@@ -49,6 +49,25 @@ This is an execution view, not a second evidence authority. A component being im
 - [ ] Complete all F01–F13/P01–P14 functional rows before the four sequential whole-repository audit loops. Per-batch independent reviews do not count as Stage 1–4 convergence.
 - [ ] Keep user/game cooperation H01–H09 at handover's end and unfilled until real execution; do not hold unrelated automated work for them.
 
+### Current validation cadence and new Source priorities
+
+- [ ] Run local real pure Rust/Node/Lua regressions first within valid owned channels; preserve results and promptly push each meaningful batch. Every push runs fast checks; explicit `[rust-native]` batch commits run full Windows/Emmy acceptance. Do not treat skipped native jobs as green product validation.
+- [ ] Finish Source process terminal proof and legacy luac caller retention, checked Windows process/job close and Closure I/O/control boundaries. An error with uncertain resource retirement must not trigger parent scratch deletion.
+- [ ] Record actual full-Retail cold/warm/native/session synchronized process-group WorkingSet and PrivateBytes, including workers, steady samples, sampling gaps and failed-run status; existing peakRSS is not_measured.
+- [ ] Introduce narrow owned `lycheedev-emmy` adapter crate after default CLI integration: dependency direction Source→adapter→pinned upstream, no back-reference/Graph copy/framework expansion. First move authenticated environment DTO/type conversion/domain provenance and reporting; preserve necessary recursive/session/unknown/cardinality/checker hooks.
+- [ ] Map all 29 current patch paths to production/example/test consumers and regression evidence. Validate API Type public-upstream alternative, file diagnostic opt-in and object reconstruction before reducing hooks; keep 35 existing engine regressions and complete fixed-Retail acceptance.
+- [ ] Document and test each upstream-version upgrade: fixed commit/archive/license, patch conflicts/replacements, cache identity, reproducibility, owned-adapter and full-Retail outputs/resources. No claim of zero-maintenance fork or measured performance gains from file movement.
+
+### Newly ordered implementation work (2026-10-15)
+
+- [x] Push reviewed formal activation/doctor/repair and default CON CLI wiring in b83a4d3/da546758. This checks delivery of code, not runtime equivalence; legacy OP/BTP and remaining cleanup cases stay open.
+- [ ] Finish Source process terminal ownership and both ordered/legacy luac caller retention; independently review, locally test pure portions, then run automated Windows process fixtures.
+- [ ] Publish independently reviewed local pure Rust runner; continue exact production module tests locally. Keep frequent persistence pushes separate from explicit `[rust-native]` batch acceptance.
+- [ ] Collect actual full Retail memory by phase using synchronized authenticated Job membership; report current WorkingSet/PrivateBytes sampled group peaks and steady observations, sampling gaps and failed/incomplete operations separately. Historical `not_measured` remains unchanged.
+- [ ] Create owned Emmy adapter crate with one-way Source→adapter→Emmy dependencies and real diagnostics/API-type consumers, then move domain DTO/projection/provenance/reporting out of upstream patches in small reviewed batches. Preserve the entire enhanced XML/Lua design per explicit user decision; label it separately from Go-equivalent behavior.
+- [ ] Map each remaining Emmy patch to consumers and tests; preserve 35 contextual regressions/full Retail acceptance. Pin upgrades, check official public API replacements, review uncertainty/identity/cardinality boundaries and remove only proven-redundant hooks. Do not count a wrapper-only crate as completed decoupling.
+- [ ] Complete SQL meta exact Unicode EqualFold before independent review; logical resources admission (including 16×1MiB Go80MiB/Rust144MiB false rejection), paired CSV transaction and EXPLAIN remain separate required gaps.
+
 ## 1. Reproducible foundation (no user interaction)
 
 - [ ] Pin Go release executable/source hashes; export complete describe/help/CLI/Skill/addon oracle.

@@ -1,0 +1,137 @@
+{
+  "schema": "lycheedev.source-process-lifetime-test-map.v1",
+  "oracle": {
+    "release": "Go v3.2.0",
+    "commit": "3057a9666ab078270b63c7f06de748069b0d1f4b"
+  },
+  "execution": "NOT_RUN",
+  "method": "Fixed Git objects and exact Rust snapshots reviewed; rustfmt parser and Python byte/declaration checks only. No Cargo, rustc, Go, Rust/Windows/game/desktop execution.",
+  "goFiles": [
+    {
+      "path": "internal/luals/process.go",
+      "bytes": 792,
+      "sha256": "ca61bed7f867f216d320defbef00fdd94f7e84deb6f2688ce57850fcd4199381",
+      "url": "https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/luals/process.go"
+    },
+    {
+      "path": "internal/luals/process_windows.go",
+      "bytes": 2878,
+      "sha256": "bb801863596bd7a4dfffe6f8efa4e736365c19033f3cdb59ff40110c80006cab",
+      "url": "https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/luals/process_windows.go"
+    },
+    {
+      "path": "internal/luals/process_windows_test.go",
+      "bytes": 1914,
+      "sha256": "6b5a324ce06299fd88aadc94adf5d59a6636a99ba398f3d7fab50dfebee9564a",
+      "url": "https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/luals/process_windows_test.go"
+    },
+    {
+      "path": "internal/luals/runtime.go",
+      "bytes": 12519,
+      "sha256": "f57f55f65adc2632d072804765cb1ae3ac1e45bdd9f9974fdb5be6569ca5893a",
+      "url": "https://github.com/Follen/Lychee-Dev/blob/3057a9666ab078270b63c7f06de748069b0d1f4b/internal/luals/runtime.go"
+    }
+  ],
+  "mappings": [
+    {
+      "go": "internal/luals/process_windows_test.go:TestWindowsJobClosesProcessTree",
+      "scope": "Post-attachment root/descendant cleanup and cancellation. New self-hosted helper requires a stdin byte written only after Job attachment before spawning its descendant. Deny-delete fixture file remains held while that descendant runs. This does not prove containment before attachment.",
+      "rust": [
+        "cancellation_drains_a_post_attachment_descendant_holding_output_pipes",
+        "complete_control_parent_cancel_reaps_started_child_and_blocked_writer",
+        "timeout_output_budget_and_cancel_reap_blocked_writer"
+      ]
+    },
+    {
+      "go": "internal/luals/process.go:runGuarded and startGuardedPolicy",
+      "scope": "Wait and mandatory cleanup on all ordinary outcomes. Go runtime goroutines and Rust OS threads are different: Rust is_finished+join proves pipe workers are finished, independent of wake messages and root status.",
+      "rust": [
+        "failed_wait_and_successful_terminate_never_prove_reap",
+        "root_reap_is_separate_from_active_descendants",
+        "no_job_attach_failure_only_proves_original_root_and_stops_after_reap",
+        "failed_wait_job_query_termination_and_root_kill_all_survive",
+        "a_later_successful_wait_proves_reap_without_erasing_the_prior_failure",
+        "writer_and_reader_teardown_must_finish_before_they_are_joined_or_counted",
+        "worker_panic_is_joined_and_reported_even_if_root_and_job_are_terminal"
+      ]
+    },
+    {
+      "go": "internal/luals/runtime.go:Runtime.Check bounded context and runGuarded error projection",
+      "scope": "Preserve selected stop cause and original invocation ancestry; no new operation timeout after completion. Exact Source engine output/CLI parity is not claimed by these lifecycle fixtures.",
+      "rust": [
+        "primary_cancel_deadline_and_io_errors_survive_late_control_and_cleanup_faults",
+        "complete_control_maps_first_stop_without_raw_escape_or_legacy_drift",
+        "process_scope_bounds_its_timeout_and_keeps_raw_ancestry_unordered",
+        "complete_control_rejects_cancelled_operation_before_spawning",
+        "complete_control_zero_timeout_precedes_missing_program_but_legacy_does_not",
+        "complete_control_checks_cancel_after_final_event_and_keeps_cleanup_evidence",
+        "complete_control_detects_short_scope_deadline_at_completion_before_late_cancel"
+      ]
+    }
+  ],
+  "extensions": [
+    {
+      "contract": "A root exit with closed pipes cannot permit success while the exact attached Job still contains descendants.",
+      "rust": [
+        "success_retires_a_post_attachment_descendant_with_closed_output_pipes"
+      ]
+    },
+    {
+      "contract": "Output caps and I/O faults are distinct; stdin failure with exit zero is an error with terminal evidence, while nonzero status remains available to the caller.",
+      "rust": [
+        "reader_failure_is_not_an_output_cap_failure_and_both_pipes_are_dropped",
+        "output_reader_retains_exact_cap_and_detects_the_next_byte",
+        "successful_echo_and_nonzero_exit_keep_output_and_join_the_stdin_writer",
+        "successful_child_with_failed_stdin_returns_joined_cleanup_evidence"
+      ]
+    }
+  ],
+  "rustTests": {
+    "existing": [
+      "helper_process",
+      "timeout_output_budget_and_cancel_reap_blocked_writer",
+      "complete_control_maps_first_stop_without_raw_escape_or_legacy_drift",
+      "process_scope_bounds_its_timeout_and_keeps_raw_ancestry_unordered",
+      "complete_control_rejects_cancelled_operation_before_spawning",
+      "complete_control_zero_timeout_precedes_missing_program_but_legacy_does_not",
+      "complete_control_checks_cancel_after_final_event_and_keeps_cleanup_evidence",
+      "complete_control_detects_short_scope_deadline_at_completion_before_late_cancel",
+      "complete_control_parent_cancel_reaps_started_child_and_blocked_writer"
+    ],
+    "new": [
+      "failed_wait_and_successful_terminate_never_prove_reap",
+      "root_reap_is_separate_from_active_descendants",
+      "no_job_attach_failure_only_proves_original_root_and_stops_after_reap",
+      "failed_wait_job_query_termination_and_root_kill_all_survive",
+      "a_later_successful_wait_proves_reap_without_erasing_the_prior_failure",
+      "primary_cancel_deadline_and_io_errors_survive_late_control_and_cleanup_faults",
+      "writer_and_reader_teardown_must_finish_before_they_are_joined_or_counted",
+      "reader_failure_is_not_an_output_cap_failure_and_both_pipes_are_dropped",
+      "worker_panic_is_joined_and_reported_even_if_root_and_job_are_terminal",
+      "output_reader_retains_exact_cap_and_detects_the_next_byte",
+      "successful_echo_and_nonzero_exit_keep_output_and_join_the_stdin_writer",
+      "successful_child_with_failed_stdin_returns_joined_cleanup_evidence",
+      "success_retires_a_post_attachment_descendant_with_closed_output_pipes",
+      "cancellation_drains_a_post_attachment_descendant_holding_output_pipes"
+    ],
+    "declaredTotal": 23,
+    "newCount": 14,
+    "childHelper": "process::tests::helper_process",
+    "allResults": "NOT_RUN"
+  },
+  "ci": {
+    "existingSelector": "process::tests",
+    "command": "node tools/rust-cargo.mjs --owner ci-source-process --one-shot -- test --locked --offline -p lycheedev-source --lib process::tests -j 1",
+    "workflowChangedByThisBatch": false,
+    "staticInclusion": "new module is process::tests::lifetime_tests; recursive rustfmt resolved it"
+  },
+  "notCovered": [
+    "Actual thread-creation resource exhaustion; checked Builder::spawn failure path reviewed but not fault-injected.",
+    "Real wait, Job query, terminate and kill failures use the production retirement algorithm with modeled owner results; no OS fault injection executed.",
+    "A hard realtime OS bound is not claimed: std is_finished permits non-blocking join, but documentation notes a brief thread teardown interval.",
+    "JobGuard and standard Child/pipe/thread handle closure is Drop-only, not checked CloseHandle.",
+    "No pre-attachment descendant containment: the existing running spawn/attach race remains.",
+    "Legacy luac None entry may still remove its Frozen scratch on unconfirmed errors; its ordered entry remains conservative.",
+    "Separate existing five-second error cleanup grace can extend beyond the original operation deadline; only success uses the original deadline."
+  ]
+}

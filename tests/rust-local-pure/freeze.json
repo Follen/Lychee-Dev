@@ -1,0 +1,169 @@
+{
+  "schema": "lycheedev.local-pure-freeze.v1",
+  "revision": 2,
+  "createdAt": "2026-10-15T01:46:54.585Z",
+  "snapshot": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-disk/evidence/6fb090b6-99d8-479f-9d11-2f8a0bf2b7fd/candidate",
+  "files": [
+    {
+      "path": "tools/rust-local-owned-process.mjs",
+      "bytes": 6339,
+      "sha256": "d583b14bd755eaaf70b01c7059d874b84e9b9e3bd6b37316a7ad4f4142f7d601",
+      "snapshotPath": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-disk/evidence/6fb090b6-99d8-479f-9d11-2f8a0bf2b7fd/candidate/tools/rust-local-owned-process.mjs"
+    },
+    {
+      "path": "tools/rust-local-owned-process.test.mjs",
+      "bytes": 3193,
+      "sha256": "86e8691c34fb8d0cd7a3053a002f5977309a1f2d1c99b89973cef6266c4be960",
+      "snapshotPath": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-disk/evidence/6fb090b6-99d8-479f-9d11-2f8a0bf2b7fd/candidate/tools/rust-local-owned-process.test.mjs"
+    },
+    {
+      "path": "tools/rust-local-pure.mjs",
+      "bytes": 11705,
+      "sha256": "595e29aba5c622700601b18d71b4a0404db98bc95ebd86cef061dc6620846cd5",
+      "snapshotPath": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-disk/evidence/6fb090b6-99d8-479f-9d11-2f8a0bf2b7fd/candidate/tools/rust-local-pure.mjs"
+    },
+    {
+      "path": "tools/rust-local-pure.test.mjs",
+      "bytes": 4244,
+      "sha256": "0a55d269af60fb92824855573659cf541332fab4c5a6072029ef00d09b73bda8",
+      "snapshotPath": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-disk/evidence/6fb090b6-99d8-479f-9d11-2f8a0bf2b7fd/candidate/tools/rust-local-pure.test.mjs"
+    },
+    {
+      "path": "tests/rust-local-pure/Cargo.toml",
+      "bytes": 603,
+      "sha256": "4597231e1cd531b1e871352ce8351ce52af58be2e17ff147a119b9cef5affab2",
+      "snapshotPath": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-disk/evidence/6fb090b6-99d8-479f-9d11-2f8a0bf2b7fd/candidate/tests/rust-local-pure/Cargo.toml"
+    },
+    {
+      "path": "tests/rust-local-pure/Cargo.lock",
+      "bytes": 2872,
+      "sha256": "444372319ee29d35fe5e8969df78f000713c7106c8a711cff21ca627c682764f",
+      "snapshotPath": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-disk/evidence/6fb090b6-99d8-479f-9d11-2f8a0bf2b7fd/candidate/tests/rust-local-pure/Cargo.lock"
+    },
+    {
+      "path": "tests/rust-local-pure/src/lib.rs",
+      "bytes": 208,
+      "sha256": "223db68838d3d126aac7f8248c9d07b1aab4073dca21356d826d1dcf575484bf",
+      "snapshotPath": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-disk/evidence/6fb090b6-99d8-479f-9d11-2f8a0bf2b7fd/candidate/tests/rust-local-pure/src/lib.rs"
+    },
+    {
+      "path": "tests/rust-local-pure/check_cache.py",
+      "bytes": 4734,
+      "sha256": "ad1ce37d811b59bd97babcd2b2035518ae10a12a495743a44b5b56005277d5b8",
+      "snapshotPath": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-disk/evidence/6fb090b6-99d8-479f-9d11-2f8a0bf2b7fd/candidate/tests/rust-local-pure/check_cache.py"
+    },
+    {
+      "path": "tests/rust-local-pure/README.md",
+      "bytes": 3720,
+      "sha256": "b28ca50e7ef55cdd1ca95993547c59e746f28e724a031ac89987749c4ff3f401",
+      "snapshotPath": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-disk/evidence/6fb090b6-99d8-479f-9d11-2f8a0bf2b7fd/candidate/tests/rust-local-pure/README.md"
+    }
+  ],
+  "dependencies": [
+    {
+      "path": "tools/rust-disk.mjs",
+      "bytes": 11567,
+      "sha256": "54122b03b7b474f1f2119a31caa85d2217aeb5ea97e65f28a7e0161bebc203e5",
+      "snapshotPath": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-disk/evidence/6fb090b6-99d8-479f-9d11-2f8a0bf2b7fd/candidate/tools/rust-disk.mjs"
+    },
+    {
+      "path": "Cargo.toml",
+      "bytes": 1840,
+      "sha256": "0e00a44fd16a0de1697a3e0c7158cbaf010f09ace305b285f33f841fc3c5831d",
+      "snapshotPath": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-disk/evidence/6fb090b6-99d8-479f-9d11-2f8a0bf2b7fd/candidate/Cargo.toml"
+    },
+    {
+      "path": ".cargo/config.toml",
+      "bytes": 112,
+      "sha256": "6fa161704379fee1eaa69404580679c61bfb2ce7d96655f9997c3f0a372897c7",
+      "snapshotPath": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-disk/evidence/6fb090b6-99d8-479f-9d11-2f8a0bf2b7fd/candidate/.cargo/config.toml"
+    },
+    {
+      "path": "crates/lycheedev-core/src/raw_json.rs",
+      "bytes": 8324,
+      "sha256": "e8a0e77234d56318b586385c27f69ed7a8ba63cb7fb895aa19d7e49befb703f3",
+      "snapshotPath": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-disk/evidence/6fb090b6-99d8-479f-9d11-2f8a0bf2b7fd/candidate/crates/lycheedev-core/src/raw_json.rs"
+    },
+    {
+      "path": "crates/lycheedev-core/src/raw_json/tests.rs",
+      "bytes": 2534,
+      "sha256": "c1ffc43b782846e5007fd3435d39e255297bc609b2956c0972c8da939203c560",
+      "snapshotPath": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-disk/evidence/6fb090b6-99d8-479f-9d11-2f8a0bf2b7fd/candidate/crates/lycheedev-core/src/raw_json/tests.rs"
+    },
+    {
+      "path": "crates/lycheedev-core/src/mailbox.rs",
+      "bytes": 7328,
+      "sha256": "a8698fb1d4915e709c7881cbc1076a899e301611a5fabda6c3e662c49c985626",
+      "snapshotPath": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-disk/evidence/6fb090b6-99d8-479f-9d11-2f8a0bf2b7fd/candidate/crates/lycheedev-core/src/mailbox.rs"
+    },
+    {
+      "path": "crates/lycheedev-core/src/mailbox/code_bytes.rs",
+      "bytes": 3189,
+      "sha256": "8a411b4a7825fc98745b9ea2bfb4577565938b8e73d005903a946979fdb9aaf8",
+      "snapshotPath": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-disk/evidence/6fb090b6-99d8-479f-9d11-2f8a0bf2b7fd/candidate/crates/lycheedev-core/src/mailbox/code_bytes.rs"
+    },
+    {
+      "path": "crates/lycheedev-core/src/mailbox/code_bytes_tests.rs",
+      "bytes": 3525,
+      "sha256": "b60de8bc2a3e935e456ebd2c9f065f6ffc1e3d3ea5871a6de68d146db95bc104",
+      "snapshotPath": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/rust-disk/evidence/6fb090b6-99d8-479f-9d11-2f8a0bf2b7fd/candidate/crates/lycheedev-core/src/mailbox/code_bytes_tests.rs"
+    }
+  ],
+  "verification": {
+    "rustReceipt": ".tmp/rust-disk/evidence/34a449a6-55f1-41d9-8ddd-51990ee02ceb/receipt.json",
+    "rustTests": {
+      "passed": 10,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 0
+    },
+    "nodeAssertions": {
+      "processTestsPassed": 7,
+      "harnessAndCacheTestsPassed": 4,
+      "totalPassed": 11,
+      "failed": 0,
+      "note": "Actual separate runs of both final test files; no combined-run claim."
+    },
+    "independentReview": "pending"
+  },
+  "limits": [
+    "Pure modules only; not Windows or full workspace acceptance",
+    "Separate pinned harness lock, not product dependency closure",
+    "No ordinary lease or cache adoption; symbols only"
+  ],
+  "previousFreezeSHA256": "2dbe6c5ee64b9865f5290044e1b8aebdcbe22c1ebef46ce2618251f3db6251f4",
+  "updatedAt": "2026-10-15T01:48:01.245Z",
+  "priorReviewFindings": [
+    {
+      "finding": "A prior timeout/output error could mask a failed namespace scan and falsely establish handlesReaped.",
+      "resolution": "Explicit namespaceVerified is false until the full scan succeeds; treeReaped depends on it independently of error text.",
+      "regression": "a prior timeout never hides failed namespace inspection or releases ownership"
+    },
+    {
+      "finding": "Cargo can discover unrecorded ancestor/home configuration outside the isolated harness workspace.",
+      "resolution": "Record all ancestor/CARGO_HOME config and config.toml hashes or absence, then recheck after Cargo."
+    },
+    {
+      "finding": "Actual copied compiler inputs were writable and not rehashed after execution.",
+      "resolution": "Test-stage source is read-only in the namespace, every selected copy and original staged input is rehashed after execution. Lock-resolution mode is separately identified."
+    },
+    {
+      "finding": "The small rustc executable hash did not bind dynamically loaded compiler and standard-library bytes.",
+      "resolution": "Before/after streaming hashes cover every installed rustc and host rust-std manifest file, including LLVM, rustc_driver and host rustlib closure; no whole-OS authentication claim."
+    }
+  ],
+  "preservedHistoricalFailures": [
+    {
+      "receipt": ".tmp/rust-disk/evidence/f81e341a-28dd-4794-84a3-47c364ae2ade/receipt.json",
+      "finding": "Optional network namespace setup was unsupported (NETLINK_ROUTE EPERM). Removed the optional network-namespace request; no claim of network sandbox; Cargo remains offline."
+    },
+    {
+      "receipt": ".tmp/rust-disk/evidence/a39febde-b829-4d5c-8212-f5a7e428b664/receipt.json",
+      "finding": "Harness path attribute changed nested Rust module lookup. Replaced it with exact-byte source copies using ordinary module layout."
+    },
+    {
+      "receipt": ".tmp/rust-disk/evidence/798aac46-5114-4b8d-bd9b-c78465a09009/receipt.json",
+      "finding": "Kernel namespace teardown briefly trailed wrapper close. Added read-only drain under the original timeout plus fixed five-second cleanup bound; never signals discovered PIDs."
+    }
+  ]
+}

@@ -243,7 +243,7 @@ impl Runtime {
                 let out = match ordered {
                     Some(control) => {
                         control.check()?;
-                        ordered_run_with(frozen, || {
+                        run_with_frozen(frozen, || {
                             process::run_with_operation_control(
                                 cmd,
                                 32768,
@@ -253,13 +253,15 @@ impl Runtime {
                             )
                         })
                     }
-                    None => process::run_controlled(
-                        cmd,
-                        32768,
-                        remaining.min(Duration::from_secs(10)),
-                        Some(data.clone()),
-                        cancel,
-                    ),
+                    None => run_with_frozen(frozen, || {
+                        process::run_controlled(
+                            cmd,
+                            32768,
+                            remaining.min(Duration::from_secs(10)),
+                            Some(data.clone()),
+                            cancel,
+                        )
+                    }),
                 }
                 .map_err(|mut e| {
                     e.code = e.code.replace("luals.", "luac.");
@@ -322,7 +324,10 @@ impl Runtime {
                 };
                 finish_runtime(held_runtime, result, control)
             }
-            None => result,
+            None => match frozen {
+                Some(frozen) => frozen.finish_legacy(result),
+                None => result,
+            },
         }
     }
     fn lock_verified_ordered(
@@ -375,11 +380,11 @@ fn finish_runtime<T>(
     }
     result
 }
-/// Keep the existing runner's success path, but never treat its error metadata
-/// as independent terminal proof: current `reaped` accepts Exited(Err), and pipe
-/// completion events are not joined worker handles. The later runner-ownership
-/// batch must supply proof before any entered-runner error may delete scratch.
-fn ordered_run_with(
+/// Both runner entries share the same scratch ownership boundary. Only a
+/// successful output satisfies the runner's terminal-completion contract.
+/// Errors remain conservative even when their diagnostic metadata describes
+/// completed cleanup; this caller does not independently verify that evidence.
+fn run_with_frozen(
     frozen: &mut Frozen,
     run: impl FnOnce() -> Result<process::Output>,
 ) -> Result<process::Output> {
@@ -391,6 +396,19 @@ fn ordered_run_with(
 }
 struct Frozen(PathBuf, bool);
 impl Frozen {
+    fn finish_legacy<T>(self, result: Result<T>) -> Result<T> {
+        if self.1 {
+            // Preserve legacy best-effort cleanup and its original result for
+            // pre-run failures and successfully retired compiler invocations.
+            // Drop removes only this invocation's freshly allocated directory.
+            result
+        } else {
+            // An entered runner failed without returning its success proof.
+            // Surface the retention marker so parent-directory owners also
+            // know that this scratch cannot safely be removed.
+            self.finish(result)
+        }
+    }
     fn finish<T>(mut self, result: Result<T>) -> Result<T> {
         let allowed = self.1;
         self.1 = false;

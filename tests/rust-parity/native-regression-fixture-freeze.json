@@ -1,0 +1,194 @@
+{
+  "schema": "lycheedev.native-regression-fixture-freeze.v1",
+  "createdAt": "2026-10-15T01:55:51.752375+00:00",
+  "observedHead": "da54675856bd15018a2aa4020f991f5b546c3a76",
+  "snapshot": "/workspace/shared/Lychee-Dev-rust-docs/.tmp/native-regression-fixture-repair-363/review",
+  "scope": "Immutable static-review snapshot of three edited test files and listed read-only dependencies, not a hermetic build closure. Other workers may change dependencies in shared worktree after this snapshot.",
+  "runtimeValidation": "NOT_RUN",
+  "independentReview": "PENDING",
+  "files": [
+    {
+      "path": "Cargo.lock",
+      "bytes": 71605,
+      "sha256": "b01de2b2207c4415bdfdfde590f68c549dd66920862feb53fbd3eac72085acbe",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "Cargo.toml",
+      "bytes": 1873,
+      "sha256": "aa9f6aea8ecda7ce1e3876360a31f9ca53cdf6ff23eceb01bae1c90a13fd9b48",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-core/Cargo.toml",
+      "bytes": 376,
+      "sha256": "20b9b2b9ffe17ff4e0b740a55e2714ea8986ea78e8eec1d9bc3374ea36549f16",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-core/src/client.rs",
+      "bytes": 73334,
+      "sha256": "bb1694eb93ec8d097d6df8775319f85a71a2983552437f98dca5a21d45248dcf",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-core/src/control.rs",
+      "bytes": 20162,
+      "sha256": "d918644d339bb9ee6e9e0b3e4b877e6db41b5dfa403f82b5d792952e80deeec6",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-core/src/coordination.rs",
+      "bytes": 7144,
+      "sha256": "4130866ad72d52150f64e870f2e1c07a777c63518561dbd457fc539f1a809dc0",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-core/src/evidence.rs",
+      "bytes": 20931,
+      "sha256": "f33856af2242ea822f1a7706ab0a5c3db46d73d5676bb38413e0b07c55a6965f",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-core/src/evidence/budgeted.rs",
+      "bytes": 19940,
+      "sha256": "ea9942eb51ec750b557ec3458f68c200e8fe37cbf389ce89a9a2573ab9458151",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-core/src/metadata.rs",
+      "bytes": 30579,
+      "sha256": "1beaefaa6ba2ca2b58b5c28b502c846809abd85dfae386a47988818448509971",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-core/src/public_json.rs",
+      "bytes": 25956,
+      "sha256": "bfc67a8ac470bb89df3630d91b600c940453b296ca9c61f63bac69e2cdae1e35",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-core/src/public_json/typed.rs",
+      "bytes": 13946,
+      "sha256": "433f715ed4cff496dc210194dd7325492e9e47f5cbb18fb5b7e27699b78773a0",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-core/src/storage.rs",
+      "bytes": 26525,
+      "sha256": "40755423855b7b296071e23bfb2ec0483c3a8d60561b7ba428874aa296c1ee6d",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-data/Cargo.toml",
+      "bytes": 647,
+      "sha256": "5bfab2737240c8e7c423060a129008807dd53422e81ccc28205ddcf9d70e20b6",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-data/src/capture.rs",
+      "bytes": 9121,
+      "sha256": "706713cb7e20a2009542a1ec2e5b9656abac53d350a67c27e71f0cca2f01e201",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-data/src/hotfix.rs",
+      "bytes": 32669,
+      "sha256": "910496df7f990765e5fc7f372d45d96d3658acfc82f2bc4dc60bebe751833398",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-data/src/hotfix/local.rs",
+      "bytes": 26613,
+      "sha256": "c8eaee7a54c988f5d3d049b166c03c97e65208b24d6be9aca06f4eb6388c19ad",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-data/src/hotfix/scan.rs",
+      "bytes": 18586,
+      "sha256": "4435a026d52e2ceed2c3547c76a9df965d78919892c0669cf86bb6481cc4693f",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-data/src/lib.rs",
+      "bytes": 4881,
+      "sha256": "46acd41b9e1f9a019d20b878b6d111ba66a51a48f9aa0c61ed708f35607c68aa",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-data/src/local_query.rs",
+      "bytes": 39956,
+      "sha256": "7bfa494423cd7d0c1ba29c2ff9483e79e9797e65e9c952e92377f6ed93fa40b9",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-data/src/local_query/effective.rs",
+      "bytes": 37624,
+      "sha256": "900d4f75fe03efc4d60c62789a63abd904404e013117e0382fcd34f6761fbb33",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-data/src/local_query/request.rs",
+      "bytes": 15998,
+      "sha256": "92ee7e7c663bda5736fcd8275833aab6d35af060be469d150d7f954e6629cf3b",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-data/src/relational.rs",
+      "bytes": 57749,
+      "sha256": "84ff932b844a8d784af697cff9119ddeaf383702a788fd94d5a0f022899a5c89",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/effective_sql_parity.rs",
+      "bytes": 20592,
+      "sha256": "701216521c4755a808bbebe5d7954e3bfee197765b701fafd37c962e84f91cd7",
+      "role": "edited-test"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/hotfix_table_parity.rs",
+      "bytes": 34584,
+      "sha256": "a18908b30a640ce9a9414efc221f65dd852102ccf150c2b6e0247499653e05a9",
+      "role": "edited-test"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/support/catalog_fixture.rs",
+      "bytes": 22421,
+      "sha256": "84f9fe0cccc3bdf04d7c455cd123160a6381f480f539872f015bfe477dbe77c1",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-delivery/Cargo.toml",
+      "bytes": 243,
+      "sha256": "c07fd8457fa94c20d0152496a43aef139404ef16aa828a9f58a8cfe8ffa0fd90",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/installation.rs",
+      "bytes": 9163,
+      "sha256": "d7b4f8d026e5da7ea666af63d68b8bfee70755ed56564e073cf007d95a5585a5",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/slot_publication.rs",
+      "bytes": 34907,
+      "sha256": "4afbea1ba8191d88c0265f14958428f0a5d755bae8d14d3f3dd61e633bd60170",
+      "role": "read-only-dependency"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/slot_publication_tests.rs",
+      "bytes": 78428,
+      "sha256": "6aec4c5ca77fbe86016e22c461696e37400f4f4a688c120b1a15c6c4cd23b68f",
+      "role": "edited-test"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/slots.rs",
+      "bytes": 28714,
+      "sha256": "ab16bc8bef5f8a3d0de5aa8d1d2a8656ba8cce44fd8839f7644ba045b9a01bd5",
+      "role": "read-only-dependency"
+    }
+  ],
+  "mapSHA256": "0c1f9f180f1721343270e85c9880c946b25b07585227b8e29369896515b7bd0f",
+  "patchSHA256": "183612d6edfa3f4b861e363a5d537556689002a8c611f8bca4df2940790a84b7",
+  "beforeSHA256": "23a51a75cc9f20c3a63563cb31553605df3e11182d18291eafa0f4c6c13ab746"
+}

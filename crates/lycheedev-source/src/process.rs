@@ -3,7 +3,7 @@
 use lycheedev_core::{Result, ToolkitError, control::OperationControl};
 use std::{
     io::{Read, Write},
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -17,9 +17,11 @@ pub struct Output {
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
 }
+mod lifetime;
+use lifetime::{ProcessState, Retirement, WorkerSet};
+
 enum Event {
-    Output(usize, Vec<u8>, bool),
-    Exited(std::io::Result<std::process::ExitStatus>),
+    Output(usize, Vec<u8>, std::io::Result<()>, bool),
     Input(std::io::Result<()>),
 }
 #[derive(Clone, Copy)]
@@ -187,137 +189,155 @@ fn run_with_limits_inner(
         })
         .spawn()
         .map_err(|e| ToolkitError::new("luals.unavailable", e.to_string(), 3))?;
+    let (wake, rx) = mpsc::channel();
+    let mut workers = WorkerSet::default();
+    let mut state = ProcessState::default();
     let job = match lycheedev_windows::JobGuard::attach(&child) {
-        Ok(j) => j,
-        Err(e) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(ToolkitError::new("luals.unavailable", e, 3));
+        Ok(job) => job,
+        Err(error) => {
+            let mut owned = OwnedProcess {
+                child: &mut child,
+                job: None,
+            };
+            let cleanup = lifetime::retire(
+                &mut owned,
+                &mut workers,
+                &mut state,
+                &rx,
+                Instant::now() + lifetime::CLEANUP_GRACE,
+            );
+            return Err(
+                ToolkitError::new("luals.unavailable", error, 3).with_details(cleanup.details())
+            );
         }
     };
-    let out = child.stdout.take().unwrap();
-    let err = child.stderr.take().unwrap();
-    let (tx, rx) = mpsc::channel();
-    let mut input_complete = input.is_none();
-    if let Some(input) = input {
-        let mut pipe = child.stdin.take().unwrap();
-        let tx = tx.clone();
-        std::thread::spawn(move || {
-            let result = pipe.write_all(&input);
-            drop(pipe);
-            let _ = tx.send(Event::Input(result));
-        });
-    }
-    for (i, mut pipe) in [
-        (0, Box::new(out) as Box<dyn Read + Send>),
-        (1, Box::new(err) as Box<dyn Read + Send>),
-    ] {
-        let cap = if i == 0 { stdout_cap } else { stderr_cap };
-        let tx = tx.clone();
-        std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            let result = pipe.by_ref().take(cap as u64 + 1).read_to_end(&mut bytes);
-            let overflow = bytes.len() > cap || result.is_err();
-            let _ = tx.send(Event::Output(i, bytes, overflow));
-        });
-    }
-    std::thread::spawn(move || {
-        let _ = tx.send(Event::Exited(child.wait()));
+    // Keep the Child in this scope. Only a successful try_wait establishes its
+    // terminal status; a failed waiter event can no longer masquerade as reap.
+    let result = (|| {
+        if let Some(input) = input {
+            let pipe = child.stdin.take().expect("piped child stdin");
+            workers.spawn(0, wake.clone(), move || lifetime::write_input(pipe, input))?;
+        }
+        let out = child.stdout.take().expect("piped child stdout");
+        workers.spawn(1, wake.clone(), move || {
+            lifetime::read_output(0, out, stdout_cap)
+        })?;
+        let err = child.stderr.take().expect("piped child stderr");
+        workers.spawn(2, wake, move || lifetime::read_output(1, err, stderr_cap))?;
+        loop {
+            control.check()?;
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(control.expired());
+            }
+            workers.collect(&mut state)?;
+            if state.status.is_none() {
+                state.observe_wait(
+                    child
+                        .try_wait()
+                        .map(|status| status.map(|s| s.code().unwrap_or(-1))),
+                )?;
+            }
+            if state.status.is_some() && workers.complete() {
+                break;
+            }
+            // Worker messages are wakeups only. A wakeup/EOF is not terminal
+            // evidence: collect joins only handles which report is_finished.
+            lifetime::wait_for_progress(&rx, remaining.min(lifetime::POLL_INTERVAL));
+        }
+        Ok(())
+    })();
+    let result = result.and_then(|()| {
+        // Preserve the existing final control-before-stdin-error ordering.
+        // Stops observed here use the same error grace as stops in the loop.
+        control.check_complete()?;
+        if state.status == Some(0)
+            && let Some(error) = state.input_error.take()
+        {
+            return Err(ToolkitError::new(
+                "luals.check_failed",
+                format!("Process stdin failed: {error}"),
+                5,
+            ));
+        }
+        Ok(())
     });
-    let mut outputs = [Vec::new(), Vec::new()];
-    let mut received = 0;
-    let mut status = None;
-    let mut input_error = None;
-    while received < 2 || status.is_none() || !input_complete {
-        if let Err(mut error) = control.check() {
-            error.details =
-                terminate_and_reap(&job, &rx, received, status.is_some(), input_complete);
-            return Err(error);
-        }
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            let mut error = control.expired();
-            error.details =
-                terminate_and_reap(&job, &rx, received, status.is_some(), input_complete);
-            return Err(error);
-        }
-        match rx.recv_timeout(remaining.min(Duration::from_millis(100))) {
-            Ok(Event::Output(i, b, overflow)) => {
-                if overflow {
-                    let mut error = ToolkitError::new(
-                        "luals.input_budget",
-                        "External process output cap exceeded",
-                        3,
-                    );
-                    error.details = terminate_and_reap(
-                        &job,
-                        &rx,
-                        received + 1,
-                        status.is_some(),
-                        input_complete,
-                    );
-                    return Err(error);
-                }
-                received += 1;
-                outputs[i] = b;
-            }
-            Ok(Event::Exited(result)) => {
-                status = Some(result?.code().unwrap_or(-1));
-            }
-            Ok(Event::Input(result)) => {
-                input_complete = true;
-                input_error = result.err();
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(_) => {
-                let _ = job.terminate();
-                return Err(ToolkitError::new(
-                    "luals.check_failed",
-                    "External process execution deadline exceeded",
-                    5,
-                ));
-            }
-        }
-    }
-    // The last event can complete the loop while cancellation or this runner's
-    // narrower deadline arrives. The original invocation's later check alone
-    // cannot detect a shorter process scope's timeout.
-    complete_process_control(control, || {
-        terminate_and_reap(&job, &rx, received, status.is_some(), input_complete)
-    })?;
-    if status == Some(0)
-        && let Some(e) = input_error
-    {
-        return Err(ToolkitError::new(
-            "luals.check_failed",
-            format!("Process stdin failed: {e}"),
-            5,
-        ));
-    }
+    // All ordinary post-spawn exits take the same bounded retirement path,
+    // including worker startup, read/write, wait and output-cap failures.
+    // Error retirement retains the existing separate five-second grace. A
+    // successful operation does not acquire a new execution budget.
+    let cleanup_deadline = if result.is_err() {
+        Instant::now() + lifetime::CLEANUP_GRACE
+    } else {
+        deadline.min(Instant::now() + lifetime::CLEANUP_GRACE)
+    };
+    let mut owned = OwnedProcess {
+        child: &mut child,
+        job: Some(&job),
+    };
+    let cleanup = lifetime::retire(&mut owned, &mut workers, &mut state, &rx, cleanup_deadline);
+    finish_result(result, control, &cleanup)?;
     Ok(Output {
-        status: status.unwrap(),
-        stdout: std::mem::take(&mut outputs[0]),
-        stderr: std::mem::take(&mut outputs[1]),
+        status: state
+            .status
+            .expect("successful retirement reaped the child"),
+        stdout: state.outputs[0].take().expect("joined stdout reader"),
+        stderr: state.outputs[1].take().expect("joined stderr reader"),
     })
 }
-fn terminate_and_reap(
-    job: &lycheedev_windows::JobGuard,
-    rx: &mpsc::Receiver<Event>,
-    mut outputs: usize,
-    mut reaped: bool,
-    mut input_complete: bool,
-) -> serde_json::Value {
-    let terminated = job.terminate().is_ok();
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !reaped || !input_complete || outputs < 2 {
-        match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-            Ok(Event::Exited(_)) => reaped = true,
-            Ok(Event::Input(_)) => input_complete = true,
-            Ok(Event::Output(_, _, _)) => outputs += 1,
-            Err(_) => break,
-        }
+fn finish_result(
+    result: Result<()>,
+    control: ProcessControl<'_>,
+    cleanup: &Retirement,
+) -> Result<()> {
+    // Once a primary failure has been selected, later cancellation, timeout or
+    // cleanup failures cannot replace it. Keep independent cleanup evidence.
+    result.map_err(|mut error| {
+        error.details = cleanup.details();
+        error
+    })?;
+    complete_process_control(control, || cleanup.details())?;
+    if !cleanup.complete() || !cleanup.errors.is_empty() {
+        return Err(ToolkitError::new(
+            "luals.check_failed",
+            "External process retirement is unconfirmed",
+            5,
+        )
+        .with_details(cleanup.details()));
     }
-    serde_json::json!({"terminated":terminated,"reaped":reaped,"stdinWriterComplete":input_complete,"outputReadersComplete":outputs>=2})
+    Ok(())
+}
+struct OwnedProcess<'a> {
+    child: &'a mut Child,
+    job: Option<&'a lycheedev_windows::JobGuard>,
+}
+impl lifetime::ProcessOwner for OwnedProcess<'_> {
+    fn close_parent_pipes(&mut self) {
+        self.child.stdin.take();
+        self.child.stdout.take();
+        self.child.stderr.take();
+    }
+    fn try_wait(&mut self) -> std::io::Result<Option<i32>> {
+        self.child
+            .try_wait()
+            .map(|status| status.map(|s| s.code().unwrap_or(-1)))
+    }
+    fn terminate_job(&mut self) -> std::result::Result<bool, String> {
+        self.job
+            .map(|job| job.terminate().map(|()| true))
+            .unwrap_or(Ok(false))
+    }
+    fn kill_root(&mut self) -> std::io::Result<()> {
+        self.child.kill()
+    }
+    fn job_empty(&mut self) -> std::result::Result<Option<bool>, String> {
+        self.job
+            .map(|job| {
+                job.memory_accounting()
+                    .map(|value| value.active_processes == 0)
+            })
+            .transpose()
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -336,6 +356,55 @@ mod tests {
                 let ready = std::env::var_os("LYCHEEDEV_SOURCE_TEST_READY").unwrap();
                 std::fs::write(ready, b"ready").unwrap();
                 std::thread::sleep(Duration::from_secs(30));
+            }
+            "echo" => {
+                let mut input = Vec::new();
+                std::io::stdin().read_to_end(&mut input).unwrap();
+                std::io::stderr().write_all(&input).unwrap();
+                std::io::stdout().write_all(b"source-process-echo").unwrap();
+            }
+            "nonzero" => {
+                std::io::stderr()
+                    .write_all(b"source-process-nonzero")
+                    .unwrap();
+                std::process::exit(17);
+            }
+            "no-read" => {}
+            "descendant-block" => {
+                use std::os::windows::fs::OpenOptionsExt;
+                let ready = std::env::var_os("LYCHEEDEV_SOURCE_TEST_READY").unwrap();
+                let mut held = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .share_mode(0)
+                    .open(ready)
+                    .unwrap();
+                held.write_all(b"ready").unwrap();
+                std::thread::sleep(Duration::from_secs(30));
+                drop(held);
+            }
+            "spawn-pipe-descendant" | "spawn-silent-descendant" => {
+                // The production stdin worker starts only after Job attach.
+                // Requiring its byte removes the attach race from this fixture.
+                let mut gate = [0];
+                std::io::stdin().read_exact(&mut gate).unwrap();
+                assert_eq!(gate, [b'G']);
+                let ready = std::path::PathBuf::from(
+                    std::env::var_os("LYCHEEDEV_SOURCE_TEST_READY").unwrap(),
+                );
+                let mut command = helper("descendant-block");
+                command.stdin(Stdio::null());
+                if mode == "spawn-silent-descendant" {
+                    command.stdout(Stdio::null()).stderr(Stdio::null());
+                }
+                // The runner's already-attached Job owns this descendant even
+                // after this helper root exits and drops its std Child handle.
+                let _descendant = command.spawn().unwrap();
+                let deadline = Instant::now() + Duration::from_secs(10);
+                while !ready.is_file() && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                assert!(ready.is_file(), "post-attachment descendant started");
             }
             _ => panic!("unknown helper mode"),
         }
@@ -358,9 +427,11 @@ mod tests {
         assert_eq!(timed.details["reaped"], true, "{:?}", timed.details);
         assert_eq!(timed.details["stdinWriterComplete"], true);
         assert_eq!(timed.details["outputReadersComplete"], true);
+        assert_eq!(timed.details["jobEmpty"], true);
         let over = run(helper("output"), 1024, Duration::from_secs(10)).unwrap_err();
         assert_eq!(over.code, "luals.input_budget");
         assert_eq!(over.details["reaped"], true);
+        assert_eq!(over.details["ownedJobTerminal"], true);
         let cancel = std::sync::Arc::new(AtomicBool::new(false));
         let signal = cancel.clone();
         let thread = std::thread::spawn(move || {
@@ -380,6 +451,7 @@ mod tests {
         assert_eq!(aborted.details["reaped"], true);
         assert_eq!(aborted.details["stdinWriterComplete"], true);
         assert_eq!(aborted.details["outputReadersComplete"], true);
+        assert_eq!(aborted.details["ownedJobTerminal"], true);
     }
 
     #[test]
@@ -619,10 +691,14 @@ mod tests {
         assert_eq!(error.details["reaped"], true);
         assert_eq!(error.details["stdinWriterComplete"], true);
         assert_eq!(error.details["outputReadersComplete"], true);
+        assert_eq!(error.details["ownedJobTerminal"], true);
         assert!(!local.is_cancelled());
         assert_eq!(parent.stop_cause().unwrap(), Some(StopCause::Cancelled));
         assert_eq!(child.stop_cause().unwrap(), Some(StopCause::Cancelled));
         // Retain scratch on failure; delete only after all owned cleanup facts.
         std::fs::remove_dir_all(directory).unwrap();
     }
+
+    #[path = "lifetime_tests.rs"]
+    mod lifetime_tests;
 }

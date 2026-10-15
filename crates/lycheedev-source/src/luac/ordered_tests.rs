@@ -114,7 +114,7 @@ fn ordered_runner_unknown_lifetime_retains_owned_scratch_and_original_error() {
     let root = retained_fixture("unknown");
     fs::write(root.join("evidence"), b"keep").unwrap();
     let mut frozen = Frozen(root.clone(), true);
-    let error = ordered_run_with(&mut frozen, || {
+    let error = run_with_frozen(&mut frozen, || {
         Err(ToolkitError::new(
             "luac.unavailable",
             "ambiguous spawn or job-attach failure",
@@ -146,7 +146,7 @@ fn ordered_runner_partial_pipe_or_reap_proof_never_allows_cleanup() {
         let mut frozen = Frozen(root.clone(), true);
         let mut proof = json!({"terminated":true,"reaped":true,"stdinWriterComplete":true,"outputReadersComplete":true});
         proof[missing] = json!(false);
-        let error = ordered_run_with(&mut frozen, || {
+        let error = run_with_frozen(&mut frozen, || {
             Err(ToolkitError::new("process.cancelled", "cancelled", 7).with_details(proof.clone()))
         })
         .unwrap_err();
@@ -172,7 +172,7 @@ fn ordered_no_runner_can_cleanup_but_error_metadata_is_not_terminal_proof() {
     assert!(!requires_scratch_retention(&error));
     let root = retained_fixture("terminal");
     let mut frozen = Frozen(root.clone(), true);
-    let error=ordered_run_with(&mut frozen,||Err(ToolkitError::new("process.cancelled","cancelled",7).with_details(json!({"terminated":true,"reaped":true,"stdinWriterComplete":true,"outputReadersComplete":true})))).unwrap_err();
+    let error=run_with_frozen(&mut frozen,||Err(ToolkitError::new("process.cancelled","cancelled",7).with_details(json!({"terminated":true,"reaped":true,"stdinWriterComplete":true,"outputReadersComplete":true})))).unwrap_err();
     let error = frozen.finish::<()>(Err(error)).unwrap_err();
     assert_eq!(error.exit_code, 7);
     assert!(root.exists());
@@ -191,3 +191,7 @@ fn ordered_retention_marker_survives_checked_close_cause_tree() {
     assert_eq!(combined.exit_code, 7);
     assert_eq!(combined.details["cleanup"]["message"], "close failed");
 }
+
+// Keep the shared ownership regression family under the existing CI selector.
+#[path = "legacy_tests.rs"]
+mod legacy_tests;

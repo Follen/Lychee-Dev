@@ -1,0 +1,192 @@
+{
+  "schema": "lycheedev.legacy-luac-retention-freeze.v1",
+  "createdAt": "2026-10-15T01:55:00.097953+00:00",
+  "baseHead": "da54675856bd15018a2aa4020f991f5b546c3a76",
+  "observedHeadAtFreeze": "da54675856bd15018a2aa4020f991f5b546c3a76",
+  "oracle": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "status": "frozen for independent review; all executable Rust/Go/Windows tests NOT_RUN",
+  "snapshot": "/tmp/lychee-legacy-luac-r1/snapshot",
+  "ownedFiles": [
+    {
+      "path": "crates/lycheedev-source/src/luac.rs",
+      "bytes": 17566,
+      "sha256": "b166a478b16879056dcd25b510cc61c36b94c283549543a7cc0a122c09ecbd91",
+      "baseSHA256": "fa117cc725989295fbe495b31910c6104834d0897fd0bd0cf85850f6f841329d"
+    },
+    {
+      "path": "crates/lycheedev-source/src/luac/ordered_tests.rs",
+      "bytes": 7813,
+      "sha256": "126037f5ad5d430a921acbd6bf8e9dc992a67d55881441cf7ef8b7ad32178578",
+      "baseSHA256": "84b9572384ce12509c3577ff538aedbe01097c39f3a6461aff1fe0e972d49d7f"
+    },
+    {
+      "path": "crates/lycheedev-source/src/luac/legacy_tests.rs",
+      "bytes": 10049,
+      "sha256": "d974c46fcfa746d5e79f6878b9936de1f8533a3da965769459faceeea20b0183",
+      "baseSHA256": null
+    }
+  ],
+  "dependencies": [
+    {
+      "path": "Cargo.toml",
+      "bytes": 1873,
+      "sha256": "aa9f6aea8ecda7ce1e3876360a31f9ca53cdf6ff23eceb01bae1c90a13fd9b48"
+    },
+    {
+      "path": "Cargo.lock",
+      "bytes": 71605,
+      "sha256": "b01de2b2207c4415bdfdfde590f68c549dd66920862feb53fbd3eac72085acbe"
+    },
+    {
+      "path": "crates/lycheedev-source/Cargo.toml",
+      "bytes": 2311,
+      "sha256": "acf25af1cfd950f3d368038f9e7039b63ae8b1f6e55dc21a38d77866db3e9664"
+    },
+    {
+      "path": "crates/lycheedev-source/src/lib.rs",
+      "bytes": 15183,
+      "sha256": "1b67a163cb038283f29732e0710f5f9a00734bebadb7f91d764c91232d62cad3"
+    },
+    {
+      "path": "crates/lycheedev-source/src/luac/retention.rs",
+      "bytes": 1310,
+      "sha256": "b07d1f3d77c995810acf004a29c24cf36ad3c69c48676d3c75d14a1f19d87401"
+    },
+    {
+      "path": "crates/lycheedev-source/src/process.rs",
+      "bytes": 27110,
+      "sha256": "687a17af800f7c84fcf0197bfe4675330da27eda9093dc1601eeeb02e33bfa46"
+    },
+    {
+      "path": "crates/lycheedev-source/src/process/lifetime.rs",
+      "bytes": 9616,
+      "sha256": "c553c2a33c8371caf36e22e40f8511a4e6e785ab4a9538d5c6d2489099d858bf"
+    },
+    {
+      "path": "crates/lycheedev-source/src/process/tests/lifetime_tests.rs",
+      "bytes": 16563,
+      "sha256": "c97ebdc3ad7c051bccae9903b8fff2a2b956d37c5aeb6260ce972ede90277237"
+    },
+    {
+      "path": "crates/lycheedev-source/src/git.rs",
+      "bytes": 38099,
+      "sha256": "ce20c99368d9437ef60996d90f176979687caf706e217b2541300ccad5063904"
+    },
+    {
+      "path": "crates/lycheedev-source/src/xml_inline/source_map.rs",
+      "bytes": 11734,
+      "sha256": "84992c03153187f5df81bde85172fd52e8765fbd6b8422263ec3d1e4cbbb8e5c"
+    },
+    {
+      "path": "crates/lycheedev-source/src/validate.rs",
+      "bytes": 11557,
+      "sha256": "4e1f8692ae9c42a8fe16aaa0f4762bc26da993d4cd88a7ad6c262d3e06a7360f"
+    },
+    {
+      "path": "crates/lycheedev-source/src/flow/public.rs",
+      "bytes": 21456,
+      "sha256": "a1683f9bd57e6dac5bb232b27974f6a1aadd8fd969e1760fd6cb3146c07ab1b1"
+    },
+    {
+      "path": "crates/lycheedev-core/Cargo.toml",
+      "bytes": 376,
+      "sha256": "20b9b2b9ffe17ff4e0b740a55e2714ea8986ea78e8eec1d9bc3374ea36549f16"
+    },
+    {
+      "path": "crates/lycheedev-core/src/lib.rs",
+      "bytes": 4790,
+      "sha256": "beb975bb9f3836cd89e9b69d14404cd47421c2a7d02aca2d779f94b86a157fb1"
+    },
+    {
+      "path": "crates/lycheedev-core/src/control.rs",
+      "bytes": 20162,
+      "sha256": "d918644d339bb9ee6e9e0b3e4b877e6db41b5dfa403f82b5d792952e80deeec6"
+    },
+    {
+      "path": "crates/lycheedev-core/src/storage.rs",
+      "bytes": 26525,
+      "sha256": "40755423855b7b296071e23bfb2ec0483c3a8d60561b7ba428874aa296c1ee6d"
+    },
+    {
+      "path": "crates/lycheedev-core/src/storage/owned_cleanup.rs",
+      "bytes": 2062,
+      "sha256": "da3ddc3ceeddfcd488a716e1b8fd7ddde41885859cbd5d45bdcf267c0a6fecbe"
+    },
+    {
+      "path": "crates/lycheedev-windows/Cargo.toml",
+      "bytes": 1245,
+      "sha256": "e514624884cebeb1a793bc91dfcc3469715b4be1cac12d2746c0514cf71d0b6a"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/lib.rs",
+      "bytes": 588,
+      "sha256": "e5ac63a0209560f1db55460a4b5f95da6a05c9963429562359bb904075ef2089"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/job.rs",
+      "bytes": 9109,
+      "sha256": "ad62bb8cc208eae27f08e00d6b509ba7ade3b072b3afabd5c31453a2b0a33495"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/filesystem.rs",
+      "bytes": 10712,
+      "sha256": "5af8199bdfc4f98b635c0a795335877919e139ce70e9f31e703fbeefa6a263af"
+    },
+    {
+      "path": ".github/workflows/rust-parity.yml",
+      "bytes": 34523,
+      "sha256": "33a312214fd98a083696400ee9359333b25fe4bc4e4f431784483868a9aa618f"
+    }
+  ],
+  "dependencyScope": "Exact direct API/manifest, process-candidate, cleanup, diagnostic mapper, consumer and CI context. Not full transitive build custody. Shared dependency bytes copied without modifying them and checked immediately after capture.",
+  "testMap": {
+    "path": "legacy-luac-retention-test-map.json",
+    "bytes": 7362,
+    "sha256": "80d3fbe1a95d2f24bbc504cdbe4342ec283386fef2e6ad65bef56b4d3ae129d7"
+  },
+  "originalProcessEvidence": {
+    "freeze": {
+      "path": "/tmp/lychee-source-process-r1/source-process-lifetime-freeze.json",
+      "bytes": 9241,
+      "sha256": "76b8a6eeb5595b204c2fda6e2f6d024576c3694becaf146364b22b3b1d5eee44"
+    },
+    "testMap": {
+      "path": "/tmp/lychee-source-process-r1/source-process-lifetime-test-map.json",
+      "bytes": 7996,
+      "sha256": "c1841fb2659b3d420fa780b0dc86f8f0926d942991391f4623adccb0cae8a864"
+    },
+    "allThreeCandidateFilesMatchOriginalFreeze": true,
+    "originalEvidenceModified": false,
+    "note": "Original limitation entry still states the legacy gap; this new scoped batch addresses it without rewriting that historical evidence."
+  },
+  "behavior": [
+    "Both run_controlled and run_with_operation_control pass through the same private run_with_frozen boundary. It disarms deletion before invocation and only Ok(Output) rearms it.",
+    "All ordinary legacy runner errors finish via the pre-existing retained-scratch code, retaining original mapped code/message/exit and nesting complete original details as cause. The marker lets parent owners identify unsafe cleanup.",
+    "Unwind propagates without a production catch; Drop retains disarmed scratch. No receipt is claimed on unwind.",
+    "Legacy pre-run failures, successful output, and later parsing/preflight failures retain their existing best-effort Drop cleanup and original public result, including cleanup-removal failures.",
+    "Ordered checked cleanup, runtime lock/close, public entrypoint signatures, data validation, deadline calculation and luals-to-luac error projection are unchanged.",
+    "No process/Core/Windows, workflow, docs or original fixture-evidence edits. No commit or push."
+  ],
+  "staticChecks": {
+    "recursiveRustfmt": "PASS: edition 2024, includes both child modules; parser/format only",
+    "scopedDiffWhitespace": "PASS",
+    "existingOrderedTestBodies": "BYTE-EXACT after private-helper rename and new module declaration normalization",
+    "publicEntrypointsAndLockClose": "BYTE-EXACT",
+    "existingFrozenFinishAndDrop": "BYTE-EXACT",
+    "processCandidateHashes": "ALL THREE MATCH ORIGINAL FREEZE",
+    "newTests": 10,
+    "unsafe": "0 owned source unsafe blocks; existing crate forbid(unsafe_code) applies",
+    "productionCatchUnwind": "NONE",
+    "CISelector": "Existing luac::ordered_tests includes nested legacy_tests; no workflow edit"
+  },
+  "notRun": [
+    "Cargo/rustc/type checking",
+    "Rust focused tests",
+    "Go tests",
+    "Windows/native/runtime fixtures",
+    "game/desktop work",
+    "commit",
+    "push"
+  ],
+  "review": "PENDING independent frozen-snapshot review"
+}

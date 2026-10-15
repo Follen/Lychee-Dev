@@ -723,6 +723,17 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - 已保存完整Retail报告均 `performance.peakRSS=not_measured`，无可信实际占用数字；4036文档/32MB源码与runner主机16GB不是运行内存。下一有效原生批添加按phase同步的Job成员WorkingSet/PrivateBytes采样，区分冷索引/暖查询/native语义/常驻会话、controller/CLI/worker及未分类成员；报告采样峰值/稳态/缺口，不叠加各进程各自峰值，不把失败run当完成数据。
 - 独立只读Emmy审计确认当前29路径补丁未最小化：生产新增2248行，另1857行为35测试。优先可移回自身adapter的领域DTO/类型投影/provenance/references报告与独立VFS共享输入扩展已列下一架构任务。递归跨文件上下文、session/epoch对象身份、unknown/absent/返回基数及真实checker完成观测仍需某种内核接缝，外层过滤不能等价。两个默认不启用checker仍可能被文件级diagnostic opt-in触发，不视为已证死代码；先映射消费者/合同并保35回归，再小批缩减，当前不声称已删或性能已提升。
 
+### 363d8d4 终态及本地纯 Rust／Source 回收修复（2026-10-15）
+
+- run `38661264087` 已结束：product `116185104371` 失败、Emmy job 成功；不是整体验收通过。最终 artifact `11942796058` ZIP SHA256 `7d2c05de10ec463a72f5a2ce69f1b1e665eb71b81265660d18da38c86fea4b60`，125 owner／2268 sealed log 哈希已核。固定 Go Lua profiles **214/214 实际通过**，owner `6983fdb9-addc-4714-b262-cfde5d8c164f`；三个 Go host bridge 仍未完成。固定4036文档静态组通过，不代替 native 语义。
+- Source native refs/context 分别约184/180秒 deadline，冷 refs 的 native_analyze 阶段163865ms。API CallbackType 原始声明存在，但当前 environment_type 不读取 catalog.declarations，TimerCallback 投影 unavailable；单测和完整 Retail 的 known 断言真实失败，需保签名的有界声明投影，不降低断言。Skill 两个 native 任务同样 timeout。实际性能和内存仍未测，未通过运行不算可用性验收。
+- quota/idle/lifetime 三个 IPC 组均在 bootstrap-open exit2：缺少 --snapshot，尚未进入真实256请求／60秒idle／600秒lifetime。project init 已真实成功。正在修公共 index→snapshot→refs 合法调用；静态测试不冒称 IPC 通过。
+- 三个独立失败为实际 Rust exit101，均非 wrapper timeout：slot fixture 的 Windows verbatim PathBuf 吞掉 ParentDir；Hotfix successful scan 后仍断言零capture；SQL 在内部 Value 上断言原始指数拼写。候选仅改测试：原始非canonical路径与目标先验、scan后完整capture/pin快照不变、public writer和archive精确数字字节。父独立窄审通过，历史24日志哈希保留，三组 Windows rerun **NOT_RUN**。freeze `613a3852500ad096cb91cd5cde02f5d6bc9cf2f24b2cbc9e3c45150a398d96f2`。
+- Source process lifetime 候选 freeze `76b8a6eeb5595b204c2fda6e2f6d024576c3694becaf146364b22b3b1d5eee44` 已独审：父线程 try_wait、成功root状态、stdin/stdout/stderr worker完成与join、attached Job清空后才成功；失败按原cause有界回收，仍未证明完成时明确保留。新增14测试，全部23包含helper均未运行。旧attach race及部分std handle Drop边界未在此批假称解决。
+- Legacy luac 与 ordered 共用 entered-runner scratch disarm；Err/unwind保留，既有typed cause/receipt与取消边界不变；pre-run与确认成功后保留legacy best-effort清理语义。新增10回归与既有8项均由现有selector覆盖。独审核三owner、process依赖及历史证据通过；Rust/Windows **NOT_RUN**。
+- 本地纯模块 runner 已独审闭合4项发现，使用独立symbols admission、bubblewrap私有PID namespace、只读精确production副本、工具链/依赖/配置身份与封存日志；不占用或抢夺旧ordinary lease。覆盖原始production raw_json及Mailbox/CodeBytes，不是全workspace。独审实际重跑 **10/10 Rust通过**（32.81s），owner `63fa515c-5996-4201-9eb1-9edda1210f44`，receipt SHA256 `fcd22660adbbe30d5cfb22477e8d8da2b10b40a8ea6d071d1396c85d58cef876`；11 Node测试通过，17sealed logs/12依赖/110tool身份已核。freeze `f3dec24b0fc722ada17ce4dcb2d501ce273ebb85cc5b2066e49d8dd589b087a6`。此前setup失败证据保留。
+- 用户最新明确保留完整XML/Lua增强设计并尽可能解耦Emmy；这部分增强区别于固定Go官方LuaLS/LSP的NotChecked范围。自有adapter首片、内存观测与SQL语义候选另行审核，当前未据此声明补丁已缩减或全部功能通过。最终四阶段收敛审计尚未开始。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

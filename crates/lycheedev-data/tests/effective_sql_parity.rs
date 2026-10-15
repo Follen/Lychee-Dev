@@ -463,10 +463,19 @@ fn go_sql_json_document_parameter_tokens_and_param_conflict() {
         *rows(&out),
         json!([[9007199254740993u64, u64::MAX, 100.0, 1]])
     );
-    assert_eq!(
-        out.data["query"]["parameters"]["exponent"].to_string(),
-        "1e2"
-    );
+    // Value normalizes number spelling; the public encoder and archived
+    // query must retain the request's original JSON-number tokens.
+    let parameters =
+        r#""parameters":{"big":9007199254740993,"exponent":1e2,"id":1,"max":18446744073709551615}"#;
+    let mut encoded = Vec::new();
+    lycheedev_core::public_json::write_line(&mut encoded, &out.data, &out.public_numbers).unwrap();
+    let encoded = String::from_utf8(encoded).unwrap();
+    assert!(encoded.contains(parameters), "{encoded}");
+    let archived = String::from_utf8(
+        evidence::read_blob(&fx.home, &out.provenance[0]["blob"], 16 << 20).unwrap(),
+    )
+    .unwrap();
+    assert!(archived.contains(parameters), "{archived}");
     verify_capture(&fx, &out);
     inv.flags.insert("--param".into(), "id=1".into());
     assert_eq!(

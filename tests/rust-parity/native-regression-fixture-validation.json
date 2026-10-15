@@ -1,0 +1,44 @@
+{
+  "createdAt": "2026-10-15T01:56:13.064633+00:00",
+  "checks": [
+    {
+      "command": [
+        "/workspace/shared/rust-dev/rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustfmt",
+        "--check",
+        "--edition",
+        "2024",
+        "--config",
+        "skip_children=true",
+        "crates/lycheedev-data/tests/effective_sql_parity.rs",
+        "crates/lycheedev-data/tests/hotfix_table_parity.rs",
+        "crates/lycheedev-delivery/src/slot_publication_tests.rs"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check",
+        "--",
+        "crates/lycheedev-data/tests/effective_sql_parity.rs",
+        "crates/lycheedev-data/tests/hotfix_table_parity.rs",
+        "crates/lycheedev-delivery/src/slot_publication_tests.rs"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "name": "frozen snapshot and owned working-tree hashes",
+      "result": "PASS",
+      "snapshotFiles": 30,
+      "ownedFiles": 3
+    }
+  ],
+  "rustTests": "NOT_RUN",
+  "windowsTests": "NOT_RUN",
+  "freezeSHA256": "613a3852500ad096cb91cd5cde02f5d6bc9cf2f24b2cbc9e3c45150a398d96f2"
+}

@@ -1267,15 +1267,30 @@ fn lock_wait_post_acquire_cancel_checks_real_close_once_and_releases() {
 fn disk_acquire_canonical_path_failure_releases_maintenance() {
     let f = DiskFixture::new();
     fs::create_dir(f.root.join("alias")).unwrap();
-    let identity = RecordedInstallationIdentity::from_authenticated_record(
-        f.root.join("alias").join("..").join("Lychee Dev"),
-    )
-    .unwrap();
+    // PathBuf::join normalizes `..` for Windows verbatim paths. Use an
+    // ordinary path spelling so the OS can resolve it, and append raw path
+    // text so the fixture still reaches the API with a noncanonical identity.
+    let mut raw_path = std::ffi::OsString::from(lycheedev_core::client::display_path(&f.root));
+    for component in ["alias", "..", "Lychee Dev"] {
+        raw_path.push(std::path::MAIN_SEPARATOR_STR);
+        raw_path.push(component);
+    }
+    let noncanonical = PathBuf::from(raw_path);
+    assert!(
+        noncanonical
+            .components()
+            .any(|component| component == std::path::Component::ParentDir)
+    );
+    let canonical = fs::canonicalize(&noncanonical).unwrap();
+    assert_eq!(canonical, f.identity.canonical_path);
+    assert_ne!(noncanonical, canonical);
+    let identity = RecordedInstallationIdentity::from_authenticated_record(noncanonical).unwrap();
     let error =
         PublicationLease::acquire_recorded(&identity, "3.2.0", &OperationControl::default())
             .err()
             .expect("noncanonical recorded identity");
     assert!(error.is_code("delivery.invalid_installation"));
+    assert!(f.root.join(".lycheedev-locks").is_dir());
     assert!(!f.root.join(".lycheedev-slot-locks").exists());
     assert_disk_locks_available(&f);
 }

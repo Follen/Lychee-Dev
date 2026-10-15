@@ -508,6 +508,8 @@ fn named_hotfix_admission_cancellation_and_legal_unsupported_are_explicit() {
             "{flag}"
         );
     }
+    assert_eq!(fixture.count("capture/"), 0);
+    assert_eq!(fixture.count("pin/"), 1);
     // Scan is now a supported fixed-Go route. Keep an actual successful
     // dispatch here; its checkpoint/recovery boundaries have their own suite.
     let mut scan = fixture.inv();
@@ -516,6 +518,17 @@ fn named_hotfix_admission_cancellation_and_legal_unsupported_are_explicit() {
     assert!(scanned.complete);
     assert_eq!(scanned.data["result"]["returned"], 1);
     assert_eq!(scanned.data["capture"]["provenance"]["kind"], "hotfix-scan");
+    let snapshot = |prefix: &str| {
+        Metadata::open(&fixture.home, false)
+            .unwrap()
+            .list::<Value>(prefix, 1000)
+            .unwrap()
+    };
+    // The successful scan publishes captures. Cancellation and timeout must
+    // preserve their exact ordered manifests (including IDs and count).
+    let captures_after_scan = snapshot("capture/");
+    let pins_after_scan = snapshot("pin/");
+    assert!(!captures_after_scan.is_empty());
     for expired in [false, true] {
         let mut inv = fixture.inv();
         inv.control = OperationControl::new(
@@ -534,9 +547,9 @@ fn named_hotfix_admission_cancellation_and_legal_unsupported_are_explicit() {
                 "command.cancelled"
             }
         );
+        assert_eq!(snapshot("capture/"), captures_after_scan);
+        assert_eq!(snapshot("pin/"), pins_after_scan);
     }
-    assert_eq!(fixture.count("capture/"), 0);
-    assert_eq!(fixture.count("pin/"), 1);
     let mut raw = fixture.inv();
     raw.flags.remove("--table");
     raw.flags.insert("--table-hash".into(), "42".into());
