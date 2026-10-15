@@ -1,64 +1,85 @@
-//! Selected non-member, non-generic Function signatures on the actual owned
-//! backend. Body returns use fresh owned model scopes, never a context-free
-//! signature/return query. Unsupported type/metadata work remains a continuation.
+//! Cross-file selected Function signatures using public doc/fact projection and
+//! owned contextual return values. No signature may erase a selected return.
+mod expected;
+mod local;
+
 use super::{OwnedQuery, OwnedQueryCapability, ProjectionResult, QueryResult};
-use crate::session::{BindingCoverage, BindingSite, SelectedProjectionBackend};
+use crate::session::{BindingCoverage, BindingSite, OwnedValue, SelectedProjectionBackend};
 use emmylua_code_analysis::{
-    AsyncState, LuaFunctionType, LuaType, LuaUnionType, Signature, VariadicType,
+    AsyncState, FileId, LuaFunctionType, LuaSignatureId, LuaType, LuaUnionType, Signature,
+    VariadicType,
 };
-use emmylua_parser::{LuaAstNode, LuaClosureExpr, LuaExpr, LuaReturnStat, LuaStat, LuaSyntaxId};
+use emmylua_parser::{
+    LuaAstNode, LuaClosureExpr, LuaCommentOwner, LuaDocTag, LuaExpr, LuaReturnStat, LuaStat,
+    LuaSyntaxId, LuaTableField,
+};
 use std::sync::Arc;
 
 impl<E> OwnedQuery<'_, '_, E> {
     pub(super) fn project_function_signature(
         &mut self,
-        projection_site: BindingSite,
+        _projection_site: BindingSite,
         closure: LuaSyntaxId,
-    ) -> ProjectionResult<LuaType, super::OwnedQueryFailure<E>> {
+    ) -> ProjectionResult<OwnedValue, super::OwnedQueryFailure<E>> {
+        self.signature_in(self.model.file_id(), closure)
+    }
+
+    pub(super) fn signature_by_id(
+        &mut self,
+        id: &LuaSignatureId,
+    ) -> QueryResult<Option<OwnedValue>, E> {
         self.checkpoint()?;
-        let Some(facts) = self.model.file_facts() else {
+        let closure = self
+            .model
+            .file_facts_of(id.get_file_id())
+            .and_then(|facts| facts.signature_by_position(id.get_position()))
+            .map(|signature| signature.closure_syntax);
+        let Some(closure) = closure else {
+            return Ok(None);
+        };
+        self.signature_in(id.get_file_id(), closure)
+            .map(|value| value.ok())
+    }
+
+    pub(super) fn signature_in(
+        &mut self,
+        file: FileId,
+        closure: LuaSyntaxId,
+    ) -> ProjectionResult<OwnedValue, super::OwnedQueryFailure<E>> {
+        self.checkpoint()?;
+        let Some(facts) = self.model.file_facts_of(file) else {
             return Ok(Err("selected_function_signature_unavailable"));
         };
         let Some(signature) = facts.signature_by_closure(closure) else {
             return Ok(Err("selected_function_signature_unavailable"));
         };
-        if signature.is_method
-            || facts.member_by_value_syntax(closure).is_some()
-            || signature
-                .docs
-                .as_ref()
-                .is_some_and(|docs| !docs.generic_params.is_empty())
-        {
-            return self.continuation(
-                OwnedQueryCapability::FunctionMetadata,
-                Some(projection_site),
-                None,
-                None,
-            );
-        }
+        let generics = signature
+            .docs
+            .as_ref()
+            .map(|docs| docs.generic_params.as_slice())
+            .unwrap_or(&[]);
+        self.checkpoint()?;
+        let generic_params = self.model.generic_tpls_with_metadata(file, generics);
+        self.checkpoint()?;
         let mut params = Vec::new();
-        for (index, name) in signature.param_names.iter().enumerate() {
+        for name in &signature.param_names {
             self.checkpoint()?;
-            // param_type's only addition to the old direct shell projection is
-            // expected_member_param_for_closure. The member exclusion above
-            // makes that branch unavailable; generic names are empty on both.
-            let mut ty = self
-                .model
-                .param_type(closure, index)
-                .or_else(|| {
-                    signature.docs.as_ref().and_then(|docs| {
-                        docs.param_types
-                            .iter()
-                            .find(|(param, _)| param == name)
-                            .map(|(_, syntax)| {
-                                self.model
-                                    .doc_type_lua_rich_in(self.model.file_id(), *syntax)
-                            })
-                    })
-                })
+            // The public doc_type_lua_in is exactly lower_doc_type followed by
+            // type_shell_lua_in with these signature generic names. Unlike
+            // param_type(), it does not trigger a member-parameter fallback that
+            // the original cross-file signature producer never ran.
+            let syntax = signature.docs.as_ref().and_then(|docs| {
+                docs.param_types
+                    .iter()
+                    .find(|(param, _)| param == name)
+                    .map(|(_, syntax)| *syntax)
+            });
+            let mut ty = syntax
+                .map(|syntax| self.model.doc_type_lua_in(file, syntax, generics))
+                .filter(|ty| !matches!(ty, LuaType::Unknown))
+                .or_else(|| syntax.map(|syntax| self.model.doc_type_lua_rich_in(file, syntax)))
                 .unwrap_or(LuaType::Any);
             self.checkpoint()?;
-            self.require_plain_signature_type(&ty, projection_site)?;
             ty = self.model.expand_alias_for_hover(&ty);
             self.checkpoint()?;
             if signature
@@ -71,24 +92,29 @@ impl<E> OwnedQuery<'_, '_, E> {
             }
             params.push((name.to_string(), Some(ty)));
         }
-        let mut ret = self.contextual_signature_return(signature)?;
-        self.require_plain_signature_type(&ret, projection_site)?;
-        ret = self.model.expand_alias_for_hover(&ret);
+        let mut ret = self.contextual_signature_return(file, signature)?;
+        ret = self.expand_aliases(ret)?;
         self.checkpoint()?;
         // The fixed in-file function wrapper invokes closure_return_lua again
         // for Unknown without docs. That helper has a distinct inherited VM /
         // flow-cast schedule and may recover a value; silently returning Unknown
         // here would weaken the original contract.
-        if matches!(ret, LuaType::Unknown) && signature.docs.is_none() {
+        if matches!(ret.structural_type(), LuaType::Unknown)
+            && signature.docs.is_none()
+            && file == self.model.file_id()
+        {
             return self.continuation(
                 OwnedQueryCapability::FunctionRawReturnFallback,
                 Some(BindingSite {
-                    file_id: self.model.file_id(),
+                    file_id: file,
                     syntax: closure,
                 }),
                 None,
                 None,
             );
+        }
+        if signature.docs.is_none() {
+            (params, ret) = self.table_field_signature_override(file, closure, params, ret)?;
         }
         let async_state = if signature.docs.as_ref().is_some_and(|docs| docs.is_async) {
             AsyncState::Async
@@ -96,18 +122,27 @@ impl<E> OwnedQuery<'_, '_, E> {
             AsyncState::None
         };
         self.checkpoint()?;
-        Ok(Ok(LuaType::DocFunction(Arc::new(LuaFunctionType::new(
+        let metadata = LuaFunctionType::new(
             async_state,
             signature.is_method,
             signature.is_variadic,
             params,
-            ret,
-            Some(Vec::new()),
-        )))))
+            ret.structural_type().clone(),
+            Some(generic_params),
+        );
+        let params = metadata
+            .get_params()
+            .iter()
+            .map(|(_, ty)| ty.clone().map(OwnedValue::plain))
+            .collect();
+        Ok(Ok(OwnedValue::function(&metadata, params, ret)))
     }
 
-    fn contextual_signature_return(&mut self, signature: &Signature) -> QueryResult<LuaType, E> {
-        let file = self.model.file_id();
+    fn contextual_signature_return(
+        &mut self,
+        file: FileId,
+        signature: &Signature,
+    ) -> QueryResult<OwnedValue, E> {
         if let Some(docs) = &signature.docs {
             if !docs.returns.is_empty() {
                 let mut returns = Vec::new();
@@ -116,11 +151,11 @@ impl<E> OwnedQuery<'_, '_, E> {
                     returns.push(self.model.doc_type_lua_rich_in(file, *syntax));
                     self.checkpoint()?;
                 }
-                return Ok(if returns.len() == 1 {
+                return Ok(OwnedValue::plain(if returns.len() == 1 {
                     returns.remove(0)
                 } else {
                     LuaType::Variadic(Arc::new(VariadicType::Multi(returns)))
-                });
+                }));
             }
             if !docs.return_overload_rows.is_empty() {
                 let mut rows = Vec::new();
@@ -131,7 +166,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                         .checked_add(len)
                         .filter(|end| *end <= docs.return_overloads.len())
                     else {
-                        return Ok(LuaType::Unknown);
+                        return Ok(OwnedValue::plain(LuaType::Unknown));
                     };
                     let mut values = Vec::new();
                     for (_, syntax) in &docs.return_overloads[index..end] {
@@ -142,11 +177,11 @@ impl<E> OwnedQuery<'_, '_, E> {
                     rows.push(LuaType::Variadic(Arc::new(VariadicType::Multi(values))));
                     index = end;
                 }
-                return Ok(if index == docs.return_overloads.len() {
+                return Ok(OwnedValue::plain(if index == docs.return_overloads.len() {
                     LuaType::from_vec(rows)
                 } else {
                     LuaType::Unknown
-                });
+                }));
             }
         }
         let site = BindingSite {
@@ -157,13 +192,14 @@ impl<E> OwnedQuery<'_, '_, E> {
         let Some(_guard) = session.enter(site, || self.checkpoint())? else {
             // This guard failure has no signature_return receipt in the fixed
             // producer, unlike project_selected's projection-cycle receipt.
-            return Ok(LuaType::Unknown);
+            return Ok(OwnedValue::plain(LuaType::Unknown));
         };
         let mut body = OwnedQuery::new(self.analysis, session, file, &mut *self.check);
+        body.flow_trees = std::rc::Rc::clone(&self.flow_trees);
         body.contextual_closure_return(signature.closure_syntax)
     }
 
-    fn contextual_closure_return(&mut self, syntax: LuaSyntaxId) -> QueryResult<LuaType, E> {
+    fn contextual_closure_return(&mut self, syntax: LuaSyntaxId) -> QueryResult<OwnedValue, E> {
         self.checkpoint()?;
         let Some(closure) = self
             .model
@@ -171,7 +207,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             .and_then(|tree| syntax.to_node_from_root(&tree.get_red_root()))
             .and_then(LuaClosureExpr::cast)
         else {
-            return Ok(LuaType::Unknown);
+            return Ok(OwnedValue::plain(LuaType::Unknown));
         };
         let mut rows = Vec::new();
         for node in closure.syntax().descendants() {
@@ -191,71 +227,61 @@ impl<E> OwnedQuery<'_, '_, E> {
                 continue;
             }
             if rows.len() >= 256 {
-                return Ok(LuaType::Unknown);
+                return Ok(OwnedValue::plain(LuaType::Unknown));
             }
             let mut exprs = Vec::new();
             for expr in ret.get_expr_list() {
                 self.checkpoint()?;
                 exprs.push(expr);
                 if exprs.len() > 32 {
-                    return Ok(LuaType::Unknown);
+                    return Ok(OwnedValue::plain(LuaType::Unknown));
                 }
             }
             let mut slots = Vec::new();
             for (index, expr) in exprs.iter().enumerate() {
                 self.checkpoint()?;
-                let value = self.type_of_expr(expr.get_syntax_id())?;
-                let ty = match value.into_context_free_type() {
-                    Ok(ty) => ty,
-                    Err(_) => {
-                        // Function-return carriers have not been implemented.
-                        // Keep the completed child receipts, but never turn its
-                        // selected identity into a plain DocFunction return.
-                        return self.continuation(
-                            OwnedQueryCapability::FunctionReturnType,
-                            Some(BindingSite {
-                                file_id: self.model.file_id(),
-                                syntax: expr.get_syntax_id(),
-                            }),
-                            None,
-                            None,
-                        );
-                    }
-                };
+                let ty = self.type_of_expr(expr.get_syntax_id())?;
                 if index + 1 == exprs.len()
                     && matches!(expr, LuaExpr::CallExpr(_))
-                    && matches!(ty, LuaType::Unknown | LuaType::Any)
+                    && matches!(ty.structural_type(), LuaType::Unknown | LuaType::Any)
                 {
-                    slots.push(LuaType::Variadic(Arc::new(VariadicType::Base(
-                        LuaType::Unknown,
+                    slots.push(OwnedValue::plain(LuaType::Variadic(Arc::new(
+                        VariadicType::Base(LuaType::Unknown),
                     ))));
                 } else if index + 1 == exprs.len()
-                    && let LuaType::Variadic(values) = &ty
+                    && let LuaType::Variadic(values) = ty.structural_type()
                 {
                     match values.as_ref() {
                         VariadicType::Multi(values) => {
-                            for value in values {
+                            for (slot, value) in values.iter().enumerate() {
                                 self.checkpoint()?;
-                                slots.push(value.clone());
+                                slots.push(
+                                    ty.carried_slots()
+                                        .map(|slots| slots[slot].clone())
+                                        .unwrap_or_else(|| OwnedValue::plain(value.clone())),
+                                );
                             }
                         }
                         VariadicType::Base(_) => slots.push(ty),
                     }
                 } else {
-                    slots.push(ty.get_result_slot_type(0).unwrap_or(LuaType::Nil));
+                    slots.push(
+                        ty.result_slot(0)
+                            .unwrap_or_else(|| OwnedValue::plain(LuaType::Nil)),
+                    );
                 }
                 if slots.len() > 32 {
-                    return Ok(LuaType::Unknown);
+                    return Ok(OwnedValue::plain(LuaType::Unknown));
                 }
             }
             rows.push(if slots.len() == 1 {
                 slots.remove(0)
             } else {
-                LuaType::Variadic(Arc::new(VariadicType::Multi(slots)))
+                OwnedValue::pack(slots)
             });
         }
         if rows.is_empty() {
-            return Ok(LuaType::Variadic(Arc::new(VariadicType::Multi(Vec::new()))));
+            return Ok(OwnedValue::pack(Vec::new()));
         }
         let mut terminal = false;
         if let Some(block) = closure.get_block() {
@@ -283,49 +309,84 @@ impl<E> OwnedQuery<'_, '_, E> {
                 },
                 || self.checkpoint(),
             )?;
-            return Ok(LuaType::Unknown);
+            return Ok(OwnedValue::plain(LuaType::Unknown));
         }
-        Ok(LuaType::from_vec(rows))
+        OwnedValue::union_checked(rows, || self.checkpoint())
     }
 
-    fn require_plain_signature_type(
+    fn table_field_signature_override(
         &mut self,
-        ty: &LuaType,
-        site: BindingSite,
-    ) -> QueryResult<(), E> {
-        // Arc-backed LuaType clones keep an explicit cancellable traversal;
-        // nesting depth never consumes the Rust call stack. This is a type
-        // frontier, not a copied analysis graph or completed ledger.
-        let mut pending = vec![ty.clone()];
-        while let Some(ty) = pending.pop() {
+        file: FileId,
+        closure: LuaSyntaxId,
+        mut params: Vec<(String, Option<LuaType>)>,
+        mut ret: OwnedValue,
+    ) -> QueryResult<(Vec<(String, Option<LuaType>)>, OwnedValue), E> {
+        self.checkpoint()?;
+        if self
+            .model
+            .file_facts_of(file)
+            .and_then(|facts| facts.member_by_value_syntax(closure))
+            .is_none()
+        {
+            return Ok((params, ret));
+        }
+        let field = self
+            .model
+            .syntax_tree_of(file)
+            .and_then(|tree| closure.to_node_from_root(&tree.get_red_root()))
+            .and_then(|node| node.ancestors().find_map(LuaTableField::cast));
+        let Some(field) = field else {
+            return Ok((params, ret));
+        };
+        let mut returns = Vec::new();
+        let mut has_return = false;
+        for comment in field.get_comments() {
             self.checkpoint()?;
-            match &ty {
-                LuaType::Variadic(values) => match values.as_ref() {
-                    VariadicType::Base(value) => pending.push(value.clone()),
-                    VariadicType::Multi(values) => {
-                        for value in values.iter().rev() {
+            for tag in comment.get_doc_tags() {
+                self.checkpoint()?;
+                match tag {
+                    LuaDocTag::Param(param) => {
+                        if let Some(name) = param.get_name_token()
+                            && let Some(doc_ty) = param.get_type()
+                        {
+                            let mut ty = self
+                                .model
+                                .doc_type_lua_rich_in(file, doc_ty.get_syntax_id());
                             self.checkpoint()?;
-                            pending.push(value.clone());
+                            if param.is_nullable() {
+                                ty = LuaType::from_vec(vec![ty, LuaType::Nil]);
+                            }
+                            if let Some(slot) =
+                                params.iter_mut().find(|(n, _)| n == name.get_name_text())
+                            {
+                                slot.1 = Some(ty);
+                            }
                         }
                     }
-                },
-                LuaType::Union(union) => {
-                    for value in union.into_vec().into_iter().rev() {
-                        self.checkpoint()?;
-                        pending.push(value);
+                    LuaDocTag::Return(tag) => {
+                        has_return = true;
+                        for doc_ty in tag.get_types() {
+                            self.checkpoint()?;
+                            let ty = self
+                                .model
+                                .doc_type_lua_rich_in(file, doc_ty.get_syntax_id());
+                            if !matches!(ty, LuaType::Unknown) {
+                                returns.push(OwnedValue::plain(ty));
+                            }
+                        }
                     }
-                }
-                value if super::call::plain_atom(value) => {}
-                _ => {
-                    return self.continuation(
-                        OwnedQueryCapability::FunctionReturnType,
-                        Some(site),
-                        None,
-                        None,
-                    );
+                    _ => {}
                 }
             }
         }
-        Ok(())
+        if has_return && !returns.is_empty() {
+            ret = if returns.len() == 1 {
+                returns.pop().unwrap()
+            } else {
+                OwnedValue::pack(returns)
+            };
+        }
+        self.checkpoint()?;
+        Ok((params, ret))
     }
 }

@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 19:33 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`93211ea1e266b3bdd176208a7a2ab9ce5d21b0ad`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 19:37 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`f5ad62fcafbde8d960a7c3128ccdb31648b45ae9`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -29,11 +29,13 @@
 
 6699终态产物168 owner/987 sealed日志全SHA核验；owned binary4/dense3/execution3/plan2/function5实际通过，query backend4通过1失败，正常局部变量触发尚缺的DeclarationFlow，后续selected448未执行。此缺口正按完整flow链实现，不改成Unknown掩盖。Data旧可见域错误与三处adaptive测试移出PinnedSet的E0507已最小修；Core旧immediate-busy测试已按真实blob等待合同改取消，历史metadata测试目录加唯一序号。新测试均未运行；同候选旧context fixture失败已在c8后继保存正负用例。
 
+owned查询后端已保存完整累计源码：单文件按需CFG、局部声明flow/赋值/join/基本guard/casts、三种类型关系、member producer与结构化carrier、substitution和本地/跨文件signature。32 Rust源仅完成语法检查，未编译；仍须补完整closure environment、一般call/generic、member flow/复杂相关窄化与统一checker，再切Source实际诊断。当前不新增生产patch删除，不宣称6699正常局部变量失败已修复。依赖只增加既有锁定rowan0.17.0的adapter直接边，无新包或版本升级。
+
 当前完整生产批已把 adapter declaration 与 Source PreparedSnapshot 两处摄取切换为原版 Emmy 公开 batch API，并把原35个测试迁到自有 adapter；删除 checked/shared ingestion、DB shared setter 和 VFS Arc接收改动。重建 recipe 从31降为26 changed paths、生产源从26降为24，完整源码身份重建已核，Rust运行待集中验证。公开API要求String，新增N常驻及N+最大文件转换瞬态文本成本已明确记录；不提高原2GiB worker上限，完整语义/诊断仍继续迁移，未达到零补丁。
 
 Data当前批已将实际默认DB2/navigation/JSONL消费者接入同一lexical Session：owned Encoding双目录、≤8MiB page cache、Root compact index/Memo、首成功读取统计和capture持有贯通。保持页缓存超大不插入也不清旧缓存、原独立控制/预算；18源文件已组合，Rust未执行。默认local/CDN/effective SQL现已组合真实lazy Equal/Scan、query内完整bundle复用与行临时安全账，包含普通/相关IN子查询、CTE/derived/recursive、RHS UNION、EXPLAIN及Unicode binder区别；97新增与40继承测试均未运行。嵌套UNION尾expression-subquery的继承callback作用域仍有已知差异待补。
 
-本地CASC/Selected、decoded cache及streaming消费者现已保原invocation＋独立Budget至目录/index/archive读取、decode、metadata、单遍staged发布及消费式关闭；默认SQL两处materialized读取已接新入口。仅逻辑解码一次，随后required Vec从已验证本地blob有界读取；没有第二次网络读取或解码。同步系统调用仍只在有界边界检查，ReadDir仍为标准Drop。自动project-pin受控发现正在实现；旧local decoded256MiB硬限仍未闭合，不能因移除SQL累计raw512MiB限制就称所有合法512MiB本地文件可执行。该32源组合未运行Rust。
+本地CASC/Selected、decoded cache及streaming消费者现已保原invocation＋独立Budget至目录/index/archive读取、decode、metadata、单遍staged发布及消费式关闭；默认SQL两处materialized读取已接新入口。仅逻辑解码一次，随后required Vec从已验证本地blob有界读取；没有第二次网络读取或解码。同步系统调用仍只在有界边界检查，ReadDir仍为标准Drop。自动/显式project-pin已接实际Data provider，原invocation＋Budget贯穿最近项目发现、64KiB严格JSON/UTF8/重复键/depth16、SQLite创建/冲突winner验证与checked close；专用ProjectReader允许原子lock替换，其他Reader共享策略不变。10新回归未运行；旧local decoded256MiB硬限仍未闭合，不能因移除SQL累计raw512MiB限制就称所有合法512MiB本地文件可执行。该32源组合未运行Rust。
 
 最新实际结果：bc2终态产物177个owner、7059份sealed日志已逐SHA核验。该精确候选完整Retail ordinary refs约78.53秒、context约78.92秒、API约65.14秒已成功；仍失败的是retained session冷启动EOF/回收，后续常驻warm/steady未测。这些成功不包含后来XML子索引/统计复用，不能归因后续优化，也未证明≤Go30%或内存目标。真实Driver→正式Lua桥9/9通过；其他范围按各自结果，不称全仓绿。
 

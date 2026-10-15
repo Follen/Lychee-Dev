@@ -645,6 +645,10 @@ jobs:
       - name: Run independent selection and typed row budget fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-selection-supplemental --one-shot -- test --locked --offline -p lycheedev-core --lib selection::supplemental_tests -j 1
+      - name: Run controlled automatic project pin fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-project-pin --one-shot -- test --locked --offline -p lycheedev-core --lib selection::project_controlled:: -j 1
       - name: Run target cancellation before symbolic resolution
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-target-cancellation --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev tests::target_dispatch_preserves_invocation_cancellation_and_deadline -j 1

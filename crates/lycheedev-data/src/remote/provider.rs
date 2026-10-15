@@ -16,22 +16,7 @@ fn resolve_pin(
     invocation: &Invocation,
     budget: &Arc<Budget>,
 ) -> Result<lycheedev_core::selection::PinnedSet> {
-    invocation.control.check()?;
-    budget.check()?;
-    if let Some(id) = invocation.flag("--snapshot") {
-        lycheedev_core::selection::load_pinned_controlled_with_check(
-            &invocation.home,
-            id,
-            &invocation.control,
-            || budget.check(),
-        )
-    } else {
-        // Legacy automatic project discovery remains an explicit gap.
-        let pin = lycheedev_core::selection::resolve_pinned(invocation)?;
-        invocation.control.check()?;
-        budget.check()?;
-        Ok(pin)
-    }
+    lycheedev_core::selection::resolve_pinned_controlled_with_check(invocation, || budget.check())
 }
 
 /// No file-read method exists until this owner has acquired real workspace slots.

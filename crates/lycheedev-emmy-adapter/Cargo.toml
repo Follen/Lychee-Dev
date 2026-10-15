@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+rowan = "=0.17.0"
 lycheedev-binding-contracts = { path = "../lycheedev-binding-contracts", version = "=3.5.0" }
 # Keep this backend pin identical to the custody-verified Source engine.
 emmylua_code_analysis = { path = "../../.tmp/emmy-reconstruction-v1/upstream/crates/emmylua_code_analysis", version = "=0.30.0" }

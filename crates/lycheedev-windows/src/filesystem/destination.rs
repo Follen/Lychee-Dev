@@ -89,6 +89,7 @@ enum RelativeOpen {
     Stage,
     Inspect,
     Reader,
+    ProjectReader,
 }
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FileCost {
@@ -198,6 +199,14 @@ fn relative_file_optional<C: FileControl>(
         RelativeOpen::Reader => (
             1 | FILE_READ_ATTRIBUTES.0 | 0x100000,
             1,
+            1,
+            0x00200000 | 0x20,
+        ),
+        // Fixed Go project Root.Open keeps readers valid across atomic lock
+        // replacement. Other readers retain their deny-write/delete policy.
+        RelativeOpen::ProjectReader => (
+            1 | FILE_READ_ATTRIBUTES.0 | 0x100000,
+            1 | 2 | 4,
             1,
             0x00200000 | 0x20,
         ),
@@ -476,6 +485,23 @@ impl Directory {
     ) -> Result<File, C::Error> {
         self.verify_controlled(control)?;
         relative_file_controlled(self.parent_handle(), name, RelativeOpen::Reader, control)
+    }
+    /// Read a project declaration/lock while allowing Go's atomic replacement.
+    /// The caller must validate regular-file kind and bound its body; this is
+    /// deliberately separate from immutable blob/archive Reader semantics.
+    pub fn open_optional_project_file_controlled<C: FileControl>(
+        &self,
+        name: &std::ffi::OsStr,
+        control: &mut C,
+    ) -> Result<Option<File>, C::Error> {
+        self.verify_controlled(control)?;
+        relative_file_optional(
+            self.parent_handle(),
+            name,
+            RelativeOpen::ProjectReader,
+            true,
+            control,
+        )
     }
     pub fn open_optional_file_controlled<C: FileControl>(
         &self,
