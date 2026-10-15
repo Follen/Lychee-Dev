@@ -1,6 +1,6 @@
 # 待办与验证范围
 
-基线：3.2.0；更新日期：2026-10-15。发行版本源为 3.2.0，授权渠道为 `latest`。
+基线：3.2.1；更新日期：2026-10-15。发行版本源为 3.2.1，授权渠道为 `latest`。
 
 ## 待办
 
@@ -17,6 +17,8 @@
 - [x] 用户追加高风险覆盖补强已交付：数据保全、非幂等恢复、取消/事务和并发边界均有独立触发与负对照，当前Windows正式回归通过，未为覆盖数字改产品合同。
 - [x] 完成本轮7项实机整合：Retail12.1.0.69933通过Trace/Objects真实页面回调、用户实际战斗与按键、数值往返、running原请求resume、bridge off/on及保存off重载、默认option重新加载、bind回执与新鲜替代runtime退役。e17f0759修复后空map和完整交易复验通过；报告verified/released、本轮三CON均closed、doctor全绿、0预约。范围与限制见 [handover.md](handover.md#7项实机结果)。
 - [ ] 补齐七产品的干净首次安装、重新登录和完整升级实机矩阵。
+- [x] Retail 12.1.5.70391/120105完成受管升级、启动识别及单实例容量验证：125份verified/released报告、500次业务槽交换、1次自动reload；504次输入交换各提交一次，500个数值比较通过，最终disconnect且doctor全绿、0预约。仅本轮升级和容量路径，不扩展为七产品完整安装矩阵。
+- [x] R1215-INPUT-01键盘优先等待已实现，并按用户要求更新本机CLI/Skill完成12.1.5实测：按住W时两次发送尝试均0消息，松开469ms时仍等待静默，随后完成原请求；四个业务交换各提交一次，报告verified/released，disconnect后doctor全绿、0预约。desktop、channel整包与定向race通过；仍不能保证消除与已开始组合键恰好重叠的误触。当前本机为3.2.0本地开发包，修改尚未公开发布。
 - [x] e17f0759追加一轮500次业务槽交换：125份verified/released报告、1次自动容量reload及重连、504次输入交换无重复；500个数值比较通过，最终disconnect与doctor确认无owner、0预约。
 - [ ] 补齐战斗、受限编辑框和最小化窗口等真实阻塞场景；现有离线测试不能替代这些验收。
 - [x] 3.2.0已发布到 `latest`：固定提交3057a966的[发布流水线](https://github.com/Follen/Lychee-Dev/actions/runs/38608441597)完成CI、打包、Windows隔离安装、registry回读与[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.0)。本机全局CLI及受管Skill均已升级并核验版本。

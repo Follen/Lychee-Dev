@@ -88,7 +88,7 @@ func TestUnifiedTOCContract(t *testing.T) {
 	for _, part := range strings.Split(interfaceLine, ",") {
 		declared[strings.TrimSpace(part)] = true
 	}
-	for _, iface := range []string{"120100", "50504", "38002", "16001", "11509", "20506"} {
+	for _, iface := range []string{"120105", "120100", "50504", "38002", "16001", "11509", "20506"} {
 		if !declared[iface] {
 			t.Fatalf("missing declared interface %s", iface)
 		}

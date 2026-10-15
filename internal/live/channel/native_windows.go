@@ -32,6 +32,7 @@ type Native struct {
 	tracesOmitted             int
 	inputWait                 inputSampleWait
 	inputAttemptProbe         receiptAttemptProbe
+	keyboardActivity          *desktop.KeyboardActivity
 }
 
 type mailboxLookup interface {
@@ -90,6 +91,10 @@ func (n *Native) Close() error {
 	if n.Publication != nil {
 		err = n.Publication.Close()
 		n.Publication = nil
+	}
+	if n.keyboardActivity != nil {
+		err = errors.Join(err, n.keyboardActivity.Close())
+		n.keyboardActivity = nil
 	}
 	if n.Process != nil {
 		err = errors.Join(err, n.Process.Close())

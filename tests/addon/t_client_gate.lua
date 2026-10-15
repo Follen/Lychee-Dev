@@ -1,7 +1,12 @@
 local Env = ...
 local original = GetBuildInfo
-for _, client in ipairs({ "classic-era", "anniversary" }) do
-    local expected = Env.testBuilds[client]
+for _, profile in ipairs({
+    { "retail", Env.testBuilds.retail },
+    { "retail", { "12.1.0", "69933", "Sep 2026", 120100 } },
+    { "classic-era", Env.testBuilds["classic-era"] },
+    { "anniversary", Env.testBuilds.anniversary },
+}) do
+    local client, expected = profile[1], profile[2]
     GetBuildInfo = function() return unpack(expected) end
     local ns = {}
     local frames = Env.framesCreated

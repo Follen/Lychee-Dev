@@ -12,8 +12,12 @@ func TestClientEvidencePrecedence(t *testing.T) {
 	for _, test := range []struct {
 		name, folder, flavor, version, want string
 		active                              []ClientBuild
+		wantInterface                       int
 	}{
-		{name: "retail catalog", folder: "_retail_", flavor: "wow", want: "retail", active: []ClientBuild{{"wow", "12.1.0.69875"}}},
+		{name: "retail catalog", folder: "_retail_", flavor: "wow", want: "retail", active: []ClientBuild{{"wow", "12.1.0.69875"}}, wantInterface: 120100},
+		{name: "retail 12.1.5 catalog", folder: "_retail_", flavor: "wow", want: "retail", active: []ClientBuild{{"wow", "12.1.5.70391"}}, wantInterface: 120105},
+		{name: "retail 12.1.5 version", folder: "custom", flavor: "wow", version: "12.1.5.70391", want: "retail", wantInterface: 120105},
+		{name: "retail 12.1.5 version only", folder: "custom", version: "12.1.5.70391", want: "retail", wantInterface: 120105},
 		{name: "anniversary catalog", folder: "_anniversary_", flavor: "wow_anniversary", want: "anniversary", active: []ClientBuild{{"wow_anniversary", "2.5.6.70006"}}},
 		{name: "anniversary version", folder: "custom", flavor: "wow_anniversary", version: "2.5.6.70006", want: "anniversary"},
 		{name: "reused Forever slot", folder: "_classic_beta_", flavor: "wow_forever", version: "1.60.1.69893", want: "forever"},
@@ -62,6 +66,9 @@ func TestClientEvidencePrecedence(t *testing.T) {
 			}
 			if err != nil || result.Product != test.want || result.Interface == 0 || result.TOC == "" {
 				t.Fatalf("%+v %v", result, err)
+			}
+			if test.wantInterface != 0 && result.Interface != test.wantInterface {
+				t.Fatalf("interface %d, want %d", result.Interface, test.wantInterface)
 			}
 		})
 	}

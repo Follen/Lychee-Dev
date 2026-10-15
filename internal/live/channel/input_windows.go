@@ -59,6 +59,12 @@ func (n *Native) Input(ctx context.Context, a InputAction) (out InputOutcome, er
 	if n.Guard == nil {
 		return InputOutcome{Disposition: "not_sent", Reason: "guard_missing"}, errors.New("live.channel_guard_required")
 	}
+	if n.keyboardActivity == nil {
+		n.keyboardActivity, err = desktop.NewKeyboardActivity()
+		if err != nil {
+			return InputOutcome{Disposition: "not_sent", Reason: err.Error()}, err
+		}
+	}
 	// Resume may enter with a published transaction but no OS lock. Reacquire
 	// the shared publication lease and verify the exact bytes BEFORE any key.
 	if err := n.lockPublication(ctx); err != nil {
@@ -122,13 +128,13 @@ func (n *Native) Input(ctx context.Context, a InputAction) (out InputOutcome, er
 	if err != nil {
 		return InputOutcome{Disposition: "not_sent", Reason: err.Error()}, err
 	}
-	receipt, err := desktop.WithMailboxInput(ctx, n.Target, profile, n.Guard, send)
+	receipt, err := desktop.WithMailboxInput(ctx, n.Target, profile, n.Guard, n.keyboardActivity.Check, send)
 	out = InputOutcome{MessagesQueued: receipt.MessagesQueued, AtMillis: uptimeMillis(), Disposition: "uncertain"}
 	if err == nil && receipt.SubmissionComplete {
 		out.Disposition = "submitted"
 	} else if receipt.MessagesQueued == 0 {
 		out.Disposition = "not_sent"
-		out.Retryable = errors.Is(err, desktop.ErrKeyAlreadyHeld) || errors.Is(err, ErrPending) || errors.Is(err, memory.ErrMailboxPathChanged)
+		out.Retryable = errors.Is(err, desktop.ErrKeyAlreadyHeld) || errors.Is(err, desktop.ErrKeyboardActive) || errors.Is(err, ErrPending) || errors.Is(err, memory.ErrMailboxPathChanged)
 	}
 	if err != nil {
 		out.Reason = err.Error()

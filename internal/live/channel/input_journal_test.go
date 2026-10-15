@@ -15,7 +15,7 @@ import (
 )
 
 // Every invocation gets a checksum-valid fresh INPUT. The fake sender models
-// the native physical-modifier check: zero queued messages is positively known.
+// the native held-key/quiet-period check: zero queued messages is positively known.
 // Cancelling after that observation gives one bounded CLI turn without waiting
 // for wall time or posting a key to any window.
 type heldKeyJournalPeer struct {
@@ -41,7 +41,11 @@ func (p *heldKeyJournalPeer) Input(context.Context, InputAction) (InputOutcome, 
 	if p.uncertain {
 		return InputOutcome{Disposition: "uncertain", MessagesQueued: 1, AtMillis: p.uptime(), Reason: "fixture_submission_unknown"}, errors.New("fixture_submission_unknown")
 	}
-	return InputOutcome{Disposition: "not_sent", AtMillis: p.uptime(), Retryable: true, Reason: desktop.ErrKeyAlreadyHeld.Error()}, desktop.ErrKeyAlreadyHeld
+	blocker := desktop.ErrKeyAlreadyHeld
+	if p.attempts%2 != 0 {
+		blocker = desktop.ErrKeyboardActive
+	}
+	return InputOutcome{Disposition: "not_sent", AtMillis: p.uptime(), Retryable: true, Reason: blocker.Error()}, blocker
 }
 func (p *heldKeyJournalPeer) Observe(context.Context, ObservationQuery) (Observation, error) {
 	p.reads++

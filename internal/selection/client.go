@@ -135,24 +135,6 @@ func InspectClient(ctx context.Context, directory string, active []ClientBuild) 
 		}
 		source = "folder"
 	}
-	var selected *ClientBaseline
-	for _, baseline := range clientIdentityBaselines() {
-		if baseline.ProductCode == product {
-			value := baseline
-			selected = &value
-			break
-		}
-	}
-	if selected == nil {
-		if result.ProductCode == "" {
-			result.ProductCode = product
-		}
-		return result, fmt.Errorf("%w: unsupported product %q", ErrClientIdentity, product)
-	}
-	result.Product = selected.Product
-	if result.ProductCode == "" {
-		result.ProductCode = product
-	}
 	if version == "" {
 		for _, candidate := range active {
 			if candidate.ProductCode != product && candidate.ProductCode != slot {
@@ -164,7 +146,24 @@ func InspectClient(ctx context.Context, directory string, active []ClientBuild) 
 			version = candidate.FullBuild
 		}
 	}
-	if !build(version) || !strings.HasPrefix(version, selected.BuildSeries+".") {
+	var selected *ClientBaseline
+	for _, baseline := range clientIdentityBaselines() {
+		if baseline.ProductCode == product {
+			result.Product = baseline.Product
+			if strings.HasPrefix(version, baseline.BuildSeries+".") {
+				value := baseline
+				selected = &value
+				break
+			}
+		}
+	}
+	if result.ProductCode == "" {
+		result.ProductCode = product
+	}
+	if result.Product == "" {
+		return result, fmt.Errorf("%w: unsupported product %q", ErrClientIdentity, product)
+	}
+	if !build(version) || selected == nil {
 		return result, fmt.Errorf("%w: missing or unsupported product/build pair", ErrClientIdentity)
 	}
 	// Reused Forever test slots require a verified Forever build series.

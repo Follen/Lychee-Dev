@@ -72,12 +72,12 @@ func TestInputLockAcrossProcesses(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("child did not acquire mutex")
 			}
-			receipt, err := WithMailboxInput(context.Background(), f.identity, MailboxBindings{Wake: "ALT-CTRL-F12", Reload: "ALT-CTRL-F11"}, func(context.Context) error { return nil }, func(wake, reload func() error) error { return wake() })
+			receipt, err := WithMailboxInput(context.Background(), f.identity, MailboxBindings{Wake: "ALT-CTRL-F12", Reload: "ALT-CTRL-F11"}, func(context.Context) error { return nil }, fixtureKeyboardReady, func(wake, reload func() error) error { return wake() })
 			if err == nil || err.Error() != "desktop.input_busy" || receipt.MessagesQueued != 0 {
 				t.Fatalf("busy sent input: %+v %v", receipt, err)
 			}
 			prepared := false
-			_, err = WithMailboxInput(context.Background(), f.identity, MailboxBindings{Wake: "ALT-CTRL-F12", Reload: "ALT-CTRL-F11"}, func(context.Context) error { return nil }, func(wake, reload func() error) error { prepared = true; return wake() })
+			_, err = WithMailboxInput(context.Background(), f.identity, MailboxBindings{Wake: "ALT-CTRL-F12", Reload: "ALT-CTRL-F11"}, func(context.Context) error { return nil }, fixtureKeyboardReady, func(wake, reload func() error) error { prepared = true; return wake() })
 			if err == nil || err.Error() != "desktop.input_busy" || prepared {
 				t.Fatal("busy prepared durable intent", err)
 			}
@@ -103,7 +103,7 @@ func TestInputLockAcrossProcesses(t *testing.T) {
 					t.Fatal(err)
 				}
 				child.Wait()
-				receipt, err = WithMailboxInput(context.Background(), f.identity, MailboxBindings{Wake: "ALT-CTRL-F12", Reload: "ALT-CTRL-F11"}, func(context.Context) error { return nil }, func(wake, reload func() error) error { return wake() })
+				receipt, err = WithMailboxInput(context.Background(), f.identity, MailboxBindings{Wake: "ALT-CTRL-F12", Reload: "ALT-CTRL-F11"}, func(context.Context) error { return nil }, fixtureKeyboardReady, func(wake, reload func() error) error { return wake() })
 				if err == nil || err.Error() != "desktop.input_abandoned" || receipt.MessagesQueued != 0 {
 					t.Fatalf("abandoned sent input: %+v %v", receipt, err)
 				}
@@ -115,7 +115,7 @@ func TestInputLockAcrossProcesses(t *testing.T) {
 			if err := child.Wait(); err != nil {
 				t.Fatal(err)
 			}
-			receipt, err = WithMailboxInput(context.Background(), f.identity, MailboxBindings{Wake: "ALT-CTRL-F12", Reload: "ALT-CTRL-F11"}, func(context.Context) error { return nil }, func(wake, reload func() error) error { return wake() })
+			receipt, err = WithMailboxInput(context.Background(), f.identity, MailboxBindings{Wake: "ALT-CTRL-F12", Reload: "ALT-CTRL-F11"}, func(context.Context) error { return nil }, fixtureKeyboardReady, func(wake, reload func() error) error { return wake() })
 			if err != nil || !receipt.SubmissionComplete {
 				t.Fatalf("released: %+v %v", receipt, err)
 			}

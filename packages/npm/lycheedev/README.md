@@ -28,6 +28,6 @@ lycheedev skill install --release $release --path (Join-Path $env:USERPROFILE '.
 
 Source、Data 和 Assets 无需启动游戏。Live 需要运行中的客户端和配套受管插件；恢复时保留原 project、CON、request 与预算。
 
-本包版本为 3.2.0，通过 `latest` 渠道发布。以已安装版本的 `version`、`describe` 和 `--help` 确认能力。
+本包版本为 3.2.1，通过 `latest` 渠道发布。以已安装版本的 `version`、`describe` 和 `--help` 确认能力。
 
 项目代码采用 MIT，第三方组件声明见包内 LICENSE 与 THIRD_PARTY_NOTICES。

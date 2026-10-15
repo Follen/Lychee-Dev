@@ -11,25 +11,29 @@ import (
 )
 
 type nativeInput struct {
-	ctx     context.Context
-	target  WindowIdentity
-	guard   func(context.Context) error
-	receipt InputReceipt
-	down    []uint16
+	ctx           context.Context
+	target        WindowIdentity
+	guard         func(context.Context) error
+	keyboardReady func() error
+	receipt       InputReceipt
+	down          []uint16
 }
 
 // withNativeInput reuses production identity checks and its cross-process mutex.
 // guard is the caller's disk ownership check, also called before every message.
-func withNativeInput(ctx context.Context, target WindowIdentity, guard func(context.Context) error, fn func(*nativeInput) error) (InputReceipt, error) {
-	if guard == nil || fn == nil {
+func withNativeInput(ctx context.Context, target WindowIdentity, guard func(context.Context) error, keyboardReady func() error, fn func(*nativeInput) error) (InputReceipt, error) {
+	if guard == nil || keyboardReady == nil || fn == nil {
 		return InputReceipt{}, errors.New("desktop.invalid_options")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	return withInputLock(ctx, target, func() (receipt InputReceipt, err error) {
-		in := &nativeInput{ctx: ctx, target: target, guard: guard}
+		in := &nativeInput{ctx: ctx, target: target, guard: guard, keyboardReady: keyboardReady}
 		defer func() { err = errors.Join(err, in.release()); receipt = in.receipt }()
 		if err = in.check(); err != nil {
+			return receipt, err
+		}
+		if err = in.keyboardReady(); err != nil {
 			return receipt, err
 		}
 		err = fn(in)
@@ -158,11 +162,10 @@ func (in *nativeInput) ReceiverChord(chord string) error {
 }
 
 func (in *nativeInput) chordKeys(keys []uint16) error {
-	// Physical modifiers must be released before attempting a chord.
-	if err := checkChordKeys(keys, func(vk uint16) bool {
-		pressed, _, _ := userLibrary.NewProc("GetAsyncKeyState").Call(uintptr(vk))
-		return pressed&0x8000 != 0
-	}); err != nil {
+	// Recheck after the caller's fresh INPUT read, immediately before the
+	// first key-down. Once started, finish the chord and release every key;
+	// keyboard activity must never insert a pause with our modifiers held.
+	if err := in.keyboardReady(); err != nil {
 		return err
 	}
 	alt := false

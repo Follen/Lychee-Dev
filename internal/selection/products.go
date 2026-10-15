@@ -14,7 +14,7 @@ type DataProductProfile struct {
 
 func DataProducts() []DataProductProfile {
 	return []DataProductProfile{
-		{Product: "retail", Family: "retail", ProductCode: "wow", Folder: "_retail_", BuildSeries: "12.1.0"},
+		{Product: "retail", Family: "retail", ProductCode: "wow", Folder: "_retail_", BuildSeries: "12.1.5"},
 		{Product: "classic", Family: "classic", ProductCode: "wow_classic", Folder: "_classic_", BuildSeries: "5.5.4"},
 		{Product: "classic-era", Family: "classic-era", ProductCode: "wow_classic_era", Folder: "_classic_era_", BuildSeries: "1.15.9"},
 		{Product: "titan", Family: "titan", ProductCode: "wow_classic_titan", Folder: "_classic_titan_", BuildSeries: "3.80.2"},

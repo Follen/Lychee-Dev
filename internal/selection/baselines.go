@@ -25,6 +25,7 @@ type ClientBaseline struct {
 
 func VerifiedClientBaselines() []ClientBaseline {
 	return []ClientBaseline{
+		{Product: "retail", ProductCode: "wow", BuildSeries: "12.1.5", TOC: MainTOC, Interface: 120105, SourceCommit: "18c6d677b605b312f3d813d498404631fb941977"},
 		{Product: "retail", ProductCode: "wow", BuildSeries: "12.1.0", TOC: MainTOC, Interface: 120100, SourceCommit: "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b"},
 		{Product: "classic", ProductCode: "wow_classic", BuildSeries: "5.5.4", TOC: MainTOC, Interface: 50504, SourceCommit: "1028c1e687f721ba9d3af14d1b12a5745e4227c7"},
 		{Product: "classic-era", ProductCode: "wow_classic_era", BuildSeries: "1.15.9", TOC: MainTOC, Interface: 11509, SourceCommit: "8165d4cd6e48d606369336cc3a7977902310e81e"},
