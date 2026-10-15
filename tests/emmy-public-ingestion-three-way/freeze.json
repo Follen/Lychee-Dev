@@ -7,9 +7,9 @@
     "Cargo-A.lock": "e4dbe781949666b293834260f894cb7333ab6ac1a6627d71a16ed63c9b1630f2",
     "Cargo-B.lock": "e4dbe781949666b293834260f894cb7333ab6ac1a6627d71a16ed63c9b1630f2",
     "Cargo-C.lock": "6ba0c3d78568ef93df4b7930c5c91d96aa4f46d3f34101d5e0ee13b62c7bebba",
-    "README.md": "e67587d0dc9038b867cf57fe7e2c8e543624cc997e103ccd053525503ee59c87",
+    "README.md": "c2226fc30dfa7353174027d53fc6f18b347e41bfe1ffb45e7d841e4ff26546d8",
     "assertions.mjs": "6fc873d39a58831eb45c8aadf978ef0993f025162d4163035aea4cab9ff99df6",
-    "assertions.test.mjs": "c86afd62fd0066527473864864fa990a1e675ae38d3fbb0c199436ce6cf46d9a",
+    "assertions.test.mjs": "c0df417bf8a62fd602ebea2a51fb2a91b2871e5c4c2468c6679618672eafb911",
     "check_selected_cache.py": "af709a319c13f7b4b88c3325835f2b6b9cc6972ba316f9420efcecea3a1beec8",
     "check_selected_cache_test.py": "60e9e834ba4eb9ed027a73d23dbeee54ad2ed3fee36d696727ae6f85c96e7ae4",
     "crates/lycheedev-binding-contracts/Cargo.toml": "d9ab9f5e535132c6b4d49a12042c49181a25dc0d387004b4106c1c1ab1a7493e",
@@ -31,6 +31,7 @@
     "fixtures/old-declaration.rs": "91a321a570c59d3bf29034401852bb0b8d0505bd003ffbedb13f39b53713e365",
     "harness-Cargo.toml": "e9b60db481bc4a5e40e2a459244ea06077c3e7fc9563662f9b093d4356132377",
     "inputs.json": "3e2425f05d3c520baeb3a3f050a51db1ad740f5af4e2d2919e7198354d5423b2",
+    "official-cargo.json": "7ac7134329168a3f4eaf2fdbbffe2b643371a9f66dcddb913b55a98717e55b60",
     "prepare_inputs.py": "bdb9c04459b038a08809cf7065cd1e95119a03c5779d9b914dd4be41bcffcf1c",
     "release/rust-disk-policy.json": "672e33453bcb1333e6e7ab0cbe267249ae93e0d53ff0800d560f723543290b6d",
     "run_windows_three_way.mjs": "2fdfe33221385e9bf5d65ae15f7279ed9c2c81ede9100ef3bed165f51b2d5836",
@@ -46,7 +47,7 @@
     "third_party/emmy/seal.py": "700d40ce1cd37bc3714035d9ce29e7bfd2ec53a7a9f98d80f7eb8062c3a3b18f",
     "third_party/emmy/standalone-Cargo.toml": "d91e5351aed1f37550198675e2efce32f1c47bdab4abe63685540b7c96415f57",
     "third_party/emmy/test_prepare.py": "4166cad5d64a52952af65f6500ae79be191f0eacbcb017f51c3dcaa64bf9eb04",
-    "tools/rust-build-auxiliary.json": "1c709b9e9ceaded3fc5efb1306d08e1650470fe5fef08e6931c765d4614dbe7b",
+    "tools/rust-build-auxiliary.json": "1837cdd1279571fc3c7e8b3ad1a5cde87aa3742c99e6809af52c0f926779e519",
     "tools/rust-disk.mjs": "54122b03b7b474f1f2119a31caa85d2217aeb5ea97e65f28a7e0161bebc203e5",
     "tools/rust-owned-process.mjs": "618b5cecea59b0860f41b91d5cb9adf88e3f580706ae695e183499f150fe253c",
     "tools/rust-owned-process.ps1": "1d55db6a6ba238122f6398b075ecaf1a2160ef4c0cd0fdb5c6c22e640e824fcf",
@@ -58,10 +59,18 @@
   "unchangedOwnerFiles": [
     "tools/rust-disk.mjs",
     "tools/rust-owned-process.mjs",
-    "tools/rust-owned-process.ps1",
-    "tools/rust-build-auxiliary.json"
+    "tools/rust-owned-process.ps1"
   ],
   "localExecution": false,
   "ciExecution": false,
-  "revision": "R2: reject source empty-directory drift; include installed Python bytecode in tool hashes"
+  "revision": "R3: independent official Rust 1.99.0 MSVC Cargo component authentication; only copied auxiliary Cargo digest corrected",
+  "priorFreezeSHA256": "003f79868a395dd3853ac20dd2f992890e68a3a1891b377daef6171e92395d3d",
+  "officialCargoEvidence": "official-cargo.json",
+  "reviewedAuxiliaryPolicyChange": {
+    "path": "tools/rust-build-auxiliary.json",
+    "field": "cargoSHA256",
+    "before": "6f4bef66261261fcb43131be8720bab817d403a09edec7455c371974b90bdb7e",
+    "after": "c9b44417dc8228b81923a1068a3c09e32d2793f2cced2a816789cf433c1f0d46",
+    "evidence": "official-cargo.json"
+  }
 }

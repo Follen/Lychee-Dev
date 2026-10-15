@@ -545,8 +545,18 @@ impl ExclusiveLock {
     }
     fn acquire_with(
         path: &Path,
-        mut check: impl FnMut() -> Result<()>,
+        check: impl FnMut() -> Result<()>,
         lock: impl FnOnce(&File) -> Result<()>,
+        close: impl FnOnce(File) -> std::io::Result<()>,
+    ) -> Result<Self> {
+        Self::acquire_checked_with(path, check, |file, _| lock(file), close)
+    }
+    // Keep one open/close boundary for both immediate and explicitly waiting
+    // callers. The lock operation never owns or reopens this original File.
+    fn acquire_checked_with(
+        path: &Path,
+        mut check: impl FnMut() -> Result<()>,
+        lock: impl FnOnce(&File, &mut dyn FnMut() -> Result<()>) -> Result<()>,
         close: impl FnOnce(File) -> std::io::Result<()>,
     ) -> Result<Self> {
         check()?;
@@ -560,7 +570,7 @@ impl ExclusiveLock {
             .read(true)
             .write(true)
             .open(path)?;
-        let result = lock(&file).and_then(|_| check());
+        let result = lock(&file, &mut check).and_then(|_| check());
         if let Err(error) = result {
             return finish_file_with(file, Err(error), check, close);
         }
@@ -776,3 +786,6 @@ mod checked_close_tests;
 #[cfg(test)]
 #[path = "storage/controlled_lock_tests.rs"]
 mod controlled_lock_tests;
+
+#[path = "storage/blob_wait.rs"]
+mod blob_wait;

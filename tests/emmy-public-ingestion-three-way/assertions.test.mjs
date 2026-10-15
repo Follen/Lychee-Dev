@@ -58,3 +58,23 @@ test('source inventories reject extra empty directories and Python bytecode is f
  assert(!run.includes("part==='__pycache__'"));
  assert(run.includes("skip:p=>p.split('/').includes('site-packages')"));
 });
+
+
+test('fixed Windows Cargo pin comes from the independently authenticated official component',()=>{
+ const evidence=read('./official-cargo.json'),policy=read('./tools/rust-build-auxiliary.json');
+ assert.equal(evidence.schema,'lycheedev.official-rust-cargo-evidence.v1');
+ assert.equal(evidence.target,'x86_64-pc-windows-msvc');
+ assert.equal(evidence.manifestURL,'https://static.rust-lang.org/dist/2026-10-01/channel-rust-1.99.0.toml');
+ assert.equal(evidence.manifestSHA256,'ce6dddc886364f8d786514771212cebe9b731ba82d6b859951c6b0ccc516b6a2');
+ assert.equal(evidence.archiveURL,'https://static.rust-lang.org/dist/2026-10-01/cargo-1.99.0-x86_64-pc-windows-msvc.tar.xz');
+ assert.equal(evidence.archiveSHA256,'6201b8dcea8cc55ccfa12e842adf1b2c2aa96490a6cb4f129bf03f2df08c80c9');
+ assert.equal(evidence.member,'cargo-1.99.0-x86_64-pc-windows-msvc/cargo/bin/cargo.exe');
+ assert.equal(evidence.cargoBytes,27545088);
+ assert.equal(evidence.cargoSHA256,'c9b44417dc8228b81923a1068a3c09e32d2793f2cced2a816789cf433c1f0d46');
+ assert.equal(policy.cargoSHA256,evidence.cargoSHA256);
+ assert.equal(evidence.executed,false);assert.equal(evidence.installed,false);
+ const run=readFileSync(new URL('./run_windows_three_way.mjs',import.meta.url),'utf8');
+ const owner=readFileSync(new URL('./tools/rust-owned-process.ps1',import.meta.url),'utf8');
+ assert(run.includes("assert.equal(hash(cargo),auxiliary.cargoSHA256,'windows-contract.fixed_official_cargo')"));
+ assert(owner.includes("if($cargoIdentity.sha256 -ne $policy.cargoSHA256){throw 'owned.unreviewed_cargo_identity'}"));
+});

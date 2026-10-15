@@ -242,12 +242,12 @@ impl<'a, 'scope> Session<'a, 'scope> {
             deadline: budget.deadline.min(admitted.control().deadline()),
             ..Default::default()
         };
-        let index =
-            Encoding::open_with_check(&metered, limits, budget.token(), || files.store.check())?;
+        // Each metadata check point already runs the original scope callback.
+        // Exporting its writable AtomicBool would irreversibly discard ordered
+        // cancellation provenance even though the parser only reads the token.
+        let index = Encoding::open_with_check(&metered, limits, None, || files.store.check())?;
         let root_mapping =
-            index.find_with_check(&build.root_content_key, limits, budget.token(), || {
-                admitted.check()
-            })?;
+            index.find_with_check(&build.root_content_key, limits, None, || admitted.check())?;
         let mut stats = Stats::default();
         let mut decoded = content::Memo::default();
         let root = content::materialize(
@@ -285,7 +285,7 @@ impl<'a, 'scope> Session<'a, 'scope> {
                         matches: 4096,
                         operation: limits,
                     },
-                    budget.token(),
+                    None,
                     || files.store.check(),
                 )?;
                 let matching = entries
@@ -314,9 +314,7 @@ impl<'a, 'scope> Session<'a, 'scope> {
                 }
                 let entry = entries[matching[0]].clone();
                 let mapping =
-                    index.find_with_check(&entry.content_key, limits, budget.token(), || {
-                        admitted.check()
-                    })?;
+                    index.find_with_check(&entry.content_key, limits, None, || admitted.check())?;
                 let content = content::materialize(
                     files,
                     &index,

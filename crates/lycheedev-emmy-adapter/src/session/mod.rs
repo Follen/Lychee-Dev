@@ -4,6 +4,8 @@
 //! append here at its actual execution point before the engine ledger can be
 //! removed; merging separate completed ledgers cannot preserve its contract.
 mod evidence;
+mod execution;
+pub use execution::{ExpressionExecutionBackend, ExpressionValue};
 mod expression;
 pub use expression::{ExpressionInstruction, ExpressionPlan};
 mod projector;

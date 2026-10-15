@@ -37,3 +37,21 @@ No runner, test, Python module, Cargo command or workflow in this new payload
 has been executed as part of preparation. The initial checks were static input
 hash comparisons and Python AST parsing only. Approval of this candidate's exact
 freeze and workflow is required before any actual execution.
+
+## R3 fixed official Cargo correction
+
+The first Windows attempt stopped at the Cargo identity check before any A/B/C
+Rust test execution. Its copied local auxiliary policy had a different Cargo
+identity. The R3 pin is independently derived from Rust's fixed 2026-10-01
+1.99.0 MSVC component: official HTTPS channel manifest plus its checksum,
+manifest-named archive checksum, then the exact cargo.exe archive member.
+`official-cargo.json` records that chain; the archive was read without installing
+or executing it. Detached-signature verification is not claimed.
+
+Only the copied auxiliary policy's Cargo digest changes. Both the top-level
+runner check and the frozen PowerShell Cargo-build helper check still compare
+against that same exact digest. The owner implementations, MSVC identities,
+process cleanup rules, fixed test inputs and all A/B/C contracts are unchanged.
+The product runner/policy and unresolved Linux owner are untouched. The new
+payload requires a new independently reviewed freeze and Windows run; this
+correction is not evidence that any of the three variants passed.

@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 16:17 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`888de5ff2432e80c11c87649654962894363b140`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 16:24 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`7f3410fcc2c172e97fc99e00fbe813c0c1a11706`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -8,7 +8,7 @@
 - 当前 Go tag `v3.2.3`：tag object `7a24532cf0fe294faeb96e8224797b6fe69386d5`，peeled commit **`3766f9cacb52e93a803a626187e2a1d54a445468`**；2026-10-15远端tag/main与本地精确对象已核。322→323为2提交、41文件；业务在该正式提交，另一个提交为322发布文档。新增自适应Data内存/准入容量、紧凑记录、IN选择及Data Skill，详见[323增量矩阵](docs/toolkit/rust-go-3.2.3-increment.md)。新增验收PENDING；未验证发行二进制/资产。
 - 历史 Go tag `v3.2.2`：tag object `97890b267a620a166889db0934e57a826d72a872`，peeled commit **`0bec60e4406f5d5dc155ee25cef44f9a710e37e8`**；2026-10-15 精确远端对象与本地 fetch 已核，检查时 main 同 commit。Release API 当时返回 404，不能声称发行二进制/资产已验证。业务增量 `969fe480fdb38eb038401044c3327b04ccaaee81`，详见[3.2.2 增量矩阵](docs/toolkit/rust-go-3.2.2-increment.md)。
 - 前 v3.2.1 tag object `637584b8b976966c3863c1889e9ff86fe55493d4` / commit **`10b561db5706702cd42e047eaeed4ccb5e825351`** 和 v3.2.0 tag object `93849f43f34d8ff1d6f4539c5a3496ab941ef229` / commit **`3057a9666ab078270b63c7f06de748069b0d1f4b`** 的源码、fixture、二进制、测试/失败证据均保留原身份，不能重标为3.2.2通过。未完成的[3.2.1 累积增量](docs/toolkit/rust-go-3.2.1-increment.md)仍须完成。
-- 2026-10-15 用户最新版本决定：未发布 Rust 候选源码/包版本 **3.5.0**，发行配置渠道 **beta**（版本与 npm dist-tag 分开，不自动改成 `3.5.0-beta.1`）。Go 行为 oracle 仍为上述 3.2.2；只获准同步源码和配置，未执行发布、tag 或 npm 渠道变更。版本同步已完成源码集成及本地包合同检查；精确 b16a 候选已通过 Windows all-target 编译和 CLI 构建，后续提交及完整产品验证仍按各自证据记录。
+- 2026-10-15 用户最新版本决定：未发布 Rust 候选源码/包版本 **3.5.0**，发行配置渠道 **beta**（版本与 npm dist-tag 分开，不自动改成 `3.5.0-beta.1`）。Go 行为 oracle 现为上述 3.2.3；只获准同步源码和配置，未执行发布、tag 或 npm 渠道变更。版本同步已完成源码集成及本地包合同检查；精确 b16a 候选已通过 Windows all-target 编译和 CLI 构建，后续提交及完整产品验证仍按各自证据记录。
 - 2026-10-15 13:39 用户明确要求“全量替换”：最终验收必须移除全部 Emmy 上游源码补丁，使用未修改的固定上游公开 API，自有 crate 承接完整 XML/Lua 增强、类型/诊断/来源/取消与资源合同。此前“尽可能减少、必要时保留最小 hook”的最终豁免已被此要求取代；已有补丁仅属过渡实现，不能作为交付完成。逐 production hook→实际消费者→自有替代→差分/全仓证据列迁移表并分批实施，不另写整个 LuaLS、不削功能或假造 checker coverage。现有原版5/5小样及 public rendering27+27/450trace证据只覆盖各自范围，不能宣称全量零补丁已完成。
 - Rust 调查起点：`5443314c536e925801d3f0360110db946181d1b3`。它是复用基础，不是完成声明。按模块差分决定保留/替换/补齐，不从零丢弃已有成果，不沿用不符目标的旧协议。
 - unsafe约束：自有业务/跨平台Rust代码默认禁止unsafe，用适当crate级forbid/deny守住；确有必要的Windows FFI/内存边界必须最小化安全封装、逐处SAFETY理由和指针/生命周期/线程约束与测试，独立审查，不整模块无限豁免，不为性能目标放开unsafe。第三方依赖另列审计，不能宣称整个依赖图无unsafe。
@@ -40,7 +40,7 @@
 
 1. 已完成 public declaration rendering 的局部替代，历史27+27/450 trace证明只属于其冻结输入。
 2. DeclarationModel摄取后继已独审，三方 A旧构造/B新构造/C完全原版公开API的prepare-lock已完成，150registry+5local每侧身份核验一致，实际验证已启动：A31通过，B编译与projection11/declaration11通过；随后B callback列表进程exit0但namespace回收观察遇EACCES，无法确认完整树回收，owner中断且symbols lease保留。C及近8MiB资源组未运行；后继本地Cargo暂停，独立Windows三方契约runner R2已完成独审并接入单独job，固定49文件身份；本地parser11/缓存checker4项实际通过，31×3/450trace/6构造结果尚未在Windows执行，资源probe未接入，不能追认旧owner。公开parse/index合并了原阶段边界回调（原实现也无逐token回调）、增加文本持有是待测取舍，不能宣称等价或减内存。
-3. owned session/coverage ledger、selected-decision与DerivedNumber/EnvironmentCallable/EnvironmentReturn、call/return query编排三片已分别独审并累计组合12个源文件；21新增Rust仍NOT_RUN，已接准确测试目标。后继S4两阶段表达式plan已独审组合，保selected编译期与raw执行期顺序，新增8Rust未跑；执行后端尚未完成，未切生产、未删除现有hook，不能以新增自有代码冒充零补丁完成。旧callability首候选存在enable/coverage顺序差异，未集成。全部43个registry入口按真实消费者核对，不能删除nil/unknown/denied-call能力换取无补丁。
+3. owned session/coverage ledger、selected-decision与DerivedNumber/EnvironmentCallable/EnvironmentReturn、call/return query编排三片已分别独审并累计组合12个源文件；21新增Rust仍NOT_RUN，已接准确测试目标。后继S4两阶段表达式plan已独审组合，保selected编译期与raw执行期顺序，新增8Rust未跑；S5栈执行/unary已独审组合，保两阶段producer顺序与carrier身份，12新增Rust未跑；通用递归后端尚未完成，未切生产、未删除现有hook，不能以新增自有代码冒充零补丁完成。旧callability首候选存在enable/coverage顺序差异，未集成。全部43个registry入口按真实消费者核对，不能删除nil/unknown/denied-call能力换取无补丁。
 4. 其余推断、identity、cardinality与checker随后按真实消费者逐片替换。最后核未修改上游完整文件身份、产品锁、全Retail和全部增强回归。
 
 ## 3. 最近已验证证据与限制
@@ -56,10 +56,11 @@
 - **b0fe353 definitions组合**：R3把原invocation与独立Budget贯通metadata等待、可取消HTTP、解析及发布；实际已读网络先记账、consumer留存后准入、原30秒request上限/4MiB+1前缀和Go逻辑计量保持。R1/R2已发现的取消fixture竞态与解析错误被stop覆盖均已独审修正；24新增Rust未运行。现有definitions::和remote::组覆盖，无重复新job；实际SQL/DB2调用已在当前R18.3组合改接；Core隐藏publication Directory checked-close与既有gzip优先级缺口仍保留。
 - **bc85a4c DB2组合**：R18.3接实际record/page/schema/search/FK远程provider，outer Metadata→pin/lease顺序逐Go命令保持，owner持至capture。独审修正两项：外层/读pin直接保原invocation+Budget回调；资源cleanup-only后统一stop，避免把同一stop当close event。15新增/11继承Rust未运行。后继6文件已独审修复Store/Fragments/target内部Budget child错误身份，保target真实120秒上限与独立预算，7新增/2修Rust未跑；normalizer内部回调、资源lock单次同步边界及capture/Directory隐藏close仍未全部闭合。
 - **当前navigation组合**：R19实际item/spell/decor/creature/encounter远程路径共享Metadata→admission→pin→Session→capture；encounter仍保两个独立capture。6新增Rust未跑，local aura/summon补充source复核已明确，不能冒称整个远程业务验收。
-- **498c2ea三方契约**：51文件已逐SHA/长度读回，独立Windows run `38763797404` 产品组运行中；三方契约组已在Cargo身份认证前置失败，官方组件身份修复待核，未执行三方测试；该focused锁实验和产品all-target/业务组各自报告，31×3未运行不得写通过。
+- **498c2ea三方契约**：51文件已逐SHA/长度读回，独立Windows run `38763797404` 产品组运行中；三方契约组已在Cargo身份认证前置失败，已按官方dated manifest→archive→cargo.exe独立认证修复copied policy，原严格owner认证保持；Node12/12通过，新三方测试仍未执行；该focused锁实验和产品all-target/业务组各自报告，31×3未运行不得写通过。
 - **479新语义及内存**：refs/context/API均约90.47秒exit5，retained cold约90.21秒deadline；worker完成XML约15.94–15.97秒、source admission约31.19秒，但Emmy prepare尚未完成。source-process采样working set1957.62MiB/private2062.78MiB，retained cold1897.12/1999.23MiB；warm/steady未测。此候选含Graph/XML优化，但原90秒更早终止、执行阶段不完整，不能将低于旧ce6约2356.48MiB解释为已证实内存降幅。100ms采样有缺口，是观测下界而非RSS/绝对峰；整体性能仍未验收。
 - **479测试入口修复**：真实Lua桥首例因verbatim路径进入Lua5.1 C文件API而启动失败，后八例被安全guard阻断；候选在全部Lua参数/payload边界转普通路径并重验canonical身份。IPC三组因C#反射字段CS0649导致Add-Type失败，候选显式初始化required字段，未禁warning或放宽schema。本地IPC Node26/26通过；两项实际Windows仍NOT_RUN。
 - **当前Source context R2b**：仅同scope内证明无outgoing的文件move复用incoming行，XML尾部原路；独审发现混合charge重放step的return-reserve边缘缺陷，已用收费前安全域检查/边缘原路fallback修正（同时修旧incoming）。9新增Rust未跑；复用改变poll频率，不承诺异步取消竞态逐counter同构，保原control/deadline/typed stop，未实测耗时收益。
+- **当前远程读取修复**：Core仅同digest bytes publication改为原File上的真实锁竞争等待，保原deadline/独立Budget/一次checked close；Go323的blob/lease源码与322相同。Session五处metadata不再暴露raw cancellation token，仍在相同边界执行原invocation-first/Budget回调，修复读取后ordered控制来源丢失。8项锁回归与2新增/11继承Session Rust仍NOT_RUN，不据静态审称479失败已消失。
 - **当前JSONL R20.2**：实际remote stream持外层admission至capture与checked finish，首次sink失败后不再写；已知capture已提交而后失败时message明确真实ID、typed内部保多因，不新增公开frame字段。9新增Rust未跑；capture内部旧Metadata/Directory Drop及unknown commit未返回ID仍是明确缺口，不能据外层finish宣称全部checked-close完成。
 - **Source历史失败**：62d cold refs在约182秒runner成功但不满足Go90秒总预算；context超时、retained worker EOF仍是实质缺口。ce6全部长语义路径失败。新90秒、phase、Graph/XML修改不能在新全仓结果出来前宣称修复。
 - **执行/写入边界**：被明确拒绝的重复gzip验证未重跑；PR14标题/正文刷新两次拒绝后保持暂停。代码、文档与其它已授权验证继续，不改rules、不换路绕过。未发布、未合main。

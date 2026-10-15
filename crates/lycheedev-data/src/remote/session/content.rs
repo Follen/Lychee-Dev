@@ -59,8 +59,7 @@ pub(super) fn materialize<'a>(
     let mut unavailable = None;
     for key in &record.encoding_keys {
         files.store.check()?;
-        let physical =
-            index.find_encoding_with_check(key, limits, budget.token(), || files.store.check())?;
+        let physical = index.find_encoding_with_check(key, limits, None, || files.store.check())?;
         let encoded = usize::try_from(physical.encoded_bytes).map_err(|_| limit())?;
         if encoded > maximum {
             return Err(limit());

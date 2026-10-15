@@ -1,0 +1,267 @@
+{
+  "schema": "lycheedev.remote-session-control-freeze.v1",
+  "revision": "r22",
+  "baselineCommit": "6d1ec158f67331bd5fdbb8b3ad1535cb96c84a32",
+  "oracleCommit": "0bec60e4406f5d5dc155ee25cef44f9a710e37e8",
+  "owned": [
+    {
+      "path": "stage/crates/lycheedev-data/src/remote/session/content.rs",
+      "bytes": 7197,
+      "sha256": "8fef0903ea2fd6dd35a71b69495d388c56e4057c3f9a8b33df53ff2325dc8f6d"
+    },
+    {
+      "path": "stage/crates/lycheedev-data/src/remote/session/tests.rs",
+      "bytes": 23117,
+      "sha256": "16353ceb13d213b946b0b6d0d0e4cc89f68f2630b89a485297affa3f835bacdb"
+    },
+    {
+      "path": "stage/crates/lycheedev-data/src/remote/session.rs",
+      "bytes": 16153,
+      "sha256": "62a9845433cd7e469b8a60d8dae7d8b725acaae0f27434cdb435d2da52516fa9"
+    },
+    {
+      "path": "patches/crates-lycheedev-data-src-remote-session-content.rs.patch",
+      "bytes": 613,
+      "sha256": "59d9b9d0da14c71c7a7f4a61f85b0ffd0cd474e25cc641f5b6661afc4c3d5f67"
+    },
+    {
+      "path": "patches/crates-lycheedev-data-src-remote-session-tests.rs.patch",
+      "bytes": 3748,
+      "sha256": "cf0e9b6a70eccf7d06a32aec5b130803a1e5730b67daee796e5d35bf5d50deb0"
+    },
+    {
+      "path": "patches/crates-lycheedev-data-src-remote-session.rs.patch",
+      "bytes": 1903,
+      "sha256": "fd498c2279ef0de7191735e352423ddd9707d44f87b1e2afc7cbe99393539b6c"
+    }
+  ],
+  "support": [
+    {
+      "path": "support/Cargo.lock",
+      "bytes": 79886,
+      "sha256": "d636c9796991b4f25d3ab8088887db7618648826170b89a760be04aee3429f02"
+    },
+    {
+      "path": "support/crates/lycheedev-core/src/control.rs",
+      "bytes": 20162,
+      "sha256": "d918644d339bb9ee6e9e0b3e4b877e6db41b5dfa403f82b5d792952e80deeec6"
+    },
+    {
+      "path": "support/crates/lycheedev-core/src/evidence/bounded.rs",
+      "bytes": 35823,
+      "sha256": "b2968f55198d60b0dd25ff7356693b92443d6c1516c3186373e0f0a86e6af1ae"
+    },
+    {
+      "path": "support/crates/lycheedev-core/src/storage.rs",
+      "bytes": 29369,
+      "sha256": "43f57fb370e72e26226cdf212dd9acc59bf9ebb343e1c1b4c1767096de8b9194"
+    },
+    {
+      "path": "support/crates/lycheedev-core/src/workspace/data_resources.rs",
+      "bytes": 10370,
+      "sha256": "b888cbad1267c3202dfe48f84d8772047c9cc4081cc81c38c713e114be65ff91"
+    },
+    {
+      "path": "support/crates/lycheedev-data/Cargo.toml",
+      "bytes": 1253,
+      "sha256": "7dd3639abb2897cac370b9d99b99924aeb354dcd9bfc49ce701bae0f4c108f6e"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/blte/streaming.rs",
+      "bytes": 8750,
+      "sha256": "c688d0ccc75c0e10ed29df60cef804b3f8b2884a286b33ca75754247278ce921"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/blte.rs",
+      "bytes": 31561,
+      "sha256": "35d552046adf01ffd128ea1c94b60ebfb773d48be5c739a589b708bdbdad1b08"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/casc.rs",
+      "bytes": 22099,
+      "sha256": "fd02f0b25d2e59475680357643c8c4eaef8b64cfaed1c0456ed174cd084c17b7"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/keys.rs",
+      "bytes": 10668,
+      "sha256": "c285379904c97c34c03abe0b8039771cb06ce31ab1fc4b976b2dfca750e0f16e"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/metadata_format.rs",
+      "bytes": 18010,
+      "sha256": "f98f2950b18f04d916911bfe982d42164587becd1b7ba761f16995e01d952846"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/admission.rs",
+      "bytes": 7382,
+      "sha256": "f6ce54078e875bbec294670f92a47fc42576d3278d7048ca7972d2c0491390d3"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/cache.rs",
+      "bytes": 19427,
+      "sha256": "cb35863f66e13aebd371996100f904569f76419afaa078d5d5c642f6a5a167c4"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/files.rs",
+      "bytes": 21394,
+      "sha256": "68642f0cb7097d8ce7807de48bdbf494020af15c6a651ff58ac264091f612128"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/fragments.rs",
+      "bytes": 16042,
+      "sha256": "abfd29e12da36ca2e6c50fa9fb82f46a970f918a6a9b9940b155de8557bc23f0"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/mod.rs",
+      "bytes": 1237,
+      "sha256": "2e76a8d66f43741d8f6446821616087a5882c2f29eaa2876c449a99c68f01448"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/session/content/alias/tests.rs",
+      "bytes": 11139,
+      "sha256": "b51a02d81eb4a1f503b315d57d3ed6dcba3fe2043eb2aac4e8888132b3b63230"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/session/content/alias.rs",
+      "bytes": 9828,
+      "sha256": "880c0f5508bce14da13d6345371f535be0e5fea2f344424db1a7f49e6b4f59dd"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/session/content.rs",
+      "bytes": 7219,
+      "sha256": "af35188cea22f66e9a21093b62347ea3b1a0ada42920456c07a2e5838b597f0c"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/session/tests/body_owner.rs",
+      "bytes": 3573,
+      "sha256": "4a9ff6e40f752c655e55a0f8ab1ac84df5c239eabd8be1cb4aac16e0c1895868"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/session/tests/decoded_alias.rs",
+      "bytes": 5953,
+      "sha256": "cf3780276a1281a37502db2171e4101d5643654de470a54619d3ea1a6c262ce0"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/session/tests/default_navigation.rs",
+      "bytes": 14373,
+      "sha256": "cba2079bc75050d1fece713a7dac0724f1c2cf3ee1238f6429935572115fe580"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/session/tests/default_sql/default_db2.rs",
+      "bytes": 8029,
+      "sha256": "1a2cad59a7750a30ca93254f079ab1bd99280a52bf89eac6fae7cfe8bfbade5f"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/session/tests/default_sql.rs",
+      "bytes": 10325,
+      "sha256": "fef137d7038480e7d105a9b718c9b7ca92d29b742c209c877d2df1eff72560a8"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/session/tests.rs",
+      "bytes": 19856,
+      "sha256": "f107901fd860db9a2d476e3b1c0ade590fb802562a8759b36fd16bda338980de"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/session.rs",
+      "bytes": 16046,
+      "sha256": "ca9df942193c9b4f468bff8141935fb92a67b667a9d52f36ef8f80ad8d63e881"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/resource.rs",
+      "bytes": 21423,
+      "sha256": "3ae99b91dd2caf3ea5007e7302f5adc8fa3bf4ac76dae730fca23f92cc8cfb5b"
+    },
+    {
+      "path": "README.md",
+      "bytes": 3493,
+      "sha256": "aae42065e090301e158d4f932ddf565a4e1a3a2b66c6052d0a28b4bc92551817"
+    },
+    {
+      "path": "dependencies.json",
+      "bytes": 10668,
+      "sha256": "32265c331179d6600df21b7f6f3a1d1c00067173214cf963b54051829b2d932e"
+    },
+    {
+      "path": "diagnostic.json",
+      "bytes": 938,
+      "sha256": "b224028764a33f1739d2fa3d744ceb5a2edc0b6b7237101965fef9d9a0daa91a"
+    },
+    {
+      "path": "freeze-stage.py",
+      "bytes": 6367,
+      "sha256": "082288f2277b11da6e29d8044e27b586cd6bf161e68b4def1fad22cd47bfce78"
+    },
+    {
+      "path": "oracle.json",
+      "bytes": 1671,
+      "sha256": "9030f8f5c2095636ce3ca7ec271836f74f642d50def578a3606a9c0bd41324ac"
+    },
+    {
+      "path": "owner.json",
+      "bytes": 366,
+      "sha256": "8e2d9f03a593b4279de8718ae21392be7d2ea010035e87b1a97749fa87026b24"
+    },
+    {
+      "path": "patch-inputs.json",
+      "bytes": 985,
+      "sha256": "2df632bb7e6988b1bdf7bee13fbdb3cc35a2d9a9bf770e6ffa0686c8ee2a65d1"
+    },
+    {
+      "path": "static-checks.json",
+      "bytes": 266,
+      "sha256": "5577558d9d12e240632046a999db0843d400a2943a71cb1df16ea14bbbd93d0d"
+    },
+    {
+      "path": "test-map.json",
+      "bytes": 2937,
+      "sha256": "df7815e7aae2d20d7794b5e25b9c9323581b5bf72c4950a9a0bf701abe26656a"
+    }
+  ],
+  "oracle": [
+    {
+      "path": "oracle/internal/records/encoding.go",
+      "bytes": 7636,
+      "sha256": "b1575ccd0340a9c2f448542f99ce1827b965edaacade3a4eaf2783b1b541435f",
+      "blob": "6ac8858e39a2cbbea7a1c45522df0d6a5959cb6f"
+    },
+    {
+      "path": "oracle/internal/records/root_index.go",
+      "bytes": 2277,
+      "sha256": "d0f8bd5d472fe2636d544a7e754cb706fdefa24cbf8eb1122cd746c98ef4203d",
+      "blob": "8935a5a86d215c28c351347563f1b83c4d35318b"
+    },
+    {
+      "path": "oracle/internal/records/read_session.go",
+      "bytes": 6494,
+      "sha256": "79c90e12301c36840731eaa53458d294f533afa904f8c03d3b9a5fafbda89ebd",
+      "blob": "1ac572ed0f57b8732bba56cfeb0c4fc7a940472d"
+    },
+    {
+      "path": "oracle/internal/records/cdn_files.go",
+      "bytes": 14914,
+      "sha256": "07b5f8fa5d3772d112ba77d6f926bed078e8283acac2ec4da3ab70039f117d48",
+      "blob": "1422d419828b9ae1fb3abd721f81d8cc73463bba"
+    },
+    {
+      "path": "oracle/internal/vault/blob.go",
+      "bytes": 5301,
+      "sha256": "8471fee27e3b722a890fb4fa0018450f698358de03501b18f129d319edf397af",
+      "blob": "958ea32844100600929c2d8207ea73f3de0f5791"
+    },
+    {
+      "path": "oracle/internal/vault/lease.go",
+      "bytes": 2203,
+      "sha256": "de5a9334c107834dbfb669a43a28a8226171bcfbd4775519de232ba4c24b209b",
+      "blob": "a7a668e2454dba46be9b4445b92909427e81b8b1"
+    },
+    {
+      "path": "oracle/internal/vault/lease_windows.go",
+      "bytes": 383,
+      "sha256": "18b08ca948136469f7a7f9be8ded39fec3733d3e2caa99a3d12545b0b8f2b091",
+      "blob": "c289825bd060b24c5bb51b31edccbfa4b15054d9"
+    }
+  ],
+  "newTests": 2,
+  "rust": "NOT_RUN",
+  "sourceFreezeSHA256": "19070a59dca4c1132079e32c2f67b9c65816606c2f8cea4a2f0447a97635b650"
+}

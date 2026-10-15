@@ -748,10 +748,12 @@ fn publish_internal_with_check(
     let _home = Directory::open_shared(home)?;
     workspace::open(home)?;
     let digest = digest_bytes_with_check(bytes, control, supplemental)?;
-    let guard =
-        ExclusiveLock::resource_checked(&home.join("locks"), &format!("blob:{digest}"), || {
-            check_with(control, supplemental)
-        })?;
+    let guard = ExclusiveLock::resource_wait_checked(
+        &home.join("locks"),
+        &format!("blob:{digest}"),
+        control.map(OperationControl::deadline),
+        || check_with(control, supplemental),
+    )?;
     let result = publish_locked_with_check(home, bytes, maximum, digest, control, supplemental)
         .and_then(|reference| serde_json::to_value(reference).map_err(Into::into));
     let result = crate::metadata::historical_write::finish_historical(result, guard.close());
@@ -1006,3 +1008,6 @@ mod stream_supplemental_tests;
 
 #[cfg(test)]
 mod optional_tests;
+
+#[cfg(test)]
+mod blob_wait_tests;

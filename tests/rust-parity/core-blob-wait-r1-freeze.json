@@ -1,0 +1,61 @@
+{
+  "schema": "lycheedev.core-blob-wait-freeze.v1",
+  "revision": "r1",
+  "baseCommit": "6d1ec158f67331bd5fdbb8b3ad1535cb96c84a32",
+  "rust": "NOT_RUN",
+  "files": [
+    {
+      "path": "crates/lycheedev-core/src/evidence/bounded/blob_wait_tests.rs",
+      "beforeSha256": null,
+      "bytes": 5845,
+      "sha256": "58222c0c3f618cc59c8bd9790b6880ea34d26bfd66c940c0872036dd27527a8f"
+    },
+    {
+      "path": "crates/lycheedev-core/src/evidence/bounded.rs",
+      "beforeSha256": "b2968f55198d60b0dd25ff7356693b92443d6c1516c3186373e0f0a86e6af1ae",
+      "bytes": 35911,
+      "sha256": "0cec606a17eb9444a5d405816164d5d8c81096a33149fb98c9a86aca075ba739"
+    },
+    {
+      "path": "crates/lycheedev-core/src/storage/blob_wait/tests.rs",
+      "beforeSha256": null,
+      "bytes": 6152,
+      "sha256": "de7219054a6a27dab18c7d854adecb69fcaba4ae1e3a343767bcd8e2c5d441ff"
+    },
+    {
+      "path": "crates/lycheedev-core/src/storage/blob_wait.rs",
+      "beforeSha256": null,
+      "bytes": 2862,
+      "sha256": "06a3daa6c20920923dd7c67f85126a84076149ff81dd622b98afd9b6d67cc0c0"
+    },
+    {
+      "path": "crates/lycheedev-core/src/storage.rs",
+      "beforeSha256": "43f57fb370e72e26226cdf212dd9acc59bf9ebb343e1c1b4c1767096de8b9194",
+      "bytes": 29922,
+      "sha256": "c97a51272c3f45349874471b67dda7dcca3b4df734ec04acce0c738bb64024a1"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "DESIGN.md",
+      "bytes": 1808,
+      "sha256": "ed7c205acecde1712d747356e4b19d60362afd540198085e56e28611e9b9dafe"
+    },
+    {
+      "path": "candidate.patch",
+      "bytes": 18046,
+      "sha256": "9629225bb479d1c855ee0172be24ea7dce011121a72ab097b97f75cb0743a3fd"
+    },
+    {
+      "path": "test-map.json",
+      "bytes": 1260,
+      "sha256": "8d52d41ff7cfd70762ba531753965bf7a34e2e4fbeb7265ed2084da952a4555f"
+    },
+    {
+      "path": "receipt.json",
+      "bytes": 612,
+      "sha256": "d8c5513500ff5c8b72256c9fa967ce530e764a0036b1b43576c66279fadcbc0f"
+    }
+  ],
+  "sourceFreezeSHA256": "49ee9ac87f87c51a46e9d6d59d9b62e46d0e612032af506eba9e9c3157a87a89"
+}

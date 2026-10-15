@@ -1,7 +1,7 @@
 {
   "schema": "lycheedev.build-auxiliary-policy.v1",
   "scope": "Local Cargo runner and exact reviewed MSVC C compile/link only. Exact reviewed identities are not product processes. Installed reviewed variants may be absent; unknown, changed, or unsigned tools retain the ordinary orphan-failure rule.",
-  "cargoSHA256": "6f4bef66261261fcb43131be8720bab817d403a09edec7455c371974b90bdb7e",
+  "cargoSHA256": "c9b44417dc8228b81923a1068a3c09e32d2793f2cced2a816789cf433c1f0d46",
   "helpers": [
     {
       "kind": "msvc-vctip",

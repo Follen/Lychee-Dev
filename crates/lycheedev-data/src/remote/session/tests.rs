@@ -336,6 +336,12 @@ fn callback_failure_is_not_replayed_and_original_scope_remains_terminal() {
         .unwrap_err();
     assert_eq!(error.code, "test.callback");
     assert_eq!(calls, 1);
+    assert_eq!(f.control.stop_cause().unwrap(), None);
+    f.control
+        .ordered_child(f.control.deadline())
+        .unwrap()
+        .check()
+        .unwrap();
     f.control.tracked_cancel_handle().unwrap().cancel();
     assert_eq!(
         session
@@ -624,3 +630,96 @@ mod body_owner;
 mod default_sql;
 
 mod default_navigation;
+
+#[test]
+fn real_remote_metadata_reads_preserve_ordered_original_scope_through_batches() {
+    let f = Fixture::new();
+    let mut admission = f.admission();
+    let mut session = Session::borrowed_with(
+        &mut admission,
+        &f.pin,
+        f.options(),
+        &f.budget,
+        &f.backend,
+        &f.backend,
+    )
+    .unwrap();
+    let mut calls = 0;
+    session
+        .read_batches(&[7], &mut |files| {
+            calls += 1;
+            assert_eq!(files[0].bytes(), f.payload);
+            assert_eq!(f.control.stop_cause().unwrap(), None);
+            let child = f.control.ordered_child(f.control.deadline()).unwrap();
+            child.check().unwrap();
+            assert_eq!(child.stop_cause().unwrap(), None);
+            Ok(if calls == 1 { vec![7] } else { vec![] })
+        })
+        .unwrap();
+    assert_eq!(calls, 2);
+    assert!(f.budget.snapshot().unwrap().network_requests > 0);
+    assert_eq!(f.control.stop_cause().unwrap(), None);
+    f.control.tracked_cancel_handle().unwrap();
+    session.close().unwrap();
+    admission.finish(Ok(())).unwrap();
+    std::fs::remove_dir_all(f.home).unwrap();
+}
+
+#[test]
+fn real_remote_metadata_reads_keep_independent_budget_cancellation_ordered() {
+    let mut f = Fixture::new();
+    let budget_control = OperationControl::uncancelable(f.control.deadline());
+    f.budget = Arc::new(Budget::controlled(
+        Cost::defaults(),
+        budget_control.deadline(),
+        budget_control.clone(),
+    ));
+    let mut admission = f.admission();
+    let mut session = Session::borrowed_with(
+        &mut admission,
+        &f.pin,
+        f.options(),
+        &f.budget,
+        &f.backend,
+        &f.backend,
+    )
+    .unwrap();
+    let mut calls = 0;
+    session
+        .read_batches(&[7], &mut |files| {
+            calls += 1;
+            assert_eq!(files[0].bytes(), f.payload);
+            assert_eq!(budget_control.stop_cause().unwrap(), None);
+            budget_control
+                .ordered_child(budget_control.deadline())
+                .unwrap()
+                .check()
+                .unwrap();
+            Ok(vec![])
+        })
+        .unwrap();
+    assert_eq!(calls, 1);
+    let requests = f.budget.snapshot().unwrap().network_requests;
+    budget_control.tracked_cancel_handle().unwrap().cancel();
+    assert_eq!(
+        budget_control.stop_cause().unwrap(),
+        Some(lycheedev_core::control::StopCause::Cancelled)
+    );
+    assert_eq!(f.control.stop_cause().unwrap(), None);
+    f.control.check().unwrap();
+    let error = session
+        .read_batches(&[7], &mut |_| {
+            panic!("stopped independent budget delivered callback")
+        })
+        .unwrap_err();
+    assert_eq!(error.code, "command.cancelled");
+    assert_eq!(error.exit_code, 7);
+    assert_eq!(f.budget.snapshot().unwrap().network_requests, requests);
+    assert_eq!(session.close().unwrap_err().code, "command.cancelled");
+    assert_eq!(
+        admission.finish(Ok(())).unwrap_err().code,
+        "command.cancelled"
+    );
+    f.control.check().unwrap();
+    std::fs::remove_dir_all(f.home).unwrap();
+}

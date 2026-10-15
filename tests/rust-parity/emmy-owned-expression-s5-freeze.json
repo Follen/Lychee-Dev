@@ -1,0 +1,64 @@
+{
+  "schema": "lycheedev.source-candidate-freeze.v1",
+  "baselineCommit": "66c2a5474341bda2301dcf8664c40f36128eeb10",
+  "sourceBase": {
+    "path": "candidate",
+    "freezeSHA256": "4d72edc69cda83b2746f5392aa9b885126f3cebc1acbd7e961aae7c1a1a513ad"
+  },
+  "status": "SOURCE_READY_FOR_INDEPENDENT_REVIEW_NOT_PRODUCTION",
+  "productFiles": [
+    {
+      "path": "crates/lycheedev-emmy-adapter/src/session/execution.rs",
+      "beforeSHA256": null,
+      "candidateSHA256": "8ab57a342ddb4665752a624938bd795557f4fdc8305174daca0e140edc4bea22",
+      "bytes": 12653
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/src/session/mod.rs",
+      "beforeSHA256": "a678fae98af3b837f6ece0967595777703f28d7246de82aa5130b6710e677e3e",
+      "candidateSHA256": "5599443c509ce4d7d9d5e5d2763d14fd5d8107ed1f48e051d4cc8b073e7e9ec1",
+      "bytes": 9410
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/tests/expression_execution_contract.rs",
+      "beforeSHA256": null,
+      "candidateSHA256": "adb745ef75d9374b6918d3f39751aaf69e5accf771d7244d088ddd409df70d0e",
+      "bytes": 14571
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/tests/support/expression_execution_cases.rs",
+      "beforeSHA256": null,
+      "candidateSHA256": "da43d8693bc3f6e5a16fd19679971e60becf5e5223293192aa7968deae4d3c69",
+      "bytes": 12044
+    },
+    {
+      "path": "crates/lycheedev-source/tests/expression_execution_native_oracle.rs",
+      "beforeSHA256": null,
+      "candidateSHA256": "35099862d9acfc503da71d83c08978c979c917e63e24aade76808de7411fef61",
+      "bytes": 8236
+    }
+  ],
+  "patchSHA256": "a3763edc6f185899502a4f77980a0b505001b854c66df4a2f1d495ed538fae58",
+  "remainingPatchPaths": 31,
+  "newRustTests": "12 NOT_RUN",
+  "carriedS1S2S3S4Tests": "29 NOT_RUN",
+  "oldAlgorithmSources": {
+    "semantic_model/infer/vm.rs": "19f37fcd0f75c27ba30538cfb15c0b539b4aa6589534b610fecf8e04ca9a3602",
+    "semantic_model/binding.rs": "35e0006158d1ccde9cc7d7f220918dcd14fd30db723c81059568d5012ec86bc9",
+    "semantic_model/types.rs": "87324abdee7517f192853003cc902a7a351c2b610ec77bb7d03e4d48dc8b4416"
+  },
+  "cleanPublicApiSources": {
+    "lib.rs": "97edfd5683e9c8b12956b083f39b64e359542fc543ef9313431af496b46d1308",
+    "semantic_model/types.rs": "229a8fdfb0231a2786ce74a8740e222e4aa7079f164171ece2e9653e19f67e2d",
+    "semantic_model/access.rs": "c883bc94f0510259209286fceeac339e33fc95231906449249feee8b7d7eae02"
+  },
+  "rustfmtBinarySHA256": "a3ab6c445b26eda8d7bcfd5cc3f4b068dd7136af96822fd21378fc6fe8c2f2a3",
+  "artifacts": {
+    "RESULTS.zh-CN.md": "26636d26ee50ec2600244122b889bb0b07bedfbf3e00a38e0db2aca41f98d20c",
+    "source-check.json": "2ee3b7be4ecbb4cf43cc44a6831ff24ce3d29553edc41aaf50fc89afa102c080",
+    "rustfmt-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "patch-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "freeze_source.py": "c0dda34e5feccfb55e8b2738d36d99cc95a4cd45fed05f5c3bc9ecb4660e2449"
+  },
+  "sourceFreezeSHA256": "ecfaae6335db98164182d48bc107c2cbd0ad3b2293e8ba071fd306cae0fc24c0"
+}
