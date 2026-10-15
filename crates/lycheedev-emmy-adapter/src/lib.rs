@@ -14,3 +14,6 @@ pub use types::{
     ByteRange, CallableInput, CoverageRow, DeclarationFailure, DeclarationLookup,
     DeclarationProvenance, OriginInput, ParseIssue, ParseIssues, TypeProjection,
 };
+
+/// Selected evidence and ordered coverage ownership; production migration pending.
+pub mod session;

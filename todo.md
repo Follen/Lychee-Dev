@@ -16,6 +16,7 @@ Authority for decisions, status and evidence: [handover.md](handover.md). This c
 ## Hard requirement: unmodified Emmy upstream
 
 - [ ] Inventory every remaining production hook and actual consumer, including shared ingestion, contextual inference, identity/cardinality and diagnostic receipts.
+- [ ] Execute the composed owned-session S1–S3 regressions (21 new Rust tests), implement recursive backends, and connect real consumers before removing upstream hooks; the source-only slices are independently reviewed, not production equivalence.
 - [ ] Replace all upstream source changes with owned-crate behavior through the fixed unmodified public API, preserving the complete approved XML/Lua design. No minimal-hook final exemption remains.
 - [ ] Prove each replacement with full output/diagnostic/coverage/cancellation/resource differentials, then exact-lock native and full Retail cold/warm/session acceptance. Keep prior failures and transitional patches honestly identified until removed.
 
