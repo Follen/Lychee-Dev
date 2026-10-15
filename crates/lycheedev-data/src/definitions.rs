@@ -1,9 +1,11 @@
 //! Exact-revision definition resources. Cached bytes are rehashed and parsed;
 //! corruption never causes a silent replacement download.
 use crate::{fault, schema};
-use lycheedev_core::{Result, evidence, metadata::Metadata, storage};
+use lycheedev_core::{Result, control::OperationControl, evidence, metadata::Metadata, storage};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+pub(crate) mod semantics;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::Read,
@@ -293,8 +295,19 @@ fn load(
     offline: bool,
     deadline: Instant,
     budget: Option<&crate::resource::Budget>,
-    validate: impl Fn(&[u8]) -> Result<()>,
+    control: Option<&OperationControl>,
+    mut validate: impl FnMut(&[u8]) -> Result<()>,
 ) -> Result<(Value, Vec<u8>)> {
+    let check = || -> Result<()> {
+        if let Some(control) = control {
+            control.check()?;
+        }
+        if let Some(budget) = budget {
+            budget.check()?;
+        }
+        Ok(())
+    };
+    check()?;
     let remaining = deadline
         .checked_duration_since(Instant::now())
         .ok_or_else(|| fault("records.resource_limit", 3, "Definition deadline exceeded"))?;
@@ -322,8 +335,13 @@ fn load(
                     })?;
                 budget.charge(crate::resource::Cost::metadata(bytes as usize * 8))?;
             }
-            let raw = evidence::read_blob(home, &object.blob, 4 << 20)?;
+            let raw = match control {
+                Some(control) => evidence::read_blob_bounded(home, &object.blob, 4 << 20, control)?,
+                None => evidence::read_blob(home, &object.blob, 4 << 20)?,
+            };
+            check()?;
             validate(&raw)?;
+            check()?;
             return Ok((object.blob, raw));
         }
         Err(error) if error.code == "vault.record_missing" => {}
@@ -343,11 +361,10 @@ fn load(
             ..Default::default()
         })?;
     }
-    let mut response = agent
-        .get(url)
-        .header("Accept-Encoding", "identity")
-        .call()
-        .map_err(|e| fault("records.definition_http", 5, e.to_string()))?;
+    check()?;
+    let response = agent.get(url).header("Accept-Encoding", "identity").call();
+    check()?;
+    let mut response = response.map_err(|e| fault("records.definition_http", 5, e.to_string()))?;
     if response.status().as_u16() != 200 {
         return Err(fault(
             "records.definition_http",
@@ -359,10 +376,13 @@ fn load(
     let mut reader = response.body_mut().as_reader().take((4 << 20) + 1);
     let mut chunk = [0; 65536];
     loop {
-        if let Some(budget) = budget {
-            budget.check()?;
-        }
-        let n = reader.read(&mut chunk)?;
+        check()?;
+        let read = reader.read(&mut chunk);
+        check()?;
+        let n = match read {
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            result => result?,
+        };
         if n == 0 {
             break;
         }
@@ -383,13 +403,23 @@ fn load(
             "Definition byte budget exceeded",
         ));
     }
+    check()?;
     validate(&raw)?;
-    let blob = evidence::publish_blob(home, &raw, 4 << 20)?;
+    check()?;
+    let blob = match control {
+        Some(control) => evidence::publish_blob_bounded(home, &raw, 4 << 20, control)?,
+        None => evidence::publish_blob(home, &raw, 4 << 20)?,
+    };
+    check()?;
     let object = Object {
         url: url.to_owned(),
         blob: blob.clone(),
     };
-    match metadata.put(&key, &object, None) {
+    let published = match control {
+        Some(control) => metadata.put_controlled(&key, &object, None, control),
+        None => metadata.put(&key, &object, None),
+    };
+    match published {
         Ok(()) => {}
         Err(error) if error.code == "vault.generation_conflict" => {
             let other: Object = metadata.read(&key)?;
@@ -403,6 +433,7 @@ fn load(
         }
         Err(error) => return Err(error),
     }
+    check()?;
     Ok((blob, raw))
 }
 pub fn prepare(home: &Path, commit: &str, name: &str, offline: bool) -> Result<(Bundle, Vec<u8>)> {
@@ -444,6 +475,24 @@ pub(crate) fn prepare_many_budgeted(
     deadline: Instant,
     budget: Option<&crate::resource::Budget>,
 ) -> Result<Vec<(Bundle, Vec<u8>)>> {
+    prepare_many_controlled(home, commit, names, offline, deadline, budget, None)
+}
+
+fn prepare_many_controlled(
+    home: &Path,
+    commit: &str,
+    names: &[&str],
+    offline: bool,
+    deadline: Instant,
+    budget: Option<&crate::resource::Budget>,
+    control: Option<&OperationControl>,
+) -> Result<Vec<(Bundle, Vec<u8>)>> {
+    if let Some(control) = control {
+        control.check()?;
+    }
+    if let Some(budget) = budget {
+        budget.check()?;
+    }
     if !lycheedev_core::selection::valid_digest(commit, 40)
         || names.is_empty()
         || names.len() > 32
@@ -462,6 +511,7 @@ pub(crate) fn prepare_many_budgeted(
         offline,
         deadline,
         budget,
+        control,
         |raw| Manifest::parse(raw).map(|_| ()),
     )?;
     let catalog = Manifest::parse(&raw)?;
@@ -481,6 +531,7 @@ pub(crate) fn prepare_many_budgeted(
             offline,
             deadline,
             budget,
+            control,
             |raw| schema::Document::parse(raw).map(|_| ()),
         )?;
         result.push((

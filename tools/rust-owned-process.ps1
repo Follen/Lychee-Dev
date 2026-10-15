@@ -138,7 +138,7 @@ public static class ToolkitOwnedProcess {
  [StructLayout(LayoutKind.Sequential)] struct ACCOUNTING {public long user,kernel,periodUser,periodKernel;public uint faults,total,active,terminated;}
  [StructLayout(LayoutKind.Sequential)] struct FT {public uint low,high;}
  public sealed class ObservedProcess {public long pid,creationFileTime;public string image,error;public bool exited,jobMember,reviewedAuxiliary;}
- public sealed class Result {public uint pid,exitCode=259,activeProcesses;public long creationFileTime;public bool rootReaped,treeReaped,handlesClosed,outputReadersComplete,outputLimit,forced,deadlineHit,parentExitedBeforeChildren,drainCompletedByAccounting,knownAuxiliaryCleanup;public string error;public List<ObservedProcess> atDrainDeadline,auxiliaryProcesses;}
+ public sealed class Result {public uint pid,exitCode=259,activeProcesses;public long creationFileTime;public bool rootReaped,treeReaped,handlesClosed,outputReadersComplete,outputLimit,forced,deadlineHit,parentExitedBeforeChildren,drainCompletedByAccounting,knownAuxiliaryCleanup;public string error;public ToolkitMemory.Status memory;public List<ObservedProcess> atDrainDeadline,auxiliaryProcesses;}
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr CreateJobObjectW(IntPtr security,string name);
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetInformationJobObject(IntPtr job,int kind,IntPtr data,uint size);
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr job,int kind,out ACCOUNTING data,uint size,IntPtr returned);
@@ -201,8 +201,8 @@ public static class ToolkitOwnedProcess {
   }finally{foreach(IntPtr handle in held)if(!CloseHandle(handle))throw Error("owned.close_auxiliary_handle");}
  }
  static string Quote(string argument){if(argument.Length>0&&argument.IndexOfAny(new char[]{' ','\t','\n','\v','"'})<0)return argument;var text=new StringBuilder("\"");int slashes=0;foreach(char c in argument){if(c=='\\'){slashes++;continue;}if(c=='"'){text.Append('\\',slashes*2+1);text.Append(c);}else{text.Append('\\',slashes);text.Append(c);}slashes=0;}text.Append('\\',slashes*2);text.Append('"');return text.ToString();}
- public static Result Run(string binary,string[] args,string cwd,string stdout,string stderr,int timeoutMs,int orphanMs,string[] reviewedAuxiliary){
-  var result=new Result();IntPtr job=IntPtr.Zero,port=IntPtr.Zero,output=IntPtr.Zero,error=IntPtr.Zero,outputRead=IntPtr.Zero,errorRead=IntPtr.Zero,input=IntPtr.Zero,attributes=IntPtr.Zero,handles=IntPtr.Zero;PI process=new PI();bool assigned=false,attributeReady=false;var clock=Stopwatch.StartNew();long orphanDeadline=Int64.MaxValue;Task rootWatcher=null,stdoutReader=null,stderrReader=null;long outputBytes=0;string readerError=null;
+ public static Result Run(string binary,string[] args,string cwd,string stdout,string stderr,int timeoutMs,int orphanMs,string[] reviewedAuxiliary,string memoryPrefix,string memoryMarker){
+  var result=new Result();IntPtr job=IntPtr.Zero,port=IntPtr.Zero,output=IntPtr.Zero,error=IntPtr.Zero,outputRead=IntPtr.Zero,errorRead=IntPtr.Zero,input=IntPtr.Zero,attributes=IntPtr.Zero,handles=IntPtr.Zero;PI process=new PI();bool assigned=false,attributeReady=false;var clock=Stopwatch.StartNew();long orphanDeadline=Int64.MaxValue;Task rootWatcher=null,stdoutReader=null,stderrReader=null;long outputBytes=0;string readerError=null;ToolkitMemory.Observer memory=null;
   try{
    job=CreateJobObjectW(IntPtr.Zero,null);if(job==IntPtr.Zero)throw Error("owned.create_job");
    var limits=new LIMITS();limits.basic.flags=0x2000;Set(job,9,limits);
@@ -221,6 +221,8 @@ public static class ToolkitOwnedProcess {
    Action<IntPtr,string> pump=(handle,path)=>{try{using(var stream=new FileStream(new SafeFileHandle(handle,false),FileAccess.Read,65536,false))using(var file=new FileStream(path,FileMode.CreateNew,FileAccess.Write,FileShare.Read)){var buffer=new byte[65536];int count;while((count=stream.Read(buffer,0,buffer.Length))>0){if(Interlocked.Add(ref outputBytes,count)>16*1024*1024){result.outputLimit=true;TerminateJobObject(job,8);break;}file.Write(buffer,0,count);}}}catch(Exception failure){Interlocked.CompareExchange(ref readerError,failure.ToString(),null);TerminateJobObject(job,8);}};
    stdoutReader=Task.Run(()=>pump(outputRead,stdout));stderrReader=Task.Run(()=>pump(errorRead,stderr));
    if(!CloseHandle(output)||!CloseHandle(error))throw Error("owned.close_parent_writers");output=IntPtr.Zero;error=IntPtr.Zero;
+   // Observation failure is evidence-only and must not abort the business run.
+   if(!String.IsNullOrEmpty(memoryPrefix))try{memory=new ToolkitMemory.Observer(job,process.pid,result.creationFileTime,memoryPrefix,memoryMarker);}catch(Exception failure){result.memory=new ToolkitMemory.Status{error=failure.ToString(),threadStopped=true,handlesClosed=!failure.Message.Contains("memory.close_startup_job")};}
    if(ResumeThread(process.thread)==UInt32.MaxValue)throw Error("owned.resume");
    rootWatcher=Task.Run(()=>{if(WaitForSingleObject(process.process,0xffffffff)==0)PostQueuedCompletionStatus(port,0x80000001,job,new IntPtr(process.pid));});
    while(true){
@@ -256,14 +258,140 @@ public static class ToolkitOwnedProcess {
    }
    if(output!=IntPtr.Zero&&output!=new IntPtr(-1)){CloseHandle(output);output=IntPtr.Zero;}if(error!=IntPtr.Zero&&error!=new IntPtr(-1)){CloseHandle(error);error=IntPtr.Zero;}
    if(stdoutReader!=null&&stderrReader!=null)result.outputReadersComplete=Task.WaitAll(new Task[]{stdoutReader,stderrReader},10000);
-   bool closed=rootWatcher==null||rootWatcher.Wait(10000);foreach(IntPtr handle in new IntPtr[]{process.thread,process.process,input,outputRead,errorRead,job,port})if(handle!=IntPtr.Zero&&handle!=new IntPtr(-1))closed=CloseHandle(handle)&&closed;
+   if(memory!=null)try{result.memory=memory.Stop();}catch(Exception failure){result.memory=new ToolkitMemory.Status{error=failure.ToString()};}
+   // Always wait for the original watcher, even when observation shutdown failed.
+   bool watcherClosed=rootWatcher==null||rootWatcher.Wait(10000);
+   bool closed=(result.memory==null||(result.memory.threadStopped&&result.memory.handlesClosed))&&watcherClosed;foreach(IntPtr handle in new IntPtr[]{process.thread,process.process,input,outputRead,errorRead,job,port})if(handle!=IntPtr.Zero&&handle!=new IntPtr(-1))closed=CloseHandle(handle)&&closed;
    if(attributeReady)DeleteProcThreadAttributeList(attributes);if(attributes!=IntPtr.Zero)Marshal.FreeHGlobal(attributes);if(handles!=IntPtr.Zero)Marshal.FreeHGlobal(handles);result.handlesClosed=closed;
   }
   return result;
  }
 }
+// Optional observation only. Never terminates, suspends, or changes a process.
+// Compiled together with rust-owned-process.ps1's owner definition.
+namespace ToolkitMemory {
+ using System;
+ using System.Collections.Generic;
+ using System.ComponentModel;
+ using System.Diagnostics;
+ using System.Globalization;
+ using System.IO;
+ using System.Runtime.InteropServices;
+ using System.Text;
+ using System.Threading;
+ public sealed class Status {
+  public string schema="lycheedev.owned-memory.v1",error;
+  public int intervalMs=100,samples,completeSamples;
+  public long frequency=Stopwatch.Frequency,bytes;
+  public uint totalAssignedProcesses;
+  public bool threadStopped,handlesClosed,budgetExceeded;
+  public List<string> chunks=new List<string>();
+ }
+ public sealed class Observer {
+  // The duplicate is query-only, non-inheritable, and owned by the sampling
+  // thread. The owner may close its original Job handle without a use-after-close.
+  const uint QueryJob=4,QueryProcess=0x00101000;
+  const int MaxProcesses=128,MaxSamples=15000,ChunkBytes=8<<20,MaxBytes=64<<20;
+  [StructLayout(LayoutKind.Sequential)] struct FT {public uint low,high;}
+  [StructLayout(LayoutKind.Sequential)] struct Counters {public uint size,faults;public UIntPtr peakWorkingSet,workingSet,peakPaged,paged,peakNonPaged,nonPaged,pagefile,peakPagefile,privateUsage;}
+  [StructLayout(LayoutKind.Sequential)] struct Accounting {public long user,kernel,periodUser,periodKernel;public uint faults,total,active,terminated;}
+  [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+  [DllImport("kernel32.dll",SetLastError=true)] static extern bool DuplicateHandle(IntPtr source,IntPtr handle,IntPtr target,out IntPtr duplicate,uint access,bool inherit,uint options);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr job,int kind,IntPtr data,uint size,IntPtr returned);
+  [DllImport("kernel32.dll",SetLastError=true,EntryPoint="QueryInformationJobObject")] static extern bool QueryAccounting(IntPtr job,int kind,out Accounting data,uint size,IntPtr returned);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr OpenProcess(uint access,bool inherit,uint pid);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern bool IsProcessInJob(IntPtr process,IntPtr job,out bool member);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetProcessTimes(IntPtr process,out FT creation,out FT exit,out FT kernel,out FT user);
+  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool QueryFullProcessImageNameW(IntPtr process,uint flags,StringBuilder image,ref uint size);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern bool K32GetProcessMemoryInfo(IntPtr process,ref Counters counters,uint size);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern uint WaitForSingleObject(IntPtr handle,uint timeout);
+  [DllImport("kernel32.dll",SetLastError=true)] static extern bool CloseHandle(IntPtr handle);
+  readonly IntPtr job; readonly uint rootPid; readonly long rootCreated;
+  readonly string prefix,marker; readonly ManualResetEvent stop=new ManualResetEvent(false);
+  readonly Thread thread; readonly Status status=new Status();
+  FileStream file; long chunkBytes; bool closeFailed;
+  static Exception Error(string step){return new Win32Exception(Marshal.GetLastWin32Error(),"memory."+step);}
+  static string N(long value){return value.ToString(CultureInfo.InvariantCulture);}
+  static string U(ulong value){return value.ToString(CultureInfo.InvariantCulture);}
+  static string Q(string value){if(value==null)return "null";var text=new StringBuilder("\"");foreach(char c in value){if(c=='"'||c=='\\')text.Append('\\').Append(c);else if(c<32)text.Append("\\u").Append(((int)c).ToString("x4"));else text.Append(c);}return text.Append('"').ToString();}
+  public Observer(IntPtr ownedJob,uint pid,long created,string outputPrefix,string phaseMarker){
+   prefix=outputPrefix;marker=phaseMarker;rootPid=pid;rootCreated=created;
+   IntPtr self=GetCurrentProcess();
+   if(!DuplicateHandle(self,ownedJob,self,out job,QueryJob,false,0)){stop.Dispose();throw Error("duplicate_query_job");}
+   thread=new Thread(Run);thread.IsBackground=true;
+   try{thread.Start();}catch{bool closed=CloseHandle(job);stop.Dispose();if(!closed)throw new Exception("memory.close_startup_job");throw;}
+  }
+  string Phase(){
+   if(!File.Exists(marker))return null;
+   using(var input=new FileStream(marker,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete)){
+    if(input.Length>1024)throw new Exception("memory.phase_budget");
+    using(var reader=new StreamReader(input,new UTF8Encoding(false,true)))return reader.ReadToEnd();
+   }
+  }
+  List<long> Members(){
+   int size=8+MaxProcesses*IntPtr.Size;IntPtr data=Marshal.AllocHGlobal(size);
+   try{
+    if(!QueryInformationJobObject(job,3,data,(uint)size,IntPtr.Zero))throw Error("job_process_list");
+    int assigned=Marshal.ReadInt32(data,0),count=Marshal.ReadInt32(data,4);
+    if(count<0||count>MaxProcesses||assigned!=count)throw new Exception("memory.process_list_budget_or_race");
+    var result=new List<long>();for(int i=0;i<count;i++)result.Add(Marshal.ReadIntPtr(data,8+i*IntPtr.Size).ToInt64());result.Sort();return result;
+   }finally{Marshal.FreeHGlobal(data);}
+  }
+  uint Total(){Accounting value;if(!QueryAccounting(job,1,out value,(uint)Marshal.SizeOf(typeof(Accounting)),IntPtr.Zero))throw Error("job_accounting");status.totalAssignedProcesses=value.total;return value.total;}
+  void Write(string row){
+   byte[] bytes=new UTF8Encoding(false,true).GetBytes(row+"\n");
+   if(bytes.Length>1<<20||status.bytes+bytes.Length>MaxBytes)throw new Exception("memory.evidence_budget");
+   if(file==null||chunkBytes+bytes.Length>ChunkBytes){if(file!=null)file.Dispose();string path=prefix+".part"+status.chunks.Count+".jsonl";file=new FileStream(path,FileMode.CreateNew,FileAccess.Write,FileShare.Read);status.chunks.Add(path);chunkBytes=0;}
+   file.Write(bytes,0,bytes.Length);file.Flush();chunkBytes+=bytes.Length;status.bytes+=bytes.Length;
+  }
+  void Sample(){
+   long start=Stopwatch.GetTimestamp();string before=null,after=null,error=null;bool complete=true;
+   ulong workingSet=0,privateBytes=0;var rows=new List<string>();var handles=new List<IntPtr>();var members=new List<long>();uint assigned=0;
+   try{
+    before=Phase();assigned=Total();members=Members();
+    foreach(long pid in members){
+     IntPtr handle=IntPtr.Zero;string image=null,creation=null,issue=null;Counters memory=new Counters{size=(uint)Marshal.SizeOf(typeof(Counters))};bool member=false;
+     try{
+      if(pid<=0||pid>UInt32.MaxValue)throw new Exception("memory.invalid_pid");
+      handle=OpenProcess(QueryProcess,false,(uint)pid);if(handle==IntPtr.Zero)throw Error("open_owned_member");handles.Add(handle);
+      FT created,exit,kernel,user;
+      if(!IsProcessInJob(handle,job,out member)||!member||!GetProcessTimes(handle,out created,out exit,out kernel,out user))throw Error("member_identity");
+      long identity=((long)created.high<<32)|created.low;creation=N(identity);
+      if(identity<rootCreated||(pid==rootPid&&identity!=rootCreated))throw new Exception("memory.creation_identity");
+      var path=new StringBuilder(32768);uint length=32768;if(!QueryFullProcessImageNameW(handle,0,path,ref length))throw Error("member_image");image=path.ToString();
+      if(WaitForSingleObject(handle,0)!=258)throw new Exception("memory.member_not_live");
+      if(!K32GetProcessMemoryInfo(handle,ref memory,(uint)Marshal.SizeOf(typeof(Counters))))throw Error("process_counters");
+      if(WaitForSingleObject(handle,0)!=258)throw new Exception("memory.member_exited_during_read");
+      checked{workingSet+=memory.workingSet.ToUInt64();privateBytes+=memory.privateUsage.ToUInt64();}
+     }catch(Exception failure){issue=failure.Message;complete=false;}
+     rows.Add("{\"pid\":"+N(pid)+",\"creationFileTime\":"+Q(creation)+",\"image\":"+Q(image)+",\"jobMember\":"+(member?"true":"false")+",\"error\":"+Q(issue)+",\"workingSetBytes\":"+U(memory.workingSet.ToUInt64())+",\"privateBytes\":"+U(memory.privateUsage.ToUInt64())+",\"kernelPeakWorkingSetBytes\":"+U(memory.peakWorkingSet.ToUInt64())+",\"kernelPeakPrivateCommitBytes\":"+U(memory.peakPagefile.ToUInt64())+"}");
+    }
+    var final=Members();if(members.Count!=final.Count)complete=false;else for(int i=0;i<members.Count;i++)if(members[i]!=final[i])complete=false;
+    if(assigned!=Total())complete=false;
+    foreach(IntPtr handle in handles)if(WaitForSingleObject(handle,0)!=258)complete=false;
+    after=Phase();if(before!=after)complete=false;
+   }catch(Exception failure){error=failure.Message;complete=false;}
+   finally{foreach(IntPtr handle in handles)if(!CloseHandle(handle)){closeFailed=true;complete=false;error="memory.close_member_handle";}}
+   long end=Stopwatch.GetTimestamp();
+   Write("{\"schema\":\"lycheedev.owned-memory-sample.v1\",\"index\":"+status.samples+",\"startedTicks\":"+Q(N(start))+",\"endedTicks\":"+Q(N(end))+",\"phaseBefore\":"+Q(before)+",\"phaseAfter\":"+Q(after)+",\"complete\":"+(complete?"true":"false")+",\"error\":"+Q(error)+",\"totalAssignedProcesses\":"+status.totalAssignedProcesses+",\"workingSetBytes\":"+(complete?U(workingSet):"null")+",\"privateBytes\":"+(complete?U(privateBytes):"null")+",\"members\":["+String.Join(",",rows)+"]}");
+   status.samples++;if(complete)status.completeSamples++;
+  }
+  void Run(){
+   try{
+    do{if(status.samples>=MaxSamples){status.budgetExceeded=true;throw new Exception("memory.sample_budget");}Sample();}while(!stop.WaitOne(status.intervalMs));
+   }catch(Exception failure){status.error=failure.ToString();if(status.error.Contains("budget"))status.budgetExceeded=true;}
+   finally{
+    try{Total();}catch(Exception failure){status.error=(status.error??"")+"\n"+failure.Message;}
+    try{if(file!=null)file.Dispose();}catch(Exception failure){status.error=(status.error??"")+"\n"+failure.Message;}
+    status.handlesClosed=CloseHandle(job)&&!closeFailed;
+   }
+  }
+  public Status Stop(){stop.Set();status.threadStopped=thread.Join(5000);if(status.threadStopped)stop.Dispose();else status.error=(status.error??"")+"\nmemory.observer_join_unverified";return status;}
+ }
+}
+
 '@
-try{$result=[ToolkitOwnedProcess]::Run($binary,[string[]]$requestData.args,[string]$requestData.cwd,[string]$requestData.stdout,[string]$requestData.stderr,[int]$requestData.timeoutMs,[int]$requestData.orphanMs,[string[]]$admittedHelperPaths)}finally{foreach($file in $heldToolFiles){$file.Dispose()}}
+try{$result=[ToolkitOwnedProcess]::Run($binary,[string[]]$requestData.args,[string]$requestData.cwd,[string]$requestData.stdout,[string]$requestData.stderr,[int]$requestData.timeoutMs,[int]$requestData.orphanMs,[string[]]$admittedHelperPaths,[string]$requestData.memoryPrefix,[string]$requestData.memoryMarker)}finally{foreach($file in $heldToolFiles){$file.Dispose()}}
 # FILETIME exceeds the JSON/JavaScript exact integer range. Preserve the native
 # Int64 comparisons above, and emit decimal strings at every evidence boundary.
 function Convert-ObservedProcesses($rows) {
@@ -272,7 +400,7 @@ function Convert-ObservedProcesses($rows) {
   @{pid=$_.pid;creationFileTime=$_.creationFileTime.ToString([Globalization.CultureInfo]::InvariantCulture);image=$_.image;error=$_.error;exited=$_.exited;jobMember=$_.jobMember;reviewedAuxiliary=$_.reviewedAuxiliary}
  })
 }
-$receipt=@{schema='lycheedev.owned-process.v1';binary=$binary;pid=$result.pid;creationFileTime=$result.creationFileTime.ToString([Globalization.CultureInfo]::InvariantCulture);exitCode=$result.exitCode;rootReaped=$result.rootReaped;treeReaped=$result.treeReaped;handlesClosed=$result.handlesClosed;toolIdentityLocksClosed=$true;outputReadersComplete=$result.outputReadersComplete;outputLimit=$result.outputLimit;activeProcesses=$result.activeProcesses;forced=$result.forced;knownAuxiliaryCleanup=$result.knownAuxiliaryCleanup;auxiliaryProcesses=(Convert-ObservedProcesses $result.auxiliaryProcesses);helperAdmission=$helperAdmission;deadlineHit=$result.deadlineHit;parentExitedBeforeChildren=$result.parentExitedBeforeChildren;drainCompletedByAccounting=$result.drainCompletedByAccounting;atDrainDeadline=(Convert-ObservedProcesses $result.atDrainDeadline);error=$result.error}
+$receipt=@{schema='lycheedev.owned-process.v1';binary=$binary;pid=$result.pid;creationFileTime=$result.creationFileTime.ToString([Globalization.CultureInfo]::InvariantCulture);exitCode=$result.exitCode;rootReaped=$result.rootReaped;treeReaped=$result.treeReaped;handlesClosed=$result.handlesClosed;toolIdentityLocksClosed=$true;outputReadersComplete=$result.outputReadersComplete;outputLimit=$result.outputLimit;activeProcesses=$result.activeProcesses;forced=$result.forced;knownAuxiliaryCleanup=$result.knownAuxiliaryCleanup;auxiliaryProcesses=(Convert-ObservedProcesses $result.auxiliaryProcesses);helperAdmission=$helperAdmission;deadlineHit=$result.deadlineHit;parentExitedBeforeChildren=$result.parentExitedBeforeChildren;drainCompletedByAccounting=$result.drainCompletedByAccounting;atDrainDeadline=(Convert-ObservedProcesses $result.atDrainDeadline);error=$result.error;memory=$result.memory}
 [IO.File]::WriteAllText([string]$requestData.receipt,($receipt|ConvertTo-Json -Depth 5))
 if(!$result.treeReaped -or !$result.rootReaped -or !$result.handlesClosed -or !$result.outputReadersComplete){exit 8}
 exit 0

@@ -3,8 +3,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {readFileSync} from 'node:fs';
-import {acceptanceCliArgs,nativePipeName,parsePeerJson,tinyQuery,tinySnapshot,tinySource,fixtureSelection,SESSION_LIMITS,runSessionGroup} from './session-ipc.mjs';
+import {mkdirSync,mkdtempSync,readFileSync,rmSync} from 'node:fs';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {bootstrapTinyOwner,acceptanceCliArgs,nativePipeName,parsePeerJson,tinyQuery,tinySnapshot,tinySource,fixtureSelection,SESSION_LIMITS,runSessionGroup} from './session-ipc.mjs';
 
 const sha=value=>createHash('sha256').update(value).digest('hex');
 const luac={version:'5.1.5',platform:'windows-amd64',executable_sha256:'a'.repeat(64),executable_bytes:1};
@@ -86,3 +88,45 @@ test('bootstrap project uses fixed path-local CLI contract without home while so
   const bootstrap=readFileSync(new URL('./session-ipc.mjs',import.meta.url),'utf8');
   assert(bootstrap.includes("'--product','retail'],{useHome:false})"));
 });
+
+// Executes only fixture Git operations, never the CLI/native owner or Lua.
+for (const returnedSnapshot of ['valid','missing','different']) {
+  test(`bootstrap indexes the project before refs and requires returned snapshot: ${returnedSnapshot}`,async()=>{
+    const root=mkdtempSync(join(tmpdir(),'lycheedev-bootstrap-contract-'));
+    const home=join(root,'home'),release=join(root,'release'),evidenceDir=join(root,'evidence');
+    const repository=join(home,'tmp','native-session-bootstrap'),calls=[];
+    let selection;
+    const invoke=(id,args,options)=>{
+      calls.push({id,args:acceptanceCliArgs(args,home,options),options});
+      if(id==='session-bootstrap-init')mkdirSync(join(home,'mirrors'),{recursive:true});
+      if(id==='session-bootstrap-index'){
+        selection=JSON.parse(readFileSync(join(repository,'lycheedev.lock.json'),'utf8')).selection;
+        assert.deepEqual(args,['source','index','--project',repository]);
+        const snapshot=returnedSnapshot==='valid'?selection.id:returnedSnapshot==='different'?'PIN-'+'f'.repeat(64):undefined;
+        return {result:{complete:true},envelope:{context:{snapshot}}};
+      }
+      if(id==='session-bootstrap-open'){
+        assert.equal(returnedSnapshot,'valid','refs must not run after invalid index response');
+        assert.deepEqual(args,['source','refs','--snapshot',selection.id,'--symbol','Caller',
+          '--direction','incoming','--limit','25','--session-reuse','--release',release]);
+        return {result:{nativeResearch:{nativeSession:{workerPid:42,snapshotTransfer:'full'}}}};
+      }
+      return {result:{}};
+    };
+    try{
+      const run=bootstrapTinyOwner({binary:'not-executed',home,release,evidenceDir,invoke});
+      if(returnedSnapshot==='valid'){
+        const opened=await run;assert.equal(opened.ownerPid,42);assert.deepEqual(opened.selection,selection);
+      }else await assert.rejects(run,/public source index did not return the fixture snapshot/);
+      const ids=['session-bootstrap-init','session-bootstrap-project','session-bootstrap-index'];
+      if(returnedSnapshot==='valid')ids.push('session-bootstrap-open');
+      assert.deepEqual(calls.map(call=>call.id),ids);
+      for(const call of calls){
+        assert.equal(call.options.phase,'local');assert(call.options.timeout>0&&call.options.timeout<=45_000);
+        assert.deepEqual(call.args.slice(-2),['--format','json']);
+        if(call.id==='session-bootstrap-project')assert(!call.args.includes('--home'));
+        else assert.deepEqual(call.args.slice(-4),['--home',home,'--format','json']);
+      }
+    }finally{rmSync(root,{recursive:true,force:true});}
+  });
+}

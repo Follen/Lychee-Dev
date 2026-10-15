@@ -62,7 +62,7 @@ function releaseLuac(release){
 
 /** Public CLI bootstrap over a tiny local Git fixture. No startup-token or
  * SQLite writes: --project validates the fixture lock and admits its pin via
- * the ordinary public source refs path. invoke(caseId,args,options) is the
+ * the ordinary public source index path before source refs opens the owner. invoke(caseId,args,options) is the
  * caller's bounded, evidence-recording CLI launcher (it supplies --home/json).
  */
 // project init is path-local in the fixed Go public contract and has no --home.
@@ -107,7 +107,12 @@ export async function bootstrapTinyOwner({binary,home,release,evidenceDir,invoke
     sourceExecuted:false,files:[{path:'a.lua',sha256:sha256(tinySource()),bytes:Buffer.byteLength(tinySource())},
       {path:'Main.toc',sha256:sha256('a.lua\n'),bytes:6}],lock}));
   writeNew(join(evidenceDir,'bootstrap-a.lua'),tinySource());
-  const opened=command('session-bootstrap-open',['source','refs','--project',repository,'--symbol','Caller',
+  // Index resolves and registers the project lock through the public CLI. Refs
+  // requires an explicit snapshot before its relation validation can proceed.
+  const indexed=command('session-bootstrap-index',['source','index','--project',repository]);
+  const snapshot=indexed.envelope?.context?.snapshot;
+  assert.equal(snapshot,selection.id,'public source index did not return the fixture snapshot');
+  const opened=command('session-bootstrap-open',['source','refs','--snapshot',snapshot,'--symbol','Caller',
     '--direction','incoming','--limit','25','--session-reuse','--release',release]);
   const native=opened.result?.nativeResearch??opened.envelope?.result?.nativeResearch;
   assert(native?.nativeSession?.workerPid>0,'public CLI did not open a native session');

@@ -7,6 +7,7 @@ import {join, resolve} from 'node:path';
 import {gzipSync} from 'node:zlib';
 import {performance} from 'node:perf_hooks';
 import os from 'node:os';
+import {beginMemoryPhase, endMemoryPhase, nativeMemoryPhase} from '../../tools/rust-owned-memory.mjs';
 import {assertEnvelope, assertAnchor, sha256} from '../rust-source-full-corpus/assertions.mjs';
 import {jsonFile} from '../rust-skill-usage/assertions.mjs';
 import {acceptanceCliArgs} from './session-ipc.mjs';
@@ -23,9 +24,9 @@ const oracle = jsonFile(new URL('../rust-source-full-corpus/retail-oracle.json',
 const workflow = jsonFile(new URL('../rust-skill-usage/workflow.json', import.meta.url));
 const started = performance.now(), deadline = started + groupBudget(group) - 15000;
 const report = {schema: 'lycheedev.source-native-acceptance.v1', group, state: 'running', startedAt: new Date().toISOString(), oracle,
-  binarySHA256: sha256(readFileSync(binary)), checks: [], commands: [], resources: [],
+  binarySHA256: sha256(readFileSync(binary)), checks: [], commands: [], resources: [], memoryWindows: [],
   machine: {platform: process.platform, arch: process.arch, release: os.release(), node: process.version, cpu: os.cpus()[0]?.model, cores: os.cpus().length, totalMemory: os.totalmem()},
-  performance: {state: 'not_evaluated', targetRatio: 0.30, sampleKind: 'single correctness execution; independent cold/warm observations only', goOracle: '3057a9666ab078270b63c7f06de748069b0d1f4b', goDifferential: 'not_run', cpu: 'not_measured', io: 'not_measured', aggregateRSS: 'not_measured', reason: 'No same-machine Go candidate/repeated paired samples. Source sync includes network and local validation; no guessed download subtraction.'},
+  performance: {state: 'not_evaluated', targetRatio: 0.30, sampleKind: 'single correctness execution; independent cold/warm observations only', goOracle: '3057a9666ab078270b63c7f06de748069b0d1f4b', goDifferential: 'not_run', cpu: 'not_measured', io: 'not_measured', aggregateRSS: 'not_measured', windowsMemory: 'outer owned Job observation; see owned-report.json; aggregateRSS remains unmeasured', reason: 'No same-machine Go candidate/repeated paired samples. Source sync includes network and local validation; no guessed download subtraction.'},
   boundaries: ['No studied Lua/configuration execution, game or publication', 'Passed selected cases never mean complete semantic resolution or complete Source acceptance', 'Quota/idle/lifetime are separate real small-material IPC groups, never substitutes for this full Retail group']};
 let sequence = 0, outputBytes = 0, fatal = false, pin, corpus, originals;
 const save = () => writeFileSync(join(out, 'report.json'), JSON.stringify(report, null, 2) + '\n'); save();
@@ -35,7 +36,9 @@ function command(caseId, executable, args, {timeout = 210000, phase = 'local', i
   const remaining = Math.floor(deadline - performance.now());
   if (remaining < 1000 || sequence >= 100 || outputBytes >= 384 << 20) { fatal = true; throw new Error('native-acceptance.controller_budget'); }
   const prefix = `${String(sequence++).padStart(3, '0')}-${caseId}`, time = performance.now();
+  const memoryPhase = beginMemoryPhase(nativeMemoryPhase(caseId), caseId);
   const run = spawnSync(executable, args, {cwd, env: environment, input, windowsHide: true, shell: false, timeout: Math.min(timeout, remaining), maxBuffer});
+  endMemoryPhase(memoryPhase);
   const stdout = run.stdout ?? Buffer.alloc(0), stderr = run.stderr ?? Buffer.alloc(0);
   outputBytes += stdout.length + stderr.length;
   const preserve = (suffix, bytes) => {
@@ -46,7 +49,7 @@ function command(caseId, executable, args, {timeout = 210000, phase = 'local', i
     } return files;
   };
   const stdoutFiles = preserve('stdout', stdout), stderrFiles = preserve('stderr', stderr);
-  const observation = {caseId, executable, args, cwd, phase, wallMillis: performance.now() - time, exit: run.status, signal: run.signal, error: run.error?.message,
+  const observation = {caseId, pid: run.pid, memoryPhase, executable, args, cwd, phase, wallMillis: performance.now() - time, exit: run.status, signal: run.signal, error: run.error?.message,
     stdoutFiles, stderrFiles, stdoutSHA256: sha256(stdout), stderrSHA256: sha256(stderr), stdoutBytes: stdout.length, stderrBytes: stderr.length};
   if (input !== undefined) observation.inputSHA256 = sha256(Buffer.from(input));
   report.commands.push(observation); if (run.error || run.signal || outputBytes > 384 << 20) fatal = true; save();
@@ -216,6 +219,15 @@ try {
       const status = invoke('session-ready', ['source', 'session', 'status']).result;
       assert.equal(status.ownerPid, firstOwner.pid); assert.equal(status.workerPid, firstOwner.pid); assert.equal(status.state, 'ready'); assert.equal(status.batches, second.nativeSession.batches);
       return {nativeSession: second.nativeSession, status, snippets};
+    });
+    await check('full-retail-retained-idle-memory-window', async () => {
+      assert(firstOwner && second, 'authenticated warm retained owner required');
+      const memoryPhase = beginMemoryPhase('retained-session-steady', 'retained-idle-window');
+      try { await new Promise(done => setTimeout(done, 1000)); }
+      finally { endMemoryPhase(memoryPhase); report.memoryWindows.push({caseId: 'retained-idle-window', memoryPhase, expectedOwner: firstOwner}); save(); }
+      const status = invoke('session-after-idle-window', ['source', 'session', 'status']).result;
+      assert.equal(status.ownerPid, firstOwner.pid); assert.equal(status.workerPid, firstOwner.pid); assert.equal(status.state, 'ready');
+      return {owner: firstOwner, idleWindowMillis: 1000, scope: 'Post-warm idle observation only; does not prove convergence or leak absence'};
     });
     await check('changed-full-corpus-identity-reprepares-and-restores', () => {
       assert(second); const variant = makeIdentityVariant();

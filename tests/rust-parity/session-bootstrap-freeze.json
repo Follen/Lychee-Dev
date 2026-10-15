@@ -1,0 +1,165 @@
+{
+  "base": "da54675856bd15018a2aa4020f991f5b546c3a76",
+  "patchSHA256": "13fc693b81e39ab22162ef15990595e73b51ccfd370f5d51dacd0af97d17e87b",
+  "files": [
+    {
+      "path": "tests/rust-source-native-acceptance/session-ipc.mjs",
+      "sha256": "c2f2bbf5fbf5c799c057c7f4318f2a568bbc6f70b549e853aeb0bf757a19ff1d"
+    },
+    {
+      "path": "tests/rust-source-native-acceptance/session-ipc.test.mjs",
+      "sha256": "29a720e27ada9f8694834b736be0ff7ba844270e8f914fa11b2110fcff4b56aa"
+    }
+  ],
+  "dependencies": [
+    {
+      "path": "tests/rust-source-native-acceptance/run.mjs",
+      "sha256": "f86fd9df8db590f5f37e1f698ebe5905d366a6f0b0d80d7aa13f540b8a5fc967"
+    },
+    {
+      "path": "crates/lycheedev-source/src/relations.rs",
+      "sha256": "cf6963398aa880a16ac55cfe13798983d86487a00a11ce2619ea59fac59a87a4"
+    },
+    {
+      "path": "crates/lycheedev-source/src/lib.rs",
+      "sha256": "1b67a163cb038283f29732e0710f5f9a00734bebadb7f91d764c91232d62cad3"
+    },
+    {
+      "path": "crates/lycheedev-core/src/selection.rs",
+      "sha256": "8fb86e9baf73cc63a35c0c01e2bc2142da7c3fa4111d75f57c1ddf79812ff588"
+    },
+    {
+      "path": "crates/lycheedev-cli/src/main.rs",
+      "sha256": "aaadd329974390781ba163ee741b480ba571d32d7ea91f13fce0529df6c52c5d"
+    },
+    {
+      "path": "crates/lycheedev-cli/src/commands.json",
+      "sha256": "554f30c665f1780c38bdf318ee3dfaea745a4972aba7374e4ae054b416f68972"
+    }
+  ],
+  "testMap": {
+    "valid": "public index precedes refs; returned pin matches lock; one symbol selector; explicit snapshot; isolated home and JSON",
+    "missing": "missing public snapshot fails closed before refs",
+    "different": "wrong public snapshot fails closed before refs"
+  },
+  "command": "node --test tests/rust-source-native-acceptance/session-ipc.test.mjs",
+  "result": "14/14 passed; offline Node contract tests with fixture Git only; actual CLI/native/Windows/Lua not run",
+  "preservedOriginalEvidence": [
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/000-session-bootstrap-init.stderr.part0",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/000-session-bootstrap-init.stdout.part0",
+      "sha256": "ff3f5e3bd9848aca1687d7f51238930fe1d22d2f363ab25e4f951d3aaf96d41c"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/001-session-bootstrap-project.stderr.part0",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/001-session-bootstrap-project.stdout.part0",
+      "sha256": "93abcd9aa5eacd94dea606656b7caf8a5fc0f410293fd31d6ea4e349796a6e94"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/002-session-bootstrap-open.stderr.part0",
+      "sha256": "5499cf47a84c42ae369856b5463485a51ed833ba6164216aaa899d5ac81601c7"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/002-session-bootstrap-open.stdout.part0",
+      "sha256": "bf1b65ed8b38ba9b2ffd9a9f5624dfb0a531a6675ac121a19860272fa8678d66"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/003-session-failed-close.stderr.part0",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/003-session-failed-close.stdout.part0",
+      "sha256": "dcc6c24d598a0f78248f710afa142f1cad9bdd4379f82758c19ea6cdca12d7e7"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/004-final-close.stderr.part0",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/004-final-close.stdout.part0",
+      "sha256": "dcc6c24d598a0f78248f710afa142f1cad9bdd4379f82758c19ea6cdca12d7e7"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/005-final-status.stderr.part0",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/005-final-status.stdout.part0",
+      "sha256": "dcc6c24d598a0f78248f710afa142f1cad9bdd4379f82758c19ea6cdca12d7e7"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/bootstrap-a.lua",
+      "sha256": "add3d684fd8d1c189f567a878cd4642aa72882059c5777caca3a23bcd343d073"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/bootstrap-fixture.json",
+      "sha256": "d1fda3a9e706b332a8680f63be8f59795f68c156726bb2126affc870b11c7f95"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/bootstrap-git-1.json",
+      "sha256": "d0391dc55fdc1ea71068a603b317825af4eb5a77efef7d8dd3952b88019f8c0c"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/bootstrap-git-2.json",
+      "sha256": "253a49cf12e8da974744ef3c2c276ad1922de7ea426c14109883f57bcd26c676"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/bootstrap-git-3.json",
+      "sha256": "e53937eea4b6723e9d47e7171f95d0c8747c7fb984e089f0c5ed1899962ee77e"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/bootstrap-git-4.json",
+      "sha256": "8727cea55cf36a81d4c1c903689e43532fc0517b8a0b028ef0f8b8f6c1e81180"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/bootstrap-git-5.json",
+      "sha256": "3f1e6d9230c5a8153ae76e92f4b027ca82361b234c02e402a0a51c9efd5c4355"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/candidate-identity.json",
+      "sha256": "5fd7f8846a9d3460c0fb0e16d88f7f9216ad39d71fa7592abeaaf89e74ef58cf"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/owned-report.json",
+      "sha256": "b95eef905dfbfe163199bff9d8f91b809d63b7db7eec16a2f832d86a61bc35c6"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/process-336384d6-9c4e-4334-bcf8-0e6e1cbe04bc.receipt.json",
+      "sha256": "e0c695f34e778185744fa9bd2bcbbe582bf0e46ca5fa69d7cb41525694e88c51"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/process-336384d6-9c4e-4334-bcf8-0e6e1cbe04bc.request.json",
+      "sha256": "e04ae107f1806935e802af80b72db4d742c34bba4b3c780d7fd5846c158772fe"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/process-336384d6-9c4e-4334-bcf8-0e6e1cbe04bc.request.json.wrapper.json",
+      "sha256": "7d24f2ab2740c20d59b3652b754eda1abdd602322a36329cba3e718aa016bf8d"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/process-336384d6-9c4e-4334-bcf8-0e6e1cbe04bc.stderr.bin",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/process-336384d6-9c4e-4334-bcf8-0e6e1cbe04bc.stdout.bin",
+      "sha256": "2495f90151a30aab81d4e147f9c647177c0c9d630e2dcadc7fbb35ca08c17152"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/receipt.json",
+      "sha256": "2710e247ff7ee6359c3ae03b9ab427996164039cdcf92db50a162490a823d734"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/report.json",
+      "sha256": "1ecda2c87d7dea3d3adb635bf0f03877f3b9246c2ce2cecc4120ce8963fe8fc9"
+    },
+    {
+      "path": ".tmp/ci-evidence/363d8d4-product/artifact/rust-disk/evidence/7be013f6-4106-47d6-839e-1f2b393b5d67/session-result.json",
+      "sha256": "de42a46a4792c24eb35b4d77338625cdca6ad97f8bf76fc8ac64abe54d1881e8"
+    }
+  ]
+}

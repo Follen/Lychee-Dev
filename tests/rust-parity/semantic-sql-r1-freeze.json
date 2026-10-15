@@ -1,0 +1,320 @@
+{
+  "schema": "lycheedev.semantic-sql-freeze.v1",
+  "oracleCommit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "createdAt": "2026-10-15T01:10:15.574552+00:00",
+  "baseHead": "a3535c8766beaa5a025d090429bd971334b73d3d",
+  "revision": "r1",
+  "snapshot": "/tmp/lycheedev-semantic-sql-review-r1",
+  "meaning": "Complete owner/dependency bytes copied into snapshot, fixed Go files under oracle/, changed tracked base bytes under base/. No runtime acceptance; all Rust/Go/Windows NOT_RUN. Receipt excludes itself.",
+  "files": [
+    {
+      "path": "crates/lycheedev-data/src/definitions.rs",
+      "bytes": 21631,
+      "sha256": "e82b16c75211b6b86dd83f6a4b17d4b887c50f86e599e4d81fc82bf123962431"
+    },
+    {
+      "path": "crates/lycheedev-data/src/definitions/semantics.rs",
+      "bytes": 10028,
+      "sha256": "5a85c02e5d5a1bf1d2cabac406def8f82b4020b24e42bc0f42dea84db21336f2"
+    },
+    {
+      "path": "crates/lycheedev-data/src/definitions/semantics/tests.rs",
+      "bytes": 9151,
+      "sha256": "3978259e0516bf8e183d8a0eff920e3b4854263db7c5e341cd3b5370d94241dd"
+    },
+    {
+      "path": "crates/lycheedev-data/src/local_query.rs",
+      "bytes": 39956,
+      "sha256": "7bfa494423cd7d0c1ba29c2ff9483e79e9797e65e9c952e92377f6ed93fa40b9"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/semantic_sql_parity.rs",
+      "bytes": 15942,
+      "sha256": "68af88acd8eb531da6d9cbdf4190f49c85aa8a56b76a7295b712300d13203d08"
+    },
+    {
+      "path": "tests/rust-parity/semantic-sql-contract.md",
+      "bytes": 5680,
+      "sha256": "a2b38705d3d12324941381f700eedaa4c3ce19318e5ed56ef4d5aac3387f6032"
+    },
+    {
+      "path": "tests/rust-parity/semantic-sql-resource-gap.json",
+      "bytes": 3591,
+      "sha256": "01405a13fa2f7aaddb1de2a038e0626b7ac1edaeba3f9636cd9205f96a3da6d1"
+    },
+    {
+      "path": "tests/rust-parity/semantic-sql-test-map.json",
+      "bytes": 12848,
+      "sha256": "df3cf15612538a4e41e3a0d987fabd07615cab636abed06e72dd6196394d1745"
+    }
+  ],
+  "dependencies": [
+    {
+      "path": "Cargo.toml",
+      "bytes": 1840,
+      "sha256": "0e00a44fd16a0de1697a3e0c7158cbaf010f09ace305b285f33f841fc3c5831d"
+    },
+    {
+      "path": "Cargo.lock",
+      "bytes": 71426,
+      "sha256": "a0d3f014709d3364d0ee28bc6ad58f260410ea7df81e8dc99fdebb35b4d45a6b"
+    },
+    {
+      "path": "crates/lycheedev-data/Cargo.toml",
+      "bytes": 647,
+      "sha256": "5bfab2737240c8e7c423060a129008807dd53422e81ccc28205ddcf9d70e20b6"
+    },
+    {
+      "path": "crates/lycheedev-data/src/lib.rs",
+      "bytes": 4881,
+      "sha256": "46acd41b9e1f9a019d20b878b6d111ba66a51a48f9aa0c61ed708f35607c68aa"
+    },
+    {
+      "path": "crates/lycheedev-data/src/schema.rs",
+      "bytes": 13744,
+      "sha256": "9fb77e7626f60cb4896cc3ec52c1e061acbdad26d226dfdf47ad07c1efbccb11"
+    },
+    {
+      "path": "crates/lycheedev-data/src/capture.rs",
+      "bytes": 9121,
+      "sha256": "706713cb7e20a2009542a1ec2e5b9656abac53d350a67c27e71f0cca2f01e201"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource.rs",
+      "bytes": 9879,
+      "sha256": "f5c8dc2e13b3d7f1cc3b740f120806301cc49aa449756201285035e66db7d2d8"
+    },
+    {
+      "path": "crates/lycheedev-data/src/relational.rs",
+      "bytes": 57749,
+      "sha256": "84ff932b844a8d784af697cff9119ddeaf383702a788fd94d5a0f022899a5c89"
+    },
+    {
+      "path": "crates/lycheedev-data/src/relational/aggregate.rs",
+      "bytes": 12290,
+      "sha256": "b62a7fa408ce219f74ee2477017698f58b996980c5d8e9af8177ddacf49af31a"
+    },
+    {
+      "path": "crates/lycheedev-data/src/relational/compound.rs",
+      "bytes": 8990,
+      "sha256": "4101e9f330af0774d133e42330c8ade89226e327c034f7d890b91e8f0e63efec"
+    },
+    {
+      "path": "crates/lycheedev-data/src/relational/joins.rs",
+      "bytes": 17415,
+      "sha256": "6c3ec15182c67b0c7cce7d312bb8ab2b5f30751b8cb761562d857b5b00c46cab"
+    },
+    {
+      "path": "crates/lycheedev-data/src/relational/recursive.rs",
+      "bytes": 4196,
+      "sha256": "f2076dea61f9b63ab7e6bcbbcdc77d5a7f75cc8dbb4eda01dbe9df74004aa1e3"
+    },
+    {
+      "path": "crates/lycheedev-data/src/local_query/request.rs",
+      "bytes": 15998,
+      "sha256": "92ee7e7c663bda5736fcd8275833aab6d35af060be469d150d7f954e6629cf3b"
+    },
+    {
+      "path": "crates/lycheedev-data/src/local_query/effective.rs",
+      "bytes": 37624,
+      "sha256": "900d4f75fe03efc4d60c62789a63abd904404e013117e0382fcd34f6761fbb33"
+    },
+    {
+      "path": "crates/lycheedev-data/src/local_query/regression_tests.rs",
+      "bytes": 5505,
+      "sha256": "7bbca27446c51c95e4cda88c2e6938b44d0aa04dd5b625c8e34cd029e8138d5a"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/support/catalog_fixture.rs",
+      "bytes": 22421,
+      "sha256": "84f9fe0cccc3bdf04d7c455cd123160a6381f480f539872f015bfe477dbe77c1"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/effective_sql_parity.rs",
+      "bytes": 19983,
+      "sha256": "79d09407430570cbba068cf5c5a73ff29636874cb2c8694a60a9d6ad19bf8963"
+    },
+    {
+      "path": "crates/lycheedev-core/src/lib.rs",
+      "bytes": 4790,
+      "sha256": "beb975bb9f3836cd89e9b69d14404cd47421c2a7d02aca2d779f94b86a157fb1"
+    },
+    {
+      "path": "crates/lycheedev-core/src/control.rs",
+      "bytes": 20162,
+      "sha256": "d918644d339bb9ee6e9e0b3e4b877e6db41b5dfa403f82b5d792952e80deeec6"
+    },
+    {
+      "path": "crates/lycheedev-core/src/metadata.rs",
+      "bytes": 30579,
+      "sha256": "1beaefaa6ba2ca2b58b5c28b502c846809abd85dfae386a47988818448509971"
+    },
+    {
+      "path": "crates/lycheedev-core/src/evidence.rs",
+      "bytes": 20931,
+      "sha256": "f33856af2242ea822f1a7706ab0a5c3db46d73d5676bb38413e0b07c55a6965f"
+    },
+    {
+      "path": "crates/lycheedev-core/src/evidence/bounded.rs",
+      "bytes": 17320,
+      "sha256": "f7ee07a01bcb3f1904591f85cdb7e33c536a76ee63fc347e4a443f227b3bada3"
+    },
+    {
+      "path": "crates/lycheedev-core/src/evidence/budgeted.rs",
+      "bytes": 19940,
+      "sha256": "ea9942eb51ec750b557ec3458f68c200e8fe37cbf389ce89a9a2573ab9458151"
+    },
+    {
+      "path": "crates/lycheedev-core/src/evidence/dependencies.rs",
+      "bytes": 34029,
+      "sha256": "95dbfeaf43098017f587443fb266e0b8fd2eb78d542ed6f148e6e50cfc254b27"
+    },
+    {
+      "path": "crates/lycheedev-core/src/public_json.rs",
+      "bytes": 25956,
+      "sha256": "bfc67a8ac470bb89df3630d91b600c940453b296ca9c61f63bac69e2cdae1e35"
+    },
+    {
+      "path": "crates/lycheedev-core/src/public_json/typed.rs",
+      "bytes": 13946,
+      "sha256": "433f715ed4cff496dc210194dd7325492e9e47f5cbb18fb5b7e27699b78773a0"
+    },
+    {
+      "path": "crates/lycheedev-core/src/selection.rs",
+      "bytes": 23518,
+      "sha256": "8fb86e9baf73cc63a35c0c01e2bc2142da7c3fa4111d75f57c1ddf79812ff588"
+    },
+    {
+      "path": "crates/lycheedev-core/src/storage.rs",
+      "bytes": 26525,
+      "sha256": "40755423855b7b296071e23bfb2ec0483c3a8d60561b7ba428874aa296c1ee6d"
+    },
+    {
+      "path": "crates/lycheedev-core/src/workspace.rs",
+      "bytes": 15598,
+      "sha256": "9cfaab974b9c0cd42ac11ae3a31dba844e8fc7dbeb6d97e4a9d602be0d44d0af"
+    },
+    {
+      "path": "crates/lycheedev-windows/src/filesystem.rs",
+      "bytes": 10712,
+      "sha256": "5af8199bdfc4f98b635c0a795335877919e139ce70e9f31e703fbeefa6a263af"
+    },
+    {
+      "path": "tests/rust-parity/effective-sql-freeze.json",
+      "bytes": 5386,
+      "sha256": "fa076be395dbb23c6607d642eaca6c783556c84b6924e0c952ca29a761afa03e"
+    }
+  ],
+  "goFiles": [
+    {
+      "path": "internal/records/semantics.go",
+      "bytes": 7695,
+      "sha256": "13e3104908c57f92ae45a929adf7d7e361060df8758edc57ac0c4def6242987e"
+    },
+    {
+      "path": "internal/records/semantics_test.go",
+      "bytes": 1211,
+      "sha256": "e61c729a5294fa0be32de40a56b36f336ab718a93bbfaf71de44c1bbcd005b22"
+    },
+    {
+      "path": "internal/records/review_budget_test.go",
+      "bytes": 5620,
+      "sha256": "be93c68bd6b7334a2a61bfec272be828350b813cf4a12c203e16a81cae827d85"
+    },
+    {
+      "path": "internal/records/definitions.go",
+      "bytes": 6870,
+      "sha256": "2c43df15d83b1cc5722b44a3ee978e2e5770bc9192beba1b3a573a5f32ae0ffc"
+    },
+    {
+      "path": "internal/records/definitions_budget_test.go",
+      "bytes": 3759,
+      "sha256": "76824de855644be3df79b81e7f0b835c526935d9330a6e1058bfc26c07be6b55"
+    },
+    {
+      "path": "internal/records/definitions_test.go",
+      "bytes": 11157,
+      "sha256": "84430db5a417beecb81b71db5ca5e25fae16258eef462f9b36db240c93673a56"
+    },
+    {
+      "path": "internal/records/sql.go",
+      "bytes": 7718,
+      "sha256": "ed01225063fd5527fd6f6c7ce97677eac4af6dd5ea306e580a5db8e664570e95"
+    },
+    {
+      "path": "internal/records/sql_contract_test.go",
+      "bytes": 883,
+      "sha256": "11d5a3e5f3d2c287cea929a55d6fc58942a109fa0c0002219021da8f8c074e4e"
+    },
+    {
+      "path": "internal/records/resource/budget.go",
+      "bytes": 3461,
+      "sha256": "a26b9c547d113d3492b53017c450ce984ac23b6de82a70fd1903c75e92049701"
+    },
+    {
+      "path": "internal/records/resource/budget_test.go",
+      "bytes": 2427,
+      "sha256": "a3aac864a65be661ac5700a35a2136ab6c64783003f9f5bf1e79cfde1342b503"
+    },
+    {
+      "path": "internal/records/schema/definition.go",
+      "bytes": 9587,
+      "sha256": "1cf63c54dd933eee7592bfd671bdcba17b7c186cf86110078cc23dc0909867d6"
+    },
+    {
+      "path": "internal/records/sql_export.go",
+      "bytes": 4755,
+      "sha256": "a5d25e7e8b244b2bcceed8d72c77c12dc77f52d8dff9d8980fd8d3f1cf0e15e9"
+    },
+    {
+      "path": "internal/records/navigatetest/sql_export_test.go",
+      "bytes": 10014,
+      "sha256": "5f5d6abedb413e4bbf5f2f9650d2ce406753c42b4241b6857606c6696bdb8fa4"
+    },
+    {
+      "path": "internal/records/relational/execute.go",
+      "bytes": 10852,
+      "sha256": "e1763fda5af17a310540be1a6161946ea5fc2fb29e15707da7794aebdf175040"
+    },
+    {
+      "path": "internal/records/relational/rows.go",
+      "bytes": 8986,
+      "sha256": "b6b8b9e9915b5bf3910c62d5f4215904d8cb88033ef3f18e558da19b3e3c75e9"
+    },
+    {
+      "path": "internal/records/relational/explain.go",
+      "bytes": 5525,
+      "sha256": "e233661da2a5d47860b7b10ae2e26feebd9287e6c920a6fcfb0dd7a491e4460c"
+    },
+    {
+      "path": "internal/records/relational/explain_test.go",
+      "bytes": 1673,
+      "sha256": "be3d76651f0ed7eaef0d1a3ad794e7c65d284bd2f598249a57e000f2563622ea"
+    },
+    {
+      "path": "internal/command/entry.go",
+      "bytes": 59149,
+      "sha256": "7cf08eb6397dee743f9398ce3b11df241f2d41a6103aeefd192e711914fb724b"
+    },
+    {
+      "path": "internal/command/sql_input_test.go",
+      "bytes": 2875,
+      "sha256": "4bb9a12a978cee06e5f18c7a312e18d9e756a285146ff241be5258500a043504"
+    }
+  ],
+  "requiredConcurrentAPI": [
+    "evidence::{read_blob_bounded,publish_blob_bounded}",
+    "Metadata::put_controlled",
+    "OperationControl::{check,deadline}",
+    "Outcome::public_numbers",
+    "public_json::{NumberLayout,write_line}"
+  ],
+  "excludedOwners": [
+    "CLI main/commands/contract",
+    "core storage/public_json/typed/raw bytes",
+    "Windows filesystem",
+    "Hotfix/effective provider",
+    "Emmy and tools stale frozen worktree"
+  ],
+  "status": "awaiting independent frozen-tree review; implementation unexecuted"
+}

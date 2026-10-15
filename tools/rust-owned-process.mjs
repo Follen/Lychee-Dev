@@ -8,11 +8,13 @@ export function auxiliaryRequest({cargoBuild=false,msvcCompile=false}={}){
   if(cargoBuild&&msvcCompile)throw new Error('owned.conflicting_auxiliary_request');
   return {cargoBuild,msvcCompile};
 }
-function request(command,args,{cwd,env,evidence,timeout=600000,orphanMs=30000,cargoBuild=false,msvcCompile=false}){
+function request(command,args,{cwd,env,evidence,timeout=600000,orphanMs=30000,cargoBuild=false,msvcCompile=false,memoryObservation=false}){
   if(process.platform!=='win32')throw new Error('owned.windows_required');
   const admission=auxiliaryRequest({cargoBuild,msvcCompile});
+  if(typeof memoryObservation!=='boolean')throw new Error('owned.invalid_memory_request');
   const id=randomUUID(),base=join(evidence,`process-${id}`),path=`${base}.request.json`;
   const spec={command,args,cwd:resolve(cwd),timeoutMs:timeout,orphanMs,...admission,stdout:`${base}.stdout.bin`,stderr:`${base}.stderr.bin`,receipt:`${base}.receipt.json`};
+  if(memoryObservation){spec.memoryPrefix=`${base}.memory`;spec.memoryMarker=`${base}.phase`;env={...env,LYCHEEDEV_OWNED_MEMORY_PHASE:spec.memoryMarker};}
   writeFileSync(path,JSON.stringify(spec,null,2)+'\n',{flag:'wx'});
   return {spec,path,env,wrapper:join(import.meta.dirname,'rust-owned-process.ps1')};
 }
@@ -26,12 +28,12 @@ function result(job,wrapper){
 }
 export function ownedSpawnSync(command,args,options){
   const job=request(command,args,options);
-  const wrapper=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',job.wrapper,'-Request',job.path],{cwd:options.cwd,env:options.env,windowsHide:true,shell:false,timeout:(options.timeout||600000)+60000,maxBuffer:1<<20});
+  const wrapper=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',job.wrapper,'-Request',job.path],{cwd:options.cwd,env:job.env,windowsHide:true,shell:false,timeout:(options.timeout||600000)+60000,maxBuffer:1<<20});
   return result(job,wrapper);
 }
 export async function ownedSpawn(command,args,options){
   const job=request(command,args,options),chunks=[],errors=[];
-  const child=spawn('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',job.wrapper,'-Request',job.path],{cwd:options.cwd,env:options.env,windowsHide:true,shell:false,stdio:['ignore','pipe','pipe']});
+  const child=spawn('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',job.wrapper,'-Request',job.path],{cwd:options.cwd,env:job.env,windowsHide:true,shell:false,stdio:['ignore','pipe','pipe']});
   let error,bytes=0;child.once('error',failure=>error=failure);
   function receive(list,chunk){bytes+=chunk.length;if(bytes>1<<20){error=new Error('owned.wrapper_output_budget');child.kill();}else list.push(chunk);}
   child.stdout.on('data',chunk=>receive(chunks,chunk));child.stderr.on('data',chunk=>receive(errors,chunk));

@@ -1,0 +1,476 @@
+{
+  "schema": "lycheedev.semantic-sql-test-map.v1",
+  "oracle": {
+    "release": "Go v3.2.0",
+    "commit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+    "execution": "NOT_RUN; fixed source inspection only"
+  },
+  "scope": "R1 pinned semantic metadata parser/provider and SQL dispatch integration; R2 only fixes Go EqualFold long-s/Kelvin selected-table matching and adds two focused regressions. No full SQL/Data/resource/output parity claim.",
+  "goFiles": [
+    {
+      "path": "internal/records/semantics.go",
+      "bytes": 7695,
+      "sha256": "13e3104908c57f92ae45a929adf7d7e361060df8758edc57ac0c4def6242987e"
+    },
+    {
+      "path": "internal/records/semantics_test.go",
+      "bytes": 1211,
+      "sha256": "e61c729a5294fa0be32de40a56b36f336ab718a93bbfaf71de44c1bbcd005b22"
+    },
+    {
+      "path": "internal/records/review_budget_test.go",
+      "bytes": 5620,
+      "sha256": "be93c68bd6b7334a2a61bfec272be828350b813cf4a12c203e16a81cae827d85"
+    },
+    {
+      "path": "internal/records/definitions.go",
+      "bytes": 6870,
+      "sha256": "2c43df15d83b1cc5722b44a3ee978e2e5770bc9192beba1b3a573a5f32ae0ffc"
+    },
+    {
+      "path": "internal/records/definitions_budget_test.go",
+      "bytes": 3759,
+      "sha256": "76824de855644be3df79b81e7f0b835c526935d9330a6e1058bfc26c07be6b55"
+    },
+    {
+      "path": "internal/records/definitions_test.go",
+      "bytes": 11157,
+      "sha256": "84430db5a417beecb81b71db5ca5e25fae16258eef462f9b36db240c93673a56"
+    },
+    {
+      "path": "internal/records/sql.go",
+      "bytes": 7718,
+      "sha256": "ed01225063fd5527fd6f6c7ce97677eac4af6dd5ea306e580a5db8e664570e95"
+    },
+    {
+      "path": "internal/records/sql_contract_test.go",
+      "bytes": 883,
+      "sha256": "11d5a3e5f3d2c287cea929a55d6fc58942a109fa0c0002219021da8f8c074e4e"
+    },
+    {
+      "path": "internal/records/resource/budget.go",
+      "bytes": 3461,
+      "sha256": "a26b9c547d113d3492b53017c450ce984ac23b6de82a70fd1903c75e92049701"
+    },
+    {
+      "path": "internal/records/resource/budget_test.go",
+      "bytes": 2427,
+      "sha256": "a3aac864a65be661ac5700a35a2136ab6c64783003f9f5bf1e79cfde1342b503"
+    },
+    {
+      "path": "internal/records/schema/definition.go",
+      "bytes": 9587,
+      "sha256": "1cf63c54dd933eee7592bfd671bdcba17b7c186cf86110078cc23dc0909867d6"
+    },
+    {
+      "path": "internal/records/sql_export.go",
+      "bytes": 4755,
+      "sha256": "a5d25e7e8b244b2bcceed8d72c77c12dc77f52d8dff9d8980fd8d3f1cf0e15e9"
+    },
+    {
+      "path": "internal/records/navigatetest/sql_export_test.go",
+      "bytes": 10014,
+      "sha256": "5f5d6abedb413e4bbf5f2f9650d2ce406753c42b4241b6857606c6696bdb8fa4"
+    },
+    {
+      "path": "internal/records/relational/execute.go",
+      "bytes": 10852,
+      "sha256": "e1763fda5af17a310540be1a6161946ea5fc2fb29e15707da7794aebdf175040"
+    },
+    {
+      "path": "internal/records/relational/rows.go",
+      "bytes": 8986,
+      "sha256": "b6b8b9e9915b5bf3910c62d5f4215904d8cb88033ef3f18e558da19b3e3c75e9"
+    },
+    {
+      "path": "internal/records/relational/explain.go",
+      "bytes": 5525,
+      "sha256": "e233661da2a5d47860b7b10ae2e26feebd9287e6c920a6fcfb0dd7a491e4460c"
+    },
+    {
+      "path": "internal/records/relational/explain_test.go",
+      "bytes": 1673,
+      "sha256": "be3d76651f0ed7eaef0d1a3ad794e7c65d284bd2f598249a57e000f2563622ea"
+    },
+    {
+      "path": "internal/command/entry.go",
+      "bytes": 59149,
+      "sha256": "7cf08eb6397dee743f9398ce3b11df241f2d41a6103aeefd192e711914fb724b"
+    },
+    {
+      "path": "internal/command/sql_input_test.go",
+      "bytes": 2875,
+      "sha256": "4bb9a12a978cee06e5f18c7a312e18d9e756a285146ff241be5258500a043504"
+    }
+  ],
+  "rustFiles": [
+    {
+      "path": "crates/lycheedev-data/src/definitions.rs",
+      "bytes": 21631,
+      "sha256": "e82b16c75211b6b86dd83f6a4b17d4b887c50f86e599e4d81fc82bf123962431"
+    },
+    {
+      "path": "crates/lycheedev-data/src/definitions/semantics.rs",
+      "bytes": 10879,
+      "sha256": "cce6b1ff5080bafc68423a9a8f4fe1dbe87ee2aae4a1b8fec2cb7f944e950d3c"
+    },
+    {
+      "path": "crates/lycheedev-data/src/definitions/semantics/tests.rs",
+      "bytes": 10688,
+      "sha256": "d728f2704ff6cbf9f2a99119e40f7294840127e614e633b666abafd332f4c015"
+    },
+    {
+      "path": "crates/lycheedev-data/src/local_query.rs",
+      "bytes": 39956,
+      "sha256": "7bfa494423cd7d0c1ba29c2ff9483e79e9797e65e9c952e92377f6ed93fa40b9"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/semantic_sql_parity.rs",
+      "bytes": 16764,
+      "sha256": "a3ef14269b8511ce9e952a0678afeccf4d6d66abac2216a6d35c97d66d9d554a"
+    },
+    {
+      "path": "tests/rust-parity/semantic-sql-contract.md",
+      "bytes": 7010,
+      "sha256": "db5b9ac56a2db7b6979421bc9d89fb36c0d0daee7c2d562daed556b7029eb856"
+    },
+    {
+      "path": "tests/rust-parity/semantic-sql-resource-gap.json",
+      "bytes": 3591,
+      "sha256": "01405a13fa2f7aaddb1de2a038e0626b7ac1edaeba3f9636cd9205f96a3da6d1"
+    },
+    {
+      "path": "tests/rust-parity/semantic-sql-fold-static.mjs",
+      "bytes": 4125,
+      "sha256": "0c6bd9cfcf98b042a102aed3cf2fd644f88c86cd922820728c703cc4fc2e41fe"
+    },
+    {
+      "path": "tests/rust-parity/semantic-sql-r1-freeze.json",
+      "bytes": 11259,
+      "sha256": "af1bcdef51e39282bdb8f65952de280b19db821d94509139309f823c094e611f"
+    },
+    {
+      "path": "tests/rust-parity/semantic-sql-r1-test-map.json",
+      "bytes": 12848,
+      "sha256": "df3cf15612538a4e41e3a0d987fabd07615cab636abed06e72dd6196394d1745"
+    },
+    {
+      "path": "tests/rust-parity/semantic-sql-contract-r1.md",
+      "bytes": 5680,
+      "sha256": "a2b38705d3d12324941381f700eedaa4c3ce19318e5ed56ef4d5aac3387f6032"
+    }
+  ],
+  "regressions": [
+    {
+      "name": "go_semantic_syntax_builds_conditions_and_exact_numbers",
+      "path": "crates/lycheedev-data/src/definitions/semantics/tests.rs",
+      "line": 10,
+      "status": "NOT_RUN",
+      "goReferences": [
+        "internal/records/semantics.go::SemanticSource",
+        "internal/records/semantics_test.go::TestPinnedSemanticSyntaxBuildsAndConditions"
+      ],
+      "introducedRevision": "r1"
+    },
+    {
+      "name": "go_semantic_irrelevant_mapping_empty_catalog_and_strict_selected_syntax",
+      "path": "crates/lycheedev-data/src/definitions/semantics/tests.rs",
+      "line": 71,
+      "status": "NOT_RUN",
+      "goReferences": [
+        "internal/records/semantics.go::SemanticSource",
+        "internal/records/semantics_test.go::TestPinnedSemanticSyntaxBuildsAndConditions"
+      ],
+      "introducedRevision": "r1"
+    },
+    {
+      "name": "go_semantic_parser_reserves_before_rows_and_oversized_token_lists",
+      "path": "crates/lycheedev-data/src/definitions/semantics/tests.rs",
+      "line": 123,
+      "status": "NOT_RUN",
+      "goReferences": [
+        "internal/records/semantics.go::SemanticSource",
+        "internal/records/review_budget_test.go::TestSemanticParsingReservesBeforeRows"
+      ],
+      "introducedRevision": "r1"
+    },
+    {
+      "name": "semantic_go_row_and_mapping_limits_and_control_recovery",
+      "path": "crates/lycheedev-data/src/definitions/semantics/tests.rs",
+      "line": 159,
+      "status": "NOT_RUN",
+      "goReferences": [
+        "internal/records/semantics.go::SemanticSource",
+        "internal/records/review_budget_test.go::TestSemanticParsingReservesBeforeRows",
+        "internal/records/sql.go::QueryData"
+      ],
+      "introducedRevision": "r1"
+    },
+    {
+      "name": "semantic_cached_load_honors_cancellation_after_validation_without_replay",
+      "path": "crates/lycheedev-data/src/definitions/semantics/tests.rs",
+      "line": 224,
+      "status": "NOT_RUN",
+      "goReferences": [
+        "internal/records/semantics.go::SemanticSource",
+        "internal/records/definitions.go::Definitions.load",
+        "internal/records/definitions_budget_test.go::TestDefinitionsBudgetSharedNetworkAndOfflinePreparation",
+        "internal/records/sql.go::QueryData"
+      ],
+      "introducedRevision": "r1"
+    },
+    {
+      "name": "go_semantic_table_filter_preserves_ascii_unicode_simple_fold_classes",
+      "path": "crates/lycheedev-data/src/definitions/semantics/tests.rs",
+      "status": "NOT_RUN",
+      "introducedRevision": "r2",
+      "goReferences": [
+        "internal/records/semantics.go::parseSemanticMappings (strings.EqualFold selected table filter)",
+        "Go 1.27.1 src/strings/strings.go::EqualFold",
+        "Go 1.27.1 src/strings/strings_test.go::TestEqualFold",
+        "Go 1.27.1 src/unicode/letter.go::SimpleFold",
+        "Go 1.27.1 src/unicode/tables.go::asciiFold,caseOrbit"
+      ],
+      "line": 297
+    },
+    {
+      "name": "go_semantic_sql_exact_rows_builds_conditions_and_source_provenance",
+      "path": "crates/lycheedev-data/tests/semantic_sql_parity.rs",
+      "line": 65,
+      "status": "NOT_RUN",
+      "goReferences": [
+        "internal/records/semantics.go::SemanticSource",
+        "internal/records/semantics_test.go::TestPinnedSemanticSyntaxBuildsAndConditions",
+        "internal/records/sql.go::QueryData"
+      ],
+      "introducedRevision": "r1"
+    },
+    {
+      "name": "go_semantic_sql_no_mapping_is_empty_with_columns_and_can_be_joined",
+      "path": "crates/lycheedev-data/tests/semantic_sql_parity.rs",
+      "line": 168,
+      "status": "NOT_RUN",
+      "goReferences": [
+        "internal/records/semantics.go::SemanticSource",
+        "internal/records/sql.go::QueryData"
+      ],
+      "introducedRevision": "r1"
+    },
+    {
+      "name": "semantic_sql_missing_and_invalid_sources_publish_no_capture_then_recover",
+      "path": "crates/lycheedev-data/tests/semantic_sql_parity.rs",
+      "line": 190,
+      "status": "NOT_RUN",
+      "goReferences": [
+        "internal/records/semantics.go::SemanticSource",
+        "internal/records/definitions.go::Definitions.load",
+        "internal/records/definitions_budget_test.go::TestDefinitionsBudgetSharedNetworkAndOfflinePreparation",
+        "internal/records/sql.go::QueryData"
+      ],
+      "introducedRevision": "r1"
+    },
+    {
+      "name": "semantic_sql_cached_blob_corruption_never_refetches_or_publishes",
+      "path": "crates/lycheedev-data/tests/semantic_sql_parity.rs",
+      "line": 233,
+      "status": "NOT_RUN",
+      "goReferences": [
+        "internal/records/semantics.go::SemanticSource",
+        "internal/records/definitions.go::Definitions.load",
+        "internal/records/definitions_budget_test.go::TestDefinitionsBudgetSharedNetworkAndOfflinePreparation",
+        "internal/records/sql.go::QueryData"
+      ],
+      "introducedRevision": "r1"
+    },
+    {
+      "name": "semantic_sql_pin_parameter_source_precedence_and_query_lexemes_survive",
+      "path": "crates/lycheedev-data/tests/semantic_sql_parity.rs",
+      "line": 257,
+      "status": "NOT_RUN",
+      "goReferences": [
+        "internal/records/semantics.go::SemanticSource",
+        "internal/records/sql.go::QueryData"
+      ],
+      "introducedRevision": "r1"
+    },
+    {
+      "name": "semantic_sql_cancelled_or_expired_query_has_no_capture_and_fresh_retry_works",
+      "path": "crates/lycheedev-data/tests/semantic_sql_parity.rs",
+      "line": 295,
+      "status": "NOT_RUN",
+      "goReferences": [
+        "internal/records/semantics.go::SemanticSource",
+        "internal/records/sql.go::QueryData"
+      ],
+      "introducedRevision": "r1"
+    },
+    {
+      "name": "semantic_sql_memoizes_definitions_and_keeps_the_128_document_limit",
+      "path": "crates/lycheedev-data/tests/semantic_sql_parity.rs",
+      "line": 322,
+      "status": "NOT_RUN",
+      "goReferences": [
+        "internal/records/semantics.go::SemanticSource",
+        "internal/records/definitions.go::Definitions.load",
+        "internal/records/definitions_budget_test.go::TestDefinitionsBudgetSharedNetworkAndOfflinePreparation",
+        "internal/records/sql.go::QueryData"
+      ],
+      "introducedRevision": "r1"
+    },
+    {
+      "name": "semantic_sql_combined_rows_are_bounded_before_query_capture",
+      "path": "crates/lycheedev-data/tests/semantic_sql_parity.rs",
+      "line": 376,
+      "status": "NOT_RUN",
+      "goReferences": [
+        "internal/records/semantics.go::SemanticSource",
+        "internal/records/review_budget_test.go::TestSemanticParsingReservesBeforeRows",
+        "internal/records/sql.go::QueryData"
+      ],
+      "introducedRevision": "r1"
+    },
+    {
+      "name": "semantic_sql_effective_join_keeps_both_explicit_provenance_chains",
+      "path": "crates/lycheedev-data/tests/semantic_sql_parity.rs",
+      "line": 405,
+      "status": "NOT_RUN",
+      "goReferences": [
+        "internal/records/semantics.go::SemanticSource",
+        "internal/records/sql.go::QueryData"
+      ],
+      "introducedRevision": "r1"
+    },
+    {
+      "name": "semantic_sql_max_bytes_admission_precedes_missing_definitions",
+      "path": "crates/lycheedev-data/tests/semantic_sql_parity.rs",
+      "line": 439,
+      "status": "NOT_RUN",
+      "goReferences": [
+        "internal/records/semantics.go::SemanticSource",
+        "internal/records/definitions.go::Definitions.load",
+        "internal/records/definitions_budget_test.go::TestDefinitionsBudgetSharedNetworkAndOfflinePreparation",
+        "internal/records/sql.go::QueryData",
+        "internal/command/entry.go::parse --max-bytes admission"
+      ],
+      "introducedRevision": "r1"
+    },
+    {
+      "name": "semantic_sql_unicode_folded_mapping_keeps_canonical_table_identity",
+      "path": "crates/lycheedev-data/tests/semantic_sql_parity.rs",
+      "status": "NOT_RUN",
+      "introducedRevision": "r2",
+      "goReferences": [
+        "internal/records/semantics.go::parseSemanticMappings (strings.EqualFold selected table filter)",
+        "Go 1.27.1 src/strings/strings.go::EqualFold",
+        "Go 1.27.1 src/strings/strings_test.go::TestEqualFold",
+        "Go 1.27.1 src/unicode/letter.go::SimpleFold",
+        "Go 1.27.1 src/unicode/tables.go::asciiFold,caseOrbit"
+      ],
+      "line": 457
+    }
+  ],
+  "newRegressionCount": 17,
+  "verification": {
+    "rust": "NOT_RUN; no valid local build lease",
+    "go": "NOT_RUN",
+    "windows": "NOT_RUN",
+    "performance": "NOT_RUN",
+    "static": [
+      "rustfmt --edition 2024 --check scoped owner Rust files",
+      "git diff --check scoped owners",
+      "source-derived JSON/resource arithmetic and declaration-map checks",
+      "R1 byte-identity check for definitions.rs, local_query.rs and semantic-sql-resource-gap.json",
+      "Full R1 owner/dependency/Go snapshot hash verification",
+      "Exact Go 1.27.1 ASCII-origin fold-table/production-branch source check; scalar comparisons are not product test cases"
+    ],
+    "nodeSourceCheck": {
+      "command": [
+        "node",
+        "tests/rust-parity/semantic-sql-fold-static.mjs",
+        "/workspace/scratch/f27ee7d61331/lycheedev-linux/toolchain/go"
+      ],
+      "result": {
+        "status": "PASS",
+        "kind": "source-derived table/branch check only",
+        "goExecution": "NOT_RUN",
+        "rustExecution": "NOT_RUN",
+        "asciiClasses": 128,
+        "nonAsciiMembers": [
+          "U+017F",
+          "U+212A"
+        ],
+        "scalarComparisons": 28160,
+        "removedArmMutationsDetected": 2
+      }
+    }
+  },
+  "ciEntrypoints": [
+    {
+      "kind": "unit",
+      "package": "lycheedev-data",
+      "filter": "definitions::semantics::tests::"
+    },
+    {
+      "kind": "integration",
+      "package": "lycheedev-data",
+      "target": "semantic_sql_parity"
+    }
+  ],
+  "mustRetainExisting": [
+    "local_query::",
+    "definitions::batch_tests::",
+    "effective_sql_parity",
+    "relational_parity",
+    "capture_query_references"
+  ],
+  "openGaps": [
+    "Logical Go resource admission and resources output (concrete 16 MiB semantic scenario in semantic-sql-resource-gap.json)",
+    "CSV paired capture/file publication with manifest last",
+    "EXPLAIN/ANALYZE real preflight/plans/scans/work/memory metrics",
+    "Complete output-field and archive-format contracts",
+    "Remote/CDN, whole-query deadline and codec/plan transient allocations",
+    "Full four-loop verification and 70% performance target"
+  ],
+  "historicalEvidence": {
+    "r1FreezePath": "tests/rust-parity/semantic-sql-r1-freeze.json",
+    "r1FreezeSHA256": "af1bcdef51e39282bdb8f65952de280b19db821d94509139309f823c094e611f",
+    "r1Snapshot": "/tmp/lycheedev-semantic-sql-review-r1",
+    "r1SnapshotIncludedAt": "historical/r1/",
+    "effectiveR4": "effective-sql-freeze.json unchanged; no historical receipts rewritten"
+  },
+  "revision": "r2",
+  "revisionAddedRegressionCount": 2,
+  "inheritedRegressionCount": 15,
+  "goStandardLibrary": {
+    "version": "go1.27.1\ntime 2026-08-28T16:20:06Z",
+    "sourceRoot": "/workspace/scratch/f27ee7d61331/lycheedev-linux/toolchain/go",
+    "files": [
+      {
+        "path": "VERSION",
+        "bytes": 35,
+        "sha256": "25eb74b09036e1ad894fb63b86cb0f0ee53342df8d2e2e860da4ff5079607758"
+      },
+      {
+        "path": "src/strings/strings.go",
+        "bytes": 34265,
+        "sha256": "a81bdf73a308277c322e35d0c602e3813f57b6f769c091f8f8962c8884a45ea3"
+      },
+      {
+        "path": "src/strings/strings_test.go",
+        "bytes": 59447,
+        "sha256": "969223f569c06116ff3366ee03c9a7d108db23ed7b482123f07c04ee66014336"
+      },
+      {
+        "path": "src/unicode/letter.go",
+        "bytes": 10702,
+        "sha256": "b35a6d259313cef88d07e9e4027b8bd72c60ae140418f5be2c41a2ecea6074fe"
+      },
+      {
+        "path": "src/unicode/tables.go",
+        "bytes": 256788,
+        "sha256": "ac0e5d5d1b58ed4b02d7cb4a0085bdefbdb4f7aae6fadddbc9477f8463da8bd8"
+      }
+    ],
+    "execution": "NOT_RUN; exact source/table inspection only"
+  }
+}

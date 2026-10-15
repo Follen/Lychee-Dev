@@ -5,6 +5,7 @@ import {spawnSync} from 'node:child_process';
 import {readFileSync, writeFileSync, existsSync} from 'node:fs';
 import {join, resolve} from 'node:path';
 import os from 'node:os';
+import {beginMemoryPhase, endMemoryPhase, staticMemoryPhase} from '../../tools/rust-owned-memory.mjs';
 import {createHash} from 'node:crypto';
 import {performance} from 'node:perf_hooks';
 import {assertAnchor, assertCorpus, assertEnvelope, assertInspect, assertPageContinuation, assertQuery, assertStaticCall, sha256} from './assertions.mjs';
@@ -19,7 +20,7 @@ const report = {
   oracle, binary: {path: binary, sha256: sha256(readFileSync(binary))},
   machine: {platform: process.platform, release: os.release(), arch: process.arch, node: process.version, cpu: os.cpus()[0]?.model, cores: os.cpus().length, totalMemory: os.totalmem()},
   home, checks: [], commands: [],
-  performance: {state: 'not_evaluated', targetRatio: 0.30, reason: 'Correctness run only; no same-machine Go sample set or controlled cold/warm repeats. CLI source sync includes inseparable network/local validation and is recorded separately, never subtracted as pure download time.', excludedDownloadMillis: null, cpu: 'not_measured', peakRSS: 'not_measured', io: 'not_measured'},
+  performance: {state: 'not_evaluated', targetRatio: 0.30, reason: 'Correctness run only; no same-machine Go sample set or controlled cold/warm repeats. CLI source sync includes inseparable network/local validation and is recorded separately, never subtracted as pure download time.', excludedDownloadMillis: null, cpu: 'not_measured', peakRSS: 'not_measured', io: 'not_measured', windowsMemory: 'outer owned Job observation; see owned-report.json; peakRSS remains unmeasured'},
   remaining: ['full semantic refs/context/flow', 'continuous retained native session and close', 'same-machine fixed Go 3.2.0 differential', 'independent cold/warm 20-repeat performance groups'],
 };
 const save = () => writeFileSync(join(out, 'report.json'), JSON.stringify(report, null, 2) + '\n');
@@ -29,13 +30,15 @@ function invoke(caseId, args, {timeout = 210000, phase = 'local', cacheMode = 'r
   if (fatalProcessFailure) throw new Error('Prior process failure requires outer Job retirement; no further child launched');
   const index = String(sequence++).padStart(3, '0'), fullArgs = [...args, '--home', home, '--format', 'json'];
   const startedAt = new Date().toISOString(), started = performance.now();
+  const memoryPhase = beginMemoryPhase(staticMemoryPhase(caseId), caseId);
   const run = spawnSync(binary, fullArgs, {cwd: root, env: {...process.env}, windowsHide: true, shell: false, timeout, maxBuffer: 16 << 20});
   const wallMillis = performance.now() - started;
+  endMemoryPhase(memoryPhase);
   const stdout = run.stdout ?? Buffer.alloc(0), stderr = run.stderr ?? Buffer.alloc(0);
   const stdoutPath = join(out, `${index}-${caseId}.stdout.json`), stderrPath = join(out, `${index}-${caseId}.stderr.bin`);
   writeFileSync(stdoutPath, stdout); writeFileSync(stderrPath, stderr);
   let envelope; try { envelope = JSON.parse(stdout.toString('utf8')); } catch {}
-  const observation = {caseId, args: fullArgs, startedAt, endedAt: new Date().toISOString(), phase, cacheMode, wallMillis, exit: run.status, signal: run.signal, error: run.error?.message, stdout: stdoutPath, stderr: stderrPath, stdoutSHA256: sha256(stdout), stderrSHA256: sha256(stderr), stdoutBytes: stdout.length, stderrBytes: stderr.length};
+  const observation = {caseId, pid: run.pid, memoryPhase, args: fullArgs, startedAt, endedAt: new Date().toISOString(), phase, cacheMode, wallMillis, exit: run.status, signal: run.signal, error: run.error?.message, stdout: stdoutPath, stderr: stderrPath, stdoutSHA256: sha256(stdout), stderrSHA256: sha256(stderr), stdoutBytes: stdout.length, stderrBytes: stderr.length};
   if (run.error || run.signal) fatalProcessFailure = true;
   report.commands.push(observation); save();
   const result = assertEnvelope({...observation, envelope}, expectedExit);

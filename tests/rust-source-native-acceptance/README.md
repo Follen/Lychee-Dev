@@ -131,3 +131,29 @@ phase timings and owner memory observations do not establish a 70% reduction.
 No CPU/I/O/aggregate-RSS metric is invented, no download time is guessed or
 subtracted, and no independent cold/warm repeated performance gate is marked
 passed. Required paired, equivalent-work Go/Rust measurements remain open.
+
+### Full Retail memory evidence
+
+The `full` group enables the same exact-Job sampler described in
+[the full-corpus runner](../rust-source-full-corpus/README.md#windows-memory-observation).
+Its `owned-report.json` → `memory.phases` includes the prerequisite cold index
+and warm queries, `full-native-semantic`, retained cold preparation, retained
+warm reuse, and a dedicated 1-second `retained-session-steady` window after
+successful warm-owner authentication. The idle window records individual
+samples and medians, requires at least three complete sweeps with the exact
+retained PID/creation identity, and checks that public session status is still
+ready afterward. This window is an observation, not proof of convergence or
+absence of a leak. Its one-second delay is part of correctness observation time
+and cannot be used in performance comparisons without equivalent instrumentation.
+
+Each command's phase marker and spawned PID are recorded. The nested prerequisite
+controller shares the original owner; native workers stay inside its Job even
+when they have their own nested Job. Authenticated existing native diagnostics
+establish the retained-owner role. Other descendants remain visible by exact
+image and identity; a matching candidate image alone does not prove a one-shot
+worker role. Whole-Job and candidate-image-only simultaneous sums are separate.
+Individual kernel lifetime peaks are never added together or attributed to the
+current phase. No actual Retail memory value is established by these source
+changes or by the synthetic tests. The next authorized Windows full run must
+supply its exact candidate, input and evidence hashes, correctness outcome and
+observation gaps before reporting an actual full Retail measurement.

@@ -4,6 +4,7 @@ import {existsSync, lstatSync, readdirSync, readFileSync, writeFileSync} from 'n
 import {join, resolve} from 'node:path';
 import {verifyArtifact, hashFile} from './rust-build.mjs';
 import {beginScratch} from './rust-disk.mjs';
+import {collectOwnedMemory} from './rust-owned-memory.mjs';
 import {ownedSpawnSync} from './rust-owned-process.mjs';
 
 const root = resolve('.');
@@ -13,7 +14,7 @@ if (process.platform !== 'win32') throw new Error('source-full-corpus.windows_re
 const artifact = verifyArtifact(root, artifactPath);
 const runner = join(root, 'tests/rust-source-full-corpus/run.mjs');
 const fixture = join(root, 'tests/rust-source-full-corpus/retail-oracle.json');
-const testInputs = Object.fromEntries(['tools/rust-source-full-corpus.mjs', 'tests/rust-source-full-corpus/run.mjs', 'tests/rust-source-full-corpus/assertions.mjs', 'tests/rust-source-full-corpus/retail-oracle.json'].map(path => [path, hashFile(join(root, path))]));
+const testInputs = Object.fromEntries(['tools/rust-source-full-corpus.mjs', 'tests/rust-source-full-corpus/run.mjs', 'tests/rust-source-full-corpus/assertions.mjs', 'tests/rust-source-full-corpus/retail-oracle.json', 'tools/rust-owned-process.mjs', 'tools/rust-owned-process.ps1', 'tools/rust-owned-memory.mjs'].map(path => [path, hashFile(join(root, path))]));
 const job = beginScratch(root, 'source-full-corpus', {
   command: process.argv,
   inputs: {binarySHA256: artifact.binarySHA256, oracleSHA256: hashFile(fixture), runnerSHA256: hashFile(runner), testInputs},
@@ -26,7 +27,7 @@ try {
   // Keeping the Job across invocations also permits later session-reuse checks.
   handlesReaped = false;
   const run = ownedSpawnSync(process.execPath, [runner, artifact.sourceBinary, join(job.directory, 'home'), job.evidence], {
-    cwd: root, env: {...process.env}, evidence: job.evidence, timeout: 900000,
+    cwd: root, env: {...process.env}, evidence: job.evidence, timeout: 900000, memoryObservation: true,
   });
   handlesReaped = run.handlesReaped === true; logs.push(...run.logs);
   const observationPath = join(job.evidence, 'report.json');
@@ -34,9 +35,10 @@ try {
   const after = verifyArtifact(root, artifactPath);
   const stable = after.binarySHA256 === artifact.binarySHA256 && Object.entries(testInputs).every(([path, expected]) => hashFile(join(root, path)) === expected);
   const passed = stable && handlesReaped && !run.error && run.status === 0 && observation?.state === 'passed_selected_static_cases';
+  const memory = collectOwnedMemory(run, {evidence: job.evidence, commands: observation?.commands, runState: observation?.state, sourceBinary: artifact.sourceBinary, controllerImage: process.execPath, expectedPhases: ['cold-index', 'warm-index', 'warm-query']});
   const report = {
     schema: 'lycheedev.source-full-corpus-owned.v1', passed, binarySHA256: artifact.binarySHA256,
-    profile: artifact.profile, buildInputs: artifact.inputHashes, artifactStable: stable,
+    memory, profile: artifact.profile, buildInputs: artifact.inputHashes, artifactStable: stable,
     process: {exit: run.status, error: run.error?.message, handlesReaped, proof: run.proof},
     observation: observationPath, scope: 'Full fixed Retail import/index and selected public static CLI quality cases. Semantic/session/Go differential/performance acceptance remain separate.',
   };

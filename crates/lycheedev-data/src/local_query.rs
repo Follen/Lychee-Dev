@@ -651,6 +651,8 @@ fn sql_inner_after_execute(
             "CSV export is pending parity",
         ));
     }
+    // Go validates this flag even when only metadata sources are referenced.
+    inv.usize_flag("--max-bytes", 128 << 20, 1, 512 << 20)?;
     let request = request::read(inv, &budget)?;
     budget.charge(Cost::metadata(request.sql.len() * 64 + 4096))?;
     let program = relational::Program::compile(&request.sql)?;
@@ -677,14 +679,33 @@ fn sql_inner_after_execute(
     let parameters = request.bindings()?;
     let definitions_started = Instant::now();
     let mut bundles = vec![];
+    let mut semantic_sources = BTreeMap::new();
+    let mut semantic_provenance = vec![];
     for name in program.source_tables() {
+        budget.check()?;
+        if let Some((catalog, table)) = name.split_once('.')
+            && catalog.eq_ignore_ascii_case("meta")
+        {
+            let (source, provenance) = definitions::semantics::source(
+                &inv.home,
+                &data.definition_commit,
+                &data.full_build,
+                table,
+                inv.flag_bool("--offline"),
+                &budget,
+                &inv.control,
+            )?;
+            semantic_sources.insert(name.to_owned(), source);
+            semantic_provenance.push(provenance);
+            continue;
+        }
         let canonical = if let Some((catalog, name)) = name.split_once('.') {
             if !catalog.eq_ignore_ascii_case("static") && !catalog.eq_ignore_ascii_case("effective")
             {
                 return Err(fault(
                     "relational.unsupported",
                     3,
-                    "Semantic SQL provider is pending parity",
+                    "SQL catalog must be static, effective or meta",
                 ));
             }
             name
@@ -710,9 +731,12 @@ fn sql_inner_after_execute(
         .collect::<Vec<_>>();
     let mut bundles = Some(bundles);
     let mut query_result = None;
+    let mut semantic_sources = Some(semantic_sources);
     let mut execute = |files: Vec<File>| -> Result<Vec<u32>> {
         let prepared = Instant::now();
-        let mut sources = BTreeMap::new();
+        let mut sources = semantic_sources
+            .take()
+            .ok_or_else(|| fault("records.internal", 8, "SQL source callback repeated"))?;
         let mut provenance = vec![];
         let mut decoded_bytes = 0;
         let mut snapshots = effective::Snapshots::new(inv, data, &budget);
@@ -803,6 +827,11 @@ fn sql_inner_after_execute(
     let public_numbers = public_query_numbers(&request, &result.rows, &budget)?;
     budget.check()?;
     let mut reading = json!({"complete":complete,"partial":!complete,"query":request,"result":{"columns":result.columns,"rows":result.rows},"sources":provenance,"timings":{"definitionsMs":definitions_ms,"preparationMs":preparation_ms,"executionMs":execution_ms,"decodedSourceBytes":decoded_bytes},"resourceAccounting":{"scope":"admitted allocation and work across local CASC/Encoding/decoded cache/definitions/WDC/SQL","strategy":"conservative cumulative admission","wholeQueryAccountingComplete":false,"used":budget.snapshot()?,"remainingGaps":["SQL plan/order-container transient allocations","uninterruptible single codec call"]}});
+    if !semantic_provenance.is_empty() {
+        let size = capture::json_size(&semantic_provenance, &budget)?;
+        budget.charge(Cost::metadata(size.saturating_mul(4).saturating_add(4096)))?;
+        reading["semanticSources"] = serde_json::to_value(&semantic_provenance)?;
+    }
     if !effective_sources.is_empty() {
         reading["effectiveSources"] = effective::reports_value(&effective_sources, &budget)?;
     }

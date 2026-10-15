@@ -734,6 +734,16 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - 本地纯模块 runner 已独审闭合4项发现，使用独立symbols admission、bubblewrap私有PID namespace、只读精确production副本、工具链/依赖/配置身份与封存日志；不占用或抢夺旧ordinary lease。覆盖原始production raw_json及Mailbox/CodeBytes，不是全workspace。独审实际重跑 **10/10 Rust通过**（32.81s），owner `63fa515c-5996-4201-9eb1-9edda1210f44`，receipt SHA256 `fcd22660adbbe30d5cfb22477e8d8da2b10b40a8ea6d071d1396c85d58cef876`；11 Node测试通过，17sealed logs/12依赖/110tool身份已核。freeze `f3dec24b0fc722ada17ce4dcb2d501ce273ebb85cc5b2066e49d8dd589b087a6`。此前setup失败证据保留。
 - 用户最新明确保留完整XML/Lua增强设计并尽可能解耦Emmy；这部分增强区别于固定Go官方LuaLS/LSP的NotChecked范围。自有adapter首片、内存观测与SQL语义候选另行审核，当前未据此声明补丁已缩减或全部功能通过。最终四阶段收敛审计尚未开始。
 
+### Source 分阶段内存观测、IPC 入口及 SQL 语义候选
+
+- 内存观测 R2 freeze `a1300d2c76e07d8c8ba937b4c6d8e2bd087412b445a2cfe245fa7ebdd1282899` 已独审通过。沿既有受控 Job 读取同步成员 WorkingSet/PrivateBytes，creation FILETIME 保留字符串，区分controller/CLI/worker/未分类；kernel单进程历史peak与采样同一时刻进程组peak分别报告，不直接相加各自峰值。冷index、warm-index、静态暖查询、native及持久session阶段各自保留结果与缺口。
+- 集成首次误对工作目录旧experimental wrapper运行造成1项静态失败，原日志保留，不作候选结果；改用完整R2精确stage加独审IPC文件后实际32项：30通过、2 Windows跳过。
+- 原R1发现 warm-index 未列required，EPERM留下旧ended marker时即使所有PID见过也可能假报完整。R2同时补required和所有记录phase完整性，4个distinct PID全部observed/unseen0仍不能掩盖marker失效。独审实际95 Node测试：84通过、11 Windows跳过；另4语法检查通过。未采样/失败运行不报sampled_successful_run；shutdown/handle gate不放松。**真实 Windows/Retail 内存仍 not_measured**，等待下一有意义原生批。
+- 控制器与旧共享support未混用：memory的两个process wrapper按精确独审stage字节纳入，工作目录旧实验副本不作发布依据。前后recipe/custody身份据新实际字节计算，不能把旧support hash追认当前。
+- IPC bootstrap 现先经公共source index注册project pin，验证返回context.snapshot精确等于fixture pin，再refs明确传snapshot与唯一symbol。三个mode共用；父独立复跑Node14/14通过、原29失败证据保留。只证明合法入口生成，真实CLI/Windows IPC仍 **NOT_RUN**。
+- SQL语义R2 freeze `fd60c7a5dda8532722b2b64e93c47c962af7eaa0247fd0d332885ddef9920e21` 已独审核12owner/31deps/19Go/5stdlib/61历史文件。实现固定commit的mapping、enum/flags/build condition、精确i64/u64、definition复用、空catalog及static/effective joins/provenance，控制检查贯穿load边界。长s/Kelvin按Go ASCII-origin SimpleFold类匹配；Node源码验证28160比较及删除映射mutation通过，17项Rust回归 **NOT_RUN**。新增supplement保存原freeze漏列但已读核的精确Go build_match.go，不修改历史freeze。
+- 资源准入仍有真实差异：16份1MiB语义定义的Go逻辑80MiB可接受，而当前Rust重复charge推到144MiB会拒绝。逻辑预算与Rust保留分配安全账应分别核对，不能抬高Go limit或冒称实际内存。resources输出合同、CSV、EXPLAIN继续开放。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

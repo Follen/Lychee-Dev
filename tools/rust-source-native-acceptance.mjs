@@ -4,6 +4,7 @@ import {existsSync, lstatSync, readFileSync, readdirSync, writeFileSync} from 'n
 import {join, resolve} from 'node:path';
 import {verifyArtifact, sourceDigest, hashFile} from './rust-build.mjs';
 import {beginScratch, contained} from './rust-disk.mjs';
+import {collectOwnedMemory} from './rust-owned-memory.mjs';
 import {ownedSpawnSync} from './rust-owned-process.mjs';
 import {inventory, inventoryHash, jsonFile, verifyCandidate} from '../tests/rust-skill-usage/assertions.mjs';
 import {groupBudget} from '../tests/rust-source-native-acceptance/assertions.mjs';
@@ -18,7 +19,7 @@ assert.equal(artifact.inputHashes?.sourceTree, tree, 'current source tree and se
 const workflow = jsonFile(join(root, 'tests/rust-skill-usage/workflow.json'));
 const candidate = verifyCandidate(root, candidatePath, artifact, workflow);
 assert.equal(candidate.report.artifactRecordSHA256, artifactSHA256);
-const paths = ['tools/rust-source-native-acceptance.mjs', ...readdirSync(join(root, 'tests/rust-source-native-acceptance')).filter(name => /\.(mjs|ps1)$/.test(name)).map(name => `tests/rust-source-native-acceptance/${name}`), 'tests/rust-source-full-corpus/run.mjs', 'tests/rust-source-full-corpus/assertions.mjs', 'tests/rust-source-full-corpus/retail-oracle.json', 'tests/rust-skill-usage/assertions.mjs', 'tests/rust-skill-usage/workflow.json'];
+const paths = ['tools/rust-source-native-acceptance.mjs', 'tools/rust-owned-process.mjs', 'tools/rust-owned-process.ps1', 'tools/rust-owned-memory.mjs', ...readdirSync(join(root, 'tests/rust-source-native-acceptance')).filter(name => /\.(mjs|ps1)$/.test(name)).map(name => `tests/rust-source-native-acceptance/${name}`), 'tests/rust-source-full-corpus/run.mjs', 'tests/rust-source-full-corpus/assertions.mjs', 'tests/rust-source-full-corpus/retail-oracle.json', 'tests/rust-skill-usage/assertions.mjs', 'tests/rust-skill-usage/workflow.json'];
 const testInputs = Object.fromEntries(paths.map(path => [path, hashFile(join(root, path))]));
 const job = beginScratch(root, `source-native-${group}`, {command: process.argv, inputs: {binarySHA256: artifact.binarySHA256, sourceTreeSHA256: tree, artifactSHA256, candidateReportSHA256: candidate.reportSHA256, packageSHA256: candidate.packageSHA256, testInputs}, admissionOptions: {requiredBytes: 1 << 30, scratchReserveBytes: 1 << 30}});
 let state = 'failed', handlesReaped = true; const logs = [];
@@ -26,7 +27,7 @@ const save = (name, value) => writeFileSync(join(job.evidence, name), JSON.strin
 try {
   save('candidate-identity.json', {artifact, artifactSHA256, candidate: candidate.report, candidateReportSHA256: candidate.reportSHA256, packageSHA256: candidate.packageSHA256, files: candidate.files, testInputs});
   handlesReaped = false;
-  const run = ownedSpawnSync(process.execPath, [join(root, 'tests/rust-source-native-acceptance/run.mjs'), artifact.sourceBinary, candidate.packageRoot, job.directory, job.evidence, group], {cwd: root, env: {...process.env}, evidence: job.evidence, timeout});
+  const run = ownedSpawnSync(process.execPath, [join(root, 'tests/rust-source-native-acceptance/run.mjs'), artifact.sourceBinary, candidate.packageRoot, job.directory, job.evidence, group], {cwd: root, env: {...process.env}, evidence: job.evidence, timeout, memoryObservation: group === 'full'});
   handlesReaped = run.handlesReaped === true; logs.push(...run.logs);
   const observationPath = join(job.evidence, 'report.json');
   const observation = existsSync(observationPath) ? jsonFile(observationPath) : null;
@@ -34,7 +35,13 @@ try {
   const stable = after.binarySHA256 === artifact.binarySHA256 && hashFile(artifactPath) === artifactSHA256 && sourceDigest(root) === tree && hashFile(candidatePath) === candidate.reportSHA256
     && inventoryHash(inventory(candidate.packageRoot)) === candidate.packageSHA256 && Object.entries(testInputs).every(([path, hash]) => hashFile(join(root, path)) === hash);
   const passed = stable && handlesReaped && !run.error && run.status === 0 && observation?.state === `passed_native_${group}`;
-  save('owned-report.json', {schema: 'lycheedev.source-native-acceptance-owned.v1', group, passed, sourceTreeSHA256: tree, binarySHA256: artifact.binarySHA256, artifactSHA256, candidateReportSHA256: candidate.reportSHA256, packageSHA256: candidate.packageSHA256, inputsStable: stable, testInputs,
+  const prerequisitePath = join(job.evidence, 'full-corpus', 'report.json');
+  let prerequisite;
+  // A failed/missing prerequisite remains incomplete memory evidence too.
+  try { if (existsSync(prerequisitePath)) prerequisite = jsonFile(prerequisitePath); } catch {}
+  const memory = collectOwnedMemory(run, {evidence: job.evidence, commands: [...(prerequisite?.commands ?? []), ...(observation?.commands ?? [])], windows: observation?.memoryWindows, resources: observation?.resources, runState: observation?.state, sourceBinary: artifact.sourceBinary, controllerImage: process.execPath,
+    expectedPhases: group === 'full' ? ['cold-index', 'warm-index', 'warm-query', 'full-native-semantic', 'retained-session-cold', 'retained-session-warm', 'retained-session-steady'] : []});
+  save('owned-report.json', {schema: 'lycheedev.source-native-acceptance-owned.v1', group, passed, memory, sourceTreeSHA256: tree, binarySHA256: artifact.binarySHA256, artifactSHA256, candidateReportSHA256: candidate.reportSHA256, packageSHA256: candidate.packageSHA256, inputsStable: stable, testInputs,
     process: {exit: run.status, error: run.error?.message, handlesReaped, proof: run.proof}, observation: observationPath,
     scope: group === 'full' ? 'Fresh complete fixed Retail corpus, selected real ordinary native and cross-CLI retained session correctness. Partial native coverage stays partial. No Go/performance/full-product acceptance claim.' : 'Real isolated native IPC lifecycle/quota fixture; this does not establish full Retail semantic acceptance.'});
   state = passed ? 'succeeded' : 'failed'; if (!passed) process.exitCode = 1;

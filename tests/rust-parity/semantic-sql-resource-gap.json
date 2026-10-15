@@ -1,0 +1,64 @@
+{
+  "schema": "lycheedev.semantic-sql-resource-gap.v1",
+  "oracleCommit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "status": "OPEN; source-derived admission comparison only, Go and Rust execution NOT_RUN",
+  "scenario": {
+    "sql": "SELECT * FROM meta.Sample",
+    "offline": true,
+    "table": "Sample",
+    "build": "12.1.0.69933",
+    "definitionCommit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "ordinaryInputs": "Use authenticated catalog_fixture Sample manifest and valid DBD; cached resources all at the exact commit.",
+    "mappingDbdm": "ENUM Sample::Value D0\nENUM Sample::Value D1\nENUM Sample::Value D2\nENUM Sample::Value D3\nENUM Sample::Value D4\nENUM Sample::Value D5\nENUM Sample::Value D6\nENUM Sample::Value D7\nENUM Sample::Value D8\nENUM Sample::Value D9\nENUM Sample::Value D10\nENUM Sample::Value D11\nENUM Sample::Value D12\nENUM Sample::Value D13\nENUM Sample::Value D14\nENUM Sample::Value D15\n",
+    "resources": [
+      "meta/enums/D0.dbde",
+      "meta/enums/D1.dbde",
+      "meta/enums/D2.dbde",
+      "meta/enums/D3.dbde",
+      "meta/enums/D4.dbde",
+      "meta/enums/D5.dbde",
+      "meta/enums/D6.dbde",
+      "meta/enums/D7.dbde",
+      "meta/enums/D8.dbde",
+      "meta/enums/D9.dbde",
+      "meta/enums/D10.dbde",
+      "meta/enums/D11.dbde",
+      "meta/enums/D12.dbde",
+      "meta/enums/D13.dbde",
+      "meta/enums/D14.dbde",
+      "meta/enums/D15.dbde"
+    ],
+    "definitionBytes": 1048576,
+    "definitionGeneration": "ASCII // followed by 1048573 ASCII x bytes followed by LF; exactly 1048576 bytes.",
+    "definitionSHA256": "db8236835a7df60fe4e1ae1e42ffa317a51f0a4311dd4b493458acdcc713d38b",
+    "rowsPerResource": 0
+  },
+  "goSourceDerivedExpectation": {
+    "outcome": "success, columns present and rows [], 16 provenance definitions",
+    "documentCount": 16,
+    "aggregateDefinitionBytes": 16777216,
+    "limitDocumentCount": 128,
+    "limitAggregateDefinitionBytes": 16777216,
+    "definitionLoadMetadataBytes": 67108864,
+    "semanticParseMetadataBytes": 16777216,
+    "definitionSubtotalMetadataBytes": 83886080,
+    "wholeQueryMetadataLimit": 134217728,
+    "note": "Subtotal 80 MiB, plus small manifest, DBD, mapping and 16 mapping-entry charges; below 128 MiB. Go load charges each distinct URL, even if content blobs match."
+  },
+  "rustSourceDerivedCurrentBehavior": {
+    "outcome": "records.query_resource_budget before SQL/capture; false rejection against Go oracle",
+    "definitionLoadMetadataBytesIfAllAdmitted": 134217728,
+    "semanticParseMetadataBytesIfAllAdmitted": 16777216,
+    "definitionSubtotalMetadataBytesIfAllAdmitted": 150994944,
+    "note": "Nominal 144 MiB plus small prerequisite charges. Atomic limit rejects during the 15th definition loader, so actual counter never reaches 144 MiB. No new test claims this is acceptable parity."
+  },
+  "requiredFollowup": "Audit Go logical admission counters separately from Rust retained-allocation safety accounting, reserve executor allowance without duplicate charges, align resources field and whole-query counter snapshot semantics. Preserve 100M decode limit and bounded publication-only reference work. Do not fix by raising Go limits, by renaming resourceAccounting, or by claiming RSS.",
+  "evidence": [
+    "internal/records/resource/budget.go",
+    "internal/records/definitions.go",
+    "internal/records/definitions_budget_test.go::TestColdDefinitionsChargeActualMetadata",
+    "internal/records/semantics.go",
+    "crates/lycheedev-data/src/definitions.rs::load",
+    "crates/lycheedev-data/src/definitions/semantics.rs::parse_values"
+  ]
+}

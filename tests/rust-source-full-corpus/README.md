@@ -51,3 +51,39 @@ Sync wall time is a separate network-and-local-preparation phase. Because the
 CLI does not expose a pure download boundary, its time is not falsely labeled
 pure download or subtracted from a controllable-time ratio. This correctness
 run reports no 70% performance success, CPU/RSS/IO or complete Source acceptance.
+
+### Windows memory observation
+
+The existing outer owned Job now opts into an evidence-only 100 ms poller. The
+controller marks `cold-index`, `warm-index` and `warm-query` command windows;
+network/input preparation and independent Git auditing remain distinguishable.
+Read `owned-report.json` → `memory`, and its hashed raw JSONL chunks. Existing
+`peakRSS: not_measured` stays accurate: this is Windows WorkingSetSize and
+PrivateUsage (committed private bytes), not Linux RSS or resident private bytes.
+
+Only current counters from authenticated members of that exact Job are summed
+within one bounded sweep. Each sweep records monotonic start/end timestamps;
+it is synchronized but not atomic. Reported group peaks are maxima of these
+sums, never sums of individual process peaks. Lifetime kernel counters are kept
+per process only. Working-set sums can double-count shared physical pages.
+Process PID, exact decimal creation FILETIME, image and evidence-based role are
+retained. `sourceExecutableOnly` filters the exact candidate image, while the
+whole-Job totals include controllers, Git, native children and any compiler
+children. A compilation/preparation peak is not a Source-command peak.
+
+A missed command window, process exit/creation race, failed observation,
+unobserved assigned child, long polling gap, evidence cap or unverified sampler
+shutdown remains explicit. Short-lived children/peaks between polls can be
+missed even in an otherwise clean sample set. Correctness success is recorded
+separately from observation coverage; failed/incomplete execution is never a
+successful full-corpus memory result. Sampling failures do not kill/retry the
+business command. An unjoined observer or unclosed handle still prevents the
+existing scratch cleanup gate from claiming all handles are closed.
+
+The poller is bounded to 128 simultaneous members, 15,000 sweeps and 64 MiB of
+raw evidence, split into at most 8 MiB files. It has no process-name discovery,
+process mutation, game access or new native execution route. Only the two Source
+acceptance launchers enable it; existing callers retain their disabled default.
+Synthetic reducer checks: `node --test tools/rust-owned-memory.test.mjs`.
+Windows-only tests in that file exercise actual owned children and observation
+failure isolation; a non-Windows skip is not runtime validation.
