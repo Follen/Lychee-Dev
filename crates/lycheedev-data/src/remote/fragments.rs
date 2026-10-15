@@ -219,12 +219,10 @@ impl<'a> Fragments<'a> {
             budget,
         };
         store.check()?;
-        let scoped =
-            cache::child_control(control, budget.map_or(control.deadline(), |b| b.deadline))?;
         let metadata_owner = lycheedev_core::metadata::Metadata::open_controlled_with_check(
             home,
             true,
-            &scoped,
+            control,
             || store.check(),
         )?;
         let result = Self::prepare_opened(home, pin, offline, control, budget, metadata, ranges);

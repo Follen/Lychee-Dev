@@ -528,11 +528,11 @@ fn cache_put_held_metadata_schema_is_bounded_by_independent_budget_deadline() {
     let elapsed = started.elapsed();
     guard.close().unwrap();
     let error = result.unwrap_err();
-    assert!(
-        serde_json::to_string(&error)
-            .unwrap()
-            .contains("records.query_resource_budget")
+    assert_eq!(
+        (error.code.as_str(), error.exit_code),
+        ("records.query_resource_budget", 3)
     );
+    fixture.control.check().unwrap();
     assert!(elapsed < Duration::from_millis(500), "{elapsed:?}");
     assert!(fixture.store().read::<bool>("held/open").unwrap().is_none());
 }
@@ -754,4 +754,196 @@ fn bounded_blob_consumers_keep_independent_stop_and_do_not_rebill_cached_network
             .exists()
     );
     fixture.control.check().unwrap();
+}
+
+#[test]
+fn cache_sqlite_write_wait_keeps_independent_deadline_identity_and_metering() {
+    use std::cell::Cell;
+    struct ObservedValue<'a> {
+        serialized: &'a Cell<bool>,
+        budget: &'a Budget,
+    }
+    impl Serialize for ObservedValue<'_> {
+        fn serialize<S: serde::Serializer>(
+            &self,
+            serializer: S,
+        ) -> std::result::Result<S::Ok, S::Error> {
+            // Prove the actual Store consumer got past Metadata::open with a
+            // live Budget before trying its blocked BEGIN IMMEDIATE.
+            self.budget.check().unwrap();
+            self.serialized.set(true);
+            serializer.serialize_bool(true)
+        }
+    }
+    let fixture = Fixture::new();
+    let original_deadline = fixture.control.deadline();
+    let mut holder = Metadata::open(&fixture.home, true).unwrap();
+    holder.create("held/owner", &true).unwrap();
+    let serialized = Cell::new(false);
+    let result = holder.consume::<bool, ()>("held/owner", |_| {
+        // Core's public callback holds an actual SQLite write transaction.
+        // This needs no test-only SQLite dependency or mocked Core wait.
+        let budget = Budget::new(
+            crate::resource::Cost::defaults(),
+            Instant::now() + Duration::from_millis(150),
+            None,
+        );
+        budget.charge_observed_network_bytes(17).unwrap();
+        let allocation = budget.reserve_retained(8).unwrap();
+        let store = Store {
+            home: &fixture.home,
+            control: &fixture.control,
+            budget: Some(&budget),
+        };
+        let started = Instant::now();
+        let error = store
+            .put(
+                "blocked/write",
+                &ObservedValue {
+                    serialized: &serialized,
+                    budget: &budget,
+                },
+                None,
+            )
+            .unwrap_err();
+        assert!(serialized.get());
+        assert!(Instant::now() >= budget.deadline);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(
+            (error.code.as_str(), error.exit_code),
+            ("records.query_resource_budget", 3)
+        );
+        fixture.control.check().unwrap();
+        assert_eq!(fixture.control.deadline(), original_deadline);
+        drop(allocation);
+        let used = budget.snapshot().unwrap();
+        assert_eq!((used.network_bytes, used.retained_bytes), (17, 0));
+        Err(error)
+    });
+    assert_eq!(result.unwrap_err().exit_code, 3);
+    // The holder rolls back its attempted consume; the blocked writer did not
+    // publish. Both real connections are explicitly closed before reopening.
+    assert!(holder.read::<bool>("held/owner").unwrap());
+    assert_eq!(holder.generation("blocked/write").unwrap(), None);
+    holder.close().unwrap();
+    fixture.store().put("blocked/write", &true, None).unwrap();
+    assert!(
+        fixture
+            .store()
+            .read::<bool>("blocked/write")
+            .unwrap()
+            .unwrap()
+            .0
+    );
+}
+
+#[test]
+fn cache_sqlite_write_wait_keeps_original_deadline_before_longer_budget() {
+    let fixture = Fixture::new();
+    let mut holder = Metadata::open(&fixture.home, true).unwrap();
+    holder.create("held/owner", &true).unwrap();
+    let error = holder
+        .consume::<bool, ()>("held/owner", |_| {
+            let control =
+                OperationControl::uncancelable(Instant::now() + Duration::from_millis(150));
+            let budget = Budget::new(
+                crate::resource::Cost::defaults(),
+                Instant::now() + Duration::from_secs(5),
+                None,
+            );
+            let store = Store {
+                home: &fixture.home,
+                control: &control,
+                budget: Some(&budget),
+            };
+            let error = store.put("blocked/deadline", &true, None).unwrap_err();
+            budget.check().unwrap();
+            assert_eq!(
+                (error.code.as_str(), error.exit_code),
+                ("command.deadline", 5)
+            );
+            Err(error)
+        })
+        .unwrap_err();
+    assert_eq!(
+        (error.code.as_str(), error.exit_code),
+        ("command.deadline", 5)
+    );
+    assert!(holder.read::<bool>("held/owner").unwrap());
+    assert_eq!(holder.generation("blocked/deadline").unwrap(), None);
+    holder.close().unwrap();
+}
+
+#[test]
+fn cache_lease_budget_deadline_does_not_stop_original_control() {
+    let fixture = Fixture::new();
+    let guard = fixture.store().lease("held/budget").unwrap();
+    let budget = Budget::new(
+        crate::resource::Cost::defaults(),
+        Instant::now() + Duration::from_millis(30),
+        None,
+    );
+    let store = Store {
+        home: &fixture.home,
+        control: &fixture.control,
+        budget: Some(&budget),
+    };
+    let started = Instant::now();
+    let error = store.lease("held/budget").err().unwrap();
+    assert_eq!(
+        (error.code.as_str(), error.exit_code),
+        ("records.query_resource_budget", 3)
+    );
+    assert!(started.elapsed() < Duration::from_millis(500));
+    fixture.control.check().unwrap();
+    guard.close().unwrap();
+    fixture
+        .store()
+        .lease("held/budget")
+        .unwrap()
+        .close()
+        .unwrap();
+}
+
+#[test]
+fn original_stop_precedes_expired_independent_budget_and_cleanup_keeps_all_causes() {
+    let fixture = Fixture::new();
+    let budget = Budget::new(crate::resource::Cost::defaults(), Instant::now(), None);
+    fixture.control.tracked_cancel_handle().unwrap().cancel();
+    let store = Store {
+        home: &fixture.home,
+        control: &fixture.control,
+        budget: Some(&budget),
+    };
+    let error = store.put("must-not-publish", &true, None).unwrap_err();
+    assert_eq!(
+        (error.code.as_str(), error.exit_code),
+        ("command.cancelled", 7)
+    );
+    let mut primary = fault("records.remote_range", 4, "invalid original body");
+    primary.details = serde_json::json!({"offset":17});
+    let mut cleanup = fault("external.io", 5, "consuming close failed");
+    cleanup.details = serde_json::json!({"native":123,"owner":"consumed"});
+    let error = store
+        .finish::<()>(Err(primary.clone()), Err(cleanup.clone()))
+        .unwrap_err();
+    assert_eq!(
+        (error.code.as_str(), error.exit_code),
+        ("records.remote_range", 4)
+    );
+    assert_eq!(
+        error.details["primary"],
+        serde_json::to_value(primary).unwrap()
+    );
+    assert_eq!(
+        error.details["cleanup"],
+        serde_json::to_value(cleanup).unwrap()
+    );
+    assert_eq!(error.details["control"]["code"], "command.cancelled");
+    assert_eq!(error.details["control"]["exit_code"], 7);
+    assert_eq!(
+        error.details["budget"]["code"],
+        "records.query_resource_budget"
+    );
+    assert_eq!(error.details["budget"]["exit_code"], 3);
 }

@@ -406,10 +406,10 @@ jobs:
         run: node tools/rust-cargo.mjs --owner ci-binding-contracts --one-shot -- test --locked --offline -p lycheedev-binding-contracts --test contracts -j 1
       - name: Run owned Emmy adapter declaration contracts
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: node tools/rust-cargo.mjs --owner ci-emmy-adapter --one-shot -- test --locked --offline -p lycheedev-emmy-adapter --lib --test declaration_contract --test callback_contract --test declaration_rendering_contract --test selected_projector_contract --test selected_query_contract -j 1
+        run: node tools/rust-cargo.mjs --owner ci-emmy-adapter --one-shot -- test --locked --offline -p lycheedev-emmy-adapter --lib --test declaration_contract --test callback_contract --test declaration_rendering_contract --test selected_projector_contract --test selected_query_contract --test expression_plan_contract -j 1
       - name: Compare owned selected projection and queries against the fixed engine
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: node tools/rust-cargo.mjs --owner ci-emmy-selected-oracle --one-shot -- test --locked --offline -p lycheedev-source --test selected_projector_native_oracle --test selected_query_native_oracle -j 1 -- --nocapture
+        run: node tools/rust-cargo.mjs --owner ci-emmy-selected-oracle --one-shot -- test --locked --offline -p lycheedev-source --test selected_projector_native_oracle --test selected_query_native_oracle --test expression_plan_native_oracle -j 1 -- --nocapture
       - name: Run source batch admission ownership and budget fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-source-batch --one-shot -- test --locked --offline -p lycheedev-source --lib batch::tests -j 1

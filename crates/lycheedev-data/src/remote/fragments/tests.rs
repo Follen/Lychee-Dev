@@ -807,3 +807,103 @@ fn prepared_build_and_cdn_configuration_share_one_owner_under_tight_remaining_bu
             < 10000 * std::mem::size_of::<String>() as u64
     );
 }
+
+#[test]
+fn fragment_prepare_schema_wait_keeps_independent_budget_as_primary() {
+    use std::time::{Duration, Instant};
+    let f = Fixture::new();
+    let guard = f.store().lease("metadata-schema").unwrap();
+    let budget = Budget::new(
+        crate::resource::Cost::defaults(),
+        Instant::now() + Duration::from_millis(30),
+        None,
+    );
+    let started = Instant::now();
+    let error = Fragments::prepare_with(
+        &f.home,
+        &f.pin,
+        false,
+        &f.control,
+        Some(&budget),
+        &f.fetch,
+        &f.fetch,
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        (error.code.as_str(), error.exit_code),
+        ("records.query_resource_budget", 3)
+    );
+    assert!(started.elapsed() < Duration::from_millis(500));
+    f.control.check().unwrap();
+    assert!(f.fetch.calls.lock().unwrap().is_empty());
+    assert!(!f.home.join("state/toolkit.sqlite").exists());
+    guard.close().unwrap();
+    f.store().lease("metadata-schema").unwrap().close().unwrap();
+}
+
+#[test]
+fn completed_fragment_read_keeps_bytes_charged_after_independent_deadline_without_retry() {
+    use std::time::{Duration, Instant};
+    struct ExpiresAfterRead(AtomicU64);
+    impl RangeFetcher for ExpiresAfterRead {
+        fn fetch(
+            &self,
+            _: &str,
+            request: RangeRequest,
+            control: &OperationControl,
+            budget: Option<&Budget>,
+        ) -> Result<RangeReply> {
+            control.check()?;
+            let budget = budget.unwrap();
+            budget.check()?;
+            self.0.fetch_add(1, Ordering::Relaxed);
+            budget.charge(crate::resource::Cost {
+                network_requests: 1,
+                ..Default::default()
+            })?;
+            let bytes = b"body".to_vec();
+            assert_eq!(bytes.len() as i64, request.length);
+            budget.charge_observed_network_bytes(bytes.len() as u64)?;
+            std::thread::sleep(budget.deadline.saturating_duration_since(Instant::now()));
+            Ok(RangeReply {
+                bytes,
+                object_bytes: 10,
+            })
+        }
+    }
+    let f = Fixture::new();
+    let ranges = ExpiresAfterRead(AtomicU64::new(0));
+    let budget;
+    let (mut reader, _) =
+        Fragments::prepare_with(&f.home, &f.pin, false, &f.control, None, &f.fetch, &ranges)
+            .unwrap();
+    budget = Budget::new(
+        crate::resource::Cost::defaults(),
+        Instant::now() + Duration::from_millis(30),
+        None,
+    );
+    reader.store.budget = Some(&budget);
+    let object = "a".repeat(32);
+    let error = reader.range(&object, request()).unwrap_err();
+    assert_eq!(
+        (error.code.as_str(), error.exit_code),
+        ("records.query_resource_budget", 3)
+    );
+    assert_eq!(ranges.0.load(Ordering::Relaxed), 1);
+    assert_eq!((reader.requests, reader.transferred), (1, 4));
+    assert_eq!(f.fetch.calls.lock().unwrap().len(), 3);
+    let used = budget.snapshot().unwrap();
+    assert_eq!(
+        (
+            used.network_requests,
+            used.network_bytes,
+            used.retained_bytes
+        ),
+        (1, 4, 0)
+    );
+    f.control.check().unwrap();
+    let key = cache_key("tpr/old", &object);
+    assert!(f.store().read::<SavedRange>(&key).unwrap().is_none());
+    f.store().lease(&key).unwrap().close().unwrap();
+}

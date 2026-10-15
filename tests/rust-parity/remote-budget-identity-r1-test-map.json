@@ -1,0 +1,80 @@
+{
+  "schema": "lycheedev.remote-budget-identity-test-map.v1",
+  "rust": "NOT_RUN",
+  "newTests": 7,
+  "revisedTests": 2,
+  "tests": [
+    {
+      "path": "crates/lycheedev-data/src/remote/cache/tests.rs",
+      "name": "cache_put_held_metadata_schema_is_bounded_by_independent_budget_deadline",
+      "kind": "strengthened",
+      "assertions": "actual Store.put schema lease wait; primary (records.query_resource_budget,3), original control live, no document; old containment assertion replaced",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/remote/cache/tests.rs",
+      "name": "cache_sqlite_write_wait_keeps_independent_deadline_identity_and_metering",
+      "kind": "new",
+      "assertions": "actual Store.put with real Metadata::consume BEGIN IMMEDIATE holder; live-Budget serialization marker; primary code3, original deadline unchanged; owner rollback/close; no new row, 17 network bytes retained, 8 retained bytes refunded",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/remote/cache/tests.rs",
+      "name": "cache_sqlite_write_wait_keeps_original_deadline_before_longer_budget",
+      "kind": "new",
+      "assertions": "actual SQLite-held Store.put; original command.deadline/5, independent budget remains live; no publish, holder rollback and close",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/remote/cache/tests.rs",
+      "name": "cache_lease_budget_deadline_does_not_stop_original_control",
+      "kind": "new",
+      "assertions": "actual resource lease wait; primary budget3, original live, lease reacquisition after explicit close",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/remote/cache/tests.rs",
+      "name": "original_stop_precedes_expired_independent_budget_and_cleanup_keeps_all_causes",
+      "kind": "new",
+      "assertions": "original cancellation/7 precedes expired independent Budget; full typed primary/cleanup/control/budget details retain exact codes and exit codes",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/remote/fragments/tests.rs",
+      "name": "fragment_prepare_schema_wait_keeps_independent_budget_as_primary",
+      "kind": "new",
+      "assertions": "actual public prepare metadata-schema wait, budget3, original live, no network/SQLite publication, lease reacquisition",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/remote/fragments/tests.rs",
+      "name": "completed_fragment_read_keeps_bytes_charged_after_independent_deadline_without_retry",
+      "kind": "new",
+      "assertions": "actual Fragment.range consumer with one injected completed read; budget3 after body, one request/4 bytes persist, retained0, no alias/no replay, closed lease",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/remote/target/tests.rs",
+      "name": "target_two_minute_cap_does_not_reclassify_independent_budget_deadline",
+      "kind": "replaced incorrect previous contract",
+      "assertions": "child remains actual120s cap, expires independent Budget separately as3, original and target child remain live",
+      "status": "NOT_RUN"
+    },
+    {
+      "path": "crates/lycheedev-data/src/remote/target/tests.rs",
+      "name": "target_pin_schema_wait_keeps_short_budget_identity_before_publication",
+      "kind": "new",
+      "assertions": "actual resolve_with reaches definitions after4 metadata requests then held pin schema lease; budget3, original live, no pin/capture, checked guard close",
+      "status": "NOT_RUN"
+    }
+  ],
+  "existingCoverageRetained": [
+    "remote::cache::tests::cache_put_held_metadata_schema_observes_original_cancellation",
+    "remote::cache::tests::cache_put_held_metadata_schema_observes_independent_budget_cancellation",
+    "remote::cache::tests::bounded_blob_consumers_keep_independent_stop_and_do_not_rebill_cached_network",
+    "remote::fragments::tests::discarded_return_buffer_refunds_allocation_after_close_failure_or_post_close_stop",
+    "remote::target::tests::two_minute_child_preserves_ordered_and_legacy_cancellation_without_promotion",
+    "Core metadata::supplemental_tests; evidence bounded tests; none run for this candidate"
+  ],
+  "executionPolicy": "No Cargo, no new build channel, no symbols lease adoption; coordinator may use already-authorized future existing remote:: test group after review."
+}

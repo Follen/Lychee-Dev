@@ -140,13 +140,6 @@ impl Store<'_> {
         }
         Ok(())
     }
-    fn scoped_control(&self) -> Result<OperationControl> {
-        self.check()?;
-        child_control(
-            self.control,
-            self.budget.map_or(self.control.deadline(), |b| b.deadline),
-        )
-    }
     pub(crate) fn finish<T>(&self, result: Result<T>, cleanup: Result<()>) -> Result<T> {
         finish(
             result,
@@ -156,8 +149,10 @@ impl Store<'_> {
         )
     }
     fn controlled<T>(&self, run: impl FnOnce(&OperationControl) -> Result<T>) -> Result<T> {
-        let control = self.scoped_control()?;
-        let result = run(&control);
+        self.check()?;
+        // Budget is an independent stop cause, not an invocation deadline.
+        // Core checks this original control before the supplemental callback.
+        let result = run(self.control);
         self.finish(result, Ok(()))
     }
     // Refresh CAS needs only document identity/generation. Go does not decode
@@ -213,6 +208,9 @@ impl Store<'_> {
                         identity()
                     }
                 })?;
+            // Core's <=1 MiB string normalizer has only invocation callbacks.
+            // Recheck the independent scope before starting deserialization.
+            self.check()?;
             let value = serde_json::from_slice(&normalized).map_err(|_| identity())?;
             Ok(Some((value, raw.generation)))
         })
@@ -275,10 +273,9 @@ impl Store<'_> {
         })
     }
     pub fn lease(&self, key: &str) -> Result<ExclusiveLock> {
-        let control = self.scoped_control()?;
         loop {
             self.check()?;
-            match ExclusiveLock::resource_controlled(&self.home.join("locks"), key, &control) {
+            match ExclusiveLock::resource_controlled(&self.home.join("locks"), key, self.control) {
                 Ok(guard) => {
                     return match self.check() {
                         Ok(()) => Ok(guard),
@@ -286,7 +283,14 @@ impl Store<'_> {
                     };
                 }
                 Err(error) if pure_expected(&error, "workspace.busy") => {
-                    std::thread::sleep(control.remaining()?.min(Duration::from_millis(25)));
+                    self.check()?;
+                    let mut pause = self.control.remaining()?.min(Duration::from_millis(25));
+                    if let Some(budget) = self.budget {
+                        // Shorten only the wait, never the original stop scope.
+                        pause =
+                            pause.min(budget.deadline.saturating_duration_since(Instant::now()));
+                    }
+                    std::thread::sleep(pause);
                 }
                 Err(error) => return self.finish(Err(error), Ok(())),
             }

@@ -622,3 +622,5 @@ mod decoded_alias;
 mod body_owner;
 
 mod default_sql;
+
+mod default_navigation;

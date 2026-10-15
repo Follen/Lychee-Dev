@@ -278,7 +278,10 @@ impl Navigator<'_> {
     }
 }
 
-pub(super) fn dispatch(inv: &Invocation) -> Result<Outcome> {
+pub(super) fn dispatch(
+    inv: &Invocation,
+    after_read: &mut impl FnMut() -> Result<()>,
+) -> Result<Outcome> {
     let encounter = super::identifier(inv, "--journal-encounter-id", false)?;
     let depth = inv
         .flag("--max-depth")
@@ -298,74 +301,93 @@ pub(super) fn dispatch(inv: &Invocation) -> Result<Outcome> {
         Instant::now() + Duration::from_secs(timeout as u64),
         inv.control.clone(),
     ));
-    let mut state = None;
-    let prepared = db2::prepare_following(inv, &[SECTION], &budget, &mut |batch| {
-        // Go completes every table's schema/WDC open before asking for the
-        // next table. Preserve error precedence as well as the success order.
-        let mut nav = Navigator::open(batch, budget.clone())?;
-        if state.is_some() {
-            return Ok(if batch[0].bundle.identity.name == "SpellName" {
-                vec!["SpellMisc"]
-            } else {
-                Vec::new()
-            });
+    let mut remote = if inv.flag_bool("--cdn") {
+        Some(crate::remote::provider::OpenedScope::open(inv, &budget)?.admit()?)
+    } else {
+        None
+    };
+    let result = (|| {
+        let mut state = None;
+        let prepared = db2::prepare_following_scoped(
+            inv,
+            &[SECTION],
+            &budget,
+            remote.as_mut(),
+            None,
+            &mut |batch| {
+                // Go completes every table's schema/WDC open before asking for the
+                // next table. Preserve error precedence as well as the success order.
+                let mut nav = Navigator::open(batch, budget.clone())?;
+                if state.is_some() {
+                    return Ok(if batch[0].bundle.identity.name == "SpellName" {
+                        vec!["SpellMisc"]
+                    } else {
+                        Vec::new()
+                    });
+                }
+                let result = nav.encounter_tree(encounter, depth)?;
+                let spells = result["spellCount"] != 0;
+                state = Some((result, nav.relations, nav.partial, nav.truncation));
+                Ok(if spells {
+                    vec!["SpellName"]
+                } else {
+                    Vec::new()
+                })
+            },
+        )?;
+        let (mut result, relations, partial, truncation) = state.expect("initial table batch");
+        let mut nav = Navigator::open(&prepared, budget.clone())?;
+        nav.relations = relations;
+        for reason in partial {
+            nav.partial(reason);
         }
-        let result = nav.encounter_tree(encounter, depth)?;
-        let spells = result["spellCount"] != 0;
-        state = Some((result, nav.relations, nav.partial, nav.truncation));
-        Ok(if spells {
-            vec!["SpellName"]
-        } else {
-            Vec::new()
-        })
-    })?;
-    let (mut result, relations, partial, truncation) = state.expect("initial table batch");
-    let mut nav = Navigator::open(&prepared, budget.clone())?;
-    nav.relations = relations;
-    for reason in partial {
-        nav.partial(reason);
+        nav.truncation = truncation;
+        if result["spellCount"] != 0 {
+            nav.encounter_spells(&mut result)?;
+        }
+        result
+            .as_object_mut()
+            .expect("encounter object")
+            .extend(nav.context()?.as_object().expect("context").clone());
+        let pin = &prepared[0].pin;
+        let complete = result["complete"] == true;
+        let truncated = result["truncated"] == true;
+        let manifest = json!({"operation":"encounter_get","root":format!("journal_encounter:{encounter}"),"snapshot":pin.id,"dataBuild":pin.data.as_ref().expect("DataPin").full_build,"relations":result["relations"],"relatedFiles":result["relatedFiles"],"complete":complete,"truncated":truncated,"truncationReason":result["truncationReason"]});
+        after_read()?;
+        let mut captures = Vec::new();
+        for (value, kind, locator) in [
+            (
+                &result,
+                "encounter-get",
+                format!("encounter:get:{encounter}"),
+            ),
+            (
+                &manifest,
+                "relation-manifest",
+                format!("encounter:relations:{encounter}"),
+            ),
+        ] {
+            budget.check()?;
+            check_source(inv, &prepared[0], &budget, remote.as_ref())?;
+            let raw = capture_bytes(value, &budget)?;
+            captures.push(evidence::commit_capture_budgeted(&inv.home, CaptureInput { bytes: &raw, maximum_bytes: 16 << 20, media_type: "application/json", provenance: json!({"kind":kind,"locator":locator,"snapshot":pin.id,"dataBuild":pin.data.as_ref().expect("DataPin").full_build}), complete, truncated }, &inv.control, budget.as_ref())?);
+        }
+        let mut outcome = Outcome::new(result);
+        outcome.complete = complete;
+        outcome.selection = serde_json::to_value(pin)?;
+        outcome.provenance = captures;
+        if truncated {
+            outcome.warnings.push(json!("This result is truncated; preserve the snapshot and the stated truncation reason when continuing."));
+        }
+        if !nav.partial.is_empty() {
+            outcome.warnings.push(json!("This result is only partially covered; inspect partialReasons for the unavailable tables and unresolved relations."));
+        }
+        Ok(outcome)
+    })();
+    match remote {
+        Some(scope) => scope.finish(result),
+        None => result,
     }
-    nav.truncation = truncation;
-    if result["spellCount"] != 0 {
-        nav.encounter_spells(&mut result)?;
-    }
-    result
-        .as_object_mut()
-        .expect("encounter object")
-        .extend(nav.context()?.as_object().expect("context").clone());
-    let pin = &prepared[0].pin;
-    let complete = result["complete"] == true;
-    let truncated = result["truncated"] == true;
-    let manifest = json!({"operation":"encounter_get","root":format!("journal_encounter:{encounter}"),"snapshot":pin.id,"dataBuild":pin.data.as_ref().expect("DataPin").full_build,"relations":result["relations"],"relatedFiles":result["relatedFiles"],"complete":complete,"truncated":truncated,"truncationReason":result["truncationReason"]});
-    let mut captures = Vec::new();
-    for (value, kind, locator) in [
-        (
-            &result,
-            "encounter-get",
-            format!("encounter:get:{encounter}"),
-        ),
-        (
-            &manifest,
-            "relation-manifest",
-            format!("encounter:relations:{encounter}"),
-        ),
-    ] {
-        budget.check()?;
-        check_source(inv, &prepared[0], &budget)?;
-        let raw = capture_bytes(value, &budget)?;
-        captures.push(evidence::commit_capture_budgeted(&inv.home, CaptureInput { bytes: &raw, maximum_bytes: 16 << 20, media_type: "application/json", provenance: json!({"kind":kind,"locator":locator,"snapshot":pin.id,"dataBuild":pin.data.as_ref().expect("DataPin").full_build}), complete, truncated }, &inv.control, budget.as_ref())?);
-    }
-    let mut outcome = Outcome::new(result);
-    outcome.complete = complete;
-    outcome.selection = serde_json::to_value(pin)?;
-    outcome.provenance = captures;
-    if truncated {
-        outcome.warnings.push(json!("This result is truncated; preserve the snapshot and the stated truncation reason when continuing."));
-    }
-    if !nav.partial.is_empty() {
-        outcome.warnings.push(json!("This result is only partially covered; inspect partialReasons for the unavailable tables and unresolved relations."));
-    }
-    Ok(outcome)
 }
 
 #[cfg(test)]

@@ -97,10 +97,10 @@ fn scoped_control(control: &OperationControl, budget: Option<&Budget>) -> Result
     let deadline = control
         .deadline()
         .min(Instant::now() + Duration::from_secs(120));
-    cache::child_control(
-        control,
-        budget.map_or(deadline, |budget| deadline.min(budget.deadline)),
-    )
+    // Go remote_target.go owns a real two-minute context cap. Retain that
+    // child, but keep an independent Budget out of OperationControl so its
+    // deadline keeps records.query_resource_budget (3) at every consumer.
+    cache::child_control(control, deadline)
 }
 
 trait DefinitionResolver {

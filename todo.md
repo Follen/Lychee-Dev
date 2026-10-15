@@ -16,7 +16,7 @@ Authority for decisions, status and evidence: [handover.md](handover.md). This c
 ## Hard requirement: unmodified Emmy upstream
 
 - [ ] Inventory every remaining production hook and actual consumer, including shared ingestion, contextual inference, identity/cardinality and diagnostic receipts.
-- [ ] Execute the composed owned-session S1–S3 regressions (21 new Rust tests), implement recursive backends, and connect real consumers before removing upstream hooks; the source-only slices are independently reviewed, not production equivalence.
+- [ ] Execute the composed owned-session S1–S4 regressions (29 new Rust tests), implement recursive backends, and connect real consumers before removing upstream hooks; the source-only slices are independently reviewed, not production equivalence.
 - [ ] Replace all upstream source changes with owned-crate behavior through the fixed unmodified public API, preserving the complete approved XML/Lua design. No minimal-hook final exemption remains.
 - [ ] Prove each replacement with full output/diagnostic/coverage/cancellation/resource differentials, then exact-lock native and full Retail cold/warm/session acceptance. Keep prior failures and transitional patches honestly identified until removed.
 
@@ -243,4 +243,4 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 
 - [ ] definitions控制R3已静态独审并集成：原invocation/独立Budget、HTTP和解析/发布贯通；24新增Rust待真实运行。把SQL/DB2实际调用改接此接口，保外层Metadata与Core隐藏Directory close缺口，不能只凭API存在标完成。
 
-- [ ] R18.3已接默认远端DB2 record/page/schema/search/FK及SQL外层Metadata生命周期，15新增/11继承Rust待运行；已修outer/provider预算首因与重复stop，继续修Store/Fragments/target真实内部consumer同类问题，再验完整typed取消。
+- [ ] R18.3已接默认远端DB2 record/page/schema/search/FK及SQL外层Metadata生命周期，15新增/11继承Rust待运行；已修outer/provider预算首因与重复stop，Store/Fragments/target内部同类错误身份修复已审并组合（7新/2修），保真实120秒target上限；R19 navigation 6项消费者待运行，继续normalizer/lock同步边界及capture内部checked-close后再验完整typed取消。

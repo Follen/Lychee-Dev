@@ -117,9 +117,16 @@ impl Request {
             "data spell info" => {
                 let spell = identifier(inv, "--spell-id", true)?;
                 if spell == 0 {
-                    return Err(fault("command.invalid_arguments", 2, "data spell info requires --spell-id"));
+                    return Err(fault(
+                        "command.invalid_arguments",
+                        2,
+                        "data spell info requires --spell-id",
+                    ));
                 }
-                let depth = inv.flag("--max-depth").unwrap_or("0").parse::<i64>()
+                let depth = inv
+                    .flag("--max-depth")
+                    .unwrap_or("0")
+                    .parse::<i64>()
                     .map_err(|_| fault("command.invalid_arguments", 2, "invalid --max-depth"))?;
                 if depth < 0 {
                     return Err(fault("command.invalid_arguments", 2, "invalid --max-depth"));
@@ -127,7 +134,10 @@ impl Request {
                 if depth > 32 {
                     return Err(fault("records.query_limit", 2, "records.query_limit"));
                 }
-                Ok(Self::SpellInfo { spell, depth: if depth == 0 { 5 } else { depth as u32 } })
+                Ok(Self::SpellInfo {
+                    spell,
+                    depth: if depth == 0 { 5 } else { depth as u32 },
+                })
             }
             "data creature display" => {
                 let display = identifier(inv, "--display-id", true)?;
@@ -164,9 +174,16 @@ impl Request {
             "data item textures" => Ok(Self::ItemTextures(identifier(inv, "--item-id", false)?)),
             "data item models" => {
                 let item = identifier(inv, "--item-id", false)?;
-                let signed = |flag| inv.flag(flag).unwrap_or("0").parse::<i64>()
-                    .map_err(|_| fault("command.invalid_arguments", 2, format!("invalid {flag}")));
-                Ok(Self::ItemModels { item, race: signed("--race-id")?, gender: signed("--gender")? })
+                let signed = |flag| {
+                    inv.flag(flag).unwrap_or("0").parse::<i64>().map_err(|_| {
+                        fault("command.invalid_arguments", 2, format!("invalid {flag}"))
+                    })
+                };
+                Ok(Self::ItemModels {
+                    item,
+                    race: signed("--race-id")?,
+                    gender: signed("--gender")?,
+                })
             }
             "data decor list" => {
                 let text = inv.flag("--limit").ok_or_else(|| {
@@ -536,14 +553,33 @@ fn admit_row(budget: &Budget, row: &Row) -> Result<()> {
 
 // The file batch verifies the source before/after IO. Recheck after navigation
 // too, before publishing any result, so long scans cannot silently cross builds.
-fn check_source(inv: &Invocation, prepared: &db2::Prepared, budget: &Budget) -> Result<()> {
+pub(super) fn check_source(
+    inv: &Invocation,
+    prepared: &db2::Prepared,
+    budget: &Arc<Budget>,
+    remote: Option<&crate::remote::provider::Scope<'_>>,
+) -> Result<()> {
+    inv.control.check()?;
     budget.check()?;
+    if let Some(scope) = remote {
+        // Fixed Go readSession.check returns after context checks for CDN, and
+        // fileSource has no local verify callback there. Content was already
+        // authenticated by the borrowed Session, not by this source selector.
+        return scope.check_consumer(inv, budget);
+    }
     let pin = prepared.pin.data.as_ref().expect("prepare checked DataPin");
-    budget.charge(Cost::metadata(inv.required("--installation")?.len()
-        + pin.product.len() + pin.full_build.len() + pin.region.len()
-        + pin.language.len() + pin.definition_commit.len()))?;
+    budget.charge(Cost::metadata(
+        inv.required("--installation")?.len()
+            + pin.product.len()
+            + pin.full_build.len()
+            + pin.region.len()
+            + pin.language.len()
+            + pin.definition_commit.len(),
+    ))?;
     let current = installed::resolve_pinned_target_budgeted(
-        Path::new(inv.required("--installation")?), pin, Some(budget),
+        Path::new(inv.required("--installation")?),
+        pin,
+        Some(budget),
     )?;
     let proof = &prepared.file.reading;
     if &current.data != pin
@@ -560,7 +596,10 @@ fn check_source(inv: &Invocation, prepared: &db2::Prepared, budget: &Budget) -> 
     budget.check()
 }
 
-pub(super) fn dispatch(inv: &Invocation) -> Result<Outcome> {
+pub(super) fn dispatch(
+    inv: &Invocation,
+    after_read: &mut impl FnMut() -> Result<()>,
+) -> Result<Outcome> {
     inv.control.check()?;
     if !inv.flag_bool("--cdn") && inv.flag("--installation").is_none_or(str::is_empty) {
         return Err(fault(
@@ -573,7 +612,7 @@ pub(super) fn dispatch(inv: &Invocation) -> Result<Outcome> {
         ));
     }
     if inv.command == "data encounter get" {
-        return encounter::dispatch(inv);
+        return encounter::dispatch(inv, after_read);
     }
     let request = Request::parse(inv)?;
     let timeout = inv.usize_flag("--timeout-seconds", 300, 1, 3600)?;
@@ -582,57 +621,91 @@ pub(super) fn dispatch(inv: &Invocation) -> Result<Outcome> {
         Instant::now() + Duration::from_secs(timeout as u64),
         inv.control.clone(),
     ));
-    let prepared = if matches!(request, Request::SpellInfo { .. } | Request::ItemModels { .. } | Request::ItemGeosets(_) | Request::ItemTextures(_) | Request::CreatureDisplay { .. } | Request::CreatureModel(_)) {
-        let tables = request.tables();
-        let mut next = 1;
-        db2::prepare_following(inv, &tables[..1], &budget, &mut |batch| {
-            // Go opens each table completely before resolving the next one.
-            // Keep that failure order in the one shared CASC read session.
-            Navigator::open(batch, budget.clone())?;
-            let names = tables.get(next).copied().into_iter().collect();
-            next += 1;
-            Ok(names)
-        })?
+    let mut remote = if inv.flag_bool("--cdn") {
+        Some(crate::remote::provider::OpenedScope::open(inv, &budget)?.admit()?)
     } else {
-        db2::prepare_many(inv, request.tables(), &budget)?
+        None
     };
-    let mut nav = Navigator::open(&prepared, budget.clone())?;
-    let mut result = nav.evaluate(&request)?;
-    result
-        .as_object_mut()
-        .expect("domain object")
-        .extend(nav.context()?.as_object().expect("context object").clone());
-    budget.check()?;
-    check_source(inv, &prepared[0], &budget)?;
-    let raw = capture_bytes(&result, &budget)?;
-    let complete = result["complete"] == true;
-    let truncated = result["truncated"] == true;
-    let (kind, locator) = request.capture();
-    let pin = &prepared[0].pin;
-    let capture = evidence::commit_capture_budgeted(
-        &inv.home,
-        CaptureInput {
-            bytes: &raw,
-            maximum_bytes: 16 << 20,
-            media_type: "application/json",
-            provenance: json!({"kind":kind,"locator":locator,"snapshot":pin.id,"dataBuild":pin.data.as_ref().expect("DataPin").full_build}),
-            complete,
-            truncated,
-        },
-        &inv.control,
-        budget.as_ref(),
-    )?;
-    let mut outcome = Outcome::new(result);
-    outcome.complete = complete;
-    outcome.selection = serde_json::to_value(pin)?;
-    outcome.provenance = vec![capture];
-    if truncated {
-        outcome.warnings.push(json!("This result is truncated; preserve the snapshot and the stated truncation reason when continuing."));
+    let result = (|| {
+        let prepared = if matches!(
+            request,
+            Request::SpellInfo { .. }
+                | Request::ItemModels { .. }
+                | Request::ItemGeosets(_)
+                | Request::ItemTextures(_)
+                | Request::CreatureDisplay { .. }
+                | Request::CreatureModel(_)
+        ) {
+            let tables = request.tables();
+            let mut next = 1;
+            db2::prepare_following_scoped(
+                inv,
+                &tables[..1],
+                &budget,
+                remote.as_mut(),
+                None,
+                &mut |batch| {
+                    // Go opens each table completely before resolving the next one.
+                    // Keep that failure order in the one shared CASC read session.
+                    Navigator::open(batch, budget.clone())?;
+                    let names = tables.get(next).copied().into_iter().collect();
+                    next += 1;
+                    Ok(names)
+                },
+            )?
+        } else {
+            db2::prepare_following_scoped(
+                inv,
+                request.tables(),
+                &budget,
+                remote.as_mut(),
+                None,
+                &mut |_| Ok(Vec::new()),
+            )?
+        };
+        let mut nav = Navigator::open(&prepared, budget.clone())?;
+        let mut result = nav.evaluate(&request)?;
+        result
+            .as_object_mut()
+            .expect("domain object")
+            .extend(nav.context()?.as_object().expect("context object").clone());
+        budget.check()?;
+        after_read()?;
+        check_source(inv, &prepared[0], &budget, remote.as_ref())?;
+        let raw = capture_bytes(&result, &budget)?;
+        let complete = result["complete"] == true;
+        let truncated = result["truncated"] == true;
+        let (kind, locator) = request.capture();
+        let pin = &prepared[0].pin;
+        let capture = evidence::commit_capture_budgeted(
+            &inv.home,
+            CaptureInput {
+                bytes: &raw,
+                maximum_bytes: 16 << 20,
+                media_type: "application/json",
+                provenance: json!({"kind":kind,"locator":locator,"snapshot":pin.id,"dataBuild":pin.data.as_ref().expect("DataPin").full_build}),
+                complete,
+                truncated,
+            },
+            &inv.control,
+            budget.as_ref(),
+        )?;
+        let mut outcome = Outcome::new(result);
+        outcome.complete = complete;
+        outcome.selection = serde_json::to_value(pin)?;
+        outcome.provenance = vec![capture];
+        if truncated {
+            outcome.warnings.push(json!("This result is truncated; preserve the snapshot and the stated truncation reason when continuing."));
+        }
+        if !nav.partial.is_empty() {
+            outcome.warnings.push(json!("This result is only partially covered; inspect partialReasons for the unavailable tables and unresolved relations."));
+        }
+        Ok(outcome)
+    })();
+    match remote {
+        Some(scope) => scope.finish(result),
+        None => result,
     }
-    if !nav.partial.is_empty() {
-        outcome.warnings.push(json!("This result is only partially covered; inspect partialReasons for the unavailable tables and unresolved relations."));
-    }
-    Ok(outcome)
 }
 
 #[cfg(test)]

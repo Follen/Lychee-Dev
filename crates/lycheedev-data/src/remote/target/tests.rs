@@ -503,17 +503,27 @@ fn family_wide_blizzard_source_parent_supports_exact_regional_data_track() {
 }
 
 #[test]
-fn target_child_uses_shorter_independent_budget_deadline_for_pin_and_capture() {
+fn target_two_minute_cap_does_not_reclassify_independent_budget_deadline() {
     let control = OperationControl::default();
     let budget = Budget::new(
         crate::resource::Cost::defaults(),
-        Instant::now() + Duration::from_secs(1),
+        Instant::now() + Duration::from_millis(30),
         None,
     );
+    let before = Instant::now();
     let child = scoped_control(&control, Some(&budget)).unwrap();
-    assert_eq!(child.deadline(), budget.deadline);
+    assert!(child.deadline() >= before + Duration::from_secs(120));
+    assert!(child.deadline() <= Instant::now() + Duration::from_secs(120));
     assert!(child.deadline() < control.deadline());
+    std::thread::sleep(budget.deadline.saturating_duration_since(Instant::now()));
+    child.check().unwrap();
+    control.check().unwrap();
     assert!(child.stop_cause().unwrap().is_none());
+    let error = budget.check().unwrap_err();
+    assert_eq!(
+        (error.code.as_str(), error.exit_code),
+        ("records.query_resource_budget", 3)
+    );
 }
 
 #[test]
@@ -590,4 +600,76 @@ fn target_fixture_has_required_build_id_and_rejects_missing_or_mismatched_id() {
             .code,
         "records.invalid_metadata"
     );
+}
+
+#[test]
+fn target_pin_schema_wait_keeps_short_budget_identity_before_publication() {
+    struct HoldPinSchema(RefCell<Option<storage::ExclusiveLock>>);
+    impl DefinitionResolver for HoldPinSchema {
+        fn resolve(
+            &self,
+            home: &Path,
+            _: &str,
+            _: bool,
+            control: &OperationControl,
+            budget: Option<&Budget>,
+        ) -> Result<String> {
+            control.check()?;
+            budget.unwrap().check()?;
+            *self.0.borrow_mut() = Some(storage::ExclusiveLock::resource(
+                &home.join("locks"),
+                "metadata-schema",
+            )?);
+            Ok("a".repeat(40))
+        }
+    }
+    let fixture = Fixture::new();
+    let fetch = inputs("retail", "12.1.5.70000");
+    let definitions = HoldPinSchema(RefCell::new(None));
+    let budget = Budget::new(
+        crate::resource::Cost::defaults(),
+        Instant::now() + Duration::from_millis(500),
+        None,
+    );
+    let started = Instant::now();
+    let error = resolve_with(
+        &fixture.home,
+        &request(),
+        &fixture.control,
+        Some(&budget),
+        &fetch,
+        &definitions,
+    )
+    .unwrap_err();
+    assert_eq!(
+        (error.code.as_str(), error.exit_code),
+        ("records.query_resource_budget", 3)
+    );
+    assert!(started.elapsed() < Duration::from_secs(2));
+    fixture.control.check().unwrap();
+    assert_eq!(fetch.calls.borrow().len(), 4);
+    definitions
+        .0
+        .borrow_mut()
+        .take()
+        .expect("definitions reached before budget stopped")
+        .close()
+        .unwrap();
+    let metadata =
+        lycheedev_core::metadata::Metadata::open_controlled(&fixture.home, false, &fixture.control)
+            .unwrap();
+    assert!(metadata.list::<PinnedSet>("pin/", 10).unwrap().is_empty());
+    assert!(
+        metadata
+            .list::<serde_json::Value>("capture/", 10)
+            .unwrap()
+            .is_empty()
+    );
+    metadata.close().unwrap();
+    fixture
+        .store()
+        .lease("metadata-schema")
+        .unwrap()
+        .close()
+        .unwrap();
 }
