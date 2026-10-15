@@ -9,7 +9,9 @@ export const emmySourcePath='.tmp/emmy-reconstruction-v1/upstream';
 export const emmyRecipePath='third_party/emmy';
 // Static imports of recipe check.mjs plus its runtime PowerShell helper/policy.
 export const emmySupportFiles=['tools/rust-emmy-identity.mjs','tools/rust-disk.mjs','tools/rust-owned-process.mjs','tools/rust-owned-process.ps1','tools/rust-build-auxiliary.json','release/rust-disk-policy.json'];
-export const emmyRecipeFiles=['.gitignore','README.md','check.mjs','files.json','identity.json','prepare.py','scratch.mjs','seal.py','test_prepare.py'];
+export const emmyOwnedCrate='crates/lycheedev-binding-contracts';
+export const emmyOwnedFiles=['Cargo.toml','src/lib.rs','tests/contracts.rs'].map(path=>`${emmyOwnedCrate}/${path}`);
+export const emmyRecipeFiles=['.gitignore','README.md','check.mjs','files.json','identity.json','prepare.py','scratch.mjs','seal.py','test_prepare.py','standalone-Cargo.toml'];
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const hex=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 // Python orders Unicode code points; JS default order compares UTF-16 units.
@@ -94,7 +96,11 @@ export function inspectEmmy(root){
   try{let entry;while((entry=patchDirectory.readSync())){check(patchNames.length<32&&entry.isFile()&&!entry.isSymbolicLink(),'unknown_patch');patchNames.push(entry.name);}}finally{patchDirectory.closeSync();}
   check(JSON.stringify(patchNames.sort(sorted))===JSON.stringify(patches.map(path=>path.slice(8)).sort(sorted)),'unknown_patch');
   const recipeFiles=[...emmyRecipeFiles,...patches].sort(sorted).map(path=>row(recipe,path,8*2**20));
-  const supportFiles=emmySupportFiles.map(path=>row(root,path,8*2**20));
+  const owned=emmyInventory(join(root,emmyOwnedCrate)).files.map(file=>({...file,path:`${emmyOwnedCrate}/${file.path}`}));
+  assert.deepEqual(owned.map(file=>file.path),emmyOwnedFiles,'emmy.owned_contract_inventory');
+  assert.deepEqual(owned,identity.ownedFiles,'emmy.owned_contract_identity');
+  check(emmyTreeDigest(owned)===identity.ownedTreeSHA256,'owned_contract_identity');
+  const supportFiles=[...emmySupportFiles,...emmyOwnedFiles].map(path=>row(root,path,8*2**20));
   const actual=emmyInventory(source);assert.deepEqual(actual.files,files,'emmy.generated_inventory');
   check(actual.totalBytes===total,'generated_bytes');
   check(files.find(file=>file.path==='LICENSE')?.sha256===identity.base.license.sha256,'original_license_bytes');

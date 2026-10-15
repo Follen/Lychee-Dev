@@ -173,7 +173,7 @@ jobs:
         run: node tools/rust-cargo.mjs --owner ci-delivery-selection --one-shot -- test --locked --offline -p lycheedev-delivery --lib selection_tests -j 1
       - name: Run combined addon transaction filesystem fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: node tools/rust-cargo.mjs --owner ci-addon-transaction --one-shot -- test --locked --offline -p lycheedev-delivery --test combined_addon -j 1
+        run: node tools/rust-cargo.mjs --owner ci-addon-transaction --one-shot -- test --locked --offline -p lycheedev-delivery --test combined_addon -j 1 -- --nocapture
       - name: Run formal slot maintenance filesystem fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-slot-maintenance --one-shot -- test --locked --offline -p lycheedev-delivery --test slot_maintenance -j 1
@@ -193,6 +193,12 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node tools/rust-cargo.mjs --owner ci-repair-locks --one-shot -- test --locked --offline -p lycheedev-core --lib storage::controlled_lock_tests -j 1
+      - name: Run slot-only preflight cleanup and uncertainty fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-slot-preflight --one-shot -- test --locked --offline -p lycheedev-core --lib storage::slot_preflight::tests -j 1
+      - name: Run actual DELETE-sharing probe ownership fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-slot-sharing-probe --one-shot -- test --locked --offline -p lycheedev-windows --lib filesystem::sharing_probe::tests -j 1
       - name: Run original-handle cleanup substitution fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
@@ -285,6 +291,9 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node tools/rust-cargo.mjs --owner ci-native-preparation --one-shot -- test --locked --offline -p lycheedev-source --lib native:: -j 1
+      - name: Run engine-independent owned binding contract fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-binding-contracts --one-shot -- test --locked --offline -p lycheedev-binding-contracts --test contracts -j 1
       - name: Run owned Emmy adapter declaration contracts
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-emmy-adapter --one-shot -- test --locked --offline -p lycheedev-emmy-adapter --lib --test declaration_contract --test callback_contract -j 1

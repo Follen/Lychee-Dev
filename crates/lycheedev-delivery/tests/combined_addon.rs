@@ -112,7 +112,31 @@ fn combined_upgrade_freezes_release_blocks_reserved_slots_and_recovers_main_befo
         &guard,
     )
     .unwrap_err();
+    // Preserve the first cause in the test log. Historical failures did not
+    // record this raw code; only this new execution can establish it.
+    eprintln!(
+        "combined addon first slot failure: {}",
+        serde_json::to_string(&error).unwrap()
+    );
     assert_eq!(error.exit_code, 5);
+    assert_eq!(error.code, "external.io");
+    assert_eq!(
+        error.details["cause"]["schema"],
+        "lycheedev.slot-sharing-preflight.v1"
+    );
+    assert_eq!(error.details["cause"]["stage"], "open");
+    assert_eq!(error.details["cause"]["rawOsError"], 32);
+    assert_eq!(error.details["cause"]["renameAttempted"], false);
+    assert_eq!(error.details["cause"]["published"], false);
+    let mut members: Vec<_> = fs::read_dir(slots::directory(&parent, 1))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    members.sort();
+    assert_eq!(
+        members,
+        ["Loader.lua", "Lychee Dev Slot 01.toc", "Payload.lua"]
+    );
     assert_eq!(error.details["result"]["phase"], "main");
     assert_eq!(error.details["result"]["complete"], false);
     assert_eq!(

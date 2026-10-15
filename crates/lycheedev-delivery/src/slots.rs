@@ -668,7 +668,7 @@ pub fn install_controlled(
         for (name, want) in static_files(index as u16, &pool.version, &pool.schema) {
             let path = target.join(&name);
             if absent(&path)? && pool.state == "installing" {
-                storage::atomic_write_controlled(&path, &want, control)?;
+                storage::slot_atomic_write_controlled(&path, &want, control)?;
             } else {
                 let actual = read_bounded_controlled(&path, STATIC_LIMIT, control)?;
                 if actual != want {
@@ -681,7 +681,7 @@ pub fn install_controlled(
         }
         let payload = target.join("Payload.lua");
         let actual = if absent(&payload)? && pool.state == "installing" {
-            storage::atomic_write_controlled(&payload, INERT, control)?;
+            storage::slot_atomic_write_controlled(&payload, INERT, control)?;
             INERT.to_vec()
         } else {
             read_bounded_controlled(&payload, PAYLOAD_LIMIT, control)?
@@ -738,7 +738,7 @@ fn upgrade(
     }
     for write in plan.writes {
         control.check()?;
-        storage::atomic_write_controlled(&write.path, &write.bytes, control)?;
+        storage::slot_atomic_write_controlled(&write.path, &write.bytes, control)?;
     }
     pool = SlotPool {
         schema: SCHEMA.into(),

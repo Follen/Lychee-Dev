@@ -19,3 +19,22 @@ fetches the pinned archive to the supplied archive path when it is absent.
 Implementation status and integration gates are recorded by the project's sole
 current authority, `handover.md`. Availability of these APIs is not a claim that
 all historical binding semantics or full-source acceptance are restored.
+
+## Owned binding contracts
+
+`crates/lycheedev-binding-contracts` contains the engine-independent evidence
+records formerly defined inside the patch. It depends only on serde/json/std;
+Emmy re-exports its exact types, while the owned adapter depends on it directly.
+Engine syntax IDs, SemanticId, LuaType, session isolation and inference/checker
+hooks remain in Emmy. This does not remove the enhanced Lua/XML semantics.
+
+From `upstream/crates/emmylua_code_analysis`, the dependency path climbs exactly
+five parents to the source snapshot root, then enters
+`crates/lycheedev-binding-contracts`. It never points outside that snapshot.
+The recipe identity authenticates every owned-crate file as `ownedFiles` plus
+`ownedTreeSHA256`; Python preparation and JS build/stage verification reject
+missing, changed or unexpected files. Sealing updates both inventories.
+Standalone staging includes those files and a minimal local workspace manifest;
+full corresponding-source staging preserves the product manifest and includes
+the same crate. Both root and upstream Cargo.lock record this path dependency.
+The new crate is covered by the owned unsafe-code gate.

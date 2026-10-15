@@ -31,7 +31,7 @@
 
 Go 基线若需要变更，必须明确记录新目标、精确 commit、原因和差分范围，再重建受影响 oracle。不能因远端 main 前进而自动滚动。
 
-## 3. 现状、证据与缺口（本次源码只读调查）
+## 3. 初始调查快照（2026-10-14；后续实现状态以本文更新节为准）
 
 状态口径：`implemented`=有代码；`historical-pass/fail`=旧记录、非本次重跑；`unverified`=当前等价证据未齐；`blocked`=明确前置缺口；`not_run`=本轮未运行。任何一项都不能替代最终验收。
 
@@ -812,6 +812,20 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - 29 owner、134基线依赖与258固定Go来源逐一核hash并独立静态收敛，冻结 `legacy-read-r2-stage-r2-freeze.json` SHA256 `a05d2db91e072591c9916f7c5c9f22c9071cdb39050d74b54f7db1313c38e348`，最终回执 `legacy-read-r2-stage-r2-review.json` 取代freeze中的待复审标记。97新增测试声明全部 **NOT_RUN**，rustfmt解析不是typecheck。相对冻结依赖仅已独审Core锁分类两文件变化，见integration清单。
 - Cargo只增加Live至已有固定flate21.1.10/zlib-rs的生产边及base640.22.1测试边；lock全部包/version/checksum不变，不混入第二解压后端。CI扩大history::覆盖各真实子模块并独立workspace::tests；CLI formal_live与Core evidence::原组保留。接线实际YAML/TOML校验和独立窄审通过，尚未执行这些Rust组。
 - 明确剩余差异：通用JSON语法/类型及损坏DEFLATE的错误文案/offset未全部等价；workspace Value不能表达Go接受异常时区后延迟MarshalJSON失败。prepared-only OP cancel、显式owner OP/BTP abandon及多文档原子CAS另片实施中。此批不宣称历史兼容全齐、describe84齐或四阶段审计已开始。
+
+### 默认业务接线与剩余实现纠偏（2026-10-15）
+
+- 当前默认 CON/activation/doctor 已由 CLI formal_live 调用正式 ConnectionService，并非仍未接默认或继续旧原型入口。其真实运行/错误恢复/实机验收仍按精确候选分别验证。todo 已将“待首次接线”改为“已接线待完整验证”；§3 是起点调查历史快照，不能反向覆盖此状态。363历史真实Go Lua214/214通过保留，最终候选仍需复测。
+- 实际仍缺的 Data 业务包括 Wago Hotfix provider、显式 Raidbots 快照路线、remote target resolve 和共享 CDN reader；最后一项波及 DB2/SQL/navigation/assets。本地 dbcache table/scan 已有 dispatch，不再沿旧表误称缺实现。partial-encrypted BLTE/DB2 底层已存在，但生产 reader/cache 消费链尚未贯通 missing spans/partial provenance，仍是独立实现任务。
+
+### 自有 binding-contracts 与 slot sharing 预检候选（2026-10-15）
+
+- `lycheedev-binding-contracts` 从上游补丁移出135行既有纯合同，依赖仅std/serde/json。Emmy原路径兼容re-export，adapter直接消费同一类型；Source→adapter→Emmy、engine/adapter→contracts无环。FileId/LuaSyntaxId/函数类型/session隔离及推断hooks仍保留内核，完整XML/Lua增强不删。补丁新增行4193→4071净减122，不能声称零patch。独审20文件/853重建引擎文件核hash，Python46/Node28实过，剩余patch升级规程写入DESIGN。
+- 新crate原integration测试5/5已本地受控执行，owner `f3550b5b-fd57-41df-9437-63bb97c61097`，receipt SHA256 `6608ae2fd0706c63d1fa3a2a9e6d62ec7b9ae685b6996436990179cd17921137`；原纯模块21/21另owner `e497e3e9-7bf1-4c12-9b2f-7453e0cbe5d3`，receipt `753bddfb79dd2b666bc680f093bc76f861397fb62a05e36f1e57093abb4cf182`。49sealed logs逐一核hash，两次source/runner/tools/deps身份一致；12registry包完整lock记录未变，新增真实path crate。symbols lease本人释放；15条harness dead_code警告保留未屏蔽。冻结 `tests/rust-local-pure/freeze-owned-contracts.json`。这26项不替代adapter24、engine36、Windows或完整Retail验收，后三者仍待新配方运行。
+- Slot预检仅四个slot文件writer启用：原CREATE_NEWtemp写/sync后仍持原handle，以OPEN_EXISTING/DELETE-only/share7/OPEN_REPARSE_POINT探测目标；只有probe open raw32才在尚未rename前用原handle discard+checkedclose。其他open错误继续原发布，probe close失败停止并retain temp，全部原因与取消保留，不重试已消费handle。普通atomic无probe、marker不变、same-directory/64temp/strict-three/rename失败retain不变；不引父层staging的ACL/权限变化，不从MoveFileEx错误推断可删。Live typed失败仍pending intent，不授业务重放。
+- Slot冻结 `slot-sharing-preflight-freeze.json` SHA256 `39d6177e41ae50b5964a2c4711a60122f3adfe184aa464f6779fdf798bb90f83`，9owner/121deps/15Go/9历史/4support独审无新可行动finding。Core10、Windows4、combined强化1全部 **NOT_RUN**；CI两独立selector和combined --nocapture仅接线，首次历史raw code仍UNKNOWN。此修复仅避免预检时已持DELETE-sharing锁造成残留，不解决后置竞争/close不确定/历史残留通用恢复。
+- 合成候选保留c6b07c7的Live锁图边，实际组合Node35与Python46全部通过，owner `811060f8-3897-425a-95d3-fe2b1c4c451f`；只证明custody/runner静态fixtures，未跑组合Rust。先前协调者archive输出超过16MiB的准备失败原证据保留，未进入产品测试；改为owned archive文件后本次成功，不追认先前成功。
+- `95bd313`虽已推送但截至本节点未观察到Actions run；未空commit刷队列。c6b07c7普通push已触发fast事件。此真实产品批使用native marker再次请求完整验收，79ef在途保持；79ef的静态fullRetail已运行，实际内存数值仍待其最终封存artifact核验。
 
 ## 11. 最后执行：需要实际配合的测试清单
 

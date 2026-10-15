@@ -15,10 +15,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
+name = "lycheedev-binding-contracts"
+version = "3.1.2"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lycheedev-local-pure"
 version = "0.0.0"
 dependencies = [
  "hex",
+ "lycheedev-binding-contracts",
  "serde",
  "serde_json",
 ]

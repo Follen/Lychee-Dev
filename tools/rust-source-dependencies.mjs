@@ -36,6 +36,10 @@ export function stageEmmySources(root,destination){
       copyFileSync(emmyNoLinks(join(root,path)),join(destination,path),constants.COPYFILE_EXCL);
     }
   }
+  // A standalone stage has no product workspace. Give the owned dependency a
+  // bounded local workspace instead of letting Cargo discover an outer checkout.
+  const rootManifest=join(destination,'Cargo.toml');
+  if(!existsSync(rootManifest))copyFileSync(join(destination,emmyRecipePath,'standalone-Cargo.toml'),rootManifest,constants.COPYFILE_EXCL);
   const after=inspectEmmy(destination),original=inspectEmmy(root);
   for(const current of [after,original]){
     assert.equal(current.recipeSHA256,before.recipeSHA256,'emmy.recipe_changed_during_stage');

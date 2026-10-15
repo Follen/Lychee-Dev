@@ -23,16 +23,58 @@ def bounded(path, limit):
     return data
 
 
-def verify(lock, home):
+OWNED_PREFIX = "crates/lycheedev-binding-contracts/"
+OWNED_PATHS = {OWNED_PREFIX + name for name in ("Cargo.toml", "src/lib.rs", "tests/contracts.rs")}
+
+
+def verify_owned(lock, identity):
+    if set(identity) != OWNED_PATHS or any(
+        not isinstance(value, str) or len(value) != 64
+        or any(char not in "0123456789abcdef" for char in value)
+        for value in identity.values()
+    ):
+        raise ValueError("cache.owned_identity")
+    # Only the one fixed sibling crate is admitted, never a supplied path.
+    repository = lock.parent.parent.parent
+    root = repository / "crates/lycheedev-binding-contracts"
+    for path in (repository, repository / "crates", root):
+        if path.is_symlink() or not path.is_dir():
+            raise ValueError("cache.owned_path")
+    actual = set()
+    for index, path in enumerate(root.rglob("*")):
+        if index >= 16 or path.is_symlink():
+            raise ValueError("cache.owned_inventory")
+        if path.is_file():
+            name = path.relative_to(repository).as_posix()
+            if name not in identity or digest(bounded(path, 1 << 20)) != identity[name]:
+                raise ValueError("cache.owned_source_bytes")
+            actual.add(name)
+        elif not path.is_dir() or path.relative_to(root).as_posix() not in ("src", "tests"):
+            raise ValueError("cache.owned_inventory")
+    if actual != OWNED_PATHS:
+        raise ValueError("cache.owned_inventory")
+    manifest = tomllib.loads(bounded(root / "Cargo.toml", 65536).decode())
+    if manifest.get("package", {}).get("name") != "lycheedev-binding-contracts" or manifest["package"].get("version") != "3.1.2":
+        raise ValueError("cache.owned_package")
+
+
+def verify(lock, home, owned=None):
     packages = tomllib.loads(bounded(lock, 128 << 10).decode())["package"]
     if len(packages) > 64:
         raise ValueError("cache.package_budget")
     registry = "index.crates.io-1949cf8c6b5b557f"
     rows = []
+    local_packages = {"lycheedev-local-pure": "0.0.0"}
+    local_seen = set()
+    if owned is not None:
+        verify_owned(lock, owned)
+        local_packages["lycheedev-binding-contracts"] = "3.1.2"
     for package in packages:
         if "source" not in package:
-            if package["name"] != "lycheedev-local-pure":
+            name = package["name"]
+            if name not in local_packages or package["version"] != local_packages[name] or name in local_seen or "checksum" in package:
                 raise ValueError("cache.unexpected_local_package")
+            local_seen.add(name)
             continue
         if package["source"] != "registry+https://github.com/rust-lang/crates.io-index":
             raise ValueError("cache.unofficial_source")
@@ -96,10 +138,12 @@ def verify(lock, home):
         rows.append({"name": package["name"], "version": package["version"],
                      "archiveSHA256": package["checksum"], "files": len(expected),
                      "treeSHA256": digest(json.dumps(sorted(expected.items()), separators=(",", ":")).encode())})
+    if owned is not None and local_seen != set(local_packages):
+        raise ValueError("cache.owned_lock_inventory")
     if not rows:
         raise ValueError("cache.empty_closure")
     return rows
 
 
 if __name__ == "__main__":
-    print(json.dumps(verify(Path(sys.argv[1]), Path(sys.argv[2])), separators=(",", ":")))
+    print(json.dumps(verify(Path(sys.argv[1]), Path(sys.argv[2]), json.loads(bounded(Path(sys.argv[3]), 65536)) if len(sys.argv) == 4 else None), separators=(",", ":")))

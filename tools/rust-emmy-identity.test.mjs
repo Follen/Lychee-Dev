@@ -4,7 +4,7 @@ import fs,{mkdirSync,mkdtempSync,readFileSync,rmSync,symlinkSync,writeFileSync} 
 import {tmpdir} from 'node:os';
 import {join,posix,resolve,win32} from 'node:path';
 import {syncBuiltinESMExports} from 'node:module';
-import {emmyInventory,emmyRecipeFiles,emmyRecipePath,emmyRelativePath,emmySourcePath,emmySupportFiles,emmyTreeDigest,inspectEmmy,verifyEmmyWiring} from './rust-emmy-identity.mjs';
+import {emmyInventory,emmyOwnedFiles,emmyRecipeFiles,emmyRecipePath,emmyRelativePath,emmySourcePath,emmySupportFiles,emmyTreeDigest,inspectEmmy,verifyEmmyWiring} from './rust-emmy-identity.mjs';
 import {emmyPathsOverlap,emmyStageParentComponents,stageEmmySources} from './rust-source-dependencies.mjs';
 import {licensedDependencies} from './rust-license-inventory.mjs';
 import {hashFile,runCargo,sourceDigest} from './rust-build.mjs';
@@ -38,7 +38,7 @@ function fixture(){
   const root=mkdtempSync(join(tmpdir(),'lycheedev-emmy-custody-'));
   try{
   const put=(path,value)=>{mkdirSync(join(root,path,'..'),{recursive:true});writeFileSync(join(root,path),value);};
-  for(const name of emmySupportFiles)put(name,readFileSync(join(repository,name)));
+  for(const name of [...emmySupportFiles,...emmyOwnedFiles])put(name,readFileSync(join(repository,name)));
   for(const name of emmyRecipeFiles)put(`${emmyRecipePath}/${name}`,readFileSync(join(repository,emmyRecipePath,name)));
   put(`${emmyRecipePath}/patches/test.patch`,'reviewed fixture patch\n');
   for(const name of ['Cargo.toml','Cargo.lock','.cargo/config.toml','release/fixture.json'])put(name,'fixture');
@@ -181,4 +181,37 @@ test('staged recipe module imports and owned-process runtime files have a comple
   assert(included.has('tools/rust-build-auxiliary.json'));
   assert.match(readFileSync(join(repository,'tools/rust-owned-process.ps1'),'utf8'),/rust-build-auxiliary\.json/);
   assert(included.has('release/rust-disk-policy.json'));
+});
+
+
+test('owned binding contracts are fixed, staged and tamper-evident',()=>withFixture(({root,put})=>{
+  const before=inspectEmmy(root),destination=join(root,'stage-owned');mkdirSync(destination);
+  stageEmmySources(root,destination);
+  for(const path of emmyOwnedFiles)assert.deepEqual(readFileSync(join(root,path)),readFileSync(join(destination,path)));
+  assert.deepEqual(readFileSync(join(destination,'Cargo.toml')),readFileSync(join(destination,emmyRecipePath,'standalone-Cargo.toml')));
+  put(emmyOwnedFiles[1],'changed owned contract');
+  assert.throws(()=>inspectEmmy(root),/owned_contract_identity/);
+  assert.throws(()=>stageEmmySources(root,join(root,'refused')),/owned_contract_identity/);
+}));
+
+test('unknown owned files cannot hide a build or path dependency',()=>withFixture(({root,put})=>{
+  put('crates/lycheedev-binding-contracts/build.rs','fn main() {}');
+  assert.throws(()=>inspectEmmy(root),/owned_contract_inventory/);
+}));
+
+test('full-source staging preserves product manifest and rejects conflicting owned bytes',()=>{
+  withFixture(({root})=>{
+    const destination=join(root,'full-stage');mkdirSync(destination);
+    writeFileSync(join(destination,'Cargo.toml'),'retained product workspace');
+    stageEmmySources(root,destination);
+    assert.equal(readFileSync(join(destination,'Cargo.toml'),'utf8'),'retained product workspace');
+    for(const path of emmyOwnedFiles)assert.deepEqual(readFileSync(join(root,path)),readFileSync(join(destination,path)));
+  });
+  withFixture(({root})=>{
+    const destination=join(root,'conflict-stage');mkdirSync(join(destination,'crates/lycheedev-binding-contracts/src'),{recursive:true});
+    const target=join(destination,'crates/lycheedev-binding-contracts/src/lib.rs');
+    writeFileSync(target,'foreign owner bytes');
+    assert.throws(()=>stageEmmySources(root,destination),/owned_contract_identity/);
+    assert.equal(readFileSync(target,'utf8'),'foreign owner bytes');
+  });
 });

@@ -71,8 +71,8 @@
   },
   {
     "path": "Cargo.lock",
-    "bytes": 71036,
-    "sha256": "8dca2cddb8bb2375674fdbd2716453bec82a45015db6be8ea762d3f56d40c6d9"
+    "bytes": 71180,
+    "sha256": "d4644ff54ec4a9579db7529a86b81fa6151c2c54802566fe253067fdcb65e019"
   },
   {
     "path": "Cargo.toml",
@@ -161,8 +161,8 @@
   },
   {
     "path": "crates/emmylua_code_analysis/Cargo.toml",
-    "bytes": 1373,
-    "sha256": "a46735a63d8248e16b7a9d34f68f5e6f338c2cbbca0d0e53f95416270cbb31bb"
+    "bytes": 1571,
+    "sha256": "f42df028779486a0bbe3fda888f7b662daac5a140b32a81088dac7321d0130f6"
   },
   {
     "path": "crates/emmylua_code_analysis/README.md",
@@ -286,8 +286,8 @@
   },
   {
     "path": "crates/emmylua_code_analysis/src/binding_context.rs",
-    "bytes": 12429,
-    "sha256": "dd4bf638cb39fd11f73e81918e1890c93c5def6c5518b32b4ccc53aa594e70de"
+    "bytes": 8796,
+    "sha256": "78b613ddfcd73a16349c0fb93f7817888cad62f07272031795d160762f5f3054"
   },
   {
     "path": "crates/emmylua_code_analysis/src/check/builtin.rs",

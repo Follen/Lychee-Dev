@@ -40,6 +40,7 @@ class PrepareTests(unittest.TestCase):
         self.identity = {'schema': 'lycheedev.emmy-reconstruction.v1', 'identity': 'test', 'base': {
             'archiveSHA256': prep.digest(self.archive.read_bytes()), 'archiveBytes': self.archive.stat().st_size,
             'archiveRoot': 'base', 'files': 1, 'bytes': 4, 'treeSHA256': prep.tree_digest(base)},
+            'ownedFiles': prep.owned_inventory(), 'ownedTreeSHA256': prep.tree_digest(prep.owned_inventory()),
             'patches': [{'path': 'patches/change.patch', 'sha256': prep.digest(self.patch)}],
             'patchedTreeSHA256': prep.tree_digest(self.files)}
         self.save()
@@ -52,6 +53,18 @@ class PrepareTests(unittest.TestCase):
         prep.HERE = self.old_here
         self.temp.cleanup()
         self.custody.__exit__(None, None, None)
+
+    def test_owned_contract_inventory_is_required(self):
+        del self.identity['ownedFiles']
+        self.save()
+        with self.assertRaisesRegex(ValueError, 'owned_contract_inventory'):
+            prep.prepare(self.archive, self.destination)
+
+    def test_owned_contract_digest_is_required(self):
+        self.identity['ownedTreeSHA256'] = '0' * 64
+        self.save()
+        with self.assertRaisesRegex(ValueError, 'owned_contract_identity'):
+            prep.prepare(self.archive, self.destination)
 
     def test_prepare_then_verify_without_archive(self):
         prep.prepare(self.archive, self.destination)

@@ -4,12 +4,14 @@ use crate::{Result, ToolkitError};
 pub use lycheedev_windows::filesystem::destination::{FileControl, FileCost};
 pub use lycheedev_windows::filesystem::{Destination, Directory, durable_move_noreplace};
 mod owned_cleanup;
+mod slot_preflight;
 pub use owned_cleanup::{
     AuthenticatedCleanup, authenticate_cleanup_directory, authenticate_cleanup_file,
     hold_cleanup_ancestor,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
+pub use slot_preflight::slot_atomic_write_controlled;
 use std::{
     fs::{self, File, OpenOptions},
     io::Write,
@@ -291,8 +293,29 @@ fn atomic_write_with_check(
 fn atomic_write_with_check_and_close(
     path: &Path,
     bytes: &[u8],
+    check: impl FnMut() -> Result<()>,
+    close: impl FnOnce(File) -> std::io::Result<()>,
+) -> Result<()> {
+    // Ordinary atomic publication has no sharing preflight. Keep its existing
+    // checks, discard/close sequence and uncertain-publication retention.
+    atomic_write_with_hooks(
+        path,
+        bytes,
+        check,
+        close,
+        |_| Ok(()),
+        owned_cleanup::OwnedTemporary::discard,
+        lycheedev_windows::durable_replace,
+    )
+}
+fn atomic_write_with_hooks(
+    path: &Path,
+    bytes: &[u8],
     mut check: impl FnMut() -> Result<()>,
     close: impl FnOnce(File) -> std::io::Result<()>,
+    preflight: impl FnOnce(&Path) -> std::result::Result<(), slot_preflight::Failure>,
+    discard: impl FnOnce(owned_cleanup::OwnedTemporary) -> (File, std::io::Result<()>),
+    replace: impl FnOnce(&Path, &Path) -> lycheedev_windows::Result<()>,
 ) -> Result<()> {
     check()?;
     let parent = path
@@ -330,7 +353,7 @@ fn atomic_write_with_check_and_close(
         ToolkitError::new("vault.temporary_collision", "all bounded temporary slots for this target are occupied; preserve and inspect uncertain residues", 6)
             .with_details(serde_json::json!({"target":path,"parent":parent,"maximumSlots":TEMPORARY_SLOTS,"namespace":format!(".lycheedev-{target_key}-") }))
     })?;
-    let written = (|| {
+    let mut written = (|| {
         for chunk in bytes.chunks(64 << 10) {
             check()?;
             owned.file_mut().write_all(chunk)?;
@@ -338,10 +361,31 @@ fn atomic_write_with_check_and_close(
         owned.file_mut().sync_all()?;
         check()
     })();
+    if written.is_ok() {
+        // The original CREATE_NEW handle is still owned here, after write/sync
+        // and before either its close or any rename. Only the slot writer uses
+        // this hook. A successful probe does not reserve a future replacement.
+        match preflight(path) {
+            Ok(()) => {}
+            Err(slot_preflight::Failure::Sharing(error)) => written = Err(error),
+            Err(slot_preflight::Failure::Close(error)) => {
+                // An uncertain probe close must never be retried. Stop here,
+                // checked-close the original temp once, and retain its name.
+                let error =
+                    finish_file_with::<()>(owned.into_file(), Err(error), &mut check, close)
+                        .expect_err("probe close failure cannot publish");
+                return Err(retained_temporary(
+                    error,
+                    &temporary,
+                    "sharing probe close failed before publication was attempted",
+                ));
+            }
+        }
+    }
     if let Err(primary) = written {
         // CREATE_NEW supplied this token's exact identity. Discard it before
         // close, by handle only; a substituted pathname is never deleted.
-        let (file, deleted) = owned.discard();
+        let (file, deleted) = discard(owned);
         let delete_succeeded = deleted.is_ok();
         let mut combined = primary.clone();
         if let Err(error) = deleted {
@@ -364,7 +408,7 @@ fn atomic_write_with_check_and_close(
         .map_err(|e| retained_temporary(e, &temporary, "close or post-close control failed"))?;
     check()
         .map_err(|e| retained_temporary(e, &temporary, "stopped after original handle closed"))?;
-    lycheedev_windows::durable_replace(&temporary, path).map_err(|e| {
+    replace(&temporary, path).map_err(|e| {
         retained_temporary(
             ToolkitError::new("vault.publish", e, 5),
             &temporary,

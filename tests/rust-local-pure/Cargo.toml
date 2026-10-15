@@ -12,6 +12,11 @@ publish = false
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.151", features = ["arbitrary_precision", "raw_value"] }
 hex = "=0.4.3"
+lycheedev-binding-contracts = { path = "../../crates/lycheedev-binding-contracts" }
+
+[[test]]
+name = "binding_contracts"
+path = "../../crates/lycheedev-binding-contracts/tests/contracts.rs"
 
 # Matches the repository's genuine optimized symbols profile and channel.
 [profile.release]

@@ -1,0 +1,33 @@
+{
+  "base": "2ae19cb",
+  "scope": "Engine-independent binding contracts extraction; full enhanced XML/Lua behavior retained",
+  "changedFiles": 20,
+  "patchAddedLinesBefore": 4193,
+  "patchAddedLinesAfter": 4071,
+  "tests": {
+    "pythonCustody": "46 passed",
+    "nodeCustodyUnsafe": "28 passed",
+    "rust": "not_run; controlled runner required",
+    "windows": "not_run; unrelated native work untouched"
+  },
+  "verification": {
+    "base": "2ae19cb",
+    "sourceDigest": "286f2850f39217034f1174ad42ccafa5e1695e0077c51eb19d44af3c63824606",
+    "identity": "64eb4478f7a75e0223b291c5015d3e62610020b7128f36bfedbcc741255d64d4",
+    "recipe": "193fd4a405d07050eb6640893627907e30446104fda2b3255fc1474cda15c34f",
+    "tree": "2b32fcce21e6f5f1e2ae7bdd23292a29adbe531c0ab65ca1fa1d2f6257bb32ad"
+  },
+  "evidence": {
+    "node-final.log": "df89570344532cf986e4be573afe5bd5120a4b2c49f241c74b3fae91e621eb03",
+    "node-fixed.log": "77c2808df6833a3d0a200830f73745082b92f6eff2d2f1ebd07c01d9bfaef694",
+    "standalone.log": "92b5ce106a0fb64324df5c4d32e2b7640575e88ec5c2b054d9eb51c4944ca260",
+    "python-custody.log": "85295ad5f0c4bdcc390677277efd045cee6ef08857b2dd8e331ee085326afa35",
+    "unsafe-inventory.log": "b4d83b56b0f8c479eab0cfb4e963c97120d81492d01cc4b27eda72e670933ea8",
+    "replay.log": "e0c74e1f7aa39aef43c78a5ef737c123acf6d7f791683fc4596ac54fde87cc4e"
+  },
+  "notes": [
+    "node-final.log preserves first unsafe fixture failure; node-fixed.log is 28/28 after fix",
+    "No shared tracked file changed; no Cargo or build lease taken",
+    "Independent review and Rust regression run required before integration"
+  ]
+}

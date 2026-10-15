@@ -5,6 +5,7 @@ use windows::{
 };
 pub mod destination;
 pub mod owned_cleanup;
+pub mod sharing_probe;
 pub use destination::{Destination, Directory};
 pub fn durable_replace(source: &Path, destination: &Path) -> crate::Result<()> {
     let src = native_move_path(source).map_err(|error| error.to_string())?;

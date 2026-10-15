@@ -22,6 +22,9 @@ import traceback
 import unicodedata
 import urllib.request
 
+OWNED_CRATE = 'crates/lycheedev-binding-contracts'
+OWNED_FILES = ('Cargo.toml', 'src/lib.rs', 'tests/contracts.rs')
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 CHUNK = 64 * 1024
@@ -260,6 +263,24 @@ def verify(root, expected, *, deadline=None):
     return tree_digest(actual)
 
 
+def owned_inventory():
+    rows = inventory(ROOT / OWNED_CRATE)
+    if [row['path'] for row in rows] != list(OWNED_FILES):
+        raise ValueError('emmy.owned_contract_inventory')
+    return [{**row, 'path': OWNED_CRATE + '/' + row['path']} for row in rows]
+
+
+def verify_owned_contracts(identity):
+    expected = identity.get('ownedFiles')
+    if not isinstance(expected, list):
+        raise ValueError('emmy.owned_contract_inventory')
+    validate_rows(expected)
+    actual = owned_inventory()
+    if actual != expected or tree_digest(actual) != identity.get('ownedTreeSHA256'):
+        raise ValueError('emmy.owned_contract_identity')
+    return tree_digest(actual)
+
+
 def load_recipe():
     identity_bytes, _ = read_regular(HERE / 'identity.json', MAX_METADATA_BYTES, collect=True)
     files_bytes, _ = read_regular(HERE / 'files.json', MAX_METADATA_BYTES, collect=True)
@@ -267,6 +288,7 @@ def load_recipe():
     if identity['schema'] != 'lycheedev.emmy-reconstruction.v1':
         raise ValueError('emmy.identity_schema')
     validate_rows(expected)
+    owned_digest = verify_owned_contracts(identity)
     if tree_digest(expected) != identity['patchedTreeSHA256']:
         raise ValueError('emmy.tracked_inventory_identity')
     base = identity['base']
@@ -289,6 +311,7 @@ def load_recipe():
             raise ValueError('emmy.patch_identity')
         patches.append((name, data))
     inputs = {'identity.json': digest(identity_bytes), 'files.json': digest(files_bytes),
+              'ownedContracts': owned_digest,
               **{name: digest(data) for name, data in patches}}
     for name in ('prepare.py', 'scratch.mjs'):
         # Unit fixtures provide their own recipe; production records executable support.

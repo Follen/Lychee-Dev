@@ -1,3 +1,4 @@
+use lycheedev_binding_contracts::BindingDecision;
 use crate::{
     ByteRange, CallableInput, CoverageRow, DeclarationFailure, DeclarationLookup, ParseIssue,
     ParseIssues, TypeProjection,
@@ -5,7 +6,7 @@ use crate::{
 use emmylua_code_analysis::{
     EmmyLuaAnalysis, Emmyrc, EmmyrcLuaVersion, FileId, LuaFunctionType, LuaType,
     binding_context::{
-        BindingContext, BindingDecision, BindingSession, BindingSite, BoundValue, SelectedValue,
+        BindingContext, BindingSession, BindingSite, BoundValue, SelectedValue,
     },
     humanize_semantic_type_detailed,
 };

@@ -25,19 +25,17 @@ This is an execution view, not a second evidence authority. A component being im
 - [ ] Delivery: retain formal 500-slot publication, journal and maintenance/rollback components; finish integrated runtime receipt/retirement, old200 upgrade, disabled/empty-map, shared-installation and complete package/install smoke on the final candidate.
 - [ ] Skill/CLI: retain Go-based payload, real packaged CLI task runner and command registration fixes; close actual describe differences and complete all arguments/errors/JSONL/business output equivalence. Public number formatting must distinguish typed floats from raw JSON tokens. Re-run the independent actual Skill flow after the current semantic fixes.
 
-### Implemented or in progress, still not the default production path
+### Default production integration implemented; exact-candidate validation remains open
 
-- [ ] Formal Live: finish trusted EXE qualification plus runtime RIP/Lua reader, original budget/control, structured firstReadFailure and checked close. Review fixed-Go Unicode path identity rather than Windows Ordinal assumptions.
-- [ ] Formal input: execute the reviewed full-identity two-key engine and owned-window tests; integrate fresh INPUT authorization, publication lease held across Invoke, Reload release ordering and 100ms exchange spacing.
-- [ ] Native backend: connect formal reader/input/delivery to Backend and RuntimeRetirementBackend, exact receipt/trace/cleanup, original deadlines and two fresh retirement samples.
-- [ ] Default Live lifecycle: connect CON admission/durable journal/history to Driver, public status/resume/execute/report/disconnect and result projection; unknown outcome must never replay business input.
-- [ ] Activation/doctor: implement prepared/waiting_manual_reload/runtime_selected/cancelled flow, Bootstrap cross-checks, read-only fresh-input doctor and explicit fix/reload fallback without hidden replay or unsafe activation.
-- [ ] Replace old default Live/Transport only after formal integration and synthetic process/window failure/restart tests cover the public route.
+- [ ] Formal Live/runtime/input are on the default CON route via formal_live → ConnectionService, rather than an unconnected prototype. Validate trusted EXE/RIP reader, Unicode identity, fresh INPUT authorization and real public command integration on the final candidate.
+- [ ] Validate the implemented formal Backend/RuntimeRetirementBackend, durable journal, original deadlines, exact receipt/trace/cleanup and two fresh retirement samples; unknown outcomes must never replay business input.
+- [ ] Validate default connect/status/resume/execute/report/disconnect and activation/doctor state/error projections, including manual reload and explicit fix boundaries. Do not describe these already-connected routes as still awaiting first implementation.
+- [ ] Complete synthetic process/window failure and restart coverage, then audit remaining old Transport/LuaLS/optical consumers before deletion. Real game-dependent validation remains last.
 
 ### Native execution and corpus acceptance still required
 
 - [ ] Obtain terminal Windows evidence for each new frozen candidate; verify selected Rust test groups execute nonzero matching tests and preserve failures. Early describe failure must not short-circuit unrelated product groups.
-- [ ] Execute the newly ported 214-case fixed-Go formal Lua/addon matrix and finish the three retained Go host bridges plus remaining bootstrap/input_mailbox/focus boundaries. Current same-named legacy Lua tests are not evidence for Mailbox v1.
+- [ ] Retain the actual historical 363-run 214/214 fixed-Go formal Lua/addon result; rerun on the final candidate and finish the three retained Go host bridges plus remaining bootstrap/input_mailbox/focus boundaries. Current same-named legacy Lua tests are not evidence for Mailbox v1.
 - [ ] Migrate valuable legacy native_e2e installation/transaction/unknown-result tests to the formal protocol before removing their extra addon/TOC consumers.
 - [ ] Audit dynamic TOC, build/include, tool, package, feature and test consumers before removing 21 extra addon files, optical/WGC/LuaLS/old protocol branches or superseded guidance.
 - [ ] Finish corresponding-source, npm install/upgrade/uninstall/restore, official addon-only package closure and exact final candidate validation.
@@ -144,3 +142,15 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] Execute reviewed OP/SESSION/signal/report/capture read chain and shared workspace admission on Windows; 97 new declarations remain NOT_RUN.
 - [ ] Close residual Go JSON/corrupt-DEFLATE diagnostics and deferred timestamp marshal semantics.
 - [ ] Finish prepared-only cancel and explicit-owner abandon with multi-document generation CAS, then verify actual 84-command describe.
+
+## Confirmed remaining business implementations (2026-10-15)
+
+- [ ] Implement Wago remote Hotfix and explicitly supplied Raidbots snapshot providers; local dbcache table/scan are already dispatched.
+- [ ] Implement remote target resolution and shared CDN read backend for DB2/SQL/navigation/assets, preserving fixed Go identity, cache, transport and resource contracts.
+- [ ] Connect existing partial-encrypted BLTE/DB2 primitives through production consumers, retaining missing-span and partial-capture provenance instead of rejecting every absent key.
+
+## Owned contracts and slot preflight checkpoint
+
+- [x] Run exact new binding-contracts integration tests locally (5/5) and retain independent existing pure group (21/21).
+- [ ] Execute new recipe adapter24/engine36 and real slot preflight/Core/Windows/combined regressions; static review is not native acceptance.
+- [ ] Keep uncertain publication residues and no-replay behavior; limited sharing preflight is not general residue recovery.

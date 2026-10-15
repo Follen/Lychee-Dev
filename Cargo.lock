@@ -479,6 +479,7 @@ dependencies = [
 name = "emmylua_code_analysis"
 version = "0.30.0"
 dependencies = [
+ "lycheedev-binding-contracts",
  "dirs",
  "emmy_lsp_types",
  "emmylua_diagnostic_macro",
@@ -1211,6 +1212,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lycheedev-binding-contracts"
+version = "3.1.2"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lycheedev-cli"
 version = "3.1.2"
 dependencies = [
@@ -1271,6 +1280,7 @@ dependencies = [
 name = "lycheedev-emmy-adapter"
 version = "3.1.2"
 dependencies = [
+ "lycheedev-binding-contracts",
  "emmylua_code_analysis",
  "emmylua_parser",
  "serde",

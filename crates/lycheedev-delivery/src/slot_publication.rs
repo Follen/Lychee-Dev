@@ -576,7 +576,7 @@ impl Store for DiskStore {
     ) -> lycheedev_core::Result<()> {
         let path = slots::directory(&self.parent, index as u16).join("Payload.lua");
         storage::guard_path(&self.parent, &path)?;
-        storage::atomic_write_controlled(&path, bytes, control)
+        storage::slot_atomic_write_controlled(&path, bytes, control)
     }
 }
 impl DiskStore {

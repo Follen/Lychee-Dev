@@ -1,0 +1,11 @@
+[package]
+name = "lycheedev-binding-contracts"
+version = "3.1.2"
+edition = "2024"
+license = "MIT"
+rust-version = "1.99"
+
+# Explicit metadata permits custody staging without inheriting a foreign workspace.
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

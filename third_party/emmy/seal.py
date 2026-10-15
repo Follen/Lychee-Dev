@@ -85,10 +85,12 @@ def main():
         license_row = current.get(BASE['license']['path'])
         if not license_row or license_row['sha256'] != BASE['license']['sha256']:
             raise ValueError('emmy.license_changed')
+        owned = prep.owned_inventory()
         identity = {
             'schema': 'lycheedev.emmy-reconstruction.v1',
             'identity': 'public-base-binding-context-reconstruction-v1',
             'historicalPrivatePatchRecovered': False,
+            'ownedFiles': owned, 'ownedTreeSHA256': prep.tree_digest(owned),
             'base': BASE,
             'patches': [{'path': 'patches/0001-binding-context.patch', 'sha256': prep.digest(patch)}] if patch else [],
             'patchedTreeSHA256': prep.tree_digest(files),

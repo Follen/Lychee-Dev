@@ -25,7 +25,7 @@
 
 ## 当前代码与构建边界
 
-`crates/` 已有 cli、core、source、data、live、delivery、windows 七个 crate。Source 默认 `emmy-prototype` 并直接链接 EmmyLua。原先缺失的修改版依赖已由公开上游固定 commit `08b0873962e83bb8307e9a81052e3f41578fbc78` 加可审补丁重新构建，对应源码、补丁和许可证清单在 [third_party/emmy](third_party/emmy/README.md)。这是独立标识的新重建版本，不冒称恢复旧私有字节。准备脚本物化被忽略的依赖目录，Windows CI 已能构建并测试封存候选。
+`crates/` 已有 cli、core、source、data、live、delivery、windows、emmy-adapter、binding-contracts 九个 crate。自有 adapter 集中引擎接入；低层 binding 合同由自有 crate 提供，通过兼容重导出供固定引擎共享。Source 默认 `emmy-prototype` 并直接链接 EmmyLua。原先缺失的修改版依赖已由公开上游固定 commit `08b0873962e83bb8307e9a81052e3f41578fbc78` 加可审补丁重新构建，对应源码、补丁和许可证清单在 [third_party/emmy](third_party/emmy/README.md)。这是独立标识的新重建版本，不冒称恢复旧私有字节。准备脚本物化被忽略的依赖目录，Windows CI 已能构建并测试封存候选。
 
 组件实际通过不等于完整 Source、默认 Live、最终安装包或性能已验收。完整 Retail 原生分析已暴露真实 API 生成错误，新修复须在精确候选上复跑；正式 runtime/input/backend 正在接入公共生命周期。精确通过/失败/未运行证据见 [handover.md](handover.md)，剩余模块见 [todo.md](todo.md)。独立可复建和最终打包门槛仍未完成。
 

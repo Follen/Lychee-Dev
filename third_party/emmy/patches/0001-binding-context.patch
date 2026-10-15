@@ -1,28 +1,59 @@
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -504,6 +504,7 @@
+ name = "emmylua_code_analysis"
+ version = "0.30.0"
+ dependencies = [
++ "lycheedev-binding-contracts",
+  "dirs",
+  "emmy_lsp_types",
+  "emmylua_diagnostic_macro",
+@@ -1284,6 +1285,14 @@
+ ]
+ 
+ [[package]]
++name = "lycheedev-binding-contracts"
++version = "3.1.2"
++dependencies = [
++ "serde",
++ "serde_json",
++]
++
++[[package]]
+ name = "memchr"
+ version = "2.8.2"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+--- a/crates/emmylua_code_analysis/Cargo.toml
++++ b/crates/emmylua_code_analysis/Cargo.toml
+@@ -23,6 +23,8 @@
+ workspace = true
+ 
+ [dependencies]
++# Five parents reach the custody snapshot root; this owned crate is shipped with it.
++lycheedev-binding-contracts = { path = "../../../../../crates/lycheedev-binding-contracts", version = "=3.1.2" }
+ # local
+ emmylua_parser.workspace = true
+ emmylua_diagnostic_macro.workspace = true
 --- /dev/null
 +++ b/crates/emmylua_code_analysis/src/binding_context.rs
-@@ -0,0 +1,418 @@
+@@ -0,0 +1,285 @@
 +//! Immutable host-selected binding evidence for one semantic query session.
 +//! This is a new public-base reconstruction, not the historical private patch.
 +#![forbid(unsafe_code)]
 +
++// Compatibility exports preserve existing host and XML/Lua integration imports.
++pub use lycheedev_binding_contracts::{BindingDecision, ObjectViewKey, FieldPresence, ShapeEnumeration, EnvironmentSlot, EnvironmentOwner, EnvironmentRecord, EnvironmentTypeCatalog, EnvironmentOrigin, EnvironmentCallable, EnvironmentReturn};
++
 +use crate::{FileId, SemanticId};
 +use emmylua_parser::LuaSyntaxId;
 +use rowan::TextRange;
-+use serde::{Deserialize, Serialize};
-+use std::collections::{BTreeMap, HashMap, HashSet};
++use std::collections::{HashMap, HashSet};
 +use std::sync::{Arc, Mutex};
 +
 +#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 +pub struct BindingSite {
 +    pub file_id: FileId,
 +    pub syntax: LuaSyntaxId,
-+}
-+#[derive(Clone, Debug)]
-+pub enum BindingDecision<T> {
-+    NotManaged,
-+    Bound(T),
-+    KnownAbsent { proof: String },
-+    Unavailable { proof: String, reason: String },
 +}
 +#[derive(Clone, Debug)]
 +pub struct BoundValue {
@@ -70,12 +101,6 @@
 +    Lua(SourceSpan),
 +    Xml(ExternalSourceSpan),
 +}
-+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-+pub struct ObjectViewKey {
-+    pub context: String,
-+    pub observation: usize,
-+    pub object_id: usize,
-+}
 +#[derive(Clone, Debug, PartialEq, Eq)]
 +pub struct ObjectRef {
 +    pub identity: String,
@@ -98,17 +123,6 @@
 +    pub destination_write: FieldWriteOrigin,
 +    pub source_write: Option<FieldWriteOrigin>,
 +    pub copy_origin: Option<FieldWriteOrigin>,
-+}
-+#[derive(Clone, Debug, PartialEq, Eq)]
-+pub enum FieldPresence {
-+    Present,
-+    Absent,
-+    Unavailable,
-+}
-+#[derive(Clone, Debug)]
-+pub enum ShapeEnumeration {
-+    Complete,
-+    Unavailable(String),
 +}
 +#[derive(Clone, Debug)]
 +pub struct DerivedNumber {
@@ -152,117 +166,6 @@
 +    pub site: BindingSite,
 +    pub proof: String,
 +    pub execution_context: String,
-+}
-+
-+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-+#[serde(rename_all = "camelCase")]
-+pub struct EnvironmentSlot {
-+    pub index: usize,
-+    pub name: String,
-+    #[serde(rename = "type")]
-+    pub type_name: String,
-+    #[serde(default)]
-+    pub inner_type: String,
-+    #[serde(default)]
-+    pub nilable: bool,
-+    #[serde(default)]
-+    pub line: usize,
-+    #[serde(default)]
-+    pub raw: BTreeMap<String, serde_json::Value>,
-+}
-+#[derive(Clone, Debug, Serialize, Deserialize)]
-+pub struct EnvironmentOwner {
-+    pub kind: String,
-+    pub name: String,
-+    #[serde(default)]
-+    pub source: serde_json::Value,
-+}
-+/// The actual ApiRecord schema: parameters/returns/payload/fields/values carry
-+/// Slot records; raw metadata is retained and is never interpreted as Lua code.
-+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-+#[serde(rename_all = "camelCase")]
-+pub struct EnvironmentRecord {
-+    pub kind: String,
-+    pub name: String,
-+    #[serde(default)]
-+    pub owner: Option<EnvironmentOwner>,
-+    #[serde(default)]
-+    pub declaration_role: String,
-+    #[serde(default)]
-+    pub display_group: String,
-+    #[serde(default)]
-+    pub namespace: String,
-+    #[serde(default)]
-+    pub path: String,
-+    #[serde(default)]
-+    pub line: usize,
-+    #[serde(default)]
-+    pub end_line: usize,
-+    #[serde(default)]
-+    pub parameters: Vec<EnvironmentSlot>,
-+    #[serde(default)]
-+    pub returns: Vec<EnvironmentSlot>,
-+    #[serde(default)]
-+    pub payload: Vec<EnvironmentSlot>,
-+    #[serde(default)]
-+    pub fields: Vec<EnvironmentSlot>,
-+    #[serde(default)]
-+    pub values: Vec<EnvironmentSlot>,
-+    #[serde(default)]
-+    pub raw: BTreeMap<String, serde_json::Value>,
-+}
-+#[derive(Clone, Debug, Default)]
-+pub struct EnvironmentTypeCatalog {
-+    pub identity: String,
-+    pub aliases: BTreeMap<String, String>,
-+    pub nominal_objects: BTreeMap<String, serde_json::Value>,
-+    pub declarations: BTreeMap<String, Vec<EnvironmentRecord>>,
-+}
-+#[derive(Clone, Debug)]
-+pub struct EnvironmentOrigin {
-+    pub material: String,
-+    pub material_sha256: String,
-+    pub pointer: String,
-+    pub identity: String,
-+}
-+#[derive(Clone, Debug)]
-+pub struct EnvironmentCallable {
-+    pub origin: EnvironmentOrigin,
-+    pub declaration: EnvironmentRecord,
-+    pub types: Arc<EnvironmentTypeCatalog>,
-+}
-+impl EnvironmentCallable {
-+    pub fn nominal_return_name(&self, slot: usize) -> Option<&str> {
-+        let value = self.declaration.returns.get(slot.checked_sub(1)?)?;
-+        if value.index != slot || value.nilable {
-+            return None;
-+        }
-+        self.types
-+            .nominal_objects
-+            .contains_key(&value.type_name)
-+            .then_some(value.type_name.as_str())
-+    }
-+    pub fn receiver_type_name(&self) -> Option<&str> {
-+        let owner = self
-+            .declaration
-+            .owner
-+            .as_ref()
-+            .filter(|o| o.kind == "script-object")?;
-+        let mut names = self.types.nominal_objects.iter().filter(|(_, value)| {
-+            value.get("owner").and_then(serde_json::Value::as_str) == Some(owner.name.as_str())
-+        });
-+        let (name, _) = names.next()?;
-+        if names.next().is_some() {
-+            return None;
-+        }
-+        Some(name.as_str())
-+    }
-+}
-+#[derive(Clone, Debug)]
-+pub struct EnvironmentReturn {
-+    pub callable: Arc<EnvironmentCallable>,
-+    pub slot: usize,
-+    pub invocation_identity: String,
 +}
 +
 +pub trait BindingContext: Send + Sync {

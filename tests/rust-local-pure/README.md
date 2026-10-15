@@ -70,3 +70,26 @@ Current 21-test execution is recorded in `freeze-source-r4.json`. The original
 `freeze.json` remains historical evidence for its earlier 10-test scope. The
 real Event/read_output integration test stays in the production process test
 module and is selected by Windows CI; it is not stubbed into this harness.
+
+## Owned binding-contracts integration suite
+
+The fixed `--binding-contracts` mode runs the complete actual
+`lycheedev-binding-contracts` crate through a path dependency, with the original
+`crates/lycheedev-binding-contracts/tests/contracts.rs` as its integration target.
+It runs `--test binding_contracts` instead of `--lib`, with the same controlled
+symbols channel and exact-source/dependency/toolchain checks. The five named
+integration tests have their own owner and result, separate from the 21 pure
+module tests. No test source or product implementation is rewritten or stubbed.
+Both modes snapshot and verify all seven pure source files and all three owned
+crate files. The checker allows only the fixed local package name/version/path
+and exact three-file hash inventory; other local packages fail closed.
+
+`--initialize-lock` updates the harness lock under the controlled runner and
+records only lock resolution. The pinned registry versions remain unchanged.
+The CLI accepts no source, test, target, or admission-directory override. An
+internal staging API can share a parent checkout's channel only for a preserved,
+successfully registered `local-owned-contract-runner-stage` owner at the fixed
+`.tmp/rust-scratch/<owner>/stage` location. It does not adopt another lease.
+
+These five tests do not execute the adapter's 24 or the engine's 36 tests.
+Those suites remain NOT_RUN for this candidate until separately executed.
