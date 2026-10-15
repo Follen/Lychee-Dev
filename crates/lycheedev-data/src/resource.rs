@@ -72,6 +72,34 @@ pub(crate) struct RetainedReservation<'a> {
     committed: bool,
 }
 impl RetainedReservation<'_> {
+    /// Extend only this owner's refundable allocation. Failed admission leaves
+    /// both the guard and the shared ledger unchanged.
+    pub(crate) fn grow(&mut self, bytes: usize) -> Result<()> {
+        let bytes = u64::try_from(bytes).map_err(|_| {
+            fault(
+                "records.query_resource_budget",
+                3,
+                "Retained allocation overflow",
+            )
+        })?;
+        let total = self
+            .bytes
+            .checked_add(bytes)
+            .filter(|total| *total <= self.budget.limits.retained_bytes)
+            .ok_or_else(|| {
+                fault(
+                    "records.query_resource_budget",
+                    3,
+                    "Retained allocation overflow",
+                )
+            })?;
+        self.budget.charge(Cost {
+            retained_bytes: bytes,
+            ..Default::default()
+        })?;
+        self.bytes = total;
+        Ok(())
+    }
     pub(crate) fn commit(mut self) {
         self.committed = true;
     }
@@ -246,5 +274,41 @@ mod temporary_tests {
         budget.reserve_retained(40).unwrap().commit();
         assert_eq!(budget.snapshot().unwrap().retained_bytes, 56);
         assert!(budget.reserve_retained(9).is_err());
+    }
+    #[test]
+    fn growing_reservation_releases_only_owned_bytes_after_failed_admission() {
+        let budget = Budget::new(
+            Cost {
+                retained_bytes: 100,
+                ..Cost::defaults()
+            },
+            Instant::now() + Duration::from_secs(30),
+            None,
+        );
+        let unrelated = budget.reserve_retained(30).unwrap();
+        let mut owned = budget.reserve_retained(10).unwrap();
+        owned.grow(40).unwrap();
+        budget
+            .charge(Cost {
+                metadata_bytes: 17,
+                decode_work: 3,
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(owned.grow(21).is_err());
+        assert_eq!(budget.snapshot().unwrap().retained_bytes, 80);
+        assert!(owned.grow(usize::MAX).is_err());
+        assert_eq!(budget.snapshot().unwrap().retained_bytes, 80);
+        drop(owned);
+        let used = budget.snapshot().unwrap();
+        assert_eq!(used.retained_bytes, 30);
+        assert_eq!(used.metadata_bytes, 17);
+        assert_eq!(used.decode_work, 3);
+        drop(unrelated);
+        assert_eq!(budget.snapshot().unwrap().retained_bytes, 0);
+        let mut persistent = budget.reserve_retained(10).unwrap();
+        persistent.grow(20).unwrap();
+        persistent.commit();
+        assert_eq!(budget.snapshot().unwrap().retained_bytes, 30);
     }
 }

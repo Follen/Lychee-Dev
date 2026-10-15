@@ -2,7 +2,7 @@
 // XFTH layout contracts ported from Lychee Dev's MIT wowdata-derived reader.
 use crate::{
     fault,
-    resource::{Budget, Cost},
+    resource::{Budget, Cost, RetainedReservation},
     schema,
 };
 use serde_json::Value;
@@ -87,7 +87,7 @@ fn malformed<T>() -> Result<T> {
 fn u32le(raw: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(raw[offset..offset + 4].try_into().unwrap())
 }
-fn walk<F: FnMut(CacheEntry) -> Result<()>>(
+pub(crate) fn walk<F: FnMut(CacheEntry) -> Result<()>>(
     raw: &[u8],
     start: usize,
     layout: u32,
@@ -199,46 +199,7 @@ pub fn inspect_budgeted(
     if !(1..=200).contains(&filter.limit) || raw.len() > 512 << 20 {
         return Err(fault("records.hotfix_limit", 3, "XFTH input/page budget"));
     }
-    if raw.len() < 12 || &raw[..4] != b"XFTH" {
-        return malformed();
-    }
-    let version = u32le(raw, 4);
-    let build = u32le(raw, 8);
-    if !(1..=9).contains(&version) {
-        return Err(fault(
-            "records.hotfix_version",
-            3,
-            "Unsupported XFTH version",
-        ));
-    }
-    if build == 0 || build > 0x7fff_ffff || build != filter.build {
-        return Err(fault(
-            "records.hotfix_build_mismatch",
-            4,
-            "XFTH build differs from pin",
-        ));
-    }
-    let start = if version >= 5 { 44 } else { 12 };
-    if raw.len() < start {
-        return malformed();
-    }
-    let mut layout = version;
-    if version == 8 && raw.len() > start {
-        let a = walk(raw, start, 8, budget, |_| Ok(()));
-        let b = walk(raw, start, 7, budget, |_| Ok(()));
-        for result in [&a, &b] {
-            if let Err(error) = result {
-                if error.code != "records.hotfix_format" {
-                    return Err(error.clone());
-                }
-            }
-        }
-        match (a.is_ok(), b.is_ok()) {
-            (true, false) => {}
-            (false, true) => layout = 7,
-            _ => return malformed(),
-        }
-    }
+    let (version, layout, start) = cache_layout(raw, filter.build, budget)?;
     if filter.region.is_some() && layout < 9 {
         return Err(fault(
             "records.hotfix_filter_unsupported",
@@ -316,6 +277,57 @@ pub fn inspect_budgeted(
     Ok(page)
 }
 
+/// Shared framing validation for page inspection and immutable SQL snapshots.
+/// Version 8 is accepted only when exactly one historical record layout fits.
+pub(crate) fn cache_layout(
+    raw: &[u8],
+    expected_build: u32,
+    budget: Option<&Budget>,
+) -> Result<(u32, u32, usize)> {
+    check(budget)?;
+    if raw.len() < 12 || &raw[..4] != b"XFTH" {
+        return malformed();
+    }
+    let version = u32le(raw, 4);
+    let build = u32le(raw, 8);
+    if !(1..=9).contains(&version) {
+        return Err(fault(
+            "records.hotfix_version",
+            3,
+            "Unsupported XFTH version",
+        ));
+    }
+    if build == 0 || build > 0x7fff_ffff || build != expected_build {
+        return Err(fault(
+            "records.hotfix_build_mismatch",
+            4,
+            "XFTH build differs from pin",
+        ));
+    }
+    let start = if version >= 5 { 44 } else { 12 };
+    if raw.len() < start {
+        return malformed();
+    }
+    let mut layout = version;
+    if version == 8 && raw.len() > start {
+        let a = walk(raw, start, 8, budget, |_| Ok(()));
+        let b = walk(raw, start, 7, budget, |_| Ok(()));
+        for result in [&a, &b] {
+            if let Err(error) = result {
+                if error.code != "records.hotfix_format" {
+                    return Err(error.clone());
+                }
+            }
+        }
+        match (a.is_ok(), b.is_ok()) {
+            (true, false) => {}
+            (false, true) => layout = 7,
+            _ => return malformed(),
+        }
+    }
+    Ok((version, layout, start))
+}
+
 fn check(budget: Option<&Budget>) -> Result<()> {
     budget.map_or(Ok(()), Budget::check)
 }
@@ -349,6 +361,36 @@ pub fn decode_fields(
     definition: &schema::Definition,
     budget: Option<&Budget>,
 ) -> Result<BTreeMap<String, Value>> {
+    let mut decoded = decode_fields_scoped(raw, record_id, definition, budget)?;
+    if let Some(allocation) = decoded.allocation.take() {
+        allocation.commit();
+    }
+    Ok(decoded.fields)
+}
+
+/// Own the typed map and its refundable allocation in the same object. Field
+/// declaration order drops the actual map before releasing its accounting.
+pub(crate) struct DecodedFields<'a> {
+    fields: BTreeMap<String, Value>,
+    allocation: Option<RetainedReservation<'a>>,
+}
+impl DecodedFields<'_> {
+    pub(crate) fn fields(&self) -> &BTreeMap<String, Value> {
+        &self.fields
+    }
+}
+fn retain_fields(allocation: &mut Option<RetainedReservation<'_>>, bytes: usize) -> Result<()> {
+    if let Some(allocation) = allocation {
+        allocation.grow(bytes)?;
+    }
+    Ok(())
+}
+pub(crate) fn decode_fields_scoped<'a>(
+    raw: &[u8],
+    record_id: u32,
+    definition: &schema::Definition,
+    budget: Option<&'a Budget>,
+) -> Result<DecodedFields<'a>> {
     check(budget)?;
     if raw.len() > 8 << 20 || definition.fields.len() > 4096 {
         return Err(limit_error());
@@ -398,14 +440,14 @@ pub fn decode_fields(
     drop(names);
     drop(names_allocation);
     let node_bytes = tree_bytes::<String, Value>(definition.fields.len());
-    let map_allocation = budget
+    let mut map_allocation = budget
         .map(|budget| budget.reserve_retained(node_bytes))
         .transpose()?;
     let mut result = BTreeMap::new();
     let mut offset = 0usize;
     let mut text_remaining = 1usize << 20;
     for field in &definition.fields {
-        charge(budget, Cost::retained(field.name.len()))?;
+        retain_fields(&mut map_allocation, field.name.len())?;
         let value = if field.identity && !field.inline {
             if field.signed {
                 let value = i64::from(record_id as i32);
@@ -423,9 +465,17 @@ pub fn decode_fields(
                 Value::from(record_id)
             }
         } else {
-            let values_allocation = budget
-                .map(|budget| budget.reserve_retained(field.elements as usize * size_of::<Value>()))
-                .transpose()?;
+            let _values_allocation = if field.array {
+                retain_fields(
+                    &mut map_allocation,
+                    field.elements as usize * size_of::<Value>(),
+                )?;
+                None
+            } else {
+                budget
+                    .map(|budget| budget.reserve_retained(size_of::<Value>()))
+                    .transpose()?
+            };
             let mut values = Vec::with_capacity(field.elements as usize);
             for _ in 0..field.elements {
                 charge(budget, Cost::work(1))?;
@@ -449,7 +499,7 @@ pub fn decode_fields(
                     })?;
                     let value =
                         std::str::from_utf8(&available[..end]).map_err(|_| fields_error())?;
-                    charge(budget, Cost::retained(end))?;
+                    retain_fields(&mut map_allocation, end)?;
                     offset += end + 1;
                     text_remaining -= end;
                     Value::String(value.to_owned())
@@ -483,9 +533,6 @@ pub fn decode_fields(
                 values.push(value);
             }
             if field.array {
-                if let Some(allocation) = values_allocation {
-                    allocation.commit();
-                }
                 Value::Array(values)
             } else {
                 values.pop().ok_or_else(fields_error)?
@@ -497,10 +544,10 @@ pub fn decode_fields(
         return Err(fields_error());
     }
     check(budget)?;
-    if let Some(allocation) = map_allocation {
-        allocation.commit();
-    }
-    Ok(result)
+    Ok(DecodedFields {
+        fields: result,
+        allocation: map_allocation,
+    })
 }
 
 // encoding/json uses shortest float64 digits, omits an integral .0, and
@@ -567,7 +614,7 @@ impl serde_json::ser::Formatter for GoFieldsFormatter {
 
 // Go's fields budget counts encoding/json's escaped representation, including
 // HTML and U+2028/U+2029. Stream-count it without allocating a second field map.
-fn fields_json_size(fields: &BTreeMap<String, Value>, budget: &Budget) -> Result<usize> {
+pub(crate) fn fields_json_size(fields: &BTreeMap<String, Value>, budget: &Budget) -> Result<usize> {
     struct Counter<'a> {
         budget: &'a Budget,
         bytes: usize,
@@ -743,6 +790,49 @@ mod tests {
 #[cfg(test)]
 mod fields_number_tests {
     use super::*;
+    #[test]
+    fn temporary_fields_release_map_strings_arrays_and_preserve_cumulative_work() {
+        let definition = schema::Document::parse(
+            b"COLUMNS\nstring Name\nint Values\n\nBUILD 12.1.0.69875\nName\nValues<u32>[2]\n",
+        )
+        .unwrap()
+        .select("12.1.0.69875", "")
+        .unwrap();
+        let mut raw = b"hello\0".to_vec();
+        raw.extend(1u32.to_le_bytes());
+        raw.extend(2u32.to_le_bytes());
+        let budget = Budget::new(
+            Cost::defaults(),
+            std::time::Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        );
+        let unrelated = budget.reserve_retained(17).unwrap();
+        budget
+            .charge(Cost {
+                metadata_bytes: 23,
+                ..Default::default()
+            })
+            .unwrap();
+        let decoded = decode_fields_scoped(&raw, 0, &definition, Some(&budget)).unwrap();
+        assert_eq!(decoded.fields()["Values"], serde_json::json!([1, 2]));
+        let held = budget.snapshot().unwrap();
+        assert!(held.retained_bytes > 17);
+        drop(decoded);
+        let freed = budget.snapshot().unwrap();
+        assert_eq!(freed.retained_bytes, 17);
+        assert_eq!(freed.metadata_bytes, 23);
+        assert_eq!(freed.decode_work, held.decode_work);
+        raw.push(0);
+        assert!(decode_fields_scoped(&raw, 0, &definition, Some(&budget)).is_err());
+        assert_eq!(
+            budget.snapshot().unwrap().retained_bytes,
+            17,
+            "Error also releases only the decoded temporary owner"
+        );
+        drop(unrelated);
+        assert_eq!(budget.snapshot().unwrap().retained_bytes, 0);
+    }
+
     #[test]
     fn scalar_decode_retains_only_result_tree_and_owned_names() {
         let definition =

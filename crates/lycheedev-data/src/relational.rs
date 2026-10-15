@@ -70,7 +70,7 @@ fn integer(value: i128) -> Result<Scalar> {
         Err(numeric())
     }
 }
-fn literal(text: &str) -> Result<Scalar> {
+pub(crate) fn literal(text: &str) -> Result<Scalar> {
     if text.len() > 1024 {
         return Err(numeric());
     }
@@ -1260,6 +1260,17 @@ impl Program {
         let mut tables = vec![];
         compound::dependencies(self, &BTreeSet::new(), &mut tables);
         tables
+    }
+    pub(crate) fn validate_parameters<T>(&self, parameters: &BTreeMap<String, T>) -> Result<()> {
+        if self.parameters.len() != parameters.len()
+            || self
+                .parameters
+                .iter()
+                .any(|name| !parameters.contains_key(name))
+        {
+            return Err(binding());
+        }
+        Ok(())
     }
     pub fn execute(
         &self,

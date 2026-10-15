@@ -637,6 +637,14 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - 作者 rustfmt、独审身份/映射/固定基线与 diff 检查通过；新增 13 core + 9 release 回归及两独立 Windows CI 组均 **NOT_RUN**。注入关闭结果仅验证模型，不能冒称真实 OS 关闭故障已测。固定 Go 的对应路径仍是 unchecked defer Close，本批为安全强化；下游 service 的组合错误消费仍需其独立验收。
 - publication 内部 receipt 的跨 burst 句柄与其其他错误路径不在本批范围；不得为了复用早关闭 helper 缩短身份保护期。正式 Live 默认 CLI、repair/activation 全接线、性能与四阶段审计仍未完成。
 
+### Effective SQL 与引用发布的有界候选
+
+- R4 冻结 `fa076be395dbb23c6607d642eaca6c783556c84b6924e0c952ca29a761afa03e`（`tests/rust-parity/effective-sql-{freeze,test-map}.json`）。独立复审闭合三项资源/顺序 P2 及后续参数转换顺序缺口；13 冻结条目、4 依赖、16 个固定 Go 来源与 32 回归声明核实。R1–R3 原失败快照保留，未用后续结果覆盖。
+- 实现显式 Hotfix 来源的 effective 表覆盖、布局/状态/构建/完整性准入、精确 JSON 请求参数和数字来源，以及 SQL 执行后 CASC 身份复核、归档前原子引用校验。Go 顺序为表数/参数名/转义后请求大小准入、pin/DataPin、参数数值转换，随后才准备来源；组合错误回归固定此优先级。
+- 大来源共享 CaptureRef，在重复输出分配前检查 16 MiB；decoded map/字符串/数组按实际生命周期归还 retained，累计工作与 metadata 不重置。原 SQL 主解码 100M 工作预算不变；Rust 额外的归档引用重验仅可用 `16×1MiB×8` 有限子预算，临时解析内存 scoped、metadata 累计实际文档字节。这不是声称 Go 原先有相同额外计费。保留 16×750KB 单表、3200列×600条、取消及第17份拒绝等回归。
+- 12 Rust 文件静态 rustfmt/身份/差分核验通过；32 Rust 回归、Windows 和固定 Go 运行差分全部 **NOT_RUN**。新增四独立 CI 组覆盖 local_query、scoped资源、effective integration、capture引用；既有 Hotfix/关系/依赖组继续运行。
+- 尚未齐：remote/CDN、SQL meta/CSV、resources/resourceAccounting 与 EXPLAIN、完整输出字段排序、部分既有 I/O 的 deadline 贯穿和单次 codec/plan 临时内存计量。此批不代表全 SQL/Data 等价。固定 Go 不把查询引用当永久生命周期依赖，因此只在发布事务中防删除/ABA，不永久禁止后续删除来源。性能未测。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

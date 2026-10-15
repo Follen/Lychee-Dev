@@ -21,7 +21,7 @@ This is an execution view, not a second evidence authority. A component being im
 
 - [ ] Foundation: retain reproducible public Emmy reconstruction and official Windows build; finish independent corresponding-source rebuilds and complete clean package acceptance.
 - [ ] Source: retain fixed full Retail static import/query and real multi-CLI session evidence; validate newly repaired XML owner plans and source batch on the next exact candidate. Complete full Retail native analysis/refs/context/flow, real quota/idle/lifetime, cancellation, identity changes, readable source locations and independent Source evaluator.
-- [ ] Data: retain installation/catalog/relations and named Hotfix components; validate corrected numeric archive/field budgets, new capture dependencies and scan checkpoint/resume on the exact Windows candidate. Finish effective SQL, remote provider, remaining DB2/CASC/CDN/assets boundaries and all fixed-Go test mapping.
+- [ ] Data: retain installation/catalog/relations and named Hotfix components; validate corrected numeric archive/field budgets, new capture dependencies and scan checkpoint/resume on the exact Windows candidate. Validate the reviewed effective SQL overlay/reference candidate on Windows; finish SQL meta/CSV/EXPLAIN/output/resource/deadline gaps, remote provider, remaining DB2/CASC/CDN/assets boundaries and all fixed-Go test mapping.
 - [ ] Delivery: retain formal 500-slot publication, journal and maintenance/rollback components; finish integrated runtime receipt/retirement, old200 upgrade, disabled/empty-map, shared-installation and complete package/install smoke on the final candidate.
 - [ ] Skill/CLI: retain Go-based payload, real packaged CLI task runner and command registration fixes; close actual describe differences and complete all arguments/errors/JSONL/business output equivalence. Public number formatting must distinguish typed floats from raw JSON tokens. Re-run the independent actual Skill flow after the current semantic fixes.
 
@@ -37,7 +37,7 @@ This is an execution view, not a second evidence authority. A component being im
 ### Native execution and corpus acceptance still required
 
 - [ ] Obtain terminal Windows evidence for each new frozen candidate; verify selected Rust test groups execute nonzero matching tests and preserve failures. Early describe failure must not short-circuit unrelated product groups.
-- [ ] Port the fixed Go formal Lua/addon test suite and missing bootstrap/input_mailbox/focus cases. Current same-named legacy Lua tests are not evidence for Mailbox v1.
+- [ ] Execute the newly ported 214-case fixed-Go formal Lua/addon matrix and finish the three retained Go host bridges plus remaining bootstrap/input_mailbox/focus boundaries. Current same-named legacy Lua tests are not evidence for Mailbox v1.
 - [ ] Migrate valuable legacy native_e2e installation/transaction/unknown-result tests to the formal protocol before removing their extra addon/TOC consumers.
 - [ ] Audit dynamic TOC, build/include, tool, package, feature and test consumers before removing 21 extra addon files, optical/WGC/LuaLS/old protocol branches or superseded guidance.
 - [ ] Finish corresponding-source, npm install/upgrade/uninstall/restore, official addon-only package closure and exact final candidate validation.

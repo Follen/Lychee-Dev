@@ -19,6 +19,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod effective;
+#[cfg(test)]
+mod regression_tests;
+mod request;
+
 pub struct File {
     pub bytes: Vec<u8>,
     pub reading: Value,
@@ -28,9 +33,18 @@ pub(crate) struct VerifiedFile {
     pub reading: Value,
 }
 #[derive(Clone, Copy, PartialEq)]
-enum ReadMode { Materialized, Verified }
-enum SelectedContent { Bytes(Vec<u8>), Blob(evidence::VerifiedBlob) }
-struct ResolvedFile { content: SelectedContent, reading: Value }
+enum ReadMode {
+    Materialized,
+    Verified,
+}
+enum SelectedContent {
+    Bytes(Vec<u8>),
+    Blob(evidence::VerifiedBlob),
+}
+struct ResolvedFile {
+    content: SelectedContent,
+    reading: Value,
+}
 fn locale(language: &str) -> Result<u32> {
     match language {
         "enUS" => Ok(2),
@@ -90,13 +104,30 @@ pub(crate) fn read_file_batches_budgeted(
     budget: &Arc<Budget>,
     callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
 ) -> Result<()> {
-    read_batches(inv, pin, ids, budget, ReadMode::Materialized, &mut |files| {
-        let files = files.into_iter().map(|file| match file.content {
-            SelectedContent::Bytes(bytes) => Ok(File { bytes, reading: file.reading }),
-            SelectedContent::Blob(_) => Err(fault("records.internal", 8, "Unexpected content representation")),
-        }).collect::<Result<Vec<_>>>()?;
-        callback(files)
-    })
+    read_batches(
+        inv,
+        pin,
+        ids,
+        budget,
+        ReadMode::Materialized,
+        &mut |files| {
+            let files = files
+                .into_iter()
+                .map(|file| match file.content {
+                    SelectedContent::Bytes(bytes) => Ok(File {
+                        bytes,
+                        reading: file.reading,
+                    }),
+                    SelectedContent::Blob(_) => Err(fault(
+                        "records.internal",
+                        8,
+                        "Unexpected content representation",
+                    )),
+                })
+                .collect::<Result<Vec<_>>>()?;
+            callback(files)
+        },
+    )
 }
 pub(crate) fn read_verified_file_budgeted(
     inv: &Invocation,
@@ -105,14 +136,34 @@ pub(crate) fn read_verified_file_budgeted(
     budget: &Arc<Budget>,
 ) -> Result<VerifiedFile> {
     let mut result = None;
-    read_batches(inv, pin, &[id], budget, ReadMode::Verified, &mut |mut files| {
-        let file = files.pop().ok_or_else(|| fault("records.internal", 8, "Selected content missing"))?;
-        match file.content {
-            SelectedContent::Blob(blob) => result = Some(VerifiedFile { blob, reading: file.reading }),
-            SelectedContent::Bytes(_) => return Err(fault("records.internal", 8, "Unexpected content representation")),
-        }
-        Ok(Vec::new())
-    })?;
+    read_batches(
+        inv,
+        pin,
+        &[id],
+        budget,
+        ReadMode::Verified,
+        &mut |mut files| {
+            let file = files
+                .pop()
+                .ok_or_else(|| fault("records.internal", 8, "Selected content missing"))?;
+            match file.content {
+                SelectedContent::Blob(blob) => {
+                    result = Some(VerifiedFile {
+                        blob,
+                        reading: file.reading,
+                    })
+                }
+                SelectedContent::Bytes(_) => {
+                    return Err(fault(
+                        "records.internal",
+                        8,
+                        "Unexpected content representation",
+                    ));
+                }
+            }
+            Ok(Vec::new())
+        },
+    )?;
     result.ok_or_else(|| fault("records.internal", 8, "Selected content missing"))
 }
 fn read_batches(
@@ -127,10 +178,19 @@ fn read_batches(
     let deadline = budget.deadline;
     let mut keys = keys::Context::prepare_budgeted(inv, deadline, Some(budget.clone()))?;
     let mut delivered = false;
-    let first = read_files_with_keys(inv, pin, ids, deadline, &mut keys, budget, mode, &mut |files| {
-        delivered = true;
-        callback(files)
-    });
+    let first = read_files_with_keys(
+        inv,
+        pin,
+        ids,
+        deadline,
+        &mut keys,
+        budget,
+        mode,
+        &mut |files| {
+            delivered = true;
+            callback(files)
+        },
+    );
     match first {
         Err(error)
             if error.code == "container.key_unavailable"
@@ -179,11 +239,18 @@ fn read_files_with_keys(
         return Err(fault("records.file_query", 2, "Invalid content variant"));
     }
     let max = inv.usize_flag("--max-bytes", 128 << 20, 1, 512 << 20)?;
-    budget.charge(Cost::metadata(inv.required("--installation")?.len()
-        + pin.product.len() + pin.full_build.len() + pin.region.len()
-        + pin.language.len() + pin.definition_commit.len()))?;
+    budget.charge(Cost::metadata(
+        inv.required("--installation")?.len()
+            + pin.product.len()
+            + pin.full_build.len()
+            + pin.region.len()
+            + pin.language.len()
+            + pin.definition_commit.len(),
+    ))?;
     let target = installed::resolve_pinned_target_budgeted(
-        Path::new(inv.required("--installation")?), pin, Some(budget),
+        Path::new(inv.required("--installation")?),
+        pin,
+        Some(budget),
     )?;
     if &target.data != pin {
         return Err(fault(
@@ -311,21 +378,21 @@ fn read_files_with_keys(
             }
             if mode == ReadMode::Materialized {
                 retained = retained
-                .checked_add(mapping.decoded_bytes as usize)
-                .ok_or_else(|| {
-                    fault(
+                    .checked_add(mapping.decoded_bytes as usize)
+                    .ok_or_else(|| {
+                        fault(
+                            "records.query_resource_budget",
+                            3,
+                            "Retained budget overflow",
+                        )
+                    })?;
+                if retained > 512 << 20 {
+                    return Err(fault(
                         "records.query_resource_budget",
                         3,
-                        "Retained budget overflow",
-                    )
-                })?;
-            if retained > 512 << 20 {
-                return Err(fault(
-                    "records.query_resource_budget",
-                    3,
-                    "Aggregate retained content budget exceeded",
-                ));
-            }
+                        "Aggregate retained content budget exceeded",
+                    ));
+                }
             }
             // Selected encoded and decoded lengths share --max-bytes; metadata
             // keeps its independent allowance. Pass the selected bound separately
@@ -333,16 +400,35 @@ fn read_files_with_keys(
             let (payload_key, content, content_blob) = match mode {
                 ReadMode::Materialized => {
                     let (object, content) = decoded_cache::read_content_budgeted(
-                        &inv.home, &target.common_root, &index, &mapping, limits,
-                        keys, &mut stats, Some(budget), Some(max),
+                        &inv.home,
+                        &target.common_root,
+                        &index,
+                        &mapping,
+                        limits,
+                        keys,
+                        &mut stats,
+                        Some(budget),
+                        Some(max),
                     )?;
                     let blob = evidence::publish_blob(&inv.home, &content.bytes, max)?;
-                    (object.encoding_key, SelectedContent::Bytes(content.bytes), blob)
+                    (
+                        object.encoding_key,
+                        SelectedContent::Bytes(content.bytes),
+                        blob,
+                    )
                 }
                 ReadMode::Verified => {
                     let (encoding_key, blob) = decoded_cache::read_verified_content(
-                        &inv.home, &target.common_root, &index, &mapping, limits, max,
-                        keys, &mut stats, budget, &inv.control,
+                        &inv.home,
+                        &target.common_root,
+                        &index,
+                        &mapping,
+                        limits,
+                        max,
+                        keys,
+                        &mut stats,
+                        budget,
+                        &inv.control,
                     )?;
                     let reference = serde_json::to_value(blob.reference())?;
                     (encoding_key, SelectedContent::Blob(blob), reference)
@@ -354,10 +440,7 @@ fn read_files_with_keys(
             }
             reading["keySource"] = keys.value();
             reading["decodedCache"] = serde_json::to_value(&stats)?;
-            result.push(ResolvedFile {
-                content,
-                reading,
-            });
+            result.push(ResolvedFile { content, reading });
             stats = decoded_cache::Stats::default();
         }
         budget.check()?;
@@ -440,99 +523,64 @@ fn scalar(value: Value) -> Result<relational::Scalar> {
         }
     })
 }
-fn request_digest(sql: &str, parameters: &BTreeMap<String, relational::Scalar>, budget: &Budget) -> Result<String> {
-    // Go's DataQuery struct emits sql before its optional sorted parameter map.
-    // Borrow both fields so the identity pass needs no cloned/serialized body.
-    #[derive(serde::Serialize)]
-    struct Request<'a> {
-        sql: &'a str,
-        #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-        parameters: &'a BTreeMap<String, relational::Scalar>,
+// Conservatively account BTreeMap node storage, including sparse one-cell
+// row layouts. Charging only a per-item size misses the root's spare slots.
+fn number_tree_bytes<K>(entries: usize) -> usize {
+    if entries == 0 {
+        return 0;
     }
-    capture::json_sha256(&Request { sql, parameters }, budget, capture::GoCaptureFormatter)
+    (entries.div_ceil(5) + 2)
+        .saturating_mul(16 * size_of::<(K, lycheedev_core::public_json::NumberLayout)>() + 128)
 }
 
-fn request(inv: &Invocation) -> Result<(String, BTreeMap<String, relational::Scalar>)> {
-    if [
-        inv.flag("--sql").is_some(),
-        inv.flag("--file").is_some(),
-        inv.flag_bool("--stdin"),
-    ]
-    .iter()
-    .filter(|v| **v)
-    .count()
-        != 1
-    {
-        return Err(fault(
-            "command.invalid_arguments",
-            2,
-            "Select exactly one --sql, --file or --stdin",
-        ));
-    }
-    let raw = if let Some(sql) = inv.flag("--sql") {
-        sql.as_bytes().to_vec()
-    } else {
-        let mut raw = vec![];
-        if let Some(path) = inv.flag("--file") {
-            let file = std::fs::File::open(path)?;
-            if !file.metadata()?.is_file() || file.metadata()?.len() > 1 << 20 {
-                return Err(fault(
-                    "command.invalid_arguments",
-                    2,
-                    "SQL input must be a regular file at most 1 MiB",
-                ));
+fn public_query_numbers(
+    request: &request::Request,
+    rows: &[Vec<relational::Scalar>],
+    budget: &Budget,
+) -> Result<lycheedev_core::public_json::NumberLayout> {
+    use lycheedev_core::public_json::NumberLayout;
+    let mut numbers = BTreeMap::new();
+    for (row_index, row) in rows.iter().enumerate() {
+        budget.check()?;
+        let mut cells = BTreeMap::new();
+        for (column, value) in row.iter().enumerate() {
+            budget.charge(Cost::work(1))?;
+            if matches!(value, relational::Scalar::Float(_)) {
+                budget.charge(Cost::retained(
+                    number_tree_bytes::<usize>(cells.len() + 1)
+                        - number_tree_bytes::<usize>(cells.len()),
+                ))?;
+                cells.insert(column, NumberLayout::Binary64);
             }
-            file.take((1 << 20) + 1).read_to_end(&mut raw)?;
-        } else {
-            std::io::stdin()
-                .lock()
-                .take((1 << 20) + 1)
-                .read_to_end(&mut raw)?;
         }
-        raw
-    };
-    if raw.len() > 1 << 20 {
-        return Err(fault(
-            "command.invalid_arguments",
-            2,
-            "SQL input exceeds 1 MiB",
-        ));
-    }
-    let sql = String::from_utf8(raw)
-        .map_err(|_| fault("command.invalid_arguments", 2, "SQL input must be UTF-8"))?;
-    // JSON documents are a separate typed admission path, not heuristically
-    // reinterpreted as SQL. Their overlays remain pending the effective provider.
-    if inv.flag("--file").is_some_and(|p| {
-        Path::new(p)
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("json"))
-    }) {
-        return Err(fault(
-            "relational.unsupported",
-            3,
-            "Query document and effective overlays are pending parity",
-        ));
-    }
-    let mut parameters = BTreeMap::new();
-    for item in inv.flag_values("--param") {
-        let (name, value) = item
-            .split_once('=')
-            .ok_or_else(|| fault("command.invalid_arguments", 2, "--param needs name=scalar"))?;
-        if !definitions::valid_name(name) || parameters.contains_key(name) {
-            return Err(fault(
-                "command.invalid_arguments",
-                2,
-                "Invalid or duplicate parameter name",
-            ));
+        if !cells.is_empty() {
+            budget.charge(Cost::retained(
+                number_tree_bytes::<usize>(numbers.len() + 1)
+                    - number_tree_bytes::<usize>(numbers.len()),
+            ))?;
+            numbers.insert(row_index, NumberLayout::Indexed(cells));
         }
-        let value = serde_json::from_str::<Value>(value)
-            .ok()
-            .filter(|v| !v.is_array() && !v.is_object())
-            .unwrap_or_else(|| json!(value));
-        parameters.insert(name.to_owned(), scalar(value)?);
     }
-    Ok((sql, parameters))
+    budget.charge(Cost::retained(
+        2 * number_tree_bytes::<String>(3) + number_tree_bytes::<String>(1) + 128,
+    ))?;
+    Ok(NumberLayout::Object(BTreeMap::from([
+        ("query".into(), request.public_numbers(budget)?),
+        (
+            "result".into(),
+            NumberLayout::field("rows", NumberLayout::Indexed(numbers)),
+        ),
+        (
+            "timings".into(),
+            NumberLayout::Object(BTreeMap::from([
+                ("definitionsMs".into(), NumberLayout::Binary64),
+                ("preparationMs".into(), NumberLayout::Binary64),
+                ("executionMs".into(), NumberLayout::Binary64),
+            ])),
+        ),
+    ])))
 }
+
 pub fn sql(inv: &Invocation) -> Result<Outcome> {
     sql_inner(inv).map_err(|mut error| {
         let mapped = match error.code.as_str() {
@@ -578,6 +626,12 @@ pub fn sql(inv: &Invocation) -> Result<Outcome> {
     })
 }
 fn sql_inner(inv: &Invocation) -> Result<Outcome> {
+    sql_inner_after_execute(inv, &mut || Ok(()))
+}
+fn sql_inner_after_execute(
+    inv: &Invocation,
+    after_execute: &mut impl FnMut() -> Result<()>,
+) -> Result<Outcome> {
     let started = Instant::now();
     let timeout = inv.usize_flag("--timeout-seconds", 300, 1, 3600)?;
     let budget = Arc::new(Budget::controlled(
@@ -597,9 +651,18 @@ fn sql_inner(inv: &Invocation) -> Result<Outcome> {
             "CSV export is pending parity",
         ));
     }
-    let (sql, parameters) = request(inv)?;
-    budget.charge(Cost::metadata(sql.len() * 64 + 4096))?;
-    let program = relational::Program::compile(&sql)?;
+    let request = request::read(inv, &budget)?;
+    budget.charge(Cost::metadata(request.sql.len() * 64 + 4096))?;
+    let program = relational::Program::compile(&request.sql)?;
+    if program.source_tables().len() > 32 {
+        return Err(fault(
+            "relational.resource_limit",
+            3,
+            "SQL request exceeds its bound",
+        ));
+    }
+    program.validate_parameters(&request.parameters)?;
+    request.admit_encoded(&budget)?;
     let pin = selection::resolve_pinned(inv)?;
     let data = pin.data.as_ref().ok_or_else(|| {
         fault(
@@ -608,15 +671,20 @@ fn sql_inner(inv: &Invocation) -> Result<Outcome> {
             "SQL requires a fixed DataPin",
         )
     })?;
+    // Go Execute canonicalizes parameters before invoking any source resolver.
+    // Keep request size/name and pin admission earlier, but no provider error
+    // may mask an invalid numeric scalar.
+    let parameters = request.bindings()?;
     let definitions_started = Instant::now();
     let mut bundles = vec![];
     for name in program.source_tables() {
         let canonical = if let Some((catalog, name)) = name.split_once('.') {
-            if !catalog.eq_ignore_ascii_case("static") {
+            if !catalog.eq_ignore_ascii_case("static") && !catalog.eq_ignore_ascii_case("effective")
+            {
                 return Err(fault(
                     "relational.unsupported",
                     3,
-                    "Semantic and effective SQL providers are pending parity",
+                    "Semantic SQL provider is pending parity",
                 ));
             }
             name
@@ -640,85 +708,146 @@ fn sql_inner(inv: &Invocation) -> Result<Outcome> {
         .iter()
         .map(|(_, (bundle, _))| bundle.identity.db2_file_data_id)
         .collect::<Vec<_>>();
-    let prepared = Instant::now();
-    // A lexical self/forward CTE may have no physical inputs. Its unresolved
-    // binding belongs to SQL evaluation, not the CASC file-ID admission API.
-    let files = if ids.is_empty() {
+    let mut bundles = Some(bundles);
+    let mut query_result = None;
+    let mut execute = |files: Vec<File>| -> Result<Vec<u32>> {
+        let prepared = Instant::now();
+        let mut sources = BTreeMap::new();
+        let mut provenance = vec![];
+        let mut decoded_bytes = 0;
+        let mut snapshots = effective::Snapshots::new(inv, data, &budget);
+        let mut effective_sources = vec![];
+        for ((name, (bundle, dbd)), file) in bundles
+            .take()
+            .ok_or_else(|| fault("records.internal", 8, "SQL source callback repeated"))?
+            .into_iter()
+            .zip(files)
+        {
+            budget.check()?;
+            let layout = table::inspect_budgeted(&file.bytes, Default::default(), budget.clone())?;
+            if layout.table_hash != bundle.identity.hash {
+                return Err(fault(
+                    "schema.invalid_format",
+                    4,
+                    "WDC table hash differs from manifest identity",
+                ));
+            }
+            let definition = schema::Document::parse(&dbd)?
+                .select(&data.full_build, &format!("{:08X}", layout.layout_hash))?;
+            let table = table::open_budgeted(
+                &file.bytes,
+                &definition,
+                Default::default(),
+                &Default::default(),
+                &[],
+                budget.clone(),
+            )?;
+            let limits = relational::Limits {
+                deadline,
+                ..Default::default()
+            };
+            let mut source = relational::Source::from_wdc_budgeted(
+                &table,
+                limits,
+                budget.token(),
+                Some(&budget),
+            )?;
+            if name
+                .split_once('.')
+                .is_some_and(|(catalog, _)| catalog.eq_ignore_ascii_case("effective"))
+            {
+                let (overlaid, report) =
+                    snapshots.apply(source, &definition, &bundle, &request.hotfix)?;
+                source = overlaid;
+                effective_sources.push(report);
+            }
+            sources.insert(name, source);
+            decoded_bytes += file.bytes.len();
+            provenance.push(json!({"complete":table.coverage()["complete"],"truncated":false,"file":file.reading,"sources":bundle,"layoutHash":format!("{:08X}",layout.layout_hash),"schema":definition}));
+        }
+        let preparation_ms = prepared.elapsed().as_secs_f64() * 1000.0;
+        let execution = Instant::now();
+        let result = program.execute_budgeted(
+            &sources,
+            &parameters,
+            relational::Limits {
+                deadline,
+                work: 10_000_000,
+                ..Default::default()
+            },
+            budget.token(),
+            Some(&budget),
+        )?;
+        after_execute()?;
+        query_result = Some((
+            result,
+            provenance,
+            decoded_bytes,
+            preparation_ms,
+            execution.elapsed().as_secs_f64() * 1000.0,
+            effective_sources,
+        ));
+        Ok(Vec::new())
+    };
+    // Run preparation/SQL inside the authenticated read session. Its final
+    // source check is after execution and before publishing any query capture.
+    // A lexical CTE can have no physical source and needs no CASC admission.
+    if ids.is_empty() {
+        execute(Vec::new())?;
+    } else {
+        read_file_batches_budgeted(inv, data, &ids, &budget, &mut execute)?;
+    }
+    let (result, provenance, decoded_bytes, preparation_ms, execution_ms, effective_sources) =
+        query_result.ok_or_else(|| fault("records.internal", 8, "SQL result missing"))?;
+    let complete = result.complete;
+    let public_numbers = public_query_numbers(&request, &result.rows, &budget)?;
+    budget.check()?;
+    let mut reading = json!({"complete":complete,"partial":!complete,"query":request,"result":{"columns":result.columns,"rows":result.rows},"sources":provenance,"timings":{"definitionsMs":definitions_ms,"preparationMs":preparation_ms,"executionMs":execution_ms,"decodedSourceBytes":decoded_bytes},"resourceAccounting":{"scope":"admitted allocation and work across local CASC/Encoding/decoded cache/definitions/WDC/SQL","strategy":"conservative cumulative admission","wholeQueryAccountingComplete":false,"used":budget.snapshot()?,"remainingGaps":["SQL plan/order-container transient allocations","uninterruptible single codec call"]}});
+    if !effective_sources.is_empty() {
+        reading["effectiveSources"] = effective::reports_value(&effective_sources, &budget)?;
+    }
+    let raw = capture::json_bytes(
+        &request::CaptureBody {
+            reading: &reading,
+            request: &request,
+        },
+        &budget,
+        16 << 20,
+        || {
+            fault(
+                "relational.resource_limit",
+                3,
+                "SQL result exceeds evidence budget",
+            )
+        },
+    )?;
+    let request_digest = request.digest(&budget)?;
+    let required_sources = if effective_sources.is_empty() {
         vec![]
     } else {
-        read_files_budgeted(inv, data, &ids, &budget)?
+        request
+            .hotfix
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
     };
-    let mut sources = BTreeMap::new();
-    let mut provenance = vec![];
-    let mut decoded_bytes = 0;
-    for ((name, (bundle, dbd)), file) in bundles.into_iter().zip(files) {
-        budget.check()?;
-        let layout = table::inspect_budgeted(&file.bytes, Default::default(), budget.clone())?;
-        if layout.table_hash != bundle.identity.hash {
-            return Err(fault(
-                "schema.invalid_format",
-                4,
-                "WDC table hash differs from manifest identity",
-            ));
-        }
-        let definition = schema::Document::parse(&dbd)?
-            .select(&data.full_build, &format!("{:08X}", layout.layout_hash))?;
-        let table = table::open_budgeted(
-            &file.bytes,
-            &definition,
-            Default::default(),
-            &Default::default(),
-            &[],
-            budget.clone(),
-        )?;
-        let limits = relational::Limits {
-            deadline,
-            ..Default::default()
-        };
-        sources.insert(
-            name,
-            relational::Source::from_wdc_budgeted(&table, limits, budget.token(), Some(&budget))?,
-        );
-        decoded_bytes += file.bytes.len();
-        provenance.push(json!({"complete":table.coverage()["complete"],"truncated":false,"file":file.reading,"sources":bundle,"layoutHash":format!("{:08X}",layout.layout_hash),"schema":definition}));
-    }
-    let preparation_ms = prepared.elapsed().as_secs_f64() * 1000.0;
-    let execution = Instant::now();
-    let result = program.execute_budgeted(
-        &sources,
-        &parameters,
-        relational::Limits {
-            deadline,
-            work: 10_000_000,
-            ..Default::default()
-        },
-        budget.token(),
-        Some(&budget),
-    )?;
-    let complete = result.complete;
-    let mut request = json!({"sql":sql});
-    if !parameters.is_empty() {
-        request["parameters"] = serde_json::to_value(&parameters)?;
-    }
-    budget.check()?;
-    let reading = json!({"complete":complete,"partial":!complete,"query":request,"result":{"columns":result.columns,"rows":result.rows},"sources":provenance,"timings":{"definitionsMs":definitions_ms,"preparationMs":preparation_ms,"executionMs":execution.elapsed().as_secs_f64()*1000.0,"decodedSourceBytes":decoded_bytes},"resourceAccounting":{"scope":"admitted allocation and work across local CASC/Encoding/decoded cache/definitions/WDC/SQL","strategy":"conservative cumulative admission","wholeQueryAccountingComplete":false,"used":budget.snapshot()?,"remainingGaps":["SQL plan/order-container transient allocations","uninterruptible single codec call"]}});
-    let raw = capture::json_bytes(&reading, &budget, 16 << 20, || fault(
-            "relational.resource_limit",
-            3,
-            "SQL result exceeds evidence budget",
-        ))?;
-    let request_digest = request_digest(&sql, &parameters, &budget)?;
-    let capture = evidence::commit_capture_budgeted(
+    let reference_accounting = effective::ReferenceAccounting::new(&budget, &inv.control);
+    let capture = evidence::commit_capture_budgeted_referencing(
         &inv.home,
         evidence::CaptureInput {
-            bytes: &raw, maximum_bytes: 16 << 20, media_type: "application/json",
+            bytes: &raw,
+            maximum_bytes: 16 << 20,
+            media_type: "application/json",
             provenance: json!({"kind":"data-query","locator":format!("sql:sha256:{request_digest}"),"snapshot":pin.id,"dataBuild":data.full_build}),
-            complete, truncated: false,
+            complete,
+            truncated: false,
         },
+        &required_sources,
         &inv.control,
-        budget.as_ref(),
+        &reference_accounting,
     )?;
     let mut out = Outcome::new(reading);
+    out.public_numbers = public_numbers;
     out.complete = complete;
     out.selection = serde_json::to_value(&pin)?;
     out.provenance = vec![capture];
@@ -755,7 +884,8 @@ pub fn asset(inv: &Invocation) -> Result<Outcome> {
         evidence::CaptureHeader {
             media_type: "application/octet-stream",
             provenance: json!({"kind":"asset","locator":format!("casc:fdid:{id}:ckey:{}",file.reading["entry"]["contentKey"].as_str().unwrap_or("")),"snapshot":pin.id,"dataBuild":data.full_build}),
-            complete: true, truncated: false,
+            complete: true,
+            truncated: false,
         },
         &inv.control,
         budget.as_ref(),
@@ -771,25 +901,86 @@ mod request_identity_tests {
     use super::*;
 
     #[test]
+    fn sql_public_number_layout_accounts_sparse_tree_nodes_before_allocation() {
+        let request = request::Request {
+            sql: "SELECT 1.0 FROM T".into(),
+            hotfix: vec![],
+            parameters: BTreeMap::new(),
+        };
+        let rows = vec![vec![relational::Scalar::Float(1.0)]];
+        let budget = Budget::new(
+            Cost {
+                retained_bytes: (number_tree_bytes::<usize>(1) - 1) as u64,
+                ..Cost::defaults()
+            },
+            Instant::now() + Duration::from_secs(30),
+            None,
+        );
+        assert_eq!(
+            public_query_numbers(&request, &rows, &budget)
+                .unwrap_err()
+                .code,
+            "records.query_resource_budget"
+        );
+        assert_eq!(
+            budget.snapshot().unwrap().retained_bytes,
+            0,
+            "Rejected tree admission is atomic"
+        );
+    }
+
+    #[test]
     fn sql_locator_matches_go_order_omission_html_unicode_and_exact_integer_goldens() {
         use relational::Scalar;
         let cases = [
-            ("SELECT ID FROM Item WHERE ID=7", BTreeMap::new(),
-                "c5462d945c5082649dfcab1450f01d37271b4e9f09481a7bd7b63525e22cf9e4"),
-            ("SELECT ID FROM Item WHERE ID=:id", BTreeMap::from([("id".into(), Scalar::Int(7))]),
-                "ac2dfa77446d4d737857d235e789eeddcdcdeddc18c5ba419e081d7a9b1df1bc"),
-            ("SELECT '<>&\u{2028}\u{2029}' FROM Item", BTreeMap::from([
-                ("max".into(), Scalar::UInt(u64::MAX)),
-                ("min".into(), Scalar::Int(i64::MIN)),
-                ("text".into(), Scalar::String("<>&\u{2028}\u{2029}".into())),
-            ]), "3e92190db22f342688a0367540c7cd9e74486c3e28806629691a2024fabe7e76"),
+            (
+                "SELECT ID FROM Item WHERE ID=7",
+                BTreeMap::new(),
+                "c5462d945c5082649dfcab1450f01d37271b4e9f09481a7bd7b63525e22cf9e4",
+            ),
+            (
+                "SELECT ID FROM Item WHERE ID=:id",
+                BTreeMap::from([("id".into(), Scalar::Int(7))]),
+                "ac2dfa77446d4d737857d235e789eeddcdcdeddc18c5ba419e081d7a9b1df1bc",
+            ),
+            (
+                "SELECT '<>&\u{2028}\u{2029}' FROM Item",
+                BTreeMap::from([
+                    ("max".into(), Scalar::UInt(u64::MAX)),
+                    ("min".into(), Scalar::Int(i64::MIN)),
+                    ("text".into(), Scalar::String("<>&\u{2028}\u{2029}".into())),
+                ]),
+                "3e92190db22f342688a0367540c7cd9e74486c3e28806629691a2024fabe7e76",
+            ),
         ];
         for (sql, parameters, expected) in cases {
-            let budget = Budget::new(Cost { retained_bytes: 64, ..Cost::defaults() },
-                Instant::now() + Duration::from_secs(30), None);
-            assert_eq!(request_digest(sql, &parameters, &budget).unwrap(), expected);
+            let budget = Budget::new(
+                Cost {
+                    retained_bytes: 64,
+                    ..Cost::defaults()
+                },
+                Instant::now() + Duration::from_secs(30),
+                None,
+            );
+            let request = request::Request {
+                sql: sql.into(),
+                hotfix: vec![],
+                parameters: parameters
+                    .into_iter()
+                    .map(|(name, value)| {
+                        (
+                            name,
+                            request::Parameter::Other(serde_json::to_value(value).unwrap()),
+                        )
+                    })
+                    .collect(),
+            };
+            assert_eq!(request.digest(&budget).unwrap(), expected);
             let used = budget.snapshot().unwrap();
-            assert_eq!(used.retained_bytes, 64, "only the returned hex digest is retained");
+            assert_eq!(
+                used.retained_bytes, 64,
+                "only the returned hex digest is retained"
+            );
             assert_eq!(used.metadata_bytes, 0);
             assert!(used.decode_work > 0);
         }

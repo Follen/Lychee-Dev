@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 //! Authenticated game data formats and bounded queries.
+#[cfg(test)]
+extern crate self as lycheedev_data;
 pub mod assets;
 pub mod availability;
 pub mod blte;

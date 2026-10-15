@@ -340,6 +340,32 @@ pub fn commit_capture_budgeted_with_dependencies(
     control: &OperationControl,
     meter: &impl CaptureAccounting,
 ) -> Result<Value> {
+    commit_capture_referencing(home, input, dependencies, dependencies, control, meter)
+}
+
+/// Verify immutable inputs at publication under the same writer boundary as
+/// removal, without making them permanent identity dependencies. Fixed Go SQL
+/// holds WriteMetadata during its query but does not emit a dependencies field.
+/// Like the existing path, a failure after blob publication can retain a whole
+/// immutable blob; no partial capture manifest is committed.
+pub fn commit_capture_budgeted_referencing(
+    home: &Path,
+    input: CaptureInput<'_>,
+    references: &[&str],
+    control: &OperationControl,
+    meter: &impl CaptureAccounting,
+) -> Result<Value> {
+    commit_capture_referencing(home, input, &[], references, control, meter)
+}
+
+fn commit_capture_referencing(
+    home: &Path,
+    input: CaptureInput<'_>,
+    dependencies: &[&str],
+    required: &[&str],
+    control: &OperationControl,
+    meter: &impl CaptureAccounting,
+) -> Result<Value> {
     check(control, meter)?;
     let header = CaptureHeader {
         media_type: input.media_type,
@@ -384,17 +410,13 @@ pub fn commit_capture_budgeted_with_dependencies(
         )?;
         Ok(())
     };
-    if dependencies.is_empty() {
+    if required.is_empty() {
         publish()?;
         return persist(home, prepared, control, meter);
     }
-    meter.admit_allocation(
-        dependencies
-            .len()
-            .saturating_mul(std::mem::size_of::<String>()),
-    )?;
-    let mut references = Vec::with_capacity(dependencies.len());
-    for id in dependencies {
+    meter.admit_allocation(required.len().saturating_mul(std::mem::size_of::<String>()))?;
+    let mut references = Vec::with_capacity(required.len());
+    for id in required {
         check(control, meter)?;
         meter.admit_allocation("capture/".len() + id.len())?;
         references.push(format!("capture/{id}"));

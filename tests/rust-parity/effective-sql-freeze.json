@@ -1,0 +1,129 @@
+{
+  "schema": "lycheedev.effective-sql-freeze.v1",
+  "oracleCommit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "createdAt": "2026-10-15T00:16:16.488507+00:00",
+  "baseHead": "cc47c55b8d4e771b18214826375025587f603f6d",
+  "meaning": "Exact owner-file bytes. All Rust/Go execution NOT_RUN; static validation only. Receipt excludes itself; R1/R2/R3 snapshots preserved.",
+  "snapshot": "/tmp/lycheedev-effective-sql-review-r4",
+  "revision": "r4",
+  "files": [
+    {
+      "path": "crates/lycheedev-core/src/evidence.rs",
+      "bytes": 20931,
+      "sha256": "f33856af2242ea822f1a7706ab0a5c3db46d73d5676bb38413e0b07c55a6965f"
+    },
+    {
+      "path": "crates/lycheedev-core/src/evidence/budgeted.rs",
+      "bytes": 19940,
+      "sha256": "ea9942eb51ec750b557ec3458f68c200e8fe37cbf389ce89a9a2573ab9458151"
+    },
+    {
+      "path": "crates/lycheedev-core/tests/capture_query_references.rs",
+      "bytes": 7789,
+      "sha256": "895dde943cd4ac76a5e8abbfea8f13c3a59d4b71b798da69faf6c606e06dc35c"
+    },
+    {
+      "path": "crates/lycheedev-data/src/hotfix.rs",
+      "bytes": 32669,
+      "sha256": "910496df7f990765e5fc7f372d45d96d3658acfc82f2bc4dc60bebe751833398"
+    },
+    {
+      "path": "crates/lycheedev-data/src/local_query.rs",
+      "bytes": 38667,
+      "sha256": "afd583eea02d20eff16cf264a58374b79f1e437f986b6fcf1b1cf3977496c076"
+    },
+    {
+      "path": "crates/lycheedev-data/src/local_query/request.rs",
+      "bytes": 15998,
+      "sha256": "92ee7e7c663bda5736fcd8275833aab6d35af060be469d150d7f954e6629cf3b"
+    },
+    {
+      "path": "crates/lycheedev-data/src/local_query/effective.rs",
+      "bytes": 37624,
+      "sha256": "900d4f75fe03efc4d60c62789a63abd904404e013117e0382fcd34f6761fbb33"
+    },
+    {
+      "path": "crates/lycheedev-data/src/relational.rs",
+      "bytes": 57749,
+      "sha256": "84ff932b844a8d784af697cff9119ddeaf383702a788fd94d5a0f022899a5c89"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/effective_sql_parity.rs",
+      "bytes": 19983,
+      "sha256": "79d09407430570cbba068cf5c5a73ff29636874cb2c8694a60a9d6ad19bf8963"
+    },
+    {
+      "path": "crates/lycheedev-data/src/lib.rs",
+      "bytes": 4881,
+      "sha256": "46acd41b9e1f9a019d20b878b6d111ba66a51a48f9aa0c61ed708f35607c68aa"
+    },
+    {
+      "path": "crates/lycheedev-data/src/resource.rs",
+      "bytes": 9879,
+      "sha256": "f5c8dc2e13b3d7f1cc3b740f120806301cc49aa449756201285035e66db7d2d8"
+    },
+    {
+      "path": "crates/lycheedev-data/src/local_query/regression_tests.rs",
+      "bytes": 5505,
+      "sha256": "7bbca27446c51c95e4cda88c2e6938b44d0aa04dd5b625c8e34cd029e8138d5a"
+    },
+    {
+      "path": "tests/rust-parity/effective-sql-test-map.json",
+      "bytes": 22843,
+      "sha256": "ff0a6ba99ac60bd55e0cfc39b053a33bc87b319a81e6028dee4b9e613c6346a1"
+    }
+  ],
+  "requiredConcurrentAPI": [
+    "lycheedev_core::public_json::{NumberLayout::{Verbatim,Binary64,Exact,Object,Indexed},JsonNumber::new}",
+    "lycheedev_core::Outcome::public_numbers"
+  ],
+  "dependencies": [
+    {
+      "path": "tests/rust-parity/public-json-number-freeze.json",
+      "bytes": 4965,
+      "sha256": "36e947e82c5c6c2e0fcbdd144755c2faee5f8aa5e12752bc78c93fd83c6c725d"
+    },
+    {
+      "path": "crates/lycheedev-core/src/public_json.rs",
+      "bytes": 25870,
+      "sha256": "d5cbe12d37d39ffa9d16f6f8e652ff41894ab33bfebb320955c8c2992a09232d"
+    },
+    {
+      "path": "crates/lycheedev-core/src/lib.rs",
+      "bytes": 4772,
+      "sha256": "2f16ae6617aea1a85c0b661126ede5fbfbd6475a612e28c6adbe154c8660965d"
+    },
+    {
+      "path": "crates/lycheedev-data/tests/support/catalog_fixture.rs",
+      "bytes": 22421,
+      "sha256": "84f9fe0cccc3bdf04d7c455cd123160a6381f480f539872f015bfe477dbe77c1"
+    }
+  ],
+  "previousFreeze": {
+    "path": "/tmp/lycheedev-effective-sql-review-r3/tests/rust-parity/effective-sql-freeze.json",
+    "sha256": "bfabc6611eca011f206c7043756bf83110cc9848a6df13fcc0989f325da7158d",
+    "snapshotVerified": true
+  },
+  "validation": {
+    "rustfmt": "PASS: all 12 owned Rust files parsed and --check clean; --edition 2024 --config skip_children=true",
+    "scopedDiff": "PASS: git diff --check on owned tracked Rust files; exact frozen files also checked for trailing whitespace/conflict markers",
+    "staticArithmetic": "PASS: request escaping, 16-source output bounds, wide replacement cumulative metadata and identity-only work cap checked with Python",
+    "goSources": "PASS: fixed commit contents rehashed; source inspection only",
+    "rustTests": "NOT_RUN: parent prohibits Cargo/rustc/build; 32 new declarations require Windows CI",
+    "goTests": "NOT_RUN: no fixed-Go execution or differential runtime result claimed",
+    "performance": "NOT_RUN",
+    "independentReview": "PENDING: R4 supplied to original independent reviewer for the last R3 precedence P2; no self-approval"
+  },
+  "changesSinceR3": [
+    {
+      "path": "crates/lycheedev-data/src/local_query.rs",
+      "beforeSHA256": "bb3ee55832ec7cc2dafcf9ec2b848c70f1f0926f5f29887020d9a352de048bbd",
+      "afterSHA256": "afd583eea02d20eff16cf264a58374b79f1e437f986b6fcf1b1cf3977496c076"
+    },
+    {
+      "path": "crates/lycheedev-data/src/local_query/regression_tests.rs",
+      "beforeSHA256": "dc07db51e231651fad87a907095481590d723e659cbc40de594daf8e2d0e721a",
+      "afterSHA256": "7bbca27446c51c95e4cda88c2e6938b44d0aa04dd5b625c8e34cd029e8138d5a"
+    }
+  ]
+}

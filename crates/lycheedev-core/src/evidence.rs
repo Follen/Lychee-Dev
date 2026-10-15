@@ -22,7 +22,7 @@ pub use bounded::{
     publish_blob_reader_bounded, read_blob_bounded, verify_blob_bounded,
 };
 pub use budgeted::{
-    CaptureAccounting, CaptureHeader, commit_capture_budgeted,
+    CaptureAccounting, CaptureHeader, commit_capture_budgeted, commit_capture_budgeted_referencing,
     commit_capture_budgeted_with_dependencies, commit_verified_capture_budgeted,
 };
 pub use dependencies::{GoCaptureDecode, GoSignedInteger, normalize_go_json_strings};
