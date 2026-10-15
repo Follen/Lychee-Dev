@@ -13,12 +13,15 @@ pub enum Event {
     Resolve(BindingSite),
     Call(BindingSite),
     Observation(BindingSite),
+    Shape(ObjectViewKey),
 }
 #[derive(Clone)]
 pub struct Provider {
     pub names: HashMap<BindingSite, String>,
     pub values: HashMap<BindingSite, BindingDecision<BoundValue>>,
     pub calls: HashMap<BindingSite, BindingDecision<CallPermit>>,
+    pub observations: HashMap<BindingSite, BindingDecision<CallObservation>>,
+    pub shapes: HashMap<ObjectViewKey, BindingDecision<ObjectShape>>,
     pub events: Arc<Mutex<Vec<Event>>>,
 }
 impl Provider {
@@ -61,7 +64,17 @@ impl BindingContext for Provider {
     }
     fn call_observation(&self, site: BindingSite) -> BindingDecision<CallObservation> {
         self.events.lock().unwrap().push(Event::Observation(site));
-        BindingDecision::NotManaged
+        self.observations
+            .get(&site)
+            .cloned()
+            .unwrap_or(BindingDecision::NotManaged)
+    }
+    fn object_shape(&self, key: &ObjectViewKey) -> BindingDecision<ObjectShape> {
+        self.events.lock().unwrap().push(Event::Shape(key.clone()));
+        self.shapes
+            .get(key)
+            .cloned()
+            .unwrap_or(BindingDecision::NotManaged)
     }
 }
 #[derive(Clone, Debug)]
@@ -100,6 +113,8 @@ pub fn load(source: &str, query: &str) -> (EmmyLuaAnalysis, BindingSite, Provide
         names: HashMap::new(),
         values: HashMap::new(),
         calls: HashMap::new(),
+        observations: HashMap::new(),
+        shapes: HashMap::new(),
         events: Arc::new(Mutex::new(vec![])),
     };
     add_names(&analysis, file, &mut provider);

@@ -12,9 +12,11 @@ mod execution;
 pub use execution::{ExpressionExecutionBackend, ExpressionValue};
 mod expression;
 pub use expression::{ExpressionInstruction, ExpressionPlan};
+mod object;
 mod projector;
 mod query;
 mod tuple;
+mod value;
 pub use evidence::*;
 pub use projector::{ProjectionResult, SelectedProjectionBackend, SelectedProjector};
 pub use query::SelectedExpressionBackend;
@@ -23,6 +25,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 pub use tuple::{DenseTupleBackend, DenseTupleProjection};
+pub use value::{OwnedObjectInfo, OwnedValue};
 
 const MAX_COVERAGE_ROWS: usize = 16_384;
 const MAX_ACTIVE: usize = 64;

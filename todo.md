@@ -145,6 +145,7 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] Stage 1: architecture, all business bugs, Skill and all code-related paths converge; independently check idiomatic Rust ownership/borrowing, meaningful enums/type-state, Result/RAII and bounded safe concurrency, without line-by-line Go translation or needless abstraction.
 - [ ] Assign a fresh independent Source evaluator: real representative CLI queries, Chinese/large/empty/error/refs/context results, correct readable file/symbol/line/source evidence.
 - [ ] Assign a separate fresh independent Skill evaluator: actually follow its workflow, discover entrypoints/use correct arguments, keep steps concise and recovery current, prefer pinned Source over ad hoc GitHub raw. Record real CLI evidence and regressions, not implementer self-approval or aesthetic contract changes.
+- [ ] Assign a fresh independent Data evaluator: real query/version provenance, partial results, export and failure/recovery tasks; fix, actually verify and re-audit usage quality with the Source and Skill evaluations before Stage 1 convergence.
 - [ ] Stage 2: test sufficiency/meaningful coverage and tests without independent value converge; add regressions/remove proven redundancy, then measure coverage.
 - [ ] Map fixed Go tests to Rust equivalents, explicit non-applicability reasons or uncovered gaps; preserve recovery/unknown-result-no-replay/transaction/cancellation/protocol/empty-map/slot-migration boundaries without copying obsolete or redundant fixtures merely to inflate counts.
 - [ ] Stage 3: dedicated dead-code audit including dynamic/platform/feature/tool/package consumers converges after cleanup and regression.
@@ -270,3 +271,5 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] Complete actual owned Function/call successor and rerun all 448 S3 comparisons; the oracle correction is diagnostic, not a passing replacement.
 
 - [ ] 本批验证：XML child index 13 例、indexed IN 23 例、owned Function/call 11 例及原 448 比较；三方官方 Python 身份边界 Node 31 已过，Windows 尚待。IN 目前仅静态 eager provider，lazy/effective 继续；不据此勾选 G323-05 或零补丁完成。
+
+- [ ] Execute owned Object/carrier and authenticated owned Data span/source regressions on their exact composed tree; continue member/typecheck and actual Prepared/Session consumers. The newly saved ownership pieces do not close zero-patch or cache acceptance.

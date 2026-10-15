@@ -8,6 +8,10 @@ use std::{
     sync::Arc,
 };
 use support::*;
+fn plain_value(value: OwnedValue) -> LuaType {
+    assert!(value.is_context_free());
+    value.structural_type().clone()
+}
 
 #[test]
 fn ready_hits_skip_provider_and_ledger_but_preserve_control_before_and_after() {
@@ -29,7 +33,10 @@ fn ready_hits_skip_provider_and_ledger_but_preserve_control_before_and_after() {
         }
     };
     let mut query = OwnedQuery::new(&analysis, &session, site.file_id, &mut check);
-    assert_eq!(query.type_of_expr(site.syntax).unwrap(), LuaType::Nil);
+    assert_eq!(
+        plain_value(query.type_of_expr(site.syntax).unwrap()),
+        LuaType::Nil
+    );
     let events = provider.events.lock().unwrap().clone();
     let coverage = rows(&session);
     for relative in [1, 2] {
@@ -44,7 +51,10 @@ fn ready_hits_skip_provider_and_ledger_but_preserve_control_before_and_after() {
     }
     stop_at.set(usize::MAX);
     let before = count.get();
-    assert_eq!(query.type_of_expr(site.syntax).unwrap(), LuaType::Nil);
+    assert_eq!(
+        plain_value(query.type_of_expr(site.syntax).unwrap()),
+        LuaType::Nil
+    );
     assert_eq!(count.get() - before, 2);
     assert_eq!(*provider.events.lock().unwrap(), events);
     assert_eq!(rows(&session), coverage);
@@ -71,7 +81,10 @@ fn actual_names_use_selected_initializer_before_annotations_and_keep_compile_ord
     let session = session(&provider);
     let mut check = || Ok::<_, Stop>(());
     let mut query = OwnedQuery::new(&analysis, &session, site.file_id, &mut check);
-    assert_eq!(query.type_of_expr(site.syntax).unwrap(), LuaType::Number);
+    assert_eq!(
+        plain_value(query.type_of_expr(site.syntax).unwrap()),
+        LuaType::Number
+    );
     let coverage = rows(&session);
     assert_eq!(
         coverage
@@ -82,7 +95,10 @@ fn actual_names_use_selected_initializer_before_annotations_and_keep_compile_ord
     );
     let before = provider.events.lock().unwrap().len();
     let left = declaration(&analysis, site.file_id, "left");
-    assert_eq!(query.type_of_decl(&left).unwrap(), Some(LuaType::Nil));
+    assert_eq!(
+        query.type_of_decl(&left).unwrap().map(plain_value),
+        Some(LuaType::Nil)
+    );
     assert_eq!(
         provider.events.lock().unwrap().len(),
         before,
@@ -99,8 +115,14 @@ fn selected_origin_creates_fresh_scope_even_for_the_same_file() {
     let session = session(&provider);
     let mut check = || Ok::<_, Stop>(());
     let mut query = OwnedQuery::new(&analysis, &session, site.file_id, &mut check);
-    assert_eq!(query.type_of_expr(origin.syntax).unwrap(), LuaType::Nil);
-    assert_eq!(query.type_of_expr(site.syntax).unwrap(), LuaType::Nil);
+    assert_eq!(
+        plain_value(query.type_of_expr(origin.syntax).unwrap()),
+        LuaType::Nil
+    );
+    assert_eq!(
+        plain_value(query.type_of_expr(site.syntax).unwrap()),
+        LuaType::Nil
+    );
     assert_eq!(
         provider
             .events
@@ -128,7 +150,10 @@ fn selected_cycle_uses_session_guard_not_a_file_global_expression_cache() {
     let session = session(&provider);
     let mut check = || Ok::<_, Stop>(());
     let mut query = OwnedQuery::new(&analysis, &session, site.file_id, &mut check);
-    assert_eq!(query.type_of_expr(site.syntax).unwrap(), LuaType::Unknown);
+    assert_eq!(
+        plain_value(query.type_of_expr(site.syntax).unwrap()),
+        LuaType::Unknown
+    );
     let coverage = rows(&session);
     assert_eq!(coverage.len(), 2);
     assert_eq!(
@@ -152,9 +177,10 @@ fn stop_at_every_checkpoint_drops_pending_entries_and_keeps_real_ledger_prefix()
         total.set(total.get() + 1);
         Ok::<_, Stop>(())
     };
-    let expected = OwnedQuery::new(&analysis, &reference_session, site.file_id, &mut check)
+    let expected_owned = OwnedQuery::new(&analysis, &reference_session, site.file_id, &mut check)
         .type_of_expr(site.syntax)
         .unwrap();
+    let expected = plain_value(expected_owned);
     let expected_rows = rows(&reference_session);
     let token = Arc::new(());
     for stop in 1..=total.get() {
@@ -182,7 +208,7 @@ fn stop_at_every_checkpoint_drops_pending_entries_and_keeps_real_ledger_prefix()
         assert_eq!(prefix, expected_rows[..prefix.len()]);
         enabled.set(false);
         assert_eq!(
-            query.type_of_expr(site.syntax).unwrap(),
+            plain_value(query.type_of_expr(site.syntax).unwrap()),
             expected,
             "retry at {stop}"
         );
@@ -207,13 +233,16 @@ fn unwind_removes_the_pending_root_without_resetting_session_or_deadline() {
     let mut query = OwnedQuery::new(&analysis, &session, site.file_id, &mut check);
     assert!(catch_unwind(AssertUnwindSafe(|| query.type_of_expr(site.syntax))).is_err());
     panic_now.set(false);
-    assert_eq!(query.type_of_expr(site.syntax).unwrap(), LuaType::Nil);
+    assert_eq!(
+        plain_value(query.type_of_expr(site.syntax).unwrap()),
+        LuaType::Nil
+    );
     assert_eq!(rows(&session).len(), 1);
     assert!(count.get() > 3);
 }
 
 #[test]
-fn unsupported_metadata_flow_and_objects_are_typed_continuations_not_successful_unknown() {
+fn unsupported_metadata_flow_continue_while_missing_object_shapes_are_authoritative_unknown() {
     for (source, text, capability) in [
         (
             "---@type string\nlocal x=1\nreturn x",
@@ -283,22 +312,29 @@ fn unsupported_metadata_flow_and_objects_are_typed_continuations_not_successful_
         let mut check = || Ok::<_, Stop>(());
         let mut query = OwnedQuery::new(&analysis, &session, site.file_id, &mut check);
         for _ in 0..2 {
-            let OwnedQueryFailure::Continue(value) = query.type_of_expr(site.syntax).unwrap_err()
-            else {
-                panic!("object erased")
-            };
-            assert_eq!(value.capability, OwnedQueryCapability::Object);
-            assert_eq!(value.syntax, Some(site.syntax));
+            assert_eq!(
+                plain_value(query.type_of_expr(site.syntax).unwrap()),
+                LuaType::Unknown
+            );
         }
         assert_eq!(
-            provider.events.lock().unwrap().len(),
-            2,
-            "neither failure cached Unknown"
+            provider
+                .events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| **event == Event::Resolve(site))
+                .count(),
+            1,
+            "the completed unavailable projection is Ready"
         );
-        assert!(
-            rows(&session).is_empty(),
-            "no projected/checked object receipt"
+        let coverage = rows(&session);
+        assert_eq!(coverage.len(), 1);
+        assert_eq!(
+            coverage[0].reason.as_deref(),
+            Some("object_shape_unavailable")
         );
+        assert_eq!(coverage[0].operation, "resolve");
     }
 }
 
@@ -324,7 +360,10 @@ fn denied_call_initializer_slots_preserve_unknown_and_exact_call_producer() {
         let session = session(&provider);
         let mut check = || Ok::<_, Stop>(());
         let mut query = OwnedQuery::new(&analysis, &session, site.file_id, &mut check);
-        assert_eq!(query.type_of_expr(site.syntax).unwrap(), LuaType::Unknown);
+        assert_eq!(
+            plain_value(query.type_of_expr(site.syntax).unwrap()),
+            LuaType::Unknown
+        );
         let coverage = rows(&session);
         assert_eq!(coverage.len(), 1);
         assert_eq!(coverage[0].site, call);

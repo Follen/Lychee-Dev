@@ -185,10 +185,12 @@ impl<'a> Files<'a> {
         }
         Ok(Source {
             files: self,
-            object,
-            size,
-            sparse,
-            block: Mutex::new(None),
+            state: SourceState {
+                object,
+                size,
+                sparse,
+                block: Mutex::new(None),
+            },
         })
     }
     /// The returned section has authenticated BLTE EKey framing (or the whole
@@ -220,7 +222,9 @@ impl<'a> Files<'a> {
             0
         };
         let source = self.source(location.object.clone(), total, false)?;
-        if location.offset > source.size || location.bytes > source.size - location.offset {
+        if location.offset > source.state.size
+            || location.bytes > source.state.size - location.offset
+        {
             return Err(range());
         }
         let result = Encoded {
@@ -260,6 +264,24 @@ impl<'a> Files<'a> {
         }
         self.store.check()?;
         Ok(result)
+    }
+    /// Keep this authenticated section and block cache bound to the exact Files
+    /// owner. The shared Store still borrows the query's admitted workspace;
+    /// this Arc never creates or prolongs an independent admission permission.
+    pub(crate) fn open_owned(self: &Arc<Self>, key: &str, size: i64) -> Result<OwnedEncoded<'a>> {
+        let Encoded {
+            source,
+            offset,
+            size,
+            position,
+        } = self.open(key, size)?;
+        Ok(OwnedEncoded {
+            state: source.state,
+            files: self.clone(),
+            offset,
+            size,
+            position,
+        })
     }
     fn locate(&self, key: &str, size: i64) -> Result<Span> {
         let mut unavailable = match self.range(key, 0, 8, size) {
@@ -345,16 +367,21 @@ impl<'a> Files<'a> {
         let source = self.source(format!("{index_key}.index"), expected, true)?;
         // Keep the existing Go logical scratch reservation distinct from the
         // real Fragment/TOC/page allocation owners in Rust's safety ledger.
-        let _scratch = if source.size <= BLOCK as i64 {
+        let _scratch = if source.state.size <= BLOCK as i64 {
             self.store
                 .budget
-                .map(|b| b.reserve_logical_scratch((source.size as u64) * 2))
+                .map(|b| b.reserve_logical_scratch((source.state.size as u64) * 2))
                 .transpose()?
         } else {
             None
         };
-        let whole = if source.size <= BLOCK as i64 {
-            match self.range(&source.object, 0, source.size, source.size) {
+        let whole = if source.state.size <= BLOCK as i64 {
+            match self.range(
+                &source.state.object,
+                0,
+                source.state.size,
+                source.state.size,
+            ) {
                 Ok(raw) => Some(raw),
                 Err(error)
                     if self.offline
@@ -367,10 +394,10 @@ impl<'a> Files<'a> {
         } else {
             None
         };
-        if source.size < 28 {
+        if source.state.size < 28 {
             return Err(invalid());
         }
-        if source.size > 1 << 30 {
+        if source.state.size > 1 << 30 {
             return Err(limit());
         }
         let read = |out: &mut [u8], offset: i64| -> Result<()> {
@@ -384,8 +411,8 @@ impl<'a> Files<'a> {
             }
         };
         let mut raw_footer = [0; 28];
-        read(&mut raw_footer, source.size - 28)?;
-        let footer = index::Footer::parse(source.size, index_key, &raw_footer)?;
+        read(&mut raw_footer, source.state.size - 28)?;
+        let footer = index::Footer::parse(source.state.size, index_key, &raw_footer)?;
         let (toc_at, toc_len) = footer.toc_span();
         let _toc_owner = self
             .store
@@ -487,6 +514,9 @@ impl<'a> Files<'a> {
 }
 struct Source<'f, 'a> {
     files: &'f Files<'a>,
+    state: SourceState<'a>,
+}
+struct SourceState<'a> {
     object: String,
     size: i64,
     sparse: bool,
@@ -494,7 +524,12 @@ struct Source<'f, 'a> {
 }
 impl Source<'_, '_> {
     fn read_at(&self, out: &mut [u8], offset: i64) -> Result<()> {
-        self.files.store.check()?;
+        self.state.read_at(self.files, out, offset)
+    }
+}
+impl<'a> SourceState<'a> {
+    fn read_at(&self, files: &Files<'a>, out: &mut [u8], offset: i64) -> Result<()> {
+        files.store.check()?;
         if out.is_empty() {
             return Ok(());
         }
@@ -502,27 +537,25 @@ impl Source<'_, '_> {
             return Err(range());
         }
         if self.sparse {
-            let raw = self
-                .files
-                .range(&self.object, offset, out.len() as i64, self.size)?;
+            let raw = files.range(&self.object, offset, out.len() as i64, self.size)?;
             out.copy_from_slice(raw.bytes());
             return Ok(());
         }
         let mut block = self.block.lock().map_err(|_| internal())?;
         let mut copied = 0;
         while copied < out.len() {
-            self.files.store.check()?;
+            files.store.check()?;
             let at = offset + copied as i64;
             let base = at / (BLOCK as i64) * (BLOCK as i64);
             if block.as_ref().is_some_and(|(saved, _)| *saved == base) {
-                self.files
+                files
                     .block_hits
                     .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
                     .map_err(|_| limit())?;
             } else {
                 // Preserve the old reusable block until replacement succeeds,
                 // matching Go's failed-read behavior and true two-block peak.
-                let raw = self.files.range(
+                let raw = files.range(
                     &self.object,
                     base,
                     (BLOCK as i64).min(self.size - base),
@@ -553,18 +586,16 @@ impl Encoded<'_, '_> {
         self.size
     }
     pub fn rewind(&mut self) -> Result<()> {
-        self.source.files.store.check()?;
-        self.position = 0;
-        Ok(())
+        rewind(self.source.files, &mut self.position)
     }
     pub fn read_at(&self, out: &mut [u8], offset: usize) -> Result<()> {
-        offset
-            .checked_add(out.len())
-            .filter(|end| *end <= self.size)
-            .ok_or_else(range)?;
-        self.source.read_at(
+        section_read_at(
+            self.source.files,
+            &self.source.state,
+            self.offset,
+            self.size,
             out,
-            self.offset.checked_add(offset as i64).ok_or_else(range)?,
+            offset,
         )
     }
 }
@@ -576,43 +607,153 @@ impl crate::blte::EncodedRead for Encoded<'_, '_> {
         self.size
     }
     fn read_encoded(&self, offset: usize, bytes: usize) -> Result<crate::blte::EncodedSpan<'_>> {
-        self.source.files.store.check()?;
-        offset
-            .checked_add(bytes)
-            .filter(|end| *end <= self.size)
-            .ok_or_else(range)?;
-        if bytes > 64 << 20 {
-            return Err(fault(
-                "container.resource_limit",
-                3,
-                "Encoded span allocation exceeds bound",
-            ));
-        }
-        crate::blte::EncodedSpan::read_owned(bytes, self.source.files.store.budget, |out| {
-            let result = self.read_at(out, offset);
-            self.source.files.store.finish(result, Ok(()))
-        })
+        section_span(
+            self.source.files,
+            &self.source.state,
+            self.offset,
+            self.size,
+            offset,
+            bytes,
+        )
     }
 }
 impl Read for Encoded<'_, '_> {
     fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
-        self.source
-            .files
-            .store
-            .check()
-            .map_err(std::io::Error::other)?;
-        // One physical block per Read avoids losing a successful prefix if the
-        // following block fails; a later Read returns that unchanged error.
-        let boundary = BLOCK - ((self.offset as usize + self.position) % BLOCK);
-        let n = out.len().min(self.size - self.position).min(boundary);
-        if n == 0 {
-            return Ok(0);
-        }
-        self.read_at(&mut out[..n], self.position)
-            .map_err(std::io::Error::other)?;
-        self.position += n;
-        Ok(n)
+        section_read(
+            self.source.files,
+            &self.source.state,
+            self.offset,
+            self.size,
+            &mut self.position,
+            out,
+        )
     }
+}
+/// No source/geometry rebinding API: only Files::open_owned can construct this
+/// section after the existing EKey/location validation has completed.
+pub(crate) struct OwnedEncoded<'a> {
+    // Release the cached Fragment before the final shared Files owner.
+    state: SourceState<'a>,
+    files: Arc<Files<'a>>,
+    offset: i64,
+    size: usize,
+    position: usize,
+}
+impl OwnedEncoded<'_> {
+    pub(crate) fn rewind(&mut self) -> Result<()> {
+        rewind(&self.files, &mut self.position)
+    }
+    pub(crate) fn read_at(&self, out: &mut [u8], offset: usize) -> Result<()> {
+        section_read_at(
+            &self.files,
+            &self.state,
+            self.offset,
+            self.size,
+            out,
+            offset,
+        )
+    }
+}
+impl crate::blte::EncodedRead for OwnedEncoded<'_> {
+    fn check_encoded(&self) -> Result<()> {
+        self.files.store.check()
+    }
+    fn encoded_size(&self) -> usize {
+        self.size
+    }
+    fn read_encoded(&self, offset: usize, bytes: usize) -> Result<crate::blte::EncodedSpan<'_>> {
+        section_span(
+            &self.files,
+            &self.state,
+            self.offset,
+            self.size,
+            offset,
+            bytes,
+        )
+    }
+}
+impl Read for OwnedEncoded<'_> {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        section_read(
+            &self.files,
+            &self.state,
+            self.offset,
+            self.size,
+            &mut self.position,
+            out,
+        )
+    }
+}
+fn rewind(files: &Files<'_>, position: &mut usize) -> Result<()> {
+    files.store.check()?;
+    *position = 0;
+    Ok(())
+}
+fn section_read_at<'a>(
+    files: &Files<'a>,
+    state: &SourceState<'a>,
+    section_offset: i64,
+    size: usize,
+    out: &mut [u8],
+    offset: usize,
+) -> Result<()> {
+    offset
+        .checked_add(out.len())
+        .filter(|end| *end <= size)
+        .ok_or_else(range)?;
+    state.read_at(
+        files,
+        out,
+        section_offset
+            .checked_add(offset as i64)
+            .ok_or_else(range)?,
+    )
+}
+fn section_span<'f, 'a>(
+    files: &'f Files<'a>,
+    state: &SourceState<'a>,
+    section_offset: i64,
+    size: usize,
+    offset: usize,
+    bytes: usize,
+) -> Result<crate::blte::EncodedSpan<'f>> {
+    files.store.check()?;
+    offset
+        .checked_add(bytes)
+        .filter(|end| *end <= size)
+        .ok_or_else(range)?;
+    if bytes > 64 << 20 {
+        return Err(fault(
+            "container.resource_limit",
+            3,
+            "Encoded span allocation exceeds bound",
+        ));
+    }
+    crate::blte::EncodedSpan::read_owned(bytes, files.store.budget, |out| {
+        let result = section_read_at(files, state, section_offset, size, out, offset);
+        files.store.finish(result, Ok(()))
+    })
+}
+fn section_read<'a>(
+    files: &Files<'a>,
+    state: &SourceState<'a>,
+    section_offset: i64,
+    size: usize,
+    position: &mut usize,
+    out: &mut [u8],
+) -> std::io::Result<usize> {
+    files.store.check().map_err(std::io::Error::other)?;
+    // One physical block per Read preserves any successful prefix when the
+    // next block fails, for both borrowed and prepared owned sections.
+    let boundary = BLOCK - ((section_offset as usize + *position) % BLOCK);
+    let n = out.len().min(size - *position).min(boundary);
+    if n == 0 {
+        return Ok(0);
+    }
+    section_read_at(files, state, section_offset, size, &mut out[..n], *position)
+        .map_err(std::io::Error::other)?;
+    *position += n;
+    Ok(n)
 }
 #[cfg(test)]
 mod tests;

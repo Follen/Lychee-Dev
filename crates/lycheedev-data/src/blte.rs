@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, collections::BTreeMap, io::Read};
 mod span;
 pub use span::EncodedSpan;
+pub(crate) use span::OwnedDecodedSpan;
+mod guarded;
 mod streaming;
 pub(crate) use streaming::{Reader as StreamingReader, stream_io_error};
 
@@ -265,19 +267,10 @@ impl<'a> Ranges<'a> {
         }
         Ok(end)
     }
-}
-impl ByteSource for Ranges<'_> {
-    fn size(&self) -> usize {
-        self.size
-    }
-    fn read_span(&self, offset: usize, bytes: usize) -> Result<Cow<'_, [u8]>> {
-        self.check()?;
-        let end = self.extent(offset, bytes)?;
-        if let Some(budget) = self.budget {
-            budget.charge(Cost::retained(bytes))?;
-        }
+    // Both lifetime policies share exactly one chunk decoder/read loop.
+    fn decode_span(&self, offset: usize, bytes: usize, end: usize) -> Result<Vec<u8>> {
         if bytes == 0 {
-            return Ok(Cow::Owned(Vec::new()));
+            return Ok(Vec::new());
         }
         let mut result = Vec::with_capacity(bytes);
         for (index, s) in self.parts.iter().enumerate() {
@@ -328,14 +321,16 @@ impl ByteSource for Ranges<'_> {
         if result.len() != bytes {
             return malformed();
         }
-        Ok(Cow::Owned(result))
+        Ok(result)
     }
-    fn read_checked_span(
-        &self,
+
+    fn checked_direct_span<'s, T>(
+        &'s self,
         offset: usize,
         bytes: usize,
         expected: &[u8],
-    ) -> Result<Cow<'_, [u8]>> {
+        consume: impl FnOnce(EncodedSpan<'s>) -> Result<T>,
+    ) -> Result<Option<T>> {
         self.check()?;
         if expected.len() != 16 || expected.iter().all(|b| *b == 0) {
             return integrity();
@@ -363,8 +358,34 @@ impl ByteSource for Ranges<'_> {
                 {
                     return integrity();
                 }
-                return raw.decoded_copy(self.budget, || self.check());
+                return consume(raw).map(Some);
             }
+        }
+        Ok(None)
+    }
+}
+impl ByteSource for Ranges<'_> {
+    fn size(&self) -> usize {
+        self.size
+    }
+    fn read_span(&self, offset: usize, bytes: usize) -> Result<Cow<'_, [u8]>> {
+        self.check()?;
+        let end = self.extent(offset, bytes)?;
+        if let Some(budget) = self.budget {
+            budget.charge(Cost::retained(bytes))?;
+        }
+        self.decode_span(offset, bytes, end).map(Cow::Owned)
+    }
+    fn read_checked_span(
+        &self,
+        offset: usize,
+        bytes: usize,
+        expected: &[u8],
+    ) -> Result<Cow<'_, [u8]>> {
+        if let Some(raw) = self.checked_direct_span(offset, bytes, expected, |raw| {
+            raw.decoded_copy(self.budget, || self.check())
+        })? {
+            return Ok(raw);
         }
         let raw = self.read_span(offset, bytes)?;
         if expected.len() != 16

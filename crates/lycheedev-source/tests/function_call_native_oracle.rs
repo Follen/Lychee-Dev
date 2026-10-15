@@ -100,7 +100,12 @@ fn compare(
     for site in queries {
         assert_eq!(site.file_id, queries[0].file_id);
         let old = old_model.type_of_expr(site.syntax);
-        let new = new_model.type_of_expr(site.syntax).unwrap();
+        let value = new_model.type_of_expr(site.syntax).unwrap();
+        assert!(
+            value.is_context_free(),
+            "inherited Function R1 cases have no selected object"
+        );
+        let new = value.structural_type().clone();
         assert_eq!(new, old, "complete LuaType at {:?}", site);
         assert_eq!(format!("{new:?}"), format!("{old:?}"), "all type fields");
         assert_eq!(

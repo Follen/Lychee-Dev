@@ -91,7 +91,16 @@ fn compare(
         assert_eq!(site.file_id, queries[0].file_id);
         let old = old_model.type_of_expr(site.syntax);
         let new = new_model.type_of_expr(site.syntax).unwrap();
-        assert_eq!(new, old, "complete LuaType at {:?}", site);
+        assert!(
+            new.is_context_free(),
+            "S8 cases contain no selected objects"
+        );
+        assert_eq!(
+            new.structural_type(),
+            &old,
+            "complete LuaType at {:?}",
+            site
+        );
         assert_eq!(
             rows(&new_session),
             old_session
@@ -106,7 +115,7 @@ fn compare(
             *old_provider.events.lock().unwrap(),
             "actual provider query sequence, including cache hits and manages probes"
         );
-        results.push(new);
+        results.push(new.structural_type().clone());
     }
     println!(
         "OWNED_QUERY_NATIVE queries={} coverage={} providerCalls={}",

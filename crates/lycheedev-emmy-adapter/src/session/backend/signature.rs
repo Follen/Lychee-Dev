@@ -204,7 +204,24 @@ impl<E> OwnedQuery<'_, '_, E> {
             let mut slots = Vec::new();
             for (index, expr) in exprs.iter().enumerate() {
                 self.checkpoint()?;
-                let ty = self.type_of_expr(expr.get_syntax_id())?;
+                let value = self.type_of_expr(expr.get_syntax_id())?;
+                let ty = match value.into_context_free_type() {
+                    Ok(ty) => ty,
+                    Err(_) => {
+                        // Function-return carriers have not been implemented.
+                        // Keep the completed child receipts, but never turn its
+                        // selected identity into a plain DocFunction return.
+                        return self.continuation(
+                            OwnedQueryCapability::FunctionReturnType,
+                            Some(BindingSite {
+                                file_id: self.model.file_id(),
+                                syntax: expr.get_syntax_id(),
+                            }),
+                            None,
+                            None,
+                        );
+                    }
+                };
                 if index + 1 == exprs.len()
                     && matches!(expr, LuaExpr::CallExpr(_))
                     && matches!(ty, LuaType::Unknown | LuaType::Any)

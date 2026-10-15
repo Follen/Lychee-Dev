@@ -175,7 +175,13 @@ fn all_call_evidence_and_lua_positions_match_real_fixed_projector_full_fields() 
                         provider.query.file_id,
                         &mut check,
                     );
-                    let result = query.type_of_expr(provider.query.syntax);
+                    let result = query.type_of_expr(provider.query.syntax).map(|value| {
+                        assert!(
+                            value.is_context_free(),
+                            "original S3 corpus contains no object"
+                        );
+                        value.structural_type().clone()
+                    });
                     let rows = owned_session.coverage_checked(|| Ok::<_, ()>(())).unwrap();
                     (result, rows, "whole_expression_contextual_successor")
                 }

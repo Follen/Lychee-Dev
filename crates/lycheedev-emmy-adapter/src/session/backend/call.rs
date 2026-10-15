@@ -2,22 +2,22 @@
 //! This is a semantic subset, not a fixture-name/empty-body fast path. Remaining
 //! overload/generic/receiver/argument work stays on the same owned backend.
 use super::{ExpressionValue, OwnedQuery, OwnedQueryCapability, QueryResult};
-use crate::session::SelectedProjectionBackend;
+use crate::session::{OwnedValue, SelectedProjectionBackend};
 use emmylua_code_analysis::{LuaType, VariadicType};
 use emmylua_parser::LuaSyntaxId;
 
 impl<E> OwnedQuery<'_, '_, E> {
     pub(super) fn call_plain_signature(
         &mut self,
-        callee: ExpressionValue<LuaType>,
-        arguments: Vec<ExpressionValue<LuaType>>,
+        callee: ExpressionValue<OwnedValue>,
+        arguments: Vec<ExpressionValue<OwnedValue>>,
         colon_call: bool,
         generic_type_syntaxes: &[LuaSyntaxId],
-    ) -> QueryResult<ExpressionValue<LuaType>, E> {
+    ) -> QueryResult<ExpressionValue<OwnedValue>, E> {
         self.checkpoint()?;
         // The fixed call VM takes this branch before builtin/signature lookup.
-        if matches!(callee.value, LuaType::Any) {
-            return Ok(ExpressionValue::plain(LuaType::Any));
+        if matches!(callee.value.structural_type(), LuaType::Any) {
+            return Ok(ExpressionValue::plain(OwnedValue::plain(LuaType::Any)));
         }
         // An ownerless primitive has no callable candidate, builtin/member
         // lookup, alias or metatable to inspect. Keep Nil/Unknown as actual
@@ -26,14 +26,15 @@ impl<E> OwnedQuery<'_, '_, E> {
         if callee.owner.is_none()
             && callee.receiver.is_none()
             && callee.closure_syntax.is_none()
-            && plain_atom(&callee.value)
+            && plain_atom(callee.value.structural_type())
         {
-            return Ok(ExpressionValue::plain(LuaType::Unknown));
+            return Ok(ExpressionValue::plain(OwnedValue::plain(LuaType::Unknown)));
         }
-        let LuaType::DocFunction(function) = &callee.value else {
+        let LuaType::DocFunction(function) = callee.value.structural_type() else {
             return self.continuation(OwnedQueryCapability::Call, None, None, None);
         };
-        if callee.owner.is_some()
+        if !callee.value.is_context_free()
+            || callee.owner.is_some()
             || callee.receiver.is_some()
             || callee.closure_syntax.is_some()
             || !arguments.is_empty()
@@ -77,7 +78,9 @@ impl<E> OwnedQuery<'_, '_, E> {
             }
         }
         self.checkpoint()?;
-        Ok(ExpressionValue::plain(function.get_ret().clone()))
+        Ok(ExpressionValue::plain(OwnedValue::plain(
+            function.get_ret().clone(),
+        )))
     }
 }
 

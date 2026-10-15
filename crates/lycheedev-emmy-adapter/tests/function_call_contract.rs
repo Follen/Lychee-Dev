@@ -4,6 +4,13 @@ use emmylua_code_analysis::{LuaType, VariadicType};
 use lycheedev_emmy_adapter::session::*;
 use std::{cell::Cell, sync::Arc};
 use support::*;
+fn plain(value: OwnedValue) -> LuaType {
+    assert!(
+        value.is_context_free(),
+        "this inherited test excludes selected objects"
+    );
+    value.structural_type().clone()
+}
 
 #[test]
 fn real_functions_with_distinct_bodies_flow_into_the_owned_direct_call() {
@@ -13,9 +20,9 @@ fn real_functions_with_distinct_bodies_flow_into_the_owned_direct_call() {
         let session = session(&provider);
         let mut check = || Ok::<_, Stop>(());
         let mut query = OwnedQuery::new(&analysis, &session, site.file_id, &mut check);
-        let value = query.type_of_expr(site.syntax).unwrap();
+        let value = plain(query.type_of_expr(site.syntax).unwrap());
         assert!(!matches!(value, LuaType::Unknown));
-        assert_eq!(query.type_of_expr(site.syntax).unwrap(), value);
+        assert_eq!(plain(query.type_of_expr(site.syntax).unwrap()), value);
         let rows = rows(&session);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].proof, "selected-function-proof");
@@ -40,7 +47,7 @@ fn child_producers_precede_the_selected_callee_receipt_and_survive_the_call() {
     let session = session(&provider);
     let mut check = || Ok::<_, Stop>(());
     let mut query = OwnedQuery::new(&analysis, &session, site.file_id, &mut check);
-    let value = query.type_of_expr(site.syntax).unwrap();
+    let value = plain(query.type_of_expr(site.syntax).unwrap());
     assert_eq!(
         value,
         LuaType::Variadic(Arc::new(VariadicType::Multi(vec![
@@ -67,7 +74,7 @@ fn explicit_docs_parameters_and_async_metadata_do_not_query_body_returns() {
     let session = session(&provider);
     let mut check = || Ok::<_, Stop>(());
     let mut query = OwnedQuery::new(&analysis, &session, site.file_id, &mut check);
-    let LuaType::DocFunction(function) = query.type_of_expr(site.syntax).unwrap() else {
+    let LuaType::DocFunction(function) = plain(query.type_of_expr(site.syntax).unwrap()) else {
         panic!("expected function")
     };
     assert_eq!(
@@ -152,7 +159,7 @@ fn every_signature_and_call_checkpoint_preserves_error_identity_prefix_and_retry
         Ok::<_, Stop>(())
     };
     let mut query = OwnedQuery::new(&analysis, &full_session, site.file_id, &mut check);
-    let expected = query.type_of_expr(site.syntax).unwrap();
+    let expected = plain(query.type_of_expr(site.syntax).unwrap());
     let total = count.get();
     let full_rows = rows(&full_session);
     assert!(total > 30);
@@ -179,7 +186,7 @@ fn every_signature_and_call_checkpoint_preserves_error_identity_prefix_and_retry
         assert!(Arc::ptr_eq(&error.token, &token));
         let prefix = rows(&session);
         assert!(full_rows.starts_with(&prefix));
-        assert_eq!(query.type_of_expr(site.syntax).unwrap(), expected);
+        assert_eq!(plain(query.type_of_expr(site.syntax).unwrap()), expected);
         assert_eq!(rows(&session), full_rows);
     }
 }
@@ -199,7 +206,10 @@ fn selected_nil_and_unknown_callees_keep_noncallable_expression_results_without_
         let session = session(&provider);
         let mut check = || Ok::<_, Stop>(());
         let mut query = OwnedQuery::new(&analysis, &session, site.file_id, &mut check);
-        assert_eq!(query.type_of_expr(site.syntax).unwrap(), LuaType::Unknown);
+        assert_eq!(
+            plain(query.type_of_expr(site.syntax).unwrap()),
+            LuaType::Unknown
+        );
         assert_eq!(rows(&session).len(), 1);
         assert_eq!(rows(&session)[0].operation, "resolve");
         assert!(

@@ -662,3 +662,5 @@ fn remote_encoded_span_and_ranges_keep_origin_admission_until_each_owner_drops()
 }
 
 mod publication_diagnostics;
+
+mod owned_source;

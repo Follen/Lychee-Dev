@@ -3,20 +3,20 @@
 //! Completed paths use the same compiler/executor and per-model caches. Missing
 //! capabilities leave through a typed continuation boundary, never a successful
 //! Unknown or a raw contextual-inference fallback. This is not the production
-//! semantic-model replacement yet: notably selected objects cannot enter this
-//! public-LuaType-only carrier until the owned provenance carrier is implemented.
+//! semantic-model replacement yet. Selected objects retain owned identity and
+//! nested carriers; unimplemented structural/member consumers remain explicit.
 mod call;
 mod signature;
 
 use super::{
     BindingDecision, BindingSite, DenseTupleBackend, DenseTupleProjection,
     ExpressionExecutionBackend, ExpressionValue, FunctionRef, ObjectRef, OwnedBindingSession,
-    PrimitiveBinaryProjection, ProjectionResult, SelectedExpressionBackend,
+    OwnedValue, PrimitiveBinaryProjection, ProjectionResult, SelectedExpressionBackend,
     SelectedProjectionBackend, SelectedProjector,
 };
 use emmylua_code_analysis::{
-    Decl, DeclKind, EmmyLuaAnalysis, FileId, LuaMemberKey, LuaTupleStatus, LuaTupleType, LuaType,
-    SemanticId, SemanticModel, VariadicType,
+    Decl, DeclKind, EmmyLuaAnalysis, FileId, LuaMemberKey, LuaTupleStatus, LuaType, SemanticId,
+    SemanticModel,
 };
 use emmylua_parser::{BinaryOperator, LuaAstNode, LuaClosureExpr, LuaIndexExpr, LuaSyntaxId};
 use std::{cell::RefCell, collections::HashMap, hash::Hash, rc::Rc, sync::Arc};
@@ -33,6 +33,7 @@ pub enum OwnedQueryCapability {
     CallSignature,
     CallReturnType,
     Object,
+    SelectedTypeMerge,
     DeclarationMetadata,
     ClosureEnvironment,
     DeclarationFlow,
@@ -98,18 +99,17 @@ impl<K: Eq + Hash, V> Drop for PendingMemo<K, V> {
 /// are borrowed once; selected Expression origins construct a fresh scope even
 /// when their file equals this model's file, exactly like old model_for.
 ///
-/// A successful result currently excludes selected Object/Parameter projections
-/// and general flow/member/call inference. Selected Function and direct
-/// DocFunction calls have explicit, checked subsets in child modules. Such a branch returns
-/// Continue before any plain LuaType can erase selected identity or provenance.
+/// A successful result currently excludes selected Function/Parameter projections
+/// and general flow/member/call inference. Object identity and nested carriers
+/// remain owned through the accepted expression, declaration and tuple paths.
 /// This entry is not installed in Source or the diagnostic registry yet.
 pub struct OwnedQuery<'a, 'control, E> {
     analysis: &'a EmmyLuaAnalysis,
     session: &'a OwnedBindingSession,
     model: SemanticModel<'a>,
     check: &'control mut dyn FnMut() -> Result<(), E>,
-    expressions: Memo<LuaSyntaxId, LuaType>,
-    declarations: Memo<(FileId, SemanticId), Option<LuaType>>,
+    expressions: Memo<LuaSyntaxId, OwnedValue>,
+    declarations: Memo<(FileId, SemanticId), Option<OwnedValue>>,
 }
 
 impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
@@ -155,13 +155,13 @@ impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
     /// Replaces the old type_of_expr_impl cache/body on the accepted subset.
     /// Ready and InProgress hits do not call the provider or append coverage.
     /// The original caller control is checked on both sides of every cache hit.
-    pub fn type_of_expr(&mut self, syntax: LuaSyntaxId) -> QueryResult<LuaType, E> {
+    pub fn type_of_expr(&mut self, syntax: LuaSyntaxId) -> QueryResult<OwnedValue, E> {
         self.checkpoint()?;
         let cached = self.expressions.borrow().get(&syntax).cloned();
         if let Some(entry) = cached {
             let value = match entry {
                 CacheEntry::Ready(value) => value,
-                CacheEntry::InProgress => LuaType::Unknown,
+                CacheEntry::InProgress => OwnedValue::plain(LuaType::Unknown),
             };
             self.checkpoint()?;
             return Ok(value);
@@ -182,7 +182,7 @@ impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
 
     /// Same current-model declaration lookup and foreign-key cache identity as
     /// the fixed engine. Unsupported branches do not leave a Ready(None) entry.
-    pub fn type_of_decl(&mut self, declaration: &SemanticId) -> QueryResult<Option<LuaType>, E> {
+    pub fn type_of_decl(&mut self, declaration: &SemanticId) -> QueryResult<Option<OwnedValue>, E> {
         self.checkpoint()?;
         let file = match declaration {
             SemanticId::Decl(key) => key.file_id,
@@ -242,15 +242,19 @@ impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
         Ok(managed)
     }
 
-    fn initializer_slot(ty: LuaType, index: Option<usize>) -> LuaType {
+    fn initializer_slot(ty: OwnedValue, index: Option<usize>) -> OwnedValue {
         match index {
             None => ty,
-            Some(_) if matches!(ty, LuaType::Unknown | LuaType::Any) => LuaType::Unknown,
-            Some(index) => ty.get_result_slot_type(index).unwrap_or(LuaType::Nil),
+            Some(_) if matches!(ty.structural_type(), LuaType::Unknown | LuaType::Any) => {
+                OwnedValue::plain(LuaType::Unknown)
+            }
+            Some(index) => ty
+                .result_slot(index)
+                .unwrap_or_else(|| OwnedValue::plain(LuaType::Nil)),
         }
     }
 
-    fn declaration_body(&mut self, declaration: &SemanticId) -> QueryResult<Option<LuaType>, E> {
+    fn declaration_body(&mut self, declaration: &SemanticId) -> QueryResult<Option<OwnedValue>, E> {
         if let Some(facts) = self.model.file_facts()
             && let Some(info) = facts.decl_by_id(declaration)
         {
@@ -307,7 +311,7 @@ impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
             // left which could observe selected context. The raw method reaches
             // exactly the old final shell projection without contextual work.
             self.checkpoint()?;
-            let value = self.model.type_of_decl(declaration);
+            let value = self.model.type_of_decl(declaration).map(OwnedValue::plain);
             self.checkpoint()?;
             return Ok(value);
         }
@@ -329,7 +333,11 @@ impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
         )
     }
 
-    fn declaration_at(&mut self, declaration: &SemanticId, offset: u32) -> QueryResult<LuaType, E> {
+    fn declaration_at(
+        &mut self,
+        declaration: &SemanticId,
+        offset: u32,
+    ) -> QueryResult<OwnedValue, E> {
         self.checkpoint()?;
         let facts = self.model.file_facts();
         let info = facts.and_then(|facts| facts.decl_by_id(declaration));
@@ -357,7 +365,9 @@ impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
                 Some(declaration.clone()),
             );
         }
-        let ty = self.type_of_decl(declaration)?.unwrap_or(LuaType::Unknown);
+        let ty = self
+            .type_of_decl(declaration)?
+            .unwrap_or_else(|| OwnedValue::plain(LuaType::Unknown));
         if info.is_some_and(|info| info.kind == DeclKind::Global) {
             return self.continuation(
                 OwnedQueryCapability::GlobalGenericSanitization,
@@ -371,20 +381,20 @@ impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
 }
 
 impl<E> SelectedProjectionBackend for OwnedQuery<'_, '_, E> {
-    type Value = LuaType;
+    type Value = OwnedValue;
     type Error = OwnedQueryFailure<E>;
     fn checkpoint(&mut self) -> QueryResult<(), E> {
         (self.check)().map_err(OwnedQueryFailure::Control)
     }
-    fn plain(&mut self, ty: LuaType) -> LuaType {
-        ty
+    fn plain(&mut self, ty: LuaType) -> OwnedValue {
+        OwnedValue::plain(ty)
     }
     fn expression(
         &mut self,
         _: &SelectedProjector<'_>,
         _: BindingSite,
         origin: BindingSite,
-    ) -> ProjectionResult<LuaType, Self::Error> {
+    ) -> ProjectionResult<OwnedValue, Self::Error> {
         let mut foreign = OwnedQuery::new(
             self.analysis,
             self.session,
@@ -398,7 +408,7 @@ impl<E> SelectedProjectionBackend for OwnedQuery<'_, '_, E> {
         _: &SelectedProjector<'_>,
         site: BindingSite,
         parameter: &SemanticId,
-    ) -> ProjectionResult<LuaType, Self::Error> {
+    ) -> ProjectionResult<OwnedValue, Self::Error> {
         self.continuation(
             OwnedQueryCapability::Parameter,
             Some(site),
@@ -411,42 +421,46 @@ impl<E> SelectedProjectionBackend for OwnedQuery<'_, '_, E> {
         _: &SelectedProjector<'_>,
         site: BindingSite,
         function: &FunctionRef,
-    ) -> ProjectionResult<LuaType, Self::Error> {
-        // The fixed model_for creates a fresh scope even for the same file.
+    ) -> ProjectionResult<OwnedValue, Self::Error> {
         let mut foreign = OwnedQuery::new(
             self.analysis,
             self.session,
             function.file_id,
             &mut *self.check,
         );
-        foreign.project_function_signature(site, function.closure)
+        foreign
+            .project_function_signature(site, function.closure)
+            .map(|result| result.map(OwnedValue::plain))
     }
     fn object(
         &mut self,
-        _: &SelectedProjector<'_>,
+        projector: &SelectedProjector<'_>,
         site: BindingSite,
-        _: &ObjectRef,
-    ) -> ProjectionResult<LuaType, Self::Error> {
-        self.continuation(OwnedQueryCapability::Object, Some(site), None, None)
+        object: &ObjectRef,
+    ) -> ProjectionResult<OwnedValue, Self::Error> {
+        projector.project_owned_object(site, object, self)
     }
 }
 impl<E> SelectedExpressionBackend for OwnedQuery<'_, '_, E> {
-    fn result_pack(&mut self, slots: Vec<LuaType>) -> LuaType {
-        LuaType::Variadic(Arc::new(VariadicType::Multi(slots)))
+    fn result_pack(&mut self, slots: Vec<OwnedValue>) -> OwnedValue {
+        OwnedValue::pack(slots)
     }
-    fn scalar_result(&mut self, value: LuaType) -> LuaType {
-        if matches!(value, LuaType::Variadic(_)) {
-            value.get_result_slot_type(0).unwrap_or(LuaType::Nil)
+    fn scalar_result(&mut self, value: OwnedValue) -> OwnedValue {
+        if matches!(value.structural_type(), LuaType::Variadic(_)) {
+            value
+                .result_slot(0)
+                .unwrap_or_else(|| OwnedValue::plain(LuaType::Nil))
         } else {
             value
         }
     }
 }
+
 impl<E> ExpressionExecutionBackend for OwnedQuery<'_, '_, E> {
-    fn value_type<'v>(&self, value: &'v LuaType) -> &'v LuaType {
-        value
+    fn value_type<'v>(&self, value: &'v OwnedValue) -> &'v LuaType {
+        value.structural_type()
     }
-    fn same_value_type(&self, left: &LuaType, right: &LuaType) -> bool {
+    fn same_value_type(&self, left: &OwnedValue, right: &OwnedValue) -> bool {
         left == right
     }
     fn load_name(
@@ -455,7 +469,7 @@ impl<E> ExpressionExecutionBackend for OwnedQuery<'_, '_, E> {
         _: FileId,
         _: &str,
         offset: u32,
-    ) -> QueryResult<ExpressionValue<LuaType>, E> {
+    ) -> QueryResult<ExpressionValue<OwnedValue>, E> {
         self.checkpoint()?;
         let declaration = self.model.resolve_name(offset.into());
         self.checkpoint()?;
@@ -478,10 +492,10 @@ impl<E> ExpressionExecutionBackend for OwnedQuery<'_, '_, E> {
             );
         }
         let mut ty = self.declaration_at(&declaration, offset)?;
-        if matches!(ty, LuaType::Unknown)
+        if matches!(ty.structural_type(), LuaType::Unknown)
             && info.is_some_and(|info| is_uninitialized_local(info, facts.unwrap()))
         {
-            ty = LuaType::Nil;
+            ty = OwnedValue::plain(LuaType::Nil);
         }
         Ok(ExpressionValue {
             value: ty,
@@ -494,18 +508,18 @@ impl<E> ExpressionExecutionBackend for OwnedQuery<'_, '_, E> {
         &mut self,
         _: &SelectedProjector<'_>,
         _: FileId,
-        _: ExpressionValue<LuaType>,
+        _: ExpressionValue<OwnedValue>,
         _: &LuaMemberKey,
-    ) -> QueryResult<ExpressionValue<LuaType>, E> {
+    ) -> QueryResult<ExpressionValue<OwnedValue>, E> {
         self.continuation(OwnedQueryCapability::IndexMember, None, None, None)
     }
     fn index_dynamic(
         &mut self,
         _: &SelectedProjector<'_>,
         _: FileId,
-        _: ExpressionValue<LuaType>,
-        _: ExpressionValue<LuaType>,
-    ) -> QueryResult<ExpressionValue<LuaType>, E> {
+        _: ExpressionValue<OwnedValue>,
+        _: ExpressionValue<OwnedValue>,
+    ) -> QueryResult<ExpressionValue<OwnedValue>, E> {
         self.continuation(OwnedQueryCapability::IndexDynamic, None, None, None)
     }
     fn expression_at(
@@ -513,25 +527,25 @@ impl<E> ExpressionExecutionBackend for OwnedQuery<'_, '_, E> {
         _: &SelectedProjector<'_>,
         site: BindingSite,
         _: u32,
-    ) -> QueryResult<LuaType, E> {
+    ) -> QueryResult<OwnedValue, E> {
         self.continuation(OwnedQueryCapability::ExpressionFlow, Some(site), None, None)
     }
     fn call(
         &mut self,
         _: &SelectedProjector<'_>,
         _: FileId,
-        callee: ExpressionValue<LuaType>,
-        arguments: Vec<ExpressionValue<LuaType>>,
+        callee: ExpressionValue<OwnedValue>,
+        arguments: Vec<ExpressionValue<OwnedValue>>,
         colon_call: bool,
         generic_type_syntaxes: &[LuaSyntaxId],
-    ) -> QueryResult<ExpressionValue<LuaType>, E> {
+    ) -> QueryResult<ExpressionValue<OwnedValue>, E> {
         self.call_plain_signature(callee, arguments, colon_call, generic_type_syntaxes)
     }
     fn logical_nullable_extra(
         &mut self,
         _: &SelectedProjector<'_>,
         site: BindingSite,
-    ) -> QueryResult<Option<LuaType>, E> {
+    ) -> QueryResult<Option<OwnedValue>, E> {
         self.checkpoint()?;
         let member = self
             .model
@@ -551,18 +565,24 @@ impl<E> ExpressionExecutionBackend for OwnedQuery<'_, '_, E> {
             Ok(None)
         }
     }
-    fn merge_value(&mut self, left: LuaType, extra: LuaType) -> QueryResult<LuaType, E> {
+    fn merge_value(&mut self, left: OwnedValue, extra: OwnedValue) -> QueryResult<OwnedValue, E> {
         self.checkpoint()?;
-        Ok(LuaType::from_vec(vec![left, extra]))
+        let (Ok(left), Ok(extra)) = (
+            left.into_context_free_type(),
+            extra.into_context_free_type(),
+        ) else {
+            return self.continuation(OwnedQueryCapability::SelectedTypeMerge, None, None, None);
+        };
+        Ok(OwnedValue::plain(LuaType::from_vec(vec![left, extra])))
     }
     fn binary(
         &mut self,
         projector: &SelectedProjector<'_>,
         file: FileId,
         op: BinaryOperator,
-        left: LuaType,
-        right: LuaType,
-    ) -> QueryResult<LuaType, E> {
+        left: OwnedValue,
+        right: OwnedValue,
+    ) -> QueryResult<OwnedValue, E> {
         match projector.project_primitive_binary(file, op, left, right, self)? {
             PrimitiveBinaryProjection::Complete(value) => Ok(value),
             PrimitiveBinaryProjection::DeferredLogical { op, left, right } => {
@@ -570,8 +590,8 @@ impl<E> ExpressionExecutionBackend for OwnedQuery<'_, '_, E> {
                     DenseTupleProjection::Projected(value)
                     | DenseTupleProjection::Unchanged(value) => value,
                 };
-                if (op == BinaryOperator::OpAnd && left.is_always_truthy())
-                    || (op == BinaryOperator::OpOr && left.is_always_falsy())
+                if (op == BinaryOperator::OpAnd && left.structural_type().is_always_truthy())
+                    || (op == BinaryOperator::OpOr && left.structural_type().is_always_falsy())
                 {
                     Ok(right)
                 } else {
@@ -586,17 +606,17 @@ impl<E> DenseTupleBackend for OwnedQuery<'_, '_, E> {
         &mut self,
         _: &SelectedProjector<'_>,
         site: BindingSite,
-    ) -> QueryResult<LuaType, E> {
+    ) -> QueryResult<OwnedValue, E> {
         debug_assert_eq!(site.file_id, self.model.file_id());
         self.type_of_expr(site.syntax)
     }
     fn tuple_value(
         &mut self,
-        slots: Vec<LuaType>,
+        slots: Vec<OwnedValue>,
         status: LuaTupleStatus,
-    ) -> QueryResult<LuaType, E> {
+    ) -> QueryResult<OwnedValue, E> {
         self.checkpoint()?;
-        Ok(LuaType::Tuple(Arc::new(LuaTupleType::new(slots, status))))
+        OwnedValue::tuple_checked(slots, status, || self.checkpoint())
     }
 }
 
@@ -657,7 +677,10 @@ mod tests {
             .declarations
             .borrow_mut()
             .insert((file, decl.clone()), CacheEntry::InProgress);
-        assert_eq!(query.type_of_expr(syntax).unwrap(), LuaType::Unknown);
+        assert_eq!(
+            query.type_of_expr(syntax).unwrap().structural_type(),
+            &LuaType::Unknown
+        );
         assert_eq!(query.type_of_decl(&decl).unwrap(), None);
         assert_eq!(count.get(), 4);
         assert!(

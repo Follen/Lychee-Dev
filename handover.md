@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 17:47 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`ac410603ccde048a76b798863b407e010383de44`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 18:04 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`6699bbff2d04075e25fafd587cb0de1618561f01`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -23,7 +23,9 @@
 
 ## 2. 当前实现与未闭环事项
 
-本批新增已独审、待原生执行的实现：XML 子节点有界索引保留原扫描回退；Data 静态 WDC 的 IN 候选整批缓冲与失败回退（仍为 eager 行输入，effective/lazy provider 尚未接）；owned Emmy Function 与有限调用后继（11 新测试及原 448 比较待跑，生产仍用过渡引擎，补丁未清）。Windows 三方工具身份修复已本地 Node 31/31 通过，限定官方 Python 单叶别名并保全部路径/字节校验；尚未实际 Windows 执行。下一原生批同时验证已保存的自适应默认消费者及 Core 测试模块路径修复。
+最新验证批 6699bbf 已保存 XML 子节点索引、静态 WDC IN 候选筛选、owned Function/call 与三方工具身份修复，run38781154924 排队，Rust 尚未执行。完整本地静态组重新通过各独立检查，仅真实21个旧addon差异仍失败；三方 Node 31/31通过。更早bc2的真实Driver→Lua桥、槽维护/移除/修复步骤现已成功，待最终sealed证据核具体用例；all-target曾因Core测试模块路径失败，6699已包含修复，不能泛化整轮通过。
+
+本普通批将 owned Object/token/epoch/嵌套pack身份搬入自有carrier，并保存单次源字节与预算guard的owned接管、已认证Files状态的无深拷贝持有；均已独审，13+14+5新Rust仍NOT_RUN。Object member/typecheck/复杂返回后继未完，生产未切，Emmy仍31补丁路径/26生产源文件；Data Prepared/Session缓存复用仍在接线，不能把新增owner当已实现缓存。
 
 498 的槽维护 13 过/4 超时，移除 8/8、修复 25/25 实际通过；原 180 秒期限、持久化与并发均未放宽。同字节前轮通过不能证明当前没有磁盘争用或性能回归，仍待受控单次业务诊断。
 
