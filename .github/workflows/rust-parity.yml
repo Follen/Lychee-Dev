@@ -404,6 +404,10 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node tools/rust-cargo.mjs --owner ci-native-preparation --one-shot -- test --locked --offline -p lycheedev-source --lib native:: -j 1
+      - name: Run XML generated text and original mapping regressions
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-xml-inline-source --one-shot -- test --locked --offline -p lycheedev-source --lib xml_inline:: -j 1
       - name: Run bounded XML child index equivalence fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
@@ -495,6 +499,10 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node tools/rust-cargo.mjs --owner ci-data-casc-span --one-shot -- test --locked --offline -p lycheedev-data --lib casc::span_tests:: -j 1
+      - name: Run prepared Encoding and Root cache regressions
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-data-prepared-metadata --one-shot -- test --locked --offline -p lycheedev-data --lib metadata_format:: -j 1
       - name: Run local Data domain fixtures independently
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-data-domain --one-shot -- test --locked --offline -p lycheedev-data --test local_domain_parity -j 1

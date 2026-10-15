@@ -265,6 +265,12 @@ impl<'a> Ranges<'a> {
         };
         let mut parts = Vec::with_capacity(count);
         for i in 0..count {
+            if session {
+                raw.check()?;
+                if let Some(budget) = budget {
+                    budget.check()?;
+                }
+            }
             let at = (if session { 4 } else { 12 }) + 24 * i;
             let p = Part {
                 encoded: u32::from_be_bytes(directory[at..at + 4].try_into().unwrap()) as usize,

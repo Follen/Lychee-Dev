@@ -341,3 +341,61 @@ fn prepared_view_rejects_independent_budget_stop_without_touching_live_source() 
     assert!(original.check().is_ok());
     assert_eq!(reads.lock().unwrap().len(), count);
 }
+
+#[test]
+fn prepared_directory_checks_source_scope_between_entries_and_refunds_failed_owner() {
+    struct StopDuringDirectory {
+        source: Source,
+        loaded: std::sync::atomic::AtomicBool,
+        checks: AtomicUsize,
+    }
+    impl EncodedRead for StopDuringDirectory {
+        fn encoded_size(&self) -> usize {
+            self.source.encoded_size()
+        }
+        fn check_encoded(&self) -> Result<()> {
+            if self.loaded.load(Ordering::SeqCst) && self.checks.fetch_add(1, Ordering::SeqCst) == 1
+            {
+                self.source.control.tracked_cancel_handle()?.cancel();
+            }
+            self.source.check_encoded()
+        }
+        fn read_encoded(&self, at: usize, bytes: usize) -> Result<EncodedSpan<'_>> {
+            let result = self.source.read_encoded(at, bytes)?;
+            if at == 8 {
+                self.loaded.store(true, Ordering::SeqCst);
+            }
+            Ok(result)
+        }
+    }
+    let mut raw = b"BLTE".to_vec();
+    raw.extend_from_slice(&60u32.to_be_bytes());
+    raw.extend_from_slice(&[15, 0, 0, 2]);
+    for chunk in [b"Na", b"Nb"] {
+        raw.extend_from_slice(&2u32.to_be_bytes());
+        raw.extend_from_slice(&1u32.to_be_bytes());
+        raw.extend_from_slice(&Md5::digest(chunk));
+    }
+    raw.extend_from_slice(b"NaNb");
+    let budget = budget();
+    let source = source(raw, &budget);
+    let reads = source.reads.clone();
+    let drops = source.drops.clone();
+    let source = StopDuringDirectory {
+        source,
+        loaded: false.into(),
+        checks: 0.into(),
+    };
+    assert_eq!(
+        PreparedRanges::open(source, Limits::default(), budget.clone())
+            .err()
+            .unwrap()
+            .code,
+        "command.cancelled"
+    );
+    assert_eq!(*reads.lock().unwrap(), [(0, 8), (8, 52)]);
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
+    assert_eq!(budget.snapshot().unwrap().retained_bytes, 0);
+    assert_eq!(budget.logical_snapshot().unwrap().metadata_bytes, 64);
+    assert_eq!(budget.logical_snapshot().unwrap().decode_work, 2);
+}

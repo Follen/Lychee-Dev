@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 18:57 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`c8dc6ec275111f45cdfbcc776630ea99dfb91852`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 19:04 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`d6b210822805f732cd4c5dc87ac839c8c2c38786`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -24,6 +24,10 @@
 - 2026-10-15 18:24 用户调整实施节奏：先按完整端到端功能实现并接入默认生产消费者，再集中补测试和统一验证；取消自行增加的逐小片冻结/独审/CI先行门禁。实现过程中仍及时分批提交推送同一草稿PR，真实安全边界和文件单写协调保留；已有CI旁路诊断，不等待每轮才继续编码。最终四阶段循环审计与完整验收要求不变。
 
 ## 2. 当前实现与未闭环事项
+
+内存当前实际实现：API定义原文副本在验证重建后立即释放；身份唯一性临时sets在syntax索引前释放；managed reads/calls冻结上下文共享Arc而不深拷贝；XML生成文本去掉Script重复Vec，仅compiler文本保有并供现消费者读取。原行映射/hash/未知处理不变，Rust与完整Retail降幅均待集中实测。
+
+6699终态产物168 owner/987 sealed日志全SHA核验；owned binary4/dense3/execution3/plan2/function5实际通过，query backend4通过1失败，正常局部变量触发尚缺的DeclarationFlow，后续selected448未执行。此缺口正按完整flow链实现，不改成Unknown掩盖。Data旧可见域错误与三处adaptive测试移出PinnedSet的E0507已最小修；Core旧immediate-busy测试已按真实blob等待合同改取消，历史metadata测试目录加唯一序号。新测试均未运行；同候选旧context fixture失败已在c8后继保存正负用例。
 
 当前完整生产批已把 adapter declaration 与 Source PreparedSnapshot 两处摄取切换为原版 Emmy 公开 batch API，并把原35个测试迁到自有 adapter；删除 checked/shared ingestion、DB shared setter 和 VFS Arc接收改动。重建 recipe 从31降为26 changed paths、生产源从26降为24，完整源码身份重建已核，Rust运行待集中验证。公开API要求String，新增N常驻及N+最大文件转换瞬态文本成本已明确记录；不提高原2GiB worker上限，完整语义/诊断仍继续迁移，未达到零补丁。
 

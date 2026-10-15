@@ -6,6 +6,13 @@ use crate::{
 };
 use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 const CAPACITY: usize = 8 << 20;
+// Separate from Go's fixed 128-byte logical charge. On the pinned 64-bit
+// standard library, one BTree node is at most 288 bytes and Arc<CachedPage>
+// owns 72 bytes of descriptor/control backing. At most one node per live key
+// (plus a transient empty split node, covered by the incoming reservation)
+// keeps 512 conservative even for the first sparse node. Allocator bookkeeping
+// is outside the allocation ledger, as elsewhere; this is not an RSS bound.
+const ENTRY_ALLOCATION: usize = 512;
 struct CachedPage {
     bytes: OwnedDecodedSpan,
     _overhead: OwnedRetainedReservation,
@@ -98,7 +105,7 @@ impl<S: EncodedRead> PreparedEncoding<S> {
         )?;
         let overhead = self
             .budget
-            .reserve_retained(128)?
+            .reserve_retained(ENTRY_ALLOCATION)?
             .into_owned(&self.budget)?;
         let raw = self.ranges.view(keys)?.read_checked_owned_span(
             offset,
@@ -207,3 +214,6 @@ impl<S: EncodedRead> EncodingLookup for PreparedEncoding<S> {
         )
     }
 }
+
+#[cfg(test)]
+mod tests;

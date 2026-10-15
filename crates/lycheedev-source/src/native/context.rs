@@ -24,8 +24,8 @@ pub struct FrozenContext {
     decisions: HashMap<BindingSite, BindingDecision<BoundValue>>,
     calls: HashMap<BindingSite, BindingDecision<CallPermit>>,
     call_observations: HashMap<BindingSite, CallObservation>,
-    managed_reads: HashSet<BindingSite>,
-    managed_calls: HashSet<BindingSite>,
+    managed_reads: Arc<HashSet<BindingSite>>,
+    managed_calls: Arc<HashSet<BindingSite>>,
     refs: HashMap<String, Vec<BindingReference>>,
     shapes: HashMap<NativeObjectViewKey, ObjectShape>,
 }
@@ -78,17 +78,18 @@ pub struct PreparedSnapshot {
     entry_catalog:Vec<EntryCandidate>,
     original_lines: BTreeMap<FileId, original_lines::OriginalLines>,
     parameters: BTreeMap<String, SemanticId>,
-    managed_reads: HashSet<BindingSite>,
-    managed_calls: HashSet<BindingSite>,
+    managed_reads: Arc<HashSet<BindingSite>>,
+    managed_calls: Arc<HashSet<BindingSite>>,
 }
 impl PreparedSnapshot {
     fn prepare_inner(inputs:Arc<SourceInputs>,control:&OperationControl,analysis:EmmyLuaAnalysis,engine_text_cost:lycheedev_emmy_adapter::IngestionTextCost,observer:&mut impl FnMut(&'static str))->Result<Self> {
         control.check().map_err(|e|e.to_string())?;
         let config=inputs.corpus.config.clone();
-        let mut input=Self{syntax:SourceSyntaxIndex::default(),inputs,control:control.clone(),owner:Arc::new(()),analysis,engine_text_cost,config,files:BTreeMap::new(),expressions:BTreeMap::new(),closures:BTreeMap::new(),entry_catalog:vec![],original_lines:BTreeMap::new(),parameters:BTreeMap::new(),managed_reads:HashSet::new(),managed_calls:HashSet::new()};
+        let mut input=Self{syntax:SourceSyntaxIndex::default(),inputs,control:control.clone(),owner:Arc::new(()),analysis,engine_text_cost,config,files:BTreeMap::new(),expressions:BTreeMap::new(),closures:BTreeMap::new(),entry_catalog:vec![],original_lines:BTreeMap::new(),parameters:BTreeMap::new(),managed_reads:Arc::new(HashSet::new()),managed_calls:Arc::new(HashSet::new())};
         let mut syntax_counts=SourceSyntaxCounts::for_files(input.inputs.corpus.files.len(),input.inputs.corpus.limits.files)?;
         let mut line_index_remaining=64usize * 1024 * 1024;
         let mut nodes=0;let mut ids=HashSet::new();let mut uris=HashSet::new();
+        let mut managed_reads=HashSet::new();let mut managed_calls=HashSet::new();
         for (file_index,source) in input.inputs.corpus.files.iter().enumerate() {
             control.check().map_err(|e|e.to_string())?;let name=source.path.as_str();
             let uri=file_path_to_uri(&input.inputs.corpus.root.join(name)).ok_or("source URI")?;
@@ -110,8 +111,8 @@ impl PreparedSnapshot {
                     let syntax=expr.get_syntax_id();let site=BindingSite{file_id,syntax};
                     let range=input.inputs.original_range(name,expr.get_range()).expect("admitted parser range");
                     input.expressions.insert((file_id,range.start().into(),range.end().into()),syntax);
-                    if matches!(expr,LuaExpr::NameExpr(_)|LuaExpr::IndexExpr(_)){input.managed_reads.insert(site);}
-                    if matches!(expr,LuaExpr::CallExpr(_)){input.managed_calls.insert(site);}
+                    if matches!(expr,LuaExpr::NameExpr(_)|LuaExpr::IndexExpr(_)){managed_reads.insert(site);}
+                    if matches!(expr,LuaExpr::CallExpr(_)){managed_calls.insert(site);}
                 }
                 if let Some(closure)=LuaClosureExpr::cast(node){input.closures.insert(input.inputs.site(name,closure.get_range()).id(),closure.get_syntax_id());input.entry_catalog.push(input.entry_candidate(name,closure.get_syntax_id()).map_err(|error|error.to_string())?);}
             }
@@ -120,6 +121,11 @@ impl PreparedSnapshot {
                 if matches!(declaration.kind,emmylua_code_analysis::DeclKind::Param){input.parameters.insert(input.inputs.site(name,declaration.name_range).id(),declaration.id.clone());}
             }
         }
+        // Identity validation is complete. These uniqueness sets are not query
+        // state and must not overlap the following syntax-index allocations.
+        drop(ids);drop(uris);
+        input.managed_reads=Arc::new(managed_reads);
+        input.managed_calls=Arc::new(managed_calls);
         observer("source_identity_indexed");
         control.check().map_err(|e|e.to_string())?;
         input.syntax=input.build_syntax_index(&syntax_counts)?;

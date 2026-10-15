@@ -382,7 +382,7 @@ fn default_local_navigation_and_asset_use_admission_with_go_report_shapes() {
 fn default_local_read_files_waits_for_real_owner_and_releases_after_return() {
     let fx = fixture();
     let mut inv = fx.invocation("data sql", &[]);
-    let pin = selection::resolve_pinned(&inv).unwrap().data.unwrap();
+    let pin = selection::resolve_pinned(&inv).unwrap().data.clone().unwrap();
     let holder =
         data_resources::acquire(&fx.home, Policy::Measurement, &OperationControl::default())
             .unwrap();
@@ -407,7 +407,7 @@ fn default_local_read_files_waits_for_real_owner_and_releases_after_return() {
 fn default_local_reader_request_errors_precede_busy_slots_but_pin_identity_follows() {
     let fx = fixture();
     let original = fx.invocation("data sql", &[]);
-    let pin = selection::resolve_pinned(&original).unwrap().data.unwrap();
+    let pin = selection::resolve_pinned(&original).unwrap().data.clone().unwrap();
     let holder =
         data_resources::acquire(&fx.home, Policy::Measurement, &OperationControl::default())
             .unwrap();
@@ -488,7 +488,7 @@ fn default_local_reader_request_errors_precede_busy_slots_but_pin_identity_follo
 fn default_local_reader_original_stop_and_independent_deadline_precede_invalid_request() {
     let fx = fixture();
     let mut inv = fx.invocation("data sql", &[("--content-variant", "bad")]);
-    let mut pin = selection::resolve_pinned(&inv).unwrap().data.unwrap();
+    let mut pin = selection::resolve_pinned(&inv).unwrap().data.clone().unwrap();
     pin.full_build = "invalid".into();
     inv.control.cancel_handle().store(true, Ordering::Release);
     assert_eq!(

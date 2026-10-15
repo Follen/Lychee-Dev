@@ -15,7 +15,6 @@ pub struct Script {
     pub path:String,
     pub handler:String,
     pub kind:String,
-    pub source:Vec<u8>,
     pub xml_sha256:String,
     pub compiler:MappedText,
     pub element:Span,
@@ -27,6 +26,8 @@ fn span(value:&Value)->Span{
     Span::new(value["start"].as_u64().expect("serialized span start")as usize,value["end"].as_u64().expect("serialized span end")as usize)
 }
 impl Script {
+    /// Generated text has one owner; compiler and semantic consumers borrow the same bytes.
+    pub fn source_bytes(&self)->&[u8]{self.compiler.text.as_bytes()}
     /// The only generated root closure spans the authenticated decoded body.
     /// Nested user closures cannot cross either synthetic wrapper boundary.
     pub(crate) fn is_syntax_wrapper(&self,start:usize,end:usize)->bool{
@@ -46,7 +47,7 @@ impl Script {
     }
     pub fn mapping_manifest(&self)->Value{
         json!({"rules":SOURCE_MAP_RULES,"path":self.key,"xmlPath":self.path,"xmlSHA256":self.xml_sha256,"xmlBytes":self.raw.len(),
-            "compilerSHA256":storage::sha256(&self.source),"compilerBytes":self.source.len(),"segments":self.compiler.segments,"element":self.element,
+            "compilerSHA256":storage::sha256(self.source_bytes()),"compilerBytes":self.source_bytes().len(),"segments":self.compiler.segments,"element":self.element,
             "wrapper":"syntax_only_closure","implicitHandlerParameters":if self.kind=="handler"{"self:xml_object; remaining:unknown"}else{"unknown"},"byteOffsets":"original_utf8_including_bom","positionEncoding":"utf-16","bomColumnPolicy":"encoding_marker_not_displayed"})
     }
     pub fn project(&self,range:Span)->Result<Value>{
@@ -108,7 +109,7 @@ pub(crate) fn scripts(program:&crate::xml_program::XmlProgram,raw:&[u8])->Result
             compiler.append("\nend\n",None,Origin::Synthetic,source.compiler.segments.last().expect("wrapped source footer").anchor).map_err(invalid)?;
         }
         scripts.push(Script{key:format!("{}/__inline_{index}.lua",program.path),path:program.path.clone(),handler:source.tag.clone(),kind:source.kind.clone(),
-            source:compiler.text.as_bytes().to_vec(),xml_sha256:program.raw_sha256.clone(),compiler,element:source.element,body,raw:raw_text.clone()});
+            xml_sha256:program.raw_sha256.clone(),compiler,element:source.element,body,raw:raw_text.clone()});
     }
     Ok(scripts)
 }
@@ -118,7 +119,7 @@ pub fn inputs(documents:&[crate::closure::Document])->Result<CompilerInputs>{
     for document in documents{
         if document.path.to_ascii_lowercase().ends_with(".lua"){files.insert(document.path.clone(),document.bytes.clone());}
         else if document.path.to_ascii_lowercase().ends_with(".xml"){
-            for script in extract(&document.path,&document.bytes)?{files.insert(script.key.clone(),script.source.clone());scripts.insert(script.key.clone(),script);}
+            for script in extract(&document.path,&document.bytes)?{files.insert(script.key.clone(),script.source_bytes().to_vec());scripts.insert(script.key.clone(),script);}
         }
     }
     Ok((files,scripts))
@@ -144,7 +145,9 @@ mod tests{
         let raw=b"<Ui>\n<Frame><Scripts><OnLoad>\nlocal x = 1 &lt; 2\n<![CDATA[local y = ...]]>&#10;local z = &quot;text&quot;\n</OnLoad></Scripts></Frame></Ui>";
         let scripts=extract("UI CJK.xml",raw).unwrap();
         assert_eq!(scripts.len(),1);
-        assert_eq!(String::from_utf8_lossy(&scripts[0].source),"return function(self, ...)\n\nlocal x = 1 < 2\nlocal y = ...\nlocal z = \"text\"\n\nend\n");
+        assert_eq!(scripts[0].source_bytes().as_ptr(),scripts[0].compiler.text.as_ptr());
+        assert_eq!(scripts[0].mapping_manifest()["compilerSHA256"],storage::sha256(scripts[0].source_bytes()));
+        assert_eq!(String::from_utf8_lossy(scripts[0].source_bytes()),"return function(self, ...)\n\nlocal x = 1 < 2\nlocal y = ...\nlocal z = \"text\"\n\nend\n");
         assert_eq!(scripts[0].compiler_line(4).unwrap()["line"],4);assert_eq!(scripts[0].compiler_line(5).unwrap()["line"],4);assert_eq!(scripts[0].compiler_line(6).unwrap()["line"],5);
         let footer=scripts[0].compiler.text.rfind("end\n").unwrap();
         let projected=scripts[0].project(Span::new(footer,footer+3)).unwrap();
@@ -187,7 +190,7 @@ mod tests{
         let synthetic=script.position(Span::new(0,WRAPPER.len()-1)).unwrap();
         assert_eq!(synthetic["positionAccuracy"],"synthetic-or-mixed");assert!(synthetic["range"].is_null());
         assert!(synthetic["sourceMap"]["segments"][0]["raw"].is_null());assert_eq!(synthetic["sourceMap"]["segments"][0]["origin"],"Synthetic");
-        assert!(script.source.starts_with(b"return function(self, ...)"));
+        assert!(script.source_bytes().starts_with(b"return function(self, ...)"));
         assert_eq!(script.mapping_manifest()["implicitHandlerParameters"],"self:xml_object; remaining:unknown");
         assert_eq!(source_map::utf16_position("\u{feff}🙂\r\n界",3).unwrap(),json!({"line":0,"character":0}));
         assert_eq!(source_map::utf16_position("\u{feff}🙂\r\n界",7).unwrap(),json!({"line":0,"character":2}));

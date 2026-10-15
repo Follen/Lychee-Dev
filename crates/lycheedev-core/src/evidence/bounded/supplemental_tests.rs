@@ -362,12 +362,15 @@ fn supplemental_noop_preserves_blob_bytes_identity_and_validation_errors() {
 }
 
 #[test]
-fn supplemental_blob_contention_retains_immediate_busy_contract_and_existing_owner() {
+fn supplemental_blob_contention_waits_for_original_stop_and_preserves_existing_owner() {
     let f = Fixture::new();
-    let invocation = alive();
+    let (invocation, cancellation) = independent();
     let bytes = b"busy";
     let key = format!("blob:{}", storage::sha256(bytes));
     let held = ExclusiveLock::resource(&f.0.join("locks"), &key).unwrap();
+    // Go AcquireLease waits for contention; stop only after the real lock
+    // attempt, without waiting for the fixture's thirty-second deadline.
+    ExclusiveLock::set_blob_wait_observer(move || cancellation.cancel());
     let checked = Cell::new(0);
     let error = publish_blob_bounded_with_check(&f.0, bytes, bytes.len(), &invocation, || {
         checked.set(checked.get() + 1);
@@ -376,7 +379,7 @@ fn supplemental_blob_contention_retains_immediate_busy_contract_and_existing_own
     .unwrap_err();
     assert_eq!(
         (error.code.as_str(), error.exit_code),
-        ("workspace.busy", 6)
+        ("command.cancelled", 7)
     );
     assert!(error.details.is_null());
     assert!(checked.get() > 0);

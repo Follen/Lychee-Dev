@@ -111,3 +111,6 @@ impl<C: RootContent> RootIndex<C> {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;

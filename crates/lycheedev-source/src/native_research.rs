@@ -62,6 +62,8 @@ impl ResearchSession {
         observer("prepare_started");
         let SnapshotRequest{mut files,load_documents,environment_documents,source,luac,api,environment_manifest,load_plans,input_gaps}=snapshot;
         let api_definitions=plan::VerifiedApiDefinitions::rebuild(&environment_documents,&api,environment_manifest.as_ref(),control)?;
+        // The verified model owns its required input; release the request copy before XML/engine preparation.
+        drop(environment_documents);
         observer("api_definitions_verified");
         let xml=XmlResearch::prepare(&mut files,load_documents,&load_plans,&source,control)?;
         let xml_identity=xml.identity(control)?;

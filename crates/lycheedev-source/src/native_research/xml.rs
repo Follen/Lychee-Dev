@@ -35,7 +35,7 @@ impl XmlResearch {
                     Ok(extracted)=>{
                         if objects.is_none(){objects=Some(catalog.as_ref().and_then(|catalog|catalog.as_ref().ok()).expect("successful production catalog").object_elements());}
                         declaration_owners.extend(Self::declaration_owners(&program,objects.as_ref().expect("object catalog"),control)?);
-                        for script in extracted{files.insert(script.key.clone(),String::from_utf8(script.source.clone()).expect("extracted UTF8"));scripts.insert(script.key.clone(),script);}
+                        for script in extracted{files.insert(script.key.clone(),script.compiler.text.clone());scripts.insert(script.key.clone(),script);}
                     },
                     Err(error)=>gaps.push(json!({"code":error.code,"detail":error.message,"path":path})),
                 },
