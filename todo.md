@@ -27,6 +27,9 @@ Authority for decisions, status and evidence: [handover.md](handover.md). This c
 - [ ] Execute the reviewed R23.1 adaptive/admission foundation (26 new Rust tests), connect real default query consumers and exact memoryBudget output; foundation composition alone does not complete G323-01–03.
 - [ ] Map fixed Go323 tests and run exact-candidate local/Windows/independent Data usage checks. Current fixed-cost Rust candidates are prior implementation evidence, not new adaptive acceptance.
 
+- [ ] Execute compact-record R2 (11 new Rust tests plus existing WDC regressions); verify actual Go323 rows, resource outputs and memory, not just static capacity arithmetic.
+- [ ] Execute default remote asset export and existing local image/output regressions, including committed-error CLI context; finish local adaptive consumers and legacy inner close boundaries.
+
 ## Cumulative prior increment: Go 3.2.2
 
 - [x] Pin v3.2.2 to `0bec60e4406f5d5dc155ee25cef44f9a710e37e8`; preserve both prior oracles and all results. Tag/main checked, Release API assets not verified. See [increment matrix](docs/toolkit/rust-go-3.2.2-increment.md).

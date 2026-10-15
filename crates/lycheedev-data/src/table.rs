@@ -9,7 +9,7 @@ use crate::{
 use lycheedev_core::Result;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     ops::Range,
     sync::{
         Arc,
@@ -137,10 +137,10 @@ pub struct Page {
 }
 #[derive(Debug, Clone, Copy)]
 struct Location {
-    origin: u32,
-    partition: usize,
     offset: usize,
-    length: usize,
+    partition: usize,
+    origin: u32,
+    length: u32,
     relation: Option<u32>,
 }
 struct Program {
@@ -185,12 +185,17 @@ impl<'a> Source<'a> {
         Ok(source)
     }
     fn metadata(&self, bytes: usize) -> Result<()> {
+        self.metadata_split(bytes, bytes)
+    }
+    // Public Go accounting and conservative Rust allocation admission are
+    // separate ledgers. Equal estimates on 64-bit targets are not measured RSS.
+    fn metadata_split(&self, logical_bytes: usize, bytes: usize) -> Result<()> {
         let used = self.metadata_bytes.load(Ordering::Relaxed);
         if bytes as u64 > (self.metadata_limit as u64).saturating_sub(used) {
             return limit();
         }
         if let Some(budget) = &self.budget {
-            budget.charge(Cost::metadata(bytes))?;
+            budget.charge_split(Cost::metadata(logical_bytes), Cost::metadata(bytes))?;
         }
         self.metadata_bytes
             .fetch_add(bytes as u64, Ordering::Relaxed);
@@ -544,7 +549,9 @@ pub struct Table<'a> {
     source: Source<'a>,
     layout: Layout,
     programs: Vec<Program>,
-    locations: HashMap<u32, Location>,
+    // Logical IDs, including copies, share immutable physical locations.
+    locations: HashMap<u32, u32>,
+    physical: Vec<Location>,
     ids: Vec<u32>,
     definition: Definition,
     column_mapping: Vec<Option<usize>>,
@@ -613,7 +620,8 @@ fn open_inner<'a>(
     if layout.rows as u64 + copies > limits.rows as u64 {
         return limit();
     }
-    let estimated = (layout.rows as u64 + copies) * 96
+    let (index_logical, index_safety) = index_allocation(&layout, copies);
+    let estimated = index_safety
         + layout.fields.len() as u64 * 96
         + definition.fields.len() as u64 * 192
         + layout.metadata_end as u64;
@@ -635,14 +643,7 @@ fn open_inner<'a>(
             )
         })
     })?;
-    let metadata = (layout.rows as u64 + copies) * 128
-        + copies * 64
-        + if layout.flags & 1 != 0 {
-            layout.rows as u64 * 128
-        } else {
-            0
-        }
-        + layout.fields.len() as u64 * std::mem::size_of::<Program>() as u64
+    let metadata = layout.fields.len() as u64 * std::mem::size_of::<Program>() as u64
         + (layout.common_bytes as u64 / 8) * 64
         + definition.fields.len() as u64
             * (std::mem::size_of::<Field>() + std::mem::size_of::<Option<usize>>() + 64) as u64
@@ -652,8 +653,10 @@ fn open_inner<'a>(
         + definition.build.len() as u64
         + definition.layout.len() as u64
         + unavailable.len() as u64 * 64;
-    source.metadata(
-        usize::try_from(metadata)
+    source.metadata_split(
+        usize::try_from(metadata + index_logical)
+            .map_err(|_| fault("table.limit_exceeded", 3, "Metadata allocation overflow"))?,
+        usize::try_from(metadata + index_safety)
             .map_err(|_| fault("table.limit_exceeded", 3, "Metadata allocation overflow"))?,
     )?;
     let mut programs = Vec::with_capacity(layout.fields.len());
@@ -691,12 +694,26 @@ fn open_inner<'a>(
         }
         programs.push(program);
     }
-    let capacity = (layout.rows as u64 + copies) as usize;
+    let capacity = usize::try_from(layout.rows as u64 + copies).map_err(|_| {
+        fault(
+            "table.limit_exceeded",
+            3,
+            "Record index allocation overflow",
+        )
+    })?;
+    let physical_capacity = usize::try_from(layout.rows).map_err(|_| {
+        fault(
+            "table.limit_exceeded",
+            3,
+            "Physical index allocation overflow",
+        )
+    })?;
     let mut table = Table {
         source,
         layout,
         programs,
         locations: HashMap::with_capacity(capacity),
+        physical: Vec::with_capacity(physical_capacity),
         ids: vec![],
         definition: definition.clone(),
         column_mapping: vec![],
@@ -707,6 +724,42 @@ fn open_inner<'a>(
     table.bind()?;
     table.index()?;
     Ok(table)
+}
+// Go 3.2.3 charges ID/copy maps, physical locations, sorted/partition IDs and
+// chain scratch up front. Rust's independent safety estimate covers compact
+// HashMap/HashSet capacity rounding and aggregate growth peaks, Vec storage,
+// and fixed small-map control allocations. Sparse offset/extent storage has
+// its own allowance. None of these conservative estimates measure RSS.
+fn index_allocation(layout: &Layout, copies: u64) -> (u64, u64) {
+    let rows = u64::from(layout.rows);
+    let sparse = if layout.flags & 1 != 0 { rows * 80 } else { 0 };
+    let logical =
+        (rows + copies) * 32 + rows * 40 + copies * 72 + u64::from(layout.stride) + sparse;
+    let safety = (rows + copies) * 32
+        + rows * (std::mem::size_of::<Location>() + 2 * std::mem::size_of::<u32>()) as u64
+        + copies * (32 + 32 + 2 * std::mem::size_of::<u32>()) as u64
+        + u64::from(layout.stride)
+        + sparse
+        + 256; // Small-map minimum buckets/control bytes, independent of row count.
+    (logical, safety)
+}
+// The supported Rust toolchain doubles Vec capacity. For these non-ZST
+// elements, 3x the whole remaining domain covers old and new buffers at once.
+// Insert-only hash maps use 7/8 occupancy and power-of-two buckets: old plus
+// new bucket counts are below 4x the entry domain; each bucket has one control
+// byte. The caller separately covers fixed minimum allocations/control groups.
+// This is safety accounting only, never part of the fixed Go logical charge.
+fn compact_growth_peak<T>(
+    capacity: usize,
+    length: usize,
+    remaining: usize,
+    multiplier: usize,
+    control_bytes: usize,
+) -> Option<usize> {
+    let domain = capacity.max(length.checked_add(remaining)?);
+    domain
+        .checked_mul(std::mem::size_of::<T>().checked_add(control_bytes)?)?
+        .checked_mul(multiplier)
 }
 impl<'a> Table<'a> {
     /// Conservative bytes actually admitted for this parser, not a default reservation or RSS.
@@ -750,15 +803,21 @@ impl<'a> Table<'a> {
                 )
             })
     }
-    pub fn raw_record(&self, id: u32) -> Result<&'a [u8]> {
-        let location = self.locations.get(&id).ok_or_else(|| {
+    fn location(&self, id: u32) -> Result<&Location> {
+        let index = self.locations.get(&id).ok_or_else(|| {
             fault(
                 "table.record_not_found",
                 3,
                 "Requested WDC record is absent",
             )
         })?;
-        self.source.read(location.offset, location.length)
+        // Only successful physical insertions and copies of their indices enter
+        // locations; every index remains valid for the table's lifetime.
+        Ok(&self.physical[*index as usize])
+    }
+    pub fn raw_record(&self, id: u32) -> Result<&'a [u8]> {
+        let location = self.location(id)?;
+        self.source.read(location.offset, location.length as usize)
     }
     pub fn raw_values(&self, id: u32, column: usize, elements: u32) -> Result<Vec<u64>> {
         if self.layout.flags & 1 != 0 {
@@ -769,13 +828,7 @@ impl<'a> Table<'a> {
         }
         self.source
             .temporary(elements as usize * std::mem::size_of::<u64>())?;
-        let location = *self.locations.get(&id).ok_or_else(|| {
-            fault(
-                "table.record_not_found",
-                3,
-                "Requested WDC record is absent",
-            )
-        })?;
+        let location = *self.location(id)?;
         if self.layout.partitions[location.partition].identity_bytes == 0
             && column == self.layout.identity_column as usize
         {
@@ -785,7 +838,8 @@ impl<'a> Table<'a> {
             return Ok(vec![id as u64]);
         }
         self.values(
-            self.source.read(location.offset, location.length)?,
+            self.source
+                .read(location.offset, location.length as usize)?,
             location.origin,
             column,
             elements,
@@ -972,17 +1026,37 @@ impl<'a> Table<'a> {
             _ => invalid(),
         }
     }
-    fn insert(&mut self, id: u32, location: Location) -> Result<()> {
+    fn check_insert(&self, id: u32) -> Result<()> {
+        if self.locations.contains_key(&id) {
+            return invalid();
+        }
         if self.locations.len() >= self.limits.rows as usize {
             return limit();
         }
-        if self.locations.insert(id, location).is_some() {
-            return invalid();
-        }
         Ok(())
     }
+    fn insert(&mut self, id: u32, index: u32) -> Result<()> {
+        self.check_insert(id)?;
+        self.locations.insert(id, index);
+        Ok(())
+    }
+    fn insert_physical(&mut self, id: u32, location: Location) -> Result<u32> {
+        let index = u32::try_from(self.physical.len())
+            .map_err(|_| fault("table.limit_exceeded", 3, "Physical record index overflow"))?;
+        self.insert(id, index)?;
+        self.physical.push(location);
+        Ok(index)
+    }
     fn index(&mut self) -> Result<()> {
-        let mut copies = HashMap::new();
+        let copies_count = self
+            .layout
+            .partitions
+            .iter()
+            .map(|p| u64::from(p.copies))
+            .sum::<u64>();
+        let copies_capacity = usize::try_from(copies_count)
+            .map_err(|_| fault("table.limit_exceeded", 3, "Copy index allocation overflow"))?;
+        let mut copies = HashMap::with_capacity(copies_capacity);
         let mut auxiliary = self.layout.metadata_end as u64;
         for pi in 0..self.layout.partitions.len() {
             if self.unavailable.contains(&pi) {
@@ -1050,13 +1124,13 @@ impl<'a> Table<'a> {
                         }
                         value as u32
                     };
-                    self.insert(
+                    self.insert_physical(
                         id,
                         Location {
                             origin: id,
                             partition: pi,
                             offset,
-                            length: self.layout.stride as usize,
+                            length: self.layout.stride,
                             relation: None,
                         },
                     )?;
@@ -1099,9 +1173,10 @@ impl<'a> Table<'a> {
                             )
                         })?
                     };
-                    let location = self.locations.get_mut(&id).ok_or_else(|| {
+                    let index = self.locations.get(&id).ok_or_else(|| {
                         fault("table.invalid_format", 4, "Relationship row is absent")
                     })?;
+                    let location = &mut self.physical[*index as usize];
                     if location.partition != pi || location.relation.is_some() {
                         return invalid();
                     }
@@ -1109,19 +1184,6 @@ impl<'a> Table<'a> {
                 }
             }
             ids.clear();
-        }
-        let aliases: Vec<_> = self
-            .locations
-            .iter()
-            .filter(|(id, location)| **id != location.origin)
-            .map(|(id, location)| (*id, location.origin))
-            .collect();
-        for (id, origin) in aliases {
-            let location = *self
-                .locations
-                .get(&origin)
-                .ok_or_else(|| fault("table.invalid_format", 4, "Sparse alias origin is absent"))?;
-            self.locations.insert(id, location);
         }
         if copies.keys().any(|id| self.locations.contains_key(id)) {
             return invalid();
@@ -1131,7 +1193,7 @@ impl<'a> Table<'a> {
         }
         for destination in copies.keys().copied() {
             let mut path = vec![];
-            let mut seen = BTreeSet::new();
+            let mut seen = HashSet::new();
             let mut id = destination;
             loop {
                 if let Some(location) = self.locations.get(&id).copied() {
@@ -1190,8 +1252,9 @@ impl<'a> Table<'a> {
             return invalid();
         }
         let mut ids = Vec::with_capacity(p.rows as usize);
-        let mut intervals = vec![];
-        let mut by_offset = HashMap::<usize, Location>::new();
+        let mut intervals = Vec::with_capacity(p.rows as usize);
+        let mut by_offset = HashMap::<usize, u32>::with_capacity(p.rows as usize);
+        let mut malformed_growth_admitted = false;
         for i in 0..count {
             let offset = u32at(aux, map_start + i * 6)? as usize;
             let length = u16at(aux, map_start + i * 6 + 4)? as usize;
@@ -1210,29 +1273,105 @@ impl<'a> Table<'a> {
             } else {
                 self.layout.first_id + i as u32
             };
-            let mut location = Location {
-                origin: id,
-                partition,
-                offset,
-                length,
-                relation: None,
-            };
+            // Preserve Go's duplicate/row-limit errors before either alias
+            // validation or its additional query-budget admission.
+            self.check_insert(id)?;
             let alias = by_offset.get(&offset).copied();
             if let Some(previous) = alias {
-                if previous.length != length {
+                if self.physical[previous as usize].length as usize != length {
                     return invalid();
                 }
                 if self.layout.version == 2 {
-                    location.origin = previous.origin;
+                    // WDC2 Rows counts unique physical records, not implicit
+                    // aliases. Admit each extra logical ID before insertion.
+                    self.source.metadata(32)?;
+                    self.insert(id, previous)?;
+                    continue;
                 }
-            } else {
-                by_offset.insert(offset, location);
+            }
+            if ids.len() >= p.rows as usize && !malformed_growth_admitted {
+                // A malformed WDC2 map can underdeclare physical Rows. Keep
+                // Go's late count-mismatch/preceding-error order, but admit the
+                // entire remaining map domain before any unreserved growth.
+                // Include this entry; later aliases also occupy logical IDs.
+                let remaining = count.checked_sub(i).ok_or_else(|| {
+                    fault("table.limit_exceeded", 3, "Sparse map domain overflow")
+                })?;
+                let allocation = (|| {
+                    let mut bytes = 256usize;
+                    for peak in [
+                        compact_growth_peak::<Location>(
+                            self.physical.capacity(),
+                            self.physical.len(),
+                            remaining,
+                            3,
+                            0,
+                        ),
+                        compact_growth_peak::<u32>(ids.capacity(), ids.len(), remaining, 3, 0),
+                        compact_growth_peak::<Range<usize>>(
+                            intervals.capacity(),
+                            intervals.len(),
+                            remaining,
+                            3,
+                            0,
+                        ),
+                        compact_growth_peak::<(u32, u32)>(
+                            self.locations.capacity(),
+                            self.locations.len(),
+                            remaining,
+                            4,
+                            1,
+                        ),
+                        compact_growth_peak::<(usize, u32)>(
+                            by_offset.capacity(),
+                            by_offset.len(),
+                            remaining,
+                            4,
+                            1,
+                        ),
+                    ] {
+                        bytes = bytes.checked_add(peak?)?;
+                    }
+                    // Conservative full-length stable-sort scratch, even
+                    // though the malformed count normally fails before sort.
+                    bytes.checked_add(
+                        intervals
+                            .len()
+                            .checked_add(remaining)?
+                            .checked_mul(std::mem::size_of::<Range<usize>>())?,
+                    )
+                })()
+                .ok_or_else(|| {
+                    fault(
+                        "table.limit_exceeded",
+                        3,
+                        "Sparse index allocation overflow",
+                    )
+                })?;
+                // Cumulative admission is not refunded: it remains held for
+                // this Budget's lifetime, beyond every covered allocation.
+                self.source.metadata_split(0, allocation)?;
+                malformed_growth_admitted = true;
+            }
+            let index = self.insert_physical(
+                id,
+                Location {
+                    origin: id,
+                    partition,
+                    offset,
+                    length: u32::try_from(length).map_err(|_| {
+                        fault("table.invalid_format", 4, "Sparse record length overflow")
+                    })?,
+                    relation: None,
+                },
+            )?;
+            if alias.is_none() {
+                by_offset.insert(offset, index);
                 intervals.push(offset..offset + length);
             }
-            self.insert(id, location)?;
-            if alias.is_none() || self.layout.version >= 3 {
-                ids.push(id);
-            }
+            // WDC3+ same-offset IDs remain distinct physical rows: their
+            // origins and relationship ordinals must not be merged.
+            ids.push(id);
         }
         if ids.len() != p.rows as usize {
             return invalid();
@@ -1374,14 +1513,10 @@ impl<'a> Table<'a> {
                 .map(|f| f.elements as u64)
                 .sum::<u64>(),
         )?;
-        let location = *self.locations.get(&id).ok_or_else(|| {
-            fault(
-                "table.record_not_found",
-                3,
-                "Requested WDC record is absent",
-            )
-        })?;
-        let record = self.source.read(location.offset, location.length)?;
+        let location = *self.location(id)?;
+        let record = self
+            .source
+            .read(location.offset, location.length as usize)?;
         let sparse = self.layout.flags & 1 != 0;
         let mut cursor = 0u64;
         let mut remaining = text_bytes;
@@ -1615,3 +1750,6 @@ fn typed(value: u64, field: &Field) -> Result<Value> {
         }))
     }
 }
+
+#[cfg(test)]
+mod compact_tests;

@@ -1249,6 +1249,34 @@ fn install_invocation_control<G>(
     );
     Some(handler)
 }
+// This marker is emitted only after Data receives a committed capture ID.
+// Validate the typed facts, not prose, before retaining the late-failure context.
+fn asset_committed_context(error: &ToolkitError) -> bool {
+    let details = &error.details;
+    if details["schema"] != "lycheedev.asset-committed-error.v1"
+        || !details["outputPublished"].is_boolean()
+    {
+        return false;
+    }
+    let Ok(primary) = serde_json::from_value::<ToolkitError>(details["primary"].clone()) else {
+        return false;
+    };
+    let Some(captures) = details["completedCaptures"].as_array() else {
+        return false;
+    };
+    primary.code == error.code
+        && primary.exit_code == error.exit_code
+        && (1..=3).contains(&captures.len())
+        && captures.iter().all(|id| {
+            id.as_str().is_some_and(|id| {
+                id.len() == 68
+                    && id.starts_with("CAP-")
+                    && id.as_bytes()[4..].iter().all(|byte| {
+                        byte.is_ascii_digit() || (b'a'..=b'f').contains(byte)
+                    })
+            })
+        })
+}
 fn command_fault(inv: &Invocation, mut error: ToolkitError) -> ToolkitError {
     // Go entry.queryFault projects installation selection errors for every
     // command, including addon handlers, rather than only catalog queries.
@@ -1261,8 +1289,14 @@ fn command_fault(inv: &Invocation, mut error: ToolkitError) -> ToolkitError {
     if matches!(inv.command.as_str(), "asset inspect" | "asset export")
         && error.code == "records.metadata_limit"
     {
-        error.message = error.code.clone();
-        error.details = json!({"stage":"query"});
+        if asset_committed_context(&error) {
+            // Keep the completed side effects and every original cleanup cause;
+            // the public error message tells callers not to replay this work.
+            error.details["stage"] = json!("query");
+        } else {
+            error.message = error.code.clone();
+            error.details = json!({"stage":"query"});
+        }
     }
     if catalog_command(&inv.command) {
         if error.code == "schema.definition_missing" {
@@ -2220,6 +2254,55 @@ mod tests {
             args(&["live", "connect", "--passive"]),
         ] {
             assert_eq!(parse(&command).unwrap_err().exit_code, 2);
+        }
+    }
+    #[test]
+    fn late_asset_limit_preserves_committed_ids_and_typed_cleanup_in_public_message() {
+        let inv = parse(&args(&["asset", "export"])).unwrap();
+        for count in 1..=3 {
+            let ids: Vec<_> = (0..count).map(|i| format!("CAP-{}", char::from(b'a' + i).to_string().repeat(64))).collect();
+            let primary = ToolkitError::new("records.metadata_limit", "limit after source capture", 3)
+                .with_details(json!({"schema":"lycheedev.admitted-workspace-errors.v1", "causes":[
+                    {"code":"records.metadata_limit","message":"limit after source capture","exit_code":3,"details":null},
+                    {"code":"external.io","message":"checked close failed","exit_code":5,"details":{"owner":"fixture"}}
+                ]}));
+            let message = format!("{}\nasset captures already committed: {}", primary.message, ids.join(", "));
+            let error = ToolkitError::new(primary.code.clone(), message.clone(), primary.exit_code)
+                .with_details(json!({"schema":"lycheedev.asset-committed-error.v1", "primary":primary,
+                    "completedCaptures":ids, "outputPublished":count == 3}));
+            let before = error.details.clone();
+            let actual = command_fault(&inv, error);
+            assert_eq!(actual.message, message);
+            assert_eq!(actual.details["primary"], before["primary"]);
+            assert_eq!(actual.details["completedCaptures"], before["completedCaptures"]);
+            assert_eq!(actual.details["outputPublished"], before["outputPublished"]);
+            assert_eq!(actual.details["stage"], "query");
+            let public = envelope(&Err(actual));
+            assert_eq!(public["error"]["message"], message);
+            assert_eq!(public["error"]["code"], "records.metadata_limit");
+            // Fixed Go323 Fault already has optional details. Preserve the
+            // existing JSON envelope and its typed completed-work information.
+            assert_eq!(public["error"]["details"], before);
+            assert!(public.get("completedCaptures").is_none());
+            assert_eq!(public["captures"], json!([]));
+        }
+    }
+    #[test]
+    fn malformed_asset_marker_does_not_replace_the_pure_go_projection() {
+        let inv = parse(&args(&["asset", "export"])).unwrap();
+        let primary = ToolkitError::new("records.metadata_limit", "limit", 3);
+        let valid = json!({"schema":"lycheedev.asset-committed-error.v1","primary":primary,
+            "completedCaptures":[format!("CAP-{}", "a".repeat(64))],"outputPublished":false});
+        for (field, value) in [
+            ("schema", json!("other")), ("primary", json!(null)),
+            ("completedCaptures", json!([])), ("completedCaptures", json!(["CAP-short"])),
+            ("completedCaptures", json!([format!("CAP-{}", "A".repeat(64))])),
+            ("outputPublished", json!("true"))
+        ] {
+            let mut details = valid.clone(); details[field] = value;
+            let actual = command_fault(&inv, primary.clone().with_details(details));
+            assert_eq!(actual.message, "records.metadata_limit");
+            assert_eq!(actual.details, json!({"stage":"query"}));
         }
     }
     #[test]

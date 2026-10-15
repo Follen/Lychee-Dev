@@ -58,6 +58,26 @@ impl<'a> OpenedScope<'a> {
             budget: self.budget,
         })
     }
+    /// Asset capture resolves the pin before admission but the Reader validates
+    /// DataIdentity only after admission (fixed Go captureAsset / readFile).
+    pub fn admit_asset(self) -> Result<(Scope<'a>, lycheedev_core::selection::PinnedSet)> {
+        let result = (|| {
+            self.workspace.check()?;
+            let pin = resolve_pin(self.invocation, self.budget)?;
+            if pin.data.is_none() {
+                return Err(crate::fault(
+                    "records.data_pin_required",
+                    2,
+                    "records.data_pin_required",
+                ));
+            }
+            Ok(pin)
+        })();
+        match result {
+            Ok(pin) => Ok((self.admit()?, pin)),
+            Err(error) => self.workspace.finish(Err(error)),
+        }
+    }
     /// SQL and ordinary DB2 validate their snapshot before the resource wait.
     pub fn admit_pinned(
         self,
@@ -105,12 +125,7 @@ impl<'a> Scope<'a> {
         self.check()?;
         resolve_pin(self.invocation, self.budget)
     }
-    pub fn read_batches(
-        &mut self,
-        pin: &DataPin,
-        ids: &[u32],
-        callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
-    ) -> Result<()> {
+    fn file_options(&self) -> Result<Options> {
         self.check()?;
         let variant = self.invocation.flag("--content-variant").unwrap_or("");
         if !["", "standard", "low-violence"].contains(&variant) {
@@ -125,7 +140,7 @@ impl<'a> Scope<'a> {
         {
             return Err(super::limit());
         }
-        let options = Options {
+        Ok(Options {
             offline: self.invocation.flag_bool("--offline"),
             key_file: self.invocation.flag("--key-file").map(str::to_owned),
             variant: variant.to_owned(),
@@ -133,7 +148,15 @@ impl<'a> Scope<'a> {
             content_bytes: self
                 .invocation
                 .usize_flag("--max-bytes", 128 << 20, 1, 512 << 20)?,
-        };
+        })
+    }
+    pub fn read_batches(
+        &mut self,
+        pin: &DataPin,
+        ids: &[u32],
+        callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
+    ) -> Result<()> {
+        let options = self.file_options()?;
         let budget = self.budget;
         let mut session = Session::borrowed(&mut self.admitted, pin, options, budget)?;
         let result = session.read_batches(ids, &mut |files| {
@@ -155,6 +178,28 @@ impl<'a> Scope<'a> {
                     .collect(),
             )
         });
+        let cleanup = session.close();
+        Store {
+            home: self.admitted.home(),
+            control: self.admitted.control(),
+            budget: Some(self.budget),
+        }
+        .finish(result, cleanup)
+    }
+    /// The caller borrows the complete immutable body through capture/output.
+    /// Session retains its descriptor and checks close before this method returns.
+    pub fn with_verified_file<R>(
+        &mut self,
+        pin: &DataPin,
+        id: u32,
+        callback: &mut dyn FnMut(
+            &mut lycheedev_core::evidence::VerifiedBlob,
+            &serde_json::Value,
+        ) -> Result<R>,
+    ) -> Result<R> {
+        let options = self.file_options()?;
+        let mut session = Session::borrowed(&mut self.admitted, pin, options, self.budget)?;
+        let result = session.with_verified(id, &mut |file| callback(&mut file.blob, &file.reading));
         let cleanup = session.close();
         Store {
             home: self.admitted.home(),

@@ -521,6 +521,26 @@ jobs:
       - name: Run Hotfix CLI provider argument contracts
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-hotfix-cli --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev hotfix_remote_tests -j 1
+      - name: Run compact physical record and malformed-growth contracts
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-compact-records --one-shot -- test --locked --offline -p lycheedev-data --lib table::compact_tests:: -j 1
+      - name: Run existing WDC record and sparse identity regressions
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-wdc-records --one-shot -- test --locked --offline -p lycheedev-data --test wdc_parity -j 1
+      - name: Run asset argument and committed-error unit contracts
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-asset-unit --one-shot -- test --locked --offline -p lycheedev-data --lib assets::export::tests -j 1
+      - name: Run actual local asset and image export regressions
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-asset-public --one-shot -- test --locked --offline -p lycheedev-data --test assets_business --test image_export_business --test content_budget_parity -j 1
+      - name: Run public asset late-error and original envelope contracts
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-asset-cli --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev asset_ -j 1
       - name: Run effective SQL request admission and resource boundaries
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |

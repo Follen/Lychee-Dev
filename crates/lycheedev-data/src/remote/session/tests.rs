@@ -733,3 +733,5 @@ fn real_remote_metadata_reads_keep_independent_budget_cancellation_ordered() {
 }
 
 mod verified;
+
+mod default_asset_export;

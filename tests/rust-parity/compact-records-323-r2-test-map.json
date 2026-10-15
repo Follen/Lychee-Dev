@@ -1,0 +1,173 @@
+{
+  "schema": "lycheedev.compact-record-index-test-map.v1",
+  "freeze": "compact-records-323-r2-freeze.json",
+  "status": "declarations_not_run",
+  "tests": [
+    {
+      "rust": "table::compact_tests::compact_copy_chains_share_one_physical_slot_and_preserve_sorted_logical_rows",
+      "go": [
+        "internal/records/table/records_test.go:TestRecordIdentityCopyChainsAndRelations",
+        "internal/records/table/page_test.go:TestPageOrdersLogicalIDsAndRepeatsStablePages"
+      ],
+      "assertions": [
+        "Exactly two physical slots for four logical IDs",
+        "copy chain maps to identical u32 physical index and address",
+        "requested identity, origin value, zero/None relation and ascending page cursor"
+      ],
+      "execution": "not_run"
+    },
+    {
+      "rust": "table::compact_tests::compact_record_index_fits_large_table_after_source_preparation",
+      "go": [
+        "internal/records/table/resource_test.go:TestCompactRecordIndexFitsLargeTableAfterSourcePreparation"
+      ],
+      "assertions": [
+        "189102 physical and 227231 copy rows after 96 MiB preparation fit remaining 48 MiB",
+        "copied ID resolves exact origin bytes and typed value",
+        "logical Go formula and separate +256-byte fixed Rust safety allowance",
+        "physical count independent of copy count"
+      ],
+      "execution": "not_run"
+    },
+    {
+      "rust": "table::compact_tests::sparse_implicit_aliases_share_relationships_and_charge_exactly_32_bytes_each",
+      "go": [
+        "internal/records/table/resource_test.go:TestSparseAliasesShareLocationsAndConsumeQueryBudget",
+        "internal/records/table/sparse_test.go:TestSparseLayoutsAndRelationshipOrder"
+      ],
+      "assertions": [
+        "1000 implicit WDC2 aliases and explicit copy through an alias share two physical slots",
+        "relationship 777 and origin12 retained on aliases",
+        "each extra alias changes admitted metadata exactly32 bytes",
+        "16 KiB query metadata rejects index; both ledgers remain capped"
+      ],
+      "execution": "not_run"
+    },
+    {
+      "rust": "table::compact_tests::wdc3_plus_same_offset_rows_keep_distinct_origins_and_relationships",
+      "go": [
+        "internal/records/table/sparse_test.go:TestSparseLayoutsAndRelationshipOrder"
+      ],
+      "assertions": [
+        "WDC3/4/5 same-offset IDs keep distinct physical slots and origins",
+        "normal and secondary relation ordering mutate only intended row",
+        "explicit copy shares its origin but not adjacent same-offset logical record"
+      ],
+      "execution": "not_run"
+    },
+    {
+      "rust": "table::compact_tests::compact_copy_uses_origin_common_override_and_requested_inline_identity",
+      "go": [
+        "internal/records/table/records_test.go:TestRecordIdentityCopyChainsAndRelations",
+        "internal/records/table/columns_test.go:TestStorageCodecs"
+      ],
+      "assertions": [
+        "common override looked up by physical origin",
+        "inline identity/raw_values use requested copied ID",
+        "raw borrowed bytes stay physical origin"
+      ],
+      "execution": "not_run"
+    },
+    {
+      "rust": "table::compact_tests::compact_index_rejects_duplicates_cycles_missing_origins_and_relation_conflicts",
+      "go": [
+        "internal/records/table/records_test.go:TestRecordIndexRejectsInvalidMetadata",
+        "internal/records/table/sparse_test.go:TestSparseMapRejectsBadRangesAndIdentities"
+      ],
+      "assertions": [
+        "exact table.invalid_format for physical/copy/alias collision, duplicate copy, cycle, missing origin",
+        "inconsistent sparse lengths, bad relationship ordinal, duplicate relationship remain errors"
+      ],
+      "execution": "not_run"
+    },
+    {
+      "rust": "table::compact_tests::compact_index_excludes_missing_partitions_without_changing_partial_coverage",
+      "go": [
+        "internal/records/table/records.go:OpenAvailableRecords"
+      ],
+      "assertions": [
+        "missing authenticated partition excluded from physical/index entries",
+        "physicalRows remains declared total and availableRows remains actual logical availability",
+        "missing ID stays table.record_not_found; unexcluded missing byte range stays table.partition_unavailable"
+      ],
+      "execution": "not_run"
+    },
+    {
+      "rust": "table::compact_tests::sparse_alias_row_limit_precedes_new_alias_query_charge",
+      "go": [
+        "internal/records/table/sparse.go:indexSparse"
+      ],
+      "assertions": [
+        "logical row limit precedes new alias query charge",
+        "budget admitting exactly one implicit alias returns table.limit_exceeded for second alias rather than query resource error"
+      ],
+      "execution": "not_run"
+    },
+    {
+      "rust": "table::compact_tests::malformed_sparse_capacity_admission_is_safety_only_and_keeps_late_format_error",
+      "go": [
+        "internal/records/table/sparse.go:indexSparse"
+      ],
+      "assertions": [
+        "100000 nonoverlapping distinct entries with one declared physical row: sufficient safety cap reaches original late table.invalid_format",
+        "16 KiB independent safety cap yields records.query_resource_budget before unreserved growth",
+        "both runs have identical Go logical ledger; only successful safety admission changes safety usage"
+      ],
+      "execution": "not_run",
+      "note": "Rust-only safety regression; does not imply Go has identical safety-only ledger"
+    },
+    {
+      "rust": "table::compact_tests::malformed_sparse_reservation_precedes_first_unreserved_physical_insert",
+      "go": [
+        "internal/records/table/sparse.go:indexSparse"
+      ],
+      "assertions": [
+        "direct production index_sparse call retains exactly one physical/logical row after first-excess reservation failure",
+        "physical Vec and ID map capacities remain unchanged",
+        "failed safety reservation is atomic and logical ledger unchanged"
+      ],
+      "execution": "not_run",
+      "note": "Rust-only safety regression; does not imply Go has identical safety-only ledger"
+    },
+    {
+      "rust": "table::compact_tests::malformed_growth_bound_checks_overflow_and_large_capacity_cliffs",
+      "go": [
+        "internal/records/table/sparse.go:indexSparse"
+      ],
+      "assertions": [
+        "remaining-domain add, item-size add, and capacity multiplication overflow reject safely",
+        "one extra row past million-entry physical Vec capacity admits the whole old+new peak, not a single entry"
+      ],
+      "execution": "not_run",
+      "note": "Rust-only safety regression; does not imply Go has identical safety-only ledger"
+    }
+  ],
+  "commandsForApprovedOwner": [
+    "node tools/rust-cargo.mjs --owner ci-data-compact-records --one-shot -- test --locked --offline -p lycheedev-data --lib table::compact_tests:: -j 1",
+    "node tools/rust-cargo.mjs --owner ci-data-wdc-regression --one-shot -- test --locked --offline -p lycheedev-data --test wdc_parity -j 1"
+  ],
+  "inheritedConsumerRegressionTargets": [
+    "wdc_parity",
+    "cli_local_parity",
+    "sql_resource_parity",
+    "semantic_sql_parity",
+    "effective_sql_parity",
+    "stream_real",
+    "catalog_navigation_parity"
+  ],
+  "unchangedPublicConsumers": [
+    "crates/lycheedev-data/src/db2.rs:dispatch_after_read",
+    "crates/lycheedev-data/src/local_query.rs:sql_inner_after_execute",
+    "crates/lycheedev-data/src/relational.rs:WDC row projection",
+    "crates/lycheedev-data/src/stream.rs:dispatch",
+    "crates/lycheedev-data/src/navigate.rs:dispatch",
+    "crates/lycheedev-data/src/navigate/catalog.rs:open table provider"
+  ],
+  "limits": [
+    "No executable Rust/Go/Windows regressions or memory benchmarks were run for this revision.",
+    "Index logical bytes now follow Go323; all pre-existing non-index parser accounting, partial and public output behavior remain outside the representation change.",
+    "Conservative Rust safety admission is not measured heap or RSS.",
+    "Existing product-wide physical/effective provider logical-accounting gaps are not closed by this slice.",
+    "Malformed underdeclared sparse maps have independent safety-only peak admission; normal-data logical and safety formulas are unchanged from R1."
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "schema": "lycheedev.remote-asset-export-candidate.v1",
+  "goOracle": "3766f9cacb52e93a803a626187e2a1d54a445468",
+  "sourceFreezeSha256": "94bd7abf3421b603ef5c8afde36d8a5a94407dc15e755f6074609d849a1f0469",
+  "sources": [
+    {
+      "path": "crates/lycheedev-data/src/assets/export.rs",
+      "beforeSha256": "381de8ea76dbe5e815cfb43a71a53088f13b1637ff2dc7e9676ac9bfc84e3cbc",
+      "sha256": "50ec320caf34da4c7e8e4a5a0c49162d6211af0d36b83a13dbe45f99b9712ea3",
+      "bytes": 10693
+    },
+    {
+      "path": "crates/lycheedev-data/src/assets/export/tests.rs",
+      "beforeSha256": null,
+      "sha256": "aa27677e99e69b10bd9bb3717dfee669a2bdcd9bf6be22918310161cc73e9ba4",
+      "bytes": 3559
+    },
+    {
+      "path": "crates/lycheedev-data/src/assets/input.rs",
+      "beforeSha256": "8d5f19a98be4ce3163f3ad1aab681f7cc91625860783ea59e299b46b3904246f",
+      "sha256": "9de5155e9fd78fcb268eeadd806741c602ffb063608cf3dcf347a691f6987b91",
+      "bytes": 7422
+    },
+    {
+      "path": "crates/lycheedev-data/src/remote/provider.rs",
+      "beforeSha256": "9a9358a3cfab92cdc55b467d4de8c0a06aa6efa3ffa034c085875f8324aa5349",
+      "sha256": "a704f025dd03da66713b9a6a2b749ec5535db30be3afa51fb04cd0e81b3ff266",
+      "bytes": 7649
+    },
+    {
+      "path": "crates/lycheedev-data/src/remote/session/tests.rs",
+      "beforeSha256": "916b00907c8d90ac160aeafe02c00ed336f3bb2ee478ceaef1a2e16e259642fc",
+      "sha256": "97f63cd1a18de1dfe65d172860f5fc5d82474d8728b5084c9681fde640a901e8",
+      "bytes": 23397
+    },
+    {
+      "path": "crates/lycheedev-data/src/remote/session/tests/default_asset_export.rs",
+      "beforeSha256": null,
+      "sha256": "1a2a469814e67a0d08d0de39140077247999910e449735558531eac6f4933613",
+      "bytes": 12339
+    }
+  ],
+  "newRustTests": 10,
+  "rust": "NOT_RUN",
+  "review": "independent full static review passed; b2 comment-only correction verified",
+  "limits": [
+    "Existing JSON error.details carries typed committed facts; no new top-level or JSONL fields.",
+    "External Destination and capture-internal legacy checked-close gaps remain.",
+    "Local adaptive asset and same-session prepared-state reuse remain separate."
+  ]
+}

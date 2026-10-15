@@ -580,8 +580,11 @@ struct InstallationFixture {
 }
 impl InstallationFixture {
     fn new() -> Self {
+        // Windows wall-clock ticks can be identical across parallel fixtures.
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let sequence = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let root = std::env::temp_dir().join(format!(
-            "lychee-data-installation-{}-{}",
+            "lychee-data-installation-{}-{}-{sequence}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

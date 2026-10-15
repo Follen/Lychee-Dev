@@ -28,28 +28,83 @@ pub struct VerifiedCascInput {
     pub data_build: String,
     pub budget: Arc<Budget>,
 }
+/// The remote source cannot outlive its Session or real workspace admission.
+/// Only the immutable body is mutably borrowed for Read/rewind, never detached.
+pub(crate) struct VerifiedView<'a> {
+    pub blob: &'a mut evidence::VerifiedBlob,
+    pub reading: &'a Value,
+    pub capture: &'a Value,
+    pub snapshot: &'a str,
+    pub data_build: &'a str,
+    pub budget: &'a Arc<Budget>,
+}
+pub(crate) fn with_remote_casc_verified<R>(
+    inv: &Invocation,
+    id: u32,
+    callback: &mut dyn FnMut(VerifiedView<'_>) -> Result<R>,
+) -> Result<R> {
+    inv.control.check()?;
+    // Deferred Go323 query budget: sampling belongs to actual admission, not
+    // this constructor. The Arc/address remains the original query identity.
+    let budget = Arc::new(Budget::query_controlled(
+        inv.control.deadline(),
+        inv.control.clone(),
+    ));
+    let opened = crate::remote::provider::OpenedScope::open(inv, &budget)?;
+    let (mut scope, pin) = opened.admit_asset()?;
+    let data = pin.data.as_ref().expect("asset pin admitted");
+    let result = scope.with_verified_file(data, id, &mut |blob, reading| {
+        budget.charge_split(Cost::retained(blob.reference().bytes.try_into().map_err(|_| fault("records.metadata_limit", 3))?), Cost::default())?;
+        let capture = evidence::commit_verified_capture_budgeted(
+            blob,
+            evidence::CaptureHeader {
+                media_type: "application/octet-stream",
+                provenance: json!({"kind":"asset","locator":format!("casc:fdid:{id}:ckey:{}",reading["entry"]["contentKey"].as_str().unwrap_or("")),"snapshot":pin.id,"dataBuild":data.full_build}),
+                complete: true, truncated: false,
+            },
+            &inv.control, &budget.safety_only(),
+        )?;
+        callback(VerifiedView {
+            blob, reading, capture: &capture, snapshot: &pin.id,
+            data_build: &data.full_build, budget: &budget,
+        })
+    });
+    scope.finish(result)
+}
 pub fn capture_casc_verified(inv: &Invocation) -> Result<VerifiedCascInput> {
     inv.control.check()?;
     let pin = selection::resolve_pinned(inv)?;
     let data = pin.data.as_ref().ok_or_else(|| {
         ToolkitError::new("records.data_pin_required", "records.data_pin_required", 2)
     })?;
-    let id = inv.required("--file-id")?.parse::<u32>()
+    let id = inv
+        .required("--file-id")?
+        .parse::<u32>()
         .map_err(|_| ToolkitError::arguments("invalid --file-id"))?;
-    let budget = Arc::new(Budget::controlled(Cost::defaults(), inv.control.deadline(), inv.control.clone()));
+    let budget = Arc::new(Budget::controlled(
+        Cost::defaults(),
+        inv.control.deadline(),
+        inv.control.clone(),
+    ));
     let file = local_query::read_verified_file_budgeted(inv, data, id, &budget)?;
     let capture = evidence::commit_verified_capture_budgeted(
         &file.blob,
         evidence::CaptureHeader {
             media_type: "application/octet-stream",
             provenance: json!({"kind":"asset","locator":format!("casc:fdid:{id}:ckey:{}",file.reading["entry"]["contentKey"].as_str().unwrap_or("")),"snapshot":pin.id,"dataBuild":data.full_build}),
-            complete: true, truncated: false,
+            complete: true,
+            truncated: false,
         },
-        &inv.control, budget.as_ref(),
+        &inv.control,
+        budget.as_ref(),
     )?;
     Ok(VerifiedCascInput {
-        blob: file.blob, reading: file.reading, capture,
-        snapshot: pin.id.clone(), data_build: data.full_build.clone(), budget,
+        blob: file.blob,
+        reading: file.reading,
+        capture,
+        snapshot: pin.id.clone(),
+        data_build: data.full_build.clone(),
+        budget,
     })
 }
 pub fn capture_casc(inv: &Invocation, maximum: usize) -> Result<CascInput> {

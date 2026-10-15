@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 17:07 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`fc832882b04c031d5768fefb31bddccc7c3f20e1`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 17:20 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`36be4d22fbf2b28bd4b12d05be13180dad83454b`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -36,6 +36,10 @@ Core单遍流式发布与Session scoped verified body已独审组合：只解码
 
 Data 323自适应基础R23.1已独审并组合：真实workspace准入后采样Windows可用内存，配置容量分摊、固定ceiling与按需增长、scratch峰值及独立安全账；growth probe后复核原控制与独立预算，取消不批准新分配，已发生网络账仍保留。26新增Rust未运行；默认SQL/DB2/navigation/asset消费者与公开memoryBudget输出正在另片接线，尚未完成新合同验收。固定预算历史证据不改标。见[源码清单](tests/rust-parity/adaptive-query-r23-1-freeze.json)与[Go测试映射](tests/rust-parity/adaptive-query-r23-1-test-map.json)。
 
+默认remote asset export已接真实准入/同Budget/verified body借用/raw与PNG/WebP/有序source→image→manifest依赖和原子输出，10新增Rust未运行。已提交capture的后续错误保ID、原typed原因和输出已发布事实；CLI沿既有JSON error.details透传，纯旧metadata_limit投影不变，2新增Rust未跑。外部Destination与capture内部旧关闭边界、local adaptive后继及same-Session准备复用仍未闭合。
+
+323紧凑记录R2已独立审查并组合：ID→u32 physical location索引、copy/WDC2 alias共用位置，Go逻辑计量与Rust独立安全峰值分账；畸形Rows不足时在增长前额外安全准入，足预算仍保原晚期格式拒绝，不削正常行。11新Rust与既有WDC回归待执行；理论容量模型不等于实测内存降幅。
+
 ### Emmy 全量替换当前顺序
 
 当前补丁31路径：26源文件、2 manifest/lock、3测试。六组真实职责为共享摄取、context递归推断、object/member身份、call/return/generic checker、诊断range/selection、session/coverage。全部必须外移后恢复原版来源，不能以包装crate冒充零补丁。
@@ -68,6 +72,8 @@ Data 323自适应基础R23.1已独审并组合：真实workspace准入后采样W
 - **执行/写入边界**：被明确拒绝的重复gzip验证未重跑；PR14标题/正文刷新两次拒绝后保持暂停。代码、文档与其它已授权验证继续，不改rules、不换路绕过。未发布、未合main。
 
 所有旧批次、owner/hash、失败与修复来源见[历史证据记录](docs/toolkit/rust-migration-evidence-2026-10-15.md)。旧状态按原树/时间理解，不覆盖本文现状。
+
+- **498c2ea2终态**：176owners/2763sealed logs独立SHA核一致。S2 atomic oracle实际成功，S3首个NotManaged-call组合失败且后续比较未全执行，独立定位中；全Retail仍90–92秒失败，source进程采样WS fullsemantic2353.78MiB/private2481.14，retainedcold2257.33/2373.06失败，暖/稳态未测，不证明降幅。XML约11.7–11.9秒、Emmy约38.1–38.4秒，warm prepared76.05秒后未完成；API内部queried78.45秒仍未在原总预算完成响应。Data安装fixture在create_dir同tick重名，最小序号修复已审未跑；两effective SQL fixture缺hotfix capture输入定位中；旧archive锁/ordered cancel修复属后续bc2、gzip既有差异保留。
 
 ## 4. 接下来按可交付批次执行
 
