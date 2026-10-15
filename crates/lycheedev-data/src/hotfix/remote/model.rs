@@ -395,12 +395,12 @@ impl Query {
     }
 }
 // Go strings.ToLower uses simple Unicode mapping rather than full lowercase expansions.
-fn lower(s: &str) -> String {
+pub(crate) fn lower(s: &str) -> String {
     s.chars()
         .map(|c| crate::unicode_simple::map(c, false))
         .collect()
 }
-fn equal_fold(a: &str, b: &str) -> bool {
+pub(crate) fn equal_fold(a: &str, b: &str) -> bool {
     {
         let fold = |c| {
             if matches!(c, '\u{0130}' | '\u{0131}') {

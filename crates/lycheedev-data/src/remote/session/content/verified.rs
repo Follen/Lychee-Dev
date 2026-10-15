@@ -189,13 +189,15 @@ pub(in crate::remote::session) fn read(
             let mut decode = |keys: &keys::Context| {
                 files.store.check()?;
                 source.rewind()?;
-                let mut reader = StreamingReader::new(
+                let check = || files.store.check();
+                let mut reader = StreamingReader::new_with_check(
                     &mut source,
                     encoded,
                     decoded,
                     expected,
                     keys.keys(),
                     &safety,
+                    Some(&check),
                 )?;
                 let owned_budget = budget.clone();
                 evidence::publish_blob_stream_bounded_with_check(

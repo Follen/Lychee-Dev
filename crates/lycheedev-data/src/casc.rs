@@ -6,7 +6,9 @@ use crate::{
     blte, fault,
     resource::{Budget, Cost},
 };
-use lycheedev_core::{Result, storage};
+use lycheedev_core::{Result, ToolkitError, control::OperationControl, storage};
+mod controlled;
+use controlled::Scope;
 use md5::{Digest, Md5};
 use serde::Serialize;
 use std::{
@@ -36,22 +38,52 @@ pub struct LocalReader<'a> {
     io_reads: AtomicU64,
     cancel: Option<&'a AtomicBool>,
     budget: Option<&'a Budget>,
+    control: Option<&'a OperationControl>,
 }
 impl LocalReader<'_> {
+    fn scope(&self) -> Scope<'_> {
+        Scope {
+            limits: self.limits,
+            cancel: self.cancel,
+            control: self.control,
+            budget: self.budget,
+        }
+    }
     pub fn io_stats(&self) -> serde_json::Value {
         serde_json::json!({"bytes":self.io_bytes.load(Ordering::Relaxed),"reads":self.io_reads.load(Ordering::Relaxed),"wholeEncoded":false})
+    }
+    /// All borrowed ranges must have ended before consuming the actual handle.
+    pub(crate) fn close_after<T>(self, result: Result<T>) -> Result<T> {
+        let scope = Scope {
+            limits: self.limits,
+            cancel: self.cancel,
+            control: self.control,
+            budget: self.budget,
+        };
+        let (file, poison) = match self.file.into_inner() {
+            Ok(file) => (file, None),
+            Err(error) => (
+                error.into_inner(),
+                Some(fault("records.internal", 8, "CASC reader lock poisoned")),
+            ),
+        };
+        let mut cleanup: Vec<_> = poison.into_iter().collect();
+        if let Err(error) = storage::close_file(file) {
+            cleanup.push(error.into());
+        }
+        scope.finish(result, cleanup)
     }
 }
 impl blte::EncodedRead for LocalReader<'_> {
     fn check_encoded(&self) -> Result<()> {
-        check(self.limits, self.cancel)?;
-        self.budget.map_or(Ok(()), Budget::check)
+        self.scope().check()
     }
     fn encoded_size(&self) -> usize {
         (self.span.bytes - 30) as usize
     }
     fn read_encoded(&self, offset: usize, bytes: usize) -> Result<blte::EncodedSpan<'_>> {
-        check(self.limits, self.cancel)?;
+        let scope = self.scope();
+        scope.check()?;
         if let Some(budget) = self.budget {
             budget.charge(Cost {
                 decode_work: bytes.div_ceil(65536) as u64,
@@ -65,11 +97,19 @@ impl blte::EncodedRead for LocalReader<'_> {
         if end > self.limits.encoded_bytes || bytes > 64 << 20 {
             return Err(exceeded());
         }
-        storage::guard_path(&self.root, &self.path)?;
-        let mut file = self
-            .file
-            .lock()
-            .map_err(|_| fault("records.internal", 8, "CASC reader lock poisoned"))?;
+        scope.guard(&self.root, &self.path)?;
+        let mut file = loop {
+            scope.check()?;
+            match self.file.try_lock() {
+                Ok(file) => break file,
+                Err(std::sync::TryLockError::Poisoned(_)) => {
+                    return Err(fault("records.internal", 8, "CASC reader lock poisoned"));
+                }
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    std::thread::sleep(Duration::from_millis(1))
+                }
+            }
+        };
         if file.metadata()?.len() != self.archive_bytes {
             return Err(fault(
                 "records.pinned_build_changed",
@@ -77,19 +117,25 @@ impl blte::EncodedRead for LocalReader<'_> {
                 "Local archive size changed",
             ));
         }
+        scope.check()?;
         file.seek(SeekFrom::Start(self.span.offset + 30 + offset as u64))?;
         blte::EncodedSpan::read_owned(bytes, self.budget, |raw| {
             for chunk in raw.chunks_mut(65536) {
-                check(self.limits, self.cancel)?;
-                if let Some(budget) = self.budget {
-                    budget.check()?;
+                let mut written = 0;
+                while written < chunk.len() {
+                    scope.check()?;
+                    let n = file.read(&mut chunk[written..])?;
+                    // Account successful OS reads before cancellation classification.
+                    self.io_bytes.fetch_add(n as u64, Ordering::Relaxed);
+                    if n == 0 {
+                        return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into());
+                    }
+                    written += n;
+                    scope.check()?;
                 }
-                file.read_exact(chunk)?;
             }
-            storage::guard_path(&self.root, &self.path)?;
-            self.io_bytes.fetch_add(bytes as u64, Ordering::Relaxed);
             self.io_reads.fetch_add(1, Ordering::Relaxed);
-            Ok(())
+            scope.guard(&self.root, &self.path)
         })
     }
 }
@@ -110,7 +156,51 @@ pub fn open_local_reader_budgeted<'a>(
     cancel: Option<&'a AtomicBool>,
     budget: Option<&'a Budget>,
 ) -> Result<LocalReader<'a>> {
-    check(limits, cancel)?;
+    open_reader(
+        root,
+        encoding_key,
+        encoded_bytes,
+        Scope {
+            limits,
+            cancel,
+            budget,
+            control: None,
+        },
+    )
+}
+pub(crate) fn open_local_reader_controlled<'a>(
+    root: &Path,
+    encoding_key: &str,
+    encoded_bytes: usize,
+    limits: Limits,
+    control: &'a OperationControl,
+    budget: Option<&'a Budget>,
+) -> Result<LocalReader<'a>> {
+    open_reader(
+        root,
+        encoding_key,
+        encoded_bytes,
+        Scope {
+            limits,
+            cancel: None,
+            control: Some(control),
+            budget,
+        },
+    )
+}
+fn open_reader<'a>(
+    root: &Path,
+    encoding_key: &str,
+    encoded_bytes: usize,
+    scope: Scope<'a>,
+) -> Result<LocalReader<'a>> {
+    scope.check()?;
+    let Scope {
+        limits,
+        cancel,
+        budget,
+        control,
+    } = scope;
     let key = key(encoding_key)?;
     if !(12..=limits.encoded_bytes).contains(&encoded_bytes)
         || limits.encoded_bytes > 256 << 20
@@ -122,92 +212,111 @@ pub fn open_local_reader_budgeted<'a>(
         return Err(exceeded());
     }
     let directory = root.join("Data/data");
-    let selected = select_indices(root, limits, cancel)?;
+    let selected = select_indices_with_check(root, limits, cancel, || scope.check())?;
     let mut collision = false;
     for (bucket, (_, name)) in selected {
-        let raw = bounded_read_budgeted(
+        let raw = bounded_read_with_check(
             &directory.join(&name),
             root,
             limits.index_bytes,
             limits,
             cancel,
             budget,
+            || scope.check(),
         )?;
-        let index = Index::open(&raw, bucket, limits, cancel)?;
-        for span in index.find(&key, limits, cancel)? {
+        let index = Index::open_with_check(&raw, bucket, limits, cancel, || scope.check())?;
+        for span in index.find_with_check(&key, limits, cancel, || scope.check())? {
             if span.bytes != encoded_bytes as u64 + 30 {
                 collision = true;
                 continue;
             }
             let path = directory.join(span.filename());
-            storage::guard_path(root, &path)?;
+            scope.guard(root, &path)?;
             let mut file = fs::File::open(&path)?;
-            let meta = file.metadata()?;
-            if !meta.is_file() || span.offset > meta.len() || span.bytes > meta.len() - span.offset
-            {
-                return Err(invalid());
+            let result = (|| {
+                scope.check()?;
+                let meta = file.metadata()?;
+                if !meta.is_file()
+                    || span.offset > meta.len()
+                    || span.bytes > meta.len() - span.offset
+                {
+                    return Err(invalid());
+                }
+                scope.check()?;
+                file.seek(SeekFrom::Start(span.offset))?;
+                let mut prefix = [0; 42];
+                scope.check()?;
+                file.read_exact(&mut prefix)?;
+                scope.check()?;
+                if prefix[..30].iter().any(|b| *b != 0) && (0..9).any(|i| prefix[15 - i] != key[i])
+                {
+                    return Ok(None);
+                }
+                if &prefix[30..34] != b"BLTE" {
+                    return Err(invalid());
+                }
+                let header = u32::from_be_bytes(prefix[34..38].try_into().unwrap()) as usize;
+                if header == 0 {
+                    return Err(fault(
+                        "container.unsupported_encoding",
+                        3,
+                        "Headerless objects require sequential content authentication",
+                    ));
+                }
+                if header < 12 || header > encoded_bytes || header > 12 + 65536 * 24 {
+                    return Err(invalid());
+                }
+                if let Some(budget) = budget {
+                    budget.charge(Cost::metadata(header))?;
+                }
+                let mut framing = vec![0; header];
+                framing[..12].copy_from_slice(&prefix[30..]);
+                for chunk in framing[12..].chunks_mut(65536) {
+                    scope.check()?;
+                    file.read_exact(chunk)?;
+                    scope.check()?;
+                }
+                if Md5::digest(&framing).as_slice() != key {
+                    return Ok(None);
+                }
+                scope.guard(root, &path)?;
+                Ok(Some((meta.len(), header, storage::sha256(&framing))))
+            })();
+            match result {
+                Ok(Some((archive_bytes, header, header_sha256))) => {
+                    return Ok(LocalReader {
+                        file: Mutex::new(file),
+                        root: root.to_owned(),
+                        path,
+                        archive_bytes,
+                        index: name,
+                        span,
+                        encoding_key: encoding_key.into(),
+                        header_sha256,
+                        limits,
+                        io_bytes: AtomicU64::new(header as u64 + 30),
+                        io_reads: AtomicU64::new(1),
+                        cancel,
+                        budget,
+                        control,
+                    });
+                }
+                other => {
+                    scope.close(file, other)?;
+                    collision = true;
+                }
             }
-            file.seek(SeekFrom::Start(span.offset))?;
-            let mut prefix = [0; 42];
-            file.read_exact(&mut prefix)?;
-            if prefix[..30].iter().any(|b| *b != 0) && (0..9).any(|i| prefix[15 - i] != key[i]) {
-                collision = true;
-                continue;
-            }
-            if &prefix[30..34] != b"BLTE" {
-                return Err(invalid());
-            }
-            let header = u32::from_be_bytes(prefix[34..38].try_into().unwrap()) as usize;
-            if header == 0 {
-                return Err(fault(
-                    "container.unsupported_encoding",
-                    3,
-                    "Headerless objects require sequential content authentication",
-                ));
-            }
-            if header < 12 || header > encoded_bytes || header > 12 + 65536 * 24 {
-                return Err(invalid());
-            }
-            if let Some(budget) = budget {
-                budget.charge(Cost::metadata(header))?;
-            }
-            let mut framing = vec![0; header];
-            framing[..12].copy_from_slice(&prefix[30..]);
-            for chunk in framing[12..].chunks_mut(65536) {
-                check(limits, cancel)?;
-                file.read_exact(chunk)?;
-            }
-            if Md5::digest(&framing).as_slice() != key {
-                collision = true;
-                continue;
-            }
-            storage::guard_path(root, &path)?;
-            return Ok(LocalReader {
-                file: Mutex::new(file),
-                root: root.to_owned(),
-                path,
-                archive_bytes: meta.len(),
-                index: name,
-                span,
-                encoding_key: encoding_key.into(),
-                header_sha256: storage::sha256(&framing),
-                limits,
-                io_bytes: AtomicU64::new(header as u64 + 30),
-                io_reads: AtomicU64::new(1),
-                cancel,
-                budget,
-            });
         }
     }
-    if collision {
-        Err(integrity())
+    Err(if collision {
+        integrity()
     } else {
-        Err(fault(
+        fault(
             "records.local_object_unavailable",
             3,
             "Full EKey unavailable in newest local CASC indices",
-        ))
-    }
+        )
+    })
 }
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -332,6 +441,16 @@ impl<'a> Index<'a> {
         limits: Limits,
         cancel: Option<&AtomicBool>,
     ) -> Result<Self> {
+        Self::open_with_check(raw, bucket, limits, cancel, || Ok(()))
+    }
+    pub(crate) fn open_with_check(
+        raw: &'a [u8],
+        bucket: u8,
+        limits: Limits,
+        cancel: Option<&AtomicBool>,
+        mut supplemental: impl FnMut() -> Result<()>,
+    ) -> Result<Self> {
+        supplemental()?;
         check(limits, cancel)?;
         if limits.index_bytes == 0
             || limits.index_bytes > 64 << 20
@@ -369,6 +488,7 @@ impl<'a> Index<'a> {
         let mut previous: Option<&[u8]> = None;
         for (i, entry) in entries.as_chunks::<18>().0.iter().enumerate() {
             if i.is_multiple_of(4096) {
+                supplemental()?;
                 check(limits, cancel)?;
             }
             if previous.is_some_and(|p| p > &entry[..9]) {
@@ -382,6 +502,7 @@ impl<'a> Index<'a> {
         if expected != primary && expected != alternate {
             return Err(integrity());
         }
+        supplemental()?;
         check(limits, cancel)?;
         Ok(Self {
             raw: entries,
@@ -394,11 +515,22 @@ impl<'a> Index<'a> {
         limits: Limits,
         cancel: Option<&AtomicBool>,
     ) -> Result<Vec<Span>> {
+        self.find_with_check(key, limits, cancel, || Ok(()))
+    }
+    pub(crate) fn find_with_check(
+        &self,
+        key: &[u8; 16],
+        limits: Limits,
+        cancel: Option<&AtomicBool>,
+        mut supplemental: impl FnMut() -> Result<()>,
+    ) -> Result<Vec<Span>> {
+        supplemental()?;
         check(limits, cancel)?;
         let count = self.raw.len() / 18;
         let mut low = 0;
         let mut high = count;
         while low < high {
+            supplemental()?;
             let mid = low + (high - low) / 2;
             if self.raw[mid * 18..mid * 18 + 9] < key[..9] {
                 low = mid + 1
@@ -408,6 +540,7 @@ impl<'a> Index<'a> {
         }
         let mut result = vec![];
         for entry in self.raw[low * 18..].as_chunks::<18>().0 {
+            supplemental()?;
             if entry[..9] != key[..9] {
                 break;
             }
@@ -428,6 +561,8 @@ impl<'a> Index<'a> {
                 bytes,
             });
         }
+        supplemental()?;
+        check(limits, cancel)?;
         Ok(result)
     }
 }
@@ -480,37 +615,70 @@ fn bounded_read_budgeted(
     cancel: Option<&AtomicBool>,
     budget: Option<&Budget>,
 ) -> Result<Vec<u8>> {
-    storage::guard_path(root, path)?;
+    bounded_read_with_check(path, root, max, limits, cancel, budget, || Ok(()))
+}
+fn bounded_read_with_check(
+    path: &Path,
+    root: &Path,
+    max: usize,
+    limits: Limits,
+    cancel: Option<&AtomicBool>,
+    budget: Option<&Budget>,
+    mut supplemental: impl FnMut() -> Result<()>,
+) -> Result<Vec<u8>> {
+    supplemental()?;
+    storage::guard_path_with_check(root, path, &mut supplemental)?;
     let mut file = fs::File::open(path)?;
-    let meta = file.metadata()?;
-    if !meta.is_file() || meta.len() > max as u64 {
-        return Err(exceeded());
-    }
-    if let Some(budget) = budget {
-        budget.charge_once(
-            &format!("index:{}:{}", path.display(), meta.len()),
-            Cost::metadata(meta.len() as usize * 2),
-        )?;
-        budget.charge(Cost::work(meta.len() as usize / 18 + 1))?;
-    }
-    let mut raw = Vec::with_capacity(meta.len() as usize);
-    let mut buf = [0; 65536];
-    loop {
-        check(limits, cancel)?;
-        let n = file.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        if n > max - raw.len() {
+    let result = (|| {
+        let meta = file.metadata()?;
+        if !meta.is_file() || meta.len() > max as u64 {
             return Err(exceeded());
         }
-        raw.extend_from_slice(&buf[..n]);
-    }
-    storage::guard_path(root, path)?;
-    if raw.len() as u64 != meta.len() || file.metadata()?.len() != meta.len() {
-        return Err(integrity());
-    }
-    Ok(raw)
+        if let Some(budget) = budget {
+            budget.charge_once(
+                &format!("index:{}:{}", path.display(), meta.len()),
+                Cost::metadata(meta.len() as usize * 2),
+            )?;
+            budget.charge(Cost::work(meta.len() as usize / 18 + 1))?;
+        }
+        let mut raw = Vec::with_capacity(meta.len() as usize);
+        let mut buf = [0; 65536];
+        loop {
+            supplemental()?;
+            check(limits, cancel)?;
+            let n = file.read(&mut buf)?;
+            supplemental()?;
+            if n == 0 {
+                break;
+            }
+            if n > max - raw.len() {
+                return Err(exceeded());
+            }
+            raw.extend_from_slice(&buf[..n]);
+        }
+        storage::guard_path_with_check(root, path, &mut supplemental)?;
+        if raw.len() as u64 != meta.len() || file.metadata()?.len() != meta.len() {
+            return Err(integrity());
+        }
+        supplemental()?;
+        Ok(raw)
+    })();
+    let cleanup = storage::close_file(file)
+        .err()
+        .map(Into::into)
+        .into_iter()
+        .collect();
+    controlled::finish(
+        result,
+        cleanup,
+        [
+            supplemental().err(),
+            budget.and_then(|budget| budget.check().err()),
+            check(limits, cancel).err(),
+        ]
+        .into_iter()
+        .flatten(),
+    )
 }
 pub fn open_local(
     root: &Path,
@@ -632,10 +800,20 @@ fn select_indices(
     limits: Limits,
     cancel: Option<&AtomicBool>,
 ) -> Result<BTreeMap<u8, (u32, String)>> {
+    select_indices_with_check(root, limits, cancel, || Ok(()))
+}
+fn select_indices_with_check(
+    root: &Path,
+    limits: Limits,
+    cancel: Option<&AtomicBool>,
+    mut supplemental: impl FnMut() -> Result<()>,
+) -> Result<BTreeMap<u8, (u32, String)>> {
+    supplemental()?;
     let directory = root.join("Data/data");
-    storage::guard_path(root, &directory)?;
+    storage::guard_path_with_check(root, &directory, &mut supplemental)?;
     let mut selected = BTreeMap::<u8, (u32, String)>::new();
     for (n, entry) in fs::read_dir(&directory)?.enumerate() {
+        supplemental()?;
         check(limits, cancel)?;
         if n >= limits.directory_entries {
             return Err(exceeded());
@@ -675,6 +853,7 @@ fn select_indices(
             }
         }
     }
+    supplemental()?;
     Ok(selected)
 }
 

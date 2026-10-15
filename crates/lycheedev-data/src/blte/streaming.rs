@@ -40,7 +40,32 @@ impl<'a> Reader<'a> {
         keys: &'a BTreeMap<u64, Vec<u8>>,
         budget: &'a Budget,
     ) -> Result<Self> {
-        budget.check()?;
+        Self::new_with_check(
+            source,
+            encoded_bytes,
+            decoded_bytes,
+            expected_key,
+            keys,
+            budget,
+            None,
+        )
+    }
+    pub(crate) fn new_with_check(
+        source: &'a mut dyn Read,
+        encoded_bytes: usize,
+        decoded_bytes: usize,
+        expected_key: [u8; 16],
+        keys: &'a BTreeMap<u64, Vec<u8>>,
+        budget: &'a Budget,
+        source_check: Option<&'a dyn Fn() -> Result<()>>,
+    ) -> Result<Self> {
+        let check = || {
+            if let Some(check) = source_check {
+                check()?;
+            }
+            budget.check()
+        };
+        check()?;
         let limits = Limits {
             encoded_bytes,
             decoded_bytes: decoded_bytes.max(1),
@@ -83,7 +108,7 @@ impl<'a> Reader<'a> {
             parts.reserve_exact(count_value);
             let (mut encoded_total, mut decoded_total) = (header, 0usize);
             for _ in 0..count_value {
-                budget.check()?;
+                check()?;
                 let mut record = [0; 24];
                 source.read_exact(&mut record).map_err(stream_io_error)?;
                 let part = Part {
@@ -125,7 +150,7 @@ impl<'a> Reader<'a> {
                 allow_missing: false,
                 budget: Some(budget),
                 logical_layout: None,
-                source_check: None,
+                source_check,
             },
             parts,
             next: 0,
@@ -158,7 +183,7 @@ impl<'a> Reader<'a> {
                     "Decoded CASC content key or length differs",
                 ));
             }
-            budget.check()?;
+            self.decoder.check()?;
             self.finished = true;
             return Ok(());
         }
@@ -173,12 +198,13 @@ impl<'a> Reader<'a> {
         let scratch = budget.reserve_retained(reserved)?;
         let mut encoded = vec![0; part.encoded];
         for block in encoded.chunks_mut(65536) {
-            budget.check()?;
+            self.decoder.check()?;
             self.source.read_exact(block).map_err(stream_io_error)?;
         }
         if part.digest != [0; 16] {
             let mut hash = Md5::new();
             for block in encoded.chunks(65536) {
+                self.decoder.check()?;
                 budget.charge(Cost::work(1))?;
                 hash.update(block);
             }

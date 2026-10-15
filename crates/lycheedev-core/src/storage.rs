@@ -2,7 +2,9 @@ use crate::{Result, ToolkitError};
 // Business providers use the shared mechanism layer, rather than adding their
 // own Win32 publication path or a direct platform dependency.
 pub use lycheedev_windows::filesystem::destination::{FileControl, FileCost};
-pub use lycheedev_windows::filesystem::{Destination, Directory, durable_move_noreplace};
+pub use lycheedev_windows::filesystem::{
+    Destination, Directory, close_file, durable_move_noreplace,
+};
 mod owned_cleanup;
 mod slot_preflight;
 pub use owned_cleanup::{
@@ -440,10 +442,21 @@ pub fn safe_relative(root: &Path, relative: &str) -> Result<PathBuf> {
 }
 /// Reject all symlink/reparse components and keep the resolved path inside the selected root.
 pub fn guard_path(root: &Path, path: &Path) -> Result<()> {
+    guard_path_with_check(root, path, || Ok(()))
+}
+/// Preserve the existing path policy while observing the caller between each
+/// ancestry metadata/canonicalization operation. No new handle policy.
+pub fn guard_path_with_check(
+    root: &Path,
+    path: &Path,
+    mut check: impl FnMut() -> Result<()>,
+) -> Result<()> {
+    check()?;
     let relative = path
         .strip_prefix(root)
         .map_err(|_| ToolkitError::invalid("path escapes selected root"))?;
     let root_metadata = fs::symlink_metadata(root)?;
+    check()?;
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
@@ -455,10 +468,13 @@ pub fn guard_path(root: &Path, path: &Path) -> Result<()> {
         return Err(ToolkitError::invalid("symlink at managed root"));
     }
     let canonical_root = fs::canonicalize(root)?;
+    check()?;
     let mut current = root.to_path_buf();
     for component in relative.components() {
+        check()?;
         current.push(component);
         if let Ok(metadata) = fs::symlink_metadata(&current) {
+            check()?;
             #[cfg(windows)]
             {
                 use std::os::windows::fs::MetadataExt;
@@ -474,7 +490,7 @@ pub fn guard_path(root: &Path, path: &Path) -> Result<()> {
             }
         }
     }
-    Ok(())
+    check()
 }
 /// Kernel lock lifetime follows the handle, not a stale timestamp or owner TTL.
 pub struct ExclusiveLock {

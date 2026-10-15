@@ -148,6 +148,40 @@ struct Program {
     palette: Range<usize>,
     common: HashMap<u32, u32>,
 }
+/// One decoded row may be handed synchronously to a consumer without escaping
+/// its allocation lease. Only Rust retained safety bytes are temporary; the
+/// original table work and cumulative metadata charges are never refunded.
+struct RowAllocation<'a> {
+    budget: Option<&'a Budget>,
+    scoped: bool,
+    reservation: Option<crate::resource::RetainedReservation<'a>>,
+}
+impl<'a> RowAllocation<'a> {
+    fn new(budget: Option<&'a Budget>, scoped: bool) -> Self {
+        Self {
+            budget,
+            scoped,
+            reservation: None,
+        }
+    }
+    fn retain(&mut self, bytes: usize) -> Result<()> {
+        let Some(budget) = self.budget else {
+            return Ok(());
+        };
+        if self.scoped {
+            if let Some(reservation) = &mut self.reservation {
+                reservation.grow(bytes)?;
+            } else {
+                self.reservation = Some(budget.reserve_retained(bytes)?);
+            }
+            Ok(())
+        } else {
+            // The legacy owned-row/page API keeps its previous lifetime: its
+            // caller can retain the returned map after the table is dropped.
+            budget.charge(Cost::retained(bytes))
+        }
+    }
+}
 struct Source<'a> {
     raw: &'a [u8],
     missing: Vec<Range<usize>>,
@@ -778,6 +812,9 @@ impl<'a> Table<'a> {
     pub fn logical_count(&self) -> usize {
         self.ids.len()
     }
+    pub(crate) fn is_complete(&self) -> bool {
+        self.unavailable.is_empty()
+    }
     pub fn coverage(&self) -> serde_json::Value {
         serde_json::json!({"complete":self.unavailable.is_empty(),"availableRows":self.ids.len(),"physicalRows":self.layout.rows,"unavailablePartitions":self.unavailable,"decodeWork":self.work.load(Ordering::Relaxed),"materialization":"one borrowed record at a time"})
     }
@@ -1397,7 +1434,13 @@ impl<'a> Table<'a> {
         }
         Ok((ids, copy_start, relation_start))
     }
-    fn terminated(&self, start: usize, end: usize, budget: usize) -> Result<String> {
+    fn terminated(
+        &self,
+        start: usize,
+        end: usize,
+        budget: usize,
+        allocation: &mut RowAllocation<'_>,
+    ) -> Result<String> {
         if start >= end {
             return invalid();
         }
@@ -1413,7 +1456,7 @@ impl<'a> Table<'a> {
         if zero > budget {
             return limit();
         }
-        self.source.temporary(zero)?;
+        allocation.retain(zero)?;
         String::from_utf8(data[..zero].to_vec())
             .map_err(|_| fault("table.invalid_format", 4, "WDC string is invalid UTF-8"))
     }
@@ -1424,6 +1467,7 @@ impl<'a> Table<'a> {
         storage: &Storage,
         elements: u32,
         budget: &mut usize,
+        allocation: &mut RowAllocation<'_>,
     ) -> Result<Vec<String>> {
         if storage.codec != 0 {
             return unsupported();
@@ -1468,6 +1512,7 @@ impl<'a> Table<'a> {
                         start + local as usize,
                         start + p.string_bytes as usize,
                         *budget,
+                        allocation,
                     )?;
                     *budget = budget.checked_sub(value.len()).ok_or_else(|| {
                         fault("table.limit_exceeded", 3, "String output budget exhausted")
@@ -1494,6 +1539,29 @@ impl<'a> Table<'a> {
         id: u32,
         text_bytes: usize,
         selected: Option<&BTreeSet<String>>,
+    ) -> Result<BTreeMap<String, Value>> {
+        let mut allocation = RowAllocation::new(self.source.budget.as_deref(), false);
+        self.row_projected_inner(id, text_bytes, selected, &mut allocation)
+    }
+    /// Consume exactly once while the temporary row lease is live. A consumer
+    /// retaining values beyond the callback must admit its own owned copy.
+    pub(crate) fn with_row_projected(
+        &self,
+        id: u32,
+        text_bytes: usize,
+        selected: Option<&BTreeSet<String>>,
+        consume: impl FnOnce(BTreeMap<String, Value>) -> Result<()>,
+    ) -> Result<()> {
+        let mut allocation = RowAllocation::new(self.source.budget.as_deref(), true);
+        let row = self.row_projected_inner(id, text_bytes, selected, &mut allocation)?;
+        consume(row)
+    }
+    fn row_projected_inner(
+        &self,
+        id: u32,
+        text_bytes: usize,
+        selected: Option<&BTreeSet<String>>,
+        allocation: &mut RowAllocation<'_>,
     ) -> Result<BTreeMap<String, Value>> {
         if text_bytes == 0 || text_bytes > 1 << 20 {
             return limit();
@@ -1537,7 +1605,7 @@ impl<'a> Table<'a> {
                     })
                     .ok_or_else(|| fault("table.limit_exceeded", 3, "Row allocation overflow"))
             })?;
-        self.source.temporary(temporary)?;
+        allocation.retain(temporary)?;
         for (index, field) in self.definition.fields.iter().enumerate() {
             let wanted = selected.is_none_or(|s| s.contains(&field.name));
             let Some(column) = self.column_mapping[index] else {
@@ -1600,7 +1668,7 @@ impl<'a> Table<'a> {
                                     "Sparse string is unterminated",
                                 )
                             })?;
-                        self.source.temporary(zero)?;
+                        allocation.retain(zero)?;
                         let value = std::str::from_utf8(&data[..zero])
                             .map_err(|_| {
                                 fault("table.invalid_format", 4, "Sparse string is invalid UTF-8")
@@ -1612,7 +1680,14 @@ impl<'a> Table<'a> {
                     }
                     values
                 } else {
-                    self.strings(location, record, storage, field.elements, &mut remaining)?
+                    self.strings(
+                        location,
+                        record,
+                        storage,
+                        field.elements,
+                        &mut remaining,
+                        allocation,
+                    )?
                 };
                 if wanted {
                     result.insert(

@@ -23,6 +23,7 @@ use std::{
 mod adaptive_tests;
 mod effective;
 mod file_bytes;
+mod provider;
 pub use file_bytes::FileBytes;
 pub(crate) mod query_csv;
 #[cfg(test)]
@@ -287,186 +288,195 @@ fn read_files_with_keys(
     // reading its metadata restarts this read-only session after lazy loading.
     let range_keys = keys.keys().clone();
     let mut stats = decoded_cache::Stats::default();
-    let reader = casc::open_local_reader_budgeted(
+    let reader = casc::open_local_reader_controlled(
         &target.common_root,
         &target.metadata.encoding_key,
         target.metadata.encoding_bytes,
         limits,
-        budget.token(),
+        &inv.control,
         Some(budget),
     )?;
-    let ranges = blte::Ranges::open_reader_budgeted(
-        &reader,
-        blte::Limits {
-            decoded_bytes: target.metadata.content_bytes,
-            ..Default::default()
-        },
-        &range_keys,
-        budget,
-    )?;
-    if ranges.size() != target.metadata.content_bytes {
-        return Err(fault(
-            "records.invalid_metadata",
-            4,
-            "Encoding logical size differs from authenticated config",
-        ));
-    }
-    let metered = MetadataSource {
-        inner: &ranges,
-        budget,
-    };
-    let index = Encoding::open(&metered, limits, budget.token())?;
-    let root_record = index.find(&target.metadata.root_content_key, limits, budget.token())?;
-    let (_, root) = decoded_cache::read_content_budgeted(
-        &inv.home,
-        &target.common_root,
-        &index,
-        &root_record,
-        limits,
-        keys,
-        &mut stats,
-        Some(budget),
-        None,
-    )?;
-    let root_blob = evidence::publish_blob(&inv.home, &root.bytes, 256 << 20)?;
-    let build_blob =
-        evidence::publish_blob(&inv.home, &target.metadata.build_document.raw, 4 << 20)?;
-    let cdn_blob = evidence::publish_blob(&inv.home, &target.metadata.cdn_document.raw, 4 << 20)?;
-    let mask = locale(&pin.language)?;
-    let mut pending = ids.to_vec();
-    let mut requested = 0usize;
-    while !pending.is_empty() {
-        budget.check()?;
-        requested = requested
-            .checked_add(pending.len())
-            .ok_or_else(|| fault("records.file_query", 2, "File batch count overflow"))?;
-        if requested > 32 || pending.contains(&0) {
-            return Err(fault(
-                "records.file_query",
-                2,
-                "Require at most 32 positive file IDs across all batches",
-            ));
-        }
-        let entries = metadata_format::lookup_root(
-            &root,
-            &pending,
-            metadata_format::RootLimits {
-                operation: limits,
+    // All borrowed ranges and metadata readers die before the consuming close.
+    let result = (|| {
+        let ranges = blte::Ranges::open_reader_budgeted(
+            &reader,
+            blte::Limits {
+                decoded_bytes: target.metadata.content_bytes,
                 ..Default::default()
             },
-            budget.token(),
+            &range_keys,
+            budget,
         )?;
-        let mut result = vec![];
-        for id in &pending {
-            budget.check()?;
-            if Instant::now() >= deadline {
-                return Err(fault(
-                    "records.resource_limit",
-                    3,
-                    "Local query deadline exceeded",
-                ));
-            }
-            let candidates = entries
-                .iter()
-                .filter(|e| {
-                    e.file_data_id == *id
-                        && e.locale_mask & mask != 0
-                        && (variant != "standard" || e.content_flags & 0x80 == 0)
-                        && (variant != "low-violence" || e.content_flags & 0x80 != 0)
-                })
-                .collect::<Vec<_>>();
-            if candidates.len() != 1 {
-                return Err(fault(
-                    if candidates.is_empty() {
-                        "records.content_missing"
-                    } else {
-                        "records.file_ambiguous"
-                    },
-                    if candidates.is_empty() { 3 } else { 4 },
-                    "Pinned file locale/content variant must select exactly one Root record",
-                ));
-            }
-            let entry = candidates[0];
-            let mapping = index.find(&entry.content_key, limits, budget.token())?;
-            if mapping.decoded_bytes > max as u64 {
-                return Err(fault(
-                    "records.metadata_limit",
-                    3,
-                    "Selected content exceeds byte budget",
-                ));
-            }
-            // Go 3.2.3 removed the cumulative raw-content cap. Each file
-            // retains its explicit maximum; shared logical/safety accounting
-            // admits real allocations and may grow only after a fresh probe.
-            // Selected encoded and decoded lengths share --max-bytes; metadata
-            // keeps its independent allowance. Pass the selected bound separately
-            // so a 512 MiB allowance does not alter CASC allocation limits.
-            let (payload_key, content, content_blob) = match mode {
-                ReadMode::Materialized => {
-                    let (object, content) = decoded_cache::read_content_budgeted(
-                        &inv.home,
-                        &target.common_root,
-                        &index,
-                        &mapping,
-                        limits,
-                        keys,
-                        &mut stats,
-                        Some(budget),
-                        Some(max),
-                    )?;
-                    let blob = evidence::publish_blob(&inv.home, &content.bytes, max)?;
-                    (
-                        object.encoding_key,
-                        SelectedContent::Bytes(content.bytes),
-                        blob,
-                    )
-                }
-                ReadMode::Verified => {
-                    let (encoding_key, blob) = decoded_cache::read_verified_content(
-                        &inv.home,
-                        &target.common_root,
-                        &index,
-                        &mapping,
-                        limits,
-                        max,
-                        keys,
-                        &mut stats,
-                        budget,
-                        &inv.control,
-                    )?;
-                    let reference = serde_json::to_value(blob.reference())?;
-                    (encoding_key, SelectedContent::Blob(blob), reference)
-                }
-            };
-            let mut reading = json!({"contentVerified":true,"source":"installation","pin":pin,"catalogSHA256":target.metadata.catalog_sha256,"buildConfiguration":build_blob,"cdnConfiguration":cdn_blob,"encodingKey":target.metadata.encoding_key,"root":root_blob,"entry":entry,"payloadEncodingKey":payload_key,"content":content_blob,"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"encodingIO":reader.io_stats()});
-            if !variant.is_empty() {
-                reading["contentVariant"] = json!(variant);
-            }
-            reading["keySource"] = keys.value();
-            reading["decodedCache"] = serde_json::to_value(&stats)?;
-            result.push(ResolvedFile { content, reading });
-            stats = decoded_cache::Stats::default();
+        if ranges.size() != target.metadata.content_bytes {
+            return Err(fault(
+                "records.invalid_metadata",
+                4,
+                "Encoding logical size differs from authenticated config",
+            ));
         }
-        budget.check()?;
-        pending = callback(result)?;
-    }
-    let after = installed::resolve_local_budgeted(
-        &target.common_root,
-        &target.metadata.installed.product,
-        &pin.full_build,
-        Some(budget),
-    )?;
-    if after.catalog_sha256 != target.metadata.catalog_sha256
-        || after.build_document.sha256 != target.metadata.build_document.sha256
-        || after.cdn_document.sha256 != target.metadata.cdn_document.sha256
-    {
-        return Err(fault(
-            "records.pinned_build_changed",
-            4,
-            "Local metadata changed during query",
-        ));
-    }
-    budget.check()
+        let metered = MetadataSource {
+            inner: &ranges,
+            budget,
+        };
+        let check = || {
+            inv.control.check()?;
+            budget.check()
+        };
+        let index = Encoding::open_with_check(&metered, limits, None, check)?;
+        let root_record =
+            index.find_with_check(&target.metadata.root_content_key, limits, None, check)?;
+        let (_, root) = decoded_cache::read_content_controlled(
+            &inv.home,
+            &target.common_root,
+            &index,
+            &root_record,
+            limits,
+            keys,
+            &mut stats,
+            budget,
+            None,
+            &inv.control,
+        )?;
+        let root_blob = evidence::publish_blob(&inv.home, &root.bytes, 256 << 20)?;
+        let build_blob =
+            evidence::publish_blob(&inv.home, &target.metadata.build_document.raw, 4 << 20)?;
+        let cdn_blob =
+            evidence::publish_blob(&inv.home, &target.metadata.cdn_document.raw, 4 << 20)?;
+        let mask = locale(&pin.language)?;
+        let mut pending = ids.to_vec();
+        let mut requested = 0usize;
+        while !pending.is_empty() {
+            budget.check()?;
+            requested = requested
+                .checked_add(pending.len())
+                .ok_or_else(|| fault("records.file_query", 2, "File batch count overflow"))?;
+            if requested > 32 || pending.contains(&0) {
+                return Err(fault(
+                    "records.file_query",
+                    2,
+                    "Require at most 32 positive file IDs across all batches",
+                ));
+            }
+            let entries = metadata_format::lookup_root_with_check(
+                &root,
+                &pending,
+                metadata_format::RootLimits {
+                    operation: limits,
+                    ..Default::default()
+                },
+                None,
+                check,
+            )?;
+            let mut result = vec![];
+            for id in &pending {
+                budget.check()?;
+                if Instant::now() >= deadline {
+                    return Err(fault(
+                        "records.resource_limit",
+                        3,
+                        "Local query deadline exceeded",
+                    ));
+                }
+                let candidates = entries
+                    .iter()
+                    .filter(|e| {
+                        e.file_data_id == *id
+                            && e.locale_mask & mask != 0
+                            && (variant != "standard" || e.content_flags & 0x80 == 0)
+                            && (variant != "low-violence" || e.content_flags & 0x80 != 0)
+                    })
+                    .collect::<Vec<_>>();
+                if candidates.len() != 1 {
+                    return Err(fault(
+                        if candidates.is_empty() {
+                            "records.content_missing"
+                        } else {
+                            "records.file_ambiguous"
+                        },
+                        if candidates.is_empty() { 3 } else { 4 },
+                        "Pinned file locale/content variant must select exactly one Root record",
+                    ));
+                }
+                let entry = candidates[0];
+                let mapping = index.find_with_check(&entry.content_key, limits, None, check)?;
+                if mapping.decoded_bytes > max as u64 {
+                    return Err(fault(
+                        "records.metadata_limit",
+                        3,
+                        "Selected content exceeds byte budget",
+                    ));
+                }
+                // Go 3.2.3 removed the cumulative raw-content cap. Each file
+                // retains its explicit maximum; shared logical/safety accounting
+                // admits real allocations and may grow only after a fresh probe.
+                // Selected encoded and decoded lengths share --max-bytes; metadata
+                // keeps its independent allowance. Pass the selected bound separately
+                // so a 512 MiB allowance does not alter CASC allocation limits.
+                let (payload_key, content, content_blob) = match mode {
+                    ReadMode::Materialized => {
+                        let (encoding_key, content) = decoded_cache::read_content_controlled(
+                            &inv.home,
+                            &target.common_root,
+                            &index,
+                            &mapping,
+                            limits,
+                            keys,
+                            &mut stats,
+                            budget,
+                            Some(max),
+                            &inv.control,
+                        )?;
+                        let blob = evidence::publish_blob(&inv.home, &content.bytes, max)?;
+                        (encoding_key, SelectedContent::Bytes(content.bytes), blob)
+                    }
+                    ReadMode::Verified => {
+                        let (encoding_key, blob) = decoded_cache::read_verified_content(
+                            &inv.home,
+                            &target.common_root,
+                            &index,
+                            &mapping,
+                            limits,
+                            max,
+                            keys,
+                            &mut stats,
+                            budget,
+                            &inv.control,
+                        )?;
+                        let reference = serde_json::to_value(blob.reference())?;
+                        (encoding_key, SelectedContent::Blob(blob), reference)
+                    }
+                };
+                let mut reading = json!({"contentVerified":true,"source":"installation","pin":pin,"catalogSHA256":target.metadata.catalog_sha256,"buildConfiguration":build_blob,"cdnConfiguration":cdn_blob,"encodingKey":target.metadata.encoding_key,"root":root_blob,"entry":entry,"payloadEncodingKey":payload_key,"content":content_blob,"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"encodingIO":reader.io_stats()});
+                if !variant.is_empty() {
+                    reading["contentVariant"] = json!(variant);
+                }
+                reading["keySource"] = keys.value();
+                reading["decodedCache"] = serde_json::to_value(&stats)?;
+                result.push(ResolvedFile { content, reading });
+                stats = decoded_cache::Stats::default();
+            }
+            budget.check()?;
+            pending = callback(result)?;
+        }
+        let after = installed::resolve_local_budgeted(
+            &target.common_root,
+            &target.metadata.installed.product,
+            &pin.full_build,
+            Some(budget),
+        )?;
+        if after.catalog_sha256 != target.metadata.catalog_sha256
+            || after.build_document.sha256 != target.metadata.build_document.sha256
+            || after.cdn_document.sha256 != target.metadata.cdn_document.sha256
+        {
+            return Err(fault(
+                "records.pinned_build_changed",
+                4,
+                "Local metadata changed during query",
+            ));
+        }
+        budget.check()
+    })();
+    reader.close_after(result)
 }
 struct MetadataSource<'a> {
     inner: &'a dyn ByteSource,
@@ -610,6 +620,11 @@ pub fn sql(inv: &Invocation) -> Result<Outcome> {
             "relational.numeric_range" => {
                 Some(("query.numeric_range", "relational.numeric_range", 4))
             }
+            "relational.invalid_cardinality" => Some((
+                "query.invalid_cardinality",
+                "relational.invalid_cardinality",
+                4,
+            )),
             _ => None,
         };
         if let Some((code, message, exit)) = mapped {
@@ -686,7 +701,7 @@ pub(crate) fn sql_inner_budgeted(
             2,
             "SQL requires a fixed DataPin",
         ))?;
-    let result = (|| {
+    let mut execute_sql = |scope: &mut dyn crate::remote::provider::FileScope| -> Result<Outcome> {
         let data = pin.data.as_ref().ok_or_else(|| {
             fault(
                 "records.data_pin_required",
@@ -759,111 +774,207 @@ pub(crate) fn sql_inner_budgeted(
         let mut semantic_sources = Some(semantic_sources);
         let mut execute = |files: Vec<File>| -> Result<Vec<u32>> {
             let prepared = Instant::now();
-            let mut sources = semantic_sources
+            let semantic_sources = semantic_sources
                 .take()
                 .ok_or_else(|| fault("records.internal", 8, "SQL source callback repeated"))?;
-            let mut provenance = vec![];
-            let mut equal_columns = BTreeMap::new();
-            let mut decoded_bytes = 0;
+            let bundles = bundles
+                .take()
+                .ok_or_else(|| fault("records.internal", 8, "SQL source callback repeated"))?;
+            if bundles.len() != files.len() {
+                return Err(fault(
+                    "records.internal",
+                    8,
+                    "SQL source callback file count differs",
+                ));
+            }
+            // FileBytes retain local allocations or the authenticated remote
+            // shared body. Tables borrow this external vector, never themselves.
+            safety.charge(Cost::retained(
+                bundles
+                    .len()
+                    .checked_mul(size_of::<provider::PreparedInput<'_>>() + 256)
+                    .ok_or_else(|| {
+                        fault(
+                            "relational.resource_limit",
+                            3,
+                            "SQL provider allocation overflow",
+                        )
+                    })?,
+            ))?;
+            let mut physical: Vec<provider::PreparedInput<'_>> = Vec::new();
+            physical.try_reserve_exact(bundles.len()).map_err(|_| {
+                fault(
+                    "relational.resource_limit",
+                    3,
+                    "SQL provider allocation failed",
+                )
+            })?;
+            let mut decoded_bytes = 0usize;
             let mut snapshots = effective::Snapshots::new(inv, data, &budget);
             let mut effective_sources = vec![];
-            for ((name, (bundle, dbd)), file) in bundles
-                .take()
-                .ok_or_else(|| fault("records.internal", 8, "SQL source callback repeated"))?
-                .into_iter()
-                .zip(files)
-            {
+            for ((name, (bundle, dbd)), file) in bundles.into_iter().zip(&files) {
                 budget.check()?;
-                let layout =
-                    table::inspect_budgeted(&file.bytes, Default::default(), budget.clone())?;
-                if layout.table_hash != bundle.identity.hash {
-                    return Err(fault(
-                        "schema.invalid_format",
-                        4,
-                        "WDC table hash differs from manifest identity",
-                    ));
-                }
-                let definition = schema::Document::parse_with_check(&dbd, || {
-                    inv.control.check()?;
-                    budget.check()
-                })?
-                .select(&data.full_build, &format!("{:08X}", layout.layout_hash))?;
-                let table = table::open_budgeted(
-                    &file.bytes,
-                    &definition,
-                    Default::default(),
-                    &Default::default(),
-                    &[],
-                    budget.clone(),
-                )?;
-                let limits = relational::Limits {
-                    deadline,
-                    ..Default::default()
-                };
-                let mut source = if program.schema_only() {
-                    relational::Source::schema_from_wdc_budgeted(
-                        &table,
-                        limits,
-                        budget.token(),
-                        Some(&budget),
-                    )?
+                // Fixed Go PreparedTable keys the complete definition bundle.
+                // Reuse only exact bundle identities within this same query;
+                // static/effective aliases still have independent schemas.
+                let cached = physical.iter().find(|input| {
+                    input.bundle.commit == bundle.commit
+                        && input.bundle.identity == bundle.identity
+                        && input.bundle.manifest == bundle.manifest
+                        && input.bundle.definition == bundle.definition
+                });
+                let (base, definition, layout_hash) = if let Some(cached) = cached {
+                    (
+                        cached.base.shared()?,
+                        cached.definition.clone(),
+                        cached.layout_hash,
+                    )
                 } else {
-                    relational::Source::from_wdc_budgeted(
-                        &table,
-                        limits,
-                        budget.token(),
-                        Some(&budget),
-                    )?
+                    let layout =
+                        table::inspect_budgeted(&file.bytes, Default::default(), budget.clone())?;
+                    if layout.table_hash != bundle.identity.hash {
+                        return Err(fault(
+                            "schema.invalid_format",
+                            4,
+                            "WDC table hash differs from manifest identity",
+                        ));
+                    }
+                    let definition = schema::Document::parse_with_check(&dbd, || {
+                        inv.control.check()?;
+                        budget.check()
+                    })?
+                    .select(&data.full_build, &format!("{:08X}", layout.layout_hash))?;
+                    let table = table::open_budgeted(
+                        &file.bytes,
+                        &definition,
+                        Default::default(),
+                        &Default::default(),
+                        &[],
+                        budget.clone(),
+                    )?;
+                    safety.charge(Cost::retained(
+                        size_of::<schema::Definition>() + 2 * size_of::<usize>(),
+                    ))?;
+                    (
+                        provider::Physical::new(table, budget.clone())?,
+                        Arc::new(definition),
+                        layout.layout_hash,
+                    )
                 };
-                if name
+                let overlay = if name
                     .split_once('.')
                     .is_some_and(|(catalog, _)| catalog.eq_ignore_ascii_case("effective"))
                 {
-                    let (overlaid, report) = if program.schema_only() {
-                        snapshots.schema(source, &definition, &bundle, &request.hotfix)?
-                    } else {
-                        snapshots.apply(source, &definition, &bundle, &request.hotfix)?
-                    };
-                    source = overlaid;
+                    let (plan, report) = snapshots.prepare(
+                        &base.schema().columns,
+                        base.schema().complete,
+                        &definition,
+                        &bundle,
+                        &request.hotfix,
+                    )?;
                     effective_sources.push(report);
-                } else if let Some(identity) = definition.fields.iter().find(|field| field.identity)
-                {
-                    // table::open has validated exactly one scalar identity.
-                    // Grant only the physical WDC capability in this adapter.
-                    // Effective patch-aware equality remains a separate path;
-                    // metadata never receives an implicit numeric lookup.
-                    safety.charge(Cost::retained(
-                        name.len()
-                            .saturating_add(identity.name.len())
-                            .saturating_add(256),
-                    ))?;
-                    equal_columns.insert(name.clone(), identity.name.clone());
-                }
-                sources.insert(name, source);
-                decoded_bytes += file.bytes.len();
-                provenance.push(json!({"complete":table.coverage()["complete"],"truncated":false,"file":file.reading,"sources":bundle,"layoutHash":format!("{:08X}",layout.layout_hash),"schema":definition}));
+                    Some(plan)
+                } else {
+                    None
+                };
+                decoded_bytes = decoded_bytes.checked_add(file.bytes.len()).ok_or_else(|| {
+                    fault("relational.resource_limit", 3, "SQL source size overflow")
+                })?;
+                physical.push(provider::PreparedInput {
+                    name,
+                    base,
+                    overlay,
+                    definition,
+                    bundle,
+                    layout_hash,
+                });
             }
             let preparation_ms = prepared.elapsed().as_secs_f64() * 1000.0;
             let execution = Instant::now();
-            let result = program.execute_prepared_budgeted(
-                &sources,
-                &parameters,
-                relational::Limits {
-                    deadline,
-                    work: 10_000_000,
-                    ..Default::default()
-                },
-                budget.token(),
-                Some(&safety),
-                &equal_columns,
-            )?;
+            let result = {
+                // Both maps borrow stable external owners for this call only.
+                // Materialized CTE/derived rows are distinct Source identities.
+                let bytes = semantic_sources
+                    .keys()
+                    .chain(physical.iter().map(|p| &p.name))
+                    .try_fold(0usize, |n, name| {
+                        n.checked_add(name.len() + 128).ok_or_else(|| {
+                            fault("relational.resource_limit", 3, "SQL provider map overflow")
+                        })
+                    })?;
+                safety.charge(Cost::retained(
+                    bytes + physical.len() * size_of::<relational::PreparedSource<'_>>(),
+                ))?;
+                let mut sources: BTreeMap<_, _> = semantic_sources
+                    .iter()
+                    .map(|(name, source)| (name.clone(), source))
+                    .collect();
+                let mut providers = Vec::new();
+                providers.try_reserve_exact(physical.len()).map_err(|_| {
+                    fault(
+                        "relational.resource_limit",
+                        3,
+                        "SQL provider registry allocation failed",
+                    )
+                })?;
+                for input in &physical {
+                    sources.insert(input.name.clone(), input.schema());
+                    providers.push(relational::PreparedSource {
+                        schema: input.schema(),
+                        provider: input,
+                    });
+                }
+                program.execute_providers_budgeted(
+                    &sources,
+                    &providers,
+                    &parameters,
+                    relational::Limits {
+                        deadline,
+                        work: 10_000_000,
+                        ..Default::default()
+                    },
+                    // Work checks this exact shared Budget at every operation
+                    // boundary. Do not expose its ordered control as a raw token.
+                    None,
+                    Some(&safety),
+                )?
+            };
             after_execute()?;
+            let execution_ms = execution.elapsed().as_secs_f64() * 1000.0;
+            // Consume/drop every Table before moving its external FileBytes.
+            // Only owned result and metadata leave the authenticated callback.
+            safety.charge(Cost::retained(
+                physical
+                    .len()
+                    .checked_mul(
+                        size_of::<(bool, definitions::Bundle, Arc<schema::Definition>, u32)>()
+                            + size_of::<Value>()
+                            + 256,
+                    )
+                    .ok_or_else(|| {
+                        fault(
+                            "relational.resource_limit",
+                            3,
+                            "SQL provenance allocation overflow",
+                        )
+                    })?,
+            ))?;
+            let metadata: Vec<_> = physical
+                .into_iter()
+                .map(|input| {
+                    let complete = input.schema().complete;
+                    (complete, input.bundle, input.definition, input.layout_hash)
+                })
+                .collect();
+            let provenance: Vec<_> = metadata.into_iter().zip(files).map(|((complete, bundle, definition, layout_hash), file)| {
+                json!({"complete":complete,"truncated":false,"file":file.reading,"sources":bundle,"layoutHash":format!("{layout_hash:08X}"),"schema":definition.as_ref()})
+            }).collect();
             query_result = Some((
                 result,
                 provenance,
                 decoded_bytes,
                 preparation_ms,
-                execution.elapsed().as_secs_f64() * 1000.0,
+                execution_ms,
                 effective_sources,
             ));
             Ok(Vec::new())
@@ -950,7 +1061,19 @@ pub(crate) fn sql_inner_budgeted(
         out.selection = serde_json::to_value(&pin)?;
         out.provenance = vec![capture];
         Ok(out)
-    })();
+    };
+    let result = if inv.flag_bool("--cdn") {
+        match pin.data.as_ref() {
+            Some(data) => scope.with_session(data, |reader| execute_sql(reader)),
+            None => Err(fault(
+                "records.data_pin_required",
+                2,
+                "SQL requires a fixed DataPin",
+            )),
+        }
+    } else {
+        execute_sql(&mut scope)
+    };
     scope.finish(result)
 }
 pub fn asset(inv: &Invocation) -> Result<Outcome> {

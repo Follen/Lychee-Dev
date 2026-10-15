@@ -1,5 +1,6 @@
 //! Read-only typed SQL evaluation. Integer lexemes/providers retain all 64 bits;
 //! parsing does not authorize writes, implicit casts or external I/O.
+use crate::hotfix::remote::{equal_fold, identifier_lower};
 use crate::{fault, table};
 use lycheedev_core::Result;
 use num_rational::BigRational;
@@ -17,8 +18,11 @@ mod compound;
 mod explain;
 pub use explain::{Explanation, PlanStep};
 mod joins;
+mod provider;
+pub(crate) use provider::{EqualityOutcome, PreparedSource, RowProvider, RowYield};
 mod recursive;
 mod selection;
+mod subquery;
 mod topk;
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(untagged)]
@@ -220,6 +224,7 @@ enum Term {
     NullTest(Box<Term>, bool),
     Between(Box<Term>, Box<Term>, Box<Term>, bool),
     In(Box<Term>, Vec<Term>, bool),
+    InSubquery(Box<Term>, std::sync::Arc<Program>, bool),
     Call(String, Vec<Term>),
     Aggregate(String, Option<Box<Term>>, bool),
     Case(Option<Box<Term>>, Vec<(Term, Term)>, Option<Box<Term>>),
@@ -305,6 +310,16 @@ fn term(expr: &Expr, parameters: &mut BTreeSet<String>, depth: usize) -> Result<
             list.iter().map(&mut nested).collect::<Result<_>>()?,
             *negated,
         ),
+        Expr::InSubquery {
+            expr,
+            subquery,
+            negated,
+        } => {
+            let input = nested(expr)?;
+            let query = Program::compile_query(*subquery.clone(), depth + 1)?;
+            parameters.extend(query.parameters.iter().cloned());
+            Term::InSubquery(Box::new(input), std::sync::Arc::new(query), *negated)
+        }
         Expr::Function(function) => {
             if function.over.is_some()
                 || function.filter.is_some()
@@ -395,8 +410,10 @@ fn bind(
     columns: &[String],
     alias: &str,
     params: &BTreeMap<String, Scalar>,
+    context: &subquery::Context<'_>,
+    work: &mut Work<'_>,
 ) -> Result<()> {
-    bind_with_aggregates(term, columns, alias, params, true)
+    bind_with_aggregates(term, columns, alias, params, true, context, work)
 }
 fn bind_with_aggregates(
     term: &Term,
@@ -404,55 +421,73 @@ fn bind_with_aggregates(
     alias: &str,
     params: &BTreeMap<String, Scalar>,
     allow_aggregates: bool,
+    context: &subquery::Context<'_>,
+    work: &mut Work<'_>,
 ) -> Result<()> {
     match term {
         Term::Ordinal(index) if *index >= columns.len() => return Err(binding()),
         Term::Column(name) => {
-            column(columns, alias, name)?;
+            subquery::resolve(columns, alias, name, context.outer)?;
         }
         Term::Parameter(name) if !params.contains_key(name) => return Err(binding()),
         Term::Unary(_, t) | Term::NullTest(t, _) => {
-            bind_with_aggregates(t, columns, alias, params, allow_aggregates)?
+            bind_with_aggregates(t, columns, alias, params, allow_aggregates, context, work)?
         }
         Term::Binary(a, _, b) => {
-            bind_with_aggregates(a, columns, alias, params, allow_aggregates)?;
-            bind_with_aggregates(b, columns, alias, params, allow_aggregates)?;
+            bind_with_aggregates(a, columns, alias, params, allow_aggregates, context, work)?;
+            bind_with_aggregates(b, columns, alias, params, allow_aggregates, context, work)?;
         }
         Term::Between(a, b, c, _) => {
             for t in [a, b, c] {
-                bind_with_aggregates(t, columns, alias, params, allow_aggregates)?;
+                bind_with_aggregates(t, columns, alias, params, allow_aggregates, context, work)?;
             }
         }
         Term::In(t, list, _) => {
-            bind_with_aggregates(t, columns, alias, params, allow_aggregates)?;
+            bind_with_aggregates(t, columns, alias, params, allow_aggregates, context, work)?;
             for t in list {
-                bind_with_aggregates(t, columns, alias, params, allow_aggregates)?;
+                bind_with_aggregates(t, columns, alias, params, allow_aggregates, context, work)?;
             }
+        }
+        Term::InSubquery(input, query, _) => {
+            // Go binds the nested schema before this operator's arguments,
+            // even for an unreachable branch or an empty outer input.
+            if work.planning {
+                subquery::execute(query, &[], columns, alias, params, context, work)?;
+            }
+            bind_with_aggregates(
+                input,
+                columns,
+                alias,
+                params,
+                allow_aggregates,
+                context,
+                work,
+            )?;
         }
         Term::Aggregate(_, input, _) => {
             if !allow_aggregates {
                 return Err(type_error());
             }
             if let Some(input) = input {
-                bind_with_aggregates(input, columns, alias, params, false)?;
+                bind_with_aggregates(input, columns, alias, params, false, context, work)?;
             }
         }
         Term::Call(name, list) => {
             check_arity(name, list.len())?;
             for t in list {
-                bind_with_aggregates(t, columns, alias, params, allow_aggregates)?;
+                bind_with_aggregates(t, columns, alias, params, allow_aggregates, context, work)?;
             }
         }
         Term::Case(operand, cases, fallback) => {
             if let Some(t) = operand {
-                bind_with_aggregates(t, columns, alias, params, allow_aggregates)?;
+                bind_with_aggregates(t, columns, alias, params, allow_aggregates, context, work)?;
             }
             for (a, b) in cases {
-                bind_with_aggregates(a, columns, alias, params, allow_aggregates)?;
-                bind_with_aggregates(b, columns, alias, params, allow_aggregates)?;
+                bind_with_aggregates(a, columns, alias, params, allow_aggregates, context, work)?;
+                bind_with_aggregates(b, columns, alias, params, allow_aggregates, context, work)?;
             }
             if let Some(t) = fallback {
-                bind_with_aggregates(t, columns, alias, params, allow_aggregates)?;
+                bind_with_aggregates(t, columns, alias, params, allow_aggregates, context, work)?;
             }
         }
         _ => {}
@@ -463,9 +498,9 @@ fn column(columns: &[String], alias: &str, name: &str) -> Result<usize> {
     if alias == joins::QUALIFIED {
         let mut found = columns.iter().enumerate().filter(|(_, c)| {
             if name.contains('.') {
-                c.eq_ignore_ascii_case(name)
+                equal_fold(c, name)
             } else {
-                c.rsplit('.').next().unwrap().eq_ignore_ascii_case(name)
+                equal_fold(c.rsplit('.').next().unwrap(), name)
             }
         });
         let index = found
@@ -479,7 +514,7 @@ fn column(columns: &[String], alias: &str, name: &str) -> Result<usize> {
     }
     let original = name;
     let name = if let Some((qualifier, name)) = name.split_once('.') {
-        if !qualifier.eq_ignore_ascii_case(alias) {
+        if !equal_fold(qualifier, alias) {
             return Err(missing_column(columns, alias, original));
         }
         name
@@ -489,7 +524,7 @@ fn column(columns: &[String], alias: &str, name: &str) -> Result<usize> {
     let mut indices = columns
         .iter()
         .enumerate()
-        .filter(|(_, c)| c.eq_ignore_ascii_case(name));
+        .filter(|(_, c)| equal_fold(c, name));
     let Some((index, _)) = indices.next() else {
         return Err(missing_column(columns, alias, original));
     };
@@ -507,7 +542,7 @@ fn missing_column(columns: &[String], alias: &str, name: &str) -> lycheedev_core
         } else {
             (alias, column.as_str())
         };
-        if !qualifier.is_empty() && !qualifier.eq_ignore_ascii_case(owner) {
+        if !qualifier.is_empty() && !equal_fold(qualifier, owner) {
             continue;
         }
         let distance = column_distance(field, candidate);
@@ -595,6 +630,7 @@ struct Work<'a> {
     // Only explicitly prepared physical inputs may use equality selection.
     // Materialized CTE/derived/effective/meta sources never inherit a capability.
     selection_sources: Vec<(&'a Source, usize)>,
+    providers: &'a [PreparedSource<'a>],
 }
 impl Work<'_> {
     fn spend(&mut self) -> Result<()> {
@@ -667,16 +703,32 @@ fn eval(
     params: &BTreeMap<String, Scalar>,
     work: &mut Work<'_>,
 ) -> Result<Scalar> {
+    let sources = BTreeMap::new();
+    let context = subquery::Context::new(&sources, None);
+    eval_scoped(t, row, columns, alias, params, &context, work)
+}
+fn eval_scoped(
+    t: &Term,
+    row: &[Scalar],
+    columns: &[String],
+    alias: &str,
+    params: &BTreeMap<String, Scalar>,
+    context: &subquery::Context<'_>,
+    work: &mut Work<'_>,
+) -> Result<Scalar> {
     work.spend()?;
-    let mut value = |t: &Term| eval(t, row, columns, alias, params, work);
+    let mut value = |t: &Term| eval_scoped(t, row, columns, alias, params, context, work);
     match t {
         Term::Aggregate(_, _, _) => Err(binding()),
         Term::Value(v) => work.clone_scalar(v),
         Term::Number(n) => literal(n),
         Term::Ordinal(index) => work.clone_scalar(row.get(*index).ok_or_else(binding)?),
-        Term::Column(name) => {
-            work.clone_scalar(row.get(column(columns, alias, name)?).ok_or_else(binding)?)
-        }
+        Term::Column(name) => match subquery::resolve(columns, alias, name, context.outer)? {
+            subquery::Position::Local(index) => {
+                work.clone_scalar(row.get(index).ok_or_else(binding)?)
+            }
+            subquery::Position::Outer(frame, index) => work.clone_scalar(frame.value(index)?),
+        },
         Term::Parameter(name) => work.clone_scalar(params.get(name).ok_or_else(binding)?),
         Term::NullTest(t, negated) => Ok(Scalar::Bool(matches!(value(t)?, Scalar::Null) ^ negated)),
         Term::Unary(op, t) => {
@@ -805,6 +857,30 @@ fn eval(
                 Scalar::Bool(*negated)
             })
         }
+        Term::InSubquery(input, query, negated) => {
+            let left = value(input)?;
+            let result = subquery::execute(query, row, columns, alias, params, context, work)?;
+            let mut null = false;
+            let mut matched = false;
+            // Materialize the complete RHS first, then compare every row.
+            // A previous match does not hide a later incompatible scalar.
+            for row in result.rows {
+                work.spend()?;
+                let other = row.first().ok_or_else(subquery::cardinality)?;
+                if left == Scalar::Null || other == &Scalar::Null {
+                    null = true;
+                } else if compare(&left, other)? == Ordering::Equal {
+                    matched = true;
+                }
+            }
+            Ok(if matched {
+                Scalar::Bool(!negated)
+            } else if null {
+                Scalar::Null
+            } else {
+                Scalar::Bool(*negated)
+            })
+        }
         Term::Case(operand, cases, fallback) => {
             let operand = operand.as_ref().map(|v| value(v)).transpose()?;
             for (test, result) in cases {
@@ -847,7 +923,7 @@ fn eval(
             )?;
             let values = args
                 .iter()
-                .map(|arg| eval(arg, row, columns, alias, params, work))
+                .map(|arg| eval_scoped(arg, row, columns, alias, params, context, work))
                 .collect::<Result<Vec<_>>>()?;
             if name == "NULLIF" && values.len() == 2 {
                 return Ok(
@@ -942,6 +1018,7 @@ impl Source {
             shared,
             planning: false,
             selection_sources: Vec::new(),
+            providers: &[],
         };
         work.consume(0)?;
         if schema_only {
@@ -1018,11 +1095,13 @@ enum ProjectionMode {
     NamedSource,
     CompoundOrdinals,
 }
+#[derive(Clone, Debug, PartialEq)]
 struct Projection {
     expr: Option<Term>,
     name: String,
 }
 type QuerySuffix = (Vec<(Term, bool, Option<bool>)>, Option<Term>, Option<Term>);
+#[derive(Clone, Debug, PartialEq)]
 pub struct Program {
     explain: bool,
     recursive: bool,
@@ -1075,6 +1154,18 @@ impl QueryResult {
     }
 }
 impl Program {
+    fn terms(&self) -> impl Iterator<Item = &Term> {
+        self.projection
+            .iter()
+            .filter_map(|projection| projection.expr.as_ref())
+            .chain(self.joins.iter().filter_map(|join| join.condition.as_ref()))
+            .chain(self.groups.iter())
+            .chain(self.order.iter().map(|(term, _, _)| term))
+            .chain(self.filter.iter())
+            .chain(self.having.iter())
+            .chain(self.limit.iter())
+            .chain(self.offset.iter())
+    }
     pub fn schema_only(&self) -> bool {
         self.explain
     }
@@ -1104,6 +1195,7 @@ impl Program {
             ));
         };
         let mut program = Self::compile_query(*query, 0)?;
+        subquery::validate_nodes(&program)?;
         program.explain = explain;
         Ok(program)
     }
@@ -1128,7 +1220,7 @@ impl Program {
                 if name.is_empty() || name.len() > 512 {
                     return Err(binding());
                 }
-                if !names.insert(name.to_ascii_lowercase()) {
+                if !names.insert(identifier_lower(&name)) {
                     return Err(problem("relational.invalid_syntax", "Duplicate CTE name"));
                 }
                 bindings.push((name, Self::compile_query(*cte.query, depth + 1)?));
@@ -1158,7 +1250,7 @@ impl Program {
                 parameters.extend(body.parameters.iter().cloned());
             }
             let (order, limit, offset) =
-                Self::suffix(query.order_by, query.limit_clause, &mut parameters)?;
+                Self::suffix(query.order_by, query.limit_clause, &mut parameters, depth)?;
             return Ok(Self {
                 explain: false,
                 recursive,
@@ -1212,7 +1304,7 @@ impl Program {
         let GroupByExpr::Expressions(group_expressions, modifiers) = &select.group_by else {
             return Err(unsupported());
         };
-        if !modifiers.is_empty() || group_expressions.len() > 1024 {
+        if !modifiers.is_empty() {
             return Err(unsupported());
         }
         let (table, alias, derived) =
@@ -1231,11 +1323,11 @@ impl Program {
         for item in &select.projection {
             projection.push(match item {
                 SelectItem::UnnamedExpr(e) => Projection {
-                    expr: Some(term(e, &mut parameters, 0)?),
+                    expr: Some(term(e, &mut parameters, depth)?),
                     name: String::new(),
                 },
                 SelectItem::ExprWithAlias { expr, alias } => Projection {
-                    expr: Some(term(expr, &mut parameters, 0)?),
+                    expr: Some(term(expr, &mut parameters, depth)?),
                     name: alias.value.clone(),
                 },
                 SelectItem::Wildcard(options)
@@ -1256,25 +1348,25 @@ impl Program {
                 _ => return Err(unsupported()),
             });
         }
-        if projection.is_empty() || projection.len() > 1024 {
+        if projection.is_empty() {
             return Err(budget());
         }
         let groups = group_expressions
             .iter()
-            .map(|e| term(e, &mut parameters, 0))
+            .map(|e| term(e, &mut parameters, depth))
             .collect::<Result<Vec<_>>>()?;
         let having = select
             .having
             .as_ref()
-            .map(|e| term(e, &mut parameters, 0))
+            .map(|e| term(e, &mut parameters, depth))
             .transpose()?;
         let filter = select
             .selection
             .as_ref()
-            .map(|e| term(e, &mut parameters, 0))
+            .map(|e| term(e, &mut parameters, depth))
             .transpose()?;
         let (order, limit, offset) =
-            Self::suffix(query.order_by, query.limit_clause, &mut parameters)?;
+            Self::suffix(query.order_by, query.limit_clause, &mut parameters, depth)?;
         let distinct = matches!(select.distinct, Some(Distinct::Distinct));
         if select.distinct.is_some() && !distinct {
             return Err(unsupported());
@@ -1311,6 +1403,7 @@ impl Program {
         order_by: Option<OrderBy>,
         limit_clause: Option<LimitClause>,
         parameters: &mut BTreeSet<String>,
+        depth: usize,
     ) -> Result<QuerySuffix> {
         let mut order = vec![];
         if let Some(order_by) = order_by {
@@ -1329,7 +1422,7 @@ impl Program {
                     return Err(unsupported());
                 }
                 order.push((
-                    term(&e.expr, parameters, 0)?,
+                    term(&e.expr, parameters, depth)?,
                     descending,
                     e.options.nulls_first,
                 ));
@@ -1348,10 +1441,10 @@ impl Program {
             if !limit_by.is_empty() {
                 return Err(unsupported());
             }
-            limit = l.as_ref().map(|e| term(e, parameters, 0)).transpose()?;
+            limit = l.as_ref().map(|e| term(e, parameters, depth)).transpose()?;
             offset = o
                 .as_ref()
-                .map(|e| term(&e.value, parameters, 0))
+                .map(|e| term(&e.value, parameters, depth))
                 .transpose()?;
         }
         Ok((order, limit, offset))
@@ -1359,6 +1452,7 @@ impl Program {
     pub fn source_tables(&self) -> Vec<&str> {
         let mut tables = vec![];
         compound::dependencies(self, &BTreeSet::new(), &mut tables);
+        tables.sort_by_cached_key(|name| compound::physical_key(name));
         tables
     }
     pub(crate) fn validate_parameters<T>(&self, parameters: &BTreeMap<String, T>) -> Result<()> {
@@ -1419,8 +1513,9 @@ impl Program {
             deadline: limits.deadline,
             cancel,
             shared,
-            planning: self.explain,
+            planning: true,
             selection_sources: Vec::new(),
+            providers: &[],
         };
         work.spend()?;
         if self
@@ -1441,9 +1536,9 @@ impl Program {
         )?;
         work.selection_sources = Vec::with_capacity(equal_columns.len());
         for (name, field) in equal_columns {
-            let mut matches = sources
-                .iter()
-                .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(name));
+            let mut matches = sources.iter().filter(|(candidate, _)| {
+                compound::physical_key(candidate) == compound::physical_key(name)
+            });
             let (_, source) = matches.next().ok_or_else(binding)?;
             if matches.next().is_some() {
                 return Err(binding());
@@ -1452,21 +1547,106 @@ impl Program {
             work.selection_sources.push((source, index));
         }
         let mut inputs = BTreeMap::new();
-        work.retain(sources.keys().map(|s| s.len() + 96).sum())?;
+        work.retain(sources.keys().map(|s| s.len() + 103).sum())?;
         for (name, source) in sources {
-            inputs.insert(name.clone(), source);
+            compound::insert_root(&mut inputs, name, source)?;
         }
         let result = self.execute_scoped(&inputs, parameters, &mut work)?;
-        if !self.explain {
-            return Ok(result);
+        if self.explain {
+            let plan = explain::build(self, result.columns, &mut work)?;
+            return Ok(QueryResult {
+                plan: Some(plan),
+                columns: vec![],
+                rows: vec![],
+                complete: result.complete,
+            });
         }
-        let plan = explain::build(self, result.columns, &mut work)?;
-        Ok(QueryResult {
-            plan: Some(plan),
-            columns: vec![],
-            rows: vec![],
-            complete: result.complete,
-        })
+        work.planning = false;
+        self.execute_scoped(&inputs, parameters, &mut work)
+    }
+    /// Query-scoped lazy roots. Owners remain in the caller; lexical computed
+    /// Sources cannot inherit these capabilities by name or schema.
+    pub(crate) fn execute_providers_budgeted<'a>(
+        &self,
+        sources: &BTreeMap<String, &'a Source>,
+        providers: &'a [PreparedSource<'a>],
+        parameters: &BTreeMap<String, Scalar>,
+        limits: Limits,
+        cancel: Option<&'a AtomicBool>,
+        shared: Option<&'a crate::resource::Budget>,
+    ) -> Result<QueryResult> {
+        if limits.work == 0 || limits.memory_bytes == 0 || limits.memory_bytes > 1 << 30 {
+            return Err(budget());
+        }
+        let mut work = Work {
+            left: limits.work,
+            bytes: limits.memory_bytes,
+            deadline: limits.deadline,
+            cancel,
+            shared,
+            planning: true,
+            selection_sources: Vec::new(),
+            providers,
+        };
+        work.spend()?;
+        if self
+            .parameters
+            .iter()
+            .any(|name| !parameters.contains_key(name))
+        {
+            return Err(binding());
+        }
+        for name in &self.parameters {
+            row_cost(std::slice::from_ref(&parameters[name]))?;
+        }
+        for (i, entry) in providers.iter().enumerate() {
+            if !sources
+                .values()
+                .any(|source| std::ptr::eq(*source, entry.schema))
+                || providers[..i]
+                    .iter()
+                    .any(|other| std::ptr::eq(other.schema, entry.schema))
+            {
+                return Err(binding());
+            }
+        }
+        // Go caches immutable source schemas across both passes. No second
+        // source resolution, per-provider Work, or reset of retained allowance.
+        for source in sources.values() {
+            let bytes = source.columns.iter().try_fold(
+                128usize
+                    .checked_add(source.columns.len().checked_mul(32).ok_or_else(budget)?)
+                    .ok_or_else(budget)?,
+                |bytes, name| bytes.checked_add(name.len()).ok_or_else(budget),
+            )?;
+            work.retain(bytes)?;
+        }
+        // Canonical-key map storage is a Rust representation cost. The Go
+        // source-cache schema charge above already owns the logical allowance;
+        // do not shrink IN's half-buffer allowance for this second map.
+        if let Some(shared) = work.shared {
+            shared
+                .safety_only()
+                .charge(crate::resource::Cost::retained(
+                    sources.keys().map(|name| name.len() + 103).sum(),
+                ))?;
+        }
+        let mut inputs = BTreeMap::new();
+        for (name, source) in sources {
+            compound::insert_root(&mut inputs, name, source)?;
+        }
+        let bound = self.execute_scoped(&inputs, parameters, &mut work)?;
+        if self.explain {
+            let plan = explain::build(self, bound.columns, &mut work)?;
+            return Ok(QueryResult {
+                plan: Some(plan),
+                columns: vec![],
+                rows: vec![],
+                complete: bound.complete,
+            });
+        }
+        work.planning = false;
+        self.execute_scoped(&inputs, parameters, &mut work)
     }
     fn execute_scoped(
         &self,
@@ -1474,28 +1654,50 @@ impl Program {
         parameters: &BTreeMap<String, Scalar>,
         work: &mut Work<'_>,
     ) -> Result<QueryResult> {
+        self.execute_scoped_with(sources, None, parameters, work)
+    }
+    fn execute_scoped_with(
+        &self,
+        sources: &BTreeMap<String, &Source>,
+        outer: Option<&subquery::Frame<'_>>,
+        parameters: &BTreeMap<String, Scalar>,
+        work: &mut Work<'_>,
+    ) -> Result<QueryResult> {
         work.spend()?;
-        compound::execute(self, sources, parameters, work)
+        compound::execute(self, sources, outer, parameters, work)
     }
     fn execute_select(
         &self,
         sources: &BTreeMap<String, &Source>,
+        outer: Option<&subquery::Frame<'_>>,
         parameters: &BTreeMap<String, Scalar>,
         work: &mut Work<'_>,
     ) -> Result<QueryResult> {
-        self.execute_select_mode(sources, parameters, work, ProjectionMode::NamedSource)
+        self.execute_select_mode(
+            sources,
+            outer,
+            parameters,
+            work,
+            ProjectionMode::NamedSource,
+        )
     }
     fn execute_select_mode(
         &self,
         sources: &BTreeMap<String, &Source>,
+        outer: Option<&subquery::Frame<'_>>,
         parameters: &BTreeMap<String, Scalar>,
         work: &mut Work<'_>,
         projection_mode: ProjectionMode,
     ) -> Result<QueryResult> {
+        let complete = std::cell::Cell::new(true);
+        let context = subquery::Context {
+            complete: Some(&complete),
+            ..subquery::Context::new(sources, outer)
+        };
         let joined = if self.joins.is_empty() {
             None
         } else {
-            Some(joins::prepare(
+            Some(joins::prepare_scoped(
                 &self.table,
                 &self.alias,
                 &self.joins,
@@ -1503,6 +1705,7 @@ impl Program {
                 parameters,
                 work,
                 self,
+                &context,
             )?)
         };
         let alias = if joined.is_some() {
@@ -1510,14 +1713,9 @@ impl Program {
         } else {
             self.alias.as_str()
         };
-        let mut inputs = sources
-            .iter()
-            .filter(|(name, _)| name.eq_ignore_ascii_case(&self.table));
-        let Some((_, &base_source)) = inputs.next() else {
-            return Err(binding());
-        };
+        let base_source = compound::source(sources, &self.table)?;
         let source = joined.as_ref().map(|p| &p.source).unwrap_or(base_source);
-        if inputs.next().is_some() || source.columns.is_empty() || source.columns.len() > 1024 {
+        if source.columns.is_empty() || source.columns.len() > 4096 {
             return Err(binding());
         }
         for column in &source.columns {
@@ -1528,7 +1726,7 @@ impl Program {
         if work.planning && projection_mode == ProjectionMode::NamedSource {
             let mut names = BTreeSet::new();
             for column in &source.columns {
-                if !names.insert(column.to_ascii_lowercase()) {
+                if !names.insert(identifier_lower(column)) {
                     return Err(binding());
                 }
             }
@@ -1538,11 +1736,12 @@ impl Program {
         let mut outputs = vec![];
         for p in &self.projection {
             if let Some(t) = &p.expr {
-                bind(t, &source.columns, alias, parameters)?;
+                bind(t, &source.columns, alias, parameters, &context, work)?;
                 outputs.push(t.clone());
                 columns.push(if p.name.is_empty() {
                     if let Term::Column(name) = t {
-                        name.rsplit('.').next().unwrap().into()
+                        subquery::display_column(&source.columns, alias, name, context.outer)?
+                            .unwrap_or_else(|| format!("column_{}", columns.len() + 1))
                     } else {
                         format!("column_{}", columns.len() + 1)
                     }
@@ -1558,7 +1757,7 @@ impl Program {
                         } else {
                             alias
                         };
-                        if !qualifier.eq_ignore_ascii_case(&p.name) {
+                        if !equal_fold(qualifier, &p.name) {
                             continue;
                         }
                     }
@@ -1579,42 +1778,69 @@ impl Program {
                 }
             }
         }
-        if columns.len() > 1024 {
-            return Err(budget());
+        if let Some(t) = &self.filter {
+            if aggregate::contains(t) {
+                return Err(type_error());
+            }
+            bind(t, &source.columns, alias, parameters, &context, work)?;
+        }
+        if let Some(t) = &self.having {
+            bind(t, &source.columns, alias, parameters, &context, work)?;
         }
         for key in &self.groups {
             if aggregate::contains(key) {
                 return Err(type_error());
             }
-            bind(key, &source.columns, alias, parameters)?;
-        }
-        if let Some(t) = &self.having {
-            bind(t, &source.columns, alias, parameters)?;
-        }
-        if let Some(t) = &self.filter {
-            if aggregate::contains(t) {
-                return Err(type_error());
-            }
-            bind(t, &source.columns, alias, parameters)?;
+            bind(key, &source.columns, alias, parameters, &context, work)?;
         }
         for (t, _, _) in &ordering_terms {
-            if bind(t, &source.columns, alias, parameters).is_err() {
-                bind(t, &columns, alias, parameters)?;
+            match bind(t, &source.columns, alias, parameters, &context, work) {
+                Ok(()) => {}
+                Err(error) if error.code == "relational.invalid_binding" => {
+                    bind(t, &columns, alias, parameters, &context, work)?
+                }
+                Err(error) => return Err(error),
             }
         }
         for t in self.limit.iter().chain(self.offset.iter()) {
-            bind(t, &[], "", parameters)?;
+            bind(t, &[], "", parameters, &context, work)?;
         }
         let count = |term: &Option<Term>, default: usize, work: &mut Work<'_>| -> Result<usize> {
             let Some(t) = term else {
                 return Ok(default);
             };
-            let v = eval(t, &[], &[], "", parameters, work)?;
+            let v = eval_scoped(t, &[], &[], "", parameters, &context, work)?;
             let n = int(&v).filter(|n| *n >= 0).ok_or_else(type_error)?;
             usize::try_from(n).map_err(|_| budget())
         };
         let limit = count(&self.limit, usize::MAX, work)?;
         let offset = count(&self.offset, 0, work)?;
+        let is_grouped = !self.groups.is_empty()
+            || self.having.is_some()
+            || outputs.iter().any(aggregate::contains)
+            || ordering_terms
+                .iter()
+                .any(|(term, _, _)| aggregate::contains(term));
+        let group_mapping = if is_grouped {
+            Some(subquery::group_mapping(
+                &self.groups,
+                &source.columns,
+                alias,
+                work,
+            )?)
+        } else {
+            None
+        };
+        let group_context = subquery::Context {
+            group: group_mapping
+                .as_deref()
+                .map(|mapping| subquery::Correlation {
+                    columns: &source.columns,
+                    alias,
+                    mapping,
+                }),
+            ..context
+        };
         if work.planning {
             // Binding uses the real schema, validates all CASE branches,
             // aggregate/group rules and LIMIT/OFFSET, but never visits a row.
@@ -1631,6 +1857,8 @@ impl Program {
                     &mut ordering_terms,
                     self.having.as_ref(),
                     &columns,
+                    parameters,
+                    &group_context,
                     work,
                 )?;
             }
@@ -1638,9 +1866,17 @@ impl Program {
                 plan: None,
                 columns,
                 rows: vec![],
-                complete: source.complete,
+                complete: source.complete && complete.get(),
             });
         }
+        let selected = if joined.is_none()
+            && provider::find(source, work).is_some()
+            && provider::can_project(self, &source.columns, alias)
+        {
+            Some(provider::selected(self, &source.columns, alias, work)?)
+        } else {
+            None
+        };
         let grouped = if !self.groups.is_empty()
             || self.having.is_some()
             || outputs.iter().any(aggregate::contains)
@@ -1654,6 +1890,8 @@ impl Program {
                 &mut ordering_terms,
                 self.having.as_ref(),
                 &columns,
+                parameters,
+                &group_context,
                 work,
             )?;
             let mut add = |row: &[Scalar], work: &mut Work<'_>| -> Result<()> {
@@ -1663,18 +1901,26 @@ impl Program {
                 }
                 row_cost(row)?;
                 if let Some(t) = &self.filter
-                    && truth(&eval(t, row, &source.columns, alias, parameters, work)?)?
-                        != Some(true)
+                    && truth(&eval_scoped(
+                        t,
+                        row,
+                        &source.columns,
+                        alias,
+                        parameters,
+                        &context,
+                        work,
+                    )?)? != Some(true)
                 {
                     return Ok(());
                 }
-                grouping.add(row, &source.columns, alias, parameters, work)
+                grouping.add(row, &source.columns, alias, parameters, &context, work)
             };
             if let Some(plan) = &joined {
-                plan.visit(parameters, work, &mut add)?;
+                plan.visit(parameters, &context, work, &mut add)?;
             } else {
                 selection::visit(
                     source,
+                    selected.as_deref(),
                     self.filter.as_ref(),
                     alias,
                     parameters,
@@ -1682,9 +1928,19 @@ impl Program {
                     &mut add,
                 )?;
             }
-            Some(grouping.finish(source.complete, parameters, work)?)
+            Some(grouping.finish(
+                source.complete && complete.get(),
+                parameters,
+                &group_context,
+                work,
+            )?)
         } else {
             None
+        };
+        let output_context = if grouped.is_some() {
+            &group_context
+        } else {
+            &context
         };
         let source = grouped.as_ref().unwrap_or(source);
         let alias = if grouped.is_some() { "" } else { alias };
@@ -1710,13 +1966,31 @@ impl Program {
             row_cost(row)?;
             if grouped.is_none()
                 && let Some(t) = &self.filter
-                && truth(&eval(t, row, &source.columns, alias, parameters, work)?)? != Some(true)
+                && truth(&eval_scoped(
+                    t,
+                    row,
+                    &source.columns,
+                    alias,
+                    parameters,
+                    output_context,
+                    work,
+                )?)? != Some(true)
             {
                 return Ok(());
             }
             let projected = outputs
                 .iter()
-                .map(|t| eval(t, row, &source.columns, alias, parameters, work))
+                .map(|t| {
+                    eval_scoped(
+                        t,
+                        row,
+                        &source.columns,
+                        alias,
+                        parameters,
+                        output_context,
+                        work,
+                    )
+                })
                 .collect::<Result<Vec<_>>>()?;
             if self.distinct {
                 let key = projected
@@ -1742,10 +2016,27 @@ impl Program {
             }
             let mut ordering = vec![];
             for (t, _, _) in &ordering_terms {
-                let v = if bind(t, &source.columns, alias, parameters).is_ok() {
-                    eval(t, row, &source.columns, alias, parameters, work)?
+                let v = if bind(t, &source.columns, alias, parameters, output_context, work).is_ok()
+                {
+                    eval_scoped(
+                        t,
+                        row,
+                        &source.columns,
+                        alias,
+                        parameters,
+                        output_context,
+                        work,
+                    )?
                 } else {
-                    eval(t, &projected, &columns, alias, parameters, work)?
+                    eval_scoped(
+                        t,
+                        &projected,
+                        &columns,
+                        alias,
+                        parameters,
+                        output_context,
+                        work,
+                    )?
                 };
                 ordering.push(v);
             }
@@ -1760,10 +2051,11 @@ impl Program {
         if grouped.is_none()
             && let Some(plan) = &joined
         {
-            plan.visit(parameters, work, &mut project_row)?;
+            plan.visit(parameters, &context, work, &mut project_row)?;
         } else if grouped.is_none() {
             selection::visit(
                 source,
+                selected.as_deref(),
                 self.filter.as_ref(),
                 alias,
                 parameters,
@@ -1786,7 +2078,7 @@ impl Program {
                     .take(limit)
                     .map(|r| r.0)
                     .collect(),
-                complete: source.complete,
+                complete: source.complete && complete.get(),
             });
         }
         // Fallible stable merge sort: comparison errors never become a fake
@@ -1867,7 +2159,7 @@ impl Program {
                 .take(limit)
                 .map(|r| r.0)
                 .collect(),
-            complete: source.complete,
+            complete: source.complete && complete.get(),
         })
     }
 }

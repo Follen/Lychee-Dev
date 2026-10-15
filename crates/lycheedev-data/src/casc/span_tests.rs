@@ -39,6 +39,7 @@ fn local_reader_span_drop_refunds_encoded_storage_and_never_read_work() {
         io_bytes: AtomicU64::new(0),
         io_reads: AtomicU64::new(0),
         cancel: None,
+        control: None,
         budget: Some(&budget),
     };
     let first = reader.read_encoded(1, 5).unwrap();

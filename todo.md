@@ -1,4 +1,4 @@
-<!-- Production integration: public Emmy ingestion replaces four shared/checked hooks (26 recipe paths remain); default Data Prepared/Session chain implemented. Rust execution pending; continue complete semantic and lazy SQL chains before consolidated tests. -->
+<!-- Production integration: public Emmy ingestion replaces four shared/checked hooks (26 recipe paths remain); default Data Prepared/Session and lazy SQL/CASC control chains implemented. Rust execution pending; complete semantic, nested compound scope and automatic project-pin before final consolidated acceptance. -->
 <!-- Current batch: legacy addon production extras are now zero under the fixed oracle; Node 60/60 passed. Lua/Go/Rust execution and final four audit loops remain pending. -->
 # Rust migration checklist
 
@@ -282,6 +282,6 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] Recompile all targets after explicit Core blob-wait child test path fix; resolve Windows three-way tool identity setup before claiming any contract execution.
 - [ ] Complete actual owned Function/call successor and rerun all 448 S3 comparisons; the oracle correction is diagnostic, not a passing replacement.
 
-- [ ] 本批验证：XML child index 13 例、indexed IN 23 例、owned Function/call 11 例及原 448 比较；三方官方 Python 身份边界 Node 31 已过，Windows 尚待。IN 目前仅静态 eager provider，lazy/effective 继续；不据此勾选 G323-05 或零补丁完成。
+- [ ] 本批验证：XML child index 13 例、indexed IN 23 例、owned Function/call 11 例及原 448 比较；三方官方 Python 身份边界 Node 31 已过，Windows 尚待。默认local/CDN/effective的lazy provider与IN子查询现已组合，97新增/40继承Rust未跑；深层UNION尾callback作用域、自动project-pin、local decoded256MiB旧上限继续，不据源码勾选G323-05或零补丁完成。
 
-- [ ] Execute owned Object/carrier and authenticated owned Data span/source regressions on their exact composed tree; continue member/typecheck and actual Prepared/Session consumers. The newly saved ownership pieces do not close zero-patch or cache acceptance.
+- [ ] Execute owned Object/carrier and authenticated owned Data span/source regressions on their exact composed tree; continue complete flow/typecheck/diagnostic consumers. Actual Prepared/Session and lazy SQL consumers are now wired; saved implementation does not close zero-patch or cache acceptance.

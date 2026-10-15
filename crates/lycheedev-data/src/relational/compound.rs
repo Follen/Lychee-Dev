@@ -56,6 +56,45 @@ pub(super) fn validate_all_keyword(sql: &str) -> Result<()> {
     Ok(())
 }
 
+/// Physical roots have one resolver/cache identity. Lexical CTE keys remain
+/// unqualified, so an explicit catalog always bypasses lexical shadowing.
+pub(super) fn physical_key(name: &str) -> String {
+    let (catalog, name) = name.split_once('.').unwrap_or(("static", name));
+    format!("{}.{}", identifier_lower(catalog), identifier_lower(name))
+}
+pub(super) fn insert_root<'a>(
+    inputs: &mut BTreeMap<String, &'a Source>,
+    name: &str,
+    source: &'a Source,
+) -> Result<()> {
+    let key = physical_key(name);
+    if inputs.contains_key(&key) {
+        return Err(binding());
+    }
+    inputs.insert(key, source);
+    Ok(())
+}
+pub(super) fn source<'a>(inputs: &BTreeMap<String, &'a Source>, name: &str) -> Result<&'a Source> {
+    let key = identifier_lower(name);
+    if !name.contains('.') {
+        let mut lexical = inputs
+            .iter()
+            .filter(|(name, _)| identifier_lower(name) == key);
+        if let Some((_, source)) = lexical.next() {
+            if lexical.next().is_some() {
+                return Err(binding());
+            }
+            return Ok(*source);
+        }
+    }
+    inputs.get(&physical_key(name)).copied().ok_or_else(binding)
+}
+static RESERVED_SOURCE: Source = Source {
+    columns: Vec::new(),
+    rows: Vec::new(),
+    complete: true,
+};
+
 pub(super) fn dependencies<'a>(
     program: &'a Program,
     outer: &BTreeSet<String>,
@@ -63,10 +102,13 @@ pub(super) fn dependencies<'a>(
 ) {
     let mut names = outer.clone();
     for (name, _) in &program.bindings {
-        names.insert(name.to_ascii_lowercase());
+        names.insert(identifier_lower(name));
     }
     for (_, body) in &program.bindings {
         dependencies(body, &names, tables);
+    }
+    for term in program.terms() {
+        subquery::visit_queries(term, &mut |query| dependencies(query, &names, tables));
     }
     if !program.branches.is_empty() {
         for body in &program.branches {
@@ -81,8 +123,10 @@ pub(super) fn dependencies<'a>(
             dependencies(body, &names, tables);
             continue;
         }
-        if !names.contains(&table.to_ascii_lowercase())
-            && !tables.iter().any(|n| n.eq_ignore_ascii_case(table))
+        if !names.contains(&identifier_lower(table))
+            && !tables
+                .iter()
+                .any(|n| physical_key(n) == physical_key(table))
         {
             tables.push(table);
         }
@@ -101,15 +145,22 @@ fn visible<'a>(
         .try_fold(0usize, |n, name| {
             n.checked_add(name.len() + 96).ok_or_else(budget)
         })?;
-    work.retain(bytes)?;
+    work.retain(
+        bytes
+            .checked_add(reserved.iter().map(|name| name.len() + 96).sum::<usize>())
+            .ok_or_else(budget)?,
+    )?;
     let mut map = BTreeMap::new();
     for (name, source) in inputs {
-        if !reserved.contains(&name.to_ascii_lowercase()) {
+        if !reserved.contains(&identifier_lower(name)) {
             map.insert(name.clone(), *source);
         }
     }
+    for name in reserved {
+        map.insert(name.clone(), &RESERVED_SOURCE);
+    }
     for (name, source) in results {
-        map.insert(name.clone(), source);
+        map.insert(identifier_lower(name), source);
     }
     Ok(map)
 }
@@ -117,6 +168,7 @@ fn visible<'a>(
 pub(super) fn execute(
     program: &Program,
     sources: &BTreeMap<String, &Source>,
+    outer: Option<&subquery::Frame<'_>>,
     parameters: &BTreeMap<String, Scalar>,
     work: &mut Work<'_>,
 ) -> Result<QueryResult> {
@@ -124,7 +176,7 @@ pub(super) fn execute(
         && program.derived.is_none()
         && program.joins.iter().all(|j| j.derived.is_none())
     {
-        return execute_body(program, sources, parameters, work);
+        return execute_body(program, sources, outer, parameters, work);
     }
     work.retain(program.bindings.iter().map(|(n, _)| n.len() + 96).sum())?;
     // Reserve every local name before any definition runs: a self or forward
@@ -132,22 +184,22 @@ pub(super) fn execute(
     let mut reserved: BTreeSet<_> = program
         .bindings
         .iter()
-        .map(|(n, _)| n.to_ascii_lowercase())
+        .map(|(n, _)| identifier_lower(n))
         .collect();
     reserved.extend(
         std::iter::once((&program.table, &program.derived))
             .chain(program.joins.iter().map(|j| (&j.table, &j.derived)))
             .filter(|(_, body)| body.is_some())
-            .map(|(name, _)| name.to_ascii_lowercase()),
+            .map(|(name, _)| identifier_lower(name)),
     );
     let mut results = BTreeMap::new();
     for (name, body) in &program.bindings {
         work.spend()?;
         let inputs = visible(sources, &reserved, &results, work)?;
         let result = if program.recursive && recursive::references(body, name) > 0 {
-            recursive::execute(name, body, &inputs, parameters, work)?
+            recursive::execute(name, body, &inputs, outer, parameters, work)?
         } else {
-            body.execute_scoped(&inputs, parameters, work)?
+            body.execute_scoped_with(&inputs, outer, parameters, work)?
         };
         work.retain(name.len() + 96)?;
         results.insert(
@@ -167,7 +219,7 @@ pub(super) fn execute(
         };
         work.spend()?;
         let inputs = visible(sources, &reserved, &results, work)?;
-        let result = body.execute_scoped(&inputs, parameters, work)?;
+        let result = body.execute_scoped_with(&inputs, outer, parameters, work)?;
         work.retain(name.len() + 96)?;
         results.insert(
             name.clone(),
@@ -179,7 +231,7 @@ pub(super) fn execute(
         );
     }
     let inputs = visible(sources, &reserved, &results, work)?;
-    let mut result = execute_body(program, &inputs, parameters, work)?;
+    let mut result = execute_body(program, &inputs, outer, parameters, work)?;
     result.complete &= results.values().all(|s| s.complete);
     Ok(result)
 }
@@ -218,16 +270,17 @@ pub(super) fn branches(body: SetExpr) -> Result<Vec<SetExpr>> {
 fn execute_body(
     program: &Program,
     sources: &BTreeMap<String, &Source>,
+    outer: Option<&subquery::Frame<'_>>,
     parameters: &BTreeMap<String, Scalar>,
     work: &mut Work<'_>,
 ) -> Result<QueryResult> {
     if program.branches.is_empty() {
-        return program.execute_select(sources, parameters, work);
+        return program.execute_select(sources, outer, parameters, work);
     }
     let mut combined = None::<Source>;
     for branch in &program.branches {
         work.spend()?;
-        let result = branch.execute_scoped(sources, parameters, work)?;
+        let result = branch.execute_scoped_with(sources, outer, parameters, work)?;
         // Move retained rows; never deep-clone scalar payloads between branches.
         // The row-vector extension itself has a separate admission cost.
         work.retain(result.rows.len().checked_mul(24).ok_or_else(budget)?)?;
@@ -247,9 +300,22 @@ fn execute_body(
     }
     let combined = combined.ok_or_else(binding)?;
     work.retain(program.table.len() + 96)?;
-    let inputs = BTreeMap::from([(program.table.clone(), &combined)]);
+    // Fixed Go's top-level UNION tail executes rows without an expression-
+    // subquery callback (compound.go/rows.go), so do not silently broaden it.
+    if outer.is_none() && program.terms().any(subquery::contains) {
+        return Err(unsupported());
+    }
+    work.retain(sources.keys().map(|name| name.len() + 96).sum())?;
+    let mut inputs = sources.clone();
+    inputs.insert(program.table.clone(), &combined);
     // Internal result columns may repeat. Project them by ordinal rather
     // than re-binding their names. ORDER BY still binds the first branch's
     // public names and must reject an ambiguous duplicate name.
-    program.execute_select_mode(&inputs, parameters, work, ProjectionMode::CompoundOrdinals)
+    program.execute_select_mode(
+        &inputs,
+        outer,
+        parameters,
+        work,
+        ProjectionMode::CompoundOrdinals,
+    )
 }

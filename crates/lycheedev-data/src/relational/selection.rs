@@ -1,6 +1,6 @@
-//! Go 3.2.3 bare numeric IN selection. The current owned-row Source has no
-//! lazy WDC provider: this adapter builds one bounded equality index per visit.
-//! Its construction is charged separately from Go's candidate-buffer costs.
+//! Go 3.2.3 bare numeric IN selection over explicit query-scoped providers.
+//! The legacy opt-in owned-row adapter retains its independently charged index;
+//! the default SQL WDC/effective route uses existing provider Equal directly.
 use super::*;
 use crate::resource::{Budget, RetainedReservation};
 
@@ -246,7 +246,11 @@ fn collect<P: Equality>(
     if items.is_empty() {
         return Ok(false);
     }
-    let column = column(columns, alias, name)?;
+    // A correlated column belongs to an enclosing row, not this provider's
+    // identity. The original predicate will evaluate it during the scan.
+    let Ok(column) = column(columns, alias, name) else {
+        return Ok(false);
+    };
     let mut temporary = Temporary::new(work);
     let result = (|| {
         let mut values = Vec::new();
@@ -341,14 +345,96 @@ fn collect<P: Equality>(
     result
 }
 
+/// The provider already owns its physical lookup. Preparation must not build
+/// an index, scan records, or decline before candidate evaluation has completed.
+struct Direct<'a> {
+    provider: &'a dyn RowProvider,
+    columns: &'a [String],
+}
+impl Equality for Direct<'_> {
+    fn prepare(&mut self, _: usize, _: &mut Temporary<'_>, _: &mut Work<'_>) -> Result<bool> {
+        Ok(true)
+    }
+    fn equal(
+        &mut self,
+        column: usize,
+        value: &Scalar,
+        work: &mut Work<'_>,
+        emit: &mut Yield<'_>,
+    ) -> Result<bool> {
+        self.provider
+            .equal(&self.columns[column], value, &mut |row| emit(row, work))
+            .map(|outcome| outcome == EqualityOutcome::Handled)
+    }
+}
+fn equality(
+    source: &Source,
+    filter: Option<&Term>,
+    alias: &str,
+    parameters: &BTreeMap<String, Scalar>,
+    provider: &dyn RowProvider,
+    work: &mut Work<'_>,
+    emit: &mut Yield<'_>,
+) -> Result<bool> {
+    let Some(Term::Binary(left, BinaryOperator::Eq, right)) = filter else {
+        return Ok(false);
+    };
+    let (column_term, value) = if matches!(left.as_ref(), Term::Column(_)) {
+        (left.as_ref(), right.as_ref())
+    } else {
+        (right.as_ref(), left.as_ref())
+    };
+    let Term::Column(name) = column_term else {
+        return Ok(false);
+    };
+    if !matches!(value, Term::Number(_) | Term::Value(_) | Term::Parameter(_)) {
+        return Ok(false);
+    }
+    let Ok(index) = column(&source.columns, alias, name) else {
+        return Ok(false);
+    };
+    let value = eval(value, &[], &source.columns, alias, parameters, work)?;
+    let result = provider.equal(&source.columns[index], &value, &mut |row| emit(row, work))?;
+    // A decline never erases a stop observed at its boundary.
+    if result == EqualityOutcome::Declined {
+        work.consume(0)?;
+    }
+    Ok(result == EqualityOutcome::Handled)
+}
+
 pub(super) fn visit(
     source: &Source,
+    selected: Option<&[usize]>,
     filter: Option<&Term>,
     alias: &str,
     parameters: &BTreeMap<String, Scalar>,
     work: &mut Work<'_>,
     yield_row: &mut Yield<'_>,
 ) -> Result<()> {
+    if let Some(provider) = provider::find(source, work) {
+        // No capability means no speculative candidate evaluation at all.
+        if provider.has_equal() {
+            if equality(source, filter, alias, parameters, provider, work, yield_row)? {
+                return Ok(());
+            }
+            let mut direct = Direct {
+                provider,
+                columns: &source.columns,
+            };
+            if collect(
+                filter,
+                &source.columns,
+                alias,
+                parameters,
+                &mut direct,
+                work,
+                yield_row,
+            )? {
+                return Ok(());
+            }
+        }
+        return provider::visit(source, selected, work, yield_row);
+    }
     let identity_column = work
         .selection_sources
         .iter()

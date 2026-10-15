@@ -98,41 +98,51 @@ fn add(
     });
     Ok(id)
 }
-fn expression(term: &Term, work: &mut Work<'_>) -> Result<()> {
+fn expression(
+    term: &Term,
+    parent: usize,
+    plan: &mut Explanation,
+    work: &mut Work<'_>,
+) -> Result<()> {
     work.spend()?;
     match term {
-        Term::Unary(_, t) | Term::NullTest(t, _) => expression(t, work)?,
+        Term::Unary(_, t) | Term::NullTest(t, _) => expression(t, parent, plan, work)?,
         Term::Binary(a, _, b) => {
-            expression(a, work)?;
-            expression(b, work)?;
+            expression(a, parent, plan, work)?;
+            expression(b, parent, plan, work)?;
         }
         Term::Between(a, b, c, _) => {
-            expression(a, work)?;
-            expression(b, work)?;
-            expression(c, work)?;
+            expression(a, parent, plan, work)?;
+            expression(b, parent, plan, work)?;
+            expression(c, parent, plan, work)?;
         }
         Term::In(a, terms, _) => {
-            expression(a, work)?;
+            expression(a, parent, plan, work)?;
             for t in terms {
-                expression(t, work)?;
+                expression(t, parent, plan, work)?;
             }
+        }
+        Term::InSubquery(input, body, _) => {
+            let child = add(plan, work, parent, "expression-subquery", "operator")?;
+            query(body, child, plan, work)?;
+            expression(input, parent, plan, work)?;
         }
         Term::Call(_, terms) => {
             for t in terms {
-                expression(t, work)?;
+                expression(t, parent, plan, work)?;
             }
         }
-        Term::Aggregate(_, Some(t), _) => expression(t, work)?,
+        Term::Aggregate(_, Some(t), _) => expression(t, parent, plan, work)?,
         Term::Case(base, branches, other) => {
             if let Some(t) = base {
-                expression(t, work)?;
+                expression(t, parent, plan, work)?;
             }
             for (a, b) in branches {
-                expression(a, work)?;
-                expression(b, work)?;
+                expression(a, parent, plan, work)?;
+                expression(b, parent, plan, work)?;
             }
             if let Some(t) = other {
-                expression(t, work)?;
+                expression(t, parent, plan, work)?;
             }
         }
         _ => {}
@@ -228,12 +238,12 @@ fn select(
         let child = add(plan, work, id, operation, &detail)?;
         input(&join.table, join.derived.as_deref(), child, plan, work)?;
         if let Some(t) = &join.condition {
-            expression(t, work)?;
+            expression(t, child, plan, work)?;
         }
     }
     if let Some(t) = &program.filter {
-        add(plan, work, id, "filter", "")?;
-        expression(t, work)?;
+        let child = add(plan, work, id, "filter", "")?;
+        expression(t, child, plan, work)?;
     }
     let grouped = !program.groups.is_empty()
         || program.having.is_some()
@@ -247,11 +257,11 @@ fn select(
         add(plan, work, id, "group", "hash keys; streaming accumulators")?;
     }
     if let Some(t) = &program.having {
-        expression(t, work)?;
+        expression(t, id, plan, work)?;
     }
     for p in &program.projection {
         if let Some(t) = &p.expr {
-            expression(t, work)?;
+            expression(t, id, plan, work)?;
         }
     }
     if program.distinct {
@@ -270,7 +280,7 @@ fn select(
         add(plan, work, id, "order", detail)?;
     }
     for (t, _, _) in &suffix.order {
-        expression(t, work)?;
+        expression(t, id, plan, work)?;
     }
     if suffix.limit.is_some() || suffix.offset.is_some() {
         add(plan, work, id, "slice", "offset then limit")?;

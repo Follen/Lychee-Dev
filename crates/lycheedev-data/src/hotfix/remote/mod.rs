@@ -19,6 +19,7 @@ mod snapshot;
 mod tests;
 mod wago;
 use model::*;
+pub(crate) use model::{equal_fold, lower as identifier_lower};
 /// The command parser's admitted Hotfix option check, shared by all three sources.
 pub fn validate_option(key: &str, value: &str) -> Result<()> {
     model::validate_option(key, value)

@@ -2,6 +2,7 @@
 //! evaluator's heterogeneous-type error timing; residual predicates use loops.
 use super::*;
 pub(super) const QUALIFIED: &str = "<joined>";
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct Link {
     pub table: String,
     pub alias: String,
@@ -104,15 +105,12 @@ pub(super) fn compile(
         alias,
         derived,
         left,
-        condition: Some(term(on, parameters, 0)?),
+        condition: Some(term(on, parameters, depth)?),
     })
 }
 fn source<'a>(sources: &BTreeMap<String, &'a Source>, name: &str) -> Result<&'a Source> {
-    let mut found = sources
-        .iter()
-        .filter(|(key, _)| key.eq_ignore_ascii_case(name));
-    let result = found.next().map(|(_, v)| *v).ok_or_else(binding)?;
-    if found.next().is_some() || result.columns.is_empty() || result.columns.len() > 1024 {
+    let result = compound::source(sources, name)?;
+    if result.columns.is_empty() || result.columns.len() > 4096 {
         return Err(binding());
     }
     if result
@@ -124,7 +122,7 @@ fn source<'a>(sources: &BTreeMap<String, &'a Source>, name: &str) -> Result<&'a 
     }
     let mut names = BTreeSet::new();
     for name in &result.columns {
-        if !names.insert(name.to_ascii_lowercase()) {
+        if !names.insert(identifier_lower(name)) {
             return Err(binding());
         }
     }
@@ -174,14 +172,14 @@ fn index(
     condition: Option<&Term>,
     columns: &[String],
     boundary: usize,
-    right: &Source,
+    right: &[Vec<Scalar>],
     work: &mut Work<'_>,
 ) -> Result<Option<KeyIndex>> {
     let Some((left, right_column)) = equality_indices(condition, columns, boundary) else {
         return Ok(None);
     };
     let mut example = None;
-    for row in &right.rows {
+    for row in right {
         work.spend()?;
         let value = row.get(right_column).ok_or_else(binding)?;
         if value == &Scalar::Null {
@@ -199,7 +197,7 @@ fn index(
     // Optional acceleration may consume at most half the remaining local
     // allocation allowance. Fall back before allocating, so shared cumulative
     // admission never needs an inaccurate refund.
-    let required = right.rows.iter().try_fold(0usize, |n, row| {
+    let required = right.iter().try_fold(0usize, |n, row| {
         let extra = match &row[right_column] {
             Scalar::Null => 0,
             Scalar::String(s) => s.len().saturating_mul(2).saturating_add(256),
@@ -211,7 +209,7 @@ fn index(
     if required > work.bytes / 2 {
         return Ok(None);
     }
-    for (i, row) in right.rows.iter().enumerate() {
+    for (i, row) in right.iter().enumerate() {
         work.spend()?;
         let value = &row[right_column];
         if value == &Scalar::Null {
@@ -225,6 +223,10 @@ fn index(
 }
 struct Right<'a> {
     source: &'a Source,
+    // Even owned lexical inputs are copied here: the fixed Go executor owns
+    // every retained right row and charges its full materialization cost.
+    rows: Vec<Vec<Scalar>>,
+    selected: Vec<usize>,
     link: &'a Link,
     start: usize,
     end: usize,
@@ -233,10 +235,12 @@ struct Right<'a> {
 pub(super) struct Plan<'a> {
     pub source: Source,
     first: &'a Source,
+    first_selected: Vec<usize>,
+    projected: bool,
     rights: Vec<Right<'a>>,
     // One bounded owned working row: string capacities are reused across
-    // candidates. No cross product or intermediate join is materialized.
-    capacities: Vec<usize>,
+    // candidates and admitted only as needed during the first input's scan.
+    // No cross product or intermediate join is materialized.
     selected: Vec<bool>,
 }
 pub(super) fn prepare<'a>(
@@ -248,8 +252,29 @@ pub(super) fn prepare<'a>(
     work: &mut Work<'_>,
     program: &Program,
 ) -> Result<Plan<'a>> {
+    prepare_scoped(
+        first,
+        alias,
+        links,
+        sources,
+        params,
+        work,
+        program,
+        &subquery::Context::new(sources, None),
+    )
+}
+pub(super) fn prepare_scoped<'a>(
+    first: &str,
+    alias: &str,
+    links: &'a [Link],
+    sources: &BTreeMap<String, &'a Source>,
+    params: &BTreeMap<String, Scalar>,
+    work: &mut Work<'_>,
+    program: &Program,
+    context: &subquery::Context<'_>,
+) -> Result<Plan<'a>> {
     let first = source(sources, first)?;
-    let mut aliases = BTreeSet::from([alias.to_ascii_lowercase()]);
+    let mut aliases = BTreeSet::from([identifier_lower(alias)]);
     work.retain(
         first
             .columns
@@ -267,7 +292,7 @@ pub(super) fn prepare<'a>(
     let mut complete = first.complete;
     for link in links {
         work.spend()?;
-        if !aliases.insert(link.alias.to_ascii_lowercase()) {
+        if !aliases.insert(identifier_lower(&link.alias)) {
             return Err(binding());
         }
         let right = source(sources, &link.table)?;
@@ -281,11 +306,13 @@ pub(super) fn prepare<'a>(
                 .sum(),
         )?;
         columns.extend(right.columns.iter().map(|c| format!("{}.{c}", link.alias)));
-        if columns.len() > 1024 {
-            return Err(budget());
+        if columns.len() > 4096 {
+            return Err(binding());
         }
         rights.push(Right {
             source: right,
+            rows: vec![],
+            selected: vec![],
             link,
             start,
             end: columns.len(),
@@ -297,28 +324,19 @@ pub(super) fn prepare<'a>(
     // CASE branches, and cannot become valid when an input happens to be empty.
     for right in &rights {
         if let Some(condition) = &right.link.condition {
-            bind_with_aggregates(condition, &columns[..right.end], QUALIFIED, params, false)?;
-        }
-    }
-    if !work.planning {
-        for right in &mut rights {
-            if right
-                .source
-                .rows
-                .iter()
-                .any(|row| row.len() != right.source.columns.len())
-            {
-                return Err(binding());
-            }
-            right.keys = index(
-                right.link.condition.as_ref(),
+            bind_with_aggregates(
+                condition,
                 &columns[..right.end],
-                right.start,
-                right.source,
+                QUALIFIED,
+                params,
+                false,
+                context,
                 work,
             )?;
         }
     }
+    // Admit the joined scalar/string buffers and all per-input selected
+    // ordinals before allocating them. Collect requirements before any scan.
     work.retain(
         columns.len()
             * (std::mem::size_of::<Scalar>()
@@ -329,11 +347,11 @@ pub(super) fn prepare<'a>(
     let mut selected = vec![false; columns.len()];
     for p in &program.projection {
         if let Some(expr) = &p.expr {
-            select(expr, &columns, &mut selected);
+            select(expr, &columns, QUALIFIED, &mut selected);
         } else {
             for (i, name) in columns.iter().enumerate() {
                 let qualifier = name.rsplit_once('.').map_or("", |(q, _)| q);
-                if p.name.is_empty() || qualifier.eq_ignore_ascii_case(&p.name) {
+                if p.name.is_empty() || equal_fold(qualifier, &p.name) {
                     selected[i] = true;
                 }
             }
@@ -346,37 +364,70 @@ pub(super) fn prepare<'a>(
         .chain(program.order.iter().map(|(expr, _, _)| expr))
         .chain(program.groups.iter())
         .chain(program.having.iter())
-        .chain(links.iter().filter_map(|l| l.condition.as_ref()))
     {
-        select(expr, &columns, &mut selected);
+        select(expr, &columns, QUALIFIED, &mut selected);
     }
-    let mut capacities = vec![0usize; columns.len()];
-    let mut start = 0;
-    for input in std::iter::once(first).chain(rights.iter().map(|r| r.source)) {
-        if work.planning {
-            continue;
+    for right in &rights {
+        if let Some(condition) = &right.link.condition {
+            // ON binds against this prefix. A later input may introduce the
+            // same unqualified name without invalidating an earlier ON.
+            select(
+                condition,
+                &columns[..right.end],
+                QUALIFIED,
+                &mut selected[..right.end],
+            );
         }
-        for row in &input.rows {
-            work.spend()?;
-            // Projection does not authorize invalid unused scalar values.
-            if row.len() != input.columns.len() {
-                return Err(binding());
-            }
-            row_cost(row)?;
-            for (column, value) in row.iter().enumerate() {
-                if let Scalar::String(s) = value
-                    && selected[start + column]
-                {
-                    capacities[start + column] = capacities[start + column].max(s.len());
-                }
-            }
-        }
-        start += input.columns.len();
     }
-    let bytes = capacities
+    let first_selected = selected[..first.columns.len()]
         .iter()
-        .try_fold(0usize, |n, v| n.checked_add(*v).ok_or_else(budget))?;
-    work.retain(bytes)?;
+        .enumerate()
+        .filter_map(|(column, selected)| selected.then_some(column))
+        .collect();
+    for right in &mut rights {
+        right.selected = selected[right.start..right.end]
+            .iter()
+            .enumerate()
+            .filter_map(|(column, selected)| selected.then_some(column))
+            .collect();
+    }
+    let projected = provider::can_project(program, &columns, QUALIFIED)
+        && rights.iter().all(|right| {
+            right.link.condition.as_ref().is_none_or(|condition| {
+                provider::projectable(condition, &columns[..right.end], QUALIFIED)
+            })
+        });
+    if !work.planning {
+        for right in &mut rights {
+            let mut rows = vec![];
+            provider::visit(
+                right.source,
+                projected.then_some(right.selected.as_slice()),
+                work,
+                &mut |row, work| {
+                    work.spend()?;
+                    if row.len() != right.source.columns.len() {
+                        return Err(binding());
+                    }
+                    // Validate every supplied scalar, including unused ones,
+                    // before admitting and copying provider-owned scratch.
+                    // row_cost includes 24 bytes; Go retains 64 per right row.
+                    let bytes = row_cost(row)?.checked_add(40).ok_or_else(budget)?;
+                    work.retain(bytes)?;
+                    rows.push(row.to_vec());
+                    Ok(())
+                },
+            )?;
+            right.rows = rows;
+            right.keys = index(
+                right.link.condition.as_ref(),
+                &columns[..right.end],
+                right.start,
+                &right.rows,
+                work,
+            )?;
+        }
+    }
     Ok(Plan {
         source: Source {
             columns,
@@ -384,54 +435,63 @@ pub(super) fn prepare<'a>(
             complete,
         },
         first,
+        first_selected,
+        projected,
         rights,
-        capacities,
         selected,
     })
 }
-fn select(term: &Term, columns: &[String], selected: &mut [bool]) {
+pub(super) fn select(term: &Term, columns: &[String], alias: &str, selected: &mut [bool]) {
     match term {
         Term::Column(name) => {
-            if let Ok(i) = column(columns, QUALIFIED, name) {
+            if let Ok(i) = column(columns, alias, name) {
                 selected[i] = true;
             }
         }
-        Term::Unary(_, t) | Term::NullTest(t, _) => select(t, columns, selected),
-        Term::Binary(a, _, b) => {
-            select(a, columns, selected);
-            select(b, columns, selected);
-        }
-        Term::Between(a, b, c, _) => {
-            select(a, columns, selected);
-            select(b, columns, selected);
-            select(c, columns, selected);
-        }
-        Term::In(a, items, _) => {
-            select(a, columns, selected);
-            for t in items {
-                select(t, columns, selected);
+        Term::Ordinal(index) => {
+            if let Some(selected) = selected.get_mut(*index) {
+                *selected = true;
             }
         }
-        Term::Aggregate(_, Some(input), _) => select(input, columns, selected),
+        Term::Unary(_, t) | Term::NullTest(t, _) => select(t, columns, alias, selected),
+        Term::Binary(a, _, b) => {
+            select(a, columns, alias, selected);
+            select(b, columns, alias, selected);
+        }
+        Term::Between(a, b, c, _) => {
+            select(a, columns, alias, selected);
+            select(b, columns, alias, selected);
+            select(c, columns, alias, selected);
+        }
+        Term::In(a, items, _) => {
+            select(a, columns, alias, selected);
+            for t in items {
+                select(t, columns, alias, selected);
+            }
+        }
+        // Correlations can reference any current input field. Like Go's
+        // neededColumns, a nested query disables projection of this scope.
+        Term::InSubquery(..) => selected.fill(true),
+        Term::Aggregate(_, Some(input), _) => select(input, columns, alias, selected),
         Term::Aggregate(_, None, _) => {}
         Term::Call(_, items) => {
             for t in items {
-                select(t, columns, selected);
+                select(t, columns, alias, selected);
             }
         }
         Term::Case(base, branches, otherwise) => {
             if let Some(t) = base {
-                select(t, columns, selected);
+                select(t, columns, alias, selected);
             }
             for (a, b) in branches {
-                select(a, columns, selected);
-                select(b, columns, selected);
+                select(a, columns, alias, selected);
+                select(b, columns, alias, selected);
             }
             if let Some(t) = otherwise {
-                select(t, columns, selected);
+                select(t, columns, alias, selected);
             }
         }
-        Term::Value(_) | Term::Number(_) | Term::Ordinal(_) | Term::Parameter(_) => {}
+        Term::Value(_) | Term::Number(_) | Term::Parameter(_) => {}
     }
 }
 fn assign(
@@ -455,10 +515,12 @@ fn assign(
                 work.consume(text.len().div_ceil(32) + 1)?;
                 let buffer = &mut strings[i];
                 buffer.clear();
-                // The capacity was admitted from every provider row before
-                // allocation; this check prevents an unexpected realloc.
+                // A lazy input cannot be pre-scanned for maximum string sizes.
+                // Reuse the old capacity and admit only checked growth before
+                // allocating. Failed admission cannot enlarge this buffer.
                 if buffer.capacity() < text.len() {
-                    return Err(budget());
+                    work.retain(text.len() - buffer.capacity())?;
+                    buffer.try_reserve_exact(text.len()).map_err(|_| budget())?;
                 }
                 buffer.push_str(text);
                 Scalar::String(std::mem::take(buffer))
@@ -472,21 +534,36 @@ impl Plan<'_> {
     pub fn visit(
         &self,
         params: &BTreeMap<String, Scalar>,
+        context: &subquery::Context<'_>,
         work: &mut Work<'_>,
         yield_row: &mut dyn FnMut(&[Scalar], &mut Work<'_>) -> Result<()>,
     ) -> Result<()> {
-        let mut values = vec![Scalar::Null; self.capacities.len()];
-        let mut strings: Vec<_> = self
-            .capacities
-            .iter()
-            .map(|n| String::with_capacity(*n))
-            .collect();
-        for row in &self.first.rows {
-            work.spend()?;
-            assign(&mut values, &mut strings, 0, row, work, &self.selected)?;
-            self.link(0, &mut values, &mut strings, params, work, yield_row)?;
-        }
-        Ok(())
+        let mut values = vec![Scalar::Null; self.selected.len()];
+        let mut strings = vec![String::new(); self.selected.len()];
+        provider::visit(
+            self.first,
+            self.projected.then_some(self.first_selected.as_slice()),
+            work,
+            &mut |row, work| {
+                work.spend()?;
+                if row.len() != self.first.columns.len() {
+                    return Err(binding());
+                }
+                // Projection never waives scalar validation for owned sources;
+                // projected providers must also validate their unused fields.
+                row_cost(row)?;
+                assign(&mut values, &mut strings, 0, row, work, &self.selected)?;
+                self.link(
+                    0,
+                    &mut values,
+                    &mut strings,
+                    params,
+                    context,
+                    work,
+                    yield_row,
+                )
+            },
+        )
     }
     fn link(
         &self,
@@ -494,6 +571,7 @@ impl Plan<'_> {
         values: &mut [Scalar],
         strings: &mut [String],
         params: &BTreeMap<String, Scalar>,
+        context: &subquery::Context<'_>,
         work: &mut Work<'_>,
         yield_row: &mut dyn FnMut(&[Scalar], &mut Work<'_>) -> Result<()>,
     ) -> Result<()> {
@@ -517,7 +595,7 @@ impl Plan<'_> {
         let count = if indexed {
             candidates.map_or(0, <[usize]>::len)
         } else {
-            right.source.rows.len()
+            right.rows.len()
         };
         let mut matched = false;
         for n in 0..count {
@@ -538,17 +616,18 @@ impl Plan<'_> {
                 values,
                 strings,
                 right.start,
-                &right.source.rows[i],
+                &right.rows[i],
                 work,
                 &self.selected,
             )?;
             let yes = if let Some(condition) = &right.link.condition {
-                truth(&eval(
+                truth(&eval_scoped(
                     condition,
                     &values[..right.end],
                     &self.source.columns[..right.end],
                     QUALIFIED,
                     params,
+                    context,
                     work,
                 )?)? == Some(true)
             } else {
@@ -556,7 +635,7 @@ impl Plan<'_> {
             };
             if yes {
                 matched = true;
-                self.link(at + 1, values, strings, params, work, yield_row)?;
+                self.link(at + 1, values, strings, params, context, work, yield_row)?;
             }
         }
         let right = &self.rights[at];
@@ -566,7 +645,7 @@ impl Plan<'_> {
                     strings[i] = s;
                 }
             }
-            self.link(at + 1, values, strings, params, work, yield_row)?;
+            self.link(at + 1, values, strings, params, context, work, yield_row)?;
         }
         Ok(())
     }

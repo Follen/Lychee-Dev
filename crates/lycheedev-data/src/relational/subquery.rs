@@ -1,0 +1,368 @@
+//! Expression-local query scopes. Frames borrow the current callback/group
+//! row; neither frames nor short-lived lexical Sources enter the shared Work.
+//! Go 3.2.3 evaluates each IN query completely on each expression evaluation.
+use super::*;
+
+/// Bound total compiled syntax after removing the old 1024-column/group
+/// caps. This is a conservative structural admission, not Go work accounting.
+pub(super) fn validate_nodes(program: &Program) -> Result<()> {
+    enum Node<'a> {
+        Query(&'a Program),
+        Term(&'a Term),
+    }
+    let mut pending = vec![Node::Query(program)];
+    let mut count = 0usize;
+    while let Some(node) = pending.pop() {
+        count += 1;
+        if count > 32768 {
+            return Err(budget());
+        }
+        match node {
+            Node::Query(query) => {
+                // Physical/derived relation nodes and wildcard projections.
+                if query.branches.is_empty() {
+                    count += 1
+                        + query.joins.len()
+                        + query.projection.iter().filter(|p| p.expr.is_none()).count();
+                } else {
+                    // Rust's synthetic compound wrapper is not a Go retrieval;
+                    // the actual branches carry those query/relation nodes.
+                    count -= 1;
+                }
+                for (_, body) in &query.bindings {
+                    pending.push(Node::Query(body));
+                }
+                for body in &query.branches {
+                    pending.push(Node::Query(body));
+                }
+                if let Some(body) = &query.derived {
+                    pending.push(Node::Query(body));
+                }
+                for link in &query.joins {
+                    if let Some(body) = &link.derived {
+                        pending.push(Node::Query(body));
+                    }
+                }
+                pending.extend(query.terms().map(Node::Term));
+            }
+            Node::Term(term) => match term {
+                Term::InSubquery(input, query, _) => {
+                    pending.push(Node::Query(query));
+                    pending.push(Node::Term(input));
+                }
+                Term::Unary(_, t) | Term::NullTest(t, _) | Term::Aggregate(_, Some(t), _) => {
+                    pending.push(Node::Term(t))
+                }
+                Term::Aggregate(_, None, _) => count += 1,
+                Term::Binary(a, _, b) => {
+                    pending.push(Node::Term(a));
+                    pending.push(Node::Term(b));
+                }
+                Term::Between(a, b, c, _) => {
+                    pending.push(Node::Term(a));
+                    pending.push(Node::Term(b));
+                    pending.push(Node::Term(c));
+                }
+                Term::In(t, args, _) => {
+                    pending.push(Node::Term(t));
+                    pending.extend(args.iter().map(Node::Term));
+                }
+                Term::Call(_, args) => pending.extend(args.iter().map(Node::Term)),
+                Term::Case(base, cases, other) => {
+                    pending.extend(base.iter().chain(other.iter()).map(|t| Node::Term(t)));
+                    for (a, b) in cases {
+                        pending.push(Node::Term(a));
+                        pending.push(Node::Term(b));
+                    }
+                }
+                _ => {}
+            },
+        }
+        if count.checked_add(pending.len()).is_none_or(|n| n > 32768) {
+            return Err(budget());
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn cardinality() -> lycheedev_core::ToolkitError {
+    problem(
+        "relational.invalid_cardinality",
+        "IN subquery must return exactly one column",
+    )
+}
+pub(super) struct Frame<'a> {
+    row: &'a [Scalar],
+    columns: &'a [String],
+    alias: &'a str,
+    mapping: Option<&'a [Option<usize>]>,
+    parent: Option<&'a Frame<'a>>,
+}
+impl Frame<'_> {
+    pub(super) fn value(&self, index: usize) -> Result<&Scalar> {
+        let index = self.mapped(index)?;
+        self.row.get(index).ok_or_else(binding)
+    }
+    fn mapped(&self, index: usize) -> Result<usize> {
+        self.mapping.map_or(Ok(index), |mapping| {
+            mapping.get(index).copied().flatten().ok_or_else(binding)
+        })
+    }
+}
+#[derive(Clone, Copy)]
+pub(super) struct Correlation<'a> {
+    pub columns: &'a [String],
+    pub alias: &'a str,
+    pub mapping: &'a [Option<usize>],
+}
+#[derive(Clone, Copy)]
+pub(super) struct Context<'a> {
+    pub sources: &'a BTreeMap<String, &'a Source>,
+    pub outer: Option<&'a Frame<'a>>,
+    pub group: Option<Correlation<'a>>,
+    pub complete: Option<&'a std::cell::Cell<bool>>,
+}
+impl<'a> Context<'a> {
+    pub(super) fn new(
+        sources: &'a BTreeMap<String, &'a Source>,
+        outer: Option<&'a Frame<'a>>,
+    ) -> Self {
+        Self {
+            sources,
+            outer,
+            group: None,
+            complete: None,
+        }
+    }
+}
+pub(super) enum Position<'a> {
+    Local(usize),
+    Outer(&'a Frame<'a>, usize),
+}
+fn local(columns: &[String], alias: &str, name: &str) -> Result<Option<usize>> {
+    let (qualifier, field) = name.split_once('.').unwrap_or(("", name));
+    let mut found = None;
+    let mut owned = false;
+    for (index, column) in columns.iter().enumerate() {
+        let (owner, column) = if alias == joins::QUALIFIED {
+            column.rsplit_once('.').unwrap_or(("", column))
+        } else {
+            (alias, column.as_str())
+        };
+        if !qualifier.is_empty() && !equal_fold(qualifier, owner) {
+            continue;
+        }
+        owned |= !qualifier.is_empty();
+        if !equal_fold(field, column) {
+            continue;
+        }
+        owned = true;
+        if found.replace(index).is_some() {
+            return Err(binding());
+        }
+    }
+    if owned && found.is_none() {
+        return Err(missing_column(columns, alias, name));
+    }
+    Ok(found)
+}
+pub(super) fn resolve<'a>(
+    columns: &[String],
+    alias: &str,
+    name: &str,
+    mut outer: Option<&'a Frame<'a>>,
+) -> Result<Position<'a>> {
+    if let Some(index) = local(columns, alias, name)? {
+        return Ok(Position::Local(index));
+    }
+    while let Some(frame) = outer {
+        if let Some(index) = local(frame.columns, frame.alias, name)? {
+            frame.mapped(index)?;
+            return Ok(Position::Outer(frame, index));
+        }
+        outer = frame.parent;
+    }
+    Err(missing_column(columns, alias, name))
+}
+pub(super) fn display_column(
+    columns: &[String],
+    alias: &str,
+    name: &str,
+    outer: Option<&Frame<'_>>,
+) -> Result<Option<String>> {
+    let Position::Local(index) = resolve(columns, alias, name, outer)? else {
+        // Go's bound outer-column node is an expression, not a local column.
+        return Ok(None);
+    };
+    let column = &columns[index];
+    Ok(Some(
+        if alias == joins::QUALIFIED {
+            column.rsplit('.').next().unwrap()
+        } else {
+            column
+        }
+        .to_owned(),
+    ))
+}
+
+pub(super) fn execute(
+    query: &Program,
+    row: &[Scalar],
+    columns: &[String],
+    alias: &str,
+    parameters: &BTreeMap<String, Scalar>,
+    context: &Context<'_>,
+    work: &mut Work<'_>,
+) -> Result<QueryResult> {
+    work.consume(0)?;
+    let (columns, alias, mapping) = context.group.map_or((columns, alias, None), |group| {
+        (group.columns, group.alias, Some(group.mapping))
+    });
+    let frame = Frame {
+        row,
+        columns,
+        alias,
+        mapping,
+        parent: context.outer,
+    };
+    let result = query.execute_scoped_with(context.sources, Some(&frame), parameters, work)?;
+    if !result.complete
+        && let Some(complete) = context.complete
+    {
+        complete.set(false);
+    }
+    if result.columns.len() != 1 {
+        return Err(cardinality());
+    }
+    Ok(result)
+}
+pub(super) fn visit_queries<'a>(term: &'a Term, emit: &mut impl FnMut(&'a Program)) {
+    match term {
+        Term::InSubquery(input, query, _) => {
+            emit(query);
+            visit_queries(input, emit);
+        }
+        Term::Unary(_, term) | Term::NullTest(term, _) | Term::Aggregate(_, Some(term), _) => {
+            visit_queries(term, emit)
+        }
+        Term::Binary(a, _, b) => {
+            visit_queries(a, emit);
+            visit_queries(b, emit);
+        }
+        Term::Between(a, b, c, _) => {
+            visit_queries(a, emit);
+            visit_queries(b, emit);
+            visit_queries(c, emit);
+        }
+        Term::In(input, list, _) => {
+            visit_queries(input, emit);
+            for term in list {
+                visit_queries(term, emit);
+            }
+        }
+        Term::Call(_, list) => {
+            for term in list {
+                visit_queries(term, emit);
+            }
+        }
+        Term::Case(base, branches, other) => {
+            for term in base.iter().chain(other.iter()) {
+                visit_queries(term, emit);
+            }
+            for (a, b) in branches {
+                visit_queries(a, emit);
+                visit_queries(b, emit);
+            }
+        }
+        _ => {}
+    }
+}
+pub(super) fn contains(term: &Term) -> bool {
+    let mut found = false;
+    visit_queries(term, &mut |_| found = true);
+    found
+}
+/// Go binds column spellings to schema identities before comparing group
+/// expressions. Keep query syntax immutable while making the same comparison.
+pub(super) fn same_group_expression(a: &Term, b: &Term, context: &Context<'_>) -> bool {
+    if a == b {
+        return true;
+    }
+    let same = |a: &Term, b: &Term| same_group_expression(a, b, context);
+    match (a, b) {
+        (Term::Column(a), Term::Column(b)) => {
+            if !equal_fold(a.rsplit('.').next().unwrap(), b.rsplit('.').next().unwrap()) {
+                return false;
+            }
+            let Some(group) = context.group else {
+                return a == b;
+            };
+            match (
+                resolve(group.columns, group.alias, a, context.outer),
+                resolve(group.columns, group.alias, b, context.outer),
+            ) {
+                (Ok(Position::Local(a)), Ok(Position::Local(b))) => a == b,
+                (Ok(Position::Outer(a, ai)), Ok(Position::Outer(b, bi))) => {
+                    std::ptr::eq(a, b) && ai == bi
+                }
+                _ => false,
+            }
+        }
+        (Term::Unary(a, x), Term::Unary(b, y)) => a == b && same(x, y),
+        (Term::Binary(a, op, b), Term::Binary(c, other, d)) => {
+            op == other && same(a, c) && same(b, d)
+        }
+        (Term::NullTest(a, n), Term::NullTest(b, m)) => n == m && same(a, b),
+        (Term::Between(a, b, c, n), Term::Between(d, e, f, m)) => {
+            n == m && same(a, d) && same(b, e) && same(c, f)
+        }
+        (Term::In(a, x, n), Term::In(b, y, m)) => {
+            n == m && same(a, b) && x.len() == y.len() && x.iter().zip(y).all(|(a, b)| same(a, b))
+        }
+        (Term::InSubquery(a, x, n), Term::InSubquery(b, y, m)) => n == m && x == y && same(a, b),
+        (Term::Call(a, x), Term::Call(b, y)) => {
+            a == b && x.len() == y.len() && x.iter().zip(y).all(|(a, b)| same(a, b))
+        }
+        (Term::Case(a, x, b), Term::Case(c, y, d)) => {
+            let optional = |a: &Option<Box<Term>>, b: &Option<Box<Term>>| match (a, b) {
+                (Some(a), Some(b)) => same(a, b),
+                (None, None) => true,
+                _ => false,
+            };
+            optional(a, c)
+                && optional(b, d)
+                && x.len() == y.len()
+                && x.iter()
+                    .zip(y)
+                    .all(|((a, b), (c, d))| same(a, c) && same(b, d))
+        }
+        _ => a == b,
+    }
+}
+
+pub(super) fn group_mapping(
+    keys: &[Term],
+    columns: &[String],
+    alias: &str,
+    work: &mut Work<'_>,
+) -> Result<Vec<Option<usize>>> {
+    work.retain(
+        columns
+            .len()
+            .checked_mul(std::mem::size_of::<Option<usize>>())
+            .ok_or_else(budget)?,
+    )?;
+    let mut mapping = vec![None; columns.len()];
+    for (key, term) in keys.iter().enumerate() {
+        if let Term::Column(name) = term
+            && let Some(index) = local(columns, alias, name)?
+        {
+            mapping[index].get_or_insert(key);
+        }
+    }
+    Ok(mapping)
+}
+
+#[cfg(test)]
+#[path = "subquery_tests.rs"]
+mod subquery_tests;

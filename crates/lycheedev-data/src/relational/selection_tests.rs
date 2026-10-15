@@ -18,6 +18,7 @@ fn work(bytes: usize, units: u64) -> Work<'static> {
         shared: None,
         planning: false,
         selection_sources: Vec::new(),
+        providers: &[],
     }
 }
 fn capabilities() -> BTreeMap<String, String> {

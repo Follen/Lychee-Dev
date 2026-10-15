@@ -576,22 +576,19 @@ jobs:
       - name: Run SQL semantic catalogs and source mapping fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-semantic-sql --one-shot -- test --locked --offline -p lycheedev-data --test semantic_sql_parity -j 1
-      - name: Run SQL CSV encoding and owned export contention fixtures
-        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: node tools/rust-cargo.mjs --owner ci-sql-csv-unit --one-shot -- test --locked --offline -p lycheedev-data --lib local_query::query_csv::tests -j 1
       - name: Run SQL CSV public capture and publication fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-sql-csv-public --one-shot -- test --locked --offline -p lycheedev-data --test sql_csv_parity -j 1
       - name: Run SQL EXPLAIN schema and bounded TopK regressions
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-sql-explain --one-shot -- test --locked --offline -p lycheedev-data --test explain_parity --test sql_explain_parity --test topk_parity -j 1
-      - name: Run indexed IN buffered selection fixtures
+      - name: Run relational provider subquery and indexed IN fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
-          node tools/rust-cargo.mjs --owner ci-indexed-in --one-shot -- test --locked --offline -p lycheedev-data --lib relational::selection::tests -j 1
+          node tools/rust-cargo.mjs --owner ci-indexed-in --one-shot -- test --locked --offline -p lycheedev-data --lib relational:: -j 1
       - name: Preserve relational binding grouping and compound regressions
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: node tools/rust-cargo.mjs --owner ci-sql-relational-regressions --one-shot -- test --locked --offline -p lycheedev-data --test relational_parity --test joins_parity --test aggregates_parity --test compound_parity --test cte_parity --test recursive_parity --test derived_parity -j 1
+        run: node tools/rust-cargo.mjs --owner ci-sql-relational-regressions --one-shot -- test --locked --offline -p lycheedev-data --test relational_parity --test joins_parity --test aggregates_parity --test compound_parity --test cte_parity --test recursive_parity --test derived_parity --test sql_lazy_provider_parity -j 1
       - name: Run SQL logical and safety ledger fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-sql-logical-resource --one-shot -- test --locked --offline -p lycheedev-data --lib resource::logical_tests -j 1

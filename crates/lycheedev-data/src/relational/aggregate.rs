@@ -133,6 +133,8 @@ pub(super) fn contains(term: &Term) -> bool {
         Term::Binary(a, _, b) => contains(a) || contains(b),
         Term::Between(a, b, c, _) => contains(a) || contains(b) || contains(c),
         Term::In(t, args, _) => contains(t) || args.iter().any(contains),
+        // Inner aggregates belong to the nested query, not this group.
+        Term::InSubquery(input, _, _) => contains(input),
         Term::Call(_, args) => args.iter().any(contains),
         Term::Case(base, args, other) => {
             base.as_deref().is_some_and(contains)
@@ -161,6 +163,8 @@ impl Grouping {
         order: &mut [(Term, bool, Option<bool>)],
         having: Option<&Term>,
         output_columns: &[String],
+        params: &BTreeMap<String, Scalar>,
+        context: &subquery::Context<'_>,
         work: &mut Work<'_>,
     ) -> Result<Self> {
         work.retain(keys.len() * 64 + outputs.len() * 64 + order.len() * 64 + 256)?;
@@ -173,10 +177,10 @@ impl Grouping {
             columns: (0..keys.len()).map(|i| format!("__key_{i}")).collect(),
         };
         for t in outputs {
-            *t = this.rewrite(t, false, output_columns, work)?;
+            *t = this.rewrite(t, false, output_columns, params, context, work)?;
         }
         for (t, _, _) in order {
-            *t = this.rewrite(t, true, output_columns, work)?;
+            *t = this.rewrite(t, true, output_columns, params, context, work)?;
         }
         if this
             .specs
@@ -186,7 +190,7 @@ impl Grouping {
             work.retain(4096)?;
         }
         this.having = having
-            .map(|t| this.rewrite(t, false, output_columns, work))
+            .map(|t| this.rewrite(t, false, output_columns, params, context, work))
             .transpose()?;
         Ok(this)
     }
@@ -195,14 +199,20 @@ impl Grouping {
         node: &Term,
         allow_alias: bool,
         aliases: &[String],
+        params: &BTreeMap<String, Scalar>,
+        context: &subquery::Context<'_>,
         work: &mut Work<'_>,
     ) -> Result<Term> {
         work.spend()?;
-        if let Some(i) = self.keys.iter().position(|t| t == node) {
+        if let Some(i) = self
+            .keys
+            .iter()
+            .position(|t| subquery::same_group_expression(t, node, context))
+        {
             return Ok(Term::Column(self.columns[i].clone()));
         }
         let recurse = |this: &mut Self, t: &Term, work: &mut Work<'_>| {
-            this.rewrite(t, allow_alias, aliases, work)
+            this.rewrite(t, allow_alias, aliases, params, context, work)
         };
         Ok(match node {
             Term::Aggregate(name, input, distinct) => {
@@ -224,7 +234,13 @@ impl Grouping {
             // one from an aggregate group is invalid even for empty input.
             Term::Ordinal(_) => return Err(binding()),
             Term::Column(name) => {
-                if allow_alias && aliases.iter().any(|a| a.eq_ignore_ascii_case(name)) {
+                let outer = context.group.is_some_and(|group| {
+                    matches!(
+                        subquery::resolve(group.columns, group.alias, name, context.outer),
+                        Ok(subquery::Position::Outer(..))
+                    )
+                });
+                if outer || allow_alias && aliases.iter().any(|a| equal_fold(a, name)) {
                     node.clone()
                 } else {
                     return Err(binding());
@@ -250,6 +266,19 @@ impl Grouping {
                     .collect::<Result<Vec<_>>>()?,
                 *n,
             ),
+            Term::InSubquery(input, query, negated) => {
+                if work.planning {
+                    // Only direct GROUP BY columns are visible to correlated
+                    // output/HAVING/order subqueries. Never retain or expose a
+                    // representative input row to make a query appear valid.
+                    subquery::execute(query, &[], &[], "", params, context, work)?;
+                }
+                Term::InSubquery(
+                    Box::new(recurse(self, input, work)?),
+                    query.clone(),
+                    *negated,
+                )
+            }
             Term::Call(name, args) => Term::Call(
                 name.clone(),
                 args.iter()
@@ -290,13 +319,14 @@ impl Grouping {
         columns: &[String],
         alias: &str,
         params: &BTreeMap<String, Scalar>,
+        context: &subquery::Context<'_>,
         work: &mut Work<'_>,
     ) -> Result<()> {
         work.spend()?;
         let mut values = vec![];
         let mut key = String::new();
         for node in &self.keys {
-            let v = eval(node, row, columns, alias, params, work)?;
+            let v = eval_scoped(node, row, columns, alias, params, context, work)?;
             let part = equal_key(&v, work)?;
             work.consume(part.len())?;
             key.push_str(&format!("{}:{part}", part.len()));
@@ -312,7 +342,7 @@ impl Grouping {
         };
         for (spec, state) in self.specs.iter().zip(&mut self.order[i].states) {
             let value = if let Some(node) = &spec.input {
-                eval(node, row, columns, alias, params, work)?
+                eval_scoped(node, row, columns, alias, params, context, work)?
             } else {
                 Scalar::Null
             };
@@ -324,6 +354,7 @@ impl Grouping {
         mut self,
         complete: bool,
         params: &BTreeMap<String, Scalar>,
+        context: &subquery::Context<'_>,
         work: &mut Work<'_>,
     ) -> Result<Source> {
         if self.order.is_empty() && self.keys.is_empty() {
@@ -337,7 +368,15 @@ impl Grouping {
                 row.push(state.result(spec, work)?);
             }
             if let Some(node) = &self.having
-                && truth(&eval(node, &row, &self.columns, "", params, work)?)? != Some(true)
+                && truth(&eval_scoped(
+                    node,
+                    &row,
+                    &self.columns,
+                    "",
+                    params,
+                    context,
+                    work,
+                )?)? != Some(true)
             {
                 continue;
             }

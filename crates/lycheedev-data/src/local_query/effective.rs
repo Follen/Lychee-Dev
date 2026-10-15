@@ -1,4 +1,4 @@
-//! Go 3.2.0 effective.go and hotfix_snapshots.go. One SQL invocation owns its
+//! Go 3.2.3 effective.go and hotfix_snapshots.go. One SQL invocation owns its
 //! authenticated immutable snapshots; an overlay never changes a static table.
 use super::*;
 use crate::hotfix::{self, CacheEntry};
@@ -169,6 +169,21 @@ pub(super) struct Report {
     pub replaced_or_added: usize,
     pub deleted: usize,
 }
+struct Patch {
+    values: Option<Vec<relational::Scalar>>,
+    ordinal: usize,
+    entry: CacheEntry,
+}
+
+/// Prepared independently of the base provider and the mutable capture cache.
+/// All selected patches are validated here, including for schema-only queries.
+pub(super) struct OverlayPlan {
+    schema: relational::Source,
+    patches: BTreeMap<u32, Patch>,
+    capture_ids: Vec<String>,
+    identity_index: usize,
+}
+
 pub(super) struct Snapshots<'a> {
     inv: &'a Invocation,
     pin: &'a selection::DataPin,
@@ -300,6 +315,41 @@ impl<'a> Snapshots<'a> {
         ids: &[String],
         schema_only: bool,
     ) -> Result<(relational::Source, Report)> {
+        let (plan, report) = self.prepare(&base.columns, base.complete, definition, bundle, ids)?;
+        if schema_only {
+            return Ok((plan.schema, report));
+        }
+        // Compatibility for existing owned-source consumers. The actual SQL
+        // path borrows the plan's provider and never materializes this table.
+        let safety = self.budget.safety_only();
+        let mut retained = safety.reserve_retained(0)?;
+        let mut rows = Vec::new();
+        plan.scan(&base, self.budget, &mut |row| {
+            retained.grow(
+                cloned_row_bytes(row, 0, 0)?
+                    .checked_add(size_of::<Vec<relational::Scalar>>())
+                    .ok_or_else(limit)?,
+            )?;
+            rows.try_reserve_exact(1).map_err(|_| limit())?;
+            rows.push(clone_row(row, row.len())?);
+            Ok(())
+        })?;
+        let mut source = plan.schema;
+        source.rows = rows;
+        // Source has no reservation owner; its owned rows follow the legacy
+        // conservative query-lifetime admission rather than being refunded.
+        retained.commit();
+        Ok((source, report))
+    }
+
+    pub(super) fn prepare(
+        &mut self,
+        columns: &[String],
+        complete: bool,
+        definition: &schema::Definition,
+        bundle: &definitions::Bundle,
+        ids: &[String],
+    ) -> Result<(OverlayPlan, Report)> {
         self.budget.check()?;
         if ids.is_empty() || ids.len() > 16 {
             return Err(identity());
@@ -376,23 +426,12 @@ impl<'a> Snapshots<'a> {
             .find(|field| field.identity)
             .map(|field| field.name.as_str())
             .unwrap_or("");
-        let identity_index = base
-            .columns
+        let identity_index = columns
             .iter()
             .rposition(|name| name == identity)
             .ok_or_else(definition_error)?;
-        if base.columns.len() > 4093
-            || base
-                .columns
-                .iter()
-                .any(|name| name.starts_with("__hotfix_"))
-        {
+        if columns.len() > 4093 || columns.iter().any(|name| name.starts_with("__hotfix_")) {
             return Err(definition_error());
-        }
-        struct Patch {
-            values: Option<Vec<relational::Scalar>>,
-            ordinal: usize,
-            entry: CacheEntry,
         }
         let mut patches = BTreeMap::new();
         let mut field_bytes = 0usize;
@@ -413,9 +452,9 @@ impl<'a> Snapshots<'a> {
                 continue;
             }
             self.budget.charge(Cost {
-                retained_bytes: (entry.payload_bytes * 4 + base.columns.len() * 64 + 384) as u64,
-                metadata_bytes: (base.columns.len() * 64 + 384) as u64,
-                decode_work: (base.columns.len() + 1) as u64,
+                retained_bytes: (entry.payload_bytes * 4 + columns.len() * 64 + 384) as u64,
+                metadata_bytes: (columns.len() * 64 + 384) as u64,
+                decode_work: (columns.len() + 1) as u64,
                 ..Default::default()
             })?;
             let raw = &self.captures[&ids[ordinal]].raw;
@@ -431,7 +470,7 @@ impl<'a> Snapshots<'a> {
                 .checked_add(size)
                 .filter(|size| *size <= 32 << 20)
                 .ok_or_else(limit)?;
-            let values = flatten(&base.columns, decoded.fields())?;
+            let values = flatten(columns, decoded.fields())?;
             drop(decoded);
             patches.insert(
                 entry.record_id,
@@ -450,122 +489,215 @@ impl<'a> Snapshots<'a> {
                 report.deleted += 1;
             }
         }
-        if schema_only {
-            // Go validates/decodes patches while creating EffectiveSource;
-            // applying them to base records belongs to Scan, not preparation.
-            self.budget.charge(Cost::retained(
-                (base.columns.len() + 3) * size_of::<String>() + 128,
-            ))?;
-            let mut columns = base.columns;
-            columns.extend([
-                "__hotfix_source".into(),
-                "__hotfix_push".into(),
-                "__hotfix_index".into(),
-            ]);
-            return Ok((
-                relational::Source {
-                    columns,
-                    rows: vec![],
-                    complete: base.complete,
-                },
-                report,
-            ));
-        }
-        let augment = |row: Vec<relational::Scalar>,
-                       patch: Option<&Patch>|
-         -> Result<Vec<relational::Scalar>> {
-            let length = row.len().checked_add(3).ok_or_else(limit)?;
-            self.budget.charge(Cost::retained(
-                length
-                    .checked_mul(size_of::<relational::Scalar>())
-                    .and_then(|bytes| bytes.checked_add(patch.map_or(0, |p| ids[p.ordinal].len())))
-                    .ok_or_else(limit)?,
-            ))?;
-            let mut out = Vec::new();
-            out.try_reserve_exact(length).map_err(|_| limit())?;
-            out.extend(row);
-            if let Some(patch) = patch {
-                out.extend([
-                    relational::Scalar::String(ids[patch.ordinal].clone()),
-                    relational::Scalar::Int(patch.entry.push as i64),
-                    relational::Scalar::UInt(patch.entry.index as u64),
-                ]);
-            } else {
-                out.extend([
-                    relational::Scalar::Null,
-                    relational::Scalar::Null,
-                    relational::Scalar::Null,
-                ]);
-            }
-            Ok(out)
-        };
-        let clone_values = |values: &[relational::Scalar]| -> Result<Vec<relational::Scalar>> {
-            self.budget.charge(Cost::retained(
-                values
-                    .iter()
-                    .map(|value| {
-                        size_of::<relational::Scalar>()
-                            + if let relational::Scalar::String(text) = value {
-                                text.len()
-                            } else {
-                                0
-                            }
-                    })
-                    .sum(),
-            ))?;
-            Ok(values.to_vec())
-        };
-        let mut rows = Vec::new();
-        let mut visited = BTreeSet::new();
+        // The existing schema allocation charge stays in its original ledger.
+        // Borrowed base columns and capture IDs need new owned strings, whose
+        // additional Rust storage is admitted separately from Go's counters.
         self.budget.charge(Cost::retained(
-            (base.rows.len() + patches.len())
-                .saturating_mul(size_of::<Vec<relational::Scalar>>() + 48),
+            (columns.len() + 3) * size_of::<String>() + 128,
         ))?;
-        for row in base.rows {
+        let copied_strings = columns.iter().chain(ids).try_fold(
+            ids.len()
+                .checked_mul(size_of::<String>())
+                .ok_or_else(limit)?,
+            |bytes, text| bytes.checked_add(text.len()).ok_or_else(limit),
+        )?;
+        self.budget
+            .safety_only()
+            .charge(Cost::retained(copied_strings))?;
+        let mut owned_columns = Vec::new();
+        owned_columns
+            .try_reserve_exact(columns.len() + 3)
+            .map_err(|_| limit())?;
+        for column in columns {
             self.budget.check()?;
-            let id = row_id(row.get(identity_index).ok_or_else(fields)?)?;
-            if let Some(patch) = patches.get(&id) {
-                visited.insert(id);
-                if let Some(values) = &patch.values {
-                    rows.push(augment(clone_values(values)?, Some(patch))?);
-                }
-            } else {
-                rows.push(augment(row, None)?);
-            }
+            owned_columns.push(clone_text(column)?);
         }
-        // BTreeMap's numeric order appends new IDs in the fixed Go scan order.
-        for (id, patch) in &patches {
-            self.budget.check()?;
-            if !visited.contains(id)
-                && let Some(values) = &patch.values
-            {
-                rows.push(augment(clone_values(values)?, Some(patch))?);
-            }
-        }
-        self.budget.charge(Cost::retained(
-            base.columns
-                .len()
-                .saturating_add(3)
-                .saturating_mul(size_of::<String>())
-                .saturating_add(128),
-        ))?;
-        let mut columns = base.columns;
-        columns.extend([
+        owned_columns.extend([
             "__hotfix_source".into(),
             "__hotfix_push".into(),
             "__hotfix_index".into(),
         ]);
+        let mut capture_ids = Vec::new();
+        capture_ids
+            .try_reserve_exact(ids.len())
+            .map_err(|_| limit())?;
+        for id in ids {
+            self.budget.check()?;
+            capture_ids.push(clone_text(id)?);
+        }
         self.budget.check()?;
         Ok((
-            relational::Source {
-                columns,
-                rows,
-                complete: base.complete,
+            OverlayPlan {
+                schema: relational::Source {
+                    columns: owned_columns,
+                    rows: vec![],
+                    complete,
+                },
+                patches,
+                capture_ids,
+                identity_index,
             },
             report,
         ))
     }
 }
+
+impl OverlayPlan {
+    pub(super) fn schema(&self) -> &relational::Source {
+        &self.schema
+    }
+
+    pub(super) fn scan(
+        &self,
+        base: &dyn relational::RowProvider,
+        budget: &Budget,
+        emit: &mut relational::RowYield<'_>,
+    ) -> Result<()> {
+        budget.check()?;
+        let safety = budget.safety_only();
+        let mut visited_reservation = safety.reserve_retained(0)?;
+        let mut visited_bytes = 0usize;
+        let mut visited = BTreeSet::new();
+        base.scan(&mut |row| {
+            budget.check()?;
+            let id = row_id(row.get(self.identity_index).ok_or_else(fields)?)?;
+            if let Some(patch) = self.patches.get(&id) {
+                if !visited.contains(&id) {
+                    let count = visited.len().checked_add(1).ok_or_else(limit)?;
+                    let next = tree_bytes::<u32, ()>(count);
+                    visited_reservation.grow(next.checked_sub(visited_bytes).ok_or_else(limit)?)?;
+                    visited.insert(id);
+                    visited_bytes = next;
+                }
+                if let Some(values) = &patch.values {
+                    self.emit_augmented(values, Some(patch), &safety, emit)?;
+                }
+                Ok(())
+            } else {
+                self.emit_augmented(row, None, &safety, emit)
+            }
+        })?;
+        // Only effective Scan appends unmatched live patches in numeric order.
+        // Equal preserves its caller's candidate order and never scans here.
+        for (id, patch) in &self.patches {
+            budget.check()?;
+            if !visited.contains(id)
+                && let Some(values) = &patch.values
+            {
+                self.emit_augmented(values, Some(patch), &safety, emit)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn equal(
+        &self,
+        base: &dyn relational::RowProvider,
+        budget: &Budget,
+        column: &str,
+        value: &relational::Scalar,
+        emit: &mut relational::RowYield<'_>,
+    ) -> Result<relational::EqualityOutcome> {
+        // Go declines before looking at the value or touching a provider.
+        // The executor owns the outer operation check before this boundary.
+        if !crate::hotfix::remote::equal_fold(column, &self.schema.columns[self.identity_index])
+            || !base.has_equal()
+        {
+            return Ok(relational::EqualityOutcome::Declined);
+        }
+        let safety = budget.safety_only();
+        if let Ok(id) = row_id(value)
+            && let Some(patch) = self.patches.get(&id)
+        {
+            if let Some(values) = &patch.values {
+                self.emit_augmented(values, Some(patch), &safety, emit)?;
+            }
+            // A replacement or deletion masks the base, even when no physical
+            // record exists. Never perform a base lookup for a known patch.
+            return Ok(relational::EqualityOutcome::Handled);
+        }
+        // Invalid/out-of-range/NULL values belong to the base's SQL contract.
+        // Do not expose the overlay's row_id conversion failure or coerce the
+        // scalar before delegation; in particular retain float/type errors.
+        base.equal(column, value, &mut |row| {
+            self.emit_augmented(row, None, &safety, emit)
+        })
+    }
+
+    fn emit_augmented(
+        &self,
+        row: &[relational::Scalar],
+        patch: Option<&Patch>,
+        safety: &Budget,
+        emit: &mut relational::RowYield<'_>,
+    ) -> Result<()> {
+        let source = patch.map(|patch| self.capture_ids[patch.ordinal].as_str());
+        let length = row.len().checked_add(3).ok_or_else(limit)?;
+        // The guard outlives the vector and all cloned strings, including on
+        // consumer error. Every retained consumer must admit its own copy.
+        let _scratch =
+            safety.reserve_retained(cloned_row_bytes(row, 3, source.map_or(0, str::len))?)?;
+        let mut out = clone_row(row, length)?;
+        if let Some(patch) = patch {
+            out.extend([
+                relational::Scalar::String(clone_text(source.ok_or_else(fields)?)?),
+                relational::Scalar::Int(patch.entry.push as i64),
+                relational::Scalar::UInt(patch.entry.index as u64),
+            ]);
+        } else {
+            out.extend([
+                relational::Scalar::Null,
+                relational::Scalar::Null,
+                relational::Scalar::Null,
+            ]);
+        }
+        safety.check()?;
+        emit(&out)
+    }
+}
+
+fn cloned_row_bytes(
+    row: &[relational::Scalar],
+    extra_cells: usize,
+    extra_bytes: usize,
+) -> Result<usize> {
+    row.iter().try_fold(
+        row.len()
+            .checked_add(extra_cells)
+            .and_then(|count| count.checked_mul(size_of::<relational::Scalar>()))
+            .and_then(|bytes| bytes.checked_add(extra_bytes))
+            .ok_or_else(limit)?,
+        |bytes, value| {
+            bytes
+                .checked_add(match value {
+                    relational::Scalar::String(text) => text.len(),
+                    _ => 0,
+                })
+                .ok_or_else(limit)
+        },
+    )
+}
+
+fn clone_text(text: &str) -> Result<String> {
+    let mut copy = String::new();
+    copy.try_reserve_exact(text.len()).map_err(|_| limit())?;
+    copy.push_str(text);
+    Ok(copy)
+}
+
+/// Caller must admit both the vector and all copied strings before entering.
+fn clone_row(row: &[relational::Scalar], capacity: usize) -> Result<Vec<relational::Scalar>> {
+    let mut copy = Vec::new();
+    copy.try_reserve_exact(capacity).map_err(|_| limit())?;
+    for value in row {
+        copy.push(match value {
+            relational::Scalar::String(text) => relational::Scalar::String(clone_text(text)?),
+            value => value.clone(),
+        });
+    }
+    Ok(copy)
+}
+
 fn output_limit() -> lycheedev_core::ToolkitError {
     fault(
         "relational.resource_limit",
@@ -1128,3 +1260,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "effective_provider_tests.rs"]
+mod provider_tests;

@@ -3,20 +3,23 @@
 use super::*;
 
 pub(super) fn references(program: &Program, name: &str) -> usize {
-    if program
-        .bindings
-        .iter()
-        .any(|(n, _)| n.eq_ignore_ascii_case(name))
-    {
+    if program.bindings.iter().any(|(n, _)| equal_fold(n, name)) {
         return 0;
     }
     let relation = |table: &str, body: &Option<Box<Program>>| {
         body.as_ref().map_or(
-            usize::from(!table.contains('.') && table.eq_ignore_ascii_case(name)),
+            usize::from(!table.contains('.') && equal_fold(table, name)),
             |p| references(p, name),
         )
     };
-    relation(&program.table, &program.derived)
+    let mut expression_references = 0;
+    for term in program.terms() {
+        subquery::visit_queries(term, &mut |query| {
+            expression_references += references(query, name)
+        });
+    }
+    expression_references
+        + relation(&program.table, &program.derived)
         + program
             .joins
             .iter()
@@ -50,7 +53,7 @@ fn delta_scope<'a>(
     })?;
     work.retain(bytes)?;
     let mut inputs = sources.clone();
-    inputs.retain(|n, _| !n.eq_ignore_ascii_case(name));
+    inputs.retain(|n, _| identifier_lower(n) != identifier_lower(name));
     inputs.insert(name.to_string(), delta);
     Ok(inputs)
 }
@@ -59,6 +62,7 @@ pub(super) fn execute(
     name: &str,
     program: &Program,
     sources: &BTreeMap<String, &Source>,
+    outer: Option<&subquery::Frame<'_>>,
     parameters: &BTreeMap<String, Scalar>,
     work: &mut Work<'_>,
 ) -> Result<QueryResult> {
@@ -76,7 +80,7 @@ pub(super) fn execute(
     {
         return Err(unsupported());
     }
-    let first = seed.execute_scoped(sources, parameters, work)?;
+    let first = seed.execute_scoped_with(sources, outer, parameters, work)?;
     work.retain(columns_cost(&first.columns)? + 96)?;
     let columns = first.columns.clone();
     let mut complete = first.complete;
@@ -89,7 +93,7 @@ pub(super) fn execute(
     // zero-delta rows are discarded: an aggregate cannot invent a starting row.
     if blocks[0].rows.is_empty() {
         let inputs = delta_scope(sources, name, &blocks[0], work)?;
-        let checked = step.execute_scoped(&inputs, parameters, work)?;
+        let checked = step.execute_scoped_with(&inputs, outer, parameters, work)?;
         if checked.columns.len() != columns.len() {
             return Err(binding());
         }
@@ -98,7 +102,7 @@ pub(super) fn execute(
     while !blocks.last().unwrap().rows.is_empty() {
         work.spend()?;
         let inputs = delta_scope(sources, name, blocks.last().unwrap(), work)?;
-        let next = step.execute_scoped(&inputs, parameters, work)?;
+        let next = step.execute_scoped_with(&inputs, outer, parameters, work)?;
         if next.columns.len() != columns.len() {
             return Err(binding());
         }
