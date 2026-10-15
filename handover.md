@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 17:02 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`0aa2671f22eed63c3aa4777f5235639da0d8e172`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 17:07 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`fc832882b04c031d5768fefb31bddccc7c3f20e1`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -42,7 +42,7 @@ Data 323自适应基础R23.1已独审并组合：真实workspace准入后采样W
 
 1. 已完成 public declaration rendering 的局部替代，历史27+27/450 trace证明只属于其冻结输入。
 2. DeclarationModel摄取后继已独审，三方 A旧构造/B新构造/C完全原版公开API的prepare-lock已完成，150registry+5local每侧身份核验一致，实际验证已启动：A31通过，B编译与projection11/declaration11通过；随后B callback列表进程exit0但namespace回收观察遇EACCES，无法确认完整树回收，owner中断且symbols lease保留。C及近8MiB资源组未运行；后继本地Cargo暂停，独立Windows三方契约runner R2已完成独审并接入单独job，固定49文件身份；本地parser11/缓存checker4项实际通过，31×3/450trace/6构造结果尚未在Windows执行，资源probe未接入，不能追认旧owner。公开parse/index合并了原阶段边界回调（原实现也无逐token回调）、增加文本持有是待测取舍，不能宣称等价或减内存。
-3. owned session/coverage ledger、selected-decision与DerivedNumber/EnvironmentCallable/EnvironmentReturn、call/return query编排三片已分别独审并累计组合12个源文件；21新增Rust仍NOT_RUN，已接准确测试目标。后继S4两阶段表达式plan已独审组合，保selected编译期与raw执行期顺序，新增8Rust未跑；S5栈执行/unary已独审组合，保两阶段producer顺序与carrier身份，12新增Rust未跑；后继S6一般非逻辑binary与两个context短路已独审组合，9新增Rust未跑，其他logical继续move交待实现后台；S7 dense RHS table tuple已独审组合，8新增Rust未跑，保原member查询顺序后排序/密度校验和已有ledger前缀；通用递归后端尚未完成，未切生产、未删除现有hook，不能以新增自有代码冒充零补丁完成。旧callability首候选存在enable/coverage顺序差异，未集成。全部43个registry入口按真实消费者核对，不能删除nil/unknown/denied-call能力换取无补丁。
+3. owned session/coverage ledger、selected-decision与DerivedNumber/EnvironmentCallable/EnvironmentReturn、call/return query编排三片已分别独审并累计组合12个源文件；21新增Rust仍NOT_RUN，已接准确测试目标。后继S4两阶段表达式plan已独审组合，保selected编译期与raw执行期顺序，新增8Rust未跑；S5栈执行/unary已独审组合，保两阶段producer顺序与carrier身份，12新增Rust未跑；后继S6一般非逻辑binary与两个context短路已独审组合，9新增Rust未跑，其他logical继续move交待实现后台；S7 dense RHS table tuple已独审组合，8新增Rust未跑，保原member查询顺序后排序/密度校验和已有ledger前缀；S8已独审组合真实owned query/cache→表达式执行→Name initializer与严格普通local shell，14新增Rust/57比较未跑；Object/Parameter/Function/general flow/member/call仍明确Continue待实现，不假raw成功；498旧S1–S3原生oracle步骤已失败，终态封存根因待核。通用递归后端尚未完成，未切生产、未删除现有hook，不能以新增自有代码冒充零补丁完成。旧callability首候选存在enable/coverage顺序差异，未集成。全部43个registry入口按真实消费者核对，不能删除nil/unknown/denied-call能力换取无补丁。
 4. 其余推断、identity、cardinality与checker随后按真实消费者逐片替换。最后核未修改上游完整文件身份、产品锁、全Retail和全部增强回归。
 
 ## 3. 最近已验证证据与限制
