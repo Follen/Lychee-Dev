@@ -34,14 +34,16 @@ func catalogCheck() vault.Check {
 	products := map[string]bool{}
 	codes := map[string]bool{}
 	for _, baseline := range baselines {
-		if baseline.Product == "" || products[baseline.Product] {
-			problems = append(problems, "duplicate or empty product "+baseline.Product)
+		productBuild := baseline.Product + "/" + baseline.BuildSeries
+		codeBuild := baseline.ProductCode + "/" + baseline.BuildSeries
+		if baseline.Product == "" || products[productBuild] {
+			problems = append(problems, "duplicate or empty product/build "+productBuild)
 		}
-		products[baseline.Product] = true
-		if baseline.ProductCode == "" || codes[baseline.ProductCode] {
-			problems = append(problems, "duplicate or empty productCode "+baseline.ProductCode)
+		products[productBuild] = true
+		if baseline.ProductCode == "" || codes[codeBuild] {
+			problems = append(problems, "duplicate or empty productCode/build "+codeBuild)
 		}
-		codes[baseline.ProductCode] = true
+		codes[codeBuild] = true
 		if !digest(baseline.SourceCommit, 40) {
 			problems = append(problems, "invalid sourceCommit for "+baseline.Product)
 		}

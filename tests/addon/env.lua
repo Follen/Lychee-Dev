@@ -18,7 +18,7 @@ Env.secrets = setmetatable({}, { __mode = "k" })
 local realPrint = print
 
 local TEST_BUILDS = {
-    retail = { "12.1.0", "70000", "Aug 19 2026", 120100 },
+    retail = { "12.1.5", "70391", "Oct 14 2026", 120105 },
     classic = { "5.5.4", "64000", "Aug 04 2026", 50504 },
     ["classic-era"] = { "1.15.9", "70003", "Sep 29 2026", 11509 },
     anniversary = { "2.5.6", "70006", "Sep 29 2026", 20506 },
@@ -709,7 +709,7 @@ C_AddOns = {
     end,
     GetAddOnMetadata = function(addonName, key)
         if addonName == "Lychee Dev" and key == "Version" then
-            return "3.2.0"
+            return "3.2.1"
         end
         return ""
     end,

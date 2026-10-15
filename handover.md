@@ -1,53 +1,38 @@
-更新日期：2026-10-15，Asia/Shanghai。详细历史问题与证据见[审计报告](docs/Clean-repo-2026-10-14.md)；本文件只记录当前交接。
+更新日期：2026-10-15，Asia/Shanghai。历史审计见[审计报告](docs/Clean-repo-2026-10-14.md)；本文件只记录当前交接。
 
-## 分支与交付
+## 当前任务：3.2.1
 
-- [PR #13](https://github.com/Follen/Lychee-Dev/pull/13)已按用户授权合入`main`，合并提交`22043f9faa081549338990b38474db4172704d0d`。本地`3.2.0`、`codex/fix-3.2.0`和远端修复分支已删除，全部提交由main保留。R29产品代码`e17f0759f9145383fdbb67b2ef6ecd021aa4802f`；7项实机、当前协议连接故障及追加容量轮换均已完成。
-- `71d645ec`的[Windows CI](https://github.com/Follen/Lychee-Dev/actions/runs/38593192586)五项必需作业与汇总全部通过；该结果不代表本轮工作区。原生覆盖24349/31245=77.9293%，0fail、17skip的口径与明细见审计报告。
-- [PR #12](https://github.com/Follen/Lychee-Dev/pull/12)已关闭、未合并，只移植必要Definitions冷读预算修复。R23无消费者WGC删除、R24–R26用户要求的三轮清理及R27整合已完成，不扩展新一轮全仓审计。
-- 3.2.0已按用户授权发布到npm `latest`，`next`仍为3.1.2。发行标签`v3.2.0`固定提交`3057a9666ab078270b63c7f06de748069b0d1f4b`；[发布流水线38608441597](https://github.com/Follen/Lychee-Dev/actions/runs/38608441597)全部成功，[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.0)六项产物齐全。本机全局CLI和现有受管Skill均已升级3.2.0；没有修改Lychee Talent。
+- 用户已授权新建PR、审核修正、检查通过后合并，并发布npm 3.2.1。[PR #15](https://github.com/Follen/Lychee-Dev/pull/15)已创建，分支`codex/release-3.2.1`，实现提交`83463a03`；当前等待必需CI，尚未合并或发布。渠道保持`latest`，已发布3.2.0产物不变。
+- 本次范围为Retail 12.1.5/120105兼容与R1215-INPUT-01键盘优先等待，以及3.2.1版本和发布说明。主代理负责整合、文档、全部实机及发行；pr13_review_delivery已完成客户端/安装/包装审查，pr13_review_live已完成输入/恢复审查，两者均无可操作发现，未写文件或运行游戏。
+- Retail基线固定Gethe live提交`18c6d677b605b312f3d813d498404631fb941977`（12.1.5.70391）；TOC、ClientGate、客户端基线与500槽声明新增120105并保留120100。安装按产品和构建系列匹配，旧槽通过既有受管路径迁移。
+- R1215-INPUT-01已实现：Native持有被动键盘监听，所有键松开且连续500ms无事件后重新核验INPUT；忙时零消息返回原Driver等待，已开始组合键完成抬键，submitted/uncertain只等待原回执。不能保证消除与已开始组合键恰好重叠的误触。
 
-## 当前实现与分工
+## 已完成验证
 
-- 主代理独占实机、受管安装、所有CON、整合和文档。live worker已完成旧200槽迁移分类、首个读取失败诊断及公开Mailbox map初始化；delivery worker已完成禁用槽的INPUT/doctor诊断；data worker提供Trace/Objects临时probe。所有worker当前已结束写入。
-- **R29-01**：结构有效的已知旧200槽身份只进入手动激活等待，不授权旧协议输入。正式回归及原CON实机红绿验证通过。
-- **R29-02**：`LoadAddOn`返回DISABLED时保留`slot_addon_disabled`，doctor显示最近回调失败；500份元数据不再表述成500个已加载槽。已通过离线回归，旧运行时捕获的真实DISABLED是故障依据，不声称修复后的错误文案已在游戏重新触发。
-- **R29-03**：公开receipts/bodies map保留固定schema元数据，避免没有业务记录时使用不可读的空哈希节点；私有协议map不变。正式Lua/Go回归、同条件实机红绿对照和完整交易均通过。
-- 首发读取诊断沿既有scan记录逻辑节点、单次长度、已有区域准入结果及guard摘要，不增加读取、不放宽准入、不记录原始地址/内存/角色信息。正式fixture与Windows自有子进程回归通过。
-
-## 当前实机状态
-
-- 固定同一Retail 12.1.0.69933进程、创建身份和窗口，使用本地CLI及受管500槽安装。用户按当前客户端的角色GUID启用了500个槽并保存设置；当前bridge已恢复on。
-- 当前版本失败已区分两件事：Slot 01禁用导致INPUT回调load_failed且未Receive；空回执查询另在`record.receipts.entry.node`被MEM_MAPPED区域准入拒绝，56字节请求、0字节实际读取、guard稳定。
-- 用户重载后的全新、无owner、NextSlot=1运行时，不发布槽、不发键，仅查询未执行nonce的命名回执，同样复现2161B/116calls的稳定拒绝。修复版在同一进程的新runtime、相同条件和同一只读helper下，结果为2236B/123calls、complete=true、0记录、无firstReadFailure。空表问题独立于禁用槽和提交输入；未放宽MEM_PRIVATE准入。
-- 失败CON凭新鲜替代runtime证据关闭；三条成功CON（含追加容量轮换）均完成verified报告、released清理及正常disconnect。本轮四条CON均closed，最终doctor全绿、安装无owner、无槽预约。用户完成bridge off后的reload，已销毁Trace hook和Objects临时快照；最后默认option重载后又完成修复版完整交易。
+- Retail兼容改动的build/vet、受影响Node 16项、版本检查及完整Lua必需Go套件通过（2891测试事件、2625叶节点pass、42skip、0fail）。这次完整运行早于键盘功能加入，不能代表最终3.2.1。
+- 3.2.1最终build/vet、Lua 5.1必需完整Go套件通过：2902测试事件、2634叶节点pass、42skip、0fail、无未完成测试，包并发2、测试并发4、包时限20分钟。skip保留helper及本机缺少的固定输入/原始材料/权限，后续CI另行记录。
+- Node工具和启动器92项通过，唯一缺archive的跳过项使用固定LuaLS archive单独补跑通过，共93项实际通过。版本、Skill合同/生成命令、发行源码输入检查通过。键盘改动此前desktop/channel整包及定向race通过，Windows被动监听实测收到按键/松键并满足500ms静默。
+- 12.1.5实机受管升级后，125份报告全部verified/released、500个数值往返比较通过；prepare/commit/confirm/release各125次，另2次bind、1次unbind、1次自动容量reload，共504次输入交换各提交一次。跨两个runtime，不称单runtime逐个执行500个物理槽。
+- 按用户要求，本机全局CLI通过本地开发包升级并同步受管Skill和Retail。用户在游戏按住W约4秒，两次held检查均0消息；松开后469ms仍等待静默期，随后完成原请求。四个业务交换各提交一次，报告verified且返回42，原期限不变。
+- 两轮实机连接均正常disconnect；最终doctor全绿、无owner、0预约。当前本机仍为3.2.0开发包（developmentOnly=true、workspaceDirty=true），尚未安装公开3.2.1。
 
 ## 7项实机结果
 
-| ID | 已完成的实际检查 | 剩余范围或限制 |
-| --- | --- | --- |
-| R3-01 Trace | 真实已加载页面OnClick回调：GetTime.foo及3类标量owner报页内错误；自有方法两次调用、参数与停止正常 | 非硬件点击；测试hook已由reload清除 |
-| R3-06 拾取器 | 用户实际进入/退出战斗；报告确认dock、键盘脚本和输入保护关闭；用户确认F、Enter、Esc正常 | 本轮特定角色/客户端，不扩展全部战斗场景 |
-| R4-01 输入与恢复 | 完整prepare/commit/confirm/release；异步请求running后原CON/request恢复至verified/released；两成功连接28次交换各提交一次，后续采样间隔最小分别257/332ms | 修复版在reload后的独立runtime通过；未制造真实崩溃或缺失outcome，相关边界仍为正式离线覆盖 |
-| R4-04 bridge状态 | 默认option、off/on与INPUT一致；保存off并reload后status=false、无RuntimePublication；清除显式option并再次reload后status=true，新runtime可正常连接 | 验证默认开关启动，未清空整个账户配置，不称全新账户矩阵 |
-| R4-07 Objects | 真实页面回调处理失败tostring与普通错误；保留5000字partial/limited；健康对象42恢复 | 非硬件点击；临时快照已由reload清除 |
-| R5-01 数值 | 4个高精度/大数/微小数JSON数值与%.17g文本double回读相等；修复版完整交易再次通过，报告verified、released，正常断开 | 同时确认游戏内receipts/bodies保留schema元数据 |
-| R20 连接故障 | 匹配500槽协议新CON bind成功；旧失败CON在reload后无充分证据时保持pending，取得新鲜替代证据后无新输入关闭 | 当前禁用槽及空表问题已定位；旧3.1.2原包仍不能唯一归因 |
+以下为此前3.2.0修复在Retail 12.1.0的已完成范围，不代替本轮版本检查或七产品完整安装矩阵：
 
-本轮共7项，按表中范围完成，不包括已删除的WGC；七产品完整安装/登录/升级矩阵仍见[todo.md](todo.md)。
+| ID | 实际检查及限制 |
+| --- | --- |
+| R3-01 Trace | 真实页面回调错误、自有方法调用与停止；非硬件点击，临时hook已reload清理 |
+| R3-06 拾取器 | 用户真实进入/退出战斗；dock、键盘脚本及输入保护关闭，F/Enter/Esc正常 |
+| R4-01 输入与恢复 | 完整交易、running原请求resume、28次交换及采样间隔；真实崩溃/缺outcome仍仅离线覆盖 |
+| R4-04 bridge状态 | 默认option、off/on、保存off后reload及恢复新runtime连接 |
+| R4-07 Objects | 真实页面错误处理、5000字partial/limited、健康对象恢复；临时快照已reload清理 |
+| R5-01 数值 | 四种double与%.17g文本往返相等，报告verified/released |
+| R20 连接故障 | 公开map固定schema后新runtime空回执及完整交易通过；旧3.1.2原包唯一根因仍未知 |
 
-## 验证与下一步
+## 发行与剩余范围
 
-- 本轮Go build/vet及完整Lua必需Go套件通过：本地Windows/amd64、Go1.27.1、Lua5.1.5、包并发2、测试并发4、包时限20分钟，2886事件/2620叶节点pass、0fail、42skip、无未完成测试。skip包含helper及本地缺少的公开/原始资料、LuaLS集成和符号链接权限，不借用旧CI结果补算；此前中止的运行不计通过。
-- R29验证时版本源为3.1.2；本次发行同步将CLI、addon、npm和测试版本统一为3.2.0，并扩展渠道校验以支持授权的latest。命令目录和Skill输入不变。
-- 3.2.0准备检查：build/vet、buildinfo与addon测试通过；Node工具及启动器92pass、0fail、1skip（本地未提供固定LuaLS archive）；版本、Skill合同/生成命令与发行源码输入检查通过。最终3057a966发布流水线的完整Lua必需Go、race、process、addon、package、真实LuaLS、源码重建、正式包Windows运行检查、摘要校验和registry回读全部成功。首轮仅为修正包内安装文案在上传前取消，不算发布。
-- R29实机CLI为`e17f0759`、workspaceDirty=false；同提交78项开发资源受管update成功。空回执对照、bind/数值报告/release/disconnect及最终doctor均通过；游戏安装仍保留该已验证候选，本次npm安装没有重载游戏。
-- PR合并前head `ab037808` 的[Windows CI38603173292](https://github.com/Follen/Lychee-Dev/actions/runs/38603173292)全部成功；本地42skip与CI环境结果仍分开记，不推测新覆盖率或skip计数。
-- 本机通过npm安装已发布3.2.0；PATH实际启动器返回Windows/amd64、commit3057a966、workspaceDirty=false。配套Skill通过受管update同步完成，后续新Agent上下文使用新版说明。registry独立回读确认latest=3.2.0、包integrity和provenance元数据存在；不声称完成provenance密码学验证。
-- 私人现场日志只留在本地，不上传公共PR。按用户既有要求保留全部剩余忽略材料、原ZIP和恢复记录；不得清理其他任务或保留的`.worktrees/rust-refactor`。原R20/R22部分临时负对照日志已删除的历史限制仍见审计报告，不能补造。
-
-## 用户追加：500槽容量一轮与发布
-
-- 同一Retail进程、e17f0759受管安装完成125次完整请求：prepare/commit/confirm/release各125次，共500次业务槽交换；另有2次bind、1次unbind和1次自动reload。504次输入交换各提交一次。容量轮换在两个runtime间完成，不称同一runtime逐一执行500个物理槽。
-- 125份报告全部verified、资源released、清理complete；500个数值/十进制文本比较通过。16份当前/历史journal包含4120条业务事件（另15条checkpoint），连接已正常关闭，最终doctor全绿、无owner、0预约。
-- 合并、相关分支清理、3.2.0发布及本机CLI/Skill升级均完成。保留用户要求留下的材料及rust-refactor工作树；其余跨产品场景仍按todo.md列出的范围待办。
+- 3.2.0已由[PR #13](https://github.com/Follen/Lychee-Dev/pull/13)合并后发布，发行标签`v3.2.0`固定`3057a966`；[发布流水线](https://github.com/Follen/Lychee-Dev/actions/runs/38608441597)及[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.0)完整成功，`next`仍为3.1.2。
+- 七产品干净首次安装、重新登录及完整升级矩阵仍见[todo.md](todo.md)。当前没有新确认缺陷或活动游戏连接。
+- 下一步：等待PR #15必需CI；通过后合并，使用固定发布workflow发布，核验registry及GitHub Release，再将本机切回正式包。
+- 本轮结果与本地重装包保留于忽略的`.tmp/keyboard-priority/`；观察程序已删除。构建stage、缓存与LuaLS下载包的清理被自动审批策略拒绝，暂留。保留用户此前要求留下的材料、原ZIP、恢复记录及`.worktrees/rust-refactor`，不清理其他任务资源。

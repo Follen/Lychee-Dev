@@ -1,6 +1,6 @@
 # Lychee Dev Toolkit 设计
 
-本文描述 3.2.0 开发基线的当前实现。发行版本以 [release/version.json](release/version.json) 为准；验证范围见 [todo.md](todo.md)。
+本文描述 3.2.1 开发基线的当前实现。发行版本以 [release/version.json](release/version.json) 为准；验证范围见 [todo.md](todo.md)。
 
 ## 组成与职责
 
@@ -28,7 +28,7 @@
 
 | CLI product | Launcher/CDN 键 | 客户端目录 | Source ref | Interface |
 | --- | --- | --- | --- | --- |
-| retail | wow | _retail_ | live | 120100 |
+| retail | wow | _retail_ | live | 120105、120100 |
 | classic | wow_classic | _classic_ | classic | 50504 |
 | classic-era | wow_classic_era | _classic_era_ | classic_era | 11509 |
 | titan | wow_classic_titan | _classic_titan_ | classic_titan | 38002 |
@@ -39,6 +39,8 @@
 安装身份从 `.flavor.info`、`version.txt`、`.build.info` 等元数据解析；明确选中的客户端路径保持原选择。两个 Forever beta 共享源码家族，但独立固定地区、产品和构建配置。
 
 Data pin 固定 product、build、BuildConfig、CDNConfig、region、locale 和 DBD 来源。同版本号不代表相同内容。主 addon 与 500 个 LoD 槽采用一致的多 Interface 声明，声明更新通过受管安装迁移。
+
+Retail 12.1.5.70391 对应 `live` 固定提交 `18c6d677b605b312f3d813d498404631fb941977`、Interface 120105；保留12.1.0的120100基线。同一产品的安装选择按实际构建系列匹配，不取该产品的第一条基线。
 
 周年服 API 基线为 `classic_anniversary` 提交 `2cfec7c00f0f24762d5ca35a4beb1e93c0cde328`（2.5.6.70006），具有独立的 1483 项事件目录。其他客户端基线保留在对应生成文件和运行时目录中。
 
@@ -70,7 +72,7 @@ Wago 的 coverage.complete 表示当前窗口耗尽，本地 snapshot 保留完�
 
 Forever 扫描主模块 `.text` 的可读区间，保留短读前缀，对剩余部分按页有界补读。所有命中先解析 RIP，再按目标根去重并验证 Lua/Mailbox；多个有效根报告歧义。扫描缺口与读取失败写入覆盖证据，部分覆盖下成功定位不代表全范围唯一。
 
-**输入路径：** 500 个不可重用的 LoD 槽承载信封；正式执行键触发 prepare → challenge → commit，独立重载键负责切换运行时。普通编辑框透传两个有效绑定，CLI 使用新鲜 INPUT 授权输入，不发送 Esc 或聊天文字。玩家按住相关实体键时等待松开。
+**输入路径：** 500 个不可重用的 LoD 槽承载信封；正式执行键触发 prepare → challenge → commit，独立重载键负责切换运行时。普通编辑框透传两个有效绑定，CLI 使用新鲜 INPUT 授权输入，不发送 Esc 或聊天文字。玩家按键优先：所有键松开且连续500ms没有键盘事件后重新核验INPUT；已开始的组合键先完成并抬键，不在修饰键按下时等待。
 
 **身份与竞争：** 先固定 installation、PID、进程创建时间、HWND、build 和 product，再绑定 GUID、runtime、owner、fence。每个进程独立连接；共享安装使用短发布锁和持久槽预约，等待执行或回执时不占发布锁。
 

@@ -55,7 +55,7 @@ func TestSlotPoolInstallPublicationAndIsolation(t *testing.T) {
 }
 
 func TestSlotPoolInterfaceMigration(t *testing.T) {
-	for _, previous := range []string{previousSlotInterfaces, previousMailboxSlotInterfaces} {
+	for _, previous := range []string{previousSlotInterfaces, previousMailboxSlotInterfaces, previousRetailSlotInterfaces} {
 		t.Run(previous, func(t *testing.T) {
 			ctx := context.Background()
 			parent := t.TempDir()
