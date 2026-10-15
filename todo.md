@@ -232,8 +232,10 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] Transfer retained body ownership without cloning complete remote buffers; preserve exact release accounting and actual source provenance. Connect streamed asset inspect/export/demux through the owned verified-blob lifetime, rather than materializing large assets.
 - [ ] Run real CLI usage quality and cold/warm/cache-failure paths on these default consumers; internal Session APIs alone do not close the remote Data acceptance rows.
 
-### 2026-10-15 14:39 当前增量
+### 2026-10-15 15:04 当前增量
 
-- [ ] R13c2 decoded alias与R13d2共享body retained所有权已静态独审、精确组合；9+6新增Rust回归待Windows。默认远端SQL/provider和definitions控制仍在下一片，不能标整个Data闭合。
+- [ ] R13c2 decoded alias与R13d2共享body retained所有权已静态独审、精确组合；9+6新增Rust回归待Windows。R17.1默认远端SQL/provider已接并独审，6项消费者测试未运行；外层Metadata owner及definitions控制另片，不能标整个Data闭合。
 - [ ] b16正式Lua220项通过；完整Source/IPC在release读取被硬编码next阻断，当前3.5.0 beta共享渠道策略修复已独审，须实跑公开入口与全Retail后再测Graph/XML收益。
 - [ ] b16 normal control及Mailbox三项fixture合同修正已独审，原4/1和340/2结果保留，新候选待运行。
+
+- [ ] 本地Emmy三方A31及B部分通过，但namespace回收EACCES未验证，保留symbols lease；C/资源与当前GNU未运行。完成独立Windows验证方案审核，不绕本地未回收owner。

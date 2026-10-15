@@ -631,7 +631,7 @@ pub fn sql(inv: &Invocation) -> Result<Outcome> {
 fn sql_inner(inv: &Invocation) -> Result<Outcome> {
     sql_inner_after_execute(inv, &mut || Ok(()))
 }
-fn sql_inner_after_execute(
+pub(crate) fn sql_inner_after_execute(
     inv: &Invocation,
     after_execute: &mut impl FnMut() -> Result<()>,
 ) -> Result<Outcome> {
@@ -669,7 +669,20 @@ fn sql_inner_after_execute(
     }
     program.validate_parameters(&request.parameters)?;
     request.admit_encoded(&safety)?;
-    let pin = selection::resolve_pinned(inv)?;
+    let pin = if inv.flag_bool("--cdn") {
+        if let Some(id) = inv.flag("--snapshot") {
+            let child = crate::remote::cache::child_control(&inv.control, budget.deadline)?;
+            selection::load_pinned_controlled_with_check(&inv.home, id, &child, || budget.check())?
+        } else {
+            // Existing project discovery remains a separate controlled-consumer gap.
+            inv.control.check()?;
+            let pin = selection::resolve_pinned(inv)?;
+            budget.check()?;
+            pin
+        }
+    } else {
+        selection::resolve_pinned(inv)?
+    };
     let data = pin.data.as_ref().ok_or_else(|| {
         fault(
             "records.data_pin_required",
@@ -677,239 +690,259 @@ fn sql_inner_after_execute(
             "SQL requires a fixed DataPin",
         )
     })?;
-    // Go Execute canonicalizes parameters before invoking any source resolver.
-    // Keep request size/name and pin admission earlier, but no provider error
-    // may mask an invalid numeric scalar.
-    let parameters = request.bindings()?;
-    // Go reserves the executor once before source preparation. Its separate
-    // 64 MiB Work limit still bounds Rust execution, whose actual allocations
-    // remain charged to the safety ledger rather than charged twice logically.
-    budget.charge_split(Cost::retained(64 << 20), Cost::default())?;
-    let definitions_started = Instant::now();
-    let mut bundles = vec![];
-    let mut semantic_sources = BTreeMap::new();
-    let mut semantic_provenance = vec![];
-    for name in program.source_tables() {
-        budget.check()?;
-        if let Some((catalog, table)) = name.split_once('.')
-            && catalog.eq_ignore_ascii_case("meta")
-        {
-            let (source, provenance) = definitions::semantics::source(
-                &inv.home,
-                &data.definition_commit,
-                &data.full_build,
-                table,
-                inv.flag_bool("--offline"),
-                &budget,
-                &inv.control,
-            )?;
-            semantic_sources.insert(name.to_owned(), source);
-            semantic_provenance.push(provenance);
-            continue;
-        }
-        let canonical = if let Some((catalog, name)) = name.split_once('.') {
-            if !catalog.eq_ignore_ascii_case("static") && !catalog.eq_ignore_ascii_case("effective")
-            {
-                return Err(fault(
-                    "relational.unsupported",
-                    3,
-                    "SQL catalog must be static, effective or meta",
-                ));
-            }
-            name
-        } else {
-            name
-        };
-        bundles.push((
-            name.to_owned(),
-            definitions::prepare_budgeted(
-                &inv.home,
-                &data.definition_commit,
-                canonical,
-                inv.flag_bool("--offline"),
-                deadline,
-                Some(&budget),
-            )?,
-        ));
-    }
-    let definitions_ms = definitions_started.elapsed().as_secs_f64() * 1000.0;
-    let ids = bundles
-        .iter()
-        .map(|(_, (bundle, _))| bundle.identity.db2_file_data_id)
-        .collect::<Vec<_>>();
-    let mut bundles = Some(bundles);
-    let mut query_result = None;
-    let mut semantic_sources = Some(semantic_sources);
-    let mut execute = |files: Vec<File>| -> Result<Vec<u32>> {
-        let prepared = Instant::now();
-        let mut sources = semantic_sources
-            .take()
-            .ok_or_else(|| fault("records.internal", 8, "SQL source callback repeated"))?;
-        let mut provenance = vec![];
-        let mut decoded_bytes = 0;
-        let mut snapshots = effective::Snapshots::new(inv, data, &budget);
-        let mut effective_sources = vec![];
-        for ((name, (bundle, dbd)), file) in bundles
-            .take()
-            .ok_or_else(|| fault("records.internal", 8, "SQL source callback repeated"))?
-            .into_iter()
-            .zip(files)
-        {
+    // Fixed Go SQL admits its workspace after DataIdentity and keeps the actual
+    // lease through source preparation, execution, capture and CSV publication.
+    // Only the CDN route changes here; local admission is a separate consumer.
+    let mut remote = if inv.flag_bool("--cdn") {
+        Some(crate::remote::provider::Scope::acquire(inv, data, &budget)?)
+    } else {
+        None
+    };
+    let result = (|| {
+        // Go reserves the executor once before source preparation. Its separate
+        // 64 MiB Work limit still bounds Rust execution, whose actual allocations
+        // remain charged to the safety ledger rather than charged twice logically.
+        budget.charge_split(Cost::retained(64 << 20), Cost::default())?;
+        // Canonical scalar errors still precede every source resolver.
+        let parameters = request.bindings()?;
+        let definitions_started = Instant::now();
+        let mut bundles = vec![];
+        let mut semantic_sources = BTreeMap::new();
+        let mut semantic_provenance = vec![];
+        for name in program.source_tables() {
             budget.check()?;
-            let layout = table::inspect_budgeted(&file.bytes, Default::default(), budget.clone())?;
-            if layout.table_hash != bundle.identity.hash {
-                return Err(fault(
-                    "schema.invalid_format",
-                    4,
-                    "WDC table hash differs from manifest identity",
-                ));
-            }
-            let definition = schema::Document::parse(&dbd)?
-                .select(&data.full_build, &format!("{:08X}", layout.layout_hash))?;
-            let table = table::open_budgeted(
-                &file.bytes,
-                &definition,
-                Default::default(),
-                &Default::default(),
-                &[],
-                budget.clone(),
-            )?;
-            let limits = relational::Limits {
-                deadline,
-                ..Default::default()
-            };
-            let mut source = if program.schema_only() {
-                relational::Source::schema_from_wdc_budgeted(
-                    &table,
-                    limits,
-                    budget.token(),
-                    Some(&budget),
-                )?
-            } else {
-                relational::Source::from_wdc_budgeted(
-                    &table,
-                    limits,
-                    budget.token(),
-                    Some(&budget),
-                )?
-            };
-            if name
-                .split_once('.')
-                .is_some_and(|(catalog, _)| catalog.eq_ignore_ascii_case("effective"))
+            if let Some((catalog, table)) = name.split_once('.')
+                && catalog.eq_ignore_ascii_case("meta")
             {
-                let (overlaid, report) = if program.schema_only() {
-                    snapshots.schema(source, &definition, &bundle, &request.hotfix)?
-                } else {
-                    snapshots.apply(source, &definition, &bundle, &request.hotfix)?
-                };
-                source = overlaid;
-                effective_sources.push(report);
+                let (source, provenance) = definitions::semantics::source(
+                    &inv.home,
+                    &data.definition_commit,
+                    &data.full_build,
+                    table,
+                    inv.flag_bool("--offline"),
+                    &budget,
+                    &inv.control,
+                )?;
+                semantic_sources.insert(name.to_owned(), source);
+                semantic_provenance.push(provenance);
+                continue;
             }
-            sources.insert(name, source);
-            decoded_bytes += file.bytes.len();
-            provenance.push(json!({"complete":table.coverage()["complete"],"truncated":false,"file":file.reading,"sources":bundle,"layoutHash":format!("{:08X}",layout.layout_hash),"schema":definition}));
+            let canonical = if let Some((catalog, name)) = name.split_once('.') {
+                if !catalog.eq_ignore_ascii_case("static")
+                    && !catalog.eq_ignore_ascii_case("effective")
+                {
+                    return Err(fault(
+                        "relational.unsupported",
+                        3,
+                        "SQL catalog must be static, effective or meta",
+                    ));
+                }
+                name
+            } else {
+                name
+            };
+            bundles.push((
+                name.to_owned(),
+                definitions::prepare_budgeted(
+                    &inv.home,
+                    &data.definition_commit,
+                    canonical,
+                    inv.flag_bool("--offline"),
+                    deadline,
+                    Some(&budget),
+                )?,
+            ));
         }
-        let preparation_ms = prepared.elapsed().as_secs_f64() * 1000.0;
-        let execution = Instant::now();
-        let result = program.execute_budgeted(
-            &sources,
-            &parameters,
-            relational::Limits {
-                deadline,
-                work: 10_000_000,
-                ..Default::default()
-            },
-            budget.token(),
-            Some(&safety),
-        )?;
-        after_execute()?;
-        query_result = Some((
-            result,
-            provenance,
-            decoded_bytes,
-            preparation_ms,
-            execution.elapsed().as_secs_f64() * 1000.0,
-            effective_sources,
-        ));
-        Ok(Vec::new())
-    };
-    // Run preparation/SQL inside the authenticated read session. Its final
-    // source check is after execution and before publishing any query capture.
-    // A lexical CTE can have no physical source and needs no CASC admission.
-    if ids.is_empty() {
-        execute(Vec::new())?;
-    } else {
-        read_file_batches_budgeted(inv, data, &ids, &budget, &mut execute)?;
-    }
-    let (result, provenance, decoded_bytes, preparation_ms, execution_ms, effective_sources) =
-        query_result.ok_or_else(|| fault("records.internal", 8, "SQL result missing"))?;
-    let complete = result.complete;
-    let resources = budget.logical_snapshot()?;
-    let public_numbers = public_query_numbers(&request, &result.rows, &safety)?;
-    budget.check()?;
-    let mut reading = json!({"resources":resources,"complete":complete,"partial":!complete,"query":request,"result":result.public(),"sources":provenance,"timings":{"definitionsMs":definitions_ms,"preparationMs":preparation_ms,"executionMs":execution_ms,"decodedSourceBytes":decoded_bytes},"resourceAccounting":{"scope":"admitted allocation and work across local CASC/Encoding/decoded cache/definitions/WDC/SQL","strategy":"conservative cumulative admission","wholeQueryAccountingComplete":false,"logicalProviderParityComplete":ids.is_empty(),"used":budget.snapshot()?,"remainingGaps":["physical/effective provider logical counters not audited against Go 3.2","SQL plan/order-container transient allocations","uninterruptible single codec call"]}});
-    if !semantic_provenance.is_empty() {
-        let size = capture::json_size(&semantic_provenance, &safety)?;
-        safety.charge(Cost::metadata(size.saturating_mul(4).saturating_add(4096)))?;
-        reading["semanticSources"] = serde_json::to_value(&semantic_provenance)?;
-    }
-    if !effective_sources.is_empty() {
-        reading["effectiveSources"] = effective::reports_value(&effective_sources, &safety)?;
-    }
-    let raw = capture::json_bytes(
-        &request::CaptureBody {
-            reading: &reading,
-            request: &request,
-        },
-        &safety,
-        16 << 20,
-        || {
-            fault(
-                "relational.resource_limit",
-                3,
-                "SQL result exceeds evidence budget",
-            )
-        },
-    )?;
-    let request_digest = request.digest(&safety)?;
-    let required_sources = if effective_sources.is_empty() {
-        vec![]
-    } else {
-        request
-            .hotfix
+        let definitions_ms = definitions_started.elapsed().as_secs_f64() * 1000.0;
+        let ids = bundles
             .iter()
-            .map(String::as_str)
-            .collect::<Vec<_>>()
-    };
-    let reference_accounting = effective::ReferenceAccounting::new(&safety, &inv.control);
-    let capture = evidence::commit_capture_budgeted_referencing(
-        &inv.home,
-        evidence::CaptureInput {
-            bytes: &raw,
-            maximum_bytes: 16 << 20,
-            media_type: "application/json",
-            provenance: json!({"kind":"data-query","locator":format!("sql:sha256:{request_digest}"),"snapshot":pin.id,"dataBuild":data.full_build}),
-            complete,
-            truncated: false,
-        },
-        &required_sources,
-        &inv.control,
-        &reference_accounting,
-    )?;
-    if csv {
-        let (manifest, csv_capture) = query_csv::export(inv, &pin.id, &capture, &result, &safety)?;
-        let mut out = Outcome::new(manifest);
+            .map(|(_, (bundle, _))| bundle.identity.db2_file_data_id)
+            .collect::<Vec<_>>();
+        let mut bundles = Some(bundles);
+        let mut query_result = None;
+        let mut semantic_sources = Some(semantic_sources);
+        let mut execute = |files: Vec<File>| -> Result<Vec<u32>> {
+            let prepared = Instant::now();
+            let mut sources = semantic_sources
+                .take()
+                .ok_or_else(|| fault("records.internal", 8, "SQL source callback repeated"))?;
+            let mut provenance = vec![];
+            let mut decoded_bytes = 0;
+            let mut snapshots = effective::Snapshots::new(inv, data, &budget);
+            let mut effective_sources = vec![];
+            for ((name, (bundle, dbd)), file) in bundles
+                .take()
+                .ok_or_else(|| fault("records.internal", 8, "SQL source callback repeated"))?
+                .into_iter()
+                .zip(files)
+            {
+                budget.check()?;
+                let layout =
+                    table::inspect_budgeted(&file.bytes, Default::default(), budget.clone())?;
+                if layout.table_hash != bundle.identity.hash {
+                    return Err(fault(
+                        "schema.invalid_format",
+                        4,
+                        "WDC table hash differs from manifest identity",
+                    ));
+                }
+                let definition = schema::Document::parse(&dbd)?
+                    .select(&data.full_build, &format!("{:08X}", layout.layout_hash))?;
+                let table = table::open_budgeted(
+                    &file.bytes,
+                    &definition,
+                    Default::default(),
+                    &Default::default(),
+                    &[],
+                    budget.clone(),
+                )?;
+                let limits = relational::Limits {
+                    deadline,
+                    ..Default::default()
+                };
+                let mut source = if program.schema_only() {
+                    relational::Source::schema_from_wdc_budgeted(
+                        &table,
+                        limits,
+                        budget.token(),
+                        Some(&budget),
+                    )?
+                } else {
+                    relational::Source::from_wdc_budgeted(
+                        &table,
+                        limits,
+                        budget.token(),
+                        Some(&budget),
+                    )?
+                };
+                if name
+                    .split_once('.')
+                    .is_some_and(|(catalog, _)| catalog.eq_ignore_ascii_case("effective"))
+                {
+                    let (overlaid, report) = if program.schema_only() {
+                        snapshots.schema(source, &definition, &bundle, &request.hotfix)?
+                    } else {
+                        snapshots.apply(source, &definition, &bundle, &request.hotfix)?
+                    };
+                    source = overlaid;
+                    effective_sources.push(report);
+                }
+                sources.insert(name, source);
+                decoded_bytes += file.bytes.len();
+                provenance.push(json!({"complete":table.coverage()["complete"],"truncated":false,"file":file.reading,"sources":bundle,"layoutHash":format!("{:08X}",layout.layout_hash),"schema":definition}));
+            }
+            let preparation_ms = prepared.elapsed().as_secs_f64() * 1000.0;
+            let execution = Instant::now();
+            let result = program.execute_budgeted(
+                &sources,
+                &parameters,
+                relational::Limits {
+                    deadline,
+                    work: 10_000_000,
+                    ..Default::default()
+                },
+                budget.token(),
+                Some(&safety),
+            )?;
+            after_execute()?;
+            query_result = Some((
+                result,
+                provenance,
+                decoded_bytes,
+                preparation_ms,
+                execution.elapsed().as_secs_f64() * 1000.0,
+                effective_sources,
+            ));
+            Ok(Vec::new())
+        };
+        // Run preparation/SQL inside the authenticated read session. Its final
+        // source check is after execution and before publishing any query capture.
+        // A lexical CTE can have no physical source and needs no CASC admission.
+        if ids.is_empty() {
+            execute(Vec::new())?;
+        } else if let Some(scope) = remote.as_mut() {
+            scope.read_batches(data, &ids, &mut execute)?;
+        } else {
+            read_file_batches_budgeted(inv, data, &ids, &budget, &mut execute)?;
+        }
+        if let Some(scope) = remote.as_ref() {
+            scope.check()?;
+        }
+        let (result, provenance, decoded_bytes, preparation_ms, execution_ms, effective_sources) =
+            query_result.ok_or_else(|| fault("records.internal", 8, "SQL result missing"))?;
+        let complete = result.complete;
+        let resources = budget.logical_snapshot()?;
+        let public_numbers = public_query_numbers(&request, &result.rows, &safety)?;
+        budget.check()?;
+        let mut reading = json!({"resources":resources,"complete":complete,"partial":!complete,"query":request,"result":result.public(),"sources":provenance,"timings":{"definitionsMs":definitions_ms,"preparationMs":preparation_ms,"executionMs":execution_ms,"decodedSourceBytes":decoded_bytes},"resourceAccounting":{"scope":"admitted allocation and work across local CASC/Encoding/decoded cache/definitions/WDC/SQL","strategy":"conservative cumulative admission","wholeQueryAccountingComplete":false,"logicalProviderParityComplete":ids.is_empty(),"used":budget.snapshot()?,"remainingGaps":["physical/effective provider logical counters not audited against Go 3.2","SQL plan/order-container transient allocations","uninterruptible single codec call"]}});
+        if !semantic_provenance.is_empty() {
+            let size = capture::json_size(&semantic_provenance, &safety)?;
+            safety.charge(Cost::metadata(size.saturating_mul(4).saturating_add(4096)))?;
+            reading["semanticSources"] = serde_json::to_value(&semantic_provenance)?;
+        }
+        if !effective_sources.is_empty() {
+            reading["effectiveSources"] = effective::reports_value(&effective_sources, &safety)?;
+        }
+        let raw = capture::json_bytes(
+            &request::CaptureBody {
+                reading: &reading,
+                request: &request,
+            },
+            &safety,
+            16 << 20,
+            || {
+                fault(
+                    "relational.resource_limit",
+                    3,
+                    "SQL result exceeds evidence budget",
+                )
+            },
+        )?;
+        let request_digest = request.digest(&safety)?;
+        let required_sources = if effective_sources.is_empty() {
+            vec![]
+        } else {
+            request
+                .hotfix
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+        };
+        let reference_accounting = effective::ReferenceAccounting::new(&safety, &inv.control);
+        let capture = evidence::commit_capture_budgeted_referencing(
+            &inv.home,
+            evidence::CaptureInput {
+                bytes: &raw,
+                maximum_bytes: 16 << 20,
+                media_type: "application/json",
+                provenance: json!({"kind":"data-query","locator":format!("sql:sha256:{request_digest}"),"snapshot":pin.id,"dataBuild":data.full_build}),
+                complete,
+                truncated: false,
+            },
+            &required_sources,
+            &inv.control,
+            &reference_accounting,
+        )?;
+        if csv {
+            let (manifest, csv_capture) =
+                query_csv::export(inv, &pin.id, &capture, &result, &safety)?;
+            let mut out = Outcome::new(manifest);
+            out.complete = complete;
+            out.selection = serde_json::to_value(&pin)?;
+            out.provenance = vec![capture, csv_capture];
+            return Ok(out);
+        }
+        let mut out = Outcome::new(reading);
+        out.public_numbers = public_numbers;
         out.complete = complete;
         out.selection = serde_json::to_value(&pin)?;
-        out.provenance = vec![capture, csv_capture];
-        return Ok(out);
+        out.provenance = vec![capture];
+        Ok(out)
+    })();
+    match remote {
+        Some(scope) => scope.finish(result),
+        None => result,
     }
-    let mut out = Outcome::new(reading);
-    out.public_numbers = public_numbers;
-    out.complete = complete;
-    out.selection = serde_json::to_value(&pin)?;
-    out.provenance = vec![capture];
-    Ok(out)
 }
 pub fn asset(inv: &Invocation) -> Result<Outcome> {
     inv.control.check()?;

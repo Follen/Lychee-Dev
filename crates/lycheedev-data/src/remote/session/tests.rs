@@ -135,6 +135,13 @@ impl Fixture {
         Self::with_root(corrupt, None)
     }
     fn with_root(corrupt: bool, groups: Option<(usize, bool)>) -> Self {
+        Self::with_payload(
+            corrupt,
+            groups,
+            b"fully authenticated selected payload".to_vec(),
+        )
+    }
+    fn with_payload(corrupt: bool, groups: Option<(usize, bool)>, payload: Vec<u8>) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let home = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.tmp/remote-session-fixtures")
@@ -151,7 +158,6 @@ impl Fixture {
             control.deadline(),
             control.clone(),
         ));
-        let payload = b"fully authenticated selected payload".to_vec();
         let pckey = hash(&payload);
         let mut actual = payload.clone();
         if corrupt {
@@ -614,3 +620,5 @@ fn single_id_root_match_limit_stays_4096_before_locale_filtering() {
 mod decoded_alias;
 
 mod body_owner;
+
+mod default_sql;
