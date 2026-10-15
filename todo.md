@@ -4,6 +4,8 @@
 
 ## 待办
 
+- [x] 3.2.1发布：[PR #15](https://github.com/Follen/Lychee-Dev/pull/15)审核及必需CI通过后合并，`v3.2.1`固定`10b561db`；[正式发布流水线](https://github.com/Follen/Lychee-Dev/actions/runs/38676733974)全部成功，registry回读确认latest=3.2.1、next=3.1.2，[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.1)六项产物齐全。本机CLI/Skill/所选Retail文件已受管更新为正式3.2.1；CLI为干净发行提交，游戏内addon需下次reload激活。
+
 - [x] R23无消费者WGC及顺序三轮R24/R25/R26清理完成；R27窄清理/有限独立终审完成。代码71d645ec已推，Windows CI38593192586五项必需作业及汇总全部通过。Linux完整结果2578pass/3既有平台fail/28skip单列；本次原生24349/31245=77.9293%，2894事件/2628叶节点pass，0fail、17skip（9helper+8实际可选）。分母删除不计新增业务覆盖。
 
 - [x] 完成追加审计 R3/R4 的 13 项代码修复及正式回归；R3-C01/R3-C03仍为候选，R4-C01已修并通过双真实卷原生回归；条目与证据见 [审计报告](docs/Clean-repo-2026-10-14.md)。
@@ -18,7 +20,7 @@
 - [x] 完成本轮7项实机整合：Retail12.1.0.69933通过Trace/Objects真实页面回调、用户实际战斗与按键、数值往返、running原请求resume、bridge off/on及保存off重载、默认option重新加载、bind回执与新鲜替代runtime退役。e17f0759修复后空map和完整交易复验通过；报告verified/released、本轮三CON均closed、doctor全绿、0预约。范围与限制见 [handover.md](handover.md#7项实机结果)。
 - [ ] 补齐七产品的干净首次安装、重新登录和完整升级实机矩阵。
 - [x] Retail 12.1.5.70391/120105完成受管升级、启动识别及单实例容量验证：125份verified/released报告、500次业务槽交换、1次自动reload；504次输入交换各提交一次，500个数值比较通过，最终disconnect且doctor全绿、0预约。仅本轮升级和容量路径，不扩展为七产品完整安装矩阵。
-- [x] R1215-INPUT-01键盘优先等待已实现，并按用户要求更新本机CLI/Skill完成12.1.5实测：按住W时两次发送尝试均0消息，松开469ms时仍等待静默，随后完成原请求；四个业务交换各提交一次，报告verified/released，disconnect后doctor全绿、0预约。desktop、channel整包与定向race通过；仍不能保证消除与已开始组合键恰好重叠的误触。当前本机为3.2.0本地开发包，修改尚未公开发布。
+- [x] R1215-INPUT-01键盘优先等待已实现，并按用户要求更新本机CLI/Skill完成12.1.5实测：按住W时两次发送尝试均0消息，松开469ms时仍等待静默，随后完成原请求；四个业务交换各提交一次，报告verified/released，disconnect后doctor全绿、0预约。desktop、channel整包与定向race通过；仍不能保证消除与已开始组合键恰好重叠的误触。修改已随3.2.1公开发布，本机CLI已从实测开发包更新为正式包。
 - [x] e17f0759追加一轮500次业务槽交换：125份verified/released报告、1次自动容量reload及重连、504次输入交换无重复；500个数值比较通过，最终disconnect与doctor确认无owner、0预约。
 - [ ] 补齐战斗、受限编辑框和最小化窗口等真实阻塞场景；现有离线测试不能替代这些验收。
 - [x] 3.2.0已发布到 `latest`：固定提交3057a966的[发布流水线](https://github.com/Follen/Lychee-Dev/actions/runs/38608441597)完成CI、打包、Windows隔离安装、registry回读与[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.0)。本机全局CLI及受管Skill均已升级并核验版本。
