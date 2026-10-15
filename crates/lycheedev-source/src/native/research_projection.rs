@@ -6,18 +6,18 @@ use serde_json::Value;
 // total allocator/RSS usage. No cloned JSON tree or graph is retained.
 pub(super) const MAX_RETAINED_BYTES: usize = 1 << 20;
 
-pub(crate) struct RetainedProjection<'a, S, Q, G, O> {
+pub(crate) struct RetainedProjection<'a, S, Q, G, O, R = Value> {
     snapshot: &'a S,
     query: &'a Q,
     graph: Option<&'a G>,
     origins: &'a O,
-    result: Value,
+    result: R,
     steps: usize,
 }
-impl<'a, S, Q, G, O> RetainedProjection<'a, S, Q, G, O> {
+impl<'a, S, Q, G, O, R: serde::Serialize> RetainedProjection<'a, S, Q, G, O, R> {
     pub(super) fn new<E>(
         snapshot: &'a S, query: &'a Q, graph: Option<&'a G>, origins: &'a O,
-        result: Value, steps: usize, mut poll: impl FnMut() -> Result<(), E>,
+        result: R, steps: usize, mut poll: impl FnMut() -> Result<(), E>,
     ) -> Result<Option<Self>, E> {
         if !within_limit(&result, MAX_RETAINED_BYTES, &mut poll)? { return Ok(None); }
         Ok(Some(Self { snapshot, query, graph, origins, result, steps }))
@@ -30,9 +30,11 @@ impl<'a, S, Q, G, O> RetainedProjection<'a, S, Q, G, O> {
                 _ => false,
             }
     }
-    /// Replay logical query costs without reconstructing or cloning the result.
-    /// The caller supplies the SAME step function, including its return reserve.
-    pub(super) fn finish<E>(self, mut poll: impl FnMut() -> Result<(), E>, mut step: impl FnMut() -> Result<(), E>) -> Result<Value, E> {
+    pub(super) fn steps(&self) -> usize { self.steps }
+    /// Replay total costs only after the caller proves the entire replay is
+    /// strictly below its return reserve; otherwise use the original path.
+    /// Original direct serialization charges need not obey that reserve.
+    pub(super) fn finish<E>(self, mut poll: impl FnMut() -> Result<(), E>, mut step: impl FnMut() -> Result<(), E>) -> Result<R, E> {
         poll()?;
         for _ in 0..self.steps { step()?; }
         poll()?;
@@ -40,7 +42,7 @@ impl<'a, S, Q, G, O> RetainedProjection<'a, S, Q, G, O> {
     }
 }
 
-fn within_limit<E>(value: &Value, limit: usize, poll: &mut impl FnMut() -> Result<(), E>) -> Result<bool, E> {
+fn within_limit<E>(value: &impl serde::Serialize, limit: usize, poll: &mut impl FnMut() -> Result<(), E>) -> Result<bool, E> {
     struct Counter<'a, E, F> { bytes: usize, limit: usize, poll: &'a mut F, error: Option<E> }
     impl<E, F: FnMut() -> Result<(), E>> std::io::Write for Counter<'_, E, F> {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {

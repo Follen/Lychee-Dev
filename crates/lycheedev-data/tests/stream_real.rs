@@ -115,7 +115,8 @@ fn real_typed_stream_complete_filtered_projected_error_and_cancel() {
     .unwrap_err();
     assert_eq!(error.exit_code, 5);
     assert_eq!(accepted.len(), 1);
-    assert_eq!(attempts, 3);
+    // Fixed Go stops calling a sink immediately after its first failure.
+    assert_eq!(attempts, 2);
     reports.push(json!({"case":"broken_sink","accepted":accepted,"attempts":attempts,"exit":error.exit_code}));
     let mut started = false;
     let error = stream::stream(&invocation(&home, &[("--filter", "Nope=1")]), &mut |_| {

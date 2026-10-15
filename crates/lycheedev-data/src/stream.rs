@@ -66,6 +66,15 @@ fn matches(value: &table::Value, want: &str) -> bool {
     }
 }
 pub fn stream(inv: &Invocation, sink: &mut dyn FnMut(&Value) -> Result<()>) -> Result<Outcome> {
+    stream_after_finish(inv, sink, &mut |result| result)
+}
+/// Narrow post-close observation seam. Production passes the real checked result
+/// unchanged; tests can inject a close diagnostic without faking table/capture IO.
+pub(crate) fn stream_after_finish(
+    inv: &Invocation,
+    sink: &mut dyn FnMut(&Value) -> Result<()>,
+    after_finish: &mut impl FnMut(Result<(Outcome, Value)>) -> Result<(Outcome, Value)>,
+) -> Result<Outcome> {
     inv.control.check()?;
     if inv.flag("--format") != Some("jsonl") {
         return Err(fault(
@@ -85,85 +94,104 @@ pub fn stream(inv: &Invocation, sink: &mut dyn FnMut(&Value) -> Result<()>) -> R
         Instant::now() + Duration::from_secs(timeout as u64),
         inv.control.clone(),
     ));
-    let db2::Prepared {
-        pin,
-        bundle,
-        file,
-        layout,
-        definition,
-    } = db2::prepare(inv, name, &budget)?;
-    let view = table::open_budgeted(
-        &file.bytes,
-        &definition,
-        Default::default(),
-        &Default::default(),
-        &[],
-        budget.clone(),
-    )?;
-    let fields: Vec<String> = match inv.flag("--fields").filter(|s| !s.is_empty()) {
-        Some(text) => text.split(',').map(|v| v.trim().to_owned()).collect(),
-        None => definition.fields.iter().map(|f| f.name.clone()).collect(),
+    let mut remote = if inv.flag_bool("--cdn") {
+        Some(crate::remote::provider::OpenedScope::open(inv, &budget)?.admit()?)
+    } else {
+        None
     };
-    if fields.len() > 1024 {
-        return Err(fault(
-            "records.query_resource_budget",
-            3,
-            "Stream projection field budget exceeded",
-        ));
-    }
-    for name in fields
-        .iter()
-        .map(String::as_str)
-        .chain(filter.iter().map(|(name, _)| *name))
-    {
-        if !definition.fields.iter().any(|f| f.name == name) {
-            return Err(field_error(name));
+    let mut started = false;
+    let mut write_failed = false;
+    let mut committed_captures = Vec::new();
+    let result = (|| {
+        let mut emit = |frame: &Value| {
+            let result = sink(frame);
+            if result.is_err() {
+                write_failed = true;
+            } else if frame["frame"] == "begin" {
+                started = true;
+            }
+            result
+        };
+        let db2::Prepared {
+            pin,
+            bundle,
+            file,
+            layout,
+            definition,
+        } = db2::prepare_scoped(inv, name, &budget, remote.as_mut(), None)?;
+        let view = table::open_budgeted(
+            &file.bytes,
+            &definition,
+            Default::default(),
+            &Default::default(),
+            &[],
+            budget.clone(),
+        )?;
+        let fields: Vec<String> = match inv.flag("--fields").filter(|s| !s.is_empty()) {
+            Some(text) => text.split(',').map(|v| v.trim().to_owned()).collect(),
+            None => definition.fields.iter().map(|f| f.name.clone()).collect(),
+        };
+        if fields.len() > 1024 {
+            return Err(fault(
+                "records.query_resource_budget",
+                3,
+                "Stream projection field budget exceeded",
+            ));
         }
-    }
-    let proof = json!({"contentVerified":true,"keySource":file.reading["keySource"],"name":name,"identity":bundle.identity,"layoutHash":format!("{:08X}",layout.layout_hash),"definitionSHA256":definition.sha256,"fileDataID":bundle.identity.db2_file_data_id,"contentKey":file.reading["entry"]["contentKey"],"logicalRows":view.logical_count()});
-    let begin = json!({"tables":[proof.clone()],"snapshot":pin.id,"source":"installation","table":bundle.identity.name,"identity":bundle.identity,"layoutHash":format!("{:08X}",layout.layout_hash),"fields":fields,"filter":filter_text,"limit":limit});
-    budget.check()?;
-    sink(&json!({"frame":"begin","begin":begin}))?;
-    let mut count = 0;
-    let mut extra = false;
-    let walk = (|| -> Result<()> {
-        for id in view.ids() {
-            budget.check()?;
-            let mut row = view.row(id, 1 << 20)?;
-            if let Some((field, value)) = filter
-                && !matches(row.get(field).ok_or_else(|| field_error(field))?, value)
-            {
-                continue;
+        for name in fields
+            .iter()
+            .map(String::as_str)
+            .chain(filter.iter().map(|(name, _)| *name))
+        {
+            if !definition.fields.iter().any(|f| f.name == name) {
+                return Err(field_error(name));
             }
-            if count == limit {
-                extra = true;
-                break;
-            }
-            budget.charge(Cost::metadata(fields.len().checked_mul(128).ok_or_else(
-                || {
-                    fault(
-                        "records.query_resource_budget",
-                        3,
-                        "Stream projection size overflow",
-                    )
-                },
-            )?))?;
-            let mut projected = BTreeMap::new();
-            for field in &fields {
-                if let Some(value) = row.remove(field) {
-                    projected.insert(field.clone(), value);
-                }
-            }
-            let frame =
-                json!({"frame":"record","record":{"index":count,"recordID":id,"row":projected}});
-            budget.check()?;
-            sink(&frame)?;
-            count += 1;
         }
+        let proof = json!({"contentVerified":true,"keySource":file.reading["keySource"],"name":name,"identity":bundle.identity,"layoutHash":format!("{:08X}",layout.layout_hash),"definitionSHA256":definition.sha256,"fileDataID":bundle.identity.db2_file_data_id,"contentKey":file.reading["entry"]["contentKey"],"logicalRows":view.logical_count()});
+        let begin = json!({"tables":[proof.clone()],"snapshot":pin.id,"source":file.reading["source"],"table":bundle.identity.name,"identity":bundle.identity,"layoutHash":format!("{:08X}",layout.layout_hash),"fields":fields,"filter":filter_text,"limit":limit});
         budget.check()?;
-        Ok(())
-    })();
-    let publication = walk.and_then(|()| {
+        emit(&json!({"frame":"begin","begin":begin}))?;
+        let mut count = 0;
+        let mut extra = false;
+        let walk = (|| -> Result<()> {
+            for id in view.ids() {
+                budget.check()?;
+                let mut row = view.row(id, 1 << 20)?;
+                if let Some((field, value)) = filter
+                    && !matches(row.get(field).ok_or_else(|| field_error(field))?, value)
+                {
+                    continue;
+                }
+                if count == limit {
+                    extra = true;
+                    break;
+                }
+                budget.charge(Cost::metadata(fields.len().checked_mul(128).ok_or_else(
+                    || {
+                        fault(
+                            "records.query_resource_budget",
+                            3,
+                            "Stream projection size overflow",
+                        )
+                    },
+                )?))?;
+                let mut projected = BTreeMap::new();
+                for field in &fields {
+                    if let Some(value) = row.remove(field) {
+                        projected.insert(field.clone(), value);
+                    }
+                }
+                let frame = json!({"frame":"record","record":{"index":count,"recordID":id,"row":projected}});
+                budget.check()?;
+                count += 1;
+                emit(&frame)?;
+            }
+            budget.check()?;
+            Ok(())
+        })();
+        let publication = walk.and_then(|()| {
+        inv.control.check()?;
+        if let Some(scope) = remote.as_ref() { scope.check_consumer(inv, &budget)?; }
         let end = json!({"partial":false,"partialReasons":null,"count":count,"complete":!extra,"truncated":extra,"truncationReason":if extra{"limit_reached"}else{"none"}});
         budget.check()?;
         let manifest = json!({"begin":begin,"end":end});
@@ -179,34 +207,74 @@ pub fn stream(inv: &Invocation, sink: &mut dyn FnMut(&Value) -> Result<()>) -> R
             &inv.control,
             budget.as_ref(),
         )?;
+        // Keep the returned identity outside the fallible operation; publication
+        // is not rolled back if a later check, consuming close, or sink fails.
+        committed_captures.push(capture);
         budget.check()?;
-        Ok((end, capture))
+        Ok(end)
     });
-    let (end, capture) = match publication {
-        Ok(value) => value,
-        Err(error) => {
-            let code = if error.exit_code == 7
-                || error.code == "command.deadline"
-                || error.code == "operation.deadline"
-            {
-                "records.cancelled"
-            } else {
-                &error.code
-            };
-            // Best effort error marker; a failed writer cannot accept even it. No
-            // end frame or generic envelope may follow the failed owned stream.
-            let _ = sink(&json!({"frame":"error","error":{"code":code,"message":error.message}}));
-            return Err(error);
-        }
+        let end = publication?;
+        let data = json!({"snapshot":pin.id,"pin":pin.data,"source":file.reading["source"],"tables":[proof],"relations":[],"complete":!extra,"truncated":extra,"truncationReason":if extra{"limit_reached"}else{"none"},"partial":false,"partialReasons":null,"table":bundle.identity.name,"mode":"stream","limit":limit,"fields":fields,"filter":filter_text,"count":count,"resourceAccounting":{"wholeQueryAccountingComplete":false,"used":budget.snapshot()?}});
+        let mut outcome = Outcome::new(data);
+        outcome.complete = !extra;
+        Ok((outcome, json!({"frame":"end","end":end})))
+    })();
+    // A success terminal is a promise about the whole owned operation. Hold the
+    // scope through capture, then check every consuming close before making it.
+    let result = match remote {
+        Some(scope) => scope.finish(result),
+        None => result,
     };
-    let data = json!({"snapshot":pin.id,"pin":pin.data,"source":"installation","tables":[proof],"relations":[],"complete":!extra,"truncated":extra,"truncationReason":if extra{"limit_reached"}else{"none"},"partial":false,"partialReasons":null,"table":bundle.identity.name,"mode":"stream","limit":limit,"fields":fields,"filter":filter_text,"count":count,"resourceAccounting":{"wholeQueryAccountingComplete":false,"used":budget.snapshot()?}});
-    let mut outcome = Outcome::new(data);
-    outcome.complete = !extra;
-    outcome.provenance = vec![capture];
-    let terminal = json!({"frame":"end","end":end});
-    // All result construction precedes the success terminal frame.
-    sink(&terminal)?;
-    Ok(outcome)
+    let result = after_finish(result);
+    let result = match result {
+        Ok((mut outcome, terminal)) => match sink(&terminal) {
+            Ok(()) => {
+                outcome.provenance = std::mem::take(&mut committed_captures);
+                Ok(outcome)
+            }
+            Err(error) => {
+                write_failed = true;
+                Err(error)
+            }
+        },
+        Err(error) => Err(error),
+    };
+    match result {
+        Ok(outcome) => Ok(outcome),
+        Err(mut error) => {
+            if !committed_captures.is_empty() {
+                let primary = error.clone();
+                let ids = committed_captures
+                    .iter()
+                    .filter_map(|capture| capture["id"].as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                error.message = format!(
+                    "{}\nstream manifest already committed: {ids}",
+                    error.message
+                );
+                error.details = json!({"schema":"lycheedev.stream-committed-error.v1", "primary":primary, "completedCaptures":committed_captures});
+            }
+            if started && !write_failed {
+                let code = if error.exit_code == 7
+                    || error.code == "command.deadline"
+                    || error.code == "operation.deadline"
+                {
+                    "records.cancelled"
+                } else {
+                    &error.code
+                };
+                // Go emits one terminal error only after a successful begin and
+                // never calls an already failed sink. Preserve a new sink error.
+                if let Err(frame_error) =
+                    sink(&json!({"frame":"error","error":{"code":code,"message":error.message}}))
+                {
+                    error.details = json!({"schema":"lycheedev.stream-errors.v1", "causes":[error.clone(), frame_error]});
+                }
+            }
+            Err(error)
+        }
+    }
 }
 
 #[cfg(test)]

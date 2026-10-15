@@ -18,18 +18,27 @@ struct SqlFixture {
 }
 impl SqlFixture {
     fn new(bad_string: bool, prime: bool) -> Self {
+        Self::with_rows(bad_string, prime, 1)
+    }
+    fn with_rows(bad_string: bool, prime: bool, count: u32) -> Self {
+        assert!((1..=3).contains(&count));
+        let rows: Vec<_> = (0..count)
+            .map(|offset| {
+                vec![
+                    Cell::U(7 + offset),
+                    if bad_string {
+                        Cell::BadString
+                    } else {
+                        Cell::Text("verified remote row".into())
+                    },
+                ]
+            })
+            .collect();
         let table = table(
             "RemoteSample",
             7,
             &[("ID", "uint"), ("Name", "text")],
-            &[vec![
-                Cell::U(7),
-                if bad_string {
-                    Cell::BadString
-                } else {
-                    Cell::Text("verified remote row".into())
-                },
-            ]],
+            &rows,
         );
         let source = Fixture::with_payload(false, None, table.raw.clone());
         let pin = selection::pin_selection(
@@ -285,3 +294,5 @@ fn default_remote_sql_original_deadline_after_execution_prevents_success_capture
 }
 
 mod default_db2;
+
+mod default_stream;

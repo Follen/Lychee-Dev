@@ -386,6 +386,7 @@ pub fn one_shot(inv:&lycheedev_core::Invocation,request:WorkerRequest)->Result<V
 mod projection_tests {
     use super::*;
     include!("native_research/caller_tests.rs");
+    include!("native_research/context_projection_tests.rs");
 
     // This exact inverse applies only to the newly labelled incoming call rows.
     // The old eager/full-scan implementations remain unchanged, including row
@@ -432,7 +433,7 @@ mod projection_tests {
                 assert_eq!(research_projection_passes()-before,usize::from(direction!="outgoing"));
                 let mut execution=plan::ResearchExecution::new(&plan);
                 let projection=execution.scope(json!({"kind":"reuse-test"}),completion).unwrap();
-                assert_eq!(projection.is_some(),direction=="incoming");
+                assert_eq!(projection.is_some(),direction!="outgoing");
                 let (answers,receipt)=execution.finish();
                 if selected.is_none(){assert_eq!(receipt.completed_batches,0);}
                 let before=session.prepared.research_steps();

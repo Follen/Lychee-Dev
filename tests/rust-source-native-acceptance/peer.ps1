@@ -24,10 +24,10 @@ using Microsoft.Win32.SafeHandles;
 public sealed class NativeAcceptancePeer : IDisposable {
  [StructLayout(LayoutKind.Sequential)] struct FT { public uint low,high; }
  [DataContract] sealed class Hello {
-  [DataMember(IsRequired=true)] public string wire;
-  [DataMember(IsRequired=true)] public string executable;
-  [DataMember(IsRequired=true)] public uint pid;
-  [DataMember(IsRequired=true)] public ulong created;
+  [DataMember(IsRequired=true)] public string wire = null;
+  [DataMember(IsRequired=true)] public string executable = null;
+  [DataMember(IsRequired=true)] public uint pid = 0;
+  [DataMember(IsRequired=true)] public ulong created = 0;
  }
  public sealed class Owner {
   public uint pid,exitCode; public string created,image,sha256,exitFileTime;

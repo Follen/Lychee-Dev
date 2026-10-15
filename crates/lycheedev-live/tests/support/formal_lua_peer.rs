@@ -59,9 +59,9 @@ impl OwnedPeer {
         inputs.verify();
         let mut command = Command::new(&inputs.lua);
         command
-            .arg(inputs.fixture.join("tests/protocol/slot_server.lua"))
-            .arg(inputs.fixture.join("addon"))
-            .arg(directory)
+            .arg(fixture::lua_path(&inputs.fixture.join("tests/protocol/slot_server.lua"))?)
+            .arg(fixture::lua_path(&inputs.fixture.join("addon"))?)
+            .arg(fixture::lua_path(directory)?)
             .arg(if fault == "reload_bind" { "2" } else { "1" })
             .arg(fault)
             .current_dir(inputs.fixture.join("tests/protocol"))
@@ -439,13 +439,7 @@ impl Peer {
         if fixture::read(&payload, 2 << 20) != slot_payload(envelope)? {
             return Err(external("payload changed before input"));
         }
-        let path = payload
-            .to_str()
-            .ok_or_else(|| external("payload path encoding"))?
-            .replace('\\', "/");
-        if path.contains(['\r', '\n', '|']) {
-            return Err(external("payload path framing"));
-        }
+        let path = fixture::lua_path(&payload).map_err(external)?;
         self.sends.push(envelope.clone());
         self.process
             .borrow()

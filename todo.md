@@ -244,3 +244,7 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] definitions控制R3已静态独审并集成：原invocation/独立Budget、HTTP和解析/发布贯通；24新增Rust待真实运行。把SQL/DB2实际调用改接此接口，保外层Metadata与Core隐藏Directory close缺口，不能只凭API存在标完成。
 
 - [ ] R18.3已接默认远端DB2 record/page/schema/search/FK及SQL外层Metadata生命周期，15新增/11继承Rust待运行；已修outer/provider预算首因与重复stop，Store/Fragments/target内部同类错误身份修复已审并组合（7新/2修），保真实120秒target上限；R19 navigation 6项消费者待运行，继续normalizer/lock同步边界及capture内部checked-close后再验完整typed取消。
+
+- [ ] Verify reviewed Source context R2b (9 new tests), including return-reserve edge fallback and real nonempty XML mixin tail; preserve the 90-second budget and measure the actual full-corpus result before claiming speed or memory gains.
+- [ ] Verify R20.2 scoped remote JSONL (9 new tests): bounded records, terminal sink failures, committed capture identity and compound cleanup errors. Complete inherited capture-internal close/control and unknown-outcome handling separately.
+- [ ] Repair the 479 actual failures: same-digest concurrent blob publisher must wait under the original control, Session consumers must not expose raw cancellation tokens, and IPC/Driver fixture startup must compile/load before claiming behavioral tests ran.

@@ -85,6 +85,24 @@ fn row_path(root: &Path, value: &Value) -> PathBuf {
     );
     descendant(root, &root.join(relative))
 }
+/// Lua 5.1 uses legacy C file APIs and appends slash-separated suffixes.
+/// Keep canonical verbatim paths for Rust custody; convert only at the Lua
+/// argument/framing boundary and prove it still names the authenticated input.
+pub fn lua_path(path: &Path) -> Result<String, String> {
+    ordinary(path);
+    let canonical = fs::canonicalize(path).map_err(|e| e.to_string())?;
+    canonical.to_str().ok_or("Lua path is not Unicode")?;
+    let ordinary = lycheedev_core::client::display_path(&canonical);
+    if fs::canonicalize(&ordinary).map_err(|e| e.to_string())? != canonical {
+        return Err("Lua path conversion changed fixture identity".into());
+    }
+    let text = ordinary.replace('\\', "/");
+    if text.contains(['\r', '\n', '|']) {
+        return Err("Lua path framing".into());
+    }
+    Ok(text)
+}
+
 pub fn write_new(path: &Path, bytes: &[u8]) {
     ordinary(path.parent().unwrap());
     let mut file = fs::OpenOptions::new()

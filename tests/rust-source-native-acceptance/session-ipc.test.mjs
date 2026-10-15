@@ -235,3 +235,9 @@ for (const scenario of ['valid','missing-snapshot','different-snapshot','missing
     }finally{rmSync(root,{recursive:true,force:true});}
   });
 }
+
+test('reflection-populated Hello fields retain required validation without unassigned-field warnings',()=>{
+  const ps=readFileSync(new URL('./peer.ps1',import.meta.url),'utf8');
+  for(const field of ['string wire = null','string executable = null','uint pid = 0','ulong created = 0']) assert(ps.includes(`[DataMember(IsRequired=true)] public ${field};`));
+  assert(!/pragma warning disable|IgnoreWarnings|nowarn/i.test(ps));
+});

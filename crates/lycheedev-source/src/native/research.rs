@@ -1,12 +1,21 @@
 include!("research_caller.rs");
 #[path = "research_projection.rs"]
 mod research_projection;
-pub(crate) type ResearchProjection<'a> = research_projection::RetainedProjection<'a, PreparedSnapshot, crate::native_research::QueryRequest, Graph, crate::native_research::XmlResearch>;
+#[path = "research_context_projection.rs"]
+mod research_context_projection;
+use research_context_projection::{ContextFiles, FileProjectionRange};
+type RetainedResearchProjection<'a, R = Value> = research_projection::RetainedProjection<'a, PreparedSnapshot, crate::native_research::QueryRequest, Graph, crate::native_research::XmlResearch, R>;
+pub(crate) enum ResearchProjection<'a> {
+    Incoming(RetainedResearchProjection<'a>),
+    Context(RetainedResearchProjection<'a, ContextFiles>),
+}
 
 #[cfg(test)]
 thread_local! { static RESEARCH_PROJECTION_PASSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 #[cfg(test)]
 pub(crate) fn research_projection_passes()->usize {RESEARCH_PROJECTION_PASSES.with(|count|count.get())}
+#[cfg(test)]
+pub(crate) fn context_projection_reused_files()->usize {research_context_projection::reused_files()}
 
 // Production projection over the same syntax identities and abstract value facts.
 impl PreparedSnapshot {
@@ -186,14 +195,22 @@ impl PreparedSnapshot {
                 let mut answer=match operation {
                     LogicalOperation::References(_)=>{
                         let before=self.research_steps();
-                        let result=self.research_relations(&query.symbol,"incoming",graph,origins)?;
+                        let mut files=Vec::new();
+                        let result=self.research_relations_with_context(&query.symbol,"incoming",graph,origins,
+                            (query.direction=="both").then_some(&mut files),None)?;
                         let steps=self.research_steps().checked_sub(before).ok_or_else(||input_error("projection step counter moved backwards"))?;
                         let rows=result["relations"].as_array().ok_or_else(||input_error("reference projection rows missing"))?;
                         let answer=json!({"kind":"references","state":if result["analysis"]["state"]=="complete"{"known"}else{"partial"},
                             "result":{"relationsSHA256":digest(&rows),"relationCount":rows.len(),"analysis":result["analysis"]},
                             "evidence":"full relation projection digest and coverage; source research retains the complete projected rows"});
                         if query.direction=="incoming"&&projection.is_none(){
-                            projection=ResearchProjection::new(self,query,graph,origins,result,steps,||self.control.check())?;
+                            projection=RetainedResearchProjection::new(self,query,graph,origins,result,steps,||self.control.check())?.map(ResearchProjection::Incoming);
+                        } else if query.direction=="both"&&projection.is_none()&&!files.is_empty(){
+                            // Only files whose original path and XML ownership
+                            // exclude every outgoing row are direction-invariant.
+                            // Move those rows; graphControl and XML tails are dropped.
+                            let files=ContextFiles::from_projection(result,files,||self.control.check())?;
+                            projection=RetainedResearchProjection::new(self,query,graph,origins,files,0,||self.control.check())?.map(ResearchProjection::Context);
                         }
                         answer
                     },
@@ -235,24 +252,44 @@ impl PreparedSnapshot {
         Ok(ResearchScopeCompletion{identity,owner,answers,performed,projection})
     }
 
-    /// Only the immediately completed incoming operation can supply these rows.
-    /// Exact borrowed inputs bind source, request/options, graph and XML maps;
-    /// the plan still authenticates execution and the original control remains live.
+    // Projection costs include both reserve-checked query steps and direct
+    // serialization charges. Their sum is safe to replay as steps ONLY when
+    // every possible prefix is strictly below the original return reserve.
+    // Near that boundary the original path must preserve charge kinds/order.
+    fn research_replay_has_reserve(&self,steps:usize)->bool {
+        steps==0||self.research_steps().checked_add(steps).and_then(|used|used.checked_add(QUERY_RETURN_RESERVE))
+            .is_some_and(|used|used<self.inputs.corpus.limits.construction_steps)
+    }
+
+    /// Only the immediately completed operation can supply these rows. Exact
+    /// borrowed inputs bind source, request/options, graph and XML maps; the plan
+    /// still authenticates execution and the original control remains live.
     pub(crate) fn project_research_relations(&self,plan:&crate::native_research::plan::ResearchPlan,query:&crate::native_research::QueryRequest,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,projection:Option<ResearchProjection<'_>>)->lycheedev_core::Result<Value> {
         self.validate_research_plan(plan,query)?;
-        if let Some(projection)=projection {
-            if query.direction!="incoming"||!projection.matches(self,query,graph,origins){return Err(input_error("relation projection belongs to another source, query or scope"));}
-            let facade=self.source_queries(&self.control)?;
-            let _selected=graph.map(|graph|facade.with_execution(graph,QuerySelector::AllOccurrences,&self.control)).transpose()?;
-            // research_relations charges only facade.definitions' query step.
-            // Replay those logical costs with the same reserve/error policy so
-            // intervening type/definition work cannot hide later exhaustion.
-            return projection.finish(||self.control.check(),||facade.step());
+        match projection {
+            Some(ResearchProjection::Incoming(projection))=>{
+                if query.direction!="incoming"||!projection.matches(self,query,graph,origins){return Err(input_error("relation projection belongs to another source, query or scope"));}
+                if !self.research_replay_has_reserve(projection.steps()) {
+                    drop(projection);
+                    return self.research_relations(&query.symbol,&query.direction,graph,origins);
+                }
+                let facade=self.source_queries(&self.control)?;
+                let _selected=graph.map(|graph|facade.with_execution(graph,QuerySelector::AllOccurrences,&self.control)).transpose()?;
+                projection.finish(||self.control.check(),||facade.step())
+            },
+            Some(ResearchProjection::Context(projection))=>{
+                if query.direction!="both"||!projection.matches(self,query,graph,origins){return Err(input_error("relation projection belongs to another source, query or scope"));}
+                let files=projection.finish(||self.control.check(),||Ok(()))?;
+                self.research_relations_with_context(&query.symbol,&query.direction,graph,origins,None,Some(files))
+            },
+            None=>self.research_relations(&query.symbol,&query.direction,graph,origins),
         }
-        self.research_relations(&query.symbol,&query.direction,graph,origins)
     }
 
     pub(crate) fn research_relations(&self,symbol:&crate::index::Symbol,direction:&str,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch)->lycheedev_core::Result<Value> {
+        self.research_relations_with_context(symbol,direction,graph,origins,None,None)
+    }
+    fn research_relations_with_context(&self,symbol:&crate::index::Symbol,direction:&str,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,mut capture:Option<&mut Vec<FileProjectionRange>>,mut retained:Option<ContextFiles>)->lycheedev_core::Result<Value> {
         self.control.check()?;
         #[cfg(test)]
         RESEARCH_PROJECTION_PASSES.with(|count|count.set(count.get()+1));
@@ -285,6 +322,20 @@ impl PreparedSnapshot {
                 ||selected_files.contains(path)||self.inputs.original(path)?.contains(&symbol.name));
             self.control.check()?;
             if !incoming_file&&!outgoing_file{continue;}
+            if let Some(cached)=retained.as_mut().and_then(|files|files.take(file)) {
+                // may_contain_outgoing is exactly the disjunction used by
+                // within: original source path OR inherited XML object owner.
+                // The same immutable query/origins/file ID was bound above.
+                if outgoing_file{return Err(input_error("retained context file gained outgoing scope"));}
+                if self.research_replay_has_reserve(cached.steps()) {
+                    cached.append(&mut relations,&mut unresolved,||self.control.check(),||facade.step())?;
+                    continue;
+                }
+                // No cached charge has run. Reconstruct this exact file below
+                // so mixed step/direct charges keep their original sequence.
+                drop(cached);
+            }
+            let first=relations.len();let prior_unresolved=unresolved;let prior_steps=self.research_steps();
             let syntax=public_result(self.file_syntax(file),&self.control)?;
             for reference in &syntax.references {
             self.control.check()?;
@@ -318,7 +369,13 @@ impl PreparedSnapshot {
             if !outgoing&&kind=="call" {self.project_incoming_caller(&mut row,&syntax,reference,origins)?;}
             origins.project_row(self,&mut row,&site)?;relations.push(row);
             }
+            if let Some(capture)=capture.as_mut()&& !origins.may_contain_outgoing(symbol,path) {
+                capture.push(FileProjectionRange{file,first,end:relations.len(),steps:self.research_steps()-prior_steps,unresolved:unresolved-prior_unresolved});
+            }
         }
+        if retained.as_ref().is_some_and(|files|!files.is_empty()) {return Err(input_error("retained context files differ from current traversal"));}
+        // XML declared references and mixin copies have additional owner rules;
+        // always retain their original traversal, observations and ordering.
         if let (Some(graph),Some(query))=(graph,query.as_ref())&&let Some(xml)=&graph.xml{
             for reference in &xml.references{
                 self.control.check()?;let fact=&graph.uses[reference.use_fact];
