@@ -1,0 +1,342 @@
+{
+  "schema": "lycheedev.owned-emmy-adapter-review-freeze.v1",
+  "revision": 2,
+  "frozenAt": "2026-10-15T02:05:13.112080+00:00",
+  "implementationBaseline": "da54675856bd15018a2aa4020f991f5b546c3a76",
+  "repositoryHeadAtFreeze": "4d31a021ff14f1aa809c7eb5482cf84462ce72c6",
+  "previousFreeze": {
+    "path": ".tmp/owned-emmy-adapter-freeze-20261015/freeze.json",
+    "sha256": "f2bc13086f30109c305756ab7e4f68e88eb0c29d6816a89bef0ff816cc2c136c"
+  },
+  "ownerPaths": [
+    "Cargo.toml",
+    "Cargo.lock",
+    "crates/lycheedev-source/Cargo.toml",
+    "crates/lycheedev-source/src/native_research/plan.rs",
+    "crates/lycheedev-emmy-adapter/Cargo.toml",
+    "crates/lycheedev-emmy-adapter/src/lib.rs",
+    "crates/lycheedev-emmy-adapter/src/types.rs",
+    "crates/lycheedev-emmy-adapter/src/declaration.rs",
+    "crates/lycheedev-emmy-adapter/tests/declaration_contract.rs",
+    "tools/rust-unsafe-boundaries.mjs",
+    "tools/rust-unsafe-boundaries.test.mjs",
+    "tools/rust-build.mjs",
+    "tools/rust-emmy-identity.mjs",
+    "tools/rust-emmy-identity.test.mjs"
+  ],
+  "files": [
+    {
+      "path": "Cargo.toml",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 1873,
+      "sha256": "aa9f6aea8ecda7ce1e3876360a31f9ca53cdf6ff23eceb01bae1c90a13fd9b48",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/owner/Cargo.toml"
+    },
+    {
+      "path": "Cargo.lock",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 71605,
+      "sha256": "b01de2b2207c4415bdfdfde590f68c549dd66920862feb53fbd3eac72085acbe",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/owner/Cargo.lock"
+    },
+    {
+      "path": "crates/lycheedev-source/Cargo.toml",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 2311,
+      "sha256": "acf25af1cfd950f3d368038f9e7039b63ae8b1f6e55dc21a38d77866db3e9664",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/owner/crates/lycheedev-source/Cargo.toml"
+    },
+    {
+      "path": "crates/lycheedev-source/src/native_research/plan.rs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 26934,
+      "sha256": "9f0cc73a19615fa3fa193b7a63b05ebf809caccfeb465d47b6615650d2221a70",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/owner/crates/lycheedev-source/src/native_research/plan.rs"
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/Cargo.toml",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 533,
+      "sha256": "fd5505aa675ba059c3889013b36be553dc0640edee0d32c980f688171d0597da",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/owner/crates/lycheedev-emmy-adapter/Cargo.toml"
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/src/lib.rs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 597,
+      "sha256": "cbaaea11e02067f4c5774e33e55c995aa14153d525e443fc03a6c32138e82113",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/owner/crates/lycheedev-emmy-adapter/src/lib.rs"
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/src/types.rs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 1560,
+      "sha256": "30c7e618b92c2cf67d4f120b245edb71746fab5d65abb34795e3fdfe535bc526",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/owner/crates/lycheedev-emmy-adapter/src/types.rs"
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/src/declaration.rs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 8730,
+      "sha256": "2899d29c67e06ca5da11cd58effe47490634b64863aa146e3c099f4d6cde8977",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/owner/crates/lycheedev-emmy-adapter/src/declaration.rs"
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/tests/declaration_contract.rs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 9800,
+      "sha256": "2aabd2ee86f3d9c554c2ddd356203883888ae71e0708d38b9fb1e6023eddc1a4",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/owner/crates/lycheedev-emmy-adapter/tests/declaration_contract.rs"
+    },
+    {
+      "path": "tools/rust-unsafe-boundaries.mjs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 7041,
+      "sha256": "b7a9ee6513ce81527aeaa5d6da8d1b5262d86c13a0fd2744abf8a3af4880da86",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/owner/tools/rust-unsafe-boundaries.mjs"
+    },
+    {
+      "path": "tools/rust-unsafe-boundaries.test.mjs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 3856,
+      "sha256": "76320920088222d169834c235da46d937afedb2d57c0675bd38654285a2f6c74",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/owner/tools/rust-unsafe-boundaries.test.mjs"
+    },
+    {
+      "path": "tools/rust-build.mjs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 11915,
+      "sha256": "c73fbfe34ccc8069f641f8cbae3af17ea1261bb475cd865e9840171d727cb839",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/owner/tools/rust-build.mjs"
+    },
+    {
+      "path": "tools/rust-emmy-identity.mjs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 9582,
+      "sha256": "870c2f5ee3d0b4e209965ee9e95b5ca8ed946b2cc40125ddd8dce6aedc293777",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/owner/tools/rust-emmy-identity.mjs"
+    },
+    {
+      "path": "tools/rust-emmy-identity.test.mjs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 15972,
+      "sha256": "c8d8921e5a25e21beba639ef50b4cec69039a14b08331563a8e003847d8cf30a",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/owner/tools/rust-emmy-identity.test.mjs"
+    },
+    {
+      "path": "crates/lycheedev-source/src/native/host.rs",
+      "role": "dependencies",
+      "source": "working_tree",
+      "bytes": 30639,
+      "sha256": "6372a221e695ef3c87fd934761fe6c3251d61cfabf3518a1ae7671a134366756",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/dependencies/crates/lycheedev-source/src/native/host.rs"
+    },
+    {
+      "path": "crates/lycheedev-source/src/native/context.rs",
+      "role": "dependencies",
+      "source": "working_tree",
+      "bytes": 34217,
+      "sha256": "369d2774e9918e357e2e57d733470102bbe5bd602aea17511211ef7645578fb6",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/dependencies/crates/lycheedev-source/src/native/context.rs"
+    },
+    {
+      "path": "crates/lycheedev-source/src/native_research.rs",
+      "role": "dependencies",
+      "source": "working_tree",
+      "bytes": 80795,
+      "sha256": "5647839de655ab1a8f399540258942a3272c9a11ce22123684e1a5d356752e46",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/dependencies/crates/lycheedev-source/src/native_research.rs"
+    },
+    {
+      "path": "crates/lycheedev-source/src/native_research/plan_api_tests.rs",
+      "role": "dependencies",
+      "source": "working_tree",
+      "bytes": 11047,
+      "sha256": "246eb504e6e73e4367879f9bfe44f08c87437bc74c0f2d670ff1109fa195a9b6",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/dependencies/crates/lycheedev-source/src/native_research/plan_api_tests.rs"
+    },
+    {
+      "path": "crates/lycheedev-source/src/environment.rs",
+      "role": "dependencies",
+      "source": "working_tree",
+      "bytes": 10451,
+      "sha256": "3b18a3dfd5538feb42381381f3bbbb426333f4f84fae62fe698e5904a4b76635",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/dependencies/crates/lycheedev-source/src/environment.rs"
+    },
+    {
+      "path": "crates/lycheedev-source/src/environment/emit.rs",
+      "role": "dependencies",
+      "source": "working_tree",
+      "bytes": 11798,
+      "sha256": "da02454bfb756ed6c94aa1316597cb646899b81dac491e9ae60be90dbab486e5",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/dependencies/crates/lycheedev-source/src/environment/emit.rs"
+    },
+    {
+      "path": "crates/lycheedev-source/src/environment/parse.rs",
+      "role": "dependencies",
+      "source": "working_tree",
+      "bytes": 18381,
+      "sha256": "c8defcdba7a83953fa0bd23cc277056f05c54e7ade75992df9b7f77bd728b8c5",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/dependencies/crates/lycheedev-source/src/environment/parse.rs"
+    },
+    {
+      "path": "crates/lycheedev-core/src/control.rs",
+      "role": "dependencies",
+      "source": "working_tree",
+      "bytes": 20162,
+      "sha256": "d918644d339bb9ee6e9e0b3e4b877e6db41b5dfa403f82b5d792952e80deeec6",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/dependencies/crates/lycheedev-core/src/control.rs"
+    },
+    {
+      "path": "tests/rust-source-data/retail-api-return-labels.json",
+      "role": "dependencies",
+      "source": "working_tree",
+      "bytes": 5227,
+      "sha256": "780509fc0a8f4109cf5ca477331db1d859f001de19e59efc7737bfe42411a4e4",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/dependencies/tests/rust-source-data/retail-api-return-labels.json"
+    },
+    {
+      "path": "third_party/emmy/identity.json",
+      "role": "pinned_recipe",
+      "source": "da54675856bd15018a2aa4020f991f5b546c3a76",
+      "bytes": 1203,
+      "sha256": "cea14d6a02d6b9a7a44dcb3ae1d295a0647adba1b3c4e4a1f45e1e8faf03042d",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/pinned_recipe/third_party/emmy/identity.json"
+    },
+    {
+      "path": "third_party/emmy/files.json",
+      "role": "pinned_recipe",
+      "source": "da54675856bd15018a2aa4020f991f5b546c3a76",
+      "bytes": 153179,
+      "sha256": "55db1cd7a5b1c6b7c090959aa48aeea7dcfe3c83691df2127e3b8908b26f2ad6",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/pinned_recipe/third_party/emmy/files.json"
+    },
+    {
+      "path": "third_party/emmy/patches/0001-binding-context.patch",
+      "role": "pinned_recipe",
+      "source": "da54675856bd15018a2aa4020f991f5b546c3a76",
+      "bytes": 198296,
+      "sha256": "f174b3c70bd236a619906c7eb3598ef950db7009424dd1b144a9e22d91012a5f",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/pinned_recipe/third_party/emmy/patches/0001-binding-context.patch"
+    },
+    {
+      "path": "internal/codebase/semantic.go",
+      "role": "go_oracle",
+      "source": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+      "bytes": 6758,
+      "sha256": "0d9c4fef940a08c656df9510329591718e43217aa485a1b125a4c1f82ce92abd",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/go_oracle/internal/codebase/semantic.go"
+    },
+    {
+      "path": "internal/luals/identity_generated.go",
+      "role": "go_oracle",
+      "source": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+      "bytes": 418,
+      "sha256": "91ff94d35b6e616affce745f59433f6a226696c55e4f1eea71e9a3cfc910e081",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/go_oracle/internal/luals/identity_generated.go"
+    },
+    {
+      "path": "tools/rust-build.test.mjs",
+      "role": "dependencies",
+      "source": "working_tree",
+      "bytes": 8130,
+      "sha256": "78dea2a78c9740b8ee5c2125c49deac4db80126e1c57c56e1272e0fb24fb6a5a",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/dependencies/tools/rust-build.test.mjs"
+    },
+    {
+      "path": "tools/rust-disk.mjs",
+      "role": "dependencies",
+      "source": "working_tree",
+      "bytes": 11567,
+      "sha256": "54122b03b7b474f1f2119a31caa85d2217aeb5ea97e65f28a7e0161bebc203e5",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/dependencies/tools/rust-disk.mjs"
+    },
+    {
+      "path": "tools/rust-owned-process.mjs",
+      "role": "dependencies",
+      "source": "working_tree",
+      "bytes": 3336,
+      "sha256": "fba57b7cacfb9d126fbc810fb5bc96f59229efff34a923a55d80af907553b000",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/dependencies/tools/rust-owned-process.mjs"
+    },
+    {
+      "path": "tools/rust-owned-process.ps1",
+      "role": "dependencies",
+      "source": "working_tree",
+      "bytes": 24577,
+      "sha256": "4914acd83d1abc6d4d57000397a1a1d7a36b3aefe7333072819e4071decb0b94",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/dependencies/tools/rust-owned-process.ps1"
+    },
+    {
+      "path": "tools/rust-build-auxiliary.json",
+      "role": "dependencies",
+      "source": "working_tree",
+      "bytes": 790,
+      "sha256": "6b3e2c0be6a957959a42ba7f05ca24de059ceef0d37c123fd79539e2731eee6b",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/dependencies/tools/rust-build-auxiliary.json"
+    },
+    {
+      "path": "release/rust-disk-policy.json",
+      "role": "dependencies",
+      "source": "working_tree",
+      "bytes": 160,
+      "sha256": "672e33453bcb1333e6e7ab0cbe267249ae93e0d53ff0800d560f723543290b6d",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/dependencies/release/rust-disk-policy.json"
+    },
+    {
+      "path": ".tmp/owned-emmy-adapter-r2-validation/focused-node-tests.log",
+      "role": "validation",
+      "source": "current_run",
+      "bytes": 2495,
+      "sha256": "33a6fd2ffa26bced63503f2459092578e4c3fced788ddc58ed084b85e8fe8a7f",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/validation/.tmp/owned-emmy-adapter-r2-validation/focused-node-tests.log"
+    },
+    {
+      "path": ".tmp/owned-emmy-adapter-r2-validation/node-tests.log",
+      "role": "validation",
+      "source": "current_run",
+      "bytes": 12014,
+      "sha256": "a805a4b4271beb651d91d38128b7257cab65405df040ce887fd402d921b2cc12",
+      "snapshotPath": ".tmp/owned-emmy-adapter-freeze-r2-20261015/validation/.tmp/owned-emmy-adapter-r2-validation/node-tests.log"
+    }
+  ],
+  "validation": {
+    "focusedNode": {
+      "passed": 25,
+      "failed": 0
+    },
+    "broaderNode": {
+      "passed": 26,
+      "failed": 6,
+      "failure": "existing rust-build fixtures stop at disk.insufficient_space before injected execution"
+    },
+    "newPublicApiTestCount": 11,
+    "rustfmt": "passed syntax/format only",
+    "staticManifestAndWiring": "passed source optional and adapter nonoptional pins",
+    "unsafeInventory": "7 guards; zero violations",
+    "cargoTests": "not_run",
+    "windows": "not_run",
+    "fullRetail": "not_run"
+  },
+  "limits": [
+    "Review source freeze only, not a build receipt.",
+    "No third_party recipe or patch changes in R1/R2.",
+    "Custody support validator bytes changed; combined recipeSHA changes legitimately.",
+    "No generated .tmp Emmy tree is certified by this freeze.",
+    "TimerCallback failure is retained; callback projection is outside R2."
+  ]
+}

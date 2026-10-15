@@ -61,10 +61,14 @@ test('business unsafe, guard removal and unknown fixture unsafe are rejected', (
     writeFileSync(absolute, text);
   };
   try {
-    for (const name of ['cli', 'core', 'data', 'delivery', 'live', 'source'])
+    for (const name of ['cli', 'core', 'data', 'delivery', 'emmy-adapter', 'live', 'source'])
       put(`crates/lycheedev-${name}/src/${name === 'cli' ? 'main' : 'lib'}.rs`, guard);
     put('crates/lycheedev-windows/src/boundary.rs', 'unsafe extern "system" { fn api(); }');
     assert.deepEqual(inventory(root).violations, []);
+    put('crates/lycheedev-emmy-adapter/src/lib.rs', '// adapter guard removed');
+    assert.deepEqual(inventory(root).violations,
+      ['missing unconditional crate forbid: crates/lycheedev-emmy-adapter/src/lib.rs']);
+    put('crates/lycheedev-emmy-adapter/src/lib.rs', guard);
     put('crates/lycheedev-core/src/new.rs', 'unsafe { bad() }');
     put('crates/lycheedev-data/src/lib.rs', '// guard removed');
     put('crates/lycheedev-live/tests/new.rs', 'unsafe { bad() }');

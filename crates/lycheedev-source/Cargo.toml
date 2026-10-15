@@ -7,7 +7,7 @@ rust-version.workspace = true
 
 [features]
 default = ["emmy-prototype"]
-emmy-prototype = ["dep:emmylua_code_analysis", "dep:emmylua_parser", "dep:rowan", "dep:tokio-util"]
+emmy-prototype = ["dep:emmylua_code_analysis", "dep:emmylua_parser", "dep:rowan", "dep:tokio-util", "dep:lycheedev-emmy-adapter"]
 
 [[example]]
 name = "emmy_library_probe"
@@ -56,6 +56,7 @@ harness = false
 
 [dependencies]
 lycheedev-core = { path = "../lycheedev-core" }
+lycheedev-emmy-adapter = { path = "../lycheedev-emmy-adapter", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

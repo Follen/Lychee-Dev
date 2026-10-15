@@ -1268,6 +1268,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lycheedev-emmy-adapter"
+version = "3.1.2"
+dependencies = [
+ "emmylua_code_analysis",
+ "emmylua_parser",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lycheedev-live"
 version = "3.1.2"
 dependencies = [
@@ -1289,6 +1299,7 @@ dependencies = [
  "emmylua_code_analysis",
  "emmylua_parser",
  "lycheedev-core",
+ "lycheedev-emmy-adapter",
  "lycheedev-windows",
  "quick-xml",
  "rowan",

@@ -1,0 +1,13 @@
+[package]
+name = "lycheedev-emmy-adapter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Keep this backend pin identical to the custody-verified Source engine.
+emmylua_code_analysis = { path = "../../.tmp/emmy-reconstruction-v1/upstream/crates/emmylua_code_analysis", version = "=0.30.0" }
+emmylua_parser = { path = "../../.tmp/emmy-reconstruction-v1/upstream/crates/emmylua_parser", version = "=0.30.0" }
+serde.workspace = true
+serde_json.workspace = true

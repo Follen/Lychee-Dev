@@ -744,6 +744,14 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - SQL语义R2 freeze `fd60c7a5dda8532722b2b64e93c47c962af7eaa0247fd0d332885ddef9920e21` 已独审核12owner/31deps/19Go/5stdlib/61历史文件。实现固定commit的mapping、enum/flags/build condition、精确i64/u64、definition复用、空catalog及static/effective joins/provenance，控制检查贯穿load边界。长s/Kelvin按Go ASCII-origin SimpleFold类匹配；Node源码验证28160比较及删除映射mutation通过，17项Rust回归 **NOT_RUN**。新增supplement保存原freeze漏列但已读核的精确Go build_match.go，不修改历史freeze。
 - 资源准入仍有真实差异：16份1MiB语义定义的Go逻辑80MiB可接受，而当前Rust重复charge推到144MiB会拒绝。逻辑预算与Rust保留分配安全账应分别核对，不能抬高Go limit或冒称实际内存。resources输出合同、CSV、EXPLAIN继续开放。
 
+### 自有 Emmy adapter 首片与下一原生批
+
+- 新 `lycheedev-emmy-adapter` 私有持有API declaration分析模型、FileId和BindingSession；Source保留文件/manifest/目标认证与公开结果，adapter返回owned DTO，沿原control/step budget。无反向Source/core/Windows依赖、无Graph复制，crate forbid unsafe。只是首个生产入口外移，当前第三方补丁并未缩减，也未修CallbackType缺口。
+- R2 freeze `2676850e0d11683846579ddc1a3b9a494a224943b1c44f7319408e494b347a29` 已独审。scanner要求新crate forbid；build custody分别强制Source optional与adapter非optional的精确Emmy版本/path，执行前后双manifest保护。supportFiles改变会合法改变recipeSHA，固定upstream/patch/tree身份未改。
+- 实际25 custody/unsafe Node通过。原build fixture在/tmp仅2.14GiB可用而需4GiB时6项被正确拒绝，原日志保留；同一测试使用workspace临时目录且不改变门槛，7/7通过。新增adapter Rust测试11项（含8MiB/取消边界）**NOT_RUN**，独立native job已接实际integration target，不用0test假绿。
+- 原adapter R2依赖副本含另一在途native control修改且缺其子模块，故不以该副本冒充完整组合。新 `adapter-native-integration.json` 从固定a3c10d1完整crate/tool/recipe源＋已审adapter owner建立542文件组合，采用原正式native_research.rs；control R1独审P2指出sidecar writer按路径重开未绑定parent原file，**本批明确排除**并继续修，不将未审修复混入测试树。
+- 本批用 `[rust-native]` 触发有意义的真实Windows验收，优先取得cold/warm静态及native阶段内存、默认CLI和adapter11测试结果。全仓native仍可能失败；不等全部功能才测内存，也不把sampler实现等同已测。Source预算传递/phase和callback修复各自继续，不扩大deadline掩盖失败。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

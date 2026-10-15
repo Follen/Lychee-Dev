@@ -33,6 +33,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 `;
 const wiring='[dependencies]\n'+['emmylua_code_analysis','emmylua_parser'].map(name=>`${name} = { path = "../../${emmySourcePath}/crates/${name}", version = "=0.30.0", optional = true }`).join('\n');
+const adapterWiring=wiring.replaceAll(', optional = true','');
 function fixture(){
   const root=mkdtempSync(join(tmpdir(),'lycheedev-emmy-custody-'));
   try{
@@ -42,6 +43,7 @@ function fixture(){
   put(`${emmyRecipePath}/patches/test.patch`,'reviewed fixture patch\n');
   for(const name of ['Cargo.toml','Cargo.lock','.cargo/config.toml','release/fixture.json'])put(name,'fixture');
   put('crates/lycheedev-source/Cargo.toml',wiring);
+  put('crates/lycheedev-emmy-adapter/Cargo.toml',adapterWiring);
   put(`${emmySourcePath}/LICENSE`,license);
   put(`${emmySourcePath}/Cargo.toml`,'fixture workspace');
   for(const name of ['emmylua_code_analysis','emmylua_parser','emmylua_diagnostic_macro'])put(`${emmySourcePath}/crates/${name}/Cargo.toml`,'fixture crate');
@@ -101,14 +103,30 @@ test('active Cargo wiring rejects private paths, commented declarations and miss
   for(const text of [wiring.replaceAll(emmySourcePath,'.tmp/rust-source-binding-context-01/upstream'),wiring.replace('emmylua_parser =','# emmylua_parser ='),wiring+'\nemmylua_parser = {}'])assert.throws(()=>verifyEmmyWiring(text),/dependency_wiring/);
   withFixture(({root})=>{rmSync(join(root,emmyRecipePath,'identity.json'));assert.throws(()=>runCargo(root,['build'],{execute(){assert.fail('must not execute');}}),/ENOENT/);});
 });
+test('Source optional and adapter nonoptional engine edges are separately enforced',()=>{
+  verifyEmmyWiring(wiring,{optional:true});
+  verifyEmmyWiring(adapterWiring,{optional:false});
+  assert.throws(()=>verifyEmmyWiring(adapterWiring),/dependency_wiring/);
+  assert.throws(()=>verifyEmmyWiring(wiring,{optional:false}),/dependency_wiring/);
+  assert.throws(()=>verifyEmmyWiring(adapterWiring,{optional:'false'}),/dependency_wiring/);
+  for(const text of [adapterWiring.replace('=0.30.0','=0.30.1'),adapterWiring.replaceAll(emmySourcePath,'.tmp/unverified'),adapterWiring+'\nemmylua_parser = {}'])
+    assert.throws(()=>verifyEmmyWiring(text,{optional:false}),/dependency_wiring/);
+  for(const [path,text] of [['crates/lycheedev-source/Cargo.toml',adapterWiring],['crates/lycheedev-emmy-adapter/Cargo.toml',wiring],['crates/lycheedev-emmy-adapter/Cargo.toml',adapterWiring.replace('=0.30.0','=0.30.1')]])
+    withFixture(({root,put})=>{put(path,text);assert.throws(()=>runCargo(root,['check'],{execute(){assert.fail('must not execute');}}),/dependency_wiring/);});
+});
+test('adapter-only custody still verifies the pinned recipe before execution',()=>withFixture(({root})=>{
+  rmSync(join(root,'crates/lycheedev-source/Cargo.toml'));
+  rmSync(join(root,emmyRecipePath,'identity.json'));
+  assert.throws(()=>runCargo(root,['check'],{execute(){assert.fail('must not execute');}}),/ENOENT/);
+}));
 test('injected Cargo fixtures seal new identity and reject source or recipe changes after execution',t=>{
   // Model abundant capacity for tiny fixtures only. No real compiler/process is
   // launched, and production admission quotas/ownership code remain unchanged.
   t.mock.method(fs,'statfsSync',()=>({bavail:100n*1024n**3n,bsize:1n}));syncBuiltinESMExports();
   try{
     withFixture(({root})=>{const expected=inspectEmmy(root);const result=runCargo(root,['check'],{execute(_command,_args,options){assert.equal(options.env.LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256,expected.patchedTreeSHA256);return{status:0,handlesReaped:true,stdout:Buffer.alloc(0),stderr:Buffer.alloc(0)};}});assert.equal(result.inputHashes.emmy.recipeSHA256,expected.recipeSHA256);assert.equal(result.inputHashes.emmyPatch,expected.patchedTreeSHA256);});
-    for(const command of ['check','metadata','fetch'])for(const path of [`${emmySourcePath}/Cargo.toml`,`${emmyRecipePath}/README.md`])withFixture(({root,put})=>{
-      assert.throws(()=>runCargo(root,[command],{execute(){put(path,'mutation during compile');return{status:0,handlesReaped:true,stdout:Buffer.alloc(0),stderr:Buffer.alloc(0)};}}),/generated_inventory|source_changed_during_compile|emmy_identity_changed_during_cargo/);
+    for(const command of ['check','metadata','fetch'])for(const path of [`${emmySourcePath}/Cargo.toml`,`${emmyRecipePath}/README.md`,'crates/lycheedev-emmy-adapter/Cargo.toml'])withFixture(({root,put})=>{
+      assert.throws(()=>runCargo(root,[command],{execute(){put(path,'mutation during compile');return{status:0,handlesReaped:true,stdout:Buffer.alloc(0),stderr:Buffer.alloc(0)};}}),/generated_inventory|source_changed_during_compile|emmy_identity_changed_during_cargo|manifests_changed_during_fetch/);
       assert.equal(fs.existsSync(join(root,'.tmp/rust-disk/channels/ordinary.lease')),false);
     });
   }finally{t.mock.restoreAll();syncBuiltinESMExports();}

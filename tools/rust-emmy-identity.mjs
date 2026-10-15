@@ -102,14 +102,15 @@ export function inspectEmmy(root){
     identitySHA256:digest(identityBytes),recipeSHA256:emmyTreeDigest([...recipeFiles.map(file=>({...file,path:`${emmyRecipePath}/${file.path}`})),...supportFiles].sort((a,b)=>sorted(a.path,b.path))),patchedTreeSHA256:identity.patchedTreeSHA256,
     source,files,totalBytes:total,recipeFiles,supportFiles};
 }
-export function verifyEmmyWiring(cargo){
+export function verifyEmmyWiring(cargo,{optional=true}={}){
+  check(typeof optional==='boolean','dependency_wiring');
   check(!cargo.includes('"""')&&!cargo.includes("'''"),'dependency_wiring');
   let section='',found=new Set(),dependencyTables=0;
   for(const raw of cargo.split(/\r?\n/)){
     const line=raw.trim();if(line.startsWith('[')){section=line;if(line==='[dependencies]')dependencyTables++;continue;}
     if(section!=='[dependencies]'||!/^emmylua_(?:code_analysis|parser)\s*=/.test(line))continue;
-    const match=/^(emmylua_code_analysis|emmylua_parser) = \{ path = "([^\"]+)", version = "=0\.30\.0", optional = true \}$/.exec(line);
-    check(match&&!found.has(match[1])&&match[2]===`../../${emmySourcePath}/crates/${match[1]}`,'dependency_wiring');found.add(match[1]);
+    const match=/^(emmylua_code_analysis|emmylua_parser) = \{ path = "([^\"]+)", version = "=0\.30\.0"(, optional = true)? \}$/.exec(line);
+    check(match&&!found.has(match[1])&&match[2]===`../../${emmySourcePath}/crates/${match[1]}`&&Boolean(match[3])===optional,'dependency_wiring');found.add(match[1]);
   }
   check(found.size===2&&dependencyTables===1,'dependency_wiring');
 }

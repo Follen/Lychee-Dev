@@ -37,9 +37,12 @@ export function runCargo(root,args,{sourceRoot=root,owner='rust-cargo',channelKi
   if(process.env.CARGO_TARGET_DIR||environment.CARGO_TARGET_DIR)throw new Error('build.uncontrolled_target_override');
   if(freshOffline&&(channelKind!=='ordinary'||!onSuccess||environment.CARGO_HOME))throw new Error('build.invalid_fresh_gate');
   const sourceManifest=join(sourceRoot,'crates/lycheedev-source/Cargo.toml');
+  const adapterManifest=join(sourceRoot,'crates/lycheedev-emmy-adapter/Cargo.toml');
   let emmy;
-  if(existsSync(sourceManifest)){
-    verifyEmmyWiring(readFileSync(sourceManifest,'utf8'));
+  const hasSource=existsSync(sourceManifest),hasAdapter=existsSync(adapterManifest);
+  if(hasSource)verifyEmmyWiring(readFileSync(sourceManifest,'utf8'),{optional:true});
+  if(hasAdapter)verifyEmmyWiring(readFileSync(adapterManifest,'utf8'),{optional:false});
+  if(hasSource||hasAdapter){
     emmy=inspectEmmy(sourceRoot);
   }
   // This existing runtime variable now identifies the NEW patched source tree.
