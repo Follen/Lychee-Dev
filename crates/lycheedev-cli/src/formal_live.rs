@@ -36,6 +36,7 @@ pub const TRANSPORT: &str = "Lycheedev mailbox protocol v1";
 pub enum LiveResult {
     Connection(ProjectResult),
     Doctor(DoctorResult),
+    Bootstrap(lycheedev_live::history::BootstrapAttempt),
 }
 #[derive(Debug, Default)]
 pub struct Response {
@@ -263,6 +264,20 @@ pub fn dispatch(inv: &Invocation) -> Response {
 
 fn route_admission(inv: &Invocation) -> Result<()> {
     let session = flag(inv, "--session");
+    // Fixed Go entry.go rejects retired recovery before opening the workspace.
+    // Unknown outcomes are inspect/abandon-only; never construct native services.
+    if inv.command == "live resume" && !inv.positional.as_deref().unwrap_or("").starts_with("CON-")
+    {
+        if inv.positional.as_deref().unwrap_or("").is_empty() {
+            return Err(ToolkitError::arguments(
+                "missing selection file or record ID; use describe",
+            ));
+        }
+        return Err(ToolkitError::arguments(
+            "legacy OP/BTP execution is retired; use live status or live abandon; Native recovery requires CON",
+        ));
+    }
+
     if matches!(
         inv.command.as_str(),
         "live execute" | "live reload" | "live bugs"
@@ -294,6 +309,8 @@ fn route_admission(inv: &Invocation) -> Result<()> {
         inv.command.as_str(),
         "live status" | "live session" | "live resume"
     ) && !inv.positional.as_deref().unwrap_or("").starts_with("CON-")
+        && !(inv.command == "live status"
+            && inv.positional.as_deref().unwrap_or("").starts_with("BTP-"))
     {
         return Err(ToolkitError::new(
             "live.migration_incomplete",
@@ -346,6 +363,25 @@ pub fn dispatch_with<S: Services>(
         {
             return Response::failure(ToolkitError::arguments(channel_message(&e)));
         }
+    }
+    if inv.command == "live status" && inv.positional.as_deref().unwrap_or("").starts_with("BTP-") {
+        let id = inv.positional.as_deref().expect("checked BTP positional");
+        let result = lycheedev_live::history::inspect_bootstrap(&inv.home, id, &inv.control);
+        let mut response = Response {
+            operation_id: id.into(),
+            ..Response::default()
+        };
+        match result {
+            Ok(value) => response.result = Some(LiveResult::Bootstrap(value)),
+            Err(mut error) => {
+                if error.code == "vault.record_missing" {
+                    error.exit_code = 2;
+                    error.message = "vault.record_missing".into();
+                }
+                response.error = Some(super::command_fault(inv, error));
+            }
+        }
+        return response;
     }
     let mut services = match factory(&project_path(inv)) {
         Ok(s) => s,

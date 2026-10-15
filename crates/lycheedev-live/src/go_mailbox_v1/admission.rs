@@ -218,10 +218,10 @@ impl Default for ConnectionMetadata {
 // are case-insensitive; repeated scalars update in encounter order; null is a
 // no-op for non-pointer fields; repeated nested objects merge into the same
 // record. Unlike claim records, project metadata need not be canonical JSON.
-trait WireRecord {
+pub(crate) trait WireRecord {
     fn field<'de, A: MapAccess<'de>>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>;
 }
-struct RecordSeed<'a, T>(&'a mut T);
+pub(crate) struct RecordSeed<'a, T>(pub(crate) &'a mut T);
 impl<'de, T: WireRecord> DeserializeSeed<'de> for RecordSeed<'_, T> {
     type Value = ();
     fn deserialize<D: serde::Deserializer<'de>>(self, d: D) -> Result<(), D::Error> {
@@ -252,7 +252,18 @@ impl<'de, T: WireRecord> DeserializeSeed<'de> for RecordSeed<'_, T> {
         d.deserialize_any(RecordVisitor(self.0))
     }
 }
-fn scalar<'de, A: MapAccess<'de>, T: serde::Deserialize<'de>>(
+/// Shared typed Go object decoder. Callers own their input bound and original
+/// control budget; the complete JSON value must be consumed.
+pub(crate) fn decode_wire_record<T: WireRecord + Default>(
+    raw: &[u8],
+) -> Result<T, serde_json::Error> {
+    let mut value = T::default();
+    let mut decoder = serde_json::Deserializer::from_slice(raw);
+    RecordSeed(&mut value).deserialize(&mut decoder)?;
+    decoder.end()?;
+    Ok(value)
+}
+pub(crate) fn scalar<'de, A: MapAccess<'de>, T: serde::Deserialize<'de>>(
     field: &mut T,
     map: &mut A,
 ) -> Result<(), A::Error> {
@@ -279,7 +290,10 @@ fn number_string<'de, A: MapAccess<'de>>(field: &mut u64, map: &mut A) -> Result
 // routes -0 through f64, but fixed Go accepts -0 for the signed Interface
 // field. Accepting an arbitrary integral float would also admit 0.0/1e0,
 // which Go rejects, so retain and check the actual syntax instead.
-fn signed_integer<'de, A: MapAccess<'de>>(field: &mut i64, map: &mut A) -> Result<(), A::Error> {
+pub(crate) fn signed_integer<'de, A: MapAccess<'de>>(
+    field: &mut i64,
+    map: &mut A,
+) -> Result<(), A::Error> {
     if let Some(value) = map.next_value::<Option<Box<serde_json::value::RawValue>>>()? {
         let text = value.get();
         let digits = text.strip_prefix('-').unwrap_or(text);
@@ -290,7 +304,7 @@ fn signed_integer<'de, A: MapAccess<'de>>(field: &mut i64, map: &mut A) -> Resul
     }
     Ok(())
 }
-fn ignored<'de, A: MapAccess<'de>>(map: &mut A) -> Result<(), A::Error> {
+pub(crate) fn ignored<'de, A: MapAccess<'de>>(map: &mut A) -> Result<(), A::Error> {
     map.next_value::<serde::de::IgnoredAny>().map(|_| ())
 }
 impl WireRecord for ClientRecord {

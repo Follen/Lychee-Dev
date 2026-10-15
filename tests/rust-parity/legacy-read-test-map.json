@@ -1,0 +1,93 @@
+{
+  "schema": "lycheedev.legacy-read.test-map.v1",
+  "freezeSha256": "4e3bd1aa066ad13b9c5fa9190ddfbb839281a0e074df08cfff454edb0b6adac1",
+  "goCommit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "contractMap": "tests/rust-parity/legacy-read-contract.md",
+  "tests": [
+    {
+      "file": "crates/lycheedev-live/src/history/tests.rs",
+      "test": "history_bootstrap_defaults_are_historical_not_input_authority",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-live/src/history/tests.rs",
+      "test": "history_bootstrap_duplicate_null_nested_and_unknown_match_go",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-live/src/history/tests.rs",
+      "test": "history_bootstrap_invalid_identity_types_and_times_are_corrupt",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-live/src/history/tests.rs",
+      "test": "history_bootstrap_pointer_and_slice_nulls_clear_previous_values",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-live/src/history/tests.rs",
+      "test": "history_bootstrap_read_honors_original_cancel_and_byte_bound",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-live/src/history/tests.rs",
+      "test": "history_bootstrap_repeated_slice_reuses_slots_until_empty_or_null",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-live/src/history/tests.rs",
+      "test": "history_bootstrap_raw_invalid_utf8_and_go_time_layout",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-live/src/history/tests.rs",
+      "test": "history_bootstrap_unknown_json_depth_matches_go_scanner",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-cli/src/formal_live_tests.rs",
+      "test": "legacy_resume_is_retired_before_workspace_or_native_factory",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-cli/src/formal_live_tests.rs",
+      "test": "legacy_bootstrap_status_reads_workspace_without_native_factory",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-cli/src/formal_live_tests.rs",
+      "test": "legacy_bootstrap_status_missing_keeps_id_and_no_result",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-cli/src/formal_live_tests.rs",
+      "test": "legacy_bootstrap_unmarshalable_time_fails_only_at_render_without_partial_frame",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-core/src/metadata.rs",
+      "test": "historical_raw_read_keeps_invalid_utf8_and_exact_document_limit",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-core/src/metadata.rs",
+      "test": "historical_raw_read_cancel_during_sqlite_wait_closes_without_writes",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-core/src/metadata.rs",
+      "test": "historical_raw_read_expired_budget_precedes_open",
+      "status": "NOT_RUN"
+    },
+    {
+      "file": "crates/lycheedev-core/src/metadata.rs",
+      "test": "historical_raw_read_schema_is_readonly_and_fixed_go_error",
+      "status": "NOT_RUN"
+    }
+  ],
+  "staticChecks": [
+    "rustfmt --edition 2024 --config skip_children=true on owned Rust source: PASS (parsing only)",
+    "git diff --check: PASS"
+  ],
+  "execution": "No Cargo, Go, native, game, or product tests run."
+}

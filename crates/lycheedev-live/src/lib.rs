@@ -3,6 +3,7 @@
 pub mod binding;
 pub mod go_mailbox_v1;
 pub mod host;
+pub mod history;
 pub mod journal;
 pub mod lifecycle;
 pub mod locator;

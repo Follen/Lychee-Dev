@@ -781,6 +781,14 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - native worker control v3 使用原总预算内绝对截止时间，扣除启动/传输/解析并预留 500ms，不再父级剩余约164秒却给新worker180秒；父 monotonic deadline 仍是硬边界。私有 deadline exit85+唯一marker 经严格匹配映射原公共 deadline，异常/伪造不覆盖原错误。phase 从子进程 stderr 固定64KiB前缀观测，无子进程路径写入或新增 Windows FFI，锁冲突/poison/容量耗尽永久停止观测、不拼接漏段。best-effort 诊断不保证末事件落盘，亦不证明完整慢因。R1/R2路径sidecar设计已撤回未发布，原失败保留；发布R4冻结 `source-native-control-r4-freeze.json`。
 - 本地 exact production 21 项与17sealed logs见 `tests/rust-local-pure/freeze-source-r4.json`，runner Node11项本次真实通过；workflow实际PyYAML解析3jobs及run字段。完整 adapter/native控制/实际process/4036 Retail/Skill/session/内存仍须对应候选实际验证。当前性能目标与四阶段串行审计仍未验收。
 
+### 2026-10-15：历史 BTP 只读与精确退役错误首批
+
+- 此批完成 non-CON resume 在 workspace/native factory 之前返回固定 Go 退役 exit 2；不复活已在 Go3.2.0 退役的 OP/BTP 执行链。BTP status 只读历史记录并保留 missing/corrupt/render 错误，无键盘/截图/native connection/replay能力。
+- 复用 Go typed decoder，保留重复字段、null、slice backing 重用、raw invalid UTF8、时间反序列化/序列化边界和10000层JSON深度合同。Core仅新增受原 OperationControl 管理的只读原始字节读取：打开前截止检查、bounded SQLite wait/checked close、1MiB preallocation边界和 TEXT/BLOB byte length。既有 strict create/put 语义未改。
+- 冻结 `legacy-read-freeze.json` SHA256 `4e3bd1aa066ad13b9c5fa9190ddfbb839281a0e074df08cfff454edb0b6adac1`，9owner、218依赖、200固定Go文件及8 Go toolchain来源文件经独立审查核 hash，所声明首批无阻断项；16映射测试均 **NOT_RUN**，只作 rustfmt 解析/diff检查。入批前9owner再次核 hash；相对3ea1155的依赖唯一变化是已独审的 activation Invalid variant 顺序修复，业务逻辑未变。
+- CI新增独立 history::tests 8项与 metadata::historical_read_tests 4项，另4项由现有 formal_live 模块过滤覆盖；实际PyYAML解析3jobs及run字段。此为测试接线，不是Windows执行通过。
+- 仍缺 OP status、历史 SESSION 验证、prepared-only OP cancel、显式 owner OP/BTP abandon、原有 workspace诊断；下一只读两路需要真正的历史 signal/report/capture 身份与证据验证，不能拿现代 mailbox Identity 替代。未来变更两文档必须原子 expected-generation CAS，不能顺序独立put冒充事务。完整历史兼容尚未交付。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

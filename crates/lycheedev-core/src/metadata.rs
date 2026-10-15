@@ -82,6 +82,104 @@ impl Metadata {
         }
         Ok(Self { connection })
     }
+    /// Read one historical Go document as original bytes. Unlike `read`, this
+    /// path never UTF-8/JSON-decodes before the caller's Go-compatible decoder.
+    /// Open, schema inspection and the single-row read share the original stop
+    /// control; SQLite's busy handler cannot hide cancellation for five seconds.
+    /// The 1 MiB ceiling is the fixed-Go documents CHECK in vault/metadata.go.
+    pub fn read_raw_controlled(
+        home: &Path,
+        key: &str,
+        control: &crate::control::OperationControl,
+    ) -> Result<Vec<u8>> {
+        Self::read_raw_controlled_observed(home, key, control, || {})
+    }
+    fn read_raw_controlled_observed(
+        home: &Path,
+        key: &str,
+        control: &crate::control::OperationControl,
+        mut on_busy: impl FnMut(),
+    ) -> Result<Vec<u8>> {
+        control.check()?;
+        crate::workspace::open(home)?;
+        control.check()?;
+        let path = home.join("state/toolkit.sqlite");
+        match std::fs::metadata(&path) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(ToolkitError::new(
+                    "vault.record_missing",
+                    "vault.record_missing",
+                    2,
+                ));
+            }
+            Err(error) => return Err(error.into()),
+        }
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let connection = checked_sql(control, until, &mut on_busy, || {
+            Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        })?;
+        let result = (|| {
+            connection.busy_timeout(std::time::Duration::ZERO)?;
+            let version: i32 = checked_sql(control, until, &mut on_busy, || {
+                connection.pragma_query_value(None, "user_version", |row| row.get(0))
+            })?;
+            control.check()?;
+            if version != 1 {
+                return Err(ToolkitError::new(
+                    "vault.unsupported_workspace",
+                    "vault.unsupported_workspace",
+                    4,
+                ));
+            }
+            // One SQL statement is an atomic read snapshot. Reject an invalid
+            // oversized row before allocating its bytes, even in a corrupted
+            // database that has bypassed the ordinary table CHECK constraint.
+            let row: Option<(i64, Option<Vec<u8>>)> = checked_sql(
+                control,
+                until,
+                &mut on_busy,
+                || {
+                    connection.query_row(
+                    "SELECT length(CAST(value AS BLOB)),CASE WHEN length(CAST(value AS BLOB))<=1048576 THEN CAST(value AS BLOB) ELSE NULL END FROM documents WHERE key=?1",
+                    [key], |row| Ok((row.get(0)?, row.get(1)?)),
+                ).optional()
+                },
+            )?;
+            control.check()?;
+            match row {
+                None => Err(ToolkitError::new(
+                    "vault.record_missing",
+                    "vault.record_missing",
+                    2,
+                )),
+                Some((length, Some(raw)))
+                    if (0..=1_048_576).contains(&length) && raw.len() as i64 == length =>
+                {
+                    Ok(raw)
+                }
+                Some(_) => Err(ToolkitError::invalid("metadata document exceeds 1 MiB")),
+            }
+        })();
+        // No statement/row escapes this scope. Close is checked on success and
+        // failure; a close failure cannot replace the original stop/error.
+        match connection.close() {
+            Ok(()) => match result {
+                Ok(raw) => {
+                    control.check()?;
+                    Ok(raw)
+                }
+                Err(error) => Err(error),
+            },
+            Err((_connection, close)) => match result {
+                Ok(_) => Err(close.into()),
+                Err(mut original) => {
+                    original.details = serde_json::json!({"primaryDetails":original.details,"metadataCloseError":close.to_string()});
+                    Err(original)
+                }
+            },
+        }
+    }
     pub fn read<T: DeserializeOwned>(&self, key: &str) -> Result<T> {
         let bytes: Option<Vec<u8>> = self
             .connection
@@ -911,5 +1009,130 @@ mod strict_create_tests {
             .create_controlled("strict/blocked", &true, &OperationControl::default())
             .unwrap();
         assert_eq!(metadata.generation("strict/blocked").unwrap(), Some(1));
+    }
+}
+
+#[cfg(test)]
+mod historical_read_tests {
+    use super::*;
+    use crate::control::{OperationControl, TrackedCancellation};
+    use std::time::{Duration, Instant};
+    struct Fixture(std::path::PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "lychee-history-read-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            crate::workspace::initialize(&path).unwrap();
+            drop(Metadata::open(&path, true).unwrap());
+            Self(path)
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+    #[test]
+    fn historical_raw_read_keeps_invalid_utf8_and_exact_document_limit() {
+        let f = Fixture::new();
+        let metadata = Metadata::open(&f.0, true).unwrap();
+        let raw = b"{\"phase\":\"\xff\"}";
+        metadata
+            .connection
+            .execute("INSERT INTO documents VALUES('raw',1,?1)", [raw.as_slice()])
+            .unwrap();
+        let limit = vec![b' '; 1_048_576];
+        metadata
+            .connection
+            .execute("INSERT INTO documents VALUES('limit',1,?1)", [&limit])
+            .unwrap();
+        let large = vec![b' '; 1_048_577];
+        metadata
+            .connection
+            .execute_batch("PRAGMA ignore_check_constraints=ON")
+            .unwrap();
+        metadata
+            .connection
+            .execute("INSERT INTO documents VALUES('large',1,?1)", [&large])
+            .unwrap();
+        metadata
+            .connection
+            .execute("INSERT INTO documents VALUES('text',1,?1)", ["你好"])
+            .unwrap();
+        drop(metadata);
+        let c = OperationControl::default();
+        assert_eq!(
+            Metadata::read_raw_controlled(&f.0, "text", &c).unwrap(),
+            "你好".as_bytes()
+        );
+        assert_eq!(Metadata::read_raw_controlled(&f.0, "raw", &c).unwrap(), raw);
+        assert_eq!(
+            Metadata::read_raw_controlled(&f.0, "limit", &c)
+                .unwrap()
+                .len(),
+            1_048_576
+        );
+        assert!(Metadata::read_raw_controlled(&f.0, "large", &c).is_err());
+    }
+    #[test]
+    fn historical_raw_read_cancel_during_sqlite_wait_closes_without_writes() {
+        let f = Fixture::new();
+        let blocker = Connection::open(f.0.join("state/toolkit.sqlite")).unwrap();
+        blocker.execute_batch("BEGIN EXCLUSIVE").unwrap();
+        let cancellation = TrackedCancellation::new();
+        let control = OperationControl::tracked(
+            Instant::now() + Duration::from_secs(30),
+            cancellation.clone(),
+        );
+        let mut waited = false;
+        let error = Metadata::read_raw_controlled_observed(&f.0, "missing", &control, || {
+            waited = true;
+            cancellation.cancel();
+        })
+        .unwrap_err();
+        assert!(waited);
+        assert_eq!(error.code, "command.cancelled");
+        blocker.execute_batch("ROLLBACK").unwrap();
+        drop(blocker);
+        let error = Metadata::read_raw_controlled(&f.0, "missing", &OperationControl::default())
+            .unwrap_err();
+        assert_eq!(error.message, "vault.record_missing");
+    }
+    #[test]
+    fn historical_raw_read_expired_budget_precedes_open() {
+        let f = Fixture::new();
+        let path = f.0.join("must-not-create");
+        let control = OperationControl::uncancelable(Instant::now() - Duration::from_secs(1));
+        assert_eq!(
+            Metadata::read_raw_controlled(&path, "x", &control)
+                .unwrap_err()
+                .code,
+            "command.deadline"
+        );
+        assert!(!path.exists());
+    }
+    #[test]
+    fn historical_raw_read_schema_is_readonly_and_fixed_go_error() {
+        for version in [0, 2, -1] {
+            let f = Fixture::new();
+            let connection = Connection::open(f.0.join("state/toolkit.sqlite")).unwrap();
+            connection
+                .pragma_update(None, "user_version", version)
+                .unwrap();
+            let error =
+                Metadata::read_raw_controlled(&f.0, "x", &OperationControl::default()).unwrap_err();
+            assert_eq!(error.code, "vault.unsupported_workspace");
+            let after: i32 = connection
+                .pragma_query_value(None, "user_version", |r| r.get(0))
+                .unwrap();
+            assert_eq!(after, version);
+            drop(connection);
+        }
     }
 }

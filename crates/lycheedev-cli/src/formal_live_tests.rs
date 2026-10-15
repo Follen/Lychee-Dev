@@ -1186,3 +1186,101 @@ fn probe_read_close_and_control_failure_preserves_original_typed_causes() {
     .unwrap();
     assert_eq!(value["error"]["details"], details);
 }
+
+#[test]
+fn legacy_resume_is_retired_before_workspace_or_native_factory() {
+    let f = Fixture::new();
+    for id in ["OP-unknown", "BTP-unknown", "SESSION-old", "unknown"] {
+        let inv = invocation(&["live", "resume", id], &f.0);
+        let response =
+            dispatch_with::<Fake>(&inv, |_| panic!("retired recovery opened native services"));
+        let error = response.error.unwrap();
+        assert_eq!(error.exit_code, 2);
+        assert_eq!(error.code, "command.invalid_arguments");
+        assert_eq!(
+            error.message,
+            "legacy OP/BTP execution is retired; use live status or live abandon; Native recovery requires CON"
+        );
+        assert!(response.result.is_none());
+        assert!(response.operation_id.is_empty());
+        assert!(!inv.home.exists());
+    }
+}
+
+#[test]
+fn legacy_bootstrap_status_reads_workspace_without_native_factory() {
+    let f = Fixture::new();
+    let inv = invocation(&["live", "status", "BTP-old"], &f.0);
+    lycheedev_core::workspace::initialize(&inv.home).unwrap();
+    let mut metadata = lycheedev_core::metadata::Metadata::open(&inv.home, true).unwrap();
+    metadata
+        .create(
+            "bootstrap/attempt/BTP-old",
+            &json!({
+                "schema":"lycheedev.bootstrap-receiver.v1", "id":"BTP-old", "phase":"unknown",
+                "receiver":{"phase":"commit_queued", "attempt":1}
+            }),
+        )
+        .unwrap();
+    drop(metadata);
+    let response =
+        dispatch_with::<Fake>(&inv, |_| panic!("historical status opened native services"));
+    assert_eq!(response.exit_code(), 0);
+    assert_eq!(response.operation_id, "BTP-old");
+    assert!(!response.context.contains_key("transport"));
+    let mut bytes = vec![];
+    render(&mut bytes, "json", &response).unwrap();
+    let envelope: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(envelope["result"]["phase"], "unknown");
+    assert_eq!(envelope["result"]["receiver"]["phase"], "commit_queued");
+    assert!(!f.0.join(".lycheedev").exists());
+}
+#[test]
+fn legacy_bootstrap_status_missing_keeps_id_and_no_result() {
+    let f = Fixture::new();
+    let inv = invocation(&["live", "status", "BTP-missing"], &f.0);
+    lycheedev_core::workspace::initialize(&inv.home).unwrap();
+    let response =
+        dispatch_with::<Fake>(&inv, |_| panic!("historical status opened native services"));
+    assert_eq!(response.operation_id, "BTP-missing");
+    assert!(response.result.is_none());
+    let error = response.error.unwrap();
+    assert_eq!(error.code, "vault.record_missing");
+    assert_eq!(error.message, "vault.record_missing");
+    assert_eq!(error.exit_code, 2);
+}
+
+#[test]
+fn legacy_bootstrap_unmarshalable_time_fails_only_at_render_without_partial_frame() {
+    let f = Fixture::new();
+    let inv = invocation(&["live", "status", "BTP-old"], &f.0);
+    lycheedev_core::workspace::initialize(&inv.home).unwrap();
+    let mut metadata = lycheedev_core::metadata::Metadata::open(&inv.home, true).unwrap();
+    metadata
+        .create(
+            "bootstrap/attempt/BTP-old",
+            &json!({
+                "schema":"lycheedev.bootstrap-receiver.v1", "id":"BTP-old",
+                "createdAt":"2026-10-15T02:00:00+24:00"
+            }),
+        )
+        .unwrap();
+    drop(metadata);
+    let response =
+        dispatch_with::<Fake>(&inv, |_| panic!("historical read opened native services"));
+    assert_eq!(response.exit_code(), 0);
+    for format in ["json", "jsonl", "text"] {
+        let mut bytes = vec![];
+        let error = render(&mut bytes, format, &response).unwrap_err();
+        assert_eq!(
+            error.message,
+            "json: error calling MarshalJSON for type time.Time: Time.MarshalJSON: timezone hour outside of range [0,23]"
+        );
+        if format == "jsonl" {
+            let begin: Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(begin["type"], "begin");
+        } else {
+            assert!(bytes.is_empty());
+        }
+    }
+}
