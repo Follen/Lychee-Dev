@@ -698,6 +698,9 @@ function GetScreenHeight()
 end
 
 C_AddOns = {
+    GetAddOnEnableState = function() return 2 end,
+    EnableAddOn = function() end,
+    SaveAddOns = function() end,
     GetNumAddOns = function()
         return 1
     end,
@@ -709,7 +712,7 @@ C_AddOns = {
     end,
     GetAddOnMetadata = function(addonName, key)
         if addonName == "Lychee Dev" and key == "Version" then
-            return "3.2.1"
+            return "3.2.2"
         end
         return ""
     end,

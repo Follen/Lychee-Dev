@@ -7,6 +7,16 @@ import (
 	"testing"
 )
 
+func TestDoctorReportsStartupSlotReloadWithoutBlockingPhysicalInput(t *testing.T) {
+	blocked := false
+	input := InputObservation{InputBlocked: &blocked, Bindings: primaryInputBindings(), SlotReloadRequired: true}
+	r := DoctorResult{Healthy: true}
+	r.inspectInput(input)
+	if r.Healthy || len(r.Checks) != 2 || r.Checks[0].ID != "live.input" || r.Checks[0].State != "ok" || r.Checks[1].ID != "live.slot_activation" || r.Checks[1].State != "blocked" || *input.InputBlocked {
+		t.Fatalf("startup activation and physical readiness were conflated: %+v", r)
+	}
+}
+
 func TestDoctorReportsLatestCallbackFailure(t *testing.T) {
 	for _, failure := range []struct{ stage, reason string }{
 		{"load_failed", "slot_addon_disabled"},

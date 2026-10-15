@@ -79,7 +79,8 @@ func TestExpiredLookupRetriesInputWithoutEagerDiscovery(t *testing.T) {
 	if err := stopReconcileContinueFor(d, 4*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	if !d.State.Bound || p.observations != 2 || p.discoveries != 0 || len(p.inputs) != 1 {
+	// Expired pre-bind check, fresh pre-bind check, then fresh input authority.
+	if !d.State.Bound || p.observations != 3 || p.discoveries != 0 || len(p.inputs) != 1 {
 		t.Fatalf("bound=%v observations=%d discoveries=%d inputs=%d", d.State.Bound, p.observations, p.discoveries, len(p.inputs))
 	}
 }

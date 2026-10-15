@@ -20,20 +20,21 @@ const legacyInputSchema = "lycheedev.input.v3"
 var ErrInputObservationStale = errors.Join(ErrPending, errors.New("live.channel_input_observation_stale"))
 
 type InputObservation struct {
-	Bindings        *InputBindings   `json:"bindings"`
-	Schema          string           `json:"schema"`
-	Runtime         string           `json:"runtime"`
-	Owner           string           `json:"owner"`
-	Fence           uint64           `json:"fence"`
-	NextSlot        int              `json:"nextSlot"`
-	GUID            string           `json:"guid"`
-	Build           string           `json:"build"`
-	SampleMillis    int64            `json:"sampleMillis"`
-	InputBlocked    *bool            `json:"inputBlocked"`
-	Reason          string           `json:"reason"`
-	EscapeLimit     int              `json:"escapeLimit"`
-	Address         uint64           `json:"-"`
-	InputDiagnostic *InputDiagnostic `json:"inputAttempt,omitempty"`
+	Bindings           *InputBindings   `json:"bindings"`
+	Schema             string           `json:"schema"`
+	Runtime            string           `json:"runtime"`
+	Owner              string           `json:"owner"`
+	Fence              uint64           `json:"fence"`
+	NextSlot           int              `json:"nextSlot"`
+	GUID               string           `json:"guid"`
+	Build              string           `json:"build"`
+	SampleMillis       int64            `json:"sampleMillis"`
+	InputBlocked       *bool            `json:"inputBlocked"`
+	SlotReloadRequired bool             `json:"slotReloadRequired,omitempty"`
+	Reason             string           `json:"reason"`
+	EscapeLimit        int              `json:"escapeLimit"`
+	Address            uint64           `json:"-"`
+	InputDiagnostic    *InputDiagnostic `json:"inputAttempt,omitempty"`
 	// Host uptime of this verified current INPUT read, never supplied by the
 	// addon or restored from an old journal's pre-input observation.
 	ObservedAtMillis int64 `json:"-"`
@@ -143,17 +144,9 @@ func (d *Driver) submitInput(ctx context.Context, exchange, runtime, desired str
 		// first acquire a current host-uptime bound, without inventing an outcome.
 		recoverTime = previous.RecoveryAfterMillis == 0 && (previous.Outcome == nil || previous.Outcome.Disposition != "not_sent" && previous.Outcome.AtMillis == 0)
 	}
-	s, err := d.Backend.ObserveInput(ctx, envelope, after, d.State.Identity.InputState)
+	s, err := d.observeInput(ctx, envelope, after)
 	if err != nil {
-		d.Waiting = "input_observation_unavailable"
-		if errors.Is(err, ErrInputObservationStale) {
-			d.Waiting = "input_observation_stale"
-		}
 		return err
-	}
-	if !s.validReadiness() || !s.validBindings() {
-		d.Waiting = "input_observation_unavailable"
-		return ErrPending
 	}
 	if *s.InputBlocked {
 		d.Waiting = s.Reason
@@ -177,6 +170,10 @@ func (d *Driver) submitInput(ctx context.Context, exchange, runtime, desired str
 			return ErrInputObservationStale
 		}
 	}
+	d.Waiting = ""
+	if desired == "invoke" && s.SlotReloadRequired {
+		return d.requestSlotReload(ctx)
+	}
 	out, err := d.perform(ctx, exchange, runtime, InputAction{Kind: desired, Envelope: envelope, Observation: &s, Capability: d.State.Identity.InputState, AfterMillis: after})
 	if out.Disposition == "not_sent" {
 		d.Waiting = out.Reason
@@ -192,6 +189,22 @@ func (d *Driver) submitInput(ctx context.Context, exchange, runtime, desired str
 		return err
 	}
 	return nil
+}
+
+func (d *Driver) observeInput(ctx context.Context, envelope bridge.SlotEnvelope, after int64) (InputObservation, error) {
+	s, err := d.Backend.ObserveInput(ctx, envelope, after, d.State.Identity.InputState)
+	if err != nil {
+		d.Waiting = "input_observation_unavailable"
+		if errors.Is(err, ErrInputObservationStale) {
+			d.Waiting = "input_observation_stale"
+		}
+		return s, err
+	}
+	if !s.validReadiness() || !s.validBindings() {
+		d.Waiting = "input_observation_unavailable"
+		return s, ErrPending
+	}
+	return s, nil
 }
 
 // Same-machine uptime is a freshness gate, not a replacement for nonce receipt

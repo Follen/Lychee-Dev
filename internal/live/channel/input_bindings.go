@@ -86,5 +86,5 @@ func (s InputObservation) mailboxProfile(action string) (desktop.MailboxBindings
 
 // Equal timestamps alone cannot authorize a changed publication's key profile.
 func sameInputProfile(current, stored InputObservation) bool {
-	return current.validBindings() && stored.validBindings() && current.Bindings != nil && stored.Bindings != nil && *current.Bindings == *stored.Bindings
+	return current.validBindings() && stored.validBindings() && current.Bindings != nil && stored.Bindings != nil && *current.Bindings == *stored.Bindings && current.SlotReloadRequired == stored.SlotReloadRequired
 }

@@ -354,8 +354,20 @@ func TestContinueReloadAllowsConsumedSlotWithoutReceipt(t *testing.T) {
 	}
 }
 
+type runtimeChangedDuringBindPeer struct{ *stopReconcilePeer }
+
+func (p *runtimeChangedDuringBindPeer) Publish(ctx context.Context, e bridge.SlotEnvelope) error {
+	err := p.stopReconcilePeer.Publish(ctx, e)
+	if e.Action == "bind" {
+		p.current.Runtime = strings.Repeat("3", 32)
+	}
+	return err
+}
+
 func TestContinueSecondRuntimeChangePreservesOriginalRecovery(t *testing.T) {
 	d, p := stopReconcileFixture(t)
+	peer := &runtimeChangedDuringBindPeer{p}
+	d.Backend = peer
 	d.State.Bound = false
 	if err := d.begin(context.Background(), "bind", d.State.Owner, nil); err != nil {
 		t.Fatal(err)
@@ -365,16 +377,16 @@ func TestContinueSecondRuntimeChangePreservesOriginalRecovery(t *testing.T) {
 	second := d.State.Identity
 	second.Runtime = strings.Repeat("2", 32)
 	second.NextSlot = 1
-	// Runtime 2 disappears before its fresh bind. Runtime 3 is now observable.
+	// Runtime 2 disappears after its startup check and bind publication, before
+	// fresh input. Both reservations must survive the newly observable runtime 3.
 	p.current = second
-	p.current.Runtime = strings.Repeat("3", 32)
 	if err := d.RecoverRuntime(context.Background(), second); !errors.Is(err, ErrPending) {
 		t.Fatal(err)
 	}
 	bindNonce := d.State.Transaction.Envelope.Nonce
 	for retry := 0; retry < 2; retry++ {
 		var err error
-		d, err = Load(d.Log, p)
+		d, err = Load(d.Log, peer)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -45,6 +45,30 @@ ns.Compat = {
         if loaded~=true and reason=="DISABLED" then return nil,"slot_addon_disabled" end
         return loaded==true and true or nil,type(reason)=="string" and reason or "slot_load_failed"
     end,
+    -- Caller has verified this managed slot's metadata and current actor.
+    -- These APIs change enable settings only; no slot is loaded or consumed.
+    EnsureInputSlotEnabled = function(name,character)
+        if type(C_AddOns)~="table" or type(C_AddOns.GetAddOnEnableState)~="function" then return nil,"slot_enable_state_unavailable" end
+        local function state()
+            local ok,value=pcall(C_AddOns.GetAddOnEnableState,name,character)
+            if not ok or (issecretvalue and issecretvalue(value)) or type(value)~="number"
+                or (value~=0 and value~=1 and value~=2) then return nil end
+            return value
+        end
+        local before=state()
+        if before==nil then return nil,"slot_enable_state_failed" end
+        if before~=0 then return false end
+        if type(C_AddOns.EnableAddOn)~="function" or type(C_AddOns.SaveAddOns)~="function" then return nil,"slot_enable_unavailable" end
+        if not pcall(C_AddOns.EnableAddOn,name,character) then return nil,"slot_enable_failed" end
+        local after=state()
+        if after==nil or after==0 then return nil,"slot_enable_failed" end
+        return true
+    end,
+    SaveInputSlots = function()
+        if type(C_AddOns)~="table" or type(C_AddOns.SaveAddOns)~="function" then return nil,"slot_enable_save_unavailable" end
+        if not pcall(C_AddOns.SaveAddOns) then return nil,"slot_enable_save_failed" end
+        return true
+    end,
     ReceiverChord = function(key)
         if (issecretvalue and issecretvalue(key)) or type(key)~="string" then return nil end
         local number=string.match(key,"^F([1-9]%d?)$")

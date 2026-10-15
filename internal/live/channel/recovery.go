@@ -29,6 +29,17 @@ func (d *Driver) RecoverRuntime(ctx context.Context, candidate Identity) error {
 	if d.State.Recovery != nil && d.State.Recovery.Phase != "complete" {
 		i := d.State.Identity
 		if candidate.Validate() == nil && candidate.Runtime > i.Runtime && candidate.Owner == "" && candidate.GUID == i.GUID && candidate.Build == i.Build && candidate.Product == i.Product && candidate.Release == i.Release {
+			if r := d.State.Reload; r != nil && r.SlotEnablement && r.From == i.Runtime && (r.Phase == "intent" || r.Phase == "input_attempted") && !d.State.Bound && d.State.Transaction == nil && d.State.Recovery.Phase == "binding" {
+				// This intermediate runtime requested slot activation before a
+				// bind was published. Preserve the original recovery transaction;
+				// only a final fresh bind can retire its reservation.
+				d.State.Identity = candidate
+				r.Phase = "binding"
+				if err := d.Save(ctx, "slot_enable_recovery_candidate"); err != nil {
+					return err
+				}
+				return d.finishRecovery(ctx)
+			}
 			// Both the original exchange and the in-flight bind may still own
 			// disk reservations. Never overwrite either to chase a third runtime.
 			return &BlockedError{Blocker: Blocker{Kind: "runtime_changed_during_recovery", Runtime: candidate.Runtime, Condition: "original_process_end_or_protocol_recovery"}}

@@ -40,14 +40,15 @@ func TestKeyboardWaitRechecksInputForTheOriginalExchange(t *testing.T) {
 		t.Fatalf("busy keyboard did not wait: %v", err)
 	}
 	original := d.State.Transaction.Envelope
-	if d.State.Input.Outcome.MessagesQueued != 0 || d.State.Input.Outcome.Disposition != "not_sent" || len(p.after) != 1 || len(p.inputs) != 0 {
+	// Binding first checks startup slot activation, then observes before input.
+	if d.State.Input.Outcome.MessagesQueued != 0 || d.State.Input.Outcome.Disposition != "not_sent" || len(p.after) != 2 || len(p.inputs) != 0 {
 		t.Fatal("busy attempt was not recorded as known-zero input")
 	}
 	p.sample, p.now, p.busy = 1500, 1500, false
 	if err := d.Connect(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if len(p.after) != 2 || len(p.inputs) != 1 || p.inputs[0].Observation.SampleMillis != 1500 || p.inputs[0].Envelope != original || !d.State.Bound {
+	if len(p.after) != 3 || len(p.inputs) != 1 || p.inputs[0].Observation.SampleMillis != 1500 || p.inputs[0].Envelope != original || !d.State.Bound {
 		t.Fatalf("quiet retry reused stale INPUT or replaced the exchange: %+v", p.inputs)
 	}
 }

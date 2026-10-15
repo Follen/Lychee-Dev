@@ -1,6 +1,6 @@
 local ADDON_NAME, ns = ...
 
-ns.Release = "3.2.1"
+ns.Release = "3.2.2"
 ns.Startup = { ready = false, reason = "addon_not_loaded" }
 _G.LycheeDevInternal = ns
 
