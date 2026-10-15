@@ -142,6 +142,14 @@ impl Fixture {
         )
     }
     fn with_payload(corrupt: bool, groups: Option<(usize, bool)>, payload: Vec<u8>) -> Self {
+        Self::with_framing(corrupt, groups, payload, framed)
+    }
+    fn with_framing(
+        corrupt: bool,
+        groups: Option<(usize, bool)>,
+        payload: Vec<u8>,
+        frame: fn(&[u8]) -> (String, Vec<u8>),
+    ) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let home = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.tmp/remote-session-fixtures")
@@ -163,7 +171,7 @@ impl Fixture {
         if corrupt {
             actual[0] ^= 1;
         }
-        let (pekey, pencoded) = framed(&actual);
+        let (pekey, pencoded) = frame(&actual);
         let mut root = Vec::new();
         let (foreign_groups, two_ids) = groups.unwrap_or((0, false));
         for group in 0..=foreign_groups {
@@ -723,3 +731,5 @@ fn real_remote_metadata_reads_keep_independent_budget_cancellation_ordered() {
     f.control.check().unwrap();
     std::fs::remove_dir_all(f.home).unwrap();
 }
+
+mod verified;

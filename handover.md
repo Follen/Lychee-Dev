@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 16:39 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`334a7558806fff0c2fb12d3f9d017fb4051abadd`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 16:50 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`1e922dd444f75a1a363da1909828a5efe5905832`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -31,6 +31,8 @@
 | Data | 本地 DB2/CASC/SQL/Hotfix；可取消 HTTP、remote catalog/target/encoded Session；direct remote target 已接实际 CLI；decoded alias 与共享 body 的 retained 责任转交已组合；Core 原控制贯通 blob/pin/capture | named target、streamed assets；JSONL scoped输出已组合待实际验证，SQL/DB2/navigation默认provider及外层Metadata已接，内部Store/Fragments/target预算错误身份修复已组合，自动pin/effective旧等待与实际使用仍待闭合；archive计量、gzip边界、合法raw-URI差异仍有缺口 |
 | Skill | 固定 Go 工作流及实际 CLI 验收入口 | Source长语义阻塞后的完整任务复测；Source/Skill/Data各自独立真实使用循环未收敛 |
 | 清理 / 质量 | 逐批独立源码审与回归持续执行，旧证据保留 | 21个旧 addon 额外文件仍有真实动态消费者；不能只删文件让静态门槛变绿。最终四阶段审计尚未开始收敛 |
+
+Core单遍流式发布与Session scoped verified body已独审组合：只解码一次，原句柄暂存后追加有界磁盘copy并同目录发布；23+7新增Rust尚未运行，默认asset/export接线另片。额外磁盘读写及最多两份decoded暂存是真实成本，未证明性能收益。现workspace::open整读、外部Destination Drop仍有受控关闭缺口；同Session重复调用重建Encoding/Root/Memo，尚未对齐Go ready/rootReported复用与统计，独立cold/warm fixture不能代替该合同。
 
 当前Data新增323自适应资源合同尚未实现验收。先在真实workspace准入后采样；保同预算贯通、取消、错误与输出，不能将旧固定成本候选改标通过。
 

@@ -1,0 +1,47 @@
+{
+  "rust": "NOT_RUN",
+  "newTests": 23,
+  "tests": [
+    {
+      "path": "crates/lycheedev-core/src/evidence/bounded/staged/tests.rs",
+      "names": [
+        "staged_generated_body_uses_one_source_traversal_and_one_live_block_per_pass",
+        "staged_empty_short_and_excess_sources_require_real_eof",
+        "staged_typed_business_eof_failure_never_publishes_or_erases_missing_key",
+        "staged_existing_blob_does_not_bypass_this_sources_eof_validation",
+        "staged_partial_read_records_original_error_and_both_stops_then_cleans",
+        "staged_work_stop_during_disk_copy_owns_both_temps_without_source_replay",
+        "staged_native_collision_verifies_good_or_corrupt_winner_without_overwrite",
+        "staged_existing_wrong_length_is_terminal_and_preserves_original_entry",
+        "staged_source_failure_plus_real_stage_close_boundary_preserves_both",
+        "staged_post_rename_close_failure_retains_published_identity_and_does_not_replay",
+        "staged_original_parent_and_final_shard_cannot_be_replaced_during_publication",
+        "staged_borrowed_meter_ends_at_return_but_owned_stop_lives_until_close",
+        "staged_admission_failure_precedes_workspace_and_source_io",
+        "staged_two_same_digest_sources_finish_once_then_coalesce_under_original_lease",
+        "staged_prior_publication_fact_cannot_be_downgraded_into_a_key_retry"
+      ],
+      "count": 15
+    },
+    {
+      "path": "crates/lycheedev-windows/src/filesystem/destination/staged/tests.rs",
+      "names": [
+        "private_spool_same_directory_native_publication_keeps_strict_parent",
+        "private_spool_seal_retains_same_handle_read_and_refuses_later_writes",
+        "private_spool_real_no_replace_collision_preserves_the_winner",
+        "private_spool_real_rename_error_retains_unknown_original_temp",
+        "private_spool_uncertain_error_after_real_rename_never_deletes_published_object",
+        "private_spool_checked_close_consumes_once_and_preserves_published_or_discarded_fact",
+        "private_spool_rejects_path_escape_stream_and_directory_names_before_commit",
+        "private_spool_post_acquisition_stop_still_has_discard_and_close_owner"
+      ],
+      "count": 8
+    }
+  ],
+  "requiredCommands": [
+    "cargo test -p lycheedev-core evidence::bounded::staged --lib",
+    "cargo test -p lycheedev-core evidence::bounded --lib",
+    "cargo test -p lycheedev-windows filesystem::destination --lib"
+  ],
+  "consumerCoverageOwnedByData": "Real BLTE/CKey complete EOF, key recovery, tight retained cap and Go323 adaptive budget remain separate Data tests; no Data source was edited."
+}

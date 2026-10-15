@@ -630,14 +630,14 @@ impl Destination {
                     ));
                 }
                 check()?;
-                stage.file.write_all(&buffer[..n])?;
+                stage.file_mut().write_all(&buffer[..n])?;
                 remaining -= n as u64;
             }
             check()?;
             if reader.read(&mut buffer[..1])? != 0 {
                 return Err(invalid("output source exceeds its declared length"));
             }
-            stage.file.sync_all()?;
+            stage.file_mut().sync_all()?;
             check()?;
             self.check()?;
             stage.rename(&self.path, self.overwrite)?;
@@ -666,14 +666,31 @@ impl Destination {
 }
 
 struct Stage {
-    file: File,
+    file: Option<File>,
+    name: String,
     published: bool,
 }
 impl Stage {
     fn create(parent: &Directory) -> io::Result<Self> {
         parent.verify()?;
+        Self::create_verified(parent, &mut Uncontrolled)
+    }
+    // The caller verified ancestry under its original control. Return the
+    // acquired owner before any post-open check can lose cleanup authority.
+    fn create_verified<C: FileControl>(
+        parent: &Directory,
+        control: &mut C,
+    ) -> Result<Self, C::Error> {
         for _ in 0..64 {
-            let token = crate::random::token().map_err(io::Error::other)?;
+            control.charge(FileCost {
+                io_operations: 4,
+                allocation_bytes: 4096,
+                work_units: 4096,
+            })?;
+            let token = crate::random::token()
+                .map_err(io::Error::other)
+                .map_err(C::Error::from)?;
+            control.check()?;
             let name = format!(".lycheedev-export-{token}");
             let opened = relative_file(
                 parent.parent_handle(),
@@ -683,18 +700,23 @@ impl Stage {
             match opened {
                 Ok(file) => {
                     return Ok(Self {
-                        file,
+                        file: Some(file),
+                        name,
                         published: false,
                     });
                 }
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(error),
+                Err(error) => return Err(error.into()),
             }
         }
         Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
             "stage name collision budget exhausted",
-        ))
+        )
+        .into())
+    }
+    fn file_mut(&mut self) -> &mut File {
+        self.file.as_mut().expect("unconsumed stage")
     }
     fn rename(&mut self, destination: &Path, overwrite: bool) -> io::Result<()> {
         // A simple name with NULL RootDirectory is the documented same-directory
@@ -729,7 +751,7 @@ impl Stage {
             // Stage has synchronous I/O (no FILE_FLAG_OVERLAPPED), so the call
             // returns the final status before these buffers expire.
             let status = NtSetInformationFile(
-                handle(&self.file),
+                handle(self.file.as_ref().expect("unconsumed stage")),
                 &mut status_block,
                 info.cast(),
                 bytes as u32,
@@ -745,11 +767,11 @@ impl Stage {
         Ok(())
     }
     fn discard(&mut self) -> io::Result<()> {
-        if !self.published {
+        if !self.published && self.file.is_some() {
             let info = FILE_DISPOSITION_INFO { DeleteFile: true };
             unsafe {
                 SetFileInformationByHandle(
-                    handle(&self.file),
+                    handle(self.file.as_ref().expect("unconsumed stage")),
                     FileDispositionInfo,
                     (&info as *const FILE_DISPOSITION_INFO).cast(),
                     size_of::<FILE_DISPOSITION_INFO>() as u32,
@@ -996,8 +1018,8 @@ mod tests {
         let output = parent.join("body");
         let destination = Destination::open(&output, true).unwrap();
         let mut stage = Stage::create(&destination._directory).unwrap();
-        stage.file.write_all(b"complete staged body").unwrap();
-        stage.file.sync_all().unwrap();
+        stage.file_mut().write_all(b"complete staged body").unwrap();
+        stage.file_mut().sync_all().unwrap();
         destination.check().unwrap();
         // Exact production boundary: a reparse target is inserted after check
         // but before NtSetInformationFile.
@@ -1022,3 +1044,6 @@ mod tests {
 #[cfg(test)]
 #[path = "destination/admission_tests.rs"]
 mod admission_tests;
+
+mod staged;
+pub use staged::{StagedFile, StagedPublication};

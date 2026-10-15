@@ -132,6 +132,78 @@ pub(super) fn key(
     )))
 }
 
+/// Shared Go wire/identity admission. Body modes keep their own ownership and
+/// verification; this function never materializes a cached body.
+pub(super) fn reference(
+    store: &Store<'_>,
+    key: Option<&str>,
+    record: &EncodingRecord,
+    keys: &mut keys::Context,
+) -> Result<Option<evidence::BlobRef>> {
+    let Some(key) = key else {
+        return Ok(None);
+    };
+    let Some(entry) = read_entry(store, key)? else {
+        return Ok(None);
+    };
+    if entry.content_key != record.content_key
+        || entry.blob.bytes < 0
+        || entry.blob.bytes as u64 != record.decoded_bytes
+        || entry.keys.kind != keys.source.kind
+        || entry.keys.sha256 != keys.source.sha256
+    {
+        return Err(integrity());
+    }
+    if entry.keys.kind == "public" && entry.keys.state == "loaded" {
+        match keys.ensure_public() {
+            Ok(()) => {}
+            Err(error)
+                if keys.source.state != "loaded"
+                    && pure_expected(&error, "container.key_unavailable") =>
+            {
+                return Ok(None);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    if !lycheedev_core::selection::valid_digest(&entry.blob.sha256, 64) {
+        return Err(integrity());
+    }
+    Ok(Some(entry.blob.into_core()?))
+}
+
+/// Returns true only for a pure concurrent-create conflict. The caller then
+/// authenticates the winner using its own materialized or streaming body mode.
+pub(super) fn save_entry(
+    store: &Store<'_>,
+    key: Option<&str>,
+    record: &EncodingRecord,
+    reference: &evidence::BlobRef,
+    keys: &keys::Context,
+) -> Result<bool> {
+    let Some(key) = key else {
+        return Ok(false);
+    };
+    let entry = Entry {
+        content_key: record.content_key.clone(),
+        blob: CachedBlob::try_from(reference.clone())?,
+        keys: Source::from(&keys.source),
+    };
+    // Keep Go's marshal-before-existence order and no validation of old values.
+    let _ = serde_json::to_vec(&entry)?;
+    if store.generation(key)?.is_some() {
+        return Ok(false);
+    }
+    create_conflict(store.put(key, &entry, None))
+}
+fn create_conflict(result: Result<()>) -> Result<bool> {
+    match result {
+        Ok(()) => Ok(false),
+        Err(error) if pure_expected(&error, "vault.generation_conflict") => Ok(true),
+        Err(error) => Err(error),
+    }
+}
+
 #[derive(Default)]
 pub(in crate::remote::session) struct Memo {
     latest: Option<(evidence::BlobRef, Arc<SharedContent>)>,
@@ -190,36 +262,9 @@ impl Memo {
         stats: &mut Stats,
         budget: &Arc<Budget>,
     ) -> Result<Option<(evidence::BlobRef, Arc<SharedContent>)>> {
-        let Some(key) = key else {
+        let Some(reference) = reference(store, key, record, keys)? else {
             return Ok(None);
         };
-        let Some(entry) = read_entry(store, key)? else {
-            return Ok(None);
-        };
-        if entry.content_key != record.content_key
-            || entry.blob.bytes < 0
-            || entry.blob.bytes as u64 != record.decoded_bytes
-            || entry.keys.kind != keys.source.kind
-            || entry.keys.sha256 != keys.source.sha256
-        {
-            return Err(integrity());
-        }
-        if entry.keys.kind == "public" && entry.keys.state == "loaded" {
-            match keys.ensure_public() {
-                Ok(()) => {}
-                Err(error)
-                    if keys.source.state != "loaded"
-                        && pure_expected(&error, "container.key_unavailable") =>
-                {
-                    return Ok(None);
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        if !lycheedev_core::selection::valid_digest(&entry.blob.sha256, 64) {
-            return Err(integrity());
-        }
-        let reference = entry.blob.into_core()?;
         let Some(content) = self.verified(store, &reference, stats, budget, true)? else {
             return Ok(None);
         };
@@ -244,30 +289,14 @@ impl Memo {
         stats: &mut Stats,
         budget: &Arc<Budget>,
     ) -> Result<()> {
-        let Some(key) = key else {
-            return Ok(());
-        };
-        let entry = Entry {
-            content_key: record.content_key.clone(),
-            blob: CachedBlob::try_from(reference.clone())?,
-            keys: Source::from(&keys.source),
-        };
-        // Go marshals before reading only existence; it does not re-validate an
-        // already present alias here. A concurrent create alone triggers reread.
-        let _ = serde_json::to_vec(&entry)?;
-        if store.generation(key)?.is_some() {
-            return Ok(());
+        if save_entry(store, key, record, reference, keys)? {
+            self.read(store, key, record, keys, stats, budget)
+                .map(|_| ())
+        } else {
+            Ok(())
         }
-        self.after_create(
-            store,
-            key,
-            record,
-            keys,
-            stats,
-            budget,
-            store.put(key, &entry, None),
-        )
     }
+    #[cfg(test)]
     fn after_create(
         &mut self,
         store: &Store<'_>,
@@ -278,12 +307,11 @@ impl Memo {
         budget: &Arc<Budget>,
         result: Result<()>,
     ) -> Result<()> {
-        match result {
-            Ok(()) => Ok(()),
-            Err(error) if pure_expected(&error, "vault.generation_conflict") => self
-                .read(store, Some(key), record, keys, stats, budget)
-                .map(|_| ()),
-            Err(error) => Err(error),
+        if create_conflict(result)? {
+            self.read(store, Some(key), record, keys, stats, budget)
+                .map(|_| ())
+        } else {
+            Ok(())
         }
     }
     pub(super) fn published(

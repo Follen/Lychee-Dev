@@ -11,7 +11,9 @@ use crate::{
 use std::io::Read;
 
 mod alias;
+mod verified;
 pub(super) use alias::Memo;
+pub(super) use verified::{Verified, completed_body, read as read_verified};
 pub(crate) struct SharedContent {
     value: blte::Content,
     _allocation: OwnedRetainedReservation,

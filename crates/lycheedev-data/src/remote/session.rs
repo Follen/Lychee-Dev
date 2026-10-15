@@ -45,6 +45,42 @@ impl File {
         &self.materialized.blob
     }
 }
+/// Kept private to the scoped dispatch. Existing FileBytes consumers continue
+/// to receive only materialized File; a verified handle cannot escape by Vec.
+#[derive(Clone, Copy)]
+enum ContentMode {
+    Materialized,
+    Verified,
+}
+enum SelectedBody {
+    Materialized(Materialized),
+    Verified(content::Verified),
+}
+struct SelectedFile {
+    entry: metadata_format::RootRecord,
+    reading: serde_json::Value,
+    body: SelectedBody,
+}
+pub(super) struct VerifiedFile {
+    pub entry: metadata_format::RootRecord,
+    pub reading: serde_json::Value,
+    pub blob: evidence::VerifiedBlob,
+    _descriptor: crate::resource::OwnedRetainedReservation,
+}
+impl SelectedBody {
+    fn reference(&self) -> &evidence::BlobRef {
+        match self {
+            Self::Materialized(value) => &value.blob,
+            Self::Verified(value) => value.blob.reference(),
+        }
+    }
+    fn encoding_key(&self) -> &str {
+        match self {
+            Self::Materialized(value) => &value.encoding_key,
+            Self::Verified(value) => &value.encoding_key,
+        }
+    }
+}
 pub(super) struct Session<'a, 'scope> {
     admitted: &'a AdmittedWorkspace<'scope>,
     pin: &'a DataPin,
@@ -172,7 +208,90 @@ impl<'a, 'scope> Session<'a, 'scope> {
         ids: &[u32],
         callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
     ) -> Result<()> {
+        let budget = self.budget;
+        self.read_selected(ids, ContentMode::Materialized, &mut |selected| {
+            let _output = budget.reserve_retained(
+                selected
+                    .len()
+                    .checked_mul(std::mem::size_of::<File>())
+                    .ok_or_else(limit)?,
+            )?;
+            let mut files = Vec::with_capacity(selected.len());
+            for selected in selected {
+                let SelectedFile {
+                    entry,
+                    reading,
+                    body,
+                } = selected;
+                match body {
+                    SelectedBody::Materialized(materialized) => files.push(File {
+                        entry,
+                        reading,
+                        materialized,
+                    }),
+                    SelectedBody::Verified(value) => {
+                        return value.blob.close_after(Err(internal()));
+                    }
+                }
+            }
+            callback(files)
+        })
+    }
+    /// One callback borrows one immutable owner through consumer publication.
+    /// The handle is checked-closed before success; a delivered callback is never
+    /// repeated for key recovery, close errors, capture errors, or sink failure.
+    pub fn with_verified<R>(
+        &mut self,
+        id: u32,
+        callback: &mut dyn FnMut(&mut VerifiedFile) -> Result<R>,
+    ) -> Result<R> {
+        let mut delivered = None;
+        let mut completed_reference = None;
+        let result = self.read_selected(&[id], ContentMode::Verified, &mut |mut selected| {
+            if selected.len() != 1 {
+                return close_selected(selected, Err(internal()));
+            }
+            let selected = selected.pop().ok_or_else(internal)?;
+            let SelectedFile {
+                entry,
+                reading,
+                body,
+            } = selected;
+            let SelectedBody::Verified(value) = body else {
+                return Err(internal());
+            };
+            let mut file = VerifiedFile {
+                entry,
+                reading,
+                blob: value.blob,
+                _descriptor: value.descriptor,
+            };
+            let reference = file.blob.reference().clone();
+            let result = callback(&mut file);
+            let result = file
+                .blob
+                .close_after(result)
+                .map_err(|error| content::completed_body(error, &reference))?;
+            completed_reference = Some(reference);
+            delivered = Some(result);
+            Ok(Vec::new())
+        });
+        result.map_err(|error| match &completed_reference {
+            Some(reference) => content::completed_body(error, reference),
+            None => error,
+        })?;
+        delivered.ok_or_else(internal)
+    }
+    fn read_selected(
+        &mut self,
+        ids: &[u32],
+        mode: ContentMode,
+        callback: &mut dyn FnMut(Vec<SelectedFile>) -> Result<Vec<u32>>,
+    ) -> Result<()> {
         self.check()?;
+        if matches!(mode, ContentMode::Verified) && ids.len() != 1 {
+            return Err(internal());
+        }
         if ids.is_empty() || ids.len() > 32 || ids.contains(&0) {
             return Err(file_query());
         }
@@ -191,13 +310,14 @@ impl<'a, 'scope> Session<'a, 'scope> {
                     keys.ensure_public()?;
                 }
             }
-            self.read_prepared(progress, callback)
+            self.read_prepared(progress, mode, callback)
         })
     }
     fn read_prepared(
         &mut self,
         progress: &mut BatchProgress,
-        callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
+        mode: ContentMode,
+        callback: &mut dyn FnMut(Vec<SelectedFile>) -> Result<Vec<u32>>,
     ) -> Result<()> {
         let admitted = self.admitted;
         let budget = self.budget;
@@ -270,6 +390,13 @@ impl<'a, 'scope> Session<'a, 'scope> {
         while !progress.pending.is_empty() {
             admitted.check()?;
             progress.validate()?;
+            let _output = budget.reserve_retained(
+                progress
+                    .pending
+                    .len()
+                    .checked_mul(std::mem::size_of::<SelectedFile>())
+                    .ok_or_else(limit)?,
+            )?;
             let mut output = Vec::with_capacity(progress.pending.len());
             for id in &progress.pending {
                 admitted.check()?;
@@ -315,27 +442,41 @@ impl<'a, 'scope> Session<'a, 'scope> {
                 let entry = entries[matching[0]].clone();
                 let mapping =
                     index.find_with_check(&entry.content_key, limits, None, || admitted.check())?;
-                let content = content::materialize(
-                    files,
-                    &index,
-                    &mapping,
-                    self.options.content_bytes,
-                    false,
-                    limits,
-                    keys,
-                    &mut stats,
-                    budget,
-                    &mut decoded,
-                )?;
-                let reading = serde_json::json!({"contentVerified":true,"source":"cdn","pin":self.pin,"buildConfiguration":build_blob,"cdnConfiguration":cdn_blob,"encodingKey":build.encoding_key,"root":root.blob,"entry":entry,"payloadEncodingKey":content.encoding_key,"content":content.blob,"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"keySource":keys.value(),"decodedCache":stats});
-                output.push(File {
+                let content = match mode {
+                    ContentMode::Materialized => SelectedBody::Materialized(content::materialize(
+                        files,
+                        &index,
+                        &mapping,
+                        self.options.content_bytes,
+                        false,
+                        limits,
+                        keys,
+                        &mut stats,
+                        budget,
+                        &mut decoded,
+                    )?),
+                    ContentMode::Verified => SelectedBody::Verified(content::read_verified(
+                        files,
+                        &index,
+                        &mapping,
+                        self.options.content_bytes,
+                        limits,
+                        keys,
+                        &mut stats,
+                        budget,
+                    )?),
+                };
+                let reading = serde_json::json!({"contentVerified":true,"source":"cdn","pin":self.pin,"buildConfiguration":build_blob,"cdnConfiguration":cdn_blob,"encodingKey":build.encoding_key,"root":root.blob,"entry":entry,"payloadEncodingKey":content.encoding_key(),"content":content.reference(),"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"keySource":keys.value(),"decodedCache":stats});
+                output.push(SelectedFile {
                     entry,
                     reading,
-                    materialized: content,
+                    body: content,
                 });
                 stats = Stats::default();
             }
-            admitted.check()?;
+            if let Err(error) = admitted.check() {
+                return close_selected(output, Err(error));
+            }
             progress.deliver(|| callback(output))?;
             admitted.check()?;
         }
@@ -379,6 +520,29 @@ impl BatchProgress {
         Ok(())
     }
 }
+/// A missing key may precede a private stage write, but a published/unknown
+/// attempt or a composite cleanup/stop error must never be replayed.
+fn recoverable_missing_key(error: &ToolkitError) -> bool {
+    if error.code != "container.key_unavailable" || error.details["missingKey"] != true {
+        return false;
+    }
+    let Some(details) = error.details.as_object() else {
+        return false;
+    };
+    if details
+        .keys()
+        .any(|key| !matches!(key.as_str(), "missingKey" | "keyId" | "publication"))
+    {
+        return false;
+    }
+    details.get("publication").is_none_or(|publication| {
+        publication["state"] == "not_published"
+            && publication["reused"] != true
+            && publication
+                .get("prior")
+                .is_none_or(serde_json::Value::is_null)
+    })
+}
 fn recover_batches(
     ids: &[u32],
     may_load_public: bool,
@@ -392,15 +556,34 @@ fn recover_batches(
     let first = run(&mut progress, false);
     match first {
         Err(error)
-            if error.code == "container.key_unavailable"
-                && error.details["missingKey"] == true
-                && !progress.callback_failed
-                && may_load_public =>
+            if recoverable_missing_key(&error) && !progress.callback_failed && may_load_public =>
         {
             run(&mut progress, true)
         }
         result => result,
     }
+}
+fn internal() -> ToolkitError {
+    fault(
+        "records.internal",
+        8,
+        "Selected body mode invariant differs",
+    )
+}
+/// An authenticated body can already be published before the final source
+/// check fails. Close every undelivered handle while retaining the primary
+/// failure; do not let an early callback boundary turn this into silent Drop.
+fn close_selected<T>(selected: Vec<SelectedFile>, mut result: Result<T>) -> Result<T> {
+    for selected in selected.into_iter().rev() {
+        if let SelectedBody::Verified(value) = selected.body {
+            let reference = value.blob.reference().clone();
+            result = value
+                .blob
+                .close_after(result)
+                .map_err(|error| content::completed_body(error, &reference));
+        }
+    }
+    result
 }
 fn file_query() -> ToolkitError {
     fault(

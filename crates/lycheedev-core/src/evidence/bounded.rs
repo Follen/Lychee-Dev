@@ -17,6 +17,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod staged;
+pub use staged::publish_blob_stream_bounded_with_check;
+
 mod optional;
 pub use optional::{
     open_verified_blob_bounded_optional_with_check, read_blob_bounded_optional_with_check,
@@ -288,13 +291,23 @@ fn scan_open_blob_with_check(
     opened: &mut OpenBlob,
     control: Option<&OperationControl>,
     supplemental: &mut impl FnMut() -> Result<()>,
+    accept: impl FnMut(&[u8]) -> Result<()>,
+) -> Result<()> {
+    scan_open_blob_accounted_with_check(opened, control, supplemental, accept, || Ok(()))
+}
+fn scan_open_blob_accounted_with_check(
+    opened: &mut OpenBlob,
+    control: Option<&OperationControl>,
+    supplemental: &mut impl FnMut() -> Result<()>,
     mut accept: impl FnMut(&[u8]) -> Result<()>,
+    mut admit_read: impl FnMut() -> Result<()>,
 ) -> Result<()> {
     let mut digest = Sha256::new();
     let mut remaining = opened.reference.bytes;
     let mut buffer = [0u8; BLOCK];
     while remaining != 0 {
         check_with(control, supplemental)?;
+        admit_read()?;
         let admitted = buffer.len().min(remaining as usize);
         let read = opened
             .file
@@ -313,6 +326,7 @@ fn scan_open_blob_with_check(
         remaining -= n as u64;
     }
     check_with(control, supplemental)?;
+    admit_read()?;
     let read = opened
         .file
         .read(&mut buffer[..1])
