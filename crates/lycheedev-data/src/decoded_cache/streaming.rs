@@ -76,6 +76,13 @@ pub(crate) fn read_verified_content(
             "Decoded content size exceeds platform bound",
         )
     })?;
+    if decoded > maximum {
+        return Err(fault(
+            "records.metadata_limit",
+            3,
+            "Selected content exceeds byte budget",
+        ));
+    }
     // Hash buffer and Core's sequential source/copy/verify buffer are bounded;
     // the decoder admits its own chunk allocation independently.
     let _io_buffers = budget.reserve_retained(4 * 65536)?;
@@ -290,28 +297,7 @@ pub(crate) fn read_content_controlled(
 ) -> Result<(String, blte::Content)> {
     control.check()?;
     budget.check()?;
-    let decoded = usize::try_from(record.decoded_bytes).map_err(|_| {
-        fault(
-            "records.metadata_limit",
-            3,
-            "Decoded content size exceeds platform bound",
-        )
-    })?;
-    if decoded > 256 << 20 {
-        return Err(fault(
-            "records.metadata_limit",
-            3,
-            "Full decoded materialization byte budget exceeded",
-        ));
-    }
-    let maximum = selected_maximum.unwrap_or(limits.encoded_bytes);
-    if decoded > maximum {
-        return Err(fault(
-            "records.metadata_limit",
-            3,
-            "Selected content exceeds byte budget",
-        ));
-    }
+    let (decoded, maximum) = materialized_extent(record.decoded_bytes, limits, selected_maximum)?;
     let (key, mut blob) = read_verified_content(
         home, root, index, record, limits, maximum, keys, stats, budget, control,
     )?;
@@ -358,3 +344,32 @@ pub(crate) fn read_content_controlled(
         },
     ))
 }
+
+// The caller's selected allowance and the metadata allowance are independent.
+// This only validates geometry; the real Vec still requires the original shared
+// logical admission and refundable safety reservation immediately before alloc.
+fn materialized_extent(
+    decoded: u64,
+    limits: casc::Limits,
+    selected_maximum: Option<usize>,
+) -> Result<(usize, usize)> {
+    let decoded = usize::try_from(decoded).map_err(|_| {
+        fault(
+            "records.metadata_limit",
+            3,
+            "Decoded content size exceeds platform bound",
+        )
+    })?;
+    let maximum = selected_maximum.unwrap_or(limits.encoded_bytes);
+    if decoded > maximum {
+        return Err(fault(
+            "records.metadata_limit",
+            3,
+            "Selected content exceeds byte budget",
+        ));
+    }
+    Ok((decoded, maximum))
+}
+
+#[cfg(test)]
+mod capacity_tests;

@@ -124,3 +124,14 @@ Releases include the project LICENSE, applicable third-party notices and
 corresponding source. The owner's project licensing decision is recorded in
 [the licensing record](docs/toolkit/licensing.md); release artifact and integrity
 checks remain required by the release contract.
+
+## EmmyLua-derived owned semantic code
+
+The owned control-flow, relation, member, transform and signature implementation in
+`crates/lycheedev-emmy-adapter/src/session/backend/` adapts portions of
+[EmmyLua Analyzer Rust, commit 08b0873962e83bb8307e9a81052e3f41578fbc78](https://github.com/CppCXY/emmylua-analyzer-rust/tree/08b0873962e83bb8307e9a81052e3f41578fbc78).
+Those portions remain copyright 2024–2026 CppCXY, licensed under MIT. The exact
+upstream permission and warranty notice is preserved in
+[the adapter's EmmyLua license](crates/lycheedev-emmy-adapter/LICENSE-EmmyLua)
+and in the npm package notices. Moving implementation into an owned crate does
+not reattribute the upstream code or remove its license requirements.

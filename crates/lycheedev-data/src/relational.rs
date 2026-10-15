@@ -427,7 +427,7 @@ fn bind_with_aggregates(
     match term {
         Term::Ordinal(index) if *index >= columns.len() => return Err(binding()),
         Term::Column(name) => {
-            subquery::resolve(columns, alias, name, context.outer)?;
+            subquery::resolve(columns, alias, name, context.scope.outer)?;
         }
         Term::Parameter(name) if !params.contains_key(name) => return Err(binding()),
         Term::Unary(_, t) | Term::NullTest(t, _) => {
@@ -449,6 +449,9 @@ fn bind_with_aggregates(
             }
         }
         Term::InSubquery(input, query, _) => {
+            if context.scope.callback.is_none() {
+                return Err(unsupported());
+            }
             // Go binds the nested schema before this operator's arguments,
             // even for an unreachable branch or an empty outer input.
             if work.planning {
@@ -723,7 +726,7 @@ fn eval_scoped(
         Term::Value(v) => work.clone_scalar(v),
         Term::Number(n) => literal(n),
         Term::Ordinal(index) => work.clone_scalar(row.get(*index).ok_or_else(binding)?),
-        Term::Column(name) => match subquery::resolve(columns, alias, name, context.outer)? {
+        Term::Column(name) => match subquery::resolve(columns, alias, name, context.scope.outer)? {
             subquery::Position::Local(index) => {
                 work.clone_scalar(row.get(index).ok_or_else(binding)?)
             }
@@ -1562,7 +1565,9 @@ impl Program {
             });
         }
         work.planning = false;
-        self.execute_scoped(&inputs, parameters, &mut work)
+        let mut actual = self.execute_scoped(&inputs, parameters, &mut work)?;
+        actual.complete &= result.complete;
+        Ok(actual)
     }
     /// Query-scoped lazy roots. Owners remain in the caller; lexical computed
     /// Sources cannot inherit these capabilities by name or schema.
@@ -1646,7 +1651,9 @@ impl Program {
             });
         }
         work.planning = false;
-        self.execute_scoped(&inputs, parameters, &mut work)
+        let mut actual = self.execute_scoped(&inputs, parameters, &mut work)?;
+        actual.complete &= bound.complete;
+        Ok(actual)
     }
     fn execute_scoped(
         &self,
@@ -1654,28 +1661,28 @@ impl Program {
         parameters: &BTreeMap<String, Scalar>,
         work: &mut Work<'_>,
     ) -> Result<QueryResult> {
-        self.execute_scoped_with(sources, None, parameters, work)
+        self.execute_scoped_with(sources, subquery::Scope::root(), parameters, work)
     }
     fn execute_scoped_with(
         &self,
         sources: &BTreeMap<String, &Source>,
-        outer: Option<&subquery::Frame<'_>>,
+        scope: subquery::Scope<'_>,
         parameters: &BTreeMap<String, Scalar>,
         work: &mut Work<'_>,
     ) -> Result<QueryResult> {
         work.spend()?;
-        compound::execute(self, sources, outer, parameters, work)
+        compound::execute(self, sources, scope, parameters, work)
     }
     fn execute_select(
         &self,
         sources: &BTreeMap<String, &Source>,
-        outer: Option<&subquery::Frame<'_>>,
+        scope: subquery::Scope<'_>,
         parameters: &BTreeMap<String, Scalar>,
         work: &mut Work<'_>,
     ) -> Result<QueryResult> {
         self.execute_select_mode(
             sources,
-            outer,
+            scope,
             parameters,
             work,
             ProjectionMode::NamedSource,
@@ -1684,15 +1691,20 @@ impl Program {
     fn execute_select_mode(
         &self,
         sources: &BTreeMap<String, &Source>,
-        outer: Option<&subquery::Frame<'_>>,
+        scope: subquery::Scope<'_>,
         parameters: &BTreeMap<String, Scalar>,
         work: &mut Work<'_>,
         projection_mode: ProjectionMode,
     ) -> Result<QueryResult> {
         let complete = std::cell::Cell::new(true);
-        let context = subquery::Context {
+        let mut context = subquery::Context {
+            scope: if projection_mode == ProjectionMode::NamedSource {
+                scope.select(sources)
+            } else {
+                scope
+            },
+            group: None,
             complete: Some(&complete),
-            ..subquery::Context::new(sources, outer)
         };
         let joined = if self.joins.is_empty() {
             None
@@ -1708,7 +1720,7 @@ impl Program {
                 &context,
             )?)
         };
-        let alias = if joined.is_some() {
+        let alias = if joined.is_some() || projection_mode == ProjectionMode::CompoundOrdinals {
             joins::QUALIFIED
         } else {
             self.alias.as_str()
@@ -1731,6 +1743,12 @@ impl Program {
                 }
             }
         }
+        if projection_mode == ProjectionMode::NamedSource {
+            context.scope.fields = subquery::Fields {
+                columns: &source.columns,
+                alias,
+            };
+        }
         let mut ordering_terms = self.order.clone();
         let mut columns = vec![];
         let mut outputs = vec![];
@@ -1740,7 +1758,7 @@ impl Program {
                 outputs.push(t.clone());
                 columns.push(if p.name.is_empty() {
                     if let Term::Column(name) = t {
-                        subquery::display_column(&source.columns, alias, name, context.outer)?
+                        subquery::display_column(&source.columns, alias, name, context.scope.outer)?
                             .unwrap_or_else(|| format!("column_{}", columns.len() + 1))
                     } else {
                         format!("column_{}", columns.len() + 1)
@@ -1767,11 +1785,13 @@ impl Program {
                     } else {
                         Term::Column(column.clone())
                     });
-                    columns.push(if joined.is_some() {
-                        column.rsplit('.').next().unwrap().into()
-                    } else {
-                        column.clone()
-                    });
+                    columns.push(
+                        if joined.is_some() || projection_mode == ProjectionMode::CompoundOrdinals {
+                            column.rsplit('.').next().unwrap().into()
+                        } else {
+                            column.clone()
+                        },
+                    );
                 }
                 if selected == 0 {
                     return Err(binding());

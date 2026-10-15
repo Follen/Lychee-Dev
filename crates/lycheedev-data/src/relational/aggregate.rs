@@ -236,7 +236,7 @@ impl Grouping {
             Term::Column(name) => {
                 let outer = context.group.is_some_and(|group| {
                     matches!(
-                        subquery::resolve(group.columns, group.alias, name, context.outer),
+                        subquery::resolve(group.columns, group.alias, name, context.scope.outer),
                         Ok(subquery::Position::Outer(..))
                     )
                 });

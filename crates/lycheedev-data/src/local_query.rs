@@ -337,11 +337,27 @@ fn read_files_with_keys(
             None,
             &inv.control,
         )?;
-        let root_blob = evidence::publish_blob(&inv.home, &root.bytes, 256 << 20)?;
-        let build_blob =
-            evidence::publish_blob(&inv.home, &target.metadata.build_document.raw, 4 << 20)?;
-        let cdn_blob =
-            evidence::publish_blob(&inv.home, &target.metadata.cdn_document.raw, 4 << 20)?;
+        let root_blob = evidence::publish_blob_bounded_with_check(
+            &inv.home,
+            &root.bytes,
+            256 << 20,
+            &inv.control,
+            || budget.check(),
+        )?;
+        let build_blob = evidence::publish_blob_bounded_with_check(
+            &inv.home,
+            &target.metadata.build_document.raw,
+            4 << 20,
+            &inv.control,
+            || budget.check(),
+        )?;
+        let cdn_blob = evidence::publish_blob_bounded_with_check(
+            &inv.home,
+            &target.metadata.cdn_document.raw,
+            4 << 20,
+            &inv.control,
+            || budget.check(),
+        )?;
         let mask = locale(&pin.language)?;
         let mut pending = ids.to_vec();
         let mut requested = 0usize;
@@ -426,7 +442,13 @@ fn read_files_with_keys(
                             Some(max),
                             &inv.control,
                         )?;
-                        let blob = evidence::publish_blob(&inv.home, &content.bytes, max)?;
+                        let blob = evidence::publish_blob_bounded_with_check(
+                            &inv.home,
+                            &content.bytes,
+                            max,
+                            &inv.control,
+                            || budget.check(),
+                        )?;
                         (encoding_key, SelectedContent::Bytes(content.bytes), blob)
                     }
                     ReadMode::Verified => {

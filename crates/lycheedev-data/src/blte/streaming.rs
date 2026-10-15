@@ -224,10 +224,10 @@ impl<'a> Reader<'a> {
         Ok(())
     }
     fn read_content(&mut self, out: &mut [u8]) -> Result<usize> {
+        self.decoder.check()?;
         if out.is_empty() {
             return Ok(0);
         }
-        self.decoder.check()?;
         while self.offset == self.current.len() && !self.finished {
             self.advance()?;
         }
@@ -296,3 +296,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod controlled_tests;

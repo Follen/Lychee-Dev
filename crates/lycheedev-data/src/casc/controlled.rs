@@ -95,3 +95,6 @@ pub(super) fn finish<T>(
     }
     Err(first)
 }
+
+#[cfg(test)]
+mod tests;

@@ -212,3 +212,36 @@ fn local_default_bare_and_static_names_share_root_and_explicit_catalog_bypasses_
         verify(&f, &out);
     }
 }
+
+#[test]
+fn local_default_nested_union_tail_uses_enclosing_callback_lexical_scope() {
+    let f = Fixture::new(&[table(
+        "Sample",
+        201,
+        &[("ID", "uint"), ("Value", "uint")],
+        &[vec![Cell::U(1), Cell::U(10)], vec![Cell::U(2), Cell::U(20)]],
+    )]);
+    // Fixed Go compound.go executes the UNION suffix with the enclosing
+    // executeSelect callback, whose CTE environment is the outer `allowed`.
+    let sql = "WITH allowed AS (SELECT ID FROM Sample WHERE ID=1) SELECT s.ID FROM Sample s WHERE s.ID IN (WITH allowed AS (SELECT ID FROM Sample WHERE ID=2) SELECT ID FROM Sample WHERE ID=1 UNION ALL SELECT ID FROM Sample WHERE ID=2 ORDER BY ID IN (SELECT ID FROM allowed) DESC LIMIT 1)";
+    let out = lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
+    assert_eq!(out.data["result"]["rows"], json!([[1]]));
+    verify(&f, &out);
+}
+
+#[test]
+fn local_default_nested_union_tail_preserves_runtime_qualifier_error_without_capture() {
+    let f = Fixture::new(&[table(
+        "Sample",
+        201,
+        &[("ID", "uint"), ("Value", "uint")],
+        &[vec![Cell::U(1), Cell::U(10)], vec![Cell::U(2), Cell::U(20)]],
+    )]);
+    // Go's saved fields bind the outer qualifier during preflight, but its
+    // restored compound row resolver uses ordinal qualifiers at execution.
+    let sql = "SELECT s.ID FROM Sample s WHERE s.ID IN (SELECT ID FROM Sample WHERE ID=1 UNION ALL SELECT ID FROM Sample WHERE ID=2 ORDER BY ID IN (SELECT ID FROM Sample x WHERE x.ID=s.ID))";
+    let before = captures(&f);
+    let error = lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap_err();
+    assert_eq!(error.code, "query.unresolved_binding");
+    assert_eq!(captures(&f), before);
+}

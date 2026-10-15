@@ -2,8 +2,9 @@ name: Rust parity foundation (Windows)
 
 # This branch has not converged with main; push coverage must not depend on a
 # mergeable pull-request merge ref. No publishing, secrets or game interaction.
-# Every push preserves work and runs fast checks. Add [rust-native] to a reviewed
-# batch commit to run complete Windows/Emmy acceptance; dispatch is optional.
+# Every push preserves work and runs fast checks. Add [rust-native] to a meaningful
+# batch for product Windows/Emmy acceptance. The independently frozen A/B/C
+# experiment uses [emmy-contracts] when its inputs change; dispatch runs all jobs.
 # Commit selection works on this branch without requiring workflow on main.
 on:
   push:
@@ -14,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: rust-parity-${{ github.ref }}-${{ (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[rust-native]')) && 'native' || 'fast' }}
+  group: rust-parity-${{ github.ref }}-${{ (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[rust-native]') || contains(github.event.head_commit.message, '[emmy-contracts]')) && 'native' || 'fast' }}
   # Preserve the current owned build and terminal evidence; newer batches queue.
   cancel-in-progress: false
 
@@ -91,7 +92,7 @@ jobs:
           retention-days: 14
 
   windows-emmy-public-contracts:
-    if: github.ref == 'refs/heads/rust-refactor' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[rust-native]'))
+    if: github.ref == 'refs/heads/rust-refactor' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[emmy-contracts]'))
     runs-on: windows-2025
     timeout-minutes: 240
     # No needs: product failures must not suppress the independent A/B/C test.
@@ -498,7 +499,11 @@ jobs:
       - name: Run local CASC encoded span ownership fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
-          node tools/rust-cargo.mjs --owner ci-data-casc-span --one-shot -- test --locked --offline -p lycheedev-data --lib casc::span_tests:: -j 1
+          node tools/rust-cargo.mjs --owner ci-data-casc-span --one-shot -- test --locked --offline -p lycheedev-data --lib casc:: -j 1
+      - name: Run decoded content control and capacity fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-data-decoded-cache --one-shot -- test --locked --offline -p lycheedev-data --lib decoded_cache:: -j 1
       - name: Run prepared Encoding and Root cache regressions
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |

@@ -621,13 +621,25 @@ impl Plan<'_> {
                 &self.selected,
             )?;
             let yes = if let Some(condition) = &right.link.condition {
+                // Like Go's ON evaluator, expose only this join prefix to
+                // nested callbacks. Later aliases must not hide an outer row.
+                let context = subquery::Context {
+                    scope: subquery::Scope {
+                        fields: subquery::Fields {
+                            columns: &self.source.columns[..right.end],
+                            alias: QUALIFIED,
+                        },
+                        ..context.scope
+                    },
+                    ..*context
+                };
                 truth(&eval_scoped(
                     condition,
                     &values[..right.end],
                     &self.source.columns[..right.end],
                     QUALIFIED,
                     params,
-                    context,
+                    &context,
                     work,
                 )?)? == Some(true)
             } else {

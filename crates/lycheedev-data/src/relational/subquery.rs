@@ -91,21 +91,18 @@ pub(super) fn cardinality() -> lycheedev_core::ToolkitError {
         "IN subquery must return exactly one column",
     )
 }
-pub(super) struct Frame<'a> {
-    row: &'a [Scalar],
-    columns: &'a [String],
-    alias: &'a str,
-    mapping: Option<&'a [Option<usize>]>,
-    parent: Option<&'a Frame<'a>>,
+#[derive(Clone, Copy)]
+pub(super) struct Fields<'a> {
+    pub columns: &'a [String],
+    pub alias: &'a str,
 }
-impl Frame<'_> {
-    pub(super) fn value(&self, index: usize) -> Result<&Scalar> {
-        let index = self.mapped(index)?;
-        self.row.get(index).ok_or_else(binding)
-    }
-    fn mapped(&self, index: usize) -> Result<usize> {
-        self.mapping.map_or(Ok(index), |mapping| {
-            mapping.get(index).copied().flatten().ok_or_else(binding)
+impl Fields<'_> {
+    fn part(&self, index: usize) -> Result<(&str, &str)> {
+        let column = self.columns.get(index).ok_or_else(binding)?;
+        Ok(if self.alias == joins::QUALIFIED {
+            column.rsplit_once('.').unwrap_or(("", column))
+        } else {
+            (self.alias, column.as_str())
         })
     }
 }
@@ -115,10 +112,84 @@ pub(super) struct Correlation<'a> {
     pub alias: &'a str,
     pub mapping: &'a [Option<usize>],
 }
+/// Go's saved evaluator state has a callback independently of an outer row.
+/// A compound tail keeps this inherited callback, lexical scope and fields;
+/// its current row resolver is installed separately by executeRows.
+#[derive(Clone, Copy)]
+pub(super) struct Scope<'a> {
+    pub outer: Option<&'a Frame<'a>>,
+    pub callback: Option<&'a BTreeMap<String, &'a Source>>,
+    pub fields: Fields<'a>,
+    pub allowed: Option<Correlation<'a>>,
+}
+impl Scope<'_> {
+    pub(super) fn root() -> Self {
+        Self {
+            outer: None,
+            callback: None,
+            fields: Fields {
+                columns: &[],
+                alias: "",
+            },
+            allowed: None,
+        }
+    }
+}
+impl<'a> Scope<'a> {
+    pub(super) fn select<'b>(self, sources: &'b BTreeMap<String, &'b Source>) -> Scope<'b>
+    where
+        'a: 'b,
+    {
+        Scope {
+            outer: self.outer,
+            callback: Some(sources),
+            fields: self.fields,
+            allowed: None,
+        }
+    }
+}
+pub(super) struct Frame<'a> {
+    row: &'a [Scalar],
+    fields: Fields<'a>,
+    resolver: Fields<'a>,
+    mapping: Option<&'a [Option<usize>]>,
+    allowed: Option<Correlation<'a>>,
+    parent: Option<&'a Frame<'a>>,
+}
+impl Frame<'_> {
+    pub(super) fn value(&self, index: usize) -> Result<&Scalar> {
+        // A UNION-tail callback may bind using inherited outer fields while
+        // its current resolver owns numeric-qualified compound columns.
+        let (qualifier, name) = self.fields.part(index)?;
+        let index = local_parts(self.resolver.columns, self.resolver.alias, qualifier, name)?
+            .ok_or_else(binding)?;
+        let index = self.mapping.map_or(Ok(index), |mapping| {
+            mapping.get(index).copied().flatten().ok_or_else(binding)
+        })?;
+        self.row.get(index).ok_or_else(binding)
+    }
+    fn check_allowed(&self, index: usize) -> Result<()> {
+        let Some(allowed) = self.allowed else {
+            return Ok(());
+        };
+        let field = self.fields.part(index)?;
+        let fields = Fields {
+            columns: allowed.columns,
+            alias: allowed.alias,
+        };
+        // Go groupAllowed is a map keyed by canonical field identity, not by
+        // the ordinal of whatever schema a nested bind temporarily installs.
+        for (index, entry) in allowed.mapping.iter().enumerate() {
+            if entry.is_some() && fields.part(index)? == field {
+                return Ok(());
+            }
+        }
+        Err(binding())
+    }
+}
 #[derive(Clone, Copy)]
 pub(super) struct Context<'a> {
-    pub sources: &'a BTreeMap<String, &'a Source>,
-    pub outer: Option<&'a Frame<'a>>,
+    pub scope: Scope<'a>,
     pub group: Option<Correlation<'a>>,
     pub complete: Option<&'a std::cell::Cell<bool>>,
 }
@@ -128,8 +199,11 @@ impl<'a> Context<'a> {
         outer: Option<&'a Frame<'a>>,
     ) -> Self {
         Self {
-            sources,
-            outer,
+            scope: Scope {
+                outer,
+                ..Scope::root()
+            }
+            .select(sources),
             group: None,
             complete: None,
         }
@@ -141,6 +215,14 @@ pub(super) enum Position<'a> {
 }
 fn local(columns: &[String], alias: &str, name: &str) -> Result<Option<usize>> {
     let (qualifier, field) = name.split_once('.').unwrap_or(("", name));
+    local_parts(columns, alias, qualifier, field)
+}
+fn local_parts(
+    columns: &[String],
+    alias: &str,
+    qualifier: &str,
+    field: &str,
+) -> Result<Option<usize>> {
     let mut found = None;
     let mut owned = false;
     for (index, column) in columns.iter().enumerate() {
@@ -162,7 +244,12 @@ fn local(columns: &[String], alias: &str, name: &str) -> Result<Option<usize>> {
         }
     }
     if owned && found.is_none() {
-        return Err(missing_column(columns, alias, name));
+        let name = if qualifier.is_empty() {
+            field.to_owned()
+        } else {
+            format!("{qualifier}.{field}")
+        };
+        return Err(missing_column(columns, alias, &name));
     }
     Ok(found)
 }
@@ -176,8 +263,8 @@ pub(super) fn resolve<'a>(
         return Ok(Position::Local(index));
     }
     while let Some(frame) = outer {
-        if let Some(index) = local(frame.columns, frame.alias, name)? {
-            frame.mapped(index)?;
+        if let Some(index) = local(frame.fields.columns, frame.fields.alias, name)? {
+            frame.check_allowed(index)?;
             return Ok(Position::Outer(frame, index));
         }
         outer = frame.parent;
@@ -215,17 +302,38 @@ pub(super) fn execute(
     work: &mut Work<'_>,
 ) -> Result<QueryResult> {
     work.consume(0)?;
-    let (columns, alias, mapping) = context.group.map_or((columns, alias, None), |group| {
-        (group.columns, group.alias, Some(group.mapping))
-    });
+    let sources = context.scope.callback.ok_or_else(unsupported)?;
+    let resolver = context
+        .group
+        .map_or(Fields { columns, alias }, |group| Fields {
+            columns: group.columns,
+            alias: group.alias,
+        });
+    let fields = if work.planning {
+        resolver
+    } else {
+        context.scope.fields
+    };
+    let allowed = if work.planning {
+        context.group.or(context.scope.allowed)
+    } else {
+        context.scope.allowed
+    };
     let frame = Frame {
         row,
-        columns,
-        alias,
-        mapping,
-        parent: context.outer,
+        fields,
+        resolver,
+        mapping: context.group.map(|group| group.mapping),
+        allowed,
+        parent: context.scope.outer,
     };
-    let result = query.execute_scoped_with(context.sources, Some(&frame), parameters, work)?;
+    let scope = Scope {
+        outer: Some(&frame),
+        fields,
+        allowed,
+        ..context.scope
+    };
+    let result = query.execute_scoped_with(sources, scope, parameters, work)?;
     if !result.complete
         && let Some(complete) = context.complete
     {
@@ -298,8 +406,8 @@ pub(super) fn same_group_expression(a: &Term, b: &Term, context: &Context<'_>) -
                 return a == b;
             };
             match (
-                resolve(group.columns, group.alias, a, context.outer),
-                resolve(group.columns, group.alias, b, context.outer),
+                resolve(group.columns, group.alias, a, context.scope.outer),
+                resolve(group.columns, group.alias, b, context.scope.outer),
             ) {
                 (Ok(Position::Local(a)), Ok(Position::Local(b))) => a == b,
                 (Ok(Position::Outer(a, ai)), Ok(Position::Outer(b, bi))) => {
@@ -366,3 +474,7 @@ pub(super) fn group_mapping(
 #[cfg(test)]
 #[path = "subquery_tests.rs"]
 mod subquery_tests;
+
+#[cfg(test)]
+#[path = "union_tail_tests.rs"]
+mod union_tail_tests;

@@ -62,7 +62,7 @@ pub(super) fn execute(
     name: &str,
     program: &Program,
     sources: &BTreeMap<String, &Source>,
-    outer: Option<&subquery::Frame<'_>>,
+    scope: subquery::Scope<'_>,
     parameters: &BTreeMap<String, Scalar>,
     work: &mut Work<'_>,
 ) -> Result<QueryResult> {
@@ -80,7 +80,7 @@ pub(super) fn execute(
     {
         return Err(unsupported());
     }
-    let first = seed.execute_scoped_with(sources, outer, parameters, work)?;
+    let first = seed.execute_scoped_with(sources, scope, parameters, work)?;
     work.retain(columns_cost(&first.columns)? + 96)?;
     let columns = first.columns.clone();
     let mut complete = first.complete;
@@ -93,7 +93,7 @@ pub(super) fn execute(
     // zero-delta rows are discarded: an aggregate cannot invent a starting row.
     if blocks[0].rows.is_empty() {
         let inputs = delta_scope(sources, name, &blocks[0], work)?;
-        let checked = step.execute_scoped_with(&inputs, outer, parameters, work)?;
+        let checked = step.execute_scoped_with(&inputs, scope, parameters, work)?;
         if checked.columns.len() != columns.len() {
             return Err(binding());
         }
@@ -102,7 +102,7 @@ pub(super) fn execute(
     while !blocks.last().unwrap().rows.is_empty() {
         work.spend()?;
         let inputs = delta_scope(sources, name, blocks.last().unwrap(), work)?;
-        let next = step.execute_scoped_with(&inputs, outer, parameters, work)?;
+        let next = step.execute_scoped_with(&inputs, scope, parameters, work)?;
         if next.columns.len() != columns.len() {
             return Err(binding());
         }

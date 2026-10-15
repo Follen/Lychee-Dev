@@ -168,7 +168,7 @@ fn visible<'a>(
 pub(super) fn execute(
     program: &Program,
     sources: &BTreeMap<String, &Source>,
-    outer: Option<&subquery::Frame<'_>>,
+    scope: subquery::Scope<'_>,
     parameters: &BTreeMap<String, Scalar>,
     work: &mut Work<'_>,
 ) -> Result<QueryResult> {
@@ -176,7 +176,7 @@ pub(super) fn execute(
         && program.derived.is_none()
         && program.joins.iter().all(|j| j.derived.is_none())
     {
-        return execute_body(program, sources, outer, parameters, work);
+        return execute_body(program, sources, scope, parameters, work);
     }
     work.retain(program.bindings.iter().map(|(n, _)| n.len() + 96).sum())?;
     // Reserve every local name before any definition runs: a self or forward
@@ -197,9 +197,9 @@ pub(super) fn execute(
         work.spend()?;
         let inputs = visible(sources, &reserved, &results, work)?;
         let result = if program.recursive && recursive::references(body, name) > 0 {
-            recursive::execute(name, body, &inputs, outer, parameters, work)?
+            recursive::execute(name, body, &inputs, scope, parameters, work)?
         } else {
-            body.execute_scoped_with(&inputs, outer, parameters, work)?
+            body.execute_scoped_with(&inputs, scope, parameters, work)?
         };
         work.retain(name.len() + 96)?;
         results.insert(
@@ -219,7 +219,7 @@ pub(super) fn execute(
         };
         work.spend()?;
         let inputs = visible(sources, &reserved, &results, work)?;
-        let result = body.execute_scoped_with(&inputs, outer, parameters, work)?;
+        let result = body.execute_scoped_with(&inputs, scope.select(&inputs), parameters, work)?;
         work.retain(name.len() + 96)?;
         results.insert(
             name.clone(),
@@ -231,7 +231,7 @@ pub(super) fn execute(
         );
     }
     let inputs = visible(sources, &reserved, &results, work)?;
-    let mut result = execute_body(program, &inputs, outer, parameters, work)?;
+    let mut result = execute_body(program, &inputs, scope, parameters, work)?;
     result.complete &= results.values().all(|s| s.complete);
     Ok(result)
 }
@@ -270,17 +270,17 @@ pub(super) fn branches(body: SetExpr) -> Result<Vec<SetExpr>> {
 fn execute_body(
     program: &Program,
     sources: &BTreeMap<String, &Source>,
-    outer: Option<&subquery::Frame<'_>>,
+    scope: subquery::Scope<'_>,
     parameters: &BTreeMap<String, Scalar>,
     work: &mut Work<'_>,
 ) -> Result<QueryResult> {
     if program.branches.is_empty() {
-        return program.execute_select(sources, outer, parameters, work);
+        return program.execute_select(sources, scope, parameters, work);
     }
     let mut combined = None::<Source>;
     for branch in &program.branches {
         work.spend()?;
-        let result = branch.execute_scoped_with(sources, outer, parameters, work)?;
+        let result = branch.execute_scoped_with(sources, scope, parameters, work)?;
         // Move retained rows; never deep-clone scalar payloads between branches.
         // The row-vector extension itself has a separate admission cost.
         work.retain(result.rows.len().checked_mul(24).ok_or_else(budget)?)?;
@@ -298,24 +298,52 @@ fn execute_body(
             });
         }
     }
-    let combined = combined.ok_or_else(binding)?;
-    work.retain(program.table.len() + 96)?;
-    // Fixed Go's top-level UNION tail executes rows without an expression-
-    // subquery callback (compound.go/rows.go), so do not silently broaden it.
-    if outer.is_none() && program.terms().any(subquery::contains) {
-        return Err(unsupported());
+    let mut combined = combined.ok_or_else(binding)?;
+    // Fixed Go gives compound output fields ordinal qualifiers ("0", "1", ...).
+    // Those identities matter when an inherited callback resolves an outer row.
+    let bytes = combined
+        .columns
+        .iter()
+        .enumerate()
+        .try_fold(0usize, |total, (index, name)| {
+            let digits = if index == 0 {
+                1
+            } else {
+                index.ilog10() as usize + 1
+            };
+            total
+                .checked_add(name.len() + digits + 1 + std::mem::size_of::<String>())
+                .ok_or_else(budget)
+        })?;
+    if let Some(shared) = work.shared {
+        shared
+            .safety_only()
+            .charge(crate::resource::Cost::retained(bytes))?;
     }
+    let names = combined
+        .columns
+        .iter()
+        .enumerate()
+        .map(|(index, name)| format!("{index}.{name}"))
+        .collect();
+    // Keep the original public names as owned metadata. A quoted name may
+    // contain dots, so stripping the internal qualifier cannot recover it.
+    let public_names = std::mem::replace(&mut combined.columns, names);
+    work.retain(program.table.len() + 96)?;
+
     work.retain(sources.keys().map(|name| name.len() + 96).sum())?;
     let mut inputs = sources.clone();
     inputs.insert(program.table.clone(), &combined);
     // Internal result columns may repeat. Project them by ordinal rather
     // than re-binding their names. ORDER BY still binds the first branch's
     // public names and must reject an ambiguous duplicate name.
-    program.execute_select_mode(
+    let mut result = program.execute_select_mode(
         &inputs,
-        outer,
+        scope,
         parameters,
         work,
         ProjectionMode::CompoundOrdinals,
-    )
+    )?;
+    result.columns = public_names;
+    Ok(result)
 }
