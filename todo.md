@@ -172,3 +172,11 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] Source: independent actual fixed full-corpus queries prove accurate/readable results, file/symbol/line/source access, Chinese/large/empty/error and refs/context contracts.
 - [ ] Data: independent actual queries/Hotfix/SQL/export tasks prove values, product/build/pin provenance, partial/coverage/error reliability, cold/warm behavior, cancellation and no false successful captures.
 - [ ] For each, independently use/review → fix → actually validate → independently review again until the frozen tree has no new actionable finding; candidate checks during implementation do not replace the four sequential final audit stages. User-assisted exceptions stay at the end of handover, with no fabricated result.
+
+## Public API and remaining runtime closure
+
+- [x] Independently compare public declaration rendering against the old renderer: 27+27 local focused-lock tests and 450 complete traces equal; retain the original Linux path failure and identical reviewed portability accommodation.
+- [ ] Validate this reduced Emmy patch on the exact product lock, Windows, and complete Source workflows; do not infer full zero-patch equivalence.
+- [ ] Execute 11 new independent Metadata budget/owner-cleanup tests and validate real Remote cache/target consumers.
+- [ ] Repair the actual gzip deflate-versus-limit difference and execute all 157 differential vectors plus all Rust regressions without fail-fast hiding later cases.
+- [ ] Diagnose full-Retail memory by concrete structure counts and ownership lifetimes; compare phase-matched sampled working set/private bytes after any optimization without dropping coverage or results.

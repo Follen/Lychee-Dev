@@ -38,16 +38,40 @@ pub fn historical_lease(
     key: &str,
     control: &OperationControl,
 ) -> Result<ExclusiveLock> {
+    historical_lease_with_check(home, key, control, &mut || Ok(()))
+}
+// Kept narrow for controlled open: existing historical writers have no new
+// budget contract, while supplemental checks reach resource creation and waits.
+pub(super) fn historical_lease_with_check(
+    home: &Path,
+    key: &str,
+    control: &OperationControl,
+    check: &mut impl FnMut() -> Result<()>,
+) -> Result<ExclusiveLock> {
+    historical_lease_observed_with_check(home, key, control, check, &mut || {})
+}
+pub(super) fn historical_lease_observed_with_check(
+    home: &Path,
+    key: &str,
+    control: &OperationControl,
+    check: &mut impl FnMut() -> Result<()>,
+    on_busy: &mut impl FnMut(),
+) -> Result<ExclusiveLock> {
     loop {
-        control.check()?;
-        match ExclusiveLock::resource_controlled(&home.join("locks"), key, control) {
+        metadata_check(control, check)?;
+        match ExclusiveLock::resource_checked(&home.join("locks"), key, || {
+            metadata_check(control, check)
+        }) {
             Err(error) if error.code == "workspace.busy" && error.details.is_null() => {
+                on_busy();
+                metadata_check(control, check)?;
                 std::thread::sleep(Duration::from_millis(25).min(control.remaining()?));
             }
             result => return result,
         }
     }
 }
+
 impl Metadata {
     pub fn with_historical_write<T>(
         home: &Path,

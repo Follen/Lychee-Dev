@@ -1,13 +1,9 @@
-use lycheedev_binding_contracts::BindingDecision;
 use crate::{
     ByteRange, CallableInput, CoverageRow, DeclarationFailure, DeclarationLookup, ParseIssue,
     ParseIssues, TypeProjection,
 };
 use emmylua_code_analysis::{
-    EmmyLuaAnalysis, Emmyrc, EmmyrcLuaVersion, FileId, LuaFunctionType, LuaType,
-    binding_context::{
-        BindingContext, BindingSession, BindingSite, BoundValue, SelectedValue,
-    },
+    EmmyLuaAnalysis, Emmyrc, EmmyrcLuaVersion, FileId, LuaType,
     humanize_semantic_type_detailed,
 };
 use emmylua_parser::{LuaAstNode, LuaExpr};
@@ -36,7 +32,13 @@ impl DeclarationModel {
         let mut config = Emmyrc::default();
         config.runtime.version = EmmyrcLuaVersion::Lua51;
         analysis.update_config(Arc::new(config));
-        let root = PathBuf::from("C:/lycheedev/authenticated-environment-types");
+        // The synthetic workspace exists only in Emmy's in-memory VFS. Its
+        // file URI still requires an absolute path on the current host.
+        let root = PathBuf::from(if cfg!(windows) {
+            "C:/lycheedev/authenticated-environment-types"
+        } else {
+            "/lycheedev/authenticated-environment-types"
+        });
         analysis.add_main_workspace(root.clone());
         let ids = analysis
             .update_files_by_path_shared_checked(
@@ -149,88 +151,38 @@ impl DeclarationModel {
             }
         }
         check().map_err(DeclarationFailure::Interrupted)?;
-        let Some((_, syntax)) = selected else {
+        let Some(_) = selected else {
             return Ok(None);
-        };
-        let site = BindingSite {
-            file_id: self.file_id,
-            syntax,
         };
         let projection =
             crate::projection::project(&callable, check.as_ref(), &mut step, &mut resolve)?;
-        let session = BindingSession::new(Arc::new(DeclarationContext {
-            identity: query_identity.into(),
-            site,
-            signature: projection.signature,
-            check: check.clone(),
-            error_code,
-        }));
-        let model = self
-            .analysis
-            .semantic_model_with_context(self.file_id, session.clone());
         step().map_err(DeclarationFailure::Interrupted)?;
-        let inferred = model.type_of_expr(syntax);
+        // Keep the former selected-value checkpoint and its unavailable reason.
+        // A persistent interruption is returned with the original payload below;
+        // a transient failed check remains unavailable, never raw-source inference.
+        let (inferred, state, reason) = match check() {
+            Err(error) => (LuaType::Unknown, "unavailable", Some(error_code(&error))),
+            Ok(()) => match projection.signature {
+                Ok(signature) => (LuaType::DocFunction(signature), "bound", None),
+                Err(reason) => (LuaType::Unknown, "unavailable", Some(reason.into())),
+            },
+        };
         check().map_err(DeclarationFailure::Interrupted)?;
-        let coverage = session.coverage();
-        let known = matches!(&inferred, LuaType::DocFunction(_))
-            && coverage
-                .iter()
-                .any(|row| row.site == site && row.state == "bound");
+        let known = matches!(&inferred, LuaType::DocFunction(_));
         let rendered = humanize_semantic_type_detailed(&model, &inferred);
         check().map_err(DeclarationFailure::Interrupted)?;
         Ok(Some(TypeProjection {
             declarations: projection.declarations,
             known,
             rendered,
-            coverage: coverage
-                .into_iter()
-                .map(|row| CoverageRow {
-                    operation: row.operation.into(),
-                    state: row.state.into(),
-                    proof: row.proof,
-                    reason: row.reason,
-                })
-                .collect(),
+            // This is owned declaration-resolution evidence. No engine checker
+            // or source-expression inference ran to render this signature.
+            coverage: vec![CoverageRow {
+                operation: "resolve".into(),
+                state: state.into(),
+                proof: query_identity.into(),
+                reason,
+            }],
         }))
-    }
-}
-
-struct DeclarationContext<E> {
-    identity: String,
-    site: BindingSite,
-    signature: Result<Arc<LuaFunctionType>, &'static str>,
-    check: Arc<dyn Fn() -> Result<(), E> + Send + Sync>,
-    error_code: fn(&E) -> String,
-}
-
-impl<E> BindingContext for DeclarationContext<E> {
-    fn identity(&self) -> &str {
-        &self.identity
-    }
-
-    fn resolve(&self, site: BindingSite) -> BindingDecision<BoundValue> {
-        if let Err(error) = (self.check)() {
-            return BindingDecision::Unavailable {
-                proof: self.identity.clone(),
-                reason: (self.error_code)(&error),
-            };
-        }
-        if site != self.site {
-            return BindingDecision::Unavailable {
-                proof: self.identity.clone(),
-                reason: "outside_authenticated_api_type_target".into(),
-            };
-        }
-        match &self.signature {
-            Ok(signature) => BindingDecision::Bound(BoundValue {
-                identity: self.identity.clone(),
-                proof: self.identity.clone(),
-                value: SelectedValue::CallableSignature(signature.clone()),
-            }),
-            Err(reason) => BindingDecision::Unavailable {
-                proof: self.identity.clone(),
-                reason: (*reason).into(),
-            },
-        }
     }
 }

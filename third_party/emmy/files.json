@@ -286,8 +286,8 @@
   },
   {
     "path": "crates/emmylua_code_analysis/src/binding_context.rs",
-    "bytes": 8796,
-    "sha256": "78b613ddfcd73a16349c0fb93f7817888cad62f07272031795d160762f5f3054"
+    "bytes": 8591,
+    "sha256": "7c2622dc9d815ef5906b9132b655eedfaa77dc0098f29e249b3018e0607e1eaf"
   },
   {
     "path": "crates/emmylua_code_analysis/src/check/builtin.rs",
@@ -1261,8 +1261,8 @@
   },
   {
     "path": "crates/emmylua_code_analysis/src/semantic_model/binding.rs",
-    "bytes": 37514,
-    "sha256": "17542138a468404c5ad0b4d362d29672fca658700e76beb653761d0976872a1a"
+    "bytes": 37379,
+    "sha256": "35e0006158d1ccde9cc7d7f220918dcd14fd30db723c81059568d5012ec86bc9"
   },
   {
     "path": "crates/emmylua_code_analysis/src/semantic_model/cache.rs",
@@ -1651,8 +1651,8 @@
   },
   {
     "path": "crates/emmylua_code_analysis/tests/lychee_context.rs",
-    "bytes": 38477,
-    "sha256": "00f72a4e434c98a2b4fa9e4a789adc9d52168ea41a250f08f85175a9be239dc7"
+    "bytes": 35719,
+    "sha256": "173a7f14b71dbaa4bc8e524a029a112f19520c4ad21f2124f8b9dc93a98e96e2"
   },
   {
     "path": "crates/emmylua_diagnostic_macro/Cargo.toml",

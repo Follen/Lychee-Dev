@@ -504,6 +504,20 @@ impl ExclusiveLock {
             control,
         )
     }
+    /// The caller composes independent checks serially; acquiring and failed
+    /// acquisition cleanup retain the same one-owner checked-close boundary.
+    pub(crate) fn resource_checked(
+        scope: &Path,
+        resource: &str,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<Self> {
+        Self::acquire_with(
+            &scope.join(format!("{}.lock", sha256(resource.as_bytes()))),
+            check,
+            Self::lock_file,
+            lycheedev_windows::filesystem::close_file,
+        )
+    }
     pub fn acquire_controlled(
         path: &Path,
         control: &crate::control::OperationControl,

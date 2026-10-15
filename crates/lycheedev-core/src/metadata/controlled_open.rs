@@ -9,34 +9,57 @@ impl Metadata {
     /// Unlike `open`, SQLite lock waits never use an internal five-second sleep.
     /// This only controls opening; subsequent methods retain their own contracts.
     pub fn open_controlled(home: &Path, write: bool, control: &OperationControl) -> Result<Self> {
-        Self::open_controlled_observed(home, write, control, || {})
+        Self::open_controlled_with_check(home, write, control, || Ok(()))
     }
 
+    /// Check an independent caller budget within schema and SQLite contention.
+    /// A stopped callback is returned only after all acquired owners are closed.
+    pub fn open_controlled_with_check(
+        home: &Path,
+        write: bool,
+        control: &OperationControl,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<Self> {
+        Self::open_controlled_observed_with_check(home, write, control, check, || {})
+    }
+
+    #[cfg(test)]
     fn open_controlled_observed(
         home: &Path,
         write: bool,
         control: &OperationControl,
+        on_busy: impl FnMut(),
+    ) -> Result<Self> {
+        Self::open_controlled_observed_with_check(home, write, control, || Ok(()), on_busy)
+    }
+
+    pub(super) fn open_controlled_observed_with_check(
+        home: &Path,
+        write: bool,
+        control: &OperationControl,
+        mut check: impl FnMut() -> Result<()>,
         mut on_busy: impl FnMut(),
     ) -> Result<Self> {
         // This must precede even workspace validation or directory inspection.
-        control.check()?;
+        metadata_check(control, &mut check)?;
         crate::workspace::open(home)?;
-        control.check()?;
+        metadata_check(control, &mut check)?;
         let schema = if write {
-            Some(historical_write::historical_lease(
+            Some(historical_write::historical_lease_with_check(
                 home,
                 "metadata-schema",
                 control,
+                &mut check,
             )?)
         } else {
             None
         };
         let opened = (|| {
-            control.check()?;
+            metadata_check(control, &mut check)?;
             let path = home.join("state/toolkit.sqlite");
             if write {
                 std::fs::create_dir_all(path.parent().expect("metadata parent"))?;
-                control.check()?;
+                metadata_check(control, &mut check)?;
             }
             if !path.exists() && !write {
                 return Err(ToolkitError::new(
@@ -52,15 +75,18 @@ impl Metadata {
             };
             // One absolute deadline spans open, schema reads, BEGIN and COMMIT.
             let until = control.deadline();
-            let connection = checked_sql(control, until, &mut on_busy, || {
-                Connection::open_with_flags(&path, flags)
-            })?;
-            let initialized = (|| {
-                connection.busy_timeout(Duration::ZERO)?;
-                let version: i32 = checked_sql(control, until, &mut on_busy, || {
-                    connection.pragma_query_value(None, "user_version", |row| row.get(0))
+            let connection =
+                checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
+                    Connection::open_with_flags(&path, flags)
                 })?;
-                control.check()?;
+            let initialized = (|| {
+                metadata_check(control, &mut check)?;
+                connection.busy_timeout(Duration::ZERO)?;
+                let version: i32 =
+                    checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
+                        connection.pragma_query_value(None, "user_version", |row| row.get(0))
+                    })?;
+                metadata_check(control, &mut check)?;
                 // Deliberately retain open's existing schema/version diagnostics.
                 // Historical Go migration has its separate, stricter boundary.
                 if version > 1 {
@@ -78,23 +104,24 @@ impl Metadata {
                             4,
                         ));
                     }
-                    checked_sql(control, until, &mut on_busy, || {
+                    checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
                         connection.pragma_update(None, "synchronous", "FULL")
                     })?;
-                    let mut transaction = checked_sql(control, until, &mut on_busy, || {
-                        rusqlite::Transaction::new_unchecked(
-                            &connection,
-                            rusqlite::TransactionBehavior::Immediate,
-                        )
-                    })?;
+                    let mut transaction =
+                        checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
+                            rusqlite::Transaction::new_unchecked(
+                                &connection,
+                                rusqlite::TransactionBehavior::Immediate,
+                            )
+                        })?;
                     let created = (|| {
-                        checked_sql(control, until, &mut on_busy, || {
+                        checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
                             transaction.execute_batch("CREATE TABLE IF NOT EXISTS documents (key TEXT PRIMARY KEY NOT NULL, generation INTEGER NOT NULL CHECK(generation>0), value BLOB NOT NULL CHECK(length(value)<=1048576)) WITHOUT ROWID")
                         })?;
-                        checked_sql(control, until, &mut on_busy, || {
+                        checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
                             transaction.pragma_update(None, "user_version", 1)
                         })?;
-                        checked_sql(control, until, &mut on_busy, || {
+                        checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
                             transaction.execute_batch("COMMIT")
                         })?;
                         Ok(())
@@ -114,11 +141,11 @@ impl Metadata {
                     finish_historical(created, rollback)?;
                 }
                 if write {
-                    checked_sql(control, until, &mut on_busy, || {
+                    checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
                         connection.pragma_update(None, "synchronous", "FULL")
                     })?;
                 }
-                control.check()
+                metadata_check(control, &mut check)
             })();
             let metadata = Self { connection };
             match initialized {
@@ -136,7 +163,7 @@ impl Metadata {
             }
             (Err(error), cleanup) => return finish_historical(Err(error), cleanup),
         };
-        match control.check() {
+        match metadata_check(control, &mut check) {
             Ok(()) => Ok(metadata),
             Err(error) => finish_historical(Err(error), metadata.close()),
         }

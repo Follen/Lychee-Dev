@@ -105,17 +105,37 @@ impl Metadata {
         key: &str,
         control: &crate::control::OperationControl,
     ) -> Result<RawDocument> {
-        Self::read_raw_controlled_observed(home, key, control, || {})
+        Self::read_document_raw_controlled_with_check(home, key, control, || Ok(()))
     }
+    /// Also check an independent caller budget inside every SQLite wait.
+    /// The supplemental check never extends the original five-second cutoff.
+    pub fn read_document_raw_controlled_with_check(
+        home: &Path,
+        key: &str,
+        control: &crate::control::OperationControl,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<RawDocument> {
+        Self::read_raw_controlled_observed_with_check(home, key, control, check, || {})
+    }
+    #[cfg(test)]
     fn read_raw_controlled_observed(
         home: &Path,
         key: &str,
         control: &crate::control::OperationControl,
+        on_busy: impl FnMut(),
+    ) -> Result<RawDocument> {
+        Self::read_raw_controlled_observed_with_check(home, key, control, || Ok(()), on_busy)
+    }
+    fn read_raw_controlled_observed_with_check(
+        home: &Path,
+        key: &str,
+        control: &crate::control::OperationControl,
+        mut check: impl FnMut() -> Result<()>,
         mut on_busy: impl FnMut(),
     ) -> Result<RawDocument> {
-        control.check()?;
+        metadata_check(control, &mut check)?;
         crate::workspace::open(home)?;
-        control.check()?;
+        metadata_check(control, &mut check)?;
         let path = home.join("state/toolkit.sqlite");
         match std::fs::metadata(&path) {
             Ok(_) => {}
@@ -129,15 +149,18 @@ impl Metadata {
             Err(error) => return Err(error.into()),
         }
         let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let connection = checked_sql(control, until, &mut on_busy, || {
+        let connection = checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
             Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         })?;
         let result = (|| {
+            // Any post-open failure stays inside this connection's close scope.
+            metadata_check(control, &mut check)?;
             connection.busy_timeout(std::time::Duration::ZERO)?;
-            let version: i32 = checked_sql(control, until, &mut on_busy, || {
-                connection.pragma_query_value(None, "user_version", |row| row.get(0))
-            })?;
-            control.check()?;
+            let version: i32 =
+                checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
+                    connection.pragma_query_value(None, "user_version", |row| row.get(0))
+                })?;
+            metadata_check(control, &mut check)?;
             if version != 1 {
                 return Err(ToolkitError::new(
                     "vault.unsupported_workspace",
@@ -148,9 +171,10 @@ impl Metadata {
             // One SQL statement is an atomic read snapshot. Reject an invalid
             // oversized row before allocating its bytes, even in a corrupted
             // database that has bypassed the ordinary table CHECK constraint.
-            let row: Option<(i64, i64, Option<Vec<u8>>)> = checked_sql(
+            let row: Option<(i64, i64, Option<Vec<u8>>)> = checked_sql_with_check(
                 control,
                 until,
+                &mut check,
                 &mut on_busy,
                 || {
                     connection.query_row(
@@ -159,7 +183,7 @@ impl Metadata {
                 ).optional()
                 },
             )?;
-            control.check()?;
+            metadata_check(control, &mut check)?;
             match row {
                 None => Err(ToolkitError::new(
                     "vault.record_missing",
@@ -182,7 +206,7 @@ impl Metadata {
         match connection.close() {
             Ok(()) => match result {
                 Ok(raw) => {
-                    control.check()?;
+                    metadata_check(control, &mut check)?;
                     Ok(raw)
                 }
                 Err(error) => Err(error),
@@ -238,7 +262,17 @@ impl Metadata {
         value: &T,
         control: &crate::control::OperationControl,
     ) -> Result<()> {
-        self.put_controlled_policy(key, value, None, control, true, || {})
+        self.create_controlled_with_check(key, value, control, || Ok(()))
+    }
+    /// Strict creation with an independent stop check at every SQL boundary.
+    pub fn create_controlled_with_check<T: Serialize>(
+        &mut self,
+        key: &str,
+        value: &T,
+        control: &crate::control::OperationControl,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<()> {
+        self.put_controlled_policy_with_check(key, value, None, control, true, check, || {})
     }
     /// Cancellation-aware publication. SQLite never sleeps inside an attempt:
     /// lock contention is retried with a stop check before every statement,
@@ -250,8 +284,21 @@ impl Metadata {
         expected: Option<i64>,
         control: &crate::control::OperationControl,
     ) -> Result<()> {
-        self.put_controlled_observed(key, value, expected, control, || {})
+        self.put_controlled_with_check(key, value, expected, control, || Ok(()))
     }
+    /// Keep invocation and supplemental budget checks independent; no control
+    /// lineage is combined and neither check runs under the other's mutex.
+    pub fn put_controlled_with_check<T: Serialize>(
+        &mut self,
+        key: &str,
+        value: &T,
+        expected: Option<i64>,
+        control: &crate::control::OperationControl,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<()> {
+        self.put_controlled_policy_with_check(key, value, expected, control, false, check, || {})
+    }
+    #[cfg(test)]
     fn put_controlled_observed<T: Serialize>(
         &mut self,
         key: &str,
@@ -262,6 +309,7 @@ impl Metadata {
     ) -> Result<()> {
         self.put_controlled_policy(key, value, expected, control, false, on_busy)
     }
+    #[cfg(test)]
     fn put_controlled_policy<T: Serialize>(
         &mut self,
         key: &str,
@@ -269,25 +317,47 @@ impl Metadata {
         expected: Option<i64>,
         control: &crate::control::OperationControl,
         strict_create: bool,
+        on_busy: impl FnMut(),
+    ) -> Result<()> {
+        self.put_controlled_policy_with_check(
+            key,
+            value,
+            expected,
+            control,
+            strict_create,
+            || Ok(()),
+            on_busy,
+        )
+    }
+    fn put_controlled_policy_with_check<T: Serialize>(
+        &mut self,
+        key: &str,
+        value: &T,
+        expected: Option<i64>,
+        control: &crate::control::OperationControl,
+        strict_create: bool,
+        mut check: impl FnMut() -> Result<()>,
         mut on_busy: impl FnMut(),
     ) -> Result<()> {
-        control.check()?;
+        metadata_check(control, &mut check)?;
         let raw = serde_json::to_vec(value)?;
         if raw.len() > 1_048_576 {
             return Err(ToolkitError::invalid("metadata document exceeds 1 MiB"));
         }
+        metadata_check(control, &mut check)?;
         self.connection.busy_timeout(std::time::Duration::ZERO)?;
         let result = (|| {
             let until = control.deadline();
-            let mut transaction = checked_sql(control, until, &mut on_busy, || {
-                rusqlite::Transaction::new_unchecked(
-                    &self.connection,
-                    rusqlite::TransactionBehavior::Immediate,
-                )
-            })?;
+            let mut transaction =
+                checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
+                    rusqlite::Transaction::new_unchecked(
+                        &self.connection,
+                        rusqlite::TransactionBehavior::Immediate,
+                    )
+                })?;
             let written = (|| {
                 let existing: Option<(i64, bool)> =
-                    checked_sql(control, until, &mut on_busy, || {
+                    checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
                         transaction
                             .query_row(
                                 "SELECT generation,value=?2 FROM documents WHERE key=?1",
@@ -298,7 +368,7 @@ impl Metadata {
                     })?;
                 match existing {
                     Some((generation, _)) if expected == Some(generation) => {
-                        checked_sql(control, until, &mut on_busy, || {
+                        checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
                             transaction.execute(
                                 "UPDATE documents SET generation=generation+1,value=?2 WHERE key=?1",
                                 params![key, &raw],
@@ -306,10 +376,10 @@ impl Metadata {
                         })?;
                     }
                     Some((_, true)) if expected.is_none() && !strict_create => {
-                        return control.check();
+                        return metadata_check(control, &mut check);
                     }
                     None if expected.is_none() => {
-                        checked_sql(control, until, &mut on_busy, || {
+                        checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
                             transaction.execute(
                                 "INSERT INTO documents(key,generation,value) VALUES(?1,1,?2)",
                                 params![key, &raw],
@@ -326,7 +396,7 @@ impl Metadata {
                 }
                 // Transaction::commit consumes the guard on SQLITE_BUSY. Keep it
                 // alive for checked retries; rollback below handles other exits.
-                checked_sql(control, until, &mut on_busy, || {
+                checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
                     transaction.execute_batch("COMMIT")
                 })?;
                 Ok(())
@@ -713,24 +783,46 @@ fn checked_sql<T>(
     control: &crate::control::OperationControl,
     until: std::time::Instant,
     on_busy: &mut impl FnMut(),
+    execute: impl FnMut() -> rusqlite::Result<T>,
+) -> Result<T> {
+    checked_sql_with_check(control, until, &mut || Ok(()), on_busy, execute)
+}
+
+// Check serially: supplemental code must not be invoked inside OperationControl
+// or while holding a supplemental budget's mutex around OperationControl.
+fn metadata_check(
+    control: &crate::control::OperationControl,
+    check: &mut impl FnMut() -> Result<()>,
+) -> Result<()> {
+    control.check()?;
+    check()
+}
+
+fn checked_sql_with_check<T>(
+    control: &crate::control::OperationControl,
+    until: std::time::Instant,
+    check: &mut impl FnMut() -> Result<()>,
+    on_busy: &mut impl FnMut(),
     mut execute: impl FnMut() -> rusqlite::Result<T>,
 ) -> Result<T> {
     loop {
-        control.check()?;
+        metadata_check(control, check)?;
         match execute() {
+            // The owner must perform any post-success check in its cleanup
+            // scope. In particular, do not silently Drop a newly opened handle.
             Ok(value) => return Ok(value),
             Err(error) => {
-                control.check()?;
                 let busy = matches!(&error, rusqlite::Error::SqliteFailure(inner, _)
                     if matches!(inner.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked));
+                let error = ToolkitError::from(error);
+                metadata_check_after_sql_error(control, check, &error)?;
                 if !busy || std::time::Instant::now() >= until {
-                    // The absolute cutoff may have elapsed since the check
-                    // above. Preserve the caller's stop cause at that boundary.
-                    control.check()?;
-                    return Err(error.into());
+                    // Keep the legacy control-first precedence at this cutoff.
+                    metadata_check_after_sql_error(control, check, &error)?;
+                    return Err(error);
                 }
                 on_busy();
-                control.check()?;
+                metadata_check_after_sql_error(control, check, &error)?;
                 std::thread::sleep(
                     std::time::Duration::from_millis(5).min(
                         control
@@ -741,6 +833,23 @@ fn checked_sql<T>(
             }
         }
     }
+}
+fn metadata_check_after_sql_error(
+    control: &crate::control::OperationControl,
+    check: &mut impl FnMut() -> Result<()>,
+    sqlite_error: &ToolkitError,
+) -> Result<()> {
+    control.check()?;
+    check().map_err(|mut stop| {
+        // SQL errors are not cleanup failures. Preserve the complete typed
+        // supplemental cause, including its previous details, and the SQL cause.
+        let original = stop.clone();
+        stop.details = serde_json::json!({
+            "originalSupplemental": original,
+            "sqliteError": sqlite_error,
+        });
+        stop
+    })
 }
 
 #[cfg(test)]
@@ -1173,3 +1282,6 @@ pub mod historical_write;
 pub use historical_write::{HistoricalMutation, HistoricalWriter};
 
 mod controlled_open;
+
+#[cfg(test)]
+mod supplemental_tests;
