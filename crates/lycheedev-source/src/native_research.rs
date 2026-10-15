@@ -8,6 +8,7 @@ use std::{collections::BTreeMap,path::PathBuf};
 
 pub(crate) mod plan;
 mod xml;
+mod worker_control;
 pub(crate) use xml::XmlResearch;
 pub const RESEARCH_RULES:&str="source-native-research-v7-xml-script-ancestry";
 #[derive(Clone,Serialize,Deserialize)]
@@ -54,13 +55,17 @@ impl ResearchSession {
     pub fn prepare(snapshot:SnapshotRequest,control:&OperationControl)->Result<Self> {
         Self::prepare_observed(snapshot,control,|_|{})
     }
-    pub fn prepare_observed(snapshot:SnapshotRequest,control:&OperationControl,observer:impl FnMut(&'static str))->Result<Self> {
+    pub fn prepare_observed(snapshot:SnapshotRequest,control:&OperationControl,mut observer:impl FnMut(&'static str))->Result<Self> {
         control.check()?;
+        observer("prepare_started");
         let SnapshotRequest{mut files,load_documents,environment_documents,source,luac,api,environment_manifest,load_plans,input_gaps}=snapshot;
         let api_definitions=plan::VerifiedApiDefinitions::rebuild(&environment_documents,&api,environment_manifest.as_ref(),control)?;
+        observer("api_definitions_verified");
         let xml=XmlResearch::prepare(&mut files,load_documents,&load_plans,&source,control)?;
         let xml_identity=xml.identity(control)?;
+        observer("xml_prepared");
         let host=api_environment(&api,environment_manifest.as_ref(),control)?;
+        observer("host_prepared");
         let files=files.into_iter().map(|(path,text)|{
             let content_sha256=storage::sha256(text.as_bytes());
             let analysis_utf8=text.strip_prefix('\u{feff}').unwrap_or(&text).into();
@@ -69,6 +74,7 @@ impl ResearchSession {
         }).collect();
         let mut config=emmylua_code_analysis::Emmyrc::default();config.runtime.version=emmylua_code_analysis::EmmyrcLuaVersion::Lua51;
         let inputs=SourceInputs::admit(SourceInputSpec{files,workspace_root:PathBuf::from("C:/lycheedev/pinned-source-research"),source_identity:json!({"source":source,"environment":environment_manifest,"researchRules":RESEARCH_RULES,"xml":xml_identity}),phase:"unknown".into(),ordered_occurrences:vec![],config,host,luac,limits:SourceLimits::research()},control)?;
+        observer("source_admitted");
         let prepared=prepare_observed(inputs,control,observer)?;
         Ok(Self{snapshot:ResearchMetadata{api,environment_manifest,load_plans,input_gaps,api_definitions},prepared,xml})
     }
@@ -268,16 +274,27 @@ pub(crate) fn api_environment(api:&[environment::ApiRecord],manifest:Option<&env
 
 pub fn worker_stdio()->Result<()> {
     use std::io::{Read,Write};
-    let control=OperationControl::new(std::time::Instant::now()+std::time::Duration::from_secs(180),std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)));
+    let control=worker_control::receive_control().map_err(worker_control::report_stop)?;
+    let mut phases=worker_control::Phases::from_environment();
+    phases.record("worker_started");
+    let result=(|| -> Result<()> {
     let mut bytes=Vec::new();std::io::stdin().take((768u64<<20)+1).read_to_end(&mut bytes)?;
+    control.check()?;
     if bytes.len()>768<<20{return Err(ToolkitError::new("source.native_budget","native worker input exceeds budget",3));}
     let request:WorkerRequest=serde_json::from_slice(&bytes)?;
     drop(bytes);
-    let mut session=ResearchSession::prepare(request.snapshot,&control)?;
-    let result=session.query(request.query,&control)?;
+    control.check()?;phases.record("request_decoded");
+    let mut session=ResearchSession::prepare_observed(request.snapshot,&control,|phase|phases.record(phase))?;
+    phases.record("prepared");
+    let result=session.query_observed(request.query,&control,|phase|phases.record(phase))?;
+    phases.record("queried");
     let bytes=serde_json::to_vec(&result)?;
+    control.check()?;
     if bytes.len()>32<<20{return Err(ToolkitError::new("source.native_budget","native worker result exceeds budget",3));}
     std::io::stdout().write_all(&bytes)?;Ok(())
+    })();
+    phases.record(if result.is_ok(){"worker_complete"}else{"worker_error"});
+    result.map_err(worker_control::report_stop)
 }
 
 /// Parent-side immutable bytes. The same request is used by one-shot and session owners.
@@ -349,8 +366,14 @@ pub fn one_shot(inv:&lycheedev_core::Invocation,request:WorkerRequest)->Result<V
     let bytes=serde_json::to_vec(&request)?;
     if bytes.len()>768<<20{return Err(ToolkitError::new("source.native_budget","native research input exceeds transport budget",3));}
     let mut command=std::process::Command::new(std::env::current_exe()?);command.arg("--source-native-worker");
-    let output=crate::process::run_with_operation_control(command,32<<20,inv.control.remaining()?.min(std::time::Duration::from_secs(180)),Some(bytes),&inv.control)?;
+    let diagnostic=worker_control::configure(&mut command,&inv.control)?;
+    let output=crate::process::run_with_operation_control_observed(command,32<<20,inv.control.remaining()?.min(std::time::Duration::from_secs(180)),Some(bytes),&inv.control,diagnostic.clone());
+    // The process runner intentionally returns only retirement details on hard
+    // stop. Replay the observed stderr prefix before propagating that primary error.
+    worker_control::replay(diagnostic);
+    let output=output?;
     inv.control.check()?;
+    if output.status!=0&&worker_control::stopped_at_deadline(output.status,&output.stderr){return Err(ToolkitError::new("command.deadline","Native Source operation deadline exhausted",5));}
     if output.status!=0{return Err(ToolkitError::new("source.native_worker_failed",String::from_utf8_lossy(&output.stderr).into_owned(),5));}
     let mut result:Value=serde_json::from_slice(&output.stdout)?;
     if result["schema"]!="lycheedev.source-native-research.v1"{return Err(ToolkitError::new("source.native_worker_protocol","native research worker returned an invalid schema",4));}

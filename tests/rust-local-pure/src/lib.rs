@@ -3,3 +3,5 @@
 // beside this root, retaining Rust's ordinary nested module lookup.
 pub mod raw_json;
 pub mod mailbox;
+pub mod original_lines;
+pub mod stderr_observation;

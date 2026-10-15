@@ -259,7 +259,7 @@ impl PreparedSnapshot {
             let proved=(!reference.roles.contains(&ReferenceRole::Call)&&matches!(&definition.lexical,QueryFact::Known{..}))
                 ||!observations.is_empty()&&observations.iter().all(|row|row["selected"]["state"]=="known");
             if !proved{unresolved+=1;}
-            let line=original_line_at(self.inputs.original(&site.file)?,site.start as usize);
+            let line=self.original_line_at(&site.file,site.start as usize)?;
             let kind=if reference.roles.contains(&ReferenceRole::Call){"call"}else if reference.roles.contains(&ReferenceRole::Write){"write"}else if reference.roles.contains(&ReferenceRole::Capture){"capture"}else{"reference"};
             let mut row=json!({"source":if outgoing{symbol.name.as_str()}else{spelling},"target":if outgoing{spelling}else{symbol.name.as_str()},"kind":kind,"state":if proved{"resolved"}else{"static_candidate"},"path":site.file,"line":line,"site":site,"basis":["native_common_source_facts"],"lexical":definition.lexical,"observations":observations,"proof":reference.id,"reason":if proved{"lexical declaration or selected abstract value"}else{"source candidate; execution binding unavailable"}});
             origins.project_row(self,&mut row,&site)?;relations.push(row);
@@ -368,7 +368,7 @@ impl PreparedSnapshot {
             let proved=(!reference.roles.contains(&ReferenceRole::Call)&&matches!(&definition.lexical,QueryFact::Known{..}))
                 ||!observations.is_empty()&&observations.iter().all(|row|row["selected"]["state"]=="known");
             if !proved{unresolved+=1;}
-            let line=original_line_at(self.inputs.original(&site.file)?,site.start as usize);
+            let line=self.original_line_at(&site.file,site.start as usize)?;
             let kind=if reference.roles.contains(&ReferenceRole::Call){"call"}else if reference.roles.contains(&ReferenceRole::Write){"write"}else if reference.roles.contains(&ReferenceRole::Capture){"capture"}else{"reference"};
             let mut row=json!({"source":if outgoing{symbol.name.as_str()}else{spelling},"target":if outgoing{spelling}else{symbol.name.as_str()},"kind":kind,"state":if proved{"resolved"}else{"static_candidate"},"path":site.file,"line":line,"site":site,"basis":["native_common_source_facts"],"lexical":definition.lexical,"observations":observations,"proof":reference.id,"reason":if proved{"lexical declaration or selected abstract value"}else{"source candidate; execution binding unavailable"}});
             origins.project_row(self,&mut row,&site)?;relations.push(row);

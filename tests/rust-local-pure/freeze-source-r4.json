@@ -1,0 +1,168 @@
+{
+  "schema": "lycheedev.local-pure-freeze.v1",
+  "revision": 3,
+  "headBeforeIntegration": "79ef742fcd74e08bfa6a5e641a31f2eb525633c5",
+  "scope": "21 exact production pure tests, not Windows process integration",
+  "owner": "d2608611-bb54-49d1-a490-d3dec35db9b4",
+  "receiptSha256": "35cbac7277d2cb5174d0fc8fa155e277a8cde22ca6587709b1288586a46e23b7",
+  "result": {
+    "passed": 21,
+    "failed": 0,
+    "ignored": 0,
+    "filtered": 0
+  },
+  "files": [
+    {
+      "path": "crates/lycheedev-core/src/raw_json.rs",
+      "sha256": "e8a0e77234d56318b586385c27f69ed7a8ba63cb7fb895aa19d7e49befb703f3",
+      "bytes": 8324
+    },
+    {
+      "path": "crates/lycheedev-core/src/raw_json/tests.rs",
+      "sha256": "c1ffc43b782846e5007fd3435d39e255297bc609b2956c0972c8da939203c560",
+      "bytes": 2534
+    },
+    {
+      "path": "crates/lycheedev-core/src/mailbox.rs",
+      "sha256": "a8698fb1d4915e709c7881cbc1076a899e301611a5fabda6c3e662c49c985626",
+      "bytes": 7328
+    },
+    {
+      "path": "crates/lycheedev-core/src/mailbox/code_bytes.rs",
+      "sha256": "8a411b4a7825fc98745b9ea2bfb4577565938b8e73d005903a946979fdb9aaf8",
+      "bytes": 3189
+    },
+    {
+      "path": "crates/lycheedev-core/src/mailbox/code_bytes_tests.rs",
+      "sha256": "b60de8bc2a3e935e456ebd2c9f065f6ffc1e3d3ea5871a6de68d146db95bc104",
+      "bytes": 3525
+    },
+    {
+      "path": "crates/lycheedev-source/src/native/original_lines.rs",
+      "sha256": "b7679ca8f10bfb3502865dfea9e04afac0d28b68a48a41357d0fea87e633b509",
+      "bytes": 9337
+    },
+    {
+      "path": "crates/lycheedev-source/src/process/stderr_observation.rs",
+      "sha256": "78ddbe9c95de3d45d63168abd3dab2498071cd47b40becf886a151ffa0982fb1",
+      "bytes": 6393
+    },
+    {
+      "path": "tests/rust-local-pure/Cargo.toml",
+      "sha256": "4597231e1cd531b1e871352ce8351ce52af58be2e17ff147a119b9cef5affab2",
+      "bytes": 603
+    },
+    {
+      "path": "tests/rust-local-pure/src/lib.rs",
+      "sha256": "5dc1af3e0b3236680a11a6cb63d2d8263d02be739c17c473f08d75f7cdbf9f0f",
+      "bytes": 260
+    },
+    {
+      "path": "tests/rust-local-pure/check_cache.py",
+      "sha256": "ad1ce37d811b59bd97babcd2b2035518ae10a12a495743a44b5b56005277d5b8",
+      "bytes": 4734
+    },
+    {
+      "path": "tests/rust-local-pure/Cargo.lock",
+      "sha256": "444372319ee29d35fe5e8969df78f000713c7106c8a711cff21ca627c682764f",
+      "bytes": 2872
+    },
+    {
+      "path": "tools/rust-local-pure.mjs",
+      "sha256": "24afef9eac3e6695ff0185c8dbf290345bf6213ca9e193ce3a04a2b464c48f2d",
+      "bytes": 12241
+    },
+    {
+      "path": "tools/rust-local-owned-process.mjs",
+      "sha256": "d583b14bd755eaaf70b01c7059d874b84e9b9e3bd6b37316a7ad4f4142f7d601",
+      "bytes": 6339
+    },
+    {
+      "path": "tools/rust-disk.mjs",
+      "sha256": "54122b03b7b474f1f2119a31caa85d2217aeb5ea97e65f28a7e0161bebc203e5",
+      "bytes": 11567
+    },
+    {
+      "path": "tools/rust-local-pure.test.mjs",
+      "sha256": "541be0f8b920ed4ab5b02de8829ef17a85f22745fa2e9c9c076946f2dbe3a990",
+      "bytes": 4857
+    },
+    {
+      "path": "tests/rust-local-pure/README.md",
+      "sha256": "ddb7ea8a3b3b5fbec02e9f2b838c96c0347dcf2e9801517c7ce4c669d84b293b",
+      "bytes": 4103
+    }
+  ],
+  "sealedLogs": [
+    {
+      "name": "cargo-configurations.json",
+      "sha256": "4304e98c238f4dfb5534b8ca1a441997a380d61911004ecdea9dc4ea044290b6"
+    },
+    {
+      "name": "local-process-7e6d929b-db6e-45c7-8484-55687e7c71f2.request.json",
+      "sha256": "ae5f7877f8bf7e53412759f543a4e9e74ac1d1ea9b721fe86961298626484a46"
+    },
+    {
+      "name": "local-process-7e6d929b-db6e-45c7-8484-55687e7c71f2.stdout.bin",
+      "sha256": "82602c3f8c4d5318fc0b0c186bbfb5f59a7e313b2d8eead3285e7bc9baa453a9"
+    },
+    {
+      "name": "local-process-7e6d929b-db6e-45c7-8484-55687e7c71f2.stderr.bin",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "local-process-7e6d929b-db6e-45c7-8484-55687e7c71f2.status.bin",
+      "sha256": "38554cd09d808f6bb09ca1356c52704c00dba3c2e25a4f499174c38c5de05fcf"
+    },
+    {
+      "name": "local-process-7e6d929b-db6e-45c7-8484-55687e7c71f2.receipt.json",
+      "sha256": "8f1c01b8952fd1fac3f4a6ed65e7a0b1c22d88b1656f24f1ee4fd14e16ee3e2e"
+    },
+    {
+      "name": "local-process-2e506bbf-11c4-45f3-ae58-0bb5465a7d55.request.json",
+      "sha256": "62ec9867d8667ec9f496c4159d55ffc4472ab45a4f26077e461b6e06f2398ed3"
+    },
+    {
+      "name": "local-process-2e506bbf-11c4-45f3-ae58-0bb5465a7d55.stdout.bin",
+      "sha256": "7c6f4491de52f56b2d081defadd8ca53f51477f31b4041a77d4a4b93a469a1ae"
+    },
+    {
+      "name": "local-process-2e506bbf-11c4-45f3-ae58-0bb5465a7d55.stderr.bin",
+      "sha256": "ff613183741f4e0d4a5f86908fc5edea25e41b6ec3c58cd344391a7a75245e49"
+    },
+    {
+      "name": "local-process-2e506bbf-11c4-45f3-ae58-0bb5465a7d55.status.bin",
+      "sha256": "1ce3f327da1d92a5e092ccbe554cbdb2c8912010c6ee30ca3da7b09b6ffdea79"
+    },
+    {
+      "name": "local-process-2e506bbf-11c4-45f3-ae58-0bb5465a7d55.receipt.json",
+      "sha256": "6a9d0f3e72ef4292e1de9c7080216df71796a713854f54f4924300d8aaaba740"
+    },
+    {
+      "name": "local-process-1a5c9cbf-4566-4bb8-b131-9f4e0efbd55b.request.json",
+      "sha256": "ae5f7877f8bf7e53412759f543a4e9e74ac1d1ea9b721fe86961298626484a46"
+    },
+    {
+      "name": "local-process-1a5c9cbf-4566-4bb8-b131-9f4e0efbd55b.stdout.bin",
+      "sha256": "82602c3f8c4d5318fc0b0c186bbfb5f59a7e313b2d8eead3285e7bc9baa453a9"
+    },
+    {
+      "name": "local-process-1a5c9cbf-4566-4bb8-b131-9f4e0efbd55b.stderr.bin",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "local-process-1a5c9cbf-4566-4bb8-b131-9f4e0efbd55b.status.bin",
+      "sha256": "4a5cd855536026bb00e320e8612ce9a79d73a69182a73ec2b53b2293a0a12f4f"
+    },
+    {
+      "name": "local-process-1a5c9cbf-4566-4bb8-b131-9f4e0efbd55b.receipt.json",
+      "sha256": "e8dc895cb39efc1824fd48d901ebc275a88d260990439bd51548e49c8b809600"
+    },
+    {
+      "name": "summary.json",
+      "sha256": "0e2c4ff503c308c1e87ff1749ebab82b54c0d4d8eae4c744e60a145fd99739fa"
+    }
+  ],
+  "historicalFailureOwner": "9fb69182-7bd9-4cbc-a981-3136fbbbc6f6",
+  "remaining": "real Event/read_output, worker control, full Source, Windows, corpus and performance NOT_RUN"
+}

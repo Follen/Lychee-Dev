@@ -4,13 +4,20 @@ import {readFileSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {beginScratch,sha256} from './rust-disk.mjs';
 import {localOwnedSpawn} from './rust-local-owned-process.mjs';
-import {sourcePaths,harnessPaths,snapshotInputs,verifyTestResults} from './rust-local-pure.mjs';
+import {sourcePaths,harnessPaths,harnessSourcePath,snapshotInputs,verifyTestResults} from './rust-local-pure.mjs';
 test('minimal harness compiles actual unmodified production module/test paths',()=>{
-  assert.equal(sourcePaths.length,5);
+  assert.equal(sourcePaths.length,7);
   const source=readFileSync('tests/rust-local-pure/src/lib.rs','utf8');
   assert.match(source,/pub mod raw_json;/);
+  assert.match(source,/pub mod original_lines;/);
+  assert.match(source,/pub mod stderr_observation;/);
+  assert.equal(harnessSourcePath('crates/lycheedev-source/src/process/stderr_observation.rs'),'stderr_observation.rs');
+  assert.equal(harnessSourcePath('crates/lycheedev-source/src/native/original_lines.rs'),'original_lines.rs');
+  assert.equal(harnessSourcePath('crates/lycheedev-core/src/mailbox/code_bytes.rs'),'mailbox/code_bytes.rs');
+  assert.throws(()=>harnessSourcePath('../original_lines.rs'));
+  assert.equal(new Set(sourcePaths.map(harnessSourcePath)).size,sourcePaths.length);
   assert.equal(source.includes('fn '),false);
-  assert.equal(Object.keys(snapshotInputs(process.cwd(),[...sourcePaths,...harnessPaths])).length,8);
+  assert.equal(Object.keys(snapshotInputs(process.cwd(),[...sourcePaths,...harnessPaths])).length,10);
 });
 test('harness has isolated pinned official deps and a real optimized symbols profile',()=>{
   const manifest=readFileSync('tests/rust-local-pure/Cargo.toml','utf8');

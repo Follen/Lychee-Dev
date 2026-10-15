@@ -1,3 +1,6 @@
+#[path = "original_lines.rs"]
+mod original_lines;
+
 use std::collections::{HashMap, HashSet};
 use emmylua_code_analysis::{FileId, SemanticId};
 use emmylua_code_analysis::binding_context::{BindingContext, BindingDecision, BindingSite, BoundValue, SelectedValue, FunctionRef, ObjectRef, CallPermit, CallObservation, BindingReference, BindingSession, ObjectViewKey as NativeObjectViewKey, ObjectShape, ObjectField, FieldPresence, ShapeEnumeration, SourceSpan, DerivedNumber, DerivedNumberRule};
@@ -72,6 +75,7 @@ pub struct PreparedSnapshot {
     expressions: BTreeMap<(FileId, u32, u32), LuaSyntaxId>,
     closures: BTreeMap<String, LuaSyntaxId>,
     entry_catalog:Vec<EntryCandidate>,
+    original_lines: BTreeMap<FileId, original_lines::OriginalLines>,
     parameters: BTreeMap<String, SemanticId>,
     managed_reads: HashSet<BindingSite>,
     managed_calls: HashSet<BindingSite>,
@@ -80,7 +84,8 @@ impl PreparedSnapshot {
     fn prepare_inner(inputs:Arc<SourceInputs>,control:&OperationControl,analysis:EmmyLuaAnalysis,observer:&mut impl FnMut(&'static str))->Result<Self> {
         control.check().map_err(|e|e.to_string())?;
         let config=inputs.corpus.config.clone();
-        let mut input=Self{syntax:SourceSyntaxIndex::default(),inputs,control:control.clone(),owner:Arc::new(()),analysis,config,files:BTreeMap::new(),expressions:BTreeMap::new(),closures:BTreeMap::new(),entry_catalog:vec![],parameters:BTreeMap::new(),managed_reads:HashSet::new(),managed_calls:HashSet::new()};
+        let mut input=Self{syntax:SourceSyntaxIndex::default(),inputs,control:control.clone(),owner:Arc::new(()),analysis,config,files:BTreeMap::new(),expressions:BTreeMap::new(),closures:BTreeMap::new(),entry_catalog:vec![],original_lines:BTreeMap::new(),parameters:BTreeMap::new(),managed_reads:HashSet::new(),managed_calls:HashSet::new()};
+        let mut line_index_remaining=64usize * 1024 * 1024;
         let mut nodes=0;let mut ids=HashSet::new();let mut uris=HashSet::new();
         for source in &input.inputs.corpus.files {
             control.check().map_err(|e|e.to_string())?;let name=source.path.as_str();
@@ -90,6 +95,10 @@ impl PreparedSnapshot {
             if !ids.insert(file_id) || !uris.insert(actual_uri.to_string()) || actual_uri!=uri {return Err("admitted paths alias the same Emmy FileId or URI".into())}
             if input.analysis.db.get_file_text(file_id)!=Some(source.analysis.as_ref()){return Err("Emmy analyzed bytes differ from admitted analysis bytes".into())}
             input.files.insert(name.into(),file_id);
+            if let Some(lines)=original_lines::OriginalLines::build(&source.original,line_index_remaining,||control.check().map_err(|error|error.to_string()))? {
+                line_index_remaining=line_index_remaining.checked_sub(lines.retained_bytes()).ok_or("original line index accounting overflow")?;
+                input.original_lines.insert(file_id,lines);
+            }
             let model=input.analysis.semantic_model(file_id);if !model.parse_errors().unwrap_or_default().is_empty(){return Err(format!("native source parse error: {name}"))}
             let root=model.syntax_tree().ok_or("source syntax tree")?.get_red_root();
             for node in root.descendants() {
@@ -101,7 +110,7 @@ impl PreparedSnapshot {
                     if matches!(expr,LuaExpr::NameExpr(_)|LuaExpr::IndexExpr(_)){input.managed_reads.insert(site);}
                     if matches!(expr,LuaExpr::CallExpr(_)){input.managed_calls.insert(site);}
                 }
-                if let Some(closure)=LuaClosureExpr::cast(node){input.closures.insert(input.inputs.site(name,closure.get_range()).id(),closure.get_syntax_id());input.entry_catalog.push(input.entry_candidate(name,closure.get_syntax_id())?);}
+                if let Some(closure)=LuaClosureExpr::cast(node){input.closures.insert(input.inputs.site(name,closure.get_range()).id(),closure.get_syntax_id());input.entry_catalog.push(input.entry_candidate(name,closure.get_syntax_id()).map_err(|error|error.to_string())?);}
             }
             for declaration in &model.file_facts().ok_or("source facts")?.decls {
                 control.check().map_err(|e|e.to_string())?;

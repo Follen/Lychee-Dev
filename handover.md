@@ -773,6 +773,14 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - 当前 `8a57231e` Emmy job `116215966932` success；产品独立组继续运行，但 CLI 构建失败使 full Retail/内存测量不能开始。内存数值仍 **not_measured**，不能将主机总内存或预算作实际占用。
 - 后续尚未合入的 Source 行索引/有界 stderr 观测候选已实际通过 Linux 本地纯模块 21 项（原 10、行索引 4、观测 7），0 failed/ignored/filtered，编译 22.92 秒、测试 0.06 秒。owner `d2608611-bb54-49d1-a490-d3dec35db9b4`，receipt SHA256 `35cbac7277d2cb5174d0fc8fa155e277a8cde22ca6587709b1288586a46e23b7`，17 sealed logs 核 hash。其先前错误包含真实 process 集成测试、无法在纯模块 crate 编译的失败 owner `9fb69182-7bd9-4cbc-a981-3136fbbbc6f6` 保留；原集成测试完整移动至真实 process::tests，由既有 Windows selector 覆盖，仍 NOT_RUN。这 21 项不是全 Source、Windows、性能或全 Retail 通过。
 
+### 2026-10-15：Source 完整增强保留、owned callback 投影与控制预算候选
+
+- 此批基于 `79ef742f`（activation serde 排序最小修复另行启动原生 run `38672577841`）普通 push 保存，不替换其待运行原生批。`tests/rust-parity/source-quality-integration-snapshot.json` 记录固定已提交工具/Windows/配方闭包与精确候选覆盖；不混入未集成 legacy-read 工作树或旧 support 文件。独立静态审查通过只适用列明冻结，不能当编译通过。
+- owned Emmy adapter 补齐 callback 类型投影：原生 `TimerCallback` unknown 的已知原因是已有 catalog declaration 没有进入 environment type。自有层递归解析参数/返回/nilable/cardinality/provenance，歧义、循环、深度与工作预算 fail closed；没有硬编码该类型。保留完整 XML/Lua 增强，Go 原引擎并不提供该增强。引擎内核仅新增 CallableSignature 语义接缝及转换（2 生产文件 6 行），旧 35 回归保留并加 1 项；adapter 24 项对应生产实现，尚未实际运行。重建 patch SHA256 `eff914ec33bd8bf3bb67096bd2136994c71f90b710b5e0032876bc25b8771c86`，tree `828cfad0692b79595e1591649b33013916f8dd8cc5e8230d74c70f0b56a5088b`。冻结 `owned-emmy-callback-freeze.json`，不是已实现全部去耦合或零 patch。
+- 原始行号查询由每次 prefix 扫描改为一次逐文件 newline 索引，保持 byte offset、CRLF/LFCR 首字节、BOM/UTF8、EOF/半开区间语义；64MiB 仅可选缓存容量上限，达到上限/分配失败回退原可取消扫描，不删结果、不作为产品内存配额。类型化取消/超时沿公共 Result 保留。冻结 `owned-original-lines-r2-freeze.json`；4 个纯模块测试真实通过，prepare 集成测试新接入独立 native:: CI，尚 NOT_RUN。尚无耗时占比或性能改善实测。
+- native worker control v3 使用原总预算内绝对截止时间，扣除启动/传输/解析并预留 500ms，不再父级剩余约164秒却给新worker180秒；父 monotonic deadline 仍是硬边界。私有 deadline exit85+唯一marker 经严格匹配映射原公共 deadline，异常/伪造不覆盖原错误。phase 从子进程 stderr 固定64KiB前缀观测，无子进程路径写入或新增 Windows FFI，锁冲突/poison/容量耗尽永久停止观测、不拼接漏段。best-effort 诊断不保证末事件落盘，亦不证明完整慢因。R1/R2路径sidecar设计已撤回未发布，原失败保留；发布R4冻结 `source-native-control-r4-freeze.json`。
+- 本地 exact production 21 项与17sealed logs见 `tests/rust-local-pure/freeze-source-r4.json`，runner Node11项本次真实通过；workflow实际PyYAML解析3jobs及run字段。完整 adapter/native控制/实际process/4036 Retail/Skill/session/内存仍须对应候选实际验证。当前性能目标与四阶段串行审计仍未验收。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

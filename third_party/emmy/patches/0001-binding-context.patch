@@ -1,6 +1,6 @@
 --- /dev/null
 +++ b/crates/emmylua_code_analysis/src/binding_context.rs
-@@ -0,0 +1,415 @@
+@@ -0,0 +1,418 @@
 +//! Immutable host-selected binding evidence for one semantic query session.
 +//! This is a new public-base reconstruction, not the historical private patch.
 +#![forbid(unsafe_code)]
@@ -35,6 +35,9 @@
 +    Expression(BindingSite),
 +    Parameter(SemanticId),
 +    Function(FunctionRef),
++    /// Host-projected declaration signature; the host owns validation/budgets.
++    /// This does not grant a call permit or observed return capability.
++    CallableSignature(Arc<crate::LuaFunctionType>),
 +    Object(ObjectRef),
 +    DerivedNumber(DerivedNumber),
 +    EnvironmentCallable(Arc<EnvironmentCallable>),
@@ -1280,7 +1283,7 @@
              .member_ref_of_index(self.view.file_id(), index_expr.get_syntax_id())?;
 --- /dev/null
 +++ b/crates/emmylua_code_analysis/src/semantic_model/binding.rs
-@@ -0,0 +1,917 @@
+@@ -0,0 +1,920 @@
 +//! Context-sensitive projection. Unknown evidence never re-enters raw inference.
 +#![forbid(unsafe_code)]
 +use super::SemanticModel;
@@ -1998,6 +2001,9 @@
 +                .type_of_signature_in_file(function.file_id, function.closure)
 +                .map(|f| LuaType::DocFunction(Arc::new(f)))
 +                .ok_or("selected_function_signature_unavailable"),
++            SelectedValue::CallableSignature(signature) => {
++                Ok(LuaType::DocFunction(signature.clone()))
++            }
 +            SelectedValue::DerivedNumber(number) => {
 +                if !number.value.is_finite()
 +                    || number.occurrence_identity.is_empty()
@@ -4131,7 +4137,7 @@
 +}
 --- /dev/null
 +++ b/crates/emmylua_code_analysis/tests/lychee_context.rs
-@@ -0,0 +1,1029 @@
+@@ -0,0 +1,1111 @@
 +use emmylua_code_analysis::FileId;
 +use emmylua_code_analysis::binding_context::*;
 +use emmylua_code_analysis::{EmmyLuaAnalysis, LuaType};
@@ -5160,4 +5166,86 @@
 +            assert!(model.resolve_member(&index).is_none(), "{text}");
 +        }
 +    }
++}
++
++#[test]
++fn host_projected_signature_is_session_local_and_does_not_grant_call_observations() {
++    use emmylua_code_analysis::{AsyncState, LuaFunctionType, VariadicType};
++    let mut analysis = EmmyLuaAnalysis::new();
++    let root = std::env::current_dir()
++        .unwrap()
++        .join("binding-projected-signature");
++    analysis.add_main_workspace(root.clone());
++    let ids = analysis
++        .update_files_by_path_shared_checked(
++            vec![(
++                root.join("signature.lua"),
++                Some(Arc::from("local function F() return 901 end\nreturn F()\n")),
++            )],
++            || Ok::<_, ()>(()),
++        )
++        .unwrap();
++    let callee = site(&analysis, ids[0], "F");
++    let call = site(&analysis, ids[0], "F()");
++    let signature = Arc::new(LuaFunctionType::new(
++        AsyncState::None,
++        false,
++        false,
++        vec![("callback".into(), Some(LuaType::Function))],
++        LuaType::Variadic(Arc::new(VariadicType::Multi(vec![
++            LuaType::String,
++            LuaType::Boolean,
++        ]))),
++        None,
++    ));
++    let mut selected = context("projected");
++    selected.decisions.insert(
++        callee,
++        BindingDecision::Bound(BoundValue {
++            identity: "selected".into(),
++            proof: "projection-proof".into(),
++            value: SelectedValue::CallableSignature(signature.clone()),
++        }),
++    );
++    selected.calls.insert(
++        call,
++        BindingDecision::Bound(CallPermit {
++            callee,
++            proof: "call-proof".into(),
++            capability_profile: "typed-call-v1".into(),
++        }),
++    );
++    let session = BindingSession::new(Arc::new(selected));
++    let model = analysis.semantic_model_with_context(ids[0], session.clone());
++    assert_eq!(
++        model.type_of_expr(callee.syntax),
++        LuaType::DocFunction(signature)
++    );
++    assert_eq!(model.type_of_expr(call.syntax), LuaType::Unknown);
++    assert!(
++        session.coverage().iter().any(|row| row.site == callee
++            && row.state == "bound"
++            && row.proof == "projection-proof")
++    );
++    assert!(
++        session
++            .coverage()
++            .iter()
++            .any(|row| row.site == call && row.state == "unavailable")
++    );
++    let mut denied = context("denied-projection");
++    denied.decisions.insert(
++        callee,
++        BindingDecision::Unavailable {
++            proof: "denied".into(),
++            reason: "unavailable".into(),
++        },
++    );
++    let denied =
++        analysis.semantic_model_with_context(ids[0], BindingSession::new(Arc::new(denied)));
++    assert_eq!(denied.type_of_expr(callee.syntax), LuaType::Unknown);
++    assert!(matches!(
++        model.type_of_expr(callee.syntax),
++        LuaType::DocFunction(_)
++    ));
 +}

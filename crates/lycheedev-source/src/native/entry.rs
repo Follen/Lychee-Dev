@@ -36,13 +36,14 @@ pub struct EntryExistenceAssumption {
 #[derive(Clone,Debug,Serialize)]
 pub struct ExecutionBoundary { pub kind:NativeBoundaryKind, pub reason:String, pub load_plan:LoadPlan }
 
-fn original_line_at(text:&str,offset:usize)->usize {
-    let bytes=text.as_bytes();let mut line=1;let mut i=0;
-    while i<offset && i<bytes.len(){let ch=bytes[i];i+=1;if ch==b'\r'||ch==b'\n'{
-        if i<bytes.len() && bytes[i]!=ch && (bytes[i]==b'\r'||bytes[i]==b'\n'){i+=1;}line+=1;
-    }}line
-}
 impl PreparedSnapshot {
+    fn original_line_at(&self,file:&str,offset:usize)->lycheedev_core::Result<usize>{
+        self.control.check()?;
+        let file_id=self.files.get(file).ok_or_else(||input_error("source file not admitted"))?;
+        if let Some(lines)=self.original_lines.get(file_id){return Ok(lines.line_at(offset));}
+        original_lines::controlled_line_at(self.inputs.original(file)?,offset,||self.control.check())
+    }
+
     pub fn entry_catalog(&self,control:&OperationControl)->lycheedev_core::Result<&[EntryCandidate]>{
         require_same_control(&self.control,control)?;Ok(&self.entry_catalog)
     }
@@ -60,21 +61,20 @@ impl PreparedSnapshot {
             }else if let Some(stat)=emmylua_parser::LuaLocalFuncStat::cast(node){
                 stat.get_local_name().and_then(|item|item.get_name_token()).filter(|item|item.get_text()==name).and_then(|_|stat.get_closure())
             }else{None};
-            if let Some(closure)=closure{candidates.push(self.entry_candidate(file,closure.get_syntax_id()).map_err(|message|input_error(&message))?);}
+            if let Some(closure)=closure{candidates.push(self.entry_candidate(file,closure.get_syntax_id())?);}
         }
         Ok(match candidates.len(){0=>EntryResolution::Absent,1=>EntryResolution::Unique{candidate:candidates.remove(0)},_=>EntryResolution::SelectorRequired{candidates}})
     }
-    fn entry_candidate(&self,file:&str,syntax:LuaSyntaxId)->Result<EntryCandidate>{
-        let range=syntax.get_range();let mapped=self.inputs.original_range(file,range).map_err(|error|error.to_string())?;let site=Site::at(file,mapped);
-        let original=self.inputs.original(file).map_err(|error|error.to_string())?;
-        let input=self.inputs.file(file)?;
-        Ok(EntryCandidate{id:digest(&(ENTRY_RULES,&input.identity,&site)),start_line:original_line_at(original,site.start as usize),end_line:original_line_at(original,site.end.saturating_sub(1) as usize),closure:site})
+    fn entry_candidate(&self,file:&str,syntax:LuaSyntaxId)->lycheedev_core::Result<EntryCandidate>{
+        let range=syntax.get_range();let mapped=self.inputs.original_range(file,range)?;let site=Site::at(file,mapped);
+        let input=self.inputs.file(file).map_err(|message|input_error(&message))?;
+        Ok(EntryCandidate{id:digest(&(ENTRY_RULES,&input.identity,&site)),start_line:self.original_line_at(file,site.start as usize)?,end_line:self.original_line_at(file,site.end.saturating_sub(1) as usize)?,closure:site})
     }
     /// All closures intersecting this original-source line. Never picks by spelling or first match.
     pub fn entry_candidates(&self,file:&str,line:usize,control:&OperationControl)->lycheedev_core::Result<EntryResolution>{
         require_same_control(&self.control,control)?;
         let original=self.inputs.original(file)?;
-        if line==0 || line>original_line_at(original,original.len()){return Err(input_error("entry line outside original source"));}
+        if line==0 || line>self.original_line_at(file,original.len())?{return Err(input_error("entry line outside original source"));}
         let mut candidates=Vec::new();
         for candidate in &self.entry_catalog{
             control.check()?;self.inputs.charge(1)?;
@@ -117,7 +117,7 @@ impl Builder {
             self.inputs.charge(1).map_err(|error|error.to_string())?;
             let function=&self.graph.functions[instance.function];
             let syntax=*prepared.closures.get(&function.closure.id()).ok_or("entry closure source identity missing")?;
-            let candidate=prepared.entry_candidate(&function.closure.file,syntax)?;
+            let candidate=prepared.entry_candidate(&function.closure.file,syntax).map_err(|error|error.to_string())?;
             if candidate.id==request.candidate && request.load_occurrence.is_none_or(|load|load==instance.load_occurrence)
                 && request.creation_context.as_ref().is_none_or(|context|context==&instance.creation_context){candidates.push(instance.id);}
         }

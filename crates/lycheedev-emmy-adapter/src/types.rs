@@ -19,13 +19,34 @@ pub struct OriginInput<'a> {
 
 /// Borrow the admitted declaration and alias table, not a Source graph or an
 /// engine type. Only the selected callable is materialized for this query.
-/// Nominal declarations remain unsupported by this fixed backend projection;
-/// this boundary does not reinterpret them as primitive signatures.
+/// Named callbacks are resolved on demand from this same authenticated catalog.
+/// Other nominal declarations remain unavailable, never primitive stand-ins.
 pub struct CallableInput<'a> {
     pub origin: OriginInput<'a>,
     pub declaration: &'a Value,
     pub catalog_identity: &'a str,
     pub aliases: &'a BTreeMap<String, String>,
+}
+
+/// The host checks declaration uniqueness before materializing one record.
+/// Missing and ambiguous are distinct; neither permits raw engine inference.
+#[derive(Debug)]
+pub enum DeclarationLookup {
+    Missing,
+    Ambiguous,
+    Unique(Value),
+}
+
+/// Small provenance for each named callback dependency, bound to the admitted
+/// catalog identity. The original declaration and source graph stay with Source.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DeclarationProvenance {
+    pub name: String,
+    pub kind: String,
+    pub catalog_identity: String,
+    pub path: String,
+    pub line: u64,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -60,4 +81,5 @@ pub struct TypeProjection {
     pub known: bool,
     pub rendered: String,
     pub coverage: Vec<CoverageRow>,
+    pub declarations: Vec<DeclarationProvenance>,
 }

@@ -374,3 +374,51 @@ fn shared_emmy_batch_matches_string_entry_and_propagates_interruptions() {
         // Interrupted analyses are intentionally dropped without a query.
     }
 }
+
+
+#[test]
+fn entry_line_lookup_preserves_typed_stop_causes() {
+    // Exercise real prepared inputs; removing the optional cache selects the
+    // same production fallback used for allocation/cap exhaustion.
+    for fallback in [false, true] {
+        for deadline in [false, true] {
+            let c = control();
+            let mut prepared = prepare(inputs(&c, false), &c).unwrap();
+            let syntax = *prepared.closures.values().next().unwrap();
+            let before = prepared.entry_candidate("a.lua", syntax).unwrap();
+            if fallback { prepared.original_lines.clear(); }
+            assert_eq!(prepared.entry_candidate("a.lua", syntax).unwrap(), before);
+            assert!(matches!(prepared.entry_symbol_candidates("a.lua", "F", &c).unwrap(), EntryResolution::Unique { .. }));
+
+            let token = Arc::new(AtomicBool::new(!deadline));
+            let stopped = OperationControl::new(
+                if deadline { Instant::now() - Duration::from_secs(1) }
+                else { Instant::now() + Duration::from_secs(30) },
+                token,
+            );
+            prepared.control = stopped.clone();
+            let expected = stopped.check().unwrap_err();
+            // This private producer is the exact boundary that formerly
+            // stringified line-lookup errors before public input_error mapping.
+            let actual = prepared.entry_candidate("a.lua", syntax).unwrap_err();
+            assert_eq!((actual.code, actual.exit_code), (expected.code.clone(), expected.exit_code));
+            let actual = prepared.entry_symbol_candidates("a.lua", "F", &stopped).unwrap_err();
+            assert_eq!((actual.code, actual.exit_code), (expected.code, expected.exit_code));
+        }
+    }
+
+    // Trigger a real typed cancellation only after fallback has entered its
+    // scan. No sleeps, timing race, stub control, or production test hook.
+    let token = Arc::new(AtomicBool::new(false));
+    let c = OperationControl::new(Instant::now() + Duration::from_secs(30), token.clone());
+    let text = "x\n".repeat(16384);
+    let mut polls = 0;
+    let actual = original_lines::controlled_line_at(&text, text.len(), || {
+        polls += 1;
+        if polls == 2 { token.store(true, Ordering::Release); }
+        c.check()
+    }).unwrap_err();
+    let expected = c.check().unwrap_err();
+    assert_eq!(polls, 2);
+    assert_eq!((actual.code, actual.exit_code), (expected.code, expected.exit_code));
+}

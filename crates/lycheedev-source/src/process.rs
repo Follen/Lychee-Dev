@@ -18,7 +18,9 @@ pub struct Output {
     pub stderr: Vec<u8>,
 }
 mod lifetime;
+mod stderr_observation;
 use lifetime::{ProcessState, Retirement, WorkerSet};
+pub(crate) use stderr_observation::{Snapshot as StderrSnapshot, StderrObservation};
 
 enum Event {
     Output(usize, Vec<u8>, std::io::Result<()>, bool),
@@ -122,6 +124,17 @@ pub fn run_with_operation_control(
     input: Option<Vec<u8>>,
     control: &OperationControl,
 ) -> Result<Output> {
+    run_with_operation_control_observed(cmd, cap, timeout, input, control, None)
+}
+/// Internal diagnostic-only stderr prefix; legacy callers keep None.
+pub(crate) fn run_with_operation_control_observed(
+    cmd: Command,
+    cap: usize,
+    timeout: Duration,
+    input: Option<Vec<u8>>,
+    control: &OperationControl,
+    observation: Option<StderrObservation>,
+) -> Result<Output> {
     let scope = process_scope(control, Instant::now() + timeout)?;
     run_with_limits_inner(
         cmd,
@@ -130,6 +143,7 @@ pub fn run_with_operation_control(
         timeout,
         input,
         ProcessControl::Complete(&scope),
+        observation,
     )
 }
 fn process_scope(control: &OperationControl, deadline: Instant) -> Result<OperationControl> {
@@ -160,6 +174,7 @@ pub(crate) fn run_with_limits(
         timeout,
         input,
         ProcessControl::Legacy(cancel),
+        None,
     )
 }
 fn run_with_limits_inner(
@@ -169,6 +184,7 @@ fn run_with_limits_inner(
     timeout: Duration,
     input: Option<Vec<u8>>,
     control: ProcessControl<'_>,
+    observation: Option<StderrObservation>,
 ) -> Result<Output> {
     let deadline = control.deadline(Instant::now() + timeout);
     #[cfg(windows)]
@@ -223,7 +239,10 @@ fn run_with_limits_inner(
             lifetime::read_output(0, out, stdout_cap)
         })?;
         let err = child.stderr.take().expect("piped child stderr");
-        workers.spawn(2, wake, move || lifetime::read_output(1, err, stderr_cap))?;
+        workers.spawn(2, wake, move || match observation {
+            Some(observation) => lifetime::read_output_observed(err, stderr_cap, observation),
+            None => lifetime::read_output(1, err, stderr_cap),
+        })?;
         loop {
             control.check()?;
             let remaining = deadline.saturating_duration_since(Instant::now());

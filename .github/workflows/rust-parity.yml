@@ -262,9 +262,13 @@ jobs:
         # and reply_assembly_tests; native_research::tests matched zero tests.
         run: |
           node tools/rust-cargo.mjs --owner ci-source-research --one-shot -- test --locked --offline -p lycheedev-source --lib native_research:: -j 1
+      - name: Run native preparation and original line mapping regressions
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-native-preparation --one-shot -- test --locked --offline -p lycheedev-source --lib native:: -j 1
       - name: Run owned Emmy adapter declaration contracts
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: node tools/rust-cargo.mjs --owner ci-emmy-adapter --one-shot -- test --locked --offline -p lycheedev-emmy-adapter --test declaration_contract -j 1
+        run: node tools/rust-cargo.mjs --owner ci-emmy-adapter --one-shot -- test --locked --offline -p lycheedev-emmy-adapter --lib --test declaration_contract --test callback_contract -j 1
       - name: Run source batch admission ownership and budget fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-source-batch --one-shot -- test --locked --offline -p lycheedev-source --lib batch::tests -j 1

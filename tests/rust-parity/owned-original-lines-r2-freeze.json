@@ -1,0 +1,166 @@
+{
+  "schema": "lycheedev.original-lines-review-freeze.v1",
+  "revision": 2,
+  "frozenAt": "2026-10-15T02:30:16.754648+00:00",
+  "repositoryHeadAtFreeze": "7489aa83542323253662aefc7b5217dfea008129",
+  "previousFreeze": {
+    "path": ".tmp/owned-original-lines-freeze-20261015/freeze.json",
+    "sha256": "c9619fee6859a953d07a967b520e8209352c5c36d062edf2809527c6d7bb80ed"
+  },
+  "ownerPaths": [
+    "crates/lycheedev-source/src/native/entry.rs",
+    "crates/lycheedev-source/src/native/context.rs",
+    "crates/lycheedev-source/src/native/research.rs",
+    "crates/lycheedev-source/src/native/original_lines.rs",
+    "crates/lycheedev-source/src/native/sharing_tests.rs"
+  ],
+  "dependencyScope": "Selected read dependencies only; NOT a full transitive source/build closure.",
+  "files": [
+    {
+      "path": "crates/lycheedev-source/src/native/entry.rs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 13452,
+      "sha256": "8af2e4847b3b91927efdfc7932297844f8f0029ca374ed8201f0dd5b9f69ac95",
+      "snapshotPath": ".tmp/owned-original-lines-freeze-r2-20261015/owner/crates/lycheedev-source/src/native/entry.rs"
+    },
+    {
+      "path": "crates/lycheedev-source/src/native/context.rs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 34843,
+      "sha256": "c52551a73f5464e2fce6ae94cd34008c5eedd7dcc3479a231473b52b97642de3",
+      "snapshotPath": ".tmp/owned-original-lines-freeze-r2-20261015/owner/crates/lycheedev-source/src/native/context.rs"
+    },
+    {
+      "path": "crates/lycheedev-source/src/native/research.rs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 38304,
+      "sha256": "2e0dacc9f744c7c89222c6066d43cfb623b13e083ad4116c4a4b640544311fbb",
+      "snapshotPath": ".tmp/owned-original-lines-freeze-r2-20261015/owner/crates/lycheedev-source/src/native/research.rs"
+    },
+    {
+      "path": "crates/lycheedev-source/src/native/original_lines.rs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 9337,
+      "sha256": "b7679ca8f10bfb3502865dfea9e04afac0d28b68a48a41357d0fea87e633b509",
+      "snapshotPath": ".tmp/owned-original-lines-freeze-r2-20261015/owner/crates/lycheedev-source/src/native/original_lines.rs"
+    },
+    {
+      "path": "crates/lycheedev-source/src/native/sharing_tests.rs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 18181,
+      "sha256": "e065a4494ce5528739a4650289abfd01068d6a035dafcb9d682ecfdad7e70099",
+      "snapshotPath": ".tmp/owned-original-lines-freeze-r2-20261015/owner/crates/lycheedev-source/src/native/sharing_tests.rs"
+    },
+    {
+      "path": "AGENTS.md",
+      "role": "selected_dependency",
+      "source": "working_tree",
+      "bytes": 18786,
+      "sha256": "0c51b8e8f9c314579ae66f87d1fafc139e6ea80e43e4fa7cd43d1a496ba34f7b",
+      "snapshotPath": ".tmp/owned-original-lines-freeze-r2-20261015/selected_dependency/AGENTS.md"
+    },
+    {
+      "path": "handover.md",
+      "role": "selected_dependency",
+      "source": "working_tree",
+      "bytes": 151401,
+      "sha256": "380f8c1aa5fa5a235c628326a06c068189059e4a6623c44aaa15c0f8ed6a0af3",
+      "snapshotPath": ".tmp/owned-original-lines-freeze-r2-20261015/selected_dependency/handover.md"
+    },
+    {
+      "path": "Cargo.toml",
+      "role": "selected_dependency",
+      "source": "working_tree",
+      "bytes": 1873,
+      "sha256": "aa9f6aea8ecda7ce1e3876360a31f9ca53cdf6ff23eceb01bae1c90a13fd9b48",
+      "snapshotPath": ".tmp/owned-original-lines-freeze-r2-20261015/selected_dependency/Cargo.toml"
+    },
+    {
+      "path": "Cargo.lock",
+      "role": "selected_dependency",
+      "source": "working_tree",
+      "bytes": 71605,
+      "sha256": "b01de2b2207c4415bdfdfde590f68c549dd66920862feb53fbd3eac72085acbe",
+      "snapshotPath": ".tmp/owned-original-lines-freeze-r2-20261015/selected_dependency/Cargo.lock"
+    },
+    {
+      "path": "crates/lycheedev-source/Cargo.toml",
+      "role": "selected_dependency",
+      "source": "working_tree",
+      "bytes": 2311,
+      "sha256": "acf25af1cfd950f3d368038f9e7039b63ae8b1f6e55dc21a38d77866db3e9664",
+      "snapshotPath": ".tmp/owned-original-lines-freeze-r2-20261015/selected_dependency/crates/lycheedev-source/Cargo.toml"
+    },
+    {
+      "path": "crates/lycheedev-source/src/lib.rs",
+      "role": "selected_dependency",
+      "source": "working_tree",
+      "bytes": 15183,
+      "sha256": "1b67a163cb038283f29732e0710f5f9a00734bebadb7f91d764c91232d62cad3",
+      "snapshotPath": ".tmp/owned-original-lines-freeze-r2-20261015/selected_dependency/crates/lycheedev-source/src/lib.rs"
+    },
+    {
+      "path": "crates/lycheedev-source/src/native/mod.rs",
+      "role": "selected_dependency",
+      "source": "working_tree",
+      "bytes": 1606,
+      "sha256": "48ed48a0a2cdcde2370555029e41444a01040a62b6e028e14bef26a0d8b6e4b9",
+      "snapshotPath": ".tmp/owned-original-lines-freeze-r2-20261015/selected_dependency/crates/lycheedev-source/src/native/mod.rs"
+    },
+    {
+      "path": "crates/lycheedev-source/src/native/inputs.rs",
+      "role": "selected_dependency",
+      "source": "working_tree",
+      "bytes": 18571,
+      "sha256": "347c38ea51e05624b3b867e17ac515256720d693d4c051925e2c83c6dffa1b5d",
+      "snapshotPath": ".tmp/owned-original-lines-freeze-r2-20261015/selected_dependency/crates/lycheedev-source/src/native/inputs.rs"
+    },
+    {
+      "path": "crates/lycheedev-core/src/control.rs",
+      "role": "selected_dependency",
+      "source": "working_tree",
+      "bytes": 20162,
+      "sha256": "d918644d339bb9ee6e9e0b3e4b877e6db41b5dfa403f82b5d792952e80deeec6",
+      "snapshotPath": ".tmp/owned-original-lines-freeze-r2-20261015/selected_dependency/crates/lycheedev-core/src/control.rs"
+    },
+    {
+      "path": "crates/lycheedev-source/src/native_session.rs",
+      "role": "selected_dependency",
+      "source": "working_tree",
+      "bytes": 45565,
+      "sha256": "16fb353af705c659592f94d4aa07e1fd4c369749689d44101919dfacaad4c9c6",
+      "snapshotPath": ".tmp/owned-original-lines-freeze-r2-20261015/selected_dependency/crates/lycheedev-source/src/native_session.rs"
+    },
+    {
+      "path": "crates/lycheedev-source/src/native/lifecycle.rs",
+      "role": "selected_dependency",
+      "source": "working_tree",
+      "bytes": 7194,
+      "sha256": "c2cae3402e47086848aa06317d4317b21dc365e24ef163938dadfa180cab25ca",
+      "snapshotPath": ".tmp/owned-original-lines-freeze-r2-20261015/selected_dependency/crates/lycheedev-source/src/native/lifecycle.rs"
+    },
+    {
+      "path": "crates/lycheedev-core/src/lib.rs",
+      "role": "selected_dependency",
+      "source": "working_tree",
+      "bytes": 4790,
+      "sha256": "beb975bb9f3836cd89e9b69d14404cd47421c2a7d02aca2d779f94b86a157fb1",
+      "snapshotPath": ".tmp/owned-original-lines-freeze-r2-20261015/selected_dependency/crates/lycheedev-core/src/lib.rs"
+    }
+  ],
+  "testMap": {
+    "path": ".tmp/owned-original-lines-freeze-r2-20261015/test-map.json",
+    "sha256": "2cc479010239fde8e23f25d2c1f88b9a39037d335d47da5c71d9bafe516602ea"
+  },
+  "validation": {
+    "gitDiffCheck": "PASS",
+    "rustTests": "NOT_RUN",
+    "nativeIntegration": "NOT_RUN",
+    "realPerformance": "NOT_MEASURED"
+  }
+}

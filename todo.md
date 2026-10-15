@@ -120,3 +120,12 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] Complete real Live timing with external waits separated; no unmeasured performance guarantee.
 - [ ] Review every F/P/B/H row with exact candidate evidence; preserve failed/partial/not_run rather than claiming complete.
 - [ ] Obtain separate authorization for release/npm tag changes/main merge; this documentation task authorizes none of them.
+
+## Source implementation checkpoint (2026-10-15)
+
+- [x] Implement and independently review owned callback projection, original-line index, and parent-budget/phase observation candidate. Preserve full XML/Lua enhancement.
+- [x] Execute 21 exact production pure tests locally, plus 11 runner tests; record exact receipts.
+- [ ] Compile the composed Source candidate and run all adapter/worker-control/native preparation/process integration regressions.
+- [ ] Re-run 4036-document native queries/Skill/session on the fixed candidate; inspect phase timings before further optimization.
+- [ ] Measure cold/warm/semantic/session process-group working set and private bytes; current full-corpus values remain not_measured.
+- [ ] Close legacy OP/session read-only and cancel/abandon compatibility, CSV/EXPLAIN/provider-resource gaps, then complete all four audit stages.

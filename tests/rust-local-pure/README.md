@@ -1,8 +1,9 @@
 # Local pure Rust regression harness
 
 This small Linux development check compiles **unchanged production files and
-their existing tests**: raw JSON byte grammar (4) and mailbox code-byte/string
-and Lua payload boundaries (6). The runner copies the five selected files
+their existing tests**: raw JSON byte grammar (4), mailbox code-byte/string
+and Lua payload boundaries (6), original byte-offset line indexing (4), and
+bounded stderr observation (7). The runner copies the seven selected files
 byte-for-byte into an isolated crate with normal Rust module lookup. It never
 introduces a second implementation or edits the product workspace.
 
@@ -64,3 +65,8 @@ This is not Windows runtime verification, whole-workspace coverage, native
 input or game validation, corresponding-source acceptance, or performance
 comparison with Go. Those checks remain separate. Windows-owned process and
 Emmy/luac support tools are neither imported nor modified by this harness.
+
+Current 21-test execution is recorded in `freeze-source-r4.json`. The original
+`freeze.json` remains historical evidence for its earlier 10-test scope. The
+real Event/read_output integration test stays in the production process test
+module and is selected by Windows CI; it is not stubbed into this harness.

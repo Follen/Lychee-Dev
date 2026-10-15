@@ -12,7 +12,16 @@ export const sourcePaths=Object.freeze([
   'crates/lycheedev-core/src/mailbox.rs',
   'crates/lycheedev-core/src/mailbox/code_bytes.rs',
   'crates/lycheedev-core/src/mailbox/code_bytes_tests.rs',
+  'crates/lycheedev-source/src/native/original_lines.rs',
+  'crates/lycheedev-source/src/process/stderr_observation.rs',
 ]);
+// Fixed reviewed production-to-harness mapping; arbitrary paths are never accepted.
+export function harnessSourcePath(name) {
+  if (!sourcePaths.includes(name)) throw new Error('local.unknown_source');
+  if (name === 'crates/lycheedev-source/src/process/stderr_observation.rs') return 'stderr_observation.rs';
+  return name === 'crates/lycheedev-source/src/native/original_lines.rs'
+    ? 'original_lines.rs' : name.slice('crates/lycheedev-core/src/'.length);
+}
 export const harnessPaths=Object.freeze(['tests/rust-local-pure/Cargo.toml','tests/rust-local-pure/src/lib.rs','tests/rust-local-pure/check_cache.py']);
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 function hashFile(path) {const stat=lstatSync(path);if(!stat.isFile()||stat.isSymbolicLink()||stat.size>64<<20)throw new Error('local.source_budget');return sha256(readFileSync(path));}
@@ -57,7 +66,7 @@ function copyInputs(repository,destination,hashes) {
     if(hashFile(target)!==hash)throw new Error('local.source_changed_during_snapshot');
   }
   for(const name of sourcePaths) {
-    const target=join(destination,'tests/rust-local-pure/src',name.slice('crates/lycheedev-core/src/'.length));
+    const target=join(destination,'tests/rust-local-pure/src',harnessSourcePath(name));
     mkdirSync(dirname(target),{recursive:true});copyFileSync(join(repository,name),target);
     if(hashFile(target)!==hashes[name])throw new Error('local.source_changed_during_snapshot');
   }
@@ -67,7 +76,7 @@ function checkStage(stage,hashes,initializeLock) {
     if(initializeLock&&name==='tests/rust-local-pure/Cargo.lock')continue;
     if(hashFile(join(stage,name))!==hash)throw new Error('local.staged_source_changed');
   }
-  for(const name of sourcePaths)if(hashFile(join(stage,'tests/rust-local-pure/src',name.slice('crates/lycheedev-core/src/'.length)))!==hashes[name])throw new Error('local.compiled_source_changed');
+  for(const name of sourcePaths)if(hashFile(join(stage,'tests/rust-local-pure/src',harnessSourcePath(name)))!==hashes[name])throw new Error('local.compiled_source_changed');
 }
 export function verifyTestResults(stdout,expected) {
   if(!expected.length||new Set(expected).size!==expected.length)throw new Error('local.invalid_test_expectations');

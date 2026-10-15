@@ -134,6 +134,21 @@ pub(super) fn read_output(index: usize, mut pipe: impl Read, cap: usize) -> Even
     let overflow = bytes.len() > cap;
     Event::Output(index, bytes, result, overflow)
 }
+/// Reuse the exact reader cap/Event contract; only stderr can enter here.
+pub(super) fn read_output_observed(
+    pipe: impl Read,
+    cap: usize,
+    observation: super::StderrObservation,
+) -> Event {
+    read_output(
+        1,
+        super::stderr_observation::ObservedReader {
+            reader: pipe,
+            observation,
+        },
+        cap,
+    )
+}
 pub(super) fn wait_for_progress(rx: &mpsc::Receiver<()>, timeout: Duration) {
     if matches!(
         rx.recv_timeout(timeout),

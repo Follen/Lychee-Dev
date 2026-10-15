@@ -198,7 +198,7 @@ impl VerifiedApiDefinitions {
     /// Query the authenticated environment declaration in a separate Emmy model.
     /// This is declaration semantics, never a claim about mutable source globals.
     pub(crate) fn semantic_type(&self,target:&AuthenticatedSite,bindings:&[crate::native::HostBinding],control:&lycheedev_core::control::OperationControl,mut step:impl FnMut()->Result<()>)->Result<Value> {
-        use lycheedev_emmy_adapter::{ByteRange,CallableInput,OriginInput};
+        use lycheedev_emmy_adapter::{ByteRange,CallableInput,DeclarationLookup,OriginInput};
         control.check()?;
         if target.file_sha256!=self.manifest.definitions_sha256||target.material["manifest"]!=serde_json::to_value(&self.manifest)? {return Err(invalid_environment("API Type target belongs to another environment"));}
         let mapping:environment::Mapping=serde_json::from_value(target.material["mapping"].clone())?;
@@ -218,15 +218,24 @@ impl VerifiedApiDefinitions {
         if binding.descriptor().is_none_or(|record|record["path"]!=mapping.source_path||record["line"]!=mapping.source_line){return Err(invalid_environment("API Type host origin differs from unique mapping"));}
         let identity=digest(&(target,binding.identity(),"authenticated-api-type-v1"));
         let query_control=control.clone();
-        let projection=self.engine.type_at(ByteRange{start:target.site.start,end:target.site.end},&identity,
+        let projection=self.engine.type_at_with_declarations(ByteRange{start:target.site.start,end:target.site.end},&identity,
             CallableInput{origin:OriginInput{material:&descriptor.origin.material,material_sha256:&descriptor.origin.material_sha256,pointer:&descriptor.origin.pointer,identity:&descriptor.origin.identity},
                 declaration:binding.descriptor().expect("authenticated descriptor"),catalog_identity:&descriptor.types.identity,aliases:&descriptor.types.aliases},
-            Arc::new(move||query_control.check()),|error|error.code.clone(),&mut step)
+            Arc::new(move||query_control.check()),|error|error.code.clone(),&mut step,|name| {
+                control.check()?;
+                let selected=match descriptor.types.declarations.get(name).map(Vec::as_slice) {
+                    None|Some([])=>DeclarationLookup::Missing,
+                    Some([record])=>DeclarationLookup::Unique(serde_json::to_value(record)?),
+                    Some(_)=>DeclarationLookup::Ambiguous,
+                };
+                control.check()?;
+                Ok(selected)
+            })
             .map_err(|error|declaration_error(error,&self.manifest.definitions_sha256))?;
         control.check()?;
         let Some(projection)=projection else{return Ok(serde_json::json!({"kind":"type","state":"unavailable","executed":false,"reason":"authenticated_api_syntax_target_unavailable"}));};
         Ok(serde_json::json!({"kind":"type","state":if projection.known{"known"}else{"unavailable"},"executed":true,
-            "result":{"type":projection.rendered,"coverage":projection.coverage,"binding":binding,"queryIdentity":identity,"target":target,"bindingSelection":"authenticated_environment_declaration","sourceExecution":false}}))
+            "result":{"type":projection.rendered,"coverage":projection.coverage,"declarations":projection.declarations,"binding":binding,"queryIdentity":identity,"target":target,"bindingSelection":"authenticated_environment_declaration","sourceExecution":false}}))
     }
     pub(crate) fn target(&self,symbol:&index::Symbol)->Result<Option<AuthenticatedSite>> {
         if symbol.category!="api-function" {return Ok(None);}

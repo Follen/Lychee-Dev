@@ -1,0 +1,50 @@
+{
+  "schema": "lycheedev.original-lines-test-map.v1",
+  "module": "crates/lycheedev-source/src/native/original_lines.rs",
+  "execution": "NOT_RUN",
+  "nativeIntegration": "NOT_RUN",
+  "performance": "NOT_MEASURED",
+  "tests": [
+    {
+      "name": "all_original_offsets_match_scanner",
+      "scope": "Verbatim prior scanner vs index and controlled fallback at every byte offset for small ASCII/BOM/UTF8/mixed newline fixtures; exhaustive ternary byte strings length 0..7; EOF/out-of-range."
+    },
+    {
+      "name": "pairs_across_control_chunks_and_cancellation",
+      "scope": "CRLF/LFCR/CRCR/LFLF across 16 KiB scan chunks; boundary coordinates and cancellation at each count/fill pass poll."
+    },
+    {
+      "name": "aggregate_cap_fallback_and_typed_cancellation",
+      "scope": "Exact cap thresholds; cumulative actual Vec capacity <= cap; zero cap fallback; typed cancellation; fallback repeated-prefix work remains counted."
+    },
+    {
+      "name": "deterministic_work_avoids_repeated_prefix_scans",
+      "scope": "Two complete build byte passes plus counted binary-search comparisons vs repeated old prefix traversal; deterministic operation-count evidence only."
+    },
+    {
+      "name": "native::sharing_tests::entry_line_lookup_preserves_typed_stop_causes",
+      "scope": "Actual prepare fixture; entry_candidate called while admission inputs remain active and snapshot control is cancelled/expired, forcing error from line lookup after valid source-range mapping. Both indexed-cache and cleared-cache mode retain exact ToolkitError code and exit. Public symbol entry separately preserves the same cause. Also cancel deterministically at second controlled fallback scan poll using actual OperationControl.",
+      "execution": "NOT_RUN",
+      "limitation": "Public-entry check uses already-stopped control; internal mapping regression is separately caught by typed entry_candidate result. No claim of a mid-query public-thread race test."
+    }
+  ],
+  "resourcePolicy": {
+    "optionalCachePayloadCeilingBytes": 67108864,
+    "meaning": "Conservative internal ceiling for an optional line-offset cache, not a new business admission limit, RSS measurement, or measured necessary allocation. Existing source input/file admission and operation control still apply. Worker process memory enforcement is unchanged; this cache ceiling is not claimed derived from a worker RSS allotment. Actual offset Vec capacity is accumulated with checked subtraction; map metadata remains bounded by admitted file count. Cap or allocation failure falls back to cancellation-polled prefix scanning and does not reject admitted input. Fallback costs must be included in any later performance measurement."
+  },
+  "preservedContracts": [
+    "1-based line; original byte offsets; newline first byte; CRLF/LFCR collapse; CRCR/LFLF separate; BOM/UTF8 plain bytes; offset clamped to original length",
+    "Entry digest payload and site identity unchanged; end coordinate remains site.end.saturating_sub(1)",
+    "Generic control error in pure helper; production query preserves ToolkitError; no graph clone or public schema changes"
+  ],
+  "knownEvidenceLimits": [
+    "No deterministic allocation-failure injection: try_reserve_exact error branch source-reviewed only.",
+    "Selected dependency copies are review context, not a full build/dependency closure.",
+    "No Cargo, Rust binary, Go, game or real performance run by this worker."
+  ],
+  "revision": 2,
+  "repair": {
+    "finding": "P2: entry_candidate stringified line lookup control errors and public symbol query wrapped them as invalid input exit 4.",
+    "resolution": "entry_candidate now returns core Result and directly propagates original_range and original_line_at errors. Public symbol query uses ?. Only existing internal String-producing prepare_inner and native_explicit_entry explicitly stringify at their pre-existing boundary."
+  }
+}

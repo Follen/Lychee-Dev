@@ -1,0 +1,206 @@
+{
+  "schema": "lycheedev.source-native-control-r4-test-map.v1",
+  "freeze": "tests/rust-parity/source-native-control-r4-freeze.json",
+  "freezeSHA256": "5a23083bb4de75ea92a667d169af3f2b3d250c86ceb2cc4fab10dfc956794b48",
+  "unitTests": [
+    {
+      "path": "crates/lycheedev-source/src/native_research/worker_control.rs",
+      "status": "NOT_RUN",
+      "cases": [
+        "transport_time_is_debited_and_expiry_is_not_reset",
+        "malformed_or_expanded_control_is_rejected",
+        "only_fixed_metadata_can_be_replayed",
+        "private_control_accepts_unknown_fields_without_changing_request_schema",
+        "deadline_mapping_requires_exact_marker_and_reserved_exit",
+        "maximum_metadata_remains_inside_the_fixed_byte_cap",
+        "replay_accepts_only_canonical_whitelisted_metadata",
+        "replay_drops_partial_tail_and_obeys_record_bound"
+      ]
+    },
+    {
+      "path": "crates/lycheedev-source/src/process/stderr_observation.rs",
+      "status": "NOT_RUN",
+      "cases": [
+        "arbitrary_chunks_preserve_exact_prefix",
+        "fixed_capacity_stops_without_joining_later_bytes",
+        "contention_stops_capture_permanently_and_snapshot_never_waits",
+        "clone_owned_by_reader_outlives_parent",
+        "observing_preserves_original_read_cap_and_output",
+        "read_failure_remains_original_failure",
+        "poisoned_capture_is_unavailable_without_replacing_read_error"
+      ]
+    }
+  ],
+  "relocatedIntegrationTest": {
+    "path": "crates/lycheedev-source/src/process/tests/lifetime_tests.rs",
+    "module": "process::tests::lifetime_tests",
+    "case": "original_and_observed_events_match_at_overflow_boundary",
+    "status": "NOT_RUN",
+    "note": "Moved exact fixture/assertions out of std-only observer module; true Event/read_output integration retained, no stubs or cfg skips."
+  },
+  "staticChecks": [
+    {
+      "name": "rustfmt-parse",
+      "path": "crates/lycheedev-source/src/native_research.rs",
+      "argv": [
+        "/workspace/shared/rust-dev/rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustfmt",
+        "--edition",
+        "2024",
+        "--config",
+        "skip_children=true",
+        "--emit",
+        "stdout",
+        "crates/lycheedev-source/src/native_research.rs"
+      ],
+      "status": "passed",
+      "exitCode": 0,
+      "stdoutSHA256": "93d3e01ad1b5f29b46c03f61e7924b36b3c6db79f65b135b04f3a0782b4a83dd",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "rustfmt-parse",
+      "path": "crates/lycheedev-source/src/native_research/worker_control.rs",
+      "argv": [
+        "/workspace/shared/rust-dev/rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustfmt",
+        "--edition",
+        "2024",
+        "--config",
+        "skip_children=true",
+        "--emit",
+        "stdout",
+        "crates/lycheedev-source/src/native_research/worker_control.rs"
+      ],
+      "status": "passed",
+      "exitCode": 0,
+      "stdoutSHA256": "840417bd841fadc5e39003d23fe46274f5789be3dada8418be055cc850ec2f3e",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "rustfmt-parse",
+      "path": "crates/lycheedev-source/src/process.rs",
+      "argv": [
+        "/workspace/shared/rust-dev/rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustfmt",
+        "--edition",
+        "2024",
+        "--config",
+        "skip_children=true",
+        "--emit",
+        "stdout",
+        "crates/lycheedev-source/src/process.rs"
+      ],
+      "status": "passed",
+      "exitCode": 0,
+      "stdoutSHA256": "b99d9360123a949253aded22f683d5ead37b2f458df9080708b46e595e95edee",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "rustfmt-parse",
+      "path": "crates/lycheedev-source/src/process/lifetime.rs",
+      "argv": [
+        "/workspace/shared/rust-dev/rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustfmt",
+        "--edition",
+        "2024",
+        "--config",
+        "skip_children=true",
+        "--emit",
+        "stdout",
+        "crates/lycheedev-source/src/process/lifetime.rs"
+      ],
+      "status": "passed",
+      "exitCode": 0,
+      "stdoutSHA256": "55f277a228beb93045729373bcf07e083cdedb3c7a29bbeb9ce0296001f9e954",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "rustfmt-parse",
+      "path": "crates/lycheedev-source/src/process/stderr_observation.rs",
+      "argv": [
+        "/workspace/shared/rust-dev/rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustfmt",
+        "--edition",
+        "2024",
+        "--config",
+        "skip_children=true",
+        "--emit",
+        "stdout",
+        "crates/lycheedev-source/src/process/stderr_observation.rs"
+      ],
+      "status": "passed",
+      "exitCode": 0,
+      "stdoutSHA256": "9e29ef564528810cc6d3766bf7273a3d95baf24382e02ea6055c8d299c65d457",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "rustfmt-parse",
+      "path": "crates/lycheedev-source/src/process/tests/lifetime_tests.rs",
+      "argv": [
+        "/workspace/shared/rust-dev/rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustfmt",
+        "--edition",
+        "2024",
+        "--config",
+        "skip_children=true",
+        "--emit",
+        "stdout",
+        "crates/lycheedev-source/src/process/tests/lifetime_tests.rs"
+      ],
+      "status": "passed",
+      "exitCode": 0,
+      "stdoutSHA256": "9ead9086e9b270d71e247d10cac00d8b1c3996dc2c153e0b7e94bf5ff9bc50f2",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "diff-check",
+      "argv": [
+        "git",
+        "diff",
+        "--check",
+        "--",
+        "crates/lycheedev-source/src/native_research.rs",
+        "crates/lycheedev-source/src/native_research/worker_control.rs",
+        "crates/lycheedev-source/src/process.rs",
+        "crates/lycheedev-source/src/process/lifetime.rs",
+        "crates/lycheedev-source/src/process/stderr_observation.rs",
+        "crates/lycheedev-source/src/process/tests/lifetime_tests.rs"
+      ],
+      "exitCode": 0,
+      "status": "passed",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "requiredExecution": [
+    {
+      "case": "Compile exact frozen Source/process dependency tree",
+      "status": "NOT_RUN"
+    },
+    {
+      "case": "Run16new unit tests plus existing process lifetime/reader tests",
+      "status": "NOT_RUN"
+    },
+    {
+      "case": "Windows one-shot success/harddeadline+marker preserve stdout/error payload",
+      "status": "NOT_RUN"
+    },
+    {
+      "case": "Timeout/error stderr prefix remains bounded without waiting for reader retirement",
+      "status": "NOT_RUN"
+    },
+    {
+      "case": "Contention/poison/cap prefix-stop cannot concatenate omitted chunks",
+      "status": "NOT_RUN"
+    },
+    {
+      "case": "Actual fullRetail4036 cold/warm refs/context phase evidence",
+      "status": "NOT_RUN"
+    },
+    {
+      "case": "Session90s/batch90s regression unchanged",
+      "status": "NOT_RUN"
+    }
+  ],
+  "callers": {
+    "ordinary": "relations.rs -> one_shot -> run_with_operation_control_observed(Some only profile) -> CLI worker_stdio private v3",
+    "legacy": "run_controlled/run_with_limits and run_with_operation_control pass None",
+    "session": "native_session IPC v1/90s unchanged",
+    "batch": "native batch worker schema/90s unchanged"
+  }
+}

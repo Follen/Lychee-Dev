@@ -1,0 +1,321 @@
+{
+  "schema": "lycheedev.owned-emmy-callback-review-freeze.v1",
+  "frozenAt": "2026-10-15T02:25:16.683499+00:00",
+  "implementationBaseline": "7489aa8",
+  "repositoryHeadAtFreeze": "7489aa83542323253662aefc7b5217dfea008129",
+  "engineRecipeBaseline": "a3c10d1be8d11809a5e75bdc078acb943a839eea",
+  "completeBuildClosure": false,
+  "closureCaveat": "Review freeze only. Concurrent native_research.rs/worker-control and unrelated writers omitted; integration needs new complete manifest.",
+  "ownerPaths": [
+    "crates/lycheedev-source/src/native_research/plan.rs",
+    "crates/lycheedev-emmy-adapter/src/lib.rs",
+    "crates/lycheedev-emmy-adapter/src/types.rs",
+    "crates/lycheedev-emmy-adapter/src/declaration.rs",
+    "crates/lycheedev-emmy-adapter/src/projection.rs",
+    "crates/lycheedev-emmy-adapter/src/projection/tests.rs",
+    "crates/lycheedev-emmy-adapter/tests/callback_contract.rs",
+    "third_party/emmy/identity.json",
+    "third_party/emmy/files.json",
+    "third_party/emmy/patches/0001-binding-context.patch"
+  ],
+  "files": [
+    {
+      "path": "crates/lycheedev-source/src/native_research/plan.rs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 27460,
+      "sha256": "63f7e14735ec22685f70cd97691649a4e8009a08b0ac8eb1bb61a8bceba1bf05",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/owner/crates/lycheedev-source/src/native_research/plan.rs"
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/src/lib.rs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 655,
+      "sha256": "532ba74eec9d47d58d57c492023f26c07569be14708cd8dac2a9f095fb5f01fc",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/owner/crates/lycheedev-emmy-adapter/src/lib.rs"
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/src/types.rs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 2268,
+      "sha256": "acadb9c19fa51c98cc7b10c5c9404e2e4aedbcea685e66709a931ce02348ec54",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/owner/crates/lycheedev-emmy-adapter/src/types.rs"
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/src/declaration.rs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 8983,
+      "sha256": "dbf17a85336c41cfd4406de0663a8ac73cfc9daca7b6c6200c60a5c05e764549",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/owner/crates/lycheedev-emmy-adapter/src/declaration.rs"
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/src/projection.rs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 12058,
+      "sha256": "3624ef404b83d30b2a6d06026240a37f29664a5c6a115889c5a7600af8093122",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/owner/crates/lycheedev-emmy-adapter/src/projection.rs"
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/src/projection/tests.rs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 11879,
+      "sha256": "df67404464ebec84c72f4f5cc4c3ed2932634cf473a799fe10c7c756fa977b3b",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/owner/crates/lycheedev-emmy-adapter/src/projection/tests.rs"
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/tests/callback_contract.rs",
+      "role": "owner",
+      "source": "working_tree",
+      "bytes": 3735,
+      "sha256": "5d80a204babd80f0b7f3d81d02504d1acaf3b36730ae54391b6363a44d0f6b3d",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/owner/crates/lycheedev-emmy-adapter/tests/callback_contract.rs"
+    },
+    {
+      "path": "third_party/emmy/identity.json",
+      "role": "owner",
+      "source": "independent_recipe_stage",
+      "bytes": 1203,
+      "sha256": "08a7604f1887fbf9b6eab9b9b148676c548ff55aecd1882145b14e9b4459ed77",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/owner/third_party/emmy/identity.json"
+    },
+    {
+      "path": "third_party/emmy/files.json",
+      "role": "owner",
+      "source": "independent_recipe_stage",
+      "bytes": 153179,
+      "sha256": "cb48c33852479a149e6beb1860a539943ab3e9800b8a992b7ebdb1bdc14c6950",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/owner/third_party/emmy/files.json"
+    },
+    {
+      "path": "third_party/emmy/patches/0001-binding-context.patch",
+      "role": "owner",
+      "source": "independent_recipe_stage",
+      "bytes": 201483,
+      "sha256": "eff914ec33bd8bf3bb67096bd2136994c71f90b710b5e0032876bc25b8771c86",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/owner/third_party/emmy/patches/0001-binding-context.patch"
+    },
+    {
+      "path": "Cargo.toml",
+      "role": "dependency",
+      "source": "working_tree_snapshot_not_complete_closure",
+      "bytes": 1873,
+      "sha256": "aa9f6aea8ecda7ce1e3876360a31f9ca53cdf6ff23eceb01bae1c90a13fd9b48",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/dependency/Cargo.toml"
+    },
+    {
+      "path": "Cargo.lock",
+      "role": "dependency",
+      "source": "working_tree_snapshot_not_complete_closure",
+      "bytes": 71605,
+      "sha256": "b01de2b2207c4415bdfdfde590f68c549dd66920862feb53fbd3eac72085acbe",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/dependency/Cargo.lock"
+    },
+    {
+      "path": "crates/lycheedev-source/Cargo.toml",
+      "role": "dependency",
+      "source": "working_tree_snapshot_not_complete_closure",
+      "bytes": 2311,
+      "sha256": "acf25af1cfd950f3d368038f9e7039b63ae8b1f6e55dc21a38d77866db3e9664",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/dependency/crates/lycheedev-source/Cargo.toml"
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/Cargo.toml",
+      "role": "dependency",
+      "source": "working_tree_snapshot_not_complete_closure",
+      "bytes": 533,
+      "sha256": "fd5505aa675ba059c3889013b36be553dc0640edee0d32c980f688171d0597da",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/dependency/crates/lycheedev-emmy-adapter/Cargo.toml"
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/tests/declaration_contract.rs",
+      "role": "dependency",
+      "source": "working_tree_snapshot_not_complete_closure",
+      "bytes": 9800,
+      "sha256": "2aabd2ee86f3d9c554c2ddd356203883888ae71e0708d38b9fb1e6023eddc1a4",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/dependency/crates/lycheedev-emmy-adapter/tests/declaration_contract.rs"
+    },
+    {
+      "path": "crates/lycheedev-source/src/native_research/plan_api_tests.rs",
+      "role": "dependency",
+      "source": "working_tree_snapshot_not_complete_closure",
+      "bytes": 11047,
+      "sha256": "246eb504e6e73e4367879f9bfe44f08c87437bc74c0f2d670ff1109fa195a9b6",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/dependency/crates/lycheedev-source/src/native_research/plan_api_tests.rs"
+    },
+    {
+      "path": "crates/lycheedev-source/src/native/host.rs",
+      "role": "dependency",
+      "source": "working_tree_snapshot_not_complete_closure",
+      "bytes": 30639,
+      "sha256": "6372a221e695ef3c87fd934761fe6c3251d61cfabf3518a1ae7671a134366756",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/dependency/crates/lycheedev-source/src/native/host.rs"
+    },
+    {
+      "path": "crates/lycheedev-source/src/environment.rs",
+      "role": "dependency",
+      "source": "working_tree_snapshot_not_complete_closure",
+      "bytes": 10451,
+      "sha256": "3b18a3dfd5538feb42381381f3bbbb426333f4f84fae62fe698e5904a4b76635",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/dependency/crates/lycheedev-source/src/environment.rs"
+    },
+    {
+      "path": "crates/lycheedev-source/src/environment/emit.rs",
+      "role": "dependency",
+      "source": "working_tree_snapshot_not_complete_closure",
+      "bytes": 11798,
+      "sha256": "da02454bfb756ed6c94aa1316597cb646899b81dac491e9ae60be90dbab486e5",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/dependency/crates/lycheedev-source/src/environment/emit.rs"
+    },
+    {
+      "path": "crates/lycheedev-source/src/environment/parse.rs",
+      "role": "dependency",
+      "source": "working_tree_snapshot_not_complete_closure",
+      "bytes": 18381,
+      "sha256": "c8defcdba7a83953fa0bd23cc277056f05c54e7ade75992df9b7f77bd728b8c5",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/dependency/crates/lycheedev-source/src/environment/parse.rs"
+    },
+    {
+      "path": "tests/rust-source-data/retail-api-return-labels.json",
+      "role": "dependency",
+      "source": "working_tree_snapshot_not_complete_closure",
+      "bytes": 5227,
+      "sha256": "780509fc0a8f4109cf5ca477331db1d859f001de19e59efc7737bfe42411a4e4",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/dependency/tests/rust-source-data/retail-api-return-labels.json"
+    },
+    {
+      "path": "third_party/emmy/prepare.py",
+      "role": "dependency",
+      "source": "git:a3c10d1be8d11809a5e75bdc078acb943a839eea",
+      "bytes": 31408,
+      "sha256": "4df0e346832e8005974967dc2d6c451a8e1daf45316ece4e125b3460046872a0",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/dependency/third_party/emmy/prepare.py"
+    },
+    {
+      "path": "third_party/emmy/scratch.mjs",
+      "role": "dependency",
+      "source": "git:a3c10d1be8d11809a5e75bdc078acb943a839eea",
+      "bytes": 3681,
+      "sha256": "82f2a607bc8b7d8f33918ff54fcd84797cec417a09ebc1eabcdce746bb297ba3",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/dependency/third_party/emmy/scratch.mjs"
+    },
+    {
+      "path": "tools/rust-disk.mjs",
+      "role": "dependency",
+      "source": "git:a3c10d1be8d11809a5e75bdc078acb943a839eea",
+      "bytes": 11567,
+      "sha256": "54122b03b7b474f1f2119a31caa85d2217aeb5ea97e65f28a7e0161bebc203e5",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/dependency/tools/rust-disk.mjs"
+    },
+    {
+      "path": "release/rust-disk-policy.json",
+      "role": "dependency",
+      "source": "git:a3c10d1be8d11809a5e75bdc078acb943a839eea",
+      "bytes": 160,
+      "sha256": "672e33453bcb1333e6e7ab0cbe267249ae93e0d53ff0800d560f723543290b6d",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/dependency/release/rust-disk-policy.json"
+    },
+    {
+      "path": "REVIEW.md",
+      "role": "evidence",
+      "source": "candidate_validation",
+      "bytes": 6229,
+      "sha256": "0ad0dd96edac0564e29412c3678a27b9201c00c041491b88a9f37c93f88c0960",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/evidence/REVIEW.md"
+    },
+    {
+      "path": "baseline.json",
+      "role": "evidence",
+      "source": "candidate_validation",
+      "bytes": 226,
+      "sha256": "c859268d18c511ce61397fa6890e61ae5baaca6c9ac0e4594b46cd9fa741fe7b",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/evidence/baseline.json"
+    },
+    {
+      "path": "recipe-validation.json",
+      "role": "evidence",
+      "source": "candidate_validation",
+      "bytes": 681,
+      "sha256": "78ac1b17f8d60da20685e23980fdcc73f872585a144063740b4854b160516475",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/evidence/recipe-validation.json"
+    },
+    {
+      "path": "engine-delta.patch",
+      "role": "evidence",
+      "source": "candidate_validation",
+      "bytes": 4202,
+      "sha256": "533009addb429fff0d3f4a15873bf62f6e78c10a7a06f15c0b069b3f15782070",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/evidence/engine-delta.patch"
+    },
+    {
+      "path": "node-tests.log",
+      "role": "evidence",
+      "source": "candidate_validation",
+      "bytes": 2493,
+      "sha256": "e8340d246e132e2d0373709d0e16e51e1f8be48f85589cc22680eee06a9eddcb",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/evidence/node-tests.log"
+    },
+    {
+      "path": "static-validation.log",
+      "role": "evidence",
+      "source": "candidate_validation",
+      "bytes": 427,
+      "sha256": "1faf975b2ba1b651c60f471af1c4ca4451c1e5476cc5f0f2fbdd3beb9dfe1554",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/evidence/static-validation.log"
+    },
+    {
+      "path": "unsafe-inventory.json",
+      "role": "evidence",
+      "source": "candidate_validation",
+      "bytes": 26097,
+      "sha256": "316184dc423c3ac668702e2992f744afe39e7e16f8dd4176a8eeda8ca844dc95",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/evidence/unsafe-inventory.json"
+    },
+    {
+      "path": "third_party/emmy/identity.json",
+      "role": "baseline",
+      "source": "git:a3c10d1be8d11809a5e75bdc078acb943a839eea",
+      "bytes": 1203,
+      "sha256": "cea14d6a02d6b9a7a44dcb3ae1d295a0647adba1b3c4e4a1f45e1e8faf03042d",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/baseline/third_party/emmy/identity.json"
+    },
+    {
+      "path": "third_party/emmy/files.json",
+      "role": "baseline",
+      "source": "git:a3c10d1be8d11809a5e75bdc078acb943a839eea",
+      "bytes": 153179,
+      "sha256": "55db1cd7a5b1c6b7c090959aa48aeea7dcfe3c83691df2127e3b8908b26f2ad6",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/baseline/third_party/emmy/files.json"
+    },
+    {
+      "path": "third_party/emmy/patches/0001-binding-context.patch",
+      "role": "baseline",
+      "source": "git:a3c10d1be8d11809a5e75bdc078acb943a839eea",
+      "bytes": 198296,
+      "sha256": "f174b3c70bd236a619906c7eb3598ef950db7009424dd1b144a9e22d91012a5f",
+      "snapshotPath": ".tmp/owned-emmy-callback-freeze-20261015/baseline/third_party/emmy/patches/0001-binding-context.patch"
+    }
+  ],
+  "validation": {
+    "adapterRustTests": {
+      "count": 24,
+      "state": "not_run"
+    },
+    "emmyRegressionTests": {
+      "count": 36,
+      "unchangedPrior": 35,
+      "state": "not_run"
+    },
+    "sourceApiTypeAndFullRetail": "not_run",
+    "nodeFocused": {
+      "passed": 25,
+      "failed": 0
+    },
+    "recipeReplay": "pass",
+    "staticSyntaxAndBoundary": "pass"
+  }
+}

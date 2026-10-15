@@ -473,3 +473,18 @@ fn cancellation_drains_a_post_attachment_descendant_holding_output_pipes() {
     std::fs::rename(&ready, root.join("released")).unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
+
+// Integration coverage stays with the real process Event and reader functions.
+#[test]
+fn original_and_observed_events_match_at_overflow_boundary() {
+    let observation = StderrObservation::new();
+    let original = read_output(1, io::Cursor::new(b"abcdef"), 3);
+    let observed = read_output_observed(io::Cursor::new(b"abcdef"), 3, observation.clone());
+    match (original, observed) {
+        (Event::Output(ai, ab, ar, ao), Event::Output(bi, bb, br, bo)) => {
+            assert_eq!((ai, &ab, ar.is_ok(), ao), (bi, &bb, br.is_ok(), bo));
+            assert_eq!(observation.snapshot().bytes, ab);
+        }
+        _ => panic!("unexpected reader event"),
+    }
+}

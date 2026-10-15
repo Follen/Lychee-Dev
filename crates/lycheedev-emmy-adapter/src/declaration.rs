@@ -1,18 +1,15 @@
 use crate::{
-    ByteRange, CallableInput, CoverageRow, DeclarationFailure, ParseIssue, ParseIssues,
-    TypeProjection,
+    ByteRange, CallableInput, CoverageRow, DeclarationFailure, DeclarationLookup, ParseIssue,
+    ParseIssues, TypeProjection,
 };
 use emmylua_code_analysis::{
-    EmmyLuaAnalysis, Emmyrc, EmmyrcLuaVersion, FileId, LuaType,
+    EmmyLuaAnalysis, Emmyrc, EmmyrcLuaVersion, FileId, LuaFunctionType, LuaType,
     binding_context::{
-        BindingContext, BindingDecision, BindingSession, BindingSite, BoundValue,
-        EnvironmentCallable, EnvironmentOrigin, EnvironmentRecord, EnvironmentTypeCatalog,
-        SelectedValue,
+        BindingContext, BindingDecision, BindingSession, BindingSite, BoundValue, SelectedValue,
     },
     humanize_semantic_type_detailed,
 };
 use emmylua_parser::{LuaAstNode, LuaExpr};
-use serde::Deserialize;
 use std::{path::PathBuf, sync::Arc};
 
 /// One private engine model for an already-authenticated generated definition
@@ -91,7 +88,32 @@ impl DeclarationModel {
         callable: CallableInput<'_>,
         check: Arc<dyn Fn() -> Result<(), E> + Send + Sync>,
         error_code: fn(&E) -> String,
+        step: impl FnMut() -> Result<(), E>,
+    ) -> Result<Option<TypeProjection>, DeclarationFailure<E>> {
+        self.type_at_with_declarations(
+            target,
+            query_identity,
+            callable,
+            check,
+            error_code,
+            step,
+            |_| Ok(DeclarationLookup::Missing),
+        )
+    }
+
+    /// The resolver must select from the same admitted catalog as `callable`.
+    /// It is invoked at most once per name in this query, never retained or used
+    /// across sessions. Projection work consumes the original check/step budget.
+    #[allow(clippy::too_many_arguments)]
+    pub fn type_at_with_declarations<E: 'static>(
+        &self,
+        target: ByteRange,
+        query_identity: &str,
+        callable: CallableInput<'_>,
+        check: Arc<dyn Fn() -> Result<(), E> + Send + Sync>,
+        error_code: fn(&E) -> String,
         mut step: impl FnMut() -> Result<(), E>,
+        mut resolve: impl FnMut(&str) -> Result<DeclarationLookup, E>,
     ) -> Result<Option<TypeProjection>, DeclarationFailure<E>> {
         check().map_err(DeclarationFailure::Interrupted)?;
         if target.start >= target.end
@@ -133,31 +155,12 @@ impl DeclarationModel {
             file_id: self.file_id,
             syntax,
         };
-        let declaration =
-            EnvironmentRecord::deserialize(callable.declaration).map_err(|error| {
-                DeclarationFailure::InvalidInput(format!("host descriptor: {error}"))
-            })?;
-        // The pinned environment_function/environment_slot projection reads
-        // aliases only. Preserve its unsupported nominal/receiver boundary;
-        // do not clone the unrelated full declaration catalog or Source graph.
-        let descriptor = Arc::new(EnvironmentCallable {
-            origin: EnvironmentOrigin {
-                material: callable.origin.material.into(),
-                material_sha256: callable.origin.material_sha256.into(),
-                pointer: callable.origin.pointer.into(),
-                identity: callable.origin.identity.into(),
-            },
-            declaration,
-            types: Arc::new(EnvironmentTypeCatalog {
-                identity: callable.catalog_identity.into(),
-                aliases: callable.aliases.clone(),
-                ..Default::default()
-            }),
-        });
+        let projection =
+            crate::projection::project(&callable, check.as_ref(), &mut step, &mut resolve)?;
         let session = BindingSession::new(Arc::new(DeclarationContext {
             identity: query_identity.into(),
             site,
-            descriptor,
+            signature: projection.signature,
             check: check.clone(),
             error_code,
         }));
@@ -175,6 +178,7 @@ impl DeclarationModel {
         let rendered = humanize_semantic_type_detailed(&model, &inferred);
         check().map_err(DeclarationFailure::Interrupted)?;
         Ok(Some(TypeProjection {
+            declarations: projection.declarations,
             known,
             rendered,
             coverage: coverage
@@ -193,7 +197,7 @@ impl DeclarationModel {
 struct DeclarationContext<E> {
     identity: String,
     site: BindingSite,
-    descriptor: Arc<EnvironmentCallable>,
+    signature: Result<Arc<LuaFunctionType>, &'static str>,
     check: Arc<dyn Fn() -> Result<(), E> + Send + Sync>,
     error_code: fn(&E) -> String,
 }
@@ -216,10 +220,16 @@ impl<E> BindingContext for DeclarationContext<E> {
                 reason: "outside_authenticated_api_type_target".into(),
             };
         }
-        BindingDecision::Bound(BoundValue {
-            identity: self.identity.clone(),
-            proof: self.identity.clone(),
-            value: SelectedValue::EnvironmentCallable(self.descriptor.clone()),
-        })
+        match &self.signature {
+            Ok(signature) => BindingDecision::Bound(BoundValue {
+                identity: self.identity.clone(),
+                proof: self.identity.clone(),
+                value: SelectedValue::CallableSignature(signature.clone()),
+            }),
+            Err(reason) => BindingDecision::Unavailable {
+                proof: self.identity.clone(),
+                reason: (*reason).into(),
+            },
+        }
     }
 }
