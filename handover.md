@@ -2,10 +2,11 @@
 
 ## 当前交付：3.2.2 发行
 
-- 用户已授权提交3.2.2、合并main并发布npm。沿用`latest`渠道，`next`仍为3.1.2；不改动已有发行产物。
-- 当前分支`codex/release-3.2.2`，从已同步的main `6df4390`创建，复用当前工作区。主代理负责版本同步、完整Lua必需Go测试、PR/合并及固定标签发布；此前功能实测和限定范围复核已完成。
-- 版本源与发行渠道清单已同步为3.2.2，CLI/addon/npm派生文件已生成。本地build/vet、Lua 5.1必需完整Go套件（2922项pass事件、42项既有可选skip、0fail）、93项Node工具/启动器检查、版本/Skill/发行输入检查通过；固定公开集成输入由远端CI另行准备并验收。准备提交和推送PR，尚未合并或发布。
-- 下一步：完成本地检查，提交并推送PR；必需CI通过后合并main，固定`v3.2.2`并等待正式发布流水线及registry回读。
+- 用户已授权提交3.2.2、合并main、发布npm，并在发布后直接安装到本机。沿用`latest`渠道，`next`仍为3.1.2；不改动已有发行产物。
+- 当前在`main`；[PR #16](https://github.com/Follen/Lychee-Dev/pull/16)已合并，实现提交`969fe48`，合并提交`0bec60e`。`v3.2.2`已固定该合并提交并推送。主代理负责最终发布及registry核验；此前功能实测和限定范围复核已完成。
+- 版本源与发行渠道清单已同步为3.2.2，CLI/addon/npm派生文件已生成。本地build/vet、Lua 5.1必需完整Go套件（2922项pass事件、42项既有可选skip、0fail）、93项Node工具/启动器检查、版本/Skill/发行输入检查通过；PR必需[CI](https://github.com/Follen/Lychee-Dev/actions/runs/38723851897)及分支CI全部通过，远端已准备固定公开输入并验收。
+- [正式发布流水线](https://github.com/Follen/Lychee-Dev/actions/runs/38725056854)全部成功，包含必需CI、CGO预检、正式包构建、源码重建比较、真实LuaLS/Source检查、Windows隔离安装、摘要门禁、OIDC发布和registry重新安装验收。独立registry回读确认`latest=3.2.2`、`next=3.1.2`，integrity和provenance元数据存在，不声称完成provenance密码学验证。[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.2)六项产物齐全。
+- 本机受管`update`返回`complete=true`，CLI、1份Skill及7个客户端addon均为`current`。PATH实际运行3.2.2、commit=`0bec60e`、workspaceDirty=false。Skill需新Agent上下文加载，游戏内addon需后续reload激活；本轮只同步文件，未新增Live连接，不计入新的七产品实机覆盖。已按限定绝对路径清理`.tmp/release-3.2.2`；本次发行、本机更新及临时清理均已完成。
 
 ## 当前任务：槽位自动启用与 Mailbox 重载
 
@@ -14,7 +15,7 @@
 - Lua在现有启动元数据遍历内按角色GUID启用禁用槽，复查并统一保存；成功修改通过`Mailbox.input.slotReloadRequired`请求重载，失败走启动诊断。CLI在bind发布前处理请求，保留原CON、重载请求、业务交易和期限；已有重载的新runtime再次要求启用时可继续重载，submitted/uncertain仍不重发。没有新增轮询或批量加载槽。
 - 已确认此次故障来自另一个角色沿用的旧槽位禁用配置；此前成功角色500槽均启用。本次实测前doctor确认所选PID无占用、0预约；本任务没有操作原LycheeGroup项目或其恢复记录。
 - 已通过build/vet、正常Windows环境下的channel/addon/protocol整包（Lua 5.1必需，包并发2、测试并发4、包时限20分钟）、submitted/uncertain/missing outcome分别跨重启不重放的定向回归，以及Skill合同和文档本地链接检查。旧测试已按新增绑定前读取调整，保留原输入不重放和两份未决预约的恢复约束。
-- 本次实现、离线验证及Retail 12.1.5.70391实测已完成：灵止光／死亡之翼原有17个禁用槽，部署后启动自动启用并保存；新鲜INPUT记录slotReloadRequired=true，CLI在同一CON及原期限内追加一次槽启用重载，新runtime绑定成功。此前另有一次测试版激活重载；两者分别只提交一次。游戏内探针确认500/500启用，角色AddOns.txt禁用数为0、其他插件设置无变化，报告verified/released并返回42。共8次已提交输入交换无重复，7次等待均0消息。CON-f68a01a481d7cd9100d0694ef9644988已正常关闭；最终doctor全绿、无owner、0预约。已清理本次实现和实测临时目录。游戏保留测试版addon；全局CLI/Skill仍为正式3.2.1，未更新。没有提交、推送或发布。
+- 本次实现、离线验证及Retail 12.1.5.70391实测已完成：灵止光／死亡之翼原有17个禁用槽，部署后启动自动启用并保存；新鲜INPUT记录slotReloadRequired=true，CLI在同一CON及原期限内追加一次槽启用重载，新runtime绑定成功。此前另有一次测试版激活重载；两者分别只提交一次。游戏内探针确认500/500启用，角色AddOns.txt禁用数为0、其他插件设置无变化，报告verified/released并返回42。共8次已提交输入交换无重复，7次等待均0消息。CON-f68a01a481d7cd9100d0694ef9644988已正常关闭；最终doctor全绿、无owner、0预约。已清理本次实现和实测临时目录。实测结束时游戏为测试版addon，全局CLI/Skill仍为正式3.2.1；后续发行及本机更新状态以上方3.2.2交付为准。
 
 ## 已发布基线：3.2.1
 

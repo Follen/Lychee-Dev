@@ -4,6 +4,9 @@
 
 ## 待办
 
+- [x] 3.2.2发行：[PR #16](https://github.com/Follen/Lychee-Dev/pull/16)及必需CI通过，已合并main；`v3.2.2`固定`0bec60e`，[正式发布流水线](https://github.com/Follen/Lychee-Dev/actions/runs/38725056854)全部成功，registry回读确认`latest=3.2.2`、`next=3.1.2`，[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.2)六项产物齐全。
+- [x] 按用户授权，在3.2.2正式发布后完成本机受管更新：PATH CLI为3.2.2、commit=`0bec60e`、workspaceDirty=false，Skill及7个客户端addon均为current、complete=true；Skill需新Agent上下文，游戏内addon需后续reload，本轮不计作新的实机验收。
+
 - [x] Retail 12.1.5当前角色禁用槽自动启用与Mailbox重载实测通过：17个禁用槽自动启用并保存，500/500游戏内启用，其他插件设置不变；Mailbox标志触发同CON/原期限内一次槽启用重载，报告verified/released，连接正常关闭。结果见 [handover.md](handover.md#当前任务槽位自动启用与-mailbox-重载)。仅本次测试版及所选角色，不计入已发布3.2.1或其他产品实测。
 
 - [x] 3.2.1发布：[PR #15](https://github.com/Follen/Lychee-Dev/pull/15)审核及必需CI通过后合并，`v3.2.1`固定`10b561db`；[正式发布流水线](https://github.com/Follen/Lychee-Dev/actions/runs/38676733974)全部成功，registry回读确认latest=3.2.1、next=3.1.2，[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.1)六项产物齐全。本机CLI/Skill/所选Retail文件已受管更新为正式3.2.1；CLI为干净发行提交，游戏内addon需下次reload激活。
