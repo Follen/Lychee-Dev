@@ -5,8 +5,8 @@ use crate::Result;
 use windows::{
     Win32::{
         Foundation::{
-            CloseHandle, ERROR_INVALID_PARAMETER, FILETIME, HANDLE, WAIT_FAILED, WAIT_OBJECT_0,
-            WAIT_TIMEOUT,
+            CloseHandle, ERROR_INVALID_PARAMETER, FILETIME, GetLastError, HANDLE, WAIT_FAILED,
+            WAIT_OBJECT_0, WAIT_TIMEOUT,
         },
         System::Threading::{
             GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
@@ -178,7 +178,13 @@ impl Backend for Windows {
         let state = unsafe { WaitForSingleObject(owner.0, 0) };
         // Read the thread's last error immediately on WAIT_FAILED, before any
         // caller control check or other OS operation can replace it.
-        waited(state, Error::from_win32)
+        waited(state, || {
+            // SAFETY: GetLastError reads only this thread's last-error scalar.
+            // The lazy callback runs solely for WAIT_FAILED, before any other
+            // OS call or caller control check can replace that error.
+            let error = unsafe { GetLastError() };
+            Error::from_hresult(HRESULT::from_win32(error.0))
+        })
     }
     fn close(&mut self, owner: Handle) -> Result<()> {
         consume_close(

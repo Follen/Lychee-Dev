@@ -667,6 +667,13 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - 嵌套非有限浮点及非法 raw 的预检失败不输出该帧；实际 IO 失败仍 external.io，可能部分写入，不声称OS原子。18回归由现有 public_json:: CI组覆盖，静态rustfmt/身份/两个source-derived Python golden通过，全部 Rust/Go/Windows/性能 **NOT_RUN**。
 - 此UTF8 writer尚不能修复 native RawReport/State 的非法UTF8字节准入差异；明确另批修原始字节入口。默认CLI typed渲染/JSONL错误伴结果/业务输出仍由正在实施的adapter接入，不能用此单组件通过代替公开CLI验收。
 
+### 5a0e3ed 原生终态与 e047 早期编译失败
+
+- `5a0e3edd228a14dc3a9bb76b5eeb986188158d36` run `38655286434` / product job `116164945294` **failure**；artifact `11938112825` ZIP SHA256 `f827988aa54375630e8ac68a594874ea28304b66317f9bf0035dc9a2fc5a8405`，1467项/170376262展开字节、112owner/851日志hash逐一验证。EXE `ffbd4c3cbef5dcc17face2b9fbeaa314029c2605512684e01a4cdf60c0c53ebc`，source digest `4175d82595cd08af57ff435ed51a1f581c5f7400f5021bd41fe8301afb572be7`；本地核验JSON SHA256 `13dee0aa93d10d4b16bc3577bc53a03f5c2b328983590e9d4c7488f74bb58e33`。
+- 新增真实通过：输入unit16、owned-window6、RIP/root30、可信runtime43、owned-memory14、runtime-observation45，日志均非0匹配。总体Cargo断言执行680通过/1失败/6忽略（并非去重覆盖数）。唯一Rust失败是旧scan期待unsupported，后续1f2候选已修但尚未验证；catalog13通过/1忽略却因Cargo退出后vctip未在首次辅助回收时收敛而wrapper forced cleanup，整个组仍失败。其严格helper回收竞态另批修复，不追认原run为通过。
+- Skill实际26passed/2failed/1not_run；完整Retail native5passed/7failed，ordinary refs/context/API及session仍为旧API语法问题；quota/idle/lifetime在旧project-init非法home入口失败，实际寿命/额度仍未测。上述树不含231/1f2修复。原失败及已回收资源证据保留。
+- 后续 `e047c739a7fe40d4eecc8ada8b5fcb5fd22d2a87` run `38660112968` 的early artifact `11938129355` ZIP SHA256 `65ea398be04c72377689211a1e66b2bcf95388547906a16d5408732f4b7122a8` 提前暴露构建E0599：锁定windows0.62.2没有 `Error::from_win32`。候选改为WAIT_FAILED惰性即时 `GetLastError`→`HRESULT::from_win32`→`Error::from_hresult`，维持非失败零读取与失败一次读取、控制/关闭顺序；独立小diff复核及rustfmt通过，新Windows编译 **NOT_RUN**。e047依赖此crate的后续组未构建成功不能当执行覆盖。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。
