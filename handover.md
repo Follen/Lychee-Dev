@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 18:34 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`8eb169d34650ff8ee539706adbbc1a0c717b2996`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 18:42 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`00fd643908badaf282a5ddbd1e06a88c0e291d29`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -25,6 +25,10 @@
 
 ## 2. 当前实现与未闭环事项
 
+最新实际结果：bc2终态产物177个owner、7059份sealed日志已逐SHA核验。该精确候选完整Retail ordinary refs约78.53秒、context约78.92秒、API约65.14秒已成功；仍失败的是retained session冷启动EOF/回收，后续常驻warm/steady未测。这些成功不包含后来XML子索引/统计复用，不能归因后续优化，也未证明≤Go30%或内存目标。真实Driver→正式Lua桥9/9通过；其他范围按各自结果，不称全仓绿。
+
+当前已将公共miniz inflater接到实际gzip transport，保持现有前缀drain、独立取消/预算和已读字节计量，用于修复压缩错误与长度限制优先级。既有独立harness实际233向量一致、71/72测试通过（stalled-header peer-close失败保留），当前产品组合尚未运行；没有修改第三方源码，旧被拒本地重跑未执行。
+
 最新验证批 6699bbf 已保存 XML 子节点索引、静态 WDC IN 候选筛选、owned Function/call 与三方工具身份修复，run38781154924已开始，all-target与CLI构建因Data content::verified::read可见域错误失败；当前主树已最小修正到session域，尚待重编译。完整本地静态组重新通过各独立检查，仅真实21个旧addon差异仍失败；三方 Node 31/31通过。更早bc2的真实Driver→Lua桥、槽维护/移除/修复步骤现已成功，待最终sealed证据核具体用例；all-target曾因Core测试模块路径失败，6699已包含修复，不能泛化整轮通过。
 
 本普通批将 owned Object/token/epoch/嵌套pack身份搬入自有carrier，并保存单次源字节与预算guard的owned接管、已认证Files状态的无深拷贝持有；均已独审，13+14+5新Rust仍NOT_RUN。Object member/typecheck/复杂返回后继未完，生产未切，Emmy仍31补丁路径/26生产源文件；Data Prepared/Session缓存复用仍在接线，不能把新增owner当已实现缓存。
@@ -35,7 +39,7 @@
 | --- | --- | --- |
 | CLI / 版本 / 打包 | 3.5.0 beta 源码配置；当前 Go describe 合同；正式 addon ZIP；默认 Live 路由 | 最终包安装/更新/卸载全链、参数/输出完整差分；内部 Invocation 空值处理不等于实际 argv 空值已等价 |
 | Live / Delivery | Go Mailbox v1 默认 CON、RIP 定位/输入/持久恢复；321键盘静默与322槽启用/reload；500槽发布/维护 | 精确最终树自动回归与真实 Lua Driver 桥；多实例/真实客户端最后验收；未知结果绝不重放 |
-| Source | 完整固定 Retail 静态导入/查询；Emmy direct worker/session；Graph move、一次 XML catalog、90秒 research 原预算、调用者身份候选已落地 | 完整语义与常驻会话仍未通过；新优化全仓时长/内存待实测；零上游补丁迁移尚未完成 |
+| Source | 完整固定 Retail 静态导入/查询；Emmy direct worker/session；Graph move、一次 XML catalog、90秒 research 原预算、调用者身份候选已落地 | bc2普通refs/context/API已实际通过；常驻会话仍失败，新优化全仓时长/内存待实测；零上游补丁迁移尚未完成 |
 | Data | 本地 DB2/CASC/SQL/Hotfix；可取消 HTTP、remote catalog/target/encoded Session；direct remote target 已接实际 CLI；decoded alias 与共享 body 的 retained 责任转交已组合；Core 原控制贯通 blob/pin/capture | named target、streamed assets；JSONL scoped输出已组合待实际验证，SQL/DB2/navigation默认provider及外层Metadata已接，内部Store/Fragments/target预算错误身份修复已组合，自动pin/effective旧等待与实际使用仍待闭合；archive计量、gzip边界、合法raw-URI差异仍有缺口 |
 | Skill | 固定 Go 工作流及实际 CLI 验收入口 | Source长语义阻塞后的完整任务复测；Source/Skill/Data各自独立真实使用循环未收敛 |
 | 清理 / 质量 | 逐批独立源码审与回归持续执行，旧证据保留 | 本地已将7个旧 addon 额外文件和9个旧协议自动测试入口逐字节迁到历史目录，独立Node50/50通过；剩14个额外文件仍有真实动态消费者；不能只删文件让静态门槛变绿。最终四阶段审计尚未开始收敛 |

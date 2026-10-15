@@ -629,7 +629,7 @@ fn exact_budget_probe_retains_observed_n_with_decode_boundary_errors() {
 }
 
 #[test]
-fn empty_input_decode_really_emits_pending_output_before_eof() {
+fn pending_decoded_output_retains_tail_and_terminal_error() {
     let fixture = fixtures()
         .into_iter()
         .find(|v| v.name == "short-deflate-pending-empty-input-drain/fragment-8192")
@@ -641,7 +641,8 @@ fn empty_input_decode_really_emits_pending_output_before_eof() {
         budget: None,
         deadline: control.deadline(),
         state: State::Header,
-        decoder: Decompress::new(false),
+        decoder: Decoder::default(),
+        input_error: None,
         crc: Crc::new(),
         input_buffer: [0; 8192],
         start: 0,
@@ -657,13 +658,7 @@ fn empty_input_decode_really_emits_pending_output_before_eof() {
             reader.start, reader.end,
             "first decode consumed all raw input"
         );
-        let before = reader.decoder.total_in();
-        produced = 0;
-        reader.next(&mut output, &mut produced).await?;
-        assert!(produced > 0, "empty input must deliver pending output");
-        assert_eq!(reader.decoder.total_in(), before);
-        assert_eq!(reader.start, reader.end);
-        assert_eq!(8192 + produced, unhex(&fixture.expected_hex).len());
+        let before = (reader.start, reader.end);
         produced = 0;
         assert_eq!(
             reader
@@ -673,8 +668,162 @@ fn empty_input_decode_really_emits_pending_output_before_eof() {
                 .message,
             "unexpected EOF"
         );
-        assert_eq!(produced, 0);
+        assert!(produced > 0, "pending decoded output must not be lost");
+        assert_eq!((reader.start, reader.end), before);
+        assert_eq!(8192 + produced, unhex(&fixture.expected_hex).len());
         Ok(())
     })
     .unwrap();
+}
+
+#[test]
+fn empty_stored_flush_returns_limit_without_waiting_for_pending_tail() {
+    let raw = [0, 3, 0, 252, 255, b'a', b'b', b'c', 0, 0, 0, 255, 255];
+    let mut gzip = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
+    gzip.extend_from_slice(&raw);
+    for fragment in [1, 2, 7, 8192] {
+        let control = OperationControl::default();
+        let budget = Budget::controlled(Cost::defaults(), control.deadline(), control.clone());
+        let mut input = source(gzip.clone(), fragment);
+        input.pending_tail = true;
+        let error = run(read_bounded(
+            input,
+            2,
+            &control,
+            Some(&budget),
+            Instant::now() + Duration::from_millis(100),
+        ))
+        .unwrap_err();
+        assert_eq!(error.code, "records.metadata_limit", "fragment {fragment}");
+        assert_eq!(budget.snapshot().unwrap().network_bytes, 3);
+    }
+}
+#[test]
+fn marker_bytes_inside_stored_payload_do_not_publish_a_flush() {
+    let raw = [0, 8, 0, 247, 255, b'a', b'b', b'c', 0, 0, 0, 255, 255];
+    let mut gzip = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
+    gzip.extend_from_slice(&raw);
+    for fragment in [1, 2, 7, 8192] {
+        let control = OperationControl::default();
+        let budget = Budget::controlled(Cost::defaults(), control.deadline(), control.clone());
+        let mut input = source(gzip.clone(), fragment);
+        input.pending_tail = true;
+        let error = run(read_bounded(
+            input,
+            7,
+            &control,
+            Some(&budget),
+            Instant::now() + Duration::from_millis(30),
+        ))
+        .unwrap_err();
+        assert_eq!(
+            error.message, "remote request timeout",
+            "fragment {fragment}"
+        );
+        assert_eq!(budget.snapshot().unwrap().network_bytes, 8);
+    }
+}
+#[test]
+fn exact_window_limit_precedes_bad_footer_even_when_prefetched() {
+    let mut gzip = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255, 1, 0, 128, 255, 127];
+    gzip.resize(15 + 32768, b'a');
+    gzip.extend_from_slice(&[0; 8]);
+    for fragment in [1, 2, 7, 8192] {
+        let control = OperationControl::default();
+        let budget = Budget::controlled(Cost::defaults(), control.deadline(), control.clone());
+        let error = run(read_bounded(
+            source(gzip.clone(), fragment),
+            32767,
+            &control,
+            Some(&budget),
+            control.deadline(),
+        ))
+        .unwrap_err();
+        assert_eq!(error.code, "records.metadata_limit", "fragment {fragment}");
+        assert_eq!(budget.snapshot().unwrap().network_bytes, 32768);
+    }
+}
+
+#[test]
+fn public_boundary_matrix_matches_source_derived_go_expectations() {
+    // Lossless storage only: verify the exact original Go-vector bytes before
+    // parsing. Use the existing flate2 backend, not the raw decoder under test.
+    fn load(encoded: &str, expected_sha256: &str, expected_bytes: usize) -> Vec<Fixture> {
+        use base64::Engine as _;
+        use sha2::Digest as _;
+        use std::io::Read as _;
+        let compressed = base64::engine::general_purpose::STANDARD
+            .decode(encoded.trim())
+            .unwrap();
+        let mut bytes = Vec::new();
+        flate2::read::GzDecoder::new(compressed.as_slice())
+            .take((expected_bytes + 1) as u64)
+            .read_to_end(&mut bytes)
+            .unwrap();
+        assert_eq!(bytes.len(), expected_bytes);
+        assert_eq!(
+            format!("{:x}", sha2::Sha256::digest(&bytes)),
+            expected_sha256
+        );
+        serde_json::from_slice(&bytes).unwrap()
+    }
+    let mut cases = load(
+        include_str!("boundary-fixtures-1.json.gz.b64"),
+        "6cd4150e39b1d6c7b91eefaf52b44daaa0911e8b2f51b5af324efee864db600d",
+        2302162,
+    );
+    cases.extend(load(
+        include_str!("boundary-fixtures-2.json.gz.b64"),
+        "95cc9ef961c70c17bd4bc8154f578287642a86b20dab7c16b6af2da494f42464",
+        2302276,
+    ));
+    for fixture in cases {
+        let control = OperationControl::default();
+        let budget = Budget::controlled(Cost::defaults(), control.deadline(), control.clone());
+        let result = run(read_bounded(
+            source(fixture.input, fixture.fragment),
+            fixture.maximum,
+            &control,
+            Some(&budget),
+            control.deadline(),
+        ));
+        assert_eq!(
+            budget.snapshot().unwrap().network_bytes as usize,
+            unhex(&fixture.expected_hex).len(),
+            "{}",
+            fixture.name
+        );
+        assert_eq!(
+            kind(&result.unwrap_err()),
+            fixture.expected_kind,
+            "{}",
+            fixture.name
+        );
+    }
+}
+#[test]
+fn valid_matches_cross_dictionary_wrap_after_partial_flush() {
+    let plain: Vec<u8> = (0..140_000).map(|i| (i % 251) as u8).collect();
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    std::io::Write::write_all(&mut encoder, &plain[..13]).unwrap();
+    std::io::Write::flush(&mut encoder).unwrap();
+    std::io::Write::write_all(&mut encoder, &plain[13..]).unwrap();
+    let encoded = encoder.finish().unwrap();
+    for fragment in [1, 2, 7, 8192] {
+        let control = OperationControl::default();
+        let budget = Budget::controlled(Cost::defaults(), control.deadline(), control.clone());
+        let result = run(read_bounded(
+            source(encoded.clone(), fragment),
+            plain.len(),
+            &control,
+            Some(&budget),
+            control.deadline(),
+        ))
+        .unwrap();
+        assert_eq!(result, plain, "fragment {fragment}");
+        assert_eq!(
+            budget.snapshot().unwrap().network_bytes as usize,
+            plain.len()
+        );
+    }
 }

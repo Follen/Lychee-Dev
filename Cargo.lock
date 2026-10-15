@@ -1384,6 +1384,7 @@ dependencies = [
  "image-webp",
  "lycheedev-core",
  "md-5",
+ "miniz_oxide 0.9.1",
  "num-rational",
  "num-traits",
  "png",

@@ -167,17 +167,22 @@ impl NativeSourcePeer {
             if WaitForSingleObject(process.0, 0) == WAIT_OBJECT_0 {
                 return Ok(());
             }
-            if let Err(error) = TerminateProcess(process.0, 5)
-                && WaitForSingleObject(process.0, 0) != WAIT_OBJECT_0
-            {
-                return Err(error.to_string());
-            }
+            // Termination can already be in progress after an IPC EOF. Even
+            // with our pre-authenticated termination handle, Windows may report
+            // ACCESS_DENIED for an exiting process before it becomes signaled.
+            // Observe this same process until the caller's original deadline;
+            // never reopen its PID, retry termination, or infer successful exit
+            // from that error alone.
+            let termination = TerminateProcess(process.0, 5);
             let remaining = deadline.saturating_duration_since(Instant::now());
             if WaitForSingleObject(
                 process.0,
                 remaining.as_millis().min(u32::MAX as u128) as u32,
             ) != WAIT_OBJECT_0
             {
+                if let Err(error) = termination {
+                    return Err(error.to_string());
+                }
                 return Err("source.owner_retirement_deadline".into());
             }
         }

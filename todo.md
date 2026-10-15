@@ -24,6 +24,12 @@ Complete end-to-end production behavior first, then add the corresponding tests 
 - [ ] Replace all upstream source changes with owned-crate behavior through the fixed unmodified public API, preserving the complete approved XML/Lua design. No minimal-hook final exemption remains.
 - [ ] Prove each replacement with full output/diagnostic/coverage/cancellation/resource differentials, then exact-lock native and full Retail cold/warm/session acceptance. Keep prior failures and transitional patches honestly identified until removed.
 
+## Current consolidated validation queue
+
+- [ ] Validate the integrated public-miniz gzip transport with the current product lock, prefix drains, cancellation/accounting and all 233 fixed vectors; preserve the earlier 71/72 harness failure and denied rerun.
+- [ ] Complete retained Source session startup/recovery. Exact bc2 ordinary full-Retail refs/context/API now have successful runs; subsequent optimizations and the performance target are still unverified.
+- [ ] Finish the complete owned Emmy query/diagnostic/default-consumer chain and remove the remaining upstream source changes before final zero-patch acceptance.
+
 ## Current tagged increment: Go 3.2.3
 
 - [x] Pin v3.2.3 tag `7a24532cf0fe294faeb96e8224797b6fe69386d5` to `3766f9cacb52e93a803a626187e2a1d54a445468`. Keep 320/321/322 source, tests and results unchanged; Rust stays 3.5.0 beta.

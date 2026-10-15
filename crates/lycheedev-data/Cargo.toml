@@ -14,6 +14,7 @@ base64 = "=0.22.1"
 sha2 = "0.10"
 md-5 = "0.10.6"
 flate2 = { version = "=1.1.10", default-features = false, features = ["zlib-rs"] }
+miniz_oxide = { version = "=0.9.1", default-features = false, features = ["block-boundary"] }
 regex = "1.12"
 sqlparser = { version = "=0.63.0", default-features = false, features = ["std"] }
 num-rational = "=0.4.2"

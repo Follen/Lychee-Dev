@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Framing adapted from The Go Authors' compress/gzip; see adjacent GO-LICENSE.
-//! Go-compatible gzip framing only. DEFLATE and CRC use the existing flate2 backend.
+//! Go-compatible gzip delivery. DEFLATE uses the unmodified miniz_oxide public API; CRC uses flate2.
 //! Based on Go1.27.1 compress/gzip/gunzip.go; no async select owns decoded output.
 use super::*;
-use flate2::{Crc, Decompress, FlushDecompress, Status};
+use flate2::Crc;
+mod decoder;
+use decoder::{Decoder, End, Progress};
 
 #[derive(Clone, Copy)]
 enum State {
@@ -18,7 +20,8 @@ struct Gzip<'a, R> {
     budget: Option<&'a Budget>,
     deadline: Instant,
     state: State,
-    decoder: Decompress,
+    decoder: Decoder,
+    input_error: Option<ToolkitError>,
     crc: Crc,
     input_buffer: [u8; 8192],
     start: usize,
@@ -108,7 +111,8 @@ impl<R: AsyncRead + Unpin> Gzip<'_, R> {
                 return Err(http("gzip: invalid header"));
             }
         }
-        self.decoder.reset(false);
+        self.decoder = Decoder::default();
+        self.input_error = None;
         self.crc.reset();
         Ok(true)
     }
@@ -128,28 +132,43 @@ impl<R: AsyncRead + Unpin> Gzip<'_, R> {
                     }
                 }
                 State::Deflate => {
-                    let input = &self.input_buffer[self.start..self.end];
-                    let input_len = input.len();
-                    let (before_in, before_out) =
-                        (self.decoder.total_in(), self.decoder.total_out());
-                    // Empty input is intentional: drain pending output before EOF failure.
-                    let result = self
-                        .decoder
-                        .decompress(input, output, FlushDecompress::None);
-                    let used = (self.decoder.total_in() - before_in) as usize;
-                    *produced = (self.decoder.total_out() - before_out) as usize;
-                    if used > input_len || *produced > output.len() {
-                        return Err(fault("records.internal", 8, "Invalid decoder counts"));
+                    if let Some(delivery) = self.decoder.read(output) {
+                        *produced = delivery.count;
+                        self.crc.update(&output[..*produced]);
+                        match delivery.end {
+                            None => return Ok(()),
+                            Some(End::StreamEnd) => self.state = State::Footer,
+                            Some(End::Corrupt) => return Err(http("deflate decompression error")),
+                            Some(End::UnexpectedEof) => return Err(http("unexpected EOF")),
+                            Some(End::InputError) => {
+                                return Err(self.input_error.take().unwrap_or_else(|| {
+                                    fault("records.internal", 8, "Missing gzip input error")
+                                }));
+                            }
+                            Some(End::InvalidState) => {
+                                return Err(fault("records.internal", 8, "Invalid decoder state"));
+                            }
+                        }
+                        continue;
                     }
-                    self.start += used;
-                    self.crc.update(&output[..*produced]);
-                    match result.map_err(|error| http(error.to_string()))? {
-                        Status::StreamEnd => self.state = State::Footer,
-                        _ if *produced != 0 => return Ok(()),
-                        _ if input_len == 0 && self.eof => return Err(http("unexpected EOF")),
-                        _ if input_len == 0 => self.fill().await?,
-                        _ if used == 0 => return Err(http("gzip decoder made no progress")),
-                        _ => {}
+                    let step = self
+                        .decoder
+                        .advance(&self.input_buffer[self.start..self.end]);
+                    self.start += step.used;
+                    if step.progress == Progress::NeedInput {
+                        if self.start != self.end {
+                            return Err(fault(
+                                "records.internal",
+                                8,
+                                "Decoder left input unconsumed",
+                            ));
+                        }
+                        if self.eof {
+                            self.decoder.input_eof();
+                        } else if let Err(error) = self.fill().await {
+                            self.input_error = Some(error);
+                            self.decoder.input_error();
+                        }
                     }
                 }
                 State::Footer => {
@@ -206,7 +225,8 @@ pub(super) async fn collect_admitted(
         budget,
         deadline,
         state: State::Header,
-        decoder: Decompress::new(false),
+        decoder: Decoder::default(),
+        input_error: None,
         crc: Crc::new(),
         input_buffer: [0; 8192],
         start: 0,
