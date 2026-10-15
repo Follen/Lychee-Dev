@@ -104,6 +104,15 @@ test('new behavioral regression names and unchanged receipt/recovery production 
     const text = read(row.candidatePath);
     for (const name of row.candidateTests) assert.match(text, new RegExp(`fn ${name}\\(`), name);
   }
-  for (const row of map.retainedProduction) assert.equal(sha256(read(row.path)), row.sha256, row.path);
+  for (const row of map.retainedProduction) {
+    const current = read(row.path);
+    assert.equal(sha256(current), row.sha256, row.path);
+    if (row.testOnlyIntegration) {
+      const delta = row.testOnlyIntegration;
+      assert.equal(delta.commit, '5152cc90a69e2108f159b009bc38df6e7cd2c09c');
+      assert.equal(current.split(delta.replacementText).length, 2);
+      assert.equal(sha256(current.replace(delta.replacementText, delta.originalText)), delta.originalSHA256);
+    }
+  }
   assert.deepEqual(map.execution, {rustCompilation: 'NOT_RUN', rustTests: 'NOT_RUN', windowsHook: 'NOT_RUN', windowsFixture: 'NOT_RUN', actualGame: 'NOT_RUN'});
 });

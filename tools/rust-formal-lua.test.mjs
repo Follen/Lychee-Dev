@@ -6,7 +6,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writ
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BASE, BRIDGE_GAPS, LIMITS, MANIFEST_SHA256, ORACLE, PROFILES, authenticate, cases, cleanLuaEnvironment, evaluate, gitBlob, hash, manifest, materialize, processPassed, runCases, verifyMaterial, verifyOwnerEvidence, verifyUnifiedTOC } from '../tests/rust-parity/formal-lua/assertions.mjs';
+import { BASE, BRIDGE_GAPS, LIMITS, MANIFEST_SHA256, ORACLE, PROFILES, authenticate, cases, cleanLuaEnvironment, evaluate, gitBlob, hash, manifest, materialize, processPassed, runCases, verifyMaterial, verifyOwnerEvidence, verifyUnifiedTOC } from '../tests/rust-parity/formal-lua-3.2.1/assertions.mjs';
 import { sourceDigest } from './rust-build.mjs';
 import { verifyCandidateArtifact } from './rust-formal-lua.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -244,3 +244,30 @@ test('artifact command uses the actual producer cargo prefix exactly once', () =
     assert.throws(() => verifyCandidateArtifact(directory, f.artifactPath));
   });
 });
+
+// Current release authentication never weakens source-byte custody.
+test('3.2.1 has only two exact retained release literals and unchanged historical oracle', () => {
+  const m = manifest(root);
+  assert.equal(m.oracle.commit, '10b561db5706702cd42e047eaeed4ccb5e825351');
+  assert.deepEqual(m.retainedReleaseFields.map(row => row.path), ['addon/Core/Runtime.lua', 'addon/Lychee Dev.toc']);
+  assert.equal(hash(readFileSync(join(root, 'tests/rust-parity/formal-lua/manifest.json'))), m.historicalOracle.manifestSHA256);
+  assert.deepEqual(fixed.retainedReleaseFields, m.retainedReleaseFields);
+});
+test('retained release allowance rejects every additional source edit', () => copied(dir => {
+  for (const row of manifest(dir).retainedReleaseFields) {
+    const path = join(dir, row.path), original = readFileSync(path);
+    writeFileSync(path, Buffer.concat([original, Buffer.from('\n-- changed business bytes\n')]));
+    assert.throws(() => authenticate(dir), /retained_release_identity/);
+    writeFileSync(path, original);
+  }
+  authenticate(dir);
+}));
+test('current static TOC requires both Retail interfaces and original client gate covers both', () => copied(dir => {
+  const path = join(dir, 'addon/Lychee Dev.toc');
+  writeFileSync(path, readFileSync(path, 'utf8').replace('120105, ', ''));
+  assert.throws(() => verifyUnifiedTOC(dir), /interface_missing: 120105/);
+  const gate = readFileSync(join(root, BASE, 'oracle/tests/addon/t_client_gate.lua'), 'utf8');
+  assert(gate.includes('Env.testBuilds.retail'));
+  assert(gate.includes('12.1.0'));
+  assert(readFileSync(join(root, BASE, 'oracle/tests/addon/env.lua'), 'utf8').includes('120105'));
+}));

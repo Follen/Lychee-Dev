@@ -903,6 +903,14 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - 新共享 HTTP/catalog/gzip 模块及原始期限/实际网络计量 seam 已本地合成，Wago 真正改接此异步路径、cache/target resolve/CDN reader 正分片继续。先前49项证据仅R4.3，不能自动覆盖R6.1。后续有意义原生批覆盖新增 remote:: 目标，普通持久化 push 不重复启动长测。
 - static 后续 unsafe、历史/current oracle 和真实差异报告改独立运行；addon失败仍使job失败，未使用 continue-on-error 或扩大例外。
 
+### Go 3.2.1 Lua 来源与组合测试身份修正（2026-10-15）
+
+- `afd967c8298a4d410a641bcbefe50bfe6b285299` 已保存 Remote R6.1、固定工作区锁和时间解析只读出口；20 个远端 blob 逐个 SHA 验证。此普通 push 的 native jobs 跳过符合节奏，不是运行通过。
+- `62d53b2` 原生早期 artifact `11964141538`：54 owner / 166 sealed logs 全部核hash；all-target owner `a9c9d030-3e8c-4832-993c-a51176fcbb6f` 实际 exit0、4m10s，所有进程回收，保留已认证编译辅助进程 cleanup/forced 事实。CLI / actual describe / 固定完整 Retail 静态用例已过，full native 与性能未验收。Emmy artifact `11962944421` 的17 sealed logs核验、真实9+6+21项全部通过，0 ignored / filtered。
+- 本轮 formal Lua 两步失败已本地复现为旧3057 authentication仍要求旧ClientGate字节，不能解释成Lua产品行为失败。新增 `formal-lua-3.2.1` 精确10b清单与原57份Go/Lua来源；旧62份历史文件保留。当前55addon只允许D2已锁定两处release label原字节差异，逆替换验证完整blob/gitBlob；执行物料仍原candidate字节，不暗改版本。214 suite/profile计划包含上游新增双Retail测试；Node34/34独立实过，新的Lua/Windows运行仍NOT_RUN。
+- keyboard源码守卫的失败来自E组合测试将durable_journal测试模块改为 `pub(super)`，仅cfg(test)可见性。现pin固定5152对应blob，并要求精确逆替换后仍还原旧9763225f摘要；不是接受任意当前字节。Node6/6实过，旧失败保留。
+- adapter public-render差分原Linux基线只执行22项，12通过/10失败，后5及全部candidate未运行：自有构造器Windows虚拟根路径在Linux是相对路径，公开URL转换拒绝后返回API input missing。两侧url2.5.8依赖相同，不能归因缺GeneratedAPI fixture或新render。独立R2旧render参考/候选都只加host合法绝对虚拟路径，保Windows路径与原输入/取消检查，明确不是原基线通过；27+27新实测仍待结果。
+
 ## 11. 最后执行：需要实际配合的测试清单
 
 **本节必须始终是handover的最后一节。** 只有前述可独立完成的实现、离线差分、自动Windows测试、封存候选和可自动性能检查就绪后再约实际配合。当前全部 `not_run`；以下“结果”故意留空待真实执行填写。每次先固定candidate commit/exe/package/addon hash、产品/build、所选安装/PID/创建时间/HWND及授权操作；缺客户端或用户未就绪留缺口，不缩范围。普通Windows API单元/自有子进程/合成窗口CI不在本节。

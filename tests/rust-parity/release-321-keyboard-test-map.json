@@ -143,7 +143,14 @@
     },
     {
       "path": "crates/lycheedev-live/src/go_mailbox_v1/durable_journal.rs",
-      "sha256": "9763225ff04287bbd838244544e811ed981e88208aa7495b6204ced2c4fd160f"
+      "sha256": "d2ad72743b697f7f4c2368ae948fe5f3c4b4b73c5169e157b814da6ebe36780f",
+      "testOnlyIntegration": {
+        "commit": "5152cc90a69e2108f159b009bc38df6e7cd2c09c",
+        "originalSHA256": "9763225ff04287bbd838244544e811ed981e88208aa7495b6204ced2c4fd160f",
+        "originalText": "#[cfg(test)]\n#[path = \"durable_journal_tests.rs\"]\nmod tests;",
+        "replacementText": "#[cfg(test)]\n#[path = \"durable_journal_tests.rs\"]\npub(super) mod tests;",
+        "reason": "E durable multi-CLI regression reuses existing cfg(test) fixture; production byte identity is retained after this exact visibility-only reversal."
+      }
     },
     {
       "path": "crates/lycheedev-live/src/go_mailbox_v1/journal.rs",
