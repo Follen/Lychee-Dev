@@ -21,11 +21,22 @@ enum Lease {
     Immediate(ExclusiveLock),
     #[cfg(windows)]
     Queued(fs::File),
+    #[cfg(test)]
+    InjectedClose {
+        name: &'static str,
+        calls: Arc<std::sync::Mutex<Vec<&'static str>>>,
+        error: ToolkitError,
+    },
 }
 impl Lease {
     fn close(self) -> Result<()> {
         match self {
             Self::Immediate(lease) => lease.close(),
+            #[cfg(test)]
+            Self::InjectedClose { name, calls, error } => {
+                calls.lock().unwrap().push(name);
+                Err(error)
+            }
             #[cfg(windows)]
             Self::Queued(file) => {
                 lycheedev_windows::filesystem::close_file(file).map_err(ToolkitError::io)
@@ -52,6 +63,12 @@ impl DataResources {
             }
         }
         errors
+    }
+    /// Consume only this owner's reverse-order handle cleanup. The outer owner
+    /// may then close its Metadata/root before observing its original scopes.
+    /// No stop is sampled here and no cleanup event is deduplicated.
+    pub fn close_cleanup(mut self) -> Vec<ToolkitError> {
+        self.close_all()
     }
     pub fn close(self) -> Result<()> {
         self.close_with_check(|| Ok(()))
@@ -257,3 +274,35 @@ pub fn acquire_with_check(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod cleanup_tests {
+    use super::*;
+    #[test]
+    fn cleanup_only_preserves_each_equal_close_event_in_reverse_order_without_stop() {
+        let control = OperationControl::default();
+        control
+            .cancel_handle()
+            .store(true, std::sync::atomic::Ordering::Release);
+        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let error = ToolkitError::new("test.close", "injected close failure", 5);
+        let owner = DataResources {
+            leases: ["gate", "slot:0", "slot:1"]
+                .into_iter()
+                .map(|name| Lease::InjectedClose {
+                    name,
+                    calls: calls.clone(),
+                    error: error.clone(),
+                })
+                .collect(),
+            download_workers: 1,
+            control,
+        };
+        let errors = owner.close_cleanup();
+        assert_eq!(*calls.lock().unwrap(), ["slot:1", "slot:0", "gate"]);
+        assert_eq!(errors.len(), 3);
+        for actual in errors {
+            assert!(same(&actual, &error));
+        }
+    }
+}

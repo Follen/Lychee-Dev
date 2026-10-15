@@ -1,6 +1,6 @@
 //! Actual default CDN query owner. Numeric download width alone is never admission.
 use super::{
-    admission::AdmittedWorkspace,
+    admission::{AdmittedWorkspace, OpenWorkspace},
     cache::Store,
     fragments,
     session::{Options, Session},
@@ -12,34 +12,98 @@ use crate::{
 use lycheedev_core::{Invocation, Result, selection::DataPin, workspace::data_resources::Policy};
 use std::sync::Arc;
 
+fn resolve_pin(
+    invocation: &Invocation,
+    budget: &Arc<Budget>,
+) -> Result<lycheedev_core::selection::PinnedSet> {
+    invocation.control.check()?;
+    budget.check()?;
+    if let Some(id) = invocation.flag("--snapshot") {
+        lycheedev_core::selection::load_pinned_controlled_with_check(
+            &invocation.home,
+            id,
+            &invocation.control,
+            || budget.check(),
+        )
+    } else {
+        // Legacy automatic project discovery remains an explicit gap.
+        let pin = lycheedev_core::selection::resolve_pinned(invocation)?;
+        invocation.control.check()?;
+        budget.check()?;
+        Ok(pin)
+    }
+}
+
+/// No file-read method exists until this owner has acquired real workspace slots.
+pub(crate) struct OpenedScope<'a> {
+    workspace: OpenWorkspace<'a>,
+    invocation: &'a Invocation,
+    budget: &'a Arc<Budget>,
+}
+impl<'a> OpenedScope<'a> {
+    pub fn open(invocation: &'a Invocation, budget: &'a Arc<Budget>) -> Result<Self> {
+        let workspace =
+            OpenWorkspace::open_metadata(&invocation.home, &invocation.control, Some(budget))?;
+        Ok(Self {
+            workspace,
+            invocation,
+            budget,
+        })
+    }
+    pub fn admit(self) -> Result<Scope<'a>> {
+        let admitted = self.workspace.acquire(Policy::Ordinary)?;
+        Ok(Scope {
+            admitted,
+            invocation: self.invocation,
+            budget: self.budget,
+        })
+    }
+    /// SQL and ordinary DB2 validate their snapshot before the resource wait.
+    pub fn admit_pinned(
+        self,
+        missing: lycheedev_core::ToolkitError,
+    ) -> Result<(Scope<'a>, lycheedev_core::selection::PinnedSet)> {
+        let result = (|| {
+            self.workspace.check()?;
+            let pin = resolve_pin(self.invocation, self.budget)?;
+            let data = pin.data.as_ref().ok_or(missing)?;
+            fragments::data_identity(data)?;
+            Ok(pin)
+        })();
+        match result {
+            Ok(pin) => Ok((self.admit()?, pin)),
+            Err(error) => self.workspace.finish(Err(error)),
+        }
+    }
+}
+
 pub(crate) struct Scope<'a> {
     admitted: AdmittedWorkspace<'a>,
     invocation: &'a Invocation,
     budget: &'a Arc<Budget>,
 }
 impl<'a> Scope<'a> {
-    pub fn acquire(
-        invocation: &'a Invocation,
-        pin: &DataPin,
-        budget: &'a Arc<Budget>,
-    ) -> Result<Self> {
-        invocation.control.check()?;
-        budget.check()?;
-        fragments::data_identity(pin)?;
-        let admitted = AdmittedWorkspace::acquire(
-            &invocation.home,
-            Policy::Ordinary,
-            &invocation.control,
-            Some(budget),
-        )?;
-        Ok(Self {
-            admitted,
-            invocation,
-            budget,
-        })
-    }
     pub fn check(&self) -> Result<()> {
         self.admitted.check()
+    }
+    pub fn check_pin(&self, pin: &DataPin) -> Result<()> {
+        self.check()?;
+        fragments::data_identity(pin).map(|_| ())
+    }
+    pub fn check_consumer(&self, invocation: &Invocation, budget: &Arc<Budget>) -> Result<()> {
+        self.check()?;
+        if !std::ptr::eq(self.invocation, invocation) || !Arc::ptr_eq(self.budget, budget) {
+            return Err(crate::fault(
+                "records.file_query",
+                4,
+                "Consumer differs from admitted invocation/budget",
+            ));
+        }
+        Ok(())
+    }
+    pub fn resolve_pin(&self) -> Result<lycheedev_core::selection::PinnedSet> {
+        self.check()?;
+        resolve_pin(self.invocation, self.budget)
     }
     pub fn read_batches(
         &mut self,

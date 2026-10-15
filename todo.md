@@ -241,3 +241,5 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] 本地Emmy三方A31及B部分通过，但namespace回收EACCES未验证，保留symbols lease；C/资源与当前GNU未运行。完成独立Windows验证方案审核，不绕本地未回收owner。
 
 - [ ] definitions控制R3已静态独审并集成：原invocation/独立Budget、HTTP和解析/发布贯通；24新增Rust待真实运行。把SQL/DB2实际调用改接此接口，保外层Metadata与Core隐藏Directory close缺口，不能只凭API存在标完成。
+
+- [ ] R18.3已接默认远端DB2 record/page/schema/search/FK及SQL外层Metadata生命周期，15新增/11继承Rust待运行；已修outer/provider预算首因与重复stop，继续修Store/Fragments/target真实内部consumer同类问题，再验完整typed取消。

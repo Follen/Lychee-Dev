@@ -4,6 +4,7 @@ use crate::resource::Budget;
 use lycheedev_core::{
     Result, ToolkitError,
     control::OperationControl,
+    metadata::Metadata,
     storage::{Directory, FileControl, FileCost},
     workspace::data_resources::{self, DataResources, Policy},
 };
@@ -62,35 +63,48 @@ fn finish<T>(
     Err(first)
 }
 
-pub(super) struct AdmittedWorkspace<'a> {
-    // Fallback field drop order releases slots before directory handles. Normal
-    // consuming finish explicitly closes every owner and retains diagnostics.
-    resources: Option<DataResources>,
+/// A held root, optionally with the fixed Go outer Metadata owner. This is not
+/// permission to create a Session: only consuming acquire yields that type.
+pub(super) struct OpenWorkspace<'a> {
+    // On fallback Drop, the idle database closes before its held root.
+    metadata: Option<Metadata>,
     directory: Option<Directory>,
     control: &'a OperationControl,
     budget: Option<&'a Budget>,
 }
-impl<'a> AdmittedWorkspace<'a> {
-    pub fn acquire(
+impl<'a> OpenWorkspace<'a> {
+    fn open(
         home: &Path,
-        policy: Policy,
         control: &'a OperationControl,
         budget: Option<&'a Budget>,
     ) -> Result<Self> {
         check(control, budget)?;
         let directory = Directory::open_shared_controlled(home, &mut Files { control, budget })?;
-        let mut owner = Self {
-            resources: None,
+        let owner = Self {
+            metadata: None,
             directory: Some(directory),
             control,
             budget,
         };
-        let result = data_resources::acquire_with_check(owner.home(), policy, control, || {
-            check(control, budget)
+        match owner.check() {
+            Ok(()) => Ok(owner),
+            Err(error) => owner.finish(Err(error)),
+        }
+    }
+    pub fn open_metadata(
+        home: &Path,
+        control: &'a OperationControl,
+        budget: Option<&'a Budget>,
+    ) -> Result<Self> {
+        let mut owner = Self::open(home, control, budget)?;
+        // Preserve the two stop identities: Core checks invocation first, then
+        // this supplemental Budget within every schema/SQLite wait attempt.
+        let result = Metadata::open_controlled_with_check(owner.home(), true, control, || {
+            budget.map_or(Ok(()), Budget::check)
         });
         match result {
-            Ok(resources) => {
-                owner.resources = Some(resources);
+            Ok(metadata) => {
+                owner.metadata = Some(metadata);
                 match owner.check() {
                     Ok(()) => Ok(owner),
                     Err(error) => owner.finish(Err(error)),
@@ -99,38 +113,49 @@ impl<'a> AdmittedWorkspace<'a> {
             Err(error) => owner.finish(Err(error)),
         }
     }
+    pub fn acquire(self, policy: Policy) -> Result<AdmittedWorkspace<'a>> {
+        let result = (|| {
+            self.check()?;
+            data_resources::acquire_with_check(self.home(), policy, self.control, || {
+                check(self.control, self.budget)
+            })
+        })();
+        match result {
+            Ok(resources) => {
+                let owner = AdmittedWorkspace {
+                    resources: Some(resources),
+                    workspace: self,
+                };
+                match owner.check() {
+                    Ok(()) => Ok(owner),
+                    Err(error) => owner.finish(Err(error)),
+                }
+            }
+            Err(error) => self.finish(Err(error)),
+        }
+    }
     pub fn home(&self) -> &Path {
         self.directory
             .as_ref()
-            .expect("live admitted directory")
+            .expect("live workspace directory")
             .path()
-    }
-    pub fn control(&self) -> &'a OperationControl {
-        self.control
-    }
-    pub fn budget(&self) -> Option<&'a Budget> {
-        self.budget
-    }
-    pub fn download_workers(&self) -> usize {
-        self.resources
-            .as_ref()
-            .expect("live admission lease")
-            .download_workers()
     }
     pub fn check(&self) -> Result<()> {
         check(self.control, self.budget)?;
         self.directory
             .as_ref()
-            .expect("live admitted directory")
+            .expect("live workspace directory")
             .verify_controlled(&mut Files {
                 control: self.control,
                 budget: self.budget,
             })
     }
-    pub fn finish<T>(mut self, result: Result<T>) -> Result<T> {
-        let mut cleanup = Vec::new();
-        if let Some(resources) = self.resources.take() {
-            if let Err(error) = resources.close_with_check(|| check(self.control, self.budget)) {
+    pub fn finish<T>(self, result: Result<T>) -> Result<T> {
+        self.finish_after(result, Vec::new())
+    }
+    fn finish_after<T>(mut self, result: Result<T>, mut cleanup: Vec<ToolkitError>) -> Result<T> {
+        if let Some(metadata) = self.metadata.take() {
+            if let Err(error) = metadata.close() {
                 cleanup.push(error);
             }
         }
@@ -145,6 +170,48 @@ impl<'a> AdmittedWorkspace<'a> {
             self.control.check(),
             self.budget.map_or(Ok(()), Budget::check),
         )
+    }
+}
+
+pub(super) struct AdmittedWorkspace<'a> {
+    // Fallback and checked teardown release slots before Metadata/root.
+    resources: Option<DataResources>,
+    workspace: OpenWorkspace<'a>,
+}
+impl<'a> AdmittedWorkspace<'a> {
+    pub fn acquire(
+        home: &Path,
+        policy: Policy,
+        control: &'a OperationControl,
+        budget: Option<&'a Budget>,
+    ) -> Result<Self> {
+        // Standalone session callers retain their prior no-Metadata admission.
+        OpenWorkspace::open(home, control, budget)?.acquire(policy)
+    }
+    pub fn home(&self) -> &Path {
+        self.workspace.home()
+    }
+    pub fn control(&self) -> &'a OperationControl {
+        self.workspace.control
+    }
+    pub fn budget(&self) -> Option<&'a Budget> {
+        self.workspace.budget
+    }
+    pub fn download_workers(&self) -> usize {
+        self.resources
+            .as_ref()
+            .expect("live admission lease")
+            .download_workers()
+    }
+    pub fn check(&self) -> Result<()> {
+        self.workspace.check()
+    }
+    pub fn finish<T>(mut self, result: Result<T>) -> Result<T> {
+        let mut cleanup = Vec::new();
+        if let Some(resources) = self.resources.take() {
+            cleanup.extend(resources.close_cleanup());
+        }
+        self.workspace.finish_after(result, cleanup)
     }
 }
 

@@ -669,36 +669,25 @@ pub(crate) fn sql_inner_after_execute(
     }
     program.validate_parameters(&request.parameters)?;
     request.admit_encoded(&safety)?;
-    let pin = if inv.flag_bool("--cdn") {
-        if let Some(id) = inv.flag("--snapshot") {
-            let child = crate::remote::cache::child_control(&inv.control, budget.deadline)?;
-            selection::load_pinned_controlled_with_check(&inv.home, id, &child, || budget.check())?
-        } else {
-            // Existing project discovery remains a separate controlled-consumer gap.
-            inv.control.check()?;
-            let pin = selection::resolve_pinned(inv)?;
-            budget.check()?;
-            pin
-        }
-    } else {
-        selection::resolve_pinned(inv)?
-    };
-    let data = pin.data.as_ref().ok_or_else(|| {
-        fault(
+    let (mut remote, pin) = if inv.flag_bool("--cdn") {
+        let opened = crate::remote::provider::OpenedScope::open(inv, &budget)?;
+        let (scope, pin) = opened.admit_pinned(fault(
             "records.data_pin_required",
             2,
             "SQL requires a fixed DataPin",
-        )
-    })?;
-    // Fixed Go SQL admits its workspace after DataIdentity and keeps the actual
-    // lease through source preparation, execution, capture and CSV publication.
-    // Only the CDN route changes here; local admission is a separate consumer.
-    let mut remote = if inv.flag_bool("--cdn") {
-        Some(crate::remote::provider::Scope::acquire(inv, data, &budget)?)
+        ))?;
+        (Some(scope), pin)
     } else {
-        None
+        (None, selection::resolve_pinned(inv)?)
     };
     let result = (|| {
+        let data = pin.data.as_ref().ok_or_else(|| {
+            fault(
+                "records.data_pin_required",
+                2,
+                "SQL requires a fixed DataPin",
+            )
+        })?;
         // Go reserves the executor once before source preparation. Its separate
         // 64 MiB Work limit still bounds Rust execution, whose actual allocations
         // remain charged to the safety ledger rather than charged twice logically.
@@ -743,13 +732,14 @@ pub(crate) fn sql_inner_after_execute(
             };
             bundles.push((
                 name.to_owned(),
-                definitions::prepare_budgeted(
+                definitions::prepare_controlled(
                     &inv.home,
                     &data.definition_commit,
                     canonical,
                     inv.flag_bool("--offline"),
                     deadline,
                     Some(&budget),
+                    &inv.control,
                 )?,
             ));
         }
@@ -786,8 +776,11 @@ pub(crate) fn sql_inner_after_execute(
                         "WDC table hash differs from manifest identity",
                     ));
                 }
-                let definition = schema::Document::parse(&dbd)?
-                    .select(&data.full_build, &format!("{:08X}", layout.layout_hash))?;
+                let definition = schema::Document::parse_with_check(&dbd, || {
+                    inv.control.check()?;
+                    budget.check()
+                })?
+                .select(&data.full_build, &format!("{:08X}", layout.layout_hash))?;
                 let table = table::open_budgeted(
                     &file.bytes,
                     &definition,
