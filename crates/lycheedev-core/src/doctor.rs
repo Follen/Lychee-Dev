@@ -277,7 +277,30 @@ pub fn inspect(inv: &Invocation) -> Result<Outcome> {
             "",
         ));
     }
-    checks.push(check("selection.catalog",true,"ok","","4 fixed baseline product/build identities are available; supported acceptance remains separately recorded",""));
+    let baselines = &crate::client::baselines::VERIFIED_BASELINES;
+    let problems = crate::client::baselines::catalog_problems(baselines);
+    checks.push(if problems.is_empty() {
+        check(
+            "selection.catalog",
+            true,
+            "ok",
+            "",
+            format!(
+                "{} verified client baselines are self-consistent",
+                baselines.len()
+            ),
+            "",
+        )
+    } else {
+        check(
+            "selection.catalog",
+            false,
+            "error",
+            "selection.catalog_invalid",
+            problems.join("; "),
+            "regenerate or repair the verified client baselines before resolving targets",
+        )
+    });
     let healthy = checks.iter().all(|item| item["status"] != "error");
     let result = json!({"healthy":healthy,"checks":checks});
     if !healthy {

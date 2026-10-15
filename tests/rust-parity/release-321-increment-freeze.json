@@ -1,0 +1,517 @@
+{
+  "schema": "lycheedev.release-increment-freeze.v1",
+  "stage": "A",
+  "baseCommit": "ea3644ef445973606722c21d84eb09dc701cb616",
+  "oracleCommit": "10b561db5706702cd42e047eaeed4ccb5e825351",
+  "previousOracleCommit": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "owners": [
+    {
+      "path": "crates/lycheedev-core/src/client.rs",
+      "sha256": "53052a86c02575a6e33716cd9bf0f8aa55ed717e8c2700a8c72e751fae20d0c1",
+      "bytes": 76628,
+      "previousSHA256": "bb1694eb93ec8d097d6df8775319f85a71a2983552437f98dca5a21d45248dcf"
+    },
+    {
+      "path": "crates/lycheedev-core/src/selection.rs",
+      "sha256": "133874daec80ccb48cdb541e8e2fafa849ac70aa08eefda6feb68c350e0f7f4c",
+      "bytes": 23205,
+      "previousSHA256": "8fb86e9baf73cc63a35c0c01e2bc2142da7c3fa4111d75f57c1ddf79812ff588"
+    },
+    {
+      "path": "crates/lycheedev-core/src/doctor.rs",
+      "sha256": "b51167c88afeaeb9a72fd0944bfbca39f4e85128b80fe8809e4e438a2a855c31",
+      "bytes": 13265,
+      "previousSHA256": "94fa15c54f4cbf8efa3defafe57adc9c443e2f09fcec0e078a2f7bffe479065c"
+    },
+    {
+      "path": "crates/lycheedev-delivery/src/slots.rs",
+      "sha256": "b6694d81801881b5275a634d363a89c7b41cabe1b62ea130140e3dd042362eac",
+      "bytes": 28890,
+      "previousSHA256": "63378a4a3b1c1c105d338f19e3045fb1b89a5bc18edf6471d99bf98fe863be13"
+    },
+    {
+      "path": "crates/lycheedev-delivery/tests/slot_maintenance.rs",
+      "sha256": "17846c6d6aeb1dfddb456376b59eb6d91f8c7f314f1480bfdc9dc3f4648a2681",
+      "bytes": 19888,
+      "previousSHA256": "ef878845f89dcd8eaaab5a66e3d8cb243c730f45af5296224f528528639fe369"
+    },
+    {
+      "path": "addon/Core/ClientGate.lua",
+      "sha256": "aee7965a2db4e431d140868f46ddc4ec14d8df887d056d5cb67c88e957efe52a",
+      "bytes": 1538,
+      "previousSHA256": "5eb428dfb2e38d3c0be517944c28b5bb757769330881ef966b1f2cfc1ff9bf27"
+    },
+    {
+      "path": "addon/Lychee Dev.toc",
+      "sha256": "5c0a6ef52611166a32c61b6be440d4371543fb03be724feb6a139b3563a76d64",
+      "bytes": 2005,
+      "previousSHA256": "2ba2db56aa2461b08bd7483948290e0beba92e965098f67f125f54230d7bfa25"
+    },
+    {
+      "path": "tools/addon-package.mjs",
+      "sha256": "e556a603c01e9f2a076af63a70167ac591dd33401fe4680480a05afa7082f35c",
+      "bytes": 12460,
+      "previousSHA256": "d5ad4bea4f645d5306dfef4917ddbf6a4e95659b85130e7137e33c9291d819a5"
+    },
+    {
+      "path": "tools/addon-package.test.mjs",
+      "sha256": "ba642ed0c272c49d5fb7823bbfde0452abe4e6657d3a1bf38a5cd89572223118",
+      "bytes": 7079,
+      "previousSHA256": "360e826df1a235c47e264a943d2029b6af7a13fa73140304197cc958d5313f9b"
+    },
+    {
+      "path": "crates/lycheedev-core/src/client/baselines.rs",
+      "sha256": "a70fc07b4228d753de086cb7f7addd781ff11d360e2543d91f78b08d5d9fe05e",
+      "bytes": 5684,
+      "previousSHA256": null
+    },
+    {
+      "path": "tests/rust-parity/go-3.2.1-increment-oracle.json",
+      "sha256": "d019abaed1bceaadf55a59a93790fac486a4427d39e1255f81e18d411dc26635",
+      "bytes": 40301,
+      "previousSHA256": null
+    },
+    {
+      "path": "tests/rust-parity/release-321-increment-contract.md",
+      "sha256": "30e06043325a74c215cd247bbd2ee3b08e2e7dc9aad9bf37c35a5f33e77d799e",
+      "bytes": 6899,
+      "previousSHA256": null
+    },
+    {
+      "path": "tests/rust-parity/release-321-increment-test-map.json",
+      "sha256": "01cbec864f6b8267852f501f2c1c66af15483a6b26a8d2fb456dd9de3df8d984",
+      "bytes": 3904,
+      "previousSHA256": null
+    },
+    {
+      "path": "tests/rust-parity/release-321-increment.test.mjs",
+      "sha256": "79a583aeefeadd262005afeefbedae45a82bb007f1c8e0ce6562dd849e57e24b",
+      "bytes": 6079,
+      "previousSHA256": null
+    },
+    {
+      "path": "tests/rust-parity/release-321-client-gate.lua",
+      "sha256": "7a69b179911bbc2af1438f430d9021b646b2753226c5637c9dba9475b54c1ad8",
+      "bytes": 1531,
+      "previousSHA256": null
+    }
+  ],
+  "dependencies": [
+    {
+      "path": "addon/Bindings.xml",
+      "sha256": "f017015bb40e4265d6d6fa25711cdae3baf070c5118a5009ec6873ae22bb0f2a",
+      "bytes": 490
+    },
+    {
+      "path": "addon/Bridge/ActivityView.lua",
+      "sha256": "d0d716cced185b1752e78d1d96d7194c2e768e693be5441699d55301b79445e3",
+      "bytes": 3612
+    },
+    {
+      "path": "addon/Bridge/CaptureWriter.lua",
+      "sha256": "69817010b73019f6f20dfc7e45c7f1dfcae7c0377911394dfff1236fc173661f",
+      "bytes": 5761
+    },
+    {
+      "path": "addon/Bridge/Definitions.lua",
+      "sha256": "f40b7e3d6addf1b064c8e18a779fb5c1484ad1e7e1b21e1d36aa7ea509cd31da",
+      "bytes": 82
+    },
+    {
+      "path": "addon/Bridge/FaultRunner.lua",
+      "sha256": "40b72ebd94be4f93812349b86ad13742bdca208e3362a6d8afb7eee5ff5c5071",
+      "bytes": 2350
+    },
+    {
+      "path": "addon/Bridge/FocusBindings.lua",
+      "sha256": "86b288def5c49653727c8c6eaef7cab2f60b64f57a58284eb447728e06ce2010",
+      "bytes": 2905
+    },
+    {
+      "path": "addon/Bridge/Identity.lua",
+      "sha256": "7f449701afbe8ff31d05d9c4697fa3caa8816cf618d9ee3d1c08e86d5b1f0d11",
+      "bytes": 5124
+    },
+    {
+      "path": "addon/Bridge/InputProtection.lua",
+      "sha256": "852f66cfe666a638cb338fe7cda0d432b529f716e5368abd90bfe64656ce509e",
+      "bytes": 3843
+    },
+    {
+      "path": "addon/Bridge/InputProtocol.lua",
+      "sha256": "31ff9b147682e9fd7d8683443acb96db419bffe0f0b019a8a3409cfd9d2627d1",
+      "bytes": 4248
+    },
+    {
+      "path": "addon/Bridge/InputSignal.lua",
+      "sha256": "b08b9b1cb7196abb042ec8adcce38489d43c0dd5f0b98f092aaa946d56d35254",
+      "bytes": 1701
+    },
+    {
+      "path": "addon/Bridge/InputState.lua",
+      "sha256": "e2ce20c45d8f941cfa01de6499ec1ca2d88efdbd85e02922e5afaed70a972a10",
+      "bytes": 5067
+    },
+    {
+      "path": "addon/Bridge/Investigation.lua",
+      "sha256": "2c67c3065d49f18580edb0e654b1a0f2329778010fb121d9db25480e9f3cdb30",
+      "bytes": 8119
+    },
+    {
+      "path": "addon/Bridge/MatrixSymbol.lua",
+      "sha256": "53c774b4c9c789720396be1efc5892307c5340f75b0ef36eaa2195b5b36f5eb5",
+      "bytes": 50208
+    },
+    {
+      "path": "addon/Bridge/MemoryProtocol.lua",
+      "sha256": "cd2a7379c2f9d53a64c83a11cffa6c16c258b0dddc02da286dc16f353478efdb",
+      "bytes": 1436
+    },
+    {
+      "path": "addon/Bridge/NativeAdapter.lua",
+      "sha256": "a7ca625171dbd980fbebb270045c5ae4bc7b782407447cc1efbeec91a6366ef3",
+      "bytes": 10138
+    },
+    {
+      "path": "addon/Bridge/NativeInputState.lua",
+      "sha256": "977f82ace06e8a9da12a7d21e1a315a77bc50981b99712cc784fc27051d5df2f",
+      "bytes": 5301
+    },
+    {
+      "path": "addon/Bridge/NativeProtocol.lua",
+      "sha256": "571e38c72f15f6c45e3572b21d67351fb35df352d8e278c4b83c2b5f5414b6bb",
+      "bytes": 14169
+    },
+    {
+      "path": "addon/Bridge/NativeRuntime.lua",
+      "sha256": "2a2073b7048d6e7f137c39325af534a39f03bd3fd2d4dcfd0c39d5ffbe65dccc",
+      "bytes": 1535
+    },
+    {
+      "path": "addon/Bridge/NativeWire.lua",
+      "sha256": "a8953af53d23500322a95cb1afdedbd4d1260f62026c0b436e1acd873f32cf67",
+      "bytes": 1024
+    },
+    {
+      "path": "addon/Bridge/ProbeExecution.lua",
+      "sha256": "0436d3fadcd2754818fa6a149483b5f8cae093fe5cdac94ad64e19ac33712e14",
+      "bytes": 7408
+    },
+    {
+      "path": "addon/Bridge/ProbeQueue.lua",
+      "sha256": "fcf480881340680511faa0f68194ae0c6ec812a057f6c1282630a61b639807aa",
+      "bytes": 11770
+    },
+    {
+      "path": "addon/Bridge/ProbeRunner.lua",
+      "sha256": "5e76bb8070039d9d12abbcb229567b957a0fb10f47c5628eff7e273383fb3471",
+      "bytes": 17957
+    },
+    {
+      "path": "addon/Bridge/ReceiptView.lua",
+      "sha256": "ee4741bf18ffdcf32c7223054d6024309f9b1bdfe34aaa45f2e35b6772bfdeb3",
+      "bytes": 14677
+    },
+    {
+      "path": "addon/Bridge/Receiver.lua",
+      "sha256": "fd3b4b73e15414bfd33a62ac25133690bf423488369f6128591c93a2a8a3e868",
+      "bytes": 16207
+    },
+    {
+      "path": "addon/Bridge/ReceiverBindings.lua",
+      "sha256": "624dfc17add3e84b31c4721566fe53f747fe07c0beab86f38a628836f59f0919",
+      "bytes": 5229
+    },
+    {
+      "path": "addon/Bridge/Reentry.lua",
+      "sha256": "657040e158ca079148a7c39c088b2bdef9cfbf772c83e296b51ccded1d49ff2d",
+      "bytes": 15794
+    },
+    {
+      "path": "addon/Bridge/ReportStore.lua",
+      "sha256": "4ca09e53acc7a0df9ab78b2376d2e0bceb9ab3705ed857424fc79634b9293ca4",
+      "bytes": 13010
+    },
+    {
+      "path": "addon/Bridge/Session.lua",
+      "sha256": "4d50cd3a68fa6d2eb56b2da6843b454b7a55475d22df8f23d2d1fb9c06d98e9e",
+      "bytes": 8677
+    },
+    {
+      "path": "addon/Bridge/SlotProtocol.lua",
+      "sha256": "5ee1c87528a5b1ba371f6b94dde06e2a3434a0979de65a2ecac4f4dea91c88ce",
+      "bytes": 14523
+    },
+    {
+      "path": "addon/Bridge/SlotRuntime.lua",
+      "sha256": "636ed871d85829dcae6aafc8d349d6ea4ec7511a276ffefb2454e5769309fc25",
+      "bytes": 9427
+    },
+    {
+      "path": "addon/Bridge/StartupBeacon.lua",
+      "sha256": "260d3ff2dfdd9163ac5aaf4304dd6cb4b0af08fc58db7d338111d9f9b59b2734",
+      "bytes": 2936
+    },
+    {
+      "path": "addon/Core/Compat.lua",
+      "sha256": "70a007746df96f2789aab59e04f1a69f3101c829da991e33320cf8940e7fb9b2",
+      "bytes": 4892
+    },
+    {
+      "path": "addon/Core/Controls.lua",
+      "sha256": "96c8c72ef0d0dca0d0ea4fc5cc8c000181f0f0bb7549687ebf6871a3021b7f2e",
+      "bytes": 2923
+    },
+    {
+      "path": "addon/Core/Execute.lua",
+      "sha256": "e5519919d718b3202763909d769880774ec67993878f753e3c10c3335dd132fd",
+      "bytes": 4175
+    },
+    {
+      "path": "addon/Core/Inspector.lua",
+      "sha256": "6427e439d5d2703b3fb35dd35216a7ebbb512b79e03f9f8fdbf9d16e79252143",
+      "bytes": 12782
+    },
+    {
+      "path": "addon/Core/Locale.lua",
+      "sha256": "9c4c3ed81b08c6629f477b19b9fffe5da8057434f31d617ef29018a7b2e09262",
+      "bytes": 13000
+    },
+    {
+      "path": "addon/Core/Locale_enUS.lua",
+      "sha256": "8395f64ae656c5000dff3a1082301eac4f3586930ed07fe94c0cfaf74d45cd00",
+      "bytes": 13220
+    },
+    {
+      "path": "addon/Core/Persistence.lua",
+      "sha256": "0d0c7003dde200ba520a600ab548b6339d334dfe7145b536dde1f2c051cb871d",
+      "bytes": 3993
+    },
+    {
+      "path": "addon/Core/Platform.lua",
+      "sha256": "3b93449e28353dabd0dbcdaaf50adfe7863cd6fd00794f947ca357c3cb2fc8e7",
+      "bytes": 3289
+    },
+    {
+      "path": "addon/Core/Runtime.lua",
+      "sha256": "27a38b0933e3a73dd03efd985063be326669ea17d2de445bf1431b6935897d95",
+      "bytes": 2615
+    },
+    {
+      "path": "addon/Core/Safety.lua",
+      "sha256": "8c644f6b25f3804604bb7032e5d7b74b5d13ba13699be5cc2920e8a7a58eece7",
+      "bytes": 1588
+    },
+    {
+      "path": "addon/Core/Serializer.lua",
+      "sha256": "6553f0e1a3570c79eaf67acaa1276a300d2c6e78ec4fa836e0d0709a900448dc",
+      "bytes": 11728
+    },
+    {
+      "path": "addon/Core/Startup.lua",
+      "sha256": "4885d5e5feff273cb2d7a6017007a158c8aa318421b324ec899dbf5f721b524d",
+      "bytes": 864
+    },
+    {
+      "path": "addon/Core/Stores.lua",
+      "sha256": "e22003a0c3a6f5de4ef4f7279db815d1c4ef21d4f3bdb20d5acbfc473d5af6d3",
+      "bytes": 18268
+    },
+    {
+      "path": "addon/Lychee Dev Rust.toc",
+      "sha256": "b5801970da67ab45a7cb730d8808862935958ce52064efb648bb459ed59ddee9",
+      "bytes": 2231
+    },
+    {
+      "path": "addon/Media/GitHub.png",
+      "sha256": "f7593d9abf0b1286001e3941b1e66b6753095b933a47185abf4c6931ac0abe9f",
+      "bytes": 13898
+    },
+    {
+      "path": "addon/Media/Logo.png",
+      "sha256": "96887564230fa250d2af4b151dec219e9a166f245771c4414135f498e9e4e7e3",
+      "bytes": 77752
+    },
+    {
+      "path": "addon/Media/RoundedPanel.png",
+      "sha256": "f101f37088f95553b24168fcba31419e8757c895be211041f876d0741c7e1280",
+      "bytes": 352
+    },
+    {
+      "path": "addon/Modules/AutomationHistory.lua",
+      "sha256": "cd3f14d7247082020edc77c54dc7deb5e70532131f2f0cd7d94a719c6ca377b3",
+      "bytes": 5828
+    },
+    {
+      "path": "addon/Modules/AutomationView.lua",
+      "sha256": "a733cbea2ac3e16deeddf5998d3d15ecaf620e3380dc60744f8a3c905ddaf45b",
+      "bytes": 4004
+    },
+    {
+      "path": "addon/Modules/Diagnostics.lua",
+      "sha256": "cc18c2028d6be9461cc9f5cbeb445fe6c67315305b4b6a79dddab11390327725",
+      "bytes": 10038
+    },
+    {
+      "path": "addon/Modules/Events/Catalog.lua",
+      "sha256": "104c7a09d848a20f63df2e8c965dadacd14160f504f655924d086dd0ede7b000",
+      "bytes": 5659
+    },
+    {
+      "path": "addon/Modules/Events/CatalogData_Anniversary.lua",
+      "sha256": "2be58ab0090eda6dd788aa09ac6ea8a6262af91b73f9f4dc03247a1b4d345875",
+      "bytes": 82821
+    },
+    {
+      "path": "addon/Modules/Events/CatalogData_Era.lua",
+      "sha256": "3748b756aa23b0e7cefa9fdf4afb52bb7e4f6823b9f2aab8c524376ed691bcf6",
+      "bytes": 82817
+    },
+    {
+      "path": "addon/Modules/Events/CatalogData_Forever.lua",
+      "sha256": "83c278052850856adf7d37f5027933521013b5745b0e7028b35998f6e26dc800",
+      "bytes": 100770
+    },
+    {
+      "path": "addon/Modules/Events/CatalogData_Mainline.lua",
+      "sha256": "2579edbd1b11d766718d8bc074db97603486592d554ebebe504113d59f044945",
+      "bytes": 99421
+    },
+    {
+      "path": "addon/Modules/Events/CatalogData_Mists.lua",
+      "sha256": "7eee5b0c952f39978b3377c8dcb8257678d8376f098a7b6d4c0d4932aca71151",
+      "bytes": 82793
+    },
+    {
+      "path": "addon/Modules/Events/CatalogData_Titan.lua",
+      "sha256": "ca1e3377b971808dbc2669c7e2c0956b8714668b959c1dd343b335053c8711c4",
+      "bytes": 82926
+    },
+    {
+      "path": "addon/Modules/Events/Monitor.lua",
+      "sha256": "b12373759694a6a33ad7906862ffaf321814fc9d67c746e6e60aa86f8514778e",
+      "bytes": 5945
+    },
+    {
+      "path": "addon/Modules/FunctionTrace.lua",
+      "sha256": "56041142fe3815e2527ecd8f92da828688dd678256d2ef7993e69e53a599a9d7",
+      "bytes": 4713
+    },
+    {
+      "path": "addon/Modules/ObjectInspector.lua",
+      "sha256": "57465a78003c7852a315c6791e05e8bcb2e13854db7702aac14b4cf65c1bfb21",
+      "bytes": 14337
+    },
+    {
+      "path": "addon/UI/Export.lua",
+      "sha256": "117adab1e5bb890d6dff72b78d74270c0692aff7c63fe789c818e7072380b5db",
+      "bytes": 6115
+    },
+    {
+      "path": "addon/UI/Pages/About.lua",
+      "sha256": "92aec5d5b16896d6a69610e8a07e6bf3b6b3a69f93f9bcd14d51d2739e65b88d",
+      "bytes": 7802
+    },
+    {
+      "path": "addon/UI/Pages/Automation.lua",
+      "sha256": "852604eeb6e827c9c2d2ed1141912f3b7ddc5822c1290c1902c5e6dd86b16f53",
+      "bytes": 15901
+    },
+    {
+      "path": "addon/UI/Pages/Diagnostics.lua",
+      "sha256": "3e17eaf69ecbbb5eaf4d85c4ee9fab6e27abf15ba7b61ffb2fb56be418d0fb7d",
+      "bytes": 14344
+    },
+    {
+      "path": "addon/UI/Pages/Events.lua",
+      "sha256": "2a637b23962ed53e78a2e287282394630b01098bb5615a183d38b8150f4d701b",
+      "bytes": 27138
+    },
+    {
+      "path": "addon/UI/Pages/ExportRecords.lua",
+      "sha256": "12c8a9135294719635397ffd957cf07cf3f818d24fef06db7c00a718ecf21322",
+      "bytes": 19159
+    },
+    {
+      "path": "addon/UI/Pages/Object.lua",
+      "sha256": "0fa8cf1d6d9db56df4720bf0e4ac3df8f80d33ce372b5176108f1f07d9175a35",
+      "bytes": 25782
+    },
+    {
+      "path": "addon/UI/Pages/Run.lua",
+      "sha256": "ca6146a40f94a806b8cf0310350542984adc070bb78baf02bff794b3dd2bb47b",
+      "bytes": 16097
+    },
+    {
+      "path": "addon/UI/Pages/Trace.lua",
+      "sha256": "bdb7a11173e92c1de1a88d1521f7882e6b29c3b17b9f843746d77a3f36418fd1",
+      "bytes": 10697
+    },
+    {
+      "path": "addon/UI/Theme.lua",
+      "sha256": "1ff1aa30ba3213aecc1574c4f98d48827643e17d825c000a92a9d18c342d7e66",
+      "bytes": 6364
+    },
+    {
+      "path": "addon/UI/TreeView.lua",
+      "sha256": "4d3153765772459c1302b376e1f3334fc539984d3b55755afe164420583d6c31",
+      "bytes": 7903
+    },
+    {
+      "path": "addon/UI/Widgets.lua",
+      "sha256": "539d4bb9958dc2b34f8c4f15b34d5ac921ebe193f797fce9ae2f1e110167fbb4",
+      "bytes": 26750
+    },
+    {
+      "path": "addon/UI/Window.lua",
+      "sha256": "7883b9f708b8dd1015b69a1ca5bdb4491a1a683d41f13e1fada3302cc2ea9e65",
+      "bytes": 20628
+    },
+    {
+      "path": "release/version.json",
+      "sha256": "4717110f8ff40db4d3ff0dc52db8641a8c2386a350552f822bfc87961e26d916",
+      "bytes": 61
+    },
+    {
+      "path": "tests/rust-parity/go-3.2.0.manifest.json",
+      "sha256": "78e04b069c1760da67caf7dc192fda93b51b56df5769c479c530554496bb363c",
+      "bytes": 200730
+    },
+    {
+      "path": "tests/rust-parity/oracle.mjs",
+      "sha256": "9932e76db9f5b359f1fa48a10400824e7dc94a6d482632d8fbe3dbfd240df40b",
+      "bytes": 26308
+    },
+    {
+      "path": "tools/zip.mjs",
+      "sha256": "d392eb4c677b680642d88eea083e0635ee67f8dc0b30516b00217904227e9888",
+      "bytes": 6026
+    }
+  ],
+  "logs": [
+    {
+      "path": ".tmp/release-321-stage-20261015/addon-package.log",
+      "sha256": "295a3cbb7cc463ae61344531e0e626fcb05612b579d9a1e58fe2a80bf7fa4aa4",
+      "bytes": 1659
+    },
+    {
+      "path": ".tmp/release-321-stage-20261015/increment-test.log",
+      "sha256": "59204a0632afc098218a2208bf29ecd896e5e5226e53d544539b1baced51de12",
+      "bytes": 3532
+    },
+    {
+      "path": ".tmp/release-321-stage-20261015/increment-test-r2.log",
+      "sha256": "bf66a1c22a47b373744a866ed426e19fdec153e20c4a9b0529fbcd5a1b23fbed",
+      "bytes": 822
+    }
+  ],
+  "checks": {
+    "rustfmt": "PASS syntax/format only",
+    "incrementNode": "PASS 7/7",
+    "packageNode": "FAIL 12/13; inherited release-version mismatch",
+    "rustTests": "NOT_RUN",
+    "luaTests": "NOT_RUN",
+    "windowsTests": "NOT_RUN"
+  },
+  "review": "pending independent narrow review; freeze does not certify parity"
+}

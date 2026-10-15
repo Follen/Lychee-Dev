@@ -57,6 +57,9 @@ This is an execution view, not a second evidence authority. A component being im
 
 ### Current validation cadence and new Source priorities
 
+- [ ] Apply the latest upstream-minimization direction: evaluate each remaining Emmy patch against the independent unpatched public-API matrix, prefer owned XML/business/adapter implementations, and retain only demonstrated necessary minimal hooks with consumer/regression evidence. Preserve all approved enhanced semantics; no automatic large rewrite, dynamic plugin framework or zero-maintenance promise. Session/epoch/source-map/ref provenance are not automatically engine-only responsibilities.
+
+
 - [ ] Run local real pure Rust/Node/Lua regressions first within valid owned channels; preserve results and promptly push each meaningful batch. Every push runs fast checks; explicit `[rust-native]` batch commits run full Windows/Emmy acceptance. Do not treat skipped native jobs as green product validation.
 - [ ] Finish Source process terminal proof and legacy luac caller retention, checked Windows process/job close and Closure I/O/control boundaries. An error with uncertain resource retirement must not trigger parent scratch deletion.
 - [ ] Record actual full-Retail cold/warm/native/session synchronized process-group WorkingSet and PrivateBytes, including workers, steady samples, sampling gaps and failed-run status; existing peakRSS is not_measured.
@@ -162,3 +165,10 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [x] Run exact new binding-contracts integration tests locally (5/5) and retain independent existing pure group (21/21).
 - [ ] Execute new recipe adapter24/engine36 and real slot preflight/Core/Windows/combined regressions; static review is not native acceptance.
 - [ ] Keep uncertain publication residues and no-replay behavior; limited sharing preflight is not general residue recovery.
+
+## Independent actual-use quality loops
+
+- [ ] Skill: independent agent completes real CLI workflows; verify entry discovery, correct arguments, concise steps and faithful recovery without bypasses.
+- [ ] Source: independent actual fixed full-corpus queries prove accurate/readable results, file/symbol/line/source access, Chinese/large/empty/error and refs/context contracts.
+- [ ] Data: independent actual queries/Hotfix/SQL/export tasks prove values, product/build/pin provenance, partial/coverage/error reliability, cold/warm behavior, cancellation and no false successful captures.
+- [ ] For each, independently use/review → fix → actually validate → independently review again until the frozen tree has no new actionable finding; candidate checks during implementation do not replace the four sequential final audit stages. User-assisted exceptions stay at the end of handover, with no fabricated result.

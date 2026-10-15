@@ -413,6 +413,20 @@ pub(super) fn commit_internal(
     input: CaptureInput<'_>,
     control: Option<&OperationControl>,
 ) -> Result<Value> {
+    commit_internal_observed(home, input, control, |_| {})
+}
+#[derive(Clone, Copy)]
+enum CapturePublication {
+    BeforeBlob,
+    BlobPublished,
+    ManifestPublished,
+}
+fn commit_internal_observed(
+    home: &Path,
+    input: CaptureInput<'_>,
+    control: Option<&OperationControl>,
+    mut publication: impl FnMut(CapturePublication),
+) -> Result<Value> {
     check(control)?;
     if input.media_type.is_empty()
         || input.provenance["kind"].as_str().unwrap_or("").is_empty()
@@ -437,24 +451,50 @@ pub(super) fn commit_internal(
     workspace::open(home)?;
     let digest = digest_bytes(input.bytes, control)?;
     // Publication and manifest insertion hold the same content guard as remove.
-    let _guard = ExclusiveLock::resource(&home.join("locks"), &format!("blob:{digest}"))?;
-    let blob = publish_locked(home, input.bytes, input.maximum_bytes, digest, control)?;
-    let mut capture = CaptureRef {
-        schema: "lycheedev.capture.v1".into(),
-        id: String::new(),
-        blob,
-        media_type: input.media_type.into(),
-        provenance,
-        complete: input.complete,
-        truncated: input.truncated,
-        captured_at: storage::utc_now(),
-        dependencies: Vec::new(),
+    let guard = match control {
+        Some(control) => ExclusiveLock::resource_controlled(
+            &home.join("locks"),
+            &format!("blob:{digest}"),
+            control,
+        )?,
+        None => ExclusiveLock::resource(&home.join("locks"), &format!("blob:{digest}"))?,
     };
-    capture.id = capture_identity(&capture)?;
+    let result = (|| {
+        publication(CapturePublication::BeforeBlob);
+        let blob = publish_locked(home, input.bytes, input.maximum_bytes, digest, control)?;
+        publication(CapturePublication::BlobPublished);
+        check(control)?;
+        let mut capture = CaptureRef {
+            schema: "lycheedev.capture.v1".into(),
+            id: String::new(),
+            blob,
+            media_type: input.media_type.into(),
+            provenance,
+            complete: input.complete,
+            truncated: input.truncated,
+            captured_at: storage::utc_now(),
+            dependencies: Vec::new(),
+        };
+        capture.id = capture_identity(&capture)?;
+        check(control)?;
+        let key = format!("capture/{}", capture.id);
+        if let Some(control) = control {
+            let mut metadata = Metadata::open_controlled(home, true, control)?;
+            let written = metadata.put_controlled(&key, &capture, None, control);
+            if written.is_ok() {
+                publication(CapturePublication::ManifestPublished);
+            }
+            crate::metadata::historical_write::finish_historical(written, metadata.close())?;
+        } else {
+            Metadata::open(home, true)?.put(&key, &capture, None)?;
+            publication(CapturePublication::ManifestPublished);
+        }
+        check(control)?;
+        Ok(serde_json::to_value(capture)?)
+    })();
+    let value = crate::metadata::historical_write::finish_historical(result, guard.close())?;
     check(control)?;
-    Metadata::open(home, true)?.put(&format!("capture/{}", capture.id), &capture, None)?;
-    check(control)?;
-    Ok(serde_json::to_value(capture)?)
+    Ok(value)
 }
 
 #[cfg(test)]
@@ -499,3 +539,6 @@ mod tests {
         fs::remove_dir_all(&path).unwrap();
     }
 }
+
+#[cfg(test)]
+mod controlled_tests;

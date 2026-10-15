@@ -242,7 +242,7 @@ impl Metadata {
     }
     /// Cancellation-aware publication. SQLite never sleeps inside an attempt:
     /// lock contention is retried with a stop check before every statement,
-    /// including COMMIT. Dropping a stopped transaction rolls it back.
+    /// including COMMIT. Every uncommitted exit explicitly checks rollback.
     pub fn put_controlled<T: Serialize>(
         &mut self,
         key: &str,
@@ -278,62 +278,75 @@ impl Metadata {
         }
         self.connection.busy_timeout(std::time::Duration::ZERO)?;
         let result = (|| {
-            let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let until = control.deadline();
             let mut transaction = checked_sql(control, until, &mut on_busy, || {
                 rusqlite::Transaction::new_unchecked(
                     &self.connection,
                     rusqlite::TransactionBehavior::Immediate,
                 )
             })?;
-            let existing: Option<(i64, bool)> = checked_sql(control, until, &mut on_busy, || {
+            let written = (|| {
+                let existing: Option<(i64, bool)> =
+                    checked_sql(control, until, &mut on_busy, || {
+                        transaction
+                            .query_row(
+                                "SELECT generation,value=?2 FROM documents WHERE key=?1",
+                                params![key, &raw],
+                                |row| Ok((row.get(0)?, row.get(1)?)),
+                            )
+                            .optional()
+                    })?;
+                match existing {
+                    Some((generation, _)) if expected == Some(generation) => {
+                        checked_sql(control, until, &mut on_busy, || {
+                            transaction.execute(
+                                "UPDATE documents SET generation=generation+1,value=?2 WHERE key=?1",
+                                params![key, &raw],
+                            )
+                        })?;
+                    }
+                    Some((_, true)) if expected.is_none() && !strict_create => {
+                        return control.check();
+                    }
+                    None if expected.is_none() => {
+                        checked_sql(control, until, &mut on_busy, || {
+                            transaction.execute(
+                                "INSERT INTO documents(key,generation,value) VALUES(?1,1,?2)",
+                                params![key, &raw],
+                            )
+                        })?;
+                    }
+                    _ => {
+                        return Err(ToolkitError::new(
+                            "vault.generation_conflict",
+                            "document changed or disappeared",
+                            4,
+                        ));
+                    }
+                }
+                // Transaction::commit consumes the guard on SQLITE_BUSY. Keep it
+                // alive for checked retries; rollback below handles other exits.
+                checked_sql(control, until, &mut on_busy, || {
+                    transaction.execute_batch("COMMIT")
+                })?;
+                Ok(())
+            })();
+            // Successful byte-idempotence also exits an active transaction.
+            // Explicitly roll back every uncommitted exit, even after stop.
+            let rollback = if !transaction.is_autocommit() {
                 transaction
-                    .query_row(
-                        "SELECT generation,value=?2 FROM documents WHERE key=?1",
-                        params![key, &raw],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    )
-                    .optional()
-            })?;
-            match existing {
-                Some((generation, _)) if expected == Some(generation) => {
-                    checked_sql(control, until, &mut on_busy, || {
-                        transaction.execute(
-                            "UPDATE documents SET generation=generation+1,value=?2 WHERE key=?1",
-                            params![key, &raw],
-                        )
-                    })?;
-                }
-                Some((_, true)) if expected.is_none() && !strict_create => return control.check(),
-                None if expected.is_none() => {
-                    checked_sql(control, until, &mut on_busy, || {
-                        transaction.execute(
-                            "INSERT INTO documents(key,generation,value) VALUES(?1,1,?2)",
-                            params![key, &raw],
-                        )
-                    })?;
-                }
-                _ => {
-                    return Err(ToolkitError::new(
-                        "vault.generation_conflict",
-                        "document changed or disappeared",
-                        4,
-                    ));
-                }
-            }
-            // Transaction::commit consumes the guard on SQLITE_BUSY. Keep it
-            // alive for controlled retries, and disarm only after COMMIT wins.
-            checked_sql(control, until, &mut on_busy, || {
-                transaction.execute_batch("COMMIT")
-            })?;
+                    .execute_batch("ROLLBACK")
+                    .map_err(ToolkitError::from)
+            } else {
+                Ok(())
+            };
             transaction.set_drop_behavior(rusqlite::DropBehavior::Ignore);
-            Ok(())
+            historical_write::finish_historical(written, rollback)
         })();
         let restore = self
             .connection
             .busy_timeout(std::time::Duration::from_secs(5));
-        result?;
-        restore?;
-        Ok(())
+        historical_write::finish_historical(result, restore.map_err(ToolkitError::from))
     }
     /// The caller owns already serialized JSON. Keep insertion, replacement and
     /// byte-identical idempotence in the same transaction as `put`.
@@ -711,6 +724,9 @@ fn checked_sql<T>(
                 let busy = matches!(&error, rusqlite::Error::SqliteFailure(inner, _)
                     if matches!(inner.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked));
                 if !busy || std::time::Instant::now() >= until {
+                    // The absolute cutoff may have elapsed since the check
+                    // above. Preserve the caller's stop cause at that boundary.
+                    control.check()?;
                     return Err(error.into());
                 }
                 on_busy();
@@ -1155,3 +1171,5 @@ mod historical_read_tests {
 
 pub mod historical_write;
 pub use historical_write::{HistoricalMutation, HistoricalWriter};
+
+mod controlled_open;

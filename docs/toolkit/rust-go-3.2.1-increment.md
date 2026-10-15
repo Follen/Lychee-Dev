@@ -7,7 +7,7 @@ Current authority: [handover](../../handover.md). This is a pending acceptance m
 - Business increment: `83463a03ac99050f6d9e15d9f27849cde53dab10`; later release bookkeeping is not permission to change Rust package versions. Main `1ee747e021da74a53643ec91ebdb16f6ad22e03c` is not the release pin.
 - Verification: remote tag object and local exact commit fetch checked on 2026-10-15. [Exact release diff](https://github.com/Follen/Lychee-Dev/compare/3057a9666ab078270b63c7f06de748069b0d1f4b...10b561db5706702cd42e047eaeed4ccb5e825351).
 
-All source paths below are at the current exact release. All rows are **PENDING / NOT_RUN** until a matching Rust candidate and actual evidence are recorded.
+All source paths below are at the current exact release. Full acceptance remains **PENDING**. G321-01/02 have independently reviewed A code integrated locally and seven actual Node source/packaging checks passing; their Rust/Lua/Windows execution is **NOT_RUN**. G321-03–06 remain pending independent candidate integration and execution. See handover for exact freeze and publication state.
 
 | ID | Contract increment | Fixed Go sources / tests | Rust acceptance |
 | --- | --- | --- | --- |

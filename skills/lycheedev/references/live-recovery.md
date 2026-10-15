@@ -162,9 +162,15 @@ bridge is enabled. Focus and draft text stay intact. Current INPUT publishes
 `escapeLimit=0`; no Esc is needed. Password, secure text, protected or forbidden
 editors return `input_focus_unavailable`; retain the CON and wait for the user to
 leave that field. Combat, loading and stale evidence never authorize keys.
-Held Ctrl, Alt, Shift, either Win key or a key in the selected chord delays input
-until release. The CLI never forces the user's physical keys up. A user can
-still interrupt a chord after that check; only the addon receipt confirms execution.
+Keyboard activity pauses new automatic chords. Every key must be released and
+no keyboard event may occur for 500ms before the CLI rechecks fresh INPUT and
+sends. Holding W also pauses input. The passive listener keeps only the last
+event time, passes keys through normally, and closes with the native backend.
+An active chord finishes and releases its keys before waiting; cancellation
+still releases only keys pressed by that attempt. Submitted or uncertain input
+continues waiting for its original receipt and is never replayed. Keyboard waits
+retain the original request and deadline. A user key can still overlap a chord
+that has already started; only the addon receipt confirms execution.
 
 The enabled INPUT sampler remains active when an AFK interface hides UIParent.
 Loading, world state and focus checks still apply. Fresh telemetry does not

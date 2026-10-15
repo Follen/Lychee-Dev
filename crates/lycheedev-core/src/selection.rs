@@ -94,28 +94,13 @@ pub fn source_interface(pin: &SourcePin) -> Option<u32> {
     if pin.repository != "wow-ui-source" {
         return None;
     }
-    [
-        ("retail", "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b", 120100),
-        ("classic", "1028c1e687f721ba9d3af14d1b12a5745e4227c7", 50504),
-        (
-            "classic-era",
-            "8165d4cd6e48d606369336cc3a7977902310e81e",
-            11509,
-        ),
-        (
-            "anniversary",
-            "2cfec7c00f0f24762d5ca35a4beb1e93c0cde328",
-            20506,
-        ),
-        ("titan", "825d29d3662b372f0bead725ee6abd339e4a77b5", 38002),
-        ("forever", "4d5d706b8e01c5ebe01c8dd9b7a07151d8d37069", 16001),
-    ]
-    .into_iter()
-    .find(|(product, commit, _)| {
-        *product == crate::client::source_product_family(&pin.product)
-            && *commit == pin.exact_commit
-    })
-    .map(|(_, _, interface)| interface)
+    crate::client::baselines::VERIFIED_BASELINES
+        .iter()
+        .find(|baseline| {
+            baseline.product == crate::client::source_product_family(&pin.product)
+                && baseline.source_commit == pin.exact_commit
+        })
+        .map(|baseline| baseline.interface)
 }
 /// Family-wide Blizzard source pins support each delivery track, but an exact
 /// regional pin never grants access to the other regional track.
@@ -211,7 +196,26 @@ fn identity(pin: &PinnedSet) -> Result<String> {
     ))
 }
 pub fn load_pinned(home: &Path, id: &str) -> Result<PinnedSet> {
-    let pin: PinnedSet = Metadata::open(home, false)?.read(&format!("pin/{id}"))?;
+    let pin = Metadata::open(home, false)?.read(&format!("pin/{id}"))?;
+    validate_loaded_pin(pin, id)
+}
+/// Preserve parent pin identity validation while bounding open and row reads
+/// by the invoking operation. Always check the acquired connection's close.
+pub fn load_pinned_controlled(
+    home: &Path,
+    id: &str,
+    control: &crate::control::OperationControl,
+) -> Result<PinnedSet> {
+    control.check()?;
+    let metadata = Metadata::open_controlled(home, false, control)?;
+    let result = metadata
+        .read_controlled(&format!("pin/{id}"), control)
+        .and_then(|pin| validate_loaded_pin(pin, id));
+    let pin = crate::metadata::historical_write::finish_historical(result, metadata.close())?;
+    control.check()?;
+    Ok(pin)
+}
+fn validate_loaded_pin(pin: PinnedSet, id: &str) -> Result<PinnedSet> {
     validate(&pin.spec)?;
     if pin.schema != "lycheedev.selection.v1" || pin.id != id || identity(&pin)? != id {
         return Err(ToolkitError::new(
@@ -235,8 +239,16 @@ pub fn pin_selection_controlled(
 }
 fn pin_selection_inner(
     home: &Path,
+    spec: SelectionSpec,
+    control: Option<&crate::control::OperationControl>,
+) -> Result<PinnedSet> {
+    pin_selection_observed(home, spec, control, |_| {})
+}
+fn pin_selection_observed(
+    home: &Path,
     mut spec: SelectionSpec,
     control: Option<&crate::control::OperationControl>,
+    mut published: impl FnMut(&PinnedSet),
 ) -> Result<PinnedSet> {
     if let Some(control) = control {
         control.check()?;
@@ -247,7 +259,10 @@ fn pin_selection_inner(
         change.fetched_at = storage::timestamp_offset(time);
     }
     if !spec.parent.is_empty() {
-        let parent = load_pinned(home, &spec.parent)?;
+        let parent = match control {
+            Some(control) => load_pinned_controlled(home, &spec.parent, control)?,
+            None => load_pinned(home, &spec.parent)?,
+        };
         if spec.source.is_some() && parent.source.is_some() && spec.source != parent.source {
             return Err(ToolkitError::new(
                 "selection.fixed_source_conflict",
@@ -283,12 +298,18 @@ fn pin_selection_inner(
     if let Some(control) = control {
         control.check()?;
     }
-    let mut metadata = Metadata::open(home, true)?;
     let key = format!("pin/{}", pin.id);
     if let Some(control) = control {
-        metadata.put_controlled(&key, &pin, None, control)?;
+        let mut metadata = Metadata::open_controlled(home, true, control)?;
+        let result = metadata.put_controlled(&key, &pin, None, control);
+        if result.is_ok() {
+            published(&pin);
+        }
+        crate::metadata::historical_write::finish_historical(result, metadata.close())?;
+        control.check()?;
     } else {
-        metadata.put(&key, &pin, None)?;
+        Metadata::open(home, true)?.put(&key, &pin, None)?;
+        published(&pin);
     }
     Ok(pin)
 }
@@ -601,6 +622,8 @@ mod product_tests {
     #[test]
     fn exact_source_commit_and_repository_remain_required_for_interface() {
         for (product, commit, interface) in [
+            ("retail", "18c6d677b605b312f3d813d498404631fb941977", 120105),
+            ("retail", "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b", 120100),
             (
                 "classic-era",
                 "8165d4cd6e48d606369336cc3a7977902310e81e",
@@ -659,3 +682,6 @@ mod product_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod controlled_tests;

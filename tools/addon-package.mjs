@@ -16,7 +16,7 @@ const MAIN_TOC = 'Lychee Dev.toc';
 // product profile from the running build at load time. A per-client TOC variant
 // is exactly the engine selection rule this architecture removed, so the
 // archive ships exactly one manifest and it must declare all of these.
-const SUPPORTED_INTERFACES = ['120100', '50504', '38002', '16001'];
+const SUPPORTED_INTERFACES = ['120105', '120100', '50504', '38002', '16001', '11509', '20506'];
 const CATALOG_DATA = /^Modules[\\/]Events[\\/]CatalogData_[A-Za-z0-9]+\.lua$/;
 const EMPTY_DEFINITIONS = 'local _, ns = ...\nns.ProbeDefinitions = {schema="lycheedev.queue.v1",entries={\n}}\n';
 // Ban tokens are path fragments on the lowercased, /-separated entry name.
@@ -161,7 +161,7 @@ export function verifyAddonZip(input, options = {}) {
       if (!zip.has(target)) violations.push(`missing load file: ${target} (referenced by ${key})`);
     }
     // One manifest declares every supported engine; the runtime client gate
-    // selects the profile, so all four interfaces must be present and nothing
+    // selects the profile, so all supported interfaces must be present and nothing
     // outside the supported set may slip in.
     const declared = String(parse.interface ?? '').split(',').map(part => part.trim()).filter(Boolean);
     for (const iface of SUPPORTED_INTERFACES) {
@@ -176,8 +176,8 @@ export function verifyAddonZip(input, options = {}) {
       violations.push(`${key}: Core\\ClientGate.lua must be loaded (runtime profile selection)`);
     }
     const catalogData = parse.loads.filter(line => CATALOG_DATA.test(line));
-    if (catalogData.length !== 4) {
-      violations.push(`${key}: expected all four event catalog data files, found ${catalogData.length}`);
+    if (catalogData.length !== 6) {
+      violations.push(`${key}: expected all 6 event catalog data files, found ${catalogData.length}`);
     }
   }
   const expected = options.repoRoot

@@ -1,0 +1,233 @@
+{
+  "schema": "lycheedev.metadata-consumers-tests.v2",
+  "goCommit": "10b561db5706702cd42e047eaeed4ccb5e825351",
+  "newTestCount": 16,
+  "state": "NOT_RUN",
+  "groups": [
+    {
+      "crate": "lycheedev-core",
+      "target": "--lib",
+      "filter": "metadata::controlled_open::consumer_tests",
+      "count": 4,
+      "state": "NOT_RUN",
+      "controlledCommand": "node tools/rust-cargo.mjs --owner ci-metadata-consumers-r2 --one-shot -- test --locked --offline -p lycheedev-core --lib metadata::controlled_open::consumer_tests -j 1 -- --test-threads=1"
+    },
+    {
+      "crate": "lycheedev-core",
+      "target": "--lib",
+      "filter": "selection::controlled_tests",
+      "count": 5,
+      "state": "NOT_RUN",
+      "controlledCommand": "node tools/rust-cargo.mjs --owner ci-selection-consumers-r2 --one-shot -- test --locked --offline -p lycheedev-core --lib selection::controlled_tests -j 1 -- --test-threads=1"
+    },
+    {
+      "crate": "lycheedev-core",
+      "target": "--lib",
+      "filter": "evidence::bounded::controlled_tests",
+      "count": 7,
+      "state": "NOT_RUN",
+      "controlledCommand": "node tools/rust-cargo.mjs --owner ci-evidence-consumers-r2 --one-shot -- test --locked --offline -p lycheedev-core --lib evidence::bounded::controlled_tests -j 1 -- --test-threads=1"
+    }
+  ],
+  "tests": [
+    {
+      "name": "metadata::controlled_open::consumer_tests::controlled_read_cancelled_after_open_retries_actual_busy_and_restores_timeout",
+      "source": "crates/lycheedev-core/src/metadata/controlled_open/consumer_tests.rs",
+      "sourceSha256": "5c0ddc58d89ab7eacd3ff1c03c5575baa8aa7de6867be3b3c89ef1ebbc3b8e2f",
+      "goSources": [
+        "internal/vault/metadata.go",
+        "internal/vault/metadata_rollback_test.go"
+      ],
+      "state": "NOT_RUN",
+      "kind": "real SQLite/filesystem fixture declaration",
+      "requirement": "controlled read cancelled after open retries actual busy and restores timeout"
+    },
+    {
+      "name": "metadata::controlled_open::consumer_tests::controlled_read_original_deadline_and_missing_record_diagnostics",
+      "source": "crates/lycheedev-core/src/metadata/controlled_open/consumer_tests.rs",
+      "sourceSha256": "5c0ddc58d89ab7eacd3ff1c03c5575baa8aa7de6867be3b3c89ef1ebbc3b8e2f",
+      "goSources": [
+        "internal/vault/metadata.go",
+        "internal/vault/metadata_rollback_test.go"
+      ],
+      "state": "NOT_RUN",
+      "kind": "real SQLite/filesystem fixture declaration",
+      "requirement": "controlled read original deadline and missing record diagnostics"
+    },
+    {
+      "name": "metadata::controlled_open::consumer_tests::controlled_put_commit_cancellation_explicitly_restores_autocommit",
+      "source": "crates/lycheedev-core/src/metadata/controlled_open/consumer_tests.rs",
+      "sourceSha256": "5c0ddc58d89ab7eacd3ff1c03c5575baa8aa7de6867be3b3c89ef1ebbc3b8e2f",
+      "goSources": [
+        "internal/vault/metadata.go",
+        "internal/vault/metadata_rollback_test.go"
+      ],
+      "state": "NOT_RUN",
+      "kind": "real SQLite/filesystem fixture declaration",
+      "requirement": "controlled put commit cancellation explicitly restores autocommit"
+    },
+    {
+      "name": "metadata::controlled_open::consumer_tests::controlled_idempotence_and_conflict_both_release_transaction",
+      "source": "crates/lycheedev-core/src/metadata/controlled_open/consumer_tests.rs",
+      "sourceSha256": "5c0ddc58d89ab7eacd3ff1c03c5575baa8aa7de6867be3b3c89ef1ebbc3b8e2f",
+      "goSources": [
+        "internal/vault/metadata.go",
+        "internal/vault/metadata_rollback_test.go"
+      ],
+      "state": "NOT_RUN",
+      "kind": "real SQLite/filesystem fixture declaration",
+      "requirement": "controlled idempotence and conflict both release transaction"
+    },
+    {
+      "name": "selection::controlled_tests::pin_and_load_precancel_reject_before_filesystem_work",
+      "source": "crates/lycheedev-core/src/selection/controlled_tests.rs",
+      "sourceSha256": "c2dc7b711caaef49172a62e1d5119ebd8009d950d7e0e145104d28a9254cb033",
+      "goSources": [
+        "internal/selection/pins.go",
+        "internal/selection/pins_test.go"
+      ],
+      "state": "NOT_RUN",
+      "kind": "real SQLite/filesystem fixture declaration",
+      "requirement": "pin and load precancel reject before filesystem work"
+    },
+    {
+      "name": "selection::controlled_tests::controlled_parent_read_keeps_original_deadline_under_exclusive_sqlite_lock",
+      "source": "crates/lycheedev-core/src/selection/controlled_tests.rs",
+      "sourceSha256": "c2dc7b711caaef49172a62e1d5119ebd8009d950d7e0e145104d28a9254cb033",
+      "goSources": [
+        "internal/selection/pins.go",
+        "internal/selection/pins_test.go"
+      ],
+      "state": "NOT_RUN",
+      "kind": "real SQLite/filesystem fixture declaration",
+      "requirement": "controlled parent read keeps original deadline under exclusive sqlite lock"
+    },
+    {
+      "name": "selection::controlled_tests::controlled_pin_write_deadline_does_not_publish",
+      "source": "crates/lycheedev-core/src/selection/controlled_tests.rs",
+      "sourceSha256": "c2dc7b711caaef49172a62e1d5119ebd8009d950d7e0e145104d28a9254cb033",
+      "goSources": [
+        "internal/selection/pins.go",
+        "internal/selection/pins_test.go"
+      ],
+      "state": "NOT_RUN",
+      "kind": "real SQLite/filesystem fixture declaration",
+      "requirement": "controlled pin write deadline does not publish"
+    },
+    {
+      "name": "selection::controlled_tests::cancellation_after_pin_commit_preserves_once_published_identity",
+      "source": "crates/lycheedev-core/src/selection/controlled_tests.rs",
+      "sourceSha256": "c2dc7b711caaef49172a62e1d5119ebd8009d950d7e0e145104d28a9254cb033",
+      "goSources": [
+        "internal/selection/pins.go",
+        "internal/selection/pins_test.go"
+      ],
+      "state": "NOT_RUN",
+      "kind": "real SQLite/filesystem fixture declaration",
+      "requirement": "cancellation after pin commit preserves once published identity"
+    },
+    {
+      "name": "selection::controlled_tests::controlled_pin_read_preserves_integrity_and_missing_diagnostics",
+      "source": "crates/lycheedev-core/src/selection/controlled_tests.rs",
+      "sourceSha256": "c2dc7b711caaef49172a62e1d5119ebd8009d950d7e0e145104d28a9254cb033",
+      "goSources": [
+        "internal/selection/pins.go",
+        "internal/selection/pins_test.go"
+      ],
+      "state": "NOT_RUN",
+      "kind": "real SQLite/filesystem fixture declaration",
+      "requirement": "controlled pin read preserves integrity and missing diagnostics"
+    },
+    {
+      "name": "evidence::bounded::controlled_tests::capture_precancel_and_stop_before_blob_leave_no_publication",
+      "source": "crates/lycheedev-core/src/evidence/bounded/controlled_tests.rs",
+      "sourceSha256": "c9102abeb2273c1a8d44c3d900ca368ec65d62619ca7b48bf925d3d9472bb32b",
+      "goSources": [
+        "internal/evidence/archive.go",
+        "internal/records/remote_target.go"
+      ],
+      "state": "NOT_RUN",
+      "kind": "real SQLite/filesystem fixture declaration",
+      "requirement": "capture precancel and stop before blob leave no publication"
+    },
+    {
+      "name": "evidence::bounded::controlled_tests::cancellation_after_blob_preserves_original_bytes_without_manifest_or_replay",
+      "source": "crates/lycheedev-core/src/evidence/bounded/controlled_tests.rs",
+      "sourceSha256": "c9102abeb2273c1a8d44c3d900ca368ec65d62619ca7b48bf925d3d9472bb32b",
+      "goSources": [
+        "internal/evidence/archive.go",
+        "internal/records/remote_target.go"
+      ],
+      "state": "NOT_RUN",
+      "kind": "real SQLite/filesystem fixture declaration",
+      "requirement": "cancellation after blob preserves original bytes without manifest or replay"
+    },
+    {
+      "name": "evidence::bounded::controlled_tests::cancellation_after_manifest_preserves_exact_capture_and_separate_pin_transaction",
+      "source": "crates/lycheedev-core/src/evidence/bounded/controlled_tests.rs",
+      "sourceSha256": "c9102abeb2273c1a8d44c3d900ca368ec65d62619ca7b48bf925d3d9472bb32b",
+      "goSources": [
+        "internal/evidence/archive.go",
+        "internal/records/remote_target.go"
+      ],
+      "state": "NOT_RUN",
+      "kind": "real SQLite/filesystem fixture declaration",
+      "requirement": "cancellation after manifest preserves exact capture and separate pin transaction"
+    },
+    {
+      "name": "evidence::bounded::controlled_tests::capture_metadata_contention_uses_original_deadline_and_retains_blob",
+      "source": "crates/lycheedev-core/src/evidence/bounded/controlled_tests.rs",
+      "sourceSha256": "c9102abeb2273c1a8d44c3d900ca368ec65d62619ca7b48bf925d3d9472bb32b",
+      "goSources": [
+        "internal/evidence/archive.go",
+        "internal/records/remote_target.go"
+      ],
+      "state": "NOT_RUN",
+      "kind": "real SQLite/filesystem fixture declaration",
+      "requirement": "capture metadata contention uses original deadline and retains blob"
+    },
+    {
+      "name": "evidence::bounded::controlled_tests::capture_blob_lock_contention_preserves_existing_busy_contract",
+      "source": "crates/lycheedev-core/src/evidence/bounded/controlled_tests.rs",
+      "sourceSha256": "c9102abeb2273c1a8d44c3d900ca368ec65d62619ca7b48bf925d3d9472bb32b",
+      "goSources": [
+        "internal/evidence/archive.go",
+        "internal/records/remote_target.go"
+      ],
+      "state": "NOT_RUN",
+      "kind": "real SQLite/filesystem fixture declaration",
+      "requirement": "capture blob lock contention preserves existing busy contract"
+    },
+    {
+      "name": "evidence::bounded::controlled_tests::capture_existing_blob_integrity_failure_closes_guard_without_overwriting",
+      "source": "crates/lycheedev-core/src/evidence/bounded/controlled_tests.rs",
+      "sourceSha256": "c9102abeb2273c1a8d44c3d900ca368ec65d62619ca7b48bf925d3d9472bb32b",
+      "goSources": [
+        "internal/evidence/archive.go",
+        "internal/records/remote_target.go"
+      ],
+      "state": "NOT_RUN",
+      "kind": "real SQLite/filesystem fixture declaration",
+      "requirement": "capture existing blob integrity failure closes guard without overwriting"
+    },
+    {
+      "name": "evidence::bounded::controlled_tests::capture_cleanup_join_keeps_full_primary_and_multiple_close_causes",
+      "source": "crates/lycheedev-core/src/evidence/bounded/controlled_tests.rs",
+      "sourceSha256": "c9102abeb2273c1a8d44c3d900ca368ec65d62619ca7b48bf925d3d9472bb32b",
+      "goSources": [
+        "internal/evidence/archive.go",
+        "internal/records/remote_target.go"
+      ],
+      "state": "NOT_RUN",
+      "kind": "injected cleanup error-value model",
+      "requirement": "capture cleanup join keeps full primary and multiple close causes"
+    }
+  ],
+  "regressionsRequired": [
+    "metadata::controlled_open::tests",
+    "metadata::controlled_tests",
+    "metadata::strict_create_tests",
+    "bounded_evidence integration target",
+    "budgeted_capture integration target"
+  ]
+}

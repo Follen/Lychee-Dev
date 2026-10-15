@@ -1,5 +1,6 @@
-//! In-memory orchestration fixtures only. These do not prove filesystem flush,
-//! publication leases, native key dispatch, Lua traversal or runtime replacement.
+//! Orchestration fixtures, with one explicit real DurableChannelJournal regression.
+//! FakeJournal tests do not prove filesystem flush or publication leases; none of
+//! these fixtures prove native key dispatch, Lua traversal or runtime replacement.
 use super::super::observations::{InputAction, InputDispatch, ObservationDispatch};
 use super::super::state::{Blocker, InputKind, TransactionPhase};
 use super::super::transactions::{ReleaseRecoveryDecision, missing_release_decision};
@@ -571,12 +572,17 @@ fn go_mailbox_v1_driver_unknown_intent_and_uncertain_outcomes_never_replay() {
 fn go_mailbox_v1_driver_known_zero_retry_keeps_nonce_and_deadline() {
     let mut d = prepared();
     let budget = d.state.operation.as_ref().unwrap().recovery_budget.clone();
-    for _ in 0..3 {
+    for attempt in 0..3 {
         d.backend.input_outcomes.push_back(InputOutcome {
             disposition: InputDisposition::NotSent,
             messages_queued: 0,
             at_millis: 0,
-            reason: "physical_key_held".into(),
+            reason: if attempt % 2 == 0 {
+                "desktop.keyboard_active"
+            } else {
+                "desktop.key_already_held"
+            }
+            .into(),
             retryable: true,
         });
     }
@@ -1378,4 +1384,502 @@ fn go_mailbox_v1_driver_raw_byte_report_survives_complete_and_readonly_recovery(
     d.run(&control).unwrap();
     assert_eq!(d.backend.inputs.len(), sends);
     assert_eq!(d.state.operation.as_ref().unwrap().result_bytes.0, original);
+}
+
+#[test]
+fn go_321_keyboard_wait_rechecks_input_without_replacing_exchange_or_deadline() {
+    let mut d = prepared();
+    let budget = d.state.operation.as_ref().unwrap().recovery_budget.clone();
+    d.backend.input_outcomes.push_back(InputOutcome {
+        disposition: InputDisposition::NotSent,
+        messages_queued: 0,
+        at_millis: 0,
+        reason: "desktop.keyboard_active".into(),
+        retryable: true,
+    });
+    assert!(
+        d.run(&OperationControl::default())
+            .unwrap_err()
+            .is_pending()
+    );
+    let original = d.state.transaction.as_ref().unwrap().envelope.clone();
+    let first = d.backend.inputs.last().unwrap().clone();
+    let reads = d.backend.input_reads;
+    d = reload(d);
+    d.run(&OperationControl::default()).unwrap();
+    let retry = d
+        .backend
+        .inputs
+        .iter()
+        .filter(|a| a.envelope.nonce == original.nonce)
+        .nth(1)
+        .unwrap();
+    assert_eq!(retry.envelope, original);
+    assert!(
+        retry.observation.as_ref().unwrap().sample_millis
+            > first.observation.as_ref().unwrap().sample_millis
+    );
+    assert!(d.backend.input_reads > reads);
+    assert_eq!(d.state.operation.as_ref().unwrap().recovery_budget, budget);
+    assert_eq!(
+        d.backend
+            .published
+            .iter()
+            .filter(|e| e.nonce == original.nonce)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn go_321_busy_keyboard_does_not_delay_or_replay_submitted_uncertain_or_unknown_receipt() {
+    for state in ["submitted", "uncertain", "missing"] {
+        let mut d = fixture();
+        d.backend.pending_actions.insert("bind".into());
+        if state == "missing" {
+            d.journal.fail_event = Some("input_observed");
+        } else if state == "uncertain" {
+            d.backend.input_outcomes.push_back(InputOutcome {
+                disposition: InputDisposition::Uncertain,
+                messages_queued: 1,
+                at_millis: 0,
+                reason: "fixture.uncertain".into(),
+                retryable: false,
+            });
+        }
+        assert!(d.connect(&OperationControl::default()).is_err());
+        let original = d.state.transaction.as_ref().unwrap().envelope.clone();
+        let sends = d.backend.inputs.len();
+        let reads = d.backend.input_reads;
+        d = reload(d);
+        // Any new INPUT admission would be blocked. The original receipt path
+        // must remain independent of the physical-keyboard readiness gate.
+        d.backend.input_blocked = Some("desktop.keyboard_active".into());
+        d.backend.pending_actions.remove("bind");
+        d.connect(&OperationControl::default()).unwrap();
+        assert!(d.state.bound);
+        assert_eq!(d.backend.inputs.len(), sends);
+        assert_eq!(d.backend.input_reads, reads);
+        assert_eq!(
+            d.backend
+                .published
+                .iter()
+                .filter(|e| e.nonce == original.nonce)
+                .count(),
+            1
+        );
+        assert!(d.backend.consumed.iter().any(|e| e == &original));
+    }
+}
+
+// Go 3.2.1 input_journal_test.go: TestHeldKeyRetriesKeepJournalCapacityAndOriginalDeadline.
+// Reuse the driver peer, clock, tokens, scheduler and durable filesystem fixture.
+// Only the transport remains fake; every journal append, archive, close and reload
+// below goes through the production DurableChannelJournal.
+struct HeldKeyJournalPeer(FakeBackend);
+impl Backend for HeldKeyJournalPeer {
+    fn observe(
+        &mut self,
+        control: &OperationControl,
+        query: &ObservationQuery,
+    ) -> ObservationDispatch {
+        let observed = self.0.observe(control, query);
+        control.tracked_cancel_handle().unwrap().cancel();
+        observed
+    }
+    fn publish(
+        &mut self,
+        control: &OperationControl,
+        envelope: &SlotEnvelope,
+    ) -> ChannelResult<()> {
+        self.0.publish(control, envelope)
+    }
+    fn observe_input(
+        &mut self,
+        control: &OperationControl,
+        envelope: &SlotEnvelope,
+        after: i64,
+        capability: &str,
+    ) -> ChannelResult<InputObservation> {
+        use super::super::{Header, Kind, ZERO_TOKEN, decode_input, decode_record, encode_record};
+        let sample = self.0.observe_input(control, envelope, after, capability)?;
+        let runtime = parse_token(&sample.runtime)?;
+        let wire = encode_record(
+            Header {
+                nonce: runtime,
+                runtime,
+                ticket: ZERO_TOKEN,
+                kind: Kind::Input,
+                state: 1,
+                sequence: self.0.input_reads.try_into().unwrap(),
+                length: 0,
+                checksum: 0,
+            },
+            &serde_json::to_vec(&sample).unwrap(),
+        )?;
+        // Freshness is qualified from a checksum-valid INPUT on every turn,
+        // not from a journal-restored host observed_at_millis value.
+        Ok(decode_input(
+            &decode_record(&wire)?,
+            &envelope.expected(),
+            after,
+            sample.observed_at_millis,
+        )?)
+    }
+    fn input(&mut self, control: &OperationControl, action: &InputAction) -> InputDispatch {
+        let dispatched = self.0.input(control, action);
+        control.tracked_cancel_handle().unwrap().cancel();
+        dispatched
+    }
+    fn runtime_candidate(
+        &mut self,
+        _: &OperationControl,
+        _: &Identity,
+    ) -> ChannelResult<Option<Identity>> {
+        panic!("bounded held-key turns must not discover another runtime")
+    }
+    fn supersede(
+        &mut self,
+        _: &OperationControl,
+        _: &SlotEnvelope,
+        _: &Identity,
+    ) -> ChannelResult<()> {
+        panic!("held-key retry must not supersede the original exchange")
+    }
+    fn consumed(
+        &mut self,
+        control: &OperationControl,
+        envelope: &SlotEnvelope,
+    ) -> ChannelResult<()> {
+        self.0.consumed(control, envelope)
+    }
+}
+impl super::super::runtime_retirement::RuntimeRetirementBackend for HeldKeyJournalPeer {
+    fn observe_runtime_replacement(
+        &mut self,
+        _: &OperationControl,
+        _: &Identity,
+    ) -> ChannelResult<Option<super::super::state::RuntimeReplacementProof>> {
+        panic!("held-key retry must not request runtime replacement")
+    }
+    fn retire_replaced_runtime(
+        &mut self,
+        _: &OperationControl,
+        _: &SlotEnvelope,
+        _: &super::super::state::RuntimeReplacementProof,
+    ) -> ChannelResult<()> {
+        panic!("held-key retry must not retire the original runtime")
+    }
+}
+type DurableHeldKeyDriver = Driver<
+    HeldKeyJournalPeer,
+    super::super::durable_journal::DurableChannelJournal,
+    FakeClock,
+    Tokens,
+>;
+fn reload_held_key_journal(
+    mut driver: DurableHeldKeyDriver,
+    filesystem: &super::super::durable_journal::tests::Fixture,
+) -> DurableHeldKeyDriver {
+    driver.journal.close().unwrap();
+    let journal = filesystem.open();
+    let state = journal.load(&OperationControl::default()).unwrap();
+    if let Some(input) = &state.input {
+        assert_eq!(input.observation.as_ref().unwrap().observed_at_millis, 0);
+    }
+    Driver::from_state(state, driver.backend, journal, driver.clock, driver.tokens).unwrap()
+}
+fn held_key_journal_turn(driver: &mut DurableHeldKeyDriver) -> ChannelResult<()> {
+    use super::super::recovery::test_support::{Schedule, target};
+    let control = OperationControl::uncancelable(
+        std::time::Instant::now() + std::time::Duration::from_secs(30),
+    );
+    let mut scheduler = Schedule::default();
+    let result = driver.continue_until(&control, target(), &mut scheduler);
+    assert_eq!(scheduler.waits, 0, "the peer ends each bounded CLI turn");
+    result
+}
+
+#[test]
+fn go_321_durable_keyboard_retries_preserve_archive_capacity_and_original_deadline() {
+    use super::super::durable_journal::tests::Fixture as JournalFixture;
+    use super::super::journal::{MAX_EVENTS, event_hash, hydrate, read_log_bytes};
+    use super::super::state::InputAttempt;
+    use std::{fs, path::PathBuf};
+
+    let filesystem = JournalFixture::new();
+    let mut initial = fixture();
+    // Match the existing journal fixture's connection owner. No bind input is
+    // sent: the pinned Go regression also starts with an already-bound state.
+    initial.state.id = format!("CON-{}", "1".repeat(32));
+    initial.state.owner = "1".repeat(32);
+    initial.state.bound = true;
+    initial.state.identity.owner = initial.state.owner.clone();
+    initial.state.identity.fence = 1;
+    initial.backend.identity = initial.state.identity.clone();
+    initial.backend.pending_actions.insert("prepare".into());
+    filesystem.seed([initial.state.clone()]);
+    let mut d = Driver::from_state(
+        initial.state,
+        HeldKeyJournalPeer(initial.backend),
+        filesystem.open(),
+        initial.clock,
+        initial.tokens,
+    )
+    .unwrap();
+    let start = d.clock.unix_millis();
+    d.prepare_request(
+        &OperationControl::default(),
+        "held-key-original",
+        "return 1",
+        5,
+        OperationPolicy::Opaque,
+    )
+    .unwrap();
+    let original = d.state.operation.clone().unwrap();
+    let original_budget = original.recovery_budget.clone().unwrap();
+    let deadline = original_budget.deadline_ms;
+    assert_eq!(deadline - start, 600_000);
+    let mut envelope = None;
+    let mut expected_inputs = BTreeMap::<String, InputAttempt>::new();
+    let mut immutable_archives = BTreeMap::<PathBuf, Vec<u8>>::new();
+    let mut previous_sample = 0;
+
+    for turn in 0..=600 {
+        d.clock.0.set(start + (i64::from(turn) + 1) * 500);
+        d = reload_held_key_journal(d, &filesystem);
+        d.backend.0.uptime = 1_000_000 + d.clock.unix_millis() - start - 100;
+        let reason = if turn == 600 {
+            "fixture_submission_unknown"
+        } else if turn % 2 == 0 {
+            "desktop.keyboard_active"
+        } else {
+            "desktop.key_already_held"
+        };
+        let expected_outcome = InputOutcome {
+            disposition: if turn == 600 {
+                InputDisposition::Uncertain
+            } else {
+                InputDisposition::NotSent
+            },
+            messages_queued: if turn == 600 { 1 } else { 0 },
+            at_millis: d.backend.0.uptime + 100,
+            reason: reason.into(),
+            retryable: turn != 600,
+        };
+        d.backend
+            .0
+            .input_outcomes
+            .push_back(expected_outcome.clone());
+        d.backend.0.input_error = Some(error(reason));
+        let err = held_key_journal_turn(&mut d).unwrap_err();
+        assert!(err.is_pending(), "turn {turn}: {err:?}");
+        assert!(error_is(&err, reason), "turn {turn}: {err:?}");
+        let operation = d.state.operation.as_ref().unwrap();
+        assert_eq!(
+            (&operation.id, &operation.ticket, &operation.request),
+            (&original.id, &original.ticket, &original.request)
+        );
+        let budget = operation.recovery_budget.as_ref().unwrap();
+        assert_eq!(
+            (budget.started_at_ms, budget.deadline_ms, budget.exhausted),
+            (original_budget.started_at_ms, deadline, false)
+        );
+        let transaction = d.state.transaction.as_ref().unwrap();
+        assert_eq!(transaction.phase, TransactionPhase::Published);
+        assert_eq!(
+            envelope.get_or_insert_with(|| transaction.envelope.clone()),
+            &transaction.envelope
+        );
+        let input = d.state.input.as_ref().unwrap();
+        assert_eq!(input.outcome.as_ref(), Some(&expected_outcome));
+        let sample = input.observation.as_ref().unwrap();
+        assert!(sample.sample_millis > previous_sample);
+        assert_eq!(sample.observed_at_millis, sample.sample_millis);
+        assert!(sample.sample_millis >= input.after_millis + 100);
+        previous_sample = sample.sample_millis;
+        // Persisted observations intentionally lose host freshness; compare the
+        // entire remaining intent and exact outcome after independent decoding.
+        let saved_input = serde_json::from_slice(&serde_json::to_vec(input).unwrap()).unwrap();
+        assert!(
+            expected_inputs
+                .insert(input.id.clone(), saved_input)
+                .is_none()
+        );
+        assert_eq!(d.backend.0.inputs.len(), turn as usize + 1);
+        assert_eq!(d.backend.0.input_reads, turn as usize + 1);
+        assert_eq!(d.backend.0.published.len(), 1);
+        if !d.state.archive.is_empty() {
+            let path = d
+                .journal
+                .paths()
+                .history_directory()
+                .join(format!("{}.jsonl", d.state.archive));
+            let bytes = fs::read(&path).unwrap();
+            if let Some(prior) = immutable_archives.get(&path) {
+                assert_eq!(&bytes, prior, "an immutable predecessor changed");
+            } else {
+                immutable_archives.insert(path, bytes);
+            }
+        }
+    }
+    let input_id = d.state.input.as_ref().unwrap().id.clone();
+    for _ in 0..2 {
+        d = reload_held_key_journal(d, &filesystem);
+        assert!(held_key_journal_turn(&mut d).unwrap_err().is_pending());
+        assert_eq!(d.backend.0.inputs.len(), 601);
+        assert_eq!(d.backend.0.input_reads, 601);
+        assert_eq!(d.state.input.as_ref().unwrap().id, input_id);
+    }
+    assert_eq!(d.backend.0.observations, 2);
+    d.clock.0.set(deadline);
+    assert!(error_is(
+        &held_key_journal_turn(&mut d).unwrap_err(),
+        "live.channel_budget_exhausted"
+    ));
+    assert!(
+        d.state
+            .operation
+            .as_ref()
+            .unwrap()
+            .recovery_budget
+            .as_ref()
+            .unwrap()
+            .exhausted
+    );
+    assert_eq!(d.backend.0.inputs.len(), 601);
+    d.request_close(&OperationControl::default()).unwrap();
+    d = reload_held_key_journal(d, &filesystem);
+    assert!(d.state.closing, "close intent was not durable");
+    assert!(
+        d.state
+            .operation
+            .as_ref()
+            .unwrap()
+            .recovery_budget
+            .as_ref()
+            .unwrap()
+            .exhausted
+    );
+    assert_eq!(
+        d.state
+            .operation
+            .as_ref()
+            .unwrap()
+            .recovery_budget
+            .as_ref()
+            .unwrap()
+            .deadline_ms,
+        deadline
+    );
+    assert!(held_key_journal_turn(&mut d).unwrap_err().is_pending());
+    assert_eq!(d.waiting, "closing_exchange_unconfirmed");
+    assert_eq!(d.backend.0.inputs.len(), 601);
+    assert_eq!(d.backend.0.input_reads, 601);
+    assert_eq!(d.backend.0.published.len(), 1);
+    assert_eq!(d.backend.0.observations, 3);
+
+    let paths = d.journal.paths().clone();
+    d.journal.close().unwrap();
+    let mut path = paths.log_path().to_owned();
+    let mut expected_predecessor = String::new();
+    let mut visited = BTreeSet::new();
+    let mut intents = BTreeSet::new();
+    let mut outcomes = BTreeSet::new();
+    let mut zero_outcomes = 0;
+    loop {
+        assert!(visited.insert(path.clone()), "archive chain loop");
+        assert!(visited.len() <= 16, "unexpected archive chain length");
+        let bytes = fs::read(&path).unwrap();
+        if !expected_predecessor.is_empty() {
+            assert_eq!(
+                &bytes,
+                immutable_archives.get(&path).unwrap(),
+                "archived bytes changed after retry/resume/close"
+            );
+        }
+        let log = read_log_bytes(&bytes);
+        assert!(log.failure.is_none(), "{path:?}: {:?}", log.failure);
+        assert!(!log.events.is_empty());
+        assert!(
+            log.events.len() < MAX_EVENTS,
+            "active/archived segment exhausted its hard limit"
+        );
+        let last = log.events.last().unwrap();
+        if !expected_predecessor.is_empty() {
+            assert_eq!(last.checksum, expected_predecessor);
+        }
+        for event in &log.events {
+            assert_eq!(event_hash(event).unwrap(), event.checksum);
+            if !matches!(event.kind.as_str(), "input_intent" | "input_observed") {
+                continue;
+            }
+            let snapshot: State = serde_json::from_str(event.data.get()).unwrap();
+            let state = hydrate(snapshot, |hash| {
+                Ok(fs::read(paths.artifact_directory().join(hash)).unwrap())
+            })
+            .unwrap();
+            state.validate().unwrap();
+            let operation = state.operation.as_ref().unwrap();
+            assert_eq!(
+                (
+                    &operation.id,
+                    &operation.ticket,
+                    &operation.request,
+                    &operation.code
+                ),
+                (
+                    &original.id,
+                    &original.ticket,
+                    &original.request,
+                    &original.code
+                )
+            );
+            let budget = operation.recovery_budget.as_ref().unwrap();
+            assert_eq!(
+                (budget.started_at_ms, budget.deadline_ms, budget.exhausted),
+                (original_budget.started_at_ms, deadline, false)
+            );
+            assert_eq!(
+                &state.transaction.as_ref().unwrap().envelope,
+                envelope.as_ref().unwrap()
+            );
+            let input = state.input.as_ref().unwrap();
+            assert_eq!(input.exchange, envelope.as_ref().unwrap().nonce);
+            let mut expected = expected_inputs.get(&input.id).unwrap().clone();
+            if event.kind == "input_intent" {
+                expected.outcome = None;
+                assert!(intents.insert(input.id.clone()), "duplicate input intent");
+            } else {
+                assert!(outcomes.insert(input.id.clone()), "duplicate input outcome");
+                let outcome = input.outcome.as_ref().unwrap();
+                if outcome.disposition == InputDisposition::NotSent {
+                    assert_eq!(outcome.messages_queued, 0);
+                    zero_outcomes += 1;
+                } else {
+                    assert_eq!(input.id, input_id);
+                    assert_eq!(outcome.disposition, InputDisposition::Uncertain);
+                    assert_eq!(outcome.messages_queued, 1);
+                }
+            }
+            assert_eq!(input, &expected, "archive lost an exact intent/outcome");
+        }
+        let latest: State = serde_json::from_str(last.data.get()).unwrap();
+        if latest.archive.is_empty() {
+            break;
+        }
+        expected_predecessor = latest.archive;
+        path = paths
+            .history_directory()
+            .join(format!("{expected_predecessor}.jsonl"));
+    }
+    assert_eq!(intents.len(), 601);
+    assert_eq!(outcomes, intents);
+    assert_eq!(zero_outcomes, 600);
+    assert!(visited.len() >= 2, "the real journal never checkpointed");
+    assert_eq!(visited.len(), immutable_archives.len() + 1);
+    assert_eq!(
+        fs::read_dir(paths.history_directory()).unwrap().count(),
+        immutable_archives.len()
+    );
 }

@@ -4,8 +4,8 @@
 use lycheedev_windows::{
     Process, WindowIdentity,
     mailbox_input::{
-        InputError, MailboxAction, MailboxBindings, MailboxControl, MailboxWindow,
-        send_mailbox_action, uptime_millis,
+        InputError, KeyboardActivity, MailboxAction, MailboxBindings, MailboxControl,
+        MailboxWindow, send_mailbox_action, uptime_millis,
     },
 };
 use std::{
@@ -162,6 +162,25 @@ fn bindings() -> MailboxBindings {
     MailboxBindings::new("ALT-CTRL-F12", "ALT-CTRL-F11").unwrap()
 }
 
+fn quiet_keyboard(control: &Control) -> KeyboardActivity {
+    let keyboard = KeyboardActivity::new(control.deadline()).unwrap();
+    loop {
+        control.check().unwrap();
+        match keyboard.check() {
+            Ok(()) => return keyboard,
+            Err(error)
+                if matches!(
+                    error.as_str(),
+                    "desktop.keyboard_active" | "desktop.key_already_held"
+                ) =>
+            {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => panic!("passive keyboard fixture failed: {error}"),
+        }
+    }
+}
+
 #[test]
 fn formal_reload_and_invoke_use_distinct_function_keys_without_focus_or_chat() {
     let window = OwnedWindow::new();
@@ -169,9 +188,12 @@ fn formal_reload_and_invoke_use_distinct_function_keys_without_focus_or_chat() {
     let target = window.target();
     for (action, key) in [(MailboxAction::Reload, 0x7a), (MailboxAction::Invoke, 0x7b)] {
         let previous_foreground = foreground();
+        let control = Control::new();
+        let mut keyboard = quiet_keyboard(&control);
         let started = Instant::now();
         let receipt =
-            send_mailbox_action(&target, bindings(), action, &Control::new(), |_| Ok(())).unwrap();
+            send_mailbox_action(&target, bindings(), action, &control, &keyboard, |_| Ok(()))
+                .unwrap();
         assert!(started.elapsed() >= Duration::from_millis(240));
         assert_eq!(foreground(), previous_foreground);
         assert_eq!(receipt.messages_queued, 6);
@@ -195,18 +217,21 @@ fn formal_reload_and_invoke_use_distinct_function_keys_without_focus_or_chat() {
             assert_eq!(bits & (3 << 30), if i >= 3 { 3 << 30 } else { 0 });
         }
         assert!(other.queued().is_empty());
+        keyboard.close().unwrap();
     }
 }
 #[test]
 fn formal_cancelled_chord_releases_only_injected_control_on_owned_window() {
     let window = OwnedWindow::new();
     let control = Control::new();
+    let mut keyboard = quiet_keyboard(&control);
     let mut checks = 0;
     let failure = send_mailbox_action(
         &window.target(),
         bindings(),
         MailboxAction::Invoke,
         &control,
+        &keyboard,
         |child| {
             checks += 1;
             if checks == 3 {
@@ -216,6 +241,7 @@ fn formal_cancelled_chord_releases_only_injected_control_on_owned_window() {
         },
     )
     .unwrap_err();
+    keyboard.close().unwrap();
     assert!(
         matches!(failure.cause, Some(InputError::Guard(ref error)) if error == "fixture.original_cancelled")
     );
@@ -283,17 +309,21 @@ fn busy_input_mutex_does_not_run_fresh_guard_or_queue_stale_input() {
         let _ = release_rx.recv_timeout(Duration::from_secs(5));
     });
     ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let control = Control::new();
+    let mut keyboard = KeyboardActivity::new(control.deadline()).unwrap();
     let failure = send_mailbox_action(
         &target,
         bindings(),
         MailboxAction::Invoke,
-        &Control::new(),
+        &control,
+        &keyboard,
         |_| panic!("busy must precede authorization"),
     )
     .unwrap_err();
     // Release/reap before assertions so an assertion failure strands no worker.
     release_tx.send(()).unwrap();
     thread.join().unwrap();
+    keyboard.close().unwrap();
     assert!(
         matches!(failure.cause, Some(InputError::Platform(ref value)) if value == "desktop.input_busy")
     );

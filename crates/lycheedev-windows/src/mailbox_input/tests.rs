@@ -54,6 +54,11 @@ struct Event {
 struct Fake {
     now: Rc<Cell<Instant>>,
     held: Option<u16>,
+    keyboard_checks: usize,
+    keyboard_error_after_checks: Option<usize>,
+    keyboard_activity_after_post: bool,
+    keyboard_busy: bool,
+    after_second_keyboard_check: Option<Box<dyn FnMut()>>,
     minimized: bool,
     events: Vec<Event>,
     posts: usize,
@@ -86,14 +91,31 @@ impl Backend for Fake {
     fn minimized(&mut self) -> bool {
         self.minimized
     }
-    fn pressed(&mut self, vk: u16) -> bool {
-        self.held == Some(vk)
+    fn keyboard_ready(&mut self) -> Result<(), String> {
+        self.keyboard_checks += 1;
+        super::super::keyboard_state::check_keys(|vk| self.held == Some(vk))?;
+        if self.keyboard_busy
+            || self
+                .keyboard_error_after_checks
+                .is_some_and(|at| self.keyboard_checks >= at)
+        {
+            return Err("desktop.keyboard_active".into());
+        }
+        if self.keyboard_checks == 2 {
+            if let Some(change) = self.after_second_keyboard_check.as_mut() {
+                change();
+            }
+        }
+        Ok(())
     }
     fn scan(&mut self, vk: u16) -> u32 {
         u32::from(vk)
     }
     fn post(&mut self, message: u32, vk: u16, bits: u32) -> Result<(), String> {
         self.posts += 1;
+        if self.keyboard_activity_after_post {
+            self.keyboard_busy = true;
+        }
         if let Some(error) = self.fail_posts.get(&self.posts) {
             return Err(error.clone());
         }
@@ -129,6 +151,11 @@ fn setup() -> (Fake, Control) {
     let backend = Fake {
         now,
         held: None,
+        keyboard_checks: 0,
+        keyboard_error_after_checks: None,
+        keyboard_activity_after_post: false,
+        keyboard_busy: false,
+        after_second_keyboard_check: None,
         minimized: false,
         events: Vec::new(),
         posts: 0,
@@ -221,8 +248,11 @@ fn both_actions_have_exact_six_messages_alt_context_and_forty_ms_cadence() {
     }
 }
 #[test]
-fn extra_physical_modifiers_and_chord_key_block_without_releasing_them() {
-    for held in [0x10, CTRL, ALT, 0x5b, 0x5c, 0x7b, 0x41, 0x7a] {
+fn all_physical_keyboard_keys_block_without_releasing_them() {
+    for held in [
+        0x03, 0x08, 0x10, CTRL, ALT, 0x5b, 0x5c, 0x7b, 0x41, 0x57, 0x7a, 0xa5, 0xba, 0x20, 0x01,
+        0x02, 0x04, 0x05, 0x06, 0x07, 0xff,
+    ] {
         let (mut backend, control) = setup();
         backend.held = Some(held);
         let result = send(
@@ -232,7 +262,7 @@ fn extra_physical_modifiers_and_chord_key_block_without_releasing_them() {
             MailboxAction::Invoke,
             |_| Ok(()),
         );
-        if [0x41, 0x7a].contains(&held) {
+        if [0x01, 0x02, 0x04, 0x05, 0x06, 0x07, 0xff].contains(&held) {
             assert!(result.is_ok());
         } else {
             let error = result.unwrap_err();
@@ -546,4 +576,115 @@ fn guard_panic_still_releases_owned_key_and_closes_lock() {
     assert_eq!(error.receipt.messages_queued, 2);
     assert!(error.receipt.release_complete);
     assert_eq!(backend.finishes, 1);
+}
+
+#[test]
+fn keyboard_activity_is_known_zero_before_fresh_guard_and_again_before_first_down() {
+    for blocked_at in [1, 2] {
+        let (mut backend, control) = setup();
+        backend.keyboard_error_after_checks = Some(blocked_at);
+        let started = backend.now();
+        let mut guards = 0;
+        let error = send(
+            &mut backend,
+            &control,
+            bindings(),
+            MailboxAction::Invoke,
+            |_| {
+                guards += 1;
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error.cause, Some(InputError::Platform(ref e)) if e == "desktop.keyboard_active")
+        );
+        assert_eq!(error.receipt.messages_queued, 0);
+        assert!(error.receipt.release_complete && backend.events.is_empty());
+        assert_eq!(
+            backend.now(),
+            started,
+            "keyboard waits must not block while locked"
+        );
+        assert_eq!(backend.finishes, 1);
+        assert_eq!(guards, if blocked_at == 1 { 0 } else { 1 });
+    }
+}
+
+#[test]
+fn keyboard_activity_after_first_down_never_pauses_or_interrupts_chord_release() {
+    let (mut backend, control) = setup();
+    backend.keyboard_activity_after_post = true;
+    let started = backend.now();
+    let receipt = send(
+        &mut backend,
+        &control,
+        bindings(),
+        MailboxAction::Invoke,
+        |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(backend.keyboard_checks, 2);
+    assert_eq!(backend.now() - started, KEY_CADENCE * 6);
+    assert_eq!(receipt.messages_queued, 6);
+    assert!(receipt.submission_complete && receipt.release_complete);
+    assert_eq!(
+        backend.events.iter().map(|e| e.vk).collect::<Vec<_>>(),
+        [CTRL, ALT, 0x7b, 0x7b, ALT, CTRL]
+    );
+}
+
+#[test]
+fn second_keyboard_scan_cannot_outrun_deadline_cancellation_or_identity() {
+    for change in ["deadline", "cancel", "identity", "owner"] {
+        let (mut backend, control) = setup();
+        let now = backend.now.clone();
+        let cancelled = control.cancelled.clone();
+        let identity = backend.verify_error.clone();
+        let owner_changed = Rc::new(Cell::new(false));
+        let owner = owner_changed.clone();
+        let deadline = control.deadline;
+        backend.after_second_keyboard_check = Some(Box::new(move || match change {
+            "deadline" => now.set(deadline + Duration::from_millis(1)),
+            "cancel" => cancelled.set(Some(now.get())),
+            "identity" => *identity.borrow_mut() = Some("desktop.identity_changed".into()),
+            "owner" => owner.set(true),
+            _ => unreachable!(),
+        }));
+        let error = send(
+            &mut backend,
+            &control,
+            bindings(),
+            MailboxAction::Invoke,
+            |_| {
+                if owner_changed.get() {
+                    Err(Fault::Guard)
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .unwrap_err();
+        match change {
+            "deadline" => assert!(matches!(
+                error.cause,
+                Some(InputError::Control(Fault::Deadline))
+            )),
+            "cancel" => assert!(matches!(
+                error.cause,
+                Some(InputError::Control(Fault::Cancelled))
+            )),
+            "identity" => assert!(
+                matches!(error.cause, Some(InputError::Platform(ref e)) if e == "desktop.identity_changed")
+            ),
+            "owner" => assert!(matches!(error.cause, Some(InputError::Guard(Fault::Guard)))),
+            _ => unreachable!(),
+        }
+        assert_eq!(backend.keyboard_checks, 2);
+        assert_eq!(error.receipt.messages_queued, 0);
+        assert!(error.receipt.release_complete);
+        assert!(backend.events.is_empty());
+        assert_eq!(backend.posts, 0, "no first down and no unowned cleanup up");
+        assert_eq!(backend.finishes, 1);
+    }
 }

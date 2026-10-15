@@ -1,6 +1,8 @@
 //! Flavor or supported version evidence identifies a family; only explicit slots select regional tracks.
 #![forbid(unsafe_code)]
+pub(crate) mod baselines;
 use crate::{Result, ToolkitError, selection::valid_build, storage};
+use baselines::{ClientBaseline, VERIFIED_BASELINES};
 use lycheedev_windows::filesystem::destination::{Directory, FileControl, FileCost};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, io::Read, path::Path};
@@ -77,7 +79,7 @@ pub struct Product {
     pub reused_slot: bool,
     pub interface: Option<u32>,
 }
-/// Ordered data catalog from the fixed Go 3.2.0 release.
+/// Ordered current data catalog from the fixed Go 3.2.1 release.
 pub static PRODUCTS: [Product; 7] = [
     Product {
         id: "retail",
@@ -85,10 +87,10 @@ pub static PRODUCTS: [Product; 7] = [
         display_name: "Retail",
         catalog_product: "wow",
         folder: "_retail_",
-        series: "12.1.0",
+        series: "12.1.5",
         channel: "",
         reused_slot: false,
-        interface: Some(120100),
+        interface: Some(120105),
     },
     Product {
         id: "classic",
@@ -411,8 +413,10 @@ fn family_profiles() -> impl Iterator<Item = &'static Product> {
         .filter(|profile| !profile.reused_slot)
         .chain(std::iter::once(&LEGACY_FOREVER))
 }
-fn version_profile(version: &str) -> Option<&'static Product> {
-    family_profiles().find(|profile| version.starts_with(&format!("{}.", profile.series)))
+fn version_profile(version: &str) -> Option<&'static ClientBaseline> {
+    VERIFIED_BASELINES
+        .iter()
+        .find(|profile| version.starts_with(&format!("{}.", profile.series)))
 }
 fn family_code(profile: &Product) -> &'static str {
     if profile.family == "forever" {
@@ -429,13 +433,13 @@ struct ClientBuild {
 }
 #[derive(Debug)]
 struct ClientIdentity {
-    profile: &'static Product,
+    profile: &'static ClientBaseline,
     product_code: String,
     catalog_product: String,
     full_build: String,
     source: String,
 }
-// selection.InspectClient at fixed Go 3.2.0. Selection evidence precedence
+// selection.InspectClient at fixed Go 3.2.1. Selection evidence precedence
 // belongs here; records.inspectExactClient's catalog-consistency gate is below.
 #[cfg(test)]
 fn resolve_identity(
@@ -480,7 +484,7 @@ fn resolve_identity_observed(
             return Err(identity_error("unsupported test track"));
         }
         let profile = profile.ok_or_else(|| identity_error("unsupported build"))?;
-        code = family_code(profile).into();
+        code = profile.product_code.into();
         source = "version.txt".into();
     }
     if code.is_empty() && version.is_empty() && !slot.is_empty() {
@@ -490,7 +494,7 @@ fn resolve_identity_observed(
                 continue;
             }
             if let Some(profile) = version_profile(&candidate.full_build) {
-                let candidate_code = family_code(profile);
+                let candidate_code = profile.product_code;
                 if !code.is_empty() && code != candidate_code {
                     return Err(identity_error("ambiguous active builds"));
                 }
@@ -516,9 +520,6 @@ fn resolve_identity_observed(
     if observed.is_empty() {
         *observed = code.clone();
     }
-    let profile = family_profiles()
-        .find(|profile| family_code(profile) == code)
-        .ok_or_else(|| identity_error(&format!("unsupported product {code:?}")))?;
     if version.is_empty() {
         for candidate in active {
             control.check()?;
@@ -531,9 +532,18 @@ fn resolve_identity_observed(
             version = candidate.full_build.clone();
         }
     }
-    if !identity_build(&version) || !version.starts_with(&format!("{}.", profile.series)) {
-        return Err(identity_error("missing or unsupported product/build pair"));
+    if !VERIFIED_BASELINES
+        .iter()
+        .any(|profile| profile.product_code == code)
+    {
+        return Err(identity_error(&format!("unsupported product {code:?}")));
     }
+    let profile = VERIFIED_BASELINES.iter().find(|profile| {
+        profile.product_code == code && version.starts_with(&format!("{}.", profile.series))
+    });
+    let profile = profile
+        .filter(|_| identity_build(&version))
+        .ok_or_else(|| identity_error("missing or unsupported product/build pair"))?;
     if (folder.eq_ignore_ascii_case("_classic_beta_")
         || folder.eq_ignore_ascii_case("_cn_beta_")
         || slot == "wow_cn_beta")
@@ -553,7 +563,11 @@ fn validate_installation_catalog(identity: &ClientIdentity, active: &[ClientBuil
     // Go records.inspectExactClient checks the canonical product and its data
     // slot after selection. Never borrow the other regional slot as evidence.
     let slot = if identity.catalog_product.is_empty() {
-        identity.profile.catalog_product
+        if identity.profile.data_slot.is_empty() {
+            identity.profile.product_code
+        } else {
+            identity.profile.data_slot
+        }
     } else {
         &identity.catalog_product
     };
@@ -745,8 +759,9 @@ fn inspect_inner(
     validate_installation_catalog(&identity, &active)?;
     let profile = identity.profile;
     let delivery = catalog_product(&identity.catalog_product)
-        .filter(|delivery| delivery.family == profile.family)
-        .unwrap_or(profile);
+        .filter(|delivery| delivery.family == profile.product)
+        .or_else(|| product(profile.product))
+        .ok_or_else(|| identity_error("verified baseline has no delivery product"))?;
     let catalog_code = if identity.catalog_product.is_empty() {
         &identity.product_code
     } else {
@@ -766,16 +781,16 @@ fn inspect_inner(
     })?;
     let result = ClientInstallation {
         directory: display_path(root.path()),
-        product: profile.family.into(),
+        product: profile.product.into(),
         product_code: identity.product_code,
         catalog_product: identity.catalog_product,
         display_name: delivery.display_name.into(),
         channel: delivery.channel.into(),
         metadata_branch: branch,
         full_build: identity.full_build,
-        interface: profile.interface.unwrap_or(0),
-        interface_known: profile.interface.is_some(),
-        toc: "Lychee Dev.toc".into(),
+        interface: profile.interface,
+        interface_known: true,
+        toc: profile.toc.into(),
         identity_source: identity.source,
     };
     root.verify_controlled(&mut MetadataFiles(&mut *control))?;
@@ -1223,6 +1238,79 @@ mod tests {
         let path = fixture.client("_cn_beta_", "wow_forever");
         fs::write(path.join("version.txt"), "1.60.1.70338").unwrap();
         assert_eq!(client_data_product(&inspect(&path).unwrap()), "forever");
+    }
+
+    // Go v3.2.1 TestClientEvidencePrecedence additions plus retained 12.1.0.
+    #[test]
+    fn go_321_retail_series_resolve_by_product_and_build() {
+        for (build, interface) in [("12.1.5.70391", 120105), ("12.1.0.69933", 120100)] {
+            for (folder, flavor, version, from_catalog) in [
+                ("_retail_", "wow", "", true),
+                ("arbitrarily-renamed", "wow", build, false),
+                ("arbitrarily-renamed", "", build, false),
+                ("_retail_", "", "", true),
+            ] {
+                let fixture = Fixture::new();
+                let path = fixture.client(folder, flavor);
+                if flavor.is_empty() {
+                    fs::write(path.join(".flavor.info"), "").unwrap();
+                }
+                if !version.is_empty() {
+                    fs::write(path.join("version.txt"), version).unwrap();
+                }
+                if from_catalog {
+                    fixture.catalog(&format!("us|1|{build}|wow\n"));
+                }
+                let observed = inspect(&path).unwrap();
+                assert_eq!(observed.product, "retail");
+                assert_eq!(observed.full_build, build);
+                assert_eq!(observed.interface, interface);
+                assert!(observed.interface_known);
+            }
+        }
+        assert_eq!(product("retail").unwrap().series, "12.1.5");
+        assert_eq!(product("retail").unwrap().interface, Some(120105));
+    }
+
+    #[test]
+    fn go_321_retail_catalog_rejects_unsupported_conflicting_and_ambiguous_builds() {
+        for (flavor, version, rows, message) in [
+            (
+                "wow",
+                "12.1.6.70391",
+                "",
+                "missing or unsupported product/build pair",
+            ),
+            (
+                "wow",
+                "12.1.5.70391",
+                "us|1|12.1.0.69933|wow\n",
+                "active launcher metadata contradicts selected client build",
+            ),
+            (
+                "wow",
+                "",
+                "us|1|12.1.0.69933|wow\nus|1|12.1.5.70391|wow\n",
+                "ambiguous active builds",
+            ),
+            (
+                "wow_classic",
+                "12.1.5.70391",
+                "",
+                "missing or unsupported product/build pair",
+            ),
+            ("wow_cn_beta", "12.1.5.70391", "", "unsupported test track"),
+        ] {
+            let fixture = Fixture::new();
+            let path = fixture.client("arbitrarily-renamed", flavor);
+            if !version.is_empty() {
+                fs::write(path.join("version.txt"), version).unwrap();
+            }
+            if !rows.is_empty() {
+                fixture.catalog(rows);
+            }
+            assert_eq!(inspect(&path).unwrap_err().message, message);
+        }
     }
 
     // Port of TestClientEvidencePrecedence at fixed Go 3.2.0 commit
@@ -1877,7 +1965,7 @@ mod tests {
                 let identity = result.unwrap_or_else(|error| panic!("{}: {error:?}", case.name));
                 assert_eq!(
                     (
-                        identity.profile.family,
+                        identity.profile.product,
                         identity.product_code.as_str(),
                         identity.catalog_product.as_str(),
                         identity.full_build.as_str(),

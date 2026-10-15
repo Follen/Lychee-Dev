@@ -110,6 +110,13 @@ trait Clock {
     fn wait(&mut self, control: &OperationControl, duration: Duration) -> ChannelResult<()>;
 }
 trait Sender {
+    /// Lazily start the passive monitor before taking a publication lease.
+    fn prepare(&mut self, control: &InputControl) -> ChannelResult<()> {
+        control.check()
+    }
+    fn close(&mut self) -> ChannelResult<()> {
+        Ok(())
+    }
     fn send(
         &mut self,
         control: &InputControl,
@@ -246,7 +253,7 @@ impl NativeBackend {
             core: NativeCore {
                 reader: TracedReader::new(reader, trace_directory),
                 publications,
-                sender: NativeSender(target),
+                sender: NativeSender::new(target),
                 clock: NativeClock,
                 guard,
                 release: release.into(),
@@ -260,8 +267,8 @@ impl NativeBackend {
         })
     }
     /// Close native process ownership before any diagnostic filesystem write.
-    /// Close remains retryable only for unflushed evidence, never for input or
-    /// a consumed OS handle. The original cancellation does not skip the 10s
+    /// Close may retry an unconfirmed monitor join or unflushed evidence, never
+    /// input or a consumed OS handle. The original cancellation does not skip the 10s
     /// diagnostic-only flush. Every independent close/flush error is returned.
     pub fn close(&mut self) -> ChannelResult<()> {
         self.core.close()
@@ -286,7 +293,7 @@ impl<R: Source, P: Publications, S: Sender, C: Clock> NativeCore<R, P, S, C> {
     }
     fn close(&mut self) -> ChannelResult<()> {
         self.witness = None;
-        let closed = self.reader.close();
+        let closed = finish(self.sender.close(), self.reader.close());
         let flush = OperationControl::uncancelable(Instant::now() + DIAGNOSTIC_FLUSH_LIMIT);
         finish(closed, self.reader.flush(&flush))
     }
@@ -413,7 +420,7 @@ fn input_failure(failure: InputFailure<ChannelError>) -> (InputReceipt, ChannelE
 fn retryable_input(error: &ChannelError) -> bool {
     error.any_cause(&|cause| matches!(cause, ChannelError::Pending { .. })
         || matches!(cause, ChannelError::Contract(e) if e.0 == "memory.mailbox_unavailable: path_changed")
-        || matches!(cause, ChannelError::External { causes } if causes.iter().any(|c| c == "desktop.key_already_held")))
+        || matches!(cause, ChannelError::External { causes } if causes.iter().any(|c| matches!(c.as_str(), "desktop.key_already_held" | "desktop.keyboard_active"))))
 }
 
 impl<R: Source, P: Publications, S: Sender, C: Clock> Backend for NativeCore<R, P, S, C> {
@@ -567,6 +574,10 @@ impl<R: Source, P: Publications, S: Sender, C: Clock> Backend for NativeCore<R, 
         }
         if let Err(cause) = self.check(control) {
             return not_sent("guard_failed", cause, false);
+        }
+        let monitor = self.sender.prepare(&InputControl(control.clone()));
+        if let Err(cause) = finish(monitor, check_control(control)) {
+            return not_sent("keyboard_monitor", cause, false);
         }
         let acquired = if kind == MailboxAction::Invoke {
             self.publications.acquire_for(control, &action.envelope)

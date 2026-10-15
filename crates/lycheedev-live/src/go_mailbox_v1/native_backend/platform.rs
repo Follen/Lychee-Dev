@@ -4,7 +4,7 @@ mod repair;
 use lycheedev_delivery::slot_publication::{
     PublicationError, PublicationLease, RecordedInstallationIdentity, next_free_slot,
 };
-use lycheedev_windows::mailbox_input::{send_mailbox_action, uptime_millis};
+use lycheedev_windows::mailbox_input::{KeyboardActivity, send_mailbox_action, uptime_millis};
 use repair::RepairAuthorization;
 
 pub(super) struct DiskPublications {
@@ -219,8 +219,40 @@ fn publication_error(error: PublicationError) -> ChannelError {
         }
     }
 }
-pub(super) struct NativeSender(pub(super) MailboxWindow);
+pub(super) struct NativeSender {
+    target: MailboxWindow,
+    keyboard: Option<KeyboardActivity>,
+}
+impl NativeSender {
+    pub(super) fn new(target: MailboxWindow) -> Self {
+        Self {
+            target,
+            keyboard: None,
+        }
+    }
+}
 impl Sender for NativeSender {
+    fn prepare(&mut self, control: &InputControl) -> ChannelResult<()> {
+        control.check()?;
+        if self.keyboard.is_none() {
+            match KeyboardActivity::new(control.deadline()) {
+                Ok(keyboard) => self.keyboard = Some(keyboard),
+                Err(cause) => {
+                    // A startup failure cannot erase cancellation/deadline that
+                    // arose while Windows installed the hook. Preserve both.
+                    return finish(Err(external(cause)), control.check());
+                }
+            }
+        }
+        control.check()
+    }
+    fn close(&mut self) -> ChannelResult<()> {
+        if let Some(keyboard) = self.keyboard.as_mut() {
+            keyboard.close().map_err(external)?;
+        }
+        self.keyboard = None;
+        Ok(())
+    }
     fn send(
         &mut self,
         control: &InputControl,
@@ -228,7 +260,19 @@ impl Sender for NativeSender {
         action: MailboxAction,
         guard: &mut dyn FnMut(&InputControl) -> ChannelResult<()>,
     ) -> Result<InputReceipt, InputFailure<ChannelError>> {
-        send_mailbox_action(&self.0, bindings, action, control, guard)
+        let Some(keyboard) = self.keyboard.as_ref() else {
+            return Err(InputFailure {
+                cause: Some(InputError::Platform(
+                    "desktop.keyboard_monitor_missing".into(),
+                )),
+                cleanup_errors: vec![],
+                receipt: InputReceipt {
+                    release_complete: true,
+                    ..InputReceipt::default()
+                },
+            });
+        };
+        send_mailbox_action(&self.target, bindings, action, control, keyboard, guard)
     }
 }
 pub(super) struct NativeClock;

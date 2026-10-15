@@ -790,6 +790,9 @@ mod publication_conflict_tests {
                     Err(error) => panic!("fixture HTTP accept: {error}"),
                 }
             };
+            // Windows accepted sockets can retain the listener's nonblocking
+            // mode. The fixture uses bounded blocking reads after admission.
+            connection.set_nonblocking(false).unwrap();
             connection
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .unwrap();

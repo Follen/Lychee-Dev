@@ -110,7 +110,7 @@ pub(super) trait Backend {
     fn sleep(&mut self, duration: Duration);
     fn verify(&mut self) -> Result<(), String>;
     fn minimized(&mut self) -> bool;
-    fn pressed(&mut self, vk: u16) -> bool;
+    fn keyboard_ready(&mut self) -> Result<(), String>;
     fn scan(&mut self, vk: u16) -> u32;
     fn post(&mut self, message: u32, vk: u16, bits: u32) -> Result<(), String>;
     fn acquire(&mut self) -> Result<(), String>;
@@ -216,19 +216,17 @@ impl<C: MailboxControl, B: Backend, G: FnMut(&C) -> Result<(), C::Error>> Attemp
         self.identity()?;
         self.backend.acquire().map_err(InputError::Platform)?;
         self.identity()?;
+        // Known-zero readiness is try-only. Return with the mutex released;
+        // the driver retains the original exchange/deadline and gets fresh INPUT.
+        self.backend
+            .keyboard_ready()
+            .map_err(InputError::Platform)?;
         self.check()?;
         let function = match action {
             MailboxAction::Invoke => bindings.invoke,
             MailboxAction::Reload => bindings.reload,
         };
         let keys = [CTRL, ALT, function];
-        // Extra modifiers alter the chord too. Never release physical keys.
-        for vk in [0x10, CTRL, ALT, 0x5b, 0x5c].into_iter().chain(keys) {
-            self.control()?;
-            if self.backend.pressed(vk) {
-                return Err(InputError::Platform("desktop.key_already_held".into()));
-            }
-        }
         let mut alt = false;
         for vk in keys {
             self.key(vk, false, alt || vk == ALT)?;
@@ -248,6 +246,18 @@ impl<C: MailboxControl, B: Backend, G: FnMut(&C) -> Result<(), C::Error>> Attemp
     }
     fn key(&mut self, vk: u16, up: bool, alt: bool) -> Result<(), InputError<C::Error>> {
         let (message, bits) = packet(self.backend.scan(vk), up, alt);
+        if !up && self.receipt.messages_queued == 0 {
+            // Recheck AFTER the admission fresh INPUT. The existing final
+            // control/guard/window check below must still follow this all-VK scan.
+            // Once the chord begins, physical activity never inserts a wait or
+            // interrupts its owned-key release sequence. Control errors still
+            // trigger the existing independently bounded emergency release.
+            self.backend
+                .keyboard_ready()
+                .map_err(InputError::Platform)?;
+        }
+        // Readiness may consume time or coincide with cancellation/identity
+        // changes. Never post based on the pre-scan guard, even when it was quiet.
         self.check()?;
         self.backend
             .post(message, vk, bits)

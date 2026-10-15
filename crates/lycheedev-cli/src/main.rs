@@ -1672,8 +1672,14 @@ mod tests {
     #[test]
     fn normal_invocation_control_preserves_error_priority_and_releases_failed_guard() {
         use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
-        let words = args(&["live", "execute", "--wait-seconds", "-1"]);
-        let mut parsed = parse(&words);
+        // The public parser rejects an invalid wait value before registration.
+        // Exercise the installer's defensive post-parse budget failure directly.
+        let invalid_budget = || -> Result<Invocation> {
+            let mut inv = parse(&args(&["live", "execute", "--wait-seconds", "1"])).unwrap();
+            inv.flags.insert("--wait-seconds".into(), "-1".into());
+            Ok(inv)
+        };
+        let mut parsed = invalid_budget();
         let expected = operation_seconds(parsed.as_ref().unwrap()).unwrap_err();
         let alive = Arc::new(AtomicBool::new(false));
         let mut installed = false;
@@ -1688,7 +1694,7 @@ mod tests {
         assert_eq!(error.code, expected.code);
         assert_eq!(error.message, expected.message);
         assert_eq!(error.exit_code, expected.exit_code);
-        let mut parsed = parse(&words);
+        let mut parsed = invalid_budget();
         assert!(install_invocation_control::<()>(&mut parsed, |_| {
             Err("fixture.console_install_failed".into())
         }).is_none());
@@ -1699,7 +1705,7 @@ mod tests {
     }
     #[test]
     fn normal_invocation_control_skips_information_help_and_parse_errors() {
-        for words in [vec![], vec!["version"], vec!["describe"], vec!["doctor", "--help"], vec!["not-a-command"]] {
+        for words in [vec![], vec!["version"], vec!["describe"], vec!["doctor", "--help"], vec!["not-a-command"], vec!["live", "execute", "--wait-seconds", "-1"]] {
             let mut parsed = parse(&args(&words));
             let before = parsed.as_ref().ok().map(|inv| inv.control.clone());
             assert!(install_invocation_control::<()>(&mut parsed, |_| {

@@ -35,14 +35,14 @@ impl Fault {
     }
 }
 static NEXT: AtomicU64 = AtomicU64::new(0);
-struct Fixture {
+pub(crate) struct Fixture {
     root: PathBuf,
     addon: PathBuf,
     paths: ChannelPaths,
     owner: WindowOwner,
 }
 impl Fixture {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
             "lycheedev-channel-journal-{}-{}-{}",
             std::process::id(),
@@ -92,7 +92,7 @@ impl Fixture {
     fn acquire(&self, control: &OperationControl) -> ChannelResult<DurableChannelJournal> {
         DurableChannelJournal::acquire(self.paths.clone(), &self.addon, self.owner.clone(), control)
     }
-    fn open(&self) -> DurableChannelJournal {
+    pub(crate) fn open(&self) -> DurableChannelJournal {
         // Model the fixed Go admission order: durable initial log, then claim.
         // This is fixture preparation, not the production new-claim API.
         if !self.paths.log.exists() {
@@ -101,7 +101,7 @@ impl Fixture {
         self.publish_fixture_claim();
         self.acquire(&OperationControl::default()).unwrap()
     }
-    fn seed(&self, states: impl IntoIterator<Item = State>) {
+    pub(crate) fn seed(&self, states: impl IntoIterator<Item = State>) {
         let mut events = Vec::new();
         let mut log = Vec::new();
         for state in states {

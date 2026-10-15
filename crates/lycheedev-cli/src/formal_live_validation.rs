@@ -120,10 +120,10 @@ fn manifest(
         .map(str::trim)
         .map(str::to_owned)
         .collect();
-    let expected: BTreeSet<_> = lycheedev_core::client::PRODUCTS
-        .iter()
-        .filter_map(|p| p.interface)
-        .map(|n| n.to_string())
+    let expected: BTreeSet<_> = lycheedev_delivery::slots::INTERFACES
+        .split(',')
+        .map(str::trim)
+        .map(str::to_owned)
         .collect();
     if declared != expected {
         return Err(payload(format!(
@@ -420,7 +420,7 @@ fn join(result: Result<()>, cleanup: Result<()>) -> Result<()> {
 mod tests {
     use super::*;
     fn toc(extra: &str) -> facts::Facts {
-        facts::toc(format!("## Interface: 120100,50504,11509,20506,38002,16001\n## Version: test\n## SavedVariables: LycheeToolkitDB\n{extra}Core/ClientGate.lua\nMain.xml\n").as_bytes())
+        facts::toc(format!("## Interface: 120105,120100,50504,11509,20506,38002,16001\n## Version: test\n## SavedVariables: LycheeToolkitDB\n{extra}Core/ClientGate.lua\nMain.xml\n").as_bytes())
     }
     fn resources() -> Vec<lycheedev_delivery::installation::Resource> {
         ["addon/Core/ClientGate.lua", "addon/Main.xml"]
@@ -450,7 +450,13 @@ mod tests {
         let rows = resources();
         let files = rows.iter().map(|r| (r.path.as_str(), r)).collect();
         assert!(manifest(&toc("## Version: test\n"), "test", &files).is_err());
-        for interface in ["120100", "120100,50504,11509,20506,38002,16001,42"] {
+        // Previous interface lists remain maintenance input only; a newly
+        // validated payload must include both supported Retail series.
+        for interface in [
+            "120100",
+            "120100,50504,11509,20506,38002,16001",
+            "120105,120100,50504,11509,20506,38002,16001,42",
+        ] {
             let mut f = toc("");
             f.headers[0].value = interface.into();
             assert!(manifest(&f, "test", &files).is_err());
@@ -555,12 +561,20 @@ mod tests {
     }
     #[test]
     fn parent_drop_after_unproven_compiler_entry_retains_ownership() {
-        let mut scratch = Scratch::new(&OperationControl::default()).unwrap();
+        let parent = std::env::temp_dir().join(format!(
+            "lycheedev-validator-retention-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut scratch = Scratch::new_in(&parent, &OperationControl::default()).unwrap();
         let root = scratch.0.clone();
         scratch.1 = false;
         drop(scratch);
         assert!(root.join("owner.json").is_file());
-        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(parent).unwrap();
     }
     #[test]
     fn unknown_and_retained_validation_roots_are_never_reclaimed_for_capacity() {

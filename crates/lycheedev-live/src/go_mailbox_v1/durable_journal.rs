@@ -1010,7 +1010,7 @@ enum FaultPoint {
 
 #[cfg(test)]
 #[path = "durable_journal_tests.rs"]
-mod tests;
+pub(super) mod tests;
 
 #[path = "activation_history.rs"]
 pub mod activation_history;

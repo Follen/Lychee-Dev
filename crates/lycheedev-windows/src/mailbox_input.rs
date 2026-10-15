@@ -1,4 +1,4 @@
-//! Formal Go 3.2.0 mailbox input boundary. No foreground activation or chat.
+//! Formal Go 3.2.1 mailbox input boundary. No foreground activation or chat.
 //!
 //! This is a low-level safety API, not a Live authorization capability. The
 //! caller must supply a guard that rechecks its fresh INPUT witness, publication,
@@ -6,6 +6,9 @@
 //! successful queue receipt cannot establish any of those facts.
 
 mod engine;
+mod keyboard_activity;
+mod keyboard_state;
+pub use keyboard_activity::KeyboardActivity;
 mod equal_fold;
 use crate::{Process, WindowIdentity};
 use engine::Backend;
@@ -31,7 +34,7 @@ use windows::{
             Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject},
         },
         UI::{
-            Input::KeyboardAndMouse::{GetAsyncKeyState, MAPVK_VK_TO_VSC, MapVirtualKeyW},
+            Input::KeyboardAndMouse::{MAPVK_VK_TO_VSC, MapVirtualKeyW},
             WindowsAndMessaging::{GetClassNameW, IsIconic, PostMessageW},
         },
     },
@@ -129,10 +132,12 @@ pub fn send_mailbox_action<C: MailboxControl>(
     bindings: MailboxBindings,
     action: MailboxAction,
     parent: &C,
+    keyboard: &KeyboardActivity,
     guard: impl FnMut(&C) -> Result<(), C::Error>,
 ) -> Result<InputReceipt, InputFailure<C::Error>> {
     let mut backend = WindowsBackend {
         target: target.clone(),
+        keyboard,
         lock: None,
         _thread: PhantomData,
     };
@@ -143,8 +148,9 @@ struct MutexHandle {
     handle: HANDLE,
     owned: bool,
 }
-struct WindowsBackend {
+struct WindowsBackend<'a> {
     target: MailboxWindow,
+    keyboard: &'a KeyboardActivity,
     lock: Option<MutexHandle>,
     // A Win32 mutex must be released on its acquiring OS thread. Neither the
     // backend nor its guard can be sent/shared across threads or await points.
@@ -153,7 +159,7 @@ struct WindowsBackend {
 fn os_error(operation: &str, error: windows::core::Error) -> String {
     format!("{operation}: hresult=0x{:08x}", error.code().0 as u32)
 }
-impl Backend for WindowsBackend {
+impl Backend for WindowsBackend<'_> {
     fn now(&self) -> Instant {
         Instant::now()
     }
@@ -169,10 +175,8 @@ impl Backend for WindowsBackend {
         // retains no memory and does not change activation/focus.
         unsafe { IsIconic(HWND(self.target.identity.hwnd as *mut _)).as_bool() }
     }
-    fn pressed(&mut self, vk: u16) -> bool {
-        // SAFETY: Only bounded virtual-key integers are queried; this reads
-        // physical key state without writing/releasing any user's input.
-        unsafe { GetAsyncKeyState(i32::from(vk)) < 0 }
+    fn keyboard_ready(&mut self) -> Result<(), String> {
+        self.keyboard.check()
     }
     fn scan(&mut self, vk: u16) -> u32 {
         // SAFETY: Pure integer VK-to-scan-code mapping, no pointer/lifetime or
@@ -251,7 +255,7 @@ impl Backend for WindowsBackend {
         errors
     }
 }
-impl Drop for WindowsBackend {
+impl Drop for WindowsBackend<'_> {
     fn drop(&mut self) {
         // Normal paths explicitly finish and return every error. This fallback
         // covers unwinding during allocation/FFI setup before that result exists.

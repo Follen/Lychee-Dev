@@ -101,12 +101,12 @@ impl MailboxControl for Control {
         }
     }
 }
-struct ChangeExpectedAfterDown {
-    inner: WindowsBackend,
+struct ChangeExpectedAfterDown<'a> {
+    inner: WindowsBackend<'a>,
     change_class: bool,
     posts: usize,
 }
-impl Backend for ChangeExpectedAfterDown {
+impl Backend for ChangeExpectedAfterDown<'_> {
     fn now(&self) -> Instant {
         self.inner.now()
     }
@@ -119,8 +119,10 @@ impl Backend for ChangeExpectedAfterDown {
     fn minimized(&mut self) -> bool {
         self.inner.minimized()
     }
-    fn pressed(&mut self, vk: u16) -> bool {
-        self.inner.pressed(vk)
+    fn keyboard_ready(&mut self) -> Result<(), String> {
+        // This fixture isolates identity rejection on its own HWND. Readiness
+        // faults are covered separately by the engine and passive monitor tests.
+        Ok(())
     }
     fn scan(&mut self, vk: u16) -> u32 {
         self.inner.scan(vk)
@@ -152,9 +154,11 @@ fn class_and_executable_mismatch_block_normal_and_emergency_posts_on_owned_hwnd(
         let window = OwnedWindow::new();
         let target = window.target();
         let control = Control(Instant::now() + Duration::from_secs(5));
+        let mut keyboard = KeyboardActivity::new(control.deadline()).unwrap();
         let mut backend = ChangeExpectedAfterDown {
             inner: WindowsBackend {
                 target,
+                keyboard: &keyboard,
                 lock: None,
                 _thread: PhantomData,
             },
@@ -179,5 +183,7 @@ fn class_and_executable_mismatch_block_normal_and_emergency_posts_on_owned_hwnd(
         assert_eq!(backend.posts, 1);
         assert!(backend.inner.lock.is_none());
         assert_eq!(window.packets(), [(WM_KEYDOWN, 0x11)]);
+        drop(backend);
+        keyboard.close().unwrap();
     }
 }

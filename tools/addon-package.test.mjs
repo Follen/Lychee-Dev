@@ -9,7 +9,7 @@ import { buildAddonZip, collectAddonZipEntries, parseToc, verifyAddonZip } from 
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const MANIFEST = 'Lychee Dev/Lychee Dev.toc';
-const SUPPORTED_INTERFACES = ['120100', '50504', '38002', '16001'];
+const SUPPORTED_INTERFACES = ['120105', '120100', '50504', '38002', '16001', '11509', '20506'];
 
 // Fixture ZIPs are written with writeZip into temp dirs; the repository is
 // never modified. `mutate` edits the collected entry map in memory.
@@ -76,7 +76,7 @@ test('collectAddonZipEntries ships one flat manifest, its loads and Media', () =
   const declared = toc.interface.split(',').map(part => part.trim());
   assert.deepEqual(declared, SUPPORTED_INTERFACES);
   assert.ok(toc.loads.some(line => /^Core\\ClientGate\.lua$/i.test(line)));
-  assert.equal(toc.loads.at(-1), 'Core\\Runtime.lua');
+  assert.equal(toc.loads.at(-1), 'Core\\Startup.lua');
 });
 
 test('built addon zip verifies clean', async t => {
@@ -118,7 +118,7 @@ test('a task block in Definitions.lua fails verification', async t => {
 test('an incomplete Interface declaration fails verification', async t => {
   const { buffer } = await fixtureZip(t, entries => {
     const text = entries.get(MANIFEST).toString('utf8');
-    const trimmed = text.replace('## Interface: 120100, 50504, 38002, 16001', '## Interface: 120100, 50504, 38002');
+    const trimmed = text.replace('## Interface: 120105, 120100, 50504, 38002, 16001', '## Interface: 120105, 120100, 50504, 38002');
     assert.notEqual(trimmed, text);
     entries.set(MANIFEST, Buffer.from(trimmed));
   });
@@ -128,7 +128,7 @@ test('an incomplete Interface declaration fails verification', async t => {
 test('an unsupported Interface value fails verification', async t => {
   const { buffer } = await fixtureZip(t, entries => {
     const text = entries.get(MANIFEST).toString('utf8');
-    const doctored = text.replace('## Interface: 120100', '## Interface: 99999');
+    const doctored = text.replace('## Interface: 120105', '## Interface: 99999');
     assert.notEqual(doctored, text);
     entries.set(MANIFEST, Buffer.from(doctored));
   });

@@ -143,13 +143,15 @@ Go 基线若需要变更，必须明确记录新目标、精确 commit、原因�
 
 不得仅用小fixture验收。复用历史Retail分支固定commit `31c7f7b9cc79e56c986b365c06a6afbcf3c9177b` 的完整Gethe/wow-ui-source输入：历史记录为4036文档（2551 Lua、1091 XML、394 TOC；32,269,051B），完整XML处理还记录4018 inline maps/sourceFiles6569。重新获取后核对真实清单和内容，不把历史计数当新扫描结果。完整导入/索引/分析后实际执行代表性查询、正确文件/符号/行/源码定位、refs/context/flow、cold/warm、持续session、关闭及资源释放，与固定Go同输入差分。保留全量加载闭包/映射和原预算；旧Retail08部分连续成功与Retail19“运行中”均不能替代当前候选全仓通过。若用户另指定具体分支，另固定其精确commit并新增全仓矩阵，不隐式换输入。
 
-### 独立Source与Skill实际任务质量验收
+### 独立Source、Skill与Data实际任务质量循环验收
 
-Source与Skill分别安排新的独立代理，不能由实现者自评通过，也不能只靠静态文档审查。先完成可运行CLI的自动准备；使用当前固定Go3.2.1合同和真实CLI任务证据发现问题、改进实现与回归，不为审美改变既有业务合同。
+Source、Skill与Data分别安排新的独立代理，不能由实现者自评通过，也不能只靠静态文档审查。先完成可运行CLI的自动准备；使用当前固定Go3.2.1合同和真实CLI任务证据发现问题、改进实现与回归，不为审美改变既有业务合同。
 
 - **Source独立验收**：代表性真实查询须准确、易读，能够可靠拿到正确文件、符号、行号及源码；覆盖中文、大结果、无结果、错误、refs/context输出、分页/截断/coverage/uncertainty。记录输入pin、完整命令、预期、原始输出、定位证据、问题与复测；不将实现者的解释当成CLI输出证据。
 - **Skill独立验收**：由新代理实际按Skill完成调查，检查入口发现、参数正确、步骤简洁、恢复边界和无旧协议；Source优先使用工具内固定版本来源，不随意改搜GitHub raw代替既定source pin。遇阻应按真实错误/恢复合同处理，不绕过约束。记录实际调用轨迹、失败点、修改和独立复用结果。
-- 两条验收纳入第一阶段架构/业务/Skill循环，并在后续测试充分性与综合审计中复查；CLI不可运行或依赖缺失时记blocked，不以模拟回答判通过。需要真实游戏或用户配合的部分仅移至最后清单，其余独立运行。
+- **Data独立验收**：由未实现该片的代理实际执行固定产品/build/pin的查询、表/记录/SQL、Hotfix及CSV/资产导出任务，核结果与版本来源、provenance链、partial/coverage/无结果及错误恢复是否可靠可读；覆盖取消、预算、无效输入、缓存冷热和失败后不产生伪成功capture。使用固定Go相同任务作为差分证据，保原始CLI输出和产物身份，不能以fixture数量或静态review替代真实使用。
+- 三条验收各自执行“独立使用/审查→修复→实际验证→独立复审”，直到当前冻结树无新可行动finding。实现期可先验证已就绪候选，不能据此跳过全量完成后的四阶段串行循环。
+- 三条验收纳入第一阶段架构/业务/Skill循环，并在后续测试充分性与综合审计中复查；CLI不可运行或依赖缺失时记blocked，不以模拟回答判通过。需要真实游戏或用户配合的部分仅移至最后清单，其余独立运行。
 
 ## 10. 本次交付与验证记录
 
@@ -849,6 +851,39 @@ CI新增独立checker/build/run并保留最终artifact，长job从120到150min�
 - 完整原生语义阶段采样峰，Source可执行进程合计 WS **2350.31 MiB（约2.30 GiB）** / PrivateBytes **2509.45 MiB**；整个owned Job（含测试控制器）为2723.82/2944.29 MiB，不可当纯工具占用。该组refs/context exit5、API命令exit0，整体失败；retained-session cold WS2084.27 MiB也exit5，warm/steady **NOT_MEASURED**，不能称稳定会话已成功。
 - 观测质量为`sampled_with_gaps`：这些是离散同步采样峰的下界，不是内核绝对峰或稳态占用。报告中的peakRSS/aggregateRSS仍not_measured，不能改名冒充此指标。此候选不含后续3ea线索索引/预算与binding拆分等修复；不能推断当前HEAD同值或优化已达标。没有同机Go样本或等价冷暖重复，Rust≤Go30%目标仍未测。
 - 新失败已定位实际断言：normal-invocation control fixture在parser阶段使用非法wait-seconds而unwrap，3pass1fail；definition conflict fixture Windows socket read返回10035 WouldBlock被unwrap，11pass1fail。正核最小fixture修复，保原失败不追认。其余失败/完整native输出继续按owner逐项诊断。
+
+### ea364 构建范围纠正（2026-10-15）
+
+- run `38678665448` 的 sealed CLI build / 静态 Retail 组成功不代表 all-target 成功。early owner `818b612d-83a6-4906-9328-964b6c266e52` 的真实 stderr 为 E0004：`emmy_native_context_probe` example 的 `SelectedValue` match 遗漏新增 `CallableSignature`。all-target **FAIL**，之前口头“all-target通过”更正；不排除 example、不放宽检查。
+- 本地最小候选为 example 增加明确 `callable_signature` 诊断输出及签名，不改生产推断。新 Windows typecheck **NOT_RUN**。同候选独立 Emmy recipe 的36项实际通过仅证明其9+6+21组，不替代workspace/example或完整Source验收。
+
+### 3.2.1 A 本地集成与实际验证边界（2026-10-15）
+
+- 已将独审通过的 A 切片15 owner及freeze逐hash核验、与原基底比较后合入本地：Retail 12.1.5/120105及12.1.0/120100兼容、按product/build选择、catalog/doctor、主addon ClientGate和slot TOC维护迁移。固定10b561db业务字节，未改变发布版本；七Data profiles及legacy兼容未被裁减。freeze `b76fe3f5525f252c0e387f2aeeee3c4204ccbb4de5c2b908c8951e4b6f8f558e`。
+- 本地实际执行 `node --test tests/rust-parity/release-321-increment.test.mjs` **7/7通过、0skip**。这些核固定Git来源/目录/包装形状，Rust编译、Lua执行与Windows运行仍 **NOT_RUN**。既有package版本一致性失败仍保留，不降低门槛。
+- 79ef的两项fixture修复已应用：真实parser负wait拒绝单列测试；installer防御分支从合法解析后显式注入非法值；已accept的definition socket显式回blocking，保留5s读写期限。生产逻辑未放宽，两组真实Windows复跑仍待执行。
+- B/C键盘静默/Skill候选仍独立实施，A并不意味着G321全部完成。以上本地代码待同PR下一批保存，不冒称远端已包含。
+
+### 原始控制期限贯穿 metadata 消费者（2026-10-15）
+
+- R1 controlled open 与R2消费者已经独立静态复审、顺序合入本地。R2 freeze `733cafdf6d17b3fef2ff499857a37b08ba3c73563eab6a8a9b3fc92990be1857`：7 owner、105 dependency、3消费者依赖、17份精确10b Go来源全部核hash。六owner合成后逐字一致；selection仅另叠已审3.2.1 product/build段落，未覆盖control变更。
+- selection parent读取/写入、bounded capture锁/open/put/close共用原control；SQLite每次尝试零内部等待、显式rollback、timeout restore与close原因保留。blob→identity→manifest顺序和发布身份不改；pin与capture依Go仍分别提交，取消/未知发布状态不自动重放。
+- R1十二、R2十六新增测试仍 **NOT_RUN**。新增CI metadata open与selection control组，capture由原evidence::组覆盖不重复；真实YAML解析/路径检查通过不是运行通过。legacy selection读取、其他budgeted/streamed capture、内部Directory/Destination Drop不在本片，Hotfix仍有legacy读取待后续贯通，不能称整链全部受控。
+
+### Emmy 上游最小改动优先级（2026-10-15）
+
+- 用户最新明确“尽可能别改 emmy的源码”。优先原版公开API与自有XML/business/adapter层；逐项用独立原版能力矩阵验证可外移部分，只保完整增强确实需要的最小hook和原因/回归。之前保留完整设计的决定继续有效，不能以减少patch删除能力。
+- 独立分析中的源码映射小样不等于原版Rust整体实跑。session/epoch/source-map/refs来源并非一概只能内核实现；但薄virtual Lua不能直接证明callable/nil/参数/返回/泛型及逐site覆盖全等价。暂不大重写或构建动态plugin/server；升级仍须固定版本和实际回归。
+
+### ea364终态及本地修复推进（2026-10-15 09:17 UTC）
+
+- `ea3644ef445973606722c21d84eb09dc701cb616` product run `38678665448` 已失败终止；完整artifact `11949683922` 的152个owner、2482份sealed日志逐项hash一致。CLI成功与all-target失败并存；后者是诊断example漏列`CallableSignature`，本地已补穷尽分支，尚未重编译，不把CLI通过泛化all-target。
+- 完整Retail native新的API查询实际解析`C_Timer.After`为`fun(seconds: number, callback: fun() -> ()) -> ()`，约170秒；总体semantic receipt仍partial。cold refs/warm context仍180秒deadline，retained cold为external.io失败；无retained warm/steady通过。
+- 实测cold refs阶段：API认证5.732秒、XML准备37.327秒、Emmy索引35.495秒、身份7.911秒、语法5.200秒，prepared累计98.179秒；首次scope2.562秒、operation执行27.892秒、projection27.256秒。第二scope执行在158.641秒开始后遇原期限。此为阶段耗时，不是内存归因或Go70%目标达成；后续定位重复工作，不用加deadline掩盖。
+- 三个真实IPC fixture均在公开bootstrap因缺generated API metadata退出，quota/idle/lifetime主体没有运行；正在补合法固定源码输入及公开预检，不注入token或放宽环境认证。
+- workspace大写ID fixture原为34字符，formal validator保留测试共用scratch发生锁竞争，SQL资源比较混用了cold/warm provider。三文件本地修复保32/34边界、独立scratch、每projection全新同内容cold fixture与cache证据/严格资源相等；同时新addon接口集统一双Retail slot列表。独立代码复核通过，真实Rust重跑仍NOT_RUN。
+- Go3.2.1 B2键盘静默与C Skill、E真实journal600/601状态测试已按冻结字节本地合成，Node分别8/8和5/5通过。E使用真实journal但transport/clock仍fixture，不能声称真实键盘/host claim通过。B/E Rust/Windows仍NOT_RUN。
+- Remote async R4.3 在官方锁定131registry依赖下真实Linux `--no-run`编译成功，5分20秒；owner`80a957e5-aedc-41ed-9cec-8004d56d4ee7` sealed succeeded、namespace回收，依赖与源码/工具前后核验一致。49项运行待受控channel可用；尚未默认接通完整远端Data。
 
 ## 11. 最后执行：需要实际配合的测试清单
 

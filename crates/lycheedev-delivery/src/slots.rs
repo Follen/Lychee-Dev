@@ -1,4 +1,4 @@
-//! Managed slot installation metadata follows the fixed Go 3.2.0 contract.
+//! Managed slot installation metadata follows the fixed Go 3.2.1 contract.
 //! Old metadata is readable only for maintenance; it never authorizes business input.
 use lycheedev_core::{Result, ToolkitError, control::OperationControl, storage};
 use serde::{Deserialize, Serialize};
@@ -10,7 +10,7 @@ use std::{
 };
 pub const COUNT: u16 = 500;
 pub const TRANSPORT: &str = "Lycheedev mailbox protocol v1";
-pub const INTERFACES: &str = "120100, 50504, 38002, 16001, 11509, 20506";
+pub const INTERFACES: &str = "120105, 120100, 50504, 38002, 16001, 11509, 20506";
 pub const SCHEMA: &str = "lycheedev.slots.v3";
 pub const MARKER: &str = ".lycheedev-slots.json";
 const PREVIOUS: &str = "lycheedev.slots.v2";
@@ -21,6 +21,7 @@ const MANIFEST_LIMIT: usize = 256 << 10;
 const STATIC_LIMIT: usize = 16 << 10;
 const PAYLOAD_LIMIT: usize = 2 << 20;
 const INERT: &[u8] = b"LycheeDevSlotEnvelope = nil\n";
+const PREVIOUS_RETAIL_INTERFACES: &str = "120100, 50504, 38002, 16001, 11509, 20506";
 const PREVIOUS_INTERFACES: &str = "120100, 50504, 38002, 16001";
 const PREVIOUS_MAILBOX_INTERFACES: &str = "120100, 50504, 38002, 16001, 11509";
 
@@ -317,7 +318,12 @@ pub(crate) fn static_matches(name: &str, actual: &[u8], want: &[u8]) -> bool {
     let Ok(want) = std::str::from_utf8(want) else {
         return false;
     };
-    for interfaces in [INTERFACES, PREVIOUS_MAILBOX_INTERFACES, PREVIOUS_INTERFACES] {
+    for interfaces in [
+        INTERFACES,
+        PREVIOUS_RETAIL_INTERFACES,
+        PREVIOUS_MAILBOX_INTERFACES,
+        PREVIOUS_INTERFACES,
+    ] {
         let toc = want.replacen(
             &format!("## Interface: {INTERFACES}\n"),
             &format!("## Interface: {interfaces}\n"),

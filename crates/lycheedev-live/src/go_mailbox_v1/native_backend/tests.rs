@@ -132,8 +132,25 @@ struct FakeSender {
     queued: u32,
     failure: Option<ChannelError>,
     after_first: Option<Box<dyn FnMut()>>,
+    prepare_error: Option<ChannelError>,
+    close_error: Option<ChannelError>,
+    prepares: usize,
+    closes: usize,
 }
 impl Sender for FakeSender {
+    fn prepare(&mut self, control: &InputControl) -> ChannelResult<()> {
+        self.prepares += 1;
+        assert!(
+            !self.publications.borrow().held,
+            "monitor startup must precede publication locks"
+        );
+        control.check()?;
+        self.prepare_error.clone().map_or(Ok(()), Err)
+    }
+    fn close(&mut self) -> ChannelResult<()> {
+        self.closes += 1;
+        self.close_error.take().map_or(Ok(()), Err)
+    }
     fn send(
         &mut self,
         control: &InputControl,
@@ -236,6 +253,10 @@ fn make_core(records: Vec<ChannelResult<Vec<Record>>>) -> Core {
             queued: 6,
             failure: None,
             after_first: None,
+            prepare_error: None,
+            close_error: None,
+            prepares: 0,
+            closes: 0,
         },
         clock: FakeClock {
             now: Rc::new(RefCell::new(Instant::now())),
@@ -1333,3 +1354,64 @@ fn continuation_native_retirement_keeps_deadline_before_late_parent_cancellation
 
 #[path = "tests/repair.rs"]
 mod repair;
+
+#[test]
+fn native_keyboard_activity_is_retryable_only_for_known_zero_and_consumes_witness() {
+    for queued in [0, 2, 6] {
+        let e = envelope("prepare");
+        let r = input_record(&e, 10_000, 1);
+        let mut core = make_core(vec![Ok(vec![r.clone()]), Ok(vec![r])]);
+        let c = control();
+        let a = action(&mut core, &c, &e);
+        core.sender.queued = queued;
+        core.sender.failure = Some(external("desktop.keyboard_active"));
+        let out = core.input(&c, &a);
+        assert_eq!(
+            out.outcome.disposition,
+            if queued == 0 {
+                InputDisposition::NotSent
+            } else {
+                InputDisposition::Uncertain
+            }
+        );
+        assert_eq!(out.outcome.retryable, queued == 0);
+        assert_eq!(core.sender.prepares, 1);
+        assert!(core.witness.is_none());
+        let attempts = events(&core).iter().filter(|e| *e == "send").count();
+        core.input(&c, &a);
+        assert_eq!(
+            events(&core).iter().filter(|e| *e == "send").count(),
+            attempts
+        );
+    }
+}
+
+#[test]
+fn native_monitor_start_failure_precedes_publication_and_close_joins_reader_errors() {
+    let e = envelope("prepare");
+    let r = input_record(&e, 10_000, 1);
+    let mut core = make_core(vec![Ok(vec![r])]);
+    let c = control();
+    let a = action(&mut core, &c, &e);
+    core.sender.prepare_error = Some(external("desktop.keyboard_hook"));
+    let before = events(&core).len();
+    let out = core.input(&c, &a);
+    assert_eq!(out.outcome.messages_queued, 0);
+    assert!(!out.outcome.retryable);
+    assert!(contains(
+        out.error.as_ref().unwrap(),
+        "desktop.keyboard_hook"
+    ));
+    assert!(
+        !events(&core)[before..]
+            .iter()
+            .any(|e| e == "acquire" || e == "send")
+    );
+    core.sender.close_error = Some(external("desktop.keyboard_unhook"));
+    core.reader.reader_for_test().close_error = Some(external("fixture.process_close"));
+    let error = core.close().unwrap_err();
+    assert!(contains(&error, "desktop.keyboard_unhook"));
+    assert!(contains(&error, "fixture.process_close"));
+    assert_eq!(core.sender.closes, 1);
+    assert!(events(&core).iter().any(|e| e == "reader_close"));
+}

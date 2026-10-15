@@ -83,11 +83,13 @@ fn sixteen_mebibyte_comment_definitions_admit_with_exact_go_resources() {
 }
 #[test]
 fn projection_and_publication_do_not_change_same_source_logical_usage() {
-    let fx = fixture();
     // Go requires FROM. Keep a real one-row source fixed while varying the
     // projected output; this checks executor/publication accounting, not full
     // physical-provider Go parity (which has its own remaining audit).
+    // Each projection starts with a fresh provider cache. Cold and warm
+    // provider reads have different charges independently of the expression.
     let mut expected_resources = None;
+    let mut expected_cache = None;
     for (sql, expected_row) in [
         ("SELECT 1 FROM Sample", json!([1])),
         ("SELECT 1 + 2 FROM Sample", json!([3])),
@@ -96,9 +98,26 @@ fn projection_and_publication_do_not_change_same_source_logical_usage() {
             json!(["longer output string"]),
         ),
     ] {
+        let fx = fixture();
         let out = lycheedev_data::dispatch(&fx.invocation("data sql", &[("--sql", sql)]))
             .unwrap_or_else(|error| panic!("{sql}: {error:?}"));
         assert_eq!(out.data["result"]["rows"], json!([expected_row]), "{sql}");
+        let cache = out.data["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|source| source["file"]["decodedCache"].clone())
+            .collect::<Vec<_>>();
+        assert!(!cache.is_empty(), "{sql}: no physical source evidence");
+        assert!(
+            cache.iter().all(Value::is_object),
+            "{sql}: missing cache evidence"
+        );
+        if let Some(expected) = &expected_cache {
+            assert_eq!(&cache, expected, "{sql}: provider cache state differs");
+        } else {
+            expected_cache = Some(cache);
+        }
         if let Some(expected) = &expected_resources {
             assert_eq!(&out.data["resources"], expected, "{sql}");
         } else {

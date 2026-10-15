@@ -164,7 +164,8 @@ jobs:
         run: node tools/rust-formal-lua.mjs run .tmp/ci-formal-lua-runtime/build-report.json .tmp/ci-cli-artifact/artifact.json
       - name: Run client metadata filesystem fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: node tools/rust-cargo.mjs --owner ci-client-fixtures --one-shot -- test --locked --offline -p lycheedev-core --lib client::tests -j 1
+        run: |
+          node tools/rust-cargo.mjs --owner ci-client-fixtures --one-shot -- test --locked --offline -p lycheedev-core --lib client:: -j 1
       - name: Run bounded installation selection fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-installation-selection --one-shot -- test --locked --offline -p lycheedev-core --lib installation_selection::tests -j 1
@@ -441,6 +442,13 @@ jobs:
       - name: Run SQLite lock cancellation and rollback fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-metadata-cancel --one-shot -- test --locked --offline -p lycheedev-core --lib metadata::controlled_tests -j 1
+      - name: Run controlled metadata opening and read consumer fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-metadata-opening --one-shot -- test --locked --offline -p lycheedev-core --lib metadata::controlled_open:: -j 1
+      - name: Run controlled selection pin and parent read fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-selection-control --one-shot -- test --locked --offline -p lycheedev-core --lib selection::controlled_tests -j 1
       - name: Run target cancellation before symbolic resolution
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-target-cancellation --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev tests::target_dispatch_preserves_invocation_cancellation_and_deadline -j 1

@@ -210,6 +210,10 @@ fn current_pool_recognizes_only_exact_previous_interface_and_transport_tocs() {
     for (interfaces, transport) in [
         ("120100, 50504, 38002, 16001", "memory-slot-v3"),
         ("120100, 50504, 38002, 16001, 11509", "lycheedev-mailbox-v1"),
+        (
+            "120100, 50504, 38002, 16001, 11509, 20506",
+            slots::TRANSPORT,
+        ),
         (slots::INTERFACES, slots::TRANSPORT),
     ] {
         let temp = Temp::new();
@@ -230,6 +234,11 @@ fn current_pool_recognizes_only_exact_previous_interface_and_transport_tocs() {
         }
         slots::install(&temp.0, OLD).unwrap();
         assert_eq!(fs::read(&toc).unwrap(), slots::files(1, OLD)[0].1);
+        let unverified = String::from_utf8(slots::files(1, OLD)[0].1.clone())
+            .unwrap()
+            .replace("120105", "120106");
+        fs::write(&toc, unverified).unwrap();
+        assert_eq!(slots::inspect(&temp.0, OLD).unwrap_err().exit_code, 4);
         fs::write(&toc, previous.replace("## Title:", "## WrongTitle:")).unwrap();
         assert_eq!(slots::inspect(&temp.0, OLD).unwrap_err().exit_code, 4);
     }

@@ -1,0 +1,95 @@
+{
+  "schema": "lycheedev.release-increment-test-map.v1",
+  "oracle": "10b561db5706702cd42e047eaeed4ccb5e825351",
+  "previousEvidencePin": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+  "stage": "A: product, client, addon, slot, packaging only",
+  "rustLuaTests": [
+    {
+      "goPath": "internal/selection/client_test.go",
+      "goTest": "TestClientEvidencePrecedence",
+      "sourceUrl": "https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/internal/selection/client_test.go",
+      "candidatePath": "crates/lycheedev-core/src/client.rs",
+      "candidateTests": [
+        "go_321_retail_series_resolve_by_product_and_build",
+        "go_321_retail_catalog_rejects_unsupported_conflicting_and_ambiguous_builds",
+        "go_320_client_evidence_precedence",
+        "selection_precedence_and_installation_consistency_are_distinct_go_layers"
+      ],
+      "state": "NOT_RUN"
+    },
+    {
+      "goPath": "internal/selection/baselines_test.go",
+      "goTest": "TestSourceInterfaceRequiresExactApprovedIdentity",
+      "sourceUrl": "https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/internal/selection/baselines_test.go",
+      "candidatePath": "crates/lycheedev-core/src/selection.rs",
+      "candidateTests": [
+        "exact_source_commit_and_repository_remain_required_for_interface"
+      ],
+      "state": "NOT_RUN"
+    },
+    {
+      "goPath": "internal/selection/checks_test.go",
+      "goTest": "TestSelectionChecksReportCatalogAndTargets",
+      "sourceUrl": "https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/internal/selection/checks_test.go",
+      "candidatePath": "crates/lycheedev-core/src/client/baselines.rs",
+      "candidateTests": [
+        "catalog_accepts_multiple_verified_series_for_one_product",
+        "catalog_rejects_duplicate_product_build_and_code_build",
+        "catalog_rejects_empty_or_invalid_observations"
+      ],
+      "state": "NOT_RUN"
+    },
+    {
+      "goPath": "internal/delivery/slots_test.go",
+      "goTest": "TestSlotPoolInterfaceMigration",
+      "sourceUrl": "https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/internal/delivery/slots_test.go",
+      "candidatePath": "crates/lycheedev-delivery/tests/slot_maintenance.rs",
+      "candidateTests": [
+        "current_pool_recognizes_only_exact_previous_interface_and_transport_tocs"
+      ],
+      "state": "NOT_RUN"
+    },
+    {
+      "goPath": "tests/addon/t_client_gate.lua",
+      "goTest": "Retail current/previous and zero idle frames",
+      "sourceUrl": "https://github.com/Follen/Lychee-Dev/blob/10b561db5706702cd42e047eaeed4ccb5e825351/tests/addon/t_client_gate.lua",
+      "candidatePath": "tests/rust-parity/release-321-client-gate.lua",
+      "candidateTests": [
+        "release-3.2.1 client gate: passed"
+      ],
+      "state": "NOT_RUN"
+    }
+  ],
+  "nodeTests": [
+    {
+      "command": "node --test tests/rust-parity/release-321-increment.test.mjs",
+      "state": "PASS",
+      "passed": 7,
+      "failed": 0,
+      "scope": "Source-derived facts and packaging only"
+    },
+    {
+      "command": "node --test tools/addon-package.test.mjs",
+      "state": "FAIL",
+      "passed": 12,
+      "failed": 1,
+      "failure": "built addon zip verifies clean: retained release/version.json 3.1.2 versus addon TOC 3.2.0"
+    }
+  ],
+  "unimplementedIncrement": [
+    "Windows passive keyboard hook and lifecycle",
+    "all-key plus 500 ms quiet readiness",
+    "fresh INPUT and first-keydown check with no active-chord pause",
+    "original receipt/deadline/no-replay keyboard regression mapping",
+    "live recovery and protocol guidance integration"
+  ],
+  "notRun": [
+    "Rust compilation",
+    "Rust unit/integration tests",
+    "Lua execution",
+    "Windows synthetic input fixtures",
+    "real games",
+    "full source acceptance",
+    "performance"
+  ]
+}

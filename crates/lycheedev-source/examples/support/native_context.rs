@@ -67,6 +67,7 @@ fn decision_json(input:&NativeInput,decision:&BindingDecision<BoundValue>)->Valu
         BindingDecision::Bound(value)=> {
             let selected=match &value.value {
                 SelectedValue::Function(function)=>json!({"kind":"function","closure":binding_site_json(input,BindingSite{file_id:function.file_id,syntax:function.closure}),"declaration":format!("{:?}",function.declaration)}),
+                SelectedValue::CallableSignature(signature)=>json!({"kind":"callable_signature","signature":format!("{signature:?}")}),
                 SelectedValue::Object(object)=>json!({"kind":"object","objectId":object.identity,"epoch":object.epoch,"origin":object_origin_json(input,&object.origin)}),
                 SelectedValue::Expression(site)=>json!({"kind":"expression","origin":binding_site_json(input,*site)}),
                 SelectedValue::Parameter(decl)=>json!({"kind":"parameter","declaration":format!("{decl:?}")}),

@@ -37,9 +37,14 @@ impl Drop for Fixture {
 #[test]
 fn workspace_open_accepts_uppercase_hex_without_normalizing_identity() {
     let f = Fixture::new();
-    let id = "ABCDEF0123456789ABCDEF0123456789AB";
+    let id = "ABCDEF0123456789ABCDEF0123456789";
+    assert_eq!(id.len(), 32);
     f.write("lycheedev.workspace.v1", id, "2026-10-15T00:00:00Z");
     assert_eq!(open(&f.0).unwrap()["workspaceId"], id);
+    let oversized = format!("{id}AB");
+    assert_eq!(oversized.len(), 34);
+    f.write("lycheedev.workspace.v1", &oversized, "2026-10-15T00:00:00Z");
+    assert!(open(&f.0).is_err());
 }
 #[test]
 fn workspace_open_rejects_zero_instant_including_offset_forms() {
