@@ -12,7 +12,9 @@ use serde_json::Value;
 use sha2::Sha256;
 use std::{path::Path, time::Instant};
 mod streaming;
-pub(crate) use streaming::{read_content_controlled, read_verified_content};
+pub(crate) use streaming::{
+    read_content_controlled, read_content_in_session, read_verified_content,
+};
 #[derive(Default, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Stats {

@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 20:52 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`f5bd1d9ef99bba3962b7f20d99629b51b839dd65`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 20:58 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`a588f526db5616eef3014e66327bb84cb0196440`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -27,7 +27,7 @@
 
 默认target list/add/show/remove现已接同一typed配置与受控分页/SQLite owner：取消旧10000截断，精确name/大小写优先与raw历史引用验证，show输出resolvedPins；remove按Go先独立CAS删除配置、再读取引用generation、每64项删除，保可见部分提交与removedPins。17项新Rust回归已写未跑；target resolve --file正继续按其自身Go JSON规则实施，不误套project更严duplicate/depth限制。其余workspace同步open/native Drop及project命令边界仍未闭合。
 
-默认SQL进一步接入typed quoted identifiers与真实单次schema preflight按需RootResolver：local/CDN/effective/meta不再提前准备全部根源；owned WDC Table移动原FileBytes并保留资源owner，local复用Prepared Encoding/Root。32物理源、固定Go100万rows/4096columns/partitions及caller ContentBytes边界已接，capture仍在同一checked-close范围，后续关闭失败保已提交ID。24源与41项新增Rust回归已组合，尚未执行。query内CASC索引缓存/成功capture前原路径rehash、EXISTS/标量子查询/EXPLAIN ANALYZE仍是明确后继缺口，未称全SQL等价。
+默认SQL进一步接入typed quoted identifiers与真实单次schema preflight按需RootResolver：local/CDN/effective/meta不再提前准备全部根源；owned WDC Table移动原FileBytes并保留资源owner，local复用Prepared Encoding/Root。32物理源、固定Go100万rows/4096columns/partitions及caller ContentBytes边界已接，capture仍在同一checked-close范围，后续关闭失败保已提交ID。24源与41项新增Rust回归已组合，尚未执行。后继默认local SQL的Encoding/Root/selected现共用query内CASC索引owner：64MiB缓存、XOR首选bucket、原累计逻辑账、真实内存释放与成功capture前原Directory逐块SHA256/最新generation复核已接，8新Rust回归未跑。独立legacy local API仍原路径，EXISTS/标量子查询/EXPLAIN ANALYZE继续实施，未称全SQL等价。
 
 默认 named target 现已组合完整配置-only分页查找、严格解码/名称匹配、真实local/remote pin准备及create-only引用；不读取旧引用历史，不因准备期间配置删除拒绝已认证目标，named结果不冒认底层capture为公开provenance。默认local同时恢复固定Go的client/build→parent/definitions→复查→pin→配置blob→capture顺序。12源与17项新Rust测试已写，未编译执行；原目录/客户端读取的native Drop边界仍待后续收口。
 
@@ -114,7 +114,7 @@ Data 323自适应基础R23.1已独审并组合：真实workspace准入后采样W
 1. bc2普通refs/context/API已在90秒合同内成功；继续处理retained session冷启动接近2GiB上限的EOF与回收。6699编译可见域错误已修，集中重编译后验证。Data推进完整Prepared与lazy SQL默认链，Emmy推进真实摄取和诊断链及相应补丁退役，不再逐小片等待审查。
 2. 本地symbols因Emmy owner未确认回收而保留，不接管/新channel绕行；当前479e57 GNU完整输入已准备但未执行。独立Windows三方契约job已真实成功，资源压力和产品deadline仍需后继验证；未来Linux观察修正不追认历史owner。
 3. decoded alias与body owner已组合，接续真实DB2/SQL/static/effective/meta/JSONL外层admission到capture。EXPLAIN/schema-only不能扫描内容，callback不得重放；大资产保持流式。
-4. named target完整local/remote默认链已组合，下一集中批验证真实分页、历史坏配置、准备期间删除/引用冲突及CLI输出。SQL typed标识符与真实按需解析已接线；继续query内CASC索引缓存/原路径rehash、EXISTS/标量子查询/EXPLAIN ANALYZE缺口。
+4. named target完整local/remote默认链已组合，下一集中批验证真实分页、历史坏配置、准备期间删除/引用冲突及CLI输出。SQL typed标识符与真实按需解析已接线；local SQL的query内CASC索引缓存/原路径rehash也已接线；继续EXISTS/标量子查询/EXPLAIN ANALYZE缺口。
 5. 继续全部Emmy hook实际外移、真实Source可读性、Skill/Data使用质量及旧消费者替代；完成后依次执行下列四阶段审计。
 6. 每批及时普通push保留工作。只有有意义的验证批使用 `[rust-native]`；fast成功/长组skip不等于产品通过。只维护此handover，历史细节移至证据文档而不持续堆叠当前页。
 

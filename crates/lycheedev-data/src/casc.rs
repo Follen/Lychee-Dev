@@ -20,8 +20,10 @@ use std::{
     sync::{Mutex, atomic::AtomicU64},
     time::{Duration, Instant},
 };
+mod query_source;
 mod selected;
-pub(crate) use selected::open_selected;
+pub(crate) use query_source::QuerySource;
+pub(crate) use selected::{open_selected, open_selected_from_source};
 /// An authenticated physical section; only the BLTE framing is read at open.
 /// The shared range decoder independently authenticates requested chunks/pages.
 pub struct LocalReader<'a> {
@@ -194,6 +196,28 @@ fn open_reader<'a>(
     encoded_bytes: usize,
     scope: Scope<'a>,
 ) -> Result<LocalReader<'a>> {
+    open_reader_source(root, encoding_key, encoded_bytes, scope, None)
+}
+pub(crate) fn open_local_reader_from_source<'a>(
+    source: &QuerySource<'a>,
+    encoding_key: &str,
+    encoded_bytes: usize,
+) -> Result<LocalReader<'a>> {
+    open_reader_source(
+        source.root(),
+        encoding_key,
+        encoded_bytes,
+        source.scope(),
+        Some(source),
+    )
+}
+fn open_reader_source<'a>(
+    root: &Path,
+    encoding_key: &str,
+    encoded_bytes: usize,
+    scope: Scope<'a>,
+    source: Option<&QuerySource<'a>>,
+) -> Result<LocalReader<'a>> {
     scope.check()?;
     let Scope {
         limits,
@@ -212,27 +236,43 @@ fn open_reader<'a>(
         return Err(exceeded());
     }
     let directory = root.join("Data/data");
-    let selected = select_indices_with_check(root, limits, cancel, || scope.check())?;
+    let selected = if let Some(source) = source {
+        source.indices(&key)?
+    } else {
+        select_indices_with_check(root, limits, cancel, || scope.check())?
+            .into_iter()
+            .map(|(bucket, (_, name))| (bucket, name))
+            .collect()
+    };
     let mut collision = false;
-    for (bucket, (_, name)) in selected {
-        let raw = bounded_read_with_check(
-            &directory.join(&name),
-            root,
-            limits.index_bytes,
-            limits,
-            cancel,
-            budget,
-            || scope.check(),
-        )?;
-        let index = Index::open_with_check(&raw, bucket, limits, cancel, || scope.check())?;
-        for span in index.find_with_check(&key, limits, cancel, || scope.check())? {
+    for (bucket, name) in selected {
+        let spans = if let Some(source) = source {
+            source.find(bucket, &name, &key)?
+        } else {
+            let raw = bounded_read_with_check(
+                &directory.join(&name),
+                root,
+                limits.index_bytes,
+                limits,
+                cancel,
+                budget,
+                || scope.check(),
+            )?;
+            Index::open_with_check(&raw, bucket, limits, cancel, || scope.check())?
+                .find_with_check(&key, limits, cancel, || scope.check())?
+        };
+        for span in spans {
             if span.bytes != encoded_bytes as u64 + 30 {
                 collision = true;
                 continue;
             }
             let path = directory.join(span.filename());
             scope.guard(root, &path)?;
-            let mut file = fs::File::open(&path)?;
+            let mut file = if let Some(source) = source {
+                source.open_file(&span.filename())?
+            } else {
+                fs::File::open(&path)?
+            };
             let result = (|| {
                 scope.check()?;
                 let meta = file.metadata()?;

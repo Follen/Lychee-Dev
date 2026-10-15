@@ -62,6 +62,44 @@ pub(crate) fn open_selected<'a>(
     budget: &'a Budget,
     control: &'a OperationControl,
 ) -> Result<Selected<'a>> {
+    open_selected_source(
+        root,
+        encoding_key,
+        encoded_bytes,
+        limits,
+        budget,
+        control,
+        None,
+    )
+}
+pub(crate) fn open_selected_from_source<'a>(
+    source: &QuerySource<'_>,
+    encoding_key: &str,
+    encoded_bytes: usize,
+    limits: Limits,
+    budget: &'a Budget,
+    control: &'a OperationControl,
+) -> Result<Selected<'a>> {
+    source.check_consumer(budget, control)?;
+    open_selected_source(
+        source.root(),
+        encoding_key,
+        encoded_bytes,
+        limits,
+        budget,
+        control,
+        Some(source),
+    )
+}
+fn open_selected_source<'a>(
+    root: &Path,
+    encoding_key: &str,
+    encoded_bytes: usize,
+    limits: Limits,
+    budget: &'a Budget,
+    control: &'a OperationControl,
+    source: Option<&QuerySource<'_>>,
+) -> Result<Selected<'a>> {
     let mut scope = Scope {
         limits,
         cancel: None,
@@ -75,26 +113,43 @@ pub(crate) fn open_selected<'a>(
     }
     let directory_path = root.join("Data/data");
     let mut collision = false;
-    for (bucket, (_, name)) in select_indices_with_check(root, limits, None, || scope.check())? {
-        let raw = bounded_read_with_check(
-            &directory_path.join(&name),
-            root,
-            limits.index_bytes,
-            limits,
-            None,
-            Some(budget),
-            || scope.check(),
-        )?;
-        let index = Index::open_with_check(&raw, bucket, limits, None, || scope.check())?;
-        for span in index.find_with_check(&expected, limits, None, || scope.check())? {
+    let selected = if let Some(source) = source {
+        source.indices(&expected)?
+    } else {
+        select_indices_with_check(root, limits, None, || scope.check())?
+            .into_iter()
+            .map(|(bucket, (_, name))| (bucket, name))
+            .collect()
+    };
+    for (bucket, name) in selected {
+        let spans =
+            if let Some(source) = source {
+                source.find(bucket, &name, &expected)?
+            } else {
+                let raw = bounded_read_with_check(
+                    &directory_path.join(&name),
+                    root,
+                    limits.index_bytes,
+                    limits,
+                    None,
+                    Some(budget),
+                    || scope.check(),
+                )?;
+                Index::open_with_check(&raw, bucket, limits, None, || scope.check())?
+                    .find_with_check(&expected, limits, None, || scope.check())?
+            };
+        for span in spans {
             if span.bytes != encoded_bytes as u64 + 30 {
                 collision = true;
                 continue;
             }
             let directory = storage::Directory::open_controlled(&directory_path, &mut scope)?;
-            let file = match directory
-                .open_file_controlled(std::ffi::OsStr::new(&span.filename()), &mut scope)
-            {
+            let opened = if let Some(source) = source {
+                source.open_file(&span.filename())
+            } else {
+                directory.open_file_controlled(std::ffi::OsStr::new(&span.filename()), &mut scope)
+            };
+            let file = match opened {
                 Ok(file) => file,
                 Err(error) => {
                     return scope.finish(

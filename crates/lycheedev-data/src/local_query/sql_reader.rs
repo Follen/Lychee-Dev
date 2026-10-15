@@ -39,6 +39,7 @@ pub(super) struct Reader<'a> {
     // The independent owner survives fallible Prepared constructors. Closing
     // cannot be lost through an early error consuming their source argument.
     source: Option<Arc<casc::LocalReader<'a>>>,
+    casc: Option<casc::QuerySource<'a>>,
     ready: Option<Ready<'a>>,
 }
 impl<'a> Reader<'a> {
@@ -56,6 +57,7 @@ impl<'a> Reader<'a> {
             keys: None,
             target: None,
             source: None,
+            casc: None,
             ready: None,
         })
     }
@@ -103,17 +105,23 @@ impl<'a> Reader<'a> {
         }
         let target = self.target.as_ref().expect("prepared local target");
         let limits = self.limits();
+        if self.casc.is_none() {
+            self.casc = Some(casc::QuerySource::open(
+                &target.common_root,
+                limits,
+                self.budget,
+                &self.inv.control,
+            )?);
+        }
+        let casc_source = self.casc.as_ref().expect("prepared CASC index source");
         if self.source.is_none() {
             self.budget.safety_only().charge(Cost::retained(
                 size_of::<casc::LocalReader<'_>>() + 2 * size_of::<usize>(),
             ))?;
-            self.source = Some(Arc::new(casc::open_local_reader_controlled(
-                &target.common_root,
+            self.source = Some(Arc::new(casc::open_local_reader_from_source(
+                casc_source,
                 &target.metadata.encoding_key,
                 target.metadata.encoding_bytes,
-                limits,
-                &self.inv.control,
-                Some(self.budget),
             )?));
         }
         let source = self.source.as_ref().expect("prepared Encoding source");
@@ -145,9 +153,9 @@ impl<'a> Reader<'a> {
             check,
         )?;
         let mut stats = decoded_cache::Stats::default();
-        let (_, root) = decoded_cache::read_content_controlled(
+        let (_, root) = decoded_cache::read_content_in_session(
             &self.inv.home,
-            &target.common_root,
+            casc_source,
             &index,
             &mapping,
             limits,
@@ -260,9 +268,9 @@ impl<'a> Reader<'a> {
                 "Selected content exceeds byte budget",
             ));
         }
-        let (encoding_key, content) = decoded_cache::read_content_controlled(
+        let (encoding_key, content) = decoded_cache::read_content_in_session(
             &self.inv.home,
-            &target.common_root,
+            self.casc.as_ref().expect("prepared CASC index source"),
             &ready.index,
             &mapping,
             limits,
@@ -324,11 +332,21 @@ impl<'a> Reader<'a> {
         if let Some(source) = &self.source {
             source.check_encoded()?;
         }
+        if let Some(source) = &self.casc {
+            source.check()?;
+        }
         self.budget.check()
+    }
+    pub fn verify_source(&self) -> Result<()> {
+        self.check_source()?;
+        if let Some(source) = &self.casc {
+            source.verify()?;
+        }
+        Ok(())
     }
     pub fn close_after<T>(mut self, result: Result<T>) -> Result<T> {
         drop(self.ready.take());
-        match self.source.take() {
+        let result = match self.source.take() {
             Some(source) => match Arc::try_unwrap(source) {
                 Ok(source) => source.close_after(result),
                 Err(_) => Err(fault(
@@ -337,6 +355,10 @@ impl<'a> Reader<'a> {
                     "Local SQL source still has a live borrower",
                 )),
             },
+            None => result,
+        };
+        match self.casc.take() {
+            Some(source) => source.close_after(result),
             None => result,
         }
     }

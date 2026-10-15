@@ -62,6 +62,24 @@ pub(crate) fn read_verified_content(
     budget: &Budget,
     control: &OperationControl,
 ) -> Result<(String, evidence::VerifiedBlob)> {
+    read_verified_content_source(
+        home, root, index, record, limits, maximum, keys, stats, budget, control, None,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn read_verified_content_source(
+    home: &Path,
+    root: &Path,
+    index: &dyn crate::metadata_format::EncodingLookup,
+    record: &EncodingRecord,
+    limits: casc::Limits,
+    maximum: usize,
+    keys: &mut keys::Context,
+    stats: &mut Stats,
+    budget: &Budget,
+    control: &OperationControl,
+    source: Option<&casc::QuerySource<'_>>,
+) -> Result<(String, evidence::VerifiedBlob)> {
     let store = Store {
         home,
         control,
@@ -103,15 +121,26 @@ pub(crate) fn read_verified_content(
                 "Selected encoded content exceeds byte budget",
             ));
         }
-        let mut object =
-            match casc::open_selected(root, encoding_key, encoded, limits, budget, control) {
-                Ok(object) => object,
-                Err(error) if pure(&error, "records.local_object_unavailable") => {
-                    unavailable = Some(error);
-                    continue;
-                }
-                Err(error) => return Err(error),
-            };
+        let mut object = match source.map_or_else(
+            || casc::open_selected(root, encoding_key, encoded, limits, budget, control),
+            |source| {
+                casc::open_selected_from_source(
+                    source,
+                    encoding_key,
+                    encoded,
+                    limits,
+                    budget,
+                    control,
+                )
+            },
+        ) {
+            Ok(object) => object,
+            Err(error) if pure(&error, "records.local_object_unavailable") => {
+                unavailable = Some(error);
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
         let result = (|| {
             let mut identity = Sha256::new();
             identity.update(
@@ -294,11 +323,66 @@ pub(crate) fn read_content_controlled(
     selected_maximum: Option<usize>,
     control: &OperationControl,
 ) -> Result<(String, blte::Content)> {
+    read_content_source(
+        home,
+        root,
+        index,
+        record,
+        limits,
+        keys,
+        stats,
+        budget,
+        selected_maximum,
+        control,
+        None,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn read_content_in_session(
+    home: &Path,
+    source: &casc::QuerySource<'_>,
+    index: &dyn crate::metadata_format::EncodingLookup,
+    record: &EncodingRecord,
+    limits: casc::Limits,
+    keys: &mut keys::Context,
+    stats: &mut Stats,
+    budget: &Budget,
+    selected_maximum: Option<usize>,
+    control: &OperationControl,
+) -> Result<(String, blte::Content)> {
+    read_content_source(
+        home,
+        source.root(),
+        index,
+        record,
+        limits,
+        keys,
+        stats,
+        budget,
+        selected_maximum,
+        control,
+        Some(source),
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn read_content_source(
+    home: &Path,
+    root: &Path,
+    index: &dyn crate::metadata_format::EncodingLookup,
+    record: &EncodingRecord,
+    limits: casc::Limits,
+    keys: &mut keys::Context,
+    stats: &mut Stats,
+    budget: &Budget,
+    selected_maximum: Option<usize>,
+    control: &OperationControl,
+    source: Option<&casc::QuerySource<'_>>,
+) -> Result<(String, blte::Content)> {
     control.check()?;
     budget.check()?;
     let (decoded, maximum) = materialized_extent(record.decoded_bytes, limits, selected_maximum)?;
-    let (key, mut blob) = read_verified_content(
-        home, root, index, record, limits, maximum, keys, stats, budget, control,
+    let (key, mut blob) = read_verified_content_source(
+        home, root, index, record, limits, maximum, keys, stats, budget, control, source,
     )?;
     let result = (|| {
         budget.charge_split(Cost::retained(decoded), Cost::default())?;

@@ -120,7 +120,7 @@ impl<'a> Resolver<'a> {
         let factory = self.factory.try_borrow().map_err(|_| internal())?;
         factory.scope.check_consumer(factory.inv, factory.budget)?;
         if let Some(reader) = &factory.local {
-            reader.check_source()?;
+            reader.verify_source()?;
         }
         Ok(())
     }

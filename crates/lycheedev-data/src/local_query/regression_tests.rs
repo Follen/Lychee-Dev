@@ -194,3 +194,49 @@ fn sql_checked_close_error_preserves_actual_committed_capture_identities() {
         serde_json::to_value(early).unwrap()
     );
 }
+
+#[test]
+fn sql_rehashes_original_index_path_after_execution_before_capture() {
+    let fx = Fixture::new(&[table("Sample", 201, &[("ID", "uint")], &[vec![U(1)]])]);
+    let inv = fx.invocation(
+        "data sql",
+        &[("--sql", "SELECT ID FROM Sample WHERE ID IN (1)")],
+    );
+    let path = fx.client.parent().unwrap().join("Data/data/0000000001.idx");
+    let original = fs::read(&path).unwrap();
+    let count = || {
+        let metadata = Metadata::open(&fx.home, false).unwrap();
+        let count = metadata.list::<Value>("capture/", 100).unwrap().len();
+        metadata.close().unwrap();
+        count
+    };
+    let before = count();
+    let error = sql_inner_after_execute(&inv, &mut || {
+        let mut changed = original.clone();
+        changed[40] ^= 1;
+        fs::write(&path, changed)?;
+        Ok(())
+    })
+    .unwrap_err();
+    assert_eq!(error.code, "records.pinned_build_changed");
+    assert_eq!(count(), before);
+    fs::write(&path, original).unwrap();
+    assert_eq!(sql(&inv).unwrap().data["result"]["rows"], json!([[1]]));
+}
+
+#[test]
+fn sql_detects_new_index_generation_after_explain_before_capture() {
+    let fx = Fixture::new(&[table("Sample", 201, &[("ID", "uint")], &[vec![U(1)]])]);
+    let inv = fx.invocation("data sql", &[("--sql", "EXPLAIN SELECT ID FROM Sample")]);
+    let directory = fx.client.parent().unwrap().join("Data/data");
+    let original = fs::read(directory.join("0000000001.idx")).unwrap();
+    let path = directory.join("0000000002.idx");
+    let error = sql_inner_after_execute(&inv, &mut || {
+        fs::write(&path, &original)?;
+        Ok(())
+    })
+    .unwrap_err();
+    assert_eq!(error.code, "records.pinned_build_changed");
+    fs::remove_file(path).unwrap();
+    assert!(sql(&inv).unwrap().data["result"]["plan"].is_object());
+}
