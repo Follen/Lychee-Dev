@@ -242,7 +242,7 @@ pub struct OwnedObjectInfo<'a> {
 }
 
 impl OwnedValue {
-    pub(crate) fn plain(ty: LuaType) -> Self {
+    pub fn plain(ty: LuaType) -> Self {
         Self { ty, evidence: None }
     }
 
@@ -371,7 +371,7 @@ impl OwnedValue {
             _ => None,
         }
     }
-    pub(crate) fn function_return(&self) -> Option<Self> {
+    pub fn function_return(&self) -> Option<Self> {
         let LuaType::DocFunction(function) = &self.ty else {
             return None;
         };
@@ -380,7 +380,7 @@ impl OwnedValue {
             |(_, ret)| ret.clone(),
         ))
     }
-    pub(crate) fn function_parameters(&self) -> Option<Vec<Option<Self>>> {
+    pub fn function_parameters(&self) -> Option<Vec<Option<Self>>> {
         let LuaType::DocFunction(function) = &self.ty else {
             return None;
         };
@@ -451,7 +451,7 @@ impl OwnedValue {
     }
 
     /// LuaUnionType::from_vec itself, without LuaType::from_vec flatten/dedup.
-    pub(crate) fn raw_union(mut members: Vec<Self>) -> Self {
+    pub fn raw_union(mut members: Vec<Self>) -> Self {
         let selected = members.iter().any(|value| !value.is_context_free());
         let union = LuaUnionType::from_vec(members.iter().map(|value| value.ty.clone()).collect());
         if matches!(&union, LuaUnionType::Nullable(_)) && matches!(members[0].ty, LuaType::Nil) {
@@ -508,7 +508,7 @@ impl OwnedValue {
             )))))
         }
     }
-    pub(crate) fn result_slot(&self, index: usize) -> Option<Self> {
+    pub fn result_slot(&self, index: usize) -> Option<Self> {
         if let Some(evidence) = &self.evidence {
             if let ValueEvidence::Structural(children) = evidence.as_ref()
                 && matches!(&self.ty, LuaType::Variadic(value) if matches!(value.as_ref(), VariadicType::Base(_)))

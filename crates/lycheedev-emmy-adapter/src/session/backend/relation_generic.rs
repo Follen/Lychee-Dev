@@ -1,7 +1,7 @@
 //! Fixed general generic relation, including direct-vs-general recursion.
 use super::{
     OwnedQuery, QueryResult,
-    relation::{Relation, RelationMode, next_relation_level},
+    relation::{Relation, RelationMode, next_relation_level, relation_from_bool},
 };
 use crate::session::{OwnedValue, SelectedProjectionBackend};
 use emmylua_code_analysis::{LuaGenericType, LuaType, LuaTypeDeclId};
@@ -64,7 +64,11 @@ impl<E> OwnedQuery<'_, '_, E> {
                 }
                 Ok(Relation::Compatible)
             }
-            _ => Ok(Relation::Mismatch),
+            _ => Ok(self.relation_mismatch(
+                mode,
+                source.structural_type(),
+                target.structural_type(),
+            )),
         }
     }
 
@@ -85,7 +89,11 @@ impl<E> OwnedQuery<'_, '_, E> {
         if source_type.get_base_type_id() != target_type.get_base_type_id()
             || source_type.get_params().len() != target_type.get_params().len()
         {
-            return Ok(Relation::Mismatch);
+            return Ok(self.relation_mismatch(
+                mode,
+                source.structural_type(),
+                target.structural_type(),
+            ));
         }
         let next = next_relation_level!(depth);
         for (index, (a, b)) in source_type
@@ -130,6 +138,10 @@ impl<E> OwnedQuery<'_, '_, E> {
                 next_relation_level!(depth),
             );
         }
-        Ok(Relation::Mismatch)
+        Ok(self.relation_mismatch(
+            mode,
+            &LuaType::Generic(std::sync::Arc::new(source.clone())),
+            &LuaType::Ref(target.clone()),
+        ))
     }
 }

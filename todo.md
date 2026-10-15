@@ -1,3 +1,4 @@
+<!-- Current end-to-end candidate: Source freeze/query/43 diagnostic checkers now use the owned production entry. Compilation and parity remain NOT_RUN; old patched test/example consumers and recipe retirement still pending. No final zero-patch or four-loop acceptance claim. -->
 <!-- Production integration: public Emmy ingestion replaces four shared/checked hooks (26 recipe paths remain); default Data Prepared/Session and lazy SQL/CASC control chains implemented. Rust execution pending; complete semantic, nested compound scope and remaining production semantic/diagnostic integration before final consolidated acceptance. Local decode limits now use the caller/adaptive budget and await actual tests. Automatic project-pin is now wired but untested. -->
 <!-- Current batch: legacy addon production extras are now zero under the fixed oracle; Node 60/60 passed. Lua/Go/Rust execution and final four audit loops remain pending. -->
 # Rust migration checklist

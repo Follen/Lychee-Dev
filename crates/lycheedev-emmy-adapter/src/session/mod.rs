@@ -1,11 +1,12 @@
 //! Owned session identity and producer-ordered coverage.
 //!
-//! This foundation is not wired to production yet. Every selected producer must
-//! append here at its actual execution point before the engine ledger can be
-//! removed; merging separate completed ledgers cannot preserve its contract.
+//! Source contextual queries and diagnostics append to this single ledger at
+//! each real producer. Cancellation retains the caller error and incomplete
+//! execution facts; completed ledgers are never merged after the fact.
 mod backend;
 pub use backend::{
-    OwnedMemberInfo, OwnedQuery, OwnedQueryCapability, OwnedQueryContinuation, OwnedQueryFailure,
+    CheckerExecution, Diagnostic, DiagnosticRun, OwnedMemberInfo, OwnedQuery, OwnedQueryCapability,
+    OwnedQueryContinuation, OwnedQueryFailure, OwnedResolvedMember, WorkspaceFactsCache,
 };
 mod binary;
 pub use binary::PrimitiveBinaryProjection;
@@ -116,6 +117,18 @@ impl OwnedBindingSession {
     }
     pub fn identity(&self) -> &str {
         &self.identity
+    }
+    /// Query the frozen reference overlay under the original caller control.
+    /// References are not semantic coverage rows and never consult a raw index.
+    pub fn references_checked<E>(
+        &self,
+        identity: &str,
+        mut check: impl FnMut() -> Result<(), E>,
+    ) -> Result<BindingDecision<Vec<BindingReference>>, E> {
+        check()?;
+        let result = self.context.references(identity);
+        check()?;
+        Ok(result)
     }
     pub fn same_session(&self, other: &Self) -> bool {
         self.token == other.token

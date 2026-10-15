@@ -3,7 +3,7 @@
 //! this producer exactly at the original two manages checks.
 use super::*;
 use crate::session::BindingDecision;
-use emmylua_parser::{LuaCallExpr, LuaClosureExpr, LuaLiteralToken, LuaReturnStat};
+use emmylua_parser::{LuaCallExpr, LuaClosureExpr};
 impl<E> OwnedQuery<'_, '_, E> {
     pub(super) fn flow_signature_return(
         &mut self,
@@ -72,104 +72,11 @@ impl<E> OwnedQuery<'_, '_, E> {
             else {
                 return Ok(None);
             };
-            if let Some(closure) = LuaClosureExpr::cast(node.clone()) {
-                let Some(signature) = facts.signature_by_closure(syntax) else {
+            if LuaClosureExpr::cast(node.clone()).is_some() {
+                if facts.signature_by_closure(syntax).is_none() {
                     return Ok(None);
-                };
-                if let Some(docs) = &signature.docs {
-                    if !docs.returns.is_empty() {
-                        let mut types = Vec::new();
-                        for syntax in &docs.returns {
-                            self.checkpoint()?;
-                            let ty =
-                                self.model
-                                    .doc_type_lua_in(file, *syntax, &docs.generic_params);
-                            if !ty.is_unknown() {
-                                types.push(ty);
-                            }
-                        }
-                        if !types.is_empty() {
-                            return Ok(Some(OwnedValue::plain(LuaType::from_vec(types))));
-                        }
-                    }
-                    if !docs.return_overload_rows.is_empty() {
-                        let mut types = Vec::new();
-                        let mut start = 0usize;
-                        for len in &docs.return_overload_rows {
-                            self.checkpoint()?;
-                            let end = (start + len).min(docs.return_overloads.len());
-                            for (_, syntax) in &docs.return_overloads[start..end] {
-                                let ty =
-                                    self.model
-                                        .doc_type_lua_in(file, *syntax, &docs.generic_params);
-                                if !ty.is_unknown() {
-                                    types.push(ty);
-                                }
-                            }
-                            start = end;
-                        }
-                        if !types.is_empty() {
-                            return Ok(Some(OwnedValue::plain(LuaType::from_vec(types))));
-                        }
-                    }
                 }
-                // Literal-only return shells are complete without invoking the
-                // semantic VM. The wider shell graph producer is implemented
-                // separately, never substituted with selected inference.
-                let mut count = 0usize;
-                for _ in closure.descendants::<LuaReturnStat>() {
-                    self.checkpoint()?;
-                    count += 1;
-                }
-                let mut values = Vec::new();
-                for row in closure.descendants::<LuaReturnStat>() {
-                    for expr in row.get_expr_list() {
-                        self.checkpoint()?;
-                        let LuaExpr::LiteralExpr(literal) = expr else {
-                            return self.continuation(
-                                OwnedQueryCapability::FunctionReturnType,
-                                Some(crate::session::BindingSite {
-                                    file_id: file,
-                                    syntax,
-                                }),
-                                None,
-                                None,
-                            );
-                        };
-                        let value = match literal.get_literal() {
-                            Some(LuaLiteralToken::Nil(_)) => LuaType::Nil,
-                            Some(LuaLiteralToken::Bool(_)) => LuaType::Boolean,
-                            Some(LuaLiteralToken::String(_)) => LuaType::String,
-                            Some(LuaLiteralToken::Number(token))
-                                if count > 1
-                                    && matches!(
-                                        token.get_number_value(),
-                                        emmylua_parser::NumberResult::Int(_)
-                                            | emmylua_parser::NumberResult::Uint(_)
-                                    ) =>
-                            {
-                                LuaType::Integer
-                            }
-                            Some(LuaLiteralToken::Number(_)) => LuaType::Number,
-                            _ => LuaType::Unknown,
-                        };
-                        if !value.is_unknown() {
-                            values.push(value);
-                        }
-                    }
-                }
-                if values.is_empty() && facts.member_by_value_syntax(syntax).is_some() {
-                    return self.continuation(
-                        OwnedQueryCapability::FunctionReturnType,
-                        Some(crate::session::BindingSite {
-                            file_id: file,
-                            syntax,
-                        }),
-                        None,
-                        None,
-                    );
-                }
-                return Ok(Some(OwnedValue::plain(LuaType::from_vec(values))));
+                return self.raw_signature_return(file, syntax);
             }
             let Some(LuaExpr::NameExpr(alias)) = LuaExpr::cast(node) else {
                 return Ok(None);

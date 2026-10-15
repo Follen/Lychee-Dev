@@ -796,7 +796,8 @@ SOFTWARE.
 ===============================================================================
 EmmyLua Analyzer Rust and derived owned semantic implementation
 Source: https://github.com/CppCXY/emmylua-analyzer-rust/tree/08b0873962e83bb8307e9a81052e3f41578fbc78
-Applies also to adapted control-flow and semantic code in lycheedev-emmy-adapter.
+Applies also to adapted control-flow, relation, member, transform, signature,
+diagnostic and checker code in lycheedev-emmy-adapter.
 
 MIT License
 

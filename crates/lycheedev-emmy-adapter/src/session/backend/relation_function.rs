@@ -2,7 +2,7 @@
 //! conversion uses the owned producer and never the raw public inference path.
 use super::{
     OwnedQuery, QueryResult,
-    relation::{Relation, RelationMode, next_relation_level},
+    relation::{Relation, RelationMode, next_relation_level, relation_from_bool},
 };
 use crate::session::{OwnedValue, SelectedProjectionBackend};
 use emmylua_code_analysis::LuaType;
@@ -22,7 +22,11 @@ impl<E> OwnedQuery<'_, '_, E> {
             }
             LuaType::Signature(id) => {
                 let Some(signature) = self.signature_by_id(id)? else {
-                    return Ok(Relation::Mismatch);
+                    return Ok(self.relation_mismatch(
+                        mode,
+                        source.structural_type(),
+                        target.structural_type(),
+                    ));
                 };
                 self.function_parameters_relation(
                     source,
@@ -33,7 +37,11 @@ impl<E> OwnedQuery<'_, '_, E> {
             }
             LuaType::Ref(id) | LuaType::Def(id) => {
                 self.checkpoint()?;
-                Ok(Relation::from_bool(
+                Ok(relation_from_bool!(
+                    self,
+                    mode,
+                    source.structural_type(),
+                    target.structural_type(),
                     self.model
                         .resolve_type_def(id.get_name())
                         .is_some_and(|def| !def.call_overloads.is_empty()),
@@ -50,7 +58,11 @@ impl<E> OwnedQuery<'_, '_, E> {
                 Ok(Relation::Compatible)
             }
             LuaType::Function => Ok(Relation::Compatible),
-            _ => Ok(Relation::Mismatch),
+            _ => Ok(self.relation_mismatch(
+                mode,
+                source.structural_type(),
+                target.structural_type(),
+            )),
         }
     }
 
@@ -110,7 +122,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                 let result =
                     self.relation_at(target_type, source_type, mode, next_relation_level!(depth))?;
                 if result != Relation::Compatible {
-                    if result == Relation::Mismatch
+                    if result.is_mismatch()
                         && index == 0
                         && source_type.structural_type().is_self_infer()
                         && target_name == "self"

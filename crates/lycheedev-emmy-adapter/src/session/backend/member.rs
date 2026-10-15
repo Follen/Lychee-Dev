@@ -1,6 +1,6 @@
 //! Selected member provenance and the corresponding direct Object-index path.
 //! General runtime owners and callable expansion continue on this same backend.
-use super::{ExpressionValue, OwnedQuery, OwnedQueryCapability, QueryResult};
+use super::{OwnedQuery, QueryResult};
 use crate::session::{BindingCoverage, FieldWriteOrigin, OwnedValue, SelectedProjectionBackend};
 use emmylua_code_analysis::{FileId, LuaMemberKey, LuaType, SemanticId};
 
@@ -125,97 +125,5 @@ impl<E> OwnedQuery<'_, '_, E> {
             },
             || self.checkpoint(),
         )
-    }
-
-    pub(super) fn index_selected_member(
-        &mut self,
-        owner: ExpressionValue<OwnedValue>,
-        key: &LuaMemberKey,
-    ) -> QueryResult<ExpressionValue<OwnedValue>, E> {
-        self.checkpoint()?;
-        if matches!(owner.value.structural_type(), LuaType::Any) {
-            return Ok(ExpressionValue::plain(OwnedValue::plain(LuaType::Any)));
-        }
-        if owner.value.object_info().is_none() || owner.owner.is_some() {
-            return self.continuation(OwnedQueryCapability::IndexMember, None, None, None);
-        }
-        // Old VM order: member_type fallback, all callable member candidates,
-        // then member_info for the method-owner decision. Do not coalesce these
-        // real queries just because their eventual receipts deduplicate.
-        let fallback = self
-            .selected_members(&owner.value)?
-            .unwrap()
-            .into_iter()
-            .find(|info| &info.key == key)
-            .map(|info| info.typ);
-        let candidates = self.selected_members(&owner.value)?.unwrap();
-        for info in candidates.iter().filter(|info| &info.key == key) {
-            self.checkpoint()?;
-            // Identity-level callable recovery can infer a closure regardless
-            // of its current projected type. Alias/union/generic expansion can
-            // also generate several candidates. Neither may be skipped.
-            if info.id.is_some()
-                || matches!(
-                    info.typ.structural_type(),
-                    LuaType::Union(_)
-                        | LuaType::Intersection(_)
-                        | LuaType::Ref(_)
-                        | LuaType::Def(_)
-                        | LuaType::Generic(_)
-                )
-            {
-                return self.continuation(OwnedQueryCapability::MemberCallable, None, None, None);
-            }
-            // One unique object field with no source member identity has zero
-            // candidates, or exactly its one DocFunction; no overload union.
-        }
-        let method = self
-            .selected_members(&owner.value)?
-            .unwrap()
-            .into_iter()
-            .find(|info| &info.key == key);
-        debug_assert!(method.as_ref().is_none_or(|info| info.id.is_none()));
-        if let Some(ty) = fallback {
-            // The broad Function branch performs one additional member_info
-            // lookup before the generic-method recovery check sees no identity.
-            if matches!(ty.structural_type(), LuaType::Function) {
-                let _ = self.selected_members(&owner.value)?;
-            }
-            self.checkpoint()?;
-            return Ok(ExpressionValue {
-                value: ty,
-                owner: None,
-                closure_syntax: None,
-                receiver: Some(owner.value),
-            });
-        }
-        // The fixed VM treats a missing Object key as Nil even when the shape
-        // is incomplete. The member_lookup receipt retains that uncertainty.
-        Ok(ExpressionValue::plain(OwnedValue::plain(LuaType::Nil)))
-    }
-
-    pub(super) fn index_selected_dynamic(
-        &mut self,
-        owner: ExpressionValue<OwnedValue>,
-        key: ExpressionValue<OwnedValue>,
-    ) -> QueryResult<ExpressionValue<OwnedValue>, E> {
-        self.checkpoint()?;
-        match key.value.structural_type() {
-            LuaType::StringConst(s) | LuaType::DocStringConst(s) => {
-                self.index_selected_member(owner, &LuaMemberKey::Name(s.as_str().into()))
-            }
-            LuaType::IntegerConst(i) | LuaType::DocIntegerConst(i) => {
-                self.index_selected_member(owner, &LuaMemberKey::Integer(*i))
-            }
-            LuaType::Union(_) | LuaType::Ref(_) | LuaType::Def(_) => {
-                self.continuation(OwnedQueryCapability::IndexDynamic, None, None, None)
-            }
-            _ if owner.value.object_info().is_some() => {
-                // Dynamic String/Number on Object does not enumerate fields in
-                // the fixed VM. Other nonliteral keys also produce Unknown.
-                Ok(ExpressionValue::plain(OwnedValue::plain(LuaType::Unknown)))
-            }
-            _ => self.continuation(OwnedQueryCapability::IndexDynamic, None, None, None),
-        }
     }
 }

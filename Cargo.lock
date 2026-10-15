@@ -1412,12 +1412,15 @@ dependencies = [
 name = "lycheedev-emmy-adapter"
 version = "3.5.0"
 dependencies = [
+ "emmy_lsp_types",
  "emmylua_code_analysis",
  "emmylua_parser",
  "rowan",
  "lycheedev-binding-contracts",
+ "rust-i18n",
  "serde",
  "serde_json",
+ "smol_str",
 ]
 
 [[package]]

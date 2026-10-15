@@ -2,7 +2,7 @@
 //! re-enter the structure gate or expand target aliases a second time.
 use super::{
     OwnedQuery, QueryResult,
-    relation::{Relation, RelationMode, next_relation_level},
+    relation::{Relation, RelationMode, next_relation_level, relation_from_bool},
 };
 use crate::session::{OwnedValue, SelectedProjectionBackend};
 use emmylua_code_analysis::{LuaType, LuaTypeDeclId, TypeDefKind, VariadicType};
@@ -77,7 +77,11 @@ impl<E> OwnedQuery<'_, '_, E> {
             },
             LuaType::IntegerConst(a) | LuaType::DocIntegerConst(a) => match t {
                 LuaType::IntegerConst(b) | LuaType::DocIntegerConst(b) => {
-                    return Ok(Relation::from_bool(
+                    return Ok(relation_from_bool!(
+                        self,
+                        mode,
+                        source.structural_type(),
+                        target.structural_type(),
                         a == b
                             || (mode == RelationMode::Assign
                                 && matches!(s, LuaType::IntegerConst(_))),
@@ -89,7 +93,13 @@ impl<E> OwnedQuery<'_, '_, E> {
                     // A doc-integer reference mismatch returns directly, while
                     // a runtime integer falls through to union handling.
                     if matches!(s, LuaType::DocIntegerConst(_)) {
-                        return Ok(Relation::from_bool(result));
+                        return Ok(relation_from_bool!(
+                            self,
+                            mode,
+                            source.structural_type(),
+                            target.structural_type(),
+                            result,
+                        ));
                     }
                     result
                 }
@@ -107,16 +117,40 @@ impl<E> OwnedQuery<'_, '_, E> {
             LuaType::Global => matches!(t, LuaType::Global),
             LuaType::DocStringConst(a) => match t {
                 LuaType::StringConst(b) | LuaType::DocStringConst(b) => {
-                    return Ok(Relation::from_bool(a == b));
+                    return Ok(relation_from_bool!(
+                        self,
+                        mode,
+                        source.structural_type(),
+                        target.structural_type(),
+                        a == b,
+                    ));
                 }
-                LuaType::String => return Ok(Relation::Mismatch),
+                LuaType::String => {
+                    return Ok(self.relation_mismatch(
+                        mode,
+                        source.structural_type(),
+                        target.structural_type(),
+                    ));
+                }
                 _ => false,
             },
             LuaType::DocBooleanConst(a) => match t {
                 LuaType::BooleanConst(b) | LuaType::DocBooleanConst(b) => {
-                    return Ok(Relation::from_bool(a == b));
+                    return Ok(relation_from_bool!(
+                        self,
+                        mode,
+                        source.structural_type(),
+                        target.structural_type(),
+                        a == b,
+                    ));
                 }
-                LuaType::Boolean => return Ok(Relation::Mismatch),
+                LuaType::Boolean => {
+                    return Ok(self.relation_mismatch(
+                        mode,
+                        source.structural_type(),
+                        target.structural_type(),
+                    ));
+                }
                 _ => false,
             },
             LuaType::StrTplRef(_) => t.is_string(),
@@ -179,7 +213,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             }
             return Ok(Relation::Compatible);
         }
-        Ok(Relation::Mismatch)
+        Ok(self.relation_mismatch(mode, source.structural_type(), target.structural_type()))
     }
 
     fn base_matches_ref(

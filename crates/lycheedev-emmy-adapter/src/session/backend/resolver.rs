@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub struct OwnedResolvedMember {
+    pub(super) binding_token: Option<crate::session::SessionToken>,
     pub member_id: Option<SemanticId>,
     pub file_id: Option<FileId>,
     pub owner: SemanticId,
@@ -21,7 +22,7 @@ pub struct OwnedResolvedMember {
     pub is_method: bool,
 }
 impl<E> OwnedQuery<'_, '_, E> {
-    pub(super) fn resolve_owned_member(
+    pub fn resolve_owned_member(
         &mut self,
         index: &LuaIndexExpr,
     ) -> QueryResult<Option<OwnedResolvedMember>, E> {
@@ -65,6 +66,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                     return Ok(None);
                 };
                 return Ok(Some(OwnedResolvedMember {
+                    binding_token: Some(self.session.token.clone()),
                     member_id: member.id,
                     file_id: member.file_id,
                     owner,
@@ -297,6 +299,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             .and_then(|(facts, member)| facts.signature_by_closure(member.value_syntax?))
             .is_some_and(|signature| signature.is_method);
         OwnedResolvedMember {
+            binding_token: None,
             member_id,
             file_id,
             owner,
@@ -694,7 +697,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             OwnerId::Concrete(id) => Some(id.clone()),
         }
     }
-    fn owned_resolve_owner_ids(
+    pub(super) fn owned_resolve_owner_ids(
         &mut self,
         owner: &SemanticId,
         contribution_order: &Arc<[FileId]>,

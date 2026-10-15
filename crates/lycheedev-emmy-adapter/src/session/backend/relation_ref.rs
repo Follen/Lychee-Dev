@@ -1,7 +1,7 @@
 //! Fixed nominal/class/enum relation and generic inheritance facts.
 use super::{
     OwnedQuery, QueryResult,
-    relation::{Relation, RelationMode, next_relation_level},
+    relation::{Relation, RelationMode, next_relation_level, relation_from_bool},
     relation_simple::base_type_name,
 };
 use crate::session::{OwnedValue, SelectedProjectionBackend};
@@ -22,7 +22,11 @@ impl<E> OwnedQuery<'_, '_, E> {
             unreachable!("reference relation source");
         };
         let Some(def) = self.model.resolve_type_def(id.get_name()) else {
-            return Ok(Relation::Mismatch);
+            return Ok(self.relation_mismatch(
+                mode,
+                &LuaType::Ref(id.clone()),
+                target.structural_type(),
+            ));
         };
         self.checkpoint()?;
         let t = target.structural_type();
@@ -46,7 +50,11 @@ impl<E> OwnedQuery<'_, '_, E> {
                 }
                 return Ok(Relation::Compatible);
             }
-            return Ok(Relation::from_bool(
+            return Ok(relation_from_bool!(
+                self,
+                mode,
+                &LuaType::Ref(id.clone()),
+                target.structural_type(),
                 matches!(t, LuaType::Ref(other) | LuaType::Def(other) if other == id),
             ));
         }
@@ -62,17 +70,27 @@ impl<E> OwnedQuery<'_, '_, E> {
             {
                 return Ok(Relation::Compatible);
             }
-            return Ok(Relation::from_bool(if let Some(base) = base_type_name(t) {
-                self.nominal_subtype(id, &LuaTypeDeclId::global(base))?
-            } else {
-                false
-            }));
+            return Ok(relation_from_bool!(
+                self,
+                mode,
+                &LuaType::Ref(id.clone()),
+                target.structural_type(),
+                if let Some(base) = base_type_name(t) {
+                    self.nominal_subtype(id, &LuaTypeDeclId::global(base))?
+                } else {
+                    false
+                },
+            ));
         }
         match t {
             LuaType::Ref(other) | LuaType::Def(other) => {
                 // The fixed general checker deliberately permits both directions.
                 // Its enum fallback asks for the base of Ref(id), which is None.
-                Ok(Relation::from_bool(
+                Ok(relation_from_bool!(
+                    self,
+                    mode,
+                    &LuaType::Ref(id.clone()),
+                    target.structural_type(),
                     id == other
                         || self.nominal_subtype(other, id)?
                         || self.nominal_subtype(id, other)?,
@@ -93,11 +111,19 @@ impl<E> OwnedQuery<'_, '_, E> {
             LuaType::Generic(generic) => {
                 let base = generic.get_base_type_id();
                 if mode == RelationMode::Strict {
-                    Ok(Relation::from_bool(
+                    Ok(relation_from_bool!(
+                        self,
+                        mode,
+                        &LuaType::Ref(id.clone()),
+                        target.structural_type(),
                         self.relation_subtype_of_generic(id, target)?,
                     ))
                 } else {
-                    Ok(Relation::from_bool(
+                    Ok(relation_from_bool!(
+                        self,
+                        mode,
+                        &LuaType::Ref(id.clone()),
+                        target.structural_type(),
                         id == &base
                             || self.nominal_subtype(&base, id)?
                             || self.nominal_subtype(id, &base)?,
@@ -107,21 +133,31 @@ impl<E> OwnedQuery<'_, '_, E> {
             LuaType::TableConst(_)
             | LuaType::Object(_)
             | LuaType::Tuple(_)
-            | LuaType::Intersection(_) => {
-                Ok(Relation::from_bool(if let Some(base) = base_type_name(t) {
+            | LuaType::Intersection(_) => Ok(relation_from_bool!(
+                self,
+                mode,
+                &LuaType::Ref(id.clone()),
+                target.structural_type(),
+                if let Some(base) = base_type_name(t) {
                     self.nominal_subtype(id, &LuaTypeDeclId::global(base))?
                 } else {
                     false
-                }))
-            }
-            _ => Ok(Relation::from_bool(if let Some(base) = base_type_name(t) {
-                let base = LuaTypeDeclId::global(base);
-                id == &base
-                    || self.nominal_subtype(&base, id)?
-                    || self.nominal_subtype(id, &base)?
-            } else {
-                false
-            })),
+                },
+            )),
+            _ => Ok(relation_from_bool!(
+                self,
+                mode,
+                &LuaType::Ref(id.clone()),
+                target.structural_type(),
+                if let Some(base) = base_type_name(t) {
+                    let base = LuaTypeDeclId::global(base);
+                    id == &base
+                        || self.nominal_subtype(&base, id)?
+                        || self.nominal_subtype(id, &base)?
+                } else {
+                    false
+                },
+            )),
         }
     }
 

@@ -127,7 +127,8 @@ checks remain required by the release contract.
 
 ## EmmyLua-derived owned semantic code
 
-The owned control-flow, relation, member, transform and signature implementation in
+The owned control-flow, relation, member, transform, signature, diagnostic and
+checker implementations in
 `crates/lycheedev-emmy-adapter/src/session/backend/` adapts portions of
 [EmmyLua Analyzer Rust, commit 08b0873962e83bb8307e9a81052e3f41578fbc78](https://github.com/CppCXY/emmylua-analyzer-rust/tree/08b0873962e83bb8307e9a81052e3f41578fbc78).
 Those portions remain copyright 2024–2026 CppCXY, licensed under MIT. The exact

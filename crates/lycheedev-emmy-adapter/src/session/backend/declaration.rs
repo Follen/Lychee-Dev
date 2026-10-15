@@ -105,6 +105,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         if file != self.model.file_id() {
             let mut foreign = OwnedQuery::new(self.analysis, self.session, file, &mut *self.check);
             foreign.contribution_order = self.contribution_order.clone();
+            foreign.workspace_facts = Arc::clone(&self.workspace_facts);
             foreign.flow_trees = Rc::clone(&self.flow_trees);
             if let Some(value) = foreign.type_of_decl(declaration)? {
                 return Ok(Some(value));
@@ -125,8 +126,10 @@ impl<E> OwnedQuery<'_, '_, E> {
     ) -> QueryResult<Option<OwnedValue>, E> {
         self.checkpoint()?;
         let ty = self
-            .model
-            .doc_type_lua_in(self.model.file_id(), syntax, &[]);
+            .raw_declaration_type(self.model.file_id(), &info.id)?
+            .unwrap_or_else(|| OwnedValue::plain(LuaType::Unknown))
+            .structural_type()
+            .clone();
         self.checkpoint()?;
         if !ty.is_unknown() {
             let bare = self
@@ -188,17 +191,6 @@ impl<E> OwnedQuery<'_, '_, E> {
                 }
             }
             return Ok(Some(OwnedValue::plain(ty)));
-        }
-        // If the annotation shell is Unknown, the old shell could fall through
-        // to an initializer before the rich-doc branch. Preserve that unresolved
-        // semantic dependency until the owned shell producer is completed.
-        if info.value_expr_syntax.is_some() {
-            return self.continuation(
-                OwnedQueryCapability::DeclarationShell,
-                Some(self.site(syntax)),
-                None,
-                Some(info.id.clone()),
-            );
         }
         let rich = self
             .model

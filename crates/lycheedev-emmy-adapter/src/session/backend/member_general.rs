@@ -56,6 +56,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         if file != self.model.file_id() {
             let mut foreign = OwnedQuery::new(self.analysis, self.session, file, &mut *self.check);
             foreign.contribution_order = self.contribution_order.clone();
+            foreign.workspace_facts = std::sync::Arc::clone(&self.workspace_facts);
             return foreign.type_of_member(id);
         }
         self.checkpoint()?;
@@ -288,6 +289,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             let mut foreign =
                 OwnedQuery::new(self.analysis, self.session, table.file_id, &mut *self.check);
             foreign.contribution_order = self.contribution_order.clone();
+            foreign.workspace_facts = std::sync::Arc::clone(&self.workspace_facts);
             return foreign.table_metatable_type(table);
         }
         let calls = self

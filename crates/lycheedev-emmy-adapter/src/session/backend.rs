@@ -1,12 +1,14 @@
-//! Concrete, deliberately incomplete owned query backend.
+//! Owned contextual queries and checker execution over public Emmy facts.
 //!
-//! Completed paths use the same compiler/executor and per-model caches. Missing
-//! capabilities leave through a typed continuation boundary, never a successful
-//! Unknown or a raw contextual-inference fallback. This is not the production
-//! semantic-model replacement yet. Selected objects retain owned identity and
-//! nested carriers; unimplemented structural/member consumers remain explicit.
+//! Expressions, declarations, flow, calls, members and type relations share the
+//! same provider/session and per-model caches. Selected objects retain identity
+//! and nested carriers throughout these consumers. Source supplies the complete
+//! intake receipt; legacy callers that omit it receive an explicit continuation
+//! when a query needs workspace contribution order. This implementation still
+//! requires consolidated native differential and production validation.
 mod aliases;
 mod call;
+mod call_access;
 mod call_bindings;
 mod call_builtins;
 mod call_candidates;
@@ -16,13 +18,17 @@ mod call_return;
 mod call_unify;
 mod callable;
 mod cfg;
+mod check_gate;
 mod declaration;
+mod diagnostics;
+pub use diagnostics::{CheckerExecution, Diagnostic, DiagnosticRun};
 mod environment;
 mod flow;
 mod index_general;
 mod iteration;
 mod logical;
 mod member;
+mod public;
 pub use member::OwnedMemberInfo;
 mod member_general;
 mod resolver;
@@ -34,9 +40,12 @@ mod relation_function;
 mod relation_generic;
 mod relation_ref;
 mod relation_simple;
+mod shell;
 mod signature;
 mod structure;
 mod transform;
+mod workspace_facts;
+pub use workspace_facts::WorkspaceFactsCache;
 
 use super::{
     BindingDecision, BindingSite, DenseTupleBackend, DenseTupleProjection,
@@ -132,21 +141,22 @@ impl<K: Eq + Hash, V> Drop for PendingMemo<K, V> {
 /// are borrowed once; selected Expression origins construct a fresh scope even
 /// when their file equals this model's file, exactly like old model_for.
 ///
-/// Selected Function signatures and restricted calls are implemented. Parameter
-/// projection and general Function/flow/member/call inference remain incomplete.
-/// Object identity and nested carriers
-/// remain owned through the accepted expression, declaration and tuple paths.
-/// This entry is not installed in Source or the diagnostic registry yet.
+/// Source and the owned diagnostic registry use this backend for contextual
+/// inference. A complete intake receipt is required for workspace-order facts.
+/// Fresh model scopes share immutable facts and the sole session ledger, while
+/// keeping inference caches independent; no second analysis database is built.
 pub struct OwnedQuery<'a, 'control, E> {
     analysis: &'a EmmyLuaAnalysis,
     session: &'a OwnedBindingSession,
     model: SemanticModel<'a>,
     check: &'control mut dyn FnMut() -> Result<(), E>,
     contribution_order: Option<Arc<[FileId]>>,
+    workspace_facts: Arc<WorkspaceFactsCache>,
     expressions: Memo<LuaSyntaxId, OwnedValue>,
     declarations: Memo<(FileId, SemanticId), Option<OwnedValue>>,
     members: Memo<(FileId, SemanticId), Option<OwnedValue>>,
     member_lists: HashMap<OwnedValue, Vec<OwnedMemberInfo>>,
+    member_items: HashMap<(OwnedValue, LuaMemberKey), Option<OwnedMemberInfo>>,
     resolved_members: HashMap<(FileId, LuaSyntaxId), Option<OwnedResolvedMember>>,
     // This cache's owner is the immutable analysis/session borrow, not FileId
     // alone. Fresh semantic scopes share CFGs but never their inference caches.
@@ -157,6 +167,11 @@ pub struct OwnedQuery<'a, 'control, E> {
     environments: environment::Environments,
     closure_returns: Rc<RefCell<std::collections::HashSet<LuaSyntaxId>>>,
     return_casts: HashMap<(FileId, LuaSyntaxId), Option<flow::ReturnCast>>,
+    callable_functions: RefCell<HashMap<OwnedValue, Vec<OwnedValue>>>,
+    callable_candidates: RefCell<HashMap<(FileId, LuaSyntaxId), Vec<OwnedValue>>>,
+    call_sites: RefCell<HashMap<(FileId, LuaSyntaxId), call_access::OwnedCallSiteAnalysis>>,
+    call_site_signatures:
+        RefCell<HashMap<(FileId, LuaSyntaxId), Vec<(OwnedValue, call_unify::Bindings)>>>,
 }
 
 impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
@@ -172,10 +187,12 @@ impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
             model: analysis.semantic_model(file_id),
             check,
             contribution_order: None,
+            workspace_facts: Arc::new(WorkspaceFactsCache::default()),
             expressions: Rc::new(RefCell::new(HashMap::new())),
             declarations: Rc::new(RefCell::new(HashMap::new())),
             members: Rc::new(RefCell::new(HashMap::new())),
             member_lists: HashMap::new(),
+            member_items: HashMap::new(),
             resolved_members: HashMap::new(),
             flow_trees: Rc::new(RefCell::new(HashMap::new())),
             flow_declarations: HashMap::new(),
@@ -184,6 +201,10 @@ impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
             environments: Rc::new(RefCell::new(Vec::new())),
             closure_returns: Rc::new(RefCell::new(std::collections::HashSet::new())),
             return_casts: HashMap::new(),
+            callable_functions: RefCell::new(HashMap::new()),
+            callable_candidates: RefCell::new(HashMap::new()),
+            call_sites: RefCell::new(HashMap::new()),
+            call_site_signatures: RefCell::new(HashMap::new()),
         }
     }
 
@@ -201,6 +222,14 @@ impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
         let mut query = Self::new(analysis, session, file_id, check);
         query.contribution_order = Some(contribution_order);
         query
+    }
+
+    /// Share only immutable workspace facts with the same full-batch owner.
+    /// The caller must retain this cache exclusively for this analysis snapshot;
+    /// changed/rebuilt analysis requires a fresh cache, exactly as admission order.
+    pub fn with_workspace_facts(mut self, facts: Arc<WorkspaceFactsCache>) -> Self {
+        self.workspace_facts = facts;
+        self
     }
 
     fn owner_contribution_order(&mut self) -> QueryResult<Arc<[FileId]>, E> {
@@ -370,6 +399,7 @@ impl<E> SelectedProjectionBackend for OwnedQuery<'_, '_, E> {
             &mut *self.check,
         );
         foreign.contribution_order = self.contribution_order.clone();
+        foreign.workspace_facts = Arc::clone(&self.workspace_facts);
         foreign.flow_trees = Rc::clone(&self.flow_trees);
         foreign.type_of_expr(origin.syntax).map(Ok)
     }
@@ -386,6 +416,7 @@ impl<E> SelectedProjectionBackend for OwnedQuery<'_, '_, E> {
         let mut foreign =
             OwnedQuery::new(self.analysis, self.session, key.file_id, &mut *self.check);
         foreign.contribution_order = self.contribution_order.clone();
+        foreign.workspace_facts = Arc::clone(&self.workspace_facts);
         foreign.flow_trees = Rc::clone(&self.flow_trees);
         let Some(declaration) = foreign
             .model
@@ -414,6 +445,7 @@ impl<E> SelectedProjectionBackend for OwnedQuery<'_, '_, E> {
             &mut *self.check,
         );
         foreign.contribution_order = self.contribution_order.clone();
+        foreign.workspace_facts = Arc::clone(&self.workspace_facts);
         foreign.flow_trees = Rc::clone(&self.flow_trees);
         foreign.project_function_signature(site, function.closure)
     }

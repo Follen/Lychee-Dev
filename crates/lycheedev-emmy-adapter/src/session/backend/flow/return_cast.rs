@@ -224,6 +224,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                     let mut foreign =
                         OwnedQuery::new(self.analysis, self.session, file, &mut *self.check);
                     foreign.contribution_order = self.contribution_order.clone();
+                    foreign.workspace_facts = Arc::clone(&self.workspace_facts);
                     foreign.flow_trees = std::rc::Rc::clone(&self.flow_trees);
                     let Some(id) = foreign
                         .resolve_owned_member(&index)?

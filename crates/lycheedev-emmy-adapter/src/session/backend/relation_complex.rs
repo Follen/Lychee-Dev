@@ -2,7 +2,7 @@
 //! as carriers, while shallow object compatibility stays intentionally shallow.
 use super::{
     OwnedQuery, QueryResult,
-    relation::{Relation, RelationMode, next_relation_level},
+    relation::{Relation, RelationMode, next_relation_level, relation_from_bool},
 };
 use crate::session::{OwnedValue, SelectedProjectionBackend};
 use emmylua_code_analysis::{LuaMemberKey, LuaType};
@@ -50,7 +50,11 @@ impl<E> OwnedQuery<'_, '_, E> {
                                 }
                             }
                         }
-                        Ok(Relation::Mismatch)
+                        Ok(self.relation_mismatch(
+                            mode,
+                            source.structural_type(),
+                            target.structural_type(),
+                        ))
                     }
                     LuaType::Tuple(tuple) => {
                         let next = next_relation_level!(depth);
@@ -71,13 +75,21 @@ impl<E> OwnedQuery<'_, '_, E> {
                     | LuaType::Ref(_)
                     | LuaType::Def(_)
                     | LuaType::Generic(_) => Ok(Relation::Compatible),
-                    _ => Ok(Relation::Mismatch),
+                    _ => Ok(self.relation_mismatch(
+                        mode,
+                        source.structural_type(),
+                        target.structural_type(),
+                    )),
                 }
             }
             LuaType::TableGeneric(types) => match t {
                 LuaType::TableGeneric(others) => {
                     if types.len() != others.len() {
-                        return Ok(Relation::Mismatch);
+                        return Ok(self.relation_mismatch(
+                            mode,
+                            source.structural_type(),
+                            target.structural_type(),
+                        ));
                     }
                     let next = next_relation_level!(depth);
                     for (index, (a, b)) in types.iter().zip(others.iter()).enumerate() {
@@ -99,12 +111,20 @@ impl<E> OwnedQuery<'_, '_, E> {
                 | LuaType::Object(_)
                 | LuaType::Ref(_)
                 | LuaType::Def(_) => Ok(Relation::Compatible),
-                _ => Ok(Relation::Mismatch),
+                _ => Ok(self.relation_mismatch(
+                    mode,
+                    source.structural_type(),
+                    target.structural_type(),
+                )),
             },
             LuaType::Tuple(tuple) => match t {
                 LuaType::Tuple(other) => {
                     if tuple.get_types().len() != other.get_types().len() {
-                        return Ok(Relation::Mismatch);
+                        return Ok(self.relation_mismatch(
+                            mode,
+                            source.structural_type(),
+                            target.structural_type(),
+                        ));
                     }
                     let next = next_relation_level!(depth);
                     for (index, (a, b)) in
@@ -130,7 +150,11 @@ impl<E> OwnedQuery<'_, '_, E> {
                 | LuaType::TableGeneric(_)
                 | LuaType::Ref(_)
                 | LuaType::Def(_) => Ok(Relation::Compatible),
-                _ => Ok(Relation::Mismatch),
+                _ => Ok(self.relation_mismatch(
+                    mode,
+                    source.structural_type(),
+                    target.structural_type(),
+                )),
             },
             LuaType::Object(object) if mode == RelationMode::Strict => match t {
                 LuaType::Object(other) => {
@@ -155,7 +179,11 @@ impl<E> OwnedQuery<'_, '_, E> {
                     for (index, actual) in tuple.get_types().iter().enumerate() {
                         let key = LuaMemberKey::Integer(index as i64 + 1);
                         let Some(expected) = object.get_fields().get(&key) else {
-                            return Ok(Relation::Mismatch);
+                            return Ok(self.relation_mismatch(
+                                mode,
+                                source.structural_type(),
+                                target.structural_type(),
+                            ));
                         };
                         let result = self.relation_at(
                             &self.owned_field(source, &key, expected),
@@ -190,17 +218,31 @@ impl<E> OwnedQuery<'_, '_, E> {
                 LuaType::Table | LuaType::Ref(_) | LuaType::Def(_) | LuaType::Generic(_) => {
                     Ok(Relation::Compatible)
                 }
-                _ => Ok(Relation::Mismatch),
+                _ => Ok(self.relation_mismatch(
+                    mode,
+                    source.structural_type(),
+                    target.structural_type(),
+                )),
             },
-            LuaType::Object(_) => Ok(Relation::from_bool(matches!(
-                t,
-                LuaType::Object(_)
-                    | LuaType::Table
-                    | LuaType::Ref(_)
-                    | LuaType::Def(_)
-                    | LuaType::Generic(_)
-            ))),
-            LuaType::Call(_) => Ok(Relation::from_bool(
+            LuaType::Object(_) => Ok(relation_from_bool!(
+                self,
+                mode,
+                source.structural_type(),
+                target.structural_type(),
+                matches!(
+                    t,
+                    LuaType::Object(_)
+                        | LuaType::Table
+                        | LuaType::Ref(_)
+                        | LuaType::Def(_)
+                        | LuaType::Generic(_)
+                ),
+            )),
+            LuaType::Call(_) => Ok(relation_from_bool!(
+                self,
+                mode,
+                source.structural_type(),
+                target.structural_type(),
                 matches!(t, LuaType::Call(_)) && source == target,
             )),
             LuaType::MultiLineUnion(multi) => {
@@ -211,7 +253,11 @@ impl<E> OwnedQuery<'_, '_, E> {
                 let union = OwnedValue::raw_union(members);
                 self.relation_at(&union, target, mode, next_relation_level!(depth))
             }
-            _ => Ok(Relation::Mismatch),
+            _ => Ok(self.relation_mismatch(
+                mode,
+                source.structural_type(),
+                target.structural_type(),
+            )),
         }
     }
 }

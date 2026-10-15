@@ -141,7 +141,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         Ok(Ok(OwnedValue::function(&metadata, params, ret)))
     }
 
-    fn contextual_signature_return(
+    pub(super) fn contextual_signature_return(
         &mut self,
         file: FileId,
         signature: &Signature,
@@ -199,6 +199,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         };
         let mut body = OwnedQuery::new(self.analysis, session, file, &mut *self.check);
         body.contribution_order = self.contribution_order.clone();
+        body.workspace_facts = Arc::clone(&self.workspace_facts);
         body.flow_trees = std::rc::Rc::clone(&self.flow_trees);
         body.contextual_closure_return(signature.closure_syntax)
     }

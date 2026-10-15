@@ -1,7 +1,7 @@
 //! Assignment-only rules; recursive comparisons stay inside the owned relation.
 use super::{
     OwnedQuery, QueryResult,
-    relation::{Relation, RelationMode, next_relation_level},
+    relation::{Relation, RelationMode, next_relation_level, relation_from_bool},
 };
 use crate::session::{OwnedValue, SelectedProjectionBackend};
 use emmylua_code_analysis::{LuaMemberKey, LuaType, SemanticId, TypeDef, TypeDefKind, TypeScope};
@@ -33,7 +33,13 @@ impl<E> OwnedQuery<'_, '_, E> {
             (
                 LuaType::Number | LuaType::FloatConst(_),
                 LuaType::Integer | LuaType::IntegerConst(_) | LuaType::DocIntegerConst(_),
-            ) => return Ok(Some(Relation::Mismatch)),
+            ) => {
+                return Ok(Some(self.relation_mismatch(
+                    RelationMode::Assign,
+                    source.structural_type(),
+                    target.structural_type(),
+                )));
+            }
             _ => {}
         }
         if let (LuaType::TableConst(table), LuaType::Ref(id) | LuaType::Def(id)) = (s, t) {
@@ -48,11 +54,15 @@ impl<E> OwnedQuery<'_, '_, E> {
                 })
                 .cloned();
             let target_def = self.model.resolve_type_def(id.get_name());
-            if let (Some(source), Some(target)) = (source_def, target_def)
-                && !self.assignment_def_extends(&source, &target, &mut Vec::new())?
-                && !self.assignment_def_extends(&target, &source, &mut Vec::new())?
+            if let (Some(source_def), Some(target_def)) = (source_def, target_def)
+                && !self.assignment_def_extends(&source_def, &target_def, &mut Vec::new())?
+                && !self.assignment_def_extends(&target_def, &source_def, &mut Vec::new())?
             {
-                return Ok(Some(Relation::Mismatch));
+                return Ok(Some(self.relation_mismatch(
+                    RelationMode::Assign,
+                    source.structural_type(),
+                    target.structural_type(),
+                )));
             }
         }
         if let LuaType::Ref(id) | LuaType::Def(id) = t
@@ -64,7 +74,11 @@ impl<E> OwnedQuery<'_, '_, E> {
                     return Ok(Some(Relation::Compatible));
                 }
                 LuaType::IntegerConst(value) => {
-                    return Ok(Some(Relation::from_bool(
+                    return Ok(Some(relation_from_bool!(
+                        self,
+                        RelationMode::Assign,
+                        source.structural_type(),
+                        target.structural_type(),
                         self.assignment_enum_values(&def)?.contains(value),
                     )));
                 }
@@ -80,7 +94,11 @@ impl<E> OwnedQuery<'_, '_, E> {
                     return Ok(Some(Relation::Compatible));
                 }
             }
-            return Ok(Some(Relation::Mismatch));
+            return Ok(Some(self.relation_mismatch(
+                RelationMode::Assign,
+                source.structural_type(),
+                target.structural_type(),
+            )));
         }
         if let (LuaType::Object(object), LuaType::Ref(_) | LuaType::Def(_)) = (s, t)
             && let Some(def) = self.assignment_named_def(t)
@@ -110,7 +128,11 @@ impl<E> OwnedQuery<'_, '_, E> {
                             next,
                         )? != Relation::Compatible
                         {
-                            return Ok(Some(Relation::Mismatch));
+                            return Ok(Some(self.relation_mismatch(
+                                RelationMode::Assign,
+                                source.structural_type(),
+                                target.structural_type(),
+                            )));
                         }
                     }
                 }
@@ -127,7 +149,11 @@ impl<E> OwnedQuery<'_, '_, E> {
             for component in intersection.get_types() {
                 self.checkpoint()?;
                 let Some(def) = self.assignment_named_def(component) else {
-                    return Ok(Some(Relation::Mismatch));
+                    return Ok(Some(self.relation_mismatch(
+                        RelationMode::Assign,
+                        source.structural_type(),
+                        target.structural_type(),
+                    )));
                 };
                 let mut expected = Vec::new();
                 self.assignment_named_members(&def, &mut Vec::new(), &mut expected)?;
@@ -137,13 +163,21 @@ impl<E> OwnedQuery<'_, '_, E> {
                         if expected.structural_type().is_nullable() {
                             continue;
                         }
-                        return Ok(Some(Relation::Mismatch));
+                        return Ok(Some(self.relation_mismatch(
+                            RelationMode::Assign,
+                            source.structural_type(),
+                            target.structural_type(),
+                        )));
                     };
                     let next = next_optional_relation_level!(depth);
                     if self.relation_at(actual, &expected, RelationMode::Assign, next)?
                         != Relation::Compatible
                     {
-                        return Ok(Some(Relation::Mismatch));
+                        return Ok(Some(self.relation_mismatch(
+                            RelationMode::Assign,
+                            source.structural_type(),
+                            target.structural_type(),
+                        )));
                     }
                 }
             }
@@ -157,15 +191,23 @@ impl<E> OwnedQuery<'_, '_, E> {
                 .function_parameters()
                 .expect("target function parameters");
             if source_params.len() != target_params.len() {
-                return Ok(Some(Relation::Mismatch));
+                return Ok(Some(self.relation_mismatch(
+                    RelationMode::Assign,
+                    source.structural_type(),
+                    target.structural_type(),
+                )));
             }
-            for (source, target) in source_params.iter().zip(&target_params) {
-                if let (Some(source), Some(target)) = (source, target) {
+            for (source_param, target_param) in source_params.iter().zip(&target_params) {
+                if let (Some(source_param), Some(target_param)) = (source_param, target_param) {
                     let next = next_optional_relation_level!(depth);
-                    if self.assignment_parameter_accepts(target, source, next)?
+                    if self.assignment_parameter_accepts(target_param, source_param, next)?
                         != Relation::Compatible
                     {
-                        return Ok(Some(Relation::Mismatch));
+                        return Ok(Some(self.relation_mismatch(
+                            RelationMode::Assign,
+                            source.structural_type(),
+                            target.structural_type(),
+                        )));
                     }
                 }
             }
@@ -210,7 +252,11 @@ impl<E> OwnedQuery<'_, '_, E> {
                     return Ok(Relation::Compatible);
                 }
             }
-            return Ok(Relation::Mismatch);
+            return Ok(self.relation_mismatch(
+                RelationMode::Assign,
+                source.structural_type(),
+                target.structural_type(),
+            ));
         }
         self.relation_at(target, source, RelationMode::Assign, depth)
     }

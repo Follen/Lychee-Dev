@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 21:05 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`b18a91081375b23f9dfded86e2aa90b742fc3ca6`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 21:17 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`cd87118123fcba3d26f8ee161166629a4570bdaa`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -25,6 +25,8 @@
 
 ## 2. 当前实现与未闭环事项
 
+Emmy后继83路径现已把真实 Source freeze→OwnedBindingSession→OwnedQuery→43项诊断调度接入生产源码，24项contextual与19项普通检查保持原顺序、配置过滤及force-enable消费者，统一证据ledger。raw TypeShell、调用/返回与泛型约束、参数/返回计数等已组合；仅81 Rust语法检查通过，未编译执行。旧增强tests/examples仍有patched API消费者，正迁到owned入口并保独立冻结旧基线差分；当前recipe仍26路径/24生产文件，尚未删除其余补丁，也未宣称完整等价。新增adapter直接依赖仅现锁定emmy_lsp_types0.1.0/rust-i18n3.1.5/smol_str0.3.6，无新包或升级；根与npm完整MIT通知增加diagnostic/checker派生范围。
+
 默认target list/add/show/remove现已接同一typed配置与受控分页/SQLite owner：取消旧10000截断，精确name/大小写优先与raw历史引用验证，show输出resolvedPins；remove按Go先独立CAS删除配置、再读取引用generation、每64项删除，保可见部分提交与removedPins。17项新Rust回归已写未跑；target resolve --file现已接实际65537字节受控读取、独立Go typed JSON规则、同一Metadata writer的parent/CAS/winner验证及checked input close；按Go不额外生成snapshot context，已知提交pin保在既有error.details。14 Core＋3 CLI新测试未运行；generic JSON/type/time精确错误文案仍待补齐，不误套project更严duplicate/depth限制。其余workspace同步open/native Drop及project命令边界仍未闭合。
 
 默认SQL进一步接入typed quoted identifiers与真实单次schema preflight按需RootResolver：local/CDN/effective/meta不再提前准备全部根源；owned WDC Table移动原FileBytes并保留资源owner，local复用Prepared Encoding/Root。32物理源、固定Go100万rows/4096columns/partitions及caller ContentBytes边界已接，capture仍在同一checked-close范围，后续关闭失败保已提交ID。24源与41项新增Rust回归已组合，尚未执行。后继默认local SQL的Encoding/Root/selected现共用query内CASC索引owner：64MiB缓存、XOR首选bucket、原累计逻辑账、真实内存释放与成功capture前原Directory逐块SHA256/最新generation复核已接，8新Rust回归未跑。独立legacy local API仍原路径，EXISTS/标量子查询/EXPLAIN ANALYZE继续实施，未称全SQL等价。
@@ -37,7 +39,7 @@
 
 6699终态产物168 owner/987 sealed日志全SHA核验；owned binary4/dense3/execution3/plan2/function5实际通过，query backend4通过1失败，正常局部变量触发尚缺的DeclarationFlow，后续selected448未执行。此缺口正按完整flow链实现，不改成Unknown掩盖。Data旧可见域错误与三处adaptive测试移出PinnedSet的E0507已最小修；Core旧immediate-busy测试已按真实blob等待合同改取消，历史metadata测试目录加唯一序号。新测试均未运行；同候选旧context fixture失败已在c8后继保存正负用例。
 
-owned查询后端已保存完整累计源码：单文件按需CFG、局部声明flow/赋值/join/基本guard/casts、三种类型关系、member producer与结构化carrier、substitution和本地/跨文件signature。后继33个Rust源已组合通用call、重载/generic、回调参数环境、builtins/返回转换、迭代变量、member flow与相关窄化、来源carrier，均仅通过语法检查，未编译。真实batch现携带贡献顺序Arc，供显式owned构造使用；旧开发构造缺该事实时保IntakeOrder未完成状态，现有oracle还需集中迁移，不能当兼容通过。raw TypeShell后继与统一checker仍继续，尚未切Source实际诊断。当前不新增生产patch删除，不宣称6699正常局部变量失败已修复。依赖只增加既有锁定rowan0.17.0的adapter直接边，无新包或版本升级。
+owned查询后端已保存完整累计源码：单文件按需CFG、局部声明flow/赋值/join/基本guard/casts、三种类型关系、member producer与结构化carrier、substitution和本地/跨文件signature。后继33个Rust源已组合通用call、重载/generic、回调参数环境、builtins/返回转换、迭代变量、member flow与相关窄化、来源carrier，均仅通过语法检查，未编译。真实batch现携带贡献顺序Arc，供显式owned构造使用；旧开发构造缺该事实时保IntakeOrder未完成状态，现有oracle还需集中迁移，不能当兼容通过。该历史候选当时尚未切Source实际诊断；后继已组合真实入口与43 checker，见本节首段，实际编译/集中差分仍待。当前不新增生产patch删除，不宣称6699正常局部变量失败已修复。依赖只增加既有锁定rowan0.17.0的adapter直接边，无新包或版本升级。
 
 当前完整生产批已把 adapter declaration 与 Source PreparedSnapshot 两处摄取切换为原版 Emmy 公开 batch API，并把原35个测试迁到自有 adapter；删除 checked/shared ingestion、DB shared setter 和 VFS Arc接收改动。重建 recipe 从31降为26 changed paths、生产源从26降为24，完整源码身份重建已核，Rust运行待集中验证。公开API要求String，新增N常驻及N+最大文件转换瞬态文本成本已明确记录；不提高原2GiB worker上限，完整语义/诊断仍继续迁移，未达到零补丁。
 

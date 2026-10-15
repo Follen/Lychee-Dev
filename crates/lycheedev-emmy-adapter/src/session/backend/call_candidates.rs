@@ -89,10 +89,8 @@ impl<E> OwnedQuery<'_, '_, E> {
         let Some(metatable) = self.table_metatable_type(table)? else {
             return Ok(None);
         };
-        let Some(info) = self
-            .member_infos_with_key(&metatable, &LuaMemberKey::Name("__call".into()))?
-            .into_iter()
-            .next()
+        let Some(info) =
+            self.member_info_uncached(&metatable, &LuaMemberKey::Name("__call".into()))?
         else {
             return Ok(None);
         };
@@ -147,7 +145,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             return Ok(None);
         };
         let key = LuaMemberKey::Name(attribute.name.clone());
-        let info = self.member_infos_with_key(class, &key)?.into_iter().next();
+        let info = self.member_info_uncached(class, &key)?;
         let (file, id) = if let Some(info) = info {
             let (Some(file), Some(id)) = (info.file_id, info.id) else {
                 return Ok(None);

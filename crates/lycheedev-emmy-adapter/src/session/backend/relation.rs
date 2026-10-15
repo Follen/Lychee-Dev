@@ -8,25 +8,55 @@ use emmylua_code_analysis::{LuaType, LuaUnionType, TypeDefKind};
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum RelationMode {
     General,
+    Detailed,
     Assign,
     Strict,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(super) enum Relation {
     Compatible,
     Mismatch,
+    MismatchWithReason(String),
     Recursion,
 }
-impl Relation {
-    pub(super) fn from_bool(value: bool) -> Self {
-        if value {
-            Self::Compatible
-        } else {
-            Self::Mismatch
-        }
+#[derive(Debug)]
+pub(super) enum TypeCheckFailReason {
+    TypeNotMatch,
+    TypeRecursion,
+    TypeNotMatchWithReason(String),
+}
+impl TypeCheckFailReason {
+    pub(super) fn is_type_not_match(&self) -> bool {
+        matches!(self, Self::TypeNotMatch | Self::TypeNotMatchWithReason(_))
     }
 }
+impl Relation {
+    fn into_detail(self) -> Result<(), TypeCheckFailReason> {
+        match self {
+            Self::Compatible => Ok(()),
+            Self::Mismatch => Err(TypeCheckFailReason::TypeNotMatch),
+            Self::Recursion => Err(TypeCheckFailReason::TypeRecursion),
+            Self::MismatchWithReason(reason) => {
+                Err(TypeCheckFailReason::TypeNotMatchWithReason(reason))
+            }
+        }
+    }
+    pub(super) fn is_mismatch(&self) -> bool {
+        matches!(self, Self::Mismatch | Self::MismatchWithReason(_))
+    }
+}
+
+macro_rules! relation_from_bool {
+    ($query:expr, $mode:expr, $source:expr, $target:expr, $value:expr $(,)?) => {{
+        if $value {
+            Relation::Compatible
+        } else {
+            $query.relation_mismatch($mode, $source, $target)
+        }
+    }};
+}
+pub(super) use relation_from_bool;
 
 // The fixed guard fails at the caller, before entering the recursive producer.
 // In particular an `is_ok` alternative may swallow the child's Recursion, but
@@ -42,6 +72,39 @@ macro_rules! next_relation_level {
 pub(super) use next_relation_level;
 
 impl<E> OwnedQuery<'_, '_, E> {
+    pub(super) fn check_assign_type_detail(
+        &mut self,
+        source: &OwnedValue,
+        target: &OwnedValue,
+    ) -> QueryResult<Result<(), TypeCheckFailReason>, E> {
+        self.relation_at(source, target, RelationMode::Assign, 0)
+            .map(Relation::into_detail)
+    }
+    pub(super) fn check_type_detail(
+        &mut self,
+        source: &OwnedValue,
+        target: &OwnedValue,
+    ) -> QueryResult<Result<(), TypeCheckFailReason>, E> {
+        self.relation_at(source, target, RelationMode::Detailed, 0)
+            .map(Relation::into_detail)
+    }
+    pub(super) fn relation_mismatch(
+        &self,
+        mode: RelationMode,
+        source: &LuaType,
+        target: &LuaType,
+    ) -> Relation {
+        if matches!(mode, RelationMode::Assign | RelationMode::Detailed) {
+            use emmylua_code_analysis::humanize_semantic_type as humanize_type;
+            Relation::MismatchWithReason(format!(
+                "expected `{}`, found `{}`",
+                humanize_type(&self.model, target),
+                humanize_type(&self.model, source)
+            ))
+        } else {
+            Relation::Mismatch
+        }
+    }
     /// Full OwnedValue identity is the key. A hit checks caller control without
     /// replaying structure receipts, exactly as the original local result cache.
     pub fn type_check(&mut self, source: &OwnedValue, target: &OwnedValue) -> QueryResult<bool, E> {
@@ -89,7 +152,9 @@ impl<E> OwnedQuery<'_, '_, E> {
     ) -> QueryResult<Relation, E> {
         self.checkpoint()?;
         if !self.structure_allowed(source)? || !self.structure_allowed(target)? {
-            return Ok(Relation::Mismatch);
+            return Ok(Relation::MismatchWithReason(
+                "binding object context or shape unavailable".into(),
+            ));
         }
         if source == target {
             return Ok(Relation::Compatible);
@@ -102,18 +167,24 @@ impl<E> OwnedQuery<'_, '_, E> {
             return Ok(Relation::Compatible);
         }
         if matches!(t, LuaType::SelfInfer) {
-            return Ok(Relation::from_bool(matches!(
-                s,
-                LuaType::SelfInfer
-                    | LuaType::Ref(_)
-                    | LuaType::Def(_)
-                    | LuaType::Generic(_)
-                    | LuaType::Table
-                    | LuaType::TableConst(_)
-                    | LuaType::TableGeneric(_)
-                    | LuaType::Object(_)
-                    | LuaType::Intersection(_)
-            )));
+            return Ok(relation_from_bool!(
+                self,
+                RelationMode::General,
+                source.structural_type(),
+                target.structural_type(),
+                matches!(
+                    s,
+                    LuaType::SelfInfer
+                        | LuaType::Ref(_)
+                        | LuaType::Def(_)
+                        | LuaType::Generic(_)
+                        | LuaType::Table
+                        | LuaType::TableConst(_)
+                        | LuaType::TableGeneric(_)
+                        | LuaType::Object(_)
+                        | LuaType::Intersection(_)
+                ),
+            ));
         }
         if let LuaType::Ref(id) | LuaType::Def(id) = t {
             self.checkpoint()?;
@@ -175,7 +246,11 @@ impl<E> OwnedQuery<'_, '_, E> {
                     return Ok(Relation::Compatible);
                 }
             }
-            return Ok(Relation::Mismatch);
+            return Ok(self.relation_mismatch(
+                mode,
+                source.structural_type(),
+                target.structural_type(),
+            ));
         }
         match s {
             LuaType::Unknown | LuaType::Any | LuaType::Never | LuaType::ModuleRef(_) => {
@@ -220,7 +295,11 @@ impl<E> OwnedQuery<'_, '_, E> {
             LuaType::DocFunction(_) => self.function_relation(source, target, mode, depth),
             LuaType::Signature(id) => {
                 let Some(signature) = self.signature_by_id(id)? else {
-                    return Ok(Relation::Mismatch);
+                    return Ok(self.relation_mismatch(
+                        mode,
+                        source.structural_type(),
+                        target.structural_type(),
+                    ));
                 };
                 self.function_relation(&signature, target, mode, next_relation_level!(depth))
             }
@@ -250,10 +329,16 @@ impl<E> OwnedQuery<'_, '_, E> {
                     match self.relation_at(&member, target, mode, next)? {
                         Relation::Compatible => return Ok(Relation::Compatible),
                         Relation::Recursion => return Ok(Relation::Recursion),
-                        Relation::Mismatch => {}
+                        Relation::Mismatch | Relation::MismatchWithReason(_) => {}
                     }
                 }
-                Ok(Relation::Mismatch)
+                Ok(
+                    self.relation_mismatch(
+                        mode,
+                        source.structural_type(),
+                        target.structural_type(),
+                    ),
+                )
             }
             LuaType::Intersection(members) => {
                 for (index, member) in members.get_types().iter().enumerate() {
@@ -268,7 +353,13 @@ impl<E> OwnedQuery<'_, '_, E> {
                         return Ok(Relation::Compatible);
                     }
                 }
-                Ok(Relation::Mismatch)
+                Ok(
+                    self.relation_mismatch(
+                        mode,
+                        source.structural_type(),
+                        target.structural_type(),
+                    ),
+                )
             }
             LuaType::Array(_)
             | LuaType::Tuple(_)
@@ -283,8 +374,18 @@ impl<E> OwnedQuery<'_, '_, E> {
                 mode,
                 next_relation_level!(depth),
             ),
-            LuaType::TypeGuard(_) => Ok(Relation::from_bool(t.is_boolean())),
-            _ => Ok(Relation::Mismatch),
+            LuaType::TypeGuard(_) => Ok(relation_from_bool!(
+                self,
+                mode,
+                source.structural_type(),
+                target.structural_type(),
+                t.is_boolean(),
+            )),
+            _ => Ok(self.relation_mismatch(
+                mode,
+                source.structural_type(),
+                target.structural_type(),
+            )),
         }
     }
 }
