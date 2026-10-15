@@ -13,6 +13,12 @@ Authority for decisions, status and evidence: [handover.md](handover.md). This c
 
 - [x] Push the reviewed documentation to rust-refactor and create/reuse its own draft PR (#14); subsequent authorized code batches update that same PR promptly, without waiting for all validation or opening one PR per batch.
 
+## Hard requirement: unmodified Emmy upstream
+
+- [ ] Inventory every remaining production hook and actual consumer, including shared ingestion, contextual inference, identity/cardinality and diagnostic receipts.
+- [ ] Replace all upstream source changes with owned-crate behavior through the fixed unmodified public API, preserving the complete approved XML/Lua design. No minimal-hook final exemption remains.
+- [ ] Prove each replacement with full output/diagnostic/coverage/cancellation/resource differentials, then exact-lock native and full Retail cold/warm/session acceptance. Keep prior failures and transitional patches honestly identified until removed.
+
 ## Current tagged increment: Go 3.2.2
 
 - [x] Pin v3.2.2 to `0bec60e4406f5d5dc155ee25cef44f9a710e37e8`; preserve both prior oracles and all results. Tag/main checked, Release API assets not verified. See [increment matrix](docs/toolkit/rust-go-3.2.2-increment.md).
@@ -68,7 +74,7 @@ This is an execution view, not a second evidence authority. A component being im
 
 ### Current validation cadence and new Source priorities
 
-- [ ] Apply the latest upstream-minimization direction: evaluate each remaining Emmy patch against the independent unpatched public-API matrix, prefer owned XML/business/adapter implementations, and retain only demonstrated necessary minimal hooks with consumer/regression evidence. Preserve all approved enhanced semantics; no automatic large rewrite, dynamic plugin framework or zero-maintenance promise. Session/epoch/source-map/ref provenance are not automatically engine-only responsibilities.
+- [ ] Apply the latest upstream-minimization direction: evaluate each remaining Emmy patch against the independent unpatched public-API matrix, prefer owned XML/business/adapter implementations, and replace every remaining upstream hook with equivalent owned behavior and consumer/regression evidence; no final hook exemption remains. Preserve all approved enhanced semantics; no automatic large rewrite, dynamic plugin framework or zero-maintenance promise. Session/epoch/source-map/ref provenance are not automatically engine-only responsibilities.
 
 
 - [ ] Run local real pure Rust/Node/Lua regressions first within valid owned channels; preserve results and promptly push each meaningful batch. Every push runs fast checks; explicit `[rust-native]` batch commits run full Windows/Emmy acceptance. Do not treat skipped native jobs as green product validation.
@@ -85,14 +91,14 @@ This is an execution view, not a second evidence authority. A component being im
 - [ ] Retain the published independently reviewed local pure Rust runner and actual 21+5 results; continue exact production module tests locally. Keep frequent persistence pushes separate from explicit `[rust-native]` batch acceptance.
 - [ ] Collect actual full Retail memory by phase using synchronized authenticated Job membership; report current WorkingSet/PrivateBytes sampled group peaks and steady observations, sampling gaps and failed/incomplete operations separately. Historical `not_measured` remains unchanged.
 - [ ] Extend the implemented owned Emmy adapter with one-way Source→adapter→Emmy dependencies and real diagnostics/API-type consumers, then move domain DTO/projection/provenance/reporting out of upstream patches in small reviewed batches. Preserve the entire enhanced XML/Lua design per explicit user decision; label it separately from Go-equivalent behavior.
-- [ ] Map each remaining Emmy patch to consumers and tests; preserve 35 contextual regressions/full Retail acceptance. Pin upgrades, check official public API replacements, review uncertainty/identity/cardinality boundaries and remove only proven-redundant hooks. Do not count a wrapper-only crate as completed decoupling.
+- [ ] Map each remaining Emmy patch to consumers and tests; preserve 35 contextual regressions/full Retail acceptance. Pin upgrades, check official public API replacements, review uncertainty/identity/cardinality boundaries and remove each hook after its owned replacement proves equivalent; all must be removed for acceptance. Do not count a wrapper-only crate as completed decoupling.
 - [ ] Complete SQL meta exact Unicode EqualFold before independent review; logical resources admission (including 16×1MiB Go80MiB/Rust144MiB false rejection), paired CSV R4 is independently reviewed but native NOT_RUN; EXPLAIN/TopK R3 is implemented and independently reviewed, with 31 new tests NOT_RUN; ANALYZE/provider callback and resource gaps remain.
 
 ## 1. Reproducible foundation (no user interaction)
 
 - [ ] Pin Go release executable/source hashes; export complete describe/help/CLI/Skill/addon oracle.
 - [ ] Inventory each current Rust implementation against F01–F13: retain/adapt/replace/missing/unverified with source and test evidence.
-- [ ] Use the verified fixed public Emmy upstream as the recovery base; compare consumed APIs, port minimal necessary patches as a NEW dependency with explicit provenance/license/tests rather than pretending to reproduce missing private bytes. Reconcile old custody assumptions honestly.
+- [ ] Use the verified fixed public Emmy upstream as the recovery base; compare consumed APIs, retain the identified transitional reconstruction with explicit provenance/license/tests only until the complete unmodified-upstream migration replaces its hooks; never pretend new bytes reproduce missing private bytes. Reconcile old custody assumptions honestly.
 - [ ] Validate clean build, locked toolchain/dependencies and two independent offline corresponding-source rebuilds within owned cache limits.
 
 ## 2. Full business parity (offline first)

@@ -660,3 +660,5 @@ fn remote_encoded_span_and_ranges_keep_origin_admission_until_each_owner_drops()
     assert_eq!(after.network_bytes, network.network_bytes);
     assert!(after.network_requests > 0);
 }
+
+mod publication_diagnostics;

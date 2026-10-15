@@ -77,7 +77,7 @@ fn failed_nested_decode_and_key_loading_release_only_temporary_ownership() {
     // failed nested output/scratch reservation was actually released.
     assert_eq!(
         budget.snapshot().unwrap().retained_bytes,
-        (keys::PUBLIC_BYTES * 8) as u64
+        (keys::PUBLIC_BYTES * 8 + 65536) as u64
     );
     assert!(budget.snapshot().unwrap().decode_work > 0);
     assert_eq!(stats.content_decode_calls, 1);

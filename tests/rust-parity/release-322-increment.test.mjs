@@ -35,7 +35,26 @@ test('322 separately authenticates the fixed tag, business commit and complete i
 
 test('all previous evidence keeps its original bytes and identity', () => {
   assert.equal(manifest.historicalFiles.length, 150);
-  for (const row of manifest.historicalFiles) assert.equal(hash(read(row.path)), row.sha256, row.path);
+  const deltaBytes = read('tests/rust-parity/release-350-static-consumer-delta.json');
+  assert.equal(hash(deltaBytes), 'cc52d3a8383a737f98c9b70cc81c312717caca3538107e22d0a761e6cb6e965d');
+  const delta = JSON.parse(deltaBytes);
+  assert.equal(delta.path, 'tests/rust-parity/release-321-increment.test.mjs');
+  for (const row of manifest.historicalFiles) {
+    if (row.path !== delta.path) { assert.equal(hash(read(row.path)), row.sha256, row.path); continue; }
+    assert.equal(delta.beforeSHA256, row.sha256);
+    const historical = read(delta.historicalPath);
+    assert.equal(hash(historical), row.sha256);
+    assert.deepEqual(historical, blob(delta.baseCommit, delta.path));
+    const current = read(row.path);
+    assert.equal(hash(current), delta.candidateSHA256);
+    let restored = current.toString();
+    for (const edit of delta.edits) {
+      assert.equal(restored.split(edit.candidateText).length, 2);
+      restored = restored.replace(edit.candidateText, edit.beforeText);
+    }
+    assert.equal(hash(Buffer.from(restored)), row.sha256);
+    assert.equal(restored, historical.toString());
+  }
   assert.equal(JSON.parse(read('tests/rust-parity/go-3.2.1.manifest.json')).oracle.commit, manifest.previous.commit);
   assert.equal(JSON.parse(read('tests/rust-parity/go-3.2.0.manifest.json')).oracle.commit, '3057a9666ab078270b63c7f06de748069b0d1f4b');
 });

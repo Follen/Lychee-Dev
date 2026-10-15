@@ -1,5 +1,9 @@
 //! Request-owned keys. Private key bytes are never persisted or printed.
-use crate::{definitions, fault};
+use crate::fault;
+use lycheedev_core::{ToolkitError, control::OperationControl};
+mod http;
+#[cfg(test)]
+mod tests;
 use lycheedev_core::{Invocation, Result, evidence, storage};
 use serde::{
     Deserialize, Serialize,
@@ -11,7 +15,7 @@ use std::{
     fmt,
     io::Read,
     path::{Path, PathBuf},
-    time::{Duration, Instant},
+    time::Instant,
 };
 pub const PUBLIC_COMMIT: &str = "71b75360752840dd62a412013a38b5a972524a50";
 pub const PUBLIC_SHA256: &str = "6d83241ed776f9e74e27ed65d1ec52f1a1464a4e9b16bed497258fdd61020b52";
@@ -91,6 +95,11 @@ impl<'de> Visitor<'de> for JsonKeys {
 }
 impl KeySet {
     pub fn parse(raw: &[u8], format: &str, expected: &str) -> Result<Self> {
+        Self::parse_checked(raw, format, expected, || Ok(()))
+    }
+    fn parse_checked(raw: &[u8], format: &str, expected: &str,
+        mut check: impl FnMut() -> Result<()>) -> Result<Self> {
+        check()?;
         if raw.len() > 4 << 20 {
             return Err(fault(
                 "records.metadata_limit",
@@ -107,10 +116,12 @@ impl KeySet {
                 "Key document digest differs",
             ));
         }
+        check()?;
         let keys = match format {
             "text" => {
                 let mut keys = BTreeMap::new();
                 for line in raw.split(|b| *b == b'\n') {
+                    check()?;
                     if line.len() > 65536 {
                         return Err(invalid());
                     }
@@ -138,6 +149,7 @@ impl KeySet {
         if keys.is_empty() {
             return Err(invalid());
         }
+        check()?;
         Ok(Self { keys })
     }
     pub fn keys(&self) -> &BTreeMap<u64, Vec<u8>> {
@@ -150,6 +162,8 @@ pub struct Context {
     home: PathBuf,
     offline: bool,
     deadline: Instant,
+    control: OperationControl,
+    public_result: Option<Result<()>>,
     budget: Option<std::sync::Arc<crate::resource::Budget>>,
 }
 impl Context {
@@ -161,7 +175,18 @@ impl Context {
         deadline: Instant,
         budget: Option<std::sync::Arc<crate::resource::Budget>>,
     ) -> Result<Self> {
-        inv.control.check()?;
+        Self::prepare_scoped(&inv.home, inv.flag("--key-file"), inv.flag_bool("--offline"),
+            &inv.control, deadline, budget)
+    }
+    pub(crate) fn prepare_scoped(
+        home: &Path,
+        key_file: Option<&str>,
+        offline: bool,
+        control: &OperationControl,
+        deadline: Instant,
+        budget: Option<std::sync::Arc<crate::resource::Budget>>,
+    ) -> Result<Self> {
+        control.check()?;
         let mut context = Self {
             source: KeySource {
                 kind: "public".into(),
@@ -170,12 +195,14 @@ impl Context {
                 sha256: PUBLIC_SHA256.into(),
             },
             keys: BTreeMap::new(),
-            home: inv.home.clone(),
-            offline: inv.flag_bool("--offline"),
+            home: home.to_owned(),
+            offline,
             deadline,
+            control: control.clone(),
+            public_result: None,
             budget,
         };
-        if let Some(path) = inv.flag("--key-file") {
+        if let Some(path) = key_file {
             let file = std::fs::File::open(path).map_err(|_| invalid())?;
             let metadata = file.metadata().map_err(|_| invalid())?;
             if !metadata.is_file() || metadata.len() > 4 << 20 {
@@ -214,86 +241,60 @@ impl Context {
         &self.keys
     }
     pub fn ensure_public(&mut self) -> Result<()> {
-        if self.source.kind != "public" || self.source.state == "loaded" {
-            return Ok(());
+        self.ensure_public_with(&http::PublicFetcher)
+    }
+    fn check(&self) -> Result<()> {
+        self.control.check()?;
+        if let Some(budget) = &self.budget { budget.check()?; }
+        if Instant::now() >= self.deadline {
+            return Err(fault("records.query_resource_budget", 3, "Data query deadline exceeded"));
         }
+        Ok(())
+    }
+    fn ensure_public_with(&mut self, fetcher: &impl http::Fetcher) -> Result<()> {
+        if self.source.kind != "public" { return Ok(()); }
+        if let Some(result) = &self.public_result { return result.clone(); }
+        let result = self.load_public(fetcher);
+        self.source.state = if result.is_ok() { "loaded" }
+            else if self.source.state == "unavailable_offline" { "unavailable_offline" }
+            else { "unavailable" }.into();
+        self.public_result = Some(result.clone());
+        result
+    }
+    fn load_public(&mut self, fetcher: &impl http::Fetcher) -> Result<()> {
+        self.check()?;
         let blob = json!({"sha256":PUBLIC_SHA256,"bytes":PUBLIC_BYTES});
         if let Some(budget) = &self.budget {
-            budget.charge_once(
-                "public-key-document",
-                crate::resource::Cost::metadata(PUBLIC_BYTES * 8),
-            )?;
+            budget.charge(crate::resource::Cost {
+                decode_work: PUBLIC_BYTES.div_ceil(65536) as u64,
+                ..crate::resource::Cost::metadata(PUBLIC_BYTES * 8 + 65536)
+            })?;
         }
         let path = evidence::blob_path(&self.home, PUBLIC_SHA256)?;
         storage::guard_path(&self.home, &path)?;
+        self.check()?;
         let raw = if path.try_exists()? {
-            evidence::read_blob(&self.home, &blob, 4 << 20)?
+            evidence::read_blob_bounded_with_check(&self.home, &blob, 4 << 20,
+                &self.control, || self.check())?
         } else {
             if self.offline {
                 self.source.state = "unavailable_offline".into();
-                return Err(fault(
-                    "container.key_unavailable",
-                    3,
-                    "Pinned public keys are unavailable offline",
-                ));
+                return Err(fault("container.key_unavailable", 3,
+                    "Pinned public keys are unavailable offline"));
             }
-            let timeout = self
-                .deadline
-                .checked_duration_since(Instant::now())
-                .ok_or_else(|| fault("records.resource_limit", 3, "Key request deadline exceeded"))?
-                .min(Duration::from_secs(30));
-            let agent = definitions::http_agent(timeout);
-            if let Some(budget) = &self.budget {
-                budget.charge(crate::resource::Cost {
-                    network_requests: 1,
-                    ..Default::default()
-                })?;
-            }
-            let mut response = agent
-                .get(format!(
-                    "https://raw.githubusercontent.com/wowdev/TACTKeys/{PUBLIC_COMMIT}/WoW.txt"
-                ))
-                .header("Accept-Encoding", "identity")
-                .call()
-                .map_err(|_| invalid())?;
-            if response.status().as_u16() != 200 {
-                return Err(invalid());
-            }
-            let mut raw = Vec::new();
-            let mut reader = response
-                .body_mut()
-                .as_reader()
-                .take(PUBLIC_BYTES as u64 + 1);
-            let mut chunk = [0; 65536];
-            loop {
-                if let Some(budget) = &self.budget {
-                    budget.check()?;
-                }
-                let n = reader.read(&mut chunk).map_err(|_| invalid())?;
-                if n == 0 {
-                    break;
-                }
-                if let Some(budget) = &self.budget {
-                    budget.charge(crate::resource::Cost {
-                        network_bytes: n as u64,
-                        ..Default::default()
-                    })?;
-                }
-                raw.extend_from_slice(&chunk[..n]);
-            }
+            let raw = fetcher.fetch(&self.control, self.budget.as_deref(), self.deadline)?;
+            self.check()?;
             if raw.len() != PUBLIC_BYTES || storage::sha256(&raw) != PUBLIC_SHA256 {
-                return Err(fault(
-                    "container.integrity",
-                    4,
-                    "Pinned public key bytes differ",
-                ));
+                return Err(fault("container.integrity", 4, "Pinned public key bytes differ"));
             }
-            evidence::publish_blob(&self.home, &raw, 4 << 20)?;
+            evidence::publish_blob_bounded_with_check(&self.home, &raw, 4 << 20,
+                &self.control, || self.check())?;
             raw
         };
-        let keys = KeySet::parse(&raw, "text", PUBLIC_SHA256)?;
+        self.check()?;
+        let keys = KeySet::parse_checked(&raw, "text", PUBLIC_SHA256, || self.check())?;
+        self.check()?;
         self.keys = keys.keys;
-        self.source.state = "loaded".into();
         Ok(())
     }
     pub fn value(&self) -> Value {

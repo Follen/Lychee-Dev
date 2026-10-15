@@ -1,17 +1,19 @@
 use super::*;
 use crate::control::TrackedCancellation;
-use std::time::Instant;
+use std::{sync::atomic::{AtomicU64, Ordering}, time::Instant};
 
 struct Fixture(std::path::PathBuf);
 impl Fixture {
     fn new() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
-            "lychee-metadata-consumers-{}-{}",
+            "lychee-metadata-consumers-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            NEXT.fetch_add(1, Ordering::Relaxed),
         ));
         std::fs::create_dir(&root).unwrap();
         let fixture = Self(root);

@@ -18,6 +18,8 @@ use std::{
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio_util::io::StreamReader;
 
+pub(crate) mod redirect_url;
+
 pub const MAX_RANGE_BYTES: i64 = 64 << 20;
 pub const MAX_OBJECT_BYTES: i64 = 1 << 50;
 
@@ -323,6 +325,18 @@ pub(crate) async fn read_response(
         deadline,
     )
     .await
+}
+/// Read at most `maximum` delivered bytes without probing for EOF beyond it.
+/// Used by Go io.LimitReader consumers; the consumer validates exact length.
+pub(crate) async fn read_response_prefix(
+    response: reqwest::Response,
+    policy: BodyPolicy,
+    maximum: usize,
+    control: &OperationControl,
+    budget: Option<&Budget>,
+    deadline: Instant,
+) -> Result<Vec<u8>> {
+    collect_response(response, policy, ReadLimit::Prefix(maximum), control, budget, deadline).await
 }
 async fn collect_response(
     response: reqwest::Response,

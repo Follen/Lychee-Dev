@@ -10,6 +10,7 @@ import {fileURLToPath} from 'node:url';
 import {extractRustProducts, parseLiteral} from './oracle.mjs';
 import {collectAddonZipEntries, verifyAddonZip} from '../../tools/addon-package.mjs';
 import {writeZip} from '../../tools/zip.mjs';
+import {CANDIDATE_RELEASE_FIELDS, CANDIDATE_VERSION} from './rust-3.5.0-release-fields.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const read = path => { assert(statSync(join(root, path)).size < 2 << 20); return readFileSync(join(root, path)); };
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -56,12 +57,24 @@ test('canonical products match the fixed 3.2.1 catalog while verified baselines 
   assert.equal(products[0].interface, 120105);
 });
 
-test('addon changes are exact business bytes with the existing candidate release version retained', () => {
+test('321 business addon bytes survive the approved independent Rust release overlay', () => {
   assert.deepEqual(read('addon/Core/ClientGate.lua'), source(manifest.current.commit, 'addon/Core/ClientGate.lua'));
-  const toc = source(manifest.current.commit, 'addon/Lychee Dev.toc').toString().replace('## Version: 3.2.1\n', '## Version: 3.2.0\n');
-  assert.equal(read('addon/Lychee Dev.toc').toString(), toc);
-  assert.deepEqual(read('addon/Core/Runtime.lua'), source(manifest.previous.commit, 'addon/Core/Runtime.lua'));
-  assert.equal(JSON.parse(read('release/version.json')).version, '3.1.2');
+  for (const [path, commit, historicalText] of [
+    ['addon/Lychee Dev.toc', manifest.current.commit, '## Version: 3.2.1'],
+    ['addon/Core/Runtime.lua', manifest.previous.commit, 'ns.Release = "3.2.0"'],
+  ]) {
+    const allowed = CANDIDATE_RELEASE_FIELDS.find(row => row.path === path);
+    assert(allowed, path);
+    const candidate = read(path);
+    assert.deepEqual({bytes: candidate.length, sha256: hash(candidate)}, allowed.retained, path);
+    const text = candidate.toString();
+    assert.equal(text.split(allowed.retainedText).length, 2, path);
+    const restored = Buffer.from(text.replace(allowed.retainedText, historicalText));
+    const original = source(commit, path);
+    assert.equal(hash(restored), hash(original), path);
+    assert.deepEqual(restored, original, path);
+  }
+  assert.equal(JSON.parse(read('release/version.json')).version, CANDIDATE_VERSION);
 });
 
 test('slot generator declares new interfaces and retains the exact previous Retail migration list', () => {
@@ -78,8 +91,17 @@ test('package shape accepts seven interfaces and six catalog families, retaining
   const zip = await zipBytes(t, entries);
   assert.deepEqual(verifyAddonZip(zip).violations, []);
   const version = verifyAddonZip(zip, {repoRoot: root});
-  assert.equal(version.ok, false);
-  assert.deepEqual(version.violations, ['Lychee Dev/Lychee Dev.toc: ## Version: 3.2.0 != 3.1.2 (release/version.json)']);
+  assert.equal(version.ok, true);
+  assert.deepEqual(version.violations, []);
+  // The old mismatch remains frozen evidence. Prove the current gate still
+  // rejects an intentionally stale release rather than weakening validation.
+  const path = 'Lychee Dev/Lychee Dev.toc';
+  const stale = Buffer.from(entries.get(path).toString().replace(`## Version: ${CANDIDATE_VERSION}\n`, '## Version: 3.2.0\n'));
+  assert.notDeepEqual(stale, entries.get(path));
+  entries.set(path, stale);
+  const rejected = verifyAddonZip(await zipBytes(t, entries), {repoRoot: root});
+  assert.equal(rejected.ok, false);
+  assert.deepEqual(rejected.violations, [`Lychee Dev/Lychee Dev.toc: ## Version: 3.2.0 != ${CANDIDATE_VERSION} (release/version.json)`]);
 });
 
 test('package rejects loss of either supported Retail interface', async t => {

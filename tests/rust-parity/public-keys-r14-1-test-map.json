@@ -1,0 +1,168 @@
+{
+  "newTests": [
+    {
+      "file": "crates/lycheedev-data/src/keys/tests.rs",
+      "name": "public_offline_failure_is_memoized_with_exact_go_reservation",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/tests.rs",
+      "name": "public_network_failure_is_memoized_without_a_second_fetch",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/tests.rs",
+      "name": "public_reservation_failure_is_memoized_before_io",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/tests.rs",
+      "name": "corrupt_public_cache_uses_core_validation_without_fetch_or_network_charge",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/tests.rs",
+      "name": "independent_budget_stop_and_original_invocation_stop_prevent_materialization",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/tests.rs",
+      "name": "public_fetch_digest_failure_never_publishes_or_loads_keys",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/tests.rs",
+      "name": "public_text_parser_observes_independent_stop_inside_actual_line_walk",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/tests.rs",
+      "name": "scoped_constructor_uses_only_admitted_home_and_original_control",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/http/tests.rs",
+      "name": "public_http_two_relative_redirects_charge_actual_hops_and_decoded_drains",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/http/tests.rs",
+      "name": "public_http_third_redirect_is_rejected_after_qualified_drain",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/http/tests.rs",
+      "name": "public_http_redirect_guard_uses_exact_go_host_not_normalized_host",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/http/tests.rs",
+      "name": "public_http_url_userinfo_is_basic_and_referer_excludes_credentials",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/http/tests.rs",
+      "name": "public_http_read_first_limit_plus_one_does_not_count_extra_tail",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/http/tests.rs",
+      "name": "public_http_status_and_missing_location_do_not_read_terminal_bodies",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/http/tests.rs",
+      "name": "public_http_malformed_location_precedes_drain_and_budget_denial_stays_typed",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/http/tests.rs",
+      "name": "public_http_original_cancellation_prevents_any_request",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/http/tests.rs",
+      "name": "public_http_automatic_gzip_counts_decoded_document_bytes",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/http/tests.rs",
+      "name": "public_http_known_large_redirect_body_is_not_consumed",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/http/tests.rs",
+      "name": "public_http_short_success_body_is_invalid_after_actual_read",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/http/tests.rs",
+      "name": "public_fetcher_preserves_original_first_stop_in_both_orders_and_transport_causes",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/http/tests.rs",
+      "name": "public_fetcher_original_stop_precedes_independent_budget_stop_but_keeps_both",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/http/tests.rs",
+      "name": "public_fetcher_independent_budget_stop_precedes_transport_classification",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/http/tests.rs",
+      "name": "public_fetcher_fixed_request_timeout_is_typed_without_retiring_original_scope",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/http/tests.rs",
+      "name": "public_fetcher_uses_one_capped_deadline_for_all_actual_consumer_hops",
+      "status": "NOT_RUN",
+      "knownGap": false
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/http/tests.rs",
+      "name": "public_fetcher_known_legal_encoded_dot_redirect_gap_remains_explicit",
+      "status": "NOT_RUN",
+      "knownGap": true
+    },
+    {
+      "file": "crates/lycheedev-data/src/keys/http/tests.rs",
+      "name": "public_context_memoizes_corrected_public_fetcher_first_failure_with_all_causes",
+      "status": "NOT_RUN",
+      "knownGap": false
+    }
+  ],
+  "r14_1_added": 7,
+  "inheritedGroups": [
+    "hotfix::remote::wago::http_tests::",
+    "cache_keys_parity"
+  ],
+  "productRust": "NOT_RUN",
+  "stalledHttp": "NOT_RUN; no socket/stalled transport execution",
+  "realPinnedSnapshotCacheSuccess": "NOT_RUN; authenticated snapshot unavailable locally"
+}

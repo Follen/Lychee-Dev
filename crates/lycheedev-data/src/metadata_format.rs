@@ -78,6 +78,15 @@ impl<'a> Encoding<'a> {
         limits: Limits,
         cancel: Option<&AtomicBool>,
     ) -> Result<Self> {
+        Self::open_with_check(content, limits, cancel, || Ok(()))
+    }
+    pub(crate) fn open_with_check(
+        content: &'a dyn ByteSource,
+        limits: Limits,
+        cancel: Option<&AtomicBool>,
+        mut supplemental: impl FnMut() -> Result<()>,
+    ) -> Result<Self> {
+        supplemental()?;
         check(limits, cancel)?;
         let h = content.read_span(0, 22)?;
         if &h[..2] != b"EN" || h[2..5] != [1, 16, 16] || h[17] != 0 {
@@ -122,6 +131,7 @@ impl<'a> Encoding<'a> {
         let mut previous: Option<&[u8]> = None;
         for (i, entry) in directory.as_chunks::<32>().0.iter().enumerate() {
             if i.is_multiple_of(1024) {
+                supplemental()?;
                 check(limits, cancel)?;
             }
             if previous.is_some_and(|p| p >= &entry[..16]) {
@@ -136,6 +146,7 @@ impl<'a> Encoding<'a> {
             }
             previous = Some(&entry[..16]);
         }
+        supplemental()?;
         Ok(Self {
             content,
             directory,
@@ -155,6 +166,16 @@ impl<'a> Encoding<'a> {
         limits: Limits,
         cancel: Option<&AtomicBool>,
     ) -> Result<EncodedRecord> {
+        self.find_encoding_with_check(key, limits, cancel, || Ok(()))
+    }
+    pub(crate) fn find_encoding_with_check(
+        &self,
+        key: &str,
+        limits: Limits,
+        cancel: Option<&AtomicBool>,
+        mut supplemental: impl FnMut() -> Result<()>,
+    ) -> Result<EncodedRecord> {
+        supplemental()?;
         check(limits, cancel)?;
         let encoded_directory = self.content.read_span(
             self.encoded_directory_start,
@@ -163,6 +184,7 @@ impl<'a> Encoding<'a> {
         let mut previous: Option<&[u8]> = None;
         for (i, entry) in encoded_directory.as_chunks::<32>().0.iter().enumerate() {
             if i.is_multiple_of(1024) {
+                supplemental()?;
                 check(limits, cancel)?;
             }
             if previous.is_some_and(|p| p >= &entry[..16]) {
@@ -241,6 +263,7 @@ impl<'a> Encoding<'a> {
             previous = Some(current);
             pos += 25;
         }
+        supplemental()?;
         check(limits, cancel)?;
         if previous.is_none() {
             return Err(invalid());
@@ -253,6 +276,16 @@ impl<'a> Encoding<'a> {
         limits: Limits,
         cancel: Option<&AtomicBool>,
     ) -> Result<EncodingRecord> {
+        self.find_with_check(key, limits, cancel, || Ok(()))
+    }
+    pub(crate) fn find_with_check(
+        &self,
+        key: &str,
+        limits: Limits,
+        cancel: Option<&AtomicBool>,
+        mut supplemental: impl FnMut() -> Result<()>,
+    ) -> Result<EncodingRecord> {
+        supplemental()?;
         check(limits, cancel)?;
         let requested = casc::key(key)?;
         let pages = self.directory.len() / 32;
@@ -330,6 +363,7 @@ impl<'a> Encoding<'a> {
             }
             pos += length;
         }
+        supplemental()?;
         check(limits, cancel)?;
         if previous.is_none() {
             return Err(invalid());
@@ -362,7 +396,7 @@ impl Default for RootLimits {
         }
     }
 }
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RootRecord {
     #[serde(rename = "fileDataID")]
@@ -380,6 +414,16 @@ pub fn lookup_root(
     limits: RootLimits,
     cancel: Option<&AtomicBool>,
 ) -> Result<Vec<RootRecord>> {
+    lookup_root_with_check(content, ids, limits, cancel, || Ok(()))
+}
+pub(crate) fn lookup_root_with_check(
+    content: &Content,
+    ids: &[u32],
+    limits: RootLimits,
+    cancel: Option<&AtomicBool>,
+    mut supplemental: impl FnMut() -> Result<()>,
+) -> Result<Vec<RootRecord>> {
+    supplemental()?;
     check(limits.operation, cancel)?;
     if content.size() > limits.bytes
         || limits.bytes == 0
@@ -422,6 +466,7 @@ pub fn lookup_root(
     let mut result = vec![];
     let mut group = 0;
     while pos < content.size() {
+        supplemental()?;
         check(limits.operation, cancel)?;
         if group >= limits.groups {
             return Err(exceeded());
@@ -452,6 +497,7 @@ pub fn lookup_root(
         let mut next = 0u64;
         for (ordinal, delta) in deltas.as_chunks::<4>().0.iter().enumerate() {
             if ordinal.is_multiple_of(4096) {
+                supplemental()?;
                 check(limits.operation, cancel)?;
             }
             let id = next + le32(delta) as u64;
@@ -489,6 +535,7 @@ pub fn lookup_root(
         pos += extent;
         group += 1;
     }
+    supplemental()?;
     check(limits.operation, cancel)?;
     Ok(result)
 }

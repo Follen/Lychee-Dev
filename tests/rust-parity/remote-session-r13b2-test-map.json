@@ -1,0 +1,76 @@
+{
+  "requiredExistingGroups": [
+    "remote::",
+    "keys::",
+    "range_parity",
+    "installed_parity",
+    "metadata_format consumers"
+  ],
+  "rust": "NOT_RUN",
+  "windows": "NOT_RUN",
+  "defaultData": "NOT_CONNECTED",
+  "inheritedTests": [
+    {
+      "name": "borrowed_session_is_lazy_and_never_releases_the_external_admission",
+      "path": "stage/crates/lycheedev-data/src/remote/session/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "actual_admitted_cdn_encoding_root_selected_chain_keeps_one_scoped_batch",
+      "path": "stage/crates/lycheedev-data/src/remote/session/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "callback_failure_is_not_replayed_and_original_scope_remains_terminal",
+      "path": "stage/crates/lycheedev-data/src/remote/session/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "different_budget_and_bad_pin_cannot_borrow_an_admitted_capability",
+      "path": "stage/crates/lycheedev-data/src/remote/session/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "independent_parser_check_is_observed_without_reading_next_page_or_root_group",
+      "path": "stage/crates/lycheedev-data/src/remote/session/tests.rs",
+      "status": "NOT_RUN"
+    },
+    {
+      "name": "valid_ekey_and_chunk_cannot_substitute_for_complete_selected_ckey",
+      "path": "stage/crates/lycheedev-data/src/remote/session/tests.rs",
+      "status": "NOT_RUN"
+    }
+  ],
+  "newTests": [
+    {
+      "name": "key_snapshot_rebuild_resumes_only_undelivered_ids_and_retains_work",
+      "path": "stage/crates/lycheedev-data/src/remote/session/tests.rs",
+      "status": "NOT_RUN",
+      "construction": "recovery-loop state injection"
+    },
+    {
+      "name": "key_loaded_during_content_still_rebuilds_old_snapshot_only_once",
+      "path": "stage/crates/lycheedev-data/src/remote/session/tests.rs",
+      "status": "NOT_RUN",
+      "construction": "recovery-loop state injection"
+    },
+    {
+      "name": "callback_key_error_is_never_replayed_and_id_limit_survives_rebuild",
+      "path": "stage/crates/lycheedev-data/src/remote/session/tests.rs",
+      "status": "NOT_RUN",
+      "construction": "recovery-loop state injection"
+    },
+    {
+      "name": "multi_locale_root_match_limit_is_per_id_not_per_batch",
+      "path": "stage/crates/lycheedev-data/src/remote/session/tests.rs",
+      "status": "NOT_RUN",
+      "construction": "actual Session synthetic Root backend"
+    },
+    {
+      "name": "single_id_root_match_limit_stays_4096_before_locale_filtering",
+      "path": "stage/crates/lycheedev-data/src/remote/session/tests.rs",
+      "status": "NOT_RUN",
+      "construction": "actual Session synthetic Root backend"
+    }
+  ]
+}

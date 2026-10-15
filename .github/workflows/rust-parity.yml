@@ -424,6 +424,13 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node tools/rust-cargo.mjs --owner ci-hotfix-decode --one-shot -- test --locked --offline -p lycheedev-data --lib hotfix:: -j 1
+      - name: Run scoped public key loading and transport fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-public-keys --one-shot -- test --locked --offline -p lycheedev-data --lib keys:: -j 1
+      - name: Run key cache identity integration fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-key-cache --one-shot -- test --locked --offline -p lycheedev-data --test cache_keys_parity -j 1
       - name: Run remote catalog cancellable HTTP and gzip fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |

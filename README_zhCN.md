@@ -6,6 +6,8 @@
 
 未发布 Rust 候选版本为 **3.5.0**，发行配置渠道为 **beta**。包版本与 Go 3.2.2 行为基线分别固定；本次没有执行发布或 npm dist-tag 操作。
 
+最终验收现要求 **Emmy 上游源码零修改**：全部现有补丁须由自有 crate 与公开 API 的等价实现替代，完整保留 XML/Lua 增强。该迁移尚未完成，当前依赖仍含过渡补丁。
+
 ## 唯一目标与固定基线
 
 基线为 **v3.2.2**，发布 tag 解析后的精确提交 **`0bec60e4406f5d5dc155ee25cef44f9a710e37e8`**（[发行源码](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/README.md)）。不得用滚动 main、Go 3.1.2、任意开发二进制或之后的修复替代。

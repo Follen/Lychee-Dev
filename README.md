@@ -6,6 +6,8 @@ This branch, `rust-refactor`, is an **unfinished Rust implementation of the tagg
 
 The unpublished Rust candidate version is **3.5.0**, with **beta** distribution configuration. This is a package identity separate from the fixed Go 3.2.2 behavior oracle; no release or npm dist-tag operation has been performed.
 
+Final acceptance now requires **unmodified Emmy upstream source**: all current patches must be replaced by equivalent owned-crate/public-API behavior while retaining the complete XML/Lua enhancement. This migration is in progress; the current dependency is still patched.
+
 ## Goal and fixed baseline
 
 The behavioral oracle is **v3.2.2**, peeled tag commit **`0bec60e4406f5d5dc155ee25cef44f9a710e37e8`** ([release source](https://github.com/Follen/Lychee-Dev/blob/0bec60e4406f5d5dc155ee25cef44f9a710e37e8/README.md)). Do not use a moving `main`, Go 3.1.2, an arbitrary development binary, or later fixes as the oracle.

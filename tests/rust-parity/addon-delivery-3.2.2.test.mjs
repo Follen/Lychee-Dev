@@ -6,7 +6,8 @@ import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {addonInventory} from './oracle.mjs';
-import {CURRENT_GO_COMMIT, RETAINED_RELEASE_FIELDS} from './oracle-3.2.2.mjs';
+import {CURRENT_GO_COMMIT} from './oracle-3.2.2.mjs';
+import {CANDIDATE_RELEASE_FIELDS as RETAINED_RELEASE_FIELDS} from './rust-3.5.0-release-fields.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const oracle = JSON.parse(readFileSync(join(root, 'tests/rust-parity/go-3.2.2.manifest.json'), 'utf8'));
 const read = path => readFileSync(join(root, path), 'utf8');
@@ -18,7 +19,13 @@ test('all 55 formal addon resources match current Go business bytes with explici
   const current = new Map(addonInventory(root).map(row => [row.path, row]));
   for (const expected of oracle.addon) {
     const allowed = RETAINED_RELEASE_FIELDS.find(row => row.path === expected.path);
-    if (allowed) assert.deepEqual(expected, {path: allowed.path, ...allowed.expected});
+    if (allowed) {
+      assert.deepEqual(expected, {path: allowed.path, ...allowed.expected});
+      const text = read(expected.path);
+      assert.equal(text.split(allowed.retainedText).length, 2, expected.path);
+      const restored = Buffer.from(text.replace(allowed.retainedText, allowed.expectedText));
+      assert.deepEqual({bytes: restored.length, sha256: digest(restored)}, allowed.expected, expected.path);
+    }
     assert.deepEqual(current.get(expected.path), allowed ? {path: allowed.path, ...allowed.retained} : expected, expected.path);
   }
   // Extra historical files remain a separate failing gate in run-3.2.2.mjs until

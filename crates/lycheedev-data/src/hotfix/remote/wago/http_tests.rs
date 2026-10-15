@@ -619,8 +619,10 @@ fn cgi_proxy_is_checked_before_loopback_and_no_proxy_in_isolated_process() {
         .args(["--exact", &test, "--test-threads=1"])
         .env("LYCHEE_WAGO_CGI_FIXTURE", "1")
         .env("REQUEST_METHOD", "GET")
+        // Windows environment keys are case-insensitive: remove the Unix alias
+        // before assigning the effective value, never clear it afterwards.
+        .env_remove("http_proxy")
         .env("HTTP_PROXY", "http://127.0.0.1:1")
-        .env("http_proxy", "")
         .env("NO_PROXY", "*")
         .env("no_proxy", "*")
         .spawn()

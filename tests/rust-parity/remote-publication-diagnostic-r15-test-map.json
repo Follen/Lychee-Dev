@@ -1,0 +1,8 @@
+{
+  "newTests": [
+    "joined_archive_probe_publication_preserves_both_original_worker_outcomes"
+  ],
+  "rust": "NOT_RUN",
+  "status": "DIAGNOSTIC_ONLY_CAUSE_NOT_YET_EXECUTED",
+  "originalFailureOwner": "b0ffe4d8-6f28-419d-bd1f-c4a2c2b2fde6"
+}

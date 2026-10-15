@@ -117,7 +117,14 @@ fn inputs(product: &str, build: &str) -> Fetch {
         hosts: vec!["cdn.example.test".into()],
     };
     let mut fetch = Fetch::default();
-    fetch.values.insert(cache::catalog_url("cn",slot,"versions").unwrap(),format!("Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|VersionsName!STRING:0\ncn|{b}|{c}|{build}\n").into_bytes());
+    let build_id = build
+        .rsplit('.')
+        .next()
+        .expect("fixture full build has components");
+    fetch.values.insert(
+        cache::catalog_url("cn", slot, "versions").unwrap(),
+        format!("Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|BuildId!DEC:4|VersionsName!STRING:0\ncn|{b}|{c}|{build_id}|{build}\n").into_bytes(),
+    );
     fetch.values.insert(
         cache::catalog_url("cn", slot, "cdns").unwrap(),
         b"Name!STRING:0|Path!STRING:0|Hosts!STRING:0\ncn|tpr/wow|cdn.example.test\n".to_vec(),
@@ -558,4 +565,29 @@ fn independent_budget_stop_after_definitions_prevents_pin_and_capture_publicatio
             .is_empty()
     );
     metadata.close().unwrap();
+}
+
+#[test]
+fn target_fixture_has_required_build_id_and_rejects_missing_or_mismatched_id() {
+    let fetch = inputs("retail", "12.1.5.70000");
+    let raw = &fetch.values[&cache::catalog_url("cn", "wow", "versions").unwrap()];
+    assert_eq!(
+        catalog::release(raw, "cn", "").unwrap().full_build,
+        "12.1.5.70000"
+    );
+    let text = std::str::from_utf8(raw).unwrap();
+    let missing = text.replace("|BuildId!DEC:4", "").replace("|70000|", "|");
+    assert_eq!(
+        catalog::release(missing.as_bytes(), "cn", "")
+            .unwrap_err()
+            .code,
+        "records.invalid_metadata"
+    );
+    let mismatch = text.replace("|70000|", "|70001|");
+    assert_eq!(
+        catalog::release(mismatch.as_bytes(), "cn", "")
+            .unwrap_err()
+            .code,
+        "records.invalid_metadata"
+    );
 }

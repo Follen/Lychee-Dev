@@ -120,6 +120,36 @@ impl std::fmt::Debug for Fragment<'_> {
     }
 }
 
+pub(crate) fn data_identity(pin: &DataPin) -> Result<(&'static str, &'static str)> {
+    // Fixed DataIdentity validates the exact pin before product/locale lookup.
+    if pin.product.is_empty()
+        || pin.region.is_empty()
+        || pin.language.is_empty()
+        || catalog::build_components(&pin.full_build).is_none()
+        || !catalog::valid_key(&pin.build_config)
+        || !catalog::valid_key(&pin.cdn_config)
+        || !lycheedev_core::selection::valid_digest(&pin.definition_commit, 40)
+    {
+        return Err(fault(
+            "selection.unresolved_data",
+            4,
+            "selection.unresolved_data",
+        ));
+    }
+    target::release_product(&pin.product, &pin.full_build)?;
+    let identity = target::product(&pin.product)?;
+    target::Request {
+        product: pin.product.clone(),
+        region: pin.region.clone(),
+        locale: pin.language.clone(),
+        full_build: pin.full_build.clone(),
+        definitions: pin.definition_commit.clone(),
+        ..Default::default()
+    }
+    .validate()?;
+    Ok(identity)
+}
+
 pub(crate) struct Fragments<'a> {
     pub store: Store<'a>,
     pub route: Route,
@@ -210,32 +240,7 @@ impl<'a> Fragments<'a> {
         metadata: &'a (dyn MetadataFetcher + Sync),
         ranges: &'a dyn RangeFetcher,
     ) -> Result<(Self, Arc<BuildMetadata>)> {
-        // Fixed DataIdentity validates the exact pin before product/locale lookup.
-        if pin.product.is_empty()
-            || pin.region.is_empty()
-            || pin.language.is_empty()
-            || catalog::build_components(&pin.full_build).is_none()
-            || !catalog::valid_key(&pin.build_config)
-            || !catalog::valid_key(&pin.cdn_config)
-            || !lycheedev_core::selection::valid_digest(&pin.definition_commit, 40)
-        {
-            return Err(fault(
-                "selection.unresolved_data",
-                4,
-                "selection.unresolved_data",
-            ));
-        }
-        target::release_product(&pin.product, &pin.full_build)?;
-        let (product, slot) = target::product(&pin.product)?;
-        target::Request {
-            product: pin.product.clone(),
-            region: pin.region.clone(),
-            locale: pin.language.clone(),
-            full_build: pin.full_build.clone(),
-            definitions: pin.definition_commit.clone(),
-            ..Default::default()
-        }
-        .validate()?;
+        let (product, slot) = data_identity(pin)?;
         let store = Store {
             home,
             control,

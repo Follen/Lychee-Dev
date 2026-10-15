@@ -2,6 +2,7 @@
 //! Catalog observations are not content authentication: decoded bytes must
 //! still pass their EKey/chunk/CKey checks in the consuming reader.
 pub(crate) mod admission;
+pub(crate) mod session;
 pub(crate) mod cache;
 pub mod target;
 pub(crate) mod fragments;

@@ -113,28 +113,86 @@ struct OpenBlob {
     _directory: Directory,
     reference: BlobRef,
 }
+/// The existing query owner is retained, never a borrowed Store or new ledger.
+/// Send preserves transfer to the consuming thread; no Sync/mutex is required.
+type BlobCheck = Box<dyn FnMut() -> Result<()> + Send + 'static>;
+fn optional_check(supplemental: &mut Option<BlobCheck>) -> Result<()> {
+    match supplemental {
+        Some(check) => check(),
+        None => Ok(()),
+    }
+}
+fn stream_check(control: &OperationControl, supplemental: &mut Option<BlobCheck>) -> Result<()> {
+    control.check()?;
+    optional_check(supplemental)
+}
 /// A fully scanned immutable file. Keep this handle through its consumer;
 /// capture/export need not reopen a path or rehash already verified bytes.
 pub struct VerifiedBlob {
     opened: OpenBlob,
     pub(super) home: PathBuf,
     control: OperationControl,
+    supplemental: Option<BlobCheck>,
 }
 impl VerifiedBlob {
     pub fn reference(&self) -> &BlobRef {
         &self.opened.reference
     }
     pub fn rewind(&mut self) -> Result<()> {
-        self.control.check()?;
-        self.opened.file.seek(SeekFrom::Start(0))?;
-        Ok(())
+        stream_check(&self.control, &mut self.supplemental)?;
+        let result = self
+            .opened
+            .file
+            .seek(SeekFrom::Start(0))
+            .map(|_| ())
+            .map_err(ToolkitError::from);
+        if self.supplemental.is_some() {
+            finish_check(result, stream_check(&self.control, &mut self.supplemental))
+        } else {
+            result
+        }
+    }
+    /// Preserve complete typed IO/stop details. This reads at most one 64 KiB
+    /// block; it neither records network usage nor implies complete consumption.
+    pub fn read_checked(&mut self, out: &mut [u8]) -> Result<usize> {
+        self.read(out).map_err(io_error)
+    }
+    /// Consume the held file once and check close, including after cancellation.
+    /// Closing does not assert EOF or reverify a consumer's interpretation.
+    pub fn close(self) -> Result<()> {
+        self.close_after(Ok(()))
+    }
+    /// Close after dependent work, preserving its failure plus distinct close
+    /// and stop causes. This is handle cleanup, not a stream-completion claim.
+    pub fn close_after<T>(self, result: Result<T>) -> Result<T> {
+        self.close_after_with(result, lycheedev_windows::filesystem::close_file)
+    }
+    fn close_after_with<T>(
+        mut self,
+        result: Result<T>,
+        close: impl FnOnce(File) -> io::Result<()>,
+    ) -> Result<T> {
+        let closed = close(self.opened.file).map_err(ToolkitError::from);
+        let result = crate::metadata::historical_write::finish_historical(result, closed);
+        finish_check(result, stream_check(&self.control, &mut self.supplemental))
     }
 }
 impl Read for VerifiedBlob {
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
-        self.control.check().map_err(io::Error::other)?;
+        stream_check(&self.control, &mut self.supplemental).map_err(io::Error::other)?;
         let n = out.len().min(BLOCK);
-        self.opened.file.read(&mut out[..n])
+        let result = self.opened.file.read(&mut out[..n]);
+        // The None path preserves the original Read contract and raw IO error.
+        // Sources/accounting owners record actual consumed work themselves;
+        // cached disk bytes are not network bytes and are not charged here.
+        if self.supplemental.is_none() {
+            return result;
+        }
+        finish_check(
+            result.map_err(io_error),
+            stream_check(&self.control, &mut self.supplemental),
+        )
+        .map_err(io::Error::other)
     }
 }
 fn validate_metadata(info: &fs::Metadata, length: u64) -> Result<()> {
@@ -271,11 +329,106 @@ pub fn open_verified_blob_bounded(
     control: &OperationControl,
     accept: impl FnMut(&[u8]) -> Result<()>,
 ) -> Result<VerifiedBlob> {
+    open_verified_blob_internal(home, blob, maximum, control, accept, None)
+}
+/// Retain the caller's existing budget owner through verification and every
+/// subsequent Read/rewind. Only the supplemental check is retained; the format
+/// observer remains borrowed and runs during the initial verification scan.
+pub fn open_verified_blob_bounded_with_check(
+    home: &Path,
+    blob: &Value,
+    maximum: u64,
+    control: &OperationControl,
+    accept: impl FnMut(&[u8]) -> Result<()>,
+    supplemental: impl FnMut() -> Result<()> + Send + 'static,
+) -> Result<VerifiedBlob> {
+    open_verified_blob_internal(
+        home,
+        blob,
+        maximum,
+        control,
+        accept,
+        Some(Box::new(supplemental)),
+    )
+}
+fn open_verified_blob_internal(
+    home: &Path,
+    blob: &Value,
+    maximum: u64,
+    control: &OperationControl,
+    accept: impl FnMut(&[u8]) -> Result<()>,
+    mut supplemental: Option<BlobCheck>,
+) -> Result<VerifiedBlob> {
+    let opened = prepare_verified_blob(home, blob, maximum, control, accept, &mut supplemental)?;
+    Ok(VerifiedBlob {
+        opened,
+        home: home.to_owned(),
+        control: control.clone(),
+        supplemental,
+    })
+}
+fn prepare_verified_blob(
+    home: &Path,
+    blob: &Value,
+    maximum: u64,
+    control: &OperationControl,
+    accept: impl FnMut(&[u8]) -> Result<()>,
+    supplemental: &mut Option<BlobCheck>,
+) -> Result<OpenBlob> {
+    if supplemental.is_some() {
+        stream_check(control, supplemental)?;
+    }
     workspace::open(home)?;
-    let mut opened = open_blob(home, admitted_ref(blob, maximum)?, Some(control))?;
-    scan_open_blob(&mut opened, Some(control), accept)?;
-    opened.file.seek(SeekFrom::Start(0))?;
-    Ok(VerifiedBlob { opened, home: home.to_owned(), control: control.clone() })
+    let mut opened = open_blob_with_check(
+        home,
+        admitted_ref(blob, maximum)?,
+        Some(control),
+        &mut || optional_check(supplemental),
+    )?;
+    let result = (|| {
+        // Preserve the existing observer order: pre-read stop, actual read,
+        // post-read stop, SHA256 then format/work observer. This adds no claim
+        // that the observer accounts a disk read interrupted before its call.
+        if supplemental.is_some() {
+            scan_open_blob_with_check(
+                &mut opened,
+                Some(control),
+                &mut || optional_check(supplemental),
+                accept,
+            )?;
+        } else {
+            scan_open_blob(&mut opened, Some(control), accept)?;
+        }
+        if supplemental.is_some() {
+            stream_check(control, supplemental)?;
+        }
+        let result = opened
+            .file
+            .seek(SeekFrom::Start(0))
+            .map(|_| ())
+            .map_err(ToolkitError::from);
+        if supplemental.is_some() {
+            finish_check(result, stream_check(control, supplemental))
+        } else {
+            result
+        }
+    })();
+    match result {
+        Ok(()) => Ok(opened),
+        Err(error) => close_opened_blob(opened, Err(error), control, supplemental),
+    }
+}
+fn close_opened_blob<T>(
+    opened: OpenBlob,
+    result: Result<T>,
+    control: &OperationControl,
+    supplemental: &mut Option<BlobCheck>,
+) -> Result<T> {
+    let result = crate::metadata::historical_write::finish_historical(
+        result,
+        lycheedev_windows::filesystem::close_file(opened.file).map_err(ToolkitError::from),
+    );
+    finish_check(result, stream_check(control, supplemental))
 }
 
 struct DigestReader<'a, R: Read> {
@@ -283,14 +436,28 @@ struct DigestReader<'a, R: Read> {
     expected: &'a str,
     hash: Sha256,
     terminal: bool,
+    failure: Option<ToolkitError>,
+}
+impl<R: Read> DigestReader<'_, R> {
+    fn failed(&mut self, error: ToolkitError) -> io::Error {
+        self.failure.get_or_insert_with(|| error.clone());
+        io::Error::other(error)
+    }
 }
 impl<R: Read> Read for DigestReader<'_, R> {
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
-        if out.is_empty() || self.terminal { return Ok(0); }
-        let n = self.source.read(out)?;
+        if out.is_empty() || self.terminal {
+            return Ok(0);
+        }
+        // The underlying reader owns actual-byte accounting and must record
+        // consumed bytes before returning, including a concurrent stop/error.
+        let n = match self.source.read(out) {
+            Ok(n) => n,
+            Err(error) => return Err(self.failed(io_error(error))),
+        };
         if n == 0 {
             if hex::encode(self.hash.clone().finalize()) != self.expected {
-                return Err(io::Error::other(integrity("published stream digest differs")));
+                return Err(self.failed(integrity("published stream digest differs")));
             }
             self.terminal = true;
         } else {
@@ -309,31 +476,114 @@ pub fn publish_blob_reader_bounded(
     maximum: u64,
     control: &OperationControl,
 ) -> Result<VerifiedBlob> {
-    control.check()?;
+    publish_blob_reader_internal(home, reader, reference, maximum, control, None)
+}
+/// Publish with an owned independent stop check and retain that exact owner in
+/// the returned immutable blob. The input reader is borrowed only during this
+/// call; its network/work ledger is neither replaced nor charged a second time.
+pub fn publish_blob_reader_bounded_with_check(
+    home: &Path,
+    reader: &mut impl Read,
+    reference: &BlobRef,
+    maximum: u64,
+    control: &OperationControl,
+    supplemental: impl FnMut() -> Result<()> + Send + 'static,
+) -> Result<VerifiedBlob> {
+    publish_blob_reader_internal(
+        home,
+        reader,
+        reference,
+        maximum,
+        control,
+        Some(Box::new(supplemental)),
+    )
+}
+fn publish_blob_reader_internal(
+    home: &Path,
+    reader: &mut impl Read,
+    reference: &BlobRef,
+    maximum: u64,
+    control: &OperationControl,
+    mut supplemental: Option<BlobCheck>,
+) -> Result<VerifiedBlob> {
+    stream_check(control, &mut supplemental)?;
     workspace::open(home)?;
     let value = serde_json::to_value(reference)?;
     let admitted = admitted_ref(&value, maximum)?;
     let _home = Directory::open_shared(home)?;
-    let _guard = ExclusiveLock::resource(&home.join("locks"), &format!("blob:{}", admitted.sha256))?;
-    let path = blob_path(home, &admitted.sha256)?;
-    storage::guard_path(home, &path)?;
-    if !path.try_exists()? {
-        let shard = path.parent().expect("blob shard");
-        match fs::create_dir(shard) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error.into()),
-        }
+    let guard = ExclusiveLock::resource_checked(
+        &home.join("locks"),
+        &format!("blob:{}", admitted.sha256),
+        || stream_check(control, &mut supplemental),
+    )?;
+    let result = (|| {
+        let path = blob_path(home, &admitted.sha256)?;
         storage::guard_path(home, &path)?;
-        let destination = Destination::open(&path, false)?;
-        let mut checked = DigestReader { source: reader, expected: &admitted.sha256, hash: Sha256::new(), terminal: false };
-        destination.publish_reader(&mut checked, admitted.bytes, maximum, || {
-            control.check().map_err(io::Error::other)
-        }).map_err(io_error)?;
+        if !path.try_exists()? {
+            let shard = path.parent().expect("blob shard");
+            match fs::create_dir(shard) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error.into()),
+            }
+            storage::guard_path(home, &path)?;
+            let destination = Destination::open(&path, false)?;
+            let mut checked = DigestReader {
+                source: reader,
+                expected: &admitted.sha256,
+                hash: Sha256::new(),
+                terminal: false,
+                failure: None,
+            };
+            let mut first_stop = None;
+            let result = destination.publish_reader(&mut checked, admitted.bytes, maximum, || {
+                stream_check(control, &mut supplemental).map_err(|error| {
+                    first_stop.get_or_insert_with(|| error.clone());
+                    io::Error::other(error)
+                })
+            });
+            let returned_original = result.as_ref().err().is_some_and(|error| {
+                error
+                    .get_ref()
+                    .and_then(|inner| inner.downcast_ref::<ToolkitError>())
+                    .is_some()
+            });
+            // The first source/callback failure ends publication immediately;
+            // discard can fail afterward. Do not let it erase the original.
+            let result = finish_publication(
+                checked.failure.or(first_stop),
+                result.map_err(io_error),
+                returned_original,
+            );
+            finish_check(result, stream_check(control, &mut supplemental))?;
+        }
+        // Verify under this same owner; keep the immutable file across guard
+        // close and transfer it only after all failure/cleanup checks succeed.
+        prepare_verified_blob(
+            home,
+            &value,
+            maximum,
+            control,
+            |_| Ok(()),
+            &mut supplemental,
+        )
+    })();
+    let closed = guard.close();
+    match result {
+        Ok(opened) => match finish_check(closed, stream_check(control, &mut supplemental)) {
+            Ok(()) => Ok(VerifiedBlob {
+                opened,
+                home: home.to_owned(),
+                control: control.clone(),
+                supplemental,
+            }),
+            Err(error) => close_opened_blob(opened, Err(error), control, &mut supplemental),
+        },
+        Err(error) => finish_check(
+            crate::metadata::historical_write::finish_historical(Err(error), closed),
+            stream_check(control, &mut supplemental),
+        ),
     }
-    // Open once at this boundary; callers keep the returned immutable handle
-    // through capture/export instead of validating and reopening the path.
-    open_verified_blob_bounded(home, &value, maximum, control, |_| Ok(()))
 }
 
 /// Capture an already verified held blob without allocating or rehashing it.
@@ -735,3 +985,6 @@ mod controlled_tests;
 
 #[cfg(test)]
 mod supplemental_tests;
+
+#[cfg(test)]
+mod stream_supplemental_tests;

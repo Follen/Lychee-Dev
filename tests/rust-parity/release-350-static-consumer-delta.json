@@ -1,0 +1,23 @@
+{
+  "schema": "lycheedev.static-consumer-adaptation.v1",
+  "path": "tests/rust-parity/release-321-increment.test.mjs",
+  "historicalPath": "tests/rust-parity/history/release-321-increment.before-rust-350.mjs",
+  "baseCommit": "66c2a5474341bda2301dcf8664c40f36128eeb10",
+  "beforeSHA256": "79a583aeefeadd262005afeefbedae45a82bb007f1c8e0ce6562dd849e57e24b",
+  "candidateSHA256": "08b65fc13133767a90d86b79652db465f6e2e205882b29120a7aebd225d798f4",
+  "edits": [
+    {
+      "beforeText": "import {writeZip} from '../../tools/zip.mjs';",
+      "candidateText": "import {writeZip} from '../../tools/zip.mjs';\nimport {CANDIDATE_RELEASE_FIELDS, CANDIDATE_VERSION} from './rust-3.5.0-release-fields.mjs';"
+    },
+    {
+      "beforeText": "test('addon changes are exact business bytes with the existing candidate release version retained', () => {\n  assert.deepEqual(read('addon/Core/ClientGate.lua'), source(manifest.current.commit, 'addon/Core/ClientGate.lua'));\n  const toc = source(manifest.current.commit, 'addon/Lychee Dev.toc').toString().replace('## Version: 3.2.1\\n', '## Version: 3.2.0\\n');\n  assert.equal(read('addon/Lychee Dev.toc').toString(), toc);\n  assert.deepEqual(read('addon/Core/Runtime.lua'), source(manifest.previous.commit, 'addon/Core/Runtime.lua'));\n  assert.equal(JSON.parse(read('release/version.json')).version, '3.1.2');\n});\n\n",
+      "candidateText": "test('321 business addon bytes survive the approved independent Rust release overlay', () => {\n  assert.deepEqual(read('addon/Core/ClientGate.lua'), source(manifest.current.commit, 'addon/Core/ClientGate.lua'));\n  for (const [path, commit, historicalText] of [\n    ['addon/Lychee Dev.toc', manifest.current.commit, '## Version: 3.2.1'],\n    ['addon/Core/Runtime.lua', manifest.previous.commit, 'ns.Release = \"3.2.0\"'],\n  ]) {\n    const allowed = CANDIDATE_RELEASE_FIELDS.find(row => row.path === path);\n    assert(allowed, path);\n    const candidate = read(path);\n    assert.deepEqual({bytes: candidate.length, sha256: hash(candidate)}, allowed.retained, path);\n    const text = candidate.toString();\n    assert.equal(text.split(allowed.retainedText).length, 2, path);\n    const restored = Buffer.from(text.replace(allowed.retainedText, historicalText));\n    const original = source(commit, path);\n    assert.equal(hash(restored), hash(original), path);\n    assert.deepEqual(restored, original, path);\n  }\n  assert.equal(JSON.parse(read('release/version.json')).version, CANDIDATE_VERSION);\n});\n\n"
+    },
+    {
+      "beforeText": "  assert.equal(version.ok, false);\n  assert.deepEqual(version.violations, ['Lychee Dev/Lychee Dev.toc: ## Version: 3.2.0 != 3.1.2 (release/version.json)']);",
+      "candidateText": "  assert.equal(version.ok, true);\n  assert.deepEqual(version.violations, []);\n  // The old mismatch remains frozen evidence. Prove the current gate still\n  // rejects an intentionally stale release rather than weakening validation.\n  const path = 'Lychee Dev/Lychee Dev.toc';\n  const stale = Buffer.from(entries.get(path).toString().replace(`## Version: ${CANDIDATE_VERSION}\\n`, '## Version: 3.2.0\\n'));\n  assert.notDeepEqual(stale, entries.get(path));\n  entries.set(path, stale);\n  const rejected = verifyAddonZip(await zipBytes(t, entries), {repoRoot: root});\n  assert.equal(rejected.ok, false);\n  assert.deepEqual(rejected.violations, [`Lychee Dev/Lychee Dev.toc: ## Version: 3.2.0 != ${CANDIDATE_VERSION} (release/version.json)`]);"
+    }
+  ],
+  "scope": "Current static test expectations only. Original321test and all frozen Go manifests are preserved. No runtime acceptance claim."
+}

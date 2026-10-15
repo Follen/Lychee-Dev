@@ -16,6 +16,7 @@ Use only `DESIGN.md`, never add a case-only `Design.md` duplicate. Do not create
   Apply the cumulative 3.2.1 and 3.2.2 increment matrices without relabeling old results. The user subsequently authorized Rust candidate version
   3.5.0 with beta distribution configuration; this does not authorize publication,
   tags or external npm channel changes, and does not change the Go behavior oracle.
+- Latest 2026-10-15 requirement: final Emmy dependency must use unmodified upstream source. Replace every current patch with equivalent owned-crate/public-API behavior while preserving all approved XML/Lua enhancements. Earlier minimal-hook exceptions are historical; transitional patches do not satisfy final acceptance.
 - Reuse existing Rust code when differential evidence supports it; decide
   retain/adapt/replace per module. Do not restart indiscriminately.
 - Only host language and Source engine change: Rust with EmmyLua direct analysis

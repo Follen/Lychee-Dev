@@ -1,0 +1,70 @@
+{
+  "schema": "lycheedev.remote-r15-freeze.v1",
+  "kind": "target",
+  "baselineCommit": "66c2a5474341bda2301dcf8664c40f36128eeb10",
+  "oracleCommit": "0bec60e4406f5d5dc155ee25cef44f9a710e37e8",
+  "owned": [
+    {
+      "path": "stage/crates/lycheedev-data/src/remote/target/tests.rs",
+      "bytes": 18914,
+      "sha256": "79d0d8e4d54d889ec03c9c263ce1acdd81a2dd2df2c5877917dd655d7c108fa8"
+    },
+    {
+      "path": "patches/crates-lycheedev-data-src-remote-target-tests.rs.patch",
+      "bytes": 1897,
+      "sha256": "c8ee94073404895e987e31fc4517d542bd1d5fa318521501b1dc66c59e309bc3"
+    }
+  ],
+  "support": [
+    {
+      "path": "support/crates/lycheedev-data/src/remote/catalog.rs",
+      "bytes": 8934,
+      "sha256": "371bda460a12907d59422575d58a21c77ac9de0bc7c3637b3928e76a8209118e"
+    },
+    {
+      "path": "support/crates/lycheedev-data/src/remote/target/tests.rs",
+      "bytes": 17914,
+      "sha256": "fdf0d175ddf32d789a5e957b3d61d41adf8e7208e394d4c89867d34b7f44ff7c"
+    },
+    {
+      "path": "README.md",
+      "bytes": 1166,
+      "sha256": "2f3336e2d460433adf36e1fc5dba47b43595d75de6d6f2cbe9f7169db9ccb58a"
+    },
+    {
+      "path": "patch-inputs.json",
+      "bytes": 329,
+      "sha256": "d92e3027bd285bf82a06795eaf062dff425324cb32584555689bf72512073b86"
+    },
+    {
+      "path": "dependencies.json",
+      "bytes": 346,
+      "sha256": "564fddd63258f9f3e9a05204452aff68ce8de0ec2ce29b2f33ad89ba104c71ea"
+    },
+    {
+      "path": "test-map.json",
+      "bytes": 238,
+      "sha256": "35686fdfb6c7dd6c0d22e1ef21ddf4ca1c6791471501140ef4b54726474e198c"
+    },
+    {
+      "path": "owner.json",
+      "bytes": 178,
+      "sha256": "51fc6d062d8d488dc80265dd118bee576bb7f08d16971c24332329ebc6f464dc"
+    },
+    {
+      "path": "evidence/351-remote-stdout.bin",
+      "bytes": 17868,
+      "sha256": "c27c908df304346b3699397e792e0409a053bd577a76b47749ec3cdacebbab02"
+    }
+  ],
+  "oracle": [
+    {
+      "path": "oracle/internal/records/remote_catalog.go",
+      "bytes": 9864,
+      "sha256": "6fe8429a616e38aed84978156afeec35eb3eb29170ad7397a722809d3fe764e5",
+      "blob": "a6a5b0447c5e926658a3675bf4fdac1e4e10a8d5"
+    }
+  ],
+  "rust": "NOT_RUN",
+  "status": "FIXTURE_CORRECTION_RUST_NOT_RUN"
+}
