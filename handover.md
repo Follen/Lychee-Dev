@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 16:52 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`7d5977bb6f6f2c8318f064b902ebdd8e1b4e9ec3`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 17:04 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`5bbb1fea69d8377d1b73c1afd98728895f908899`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -26,14 +26,18 @@
 ## 2. 当前实现与有限剩余项
 
 - **Data 默认链已接入**：本地/CDN、Prepared/cache、SQL、导航、asset、Hotfix、自适应内存与 checked 收尾均已有实现。当前重点是 SQL 默认线程栈安全：原合法 scalar 深度63在 parse 实际溢出；本批25文件完整候选已实现堆任务栈解析/降低、bind/eval与迭代树 clone/equality/drop、flat JOIN及visitors，新增18项默认栈深度/混合嵌套/错误析构回归。最新fa587f已通过all-target与原三个parse边界测试，但同步 provider callback 的原生重入已在默认栈实际导致6项执行/错误回收溢出。本轮30源已完整实现统一单堆query/CTE/derived/UNION/JOIN与bind/eval任务驱动，子查询通过请求返回主循环而不嵌套poll；provider单次open逐行cursor保留当前行与预算lease。原右侧JOIN物化策略保留，未新增全表缓冲、抬栈或降低深度。迭代Drop/Debug涵盖Weak与并发最后引用；独立结构与固定Go审查已完成，净增22测试，fed首次生产lib的5处子模块可见域错误已在ac8最窄修复；ac8生产lib与workspace all-target编译真实通过，原6个执行崩溃逐项通过，完整正式Cargo relational组299/0/0通过。原预算、深度与默认线程栈不变；专项独立架构/provider/固定Go差分深审完成、无确认新缺陷，local_query76/0/1与全Data库1063/0/1通过；36集成256通过1预算断言失败20忽略，7db补强定向27/0/0已通过，关闭该预算测试缺口，原ac8失败保留。
-- **Emmy 已使用原版848文件，语义验证未完成**：`3336d82`已保存 initializer/provider 重复查询、call quality 多余查询和完整键集合被未知值污染的修复。原固定参考与当前候选的全量类型/provider/coverage差分保留；ac8实际Adapter140项、context56项已通过；完整历史严格差分参考36通过、候选35通过1失败，4137行中仅object成功投影的两条正向call_result证据有差异。独立当前合同检查已实现、Node82/82通过，待读取原sealed实证执行；原始严格失败、全部类型/provider/coverage原文和Cargo退出结果保留；不能将新增检查冒充原历史比较通过。
+- **Emmy 已使用原版848文件，语义验证未完成**：`3336d82`已保存 initializer/provider 重复查询、call quality 多余查询和完整键集合被未知值污染的修复。原固定参考与当前候选的全量类型/provider/coverage差分保留；ac8实际Adapter140项、context56项已通过；完整历史严格差分参考36通过、候选35通过1失败，4137行中仅object成功投影的两条正向call_result证据有差异。独立当前合同检查已在原ac8真实sealed产物通过（4135相同行+2精确当前receipt），原始严格失败、全部类型/provider/coverage原文和Cargo退出结果保留；不能将新增检查冒充原历史比较通过。
 - **HTTP 后继已保存并取得定向实证**：`6051063`使用固定 native-tls/schannel 三源38加4删的最小适配，将SNI名与证书校验名分离，保原验证与tokio所有权。完整来源/许可/逆补丁和打包已接，Node20/20通过；固定fa封存Data EXE实际remote329项与私有根TLS五项Go1.27.1对照已全部通过，多尾点SNI一致且证书拒绝保留。后续ac8正式Cargo remote329及固定Go五loopback也已通过；不能外推系统根/撤销全部策略。Emmy零补丁不等于整个依赖树零补丁。
-- **Source 正确性与性能仍未验收**：短预算隔离/暖态回收已有实际测试；完整Retail仍在原90秒内未完成。最新 dev 候选准备约72秒，API虽写完回复，最终 capture 仍耗尽总预算。不得增加deadline、减少输入或校验来通过。ac8优化release实际构建成功，describe冷热各20对输出全部等价，但Rust/Go中位数比为1.127/1.126，未达到≤0.30；静态Retail四组在真实init/sync后因Rust metadata缺deleted_generations而无计时样本。默认Metadata删除generation真实ABA修复已实现、Rust待验，启动成本分段诊断已实现、Windows实际待跑；CLI已实现同进程不可变commands目录一次解析和只读引用，3项Rust回归待跑、收益未测；不能放宽基准校验掩盖。完整 B01–B07仍未通过。
+- **Source 正确性与性能仍未验收**：短预算隔离/暖态回收已有实际测试；完整Retail仍在原90秒内未完成。最新 dev 候选准备约72秒，API虽写完回复，最终 capture 仍耗尽总预算。不得增加deadline、减少输入或校验来通过。ac8优化release实际构建成功，describe冷热各20对输出全部等价，但Rust/Go中位数比为1.127/1.126，未达到≤0.30；静态Retail四组在真实init/sync后因Rust metadata缺deleted_generations而无计时样本。默认Metadata删除generation真实ABA修复已在7d完整Core492项与9项新增回归通过；5bbb启动观测61项真实Windows测试通过，旧ac8一次/引擎诊断已完成；CLI已实现同进程不可变commands目录一次解析和只读引用，3项Rust回归与CLI contract/describe/help全部已过、收益未测；不能放宽基准校验掩盖。完整 B01–B07仍未通过。
 - **正式 Lua 已明确切到 Go323**：`4092344`保存113原blob认证、精确Rust3.5 overlay与220/9正式入口，旧320/321/322原清单保留。Node正式63及包/版本115通过；本机已安装官方固定MSVC14.51与SDK，Community三工具字节/版本/签名均匹配原Enterprise固定身份；Community精确路径已实际验证。固定7c07的Go323正式Lua220/0/0与Rust桥9/0/0现已真实通过，全部owner回收；只是该自动化范围，不含实机或性能。
 
 ## 3. 最新实际验证与证据
 
-- **默认Metadata generation真实缺口已修、待Rust复验**：原HistoricalWriter已有固定Go323 tombstone，但默认writable open缺表、创建从1重置、删除不留generation；target remove→resolve与capture重新持久化可让旧CAS误匹配。本批统一两writable入口原样DDL、五创建路径读tombstone+1、四删除路径同事务保generation；readonly不迁移，原幂等/CAS/取消与rollback保留。新增7存储测试、2真实消费者回归及Source取消COMMIT回滚断言；Node6/6执行固定Go/Rust真实SQL通过，Rust仍未编译/执行。不能恢复旧Rust从未保存的删除历史，未猜测重建旧数据。原B02 seed失败保留，修后须沿原认证重跑。
+- **c508当前合同与CLI实测通过**：[独立Emmy当前合同](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6220362319)直接验证原ac8三个owner/完整4137行，4135相同与两个精确新receipt通过，原raw=false/Cargo101/forced事实保留；新报告SHA bbead27e618a109563a4f53eae049b1145d4a6538bdce98b715c4ac03165ef4e。Windows Node81通过1权限skip，不扩推完整Retail。[CLI实际contract9+describe2+help1与workspace all-target](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6220392778)均通过，新3缓存回归已跑；静态52通过1skip。只证明行为等价，不证明启动性能收益。
+
+- **7d默认Metadata generation缺口已修并实际验证**：[完整Core492/0/0与workspace all-target通过](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6220479350)，metadata80与两个真实消费者是492的子集，不加总；7个存储回归、capture/target删除重建两消费者及Source取消COMMIT回滚加强项均通过。默认两writable入口原样创建固定Go tombstone表、五创建路径读取last generation+1、四删除路径在原事务保存generation；readonly不迁移，幂等/CAS/取消与rollback保留。CLI contract9与Node SQL合同6也通过，五个Rust owner全部exit0/sealed/reaped。不能恢复旧Rust从未保存的删除历史，未猜测旧数据；原ac8 B02 seed失败保留，新优化产物配对尚待运行。
+
+- **5bbb启动观测已实际验证，旧ac8一次诊断不改性能判据**：[真实Windows61/0/0及一次/引擎结果](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6220553599)。新runner17个文件固定导出后，仍在匹配旧ac8的源码树认证原优化产物；原总elapsed Go48.3713ms、Rust50.8590ms，Resume前19.5694/24.0904ms（其中CreateProcess11.4212/15.5875、根身份持久化6.6680/7.2095），Resume至树回收28.8019/26.7686ms。完整输出等价、原时钟与持久化保留，两CLI及owner完整回收；不是纯CPU或main耗时，仅一次且顺序Go→Rust，不足统计结论。原ac8冷热20对未达标不变。5bbb新优化构建及完整B01/B02冷热各20对已交本机队列，结果待回传；不得把旧ac8产物归为新修复树。
 
 - **7db预算回归已闭合**：[三个正式Cargo组27通过/0失败/0忽略](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6220137512)：temporary3、stack15、relational_parity9，包含新增5项。原低cap确在future首次poll前拒绝；另有限校准真实进入scalar/concat后验证准入与退款。scalar63/mixed128六种shared错误、取消和物理拒绝退出均保foreign113，释放foreign后0；累计logical账保留。原预算、默认栈不变，三个owner均sealed/retired/reaped；两组受审辅助清理forced=true如实保留。ac8原失败不改写，不与旧全Data重复相加。
 
@@ -82,11 +86,11 @@
 
 随后[首条Data lib check](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6217011842)真正进入SQL编译并报5处E0603：joins/selection子模块的prepare/Cursor/open使用pub(super)，兄弟execution_select不能访问。ac8仅将所需接口限于共同relational模块可见，后续生产lib/workspace all-target与完整relational299组均真实通过。该失败Cargo101、无超时或强制终止，owner已sealed/retired/完整回收，ordinary lease正常释放。不要重复恢复或重复跑同一编译失败的全部组。
 
-本批Metadata先受控执行core lib metadata::全组，再两个精确消费者removed_target_reference_recreated_by_resolution_rejects_stale_generation与removed_capture_republished_by_persistence_rejects_stale_generation，随后完整core lib；全部通过后按原paired认证重跑B02，不修改旧seed。
+7d Metadata/消费者/Core完整队列与5bbb原生观测测试已经通过，不重复这些同树组。下一固定 `5bbb1fea69d8377d1b73c1afd98728895f908899`，沿原buildRust release入口在新的artifact目录构建优化候选（仅准备期限30分钟），再按[配对README](tests/rust-performance-paired/README.md)执行普通B01/B02完整冷热各20对，不传诊断选项。认证可复用的Go323完整包/LuaLS；原seed隔离、完整输出比较、计时与≤0.30判据不变，新报告不得覆盖旧ac8结果。本机已收到该队列，尚无新构建或样本结果。paired终态后，用同一新sealed优化CLI验证完整Retail native语义与retained生命周期，产品90秒及整个分析树2GiB保持。
 
-启动归因另沿[配对README诊断模式](tests/rust-performance-paired/README.md)执行：从新提交精确导出runner依赖到新目录，原ac8产物匹配的源码root不变，Go/Rust各一次describe。六点QPC和原handle CPU只拆分观察，保原总时钟、所有持久化与≤0.30判据；Node61项50通过11Windows跳过，实际Windows诊断待跑，不扣除框架开销宣布达标。
+启动归因的独立一次诊断已结束：5bbb runner与ac8 product身份分别认证，完整原始时间见§3。后续若需分段仍附原总时钟，不从已测结果扣除框架开销宣布达标。
 
-下一低成本步骤为[独立当前Emmy合同检查](tests/rust-source-engine/fixed-emmy-oracle/CURRENT-CONTRACT.md)：使用三个原ac8封存owner，写入全新独立报告目录，不重跑Cargo或改原报告。新Node82/82已过，原实证读取尚未执行。CLI目录缓存优化另需原contract::tests及真实describe完整输出回归；实测收益待确认。
+已完成的低成本证据为[独立当前Emmy合同检查](tests/rust-source-engine/fixed-emmy-oracle/CURRENT-CONTRACT.md)：使用三个原ac8封存owner，写入全新独立报告目录，不重跑Cargo或改原报告。c508已实际读取原实证并通过，报告SHA bbead27e618a109563a4f53eae049b1145d4a6538bdce98b715c4ac03165ef4e；Node在Windows81通过1symlink权限跳过。CLI目录缓存contract9、describe2、help1及workspace all-target已实际通过；实测收益待确认。
 
 本机固定ac8的全Data/TLS、完整Emmy严格差分、Source补测与首轮优化配对已结束，结果如上。固定7db已完成resource::temporary_tests::、relational::stack_safety_tests::及relational_parity共27/0/0；不重复已过的同树全SQL组。原fa6个执行栈溢出与ac8预算断言失败均保留。
 
