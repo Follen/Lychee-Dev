@@ -54,12 +54,19 @@ pub struct Facts {
 }
 impl Facts {
     pub(crate) fn fresh() -> Self {
-        Self { raw_relationship_targets: Some(BTreeMap::new()), ..Self::default() }
+        Self {
+            raw_relationship_targets: Some(BTreeMap::new()),
+            ..Self::default()
+        }
     }
     pub(crate) fn relationship_target_bytes(&self, ordinal: usize) -> Option<&[u8]> {
         let edge = self.relationships.get(ordinal)?;
         let originals = self.raw_relationship_targets.as_ref()?;
-        Some(originals.get(&ordinal).map_or(edge.to.as_bytes(), Vec::as_slice))
+        Some(
+            originals
+                .get(&ordinal)
+                .map_or(edge.to.as_bytes(), Vec::as_slice),
+        )
     }
 }
 pub fn lua(raw: &[u8], generated: bool) -> Facts {
@@ -161,26 +168,38 @@ pub(crate) fn xml_attribute(
     let decoded = decoder
         .decode(attribute.value.as_ref())
         .map_err(|_| "invalid UTF-8".to_owned())?;
-    if decoded.contains('<') {
-        return Err("unescaped < inside quoted string".into());
-    }
     let normalized = decoded.replace("\r\n", "\n").replace('\r', "\n");
     let mut value = String::new();
     let mut rest = normalized.as_str();
     while let Some(at) = rest.find('&') {
+        if rest[..at].contains('<') {
+            return Err("unescaped < inside quoted string".into());
+        }
         value.push_str(&rest[..at]);
         let entity = &rest[at..];
-        let end = entity
-            .find(';')
-            .ok_or_else(|| format!("invalid character entity {entity} (no semicolon)"))?;
-        value.push_str(&xml_entity(&entity[1..end])?);
+        let end = xml_reference_end(entity.as_bytes());
+        if entity.as_bytes().get(end) != Some(&b';') {
+            return Err(format!(
+                "invalid character entity {} (no semicolon)",
+                &entity[..end]
+            ));
+        }
+        value.push_str(&xml_entity_value(&entity[1..end])?);
         rest = &entity[end + 1..];
+    }
+    if rest.contains('<') {
+        return Err("unescaped < inside quoted string".into());
     }
     value.push_str(rest);
     xml_characters(&value)?;
     Ok(value)
 }
 pub(crate) fn xml_entity(reference: &str) -> std::result::Result<String, String> {
+    let value = xml_entity_value(reference)?;
+    xml_characters(&value)?;
+    Ok(value)
+}
+fn xml_entity_value(reference: &str) -> std::result::Result<String, String> {
     let value = match reference {
         "lt" => Some('<'),
         "gt" => Some('>'),
@@ -201,9 +220,7 @@ pub(crate) fn xml_entity(reference: &str) -> std::result::Result<String, String>
         }),
     }
     .ok_or_else(|| format!("invalid character entity &{reference};"))?;
-    let value = value.to_string();
-    xml_characters(&value)?;
-    Ok(value)
+    Ok(value.to_string())
 }
 pub(crate) fn xml_characters(text: &str) -> std::result::Result<(), String> {
     for ch in text.chars() {
@@ -244,8 +261,15 @@ fn append_inline(facts: &mut Facts, script: &str, script_line: usize, owner: &st
     // Relations are appended in token order. Preserve the exact ordinal of
     // invalid literal targets without exposing a second public fact model.
     let offset = facts.relationships.len();
-    match (&mut facts.raw_relationship_targets, inner.raw_relationship_targets.take()) {
-        (Some(targets), Some(inner)) => targets.extend(inner.into_iter().map(|(ordinal, raw)| (offset + ordinal, raw))),
+    match (
+        &mut facts.raw_relationship_targets,
+        inner.raw_relationship_targets.take(),
+    ) {
+        (Some(targets), Some(inner)) => targets.extend(
+            inner
+                .into_iter()
+                .map(|(ordinal, raw)| (offset + ordinal, raw)),
+        ),
         _ => facts.raw_relationship_targets = None,
     }
     facts.declarations.extend(inner.declarations);
@@ -260,11 +284,20 @@ fn xml_error_message(error: quick_xml::Error) -> String {
         }
         quick_xml::Error::Syntax(_) => "unexpected EOF".into(),
         quick_xml::Error::IllFormed(IllFormedError::MismatchedEndTag { expected, found }) => {
-            format!(
-                "element <{}> closed by </{}>",
-                expected.rsplit(':').next().unwrap_or(&expected),
-                found.rsplit(':').next().unwrap_or(&found)
-            )
+            let (expected_prefix, expected) = xml_name(&expected);
+            let (found_prefix, found) = xml_name(&found);
+            if expected == found && expected_prefix != found_prefix {
+                format!(
+                    "element <{expected}> in space {expected_prefix} closed by </{found}> in space {}",
+                    if found_prefix.is_empty() {
+                        "\"\""
+                    } else {
+                        found_prefix
+                    }
+                )
+            } else {
+                format!("element <{expected}> closed by </{found}>")
+            }
         }
         quick_xml::Error::IllFormed(IllFormedError::UnmatchedEndTag(found)) => format!(
             "unexpected end element </{}>",
@@ -287,9 +320,248 @@ fn xml_attribute_error(error: quick_xml::events::attributes::AttrError) -> Strin
         other => other.to_string(),
     }
 }
+// encoding/xml compares the literal namespace prefixes before translation.
+// Empty prefixes/suffixes are retained as part of the local name.
+fn xml_name(name: &str) -> (&str, &str) {
+    match name.split_once(':') {
+        Some((prefix, local)) if !prefix.is_empty() && !local.is_empty() => (prefix, local),
+        _ => ("", name),
+    }
+}
+fn xml_reference_end(raw: &[u8]) -> usize {
+    let mut at = 1; // The initial & belongs to the error token.
+    if raw.get(at) == Some(&b'#') {
+        at += 1;
+        let hex = raw.get(at) == Some(&b'x');
+        if hex {
+            at += 1;
+        }
+        while raw.get(at).is_some_and(|byte| {
+            if hex {
+                byte.is_ascii_hexdigit()
+            } else {
+                byte.is_ascii_digit()
+            }
+        }) {
+            at += 1;
+        }
+    } else {
+        while raw.get(at).is_some_and(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(*byte, b'_' | b':' | b'.' | b'-')
+                || *byte >= 128
+        }) {
+            at += 1;
+        }
+    }
+    at
+}
+// A Go CharData token contains adjacent text and references. Validate the
+// entire token once, preserving first-failure precedence and the scanner's
+// consumed-byte position (which can precede quick-xml's final event cursor).
+fn xml_text_failure(raw: &[u8]) -> Option<(String, usize)> {
+    let end = raw
+        .iter()
+        .position(|byte| *byte == b'<')
+        .unwrap_or(raw.len());
+    let text = &raw[..end];
+    let mut expanded = Vec::new();
+    let mut at = 0;
+    let mut copied = 0;
+    while at < text.len() {
+        if text[at..].starts_with(b"]]>") {
+            return Some(("unescaped ]]> not in CDATA section".into(), at + 3));
+        }
+        if text[at] == b'&' {
+            expanded.extend_from_slice(&text[copied..at]);
+            let finish = at + xml_reference_end(&text[at..]);
+            if text.get(finish) != Some(&b';') {
+                return Some((
+                    if finish == raw.len() {
+                        "unexpected EOF".into()
+                    } else {
+                        format!(
+                            "invalid character entity {} (no semicolon)",
+                            String::from_utf8_lossy(&text[at..finish])
+                        )
+                    },
+                    finish,
+                ));
+            }
+            let reference = std::str::from_utf8(&text[at + 1..finish]).ok()?;
+            match xml_entity_value(reference) {
+                Ok(value) => expanded.extend_from_slice(value.as_bytes()),
+                Err(error) => return Some((error, finish + 1)),
+            }
+            at = finish + 1;
+            copied = at;
+        } else {
+            at += 1;
+        }
+    }
+    let value = if copied == 0 {
+        std::borrow::Cow::Borrowed(text)
+    } else {
+        expanded.extend_from_slice(&text[copied..]);
+        std::borrow::Cow::Owned(expanded)
+    };
+    let value = std::str::from_utf8(&value).ok()?;
+    xml_characters(value).err().map(|error| (error, end))
+}
+fn xml_attribute_failure_offset(raw: &[u8]) -> usize {
+    let mut at = 0;
+    while at < raw.len() {
+        if raw[at] == b'<' {
+            return at + 1;
+        }
+        if raw[at] == b'&' {
+            let end = at + xml_reference_end(&raw[at..]);
+            if raw.get(end) != Some(&b';') {
+                return end;
+            }
+            if std::str::from_utf8(&raw[at + 1..end])
+                .is_ok_and(|reference| xml_entity_value(reference).is_err())
+            {
+                return end + 1;
+            }
+            at = end + 1;
+        } else {
+            at += 1;
+        }
+    }
+    raw.len() + 1 // Character validity is checked after the closing quote.
+}
+// Match encoding/xml's deliberately permissive procInst attribute lookup,
+// rather than imposing quick-xml's XML-declaration schema.
+fn xml_declaration(content: &[u8]) -> std::result::Result<(), String> {
+    fn parameter<'a>(content: &'a str, key: &str) -> &'a str {
+        let needle = format!("{key}=");
+        let mut rest = content;
+        while let Some(at) = rest.find(&needle) {
+            rest = &rest[at + needle.len()..];
+            let Some(quote) = rest.as_bytes().first().copied() else {
+                return "";
+            };
+            rest = &rest[rest.chars().next().expect("nonempty parameter").len_utf8()..];
+            if matches!(quote, b'\'' | b'"') {
+                return rest.find(quote as char).map_or("", |end| &rest[..end]);
+            }
+        }
+        ""
+    }
+    let content = String::from_utf8_lossy(content);
+    let version = parameter(&content, "version");
+    if !version.is_empty() && version != "1.0" {
+        return Err(format!(
+            "xml: unsupported version {version:?}; only version 1.0 is supported"
+        ));
+    }
+    let encoding = parameter(&content, "encoding");
+    if !encoding.is_empty() && !encoding.eq_ignore_ascii_case("utf-8") {
+        return Err(format!(
+            "xml: encoding {encoding:?} declared but Decoder.CharsetReader is nil"
+        ));
+    }
+    Ok(())
+}
+// Go ignores arbitrary <!directives>, with nested brackets and quoted >,
+// without installing declared entities. Quick-xml only admits DOCTYPE. Mask
+// those tokens to same-width ignored PIs; positions and source bytes stay raw.
+fn public_xml_grammar(raw: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    let mut changed: Option<Vec<u8>> = None;
+    let mut at = 0;
+    while at < raw.len() {
+        if raw[at..].starts_with(b"<!--")
+            || raw[at..].starts_with(b"<![CDATA[")
+            || raw[at..].starts_with(b"<?")
+        {
+            let end: &[u8] = if raw[at..].starts_with(b"<!--") {
+                b"-->"
+            } else if raw[at..].starts_with(b"<?") {
+                b"?>"
+            } else {
+                b"]]>"
+            };
+            let Some(length) = raw[at..].windows(end.len()).position(|bytes| bytes == end) else {
+                break;
+            };
+            at += length + end.len();
+            continue;
+        }
+        if raw[at..].starts_with(b"<!") && !matches!(raw.get(at + 2), Some(b'-' | b'[')) {
+            let start = at;
+            at += 3;
+            let mut depth = 0usize;
+            let mut quote = 0;
+            let mut complete = false;
+            while at < raw.len() {
+                let byte = raw[at];
+                if quote != 0 {
+                    if byte == quote {
+                        quote = 0;
+                    }
+                } else if matches!(byte, b'\'' | b'"') {
+                    quote = byte;
+                } else if raw[at..].starts_with(b"<!--") {
+                    let Some(end) = raw[at + 4..].windows(3).position(|bytes| bytes == b"-->")
+                    else {
+                        break;
+                    };
+                    at += end + 7;
+                    continue;
+                } else if byte == b'<' {
+                    depth += 1;
+                } else if byte == b'>' {
+                    if depth == 0 {
+                        at += 1;
+                        complete = true;
+                        break;
+                    }
+                    depth -= 1;
+                }
+                at += 1;
+            }
+            if !complete {
+                break;
+            }
+            let bytes = changed.get_or_insert_with(|| raw.to_vec());
+            for byte in &mut bytes[start + 1..at - 1] {
+                if !matches!(*byte, b'\r' | b'\n') {
+                    *byte = b' ';
+                }
+            }
+            bytes[start + 1] = b'?';
+            bytes[at - 2] = b'?';
+            continue;
+        }
+        if raw[at] == b'<' {
+            at += 1;
+            let mut quote = 0;
+            while at < raw.len() {
+                let byte = raw[at];
+                at += 1;
+                if quote != 0 {
+                    if byte == quote {
+                        quote = 0;
+                    }
+                } else if matches!(byte, b'\'' | b'"') {
+                    quote = byte;
+                } else if byte == b'>' {
+                    break;
+                }
+            }
+        } else {
+            at += 1;
+        }
+    }
+    changed
+        .map(std::borrow::Cow::Owned)
+        .unwrap_or(std::borrow::Cow::Borrowed(raw))
+}
 fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) -> Facts {
     use quick_xml::{Reader, events::Event};
-    let mut reader = Reader::from_reader(raw);
+    let grammar = public_xml_grammar(raw);
+    let mut reader = Reader::from_reader(grammar.as_ref());
     reader.config_mut().check_comments = true;
     let mut facts = Facts::fresh();
     let mut stack = Vec::<(String, String)>::new();
@@ -310,22 +582,58 @@ fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) ->
         let empty = matches!(&event, Ok(Event::Empty(_)));
         // quick-xml exposes references separately; Go returns one CharData
         // token for the entire adjacent text/reference sequence.
-        let diagnostic_line = if matches!(&event, Ok(Event::Text(_) | Event::GeneralRef(_))) {
+        let is_character_data = matches!(&event, Ok(Event::Text(_) | Event::GeneralRef(_)))
+            || raw.get(at) == Some(&b'&');
+        let first_character_data = is_character_data && character_data_line.is_none();
+        let diagnostic_line = if is_character_data {
             *character_data_line.get_or_insert(line)
         } else {
             character_data_line = None;
             line
         };
+        let mut error_offset = None;
         let result: std::result::Result<(), String> = (|| {
+            if first_character_data && let Some((message, consumed)) = xml_text_failure(&raw[at..])
+            {
+                error_offset = Some(at + consumed);
+                return Err(message);
+            }
+            if raw.get(at..at + 4) == Some(b"<!--") {
+                if let Some(bad) = raw[at + 4..]
+                    .windows(3)
+                    .position(|bytes| bytes.starts_with(b"--"))
+                {
+                    if raw[at + 4 + bad + 2] != b'>' {
+                        error_offset = Some(at + 4 + bad + 3);
+                        return Err("invalid sequence \"--\" not allowed in comments".into());
+                    }
+                }
+            }
             match event.map_err(xml_error_message)? {
                 Event::Start(element) | Event::Empty(element) => {
-                    let tag = String::from_utf8_lossy(element.local_name().as_ref()).into_owned();
+                    let qualified = String::from_utf8_lossy(element.name().as_ref()).into_owned();
+                    let tag = xml_name(&qualified).1.to_owned();
                     let mut attrs = BTreeMap::new();
                     for attribute in element.attributes().with_checks(false) {
                         let attribute = attribute.map_err(xml_attribute_error)?;
-                        let value = xml_attribute(&attribute, reader.decoder())?;
+                        let value =
+                            xml_attribute(&attribute, reader.decoder()).map_err(|error| {
+                                if let Some(value_at) = (attribute.value.as_ptr() as usize)
+                                    .checked_sub(grammar.as_ptr() as usize)
+                                    .filter(|offset| *offset <= raw.len())
+                                {
+                                    error_offset = Some(
+                                        value_at
+                                            + xml_attribute_failure_offset(
+                                                attribute.value.as_ref(),
+                                            ),
+                                    );
+                                }
+                                error
+                            })?;
                         attrs.insert(
-                            String::from_utf8_lossy(attribute.key.local_name().as_ref())
+                            xml_name(&String::from_utf8_lossy(attribute.key.as_ref()))
+                                .1
                                 .to_ascii_lowercase(),
                             value,
                         );
@@ -392,7 +700,8 @@ fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) ->
                     }
                 }
                 Event::End(element) => {
-                    let tag = String::from_utf8_lossy(element.local_name().as_ref()).into_owned();
+                    let qualified = String::from_utf8_lossy(element.name().as_ref()).into_owned();
+                    let tag = xml_name(&qualified).1.to_owned();
                     if is_public_handler(&tag) {
                         let owner = stack.last().map_or("", |(_, owner)| owner.as_str());
                         append_inline(&mut facts, &script, script_line, owner, &tag);
@@ -439,7 +748,8 @@ fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) ->
                 }
                 // Go accepts XML declarations, directives, processing
                 // instructions and comments without imposing a UI schema.
-                Event::Decl(_) | Event::DocType(_) | Event::PI(_) | Event::Comment(_) => {}
+                Event::Decl(declaration) => xml_declaration(declaration.as_ref())?,
+                Event::DocType(_) | Event::PI(_) | Event::Comment(_) => {}
             }
             Ok(())
         })();
@@ -450,9 +760,13 @@ fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) ->
                 reader.buffer_position(),
             )
             .unwrap_or(raw.len());
-            let error_line = line_at(after.min(raw.len()));
+            let error_line = line_at(error_offset.unwrap_or(after).min(raw.len()));
             facts.diagnostics.push(SyntaxNote {
-                message: format!("XML syntax error on line {error_line}: {message}"),
+                message: if message.starts_with("xml: ") {
+                    message
+                } else {
+                    format!("XML syntax error on line {error_line}: {message}")
+                },
                 line: diagnostic_line,
             });
             break;
@@ -474,6 +788,141 @@ fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fixed_go_malformed_observations() {
+        use sha2::{Digest, Sha256};
+        let fixture = include_str!("../../../tests/rust-parity/source-facts-malformed/cases.json");
+        let input: serde_json::Value = serde_json::from_str(fixture).unwrap();
+        let mut observations = Vec::new();
+        for case in input["cases"].as_array().unwrap() {
+            let path = case["path"].as_str().unwrap();
+            let raw = case["source"].as_str().unwrap().as_bytes();
+            let facts = if path.ends_with(".lua") {
+                lua(raw, false)
+            } else {
+                assert!(path.ends_with(".xml"));
+                xml(raw)
+            };
+            let row =
+                serde_json::json!({"id":case["id"], "path":path, "facts":facts, "error":null});
+            println!("SOURCE_FACT_ORACLE_JSON {row}");
+            observations.push(row);
+        }
+        if let Some(path) = std::env::var_os("LYCHEEDEV_SOURCE_FACTS_GO_REPORT") {
+            let report: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            assert_eq!(
+                report["schema"],
+                "lycheedev.source-facts-malformed-observations.v1"
+            );
+            assert_eq!(report["oracleCommit"], input["oracleCommit"]);
+            assert_eq!(report["goVersion"], "go1.27.1");
+            assert_eq!(
+                report["casesSHA256"],
+                format!("{:x}", Sha256::digest(fixture.as_bytes()))
+            );
+            assert_eq!(
+                report["observations"],
+                serde_json::json!(observations),
+                "Full public Facts/error differential; no fields or order omitted"
+            );
+        } else {
+            println!(
+                "SOURCE_FACT_ORACLE_NOT_COMPARED: no sealed fixed-Go report supplied; observations only"
+            );
+        }
+    }
+    #[test]
+    fn public_xml_declaration_errors_are_plain_and_keep_token_start_line() {
+        for (raw, expected, line) in [
+            (
+                "<?xml version=\"1.1\"?><Root/>",
+                "xml: unsupported version \"1.1\"; only version 1.0 is supported",
+                1,
+            ),
+            (
+                "<Root/>\n<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>",
+                "xml: encoding \"ISO-8859-1\" declared but Decoder.CharsetReader is nil",
+                2,
+            ),
+        ] {
+            assert_eq!(
+                serde_json::to_value(xml(raw.as_bytes()).diagnostics).unwrap(),
+                serde_json::json!([{"message":expected,"line":line}])
+            );
+        }
+        for raw in [
+            "<?xml encoding=\"Utf-8\"?><Root/>",
+            "<?xml version = \"1.1\"?><Root/>",
+        ] {
+            assert!(xml(raw.as_bytes()).diagnostics.is_empty(), "{raw}");
+        }
+    }
+    #[test]
+    fn public_xml_entity_and_comment_errors_keep_consumed_position() {
+        for (raw, message, line) in [
+            (
+                "<Ui>\ntext &unknown\n</Ui>",
+                "XML syntax error on line 2: invalid character entity &unknown (no semicolon)",
+                1,
+            ),
+            (
+                "<Ui>&unknown",
+                "XML syntax error on line 1: unexpected EOF",
+                1,
+            ),
+            (
+                "<Ui>&#xZ;</Ui>",
+                "XML syntax error on line 1: invalid character entity &#x (no semicolon)",
+                1,
+            ),
+            (
+                "<Ui><Frame name=\"&bad\"\n/></Ui>",
+                "XML syntax error on line 1: invalid character entity &bad (no semicolon)",
+                1,
+            ),
+            (
+                "<Ui><!--bad--x\nend--></Ui>",
+                "XML syntax error on line 1: invalid sequence \"--\" not allowed in comments",
+                1,
+            ),
+            (
+                "<Ui>&#0;&unknown;</Ui>",
+                "XML syntax error on line 1: invalid character entity &unknown;",
+                1,
+            ),
+        ] {
+            assert_eq!(
+                serde_json::to_value(xml(raw.as_bytes()).diagnostics).unwrap(),
+                serde_json::json!([{"message":message,"line":line}]),
+                "{raw}"
+            );
+        }
+    }
+    #[test]
+    fn public_xml_namespace_prefixes_and_directives_follow_go_tokens() {
+        let mismatched =
+            xml(br#"<Ui><a:Frame xmlns:a="urn:x" xmlns:b="urn:x" name="F"></b:Frame></Ui>"#);
+        assert_eq!(mismatched.declarations[0].name, "F");
+        assert_eq!(
+            serde_json::to_value(mismatched.diagnostics).unwrap(),
+            serde_json::json!([{"message":"XML syntax error on line 1: element <Frame> in space a closed by </Frame> in space b", "line":1}])
+        );
+        let undefined = xml(br#"<Ui><x:Frame name="F"/><:Frame name="G"/></Ui>"#);
+        assert!(undefined.diagnostics.is_empty());
+        assert_eq!(undefined.declarations[0].category, "xml-Frame");
+        assert_eq!(undefined.declarations[1].category, "xml-:Frame");
+        let raw =
+            br#"<!DOCTYPE Ui [<!ENTITY ignored "a>b">]><Ui><OnLoad>R<!anything>un()</OnLoad></Ui>"#;
+        let facts = xml(raw);
+        assert!(facts.diagnostics.is_empty(), "{:?}", facts.diagnostics);
+        assert_eq!(facts.relationships[0].to, "Run");
+        let not_expanded = xml(br#"<!ENTITY ignored "text"><Ui>&ignored;</Ui>"#);
+        assert_eq!(
+            not_expanded.diagnostics[0].message,
+            "XML syntax error on line 1: invalid character entity &ignored;"
+        );
+    }
     #[test]
     fn never_evaluates_and_keeps_scopes() {
         let f=lua(b"-- function fake() end\nlocal function one()\n frame:RegisterEvent(\"PLAYER_LOGIN\")\n C_Test.Do()\nend\nlocal two = function() one() end\n",false);
@@ -499,20 +948,32 @@ mod tests {
         let fresh = lua(raw, false);
         assert!(fresh.diagnostics.is_empty());
         assert_eq!(fresh.relationship_target_bytes(0).unwrap(), b"C_X.\xff");
-        assert_eq!(fresh.relationship_target_bytes(1).unwrap(), b"frame:RegisterEvent");
+        assert_eq!(
+            fresh.relationship_target_bytes(1).unwrap(),
+            b"frame:RegisterEvent"
+        );
         assert_eq!(fresh.relationship_target_bytes(2).unwrap(), b"\xfe");
-        assert_eq!(fresh.relationship_target_bytes(3).unwrap(), "C_X.�".as_bytes());
+        assert_eq!(
+            fresh.relationship_target_bytes(3).unwrap(),
+            "C_X.�".as_bytes()
+        );
         assert_eq!(fresh.raw_relationship_targets.as_ref().unwrap().len(), 2);
         let public = serde_json::to_value(&fresh).unwrap();
         assert_eq!(public.as_object().unwrap().len(), 5);
-        assert_eq!(public["relationships"][0]["to"], public["relationships"][3]["to"]);
+        assert_eq!(
+            public["relationships"][0]["to"],
+            public["relationships"][3]["to"]
+        );
         let cached: Facts = serde_json::from_value(public.clone()).unwrap();
         assert!(cached.raw_relationship_targets.is_none());
         assert!(cached.relationship_target_bytes(0).is_none());
         assert!(cached.relationship_target_bytes(1).is_none());
         assert_eq!(serde_json::to_value(&cached).unwrap(), public);
         let reparsed = lua(raw, false);
-        assert_eq!(reparsed.relationship_target_bytes(0), fresh.relationship_target_bytes(0));
+        assert_eq!(
+            reparsed.relationship_target_bytes(0),
+            fresh.relationship_target_bytes(0)
+        );
         assert_eq!(serde_json::to_value(&reparsed).unwrap(), public);
     }
     #[test]
@@ -522,9 +983,21 @@ mod tests {
         assert!(facts.diagnostics.is_empty());
         assert_eq!(facts.relationship_target_bytes(0).unwrap(), b"T");
         assert_eq!(facts.relationship_target_bytes(1).unwrap(), b"C_X.\xff");
-        assert_eq!(facts.relationship_target_bytes(2).unwrap(), b"frame:RegisterEvent");
+        assert_eq!(
+            facts.relationship_target_bytes(2).unwrap(),
+            b"frame:RegisterEvent"
+        );
         assert_eq!(facts.relationship_target_bytes(3).unwrap(), b"\xfe");
-        assert_eq!(facts.raw_relationship_targets.as_ref().unwrap().keys().copied().collect::<Vec<_>>(), [1, 3]);
+        assert_eq!(
+            facts
+                .raw_relationship_targets
+                .as_ref()
+                .unwrap()
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            [1, 3]
+        );
     }
     #[test]
     fn rejected_program_clears_raw_targets_but_empty_fresh_identity_is_known() {
@@ -532,9 +1005,27 @@ mod tests {
         assert!(!facts.diagnostics.is_empty());
         assert!(facts.relationships.is_empty());
         assert!(facts.raw_relationship_targets.as_ref().unwrap().is_empty());
-        assert!(lua(b"", false).raw_relationship_targets.as_ref().unwrap().is_empty());
-        assert!(xml(b"<Root/>").raw_relationship_targets.as_ref().unwrap().is_empty());
-        assert!(toc(b"## Interface: 120100\n").raw_relationship_targets.as_ref().unwrap().is_empty());
+        assert!(
+            lua(b"", false)
+                .raw_relationship_targets
+                .as_ref()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            xml(b"<Root/>")
+                .raw_relationship_targets
+                .as_ref()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            toc(b"## Interface: 120100\n")
+                .raw_relationship_targets
+                .as_ref()
+                .unwrap()
+                .is_empty()
+        );
         assert!(Facts::default().raw_relationship_targets.is_none());
     }
     #[test]

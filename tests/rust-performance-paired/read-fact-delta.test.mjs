@@ -38,8 +38,8 @@ function fixture(rustLayout = 'v6') {
       diagnostics: [],
     };
     const goKey = sha256(`${parser}\0${mode}\0${document.sha256}`);
-    const layoutKey = rustLayout === 'v7' ? 'facts-layout-v7-go323-public' : 'facts-layout-v6-xml-original-tags';
-    const generator = rustLayout === 'v7' ? 'generator-v6' : 'generator-v5';
+    const layoutKey = rustLayout === 'v8' ? 'facts-layout-v8-go323-malformed' : rustLayout === 'v7' ? 'facts-layout-v7-go323-public' : 'facts-layout-v6-xml-original-tags';
+    const generator = ['v7', 'v8'].includes(rustLayout) ? 'generator-v6' : 'generator-v5';
     const rustKey = sha256(`${layoutKey}\0tree-sitter-0.26.3\0`
       + `lua-0.5.0\0xml-0.38\0${generator}\0${document.path}\0${document.sha256}`);
     const goFile = path.join(goHome, 'source/v1/facts/files', parser, `${goKey}.json`);
@@ -219,4 +219,15 @@ test('authenticates explicit v7 public facts without relabeling historical v6', 
 
 test('rejects an unknown layout instead of discovering or mixing cache identities', async () => {
   await assert.rejects(readFactDelta('', '', '', 'latest'), /Unsupported Rust facts layout/);
+});
+
+
+test('authenticates explicit v8 malformed-contract facts without accepting v7 cache', async t => {
+  await withFixture(t, async f => {
+    const report = await f.read();
+    assert.equal(report.inputs.rustLayout, 'v8');
+    assert.equal(report.differentFiles.length, 0);
+    await assert.rejects(readFactDelta(f.goHome, f.rustHome, f.records, 'v7'), /ENOENT/);
+    await assert.rejects(readFactDelta(f.goHome, f.rustHome, f.records), /ENOENT/);
+  }, 'v8');
 });

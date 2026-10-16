@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 18:37 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`73672909b78da2eaef4b25852f09ccfe462598d2`；当前本机受测优化产品树为 `408ca6bf8364fbe4348a9cf52fcfcbc5d6b08510`，runner身份独立认证。实现进行中，尚未完成全量验收。
+更新：2026-10-16 18:53 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`ed6f52fbb939cecabd8d85c8ab056ca092f29805`；当前本机受测优化产品树为 `408ca6bf8364fbe4348a9cf52fcfcbc5d6b08510`，runner身份独立认证。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -33,7 +33,13 @@
 
 ## 3. 最新实际验证与证据
 
-- **本轮scope与终态修复已实现，尚待Rust验证**：host runtime的5份全Vec深拷贝及XML handlers全Vec深拷贝改为固定原长度逐项消费，保持原顺序、步骤计量和首错；5项冻结旧实现差分回归尚未运行，未测内存收益。正常owner寿命到期与取消/请求超时分开，保真实回收和checked close，避免成功正常到期被末次control检查伪报deadline；新增8项Rust回归未跑，相关Node71/71通过。真实408 lifetime含bootstrap analysis child；按固定Go的服务截止后回收语义，只有正常600秒到期进入固定原截止+2秒的终态清理，原服务/请求期限不延长且不接新请求，未确认回收或最终checked close超过602秒仍失败。2秒是Rust实现清理上限，并非Go整段精确承诺；真实600秒复验仍待跑，旧失败保留。
+- **畸形输入公共合同候选与固定Go探针已准备**：[52输入与精确命令](tests/rust-parity/source-facts-malformed/README.md)调用固定Go AnalyzeDocument完整Facts/error；测试overlay不改Go生产源码，并认证6个原scanner SHA。Rust后继修复EOF字符串/注释、goto公共拒绝、NUL字面量与token区别及XML declaration/entity/comment/namespace/directive边界；native语法适配保持原行为。新增8项Rust回归及52输入完整观察/可选差分均NOT_RUN；换行调用错误token定位和通用tree-recovery错误仍需真实Go→Rust比较，不能说52项已等价。缓存布局明确v8、index指纹v9，query沿指纹失效，历史v6/v7读侧保留，新读侧13/13 Node通过；新索引逐字段对照必须显式v8。
+
+- **ed6新增定向53/0/0已实际通过**：[本机报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6222429490)workspace all-target通过；facts16、single11、literal1、scope5、native_session20全部通过（新增20项已含其中，不重复累计）。scope冻结旧实现的完整结果/计量差分通过，不能据此宣称峰值下降。8个新寿命单测已过，真实600秒lifetime与完整Retail retained仍待复验。
+
+- **736本机首轮已实际编译，两个失败仍保留**：[原报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6222322473)workspace all-target通过；facts13、index12、query6、XML inline10、matrix1、luac syntax18通过。lua_tree9通过1失败：gopher保留字goto被tree-sitter恢复成identifier，测试只检查内部has_error不准确，公共拒绝边界正在统一修复；validate26通过1失败：负例`local broken =\nC_Good.Do()`其实是合法跨行initializer，修复测试为真实非法语法并保跨行正例。修订尚未复验，不把原失败改标签。真实认证luac集成另等终态；本轮不含随后ed6的scope/rawbyte/lifetime后继。
+
+- **本轮scope与终态修复已实现，尚待Rust验证**：host runtime的5份全Vec深拷贝及XML handlers全Vec深拷贝改为固定原长度逐项消费，保持原顺序、步骤计量和首错；5项冻结旧实现差分回归已在ed6通过，未测内存收益。正常owner寿命到期与取消/请求超时分开，保真实回收和checked close，避免成功正常到期被末次control检查伪报deadline；新增8项Rust回归已在ed6定向组通过，相关Node71/71通过。真实408 lifetime含bootstrap analysis child；按固定Go的服务截止后回收语义，只有正常600秒到期进入固定原截止+2秒的终态清理，原服务/请求期限不延长且不接新请求，未确认回收或最终checked close超过602秒仍失败。2秒是Rust实现清理上限，并非Go整段精确承诺；真实600秒复验仍待跑，旧失败保留。
 
 - **当前两条validate公共合同修复已实现、Rust待跑**：单addon使用Go CheckClosure的staticValid/loadValid/references，cycle为error；matrix保Go AST usage解析、兼容类别和cycle warning。index准备置于addon/luac/capture前，完整类别gap不受20条诊断sample截断且暖cache保留。matrix capture.complete只按valid、零unresolved和sourceCoverage.complete计算，semantic.complete独立如实呈现。普通语法检查使用保映射的轻量XML输入，接受公共Root/namespace而不误投native schema；显式semantic保原严格认证。新入口继承原control逐token检查。非法UTF8源码的index路径改按固定Go返回command.failed/exit5及原message，不再成功跳过；新增真实Git非法字节、重复失败与无最终manifest回归，仍NOT_RUN。matrix内部非法Lua字节保持原byte身份与公开JSON替换分开，single后继已在fresh Facts保原byte ordinal，防止非法字节名误匹配JSON替换后的Unicode名称；缓存反序列化不冒充原byte证据。新增真实Closure/原Lua/XML回归仍NOT_RUN。27个validate单测、1个matrix单测、1个真实Git/认证luac集成、XML6与Lua1新测试均NOT_RUN；Node消费者6/6已过，语法解析不等于编译。
 

@@ -1,0 +1,266 @@
+{
+  "schema": "lycheedev.source-facts-malformed-cases.v1",
+  "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+  "cases": [
+    {
+      "id": "function_missing_end",
+      "path": "Fixture.lua",
+      "source": "function Missing()"
+    },
+    {
+      "id": "function_missing_arguments",
+      "path": "Fixture.lua",
+      "source": "function Missing("
+    },
+    {
+      "id": "function_keyword_eof",
+      "path": "Fixture.lua",
+      "source": "function"
+    },
+    {
+      "id": "function_body_eof",
+      "path": "Fixture.lua",
+      "source": "function Missing()\n Run()"
+    },
+    {
+      "id": "quote_eof",
+      "path": "Fixture.lua",
+      "source": "Run(); local s=\"missing"
+    },
+    {
+      "id": "quote_newline",
+      "path": "Fixture.lua",
+      "source": "Run(); local s=\"missing\n"
+    },
+    {
+      "id": "quote_escape_newline",
+      "path": "Fixture.lua",
+      "source": "local s=\"ok\\\nnext\"; Run()"
+    },
+    {
+      "id": "long_string_eof",
+      "path": "Fixture.lua",
+      "source": "local s=[=[missing"
+    },
+    {
+      "id": "long_comment_eof",
+      "path": "Fixture.lua",
+      "source": "Run() --[=[missing"
+    },
+    {
+      "id": "long_comment_bad_open",
+      "path": "Fixture.lua",
+      "source": "--[=oops"
+    },
+    {
+      "id": "long_string_bad_open",
+      "path": "Fixture.lua",
+      "source": "local s=[=oops"
+    },
+    {
+      "id": "nul_token",
+      "path": "Fixture.lua",
+      "source": "Run()\n\u0000After()"
+    },
+    {
+      "id": "nul_quote",
+      "path": "Fixture.lua",
+      "source": "frame:RegisterEvent(\"A\u0000B\")"
+    },
+    {
+      "id": "nul_long_string",
+      "path": "Fixture.lua",
+      "source": "frame:RegisterEvent([[A\u0000B]])"
+    },
+    {
+      "id": "nul_comment",
+      "path": "Fixture.lua",
+      "source": "-- A\u0000B\nRun()"
+    },
+    {
+      "id": "nul_long_comment",
+      "path": "Fixture.lua",
+      "source": "--[[A\u0000B]] Run()"
+    },
+    {
+      "id": "ambiguous_empty",
+      "path": "Fixture.lua",
+      "source": "f()\n()"
+    },
+    {
+      "id": "ambiguous_args",
+      "path": "Fixture.lua",
+      "source": "f(1)\n(2)"
+    },
+    {
+      "id": "ambiguous_crlf",
+      "path": "Fixture.lua",
+      "source": "f()\r\n()"
+    },
+    {
+      "id": "ambiguous_line_comment",
+      "path": "Fixture.lua",
+      "source": "f() -- tail\n()"
+    },
+    {
+      "id": "ambiguous_long_comment",
+      "path": "Fixture.lua",
+      "source": "f() --[[tail]]\n()"
+    },
+    {
+      "id": "same_line_call",
+      "path": "Fixture.lua",
+      "source": "f() ()"
+    },
+    {
+      "id": "explicit_statement",
+      "path": "Fixture.lua",
+      "source": "f();\n()"
+    },
+    {
+      "id": "goto_function_identifier",
+      "path": "Fixture.lua",
+      "source": "function goto() end"
+    },
+    {
+      "id": "goto_local_identifier",
+      "path": "Fixture.lua",
+      "source": "local goto=1"
+    },
+    {
+      "id": "goto_field_identifier",
+      "path": "Fixture.lua",
+      "source": "obj.goto()"
+    },
+    {
+      "id": "goto_statement_label",
+      "path": "Fixture.lua",
+      "source": "goto done; ::done:: Run()"
+    },
+    {
+      "id": "valid_assignment_newline",
+      "path": "Fixture.lua",
+      "source": "local value =\nC_Good.Do()"
+    },
+    {
+      "id": "invalid_assignment_separator",
+      "path": "Fixture.lua",
+      "source": "local value = ;\nC_Good.Do()"
+    },
+    {
+      "id": "xml_version",
+      "path": "Fixture.xml",
+      "source": "<?xml version=\"1.1\"?><Root/>"
+    },
+    {
+      "id": "xml_encoding",
+      "path": "Fixture.xml",
+      "source": "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><Root/>"
+    },
+    {
+      "id": "xml_utf8_case",
+      "path": "Fixture.xml",
+      "source": "<?xml encoding=\"Utf-8\"?><Root/>"
+    },
+    {
+      "id": "xml_version_spaces",
+      "path": "Fixture.xml",
+      "source": "<?xml version = \"1.1\"?><Root/>"
+    },
+    {
+      "id": "xml_late_declaration",
+      "path": "Fixture.xml",
+      "source": "<Root/>\n<?xml version=\"2.0\"?>"
+    },
+    {
+      "id": "xml_unknown_entity",
+      "path": "Fixture.xml",
+      "source": "<Ui>\n<Frame name=\"Before\"/>\n&unknown;\n</Ui>"
+    },
+    {
+      "id": "xml_entity_no_semicolon",
+      "path": "Fixture.xml",
+      "source": "<Ui>\ntext &unknown\n</Ui>"
+    },
+    {
+      "id": "xml_entity_eof",
+      "path": "Fixture.xml",
+      "source": "<Ui>&unknown"
+    },
+    {
+      "id": "xml_empty_entity",
+      "path": "Fixture.xml",
+      "source": "<Ui>&;</Ui>"
+    },
+    {
+      "id": "xml_numeric_bad",
+      "path": "Fixture.xml",
+      "source": "<Ui>&#xZ;</Ui>"
+    },
+    {
+      "id": "xml_entity_attr",
+      "path": "Fixture.xml",
+      "source": "<Ui><Frame name=\"&unknown more;\"/></Ui>"
+    },
+    {
+      "id": "xml_entity_control",
+      "path": "Fixture.xml",
+      "source": "<Ui>&#0;</Ui>"
+    },
+    {
+      "id": "xml_comment_double_hyphen",
+      "path": "Fixture.xml",
+      "source": "<Ui><!--bad--x\nend--></Ui>"
+    },
+    {
+      "id": "xml_comment_eof",
+      "path": "Fixture.xml",
+      "source": "<Ui><!--bad"
+    },
+    {
+      "id": "xml_cdata_eof",
+      "path": "Fixture.xml",
+      "source": "<Ui><![CDATA[bad"
+    },
+    {
+      "id": "xml_namespace_undefined",
+      "path": "Fixture.xml",
+      "source": "<Ui><x:Frame name=\"F\"/></Ui>"
+    },
+    {
+      "id": "xml_namespace_mismatch",
+      "path": "Fixture.xml",
+      "source": "<Ui><a:Frame xmlns:a=\"urn:x\" xmlns:b=\"urn:x\" name=\"F\"></b:Frame></Ui>"
+    },
+    {
+      "id": "xml_namespace_empty_prefix",
+      "path": "Fixture.xml",
+      "source": "<Ui><:Frame name=\"F\"/></Ui>"
+    },
+    {
+      "id": "xml_directive",
+      "path": "Fixture.xml",
+      "source": "<!ENTITY ignored \"text\"><Ui><Frame name=\"F\"/></Ui>"
+    },
+    {
+      "id": "xml_directive_nested",
+      "path": "Fixture.xml",
+      "source": "<!DOCTYPE Ui [<!ENTITY ignored \"a>b\">]><Ui/>"
+    },
+    {
+      "id": "xml_directive_no_expansion",
+      "path": "Fixture.xml",
+      "source": "<!ENTITY ignored \"text\"><Ui>&ignored;</Ui>"
+    },
+    {
+      "id": "xml_directive_handler_gap",
+      "path": "Fixture.xml",
+      "source": "<Ui><OnLoad>R<!anything>un()</OnLoad></Ui>"
+    },
+    {
+      "id": "xml_inline_function_eof",
+      "path": "Fixture.xml",
+      "source": "<Ui>\n<Frame name=\"F\"><OnLoad>function Missing()</OnLoad></Frame></Ui>"
+    }
+  ]
+}

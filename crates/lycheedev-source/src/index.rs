@@ -274,7 +274,7 @@ pub fn penalty(role: &str) -> i32 {
     }
 }
 pub(crate) fn fingerprint(pin: &SourcePin) -> String {
-    storage::sha256(format!("rust-index-v8\0facts-layout-v7-go323-public\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}",pin.repository,pin.product,pin.exact_commit,pin.parser_revision).as_bytes())
+    storage::sha256(format!("rust-index-v9\0facts-layout-v8-go323-malformed\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}",pin.repository,pin.product,pin.exact_commit,pin.parser_revision).as_bytes())
 }
 pub fn build(home: &Path, pin: &SourcePin) -> Result<Index> {
     build_with_control(home, pin, &Default::default())
@@ -460,7 +460,7 @@ pub fn is_ready_with_control(
 fn facts_cache_path(home: &Path, path: &str, sha256: &str) -> PathBuf {
     let key = storage::sha256(
         format!(
-            "facts-layout-v7-go323-public\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0{path}\0{sha256}"
+            "facts-layout-v8-go323-malformed\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0{path}\0{sha256}"
         ).as_bytes(),
     );
     home.join("cache/source-facts-rust")
@@ -514,7 +514,7 @@ fn document_facts_profiled(
             Ok(serde_json::from_slice::<Value>(&raw).ok())
         })();
         if let Some(envelope) = storage::finish_file(file, loaded, control)?
-            && envelope["schema"] == "lycheedev.source-facts.rust.v7"
+            && envelope["schema"] == "lycheedev.source-facts.rust.v8"
             && envelope["inputSHA256"] == sha256
             && envelope["factsSHA256"] == storage::sha256(&serde_json::to_vec(&envelope["facts"])?)
             && let Ok(parsed) = serde_json::from_value(envelope["facts"].clone())
@@ -537,7 +537,7 @@ fn document_facts_profiled(
     let serialize_phase = profile.map(|p| p.span(Phase::FactsSerialize));
     let f = serde_json::to_value(&parsed)?;
     let envelope = serde_json::to_vec(
-        &json!({"schema":"lycheedev.source-facts.rust.v7","inputSHA256":sha256,"factsSHA256":storage::sha256(&serde_json::to_vec(&f)?),"facts":f}),
+        &json!({"schema":"lycheedev.source-facts.rust.v8","inputSHA256":sha256,"factsSHA256":storage::sha256(&serde_json::to_vec(&f)?),"facts":f}),
     )?;
     if envelope.len() > MAX_FACT_CACHE_BYTES {
         return Err(ToolkitError::new(
@@ -1189,6 +1189,20 @@ mod facts_cache_tests {
         io::Write,
         process::{Command, Stdio},
     };
+
+    #[test]
+    fn malformed_contract_invalidates_previous_index_and_file_facts() {
+        let pin = SourcePin {
+            repository: "elvui".into(), product: "main".into(), requested_ref: "fixture".into(),
+            exact_commit: "a".repeat(40), parser_revision: git::PARSER.into(),
+        };
+        let previous = storage::sha256(format!("rust-index-v8\0facts-layout-v7-go323-public\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}", pin.repository, pin.product, pin.exact_commit, pin.parser_revision).as_bytes());
+        assert_ne!(fingerprint(&pin), previous);
+        let input = storage::sha256(b"function goto() end");
+        let previous_file = storage::sha256(format!("facts-layout-v7-go323-public\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0Example.lua\0{input}").as_bytes());
+        let current = facts_cache_path(Path::new("fixture-home"), "Example.lua", &input);
+        assert_ne!(current, Path::new("fixture-home").join("cache/source-facts-rust").join(format!("{previous_file}.json")));
+    }
 
     struct Fixture {
         home: PathBuf,

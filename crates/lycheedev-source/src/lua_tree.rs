@@ -100,9 +100,55 @@ impl SyntaxDocument {
     /// Reject newer grammar forms absent from the fixed gopher-lua parser.
     /// This is shared by public facts and matrix usages, never by native flow.
     pub(crate) fn public_parse_note(&self) -> Option<SyntaxNote> {
+        if let Some(note) = public_lexical_note(&self.bytes) {
+            return Some(note);
+        }
+        let mut missing_at_eof = false;
+        let end = self
+            .bytes
+            .iter()
+            .rposition(|byte| !byte.is_ascii_whitespace())
+            .map_or(0, |at| at + 1);
         let mut cursor = self.tree.walk();
         loop {
             let node = cursor.node();
+            missing_at_eof |= node.is_missing() && node.start_byte() >= end;
+            missing_at_eof |= node.is_error()
+                && node.end_byte() >= end
+                && incomplete_function_header(text(&self.bytes, node));
+            if node.kind() == "arguments"
+                && text(&self.bytes, node).starts_with('(')
+                && text(&self.bytes, node).ends_with(')')
+            {
+                let tail = &self.bytes[node.end_byte()..];
+                let next = tail
+                    .iter()
+                    .position(|byte| !matches!(*byte, b' ' | b'\t' | b'\r' | b'\n'))
+                    .unwrap_or(tail.len());
+                if tail.get(next) == Some(&b'(')
+                    && tail[..next]
+                        .iter()
+                        .any(|byte| matches!(*byte, b'\r' | b'\n'))
+                {
+                    // gopher-lua's yacc reduction observes PNewLine after
+                    // looking ahead to the following '(', and TokenError
+                    // receives the opening token of these completed args.
+                    return Some(public_lua_error(
+                        &self.bytes,
+                        node.start_byte(),
+                        b"(",
+                        "ambiguous syntax (function call x new statement)",
+                    ));
+                }
+            }
+            if node.kind() == "identifier" && text(&self.bytes, node) == "goto" {
+                return Some(public_lua_error(
+                    &self.bytes,
+                    node.end_byte() - 1,
+                    b"goto",
+                    "syntax error",
+                ));
+            }
             let unsupported = public_unsupported(&self.bytes, node);
             if unsupported {
                 return Some(SyntaxNote {
@@ -119,12 +165,19 @@ impl SyntaxDocument {
                     break;
                 }
                 if !cursor.goto_parent() {
-                    return None;
+                    return missing_at_eof.then(|| public_lua_eof("syntax error"));
                 }
             }
         }
     }
     pub fn facts(&self, generated: bool) -> Facts {
+        if !self.lua51_identifiers
+            && let Some(note) = self.public_parse_note()
+        {
+            let mut facts = Facts::fresh();
+            facts.diagnostics.push(note);
+            return facts;
+        }
         let mut w = Walker {
             raw: &self.bytes,
             facts: Facts::fresh(),
@@ -146,7 +199,9 @@ impl SyntaxDocument {
         if self.tree.root_node().has_error() || w.rejected_syntax {
             w.facts.declarations.clear();
             w.facts.relationships.clear();
-            if let Some(targets) = &mut w.facts.raw_relationship_targets { targets.clear(); }
+            if let Some(targets) = &mut w.facts.raw_relationship_targets {
+                targets.clear();
+            }
         } else {
             for root in std::mem::take(&mut w.api_roots) {
                 w.documentation(root, "");
@@ -196,10 +251,16 @@ fn lua51_grammar_input(raw: &[u8], mask_goto: bool) -> Cow<'_, [u8]> {
     while at < raw.len() {
         if raw.get(at..at + 2) == Some(b"--") {
             if let Some(end) = long_end(raw, at + 2) {
+                if !mask_goto {
+                    mask_literal_nul(raw, at, end, &mut changed);
+                }
                 at = end;
             } else {
                 at += 2;
-                while at < raw.len() && raw[at] != b'\n' {
+                while at < raw.len() && raw[at] != b'\n' && (mask_goto || raw[at] != b'\r') {
+                    if !mask_goto && raw[at] == 0 {
+                        changed.get_or_insert_with(|| raw.to_vec())[at] = b' ';
+                    }
                     at += 1;
                 }
             }
@@ -209,7 +270,13 @@ fn lua51_grammar_input(raw: &[u8], mask_goto: bool) -> Cow<'_, [u8]> {
             let quote = raw[at];
             at += 1;
             while at < raw.len() {
+                if !mask_goto && raw[at] == 0 {
+                    changed.get_or_insert_with(|| raw.to_vec())[at] = b' ';
+                }
                 if raw[at] == b'\\' {
+                    if !mask_goto && raw.get(at + 1) == Some(&0) {
+                        changed.get_or_insert_with(|| raw.to_vec())[at + 1] = b' ';
+                    }
                     if let Some(next) = raw.get(at + 1)
                         && !b"abfnrtv\\'\"0123456789\r\n".contains(next)
                     {
@@ -230,6 +297,9 @@ fn lua51_grammar_input(raw: &[u8], mask_goto: bool) -> Cow<'_, [u8]> {
             continue;
         }
         if let Some(end) = long_end(raw, at) {
+            if !mask_goto {
+                mask_literal_nul(raw, at, end, &mut changed);
+            }
             at = end;
             continue;
         }
@@ -247,6 +317,205 @@ fn lua51_grammar_input(raw: &[u8], mask_goto: bool) -> Cow<'_, [u8]> {
         }
     }
     changed.map(Cow::Owned).unwrap_or(Cow::Borrowed(raw))
+}
+// Same-width grammar adaptation only. Public literal bytes remain untouched.
+fn mask_literal_nul(raw: &[u8], start: usize, end: usize, changed: &mut Option<Vec<u8>>) {
+    for at in start..end {
+        if raw[at] == 0 {
+            changed.get_or_insert_with(|| raw.to_vec())[at] = b' ';
+        }
+    }
+}
+// Only the unfinished declaration header that tree-sitter recovers as an
+// ERROR rather than a missing `end`; other grammar errors retain their path.
+fn incomplete_function_header(source: &str) -> bool {
+    let mut rest = source.trim();
+    if let Some(value) = rest.strip_prefix("local ") {
+        rest = value.trim_start();
+    }
+    let Some(value) = rest.strip_prefix("function") else {
+        return false;
+    };
+    if !value.is_empty() && !value.starts_with(char::is_whitespace) && !value.starts_with('(') {
+        return false;
+    }
+    rest = value.trim_start();
+    if rest.is_empty() {
+        return true;
+    }
+    if !rest.starts_with('(') {
+        let name_end = rest
+            .find(|ch: char| !ch.is_ascii_alphanumeric() && !matches!(ch, '_' | '.' | ':'))
+            .unwrap_or(rest.len());
+        let name = &rest[..name_end];
+        if name.is_empty() || !name.as_bytes()[0].is_ascii_alphabetic() && !name.starts_with('_') {
+            return false;
+        }
+        rest = rest[name_end..].trim_start();
+        if rest.is_empty() {
+            return true;
+        }
+    }
+    let Some(parameters) = rest.strip_prefix('(') else {
+        return false;
+    };
+    let parameters = parameters.trim();
+    let parameters = parameters.strip_suffix(')').unwrap_or(parameters).trim();
+    parameters.split(',').all(|name| {
+        let name = name.trim();
+        name.is_empty()
+            || name == "..."
+            || name.bytes().enumerate().all(|(at, byte)| {
+                byte == b'_' || byte.is_ascii_alphabetic() || at > 0 && byte.is_ascii_digit()
+            })
+    })
+}
+fn public_lua_eof(message: &str) -> SyntaxNote {
+    SyntaxNote {
+        message: format!("source at EOF:   {message}\n"),
+        line: 0,
+    }
+}
+fn public_lua_error(raw: &[u8], at: usize, token: &[u8], message: &str) -> SyntaxNote {
+    let lines = lua_line_starts(raw);
+    let line = lines.partition_point(|start| *start <= at);
+    let bom = usize::from(line == 1 && raw.starts_with(b"\xef\xbb\xbf")) * 3;
+    let column = at + 1 - lines[line - 1] - bom;
+    SyntaxNote {
+        message: format!(
+            "source line:{line}(column:{column}) near '{}':   {message}\n",
+            lua_json_string(token)
+        ),
+        line,
+    }
+}
+// This is only the fixed scanner's string/comment/NUL boundary, not a second
+// Lua parser. Statement/expression structure remains tree-sitter's job. The
+// fixed scanProgram wrapper normalizes lexer EOF (-1) to public note line 0.
+fn public_lexical_note(raw: &[u8]) -> Option<SyntaxNote> {
+    let mut at = if raw.starts_with(b"\xef\xbb\xbf") {
+        3
+    } else {
+        0
+    };
+    if raw[at..].starts_with(b"#!") {
+        if let Some(end) = raw[at..].iter().position(|byte| *byte == b'\n') {
+            at += end;
+        }
+    }
+    while at < raw.len() {
+        let comment = raw[at..].starts_with(b"--");
+        if comment {
+            at += 2;
+        }
+        if raw.get(at) == Some(&b'[')
+            && raw
+                .get(at + 1)
+                .is_some_and(|byte| matches!(*byte, b'[' | b'='))
+        {
+            let start = at;
+            at += 1;
+            while raw.get(at) == Some(&b'=') {
+                at += 1;
+            }
+            if at == raw.len() {
+                return Some(public_lua_eof(if comment {
+                    "invalid multiline comment"
+                } else {
+                    "invalid multiline string"
+                }));
+            }
+            if raw[at] != b'[' {
+                return Some(public_lua_error(
+                    raw,
+                    at,
+                    if comment { b"" } else { &raw[at..at + 1] },
+                    if comment {
+                        "invalid multiline comment"
+                    } else {
+                        "invalid multiline string"
+                    },
+                ));
+            }
+            let width = at - start;
+            at += 1;
+            loop {
+                if at == raw.len() {
+                    return Some(public_lua_eof(if comment {
+                        "invalid multiline comment"
+                    } else {
+                        "unterminated multiline string"
+                    }));
+                }
+                if raw[at] == b']'
+                    && raw.get(at + width) == Some(&b']')
+                    && raw
+                        .get(at + 1..at + width)
+                        .is_some_and(|bytes| bytes.iter().all(|byte| *byte == b'='))
+                {
+                    at += width + 1;
+                    break;
+                }
+                at += 1;
+            }
+            continue;
+        }
+        if comment {
+            while at < raw.len() && !matches!(raw[at], b'\r' | b'\n') {
+                at += 1;
+            }
+            continue;
+        }
+        if matches!(raw[at], b'\'' | b'"') {
+            let quote = raw[at];
+            let start = at;
+            at += 1;
+            loop {
+                let Some(&byte) = raw.get(at) else {
+                    return Some(public_lua_eof("unterminated string"));
+                };
+                if byte == quote {
+                    at += 1;
+                    break;
+                }
+                if matches!(byte, b'\r' | b'\n') {
+                    let line = lua_line_starts(raw).partition_point(|start| *start <= at) + 1;
+                    // Decode only the malformed token for its diagnostic.
+                    // Ordinary strings do not allocate during this scan.
+                    let mut literal = raw[start..at].to_vec();
+                    literal.push(quote);
+                    let token = string_value_bytes(&literal).unwrap_or_default();
+                    return Some(SyntaxNote {
+                        message: format!(
+                            "source line:{line}(column:0) near '{}':   unterminated string\n",
+                            lua_json_string(&token)
+                        ),
+                        line,
+                    });
+                }
+                at += 1;
+                if byte == b'\\' {
+                    let Some(&escaped) = raw.get(at) else {
+                        return Some(public_lua_eof("unterminated string"));
+                    };
+                    at += 1;
+                    if matches!(escaped, b'\r' | b'\n')
+                        && raw
+                            .get(at)
+                            .is_some_and(|next| matches!(*next, b'\r' | b'\n') && *next != escaped)
+                    {
+                        at += 1;
+                    }
+                }
+            }
+            continue;
+        }
+        if raw[at] == 0 {
+            return Some(public_lua_error(raw, at, b"\0", "Invalid token"));
+        }
+        at += 1;
+    }
+    None
 }
 fn point_at(raw: &[u8], at: usize) -> tree_sitter::Point {
     let prefix = &raw[..at];
@@ -342,22 +611,39 @@ fn name(raw: &[u8], node: Node<'_>) -> String {
         .unwrap_or_else(|error| lua_json_string(error.as_bytes()))
 }
 fn name_bytes(raw: &[u8], node: Node<'_>, depth: usize) -> Vec<u8> {
-    if depth > 256 { return Vec::new(); }
+    if depth > 256 {
+        return Vec::new();
+    }
     let node = unparenthesized(node);
     match node.kind() {
         "identifier" => raw[node.byte_range()].to_vec(),
         "dot_index_expression" | "method_index_expression" | "bracket_index_expression" => {
-            let Some(table) = node.child_by_field_name("table") else { return Vec::new(); };
-            let Some(field) = node.child_by_field_name("field").or_else(|| node.child_by_field_name("method")) else { return Vec::new(); };
+            let Some(table) = node.child_by_field_name("table") else {
+                return Vec::new();
+            };
+            let Some(field) = node
+                .child_by_field_name("field")
+                .or_else(|| node.child_by_field_name("method"))
+            else {
+                return Vec::new();
+            };
             let mut base = name_bytes(raw, table, depth + 1);
-            if base.is_empty() { return base; }
+            if base.is_empty() {
+                return base;
+            }
             let value = if node.kind() == "bracket_index_expression" {
-                let Some(value) = string_bytes(raw, field) else { return Vec::new(); };
+                let Some(value) = string_bytes(raw, field) else {
+                    return Vec::new();
+                };
                 value
             } else {
                 raw[field.byte_range()].to_vec()
             };
-            base.push(if node.kind() == "method_index_expression" { b':' } else { b'.' });
+            base.push(if node.kind() == "method_index_expression" {
+                b':'
+            } else {
+                b'.'
+            });
             base.extend(value);
             base
         }
@@ -391,6 +677,13 @@ pub(crate) fn string(raw: &[u8], node: Node<'_>) -> Option<String> {
 /// Internal literal identity before Go's JSON replacement of invalid UTF-8.
 /// Public fact strings keep the encoding/json-compatible wrapper above.
 pub(crate) fn string_bytes(raw: &[u8], node: Node<'_>) -> Option<Vec<u8>> {
+    let node = unparenthesized(node);
+    if node.kind() != "string" {
+        return None;
+    }
+    string_value_bytes(&raw[node.byte_range()])
+}
+fn string_value_bytes(value: &[u8]) -> Option<Vec<u8>> {
     fn newline(bytes: &[u8], at: &mut usize) -> u8 {
         let value = bytes[*at];
         *at += 1;
@@ -406,11 +699,6 @@ pub(crate) fn string_bytes(raw: &[u8], node: Node<'_>) -> Option<Vec<u8>> {
             value
         }
     }
-    let node = unparenthesized(node);
-    if node.kind() != "string" {
-        return None;
-    }
-    let value = &raw[node.byte_range()];
     let first = *value.first()?;
     let mut out = Vec::new();
     if first == b'[' {
@@ -553,14 +841,25 @@ impl<'tree> Walker<'_, 'tree> {
             line: self.line(n),
         });
     }
-    fn link_raw(&mut self, node: Node<'_>, from: String, target: Vec<u8>, category: &str, confidence: &str) {
+    fn link_raw(
+        &mut self,
+        node: Node<'_>,
+        from: String,
+        target: Vec<u8>,
+        category: &str,
+        confidence: &str,
+    ) {
         let ordinal = self.facts.relationships.len();
         let display = match String::from_utf8(target) {
             Ok(value) => value,
             Err(error) => {
                 let target = error.into_bytes();
                 let display = lua_json_string(&target);
-                self.facts.raw_relationship_targets.as_mut().expect("fresh parser target identity").insert(ordinal, target);
+                self.facts
+                    .raw_relationship_targets
+                    .as_mut()
+                    .expect("fresh parser target identity")
+                    .insert(ordinal, target);
                 display
             }
         };
@@ -1144,14 +1443,86 @@ READY
         assert_eq!(string(raw, arguments[3]).unwrap(), "�");
     }
     #[test]
+    fn public_eof_diagnostics_use_fixed_go_messages_and_zero_line() {
+        for (raw, message) in [
+            ("function Missing()", "syntax error"),
+            ("function Missing(", "syntax error"),
+            ("function", "syntax error"),
+            ("Run(); local s=\"missing", "unterminated string"),
+            ("local s=[=[missing", "unterminated multiline string"),
+            ("Run() --[=[missing", "invalid multiline comment"),
+        ] {
+            let facts = SyntaxDocument::new_public(raw.as_bytes())
+                .unwrap()
+                .facts(false);
+            assert!(facts.declarations.is_empty(), "{raw}");
+            assert!(facts.relationships.is_empty(), "{raw}");
+            assert_eq!(
+                serde_json::to_value(facts.diagnostics).unwrap(),
+                serde_json::json!([{"message":format!("source at EOF:   {message}\n"), "line":0}]),
+                "{raw}"
+            );
+        }
+    }
+    #[test]
+    fn public_nul_is_a_lexical_error_only_outside_literals_and_comments() {
+        let facts = SyntaxDocument::new_public(b"Run()\n\0After()")
+            .unwrap()
+            .facts(false);
+        assert!(facts.relationships.is_empty());
+        assert_eq!(
+            serde_json::to_value(facts.diagnostics).unwrap(),
+            serde_json::json!([{"message":"source line:2(column:1) near '\0':   Invalid token\n", "line":2}])
+        );
+        for raw in [
+            b"frame:RegisterEvent(\"A\0B\")".as_slice(),
+            b"frame:RegisterEvent([[A\0B]])",
+        ] {
+            assert!(SyntaxDocument::new(raw).is_err());
+            let facts = SyntaxDocument::new_public(raw).unwrap().facts(false);
+            assert!(facts.diagnostics.is_empty(), "{:?}", facts.diagnostics);
+            assert_eq!(facts.relationships[1].to, "A\0B");
+        }
+        for raw in [b"-- A\0B\nRun()".as_slice(), b"--[[A\0B]] Run()"] {
+            let facts = SyntaxDocument::new_public(raw).unwrap().facts(false);
+            assert!(facts.diagnostics.is_empty());
+            assert_eq!(facts.relationships[0].to, "Run");
+        }
+    }
+    #[test]
+    fn public_newline_call_rejects_recovered_rows_without_changing_native_tree() {
+        for raw in [b"f()\n()".as_slice(), b"f(1)\r\n(2)"] {
+            let document = SyntaxDocument::new_public(raw).unwrap();
+            let facts = document.facts(false);
+            assert!(facts.relationships.is_empty());
+            assert_eq!(facts.diagnostics.len(), 1);
+            assert!(
+                facts.diagnostics[0]
+                    .message
+                    .contains("ambiguous syntax (function call x new statement)")
+            );
+            assert_eq!(
+                document.root().to_sexp(),
+                SyntaxDocument::new(raw).unwrap().root().to_sexp()
+            );
+        }
+        assert!(
+            SyntaxDocument::new_public(b"f() ()")
+                .unwrap()
+                .facts(false)
+                .diagnostics
+                .is_empty()
+        );
+    }
+    #[test]
     fn public_goto_keywords_and_native_lua51_identifiers_have_separate_consumers() {
         let identifier = b"function goto() end";
         assert!(!SyntaxDocument::new(identifier).unwrap().root().has_error());
         assert!(
             SyntaxDocument::new_public(identifier)
                 .unwrap()
-                .root()
-                .has_error()
+                .public_parse_note()
+                .is_some()
         );
         let keyword = SyntaxDocument::new_public(b"goto done; ::done:: Run()")
             .unwrap()

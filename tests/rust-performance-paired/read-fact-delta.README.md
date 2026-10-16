@@ -49,3 +49,16 @@ The default remains `v6` for the original failed 5bbb pair. `v7` selects the
 `lycheedev.source-facts.rust.v7` envelope. The reader never mixes layouts or
 chooses whichever cache happens to exist. Both modes compare every field and
 array position; neither changes the original paired-run verdict.
+
+For the subsequent malformed-input contract candidate, explicitly select `v8`:
+
+```sh
+node tests/rust-performance-paired/read-fact-delta.mjs GO_HOME RUST_HOME GO_RECORDS_JSONL v8 > static-fact-delta-v8.json
+```
+
+This authenticates `facts-layout-v8-go323-malformed` and
+`lycheedev.source-facts.rust.v8`. The generator remains v6; changed lexical/XML
+diagnostics invalidate the complete index/query identity and per-file facts
+cache. Historical v6 and v7 caches remain readable only with their own explicit
+identity. No earlier result is relabeled, and malformed-input differential
+checks are separate from the normal full-Retail comparison.

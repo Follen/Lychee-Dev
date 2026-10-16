@@ -420,7 +420,7 @@ fn matrix_labels_variable_brackets_like_go_and_keeps_candidate_calls() {
 #[test]
 fn matrix_usage_parse_failure_and_shebang_do_not_reuse_public_fact_rows() {
     for raw in [
-        b"local broken =\nC_Good.Do()".as_slice(),
+        b"local broken = ;\nC_Good.Do()".as_slice(),
         b"#!lua\nC_Good.Do()",
         b"\xef\xbb\xbf#!lua\nC_Good.Do()",
         b"local x = 5 // 2; C_Good.Do()",
@@ -431,6 +431,19 @@ fn matrix_usage_parse_failure_and_shebang_do_not_reuse_public_fact_rows() {
         assert!(usages.is_empty());
         assert!(unresolved.is_empty());
     }
+}
+#[test]
+fn matrix_lua_assignment_rhs_can_start_on_the_next_line() {
+    // Fixed gopher-lua grammar: local names '=' exprlist, with newline treated
+    // as lexical whitespace. This is not a parse-failure fixture.
+    let (usages, unresolved) = usage::lua(
+        "Main.lua",
+        b"local value =\nC_Good.Do()",
+        &Default::default(),
+    )
+    .unwrap();
+    assert!(unresolved.is_empty());
+    assert_eq!(pairs(&usages), vec![("api", "C_Good.Do")]);
 }
 #[test]
 fn matrix_lua_comments_do_not_shift_arguments_and_lines_follow_go_newlines() {
