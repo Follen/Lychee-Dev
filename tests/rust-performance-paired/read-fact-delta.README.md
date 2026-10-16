@@ -62,3 +62,9 @@ diagnostics invalidate the complete index/query identity and per-file facts
 cache. Historical v6 and v7 caches remain readable only with their own explicit
 identity. No earlier result is relabeled, and malformed-input differential
 checks are separate from the normal full-Retail comparison.
+
+The correction based on the first actual 52-case Go observation uses explicit
+`v9`, `facts-layout-v9-go323-observed`, and
+`lycheedev.source-facts.rust.v9`. Its whole-index/query fingerprint changes too.
+Use v8 only for the original e843 candidate and v9 for the subsequent corrected
+candidate; no automatic discovery or historical relabeling is performed.

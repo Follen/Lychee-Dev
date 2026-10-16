@@ -104,6 +104,7 @@ impl SyntaxDocument {
             return Some(note);
         }
         let mut missing_at_eof = false;
+        let mut previous_token = "";
         let end = self
             .bytes
             .iter()
@@ -116,30 +117,48 @@ impl SyntaxDocument {
             missing_at_eof |= node.is_error()
                 && node.end_byte() >= end
                 && incomplete_function_header(text(&self.bytes, node));
-            if node.kind() == "arguments"
-                && text(&self.bytes, node).starts_with('(')
-                && text(&self.bytes, node).ends_with(')')
+            missing_at_eof |=
+                node.is_error() && node.end_byte() >= end && incomplete_function_body(node);
+            // An ERROR subtree can be bypassed by the facts walk (notably an
+            // assignment's recovered RHS). Inspect its real token boundary
+            // here before publishing any recovered facts. Comments are
+            // trivia; strings remain one token, never their contents.
+            if node.kind() != "comment"
+                && (node.child_count() == 0 || node.kind() == "string")
+                && !node.is_missing()
             {
-                let tail = &self.bytes[node.end_byte()..];
-                let next = tail
-                    .iter()
-                    .position(|byte| !matches!(*byte, b' ' | b'\t' | b'\r' | b'\n'))
-                    .unwrap_or(tail.len());
-                if tail.get(next) == Some(&b'(')
-                    && tail[..next]
-                        .iter()
-                        .any(|byte| matches!(*byte, b'\r' | b'\n'))
-                {
-                    // gopher-lua's yacc reduction observes PNewLine after
-                    // looking ahead to the following '(', and TokenError
-                    // receives the opening token of these completed args.
+                let token = text(&self.bytes, node);
+                let empty_expression = token == ")"
+                    && previous_token == "("
+                    && !node.parent().is_some_and(|delimiter| {
+                        delimiter
+                            .parent()
+                            .is_some_and(|owner| match delimiter.kind() {
+                                "arguments" => owner.kind() == "function_call",
+                                "parameters" => {
+                                    matches!(
+                                        owner.kind(),
+                                        "function_declaration" | "function_definition"
+                                    ) || owner.is_error() && {
+                                        let mut cursor = owner.walk();
+                                        let found = owner
+                                            .children(&mut cursor)
+                                            .any(|child| child.kind() == "function");
+                                        found
+                                    }
+                                }
+                                _ => false,
+                            })
+                    });
+                if token == ";" && previous_token == "=" || empty_expression {
                     return Some(public_lua_error(
                         &self.bytes,
-                        node.start_byte(),
-                        b"(",
-                        "ambiguous syntax (function call x new statement)",
+                        node.end_byte() - 1,
+                        &self.bytes[node.byte_range()],
+                        "syntax error",
                     ));
                 }
+                previous_token = token;
             }
             if node.kind() == "identifier" && text(&self.bytes, node) == "goto" {
                 return Some(public_lua_error(
@@ -369,6 +388,51 @@ fn incomplete_function_header(source: &str) -> bool {
                 byte == b'_' || byte.is_ascii_alphabetic() || at > 0 && byte.is_ascii_digit()
             })
     })
+}
+// Tree-sitter may retain an unfinished function as one ERROR containing its
+// parsed parameters/body rather than inserting a missing `end`. A parsed
+// body boundary proves that this is beyond the header. Keep EOF pending so a
+// real bad body token visited later wins over this missing terminator.
+fn incomplete_function_body(node: Node<'_>) -> bool {
+    if !node.is_error() {
+        return false;
+    }
+    let mut cursor = node.walk();
+    let mut function = false;
+    let mut parameters = false;
+    for child in node.children(&mut cursor) {
+        if child.has_error() || child.is_missing() {
+            return false;
+        }
+        match child.kind() {
+            "comment" => {}
+            "function" if !parameters => function = true,
+            "parameters" if !parameters => parameters = true,
+            "end" => return false,
+            // These are already parsed statement/body productions, not
+            // arbitrary text after a function token. An earlier malformed
+            // body child must not be reclassified as a terminator-at-EOF.
+            "block"
+            | "function_call"
+            | "assignment_statement"
+            | "variable_declaration"
+            | "function_declaration"
+            | "do_statement"
+            | "while_statement"
+            | "repeat_statement"
+            | "if_statement"
+            | "for_statement"
+            | "return_statement"
+            | "break_statement"
+            | "goto_statement"
+            | "label_statement"
+            | "empty_statement"
+                if parameters => {}
+            _ if parameters => return false,
+            _ => {}
+        }
+    }
+    function && parameters
 }
 fn public_lua_eof(message: &str) -> SyntaxNote {
     SyntaxNote {
@@ -1446,6 +1510,7 @@ READY
     fn public_eof_diagnostics_use_fixed_go_messages_and_zero_line() {
         for (raw, message) in [
             ("function Missing()", "syntax error"),
+            ("function Missing()\n Run()", "syntax error"),
             ("function Missing(", "syntax error"),
             ("function", "syntax error"),
             ("Run(); local s=\"missing", "unterminated string"),
@@ -1490,29 +1555,71 @@ READY
         }
     }
     #[test]
-    fn public_newline_call_rejects_recovered_rows_without_changing_native_tree() {
-        for raw in [b"f()\n()".as_slice(), b"f(1)\r\n(2)"] {
+    fn public_newline_calls_keep_fixed_go_nested_relationship_order() {
+        // Actual fixed-Go1.27.1/gopher-lua1.1.1 observations, report SHA256
+        // 849e3b0ab76e2252e10f183bb84c281ba96452cb0f32bc0f430e8ab9680730dc.
+        // These calls are accepted despite the lexer/parser PNewLine code.
+        for raw in [b"f()\n()".as_slice(), b"f(1)\n(2)", b"f()\r\n()", b"f() ()"] {
             let document = SyntaxDocument::new_public(raw).unwrap();
             let facts = document.facts(false);
-            assert!(facts.relationships.is_empty());
-            assert_eq!(facts.diagnostics.len(), 1);
-            assert!(
-                facts.diagnostics[0]
-                    .message
-                    .contains("ambiguous syntax (function call x new statement)")
+            assert_eq!(
+                serde_json::to_value(&facts).unwrap(),
+                serde_json::json!({
+                    "declarations":[], "loads":[], "headers":[], "diagnostics":[],
+                    "relationships":[
+                        {"from":"<file>","to":"<dynamic>","category":"call","confidence":"dynamic-unresolved","line":1},
+                        {"from":"<file>","to":"f","category":"call","confidence":"inferred","line":1}
+                    ]
+                }),
+                "tree: {}",
+                document.root().to_sexp()
             );
             assert_eq!(
                 document.root().to_sexp(),
                 SyntaxDocument::new(raw).unwrap().root().to_sexp()
             );
         }
-        assert!(
-            SyntaxDocument::new_public(b"f() ()")
-                .unwrap()
-                .facts(false)
-                .diagnostics
-                .is_empty()
-        );
+    }
+    #[test]
+    fn public_recovery_reports_bad_tokens_before_an_unclosed_function_eof() {
+        for (raw, line, column, token, message) in [
+            ("f();\n()", 2, 2, ")", "syntax error"),
+            ("local value = ;\nC_Good.Do()", 1, 15, ";", "syntax error"),
+            (
+                "function Missing()\n local value = ;",
+                2,
+                16,
+                ";",
+                "syntax error",
+            ),
+            ("function Missing()\n \0", 2, 2, "\0", "Invalid token"),
+            ("local value = -- comment\n ;", 2, 2, ";", "syntax error"),
+        ] {
+            let document = SyntaxDocument::new_public(raw.as_bytes()).unwrap();
+            let facts = document.facts(false);
+            assert_eq!(
+                serde_json::to_value(&facts).unwrap(),
+                serde_json::json!({
+                    "declarations":[], "relationships":[], "loads":[], "headers":[],
+                    "diagnostics":[{"message":format!("source line:{line}(column:{column}) near '{token}':   {message}\n"),"line":line}]
+                }),
+                "input: {raw:?}; tree: {}",
+                document.root().to_sexp()
+            );
+        }
+        for raw in [
+            "function Complete() local value = 1; Run() end",
+            "local value = '= ;'; Run()",
+            "local value = {key = 1;}; Run()",
+            "f();\n g()",
+        ] {
+            let document = SyntaxDocument::new_public(raw.as_bytes()).unwrap();
+            assert!(
+                document.facts(false).diagnostics.is_empty(),
+                "input: {raw}; tree: {}",
+                document.root().to_sexp()
+            );
+        }
     }
     #[test]
     fn public_goto_keywords_and_native_lua51_identifiers_have_separate_consumers() {

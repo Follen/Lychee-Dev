@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 18:53 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`ed6f52fbb939cecabd8d85c8ab056ca092f29805`；当前本机受测优化产品树为 `408ca6bf8364fbe4348a9cf52fcfcbc5d6b08510`，runner身份独立认证。实现进行中，尚未完成全量验收。
+更新：2026-10-16 19:14 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`e8434bfbdb3e26c19c3c2c84c4be3624a63a3499`；当前本机受测优化产品树为 `408ca6bf8364fbe4348a9cf52fcfcbc5d6b08510`，runner身份独立认证。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -32,6 +32,10 @@
 - **正式 Lua 已明确切到 Go323**：`4092344`保存113原blob认证、精确Rust3.5 overlay与220/9正式入口，旧320/321/322原清单保留。Node正式63及包/版本115通过；本机已安装官方固定MSVC14.51与SDK，Community三工具字节/版本/签名均匹配原Enterprise固定身份；Community精确路径已实际验证。固定7c07的Go323正式Lua220/0/0与Rust桥9/0/0现已真实通过，全部owner回收；只是该自动化范围，不含实机或性能。
 
 ## 3. 最新实际验证与证据
+
+- **真实6差后继修复已实现、待复验**：撤销错误的跨行call歧义拒绝，恢复固定Go已观测的外dynamic→内f关系顺序；按真实恢复节点、参数/body边界和token补function body EOF、独立空括号及赋值分号诊断，较早非法token保优先。仅自有lua_tree改变生产行为，新1项Rust回归并扩2项；52原输入与Go报告哈希不变，必须复用原报告全字段重比，不能以新测试替原失败。公共facts v9、index指纹v10使旧v8错误缓存失效；读侧显式v9新增回归14/14 Node通过，历史v6/v7/v8可按原身份读取。新Rust尚未执行，e843优化产物仍代表旧v8。
+
+- **e843固定Go52输入首次真实差分：46完全一致、6差异**：[完整原行](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6222664692)。all-target通过，受影响Rust组83通过1失败（52输入属于该1个差分test，不另累计），读侧13/13通过。goto标识符拒绝、goto/label接受及合法跨行赋值均已真实符合固定gopher合同，不称Lua5.1标准。剩6差是function body EOF、3种合法跨行嵌套call被错拒、独立空括号/赋值分号的语法诊断；作者正按真实token/EOF结构修复，保52原输入和全部字段/顺序，复用原Go封存报告，不把失败归一化掉。Go report SHA256 `849e3b0ab76e2252e10f183bb84c281ba96452cb0f32bc0f430e8ab9680730dc`。同e843优化构建/正常4036/native/lifetime独立继续。
 
 - **畸形输入公共合同候选与固定Go探针已准备**：[52输入与精确命令](tests/rust-parity/source-facts-malformed/README.md)调用固定Go AnalyzeDocument完整Facts/error；测试overlay不改Go生产源码，并认证6个原scanner SHA。Rust后继修复EOF字符串/注释、goto公共拒绝、NUL字面量与token区别及XML declaration/entity/comment/namespace/directive边界；native语法适配保持原行为。新增8项Rust回归及52输入完整观察/可选差分均NOT_RUN；换行调用错误token定位和通用tree-recovery错误仍需真实Go→Rust比较，不能说52项已等价。缓存布局明确v8、index指纹v9，query沿指纹失效，历史v6/v7读侧保留，新读侧13/13 Node通过；新索引逐字段对照必须显式v8。
 

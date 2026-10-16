@@ -38,8 +38,8 @@ function fixture(rustLayout = 'v6') {
       diagnostics: [],
     };
     const goKey = sha256(`${parser}\0${mode}\0${document.sha256}`);
-    const layoutKey = rustLayout === 'v8' ? 'facts-layout-v8-go323-malformed' : rustLayout === 'v7' ? 'facts-layout-v7-go323-public' : 'facts-layout-v6-xml-original-tags';
-    const generator = ['v7', 'v8'].includes(rustLayout) ? 'generator-v6' : 'generator-v5';
+    const layoutKey = rustLayout === 'v9' ? 'facts-layout-v9-go323-observed' : rustLayout === 'v8' ? 'facts-layout-v8-go323-malformed' : rustLayout === 'v7' ? 'facts-layout-v7-go323-public' : 'facts-layout-v6-xml-original-tags';
+    const generator = ['v7', 'v8', 'v9'].includes(rustLayout) ? 'generator-v6' : 'generator-v5';
     const rustKey = sha256(`${layoutKey}\0tree-sitter-0.26.3\0`
       + `lua-0.5.0\0xml-0.38\0${generator}\0${document.path}\0${document.sha256}`);
     const goFile = path.join(goHome, 'source/v1/facts/files', parser, `${goKey}.json`);
@@ -230,4 +230,14 @@ test('authenticates explicit v8 malformed-contract facts without accepting v7 ca
     await assert.rejects(readFactDelta(f.goHome, f.rustHome, f.records, 'v7'), /ENOENT/);
     await assert.rejects(readFactDelta(f.goHome, f.rustHome, f.records), /ENOENT/);
   }, 'v8');
+});
+
+
+test('authenticates v9 observed grammar corrections and rejects preceding v8 cache', async t => {
+  await withFixture(t, async f => {
+    const report = await f.read();
+    assert.equal(report.inputs.rustLayout, 'v9');
+    assert.equal(report.differentFiles.length, 0);
+    await assert.rejects(readFactDelta(f.goHome, f.rustHome, f.records, 'v8'), /ENOENT/);
+  }, 'v9');
 });
