@@ -54,5 +54,5 @@ fn graph_move_copying_reference(prepared:&PreparedSnapshot,name:&str,snapshot_in
         if builder.graph.calls.iter().any(|call|call.result_fact.is_none()){return Err("cannot freeze a call without its result fact".into())}
     }
     control.check().map_err(|e|e.to_string())?;
-    Ok(Graph{facts:builder.graph,inputs,control:control.clone(),owner})
+    Ok(Graph{facts:builder.graph,inputs,control:control.clone(),owner,research_control:Default::default()})
 }

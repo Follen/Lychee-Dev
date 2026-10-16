@@ -28,12 +28,12 @@ impl SyntaxSite {
 }
 #[derive(Clone, Debug)]
 struct IndexedDeclaration {
-    id:String, name:String, site:SyntaxSite, kind:String,
+    id:String, name:String, site:SyntaxSite, kind:&'static str,
     owner:Option<SyntaxSite>, implicit_self:bool,
 }
 impl IndexedDeclaration {
     fn public(&self,inputs:&SourceInputs)->SourceDeclaration {
-        SourceDeclaration{id:self.id.clone(),name:self.name.clone(),site:self.site.public(inputs),kind:self.kind.clone(),owner:self.owner.map(|site|site.public(inputs)),implicit_self:self.implicit_self}
+        SourceDeclaration{id:self.id.clone(),name:self.name.clone(),site:self.site.public(inputs),kind:self.kind.into(),owner:self.owner.map(|site|site.public(inputs)),implicit_self:self.implicit_self}
     }
 }
 #[derive(Clone, Debug)]
@@ -75,12 +75,41 @@ impl SourceSyntaxCounts {
 #[derive(Clone, Debug, Default)]
 struct SourceSyntaxIndex {
     declarations:Vec<IndexedDeclaration>, declaration_ranges:Vec<std::ops::Range<usize>>,
-    declarations_by_id:BTreeMap<String,usize>, declarations_by_site:BTreeMap<SyntaxSite,usize>,
+    // Immutable lookup permutations borrow keys from declarations. No second
+    // digest allocation, site copy, or B-tree node is retained for either key.
+    declarations_by_id:Box<[usize]>, declarations_by_site:Box<[usize]>,
     reference_count:usize, call_count:usize,
 }
 impl SourceSyntaxIndex {
+    fn finish_declaration_lookups(&mut self) {
+        let mut by_id:Vec<_>=(0..self.declarations.len()).collect();
+        let mut by_site=by_id.clone();
+        // Index tie-breaking retains original insertion order without allocating
+        // stable-sort scratch. Equal keys retain the last insertion, exactly as
+        // the former BTreeMap::insert did, including recovered duplicate sites.
+        by_id.sort_unstable_by(|&a,&b|self.declarations[a].id.cmp(&self.declarations[b].id).then(a.cmp(&b)));
+        by_id.dedup_by(|later,earlier|{
+            if self.declarations[*later].id==self.declarations[*earlier].id{*earlier=*later;true}else{false}
+        });
+        by_site.sort_unstable_by(|&a,&b|self.declarations[a].site.cmp(&self.declarations[b].site).then(a.cmp(&b)));
+        by_site.dedup_by(|later,earlier|{
+            if self.declarations[*later].site==self.declarations[*earlier].site{*earlier=*later;true}else{false}
+        });
+        self.declarations_by_id=by_id.into_boxed_slice();
+        self.declarations_by_site=by_site.into_boxed_slice();
+        // The former insertion loop had no control or step charge. Preserve
+        // that ordering: the original shared row charge follows this freeze.
+    }
+    fn declaration_by_id(&self,id:&str)->Option<usize> {
+        self.declarations_by_id.binary_search_by(|&index|self.declarations[index].id.as_str().cmp(id))
+            .ok().map(|index|self.declarations_by_id[index])
+    }
+    fn declaration_by_site(&self,site:SyntaxSite)->Option<usize> {
+        self.declarations_by_site.binary_search_by_key(&site,|&index|self.declarations[index].site)
+            .ok().map(|index|self.declarations_by_site[index])
+    }
     fn declaration_at(&self,inputs:&SourceInputs,site:&Site)->Option<usize> {
-        self.declarations_by_site.get(&SyntaxSite::from_site(inputs,site)?).copied()
+        self.declaration_by_site(SyntaxSite::from_site(inputs,site)?)
     }
 }
 // Queries own at most one of these projections. Emmy retains the whole
@@ -134,7 +163,7 @@ impl PreparedSnapshot {
         }
         let rows=index.declarations.len()+index.reference_count+index.call_count;
         if rows>if self.inputs.corpus.limits.research{5000000}else{12000}{return Err("syntax index row bound".into())}
-        for (i,decl) in index.declarations.iter().enumerate(){index.declarations_by_id.insert(decl.id.clone(),i);index.declarations_by_site.insert(decl.site,i);}
+        index.finish_declaration_lookups();
         self.inputs.charge(rows).map_err(|e|e.to_string())?;Ok(index)
     }
     fn file_syntax(&self,file_index:usize)->Result<SourceFileSyntax> {
@@ -156,7 +185,7 @@ impl PreparedSnapshot {
         for use_ in &facts.name_uses {
             self.control.check().map_err(|e|e.to_string())?;
             if let Some(decl)=facts.find_visible_decl_before_offset(&use_.name,use_.syntax.get_range().start()).filter(|decl|decl.kind.is_local()){
-                local_bindings.insert(source_site(use_.syntax.get_range()),self.syntax.declarations_by_site[&source_site(decl.name_range)]);
+                local_bindings.insert(source_site(use_.syntax.get_range()),self.syntax.declaration_by_site(source_site(decl.name_range)).expect("admitted local declaration site"));
             }
         }
         let mut index=SourceFileSyntax::default();let mut writes=HashSet::new();let mut callees=BTreeMap::new();
@@ -196,7 +225,7 @@ impl PreparedSnapshot {
                     let use_=facts.name_use_at_offset(binding.syntax.get_range().start()).filter(|use_|use_.syntax==binding.syntax)?;
                     let decl=facts.find_visible_decl_before_offset(&use_.name,use_.syntax.get_range().start()).filter(|decl|decl.kind.is_local())?;
                     let key=SyntaxSite::at(self.inputs.corpus.index[&site.file],self.inputs.original_range(&site.file,decl.name_range).expect("admitted parser range"));
-                    return self.syntax.declarations_by_site.get(&key).map(|id|&self.syntax.declarations[*id]);
+                    return self.syntax.declaration_by_site(key).map(|id|&self.syntax.declarations[id]);
                 },
                 emmylua_parser::LuaSyntaxKind::IndexExpr=>return None,
                 _=>{},
@@ -232,3 +261,7 @@ mod syntax_count_tests {
     use super::*;
     include!("syntax_count_tests.rs");
 }
+
+#[cfg(test)]
+#[path = "syntax_index_tests.rs"]
+mod syntax_index_tests;

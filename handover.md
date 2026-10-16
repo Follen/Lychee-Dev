@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 22:36 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`8ee3a30582aa986ea8f2681e3b3a3c09d0e3b9b1`；当前f088优化4036完整等价，retained仍失败；c924仅增加有界细阶段定位，等待新候选验证；各旧产物与runner身份独立保留。实现进行中，尚未完成全量验收。
+更新：2026-10-16 22:39 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`6ce6451f6d7f4b8e54d37a195d3465dede59d664`；当前f088优化4036完整等价，retained仍失败；c924仅增加有界细阶段定位，等待新候选验证；各旧产物与runner身份独立保留。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -79,6 +79,8 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 - **8ee按需原文真实69通过1失败2原忽略**：[正式结果](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6225952545)all-target与52/52差分通过，新增31项中30通过；Git需求流17项均真实Windows通过。唯一fallback测试将literal写在单行function的signature，默认搜索实际命中结构候选，limit1只读1文档正确，未进入它想验证的4文档扫描。当前仅改多行body并断言结构字段不含token/结果matchedBy=body_text，保4文档、完整结果、cursor与warm断言；修后NOT_RUN。原batch子串filter也匹配git_batch，本批显式skip已独立执行的Git组，不改变任何测试断言。本轮未构建优化产物或跑profile。
 
+- **retained真实峰值持有链修复已实现，尚未实测**：[d75操作级证据](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6225634434)同首请求第一scope完整query_projected，第二scope停在References digest/answer装配前；61条完整prefix无证据限额/截断，不能从cleanup后退出码推断自然OOM。当前摘要直接流式SHA，不分配整串；同一冻结Graph的完整graphControl由懒Arc共享，各方向metadata独立，References answer、retained projection及跨scope证据保共享至所有Graph释放后再展开公共Value。大于1MiB不保留/近预算重算仍保原费用与完整控制证据，32MiB输出计数不减。声明lookup改排序usize索引保重复键最后值，XML仅复用已有且完全同字节的raw Arc，未共享项保原String。新增18 Rust（digest3/shared2/syntax6/projection4/XML3）NOT_RUN；16文件语法解析、Node81/81、diff检查通过；原版848逐文件认证无变化。不声称本次已压进2GiB或完整Retail成功。
+
 ## 4. 进入最终五阶段前的有限收口
 
 1. SQL结构性栈修复与预算回归已有实证，保完整实现供最终独立审计；当前集中闭合Source52边界、retained回收/寿命和真实冷链发布性能，不扩展新数据库或通用框架。
@@ -100,7 +102,7 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 本机测试通道已正常恢复，原unknown历史保留，无需再次apply或重启。仅云端实现，用户指定本机线程负责固定SHA测试并将报告写回同一PR。普通push不自动切换其正在测试的树；不另排重复长CI。
 
-固定 **f088d5cbd7730a11bd77412b5490fa8b81d35792** 已完成all-target与40通过1原忽略、优化4036完整等价及单次profile，retained仍失败。后继 **c924f53adf547171bc528ecd5a4225d54fc6c8e1** 的8新Rust/优化retained细阶段定位已由协调排队；待原操作安全终态后固定切换，不拿f088旧EXE冒新诊断。024优化完整Retail8通过5失败，根因仍retained首请求EOF；原终态和精确进程证据保留。7a全仓typed边界测试与0e1 Data后继已过，Core阶段fixture亦由024闭合，不重复历史失败树。
+当前本机按固定树逐批验证：d75细定位已结束，8ee按需原文31新增30通过1测试输入失败，52/52与all-target通过；6ce只修真实fallback测试前提并排除重复Git filter，正在等待其结果。接续本批retained共享/索引/XML所有权完整实现，先all-target，再现native::与native_research::全组（包含18新增与旧诊断/引用测试），通过后一次构建新优化CLI、认证候选，跑完整retained首请求/暖态/实际回收及同机性能。未完成当前树前不切后继，不拿旧EXE冒新内存实现。
 
 - 所有Rust检查沿仓库受控 `tools/rust-cargo.mjs`、固定工具链和原owner/cache合同，先all-target编译，再受影响组；默认线程栈不加大。完整SQL299及7db预算组已过，不机械重跑历史失败树。
 - 正式Lua与9桥使用[现有入口](tools/rust-formal-lua-bridge.mjs)，每次新输出目录；原runtime与CLI封存产物必须通过全部身份验证，不能覆盖旧失败目录。当前正式Go323220/9已有实证。

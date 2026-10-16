@@ -9,6 +9,11 @@ pub struct Graph {
     control: OperationControl,
     #[serde(skip)]
     owner: Arc<()>,
+    // Populated only after Builder has moved its completed facts into this
+    // immutable Graph. Graph has no Clone, mutable dereference or facts setter;
+    // every constructor starts empty. Shared JSON never outlives its consumers.
+    #[serde(skip)]
+    research_control: std::sync::OnceLock<Arc<Value>>,
 }
 impl std::ops::Deref for Graph {
     type Target = GraphFacts;
@@ -17,6 +22,11 @@ impl std::ops::Deref for Graph {
     }
 }
 impl Graph {
+    fn research_control(&self) -> Arc<Value> {
+        Arc::clone(self.research_control.get_or_init(|| {
+            Arc::new(json!(self.facts.native_invocations.as_ref().map(|facts| &facts.control)))
+        }))
+    }
     pub fn inputs(&self) -> &SourceInputs {
         &self.inputs
     }

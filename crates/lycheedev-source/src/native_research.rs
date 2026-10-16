@@ -142,7 +142,7 @@ impl ResearchSession {
         let mut gaps=self.snapshot.input_gaps.clone();gaps.extend(self.xml.gaps.clone());
         for plan in &self.snapshot.load_plans{if plan.ordered.contains(&query.symbol.path)||programs.iter().any(|program|program.manifest==plan.manifest){for issue in &plan.issues{let mut issue=issue.clone();issue["manifest"]=json!(plan.manifest);gaps.push(issue);}}}
 
-        let mut rows=Vec::new();let mut scopes=Vec::new();let mut complete=true;let mut analysis=json!({});let mut entry_candidates=BTreeMap::new();let mut entry_facts=Vec::new();
+        let mut rows=Vec::new();let mut scopes=Vec::new();let mut complete=true;let mut analysis=None;let mut entry_candidates=BTreeMap::new();let mut entry_facts=Vec::new();
         for program in &programs {
             control.check()?;
 
@@ -183,15 +183,13 @@ impl ResearchSession {
                 observer("query_scope_evidence");
                 let projection=execution.scope(json!({"manifest":program.manifest,"snapshot":graph.snapshot_key}),answers)?;
                 observer("query_project");
-                let mut result=self.prepared.project_research_relations_observed(&semantic_plan,&query,Some(&graph),&self.xml,projection,&mut observer)?;
+                let result=self.prepared.project_research_relations_observed(&semantic_plan,&query,Some(&graph),&self.xml,projection,&mut observer)?;
                 observer("query_projected");
-                complete&=result["analysis"]["state"]=="complete";analysis=result["analysis"].clone();
+                complete&=result.analysis["state"]=="complete";analysis=Some(std::sync::Arc::clone(&result.analysis));
                 if let Some(native)=&graph.native_invocations{entry_facts.extend(native.entries.iter().map(|entry|json!(entry)));}
                 let scope=json!({"manifest":program.manifest,"loadContext":program.context,"snapshot":graph.snapshot_key,"entries":graph.native_invocations.as_ref().map(|facts|&facts.entries),"kind":"alternative_manifest_hypothetical_after_load"});
-                for mut row in result["relations"].as_array_mut().expect("relation rows").drain(..){row["loadScope"]=scope.clone();rows.push(row);}
-                let mut scope_result=json!({"xmlFacts":graph.xml});
-                scope_result["scope"]=scope;scope_result["analysis"]=result["analysis"].take();
-                scopes.push(scope_result);
+                for mut row in result.relations{row["loadScope"]=scope.clone();rows.push(row);}
+                scopes.push(ResearchScopeEvidence{scope,analysis:result.analysis,xml_facts:json!(graph.xml)});
             }
         }
         if programs.is_empty(){
@@ -201,12 +199,15 @@ impl ResearchSession {
             observer("query_scope_evidence");
             let projection=execution.scope(json!({"kind":"unknown_load_order"}),answers)?;
             observer("query_project");
-            let mut result=self.prepared.project_research_relations_observed(&semantic_plan,&query,None,&self.xml,projection,&mut observer)?;
+            let result=self.prepared.project_research_relations_observed(&semantic_plan,&query,None,&self.xml,projection,&mut observer)?;
             observer("query_projected");
-            rows=take_relation_rows(&mut result);analysis=result["analysis"].take();complete=false;
+            rows=result.relations;analysis=Some(result.analysis);complete=false;
         }
         let mut candidates=entry_candidates.into_values().collect::<Vec<_>>();
         let entry_resolution=match candidates.len(){0=>EntryResolution::Absent,1=>EntryResolution::Unique{candidate:candidates.remove(0)},_=>EntryResolution::SelectorRequired{candidates}};
+        // All per-scope Graphs are gone before repeated public evidence trees
+        // are expanded. The original request and output/retention limits remain.
+        let mut analysis=analysis.map(owned_analysis).unwrap_or_else(||json!({}));
         analysis["state"]=json!(if complete&&gaps.is_empty(){"complete"}else{"partial"});
         observer("query_assemble_reply");
         let header=json!({"schema":"lycheedev.source-native-research.v1",
@@ -215,6 +216,7 @@ impl ResearchSession {
             "entryResolution":entry_resolution,
             "entryEvidence":{"kind":"hypothetical_selected_declaration_entry","phase":"after_load","sourceExecution":false,"xmlSelf":"exact_registered_instance"}});
         let has_gaps=!gaps.is_empty();
+        let scopes=scopes.into_iter().map(ResearchScopeEvidence::into_value).collect();
         let mut output=assemble_reply(header,rows,scopes,self.xml.mapping_manifests(),gaps,entry_facts,analysis);
         output["environmentManifest"]=json!(self.snapshot.environment_manifest);
         // Declaration/type metadata is immutable evidence. It does not assert that a
@@ -253,6 +255,7 @@ fn assemble_reply(mut header:Value,rows:Vec<Value>,scopes:Vec<Value>,maps:Vec<Va
     header["analysis"]=analysis;
     header
 }
+#[cfg(test)]
 fn take_relation_rows(result:&mut Value)->Vec<Value> {
     match result["relations"].take(){Value::Array(rows)=>rows,_=>panic!("relation rows")}
 }

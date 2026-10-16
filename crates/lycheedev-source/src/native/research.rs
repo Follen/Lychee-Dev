@@ -7,7 +7,10 @@ mod research_context_projection;
 mod research_use_index;
 use research_context_projection::{ContextFiles, FileProjectionRange};
 use research_use_index::ResearchUses;
-type RetainedResearchProjection<'a, R = Value> = research_projection::RetainedProjection<'a, PreparedSnapshot, crate::native_research::QueryRequest, Graph, crate::native_research::XmlResearch, R>;
+#[path = "research_output.rs"]
+mod research_output;
+pub(crate) use research_output::{ResearchOperationAnswer,ResearchProjectionResult,ResearchAnalysis,ResearchScopeEvidence,owned_analysis};
+type RetainedResearchProjection<'a, R = ResearchProjectionResult> = research_projection::RetainedProjection<'a, PreparedSnapshot, crate::native_research::QueryRequest, Graph, crate::native_research::XmlResearch, R>;
 pub(crate) enum ResearchProjection<'a> {
     Incoming(RetainedResearchProjection<'a>),
     Context(RetainedResearchProjection<'a, ContextFiles>),
@@ -200,7 +203,8 @@ impl PreparedSnapshot {
                     if file.identity["sha256"]!=target.file_sha256||origins.position(self,&target.site)?!=target.position {return Err(input_error("semantic operation source identity differs"));}
                     target.site.text(&self.inputs)?;
                 }
-                let mut answer=match operation {
+                let mut reference_analysis=None;
+                let answer=match operation {
                     LogicalOperation::References(_)=>{
                         let before=self.research_steps();
                         let mut files=Vec::new();
@@ -208,11 +212,12 @@ impl PreparedSnapshot {
                         let result=self.research_relations_with_context_observed(&query.symbol,"incoming",graph,origins,
                             (query.direction=="both").then_some(&mut files),None,observer)?;
                         let steps=self.research_steps().checked_sub(before).ok_or_else(||input_error("projection step counter moved backwards"))?;
-                        let rows=result["relations"].as_array().ok_or_else(||input_error("reference projection rows missing"))?;
+                        let rows=&result.relations;
                         observer("query_references_digest");
-                        let answer=json!({"kind":"references","state":if result["analysis"]["state"]=="complete"{"known"}else{"partial"},
-                            "result":{"relationsSHA256":digest(&rows),"relationCount":rows.len(),"analysis":result["analysis"]},
+                        let answer=json!({"kind":"references","state":if result.analysis["state"]=="complete"{"known"}else{"partial"},
+                            "result":{"relationsSHA256":digest(&rows),"relationCount":rows.len()},
                             "evidence":"full relation projection digest and coverage; source research retains the complete projected rows"});
+                        reference_analysis=Some(Arc::clone(&result.analysis));
                         observer("query_references_retain");
                         if query.direction=="incoming"&&projection.is_none(){
                             projection=RetainedResearchProjection::new(self,query,graph,origins,result,steps,||self.control.check())?.map(ResearchProjection::Incoming);
@@ -220,7 +225,7 @@ impl PreparedSnapshot {
                             // Only files whose original path and XML ownership
                             // exclude every outgoing row are direction-invariant.
                             // Move those rows; graphControl and XML tails are dropped.
-                            let files=ContextFiles::from_projection(result,files,||self.control.check())?;
+                            let files=ContextFiles::from_projection(result.into_context_rows(),files,||self.control.check())?;
                             projection=RetainedResearchProjection::new(self,query,graph,origins,files,0,||self.control.check())?.map(ResearchProjection::Context);
                         }
                         answer
@@ -253,6 +258,7 @@ impl PreparedSnapshot {
                         } else {json!({"kind":"type","state":"unavailable","reason":"no_execution_scope_for_selected_type"})}
                     },
                 };
+                let mut answer=ResearchOperationAnswer::new(answer,reference_analysis);
                 observer("query_operation_answer");
                 let executed=if matches!(operation,LogicalOperation::Type(target) if target.material["kind"]=="api_definition") {answer["executed"].as_bool().unwrap_or(false)}else{graph.is_some()};
                 answer["executed"]=json!(executed);
@@ -283,9 +289,9 @@ impl PreparedSnapshot {
     /// still authenticates execution and the original control remains live.
     #[cfg(test)]
     pub(crate) fn project_research_relations(&self,plan:&crate::native_research::plan::ResearchPlan,query:&crate::native_research::QueryRequest,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,projection:Option<ResearchProjection<'_>>)->lycheedev_core::Result<Value> {
-        self.project_research_relations_observed(plan,query,graph,origins,projection,&mut |_|{})
+        self.project_research_relations_observed(plan,query,graph,origins,projection,&mut |_|{}).map(ResearchProjectionResult::into_value)
     }
-    pub(crate) fn project_research_relations_observed(&self,plan:&crate::native_research::plan::ResearchPlan,query:&crate::native_research::QueryRequest,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,projection:Option<ResearchProjection<'_>>,observer:&mut impl FnMut(&'static str))->lycheedev_core::Result<Value> {
+    pub(crate) fn project_research_relations_observed(&self,plan:&crate::native_research::plan::ResearchPlan,query:&crate::native_research::QueryRequest,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,projection:Option<ResearchProjection<'_>>,observer:&mut impl FnMut(&'static str))->lycheedev_core::Result<ResearchProjectionResult> {
         self.validate_research_plan(plan,query)?;
         match projection {
             Some(ResearchProjection::Incoming(projection))=>{
@@ -311,9 +317,9 @@ impl PreparedSnapshot {
         self.research_relations_with_context(symbol,direction,graph,origins,None,None)
     }
     fn research_relations_with_context(&self,symbol:&crate::index::Symbol,direction:&str,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,capture:Option<&mut Vec<FileProjectionRange>>,retained:Option<ContextFiles>)->lycheedev_core::Result<Value> {
-        self.research_relations_with_context_observed(symbol,direction,graph,origins,capture,retained,&mut |_|{})
+        self.research_relations_with_context_observed(symbol,direction,graph,origins,capture,retained,&mut |_|{}).map(ResearchProjectionResult::into_value)
     }
-    fn research_relations_with_context_observed(&self,symbol:&crate::index::Symbol,direction:&str,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,mut capture:Option<&mut Vec<FileProjectionRange>>,mut retained:Option<ContextFiles>,observer:&mut impl FnMut(&'static str))->lycheedev_core::Result<Value> {
+    fn research_relations_with_context_observed(&self,symbol:&crate::index::Symbol,direction:&str,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,mut capture:Option<&mut Vec<FileProjectionRange>>,mut retained:Option<ContextFiles>,observer:&mut impl FnMut(&'static str))->lycheedev_core::Result<ResearchProjectionResult> {
         self.control.check()?;
         observer("query_relations_target_declarations");
         #[cfg(test)]
@@ -430,9 +436,10 @@ impl PreparedSnapshot {
         }
         observer("query_relations_control_json");
         let control=graph.and_then(|graph|graph.native_invocations.as_ref()).map(|facts|&facts.control);
-        let analysis=json!({"state":if unresolved==0&&control.is_some_and(|control|control.complete){"complete"}else{"partial"},"engine":"native_common_facts","lexicalDeclarations":self.syntax.declarations.len(),"sourceReferences":self.syntax.reference_count,"sourceCalls":self.syntax.call_count,"unresolvedRelations":unresolved,"graphControl":control,"sourceFiles":self.inputs.corpus.files.len(),"inputIdentity":self.inputs.identity_sha256(),"sourceExecution":false});
+        let analysis=json!({"state":if unresolved==0&&control.is_some_and(|control|control.complete){"complete"}else{"partial"},"engine":"native_common_facts","lexicalDeclarations":self.syntax.declarations.len(),"sourceReferences":self.syntax.reference_count,"sourceCalls":self.syntax.call_count,"unresolvedRelations":unresolved,"sourceFiles":self.inputs.corpus.files.len(),"inputIdentity":self.inputs.identity_sha256(),"sourceExecution":false});
+        let graph_control=graph.map(Graph::research_control).unwrap_or_else(||Arc::new(Value::Null));
         observer("query_relations_assemble");
-        Ok(research_use_index::assemble_projection(relations,analysis))
+        Ok(ResearchProjectionResult{relations,analysis:Arc::new(ResearchAnalysis::new(analysis,graph_control))})
     }
 
     // The graph and selected symbol are immutable for this projection. Resolve
@@ -549,10 +556,10 @@ impl PreparedSnapshot {
 /// Constructed only by the native operation executor. JSON projections alone
 /// cannot mint execution credit or change the bound request after execution.
 pub(crate) struct ResearchScopeCompletion<'a> {
-    identity:String, owner:Arc<()>, answers:Vec<Value>, performed:Vec<bool>, projection:Option<ResearchProjection<'a>>,
+    identity:String, owner:Arc<()>, answers:Vec<ResearchOperationAnswer>, performed:Vec<bool>, projection:Option<ResearchProjection<'a>>,
 }
 impl<'a> ResearchScopeCompletion<'a> {
-    pub(crate) fn consume(self,plan:&crate::native_research::plan::ResearchPlan)->lycheedev_core::Result<(Vec<Value>,Vec<bool>,Option<ResearchProjection<'a>>)> {
+    pub(crate) fn consume(self,plan:&crate::native_research::plan::ResearchPlan)->lycheedev_core::Result<(Vec<ResearchOperationAnswer>,Vec<bool>,Option<ResearchProjection<'a>>)> {
         use crate::native_research::plan::{LogicalOperation,BATCH_QUERIES};
         plan.validate_execution_identity(&self.identity,&self.owner)?;
         if self.answers.len()!=plan.operations().len()||self.performed.len()!=self.answers.len(){return Err(input_error("semantic completion operation count differs"));}
@@ -576,7 +583,7 @@ mod research_completion_identity_tests {
     }
     fn completion(plan:&ResearchPlan)->ResearchScopeCompletion<'static> {
         let(identity,owner)=plan.execution_identity();
-        let answers=plan.operations().iter().enumerate().map(|(index,operation)|json!({"kind":"definition","state":"unavailable","executed":true,"operation":index,"batch":0,"operationIdentity":digest(operation)})).collect();
+        let answers=plan.operations().iter().enumerate().map(|(index,operation)|json!({"kind":"definition","state":"unavailable","executed":true,"operation":index,"batch":0,"operationIdentity":digest(operation)}).into()).collect();
         ResearchScopeCompletion{identity,owner,answers,performed:vec![true;2],projection:None}
     }
     #[test]

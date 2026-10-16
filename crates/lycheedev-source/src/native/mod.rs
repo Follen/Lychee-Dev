@@ -17,7 +17,16 @@ pub const RULES_VERSION: &str = "wow-binding-value-graph-v7-conditional-footprin
 pub const SOURCE_MAP_PROFILE: &str = "identity-original-utf8-no-transform-v1";
 pub const DEPENDENCY_LOCK: &[u8] = include_bytes!("../../../../Cargo.lock");
 pub fn hash(bytes: &[u8]) -> String { format!("{:x}", Sha256::digest(bytes)) }
-pub fn digest(value: &impl Serialize) -> String { hash(&serde_json::to_vec(value).expect("serializable bounded facts")) }
+struct JsonDigestWriter(Sha256);
+impl Write for JsonDigestWriter {
+    fn write(&mut self,bytes:&[u8])->std::io::Result<usize>{self.0.update(bytes);Ok(bytes.len())}
+    fn flush(&mut self)->std::io::Result<()>{Ok(())}
+}
+pub fn digest(value: &impl Serialize) -> String {
+    let mut writer=JsonDigestWriter(Sha256::new());
+    serde_json::to_writer(&mut writer,value).expect("serializable bounded facts");
+    format!("{:x}",writer.0.finalize())
+}
 
 include!("evidence.rs");
 include!("inputs.rs");
@@ -39,3 +48,6 @@ include!("research.rs");
 
 #[cfg(test)]
 mod sharing_tests;
+
+#[cfg(test)]
+mod digest_tests;

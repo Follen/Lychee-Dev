@@ -2,10 +2,37 @@ use super::*;
 use crate::{xml_inline::{self,source_map::Span},xml_load};
 use std::sync::Arc;
 
+/// A document without a retained parsed owner keeps its original allocation.
+/// Parsed XML reuses the exact immutable original already held by scripts or
+/// load programs; converting unrelated TOC/invalid XML into Arcs would add a
+/// new copy and allocation overlap without eliminating any retained text.
+pub(crate) enum ResearchDocument {
+    Owned(String),
+    Shared(Arc<str>),
+}
+impl ResearchDocument {
+    fn as_str(&self)->&str{match self{Self::Owned(text)=>text.as_str(),Self::Shared(text)=>text.as_ref()}}
+    fn as_bytes(&self)->&[u8]{self.as_str().as_bytes()}
+}
+fn retain_documents(documents:BTreeMap<String,String>,mut originals:BTreeMap<String,Arc<str>>)->BTreeMap<String,ResearchDocument>{
+    documents.into_iter().map(|(path,text)|{
+        // The pool was populated only by the same production extraction/load
+        // above. Exact equality also makes a future unrelated pool entry a
+        // no-sharing fallback, never a new trust source or public error.
+        // A failed load can leave only the pool's Arc; that has no surviving
+        // duplicate to share, so preserve the moved String in that case too.
+        let retained=match originals.remove(&path){
+            Some(shared) if Arc::strong_count(&shared)>1&&shared.as_ref()==text.as_str()=>ResearchDocument::Shared(shared),
+            _=>ResearchDocument::Owned(text),
+        };
+        (path,retained)
+    }).collect()
+}
+
 /// Original XML/TOC bytes are the cache material. Derived Lua and maps belong to
 /// the prepared snapshot and are rebuilt by the same production extractor.
 pub(crate) struct XmlResearch {
-    pub documents:BTreeMap<String,String>,
+    pub documents:BTreeMap<String,ResearchDocument>,
     pub scripts:BTreeMap<String,xml_inline::Script>,
     pub programs:Vec<Arc<xml_load::Program>>,
     pub gaps:Vec<Value>,
@@ -57,7 +84,8 @@ impl XmlResearch {
                 Err(error)=>{control.check()?;gaps.push(json!({"code":error.code,"detail":error.message,"manifest":plan.manifest}));}
             }
         }
-        drop(paths);drop(sources);drop(originals);
+        drop(paths);drop(sources);
+        let documents=retain_documents(documents,originals);
         let mut owners:BTreeMap<String,Vec<(String,xml_load::XmlOrigin)>>=BTreeMap::new();
         for program in &programs{
             let objects=program.actions().iter().filter_map(|action|if let xml_load::Action::Object{instance,origin,name:Some(name),..}=action{Some((instance,(name,origin)))}else{None}).collect::<BTreeMap<_,_>>();
@@ -292,6 +320,7 @@ mod tests{
             documents.insert(path,raw);
         }
         for ordinal in 0..394{documents.insert(format!("Interface/AddOns/Blizzard_Identity/Manifest{ordinal}.toc"),format!("Frames{}.xml\n",ordinal%1091));}
+        let documents=retain_documents(documents,BTreeMap::new());
         let mut xml=XmlResearch{documents,scripts,programs:vec![],gaps:vec![],owners:BTreeMap::new(),declaration_owners:BTreeMap::new()};
         assert_eq!(xml.documents.len(),1485);assert_eq!(xml.scripts.len(),4018);
         let old_documents=xml.documents.iter().map(|(path,text)|(path,storage::sha256(text.as_bytes()))).collect::<BTreeMap<_,_>>();
@@ -302,9 +331,9 @@ mod tests{
         assert_eq!(identity["documentCount"],1485);assert_eq!(identity["mapCount"],4018);
         assert_eq!(xml.identity(&control).unwrap(),identity);
         let path=xml.documents.keys().find(|path|path.ends_with(".xml")).unwrap().clone();
-        xml.documents.get_mut(&path).unwrap().push(' ');
+        let ResearchDocument::Owned(text)=xml.documents.get_mut(&path).unwrap()else{panic!("fixture has no shared pool")};text.push(' ');
         assert_ne!(xml.identity(&control).unwrap()["documentsSHA256"],identity["documentsSHA256"]);
-        xml.documents.get_mut(&path).unwrap().pop();
+        let ResearchDocument::Owned(text)=xml.documents.get_mut(&path).unwrap()else{panic!("fixture has no shared pool")};text.pop();
         let raw=xml.documents.remove(&path).unwrap();let renamed=format!("{path}.renamed");xml.documents.insert(renamed.clone(),raw);
         assert_ne!(xml.identity(&control).unwrap()["documentsSHA256"],identity["documentsSHA256"]);
         let raw=xml.documents.remove(&renamed).unwrap();xml.documents.insert(path,raw);
@@ -330,3 +359,7 @@ mod tests{
         assert_eq!(streamed,storage::sha256(&serde_json::to_vec(&json!([header,["b",3],["a",4]])).unwrap()));
     }
 }
+
+#[cfg(test)]
+#[path="xml_document_sharing_tests.rs"]
+mod document_sharing_tests;

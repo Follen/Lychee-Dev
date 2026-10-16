@@ -961,6 +961,6 @@ fn build_graph(prepared:&PreparedSnapshot,name:&str,snapshot_inputs:GraphSnapsho
     }
     control.check().map_err(|e|e.to_string())?;
     if native_profile {builder.graph.native_invocations=Some(builder.native.facts);}
-    Ok(Graph{facts:builder.graph,inputs,control:control.clone(),owner})
+    Ok(Graph{facts:builder.graph,inputs,control:control.clone(),owner,research_control:Default::default()})
 }
 

@@ -105,7 +105,7 @@ impl<'a> SourceQueries<'a> {
         if self.selector==QuerySelector::SyntaxOnly&&matches!(target,QueryTarget::Storage(_)|QueryTarget::Value(_)){return Err(input_error("storage and selected-value queries require an explicit execution selector"))}
         match target {
             QueryTarget::Site(site)=>self.validate_site(site),
-            QueryTarget::Declaration(id)=>if self.prepared.syntax.declarations_by_id.contains_key(id){Ok(())}else{Err(input_error("foreign or unknown declaration identity"))},
+            QueryTarget::Declaration(id)=>if self.prepared.syntax.declaration_by_id(id).is_some(){Ok(())}else{Err(input_error("foreign or unknown declaration identity"))},
             QueryTarget::Value(id)=>{if let Some(graph)=self.graph{for value in &graph.values{self.step()?;if self.value_id(value.id)==*id{return Ok(())}}}Err(input_error("foreign or unknown selected value identity"))},
             QueryTarget::Storage(id)=>{if let Some(facts)=self.graph.and_then(|graph|graph.native_invocations.as_ref()){for storage in &facts.storages{self.step()?;if self.storage_id(&storage.cell)==*id{return Ok(())}}}Err(input_error("foreign or unknown storage identity"))},
             QueryTarget::All=>Ok(()),
@@ -396,7 +396,7 @@ impl SourceQueries<'_> {
         }
         let graph=self.graph.ok_or_else(||input_error("execution context node without graph"))?;
         let load_for=|context:&str|match self.occurrence(context){QuerySelector::LoadOccurrence{occurrence}=>Some(occurrence),QuerySelector::Invocation{frame}|QuerySelector::Entry{frame}=>graph.native_invocations.as_ref().and_then(|facts|facts.frames.get(frame)).and_then(|frame|frame.closure).and_then(|closure|graph.native_invocations.as_ref()?.closures.get(closure)).map(|closure|closure.load_occurrence),_=>None};
-        let add_decl=|site:&Site,next:&mut Vec<ContextNode>|{if let Some(id)=self.lexical_id_at(site).and_then(|id|self.prepared.syntax.declarations_by_id.get(&id).copied()){next.push(ContextNode::Declaration(id));}};
+        let add_decl=|site:&Site,next:&mut Vec<ContextNode>|{if let Some(id)=self.lexical_id_at(site).and_then(|id|self.prepared.syntax.declaration_by_id(&id)){next.push(ContextNode::Declaration(id));}};
         let result=match node {
             ContextNode::Use(id)=>{
                 let fact=&graph.uses[*id];add_decl(&fact.site,&mut next);if let Decision::Bound(value)=fact.decision{next.push(ContextNode::Value(value))}

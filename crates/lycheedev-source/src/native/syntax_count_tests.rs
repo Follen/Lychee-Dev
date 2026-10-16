@@ -52,8 +52,8 @@ fn counts(snapshot:&PreparedSnapshot)->Box<[SourceSyntaxCounts]> {
 fn index_evidence(index:&SourceSyntaxIndex)->Value {
     json!({"declarations":index.declarations.iter().map(|d|json!({"id":d.id,"name":d.name,"site":[d.site.file,d.site.start as usize,d.site.end as usize],
         "kind":d.kind,"owner":d.owner.map(|s|[s.file,s.start as usize,s.end as usize]),"implicitSelf":d.implicit_self})).collect::<Vec<_>>(),
-        "ranges":index.declaration_ranges.iter().map(|r|[r.start,r.end]).collect::<Vec<_>>(),"byId":index.declarations_by_id,
-        "bySite":index.declarations_by_site.iter().map(|(s,id)|([s.file,s.start as usize,s.end as usize],id)).collect::<Vec<_>>(),
+        "ranges":index.declaration_ranges.iter().map(|r|[r.start,r.end]).collect::<Vec<_>>(),"byId":index.declarations_by_id.iter().map(|&id|(index.declarations[id].id.as_str(),id)).collect::<BTreeMap<_,_>>(),
+        "bySite":index.declarations_by_site.iter().map(|&id|{let s=index.declarations[id].site;([s.file,s.start as usize,s.end as usize],id)}).collect::<Vec<_>>(),
         "references":index.reference_count,"calls":index.call_count})
 }
 
@@ -198,7 +198,12 @@ impl PreparedSnapshot {
         }
         let rows=index.declarations.len()+index.reference_count+index.call_count;
         if rows>if self.inputs.corpus.limits.research{5000000}else{12000}{return Err("syntax index row bound".into())}
-        for (i,decl) in index.declarations.iter().enumerate(){index.declarations_by_id.insert(decl.id.clone(),i);index.declarations_by_site.insert(decl.site,i);}
+        // Preserve the original BTreeMap insertion/last-write oracle. Convert only
+        // its final lookup representation for the current SourceSyntaxIndex.
+        let mut by_id=BTreeMap::new();let mut by_site=BTreeMap::new();
+        for (i,decl) in index.declarations.iter().enumerate(){by_id.insert(decl.id.clone(),i);by_site.insert(decl.site,i);}
+        index.declarations_by_id=by_id.into_values().collect::<Vec<_>>().into_boxed_slice();
+        index.declarations_by_site=by_site.into_values().collect::<Vec<_>>().into_boxed_slice();
         self.inputs.charge(rows).map_err(|e|e.to_string())?;Ok(index)
     }
 }

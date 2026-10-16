@@ -117,9 +117,15 @@ pub(crate) struct ExecutionReceipt {
     pub(super) unexecuted_operations:usize,
     pub(super) plan_identity:String,
 }
+#[derive(Serialize)]
+#[serde(untagged)]
+enum ScopeAnswers {
+    Complete { operations:Vec<crate::native::ResearchOperationAnswer>, scope:Value },
+    Unavailable(Value),
+}
 pub(crate) struct ResearchExecution<'a> {
     plan:&'a ResearchPlan, completed:Vec<bool>, unexecuted_operations:usize,
-    answers:Vec<Value>, scopes:usize, unavailable_scopes:usize, uncertain_answers:usize, evidence_bytes:usize,
+    answers:Vec<ScopeAnswers>, scopes:usize, unavailable_scopes:usize, uncertain_answers:usize, evidence_bytes:usize,
 }
 impl<'a> ResearchExecution<'a> {
     pub(crate) fn new(plan:&'a ResearchPlan)->Self {Self{plan,completed:vec![true;plan.batch_count()],unexecuted_operations:0,answers:Vec::new(),scopes:0,unavailable_scopes:0,uncertain_answers:0,evidence_bytes:0}}
@@ -144,12 +150,12 @@ impl<'a> ResearchExecution<'a> {
         self.unexecuted_operations+=performed.iter().filter(|done|!**done).count();
         self.uncertain_answers+=answers.iter().filter(|answer|answer["state"]!="known"&&answer["state"]!="known_declaration").count();
         self.scopes+=1;
-        self.answers.push(serde_json::json!({"scope":scope,"operations":answers}));
+        self.answers.push(ScopeAnswers::Complete{scope,operations:answers});
         Ok(projection)
     }
     pub(crate) fn unavailable_scope(&mut self,reason:Value) {
         self.unavailable_scopes+=1;
-        self.answers.push(serde_json::json!({"scope":reason,"state":"unavailable","operationsExecuted":false}));
+        self.answers.push(ScopeAnswers::Unavailable(serde_json::json!({"scope":reason,"state":"unavailable","operationsExecuted":false})));
     }
     pub(crate) fn finish(self)->(Value,ExecutionReceipt) {
         let completed=if self.scopes>0&&self.unavailable_scopes==0 {self.completed.iter().filter(|done|**done).count()} else {0};
