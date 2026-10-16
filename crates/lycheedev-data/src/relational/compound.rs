@@ -12,6 +12,19 @@ pub(super) fn validate_all_keyword(sql: &str) -> Result<()> {
         .filter(|t| !matches!(t.token, Token::Whitespace(_)))
         .collect();
     for (i, token) in tokens.iter().enumerate() {
+        // The Go tokenizer treats :ALL and :UNION as one parameter token.
+        // GenericDialect splits ':' and Word; parameter names are not keywords.
+        if i > 0 && tokens[i - 1].token == Token::Colon {
+            continue;
+        }
+        // Go reserves ALL everywhere except UNION ALL. sqlparser erases
+        // SELECT ALL and LIMIT ALL, so reject those tokens before AST lowering.
+        if matches!(&token.token, Token::Word(word) if word.quote_style.is_none() && word.value.eq_ignore_ascii_case("ALL"))
+            && (i == 0
+                || !matches!(&tokens[i-1].token, Token::Word(word) if word.quote_style.is_none() && word.value.eq_ignore_ascii_case("UNION")))
+        {
+            return Err(problem("relational.invalid_syntax", "Unexpected ALL"));
+        }
         if !matches!(&token.token, Token::Word(word) if word.quote_style.is_none() && word.value.eq_ignore_ascii_case("UNION"))
         {
             continue;

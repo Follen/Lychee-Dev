@@ -478,13 +478,19 @@ pub(super) fn select(
         // Correlations can reference any current input field. Like Go's
         // neededColumns, a nested query disables projection of this scope.
         Term::InSubquery(..) | Term::ScalarSubquery(_) | Term::Exists(_) => selected.fill(true),
-        Term::Aggregate(_, Some(input), _) => select(input, columns, alias, selected),
-        Term::Aggregate(_, None, _) => {}
-        Term::Call(_, items) => {
+        Term::Call(_, items, _) => {
             for t in items {
                 select(t, columns, alias, selected);
             }
         }
+        Term::Aggregate(name, items, _) => {
+            for t in items {
+                if name != "COUNT" || !matches!(t, Term::Star(_)) {
+                    select(t, columns, alias, selected);
+                }
+            }
+        }
+        Term::Star(_) => selected.fill(true),
         Term::Case(base, branches, otherwise) => {
             if let Some(t) = base {
                 select(t, columns, alias, selected);

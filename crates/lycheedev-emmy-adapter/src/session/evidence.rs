@@ -148,6 +148,10 @@ pub trait BindingContext: Send + Sync {
         }
     }
 }
+/// Public semantic-quality receipt. `native_projected` / `native_checked` are
+/// the established completion states, independent of whether the algorithm
+/// lives in the upstream engine or this owned backend. Actual owned checker
+/// execution is reported separately by `DiagnosticRun::execution`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct BindingCoverage {
     pub site: BindingSite,

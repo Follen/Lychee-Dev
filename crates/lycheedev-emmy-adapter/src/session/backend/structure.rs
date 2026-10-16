@@ -29,7 +29,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                         site: metadata.site,
                         operation: "structure_check",
                         state: if valid {
-                            "owned_checked"
+                            "native_checked"
                         } else {
                             "unavailable"
                         },

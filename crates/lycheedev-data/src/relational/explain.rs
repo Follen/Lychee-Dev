@@ -154,12 +154,11 @@ fn expression(
             query(body, child, plan, work)?;
             expression(input, parent, plan, work)?;
         }
-        Term::Call(_, terms) => {
+        Term::Call(_, terms, _) | Term::Aggregate(_, terms, _) => {
             for t in terms {
                 expression(t, parent, plan, work)?;
             }
         }
-        Term::Aggregate(_, Some(t), _) => expression(t, parent, plan, work)?,
         Term::Case(base, branches, other) => {
             if let Some(t) = base {
                 expression(t, parent, plan, work)?;
@@ -289,6 +288,10 @@ fn select(
     for p in &program.projection {
         if let Some(t) = &p.expr {
             expression(t, id, plan, work)?;
+        } else {
+            // A wildcard projection is still one Go syntax node even though
+            // the row binder expands it without an expression bind charge.
+            work.spend()?;
         }
     }
     if program.distinct {

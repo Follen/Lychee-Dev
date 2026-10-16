@@ -289,7 +289,7 @@ fn managed_variadic_argument_packs_never_claim_completed_argument_type_checks() 
         );
         assert!(!coverage.iter().any(|row| row.site == outer
             && row.operation == "argument_check"
-            && row.state == "owned_checked"));
+            && row.state == "native_checked"));
     }
 }
 

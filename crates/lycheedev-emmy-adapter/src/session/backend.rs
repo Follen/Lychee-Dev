@@ -14,6 +14,7 @@ mod call_builtins;
 mod call_candidates;
 mod call_inference;
 mod call_match;
+mod call_quality;
 mod call_return;
 mod call_unify;
 mod callable;
@@ -474,6 +475,23 @@ impl<E> SelectedProjectionBackend for OwnedQuery<'_, '_, E> {
     }
 }
 impl<E> SelectedExpressionBackend for OwnedQuery<'_, '_, E> {
+    fn infer_permitted_call(
+        &mut self,
+        projector: &SelectedProjector<'_>,
+        site: BindingSite,
+        permit: &super::CallPermit,
+    ) -> QueryResult<Option<OwnedValue>, E> {
+        self.infer_authenticated_signature_call(projector, site, permit)
+    }
+
+    fn finish_call_projection(
+        &mut self,
+        site: BindingSite,
+        value: &OwnedValue,
+    ) -> QueryResult<(), E> {
+        self.record_call_result_quality(site, value)
+    }
+
     fn result_pack(&mut self, slots: Vec<OwnedValue>) -> OwnedValue {
         OwnedValue::pack(slots)
     }

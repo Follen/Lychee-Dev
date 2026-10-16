@@ -597,7 +597,7 @@ fn denied_calls_never_report_completed_native_checks() {
         );
         assert!(!rows.iter().any(|row| row.site == call
             && row.operation == operation
-            && row.state == "owned_checked"));
+            && row.state == "native_checked"));
     }
 }
 
@@ -1070,4 +1070,353 @@ fn resolved_frozen_member_keeps_selected_type_and_does_not_alias_dynamic_keys() 
             assert!(model.resolve_member(&index).is_none(), "{text}");
         }
     }
+}
+
+// The original five authenticated fixtures stay byte-for-byte fixed. This
+// exercises the real public intake, owned VM and owned diagnostic registry;
+// no expected value is obtained from another invocation of the candidate.
+fn fixed_return_quality_fixture() -> (
+    OwnedQueryTest,
+    Vec<FileId>,
+    BindingSite,
+    Context,
+    Arc<emmylua_code_analysis::CheckConfig>,
+) {
+    use emmylua_code_analysis::{CheckConfig, DiagnosticCode, Emmyrc, EmmyrcLuaVersion};
+    const INPUTS: [(&str, &str); 5] = [
+        (
+            "profile.lua",
+            include_str!("../../../tests/rust-source-engine/wow/profile.lua"),
+        ),
+        (
+            "generic-defs.lua",
+            include_str!("../../../tests/rust-source-engine/wow/native/generic-defs.lua"),
+        ),
+        (
+            "generic-calls.lua",
+            include_str!("../../../tests/rust-source-engine/wow/native/generic-calls.lua"),
+        ),
+        (
+            "generic-replace.lua",
+            include_str!("../../../tests/rust-source-engine/wow/native/generic-replace.lua"),
+        ),
+        (
+            "coverage-unknown-argument.lua",
+            include_str!(
+                "../../../tests/rust-source-engine/wow/native/coverage-unknown-argument.lua"
+            ),
+        ),
+    ];
+    let enabled = [
+        DiagnosticCode::ParamTypeMismatch,
+        DiagnosticCode::ReturnTypeMismatch,
+        DiagnosticCode::MissingParameter,
+        DiagnosticCode::RedundantParameter,
+        DiagnosticCode::CallNonCallable,
+        DiagnosticCode::MissingReturnValue,
+        DiagnosticCode::RedundantReturnValue,
+        DiagnosticCode::MissingReturn,
+    ];
+    let mut config = Emmyrc::default();
+    config.runtime.version = EmmyrcLuaVersion::Lua51;
+    config.diagnostics.disable = DiagnosticCode::all()
+        .into_iter()
+        .filter(|code| !enabled.contains(code))
+        .collect();
+    config.diagnostics.enables = enabled.to_vec();
+    let checks = Arc::new(CheckConfig::new(&config));
+    let mut analysis = EmmyLuaAnalysis::new();
+    analysis.update_config(Arc::new(config));
+    let root = std::env::current_dir()
+        .unwrap()
+        .join("fixed-return-quality-input");
+    analysis.add_main_workspace(root.clone());
+    let fixture = OwnedQueryTest::ingest(
+        analysis,
+        INPUTS
+            .into_iter()
+            .map(|(name, text)| (root.join(name), Some(Arc::from(text))))
+            .collect(),
+    )
+    .unwrap();
+    let ids = fixture.file_ids().to_vec();
+    assert_eq!(ids.len(), 5);
+    assert_eq!(fixture.db.get_file_text(ids[4]).unwrap().len(), 127);
+    let call = site(&fixture, ids[4], "Replacement(object[key])");
+    let callee = site(&fixture, ids[4], "Replacement");
+    let argument = site(&fixture, ids[4], "object[key]");
+    let closure = fixture
+        .semantic_model(ids[1])
+        .syntax_tree()
+        .unwrap()
+        .get_red_root()
+        .descendants()
+        .filter_map(emmylua_parser::LuaClosureExpr::cast)
+        .nth(1)
+        .unwrap();
+    let mut provider = context("fixed-return-unknown-argument");
+    provider.decisions.insert(
+        callee,
+        BindingDecision::Bound(BoundValue {
+            identity: "Replacement@fixed-definitions".into(),
+            proof: "selected-callee-proof".into(),
+            value: SelectedValue::Function(FunctionRef {
+                file_id: ids[1],
+                closure: closure.get_syntax_id(),
+                declaration: None,
+            }),
+        }),
+    );
+    provider.decisions.insert(
+        argument,
+        BindingDecision::Unavailable {
+            proof: "unknown-argument-proof".into(),
+            reason: "dynamic_key_unavailable".into(),
+        },
+    );
+    provider.calls.insert(
+        call,
+        BindingDecision::Bound(CallPermit {
+            callee,
+            proof: "same-result-proof".into(),
+            capability_profile: "typed-call-v1".into(),
+        }),
+    );
+    (fixture, ids, call, provider, checks)
+}
+
+#[test]
+fn known_signature_result_and_actual_return_check_survive_unknown_argument() {
+    use emmylua_code_analysis::DiagnosticCode;
+    let (fixture, ids, call, provider, checks) = fixed_return_quality_fixture();
+    let session = owned_query::session(Arc::new(provider));
+    owned_query::model!(model, fixture, ids[4], session.clone());
+    assert_eq!(model.type_of_expr(call.syntax), LuaType::String);
+    let before_check = session.coverage();
+    assert!(before_check.iter().any(|row| row.site == call
+        && row.operation == "call_result"
+        && row.state == "native_projected"
+        && row.proof == "same-result-proof"
+        && row.reason.is_none()));
+    assert!(
+        !before_check
+            .iter()
+            .any(|row| row.site == call
+                && matches!(row.operation, "argument_check" | "return_check"))
+    );
+    let run = fixture.diagnose(ids[4], checks, &session).unwrap();
+    assert!(run.complete);
+    assert!(run.execution.iter().any(|row| matches!(
+        row,
+        CheckerExecution::Completed(
+            "lycheedev_emmy_adapter::return_type_mismatch::ReturnTypeMismatchChecker"
+        )
+    )));
+    let actual: Vec<_> = run
+        .diagnostics
+        .iter()
+        .map(|row| {
+            (
+                row.code,
+                u32::from(row.range.start()),
+                u32::from(row.range.end()),
+            )
+        })
+        .collect();
+    assert_eq!(actual, [(DiagnosticCode::ReturnTypeMismatch, 98, 122)]);
+    let coverage = session.coverage();
+    for (operation, state) in [
+        ("call_result", "native_projected"),
+        ("argument_check", "unavailable"),
+        ("return_check", "native_checked"),
+    ] {
+        let rows: Vec<_> = coverage
+            .iter()
+            .filter(|row| row.site == call && row.operation == operation)
+            .collect();
+        assert_eq!(rows.len(), 1, "{operation}: {rows:?}");
+        assert_eq!(rows[0].state, state, "{operation}");
+        assert_eq!(rows[0].proof, "same-result-proof", "{operation}");
+        assert!(rows[0].parameter.is_none());
+        assert!(rows[0].parameter_index.is_none());
+        assert!(rows[0].argument.is_none());
+    }
+}
+
+#[test]
+fn signature_projection_does_not_bypass_denied_or_invalid_selected_calls() {
+    for case in [
+        "denied",
+        "absent",
+        "wrong-profile",
+        "wrong-callee",
+        "unavailable-callee",
+    ] {
+        let (fixture, ids, call, mut provider, checks) = fixed_return_quality_fixture();
+        let BindingDecision::Bound(mut permit) = provider.calls[&call].clone() else {
+            unreachable!()
+        };
+        match case {
+            "denied" => {
+                provider.calls.insert(
+                    call,
+                    BindingDecision::Unavailable {
+                        proof: "denied-proof".into(),
+                        reason: "effect_unavailable".into(),
+                    },
+                );
+            }
+            "absent" => {
+                provider.calls.insert(
+                    call,
+                    BindingDecision::KnownAbsent {
+                        proof: "absent-proof".into(),
+                    },
+                );
+            }
+            "wrong-profile" => {
+                permit.capability_profile = "untrusted-profile".into();
+                provider.calls.insert(call, BindingDecision::Bound(permit));
+            }
+            "wrong-callee" => {
+                permit.callee = site(&fixture, ids[4], "object[key]");
+                provider.calls.insert(call, BindingDecision::Bound(permit));
+            }
+            "unavailable-callee" => {
+                provider.decisions.insert(
+                    permit.callee,
+                    BindingDecision::Unavailable {
+                        proof: "callee-denied-proof".into(),
+                        reason: "callee_unavailable".into(),
+                    },
+                );
+            }
+            _ => unreachable!(),
+        }
+        let session = owned_query::session(Arc::new(provider));
+        owned_query::model!(model, fixture, ids[4], session.clone());
+        assert_eq!(model.type_of_expr(call.syntax), LuaType::Unknown, "{case}");
+        let run = fixture.diagnose(ids[4], checks, &session).unwrap();
+        assert!(run.complete, "{case}");
+        let rows = session.coverage();
+        assert!(
+            rows.iter().any(|row| row.site == call
+                && row.operation == "call_result"
+                && row.state == "unavailable"),
+            "{case}: {rows:?}"
+        );
+        assert!(
+            !rows.iter().any(|row| row.site == call
+                && matches!(row.operation, "call_result" | "return_check")
+                && matches!(row.state, "native_projected" | "native_checked")),
+            "{case}: {rows:?}"
+        );
+    }
+}
+
+#[test]
+fn generic_result_depending_on_unknown_argument_never_claims_known_result_or_return_check() {
+    let (fixture, ids, call, mut provider, checks) = fixed_return_quality_fixture();
+    let BindingDecision::Bound(permit) = provider.calls[&call].clone() else {
+        unreachable!()
+    };
+    let closure = fixture
+        .semantic_model(ids[1])
+        .syntax_tree()
+        .unwrap()
+        .get_red_root()
+        .descendants()
+        .find_map(emmylua_parser::LuaClosureExpr::cast)
+        .unwrap();
+    let BindingDecision::Bound(bound) = provider.decisions.get_mut(&permit.callee).unwrap() else {
+        unreachable!()
+    };
+    bound.value = SelectedValue::Function(FunctionRef {
+        file_id: ids[1],
+        closure: closure.get_syntax_id(),
+        declaration: None,
+    });
+    let session = owned_query::session(Arc::new(provider));
+    owned_query::model!(model, fixture, ids[4], session.clone());
+    assert_eq!(model.type_of_expr(call.syntax), LuaType::Unknown);
+    let run = fixture.diagnose(ids[4], checks, &session).unwrap();
+    assert!(run.complete);
+    let rows = session.coverage();
+    for operation in ["call_result", "argument_check", "return_check"] {
+        assert!(
+            rows.iter().any(|row| row.site == call
+                && row.operation == operation
+                && row.state == "unavailable"),
+            "{operation}: {rows:?}"
+        );
+        assert!(
+            !rows.iter().any(|row| row.site == call
+                && row.operation == operation
+                && matches!(row.state, "native_projected" | "native_checked")),
+            "{operation}: {rows:?}"
+        );
+    }
+}
+
+#[test]
+fn interrupted_signature_projection_keeps_typed_control_and_never_caches_a_success() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct StopAtSelectedCallee {
+        inner: Context,
+        callee: BindingSite,
+        armed: AtomicBool,
+        stopped: Arc<AtomicBool>,
+    }
+    impl BindingContext for StopAtSelectedCallee {
+        fn identity(&self) -> &str {
+            self.inner.identity()
+        }
+        fn resolve(&self, site: BindingSite) -> BindingDecision<BoundValue> {
+            let result = self.inner.resolve(site);
+            if site == self.callee && self.armed.swap(false, Ordering::SeqCst) {
+                self.stopped.store(true, Ordering::SeqCst);
+            }
+            result
+        }
+        fn call(&self, site: BindingSite) -> BindingDecision<CallPermit> {
+            self.inner.call(site)
+        }
+    }
+    let (fixture, ids, call, provider, _) = fixed_return_quality_fixture();
+    let BindingDecision::Bound(permit) = provider.calls[&call].clone() else {
+        unreachable!()
+    };
+    let stopped = Arc::new(AtomicBool::new(false));
+    let provider = StopAtSelectedCallee {
+        inner: provider,
+        callee: permit.callee,
+        armed: AtomicBool::new(true),
+        stopped: stopped.clone(),
+    };
+    let session = owned_query::session(Arc::new(provider));
+    let mut check = || {
+        if stopped.load(Ordering::SeqCst) {
+            Err("original-deadline")
+        } else {
+            Ok(())
+        }
+    };
+    let mut query = OwnedQuery::new_for_snapshot(&fixture, &session, ids[4], &mut check).unwrap();
+    // The provider is reached inside an active selected guard and an in-progress
+    // expression memo. Both must unwind on the original typed cancellation.
+    assert!(matches!(
+        query.type_of_expr(call.syntax),
+        Err(OwnedQueryFailure::Control("original-deadline"))
+    ));
+    assert!(session.coverage().is_empty());
+    stopped.store(false, Ordering::SeqCst);
+    assert_eq!(
+        query.type_of_expr(call.syntax).unwrap().structural_type(),
+        &LuaType::String
+    );
+    stopped.store(true, Ordering::SeqCst);
+    assert!(matches!(
+        query.type_of_expr(call.syntax),
+        Err(OwnedQueryFailure::Control("original-deadline"))
+    ));
 }

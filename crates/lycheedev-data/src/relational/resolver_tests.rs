@@ -341,3 +341,166 @@ fn unknown_function_binding_waits_for_the_real_source_resolver() {
     );
     assert_eq!(*resolver.events.borrow(), ["resolve:static:a"]);
 }
+
+#[test]
+fn malformed_functions_compile_then_preserve_first_physical_error() {
+    for call in [
+        "COUNT()",
+        "SUM()",
+        "COUNT(ID, Missing)",
+        "SUM(*)",
+        "COUNT(t.*)",
+        "COUNT(DISTINCT *)",
+        "COUNT(DISTINCT)",
+        "LOWER(DISTINCT ID)",
+        "UNKNOWN(DISTINCT ID)",
+        "LOWER(*)",
+        "SUM(COUNT(*))",
+        "SUM(*+Missing)",
+    ] {
+        let sql = format!("SELECT {call} FROM absent t");
+        let program = Program::compile(&sql).unwrap_or_else(|e| panic!("{sql}: compile {e:?}"));
+        let resolver = Resolver::new(&["t"]);
+        let error = program
+            .execute_resolved_budgeted(&resolver, &BTreeMap::new(), Limits::default(), None, None)
+            .unwrap_err();
+        assert_eq!(error.code, "fixture.missing_root", "{sql}: {error:?}");
+        assert_eq!(
+            *resolver.events.borrow(),
+            ["resolve:static:absent"],
+            "{sql}"
+        );
+    }
+}
+
+#[test]
+fn malformed_function_binding_does_not_scan_or_enter_later_arguments() {
+    for (call, code) in [
+        ("COUNT()", "relational.type_mismatch"),
+        ("COUNT(DISTINCT)", "relational.type_mismatch"),
+        (
+            "SUM(ID, (SELECT ID FROM absent))",
+            "relational.type_mismatch",
+        ),
+        ("SUM(*)", "relational.type_mismatch"),
+        ("COUNT(z.*)", "relational.type_mismatch"),
+        ("COUNT(DISTINCT *)", "relational.type_mismatch"),
+        ("LOWER(DISTINCT Missing)", "relational.type_mismatch"),
+        (
+            "UNKNOWN(DISTINCT (SELECT ID FROM absent))",
+            "relational.type_mismatch",
+        ),
+        ("UNKNOWN((SELECT ID FROM absent))", "relational.unsupported"),
+        ("COALESCE(1, *)", "relational.type_mismatch"),
+        ("SUM(COUNT(*))", "relational.type_mismatch"),
+        ("SUM(*+Missing)", "relational.type_mismatch"),
+        ("SUM(Missing+*)", "relational.invalid_binding"),
+    ] {
+        let resolver = Resolver::new(&["z"]);
+        let sql = format!("SELECT {call} FROM z");
+        let error = resolver.execute(&sql).unwrap_err();
+        assert_eq!(error.code, code, "{sql}: {error:?}");
+        assert_eq!(*resolver.events.borrow(), ["resolve:static:z"], "{sql}");
+    }
+}
+
+#[test]
+fn malformed_aggregate_arguments_still_collect_required_parameters() {
+    let resolver = Resolver::new(&["z"]);
+    let program = Program::compile("SELECT SUM(:first, :second) FROM absent").unwrap();
+    assert_eq!(
+        program.parameters,
+        BTreeSet::from(["first".into(), "second".into()])
+    );
+    let error = program
+        .execute_resolved_budgeted(&resolver, &BTreeMap::new(), Limits::default(), None, None)
+        .unwrap_err();
+    assert_eq!(error.code, "relational.invalid_binding");
+    assert!(resolver.events.borrow().is_empty());
+}
+
+#[test]
+fn malformed_join_call_waits_for_each_input_schema() {
+    let resolver = Resolver::new(&["z"]);
+    let error = resolver
+        .execute("SELECT z.ID FROM z JOIN absent a ON LOWER(DISTINCT z.ID)=a.ID")
+        .unwrap_err();
+    assert_eq!(error.code, "fixture.missing_root");
+    assert_eq!(
+        *resolver.events.borrow(),
+        ["resolve:static:z", "resolve:static:absent"]
+    );
+}
+
+#[test]
+fn valid_nested_query_aggregates_keep_separate_binding_scopes() {
+    let resolver = Resolver::new(&["z"]);
+    let result = resolver
+        .execute("SELECT SUM((SELECT COUNT(*) FROM z)) FROM z")
+        .unwrap();
+    assert_eq!(result.rows, vec![vec![Scalar::Int(1)]]);
+    assert_eq!(resolved(&resolver.events), ["resolve:static:z"]);
+}
+
+#[test]
+fn invalid_pagination_is_syntax_before_any_source_resolution() {
+    for suffix in [
+        "LIMIT -1",
+        "LIMIT +1",
+        "LIMIT 1.0",
+        "LIMIT 1e0",
+        "LIMIT 1L",
+        "LIMIT (1)",
+        "LIMIT LOWER('1')",
+        "LIMIT COUNT(*)",
+        "LIMIT NULL",
+        "LIMIT ID",
+        "OFFSET -1",
+        "OFFSET (0)",
+        "OFFSET COALESCE(0)",
+        "OFFSET 1 ROWS",
+        "OFFSET 1 LIMIT 2",
+        "LIMIT 1,2",
+        "LIMIT 1 BY ID",
+        "LIMIT ALL",
+    ] {
+        let resolver = Resolver::new(&[]);
+        let sql = format!("SELECT ID FROM absent {suffix}");
+        let error = resolver.execute(&sql).unwrap_err();
+        assert_eq!(error.code, "relational.invalid_syntax", "{sql}: {error:?}");
+        assert!(resolver.events.borrow().is_empty(), "{sql}");
+    }
+}
+
+#[test]
+fn negative_pagination_parameter_is_runtime_type_error_after_resolve() {
+    let resolver = Resolver::new(&["z"]);
+    let program = Program::compile("SELECT ID FROM z LIMIT :n").unwrap();
+    let error = program
+        .execute_resolved_budgeted(
+            &resolver,
+            &BTreeMap::from([("n".into(), Scalar::Int(-1))]),
+            Limits::default(),
+            None,
+            None,
+        )
+        .unwrap_err();
+    assert_eq!(error.code, "relational.type_mismatch");
+    assert_eq!(*resolver.events.borrow(), ["resolve:static:z"]);
+}
+
+#[test]
+fn grouped_root_star_is_binding_error_before_any_scan() {
+    for sql in [
+        "SELECT COUNT(*) FROM z HAVING *",
+        "SELECT COUNT(*) FROM z ORDER BY *",
+    ] {
+        let resolver = Resolver::new(&["z"]);
+        assert_eq!(
+            resolver.execute(sql).unwrap_err().code,
+            "relational.invalid_binding",
+            "{sql}"
+        );
+        assert_eq!(*resolver.events.borrow(), ["resolve:static:z"]);
+    }
+}

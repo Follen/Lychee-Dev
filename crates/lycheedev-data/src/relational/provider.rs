@@ -162,10 +162,9 @@ pub(super) fn projectable(term: &Term, columns: &[String], alias: ColumnOwners<'
         Term::InSubquery(..) | Term::ScalarSubquery(_) | Term::Exists(_) => false,
         Term::Column(name) => column(columns, alias, name).is_ok(),
         Term::Ordinal(index) => *index < columns.len(),
-        Term::Unary(_, t)
-        | Term::NullTest(t, _)
-        | Term::Cast(t, _)
-        | Term::Aggregate(_, Some(t), _) => projectable(t, columns, alias),
+        Term::Unary(_, t) | Term::NullTest(t, _) | Term::Cast(t, _) => {
+            projectable(t, columns, alias)
+        }
         Term::Binary(a, _, b) | Term::Like(a, b, _) => {
             projectable(a, columns, alias) && projectable(b, columns, alias)
         }
@@ -173,7 +172,11 @@ pub(super) fn projectable(term: &Term, columns: &[String], alias: ColumnOwners<'
         Term::In(t, args, _) => {
             projectable(t, columns, alias) && args.iter().all(|t| projectable(t, columns, alias))
         }
-        Term::Call(_, args) => args.iter().all(|t| projectable(t, columns, alias)),
+        Term::Star(_) => false,
+        Term::Call(_, args, _) => args.iter().all(|t| projectable(t, columns, alias)),
+        Term::Aggregate(name, args, _) => args.iter().all(|t| {
+            (name == "COUNT" && matches!(t, Term::Star(_))) || projectable(t, columns, alias)
+        }),
         Term::Case(base, cases, other) => {
             base.iter()
                 .chain(other.iter())

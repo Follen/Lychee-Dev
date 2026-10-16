@@ -37,7 +37,7 @@ pub(super) fn decimal_literal(text: &str) -> bool {
     }
     at == bytes.len()
 }
-fn upper(name: &str) -> String {
+pub(super) fn upper(name: &str) -> String {
     name.chars()
         .map(|c| crate::unicode_simple::map(c, true))
         .collect()

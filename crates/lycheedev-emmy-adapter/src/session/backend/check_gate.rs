@@ -35,7 +35,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             .project_selected(self.site(syntax), self)
     }
 
-    fn record_check(
+    pub(super) fn record_check(
         &mut self,
         syntax: LuaSyntaxId,
         operation: &'static str,
@@ -179,7 +179,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             syntax,
             operation,
             if ready {
-                "owned_checked"
+                "native_checked"
             } else {
                 "unavailable"
             },
@@ -188,7 +188,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         )
     }
 
-    fn binding_type_has_unknown(&mut self, value: &OwnedValue) -> QueryResult<bool, E> {
+    pub(super) fn binding_type_has_unknown(&mut self, value: &OwnedValue) -> QueryResult<bool, E> {
         let mut stack = vec![value.structural_type()];
         let mut count = 0;
         while let Some(value) = stack.pop() {

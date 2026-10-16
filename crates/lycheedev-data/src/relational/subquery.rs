@@ -53,11 +53,9 @@ pub(super) fn validate_nodes(program: &Program) -> Result<()> {
                     pending.push(Node::Query(query));
                     pending.push(Node::Term(input));
                 }
-                Term::Unary(_, t)
-                | Term::NullTest(t, _)
-                | Term::Cast(t, _)
-                | Term::Aggregate(_, Some(t), _) => pending.push(Node::Term(t)),
-                Term::Aggregate(_, None, _) => count += 1,
+                Term::Unary(_, t) | Term::NullTest(t, _) | Term::Cast(t, _) => {
+                    pending.push(Node::Term(t))
+                }
                 Term::Binary(a, _, b) | Term::Like(a, b, _) => {
                     pending.push(Node::Term(a));
                     pending.push(Node::Term(b));
@@ -71,7 +69,9 @@ pub(super) fn validate_nodes(program: &Program) -> Result<()> {
                     pending.push(Node::Term(t));
                     pending.extend(args.iter().map(Node::Term));
                 }
-                Term::Call(_, args) => pending.extend(args.iter().map(Node::Term)),
+                Term::Call(_, args, _) | Term::Aggregate(_, args, _) => {
+                    pending.extend(args.iter().map(Node::Term))
+                }
                 Term::Case(base, cases, other) => {
                     pending.extend(base.iter().chain(other.iter()).map(|t| Node::Term(t)));
                     for (a, b) in cases {
@@ -346,10 +346,9 @@ pub(super) fn visit_queries<'a>(term: &'a Term, emit: &mut impl FnMut(&'a Progra
             emit(query);
             visit_queries(input, emit);
         }
-        Term::Unary(_, term)
-        | Term::NullTest(term, _)
-        | Term::Cast(term, _)
-        | Term::Aggregate(_, Some(term), _) => visit_queries(term, emit),
+        Term::Unary(_, term) | Term::NullTest(term, _) | Term::Cast(term, _) => {
+            visit_queries(term, emit)
+        }
         Term::Binary(a, _, b) | Term::Like(a, b, _) => {
             visit_queries(a, emit);
             visit_queries(b, emit);
@@ -365,7 +364,7 @@ pub(super) fn visit_queries<'a>(term: &'a Term, emit: &mut impl FnMut(&'a Progra
                 visit_queries(term, emit);
             }
         }
-        Term::Call(_, list) => {
+        Term::Call(_, list, _) | Term::Aggregate(_, list, _) => {
             for term in list {
                 visit_queries(term, emit);
             }
@@ -427,8 +426,9 @@ pub(super) fn same_group_expression(a: &Term, b: &Term, context: &Context<'_>) -
             n == m && same(a, b) && x.len() == y.len() && x.iter().zip(y).all(|(a, b)| same(a, b))
         }
         (Term::InSubquery(a, x, n), Term::InSubquery(b, y, m)) => n == m && x == y && same(a, b),
-        (Term::Call(a, x), Term::Call(b, y)) => {
-            a == b && x.len() == y.len() && x.iter().zip(y).all(|(a, b)| same(a, b))
+        (Term::Call(a, x, d), Term::Call(b, y, e))
+        | (Term::Aggregate(a, x, d), Term::Aggregate(b, y, e)) => {
+            d == e && a == b && x.len() == y.len() && x.iter().zip(y).all(|(a, b)| same(a, b))
         }
         (Term::Case(a, x, b), Term::Case(c, y, d)) => {
             let optional = |a: &Option<Box<Term>>, b: &Option<Box<Term>>| match (a, b) {

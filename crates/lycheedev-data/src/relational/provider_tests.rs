@@ -1287,12 +1287,16 @@ fn real_join_materialization_waits_until_all_local_bind_nodes_finish() {
     for sql in [
         "SELECT Missing FROM a CROSS JOIN b",
         "SELECT a.ID FROM a CROSS JOIN b ORDER BY Missing",
-        "SELECT a.ID FROM a CROSS JOIN b LIMIT -1",
+        "SELECT a.ID FROM a CROSS JOIN b LIMIT :n",
     ] {
         let error = run(
             sql,
             &[("a", &a_schema, &a), ("b", &b_schema, &b)],
-            &BTreeMap::new(),
+            &if sql.ends_with(":n") {
+                BTreeMap::from([("n".into(), Scalar::Int(-1))])
+            } else {
+                BTreeMap::new()
+            },
             Limits::default(),
             None,
         )

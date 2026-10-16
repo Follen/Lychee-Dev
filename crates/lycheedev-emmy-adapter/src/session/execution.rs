@@ -122,6 +122,23 @@ impl SelectedProjector<'_> {
         backend: &mut B,
     ) -> Result<B::Value, B::Error> {
         let plan = self.compile_expression(site, backend)?;
+        self.execute_expression_plan(plan, backend)
+    }
+
+    pub(super) fn evaluate_permitted_call<B: ExpressionExecutionBackend>(
+        &self,
+        site: BindingSite,
+        backend: &mut B,
+    ) -> Result<B::Value, B::Error> {
+        let plan = self.compile_permitted_call(site, backend)?;
+        self.execute_expression_plan(plan, backend)
+    }
+
+    fn execute_expression_plan<B: ExpressionExecutionBackend>(
+        &self,
+        plan: super::ExpressionPlan<B::Value>,
+        backend: &mut B,
+    ) -> Result<B::Value, B::Error> {
         let model = self.analysis().semantic_model(plan.file_id);
         let mut stack = Vec::new();
         for instruction in plan.instructions {

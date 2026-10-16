@@ -313,14 +313,14 @@ fn native_object_red(out: &mut NativeOutput) -> Result<()> {
             json!(spec.compatible),
             json!(foreign_compatibility),
         )?;
-        // Executor identity only: backend/structure.rs records owned_checked.
-        // Dynamic/unavailable and every other expected field remain unchanged.
+        // Preserve the public completion-quality vocabulary. The executor is
+        // the owned structure gate, with its actual per-session provenance.
         out.check(
             &(prefix.clone() + ":public_structure_coverage"),
             json!(if spec.dynamic {
                 "unavailable"
             } else {
-                "owned_checked"
+                "native_checked"
             }),
             json!(structure_coverage.map(|record| record.state)),
         )?;
@@ -492,13 +492,13 @@ fn native_object_red(out: &mut NativeOutput) -> Result<()> {
         let expression = format!("NeedNumber({})", spec.object);
         let site = marker_site(OBJECT_FILE, spec.marker, &expression)?;
         let native = input.binding_site(&site)?;
-        // Executor identity only: the owned argument checker records owned_checked.
+        // Completion quality retains the original public state spelling.
         out.check(
             &format!("object_red:{}:native_argument_coverage", spec.label),
             json!(if spec.dynamic {
                 "unavailable"
             } else {
-                "owned_checked"
+                "native_checked"
             }),
             json!(
                 coverage

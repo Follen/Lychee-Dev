@@ -19,6 +19,28 @@ use std::sync::Arc;
 pub trait SelectedExpressionBackend: SelectedProjectionBackend {
     fn result_pack(&mut self, slots: Vec<Self::Value>) -> Self::Value;
     fn scalar_result(&mut self, value: Self::Value) -> Self::Value;
+
+    /// A validated typed permit can authorize static signature inference even
+    /// when there is no observed runtime return. Primitive projector backends
+    /// have no call executor and therefore retain the unavailable result.
+    fn infer_permitted_call(
+        &mut self,
+        _projector: &SelectedProjector<'_>,
+        _site: BindingSite,
+        _permit: &super::CallPermit,
+    ) -> Result<Option<Self::Value>, Self::Error> {
+        Ok(None)
+    }
+
+    /// The complete backend records result quality only after actual projection
+    /// finishes. Argument-check availability is deliberately independent.
+    fn finish_call_projection(
+        &mut self,
+        _site: BindingSite,
+        _value: &Self::Value,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
 }
 
 impl SelectedProjector<'_> {
@@ -49,6 +71,11 @@ impl SelectedProjector<'_> {
             .and_then(LuaCallExpr::cast);
         backend.checkpoint()?;
         let value = self.selected_inner(site, call.as_ref(), backend)?;
+        if call.is_some()
+            && let Some(value) = &value
+        {
+            backend.finish_call_projection(site, value)?;
+        }
         Ok(match (value, call) {
             (Some(value), Some(call)) if !call_expands(&call) => {
                 backend.checkpoint()?;
@@ -210,6 +237,15 @@ impl SelectedProjector<'_> {
                             backend.checkpoint()?;
                             if let Some(value) =
                                 self.project_decision(site, decision, "call_return", backend)?
+                            {
+                                return Ok(Some(value));
+                            }
+                            // Absence of an observation is not a denial of the
+                            // authenticated native signature. Execute the same
+                            // owned VM and selected children, never a raw model
+                            // fallback or a synthetic result from the permit.
+                            if let Some(value) =
+                                backend.infer_permitted_call(self, site, &permit)?
                             {
                                 return Ok(Some(value));
                             }

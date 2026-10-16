@@ -84,6 +84,26 @@ impl SelectedProjector<'_> {
         site: BindingSite,
         backend: &mut B,
     ) -> Result<ExpressionPlan<B::Value>, B::Error> {
+        self.compile_expression_inner(site, backend, false)
+    }
+
+    /// The caller has already authenticated this call's permit. Only the root
+    /// selected lookup is skipped; every selected child and deferred operation
+    /// retains the normal compiler/executor schedule and the same session.
+    pub(super) fn compile_permitted_call<B: SelectedExpressionBackend>(
+        &self,
+        site: BindingSite,
+        backend: &mut B,
+    ) -> Result<ExpressionPlan<B::Value>, B::Error> {
+        self.compile_expression_inner(site, backend, true)
+    }
+
+    fn compile_expression_inner<B: SelectedExpressionBackend>(
+        &self,
+        site: BindingSite,
+        backend: &mut B,
+        permitted_call_root: bool,
+    ) -> Result<ExpressionPlan<B::Value>, B::Error> {
         backend.checkpoint()?;
         let model = self.analysis().semantic_model(site.file_id);
         let expr = model
@@ -108,7 +128,9 @@ impl SelectedProjector<'_> {
                         file_id: site.file_id,
                         syntax: expr.get_syntax_id(),
                     };
-                    if let Some(value) = self.project_selected(current, backend)? {
+                    if !(permitted_call_root && current == site)
+                        && let Some(value) = self.project_selected(current, backend)?
+                    {
                         instructions.push(ExpressionInstruction::PushValue(value));
                         continue;
                     }

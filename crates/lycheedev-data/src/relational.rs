@@ -29,6 +29,7 @@ mod scalar;
 pub(crate) use scalar::text as scalar_text;
 mod selection;
 mod subquery;
+mod syntax;
 mod topk;
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(untagged)]
@@ -238,8 +239,11 @@ enum Term {
     InSubquery(Box<Term>, std::sync::Arc<Program>, bool),
     ScalarSubquery(std::sync::Arc<Program>),
     Exists(std::sync::Arc<Program>),
-    Call(String, Vec<Term>),
-    Aggregate(String, Option<Box<Term>>, bool),
+    // Keep the complete parsed call shape until real schema binding. Invalid
+    // arity, DISTINCT and star qualifiers must not hide a resolver failure.
+    Star(String),
+    Call(String, Vec<Term>, bool),
+    Aggregate(String, Vec<Term>, bool),
     Case(Option<Box<Term>>, Vec<(Term, Term)>, Option<Box<Term>>),
 }
 fn term(expr: &Expr, parameters: &mut BTreeSet<String>, depth: usize) -> Result<Term> {
@@ -248,6 +252,13 @@ fn term(expr: &Expr, parameters: &mut BTreeSet<String>, depth: usize) -> Result<
     }
     let mut nested = |e: &Expr| term(e, parameters, depth + 1);
     Ok(match expr {
+        Expr::Wildcard(_) => Term::Star(String::new()),
+        Expr::QualifiedWildcard(name, _) => {
+            let [ObjectNamePart::Identifier(name)] = name.0.as_slice() else {
+                return Err(unsupported());
+            };
+            Term::Star(name.value.clone())
+        }
         Expr::Identifier(name) => Term::Column(ColumnRef::new(name.value.clone())),
         Expr::CompoundIdentifier(names) if names.len() == 2 => Term::Column(ColumnRef::qualified(
             names[0].value.clone(),
@@ -379,36 +390,32 @@ fn term(expr: &Expr, parameters: &mut BTreeSet<String>, depth: usize) -> Result<
                 return Err(unsupported());
             }
             let name = scalar::name(&function.name)?;
-            if ["COUNT", "MIN", "MAX", "SUM", "AVG"].contains(&name.as_str()) {
-                if args.args.len() != 1 {
-                    return Err(type_error());
-                }
-                let distinct =
-                    matches!(args.duplicate_treatment, Some(DuplicateTreatment::Distinct));
-                let input = match &args.args[0] {
-                    FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => {
-                        Some(Box::new(nested(expr)?))
-                    }
-                    FunctionArg::Unnamed(FunctionArgExpr::Wildcard)
-                        if name == "COUNT" && !distinct =>
-                    {
-                        None
-                    }
-                    _ => return Err(type_error()),
-                };
-                return Ok(Term::Aggregate(name, input, distinct));
+            if matches!(args.duplicate_treatment, Some(DuplicateTreatment::All)) {
+                return Err(problem(
+                    "relational.invalid_syntax",
+                    "Unexpected ALL in function arguments",
+                ));
             }
-            if args.duplicate_treatment.is_some() {
-                return Err(unsupported());
-            }
-            let mut terms = vec![];
+            let distinct = matches!(args.duplicate_treatment, Some(DuplicateTreatment::Distinct));
+            let mut terms = Vec::with_capacity(args.args.len());
             for arg in &args.args {
-                let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) = arg else {
-                    return Err(unsupported());
-                };
-                terms.push(nested(expr)?);
+                terms.push(match arg {
+                    FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => nested(expr)?,
+                    FunctionArg::Unnamed(FunctionArgExpr::Wildcard) => Term::Star(String::new()),
+                    FunctionArg::Unnamed(FunctionArgExpr::QualifiedWildcard(name)) => {
+                        let [ObjectNamePart::Identifier(name)] = name.0.as_slice() else {
+                            return Err(unsupported());
+                        };
+                        Term::Star(name.value.clone())
+                    }
+                    _ => return Err(unsupported()),
+                });
             }
-            Term::Call(name, terms)
+            if ["COUNT", "MIN", "MAX", "SUM", "AVG"].contains(&name.as_str()) {
+                Term::Aggregate(name, terms, distinct)
+            } else {
+                Term::Call(name, terms, distinct)
+            }
         }
         Expr::Case {
             operand,
@@ -471,21 +478,21 @@ fn bind_with_aggregates(
         }
         Term::Parameter(name) if !params.contains_key(name) => return Err(binding()),
         Term::Unary(_, t) | Term::NullTest(t, _) => {
-            bind_with_aggregates(t, columns, alias, params, allow_aggregates, context, work)?
+            bind_argument(t, columns, alias, params, allow_aggregates, context, work)?
         }
         Term::Binary(a, _, b) | Term::Like(a, b, _) => {
-            bind_with_aggregates(a, columns, alias, params, allow_aggregates, context, work)?;
-            bind_with_aggregates(b, columns, alias, params, allow_aggregates, context, work)?;
+            bind_argument(a, columns, alias, params, allow_aggregates, context, work)?;
+            bind_argument(b, columns, alias, params, allow_aggregates, context, work)?;
         }
         Term::Between(a, b, c, _) => {
             for t in [a, b, c] {
-                bind_with_aggregates(t, columns, alias, params, allow_aggregates, context, work)?;
+                bind_argument(t, columns, alias, params, allow_aggregates, context, work)?;
             }
         }
         Term::In(t, list, _) => {
-            bind_with_aggregates(t, columns, alias, params, allow_aggregates, context, work)?;
+            bind_argument(t, columns, alias, params, allow_aggregates, context, work)?;
             for t in list {
-                bind_with_aggregates(t, columns, alias, params, allow_aggregates, context, work)?;
+                bind_argument(t, columns, alias, params, allow_aggregates, context, work)?;
             }
         }
         Term::InSubquery(input, query, _) => {
@@ -497,7 +504,7 @@ fn bind_with_aggregates(
             if work.planning {
                 subquery::execute(query, &[], columns, alias, params, context, work)?;
             }
-            bind_with_aggregates(
+            bind_argument(
                 input,
                 columns,
                 alias,
@@ -521,7 +528,7 @@ fn bind_with_aggregates(
         }
         Term::Cast(input, kind) => {
             scalar::cast_kind(kind)?;
-            bind_with_aggregates(
+            bind_argument(
                 input,
                 columns,
                 alias,
@@ -531,11 +538,11 @@ fn bind_with_aggregates(
                 work,
             )?;
         }
-        Term::Aggregate(_, input, _) => {
+        Term::Aggregate(name, args, distinct) => {
             if !allow_aggregates {
                 return Err(type_error());
             }
-            if let Some(input) = input {
+            if let Some(input) = aggregate::input(name, args, *distinct)? {
                 let input_context = subquery::Context {
                     group: None,
                     scope: subquery::Scope {
@@ -544,31 +551,60 @@ fn bind_with_aggregates(
                     },
                     ..*context
                 };
-                bind_with_aggregates(input, columns, alias, params, false, &input_context, work)?;
+                bind_argument(input, columns, alias, params, false, &input_context, work)?;
             }
         }
-        Term::Call(name, list) => {
+        Term::Call(name, list, distinct) => {
+            if *distinct {
+                return Err(type_error());
+            }
             check_arity(name, list.len())?;
             for t in list {
-                bind_with_aggregates(t, columns, alias, params, allow_aggregates, context, work)?;
+                bind_argument(t, columns, alias, params, allow_aggregates, context, work)?;
             }
         }
         Term::Case(operand, cases, fallback) => {
             if let Some(t) = operand {
-                bind_with_aggregates(t, columns, alias, params, allow_aggregates, context, work)?;
+                bind_argument(t, columns, alias, params, allow_aggregates, context, work)?;
             }
             for (a, b) in cases {
-                bind_with_aggregates(a, columns, alias, params, allow_aggregates, context, work)?;
-                bind_with_aggregates(b, columns, alias, params, allow_aggregates, context, work)?;
+                bind_argument(a, columns, alias, params, allow_aggregates, context, work)?;
+                bind_argument(b, columns, alias, params, allow_aggregates, context, work)?;
             }
             if let Some(t) = fallback {
-                bind_with_aggregates(t, columns, alias, params, allow_aggregates, context, work)?;
+                bind_argument(t, columns, alias, params, allow_aggregates, context, work)?;
             }
         }
         _ => {}
     }
     Ok(())
 }
+// Go's loop checks star children before calling bindTerm, so rejecting one
+// consumes the parent node but no child unit. A root star is handled by the
+// projection expander; COUNT(*) bypasses this helper after shape validation.
+fn bind_argument(
+    term: &Term,
+    columns: &[String],
+    alias: ColumnOwners<'_>,
+    params: &BTreeMap<String, Scalar>,
+    allow_aggregates: bool,
+    context: &subquery::Context<'_>,
+    work: &mut Work<'_>,
+) -> Result<()> {
+    if matches!(term, Term::Star(_)) {
+        return Err(type_error());
+    }
+    bind_with_aggregates(
+        term,
+        columns,
+        alias,
+        params,
+        allow_aggregates,
+        context,
+        work,
+    )
+}
+
 fn column(columns: &[String], alias: ColumnOwners<'_>, name: &ColumnRef) -> Result<usize> {
     let mut found = columns.iter().enumerate().filter(|(i, candidate)| {
         (name.qualifier.is_empty() || equal_fold(&name.qualifier, alias.owner(*i)))
@@ -916,7 +952,9 @@ fn eval_scoped(
     work.spend()?;
     let mut value = |t: &Term| eval_scoped(t, row, columns, alias, params, context, work);
     match t {
-        Term::Aggregate(_, _, _) => Err(binding()),
+        // Only a rewritten grouped expression can evaluate an aggregate.
+        // Go's raw scalar evaluator rejects aggregate names and star nodes.
+        Term::Aggregate(..) | Term::Star(_) => Err(unsupported()),
         Term::Value(v) => work.clone_scalar(v),
         Term::Number(n) => literal(n),
         Term::Ordinal(index) => work.clone_scalar(row.get(*index).ok_or_else(binding)?),
@@ -1129,7 +1167,12 @@ fn eval_scoped(
                 .transpose()
                 .map(|v| v.unwrap_or(Scalar::Null))
         }
-        Term::Call(name, args) => {
+        Term::Call(name, args, distinct) => {
+            // Preserve the raw scalar evaluator's error independently of the
+            // public binder, which rejects scalar DISTINCT with ErrType.
+            if *distinct {
+                return Err(unsupported());
+            }
             check_arity(name, args.len())?;
             if name == "COALESCE" {
                 if args.is_empty() {
@@ -1414,7 +1457,7 @@ impl Program {
         }
         let (explain, analyze, sql) = explain::prefix(sql)?;
         compound::validate_all_keyword(&sql)?;
-        let mut parser = Parser::new(&GenericDialect {})
+        let mut parser = Parser::new(&syntax::QueryDialect)
             .with_recursion_limit(128)
             .try_with_sql(&sql)
             .map_err(|e| problem("relational.invalid_syntax", &e.to_string()))?;
@@ -1681,15 +1724,62 @@ impl Program {
                 limit_by,
             } = clause
             else {
-                return Err(unsupported());
+                return Err(problem(
+                    "relational.invalid_syntax",
+                    "Expected LIMIT count then OFFSET count",
+                ));
             };
             if !limit_by.is_empty() {
-                return Err(unsupported());
+                return Err(problem(
+                    "relational.invalid_syntax",
+                    "Unexpected BY after LIMIT",
+                ));
             }
-            limit = l.as_ref().map(|e| term(e, parameters, depth)).transpose()?;
+            if let (Some(limit), Some(offset)) = (&l, &o) {
+                let limit = limit.span().start;
+                let offset = offset.value.span().start;
+                if (offset.line, offset.column) < (limit.line, limit.column) {
+                    return Err(problem(
+                        "relational.invalid_syntax",
+                        "LIMIT must precede OFFSET",
+                    ));
+                }
+            }
+            if o.as_ref()
+                .is_some_and(|o| !matches!(o.rows, OffsetRows::None))
+            {
+                return Err(problem(
+                    "relational.invalid_syntax",
+                    "Unexpected ROW/ROWS after OFFSET",
+                ));
+            }
+            let count = |expr: &Expr, parameters: &mut BTreeSet<String>| {
+                // Test the original AST before term() erases parentheses.
+                match expr {
+                    Expr::Value(value) => match &value.value {
+                        Value::Number(value, false)
+                            if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) => {}
+                        Value::Placeholder(value) if value.starts_with(':') && value.len() > 1 => {}
+                        _ => {
+                            return Err(problem(
+                                "relational.invalid_syntax",
+                                "Expected integer count or named parameter",
+                            ));
+                        }
+                    },
+                    _ => {
+                        return Err(problem(
+                            "relational.invalid_syntax",
+                            "Expected integer count or named parameter",
+                        ));
+                    }
+                }
+                term(expr, parameters, depth)
+            };
+            limit = l.as_ref().map(|e| count(e, parameters)).transpose()?;
             offset = o
                 .as_ref()
-                .map(|e| term(&e.value, parameters, depth))
+                .map(|e| count(&e.value, parameters))
                 .transpose()?;
         }
         Ok((order, limit, offset))
@@ -2075,7 +2165,9 @@ impl Program {
         let mut columns = vec![];
         let mut outputs = vec![];
         for p in &self.projection {
-            if let Some(t) = &p.expr {
+            if let Some(t) = &p.expr
+                && !matches!(t, Term::Star(_))
+            {
                 bind(t, &source.columns, alias, parameters, &context, work)?;
                 outputs.push(t.clone());
                 columns.push(if p.name.is_empty() {
@@ -2089,11 +2181,19 @@ impl Program {
                     p.name.clone()
                 });
             } else {
+                let requested = if let Some(Term::Star(qualifier)) = &p.expr {
+                    if !p.name.is_empty() {
+                        return Err(binding());
+                    }
+                    qualifier
+                } else {
+                    &p.name
+                };
                 let mut selected = 0usize;
                 for (ordinal, column) in source.columns.iter().enumerate() {
-                    if !p.name.is_empty() {
+                    if !requested.is_empty() {
                         let qualifier = alias.owner(ordinal);
-                        if !equal_fold(qualifier, &p.name) {
+                        if !equal_fold(qualifier, requested) {
                             continue;
                         }
                     }
@@ -2384,3 +2484,7 @@ mod resolver_tests;
 #[cfg(test)]
 #[path = "relational/execution_contract_tests.rs"]
 mod execution_contract_tests;
+
+#[cfg(test)]
+#[path = "relational/function_binding_tests.rs"]
+mod function_binding_tests;

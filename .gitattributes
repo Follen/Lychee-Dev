@@ -6,3 +6,12 @@ tests/history/legacy-ui-00fd643/source/** -text
 # Raw investigation evidence stays in Git, outside release source archives.
 docs/toolkit/research export-ignore
 docs/toolkit/research/** -text export-ignore whitespace=cr-at-eol,-blank-at-eof
+
+# Preserve the original authenticated native-call contract input bytes.
+tests/rust-source-engine/wow/native/generic-defs.lua -text whitespace=cr-at-eol
+tests/rust-source-engine/wow/native/generic-calls.lua -text whitespace=cr-at-eol
+tests/rust-source-engine/wow/native/generic-replace.lua -text whitespace=cr-at-eol
+
+# Fixed XML source-map golden inputs include physical CRLF bytes.
+tests/rust-source-engine/xml-golden-204.xml -text whitespace=cr-at-eol
+tests/rust-source-engine/xml-bindings-394.xml -text whitespace=cr-at-eol

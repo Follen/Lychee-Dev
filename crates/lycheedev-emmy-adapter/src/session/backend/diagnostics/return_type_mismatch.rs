@@ -80,6 +80,9 @@ impl<E> OwnedQuery<'_, '_, E> {
                     if !self.return_compatible(&constraint, expected)? {
                         add_mismatch(context, expression.get_range(), expected, &constraint);
                     }
+                    self.finish_return_quality(&expression, &constraint, expected, true)?;
+                } else {
+                    self.finish_return_quality(&expression, &raw, expected, false)?;
                 }
                 continue;
             }
@@ -89,11 +92,14 @@ impl<E> OwnedQuery<'_, '_, E> {
             if matches!(
                 actual.structural_type(),
                 LuaType::Unknown | LuaType::Any | LuaType::Never
-            ) || self.return_compatible(&actual, expected)?
-            {
+            ) {
+                self.finish_return_quality(&expression, &actual, expected, false)?;
                 continue;
             }
-            add_mismatch(context, expression.get_range(), expected, &actual);
+            if !self.return_compatible(&actual, expected)? {
+                add_mismatch(context, expression.get_range(), expected, &actual);
+            }
+            self.finish_return_quality(&expression, &actual, expected, true)?;
         }
         Ok(())
     }

@@ -1,5 +1,20 @@
 //! Streaming groups retain keys and aggregate state, never arbitrary input rows.
 use super::*;
+/// Validate only when the real binder/prepareGroups reaches this call. A star
+/// is syntax in the immutable Program, but COUNT(*) has no per-row input term.
+pub(super) fn input<'a>(name: &str, args: &'a [Term], distinct: bool) -> Result<Option<&'a Term>> {
+    let [input] = args else {
+        return Err(type_error());
+    };
+    if let Term::Star(qualifier) = input {
+        if name != "COUNT" || distinct || !qualifier.is_empty() {
+            return Err(type_error());
+        }
+        Ok(None)
+    } else {
+        Ok(Some(input))
+    }
+}
 #[derive(Clone)]
 struct Spec {
     name: String,
@@ -153,7 +168,7 @@ pub(super) fn contains(term: &Term) -> bool {
         Term::In(t, args, _) => contains(t) || args.iter().any(contains),
         // Inner aggregates belong to the nested query, not this group.
         Term::InSubquery(input, _, _) => contains(input),
-        Term::Call(_, args) => args.iter().any(contains),
+        Term::Call(_, args, _) => args.iter().any(contains),
         Term::Case(base, args, other) => {
             base.as_deref().is_some_and(contains)
                 || args.iter().any(|(a, b)| contains(a) || contains(b))
@@ -211,7 +226,7 @@ fn validate_correlations(
                 visit(arg)?;
             }
         }
-        Term::Call(_, args) => {
+        Term::Call(_, args, _) => {
             for arg in args {
                 visit(arg)?;
             }
@@ -313,8 +328,9 @@ impl Grouping {
             this.rewrite(t, allow_alias, aliases, params, context, work)
         };
         Ok(match node {
-            Term::Aggregate(name, input, distinct) => {
-                if input.as_deref().is_some_and(contains) {
+            Term::Aggregate(name, args, distinct) => {
+                let input = input(name, args, *distinct)?;
+                if input.is_some_and(contains) {
                     return Err(type_error());
                 }
                 let column = format!("__agg_{}", self.specs.len());
@@ -322,7 +338,7 @@ impl Grouping {
                 self.columns.push(column.clone());
                 self.specs.push(Spec {
                     name: name.clone(),
-                    input: input.clone(),
+                    input: input.cloned().map(Box::new),
                     distinct: *distinct,
                 });
                 Term::Column(ColumnRef::new(column))
@@ -330,7 +346,7 @@ impl Grouping {
             // Internal compound ordinals are input columns, not literals.
             // A matching group key was handled above; otherwise projecting
             // one from an aggregate group is invalid even for empty input.
-            Term::Ordinal(_) => return Err(binding()),
+            Term::Ordinal(_) | Term::Star(_) => return Err(binding()),
             Term::Column(name) => {
                 let outer = context.group.is_some_and(|group| {
                     matches!(
@@ -383,11 +399,12 @@ impl Grouping {
                 query.clone(),
                 *negated,
             ),
-            Term::Call(name, args) => Term::Call(
+            Term::Call(name, args, distinct) => Term::Call(
                 name.clone(),
                 args.iter()
                     .map(|a| recurse(self, a, work))
                     .collect::<Result<Vec<_>>>()?,
+                *distinct,
             ),
             Term::Case(base, args, other) => Term::Case(
                 base.as_ref()
