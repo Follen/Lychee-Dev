@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 01:00 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`93acdcb7c21d76d840d93e2f087a0ce6691ba626`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 01:08 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`ef37ea52d3a31cc2848cc8722f9aeae82cdbd037`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -25,9 +25,9 @@
 
 ## 2. 当前实现与未闭环事项
 
-当前零补丁生产候选已组合：Source freeze→OwnedBindingSession→OwnedQuery→43项诊断调度使用自有实现；上游恢复固定原版848文件、8,382,174字节，树SHA256 `375d92c5d5e503d77232fabf22a21a82f504c2b38dc5def8fcca1d6ecf06e104`，生产patch清单为空，删除旧补丁文件及引擎对自有binding-contracts依赖。增强测试和examples已转向自有公开入口；独立历史参照固定cd871181，测试专用417文件归档不进入生产引擎。原生差分保留历史真实expected及独立失败状态，不把新实现当旧oracle。40 Rust文件语法检查和39项Node检查通过；当前产品锁编译、完整差分、Retail与资源验收仍未运行。已知固定context合同中的已知签名结果投影、独立参数不可用及call_result/return_check真实证据仍在完成，不能因生产recipe归零就称功能等价或验收完成。
+当前零补丁生产候选已组合：Source freeze→OwnedBindingSession→OwnedQuery→43项诊断调度使用自有实现；上游恢复固定原版848文件、8,382,174字节，树SHA256 `375d92c5d5e503d77232fabf22a21a82f504c2b38dc5def8fcca1d6ecf06e104`，生产patch清单为空，删除旧补丁文件及引擎对自有binding-contracts依赖。增强测试和examples已转向自有公开入口；独立历史参照固定cd871181，测试专用417文件归档不进入生产引擎。原生差分保留历史真实expected及独立失败状态，不把新实现当旧oracle。40 Rust文件语法检查和39项Node检查通过；当前产品锁编译、完整差分、Retail与资源验收仍未运行。恢复后在主树执行版本工具发现退役Lua fixture引用导致6项失败，现明确当前report及5个signal样本为required、历史归档不参与版本同步；修后10/10与version --check通过。当前rust-parity的7条Node测试命令219通过、0失败、3个Windows专属launcher在Linux跳过。已知固定context合同中的已知签名结果投影、独立参数不可用及call_result/return_check真实证据仍在完成，不能因生产recipe归零就称功能等价或验收完成。
 
-默认target list/add/show/remove现已接同一typed配置与受控分页/SQLite owner：取消旧10000截断，精确name/大小写优先与raw历史引用验证，show输出resolvedPins；remove按Go先独立CAS删除配置、再读取引用generation、每64项删除，保可见部分提交与removedPins。17项新Rust回归已写未跑；target resolve --file现已接实际65537字节受控读取、独立Go typed JSON规则、同一Metadata writer的parent/CAS/winner验证及checked input close；按Go不额外生成snapshot context，已知提交pin保在既有error.details。14 Core＋3 CLI新测试未运行；generic JSON/type/time精确错误文案仍待补齐，不误套project更严duplicate/depth限制。后继project init/status/lock已组合原control、严格项目读取、同一Metadata原Vec认证与held Stage同目录no-replace/replace/checked关闭，默认resolve_pinned/optional和doctor项目边也已接；21新Rust测试未跑。cd576旧持有reader替换失败的回归现走真实project lock并保新旧reader断言。workspace同步open/native Drop、doctor其余metadata/list/probe及generic错误文案仍未闭合。
+默认target list/add/show/remove现已接同一typed配置与受控分页/SQLite owner：取消旧10000截断，精确name/大小写优先与raw历史引用验证，show输出resolvedPins；remove按Go先独立CAS删除配置、再读取引用generation、每64项删除，保可见部分提交与removedPins。17项新Rust回归已写未跑；target resolve --file现已接实际65537字节受控读取、独立Go typed JSON规则、同一Metadata writer的parent/CAS/winner验证及checked input close；按Go不额外生成snapshot context，已知提交pin保在既有error.details。14 Core＋3 CLI新测试未运行；generic JSON/type/time精确错误文案仍待补齐，不误套project更严duplicate/depth限制。后继project init/status/lock已组合原control、严格项目读取、同一Metadata原Vec认证与held Stage同目录no-replace/replace/checked关闭，默认resolve_pinned/optional和doctor项目边也已接；21新Rust测试未跑。cd576旧持有reader替换失败的回归现走真实project lock并保新旧reader断言。doctor/cache后继23路径现已组合默认独立检查组、全部target配置分页、流式SHA256 cache verify、只读archive检查、原control和独立Budget贯通workspace marker/Metadata；35新Rust回归未跑。当前文件owner采用checked close，保取消与部分报告；旧workspace通用入口、capture内部受控链与native Drop、generic JSON错误文案/延迟type-error首错仍继续闭合。
 
 默认SQL进一步接入typed quoted identifiers与真实单次schema preflight按需RootResolver：local/CDN/effective/meta不再提前准备全部根源；owned WDC Table移动原FileBytes并保留资源owner，local复用Prepared Encoding/Root。32物理源、固定Go100万rows/4096columns/partitions及caller ContentBytes边界已接，capture仍在同一checked-close范围，后续关闭失败保已提交ID。24源与41项新增Rust回归已组合，尚未执行。后继默认local SQL的Encoding/Root/selected现共用query内CASC索引owner：64MiB缓存、XOR首选bucket、原累计逻辑账、真实内存释放与成功capture前原Directory逐块SHA256/最新generation复核已接，8新Rust回归未跑。独立legacy local API仍原路径。后继19路径现已实现默认local/CDN/effective的EXISTS、标量子查询、EXPLAIN ANALYZE、CAST和LIKE；ANALYZE取同一次真实执行的provider回调行数/逻辑账而非RSS。32新增与2更新Rust测试未跑，typed aggregate alias断口及bit函数NULL/首错顺序一并修复。后继18路径已组合真实执行顺序：逐行投影与ORDER表达式先完成，再DISTINCT、稳定排序和slice；每组HAVING→投影→ORDER、MIN/MAX增量驻留、JOIN索引精确成本与仅局部预算fallback退款、真实work与临时安全账均接默认消费者。25新增/1替换回归未跑；cd576子查询类型推断与compound测试适配已修，原expected不改。malformed aggregate/普通函数DISTINCT校验相对真实source binding的首错顺序仍在后继完成，未称全SQL等价。
 
@@ -41,7 +41,7 @@
 
 owned查询后端已保存完整累计源码：单文件按需CFG、局部声明flow/赋值/join/基本guard/casts、三种类型关系、member producer与结构化carrier、substitution和本地/跨文件signature。后继33个Rust源已组合通用call、重载/generic、回调参数环境、builtins/返回转换、迭代变量、member flow与相关窄化、来源carrier，均仅通过语法检查，未编译。真实batch现携带贡献顺序Arc，供显式owned构造使用；旧开发构造缺该事实时保IntakeOrder未完成状态，现有oracle还需集中迁移，不能当兼容通过。该历史候选当时尚未切Source实际诊断；后继已组合真实入口与43 checker，见本节首段，实际编译/集中差分仍待。当前不新增生产patch删除，不宣称6699正常局部变量失败已修复。依赖只增加既有锁定rowan0.17.0的adapter直接边，无新包或版本升级。
 
-当前完整生产批已把 adapter declaration 与 Source PreparedSnapshot 两处摄取切换为原版 Emmy 公开 batch API，并把原35个测试迁到自有 adapter；删除 checked/shared ingestion、DB shared setter 和 VFS Arc接收改动。重建 recipe 从31降为26 changed paths、生产源从26降为24，完整源码身份重建已核，Rust运行待集中验证。公开API要求String，新增N常驻及N+最大文件转换瞬态文本成本已明确记录；不提高原2GiB worker上限，完整语义/诊断仍继续迁移，未达到零补丁。
+历史摄取批已把 adapter declaration 与 Source PreparedSnapshot 两处摄取切换为原版 Emmy 公开 batch API，并把原35个测试迁到自有 adapter；删除 checked/shared ingestion、DB shared setter 和 VFS Arc接收改动。重建 recipe 从31降为26 changed paths、生产源从26降为24，完整源码身份重建已核，Rust运行待集中验证。公开API要求String，新增N常驻及N+最大文件转换瞬态文本成本已明确记录；不提高原2GiB worker上限；该批当时仍有补丁。当前93acdcb已恢复848文件原版生产树，完整功能与资源验收仍待集中执行。
 
 Data当前批已将实际默认DB2/navigation/JSONL消费者接入同一lexical Session：owned Encoding双目录、≤8MiB page cache、Root compact index/Memo、首成功读取统计和capture持有贯通。保持页缓存超大不插入也不清旧缓存、原独立控制/预算；18源文件已组合，Rust未执行。默认local/CDN/effective SQL现已组合真实lazy Equal/Scan、query内完整bundle复用与行临时安全账，包含普通/相关IN子查询、CTE/derived/recursive、RHS UNION、EXPLAIN及Unicode binder区别；97新增与40继承测试均未运行。嵌套UNION尾expression-subquery的继承callback作用域后继现已实现，保词法/运行时字段、derived无outer callback、JOIN前缀、quoted-dot输出名与preflight complete，22项新增回归尚未运行。
 

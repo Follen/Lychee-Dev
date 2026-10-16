@@ -1,9 +1,18 @@
-//! Independent bounded workspace checks. Provider-specific checks are composed at the entry point.
+//! Independently assembled workspace and selection checks. Provider probes run
+//! afterward; an unhealthy workspace does not suppress unrelated diagnostics.
+use crate::control::OperationControl;
 use crate::{
     Invocation, Outcome, Result, ToolkitError, cache, metadata::Metadata, storage, workspace,
 };
 use serde_json::{Value, json};
-use std::{fs, io::Write, path::Path};
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+};
+mod legacy;
+pub use legacy::{LegacyRoot, legacy_candidates};
+mod probes;
 fn check(
     id: &str,
     ok: bool,
@@ -14,269 +23,58 @@ fn check(
 ) -> Value {
     let mut value = json!({"id":id,"ok":ok,"status":status,"detail":detail.into()});
     if !code.is_empty() {
-        value["code"] = json!(code);
+        value["code"] = json!(code)
     }
     if !next.is_empty() {
-        value["nextStep"] = json!(next);
+        value["nextStep"] = json!(next)
     }
     value
 }
-fn files(root: &Path, control: &crate::control::OperationControl) -> Result<usize> {
-    if !root.exists() {
-        return Ok(0);
-    }
-    storage::guard_path(root, root)?;
-    let mut stack = vec![root.to_path_buf()];
-    let mut count = 0usize;
-    while let Some(directory) = stack.pop() {
-        for entry in fs::read_dir(directory)? {
-            control.check()?;
-            let entry = entry?;
-            storage::guard_path(root, &entry.path())?;
-            count += 1;
-            if count > 100000 {
-                return Err(ToolkitError::new(
-                    "vault.check_limit",
-                    "doctor file scan exceeds 100000 entries",
-                    3,
-                ));
-            }
-            if entry.file_type()?.is_dir() {
-                stack.push(entry.path());
-            }
-        }
-    }
-    Ok(count)
+fn finish<T>(result: Result<T>, control: &OperationControl) -> Result<T> {
+    crate::selection::selection_finish(result, control.check())
 }
-pub fn inspect(inv: &Invocation) -> Result<Outcome> {
-    inv.control.check()?;
-    let mut checks = vec![];
-    let identity = workspace::open(&inv.home);
-    match identity {
-        Err(error) => {
-            let code = if !inv.home.exists() {
-                "vault.workspace_missing"
-            } else if !inv.home.join("workspace.json").exists() {
-                "vault.legacy_detected"
-            } else {
-                error.code.as_str()
-            };
-            checks.push(check(
-                "vault.workspace",
-                false,
-                "error",
-                code,
-                error.message,
-                "run explicit init into an empty root, or inspect the selected marker",
-            ));
-        }
-        Ok(identity) => {
-            checks.push(check(
-                "vault.workspace",
-                true,
-                "ok",
-                "",
-                format!(
-                    "workspace marker valid: schema {}, id {}",
-                    identity["schema"].as_str().unwrap_or(""),
-                    identity["workspaceId"].as_str().unwrap_or("")
-                ),
-                "",
-            ));
-            match Metadata::open(&inv.home, false) {
-                Ok(metadata) => {
-                    checks.push(check(
-                        "vault.metadata",
-                        true,
-                        "ok",
-                        "",
-                        "metadata readable; schema version 1",
-                        "",
-                    ));
-                    let targets: Vec<Value> = metadata.list("target/", 10001)?;
-                    if targets.len() > 10000 {
-                        return Err(ToolkitError::new(
-                            "selection.target_scan_limit",
-                            "doctor target scan exceeds 10000 entries",
-                            3,
-                        ));
-                    }
-                    let mut problems = vec![];
-                    let mut remote = vec![];
-                    for target in &targets {
-                        if target["schema"] != "lycheedev.target.v1"
-                            || !crate::selection::valid_product(
-                                target["product"].as_str().unwrap_or(""),
-                            )
-                        {
-                            problems.push(target["name"].clone());
-                        }
-                        if target["source"] == "installation"
-                            && !Path::new(target["installation"].as_str().unwrap_or("")).is_dir()
-                        {
-                            problems.push(target["name"].clone());
-                        }
-                        if target["source"] == "remote" {
-                            remote.push(target["name"].clone());
-                        }
-                    }
-                    let mut item = check(
-                        "selection.named_targets",
-                        problems.is_empty(),
-                        if problems.is_empty() { "ok" } else { "error" },
-                        if problems.is_empty() {
-                            ""
-                        } else {
-                            "selection.target_unresolvable"
-                        },
-                        format!(
-                            "{} named target(s); remote currency is unknown without a provider observation",
-                            targets.len()
-                        ),
-                        "inspect target list and resolve only the needed target",
-                    );
-                    item["data"] = json!({"remote":remote,"unresolvable":problems});
-                    checks.push(item);
-                }
-                Err(error) => checks.push(check(
-                    "vault.metadata",
-                    false,
-                    if error.code == "vault.record_missing" {
-                        "warn"
-                    } else {
-                        "error"
-                    },
-                    &error.code,
-                    error.message,
-                    "inspect state/toolkit.sqlite; a fresh workspace may have no database",
-                )),
-            }
-            let tmp = inv.home.join("tmp");
-            let probe = tmp.join(format!(
-                ".lycheedev-write-probe-{}-{}",
-                std::process::id(),
-                chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
-            ));
-            let writable = (|| -> Result<()> {
-                storage::guard_path(&inv.home, &tmp)?;
-                let mut file = fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&probe)?;
-                file.write_all(b"probe")?;
-                drop(file);
-                fs::remove_file(&probe)?;
-                Ok(())
-            })();
-            match writable {
-                Ok(()) => checks.push(check(
-                    "vault.writable",
-                    true,
-                    "ok",
-                    "",
-                    "workspace tmp/ accepts writes",
-                    "",
-                )),
-                Err(error) => checks.push(check(
-                    "vault.writable",
-                    false,
-                    "error",
-                    "vault.workspace_readonly",
-                    error.message,
-                    "check selected workspace permissions",
-                )),
-            }
-            let lock_count = files(&inv.home.join("locks"), &inv.control)?;
-            checks.push(check(
-                "vault.lock_hygiene",
-                true,
-                "ok",
-                "",
-                format!("{lock_count} lock files retained to preserve lock identity"),
-                "",
-            ));
-            let temporary =
-                files(&tmp, &inv.control)? + files(&inv.home.join("cache/tmp"), &inv.control)?;
-            checks.push(check(
-                "vault.tmp_hygiene",
-                temporary == 0,
-                if temporary == 0 { "ok" } else { "warn" },
-                if temporary == 0 {
-                    ""
-                } else {
-                    "vault.stale_temporary_files"
-                },
-                format!("{temporary} leftover temporary entries"),
-                "unfinished files are not deleted by doctor",
-            ));
-            let mut verify = inv.clone();
-            verify.command = "cache verify".into();
-            match cache::dispatch(&verify) {
-                Ok(report) => checks.push(check(
-                    "vault.cache_integrity",
-                    true,
-                    "ok",
-                    "",
-                    format!(
-                        "objects={} bytes={}",
-                        report.data["checked"], report.data["bytes"]
-                    ),
-                    "",
-                )),
-                Err(error) => {
-                    let mut item = check(
-                        "vault.cache_integrity",
-                        false,
-                        "error",
-                        &error.code,
-                        error.message,
-                        "run cache verify for the original integrity report",
-                    );
-                    item["data"] = error.details;
-                    checks.push(item);
-                }
-            }
+// Classify diagnostics and terminal cancellation from one observation. A stop
+// arriving after a successful probe must never enter an unreachable branch.
+fn diagnostic<T>(result: Result<T>, control: &OperationControl) -> Result<Result<T>> {
+    match (result, control.check()) {
+        (result, Ok(())) => Ok(result),
+        (Ok(_), Err(stop)) => Err(stop),
+        (Err(primary), Err(stop)) => {
+            crate::selection::selection_finish::<T>(Err(primary), Err(stop)).map(Ok)
         }
     }
-    let journal = crate::archive::journal_path(&inv.home)?;
-    if journal.exists() {
-        let plan = crate::archive::plan(&inv.home);
-        match plan {
-            Ok(plan) => checks.push(check(
-                "vault.archive_state",
-                plan["state"] == "complete",
-                if plan["state"] == "complete" {
-                    "ok"
-                } else {
-                    "warn"
-                },
-                if plan["state"] == "complete" {
-                    ""
-                } else {
-                    "vault.archive_incomplete"
-                },
-                format!("archive switch state={}", plan["state"]),
-                "resume the exact explicit fresh initialization",
-            )),
-            Err(error) => checks.push(check(
-                "vault.archive_state",
-                false,
-                "warn",
-                &error.code,
-                error.message,
-                "inspect the selected archive-state journal",
-            )),
+}
+fn workspace_checks(
+    inv: &Invocation,
+    legacy: &[LegacyRoot],
+    checks: &mut Vec<Value>,
+) -> Result<()> {
+    let (identity, missing) = workspace::inspect_controlled(&inv.home, &inv.control);
+    let identity = diagnostic(identity, &inv.control)?;
+    let available = identity.is_ok();
+    checks.push(match identity {
+        Ok(identity)=>check("vault.workspace",true,"ok","",format!("workspace marker valid: schema {}, id {}",identity["schema"].as_str().unwrap_or(""),identity["workspaceId"].as_str().unwrap_or("")),""),
+        Err(error)=>match error.code.as_str(){
+            "vault.workspace_schema_newer"=>check("vault.workspace",false,"error","vault.workspace_schema_newer","workspace marker was written by a newer toolkit","upgrade the toolkit; writes are refused to protect the data"),
+            "vault.unsupported_workspace"=>check("vault.workspace",false,"error","vault.unsupported_workspace","workspace marker is corrupt or unsupported","inspect workspace.json by hand or reinitialize into a fresh root; nothing is overwritten automatically"),
+            "vault.legacy_detected"=>check("vault.workspace",false,"error","vault.legacy_detected","root is occupied without the new workspace marker","run an explicit fresh init to isolate the legacy root, or pick another --home"),
+            _ if missing=>check("vault.workspace",false,"error","vault.workspace_missing",format!("no workspace at {}",inv.home.display()),"run init to create a workspace"),
+            _=>check("vault.workspace",false,"error","vault.unsupported_workspace",error.message,"check the workspace path and permissions"),
         }
-    } else {
-        checks.push(check(
-            "vault.archive_state",
-            true,
-            "ok",
-            "",
-            "no archive switch recorded for this root",
-            "",
-        ));
+    });
+    if available {
+        checks.push(probes::metadata(inv)?);
+        checks.push(probes::writable(inv)?);
+        checks.extend(probes::hygiene(inv)?);
+        checks.push(probes::cache(inv)?);
     }
+    checks.push(probes::archive(inv)?);
+    if !legacy.is_empty() {
+        checks.push(legacy::inspect(legacy, &inv.control)?)
+    }
+    inv.control.check()
+}
+fn selection_checks(inv: &Invocation, checks: &mut Vec<Value>) -> Result<()> {
     let baselines = &crate::client::baselines::VERIFIED_BASELINES;
     let problems = crate::client::baselines::catalog_problems(baselines);
     checks.push(if problems.is_empty() {
@@ -301,6 +99,104 @@ pub fn inspect(inv: &Invocation) -> Result<Outcome> {
             "regenerate or repair the verified client baselines before resolving targets",
         )
     });
+    let result = crate::selection::target::list_configurations(&inv.home, &inv.control);
+    let result = diagnostic(result, &inv.control)?;
+    let configs = match result {
+        Ok(v) => v,
+        Err(e) => {
+            checks.push(check(
+                "selection.named_targets",
+                false,
+                "error",
+                "selection.target_format",
+                e.message,
+                "run target list against a valid workspace root",
+            ));
+            return Ok(());
+        }
+    };
+    if configs.is_empty() {
+        checks.push(check(
+            "selection.named_targets",
+            true,
+            "ok",
+            "",
+            "no named target configurations",
+            "",
+        ));
+        return Ok(());
+    }
+    let mut problems = Vec::new();
+    let mut remote = Vec::new();
+    for config in &configs {
+        inv.control.check()?;
+        if let Err(e) = config.validate() {
+            problems.push(format!("{}: {}", config.name, e.message));
+            continue;
+        }
+        match config.source.as_str() {
+            "installation" => {
+                if !fs::symlink_metadata(&config.installation).is_ok_and(|i| i.is_dir()) {
+                    problems.push(format!(
+                        "{}: installation directory is missing ({})",
+                        config.name, config.installation
+                    ));
+                }
+            }
+            "remote" => remote.push(config.name.clone()),
+            _ => {}
+        }
+        inv.control.check()?;
+    }
+    checks.push(if !problems.is_empty(){check("selection.named_targets",false,"error","selection.target_unresolvable",problems.join("; "),"fix or re-add the named target (target add replaces it explicitly)")}else{
+        let mut detail=format!("{} named target(s) validate and resolve locally",configs.len());
+        if !remote.is_empty(){detail.push_str(&format!("; remote currency unknown offline for {}",remote.join(", ")))}
+        let mut item=check("selection.named_targets",true,"ok","",detail,"run target resolve (or the remote availability listing) to observe current remote releases");item["data"]=json!({"remote":remote});item
+    });
+    Ok(())
+}
+fn partial(mut error: ToolkitError, inv: &Invocation, checks: Vec<Value>) -> ToolkitError {
+    let primary = error.clone();
+    error.details = json!({"schema":"lycheedev.doctor-error.v1","primary":primary,"context":{"workspace":inv.home},"result":{"healthy":false,"checks":checks}});
+    error
+}
+pub fn inspect(inv: &Invocation) -> Result<Outcome> {
+    inspect_with_provider(inv, &[], || Ok(Vec::new()))
+}
+/// Existing callers keep their provider shape contract. The actual entrypoint
+/// supplies a closure so expensive provider observations follow Core checks.
+pub fn inspect_with_checks(inv: &Invocation, providers: Vec<Value>) -> Result<Outcome> {
+    inspect_with_provider(inv, &[], || Ok(providers))
+}
+pub fn inspect_with_provider(
+    inv: &Invocation,
+    legacy: &[LegacyRoot],
+    provider: impl FnOnce() -> Result<Vec<Value>>,
+) -> Result<Outcome> {
+    inv.control.check()?;
+    let mut checks = Vec::new();
+    let result = (|| {
+        workspace_checks(inv, legacy, &mut checks)?;
+        selection_checks(inv, &mut checks)?;
+        let providers = provider()?;
+        for item in providers {
+            inv.control.check()?;
+            if item["id"].as_str().is_none_or(str::is_empty)
+                || !item["ok"].is_boolean()
+                || !["ok", "warn", "error", "unknown"]
+                    .contains(&item["status"].as_str().unwrap_or("ok"))
+            {
+                return Err(ToolkitError::invalid(
+                    "provider health check shape is invalid",
+                ));
+            }
+            checks.push(item);
+        }
+        inv.control.check()
+    })();
+    if let Err(error) = result {
+        return Err(partial(error, inv, checks));
+    }
     let healthy = checks.iter().all(|item| item["status"] != "error");
     let result = json!({"healthy":healthy,"checks":checks});
     if !healthy {
@@ -315,53 +211,5 @@ pub fn inspect(inv: &Invocation) -> Result<Outcome> {
     outcome.selection = json!({"workspace":inv.home});
     Ok(outcome)
 }
-/// Entry adapters supply provider-owned observations; Core remains independent
-/// of all business crates and owns the common health/status/exit aggregation.
-pub fn inspect_with_checks(inv: &Invocation, providers: Vec<Value>) -> Result<Outcome> {
-    if providers.len() > 64 {
-        return Err(ToolkitError::new(
-            "doctor.check_budget",
-            "provider check count exceeds64",
-            3,
-        ));
-    }
-    let mut outcome = match inspect(inv) {
-        Ok(outcome) => outcome,
-        Err(error) if error.code == "doctor.unhealthy" => {
-            Outcome::new(error.details["result"].clone())
-        }
-        Err(error) => return Err(error),
-    };
-    for provider in providers {
-        inv.control.check()?;
-        if provider["id"].as_str().is_none_or(|id| id.is_empty())
-            || !provider["ok"].is_boolean()
-            || !["ok", "warn", "error", "unknown"]
-                .contains(&provider["status"].as_str().unwrap_or("ok"))
-        {
-            return Err(ToolkitError::invalid(
-                "provider health check shape is invalid",
-            ));
-        }
-        outcome.data["checks"]
-            .as_array_mut()
-            .ok_or_else(|| ToolkitError::invalid("base health check shape is invalid"))?
-            .push(provider);
-    }
-    let healthy = outcome.data["checks"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|check| check["status"] != "error");
-    outcome.data["healthy"] = json!(healthy);
-    outcome.selection = json!({"workspace":inv.home});
-    if !healthy {
-        return Err(ToolkitError::new(
-            "doctor.unhealthy",
-            "workspace has error-status health checks",
-            3,
-        )
-        .with_details(json!({"result":outcome.data,"context":outcome.selection})));
-    }
-    Ok(outcome)
-}
+#[cfg(test)]
+mod tests;

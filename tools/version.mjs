@@ -3,13 +3,10 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-// Protocol fixtures exercise the currently shipped Lua runtime, so they must
-// advance with its release identity rather than silently becoming stale.
-export const versionedLuaFixtures = [
-  'acknowledge', 'identity', 'loaded_ready', 'persistence', 'queue',
-  'queue_ack', 'reentry', 'report', 'runtime_epoch',
-  'investigation', 'receiver', 'receiver_rollback',
-].map(name => `tests/protocol/${name}.lua`);
+// TestLuaReportVerifiedByHost compares this current Lua fixture with
+// buildinfo.Version. Retired fixtures remain immutable in tests/history;
+// fixed-version protocol fixtures do not follow the product release.
+export const versionedLuaFixtures = ['tests/protocol/report.lua'];
 export const versionedSignalSamples = [
   'identity.actor_restricted', 'identity.no_actor', 'identity.ok',
   'identity.unready', 'ready',

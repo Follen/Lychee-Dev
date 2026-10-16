@@ -7,6 +7,9 @@ use crate::{
 use serde_json::{Value, json};
 use std::{fs, path::Path};
 pub mod data_resources;
+mod controlled;
+pub(crate) use controlled::inspect_controlled;
+pub use controlled::{open_controlled, open_controlled_with_check};
 pub fn open(home: &Path) -> Result<Value> {
     let path = home.join("workspace.json");
     let bytes = match fs::read(&path) {
@@ -27,15 +30,22 @@ pub fn open(home: &Path) -> Result<Value> {
         }
         Err(error) => return Err(error.into()),
     };
-    let unsupported = || {
-        ToolkitError::new(
-            "vault.unsupported_workspace",
-            "vault.unsupported_workspace",
-            4,
-        )
-    };
-    let (identity, zero_time) =
-        crate::evidence::decode_workspace_identity(&bytes).map_err(|_| unsupported())?;
+    decode_identity(&bytes)
+}
+fn decode_identity(bytes: &[u8]) -> Result<Value> {
+    let decoded =
+        crate::evidence::decode_workspace_identity(bytes).map_err(|_| unsupported_identity())?;
+    validate_identity(decoded)
+}
+fn unsupported_identity() -> ToolkitError {
+    ToolkitError::new(
+        "vault.unsupported_workspace",
+        "vault.unsupported_workspace",
+        4,
+    )
+}
+fn validate_identity((identity, zero_time): (Value, bool)) -> Result<Value> {
+    let unsupported = unsupported_identity;
     let id = identity["workspaceId"].as_str().unwrap_or("");
     // Fixed Go checks decoded length and time.IsZero before schema, then hex.
     if id.len() != 32 || zero_time {

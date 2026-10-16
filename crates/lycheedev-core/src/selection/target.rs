@@ -407,3 +407,4 @@ mod tests;
 
 mod management;
 pub use management::dispatch;
+pub(crate) use management::list_configurations;

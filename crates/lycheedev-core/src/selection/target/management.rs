@@ -249,16 +249,16 @@ fn absolute(path: &Path, cwd: &Path) -> Result<PathBuf> {
     }
     Ok(clean)
 }
-fn list(inv: &Invocation) -> Result<Outcome> {
-    let result = read(&inv.home, &inv.control, |reader| {
-        configs(reader, &inv.control)
-    });
-    let values = match result {
-        Err(error) if pure(&error, "vault.record_missing") => Vec::new(),
-        other => other?,
-    };
-    Ok(Outcome::new(json!({"targets":values})))
+pub(crate) fn list_configurations(home: &Path, control: &OperationControl) -> Result<Vec<TargetConfig>> {
+    match read(home, control, |reader| configs(reader, control)) {
+        Err(error) if pure(&error, "vault.record_missing") => Ok(Vec::new()),
+        other => other,
+    }
 }
+fn list(inv: &Invocation) -> Result<Outcome> {
+    Ok(Outcome::new(json!({"targets":list_configurations(&inv.home, &inv.control)?})))
+}
+
 fn add(inv: &Invocation) -> Result<Outcome> {
     let name = inv
         .positional

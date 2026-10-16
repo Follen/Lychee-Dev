@@ -116,7 +116,7 @@ This is an execution view, not a second evidence authority. A component being im
 - [ ] Collect actual full Retail memory by phase using synchronized authenticated Job membership; report current WorkingSet/PrivateBytes sampled group peaks and steady observations, sampling gaps and failed/incomplete operations separately. Historical `not_measured` remains unchanged.
 - [ ] Extend the implemented owned Emmy adapter with one-way Source→adapter→Emmy dependencies and real diagnostics/API-type consumers, then move domain DTO/projection/provenance/reporting out of upstream patches in small reviewed batches. Preserve the entire enhanced XML/Lua design per explicit user decision; label it separately from Go-equivalent behavior.
 - [ ] Map each remaining Emmy patch to consumers and tests; preserve 35 contextual regressions/full Retail acceptance. Pin upgrades, check official public API replacements, review uncertainty/identity/cardinality boundaries and remove each hook after its owned replacement proves equivalent; all must be removed for acceptance. Do not count a wrapper-only crate as completed decoupling.
-- [ ] Complete SQL meta exact Unicode EqualFold before independent review; logical resources admission (including 16×1MiB Go80MiB/Rust144MiB false rejection), paired CSV R4 is independently reviewed but native NOT_RUN; EXPLAIN/TopK R3 is implemented and independently reviewed, with 31 new tests NOT_RUN; ANALYZE/provider callback and resource gaps remain.
+- [ ] Complete SQL meta exact Unicode EqualFold before independent review; logical resources admission (including 16×1MiB Go80MiB/Rust144MiB false rejection), paired CSV R4 is independently reviewed but native NOT_RUN; EXPLAIN/TopK and actual ANALYZE provider callbacks are implemented; execution-order, group/index/result logical accounting is now integrated through R25.8. Concentrated native tests and remaining parser/binder first-error parity are pending.
 
 ## 1. Reproducible foundation (no user interaction)
 
@@ -199,7 +199,7 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 ## Confirmed remaining business implementations (2026-10-15)
 
 - [ ] Validate default Wago and supplied Raidbots Hotfix providers now committed in 62d53b2; complete Wago cancellable shared HTTP integration and actual provider/error/cache tests. Local dbcache table/scan remain dispatched; implementation is not complete provider acceptance.
-- [ ] Implement remote target resolution and shared CDN read backend for DB2/SQL/navigation/assets, preserving fixed Go identity, cache, transport and resource contracts. R4.3 HTTP has 49 actual local passes; R6.1 gzip/redirect successor is source-reviewed but not yet runtime-validated, cache/target candidates still require repair and independent review. The final CLI consumers and complete CDN reader remain open.
+- [ ] Validate the integrated default target/local/CDN reader and DB2/SQL/navigation/assets consumers against fixed Go identity, cache, transport and resource contracts. Named/direct/file target and project lifecycle are now connected; current doctor/cache closure and remaining SQL parser/binder error ordering are still being completed. Historical R4.3 HTTP 49 passes prove only that earlier scope. Complete runtime acceptance of the actual current default routes.
 - [ ] Connect existing partial-encrypted BLTE/DB2 primitives through production consumers, retaining missing-span and partial-capture provenance instead of rejecting every absent key.
 
 ## Owned contracts and slot preflight checkpoint
@@ -218,7 +218,7 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 ## Public API and remaining runtime closure
 
 - [x] Independently compare public declaration rendering against the old renderer: 27+27 local focused-lock tests and 450 complete traces equal; retain the original Linux path failure and identical reviewed portability accommodation.
-- [ ] Validate this reduced Emmy patch on the exact product lock, Windows, and complete Source workflows; do not infer full zero-patch equivalence.
+- [ ] Validate the restored unmodified 848-file Emmy tree plus owned semantic consumers on the exact product lock, Windows, and complete Source workflows. Source patch removal alone does not establish full behavior/resource equivalence.
 - [ ] Execute 11 new independent Metadata budget/owner-cleanup tests and validate real Remote cache/target consumers.
 - [ ] Repair the actual gzip deflate-versus-limit difference and execute all 157 differential vectors plus all Rust regressions without fail-fast hiding later cases.
 - [ ] Diagnose full-Retail memory by concrete structure counts and ownership lifetimes; compare phase-matched sampled working set/private bytes after any optimization without dropping coverage or results.
@@ -236,7 +236,7 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 
 - [ ] Execute cumulative Go 3.2.2 R4 slot activation/recovery regressions (21 declarations), current 220-case formal Lua suite and actual Skill/CLI against the exact next Windows commit. Explicit budget-source identity, nil-budget and historical Go journal compatibility are implemented and independently reviewed, not yet runtime-accepted.
 - [ ] Validate the corrected shared 90-second Source refs/context/batch total budget with actual public CLI calls. The old 182-second refs success does not satisfy this contract. Measure request-local XML catalog reuse, conservative relation filtering and Graph ownership moves on the full corpus; retain every result/check and report failures.
-- [ ] Complete remote workspace admission and default provider consumers after the reviewed R10.1 encoded-reader integration. Run new/inherited reader tests and preserve all counter, ownership and independent-cancellation evidence.
+- [ ] Validate the now-integrated default remote workspace admission, scoped provider/read sessions and single-pass decoded publication with new/inherited reader tests. Preserve every counter, ownership and independent-cancellation assertion; finish any remaining controlled lifetime gaps identified in concentrated execution.
 - [ ] Close the local gzip candidate's one stalled-header deadline test failure before full acceptance; all 233 fixed-Go vectors matched, but full Rust result is 71/72. Do not relabel the old 60/61 or 152/157 results.
 - [ ] Diagnose Windows 500-slot fixture timeouts with actual concurrency and single-operation timing; cargo compilation jobs do not bound test threads. Do not extend production deadlines or remove durable writes/checks to obtain green tests.
 

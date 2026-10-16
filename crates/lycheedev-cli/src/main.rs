@@ -815,53 +815,76 @@ fn doctor_provider_checks_with(
     Ok(vec![release, engine])
 }
 fn dispatch_doctor(inv: &Invocation) -> Result<Outcome> {
-    let mut providers = doctor_provider_checks_with(
-        inv,
-        || {
-            // Preserve the original installed-layout lookup and full, bounded
-            // inventory verification, under the caller's unchanged operation budget.
-            let executable = std::env::current_exe()?;
-            let root = executable
-                .parent()
-                .and_then(|path| path.parent())
-                .and_then(|path| path.parent())
-                .ok_or_else(|| {
-                    ToolkitError::new(
-                        "delivery.invalid_release",
-                        "complete distribution root unavailable",
-                        3,
-                    )
-                })?;
-            lycheedev_delivery::release::inspect_with_control(root, VERSION, &inv.control)
-        },
-        lycheedev_source::native_research::one_shot,
-    )?;
-    let project = lycheedev_core::selection::find_project_controlled(&inv.cwd, &inv.control)
-        .and_then(|directory| lycheedev_core::selection::inspect_project_controlled(&directory, &inv.control));
     inv.control.check()?;
-    if let Ok(project) = project
-        && let Some(product) = project["project"]["product"].as_str()
-    {
-        let observed = lycheedev_source::git::mirror_health_with_control(
-            &inv.home,
-            "wow-ui-source",
-            product,
-            &inv.control,
-        );
+    #[cfg(windows)]
+    let (home_key, home_display) = ("USERPROFILE", "%userprofile%");
+    #[cfg(not(windows))]
+    let (home_key, home_display) = ("HOME", "$HOME");
+    let user_home = std::env::var_os(home_key)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            ToolkitError::new(
+                "command.failed",
+                format!("{home_display} is not defined"),
+                5,
+            )
+        })?;
+    let local_app_data = std::env::var_os("LOCALAPPDATA");
+    let legacy = lycheedev_core::doctor::legacy_candidates(
+        Some(std::path::Path::new(&user_home)),
+        local_app_data.as_deref().map(std::path::Path::new),
+    );
+    lycheedev_core::doctor::inspect_with_provider(inv, &legacy, || {
+        let mut providers = doctor_provider_checks_with(
+            inv,
+            || {
+                // Preserve the original installed-layout lookup and full, bounded
+                // inventory verification, under the caller's unchanged operation budget.
+                let executable = std::env::current_exe()?;
+                let root = executable
+                    .parent()
+                    .and_then(|path| path.parent())
+                    .and_then(|path| path.parent())
+                    .ok_or_else(|| {
+                        ToolkitError::new(
+                            "delivery.invalid_release",
+                            "complete distribution root unavailable",
+                            3,
+                        )
+                    })?;
+                lycheedev_delivery::release::inspect_with_control(root, VERSION, &inv.control)
+            },
+            lycheedev_source::native_research::one_shot,
+        )?;
+        providers.extend(formal_live::doctor_checks(inv));
+        let project = lycheedev_core::selection::find_project_controlled(&inv.cwd, &inv.control)
+            .and_then(|directory| {
+                lycheedev_core::selection::inspect_project_controlled(&directory, &inv.control)
+            });
         inv.control.check()?;
-        let detail = match &observed {
-            Ok(value) if value["exists"] == false => {
-                format!("mirror for {product} is not initialized yet")
-            }
-            Ok(_) => format!(
-                "mirror for {product} is a contained bare SHA-1 repository; commit/object authentication is not covered by this format check"
-            ),
-            Err(error) => format!("mirror health probe failed: {}", error.message),
-        };
-        providers.push(json!({"id":"codebase.source_mirror","ok":true,"status":"unknown","detail":format!("{detail}; remote currency {}",if inv.flag_bool("--offline"){"not checked (--offline)"}else{"unknown"}),"nextStep":format!("run source sync --source wow-ui-source --product {product} to prepare or refresh the mirror"),"scope":"repository-format","objectsVerified":false}));
-    }
-    providers.extend(formal_live::doctor_checks(inv));
-    lycheedev_core::doctor::inspect_with_checks(inv, providers)
+        if let Ok(project) = project
+            && let Some(product) = project["project"]["product"].as_str()
+        {
+            let observed = lycheedev_source::git::mirror_health_with_control(
+                &inv.home,
+                "wow-ui-source",
+                product,
+                &inv.control,
+            );
+            inv.control.check()?;
+            let detail = match &observed {
+                Ok(value) if value["exists"] == false => {
+                    format!("mirror for {product} is not initialized yet")
+                }
+                Ok(_) => format!(
+                    "mirror for {product} is a contained bare SHA-1 repository; commit/object authentication is not covered by this format check"
+                ),
+                Err(error) => format!("mirror health probe failed: {}", error.message),
+            };
+            providers.push(json!({"id":"codebase.source_mirror","ok":true,"status":"unknown","detail":format!("{detail}; remote currency {}",if inv.flag_bool("--offline"){"not checked (--offline)"}else{"unknown"}),"nextStep":format!("run source sync --source wow-ui-source --product {product} to prepare or refresh the mirror"),"scope":"repository-format","objectsVerified":false}));
+        }
+        Ok(providers)
+    })
 }
 fn source_runtime_bundle_from_release(
     root: &std::path::Path,
@@ -1051,7 +1074,7 @@ fn envelope(result: &Result<Outcome>) -> Value {
             } else if !error.details.is_null() {
                 fault["details"] = error.details.clone();
             }
-            json!({"schema":"lycheedev.result.v1","ok":false,"operationId":error.details["operationId"].as_str().unwrap_or(""),"context":error.details.get("__commandContext").or_else(||error.details.get("context")).cloned().unwrap_or(json!({})),"result":error.details.get("result").cloned().unwrap_or(Value::Null),"captures":error.details.get("captures").cloned().unwrap_or(json!([])),"warnings":[],"error":fault})
+            json!({"schema":"lycheedev.result.v1","ok":false,"operationId":error.details["operationId"].as_str().unwrap_or(""),"context":error.details.get("__commandContext").or_else(||error.details.get("context")).cloned().unwrap_or(json!({})),"result":error.details.get("result").cloned().unwrap_or(Value::Null),"captures":error.details.get("captures").cloned().unwrap_or(json!([])),"warnings":error.details.get("warnings").and_then(Value::as_array).filter(|warnings|warnings.iter().all(Value::is_string)).cloned().unwrap_or_default(),"error":fault})
         }
     }
 }
@@ -2978,3 +3001,5 @@ mod tests {
         );
     }
 }
+#[cfg(test)]
+mod doctor_cache_tests;

@@ -382,7 +382,27 @@ jobs:
       - name: Run exact native raw byte JSON grammar fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
-          node tools/rust-cargo.mjs --owner ci-raw-json --one-shot -- test --locked --offline -p lycheedev-core --lib raw_json::tests -j 1
+          node tools/rust-cargo.mjs --owner ci-raw-json --one-shot -- test --locked --offline -p lycheedev-core --lib raw_json:: -j 1
+      - name: Run core-doctor controlled consumer fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-core-doctor --one-shot -- test --locked --offline -p lycheedev-core --lib doctor:: -j 1
+      - name: Run cache-verification controlled consumer fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-cache-verification --one-shot -- test --locked --offline -p lycheedev-core --lib cache::verification:: -j 1
+      - name: Run archive-inspection controlled consumer fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-archive-inspection --one-shot -- test --locked --offline -p lycheedev-core --lib archive::inspection:: -j 1
+      - name: Run workspace-controlled controlled consumer fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-workspace-controlled --one-shot -- test --locked --offline -p lycheedev-core --lib workspace::controlled:: -j 1
+      - name: Run doctor-cache-cli controlled consumer fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-doctor-cache-cli --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev doctor_cache_tests:: -j 1
       - name: Run actual Source child scope and cleanup fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-source-process --one-shot -- test --locked --offline -p lycheedev-source --lib process::tests -j 1

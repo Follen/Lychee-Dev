@@ -800,13 +800,41 @@ fn normalize_go_strings_with_time_key<'a>(
     control: &OperationControl,
     time_key: &str,
 ) -> Result<Cow<'a, [u8]>> {
-    control.check()?;
+    normalize_go_strings_checked(raw, time_key, &mut || control.check())
+}
+fn needs_string_normalization(raw: &[u8], check: &mut impl FnMut() -> Result<()>) -> Result<bool> {
+    let mut at = 0;
+    while at < raw.len() {
+        check()?;
+        let mut end = at.saturating_add(65536).min(raw.len());
+        match std::str::from_utf8(&raw[at..end]) {
+            Ok(_) => {}
+            Err(e) if e.error_len().is_none() && end < raw.len() => end = at + e.valid_up_to(),
+            Err(_) => return Ok(true),
+        }
+        // Include the next byte so an escape crossing a scan boundary counts.
+        if raw[at..end.saturating_add(1).min(raw.len())]
+            .windows(2)
+            .any(|pair| pair == b"\\u")
+        {
+            return Ok(true);
+        }
+        at = end;
+    }
+    check()?;
+    Ok(false)
+}
+fn normalize_go_strings_checked<'a>(
+    raw: &'a [u8],
+    time_key: &str,
+    check: &mut impl FnMut() -> Result<()>,
+) -> Result<Cow<'a, [u8]>> {
+    check()?;
     // Normal producer JSON needs no second body allocation. Only Unicode
     // escapes can hide a valid timestamp character from the raw Go reader;
     // the other JSON escapes produce characters the time grammar rejects.
-    let needs_normalization =
-        std::str::from_utf8(raw).is_err() || raw.windows(2).any(|pair| pair == b"\\u");
-    control.check()?;
+    let needs_normalization = needs_string_normalization(raw, check)?;
+    check()?;
     if !needs_normalization {
         return Ok(Cow::Borrowed(raw));
     }
@@ -824,14 +852,23 @@ fn normalize_go_strings_with_time_key<'a>(
             Some((n << 4) | u16::from(digit))
         })
     }
-    fn skip_space(raw: &[u8], mut at: usize) -> usize {
+    fn skip_space(
+        raw: &[u8],
+        mut at: usize,
+        check: &mut impl FnMut() -> Result<()>,
+    ) -> Result<usize> {
+        let mut next = at.saturating_add(65536);
         while raw
             .get(at)
             .is_some_and(|ch| matches!(ch, b' ' | b'\t' | b'\r' | b'\n'))
         {
+            if at >= next {
+                check()?;
+                next = at.saturating_add(65536);
+            }
             at += 1;
         }
-        at
+        Ok(at)
     }
     let maximum = raw
         .len()
@@ -845,7 +882,7 @@ fn normalize_go_strings_with_time_key<'a>(
     let mut next_check = 0;
     while at < raw.len() {
         if at >= next_check {
-            control.check()?;
+            check()?;
             next_check = at.saturating_add(65536);
         }
         if raw[at] != b'"' {
@@ -861,7 +898,7 @@ fn normalize_go_strings_with_time_key<'a>(
         at += 1;
         while at < raw.len() && raw[at] != b'"' {
             if at >= next_check {
-                control.check()?;
+                check()?;
                 next_check = at.saturating_add(65536);
             }
             if raw[at] == b'\\' {
@@ -938,19 +975,18 @@ fn normalize_go_strings_with_time_key<'a>(
             out.truncate(output_start);
             out.extend_from_slice(b"\"!\"");
         }
-        let next = skip_space(raw, at);
+        let next = skip_space(raw, at, check)?;
         if raw.get(next) == Some(&b':') && at - start <= 64 {
             let key: String = serde_json::from_slice(&out[output_start..])?;
             if fold_field(&key) == time_key {
-                timestamp_at = Some(skip_space(raw, next + 1));
+                timestamp_at = Some(skip_space(raw, next + 1, check)?);
             }
         }
         debug_assert!(out.len() <= maximum);
     }
-    control.check()?;
+    check()?;
     Ok(Cow::Owned(out))
 }
-
 #[cfg(test)]
 mod compatibility_tests {
     use super::*;
@@ -1074,6 +1110,13 @@ pub(super) fn decode_historical_capture(
 // Shared foundation admission uses the same Go scalar/null/string/time decoder
 // as capture manifests; no separate historical-workspace policy is introduced.
 pub(crate) fn decode_workspace_identity(raw: &[u8]) -> Result<(serde_json::Value, bool)> {
+    let control = OperationControl::default();
+    decode_workspace_identity_with_check(raw, || control.check())
+}
+pub(crate) fn decode_workspace_identity_with_check(
+    raw: &[u8],
+    mut check: impl FnMut() -> Result<()>,
+) -> Result<(serde_json::Value, bool)> {
     #[derive(Default)]
     struct Identity {
         schema: String,
@@ -1103,17 +1146,62 @@ pub(crate) fn decode_workspace_identity(raw: &[u8]) -> Result<(serde_json::Value
             }
         }
     }
-    if !crate::raw_json::is_valid(raw) {
+    if crate::raw_json::validate_with_check(raw, &mut check)?.is_err() {
         return Err(ToolkitError::invalid("invalid workspace JSON"));
     }
-    let normalized =
-        normalize_go_strings_with_time_key(raw, &OperationControl::default(), "createdat")?;
+    let normalized = normalize_go_strings_checked(raw, "createdat", &mut check)?;
+    check()?;
     let mut identity = Identity::default();
-    let mut decoder = serde_json::Deserializer::from_slice(&normalized);
-    ObjectSeed(&mut identity).deserialize(&mut decoder)?;
-    decoder.end()?;
+    if normalized.len() <= 65536 {
+        let mut decoder = serde_json::Deserializer::from_slice(&normalized);
+        ObjectSeed(&mut identity).deserialize(&mut decoder)?;
+        decoder.end()?;
+    } else {
+        struct Reader<'a, C> {
+            raw: &'a [u8],
+            at: usize,
+            next: usize,
+            check: C,
+            stopped: Option<ToolkitError>,
+        }
+        impl<C: FnMut() -> Result<()>> std::io::Read for Reader<'_, C> {
+            fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+                if self.at >= self.next {
+                    if let Err(e) = (self.check)() {
+                        self.stopped = Some(e.clone());
+                        return Err(std::io::Error::other(e));
+                    }
+                    self.next = self.at.saturating_add(65536);
+                }
+                let n = out.len().min(self.raw.len() - self.at).min(65536);
+                out[..n].copy_from_slice(&self.raw[self.at..self.at + n]);
+                self.at += n;
+                Ok(n)
+            }
+        }
+        let mut reader = Reader {
+            raw: &normalized,
+            at: 0,
+            next: 0,
+            check: &mut check,
+            stopped: None,
+        };
+        let result = {
+            let mut decoder = serde_json::Deserializer::from_reader(&mut reader);
+            ObjectSeed(&mut identity)
+                .deserialize(&mut decoder)
+                .and_then(|_| decoder.end())
+        };
+        if let Some(error) = reader.stopped {
+            return Err(error);
+        }
+        result?;
+    }
+
     Ok((
         serde_json::json!({"schema":identity.schema,"workspaceId":identity.workspace_id,"createdAt":identity.created_at.canonical.unwrap_or(identity.original_time)}),
         identity.created_at.zero,
     ))
 }
+#[cfg(test)]
+mod workspace_control_tests;

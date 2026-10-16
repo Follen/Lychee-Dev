@@ -26,6 +26,9 @@ function changeSource(root, version) {
 test('current source is synchronized without writes', () => {
   assert.equal(synchronizeVersion(repo).changed.length, 0);
 });
+test('only the current host-verified Lua report follows the product release', () => {
+  assert.deepEqual(versionedLuaFixtures, ['tests/protocol/report.lua']);
+});
 test('check rejects drift without repair; explicit generation updates every deliverable', t => {
   const root = fixture(t);
   const original = new Map(targets.map(path => [path, readFileSync(join(root, path), 'utf8')]));
@@ -47,6 +50,39 @@ test('malformed or duplicated target prevents any partial generation', t => {
   writeFileSync(join(root, 'addon/Lychee Dev.toc'), '## Version: old\n## Version: other\n');
   assert.throws(() => synchronizeVersion(root, true), /version.invalid_target/);
   assert.equal(readFileSync(join(root, targets[0]), 'utf8'), generated);
+});
+test('missing current Lua or signal targets fail without any partial generation', t => {
+  for (const missing of [...versionedLuaFixtures, ...versionedSignalSamples, 'tests/addon/env.lua', 'tests/addon/t_about.lua']) {
+    const root = fixture(t);
+    const original = new Map(targets.filter(path => path !== missing).map(path => [path, readFileSync(join(root, path))]));
+    rmSync(join(root, missing));
+    changeSource(root, '3.5.1');
+    for (const write of [false, true]) {
+      assert.throws(() => synchronizeVersion(root, write), {code: 'ENOENT', path: join(root, missing)});
+      for (const [path, bytes] of original) assert.deepEqual(readFileSync(join(root, path)), bytes, path);
+    }
+  }
+});
+test('release generation preserves archived oracles and fixed-version Lua fixtures', t => {
+  const root = fixture(t);
+  const retired = ['acknowledge', 'identity', 'loaded_ready', 'persistence', 'queue',
+    'queue_ack', 'reentry', 'runtime_epoch', 'investigation', 'receiver', 'receiver_rollback'];
+  const retained = [
+    ...retired.map(name => `tests/history/legacy-ui-00fd643/source/tests/protocol/${name}.lua.source`),
+    ...['formal-lua', 'formal-lua-3.2.1', 'formal-lua-3.2.2'].flatMap(name =>
+      ['env.lua', 't_about.lua'].map(file => `tests/rust-parity/${name}/oracle/tests/addon/${file}`)),
+    'tests/protocol/writer.lua', 'tests/protocol/slot_server.lua',
+  ];
+  const original = new Map(retained.map(path => [path, readFileSync(join(repo, path))]));
+  for (const [path, bytes] of original) {
+    mkdirSync(dirname(join(root, path)), {recursive: true});
+    writeFileSync(join(root, path), bytes);
+  }
+  changeSource(root, '3.5.1');
+  synchronizeVersion(root, true);
+  assert.equal(synchronizeVersion(root).changed.length, 0);
+  for (const [path, bytes] of original) assert.deepEqual(readFileSync(join(root, path)), bytes, path);
+  for (const name of retired) assert.throws(() => readFileSync(join(root, `tests/protocol/${name}.lua`)), {code: 'ENOENT'});
 });
 test('invalid source version cannot enter generated Go or Lua', t => {
   const root = fixture(t);

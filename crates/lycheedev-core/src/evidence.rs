@@ -30,7 +30,7 @@ pub use budgeted::{
     CaptureAccounting, CaptureHeader, commit_capture_budgeted, commit_capture_budgeted_referencing,
     commit_capture_budgeted_with_dependencies, commit_verified_capture_budgeted,
 };
-pub(crate) use dependencies::decode_workspace_identity;
+pub(crate) use dependencies::{decode_workspace_identity, decode_workspace_identity_with_check};
 pub use dependencies::{
     GoCaptureDecode, GoSignedInteger, GoTimestamp, normalize_go_json_strings, parse_go_timestamp,
 };

@@ -10,6 +10,8 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
+mod verification;
+pub(crate) use verification::{verify, walk_files};
 #[derive(Clone)]
 struct Object {
     digest: String,
@@ -282,6 +284,16 @@ pub fn commands() -> &'static [&'static str] {
     &["cache status", "cache verify", "cache prune"]
 }
 pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
+    if inv.command == "cache verify" {
+        workspace::open_controlled(&inv.home, &inv.control)?;
+        let report = verify(&inv.home, &inv.control)?;
+        let value = serde_json::to_value(&report)?;
+        if !report.ok {
+            return Err(ToolkitError::new("vault.cache_integrity", "vault.cache_integrity", 4)
+                .with_details(json!({"result":value,"warnings":["Managed cache integrity failed; inspect missing and corrupt lists and decide on an explicit prune. Nothing was repaired or deleted."]})));
+        }
+        return Ok(Outcome::new(value));
+    }
     workspace::open(&inv.home)?;
     let (objs, foreign) = objects(&inv.home)?;
     let (staging, staging_bytes) = {
@@ -309,24 +321,6 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
             Ok(Outcome::new(
                 json!({"objectBytes":bytes,"objectCount":objs.len(),"uncommittedBytes":staging_bytes,"uncommittedCount":staging.len(),"protectedCount":protected.len(),"protectedByKind":kinds,"protected":protected,"orphanMarkers":missing.len(),"foreignCount":foreign+marker_foreign,"limitBytes":limit,"withinLimit":bytes<=limit}),
             ))
-        }
-        "cache verify" => {
-            let mut corrupt = vec![];
-            for object in &objs {
-                if storage::sha256(&fs::read(&object.path)?) != object.digest {
-                    corrupt.push(object.digest.clone());
-                }
-            }
-            let value = json!({"ok":corrupt.is_empty()&&missing.is_empty(),"checked":objs.len(),"bytes":bytes,"missing":missing,"corrupt":corrupt,"errors":[]});
-            if !corrupt.is_empty() || !missing.is_empty() {
-                return Err(ToolkitError::new(
-                    "vault.cache_integrity",
-                    "managed cache contains corrupt bytes",
-                    4,
-                )
-                .with_details(json!({"result":value})));
-            }
-            Ok(Outcome::new(value))
         }
         "cache prune" => {
             let _quota = ExclusiveLock::resource(&inv.home.join("locks"), "cache:quota")?;

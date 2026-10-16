@@ -9,6 +9,8 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
+mod inspection;
+pub(crate) use inspection::journal_controlled;
 fn absolute(path: &Path) -> Result<PathBuf> {
     let raw = if path.is_absolute() {
         path.to_path_buf()

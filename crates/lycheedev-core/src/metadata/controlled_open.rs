@@ -5,6 +5,11 @@ use crate::control::OperationControl;
 use std::time::Duration;
 
 impl Metadata {
+    pub(crate) fn schema_version_controlled(&self, control: &OperationControl) -> Result<i32> {
+        let result=checked_sql_with_check(control,control.deadline(),&mut || Ok(()),&mut || {},||self.connection.pragma_query_value(None,"user_version",|row|row.get(0)));
+        crate::selection::selection_finish(result,control.check())
+    }
+
     /// Open the existing metadata API under the caller's original stop scope.
     /// Unlike `open`, SQLite lock waits never use an internal five-second sleep.
     /// This only controls opening; subsequent methods retain their own contracts.
@@ -42,7 +47,7 @@ impl Metadata {
     ) -> Result<Self> {
         // This must precede even workspace validation or directory inspection.
         metadata_check(control, &mut check)?;
-        crate::workspace::open(home)?;
+        crate::workspace::open_controlled_with_check(home, control, &mut check)?;
         metadata_check(control, &mut check)?;
         let schema = if write {
             Some(historical_write::historical_lease_with_check(
