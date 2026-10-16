@@ -106,6 +106,17 @@ pub fn normalize_go_json_strings<'a>(
     normalize_go_strings(raw, control)
 }
 
+pub fn normalize_go_json_strings_with_check<'a>(
+    raw: &'a [u8],
+    control: &OperationControl,
+    mut check: impl FnMut() -> Result<()>,
+) -> Result<Cow<'a, [u8]>> {
+    let result = normalize_go_strings_checked(raw, "capturedat", &mut || {
+        capture_check(control, &mut check)
+    });
+    finish_capture_checks(result, control, &mut check)
+}
+
 pub(super) fn deserialize_dependencies<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> std::result::Result<Vec<String>, D::Error> {
@@ -1042,28 +1053,61 @@ mod compatibility_tests {
 
 // Keep the signed historical wire representation through inspection. Show and
 // list may return a negative BlobRef.Bytes; only a blob-consuming command rejects it.
+fn capture_check(control: &OperationControl, check: &mut impl FnMut() -> Result<()>) -> Result<()> {
+    control.check()?;
+    check()
+}
+pub(super) fn finish_capture_checks<T>(
+    result: Result<T>,
+    control: &OperationControl,
+    check: &mut impl FnMut() -> Result<()>,
+) -> Result<T> {
+    let result = crate::selection::selection_finish(result, control.check());
+    crate::selection::selection_finish(result, check())
+}
 pub(super) fn decode_capture_projection(
     raw: &[u8],
     control: &OperationControl,
 ) -> Result<GoCaptureDecode> {
-    control.check()?;
-    let syntax = crate::raw_json::validate_with_check(raw, || control.check())?;
+    decode_capture_projection_with_check(raw, control, &mut || Ok(()))
+}
+fn decode_capture_projection_with_check(
+    raw: &[u8],
+    control: &OperationControl,
+    check: &mut impl FnMut() -> Result<()>,
+) -> Result<GoCaptureDecode> {
+    capture_check(control, check)?;
+    let syntax = crate::raw_json::validate_with_check(raw, || capture_check(control, check))?;
     if syntax.is_err() {
-        return crate::selection::selection_finish(
+        return finish_capture_checks(
             Err(ToolkitError::invalid("invalid capture JSON")),
-            control.check(),
+            control,
+            check,
         );
     }
-    let normalized = normalize_go_strings(raw, control)?;
+    let normalized =
+        normalize_go_strings_checked(raw, "capturedat", &mut || capture_check(control, check))?;
+    capture_check(control, check)?;
+    // Original documents are bounded to 1 MiB by the Metadata reader. Serde's
+    // synchronous typed decode is checked immediately on both sides; grammar
+    // and normalization have the existing bounded internal checkpoints.
     let parsed: Result<EmbeddedCapture> = serde_json::from_slice(&normalized).map_err(Into::into);
-    crate::selection::selection_finish(parsed.map(GoCaptureDecode), control.check())
+    finish_capture_checks(parsed.map(GoCaptureDecode), control, check)
 }
 pub(super) fn inspect_capture_projection(
     raw: &[u8],
     id: &str,
     control: &OperationControl,
 ) -> Result<GoCaptureDecode> {
-    let decoded = decode_capture_projection(raw, control)?;
+    inspect_capture_projection_with_check(raw, id, control, &mut || Ok(()))
+}
+pub(super) fn inspect_capture_projection_with_check(
+    raw: &[u8],
+    id: &str,
+    control: &OperationControl,
+    check: &mut impl FnMut() -> Result<()>,
+) -> Result<GoCaptureDecode> {
+    let decoded = decode_capture_projection_with_check(raw, control, check)?;
     let value = &decoded.0;
     if value.schema != "lycheedev.capture.v1" || value.id != id || value.complete && value.truncated
     {
@@ -1101,15 +1145,27 @@ pub(super) fn inspect_capture_projection(
         captured_at,
         dependencies: &value.dependencies.elements[..value.dependencies.length],
     };
-    let bytes = crate::storage::identity_json(&identity)?;
-    if format!("CAP-{}", crate::storage::sha256(&bytes)) != id {
-        return Err(ToolkitError::new(
-            "command.failed",
-            "evidence.manifest_integrity",
-            5,
-        ));
+    capture_check(control, check)?;
+    let bytes = crate::storage::identity_json(&identity);
+    let bytes = finish_capture_checks(bytes, control, check)?;
+    use sha2::{Digest, Sha256};
+    let mut digest = Sha256::new();
+    for block in bytes.chunks(65536) {
+        capture_check(control, check)?;
+        digest.update(block);
     }
-    control.check()?;
+    if format!("CAP-{}", hex::encode(digest.finalize())) != id {
+        return finish_capture_checks(
+            Err(ToolkitError::new(
+                "command.failed",
+                "evidence.manifest_integrity",
+                5,
+            )),
+            control,
+            check,
+        );
+    }
+    capture_check(control, check)?;
     Ok(decoded)
 }
 impl GoCaptureDecode {

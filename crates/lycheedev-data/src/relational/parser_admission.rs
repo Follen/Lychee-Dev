@@ -7,6 +7,7 @@ use super::*;
 pub(super) fn validate(
     query: &Query,
     tokens: &[sqlparser::tokenizer::TokenWithSpan],
+    check: &dyn Fn() -> Result<()>,
 ) -> Result<()> {
     use sqlparser::tokenizer::Token;
     // sqlparser's projection wildcard fast path erases exactly one (*) pair.
@@ -34,6 +35,7 @@ pub(super) fn validate(
     }
     let mut pending = vec![(Node::Query(query), 1usize)];
     while let Some((node, depth)) = pending.pop() {
+        check()?;
         if depth > 128 {
             return Err(budget());
         }

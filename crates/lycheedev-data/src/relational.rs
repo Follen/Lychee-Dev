@@ -249,11 +249,17 @@ enum Term {
     Aggregate(String, Vec<Term>, bool),
     Case(Option<Box<Term>>, Vec<(Term, Term)>, Option<Box<Term>>),
 }
-fn term(expr: &Expr, parameters: &mut BTreeSet<String>, depth: usize) -> Result<Term> {
+fn term(
+    expr: &Expr,
+    parameters: &mut BTreeSet<String>,
+    depth: usize,
+    check: &dyn Fn() -> Result<()>,
+) -> Result<Term> {
+    check()?;
     if depth > 256 {
         return Err(budget());
     }
-    let mut nested = |e: &Expr| term(e, parameters, depth + 1);
+    let mut nested = |e: &Expr| term(e, parameters, depth + 1, check);
     Ok(match expr {
         Expr::Wildcard(_) => Term::Star(String::new()),
         Expr::QualifiedWildcard(name, _) => {
@@ -359,12 +365,12 @@ fn term(expr: &Expr, parameters: &mut BTreeSet<String>, depth: usize) -> Result<
             negated,
         } => {
             let input = nested(expr)?;
-            let query = Program::compile_query(*subquery.clone(), depth + 1)?;
+            let query = Program::compile_query(*subquery.clone(), depth + 1, check)?;
             parameters.extend(query.parameters.iter().cloned());
             Term::InSubquery(Box::new(input), std::sync::Arc::new(query), *negated)
         }
         Expr::Subquery(subquery) | Expr::Exists { subquery, .. } => {
-            let query = Program::compile_query(*subquery.clone(), depth + 1)?;
+            let query = Program::compile_query(*subquery.clone(), depth + 1, check)?;
             parameters.extend(query.parameters.iter().cloned());
             let query = std::sync::Arc::new(query);
             match expr {
@@ -1457,15 +1463,31 @@ impl Program {
         self.explain
     }
     pub fn compile(sql: &str) -> Result<Self> {
-        let mut tokens = lexical::tokens(sql)?;
+        Self::compile_with(sql, &syntax::QueryDialect::default())
+    }
+    pub(crate) fn compile_controlled(
+        sql: &str,
+        control: &lycheedev_core::control::OperationControl,
+        budget: &crate::resource::Budget,
+    ) -> Result<Self> {
+        Self::compile_with(sql, &syntax::QueryDialect::controlled(control, budget))
+    }
+    fn compile_with(sql: &str, dialect: &syntax::QueryDialect) -> Result<Self> {
+        let check = &|| dialect.check();
+        let mut tokens = lexical::tokens_checked(sql, check)?;
         let (explain, analyze) = explain::prefix(&mut tokens);
         // sqlparser's implementation guards count more frames than Go's
         // retrieve/expression stack. Its independent ceiling stays bounded;
         // the Go syntax admission below uses the actual logical structure.
-        let mut parser = Parser::new(&syntax::QueryDialect)
+        let mut parser = Parser::new(dialect)
             .with_recursion_limit(256)
             .with_tokens_with_locations(tokens.clone());
-        let query = match parser.parse_query() {
+        check()?;
+        let parsed = parser.parse_query();
+        // A dialect hook may stop a speculative parse that sqlparser otherwise
+        // rewinds. It must never become a syntax error or silently disappear.
+        dialect.take_stop()?;
+        let query = match parsed {
             Ok(query) => query,
             Err(error) => {
                 compound::validate_all_keyword(
@@ -1489,14 +1511,19 @@ impl Program {
         // Check UNION's retained token after normal left-to-right parsing, so
         // a later missing ALL cannot conceal an earlier malformed expression.
         compound::validate_all_keyword(sql, &tokens, usize::MAX)?;
-        parser_admission::validate(&query, &tokens)?;
-        let mut program = Self::compile_query(*query, 0)?;
-        subquery::validate_nodes(&program)?;
+        parser_admission::validate(&query, &tokens, check)?;
+        let mut program = Self::compile_query(*query, 0, check)?;
+        subquery::validate_nodes(&program, check)?;
         program.explain = explain;
         program.analyze = analyze;
         Ok(program)
     }
-    fn compile_query(mut query: Query, depth: usize) -> Result<Self> {
+    fn compile_query(
+        mut query: Query,
+        depth: usize,
+        check: &dyn Fn() -> Result<()>,
+    ) -> Result<Self> {
+        check()?;
         if depth > 256 {
             return Err(budget());
         }
@@ -1506,6 +1533,7 @@ impl Program {
             recursive = with.recursive;
             let mut names = BTreeSet::new();
             for cte in with.cte_tables {
+                check()?;
                 if cte.from.is_some() || cte.materialized.is_some() || !cte.alias.columns.is_empty()
                 {
                     return Err(unsupported());
@@ -1514,7 +1542,7 @@ impl Program {
                 if !names.insert(identifier_lower(&name)) {
                     return Err(problem("relational.invalid_syntax", "Duplicate CTE name"));
                 }
-                bindings.push((name, Self::compile_query(*cte.query, depth + 1)?));
+                bindings.push((name, Self::compile_query(*cte.query, depth + 1, check)?));
             }
         }
         if query.fetch.is_some()
@@ -1530,18 +1558,24 @@ impl Program {
             let bodies = compound::branches(*query.body.clone())?;
             let mut branches = Vec::with_capacity(bodies.len());
             for body in bodies {
+                check()?;
                 let mut branch = query.clone();
                 branch.body = Box::new(body);
                 branch.order_by = None;
                 branch.limit_clause = None;
-                branches.push(Self::compile_query(branch, depth)?);
+                branches.push(Self::compile_query(branch, depth, check)?);
             }
             let mut parameters = BTreeSet::new();
             for body in branches.iter().chain(bindings.iter().map(|(_, b)| b)) {
                 parameters.extend(body.parameters.iter().cloned());
             }
-            let (order, limit, offset) =
-                Self::suffix(query.order_by, query.limit_clause, &mut parameters, depth)?;
+            let (order, limit, offset) = Self::suffix(
+                query.order_by,
+                query.limit_clause,
+                &mut parameters,
+                depth,
+                check,
+            )?;
             return Ok(Self {
                 explain: false,
                 analyze: false,
@@ -1600,23 +1634,24 @@ impl Program {
             return Err(unsupported());
         }
         let (table, alias, derived) =
-            joins::relation(&select.from[0].relation, "\0derived:base", depth)?;
+            joins::relation(&select.from[0].relation, "\0derived:base", depth, check)?;
         let mut parameters = BTreeSet::new();
         let joins = select.from[0]
             .joins
             .iter()
             .enumerate()
-            .map(|(i, j)| joins::compile(j, &mut parameters, i, depth))
+            .map(|(i, j)| joins::compile(j, &mut parameters, i, depth, check))
             .collect::<Result<Vec<_>>>()?;
         let mut projection = vec![];
         for item in &select.projection {
+            check()?;
             projection.push(match item {
                 SelectItem::UnnamedExpr(e) => Projection {
-                    expr: Some(term(e, &mut parameters, depth)?),
+                    expr: Some(term(e, &mut parameters, depth, check)?),
                     name: String::new(),
                 },
                 SelectItem::ExprWithAlias { expr, alias } => Projection {
-                    expr: Some(term(expr, &mut parameters, depth)?),
+                    expr: Some(term(expr, &mut parameters, depth, check)?),
                     name: syntax::identifier(alias)?.to_owned(),
                 },
                 SelectItem::Wildcard(options)
@@ -1645,20 +1680,25 @@ impl Program {
         }
         let groups = group_expressions
             .iter()
-            .map(|e| term(e, &mut parameters, depth))
+            .map(|e| term(e, &mut parameters, depth, check))
             .collect::<Result<Vec<_>>>()?;
         let having = select
             .having
             .as_ref()
-            .map(|e| term(e, &mut parameters, depth))
+            .map(|e| term(e, &mut parameters, depth, check))
             .transpose()?;
         let filter = select
             .selection
             .as_ref()
-            .map(|e| term(e, &mut parameters, depth))
+            .map(|e| term(e, &mut parameters, depth, check))
             .transpose()?;
-        let (order, limit, offset) =
-            Self::suffix(query.order_by, query.limit_clause, &mut parameters, depth)?;
+        let (order, limit, offset) = Self::suffix(
+            query.order_by,
+            query.limit_clause,
+            &mut parameters,
+            depth,
+            check,
+        )?;
         let distinct = matches!(select.distinct, Some(Distinct::Distinct));
         if select.distinct.is_some() && !distinct {
             return Err(unsupported());
@@ -1697,7 +1737,9 @@ impl Program {
         limit_clause: Option<LimitClause>,
         parameters: &mut BTreeSet<String>,
         depth: usize,
+        check: &dyn Fn() -> Result<()>,
     ) -> Result<QuerySuffix> {
+        check()?;
         let mut order = vec![];
         if let Some(order_by) = order_by {
             if order_by.interpolate.is_some() {
@@ -1707,6 +1749,7 @@ impl Program {
                 return Err(unsupported());
             };
             for e in expressions {
+                check()?;
                 if e.with_fill.is_some() {
                     return Err(unsupported());
                 }
@@ -1715,7 +1758,7 @@ impl Program {
                     return Err(unsupported());
                 }
                 order.push((
-                    term(&e.expr, parameters, depth)?,
+                    term(&e.expr, parameters, depth, check)?,
                     descending,
                     e.options.nulls_first,
                 ));
@@ -1779,7 +1822,7 @@ impl Program {
                         ));
                     }
                 }
-                term(expr, parameters, depth)
+                term(expr, parameters, depth, check)
             };
             limit = l.as_ref().map(|e| count(e, parameters)).transpose()?;
             offset = o
@@ -2496,3 +2539,6 @@ mod function_binding_tests;
 
 #[cfg(test)]
 mod identifier_grammar_tests;
+
+#[cfg(test)]
+mod compiler_control_tests;

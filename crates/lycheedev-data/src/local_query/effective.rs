@@ -201,8 +201,12 @@ impl<'a> Snapshots<'a> {
             bytes: 0,
         }
     }
+    fn check(&self) -> Result<()> {
+        self.inv.control.check()?;
+        self.budget.check()
+    }
     fn load(&mut self, id: &str) -> Result<()> {
-        self.budget.check()?;
+        self.check()?;
         if self.captures.contains_key(id) {
             return Ok(());
         }
@@ -222,8 +226,13 @@ impl<'a> Snapshots<'a> {
         // only the actual retained Value is kept after that bounded seam.
         let source = {
             let _parse = self.budget.reserve_retained((1 << 20) * 64 + 4096)?;
-            let value = evidence::read_capture(&self.inv.home, id)?;
-            self.budget.check()?;
+            let value = evidence::read_capture_controlled_with_check(
+                &self.inv.home,
+                id,
+                &self.inv.control,
+                || self.budget.check(),
+            )?;
+            self.check()?;
             let bytes = capture::json_size(&value, self.budget)?;
             self.budget.charge(Cost {
                 metadata_bytes: bytes as u64,
@@ -238,13 +247,15 @@ impl<'a> Snapshots<'a> {
         {
             return Err(identity());
         }
-        let origin = selection::load_pinned(
+        let origin = selection::load_pinned_controlled_with_check(
             &self.inv.home,
             source_value["provenance"]["snapshot"]
                 .as_str()
                 .unwrap_or(""),
+            &self.inv.control,
+            || self.budget.check(),
         )?;
-        self.budget.check()?;
+        self.check()?;
         if origin.data.as_ref() != Some(self.pin)
             || source_value["provenance"]["dataBuild"] != self.pin.full_build
         {
@@ -255,24 +266,35 @@ impl<'a> Snapshots<'a> {
             .filter(|bytes| *bytes <= ((128 << 20) - self.bytes) as u64)
             .ok_or_else(limit)? as usize;
         self.budget.charge(Cost::metadata(bytes))?;
-        let raw = evidence::read_blob_bounded(
+        let raw = evidence::read_blob_bounded_with_check(
             &self.inv.home,
             &source_value["blob"],
             128 << 20,
             &self.inv.control,
+            || self.budget.check(),
         )?;
-        let (_, layout, start) = hotfix::cache_layout(&raw, build, Some(self.budget))?;
-        let mut tables: BTreeMap<u32, Vec<CacheEntry>> = BTreeMap::new();
-        hotfix::walk(&raw, start, layout, Some(self.budget), |entry| {
-            self.budget.charge(Cost {
-                retained_bytes: 384,
-                metadata_bytes: 384,
-                decode_work: 1,
-                ..Default::default()
+        let (_, layout, start) =
+            hotfix::cache_layout_with_check(&raw, build, Some(self.budget), || {
+                self.inv.control.check()
             })?;
-            tables.entry(entry.table_hash).or_default().push(entry);
-            Ok(())
-        })?;
+        let mut tables: BTreeMap<u32, Vec<CacheEntry>> = BTreeMap::new();
+        hotfix::walk_with_check(
+            &raw,
+            start,
+            layout,
+            Some(self.budget),
+            || self.inv.control.check(),
+            |entry| {
+                self.budget.charge(Cost {
+                    retained_bytes: 384,
+                    metadata_bytes: 384,
+                    decode_work: 1,
+                    ..Default::default()
+                })?;
+                tables.entry(entry.table_hash).or_default().push(entry);
+                Ok(())
+            },
+        )?;
         self.budget.charge(Cost::retained(
             id.len() + tree_bytes::<String, Snapshot>(self.captures.len() + 1)
                 - tree_bytes::<String, Snapshot>(self.captures.len()),
@@ -350,7 +372,7 @@ impl<'a> Snapshots<'a> {
         bundle: &definitions::Bundle,
         ids: &[String],
     ) -> Result<(OverlayPlan, Report)> {
-        self.budget.check()?;
+        self.check()?;
         if ids.is_empty() || ids.len() > 16 {
             return Err(identity());
         }
@@ -367,7 +389,7 @@ impl<'a> Snapshots<'a> {
             deleted: 0,
         };
         for (ordinal, id) in ids.iter().enumerate() {
-            self.budget.check()?;
+            self.check()?;
             if !seen.insert(id) {
                 return Err(identity());
             }
@@ -388,7 +410,7 @@ impl<'a> Snapshots<'a> {
                 ..Default::default()
             })?;
             for entry in selected {
-                self.budget.check()?;
+                self.check()?;
                 if snapshot.layout >= 7 && entry.status > 4 {
                     return Err(fault(
                         "records.hotfix_format",
@@ -418,7 +440,7 @@ impl<'a> Snapshots<'a> {
         // (push, capture ordinal, physical index) is unique, so unstable sort
         // gives the exact stable Go ordering without a second scratch array.
         entries.sort_unstable_by_key(|(ordinal, entry)| (entry.push, *ordinal, entry.index));
-        self.budget.check()?;
+        self.check()?;
         let identity = definition
             .fields
             .iter()
@@ -436,7 +458,7 @@ impl<'a> Snapshots<'a> {
         let mut patches = BTreeMap::new();
         let mut field_bytes = 0usize;
         for (ordinal, entry) in entries {
-            self.budget.check()?;
+            self.check()?;
             if !valid(ordinal, &entry) {
                 if should_delete {
                     self.budget.charge(Cost::metadata(384))?;
@@ -482,7 +504,7 @@ impl<'a> Snapshots<'a> {
             );
         }
         for patch in patches.values() {
-            self.budget.check()?;
+            self.check()?;
             if patch.values.is_some() {
                 report.replaced_or_added += 1;
             } else {
@@ -509,7 +531,7 @@ impl<'a> Snapshots<'a> {
             .try_reserve_exact(columns.len() + 3)
             .map_err(|_| limit())?;
         for column in columns {
-            self.budget.check()?;
+            self.check()?;
             owned_columns.push(clone_text(column)?);
         }
         owned_columns.extend([
@@ -522,10 +544,10 @@ impl<'a> Snapshots<'a> {
             .try_reserve_exact(ids.len())
             .map_err(|_| limit())?;
         for id in ids {
-            self.budget.check()?;
+            self.check()?;
             capture_ids.push(clone_text(id)?);
         }
-        self.budget.check()?;
+        self.check()?;
         Ok((
             OverlayPlan {
                 schema: relational::Source {
@@ -1258,6 +1280,55 @@ mod tests {
             used.decode_work > 1_920_000,
             "All record decoding remains charged"
         );
+    }
+    #[test]
+    fn effective_cached_source_checks_original_invocation_before_independent_budget() {
+        let mut inv = invocation();
+        let pin = selection::DataPin::default();
+        let control = lycheedev_core::control::OperationControl::uncancelable(
+            Instant::now() + Duration::from_secs(30),
+        );
+        inv.control = control.clone();
+        let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let budget = Budget::new(
+            Cost::defaults(),
+            control.deadline(),
+            Some(cancelled.clone()),
+        );
+        let mut snapshots = Snapshots::new(&inv, &pin, &budget);
+        seed(&mut snapshots, Vec::new(), Vec::new());
+        let before = budget.snapshot().unwrap();
+        control.tracked_cancel_handle().unwrap().cancel();
+        cancelled.store(true, std::sync::atomic::Ordering::Release);
+        assert_eq!(
+            snapshots.load("CAP-fixture").unwrap_err().code,
+            "command.cancelled"
+        );
+        assert_eq!(budget.snapshot().unwrap(), before);
+    }
+    #[test]
+    fn effective_uncached_source_checks_independent_budget_before_historical_io() {
+        let inv = invocation();
+        let pin = selection::DataPin::default();
+        let cancelled = Budget::new(
+            Cost::defaults(),
+            inv.control.deadline(),
+            Some(Arc::new(std::sync::atomic::AtomicBool::new(true))),
+        );
+        let expired = Budget::new(
+            Cost::defaults(),
+            Instant::now() - Duration::from_secs(1),
+            None,
+        );
+        for (budget, code) in [
+            (&cancelled, "operation.cancelled"),
+            (&expired, "records.query_resource_budget"),
+        ] {
+            let mut snapshots = Snapshots::new(&inv, &pin, budget);
+            assert_eq!(snapshots.load("not-a-capture").unwrap_err().code, code);
+            assert_eq!(budget.snapshot().unwrap(), Cost::default());
+        }
+        assert_eq!(inv.control.stop_cause().unwrap(), None);
     }
 }
 

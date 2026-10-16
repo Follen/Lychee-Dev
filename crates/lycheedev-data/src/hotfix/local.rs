@@ -51,10 +51,15 @@ fn read_file(path: &Path, maximum: usize, budget: &Budget) -> Result<Vec<u8>> {
     read_file_inner(path, maximum, budget, true)
 }
 /// Raidbots is a separately bounded input blob, not JSON metadata.
-pub(super) fn read_source_file(path:&Path,maximum:usize,budget:&Budget)->Result<Vec<u8>> {
+pub(super) fn read_source_file(path: &Path, maximum: usize, budget: &Budget) -> Result<Vec<u8>> {
     read_file_inner(path, maximum, budget, false)
 }
-fn read_file_inner(path: &Path, maximum: usize, budget: &Budget, metadata:bool) -> Result<Vec<u8>> {
+fn read_file_inner(
+    path: &Path,
+    maximum: usize,
+    budget: &Budget,
+    metadata: bool,
+) -> Result<Vec<u8>> {
     budget.check()?;
     let mut files = Files {
         budget,
@@ -65,72 +70,103 @@ fn read_file_inner(path: &Path, maximum: usize, budget: &Budget, metadata:bool) 
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     let parent = storage::Directory::open_controlled(parent_path, &mut files)?;
-    let name = path
-        .file_name()
-        .ok_or_else(|| identity("Cache path requires a file name"))?;
-    use std::os::windows::fs::MetadataExt;
-    let observed = parent.metadata_controlled(name, &mut files)?;
-    if !observed.is_file() || observed.file_attributes() & 0x400 != 0 {
-        return Err(fault(
-            "records.hotfix_format",
-            4,
-            "Cache must be a regular non-reparse file",
-        ));
-    }
-    if observed.len() > maximum as u64 {
-        return Err(limit());
-    }
-    let mut file = parent.open_file_controlled(name, &mut files)?;
-    budget.charge(Cost::work(1))?;
-    let before = file.metadata()?;
-    budget.check()?;
-    if !before.is_file() || before.file_attributes() & 0x400 != 0 {
-        return Err(fault(
-            "records.hotfix_format",
-            4,
-            "Cache must be a regular non-reparse file",
-        ));
-    }
-    let size = usize::try_from(before.len()).map_err(|_| limit())?;
-    if size > maximum {
-        return Err(limit());
-    }
-    budget.charge(Cost::retained(size))?;
-    let mut raw = Vec::new();
-    raw.try_reserve_exact(size).map_err(|_| limit())?;
-    let _scratch = budget.reserve_retained(65536)?;
-    let mut block = [0u8; 65536];
-    loop {
-        budget.check()?;
-        let count = match file.read(&mut block) {
-            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-            result => result?,
-        };
-        budget.charge(Cost {
-            metadata_bytes: if metadata {count as u64}else{0},
-            decode_work: count.div_ceil(65536) as u64 + 1,
-            ..Default::default()
-        })?;
-        if count == 0 {
-            break;
+    let result = (|| {
+        let name = path
+            .file_name()
+            .ok_or_else(|| identity("Cache path requires a file name"))?;
+        use std::os::windows::fs::MetadataExt;
+        let observed = parent.metadata_controlled(name, &mut files)?;
+        if !observed.is_file() || observed.file_attributes() & 0x400 != 0 {
+            return Err(fault(
+                "records.hotfix_format",
+                4,
+                "Cache must be a regular non-reparse file",
+            ));
         }
-        if count > maximum - raw.len() {
+        if observed.len() > maximum as u64 {
             return Err(limit());
         }
-        if count > size - raw.len() {
-            return Err(identity("Cache changed while reading; retry a stable copy"));
+        let mut file = parent.open_file_controlled(name, &mut files)?;
+        let result = (|| {
+            budget.charge(Cost::work(1))?;
+            let before = file.metadata()?;
+            budget.check()?;
+            if !before.is_file() || before.file_attributes() & 0x400 != 0 {
+                return Err(fault(
+                    "records.hotfix_format",
+                    4,
+                    "Cache must be a regular non-reparse file",
+                ));
+            }
+            let size = usize::try_from(before.len()).map_err(|_| limit())?;
+            if size > maximum {
+                return Err(limit());
+            }
+            budget.charge(Cost::retained(size))?;
+            let mut raw = Vec::new();
+            raw.try_reserve_exact(size).map_err(|_| limit())?;
+            let _scratch = budget.reserve_retained(65536)?;
+            let mut block = [0u8; 65536];
+            loop {
+                budget.check()?;
+                let count = match file.read(&mut block) {
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    result => result?,
+                };
+                budget.charge(Cost {
+                    metadata_bytes: if metadata { count as u64 } else { 0 },
+                    decode_work: count.div_ceil(65536) as u64 + 1,
+                    ..Default::default()
+                })?;
+                if count == 0 {
+                    break;
+                }
+                if count > maximum - raw.len() {
+                    return Err(limit());
+                }
+                if count > size - raw.len() {
+                    return Err(identity("Cache changed while reading; retry a stable copy"));
+                }
+                raw.extend_from_slice(&block[..count]);
+            }
+            budget.charge(Cost::work(1))?;
+            let after = file.metadata()?;
+            budget.check()?;
+            parent.verify_controlled(&mut files)?;
+            if before.len() != after.len()
+                || raw.len() != size
+                || before.modified()? != after.modified()?
+            {
+                return Err(identity("Cache changed while reading; retry a stable copy"));
+            }
+            Ok(raw)
+        })();
+        lycheedev_core::metadata::historical_write::finish_historical(
+            result,
+            storage::close_file(file).map_err(Into::into),
+        )
+    })();
+    let mut result = result;
+    if let Err(errors) = parent.close() {
+        for error in errors {
+            result = lycheedev_core::metadata::historical_write::finish_historical(
+                result,
+                Err(error.into()),
+            );
         }
-        raw.extend_from_slice(&block[..count]);
     }
-    budget.charge(Cost::work(1))?;
-    let after = file.metadata()?;
-    budget.check()?;
-    parent.verify_controlled(&mut files)?;
-    if before.len() != after.len() || raw.len() != size || before.modified()? != after.modified()? {
-        return Err(identity("Cache changed while reading; retry a stable copy"));
+    let stopped = budget.check();
+    if let (Err(primary), Err(stop)) = (&result, &stopped)
+        && primary.code == stop.code
+        && primary.exit_code == stop.exit_code
+        && primary.message == stop.message
+        && primary.details == stop.details
+    {
+        return result;
     }
-    Ok(raw)
+    lycheedev_core::metadata::historical_write::finish_historical(result, stopped)
 }
+
 fn digest(raw: &[u8], budget: &Budget) -> Result<String> {
     let mut hash = Sha256::new();
     for block in raw.chunks(65536) {
@@ -245,13 +281,14 @@ fn named_definition(
     name: &str,
     budget: &Budget,
 ) -> Result<(definitions::Bundle, schema::Definition)> {
-    let (bundle, raw) = definitions::prepare_budgeted(
+    let (bundle, raw) = definitions::prepare_controlled(
         &inv.home,
         &data.definition_commit,
         name,
         inv.flag_bool("--offline"),
         budget.deadline,
         Some(budget),
+        &inv.control,
     )?;
     budget.check()?;
     let bytes = bundle.manifest["bytes"]
@@ -260,7 +297,13 @@ fn named_definition(
         .ok_or_else(|| identity("Invalid definition manifest reference"))? as usize;
     budget.charge(Cost::metadata(bytes))?;
     let _manifest_parser = budget.reserve_retained(bytes * 32 + 4096)?;
-    let manifest = evidence::read_blob_bounded(&inv.home, &bundle.manifest, 4 << 20, &inv.control)?;
+    let manifest = evidence::read_blob_bounded_with_check(
+        &inv.home,
+        &bundle.manifest,
+        4 << 20,
+        &inv.control,
+        || budget.check(),
+    )?;
     let entries: Vec<Value> = serde_json::from_slice(&manifest)?;
     let mut matches = 0;
     for entry in entries {
@@ -289,7 +332,11 @@ fn named_definition(
         ));
     }
     let _definition_parser = budget.reserve_retained(raw.len() * 32 + 4096)?;
-    let definition = schema::Document::parse(&raw)?.select(&data.full_build, "")?;
+    let definition = schema::Document::parse_with_check(&raw, || {
+        inv.control.check()?;
+        budget.check()
+    })?
+    .select(&data.full_build, "")?;
     let owned = size_of::<schema::Definition>()
         + definition.sha256.len()
         + definition.r#match.len()
@@ -503,7 +550,10 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
     budget.check()?;
     let mut filter = CacheFilter {
         build: 0,
-        table_hash: inv.flag("--table-hash").map(super::parse_table_hash).transpose()?,
+        table_hash: inv
+            .flag("--table-hash")
+            .map(super::parse_table_hash)
+            .transpose()?,
         record_id: number(inv, "--record")?,
         push: inv
             .flag("--push")
@@ -521,7 +571,10 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
         after_index: number(inv, "--after-index")?,
         limit: request_limit(inv, "--limit", 20, 200)?,
     };
-    let mut pin = selection::load_pinned(&inv.home, snapshot)?;
+    let mut pin =
+        selection::load_pinned_controlled_with_check(&inv.home, snapshot, &inv.control, || {
+            budget.check()
+        })?;
     budget.check()?;
     let data = pin
         .data
@@ -530,7 +583,10 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
     validate_data(&data)?;
     filter.build = schema::version(&data.full_build)?[3];
     let (mut source, raw) = if let Some(id) = inv.flag("--from").filter(|value| !value.is_empty()) {
-        let source = evidence::read_capture(&inv.home, id)?;
+        let source =
+            evidence::read_capture_controlled_with_check(&inv.home, id, &inv.control, || {
+                budget.check()
+            })?;
         budget.check()?;
         if source["provenance"]["kind"] != "hotfix-cache"
             || source["mediaType"] != "application/octet-stream"
@@ -542,9 +598,11 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
                 "Capture is not a complete cache for the selected build",
             ));
         }
-        let origin = selection::load_pinned(
+        let origin = selection::load_pinned_controlled_with_check(
             &inv.home,
             source["provenance"]["snapshot"].as_str().unwrap_or(""),
+            &inv.control,
+            || budget.check(),
         )?;
         budget.check()?;
         if origin.data.as_ref() != Some(&data) {
@@ -555,7 +613,13 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
             .filter(|bytes| *bytes <= maximum as u64)
             .ok_or_else(limit)? as usize;
         budget.charge(Cost::metadata(bytes))?;
-        let raw = evidence::read_blob_bounded(&inv.home, &source["blob"], maximum, &inv.control)?;
+        let raw = evidence::read_blob_bounded_with_check(
+            &inv.home,
+            &source["blob"],
+            maximum,
+            &inv.control,
+            || budget.check(),
+        )?;
         (Some(source), raw)
     } else {
         (
@@ -612,7 +676,7 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
     let source = source.expect("fresh or verified archived source");
     if pin.changes.is_none() {
         budget.check()?;
-        pin = selection::pin_selection_controlled(
+        pin = selection::pin_selection_controlled_with_check(
             &inv.home,
             selection::SelectionSpec {
                 parent: pin.id.clone(),
@@ -631,6 +695,7 @@ pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
                 ..Default::default()
             },
             &inv.control,
+            || budget.check(),
         )?;
     }
     budget.check()?;
@@ -747,3 +812,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod control_tests;

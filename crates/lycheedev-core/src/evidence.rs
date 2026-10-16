@@ -32,10 +32,12 @@ pub use budgeted::{
     commit_capture_budgeted_with_dependencies, commit_verified_capture_budgeted,
 };
 pub use dependencies::{
-    GoCaptureDecode, GoSignedInteger, GoTimestamp, normalize_go_json_strings, parse_go_timestamp,
+    GoCaptureDecode, GoSignedInteger, GoTimestamp, normalize_go_json_strings,
+    normalize_go_json_strings_with_check, parse_go_timestamp,
 };
 pub(crate) use dependencies::{decode_workspace_identity, decode_workspace_identity_with_check};
 pub use history_read::fetch_capture_controlled;
+pub use read_commands::read_capture_controlled_with_check;
 pub fn blob_path(home: &Path, digest: &str) -> Result<PathBuf> {
     if !valid_digest(digest, 64) {
         return Err(ToolkitError::new(

@@ -236,7 +236,10 @@ fn request(inv: &Invocation) -> Result<Request> {
         max_bytes: request_limit(inv, "--max-bytes", 128 << 20, 512 << 20)? as i64,
         filter: RequestFilter {
             build: 0,
-            table_hash: inv.flag("--table-hash").map(super::parse_table_hash).transpose()?,
+            table_hash: inv
+                .flag("--table-hash")
+                .map(super::parse_table_hash)
+                .transpose()?,
             record_id: number(inv, "--record")?,
             push: inv
                 .flag("--push")
@@ -372,19 +375,24 @@ fn run(
             return Err(identity("Resume requires an archived --from"));
         }
         let budget = ledger(inv);
-        let reference = evidence::read_capture(&inv.home, resume)?;
+        let reference =
+            evidence::read_capture_controlled_with_check(&inv.home, resume, &inv.control, || {
+                budget.check()
+            })?;
         budget.check()?;
-        let raw = evidence::read_blob_bounded(
+        let raw = evidence::read_blob_bounded_with_check(
             &inv.home,
             &reference["blob"],
             MANIFEST_BYTES,
             &inv.control,
+            || budget.check(),
         )?;
         budget.charge(Cost::metadata(raw.len()))?;
         // Go replaces malformed UTF-8 and unpaired UTF-16 only in strings.
         // Its existing capture reader also preserves raw timestamp semantics.
         let _parser = budget.reserve_retained(raw.len().saturating_mul(64).saturating_add(4096))?;
-        let normalized = evidence::normalize_go_json_strings(&raw, &inv.control)?;
+        let normalized =
+            evidence::normalize_go_json_strings_with_check(&raw, &inv.control, || budget.check())?;
         let saved: State =
             serde_json::from_slice(&normalized).map_err(|_| identity("Invalid scan checkpoint"))?;
         if reference["provenance"]["kind"] != "hotfix-scan"
@@ -405,7 +413,9 @@ fn run(
             .chain(saved.pages.values().iter().map(String::as_str))
         {
             budget.check()?;
-            evidence::read_capture(&inv.home, id)?;
+            evidence::read_capture_controlled_with_check(&inv.home, id, &inv.control, || {
+                budget.check()
+            })?;
         }
         state = saved;
         if state.complete {

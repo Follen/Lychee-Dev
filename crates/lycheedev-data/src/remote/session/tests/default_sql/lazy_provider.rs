@@ -276,3 +276,34 @@ fn default_remote_cast_like_complete_lazy_scan_and_capture() {
     f.verify(&out);
     f.close();
 }
+
+#[test]
+fn default_remote_effective_historical_source_keeps_original_control_ordered() {
+    let f = SqlFixture::new(false, true);
+    let cache = f.hotfix_capture(&f.snapshot, true, false);
+    let inv = f.effective_invocation(
+        "SELECT ID FROM effective.RemoteSample WHERE ID IN (7,99)",
+        std::slice::from_ref(&cache),
+    );
+    let out = crate::dispatch(&inv).unwrap();
+    assert_eq!(out.data["result"]["rows"], json!([[7]]));
+    assert_eq!(out.data["effectiveSources"][0]["captures"][0]["id"], cache);
+    assert!(inv.control.stop_cause().unwrap().is_none());
+    inv.control
+        .ordered_child(inv.control.deadline())
+        .unwrap()
+        .check()
+        .unwrap();
+    f.verify(&out);
+    f.close();
+}
+#[test]
+fn default_remote_sql_compiler_stop_publishes_no_capture_or_file() {
+    let f = SqlFixture::new(false, false);
+    let inv = f.invocation("SELECT FROM RemoteSample");
+    let before = f.captures().len();
+    inv.control.tracked_cancel_handle().unwrap().cancel();
+    assert_eq!(crate::dispatch(&inv).unwrap_err().code, "command.cancelled");
+    assert_eq!(f.captures().len(), before);
+    f.close();
+}

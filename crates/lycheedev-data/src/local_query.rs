@@ -709,7 +709,7 @@ pub(crate) fn sql_inner_budgeted(
     let safety = budget.safety_only();
     let request = request::read(inv, &safety)?;
     safety.charge(Cost::metadata(request.sql.len() * 64 + 4096))?;
-    let program = relational::Program::compile(&request.sql)?;
+    let program = relational::Program::compile_controlled(&request.sql, &inv.control, &safety)?;
     if program.source_tables().len() > 32 {
         return Err(fault(
             "relational.resource_limit",

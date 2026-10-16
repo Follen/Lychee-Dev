@@ -67,7 +67,7 @@ pub(crate) struct SourceTableUse<'a> {
 }
 fn identifier_key(value: &str) -> String {
     use sqlparser::dialect::Dialect;
-    let dialect = syntax::QueryDialect;
+    let dialect = syntax::QueryDialect::default();
     let mut chars = value.chars();
     if chars.next().is_some_and(|c| dialect.is_identifier_start(c))
         && chars.all(|c| dialect.is_identifier_part(c))
@@ -123,7 +123,7 @@ impl RelationName {
             return Self::from_parts(vec![key.to_owned()]);
         }
         use sqlparser::tokenizer::{Token, Tokenizer};
-        let tokens = Tokenizer::new(&syntax::QueryDialect, key)
+        let tokens = Tokenizer::new(&syntax::QueryDialect::default(), key)
             .tokenize()
             .map_err(|_| binding())?;
         let tokens: Vec<_> = tokens

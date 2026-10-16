@@ -6,7 +6,7 @@ use super::*;
 /// Go inspect() counts logical retrieval, relation and expression nodes. The
 /// Rust compound wrapper is synthetic; its branches model a right-linked Go
 /// UNION chain and its tail expressions belong to that chain's last query.
-pub(super) fn validate_nodes(program: &Program) -> Result<()> {
+pub(super) fn validate_nodes(program: &Program, check: &dyn Fn() -> Result<()>) -> Result<()> {
     enum Node<'a> {
         Query(&'a Program),
         Term(&'a Term),
@@ -15,6 +15,7 @@ pub(super) fn validate_nodes(program: &Program) -> Result<()> {
     let mut pending = vec![(Node::Query(program), 1usize)];
     let mut count = 0usize;
     while let Some((node, depth)) = pending.pop() {
+        check()?;
         if depth > 128 {
             return Err(budget());
         }

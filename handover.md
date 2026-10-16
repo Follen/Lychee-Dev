@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 01:47 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`e8ae9a35bce956550f7ada53fc36ada51404b3fc`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 02:02 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`6921933c5dc2ec3b8034a5a8f1c50fb8f17f6777`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -24,6 +24,8 @@
 - 2026-10-15 18:24 用户调整实施节奏：先按完整端到端功能实现并接入默认生产消费者，再集中补测试和统一验证；取消自行增加的逐小片冻结/独审/CI先行门禁。实现过程中仍及时分批提交推送同一草稿PR，真实安全边界和文件单写协调保留；已有CI旁路诊断，不等待每轮才继续编码。最终四阶段循环审计与完整验收要求不变。
 
 ## 2. 当前实现与未闭环事项
+
+本批补齐历史capture读取、Hotfix archive/origin/定义/scan与effective SQL的原invocation及独立Budget，保typed停止、历史身份和checked关闭；8项Core/Data新回归未运行。SQL默认编译入口已贯通lexer、公共parser hooks及lowering控制，17项新回归未运行；wildcard公共hook不能直接返回错误，记录停止后在parse完成且lowering/provider之前返回。非最终UNION后缀与复合错误优先级仍继续实现。keep/bundle/remove和Source默认存储受控链正在闭合，不据新API声明全链完成。
 
 修复后的集中验证 [38836247524](https://github.com/Follen/Lychee-Dev/actions/runs/38836247524) 针对e8ae9a3已排队，仍由前一运行保留独立测试证据；不能把排队或toolidentity成功当产品编译成功。后继同session跨文件member/metatable两处CFG缓存已共享，新增真实三文件回归未跑，不宣称内存/耗时收益。
 
@@ -59,7 +61,7 @@ Data当前批已将实际默认DB2/navigation/JSONL消费者接入同一lexical 
 
 最新验证批 6699bbf 已保存 XML 子节点索引、静态 WDC IN 候选筛选、owned Function/call 与三方工具身份修复，run38781154924已开始，all-target与CLI构建因Data content::verified::read可见域错误失败；当前主树已最小修正到session域，尚待重编译。该次本地静态检查仍有历史addon差异；当前后继已将最后14个旧生产文件及全部旧自动发现消费者迁到原字节历史归档，正式Go323的36套Lua入口恢复到六profile，Node60/60通过且addon静态差异为0，Lua/Go/Rust实际执行待集中验证；三方 Node 31/31通过。更早bc2的真实Driver→Lua桥、槽维护/移除/修复步骤现已成功，待最终sealed证据核具体用例；all-target曾因Core测试模块路径失败，6699已包含修复，不能泛化整轮通过。
 
-owned 后端已累计实现表达式执行、函数/对象/member 与返回 carrier，6699 已实际通过其中 binary/dense/execution/plan/function 测试。正常局部变量 flow 仍有真实失败；当前正在贯通同一 session 的 CFG、类型关系、调用与诊断消费者。完整语义尚未切生产，剩余补丁不能据候选源码或局部通过判定已退役。
+owned 后端已累计实现表达式执行、函数/对象/member 与返回 carrier，6699 已实际通过其中 binary/dense/execution/plan/function 测试。正常局部变量 flow 仍有真实失败；当前正在贯通同一 session 的 CFG、类型关系、调用与诊断消费者。这是6699的历史状态；后继93acdcb已切Source生产查询与43项诊断并归零上游patch，当前实际编译/语义等价仍未通过集中验收。
 
 498 的槽维护 13 过/4 超时，移除 8/8、修复 25/25 实际通过；原 180 秒期限、持久化与并发均未放宽。同字节前轮通过不能证明当前没有磁盘争用或性能回归，仍待受控单次业务诊断。
 
@@ -67,7 +69,7 @@ owned 后端已累计实现表达式执行、函数/对象/member 与返回 carr
 | --- | --- | --- |
 | CLI / 版本 / 打包 | 3.5.0 beta 源码配置；当前 Go describe 合同；正式 addon ZIP；默认 Live 路由 | 最终包安装/更新/卸载全链、参数/输出完整差分；内部 Invocation 空值处理不等于实际 argv 空值已等价 |
 | Live / Delivery | Go Mailbox v1 默认 CON、RIP 定位/输入/持久恢复；321键盘静默与322槽启用/reload；500槽发布/维护 | 精确最终树自动回归与真实 Lua Driver 桥；多实例/真实客户端最后验收；未知结果绝不重放 |
-| Source | 完整固定 Retail 静态导入/查询；Emmy direct worker/session；Graph move、一次 XML catalog、90秒 research 原预算、调用者身份候选已落地 | bc2普通refs/context/API已实际通过；常驻会话仍失败，新优化全仓时长/内存待实测；零上游补丁迁移尚未完成 |
+| Source | 完整固定 Retail 静态导入/查询；Emmy direct worker/session；Graph move、一次 XML catalog、90秒 research 原预算、调用者身份候选已落地 | bc2普通refs/context/API已实际通过；常驻会话仍失败，新优化全仓时长/内存待实测；生产已切原版上游和自有查询/诊断，零补丁组合的编译、语义和资源验收尚未完成 |
 | Data | 本地 DB2/CASC/SQL/Hotfix；可取消 HTTP、remote catalog/target/encoded Session；direct remote target 已接实际 CLI；decoded alias 与共享 body 的 retained 责任转交已组合；Core 原控制贯通 blob/pin/capture | named target、streamed assets；JSONL scoped输出已组合待实际验证，SQL/DB2/navigation默认provider及外层Metadata已接，内部Store/Fragments/target预算错误身份修复已组合，自动pin/effective旧等待与实际使用仍待闭合；archive计量、gzip边界、合法raw-URI差异仍有缺口 |
 | Skill | 固定 Go 工作流及实际 CLI 验收入口 | Source长语义阻塞后的完整任务复测；Source/Skill/Data各自独立真实使用循环未收敛 |
 | 清理 / 质量 | 旧 addon 额外文件与旧协议消费者已迁到精确历史归档；当前55个正式addon文件与36套Go323 Lua入口恢复，Node60/60通过、addon静态差异0 | 新组合Lua/Go/Rust实际执行待集中验证；最终四阶段审计尚未开始收敛 |

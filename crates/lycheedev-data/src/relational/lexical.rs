@@ -66,7 +66,16 @@ fn invalid(sql: &str, at: usize, detail: &str) -> lycheedev_core::ToolkitError {
     error
 }
 
+#[cfg(test)]
 pub(super) fn tokens(sql: &str) -> Result<Vec<TokenWithSpan>> {
+    tokens_checked(sql, &|| Ok(()))
+}
+
+pub(super) fn tokens_checked(
+    sql: &str,
+    check: &dyn Fn() -> Result<()>,
+) -> Result<Vec<TokenWithSpan>> {
+    check()?;
     if sql.len() > 256 << 10 {
         return Err(budget());
     }
@@ -78,6 +87,7 @@ pub(super) fn tokens(sql: &str) -> Result<Vec<TokenWithSpan>> {
     let mut pos = 0;
     let mut location = Location { line: 1, column: 1 };
     while pos < bytes.len() {
+        check()?;
         // Exactly 32768 tokens at EOF are admitted. Even trailing trivia
         // performs this check, matching the original scanner loop ordering.
         if tokens.len() >= 32768 {

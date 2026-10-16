@@ -287,3 +287,5 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] 本批验证：XML child index 13 例、indexed IN 23 例、owned Function/call 11 例及原 448 比较；三方官方 Python 身份边界 Node 31 已过，Windows 尚待。默认local/CDN/effective的lazy provider与IN子查询现已组合，97新增/40继承Rust未跑；深层UNION尾callback作用域与local decoded256MiB旧上限已修源码，新增22＋3回归未跑；自动project-pin已接原控制/预算且10新回归未跑，不据源码勾选G323-05或零补丁完成。
 
 - [ ] Execute owned Object/carrier and authenticated owned Data span/source regressions on their exact composed tree; continue complete flow/typecheck/diagnostic consumers. Actual Prepared/Session and lazy SQL consumers are now wired; saved implementation does not close zero-patch or cache acceptance.
+
+- [ ] 集中验证历史capture/Hotfix/effective SQL原控制与独立Budget读取链（8新回归）、默认SQL lexer/parser/lowering控制（17新回归）；公共wildcard hook停止在parse后、lowering/provider前返回。继续UNION后缀/复合首错、evidence keep/bundle/remove与Source默认存储闭环，不把语法检查算Rust通过。

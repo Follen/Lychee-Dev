@@ -28,7 +28,9 @@ pub(super) fn parse_table_hash(value: &str) -> lycheedev_core::Result<u32> {
         ));
     }
     if !value.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(lycheedev_core::ToolkitError::arguments("invalid --table-hash"));
+        return Err(lycheedev_core::ToolkitError::arguments(
+            "invalid --table-hash",
+        ));
     }
     u32::from_str_radix(value, 16)
         .map_err(|_| lycheedev_core::ToolkitError::arguments("invalid --table-hash"))
@@ -107,6 +109,16 @@ pub(crate) fn walk<F: FnMut(CacheEntry) -> Result<()>>(
     start: usize,
     layout: u32,
     budget: Option<&Budget>,
+    yield_entry: F,
+) -> Result<()> {
+    walk_with_check(raw, start, layout, budget, || Ok(()), yield_entry)
+}
+pub(crate) fn walk_with_check<F: FnMut(CacheEntry) -> Result<()>>(
+    raw: &[u8],
+    start: usize,
+    layout: u32,
+    budget: Option<&Budget>,
+    mut supplemental: impl FnMut() -> Result<()>,
     mut yield_entry: F,
 ) -> Result<()> {
     let width = match layout {
@@ -117,6 +129,7 @@ pub(crate) fn walk<F: FnMut(CacheEntry) -> Result<()>>(
     let mut offset = start;
     let mut index = 0;
     while offset < raw.len() {
+        supplemental()?;
         charge(budget, Cost::work(1))?;
         if index >= 8_000_000 {
             return Err(fault("records.hotfix_limit", 3, "XFTH record limit"));
@@ -299,6 +312,15 @@ pub(crate) fn cache_layout(
     expected_build: u32,
     budget: Option<&Budget>,
 ) -> Result<(u32, u32, usize)> {
+    cache_layout_with_check(raw, expected_build, budget, || Ok(()))
+}
+pub(crate) fn cache_layout_with_check(
+    raw: &[u8],
+    expected_build: u32,
+    budget: Option<&Budget>,
+    mut supplemental: impl FnMut() -> Result<()>,
+) -> Result<(u32, u32, usize)> {
+    supplemental()?;
     check(budget)?;
     if raw.len() < 12 || &raw[..4] != b"XFTH" {
         return malformed();
@@ -325,8 +347,8 @@ pub(crate) fn cache_layout(
     }
     let mut layout = version;
     if version == 8 && raw.len() > start {
-        let a = walk(raw, start, 8, budget, |_| Ok(()));
-        let b = walk(raw, start, 7, budget, |_| Ok(()));
+        let a = walk_with_check(raw, start, 8, budget, &mut supplemental, |_| Ok(()));
+        let b = walk_with_check(raw, start, 7, budget, &mut supplemental, |_| Ok(()));
         for result in [&a, &b] {
             if let Err(error) = result {
                 if error.code != "records.hotfix_format" {
@@ -959,3 +981,7 @@ mod fields_number_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "hotfix/snapshot_control_tests.rs"]
+mod snapshot_control_tests;

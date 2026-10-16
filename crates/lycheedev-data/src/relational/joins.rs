@@ -13,7 +13,9 @@ pub(super) fn relation(
     relation: &TableFactor,
     virtual_name: &str,
     depth: usize,
+    check: &dyn Fn() -> Result<()>,
 ) -> Result<(RelationName, String, Option<Box<Program>>)> {
+    check()?;
     if let TableFactor::Derived {
         lateral,
         subquery,
@@ -35,6 +37,7 @@ pub(super) fn relation(
             Some(Box::new(Program::compile_query(
                 *subquery.clone(),
                 depth + 1,
+                check,
             )?)),
         ));
     }
@@ -78,9 +81,15 @@ pub(super) fn compile(
     parameters: &mut BTreeSet<String>,
     index: usize,
     depth: usize,
+    check: &dyn Fn() -> Result<()>,
 ) -> Result<Link> {
-    let (table, alias, derived) =
-        relation(&join.relation, &format!("\0derived:join:{index}"), depth)?;
+    check()?;
+    let (table, alias, derived) = relation(
+        &join.relation,
+        &format!("\0derived:join:{index}"),
+        depth,
+        check,
+    )?;
     let (left, constraint) = match &join.join_operator {
         JoinOperator::Join(c) | JoinOperator::Inner(c) => (false, c),
         JoinOperator::Left(c) | JoinOperator::LeftOuter(c) => (true, c),
@@ -103,7 +112,7 @@ pub(super) fn compile(
         alias,
         derived,
         left,
-        condition: Some(term(on, parameters, depth)?),
+        condition: Some(term(on, parameters, depth, check)?),
     })
 }
 /// Derived results stay in caller-owned slots. Sources are borrowed only after

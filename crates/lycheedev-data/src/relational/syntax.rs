@@ -73,8 +73,61 @@ pub(super) fn identifier(name: &Ident) -> Result<&str> {
     Ok(&name.value)
 }
 
-#[derive(Debug)]
-pub(super) struct QueryDialect;
+/// Owns views of the original controls because sqlparser's Dialect is Any.
+/// Cloning a control and taking a safety view preserves their identity, deadline
+/// and cancellation provenance; no token or replacement deadline is created.
+#[derive(Default)]
+pub(super) struct QueryDialect {
+    controls: Option<(
+        lycheedev_core::control::OperationControl,
+        crate::resource::Budget,
+    )>,
+    stop: std::cell::RefCell<Option<lycheedev_core::ToolkitError>>,
+}
+impl std::fmt::Debug for QueryDialect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QueryDialect")
+            .field("controlled", &self.controls.is_some())
+            .finish()
+    }
+}
+impl QueryDialect {
+    pub(super) fn controlled(
+        control: &lycheedev_core::control::OperationControl,
+        budget: &crate::resource::Budget,
+    ) -> Self {
+        Self {
+            controls: Some((control.clone(), budget.safety_only())),
+            stop: Default::default(),
+        }
+    }
+    pub(super) fn check(&self) -> Result<()> {
+        if let Some((control, budget)) = &self.controls {
+            control.check()?;
+            budget.check()?;
+        }
+        Ok(())
+    }
+    // sqlparser has a closed error enum. Preserve the actual typed error in
+    // this one compilation, rather than inferring cancellation from a string.
+    fn parser_check(&self) -> std::result::Result<(), ParserError> {
+        let mut stop = self.stop.borrow_mut();
+        if stop.is_none() {
+            *stop = self.check().err();
+        }
+        if stop.is_some() {
+            Err(ParserError::ParserError("SQL compilation stopped".into()))
+        } else {
+            Ok(())
+        }
+    }
+    pub(super) fn take_stop(&self) -> Result<()> {
+        match self.stop.borrow_mut().take() {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+}
 
 // Delegate the pinned GenericDialect's feature overrides. This adapter changes
 // expression prefixes and identifier boundaries. Tokens retain the fixed Go
@@ -170,11 +223,19 @@ impl Dialect for QueryDialect {
         supports_aliased_function_args,
     );
 
+    fn get_reserved_keywords_for_select_item_operator(&self) -> &[Keyword] {
+        // sqlparser's '*' / 't.*' fast paths bypass parse_prefix. This public
+        // select-item hook records the same original stop before those paths.
+        // The dependency has no fallible hook here; take_stop propagates it
+        // before any lowering, binding, provider access or public result.
+        let _ = self.parser_check();
+        &[]
+    }
     fn is_select_item_alias(&self, _explicit: bool, kw: &Keyword, _parser: &mut Parser) -> bool {
-        *kw == Keyword::NoKeyword
+        self.parser_check().is_ok() && *kw == Keyword::NoKeyword
     }
     fn is_table_factor_alias(&self, _explicit: bool, kw: &Keyword, _parser: &mut Parser) -> bool {
-        *kw == Keyword::NoKeyword
+        self.parser_check().is_ok() && *kw == Keyword::NoKeyword
     }
     fn prec_value(&self, precedence: Precedence) -> u8 {
         match precedence {
@@ -193,6 +254,9 @@ impl Dialect for QueryDialect {
         expr: &Expr,
         _precedence: u8,
     ) -> Option<std::result::Result<Expr, ParserError>> {
+        if let Err(error) = self.parser_check() {
+            return Some(Err(error));
+        }
         if !matches!(parser.peek_token().token, Token::Word(ref w) if w.keyword == Keyword::IS) {
             return None;
         }
@@ -209,6 +273,9 @@ impl Dialect for QueryDialect {
         })())
     }
     fn get_next_precedence(&self, parser: &Parser) -> Option<std::result::Result<u8, ParserError>> {
+        if let Err(error) = self.parser_check() {
+            return Some(Err(error));
+        }
         Some(Ok(match parser.peek_token().token {
             Token::Word(ref word) => match word.keyword {
                 Keyword::OR => 10,
@@ -230,6 +297,9 @@ impl Dialect for QueryDialect {
         }))
     }
     fn parse_prefix(&self, parser: &mut Parser) -> Option<std::result::Result<Expr, ParserError>> {
+        if let Err(error) = self.parser_check() {
+            return Some(Err(error));
+        }
         if matches!(parser.peek_token().token, Token::Word(ref word)
             if word.quote_style.is_none() && equal_fold(&word.value, "NOT"))
         {
