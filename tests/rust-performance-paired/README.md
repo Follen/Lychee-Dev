@@ -227,3 +227,31 @@ Successful observation has `state=startup_diagnostics_observed`,
 `performanceAcceptanceEvaluated=false`, `passedSelectedPaths=false` and no
 performance groups. Failed/mismatched/unreaped observations retain evidence;
 there are no replacement samples. [5bbb Windows observation tests and the first diagnostic](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6220553599) have executed: 61 tests passed, and the separately authenticated ac8 product ran once per engine with original totals Go48.3713ms/Rust50.8590ms. The diagnostic preserved all original timing and ownership facts. One pair is not a stable performance estimate and does not change the failed ac8 20-pair verdict or prove a newer product's speed.
+
+## Single cold index diagnostic
+
+Append `--cold-index-diagnostics` instead of `--startup-diagnostics` to the same
+five-argument owned entry when a single cold index observation is required.
+The flags are mutually exclusive. This mode authenticates both optimized
+artifacts and full fixed Retail inputs, performs each engine's real init/sync,
+then clones those independent cold seeds into new homes and invokes each
+engine's original `source index` once. It does not read or modify an earlier
+failed pair's homes. Preparation is retained separately; no product work is
+subtracted from the original command clock. Original 180-second index budget
+and 210-second outer invocation bound remain unchanged.
+
+All public index fields remain compared. A mismatch produces
+`cold_index_diagnostics_failed`, exit 1, and retains the failed pair's full
+outputs, timing, memory and scratch. It does not run a warm sample or replace
+the failed pair. An equivalent observation is `cold_index_diagnostics_observed`;
+both states have `performanceAcceptanceEvaluated=false`,
+`passedSelectedPaths=false`, and no acceptance groups. One pair cannot establish
+the 20-pair performance criterion, including when used to diagnose an
+optimization while a known semantic difference is still open.
+
+Like startup diagnostics, this mode may use the separately exported, authenticated
+17-file runner described above against an unchanged source checkout matching a
+previously sealed optimized artifact. Retain both identities; do not overwrite
+that checkout's tools or relabel the artifact as the new runner's product.
+Ordinary invocation without either flag still runs all original cases with
+20 cold and 20 warm pairs per case and the unchanged strict acceptance gate.

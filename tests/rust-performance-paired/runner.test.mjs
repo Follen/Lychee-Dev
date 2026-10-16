@@ -214,26 +214,26 @@ test('diagnostic mode retains strict identities, separate runner custody, one pa
   const outer = readFileSync(new URL('../../tools/rust-performance-paired.mjs', import.meta.url), 'utf8');
   const inner = readFileSync(new URL('./run.mjs', import.meta.url), 'utf8');
   assert(outer.includes("extra.length === 1 && extra[0] === '--startup-diagnostics'"));
-  assert(outer.includes("const runnerRoot = startupDiagnostics ? resolve(import.meta.dirname, '..') : root;"));
+  assert(outer.includes("const runnerRoot = diagnosticMode ? resolve(import.meta.dirname, '..') : root;"));
   assert(outer.includes('hashFile(join(runnerRoot, path)) === hash'));
-  assert(outer.includes('const passed = !startupDiagnostics && stable && handlesReaped'));
+  assert(outer.includes('const passed = !diagnosticMode && stable && handlesReaped'));
   assert(outer.includes("observation?.state === 'startup_diagnostics_observed'"));
   assert(inner.includes("assert.equal(sourceDigest(root), rust.inputHashes.sourceTree, 'Rust source/build identity changed')"));
   assert(inner.includes('assert.equal(emmy.patchedTreeSHA256, rust.inputHashes.emmy?.patchedTreeSHA256)'));
   const begin = inner.indexOf('  if (startupDiagnostics) {\n    const entry = CASES[0];');
-  const end = inner.indexOf('  } else for (const entry of CASES) {', begin);
+  const end = inner.indexOf('  } else for (const entry of executionCases) {', begin);
   assert(begin > 0 && end > begin);
   const diagnostic = inner.slice(begin, end);
   assert.equal((diagnostic.match(/invoke\(entry, engine,/g) ?? []).length, 1);
   assert(diagnostic.includes('for (const engine of row.order)'));
   assert(diagnostic.includes('compareSamples(entry.id, outputs.go, outputs.rust, oracle, null)'));
   assert(!/REPETITIONS|prepareSeeds\(|cacheMode of/.test(diagnostic));
-  assert(inner.includes('startupDiagnostics ? [] : summarize(report.pairs)'));
+  assert(inner.includes('diagnosticMode ? [] : summarize(report.pairs)'));
 });
 function runDiagnosticFixture({mismatch = false, invalid = false, unreaped = false} = {}) {
   const source = readFileSync(new URL('./run.mjs', import.meta.url), 'utf8');
   const begin = source.indexOf('  if (startupDiagnostics) {\n    const entry = CASES[0];');
-  const end = source.indexOf('  } else for (const entry of CASES) {', begin);
+  const end = source.indexOf('  } else for (const entry of executionCases) {', begin);
   assert(begin > 0 && end > begin);
   const calls = [], seals = [], writes = [], cleaned = [];
   const pair = {directory: 'fixture', evidence: 'evidence', receipt: 'receipt', seal: value => seals.push(value), cleanup: () => cleaned.push(true)};
@@ -275,4 +275,67 @@ test('unreaped diagnostic process stops before the other engine and retains inte
   assert.match(result.error.message, /unverified process reap/); assert.equal(result.calls.length, 1);
   assert.equal(result.seals[0].state, 'interrupted'); assert.equal(result.seals[0].handlesReaped, false);
   assert.equal(result.context.report.diagnosticPairs[0].resultEquivalent, false); assert.equal(result.cleaned.length, 0);
+});
+
+function runColdIndexFixture({mismatch = false, invalid = false, unreaped = false} = {}) {
+  const source = readFileSync(new URL('./run.mjs', import.meta.url), 'utf8');
+  const begin = source.indexOf('for (const entry of executionCases) {');
+  const end = source.indexOf('\n  identity();', begin);
+  assert(begin > 0 && end > begin);
+  const calls = [], copies = [], seals = [], cleaned = [], writes = [];
+  let preparations = 0;
+  const pair = {directory: 'new-fixture', evidence: 'evidence', receipt: 'receipt', seal: value => seals.push(value), cleanup: () => cleaned.push(true)};
+  const context = {executionCases: [CASES[1]], executionRepetitions: 1, executionCacheModes: ['cold'],
+    root: 'root', config: {go: {binarySHA256: 'go'}, rust: {binarySHA256: 'rust'}}, fatal: false,
+    report: {pairs: [], pairOwners: [], preparation: []}, seedIdentities: {}, seeds: {}, pins: {},
+    performance: {now: () => 1}, orderFor, join, assert, compareSamples, oracle, files: () => ['sealed-output'], save: () => {},
+    prepareSeeds: () => { preparations++; for (const engine of ['go', 'rust']) { context.seeds[engine] = `${engine}-independent-seed`; context.seedIdentities[engine] = {sha256: engine}; context.pins[engine] = {id: pin}; } },
+    cloneSeed: (seed, home, identity) => copies.push({seed, home, identity}),
+    beginScratch: () => pair, writeFileSync: (path, bytes) => writes.push({path, value: JSON.parse(bytes)}),
+    invoke: (entry, engine, home, selectedPin, evidence, iteration, cacheMode) => {
+      calls.push({entry, engine, home, selectedPin, iteration, cacheMode});
+      if (unreaped) context.fatal = true;
+      const result = index(); if (mismatch && engine === 'rust') result.result.declarations++;
+      return {row: {valid: !invalid, controllableMillis: 123}, envelope: result};
+    }};
+  let error; try { runInNewContext(source.slice(begin, end), context); } catch (failure) { error = failure; }
+  return {context, calls, copies, seals, cleaned, writes, error, preparations};
+}
+test('cold index diagnostic runs only one real index pair with independently cloned cold homes', () => {
+  const result = runColdIndexFixture(); assert.equal(result.error, undefined); assert.equal(result.preparations, 1);
+  assert.deepEqual(result.calls.map(row => row.engine), ['go', 'rust']); assert.equal(result.copies.length, 2);
+  for (const call of result.calls) {
+    assert.equal(call.entry.id, 'B02-retail-index'); assert.deepEqual(call.entry.args, ['source', 'index']);
+    assert.equal(call.cacheMode, 'cold'); assert.equal(call.iteration, 0); assert.equal(call.selectedPin, pin);
+    assert.equal(call.home, join('new-fixture', `${call.engine}-home`));
+    assert.equal(result.copies.find(row => row.home === call.home).seed, `${call.engine}-independent-seed`);
+  }
+  assert.equal(result.context.report.pairs.length, 1); assert.equal(result.context.report.pairs[0].resultEquivalent, true);
+  assert.equal(result.seals[0].state, 'succeeded'); assert.equal(result.cleaned.length, 1);
+});
+test('cold index diagnostic keeps the entire mismatched pair and original timing without replacement or warm', () => {
+  for (const options of [{mismatch: true}, {invalid: true}]) {
+    const result = runColdIndexFixture(options); assert.equal(result.error, undefined); assert.equal(result.calls.length, 2);
+    assert.equal(result.context.report.pairs.length, 1); const row = result.context.report.pairs[0];
+    assert.equal(row.resultEquivalent, false); assert(row.failure); assert.equal(row.rust.controllableMillis, 123);
+    assert.equal(result.seals[0].state, 'failed'); assert.equal(result.seals[0].handlesReaped, true); assert.equal(result.cleaned.length, 0);
+  }
+});
+test('cold index unknown retirement halts the second engine and preserves its interrupted owner', () => {
+  const result = runColdIndexFixture({unreaped: true}); assert.match(result.error.message, /unverified process reap/);
+  assert.equal(result.calls.length, 1); assert.equal(result.seals[0].state, 'interrupted');
+  assert.equal(result.seals[0].handlesReaped, false); assert.equal(result.cleaned.length, 0);
+});
+test('cold index mode cannot become twenty-pair acceptance or alter ordinary schedules', () => {
+  const outer = readFileSync(new URL('../../tools/rust-performance-paired.mjs', import.meta.url), 'utf8');
+  const inner = readFileSync(new URL('./run.mjs', import.meta.url), 'utf8');
+  assert(outer.includes("extra.length === 1 && extra[0] === '--cold-index-diagnostics'"));
+  assert(inner.includes("assert(!(startupDiagnostics && coldIndexDiagnostics)"));
+  assert(inner.includes('const executionCases = coldIndexDiagnostics ? [CASES[1]] : CASES;'));
+  assert(inner.includes('const executionRepetitions = coldIndexDiagnostics ? 1 : REPETITIONS;'));
+  assert(inner.includes("const executionCacheModes = coldIndexDiagnostics ? ['cold'] : ['cold', 'warm'];"));
+  for (const source of [inner, outer]) assert(source.includes('performanceAcceptanceEvaluated: !diagnosticMode'));
+  assert(outer.includes('const passed = !diagnosticMode && stable && handlesReaped'));
+  assert(outer.includes("observation.pairs[0].cacheMode === 'cold'"));
+  assert(inner.includes('report.groups = diagnosticMode ? [] : summarize(report.pairs)'));
 });

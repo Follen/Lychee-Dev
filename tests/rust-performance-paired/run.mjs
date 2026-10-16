@@ -20,11 +20,18 @@ const config = JSON.parse(readFileSync(configuration)), root = resolve(config.ro
 const oracle = JSON.parse(readFileSync(join(config.runnerRoot ?? root, 'tests/rust-source-full-corpus/retail-oracle.json')));
 assert(config.startupDiagnostics === undefined || typeof config.startupDiagnostics === 'boolean', 'startup diagnostic mode must be boolean');
 const startupDiagnostics = config.startupDiagnostics === true;
+assert(config.coldIndexDiagnostics === undefined || typeof config.coldIndexDiagnostics === 'boolean', 'cold index diagnostic mode must be boolean');
+const coldIndexDiagnostics = config.coldIndexDiagnostics === true;
+assert(!(startupDiagnostics && coldIndexDiagnostics), 'diagnostic modes are mutually exclusive');
+const diagnosticMode = startupDiagnostics || coldIndexDiagnostics;
+const executionCases = coldIndexDiagnostics ? [CASES[1]] : CASES;
+const executionRepetitions = coldIndexDiagnostics ? 1 : REPETITIONS;
+const executionCacheModes = coldIndexDiagnostics ? ['cold'] : ['cold', 'warm'];
 let fatal = false, sequence = 0;
 const report = {
-  schema: 'lycheedev.paired-performance.v1', mode: startupDiagnostics ? 'startup_diagnostics' : 'paired_performance', performanceAcceptanceEvaluated: !startupDiagnostics, state: 'running', startedAt: new Date().toISOString(),
-  scope: startupDiagnostics ? ['B01 describe startup diagnostic only; exactly one invocation per engine'] : ['B01 describe only', 'B02 fixed full-Retail local index and precise query only'],
-  completeB01B07Acceptance: false, targetRatio: TARGET_RATIO, repetitionsPerColdWarmGroup: startupDiagnostics ? null : REPETITIONS,
+  schema: 'lycheedev.paired-performance.v1', mode: startupDiagnostics ? 'startup_diagnostics' : coldIndexDiagnostics ? 'cold_index_diagnostics' : 'paired_performance', performanceAcceptanceEvaluated: !diagnosticMode, state: 'running', startedAt: new Date().toISOString(),
+  scope: startupDiagnostics ? ['B01 describe startup diagnostic only; exactly one invocation per engine'] : coldIndexDiagnostics ? ['B02 fixed full-Retail cold index diagnostic only; one invocation per engine; no performance acceptance'] : ['B01 describe only', 'B02 fixed full-Retail local index and precise query only'],
+  completeB01B07Acceptance: false, targetRatio: TARGET_RATIO, repetitionsPerColdWarmGroup: diagnosticMode ? null : REPETITIONS,
   remaining: ['B01 parser/selection/project/persistence', 'B02 local sync preparation, refs/context/flow/batch and full semantic checks', 'B03 retained session/invalidation/error recovery/close', 'B04-B07', 'full F/P correctness qualification'],
   cacheDefinition: 'Application-derived cache cold: independent new home per engine/path/pair copied only from that engine’s independently initialized, synced and authenticated seed; no cross-engine cache or metadata sharing; warm: exact same home, pin, binary and command after its own successful cold invocation. OS page/file caches are not flushed or claimed cold. Describe has no derived cache; cold/warm names denote first/repeated invocation only.',
   timingDefinition: 'Native monotonic clock immediately before CLI CreateProcessW until root and every owned descendant reaped and output drained. Includes all CLI local validation, worktree/index/cache reads/writes, worker startup and cleanup. PowerShell/compiler startup and observer shutdown excluded; observer startup, scheduling and pipe-drain overhead within the native interval remain included without subtraction. Wrapper wall time separately retained.',
@@ -143,10 +150,10 @@ try {
       save();
     }
     assert(!fatal, 'unverified process reap; outer retirement required');
-  } else for (const entry of CASES) {
+  } else for (const entry of executionCases) {
     // Describe remains independently useful when later input acquisition fails.
     if (entry.id !== 'B01-describe' && !seedIdentities.go) prepareSeeds();
-    for (let iteration = 0; iteration < REPETITIONS; iteration++) {
+    for (let iteration = 0; iteration < executionRepetitions; iteration++) {
       const pair = beginScratch(root, `paired-${entry.id}-${iteration}`, {command: entry.args, inputs: {go: config.go.binarySHA256, rust: config.rust.binarySHA256, seeds: Object.fromEntries(Object.entries(seedIdentities).map(([engine, value]) => [engine, value.sha256]))}, admissionOptions: {requiredBytes: 512 << 20, scratchReserveBytes: 512 << 20}});
       report.pairOwners.push({caseId: entry.id, iteration, receipt: pair.receipt}); save();
       let valid = false;
@@ -155,7 +162,7 @@ try {
         const copying = performance.now();
         if (entry.id !== 'B01-describe') for (const engine of ['go', 'rust']) cloneSeed(seeds[engine], homes[engine], seedIdentities[engine]);
         report.preparation.push({label: 'independent-home-copy', caseId: entry.id, iteration, wallMillis: performance.now() - copying, seedSHA256: entry.id === 'B01-describe' ? null : Object.fromEntries(Object.entries(seedIdentities).map(([engine, value]) => [engine, value.sha256])), classification: 'fixture construction; not product work removed from timing'});
-        for (const cacheMode of ['cold', 'warm']) {
+        for (const cacheMode of executionCacheModes) {
           const row = {caseId: entry.id, iteration, cacheMode, order: orderFor(iteration), resultEquivalent: false, inputSHA256: entry.id === 'B01-describe' ? null : oracle.allPathSHA256SizeDigest};
           report.pairs.push(row); save();
           const outputs = {};
@@ -185,7 +192,7 @@ try {
           if (!row.resultEquivalent) break; // No warm label after a failed cold.
         }
         const attempted = report.pairs.filter(row => row.caseId === entry.id && row.iteration === iteration);
-        valid = attempted.length === 2 && attempted.every(row => row.resultEquivalent);
+        valid = attempted.length === executionCacheModes.length && attempted.every(row => row.resultEquivalent);
         writeFileSync(join(pair.evidence, 'pair.json'), JSON.stringify({caseId: entry.id, iteration, valid, rows: attempted}, null, 2) + '\n');
       } finally {
         pair.seal({state: fatal ? 'interrupted' : valid ? 'succeeded' : 'failed', handlesReaped: !fatal, logs: files(pair.evidence)});
@@ -199,9 +206,9 @@ try {
   identity();
   report.machine.powerAfter = prepare('powercfg.exe', ['/getactivescheme'], 'power-policy-after').toString().trim();
   assert.equal(report.machine.powerAfter, report.machine.powerBefore, 'power policy changed');
-  report.groups = startupDiagnostics ? [] : summarize(report.pairs);
-  report.state = startupDiagnostics ? report.diagnosticPairs.length === 1 && report.diagnosticPairs[0].resultEquivalent === true ? 'startup_diagnostics_observed' : 'startup_diagnostics_failed' : report.groups.every(row => row.state === 'passed_selected_path') ? 'passed_selected_paths_full_acceptance_open' : 'failed';
-} catch (error) { report.blocker = error.message.slice(0, 4096); report.groups = startupDiagnostics ? [] : summarize(report.pairs); report.state = startupDiagnostics ? 'startup_diagnostics_failed' : 'failed'; }
+  report.groups = diagnosticMode ? [] : summarize(report.pairs);
+  report.state = startupDiagnostics ? report.diagnosticPairs.length === 1 && report.diagnosticPairs[0].resultEquivalent === true ? 'startup_diagnostics_observed' : 'startup_diagnostics_failed' : coldIndexDiagnostics ? report.pairs.length === 1 && report.pairs[0].resultEquivalent === true ? 'cold_index_diagnostics_observed' : 'cold_index_diagnostics_failed' : report.groups.every(row => row.state === 'passed_selected_path') ? 'passed_selected_paths_full_acceptance_open' : 'failed';
+} catch (error) { report.blocker = error.message.slice(0, 4096); report.groups = diagnosticMode ? [] : summarize(report.pairs); report.state = startupDiagnostics ? 'startup_diagnostics_failed' : coldIndexDiagnostics ? 'cold_index_diagnostics_failed' : 'failed'; }
 finally { report.wallMillis = performance.now() - start; report.finishedAt = new Date().toISOString(); report.requiresOuterRetirement = fatal; save(); }
 console.log(JSON.stringify({state: report.state, report: join(out, 'report.json'), groups: report.groups, diagnosticPairs: report.diagnosticPairs}));
-if (!['passed_selected_paths_full_acceptance_open', 'startup_diagnostics_observed'].includes(report.state)) process.exitCode = 1;
+if (!['passed_selected_paths_full_acceptance_open', 'startup_diagnostics_observed', 'cold_index_diagnostics_observed'].includes(report.state)) process.exitCode = 1;
