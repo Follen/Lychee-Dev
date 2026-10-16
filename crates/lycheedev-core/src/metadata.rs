@@ -3,6 +3,21 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::{Serialize, de::DeserializeOwned};
 use std::path::Path;
 
+// Fixed Go v3.2.3 keeps a removed key's last generation independently of its
+// document. Every writer, including immutable capture publication, must use
+// that same history so a delete/recreate cannot authorize an older CAS.
+const DELETED_GENERATIONS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS deleted_generations (key TEXT PRIMARY KEY NOT NULL, generation INTEGER NOT NULL) WITHOUT ROWID";
+const INSERT_DOCUMENT: &str = "INSERT INTO documents(key,generation,value) VALUES(?1,COALESCE((SELECT generation+1 FROM deleted_generations WHERE key=?1),1),?2)";
+
+// Call only inside the same write transaction as the corresponding DELETE.
+// A missing document does not erase an earlier tombstone.
+fn remember_deleted_generation(connection: &Connection, key: &str) -> rusqlite::Result<usize> {
+    connection.execute(
+        "INSERT INTO deleted_generations(key,generation) SELECT key,generation FROM documents WHERE key=?1 ON CONFLICT(key) DO UPDATE SET generation=excluded.generation",
+        [key],
+    )
+}
+
 #[derive(Debug, Clone)]
 pub struct RawDocument {
     pub generation: i64,
@@ -85,6 +100,7 @@ impl Metadata {
         }
         if write {
             connection.pragma_update(None, "synchronous", "FULL")?;
+            connection.execute_batch(DELETED_GENERATIONS_SCHEMA)?;
         }
         Ok(Self { connection })
     }
@@ -381,7 +397,7 @@ impl Metadata {
                     None if expected.is_none() => {
                         checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
                             transaction.execute(
-                                "INSERT INTO documents(key,generation,value) VALUES(?1,1,?2)",
+                                INSERT_DOCUMENT,
                                 params![key, &raw],
                             )
                         })?;
@@ -476,7 +492,7 @@ impl Metadata {
                 ));
             }
             transaction.execute(
-                "INSERT INTO documents(key,generation,value) VALUES(?1,1,?2)",
+                INSERT_DOCUMENT,
                 params![key, raw],
             )?;
         }
@@ -566,7 +582,7 @@ impl Metadata {
                     check()?;
                     checked_sql(control, until, &mut || {}, || {
                         transaction.execute(
-                            "INSERT INTO documents(key,generation,value) VALUES(?1,1,?2)",
+                            INSERT_DOCUMENT,
                             params![key, raw],
                         )
                     })?;
@@ -597,10 +613,13 @@ impl Metadata {
         rows.map(|row| Ok(serde_json::from_slice(&row?)?)).collect()
     }
     pub fn delete(&mut self, key: &str) -> Result<bool> {
-        Ok(self
+        let transaction = self
             .connection
-            .execute("DELETE FROM documents WHERE key=?1", [key])?
-            != 0)
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        remember_deleted_generation(&transaction, key)?;
+        let deleted = transaction.execute("DELETE FROM documents WHERE key=?1", [key])? != 0;
+        transaction.commit()?;
+        Ok(deleted)
     }
     /// Validate and consume one document in the same write transaction.
     /// Unrelated workspace documents are not loaded for a single-use intent.
@@ -625,6 +644,7 @@ impl Metadata {
             )
         })?;
         let result = validate(serde_json::from_slice(&raw)?)?;
+        remember_deleted_generation(&transaction, key)?;
         transaction.execute("DELETE FROM documents WHERE key=?1", [key])?;
         transaction.commit()?;
         Ok(result)
@@ -756,12 +776,15 @@ impl Metadata {
                     return Err(ToolkitError::invalid("recovery document exceeds 1 MiB"));
                 }
                 transaction.execute(
-                    "INSERT INTO documents(key,generation,value) VALUES(?1,1,?2)",
+                    INSERT_DOCUMENT,
                     params![key, raw],
                 )?;
             }
             for key in keys {
                 control.check()?;
+                checked_sql(control, until, &mut || {}, || {
+                    remember_deleted_generation(&transaction, key)
+                })?;
                 transaction.execute("DELETE FROM documents WHERE key=?1", [key])?;
             }
             checked_sql(control, until, &mut || {}, || {
@@ -1295,3 +1318,6 @@ pub(crate) use capture_write::CaptureWriteState;
 mod source_controlled;
 
 mod listfile_controlled;
+
+#[cfg(test)]
+mod generation_tests;

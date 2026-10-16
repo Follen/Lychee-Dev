@@ -129,7 +129,7 @@ impl Metadata {
                     None => {
                         checked_sql_with_check(control, until, &mut check, on_busy, || {
                             transaction.execute(
-                                "INSERT INTO documents(key,generation,value) VALUES(?1,1,?2)",
+                                INSERT_DOCUMENT,
                                 params![key, raw],
                             )
                         })?;

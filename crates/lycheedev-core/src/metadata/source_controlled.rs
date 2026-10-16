@@ -108,6 +108,9 @@ impl Metadata {
                 let value = validate(serde_json::from_slice(&raw)?)?;
                 control.check()?;
                 checked_sql(control, control.deadline(), on_busy, || {
+                    remember_deleted_generation(&transaction, key)
+                })?;
+                checked_sql(control, control.deadline(), on_busy, || {
                     transaction.execute("DELETE FROM documents WHERE key=?1", [key])
                 })?;
                 checked_sql(control, control.deadline(), on_busy, || {

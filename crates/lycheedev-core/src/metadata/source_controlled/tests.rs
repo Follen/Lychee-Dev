@@ -213,6 +213,19 @@ fn commit_contention_does_not_replay_validator_and_rolls_back_delete() {
     blocker.execute_batch("ROLLBACK").unwrap();
     blocker.close().unwrap();
     assert_eq!(store.generation("source/intent").unwrap(), Some(1));
+    let tombstone: Option<i64> = store
+        .connection
+        .query_row(
+            "SELECT generation FROM deleted_generations WHERE key='source/intent'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .unwrap();
+    assert_eq!(
+        tombstone, None,
+        "cancelled COMMIT must roll back its tombstone"
+    );
     store.close().unwrap();
 }
 #[test]

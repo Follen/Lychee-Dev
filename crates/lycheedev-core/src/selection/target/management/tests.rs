@@ -163,6 +163,60 @@ fn add_reads_only_exact_generation_and_replace_recreate_preserve_monotonic_cas()
     f.cleanup();
 }
 #[test]
+fn removed_target_reference_recreated_by_resolution_rejects_stale_generation() {
+    let f = Fixture::new();
+    crate::workspace::dispatch(&f.add("recreated")).unwrap();
+    let pin = crate::selection::pin_selection(
+        &f.home,
+        SelectionSpec {
+            data: Some(DataPin {
+                product: "retail".into(),
+                region: "us".into(),
+                language: "enUS".into(),
+                full_build: "12.1.5.70000".into(),
+                build_config: "1".repeat(32),
+                cdn_config: "2".repeat(32),
+                definition_commit: "a".repeat(40),
+            }),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let key = format!("target-ref/recreated/pin/{}", pin.id);
+    for generation in [1, 2] {
+        let resolved = resolve_controlled_with_check(
+            &f.home,
+            "recreated",
+            "",
+            &f.control,
+            || Ok(()),
+            |_, _| Ok(pin.clone()),
+        )
+        .unwrap();
+        assert_eq!(resolved.pin.id, pin.id);
+        write(&f.home, &f.control, |writer| {
+            assert_eq!(writer.document(&key)?.generation, generation);
+            if generation == 2 {
+                assert_eq!(
+                    writer.delete(&[(key.clone(), 1)]).unwrap_err().code,
+                    "vault.generation_conflict"
+                );
+                assert_eq!(writer.document(&key)?.generation, 2);
+            }
+            Ok(())
+        })
+        .unwrap();
+        if generation == 1 {
+            let removed = f.run("target remove", Some("recreated")).unwrap();
+            assert_eq!(removed.data["removedRefCount"], 1);
+            assert!(f.missing(&key));
+            assert!(!f.missing(&format!("pin/{}", pin.id)));
+            crate::workspace::dispatch(&f.add("recreated")).unwrap();
+        }
+    }
+    f.cleanup();
+}
+#[test]
 fn relative_installation_is_fixed_at_save_without_requiring_directory_to_exist() {
     let f = Fixture::new();
     let mut inv = f.add("local");

@@ -172,3 +172,62 @@ fn actual_bounded_capture_late_stop_retains_manifest_identity() {
         id
     );
 }
+
+#[test]
+fn removed_capture_republished_by_persistence_rejects_stale_generation() {
+    for controlled in [false, true] {
+        let f = Fixture::new();
+        let control = alive();
+        let bytes = b"recreated capture";
+        let capture = commit_capture_bounded(
+            &f.0,
+            CaptureInput {
+                bytes,
+                maximum_bytes: bytes.len(),
+                media_type: "text/plain",
+                provenance: serde_json::json!({"kind":"fixture","locator":"recreated"}),
+                complete: true,
+                truncated: false,
+            },
+            &control,
+        )
+        .unwrap();
+        let id = capture["id"].as_str().unwrap();
+        let key = format!("capture/{id}");
+        let original = Metadata::read_document_raw_controlled(&f.0, &key, &control).unwrap();
+        assert_eq!(original.generation, 1);
+        let removed = crate::evidence::remove_capture_controlled(&f.0, id, &control).unwrap();
+        assert_eq!(removed["manifestRemoved"], true);
+        assert_eq!(removed["blobRemoved"], true);
+
+        // Public constructors include a new timestamp in the capture identity.
+        // Reuse the exact original manifest through the production persistence
+        // boundary to exercise recreation deterministically, without a clock hook.
+        let blob = publish_blob_bounded(&f.0, bytes, bytes.len(), &control).unwrap();
+        assert_eq!(blob, capture["blob"]);
+        let state = Cell::new(crate::metadata::CaptureWriteState::NotCommitted);
+        persist_capture(
+            &f.0,
+            &key,
+            &original.bytes,
+            controlled.then_some(&control),
+            &mut || Ok(()),
+            &state,
+        )
+        .unwrap();
+        assert_eq!(state.get(), crate::metadata::CaptureWriteState::Committed);
+        Metadata::with_historical_write(&f.0, &control, |writer| {
+            let recreated = writer.document(&key)?;
+            assert_eq!(recreated.generation, 2);
+            assert_eq!(recreated.bytes, original.bytes);
+            assert_eq!(
+                writer.delete(&[(key.clone(), 1)]).unwrap_err().code,
+                "vault.generation_conflict"
+            );
+            assert_eq!(writer.document(&key)?.generation, 2);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(crate::evidence::read_capture(&f.0, id).unwrap(), capture);
+    }
+}

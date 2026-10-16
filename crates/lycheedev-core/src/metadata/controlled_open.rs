@@ -164,6 +164,9 @@ impl Metadata {
                     checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
                         connection.pragma_update(None, "synchronous", "FULL")
                     })?;
+                    checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
+                        connection.execute_batch(DELETED_GENERATIONS_SCHEMA)
+                    })?;
                 }
                 metadata_check(control, &mut check)
             })();
