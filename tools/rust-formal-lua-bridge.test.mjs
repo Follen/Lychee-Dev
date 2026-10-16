@@ -2,7 +2,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {resolve, join} from 'node:path';
-import {selectTestExecutable, verifyTestOutput} from './rust-formal-lua-bridge.mjs';
+import {readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import {SUPPORT, selectTestExecutable, verifyTestOutput} from './rust-formal-lua-bridge.mjs';
+import {BASE, ORACLE, MANIFEST_SHA256, RELEASE_FIELDS_SHA256, SUPPORT as ORACLE_SUPPORT, authenticate, hash} from '../tests/rust-parity/formal-lua-3.2.3/assertions.mjs';
+const root = fileURLToPath(new URL('..', import.meta.url));
 const target = resolve('target');
 const artifact = {reason:'compiler-artifact', target:{name:'formal_lua_bridge',kind:['test']},
   profile:{test:true}, executable:join(target,'debug/deps/formal_lua_bridge-a1b2c3.exe')};
@@ -40,3 +44,30 @@ for(const [name, bytes] of [
   ['failure',output(cases,'9 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out;')],
   ['double summary',Buffer.concat([output(),Buffer.from('test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0s\n')])],
 ]) test(`rejects ${name} result`,()=>assert.throws(()=>verifyTestOutput(bytes)));
+
+test('Node admission and Rust bridge authenticate the same current 113-file manifest and exact release fields',()=>{
+  const source=readFileSync(join(root,'crates/lycheedev-live/tests/support/formal_lua_fixture.rs'),'utf8');
+  const constant=name=>source.match(new RegExp(`pub const ${name}: &str =\\s*"([a-f0-9]+)";`))?.[1];
+  assert.equal(constant('ORACLE'),ORACLE); assert.equal(constant('MANIFEST_SHA256'),MANIFEST_SHA256);
+  assert.equal(constant('RELEASE_FIELDS_SHA256'),RELEASE_FIELDS_SHA256);
+  const includes=[...source.matchAll(/include_bytes!\("\.\.\/\.\.\/\.\.\/\.\.\/([^"\n]+)"\)/g)].map(match=>match[1]);
+  assert.deepEqual(includes,[`${BASE}/release-fields.json`,`${BASE}/manifest.json`]);
+  assert.equal(hash(readFileSync(join(root,includes[0]))),RELEASE_FIELDS_SHA256);
+  assert.equal(hash(readFileSync(join(root,includes[1]))),MANIFEST_SHA256);
+  const fixed=authenticate(root); assert.equal(fixed.fixtures.length+fixed.addon.length,113);
+  assert.deepEqual(JSON.parse(readFileSync(join(root,includes[0]))),fixed.retainedReleaseFields);
+  assert.match(source,/value\["fixture"\]\["oracle"\], ORACLE/);
+  assert.match(source,/report\["oracle"\], ORACLE/);
+  assert.match(source,/serde_json::from_slice\(RELEASE_FIELDS\)/);
+  assert(!source.includes('formal-lua-3.2.2')); assert(!source.includes('split_once'));
+  assert(ORACLE_SUPPORT.every(path=>SUPPORT.includes(path)));
+  assert.equal(new Set(SUPPORT).size,SUPPORT.length);
+  const controller=readFileSync(join(root,'tools/rust-formal-lua-bridge.mjs'),'utf8');
+  assert.match(controller,/fixture: \{root: fixture, oracle: ORACLE, manifestSHA256: MANIFEST_SHA256, releaseFieldsSHA256: RELEASE_FIELDS_SHA256\}/);
+  assert.match(controller,/materialize\(root, fixture, inputs\)/);
+});
+test('all nine actual Rust bridge test definitions retain the checked scenario set',()=>{
+  const source=readFileSync(join(root,'crates/lycheedev-live/tests/formal_lua_bridge.rs'),'utf8');
+  const names=[...source.matchAll(/^case!\((formal_lua_recovery_\w+),/gm)].map(match=>match[1]);
+  assert.deepEqual(names.sort(),[...cases].sort());
+});

@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 10:43 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`ec503c9a1734e29d67dd5c8ffe6f17caab5336f2`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 10:52 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`1f9a8cb544b1f240813ee77410b5536df4e8d4c7`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -35,7 +35,7 @@
 
 ## 3. 最近集中验证的真实边界
 
-- [89f61b9 run38880882451](https://github.com/Follen/Lychee-Dev/actions/runs/38880882451)：10:38核实static/context成功，product仍运行；all-target编译、CLI构建、真实describe、静态Retail及22–75各组已通过，76 adapter组失败（详细封存诊断待取），77固定oracle失败且已受控返回，78–96各组成功、97安装组运行中。SQL深度、分段trace、完整Retail与后续产品组尚不能报通过。
+- [89f61b9 run38880882451](https://github.com/Follen/Lychee-Dev/actions/runs/38880882451)：10:45核实static/context成功，product仍运行；all-target编译、CLI构建、真实describe、静态Retail及22–75各组已通过，76 adapter组失败（详细封存诊断待取），77固定oracle失败且已受控返回，后续继续执行至142；keys109、SQL118/126另有失败，78–141其余已执行组成功。SQL深度、分段trace、完整Retail与后续产品组尚不能报通过。
 
 - [8a3 run38854701834](https://github.com/Follen/Lychee-Dev/actions/runs/38854701834)：context/static成功，product取消；final产物122 owners/2210 sealed日志逐SHA一致。CLI构建、真实describe、静态Retail、正式Lua/桥、slot维护17/移除8/修复25、Source准备47/research65（另2ignored）及生命周期28等组实际通过。all-target旧Script字段与adapter旧集合类型失败。历史参考cargo真实异常退出；outer在06:29报错后直至08:08取消，后续组未执行，不能当成用户取消或完整产品通过。最新149修复不在该run。
 - [fbba run38850381033](https://github.com/Follen/Lychee-Dev/actions/runs/38850381033)：context/static成功，product失败；191 owners/1171 sealed日志逐SHA一致。CLI/Source多数目标受旧cleanup Result类型编译阻断（现已修）。独立Data remote284等组真实通过；另有SQL断言及IN测试栈溢出、Hotfix、asset、Core等真实失败，不能全部归为编译连锁。
@@ -44,10 +44,14 @@
 - 原始批次、owner/hash和失败记录见[历史证据](docs/toolkit/rust-migration-evidence-2026-10-15.md)。PR正文更新曾两次被拒，仍暂停该动作；已授权源码推送继续，未发布或合并。
 
 - 本机ec503实际复验已确认SQL三个0xc00000fd，合法scalar深度63最后停在parse；TLS两多尾点SNI与固定Go不等价；keys redirect fixture与local_query scratch_bytes另有失败。编译已过不代表这些运行问题解决。本机负责测试与PR证据，修复仍在云端进行。
+- 本机同ec503补测：process47与native_session28通过；trace storage5通过、1个由父进程实际启动的故障peer例单列ignored；完整固定oracle仍运行。源码原版848认证通过，不代表完整语义等价已通过。
+- `d20586d`已保存首个固定Go323优化候选配对入口，42个Node检查通过、10个Windows项未执行；实际基准未跑。`1f9a8cb`已按Go实际Root上限4096修复SQL reader过量scratch准入，并将keys旧gap断言改为真实两跳编码路径回归；Rust复验待后续完整候选。
+- 本批将正式Lua与真实Driver桥入口切到独立固定Go323清单（113个原blob认证）；旧320/321/322清单原样保留。仅上游323相对322的Runtime/TOC与两个Lua版本fixture增量，Rust3.5字段采用精确可逆overlay；Node正式63及包/版本115检查通过。正式220 Lua与9桥需在新SHA实际运行，旧322补充结果不重标。
+
 
 ## 4. 进入最终四阶段前的有限收口
 
-1. 修复当前编译、测试输出/收尾与已确认SQL/Data/Core失败，保真实错误、预算、部分结果和提交事实；完成HTTP剩余Go既有边界，不扩成新数据库或通用网络栈。
+1. 结构性修复SQL输入驱动的parse/retrieval/lowering/execute/drop递归与错误释放；不能以Box缩小帧、抬线程栈或降低原深度代替闭合。修复当前编译、测试输出/收尾与已确认SQL/Data/Core失败，保真实错误、预算、部分结果和提交事实；完成HTTP剩余Go既有边界，不扩成新数据库或通用网络栈。
 2. 在同草稿PR保存完整修复批，集中跑实际生产链与原全量比较；外层验证必须有界失败并让后续独立组执行，不提高产品deadline。
 3. 验证Source短预算/暖态回收与完整Retail输出、诊断、性能/内存；未完成组清楚列NOT_RUN，不以unit或静态Retail替代。
 4. 完成上述实现闭环后进入下节四阶段循环。继续以完整功能为单位实施与集中验证，不恢复逐几十行独审门禁。

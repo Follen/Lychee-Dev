@@ -6,15 +6,16 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writ
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BASE, BRIDGE_GAPS, LIMITS, MANIFEST_SHA256, ORACLE, PROFILES, authenticate, cases, cleanLuaEnvironment, evaluate, gitBlob, hash, manifest, materialize, processPassed, runCases, verifyMaterial, verifyOwnerEvidence, verifyUnifiedTOC } from '../tests/rust-parity/formal-lua-3.2.2/assertions.mjs';
+import { BASE, PREVIOUS_BASE, CHANGED_FIXTURES, CHANGED_ADDON, BRIDGE_GAPS, LIMITS, MANIFEST_SHA256, ORACLE, PROFILES, RELEASE_FIELDS_SHA256, SUPPORT as ORACLE_SUPPORT, authenticate, cases, cleanLuaEnvironment, evaluate, gitBlob, hash, fixturePath, manifest, materialize, processPassed, runCases, verifyMaterial, verifyOwnerEvidence, verifyUnifiedTOC } from '../tests/rust-parity/formal-lua-3.2.3/assertions.mjs';
 import { sourceDigest } from './rust-build.mjs';
-import { verifyCandidateArtifact } from './rust-formal-lua.mjs';
+import { SUPPORT as RUNNER_SUPPORT, verifyCandidateArtifact } from './rust-formal-lua.mjs';
+import * as historical from '../tests/rust-parity/formal-lua-3.2.2/assertions.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const fixed = authenticate(root), plan = cases(fixed);
 const proof = () => ({ rootReaped: true, treeReaped: true, handlesClosed: true, toolIdentityLocksClosed: true, outputReadersComplete: true, activeProcesses: 0, forced: false, outputLimit: false });
 const result = row => ({ status: 0, handlesReaped: true, proof: proof(), stdout: Buffer.from(row.completion), stderr: Buffer.alloc(0), logs: ['owned-process.receipt.json'] });
 function scratch(fn) { const dir = mkdtempSync(join(tmpdir(), 'lycheedev-formal-lua-checker-')); try { return fn(dir); } finally { rmSync(dir, { recursive: true, force: true }); } }
-function copied(fn) { return scratch(dir => { cpSync(join(root, BASE), join(dir, BASE), { recursive: true }); cpSync(join(root, 'addon'), join(dir, 'addon'), { recursive: true }); return fn(dir); }); }
+function copied(fn) { return scratch(dir => { cpSync(join(root, BASE), join(dir, BASE), { recursive: true }); cpSync(join(root, PREVIOUS_BASE), join(dir, PREVIOUS_BASE), { recursive: true }); cpSync(join(root, 'addon'), join(dir, 'addon'), { recursive: true }); return fn(dir); }); }
 
 test('manifest and all 113 source records match immutable Git objects byte for byte', () => {
   const m = manifest(root); assert.equal(hash(readFileSync(join(root, BASE, 'manifest.json'))), MANIFEST_SHA256);
@@ -23,10 +24,10 @@ test('manifest and all 113 source records match immutable Git objects byte for b
     assert.equal(bytes.length, row.bytes, row.path); assert.equal(hash(bytes), row.sha256, row.path); assert.equal(gitBlob(bytes), row.gitBlob, row.path);
   }
 });
-test('original 39 addon and 13 protocol sets are complete, not selected old test names', () => {
+test('all original fixture directories and the complete 55-file addon set are retained', () => {
   const m = manifest(root);
-  for (const [prefix, expected] of [['tests/addon/', 39], ['tests/protocol/', 13]]) {
-    const actual = m.fixtures.filter(row => row.path.startsWith(prefix)).map(row => row.path);
+  for (const [prefix, expected] of [['tests/addon/', 39], ['tests/protocol/', 13], ['tests/lib/', 1], ['tests/baseline/probes/', 4], ['internal/testkit/lua.go', 1], ['addon/', 55]]) {
+    const actual = [...m.fixtures, ...m.candidateAddon].filter(row => row.path.startsWith(prefix)).map(row => row.path);
     const original = execFileSync('git', ['ls-tree', '--full-tree', '-r', '--name-only', ORACLE, `:(top)${prefix}`], { cwd: root, timeout: 10000, maxBuffer: 65536 }).toString().trim().split('\n');
     assert.equal(actual.length, expected); assert.deepEqual(actual, original);
   }
@@ -42,16 +43,16 @@ test('every addon fixture runs independently under all six exact profiles', () =
 });
 test('staging contains current authenticated addon plus exact frozen fixture dependencies', () => scratch(dir => {
   const target = join(dir, 'staged'); materialize(root, target, fixed); verifyMaterial(target, fixed); verifyUnifiedTOC(target);
-  assert.equal(readFileSync(join(target, 'tests/baseline/probes/sync.lua')).toString(), readFileSync(join(root, BASE, 'oracle/tests/baseline/probes/sync.lua')).toString());
+  assert.equal(readFileSync(join(target, 'tests/baseline/probes/sync.lua')).toString(), readFileSync(fixturePath(root, 'tests/baseline/probes/sync.lua')).toString());
   // The current delivery retired the 21 historical addon extras; their frozen
   // source evidence remains separate from the exact staged addon inventory.
   assert.deepEqual(fixed.historicalAddonExtras, []);
 }));
 test('fixture mutation, current addon mutation, missing source and unexpected fixture fail authentication', () => {
   for (const mutate of [
-    dir => writeFileSync(join(dir, BASE, 'oracle/tests/addon/t_bootstrap.lua'), '-- old legacy test\n'),
+    dir => writeFileSync(fixturePath(dir, 'tests/addon/t_bootstrap.lua'), '-- old legacy test\n'),
     dir => writeFileSync(join(dir, 'addon/Bridge/SlotRuntime.lua'), '-- wrong protocol\n'),
-    dir => rmSync(join(dir, BASE, 'oracle/tests/addon/t_input_mailbox.lua')),
+    dir => rmSync(fixturePath(dir, 'tests/addon/t_input_mailbox.lua')),
     dir => writeFileSync(join(dir, BASE, 'oracle/tests/addon/t_unreviewed.lua'), 'assert(true)\n'),
   ]) copied(dir => { mutate(dir); assert.throws(() => authenticate(dir)); });
 });
@@ -130,7 +131,7 @@ test('Lua init and search hook environment never enters interpreter processes', 
 });
 test('all original Go functions are explicitly mapped; three bridge gaps cannot count as passed', () => {
   const map = JSON.parse(readFileSync(join(root, BASE, 'go-test-map.json')));
-  const originals = fixed.fixtures.filter(row => row.path.endsWith('_test.go')).flatMap(row => [...readFileSync(join(root, BASE, 'oracle', row.path)).toString().matchAll(/^func (Test\w+)\(t \*testing.T\)/gm)].map(match => match[1])).sort();
+  const originals = fixed.fixtures.filter(row => row.path.endsWith('_test.go')).flatMap(row => [...readFileSync(fixturePath(root, row.path)).toString().matchAll(/^func (Test\w+)\(t \*testing.T\)/gm)].map(match => match[1])).sort();
   assert.deepEqual(map.tests.map(row => row.goTest).sort(), originals); assert.equal(map.tests.length, 9);
   assert.deepEqual(map.tests.filter(row => row.mode === 'deferred-rust-host-integration').map(row => row.goTest).sort(), BRIDGE_GAPS.map(row => row.test).sort());
   assert(BRIDGE_GAPS.every(row => row.state === 'not_run')); assert.equal(map.executionCases, plan.length);
@@ -248,11 +249,13 @@ test('artifact command uses the actual producer cargo prefix exactly once', () =
 });
 
 // Current release authentication never weakens source-byte custody.
-test('3.2.2 has only two exact retained release literals and unchanged historical oracle', () => {
+test('3.2.3 has two exact 3.5.0 release allowances without relabeling historical manifests', () => {
   const m = manifest(root);
-  assert.equal(m.oracle.commit, '0bec60e4406f5d5dc155ee25cef44f9a710e37e8');
+  assert.equal(m.oracle.commit, '3766f9cacb52e93a803a626187e2a1d54a445468');
+  assert.equal(m.previousOracle.commit, historical.ORACLE);
+  assert.equal(hash(readFileSync(join(root, PREVIOUS_BASE, 'manifest.json'))), historical.MANIFEST_SHA256);
   assert.deepEqual(m.retainedReleaseFields.map(row => row.path), ['addon/Core/Runtime.lua', 'addon/Lychee Dev.toc']);
-  assert.equal(hash(readFileSync(join(root, 'tests/rust-parity/formal-lua/manifest.json'))), m.historicalOracle.manifestSHA256);
+  assert.equal(hash(readFileSync(join(root, 'tests/rust-parity/formal-lua/manifest.json'))), historical.manifest(root).historicalOracle.manifestSHA256);
   assert.deepEqual(fixed.retainedReleaseFields, m.retainedReleaseFields);
 });
 test('retained release allowance rejects every additional source edit', () => copied(dir => {
@@ -268,8 +271,85 @@ test('current static TOC requires both Retail interfaces and original client gat
   const path = join(dir, 'addon/Lychee Dev.toc');
   writeFileSync(path, readFileSync(path, 'utf8').replace('120105, ', ''));
   assert.throws(() => verifyUnifiedTOC(dir), /interface_missing: 120105/);
-  const gate = readFileSync(join(root, BASE, 'oracle/tests/addon/t_client_gate.lua'), 'utf8');
+  const gate = readFileSync(fixturePath(root, 'tests/addon/t_client_gate.lua'), 'utf8');
   assert(gate.includes('Env.testBuilds.retail'));
   assert(gate.includes('12.1.0'));
-  assert(readFileSync(join(root, BASE, 'oracle/tests/addon/env.lua'), 'utf8').includes('120105'));
+  assert(readFileSync(fixturePath(root, 'tests/addon/env.lua'), 'utf8').includes('120105'));
 }));
+
+test('the entire 3.2.3 increment is exactly four one-line version changes', () => {
+  const current = manifest(root), previous = historical.manifest(root);
+  for (const key of ['fixtures', 'candidateAddon']) {
+    const changed = [];
+    for (const row of current[key]) {
+      const old = previous[key].find(old => old.path === row.path);
+      if (row.sha256 === old.sha256) { assert.deepEqual(row, old); continue; }
+      changed.push(row.path);
+      const bytes = execFileSync('git', ['cat-file', 'blob', `${ORACLE}:${row.path}`], { cwd: root, timeout: 10000, maxBuffer: LIMITS.file });
+      const text = bytes.toString('utf8');
+      assert.equal(text.split('3.2.3').length, 2, row.path);
+      const restored = Buffer.from(text.replace('3.2.3', '3.2.2'));
+      assert.equal(restored.length, old.bytes); assert.equal(hash(restored), old.sha256); assert.equal(gitBlob(restored), old.gitBlob);
+    }
+    assert.deepEqual(changed, key === 'fixtures' ? CHANGED_FIXTURES : CHANGED_ADDON);
+  }
+  assert.equal(current.increment.authenticatedGitObjects, 113);
+  assert.equal(current.increment.reusedFixtures, 56); assert.equal(current.increment.unchangedAddon, 53);
+});
+test('current materialization stages original 3.2.3 fixtures and preserves historical 3.2.2 bytes', () => scratch(dir => {
+  const target = join(dir, 'stage'); materialize(root, target, fixed);
+  for (const row of fixed.fixtures) {
+    const staged = readFileSync(join(target, row.path));
+    assert.equal(hash(staged), row.sha256); assert.equal(gitBlob(staged), row.gitBlob);
+    assert.deepEqual(staged, readFileSync(fixturePath(root, row.path)));
+    if (CHANGED_FIXTURES.includes(row.path)) {
+      const previous = readFileSync(join(root, PREVIOUS_BASE, 'oracle', row.path));
+      assert(previous.includes('3.2.2')); assert(staged.includes('3.2.3'));
+      assert.notDeepEqual(previous, staged);
+    }
+  }
+  for (const field of fixed.retainedReleaseFields) {
+    assert(readFileSync(join(target, field.path)).includes(field.retainedText));
+    assert(field.expectedText.includes('3.2.3')); assert(field.retainedText.includes('3.5.0'));
+  }
+  assert.deepEqual(cases(fixed), historical.cases(historical.authenticate(root)));
+  assert.equal(runCases, historical.runCases); assert.equal(verifyMaterial, historical.verifyMaterial);
+}));
+test('new and reused fixture custody rejects rollback, tampering, omission, additions and rewritten overlays', () => {
+  for (const mutate of [
+    dir => cpSync(join(dir, PREVIOUS_BASE, 'oracle/tests/addon/env.lua'), fixturePath(dir, 'tests/addon/env.lua')),
+    dir => writeFileSync(fixturePath(dir, 'tests/addon/t_about.lua'), '-- changed current assertion\n'),
+    dir => rmSync(fixturePath(dir, 'tests/addon/env.lua')),
+    dir => cpSync(fixturePath(dir, 'tests/addon/run.lua'), join(dir, BASE, 'oracle/tests/addon/run.lua')),
+    dir => writeFileSync(join(dir, PREVIOUS_BASE, 'oracle/tests/addon/env.lua'), '-- cannot rewrite old identity\n'),
+    dir => writeFileSync(join(dir, PREVIOUS_BASE, 'oracle/tests/addon/new.lua'), '-- cannot extend inherited set\n'),
+    dir => writeFileSync(join(dir, PREVIOUS_BASE, 'manifest.json'), '{}\n'),
+    dir => writeFileSync(join(dir, BASE, 'release-fields.json'), '[]\n'),
+  ]) copied(dir => { mutate(dir); assert.throws(() => authenticate(dir)); });
+});
+test('materialization refuses a caller-supplied stale or forged identity before creating the target', () => scratch(dir => {
+  assert.throws(() => materialize(root, join(dir, 'old'), historical.authenticate(root)), /materialize_input_identity/);
+  assert.throws(() => materialize(root, join(dir, 'forged'), { ...fixed, oracle: historical.ORACLE }), /materialize_input_identity/);
+  const target = join(dir, 'current'); materialize(root, target, fixed);
+  writeFileSync(join(target, 'unexpected.lua'), 'assert(true)');
+  assert.throws(() => verifyMaterial(target, fixed), /staged_identity/);
+}));
+test('current test map binds all original Go functions and only current not-run execution claims', () => {
+  const map = JSON.parse(readFileSync(join(root, BASE, 'go-test-map.json')));
+  assert.deepEqual(map.oracle, manifest(root).oracle); assert.equal(map.manifestSHA256, MANIFEST_SHA256);
+  for (const entry of map.tests) {
+    const source = fixed.fixtures.find(row => row.path === entry.goSource);
+    assert.equal(entry.sourceSHA256, source.sha256); assert.equal(entry.sourceGitBlob, source.gitBlob);
+    assert.equal(entry.executionEvidence, 'NOT_RUN for Go 3.2.3 until actual current-oracle execution is sealed');
+  }
+});
+test('interpreter support binds both identity generations and the new exact release overlay', () => {
+  assert(ORACLE_SUPPORT.every(path => RUNNER_SUPPORT.includes(path)));
+  assert.equal(new Set(RUNNER_SUPPORT).size, RUNNER_SUPPORT.length);
+  assert.equal(hash(readFileSync(join(root, BASE, 'release-fields.json'))), RELEASE_FIELDS_SHA256);
+  for (const path of [`${BASE}/assertions.mjs`, `${BASE}/manifest.json`, `${BASE}/release-fields.json`, `${BASE}/go-test-map.json`, `${PREVIOUS_BASE}/assertions.mjs`, `${PREVIOUS_BASE}/manifest.json`]) assert(RUNNER_SUPPORT.includes(path), path);
+  const source = readFileSync(join(root, 'tools/rust-formal-lua.mjs'), 'utf8');
+  assert.match(source, /report\.oracle, ORACLE/); assert.match(source, /report\.manifestSHA256, MANIFEST_SHA256/);
+  assert.match(source, /receipt\.inputHashes\.oracle, ORACLE/);
+  assert.match(source, /scope: '216 fixed Go 3\.2\.3 addon Lua suite\/profile executions plus four/);
+});

@@ -16,15 +16,15 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-pub const ORACLE: &str = "0bec60e4406f5d5dc155ee25cef44f9a710e37e8";
+pub const ORACLE: &str = "3766f9cacb52e93a803a626187e2a1d54a445468";
 pub const MANIFEST_SHA256: &str =
-    "9a4ffc0a482b0543bacb3065a56a79657ff7935b4d03b5ab2b9e321bce04f140";
+    "c976957ff8e2dd05b12179ccb240a41c0836f6fc877314b7107fedbfd9357cd7";
 pub const RELEASE_FIELDS_SHA256: &str =
-    "de5f159ca60c96d38ba38e1ab43ed1cfd1f750abbd56ee5364d12100127af020";
+    "d3d071167c4a031aecebf50508ee0d27bce5bdb2ec8307c4c1b36b827f160396";
 const RELEASE_FIELDS: &[u8] =
-    include_bytes!("../../../../tests/rust-parity/rust-3.5.0-release-fields.mjs");
+    include_bytes!("../../../../tests/rust-parity/formal-lua-3.2.3/release-fields.json");
 const MANIFEST: &[u8] =
-    include_bytes!("../../../../tests/rust-parity/formal-lua-3.2.2/manifest.json");
+    include_bytes!("../../../../tests/rust-parity/formal-lua-3.2.3/manifest.json");
 pub const CODE: &str = "return { message = \"荔枝\\n\\000123\", quoted = [=[x\\y]=] }";
 pub const BROKEN_CODE: &str = "return { broken =";
 
@@ -139,6 +139,7 @@ impl Inputs {
         );
         let bytes = read(&path, 64 << 10);
         let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["fixture"]["oracle"], ORACLE);
         assert_eq!(value["fixture"]["manifestSHA256"], MANIFEST_SHA256);
         assert_eq!(
             value["fixture"]["releaseFieldsSHA256"],
@@ -161,6 +162,8 @@ impl Inputs {
         assert_eq!(storage::sha256(&report_bytes), report_hash);
         let report: Value = serde_json::from_slice(&report_bytes).unwrap();
         assert_eq!(report["schema"], "lycheedev.formal-lua-interpreter.v1");
+        assert_eq!(report["oracle"], ORACLE);
+        assert_eq!(report["manifestSHA256"], MANIFEST_SHA256);
         assert_eq!(report["version"], "5.1.5");
         assert_eq!(report["platform"], "windows-amd64");
         assert_eq!(
@@ -229,16 +232,11 @@ impl Inputs {
         assert_eq!(storage::sha256(MANIFEST), MANIFEST_SHA256);
         let manifest: Value = serde_json::from_slice(MANIFEST).unwrap();
         assert_eq!(manifest["oracle"]["commit"], ORACLE);
-        // Preserve the original Go manifest byte for byte. Extract only the
-        // two JSON rows from the independently pinned overlay; never execute
-        // that JavaScript, Lua addon startup, or studied source to inspect it.
+        // The complete current Go manifest and exact two-field candidate
+        // overlay are pinned separately. Historical manifests stay unchanged;
+        // inspecting these JSON bytes never executes studied source.
         assert_eq!(storage::sha256(RELEASE_FIELDS), RELEASE_FIELDS_SHA256);
-        let overlay = std::str::from_utf8(RELEASE_FIELDS).unwrap();
-        let (_, rows) = overlay
-            .split_once("export const CANDIDATE_RELEASE_FIELDS = Object.freeze(")
-            .unwrap();
-        let (rows, _) = rows.split_once(".map(row =>").unwrap();
-        let retained: Vec<Value> = serde_json::from_str(rows).unwrap();
+        let retained: Vec<Value> = serde_json::from_slice(RELEASE_FIELDS).unwrap();
         assert_eq!(retained.len(), 2);
         assert_eq!(retained[0]["path"], "addon/Core/Runtime.lua");
         assert_eq!(retained[1]["path"], "addon/Lychee Dev.toc");

@@ -8,13 +8,13 @@ import { beginScratch, contained } from './rust-disk.mjs';
 import { ownedSpawnSync } from './rust-owned-process.mjs';
 import { fixedToolchain, luaSource, selectCompiler, verifySystemImports } from './luac.mjs';
 import { sourceDigest, verifyArtifact } from './rust-build.mjs';
-import { BASE, BRIDGE_GAPS, LIMITS, ORACLE, authenticate, cases, cleanLuaEnvironment, hash, materialize, processReaped, regular, runCases, verifyMaterial, verifyOwnerEvidence, verifyUnifiedTOC } from '../tests/rust-parity/formal-lua-3.2.2/assertions.mjs';
+import { BRIDGE_GAPS, LIMITS, MANIFEST_SHA256, ORACLE, SUPPORT as ORACLE_SUPPORT, authenticate, cases, cleanLuaEnvironment, hash, materialize, processReaped, regular, runCases, verifyMaterial, verifyOwnerEvidence, verifyUnifiedTOC } from '../tests/rust-parity/formal-lua-3.2.3/assertions.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BUILD_ARGUMENTS = Object.freeze(['/nologo', '/Bv', '/O2', '/MT', '/Brepro', '/TC']);
 const LINK_ARGUMENTS = Object.freeze(['/link', '/Brepro', '/INCREMENTAL:NO', '/OPT:REF', '/OPT:ICF']);
 const SOURCES = Object.freeze(['lapi.c', 'lauxlib.c', 'lbaselib.c', 'lcode.c', 'ldblib.c', 'ldebug.c', 'ldo.c', 'ldump.c', 'lfunc.c', 'lgc.c', 'linit.c', 'liolib.c', 'llex.c', 'lmathlib.c', 'lmem.c', 'loadlib.c', 'lobject.c', 'lopcodes.c', 'loslib.c', 'lparser.c', 'lstate.c', 'lstring.c', 'lstrlib.c', 'ltable.c', 'ltablib.c', 'ltm.c', 'lua.c', 'lundump.c', 'lvm.c', 'lzio.c']);
-const SUPPORT = Object.freeze(['tools/rust-formal-lua.mjs', `${BASE}/assertions.mjs`, 'tests/rust-parity/rust-3.5.0-release-fields.mjs', `${BASE}/go-test-map.json`, 'tools/luac.mjs', 'tools/rust-owned-process.mjs', 'tools/rust-owned-process.ps1', 'tools/rust-build-auxiliary.json', 'tools/rust-disk.mjs', 'tools/rust-build.mjs', 'tools/rust-emmy-identity.mjs', 'release/rust-disk-policy.json', 'release/tools/luac.json']);
+export const SUPPORT = Object.freeze(['tools/rust-formal-lua.mjs', ...ORACLE_SUPPORT, 'tools/luac.mjs', 'tools/rust-owned-process.mjs', 'tools/rust-owned-process.ps1', 'tools/rust-build-auxiliary.json', 'tools/rust-disk.mjs', 'tools/rust-build.mjs', 'tools/rust-emmy-identity.mjs', 'release/rust-disk-policy.json', 'release/tools/luac.json']);
 const identity = paths => Object.fromEntries(paths.map(path => [path, hash(regular(join(root, path)))]));
 const save = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
 function windowsOnly() { assert(process.platform === 'win32' && process.arch === 'x64', 'formal-lua.windows_amd64_required'); }
@@ -39,7 +39,7 @@ export async function buildInterpreter(output, sourceArchive) {
   const destination = contained(root, resolve(output)), support = identity(SUPPORT);
   const pinned = JSON.parse(regular(join(root, 'release/tools/luac.json'))), selected = fixedToolchain(pinned.toolchain);
   assert.equal(luaSource.sha256, '2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333');
-  const job = beginScratch(root, 'formal-lua-build', { command: process.argv, inputs: { support, sourceSHA256: luaSource.sha256, toolchain: selected }, admissionOptions: { requiredBytes: 64 << 20, scratchReserveBytes: 64 << 20 } });
+  const job = beginScratch(root, 'formal-lua-build', { command: process.argv, inputs: { oracle: ORACLE, manifestSHA256: MANIFEST_SHA256, support, sourceSHA256: luaSource.sha256, toolchain: selected }, admissionOptions: { requiredBytes: 64 << 20, scratchReserveBytes: 64 << 20 } });
   const deadline = Date.now() + 10 * 60000;
   let handlesReaped = true, state = 'failed', sequence = 0;
   function run(command, args, cwd, env = process.env, msvcCompile = false) {
@@ -81,7 +81,7 @@ export async function buildInterpreter(output, sourceArchive) {
     assert.deepEqual(identity(SUPPORT), support, 'formal-lua.support_changed');
     assert.equal(hash(regular(executable, 16 << 20)), hash(bytes), 'formal-lua.interpreter_changed');
     assert(Date.now() <= deadline, 'formal-lua.build_deadline');
-    const report = { schema: 'lycheedev.formal-lua-interpreter.v1', version: '5.1.5', platform: 'windows-amd64', executable, executableSHA256: hash(bytes), executableBytes: bytes.length,
+    const report = { schema: 'lycheedev.formal-lua-interpreter.v1', oracle: ORACLE, manifestSHA256: MANIFEST_SHA256, version: '5.1.5', platform: 'windows-amd64', executable, executableSHA256: hash(bytes), executableBytes: bytes.length,
       source: { ...luaSource, bytes: archive.length, archive: join(destination, 'lua-5.1.5.tar.gz') }, license: { path: join(destination, 'LICENSE'), sha256: hash(license) }, toolchain: selected,
       compilerVersion, toolFiles, sourceFiles, arguments: args, imports, buildEvidence: job.receipt, support, interpreterProbe: probe.trim() };
     save(join(destination, 'build-report.json'), report);
@@ -97,6 +97,7 @@ export async function buildInterpreter(output, sourceArchive) {
 export function verifyInterpreter(reportPath) {
   const path = contained(root, resolve(reportPath)), bytes = regular(path), report = JSON.parse(bytes);
   assert.equal(report.schema, 'lycheedev.formal-lua-interpreter.v1');
+  assert.equal(report.oracle, ORACLE); assert.equal(report.manifestSHA256, MANIFEST_SHA256);
   assert.equal(report.version, '5.1.5'); assert.equal(report.platform, 'windows-amd64');
   assert.equal(report.source.sha256, luaSource.sha256); assert.equal(report.source.url, luaSource.url);
   assert.equal(report.interpreterProbe, 'formal-lua-interpreter-ok');
@@ -110,6 +111,7 @@ export function verifyInterpreter(reportPath) {
   assert.equal(hash(regular(contained(root, report.license.path))), report.license.sha256);
   assert.equal(report.license.sha256, pinned.runtime.licenseSHA256);
   const receiptPath = contained(root, report.buildEvidence), evidence = verifyOwnerEvidence(root, receiptPath, 'formal-lua-build'), { receipt } = evidence;
+  assert.equal(receipt.inputHashes.oracle, ORACLE); assert.equal(receipt.inputHashes.manifestSHA256, MANIFEST_SHA256);
   assert.deepEqual(receipt.inputHashes.support, report.support); assert.equal(receipt.inputHashes.sourceSHA256, luaSource.sha256);
   assert.deepEqual(receipt.inputHashes.toolchain, report.toolchain);
   const sealedReport = evidence.logs.get(join(dirname(receiptPath), 'interpreter-report.json'));
@@ -182,10 +184,11 @@ export function runAcceptance(interpreterPath, artifactPath) {
     const elapsedMs = Date.now() - started, totalDeadlineExceeded = elapsedMs > LIMITS.totalMs;
     const passed = !identityError && !totalDeadlineExceeded && handlesReaped && observations.length === LIMITS.cases && observations.every(row => row.state === 'passed');
     const report = { schema: 'lycheedev.formal-lua-acceptance.v1', state: passed ? 'passed_selected_lua_suites' : 'failed', passed, oracle: ORACLE, manifestSHA256: inputs.manifestSHA256,
+      releaseFieldsSHA256: inputs.releaseFieldsSHA256, previousOracle: inputs.previousOracle, increment: inputs.increment,
       interpreterSHA256: runtime.report.executableSHA256, interpreterReportSHA256: runtime.reportSHA256, artifactSHA256, binarySHA256: artifact.binarySHA256,
       inputsStable: !identityError, identityError, handlesReaped, elapsedMs, totalDeadlineExceeded, limits: LIMITS, profiles: [...new Set(observations.filter(row => row.kind === 'addon').map(row => row.profile))],
       observations, staticTOC: { source: 'TestUnifiedTOCContract', state: 'passed_static' }, deferredHostTests: BRIDGE_GAPS, historicalAddonExtras: inputs.historicalAddonExtras, retainedReleaseFields: inputs.retainedReleaseFields,
-      scope: '210 fixed Go addon Lua suite/profile executions plus four standalone protocol Lua suites. Real Lua assertions, WoW API mocks. No Go host tests, Rust bridge integration, real client, seven-product or historical-consumer cleanup claim; the sealed Rust artifact is identity-bound but is not exercised by these Lua suites.' };
+      scope: '216 fixed Go 3.2.3 addon Lua suite/profile executions plus four standalone protocol Lua suites. Real Lua assertions, WoW API mocks. No Go host tests, Rust bridge integration, real client, seven-product or historical-consumer cleanup claim; the sealed Rust artifact is identity-bound but is not exercised by these Lua suites.' };
     save(join(job.evidence, 'report.json'), report);
     state = passed ? 'succeeded' : 'failed';
     return { passed, report: join(job.evidence, 'report.json'), receipt: job.receipt, counts: Object.fromEntries(['passed', 'failed', 'not_run'].map(value => [value, observations.filter(row => row.state === value).length])), deferredHostTests: BRIDGE_GAPS };

@@ -8,10 +8,9 @@ import {beginScratch, contained} from './rust-disk.mjs';
 import {runCargo, sourceDigest, verifyArtifact} from './rust-build.mjs';
 import {ownedSpawnSync} from './rust-owned-process.mjs';
 import {verifyCandidateArtifact, verifyInterpreter} from './rust-formal-lua.mjs';
-import {ORACLE, MANIFEST_SHA256, authenticate, cleanLuaEnvironment, hash, materialize,
-  processPassed, processReaped, regular, verifyMaterial, verifyOwnerEvidence} from '../tests/rust-parity/formal-lua-3.2.2/assertions.mjs';
+import {BASE, ORACLE, MANIFEST_SHA256, RELEASE_FIELDS_SHA256, SUPPORT as ORACLE_SUPPORT, authenticate, cleanLuaEnvironment, hash, materialize,
+  processPassed, processReaped, regular, verifyMaterial, verifyOwnerEvidence} from '../tests/rust-parity/formal-lua-3.2.3/assertions.mjs';
 
-const RELEASE_FIELDS_SHA256 = 'de5f159ca60c96d38ba38e1ab43ed1cfd1f750abbd56ee5364d12100127af020';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const runtimePath = join(root, '.tmp/ci-formal-lua-runtime/build-report.json');
 const candidatePath = join(root, '.tmp/ci-cli-artifact/artifact.json');
@@ -19,8 +18,8 @@ const artifactDirectory = join(root, '.tmp/ci-formal-lua-bridge-test');
 const artifactPath = join(artifactDirectory, 'artifact.json');
 const args = Object.freeze(['test', '--locked', '--offline', '-p', 'lycheedev-live', '--test', 'formal_lua_bridge', '--no-run', '--message-format=json-render-diagnostics', '-j', '1']);
 const cases = Object.freeze(['normal', 'after_bind', 'after_prepare', 'after_commit', 'after_confirm', 'after_release', 'reload_bind', 'compile_error', 'cleanup_error'].map(value => `formal_lua_recovery_${value}`));
-const supportPaths = Object.freeze(['tools/rust-formal-lua-bridge.mjs', 'tools/rust-formal-lua.mjs', 'tools/rust-build.mjs', 'tools/rust-cargo.mjs', 'tools/rust-disk.mjs', 'tools/rust-owned-process.mjs', 'tools/rust-owned-process.ps1', 'tests/rust-parity/formal-lua-3.2.2/assertions.mjs', 'tests/rust-parity/formal-lua-3.2.2/manifest.json', 'tests/rust-parity/rust-3.5.0-release-fields.mjs']);
-const supportIdentity = () => Object.fromEntries(supportPaths.map(path => [path, hash(regular(join(root, path)))]));
+export const SUPPORT = Object.freeze(['tools/rust-formal-lua-bridge.mjs', 'tools/rust-formal-lua.mjs', 'tools/rust-build.mjs', 'tools/rust-cargo.mjs', 'tools/rust-disk.mjs', 'tools/rust-owned-process.mjs', 'tools/rust-owned-process.ps1', ...ORACLE_SUPPORT]);
+const supportIdentity = () => Object.fromEntries(SUPPORT.map(path => [path, hash(regular(join(root, path)))]));
 const save = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2) + '\n', {flag: 'wx'});
 
 // The artifact must come from this Cargo invocation's structured output, not a
@@ -112,7 +111,7 @@ function collectFiles(directory, cap = 64 << 20) {
 export function main() {
   assert.equal(process.platform, 'win32'); assert.equal(process.arch, 'x64');
   const support = supportIdentity(), inputs = authenticate(root);
-  assert.equal(support['tests/rust-parity/rust-3.5.0-release-fields.mjs'], RELEASE_FIELDS_SHA256, 'formal-bridge.release_fields_identity');
+  assert.equal(support[`${BASE}/release-fields.json`], RELEASE_FIELDS_SHA256, 'formal-bridge.release_fields_identity');
   const runtime = verifyInterpreter(runtimePath), candidate = verifyCandidateArtifact(root, candidatePath);
   const test = buildTest(support, inputs, candidate);
   const testIdentity = verifyTestArtifact(test, support, inputs);
@@ -127,7 +126,7 @@ export function main() {
   try {
     materialize(root, fixture, inputs); mkdirSync(caseRoot);
     save(admissionPath, {interpreter: {report: runtimePath, reportSHA256: runtime.reportSHA256,
-      buildReceiptSHA256: runtime.buildReceiptSHA256}, fixture: {root: fixture, manifestSHA256: MANIFEST_SHA256, releaseFieldsSHA256: RELEASE_FIELDS_SHA256},
+      buildReceiptSHA256: runtime.buildReceiptSHA256}, fixture: {root: fixture, oracle: ORACLE, manifestSHA256: MANIFEST_SHA256, releaseFieldsSHA256: RELEASE_FIELDS_SHA256},
       scratch: {receipt: job.receipt, cases: caseRoot}});
     save(join(job.evidence, 'identity.json'), {runtime, candidate, test, testIdentity, support, inputs});
     const checkIdentity = () => {
@@ -154,10 +153,11 @@ export function main() {
     });
     assert.deepEqual(lifetimes.map(row => row.case).sort(), ['normal', 'bind', 'prepare', 'commit', 'confirm', 'release', 'reload_bind', 'compile_error', 'cleanup_error'].sort());
     save(join(job.evidence, 'report.json'), {schema: 'lycheedev.formal-lua-bridge-recovery.v1', state: 'passed',
-      oracle: ORACLE, goTest: 'TestSlotDriverLuaRecoveryWithoutBusinessReplay', counts, lifetimes,
+      oracle: ORACLE, manifestSHA256: MANIFEST_SHA256, releaseFieldsSHA256: RELEASE_FIELDS_SHA256,
+      previousOracle: inputs.previousOracle, increment: inputs.increment, goTest: 'TestSlotDriverLuaRecoveryWithoutBusinessReplay', counts, lifetimes,
       testBinarySHA256: test.binarySHA256, testIdentity, candidateArtifactSHA256: candidate.artifactSHA256,
       interpreterReportSHA256: runtime.reportSHA256, handlesReaped,
-      scope: 'Real formal Rust Driver, codec, DurableChannelJournal and unchanged fixed Go Lua. Readiness/clock/input transport are explicit fixtures. No real client or the two other deferred bridge tests. Inner handles use existing standard-library/JobGuard Drop; no independently checked inner-handle-close claim.'});
+      scope: 'Real formal Rust Driver, codec, DurableChannelJournal and authenticated fixed Go 3.2.3 Lua. Readiness/clock/input transport are explicit fixtures. No real client or the two other deferred bridge tests. Inner handles use existing standard-library/JobGuard Drop; no independently checked inner-handle-close claim.'});
     succeeded = true;
   } catch (error) {
     failure = error;

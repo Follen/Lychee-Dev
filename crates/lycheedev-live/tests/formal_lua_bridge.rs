@@ -1,4 +1,4 @@
-//! Fixed Go 3.2.2 TestSlotDriverLuaRecoveryWithoutBusinessReplay, with the real
+//! Fixed Go 3.2.3 TestSlotDriverLuaRecoveryWithoutBusinessReplay, with the real
 //! Rust formal Driver/codec/durable journal and unchanged authenticated Lua.
 //! Physical input, selected HWND, monotonic samples and wall clock are fixtures.
 //! This does not replace real-client or the two remaining host bridge tests.
