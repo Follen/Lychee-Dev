@@ -1,6 +1,7 @@
 // Fixed historical semantic oracle followed by the unmodified-engine candidate.
 // This is a test-only composition of the existing controlled Cargo/owner boundary.
 import assert from 'node:assert/strict';
+import {isDeepStrictEqual} from 'node:util';
 import {existsSync,lstatSync,mkdirSync,readFileSync,readdirSync,writeFileSync} from 'node:fs';
 import {dirname,join,relative,resolve} from 'node:path';
 import {beginScratch,contained,sha256} from '../../../tools/rust-disk.mjs';
@@ -41,6 +42,36 @@ export function readTraces(directory,targets,role){
     const rows=validateFrames(text.slice(0,-1).split('\n').map(line=>JSON.parse(line)),{...entry,role});
     return {...entry,path,bytes:info.size,sha256:hashFile(path,MAX_TRACE),rows};
   });
+}
+
+// Continue all original targets after a semantic failure, preserving the final
+// nonzero Cargo status on each side. This is Cargo's switch, not a libtest flag.
+export function oracleCargoArgs(targets){
+  return ['test','--locked','--offline','--no-fail-fast','-p','lycheedev-source',
+    ...targets.flatMap(t=>['--test',t.target]),'-j','1','--','--test-threads=1'];
+}
+
+// Full raw rows remain in their separately sealed bounded traces. Summarize all
+// differing ordinals while bounding duplicate report data; no field allowlist.
+export function traceDifferences(reference,candidate){
+  assert.equal(candidate.length,reference.length,'oracle.trace_pair_inventory');
+  const differences=[];
+  for(let i=0;i<reference.length;i++){
+    const old=reference[i],actual=candidate[i];
+    assert.equal(actual.file,old.file,'oracle.trace_pair_identity');
+    let differingRows=0;const first=[];
+    for(let ordinal=0;ordinal<Math.max(old.rows.length,actual.rows.length);ordinal++){
+      const expected=old.rows[ordinal],value=actual.rows[ordinal];
+      if(isDeepStrictEqual(value,expected))continue;
+      differingRows++;
+      if(first.length<32)first.push({ordinal,referenceLabel:expected?.label??null,candidateLabel:value?.label??null,
+        referenceSHA256:expected?sha256(Buffer.from(JSON.stringify(expected))):null,
+        candidateSHA256:value?sha256(Buffer.from(JSON.stringify(value))):null});
+    }
+    if(differingRows)differences.push({file:old.file,referenceRows:old.rows.length,candidateRows:actual.rows.length,
+      differingRows,first,moreDifferingRows:differingRows-first.length});
+  }
+  return differences;
 }
 
 function harnessInputs(){
@@ -98,7 +129,7 @@ export function run(root=process.cwd()){
     report.reference.recipeSHA256=historical.recipeSHA256;
     report.reference.sourceTree=sourceDigest(stage);
     stable();
-    const args=['test','--locked','--offline','-p','lycheedev-source',...inputs.manifest.targets.flatMap(t=>['--test',t.target]),'-j','1','--','--test-threads=1'];
+    const args=oracleCargoArgs(inputs.manifest.targets);
     const invoke=(sourceRoot,environment,role)=>{
       handlesReaped=false;
       try{
@@ -132,14 +163,16 @@ export function run(root=process.cwd()){
     const candidate=readTraces(candidateDir,inputs.manifest.targets,'candidate');
     for(let i=0;i<reference.length;i++){
       assert.equal(hashFile(reference[i].path,MAX_TRACE),reference[i].sha256,'oracle.reference_trace_changed');
-      assert.deepEqual(candidate[i].rows,reference[i].rows,`oracle.all_fields:${reference[i].file}`);
     }
     stable();
     assert.equal(inspectEmmy(root).patchedTreeSHA256,CLEAN,'oracle.production_tree_changed');
     assert.equal(inspectEmmy(stage).patchedTreeSHA256,HISTORY,'oracle.reference_tree_changed');
     report.production.traces=candidate.map(({rows,path,...row})=>({...row,rows:rows.length,path}));
     report.production.totalRows=candidate.reduce((n,r)=>n+r.rows.length,0);
-    report.allTraceFieldsMatch=true;
+    report.differences=traceDifferences(reference,candidate);
+    report.allTraceFieldsMatch=report.differences.length===0;
+    save(reportPath,report);
+    assert(report.allTraceFieldsMatch,'oracle.all_fields_mismatch');
     assert(referenceSucceeded&&candidateSucceeded,'oracle.cargo_side_failed');
     report.state='passed';succeeded=true;
     return report;

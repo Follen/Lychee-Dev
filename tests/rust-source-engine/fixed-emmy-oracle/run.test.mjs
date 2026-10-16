@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync,writeFileSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {readTraces,validateFrames} from './run.mjs';
+import {oracleCargoArgs,readTraces,traceDifferences,validateFrames} from './run.mjs';
 const target='case_native_oracle',name='same_complete_contract';
 const header={kind:'header',schema:'lycheedev.emmy-fixed-oracle.v1',role:'reference',target,test:name};
 const row={kind:'row',ordinal:0,label:'query:all_fields',value:'BindingCoverage { state: "bound", proof: "real" }'};
@@ -75,4 +75,30 @@ test('reference and candidate capture the same labels in the same producer order
     }
     assert.deepEqual(actual,old,target);
   }
+});
+
+test('Cargo runs every original target after a failure and keeps libtest serial',()=>{
+  const inputs=JSON.parse(readFileSync(new URL('./inputs.json',import.meta.url)));
+  const args=oracleCargoArgs(inputs.targets),separator=args.indexOf('--');
+  assert.deepEqual(args.slice(0,7),['test','--locked','--offline','--no-fail-fast','-p','lycheedev-source','--test']);
+  assert(args.indexOf('--no-fail-fast')<separator);
+  assert.deepEqual(args.slice(separator),['--','--test-threads=1']);
+  assert.deepEqual(args.flatMap((value,index)=>value==='--test'?[args[index+1]]:[]),inputs.targets.map(t=>t.target));
+});
+test('difference report retains exact independent values and all differing ordinals',()=>{
+  const rows=Array.from({length:40},(_,ordinal)=>({...row,ordinal}));
+  const reference=[{file:'same.jsonl',rows}],actual=structuredClone(reference);
+  assert.deepEqual(traceDifferences(reference,actual),[]);
+  for(const entry of actual[0].rows)entry.value=entry.value.replace('bound','native_projected');
+  const [difference]=traceDifferences(reference,actual);
+  assert.equal(difference.differingRows,40);
+  assert.equal(difference.first.length,32);
+  assert.equal(difference.moreDifferingRows,8);
+  assert(difference.first.every(entry=>entry.referenceSHA256!==entry.candidateSHA256));
+  assert(reference[0].rows.every(entry=>entry.value.includes('bound')));
+  assert(actual[0].rows.every(entry=>entry.value.includes('native_projected')));
+  actual[0].rows.pop();
+  assert.equal(traceDifferences(reference,actual)[0].differingRows,40);
+  assert.throws(()=>traceDifferences(reference,[]),/oracle.trace_pair_inventory/);
+  assert.throws(()=>traceDifferences(reference,[{file:'other.jsonl',rows}]),/oracle.trace_pair_identity/);
 });

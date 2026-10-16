@@ -26,11 +26,29 @@ coverage or failure is replaced by this intake adaptation.
 Only after all expected traces are complete and authenticated does the runner run
 the same 36 candidate functions with the clean dependency. A nonzero historical
 Cargo run remains an overall failure even if complete traces permit a useful
-additional clean-side comparison. Incomplete or failed-test traces forbid it. The original 448 selected cases, full type
+additional clean-side comparison. Incomplete reference traces forbid it. The original 448 selected cases, full type
 metadata, producer call order, all coverage fields, 16384 boundary and actual
 cross-session token equality relations remain checked. A missing/failed reference,
 partial or surplus trace, changed label/order, differing value or failed original
 assertion is a hard failure. No baseline capture is automatically updated.
+
+Both Cargo invocations use `--no-fail-fast`, retaining independent exit status
+while continuing the remaining compiled targets. Candidate value differences are
+recorded through the end of each test, then fail that test. A complete trace is a
+data-completeness statement, not a passing-test statement. The report lists every
+differing trace and its exact differing-row count, with the first 32 row identities
+and hashes per trace; full unchanged reference and actual rows are separately
+sealed. Missing rows, identities or terminal frames still reject comparison.
+
+The current owned result/return-quality implementation adds real `call_result`
+and `return_check` receipts required by the original 12 business assertions.
+The frozen public reconstruction did not implement those receipts. Exact history
+comparison therefore remains a possible failure, including concrete managed-call
+cases in `function_call_native_oracle`, `query_backend_native_oracle` and
+`object_carrier_native_oracle`; fields are not globally ignored or backfilled.
+The 448 selected-projector comparisons retain their original inputs and all-field
+checks. The fixed 12 business contract and current explicit receipt assertions
+are separate acceptance evidence for the added completion-quality behavior.
 
 `run.mjs` composes the existing `ci-emmy-selected-oracle` scratch owner and
 `runCargo` ordinary-channel/Windows process-tree boundary. The reference and clean

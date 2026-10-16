@@ -365,16 +365,36 @@ fn denied_call_initializer_slots_preserve_unknown_and_exact_call_producer() {
             LuaType::Unknown
         );
         let coverage = rows(&session);
-        assert_eq!(coverage.len(), 1);
-        assert_eq!(coverage[0].site, call);
-        assert_eq!(coverage[0].operation, "call");
+        let proof = if unavailable { "denied" } else { "absent" };
+        let reason = unavailable.then(|| "capability_missing".to_owned());
         assert_eq!(
-            coverage[0].state,
-            if unavailable {
-                "unavailable"
-            } else {
-                "known_absent"
-            }
+            coverage,
+            vec![
+                BindingCoverage {
+                    site: call,
+                    operation: "call",
+                    state: if unavailable {
+                        "unavailable"
+                    } else {
+                        "known_absent"
+                    },
+                    proof: proof.into(),
+                    reason: reason.clone(),
+                    parameter: None,
+                    parameter_index: None,
+                    argument: None,
+                },
+                BindingCoverage {
+                    site: call,
+                    operation: "call_result",
+                    state: "unavailable",
+                    proof: proof.into(),
+                    reason: Some(reason.unwrap_or_else(|| "known_absent_callee".into())),
+                    parameter: None,
+                    parameter_index: None,
+                    argument: None,
+                },
+            ]
         );
     }
 }

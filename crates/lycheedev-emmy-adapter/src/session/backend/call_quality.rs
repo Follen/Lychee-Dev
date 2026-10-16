@@ -8,7 +8,7 @@
 use super::{OwnedQuery, QueryResult};
 use crate::session::{
     BindingDecision, BindingSite, CallPermit, OwnedValue, SelectedProjectionBackend,
-    SelectedProjector,
+    SelectedProjector, SelectedValue,
 };
 use emmylua_parser::{LuaAstNode, LuaCallExpr, LuaExpr};
 
@@ -24,7 +24,27 @@ impl<E> OwnedQuery<'_, '_, E> {
         // missing observation does not authenticate a missing selected callee.
         let selected = self.session.context().resolve(permit.callee);
         self.checkpoint()?;
-        if !matches!(selected, BindingDecision::Bound(_)) {
+        let declared_signature = match selected {
+            BindingDecision::Bound(bound) => match bound.value {
+                SelectedValue::Function(function) => self
+                    .analysis
+                    .semantic_model(function.file_id)
+                    .file_facts()
+                    .and_then(|facts| facts.signature_by_closure(function.closure))
+                    .and_then(|signature| signature.docs.as_ref())
+                    .is_some_and(|docs| {
+                        !docs.returns.is_empty() || !docs.return_overloads.is_empty()
+                    }),
+                SelectedValue::EnvironmentCallable(_) => true,
+                _ => false,
+            },
+            _ => false,
+        };
+        self.checkpoint()?;
+        // No runtime observation is not permission to recover an arbitrary
+        // inferred body value. Only an actual declared return contract can
+        // supply independent type knowledge; unannotated calls stay Unknown.
+        if !declared_signature {
             return Ok(None);
         }
         let value = projector.evaluate_permitted_call(site, self)?;

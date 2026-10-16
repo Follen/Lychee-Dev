@@ -12,6 +12,8 @@ struct State {
     reference: bool,
     expected: Vec<Value>,
     ordinal: usize,
+    mismatches: usize,
+    first_mismatch: Option<String>,
     output: fs::File,
 }
 pub struct Guard;
@@ -89,6 +91,8 @@ fn begin(reference: bool) -> Guard {
             reference,
             expected,
             ordinal: 0,
+            mismatches: 0,
+            first_mismatch: None,
             output,
         });
     });
@@ -119,17 +123,22 @@ pub fn matches(label: &str, actual: &impl Debug) -> bool {
         assert!(!state.reference);
         let row = json!({"kind":"row","ordinal":state.ordinal,"label":label,"value":format!("{actual:?}")});
         emit(&mut state.output, &row);
-        let expected = state.expected.get(state.ordinal).expect("candidate emitted surplus reference comparison");
-        assert_eq!(expected["label"], label, "reference producer label/order");
+        let ordinal = state.ordinal;
         state.ordinal += 1;
-        expected == &row
+        let expected = state.expected.get(ordinal).expect("candidate emitted surplus reference comparison");
+        assert_eq!(expected["label"], label, "reference producer label/order");
+        let equal = expected == &row;
+        if !equal {
+            state.mismatches += 1;
+            state.first_mismatch.get_or_insert_with(|| format!("{ordinal}:{label}"));
+        }
+        equal
     })
 }
+/// Keep recording later queries after a value difference. The guard still
+/// fails this test; no field is ignored and no baseline is changed.
 pub fn check(label: &str, actual: &impl Debug) {
-    assert!(
-        matches(label, actual),
-        "complete fixed-engine value mismatch at {label}: {actual:?}"
-    );
+    let _ = matches(label, actual);
 }
 impl Drop for Guard {
     fn drop(&mut self) {
@@ -137,14 +146,23 @@ impl Drop for Guard {
             let Some(mut state) = state.borrow_mut().take() else {
                 return;
             };
-            let complete = !std::thread::panicking()
-                && (state.reference || state.ordinal == state.expected.len());
+            // Completeness is a data property, independent of the test result.
+            // A candidate that emitted every row may still fail exact equality;
+            // the runner records its nonzero exit and compares all real rows.
+            let complete = if state.reference {
+                !std::thread::panicking()
+            } else {
+                state.ordinal == state.expected.len()
+            };
             emit(
                 &mut state.output,
                 &json!({"kind":"end","rows":state.ordinal,"complete":complete}),
             );
             if !std::thread::panicking() {
                 assert!(complete, "candidate omitted fixed-engine reference rows");
+                assert_eq!(state.mismatches, 0,
+                    "complete fixed-engine value differences; first={:?}; full actual rows are retained",
+                    state.first_mismatch);
             }
         });
     }

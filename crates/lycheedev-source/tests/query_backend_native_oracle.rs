@@ -199,7 +199,42 @@ fn selected_absent_unknown_and_denied_calls_keep_initializer_slot_nil_unknown_di
                     LuaType::Unknown
                 }
             );
-            assert_eq!(coverage.len(), 1);
+            let (operation, state, proof, reason) = match mode {
+                0 => ("resolve", "known_absent", "nil-result", None),
+                1 => ("resolve", "unavailable", "unknown-result", Some("missing")),
+                2 => ("call", "known_absent", "denied", None),
+                _ => (
+                    "call",
+                    "unavailable",
+                    "denied-unknown",
+                    Some("missing_permit"),
+                ),
+            };
+            let mut expected = vec![owned::BindingCoverage {
+                site: call,
+                operation,
+                state,
+                proof: proof.into(),
+                reason: reason.map(str::to_owned),
+                parameter: None,
+                parameter_index: None,
+                argument: None,
+            }];
+            if mode >= 2 {
+                expected.push(owned::BindingCoverage {
+                    site: call,
+                    operation: "call_result",
+                    state: "unavailable",
+                    proof: proof.into(),
+                    reason: Some(reason.unwrap_or("known_absent_callee").into()),
+                    parameter: None,
+                    parameter_index: None,
+                    argument: None,
+                });
+            }
+            // Current complete contract, separate from the immutable native
+            // trace comparison above. No native expected row is rewritten.
+            assert_eq!(coverage, expected);
             comparisons += 2;
         }
     }

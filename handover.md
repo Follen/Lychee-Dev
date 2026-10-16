@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 01:16 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`03e040da4183ccb9ea2b34394cb7dfd88eaf06b9`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 01:25 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`31f1fa0a2e3add4f149b4f87bcc5c11261e7d08f`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -25,7 +25,7 @@
 
 ## 2. 当前实现与未闭环事项
 
-当前零补丁生产候选已组合：Source freeze→OwnedBindingSession→OwnedQuery→43项诊断调度使用自有实现；上游恢复固定原版848文件、8,382,174字节，树SHA256 `375d92c5d5e503d77232fabf22a21a82f504c2b38dc5def8fcca1d6ecf06e104`，生产patch清单为空，删除旧补丁文件及引擎对自有binding-contracts依赖。增强测试和examples已转向自有公开入口；独立历史参照固定cd871181，测试专用417文件归档不进入生产引擎。原生差分保留历史真实expected及独立失败状态，不把新实现当旧oracle。40 Rust文件语法检查和39项Node检查通过；当前产品锁编译、完整差分、Retail与资源验收仍未运行。恢复后在主树执行版本工具发现退役Lua fixture引用导致6项失败，现明确当前report及5个signal样本为required、历史归档不参与版本同步；修后10/10与version --check通过。当前rust-parity的7条Node测试命令219通过、0失败、3个Windows专属launcher在Linux跳过。后继已把已认证签名结果的真实owned VM执行、独立Unknown参数不可用、结果完成后的call_result与真实返回比较后的return_check接入同一ledger，保持原公开native_projected/native_checked状态字面及proof来源；4条新真实管线回归已写未跑。五个被换行规范化破坏的固定Lua/XML输入恢复原合同字节/SHA，并只对这五路径禁文本转换；expected原字节不改。不能因生产recipe归零或源码接线完成就称功能等价或验收完成。
+当前零补丁生产候选已组合：Source freeze→OwnedBindingSession→OwnedQuery→43项诊断调度使用自有实现；上游恢复固定原版848文件、8,382,174字节，树SHA256 `375d92c5d5e503d77232fabf22a21a82f504c2b38dc5def8fcca1d6ecf06e104`，生产patch清单为空，删除旧补丁文件及引擎对自有binding-contracts依赖。增强测试和examples已转向自有公开入口；独立历史参照固定cd871181，测试专用417文件归档不进入生产引擎。原生差分保留历史真实expected及独立失败状态，不把新实现当旧oracle。40 Rust文件语法检查和39项Node检查通过；当前产品锁编译、完整差分、Retail与资源验收仍未运行。恢复后在主树执行版本工具发现退役Lua fixture引用导致6项失败，现明确当前report及5个signal样本为required、历史归档不参与版本同步；修后10/10与version --check通过。当前rust-parity的7条Node测试命令219通过、0失败、3个Windows专属launcher在Linux跳过。后继已把已认证签名结果的真实owned VM执行、独立Unknown参数不可用、结果完成后的call_result与真实返回比较后的return_check接入同一ledger，保持原公开native_projected/native_checked状态字面及proof来源；4条新真实管线回归已写未跑。五个被换行规范化破坏的固定Lua/XML输入恢复原合同字节/SHA，并只对这五路径禁文本转换；expected原字节不改。缺runtime observation的后继仅允许明确返回声明或已认证EnvironmentCallable，无声明函数仍保持原Unknown，不从任意body猜值。两侧历史/当前差分启用--no-fail-fast并收集全部精确字段差异，任何真实失败仍使整组失败；原448输入与完整旧trace保留。新增真实quality receipt与公开重建参照的已知缺口独立报告，不全局忽略字段。不能因生产recipe归零或源码接线完成就称功能等价或验收完成。
 
 默认target list/add/show/remove现已接同一typed配置与受控分页/SQLite owner：取消旧10000截断，精确name/大小写优先与raw历史引用验证，show输出resolvedPins；remove按Go先独立CAS删除配置、再读取引用generation、每64项删除，保可见部分提交与removedPins。17项新Rust回归已写未跑；target resolve --file现已接实际65537字节受控读取、独立Go typed JSON规则、同一Metadata writer的parent/CAS/winner验证及checked input close；按Go不额外生成snapshot context，已知提交pin保在既有error.details。14 Core＋3 CLI新测试未运行；generic JSON/type/time精确错误文案仍待补齐，不误套project更严duplicate/depth限制。后继project init/status/lock已组合原control、严格项目读取、同一Metadata原Vec认证与held Stage同目录no-replace/replace/checked关闭，默认resolve_pinned/optional和doctor项目边也已接；21新Rust测试未跑。cd576旧持有reader替换失败的回归现走真实project lock并保新旧reader断言。doctor/cache后继23路径现已组合默认独立检查组、全部target配置分页、流式SHA256 cache verify、只读archive检查、原control和独立Budget贯通workspace marker/Metadata；35新Rust回归未跑。当前文件owner采用checked close，保取消与部分报告；旧workspace通用入口、capture内部受控链与native Drop、generic JSON错误文案/延迟type-error首错仍继续闭合。
 
