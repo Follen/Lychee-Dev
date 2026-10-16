@@ -116,6 +116,52 @@ fn scope(limits: Cost) -> (OperationControl, Budget) {
     let budget = Budget::controlled(limits, control.deadline(), control.clone());
     (control, budget)
 }
+// with_budget_check preserves its first HTTP cause and appends the original
+// invocation/Budget checks with the existing typed finish_historical envelope.
+// Follow only that exact envelope: an arbitrary nested JSON `code` cannot
+// satisfy a stop assertion, and every appended cause must deserialize intact.
+fn primary_with_later_causes(failure: &ToolkitError) -> (ToolkitError, Vec<ToolkitError>) {
+    let mut primary = failure.clone();
+    let mut later = Vec::new();
+    for depth in 0..=2 {
+        if primary.details["schema"] != lycheedev_core::storage::FILE_CLEANUP_SCHEMA {
+            return (primary, later);
+        }
+        assert!(
+            depth < 2,
+            "only the two post-request scope checks wrap here"
+        );
+        let fields = primary.details.as_object().unwrap();
+        assert_eq!(fields.len(), 4);
+        assert!(fields["control"].is_null());
+        let previous: ToolkitError = serde_json::from_value(fields["primary"].clone()).unwrap();
+        let appended: ToolkitError = serde_json::from_value(fields["cleanup"].clone()).unwrap();
+        assert_eq!(primary.code, previous.code);
+        assert_eq!(primary.exit_code, previous.exit_code);
+        assert_eq!(
+            primary.message,
+            format!("{}\n{}", previous.message, appended.message)
+        );
+        later.insert(0, appended);
+        primary = previous;
+    }
+    unreachable!()
+}
+fn assert_later_stops(causes: &[ToolkitError], code: &str) {
+    for cause in causes {
+        let stop = if cause.code == "records.hotfix_wago_http" {
+            assert_eq!(cause.exit_code, 5);
+            serde_json::from_value::<ToolkitError>(cause.details["originalStop"].clone()).unwrap()
+        } else {
+            cause.clone()
+        };
+        assert_eq!(stop.code, code);
+        assert_eq!(
+            stop.exit_code,
+            if code == "command.cancelled" { 7 } else { 5 }
+        );
+    }
+}
 fn gzip(bytes: &[u8]) -> Vec<u8> {
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     encoder.write_all(bytes).unwrap();
@@ -500,7 +546,14 @@ fn cancellation_during_stalled_headers_or_body_closes_owned_socket() {
             (failure.code.as_str(), failure.exit_code),
             ("records.hotfix_wago_http", 5)
         );
-        assert_eq!(failure.details["originalStop"]["code"], "command.cancelled");
+        let (primary, later) = primary_with_later_causes(&failure);
+        let stop: ToolkitError =
+            serde_json::from_value(primary.details["originalStop"].clone()).unwrap();
+        assert_eq!(
+            (stop.code.as_str(), stop.exit_code),
+            ("command.cancelled", 7)
+        );
+        assert_later_stops(&later, "command.cancelled");
         assert!(started.elapsed() < Duration::from_secs(1));
         stopper.join().unwrap();
         assert!(closed_rx.recv_timeout(Duration::from_secs(2)).unwrap());
@@ -542,7 +595,14 @@ fn cancellation_during_redirect_drain_prevents_second_send() {
         (failure.code.as_str(), failure.exit_code),
         ("records.hotfix_wago_http", 5)
     );
-    assert_eq!(failure.details["originalStop"]["code"], "command.cancelled");
+    let (primary, later) = primary_with_later_causes(&failure);
+    let stop: ToolkitError =
+        serde_json::from_value(primary.details["originalStop"].clone()).unwrap();
+    assert_eq!(
+        (stop.code.as_str(), stop.exit_code),
+        ("command.cancelled", 7)
+    );
+    assert_later_stops(&later, "command.cancelled");
     stopper.join().unwrap();
     assert!(closed_rx.recv_timeout(Duration::from_secs(2)).unwrap());
     assert_eq!(server.finish().len(), 1);
@@ -1148,10 +1208,15 @@ fn tenth_redirect_cancel_keeps_limit_primary_and_stop_secondary() {
         ("records.hotfix_wago_http", 5)
     );
     assert!(failure.message.contains("stopped after 10 redirects"));
+    let (primary, later) = primary_with_later_causes(&failure);
+    let drains: Vec<ToolkitError> =
+        serde_json::from_value(primary.details["redirectBodyErrors"].clone()).unwrap();
+    assert_eq!(drains.len(), 1);
     assert_eq!(
-        failure.details["redirectBodyErrors"][0]["code"],
-        "command.cancelled"
+        (drains[0].code.as_str(), drains[0].exit_code),
+        ("command.cancelled", 7)
     );
+    assert_later_stops(&later, "command.cancelled");
     stopper.join().unwrap();
     assert!(closed_rx.recv_timeout(Duration::from_secs(2)).unwrap());
     assert_eq!(server.finish().len(), 10);
@@ -1187,9 +1252,16 @@ fn deadline_before_fetch_is_direct_but_waiting_headers_or_body_is_http() {
         );
         // Control and reqwest deadlines both map to HTTP. If control wins its
         // exact typed cause remains available, without changing public priority.
-        if !failure.details["originalStop"].is_null() {
-            assert_eq!(failure.details["originalStop"]["code"], "command.deadline");
+        let (primary, later) = primary_with_later_causes(&failure);
+        if !primary.details["originalStop"].is_null() {
+            let stop: ToolkitError =
+                serde_json::from_value(primary.details["originalStop"].clone()).unwrap();
+            assert_eq!(
+                (stop.code.as_str(), stop.exit_code),
+                ("command.deadline", 5)
+            );
         }
+        assert_later_stops(&later, "command.deadline");
         assert!(closed_rx.recv_timeout(Duration::from_secs(2)).unwrap());
         assert_eq!(server.finish().len(), 1);
     }
@@ -1318,4 +1390,55 @@ fn independent_budget_cancel_drops_header_and_body_requests_without_hop_accounti
         assert_eq!(budget.snapshot().unwrap().network_bytes, 0);
         assert_eq!(budget.snapshot().unwrap().network_requests, 0);
     }
+}
+
+#[test]
+fn typed_http_stop_and_redirect_limit_retain_all_post_request_scope_causes() {
+    let (control, budget) = scope(Cost::defaults());
+    control.tracked_cancel_handle().unwrap().cancel();
+    let original = control.check().unwrap_err();
+    let mapped = inflight_error(original.clone());
+    let stopped: Result<()> = Err(mapped.clone());
+    let failure = finish_stop(
+        finish_stop(stopped, control.check().map_err(inflight_error)),
+        budget.check(),
+    )
+    .unwrap_err();
+    let (primary, later) = primary_with_later_causes(&failure);
+    assert_eq!(
+        serde_json::to_value(&primary).unwrap(),
+        serde_json::to_value(&mapped).unwrap()
+    );
+    // The identical mapped invocation observation is deduplicated. The Budget
+    // observation keeps its original typed stop without replacing the HTTP leaf.
+    assert_eq!(later.len(), 1);
+    assert_eq!(
+        serde_json::to_value(&later[0]).unwrap(),
+        serde_json::to_value(&original).unwrap()
+    );
+    assert_later_stops(&later, "command.cancelled");
+
+    let selected = error("wago_http", 5, "stopped after 10 redirects")
+        .with_details(json!({"primaryDetails": null, "redirectBodyErrors": [original]}));
+    let stopped: Result<()> = Err(selected.clone());
+    let failure = finish_stop(
+        finish_stop(stopped, control.check().map_err(inflight_error)),
+        budget.check(),
+    )
+    .unwrap_err();
+    let (primary, later) = primary_with_later_causes(&failure);
+    assert_eq!(
+        serde_json::to_value(&primary).unwrap(),
+        serde_json::to_value(&selected).unwrap()
+    );
+    assert_eq!(later.len(), 2);
+    assert_eq!(
+        serde_json::to_value(&later[0]).unwrap(),
+        serde_json::to_value(&mapped).unwrap()
+    );
+    assert_eq!(
+        serde_json::to_value(&later[1]).unwrap(),
+        serde_json::to_value(&original).unwrap()
+    );
+    assert_later_stops(&later, "command.cancelled");
 }

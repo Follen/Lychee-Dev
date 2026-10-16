@@ -45,13 +45,52 @@ impl Sender for Script {
             .expect("only admitted requests"))
     }
 }
-fn response(
+// A received HTTP body carries the wire Content-Length as its size hint. A
+// Vec-backed synthetic Response instead reports Vec::len(), even if its header
+// says otherwise, so it cannot model a short declared-length response.
+struct DeclaredBody {
+    data: Option<hyper::body::Bytes>,
+    remaining: Option<u64>,
+    polls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+impl hyper::body::Body for DeclaredBody {
+    type Data = hyper::body::Bytes;
+    type Error = std::convert::Infallible;
+    fn poll_frame(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<std::result::Result<hyper::body::Frame<Self::Data>, Self::Error>>>
+    {
+        let this = self.get_mut();
+        this.polls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let data = this.data.take();
+        if let (Some(remaining), Some(data)) = (&mut this.remaining, &data) {
+            *remaining = remaining.saturating_sub(data.len() as u64);
+        }
+        std::task::Poll::Ready(data.map(|data| Ok(hyper::body::Frame::data(data))))
+    }
+    fn is_end_stream(&self) -> bool {
+        self.data.is_none()
+    }
+    fn size_hint(&self) -> hyper::body::SizeHint {
+        let mut hint = hyper::body::SizeHint::new();
+        if let Some(length) = self.remaining {
+            hint.set_exact(length);
+        }
+        hint
+    }
+}
+fn response_with_polls(
     status: u16,
     location: Option<&str>,
     length: Option<usize>,
     gzip: bool,
     bytes: Vec<u8>,
-) -> reqwest::Response {
+) -> (
+    reqwest::Response,
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+) {
     let mut response = ureq::http::Response::builder().status(status);
     if let Some(location) = location {
         response = response.header("Location", location);
@@ -62,7 +101,24 @@ fn response(
     if gzip {
         response = response.header("Content-Encoding", "gzip");
     }
-    response.body(bytes).unwrap().into()
+    let polls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let body = reqwest::Body::wrap(DeclaredBody {
+        data: (!bytes.is_empty()).then(|| bytes.into()),
+        remaining: length.map(|n| n as u64),
+        polls: polls.clone(),
+    });
+    let response: reqwest::Response = response.body(body).unwrap().into();
+    assert_eq!(response.content_length(), length.map(|n| n as u64));
+    (response, polls)
+}
+fn response(
+    status: u16,
+    location: Option<&str>,
+    length: Option<usize>,
+    gzip: bool,
+    bytes: Vec<u8>,
+) -> reqwest::Response {
+    response_with_polls(status, location, length, gzip, bytes).0
 }
 fn scope() -> OperationControl {
     OperationControl::uncancelable(Instant::now() + Duration::from_secs(300))
@@ -134,6 +190,19 @@ fn listfile_status_missing_location_empty_and_identity_declared_limit_are_distin
         let script = Script::new(vec![response(status, location, length, false, body)]);
         assert_eq!(run(&script, 10).unwrap_err().code, code);
     }
+}
+#[test]
+fn listfile_declared_length_rejects_before_body_poll_but_unknown_length_reads() {
+    let (response, polls) = response_with_polls(200, None, Some(20), false, b"short".to_vec());
+    let script = Script::new(vec![response]);
+    assert_eq!(run(&script, 10).unwrap_err().code, "records.listfile_limit");
+    assert_eq!(polls.load(std::sync::atomic::Ordering::Relaxed), 0);
+    assert_eq!(script.seen.borrow().len(), 1);
+    let (response, polls) = response_with_polls(200, None, None, false, vec![0; 20]);
+    let script = Script::new(vec![response]);
+    assert_eq!(run(&script, 10).unwrap_err().code, "records.listfile_limit");
+    assert!(polls.load(std::sync::atomic::Ordering::Relaxed) > 0);
+    assert_eq!(script.seen.borrow().len(), 1);
 }
 fn compressed(bytes: &[u8]) -> Vec<u8> {
     use std::io::Write;

@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 09:14 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`149d90e9aeddecf439bd6e0a7eae183b616df5d5`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 09:29 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`84e135216f373f5264b72ec078c70a35060a160e`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -30,6 +30,7 @@
 - **Source短预算隔离已保存**：私有analysis child保warm状态，沿原请求绝对deadline与整个子树aggregate 2GiB，owner无同步可选sidecar写；失败确认回收且未知不重放。8a3的28项生命周期unit已通过，实际1秒/warm idle及完整Retail后续组因前步耗尽job未执行。原90秒/2GiB不扩张。
 - **剩余性能验收**：此前e8完整Retail四路径均耗尽原90秒；API worker虽已写回复，caller未完成。其失败run source进程集合采样峰WS2370.62MiB/private2502.21MiB，有采样间隙且含多进程；retained warm/steady未测。后续准备/身份索引/释放优化不能在新完整结果出现前称改善；尚无同机Go对照或70%目标证明。
 - **HTTP有限边界后继已组合**：原始Host、非UTF8/空authority/未知proxy scheme的错误阶段与固定请求行投影已接；TLS保Go精确验证名，IP通过公开配置禁SNI且仍严格验证。13新增Rust未跑；多尾点SNI与证书验证在支持Windows上的实际行为仍待实证，未宣称等价。
+- **本次集中候选**：SQL保原合法深度63/拒绝64边界，移出递归帧的大型AST临时值、move嵌套Query代替clone、迭代展开UNION；3新增测试及原崩溃用例尚未运行，栈问题不能先标解决。五项SQL旧fixture按Go323改正并保负例。Data九个失败的五类fixture已按规范路径、真实body长度提示、必需provenance、CAS generation与typed cleanup原因修正；新增2回归待跑。
 - **当前修复状态**：149d90已保存adapter集合类型编译修复。8a3另一个all-target失败为Lua integration测试仍访问移除的Script.source字段，已本地改为source_bytes()，尚待重编译。Core非法历史大行fixture与并发临时目录碰撞、SQL及Data实际失败分别继续修；bundle原目录计数漏了初始化既有的`.lycheedev-locks`，已改为严格对照操作前完整目录名集合。
 
 ## 3. 最近集中验证的真实边界

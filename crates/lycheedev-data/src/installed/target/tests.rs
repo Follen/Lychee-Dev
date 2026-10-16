@@ -72,10 +72,12 @@ fn local_target_publishes_exact_go_capture_body_and_original_scope() {
     for extra in ["interfaceKnown", "displayName", "channel", "metadataBranch"] {
         assert!(body["client"].get(extra).is_none());
     }
-    assert_eq!(
-        capture["provenance"]["locator"],
-        f.request.installation.to_str().unwrap()
-    );
+    let selected_directory =
+        client::display_path(&std::fs::canonicalize(&f.request.installation).unwrap());
+    assert_eq!(result.client["directory"], selected_directory);
+    // Fixed Go uses client.Directory, after selection/canonicalization, rather
+    // than the original spelling (TEMP can include a Windows 8.3 alias).
+    assert_eq!(capture["provenance"]["locator"], selected_directory);
     assert_eq!(capture["provenance"]["kind"], "local-target");
     assert!(f.control.stop_cause().unwrap().is_none());
     f.control.ordered_child(f.control.deadline()).unwrap();

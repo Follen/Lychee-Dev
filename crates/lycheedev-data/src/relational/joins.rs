@@ -10,7 +10,7 @@ pub(super) struct Link {
     pub(super) condition: Option<Term>,
 }
 pub(super) fn relation(
-    relation: &TableFactor,
+    relation: TableFactor,
     virtual_name: &str,
     depth: usize,
     check: &dyn Fn() -> Result<()>,
@@ -23,7 +23,7 @@ pub(super) fn relation(
         sample,
     } = relation
     {
-        if *lateral || sample.is_some() || alias.as_ref().is_some_and(|a| !a.columns.is_empty()) {
+        if lateral || sample.is_some() || alias.as_ref().is_some_and(|a| !a.columns.is_empty()) {
             return Err(unsupported());
         }
         let alias = alias
@@ -35,7 +35,7 @@ pub(super) fn relation(
             RelationName::internal(virtual_name),
             alias,
             Some(Box::new(Program::compile_query(
-                *subquery.clone(),
+                *subquery,
                 depth + 1,
                 check,
             )?)),
@@ -59,7 +59,7 @@ pub(super) fn relation(
     if args.is_some()
         || !with_hints.is_empty()
         || version.is_some()
-        || *with_ordinality
+        || with_ordinality
         || !partitions.is_empty()
         || json_path.is_some()
         || sample.is_some()
@@ -68,7 +68,7 @@ pub(super) fn relation(
     {
         return Err(unsupported());
     }
-    let table = RelationName::from_object(name)?;
+    let table = RelationName::from_object(&name)?;
     let alias = alias
         .as_ref()
         .map(|a| syntax::identifier(&a.name).map(str::to_owned))
@@ -77,7 +77,7 @@ pub(super) fn relation(
     Ok((table, alias, None))
 }
 pub(super) fn compile(
-    join: &Join,
+    join: Join,
     parameters: &mut BTreeSet<String>,
     index: usize,
     depth: usize,
@@ -85,12 +85,12 @@ pub(super) fn compile(
 ) -> Result<Link> {
     check()?;
     let (table, alias, derived) = relation(
-        &join.relation,
+        join.relation,
         &format!("\0derived:join:{index}"),
         depth,
         check,
     )?;
-    let (left, constraint) = match &join.join_operator {
+    let (left, constraint) = match join.join_operator {
         JoinOperator::Join(c) | JoinOperator::Inner(c) => (false, c),
         JoinOperator::Left(c) | JoinOperator::LeftOuter(c) => (true, c),
         JoinOperator::CrossJoin(JoinConstraint::None) => {
@@ -104,7 +104,7 @@ pub(super) fn compile(
         }
         _ => return Err(unsupported()),
     };
-    let JoinConstraint::On(on) = constraint else {
+    let JoinConstraint::On(mut on) = constraint else {
         return Err(unsupported());
     };
     Ok(Link {
@@ -112,7 +112,7 @@ pub(super) fn compile(
         alias,
         derived,
         left,
-        condition: Some(term(on, parameters, depth, check)?),
+        condition: Some(term(&mut on, parameters, depth, check)?),
     })
 }
 /// Derived results stay in caller-owned slots. Sources are borrowed only after

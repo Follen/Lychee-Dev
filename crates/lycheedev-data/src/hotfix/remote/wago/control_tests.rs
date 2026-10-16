@@ -121,9 +121,22 @@ fn seed_historical_time(f: &Fixture, budget: &Budget, number: i64, last: i64, st
     let mut value = serde_json::to_value(receipt).unwrap();
     value["capturedAt"] = json!(stamp);
     let key = format!("hotfix-wago-page/{}", identity.key(budget).unwrap());
-    let mut owner = Metadata::open_controlled(&f.inv.home, true, &f.inv.control).unwrap();
+    let mut owner =
+        Metadata::open_controlled_with_check(&f.inv.home, true, &f.inv.control, || budget.check())
+            .unwrap();
+    let current = owner
+        .read_document_on_owner_controlled_with_check(&key, &f.inv.control, || budget.check())
+        .unwrap();
+    // store() already published this key. The intentional historical rewrite
+    // must compare that generation; None means create, not unconditional update.
     owner
-        .put_controlled(&key, &value, None, &f.inv.control)
+        .put_controlled_with_check(
+            &key,
+            &value,
+            Some(current.generation),
+            &f.inv.control,
+            || budget.check(),
+        )
         .unwrap();
     owner.close().unwrap();
 }

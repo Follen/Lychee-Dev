@@ -177,8 +177,16 @@ fn derived_inputs_preserve_shared_budget_partial_and_missing_column_diagnostics(
         json!({"column":"MapNme_lang","candidates":["a.MapName_lang"]})
     );
     inputs.get_mut("a").unwrap().rows[0][1] = Scalar::Float(f64::NAN);
+    // An unused scalar in the plain first-source adapter is not evaluated.
+    let result = p
+        .execute(&inputs, &BTreeMap::new(), Limits::default(), None)
+        .unwrap();
+    assert_eq!(result.rows, vec![vec![Scalar::Int(1)]]);
+    assert!(!result.complete);
     assert_eq!(
-        p.execute(&inputs, &BTreeMap::new(), Limits::default(), None)
+        Program::compile("SELECT p.MapName_lang FROM (SELECT MapName_lang FROM a) p")
+            .unwrap()
+            .execute(&inputs, &BTreeMap::new(), Limits::default(), None)
             .unwrap_err()
             .code,
         "relational.numeric_range"

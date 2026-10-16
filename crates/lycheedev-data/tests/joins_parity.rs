@@ -154,12 +154,30 @@ fn cross_join_filters_without_retaining_product_and_validates_unused_cells() {
         ),
     ]);
     let query = Program::compile("SELECT a.ID,b.ID FROM a CROSS JOIN b WHERE FALSE").unwrap();
+    // Fixed Go execute.go retains every right-side row: 200 * (64 + 2*32
+    // + 32) = 32000 bytes, in addition to both cached schemas. The product
+    // itself remains streamed; 16 KiB is insufficient even for WHERE FALSE.
+    assert_eq!(
+        query
+            .execute(
+                &input,
+                &BTreeMap::new(),
+                Limits {
+                    memory_bytes: 16 << 10,
+                    ..Limits::default()
+                },
+                None,
+            )
+            .unwrap_err()
+            .code,
+        "relational.resource_limit"
+    );
     let result = query
         .execute(
             &input,
             &BTreeMap::new(),
             Limits {
-                memory_bytes: 16384,
+                memory_bytes: 32 << 10,
                 ..Limits::default()
             },
             None,

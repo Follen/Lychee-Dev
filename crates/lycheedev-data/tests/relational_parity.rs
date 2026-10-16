@@ -117,7 +117,7 @@ fn literal_parameter_column_and_concat_allocations_require_shared_admission() {
         Instant::now() + Duration::from_secs(5),
         None,
     );
-    assert!(
+    assert_eq!(
         Program::compile("SELECT Name||Name FROM T")
             .unwrap()
             .execute_budgeted(
@@ -127,12 +127,14 @@ fn literal_parameter_column_and_concat_allocations_require_shared_admission() {
                 None,
                 Some(&budget)
             )
-            .is_err()
+            .unwrap_err()
+            .code,
+        "records.query_resource_budget"
     );
     let admitted = budget.snapshot().unwrap().retained_bytes;
     assert!(
-        (2048..=2200).contains(&admitted),
-        "both operands and bounded metadata are admitted; concatenated allocation must be rejected"
+        admitted > 0 && admitted < 2048,
+        "temporary operands are released on failure; only schema and allocation metadata remain"
     );
 }
 #[test]
@@ -194,10 +196,17 @@ fn supported_functions_check_arity_before_null_and_abs_stays_unsupported() {
         "SELECT ABS(NULL,1) FROM T",
         "SELECT ABS(-9223372036854775808) FROM T",
     ] {
-        assert_eq!(
-            Program::compile(sql).err().unwrap().code,
-            "relational.unsupported"
-        );
+        let program = Program::compile(sql).unwrap();
+        for rows in [vec![], vec![vec![S::Int(1), S::Null]]] {
+            assert_eq!(
+                program
+                    .execute(&source(rows), &BTreeMap::new(), Limits::default(), None)
+                    .unwrap_err()
+                    .code,
+                "relational.unsupported",
+                "{sql}: Go rejects unsupported functions during schema binding"
+            );
+        }
     }
     assert_eq!(
         query(

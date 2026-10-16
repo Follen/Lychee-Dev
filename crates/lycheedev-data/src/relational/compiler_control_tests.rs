@@ -193,3 +193,98 @@ fn compiler_admission_checks_each_retained_parser_frame() {
     assert_eq!(error.code, "fixture.admission_stop");
     assert_eq!(calls.get(), 4);
 }
+
+#[test]
+fn lowering_moves_each_query_expression_and_preserves_nested_parameters() {
+    for (sql, expected) in [
+        (
+            "SELECT (SELECT :inner FROM t WHERE ID=:id) FROM t",
+            vec!["id", "inner"],
+        ),
+        (
+            "SELECT EXISTS(SELECT :inner FROM t WHERE ID=:id) FROM t",
+            vec!["id", "inner"],
+        ),
+        (
+            "SELECT :probe IN (SELECT :inner FROM t WHERE ID=:id) FROM t",
+            vec!["id", "inner", "probe"],
+        ),
+    ] {
+        let dialect = syntax::QueryDialect::default();
+        let mut parser =
+            Parser::new(&dialect).with_tokens_with_locations(lexical::tokens(sql).unwrap());
+        let mut query = retrieval::parse(&dialect, &mut parser).unwrap();
+        let SetExpr::Select(select) = query.body.as_mut() else {
+            panic!("SELECT fixture")
+        };
+        let SelectItem::UnnamedExpr(expr) = &mut select.projection[0] else {
+            panic!("expression fixture")
+        };
+        let mut parameters = BTreeSet::new();
+        let lowered = term(expr, &mut parameters, 0, &|| Ok(())).unwrap();
+        assert_eq!(
+            parameters.iter().map(String::as_str).collect::<Vec<_>>(),
+            expected
+        );
+        assert!(matches!(expr, Expr::Value(value) if value.value == Value::Null));
+        let child = match lowered {
+            Term::ScalarSubquery(query) | Term::Exists(query) | Term::InSubquery(_, query, _) => {
+                query
+            }
+            other => panic!("query child lost: {other:?}"),
+        };
+        assert_eq!(child.source_tables(), ["t"]);
+        assert_eq!(
+            child
+                .parameters
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["id", "inner"]
+        );
+    }
+}
+
+#[test]
+fn iterative_union_lowering_keeps_branch_scope_tail_and_original_stop() {
+    let sql = "SELECT ID FROM t UNION ALL WITH b AS (SELECT ID FROM u) SELECT ID FROM b UNION ALL SELECT ID FROM v ORDER BY ID LIMIT 1";
+    let dialect = syntax::QueryDialect::default();
+    let parse = || {
+        let mut parser =
+            Parser::new(&dialect).with_tokens_with_locations(lexical::tokens(sql).unwrap());
+        retrieval::parse(&dialect, &mut parser).unwrap()
+    };
+    let branches = compound::branches(parse().body, &|| Ok(())).unwrap();
+    assert_eq!(branches.len(), 3);
+    assert!(branches[0].with.is_none());
+    assert!(branches[0].order_by.is_none());
+    assert!(branches[0].limit_clause.is_none());
+    assert_eq!(
+        branches[1].with.as_ref().unwrap().cte_tables[0]
+            .alias
+            .name
+            .value,
+        "b"
+    );
+    assert!(branches[1].order_by.is_none());
+    assert!(branches[1].limit_clause.is_none());
+    assert!(branches[2].with.is_none());
+    assert!(branches[2].order_by.is_some());
+    assert!(branches[2].limit_clause.is_some());
+    let calls = Cell::new(0);
+    let error = compound::branches(parse().body, &|| {
+        calls.set(calls.get() + 1);
+        if calls.get() == 7 {
+            Err(fault(
+                "fixture.union_stop",
+                7,
+                "original union traversal stop",
+            ))
+        } else {
+            Ok(())
+        }
+    })
+    .unwrap_err();
+    assert_eq!(error.code, "fixture.union_stop");
+    assert_eq!(calls.get(), 7);
+}

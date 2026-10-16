@@ -354,3 +354,66 @@ fn full_binary_arguments_evaluate_before_boolean_type_validation() {
     .unwrap_err();
     assert_eq!(error.code, "relational.numeric_range");
 }
+
+#[test]
+fn concatenation_admits_operands_then_releases_them_on_destination_rejection() {
+    let text = "a".repeat(1024);
+    // Work's first temporary grows its guard vector to four elements. Admit
+    // precisely that metadata plus the two cloned operands, but no destination.
+    let guard_bytes = 4 * std::mem::size_of::<crate::resource::RetainedReservation<'_>>();
+    let shared = crate::resource::Budget::new(
+        crate::resource::Cost {
+            retained_bytes: (guard_bytes + 2 * text.len()) as u64,
+            ..crate::resource::Cost::defaults()
+        },
+        Instant::now() + Duration::from_secs(30),
+        None,
+    );
+    let mut work = Work {
+        left: 100,
+        bytes: 1024,
+        deadline: shared.deadline,
+        cancel: None,
+        shared: Some(&shared),
+        planning: false,
+        temporaries: Vec::new(),
+        selection_sources: vec![],
+        providers: &[],
+        resolver: None,
+        roots: BTreeMap::new(),
+        measure: false,
+        scans: vec![],
+    };
+    let term = Term::Binary(
+        Box::new(Term::Value(Scalar::String(text.clone()))),
+        BinaryOperator::StringConcat,
+        Box::new(Term::Value(Scalar::String(text))),
+    );
+    let error = work
+        .temporary_scope(|work| {
+            eval(
+                &term,
+                &[],
+                &[],
+                ColumnOwners::Single(""),
+                &BTreeMap::new(),
+                work,
+            )
+        })
+        .unwrap_err();
+    assert_eq!(error.code, "records.query_resource_budget");
+    assert_eq!(
+        work.left, 97,
+        "both operands were evaluated before rejection"
+    );
+    assert_eq!(
+        work.bytes, 1024,
+        "temporary clones have no Go logical charge"
+    );
+    assert!(work.temporaries.is_empty());
+    assert_eq!(
+        shared.snapshot().unwrap().retained_bytes,
+        guard_bytes as u64
+    );
+    assert_eq!(shared.logical_snapshot().unwrap().retained_bytes, 0);
+}

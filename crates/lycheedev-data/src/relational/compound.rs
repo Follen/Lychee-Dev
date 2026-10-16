@@ -225,11 +225,12 @@ pub(super) fn execute(
 /// Retrieval shells retain suffixes and WITH at their actual query node.
 /// Flatten only UNION's right chain, transferring each local WITH to that
 /// branch (not the subsequent branches), just as executeQuery's copied branch.
-pub(super) fn branches(body: SetExpr) -> Result<Vec<Query>> {
-    fn plain(body: SetExpr) -> Query {
+#[inline(never)]
+pub(super) fn branches(body: Box<SetExpr>, check: &dyn Fn() -> Result<()>) -> Result<Vec<Query>> {
+    fn plain(body: Box<SetExpr>) -> Query {
         Query {
             with: None,
-            body: Box::new(body),
+            body,
             order_by: None,
             limit_clause: None,
             fetch: None,
@@ -240,31 +241,29 @@ pub(super) fn branches(body: SetExpr) -> Result<Vec<Query>> {
             pipe_operators: Vec::new(),
         }
     }
-    fn walk(body: SetExpr, result: &mut Vec<Query>) -> Result<()> {
-        match body {
-            SetExpr::SetOperation {
-                op: SetOperator::Union,
-                set_quantifier: SetQuantifier::All,
-                left,
-                right,
+    enum Pending {
+        Body(Box<SetExpr>),
+        Suffix {
+            start: usize,
+            with: Option<With>,
+            order: Option<OrderBy>,
+            limit: Option<LimitClause>,
+        },
+    }
+    let mut result: Vec<Query> = vec![];
+    let mut pending = vec![Pending::Body(body)];
+    while let Some(next) = pending.pop() {
+        check()?;
+        match next {
+            Pending::Suffix {
+                start,
+                with,
+                order,
+                limit,
             } => {
-                walk(*left, result)?;
-                walk(*right, result)
-            }
-            SetExpr::SetOperation { .. } => Err(problem(
-                "relational.invalid_syntax",
-                "Only UNION ALL is supported by the retrieval contract",
-            )),
-            SetExpr::Query(mut query) if matches!(*query.body, SetExpr::SetOperation { .. }) => {
-                let start = result.len();
-                let with = query.with.take();
-                let order = query.order_by.take();
-                let limit = query.limit_clause.take();
-                walk(*query.body, result)?;
-                result[start].with = with;
-                // Ordinary public-parser AST callers may carry a tail outside
-                // the set body. The owned shell normally retains it in its
-                // final branch; neither representation duplicates evaluation.
+                result.get_mut(start).ok_or_else(unsupported)?.with = with;
+                // Apply an enclosing tail only after all its branches, retaining
+                // the previous recursive walk's exact inner-to-outer order.
                 let tail = result.last_mut().ok_or_else(unsupported)?;
                 if order.is_some() {
                     tail.order_by = order;
@@ -272,21 +271,40 @@ pub(super) fn branches(body: SetExpr) -> Result<Vec<Query>> {
                 if limit.is_some() {
                     tail.limit_clause = limit;
                 }
-                Ok(())
             }
-            SetExpr::Query(query) => {
-                result.push(*query);
-                Ok(())
-            }
-            SetExpr::Select(_) => {
-                result.push(plain(body));
-                Ok(())
-            }
-            _ => Err(unsupported()),
+            Pending::Body(body) => match *body {
+                SetExpr::SetOperation {
+                    op: SetOperator::Union,
+                    set_quantifier: SetQuantifier::All,
+                    left,
+                    right,
+                } => {
+                    pending.push(Pending::Body(right));
+                    pending.push(Pending::Body(left));
+                }
+                SetExpr::SetOperation { .. } => {
+                    return Err(problem(
+                        "relational.invalid_syntax",
+                        "Only UNION ALL is supported by the retrieval contract",
+                    ));
+                }
+                SetExpr::Query(mut query)
+                    if matches!(*query.body, SetExpr::SetOperation { .. }) =>
+                {
+                    pending.push(Pending::Suffix {
+                        start: result.len(),
+                        with: query.with.take(),
+                        order: query.order_by.take(),
+                        limit: query.limit_clause.take(),
+                    });
+                    pending.push(Pending::Body(query.body));
+                }
+                SetExpr::Query(query) => result.push(*query),
+                SetExpr::Select(_) => result.push(plain(body)),
+                _ => return Err(unsupported()),
+            },
         }
     }
-    let mut result = vec![];
-    walk(body, &mut result)?;
     Ok(result)
 }
 

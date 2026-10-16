@@ -129,35 +129,16 @@ pub(super) fn parse(
     } else {
         None
     };
-    let mut branch = empty_query(SetExpr::Select(Box::new(Select {
+    let mut branch = select_query(
         select_token,
-        optimizer_hints: Vec::new(),
         distinct,
-        select_modifiers: None,
-        top: None,
-        top_before_distinct: false,
         projection,
-        exclude: None,
-        into: None,
-        from: vec![TableWithJoins {
-            relation: input,
-            joins,
-        }],
-        lateral_views: Vec::new(),
-        prewhere: None,
+        input,
+        joins,
         selection,
-        connect_by: Vec::new(),
-        group_by: GroupByExpr::Expressions(groups, Vec::new()),
-        cluster_by: Vec::new(),
-        distribute_by: Vec::new(),
-        sort_by: Vec::new(),
+        groups,
         having,
-        named_window: Vec::new(),
-        qualify: None,
-        window_before_qualify: false,
-        value_table_mode: None,
-        flavor: SelectFlavor::Standard,
-    })));
+    );
     branch.with = with;
     if take_word(parser, "ORDER").is_some() {
         require_word(parser, "BY")?;
@@ -223,18 +204,69 @@ pub(super) fn parse(
         // A branch suffix is legal at compilation. Compound execution checks
         // a non-final suffix after CTE execution and in branch execution order.
         // Only this branch's WITH belongs to the containing compound scope.
-        let with = branch.with.take();
-        let mut compound = empty_query(SetExpr::SetOperation {
-            op: SetOperator::Union,
-            set_quantifier: SetQuantifier::All,
-            left: Box::new(SetExpr::Query(Box::new(branch))),
-            right: Box::new(SetExpr::Query(right)),
-        });
-        compound.with = with;
-        Ok(Box::new(compound))
+        Ok(union_query(branch, right))
     } else {
-        Ok(Box::new(branch))
+        Ok(branch)
     }
+}
+
+// SetExpr contains unboxed Statement variants even though our language never
+// uses them. Construct those large public enum values only after recursive
+// parsing has returned; retaining their debug-build stack slots in every
+// retrieve frame can exhaust an ordinary Windows thread at legal Go depth.
+#[inline(never)]
+fn select_query(
+    select_token: AttachedToken,
+    distinct: Option<Distinct>,
+    projection: Vec<SelectItem>,
+    input: TableFactor,
+    joins: Vec<Join>,
+    selection: Option<Expr>,
+    groups: Vec<Expr>,
+    having: Option<Expr>,
+) -> Box<Query> {
+    Box::new(empty_query(SetExpr::Select(Box::new(Select {
+        select_token,
+        optimizer_hints: Vec::new(),
+        distinct,
+        select_modifiers: None,
+        top: None,
+        top_before_distinct: false,
+        projection,
+        exclude: None,
+        into: None,
+        from: vec![TableWithJoins {
+            relation: input,
+            joins,
+        }],
+        lateral_views: Vec::new(),
+        prewhere: None,
+        selection,
+        connect_by: Vec::new(),
+        group_by: GroupByExpr::Expressions(groups, Vec::new()),
+        cluster_by: Vec::new(),
+        distribute_by: Vec::new(),
+        sort_by: Vec::new(),
+        having,
+        named_window: Vec::new(),
+        qualify: None,
+        window_before_qualify: false,
+        value_table_mode: None,
+        flavor: SelectFlavor::Standard,
+    }))))
+}
+
+#[inline(never)]
+fn union_query(mut left: Box<Query>, right: Box<Query>) -> Box<Query> {
+    let with = left.with.take();
+    let mut query = empty_query(SetExpr::SetOperation {
+        op: SetOperator::Union,
+        set_quantifier: SetQuantifier::All,
+        left: Box::new(SetExpr::Query(left)),
+        right: Box::new(SetExpr::Query(right)),
+    });
+    query.with = with;
+    Box::new(query)
 }
 
 fn empty_query(body: SetExpr) -> Query {

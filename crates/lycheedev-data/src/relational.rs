@@ -17,6 +17,8 @@ mod aggregate;
 mod compound;
 mod explain;
 pub use explain::{ExecutionMeasurement, Explanation, MeasuredTable, PlanStep, ScanMeasurement};
+#[cfg(test)]
+mod compiler_trace;
 mod identifier_categories;
 mod identifiers;
 mod lexical;
@@ -251,7 +253,7 @@ enum Term {
     Case(Option<Box<Term>>, Vec<(Term, Term)>, Option<Box<Term>>),
 }
 fn term(
-    expr: &Expr,
+    expr: &mut Expr,
     parameters: &mut BTreeSet<String>,
     depth: usize,
     check: &dyn Fn() -> Result<()>,
@@ -260,7 +262,13 @@ fn term(
     if depth > 256 {
         return Err(budget());
     }
-    let mut nested = |e: &Expr| term(e, parameters, depth + 1, check);
+    if matches!(
+        expr,
+        Expr::InSubquery { .. } | Expr::Subquery(_) | Expr::Exists { .. }
+    ) {
+        return query_term(expr, parameters, depth, check);
+    }
+    let mut nested = |e: &mut Expr| term(e, parameters, depth + 1, check);
     Ok(match expr {
         Expr::Wildcard(_) => Term::Star(String::new()),
         Expr::QualifiedWildcard(name, _) => {
@@ -357,35 +365,9 @@ fn term(
             negated,
         } => Term::In(
             Box::new(nested(expr)?),
-            list.iter().map(&mut nested).collect::<Result<_>>()?,
+            list.iter_mut().map(&mut nested).collect::<Result<_>>()?,
             *negated,
         ),
-        Expr::InSubquery {
-            expr,
-            subquery,
-            negated,
-        } => {
-            let input = nested(expr)?;
-            let query = Program::compile_query(*subquery.clone(), depth + 1, check)?;
-            parameters.extend(query.parameters.iter().cloned());
-            Term::InSubquery(Box::new(input), std::sync::Arc::new(query), *negated)
-        }
-        Expr::Subquery(subquery) | Expr::Exists { subquery, .. } => {
-            let query = Program::compile_query(*subquery.clone(), depth + 1, check)?;
-            parameters.extend(query.parameters.iter().cloned());
-            let query = std::sync::Arc::new(query);
-            match expr {
-                Expr::Exists { negated, .. } => {
-                    let exists = Term::Exists(query);
-                    if *negated {
-                        Term::Unary(UnaryOperator::Not, Box::new(exists))
-                    } else {
-                        exists
-                    }
-                }
-                _ => Term::ScalarSubquery(query),
-            }
-        }
         Expr::Function(function) => {
             if function.over.is_some()
                 || function.filter.is_some()
@@ -395,7 +377,7 @@ fn term(
             {
                 return Err(unsupported());
             }
-            let FunctionArguments::List(args) = &function.args else {
+            let FunctionArguments::List(args) = &mut function.args else {
                 return Err(unsupported());
             };
             if !args.clauses.is_empty() {
@@ -410,7 +392,7 @@ fn term(
             }
             let distinct = matches!(args.duplicate_treatment, Some(DuplicateTreatment::Distinct));
             let mut terms = Vec::with_capacity(args.args.len());
-            for arg in &args.args {
+            for arg in &mut args.args {
                 terms.push(match arg {
                     FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => nested(expr)?,
                     FunctionArg::Unnamed(FunctionArgExpr::Wildcard) => Term::Star(String::new()),
@@ -436,16 +418,16 @@ fn term(
             ..
         } => Term::Case(
             operand
-                .as_ref()
+                .as_mut()
                 .map(|e| nested(e).map(Box::new))
                 .transpose()?,
             conditions
-                .iter()
-                .map(|pair| Ok((nested(&pair.condition)?, nested(&pair.result)?)))
+                .iter_mut()
+                .map(|pair| Ok((nested(&mut pair.condition)?, nested(&mut pair.result)?)))
                 .collect::<Result<_>>()?,
             Some(
                 else_result
-                    .as_ref()
+                    .as_mut()
                     .map(|e| nested(e))
                     .transpose()?
                     .map_or_else(|| Box::new(Term::Value(Scalar::Null)), Box::new),
@@ -454,6 +436,46 @@ fn term(
         _ => return Err(unsupported()),
     })
 }
+// The parser AST has one owner after admission. Move query children into
+// lowering instead of cloning the complete descendant tree at every level.
+// The inert placeholder is never revisited and bounds the old AST's Drop path.
+fn query_term(
+    expr: &mut Expr,
+    parameters: &mut BTreeSet<String>,
+    depth: usize,
+    check: &dyn Fn() -> Result<()>,
+) -> Result<Term> {
+    let owned = std::mem::replace(expr, Expr::Value(Value::Null.with_empty_span()));
+    let (query, input, kind) = match owned {
+        Expr::InSubquery {
+            mut expr,
+            subquery,
+            negated,
+        } => {
+            let input = term(&mut expr, parameters, depth + 1, check)?;
+            (subquery, Some((input, negated)), None)
+        }
+        Expr::Subquery(query) => (query, None, None),
+        Expr::Exists { subquery, negated } => (subquery, None, Some(negated)),
+        _ => unreachable!("query_term only receives query expressions"),
+    };
+    let query = Program::compile_query(*query, depth + 1, check)?;
+    parameters.extend(query.parameters.iter().cloned());
+    let query = std::sync::Arc::new(query);
+    Ok(if let Some((input, negated)) = input {
+        Term::InSubquery(Box::new(input), query, negated)
+    } else if let Some(negated) = kind {
+        let exists = Term::Exists(query);
+        if negated {
+            Term::Unary(UnaryOperator::Not, Box::new(exists))
+        } else {
+            exists
+        }
+    } else {
+        Term::ScalarSubquery(query)
+    })
+}
+
 fn check_arity(name: &str, count: usize) -> Result<()> {
     let valid = match name {
         "COALESCE" => count > 0,
@@ -1447,6 +1469,16 @@ impl QueryResult {
         }
     }
 }
+// Do not retain the public SetExpr enum's large unboxed Statement storage in
+// every recursive lowering frame; the SELECT body itself is already boxed.
+#[inline(never)]
+fn select_body(body: Box<SetExpr>) -> Result<Box<Select>> {
+    match *body {
+        SetExpr::Select(select) => Ok(select),
+        _ => Err(unsupported()),
+    }
+}
+
 impl Program {
     fn terms(&self) -> impl Iterator<Item = &Term> {
         self.projection
@@ -1484,6 +1516,8 @@ impl Program {
             .with_recursion_limit(256)
             .with_tokens_with_locations(tokens.clone());
         check()?;
+        #[cfg(test)]
+        compiler_trace::stage("parse");
         let parsed = retrieval::parse(dialect, &mut parser);
         // A dialect hook may stop a speculative parse that sqlparser otherwise
         // rewinds. It must never become a syntax error or silently disappear.
@@ -1512,9 +1546,17 @@ impl Program {
         // Check UNION's retained token after normal left-to-right parsing, so
         // a later missing ALL cannot conceal an earlier malformed expression.
         compound::validate_all_keyword(sql, &tokens, usize::MAX)?;
+        #[cfg(test)]
+        compiler_trace::stage("admission");
         parser_admission::validate(&query, &tokens, check)?;
+        #[cfg(test)]
+        compiler_trace::stage("lowering");
         let mut program = Self::compile_query(*query, 0, check)?;
+        #[cfg(test)]
+        compiler_trace::stage("inspection");
         subquery::validate_nodes(&program, check)?;
+        #[cfg(test)]
+        compiler_trace::stage("complete");
         program.explain = explain;
         program.analyze = analyze;
         Ok(program)
@@ -1556,7 +1598,7 @@ impl Program {
             return Err(unsupported());
         }
         if matches!(*query.body, SetExpr::SetOperation { .. }) {
-            let mut bodies = compound::branches(*query.body)?;
+            let mut bodies = compound::branches(query.body, check)?;
             let tail = bodies.last_mut().ok_or_else(unsupported)?;
             let tail_order = query.order_by.take().or_else(|| tail.order_by.take());
             let tail_limit = query
@@ -1598,9 +1640,7 @@ impl Program {
                 having: None,
             });
         }
-        let SetExpr::Select(select) = *query.body else {
-            return Err(unsupported());
-        };
+        let mut select = select_body(query.body)?;
         // Fixed Go 3.2 compiler requires FROM after every SELECT projection.
         // sqlparser accepts source-free SELECT, but that is a syntax error in
         // our public language rather than an unimplemented Rust expression.
@@ -1625,23 +1665,24 @@ impl Program {
         {
             return Err(unsupported());
         }
-        let GroupByExpr::Expressions(group_expressions, modifiers) = &select.group_by else {
+        let GroupByExpr::Expressions(group_expressions, modifiers) = &mut select.group_by else {
             return Err(unsupported());
         };
         if !modifiers.is_empty() {
             return Err(unsupported());
         }
+        let from = select.from.remove(0);
         let (table, alias, derived) =
-            joins::relation(&select.from[0].relation, "\0derived:base", depth, check)?;
+            joins::relation(from.relation, "\0derived:base", depth, check)?;
         let mut parameters = BTreeSet::new();
-        let joins = select.from[0]
+        let joins = from
             .joins
-            .iter()
+            .into_iter()
             .enumerate()
             .map(|(i, j)| joins::compile(j, &mut parameters, i, depth, check))
             .collect::<Result<Vec<_>>>()?;
         let mut projection = vec![];
-        for item in &select.projection {
+        for item in &mut select.projection {
             check()?;
             projection.push(match item {
                 SelectItem::UnnamedExpr(e) => Projection {
@@ -1653,7 +1694,7 @@ impl Program {
                     name: syntax::identifier(alias)?.to_owned(),
                 },
                 SelectItem::Wildcard(options)
-                    if options == &WildcardAdditionalOptions::default() =>
+                    if *options == WildcardAdditionalOptions::default() =>
                 {
                     Projection {
                         expr: None,
@@ -1663,7 +1704,7 @@ impl Program {
                 SelectItem::QualifiedWildcard(
                     SelectItemQualifiedWildcardKind::ObjectName(name),
                     options,
-                ) if options == &WildcardAdditionalOptions::default() => Projection {
+                ) if *options == WildcardAdditionalOptions::default() => Projection {
                     expr: None,
                     name: match name.0.as_slice() {
                         [ObjectNamePart::Identifier(name)] => syntax::identifier(name)?.to_owned(),
@@ -1677,17 +1718,17 @@ impl Program {
             return Err(budget());
         }
         let groups = group_expressions
-            .iter()
+            .iter_mut()
             .map(|e| term(e, &mut parameters, depth, check))
             .collect::<Result<Vec<_>>>()?;
         let having = select
             .having
-            .as_ref()
+            .as_mut()
             .map(|e| term(e, &mut parameters, depth, check))
             .transpose()?;
         let filter = select
             .selection
-            .as_ref()
+            .as_mut()
             .map(|e| term(e, &mut parameters, depth, check))
             .transpose()?;
         let (order, limit, offset) = Self::suffix(
@@ -1746,7 +1787,7 @@ impl Program {
             let OrderByKind::Expressions(expressions) = order_by.kind else {
                 return Err(unsupported());
             };
-            for e in expressions {
+            for mut e in expressions {
                 check()?;
                 if e.with_fill.is_some() {
                     return Err(unsupported());
@@ -1756,7 +1797,7 @@ impl Program {
                     return Err(unsupported());
                 }
                 order.push((
-                    term(&e.expr, parameters, depth, check)?,
+                    term(&mut e.expr, parameters, depth, check)?,
                     descending,
                     e.options.nulls_first,
                 ));
@@ -1765,8 +1806,8 @@ impl Program {
         let (mut limit, mut offset) = (None, None);
         if let Some(clause) = limit_clause {
             let LimitClause::LimitOffset {
-                limit: l,
-                offset: o,
+                limit: mut l,
+                offset: mut o,
                 limit_by,
             } = clause
             else {
@@ -1799,7 +1840,7 @@ impl Program {
                     "Unexpected ROW/ROWS after OFFSET",
                 ));
             }
-            let count = |expr: &Expr, parameters: &mut BTreeSet<String>| {
+            let count = |expr: &mut Expr, parameters: &mut BTreeSet<String>| {
                 // Test the original AST before term() erases parentheses.
                 match expr {
                     Expr::Value(value) => match &value.value {
@@ -1822,10 +1863,10 @@ impl Program {
                 }
                 term(expr, parameters, depth, check)
             };
-            limit = l.as_ref().map(|e| count(e, parameters)).transpose()?;
+            limit = l.as_mut().map(|e| count(e, parameters)).transpose()?;
             offset = o
-                .as_ref()
-                .map(|e| count(&e.value, parameters))
+                .as_mut()
+                .map(|e| count(&mut e.value, parameters))
                 .transpose()?;
         }
         Ok((order, limit, offset))

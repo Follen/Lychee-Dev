@@ -200,8 +200,20 @@ fn ctes_share_original_budgets_borrow_physical_rows_and_propagate_partial_inputs
     );
     let mut bad = input;
     bad.get_mut("a").unwrap().rows[0][1] = Scalar::Float(f64::NAN);
+    // Go execute.go checks first-source row width; COUNT(*) never evaluates
+    // an unused scalar. Physical providers keep their own validation contract.
+    let result = plan
+        .execute(&bad, &BTreeMap::new(), Limits::default(), None)
+        .unwrap();
+    assert_eq!(result.rows, vec![vec![Scalar::Int(1)]]);
+    assert!(!result.complete);
+    let selected = Program::compile(
+        "WITH x AS (SELECT COUNT(unused) AS n FROM a),y AS (SELECT n FROM x) SELECT n FROM y",
+    )
+    .unwrap();
     assert_eq!(
-        plan.execute(&bad, &BTreeMap::new(), Limits::default(), None)
+        selected
+            .execute(&bad, &BTreeMap::new(), Limits::default(), None)
             .unwrap_err()
             .code,
         "relational.numeric_range"

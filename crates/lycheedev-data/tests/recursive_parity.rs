@@ -82,6 +82,13 @@ fn delta_cycle_uses_shared_budget_and_never_returns_partial_success() {
     assert_eq!(qualified.source_tables(), vec!["static.a"]);
     let mut bad = input;
     bad.get_mut("a").unwrap().rows[0][1] = Scalar::Float(f64::NAN);
+    let result = bounded
+        .execute(&bad, &BTreeMap::new(), Limits::default(), None)
+        .unwrap();
+    assert_eq!(result.rows, vec![vec![Scalar::Int(4)]]);
+    assert!(!result.complete);
+    // The same nonfinite value remains an error when the seed reads it.
+    bad.get_mut("a").unwrap().rows[0][0] = Scalar::Float(f64::NAN);
     assert_eq!(
         bounded
             .execute(&bad, &BTreeMap::new(), Limits::default(), None)

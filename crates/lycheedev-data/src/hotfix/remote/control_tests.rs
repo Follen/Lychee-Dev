@@ -199,7 +199,7 @@ fn output_failure_retains_committed_capture_and_original_typed_cause() {
             bytes: b"{}",
             maximum_bytes: 2,
             media_type: "application/json",
-            provenance: json!({"kind":"test"}),
+            provenance: json!({"kind":"test", "locator":"fixture://hotfix/output"}),
             complete: true,
             truncated: false,
         },

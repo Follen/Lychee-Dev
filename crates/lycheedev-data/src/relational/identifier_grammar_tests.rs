@@ -366,8 +366,14 @@ fn nested_scalar_and_derived_queries_are_admitted_at_go_depth() {
         }
         sql
     };
-    assert!(Program::compile(&scalar(63)).is_ok());
-    budget_error(&scalar(64));
+    {
+        let _trace = compiler_trace::enter("scalar depth 63");
+        assert!(Program::compile(&scalar(63)).is_ok());
+    }
+    {
+        let _trace = compiler_trace::enter("scalar depth 64 rejection");
+        budget_error(&scalar(64));
+    }
     let derived = |n| {
         let mut sql = "SELECT ID FROM t".to_string();
         for _ in 0..n {
@@ -375,8 +381,14 @@ fn nested_scalar_and_derived_queries_are_admitted_at_go_depth() {
         }
         sql
     };
-    assert!(Program::compile(&derived(63)).is_ok());
-    budget_error(&derived(64));
+    {
+        let _trace = compiler_trace::enter("derived depth 63");
+        assert!(Program::compile(&derived(63)).is_ok());
+    }
+    {
+        let _trace = compiler_trace::enter("derived depth 64 rejection");
+        budget_error(&derived(64));
+    }
 }
 
 #[test]
