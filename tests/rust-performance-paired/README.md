@@ -137,3 +137,96 @@ pass before a Windows benchmark starts. Synthetic tests are not product passes.
 Parser/selection/project/persistence, local sync stages, remaining Source
 queries/refs/context/flow/batch, retained sessions/close/invalidation/error
 recovery, Data and B04–B07 remain separate required acceptance work.
+
+## One-shot describe startup attribution
+
+`--startup-diagnostics` is a separate observation mode of this existing entry.
+It performs exactly one public `describe --home <private-home> --format json`
+invocation per engine, with the same sealed optimized Rust artifact and fixed
+Go package/source checks, full result comparison, owned Jobs, output capture,
+memory observation and final handle/identity verification. It does not run the
+20-pair acceptance or acquire/sync/index the Retail corpus. Preparation still
+verifies toolchains, power policy, packages, source digest and the original
+Emmy identity. A diagnostic observation is not a speedup or performance pass.
+
+Keep the product checkout/source bytes matching the original sealed Rust
+artifact. A newly reviewed runner stage may be located separately; invoke its
+entry from that unchanged product checkout as the current directory:
+
+```powershell
+node <diagnostic-runner-stage>/tools/rust-performance-paired.mjs <optimized-artifact.json> <clean-fixed-Go-checkout> <Go-dev-npm-stage> <pinned-LuaLS.zip> <machine-conditions.json> --startup-diagnostics
+```
+
+Use the same five verified input paths from the existing paired run. Deploy the
+runner from one new, reviewed commit containing this mode and the then-current
+metadata/oracle checks. Do not combine historical 7db dependency copies with
+later production edits. The review patch changes only the files listed in its
+manifest; it is not permission to overwrite unrelated dependencies.
+
+Create an empty runner directory and archive inside the local coordinator's
+owned scratch. From a checkout containing the new reviewed commit, export these
+exact runtime dependencies together. Use an archive file rather than a binary
+pipeline through Windows PowerShell 5.1:
+
+```powershell
+$runnerCommit = "<new-reviewed-commit-containing-startup-diagnostics>"
+$runner = "<empty-owned-diagnostic-runner-directory>"
+$archive = "<owned-scratch>/startup-runner.tar"
+$files = @(
+  "tools/rust-performance-paired.mjs",
+  "tests/rust-performance-paired/run.mjs",
+  "tests/rust-performance-paired/contract.mjs",
+  "tests/rust-performance-paired/inputs.mjs",
+  "tests/rust-source-full-corpus/assertions.mjs",
+  "tests/rust-source-full-corpus/retail-oracle.json",
+  "tests/rust-parity/describe-contract.mjs",
+  "tests/rust-parity/oracle.mjs",
+  "tools/rust-build.mjs",
+  "tools/rust-disk.mjs",
+  "tools/rust-emmy-identity.mjs",
+  "tools/rust-owned-process.mjs",
+  "tools/rust-owned-process.ps1",
+  "tools/rust-owned-memory.mjs",
+  "tools/rust-build-auxiliary.json",
+  "tools/zip.mjs",
+  "release/rust-disk-policy.json"
+)
+git archive --format=tar "--output=$archive" $runnerCommit -- $files
+if ($LASTEXITCODE -ne 0) { throw "runner archive failed" }
+tar -xf $archive -C $runner
+if ($LASTEXITCODE -ne 0) { throw "runner extraction failed" }
+```
+
+Retain the selected commit, archive SHA-256 and exported file hashes. Then use
+the unchanged product checkout matching the ac8 artifact as cwd for the
+invocation above. Do not overwrite that product checkout's tools: they
+participate in its `sourceDigest`. The diagnostic configuration and outer report
+record both the product root and executing runner root; all executing runner
+inputs are hashed before/after and retained independently from the original
+artifact identity. A new runner never becomes the old artifact's source
+identity. Normal acceptance retains its original single-root behavior.
+
+Optional `proof.diagnostics` records six additional monotonic timestamps:
+CreateProcess return, durable root-identity write begin/end, observer setup end,
+and ResumeThread before/after. The original start/root-exit/tree-reap clock and
+all fsync, validation, output, ownership and cleanup behavior remain in place.
+The durable-write phase includes opening, writing, `Flush(true)` and closing
+that sidecar; it is not a claim that the filesystem flush alone took that time.
+Observer setup includes construction/startup; its concurrent samples can also
+consume time after ResumeThread. No phase is subtracted from `elapsed()`.
+
+After the unchanged timing end and before closing the original process handle,
+GetProcessTimes observes root kernel/user CPU. This is root-only CPU, not owner,
+observer or descendant CPU. `preResumeMillis` and
+`resumeThroughReapAndDrainMillis` partition the original whole interval;
+the latter includes scheduling, loader/runtime, product work, cleanup and
+output drain, and is not pure CPU or a measured `main()` interval. The nested
+`phases` expose non-overlapping intervals. Missing diagnostics remain compatible
+with ordinary timing receipts; explicitly requested invalid or missing
+observations fail the diagnostic report without changing a business exit.
+
+Successful observation has `state=startup_diagnostics_observed`,
+`performanceAcceptanceEvaluated=false`, `passedSelectedPaths=false` and no
+performance groups. Failed/mismatched/unreaped observations retain evidence;
+there are no replacement samples. Native Windows execution and this mode's
+actual Go/Rust observations are still required before reporting measured costs.

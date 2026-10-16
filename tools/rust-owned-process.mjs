@@ -8,12 +8,14 @@ export function auxiliaryRequest({cargoBuild=false,msvcCompile=false}={}){
   if(cargoBuild&&msvcCompile)throw new Error('owned.conflicting_auxiliary_request');
   return {cargoBuild,msvcCompile};
 }
-function request(command,args,{cwd,env,evidence,timeout=600000,orphanMs=30000,cargoBuild=false,msvcCompile=false,memoryObservation=false}){
+function request(command,args,{cwd,env,evidence,timeout=600000,orphanMs=30000,cargoBuild=false,msvcCompile=false,memoryObservation=false,startupDiagnostics=false}){
   if(process.platform!=='win32')throw new Error('owned.windows_required');
   const admission=auxiliaryRequest({cargoBuild,msvcCompile});
   if(typeof memoryObservation!=='boolean')throw new Error('owned.invalid_memory_request');
+  if(typeof startupDiagnostics!=='boolean')throw new Error('owned.invalid_startup_diagnostics_request');
   const id=randomUUID(),base=join(evidence,`process-${id}`),path=`${base}.request.json`;
   const spec={schema:'lycheedev.owned-request.v2',runId:id,coordinatorPid:process.pid,identity:`${base}.identity.json`,rootIdentity:`${base}.root.json`,command,args,cwd:resolve(cwd),timeoutMs:timeout,orphanMs,...admission,stdout:`${base}.stdout.bin`,stderr:`${base}.stderr.bin`,receipt:`${base}.receipt.json`};
+  if(startupDiagnostics)spec.startupDiagnostics=true;
   if(memoryObservation){spec.memoryPrefix=`${base}.memory`;spec.memoryMarker=`${base}.phase`;env={...env,LYCHEEDEV_OWNED_MEMORY_PHASE:spec.memoryMarker};}
   writeFileSync(path,JSON.stringify(spec,null,2)+'\n',{flag:'wx'});
   return {spec,path,env,wrapper:join(import.meta.dirname,'rust-owned-process.ps1')};

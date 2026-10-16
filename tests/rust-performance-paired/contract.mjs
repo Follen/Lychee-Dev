@@ -29,6 +29,34 @@ export function elapsed(proof) {
   return {controllableMillis: millis, rootObservedMillis: Number(root - start) * 1000 / t.frequency, reapAndDrainMillis: Number(end - root) * 1000 / t.frequency, resolutionMillis: 1000 / t.frequency};
 }
 
+
+// Optional attribution only. Old receipts remain valid for elapsed()/acceptance.
+// Never subtract these phases or root CPU from the original end-to-end clock.
+export function startupBreakdown(proof, {required = false} = {}) {
+  const d = proof?.diagnostics;
+  if (d === undefined) { assert(!required, 'startup diagnostics missing'); return null; }
+  const total = elapsed(proof), t = proof.timing;
+  assert.equal(d?.schema, 'lycheedev.owned-startup-diagnostics.v1');
+  assert(!d.error, 'startup diagnostic observation failed');
+  const names = ['createReturnTicks', 'rootPersistBeginTicks', 'rootPersistEndTicks', 'observerSetupEndTicks', 'resumeBeforeTicks', 'resumeAfterTicks'];
+  for (const name of names) assert.match(d[name], /^[1-9]\d*$/, name);
+  const ticks = [BigInt(t.startTicks), ...names.map(name => BigInt(d[name])), BigInt(t.rootExitTicks), BigInt(t.treeReapedTicks)];
+  for (let i = 1; i < ticks.length; i++) assert(ticks[i] >= ticks[i - 1], 'startup diagnostic clock order');
+  assert.equal(d.rootCpuObserved, true, 'root process CPU observation missing');
+  for (const name of ['rootKernel100ns', 'rootUser100ns']) assert.match(d[name], /^(0|[1-9]\d*)$/, name);
+  const millis = (start, end) => Number(end - start) * 1000 / t.frequency;
+  const phaseNames = ['createProcessMillis', 'identityBeforePersistenceMillis', 'rootIdentityDurabilityMillis', 'outputAndObserverSetupMillis', 'beforeResumeGapMillis', 'resumeCallMillis', 'resumedToObservedRootExitMillis', 'rootExitToReapAndDrainMillis'];
+  return {
+    schema: 'lycheedev.startup-breakdown.v1', ...total,
+    preResumeMillis: millis(ticks[0], ticks[5]),
+    resumeThroughReapAndDrainMillis: millis(ticks[5], ticks[8]),
+    phases: Object.fromEntries(phaseNames.map((name, i) => [name, millis(ticks[i], ticks[i + 1])])),
+    rootCpu: {kernelMillis: Number(BigInt(d.rootKernel100ns)) / 10000, userMillis: Number(BigInt(d.rootUser100ns)) / 10000,
+      scope: 'GetProcessTimes on the original reaped root handle only; not descendants or owner/observer CPU'},
+    qualification: 'Diagnostic attribution only; all original elapsed time remains included. Resume-through-reap contains scheduling, loader/runtime, product work, cleanup and output drain; it is not pure CPU or a performance pass.',
+  };
+}
+
 function fields(value, names, optional = []) {
   const result = {};
   for (const name of names) { assert(Object.hasOwn(value, name) || optional.includes(name), `missing public field ${name}`); if (Object.hasOwn(value, name)) result[name] = value[name]; }

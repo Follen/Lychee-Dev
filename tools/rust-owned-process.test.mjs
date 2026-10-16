@@ -290,3 +290,33 @@ test('native command clock excludes wrapper startup and includes finite descenda
   assert.ok(millis<wallMillis,'PowerShell startup is outside native command interval');
   assert.equal(result.proof.forced,false);
 });
+
+test('startup diagnostics timestamp durable ownership and keep CPU outside the original interval', () => {
+  const owner = readFileSync(new URL('./rust-owned-process.ps1', import.meta.url), 'utf8');
+  const marker = text => { const at = owner.indexOf(text); assert(at >= 0, text); return at; };
+  const order = [
+    'result.commandStartTicks=Stopwatch.GetTimestamp();', 'if(!CreateProcessW(binary,command',
+    'if(startupDiagnostics)result.createReturnTicks=', 'if(startupDiagnostics)result.rootPersistBeginTicks=',
+    'using(var file=new FileStream(rootIdentity,FileMode.CreateNew', 'file.Flush(true);}',
+    'if(startupDiagnostics)result.rootPersistEndTicks=', 'memory=new ToolkitMemory.Observer(',
+    'if(startupDiagnostics)result.observerSetupEndTicks=', 'if(startupDiagnostics)result.resumeBeforeTicks=',
+    'if(ResumeThread(process.thread)', 'if(startupDiagnostics)result.resumeAfterTicks=',
+    'result.treeReapedTicks=Stopwatch.GetTimestamp();', 'if(startupDiagnostics&&result.rootReaped)try{',
+    'GetProcessTimes(process.process,out cpuCreated,out cpuExit,out cpuKernel,out cpuUser)',
+    'if(memory!=null)try{result.memory=memory.Stop();}',
+  ].map(marker);
+  for (let i = 1; i < order.length; i++) assert(order[i] > order[i - 1]);
+  assert(owner.includes('catch(Exception diagnostic){result.diagnosticError=diagnostic.ToString();}'));
+  assert(owner.includes("if($requestData.startupDiagnostics -eq $true){\n $receipt.diagnostics="));
+});
+test('startup diagnostics use six ordered native timestamps and the held root CPU handle', {skip:process.platform!=='win32'}, t => {
+  const options = {...fixture(t), startupDiagnostics: true};
+  const result = ownedSpawnSync(process.execPath, ['-e', 'process.stdout.write("startup-diagnostic");'], options);
+  assert.equal(result.status, 0); assert.equal(result.error, undefined); assert.equal(result.handlesReaped, true);
+  assert.equal(result.stdout.toString(), 'startup-diagnostic');
+  const d = result.proof.diagnostics, timing = result.proof.timing;
+  assert.equal(d.schema, 'lycheedev.owned-startup-diagnostics.v1'); assert.equal(d.error, null); assert.equal(d.rootCpuObserved, true);
+  const ticks = [timing.startTicks, ...['createReturnTicks', 'rootPersistBeginTicks', 'rootPersistEndTicks', 'observerSetupEndTicks', 'resumeBeforeTicks', 'resumeAfterTicks'].map(name => d[name]), timing.rootExitTicks, timing.treeReapedTicks].map(BigInt);
+  for (let i = 1; i < ticks.length; i++) assert(ticks[i] >= ticks[i - 1]);
+  for (const name of ['rootKernel100ns', 'rootUser100ns']) assert.match(d[name], /^(0|[1-9]\d*)$/);
+});

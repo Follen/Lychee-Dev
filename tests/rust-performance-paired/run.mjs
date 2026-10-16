@@ -11,33 +11,35 @@ import {collectOwnedMemory} from '../../tools/rust-owned-memory.mjs';
 import {hashFile, sourceDigest, verifyArtifact} from '../../tools/rust-build.mjs';
 import {inspectEmmy} from '../../tools/rust-emmy-identity.mjs';
 import {assertEnvelope, sha256} from '../rust-source-full-corpus/assertions.mjs';
-import {CASES, GO_COMMIT, REPETITIONS, TARGET_RATIO, compareSamples, elapsed, orderFor, semantic, summarize} from './contract.mjs';
+import {CASES, GO_COMMIT, REPETITIONS, TARGET_RATIO, compareSamples, elapsed, orderFor, semantic, startupBreakdown, summarize} from './contract.mjs';
 import {assertSeedCold, auditCorpus, cloneSeed, derivedIdentity, proveWarmReuse, verifyGoMetadata, verifyGoPackage, verifySeedMetadata} from './inputs.mjs';
 
 const [configuration, ...extra] = process.argv.slice(2);
 assert(configuration && extra.length === 0 && process.platform === 'win32', 'owned Windows controller requires configuration');
 const config = JSON.parse(readFileSync(configuration)), root = resolve(config.root), out = resolve(config.evidence), start = performance.now();
-const oracle = JSON.parse(readFileSync(join(root, 'tests/rust-source-full-corpus/retail-oracle.json')));
+const oracle = JSON.parse(readFileSync(join(config.runnerRoot ?? root, 'tests/rust-source-full-corpus/retail-oracle.json')));
+assert(config.startupDiagnostics === undefined || typeof config.startupDiagnostics === 'boolean', 'startup diagnostic mode must be boolean');
+const startupDiagnostics = config.startupDiagnostics === true;
 let fatal = false, sequence = 0;
 const report = {
-  schema: 'lycheedev.paired-performance.v1', state: 'running', startedAt: new Date().toISOString(),
-  scope: ['B01 describe only', 'B02 fixed full-Retail local index and precise query only'],
-  completeB01B07Acceptance: false, targetRatio: TARGET_RATIO, repetitionsPerColdWarmGroup: REPETITIONS,
+  schema: 'lycheedev.paired-performance.v1', mode: startupDiagnostics ? 'startup_diagnostics' : 'paired_performance', performanceAcceptanceEvaluated: !startupDiagnostics, state: 'running', startedAt: new Date().toISOString(),
+  scope: startupDiagnostics ? ['B01 describe startup diagnostic only; exactly one invocation per engine'] : ['B01 describe only', 'B02 fixed full-Retail local index and precise query only'],
+  completeB01B07Acceptance: false, targetRatio: TARGET_RATIO, repetitionsPerColdWarmGroup: startupDiagnostics ? null : REPETITIONS,
   remaining: ['B01 parser/selection/project/persistence', 'B02 local sync preparation, refs/context/flow/batch and full semantic checks', 'B03 retained session/invalidation/error recovery/close', 'B04-B07', 'full F/P correctness qualification'],
   cacheDefinition: 'Application-derived cache cold: independent new home per engine/path/pair copied only from that engine’s independently initialized, synced and authenticated seed; no cross-engine cache or metadata sharing; warm: exact same home, pin, binary and command after its own successful cold invocation. OS page/file caches are not flushed or claimed cold. Describe has no derived cache; cold/warm names denote first/repeated invocation only.',
   timingDefinition: 'Native monotonic clock immediately before CLI CreateProcessW until root and every owned descendant reaped and output drained. Includes all CLI local validation, worktree/index/cache reads/writes, worker startup and cleanup. PowerShell/compiler startup and observer shutdown excluded; observer startup, scheduling and pipe-drain overhead within the native interval remain included without subtraction. Wrapper wall time separately retained.',
   machine: {hostname: os.hostname(), platform: process.platform, release: os.release(), arch: process.arch, node: process.version, cpus: os.cpus(), totalMemory: os.totalmem(), freeMemory: os.freemem(), loadAverage: os.loadavg(), conditions: config.conditions},
-  inputs: {oracle, rust: config.rust, go: config.go}, preparation: [], pairs: [], pairOwners: [],
-  metrics: {cpu: 'not_measured', io: 'not_measured', rss: 'not_measured; Windows working set/private usage recorded per CLI owned Job with identity deduplication; never sum child and outer Job counters'},
+  inputs: {oracle, rust: config.rust, go: config.go}, runnerRoot: config.runnerRoot ?? root, preparation: [], pairs: [], pairOwners: [], ...(startupDiagnostics ? {diagnosticPairs: []} : {}),
+  metrics: {cpu: startupDiagnostics ? 'Original root process handle GetProcessTimes; no owner or descendant CPU claim' : 'not_measured', io: 'not_measured', rss: 'not_measured; Windows working set/private usage recorded per CLI owned Job with identity deduplication; never sum child and outer Job counters'},
   excludedDownloadMillis: null, excludedExternalWaitMillis: null,
 };
 const save = () => writeFileSync(join(out, 'report.json'), JSON.stringify(report, null, 2) + '\n');
 const files = directory => readdirSync(directory).filter(name => name !== 'receipt.json' && lstatSync(join(directory, name)).isFile()).map(name => join(directory, name));
-function controlled(binary, args, evidence, {timeout = 210000, env = process.env, measure = false} = {}) {
+function controlled(binary, args, evidence, {timeout = 210000, env = process.env, measure = false, diagnoseStartup = false} = {}) {
   assert(!fatal, 'previous unverified process failure requires outer retirement');
   const startedAt = new Date().toISOString(), begin = performance.now();
   fatal = true; // An exception before a verified receipt must retain ownership.
-  const run = ownedSpawnSync(binary, args, {cwd: root, env, evidence, timeout, orphanMs: 30000, memoryObservation: measure});
+  const run = ownedSpawnSync(binary, args, {cwd: root, env, evidence, timeout, orphanMs: 30000, memoryObservation: measure, startupDiagnostics: diagnoseStartup});
   const row = {binary, args, startedAt, endedAt: new Date().toISOString(), wallMillis: performance.now() - begin, pid: run.proof?.pid, exit: run.status, signal: run.signal, error: run.error?.message, handlesReaped: run.handlesReaped, proof: run.proof, logs: run.logs, stdoutSHA256: sha256(run.stdout), stderrSHA256: sha256(run.stderr), stdoutBytes: run.stdout.length, stderrBytes: run.stderr.length};
   fatal = run.handlesReaped !== true;
   if (measure) row.memory = collectOwnedMemory(run, {evidence, sourceBinary: binary, runState: run.status === 0 && !run.error ? 'passed_invocation' : 'failed_invocation'});
@@ -80,12 +82,14 @@ function identity() {
 function invoke(entry, engine, home, pin, evidence, iteration, cacheMode) {
   const binary = engine === 'go' ? config.go.binary : config.rust.sourceBinary;
   const args = [...entry.args, ...(pin ? ['--snapshot', pin] : []), '--home', home, '--format', 'json'];
-  const {run, row} = controlled(binary, args, evidence, {measure: true});
+  const {run, row} = controlled(binary, args, evidence, {measure: true, diagnoseStartup: startupDiagnostics});
   Object.assign(row, {caseId: entry.id, engine, iteration, cacheMode, home, snapshot: pin, excludedDownloadMillis: 0, excludedExternalWaitMillis: 0, valid: false});
   let envelope;
   try {
     assert.equal(run.status, 0); assert(!run.error && run.handlesReaped); Object.assign(row, elapsed(run.proof));
-    envelope = JSON.parse(run.stdout); semantic(entry.id, envelope, engine, oracle, pin); row.valid = true;
+    envelope = JSON.parse(run.stdout); semantic(entry.id, envelope, engine, oracle, pin);
+    if (startupDiagnostics) row.startup = startupBreakdown(run.proof, {required: true});
+    row.valid = true;
   } catch (error) { row.failure = error.message.slice(0, 4096); }
   return {row, envelope};
 }
@@ -114,7 +118,32 @@ try {
     }
     assert.deepEqual(pins.rust, pins.go, 'independently created public fixed pins must agree');
   }
-  for (const entry of CASES) {
+  if (startupDiagnostics) {
+    const entry = CASES[0];
+    const pair = beginScratch(root, 'paired-startup-diagnostics-once', {command: entry.args, inputs: {go: config.go.binarySHA256, rust: config.rust.binarySHA256}, admissionOptions: {requiredBytes: 512 << 20, scratchReserveBytes: 512 << 20}});
+    report.pairOwners.push({caseId: entry.id, iteration: 0, mode: 'diagnostic_once', receipt: pair.receipt});
+    const row = {caseId: entry.id, iteration: 0, cacheMode: 'diagnostic_once', order: orderFor(0), resultEquivalent: false};
+    report.diagnosticPairs.push(row); save();
+    let valid = false;
+    try {
+      const outputs = {};
+      for (const engine of row.order) {
+        const output = invoke(entry, engine, join(pair.directory, `${engine}-home`), null, pair.evidence, 0, 'diagnostic_once');
+        row[engine] = output.row; outputs[engine] = output.envelope; save();
+        if (fatal) throw new Error('unverified process reap; outer retirement required');
+      }
+      assert(row.go.valid && row.rust.valid, 'startup diagnostic sample failed; full raw output retained');
+      Object.assign(row, compareSamples(entry.id, outputs.go, outputs.rust, oracle, null));
+      valid = row.resultEquivalent;
+    } catch (error) { row.failure = error.message.slice(0, 4096); }
+    finally {
+      writeFileSync(join(pair.evidence, 'pair.json'), JSON.stringify({mode: 'startup_diagnostics', valid, row}, null, 2) + '\n');
+      pair.seal({state: fatal ? 'interrupted' : valid ? 'succeeded' : 'failed', handlesReaped: !fatal, logs: files(pair.evidence)});
+      if (!fatal && valid) pair.cleanup();
+      save();
+    }
+    assert(!fatal, 'unverified process reap; outer retirement required');
+  } else for (const entry of CASES) {
     // Describe remains independently useful when later input acquisition fails.
     if (entry.id !== 'B01-describe' && !seedIdentities.go) prepareSeeds();
     for (let iteration = 0; iteration < REPETITIONS; iteration++) {
@@ -170,9 +199,9 @@ try {
   identity();
   report.machine.powerAfter = prepare('powercfg.exe', ['/getactivescheme'], 'power-policy-after').toString().trim();
   assert.equal(report.machine.powerAfter, report.machine.powerBefore, 'power policy changed');
-  report.groups = summarize(report.pairs);
-  report.state = report.groups.every(row => row.state === 'passed_selected_path') ? 'passed_selected_paths_full_acceptance_open' : 'failed';
-} catch (error) { report.blocker = error.message.slice(0, 4096); report.groups = summarize(report.pairs); report.state = 'failed'; }
+  report.groups = startupDiagnostics ? [] : summarize(report.pairs);
+  report.state = startupDiagnostics ? report.diagnosticPairs.length === 1 && report.diagnosticPairs[0].resultEquivalent === true ? 'startup_diagnostics_observed' : 'startup_diagnostics_failed' : report.groups.every(row => row.state === 'passed_selected_path') ? 'passed_selected_paths_full_acceptance_open' : 'failed';
+} catch (error) { report.blocker = error.message.slice(0, 4096); report.groups = startupDiagnostics ? [] : summarize(report.pairs); report.state = startupDiagnostics ? 'startup_diagnostics_failed' : 'failed'; }
 finally { report.wallMillis = performance.now() - start; report.finishedAt = new Date().toISOString(); report.requiresOuterRetirement = fatal; save(); }
-console.log(JSON.stringify({state: report.state, report: join(out, 'report.json'), groups: report.groups}));
-if (report.state !== 'passed_selected_paths_full_acceptance_open') process.exitCode = 1;
+console.log(JSON.stringify({state: report.state, report: join(out, 'report.json'), groups: report.groups, diagnosticPairs: report.diagnosticPairs}));
+if (!['passed_selected_paths_full_acceptance_open', 'startup_diagnostics_observed'].includes(report.state)) process.exitCode = 1;

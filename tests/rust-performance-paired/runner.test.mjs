@@ -6,7 +6,7 @@ import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {runInNewContext} from 'node:vm';
-import {CASES, GO_COMMIT, REPETITIONS, compareSamples, elapsed, orderFor, semantic, statistics, summarize} from './contract.mjs';
+import {CASES, GO_COMMIT, REPETITIONS, compareSamples, elapsed, orderFor, semantic, startupBreakdown, statistics, summarize} from './contract.mjs';
 import {LUALS, assertSeedCold, cloneSeed, derivedIdentity, inventory, proveWarmReuse, safeRelative, verifyGoMetadata, verifySeedMetadata} from './inputs.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {APPROVED_ENGINE_SUMMARIES} from '../rust-parity/describe-contract.mjs';
@@ -177,4 +177,102 @@ test('package/runtime validation matches actual immutable Go 3.2.3 source', () =
   assert(lua.includes("files.set('runtime.json', runtimeBytes)")); assert(lua.includes('const path = `tool/luals/${name}`'));
   assert(open.includes('bytes.Equal(bytes.TrimSpace(metadata), []byte(pinnedRuntimeJSON))'));
   for (const name of ['bin/lua-language-server.exe', 'bin/main.lua', 'main.lua', 'LICENSE']) assert(open.includes(`"${name}"`));
+});
+
+function startupProof() {
+  const p = proof(), start = BigInt(p.timing.startTicks);
+  const names = ['createReturnTicks', 'rootPersistBeginTicks', 'rootPersistEndTicks', 'observerSetupEndTicks', 'resumeBeforeTicks', 'resumeAfterTicks'];
+  p.diagnostics = {schema: 'lycheedev.owned-startup-diagnostics.v1', ...Object.fromEntries(names.map((name, i) => [name, (start + BigInt(i + 1) * 100000n).toString()])), rootCpuObserved: true, rootKernel100ns: '120000', rootUser100ns: '30000', error: null};
+  return p;
+}
+test('startup diagnostics remain optional for old receipts and never alter accepted elapsed', () => {
+  const old = proof(); assert.equal(startupBreakdown(old), null);
+  assert.throws(() => startupBreakdown(old, {required: true}), /missing/);
+  const current = startupProof(); assert.deepEqual(elapsed(current), elapsed(old));
+  current.diagnostics.error = 'observation failed';
+  assert.deepEqual(elapsed(current), elapsed(old));
+  assert.throws(() => startupBreakdown(current), /observation failed/);
+});
+test('startup diagnostics attribute all six QPC boundaries without subtracting any time', () => {
+  const p = startupProof(), before = structuredClone(p), result = startupBreakdown(p, {required: true});
+  assert.equal(result.controllableMillis, 200); assert.equal(result.preResumeMillis, 50);
+  assert.equal(result.resumeThroughReapAndDrainMillis, 150);
+  assert.deepEqual(result.phases, {createProcessMillis: 10, identityBeforePersistenceMillis: 10, rootIdentityDurabilityMillis: 10, outputAndObserverSetupMillis: 10, beforeResumeGapMillis: 10, resumeCallMillis: 10, resumedToObservedRootExitMillis: 40, rootExitToReapAndDrainMillis: 100});
+  assert.equal(Object.values(result.phases).reduce((sum, n) => sum + n, 0), result.controllableMillis);
+  assert.equal(result.rootCpu.kernelMillis, 12); assert.equal(result.rootCpu.userMillis, 3);
+  assert.match(result.qualification, /not pure CPU or a performance pass/);
+  assert.deepEqual(p, before);
+});
+test('incomplete or invalid startup observations cannot become a diagnostic success', () => {
+  for (const mutate of [p => delete p.diagnostics.createReturnTicks, p => p.diagnostics.resumeBeforeTicks = p.timing.startTicks, p => p.diagnostics.resumeAfterTicks = p.timing.treeReapedTicks, p => p.diagnostics.rootCpuObserved = false, p => p.diagnostics.rootKernel100ns = '-1', p => p.diagnostics.rootUser100ns = '1.5', p => p.diagnostics.schema = 'unknown', p => p.diagnostics.error = 'GetProcessTimes failed']) {
+    const value = startupProof(); mutate(value); assert.throws(() => startupBreakdown(value, {required: true}));
+  }
+  const p = startupProof(); p.diagnostics.rootKernel100ns = '0'; p.diagnostics.rootUser100ns = '0';
+  assert.equal(startupBreakdown(p).rootCpu.kernelMillis, 0);
+});
+test('diagnostic mode retains strict identities, separate runner custody, one pair and no performance pass', () => {
+  const outer = readFileSync(new URL('../../tools/rust-performance-paired.mjs', import.meta.url), 'utf8');
+  const inner = readFileSync(new URL('./run.mjs', import.meta.url), 'utf8');
+  assert(outer.includes("extra.length === 1 && extra[0] === '--startup-diagnostics'"));
+  assert(outer.includes("const runnerRoot = startupDiagnostics ? resolve(import.meta.dirname, '..') : root;"));
+  assert(outer.includes('hashFile(join(runnerRoot, path)) === hash'));
+  assert(outer.includes('const passed = !startupDiagnostics && stable && handlesReaped'));
+  assert(outer.includes("observation?.state === 'startup_diagnostics_observed'"));
+  assert(inner.includes("assert.equal(sourceDigest(root), rust.inputHashes.sourceTree, 'Rust source/build identity changed')"));
+  assert(inner.includes('assert.equal(emmy.patchedTreeSHA256, rust.inputHashes.emmy?.patchedTreeSHA256)'));
+  const begin = inner.indexOf('  if (startupDiagnostics) {\n    const entry = CASES[0];');
+  const end = inner.indexOf('  } else for (const entry of CASES) {', begin);
+  assert(begin > 0 && end > begin);
+  const diagnostic = inner.slice(begin, end);
+  assert.equal((diagnostic.match(/invoke\(entry, engine,/g) ?? []).length, 1);
+  assert(diagnostic.includes('for (const engine of row.order)'));
+  assert(diagnostic.includes('compareSamples(entry.id, outputs.go, outputs.rust, oracle, null)'));
+  assert(!/REPETITIONS|prepareSeeds\(|cacheMode of/.test(diagnostic));
+  assert(inner.includes('startupDiagnostics ? [] : summarize(report.pairs)'));
+});
+function runDiagnosticFixture({mismatch = false, invalid = false, unreaped = false} = {}) {
+  const source = readFileSync(new URL('./run.mjs', import.meta.url), 'utf8');
+  const begin = source.indexOf('  if (startupDiagnostics) {\n    const entry = CASES[0];');
+  const end = source.indexOf('  } else for (const entry of CASES) {', begin);
+  assert(begin > 0 && end > begin);
+  const calls = [], seals = [], writes = [], cleaned = [];
+  const pair = {directory: 'fixture', evidence: 'evidence', receipt: 'receipt', seal: value => seals.push(value), cleanup: () => cleaned.push(true)};
+  const context = {startupDiagnostics: true, CASES, root: 'root', config: {go: {binarySHA256: 'go'}, rust: {binarySHA256: 'rust'}}, fatal: false,
+    report: {pairOwners: [], diagnosticPairs: []}, orderFor, join, assert, compareSamples, oracle, files: () => ['sealed-output'], save: () => {},
+    beginScratch: () => pair, writeFileSync: (path, bytes) => writes.push({path, value: JSON.parse(bytes)}),
+    invoke: (entry, engine, home, pin, evidence, iteration, cacheMode) => {
+      calls.push({entry, engine, home, pin, evidence, iteration, cacheMode});
+      if (unreaped) context.fatal = true;
+      return {row: {valid: !invalid, startup: startupBreakdown(startupProof())}, envelope: envelope({commands: [{path: 'describe', flags: mismatch && engine === 'rust' ? ['changed'] : []}], formats: ['json'], development: false})};
+    }};
+  let error;
+  try { runInNewContext(source.slice(begin, end) + '\n  }', context); } catch (failure) { error = failure; }
+  return {context, calls, seals, writes, cleaned, error};
+}
+test('diagnostic control flow invokes exactly the original Go/Rust describe pair and seals it', () => {
+  const result = runDiagnosticFixture(); assert.equal(result.error, undefined);
+  assert.deepEqual(result.calls.map(row => row.engine), ['go', 'rust']);
+  for (const row of result.calls) {
+    assert.equal(row.entry.id, 'B01-describe'); assert.deepEqual(row.entry.args, ['describe']);
+    assert.equal(row.home, join('fixture', `${row.engine}-home`)); assert.equal(row.pin, null);
+    assert.equal(row.iteration, 0); assert.equal(row.cacheMode, 'diagnostic_once');
+  }
+  assert.equal(result.context.report.diagnosticPairs.length, 1);
+  assert.equal(result.context.report.diagnosticPairs[0].resultEquivalent, true);
+  assert.equal(result.seals[0].state, 'succeeded'); assert.equal(result.seals[0].handlesReaped, true);
+  assert.equal(result.cleaned.length, 1); assert.equal(result.writes[0].value.mode, 'startup_diagnostics');
+});
+test('diagnostic mismatches and invalid observations retain failed evidence without replacement samples', () => {
+  for (const options of [{mismatch: true}, {invalid: true}]) {
+    const result = runDiagnosticFixture(options); assert.equal(result.error, undefined);
+    assert.equal(result.calls.length, 2); assert.equal(result.context.report.diagnosticPairs[0].resultEquivalent, false);
+    assert(result.context.report.diagnosticPairs[0].failure); assert.equal(result.seals[0].state, 'failed');
+    assert.equal(result.seals[0].handlesReaped, true); assert.equal(result.cleaned.length, 0);
+  }
+});
+test('unreaped diagnostic process stops before the other engine and retains interrupted ownership', () => {
+  const result = runDiagnosticFixture({unreaped: true});
+  assert.match(result.error.message, /unverified process reap/); assert.equal(result.calls.length, 1);
+  assert.equal(result.seals[0].state, 'interrupted'); assert.equal(result.seals[0].handlesReaped, false);
+  assert.equal(result.context.report.diagnosticPairs[0].resultEquivalent, false); assert.equal(result.cleaned.length, 0);
 });
