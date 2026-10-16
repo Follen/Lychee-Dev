@@ -13,8 +13,8 @@ struct Right<'a> {
     end: usize,
     index: usize,
 }
-pub(super) struct Plan<'a> {
-    pub fields: Fields<'a>,
+pub(in crate::relational) struct Plan<'a> {
+    pub(in crate::relational) fields: Fields<'a>,
     query: Query<'a>,
     first: SourceRef<'a>,
     first_selected: Vec<usize>,
@@ -22,7 +22,7 @@ pub(super) struct Plan<'a> {
     rights: Vec<Right<'a>>,
     selected: Vec<bool>,
 }
-pub(super) async fn prepare<'a, 'w: 'a>(
+pub(in crate::relational) async fn prepare<'a, 'w: 'a>(
     query: Query<'a>,
     inputs: &[SourceRef<'a>],
     context: &Context<'a>,
@@ -163,7 +163,7 @@ struct Position<'a> {
     matched: bool,
     fallback: bool,
 }
-pub(super) struct Cursor<'c, 'a, 'w: 'a> {
+pub(in crate::relational) struct Cursor<'c, 'a, 'w: 'a> {
     plan: Plan<'a>,
     materialized: Vec<(Vec<Vec<Scalar>>, Option<KeyIndex<'w>>)>,
     positions: Vec<Position<'a>>,
@@ -175,7 +175,7 @@ pub(super) struct Cursor<'c, 'a, 'w: 'a> {
     _allocation: Option<crate::resource::RetainedReservation<'w>>,
 }
 impl<'c, 'a, 'w: 'a> Cursor<'c, 'a, 'w> {
-    pub fn new(plan: Plan<'a>, control: &'c Control<'a, 'w>) -> Result<Self> {
+    pub(in crate::relational) fn new(plan: Plan<'a>, control: &'c Control<'a, 'w>) -> Result<Self> {
         let mut materialized = Vec::with_capacity(plan.rights.len());
         for right in &plan.rights {
             let mut rows = Vec::new();
@@ -244,7 +244,7 @@ impl<'c, 'a, 'w: 'a> Cursor<'c, 'a, 'w> {
             _allocation: allocation,
         })
     }
-    pub async fn next(
+    pub(in crate::relational) async fn next(
         &mut self,
         context: &Context<'a>,
         control: &Control<'a, 'w>,

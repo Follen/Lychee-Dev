@@ -113,7 +113,7 @@ fn prepare_collect<'w, P: Equality>(
         }
     }
 }
-pub(super) struct Buffer<'c, 'a, 'w: 'a> {
+pub(in crate::relational) struct Buffer<'c, 'a, 'w: 'a> {
     rows: std::vec::IntoIter<Vec<Scalar>>,
     index: BTreeMap<Key, Vec<usize>>,
     temporary: Temporary<'w>,
@@ -130,12 +130,12 @@ impl Drop for Buffer<'_, '_, '_> {
         });
     }
 }
-pub(super) enum Cursor<'c, 'a, 'w: 'a> {
+pub(in crate::relational) enum Cursor<'c, 'a, 'w: 'a> {
     Scan(Scan<'c, 'a, 'w>),
     Buffer(Buffer<'c, 'a, 'w>),
 }
 impl<'c, 'a, 'w: 'a> Cursor<'c, 'a, 'w> {
-    pub fn next(&mut self) -> Result<Option<Row<'a>>> {
+    pub(in crate::relational) fn next(&mut self) -> Result<Option<Row<'a>>> {
         match self {
             Self::Scan(scan) => scan.next(),
             Self::Buffer(buffer) => buffer
@@ -146,7 +146,7 @@ impl<'c, 'a, 'w: 'a> Cursor<'c, 'a, 'w> {
         }
     }
 }
-pub(super) fn open<'c, 'a, 'w: 'a>(
+pub(in crate::relational) fn open<'c, 'a, 'w: 'a>(
     source: SourceRef<'a>,
     selected: Option<&[usize]>,
     filter: Option<&Term>,
