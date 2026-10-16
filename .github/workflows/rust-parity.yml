@@ -44,7 +44,7 @@ jobs:
           git cat-file -e '0bec60e4406f5d5dc155ee25cef44f9a710e37e8^{commit}'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test the differential runner (not product parity)
-        run: node --test tests/rust-parity/oracle.test.mjs tests/rust-parity/oracle-3.2.2.test.mjs tests/rust-parity/skill-entrypoint-identity.test.mjs crates/lycheedev-cli/tests/contract_metadata.test.mjs tests/rust-parity/describe-contract.test.mjs tools/rust-early-evidence.test.mjs
+        run: node --test tests/rust-parity/oracle.test.mjs tests/rust-parity/oracle-3.2.2.test.mjs tests/rust-parity/skill-entrypoint-identity.test.mjs crates/lycheedev-cli/tests/contract_metadata.test.mjs tests/rust-parity/describe-contract.test.mjs tools/rust-early-evidence.test.mjs tests/rust-parity/tls-name-oracle/run.test.mjs
       - name: Test full Skill packaging and Windows launcher fixtures
         run: |
           node --test tools/skill-contract.test.mjs tools/skill-launcher.test.mjs
@@ -565,9 +565,22 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-key-cache --one-shot -- test --locked --offline -p lycheedev-data --test cache_keys_parity -j 1
       - name: Run remote catalog cancellable HTTP and gzip fixtures
+        id: data_remote
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: |
-          node tools/rust-cargo.mjs --owner ci-data-remote --one-shot -- test --locked --offline -p lycheedev-data --lib remote:: -j 1 -- --skip hotfix::
+        # Same runCargo owner/filter/lease, with nocapture for five TLS records.
+        run: node tests/rust-parity/tls-name-oracle/run.mjs rust
+      - name: Install fixed official Go for the private-root TLS observation oracle
+        id: tls_go
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Compare Go TLS with the same sealed Rust remote invocation
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' && steps.tls_go.outcome == 'success' }}
+        env:
+          LYCHEEDEV_TLS_RUST_OWNER: ${{ steps.data_remote.outputs.tls_rust_owner }}
+        run: node tests/rust-parity/tls-name-oracle/run.mjs go
       - name: Run Hotfix CLI provider argument contracts
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-hotfix-cli --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev hotfix_remote_tests -j 1

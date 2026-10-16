@@ -1418,7 +1418,7 @@ fn late_wire_validation_keeps_original_connection_failure_and_closes_successful_
 }
 
 // Read the bounded ClientHello fixture only. This is not production TLS parsing.
-fn client_hello_sni(stream: &mut TcpStream) -> Option<Vec<u8>> {
+fn client_hello_sni(stream: &mut impl std::io::Read) -> Option<Vec<u8>> {
     let mut record = [0; 5];
     stream.read_exact(&mut record).unwrap();
     assert_eq!(record[0], 22);
@@ -1545,3 +1545,5 @@ fn ip_tls_retains_go_zone_verification_input_and_omits_sni() {
         assert_eq!(budget.snapshot().unwrap().network_requests, 1);
     }
 }
+
+mod tls_names;

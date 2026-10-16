@@ -269,6 +269,15 @@ fn tls_name(name: &str) -> String {
     name.strip_suffix('.').unwrap_or(name).to_owned()
 }
 fn platform_tls(name: &str) -> Result<(String, tokio_native_tls::TlsConnector)> {
+    platform_tls_with_builder(name, native_tls::TlsConnector::builder())
+}
+// The caller in production always supplies the platform-default builder. Tests
+// add one private fixture root to their own builder; no trust is installed or
+// shared, and the same SNI/name selection below remains under test.
+fn platform_tls_with_builder(
+    name: &str,
+    mut builder: native_tls::TlsConnectorBuilder,
+) -> Result<(String, tokio_native_tls::TlsConnector)> {
     // Public native-tls SNI switch does not weaken hostname/certificate checks.
     // Go excludes literal IPs (also bracketed/zoned) from ClientHello SNI.
     let ip = name
@@ -277,7 +286,7 @@ fn platform_tls(name: &str) -> Result<(String, tokio_native_tls::TlsConnector)> 
         .unwrap_or(name);
     let ip = ip.rsplit_once('%').map_or(ip, |(address, _)| address);
     let use_sni = ip.parse::<std::net::IpAddr>().is_err() && !name.trim_end_matches('.').is_empty();
-    let connector = native_tls::TlsConnector::builder()
+    let connector = builder
         .use_sni(use_sni)
         .build()
         .map_err(|_| http("platform TLS configuration failed"))?;
