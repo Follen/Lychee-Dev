@@ -2,6 +2,8 @@
 mod original_lines;
 #[path = "expression_index.rs"]
 mod expression_index;
+#[path = "managed_sites.rs"]
+mod managed_sites;
 #[cfg(test)]
 #[path = "expression_identity_tests.rs"]
 mod expression_identity_tests;
@@ -43,8 +45,7 @@ pub struct FrozenContext {
     decisions: HashMap<BindingSite, BindingDecision<BoundValue>>,
     calls: HashMap<BindingSite, BindingDecision<CallPermit>>,
     call_observations: HashMap<BindingSite, CallObservation>,
-    managed_reads: Arc<HashSet<BindingSite>>,
-    managed_calls: Arc<HashSet<BindingSite>>,
+    managed_sites: Arc<managed_sites::ManagedSites>,
     refs: HashMap<String, Vec<BindingReference>>,
     shapes: HashMap<NativeObjectViewKey, ObjectShape>,
 }
@@ -76,7 +77,7 @@ impl BindingContext for FrozenContext {
             };
         }
         self.decisions.get(&site).cloned().unwrap_or_else(|| {
-            if self.managed_reads.contains(&site) {
+            if self.managed_sites.contains_read(&site) {
                 BindingDecision::Unavailable {
                     proof: digest(&(self.identity.as_str(), format!("{site:?}"))),
                     reason: "managed_use_missing_from_bounded_graph".into(),
@@ -94,7 +95,7 @@ impl BindingContext for FrozenContext {
             };
         }
         self.calls.get(&site).cloned().unwrap_or_else(|| {
-            if self.managed_calls.contains(&site) {
+            if self.managed_sites.contains_call(&site) {
                 BindingDecision::Unavailable {
                     proof: digest(&(self.identity.as_str(), format!("{site:?}"))),
                     reason: "managed_call_missing_from_bounded_graph".into(),
@@ -152,8 +153,7 @@ pub struct PreparedSnapshot {
     entry_catalog: Vec<EntryCandidate>,
     original_lines: BTreeMap<FileId, original_lines::OriginalLines>,
     parameters: BTreeMap<String, SemanticId>,
-    managed_reads: Arc<HashSet<BindingSite>>,
-    managed_calls: Arc<HashSet<BindingSite>>,
+    managed_sites: Arc<managed_sites::ManagedSites>,
 }
 impl PreparedSnapshot {
     fn prepare_inner(
@@ -184,8 +184,7 @@ impl PreparedSnapshot {
             entry_catalog: vec![],
             original_lines: BTreeMap::new(),
             parameters: BTreeMap::new(),
-            managed_reads: Arc::new(HashSet::new()),
-            managed_calls: Arc::new(HashSet::new()),
+            managed_sites: Arc::new(managed_sites::ManagedSites::default()),
         };
         let mut syntax_counts = SourceSyntaxCounts::for_files(
             input.inputs.corpus.files.len(),
@@ -195,8 +194,7 @@ impl PreparedSnapshot {
         let mut nodes = 0;
         let mut ids = HashSet::new();
         let mut uris = HashSet::new();
-        let mut managed_reads = HashSet::new();
-        let mut managed_calls = HashSet::new();
+        let mut managed_sites = managed_sites::ManagedSites::default();
         for (file_index, source) in input.inputs.corpus.files.iter().enumerate() {
             control.check().map_err(|e| e.to_string())?;
             let name = source.path.as_str();
@@ -235,6 +233,7 @@ impl PreparedSnapshot {
                 .ok_or("source syntax tree")?
                 .get_red_root();
             let mut expressions = Vec::new();
+            let mut managed_file = managed_sites::ManagedFileBuilder::default();
             for node in root.descendants() {
                 control.check().map_err(|e| e.to_string())?;
                 nodes += 1;
@@ -244,18 +243,12 @@ impl PreparedSnapshot {
                 syntax_counts[file_index].observe(&node);
                 if let Some(expr) = LuaExpr::cast(node.clone()) {
                     let syntax = expr.get_syntax_id();
-                    let site = BindingSite { file_id, syntax };
                     let range = input
                         .inputs
                         .original_range(name, expr.get_range())
                         .expect("admitted parser range");
                     expressions.push((range.start().into(), range.end().into(), syntax));
-                    if matches!(expr, LuaExpr::NameExpr(_) | LuaExpr::IndexExpr(_)) {
-                        managed_reads.insert(site);
-                    }
-                    if matches!(expr, LuaExpr::CallExpr(_)) {
-                        managed_calls.insert(site);
-                    }
+                    managed_file.observe(syntax);
                 }
                 if let Some(closure) = LuaClosureExpr::cast(node) {
                     input.closures.insert(
@@ -275,6 +268,10 @@ impl PreparedSnapshot {
                     control.check().map_err(|error| error.to_string())
                 })?,
             );
+            // The original expression-compaction control check precedes this
+            // per-file sort; the next original declaration check follows it.
+            // No whole-workspace hash table or second membership copy remains.
+            managed_sites.insert(file_id, managed_file.finish());
             for declaration in &model.file_facts().ok_or("source facts")?.decls {
                 control.check().map_err(|e| e.to_string())?;
                 if matches!(declaration.kind, emmylua_code_analysis::DeclKind::Param) {
@@ -289,8 +286,7 @@ impl PreparedSnapshot {
         // state and must not overlap the following syntax-index allocations.
         drop(ids);
         drop(uris);
-        input.managed_reads = Arc::new(managed_reads);
-        input.managed_calls = Arc::new(managed_calls);
+        input.managed_sites = Arc::new(managed_sites);
         observer("source_identity_indexed");
         control.check().map_err(|e| e.to_string())?;
         input.syntax = input.build_syntax_index(&syntax_counts)?;
@@ -450,8 +446,7 @@ impl PreparedSnapshot {
             decisions: HashMap::new(),
             calls: HashMap::new(),
             call_observations: HashMap::new(),
-            managed_reads: self.managed_reads.clone(),
-            managed_calls: self.managed_calls.clone(),
+            managed_sites: self.managed_sites.clone(),
             refs: HashMap::new(),
             shapes: HashMap::new(),
         };
@@ -557,7 +552,7 @@ impl PreparedSnapshot {
             // Only Name/Index use sites are value replacement points. Literals
             // and calls retain native inference unless a profile intrinsic
             // explicitly projects the graph-selected fresh object.
-            if !provider.managed_reads.contains(&site) {
+            if !provider.managed_sites.contains_read(&site) {
                 continue;
             }
             let decision = self.native_decision(graph, fact)?;

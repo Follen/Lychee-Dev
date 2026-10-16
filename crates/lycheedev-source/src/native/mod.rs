@@ -23,6 +23,7 @@ include!("evidence.rs");
 include!("inputs.rs");
 include!("host.rs");
 include!("origin.rs");
+include!("harvest_evidence.rs");
 include!("graph.rs");
 include!("invocation.rs");
 include!("entry.rs");

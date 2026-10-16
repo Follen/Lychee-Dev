@@ -99,7 +99,7 @@ pub struct ReturnCheck { pub function: usize, pub expression: usize, pub context
 #[derive(Clone, Debug, Serialize)]
 pub struct BranchFact { pub id:usize, pub site:Site, pub parent:Option<usize>, pub condition_sites:Vec<Site>, pub condition_facts:Vec<usize>, pub call_facts:Vec<usize>, pub write_versions:Vec<usize>, pub footprints:Vec<Value>, pub coverage_gaps:Vec<Value> }
 #[derive(Clone, Debug, Serialize)]
-pub struct GraphFacts { pub snapshot_key: String, pub snapshot_inputs: GraphSnapshotEvidence, pub snapshot_inputs_json: String, pub scenario: String, pub phase: String, pub script_load_occurrences: Vec<String>, pub values: Vec<AbstractValue>, pub functions: Vec<Function>, pub writes: Vec<WriteVersion>, pub uses: Vec<UseFact>, pub calls: Vec<CallFact>, pub copies: Vec<CopyEdge>, pub returns: Vec<ReturnCheck>, pub branches:Vec<BranchFact>, pub raw_emmy: Vec<Value>,
+pub struct GraphFacts { pub snapshot_key: String, pub snapshot_inputs: GraphSnapshotEvidence, pub snapshot_inputs_json: String, pub scenario: String, pub phase: String, pub script_load_occurrences: Vec<String>, pub values: Vec<AbstractValue>, pub functions: Vec<Function>, pub writes: Vec<WriteVersion>, pub uses: Vec<UseFact>, pub calls: Vec<CallFact>, pub copies: Vec<CopyEdge>, pub returns: Vec<ReturnCheck>, pub branches:Vec<BranchFact>, pub raw_emmy: Vec<RawEmmyEvidence>,
     #[serde(skip_serializing_if="Vec::is_empty")]
     pub object_views: Vec<ObjectShapeFacts>,
     #[serde(skip_serializing_if="Vec::is_empty")]
@@ -112,7 +112,7 @@ pub struct GraphFacts { pub snapshot_key: String, pub snapshot_inputs: GraphSnap
     pub xml:Option<XmlRuntimeFacts>,
 }
 
-struct Harvest { declaration_sites:BTreeMap<String,Site>, blocks: BTreeMap<String,LuaBlock>, local_reads: BTreeMap<String,String>, signatures: BTreeMap<String,Signature>, intrinsic_declarations:BTreeMap<String,String>, raw: Vec<Value> }
+struct Harvest { declaration_sites:BTreeMap<String,Site>, blocks: BTreeMap<String,LuaBlock>, local_reads: BTreeMap<String,String>, signatures: BTreeMap<String,Signature>, intrinsic_declarations:BTreeMap<String,String>, raw: Vec<RawEmmyEvidence> }
 fn harvest(analysis: &EmmyLuaAnalysis, names: &[&str],inputs:&SourceInputs,control:&OperationControl) -> Result<Harvest> {
     let mut result=Harvest { declaration_sites:BTreeMap::new(), blocks:BTreeMap::new(), local_reads:BTreeMap::new(), signatures:BTreeMap::new(), intrinsic_declarations:BTreeMap::new(), raw:vec![] };
     let mut node_count=0;
@@ -132,6 +132,7 @@ fn harvest(analysis: &EmmyLuaAnalysis, names: &[&str],inputs:&SourceInputs,contr
         }}
         let facts=model.file_facts().ok_or("file facts")?;
         for decl in &facts.decls {if decl.kind.is_local(){let site=inputs.site(name,decl.name_range);result.declaration_sites.insert(site.id(),site);}}
+        let evidence_file:Arc<str>=Arc::from(*name);
         for node in root.descendants() {
             node_count+=1;
             control.check().map_err(|e|e.to_string())?;
@@ -141,7 +142,7 @@ fn harvest(analysis: &EmmyLuaAnalysis, names: &[&str],inputs:&SourceInputs,contr
                 let raw=model.resolve_name(expr.get_position());
                 let local=raw.as_ref().and_then(|id|facts.decl_by_id(id)).filter(|decl|decl.kind.is_local());
                 if let Some(decl)=local { result.local_reads.insert(site.id(),inputs.site(name,decl.name_range).id()); }
-                result.raw.push(json!({"site":site,"rawIdentity":format!("{raw:?}"),"usedFor":"lexical-local-identity-only; global/value selection excluded"}));
+                result.raw.push(RawEmmyEvidence::new(Arc::clone(&evidence_file),&site,raw));
             }
         }
         for sig in &facts.signatures {

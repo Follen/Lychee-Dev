@@ -34,6 +34,8 @@ Do not translate Go line by line. Preserve the external contract while using Rus
 
 The user's 2026-10-16 refinement makes this an explicit all-module acceptance requirement. Stage 1 must assess Core, Source, Data, Live, CLI and Skill/delivery boundaries individually: identify who owns each large allocation and handle, which borrows or moves avoid copies, whether enums prevent invalid states, how streaming and explicit heap tasks bound memory and native stack depth, and where concurrency has measured benefit. Include cancellation, error and destruction paths. Record concrete costs and evidence for retaining or changing each design. Preserve good existing Rust implementations; neither blanket rewrites nor generic frameworks count as progress. Skill is evaluated at its workflow/implementation boundary rather than rewritten into Rust merely for appearance. Fixed Go external behavior, resource limits and independent measured acceptance remain mandatory.
 
+The user further asks for proactive use of Rust concurrency: Go is the functional/result reference, not an internal module-layout or scheduling template. Evaluate bounded parallel parsing/validation and I/O pipelines where independent work exists; preserve deterministic public ordering, first-error behavior, resource admission and prompt cancellation. Measure throughput, latency and peak memory together. Data batch work may benefit from parallel preparation, while Live transaction/input order remains serialized where its contract requires it. Do not force concurrency into shared-state paths or replace a concrete pipeline with an unnecessary generic scheduler.
+
 ## 2. Boundaries and ownership
 
 | Rust boundary | Responsibilities | Go reference at fixed release |
