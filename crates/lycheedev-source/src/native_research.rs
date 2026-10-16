@@ -376,6 +376,9 @@ fn walk_load(path:&str,inputs:&LoadInputs<'_>,active:&mut std::collections::BTre
 
 pub fn one_shot(inv:&lycheedev_core::Invocation,request:WorkerRequest)->Result<Value> {
     let bytes=serde_json::to_vec(&request)?;
+    // The immutable wire bytes now own the transport. The full request is no
+    // longer needed in this process while the worker holds its decoded copy.
+    drop(request);
     if bytes.len()>768<<20{return Err(ToolkitError::new("source.native_budget","native research input exceeds transport budget",3));}
     let mut command=std::process::Command::new(std::env::current_exe()?);command.arg("--source-native-worker");
     let diagnostic=worker_control::configure(&mut command,&inv.control)?;

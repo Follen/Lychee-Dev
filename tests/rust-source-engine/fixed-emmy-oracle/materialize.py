@@ -3,6 +3,9 @@
 
 Never downloads, invokes Cargo, takes a channel, or alters the clean workspace.
 The historical adapter/source/lock come only from the fixed cd871181 archive.
+An explicitly identified compile-only overlay repairs authenticated adapter API
+spellings and missing cache declarations in the stage; it never supplies current
+candidate algorithms or expected values.
 """
 import argparse
 import hashlib
@@ -59,6 +62,63 @@ def write_file(root, name, data, *, replace=False):
         raise ValueError('oracle.copy_changed')
 
 
+def compatibility_bytes(row, frozen_row, original):
+    """Apply exact declared edits and prove their reverse restores frozen bytes."""
+    if (row['path'] != frozen_row['path']
+            or row['beforeBytes'] != frozen_row['bytes']
+            or row['beforeSHA256'] != frozen_row['sha256']
+            or len(original) != row['beforeBytes']
+            or digest(original) != row['beforeSHA256']):
+        raise ValueError('oracle.compatibility_preimage')
+    edits = row['edits']
+    if not 0 < len(edits) <= 32:
+        raise ValueError('oracle.compatibility_edits')
+    data = original
+    for edit in edits:
+        before, after = edit['before'].encode(), edit['after'].encode()
+        count = edit['occurrences']
+        if (not 0 < len(before) <= 4096 or not 0 < len(after) <= 4096
+                or before == after or type(count) is not int or not 0 < count <= 32
+                or data.count(before) != count):
+            raise ValueError('oracle.compatibility_edit_preimage')
+        data = data.replace(before, after)
+    if len(data) != row['afterBytes'] or digest(data) != row['afterSHA256']:
+        raise ValueError('oracle.compatibility_postimage')
+    restored = data
+    for edit in reversed(edits):
+        before, after = edit['before'].encode(), edit['after'].encode()
+        if restored.count(after) != edit['occurrences']:
+            raise ValueError('oracle.compatibility_reverse')
+        restored = restored.replace(after, before)
+    if restored != original:
+        raise ValueError('oracle.compatibility_reverse')
+    return data
+
+
+def apply_compile_compatibility(stage, manifest, frozen, check):
+    compatibility = manifest['historicalCompileCompatibility']
+    if (compatibility['schema'] != 'lycheedev.emmy-fixed-compile-compatibility.v1'
+            or compatibility['identity'] != 'cd871181-compile-compatibility-r1'
+            or compatibility['referenceCommit'] != frozen['commit']):
+        raise ValueError('oracle.compatibility_identity')
+    rows = compatibility['files']
+    if len(rows) != 10 or len({row['path'] for row in rows}) != len(rows):
+        raise ValueError('oracle.compatibility_inventory')
+    originals = {row['path']: row for row in frozen['files']}
+    for row in rows:
+        check()
+        name = safe_name(row['path'])
+        api = (name.startswith('crates/lycheedev-emmy-adapter/src/session/backend/')
+               and name.endswith('.rs') and row['kind'] == 'public-api-compile-adaptation')
+        cache = (name == 'crates/lycheedev-emmy-adapter/src/session/backend.rs'
+                 and row['kind'] == 'missing-cache-declaration')
+        if not (api or cache) or name not in originals:
+            raise ValueError('oracle.compatibility_scope')
+        data = compatibility_bytes(row, originals[name], checked_bytes(stage / name))
+        write_file(stage, name, data, replace=True)
+    return compatibility
+
+
 def materialize(root, stage, receipt):
     deadline = time.monotonic() + DEADLINE_SECONDS
     def check():
@@ -102,6 +162,7 @@ def materialize(root, stage, receipt):
     # Only the source files explicitly listed by the immutable harness manifest
     # can overlay this fixed source. No runtime candidate semantics are copied.
     manifest = json.loads(checked_bytes(HERE / 'inputs.json', 2 << 20))
+    compatibility = apply_compile_compatibility(stage, manifest, frozen, check)
     for row in manifest['files']:
         check()
         name = row['path']
@@ -134,6 +195,7 @@ def materialize(root, stage, receipt):
         raise ValueError('oracle.historical_tree')
     print(json.dumps({'schema':'lycheedev.emmy-fixed-materialized.v1',
                       'commit':frozen['commit'], 'archiveSHA256':frozen['archiveSHA256'],
+                      'compileCompatibility':compatibility,
                       'treeSHA256':tree, 'files':len(expected), 'stage':str(stage)}))
 
 

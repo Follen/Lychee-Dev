@@ -1,5 +1,10 @@
 #[path = "original_lines.rs"]
 mod original_lines;
+#[path = "expression_index.rs"]
+mod expression_index;
+#[cfg(test)]
+#[path = "expression_identity_tests.rs"]
+mod expression_identity_tests;
 
 use emmylua_code_analysis::{FileId, SemanticId};
 use emmylua_parser::LuaSyntaxId;
@@ -140,9 +145,9 @@ pub struct PreparedSnapshot {
     workspace_facts: Arc<lycheedev_emmy_adapter::session::WorkspaceFactsCache>,
     config: Emmyrc,
     files: BTreeMap<String, FileId>,
-    // Public sites use original-source byte offsets; keep their path only once
-    // in `files` instead of retaining a formatted path for every expression.
-    expressions: BTreeMap<(FileId, u32, u32), LuaSyntaxId>,
+    // Exact original-byte lookups only: one packed sorted range index per file.
+    // File IDs and B-tree nodes are not repeated for every expression.
+    expressions: BTreeMap<FileId, expression_index::ExpressionIndex<LuaSyntaxId>>,
     closures: BTreeMap<String, LuaSyntaxId>,
     entry_catalog: Vec<EntryCandidate>,
     original_lines: BTreeMap<FileId, original_lines::OriginalLines>,
@@ -229,6 +234,7 @@ impl PreparedSnapshot {
                 .syntax_tree()
                 .ok_or("source syntax tree")?
                 .get_red_root();
+            let mut expressions = Vec::new();
             for node in root.descendants() {
                 control.check().map_err(|e| e.to_string())?;
                 nodes += 1;
@@ -243,9 +249,7 @@ impl PreparedSnapshot {
                         .inputs
                         .original_range(name, expr.get_range())
                         .expect("admitted parser range");
-                    input
-                        .expressions
-                        .insert((file_id, range.start().into(), range.end().into()), syntax);
+                    expressions.push((range.start().into(), range.end().into(), syntax));
                     if matches!(expr, LuaExpr::NameExpr(_) | LuaExpr::IndexExpr(_)) {
                         managed_reads.insert(site);
                     }
@@ -265,6 +269,12 @@ impl PreparedSnapshot {
                     );
                 }
             }
+            input.expressions.insert(
+                file_id,
+                expression_index::ExpressionIndex::build(expressions, || {
+                    control.check().map_err(|error| error.to_string())
+                })?,
+            );
             for declaration in &model.file_facts().ok_or("source facts")?.decls {
                 control.check().map_err(|e| e.to_string())?;
                 if matches!(declaration.kind, emmylua_code_analysis::DeclKind::Param) {
@@ -294,13 +304,14 @@ impl PreparedSnapshot {
         let file_id = *self.files.get(&site.file).ok_or("site file")?;
         let syntax = *self
             .expressions
-            .get(&(file_id, site.start, site.end))
+            .get(&file_id)
+            .and_then(|expressions| expressions.get(site.start, site.end))
             .ok_or_else(|| format!("expression identity unavailable: {}", site.id()))?;
         Ok(BindingSite { file_id, syntax })
     }
     fn expression_binding_site(&self, site: &Site) -> Option<BindingSite> {
         let file_id = *self.files.get(&site.file)?;
-        let syntax = *self.expressions.get(&(file_id, site.start, site.end))?;
+        let syntax = *self.expressions.get(&file_id)?.get(site.start, site.end)?;
         Some(BindingSite { file_id, syntax })
     }
     fn graph_inner(

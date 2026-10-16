@@ -80,7 +80,11 @@ function harnessInputs(){
   assert.equal(manifest.referenceCommit,'cd87118123fcba3d26f8ee161166629a4570bdaa');
   assert.equal(manifest.targets.length,10);
   assert.equal(manifest.targets.flatMap(t=>t.tests).length,36);
+  assert.equal(manifest.files.length,31,'oracle.input_inventory');
   assert.equal(new Set(manifest.files.map(f=>f.path)).size,manifest.files.length);
+  assert.equal(manifest.historicalCompileCompatibility.schema,'lycheedev.emmy-fixed-compile-compatibility.v1');
+  assert.equal(manifest.historicalCompileCompatibility.identity,'cd871181-compile-compatibility-r1');
+  assert.equal(manifest.historicalCompileCompatibility.files.length,10);
   for(const row of manifest.files){
     const path=contained(HERE,resolve(HERE,row.path));
     assert.equal(lstatSync(path).size,row.bytes,`oracle.input_bytes:${row.path}`);
@@ -112,7 +116,10 @@ export function run(root=process.cwd()){
   const reportPath=join(job.evidence,'fixed-oracle-report.json');
   const report={schema:'lycheedev.emmy-fixed-run.v1',state:'running',referenceCommit:inputs.manifest.referenceCommit,
     fixedInputsSHA256:inputs.sha256,production:{identity:clean.identity,treeSHA256:CLEAN,files:clean.files.length,bytes:clean.totalBytes},
-    reference:{treeSHA256:HISTORY},sourceTree:initialSource,tests:36,cargoInvoked:false,invocations:[]};
+    reference:{treeSHA256:HISTORY,sourceIdentity:'fixed-source-plus-compile-compatibility',
+      compileCompatibility:{...inputs.manifest.historicalCompileCompatibility,
+        files:inputs.manifest.historicalCompileCompatibility.files.map(({edits,...row})=>row)}},
+    sourceTree:initialSource,tests:36,cargoInvoked:false,invocations:[]};
   let handlesReaped=true,succeeded=false;
   const logs=[reportPath];
   const stable=()=>{assert.equal(harnessInputs().sha256,inputs.sha256,'oracle.harness_changed');assert.equal(sourceDigest(root),initialSource,'oracle.production_changed');};

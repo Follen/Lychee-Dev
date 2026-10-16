@@ -92,8 +92,8 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 5005,
-      "sha256": "3cdc77b998172ea0d592492a4331126cde3c6e22715ae8694d126f0769d2207e"
+      "bytes": 6847,
+      "sha256": "9085b4b4e59bd0ce317e128182698a2d1c01a7739bc5936b4dacad0b2addb6a2"
     },
     {
       "path": "historical-engine/.gitignore",
@@ -152,8 +152,8 @@
     },
     {
       "path": "materialize.py",
-      "bytes": 6660,
-      "sha256": "fbfe181c9cca0fac5dedd14fc95ac2cae0dfeadd8aff8dd557eea78e9184ae94"
+      "bytes": 9899,
+      "sha256": "6831dd07cec171d7ea586e28101ae07a0536996ba2574dfd297105e92a37589f"
     },
     {
       "path": "original-tests.json",
@@ -222,13 +222,13 @@
     },
     {
       "path": "run.mjs",
-      "bytes": 11602,
-      "sha256": "d27c2af94d90557666ddd46b775587e650e532f21e466ee8da8fcd0e6bffabed"
+      "bytes": 12193,
+      "sha256": "35296064fc511c65f3f36a767551ead592eeea1d7910955d4e5f740899affd8d"
     },
     {
       "path": "run.test.mjs",
-      "bytes": 6612,
-      "sha256": "117f3343bbeaa0f6a6105e6eb7691e9b292d5cba0c06f4c247659a5b9d08ca7c"
+      "bytes": 12253,
+      "sha256": "b1c0cdb5fdaa3244c7c2ac0183207b1441ba4fe34c8d2fb21352b90d58add961"
     },
     {
       "path": "source-cd871181.json",
@@ -245,5 +245,177 @@
       "bytes": 3861,
       "sha256": "2fb97511cefe276c228bde2eda70cf8c8ebec786c4336bbd5eea4707f1f5342b"
     }
-  ]
+  ],
+  "historicalCompileCompatibility": {
+    "schema": "lycheedev.emmy-fixed-compile-compatibility.v1",
+    "identity": "cd871181-compile-compatibility-r1",
+    "referenceCommit": "cd87118123fcba3d26f8ee161166629a4570bdaa",
+    "files": [
+      {
+        "path": "crates/lycheedev-emmy-adapter/src/session/backend.rs",
+        "kind": "missing-cache-declaration",
+        "beforeBytes": 22510,
+        "beforeSHA256": "385254576afa89e77562f07e77a4188f6aada4ba6b2034c91ee22e3fb980c418",
+        "afterBytes": 22632,
+        "afterSHA256": "c623dc5b6d7d9f8f7ec38004f2681bf4e5986f20bf043f60c739932513d53145",
+        "edits": [
+          {
+            "before": "    member_lists: HashMap<OwnedValue, Vec<OwnedMemberInfo>>,",
+            "after": "    member_lists: HashMap<OwnedValue, Vec<OwnedMemberInfo>>,\n    member_items: HashMap<(OwnedValue, LuaMemberKey), Option<OwnedMemberInfo>>,",
+            "occurrences": 1
+          },
+          {
+            "before": "            member_lists: HashMap::new(),",
+            "after": "            member_lists: HashMap::new(),\n            member_items: HashMap::new(),",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "path": "crates/lycheedev-emmy-adapter/src/session/backend/call.rs",
+        "kind": "public-api-compile-adaptation",
+        "beforeBytes": 18703,
+        "beforeSHA256": "5da294eedce2877c79309ec44f0832bf0543e093a85fd3361e56e002caf64e26",
+        "afterBytes": 18704,
+        "afterSHA256": "54f2440723d0ec8f2d0fde4ba35151d4916296c32d0c54c4751fe13f1b1dd011",
+        "edits": [
+          {
+            "before": "for reference in self.model.members_of_owner(&owner) {",
+            "after": "for reference in &self.model.members_of_owner(&owner) {",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "path": "crates/lycheedev-emmy-adapter/src/session/backend/call_candidates.rs",
+        "kind": "public-api-compile-adaptation",
+        "beforeBytes": 14193,
+        "beforeSHA256": "c8f6db93f256f03f641bb63035a0eb784bd552679aba2870fc26411880e1b18e",
+        "afterBytes": 14177,
+        "afterSHA256": "a6f24b84485e66e194517cde71e2fc4daa289e11d2be39ebde2dd04107c1648f",
+        "edits": [
+          {
+            "before": "            let Some(member) = self\n                .model\n                .members_of_owner(&SemanticId::name(def.name.clone()))\n                .into_iter()\n                .find(|member| member.name == attribute.name)\n            else {",
+            "after": "            let members = self\n                .model\n                .members_of_owner(&SemanticId::name(def.name.clone()));\n            let Some(member) = members.iter().find(|member| member.name == attribute.name) else {",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "path": "crates/lycheedev-emmy-adapter/src/session/backend/call_match.rs",
+        "kind": "public-api-compile-adaptation",
+        "beforeBytes": 21973,
+        "beforeSHA256": "4d4dda753cb7b10b4a3ab7d7abe85f36cb7169cc13eab2c0dce4070d319fde09",
+        "afterBytes": 21975,
+        "afterSHA256": "1318984c2a393992a9d93fe3fb73116d8e943c570fde046499af4d72dbbac32e",
+        "edits": [
+          {
+            "before": "for member in self.model.members_of_owner(&owner) {",
+            "after": "for member in &self.model.members_of_owner(&owner) {",
+            "occurrences": 1
+          },
+          {
+            "before": "for reference in self.model.members_of_owner(&owner) {",
+            "after": "for reference in &self.model.members_of_owner(&owner) {",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "path": "crates/lycheedev-emmy-adapter/src/session/backend/call_return.rs",
+        "kind": "public-api-compile-adaptation",
+        "beforeBytes": 17814,
+        "beforeSHA256": "e3a3017ad662dd28a53cb6fae0eae33fb4e622763aced98a1af33302158b6651",
+        "afterBytes": 17815,
+        "afterSHA256": "7b97ae449a03ab9b938ae5bc1b861a11c9ecdb306858b24b01a705b8530a472a",
+        "edits": [
+          {
+            "before": "for reference in self.model.members_of_owner(&owner) {",
+            "after": "for reference in &self.model.members_of_owner(&owner) {",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "path": "crates/lycheedev-emmy-adapter/src/session/backend/flow/discriminants.rs",
+        "kind": "public-api-compile-adaptation",
+        "beforeBytes": 7736,
+        "beforeSHA256": "c25f163067b45ad5db76e787f2d33c840baf1ee4a63ea487d73c0413428f775f",
+        "afterBytes": 7737,
+        "afterSHA256": "f1a3930c82f58b71b9512a43fce8cde3912aff27bb3247140072de3499c68bc8",
+        "edits": [
+          {
+            "before": "for member in self.model.members_of_owner(&owner) {",
+            "after": "for member in &self.model.members_of_owner(&owner) {",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "path": "crates/lycheedev-emmy-adapter/src/session/backend/index_general.rs",
+        "kind": "public-api-compile-adaptation",
+        "beforeBytes": 24162,
+        "beforeSHA256": "b397ef5154f4c1732685144ffee00bbfe276c6b47791dffc633bff4a10190a02",
+        "afterBytes": 24163,
+        "afterSHA256": "d7f4066d1138a9790837c94505519a67893a0957abe04ef52129a4688c0beac0",
+        "edits": [
+          {
+            "before": "for member in self.model.members_of_owner(&enum_owner) {",
+            "after": "for member in &self.model.members_of_owner(&enum_owner) {",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "path": "crates/lycheedev-emmy-adapter/src/session/backend/iteration.rs",
+        "kind": "public-api-compile-adaptation",
+        "beforeBytes": 17380,
+        "beforeSHA256": "a861ab299428783d9068d46d52e17166f8f8404c2f002b656899c464c4a77333",
+        "afterBytes": 17383,
+        "afterSHA256": "61d3506cc7ef30b0fa314d65b0b674346ac5f41b5860f8fd5d4be547c87f6313",
+        "edits": [
+          {
+            "before": "for reference in self.model.members_of_owner(&owner) {",
+            "after": "for reference in &self.model.members_of_owner(&owner) {",
+            "occurrences": 1
+          },
+          {
+            "before": "for reference in self.model.members_of_owner(&def.id) {",
+            "after": "for reference in &self.model.members_of_owner(&def.id) {",
+            "occurrences": 2
+          }
+        ]
+      },
+      {
+        "path": "crates/lycheedev-emmy-adapter/src/session/backend/resolver.rs",
+        "kind": "public-api-compile-adaptation",
+        "beforeBytes": 36149,
+        "beforeSHA256": "09acffd9d52f6abbe423b121609715222d35a532fae93bc6e3e8afc54d186e91",
+        "afterBytes": 36134,
+        "afterSHA256": "675fb1f79ad9de4c35fbaeb67d80f0c9888a5179a1382e20cb4b91d65e2a25a2",
+        "edits": [
+          {
+            "before": "facts.field_members_of_type(&def.id, &name.clone().into())",
+            "after": "facts.field_members_of_type(&def.id, &name)",
+            "occurrences": 1
+          }
+        ]
+      },
+      {
+        "path": "crates/lycheedev-emmy-adapter/src/session/backend/transform.rs",
+        "kind": "public-api-compile-adaptation",
+        "beforeBytes": 69426,
+        "beforeSHA256": "6f0823a01d57481beb2fb2c7d625b43a29506bd9a20259c8930cbd1ee493ddb4",
+        "afterBytes": 69425,
+        "afterSHA256": "089aa2807ecbebfc7e189430337ecffec9b972103236c25cfecbcdbd17c21ab4",
+        "edits": [
+          {
+            "before": "LuaType::StringConst(name.as_str().into())",
+            "after": "LuaType::StringConst(name.clone().into())",
+            "occurrences": 1
+          }
+        ]
+      }
+    ]
+  }
 }

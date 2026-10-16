@@ -161,7 +161,7 @@ impl<'a> ResearchExecution<'a> {
 /// Rebuild the existing environment emitter from the exact admitted originals.
 /// A caller's mapping list or generated coordinate is never a trust root.
 pub(crate) struct VerifiedApiDefinitions {
-    definitions: String,
+    definitions: Arc<str>,
     mappings: Vec<environment::Mapping>,
     manifest: environment::Manifest,
     engine:lycheedev_emmy_adapter::DeclarationModel,
@@ -187,13 +187,21 @@ impl VerifiedApiDefinitions {
             documents.insert(path.clone(),text.as_bytes().to_vec());
         }
         let rebuilt=environment::build(manifest.identity.clone(),&documents,limits,control)?;
+        drop(documents);
         if serde_json::to_value(&rebuilt.manifest)?!=serde_json::to_value(manifest)?
             || serde_json::to_value(&rebuilt.facts)?!=serde_json::to_value(api)? {
             return Err(invalid_environment("API manifest or facts differ from admitted original source"));
         }
-        let engine=lycheedev_emmy_adapter::DeclarationModel::new(Arc::<str>::from(rebuilt.definitions.as_str()),||control.check())
-            .map_err(|error|declaration_error(error,&rebuilt.manifest.definitions_sha256))?;
-        Ok(Some(Self {definitions:rebuilt.definitions,mappings:rebuilt.mappings,manifest:rebuilt.manifest,engine}))
+        // Verification is complete. The independent declaration model needs
+        // only these three fields; discard rebuilt facts/coverage/source spans
+        // before allocating its parser/index. The constructor borrows the same
+        // retained Arc; public upstream still owns its separately checked text.
+        let environment::Environment{definitions,mappings,manifest,facts,coverage,source_spans}=rebuilt;
+        drop(facts);drop(coverage);drop(source_spans);
+        let definitions:Arc<str>=definitions.into();
+        let engine=lycheedev_emmy_adapter::DeclarationModel::new(Arc::clone(&definitions),||control.check())
+            .map_err(|error|declaration_error(error,&manifest.definitions_sha256))?;
+        Ok(Some(Self {definitions,mappings,manifest,engine}))
     }
     /// Query the authenticated environment declaration in a separate Emmy model.
     /// This is declaration semantics, never a claim about mutable source globals.

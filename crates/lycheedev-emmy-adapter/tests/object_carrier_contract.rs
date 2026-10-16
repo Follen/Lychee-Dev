@@ -167,13 +167,16 @@ fn metadata_token_and_nested_slot_identity_survive_all_accepted_transports() {
     let merged = first_query
         .merge_value(value.clone(), token_peer.clone())
         .unwrap();
-    assert_eq!(
-        merged.structural_type(),
-        &LuaType::Union(Arc::new(LuaUnionType::Multi(vec![
-            object_type.clone(),
-            object_type,
-        ])))
-    );
+    let LuaType::Union(union) = merged.structural_type() else {
+        panic!("two selected identities require a structural union");
+    };
+    let LuaUnionType::Multi(members) = union.as_ref() else {
+        panic!("two selected object identities require the Multi representation");
+    };
+    // The fixed upstream Multi equality removes members from a HashSet and is
+    // not reflexive for duplicate erased structures. Assert the exact variant,
+    // count and ordered fields directly; retain both owned tokens below.
+    assert_eq!(members.as_slice(), [object_type.clone(), object_type]);
     assert!(!merged.is_context_free());
     assert_eq!(
         merged.carried_union().unwrap(),

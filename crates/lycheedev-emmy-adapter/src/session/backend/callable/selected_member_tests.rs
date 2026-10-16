@@ -369,7 +369,7 @@ fn selected_composite_members_do_not_merge_destination_signatures() {
     let selected = query.type_of_expr(fixture.site("{}").syntax).unwrap();
     let (raw, owner, _) = fixture.raw_member();
     let array = OwnedValue::with_structural_children(
-        LuaType::Array(Arc::new(LuaArrayType::new(
+        LuaType::Array(Arc::new(LuaArrayType::from_base_type(
             selected.structural_type().clone(),
         ))),
         vec![selected.clone()],

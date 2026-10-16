@@ -445,7 +445,7 @@ jobs:
         run: node tools/rust-cargo.mjs --owner ci-binding-contracts --one-shot -- test --locked --offline -p lycheedev-binding-contracts --test contracts -j 1
       - name: Run owned Emmy adapter declaration contracts
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: node tools/rust-cargo.mjs --owner ci-emmy-adapter --one-shot -- test --locked --offline -p lycheedev-emmy-adapter --lib --test declaration_contract --test callback_contract --test declaration_rendering_contract --test selected_projector_contract --test selected_query_contract --test expression_plan_contract --test expression_execution_contract --test binary_core_contract --test dense_tuple_contract --test query_backend_contract --test function_call_contract --test object_carrier_contract --test object_member_contract -j 1
+        run: node tools/rust-cargo.mjs --owner ci-emmy-adapter --one-shot -- test --no-fail-fast --locked --offline -p lycheedev-emmy-adapter --lib --test declaration_contract --test callback_contract --test declaration_rendering_contract --test selected_projector_contract --test selected_query_contract --test expression_plan_contract --test expression_execution_contract --test binary_core_contract --test dense_tuple_contract --test query_backend_contract --test function_call_contract --test object_carrier_contract --test object_member_contract -j 1
       - name: Compare owned selected projection and queries against the fixed engine
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tests/rust-source-engine/fixed-emmy-oracle/run.mjs
@@ -813,7 +813,7 @@ jobs:
       - name: Fetch locked integration-test dependencies under ownership controls
         run: node tools/rust-cargo.mjs --owner ci-emmy-context --one-shot -- fetch --locked
       - name: Execute owned context and cardinality integration tests
-        run: node tools/rust-cargo.mjs --owner ci-emmy-context --one-shot -- test --offline --locked -p lycheedev-emmy-adapter --test lychee_context --test lychee_cardinality --test lychee_checker_guards --test public_ingestion_contract --test declaration_ingestion_contract -j 1
+        run: node tools/rust-cargo.mjs --owner ci-emmy-context --one-shot -- test --no-fail-fast --offline --locked -p lycheedev-emmy-adapter --test lychee_context --test lychee_cardinality --test lychee_checker_guards --test public_ingestion_contract --test declaration_ingestion_contract -j 1
       - name: Preserve exact recipe and owned execution evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

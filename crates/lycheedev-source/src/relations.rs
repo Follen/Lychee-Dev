@@ -331,11 +331,7 @@ fn with_engine(
             };
             data["semanticRuntime"] = json!({"engine":"native-common-source","rulesVersion":crate::native_research::RESEARCH_RULES});
             data["semanticAnalysis"] = response["analysis"].clone();
-            if let Some(rows) = response
-                .as_object_mut()
-                .and_then(|value| value.remove("relations"))
-                .and_then(|value| value.as_array().cloned())
-            {
+            if let Some(rows) = take_native_relation_rows(&mut response) {
                 relations.extend(rows);
             }
             data["nativeResearch"] = response;
@@ -429,7 +425,9 @@ fn with_engine(
             data["semanticAnalysis"] = json!({"state":analysis["state"],"cacheHit":analysis["cacheHit"]==true,"queryCount":analysis["results"].as_array().map_or(0,Vec::len),"queryBatches":analysis["queryBatches"],"workspaceCoverage":analysis["coverage"],"positionCoverage":analysis["positionCoverage"]});
             relations.extend(semantic);
         }
-        project_relation_page(&mut data, &mut relations, offset, &key, limit, overflow)?;
+        crate::research_material::measured("source.relation_page", || {
+            project_relation_page(&mut data, &mut relations, offset, &key, limit, overflow)
+        })?;
         if overflow {
             reasons.push("matching structural relations exceeded 10000-entry budget");
         }
@@ -465,6 +463,14 @@ fn with_engine(
         environment: client_environment,
         load_facts,
     })
+}
+// The worker reply is already owned. Move its row array into pagination rather
+// than cloning it immediately before discarding the removed original array.
+fn take_native_relation_rows(response: &mut Value) -> Option<Vec<Value>> {
+    match response.as_object_mut()?.remove("relations")? {
+        Value::Array(rows) => Some(rows),
+        _ => None,
+    }
 }
 // Keep proof rows independent, sorted before the unchanged public page cut.
 // Factored only so the real pagination path is exercised by the caller tests.
@@ -1017,5 +1023,31 @@ mod incoming_caller_cursor_tests {
         let mut rows=input;let mut data=json!({});project_relation_page(&mut data,&mut rows,0,&key,200,true).unwrap();
         assert_eq!(data["relations"].as_array().unwrap().len(),11);assert_eq!(data["truncated"],true);
         assert_eq!(project_relation_page(&mut data,&mut rows,12,&key,2,false).unwrap_err().code,"codebase.invalid_search_cursor");
+    }
+
+    #[test]
+    fn removed_relation_rows_keep_exact_reply_and_owned_string_storage() {
+        let mut response = json!({"relations":[{"path":"Original.xml", "source":"调用", "proof":{"items":[1,2,3]}}],
+            "analysis":{"state":"partial"},"sourceMaps":[{"path":"Original.xml"}],"semanticExecution":{"state":"executed"}});
+        let pointer = response["relations"][0]["source"].as_str().unwrap().as_ptr();
+        let mut expected = response.clone();
+        let expected_rows = expected.as_object_mut().and_then(|value| value.remove("relations"))
+            .and_then(|value| value.as_array().cloned());
+        let actual = take_native_relation_rows(&mut response).unwrap();
+        assert_eq!(actual[0]["source"].as_str().unwrap().as_ptr(), pointer);
+        assert_eq!(Some(&actual), expected_rows.as_ref());
+        assert_eq!(serde_json::to_vec(&response).unwrap(), serde_json::to_vec(&expected).unwrap());
+    }
+
+    #[test]
+    fn absent_empty_or_invalid_relation_member_keeps_previous_projection() {
+        for mut response in [Value::Null, json!([]), json!({}), json!({"relations":null}),
+            json!({"relations":{"invalid":true},"analysis":{}}), json!({"relations":[]})] {
+            let mut expected = response.clone();
+            let expected_rows = expected.as_object_mut().and_then(|value| value.remove("relations"))
+                .and_then(|value| value.as_array().cloned());
+            assert_eq!(take_native_relation_rows(&mut response), expected_rows);
+            assert_eq!(response, expected);
+        }
     }
 }

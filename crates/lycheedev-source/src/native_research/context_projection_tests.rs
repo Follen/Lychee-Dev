@@ -6,8 +6,8 @@ fn context_projection_fixture() -> ResearchSession {
 fn context_projection_load_fixture(complete_load:bool) -> ResearchSession {
     let control=OperationControl::default();
     // Positive entry cases must finish loading before the explicit entry can
-    // run. Keep the former recursive/unknown-call and use-before-definition
-    // inputs below as negative cases rather than weakening the entry assertion.
+    // run. The former inputs below distinguish a recursive load boundary from
+    // an unknown pre-definition call, whose conservative effects permit loading.
     let target=if complete_load {
         "\u{feff}-- 中文 😀\r\nfunction Target(x)\r\n if x then Other(nil) end\r\n return Other(x)\r\nend; function Other(x) return x end\r\nAlias=Target\r\n"
     } else {
@@ -81,13 +81,64 @@ fn context_projection_incomplete_load_does_not_fabricate_an_explicit_entry() {
     let session=context_projection_load_fixture(false);
     let control=session.prepared.operation_control();
     let entry=session.prepared.entry_catalog(control).unwrap().iter().find(|entry|entry.closure.file=="target.lua"&&entry.start_line==2).unwrap();
-    for program in &session.xml.programs {
-        let request=EntryRequest{candidate:entry.id.clone(),load_occurrence:None,creation_context:None,arguments:EntryArguments::Exact(vec![EntryArgument::Nil])};
-        let graph=session.prepared.build_xml_plan("incomplete-context-entry",program.clone(),Some(request),control).unwrap();
+    // One.toc calls the already-loaded Target recursively. Two.toc instead
+    // calls an unknown global before definition; it is covered separately below.
+    let program=session.xml.programs.iter().find(|program|program.manifest=="One.toc").unwrap();
+    let request=EntryRequest{candidate:entry.id.clone(),load_occurrence:None,creation_context:None,arguments:EntryArguments::Exact(vec![EntryArgument::Nil])};
+    for request in [None,Some(request)] {
+        let graph=session.prepared.build_xml_plan("incomplete-context-entry",program.clone(),request,control).unwrap();
         let facts=graph.native_invocations.as_ref().unwrap();
-        assert!(!facts.control.complete,"original load failure remains explicit");
-        assert!(!facts.control.boundaries.is_empty(),"incomplete loading must retain its reason");
+        assert!(!facts.control.complete,"original recursive load failure remains explicit: {:?}",facts.control.boundaries);
+        assert!(!facts.control.truncated,"a known recursive boundary is not a resource truncation");
+        assert_eq!(facts.control.coverage,"verified_prefix_with_explicit_boundaries");
+        assert_eq!(facts.control.boundaries.len(),1);
+        let boundary=&facts.control.boundaries[0];
+        assert!(matches!(boundary.kind,NativeBoundaryKind::Knowledge));
+        assert_eq!(boundary.reason,"recursive_invocation_requires_summary");
+        assert_eq!(boundary.site.file,"target.lua");
+        assert_eq!(boundary.site.text(session.prepared.inputs()).unwrap(),"Target(nil)");
         assert!(facts.entries.is_empty(),"do not invent an entry after a stopped load");
+    }
+}
+
+#[test]
+fn context_projection_unknown_load_calls_preserve_uncertainty_and_real_entry() {
+    let session=context_projection_load_fixture(false);
+    let control=session.prepared.operation_control();
+    let program=session.xml.programs.iter().find(|program|program.manifest=="Two.toc").unwrap();
+    let load=session.prepared.build_xml_plan("unknown-context-load",program.clone(),None,control).unwrap();
+    let facts=load.native_invocations.as_ref().unwrap();
+    assert!(facts.control.complete,"unknown call effects do not stop bounded loading: {:?}",facts.control.boundaries);
+    assert!(facts.control.boundaries.is_empty());
+    assert!(facts.entries.is_empty());
+    let calls=load.calls.iter().filter(|call|call.site.file=="a-callers.lua"&&call.context.starts_with("load:0:")).collect::<Vec<_>>();
+    assert_eq!(calls.len(),2,"both calls before Target's definition must be observed");
+    for (call,(text,reason)) in calls.iter().zip([("Alias(1)","open_initial_host_environment"),("Target(2)","unknown_call_open_global_environment")]) {
+        assert_eq!(call.site.text(session.prepared.inputs()).unwrap(),text);
+        assert_eq!(load.uses[call.callee].decision,Decision::Unavailable(reason.into()));
+        assert!(matches!(call.invocation_coverage,CallCoverage::Unavailable));
+        assert!(matches!(call.effect_coverage,CallCoverage::Unavailable));
+        assert!(facts.escape_events.iter().any(|event|event.call==call.id&&event.application_complete));
+    }
+    let entry=session.prepared.entry_catalog(control).unwrap().iter().find(|entry|entry.closure.file=="target.lua"&&entry.start_line==2).unwrap();
+    for (argument,complete) in [(EntryArgument::Nil,true),(EntryArgument::Boolean(true),false)] {
+        let request=EntryRequest{candidate:entry.id.clone(),load_occurrence:None,creation_context:None,arguments:EntryArguments::Exact(vec![argument])};
+        let graph=session.prepared.build_xml_plan("unknown-context-entry",program.clone(),Some(request.clone()),control).unwrap();
+        let facts=graph.native_invocations.as_ref().unwrap();
+        assert_eq!(facts.control.complete,complete,"entry arguments determine recursion: {:?}",facts.control.boundaries);
+        assert_eq!(facts.entries.len(),1,"a completed load permits one real entry even if that entry later stops");
+        assert_eq!(facts.entries[0].request,request);
+        assert!(facts.entries[0].frame.is_some());
+        assert!(!facts.entries[0].effects_complete,"the nil entry calls unknown Other; the true entry stops at recursion");
+        if complete {
+            assert!(facts.control.boundaries.is_empty());
+            assert!(graph.calls.iter().any(|call|call.site.file=="target.lua"&&call.context.starts_with("entry:0:")
+                &&call.site.text(session.prepared.inputs()).unwrap()=="Other(x)"
+                &&matches!(&graph.uses[call.callee].decision,Decision::Unavailable(reason) if reason=="unknown_call_open_global_environment")));
+        } else {
+            assert_eq!(facts.control.boundaries.len(),1);
+            assert_eq!(facts.control.boundaries[0].reason,"recursive_invocation_requires_summary");
+        }
     }
 }
 

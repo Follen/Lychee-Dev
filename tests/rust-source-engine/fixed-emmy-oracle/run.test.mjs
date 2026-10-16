@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync,writeFileSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {createHash} from 'node:crypto';
+import {spawnSync} from 'node:child_process';
 import {oracleCargoArgs,readTraces,traceDifferences,validateFrames} from './run.mjs';
 const target='case_native_oracle',name='same_complete_contract';
 const header={kind:'header',schema:'lycheedev.emmy-fixed-oracle.v1',role:'reference',target,test:name};
@@ -58,6 +61,99 @@ test('fixed source archive and reference preserve the original 36 test identitie
   assert.equal(new Set(inputs.targets.map(t=>t.target)).size,10);
   assert(inputs.files.some(f=>f.path==='source-cd871181.tar.gz'));
   assert(inputs.files.some(f=>f.path==='historical-engine/patches/0001-binding-context.patch'));
+});
+test('all 31 harness inputs remain individually sealed including the immutable archive',()=>{
+  const inputs=JSON.parse(readFileSync(new URL('./inputs.json',import.meta.url)));
+  assert.equal(inputs.files.length,31);
+  assert.equal(new Set(inputs.files.map(row=>row.path)).size,31);
+  for(const row of inputs.files){
+    const bytes=readFileSync(new URL(row.path,new URL('./',import.meta.url)));
+    assert.equal(bytes.length,row.bytes,row.path);
+    assert.equal(createHash('sha256').update(bytes).digest('hex'),row.sha256,row.path);
+  }
+  assert.equal(inputs.files.find(row=>row.path==='source-cd871181.tar.gz').sha256,
+    '4a4657eec2b2fe7186e9815d663da938ce360fe08970240fd343fa98ea6ebdb0');
+});
+test('compile-only overlay has exact frozen preimages and reversible edits without prepare or Cargo',()=>{
+  const script=String.raw`
+import copy, hashlib, importlib.util, json, pathlib, sys, tarfile, tempfile
+here=pathlib.Path(sys.argv[1])
+spec=importlib.util.spec_from_file_location('fixed_materialize', here/'materialize.py')
+module=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+manifest=json.loads((here/'inputs.json').read_bytes())
+frozen=json.loads((here/'source-cd871181.json').read_bytes())
+rows=manifest['historicalCompileCompatibility']['files']
+assert len(rows)==10
+assert sum(edit['occurrences'] for row in rows for edit in row['edits'])==14
+assert sum(row['kind']=='public-api-compile-adaptation' for row in rows)==9
+cache=[row for row in rows if row['kind']=='missing-cache-declaration']
+assert len(cache)==1
+assert cache[0]['path']=='crates/lycheedev-emmy-adapter/src/session/backend.rs'
+assert cache[0]['edits']==[
+    {'before':'    member_lists: HashMap<OwnedValue, Vec<OwnedMemberInfo>>,',
+     'after':'    member_lists: HashMap<OwnedValue, Vec<OwnedMemberInfo>>,\n    member_items: HashMap<(OwnedValue, LuaMemberKey), Option<OwnedMemberInfo>>,',
+     'occurrences':1},
+    {'before':'            member_lists: HashMap::new(),',
+     'after':'            member_lists: HashMap::new(),\n            member_items: HashMap::new(),',
+     'occurrences':1}]
+originals={row['path']:row for row in frozen['files']}
+archive=(here/frozen['archive']).read_bytes()
+assert len(archive)==frozen['archiveBytes']
+assert hashlib.sha256(archive).hexdigest()==frozen['archiveSHA256']
+with tarfile.open(here/frozen['archive']) as source:
+    content={entry.name:source.extractfile(entry).read() for entry in source}
+assert len(content)==len(originals)==417
+member_body=content['crates/lycheedev-emmy-adapter/src/session/backend/member_general.rs']
+assert b'self.member_items.get(&cache_key).cloned()' in member_body
+assert b'self.member_items.insert(cache_key, info.clone())' in member_body
+assert not any(row['path'].endswith('/member_general.rs') for row in rows)
+for name,data in content.items():
+    assert len(data)==originals[name]['bytes']
+    assert hashlib.sha256(data).hexdigest()==originals[name]['sha256']
+def rejected(fn,reason):
+    try: fn()
+    except ValueError as error: assert str(error)==reason, str(error)
+    else: raise AssertionError(reason)
+for row in rows:
+    original=content[row['path']]
+    repaired=module.compatibility_bytes(row,originals[row['path']],original)
+    assert repaired!=original
+    restored=repaired
+    for edit in reversed(row['edits']):
+        restored=restored.replace(edit['after'].encode(),edit['before'].encode())
+    assert restored==original
+    rejected(lambda:module.compatibility_bytes(row,originals[row['path']],original+b'\n'),
+             'oracle.compatibility_preimage')
+    bad=copy.deepcopy(row);bad['edits'][0]['occurrences']+=1
+    rejected(lambda:module.compatibility_bytes(bad,originals[row['path']],original),
+             'oracle.compatibility_edit_preimage')
+    bad=copy.deepcopy(row);bad['afterSHA256']='0'*64
+    rejected(lambda:module.compatibility_bytes(bad,originals[row['path']],original),
+             'oracle.compatibility_postimage')
+with tempfile.TemporaryDirectory(prefix='emmy-compile-fixture-') as directory:
+    stage=pathlib.Path(directory)
+    for row in rows:
+        path=stage/row['path'];path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_bytes(content[row['path']])
+    module.apply_compile_compatibility(stage,manifest,frozen,lambda:None)
+    for row in rows:
+        assert hashlib.sha256((stage/row['path']).read_bytes()).hexdigest()==row['afterSHA256']
+    rejected(lambda:module.apply_compile_compatibility(stage,manifest,frozen,lambda:None),
+             'oracle.compatibility_preimage')
+    bad=copy.deepcopy(manifest);bad['historicalCompileCompatibility']['files'][0]['path']='Cargo.lock'
+    rejected(lambda:module.apply_compile_compatibility(stage,bad,frozen,lambda:None),
+             'oracle.compatibility_scope')
+    bad=copy.deepcopy(manifest);bad['historicalCompileCompatibility']['files'][0]=bad['historicalCompileCompatibility']['files'][1]
+    rejected(lambda:module.apply_compile_compatibility(stage,bad,frozen,lambda:None),
+             'oracle.compatibility_inventory')
+print('authenticated 417 frozen files; 10 compile-only overlays reverse exactly; no build or prepare')
+`;
+  const result=spawnSync(process.platform==='win32'?'python':'python3',
+    ['-I','-B','-S','-c',script,fileURLToPath(new URL('./',import.meta.url))],
+    {encoding:'utf8',timeout:30000,maxBuffer:1<<20});
+  assert.equal(result.status,0,result.error?.message||result.stderr);
+  assert.match(result.stdout,/authenticated 417 frozen files; 10 compile-only overlays reverse exactly/);
 });
 test('reference and candidate capture the same labels in the same producer order',()=>{
   const inputs=JSON.parse(readFileSync(new URL('./inputs.json',import.meta.url)));

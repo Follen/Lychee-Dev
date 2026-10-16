@@ -18,10 +18,34 @@ staging or release artifact uses the archived patched engine.
 The 10 reference integration targets preserve all 36 original test functions and
 original A/B assertions. Test-only edits record **the historical native side** as
 expected; the current candidate never supplies expected values. The immutable
-historical adapter is not replaced. A small test helper captures actual public
+historical adapter algorithms are not replaced. A small test helper captures actual public
 workspace/file contribution order and calls that historical adapter's existing
 `new_with_contribution_order` constructor. No provider, expression, result,
 coverage or failure is replaced by this intake adaptation.
+
+The first real reference build at e8 failed with 15 compiler diagnostics before
+producing any complete trace; its clean-side invocation did not run. The frozen
+archive includes the unfinished owned backend, which the original A/B assertions
+actually instantiate. Excluding that backend or its directly called modules would
+remove original checks and is not a valid build-closure repair.
+
+`inputs.json` explicitly identifies the stage-only
+`cd871181-compile-compatibility-r1` overlay. It authenticates ten archived
+adapter files and changes only nine MemberList loops to borrowed iteration, two
+string conversion spellings, one temporary-list lifetime binding, and the missing
+`member_items` field plus empty initialization. That last declaration supplies the
+storage already referenced by the unchanged historical `member_info` get/insert
+body; it does not replace, omit or replay that cache algorithm. These address the
+original 15 diagnostics (the field and one string call each emitted two). Every exact
+edit is declared with its occurrence count and full-file pre/post byte/SHA seals;
+reversing the edits must reproduce the frozen bytes exactly. No current candidate
+source is copied. The archive, original reference tests/assertions, lockfile and
+historical engine remain byte-identical. The report identifies the reference as
+fixed source plus compile compatibility, never the untouched historical source.
+The ten-file compile overlay is separately identified from the frozen archive;
+syntax checks alone do not establish a working reference build or semantic
+equivalence. The 31-file harness seal includes the overlay inside `inputs.json`
+without adding or replacing a reference test or historical engine file.
 
 Only after all expected traces are complete and authenticated does the runner run
 the same 36 candidate functions with the clean dependency. A nonzero historical
@@ -66,7 +90,9 @@ repository on Windows. The workflow must already have prepared the **clean**
 production engine and locked dependencies. The historical source lock must also
 be satisfiable from that offline dependency cache; a miss fails rather than fetching.
 
-Current implementation status: syntax and pure source/trace fixture checks only;
-**Rust reference and candidate execution NOT_RUN**. The original 6699/cd576 failures
+Current repair status: syntax and pure source/trace fixture checks only;
+**Rust execution after the compile overlay NOT_RUN**. The actual e8 reference
+compile failure and zero complete traces remain failed evidence; its clean side
+was not run. The original 6699/cd576 failures
 retain their historical identities. These 36 targeted tests are not full Retail,
 all-checker, worker deadline, memory/performance or final four-loop acceptance.

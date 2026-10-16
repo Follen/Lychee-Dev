@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 04:13 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`3c720fa8d962fa1751c3a365fafd5b0e5431c09a`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 04:17 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`c92638888ed53693e04b185d87ef758683c0a258`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -25,7 +25,9 @@
 
 ## 2. 当前实现与未闭环事项
 
-最新集中验证 [run38849016645](https://github.com/Follen/Lychee-Dev/actions/runs/38849016645) 已在04:08启动，精确head `3c720fa`，19路径远端读回一致；包含Hotfix/CSV控制闭环及此前Source/SQL/asset组合。结果未出。后续Core三项测试合同修正、project argv fixture修正、Emmy结构相等修复与Source性能优化不在该run。
+本地后继已组合18路径：owned Structural按外层metadata与完整owned children比较/哈希，raw union保重数与token；Source负fixture分别保递归停止与未知调用继续事实。历史比较采用明确可逆compile-compatibility overlay，原归档/expected/448输入不变，Node13/13实际通过；Rust比较尚未运行。Source表达式身份改每文件紧凑索引，保原AST遍历/范围/计量与重复range最后值，释放准备临时文本/父请求并move回复rows；7新回归未跑，收益未测。原90秒/2GiB不变，独立1秒短预算响应仍有broker.deadline待闭合。
+
+最新集中验证 [run38849016645](https://github.com/Follen/Lychee-Dev/actions/runs/38849016645) 已在04:08启动，精确head `3c720fa`，19路径远端读回一致；包含Hotfix/CSV控制闭环及此前Source/SQL/asset组合。其static通过；独立Emmy context实际56/56通过，原两empty-scope失败均逐名称通过。该组cargo退出0，已认证vctip辅助进程按既有合同强制清理，最终完整回收。product all-target及CLI同因Core bundle闭包E0282不能推断错误类型而失败；c926388仅补Result<()>已远端保存，未重新编译。cd5fcd9保存的Core三项测试合同修正、project argv fixture修正，以及后续Emmy结构相等修复与Source性能优化不在该run。
 
 e8终态204个owner/7243份sealed日志逐SHA一致。真实小型IPC quota（789请求）、idle（60.032秒）、lifetime（600.011秒）通过且完整回收。完整Retail普通refs/context/API及retained cold均耗尽原90秒总预算；API worker已写回复并完成，caller后续仍超时，不能称最终API成功。retained本次owner已回收、无retirementError，单worker采样私人内存约1.90GiB，未观察触2GiB上限；不能归因OOM。完整语义source可执行进程集合采样峰WS2370.62MiB/private2502.21MiB，retained cold集合2214.22/2323.11MiB，含多进程且有采样间隙/失败run；常驻warm/steady未测，未证明内存或70%性能目标。当前按原预算优化准备、身份索引与回复后工作。
 

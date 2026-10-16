@@ -8,7 +8,7 @@ use emmylua_code_analysis::{
     LuaUnionType, VariadicType,
 };
 use std::{
-    collections::{BTreeMap, HashSet, hash_map::DefaultHasher},
+    collections::{BTreeMap, HashMap, HashSet, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
     sync::Arc,
 };
@@ -90,13 +90,23 @@ impl PartialEq for OwnedValue {
                             if a.len() != b.len() {
                                 return false;
                             }
-                            let mut set: HashSet<_> = a.iter().collect();
+                            // raw_union deliberately preserves multiplicity.
+                            // Count complete owned values, including session tokens;
+                            // an erased structural duplicate is not the same member.
+                            let mut counts: HashMap<&Self, usize> = HashMap::new();
+                            for value in a {
+                                *counts.entry(value).or_default() += 1;
+                            }
                             for value in b {
-                                if !set.remove(value) {
+                                let Some(count) = counts.get_mut(value) else {
+                                    return false;
+                                };
+                                if *count == 0 {
                                     return false;
                                 }
+                                *count -= 1;
                             }
-                            set.is_empty()
+                            true
                         }
                         _ => false,
                     },
@@ -129,7 +139,7 @@ impl PartialEq for OwnedValue {
                     && ar == br
             }
             (Some(ValueEvidence::Structural(a)), Some(ValueEvidence::Structural(b))) => {
-                if self.ty != other.ty {
+                if !structural_shell_eq(&self.ty, &other.ty) {
                     return false;
                 }
                 match (&self.ty, &other.ty) {
@@ -195,7 +205,7 @@ impl Hash for OwnedValue {
             }
             Some(ValueEvidence::Structural(children)) => {
                 6u8.hash(state);
-                self.ty.hash(state);
+                structural_shell_hash(&self.ty, state);
                 if let LuaType::Object(object) = &self.ty {
                     let prefix = object.get_index_access().len() * 2;
                     children[..prefix].hash(state);
@@ -225,6 +235,105 @@ impl Hash for OwnedValue {
                 ret.hash(state);
             }
         }
+    }
+}
+
+// Compare only metadata that is not represented by Structural's owned children.
+// Recursively comparing the public type first erases token identity and also
+// inherits upstream Multi's non-reflexive equality for repeated structures.
+// The constructors keep child order and shell metadata paired; no second type
+// tree, normalization or selected-identity deduplication is needed here.
+fn structural_shell_eq(a: &LuaType, b: &LuaType) -> bool {
+    match (a, b) {
+        (LuaType::Array(a), LuaType::Array(b)) => a.get_len() == b.get_len(),
+        (LuaType::Call(a), LuaType::Call(b)) => a.get_call_kind() == b.get_call_kind(),
+        (LuaType::Generic(a), LuaType::Generic(b)) => {
+            a.get_base_type_id_ref() == b.get_base_type_id_ref()
+        }
+        (LuaType::Intersection(_), LuaType::Intersection(_))
+        | (LuaType::TableGeneric(_), LuaType::TableGeneric(_))
+        | (LuaType::TypeGuard(_), LuaType::TypeGuard(_)) => true,
+        (LuaType::Variadic(a), LuaType::Variadic(b)) => {
+            std::mem::discriminant(a.as_ref()) == std::mem::discriminant(b.as_ref())
+        }
+        (LuaType::Object(a), LuaType::Object(b)) => {
+            a.get_index_access().len() == b.get_index_access().len()
+                && a.get_fields().len() == b.get_fields().len()
+        }
+        (LuaType::Instance(a), LuaType::Instance(b)) => a.get_range() == b.get_range(),
+        (LuaType::Conditional(a), LuaType::Conditional(b)) => {
+            a.has_new == b.has_new && a.get_infer_params() == b.get_infer_params()
+        }
+        (LuaType::Mapped(a), LuaType::Mapped(b)) => {
+            a.param.0 == b.param.0
+                && a.param.1.name == b.param.1.name
+                && a.param.1.is_const == b.param.1.is_const
+                && a.param.1.attributes == b.param.1.attributes
+                && a.param.1.constraint.is_some() == b.param.1.constraint.is_some()
+                && a.param.1.default.is_some() == b.param.1.default.is_some()
+                && a.is_readonly == b.is_readonly
+                && a.is_optional == b.is_optional
+        }
+        (LuaType::StrTplRef(a), LuaType::StrTplRef(b)) => {
+            a.get_tpl_id() == b.get_tpl_id()
+                && a.get_name() == b.get_name()
+                && a.get_prefix() == b.get_prefix()
+                && a.get_suffix() == b.get_suffix()
+                && a.get_constraint().is_some() == b.get_constraint().is_some()
+        }
+        (LuaType::MultiLineUnion(a), LuaType::MultiLineUnion(b)) => a
+            .get_unions()
+            .iter()
+            .map(|(_, description)| description)
+            .eq(b.get_unions().iter().map(|(_, description)| description)),
+        // The other composite types use their dedicated evidence variants;
+        // leaves have no structural carrier. Preserve exact public metadata
+        // equality if a future caller introduces another shell here.
+        _ => a == b,
+    }
+}
+
+fn structural_shell_hash<H: Hasher>(ty: &LuaType, state: &mut H) {
+    std::mem::discriminant(ty).hash(state);
+    match ty {
+        LuaType::Array(array) => array.get_len().hash(state),
+        LuaType::Call(call) => call.get_call_kind().hash(state),
+        LuaType::Generic(generic) => generic.get_base_type_id_ref().hash(state),
+        LuaType::Intersection(_) | LuaType::TableGeneric(_) | LuaType::TypeGuard(_) => {}
+        LuaType::Variadic(variadic) => std::mem::discriminant(variadic.as_ref()).hash(state),
+        LuaType::Object(object) => {
+            object.get_index_access().len().hash(state);
+            object.get_fields().len().hash(state);
+        }
+        LuaType::Instance(instance) => instance.get_range().hash(state),
+        LuaType::Conditional(conditional) => {
+            conditional.has_new.hash(state);
+            conditional.get_infer_params().hash(state);
+        }
+        LuaType::Mapped(mapped) => {
+            mapped.param.0.hash(state);
+            mapped.param.1.name.hash(state);
+            mapped.param.1.is_const.hash(state);
+            mapped.param.1.attributes.hash(state);
+            mapped.param.1.constraint.is_some().hash(state);
+            mapped.param.1.default.is_some().hash(state);
+            mapped.is_readonly.hash(state);
+            mapped.is_optional.hash(state);
+        }
+        LuaType::StrTplRef(tpl) => {
+            tpl.get_tpl_id().hash(state);
+            tpl.get_name().hash(state);
+            tpl.get_prefix().hash(state);
+            tpl.get_suffix().hash(state);
+            tpl.get_constraint().is_some().hash(state);
+        }
+        LuaType::MultiLineUnion(union) => {
+            union.get_unions().len().hash(state);
+            for (_, description) in union.get_unions() {
+                description.hash(state);
+            }
+        }
+        _ => ty.hash(state),
     }
 }
 
@@ -666,3 +775,6 @@ impl OwnedValue {
         Ok(result)
     }
 }
+
+#[cfg(test)]
+mod tests;
