@@ -211,28 +211,85 @@ fn cancelled_prefix_flush_drops_original_transport_without_retry() {
             Poll::Pending
         }
     }
-    let control = OperationControl::default();
-    let cancel = control.tracked_cancel_handle().unwrap();
-    let dropped = Arc::new(AtomicBool::new(false));
-    let result: Result<io::Result<()>> = run(async {
-        let mut io = ConnectTargetIo::new(
-            TokioIo::new(Stalled {
+    for forward in [false, true] {
+        let control = OperationControl::default();
+        let cancel = control.tracked_cancel_handle().unwrap();
+        let dropped = Arc::new(AtomicBool::new(false));
+        let result: Result<io::Result<()>> = run(async {
+            let transport = TokioIo::new(Stalled {
                 dropped: dropped.clone(),
-            }),
-            Some("-bücher.test:443"),
-        )
-        .unwrap();
-        let work = async move {
-            std::future::poll_fn(|cx| Pin::new(&mut io).poll_write(cx, PREFIX)).await?;
-            std::future::poll_fn(|cx| {
-                let result = Pin::new(&mut io).poll_flush(cx);
-                cancel.cancel();
-                result
-            })
-            .await
-        };
-        controlled(work, &control, None, control.deadline()).await
-    });
-    assert_eq!(result.unwrap_err().code, "command.cancelled");
-    assert!(dropped.load(Ordering::SeqCst));
+            });
+            let mut io = if forward {
+                ConnectTargetIo::forward(transport, "http://name%zone/a")
+            } else {
+                ConnectTargetIo::new(transport, Some("-bücher.test:443"))
+            }
+            .unwrap();
+            let prefix = if forward { FORWARD_PREFIX } else { PREFIX };
+            let work = async move {
+                std::future::poll_fn(|cx| Pin::new(&mut io).poll_write(cx, prefix)).await?;
+                std::future::poll_fn(|cx| {
+                    let result = Pin::new(&mut io).poll_flush(cx);
+                    cancel.cancel();
+                    result
+                })
+                .await
+            };
+            controlled(work, &control, None, control.deadline()).await
+        });
+        assert_eq!(result.unwrap_err().code, "command.cancelled");
+        assert!(dropped.load(Ordering::SeqCst));
+    }
+}
+
+#[test]
+fn forward_projection_uses_only_fixed_get_prefix_at_every_input_boundary() {
+    let raw = "http://name%zone:0080/keep/%2e?q=%2f";
+    for split in 0..=FORWARD_PREFIX.len() {
+        let state = Arc::new(Mutex::new(State {
+            steps: [Step::Short(2), Step::Pending, Step::Short(1)]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        }));
+        let mut io = ConnectTargetIo::forward(TokioIo::new(Mock(state.clone())), raw).unwrap();
+        write_all(&mut io, &FORWARD_PREFIX[..split]);
+        write_all(&mut io, &FORWARD_PREFIX[split..]);
+        let headers=b"host: name%zone:0080\r\nx-literal: GET http://lycheedev-forward.invalid/ HTTP/1.1\r\n\r\n";
+        write_all(&mut io, headers);
+        flush(&mut io).unwrap();
+        let mut expected = format!("GET {raw} HTTP/1.1\r\n").into_bytes();
+        expected.extend_from_slice(headers);
+        assert_eq!(state.lock().unwrap().bytes, expected, "{split}");
+    }
+}
+
+#[test]
+fn forward_projection_zero_error_and_incomplete_prefix_never_leak_placeholder() {
+    for (step, kind) in [
+        (Step::Zero, io::ErrorKind::WriteZero),
+        (Step::Error, io::ErrorKind::BrokenPipe),
+    ] {
+        let state = Arc::new(Mutex::new(State {
+            steps: [Step::Short(3), step].into_iter().collect(),
+            ..Default::default()
+        }));
+        let mut io =
+            ConnectTargetIo::forward(TokioIo::new(Mock(state.clone())), "http://name%zone/a")
+                .unwrap();
+        write_all(&mut io, FORWARD_PREFIX);
+        assert_eq!(flush(&mut io).unwrap_err().kind(), kind);
+        assert_eq!(state.lock().unwrap().bytes, b"GET");
+        drop(io);
+        assert!(state.lock().unwrap().dropped);
+    }
+    let state = Arc::new(Mutex::new(State::default()));
+    let mut io =
+        ConnectTargetIo::forward(TokioIo::new(Mock(state.clone())), "http://name%zone/a").unwrap();
+    write_all(&mut io, &FORWARD_PREFIX[..5]);
+    assert!(flush(&mut io).is_err());
+    assert!(state.lock().unwrap().bytes.is_empty());
+    for target in ["http://a/\r", "http://a/\n", "http://a/\0"] {
+        assert!(ConnectTargetIo::forward(TokioIo::new(Mock(state.clone())), target).is_err());
+    }
 }

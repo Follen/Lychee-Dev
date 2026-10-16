@@ -2,6 +2,7 @@
 // This is a test-only composition of the existing controlled Cargo/owner boundary.
 import assert from 'node:assert/strict';
 import {isDeepStrictEqual} from 'node:util';
+import {createHash} from 'node:crypto';
 import {existsSync,lstatSync,mkdirSync,readFileSync,readdirSync,writeFileSync} from 'node:fs';
 import {dirname,join,relative,resolve} from 'node:path';
 import {beginScratch,contained,sha256} from '../../../tools/rust-disk.mjs';
@@ -15,6 +16,8 @@ const OWNER='ci-emmy-selected-oracle';
 const CLEAN='375d92c5d5e503d77232fabf22a21a82f504c2b38dc5def8fcca1d6ecf06e104';
 const HISTORY='cc0a3496bad44f2dfede0799b86175dc3b3332587097bacf6ed691648130fcff';
 const MAX_TRACE=16<<20;
+const MAX_TRACE_PARTS=8;
+const MAX_TEST_TRACE=64<<20;
 const readJSON=path=>{assert(lstatSync(path).isFile()&&!lstatSync(path).isSymbolicLink()&&lstatSync(path).size<=MAX_TRACE,'oracle.file_budget');return JSON.parse(readFileSync(path,'utf8'));};
 const save=(path,value)=>writeFileSync(path,JSON.stringify(value,null,2)+'\n');
 
@@ -33,15 +36,74 @@ export function validateFrames(frames,{target,test,role}){
 
 export function readTraces(directory,targets,role){
   const expected=targets.flatMap(({target,tests})=>tests.map(test=>({target,test,file:`${target}--${test}.jsonl`})));
-  assert.deepEqual(readdirSync(directory).sort(),expected.map(e=>e.file).sort(),'oracle.test_inventory');
+  assert.equal(new Set(expected.map(e=>e.file)).size,expected.length,'oracle.test_inventory');
+  const actual=new Set(readdirSync(directory));
+  const allowed=new Set(expected.flatMap(e=>Array.from({length:MAX_TRACE_PARTS},(_,part)=>part?`${e.file}.part${part}`:e.file)));
+  assert([...actual].every(file=>allowed.has(file)),'oracle.test_inventory');
   return expected.map(entry=>{
-    const path=join(directory,entry.file),info=lstatSync(path);
-    assert(info.isFile()&&!info.isSymbolicLink()&&info.size<=MAX_TRACE,'oracle.trace_budget');
-    const text=readFileSync(path,'utf8');
-    assert(text.endsWith('\n'),'oracle.truncated_line');
-    const rows=validateFrames(text.slice(0,-1).split('\n').map(line=>JSON.parse(line)),{...entry,role});
-    return {...entry,path,bytes:info.size,sha256:hashFile(path,MAX_TRACE),rows};
+    assert(actual.has(entry.file),'oracle.test_inventory');
+    const parts=[],frames=[],digest=createHash('sha256');
+    let bytes=0,missing=false;
+    for(let part=0;part<MAX_TRACE_PARTS;part++){
+      const file=part?`${entry.file}.part${part}`:entry.file;
+      if(!actual.has(file)){missing=true;continue;}
+      assert(!missing,'oracle.test_inventory');
+      const path=join(directory,file),info=lstatSync(path);
+      assert(info.isFile()&&!info.isSymbolicLink()&&info.size<=MAX_TRACE,'oracle.trace_budget');
+      assert(info.size>0,'oracle.empty_part');
+      bytes+=info.size;
+      assert(bytes<=MAX_TEST_TRACE,'oracle.test_trace_budget');
+      parts.push({file,path,bytes:info.size});
+    }
+    // Admit the whole logical trace before allocating or parsing its contents.
+    for(const part of parts){
+      const data=readFileSync(part.path);
+      assert.equal(data.length,part.bytes,'oracle.trace_changed');
+      const text=new TextDecoder('utf-8',{fatal:true}).decode(data);
+      assert(text.endsWith('\n'),'oracle.truncated_line');
+      for(const line of text.slice(0,-1).split('\n')){
+        assert(line.length>0,'oracle.empty_line');
+        frames.push(JSON.parse(line));
+      }
+      digest.update(data);
+      part.sha256=sha256(data);
+    }
+    const rows=validateFrames(frames,{...entry,role});
+    return {...entry,path:parts[0].path,bytes,sha256:digest.digest('hex'),parts,rows};
   });
+}
+
+// The candidate must not alter any independently produced reference byte or
+// add/remove a part. Authenticate the exact physical inventory as well as rows.
+export function assertTracesUnchanged(directory,traces){
+  const parts=traces.flatMap(trace=>trace.parts);
+  assert.deepEqual(readdirSync(directory).sort(),parts.map(part=>part.file).sort(),'oracle.reference_inventory_changed');
+  for(const part of parts){
+    const path=join(directory,part.file),info=lstatSync(path);
+    assert(info.isFile()&&!info.isSymbolicLink()&&info.size<=MAX_TRACE,'oracle.reference_trace_changed');
+    assert.equal(info.size,part.bytes,'oracle.reference_trace_changed');
+    assert.equal(hashFile(path,MAX_TRACE),part.sha256,'oracle.reference_trace_changed');
+  }
+}
+
+// Include partial failed traces whenever they fit the sealing boundary. Invalid
+// evidence is a distinct failure, never a claim about process-handle ownership.
+export function collectTraceEvidence(directories){
+  const logs=[],invalid=[];
+  for(const directory of directories){
+    let files;
+    try{files=readdirSync(directory);}
+    catch(error){invalid.push({path:directory,reason:'oracle.trace_read',error:error.message});continue;}
+    for(const file of files){
+      const path=join(directory,file);
+      try{
+        const info=lstatSync(path);
+        if(info.isFile()&&!info.isSymbolicLink()&&info.size<=MAX_TRACE)logs.push(path);
+        else invalid.push({path,bytes:info.size,reason:'oracle.trace_budget'});
+      }catch(error){invalid.push({path,reason:'oracle.trace_read',error:error.message});}
+    }
+  }
+  return {logs,invalid};
 }
 
 // Continue all original targets after a semantic failure, preserving the final
@@ -80,7 +142,7 @@ function harnessInputs(){
   assert.equal(manifest.referenceCommit,'cd87118123fcba3d26f8ee161166629a4570bdaa');
   assert.equal(manifest.targets.length,10);
   assert.equal(manifest.targets.flatMap(t=>t.tests).length,36);
-  assert.equal(manifest.files.length,31,'oracle.input_inventory');
+  assert.equal(manifest.files.length,32,'oracle.input_inventory');
   assert.equal(new Set(manifest.files.map(f=>f.path)).size,manifest.files.length);
   assert.equal(manifest.historicalCompileCompatibility.schema,'lycheedev.emmy-fixed-compile-compatibility.v1');
   assert.equal(manifest.historicalCompileCompatibility.identity,'cd871181-compile-compatibility-r1');
@@ -167,10 +229,8 @@ export function run(root=process.cwd()){
     assert.equal(sourceDigest(stage),report.reference.sourceTree,'oracle.reference_changed');
     const candidateSucceeded=invoke(root,{LYCHEEDEV_EMMY_ORACLE_CAPTURE:candidateDir,LYCHEEDEV_EMMY_ORACLE_REFERENCE:referenceDir},'clean-candidate');
     report.production.cargoSucceeded=candidateSucceeded;
+    assertTracesUnchanged(referenceDir,reference);
     const candidate=readTraces(candidateDir,inputs.manifest.targets,'candidate');
-    for(let i=0;i<reference.length;i++){
-      assert.equal(hashFile(reference[i].path,MAX_TRACE),reference[i].sha256,'oracle.reference_trace_changed');
-    }
     stable();
     assert.equal(inspectEmmy(root).patchedTreeSHA256,CLEAN,'oracle.production_tree_changed');
     assert.equal(inspectEmmy(stage).patchedTreeSHA256,HISTORY,'oracle.reference_tree_changed');
@@ -186,14 +246,16 @@ export function run(root=process.cwd()){
   }catch(error){report.state='failed';report.error=error.stack||error.message;throw error;}
   finally{
     // Preserve partial failed traces as evidence as well; never reuse them as expected.
-    for(const directory of [referenceDir,candidateDir])for(const name of readdirSync(directory)){
-      const path=join(directory,name),info=lstatSync(path);
-      if(info.isFile()&&!info.isSymbolicLink()&&info.size<=MAX_TRACE)logs.push(path);
-      else {report.state='failed';report.evidenceError='oracle.trace_budget';handlesReaped=false;}
+    const evidence=collectTraceEvidence([referenceDir,candidateDir]);
+    logs.push(...evidence.logs);
+    if(evidence.invalid.length){
+      report.state='failed';report.evidenceError='oracle.trace_budget';
+      report.invalidEvidence=evidence.invalid;succeeded=false;
     }
     save(reportPath,report);
     job.seal({state:handlesReaped?(succeeded?'succeeded':'failed'):'interrupted',handlesReaped,logs});
     if(handlesReaped)job.cleanup();
+    if(evidence.invalid.length&&!report.error)throw new Error('oracle.trace_budget');
   }
 }
 if(process.argv[1]&&resolve(process.argv[1])===resolve(import.meta.filename)){

@@ -336,21 +336,12 @@ fn selected_proxy_raw(value: &str) -> Result<Option<ProxyEndpoint>> {
     let Some(parsed) = parsed else {
         return Ok(None);
     };
+    // A parse-valid unknown scheme is still an HTTP forward/CONNECT proxy
+    // in Go. Preserve it so canonicalAddr's empty default port becomes port 0
+    // at dial time, rather than inventing HTTP port 80 or rejecting selection.
     let scheme = match parsed.scheme.as_str() {
-        "http" => "http",
-        "https" => "https",
-        // Go socks5 and socks5h both send the original hostname to the proxy.
         "socks5" | "socks5h" => "socks5h",
-        // Go net/http also uses plaintext CONNECT for other proxy schemes.
-        // They have no default port (transport.go schemePort), so only an
-        // explicit nonempty port can be represented without inventing one.
-        _ if parsed.host.rsplit_once(':').is_some_and(|(_, port)| {
-            !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit())
-        }) =>
-        {
-            "http"
-        }
-        _ => return Err(configuration_error()),
+        other => other,
     };
     Ok(Some(ProxyEndpoint {
         scheme: scheme.to_owned(),

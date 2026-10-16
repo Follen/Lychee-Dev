@@ -157,7 +157,7 @@ fn public_validate_inline_51_errors_original_lines_and_legacy_cycle_order() {
     }
     assert!(
         xml_inline::extract(xml_path, legal.as_bytes()).unwrap()[0]
-            .source
+            .source_bytes()
             .starts_with(b"return function(self, ...)")
     );
     fs::write(

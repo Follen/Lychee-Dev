@@ -28,7 +28,7 @@ mod connect;
 mod connect_target;
 mod socks;
 mod target;
-use connect::{ExactName, ExactTunnel, NamedTls};
+use connect::{BeforeWrite, ExactName, ExactTunnel, NamedTls};
 use socks::GoSocks;
 use target::Target;
 
@@ -44,7 +44,10 @@ fn classify(locator: &str) -> Result<(Target, bool)> {
         parsed.set_fragment(None);
         parsed.to_string()
     });
-    let raw = normalized.as_deref() != Some(target.wire.to_string().as_str());
+    let raw = target.projection
+        || target.write_error.is_some()
+        || target.tls_host.ends_with('.')
+        || normalized.as_deref() != Some(target.wire.to_string().as_str());
     Ok((target, raw))
 }
 
@@ -63,7 +66,6 @@ pub(super) struct Prepared {
     request: Request<reqwest::Body>,
     target: Target,
     proxy: Option<crate::remote::proxy::ProxyEndpoint>,
-    tls: tokio_native_tls::TlsConnector,
 }
 impl Prepared {
     #[cfg(test)]
@@ -95,16 +97,10 @@ impl Prepared {
         mut headers: HeaderMap,
         proxy: Option<crate::remote::proxy::ProxyEndpoint>,
     ) -> Result<Self> {
-        // Native roots, certificate and hostname validation are never disabled.
-        // No ALPN protocols are requested: this adapter is strictly HTTP/1.
-        let tls: tokio_native_tls::TlsConnector = native_tls::TlsConnector::builder()
-            .build()
-            .map_err(|_| http("platform TLS configuration failed"))?
-            .into();
         let mut request = Request::new(reqwest::Body::from(Vec::<u8>::new()));
         headers.insert(
             reqwest::header::HOST,
-            reqwest::header::HeaderValue::from_str(target.wire.authority().unwrap().as_str())
+            reqwest::header::HeaderValue::from_str(&target.host_header)
                 .map_err(|_| http("invalid remote Host header"))?,
         );
         *request.uri_mut() = target.wire.clone();
@@ -113,14 +109,27 @@ impl Prepared {
             request,
             target,
             proxy,
-            tls,
         })
     }
     pub(super) async fn send(mut self) -> Result<reqwest::Response> {
         let secure = self.target.wire.scheme_str() == Some("https");
-        let tls = secure.then(|| (self.target.tls_host.clone(), self.tls.clone()));
+        let origin_tls_name = if self.proxy.is_some() && self.target.tls_host.contains(':') {
+            // Go's tunnel addTLS uses removePort(canonicalAddr), retaining [];
+            // the direct/proxy socket's first TLS layer uses SplitHostPort.
+            format!("[{}]", self.target.tls_host)
+        } else {
+            self.target.tls_host.clone()
+        };
+        let tls = secure.then(|| platform_tls(&origin_tls_name)).transpose()?;
         let Some(proxy) = self.proxy.take() else {
-            return send(direct(&self.target, tls)?, self.request).await;
+            return send(
+                BeforeWrite {
+                    inner: direct(&self.target, tls)?,
+                    error: self.target.write_error,
+                },
+                self.request,
+            )
+            .await;
         };
         let reference =
             redirect_url::RedirectUrl::absolute(&format!("http://{}", proxy.authority))?;
@@ -142,11 +151,18 @@ impl Prepared {
             "http"
         };
         let mut endpoint = Target::parse(&format!("{scheme}://{authority}/"))?;
-        if proxy.scheme == "socks5h" && !explicit_port(authority) {
-            endpoint.dial_port = "1080".into();
+        if !explicit_port(authority) {
+            endpoint.dial_port = match proxy.scheme.as_str() {
+                "https" => "443",
+                "http" => "80",
+                "socks5h" => "1080",
+                _ => "", // Go schemePort -> LookupPort("") == 0.
+            }
+            .into();
         }
-        let proxy_tls =
-            (proxy.scheme == "https").then(|| (endpoint.tls_host.clone(), self.tls.clone()));
+        let proxy_tls = (proxy.scheme == "https")
+            .then(|| platform_tls(&endpoint.tls_host))
+            .transpose()?;
         let connector = direct(&endpoint, proxy_tls)?;
         // This Uri is connector plumbing only. The connector always dials the
         // exact selected proxy name, and its TLS name is separately captured.
@@ -164,7 +180,7 @@ impl Prepared {
             let socks = GoSocks {
                 inner: connector,
                 proxy: proxy_uri,
-                host: self.target.dial_host.clone(),
+                host: self.target.dial_bytes.clone(),
                 port: self.target.dial_port.clone(),
                 credentials,
             };
@@ -172,10 +188,13 @@ impl Prepared {
             // connector plumbing and cannot change the SOCKS address.
             let destination: Uri = "http://lycheedev-socks.invalid/".parse().unwrap();
             return send(
-                NamedTls {
-                    inner: socks,
-                    destination,
-                    tls,
+                BeforeWrite {
+                    inner: NamedTls {
+                        inner: socks,
+                        destination,
+                        tls,
+                    },
+                    error: self.target.write_error,
                 },
                 self.request,
             )
@@ -199,13 +218,17 @@ impl Prepared {
                 proxy: proxy_uri,
                 host: self.target.connect_host.clone(),
                 target: self.target.connect_target.clone(),
+                write_error: self.target.connect_error,
                 authorization,
             };
             return send(
-                NamedTls {
-                    inner: tunnel,
-                    destination,
-                    tls,
+                BeforeWrite {
+                    inner: NamedTls {
+                        inner: tunnel,
+                        destination,
+                        tls,
+                    },
+                    error: self.target.write_error,
                 },
                 self.request,
             )
@@ -216,15 +239,49 @@ impl Prepared {
                 .headers_mut()
                 .insert(reqwest::header::PROXY_AUTHORIZATION, authorization);
         }
+        let projection = self
+            .target
+            .projection
+            .then(|| self.target.forward_target.clone());
+        if projection.is_some() {
+            *self.request.uri_mut() = "http://lycheedev-forward.invalid/".parse().unwrap();
+        }
         send(
             Forward {
                 inner: connector,
                 proxy: proxy_uri,
+                projection,
+                error: self.target.write_error.or(self
+                    .target
+                    .invalid_host
+                    .then_some("http: invalid Host header")),
             },
             self.request,
         )
         .await
     }
+}
+// Go's Windows certificate-policy input removes exactly one final dot. The
+// locked native connector shares this name with SNI: it matches Go SNI for
+// zero/one dot, while multiple dots still require supported-Windows evidence.
+// Strict platform trust/hostname verification is always retained.
+fn tls_name(name: &str) -> String {
+    name.strip_suffix('.').unwrap_or(name).to_owned()
+}
+fn platform_tls(name: &str) -> Result<(String, tokio_native_tls::TlsConnector)> {
+    // Public native-tls SNI switch does not weaken hostname/certificate checks.
+    // Go excludes literal IPs (also bracketed/zoned) from ClientHello SNI.
+    let ip = name
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(name);
+    let ip = ip.rsplit_once('%').map_or(ip, |(address, _)| address);
+    let use_sni = ip.parse::<std::net::IpAddr>().is_err() && !name.trim_end_matches('.').is_empty();
+    let connector = native_tls::TlsConnector::builder()
+        .use_sni(use_sni)
+        .build()
+        .map_err(|_| http("platform TLS configuration failed"))?;
+    Ok((tls_name(name), connector.into()))
 }
 fn explicit_port(authority: &str) -> bool {
     let suffix = authority
@@ -239,12 +296,22 @@ fn direct(
 ) -> Result<NamedTls<HttpConnector<ExactName>>> {
     // Never reinterpret an invalid port as 80/443. This runs inside the
     // controlled/admitted send, preserving the original attempt accounting.
-    let port = target
-        .dial_port
-        .parse::<u16>()
-        .map_err(|_| http("invalid remote port"))?;
-    let name = target
-        .dial_host
+    let port = if target.dial_port.is_empty() {
+        0 // Go LookupPort's explicit empty-service behavior.
+    } else {
+        target
+            .dial_port
+            .parse::<u16>()
+            .map_err(|_| http("invalid remote port"))?
+    };
+    // An empty hostname with a nonempty authority (":port") is Go's nil
+    // TCPAddr IP, an IPv4 unspecified destination. It is not a DNS lookup.
+    let dial_name = if target.dial_host.is_empty() {
+        "0.0.0.0"
+    } else {
+        &target.dial_host
+    };
+    let name = dial_name
         .parse()
         .map_err(|_| http("invalid remote dial name"))?;
     let mut tcp = HttpConnector::new_with_resolver(ExactName { name });
@@ -286,13 +353,15 @@ where
 struct Forward<C> {
     inner: C,
     proxy: Uri,
+    projection: Option<String>,
+    error: Option<&'static str>,
 }
-struct ForwardIo<T>(T);
+struct ForwardIo<T>(connect_target::ConnectTargetIo<T>);
 impl<C> Service<Uri> for Forward<C>
 where
     C: Service<Uri>,
     C::Future: Send + 'static,
-    C::Response: Send + 'static,
+    C::Response: Read + Write + Unpin + Send + 'static,
     C::Error: Into<BoxError>,
 {
     type Response = ForwardIo<C::Response>;
@@ -304,7 +373,19 @@ where
     }
     fn call(&mut self, _: Uri) -> Self::Future {
         let future = self.inner.call(self.proxy.clone());
-        Box::pin(async move { future.await.map(ForwardIo).map_err(Into::into) })
+        let projection = self.projection.clone();
+        let error = self.error;
+        Box::pin(async move {
+            let stream = future.await.map_err(Into::into)?;
+            if let Some(error) = error {
+                return Err(io::Error::other(error).into());
+            }
+            let stream = match projection {
+                Some(target) => connect_target::ConnectTargetIo::forward(stream, &target)?,
+                None => connect_target::ConnectTargetIo::new(stream, None)?,
+            };
+            Ok(ForwardIo(stream))
+        })
     }
 }
 impl<T: Connection> Connection for ForwardIo<T> {
@@ -312,7 +393,7 @@ impl<T: Connection> Connection for ForwardIo<T> {
         self.0.connected().proxy(true)
     }
 }
-impl<T: Read + Unpin> Read for ForwardIo<T> {
+impl<T: Read + Write + Unpin> Read for ForwardIo<T> {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,

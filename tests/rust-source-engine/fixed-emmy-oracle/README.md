@@ -44,8 +44,9 @@ historical engine remain byte-identical. The report identifies the reference as
 fixed source plus compile compatibility, never the untouched historical source.
 The ten-file compile overlay is separately identified from the frozen archive;
 syntax checks alone do not establish a working reference build or semantic
-equivalence. The 31-file harness seal includes the overlay inside `inputs.json`
-without adding or replacing a reference test or historical engine file.
+equivalence. The 32-file harness seal includes the overlay inside `inputs.json` and the
+shared test-only trace storage module. No reference test or historical engine
+file is replaced by that storage module.
 
 Only after all expected traces are complete and authenticated does the runner run
 the same 36 candidate functions with the clean dependency. A nonzero historical
@@ -81,18 +82,68 @@ target and cache. No new lease, cache, tool policy or target override is introdu
 The Python step only reconstructs authenticated source inside that existing owner;
 it cannot run Cargo or acquire a channel. All result and partial trace files are
 sealed before cleanup. Successful libtest stdout uses its normal capture mode;
-full field evidence is in the bounded per-test trace files, avoiding duplicating
+full field evidence is in bounded per-test trace parts, avoiding duplicating
 16384-row ledgers into one process log. Failed tests retain normal libtest output.
 Unverified process-tree reaping retains the stage.
 
-Entry: `node tests/rust-source-engine/fixed-emmy-oracle/run.mjs` from the prepared
+Entry: `node tests/rust-source-engine/fixed-emmy-oracle/controlled-run.mjs` from the prepared
 repository on Windows. The workflow must already have prepared the **clean**
 production engine and locked dependencies. The historical source lock must also
 be satisfiable from that offline dependency cache; a miss fails rather than fetching.
 
-Current repair status: syntax and pure source/trace fixture checks only;
-**Rust execution after the compile overlay NOT_RUN**. The actual e8 reference
-compile failure and zero complete traces remain failed evidence; its clean side
-was not run. The original 6699/cd576 failures
-retain their historical identities. These 36 targeted tests are not full Retail,
-all-checker, worker deadline, memory/performance or final four-loop acceptance.
+## 8a3 trace failure and bounded transport repair
+
+The 8a3 reference compiled and ran. Eight target binaries completed, including
+the original 448 selected cases. The Function/call ledger boundary case and the
+member ledger boundary case aborted with `0xc0000409`; the code alone does not
+identify its cause. Their actual trace bytes locate the triggering operation:
+
+- Function coverage ordinal 10 grew the file from 13,724,529 to 18,427,540 bytes;
+  the next 42 bytes were `end complete:false rows:10`.
+- Member coverage ordinal 10 grew the file from 13,986,822 to 18,690,124 bytes;
+  the same incomplete terminal followed.
+- The passing query-backend 16,384 case wrote 13,364,864 bytes, below 16 MiB.
+
+The old helper wrote and flushed each row before asserting its file cap. Its
+ordinal increments only after that assertion. During unwinding, Guard wrote the
+incomplete terminal through the same cap assertion. The observed ordinal/byte
+sequence and source support the double-panic abort cause; the native exit code
+alone does not establish a stack overflow or memory-corruption diagnosis.
+
+Both helpers now use identical `fixed_oracle_storage.rs` transport. A complete
+JSONL frame is encoded and admitted before writing. A physical file remains at
+most **16 MiB**; a single larger frame is rejected without writing it. Larger
+logical cases use consecutive `base.jsonl`, `base.jsonl.part1`, …, with at most
+8 parts and **64 MiB total test evidence**. This bound only concerns test-output
+storage; no Source input, production memory cap, deadline or coverage budget is
+increased. Headers, every full row, global ordinal and final terminal are
+unchanged, without field splitting, normalization or omitted values.
+
+Readers require the exact test inventory, consecutive canonical part numbers,
+nonempty parts, complete UTF-8 JSONL lines and the original full-frame schema and
+complete terminal. Every physical part has its own byte/SHA seal; the candidate
+run is followed by an exact reference-directory and per-part recheck. A missing,
+extra, reordered, corrupt, oversized or incomplete part still fails. Guard's
+failure-terminal write is fallible during unwinding; a normal write failure still
+fails the test, without a second panic abort.
+
+Evidence validity and process reaping are separate facts. An invalid file marks
+the run failed and is recorded explicitly as unsealed evidence; it no longer
+changes an already verified `handlesReaped` fact. Partial legal-size parts remain
+sealed, and none is reused as expected without complete logical validation.
+
+`fixed_oracle_trace_storage` is a separate regression target, not one of the
+original ten semantic targets / 36 original tests. It exercises full-row rollover,
+per-file and aggregate rejection, malformed parts, and a deliberately failing
+child test whose parent uses the existing Core `process::run` owned Job, a
+10-second OperationControl and 1 MiB per output pipe, then requires an ordinary
+libtest exit 101 rather than native abort. stdout/stderr/status or control-error
+evidence is retained with the temporary directory if the parent test fails;
+successful tests remove only their own temporary directory. Its one ignored peer is explicitly executed by that parent test; no
+business regression is skipped.
+
+This transport repair's Rust execution remains **NOT_RUN**. The original 8a3
+aborts and incomplete traces stay failed evidence; that run's clean-side
+comparison did not run. The e8/6699/cd576 failures retain their original identities.
+These targeted tests are not full Retail, all-checker, worker deadline,
+memory/performance or final four-loop acceptance.

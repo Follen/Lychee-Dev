@@ -73,6 +73,7 @@ pub(super) struct ExactTunnel<C> {
     pub(super) proxy: Uri,
     pub(super) host: String,
     pub(super) target: String,
+    pub(super) write_error: Option<&'static str>,
     pub(super) authorization: Option<reqwest::header::HeaderValue>,
 }
 impl<C> Service<Uri> for ExactTunnel<C>
@@ -93,9 +94,13 @@ where
         let connecting = self.inner.call(self.proxy.clone());
         let host = self.host.clone();
         let target = self.target.clone();
+        let write_error = self.write_error;
         let authorization = self.authorization.clone();
         Box::pin(async move {
             let stream = connecting.await.map_err(Into::into)?;
+            if let Some(error) = write_error {
+                return Err(io::Error::other(error).into());
+            }
             let representable = target
                 .parse::<Uri>()
                 .ok()
@@ -177,5 +182,40 @@ impl Write for TunnelIo {
         bytes: &[io::IoSlice<'_>],
     ) -> Poll<io::Result<usize>> {
         Pin::new(&mut self.get_mut().0).poll_write_vectored(cx, bytes)
+    }
+}
+
+/// Go Request.Write validates its wire identity only after the selected socket
+/// (and any required TLS/proxy handshake) was acquired. Never send a placeholder
+/// or erase an earlier connect failure when the wire identity cannot be written.
+#[derive(Clone)]
+pub(super) struct BeforeWrite<C> {
+    pub(super) inner: C,
+    pub(super) error: Option<&'static str>,
+}
+impl<C> Service<Uri> for BeforeWrite<C>
+where
+    C: Service<Uri>,
+    C::Future: Send + 'static,
+    C::Response: Send + 'static,
+    C::Error: Into<BoxError>,
+{
+    type Response = C::Response;
+    type Error = BoxError;
+    type Future =
+        Pin<Box<dyn Future<Output = std::result::Result<Self::Response, BoxError>> + Send>>;
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<std::result::Result<(), BoxError>> {
+        self.inner.poll_ready(cx).map_err(Into::into)
+    }
+    fn call(&mut self, uri: Uri) -> Self::Future {
+        let connecting = self.inner.call(uri);
+        let error = self.error;
+        Box::pin(async move {
+            let stream = connecting.await.map_err(Into::into)?;
+            if let Some(error) = error {
+                return Err(io::Error::other(error).into());
+            }
+            Ok(stream)
+        })
     }
 }

@@ -3,9 +3,11 @@
 //! Missing, truncated, reordered, or surplus reference rows are hard failures.
 #![allow(dead_code)]
 use serde_json::{Value, json};
-use std::{cell::RefCell, fmt::Debug, fs, io::Write, path::PathBuf};
+use std::{cell::RefCell, fmt::Debug, path::PathBuf};
+#[path = "fixed_oracle_storage.rs"]
+mod storage;
+use storage::TraceOutput;
 
-const MAX_TRACE_BYTES: u64 = 16 << 20;
 const SCHEMA: &str = "lycheedev.emmy-fixed-oracle.v1";
 thread_local! { static STATE: RefCell<Option<State>> = const { RefCell::new(None) }; }
 struct State {
@@ -14,7 +16,7 @@ struct State {
     ordinal: usize,
     mismatches: usize,
     first_mismatch: Option<String>,
-    output: fs::File,
+    output: TraceOutput,
 }
 pub struct Guard;
 fn file_name() -> String {
@@ -23,14 +25,8 @@ fn file_name() -> String {
     assert!(name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'));
     format!("{}--{name}.jsonl", env!("CARGO_CRATE_NAME"))
 }
-fn emit(output: &mut fs::File, value: &Value) {
-    serde_json::to_writer(&mut *output, value).expect("write oracle evidence");
-    output.write_all(b"\n").expect("write oracle newline");
-    output.flush().expect("flush oracle evidence");
-    assert!(
-        output.metadata().unwrap().len() <= MAX_TRACE_BYTES,
-        "trace evidence exceeds existing per-log cap"
-    );
+fn emit(output: &mut TraceOutput, value: &Value) {
+    output.emit(value).expect("write bounded oracle evidence");
 }
 fn begin(reference: bool) -> Guard {
     let name = file_name();
@@ -41,17 +37,9 @@ fn begin(reference: bool) -> Guard {
     } else {
         let directory = std::env::var_os("LYCHEEDEV_EMMY_ORACLE_REFERENCE")
             .expect("the controlled runner must supply complete fixed-engine reference evidence");
-        let path = PathBuf::from(directory).join(&name);
-        assert!(
-            fs::metadata(&path).unwrap().len() <= MAX_TRACE_BYTES,
-            "reference evidence byte cap"
+        let mut frames = storage::read_frames(&PathBuf::from(directory), &name).expect(
+            "complete bounded reference evidence must exist; never substitute owned output",
         );
-        let text = fs::read_to_string(path)
-            .expect("reference evidence must exist; never substitute owned output");
-        let mut frames: Vec<Value> = text
-            .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
-            .collect();
         assert!(
             frames.len() >= 2,
             "reference header and terminal are mandatory"
@@ -76,10 +64,7 @@ fn begin(reference: bool) -> Guard {
     };
     let directory = std::env::var_os("LYCHEEDEV_EMMY_ORACLE_CAPTURE")
         .expect("the controlled runner must supply a fresh owned evidence directory");
-    let mut output = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(PathBuf::from(directory).join(name))
+    let mut output = TraceOutput::new(&PathBuf::from(directory), &name)
         .expect("never overwrite prior oracle evidence");
     emit(
         &mut output,
@@ -142,28 +127,36 @@ pub fn check(label: &str, actual: &impl Debug) {
 }
 impl Drop for Guard {
     fn drop(&mut self) {
-        STATE.with(|state| {
-            let Some(mut state) = state.borrow_mut().take() else {
-                return;
-            };
-            // Completeness is a data property, independent of the test result.
-            // A candidate that emitted every row may still fail exact equality;
-            // the runner records its nonzero exit and compares all real rows.
-            let complete = if state.reference {
-                !std::thread::panicking()
+        // Release the thread-local borrow before any fallible serialization or
+        // I/O. A prior assertion remains the primary test failure.
+        let Some(mut state) = STATE.with(|state| state.borrow_mut().take()) else {
+            return;
+        };
+        let panicking = std::thread::panicking();
+        // Complete captured data may still have semantic differences. Keep
+        // every real row and let the runner report the independent nonzero exit.
+        let complete = !state.output.failed()
+            && if state.reference {
+                !panicking
             } else {
                 state.ordinal == state.expected.len()
             };
-            emit(
-                &mut state.output,
-                &json!({"kind":"end","rows":state.ordinal,"complete":complete}),
-            );
-            if !std::thread::panicking() {
-                assert!(complete, "candidate omitted fixed-engine reference rows");
-                assert_eq!(state.mismatches, 0,
-                    "complete fixed-engine value differences; first={:?}; full actual rows are retained",
-                    state.first_mismatch);
+        let result = storage::finish(&mut state.output, state.ordinal, complete);
+        if panicking {
+            // A missing/partial failure terminal is rejected by the reader.
+            // Never turn a write error during unwinding into a process abort.
+            if let Err(error) = result {
+                use std::io::Write;
+                let _ = writeln!(std::io::stderr().lock(), "oracle failure terminal: {error}");
             }
-        });
+            return;
+        }
+        result.expect("finish bounded oracle evidence");
+        assert!(complete, "candidate omitted fixed-engine reference rows");
+        assert_eq!(
+            state.mismatches, 0,
+            "complete fixed-engine value differences; first={:?}; full actual rows are retained",
+            state.first_mismatch
+        );
     }
 }

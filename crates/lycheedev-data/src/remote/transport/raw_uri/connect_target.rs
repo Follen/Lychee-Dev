@@ -1,28 +1,43 @@
-//! One fixed CONNECT request-line projection for Go's raw Unicode authority.
+//! Two fixed request-line projections for Go's raw CONNECT/forward targets.
 //! hyper owns request headers, response parsing and upgrade. No arbitrary
 //! header replacement and no TLS bytes are inspected or changed.
 use super::*;
 
 pub(super) const PLACEHOLDER: &str = "lycheedev-connect.invalid:443";
 const PREFIX: &[u8] = b"CONNECT lycheedev-connect.invalid:443 HTTP/1.1\r\n";
+const FORWARD_PREFIX: &[u8] = b"GET http://lycheedev-forward.invalid/ HTTP/1.1\r\n";
 
 pub(super) struct ConnectTargetIo<T> {
     inner: T,
+    prefix: &'static [u8],
     prefix_at: Option<usize>,
     replacement: Option<Vec<u8>>,
     written: usize,
 }
 impl<T> ConnectTargetIo<T> {
     pub(super) fn new(inner: T, target: Option<&str>) -> io::Result<Self> {
+        Self::line(inner, target, PREFIX, "CONNECT")
+    }
+    pub(super) fn forward(inner: T, target: &str) -> io::Result<Self> {
+        Self::line(inner, Some(target), FORWARD_PREFIX, "GET")
+    }
+    fn line(
+        inner: T,
+        target: Option<&str>,
+        prefix: &'static [u8],
+        method: &str,
+    ) -> io::Result<Self> {
         if target.is_some_and(|target| target.bytes().any(|b| b < 0x20 || b == 0x7f)) {
             return Err(io::Error::other(
-                "invalid control character in CONNECT target",
+                "invalid control character in request target",
             ));
         }
         Ok(Self {
             inner,
+            prefix,
             prefix_at: target.map(|_| 0),
-            replacement: target.map(|target| format!("CONNECT {target} HTTP/1.1\r\n").into_bytes()),
+            replacement: target
+                .map(|target| format!("{method} {target} HTTP/1.1\r\n").into_bytes()),
             written: 0,
         })
     }
@@ -67,12 +82,12 @@ impl<T: Write + Unpin> Write for ConnectTargetIo<T> {
         let this = self.get_mut();
         std::task::ready!(this.flush_replacement(cx))?;
         if let Some(at) = &mut this.prefix_at {
-            let n = bytes.len().min(PREFIX.len() - *at);
-            if bytes[..n] != PREFIX[*at..*at + n] {
-                return Poll::Ready(Err(io::Error::other("unexpected CONNECT request prefix")));
+            let n = bytes.len().min(this.prefix.len() - *at);
+            if bytes[..n] != this.prefix[*at..*at + n] {
+                return Poll::Ready(Err(io::Error::other("unexpected fixed request prefix")));
             }
             *at += n;
-            if *at == PREFIX.len() {
+            if *at == this.prefix.len() {
                 this.prefix_at = None;
             }
             // Count consumed hyper input, not the different replacement size.
@@ -86,7 +101,7 @@ impl<T: Write + Unpin> Write for ConnectTargetIo<T> {
         if this.prefix_at.is_some_and(|at| at != 0) {
             // hyper encodes a complete request line before writing. A partial
             // prefix cannot be committed or leaked as an ASCII placeholder.
-            return Poll::Ready(Err(io::Error::other("incomplete CONNECT request prefix")));
+            return Poll::Ready(Err(io::Error::other("incomplete fixed request prefix")));
         }
         std::task::ready!(this.flush_replacement(cx))?;
         Pin::new(&mut this.inner).poll_flush(cx)
@@ -94,7 +109,7 @@ impl<T: Write + Unpin> Write for ConnectTargetIo<T> {
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let this = self.get_mut();
         if this.prefix_at.is_some_and(|at| at != 0) {
-            return Poll::Ready(Err(io::Error::other("incomplete CONNECT request prefix")));
+            return Poll::Ready(Err(io::Error::other("incomplete fixed request prefix")));
         }
         std::task::ready!(this.flush_replacement(cx))?;
         Pin::new(&mut this.inner).poll_shutdown(cx)
@@ -103,3 +118,9 @@ impl<T: Write + Unpin> Write for ConnectTargetIo<T> {
 
 #[cfg(test)]
 mod tests;
+
+impl<T: Connection> Connection for ConnectTargetIo<T> {
+    fn connected(&self) -> Connected {
+        self.inner.connected()
+    }
+}

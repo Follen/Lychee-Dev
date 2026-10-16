@@ -847,7 +847,6 @@ fn go_parse_valid_transport_invalid_urls_drain_before_failure() {
         "http://127.0.0.1:99999999999999999999999/",
         "http:bad%zz",
         "http:/hostless",
-        "http://example%25test/",
     ] {
         let parsed = RedirectUrl::parse(location).unwrap();
         if location == "http:bad%zz" {
@@ -890,6 +889,7 @@ fn go_numeric_authorities_reach_transport_without_whatwg_rewriting() {
         "0x7f000001",
         "2130706433",
         "127.0.0.1.",
+        "example%25test",
     ] {
         let reference =
             RedirectUrl::absolute(&format!("http://{host}:80/keep/%2e/target")).unwrap();

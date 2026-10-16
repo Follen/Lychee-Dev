@@ -82,11 +82,26 @@ fn listfile_owner_row_bound_and_original_deadline_precede_missing_classification
     let f = Fixture::new();
     let control = OperationControl::default();
     let m = Metadata::open_controlled(&f.0, true, &control).unwrap();
+    assert!(m.connection
+        .execute(
+            "INSERT INTO documents(key,generation,value) VALUES('large',1,?1)",
+            [vec![b' '; 1048577]],
+        )
+        .is_err());
+    // Seed an invalid historical row deliberately; the current schema rejects
+    // it before the bounded reader can observe it. Restore enforcement before
+    // exercising the production read, without weakening that schema.
+    m.connection
+        .execute_batch("PRAGMA ignore_check_constraints=ON")
+        .unwrap();
     m.connection
         .execute(
             "INSERT INTO documents(key,generation,value) VALUES('large',1,?1)",
             [vec![b' '; 1048577]],
         )
+        .unwrap();
+    m.connection
+        .execute_batch("PRAGMA ignore_check_constraints=OFF")
         .unwrap();
     assert!(
         m.read_document_on_owner_controlled("large", &control)

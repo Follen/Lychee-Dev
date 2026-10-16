@@ -486,10 +486,7 @@ pub(crate) async fn get_once(
             url(locator)?;
         }
         LocatorPolicy::HotfixRedirect => {
-            let parsed = redirect_url::RedirectUrl::absolute(locator)?;
-            if !matches!(parsed.scheme.as_str(), "http" | "https") || parsed.authority.is_none() {
-                return Err(http("Hotfix URL requires HTTP or HTTPS"));
-            }
+            let parsed = redirect_url::RedirectUrl::parse(locator)?;
             // Go lowercases the scheme but retains authority spelling for its
             // localhost special case. Do not reuse WHATWG host normalization.
             if let Some((_, rest)) = locator.split_once(':') {
@@ -551,24 +548,19 @@ async fn send_once(
     budget: Option<&Budget>,
     deadline: Instant,
 ) -> Result<reqwest::Response> {
-    // Each redirect selects its new locator's route and owns a no-pool client
-    // in this same runtime, with no automatic redirects or request retry.
-    if let Some(prepared) = raw_uri::prepare(locator, &headers)? {
-        check(control, budget)?;
-        if Instant::now() >= deadline {
-            return Err(http("remote request timeout"));
-        }
-        attempt(budget)?;
-        let response = controlled(prepared.send(), control, budget, deadline).await?;
-        check(control, budget)?;
-        return response;
-    }
-    let request = client(deadline)?.get(locator).headers(headers);
+    // Request construction/parse has succeeded. Go BudgetTransport observes
+    // this RoundTrip even if route selection, missing Host or dialing fails.
     check(control, budget)?;
     if Instant::now() >= deadline {
         return Err(http("remote request timeout"));
     }
     attempt(budget)?;
+    if let Some(prepared) = raw_uri::prepare(locator, &headers)? {
+        let response = controlled(prepared.send(), control, budget, deadline).await?;
+        check(control, budget)?;
+        return response;
+    }
+    let request = client(deadline)?.get(locator).headers(headers);
     let response = controlled(request.send(), control, budget, deadline).await?;
     check(control, budget)?;
     response.map_err(|error| http(error.without_url().to_string()))

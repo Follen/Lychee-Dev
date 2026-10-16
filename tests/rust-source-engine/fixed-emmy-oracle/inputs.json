@@ -92,8 +92,8 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 6847,
-      "sha256": "9085b4b4e59bd0ce317e128182698a2d1c01a7739bc5936b4dacad0b2addb6a2"
+      "bytes": 10099,
+      "sha256": "054fcb680b020bca718632f1b576a4e083c5b6558441e1e4f39fd2e56e0593fc"
     },
     {
       "path": "historical-engine/.gitignore",
@@ -212,8 +212,8 @@
     },
     {
       "path": "reference/crates/lycheedev-source/tests/support/fixed_oracle_trace.rs",
-      "bytes": 7169,
-      "sha256": "96434dc6efbe913ac9e27bd18153844aa80763edda36733f58ad0df78d7b260c"
+      "bytes": 7085,
+      "sha256": "cd88098b5da603ee25ab99d38499fc33852239fd99089a2717dd0057b5a23985"
     },
     {
       "path": "reference/crates/lycheedev-source/tests/support/object_oracle.rs",
@@ -222,13 +222,13 @@
     },
     {
       "path": "run.mjs",
-      "bytes": 12193,
-      "sha256": "35296064fc511c65f3f36a767551ead592eeea1d7910955d4e5f740899affd8d"
+      "bytes": 15011,
+      "sha256": "38dec2daa0a40427d2200a57754510aec3a21907826ed765a33bb9625bcf0759"
     },
     {
       "path": "run.test.mjs",
-      "bytes": 12253,
-      "sha256": "b1c0cdb5fdaa3244c7c2ac0183207b1441ba4fe34c8d2fb21352b90d58add961"
+      "bytes": 20732,
+      "sha256": "3bcb169295acb730e937555d80316f0213b84ad685026752e7236e6610f6b324"
     },
     {
       "path": "source-cd871181.json",
@@ -244,6 +244,11 @@
       "path": "targets.json",
       "bytes": 3861,
       "sha256": "2fb97511cefe276c228bde2eda70cf8c8ebec786c4336bbd5eea4707f1f5342b"
+    },
+    {
+      "path": "reference/crates/lycheedev-source/tests/support/fixed_oracle_storage.rs",
+      "bytes": 6082,
+      "sha256": "4ce7ae238a931a118b4905a1fd624bc322dba04d971dfe4ff10aab5819998b04"
     }
   ],
   "historicalCompileCompatibility": {

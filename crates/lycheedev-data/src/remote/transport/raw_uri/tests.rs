@@ -514,7 +514,7 @@ fn go_authority_identities_keep_numeric_names_ports_case_and_ipv6_zone() {
     let target = Target::parse("https://[fe80::1%25Ethernet]:443/a").unwrap();
     assert_eq!(target.wire.authority().unwrap().as_str(), "[fe80::1]:443");
     assert_eq!(target.dial_host, "fe80::1%Ethernet");
-    assert_eq!(target.tls_host, "fe80::1");
+    assert_eq!(target.tls_host, "fe80::1%Ethernet");
     assert_eq!(target.route, "https://[fe80::1%Ethernet]:443/a");
     assert_eq!(
         target.dial.unwrap().authority().unwrap().as_str(),
@@ -1025,5 +1025,523 @@ fn unicode_connect_fallback_preserves_target_host_headers_and_cancelled_owner() 
         );
         let used = budget.snapshot().unwrap();
         assert_eq!((used.network_requests, used.network_bytes), (1, 0));
+    }
+}
+
+#[test]
+fn forward_proxy_get_preserves_go_percent_host_and_exact_absolute_target() {
+    let (address, peer) = server(|mut stream| {
+        let request = header(&mut stream);
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc")
+            .unwrap();
+        request
+    });
+    let (control, budget) = scope();
+    let result: Result<Vec<u8>> = run(async {
+        let prepared = Prepared::with_route(
+            Target::parse("http://name%25zone:0080/keep/%2e?q=%2f")?,
+            HeaderMap::new(),
+            Some(crate::remote::proxy::ProxyEndpoint {
+                scheme: "http".into(),
+                authority: address,
+            }),
+        )?;
+        let deadline = request_deadline(&control, Some(&budget))?;
+        attempt(Some(&budget))?;
+        let response = controlled(prepared.send(), &control, Some(&budget), deadline).await??;
+        read_response(
+            response,
+            BodyPolicy::Identity,
+            3,
+            &control,
+            Some(&budget),
+            deadline,
+        )
+        .await
+    });
+    let request = peer.join().unwrap().unwrap();
+    assert_eq!(result.unwrap(), b"abc");
+    assert!(request.starts_with("GET http://name%zone:0080/keep/%2e?q=%2f HTTP/1.1\r\n"));
+    assert!(request.contains("host: name%zone:0080\r\n"));
+    assert!(!request.contains("lycheedev-"));
+    let used = budget.snapshot().unwrap();
+    assert_eq!((used.network_requests, used.network_bytes), (1, 3));
+}
+
+#[test]
+fn invalid_wire_host_fails_after_proxy_connect_without_sending_placeholder() {
+    for host in [
+        "bad<host",
+        "bad>host",
+        "bad\"host",
+        "%FF",
+        "%EF%BF%BD",
+        "xn--abc-.é",
+    ] {
+        let (address, peer) = server(|mut stream| closed(&mut stream));
+        let (control, budget) = scope();
+        let result: Result<reqwest::Response> = run(async {
+            let prepared = Prepared::with_route(
+                Target::parse(&format!("http://{host}/a"))?,
+                HeaderMap::new(),
+                Some(crate::remote::proxy::ProxyEndpoint {
+                    scheme: "http".into(),
+                    authority: address,
+                }),
+            )?;
+            attempt(Some(&budget))?;
+            controlled(
+                prepared.send(),
+                &control,
+                Some(&budget),
+                request_deadline(&control, Some(&budget))?,
+            )
+            .await?
+        });
+        assert!(peer.join().unwrap().unwrap(), "{host}");
+        assert_eq!(result.unwrap_err().code, "records.remote_http");
+        let used = budget.snapshot().unwrap();
+        assert_eq!((used.network_requests, used.network_bytes), (1, 0));
+    }
+}
+
+#[test]
+fn direct_invalid_host_is_empty_but_valid_percent_host_is_preserved() {
+    for (host, expected) in [
+        ("bad<host", ""),
+        ("bad>host", ""),
+        ("bad\"host", ""),
+        ("name%25zone", "name%zone"),
+    ] {
+        let (address, peer) = server(|mut stream| {
+            let request = header(&mut stream);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .unwrap();
+            request
+        });
+        let (control, budget) = scope();
+        let result: Result<reqwest::Response> = run(async {
+            let mut target = Target::parse(&format!("http://{host}/raw/%2e?q=x"))?;
+            // Override only the resolver fixture destination. Production still
+            // uses the original Go canonical name, never the private URI host.
+            target.dial_host = "127.0.0.1".into();
+            target.dial_port = address.rsplit(':').next().unwrap().into();
+            let prepared = Prepared::with_route(target, HeaderMap::new(), None)?;
+            controlled(
+                prepared.send(),
+                &control,
+                Some(&budget),
+                request_deadline(&control, Some(&budget))?,
+            )
+            .await?
+        });
+        let request = peer.join().unwrap().unwrap();
+        assert_eq!(result.unwrap().status(), hyper::StatusCode::OK);
+        assert!(request.starts_with("GET /raw/%2e?q=x HTTP/1.1\r\n"));
+        assert!(request.contains(&format!("host: {expected}\r\n")));
+        assert!(!request.contains("lycheedev-"));
+    }
+}
+
+#[test]
+fn non_utf8_socks_target_stays_raw_until_go_wire_validation() {
+    let (address, peer) = server(|mut stream| {
+        let mut greeting = [0; 3];
+        stream.read_exact(&mut greeting).unwrap();
+        assert_eq!(greeting, [5, 1, 0]);
+        stream.write_all(&[5, 0]).unwrap();
+        let mut request = [0; 9];
+        stream.read_exact(&mut request).unwrap();
+        assert_eq!(request, [5, 1, 0, 3, 2, 0xe2, 0x82, 0, 80]);
+        stream
+            .write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 80])
+            .unwrap();
+        closed(&mut stream)
+    });
+    let (control, budget) = scope();
+    let result: Result<reqwest::Response> = run(async {
+        let target = Target::parse("http://%E2%82/a")?;
+        assert_eq!(target.dial_host, "\u{fffd}\u{fffd}");
+        assert_eq!(target.dial_bytes, [0xe2, 0x82]);
+        let prepared = Prepared::with_route(
+            target,
+            HeaderMap::new(),
+            Some(crate::remote::proxy::ProxyEndpoint {
+                scheme: "socks5h".into(),
+                authority: address,
+            }),
+        )?;
+        attempt(Some(&budget))?;
+        controlled(
+            prepared.send(),
+            &control,
+            Some(&budget),
+            request_deadline(&control, Some(&budget))?,
+        )
+        .await?
+    });
+    assert!(peer.join().unwrap().unwrap());
+    assert_eq!(result.unwrap_err().code, "records.remote_http");
+    assert_eq!(budget.snapshot().unwrap().network_requests, 1);
+}
+
+#[test]
+fn parse_valid_hostless_requests_fail_inside_the_original_roundtrip_attempt() {
+    for locator in [
+        "http:/hostless",
+        "http:///hostless",
+        "http:bad%zz",
+        "ftp://origin.invalid/a",
+    ] {
+        let (control, budget) = scope();
+        let result: Result<reqwest::Response> = run(async {
+            get_once(
+                locator,
+                policy(),
+                &control,
+                Some(&budget),
+                request_deadline(&control, Some(&budget))?,
+            )
+            .await
+        });
+        assert!(result.is_err(), "{locator}");
+        assert_eq!(budget.snapshot().unwrap().network_requests, 1, "{locator}");
+        assert_eq!(budget.snapshot().unwrap().network_bytes, 0);
+    }
+    let (control, budget) = scope();
+    let result: Result<reqwest::Response> = run(async {
+        get_once(
+            "http://bad host/a",
+            policy(),
+            &control,
+            Some(&budget),
+            request_deadline(&control, Some(&budget))?,
+        )
+        .await
+    });
+    assert!(result.is_err());
+    assert_eq!(budget.snapshot().unwrap().network_requests, 0);
+}
+
+#[test]
+fn non_ascii_zone_keeps_go_wire_punycode_and_endpoint_separate() {
+    // Fixed Go PunycodeHostPort processes the whole authority without a port,
+    // but the split host with a port; removeZone follows that transformation.
+    for (locator, host, forward) in [
+        (
+            "http://[fe80::1%25é]:80/a",
+            "[xn--fe80::1]:80",
+            "http://[xn--fe80::1]:80/a",
+        ),
+        (
+            "http://[fe80::1%25é]/a",
+            "xn--[fe80::1%]-j7a",
+            "http://xn--[fe80::1%]-j7a/a",
+        ),
+        (
+            "http://[fe80::1%25é]:/a",
+            "xn--fe80::1%-i1a",
+            "http://xn--fe80::1%-i1a/a",
+        ),
+    ] {
+        let target = Target::parse(locator).unwrap();
+        assert_eq!(target.host_header, host);
+        assert_eq!(target.forward_target, forward);
+        assert_eq!(target.dial_host, "fe80::1%é");
+        assert_eq!(target.tls_host, "fe80::1%é");
+        assert_eq!(target.connect_target, "[fe80::1%é]:80");
+        assert_eq!(target.connect_host, "[xn--fe80::1]:80");
+    }
+}
+
+#[test]
+fn forward_proxy_handles_empty_origin_hostname_and_unicode_zone_without_placeholder() {
+    for (locator, expected) in [
+        ("http://:00080/a/%2e?q=x", "http://:00080/a/%2e?q=x"),
+        ("http://[fe80::1%25é]/a", "http://xn--[fe80::1%]-j7a/a"),
+    ] {
+        let (address, peer) = server(|mut stream| {
+            let request = header(&mut stream);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .unwrap();
+            request
+        });
+        let (control, budget) = scope();
+        let result: Result<reqwest::Response> = run(async {
+            let prepared = Prepared::with_route(
+                Target::parse(locator)?,
+                HeaderMap::new(),
+                Some(crate::remote::proxy::ProxyEndpoint {
+                    scheme: "http".into(),
+                    authority: address,
+                }),
+            )?;
+            attempt(Some(&budget))?;
+            controlled(
+                prepared.send(),
+                &control,
+                Some(&budget),
+                request_deadline(&control, Some(&budget))?,
+            )
+            .await?
+        });
+        let request = peer.join().unwrap().unwrap();
+        assert_eq!(result.unwrap().status(), hyper::StatusCode::OK);
+        assert!(
+            request.starts_with(&format!("GET {expected} HTTP/1.1\r\n")),
+            "{request}"
+        );
+        assert!(!request.contains("lycheedev-"));
+        assert_eq!(budget.snapshot().unwrap().network_requests, 1);
+    }
+}
+
+#[test]
+fn unknown_proxy_scheme_with_port_uses_plain_forward_and_without_port_dials_zero() {
+    let (address, peer) = server(|mut stream| {
+        let request = header(&mut stream);
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .unwrap();
+        request
+    });
+    let (control, budget) = scope();
+    let result: Result<reqwest::Response> = run(async {
+        let prepared = Prepared::with_route(
+            Target::parse("http://origin.invalid/a")?,
+            HeaderMap::new(),
+            Some(crate::remote::proxy::ProxyEndpoint {
+                scheme: "unrecognized".into(),
+                authority: address,
+            }),
+        )?;
+        attempt(Some(&budget))?;
+        controlled(
+            prepared.send(),
+            &control,
+            Some(&budget),
+            request_deadline(&control, Some(&budget))?,
+        )
+        .await?
+    });
+    let request = peer.join().unwrap().unwrap();
+    result.unwrap();
+    assert!(request.starts_with("GET http://origin.invalid/a HTTP/1.1\r\n"));
+    let (control, budget) = scope();
+    let result: Result<reqwest::Response> = run(async {
+        let prepared = Prepared::with_route(
+            Target::parse("http://origin.invalid/a")?,
+            HeaderMap::new(),
+            Some(crate::remote::proxy::ProxyEndpoint {
+                scheme: "unrecognized".into(),
+                authority: "127.0.0.1".into(),
+            }),
+        )?;
+        attempt(Some(&budget))?;
+        controlled(
+            prepared.send(),
+            &control,
+            Some(&budget),
+            request_deadline(&control, Some(&budget))?,
+        )
+        .await?
+    });
+    let failure = result.unwrap_err();
+    assert_eq!(failure.code, "records.remote_http");
+    assert!(!failure.message.contains("proxy configuration"));
+    assert_eq!(budget.snapshot().unwrap().network_requests, 1);
+}
+
+#[test]
+fn late_wire_validation_keeps_original_connection_failure_and_closes_successful_owner() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    struct Owned(Arc<AtomicBool>);
+    impl Drop for Owned {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+    struct Connector {
+        fail: bool,
+        dropped: Arc<AtomicBool>,
+    }
+    impl Service<Uri> for Connector {
+        type Response = Owned;
+        type Error = io::Error;
+        type Future = std::future::Ready<io::Result<Owned>>;
+        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+        fn call(&mut self, _: Uri) -> Self::Future {
+            std::future::ready(if self.fail {
+                Err(io::Error::new(
+                    io::ErrorKind::ConnectionRefused,
+                    "original connect failure",
+                ))
+            } else {
+                Ok(Owned(self.dropped.clone()))
+            })
+        }
+    }
+    for fail in [false, true] {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let result: Result<()> = run(async {
+            let mut connector = BeforeWrite {
+                inner: Connector {
+                    fail,
+                    dropped: dropped.clone(),
+                },
+                error: Some("late invalid wire Host"),
+            };
+            connector
+                .call("http://private.invalid/".parse().unwrap())
+                .await
+                .map(|_| ())
+                .map_err(|e| http(e.to_string()))
+        });
+        assert_eq!(
+            result.unwrap_err().message,
+            if fail {
+                "original connect failure"
+            } else {
+                "late invalid wire Host"
+            }
+        );
+        assert_eq!(dropped.load(Ordering::SeqCst), !fail);
+    }
+}
+
+// Read the bounded ClientHello fixture only. This is not production TLS parsing.
+fn client_hello_sni(stream: &mut TcpStream) -> Option<Vec<u8>> {
+    let mut record = [0; 5];
+    stream.read_exact(&mut record).unwrap();
+    assert_eq!(record[0], 22);
+    let mut bytes = vec![0; u16::from_be_bytes([record[3], record[4]]) as usize];
+    stream.read_exact(&mut bytes).unwrap();
+    assert_eq!(bytes[0], 1);
+    let mut at = 4 + 2 + 32;
+    at += 1 + bytes[at] as usize;
+    at += 2 + u16::from_be_bytes([bytes[at], bytes[at + 1]]) as usize;
+    at += 1 + bytes[at] as usize;
+    let end = at + 2 + u16::from_be_bytes([bytes[at], bytes[at + 1]]) as usize;
+    at += 2;
+    assert!(end <= bytes.len());
+    while at + 4 <= end {
+        let kind = u16::from_be_bytes([bytes[at], bytes[at + 1]]);
+        let length = u16::from_be_bytes([bytes[at + 2], bytes[at + 3]]) as usize;
+        at += 4;
+        let data = &bytes[at..at + length];
+        if kind == 0 {
+            assert_eq!(data[2], 0);
+            let n = u16::from_be_bytes([data[3], data[4]]) as usize;
+            return Some(data[5..5 + n].to_vec());
+        }
+        at += length;
+    }
+    None
+}
+
+#[test]
+fn single_dot_tls_uses_go_name_without_changing_wire_identity_and_cancels() {
+    for name in ["example.test", "example.test."] {
+        let (ready, received) = mpsc::channel();
+        let (address, peer) = server(move |mut stream| {
+            let name = client_hello_sni(&mut stream);
+            ready.send(()).unwrap();
+            (name, closed(&mut stream))
+        });
+        let (control, budget) = scope();
+        let cancel = control.tracked_cancel_handle().unwrap();
+        let stop = thread::spawn(move || {
+            let ready = received.recv_timeout(Duration::from_secs(5)).is_ok();
+            cancel.cancel();
+            ready
+        });
+        let result: Result<reqwest::Response> = run(async {
+            let mut target = Target::parse(&format!("https://{name}/a"))?;
+            assert_eq!(target.host_header, name);
+            target.dial_host = "127.0.0.1".into();
+            target.dial_port = address.rsplit(':').next().unwrap().into();
+            let prepared = Prepared::with_route(target, HeaderMap::new(), None)?;
+            attempt(Some(&budget))?;
+            controlled(
+                prepared.send(),
+                &control,
+                Some(&budget),
+                request_deadline(&control, Some(&budget))?,
+            )
+            .await?
+        });
+        let ready = stop.join().unwrap();
+        let (sni, closed) = peer.join().unwrap().unwrap();
+        assert!(ready && closed);
+        assert_eq!(sni.as_deref(), Some(b"example.test".as_slice()));
+        assert_eq!(result.unwrap_err().code, "command.cancelled");
+        assert_eq!(budget.snapshot().unwrap().network_requests, 1);
+    }
+    // These prove our exact certificate-policy input, not Schannel's observed
+    // multi-dot SNI or certificate acceptance. Those require Windows evidence.
+    assert_eq!(tls_name("example.test.."), "example.test.");
+    assert_eq!(tls_name("example.test..."), "example.test..");
+}
+
+#[test]
+fn ip_tls_retains_go_zone_verification_input_and_omits_sni() {
+    for tunneled in [false, true] {
+        let (ready, received) = mpsc::channel();
+        let (address, peer) = server(move |mut stream| {
+            if tunneled {
+                let request = header(&mut stream);
+                assert!(request.starts_with("CONNECT [fe80::1%é]:443 HTTP/1.1\r\n"));
+                stream
+                    .write_all(b"HTTP/1.1 200 Connection established\r\n\r\n")
+                    .unwrap();
+            }
+            let name = client_hello_sni(&mut stream);
+            ready.send(()).unwrap();
+            (name, closed(&mut stream))
+        });
+        let (control, budget) = scope();
+        let cancel = control.tracked_cancel_handle().unwrap();
+        let stop = thread::spawn(move || {
+            let ready = received.recv_timeout(Duration::from_secs(5)).is_ok();
+            cancel.cancel();
+            ready
+        });
+        let result: Result<reqwest::Response> = run(async {
+            let mut target = Target::parse("https://[fe80::1%25é]/a")?;
+            assert_eq!(target.tls_host, "fe80::1%é");
+            let proxy = if tunneled {
+                Some(crate::remote::proxy::ProxyEndpoint {
+                    scheme: "http".into(),
+                    authority: address.clone(),
+                })
+            } else {
+                target.dial_host = "127.0.0.1".into();
+                target.dial_port = address.rsplit(':').next().unwrap().into();
+                None
+            };
+            let prepared = Prepared::with_route(target, HeaderMap::new(), proxy)?;
+            attempt(Some(&budget))?;
+            controlled(
+                prepared.send(),
+                &control,
+                Some(&budget),
+                request_deadline(&control, Some(&budget))?,
+            )
+            .await?
+        });
+        let ready = stop.join().unwrap();
+        let (sni, closed) = peer.join().unwrap().unwrap();
+        assert!(ready && closed);
+        assert!(sni.is_none());
+        assert_eq!(result.unwrap_err().code, "command.cancelled");
+        assert_eq!(budget.snapshot().unwrap().network_requests, 1);
     }
 }

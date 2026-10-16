@@ -251,9 +251,27 @@ fn bundle_corrupt_later_payload_never_publishes_partial_zip_and_releases_all_own
         b"X",
     )
     .unwrap();
-    assert!(super::super::dispatch(&f.bundle(&[aid, bid])).is_err());
-    assert!(!f.root.join("bundle.zip").exists());
-    assert_eq!(fs::read_dir(&f.root).unwrap().count(), 1);
+    // Workspace initialization owns a sibling .lycheedev-locks directory.
+    // Compare the exact pre-operation names: no ZIP or private stage may remain.
+    let entries = || {
+        let mut names = fs::read_dir(&f.root)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    };
+    let before = entries();
+    assert_eq!(
+        before,
+        vec![
+            std::ffi::OsString::from(".lycheedev-locks"),
+            std::ffi::OsString::from("home"),
+        ]
+    );
+    let error = super::super::dispatch(&f.bundle(&[aid, bid])).unwrap_err();
+    assert!(!f.root.join("bundle.zip").exists(), "{error:?}");
+    assert_eq!(entries(), before, "{error:?}");
     f.cleanup();
 }
 #[test]

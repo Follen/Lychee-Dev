@@ -11,7 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 pub(super) struct GoSocks<C> {
     pub(super) inner: C,
     pub(super) proxy: Uri,
-    pub(super) host: String,
+    pub(super) host: Vec<u8>,
     pub(super) port: String,
     pub(super) credentials: Option<(Vec<u8>, Vec<u8>)>,
 }
@@ -84,13 +84,16 @@ where
             // With no configured Authenticate callback, fixed Go accepts every
             // selected method except FF and proceeds. Preserve that ordering.
             buffer[..3].copy_from_slice(&[5, 1, 0]);
-            let size = match host.parse::<std::net::IpAddr>() {
-                Ok(std::net::IpAddr::V4(ip)) => {
+            let size = match std::str::from_utf8(&host)
+                .ok()
+                .and_then(|host| host.parse::<std::net::IpAddr>().ok())
+            {
+                Some(std::net::IpAddr::V4(ip)) => {
                     buffer[3] = 1;
                     buffer[4..8].copy_from_slice(&ip.octets());
                     8
                 }
-                Ok(std::net::IpAddr::V6(ip)) => match ip.to_ipv4_mapped() {
+                Some(std::net::IpAddr::V6(ip)) => match ip.to_ipv4_mapped() {
                     Some(ip) => {
                         buffer[3] = 1;
                         buffer[4..8].copy_from_slice(&ip.octets());
@@ -102,13 +105,13 @@ where
                         20
                     }
                 },
-                Err(_) => {
+                None => {
                     if host.len() > 255 {
                         return Err(invalid("FQDN too long").into());
                     }
                     buffer[3] = 3;
                     buffer[4] = host.len() as u8;
-                    buffer[5..5 + host.len()].copy_from_slice(host.as_bytes());
+                    buffer[5..5 + host.len()].copy_from_slice(&host);
                     5 + host.len()
                 }
             };

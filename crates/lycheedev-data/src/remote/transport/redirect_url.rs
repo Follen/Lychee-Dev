@@ -131,23 +131,10 @@ impl RedirectUrl {
         text
     }
     pub(crate) fn wire(&self) -> Result<String> {
-        if self.authority.is_none() {
-            return Err(error(
-                "wago_http",
-                5,
-                "unsupported opaque or hostless redirect URL",
-            ));
-        }
-        // URL-derived Basic is supplied from exact bytes by authorization();
-        // reqwest must never decode userinfo through its UTF-8-only helper.
-        let text = self.text(false);
-        if !matches!(self.scheme.as_str(), "http" | "https") {
-            return Err(error("wago_http", 5, "Hotfix URL requires HTTP or HTTPS"));
-        }
-        // The transport keeps Go's wire, dial and TLS identities separately.
-        // WHATWG host normalization must not choose a different endpoint.
-        super::raw_uri::target(&text)?;
-        Ok(text)
+        // Parse-valid URLs reach RoundTrip after the previous redirect drain.
+        // Hostless/unsupported schemes and wire Host errors are transport
+        // failures; do not manufacture an earlier URL parse rejection here.
+        Ok(self.text(false))
     }
     pub(crate) fn authorization(&self) -> Result<Option<String>> {
         use base64::{Engine as _, engine::general_purpose::STANDARD};

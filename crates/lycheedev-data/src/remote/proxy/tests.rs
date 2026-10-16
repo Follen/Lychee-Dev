@@ -147,7 +147,7 @@ fn proxy_schemes_and_go_remote_socks_dns() {
         ("socks5h://proxy.invalid:1081", "socks5h", Some(1081)),
         (
             "unrecognized://user:secret@proxy.invalid:8123",
-            "http",
+            "unrecognized",
             Some(8123),
         ),
     ] {
@@ -179,11 +179,12 @@ fn malformed_configuration_order_and_redaction() {
             .unwrap()
             .is_none()
     );
-    let error = Policy::new("ftp://user:secret@proxy.invalid".into(), "")
-        .select("https://cdn.example/x")
-        .unwrap_err();
-    assert_eq!(error.code, "records.remote_http");
-    assert!(!error.message.contains("secret"));
+    let selected = Policy::new("ftp://user:secret@proxy.invalid".into(), "")
+        .select_raw("https://cdn.example/x")
+        .unwrap()
+        .unwrap();
+    assert_eq!(selected.scheme, "ftp");
+    assert_eq!(selected.authority, "user:secret@proxy.invalid");
     // Go's second parse accepts this as host "http:" and path "//[bad".
     let parts = proxy_parts("http://http://[bad").unwrap();
     assert_eq!(parts.host, "http:");
