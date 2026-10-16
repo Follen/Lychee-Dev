@@ -109,3 +109,62 @@ fn listfile_owner_row_bound_and_original_deadline_precede_missing_classification
     );
     m.close().unwrap();
 }
+
+#[test]
+fn owner_read_busy_observes_independent_check_without_replacing_invocation() {
+    let f = Fixture::new();
+    let control = OperationControl::default();
+    let owner = Metadata::open_controlled(&f.0, true, &control).unwrap();
+    let lock = Connection::open(f.0.join("state/toolkit.sqlite")).unwrap();
+    lock.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    let busy = std::cell::Cell::new(false);
+    let error = owner
+        .read_document_on_owner_controlled_impl(
+            "x",
+            &control,
+            &mut || {
+                if busy.get() {
+                    Err(ToolkitError::new(
+                        "records.query_resource_budget",
+                        "independent deadline",
+                        3,
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+            &mut || busy.set(true),
+        )
+        .unwrap_err();
+    assert!(busy.get());
+    assert_eq!(
+        (error.code.as_str(), error.exit_code),
+        ("records.query_resource_budget", 3)
+    );
+    control.check().unwrap();
+    assert!(control.stop_cause().unwrap().is_none());
+    lock.execute_batch("ROLLBACK").unwrap();
+    drop(lock);
+    owner.close().unwrap();
+}
+#[test]
+fn owner_read_preserves_original_stop_before_independent_stop() {
+    let f = Fixture::new();
+    let control = OperationControl::default();
+    let owner = Metadata::open_controlled(&f.0, true, &control).unwrap();
+    control.tracked_cancel_handle().unwrap().cancel();
+    let calls = std::cell::Cell::new(0);
+    let error = owner
+        .read_document_on_owner_controlled_with_check("missing", &control, || {
+            calls.set(calls.get() + 1);
+            Err(ToolkitError::new(
+                "records.query_resource_budget",
+                "independent",
+                3,
+            ))
+        })
+        .unwrap_err();
+    assert_eq!(error.code, "command.cancelled");
+    assert_eq!(calls.get(), 0);
+    owner.close().unwrap();
+}

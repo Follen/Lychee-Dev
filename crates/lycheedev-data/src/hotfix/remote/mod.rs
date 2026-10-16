@@ -1,4 +1,4 @@
-//! Explicit Wago and Raidbots providers from fixed Go v3.2.0. No fallback source.
+//! Explicit Wago and Raidbots providers from fixed Go v3.2.3. No fallback source.
 use crate::{
     capture, fault,
     resource::{Budget, Cost},
@@ -85,11 +85,14 @@ fn budget(inv: &Invocation) -> Budget {
     }
     Budget::controlled(limits, inv.control.deadline(), inv.control.clone())
 }
-fn pin(inv: &Invocation, change: selection::ChangePin) -> Result<String> {
+fn pin(inv: &Invocation, change: selection::ChangePin, budget: &Budget) -> Result<String> {
     inv.control.check()?;
     let parent = inv.flag("--snapshot").unwrap_or_default();
     if !parent.is_empty() {
-        let existing = selection::load_pinned(&inv.home, parent)?;
+        let existing =
+            selection::load_pinned_controlled_with_check(&inv.home, parent, &inv.control, || {
+                budget.check()
+            })?;
         inv.control.check()?;
         if let Some(pinned) = &existing.changes {
             if *pinned != change {
@@ -102,7 +105,7 @@ fn pin(inv: &Invocation, change: selection::ChangePin) -> Result<String> {
             return Ok(existing.id);
         }
     }
-    Ok(selection::pin_selection_controlled(
+    Ok(selection::pin_selection_controlled_with_check(
         &inv.home,
         selection::SelectionSpec {
             parent: parent.into(),
@@ -110,6 +113,7 @@ fn pin(inv: &Invocation, change: selection::ChangePin) -> Result<String> {
             ..Default::default()
         },
         &inv.control,
+        || budget.check(),
     )?
     .id)
 }
@@ -119,7 +123,9 @@ fn run(inv: &Invocation, budget: &Budget) -> Result<RemoteResult> {
     }
     let query = Query::from_invocation(inv)?;
     inv.control.check()?;
-    lycheedev_core::workspace::open(&inv.home)?;
+    lycheedev_core::workspace::open_controlled_with_check(&inv.home, &inv.control, || {
+        budget.check()
+    })?;
     let mut result = match inv.required("--source")? {
         "raidbots" => snapshot::query(inv, query, budget)?,
         "wago" => wago::query(
@@ -153,7 +159,7 @@ fn run(inv: &Invocation, budget: &Budget) -> Result<RemoteResult> {
             ));
         }
     };
-    result.snapshot = pin(inv, result.change.clone())?;
+    result.snapshot = pin(inv, result.change.clone(), budget)?;
     if result.change.provider == "wago" {
         let raw = go_bytes(&result, budget, 32 << 20)?;
         result.capture = Some(evidence::commit_capture_budgeted(
@@ -188,24 +194,28 @@ fn outcome(result: &RemoteResult, data: Value) -> Outcome {
 pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
     let budget = budget(inv);
     let result = run(inv, &budget)?;
-    let data = if inv.flag("--encoding") == Some("csv") {
-        if inv.flag("--output").unwrap_or_default().is_empty() {
-            return Err(ToolkitError::arguments(
-                "data hotfix --encoding csv requires --output",
-            ));
-        }
-        output::csv(inv, &result, &budget)?
-    } else {
-        serde_json::to_value(&result)?
-    };
-    Ok(outcome(&result, data))
+    let presented = (|| {
+        check_scope(inv, &budget)?;
+        let data = if inv.flag("--encoding") == Some("csv") {
+            if inv.flag("--output").unwrap_or_default().is_empty() {
+                return Err(ToolkitError::arguments(
+                    "data hotfix --encoding csv requires --output",
+                ));
+            }
+            output::csv(inv, &result, &budget)?
+        } else {
+            serde_json::to_value(&result)?
+        };
+        finish_scope(Ok(outcome(&result, data)), inv, &budget)
+    })();
+    committed_result(presented, &result)
 }
 /// The CLI's special route emits the fixed typed record stream, not a generic envelope.
 pub fn stream(inv: &Invocation, emit: &mut impl FnMut(&[u8]) -> Result<()>) -> Result<Outcome> {
     let budget = budget(inv);
     let result = run(inv, &budget)?;
-    output::jsonl(&result, &inv.control, &budget, emit)
-        .map_err(|error| fault("command.output_failed", 5, error.message))?;
+    let presented = output::jsonl(&result, &inv.control, &budget, emit).map_err(output_failure);
+    committed_result(presented, &result)?;
     Ok(outcome(&result, Value::Null))
 }
 
@@ -218,7 +228,56 @@ pub fn render(
 ) -> Result<Outcome> {
     let budget = budget(inv);
     let result = run(inv, &budget)?;
-    output::render(inv, &result, timeout, out, &budget)
-        .map_err(|error| fault("command.output_failed", 5, error.message))?;
+    let presented = output::render(inv, &result, timeout, out, &budget).map_err(output_failure);
+    committed_result(presented, &result)?;
     Ok(outcome(&result, Value::Null))
+}
+
+fn check_scope(inv: &Invocation, budget: &Budget) -> Result<()> {
+    inv.control.check()?;
+    budget.check()
+}
+pub(super) fn finish_stop<T>(result: Result<T>, stop: Result<()>) -> Result<T> {
+    if let (Err(a), Err(b)) = (&result, &stop) {
+        if a.code == b.code
+            && a.exit_code == b.exit_code
+            && a.message == b.message
+            && a.details == b.details
+        {
+            return result;
+        }
+    }
+    lycheedev_core::metadata::historical_write::finish_historical(result, stop)
+}
+fn finish_scope<T>(result: Result<T>, inv: &Invocation, budget: &Budget) -> Result<T> {
+    finish_stop(finish_stop(result, inv.control.check()), budget.check())
+}
+fn close_metadata<T>(
+    metadata: lycheedev_core::metadata::Metadata,
+    result: Result<T>,
+    inv: &Invocation,
+    budget: &Budget,
+) -> Result<T> {
+    finish_scope(
+        lycheedev_core::metadata::historical_write::finish_historical(result, metadata.close()),
+        inv,
+        budget,
+    )
+}
+#[cfg(test)]
+mod control_tests;
+
+fn output_failure(original: ToolkitError) -> ToolkitError {
+    fault("command.output_failed", 5, original.message.clone())
+        .with_details(json!({"originalCause":original}))
+}
+fn committed_result<T>(result: Result<T>, reading: &RemoteResult) -> Result<T> {
+    result.map_err(|mut error| {
+        if let Some(id) = reading.capture.as_ref().and_then(|capture| capture["id"].as_str()) {
+            let primary = error.clone();
+            error.details = json!({"schema":"lycheedev.stream-committed-error.v1", "primary":primary, "completedCaptures":[id]});
+            error.message.push_str(&format!("\nhotfix capture already committed: {id}"));
+        }
+        error
+    })
 }

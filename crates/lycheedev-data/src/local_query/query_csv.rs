@@ -13,7 +13,7 @@ use lycheedev_core::{
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{borrow::Cow, path::Path, thread, time::Duration};
+use std::{borrow::Cow, path::Path};
 
 const MAX_BYTES: usize = 32 << 20;
 #[cfg(test)]
@@ -53,6 +53,29 @@ fn export_after_data(
     budget: &Budget,
     after_data: impl FnOnce() -> Result<()>,
 ) -> Result<(Value, Value)> {
+    let outcome = export_after_data_inner(inv, snapshot, query, result, budget, after_data);
+    outcome.map_err(|mut error| {
+        // The caller supplies a successfully committed query capture. If CSV
+        // commit is unknown, retain its typed Core publication below primary;
+        // never invent the pending CSV ID in this confirmed list.
+        if let Some(query_id) = query["id"].as_str().filter(|id| !id.is_empty()) {
+            if error.details.get("schema").and_then(Value::as_str) != Some("lycheedev.csv-committed-error.v1") {
+                let primary = error.clone();
+                error.details = json!({"schema":"lycheedev.csv-committed-error.v1", "primary":primary, "completedCaptures":[query_id]});
+                error.message.push_str(&format!("\nquery capture already committed: {query_id}"));
+            }
+        }
+        error
+    })
+}
+fn export_after_data_inner(
+    inv: &Invocation,
+    snapshot: &str,
+    query: &Value,
+    result: &QueryResult,
+    budget: &Budget,
+    after_data: impl FnOnce() -> Result<()>,
+) -> Result<(Value, Value)> {
     if snapshot.is_empty() {
         return Err(fault("records.export_path", 2, "Missing snapshot"));
     }
@@ -64,78 +87,115 @@ fn export_after_data(
     let overwrite = inv.flag_bool("--overwrite");
     // Match Go export ordering: both preflights precede encoding and capture.
     let sidecar_path = format!("{path}.manifest.json");
-    let (data, sidecar) = output::destination_pair(
-        &inv.home,
+    let (data, sidecar) = output::destination_pair_scoped(
+        inv,
         Path::new(path),
         Path::new(&sidecar_path),
         overwrite,
+        budget,
     )?;
-    let raw = encode(&result.columns, &result.rows, budget, MAX_BYTES)?;
-    let csv = evidence::commit_capture_budgeted_with_dependencies(
-        &inv.home,
-        evidence::CaptureInput {
-            bytes: &raw,
-            maximum_bytes: MAX_BYTES,
-            media_type: "text/csv; charset=utf-8",
-            provenance: json!({"kind":"data-query-csv","locator":query_id,"snapshot":snapshot}),
+    let mut published = false;
+    let mut committed_csv = None;
+    let result = (|| {
+        let raw = encode_scoped(
+            &result.columns,
+            &result.rows,
+            budget,
+            MAX_BYTES,
+            Some(&inv.control),
+        )?;
+        let csv = evidence::commit_capture_budgeted_with_dependencies(
+            &inv.home,
+            evidence::CaptureInput {
+                bytes: &raw,
+                maximum_bytes: MAX_BYTES,
+                media_type: "text/csv; charset=utf-8",
+                provenance: json!({"kind":"data-query-csv","locator":query_id,"snapshot":snapshot}),
+                complete: result.complete,
+                truncated: false,
+            },
+            &[query_id],
+            &inv.control,
+            budget,
+        )?;
+        let csv_id = csv["id"]
+            .as_str()
+            .ok_or_else(|| fault("records.internal", 8, "Missing CSV capture"))?;
+        committed_csv = Some(csv_id.to_owned());
+        let manifest = Manifest {
+            schema: "lycheedev.query-csv.v1",
+            snapshot,
+            output: output::ordinary(data.path()).to_string_lossy().into_owned(),
+            sha256: digest_scoped(&raw, budget, Some(&inv.control))?,
+            bytes: raw.len(),
+            columns: result.plan.is_none().then_some(result.columns.as_slice()),
+            rows: result.rows.len(),
+            query_capture: query_id,
+            csv_capture: csv_id,
             complete: result.complete,
-            truncated: false,
-        },
-        &[query_id],
-        &inv.control,
-        budget,
-    )?;
-    let csv_id = csv["id"]
-        .as_str()
-        .ok_or_else(|| fault("records.internal", 8, "Missing CSV capture"))?;
-    let manifest = Manifest {
-        schema: "lycheedev.query-csv.v1",
-        snapshot,
-        output: output::ordinary(data.path()).to_string_lossy().into_owned(),
-        sha256: digest(&raw, budget)?,
-        bytes: raw.len(),
-        columns: result.plan.is_none().then_some(result.columns.as_slice()),
-        rows: result.rows.len(),
-        query_capture: query_id,
-        csv_capture: csv_id,
-        complete: result.complete,
-    };
-    let mut sidecar_raw = capture::json_bytes_with_formatter(
-        &manifest,
-        budget,
-        MAX_BYTES,
-        limit,
-        serde_json::ser::PrettyFormatter::with_indent(b"  "),
-    )?;
-    // Manifest strings use Go MarshalIndent's HTML/JS escapes. Structural
-    // pretty formatting alone is insufficient; escape the serialized bytes.
-    let sidecar_raw = escape_manifest(&mut sidecar_raw, budget)?;
-    let public_bytes = capture::json_size(&manifest, budget)?;
-    budget.charge(Cost::metadata(
-        public_bytes.saturating_mul(4).saturating_add(4096),
-    ))?;
-    let public = serde_json::to_value(&manifest)?;
-    publish_pair_after_data(
-        inv,
-        &data,
-        &sidecar,
-        overwrite,
-        &raw,
-        &sidecar_raw,
-        budget,
-        after_data,
-    )?;
-    Ok((public, csv))
+        };
+        let mut sidecar_raw = capture::json_bytes_with_formatter(
+            &manifest,
+            budget,
+            MAX_BYTES,
+            limit,
+            serde_json::ser::PrettyFormatter::with_indent(b"  "),
+        )?;
+        // Manifest strings use Go MarshalIndent's HTML/JS escapes. Structural
+        // pretty formatting alone is insufficient; escape the serialized bytes.
+        inv.control.check()?;
+        let sidecar_raw = escape_manifest_scoped(&mut sidecar_raw, budget, Some(&inv.control))?;
+        inv.control.check()?;
+        let public_bytes = capture::json_size(&manifest, budget)?;
+        inv.control.check()?;
+        budget.charge(Cost::metadata(
+            public_bytes.saturating_mul(4).saturating_add(4096),
+        ))?;
+        let public = serde_json::to_value(&manifest)?;
+        publish_pair_after_data(
+            inv,
+            &data,
+            &sidecar,
+            overwrite,
+            &raw,
+            &sidecar_raw,
+            budget,
+            after_data,
+        )?;
+        published = true;
+        Ok((public, csv))
+    })();
+    let result = output::finish_pair(inv, data, sidecar, budget, result, published);
+    result.map_err(|mut error| {
+        if let Some(csv_id) = committed_csv {
+            let primary = error.clone();
+            error.details = json!({"schema":"lycheedev.csv-committed-error.v1", "primary":primary,
+                "completedCaptures":[query_id, csv_id]});
+            error.message.push_str(&format!(
+                "\nquery/CSV captures already committed: {query_id}, {csv_id}"
+            ));
+        }
+        error
+    })
 }
 
+#[cfg(test)]
 fn escape_manifest(raw: &mut Vec<u8>, budget: &Budget) -> Result<Vec<u8>> {
+    escape_manifest_scoped(raw, budget, None)
+}
+fn escape_manifest_scoped(
+    raw: &mut Vec<u8>,
+    budget: &Budget,
+    control: Option<&lycheedev_core::control::OperationControl>,
+) -> Result<Vec<u8>> {
     let text = std::str::from_utf8(raw)
         .map_err(|_| fault("records.internal", 8, "Invalid manifest UTF-8"))?;
-    let mut out = Buffer::new(budget, MAX_BYTES);
+    let mut out = Buffer::new(budget, MAX_BYTES, control);
     let mut start = 0;
     let mut checked = 0;
     for (at, ch) in text.char_indices() {
         if at - checked >= 4096 {
+            out.check()?;
             budget.charge(Cost::work(at - checked))?;
             checked = at;
         }
@@ -160,7 +220,7 @@ pub(crate) fn publish_pair_after_data(
     inv: &Invocation,
     data: &Destination,
     sidecar: &Destination,
-    overwrite: bool,
+    _overwrite: bool,
     raw: &[u8],
     manifest: &[u8],
     budget: &Budget,
@@ -176,48 +236,88 @@ pub(crate) fn publish_pair_after_data(
         .ok_or_else(|| fault("records.export_path", 2, "Missing output name"))?;
     let resource = format!("sql-csv:{}", name.to_string_lossy().to_lowercase());
     let scope = parent.join(".lycheedev-locks");
-    let lease = loop {
-        budget.check()?;
-        match ExclusiveLock::resource_controlled(&scope, &resource, &inv.control) {
-            Ok(lease) => break lease,
-            Err(error) if error.code == "workspace.busy" => {
-                thread::sleep(Duration::from_millis(25));
-            }
-            Err(error) => return Err(error),
-        }
-    };
+    let lease = ExclusiveLock::resource_wait_controlled_with_check(
+        &scope,
+        &resource,
+        &inv.control,
+        || budget.check(),
+    )?;
+    let mut data_state = lycheedev_core::storage::StagedPublication::NotPublished;
+    let mut manifest_state = lycheedev_core::storage::StagedPublication::NotPublished;
     let result = (|| {
+        inv.control.check()?;
         budget.check()?;
-        // Original parent handles remain live, so this recheck cannot silently
-        // follow a renamed/replaced parent. Both checks precede the first write.
-        let _data_check = Destination::open(data.path(), overwrite)
-            .map_err(|e| output::publication_error(e, data.path()))?;
-        let _sidecar_check = Destination::open(sidecar.path(), overwrite)
-            .map_err(|e| output::publication_error(e, sidecar.path()))?;
-        publish(data, raw, budget)?;
+        // Recheck the original parents under the lease. Do not acquire new
+        // unchecked owners or silently follow replaced directory paths.
+        output::check_destination_scoped(inv, data, budget)?;
+        output::check_destination_scoped(inv, sidecar, budget)?;
+        // The two native copies are sequential and share one 64 KiB stack
+        // buffer allowance. Private safety storage is refunded after both.
+        let _buffer = budget.reserve_retained(65536)?;
+        output::publish_reader_scoped(
+            inv,
+            data,
+            &mut std::io::Cursor::new(raw),
+            raw.len() as u64,
+            raw.len().max(MAX_BYTES),
+            Some(budget),
+            &mut |state| data_state = state,
+        )?;
         after_data()?;
+        inv.control.check()?;
         budget.check()?;
-        publish(sidecar, manifest, budget)
+        output::publish_reader_scoped(
+            inv,
+            sidecar,
+            &mut std::io::Cursor::new(manifest),
+            manifest.len() as u64,
+            manifest.len().max(MAX_BYTES),
+            Some(budget),
+            &mut |state| manifest_state = state,
+        )
     })();
-    let close = lease.close();
-    result.and(close)
+    let result =
+        lycheedev_core::metadata::historical_write::finish_historical(result, lease.close());
+    let result = finish_pair_check(result, inv.control.check());
+    let result = finish_pair_check(result, budget.check());
+    result.map_err(|error| {
+        output::publication_context(
+            output::publication_context(error, data.path(), data_state),
+            sidecar.path(),
+            manifest_state,
+        )
+    })
+}
+fn finish_pair_check<T>(result: Result<T>, stop: Result<()>) -> Result<T> {
+    if let (Err(primary), Err(stop)) = (&result, &stop) {
+        if primary.code == stop.code
+            && primary.exit_code == stop.exit_code
+            && primary.message == stop.message
+            && primary.details == stop.details
+        {
+            return result;
+        }
+    }
+    lycheedev_core::metadata::historical_write::finish_historical(result, stop)
 }
 
-fn publish(destination: &Destination, raw: &[u8], budget: &Budget) -> Result<()> {
-    destination
-        .publish(raw, raw.len().max(MAX_BYTES) as u64, || {
-            budget
-                .check()
-                .map_err(|error| std::io::Error::new(std::io::ErrorKind::Interrupted, error))
-        })
-        .map_err(|error| output::publication_error(error, destination.path()))
-}
-fn digest(raw: &[u8], budget: &Budget) -> Result<String> {
+fn digest_scoped(
+    raw: &[u8],
+    budget: &Budget,
+    control: Option<&lycheedev_core::control::OperationControl>,
+) -> Result<String> {
     let mut hash = Sha256::new();
     for chunk in raw.chunks(65536) {
+        if let Some(control) = control {
+            control.check()?;
+        }
         budget.charge(Cost::work(chunk.len()))?;
         hash.update(chunk);
     }
+    if let Some(control) = control {
+        control.check()?;
+    }
+    budget.check()?;
     Ok(format!("{:x}", hash.finalize()))
 }
 fn limit() -> ToolkitError {
@@ -228,19 +328,31 @@ struct Buffer<'a> {
     retained: Option<RetainedReservation<'a>>,
     budget: &'a Budget,
     maximum: usize,
+    control: Option<&'a lycheedev_core::control::OperationControl>,
 }
 impl<'a> Buffer<'a> {
-    fn new(budget: &'a Budget, maximum: usize) -> Self {
+    fn new(
+        budget: &'a Budget,
+        maximum: usize,
+        control: Option<&'a lycheedev_core::control::OperationControl>,
+    ) -> Self {
         Self {
             raw: Vec::new(),
             retained: None,
             budget,
             maximum,
+            control,
         }
+    }
+    fn check(&self) -> Result<()> {
+        if let Some(control) = self.control {
+            control.check()?;
+        }
+        self.budget.check()
     }
     fn append(&mut self, bytes: &[u8]) -> Result<()> {
         for chunk in bytes.chunks(4096) {
-            self.budget.check()?;
+            self.check()?;
             let end = self
                 .raw
                 .len()
@@ -266,16 +378,17 @@ impl<'a> Buffer<'a> {
         Ok(())
     }
     fn finish(mut self) -> Result<Vec<u8>> {
-        self.budget.check()?;
+        self.check()?;
         if let Some(retained) = self.retained.take() {
             retained.commit();
         }
         Ok(self.raw)
     }
     fn cell(&mut self, value: &str) -> Result<()> {
-        self.budget.check()?;
+        self.check()?;
         let mut quote = value == "\\." || value.chars().next().is_some_and(char::is_whitespace);
         for chunk in value.as_bytes().chunks(4096) {
+            self.check()?;
             self.budget.charge(Cost::work(chunk.len() + 1))?;
             quote |= chunk
                 .iter()
@@ -287,7 +400,7 @@ impl<'a> Buffer<'a> {
         self.append(b"\"")?;
         let mut start = 0;
         for (index, chunk) in value.as_bytes().chunks(4096).enumerate() {
-            self.budget.check()?;
+            self.check()?;
             for (offset, byte) in chunk.iter().enumerate() {
                 if *byte == b'"' {
                     let at = index * 4096 + offset;
@@ -305,13 +418,24 @@ fn scalar(value: &Scalar) -> Result<Cow<'_, str>> {
     crate::relational::scalar_text(value)
 }
 
+#[cfg(test)]
 fn encode(
     columns: &[String],
     rows: &[Vec<Scalar>],
     budget: &Budget,
     maximum: usize,
 ) -> Result<Vec<u8>> {
-    let mut out = Buffer::new(budget, maximum);
+    encode_scoped(columns, rows, budget, maximum, None)
+}
+fn encode_scoped(
+    columns: &[String],
+    rows: &[Vec<Scalar>],
+    budget: &Budget,
+    maximum: usize,
+    control: Option<&lycheedev_core::control::OperationControl>,
+) -> Result<Vec<u8>> {
+    let mut out = Buffer::new(budget, maximum, control);
+    out.check()?;
     for (index, column) in columns.iter().enumerate() {
         if index != 0 {
             out.append(b",")?;
@@ -320,7 +444,7 @@ fn encode(
     }
     out.append(b"\n")?;
     for row in rows {
-        budget.check()?;
+        out.check()?;
         if row.len() != columns.len() {
             return Err(fault(
                 "records.sql_csv_row_width",
@@ -344,6 +468,7 @@ mod tests {
     use super::*;
     use std::{
         sync::{Arc, atomic::AtomicBool},
+        thread,
         time::{Duration, Instant},
     };
     fn budget() -> Budget {
@@ -768,5 +893,111 @@ mod tests {
             assert_ne!(first_manifest["sha256"], final_manifest["sha256"]);
             assert_eq!(std::fs::read(&path).unwrap(), b"value\n2\n");
         });
+    }
+    #[test]
+    fn csv_staged_failures_keep_exact_confirmed_capture_ids_and_output_fact() {
+        let fx = fixture();
+        let (query, mut rows) = query_capture(&fx, 44);
+        let path = fx.root.join("typed-failure.csv");
+        let inv = fx.invocation("data sql", &[("--output", path.to_str().unwrap())]);
+        // Query exists, but invalid row width fails before the CSV capture.
+        rows.rows[0].clear();
+        let before = export(&inv, &fx.pin, &query, &rows, &budget()).unwrap_err();
+        assert_eq!(before.code, "records.sql_csv_row_width");
+        assert_eq!(before.details["completedCaptures"], json!([query["id"]]));
+        assert!(!path.exists());
+        rows.rows[0].push(Scalar::Int(44));
+        let calls = std::cell::Cell::new(0);
+        let after = export_after_data(&inv, &fx.pin, &query, &rows, &budget(), || {
+            calls.set(calls.get() + 1);
+            Err(ToolkitError::new(
+                "fixture.after_data",
+                "after CSV publication",
+                5,
+            ))
+        })
+        .unwrap_err();
+        assert_eq!(calls.get(), 1);
+        assert_eq!(after.code, "fixture.after_data");
+        let ids = after.details["completedCaptures"].as_array().unwrap();
+        assert_eq!(ids.len(), 2);
+        assert_eq!(ids[0], query["id"]);
+        let csv = evidence::read_capture(&fx.home, ids[1].as_str().unwrap()).unwrap();
+        assert_eq!(
+            evidence::read_blob(&fx.home, &csv["blob"], MAX_BYTES).unwrap(),
+            b"value\n44\n"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), b"value\n44\n");
+        assert!(!path.with_extension("csv.manifest.json").exists());
+        // Public serialization retains the complete original typed error and
+        // both confirmed IDs. CLI envelope routing is separately exercised.
+        let mut wire = Vec::new();
+        lycheedev_core::public_json::write_serializable_line(&mut wire, &after).unwrap();
+        let decoded: Value = serde_json::from_slice(&wire).unwrap();
+        assert_eq!(decoded["details"], after.details);
+        assert!(after.message.contains("already published"));
+        std::fs::rename(&path, path.with_extension("closed")).unwrap();
+        let lease = ExclusiveLock::resource(
+            &fx.root.join(".lycheedev-locks"),
+            "sql-csv:typed-failure.csv",
+        )
+        .unwrap();
+        lease.close().unwrap();
+    }
+    #[test]
+    fn csv_pair_independent_budget_deadline_stops_waiting_and_closes_owners() {
+        let fx = fixture();
+        let inv = fx.invocation("data sql", &[]);
+        let path = fx.root.join("waiting.csv");
+        let manifest = fx.root.join("waiting.csv.manifest.json");
+        let prepare_budget = budget();
+        let (data, sidecar) =
+            output::destination_pair_scoped(&inv, &path, &manifest, true, &prepare_budget).unwrap();
+        let held =
+            ExclusiveLock::resource(&fx.root.join(".lycheedev-locks"), "sql-csv:waiting.csv")
+                .unwrap();
+        let independent = Budget::new(
+            Cost::defaults(),
+            Instant::now() + Duration::from_millis(100),
+            None,
+        );
+        let result = publish_pair_after_data(
+            &inv,
+            &data,
+            &sidecar,
+            true,
+            b"x",
+            b"{}",
+            &independent,
+            || panic!("no data can publish while lease held"),
+        );
+        let error =
+            output::finish_pair(&inv, data, sidecar, &independent, result, false).unwrap_err();
+        assert_eq!(
+            (error.code.as_str(), error.exit_code),
+            ("records.query_resource_budget", 3)
+        );
+        inv.control.check().unwrap();
+        held.close().unwrap();
+        assert!(!path.exists());
+        assert!(!manifest.exists());
+    }
+    #[test]
+    fn csv_encoding_and_hash_observe_original_scope_with_independent_budget() {
+        let control = lycheedev_core::control::OperationControl::default();
+        let independent = budget();
+        control.tracked_cancel_handle().unwrap().cancel();
+        let error = encode_scoped(
+            &["value".into()],
+            &[vec![Scalar::Int(1)]],
+            &independent,
+            MAX_BYTES,
+            Some(&control),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "command.cancelled");
+        let error = digest_scoped(b"body", &independent, Some(&control)).unwrap_err();
+        assert_eq!(error.code, "command.cancelled");
+        independent.check().unwrap();
     }
 }

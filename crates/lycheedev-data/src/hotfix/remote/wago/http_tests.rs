@@ -1317,3 +1317,30 @@ fn tenth_drain_limit_has_no_shared_network_quota_competitor() {
     assert_eq!(budget.snapshot().unwrap(), Cost::default());
     assert_eq!(budget.logical_snapshot().unwrap(), Cost::default());
 }
+
+#[test]
+fn independent_budget_cancel_drops_header_and_body_requests_without_hop_accounting() {
+    for body_started in [false, true] {
+        let original = OperationControl::uncancelable(Instant::now() + Duration::from_secs(10));
+        let independent = OperationControl::default();
+        let cancel = independent.tracked_cancel_handle().unwrap();
+        let budget = Budget::controlled(Cost::defaults(), independent.deadline(), independent);
+        let (tx, rx) = mpsc::channel();
+        let server = Server::new(1, move |_, stream| {
+            if body_started {
+                send(stream, 200, "Content-Length: 100\r\n", b"abc");
+            }
+            cancel.cancel();
+            let _ = tx.send(socket_closed(stream));
+        });
+        let failure = PublicFetcher
+            .fetch(&server.url, &original, &budget)
+            .unwrap_err();
+        assert_eq!(failure.code, "command.cancelled");
+        original.check().unwrap();
+        assert!(rx.recv_timeout(Duration::from_secs(3)).unwrap());
+        assert_eq!(server.finish().len(), 1);
+        assert_eq!(budget.snapshot().unwrap().network_bytes, 0);
+        assert_eq!(budget.snapshot().unwrap().network_requests, 0);
+    }
+}

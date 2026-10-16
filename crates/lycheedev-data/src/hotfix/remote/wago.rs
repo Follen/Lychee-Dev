@@ -69,7 +69,33 @@ impl Fetcher for PublicFetcher {
         // Go returns ctx.Err directly only before entering client.Do.
         control.check()?;
         let deadline = transport::request_deadline(control, None).map_err(inflight_error)?;
-        transport::run(fetch_http(url, control, budget, deadline)).map_err(inflight_error)
+        transport::run(with_budget_check(
+            async {
+                fetch_http(url, control, budget, deadline)
+                    .await
+                    .map_err(inflight_error)
+            },
+            control,
+            budget,
+        ))
+    }
+}
+// This provider's Budget is a safety ledger, not Go's successful-page fetch
+// counters. Observe it without adding shared transport hop/byte caps. Dropping
+// this one future cancels the same in-flight request in the owned runtime.
+async fn with_budget_check<T>(
+    future: impl std::future::Future<Output = Result<T>>,
+    control: &OperationControl,
+    budget: &Budget,
+) -> Result<T> {
+    tokio::pin!(future);
+    loop {
+        control.check().map_err(inflight_error)?;
+        budget.check()?;
+        tokio::select! { biased;
+            result = &mut future => return finish_stop(finish_stop(result,control.check().map_err(inflight_error)),budget.check()),
+            _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {},
+        }
     }
 }
 async fn fetch_http(
@@ -251,38 +277,88 @@ fn corrupted(e: ToolkitError) -> ToolkitError {
     ) {
         e
     } else {
-        error("cache_corrupt", 4, e.message)
+        mapped_cause("cache_corrupt", 4, e)
     }
+}
+fn terminal(e: &ToolkitError) -> bool {
+    stopped(e) || e.code == "records.query_resource_budget"
+}
+fn mapped_cause(kind: &str, exit: i32, cause: ToolkitError) -> ToolkitError {
+    if terminal(&cause) {
+        return cause;
+    }
+    let mut mapped = error(kind, exit, cause.message.clone());
+    mapped.details = json!({"originalCause":cause});
+    mapped
+}
+fn pure(e: &ToolkitError, code: &str) -> bool {
+    e.code == code && e.details.is_null()
 }
 fn load(
     inv: &Invocation,
     identity: &Identity,
     budget: &Budget,
 ) -> Result<Option<(Receipt, Vec<u8>)>> {
-    inv.control.check()?;
+    check_scope(inv, budget)?;
     let key = format!("hotfix-wago-page/{}", identity.key(budget)?);
-    let raw = match Metadata::read_raw_controlled(&inv.home, &key, &inv.control) {
-        Ok(v) => v,
-        Err(e) if e.code == "vault.record_missing" => return Ok(None),
-        Err(e) => return Err(e),
-    };
-    let receipt: Receipt = serde_json::from_slice(&raw).map_err(|_| {
-        error(
-            "cache_corrupt",
-            4,
-            format!("receipt identity mismatch for page {}", identity.page),
+    let metadata =
+        match Metadata::open_controlled_with_check(&inv.home, false, &inv.control, || {
+            budget.check()
+        }) {
+            Ok(owner) => owner,
+            Err(e) if pure(&e, "vault.record_missing") => return Ok(None),
+            Err(e) => return Err(e),
+        };
+    let result = (|| {
+        let raw =
+            match metadata
+                .read_document_on_owner_controlled_with_check(&key, &inv.control, || budget.check())
+            {
+                Ok(v) => v.bytes,
+                Err(e) if pure(&e, "vault.record_missing") => return Ok(None),
+                Err(e) => return Err(e),
+            };
+        let receipt = receipt_wire::decode(&raw, inv, budget).map_err(|e| {
+            if terminal(&e) {
+                e
+            } else {
+                mapped_cause("cache_corrupt", 4, e)
+            }
+        })?;
+        if receipt.schema != CACHE_SCHEMA
+            || receipt.identity.key(budget)? != identity.key(budget)?
+        {
+            return Err(error(
+                "cache_corrupt",
+                4,
+                format!("receipt identity mismatch for page {}", identity.page),
+            ));
+        }
+        let raw = evidence::read_blob_bounded_with_check(
+            &inv.home,
+            &receipt.response,
+            PAGE_BYTES,
+            &inv.control,
+            || budget.check(),
         )
-    })?;
-    if receipt.schema != CACHE_SCHEMA || receipt.identity.key(budget)? != identity.key(budget)? {
-        return Err(error(
-            "cache_corrupt",
-            4,
-            format!("receipt identity mismatch for page {}", identity.page),
-        ));
-    }
-    let raw = evidence::read_blob_bounded(&inv.home, &receipt.response, PAGE_BYTES, &inv.control)
         .map_err(corrupted)?;
-    Ok(Some((receipt, raw)))
+        Ok(Some((receipt, raw)))
+    })();
+    close_metadata(metadata, result, inv, budget)
+}
+fn same_receipt(
+    document: &[u8],
+    receipt: &Receipt,
+    inv: &Invocation,
+    budget: &Budget,
+) -> Result<bool> {
+    match receipt_wire::decode(document, inv, budget) {
+        Ok(existing) => Ok(existing.schema == CACHE_SCHEMA
+            && existing.response == receipt.response
+            && existing.identity.key(budget)? == receipt.identity.key(budget)?),
+        Err(e) if terminal(&e) || !e.details.is_null() => Err(e),
+        Err(_) => Ok(false),
+    }
 }
 fn store(
     inv: &Invocation,
@@ -293,81 +369,96 @@ fn store(
     captured_at: String,
     budget: &Budget,
 ) -> Result<Receipt> {
-    inv.control.check()?;
-    let blob =
-        evidence::publish_blob_bounded(&inv.home, raw, PAGE_BYTES, &inv.control).map_err(|e| {
-            if e.exit_code == 7 {
-                e
-            } else {
-                error("cache_write", 5, e.message)
-            }
-        })?;
-    let key = format!("hotfix-wago-page/{}", identity.key(budget)?);
-    let receipt = Receipt {
-        schema: CACHE_SCHEMA.into(),
-        identity,
-        request_url,
-        response: blob,
-        captured_at,
-        current_page: page.current_page,
-        last_page: page.last_page,
-        per_page: page.per_page,
-        total: page.total,
-        next_page_url: page.next_page_url.clone(),
-    };
-    // The fixed Go store reads one generation and updates only that generation.
-    // If another writer wins the CAS, only identical content can be accepted.
-    let observed = match Metadata::read_document_raw_controlled(&inv.home, &key, &inv.control) {
-        Ok(v) => Some(v),
-        Err(e) if e.code == "vault.record_missing" => None,
-        Err(e) => return Err(e),
-    };
-    if let Some(document) = &observed {
-        if let Ok(existing) = serde_json::from_slice::<Receipt>(&document.bytes) {
-            if existing.schema == CACHE_SCHEMA
-                && existing.identity.key(budget)? == receipt.identity.key(budget)?
-                && existing.response == receipt.response
+    check_scope(inv, budget)?;
+    // Fixed Go WriteMetadata opens the owner before attempting blob publication.
+    let mut metadata =
+        Metadata::open_controlled_with_check(&inv.home, true, &inv.control, || budget.check())?;
+    let result = (|| {
+        let blob = evidence::publish_blob_bounded_with_check(
+            &inv.home,
+            raw,
+            PAGE_BYTES,
+            &inv.control,
+            || budget.check(),
+        )
+        .map_err(|e| mapped_cause("cache_write", 5, e))?;
+        let key = format!("hotfix-wago-page/{}", identity.key(budget)?);
+        let receipt = Receipt {
+            schema: CACHE_SCHEMA.into(),
+            identity,
+            request_url,
+            response: blob,
+            captured_at,
+            current_page: page.current_page,
+            last_page: page.last_page,
+            per_page: page.per_page,
+            total: page.total,
+            next_page_url: page.next_page_url.clone(),
+        };
+        let observed =
+            match metadata
+                .read_document_on_owner_controlled_with_check(&key, &inv.control, || budget.check())
             {
+                Ok(v) => Some(v),
+                Err(e) if pure(&e, "vault.record_missing") => None,
+                Err(e) => return Err(e),
+            };
+        if let Some(document) = &observed {
+            if same_receipt(&document.bytes, &receipt, inv, budget)? {
                 return Ok(receipt);
             }
         }
-    }
-    let mut metadata = Metadata::open(&inv.home, true)?;
-    match metadata.put_controlled(
-        &key,
-        &receipt,
-        observed.as_ref().map(|v| v.generation),
-        &inv.control,
-    ) {
-        Ok(()) => {}
-        Err(e) if e.code == "vault.generation_conflict" => {
-            let winner = Metadata::read_document_raw_controlled(&inv.home, &key, &inv.control);
-            inv.control.check()?;
-            let same = winner
-                .ok()
-                .and_then(|d| serde_json::from_slice::<Receipt>(&d.bytes).ok())
-                .filter(|r| r.schema == CACHE_SCHEMA && r.response == receipt.response)
-                .is_some_and(|r| r.identity.key(budget).ok() == receipt.identity.key(budget).ok());
-            if !same {
-                return Err(error(
-                    "page_drift",
-                    4,
-                    "concurrent pages differ for one page identity",
-                ));
+        let published = if let Some(document) = observed {
+            metadata.put_controlled_with_check(
+                &key,
+                &receipt,
+                Some(document.generation),
+                &inv.control,
+                || budget.check(),
+            )
+        } else {
+            metadata.create_controlled_with_check(&key, &receipt, &inv.control, || budget.check())
+        };
+        match published {
+            Ok(()) => {}
+            Err(e) if pure(&e, "vault.generation_conflict") => {
+                let winner = metadata.read_document_on_owner_controlled_with_check(
+                    &key,
+                    &inv.control,
+                    || budget.check(),
+                );
+                match winner {
+                    Ok(winner) if same_receipt(&winner.bytes, &receipt, inv, budget)? => {}
+                    Ok(_) => {
+                        return Err(error(
+                            "page_drift",
+                            4,
+                            "concurrent pages differ for one page identity",
+                        ));
+                    }
+                    Err(cause) => {
+                        // Go chooses page drift when the losing writer cannot
+                        // authenticate a winner. Keep its full read/stop cause.
+                        if terminal(&cause) {
+                            return Err(cause);
+                        }
+                        let mut drift = error(
+                            "page_drift",
+                            4,
+                            "concurrent pages differ for one page identity",
+                        );
+                        drift.details = json!({"winnerReadCause":cause});
+                        return Err(drift);
+                    }
+                }
             }
+            Err(e) => return Err(mapped_cause("cache_write", 5, e)),
         }
-        Err(e) => {
-            return Err(
-                if matches!(e.code.as_str(), "command.cancelled" | "command.deadline") {
-                    e
-                } else {
-                    error("cache_write", 5, e.message)
-                },
-            );
-        }
-    }
-    Ok(receipt)
+        Ok(receipt)
+    })();
+    close_metadata(metadata, result, inv, budget)
 }
+mod receipt_wire;
 fn read_page<'a>(
     inv: &Invocation,
     identity: Identity,
@@ -554,7 +645,7 @@ pub(super) fn query(
     let mut last: Option<CursorPage> = None;
     let mut captured = String::new();
     loop {
-        budget.check()?;
+        check_scope(inv, budget)?;
         if walked >= max_pages {
             stop = "page_budget";
             break;
@@ -600,7 +691,7 @@ pub(super) fn query(
             parse::sequence(last.as_ref().unwrap(), page)?;
         }
         for r in &page.records {
-            budget.check()?;
+            check_scope(inv, budget)?;
             if r.id != 0 && seen.contains(&r.id) {
                 return Err(error(
                     "page_drift",
@@ -623,7 +714,7 @@ pub(super) fn query(
         scanned += page.records.len();
         let mut full = false;
         for record in fetched.page.records {
-            budget.check()?;
+            check_scope(inv, budget)?;
             if !(1..=4).contains(&record.status) {
                 unknown.insert(record.status);
             }
@@ -728,7 +819,7 @@ pub(super) fn query(
     window.truncate(q.limit);
     let mut records = window.into_iter().map(|(r, _)| r).collect::<Vec<_>>();
     if let Some(definition) = &q.definition {
-        super::decode::apply(&mut records, definition, budget)?;
+        super::decode::apply_with_check(&mut records, definition, budget, || inv.control.check())?;
     }
     let truncated = !stop.is_empty();
     let complete = !truncated && last.page == last.last_page;
@@ -762,3 +853,6 @@ pub(super) fn query(
     }
     Ok(result)
 }
+
+#[cfg(test)]
+mod control_tests;

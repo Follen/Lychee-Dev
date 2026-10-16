@@ -223,11 +223,25 @@ pub fn inspect_budgeted(
     filter: CacheFilter,
     budget: Option<&Budget>,
 ) -> Result<CachePage> {
+    inspect_budgeted_with_check(raw, filter, budget, || Ok(()))
+}
+pub(crate) fn inspect_budgeted_with_check(
+    raw: &[u8],
+    filter: CacheFilter,
+    budget: Option<&Budget>,
+    supplemental: impl FnMut() -> Result<()>,
+) -> Result<CachePage> {
+    // The framing walker and its row visitor run sequentially, so a short
+    // RefCell borrow lets both observe the same original invocation scope.
+    let supplemental = std::cell::RefCell::new(supplemental);
+    let check_scope = || (supplemental.borrow_mut())();
+    check_scope()?;
     check(budget)?;
     if !(1..=200).contains(&filter.limit) || raw.len() > 512 << 20 {
         return Err(fault("records.hotfix_limit", 3, "XFTH input/page budget"));
     }
-    let (version, layout, start) = cache_layout(raw, filter.build, budget)?;
+    let (version, layout, start) =
+        cache_layout_with_check(raw, filter.build, budget, &check_scope)?;
     if filter.region.is_some() && layout < 9 {
         return Err(fault(
             "records.hotfix_filter_unsupported",
@@ -252,7 +266,7 @@ pub fn inspect_budgeted(
         truncated: false,
     };
     if filter.latest {
-        walk(raw, start, layout, budget, |e| {
+        walk_with_check(raw, start, layout, budget, &check_scope, |e| {
             page.scanned += 1;
             if matches(&filter, &e) && page.selected_push.is_none_or(|p| e.push > p) {
                 page.selected_push = Some(e.push);
@@ -261,11 +275,13 @@ pub fn inspect_budgeted(
         })?;
         if page.selected_push.is_none() {
             page.complete = filter.after_index.is_none();
+            check_scope()?;
+            check(budget)?;
             return Ok(page);
         }
     }
     let mut payload_bytes = 0;
-    walk(raw, start, layout, budget, |mut e| {
+    walk_with_check(raw, start, layout, budget, &check_scope, |mut e| {
         if !filter.latest {
             page.scanned += 1;
         }
@@ -289,6 +305,7 @@ pub fn inspect_budgeted(
         e.payload_hex = String::with_capacity(bytes.len() * 2);
         const HEX: &[u8; 16] = b"0123456789abcdef";
         for chunk in bytes.chunks(65536) {
+            check_scope()?;
             charge(budget, Cost::work(chunk.len()))?;
             for &byte in chunk {
                 e.payload_hex.push(HEX[(byte >> 4) as usize] as char);
@@ -302,6 +319,8 @@ pub fn inspect_budgeted(
         page.next_index = page.entries.last().map(|e| e.index);
     }
     page.complete = filter.after_index.is_none() && !page.truncated;
+    check_scope()?;
+    check(budget)?;
     Ok(page)
 }
 
@@ -428,6 +447,16 @@ pub(crate) fn decode_fields_scoped<'a>(
     definition: &schema::Definition,
     budget: Option<&'a Budget>,
 ) -> Result<DecodedFields<'a>> {
+    decode_fields_scoped_with_check(raw, record_id, definition, budget, || Ok(()))
+}
+fn decode_fields_scoped_with_check<'a>(
+    raw: &[u8],
+    record_id: u32,
+    definition: &schema::Definition,
+    budget: Option<&'a Budget>,
+    mut supplemental: impl FnMut() -> Result<()>,
+) -> Result<DecodedFields<'a>> {
+    supplemental()?;
     check(budget)?;
     if raw.len() > 8 << 20 || definition.fields.len() > 4096 {
         return Err(limit_error());
@@ -444,6 +473,7 @@ pub(crate) fn decode_fields_scoped<'a>(
     let mut cells = 0u64;
     let mut identities = 0;
     for field in &definition.fields {
+        supplemental()?;
         charge(budget, Cost::work(field.name.len().saturating_add(1)))?;
         if field.name.is_empty()
             || !names.insert(field.name.as_str())
@@ -484,6 +514,7 @@ pub(crate) fn decode_fields_scoped<'a>(
     let mut offset = 0usize;
     let mut text_remaining = 1usize << 20;
     for field in &definition.fields {
+        supplemental()?;
         retain_fields(&mut map_allocation, field.name.len())?;
         let value = if field.identity && !field.inline {
             if field.signed {
@@ -515,12 +546,14 @@ pub(crate) fn decode_fields_scoped<'a>(
             };
             let mut values = Vec::with_capacity(field.elements as usize);
             for _ in 0..field.elements {
+                supplemental()?;
                 charge(budget, Cost::work(1))?;
                 let value = if matches!(field.kind.as_str(), "string" | "locstring") {
                     let available = &raw[offset..];
                     let bound = available.len().min(text_remaining + 1);
                     let mut end = None;
                     for (index, chunk) in available[..bound].chunks(65536).enumerate() {
+                        supplemental()?;
                         charge(budget, Cost::work(chunk.len()))?;
                         if let Some(found) = chunk.iter().position(|&byte| byte == 0) {
                             end = Some(index * 65536 + found);
@@ -580,6 +613,7 @@ pub(crate) fn decode_fields_scoped<'a>(
     if offset != raw.len() {
         return Err(fields_error());
     }
+    supplemental()?;
     check(budget)?;
     Ok(DecodedFields {
         fields: result,
@@ -652,17 +686,25 @@ impl serde_json::ser::Formatter for GoFieldsFormatter {
 // Go's fields budget counts encoding/json's escaped representation, including
 // HTML and U+2028/U+2029. Stream-count it without allocating a second field map.
 pub(crate) fn fields_json_size(fields: &BTreeMap<String, Value>, budget: &Budget) -> Result<usize> {
+    fields_json_size_with_check(fields, budget, &mut || Ok(()))
+}
+fn fields_json_size_with_check(
+    fields: &BTreeMap<String, Value>,
+    budget: &Budget,
+    supplemental: &mut impl FnMut() -> Result<()>,
+) -> Result<usize> {
     struct Counter<'a> {
+        supplemental: &'a mut dyn FnMut() -> Result<()>,
         budget: &'a Budget,
         bytes: usize,
         error: Option<lycheedev_core::ToolkitError>,
     }
     impl std::io::Write for Counter<'_> {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            if let Err(error) = self
-                .budget
-                .charge(Cost::work(bytes.len().saturating_add(1)))
-            {
+            if let Err(error) = (self.supplemental)().and_then(|()| {
+                self.budget
+                    .charge(Cost::work(bytes.len().saturating_add(1)))
+            }) {
                 self.error = Some(error);
                 return Err(std::io::Error::other("hotfix JSON accounting stopped"));
             }
@@ -674,6 +716,7 @@ pub(crate) fn fields_json_size(fields: &BTreeMap<String, Value>, budget: &Budget
         }
     }
     let mut count = Counter {
+        supplemental,
         budget,
         bytes: 0,
         error: None,
@@ -689,13 +732,25 @@ pub(crate) fn fields_json_size(fields: &BTreeMap<String, Value>, budget: &Budget
 }
 pub fn decode_page(
     raw: &[u8],
-    mut page: CachePage,
+    page: CachePage,
     definition: &schema::Definition,
     budget: &Budget,
 ) -> Result<CachePage> {
+    decode_page_with_check(raw, page, definition, budget, || Ok(()))
+}
+pub(crate) fn decode_page_with_check(
+    raw: &[u8],
+    mut page: CachePage,
+    definition: &schema::Definition,
+    budget: &Budget,
+    mut supplemental: impl FnMut() -> Result<()>,
+) -> Result<CachePage> {
+    supplemental()?;
+    budget.check()?;
     let mut fields_bytes = 0usize;
     // Only publish the staged page after every selected payload validates.
     for entry in &mut page.entries {
+        supplemental()?;
         budget.check()?;
         entry.fields = None;
         entry.decode_state = if entry.payload_bytes == 0 {
@@ -715,19 +770,27 @@ pub fn decode_page(
         let end = start
             .checked_add(entry.payload_bytes)
             .ok_or_else(fields_error)?;
-        let fields = decode_fields(
+        let mut fields = decode_fields_scoped_with_check(
             raw.get(start..end).ok_or_else(fields_error)?,
             entry.record_id,
             definition,
             Some(budget),
+            &mut supplemental,
         )?;
-        let bytes = fields_json_size(&fields, budget)?;
+        let bytes = fields_json_size_with_check(fields.fields(), budget, &mut supplemental)?;
         if bytes > (8 << 20) - fields_bytes {
             return Err(limit_error());
         }
         fields_bytes += bytes;
-        entry.fields = Some(fields);
+        supplemental()?;
+        budget.check()?;
+        if let Some(allocation) = fields.allocation.take() {
+            allocation.commit();
+        }
+        entry.fields = Some(fields.fields);
     }
+    supplemental()?;
+    budget.check()?;
     Ok(page)
 }
 

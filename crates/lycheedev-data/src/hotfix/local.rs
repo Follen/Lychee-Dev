@@ -23,11 +23,15 @@ fn limit() -> ToolkitError {
 }
 struct Files<'a> {
     budget: &'a Budget,
+    control: Option<&'a lycheedev_core::control::OperationControl>,
     temporary: Vec<RetainedReservation<'a>>,
 }
 impl storage::FileControl for Files<'_> {
     type Error = ToolkitError;
     fn charge(&mut self, cost: storage::FileCost) -> Result<()> {
+        if let Some(control) = self.control {
+            control.check()?;
+        }
         self.budget.charge(Cost {
             decode_work: cost.work_units.saturating_add(cost.io_operations),
             ..Default::default()
@@ -44,6 +48,9 @@ impl storage::FileControl for Files<'_> {
         Ok(())
     }
     fn check(&mut self) -> Result<()> {
+        if let Some(control) = self.control {
+            control.check()?;
+        }
         self.budget.check()
     }
 }
@@ -60,9 +67,35 @@ fn read_file_inner(
     budget: &Budget,
     metadata: bool,
 ) -> Result<Vec<u8>> {
-    budget.check()?;
+    read_file_scoped(path, maximum, budget, metadata, None, |_| Ok(()))
+}
+pub(super) fn read_source_file_controlled(
+    path: &Path,
+    maximum: usize,
+    budget: &Budget,
+    control: &lycheedev_core::control::OperationControl,
+    validate: impl FnOnce(&std::fs::Metadata) -> Result<()>,
+) -> Result<Vec<u8>> {
+    read_file_scoped(path, maximum, budget, false, Some(control), validate)
+}
+fn read_file_scoped(
+    path: &Path,
+    maximum: usize,
+    budget: &Budget,
+    metadata: bool,
+    control: Option<&lycheedev_core::control::OperationControl>,
+    validate: impl FnOnce(&std::fs::Metadata) -> Result<()>,
+) -> Result<Vec<u8>> {
+    let check = || {
+        if let Some(control) = control {
+            control.check()?;
+        }
+        budget.check()
+    };
+    check()?;
     let mut files = Files {
         budget,
+        control,
         temporary: Vec::new(),
     };
     let parent_path = path
@@ -83,6 +116,8 @@ fn read_file_inner(
                 "Cache must be a regular non-reparse file",
             ));
         }
+        validate(&observed)?;
+        check()?;
         if observed.len() > maximum as u64 {
             return Err(limit());
         }
@@ -90,13 +125,16 @@ fn read_file_inner(
         let result = (|| {
             budget.charge(Cost::work(1))?;
             let before = file.metadata()?;
-            budget.check()?;
+            check()?;
             if !before.is_file() || before.file_attributes() & 0x400 != 0 {
                 return Err(fault(
                     "records.hotfix_format",
                     4,
                     "Cache must be a regular non-reparse file",
                 ));
+            }
+            if observed.len() != before.len() || observed.modified()? != before.modified()? {
+                return Err(identity("Cache changed while opening; retry a stable copy"));
             }
             let size = usize::try_from(before.len()).map_err(|_| limit())?;
             if size > maximum {
@@ -108,7 +146,7 @@ fn read_file_inner(
             let _scratch = budget.reserve_retained(65536)?;
             let mut block = [0u8; 65536];
             loop {
-                budget.check()?;
+                check()?;
                 let count = match file.read(&mut block) {
                     Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                     result => result?,
@@ -131,7 +169,7 @@ fn read_file_inner(
             }
             budget.charge(Cost::work(1))?;
             let after = file.metadata()?;
-            budget.check()?;
+            check()?;
             parent.verify_controlled(&mut files)?;
             if before.len() != after.len()
                 || raw.len() != size
@@ -154,6 +192,9 @@ fn read_file_inner(
                 Err(error.into()),
             );
         }
+    }
+    if let Some(control) = control {
+        result = super::remote::finish_stop(result, control.check());
     }
     let stopped = budget.check();
     if let (Err(primary), Err(stop)) = (&result, &stopped)

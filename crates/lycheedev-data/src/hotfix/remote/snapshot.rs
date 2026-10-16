@@ -2,7 +2,6 @@
 use super::*;
 use chrono::{DateTime, Utc};
 use std::{
-    fs,
     path::Path,
     time::{Duration, SystemTime},
 };
@@ -34,40 +33,43 @@ pub(super) fn query(inv: &Invocation, q: Query, budget: &Budget) -> Result<Remot
         Some(Cursor::decode(&q.cursor, &q, "raidbots")?)
     };
     let path = Path::new(inv.required("--raidbots")?);
-    budget.check()?;
-    let before = fs::metadata(path)?;
-    if !before.is_file() {
-        return Err(error("format", 4, "records.hotfix_format"));
+    check_scope(inv, budget)?;
+    let mut captured_at = String::new();
+    // The same controlled directory/file owner supplies the mtime admission and
+    // stable bounded body. Its checked close completes before publishing a pin.
+    let raw = super::super::local::read_source_file_controlled(
+        path,
+        512 << 20,
+        budget,
+        &inv.control,
+        |before| {
+            let modified = before.modified()?;
+            captured_at = storage::timestamp(DateTime::<Utc>::from(modified));
+            if SystemTime::now()
+                .duration_since(modified)
+                .unwrap_or(Duration::ZERO)
+                > Duration::from_secs(30 * 24 * 60 * 60)
+            {
+                return Err(error(
+                    "snapshot_stale",
+                    3,
+                    format!(
+                        "snapshot captured at {} is older than 720h0m0s",
+                        DateTime::<Utc>::from(modified).format("%Y-%m-%dT%H:%M:%SZ")
+                    ),
+                ));
+            }
+            Ok(())
+        },
+    )?;
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    for block in raw.chunks(65536) {
+        check_scope(inv, budget)?;
+        hash.update(block);
     }
-    let modified = before.modified()?;
-    let captured_at = storage::timestamp(DateTime::<Utc>::from(modified));
-    if SystemTime::now()
-        .duration_since(modified)
-        .unwrap_or(Duration::ZERO)
-        > Duration::from_secs(30 * 24 * 60 * 60)
-    {
-        return Err(error(
-            "snapshot_stale",
-            3,
-            format!(
-                "snapshot captured at {} is older than 720h0m0s",
-                DateTime::<Utc>::from(modified).format("%Y-%m-%dT%H:%M:%SZ")
-            ),
-        ));
-    }
-    // Go's remote snapshot CLI deliberately does not forward --max-bytes.
-    let raw = super::super::local::read_source_file(path, 512 << 20, budget)?;
-    budget.check()?;
-    let after = fs::metadata(path)?;
-    if before.len() != after.len() || modified != after.modified()? {
-        return Err(error(
-            "identity",
-            4,
-            "Cache changed while reading; retry a stable copy",
-        ));
-    }
-    let digest = storage::sha256(&raw);
-    budget.check()?;
+    let digest = crate::casc::hex(&hash.finalize());
+    check_scope(inv, budget)?;
     let mut filter = super::super::CacheFilter {
         build: q.build_number()?,
         table_hash: q.table_hash,
@@ -93,9 +95,13 @@ pub(super) fn query(inv: &Invocation, q: Query, budget: &Budget) -> Result<Remot
                 .ok_or_else(|| error("cursor", 2, "snapshot cursor has no after-index"))?,
         );
     }
-    let page = super::super::inspect_budgeted(&raw, filter, Some(budget))?;
+    let page = super::super::inspect_budgeted_with_check(&raw, filter, Some(budget), || {
+        inv.control.check()
+    })?;
     let page = if let Some(definition) = &q.definition {
-        super::super::decode_page(&raw, page, definition, budget)?
+        super::super::decode_page_with_check(&raw, page, definition, budget, || {
+            inv.control.check()
+        })?
     } else {
         page
     };
@@ -145,5 +151,6 @@ pub(super) fn query(inv: &Invocation, q: Query, budget: &Budget) -> Result<Remot
     let mut result = RemoteResult::new("raidbots", q, records, coverage, next)?;
     // Record-window completion and Raidbots server coverage are different fields.
     result.complete = page.complete;
+    check_scope(inv, budget)?;
     Ok(result)
 }

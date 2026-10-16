@@ -12,8 +12,14 @@ const COLUMNS: [&str; 9] = [
     "locale",
     "payload_length",
 ];
-fn row(raw: &mut Vec<u8>, cells: &[String], budget: &Budget) -> Result<()> {
+fn row(
+    raw: &mut Vec<u8>,
+    cells: &[String],
+    budget: &Budget,
+    check: &mut impl FnMut() -> Result<()>,
+) -> Result<()> {
     for (n, text) in cells.iter().enumerate() {
+        check()?;
         budget.check()?;
         if n != 0 {
             raw.push(b',');
@@ -25,6 +31,7 @@ fn row(raw: &mut Vec<u8>, cells: &[String], budget: &Budget) -> Result<()> {
             raw.push(b'"');
         }
         for chunk in text.as_bytes().chunks(4096) {
+            check()?;
             budget.charge(Cost::work(chunk.len()))?;
             for b in chunk {
                 match *b {
@@ -43,6 +50,15 @@ fn row(raw: &mut Vec<u8>, cells: &[String], budget: &Budget) -> Result<()> {
     Ok(())
 }
 pub(super) fn encode(result: &RemoteResult, budget: &Budget) -> Result<(Vec<u8>, Value)> {
+    encode_with_check(result, budget, || Ok(()))
+}
+fn encode_with_check(
+    result: &RemoteResult,
+    budget: &Budget,
+    mut check: impl FnMut() -> Result<()>,
+) -> Result<(Vec<u8>, Value)> {
+    check()?;
+    budget.check()?;
     if result.complete && result.truncated {
         return Err(fault(
             "records.export_encoding",
@@ -72,8 +88,10 @@ pub(super) fn encode(result: &RemoteResult, budget: &Budget) -> Result<(Vec<u8>,
         &mut raw,
         &COLUMNS.iter().map(|v| (*v).into()).collect::<Vec<String>>(),
         budget,
+        &mut check,
     )?;
     for r in &result.records {
+        check()?;
         budget.check()?;
         let _cells =
             budget.reserve_retained(r.table_name.len() + r.build.len() + r.locale.len() + 512)?;
@@ -92,8 +110,10 @@ pub(super) fn encode(result: &RemoteResult, budget: &Budget) -> Result<(Vec<u8>,
             r.locale.clone(),
             r.payload_length.to_string(),
         ];
-        row(&mut raw, &cells, budget)?;
+        row(&mut raw, &cells, budget, &mut check)?;
     }
+    check()?;
+    budget.check()?;
     allocation.commit();
     let mut manifest = json!({"schema":"lycheedev.csv-export.v1","columns":COLUMNS,"rowCount":result.records.len(),"source":{"provider":result.change.provider,"product":result.query.product,"fullBuild":result.query.full_build,"region":result.query.region,"locale":result.query.locale,"ref":result.change.sha256,"fetchedAt":result.change.fetched_at},"content":{"sha256":storage::sha256(&raw),"bytes":raw.len()},"complete":result.complete,"truncated":result.truncated});
     let reason = if result.coverage.truncation_reason.is_empty() && result.truncated {
@@ -133,7 +153,7 @@ struct CsvSource {
     fetched_at: String,
 }
 pub(super) fn csv(inv: &Invocation, result: &RemoteResult, budget: &Budget) -> Result<Value> {
-    let (raw, manifest) = encode(result, budget)?;
+    let (raw, manifest) = encode_with_check(result, budget, || inv.control.check())?;
     let wire: Manifest = serde_json::from_value(manifest.clone())?;
     let mut sidecar = serde_json::to_string_pretty(&wire)?
         .replace('&', "\\u0026")
@@ -145,13 +165,14 @@ pub(super) fn csv(inv: &Invocation, result: &RemoteResult, budget: &Budget) -> R
     sidecar.push(b'\n');
     let path = inv.required("--output")?;
     // Go Hotfix intentionally overwrites; --overwrite belongs only to SQL.
-    let (data, destination) = crate::assets::output::destination_pair(
-        &inv.home,
+    let (data, destination) = crate::assets::output::destination_pair_scoped(
+        inv,
         Path::new(path),
         Path::new(&format!("{path}.manifest.json")),
         true,
+        budget,
     )?;
-    crate::local_query::query_csv::publish_pair_after_data(
+    let result = crate::local_query::query_csv::publish_pair_after_data(
         inv,
         &data,
         &destination,
@@ -160,7 +181,9 @@ pub(super) fn csv(inv: &Invocation, result: &RemoteResult, budget: &Budget) -> R
         &sidecar,
         budget,
         || Ok(()),
-    )?;
+    );
+    let published = result.is_ok();
+    crate::assets::output::finish_pair(inv, data, destination, budget, result, published)?;
     Ok(manifest)
 }
 #[derive(Serialize)]
@@ -214,6 +237,8 @@ pub(super) fn jsonl(
         control.check()?;
         let mut raw = go_bytes(&value, budget, usize::MAX)?;
         raw.push(b'\n');
+        control.check()?;
+        budget.check()?;
         emit(&raw)
     };
     let mut begin = frame("begin");

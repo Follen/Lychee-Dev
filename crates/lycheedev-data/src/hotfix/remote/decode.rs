@@ -61,12 +61,22 @@ pub(super) fn positional(
     definition: &Definition,
     budget: &Budget,
 ) -> Result<BTreeMap<String, Value>> {
+    positional_with_check(raw, definition, budget, &mut || Ok(()))
+}
+fn positional_with_check(
+    raw: &str,
+    definition: &Definition,
+    budget: &Budget,
+    check: &mut impl FnMut() -> Result<()>,
+) -> Result<BTreeMap<String, Value>> {
+    check()?;
     budget.check()?;
     if definition.fields.is_empty() {
         return Err(fields("records.hotfix_fields"));
     }
-    let value: Value = serde_json::from_str(raw)
-        .map_err(|e| fields(format!("positional payload is invalid JSON: {e}")))?;
+    let decoded = serde_json::from_str::<Value>(raw)
+        .map_err(|e| fields(format!("positional payload is invalid JSON: {e}")));
+    let value = finish_stop(decoded, check())?;
     if let Value::Object(object) = value {
         return Ok(object.into_iter().collect());
     }
@@ -82,6 +92,7 @@ pub(super) fn positional(
     }
     let mut result = BTreeMap::new();
     for (value, field) in columns.into_iter().zip(&definition.fields) {
+        check()?;
         budget.check()?;
         let converted = if value.is_null() {
             Value::Null
@@ -103,7 +114,11 @@ pub(super) fn positional(
             Value::Array(
                 values
                     .into_iter()
-                    .map(|v| scalar(v, field))
+                    .map(|v| {
+                        check()?;
+                        budget.check()?;
+                        scalar(v, field)
+                    })
                     .collect::<Result<Vec<_>>>()?,
             )
         } else {
@@ -118,7 +133,16 @@ pub(super) fn apply(
     definition: &Definition,
     budget: &Budget,
 ) -> Result<()> {
+    apply_with_check(records, definition, budget, || Ok(()))
+}
+pub(super) fn apply_with_check(
+    records: &mut [Record],
+    definition: &Definition,
+    budget: &Budget,
+    mut check: impl FnMut() -> Result<()>,
+) -> Result<()> {
     for record in records {
+        check()?;
         budget.check()?;
         record.decode_state = "no_payload".into();
         let Some(payload) = &record.payload else {
@@ -129,12 +153,15 @@ pub(super) fn apply(
             continue;
         }
         record.fields = Some(
-            positional(payload.get(), definition, budget).map_err(|mut e| {
-                e.message = format!("record id {}: {}", record.id, e.message);
-                e
-            })?,
+            positional_with_check(payload.get(), definition, budget, &mut check).map_err(
+                |mut e| {
+                    e.message = format!("record id {}: {}", record.id, e.message);
+                    e
+                },
+            )?,
         );
         record.decode_state = "decoded".into();
     }
-    Ok(())
+    check()?;
+    budget.check()
 }

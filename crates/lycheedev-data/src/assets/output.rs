@@ -190,6 +190,140 @@ pub(crate) fn destination_pair(
     )?;
     Ok((data, manifest))
 }
+/// Same data/manifest preflight order as the legacy pair, with one checked
+/// parent owner per destination and original invocation/budget at every step.
+pub(crate) fn destination_pair_scoped(
+    inv: &Invocation,
+    data: &Path,
+    manifest: &Path,
+    overwrite: bool,
+    budget: &crate::resource::Budget,
+) -> Result<(Destination, Destination)> {
+    let data = open_destination_scoped(inv, data, overwrite, Some(budget))?;
+    let manifest = match open_destination_scoped(inv, manifest, overwrite, Some(budget)) {
+        Ok(value) => value,
+        Err(error) => {
+            return pair_stop(
+                finish_closes(Err(error), data.close(), &inv.control),
+                budget,
+            );
+        }
+    };
+    let result = (|| {
+        inv.control.check()?;
+        budget.check()?;
+        outside(&inv.home, data.path().parent().expect("validated parent"))?;
+        inv.control.check()?;
+        budget.check()?;
+        outside(
+            &inv.home,
+            manifest.path().parent().expect("validated parent"),
+        )?;
+        inv.control.check()?;
+        budget.check()
+    })();
+    match result {
+        Ok(()) => Ok((data, manifest)),
+        Err(error) => finish_pair(inv, data, manifest, budget, Err(error), false),
+    }
+}
+pub(crate) fn check_destination_scoped(
+    inv: &Invocation,
+    destination: &Destination,
+    budget: &crate::resource::Budget,
+) -> Result<()> {
+    destination
+        .check_controlled(&mut PublicationControl {
+            inv,
+            budget: Some(budget),
+        })
+        .map_err(|error| publication_error(error, destination.path()))
+}
+fn pair_stop<T>(result: Result<T>, budget: &crate::resource::Budget) -> Result<T> {
+    match budget.check() {
+        Ok(()) => result,
+        Err(stop)
+            if result.as_ref().err().is_some_and(|e| {
+                e.code == stop.code
+                    && e.exit_code == stop.exit_code
+                    && e.message == stop.message
+                    && e.details == stop.details
+            }) =>
+        {
+            result
+        }
+        Err(stop) => {
+            lycheedev_core::metadata::historical_write::finish_historical(result, Err(stop))
+        }
+    }
+}
+/// A pair caller consumes both owners even if encoding/capture/publication fails.
+/// Successful publishing followed by close failure retains both committed paths.
+pub(crate) fn finish_pair<T>(
+    inv: &Invocation,
+    data: Destination,
+    manifest: Destination,
+    budget: &crate::resource::Budget,
+    result: Result<T>,
+    published: bool,
+) -> Result<T> {
+    let paths = if published {
+        Some((data.path().to_owned(), manifest.path().to_owned()))
+    } else {
+        None
+    };
+    let mut errors = manifest.close().err().unwrap_or_default();
+    if let Err(data_errors) = data.close() {
+        errors.extend(data_errors);
+    }
+    let closes = if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    };
+    let result = pair_stop(finish_closes(result, closes, &inv.control), budget);
+    if let Some((data, manifest)) = paths {
+        result.map_err(|error| {
+            publication_context(
+                publication_context(
+                    error,
+                    &data,
+                    lycheedev_core::storage::StagedPublication::Published,
+                ),
+                &manifest,
+                lycheedev_core::storage::StagedPublication::Published,
+            )
+        })
+    } else {
+        result
+    }
+}
+/// Reuse the existing typed single-output facts; callers may nest two real
+/// attempts without inventing an atomic pair transaction or replaying a stage.
+pub(crate) fn publication_context(
+    mut error: ToolkitError,
+    path: &Path,
+    publication: lycheedev_core::storage::StagedPublication,
+) -> ToolkitError {
+    use lycheedev_core::storage::StagedPublication;
+    let primary = error.clone();
+    error.details = serde_json::json!({"schema":"lycheedev.asset-publication-error.v1", "primary":primary,
+        "publication":{"state":match publication {
+            StagedPublication::NotPublished=>"not_published", StagedPublication::Published=>"published", StagedPublication::Unknown=>"unknown"
+        },"path":path.to_string_lossy()}});
+    if publication != StagedPublication::NotPublished {
+        error
+            .message
+            .push_str(if publication == StagedPublication::Published {
+                "\noutput already published: "
+            } else {
+                "\noutput publication unknown; do not replay: "
+            });
+        error.message.push_str(&path.to_string_lossy());
+    }
+    error
+}
+
 fn open_destination(output: &Path, overwrite: bool) -> Result<Destination> {
     if output.as_os_str().is_empty()
         || matches!(output.as_os_str().encode_wide().last(), Some(47 | 92))

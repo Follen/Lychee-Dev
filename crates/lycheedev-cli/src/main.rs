@@ -2392,6 +2392,33 @@ mod tests {
         }
     }
     #[test]
+    fn asset_publication_csv_committed_errors_preserve_all_public_details_for_sql_and_hotfix() {
+        for command in ["sql", "hotfix"] {
+            let inv = parse(&args(&["data", command])).unwrap();
+            for count in 1..=2 {
+                for state in ["not_published", "published", "unknown"] {
+                    let primary = ToolkitError::new("records.metadata_limit", "stopped before checked close", 3);
+                    let publication = primary.clone().with_details(json!({
+                        "schema":"lycheedev.asset-publication-error.v1", "primary":primary,
+                        "publication":{"state":state,"path":"C:/out/table.csv"}
+                    }));
+                    let ids: Vec<_> = (0..count).map(|i| format!("CAP-{}", format!("{i:x}").repeat(64))).collect();
+                    let message = format!("CSV captures already committed: {}", ids.join(", "));
+                    let details = json!({"schema":"lycheedev.csv-committed-error.v1",
+                        "primary":publication,"completedCaptures":ids});
+                    let error = ToolkitError::new("records.metadata_limit", &message, 3).with_details(details.clone());
+                    let actual = command_fault(&inv, error);
+                    let public = envelope(&Err(actual));
+                    assert_eq!(public["error"]["code"], "records.metadata_limit");
+                    assert_eq!(public["error"]["message"], message);
+                    assert_eq!(public["error"]["details"], details);
+                    assert_eq!(public["captures"], json!([]));
+                    assert!(public.get("completedCaptures").is_none());
+                }
+            }
+        }
+    }
+    #[test]
     fn asset_output_publication_and_demux_facts_survive_typed_cleanup() {
         use lycheedev_core::metadata::historical_write::finish_historical;
         let primary = ToolkitError::new("records.metadata_limit", "allocation stopped", 3);

@@ -25,7 +25,7 @@ fn named(name: &str) -> Option<&'static str> {
         .ok()
         .map(|n| super::entities::ENTITIES[n].1)
 }
-fn unescape(raw: &[u8], control: &OperationControl) -> Result<Vec<u8>> {
+fn unescape(raw: &[u8], check: &mut impl FnMut() -> Result<()>) -> Result<Vec<u8>> {
     const WINDOWS: [u32; 32] = [
         0x20ac, 0x81, 0x201a, 0x192, 0x201e, 0x2026, 0x2020, 0x2021, 0x2c6, 0x2030, 0x160, 0x2039,
         0x152, 0x8d, 0x17d, 0x8f, 0x90, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014,
@@ -35,7 +35,7 @@ fn unescape(raw: &[u8], control: &OperationControl) -> Result<Vec<u8>> {
     let mut at = 0;
     while at < raw.len() {
         if at % 4096 == 0 {
-            control.check()?;
+            check()?;
         }
         if raw[at] != b'&' {
             out.push(raw[at]);
@@ -52,6 +52,9 @@ fn unescape(raw: &[u8], control: &OperationControl) -> Result<Vec<u8>> {
             }
             let mut x = 0i32;
             while i < s.len() {
+                if i % 4096 == 0 {
+                    check()?;
+                }
                 let c = s[i];
                 i += 1;
                 let digit = (c as char).to_digit(if hex { 16 } else { 10 });
@@ -82,6 +85,9 @@ fn unescape(raw: &[u8], control: &OperationControl) -> Result<Vec<u8>> {
             }
         } else {
             while i < s.len() {
+                if i % 4096 == 0 {
+                    check()?;
+                }
                 let c = s[i];
                 i += 1;
                 if c.is_ascii_alphanumeric() {
@@ -115,104 +121,202 @@ fn unescape(raw: &[u8], control: &OperationControl) -> Result<Vec<u8>> {
         out.extend_from_slice(&s[..i]);
         at += i;
     }
-    control.check()?;
+    check()?;
     Ok(out)
 }
 fn space(c: u8) -> bool {
     b" \t\n\r\x0c".contains(&c)
 }
-fn tag<'a>(raw: &'a [u8], start: usize) -> Option<&'a [u8]> {
-    let mut i = start + 1;
-    let ns = i;
-    while raw
-        .get(i)
-        .is_some_and(|c| c.is_ascii_alphanumeric() || b":-".contains(c))
-    {
-        i += 1;
-    }
-    if !raw.get(ns..i)?.eq_ignore_ascii_case(b"div") {
-        return None;
-    }
-    let mut id = &b""[..];
-    let mut payload = &b""[..];
-    while i < raw.len() {
-        while raw.get(i).is_some_and(|c| space(*c)) {
-            i += 1;
-        }
-        let c = *raw.get(i)?;
-        if c == b'>' {
-            break;
-        }
-        if c == b'/' {
-            i += 1;
-            continue;
-        }
-        let ks = i;
+fn tag<'a>(
+    raw: &'a [u8],
+    start: usize,
+    check: &mut impl FnMut() -> Result<()>,
+) -> Result<Option<&'a [u8]>> {
+    let mut stopped = None;
+    let result = (|| -> Option<&'a [u8]> {
+        let mut i = start + 1;
+        let ns = i;
         while raw
             .get(i)
-            .is_some_and(|c| *c != b'=' && !space(*c) && !b">/".contains(c))
+            .is_some_and(|c| c.is_ascii_alphanumeric() || b":-".contains(c))
         {
+            if i % 4096 == 0 {
+                if let Err(error) = check() {
+                    stopped = Some(error);
+                    return None;
+                }
+            }
             i += 1;
         }
-        let key = raw.get(ks..i)?;
-        if key.is_empty() {
+        if !raw.get(ns..i)?.eq_ignore_ascii_case(b"div") {
             return None;
         }
-        while raw.get(i).is_some_and(|c| space(*c)) {
-            i += 1;
-        }
-        let mut value = &b""[..];
-        if raw.get(i) == Some(&b'=') {
-            i += 1;
+        let mut id = &b""[..];
+        let mut payload = &b""[..];
+        while i < raw.len() {
             while raw.get(i).is_some_and(|c| space(*c)) {
+                if i % 4096 == 0 {
+                    if let Err(error) = check() {
+                        stopped = Some(error);
+                        return None;
+                    }
+                }
                 i += 1;
             }
             let c = *raw.get(i)?;
-            if c == b'\'' || c == b'"' {
+            if c == b'>' {
+                break;
+            }
+            if c == b'/' {
+                if i % 4096 == 0 {
+                    if let Err(error) = check() {
+                        stopped = Some(error);
+                        return None;
+                    }
+                }
                 i += 1;
-                let vs = i;
-                while raw.get(i).is_some_and(|b| *b != c) {
+                continue;
+            }
+            let ks = i;
+            while raw
+                .get(i)
+                .is_some_and(|c| *c != b'=' && !space(*c) && !b">/".contains(c))
+            {
+                if i % 4096 == 0 {
+                    if let Err(error) = check() {
+                        stopped = Some(error);
+                        return None;
+                    }
+                }
+                i += 1;
+            }
+            let key = raw.get(ks..i)?;
+            if key.is_empty() {
+                return None;
+            }
+            while raw.get(i).is_some_and(|c| space(*c)) {
+                if i % 4096 == 0 {
+                    if let Err(error) = check() {
+                        stopped = Some(error);
+                        return None;
+                    }
+                }
+                i += 1;
+            }
+            let mut value = &b""[..];
+            if raw.get(i) == Some(&b'=') {
+                if i % 4096 == 0 {
+                    if let Err(error) = check() {
+                        stopped = Some(error);
+                        return None;
+                    }
+                }
+                i += 1;
+                while raw.get(i).is_some_and(|c| space(*c)) {
+                    if i % 4096 == 0 {
+                        if let Err(error) = check() {
+                            stopped = Some(error);
+                            return None;
+                        }
+                    }
                     i += 1;
                 }
-                raw.get(i)?;
-                value = &raw[vs..i];
-                i += 1;
-            } else {
-                let vs = i;
-                while raw.get(i).is_some_and(|b| !space(*b) && *b != b'>') {
+                let c = *raw.get(i)?;
+                if c == b'\'' || c == b'"' {
+                    if i % 4096 == 0 {
+                        if let Err(error) = check() {
+                            stopped = Some(error);
+                            return None;
+                        }
+                    }
                     i += 1;
+                    let vs = i;
+                    while raw.get(i).is_some_and(|b| *b != c) {
+                        if i % 4096 == 0 {
+                            if let Err(error) = check() {
+                                stopped = Some(error);
+                                return None;
+                            }
+                        }
+                        i += 1;
+                    }
+                    raw.get(i)?;
+                    value = &raw[vs..i];
+                    if i % 4096 == 0 {
+                        if let Err(error) = check() {
+                            stopped = Some(error);
+                            return None;
+                        }
+                    }
+                    i += 1;
+                } else {
+                    let vs = i;
+                    while raw.get(i).is_some_and(|b| !space(*b) && *b != b'>') {
+                        if i % 4096 == 0 {
+                            if let Err(error) = check() {
+                                stopped = Some(error);
+                                return None;
+                            }
+                        }
+                        i += 1;
+                    }
+                    value = &raw[vs..i];
                 }
-                value = &raw[vs..i];
+            }
+            if key.eq_ignore_ascii_case(b"id") {
+                id = value;
+            } else if key.eq_ignore_ascii_case(b"data-page") {
+                payload = value;
             }
         }
-        if key.eq_ignore_ascii_case(b"id") {
-            id = value;
-        } else if key.eq_ignore_ascii_case(b"data-page") {
-            payload = value;
+        (id == b"app" && !payload.is_empty()).then_some(payload)
+    })();
+    if let Some(error) = stopped {
+        Err(error)
+    } else {
+        check()?;
+        Ok(result)
+    }
+}
+fn data_page(raw: &[u8], check: &mut impl FnMut() -> Result<()>) -> Result<Vec<u8>> {
+    // Preserve Go's fast-path preference for the first literal id="app".
+    // Poll both original scopes while locating it, including the reverse scan.
+    let mut marker = None;
+    for (at, bytes) in raw.windows(8).enumerate() {
+        if at % 4096 == 0 {
+            check()?;
+        }
+        if bytes == b"id=\"app\"" {
+            marker = Some(at);
+            break;
         }
     }
-    (id == b"app" && !payload.is_empty()).then_some(payload)
-}
-fn data_page(raw: &[u8], control: &OperationControl) -> Result<Vec<u8>> {
-    if let Some(marker) = raw.windows(8).position(|v| v == b"id=\"app\"") {
-        if let Some(div) = raw[..marker].windows(4).rposition(|v| v == b"<div") {
-            if marker - div <= 4096 {
-                if let Some(p) = tag(raw, div) {
-                    return unescape(p, control);
+    if let Some(marker) = marker {
+        for (at, bytes) in raw[..marker].windows(4).enumerate().rev() {
+            if at % 4096 == 0 {
+                check()?;
+            }
+            if bytes == b"<div" {
+                if marker - at <= 4096 {
+                    if let Some(p) = tag(raw, at, check)? {
+                        return unescape(p, check);
+                    }
                 }
+                break;
             }
         }
     }
     for (n, c) in raw.iter().enumerate() {
         if n % 4096 == 0 {
-            control.check()?;
+            check()?;
         }
         if *c == b'<' {
-            if let Some(p) = tag(raw, n) {
-                return unescape(p, control);
+            if let Some(p) = tag(raw, n, check)? {
+                return unescape(p, check);
             }
         }
     }
+    check()?;
     Err(protocol("div#app data-page not found"))
 }
 // Encoding/json structs accept case-folded keys, ordered duplicates and scalar null no-ops.
@@ -501,16 +605,20 @@ pub(super) fn parse<'a>(
 ) -> Result<Page<'a>> {
     control.check()?;
     let allocation = budget.reserve_retained(raw.len().saturating_mul(8))?;
-    let embedded = data_page(raw, control)?;
+    let mut check = || {
+        control.check()?;
+        budget.check()
+    };
+    let embedded = data_page(raw, &mut check)?;
     // Go Unmarshal validates the entire document, including ignored members and raw payload.
-    if !lycheedev_core::raw_json::is_valid(&embedded) {
-        return Err(protocol("data-page is invalid JSON"));
+    if lycheedev_core::raw_json::validate_with_check(&embedded, &mut check)?.is_err() {
+        return finish_stop(Err(protocol("data-page is invalid JSON")), check());
     }
     let mut decoder = serde_json::Deserializer::from_slice(&embedded);
     decoder.disable_recursion_limit();
-    let root = Root::deserialize(&mut decoder)
-        .map_err(|e| protocol(format!("data-page is invalid JSON: {e}")))?;
-    control.check()?;
+    let decoded = Root::deserialize(&mut decoder)
+        .map_err(|e| protocol(format!("data-page is invalid JSON: {e}")));
+    let root = finish_stop(decoded, check())?;
     if root.component != "Hotfixes" {
         return Err(protocol(format!(
             "component {:?} is not Hotfixes",
@@ -537,7 +645,7 @@ pub(super) fn parse<'a>(
         _retained: Some(allocation),
     };
     for row in p.data.slots.into_iter().take(p.data.len) {
-        budget.check()?;
+        check()?;
         if row.id.0 < 0
             || !(0..=u32::MAX as i64).contains(&row.record_id.0)
             || !(0..=u32::MAX as i64).contains(&row.region_id.0)
@@ -573,6 +681,7 @@ pub(super) fn parse<'a>(
             ..Default::default()
         });
     }
+    check()?;
     Ok(page)
 }
 fn unquote_query(raw: &str) -> Option<Vec<u8>> {
