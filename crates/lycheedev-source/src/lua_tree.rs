@@ -1,9 +1,11 @@
 //! Public source facts preserve the fixed Go scanner contract. Native semantic
 //! analysis uses the syntax tree independently of these literal observations.
 use crate::facts::{Declaration, Facts, Relationship, SyntaxNote};
-use lycheedev_core::{Result, ToolkitError};
+use lycheedev_core::{Result, ToolkitError, control::OperationControl};
 use std::borrow::Cow;
-use tree_sitter::{InputEdit, Node, Parser, Tree};
+use tree_sitter::{InputEdit, Node, ParseOptions, Parser, Tree};
+mod worker;
+use worker::WorkerGuard;
 
 pub struct SyntaxDocument {
     bytes: Vec<u8>,
@@ -24,6 +26,13 @@ impl SyntaxDocument {
         Self::new_with_identifiers(bytes, false)
     }
     fn new_with_identifiers(bytes: &[u8], lua51_identifiers: bool) -> Result<Self> {
+        Self::new_with_guard(bytes, lua51_identifiers, None)
+    }
+    fn new_with_guard(
+        bytes: &[u8],
+        lua51_identifiers: bool,
+        guard: Option<&WorkerGuard<'_>>,
+    ) -> Result<Self> {
         if std::str::from_utf8(bytes).is_err() || (lua51_identifiers && bytes.contains(&0)) {
             return Err(ToolkitError::new(
                 "codebase.source_integrity",
@@ -42,10 +51,28 @@ impl SyntaxDocument {
         parser
             .set_language(&tree_sitter_lua::LANGUAGE.into())
             .map_err(|e| ToolkitError::new("codebase.parser_unavailable", e.to_string(), 3))?;
-        let grammar = lua51_grammar_input(bytes, lua51_identifiers);
-        let tree = parser.parse(grammar.as_ref(), None).ok_or_else(|| {
-            ToolkitError::new("codebase.source_budget", "Lua parser cancelled", 3)
-        })?;
+        let grammar = lua51_grammar_input_with_guard(bytes, lua51_identifiers, guard);
+        let tree = if let Some(guard) = guard {
+            if !guard.check() {
+                None
+            } else {
+                let mut progress = |_: &tree_sitter::ParseState| {
+                    if guard.check() {
+                        std::ops::ControlFlow::Continue(())
+                    } else {
+                        std::ops::ControlFlow::Break(())
+                    }
+                };
+                parser.parse_with_options(
+                    &mut |offset, _| grammar.get(offset..).unwrap_or_default(),
+                    None,
+                    Some(ParseOptions::new().progress_callback(&mut progress)),
+                )
+            }
+        } else {
+            parser.parse(grammar.as_ref(), None)
+        }
+        .ok_or_else(|| ToolkitError::new("codebase.source_budget", "Lua parser cancelled", 3))?;
         Ok(Self {
             bytes: bytes.to_vec(),
             tree,
@@ -100,7 +127,10 @@ impl SyntaxDocument {
     /// Reject newer grammar forms absent from the fixed gopher-lua parser.
     /// This is shared by public facts and matrix usages, never by native flow.
     pub(crate) fn public_parse_note(&self) -> Option<SyntaxNote> {
-        if let Some(note) = public_lexical_note(&self.bytes) {
+        self.public_parse_note_with_guard(None)
+    }
+    fn public_parse_note_with_guard(&self, guard: Option<&WorkerGuard<'_>>) -> Option<SyntaxNote> {
+        if let Some(note) = public_lexical_note(&self.bytes, guard) {
             return Some(note);
         }
         let mut missing_at_eof = false;
@@ -112,6 +142,9 @@ impl SyntaxDocument {
             .map_or(0, |at| at + 1);
         let mut cursor = self.tree.walk();
         loop {
+            if guard.is_some_and(|guard| !guard.observe_node()) {
+                return None;
+            }
             let node = cursor.node();
             missing_at_eof |= node.is_missing() && node.start_byte() >= end;
             missing_at_eof |= node.is_error()
@@ -180,6 +213,9 @@ impl SyntaxDocument {
                 continue;
             }
             loop {
+                if !worker::check(guard) {
+                    return None;
+                }
                 if cursor.goto_next_sibling() {
                     break;
                 }
@@ -190,17 +226,33 @@ impl SyntaxDocument {
         }
     }
     pub fn facts(&self, generated: bool) -> Facts {
+        self.facts_with_guard(generated, None)
+            .expect("unrestricted facts")
+    }
+    fn facts_with_guard(&self, generated: bool, guard: Option<&WorkerGuard<'_>>) -> Option<Facts> {
         if !self.lua51_identifiers
-            && let Some(note) = self.public_parse_note()
+            && let Some(note) = self.public_parse_note_with_guard(guard)
         {
             let mut facts = Facts::fresh();
-            facts.diagnostics.push(note);
-            return facts;
+            if !worker::charge(guard, note.message.capacity()) {
+                return None;
+            }
+            worker::push(guard, &mut facts.diagnostics, note);
+            return worker::check(guard).then_some(facts);
         }
+        if !worker::charge(guard, "<file>".len()) {
+            return None;
+        }
+        let mut scopes = Vec::new();
+        if !worker::prepare_push(guard, &mut scopes) {
+            return None;
+        }
+        scopes.push("<file>".into());
         let mut w = Walker {
             raw: &self.bytes,
             facts: Facts::fresh(),
-            scopes: vec!["<file>".into()],
+            scopes,
+            guard,
             api_roots: Vec::new(),
             rejected_syntax: false,
             generated,
@@ -226,8 +278,25 @@ impl SyntaxDocument {
                 w.documentation(root, "");
             }
         }
-        w.facts
+        worker::check(guard).then_some(w.facts)
     }
+}
+/// Pure speculative preparation. Failure is an abandonment, not a public error.
+/// Caller holds the 32 MiB scratch prerequisite documented by WorkerGuard.
+pub(crate) fn facts_for_worker(
+    raw: &[u8],
+    control: &OperationControl,
+    max_owned_bytes: usize,
+) -> Option<Facts> {
+    if raw.len() > 64 << 10 || std::str::from_utf8(raw).is_err() {
+        return None;
+    }
+    let guard = WorkerGuard::new(control, max_owned_bytes);
+    if !guard.check() {
+        return None;
+    }
+    let document = SyntaxDocument::new_with_guard(raw, false, Some(&guard)).ok()?;
+    document.facts_with_guard(false, Some(&guard))
 }
 /// Lua 5.1's `goto` is an identifier. The pinned modern grammar reserves it.
 /// Token-only, same-width masking makes the grammar see an identifier while
@@ -236,12 +305,22 @@ impl SyntaxDocument {
 /// receive a same-width grammar-only mask; the literal decoder reads originals.
 /// Bundled luac remains the separate native WoW syntax authority.
 fn lua51_grammar_input(raw: &[u8], mask_goto: bool) -> Cow<'_, [u8]> {
-    fn long_end(raw: &[u8], at: usize) -> Option<usize> {
+    lua51_grammar_input_with_guard(raw, mask_goto, None)
+}
+fn lua51_grammar_input_with_guard<'a>(
+    raw: &'a [u8],
+    mask_goto: bool,
+    guard: Option<&WorkerGuard<'_>>,
+) -> Cow<'a, [u8]> {
+    fn long_end(raw: &[u8], at: usize, guard: Option<&WorkerGuard<'_>>) -> Option<usize> {
         if raw.get(at) != Some(&b'[') {
             return None;
         }
         let mut second = at + 1;
         while raw.get(second) == Some(&b'=') {
+            if !worker::check(guard) {
+                return None;
+            }
             second += 1;
         }
         if raw.get(second) != Some(&b'[') {
@@ -250,6 +329,9 @@ fn lua51_grammar_input(raw: &[u8], mask_goto: bool) -> Cow<'_, [u8]> {
         let width = second - at;
         let mut cursor = second + 1;
         while cursor < raw.len() {
+            if !worker::check(guard) {
+                return None;
+            }
             if raw[cursor] == b']'
                 && raw.get(cursor + width) == Some(&b']')
                 && raw
@@ -268,8 +350,11 @@ fn lua51_grammar_input(raw: &[u8], mask_goto: bool) -> Cow<'_, [u8]> {
     let mut changed: Option<Vec<u8>> = None;
     let mut at = 0;
     while at < raw.len() {
+        if !worker::check(guard) {
+            break;
+        }
         if raw.get(at..at + 2) == Some(b"--") {
-            if let Some(end) = long_end(raw, at + 2) {
+            if let Some(end) = long_end(raw, at + 2, guard) {
                 if !mask_goto {
                     mask_literal_nul(raw, at, end, &mut changed);
                 }
@@ -277,6 +362,9 @@ fn lua51_grammar_input(raw: &[u8], mask_goto: bool) -> Cow<'_, [u8]> {
             } else {
                 at += 2;
                 while at < raw.len() && raw[at] != b'\n' && (mask_goto || raw[at] != b'\r') {
+                    if !worker::check(guard) {
+                        break;
+                    }
                     if !mask_goto && raw[at] == 0 {
                         changed.get_or_insert_with(|| raw.to_vec())[at] = b' ';
                     }
@@ -289,6 +377,9 @@ fn lua51_grammar_input(raw: &[u8], mask_goto: bool) -> Cow<'_, [u8]> {
             let quote = raw[at];
             at += 1;
             while at < raw.len() {
+                if !worker::check(guard) {
+                    break;
+                }
                 if !mask_goto && raw[at] == 0 {
                     changed.get_or_insert_with(|| raw.to_vec())[at] = b' ';
                 }
@@ -315,7 +406,7 @@ fn lua51_grammar_input(raw: &[u8], mask_goto: bool) -> Cow<'_, [u8]> {
             }
             continue;
         }
-        if let Some(end) = long_end(raw, at) {
+        if let Some(end) = long_end(raw, at, guard) {
             if !mask_goto {
                 mask_literal_nul(raw, at, end, &mut changed);
             }
@@ -326,6 +417,9 @@ fn lua51_grammar_input(raw: &[u8], mask_goto: bool) -> Cow<'_, [u8]> {
             let start = at;
             at += 1;
             while at < raw.len() && identifier(raw[at]) {
+                if !worker::check(guard) {
+                    break;
+                }
                 at += 1;
             }
             if mask_goto && &raw[start..at] == b"goto" {
@@ -456,7 +550,7 @@ fn public_lua_error(raw: &[u8], at: usize, token: &[u8], message: &str) -> Synta
 // This is only the fixed scanner's string/comment/NUL boundary, not a second
 // Lua parser. Statement/expression structure remains tree-sitter's job. The
 // fixed scanProgram wrapper normalizes lexer EOF (-1) to public note line 0.
-fn public_lexical_note(raw: &[u8]) -> Option<SyntaxNote> {
+fn public_lexical_note(raw: &[u8], guard: Option<&WorkerGuard<'_>>) -> Option<SyntaxNote> {
     let mut at = if raw.starts_with(b"\xef\xbb\xbf") {
         3
     } else {
@@ -468,6 +562,9 @@ fn public_lexical_note(raw: &[u8]) -> Option<SyntaxNote> {
         }
     }
     while at < raw.len() {
+        if !worker::check(guard) {
+            return None;
+        }
         let comment = raw[at..].starts_with(b"--");
         if comment {
             at += 2;
@@ -504,6 +601,9 @@ fn public_lexical_note(raw: &[u8]) -> Option<SyntaxNote> {
             let width = at - start;
             at += 1;
             loop {
+                if !worker::check(guard) {
+                    return None;
+                }
                 if at == raw.len() {
                     return Some(public_lua_eof(if comment {
                         "invalid multiline comment"
@@ -535,6 +635,9 @@ fn public_lexical_note(raw: &[u8]) -> Option<SyntaxNote> {
             let start = at;
             at += 1;
             loop {
+                if !worker::check(guard) {
+                    return None;
+                }
                 let Some(&byte) = raw.get(at) else {
                     return Some(public_lua_eof("unterminated string"));
                 };
@@ -837,6 +940,7 @@ fn table_text(raw: &[u8], table: Node<'_>, key: &str) -> String {
 }
 struct Walker<'a, 'tree> {
     raw: &'a [u8],
+    guard: Option<&'a WorkerGuard<'a>>,
     facts: Facts,
     scopes: Vec<String>,
     api_roots: Vec<Node<'tree>>,
@@ -856,11 +960,26 @@ impl<'tree> Walker<'_, 'tree> {
         self.source_lines
             .partition_point(|start| *start <= node.end_byte().saturating_sub(1))
     }
+    fn scope_name(&self) -> &str {
+        self.scopes.last().map(String::as_str).unwrap_or("<file>")
+    }
     fn scope(&self) -> String {
-        self.scopes
-            .last()
-            .cloned()
-            .unwrap_or_else(|| "<file>".into())
+        let scope = self.scope_name();
+        if !worker::charge(self.guard, scope.len()) {
+            return String::new();
+        }
+        scope.into()
+    }
+    fn note(&mut self, message: &str, line: usize) {
+        if !worker::charge(self.guard, message.len())
+            || !worker::prepare_push(self.guard, &mut self.facts.diagnostics)
+        {
+            return;
+        }
+        self.facts.diagnostics.push(SyntaxNote {
+            message: message.into(),
+            line,
+        });
     }
     fn declare(
         &mut self,
@@ -874,19 +993,36 @@ impl<'tree> Walker<'_, 'tree> {
             return;
         }
         let line = self.line(n);
-        let signature = signature.unwrap_or_else(|| {
-            self.lines
-                .get(line - 1)
-                .copied()
-                .unwrap_or("")
-                .trim_start_matches('\u{feff}')
-                .trim()
-                .into()
-        });
+        let source_signature = self
+            .lines
+            .get(line - 1)
+            .copied()
+            .unwrap_or("")
+            .trim_start_matches('\u{feff}')
+            .trim();
+        let signature_bytes = signature
+            .as_ref()
+            .map_or(source_signature.len(), String::capacity);
+        let scope_bytes = if scope { self.scope_name().len() } else { 0 };
+        if !worker::charge(
+            self.guard,
+            name.capacity()
+                .saturating_add(category.len())
+                .saturating_add(scope_bytes)
+                .saturating_add(signature_bytes),
+        ) || !worker::prepare_push(self.guard, &mut self.facts.declarations)
+        {
+            return;
+        }
+        let signature = signature.unwrap_or_else(|| source_signature.into());
         self.facts.declarations.push(Declaration {
             name,
             category: category.into(),
-            scope: if scope { self.scope() } else { String::new() },
+            scope: if scope {
+                self.scope_name().into()
+            } else {
+                String::new()
+            },
             line,
             end_line: if matches!(n.kind(), "assignment_statement" | "variable_declaration") {
                 0
@@ -897,6 +1033,16 @@ impl<'tree> Walker<'_, 'tree> {
         });
     }
     fn link(&mut self, n: Node<'_>, from: String, to: String, category: &str, confidence: &str) {
+        if !worker::charge(
+            self.guard,
+            from.capacity()
+                .saturating_add(to.capacity())
+                .saturating_add(category.len())
+                .saturating_add(confidence.len()),
+        ) || !worker::prepare_push(self.guard, &mut self.facts.relationships)
+        {
+            return;
+        }
         self.facts.relationships.push(Relationship {
             from,
             to,
@@ -913,12 +1059,26 @@ impl<'tree> Walker<'_, 'tree> {
         category: &str,
         confidence: &str,
     ) {
+        if !worker::check(self.guard) {
+            return;
+        }
         let ordinal = self.facts.relationships.len();
         let display = match String::from_utf8(target) {
             Ok(value) => value,
             Err(error) => {
                 let target = error.into_bytes();
                 let display = lua_json_string(&target);
+                if self.guard.is_some_and(|guard| {
+                    !guard.raw_target(
+                        self.facts
+                            .raw_relationship_targets
+                            .as_ref()
+                            .map_or(0, |targets| targets.len()),
+                        target.capacity(),
+                    )
+                }) {
+                    return;
+                }
                 self.facts
                     .raw_relationship_targets
                     .as_mut()
@@ -935,12 +1095,31 @@ impl<'tree> Walker<'_, 'tree> {
         declared: Option<(String, &str, Node<'tree>)>,
         line: usize,
     ) {
+        if !worker::check(self.guard) {
+            return;
+        }
         let scope = if let Some((name, category, source)) = declared {
+            if !worker::charge(self.guard, name.len()) {
+                return;
+            }
             self.declare(source, name.clone(), category, true, None);
             name
         } else {
-            format!("{}/<anonymous:{line}>", self.scope())
+            // Reserve before formatting the owned scope; 32 bytes covers the
+            // suffix and any usize line number on the supported targets.
+            if !worker::charge(
+                self.guard,
+                self.scope_name().len().saturating_add(32).saturating_mul(2),
+            ) {
+                return;
+            }
+            format!("{}/<anonymous:{line}>", self.scope_name())
         };
+        if !worker::charge(self.guard, scope.capacity())
+            || !worker::prepare_push(self.guard, &mut self.scopes)
+        {
+            return;
+        }
         self.scopes.push(scope);
         if let Some(parameters) = n.child_by_field_name("parameters") {
             self.walk(parameters);
@@ -951,6 +1130,17 @@ impl<'tree> Walker<'_, 'tree> {
         self.scopes.pop();
     }
     fn walk(&mut self, n: Node<'tree>) {
+        if !worker::check(self.guard) {
+            return;
+        }
+        let _scratch = if let Some(guard) = self.guard {
+            let Some(frame) = guard.frame(self.raw.len()) else {
+                return;
+            };
+            Some(frame)
+        } else {
+            None
+        };
         if self.depth >= 256 {
             if !self
                 .facts
@@ -958,10 +1148,7 @@ impl<'tree> Walker<'_, 'tree> {
                 .iter()
                 .any(|n| n.message == "source_ast_depth_limit")
             {
-                self.facts.diagnostics.push(SyntaxNote {
-                    message: "source_ast_depth_limit".into(),
-                    line: n.start_position().row + 1,
-                });
+                self.note("source_ast_depth_limit", n.start_position().row + 1);
             }
             return;
         }
@@ -972,10 +1159,7 @@ impl<'tree> Walker<'_, 'tree> {
     fn walk_inner(&mut self, n: Node<'tree>) {
         if public_unsupported(self.raw, n) {
             if !self.rejected_syntax {
-                self.facts.diagnostics.push(SyntaxNote {
-                    message: "Syntax unavailable in fixed Go Lua parser".into(),
-                    line: self.line(n),
-                });
+                self.note("Syntax unavailable in fixed Go Lua parser", self.line(n));
                 self.rejected_syntax = true;
             }
             return;
@@ -983,22 +1167,17 @@ impl<'tree> Walker<'_, 'tree> {
         self.work += 1;
         if self.work > 2_000_000 {
             if self.work == 2_000_001 {
-                self.facts.diagnostics.push(SyntaxNote {
-                    message: "source_ast_work_limit".into(),
-                    line: n.start_position().row + 1,
-                });
+                self.note("source_ast_work_limit", n.start_position().row + 1);
             }
             return;
         }
         if n.is_error() || n.is_missing() {
-            self.facts.diagnostics.push(SyntaxNote {
-                message: if n.is_missing() {
-                    format!("Missing Lua token: {}", n.kind())
-                } else {
-                    "Lua syntax recovery region".into()
-                },
-                line: n.start_position().row + 1,
-            });
+            let message = if n.is_missing() {
+                format!("Missing Lua token: {}", n.kind())
+            } else {
+                "Lua syntax recovery region".into()
+            };
+            self.note(&message, n.start_position().row + 1);
         }
         if n.kind() == "comment" || n.kind() == "string" {
             return;
@@ -1043,6 +1222,9 @@ impl<'tree> Walker<'_, 'tree> {
                     self.assignment(a, true, n);
                 } else {
                     for child in children(n) {
+                        if !worker::check(self.guard) {
+                            return;
+                        }
                         self.walk(child);
                     }
                 }
@@ -1101,17 +1283,26 @@ impl<'tree> Walker<'_, 'tree> {
             {
                 self.api_roots.push(n)
             }
-            "attribute" => self.facts.diagnostics.push(SyntaxNote {
-                message: "Syntax unavailable in WoW Lua 5.1".into(),
-                line: n.start_position().row + 1,
-            }),
+            "attribute" => self.note(
+                "Syntax unavailable in WoW Lua 5.1",
+                n.start_position().row + 1,
+            ),
             _ => {}
         }
+        if !worker::check(self.guard) {
+            return;
+        }
         for c in children(n) {
+            if !worker::check(self.guard) {
+                return;
+            }
             self.walk(c);
         }
     }
     fn assignment(&mut self, n: Node<'tree>, local: bool, source: Node<'tree>) {
+        if !worker::check(self.guard) {
+            return;
+        }
         let nodes = children(n);
         let vars = nodes
             .iter()
@@ -1126,9 +1317,15 @@ impl<'tree> Walker<'_, 'tree> {
         // Assignment targets may contain calls. Go visits all targets before
         // any RHS, including targets that cannot produce a declaration name.
         for var in &vars {
+            if !worker::check(self.guard) {
+                return;
+            }
             self.walk(*var);
         }
         for (i, expression) in values.into_iter().enumerate() {
+            if !worker::check(self.guard) {
+                return;
+            }
             let value = unparenthesized(expression);
             let target = vars.get(i).map(|v| name(self.raw, *v)).unwrap_or_default();
             if value.kind() == "function_definition" && !target.is_empty() && !value.has_error() {
@@ -1152,6 +1349,9 @@ impl<'tree> Walker<'_, 'tree> {
                     self.declare(source, target.clone(), "mixin", true, None);
                     if let Some(arguments) = value.child_by_field_name("arguments") {
                         for base in children(arguments) {
+                            if !worker::check(self.guard) {
+                                return;
+                            }
                             let parent = name(self.raw, base);
                             if !parent.is_empty() {
                                 self.link(source, target.clone(), parent, "inherits", "inferred");
@@ -1275,6 +1475,159 @@ impl<'tree> Walker<'_, 'tree> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn on_worker_stack(work: impl FnOnce() + Send) {
+        std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .name("source-facts-regression".into())
+                .stack_size(2 << 20)
+                .spawn_scoped(scope, work)
+                .expect("production-sized parser test worker")
+                .join()
+                .expect("parser test worker completed");
+        });
+    }
+    fn same_worker_facts(raw: &[u8]) {
+        on_worker_stack(|| {
+            let control = OperationControl::default();
+            let expected = crate::facts::lua(raw, false);
+            let actual = crate::facts::lua_for_worker(raw, &control, 4 << 20)
+                .expect("ordinary fixture fits speculative allowance");
+            assert_eq!(
+                serde_json::to_vec(&actual).unwrap(),
+                serde_json::to_vec(&expected).unwrap()
+            );
+            assert_eq!(
+                actual.raw_relationship_targets,
+                expected.raw_relationship_targets
+            );
+            for ordinal in 0..expected.relationships.len() {
+                assert_eq!(
+                    actual.relationship_target_bytes(ordinal),
+                    expected.relationship_target_bytes(ordinal)
+                );
+            }
+        });
+    }
+    #[test]
+    fn worker_facts_preserve_complete_public_fields_and_raw_target_identity() {
+        for raw in [
+            b"".as_slice(),
+            b"local function f(x) frame:RegisterEvent('READY'); return A.B(x) end\nf()",
+            b"A, B = CreateFromMixins(Base, Other), function() local x = function() call() end end",
+            b"function T:m(a, b) local z = (function() f() end)(); self:RegisterUnitEvent('UNIT', a) end",
+            br#"T["\255"](); frame:RegisterEvent("\255\254"); T["\000"]()"#,
+            br#"T["\999"](); frame:RegisterEvent("\x41\u{42}\z"); ((A.B))()"#,
+            b"-- comment\r\nfunction f()\r call()\n\rend",
+            b"local f = function() return function() foo() end end",
+            b"local x = ;",
+            b"function f(",
+            b"function f() local x = ;",
+            b"f(())",
+            b"function goto() end",
+            b"::label:: goto label",
+            b"local s = 'unterminated\n",
+            b"local s = [==[unterminated",
+            b"--[=x",
+            b"local x = 1\0",
+            b"f('literal\0byte') -- comment\0\n",
+            b"local x <const> = 1",
+            b"return 1 // 2",
+        ] {
+            same_worker_facts(raw);
+        }
+    }
+    #[test]
+    fn worker_facts_owned_cap_abandons_without_a_new_public_failure() {
+        on_worker_stack(|| {
+            let control = OperationControl::default();
+            let raw = b"function f() frame:RegisterEvent('READY'); A.B() end";
+            let expected = crate::facts::lua(raw, false);
+            for cap in [0, 1, 64, 128] {
+                assert!(crate::facts::lua_for_worker(raw, &control, cap).is_none());
+                let replay = crate::facts::lua(raw, false);
+                assert_eq!(
+                    serde_json::to_vec(&replay).unwrap(),
+                    serde_json::to_vec(&expected).unwrap()
+                );
+            }
+            assert!(crate::facts::lua_for_worker(b"local x = ;", &control, 1).is_none());
+            assert!(control.check().is_ok());
+            same_worker_facts(raw);
+        });
+    }
+    #[test]
+    fn worker_facts_scope_signature_and_invalid_target_caps_fall_back() {
+        on_worker_stack(|| {
+            let control = OperationControl::default();
+            // Every declaration retains the whole physical source line as its
+            // signature. Admission must happen before those repeated clones.
+            let raw = format!("{}{}", "function a() end ".repeat(100), " ".repeat(2000));
+            assert!(crate::facts::lua_for_worker(raw.as_bytes(), &control, 32 << 10).is_none());
+            let expected = crate::facts::lua(raw.as_bytes(), false);
+            assert_eq!(expected.declarations.len(), 100);
+            same_worker_facts(raw.as_bytes());
+            let invalid = br#"T["\255"]()"#;
+            assert!(crate::facts::lua_for_worker(invalid, &control, 1024).is_none());
+            same_worker_facts(invalid);
+        });
+    }
+    #[test]
+    fn worker_facts_observe_stop_without_latching_or_copying_parent_state() {
+        on_worker_stack(|| {
+            use lycheedev_core::control::{StopCause, TrackedCancellation};
+            use std::time::{Duration, Instant};
+            let parent_signal = TrackedCancellation::new();
+            let parent = OperationControl::tracked(
+                Instant::now() + Duration::from_secs(5),
+                parent_signal.clone(),
+            );
+            let child = parent.ordered_child(parent.deadline()).unwrap();
+            let local_signal = child.tracked_cancel_handle().unwrap();
+            let document = SyntaxDocument::new_public(b"function f() call() end").unwrap();
+            let guard = WorkerGuard::new(&child, 4 << 20);
+            assert!(guard.check());
+            parent_signal.cancel();
+            assert!(document.facts_with_guard(false, Some(&guard)).is_none());
+            assert!(crate::facts::lua_for_worker(b"f()", &child, 4 << 20).is_none());
+            assert!(!local_signal.is_cancelled());
+            assert_eq!(child.stop_cause().unwrap(), Some(StopCause::Cancelled));
+            let expired = OperationControl::uncancelable(Instant::now());
+            assert!(crate::facts::lua_for_worker(b"f()", &expired, 4 << 20).is_none());
+            assert!(!expired.is_cancelled());
+            assert_eq!(
+                expired.stop_cause().unwrap(),
+                Some(StopCause::DeadlineExceeded)
+            );
+        });
+    }
+    #[test]
+    fn worker_facts_scratch_and_input_admission_leave_original_depth_contract() {
+        on_worker_stack(|| {
+            let control = OperationControl::default();
+            same_worker_facts(&vec![b'\n'; 64 << 10]);
+            assert!(
+                crate::facts::lua_for_worker(&vec![b' '; (64 << 10) + 1], &control, 4 << 20)
+                    .is_none()
+            );
+            assert!(crate::facts::lua_for_worker(b"\xff", &control, 4 << 20).is_none());
+            // The original walk still reaches its depth-256 diagnostic. Optional
+            // scratch admission may abandon earlier and must never publish it.
+            let raw = format!(
+                "{}call(){}{}",
+                "do ".repeat(260),
+                " end".repeat(260),
+                " ".repeat(32 << 10)
+            );
+            assert!(raw.len() < 64 << 10);
+            assert!(crate::facts::lua_for_worker(raw.as_bytes(), &control, 4 << 20).is_none());
+            assert!(
+                crate::facts::lua(raw.as_bytes(), false)
+                    .diagnostics
+                    .iter()
+                    .any(|note| note.message == "source_ast_depth_limit")
+            );
+        });
+    }
     #[test]
     fn lua51_goto_identifiers_preserve_trivia_ranges_and_incremental_facts() {
         let raw=b"-- goto\nlocal text = 'goto'; local long = [==[goto]==]\n--[=[ goto ]=]\nfunction goto() return text, long end\nlocal obj={}; obj.goto(); goto()\nlocal gotox = 1\n";

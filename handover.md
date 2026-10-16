@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 19:55 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`913112a6ce628812f824513aac853ccd088fd265`；当前本机已通过913定向编译/回归，正构建该树优化产物；旧优化产品e843结果保持原身份，runner身份独立认证。实现进行中，尚未完成全量验收。
+更新：2026-10-16 20:11 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`e7341e3902216de38654eaeefe8e0ce42ec62f83`；当前本机已通过913定向编译/回归，正构建该树优化产物；旧优化产品e843结果保持原身份，runner身份独立认证。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -33,7 +33,7 @@
 
 ### 当前全仓架构实施批
 
-正在贯通四个真实消费者边界，详细设计见 [DESIGN](DESIGN.md#whole-repository-rust-native-implementation-plan)：Core 借用型 pin 请求已接默认 Data provider；Data typed stream 已接 CLI、逐行执行和统一 wire renderer；Live 三态结果已迁移 connection/activation/doctor/CLI，清理合并消费原结果而不 clone；Source 集中原 Lua51 配置、八类诊断顺序和准入策略。Live 新增12项、Data/CLI新增13项、Core/Data新增10项、Source配置新增3项回归，全部本架构批新 Rust 尚未执行；Node合同/身份45项实际通过。保留原预算、错误次序、输出和已提交事实；本批不代表最终四阶段审计已完成。
+e734已保存四个真实消费者边界，详细设计见 [DESIGN](DESIGN.md#whole-repository-rust-native-implementation-plan)：Core 借用型 pin 请求已接默认 Data provider；Data typed stream 已接 CLI、逐行执行和统一 wire renderer；Live 三态结果已迁移 connection/activation/doctor/CLI，清理合并消费原结果而不 clone；Source 集中原 Lua51 配置、八类诊断顺序和准入策略。Live 新增12项、Data/CLI新增13项、Core/Data新增10项、Source配置新增3项回归，全部本架构批新 Rust 尚未执行；Node合同/身份45项实际通过。后续跨模块静态消费者曾60通过1失败，原因是旧322整体文件身份未纳入三态迁移；精确52编辑可逆认证补齐后62/62通过，原失败保留，旧manifest/Go输入字节未动。保留原预算、错误次序、输出和已提交事实；本批不代表最终四阶段审计已完成。
 
 Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共同占用原 retained 额度；不把所有模块强行并发。Core/Data 现有所有权与单堆 SQL 保留，Live 输入状态仍串行。成熟库按实际能力、成本、许可与升级验证选用，不为架构名义另造空 crate 或通用调度框架。
 
@@ -53,7 +53,7 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 - **冷index发布优化已实现，定向Rust验证通过**：Facts和4036份原文分别进入固定路径的可重建cache，单次index复用已准入目录、同key原deadline锁、最多64个不确定残留stage、同目录原子可见与checked close；这些缓存不请求逐文件crash durability。暖读仍核全文SHA/长度/UTF8，缺失或损坏按已认证index内固定repository/product/commit/parser及Git树边/对象身份恢复，不能采用移动分支。正式inspect/loadEvidence/diff/closure BlobRef及4个asset、最终index/manifest保持原durable发布。三个实际CLI search入口补传原inv.control，避免恢复时换新预算。新增Core9/Source6/Windows2回归，Node读侧14/14通过；17项新增Rust已在f6实际通过；新优化产物完整4036与新性能仍待跑。原e843慢样本保留，不预报降幅。
 
 - **retained结构性内存候选已实现，收益待测**：native raw Emmy观察改为共享path/原SemanticId的紧凑typed记录，序列化保持原字段/字节顺序；实际research回复不整体物化该表。全工作区managed membership改为FileId/语法种类分组的精确u64范围，每成员8字节、冻结上下文Arc共享，保持Name/Index/Call区别。新增6项Rust逐字输出、原集合、取消/输出预算测试；94项相关Node与语法解析通过；6新增Rust已在913实际通过，完整2GiB复验仍未完成。e843112原始内存行SHA已核，增长主要在analysis child；采样只有外层cold标签，不能据此归因某个内部phase或断言OOM。原4个冻结参考文件未改，上游生产仍原版848。
-- **实际并行路线正在实施评估**：用户进一步要求主动采用Rust并发，Go只约束功能/结果。下一工作单元选择Source冷链独立解析/校验与I/O流水线，必须同时限制在途字节和任务数、稳定原顺序与首错/取消；之后按证据审Data批处理与Live必须串行的交易边界。不为并发名义改变合同或造通用框架，当前本机测试持续。
+- **实际并行冷链候选已实现，待验证**：最多4个scoped纯Lua解析worker、8个有序槽，仅≤64KiB普通UTF8 Lua可提前计算；小XML/TOC只持有原文、按原主线程完整流程处理。cache读取/序列化/发布与所有公开错误按序，批尾drain后才启动下一Git进程；真实Git Vec capacity、原文、结果/scratch及worker栈共同受原256MiB retained余量准入。超额或未支持输入走原完整串行路径，无新增公共拒绝；第三方tree-sitter C分配不是Rust账目/RSS硬上限。26新Rust及真实默认2MiB worker栈的混合输入/跨4097对象batch回归尚未执行。并行profile只累计已消费worker任务时长，重叠不能相加；完整4036等价、取消与新20对性能仍待测。
 
 ## 4. 进入最终四阶段前的有限收口
 

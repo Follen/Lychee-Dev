@@ -718,7 +718,9 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node tools/rust-cargo.mjs --owner ci-source-query-storage --one-shot -- test --locked --offline -p lycheedev-source --lib query_store::tests -j 1
-          node tools/rust-cargo.mjs --owner ci-source-index-cache --one-shot -- test --locked --offline -p lycheedev-source --lib index::facts_cache_tests -j 1
+          node tools/rust-cargo.mjs --owner ci-source-index-cache --one-shot -- test --locked --offline -p lycheedev-source --lib index:: -j 1
+          node tools/rust-cargo.mjs --owner ci-source-lua-parser --one-shot -- test --locked --offline -p lycheedev-source --lib lua_tree:: -j 1
+          node tools/rust-cargo.mjs --owner ci-source-git-batches --one-shot -- test --locked --offline -p lycheedev-source --lib git:: -j 1
       - name: Run independent metadata budget and cleanup fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-metadata-supplemental --one-shot -- test --locked --offline -p lycheedev-core --lib metadata::supplemental_tests -j 1

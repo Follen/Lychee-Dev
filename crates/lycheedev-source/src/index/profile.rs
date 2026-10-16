@@ -20,8 +20,9 @@ pub(super) enum Phase {
     IndexSerialize,
     IndexPublish,
     Manifest,
+    FactsWorker,
 }
-const NAMES: [&str; 14] = [
+const NAMES: [&str; 15] = [
     "metadata",
     "cached_index",
     "index_lock",
@@ -36,12 +37,13 @@ const NAMES: [&str; 14] = [
     "index_serialize",
     "index_publish",
     "manifest",
+    "facts_worker_consumed",
 ];
 
 pub(super) struct Profile {
     started: Option<Instant>,
-    elapsed: [Cell<Duration>; 14],
-    calls: [Cell<u64>; 14],
+    elapsed: [Cell<Duration>; 15],
+    calls: [Cell<u64>; 15],
 }
 impl Profile {
     pub(super) fn new() -> Self {
@@ -54,6 +56,16 @@ impl Profile {
             calls: std::array::from_fn(|_| Cell::new(0)),
         }
     }
+    pub(super) fn is_enabled(&self) -> bool {
+        self.started.is_some()
+    }
+    pub(super) fn record(&self, phase: Phase, elapsed: Duration) {
+        if self.is_enabled() {
+            let i = phase as usize;
+            self.elapsed[i].set(self.elapsed[i].get().saturating_add(elapsed));
+            self.calls[i].set(self.calls[i].get().saturating_add(1));
+        }
+    }
     pub(super) fn span(&self, phase: Phase) -> Span<'_> {
         Span {
             profile: self,
@@ -63,7 +75,7 @@ impl Profile {
     }
     fn value(&self) -> serde_json::Value {
         let phases: Vec<_> = NAMES.iter().enumerate().map(|(i, name)| serde_json::json!({"phase":name,"calls":self.calls[i].get(),"elapsedMicros":self.elapsed[i].get().as_micros()})).collect();
-        serde_json::json!({"schema":"lycheedev.source-index-phases.v1","elapsedMicros":self.started.map(|s|s.elapsed().as_micros()),"timing":"wall-clock; nested phases overlap; not additive","phases":phases})
+        serde_json::json!({"schema":"lycheedev.source-index-phases.v1","elapsedMicros":self.started.map(|s|s.elapsed().as_micros()),"timing":"wall-clock; worker phase sums consumed job durations; phases overlap; not additive","phases":phases})
     }
 }
 impl Drop for Profile {
@@ -120,10 +132,10 @@ mod tests {
         assert_eq!(result, Err("original"));
         assert_eq!(p.calls[Phase::FactsParse as usize].get(), 2);
         let value = p.value();
-        assert_eq!(value["phases"].as_array().unwrap().len(), 14);
+        assert_eq!(value["phases"].as_array().unwrap().len(), 15);
         assert_eq!(
             value["timing"],
-            "wall-clock; nested phases overlap; not additive"
+            "wall-clock; worker phase sums consumed job durations; phases overlap; not additive"
         );
     }
 }

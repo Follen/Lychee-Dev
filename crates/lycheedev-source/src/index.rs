@@ -1,3 +1,4 @@
+mod facts_pipeline;
 mod original_cache;
 mod profile;
 use crate::{
@@ -478,7 +479,7 @@ fn document_facts(
     control: &lycheedev_core::control::OperationControl,
 ) -> Result<(Facts, bool)> {
     let cache = lycheedev_core::cache::SourceFactsCache::open(home, control)?;
-    let result = document_facts_profiled(home, path, data, sha256, control, None, &cache);
+    let result = document_facts_profiled(home, path, data, sha256, control, None, &cache, None);
     cache.finish(result, control)
 }
 fn document_facts_profiled(
@@ -489,6 +490,7 @@ fn document_facts_profiled(
     control: &lycheedev_core::control::OperationControl,
     profile: Option<&Profile>,
     cache_owner: &lycheedev_core::cache::SourceFactsCache,
+    prepared: Option<facts_pipeline::PreparedFacts>,
 ) -> Result<(Facts, bool)> {
     control.check()?;
     let cache = facts_cache_path(home, path, sha256);
@@ -515,17 +517,25 @@ fn document_facts_profiled(
             return Ok((parsed, true));
         }
     }
-    let parse_phase = profile.map(|p| p.span(Phase::FactsParse));
-    let lower_path = path.to_ascii_lowercase();
-    let parsed = if lower_path.ends_with(".lua") {
-        facts::lua(data, path.contains("/Blizzard_APIDocumentationGenerated/"))
-    } else if lower_path.ends_with(".toc") {
-        facts::toc(data)
+    let parsed = if let Some(prepared) = prepared {
+        if let Some(profile) = profile {
+            profile.record(Phase::FactsParse, prepared.parse_elapsed);
+        }
+        prepared.facts
     } else {
-        facts::xml(data)
+        let _parse_phase = profile.map(|p| p.span(Phase::FactsParse));
+        let lower_path = path.to_ascii_lowercase();
+        if lower_path.ends_with(".lua") {
+            facts::lua(data, path.contains("/Blizzard_APIDocumentationGenerated/"))
+        } else if lower_path.ends_with(".toc") {
+            facts::toc(data)
+        } else {
+            facts::xml(data)
+        }
     };
+    // The original control decides stop/error ordering at the original stage;
+    // speculative workers only observe its cancellation and absolute deadline.
     control.check()?;
-    drop(parse_phase);
     let serialize_phase = profile.map(|p| p.span(Phase::FactsSerialize));
     let f = serde_json::to_value(&parsed)?;
     let envelope = serde_json::to_vec(
@@ -613,151 +623,159 @@ fn build_uncached_cached(
         }
     }
     let visit_phase = profile.span(Phase::GitBlobs);
-    let batches = git::visit_blobs_with_control(home, pin, files, control, |file, data| {
-        control.check()?;
-        if std::time::Instant::now() >= deadline {
-            return Err(ToolkitError::new(
-                "codebase.source_budget",
-                "Source execution deadline exceeded",
-                3,
-            ));
-        }
-        read_bytes += data.len();
-        if file.asset {
-            let hash = storage::sha256(&data);
+    let batches = facts_pipeline::visit(
+        home,
+        pin,
+        files,
+        control,
+        profile,
+        |file, data, prepared| {
+            control.check()?;
+            if std::time::Instant::now() >= deadline {
+                return Err(ToolkitError::new(
+                    "codebase.source_budget",
+                    "Source execution deadline exceeded",
+                    3,
+                ));
+            }
+            read_bytes += data.len();
+            if file.asset {
+                let hash = storage::sha256(&data);
+                let publish_phase = profile.span(Phase::OriginalPublish);
+                let local = evidence::publish_blob_bounded(home, &data, 64 << 20, control)?;
+                drop(publish_phase);
+                let ext = Path::new(&file.path)
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                index.assets.push(json!({"path":file.path,"contentHash":hash,"bytes":file.bytes,"extension":format!(".{ext}"),"mime":"application/octet-stream","format":ext,"width":0,"height":0,"local":local}));
+                return Ok(());
+            }
+            retained = retained.checked_add(file.bytes).ok_or_else(|| {
+                ToolkitError::new(
+                    "codebase.source_budget",
+                    "Source memory admission overflow",
+                    3,
+                )
+            })?;
+            if retained > 256 << 20 {
+                return Err(ToolkitError::new(
+                    "codebase.source_budget",
+                    "Source query memory budget exceeded",
+                    3,
+                ));
+            }
+            if std::str::from_utf8(&data).is_err() {
+                // Fixed Go AnalyzeDocument returns an untyped error here, which
+                // aborts the index and maps to command.failed / dispatch / exit 5.
+                // It is not a recoverable parse note or an oversized-file skip.
+                return Err(ToolkitError::new(
+                    "command.failed",
+                    "codebase.analysis_encoding_or_budget",
+                    5,
+                ));
+            }
+            let sha256 = storage::sha256(&data);
+            let (facts, cache_hit) = document_facts_profiled(
+                home,
+                &file.path,
+                &data,
+                &sha256,
+                control,
+                Some(profile),
+                cache_owner,
+                prepared,
+            )?;
+            if cache_hit {
+                cached += 1;
+            } else {
+                parsed_documents += 1;
+            }
             let publish_phase = profile.span(Phase::OriginalPublish);
-            let local = evidence::publish_blob_bounded(home, &data, 64 << 20, control)?;
+            originals.publish(&sha256, &data, control)?;
             drop(publish_phase);
-            let ext = Path::new(&file.path)
-                .extension()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .to_ascii_lowercase();
-            index.assets.push(json!({"path":file.path,"contentHash":hash,"bytes":file.bytes,"extension":format!(".{ext}"),"mime":"application/octet-stream","format":ext,"width":0,"height":0,"local":local}));
-            return Ok(());
-        }
-        retained = retained.checked_add(file.bytes).ok_or_else(|| {
-            ToolkitError::new(
-                "codebase.source_budget",
-                "Source memory admission overflow",
-                3,
-            )
-        })?;
-        if retained > 256 << 20 {
-            return Err(ToolkitError::new(
-                "codebase.source_budget",
-                "Source query memory budget exceeded",
-                3,
-            ));
-        }
-        if std::str::from_utf8(&data).is_err() {
-            // Fixed Go AnalyzeDocument returns an untyped error here, which
-            // aborts the index and maps to command.failed / dispatch / exit 5.
-            // It is not a recoverable parse note or an oversized-file skip.
-            return Err(ToolkitError::new(
-                "command.failed",
-                "codebase.analysis_encoding_or_budget",
-                5,
-            ));
-        }
-        let sha256 = storage::sha256(&data);
-        let (facts, cache_hit) = document_facts_profiled(
-            home,
-            &file.path,
-            &data,
-            &sha256,
-            control,
-            Some(profile),
-            cache_owner,
-        )?;
-        if cache_hit {
-            cached += 1;
-        } else {
-            parsed_documents += 1;
-        }
-        let publish_phase = profile.span(Phase::OriginalPublish);
-        originals.publish(&sha256, &data, control)?;
-        drop(publish_phase);
-        let _symbols_phase = profile.span(Phase::Symbols);
-        for (ordinal, d) in facts.declarations.iter().enumerate() {
-            let mut s = Symbol {
-                id: String::new(),
-                kind: "declaration".into(),
-                name: d.name.clone(),
-                target: String::new(),
-                category: d.category.clone(),
-                confidence: "exact".into(),
+            let _symbols_phase = profile.span(Phase::Symbols);
+            for (ordinal, d) in facts.declarations.iter().enumerate() {
+                let mut s = Symbol {
+                    id: String::new(),
+                    kind: "declaration".into(),
+                    name: d.name.clone(),
+                    target: String::new(),
+                    category: d.category.clone(),
+                    confidence: "exact".into(),
+                    path: file.path.clone(),
+                    line: d.line,
+                    end_line: d.end_line,
+                    signature: d.signature.clone(),
+                    scope: d.scope.clone(),
+                    ordinal,
+                };
+                s.id = stable_id(pin, &s);
+                index.symbols.push(s);
+            }
+            for r in &facts.relationships {
+                relationships += 1;
+                index.symbols.push(Symbol {
+                    id: String::new(),
+                    kind: "relationship".into(),
+                    name: r.from.clone(),
+                    target: r.to.clone(),
+                    category: r.category.clone(),
+                    confidence: r.confidence.clone(),
+                    path: file.path.clone(),
+                    line: r.line,
+                    end_line: r.line,
+                    signature: String::new(),
+                    scope: String::new(),
+                    ordinal: 0,
+                });
+            }
+            for load in &facts.loads {
+                index.symbols.push(Symbol {
+                    id: String::new(),
+                    kind: "load".into(),
+                    name: file.path.clone(),
+                    target: load.path.clone(),
+                    category: load.kind.clone(),
+                    confidence: "exact".into(),
+                    path: file.path.clone(),
+                    line: load.line,
+                    end_line: load.line,
+                    signature: String::new(),
+                    scope: String::new(),
+                    ordinal: 0,
+                });
+            }
+            for h in &facts.headers {
+                index.symbols.push(Symbol {
+                    id: String::new(),
+                    kind: "header".into(),
+                    name: h.key.clone(),
+                    target: h.value.clone(),
+                    category: "toc-field".into(),
+                    confidence: "exact".into(),
+                    path: file.path.clone(),
+                    line: h.line,
+                    end_line: h.line,
+                    signature: String::new(),
+                    scope: String::new(),
+                    ordinal: 0,
+                });
+            }
+            for n in &facts.diagnostics {
+                diagnostics.push(json!({"path":file.path,"line":n.line,"message":n.message}));
+            }
+            index.documents.push(Document {
                 path: file.path.clone(),
-                line: d.line,
-                end_line: d.end_line,
-                signature: d.signature.clone(),
-                scope: d.scope.clone(),
-                ordinal,
-            };
-            s.id = stable_id(pin, &s);
-            index.symbols.push(s);
-        }
-        for r in &facts.relationships {
-            relationships += 1;
-            index.symbols.push(Symbol {
-                id: String::new(),
-                kind: "relationship".into(),
-                name: r.from.clone(),
-                target: r.to.clone(),
-                category: r.category.clone(),
-                confidence: r.confidence.clone(),
-                path: file.path.clone(),
-                line: r.line,
-                end_line: r.line,
-                signature: String::new(),
-                scope: String::new(),
-                ordinal: 0,
+                text: data,
+                sha256,
+                bytes: file.bytes,
+                facts,
             });
-        }
-        for load in &facts.loads {
-            index.symbols.push(Symbol {
-                id: String::new(),
-                kind: "load".into(),
-                name: file.path.clone(),
-                target: load.path.clone(),
-                category: load.kind.clone(),
-                confidence: "exact".into(),
-                path: file.path.clone(),
-                line: load.line,
-                end_line: load.line,
-                signature: String::new(),
-                scope: String::new(),
-                ordinal: 0,
-            });
-        }
-        for h in &facts.headers {
-            index.symbols.push(Symbol {
-                id: String::new(),
-                kind: "header".into(),
-                name: h.key.clone(),
-                target: h.value.clone(),
-                category: "toc-field".into(),
-                confidence: "exact".into(),
-                path: file.path.clone(),
-                line: h.line,
-                end_line: h.line,
-                signature: String::new(),
-                scope: String::new(),
-                ordinal: 0,
-            });
-        }
-        for n in &facts.diagnostics {
-            diagnostics.push(json!({"path":file.path,"line":n.line,"message":n.message}));
-        }
-        index.documents.push(Document {
-            path: file.path.clone(),
-            text: data,
-            sha256,
-            bytes: file.bytes,
-            facts,
-        });
-        Ok(())
-    })?;
+            Ok(())
+        },
+    )?;
     drop(visit_phase);
     // Go emits skipped oversized documents after all analyzed documents.
     for file in files.iter().filter(|file| file.oversized) {

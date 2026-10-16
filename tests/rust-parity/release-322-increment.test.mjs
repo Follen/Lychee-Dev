@@ -14,6 +14,22 @@ const manifestBytes = read('tests/rust-parity/go-3.2.2-increment-oracle.json');
 const manifest = JSON.parse(manifestBytes);
 const FROZEN_MANIFEST_SHA256 = '5fa4b3ed2f600bfe1b1ce1fe367972c8f47760c53843c88cb9b1d28940252701';
 const blob = (commit, path) => git('cat-file', 'blob', `${commit}:${path}`);
+const typedDeltaBytes = read('tests/rust-parity/typed-live-outcome-custody.json');
+const TYPED_DELTA_SHA256 = '8b83dee588224707f5bfdf746920720432dc51515753e543eb686db288c67d83';
+function restoreTypedOutcome(bytes, row) {
+  assert.equal(hash(bytes), row.candidateSHA256, row.path);
+  let restored = bytes;
+  let previous = bytes.length;
+  for (const edit of [...row.edits].reverse()) {
+    assert(Number.isSafeInteger(edit.candidateStart) && edit.candidateStart >= 0);
+    assert(Number.isSafeInteger(edit.candidateEnd) && edit.candidateEnd >= edit.candidateStart && edit.candidateEnd <= previous);
+    assert.deepEqual(restored.subarray(edit.candidateStart, edit.candidateEnd), Buffer.from(edit.candidateText));
+    restored = Buffer.concat([restored.subarray(0, edit.candidateStart), Buffer.from(edit.originalText), restored.subarray(edit.candidateEnd)]);
+    previous = edit.candidateStart;
+  }
+  assert.equal(hash(restored), row.originalSHA256, row.path);
+  return restored;
+}
 
 test('322 separately authenticates the fixed tag, business commit and complete increment', () => {
   assert.equal(hash(manifestBytes), FROZEN_MANIFEST_SHA256);
@@ -59,7 +75,12 @@ test('all previous evidence keeps its original bytes and identity', () => {
   assert.equal(JSON.parse(read('tests/rust-parity/go-3.2.0.manifest.json')).oracle.commit, '3057a9666ab078270b63c7f06de748069b0d1f4b');
 });
 
-test('current product is exactly the frozen increment on its authenticated Rust base', () => {
+test('current product retains the frozen increment with exact authenticated successors', () => {
+  assert.equal(hash(typedDeltaBytes), TYPED_DELTA_SHA256);
+  const typedDelta = JSON.parse(typedDeltaBytes);
+  assert.equal(typedDelta.baseCommit, '913112a6ce628812f824513aac853ccd088fd265');
+  assert.equal(typedDelta.candidateCommit, 'e7341e3902216de38654eaeefe8e0ce42ec62f83');
+  assert.deepEqual(typedDelta.sources.map(row => row.path), ['crates/lycheedev-live/src/go_mailbox_v1/activation_service.rs', 'crates/lycheedev-live/src/go_mailbox_v1/activation_tests.rs']);
   assert.equal(manifest.productChanges.length, 20);
   for (const row of manifest.persistenceCompatibility.sources) {
     const bytes = blob(row.commit, row.path);
@@ -67,6 +88,13 @@ test('current product is exactly the frozen increment on its authenticated Rust 
   }
   for (const row of manifest.productChanges) {
     let current = read(row.path);
+    const successor = typedDelta.sources.find(part => part.path === row.path);
+    if (successor) {
+      assert.equal(successor.originalSHA256, row.sha256);
+      assert.deepEqual(current, blob(typedDelta.candidateCommit, row.path));
+      current = restoreTypedOutcome(current, successor);
+      assert.deepEqual(current, blob(typedDelta.baseCommit, row.path));
+    }
     // Legacy consumer retirement restored the complete fixed Go 3.2.3 test
     // environment. Authenticate it separately and keep the original 322 record.
     if (row.path === 'tests/addon/env.lua') {
@@ -148,4 +176,17 @@ test('fresh pre-bind and invoke gates preserve ordering and never gate reload it
   assert.match(native, /!s.same_input_profile\(sample\)/);
   assert.match(native, /action.kind == InputKind::Invoke && s.slot_reload_required/);
   assert.match(read('crates/lycheedev-live/src/go_mailbox_v1/reload.rs').toString(), /if progress\(&err\) \{ continue; \}/);
+});
+
+test('typed outcome custody rejects changed bytes, offsets and replacement text', () => {
+  assert.equal(hash(typedDeltaBytes), TYPED_DELTA_SHA256);
+  for (const row of JSON.parse(typedDeltaBytes).sources) {
+    const current = read(row.path);
+    const changed = Buffer.from(current); changed[0] ^= 1;
+    assert.throws(() => restoreTypedOutcome(changed, row));
+    const altered = structuredClone(row); altered.edits[0].originalText += 'x';
+    assert.throws(() => restoreTypedOutcome(current, altered));
+    const wrongOffset = structuredClone(row); wrongOffset.edits[0].candidateStart += 1;
+    assert.throws(() => restoreTypedOutcome(current, wrongOffset));
+  }
 });

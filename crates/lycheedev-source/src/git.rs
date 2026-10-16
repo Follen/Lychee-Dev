@@ -237,13 +237,44 @@ pub fn visit_blobs_with_control(
     control.check()?;
     visit_blobs_controlled(home, pin, files, control.deadline(), Some(control), visit)
 }
+/// Typed boundaries for consumers with pure work in flight. A batch end is
+/// visited before its tail is checked and before another Git process starts,
+/// exactly where the last synchronous document callback previously completed.
+pub(crate) enum BlobBatchVisit<'a> {
+    BatchStart { allocation_bytes: usize },
+    Blob(&'a TreeFile, Vec<u8>),
+    BatchEnd,
+}
+pub(crate) fn visit_blob_batches_with_control(
+    home: &Path,
+    pin: &SourcePin,
+    files: &[TreeFile],
+    control: &OperationControl,
+    visit: impl FnMut(BlobBatchVisit<'_>) -> Result<()>,
+) -> Result<usize> {
+    control.check()?;
+    visit_blob_batches_controlled(home, pin, files, control.deadline(), Some(control), visit)
+}
 fn visit_blobs_controlled(
     home: &Path,
     pin: &SourcePin,
     files: &[TreeFile],
     deadline: std::time::Instant,
-    control: Option<&lycheedev_core::control::OperationControl>,
+    control: Option<&OperationControl>,
     mut visit: impl FnMut(&TreeFile, Vec<u8>) -> Result<()>,
+) -> Result<usize> {
+    visit_blob_batches_controlled(home, pin, files, deadline, control, |event| match event {
+        BlobBatchVisit::Blob(file, data) => visit(file, data),
+        BlobBatchVisit::BatchStart { .. } | BlobBatchVisit::BatchEnd => Ok(()),
+    })
+}
+fn visit_blob_batches_controlled(
+    home: &Path,
+    pin: &SourcePin,
+    files: &[TreeFile],
+    deadline: std::time::Instant,
+    control: Option<&lycheedev_core::control::OperationControl>,
+    mut visit: impl FnMut(BlobBatchVisit<'_>) -> Result<()>,
 ) -> Result<usize> {
     validate_pin(pin)?;
     let dir = mirror(home, &pin.repository);
@@ -287,69 +318,82 @@ fn visit_blobs_controlled(
             deadline.saturating_duration_since(std::time::Instant::now()),
             control.map(lycheedev_core::control::OperationControl::token),
         )?;
-        let mut at = 0;
-        for f in &admitted[first..last] {
-            if let Some(control) = control {
-                control.check()?;
-            }
-            let end = data[at..]
-                .iter()
-                .position(|b| *b == b'\n')
-                .map(|n| at + n)
-                .ok_or_else(|| {
-                    ToolkitError::new(
-                        "codebase.source_integrity",
-                        "Missing batch object header",
-                        4,
-                    )
-                })?;
-            let expected = format!("{} blob {}", f.object, f.bytes);
-            if data[at..end] != *expected.as_bytes() {
-                return Err(ToolkitError::new(
-                    "codebase.source_integrity",
-                    "Batch object identity mismatch",
-                    4,
-                ));
-            }
-            at = end + 1;
-            let end = at
-                .checked_add(f.bytes)
-                .filter(|n| *n < data.len())
-                .ok_or_else(|| {
-                    ToolkitError::new("codebase.source_integrity", "Truncated batch object", 4)
-                })?;
-            if data[end] != b'\n' {
-                return Err(ToolkitError::new(
-                    "codebase.source_integrity",
-                    "Invalid batch terminator",
-                    4,
-                ));
-            }
-            let blob = &data[at..end];
-            let mut hash = Sha1::new();
-            hash.update(format!("blob {}\0", f.bytes));
-            hash.update(blob);
-            if format!("{:x}", hash.finalize()) != f.object {
-                return Err(ToolkitError::new(
-                    "codebase.source_integrity",
-                    "Batch blob hash mismatch",
-                    4,
-                ));
-            }
-            visit(f, blob.to_vec())?;
-            at = end + 1;
-        }
-        if at != data.len() {
-            return Err(ToolkitError::new(
-                "codebase.source_integrity",
-                "Unexpected batch tail",
-                4,
-            ));
-        }
+        visit(BlobBatchVisit::BatchStart {
+            allocation_bytes: data.capacity(),
+        })?;
+        visit_batch_data(&data, &admitted[first..last], control, &mut visit)?;
         first = last;
         batches += 1;
     }
     Ok(batches)
+}
+fn visit_batch_data(
+    data: &[u8],
+    files: &[&TreeFile],
+    control: Option<&OperationControl>,
+    visit: &mut impl FnMut(BlobBatchVisit<'_>) -> Result<()>,
+) -> Result<()> {
+    let mut at = 0;
+    for f in files {
+        if let Some(control) = control {
+            control.check()?;
+        }
+        let end = data[at..]
+            .iter()
+            .position(|b| *b == b'\n')
+            .map(|n| at + n)
+            .ok_or_else(|| {
+                ToolkitError::new(
+                    "codebase.source_integrity",
+                    "Missing batch object header",
+                    4,
+                )
+            })?;
+        let expected = format!("{} blob {}", f.object, f.bytes);
+        if data[at..end] != *expected.as_bytes() {
+            return Err(ToolkitError::new(
+                "codebase.source_integrity",
+                "Batch object identity mismatch",
+                4,
+            ));
+        }
+        at = end + 1;
+        let end = at
+            .checked_add(f.bytes)
+            .filter(|n| *n < data.len())
+            .ok_or_else(|| {
+                ToolkitError::new("codebase.source_integrity", "Truncated batch object", 4)
+            })?;
+        if data[end] != b'\n' {
+            return Err(ToolkitError::new(
+                "codebase.source_integrity",
+                "Invalid batch terminator",
+                4,
+            ));
+        }
+        let blob = &data[at..end];
+        let mut hash = Sha1::new();
+        hash.update(format!("blob {}\0", f.bytes));
+        hash.update(blob);
+        if format!("{:x}", hash.finalize()) != f.object {
+            return Err(ToolkitError::new(
+                "codebase.source_integrity",
+                "Batch blob hash mismatch",
+                4,
+            ));
+        }
+        visit(BlobBatchVisit::Blob(f, blob.to_vec()))?;
+        at = end + 1;
+    }
+    visit(BlobBatchVisit::BatchEnd)?;
+    if at != data.len() {
+        return Err(ToolkitError::new(
+            "codebase.source_integrity",
+            "Unexpected batch tail",
+            4,
+        ));
+    }
+    Ok(())
 }
 pub fn validate_pin(pin: &SourcePin) -> Result<()> {
     let repo = catalog::lookup(&pin.repository)?;
@@ -1037,6 +1081,60 @@ mod tests {
         })
         .unwrap();
         assert_eq!(observed, vec![("Fixture.lua".into(), input.to_vec())]);
+        // A real transport boundary occurs at 4,096 objects, even when many
+        // admitted paths happen to address the same immutable content.
+        let mut repeated = vec![files[0].clone(); 4097];
+        let mut documents = 0usize;
+        let mut boundaries = 0usize;
+        let batches = visit_blob_batches_with_control(
+            &home,
+            &pin,
+            &repeated,
+            &OperationControl::default(),
+            |event| {
+                match event {
+                    BlobBatchVisit::Blob(_, raw) => {
+                        assert_eq!(raw, input);
+                        documents += 1;
+                    }
+                    BlobBatchVisit::BatchStart { allocation_bytes } => {
+                        assert!(allocation_bytes > 0)
+                    }
+                    BlobBatchVisit::BatchEnd => boundaries += 1,
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!((batches, documents, boundaries), (2, 4097, 2));
+        // A first-batch publication failure must be returned before attempting
+        // the missing Git object in the following batch.
+        repeated[4096].object = "0".repeat(40);
+        let mut documents = 0usize;
+        let error = visit_blob_batches_with_control(
+            &home,
+            &pin,
+            &repeated,
+            &OperationControl::default(),
+            |event| {
+                match event {
+                    BlobBatchVisit::Blob(_, _) => documents += 1,
+                    BlobBatchVisit::BatchStart { .. } => {}
+                    BlobBatchVisit::BatchEnd => {
+                        return Err(ToolkitError::new(
+                            "test.first_publication",
+                            "first batch commit",
+                            5,
+                        ));
+                    }
+                }
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "test.first_publication");
+        assert_eq!(documents, 4096);
+
         assert_eq!(
             blob(&home, &pin, "Fixture.lua", MAX_SOURCE_BYTES)
                 .unwrap()
@@ -1124,5 +1222,84 @@ mod tests {
             assert!(!source_path(p));
         }
         assert!(source_path("Interface/FrameXML/UIParent.lua"));
+    }
+}
+
+#[cfg(test)]
+mod batch_boundary_tests {
+    use super::*;
+
+    fn fixture() -> (TreeFile, Vec<u8>) {
+        let raw = b"Run()\n";
+        let mut hash = Sha1::new();
+        hash.update(format!("blob {}\0", raw.len()));
+        hash.update(raw);
+        let object = format!("{:x}", hash.finalize());
+        let mut batch = format!("{object} blob {}\n", raw.len()).into_bytes();
+        batch.extend_from_slice(raw);
+        batch.push(b'\n');
+        (
+            TreeFile {
+                path: "One.lua".into(),
+                object,
+                bytes: raw.len(),
+                asset: false,
+                oversized: false,
+            },
+            batch,
+        )
+    }
+    #[test]
+    fn authenticated_document_precedes_its_final_batch_boundary() {
+        let (file, batch) = fixture();
+        let mut order = Vec::new();
+        visit_batch_data(&batch, &[&file], None, &mut |event| {
+            order.push(match event {
+                BlobBatchVisit::Blob(f, raw) => {
+                    assert_eq!(f.path, "One.lua");
+                    assert_eq!(raw, b"Run()\n");
+                    "document"
+                }
+                BlobBatchVisit::BatchStart { .. } => {
+                    panic!("transport start is outside frame decoder")
+                }
+                BlobBatchVisit::BatchEnd => "batch_end",
+            });
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(order, ["document", "batch_end"]);
+    }
+    #[test]
+    fn original_document_commit_error_precedes_a_bad_batch_tail() {
+        let (file, mut batch) = fixture();
+        batch.extend_from_slice(b"unexpected");
+        let error = visit_batch_data(&batch, &[&file], None, &mut |event| match event {
+            BlobBatchVisit::Blob(_, _) | BlobBatchVisit::BatchStart { .. } => Ok(()),
+            BlobBatchVisit::BatchEnd => Err(ToolkitError::new(
+                "test.commit",
+                "original commit failure",
+                5,
+            )),
+        })
+        .unwrap_err();
+        assert_eq!(error.code, "test.commit");
+        let error = visit_batch_data(&batch, &[&file], None, &mut |_| Ok(())).unwrap_err();
+        assert_eq!(error.code, "codebase.source_integrity");
+        assert_eq!(error.message, "Unexpected batch tail");
+    }
+    #[test]
+    fn unauthenticated_document_never_reaches_either_event() {
+        let (file, mut batch) = fixture();
+        let raw_start = batch.iter().position(|b| *b == b'\n').unwrap() + 1;
+        batch[raw_start] = b'X';
+        let mut events = 0;
+        let error = visit_batch_data(&batch, &[&file], None, &mut |_| {
+            events += 1;
+            Ok(())
+        })
+        .unwrap_err();
+        assert_eq!(error.code, "codebase.source_integrity");
+        assert_eq!(events, 0);
     }
 }

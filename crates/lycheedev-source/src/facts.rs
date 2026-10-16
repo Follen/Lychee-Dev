@@ -82,6 +82,17 @@ pub fn lua(raw: &[u8], generated: bool) -> Facts {
         }
     }
 }
+pub(crate) const LUA_WORKER_SCRATCH_BYTES: usize = 32 << 20;
+/// Optional pure preparation; callers retain document order and reparse normally
+/// after abandonment. Requires <=64 KiB UTF-8, nongenerated Lua and a separate
+/// 32 MiB scratch reservation, excluding opaque tree-sitter C allocations.
+pub(crate) fn lua_for_worker(
+    raw: &[u8],
+    control: &lycheedev_core::control::OperationControl,
+    max_owned_bytes: usize,
+) -> Option<Facts> {
+    crate::lua_tree::facts_for_worker(raw, control, max_owned_bytes)
+}
 pub fn toc(raw: &[u8]) -> Facts {
     let mut f = Facts::fresh();
     let text = String::from_utf8_lossy(raw.strip_prefix(&[239, 187, 191]).unwrap_or(raw));
