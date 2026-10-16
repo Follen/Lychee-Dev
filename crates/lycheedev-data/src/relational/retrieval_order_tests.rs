@@ -205,10 +205,18 @@ fn syntax_failure_releases_owned_query_depth_for_same_dialect() {
     let dialect = syntax::QueryDialect::default();
     let mut invalid = Parser::new(&dialect)
         .with_tokens_with_locations(lexical::tokens("SELECT 1 WHERE (").unwrap());
-    assert!(retrieval::parse(&dialect, &mut invalid).is_err());
+    assert!(
+        retrieval::parse(&dialect, &mut invalid)
+            .map(ast_owner::Owned::new)
+            .is_err()
+    );
     let mut valid = Parser::new(&dialect)
         .with_tokens_with_locations(lexical::tokens("SELECT ID FROM t").unwrap());
-    assert!(retrieval::parse(&dialect, &mut valid).is_ok());
+    assert!(
+        retrieval::parse(&dialect, &mut valid)
+            .map(ast_owner::Owned::new)
+            .is_ok()
+    );
 }
 
 #[test]
@@ -385,13 +393,19 @@ fn native_rhs_markers_release_after_errors_and_do_not_accumulate_left_associativ
     ] {
         let mut parser =
             Parser::new(&dialect).with_tokens_with_locations(lexical::tokens(sql).unwrap());
-        assert!(retrieval::parse(&dialect, &mut parser).is_err(), "{sql}");
+        assert!(
+            retrieval::parse(&dialect, &mut parser)
+                .map(ast_owner::Owned::new)
+                .is_err(),
+            "{sql}"
+        );
         dialect.take_stop().unwrap();
         let valid = format!("SELECT {} FROM t", parenthesized("1+1", 125));
         let mut parser = Parser::new(&dialect)
             .with_recursion_limit(256)
             .with_tokens_with_locations(lexical::tokens(&valid).unwrap());
         retrieval::parse(&dialect, &mut parser)
+            .map(ast_owner::Owned::new)
             .unwrap_or_else(|error| panic!("after {sql}: {error:?}"));
         dialect.take_stop().unwrap();
     }

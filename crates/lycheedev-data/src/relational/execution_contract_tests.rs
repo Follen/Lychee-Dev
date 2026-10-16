@@ -359,11 +359,14 @@ fn full_binary_arguments_evaluate_before_boolean_type_validation() {
 fn concatenation_admits_operands_then_releases_them_on_destination_rejection() {
     let text = "a".repeat(1024);
     // Work's first temporary grows its guard vector to four elements. Admit
-    // precisely that metadata plus the two cloned operands, but no destination.
+    // precisely that metadata, the actual interpreter capacities, and both
+    // cloned operands, but no destination. Otherwise a second operand failure
+    // could satisfy the work count without testing concatenation admission.
     let guard_bytes = 4 * std::mem::size_of::<crate::resource::RetainedReservation<'_>>();
     let shared = crate::resource::Budget::new(
         crate::resource::Cost {
-            retained_bytes: (guard_bytes + 2 * text.len()) as u64,
+            retained_bytes: (guard_bytes + evaluation::binary_stack_bytes() + 2 * text.len())
+                as u64,
             ..crate::resource::Cost::defaults()
         },
         Instant::now() + Duration::from_secs(30),
@@ -416,4 +419,100 @@ fn concatenation_admits_operands_then_releases_them_on_destination_rejection() {
         guard_bytes as u64
     );
     assert_eq!(shared.logical_snapshot().unwrap().retained_bytes, 0);
+}
+
+#[test]
+fn interpreter_root_keeps_work_before_cancel_before_new_heap_admission() {
+    for (work_limit, expected) in [
+        (0, "records.query_resource_budget"),
+        (1, "operation.cancelled"),
+    ] {
+        for binding_mode in [false, true] {
+            let shared = crate::resource::Budget::new(
+                crate::resource::Cost {
+                    retained_bytes: 0,
+                    decode_work: work_limit,
+                    ..crate::resource::Cost::defaults()
+                },
+                Instant::now() + Duration::from_secs(30),
+                None,
+            );
+            let cancelled = AtomicBool::new(true);
+            let mut work = Work {
+                left: 100,
+                bytes: 1024,
+                deadline: shared.deadline,
+                cancel: Some(&cancelled),
+                shared: Some(&shared),
+                planning: false,
+                temporaries: vec![],
+                selection_sources: vec![],
+                providers: &[],
+                resolver: None,
+                roots: BTreeMap::new(),
+                measure: false,
+                scans: vec![],
+            };
+            let term = Term::Value(Scalar::Int(1));
+            let context = subquery::Context {
+                scope: subquery::Scope::root(),
+                group: None,
+                complete: None,
+            };
+            let error = if binding_mode {
+                bind(
+                    &term,
+                    &[],
+                    ColumnOwners::Single(""),
+                    &BTreeMap::new(),
+                    &context,
+                    &mut work,
+                )
+                .unwrap_err()
+            } else {
+                eval(
+                    &term,
+                    &[],
+                    &[],
+                    ColumnOwners::Single(""),
+                    &BTreeMap::new(),
+                    &mut work,
+                )
+                .unwrap_err()
+            };
+            assert_eq!(error.code, expected);
+            assert_eq!(shared.snapshot().unwrap().decode_work, work_limit);
+            assert_eq!(shared.snapshot().unwrap().retained_bytes, 0);
+            assert_eq!(work.left, 100);
+        }
+    }
+}
+#[test]
+fn continuation_growth_rejection_refunds_its_original_physical_ledger() {
+    let bytes = 4 * std::mem::size_of::<u64>();
+    let shared = crate::resource::Budget::new(
+        crate::resource::Cost {
+            retained_bytes: bytes as u64,
+            ..crate::resource::Cost::defaults()
+        },
+        Instant::now() + Duration::from_secs(30),
+        None,
+    );
+    {
+        let mut stack = task_stack::Stack::new(Some(&shared)).unwrap();
+        for value in 0..4u64 {
+            stack.push(value).unwrap();
+        }
+        assert_eq!(shared.snapshot().unwrap().retained_bytes, bytes as u64);
+        assert_eq!(
+            stack.push(4).unwrap_err().code,
+            "records.query_resource_budget"
+        );
+        assert_eq!(stack.len(), 4);
+    }
+    assert_eq!(shared.snapshot().unwrap(), crate::resource::Cost::default());
+    assert_eq!(
+        shared.logical_snapshot().unwrap(),
+        crate::resource::Cost::default()
+    );
 }

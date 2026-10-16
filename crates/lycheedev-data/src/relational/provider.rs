@@ -158,36 +158,25 @@ pub(super) fn equal(
 /// Match Go neededColumns: stars, subqueries and unresolved output aliases
 /// retain full rows and must not call ScanSelected, even with all ordinals.
 pub(super) fn projectable(term: &Term, columns: &[String], alias: ColumnOwners<'_>) -> bool {
-    match term {
-        Term::InSubquery(..) | Term::ScalarSubquery(_) | Term::Exists(_) => false,
-        Term::Column(name) => column(columns, alias, name).is_ok(),
-        Term::Ordinal(index) => *index < columns.len(),
-        Term::Unary(_, t) | Term::NullTest(t, _) | Term::Cast(t, _) => {
-            projectable(t, columns, alias)
+    let mut pending = vec![term];
+    while let Some(term) = pending.pop() {
+        match term {
+            Term::InSubquery(..) | Term::ScalarSubquery(_) | Term::Exists(_) | Term::Star(_) => {
+                return false;
+            }
+            Term::Column(name) if column(columns, alias, name).is_err() => return false,
+            Term::Ordinal(index) if *index >= columns.len() => return false,
+            Term::Aggregate(name, args, _) if name == "COUNT" => {
+                pending.extend(args.iter().rev().filter(|t| !matches!(t, Term::Star(_))));
+                continue;
+            }
+            _ => {}
         }
-        Term::Binary(a, _, b) | Term::Like(a, b, _) => {
-            projectable(a, columns, alias) && projectable(b, columns, alias)
-        }
-        Term::Between(a, b, c, _) => [a, b, c].iter().all(|t| projectable(t, columns, alias)),
-        Term::In(t, args, _) => {
-            projectable(t, columns, alias) && args.iter().all(|t| projectable(t, columns, alias))
-        }
-        Term::Star(_) => false,
-        Term::Call(_, args, _) => args.iter().all(|t| projectable(t, columns, alias)),
-        Term::Aggregate(name, args, _) => args.iter().all(|t| {
-            (name == "COUNT" && matches!(t, Term::Star(_))) || projectable(t, columns, alias)
-        }),
-        Term::Case(base, cases, other) => {
-            base.iter()
-                .chain(other.iter())
-                .all(|t| projectable(t, columns, alias))
-                && cases
-                    .iter()
-                    .all(|(a, b)| projectable(a, columns, alias) && projectable(b, columns, alias))
-        }
-        _ => true,
+        term_tree::children(term, &mut pending);
     }
+    true
 }
+
 pub(super) fn can_project(program: &Program, columns: &[String], alias: ColumnOwners<'_>) -> bool {
     program.projection.iter().all(|p| {
         p.expr

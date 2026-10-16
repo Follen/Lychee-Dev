@@ -9,12 +9,11 @@ pub(super) struct Link {
     pub(super) left: bool,
     pub(super) condition: Option<Term>,
 }
-pub(super) fn relation(
-    relation: TableFactor,
+pub(super) fn lower_relation(
+    relation: &mut TableFactor,
     virtual_name: &str,
-    depth: usize,
     check: &dyn Fn() -> Result<()>,
-) -> Result<(RelationName, String, Option<Box<Program>>)> {
+) -> Result<(RelationName, String, Option<ast_owner::Owned<Query>>)> {
     check()?;
     if let TableFactor::Derived {
         lateral,
@@ -23,7 +22,7 @@ pub(super) fn relation(
         sample,
     } = relation
     {
-        if lateral || sample.is_some() || alias.as_ref().is_some_and(|a| !a.columns.is_empty()) {
+        if *lateral || sample.is_some() || alias.as_ref().is_some_and(|a| !a.columns.is_empty()) {
             return Err(unsupported());
         }
         let alias = alias
@@ -34,11 +33,7 @@ pub(super) fn relation(
         return Ok((
             RelationName::internal(virtual_name),
             alias,
-            Some(Box::new(Program::compile_query(
-                *subquery,
-                depth + 1,
-                check,
-            )?)),
+            Some(ast_owner::take_query(subquery)),
         ));
     }
     let TableFactor::Table {
@@ -59,7 +54,7 @@ pub(super) fn relation(
     if args.is_some()
         || !with_hints.is_empty()
         || version.is_some()
-        || with_ordinality
+        || *with_ordinality
         || !partitions.is_empty()
         || json_path.is_some()
         || sample.is_some()
@@ -75,45 +70,6 @@ pub(super) fn relation(
         .transpose()?
         .unwrap_or_else(|| table.name.clone());
     Ok((table, alias, None))
-}
-pub(super) fn compile(
-    join: Join,
-    parameters: &mut BTreeSet<String>,
-    index: usize,
-    depth: usize,
-    check: &dyn Fn() -> Result<()>,
-) -> Result<Link> {
-    check()?;
-    let (table, alias, derived) = relation(
-        join.relation,
-        &format!("\0derived:join:{index}"),
-        depth,
-        check,
-    )?;
-    let (left, constraint) = match join.join_operator {
-        JoinOperator::Join(c) | JoinOperator::Inner(c) => (false, c),
-        JoinOperator::Left(c) | JoinOperator::LeftOuter(c) => (true, c),
-        JoinOperator::CrossJoin(JoinConstraint::None) => {
-            return Ok(Link {
-                table,
-                alias,
-                derived,
-                left: false,
-                condition: None,
-            });
-        }
-        _ => return Err(unsupported()),
-    };
-    let JoinConstraint::On(mut on) = constraint else {
-        return Err(unsupported());
-    };
-    Ok(Link {
-        table,
-        alias,
-        derived,
-        left,
-        condition: Some(term(&mut on, parameters, depth, check)?),
-    })
 }
 /// Derived results stay in caller-owned slots. Sources are borrowed only after
 /// this vector is complete, so no self-reference or provider replay is needed.
@@ -280,7 +236,6 @@ fn index<'w>(
         right,
         example,
         buckets,
-        _allocation: allocation,
     }))
 }
 struct Right<'a> {
@@ -290,7 +245,7 @@ struct Right<'a> {
     start: usize,
     end: usize,
 }
-pub(super) struct Plan<'a> {
+pub(super) struct Plan<'a, 'w> {
     pub source: Source,
     pub owners: Vec<String>,
     first: &'a Source,
@@ -301,16 +256,17 @@ pub(super) struct Plan<'a> {
     // candidates and admitted only as needed during the first input's scan.
     // No cross product or intermediate join is materialized.
     selected: Vec<bool>,
+    _allocation: Option<crate::resource::RetainedReservation<'w>>,
 }
-pub(super) fn prepare_scoped<'a>(
+pub(super) fn prepare_scoped<'a, 'w>(
     inputs: &'a [Input<'_>],
     alias: &str,
     links: &'a [Link],
     params: &BTreeMap<String, Scalar>,
-    work: &mut Work<'_>,
+    work: &mut Work<'w>,
     program: &Program,
     context: &subquery::Context<'_>,
-) -> Result<Plan<'a>> {
+) -> Result<Box<Plan<'a, 'w>>> {
     let first = inputs[0].source();
     work.safety_retain(
         first
@@ -437,7 +393,11 @@ pub(super) fn prepare_scoped<'a>(
                 )
             })
         });
-    Ok(Plan {
+    let allocation = work
+        .shared
+        .map(|budget| budget.reserve_retained(std::mem::size_of::<Plan<'_, '_>>()))
+        .transpose()?;
+    Ok(Box::new(Plan {
         source: Source {
             columns,
             rows: vec![],
@@ -449,7 +409,8 @@ pub(super) fn prepare_scoped<'a>(
         projected,
         rights,
         selected,
-    })
+        _allocation: allocation,
+    }))
 }
 pub(super) fn select(
     term: &Term,
@@ -457,64 +418,29 @@ pub(super) fn select(
     alias: ColumnOwners<'_>,
     selected: &mut [bool],
 ) {
-    match term {
-        Term::Column(name) => {
-            if let Ok(i) = column(columns, alias, name) {
-                selected[i] = true;
-            }
-        }
-        Term::Ordinal(index) => {
-            if let Some(selected) = selected.get_mut(*index) {
-                *selected = true;
-            }
-        }
-        Term::Unary(_, t) | Term::NullTest(t, _) | Term::Cast(t, _) => {
-            select(t, columns, alias, selected)
-        }
-        Term::Binary(a, _, b) | Term::Like(a, b, _) => {
-            select(a, columns, alias, selected);
-            select(b, columns, alias, selected);
-        }
-        Term::Between(a, b, c, _) => {
-            select(a, columns, alias, selected);
-            select(b, columns, alias, selected);
-            select(c, columns, alias, selected);
-        }
-        Term::In(a, items, _) => {
-            select(a, columns, alias, selected);
-            for t in items {
-                select(t, columns, alias, selected);
-            }
-        }
-        // Correlations can reference any current input field. Like Go's
-        // neededColumns, a nested query disables projection of this scope.
-        Term::InSubquery(..) | Term::ScalarSubquery(_) | Term::Exists(_) => selected.fill(true),
-        Term::Call(_, items, _) => {
-            for t in items {
-                select(t, columns, alias, selected);
-            }
-        }
-        Term::Aggregate(name, items, _) => {
-            for t in items {
-                if name != "COUNT" || !matches!(t, Term::Star(_)) {
-                    select(t, columns, alias, selected);
+    let mut pending = vec![term];
+    while let Some(term) = pending.pop() {
+        match term {
+            Term::Column(name) => {
+                if let Ok(i) = column(columns, alias, name) {
+                    selected[i] = true;
                 }
             }
+            Term::Ordinal(index) => {
+                if let Some(selected) = selected.get_mut(*index) {
+                    *selected = true;
+                }
+            }
+            Term::InSubquery(..) | Term::ScalarSubquery(_) | Term::Exists(_) | Term::Star(_) => {
+                selected.fill(true);
+            }
+            Term::Aggregate(name, args, _) if name == "COUNT" => {
+                pending.extend(args.iter().rev().filter(|t| !matches!(t, Term::Star(_))));
+                continue;
+            }
+            _ => {}
         }
-        Term::Star(_) => selected.fill(true),
-        Term::Case(base, branches, otherwise) => {
-            if let Some(t) = base {
-                select(t, columns, alias, selected);
-            }
-            for (a, b) in branches {
-                select(a, columns, alias, selected);
-                select(b, columns, alias, selected);
-            }
-            if let Some(t) = otherwise {
-                select(t, columns, alias, selected);
-            }
-        }
-        Term::Value(_) | Term::Number(_) | Term::Parameter(_) => {}
+        term_tree::children(term, &mut pending);
     }
 }
 fn assign(
@@ -553,7 +479,7 @@ fn assign(
     }
     Ok(())
 }
-impl Plan<'_> {
+impl Plan<'_, '_> {
     pub fn visit(
         &self,
         params: &BTreeMap<String, Scalar>,
@@ -592,6 +518,22 @@ impl Plan<'_> {
             )?;
             materialized.push((rows, keys));
         }
+        // A flat JOIN chain is bounded by schema width, not logical AST depth.
+        // Reserve one reusable heap DFS stack, rather than one native frame per
+        // relation (and never a fresh retained allocation per provider row).
+        let cursor_bytes = self
+            .rights
+            .len()
+            .checked_mul(std::mem::size_of::<JoinCursor<'_>>())
+            .ok_or_else(budget)?;
+        let _cursor_retained = work
+            .shared
+            .map(|budget| budget.reserve_retained(cursor_bytes))
+            .transpose()?;
+        let mut cursors = Vec::new();
+        cursors
+            .try_reserve_exact(self.rights.len())
+            .map_err(|_| budget())?;
         let mut values = vec![Scalar::Null; self.selected.len()];
         let mut strings = vec![String::new(); self.selected.len()];
         provider::visit(
@@ -607,7 +549,7 @@ impl Plan<'_> {
                 assign(&mut values, &mut strings, 0, row, work, &self.selected)?;
                 self.link(
                     &materialized,
-                    0,
+                    &mut cursors,
                     &mut values,
                     &mut strings,
                     params,
@@ -618,10 +560,10 @@ impl Plan<'_> {
             },
         )
     }
-    fn link(
+    fn link<'m>(
         &self,
-        materialized: &[(Vec<Vec<Scalar>>, Option<KeyIndex<'_>>)],
-        at: usize,
+        materialized: &'m [(Vec<Vec<Scalar>>, Option<KeyIndex<'_>>)],
+        cursors: &mut Vec<JoinCursor<'m>>,
         values: &mut [Scalar],
         strings: &mut [String],
         params: &BTreeMap<String, Scalar>,
@@ -629,106 +571,127 @@ impl Plan<'_> {
         work: &mut Work<'_>,
         yield_row: &mut dyn FnMut(&[Scalar], &mut Work<'_>) -> Result<()>,
     ) -> Result<()> {
-        work.spend()?;
-        if at == self.rights.len() {
-            return yield_row(values, work);
-        }
-        let right = &self.rights[at];
-        let (rows, keys) = &materialized[at];
-        let indexed = keys.is_some();
-        let candidates = if let Some(index) = keys {
-            let value = &values[index.left];
-            if value == &Scalar::Null || index.example.is_none() {
-                None
-            } else {
-                compare(value, &rows[index.example.unwrap()][index.right])?;
-                let payload = if let Scalar::String(text) = value {
-                    text.len()
+        cursors.clear();
+        let mut enter = true;
+        loop {
+            if enter {
+                // Exactly the old recursive entry charge, including a leaf.
+                work.spend()?;
+                let at = cursors.len();
+                if at == self.rights.len() {
+                    yield_row(values, work)?;
                 } else {
-                    0
-                };
-                let _temporary = work
-                    .shared
-                    .map(|budget| budget.reserve_retained(payload + 8192))
-                    .transpose()?;
-                index
-                    .buckets
-                    .get(&results::equal_key(value)?)
-                    .map(Vec::as_slice)
+                    let (rows, keys) = &materialized[at];
+                    let candidates = if let Some(index) = keys {
+                        let value = &values[index.left];
+                        if value == &Scalar::Null || index.example.is_none() {
+                            None
+                        } else {
+                            compare(value, &rows[index.example.unwrap()][index.right])?;
+                            let payload = if let Scalar::String(text) = value {
+                                text.len()
+                            } else {
+                                0
+                            };
+                            let _temporary = work
+                                .shared
+                                .map(|budget| budget.reserve_retained(payload + 8192))
+                                .transpose()?;
+                            index
+                                .buckets
+                                .get(&results::equal_key(value)?)
+                                .map(Vec::as_slice)
+                        }
+                    } else {
+                        None
+                    };
+                    let count = if keys.is_some() {
+                        candidates.map_or(0, <[usize]>::len)
+                    } else {
+                        rows.len()
+                    };
+                    cursors.push(JoinCursor {
+                        candidates,
+                        count,
+                        next: 0,
+                        matched: false,
+                        fallback: false,
+                    });
+                }
+                enter = false;
             }
-        } else {
-            None
-        };
-        let count = if indexed {
-            candidates.map_or(0, <[usize]>::len)
-        } else {
-            rows.len()
-        };
-        let mut matched = false;
-        for n in 0..count {
-            work.spend()?;
-            let right = &self.rights[at];
-            let i = candidates.map_or(n, |indices| indices[n]);
-            assign(values, strings, right.start, &rows[i], work, &self.selected)?;
-            let yes = if let Some(condition) = &right.link.condition {
-                // Like Go's ON evaluator, expose only this join prefix to
-                // nested callbacks. Later aliases must not hide an outer row.
-                let context = subquery::Context {
-                    scope: subquery::Scope {
-                        fields: subquery::Fields {
-                            columns: &self.source.columns[..right.end],
-                            alias: ColumnOwners::PerColumn(&self.owners),
-                        },
-                        ..context.scope
-                    },
-                    ..*context
-                };
-                truth(&eval_scoped(
-                    condition,
-                    &values[..right.end],
-                    &self.source.columns[..right.end],
-                    ColumnOwners::PerColumn(&self.owners),
-                    params,
-                    &context,
-                    work,
-                )?)? == Some(true)
-            } else {
-                true
+            let Some(at) = cursors.len().checked_sub(1) else {
+                return Ok(());
             };
-            if yes {
-                matched = true;
-                self.link(
-                    materialized,
-                    at + 1,
+            let cursor = &mut cursors[at];
+            let right = &self.rights[at];
+            if cursor.next < cursor.count {
+                work.spend()?;
+                let row = cursor
+                    .candidates
+                    .map_or(cursor.next, |indices| indices[cursor.next]);
+                cursor.next += 1;
+                assign(
                     values,
                     strings,
-                    params,
-                    context,
+                    right.start,
+                    &materialized[at].0[row],
                     work,
-                    yield_row,
+                    &self.selected,
                 )?;
-            }
-        }
-        let right = &self.rights[at];
-        if right.link.left && !matched {
-            for i in right.start..right.end {
-                if let Scalar::String(s) = std::mem::replace(&mut values[i], Scalar::Null) {
-                    strings[i] = s;
+                let yes = if let Some(condition) = &right.link.condition {
+                    // ON sees only this prefix, preserving outer-row lookup.
+                    let context = subquery::Context {
+                        scope: subquery::Scope {
+                            fields: subquery::Fields {
+                                columns: &self.source.columns[..right.end],
+                                alias: ColumnOwners::PerColumn(&self.owners),
+                            },
+                            ..context.scope
+                        },
+                        ..*context
+                    };
+                    truth(&eval_scoped(
+                        condition,
+                        &values[..right.end],
+                        &self.source.columns[..right.end],
+                        ColumnOwners::PerColumn(&self.owners),
+                        params,
+                        &context,
+                        work,
+                    )?)? == Some(true)
+                } else {
+                    true
+                };
+                if yes {
+                    // An ON match remains matched even if a later join emits
+                    // no rows. Parent cursors resume without another charge.
+                    cursor.matched = true;
+                    enter = true;
                 }
+            } else if right.link.left && !cursor.matched && !cursor.fallback {
+                cursor.fallback = true;
+                for index in right.start..right.end {
+                    if let Scalar::String(text) =
+                        std::mem::replace(&mut values[index], Scalar::Null)
+                    {
+                        strings[index] = text;
+                    }
+                }
+                enter = true;
+            } else {
+                cursors.pop();
             }
-            self.link(
-                materialized,
-                at + 1,
-                values,
-                strings,
-                params,
-                context,
-                work,
-                yield_row,
-            )?;
         }
-        Ok(())
     }
+}
+
+struct JoinCursor<'a> {
+    candidates: Option<&'a [usize]>,
+    count: usize,
+    next: usize,
+    matched: bool,
+    fallback: bool,
 }
 
 #[cfg(test)]

@@ -28,7 +28,12 @@ export function verifyArtifact(root,path){
 
 // The same lease and terminal rules cover build, test, check and clippy. The
 // injected executor is used only by fault tests; production invokes Cargo.
-export function runCargo(root,args,{sourceRoot=root,owner='rust-cargo',channelKind='ordinary',oneShot=false,environment={},freshOffline=false,execute=ownedSpawnSync,onSuccess}={}){
+export function runCargo(root,args,options={}){
+  return runCargoWithDeadline(root,args,options,600000);
+}
+// Optimized product preparation has a larger fixed build allowance. Keep this
+// private so test/check/fetch and arbitrary Cargo callers retain their limit.
+function runCargoWithDeadline(root,args,{sourceRoot=root,owner='rust-cargo',channelKind='ordinary',oneShot=false,environment={},freshOffline=false,execute=ownedSpawnSync,onSuccess}={},timeoutMs){
   root=resolve(root);sourceRoot=resolve(sourceRoot);
   if(sourceRoot!==root)contained(root,sourceRoot);
   if(!['build','test','check','clippy','fetch','metadata'].includes(args[0]))throw new Error('build.unsupported_cargo_command');
@@ -69,9 +74,9 @@ export function runCargo(root,args,{sourceRoot=root,owner='rust-cargo',channelKi
     if(oneShot||fresh)env.CARGO_INCREMENTAL='0';
     const environmentSHA256=sha256(Buffer.from(JSON.stringify(Object.entries(env).sort(([a],[b])=>a.localeCompare(b)))));
     terminal={state:'interrupted',handlesReaped:false,logs:[]};
-    const result=execute('cargo',args,{cwd:sourceRoot,env,evidence:job.evidence,cargoBuild:true,windowsHide:true,shell:false,timeout:600000,maxBuffer:8<<20});
+    const result=execute('cargo',args,{cwd:sourceRoot,env,evidence:job.evidence,cargoBuild:true,windowsHide:true,shell:false,timeout:timeoutMs,maxBuffer:8<<20});
     writeFileSync(stdout,result.stdout||Buffer.alloc(0));writeFileSync(stderr,result.stderr||Buffer.alloc(0));
-    writeFileSync(metadata,JSON.stringify({command:'cargo',args,cwd:sourceRoot,channel:channel.target,target,cargoHome:fresh?env.CARGO_HOME:undefined,freshCacheReceipt:fresh?.receipt,oneShot,environmentSHA256,exit:result.status,signal:result.signal,error:result.error?.message,inputHashes:inputs},null,2)+'\n');
+    writeFileSync(metadata,JSON.stringify({command:'cargo',args,timeoutMs,cwd:sourceRoot,channel:channel.target,target,cargoHome:fresh?env.CARGO_HOME:undefined,freshCacheReceipt:fresh?.receipt,oneShot,environmentSHA256,exit:result.status,signal:result.signal,error:result.error?.message,inputHashes:inputs},null,2)+'\n');
     terminal={state:result.handlesReaped===true?(result.status===0&&!result.error?'succeeded':'failed'):'interrupted',handlesReaped:result.handlesReaped===true,logs:[metadata,stdout,stderr,...(result.logs||[])]};
     if(result.error||result.status!==0||!terminal.handlesReaped)throw Object.assign(new Error(`build.cargo_failed:${result.error?.message||(!terminal.handlesReaped?'tree_reap_unverified':result.status)}`),{buildEvidence:job.receipt});
     if(!compiling){
@@ -95,11 +100,11 @@ export function runCargo(root,args,{sourceRoot=root,owner='rust-cargo',channelKi
   }
 }
 
-export function buildRust(root,artifactDirectory,{profile='dev',oneShot=false,owner='rust-build',packageName='lycheedev-cli',sourceRoot=root,environment={}}={}){
+export function buildRust(root,artifactDirectory,{profile='dev',oneShot=false,owner='rust-build',packageName='lycheedev-cli',sourceRoot=root,environment={},execute=ownedSpawnSync}={}){
   root=resolve(root);sourceRoot=resolve(sourceRoot);
   if(!['dev','release','symbols'].includes(profile))throw new Error('build.invalid_profile');
   const args=['build','--locked','--offline','-j','1','--profile',profile,'-p',packageName];
-  return runCargo(root,args,{sourceRoot,owner,channelKind:profile==='symbols'?'symbols':'ordinary',oneShot:oneShot||profile!=='dev',environment,onSuccess(invocation){
+  return runCargoWithDeadline(root,args,{sourceRoot,owner,execute,channelKind:profile==='symbols'?'symbols':'ordinary',oneShot:oneShot||profile!=='dev',environment,onSuccess(invocation){
     const output=profile==='dev'?'debug':profile;
     artifactDirectory=contained(root,resolve(artifactDirectory));mkdirSync(artifactDirectory);
     const source=join(invocation.target,output,'lycheedev.exe'),binary=join(artifactDirectory,'lycheedev.exe');
@@ -112,7 +117,7 @@ export function buildRust(root,artifactDirectory,{profile='dev',oneShot=false,ow
       if(hashFile(original)!==record.pdbSHA256||hashFile(record.pdb)!==record.pdbSHA256)throw new Error('build.symbols_changed');
     }
     writeFileSync(join(artifactDirectory,'artifact.json'),JSON.stringify(record,null,2)+'\n');return record;
-  }});
+  }},profile==='dev'?600000:1800000);
 }
 if(process.argv[1]&&resolve(process.argv[1])===resolve(import.meta.filename)){
   const [directory,profile='dev']=process.argv.slice(2);if(!directory)throw new Error('usage: node tools/rust-build.mjs <new-artifact-directory> [dev|release|symbols] [--one-shot]');

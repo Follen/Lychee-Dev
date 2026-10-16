@@ -370,47 +370,28 @@ pub(super) fn execute_any(
     Ok(result)
 }
 pub(super) fn visit_queries<'a>(term: &'a Term, emit: &mut impl FnMut(&'a Program)) {
-    match term {
-        Term::ScalarSubquery(query) | Term::Exists(query) => emit(query),
-        Term::InSubquery(input, query, _) => {
-            emit(query);
-            visit_queries(input, emit);
-        }
-        Term::Unary(_, term) | Term::NullTest(term, _) | Term::Cast(term, _) => {
-            visit_queries(term, emit)
-        }
-        Term::Binary(a, _, b) | Term::Like(a, b, _) => {
-            visit_queries(a, emit);
-            visit_queries(b, emit);
-        }
-        Term::Between(a, b, c, _) => {
-            visit_queries(a, emit);
-            visit_queries(b, emit);
-            visit_queries(c, emit);
-        }
-        Term::In(input, list, _) => {
-            visit_queries(input, emit);
-            for term in list {
-                visit_queries(term, emit);
+    let mut pending = vec![term];
+    while let Some(term) = pending.pop() {
+        match term {
+            Term::ScalarSubquery(query) | Term::Exists(query) | Term::InSubquery(_, query, _) => {
+                emit(query)
             }
-        }
-        Term::Call(_, list, _) | Term::Aggregate(_, list, _) => {
-            for term in list {
-                visit_queries(term, emit);
+            // Preserve the original inspector's base/else/branches order,
+            // which differs from evaluation's base/branches/else order.
+            Term::Case(base, branches, other) => {
+                for (a, b) in branches.iter().rev() {
+                    pending.extend([b, a]);
+                }
+                pending.extend(other.as_deref());
+                pending.extend(base.as_deref());
+                continue;
             }
+            _ => {}
         }
-        Term::Case(base, branches, other) => {
-            for term in base.iter().chain(other.iter()) {
-                visit_queries(term, emit);
-            }
-            for (a, b) in branches {
-                visit_queries(a, emit);
-                visit_queries(b, emit);
-            }
-        }
-        _ => {}
+        term_tree::children(term, &mut pending);
     }
 }
+
 pub(super) fn contains(term: &Term) -> bool {
     let mut found = false;
     visit_queries(term, &mut |_| found = true);
@@ -419,62 +400,7 @@ pub(super) fn contains(term: &Term) -> bool {
 /// Go binds column spellings to schema identities before comparing group
 /// expressions. Keep query syntax immutable while making the same comparison.
 pub(super) fn same_group_expression(a: &Term, b: &Term, context: &Context<'_>) -> bool {
-    if a == b {
-        return true;
-    }
-    let same = |a: &Term, b: &Term| same_group_expression(a, b, context);
-    match (a, b) {
-        (Term::Column(a), Term::Column(b)) => {
-            if !equal_fold(&a.name, &b.name) {
-                return false;
-            }
-            let Some(group) = context.group else {
-                return a == b;
-            };
-            match (
-                resolve(group.columns, group.alias, a, context.scope.outer),
-                resolve(group.columns, group.alias, b, context.scope.outer),
-            ) {
-                (Ok(Position::Local(a)), Ok(Position::Local(b))) => a == b,
-                (Ok(Position::Outer(a, ai)), Ok(Position::Outer(b, bi))) => {
-                    std::ptr::eq(a, b) && ai == bi
-                }
-                _ => false,
-            }
-        }
-        (Term::Unary(a, x), Term::Unary(b, y)) => a == b && same(x, y),
-        (Term::Binary(a, op, b), Term::Binary(c, other, d)) => {
-            op == other && same(a, c) && same(b, d)
-        }
-        (Term::Cast(a, kind), Term::Cast(b, other)) => kind == other && same(a, b),
-        (Term::Like(a, b, n), Term::Like(c, d, m)) => n == m && same(a, c) && same(b, d),
-        (Term::NullTest(a, n), Term::NullTest(b, m)) => n == m && same(a, b),
-        (Term::Between(a, b, c, n), Term::Between(d, e, f, m)) => {
-            n == m && same(a, d) && same(b, e) && same(c, f)
-        }
-        (Term::In(a, x, n), Term::In(b, y, m)) => {
-            n == m && same(a, b) && x.len() == y.len() && x.iter().zip(y).all(|(a, b)| same(a, b))
-        }
-        (Term::InSubquery(a, x, n), Term::InSubquery(b, y, m)) => n == m && x == y && same(a, b),
-        (Term::Call(a, x, d), Term::Call(b, y, e))
-        | (Term::Aggregate(a, x, d), Term::Aggregate(b, y, e)) => {
-            d == e && a == b && x.len() == y.len() && x.iter().zip(y).all(|(a, b)| same(a, b))
-        }
-        (Term::Case(a, x, b), Term::Case(c, y, d)) => {
-            let optional = |a: &Option<Box<Term>>, b: &Option<Box<Term>>| match (a, b) {
-                (Some(a), Some(b)) => same(a, b),
-                (None, None) => true,
-                _ => false,
-            };
-            optional(a, c)
-                && optional(b, d)
-                && x.len() == y.len()
-                && x.iter()
-                    .zip(y)
-                    .all(|((a, b), (c, d))| same(a, c) && same(b, d))
-        }
-        _ => a == b,
-    }
+    tree_equality::grouped(a, b, context)
 }
 
 pub(super) fn group_mapping(

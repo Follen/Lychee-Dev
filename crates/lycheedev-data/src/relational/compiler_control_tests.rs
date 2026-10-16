@@ -139,12 +139,12 @@ fn compiler_dialect_stop_is_retained_across_parser_error_and_alias_fast_path() {
 fn compiler_lowering_checks_nested_queries_and_terms_before_progress() {
     let dialect = syntax::QueryDialect::default();
     let sql = "WITH c AS (SELECT ID FROM t) SELECT (SELECT ID FROM c),COALESCE(ID,2),CASE WHEN ID=1 THEN 2 ELSE 3 END FROM t";
-    let query = Parser::new(&dialect)
+    let mut query = Parser::new(&dialect)
         .with_tokens_with_locations(lexical::tokens(sql).unwrap())
         .parse_query()
         .unwrap();
     let checks = Cell::new(0usize);
-    let error = Program::compile_query(*query, 0, &|| {
+    let error = Program::compile_query(&mut query, 0, &|| {
         checks.set(checks.get() + 1);
         if checks.get() == 11 {
             Err(fault("fixture.lower_stop", 7, "original lowering stop"))
@@ -227,7 +227,7 @@ fn lowering_moves_each_query_expression_and_preserves_nested_parameters() {
             expected
         );
         assert!(matches!(expr, Expr::Value(value) if value.value == Value::Null));
-        let child = match lowered {
+        let child = match &lowered {
             Term::ScalarSubquery(query) | Term::Exists(query) | Term::InSubquery(_, query, _) => {
                 query
             }

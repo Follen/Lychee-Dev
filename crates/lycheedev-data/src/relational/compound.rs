@@ -106,44 +106,68 @@ pub(super) fn dependencies<'a>(
     outer: &BTreeSet<String>,
     tables: &mut Vec<&'a RelationName>,
 ) {
-    let mut names = outer.clone();
-    for (name, _) in &program.bindings {
-        names.insert(identifier_lower(name));
+    enum Task<'a> {
+        Query(&'a Program, std::rc::Rc<BTreeSet<String>>),
+        Table(&'a RelationName, std::rc::Rc<BTreeSet<String>>),
     }
-    for (_, body) in &program.bindings {
-        dependencies(body, &names, tables);
-    }
-    if !program.branches.is_empty() {
-        // Go inspect walks the original right-linked query tree. Its declared
-        // SourceTables scope carries a branch's WITH into later chain nodes,
-        // although executeQuery executes each branch in the outer scope. Keep
-        // that public inspection contract separate from actual lazy resolution.
-        let mut inspected = names;
-        for body in &program.branches {
-            dependencies(body, &inspected, tables);
-            inspected.extend(body.bindings.iter().map(|(name, _)| identifier_lower(name)));
-        }
-        for term in program.terms() {
-            subquery::visit_queries(term, &mut |query| dependencies(query, &inspected, tables));
-        }
-        return;
-    }
-    for term in program.terms() {
-        subquery::visit_queries(term, &mut |query| dependencies(query, &names, tables));
-    }
-    for (table, derived) in std::iter::once((&program.table, &program.derived))
-        .chain(program.joins.iter().map(|j| (&j.table, &j.derived)))
-    {
-        if let Some(body) = derived {
-            dependencies(body, &names, tables);
-            continue;
-        }
-        if !(table.catalog.is_none() && names.contains(&identifier_lower(&table.name)))
-            && !tables
-                .iter()
-                .any(|n| n.physical_key() == table.physical_key())
-        {
-            tables.push(table);
+    let mut pending = vec![Task::Query(program, std::rc::Rc::new(outer.clone()))];
+    while let Some(task) = pending.pop() {
+        match task {
+            Task::Table(table, names) => {
+                if !(table.catalog.is_none() && names.contains(&identifier_lower(&table.name)))
+                    && !tables
+                        .iter()
+                        .any(|n| n.physical_key() == table.physical_key())
+                {
+                    tables.push(table);
+                }
+            }
+            Task::Query(program, outer) => {
+                let mut names = (*outer).clone();
+                names.extend(
+                    program
+                        .bindings
+                        .iter()
+                        .map(|(name, _)| identifier_lower(name)),
+                );
+                let names = std::rc::Rc::new(names);
+                let mut next = Vec::new();
+                for (_, body) in &program.bindings {
+                    next.push(Task::Query(body, names.clone()));
+                }
+                if program.branches.is_empty() {
+                    for term in program.terms() {
+                        subquery::visit_queries(term, &mut |query| {
+                            next.push(Task::Query(query, names.clone()))
+                        });
+                    }
+                    for (table, derived) in std::iter::once((&program.table, &program.derived))
+                        .chain(program.joins.iter().map(|j| (&j.table, &j.derived)))
+                    {
+                        next.push(if let Some(body) = derived {
+                            Task::Query(body, names.clone())
+                        } else {
+                            Task::Table(table, names.clone())
+                        });
+                    }
+                } else {
+                    // Inspection carries earlier branch WITH names into later
+                    // chain nodes; execution deliberately uses another scope.
+                    let mut inspected = names;
+                    for body in &program.branches {
+                        next.push(Task::Query(body, inspected.clone()));
+                        let mut later = (*inspected).clone();
+                        later.extend(body.bindings.iter().map(|(name, _)| identifier_lower(name)));
+                        inspected = std::rc::Rc::new(later);
+                    }
+                    for term in program.terms() {
+                        subquery::visit_queries(term, &mut |query| {
+                            next.push(Task::Query(query, inspected.clone()))
+                        });
+                    }
+                }
+                pending.extend(next.into_iter().rev());
+            }
         }
     }
 }
@@ -226,9 +250,12 @@ pub(super) fn execute(
 /// Flatten only UNION's right chain, transferring each local WITH to that
 /// branch (not the subsequent branches), just as executeQuery's copied branch.
 #[inline(never)]
-pub(super) fn branches(body: Box<SetExpr>, check: &dyn Fn() -> Result<()>) -> Result<Vec<Query>> {
-    fn plain(body: Box<SetExpr>) -> Query {
-        Query {
+pub(super) fn branches(
+    body: Box<SetExpr>,
+    check: &dyn Fn() -> Result<()>,
+) -> Result<Vec<ast_owner::Owned<Query>>> {
+    fn plain(body: Box<SetExpr>) -> ast_owner::Owned<Query> {
+        ast_owner::Owned::new(Box::new(Query {
             with: None,
             body,
             order_by: None,
@@ -239,70 +266,73 @@ pub(super) fn branches(body: Box<SetExpr>, check: &dyn Fn() -> Result<()>) -> Re
             settings: None,
             format_clause: None,
             pipe_operators: Vec::new(),
-        }
+        }))
     }
     enum Pending {
-        Body(Box<SetExpr>),
+        Body(ast_owner::Owned<SetExpr>),
         Suffix {
             start: usize,
-            with: Option<With>,
-            order: Option<OrderBy>,
-            limit: Option<LimitClause>,
+            query: ast_owner::Owned<Query>,
         },
     }
-    let mut result: Vec<Query> = vec![];
-    let mut pending = vec![Pending::Body(body)];
+    let mut result: Vec<ast_owner::Owned<Query>> = vec![];
+    let mut pending = vec![Pending::Body(ast_owner::Owned::new(body))];
     while let Some(next) = pending.pop() {
         check()?;
         match next {
-            Pending::Suffix {
-                start,
-                with,
-                order,
-                limit,
-            } => {
-                result.get_mut(start).ok_or_else(unsupported)?.with = with;
-                // Apply an enclosing tail only after all its branches, retaining
-                // the previous recursive walk's exact inner-to-outer order.
+            Pending::Suffix { start, mut query } => {
+                let first = result.get_mut(start).ok_or_else(unsupported)?;
+                ast_owner::replace_with(first, query.with.take());
                 let tail = result.last_mut().ok_or_else(unsupported)?;
-                if order.is_some() {
-                    tail.order_by = order;
+                if query.order_by.is_some() {
+                    ast_owner::replace_order(tail, query.order_by.take());
                 }
-                if limit.is_some() {
-                    tail.limit_clause = limit;
+                if query.limit_clause.is_some() {
+                    tail.limit_clause = query.limit_clause.take();
                 }
             }
-            Pending::Body(body) => match *body {
-                SetExpr::SetOperation {
-                    op: SetOperator::Union,
-                    set_quantifier: SetQuantifier::All,
-                    left,
-                    right,
-                } => {
-                    pending.push(Pending::Body(right));
-                    pending.push(Pending::Body(left));
-                }
-                SetExpr::SetOperation { .. } => {
+            Pending::Body(body) => {
+                // Reject before detaching a foreign set operation so the
+                // admitted finite AST owner also handles every error exit.
+                if matches!(&*body, SetExpr::SetOperation { .. })
+                    && !matches!(
+                        &*body,
+                        SetExpr::SetOperation {
+                            op: SetOperator::Union,
+                            set_quantifier: SetQuantifier::All,
+                            ..
+                        }
+                    )
+                {
                     return Err(problem(
                         "relational.invalid_syntax",
                         "Only UNION ALL is supported by the retrieval contract",
                     ));
                 }
-                SetExpr::Query(mut query)
-                    if matches!(*query.body, SetExpr::SetOperation { .. }) =>
-                {
-                    pending.push(Pending::Suffix {
-                        start: result.len(),
-                        with: query.with.take(),
-                        order: query.order_by.take(),
-                        limit: query.limit_clause.take(),
-                    });
-                    pending.push(Pending::Body(query.body));
+                match *body.into_box() {
+                    SetExpr::SetOperation { left, right, .. } => {
+                        pending.push(Pending::Body(ast_owner::Owned::new(right)));
+                        pending.push(Pending::Body(ast_owner::Owned::new(left)));
+                    }
+                    SetExpr::Query(query) => {
+                        let mut query = ast_owner::Owned::new(query);
+                        if matches!(*query.body, SetExpr::SetOperation { .. }) {
+                            let body = ast_owner::Owned::new(ast_owner::take_body(&mut query));
+                            pending.push(Pending::Suffix {
+                                start: result.len(),
+                                query,
+                            });
+                            pending.push(Pending::Body(body));
+                        } else {
+                            result.push(query);
+                        }
+                    }
+                    SetExpr::Select(select) => {
+                        result.push(plain(Box::new(SetExpr::Select(select))))
+                    }
+                    _ => return Err(unsupported()),
                 }
-                SetExpr::Query(query) => result.push(*query),
-                SetExpr::Select(_) => result.push(plain(body)),
-                _ => return Err(unsupported()),
-            },
+            }
         }
     }
     Ok(result)

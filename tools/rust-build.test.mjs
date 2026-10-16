@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {existsSync,mkdirSync,mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';
-import {hashFile,runCargo,verifyArtifact} from './rust-build.mjs';
+import {buildRust,hashFile,runCargo,verifyArtifact} from './rust-build.mjs';
 test('sealed artifact reuse verifies exact binary and same-invocation PDB without starting compiler',()=>{const root=mkdtempSync(join(tmpdir(),'lycheedev-artifact-'));try{const sourceBinary=join(root,'lycheedev.exe'),pdb=join(root,'lycheedev.pdb'),manifest=join(root,'artifact.json');writeFileSync(sourceBinary,'frozen bytes');writeFileSync(pdb,'matching symbols');const record={schema:'lycheedev.rust-build-artifact.v1',profile:'symbols',sourceBinary,binarySHA256:hashFile(sourceBinary),pdb,pdbSHA256:hashFile(pdb),sameInvocation:true};writeFileSync(manifest,JSON.stringify(record));assert.deepEqual(verifyArtifact(root,manifest),record);writeFileSync(pdb,'changed symbols');assert.throws(()=>verifyArtifact(root,manifest),/symbol_integrity/);writeFileSync(pdb,'matching symbols');writeFileSync(sourceBinary,'changed bytes');assert.throws(()=>verifyArtifact(root,manifest),/artifact_integrity/);assert.throws(()=>hashFile(sourceBinary,1),/file_budget/);assert.equal(readFileSync(sourceBinary,'utf8'),'changed bytes');}finally{rmSync(root,{recursive:true,force:true});}});
 
 function sourceFixture(){
@@ -97,4 +97,30 @@ test('fresh offline gate refuses a leftover cache without executing or deleting 
     assert.throws(()=>runCargo(root,['build','--offline'],{freshOffline:true,execute(){throw Error('must not execute');},onSuccess(){}}),/fresh_cache_not_empty/);
     assert.equal(readFileSync(join(leftover,'keep'),'utf8'),'unresolved');
   }finally{rmSync(root,{recursive:true,force:true});}
+});
+
+
+test('only optimized product builds receive the fixed 30 minute preparation allowance',()=>{
+  for(const profile of ['dev','release','symbols']){
+    const root=sourceFixture();
+    try{
+      const expected=profile==='dev'?600000:1800000;
+      const record=buildRust(root,join(root,'artifact'),{profile,execute(command,args,options){
+        assert.equal(options.timeout,expected);assert.deepEqual(args.slice(0,4),['build','--locked','--offline','-j']);
+        const directory=join(options.env.CARGO_TARGET_DIR,profile==='dev'?'debug':profile);mkdirSync(directory,{recursive:true});
+        writeFileSync(join(directory,'lycheedev.exe'),'fixture binary');
+        if(profile==='symbols')writeFileSync(join(directory,'lycheedev.pdb'),'fixture matching symbols');
+        return {status:0,handlesReaped:true,stdout:Buffer.alloc(0),stderr:Buffer.alloc(0)};
+      }});
+      const receipt=JSON.parse(readFileSync(record.buildEvidence));
+      const command=JSON.parse(readFileSync(receipt.sealedLogs.find(row=>row.path.endsWith('command.json')).path));
+      assert.equal(command.timeoutMs,expected);assert.equal(record.profile,profile);
+    }finally{rmSync(root,{recursive:true,force:true});}
+  }
+  for(const args of [['test','--release'],['check','--profile','release'],['fetch'],['build','--profile','release']]){
+    const root=sourceFixture();
+    try{runCargo(root,args,{timeoutMs:1800000,execute(command,received,options){
+      assert.equal(options.timeout,600000);return {status:0,handlesReaped:true,stdout:Buffer.alloc(0),stderr:Buffer.alloc(0)};
+    }});}finally{rmSync(root,{recursive:true,force:true});}
+  }
 });

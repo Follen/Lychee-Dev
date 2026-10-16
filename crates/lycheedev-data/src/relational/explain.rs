@@ -69,7 +69,7 @@ pub(super) fn build(
         steps: vec![],
         measured: None,
     };
-    query(program, 0, &mut plan, work)?;
+    walk(program, &mut plan, work)?;
     Ok(plan)
 }
 fn add(
@@ -90,206 +90,206 @@ fn add(
     });
     Ok(id)
 }
-fn expression(
-    term: &Term,
-    parent: usize,
-    plan: &mut Explanation,
-    work: &mut Work<'_>,
-) -> Result<()> {
-    work.spend()?;
-    match term {
-        Term::Unary(_, t) | Term::NullTest(t, _) | Term::Cast(t, _) => {
-            expression(t, parent, plan, work)?
-        }
-        Term::Binary(a, _, b) | Term::Like(a, b, _) => {
-            expression(a, parent, plan, work)?;
-            expression(b, parent, plan, work)?;
-        }
-        Term::Between(a, b, c, _) => {
-            expression(a, parent, plan, work)?;
-            expression(b, parent, plan, work)?;
-            expression(c, parent, plan, work)?;
-        }
-        Term::In(a, terms, _) => {
-            expression(a, parent, plan, work)?;
-            for t in terms {
-                expression(t, parent, plan, work)?;
+
+enum Task<'a> {
+    Query(&'a Program, usize),
+    Chain(&'a Program, usize, usize),
+    NextBranch(&'a Program, usize, usize),
+    Select(
+        &'a Program,
+        &'a Program,
+        &'a Program,
+        usize,
+        Option<(&'a Program, usize)>,
+    ),
+    Cte(&'a str, &'a Program, bool, usize),
+    Input(&'a RelationName, Option<&'a Program>, usize),
+    Join(&'a joins::Link, usize),
+    Filter(&'a Term, usize),
+    Expression(&'a Term, usize),
+    Wildcard,
+    Add(usize, &'static str, &'static str),
+}
+fn walk(program: &Program, plan: &mut Explanation, work: &mut Work<'_>) -> Result<()> {
+    let mut pending = vec![Task::Query(program, 0)];
+    let mut children = Vec::new();
+    while let Some(task) = pending.pop() {
+        match task {
+            Task::Query(program, parent) => {
+                pending.push(if program.branches.is_empty() {
+                    Task::Select(program, program, program, parent, None)
+                } else {
+                    Task::Chain(program, 0, parent)
+                });
+            }
+            Task::Chain(program, index, parent) => {
+                let branch = &program.branches[index];
+                let bindings = if index == 0 { program } else { branch };
+                let suffix = if index + 1 == program.branches.len() {
+                    program
+                } else {
+                    branch
+                };
+                pending.push(Task::Select(
+                    branch,
+                    bindings,
+                    suffix,
+                    parent,
+                    Some((program, index)),
+                ));
+            }
+            Task::NextBranch(program, index, id) => {
+                if index + 1 < program.branches.len() {
+                    let parent = add(
+                        plan,
+                        work,
+                        id,
+                        "union-all",
+                        "tail order/slice apply to compound result",
+                    )?;
+                    pending.push(Task::Chain(program, index + 1, parent));
+                }
+            }
+            Task::Select(program, bindings, suffix, parent, chain) => {
+                let id = add(plan, work, parent, "select", "")?;
+                let grouped = !program.groups.is_empty()
+                    || program.having.is_some()
+                    || program
+                        .projection
+                        .iter()
+                        .filter_map(|p| p.expr.as_ref())
+                        .any(aggregate::contains)
+                    || suffix.order.iter().any(|(t, _, _)| aggregate::contains(t));
+                if let Some((program, index)) = chain {
+                    pending.push(Task::NextBranch(program, index, id));
+                }
+                if suffix.limit.is_some() || suffix.offset.is_some() {
+                    pending.push(Task::Add(id, "slice", "offset then limit"));
+                }
+                pending.extend(
+                    suffix
+                        .order
+                        .iter()
+                        .rev()
+                        .map(|(t, _, _)| Task::Expression(t, id)),
+                );
+                if !suffix.order.is_empty() {
+                    let detail = if !grouped
+                        && !program.distinct
+                        && suffix.limit.is_some()
+                        && suffix.order.len() == 1
+                    {
+                        "bounded stable Top-K when offset+limit <= 1000000; otherwise stable merge sort; validates complete input"
+                    } else {
+                        "stable merge sort"
+                    };
+                    pending.push(Task::Add(id, "order", detail));
+                }
+                if program.distinct {
+                    pending.push(Task::Add(id, "distinct", "typed value keys"));
+                }
+                pending.extend(program.projection.iter().rev().map(|p| {
+                    p.expr
+                        .as_ref()
+                        .map_or(Task::Wildcard, |t| Task::Expression(t, id))
+                }));
+                if let Some(t) = &program.having {
+                    pending.push(Task::Expression(t, id));
+                }
+                if grouped {
+                    pending.push(Task::Add(id, "group", "hash keys; streaming accumulators"));
+                }
+                if let Some(t) = &program.filter {
+                    pending.push(Task::Filter(t, id));
+                }
+                pending.extend(program.joins.iter().rev().map(|join| Task::Join(join, id)));
+                pending.push(Task::Input(&program.table, program.derived.as_deref(), id));
+                pending.extend(
+                    bindings
+                        .bindings
+                        .iter()
+                        .rev()
+                        .map(|(name, body)| Task::Cte(name, body, bindings.recursive, id)),
+                );
+            }
+            Task::Cte(name, body, recursive, parent) => {
+                let kind = if recursive && recursive::references(body, name) > 0 {
+                    "recursive-delta"
+                } else {
+                    "materialized-cte"
+                };
+                let child = add(plan, work, parent, kind, name)?;
+                pending.push(Task::Query(body, child));
+            }
+            Task::Input(table, derived, parent) => {
+                if let Some(body) = derived {
+                    pending.push(Task::Query(body, parent));
+                } else {
+                    add(plan, work, parent, "input", &table.label())?;
+                }
+            }
+            Task::Join(join, parent) => {
+                let kind = if join.condition.is_none() {
+                    "cross"
+                } else if join.left {
+                    "left"
+                } else {
+                    "inner"
+                };
+                let equality = matches!(
+                    &join.condition,
+                    Some(Term::Binary(_, BinaryOperator::Eq, _))
+                );
+                let (operation, detail) = if equality {
+                    (
+                        "adaptive-equality-join",
+                        format!("{kind}; bounded hash index when eligible; nested-loop fallback"),
+                    )
+                } else {
+                    ("nested-loop-join", format!("{kind}; materialize right"))
+                };
+                let child = add(plan, work, parent, operation, &detail)?;
+                if let Some(t) = &join.condition {
+                    pending.push(Task::Expression(t, child));
+                }
+                pending.push(Task::Input(&join.table, join.derived.as_deref(), child));
+            }
+            Task::Filter(term, parent) => {
+                let child = add(plan, work, parent, "filter", "")?;
+                pending.push(Task::Expression(term, child));
+            }
+            Task::Expression(term, parent) => {
+                work.spend()?;
+                match term {
+                    Term::ScalarSubquery(body) | Term::Exists(body) => {
+                        let detail = if matches!(term, Term::Exists(_)) {
+                            "exists"
+                        } else {
+                            "subquery"
+                        };
+                        let child = add(plan, work, parent, "expression-subquery", detail)?;
+                        pending.push(Task::Query(body, child));
+                    }
+                    Term::InSubquery(input, body, _) => {
+                        let child = add(plan, work, parent, "expression-subquery", "operator")?;
+                        pending.push(Task::Expression(input, parent));
+                        pending.push(Task::Query(body, child));
+                    }
+                    _ => {
+                        term_tree::children(term, &mut children);
+                        pending.extend(
+                            children
+                                .drain(..)
+                                .map(|term| Task::Expression(term, parent)),
+                        );
+                    }
+                }
+            }
+            Task::Wildcard => work.spend()?,
+            Task::Add(parent, operation, detail) => {
+                add(plan, work, parent, operation, detail)?;
             }
         }
-        Term::ScalarSubquery(body) | Term::Exists(body) => {
-            let detail = if matches!(term, Term::Exists(_)) {
-                "exists"
-            } else {
-                "subquery"
-            };
-            let child = add(plan, work, parent, "expression-subquery", detail)?;
-            query(body, child, plan, work)?;
-        }
-        Term::InSubquery(input, body, _) => {
-            let child = add(plan, work, parent, "expression-subquery", "operator")?;
-            query(body, child, plan, work)?;
-            expression(input, parent, plan, work)?;
-        }
-        Term::Call(_, terms, _) | Term::Aggregate(_, terms, _) => {
-            for t in terms {
-                expression(t, parent, plan, work)?;
-            }
-        }
-        Term::Case(base, branches, other) => {
-            if let Some(t) = base {
-                expression(t, parent, plan, work)?;
-            }
-            for (a, b) in branches {
-                expression(a, parent, plan, work)?;
-                expression(b, parent, plan, work)?;
-            }
-            if let Some(t) = other {
-                expression(t, parent, plan, work)?;
-            }
-        }
-        _ => {}
     }
     Ok(())
-}
-fn input(
-    table: &RelationName,
-    derived: Option<&Program>,
-    parent: usize,
-    plan: &mut Explanation,
-    work: &mut Work<'_>,
-) -> Result<()> {
-    if let Some(body) = derived {
-        query(body, parent, plan, work)?;
-    } else {
-        add(plan, work, parent, "input", &table.label())?;
-    }
-    Ok(())
-}
-fn query(
-    program: &Program,
-    parent: usize,
-    plan: &mut Explanation,
-    work: &mut Work<'_>,
-) -> Result<()> {
-    if program.branches.is_empty() {
-        select(program, program, program, parent, plan, work)?;
-    } else {
-        // Rust's synthetic output SELECT is not in the Go syntax tree. CTEs
-        // belong to the first branch; compound suffixes belong to the tail.
-        let mut parent = parent;
-        for (i, branch) in program.branches.iter().enumerate() {
-            let bindings = if i == 0 { program } else { branch };
-            let suffix = if i + 1 == program.branches.len() {
-                program
-            } else {
-                branch
-            };
-            let id = select(branch, bindings, suffix, parent, plan, work)?;
-            if i + 1 < program.branches.len() {
-                parent = add(
-                    plan,
-                    work,
-                    id,
-                    "union-all",
-                    "tail order/slice apply to compound result",
-                )?;
-            }
-        }
-    }
-    Ok(())
-}
-fn select(
-    program: &Program,
-    bindings: &Program,
-    suffix: &Program,
-    parent: usize,
-    plan: &mut Explanation,
-    work: &mut Work<'_>,
-) -> Result<usize> {
-    let id = add(plan, work, parent, "select", "")?;
-    for (name, body) in &bindings.bindings {
-        let kind = if bindings.recursive && recursive::references(body, name) > 0 {
-            "recursive-delta"
-        } else {
-            "materialized-cte"
-        };
-        let child = add(plan, work, id, kind, name)?;
-        query(body, child, plan, work)?;
-    }
-    input(&program.table, program.derived.as_deref(), id, plan, work)?;
-    for join in &program.joins {
-        let kind = if join.condition.is_none() {
-            "cross"
-        } else if join.left {
-            "left"
-        } else {
-            "inner"
-        };
-        let equality = matches!(
-            &join.condition,
-            Some(Term::Binary(_, BinaryOperator::Eq, _))
-        );
-        let (operation, detail) = if equality {
-            (
-                "adaptive-equality-join",
-                format!("{kind}; bounded hash index when eligible; nested-loop fallback"),
-            )
-        } else {
-            ("nested-loop-join", format!("{kind}; materialize right"))
-        };
-        let child = add(plan, work, id, operation, &detail)?;
-        input(&join.table, join.derived.as_deref(), child, plan, work)?;
-        if let Some(t) = &join.condition {
-            expression(t, child, plan, work)?;
-        }
-    }
-    if let Some(t) = &program.filter {
-        let child = add(plan, work, id, "filter", "")?;
-        expression(t, child, plan, work)?;
-    }
-    let grouped = !program.groups.is_empty()
-        || program.having.is_some()
-        || program
-            .projection
-            .iter()
-            .filter_map(|p| p.expr.as_ref())
-            .any(aggregate::contains)
-        || suffix.order.iter().any(|(t, _, _)| aggregate::contains(t));
-    if grouped {
-        add(plan, work, id, "group", "hash keys; streaming accumulators")?;
-    }
-    if let Some(t) = &program.having {
-        expression(t, id, plan, work)?;
-    }
-    for p in &program.projection {
-        if let Some(t) = &p.expr {
-            expression(t, id, plan, work)?;
-        } else {
-            // A wildcard projection is still one Go syntax node even though
-            // the row binder expands it without an expression bind charge.
-            work.spend()?;
-        }
-    }
-    if program.distinct {
-        add(plan, work, id, "distinct", "typed value keys")?;
-    }
-    if !suffix.order.is_empty() {
-        let detail = if !grouped
-            && !program.distinct
-            && suffix.limit.is_some()
-            && suffix.order.len() == 1
-        {
-            "bounded stable Top-K when offset+limit <= 1000000; otherwise stable merge sort; validates complete input"
-        } else {
-            "stable merge sort"
-        };
-        add(plan, work, id, "order", detail)?;
-    }
-    for (t, _, _) in &suffix.order {
-        expression(t, id, plan, work)?;
-    }
-    if suffix.limit.is_some() || suffix.offset.is_some() {
-        add(plan, work, id, "slice", "offset then limit")?;
-    }
-    Ok(id)
 }

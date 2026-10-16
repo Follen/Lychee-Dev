@@ -14,15 +14,21 @@ use std::{
     time::{Duration, Instant},
 };
 mod aggregate;
+mod ast_owner;
+mod binding;
 mod compound;
+mod evaluation;
 mod explain;
+mod expression_parser;
 pub use explain::{ExecutionMeasurement, Explanation, MeasuredTable, PlanStep, ScanMeasurement};
 #[cfg(test)]
 mod compiler_trace;
 mod identifier_categories;
 mod identifiers;
 mod lexical;
+mod lowering;
 mod parser_admission;
+mod query_lowering;
 mod retrieval;
 pub(crate) use identifiers::SourceTableUse;
 use identifiers::{ColumnOwners, ColumnRef, RelationName};
@@ -36,7 +42,11 @@ pub(crate) use scalar::text as scalar_text;
 mod selection;
 mod subquery;
 mod syntax;
+mod task_stack;
+mod term_owner;
+mod term_tree;
 mod topk;
+mod tree_equality;
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(untagged)]
 pub enum Scalar {
@@ -227,7 +237,7 @@ fn rational_arithmetic(a: &Scalar, op: &BinaryOperator, b: &Scalar) -> Result<Sc
         .ok_or_else(numeric)?;
     Ok(Scalar::Float(f))
 }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug)]
 enum Term {
     Value(Scalar),
     Number(String),
@@ -252,228 +262,33 @@ enum Term {
     Aggregate(String, Vec<Term>, bool),
     Case(Option<Box<Term>>, Vec<(Term, Term)>, Option<Box<Term>>),
 }
-fn term(
+use lowering::term;
+// Keep the large public Expr move inside a nonrecursive helper. The shared
+// lowering driver stores only owned handles across query continuations.
+#[inline(never)]
+fn take_query_expression(
     expr: &mut Expr,
-    parameters: &mut BTreeSet<String>,
-    depth: usize,
-    check: &dyn Fn() -> Result<()>,
-) -> Result<Term> {
-    check()?;
-    if depth > 256 {
-        return Err(budget());
-    }
-    if matches!(
-        expr,
-        Expr::InSubquery { .. } | Expr::Subquery(_) | Expr::Exists { .. }
-    ) {
-        return query_term(expr, parameters, depth, check);
-    }
-    let mut nested = |e: &mut Expr| term(e, parameters, depth + 1, check);
-    Ok(match expr {
-        Expr::Wildcard(_) => Term::Star(String::new()),
-        Expr::QualifiedWildcard(name, _) => {
-            let [ObjectNamePart::Identifier(name)] = name.0.as_slice() else {
-                return Err(unsupported());
-            };
-            Term::Star(syntax::identifier(name)?.to_owned())
-        }
-        Expr::Identifier(name) => {
-            Term::Column(ColumnRef::new(syntax::identifier(name)?.to_owned()))
-        }
-        Expr::CompoundIdentifier(names) if names.len() == 2 => Term::Column(ColumnRef::qualified(
-            syntax::identifier(&names[0])?.to_owned(),
-            syntax::identifier(&names[1])?.to_owned(),
-        )),
-        Expr::Value(v) => match &v.value {
-            Value::Null => Term::Value(Scalar::Null),
-            Value::Boolean(v) => Term::Value(Scalar::Bool(*v)),
-            Value::Number(n, _) => Term::Number(n.clone()),
-            Value::SingleQuotedString(v) => Term::Value(Scalar::String(v.clone())),
-            Value::Placeholder(name) if name.starts_with(':') && name.len() > 1 => {
-                parameters.insert(name[1..].into());
-                Term::Parameter(name[1..].into())
-            }
-            _ => return Err(unsupported()),
-        },
-        Expr::Nested(e) => return nested(e),
-        Expr::UnaryOp { op, expr }
-            if matches!(
-                op,
-                UnaryOperator::Plus | UnaryOperator::Minus | UnaryOperator::Not
-            ) =>
-        {
-            Term::Unary(*op, Box::new(nested(expr)?))
-        }
-        Expr::BinaryOp { left, op, right }
-            if matches!(
-                op,
-                BinaryOperator::Plus
-                    | BinaryOperator::Minus
-                    | BinaryOperator::Multiply
-                    | BinaryOperator::Divide
-                    | BinaryOperator::Modulo
-                    | BinaryOperator::Eq
-                    | BinaryOperator::NotEq
-                    | BinaryOperator::Lt
-                    | BinaryOperator::LtEq
-                    | BinaryOperator::Gt
-                    | BinaryOperator::GtEq
-                    | BinaryOperator::And
-                    | BinaryOperator::Or
-                    | BinaryOperator::StringConcat
-            ) =>
-        {
-            Term::Binary(
-                Box::new(nested(left)?),
-                op.clone(),
-                Box::new(nested(right)?),
-            )
-        }
-        Expr::Cast {
-            kind: CastKind::Cast,
-            expr,
-            data_type,
-            format: None,
-        } => Term::Cast(Box::new(nested(expr)?), scalar::cast_name(data_type)?),
-        Expr::Like {
-            negated,
-            any: false,
-            expr,
-            pattern,
-            escape_char: None,
-        } => Term::Like(
-            Box::new(nested(expr)?),
-            Box::new(nested(pattern)?),
-            *negated,
-        ),
-        Expr::IsNull(e) => Term::NullTest(Box::new(nested(e)?), false),
-        Expr::IsNotNull(e) => Term::NullTest(Box::new(nested(e)?), true),
-        Expr::Between {
-            expr,
-            negated,
-            low,
-            high,
-        } => Term::Between(
-            Box::new(nested(expr)?),
-            Box::new(nested(low)?),
-            Box::new(nested(high)?),
-            *negated,
-        ),
-        Expr::InList {
-            expr,
-            list,
-            negated,
-        } => Term::In(
-            Box::new(nested(expr)?),
-            list.iter_mut().map(&mut nested).collect::<Result<_>>()?,
-            *negated,
-        ),
-        Expr::Function(function) => {
-            if function.over.is_some()
-                || function.filter.is_some()
-                || function.null_treatment.is_some()
-                || !matches!(function.parameters, FunctionArguments::None)
-                || !function.within_group.is_empty()
-            {
-                return Err(unsupported());
-            }
-            let FunctionArguments::List(args) = &mut function.args else {
-                return Err(unsupported());
-            };
-            if !args.clauses.is_empty() {
-                return Err(unsupported());
-            }
-            let name = scalar::name(&function.name)?;
-            if matches!(args.duplicate_treatment, Some(DuplicateTreatment::All)) {
-                return Err(problem(
-                    "relational.invalid_syntax",
-                    "Unexpected ALL in function arguments",
-                ));
-            }
-            let distinct = matches!(args.duplicate_treatment, Some(DuplicateTreatment::Distinct));
-            let mut terms = Vec::with_capacity(args.args.len());
-            for arg in &mut args.args {
-                terms.push(match arg {
-                    FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) => nested(expr)?,
-                    FunctionArg::Unnamed(FunctionArgExpr::Wildcard) => Term::Star(String::new()),
-                    FunctionArg::Unnamed(FunctionArgExpr::QualifiedWildcard(name)) => {
-                        let [ObjectNamePart::Identifier(name)] = name.0.as_slice() else {
-                            return Err(unsupported());
-                        };
-                        Term::Star(syntax::identifier(name)?.to_owned())
-                    }
-                    _ => return Err(unsupported()),
-                });
-            }
-            if ["COUNT", "MIN", "MAX", "SUM", "AVG"].contains(&name.as_str()) {
-                Term::Aggregate(name, terms, distinct)
-            } else {
-                Term::Call(name, terms, distinct)
-            }
-        }
-        Expr::Case {
-            operand,
-            conditions,
-            else_result,
-            ..
-        } => Term::Case(
-            operand
-                .as_mut()
-                .map(|e| nested(e).map(Box::new))
-                .transpose()?,
-            conditions
-                .iter_mut()
-                .map(|pair| Ok((nested(&mut pair.condition)?, nested(&mut pair.result)?)))
-                .collect::<Result<_>>()?,
-            Some(
-                else_result
-                    .as_mut()
-                    .map(|e| nested(e))
-                    .transpose()?
-                    .map_or_else(|| Box::new(Term::Value(Scalar::Null)), Box::new),
-            ),
-        ),
-        _ => return Err(unsupported()),
-    })
-}
-// The parser AST has one owner after admission. Move query children into
-// lowering instead of cloning the complete descendant tree at every level.
-// The inert placeholder is never revisited and bounds the old AST's Drop path.
-fn query_term(
-    expr: &mut Expr,
-    parameters: &mut BTreeSet<String>,
-    depth: usize,
-    check: &dyn Fn() -> Result<()>,
-) -> Result<Term> {
-    let owned = std::mem::replace(expr, Expr::Value(Value::Null.with_empty_span()));
-    let (query, input, kind) = match owned {
+) -> (
+    ast_owner::Owned<Query>,
+    Option<(ast_owner::Owned<Expr>, bool)>,
+    Option<bool>,
+) {
+    match std::mem::replace(expr, Expr::Value(Value::Null.with_empty_span())) {
         Expr::InSubquery {
-            mut expr,
+            expr,
             subquery,
             negated,
-        } => {
-            let input = term(&mut expr, parameters, depth + 1, check)?;
-            (subquery, Some((input, negated)), None)
+        } => (
+            ast_owner::Owned::new(subquery),
+            Some((ast_owner::Owned::new(expr), negated)),
+            None,
+        ),
+        Expr::Subquery(query) => (ast_owner::Owned::new(query), None, None),
+        Expr::Exists { subquery, negated } => {
+            (ast_owner::Owned::new(subquery), None, Some(negated))
         }
-        Expr::Subquery(query) => (query, None, None),
-        Expr::Exists { subquery, negated } => (subquery, None, Some(negated)),
         _ => unreachable!("query_term only receives query expressions"),
-    };
-    let query = Program::compile_query(*query, depth + 1, check)?;
-    parameters.extend(query.parameters.iter().cloned());
-    let query = std::sync::Arc::new(query);
-    Ok(if let Some((input, negated)) = input {
-        Term::InSubquery(Box::new(input), query, negated)
-    } else if let Some(negated) = kind {
-        let exists = Term::Exists(query);
-        if negated {
-            Term::Unary(UnaryOperator::Not, Box::new(exists))
-        } else {
-            exists
-        }
-    } else {
-        Term::ScalarSubquery(query)
-    })
+    }
 }
 
 fn check_arity(name: &str, count: usize) -> Result<()> {
@@ -495,149 +310,7 @@ fn bind(
 ) -> Result<()> {
     bind_with_aggregates(term, columns, alias, params, true, context, work)
 }
-fn bind_with_aggregates(
-    term: &Term,
-    columns: &[String],
-    alias: ColumnOwners<'_>,
-    params: &BTreeMap<String, Scalar>,
-    allow_aggregates: bool,
-    context: &subquery::Context<'_>,
-    work: &mut Work<'_>,
-) -> Result<()> {
-    work.spend()?;
-    match term {
-        Term::Ordinal(index) if *index >= columns.len() => return Err(binding()),
-        Term::Column(name) => {
-            subquery::resolve(columns, alias, name, context.scope.outer)?;
-        }
-        Term::Parameter(name) if !params.contains_key(name) => return Err(binding()),
-        Term::Unary(_, t) | Term::NullTest(t, _) => {
-            bind_argument(t, columns, alias, params, allow_aggregates, context, work)?
-        }
-        Term::Binary(a, _, b) | Term::Like(a, b, _) => {
-            bind_argument(a, columns, alias, params, allow_aggregates, context, work)?;
-            bind_argument(b, columns, alias, params, allow_aggregates, context, work)?;
-        }
-        Term::Between(a, b, c, _) => {
-            for t in [a, b, c] {
-                bind_argument(t, columns, alias, params, allow_aggregates, context, work)?;
-            }
-        }
-        Term::In(t, list, _) => {
-            bind_argument(t, columns, alias, params, allow_aggregates, context, work)?;
-            for t in list {
-                bind_argument(t, columns, alias, params, allow_aggregates, context, work)?;
-            }
-        }
-        Term::InSubquery(input, query, _) => {
-            if context.scope.callback.is_none() {
-                return Err(unsupported());
-            }
-            // Go binds the nested schema before this operator's arguments,
-            // even for an unreachable branch or an empty outer input.
-            if work.planning {
-                subquery::execute(query, &[], columns, alias, params, context, work)?;
-            }
-            bind_argument(
-                input,
-                columns,
-                alias,
-                params,
-                allow_aggregates,
-                context,
-                work,
-            )?;
-        }
-        Term::ScalarSubquery(query) | Term::Exists(query) => {
-            if context.scope.callback.is_none() {
-                return Err(unsupported());
-            }
-            if work.planning {
-                if matches!(term, Term::Exists(_)) {
-                    subquery::execute_any(query, &[], columns, alias, params, context, work)?;
-                } else {
-                    subquery::execute(query, &[], columns, alias, params, context, work)?;
-                }
-            }
-        }
-        Term::Cast(input, kind) => {
-            scalar::cast_kind(kind)?;
-            bind_argument(
-                input,
-                columns,
-                alias,
-                params,
-                allow_aggregates,
-                context,
-                work,
-            )?;
-        }
-        Term::Aggregate(name, args, distinct) => {
-            if !allow_aggregates {
-                return Err(type_error());
-            }
-            if let Some(input) = aggregate::input(name, args, *distinct)? {
-                let input_context = subquery::Context {
-                    group: None,
-                    scope: subquery::Scope {
-                        allowed: None,
-                        ..context.scope
-                    },
-                    ..*context
-                };
-                bind_argument(input, columns, alias, params, false, &input_context, work)?;
-            }
-        }
-        Term::Call(name, list, distinct) => {
-            if *distinct {
-                return Err(type_error());
-            }
-            check_arity(name, list.len())?;
-            for t in list {
-                bind_argument(t, columns, alias, params, allow_aggregates, context, work)?;
-            }
-        }
-        Term::Case(operand, cases, fallback) => {
-            if let Some(t) = operand {
-                bind_argument(t, columns, alias, params, allow_aggregates, context, work)?;
-            }
-            for (a, b) in cases {
-                bind_argument(a, columns, alias, params, allow_aggregates, context, work)?;
-                bind_argument(b, columns, alias, params, allow_aggregates, context, work)?;
-            }
-            if let Some(t) = fallback {
-                bind_argument(t, columns, alias, params, allow_aggregates, context, work)?;
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
-// Go's loop checks star children before calling bindTerm, so rejecting one
-// consumes the parent node but no child unit. A root star is handled by the
-// projection expander; COUNT(*) bypasses this helper after shape validation.
-fn bind_argument(
-    term: &Term,
-    columns: &[String],
-    alias: ColumnOwners<'_>,
-    params: &BTreeMap<String, Scalar>,
-    allow_aggregates: bool,
-    context: &subquery::Context<'_>,
-    work: &mut Work<'_>,
-) -> Result<()> {
-    if matches!(term, Term::Star(_)) {
-        return Err(type_error());
-    }
-    bind_with_aggregates(
-        term,
-        columns,
-        alias,
-        params,
-        allow_aggregates,
-        context,
-        work,
-    )
-}
+use binding::bind as bind_with_aggregates;
 
 fn column(columns: &[String], alias: ColumnOwners<'_>, name: &ColumnRef) -> Result<usize> {
     let mut found = columns.iter().enumerate().filter(|(i, candidate)| {
@@ -974,305 +647,8 @@ fn eval(
     let context = subquery::Context::new(&sources, None);
     eval_scoped(t, row, columns, alias, params, &context, work)
 }
-fn eval_scoped(
-    t: &Term,
-    row: &[Scalar],
-    columns: &[String],
-    alias: ColumnOwners<'_>,
-    params: &BTreeMap<String, Scalar>,
-    context: &subquery::Context<'_>,
-    work: &mut Work<'_>,
-) -> Result<Scalar> {
-    work.spend()?;
-    let mut value = |t: &Term| eval_scoped(t, row, columns, alias, params, context, work);
-    match t {
-        // Only a rewritten grouped expression can evaluate an aggregate.
-        // Go's raw scalar evaluator rejects aggregate names and star nodes.
-        Term::Aggregate(..) | Term::Star(_) => Err(unsupported()),
-        Term::Value(v) => work.clone_scalar(v),
-        Term::Number(n) => literal(n),
-        Term::Ordinal(index) => work.clone_scalar(row.get(*index).ok_or_else(binding)?),
-        Term::Column(name) => match subquery::resolve(columns, alias, name, context.scope.outer)? {
-            subquery::Position::Local(index) => {
-                work.clone_scalar(row.get(index).ok_or_else(binding)?)
-            }
-            subquery::Position::Outer(frame, index) => work.clone_scalar(frame.value(index)?),
-        },
-        Term::Parameter(name) => work.clone_scalar(params.get(name).ok_or_else(binding)?),
-        Term::NullTest(t, negated) => Ok(Scalar::Bool(matches!(value(t)?, Scalar::Null) ^ negated)),
-        Term::Unary(op, t) => {
-            let v = value(t)?;
-            if v == Scalar::Null {
-                return Ok(v);
-            }
-            match op {
-                UnaryOperator::Plus if int(&v).is_some() => Ok(v),
-                UnaryOperator::Minus if int(&v).is_some() => integer(-int(&v).unwrap()),
-                UnaryOperator::Plus => Ok(Scalar::Float(number(&v)?)),
-                UnaryOperator::Minus => Ok(Scalar::Float(-number(&v)?)),
-                UnaryOperator::Not => {
-                    Ok(truth(&v)?.map(|b| Scalar::Bool(!b)).unwrap_or(Scalar::Null))
-                }
-                _ => Err(unsupported()),
-            }
-        }
-        Term::Binary(a, op, b) => {
-            let a = value(a)?;
-            if matches!(op, BinaryOperator::And | BinaryOperator::Or) {
-                let b = value(b)?;
-                let a = truth(&a)?;
-                let b = truth(&b)?;
-                return Ok(match op {
-                    BinaryOperator::And if a == Some(false) || b == Some(false) => {
-                        Scalar::Bool(false)
-                    }
-                    BinaryOperator::Or if a == Some(true) || b == Some(true) => Scalar::Bool(true),
-                    _ => a
-                        .zip(b)
-                        .map(|(a, b)| {
-                            Scalar::Bool(if op == &BinaryOperator::And {
-                                a && b
-                            } else {
-                                a || b
-                            })
-                        })
-                        .unwrap_or(Scalar::Null),
-                });
-            }
-            let b = value(b)?;
-            if matches!(a, Scalar::Null) || matches!(b, Scalar::Null) {
-                return Ok(Scalar::Null);
-            }
-            match op {
-                BinaryOperator::Eq
-                | BinaryOperator::NotEq
-                | BinaryOperator::Lt
-                | BinaryOperator::LtEq
-                | BinaryOperator::Gt
-                | BinaryOperator::GtEq => {
-                    let c = compare(&a, &b)?;
-                    Ok(Scalar::Bool(match op {
-                        BinaryOperator::Eq => c == Ordering::Equal,
-                        BinaryOperator::NotEq => c != Ordering::Equal,
-                        BinaryOperator::Lt => c == Ordering::Less,
-                        BinaryOperator::LtEq => c != Ordering::Greater,
-                        BinaryOperator::Gt => c == Ordering::Greater,
-                        _ => c != Ordering::Less,
-                    }))
-                }
-                BinaryOperator::StringConcat => {
-                    let (Scalar::String(a), Scalar::String(b)) = (a, b) else {
-                        return Err(type_error());
-                    };
-                    let bytes = a.len().checked_add(b.len()).ok_or_else(budget)?;
-                    if bytes > 1 << 20 {
-                        return Err(budget());
-                    }
-                    work.temporary(bytes)?;
-                    let mut output = String::with_capacity(bytes);
-                    output.push_str(&a);
-                    output.push_str(&b);
-                    Ok(Scalar::String(output))
-                }
-                _ => {
-                    // BigRational operands/results are bounded to4096bits;
-                    // reserve a conservative temporary representation up front.
-                    if matches!(a, Scalar::Float(_))
-                        || matches!(b, Scalar::Float(_))
-                        || op == &BinaryOperator::Divide
-                    {
-                        work.temporary(8 << 10)?;
-                    }
-                    arithmetic(&a, op, &b)
-                }
-            }
-        }
-        Term::Between(t, low, high, negated) => {
-            let (v, l, h) = (value(t)?, value(low)?, value(high)?);
-            let low = if v == Scalar::Null || l == Scalar::Null {
-                None
-            } else {
-                Some(compare(&v, &l)? != Ordering::Less)
-            };
-            let high = if v == Scalar::Null || h == Scalar::Null {
-                None
-            } else {
-                Some(compare(&v, &h)? != Ordering::Greater)
-            };
-            Ok(if low == Some(false) || high == Some(false) {
-                Scalar::Bool(*negated)
-            } else if low == Some(true) && high == Some(true) {
-                Scalar::Bool(!negated)
-            } else {
-                Scalar::Null
-            })
-        }
-        Term::In(t, list, negated) => {
-            let v = value(t)?;
-            let mut null = false;
-            let mut matched = false;
-            for t in list {
-                let other = value(t)?;
-                if v == Scalar::Null || other == Scalar::Null {
-                    null = true;
-                } else if compare(&v, &other)? == Ordering::Equal {
-                    matched = true;
-                }
-            }
-            Ok(if matched {
-                Scalar::Bool(!negated)
-            } else if null {
-                Scalar::Null
-            } else {
-                Scalar::Bool(*negated)
-            })
-        }
-        Term::InSubquery(input, query, negated) => {
-            let left = value(input)?;
-            let result = subquery::execute(query, row, columns, alias, params, context, work)?;
-            let mut null = false;
-            let mut matched = false;
-            // Materialize the complete RHS first, then compare every row.
-            // A previous match does not hide a later incompatible scalar.
-            for row in result.rows {
-                work.spend()?;
-                let other = row.first().ok_or_else(subquery::cardinality)?;
-                if left == Scalar::Null || other == &Scalar::Null {
-                    null = true;
-                } else if compare(&left, other)? == Ordering::Equal {
-                    matched = true;
-                }
-            }
-            Ok(if matched {
-                Scalar::Bool(!negated)
-            } else if null {
-                Scalar::Null
-            } else {
-                Scalar::Bool(*negated)
-            })
-        }
-        Term::Cast(input, kind) => {
-            let input = value(input)?;
-            scalar::cast(input, kind, work)
-        }
-        Term::Like(input, pattern, negated) => {
-            let input = value(input)?;
-            let pattern = value(pattern)?;
-            scalar::like(&input, &pattern, *negated, work)
-        }
-        Term::ScalarSubquery(query) => {
-            let result = subquery::execute(query, row, columns, alias, params, context, work)?;
-            if result.rows.len() > 1 {
-                return Err(subquery::cardinality());
-            }
-            // The nested executor already owns and canonicalizes its scalar.
-            // Move it out rather than cloning/recharging a returned string.
-            Ok(result
-                .rows
-                .into_iter()
-                .next()
-                .and_then(|row| row.into_iter().next())
-                .unwrap_or(Scalar::Null))
-        }
-        Term::Exists(query) => {
-            // Go completes the query, even after the first row. Later provider,
-            // type, cancellation and budget failures cannot be hidden by EXISTS.
-            let result = subquery::execute_any(query, row, columns, alias, params, context, work)?;
-            Ok(Scalar::Bool(!result.rows.is_empty()))
-        }
-        Term::Case(operand, cases, fallback) => {
-            let operand = operand.as_ref().map(|v| value(v)).transpose()?;
-            for (test, result) in cases {
-                let test = value(test)?;
-                let yes = if let Some(operand) = &operand {
-                    operand != &Scalar::Null
-                        && test != Scalar::Null
-                        && compare(operand, &test)? == Ordering::Equal
-                } else {
-                    truth(&test)? == Some(true)
-                };
-                if yes {
-                    return value(result);
-                }
-            }
-            fallback
-                .as_ref()
-                .map(|v| value(v))
-                .transpose()
-                .map(|v| v.unwrap_or(Scalar::Null))
-        }
-        Term::Call(name, args, distinct) => {
-            // Preserve the raw scalar evaluator's error independently of the
-            // public binder, which rejects scalar DISTINCT with ErrType.
-            if *distinct {
-                return Err(unsupported());
-            }
-            check_arity(name, args.len())?;
-            if name == "COALESCE" {
-                if args.is_empty() {
-                    return Err(type_error());
-                }
-                for arg in args {
-                    let v = value(arg)?;
-                    if v != Scalar::Null {
-                        return Ok(v);
-                    }
-                }
-                return Ok(Scalar::Null);
-            }
-            if matches!(name.as_str(), "HAS_FLAG" | "BIT_AND") {
-                // Go validates each argument before evaluating the next. A
-                // first NULL suppresses the second; a first bad type wins over
-                // a later NULL, provider failure or numeric-range error.
-                let mut bits = [0u64; 2];
-                for (index, arg) in args.iter().enumerate() {
-                    let scalar = value(arg)?;
-                    if scalar == Scalar::Null {
-                        return Ok(Scalar::Null);
-                    }
-                    bits[index] = int(&scalar).ok_or_else(type_error)? as u64;
-                }
-                return Ok(if name == "HAS_FLAG" {
-                    Scalar::Bool(bits[0] & bits[1] == bits[1])
-                } else {
-                    Scalar::UInt(bits[0] & bits[1])
-                });
-            }
-            let left = value(&args[0])?;
-            if name == "NULLIF" {
-                let right = value(&args[1])?;
-                return Ok(
-                    if left != Scalar::Null
-                        && right != Scalar::Null
-                        && compare(&left, &right)? == Ordering::Equal
-                    {
-                        Scalar::Null
-                    } else {
-                        left
-                    },
-                );
-            }
-            if left == Scalar::Null {
-                return Ok(Scalar::Null);
-            }
-            let Scalar::String(text) = left else {
-                return Err(type_error());
-            };
-            match name.as_str() {
-                "LOWER" => Ok(Scalar::String(case_text(&text, false, work)?)),
-                "UPPER" => Ok(Scalar::String(case_text(&text, true, work)?)),
-                "LENGTH" => {
-                    if text.len() > 1 << 20 {
-                        return Err(budget());
-                    }
-                    work.consume(text.len())?;
-                    Ok(Scalar::Int(text.chars().count() as i64))
-                }
-                _ => Err(unsupported()),
-            }
-        }
-    }
-}
+use evaluation::eval as eval_scoped;
+
 pub struct Source {
     pub columns: Vec<String>,
     pub rows: Vec<Vec<Scalar>>,
@@ -1416,7 +792,7 @@ struct Projection {
     name: String,
 }
 type QuerySuffix = (Vec<(Term, bool, Option<bool>)>, Option<Term>, Option<Term>);
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug)]
 pub struct Program {
     explain: bool,
     analyze: bool,
@@ -1469,11 +845,11 @@ impl QueryResult {
         }
     }
 }
-// Do not retain the public SetExpr enum's large unboxed Statement storage in
-// every recursive lowering frame; the SELECT body itself is already boxed.
+// Borrow the boxed SELECT without moving the public SetExpr enum's large
+// unboxed Statement storage into the query continuation driver.
 #[inline(never)]
-fn select_body(body: Box<SetExpr>) -> Result<Box<Select>> {
-    match *body {
+fn select_body(body: &mut SetExpr) -> Result<&mut Select> {
+    match body {
         SetExpr::Select(select) => Ok(select),
         _ => Err(unsupported()),
     }
@@ -1509,20 +885,20 @@ impl Program {
         let check = &|| dialect.check();
         let mut tokens = lexical::tokens_checked(sql, check)?;
         let (explain, analyze) = explain::prefix(&mut tokens);
-        // sqlparser's implementation guards count more frames than Go's
-        // retrieve/expression stack. Its independent ceiling stays bounded;
-        // the Go syntax admission below uses the actual logical structure.
+        // Keep the public parser's compatibility ceiling. Production retrieval
+        // and expressions use their shared heap driver, not native Pratt/query
+        // recursion; original active-frame and logical-node limits stay 128.
         let mut parser = Parser::new(dialect)
             .with_recursion_limit(256)
             .with_tokens_with_locations(tokens.clone());
         check()?;
         #[cfg(test)]
         compiler_trace::stage("parse");
-        let parsed = retrieval::parse(dialect, &mut parser);
+        let parsed = retrieval::parse(dialect, &mut parser).map(ast_owner::Owned::new);
         // A dialect hook may stop a speculative parse that sqlparser otherwise
         // rewinds. It must never become a syntax error or silently disappear.
         dialect.take_stop()?;
-        let query = match parsed {
+        let mut query = match parsed {
             Ok(query) => query,
             Err(error) => {
                 compound::validate_all_keyword(
@@ -1551,7 +927,7 @@ impl Program {
         parser_admission::validate(&query, &tokens, check)?;
         #[cfg(test)]
         compiler_trace::stage("lowering");
-        let mut program = Self::compile_query(*query, 0, check)?;
+        let mut program = Self::compile_query(&mut query, 0, check)?;
         #[cfg(test)]
         compiler_trace::stage("inspection");
         subquery::validate_nodes(&program, check)?;
@@ -1562,218 +938,15 @@ impl Program {
         Ok(program)
     }
     fn compile_query(
-        mut query: Query,
+        query: &mut Query,
         depth: usize,
         check: &dyn Fn() -> Result<()>,
     ) -> Result<Self> {
-        check()?;
-        if depth > 256 {
-            return Err(budget());
-        }
-        let mut bindings = vec![];
-        let mut recursive = false;
-        if let Some(with) = query.with.take() {
-            recursive = with.recursive;
-            let mut names = BTreeSet::new();
-            for cte in with.cte_tables {
-                check()?;
-                if cte.from.is_some() || cte.materialized.is_some() || !cte.alias.columns.is_empty()
-                {
-                    return Err(unsupported());
-                }
-                let name = syntax::identifier(&cte.alias.name)?.to_owned();
-                if !names.insert(identifier_lower(&name)) {
-                    return Err(problem("relational.invalid_syntax", "Duplicate CTE name"));
-                }
-                bindings.push((name, Self::compile_query(*cte.query, depth + 1, check)?));
-            }
-        }
-        if query.fetch.is_some()
-            || !query.locks.is_empty()
-            || query.for_clause.is_some()
-            || query.settings.is_some()
-            || query.format_clause.is_some()
-            || !query.pipe_operators.is_empty()
-        {
-            return Err(unsupported());
-        }
-        if matches!(*query.body, SetExpr::SetOperation { .. }) {
-            let mut bodies = compound::branches(query.body, check)?;
-            let tail = bodies.last_mut().ok_or_else(unsupported)?;
-            let tail_order = query.order_by.take().or_else(|| tail.order_by.take());
-            let tail_limit = query
-                .limit_clause
-                .take()
-                .or_else(|| tail.limit_clause.take());
-            let mut branches = Vec::with_capacity(bodies.len());
-            for branch in bodies {
-                check()?;
-                branches.push(Self::compile_query(branch, depth, check)?);
-            }
-            let mut parameters = BTreeSet::new();
-            for body in branches.iter().chain(bindings.iter().map(|(_, b)| b)) {
-                parameters.extend(body.parameters.iter().cloned());
-            }
-            let (order, limit, offset) =
-                Self::suffix(tail_order, tail_limit, &mut parameters, depth, check)?;
-            return Ok(Self {
-                explain: false,
-                analyze: false,
-                recursive,
-                bindings,
-                branches,
-                derived: None,
-                table: RelationName::internal("\0union:output"),
-                alias: String::new(),
-                projection: vec![Projection {
-                    expr: None,
-                    name: String::new(),
-                }],
-                filter: None,
-                order,
-                parameters,
-                limit,
-                offset,
-                distinct: false,
-                joins: vec![],
-                groups: vec![],
-                having: None,
-            });
-        }
-        let mut select = select_body(query.body)?;
-        // Fixed Go 3.2 compiler requires FROM after every SELECT projection.
-        // sqlparser accepts source-free SELECT, but that is a syntax error in
-        // our public language rather than an unimplemented Rust expression.
-        if select.from.is_empty() {
-            return Err(problem("relational.invalid_syntax", "expected FROM"));
-        }
-        if select.from.len() != 1
-            || select.into.is_some()
-            || select.top.is_some()
-            || select.prewhere.is_some()
-            || select.qualify.is_some()
-            || !select.named_window.is_empty()
-            || !select.lateral_views.is_empty()
-            || !select.connect_by.is_empty()
-            || !select.cluster_by.is_empty()
-            || !select.distribute_by.is_empty()
-            || !select.sort_by.is_empty()
-            || select.value_table_mode.is_some()
-            || select.select_modifiers.is_some()
-            || select.exclude.is_some()
-            || !select.optimizer_hints.is_empty()
-        {
-            return Err(unsupported());
-        }
-        let GroupByExpr::Expressions(group_expressions, modifiers) = &mut select.group_by else {
-            return Err(unsupported());
-        };
-        if !modifiers.is_empty() {
-            return Err(unsupported());
-        }
-        let from = select.from.remove(0);
-        let (table, alias, derived) =
-            joins::relation(from.relation, "\0derived:base", depth, check)?;
-        let mut parameters = BTreeSet::new();
-        let joins = from
-            .joins
-            .into_iter()
-            .enumerate()
-            .map(|(i, j)| joins::compile(j, &mut parameters, i, depth, check))
-            .collect::<Result<Vec<_>>>()?;
-        let mut projection = vec![];
-        for item in &mut select.projection {
-            check()?;
-            projection.push(match item {
-                SelectItem::UnnamedExpr(e) => Projection {
-                    expr: Some(term(e, &mut parameters, depth, check)?),
-                    name: String::new(),
-                },
-                SelectItem::ExprWithAlias { expr, alias } => Projection {
-                    expr: Some(term(expr, &mut parameters, depth, check)?),
-                    name: syntax::identifier(alias)?.to_owned(),
-                },
-                SelectItem::Wildcard(options)
-                    if *options == WildcardAdditionalOptions::default() =>
-                {
-                    Projection {
-                        expr: None,
-                        name: String::new(),
-                    }
-                }
-                SelectItem::QualifiedWildcard(
-                    SelectItemQualifiedWildcardKind::ObjectName(name),
-                    options,
-                ) if *options == WildcardAdditionalOptions::default() => Projection {
-                    expr: None,
-                    name: match name.0.as_slice() {
-                        [ObjectNamePart::Identifier(name)] => syntax::identifier(name)?.to_owned(),
-                        _ => return Err(unsupported()),
-                    },
-                },
-                _ => return Err(unsupported()),
-            });
-        }
-        if projection.is_empty() {
-            return Err(budget());
-        }
-        let groups = group_expressions
-            .iter_mut()
-            .map(|e| term(e, &mut parameters, depth, check))
-            .collect::<Result<Vec<_>>>()?;
-        let having = select
-            .having
-            .as_mut()
-            .map(|e| term(e, &mut parameters, depth, check))
-            .transpose()?;
-        let filter = select
-            .selection
-            .as_mut()
-            .map(|e| term(e, &mut parameters, depth, check))
-            .transpose()?;
-        let (order, limit, offset) = Self::suffix(
-            query.order_by,
-            query.limit_clause,
-            &mut parameters,
-            depth,
-            check,
-        )?;
-        let distinct = matches!(select.distinct, Some(Distinct::Distinct));
-        if select.distinct.is_some() && !distinct {
-            return Err(unsupported());
-        }
-        for body in bindings
-            .iter()
-            .map(|(_, b)| b)
-            .chain(derived.as_deref())
-            .chain(joins.iter().filter_map(|j| j.derived.as_deref()))
-        {
-            parameters.extend(body.parameters.iter().cloned());
-        }
-        Ok(Self {
-            explain: false,
-            analyze: false,
-            recursive,
-            bindings,
-            branches: vec![],
-            derived,
-            table,
-            alias,
-            projection,
-            filter,
-            order,
-            parameters,
-            limit,
-            offset,
-            distinct,
-            joins,
-            groups,
-            having,
-        })
+        lowering::query(query, depth, check)
     }
     fn suffix(
-        order_by: Option<OrderBy>,
-        limit_clause: Option<LimitClause>,
+        order_by: &mut Option<OrderBy>,
+        limit_clause: &mut Option<LimitClause>,
         parameters: &mut BTreeSet<String>,
         depth: usize,
         check: &dyn Fn() -> Result<()>,
@@ -1784,10 +957,10 @@ impl Program {
             if order_by.interpolate.is_some() {
                 return Err(unsupported());
             }
-            let OrderByKind::Expressions(expressions) = order_by.kind else {
+            let OrderByKind::Expressions(expressions) = &mut order_by.kind else {
                 return Err(unsupported());
             };
-            for mut e in expressions {
+            for e in expressions {
                 check()?;
                 if e.with_fill.is_some() {
                     return Err(unsupported());
@@ -1806,8 +979,8 @@ impl Program {
         let (mut limit, mut offset) = (None, None);
         if let Some(clause) = limit_clause {
             let LimitClause::LimitOffset {
-                limit: mut l,
-                offset: mut o,
+                limit: l,
+                offset: o,
                 limit_by,
             } = clause
             else {
@@ -2160,6 +1333,10 @@ impl Program {
         work: &mut Work<'_>,
     ) -> Result<QueryResult> {
         work.spend()?;
+        #[cfg(test)]
+        let native_marker = 0u8;
+        #[cfg(test)]
+        let _trace = stack_safety_tests::enter_query(&native_marker);
         compound::execute(self, sources, scope, parameters, work)
     }
     fn execute_select(
@@ -2584,3 +1761,9 @@ mod compiler_control_tests;
 
 #[cfg(test)]
 mod retrieval_order_tests;
+
+#[cfg(test)]
+mod expression_parser_tests;
+
+#[cfg(test)]
+mod stack_safety_tests;

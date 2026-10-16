@@ -160,22 +160,14 @@ impl State {
     }
 }
 pub(super) fn contains(term: &Term) -> bool {
-    match term {
-        Term::Aggregate(..) => true,
-        Term::Unary(_, t) | Term::NullTest(t, _) | Term::Cast(t, _) => contains(t),
-        Term::Binary(a, _, b) | Term::Like(a, b, _) => contains(a) || contains(b),
-        Term::Between(a, b, c, _) => contains(a) || contains(b) || contains(c),
-        Term::In(t, args, _) => contains(t) || args.iter().any(contains),
-        // Inner aggregates belong to the nested query, not this group.
-        Term::InSubquery(input, _, _) => contains(input),
-        Term::Call(_, args, _) => args.iter().any(contains),
-        Term::Case(base, args, other) => {
-            base.as_deref().is_some_and(contains)
-                || args.iter().any(|(a, b)| contains(a) || contains(b))
-                || other.as_deref().is_some_and(contains)
+    let mut pending = vec![term];
+    while let Some(term) = pending.pop() {
+        if matches!(term, Term::Aggregate(..)) {
+            return true;
         }
-        _ => false,
+        term_tree::children(term, &mut pending);
     }
+    false
 }
 // Go validates grouped correlations after prepareGroups has inspected every
 // expression. This is distinct from the allocation-only rewrite above.
@@ -186,80 +178,50 @@ fn validate_correlations(
     context: &subquery::Context<'_>,
     work: &mut Work<'_>,
 ) -> Result<()> {
-    work.spend()?;
-    if keys
-        .iter()
-        .any(|key| subquery::same_group_expression(node, key, context))
-    {
-        return Ok(());
-    }
-    if matches!(
-        node,
-        Term::Aggregate(..) | Term::InSubquery(..) | Term::ScalarSubquery(_) | Term::Exists(_)
-    ) {
-        let group = context.group.ok_or_else(binding)?;
-        return bind_with_aggregates(
+    let mut pending = vec![node];
+    while let Some(node) = pending.pop() {
+        work.spend()?;
+        if keys
+            .iter()
+            .any(|key| subquery::same_group_expression(node, key, context))
+        {
+            continue;
+        }
+        if matches!(
             node,
-            group.columns,
-            group.alias,
-            params,
-            true,
-            context,
-            work,
-        );
-    }
-    let mut visit = |node: &Term| validate_correlations(node, keys, params, context, work);
-    match node {
-        Term::Unary(_, node) | Term::NullTest(node, _) | Term::Cast(node, _) => visit(node)?,
-        Term::Binary(left, _, right) | Term::Like(left, right, _) => {
-            visit(left)?;
-            visit(right)?;
+            Term::Aggregate(..) | Term::InSubquery(..) | Term::ScalarSubquery(_) | Term::Exists(_)
+        ) {
+            let group = context.group.ok_or_else(binding)?;
+            bind_with_aggregates(
+                node,
+                group.columns,
+                group.alias,
+                params,
+                true,
+                context,
+                work,
+            )?;
+        } else {
+            term_tree::children(node, &mut pending);
         }
-        Term::Between(a, b, c, _) => {
-            visit(a)?;
-            visit(b)?;
-            visit(c)?;
-        }
-        Term::In(node, args, _) => {
-            visit(node)?;
-            for arg in args {
-                visit(arg)?;
-            }
-        }
-        Term::Call(_, args, _) => {
-            for arg in args {
-                visit(arg)?;
-            }
-        }
-        Term::Case(base, branches, fallback) => {
-            if let Some(base) = base {
-                visit(base)?;
-            }
-            for (condition, value) in branches {
-                visit(condition)?;
-                visit(value)?;
-            }
-            if let Some(fallback) = fallback {
-                visit(fallback)?;
-            }
-        }
-        _ => {}
     }
     Ok(())
 }
+
 struct Group {
     values: Vec<Scalar>,
     states: Vec<State>,
 }
-pub(super) struct Grouping {
+pub(super) struct Grouping<'a> {
     keys: Vec<Term>,
     specs: Vec<Spec>,
     having: Option<Term>,
     lookup: BTreeMap<String, usize>,
     order: Vec<Group>,
     columns: Vec<String>,
+    _allocation: Option<crate::resource::RetainedReservation<'a>>,
 }
-impl Grouping {
+impl<'a> Grouping<'a> {
     pub(super) fn new(
         keys: &[Term],
         outputs: &mut [Term],
@@ -268,17 +230,22 @@ impl Grouping {
         output_columns: &[String],
         params: &BTreeMap<String, Scalar>,
         context: &subquery::Context<'_>,
-        work: &mut Work<'_>,
-    ) -> Result<Self> {
+        work: &mut Work<'a>,
+    ) -> Result<Box<Self>> {
         work.safety_retain(keys.len() * 64 + outputs.len() * 64 + order.len() * 64 + 256)?;
-        let mut this = Self {
+        let allocation = work
+            .shared
+            .map(|budget| budget.reserve_retained(std::mem::size_of::<Self>()))
+            .transpose()?;
+        let mut this = Box::new(Self {
             keys: keys.to_vec(),
             specs: vec![],
             having: None,
             lookup: BTreeMap::new(),
             order: vec![],
             columns: (0..keys.len()).map(|i| format!("__key_{i}")).collect(),
-        };
+            _allocation: allocation,
+        });
         let rewritten_outputs = outputs
             .iter()
             .map(|term| this.rewrite(term, false, output_columns, params, context, work))
@@ -316,111 +283,63 @@ impl Grouping {
         context: &subquery::Context<'_>,
         work: &mut Work<'_>,
     ) -> Result<Term> {
-        work.consume(0)?;
-        if let Some(i) = self
-            .keys
-            .iter()
-            .position(|t| subquery::same_group_expression(t, node, context))
-        {
-            return Ok(Term::Column(ColumnRef::new(self.columns[i].clone())));
-        }
-        let recurse = |this: &mut Self, t: &Term, work: &mut Work<'_>| {
-            this.rewrite(t, allow_alias, aliases, params, context, work)
-        };
-        Ok(match node {
-            Term::Aggregate(name, args, distinct) => {
-                let input = input(name, args, *distinct)?;
-                if input.is_some_and(contains) {
-                    return Err(type_error());
+        term_tree::rewrite(node, |node| {
+            work.consume(0)?;
+            if let Some(i) = self
+                .keys
+                .iter()
+                .position(|t| subquery::same_group_expression(t, node, context))
+            {
+                return Ok(Some(Term::Column(ColumnRef::new(self.columns[i].clone()))));
+            }
+            match node {
+                Term::Aggregate(name, args, distinct) => {
+                    let input = input(name, args, *distinct)?;
+                    if input.is_some_and(contains) {
+                        return Err(type_error());
+                    }
+                    let column = format!("__agg_{}", self.specs.len());
+                    work.safety_retain(128)?;
+                    self.columns.push(column.clone());
+                    self.specs.push(Spec {
+                        name: name.clone(),
+                        input: input.cloned().map(Box::new),
+                        distinct: *distinct,
+                    });
+                    Ok(Some(Term::Column(ColumnRef::new(column))))
                 }
-                let column = format!("__agg_{}", self.specs.len());
-                work.safety_retain(128)?;
-                self.columns.push(column.clone());
-                self.specs.push(Spec {
-                    name: name.clone(),
-                    input: input.cloned().map(Box::new),
-                    distinct: *distinct,
-                });
-                Term::Column(ColumnRef::new(column))
-            }
-            // Internal compound ordinals are input columns, not literals.
-            // A matching group key was handled above; otherwise projecting
-            // one from an aggregate group is invalid even for empty input.
-            Term::Ordinal(_) | Term::Star(_) => return Err(binding()),
-            Term::Column(name) => {
-                let outer = context.group.is_some_and(|group| {
-                    matches!(
-                        subquery::resolve(group.columns, group.alias, name, context.scope.outer),
-                        Ok(subquery::Position::Outer(..))
-                    )
-                });
-                if outer
-                    || allow_alias
-                        && name.qualifier.is_empty()
-                        && aliases.iter().any(|a| equal_fold(a, &name.name))
-                {
-                    node.clone()
-                } else {
-                    return Err(binding());
+                Term::Ordinal(_) | Term::Star(_) => Err(binding()),
+                Term::Column(name) => {
+                    let outer = context.group.is_some_and(|group| {
+                        matches!(
+                            subquery::resolve(
+                                group.columns,
+                                group.alias,
+                                name,
+                                context.scope.outer
+                            ),
+                            Ok(subquery::Position::Outer(..))
+                        )
+                    });
+                    if outer
+                        || allow_alias
+                            && name.qualifier.is_empty()
+                            && aliases.iter().any(|a| equal_fold(a, &name.name))
+                    {
+                        Ok(None)
+                    } else {
+                        Err(binding())
+                    }
                 }
+                Term::Cast(_, kind) => {
+                    scalar::cast_kind(kind)?;
+                    Ok(None)
+                }
+                _ => Ok(None),
             }
-            Term::Unary(op, t) => Term::Unary(*op, Box::new(recurse(self, t, work)?)),
-            Term::Binary(a, op, b) => Term::Binary(
-                Box::new(recurse(self, a, work)?),
-                op.clone(),
-                Box::new(recurse(self, b, work)?),
-            ),
-            Term::Cast(t, kind) => {
-                scalar::cast_kind(kind)?;
-                Term::Cast(Box::new(recurse(self, t, work)?), kind.clone())
-            }
-            Term::Like(a, b, negated) => Term::Like(
-                Box::new(recurse(self, a, work)?),
-                Box::new(recurse(self, b, work)?),
-                *negated,
-            ),
-            Term::NullTest(t, n) => Term::NullTest(Box::new(recurse(self, t, work)?), *n),
-            Term::Between(a, b, c, n) => Term::Between(
-                Box::new(recurse(self, a, work)?),
-                Box::new(recurse(self, b, work)?),
-                Box::new(recurse(self, c, work)?),
-                *n,
-            ),
-            Term::In(t, args, n) => Term::In(
-                Box::new(recurse(self, t, work)?),
-                args.iter()
-                    .map(|a| recurse(self, a, work))
-                    .collect::<Result<Vec<_>>>()?,
-                *n,
-            ),
-            Term::ScalarSubquery(_) | Term::Exists(_) => node.clone(),
-            Term::InSubquery(input, query, negated) => Term::InSubquery(
-                Box::new(recurse(self, input, work)?),
-                query.clone(),
-                *negated,
-            ),
-            Term::Call(name, args, distinct) => Term::Call(
-                name.clone(),
-                args.iter()
-                    .map(|a| recurse(self, a, work))
-                    .collect::<Result<Vec<_>>>()?,
-                *distinct,
-            ),
-            Term::Case(base, args, other) => Term::Case(
-                base.as_ref()
-                    .map(|t| recurse(self, t, work).map(Box::new))
-                    .transpose()?,
-                args.iter()
-                    .map(|(a, b)| Ok((recurse(self, a, work)?, recurse(self, b, work)?)))
-                    .collect::<Result<Vec<_>>>()?,
-                other
-                    .as_ref()
-                    .map(|t| recurse(self, t, work).map(Box::new))
-                    .transpose()?,
-            ),
-            _ => node.clone(),
         })
     }
+
     fn create(&mut self, key: String, values: Vec<Scalar>, work: &mut Work<'_>) -> Result<usize> {
         // Scalar states use the original per-aggregate admission. Numeric
         // persistent growth is charged before addition, and the plan reserves
@@ -487,7 +406,7 @@ impl Grouping {
         &self.columns
     }
     pub(super) fn finish(
-        mut self,
+        mut self: Box<Self>,
         params: &BTreeMap<String, Scalar>,
         context: &subquery::Context<'_>,
         work: &mut Work<'_>,
@@ -496,7 +415,7 @@ impl Grouping {
         if self.order.is_empty() && self.keys.is_empty() {
             self.create(String::new(), vec![], work)?;
         }
-        for group in self.order {
+        for group in std::mem::take(&mut self.order) {
             work.temporary_scope(|work| {
                 work.spend()?;
                 let mut row = group.values;
