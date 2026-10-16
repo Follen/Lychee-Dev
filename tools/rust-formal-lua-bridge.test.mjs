@@ -2,9 +2,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {resolve, join} from 'node:path';
-import {readFileSync} from 'node:fs';
+import {readFileSync, mkdtempSync, mkdirSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
 import {fileURLToPath} from 'node:url';
-import {SUPPORT, selectTestExecutable, verifyTestOutput} from './rust-formal-lua-bridge.mjs';
+import {SUPPORT, bridgePaths, selectTestExecutable, verifyTestOutput} from './rust-formal-lua-bridge.mjs';
 import {BASE, ORACLE, MANIFEST_SHA256, RELEASE_FIELDS_SHA256, SUPPORT as ORACLE_SUPPORT, authenticate, hash} from '../tests/rust-parity/formal-lua-3.2.3/assertions.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const target = resolve('target');
@@ -70,4 +71,23 @@ test('all nine actual Rust bridge test definitions retain the checked scenario s
   const source=readFileSync(join(root,'crates/lycheedev-live/tests/formal_lua_bridge.rs'),'utf8');
   const names=[...source.matchAll(/^case!\((formal_lua_recovery_\w+),/gm)].map(match=>match[1]);
   assert.deepEqual(names.sort(),[...cases].sort());
+});
+
+
+test('bridge retry paths preserve defaults and require sealed records plus fresh contained output',()=>{
+  const repository=mkdtempSync(join(tmpdir(),'formal-bridge-paths-'));
+  try {
+    const defaults=bridgePaths([],repository);
+    assert.equal(defaults.runtimePath,join(repository,'.tmp/ci-formal-lua-runtime/build-report.json'));
+    assert.equal(defaults.candidatePath,join(repository,'.tmp/ci-cli-artifact/artifact.json'));
+    assert.equal(defaults.artifactDirectory,join(repository,'.tmp/ci-formal-lua-bridge-test'));
+    const selected=bridgePaths(['.tmp/retry-runtime/build-report.json','.tmp/retry-cli/artifact.json','.tmp/retry-bridge'],repository);
+    assert.equal(selected.artifactPath,join(repository,'.tmp/retry-bridge/artifact.json'));
+    mkdirSync(selected.artifactDirectory,{recursive:true});
+    assert.throws(()=>bridgePaths(['.tmp/retry-runtime/build-report.json','.tmp/retry-cli/artifact.json','.tmp/retry-bridge'],repository),/directory_exists/);
+    for(const args of [['one'],['one','two'],['one','two','three','four'],['lua.exe','artifact.json','new'],['build-report.json','cli.exe','new'],['../build-report.json','artifact.json','new'],['build-report.json','../artifact.json','new'],['build-report.json','artifact.json','..'],['--runtime','artifact.json','new']])assert.throws(()=>bridgePaths(args,repository));
+    const source=readFileSync(new URL('./rust-formal-lua-bridge.mjs',import.meta.url),'utf8');
+    assert.match(source,/verifyInterpreter\(runtimePath\)/);assert.match(source,/verifyCandidateArtifact\(root, candidatePath\)/);
+    assert.match(source,/verifyTestArtifact\(test, support, inputs, paths\)/);
+  } finally {rmSync(repository,{recursive:true,force:true});}
 });

@@ -65,7 +65,8 @@
 1. 在本机明确记录OS/架构、Rust1.99.0、Node24、Windows SDK/编译器和可用空间。Windows正式产品命令沿[当前workflow](.github/workflows/rust-parity.yml)的准备步骤：认证原版Emmy、受控`rust-cargo.mjs --owner local-fetch -- fetch --locked`，随后`--owner local-check --one-shot -- check --locked --offline --workspace --all-targets -j 1`。Linux只能报告其真实支持的子集，不假称Windows测试通过；不用裸Cargo绕现有owner/cache控制。
 2. 本机下一轮固定`0d0da9f056126835f6a5e0c372f8e78f3f630de8`，不随普通push自动换树。先受控all-target编译，再`node tools/rust-cargo.mjs --owner local-sql-stack-tests --one-shot -- test --locked --offline -p lycheedev-data --lib relational:: -j 1 -- --test-threads=1 --nocapture`，包括原三个崩溃和18项新回归；单线程用于定位，保持默认线程栈，不设置更大RUST_MIN_STACK。之后跑原joins/CTE/derived/recursive及资源集成组、完整adapter组与`node tests/rust-source-engine/fixed-emmy-oracle/controlled-run.mjs`。保原63/64、128/129边界、全部输入/分段trace、完整panic/退出码及实际回收，不能只改期望。
 3. TLS新组按[专用README](tests/rust-parity/tls-name-oracle/README.md)先运行一次真实remote组，再以其精确owner执行Go对照；Go1.27.1与私有测试CA准备沿同workflow，不安装系统信任。随后依workflow检查Core修复与其他失败组，不能跳过尚未跑的组来报全绿。
-4. Source真实短预算/暖态回收及完整Retail使用现有sealed CLI、package与native acceptance入口及固定Gethe输入；性能另用[专用优化候选配对入口](tests/rust-performance-paired/README.md)（Node42通过、10个Windows项未在云端运行；实际基准未跑），不拿dev单次结果冒充70%达标。报告commit、命令、通过/失败/跳过、证据位置与结果摘要回同PR；不操作游戏、不发布。最终四阶段审计仍未开始。
+4. 正式Lua重试不得删除旧失败输出。先沿`tools/rust-formal-lua.mjs build <新的runtime目录>`和`run <新目录/build-report.json> <已封存CLI目录/artifact.json>`实际执行220项；9桥可用`node tools/rust-formal-lua-bridge.mjs <新runtime目录/build-report.json> <已封存CLI目录/artifact.json> <新的bridge输出目录>`，三个路径须均在repo内且输出不存在，原身份验证完整保留。无参数仍为原CI固定路径。
+5. Source真实短预算/暖态回收及完整Retail使用现有sealed CLI、package与native acceptance入口及固定Gethe输入；性能另用[专用优化候选配对入口](tests/rust-performance-paired/README.md)（Node42通过、10个Windows项未在云端运行；实际基准未跑），不拿dev单次结果冒充70%达标。报告commit、命令、通过/失败/跳过、证据位置与结果摘要回同PR；不操作游戏、不发布。最终四阶段审计仍未开始。
 
 ## 11. 最后执行：需要实际配合的测试清单
 

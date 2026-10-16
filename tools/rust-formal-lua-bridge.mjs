@@ -12,10 +12,18 @@ import {BASE, ORACLE, MANIFEST_SHA256, RELEASE_FIELDS_SHA256, SUPPORT as ORACLE_
   processPassed, processReaped, regular, verifyMaterial, verifyOwnerEvidence} from '../tests/rust-parity/formal-lua-3.2.3/assertions.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const runtimePath = join(root, '.tmp/ci-formal-lua-runtime/build-report.json');
-const candidatePath = join(root, '.tmp/ci-cli-artifact/artifact.json');
-const artifactDirectory = join(root, '.tmp/ci-formal-lua-bridge-test');
-const artifactPath = join(artifactDirectory, 'artifact.json');
+// Optional paths select sealed records and a fresh output directory, never a
+// bare executable. All original identity/receipt validation remains mandatory.
+export function bridgePaths(argv = [], repository = root) {
+  assert(Array.isArray(argv) && (argv.length === 0 || argv.length === 3), 'formal-bridge.path_arguments');
+  const values = argv.length ? argv : ['.tmp/ci-formal-lua-runtime/build-report.json', '.tmp/ci-cli-artifact/artifact.json', '.tmp/ci-formal-lua-bridge-test'];
+  assert(values.every(value => typeof value === 'string' && value.length > 0 && value.length <= 4096 && !value.startsWith('--') && !value.includes('\0')), 'formal-bridge.path_arguments');
+  const [runtimePath, candidatePath, artifactDirectory] = values.map(value => contained(repository, resolve(repository, value)));
+  assert.equal(basename(runtimePath), 'build-report.json', 'formal-bridge.interpreter_record_required');
+  assert.equal(basename(candidatePath), 'artifact.json', 'formal-bridge.candidate_record_required');
+  assert(!existsSync(artifactDirectory), 'formal-bridge.artifact_directory_exists');
+  return {runtimePath, candidatePath, artifactDirectory, artifactPath: join(artifactDirectory, 'artifact.json')};
+}
 const args = Object.freeze(['test', '--locked', '--offline', '-p', 'lycheedev-live', '--test', 'formal_lua_bridge', '--no-run', '--message-format=json-render-diagnostics', '-j', '1']);
 const cases = Object.freeze(['normal', 'after_bind', 'after_prepare', 'after_commit', 'after_confirm', 'after_release', 'reload_bind', 'compile_error', 'cleanup_error'].map(value => `formal_lua_recovery_${value}`));
 export const SUPPORT = Object.freeze(['tools/rust-formal-lua-bridge.mjs', 'tools/rust-formal-lua.mjs', 'tools/rust-build.mjs', 'tools/rust-cargo.mjs', 'tools/rust-disk.mjs', 'tools/rust-owned-process.mjs', 'tools/rust-owned-process.ps1', ...ORACLE_SUPPORT]);
@@ -48,7 +56,7 @@ export function verifyTestOutput(stdout) {
   assert.match(text, /^test result: ok\. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in /m);
   return {passed: 9, failed: 0, ignored: 0, filtered: 0, cases: rows};
 }
-function buildTest(support, inputs, candidate) {
+function buildTest(support, inputs, candidate, {artifactDirectory, artifactPath}) {
   assert(!existsSync(artifactDirectory), 'formal-bridge.artifact_directory_exists');
   return runCargo(root, [...args], {owner: 'formal-lua-bridge-build', oneShot: true,
     onSuccess(invocation) {
@@ -72,7 +80,7 @@ function buildTest(support, inputs, candidate) {
     },
   });
 }
-function verifyTestArtifact(expected, support, inputs) {
+function verifyTestArtifact(expected, support, inputs, {artifactPath}) {
   const artifact = verifyArtifact(root, artifactPath);
   assert.deepEqual(artifact, expected, 'formal-bridge.test_artifact_changed');
   assert.equal(artifact.schema, 'lycheedev.rust-build-artifact.v1');
@@ -108,14 +116,16 @@ function collectFiles(directory, cap = 64 << 20) {
   }
   walk(directory); return files;
 }
-export function main() {
+export function main(argv = []) {
+  const paths = bridgePaths(argv);
+  const {runtimePath, candidatePath} = paths;
   assert.equal(process.platform, 'win32'); assert.equal(process.arch, 'x64');
   const support = supportIdentity(), inputs = authenticate(root);
   assert.equal(support[`${BASE}/release-fields.json`], RELEASE_FIELDS_SHA256, 'formal-bridge.release_fields_identity');
   const runtime = verifyInterpreter(runtimePath), candidate = verifyCandidateArtifact(root, candidatePath);
-  const test = buildTest(support, inputs, candidate);
-  const testIdentity = verifyTestArtifact(test, support, inputs);
-  const job = beginScratch(root, 'formal-lua-bridge-recovery', {command: ['node', 'tools/rust-formal-lua-bridge.mjs'],
+  const test = buildTest(support, inputs, candidate, paths);
+  const testIdentity = verifyTestArtifact(test, support, inputs, paths);
+  const job = beginScratch(root, 'formal-lua-bridge-recovery', {command: ['node', 'tools/rust-formal-lua-bridge.mjs', ...argv],
     inputs: {oracle: ORACLE, manifestSHA256: MANIFEST_SHA256, interpreterSHA256: runtime.report.executableSHA256,
       interpreterReportSHA256: runtime.reportSHA256, candidateArtifactSHA256: candidate.artifactSHA256,
       testArtifact: testIdentity, testBinarySHA256: test.binarySHA256, support},
@@ -132,7 +142,7 @@ export function main() {
     const checkIdentity = () => {
       assert.deepEqual(verifyInterpreter(runtimePath), runtime);
       assert.deepEqual(verifyCandidateArtifact(root, candidatePath), candidate);
-      assert.deepEqual(verifyTestArtifact(test, support, inputs), testIdentity);
+      assert.deepEqual(verifyTestArtifact(test, support, inputs, paths), testIdentity);
       verifyMaterial(fixture, inputs);
     };
     checkIdentity(); handlesReaped = false;
@@ -178,7 +188,6 @@ export function main() {
   return {passed: succeeded, report: join(job.evidence, 'report.json'), receipt: job.receipt, expectedCases: cases};
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  assert.equal(process.argv.length, 2, 'usage: node tools/rust-formal-lua-bridge.mjs (fixed CI artifact paths only)');
-  try { console.log(JSON.stringify(main(), null, 2)); }
+  try { console.log(JSON.stringify(main(process.argv.slice(2)), null, 2)); }
   catch (error) { console.error(JSON.stringify({error: error.message, bridgeEvidence: error.bridgeEvidence, scratch: error.scratch})); process.exitCode = 1; }
 }
