@@ -23,25 +23,59 @@ impl Provider<'_> {
             .count()
     }
 }
+struct ProviderCursor<'a> {
+    provider: &'a Provider<'a>,
+    next: usize,
+    scratch: Vec<Scalar>,
+}
+impl RowCursor for ProviderCursor<'_> {
+    fn advance(&mut self) -> Result<bool> {
+        self.scratch.fill(Scalar::Null);
+        self.scratch.clear();
+        let Some(row) = self.provider.source.rows.get(self.next) else {
+            return Ok(false);
+        };
+        self.scratch.clone_from(row);
+        if let Some(cancel) = &self.provider.cancel {
+            cancel.store(true, AtomicOrdering::Release);
+        }
+        self.next += 1;
+        self.provider
+            .trace
+            .borrow_mut()
+            .push(format!("{}.row", self.provider.name));
+        Ok(true)
+    }
+    fn row(&self) -> &[Scalar] {
+        &self.scratch
+    }
+}
+impl Drop for ProviderCursor<'_> {
+    fn drop(&mut self) {
+        self.scratch.fill(Scalar::Null);
+    }
+}
 impl RowProvider for Provider<'_> {
-    fn scan(&self, emit: &mut RowYield<'_>) -> Result<()> {
+    fn cursor(&self, _: Option<&[usize]>) -> Result<Box<dyn RowCursor + '_>> {
         self.trace.borrow_mut().push(format!("{}.scan", self.name));
         if self.fail {
             return Err(fault("fixture.tail_provider", 5, "tail provider failed"));
         }
-        let mut scratch = vec![];
-        for row in &self.source.rows {
-            scratch.clone_from(row);
-            if let Some(cancel) = &self.cancel {
-                cancel.store(true, AtomicOrdering::Release);
-            }
-            self.trace.borrow_mut().push(format!("{}.row", self.name));
-            emit(&scratch)?;
-            scratch.fill(Scalar::Null);
+        Ok(Box::new(ProviderCursor {
+            provider: self,
+            next: 0,
+            scratch: vec![],
+        }))
+    }
+    fn scan(&self, emit: &mut RowYield<'_>) -> Result<()> {
+        let mut cursor = self.cursor(None)?;
+        while cursor.advance()? {
+            emit(cursor.row())?;
         }
         Ok(())
     }
 }
+
 fn source(columns: &[&str], rows: Vec<Vec<Scalar>>) -> Source {
     Source {
         columns: columns.iter().map(|s| (*s).into()).collect(),

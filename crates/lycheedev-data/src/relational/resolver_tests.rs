@@ -10,16 +10,21 @@ struct Fixture {
     events: Events,
 }
 impl RowProvider for Fixture {
-    fn scan(&self, emit: &mut RowYield<'_>) -> Result<()> {
+    fn cursor(&self, _: Option<&[usize]>) -> Result<Box<dyn RowCursor + '_>> {
         self.events
             .borrow_mut()
             .push(format!("scan:{}", self.label));
-        for row in &self.rows {
-            emit(row)?;
+        Ok(Box::new(provider::SliceCursor::new(&self.rows)))
+    }
+    fn scan(&self, emit: &mut RowYield<'_>) -> Result<()> {
+        let mut cursor = self.cursor(None)?;
+        while cursor.advance()? {
+            emit(cursor.row())?;
         }
         Ok(())
     }
 }
+
 struct Resolver {
     roots: BTreeMap<(String, String), Fixture>,
     events: Events,

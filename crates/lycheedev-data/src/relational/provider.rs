@@ -8,7 +8,51 @@ pub(crate) enum EqualityOutcome {
     Declined,
     Handled,
 }
+/// A single opened producer. The current row and all decoding leases remain
+/// owned here until advance or drop. Never recreate a scan to resume it.
+pub(crate) trait RowCursor {
+    fn advance(&mut self) -> Result<bool>;
+    fn row(&self) -> &[Scalar];
+}
+pub(crate) struct SliceCursor<'a> {
+    rows: &'a [Vec<Scalar>],
+    next: usize,
+    current: Option<usize>,
+}
+impl<'a> SliceCursor<'a> {
+    pub(crate) fn new(rows: &'a [Vec<Scalar>]) -> Self {
+        Self {
+            rows,
+            next: 0,
+            current: None,
+        }
+    }
+}
+impl RowCursor for SliceCursor<'_> {
+    fn advance(&mut self) -> Result<bool> {
+        self.current = None;
+        if self.next == self.rows.len() {
+            return Ok(false);
+        }
+        self.current = Some(self.next);
+        self.next += 1;
+        Ok(true)
+    }
+    fn row(&self) -> &[Scalar] {
+        self.current.map_or(&[], |i| self.rows[i].as_slice())
+    }
+}
+pub(crate) enum EqualityCursor<'a> {
+    Declined,
+    Empty,
+    Rows(Box<dyn RowCursor + 'a>),
+}
 pub(crate) trait RowProvider {
+    fn cursor(&self, selected: Option<&[usize]>) -> Result<Box<dyn RowCursor + '_>>;
+    fn equal_cursor(&self, _column: &str, _value: &Scalar) -> Result<EqualityCursor<'_>> {
+        Ok(EqualityCursor::Declined)
+    }
+
     fn scan(&self, emit: &mut RowYield<'_>) -> Result<()>;
     fn scan_selected(&self, _columns: &[usize], emit: &mut RowYield<'_>) -> Result<()> {
         self.scan(emit)
@@ -26,6 +70,10 @@ pub(crate) trait RowProvider {
     }
 }
 impl RowProvider for Source {
+    fn cursor(&self, _: Option<&[usize]>) -> Result<Box<dyn RowCursor + '_>> {
+        Ok(Box::new(SliceCursor::new(&self.rows)))
+    }
+
     fn scan(&self, emit: &mut RowYield<'_>) -> Result<()> {
         for row in &self.rows {
             emit(row)?;

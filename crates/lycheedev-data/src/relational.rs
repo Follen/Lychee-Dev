@@ -18,6 +18,10 @@ mod ast_owner;
 mod binding;
 mod compound;
 mod evaluation;
+mod execution;
+mod execution_query;
+mod execution_scan;
+mod execution_select;
 mod explain;
 mod expression_parser;
 pub use explain::{ExecutionMeasurement, Explanation, MeasuredTable, PlanStep, ScanMeasurement};
@@ -34,7 +38,9 @@ pub(crate) use identifiers::SourceTableUse;
 use identifiers::{ColumnOwners, ColumnRef, RelationName};
 mod joins;
 mod provider;
-pub(crate) use provider::{EqualityOutcome, PreparedSource, RootResolver, RowProvider, RowYield};
+pub(crate) use provider::{
+    EqualityCursor, EqualityOutcome, PreparedSource, RootResolver, RowCursor, RowProvider, RowYield,
+};
 mod recursive;
 mod results;
 mod scalar;
@@ -46,6 +52,7 @@ mod task_stack;
 mod term_owner;
 mod term_tree;
 mod topk;
+mod tree_debug;
 mod tree_equality;
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(untagged)]
@@ -237,7 +244,6 @@ fn rational_arithmetic(a: &Scalar, op: &BinaryOperator, b: &Scalar) -> Result<Sc
         .ok_or_else(numeric)?;
     Ok(Scalar::Float(f))
 }
-#[derive(Debug)]
 enum Term {
     Value(Scalar),
     Number(String),
@@ -300,6 +306,7 @@ fn check_arity(name: &str, count: usize) -> Result<()> {
     };
     if valid { Ok(()) } else { Err(type_error()) }
 }
+#[cfg(test)]
 fn bind(
     term: &Term,
     columns: &[String],
@@ -310,6 +317,7 @@ fn bind(
 ) -> Result<()> {
     bind_with_aggregates(term, columns, alias, params, true, context, work)
 }
+#[cfg(test)]
 use binding::bind as bind_with_aggregates;
 
 fn column(columns: &[String], alias: ColumnOwners<'_>, name: &ColumnRef) -> Result<usize> {
@@ -645,8 +653,9 @@ fn eval(
 ) -> Result<Scalar> {
     let sources = BTreeMap::new();
     let context = subquery::Context::new(&sources, None);
-    eval_scoped(t, row, columns, alias, params, &context, work)
+    evaluation::constant(t, row, columns, alias, params, &context, work)
 }
+#[cfg(test)]
 use evaluation::eval as eval_scoped;
 
 pub struct Source {
@@ -792,7 +801,6 @@ struct Projection {
     name: String,
 }
 type QuerySuffix = (Vec<(Term, bool, Option<bool>)>, Option<Term>, Option<Term>);
-#[derive(Debug)]
 pub struct Program {
     explain: bool,
     analyze: bool,
@@ -1332,408 +1340,7 @@ impl Program {
         parameters: &BTreeMap<String, Scalar>,
         work: &mut Work<'_>,
     ) -> Result<QueryResult> {
-        work.spend()?;
-        #[cfg(test)]
-        let native_marker = 0u8;
-        #[cfg(test)]
-        let _trace = stack_safety_tests::enter_query(&native_marker);
-        compound::execute(self, sources, scope, parameters, work)
-    }
-    fn execute_select(
-        &self,
-        sources: &BTreeMap<String, &Source>,
-        scope: subquery::Scope<'_>,
-        parameters: &BTreeMap<String, Scalar>,
-        work: &mut Work<'_>,
-    ) -> Result<QueryResult> {
-        self.execute_select_mode(
-            sources,
-            scope,
-            parameters,
-            work,
-            ProjectionMode::NamedSource,
-        )
-    }
-    fn execute_select_mode(
-        &self,
-        sources: &BTreeMap<String, &Source>,
-        scope: subquery::Scope<'_>,
-        parameters: &BTreeMap<String, Scalar>,
-        work: &mut Work<'_>,
-        projection_mode: ProjectionMode,
-    ) -> Result<QueryResult> {
-        let complete = std::cell::Cell::new(true);
-        let mut context = subquery::Context {
-            scope: if projection_mode == ProjectionMode::NamedSource {
-                scope.select(sources)
-            } else {
-                scope
-            },
-            group: None,
-            complete: Some(&complete),
-        };
-        // Acquire each input exactly once, in relation order. The local vector
-        // owns derived results until the complete synchronous query returns.
-        let prepared_inputs = if projection_mode == ProjectionMode::NamedSource {
-            Some(joins::inputs(self, sources, scope, parameters, work)?)
-        } else {
-            None
-        };
-        let base_source = if let Some(inputs) = &prepared_inputs {
-            inputs[0].source()
-        } else {
-            compound::source(sources, &self.table, work)?
-        };
-        let joined = if self.joins.is_empty() {
-            None
-        } else {
-            Some(joins::prepare_scoped(
-                prepared_inputs.as_deref().ok_or_else(binding)?,
-                &self.alias,
-                &self.joins,
-                parameters,
-                work,
-                self,
-                &context,
-            )?)
-        };
-        let ordinal_owners: Vec<String> = if projection_mode == ProjectionMode::CompoundOrdinals {
-            let count = base_source.columns.len();
-            if let Some(shared) = work.shared {
-                let bytes = count
-                    .checked_mul(std::mem::size_of::<String>() + 20)
-                    .ok_or_else(budget)?;
-                shared
-                    .safety_only()
-                    .charge(crate::resource::Cost::retained(bytes))?;
-            }
-            (0..count).map(|index| index.to_string()).collect()
-        } else {
-            Vec::new()
-        };
-        let alias = if let Some(joined) = &joined {
-            ColumnOwners::PerColumn(&joined.owners)
-        } else if projection_mode == ProjectionMode::CompoundOrdinals {
-            ColumnOwners::PerColumn(&ordinal_owners)
-        } else {
-            ColumnOwners::Single(&self.alias)
-        };
-        let source = joined.as_ref().map(|p| &p.source).unwrap_or(base_source);
-        if projection_mode == ProjectionMode::NamedSource {
-            context.scope.fields = subquery::Fields {
-                columns: &source.columns,
-                alias,
-            };
-        }
-        let mut ordering_terms = self.order.clone();
-        let mut columns = vec![];
-        let mut outputs = vec![];
-        for p in &self.projection {
-            if let Some(t) = &p.expr
-                && !matches!(t, Term::Star(_))
-            {
-                bind(t, &source.columns, alias, parameters, &context, work)?;
-                outputs.push(t.clone());
-                columns.push(if p.name.is_empty() {
-                    if let Term::Column(name) = t {
-                        subquery::display_column(&source.columns, alias, name, context.scope.outer)?
-                            .unwrap_or_else(|| format!("column_{}", columns.len() + 1))
-                    } else {
-                        format!("column_{}", columns.len() + 1)
-                    }
-                } else {
-                    p.name.clone()
-                });
-            } else {
-                let requested = if let Some(Term::Star(qualifier)) = &p.expr {
-                    if !p.name.is_empty() {
-                        return Err(binding());
-                    }
-                    qualifier
-                } else {
-                    &p.name
-                };
-                let mut selected = 0usize;
-                for (ordinal, column) in source.columns.iter().enumerate() {
-                    if !requested.is_empty() {
-                        let qualifier = alias.owner(ordinal);
-                        if !equal_fold(qualifier, requested) {
-                            continue;
-                        }
-                    }
-                    selected += 1;
-                    outputs.push(if projection_mode == ProjectionMode::CompoundOrdinals {
-                        // Go's synthetic UNION projection is a bound column,
-                        // not a user wildcard, and pays one bind node.
-                        work.spend()?;
-                        Term::Ordinal(ordinal)
-                    } else {
-                        Term::Column(ColumnRef::qualified(alias.owner(ordinal), column.clone()))
-                    });
-                    columns.push(column.clone());
-                }
-                if selected == 0 {
-                    return Err(binding());
-                }
-            }
-        }
-        if let Some(t) = &self.filter {
-            bind_with_aggregates(t, &source.columns, alias, parameters, false, &context, work)?;
-        }
-        if let Some(t) = &self.having {
-            bind(t, &source.columns, alias, parameters, &context, work)?;
-        }
-        for key in &self.groups {
-            bind_with_aggregates(
-                key,
-                &source.columns,
-                alias,
-                parameters,
-                false,
-                &context,
-                work,
-            )?;
-        }
-        for (t, _, _) in &mut ordering_terms {
-            // Go resolves a bare ORDER BY output name before binding against
-            // source fields. Quoted dots remain part of that single name.
-            let output = if let Term::Column(name) = &*t
-                && name.qualifier.is_empty()
-            {
-                let mut matches = columns
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, candidate)| equal_fold(candidate, &name.name));
-                let found = matches.next().map(|(index, _)| index);
-                if matches.next().is_some() {
-                    return Err(binding());
-                }
-                found
-            } else {
-                None
-            };
-            if let Some(index) = output {
-                *t = outputs[index].clone();
-            }
-            bind(t, &source.columns, alias, parameters, &context, work)?;
-        }
-        let count = |term: &Option<Term>, default: usize, work: &mut Work<'_>| -> Result<usize> {
-            let Some(t) = term else {
-                return Ok(default);
-            };
-            work.temporary_scope(|work| {
-                let v = eval_scoped(
-                    t,
-                    &[],
-                    &[],
-                    ColumnOwners::Single(""),
-                    parameters,
-                    &context,
-                    work,
-                )?;
-                let n = int(&v).filter(|n| *n >= 0).ok_or_else(type_error)?;
-                usize::try_from(n).map_err(|_| budget())
-            })
-        };
-        count(&self.limit, usize::MAX, work)?;
-        count(&self.offset, 0, work)?;
-        let is_grouped = !self.groups.is_empty()
-            || self.having.is_some()
-            || outputs.iter().any(aggregate::contains)
-            || ordering_terms
-                .iter()
-                .any(|(term, _, _)| aggregate::contains(term));
-        let group_mapping = if is_grouped {
-            Some(subquery::group_mapping(
-                &self.groups,
-                &source.columns,
-                alias,
-                work,
-            )?)
-        } else {
-            None
-        };
-        let group_context = subquery::Context {
-            group: group_mapping
-                .as_deref()
-                .map(|mapping| subquery::Correlation {
-                    columns: &source.columns,
-                    alias,
-                    mapping,
-                }),
-            ..context
-        };
-        let mut grouping = if is_grouped {
-            Some(aggregate::Grouping::new(
-                &self.groups,
-                &mut outputs,
-                &mut ordering_terms,
-                self.having.as_ref(),
-                &columns,
-                parameters,
-                &group_context,
-                work,
-            )?)
-        } else {
-            None
-        };
-        if work.planning {
-            return Ok(QueryResult {
-                plan: None,
-                columns,
-                rows: vec![],
-                complete: source.complete && complete.get(),
-            });
-        }
-        let selected = if joined.is_none()
-            && provider::find(source, work).is_some()
-            && provider::can_project(self, &source.columns, alias)
-        {
-            Some(provider::selected(self, &source.columns, alias, work)?)
-        } else {
-            None
-        };
-        let mut bounded =
-            if !is_grouped && !self.distinct && self.limit.is_some() && self.order.len() <= 1 {
-                let limit = count(&self.limit, 0, work)?;
-                let offset = count(&self.offset, 0, work)?;
-                topk::TopRows::new(self, false, limit, offset)
-            } else {
-                None
-            };
-        // Rust owns scalar vectors and copied strings; these temporary owners
-        // do not add Go logical result-retention or work charges.
-        work.safety_retain(
-            (outputs.len() + ordering_terms.len())
-                .checked_mul(std::mem::size_of::<Scalar>())
-                .ok_or_else(budget)?,
-        )?;
-        let group_columns = if let Some(grouping) = &grouping {
-            work.safety_retain(
-                grouping
-                    .columns()
-                    .iter()
-                    .map(|name| name.len() + std::mem::size_of::<String>())
-                    .sum(),
-            )?;
-            Some(grouping.columns().to_vec())
-        } else {
-            None
-        };
-        let output_columns = group_columns.as_deref().unwrap_or(&source.columns);
-        let output_alias = if is_grouped {
-            ColumnOwners::Single("")
-        } else {
-            alias
-        };
-        let output_context = if is_grouped { &group_context } else { &context };
-        let mut result: Vec<results::Output> = vec![];
-        let mut project_row = |row: &[Scalar], work: &mut Work<'_>| -> Result<()> {
-            let projected = outputs
-                .iter()
-                .map(|term| {
-                    eval_scoped(
-                        term,
-                        row,
-                        output_columns,
-                        output_alias,
-                        parameters,
-                        output_context,
-                        work,
-                    )
-                })
-                .collect::<Result<Vec<_>>>()?;
-            let ordering = ordering_terms
-                .iter()
-                .map(|(term, _, _)| {
-                    eval_scoped(
-                        term,
-                        row,
-                        output_columns,
-                        output_alias,
-                        parameters,
-                        output_context,
-                        work,
-                    )
-                })
-                .collect::<Result<Vec<_>>>()?;
-            let output = (projected, ordering);
-            if let Some(bounded) = &mut bounded {
-                bounded.add(output, work)?;
-            } else {
-                work.retain(results::output_cost(&output, 64)?)?;
-                result.push(output);
-            }
-            Ok(())
-        };
-        {
-            let mut consume = |row: &[Scalar], work: &mut Work<'_>| -> Result<()> {
-                work.temporary_scope(|work| {
-                    work.spend()?;
-                    if row.len() != source.columns.len() {
-                        return Err(binding());
-                    }
-                    if let Some(term) = &self.filter
-                        && truth(&eval_scoped(
-                            term,
-                            row,
-                            &source.columns,
-                            alias,
-                            parameters,
-                            &context,
-                            work,
-                        )?)? != Some(true)
-                    {
-                        return Ok(());
-                    }
-                    if let Some(grouping) = &mut grouping {
-                        grouping.add(row, &source.columns, alias, parameters, &context, work)
-                    } else {
-                        project_row(row, work)
-                    }
-                })
-            };
-            if let Some(plan) = &joined {
-                plan.visit(parameters, &context, work, &mut consume)?;
-            } else {
-                selection::visit(
-                    source,
-                    selected.as_deref(),
-                    self.filter.as_ref(),
-                    alias,
-                    parameters,
-                    work,
-                    &mut |row, work| {
-                        if row.len() != source.columns.len() {
-                            return Err(binding());
-                        }
-                        // executeSelect always visits joinRow(0), even without
-                        // joins. A compound tail invokes executeRows directly.
-                        if projection_mode == ProjectionMode::NamedSource {
-                            work.spend()?;
-                        }
-                        consume(row, work)
-                    },
-                )?;
-            }
-        }
-        if let Some(grouping) = grouping {
-            grouping.finish(parameters, &group_context, work, &mut project_row)?;
-        }
-        if let Some(bounded) = bounded {
-            result = bounded.finish(work)?;
-        }
-        // Go evaluates pagination again after the complete input, then
-        // finishes DISTINCT/order/slice. Do not reuse an earlier result or
-        // move this expression evaluation ahead of a provider's late failure.
-        let limit = count(&self.limit, usize::MAX, work)?;
-        let offset = count(&self.offset, 0, work)?;
-        Ok(QueryResult {
-            plan: None,
-            columns,
-            rows: results::finish(result, self.distinct, &ordering_terms, limit, offset, work)?,
-            complete: source.complete && complete.get(),
-        })
+        execution::execute(self, sources, scope, parameters, work)
     }
 }
 

@@ -55,57 +55,102 @@ impl Fixture {
             .count()
     }
     fn scan_rows(&self, selected: Option<&[usize]>, emit: &mut RowYield<'_>) -> Result<()> {
-        self.event("scan");
-        let mut scratch = vec![];
-        for (at, row) in self.rows.iter().enumerate() {
-            if self.scan_fail_after == Some(at) {
-                return Err(fault("fixture.scan_failed", 5, "scan failed"));
-            }
-            scratch.clone_from(row);
-            if let Some(selected) = selected {
-                // Match ScanSelected's validation contract before null-filling
-                // unused positions; never make projection hide bad scalars.
-                row_cost(row)?;
-                if row
-                    .iter()
-                    .any(|value| matches!(value, Scalar::String(text) if text.len() > 1 << 20))
-                {
-                    return Err(budget());
-                }
-                for (column, value) in scratch.iter_mut().enumerate() {
-                    if !selected.contains(&column) {
-                        *value = Scalar::Null;
-                    }
-                }
-            }
-            self.event("row");
-            emit(&scratch)?;
-            // Invalidate the reused row immediately after its callback.
-            scratch.fill(Scalar::Null);
-        }
-        if self.scan_fail_after == Some(self.rows.len()) {
-            return Err(fault("fixture.scan_failed", 5, "scan failed"));
+        let mut cursor = self.cursor(selected)?;
+        while cursor.advance()? {
+            emit(cursor.row())?;
         }
         Ok(())
     }
 }
+enum FixtureMode {
+    Scan(Option<Vec<usize>>),
+    Equal(Scalar),
+}
+struct FixtureCursor<'a> {
+    fixture: &'a Fixture,
+    mode: FixtureMode,
+    next: usize,
+    scratch: Vec<Scalar>,
+}
+impl RowCursor for FixtureCursor<'_> {
+    fn advance(&mut self) -> Result<bool> {
+        // A suspended consumer keeps the row until its next advance. Reuse
+        // and poison the same scratch allocation across resumptions.
+        self.scratch.fill(Scalar::Null);
+        self.scratch.clear();
+        match &self.mode {
+            FixtureMode::Scan(selected) => {
+                if self.fixture.scan_fail_after == Some(self.next) {
+                    return Err(fault("fixture.scan_failed", 5, "scan failed"));
+                }
+                let Some(row) = self.fixture.rows.get(self.next) else {
+                    return Ok(false);
+                };
+                self.scratch.clone_from(row);
+                if let Some(selected) = selected {
+                    // Validate every scalar before null-filling unused fields.
+                    row_cost(row)?;
+                    if row
+                        .iter()
+                        .any(|value| matches!(value, Scalar::String(text) if text.len() > 1 << 20))
+                    {
+                        return Err(budget());
+                    }
+                    for (column, value) in self.scratch.iter_mut().enumerate() {
+                        if !selected.contains(&column) {
+                            *value = Scalar::Null;
+                        }
+                    }
+                }
+                self.next += 1;
+                self.fixture.event("row");
+                Ok(true)
+            }
+            FixtureMode::Equal(value) => {
+                let rows = self
+                    .fixture
+                    .lookup_rows
+                    .as_ref()
+                    .unwrap_or(&self.fixture.rows);
+                while let Some(row) = rows.get(self.next) {
+                    self.next += 1;
+                    if self.fixture.lookup_all
+                        || (value != &Scalar::Null
+                            && row[0] != Scalar::Null
+                            && compare(&row[0], value)? == Ordering::Equal)
+                    {
+                        self.scratch.clone_from(row);
+                        self.fixture.event("lookup_row");
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
+        }
+    }
+    fn row(&self) -> &[Scalar] {
+        &self.scratch
+    }
+}
+impl Drop for FixtureCursor<'_> {
+    fn drop(&mut self) {
+        self.scratch.fill(Scalar::Null);
+    }
+}
 impl RowProvider for Fixture {
-    fn scan(&self, emit: &mut RowYield<'_>) -> Result<()> {
-        self.scan_rows(None, emit)
+    fn cursor(&self, selected: Option<&[usize]>) -> Result<Box<dyn RowCursor + '_>> {
+        if let Some(columns) = selected {
+            self.selections.borrow_mut().push(columns.to_vec());
+        }
+        self.event("scan");
+        Ok(Box::new(FixtureCursor {
+            fixture: self,
+            mode: FixtureMode::Scan(selected.filter(|_| self.projected).map(<[usize]>::to_vec)),
+            next: 0,
+            scratch: vec![],
+        }))
     }
-    fn scan_selected(&self, columns: &[usize], emit: &mut RowYield<'_>) -> Result<()> {
-        self.selections.borrow_mut().push(columns.to_vec());
-        self.scan_rows(self.projected.then_some(columns), emit)
-    }
-    fn has_equal(&self) -> bool {
-        self.capable
-    }
-    fn equal(
-        &self,
-        column: &str,
-        value: &Scalar,
-        emit: &mut RowYield<'_>,
-    ) -> Result<EqualityOutcome> {
+    fn equal_cursor(&self, column: &str, value: &Scalar) -> Result<EqualityCursor<'_>> {
         self.event("equal");
         self.lookups.borrow_mut().push(value.clone());
         let call = self.lookups.borrow().len();
@@ -118,24 +163,43 @@ impl RowProvider for Fixture {
             cancelled.store(true, AtomicOrdering::Release);
         }
         if self.decline_on == Some(call) || !column.eq_ignore_ascii_case("ID") {
-            return Ok(EqualityOutcome::Declined);
+            return Ok(EqualityCursor::Declined);
         }
-        let mut scratch = vec![];
-        for row in self.lookup_rows.as_ref().unwrap_or(&self.rows) {
-            if self.lookup_all
-                || (value != &Scalar::Null
-                    && row[0] != Scalar::Null
-                    && compare(&row[0], value)? == Ordering::Equal)
-            {
-                scratch.clone_from(row);
-                self.event("lookup_row");
-                emit(&scratch)?;
-                scratch.fill(Scalar::Null);
+        Ok(EqualityCursor::Rows(Box::new(FixtureCursor {
+            fixture: self,
+            mode: FixtureMode::Equal(value.clone()),
+            next: 0,
+            scratch: vec![],
+        })))
+    }
+    fn scan(&self, emit: &mut RowYield<'_>) -> Result<()> {
+        self.scan_rows(None, emit)
+    }
+    fn scan_selected(&self, columns: &[usize], emit: &mut RowYield<'_>) -> Result<()> {
+        self.scan_rows(Some(columns), emit)
+    }
+    fn has_equal(&self) -> bool {
+        self.capable
+    }
+    fn equal(
+        &self,
+        column: &str,
+        value: &Scalar,
+        emit: &mut RowYield<'_>,
+    ) -> Result<EqualityOutcome> {
+        match self.equal_cursor(column, value)? {
+            EqualityCursor::Declined => Ok(EqualityOutcome::Declined),
+            EqualityCursor::Empty => Ok(EqualityOutcome::Handled),
+            EqualityCursor::Rows(mut cursor) => {
+                while cursor.advance()? {
+                    emit(cursor.row())?;
+                }
+                Ok(EqualityOutcome::Handled)
             }
         }
-        Ok(EqualityOutcome::Handled)
     }
 }
+
 fn schema(names: &[&str]) -> Source {
     Source {
         columns: names.iter().map(|name| (*name).into()).collect(),
@@ -206,6 +270,59 @@ fn visit_selection(
         emit,
     )?;
     Ok((work.bytes, work.left))
+}
+
+#[test]
+fn fixture_cursor_pauses_without_replay_or_eager_late_error() {
+    let trace = Trace::default();
+    let mut provider = Fixture::new("t", &trace, vec![row(1, "first"), row(2, "second")]);
+    provider.projected = true;
+    provider.scan_fail_after = Some(2);
+    let mut cursor = provider.cursor(Some(&[0])).unwrap();
+    assert_eq!(*trace.borrow(), ["t.scan"]);
+    assert_eq!(*provider.selections.borrow(), [vec![0]]);
+    assert!(cursor.row().is_empty());
+    assert!(cursor.advance().unwrap());
+    let first = cursor.row().to_vec();
+    let scratch = cursor.row().as_ptr();
+    assert_eq!(first, [Scalar::Int(1), Scalar::Null]);
+    // Reading or retaining the current row does not advance the producer.
+    assert_eq!(cursor.row(), first);
+    assert_eq!(*trace.borrow(), ["t.scan", "t.row"]);
+    assert!(cursor.advance().unwrap());
+    assert_eq!(cursor.row(), [Scalar::Int(2), Scalar::Null]);
+    assert_eq!(cursor.row().as_ptr(), scratch);
+    assert_eq!(first, [Scalar::Int(1), Scalar::Null]);
+    assert_eq!(*trace.borrow(), ["t.scan", "t.row", "t.row"]);
+    assert_eq!(cursor.advance().unwrap_err().code, "fixture.scan_failed");
+    assert!(cursor.row().is_empty());
+    assert_eq!(provider.scans(), 1);
+}
+
+#[test]
+fn fixture_equality_cursor_keeps_its_position_and_single_lookup() {
+    let trace = Trace::default();
+    let provider = Fixture::new(
+        "t",
+        &trace,
+        vec![row(1, "first"), row(2, "skip"), row(1, "last")],
+    );
+    let EqualityCursor::Rows(mut cursor) = provider.equal_cursor("ID", &Scalar::Int(1)).unwrap()
+    else {
+        panic!("fixture must handle the equality cursor");
+    };
+    assert_eq!(*trace.borrow(), ["t.equal"]);
+    assert!(cursor.advance().unwrap());
+    let first = cursor.row().to_vec();
+    assert_eq!(first, row(1, "first"));
+    assert_eq!(*trace.borrow(), ["t.equal", "t.lookup_row"]);
+    assert!(cursor.advance().unwrap());
+    assert_eq!(cursor.row(), row(1, "last"));
+    assert_eq!(first, row(1, "first"));
+    assert!(!cursor.advance().unwrap());
+    assert!(cursor.row().is_empty());
+    assert_eq!(*provider.lookups.borrow(), [Scalar::Int(1)]);
+    assert_eq!(*trace.borrow(), ["t.equal", "t.lookup_row", "t.lookup_row"]);
 }
 
 #[test]
@@ -984,28 +1101,9 @@ fn owned_join_right_rows_pay_the_same_full_copy_cost_as_provider_rows() {
             scans: Vec::new(),
         };
         let parameters = BTreeMap::new();
-        let context = subquery::Context::new(&sources, None);
-        let inputs = joins::inputs(
-            &program,
-            &sources,
-            subquery::Scope::root(),
-            &parameters,
-            &mut work,
-        )
-        .unwrap();
-        let plan = joins::prepare_scoped(
-            &inputs,
-            &program.alias,
-            &program.joins,
-            &parameters,
-            &mut work,
-            &program,
-            &context,
-        )
-        .unwrap();
-        plan.visit(&parameters, &context, &mut work, &mut |_, _| Ok(()))
+        program
+            .execute_scoped(&sources, &parameters, &mut work)
             .unwrap();
-        drop(plan);
         initial - work.bytes
     }
     let mut right = schema(&["ID", "Name"]);
@@ -1349,4 +1447,71 @@ fn execution_binding_work_exhaustion_precedes_the_first_right_scan() {
     .unwrap_err();
     assert_eq!(error.code, "relational.resource_limit");
     assert!(trace.borrow().is_empty());
+}
+
+#[test]
+fn join_on_temporaries_release_after_rejected_accepted_and_failed_child_conditions() {
+    for child in [false, true] {
+        for accepted in [false, true] {
+            let mut left = schema(&["ID", "Name"]);
+            left.rows = (0..48).map(|id| row(id, &"AbCd".repeat(1024))).collect();
+            let mut right = schema(&["Name"]);
+            right.rows = vec![vec![Scalar::String(if accepted {
+                "abcd".repeat(1024)
+            } else {
+                "never matches".into()
+            })]];
+            let mut probe = schema(&["ID"]);
+            probe.rows = vec![vec![Scalar::Int(1)]];
+            let sources = BTreeMap::from([
+                ("a".into(), &left),
+                ("b".into(), &right),
+                ("p".into(), &probe),
+            ]);
+            let condition = if child {
+                "LOWER(a.Name)=(SELECT b.Name FROM p)"
+            } else {
+                "LOWER(a.Name)=b.Name"
+            };
+            let program =
+                Program::compile(&format!("SELECT a.ID FROM a JOIN b ON {condition}")).unwrap();
+            let limits = Limits::default();
+            let shared = Budget::new(Cost::defaults(), limits.deadline, None);
+            let mut work = Work {
+                left: limits.work,
+                bytes: limits.memory_bytes,
+                deadline: limits.deadline,
+                cancel: None,
+                shared: Some(&shared),
+                planning: false,
+                temporaries: Vec::new(),
+                selection_sources: Vec::new(),
+                providers: &[],
+                resolver: None,
+                roots: BTreeMap::new(),
+                measure: false,
+                scans: Vec::new(),
+            };
+            let result = program
+                .execute_scoped(&sources, &BTreeMap::new(), &mut work)
+                .unwrap();
+            assert_eq!(result.rows.len(), if accepted { 48 } else { 0 });
+            assert!(
+                work.temporaries.is_empty(),
+                "ON must release scratch before the next candidate"
+            );
+            let failing = Program::compile(
+                "SELECT a.ID FROM a JOIN b ON LOWER(a.Name)=(SELECT Missing FROM p)",
+            )
+            .unwrap();
+            let error = failing
+                .execute_scoped(&sources, &BTreeMap::new(), &mut work)
+                .unwrap_err();
+            assert_eq!(error.code, "relational.invalid_binding");
+            assert!(
+                work.temporaries.is_empty(),
+                "child failure must release suspended ON scratch"
+            );
+        }
+    }
 }

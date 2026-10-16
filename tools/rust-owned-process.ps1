@@ -1,8 +1,45 @@
 param([Parameter(Mandatory=$true)][string]$Request)
 $ErrorActionPreference='Stop'
 $requestPath=(Resolve-Path -LiteralPath $Request).Path
-if((Get-Item -LiteralPath $requestPath).Length -gt 1048576){throw 'owned.request_budget'}
-$requestData=[IO.File]::ReadAllText($requestPath)|ConvertFrom-Json
+# Parse and hash the same held bytes, preserving StreamReader BOM compatibility.
+$requestFile=[IO.File]::Open($requestPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+$requestReader=$null;$requestDigest=$null
+try{
+ if($requestFile.Length -gt 1048576){throw 'owned.request_budget'}
+ $requestReader=New-Object IO.StreamReader ($requestFile)
+ $requestData=$requestReader.ReadToEnd()|ConvertFrom-Json
+ $requestFile.Position=0;$requestDigest=[Security.Cryptography.SHA256]::Create()
+ $requestSHA256=[BitConverter]::ToString($requestDigest.ComputeHash($requestFile)).Replace('-','').ToLowerInvariant()
+}finally{if($requestDigest){$requestDigest.Dispose()};if($requestReader){$requestReader.Dispose()}else{$requestFile.Dispose()}}
+# Existing direct PS1 consumers use unversioned requests with caller-chosen names.
+# Keep UUID basenames discoverable; otherwise generate a new identity rather than
+# pretending the old request declared one. The original request bytes never change.
+$name=[IO.Path]::GetFileName($requestPath)
+if($null -ne $requestData.schema -and $requestData.schema -cne 'lycheedev.owned-request.v2'){throw 'owned.request_schema'}
+if($name -cmatch '^process-(?<id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.request\.json$'){
+ $runId=$Matches['id'];$identitySource='legacy-request-basename'
+ if($requestData.schema -ceq 'lycheedev.owned-request.v2'){$identitySource='request-v2'}
+}elseif($requestData.schema -ceq 'lycheedev.owned-request.v2'){throw 'owned.request_identity_required'}
+else{$runId=[Guid]::NewGuid().ToString('D');$identitySource='legacy-generated'}
+$expectedStem=Join-Path ([IO.Path]::GetDirectoryName($requestPath)) ('process-'+$runId)
+if($null -ne $requestData.runId -and $requestData.runId -cne $runId){throw 'owned.start_identity_run'}
+foreach($entry in @(@('identity',$expectedStem+'.identity.json'),@('rootIdentity',$expectedStem+'.root.json'))){
+ $value=$requestData.($entry[0])
+ if($null -eq $value){if($requestData.schema -ceq 'lycheedev.owned-request.v2'){throw 'owned.start_identity_path'}}
+ elseif(-not [string]::Equals([IO.Path]::GetFullPath([string]$value),[IO.Path]::GetFullPath($entry[1]),[StringComparison]::OrdinalIgnoreCase)){throw 'owned.start_identity_path'}
+}
+if($requestData.schema -ceq 'lycheedev.owned-request.v2' -and $null -eq $requestData.runId){throw 'owned.start_identity_run'}
+$requestData|Add-Member -NotePropertyMembers @{runId=$runId;identity=$expectedStem+'.identity.json';rootIdentity=$expectedStem+'.root.json'} -Force
+# Startup identity is evidence, never a substitute for the terminal reap receipt.
+$wrapperProcess=[Diagnostics.Process]::GetCurrentProcess()
+Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class ToolkitBootCounter{[DllImport("kernel32.dll",SetLastError=true)]public static extern bool QueryUnbiasedInterruptTime(out ulong time);}'
+[UInt64]$bootCounter=0
+if(-not [ToolkitBootCounter]::QueryUnbiasedInterruptTime([ref]$bootCounter)){throw 'owned.boot_counter'}
+$identity=@{schema='lycheedev.owned-start.v1';runId=$requestData.runId;identitySource=$identitySource;requestPath=$requestPath;bootClock='QueryUnbiasedInterruptTime';coordinatorPid=$requestData.coordinatorPid;wrapperPid=$PID;wrapperCreationFileTime=$wrapperProcess.StartTime.ToUniversalTime().ToFileTimeUtc().ToString([Globalization.CultureInfo]::InvariantCulture);bootUptime100ns=$bootCounter.ToString([Globalization.CultureInfo]::InvariantCulture);requestSHA256=$requestSHA256;wrapperObservedSHA256=(Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant();rootIdentity=[string]$requestData.rootIdentity;state='wrapper-started';rootAssignment='PROC_THREAD_ATTRIBUTE_JOB_LIST';historicalReapProof=$false}
+$identityBytes=[Text.Encoding]::UTF8.GetBytes(($identity|ConvertTo-Json -Depth 4))
+$identityFile=New-Object IO.FileStream ([string]$requestData.identity),([IO.FileMode]::CreateNew),([IO.FileAccess]::Write),([IO.FileShare]::Read),4096,([IO.FileOptions]::WriteThrough)
+try{$identityFile.Write($identityBytes,0,$identityBytes.Length);$identityFile.Flush($true)}finally{$identityFile.Dispose()}
+$wrapperProcess.Dispose()
 $binary=(Get-Command -Name $requestData.command -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $helperAdmission=@{state='disabled';reason='ordinary_process';helpers=@()}
 $heldToolFiles=New-Object 'System.Collections.Generic.List[System.IO.FileStream]'
@@ -143,7 +180,6 @@ public static class ToolkitOwnedProcess {
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetInformationJobObject(IntPtr job,int kind,IntPtr data,uint size);
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr job,int kind,out ACCOUNTING data,uint size,IntPtr returned);
  [DllImport("kernel32.dll",SetLastError=true,EntryPoint="QueryInformationJobObject")] static extern bool QueryProcessList(IntPtr job,int kind,IntPtr data,uint size,IntPtr returned);
- [DllImport("kernel32.dll",SetLastError=true)] static extern bool AssignProcessToJobObject(IntPtr job,IntPtr process);
  [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr OpenProcess(uint access,bool inherit,uint pid);
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool IsProcessInJob(IntPtr process,IntPtr job,out bool member);
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool QueryFullProcessImageNameW(IntPtr process,uint flags,StringBuilder image,ref uint size);
@@ -201,8 +237,8 @@ public static class ToolkitOwnedProcess {
   }finally{foreach(IntPtr handle in held)if(!CloseHandle(handle))throw Error("owned.close_auxiliary_handle");}
  }
  static string Quote(string argument){if(argument.Length>0&&argument.IndexOfAny(new char[]{' ','\t','\n','\v','"'})<0)return argument;var text=new StringBuilder("\"");int slashes=0;foreach(char c in argument){if(c=='\\'){slashes++;continue;}if(c=='"'){text.Append('\\',slashes*2+1);text.Append(c);}else{text.Append('\\',slashes);text.Append(c);}slashes=0;}text.Append('\\',slashes*2);text.Append('"');return text.ToString();}
- public static Result Run(string binary,string[] args,string cwd,string stdout,string stderr,int timeoutMs,int orphanMs,string[] reviewedAuxiliary,string memoryPrefix,string memoryMarker){
-  var result=new Result();IntPtr job=IntPtr.Zero,port=IntPtr.Zero,output=IntPtr.Zero,error=IntPtr.Zero,outputRead=IntPtr.Zero,errorRead=IntPtr.Zero,input=IntPtr.Zero,attributes=IntPtr.Zero,handles=IntPtr.Zero;PI process=new PI();bool assigned=false,attributeReady=false;var clock=Stopwatch.StartNew();long orphanDeadline=Int64.MaxValue;Task rootWatcher=null,stdoutReader=null,stderrReader=null;long outputBytes=0;string readerError=null;ToolkitMemory.Observer memory=null;
+ public static Result Run(string binary,string[] args,string cwd,string stdout,string stderr,int timeoutMs,int orphanMs,string[] reviewedAuxiliary,string memoryPrefix,string memoryMarker,string rootIdentity,string runId){
+  var result=new Result();IntPtr job=IntPtr.Zero,port=IntPtr.Zero,output=IntPtr.Zero,error=IntPtr.Zero,outputRead=IntPtr.Zero,errorRead=IntPtr.Zero,input=IntPtr.Zero,attributes=IntPtr.Zero,handles=IntPtr.Zero,jobHandles=IntPtr.Zero;PI process=new PI();bool assigned=false,attributeReady=false;var clock=Stopwatch.StartNew();long orphanDeadline=Int64.MaxValue;Task rootWatcher=null,stdoutReader=null,stderrReader=null;long outputBytes=0;string readerError=null;ToolkitMemory.Observer memory=null;
   try{
    job=CreateJobObjectW(IntPtr.Zero,null);if(job==IntPtr.Zero)throw Error("owned.create_job");
    var limits=new LIMITS();limits.basic.flags=0x2000;Set(job,9,limits);
@@ -211,15 +247,23 @@ public static class ToolkitOwnedProcess {
    if(!CreatePipe(out outputRead,out output,ref security,65536)||!CreatePipe(out errorRead,out error,ref security,65536))throw Error("owned.output_pipes");
    if(!SetHandleInformation(outputRead,1,0)||!SetHandleInformation(errorRead,1,0))throw Error("owned.pipe_inheritance");
    input=CreateFileW("NUL",0x80000000,3,ref security,3,0x80,IntPtr.Zero);if(input==new IntPtr(-1))throw Error("owned.input");
-   IntPtr size=IntPtr.Zero;InitializeProcThreadAttributeList(IntPtr.Zero,1,0,ref size);attributes=Marshal.AllocHGlobal(size);if(!InitializeProcThreadAttributeList(attributes,1,0,ref size))throw Error("owned.attribute_list");attributeReady=true;
+   IntPtr size=IntPtr.Zero;InitializeProcThreadAttributeList(IntPtr.Zero,2,0,ref size);attributes=Marshal.AllocHGlobal(size);if(!InitializeProcThreadAttributeList(attributes,2,0,ref size))throw Error("owned.attribute_list");attributeReady=true;
    handles=Marshal.AllocHGlobal(3*IntPtr.Size);Marshal.WriteIntPtr(handles,0,input);Marshal.WriteIntPtr(handles,IntPtr.Size,output);Marshal.WriteIntPtr(handles,2*IntPtr.Size,error);
    if(!UpdateProcThreadAttribute(attributes,0,new IntPtr(0x20002),handles,new IntPtr(3*IntPtr.Size),IntPtr.Zero,IntPtr.Zero))throw Error("owned.handle_list");
+   // Windows 10 / Server 2016+: assign at creation, with no unowned suspended window.
+   // Keep the existing explicit inherited HANDLE_LIST. The Job handle is not inherited.
+   jobHandles=Marshal.AllocHGlobal(IntPtr.Size);Marshal.WriteIntPtr(jobHandles,job);
+   if(!UpdateProcThreadAttribute(attributes,0,new IntPtr(0x2000D),jobHandles,new IntPtr(IntPtr.Size),IntPtr.Zero,IntPtr.Zero))throw Error("owned.atomic_job_attribute");
    var start=new SIX{start=new SI{size=Marshal.SizeOf(typeof(SIX)),flags=0x101,show=0,input=input,output=output,error=error},attributes=attributes};var command=new StringBuilder(Quote(binary));foreach(string arg in args)command.Append(" ").Append(Quote(arg));
    // Same monotonic clock: exclude PowerShell/compiler startup, retain all CLI work.
    result.commandStartTicks=Stopwatch.GetTimestamp();
    if(!CreateProcessW(binary,command,IntPtr.Zero,IntPtr.Zero,true,0x08080004,IntPtr.Zero,cwd,ref start,out process))throw Error("owned.create_suspended");
+   assigned=true; // A successful JOB_LIST CreateProcess already owns the suspended root.
    result.pid=process.pid;FT created,exited,kernel,user;if(!GetProcessTimes(process.process,out created,out exited,out kernel,out user))throw Error("owned.process_identity");result.creationFileTime=((long)created.high<<32)|created.low;
-   if(!AssignProcessToJobObject(job,process.process))throw Error("owned.assign_job");assigned=true;
+   bool member;if(!IsProcessInJob(process.process,job,out member)||!member)throw Error("owned.atomic_job_membership");
+   // Persist the exact native root before allowing it to execute any user code.
+   string rootJson="{\"schema\":\"lycheedev.owned-root.v1\",\"runId\":\""+runId+"\",\"pid\":"+process.pid.ToString(System.Globalization.CultureInfo.InvariantCulture)+",\"creationFileTime\":\""+result.creationFileTime.ToString(System.Globalization.CultureInfo.InvariantCulture)+"\",\"jobAssignedAtCreation\":true,\"state\":\"suspended\",\"historicalReapProof\":false}";
+   using(var file=new FileStream(rootIdentity,FileMode.CreateNew,FileAccess.Write,FileShare.Read,4096,FileOptions.WriteThrough)){byte[] bytes=new UTF8Encoding(false).GetBytes(rootJson);file.Write(bytes,0,bytes.Length);file.Flush(true);}
    Action<IntPtr,string> pump=(handle,path)=>{try{using(var stream=new FileStream(new SafeFileHandle(handle,false),FileAccess.Read,65536,false))using(var file=new FileStream(path,FileMode.CreateNew,FileAccess.Write,FileShare.Read)){var buffer=new byte[65536];int count;while((count=stream.Read(buffer,0,buffer.Length))>0){if(Interlocked.Add(ref outputBytes,count)>16*1024*1024){result.outputLimit=true;TerminateJobObject(job,8);break;}file.Write(buffer,0,count);}}}catch(Exception failure){Interlocked.CompareExchange(ref readerError,failure.ToString(),null);TerminateJobObject(job,8);}};
    stdoutReader=Task.Run(()=>pump(outputRead,stdout));stderrReader=Task.Run(()=>pump(errorRead,stderr));
    if(!CloseHandle(output)||!CloseHandle(error))throw Error("owned.close_parent_writers");output=IntPtr.Zero;error=IntPtr.Zero;
@@ -270,7 +314,7 @@ public static class ToolkitOwnedProcess {
    // Always wait for the original watcher, even when observation shutdown failed.
    bool watcherClosed=rootWatcher==null||rootWatcher.Wait(10000);
    bool closed=(result.memory==null||(result.memory.threadStopped&&result.memory.handlesClosed))&&watcherClosed;foreach(IntPtr handle in new IntPtr[]{process.thread,process.process,input,outputRead,errorRead,job,port})if(handle!=IntPtr.Zero&&handle!=new IntPtr(-1))closed=CloseHandle(handle)&&closed;
-   if(attributeReady)DeleteProcThreadAttributeList(attributes);if(attributes!=IntPtr.Zero)Marshal.FreeHGlobal(attributes);if(handles!=IntPtr.Zero)Marshal.FreeHGlobal(handles);result.handlesClosed=closed;
+   if(attributeReady)DeleteProcThreadAttributeList(attributes);if(attributes!=IntPtr.Zero)Marshal.FreeHGlobal(attributes);if(handles!=IntPtr.Zero)Marshal.FreeHGlobal(handles);if(jobHandles!=IntPtr.Zero)Marshal.FreeHGlobal(jobHandles);result.handlesClosed=closed;
   }
   return result;
  }
@@ -399,7 +443,7 @@ namespace ToolkitMemory {
 }
 
 '@
-try{$result=[ToolkitOwnedProcess]::Run($binary,[string[]]$requestData.args,[string]$requestData.cwd,[string]$requestData.stdout,[string]$requestData.stderr,[int]$requestData.timeoutMs,[int]$requestData.orphanMs,[string[]]$admittedHelperPaths,[string]$requestData.memoryPrefix,[string]$requestData.memoryMarker)}finally{foreach($file in $heldToolFiles){$file.Dispose()}}
+try{$result=[ToolkitOwnedProcess]::Run($binary,[string[]]$requestData.args,[string]$requestData.cwd,[string]$requestData.stdout,[string]$requestData.stderr,[int]$requestData.timeoutMs,[int]$requestData.orphanMs,[string[]]$admittedHelperPaths,[string]$requestData.memoryPrefix,[string]$requestData.memoryMarker,[string]$requestData.rootIdentity,[string]$requestData.runId)}finally{foreach($file in $heldToolFiles){$file.Dispose()}}
 # FILETIME exceeds the JSON/JavaScript exact integer range. Preserve the native
 # Int64 comparisons above, and emit decimal strings at every evidence boundary.
 function Convert-ObservedProcesses($rows) {
@@ -408,7 +452,7 @@ function Convert-ObservedProcesses($rows) {
   @{pid=$_.pid;creationFileTime=$_.creationFileTime.ToString([Globalization.CultureInfo]::InvariantCulture);image=$_.image;error=$_.error;exited=$_.exited;jobMember=$_.jobMember;reviewedAuxiliary=$_.reviewedAuxiliary}
  })
 }
-$receipt=@{schema='lycheedev.owned-process.v1';binary=$binary;pid=$result.pid;creationFileTime=$result.creationFileTime.ToString([Globalization.CultureInfo]::InvariantCulture);exitCode=$result.exitCode;rootReaped=$result.rootReaped;treeReaped=$result.treeReaped;handlesClosed=$result.handlesClosed;toolIdentityLocksClosed=$true;outputReadersComplete=$result.outputReadersComplete;outputLimit=$result.outputLimit;activeProcesses=$result.activeProcesses;forced=$result.forced;knownAuxiliaryCleanup=$result.knownAuxiliaryCleanup;auxiliaryProcesses=(Convert-ObservedProcesses $result.auxiliaryProcesses);helperAdmission=$helperAdmission;deadlineHit=$result.deadlineHit;parentExitedBeforeChildren=$result.parentExitedBeforeChildren;drainCompletedByAccounting=$result.drainCompletedByAccounting;atDrainDeadline=(Convert-ObservedProcesses $result.atDrainDeadline);error=$result.error;memory=$result.memory;timing=@{schema="lycheedev.owned-timing.v1";frequency=[Diagnostics.Stopwatch]::Frequency;startTicks=$result.commandStartTicks.ToString([Globalization.CultureInfo]::InvariantCulture);rootExitTicks=$result.rootExitTicks.ToString([Globalization.CultureInfo]::InvariantCulture);treeReapedTicks=$result.treeReapedTicks.ToString([Globalization.CultureInfo]::InvariantCulture);boundary="before CreateProcessW through root/tree reap and output drain; excludes PowerShell startup and observer shutdown"}}
+$receipt=@{schema='lycheedev.owned-process.v1';runId=$requestData.runId;identitySource=$identitySource;startupIdentity=[string]$requestData.identity;rootIdentity=[string]$requestData.rootIdentity;binary=$binary;pid=$result.pid;creationFileTime=$result.creationFileTime.ToString([Globalization.CultureInfo]::InvariantCulture);exitCode=$result.exitCode;rootReaped=$result.rootReaped;treeReaped=$result.treeReaped;handlesClosed=$result.handlesClosed;toolIdentityLocksClosed=$true;outputReadersComplete=$result.outputReadersComplete;outputLimit=$result.outputLimit;activeProcesses=$result.activeProcesses;forced=$result.forced;knownAuxiliaryCleanup=$result.knownAuxiliaryCleanup;auxiliaryProcesses=(Convert-ObservedProcesses $result.auxiliaryProcesses);helperAdmission=$helperAdmission;deadlineHit=$result.deadlineHit;parentExitedBeforeChildren=$result.parentExitedBeforeChildren;drainCompletedByAccounting=$result.drainCompletedByAccounting;atDrainDeadline=(Convert-ObservedProcesses $result.atDrainDeadline);error=$result.error;memory=$result.memory;timing=@{schema="lycheedev.owned-timing.v1";frequency=[Diagnostics.Stopwatch]::Frequency;startTicks=$result.commandStartTicks.ToString([Globalization.CultureInfo]::InvariantCulture);rootExitTicks=$result.rootExitTicks.ToString([Globalization.CultureInfo]::InvariantCulture);treeReapedTicks=$result.treeReapedTicks.ToString([Globalization.CultureInfo]::InvariantCulture);boundary="before CreateProcessW through root/tree reap and output drain; excludes PowerShell startup and observer shutdown"}}
 [IO.File]::WriteAllText([string]$requestData.receipt,($receipt|ConvertTo-Json -Depth 5))
 if(!$result.treeReaped -or !$result.rootReaped -or !$result.handlesClosed -or !$result.outputReadersComplete){exit 8}
 exit 0

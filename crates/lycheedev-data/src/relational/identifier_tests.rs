@@ -266,31 +266,79 @@ struct IdentifierProvider {
     rows: Vec<Vec<Scalar>>,
     events: std::cell::RefCell<Vec<String>>,
 }
+struct IdentifierCursor<'a> {
+    rows: &'a [Vec<Scalar>],
+    selected: Option<Vec<usize>>,
+    equal: Option<Scalar>,
+    next: usize,
+    scratch: Vec<Scalar>,
+}
+impl RowCursor for IdentifierCursor<'_> {
+    fn advance(&mut self) -> Result<bool> {
+        self.scratch.fill(Scalar::Null);
+        self.scratch.clear();
+        while let Some(row) = self.rows.get(self.next) {
+            self.next += 1;
+            if self.equal.as_ref().is_some_and(|value| row[0] != *value) {
+                continue;
+            }
+            self.scratch.clone_from(row);
+            if let Some(selected) = &self.selected {
+                for (index, value) in self.scratch.iter_mut().enumerate() {
+                    if !selected.contains(&index) {
+                        *value = Scalar::Null;
+                    }
+                }
+            }
+            return Ok(true);
+        }
+        Ok(false)
+    }
+    fn row(&self) -> &[Scalar] {
+        &self.scratch
+    }
+}
 impl RowProvider for IdentifierProvider {
+    fn cursor(&self, selected: Option<&[usize]>) -> Result<Box<dyn RowCursor + '_>> {
+        self.events.borrow_mut().push(match selected {
+            Some(selected) => format!("selected:{selected:?}"),
+            None => "scan".into(),
+        });
+        Ok(Box::new(IdentifierCursor {
+            rows: &self.rows,
+            selected: selected.map(<[usize]>::to_vec),
+            equal: None,
+            next: 0,
+            scratch: vec![],
+        }))
+    }
+    fn equal_cursor(&self, name: &str, value: &Scalar) -> Result<EqualityCursor<'_>> {
+        self.events
+            .borrow_mut()
+            .push(format!("equal:{name}:{value:?}"));
+        assert_eq!(
+            name, "ID.dot",
+            "provider receives a raw field, never a qualified path"
+        );
+        Ok(EqualityCursor::Rows(Box::new(IdentifierCursor {
+            rows: &self.rows,
+            selected: None,
+            equal: Some(value.clone()),
+            next: 0,
+            scratch: vec![],
+        })))
+    }
     fn scan(&self, emit: &mut RowYield<'_>) -> Result<()> {
-        self.events.borrow_mut().push("scan".into());
-        for row in &self.rows {
-            emit(row)?;
+        let mut cursor = self.cursor(None)?;
+        while cursor.advance()? {
+            emit(cursor.row())?;
         }
         Ok(())
     }
     fn scan_selected(&self, selected: &[usize], emit: &mut RowYield<'_>) -> Result<()> {
-        self.events
-            .borrow_mut()
-            .push(format!("selected:{selected:?}"));
-        for row in &self.rows {
-            let projected: Vec<_> = row
-                .iter()
-                .enumerate()
-                .map(|(i, v)| {
-                    if selected.contains(&i) {
-                        v.clone()
-                    } else {
-                        Scalar::Null
-                    }
-                })
-                .collect();
-            emit(&projected)?;
+        let mut cursor = self.cursor(Some(selected))?;
+        while cursor.advance()? {
+            emit(cursor.row())?;
         }
         Ok(())
     }
@@ -303,21 +351,19 @@ impl RowProvider for IdentifierProvider {
         value: &Scalar,
         emit: &mut RowYield<'_>,
     ) -> Result<EqualityOutcome> {
-        self.events
-            .borrow_mut()
-            .push(format!("equal:{name}:{value:?}"));
-        assert_eq!(
-            name, "ID.dot",
-            "provider receives a raw field, never a qualified path"
-        );
-        for row in &self.rows {
-            if row[0] == *value {
-                emit(row)?;
+        match self.equal_cursor(name, value)? {
+            EqualityCursor::Declined => Ok(EqualityOutcome::Declined),
+            EqualityCursor::Empty => Ok(EqualityOutcome::Handled),
+            EqualityCursor::Rows(mut cursor) => {
+                while cursor.advance()? {
+                    emit(cursor.row())?;
+                }
+                Ok(EqualityOutcome::Handled)
             }
         }
-        Ok(EqualityOutcome::Handled)
     }
 }
+
 fn lazy(
     sql: &str,
     schema: &Source,

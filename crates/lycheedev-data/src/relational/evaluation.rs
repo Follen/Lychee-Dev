@@ -13,7 +13,7 @@ enum Task<'a> {
     Like(bool),
     InStart(&'a [Term], bool),
     InItem(Scalar, &'a [Term], bool, bool, bool),
-    InQuery(&'a Program, bool),
+    InQuery(&'a std::sync::Arc<Program>, bool),
     CaseStart(&'a [(Term, Term)], Option<&'a Term>, bool),
     CaseNext(Option<Scalar>, &'a [(Term, Term)], Option<&'a Term>),
     CaseTest(
@@ -29,6 +29,19 @@ enum Task<'a> {
     NullIf,
 }
 
+/// Synchronous optimizer constants never enter the query driver.
+pub(super) fn constant(
+    term: &Term,
+    row: &[Scalar],
+    columns: &[String],
+    alias: ColumnOwners<'_>,
+    params: &BTreeMap<String, Scalar>,
+    context: &subquery::Context<'_>,
+    work: &mut Work<'_>,
+) -> Result<Scalar> {
+    eval_sync(term, row, columns, alias, params, context, work, false)
+}
+#[cfg(test)]
 pub(super) fn eval(
     term: &Term,
     row: &[Scalar],
@@ -37,6 +50,18 @@ pub(super) fn eval(
     params: &BTreeMap<String, Scalar>,
     context: &subquery::Context<'_>,
     work: &mut Work<'_>,
+) -> Result<Scalar> {
+    eval_sync(term, row, columns, alias, params, context, work, true)
+}
+fn eval_sync(
+    term: &Term,
+    row: &[Scalar],
+    columns: &[String],
+    alias: ColumnOwners<'_>,
+    params: &BTreeMap<String, Scalar>,
+    context: &subquery::Context<'_>,
+    work: &mut Work<'_>,
+    _legacy_queries: bool,
 ) -> Result<Scalar> {
     let mut tasks = task_stack::Stack::new(work.shared)?;
     let mut values = task_stack::Stack::new(work.shared)?;
@@ -53,21 +78,36 @@ pub(super) fn eval(
             context,
             work,
         )? {
-            // The large scalar step frame has returned before entering another
-            // query through the provider's synchronous callback boundary.
-            let result = match &request.kind {
-                QueryKind::Exists => subquery::execute_any(
-                    request.query,
-                    row,
-                    columns,
-                    alias,
-                    params,
-                    context,
-                    work,
-                )?,
-                _ => subquery::execute(request.query, row, columns, alias, params, context, work)?,
-            };
-            values.push(finish_query(request.kind, result, work)?)?;
+            // Only the test compatibility entry may execute a direct legacy
+            // subquery. The production constant entry takes this same path
+            // in tests too, so its non-reentry contract is directly testable.
+            #[cfg(test)]
+            if _legacy_queries {
+                let result = match &request.kind {
+                    QueryKind::Exists => subquery::execute_any(
+                        &request.query,
+                        row,
+                        columns,
+                        alias,
+                        params,
+                        context,
+                        work,
+                    )?,
+                    _ => subquery::execute(
+                        &request.query,
+                        row,
+                        columns,
+                        alias,
+                        params,
+                        context,
+                        work,
+                    )?,
+                };
+                values.push(finish_query(request.kind, result, work)?)?;
+                continue;
+            }
+            let _ = request;
+            return Err(unsupported());
         }
     }
     if values.len() != 1 {
@@ -80,8 +120,8 @@ enum QueryKind {
     Exists,
     In(Scalar, bool),
 }
-struct Request<'a> {
-    query: &'a Program,
+struct Request {
+    query: std::sync::Arc<Program>,
     kind: QueryKind,
 }
 #[inline(never)]
@@ -95,7 +135,7 @@ fn step<'a>(
     params: &BTreeMap<String, Scalar>,
     context: &subquery::Context<'_>,
     work: &mut Work<'_>,
-) -> Result<Option<Request<'a>>> {
+) -> Result<Option<Request>> {
     match task {
         Task::Eval(term) => {
             work.spend()?;
@@ -110,7 +150,10 @@ fn step<'a>(
                     let value = match subquery::resolve(columns, alias, name, context.scope.outer)?
                     {
                         subquery::Position::Local(index) => row.get(index).ok_or_else(binding)?,
-                        subquery::Position::Outer(frame, index) => frame.value(index)?,
+                        subquery::Position::Outer(frame, index) => {
+                            values.push(frame.clone_value(index, work)?)?;
+                            return Ok(None);
+                        }
                     };
                     values.push(work.clone_scalar(value)?)?;
                 }
@@ -155,13 +198,13 @@ fn step<'a>(
                 }
                 Term::ScalarSubquery(query) => {
                     return Ok(Some(Request {
-                        query,
+                        query: query.clone(),
                         kind: QueryKind::Scalar,
                     }));
                 }
                 Term::Exists(query) => {
                     return Ok(Some(Request {
-                        query,
+                        query: query.clone(),
                         kind: QueryKind::Exists,
                     }));
                 }
@@ -269,7 +312,7 @@ fn step<'a>(
         Task::InQuery(query, negated) => {
             let input = pop(values)?;
             return Ok(Some(Request {
-                query,
+                query: query.clone(),
                 kind: QueryKind::In(input, negated),
             }));
         }
@@ -505,4 +548,139 @@ fn call(name: &str, value: Scalar, work: &mut Work<'_>) -> Result<Scalar> {
 #[cfg(test)]
 pub(super) fn binary_stack_bytes() -> usize {
     4 * (std::mem::size_of::<Task<'_>>() + std::mem::size_of::<Scalar>())
+}
+
+pub(super) async fn eval_async<'a, 'w: 'a>(
+    term: &Term,
+    row: &execution::Row<'a>,
+    fields: &execution::Fields<'a>,
+    context: &execution::Context<'a>,
+    control: &execution::Control<'a, 'w>,
+) -> Result<Scalar> {
+    let mut tasks = task_stack::Stack::new(control.shared_budget())?;
+    let mut values = task_stack::Stack::new(control.shared_budget())?;
+    let mut root = Some(Task::Eval(term));
+    while let Some(task) = root.take().or_else(|| tasks.pop()) {
+        let request = control.work(|work| {
+            let fields = fields.view();
+            row.with(|row| {
+                step(
+                    task,
+                    &mut tasks,
+                    &mut values,
+                    row,
+                    fields.columns,
+                    fields.alias,
+                    control.parameters(),
+                    &context.view(),
+                    work,
+                )
+            })
+        })?;
+        if let Some(request) = request {
+            let any = matches!(request.kind, QueryKind::Exists);
+            let result = control
+                .subquery(request.query, row.clone(), fields.clone(), context, any)
+                .await?;
+            let value = control.work(|work| finish_query(request.kind, result, work))?;
+            values.push(value)?;
+        }
+    }
+    if values.len() != 1 {
+        return Err(unsupported());
+    }
+    pop(&mut values)
+}
+
+#[cfg(test)]
+mod constant_entry_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    struct NoQueryEntry(Cell<usize>);
+    impl RootResolver for NoQueryEntry {
+        fn resolve(&self, _: SourceTableUse<'_>) -> Result<&Source> {
+            self.0.set(self.0.get() + 1);
+            Err(binding())
+        }
+        fn provider(&self, _: &Source) -> Option<&dyn RowProvider> {
+            None
+        }
+    }
+    #[test]
+    fn synchronous_constant_entry_cannot_start_a_nested_query_driver() {
+        let resolver = NoQueryEntry(Cell::new(0));
+        let parameters = BTreeMap::new();
+        let sources = BTreeMap::new();
+        let context = subquery::Context::new(&sources, None);
+        let mut work = Work {
+            left: 1000,
+            bytes: 1 << 20,
+            deadline: Instant::now() + Duration::from_secs(10),
+            cancel: None,
+            shared: None,
+            planning: false,
+            temporaries: Vec::new(),
+            selection_sources: Vec::new(),
+            providers: &[],
+            resolver: Some(&resolver),
+            roots: BTreeMap::new(),
+            measure: false,
+            scans: Vec::new(),
+        };
+        let query = std::sync::Arc::new(Program::compile("SELECT ID FROM nested").unwrap());
+        for term in [
+            Term::ScalarSubquery(query.clone()),
+            Term::Exists(query.clone()),
+        ] {
+            let before = work.left;
+            let error = constant(
+                &term,
+                &[],
+                &[],
+                ColumnOwners::Single(""),
+                &parameters,
+                &context,
+                &mut work,
+            )
+            .unwrap_err();
+            assert_eq!(error.code, "relational.unsupported");
+            assert_eq!(work.left, before - 1);
+            assert_eq!(resolver.0.get(), 0, "no query may resolve or scan a source");
+        }
+        let term = Term::Binary(
+            Box::new(Term::Number("2".into())),
+            BinaryOperator::Plus,
+            Box::new(Term::Number("3".into())),
+        );
+        let before = work.left;
+        assert_eq!(
+            constant(
+                &term,
+                &[],
+                &[],
+                ColumnOwners::Single(""),
+                &parameters,
+                &context,
+                &mut work
+            )
+            .unwrap(),
+            Scalar::Int(5)
+        );
+        assert_eq!(work.left, before - 3);
+        // The public query entry still executes true subqueries completely.
+        let data = BTreeMap::from([(
+            "t".into(),
+            Source {
+                columns: vec!["ID".into()],
+                rows: vec![vec![Scalar::Int(7)]],
+                complete: true,
+            },
+        )]);
+        let result = Program::compile("SELECT (SELECT ID FROM t) FROM t")
+            .unwrap()
+            .execute(&data, &parameters, Limits::default(), None)
+            .unwrap();
+        assert_eq!(result.rows, vec![vec![Scalar::Int(7)]]);
+    }
 }

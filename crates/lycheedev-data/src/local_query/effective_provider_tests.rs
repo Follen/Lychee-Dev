@@ -1,7 +1,9 @@
 //! Callback contracts from fixed Go 3.2.3 effective.go, exercised through the
 //! actual prepared OverlayPlan and query-scoped Program registry.
 use super::*;
-use relational::{EqualityOutcome, RowProvider, RowYield, Scalar, Source};
+use relational::{
+    EqualityCursor, EqualityOutcome, RowCursor, RowProvider, RowYield, Scalar, Source,
+};
 use std::cell::RefCell;
 fn budget() -> Budget {
     Budget::new(
@@ -94,15 +96,56 @@ impl Base {
         }
     }
 }
+struct BaseCursor {
+    rows: &'static [(u32, u32)],
+    next: usize,
+    current: Vec<Scalar>,
+}
+impl RowCursor for BaseCursor {
+    fn advance(&mut self) -> Result<bool> {
+        self.current.fill(Scalar::Null);
+        let Some(&(id, value)) = self.rows.get(self.next) else {
+            self.current.clear();
+            return Ok(false);
+        };
+        self.next += 1;
+        self.current = row(id, value);
+        Ok(true)
+    }
+    fn row(&self) -> &[Scalar] {
+        &self.current
+    }
+}
 impl RowProvider for Base {
+    fn cursor(&self, _: Option<&[usize]>) -> Result<Box<dyn RowCursor + '_>> {
+        Ok(Box::new(BaseCursor {
+            rows: &[(1, 10), (2, 20), (4, 40)],
+            next: 0,
+            current: vec![],
+        }))
+    }
     fn scan(&self, emit: &mut RowYield<'_>) -> Result<()> {
-        for r in [row(1, 10), row(2, 20), row(4, 40)] {
-            emit(&r)?;
-        }
-        Ok(())
+        provider::emit_rows(self.cursor(None)?, emit)
     }
     fn has_equal(&self) -> bool {
         self.capable
+    }
+    fn equal_cursor(&self, column: &str, value: &Scalar) -> Result<EqualityCursor<'_>> {
+        self.calls.borrow_mut().push(value.clone());
+        if column != "ID" {
+            return Ok(EqualityCursor::Declined);
+        }
+        match value {
+            Scalar::UInt(4) | Scalar::Int(4) => Ok(EqualityCursor::Rows(Box::new(BaseCursor {
+                rows: &[(4, 40)],
+                next: 0,
+                current: vec![],
+            }))),
+            Scalar::Null | Scalar::UInt(_) | Scalar::Int(_) | Scalar::Float(_) => {
+                Ok(EqualityCursor::Empty)
+            }
+            _ => Err(fault("relational.type_mismatch", 4, "fixture type")),
+        }
     }
     fn equal(
         &self,
@@ -110,19 +153,17 @@ impl RowProvider for Base {
         value: &Scalar,
         emit: &mut RowYield<'_>,
     ) -> Result<EqualityOutcome> {
-        self.calls.borrow_mut().push(value.clone());
-        if column != "ID" {
-            return Ok(EqualityOutcome::Declined);
+        match self.equal_cursor(column, value)? {
+            EqualityCursor::Declined => Ok(EqualityOutcome::Declined),
+            EqualityCursor::Empty => Ok(EqualityOutcome::Handled),
+            EqualityCursor::Rows(cursor) => {
+                provider::emit_rows(cursor, emit)?;
+                Ok(EqualityOutcome::Handled)
+            }
         }
-        match value {
-            Scalar::Null => {}
-            Scalar::UInt(4) | Scalar::Int(4) => emit(&row(4, 40))?,
-            Scalar::UInt(_) | Scalar::Int(_) | Scalar::Float(_) => {}
-            _ => return Err(fault("relational.type_mismatch", 4, "fixture type")),
-        }
-        Ok(EqualityOutcome::Handled)
     }
 }
+
 #[test]
 fn effective_lazy_scan_replaces_deletes_and_appends_unvisited_numeric_order() {
     let p = plan();
@@ -254,6 +295,12 @@ fn effective_lazy_registry_uses_candidate_order_and_preserves_original_predicate
         budget: &'a Budget,
     }
     impl RowProvider for Provider<'_> {
+        fn cursor(&self, _: Option<&[usize]>) -> Result<Box<dyn RowCursor + '_>> {
+            self.plan.cursor(self.base, self.budget)
+        }
+        fn equal_cursor(&self, c: &str, v: &Scalar) -> Result<EqualityCursor<'_>> {
+            self.plan.equal_cursor(self.base, self.budget, c, v)
+        }
         fn scan(&self, e: &mut RowYield<'_>) -> Result<()> {
             self.plan.scan(self.base, self.budget, e)
         }
@@ -293,4 +340,213 @@ fn effective_lazy_registry_uses_candidate_order_and_preserves_original_predicate
         vec![row(8, 88), row(3, 77), row(1, 99), row(4, 40)]
     );
     assert_eq!(*b.calls.borrow(), vec![Scalar::Int(4)]);
+}
+
+struct LeaseBase<'budget> {
+    budget: &'budget Budget,
+    id: u32,
+    late_error: bool,
+    opened: std::cell::Cell<usize>,
+    active: std::cell::Cell<usize>,
+    resumed: std::cell::Cell<usize>,
+}
+impl<'budget> LeaseBase<'budget> {
+    fn new(budget: &'budget Budget, id: u32, late_error: bool) -> Self {
+        Self {
+            budget,
+            id,
+            late_error,
+            opened: Default::default(),
+            active: Default::default(),
+            resumed: Default::default(),
+        }
+    }
+}
+struct LeasedFixtureRow<'query> {
+    cells: Vec<Scalar>,
+    _allocation: RetainedReservation<'query>,
+    active: &'query std::cell::Cell<usize>,
+}
+impl Drop for LeasedFixtureRow<'_> {
+    fn drop(&mut self) {
+        self.active.set(self.active.get() - 1);
+    }
+}
+struct LeasedBaseCursor<'query, 'budget> {
+    current: Option<LeasedFixtureRow<'query>>,
+    base: &'query LeaseBase<'budget>,
+    next: usize,
+}
+impl RowCursor for LeasedBaseCursor<'_, '_> {
+    fn advance(&mut self) -> Result<bool> {
+        self.current = None;
+        match self.next {
+            0 => {
+                self.next = 1;
+                let allocation = self.base.budget.reserve_retained(4096)?;
+                self.base.active.set(self.base.active.get() + 1);
+                self.current = Some(LeasedFixtureRow {
+                    cells: row(self.base.id, 40),
+                    _allocation: allocation,
+                    active: &self.base.active,
+                });
+                Ok(true)
+            }
+            1 => {
+                self.next = 2;
+                self.base.resumed.set(self.base.resumed.get() + 1);
+                if self.base.late_error {
+                    return Err(fault("fixture.base_late", 5, "late base failure"));
+                }
+                Ok(false)
+            }
+            _ => Ok(false),
+        }
+    }
+    fn row(&self) -> &[Scalar] {
+        self.current.as_ref().map_or(&[], |row| &row.cells)
+    }
+}
+impl RowProvider for LeaseBase<'_> {
+    fn cursor(&self, _: Option<&[usize]>) -> Result<Box<dyn RowCursor + '_>> {
+        self.opened.set(self.opened.get() + 1);
+        Ok(Box::new(LeasedBaseCursor {
+            current: None,
+            base: self,
+            next: 0,
+        }))
+    }
+    fn scan(&self, emit: &mut RowYield<'_>) -> Result<()> {
+        provider::emit_rows(self.cursor(None)?, emit)
+    }
+    fn has_equal(&self) -> bool {
+        true
+    }
+    fn equal_cursor(&self, column: &str, value: &Scalar) -> Result<EqualityCursor<'_>> {
+        if column != "ID" {
+            return Ok(EqualityCursor::Declined);
+        }
+        if value != &Scalar::UInt(self.id as u64) {
+            return Ok(EqualityCursor::Empty);
+        }
+        Ok(EqualityCursor::Rows(self.cursor(None)?))
+    }
+}
+
+#[test]
+fn effective_cursor_suspends_with_base_and_augmented_leases_without_resuming_producer() {
+    let p = plan();
+    let b = budget();
+    let base = LeaseBase::new(&b, 1, true);
+    let keep = b.reserve_retained(17).unwrap();
+    let before = b.snapshot().unwrap();
+    let logical = b.logical_snapshot().unwrap();
+    let mut cursor = p.cursor(&base, &b).unwrap();
+    assert_eq!(base.opened.get(), 1);
+    assert_eq!(base.active.get(), 0);
+    let opened = b.snapshot().unwrap();
+    assert!(cursor.advance().unwrap());
+    assert_eq!(cursor.row()[1], Scalar::UInt(99));
+    assert_eq!(
+        base.active.get(),
+        1,
+        "replacement retains the base row lease"
+    );
+    assert_eq!(base.resumed.get(), 0);
+    assert!(b.snapshot().unwrap().retained_bytes > opened.retained_bytes + 4096);
+    assert_eq!(b.logical_snapshot().unwrap(), logical);
+    drop(cursor); // A consumer failure/drop must not execute the producer's tail.
+    assert_eq!(base.resumed.get(), 0);
+    assert_eq!(base.active.get(), 0);
+    assert_eq!(b.snapshot().unwrap(), before);
+    drop(keep);
+    assert_eq!(b.snapshot().unwrap().retained_bytes, 0);
+}
+
+#[test]
+fn effective_scan_cursor_reports_base_late_error_before_unmatched_patch_append() {
+    let p = plan();
+    let b = budget();
+    let base = LeaseBase::new(&b, 1, true);
+    let mut cursor = p.cursor(&base, &b).unwrap();
+    assert!(cursor.advance().unwrap());
+    assert_eq!(cursor.row()[0], Scalar::UInt(1));
+    assert_eq!(base.resumed.get(), 0);
+    assert_eq!(cursor.advance().unwrap_err().code, "fixture.base_late");
+    assert!(cursor.row().is_empty());
+    assert_eq!(base.resumed.get(), 1);
+    assert_eq!(base.active.get(), 0);
+    drop(cursor);
+    assert_eq!(b.snapshot().unwrap().retained_bytes, 0);
+}
+
+#[test]
+fn effective_equal_cursor_keeps_delegated_row_lease_and_delays_late_error() {
+    let p = plan();
+    let b = budget();
+    let base = LeaseBase::new(&b, 4, true);
+    let EqualityCursor::Rows(mut cursor) =
+        p.equal_cursor(&base, &b, "ID", &Scalar::UInt(4)).unwrap()
+    else {
+        panic!("expected delegated equality cursor");
+    };
+    assert_eq!(base.active.get(), 0, "opening must not prefetch a row");
+    assert!(cursor.advance().unwrap());
+    assert_eq!(
+        cursor.row(),
+        [
+            Scalar::UInt(4),
+            Scalar::UInt(40),
+            Scalar::Null,
+            Scalar::Null,
+            Scalar::Null
+        ]
+    );
+    assert_eq!(base.active.get(), 1);
+    assert_eq!(base.resumed.get(), 0);
+    assert_eq!(cursor.advance().unwrap_err().code, "fixture.base_late");
+    assert_eq!(base.resumed.get(), 1);
+    drop(cursor);
+    assert_eq!(base.active.get(), 0);
+    assert_eq!(b.snapshot().unwrap().retained_bytes, 0);
+}
+
+#[test]
+fn effective_equal_cursor_empty_and_declined_branches_do_not_touch_cancelled_budget() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let token = Arc::new(AtomicBool::new(false));
+    let b = Budget::new(
+        Cost::defaults(),
+        Instant::now() + Duration::from_secs(30),
+        Some(token.clone()),
+    );
+    let p = plan();
+    let base = Base::new();
+    token.store(true, Ordering::Release);
+    assert!(matches!(
+        p.equal_cursor(&base, &b, "Value", &Scalar::Bool(true))
+            .unwrap(),
+        EqualityCursor::Declined
+    ));
+    assert!(matches!(
+        p.equal_cursor(&base, &b, "ID", &Scalar::UInt(2)).unwrap(),
+        EqualityCursor::Empty
+    ));
+    assert!(
+        base.calls.borrow().is_empty(),
+        "patched deletion must not read base"
+    );
+    assert!(matches!(
+        p.equal_cursor(&base, &b, "ID", &Scalar::Null).unwrap(),
+        EqualityCursor::Empty
+    ));
+    assert_eq!(*base.calls.borrow(), [Scalar::Null]);
+    assert_eq!(
+        p.equal_cursor(&base, &b, "ID", &Scalar::Bool(true))
+            .err()
+            .unwrap()
+            .code,
+        "relational.type_mismatch"
+    );
+    assert_eq!(b.snapshot().unwrap(), Cost::default());
 }

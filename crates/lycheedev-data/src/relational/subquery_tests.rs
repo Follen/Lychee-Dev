@@ -40,30 +40,90 @@ impl Rows {
             .count()
     }
 }
-impl RowProvider for Rows {
-    fn scan(&self, emit: &mut RowYield<'_>) -> Result<()> {
-        self.event("scan");
-        let mut scratch = vec![];
-        for (index, row) in self.rows.iter().enumerate() {
-            if self.fail_after == Some(index) {
-                return Err(fault("fixture.rhs_error", 5, "RHS failed"));
+struct RowsCursor<'a> {
+    provider: &'a Rows,
+    equal: Option<Scalar>,
+    next: usize,
+    scratch: Vec<Scalar>,
+}
+impl RowCursor for RowsCursor<'_> {
+    fn advance(&mut self) -> Result<bool> {
+        self.scratch.fill(Scalar::Null);
+        self.scratch.clear();
+        if let Some(value) = &self.equal {
+            while let Some(row) = self.provider.rows.get(self.next) {
+                self.next += 1;
+                if value != &Scalar::Null
+                    && row[0] != Scalar::Null
+                    && compare(&row[0], value)? == Ordering::Equal
+                {
+                    self.scratch.clone_from(row);
+                    return Ok(true);
+                }
             }
-            if let Some(cancel) = &self.cancel {
-                cancel.store(true, AtomicOrdering::Release);
-            }
-            scratch.clone_from(row);
-            self.event("row");
-            emit(&scratch)?;
-            scratch.fill(Scalar::Null);
+            return Ok(false);
         }
-        if self.fail_after == Some(self.rows.len()) {
+        if self.provider.fail_after == Some(self.next) {
             return Err(fault("fixture.rhs_error", 5, "RHS failed"));
+        }
+        let Some(row) = self.provider.rows.get(self.next) else {
+            return Ok(false);
+        };
+        if let Some(cancel) = &self.provider.cancel {
+            cancel.store(true, AtomicOrdering::Release);
+        }
+        self.scratch.clone_from(row);
+        self.next += 1;
+        self.provider.event("row");
+        Ok(true)
+    }
+    fn row(&self) -> &[Scalar] {
+        &self.scratch
+    }
+}
+impl Drop for RowsCursor<'_> {
+    fn drop(&mut self) {
+        self.scratch.fill(Scalar::Null);
+    }
+}
+impl RowProvider for Rows {
+    fn cursor(&self, selected: Option<&[usize]>) -> Result<Box<dyn RowCursor + '_>> {
+        if selected.is_some() {
+            self.event("selected");
+        }
+        self.event("scan");
+        Ok(Box::new(RowsCursor {
+            provider: self,
+            equal: None,
+            next: 0,
+            scratch: vec![],
+        }))
+    }
+    fn equal_cursor(&self, column: &str, value: &Scalar) -> Result<EqualityCursor<'_>> {
+        self.event(&format!("equal:{value:?}"));
+        if !equal_fold(column, "ID") {
+            return Ok(EqualityCursor::Declined);
+        }
+        Ok(EqualityCursor::Rows(Box::new(RowsCursor {
+            provider: self,
+            equal: Some(value.clone()),
+            next: 0,
+            scratch: vec![],
+        })))
+    }
+    fn scan(&self, emit: &mut RowYield<'_>) -> Result<()> {
+        let mut cursor = self.cursor(None)?;
+        while cursor.advance()? {
+            emit(cursor.row())?;
         }
         Ok(())
     }
-    fn scan_selected(&self, _: &[usize], emit: &mut RowYield<'_>) -> Result<()> {
-        self.event("selected");
-        self.scan(emit)
+    fn scan_selected(&self, columns: &[usize], emit: &mut RowYield<'_>) -> Result<()> {
+        let mut cursor = self.cursor(Some(columns))?;
+        while cursor.advance()? {
+            emit(cursor.row())?;
+        }
+        Ok(())
     }
     fn has_equal(&self) -> bool {
         self.equal
@@ -74,21 +134,19 @@ impl RowProvider for Rows {
         value: &Scalar,
         emit: &mut RowYield<'_>,
     ) -> Result<EqualityOutcome> {
-        self.event(&format!("equal:{value:?}"));
-        if !equal_fold(column, "ID") {
-            return Ok(EqualityOutcome::Declined);
-        }
-        for row in &self.rows {
-            if value != &Scalar::Null
-                && row[0] != Scalar::Null
-                && compare(&row[0], value)? == Ordering::Equal
-            {
-                emit(row)?;
+        match self.equal_cursor(column, value)? {
+            EqualityCursor::Declined => Ok(EqualityOutcome::Declined),
+            EqualityCursor::Empty => Ok(EqualityOutcome::Handled),
+            EqualityCursor::Rows(mut cursor) => {
+                while cursor.advance()? {
+                    emit(cursor.row())?;
+                }
+                Ok(EqualityOutcome::Handled)
             }
         }
-        Ok(EqualityOutcome::Handled)
     }
 }
+
 fn source(columns: &[&str], rows: Vec<Vec<Scalar>>) -> Source {
     Source {
         columns: columns.iter().map(|s| (*s).into()).collect(),
@@ -440,9 +498,8 @@ fn original_numeric_list_in_inside_rhs_keeps_distinct_candidate_callbacks() {
     );
 }
 #[test]
-fn outer_correlated_in_list_is_a_scan_predicate_not_an_inner_index_binding() {
-    let (_, a, mut b) = providers();
-    b.equal = true;
+fn outer_correlated_in_list_scans_when_inner_has_no_equality_capability() {
+    let (_, a, b) = providers();
     assert_eq!(
         lazy(
             "SELECT a.ID FROM a WHERE a.ID IN (SELECT b.ID FROM b WHERE a.ID IN (1,3))",
@@ -457,6 +514,56 @@ fn outer_correlated_in_list_is_a_scan_predicate_not_an_inner_index_binding() {
         ids(&[1, 3])
     );
     assert_eq!(b.scans(), 3);
+}
+#[test]
+fn fixed_go_bare_outer_column_selection_fails_before_inner_equal_or_scan() {
+    // Go323 selection.go fieldIndex uses the original root.filter, not the
+    // outer-column node produced by binding. Preserve that capability edge.
+    for predicate in ["a.ID IN (1,3)", "a.ID = 1", "1 = a.ID"] {
+        for empty in [false, true] {
+            let (trace, a, mut b) = providers();
+            b.equal = true;
+            b.fail_after = Some(0);
+            if empty {
+                b.rows.clear();
+            }
+            let error = lazy(
+                &format!("SELECT a.ID FROM a WHERE a.ID IN (SELECT b.ID FROM b WHERE {predicate})"),
+                &a,
+                &b,
+                Limits::default(),
+                None,
+                None,
+            )
+            .unwrap_err();
+            assert_eq!(error.code, "relational.invalid_binding", "{predicate}");
+            assert_eq!(b.scans(), 0);
+            assert!(
+                !trace
+                    .borrow()
+                    .iter()
+                    .any(|event| event.starts_with("b.equal:"))
+            );
+        }
+    }
+}
+#[test]
+fn outer_column_expressions_keep_scan_semantics_with_equality_capability() {
+    for (predicate, expected) in [("a.ID+0 IN (1,3)", vec![1, 3]), ("a.ID+0 = 1", vec![1])] {
+        let (_, a, mut b) = providers();
+        b.equal = true;
+        let result = lazy(
+            &format!("SELECT a.ID FROM a WHERE a.ID IN (SELECT b.ID FROM b WHERE {predicate})"),
+            &a,
+            &b,
+            Limits::default(),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(result.rows, ids(&expected));
+        assert_eq!(b.scans(), 3);
+    }
 }
 #[test]
 fn cte_derived_and_union_rhs_keep_lexical_sources_and_correlation() {

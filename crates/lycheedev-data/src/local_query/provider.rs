@@ -1,7 +1,10 @@
 //! Query-local physical owners. Tables borrow the callback's external FileBytes;
 //! schemas, patch plans and definitions never borrow sibling owner fields.
 use super::*;
-use relational::{EqualityOutcome, RowProvider, RowYield, Scalar, Source};
+use crate::resource::RetainedReservation;
+use relational::{
+    EqualityCursor, EqualityOutcome, RowCursor, RowProvider, RowYield, Scalar, Source,
+};
 use std::collections::BTreeSet;
 
 fn binding() -> lycheedev_core::ToolkitError {
@@ -31,6 +34,104 @@ fn scalar(value: table::Value) -> Result<Scalar> {
             4,
             "SQL provider scalar type is invalid",
         )),
+    }
+}
+
+pub(super) fn emit_rows(
+    mut cursor: Box<dyn RowCursor + '_>,
+    emit: &mut RowYield<'_>,
+) -> Result<()> {
+    while cursor.advance()? {
+        emit(cursor.row())?;
+    }
+    Ok(())
+}
+
+struct Projection {
+    indices: BTreeSet<usize>,
+    names: BTreeSet<String>,
+}
+struct FlatRow<'query> {
+    cells: Vec<Scalar>,
+    _vector: RetainedReservation<'query>,
+    // Keep the emptied map alive for the same scope as the old callback.
+    _raw: BTreeMap<String, table::Value>,
+}
+type PhysicalRow<'query> = table::LeasedRow<'query, FlatRow<'query>>;
+
+struct ScanCursor<'query, 'body> {
+    current: Option<PhysicalRow<'query>>,
+    physical: &'query Physical<'body>,
+    projection: Option<Projection>,
+    next: usize,
+    done: bool,
+    _allocation: RetainedReservation<'query>,
+}
+impl ScanCursor<'_, '_> {
+    fn advance_inner(&mut self) -> Result<bool> {
+        let Some(id) = self.physical.table.id_at(self.next) else {
+            self.done = true;
+            // This used to run after the last consumer returned, not before it.
+            self.physical.budget.check()?;
+            return Ok(false);
+        };
+        self.physical.budget.check()?;
+        self.next += 1;
+        let raw = self.physical.table.leased_row_projected(
+            id,
+            1 << 20,
+            self.projection.as_ref().map(|selected| &selected.names),
+        )?;
+        self.current = Some(raw.try_map(|raw| {
+            self.physical.flatten(
+                raw,
+                self.projection.as_ref().map(|selected| &selected.indices),
+            )
+        })?);
+        Ok(true)
+    }
+}
+impl RowCursor for ScanCursor<'_, '_> {
+    fn advance(&mut self) -> Result<bool> {
+        self.current = None;
+        if self.done {
+            return Ok(false);
+        }
+        let result = self.advance_inner();
+        if result.is_err() {
+            self.done = true;
+        }
+        result
+    }
+    fn row(&self) -> &[Scalar] {
+        self.current.as_ref().map_or(&[], |row| &row.value().cells)
+    }
+}
+struct EqualCursor<'query, 'body> {
+    current: Option<PhysicalRow<'query>>,
+    physical: &'query Physical<'body>,
+    pending: Option<u32>,
+    _allocation: RetainedReservation<'query>,
+}
+impl RowCursor for EqualCursor<'_, '_> {
+    fn advance(&mut self) -> Result<bool> {
+        self.current = None;
+        let Some(id) = self.pending.take() else {
+            // Physical equality has no trailing budget check.
+            return Ok(false);
+        };
+        let raw = match self.physical.table.leased_row_projected(id, 1 << 20, None) {
+            Ok(raw) => raw,
+            Err(error) if error.code == "table.record_not_found" => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        // Only decoder misses are handled as empty. Flattening and later
+        // consumer errors, even record_not_found, remain the original error.
+        self.current = Some(raw.try_map(|raw| self.physical.flatten(raw, None))?);
+        Ok(true)
+    }
+    fn row(&self) -> &[Scalar] {
+        self.current.as_ref().map_or(&[], |row| &row.value().cells)
     }
 }
 
@@ -127,13 +228,11 @@ impl<'body> Physical<'body> {
         &self.schema
     }
 
-    fn flatten(
-        &self,
+    fn flatten<'query>(
+        &'query self,
         mut raw: BTreeMap<String, table::Value>,
         selected: Option<&BTreeSet<usize>>,
-        emit: &mut RowYield<'_>,
-    ) -> Result<()> {
-        let safety = self.budget.safety_only();
+    ) -> Result<FlatRow<'query>> {
         let bytes = self
             .schema
             .columns
@@ -141,7 +240,9 @@ impl<'body> Physical<'body> {
             .checked_mul(size_of::<Scalar>())
             .and_then(|n| n.checked_add(64))
             .ok_or_else(limit)?;
-        let _scratch = safety.reserve_retained(bytes)?;
+        // reserve_retained always has zero logical cost. Borrow the stable
+        // owner, not a temporary safety_only view, across cursor suspension.
+        let vector = self.budget.reserve_retained(bytes)?;
         let mut row = Vec::new();
         row.try_reserve_exact(self.schema.columns.len())
             .map_err(|_| limit())?;
@@ -180,40 +281,13 @@ impl<'body> Physical<'body> {
                 offset += 1;
             }
         }
-        emit(&row)
+        Ok(FlatRow {
+            cells: row,
+            _vector: vector,
+            _raw: raw,
+        })
     }
-    fn scan_mode(
-        &self,
-        selected: Option<(&BTreeSet<usize>, &BTreeSet<String>)>,
-        emit: &mut RowYield<'_>,
-    ) -> Result<()> {
-        self.budget.check()?;
-        // Go's default SQL TableSource uses a 4 MiB sorted-ID scan allowance.
-        // Rust reuses its already-admitted sorted IDs but retains this limit.
-        if self.table.logical_count() > (4 << 20) / 4 {
-            return Err(fault(
-                "table.limit_exceeded",
-                3,
-                "SQL table scan index exceeds its bound",
-            ));
-        }
-        for id in self.table.ids() {
-            self.budget.check()?;
-            self.table.with_row_projected(
-                id,
-                1 << 20,
-                selected.map(|(_, names)| names),
-                |raw| self.flatten(raw, selected.map(|(indices, _)| indices), emit),
-            )?;
-        }
-        self.budget.check()
-    }
-}
-impl RowProvider for Physical<'_> {
-    fn scan(&self, emit: &mut RowYield<'_>) -> Result<()> {
-        self.scan_mode(None, emit)
-    }
-    fn scan_selected(&self, columns: &[usize], emit: &mut RowYield<'_>) -> Result<()> {
+    fn projection(&self, columns: &[usize]) -> Result<Projection> {
         self.budget.check()?;
         if columns.iter().any(|i| *i >= self.schema.columns.len()) {
             return Err(binding());
@@ -243,32 +317,61 @@ impl RowProvider for Physical<'_> {
             }
             offset += width;
         }
-        self.scan_mode(Some((&indices, &names)), emit)
+        Ok(Projection { indices, names })
+    }
+}
+impl RowProvider for Physical<'_> {
+    fn cursor(&self, selected: Option<&[usize]>) -> Result<Box<dyn RowCursor + '_>> {
+        let projection = selected
+            .map(|columns| self.projection(columns))
+            .transpose()?;
+        self.budget.check()?;
+        // Go's default SQL TableSource uses a 4 MiB sorted-ID scan allowance.
+        // Rust reuses its already-admitted sorted IDs but retains this limit.
+        if self.table.logical_count() > (4 << 20) / 4 {
+            return Err(fault(
+                "table.limit_exceeded",
+                3,
+                "SQL table scan index exceeds its bound",
+            ));
+        }
+        let allocation = self
+            .budget
+            .reserve_retained(size_of::<ScanCursor<'_, '_>>())?;
+        Ok(Box::new(ScanCursor {
+            current: None,
+            physical: self,
+            projection,
+            next: 0,
+            done: false,
+            _allocation: allocation,
+        }))
+    }
+    fn scan(&self, emit: &mut RowYield<'_>) -> Result<()> {
+        emit_rows(self.cursor(None)?, emit)
+    }
+    fn scan_selected(&self, columns: &[usize], emit: &mut RowYield<'_>) -> Result<()> {
+        emit_rows(self.cursor(Some(columns))?, emit)
     }
     fn has_equal(&self) -> bool {
         true
     }
-    fn equal(
-        &self,
-        column: &str,
-        value: &Scalar,
-        emit: &mut RowYield<'_>,
-    ) -> Result<EqualityOutcome> {
+    fn equal_cursor(&self, column: &str, value: &Scalar) -> Result<EqualityCursor<'_>> {
         // Match Go's callback order. The evaluator checks original control
         // while evaluating the candidate; wrong-column/NULL/type branches do
         // not perform a speculative table read or replace their first error.
         if !crate::hotfix::remote::equal_fold(column, &self.schema.columns[self.identity]) {
-            return Ok(EqualityOutcome::Declined);
+            return Ok(EqualityCursor::Declined);
         }
         let id = match value {
-            Scalar::Null => return Ok(EqualityOutcome::Handled),
+            Scalar::Null => return Ok(EqualityCursor::Empty),
             Scalar::Int(n) => match u32::try_from(*n) {
                 Ok(n) => n,
-                Err(_) => return Ok(EqualityOutcome::Handled),
+                Err(_) => return Ok(EqualityCursor::Empty),
             },
             Scalar::UInt(n) => match u32::try_from(*n) {
                 Ok(n) => n,
-                Err(_) => return Ok(EqualityOutcome::Handled),
+                Err(_) => return Ok(EqualityCursor::Empty),
             },
             Scalar::Float(n) if !n.is_finite() => {
                 return Err(fault(
@@ -278,7 +381,7 @@ impl RowProvider for Physical<'_> {
                 ));
             }
             Scalar::Float(n) if *n < 0.0 || *n > u32::MAX as f64 || n.trunc() != *n => {
-                return Ok(EqualityOutcome::Handled);
+                return Ok(EqualityCursor::Empty);
             }
             Scalar::Float(n) => *n as u32,
             _ => {
@@ -289,18 +392,31 @@ impl RowProvider for Physical<'_> {
                 ));
             }
         };
-        let mut decoded = false;
-        match self.table.with_row_projected(id, 1 << 20, None, |row| {
-            decoded = true;
-            self.flatten(row, None, emit)
-        }) {
-            Ok(()) => {}
-            Err(error) if !decoded && error.code == "table.record_not_found" => {
-                return Ok(EqualityOutcome::Handled);
+        let allocation = self
+            .budget
+            .reserve_retained(size_of::<EqualCursor<'_, '_>>())?;
+        Ok(EqualityCursor::Rows(Box::new(EqualCursor {
+            current: None,
+            physical: self,
+            pending: Some(id),
+            _allocation: allocation,
+        })))
+    }
+
+    fn equal(
+        &self,
+        column: &str,
+        value: &Scalar,
+        emit: &mut RowYield<'_>,
+    ) -> Result<EqualityOutcome> {
+        match self.equal_cursor(column, value)? {
+            EqualityCursor::Declined => Ok(EqualityOutcome::Declined),
+            EqualityCursor::Empty => Ok(EqualityOutcome::Handled),
+            EqualityCursor::Rows(cursor) => {
+                emit_rows(cursor, emit)?;
+                Ok(EqualityOutcome::Handled)
             }
-            Err(error) => return Err(error),
         }
-        Ok(EqualityOutcome::Handled)
     }
 }
 
@@ -320,6 +436,15 @@ impl PreparedInput<'_> {
     }
 }
 impl RowProvider for PreparedInput<'_> {
+    fn cursor(&self, selected: Option<&[usize]>) -> Result<Box<dyn RowCursor + '_>> {
+        if let Some(plan) = &self.overlay {
+            // Effective Scan deliberately ignores projection, including its
+            // validation/metadata charge, just like the original adapter.
+            plan.cursor(&self.base, &self.base.budget)
+        } else {
+            self.base.cursor(selected)
+        }
+    }
     fn scan(&self, emit: &mut RowYield<'_>) -> Result<()> {
         if let Some(plan) = &self.overlay {
             plan.scan(&self.base, &self.base.budget, emit)
@@ -336,6 +461,13 @@ impl RowProvider for PreparedInput<'_> {
     }
     fn has_equal(&self) -> bool {
         self.base.has_equal()
+    }
+    fn equal_cursor(&self, column: &str, value: &Scalar) -> Result<EqualityCursor<'_>> {
+        if let Some(plan) = &self.overlay {
+            plan.equal_cursor(&self.base, &self.base.budget, column, value)
+        } else {
+            self.base.equal_cursor(column, value)
+        }
     }
     fn equal(
         &self,

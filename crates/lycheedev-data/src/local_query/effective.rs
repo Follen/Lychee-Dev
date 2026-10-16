@@ -2,6 +2,8 @@
 //! authenticated immutable snapshots; an overlay never changes a static table.
 use super::*;
 use crate::hotfix::{self, CacheEntry};
+use crate::resource::RetainedReservation;
+use relational::{EqualityCursor, RowCursor};
 use serde::Serialize;
 use std::collections::BTreeSet;
 
@@ -564,9 +566,162 @@ impl<'a> Snapshots<'a> {
     }
 }
 
+struct AugmentedRow<'query> {
+    cells: Vec<relational::Scalar>,
+    _allocation: RetainedReservation<'query>,
+}
+
+struct OverlayScanCursor<'query> {
+    current: Option<AugmentedRow<'query>>,
+    // The base remains on its current row while the augmented row is consumed.
+    // Its decoded row/vector leases cannot be refunded merely after cloning.
+    base: Option<Box<dyn RowCursor + 'query>>,
+    visited: BTreeSet<u32>,
+    _visited: RetainedReservation<'query>,
+    visited_bytes: usize,
+    patches: std::collections::btree_map::Iter<'query, u32, Patch>,
+    plan: &'query OverlayPlan,
+    budget: &'query Budget,
+    done: bool,
+    _allocation: RetainedReservation<'query>,
+}
+impl OverlayScanCursor<'_> {
+    fn advance_inner(&mut self) -> Result<bool> {
+        while let Some(base) = &mut self.base {
+            if !base.advance()? {
+                self.base = None;
+                break;
+            }
+            self.budget.check()?;
+            let row = base.row();
+            let id = row_id(row.get(self.plan.identity_index).ok_or_else(fields)?)?;
+            if let Some(patch) = self.plan.patches.get(&id) {
+                if !self.visited.contains(&id) {
+                    let count = self.visited.len().checked_add(1).ok_or_else(limit)?;
+                    let next = tree_bytes::<u32, ()>(count);
+                    self._visited
+                        .grow(next.checked_sub(self.visited_bytes).ok_or_else(limit)?)?;
+                    self.visited.insert(id);
+                    self.visited_bytes = next;
+                }
+                if let Some(values) = &patch.values {
+                    self.current = Some(self.plan.augment(values, Some(patch), self.budget)?);
+                    return Ok(true);
+                }
+            } else {
+                self.current = Some(self.plan.augment(row, None, self.budget)?);
+                return Ok(true);
+            }
+        }
+        // This phase starts only after successful base exhaustion, including
+        // its terminal checks. A late base error cannot leak appended patches.
+        for (id, patch) in self.patches.by_ref() {
+            self.budget.check()?;
+            if !self.visited.contains(id)
+                && let Some(values) = &patch.values
+            {
+                self.current = Some(self.plan.augment(values, Some(patch), self.budget)?);
+                return Ok(true);
+            }
+        }
+        self.done = true;
+        Ok(false)
+    }
+}
+impl RowCursor for OverlayScanCursor<'_> {
+    fn advance(&mut self) -> Result<bool> {
+        self.current = None;
+        if self.done {
+            return Ok(false);
+        }
+        let result = self.advance_inner();
+        if result.is_err() {
+            self.done = true;
+        }
+        result
+    }
+    fn row(&self) -> &[relational::Scalar] {
+        self.current.as_ref().map_or(&[], |row| &row.cells)
+    }
+}
+
+enum EqualInput<'query> {
+    Patch(Option<&'query Patch>),
+    Base(Box<dyn RowCursor + 'query>),
+}
+struct OverlayEqualCursor<'query> {
+    current: Option<AugmentedRow<'query>>,
+    input: EqualInput<'query>,
+    plan: &'query OverlayPlan,
+    budget: &'query Budget,
+    done: bool,
+    _allocation: RetainedReservation<'query>,
+}
+impl OverlayEqualCursor<'_> {
+    fn advance_inner(&mut self) -> Result<bool> {
+        match &mut self.input {
+            EqualInput::Patch(pending) => {
+                let Some(patch) = pending.take() else {
+                    self.done = true;
+                    return Ok(false);
+                };
+                let values = patch.values.as_ref().ok_or_else(fields)?;
+                self.current = Some(self.plan.augment(values, Some(patch), self.budget)?);
+            }
+            EqualInput::Base(base) => {
+                if !base.advance()? {
+                    self.done = true;
+                    return Ok(false);
+                }
+                self.current = Some(self.plan.augment(base.row(), None, self.budget)?);
+            }
+        }
+        Ok(true)
+    }
+}
+impl RowCursor for OverlayEqualCursor<'_> {
+    fn advance(&mut self) -> Result<bool> {
+        self.current = None;
+        if self.done {
+            return Ok(false);
+        }
+        let result = self.advance_inner();
+        if result.is_err() {
+            self.done = true;
+        }
+        result
+    }
+    fn row(&self) -> &[relational::Scalar] {
+        self.current.as_ref().map_or(&[], |row| &row.cells)
+    }
+}
+
 impl OverlayPlan {
     pub(super) fn schema(&self) -> &relational::Source {
         &self.schema
+    }
+
+    pub(super) fn cursor<'query>(
+        &'query self,
+        base: &'query dyn relational::RowProvider,
+        budget: &'query Budget,
+    ) -> Result<Box<dyn RowCursor + 'query>> {
+        budget.check()?;
+        let visited = budget.reserve_retained(0)?;
+        let allocation = budget.reserve_retained(size_of::<OverlayScanCursor<'_>>())?;
+        let base = base.cursor(None)?;
+        Ok(Box::new(OverlayScanCursor {
+            current: None,
+            base: Some(base),
+            visited: BTreeSet::new(),
+            _visited: visited,
+            visited_bytes: 0,
+            patches: self.patches.iter(),
+            plan: self,
+            budget,
+            done: false,
+            _allocation: allocation,
+        }))
     }
 
     pub(super) fn scan(
@@ -575,41 +730,50 @@ impl OverlayPlan {
         budget: &Budget,
         emit: &mut relational::RowYield<'_>,
     ) -> Result<()> {
-        budget.check()?;
-        let safety = budget.safety_only();
-        let mut visited_reservation = safety.reserve_retained(0)?;
-        let mut visited_bytes = 0usize;
-        let mut visited = BTreeSet::new();
-        base.scan(&mut |row| {
-            budget.check()?;
-            let id = row_id(row.get(self.identity_index).ok_or_else(fields)?)?;
-            if let Some(patch) = self.patches.get(&id) {
-                if !visited.contains(&id) {
-                    let count = visited.len().checked_add(1).ok_or_else(limit)?;
-                    let next = tree_bytes::<u32, ()>(count);
-                    visited_reservation.grow(next.checked_sub(visited_bytes).ok_or_else(limit)?)?;
-                    visited.insert(id);
-                    visited_bytes = next;
-                }
-                if let Some(values) = &patch.values {
-                    self.emit_augmented(values, Some(patch), &safety, emit)?;
-                }
-                Ok(())
-            } else {
-                self.emit_augmented(row, None, &safety, emit)
-            }
-        })?;
-        // Only effective Scan appends unmatched live patches in numeric order.
-        // Equal preserves its caller's candidate order and never scans here.
-        for (id, patch) in &self.patches {
-            budget.check()?;
-            if !visited.contains(id)
-                && let Some(values) = &patch.values
-            {
-                self.emit_augmented(values, Some(patch), &safety, emit)?;
-            }
+        provider::emit_rows(self.cursor(base, budget)?, emit)
+    }
+
+    pub(super) fn equal_cursor<'query>(
+        &'query self,
+        base: &'query dyn relational::RowProvider,
+        budget: &'query Budget,
+        column: &str,
+        value: &relational::Scalar,
+    ) -> Result<EqualityCursor<'query>> {
+        // Go declines before looking at the value or touching a provider.
+        // The executor owns the outer operation check before this boundary.
+        if !crate::hotfix::remote::equal_fold(column, &self.schema.columns[self.identity_index])
+            || !base.has_equal()
+        {
+            return Ok(EqualityCursor::Declined);
         }
-        Ok(())
+        let input = if let Ok(id) = row_id(value)
+            && let Some(patch) = self.patches.get(&id)
+        {
+            // A replacement/deletion masks the base, including missing IDs.
+            // Deletion is handled without a new allocation or budget check.
+            if patch.values.is_none() {
+                return Ok(EqualityCursor::Empty);
+            }
+            EqualInput::Patch(Some(patch))
+        } else {
+            // Preserve the original scalar and the base's NULL/type/range
+            // branches. Empty/declined outcomes need no overlay allocation.
+            match base.equal_cursor(column, value)? {
+                EqualityCursor::Declined => return Ok(EqualityCursor::Declined),
+                EqualityCursor::Empty => return Ok(EqualityCursor::Empty),
+                EqualityCursor::Rows(cursor) => EqualInput::Base(cursor),
+            }
+        };
+        let allocation = budget.reserve_retained(size_of::<OverlayEqualCursor<'_>>())?;
+        Ok(EqualityCursor::Rows(Box::new(OverlayEqualCursor {
+            current: None,
+            input,
+            plan: self,
+            budget,
+            done: false,
+            _allocation: allocation,
+        })))
     }
 
     pub(super) fn equal(
@@ -620,45 +784,28 @@ impl OverlayPlan {
         value: &relational::Scalar,
         emit: &mut relational::RowYield<'_>,
     ) -> Result<relational::EqualityOutcome> {
-        // Go declines before looking at the value or touching a provider.
-        // The executor owns the outer operation check before this boundary.
-        if !crate::hotfix::remote::equal_fold(column, &self.schema.columns[self.identity_index])
-            || !base.has_equal()
-        {
-            return Ok(relational::EqualityOutcome::Declined);
-        }
-        let safety = budget.safety_only();
-        if let Ok(id) = row_id(value)
-            && let Some(patch) = self.patches.get(&id)
-        {
-            if let Some(values) = &patch.values {
-                self.emit_augmented(values, Some(patch), &safety, emit)?;
+        match self.equal_cursor(base, budget, column, value)? {
+            EqualityCursor::Declined => Ok(relational::EqualityOutcome::Declined),
+            EqualityCursor::Empty => Ok(relational::EqualityOutcome::Handled),
+            EqualityCursor::Rows(cursor) => {
+                provider::emit_rows(cursor, emit)?;
+                Ok(relational::EqualityOutcome::Handled)
             }
-            // A replacement or deletion masks the base, even when no physical
-            // record exists. Never perform a base lookup for a known patch.
-            return Ok(relational::EqualityOutcome::Handled);
         }
-        // Invalid/out-of-range/NULL values belong to the base's SQL contract.
-        // Do not expose the overlay's row_id conversion failure or coerce the
-        // scalar before delegation; in particular retain float/type errors.
-        base.equal(column, value, &mut |row| {
-            self.emit_augmented(row, None, &safety, emit)
-        })
     }
 
-    fn emit_augmented(
+    fn augment<'query>(
         &self,
         row: &[relational::Scalar],
         patch: Option<&Patch>,
-        safety: &Budget,
-        emit: &mut relational::RowYield<'_>,
-    ) -> Result<()> {
+        budget: &'query Budget,
+    ) -> Result<AugmentedRow<'query>> {
         let source = patch.map(|patch| self.capture_ids[patch.ordinal].as_str());
         let length = row.len().checked_add(3).ok_or_else(limit)?;
-        // The guard outlives the vector and all cloned strings, including on
-        // consumer error. Every retained consumer must admit its own copy.
-        let _scratch =
-            safety.reserve_retained(cloned_row_bytes(row, 3, source.map_or(0, str::len))?)?;
+        // reserve_retained always charges only safety bytes; borrow the stable
+        // budget rather than a temporary safety_only view across suspension.
+        let allocation =
+            budget.reserve_retained(cloned_row_bytes(row, 3, source.map_or(0, str::len))?)?;
         let mut out = clone_row(row, length)?;
         if let Some(patch) = patch {
             out.extend([
@@ -673,8 +820,11 @@ impl OverlayPlan {
                 relational::Scalar::Null,
             ]);
         }
-        safety.check()?;
-        emit(&out)
+        budget.check()?;
+        Ok(AugmentedRow {
+            cells: out,
+            _allocation: allocation,
+        })
     }
 }
 

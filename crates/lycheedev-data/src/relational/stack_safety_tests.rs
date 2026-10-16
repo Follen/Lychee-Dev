@@ -7,30 +7,63 @@ thread_local! {
     static ENABLED: Cell<bool> = const {Cell::new(false)};
     static ACTIVE: Cell<usize> = const {Cell::new(0)};
     static PEAK: Cell<usize> = const {Cell::new(0)};
-    static BASE: Cell<usize> = const {Cell::new(0)};
-    static SPAN: Cell<usize> = const {Cell::new(0)};
+    static LIVE_FUTURE_BYTES: Cell<usize> = const {Cell::new(0)};
+    static PEAK_FUTURE_BYTES: Cell<usize> = const {Cell::new(0)};
+    static POLL_ACTIVE: Cell<usize> = const {Cell::new(0)};
+    static POLL_PEAK: Cell<usize> = const {Cell::new(0)};
+    static POLL_BASE: Cell<usize> = const {Cell::new(0)};
+    static POLL_SPAN: Cell<usize> = const {Cell::new(0)};
 }
-pub(super) struct QueryEntry(bool);
-pub(super) fn enter_query(marker: &u8) -> QueryEntry {
+pub(super) struct QueryEntry {
+    enabled: bool,
+    heap_bytes: usize,
+}
+pub(super) fn enter_query(_marker: &u8, heap_bytes: usize) -> QueryEntry {
     let enabled = ENABLED.get();
     if enabled {
         let active = ACTIVE.get() + 1;
-        // A test-only address difference observes the live synchronous call
-        // chain without dereferencing a pointer or configuring a stack size.
-        let address = std::ptr::from_ref(marker) as usize;
-        if active == 1 {
-            BASE.set(address);
-        }
-        SPAN.set(SPAN.get().max(address.abs_diff(BASE.get())));
+        // This counts owned query states, including suspended heap futures.
+        // Their marker addresses are not evidence of native stack frames.
         ACTIVE.set(active);
         PEAK.set(PEAK.get().max(active));
+        let live_bytes = LIVE_FUTURE_BYTES.get() + heap_bytes;
+        LIVE_FUTURE_BYTES.set(live_bytes);
+        PEAK_FUTURE_BYTES.set(PEAK_FUTURE_BYTES.get().max(live_bytes));
     }
-    QueryEntry(enabled)
+    QueryEntry {
+        enabled,
+        heap_bytes,
+    }
 }
 impl Drop for QueryEntry {
     fn drop(&mut self) {
-        if self.0 {
+        if self.enabled {
             ACTIVE.set(ACTIVE.get() - 1);
+            LIVE_FUTURE_BYTES.set(LIVE_FUTURE_BYTES.get() - self.heap_bytes);
+        }
+    }
+}
+pub(super) struct PollEntry(bool);
+pub(super) fn enter_poll(marker: &u8) -> PollEntry {
+    let enabled = ENABLED.get();
+    if enabled {
+        let active = POLL_ACTIVE.get() + 1;
+        // The caller owns this marker in its synchronous poll helper. Only
+        // simultaneous native poll calls contribute to the observed span.
+        let address = std::ptr::from_ref(marker) as usize;
+        if active == 1 {
+            POLL_BASE.set(address);
+        }
+        POLL_SPAN.set(POLL_SPAN.get().max(address.abs_diff(POLL_BASE.get())));
+        POLL_ACTIVE.set(active);
+        POLL_PEAK.set(POLL_PEAK.get().max(active));
+    }
+    PollEntry(enabled)
+}
+impl Drop for PollEntry {
+    fn drop(&mut self) {
+        if self.0 {
+            POLL_ACTIVE.set(POLL_ACTIVE.get() - 1);
         }
     }
 }
@@ -39,16 +72,14 @@ impl Trace {
     fn new(label: &str) -> Self {
         assert_eq!(ACTIVE.get(), 0);
         PEAK.set(0);
-        SPAN.set(0);
+        assert_eq!(LIVE_FUTURE_BYTES.get(), 0);
+        PEAK_FUTURE_BYTES.set(0);
+        assert_eq!(POLL_ACTIVE.get(), 0);
+        POLL_PEAK.set(0);
+        POLL_SPAN.set(0);
         ENABLED.set(true);
         marker(&format!(
-            "{label}: begin; type bytes Program={} Work={} Frame={} Context={} Plan={} Grouping={}; these are owned type sizes, not compiler native-frame sizes",
-            std::mem::size_of::<Program>(),
-            std::mem::size_of::<Work<'_>>(),
-            std::mem::size_of::<subquery::Frame<'_>>(),
-            std::mem::size_of::<subquery::Context<'_>>(),
-            std::mem::size_of::<joins::Plan<'_, '_>>(),
-            std::mem::size_of::<aggregate::Grouping<'_>>()
+            "{label}: begin; admitted future bytes measured at runtime; synchronous poll markers alone observe native nesting"
         ));
         Self
     }
@@ -56,13 +87,20 @@ impl Trace {
 impl Drop for Trace {
     fn drop(&mut self) {
         marker(&format!(
-            "completed: peak active query entries={}; native marker span bytes={}; remaining={}",
+            "completed: peak live query states={}; remaining query states={}; peak live future bytes={}; remaining future bytes={}; peak native poll nesting={}; native poll marker span bytes={}; remaining polls={}",
             PEAK.get(),
-            SPAN.get(),
-            ACTIVE.get()
+            ACTIVE.get(),
+            PEAK_FUTURE_BYTES.get(),
+            LIVE_FUTURE_BYTES.get(),
+            POLL_PEAK.get(),
+            POLL_SPAN.get(),
+            POLL_ACTIVE.get()
         ));
         ENABLED.set(false);
         assert_eq!(ACTIVE.get(), 0);
+        assert_eq!(LIVE_FUTURE_BYTES.get(), 0);
+        assert!(POLL_PEAK.get() <= 1, "driver poll must not recurse");
+        assert_eq!(POLL_ACTIVE.get(), 0);
     }
 }
 fn marker(message: &str) {
@@ -180,7 +218,7 @@ fn mixed_cte_derived_case_join_scalar_default_stack_preserves_128_129() {
     assert!(result.complete);
     assert!(
         PEAK.get() >= 60,
-        "every nested query remains live across the synchronous boundary"
+        "every nested query remains owned while its child is suspended"
     );
     marker("mixed128: explain");
     let explanation = Program::compile(&format!("EXPLAIN {sql}"))
@@ -404,9 +442,61 @@ struct LateProvider<'a> {
     calls: Cell<usize>,
     cancel: Option<&'a AtomicBool>,
     cancel_on: usize,
+    live_cursors: Cell<usize>,
+    live_rows: Cell<usize>,
+    peak_rows: Cell<usize>,
+    drops: Cell<usize>,
+}
+struct LateCursor<'a, 'b> {
+    provider: &'a LateProvider<'b>,
+    yielded: bool,
+    current: bool,
+    row: [Scalar; 1],
+}
+impl RowCursor for LateCursor<'_, '_> {
+    fn advance(&mut self) -> Result<bool> {
+        if !self.yielded {
+            self.yielded = true;
+            self.current = true;
+            let live = self.provider.live_rows.get() + 1;
+            self.provider.live_rows.set(live);
+            self.provider
+                .peak_rows
+                .set(self.provider.peak_rows.get().max(live));
+            return Ok(true);
+        }
+        if self.current {
+            self.provider
+                .live_rows
+                .set(self.provider.live_rows.get() - 1);
+            self.current = false;
+        }
+        self.row.fill(Scalar::Null);
+        Err(fault(
+            "fixture.late_scan",
+            5,
+            "provider failed after its row",
+        ))
+    }
+    fn row(&self) -> &[Scalar] {
+        if self.yielded { &self.row } else { &[] }
+    }
+}
+impl Drop for LateCursor<'_, '_> {
+    fn drop(&mut self) {
+        self.provider
+            .live_cursors
+            .set(self.provider.live_cursors.get() - 1);
+        self.provider.drops.set(self.provider.drops.get() + 1);
+        if self.current {
+            self.provider
+                .live_rows
+                .set(self.provider.live_rows.get() - 1);
+        }
+    }
 }
 impl RowProvider for LateProvider<'_> {
-    fn scan(&self, emit: &mut RowYield<'_>) -> Result<()> {
+    fn cursor(&self, _: Option<&[usize]>) -> Result<Box<dyn RowCursor + '_>> {
         let call = self.calls.get() + 1;
         self.calls.set(call);
         if call == self.cancel_on
@@ -414,14 +504,23 @@ impl RowProvider for LateProvider<'_> {
         {
             cancel.store(true, AtomicOrdering::Release);
         }
-        emit(&[Scalar::Int(1)])?;
-        Err(fault(
-            "fixture.late_scan",
-            5,
-            "provider failed after its row",
-        ))
+        self.live_cursors.set(self.live_cursors.get() + 1);
+        Ok(Box::new(LateCursor {
+            provider: self,
+            yielded: false,
+            current: false,
+            row: [Scalar::Int(1)],
+        }))
+    }
+    fn scan(&self, emit: &mut RowYield<'_>) -> Result<()> {
+        let mut cursor = self.cursor(None)?;
+        while cursor.advance()? {
+            emit(cursor.row())?;
+        }
+        Ok(())
     }
 }
+
 #[test]
 fn deepest_provider_late_error_and_cancellation_release_all_active_query_frames() {
     for cancelled in [false, true] {
@@ -435,6 +534,10 @@ fn deepest_provider_late_error_and_cancellation_release_all_active_query_frames(
             calls: Cell::new(0),
             cancel: cancelled.then_some(&flag),
             cancel_on: 64,
+            live_cursors: Cell::new(0),
+            live_rows: Cell::new(0),
+            peak_rows: Cell::new(0),
+            drops: Cell::new(0),
         };
         let schema = Source {
             columns: vec!["ID".into()],
@@ -467,6 +570,10 @@ fn deepest_provider_late_error_and_cancellation_release_all_active_query_frames(
             }
         );
         assert_eq!(provider.calls.get(), 64);
+        assert_eq!(provider.peak_rows.get(), 64);
+        assert_eq!(provider.drops.get(), 64);
+        assert_eq!(provider.live_cursors.get(), 0);
+        assert_eq!(provider.live_rows.get(), 0);
         assert_eq!(PEAK.get(), 64);
         assert_eq!(ACTIVE.get(), 0);
         drop(program);
@@ -486,6 +593,10 @@ fn mixed_128_provider_failure_and_cancel_unwind_the_full_owned_chain() {
             calls: Cell::new(0),
             cancel: cancelled.then_some(&flag),
             cancel_on: 1,
+            live_cursors: Cell::new(0),
+            live_rows: Cell::new(0),
+            peak_rows: Cell::new(0),
+            drops: Cell::new(0),
         };
         let physical = Source {
             columns: vec!["ID".into()],
@@ -524,8 +635,58 @@ fn mixed_128_provider_failure_and_cancel_unwind_the_full_owned_chain() {
             }
         );
         assert_eq!(provider.calls.get(), 1);
+        assert_eq!(provider.peak_rows.get(), 1);
+        assert_eq!(provider.drops.get(), 1);
+        assert_eq!(provider.live_cursors.get(), 0);
+        assert_eq!(provider.live_rows.get(), 0);
         assert!(PEAK.get() >= 60);
         assert_eq!(ACTIVE.get(), 0);
         drop(program);
     }
+}
+
+#[test]
+fn last_strong_query_owner_with_live_weak_handles_drops_iteratively() {
+    let _trace = Trace::new("weak-query-cleanup");
+    let leaf = Program::compile("SELECT ID FROM t").unwrap();
+    let mut query = std::sync::Arc::new(leaf.clone());
+    let mut weak = Vec::new();
+    for _ in 0..16384 {
+        weak.push(std::sync::Arc::downgrade(&query));
+        let mut parent = leaf.clone();
+        parent.projection[0].expr = Some(Term::ScalarSubquery(query));
+        query = std::sync::Arc::new(parent);
+    }
+    weak.push(std::sync::Arc::downgrade(&query));
+    drop(query);
+    assert!(weak.iter().all(|query| query.upgrade().is_none()));
+}
+
+#[test]
+fn concurrent_final_query_owners_with_weak_handles_release_without_recursive_drop() {
+    let leaf = Program::compile("SELECT ID FROM t").unwrap();
+    let mut query = std::sync::Arc::new(leaf.clone());
+    let mut weak = Vec::new();
+    let mut other_owners = Vec::new();
+    for _ in 0..8192 {
+        weak.push(std::sync::Arc::downgrade(&query));
+        other_owners.push(query.clone());
+        let mut parent = leaf.clone();
+        parent.projection[0].expr = Some(Term::ScalarSubquery(query));
+        query = std::sync::Arc::new(parent);
+    }
+    let barrier = std::sync::Barrier::new(2);
+    // Both threads keep their ordinary default stack. Only test-owned query
+    // objects cross this boundary; production execution stays same-thread.
+    std::thread::scope(|scope| {
+        let barrier = &barrier;
+        let peer = scope.spawn(move || {
+            barrier.wait();
+            drop(other_owners);
+        });
+        barrier.wait();
+        drop(query);
+        peer.join().unwrap();
+    });
+    assert!(weak.iter().all(|query| query.upgrade().is_none()));
 }

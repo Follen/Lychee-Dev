@@ -71,35 +71,6 @@ pub(super) fn validate_all_keyword(
 pub(super) fn physical_key(name: &str) -> Result<String> {
     Ok(RelationName::from_key(name)?.physical_key())
 }
-pub(super) fn source<'a, 'w: 'a>(
-    inputs: &BTreeMap<String, &'a Source>,
-    name: &RelationName,
-    work: &mut Work<'w>,
-) -> Result<&'a Source> {
-    if let Some(key) = name.lexical_key() {
-        // Internal scoped callers may provide lexical keys directly. Root
-        // entrypoints canonicalize physical keys before entering this map.
-        let mut lexical = inputs
-            .iter()
-            .filter(|(name, _)| identifier_lower(name) == key);
-        if let Some((_, source)) = lexical.next() {
-            if lexical.next().is_some() {
-                return Err(binding());
-            }
-            return Ok(*source);
-        }
-    }
-    if let Some(source) = inputs.get(&name.physical_key()) {
-        work.measure_root(name)?;
-        return Ok(*source);
-    }
-    work.resolve_root(name)
-}
-static RESERVED_SOURCE: Source = Source {
-    columns: Vec::new(),
-    rows: Vec::new(),
-    complete: true,
-};
 
 pub(super) fn dependencies<'a>(
     program: &'a Program,
@@ -170,80 +141,6 @@ pub(super) fn dependencies<'a>(
             }
         }
     }
-}
-
-fn visible<'a>(
-    inputs: &BTreeMap<String, &'a Source>,
-    reserved: &BTreeSet<String>,
-    results: &'a BTreeMap<String, Source>,
-    work: &mut Work<'_>,
-) -> Result<BTreeMap<String, &'a Source>> {
-    let bytes = inputs
-        .keys()
-        .chain(results.keys())
-        .try_fold(0usize, |n, name| {
-            n.checked_add(name.len() + 96).ok_or_else(budget)
-        })?;
-    work.safety_retain(
-        bytes
-            .checked_add(reserved.iter().map(|name| name.len() + 96).sum::<usize>())
-            .ok_or_else(budget)?,
-    )?;
-    let mut map = BTreeMap::new();
-    for (name, source) in inputs {
-        if !reserved.contains(&identifier_lower(name)) {
-            map.insert(name.clone(), *source);
-        }
-    }
-    for name in reserved {
-        map.insert(name.clone(), &RESERVED_SOURCE);
-    }
-    for (name, source) in results {
-        map.insert(name.clone(), source);
-    }
-    Ok(map)
-}
-
-pub(super) fn execute(
-    program: &Program,
-    sources: &BTreeMap<String, &Source>,
-    scope: subquery::Scope<'_>,
-    parameters: &BTreeMap<String, Scalar>,
-    work: &mut Work<'_>,
-) -> Result<QueryResult> {
-    if program.bindings.is_empty() {
-        return execute_body(program, sources, scope, parameters, work);
-    }
-    work.safety_retain(program.bindings.iter().map(|(n, _)| n.len() + 96).sum())?;
-    // Reserve every local name before any definition runs: a self or forward
-    // reference must fail binding rather than resolve a physical/outer table.
-    let reserved: BTreeSet<_> = program
-        .bindings
-        .iter()
-        .map(|(n, _)| identifiers::lexical_key(n))
-        .collect();
-    let mut results = BTreeMap::new();
-    for (name, body) in &program.bindings {
-        let inputs = visible(sources, &reserved, &results, work)?;
-        let result = if program.recursive && recursive::references(body, name) > 0 {
-            recursive::execute(name, body, &inputs, scope, parameters, work)?
-        } else {
-            body.execute_scoped_with(&inputs, scope, parameters, work)?
-        };
-        work.safety_retain(name.len() + 96)?;
-        results.insert(
-            identifiers::lexical_key(name),
-            Source {
-                columns: result.columns,
-                rows: result.rows,
-                complete: result.complete,
-            },
-        );
-    }
-    let inputs = visible(sources, &reserved, &results, work)?;
-    let mut result = execute_body(program, &inputs, scope, parameters, work)?;
-    result.complete &= results.values().all(|s| s.complete);
-    Ok(result)
 }
 
 /// Retrieval shells retain suffixes and WITH at their actual query node.
@@ -335,68 +232,5 @@ pub(super) fn branches(
             }
         }
     }
-    Ok(result)
-}
-
-fn execute_body(
-    program: &Program,
-    sources: &BTreeMap<String, &Source>,
-    scope: subquery::Scope<'_>,
-    parameters: &BTreeMap<String, Scalar>,
-    work: &mut Work<'_>,
-) -> Result<QueryResult> {
-    if program.branches.is_empty() {
-        return program.execute_select(sources, scope, parameters, work);
-    }
-    let mut combined = None::<Source>;
-    for (index, branch) in program.branches.iter().enumerate() {
-        // This is intentionally after the outer WITH definitions and after
-        // every earlier branch, but before this branch's own WITH or source.
-        // Go accepts these tokens at compile time and rejects them here in
-        // both the real schema preflight and execution traversal.
-        if index + 1 < program.branches.len()
-            && (!branch.order.is_empty() || branch.limit.is_some() || branch.offset.is_some())
-        {
-            return Err(problem(
-                "relational.invalid_syntax",
-                "Non-final UNION ALL branch has a suffix",
-            ));
-        }
-        let result = branch.execute_scoped_with(sources, scope, parameters, work)?;
-        // Move retained rows; never deep-clone scalar payloads between branches.
-        // The row-vector extension itself has a separate admission cost.
-        work.retain(result.rows.len().checked_mul(24).ok_or_else(budget)?)?;
-        if let Some(combined) = combined.as_mut() {
-            if result.columns.len() != combined.columns.len() {
-                return Err(binding());
-            }
-            combined.rows.extend(result.rows);
-            combined.complete &= result.complete;
-        } else {
-            combined = Some(Source {
-                columns: result.columns,
-                rows: result.rows,
-                complete: result.complete,
-            });
-        }
-    }
-    let combined = combined.ok_or_else(binding)?;
-    // Ordinal owners are installed by the compound tail without changing
-    // these raw public names (which may contain dots or escaped quotes).
-    work.safety_retain(program.table.key().len() + 96)?;
-
-    work.safety_retain(sources.keys().map(|name| name.len() + 96).sum())?;
-    let mut inputs = sources.clone();
-    inputs.insert(program.table.key().to_owned(), &combined);
-    // Internal result columns may repeat. Project them by ordinal rather
-    // than re-binding their names. ORDER BY still binds the first branch's
-    // public names and must reject an ambiguous duplicate name.
-    let result = program.execute_select_mode(
-        &inputs,
-        scope,
-        parameters,
-        work,
-        ProjectionMode::CompoundOrdinals,
-    )?;
     Ok(result)
 }

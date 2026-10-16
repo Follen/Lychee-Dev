@@ -413,3 +413,108 @@ fn physical_array_projection_flattens_selected_element_without_reordering_column
         [Scalar::UInt(10), Scalar::Int(11), Scalar::Int(0)]
     );
 }
+
+#[test]
+fn physical_cursor_pauses_without_redecoding_and_owns_each_active_row_lease() {
+    let raw = fixture();
+    let d = definition();
+    let b = budget();
+    let p = physical(&raw, &d, &b);
+    let before = b.snapshot().unwrap();
+    let logical = b.logical_snapshot().unwrap();
+    let mut cursor = p.cursor(None).unwrap();
+    let opened = b.snapshot().unwrap();
+    assert_eq!(b.logical_snapshot().unwrap(), logical);
+    assert!(opened.retained_bytes > before.retained_bytes);
+    assert!(cursor.advance().unwrap());
+    assert_eq!(cursor.row(), [Scalar::UInt(10), Scalar::Int(11)]);
+    let active = b.snapshot().unwrap();
+    assert!(active.retained_bytes > opened.retained_bytes);
+    // A nested lookup has its own lease; the suspended outer row stays live.
+    let EqualityCursor::Rows(mut nested) = p.equal_cursor("ID", &Scalar::UInt(20)).unwrap() else {
+        panic!("expected a physical lookup cursor");
+    };
+    assert!(nested.advance().unwrap());
+    assert_eq!(nested.row(), [Scalar::UInt(20), Scalar::Int(22)]);
+    assert_eq!(cursor.row(), [Scalar::UInt(10), Scalar::Int(11)]);
+    assert!(b.snapshot().unwrap().retained_bytes > active.retained_bytes);
+    drop(nested);
+    assert_eq!(b.snapshot().unwrap().retained_bytes, active.retained_bytes);
+    let work = b.logical_snapshot().unwrap().decode_work;
+    assert_eq!(cursor.row(), [Scalar::UInt(10), Scalar::Int(11)]);
+    assert_eq!(b.logical_snapshot().unwrap().decode_work, work);
+    assert!(cursor.advance().unwrap());
+    assert_eq!(cursor.row(), [Scalar::UInt(20), Scalar::Int(22)]);
+    assert_eq!(b.logical_snapshot().unwrap().decode_work, work + 3);
+    drop(cursor);
+    assert_eq!(b.snapshot().unwrap().retained_bytes, before.retained_bytes);
+    let after = b.logical_snapshot().unwrap();
+    assert_eq!(after.metadata_bytes, logical.metadata_bytes);
+    assert_eq!(after.retained_bytes, logical.retained_bytes);
+}
+
+#[test]
+fn physical_cursor_scan_keeps_terminal_check_but_equal_has_no_trailing_check() {
+    let token = Arc::new(AtomicBool::new(false));
+    let b = Arc::new(Budget::new(
+        Cost::defaults(),
+        Instant::now() + Duration::from_secs(30),
+        Some(token.clone()),
+    ));
+    let raw = fixture();
+    let d = definition();
+    let p = physical(&raw, &d, &b);
+    let before = b.snapshot().unwrap().retained_bytes;
+    let mut cursor = p.cursor(None).unwrap();
+    for _ in 0..4 {
+        assert!(cursor.advance().unwrap());
+    }
+    token.store(true, Ordering::Release);
+    assert_eq!(cursor.advance().unwrap_err().code, "operation.cancelled");
+    drop(cursor);
+    assert_eq!(b.snapshot().unwrap().retained_bytes, before);
+
+    token.store(false, Ordering::Release);
+    let EqualityCursor::Rows(mut cursor) = p.equal_cursor("ID", &Scalar::UInt(10)).unwrap() else {
+        panic!("expected a physical lookup cursor");
+    };
+    assert!(cursor.advance().unwrap());
+    token.store(true, Ordering::Release);
+    assert!(!cursor.advance().unwrap());
+    drop(cursor);
+    assert_eq!(b.snapshot().unwrap().retained_bytes, before);
+    assert!(matches!(
+        p.equal_cursor("ID", &Scalar::Null).unwrap(),
+        EqualityCursor::Empty
+    ));
+    assert!(matches!(
+        p.equal_cursor("other", &Scalar::Bool(true)).unwrap(),
+        EqualityCursor::Declined
+    ));
+    assert_eq!(
+        p.equal_cursor("ID", &Scalar::Bool(true))
+            .err()
+            .unwrap()
+            .code,
+        "relational.type_mismatch"
+    );
+    assert_eq!(b.snapshot().unwrap().retained_bytes, before);
+}
+
+#[test]
+fn physical_selected_cursor_preserves_late_unused_field_error_without_prefetch() {
+    let mut raw = fixture();
+    put32(&mut raw, 140, 0); // First string is empty; second points outside the pool.
+    let mut d = definition();
+    d.fields[1].kind = "string".into();
+    let b = budget();
+    let p = physical(&raw, &d, &b);
+    let work = b.logical_snapshot().unwrap().decode_work;
+    let mut cursor = p.cursor(Some(&[0])).unwrap();
+    assert_eq!(b.logical_snapshot().unwrap().decode_work, work);
+    assert!(cursor.advance().unwrap());
+    assert_eq!(cursor.row(), [Scalar::UInt(10), Scalar::Null]);
+    assert_eq!(b.logical_snapshot().unwrap().decode_work, work + 3);
+    assert_eq!(cursor.advance().unwrap_err().code, "table.invalid_format");
+    assert!(cursor.row().is_empty());
+}

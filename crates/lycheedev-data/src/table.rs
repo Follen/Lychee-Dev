@@ -148,7 +148,7 @@ struct Program {
     palette: Range<usize>,
     common: HashMap<u32, u32>,
 }
-/// One decoded row may be handed synchronously to a consumer without escaping
+/// One decoded row may stay live in a suspended query cursor without escaping
 /// its allocation lease. Only Rust retained safety bytes are temporary; the
 /// original table work and cumulative metadata charges are never refunded.
 struct RowAllocation<'a> {
@@ -180,6 +180,26 @@ impl<'a> RowAllocation<'a> {
             // caller can retain the returned map after the table is dropped.
             budget.charge(Cost::retained(bytes))
         }
+    }
+}
+/// A decoded row and the exact refundable allocation that owns its contents.
+/// Mapping moves values (including strings) without refunding or re-admitting
+/// them. The value is dropped before its guard, including on consumer failure.
+pub(crate) struct LeasedRow<'table, T> {
+    value: T,
+    allocation: RowAllocation<'table>,
+}
+impl<'table, T> LeasedRow<'table, T> {
+    pub(crate) fn value(&self) -> &T {
+        &self.value
+    }
+    pub(crate) fn try_map<U>(
+        self,
+        map: impl FnOnce(T) -> Result<U>,
+    ) -> Result<LeasedRow<'table, U>> {
+        let Self { value, allocation } = self;
+        let value = map(value)?;
+        Ok(LeasedRow { value, allocation })
     }
 }
 // An owned query body retains its exact allocation/verification owner. The
@@ -926,6 +946,9 @@ impl<'a> Table<'a> {
     pub fn ids(&self) -> impl Iterator<Item = u32> + '_ {
         self.ids.iter().copied()
     }
+    pub(crate) fn id_at(&self, index: usize) -> Option<u32> {
+        self.ids.get(index).copied()
+    }
     pub fn logical_count(&self) -> usize {
         self.ids.len()
     }
@@ -1660,18 +1683,17 @@ impl<'a> Table<'a> {
         let mut allocation = RowAllocation::new(self.source.budget.as_deref(), false);
         self.row_projected_inner(id, text_bytes, selected, &mut allocation)
     }
-    /// Consume exactly once while the temporary row lease is live. A consumer
-    /// retaining values beyond the callback must admit its own owned copy.
-    pub(crate) fn with_row_projected(
+    /// Decode once and keep the temporary row lease live until the cursor has
+    /// finished its consumer. Retained copies need their own admission.
+    pub(crate) fn leased_row_projected(
         &self,
         id: u32,
         text_bytes: usize,
         selected: Option<&BTreeSet<String>>,
-        consume: impl FnOnce(BTreeMap<String, Value>) -> Result<()>,
-    ) -> Result<()> {
+    ) -> Result<LeasedRow<'_, BTreeMap<String, Value>>> {
         let mut allocation = RowAllocation::new(self.source.budget.as_deref(), true);
-        let row = self.row_projected_inner(id, text_bytes, selected, &mut allocation)?;
-        consume(row)
+        let value = self.row_projected_inner(id, text_bytes, selected, &mut allocation)?;
+        Ok(LeasedRow { value, allocation })
     }
     fn row_projected_inner(
         &self,

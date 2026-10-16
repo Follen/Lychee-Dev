@@ -169,21 +169,21 @@ pub(super) fn contains(term: &Term) -> bool {
     }
     false
 }
-// Go validates grouped correlations after prepareGroups has inspected every
-// expression. This is distinct from the allocation-only rewrite above.
-fn validate_correlations(
+/// The inspection order and node charges match the synchronous binder. Only
+/// the nested query boundary suspends; no Work or borrowed context view is
+/// retained by the child request.
+async fn validate_correlations_async<'a, 'w: 'a>(
     node: &Term,
     keys: &[Term],
-    params: &BTreeMap<String, Scalar>,
-    context: &subquery::Context<'_>,
-    work: &mut Work<'_>,
+    context: &execution::Context<'a>,
+    control: &execution::Control<'a, 'w>,
 ) -> Result<()> {
     let mut pending = vec![node];
     while let Some(node) = pending.pop() {
-        work.spend()?;
+        control.work(|work| work.spend())?;
         if keys
             .iter()
-            .any(|key| subquery::same_group_expression(node, key, context))
+            .any(|key| subquery::same_group_expression(node, key, &context.view()))
         {
             continue;
         }
@@ -191,16 +191,8 @@ fn validate_correlations(
             node,
             Term::Aggregate(..) | Term::InSubquery(..) | Term::ScalarSubquery(_) | Term::Exists(_)
         ) {
-            let group = context.group.ok_or_else(binding)?;
-            bind_with_aggregates(
-                node,
-                group.columns,
-                group.alias,
-                params,
-                true,
-                context,
-                work,
-            )?;
+            let group = context.group.as_ref().ok_or_else(binding)?;
+            binding::bind_async(node, &group.fields, true, context, control).await?;
         } else {
             term_tree::children(node, &mut pending);
         }
@@ -222,58 +214,6 @@ pub(super) struct Grouping<'a> {
     _allocation: Option<crate::resource::RetainedReservation<'a>>,
 }
 impl<'a> Grouping<'a> {
-    pub(super) fn new(
-        keys: &[Term],
-        outputs: &mut [Term],
-        order: &mut [(Term, bool, Option<bool>)],
-        having: Option<&Term>,
-        output_columns: &[String],
-        params: &BTreeMap<String, Scalar>,
-        context: &subquery::Context<'_>,
-        work: &mut Work<'a>,
-    ) -> Result<Box<Self>> {
-        work.safety_retain(keys.len() * 64 + outputs.len() * 64 + order.len() * 64 + 256)?;
-        let allocation = work
-            .shared
-            .map(|budget| budget.reserve_retained(std::mem::size_of::<Self>()))
-            .transpose()?;
-        let mut this = Box::new(Self {
-            keys: keys.to_vec(),
-            specs: vec![],
-            having: None,
-            lookup: BTreeMap::new(),
-            order: vec![],
-            columns: (0..keys.len()).map(|i| format!("__key_{i}")).collect(),
-            _allocation: allocation,
-        });
-        let rewritten_outputs = outputs
-            .iter()
-            .map(|term| this.rewrite(term, false, output_columns, params, context, work))
-            .collect::<Result<Vec<_>>>()?;
-        this.having = having
-            .map(|term| this.rewrite(term, false, output_columns, params, context, work))
-            .transpose()?;
-        let rewritten_order = order
-            .iter()
-            .map(|(term, _, _)| this.rewrite(term, false, output_columns, params, context, work))
-            .collect::<Result<Vec<_>>>()?;
-        if work.planning {
-            for term in outputs
-                .iter()
-                .chain(having)
-                .chain(order.iter().map(|(term, _, _)| term))
-            {
-                validate_correlations(term, keys, params, context, work)?;
-            }
-        }
-        for (output, rewritten) in outputs.iter_mut().zip(rewritten_outputs) {
-            *output = rewritten;
-        }
-        for ((order, _, _), rewritten) in order.iter_mut().zip(rewritten_order) {
-            *order = rewritten;
-        }
-        Ok(this)
-    }
     fn rewrite(
         &mut self,
         node: &Term,
@@ -353,91 +293,227 @@ impl<'a> Grouping<'a> {
         self.lookup.insert(key, i);
         Ok(i)
     }
-    pub(super) fn add(
-        &mut self,
-        row: &[Scalar],
-        columns: &[String],
-        alias: ColumnOwners<'_>,
-        params: &BTreeMap<String, Scalar>,
-        context: &subquery::Context<'_>,
-        work: &mut Work<'_>,
-    ) -> Result<()> {
-        work.spend()?;
-        let mut values = vec![];
-        let mut key = String::new();
-        for node in &self.keys {
-            let v = eval_scoped(node, row, columns, alias, params, context, work)?;
-            let payload = if let Scalar::String(text) = &v {
-                text.len()
-            } else {
-                0
-            };
-            work.temporary(payload + 8192)?;
-            let part = results::equal_key(&v)?;
-            work.consume(part.len())?;
-            work.temporary(
-                part.len()
-                    .checked_add(32)
-                    .and_then(|n| n.checked_mul(2))
-                    .ok_or_else(budget)?,
-            )?;
-            key.push_str(&format!("{}:{part}", part.len()));
-            if key.len() > work.bytes {
-                return Err(budget());
-            }
-            values.push(v);
-        }
-        let i = if let Some(i) = self.lookup.get(&key) {
-            *i
-        } else {
-            self.create(key, values, work)?
-        };
-        for (spec, state) in self.specs.iter().zip(&mut self.order[i].states) {
-            let value = if let Some(node) = &spec.input {
-                eval_scoped(node, row, columns, alias, params, context, work)?
-            } else {
-                Scalar::Null
-            };
-            state.add(spec, value, work)?;
-        }
-        Ok(())
-    }
     pub(super) fn columns(&self) -> &[String] {
         &self.columns
     }
-    pub(super) fn finish(
-        mut self: Box<Self>,
-        params: &BTreeMap<String, Scalar>,
-        context: &subquery::Context<'_>,
-        work: &mut Work<'_>,
-        emit: &mut dyn FnMut(&[Scalar], &mut Work<'_>) -> Result<()>,
-    ) -> Result<()> {
-        if self.order.is_empty() && self.keys.is_empty() {
-            self.create(String::new(), vec![], work)?;
-        }
-        for group in std::mem::take(&mut self.order) {
-            work.temporary_scope(|work| {
-                work.spend()?;
-                let mut row = group.values;
-                for (spec, state) in self.specs.iter().zip(group.states) {
-                    row.push(state.result(spec, work)?);
-                }
-                if let Some(node) = &self.having
-                    && truth(&eval_scoped(
-                        node,
-                        &row,
-                        &self.columns,
-                        ColumnOwners::Single(""),
-                        params,
-                        context,
+
+    /// Prepare all rewritten expressions before validating correlations, just
+    /// as the original prepareGroups path does. Immutable scalar-query Arcs
+    /// remain shared by the existing Term clone/rewrite implementation.
+    pub(super) async fn new_async<'w: 'a>(
+        keys: &[Term],
+        outputs: &mut [Term],
+        order: &mut [(Term, bool, Option<bool>)],
+        having: Option<&Term>,
+        output_columns: &[String],
+        context: &execution::Context<'a>,
+        control: &execution::Control<'a, 'w>,
+    ) -> Result<Box<Self>> {
+        let mut this = control.work(|work| {
+            work.safety_retain(keys.len() * 64 + outputs.len() * 64 + order.len() * 64 + 256)?;
+            let allocation = work
+                .shared
+                .map(|budget| budget.reserve_retained(std::mem::size_of::<Self>()))
+                .transpose()?;
+            Ok(Box::new(Self {
+                keys: keys.to_vec(),
+                specs: vec![],
+                having: None,
+                lookup: BTreeMap::new(),
+                order: vec![],
+                columns: (0..keys.len()).map(|i| format!("__key_{i}")).collect(),
+                _allocation: allocation,
+            }))
+        })?;
+        let (rewritten_outputs, rewritten_order) = control.work(|work| {
+            let context = context.view();
+            let rewritten_outputs = outputs
+                .iter()
+                .map(|term| {
+                    this.rewrite(
+                        term,
+                        false,
+                        output_columns,
+                        control.parameters(),
+                        &context,
                         work,
-                    )?)? != Some(true)
-                {
-                    return Ok(());
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+            this.having = having
+                .map(|term| {
+                    this.rewrite(
+                        term,
+                        false,
+                        output_columns,
+                        control.parameters(),
+                        &context,
+                        work,
+                    )
+                })
+                .transpose()?;
+            let rewritten_order = order
+                .iter()
+                .map(|(term, _, _)| {
+                    this.rewrite(
+                        term,
+                        false,
+                        output_columns,
+                        control.parameters(),
+                        &context,
+                        work,
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Ok((rewritten_outputs, rewritten_order))
+        })?;
+        if control.planning() {
+            for term in outputs
+                .iter()
+                .chain(having)
+                .chain(order.iter().map(|(term, _, _)| term))
+            {
+                validate_correlations_async(term, keys, context, control).await?;
+            }
+        }
+        for (output, rewritten) in outputs.iter_mut().zip(rewritten_outputs) {
+            *output = rewritten;
+        }
+        for ((order, _, _), rewritten) in order.iter_mut().zip(rewritten_order) {
+            *order = rewritten;
+        }
+        Ok(this)
+    }
+
+    pub(super) async fn add_async<'w: 'a>(
+        &mut self,
+        row: &execution::Row<'a>,
+        fields: &execution::Fields<'a>,
+        context: &execution::Context<'a>,
+        control: &execution::Control<'a, 'w>,
+    ) -> Result<()> {
+        control.work(|work| work.spend())?;
+        let mut values = vec![];
+        let mut key = String::new();
+        for node in &self.keys {
+            let value = evaluation::eval_async(node, row, fields, context, control).await?;
+            control.work(|work| {
+                let payload = if let Scalar::String(text) = &value {
+                    text.len()
+                } else {
+                    0
+                };
+                work.temporary(payload + 8192)?;
+                let part = results::equal_key(&value)?;
+                work.consume(part.len())?;
+                work.temporary(
+                    part.len()
+                        .checked_add(32)
+                        .and_then(|n| n.checked_mul(2))
+                        .ok_or_else(budget)?,
+                )?;
+                key.push_str(&format!("{}:{part}", part.len()));
+                if key.len() > work.bytes {
+                    return Err(budget());
                 }
-                emit(&row, work)
+                Ok(())
             })?;
+            values.push(value);
+        }
+        let index = if let Some(index) = self.lookup.get(&key) {
+            *index
+        } else {
+            control.work(|work| self.create(key, values, work))?
+        };
+        for (spec, state) in self.specs.iter().zip(&mut self.order[index].states) {
+            let value = if let Some(node) = &spec.input {
+                evaluation::eval_async(node, row, fields, context, control).await?
+            } else {
+                Scalar::Null
+            };
+            control.work(|work| state.add(spec, value, work))?;
         }
         Ok(())
+    }
+
+    pub(super) fn into_finish<'c, 'w: 'a>(
+        mut self: Box<Self>,
+        control: &'c execution::Control<'a, 'w>,
+    ) -> Result<Finish<'c, 'a, 'w>> {
+        if self.order.is_empty() && self.keys.is_empty() {
+            control.work(|work| self.create(String::new(), vec![], work))?;
+        }
+        let groups = std::mem::take(&mut self.order).into_iter();
+        Ok(Finish {
+            grouping: self,
+            groups,
+            control,
+            temporary_mark: None,
+        })
+    }
+}
+
+/// Finite result cursor over retained aggregate groups. A yielded row's
+/// temporary scope includes the caller's projection/order expressions, just as
+/// the synchronous emit callback did. Drop the row, then call finish_row;
+/// dropping this cursor also releases that scope after an error or cancellation.
+pub(super) struct Finish<'c, 'a, 'w: 'a> {
+    grouping: Box<Grouping<'a>>,
+    groups: std::vec::IntoIter<Group>,
+    control: &'c execution::Control<'a, 'w>,
+    temporary_mark: Option<usize>,
+}
+
+impl<'a, 'w: 'a> Finish<'_, 'a, 'w> {
+    pub(super) async fn next(
+        &mut self,
+        fields: &execution::Fields<'a>,
+        context: &execution::Context<'a>,
+    ) -> Result<Option<execution::Row<'a>>> {
+        self.finish_row();
+        while let Some(group) = self.groups.next() {
+            self.temporary_mark = Some(self.control.temporary_mark());
+            let result = async {
+                let row = self.control.work(|work| {
+                    work.spend()?;
+                    let mut row = group.values;
+                    for (spec, state) in self.grouping.specs.iter().zip(group.states) {
+                        row.push(state.result(spec, work)?);
+                    }
+                    Ok(row)
+                })?;
+                let row = execution::Row::Values(self.control.share(row)?);
+                if let Some(node) = &self.grouping.having
+                    && truth(
+                        &evaluation::eval_async(node, &row, fields, context, self.control).await?,
+                    )? != Some(true)
+                {
+                    return Ok(None);
+                }
+                Ok(Some(row))
+            }
+            .await;
+            match result {
+                Ok(Some(row)) => return Ok(Some(row)),
+                Ok(None) => self.finish_row(),
+                Err(error) => {
+                    self.finish_row();
+                    return Err(error);
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    pub(super) fn finish_row(&mut self) {
+        if let Some(mark) = self.temporary_mark.take() {
+            self.control.temporary_end(mark);
+        }
+    }
+}
+
+impl<'a, 'w: 'a> Drop for Finish<'_, 'a, 'w> {
+    fn drop(&mut self) {
+        self.finish_row();
     }
 }

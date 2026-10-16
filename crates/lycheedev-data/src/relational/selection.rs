@@ -2,6 +2,8 @@
 //! The legacy opt-in owned-row adapter retains its independently charged index;
 //! the default SQL WDC/effective route uses existing provider Equal directly.
 use super::*;
+#[path = "selection_execution.rs"]
+pub(super) mod execution;
 use crate::resource::{Budget, RetainedReservation};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -231,6 +233,7 @@ fn supported(term: &Term) -> bool {
     }
 }
 const BUFFER_FULL: &str = "relational.selection_buffer_limit";
+#[cfg(test)]
 fn collect<P: Equality>(
     filter: Option<&Term>,
     columns: &[String],
@@ -249,11 +252,9 @@ fn collect<P: Equality>(
     if items.is_empty() {
         return Ok(false);
     }
-    // A correlated column belongs to an enclosing row, not this provider's
-    // identity. The original predicate will evaluate it during the scan.
-    let Ok(column) = column(columns, alias, name) else {
-        return Ok(false);
-    };
+    // The pinned Go optimizer checks the original filter against only this
+    // input's fields. Its missing/outer column error is not a scan fallback.
+    let column = column(columns, alias, name)?;
     let mut temporary = Temporary::new(work);
     let result = (|| {
         let mut values = Vec::new();
@@ -376,6 +377,7 @@ impl Equality for Direct<'_> {
         .map(|outcome| outcome == EqualityOutcome::Handled)
     }
 }
+#[cfg(test)]
 fn equality(
     source: &Source,
     filter: Option<&Term>,
@@ -399,9 +401,7 @@ fn equality(
     if !matches!(value, Term::Number(_) | Term::Value(_) | Term::Parameter(_)) {
         return Ok(false);
     }
-    let Ok(index) = column(&source.columns, alias, name) else {
-        return Ok(false);
-    };
+    let index = column(&source.columns, alias, name)?;
     let value = eval(value, &[], &source.columns, alias, parameters, work)?;
     let result = provider::equal(source, provider, &source.columns[index], &value, work, emit)?;
     // A decline never erases a stop observed at its boundary.
@@ -411,6 +411,7 @@ fn equality(
     Ok(result == EqualityOutcome::Handled)
 }
 
+#[cfg(test)]
 pub(super) fn visit(
     source: &Source,
     selected: Option<&[usize]>,

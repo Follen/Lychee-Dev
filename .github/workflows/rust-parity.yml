@@ -204,7 +204,7 @@ jobs:
         run: node --test tools/rust-emmy-identity.test.mjs tools/rust-build.test.mjs
       - name: Test exact owned-process lifecycle and unknown-child rejection
         if: ${{ !cancelled() && steps.rust.outcome == 'success' && steps.emmy.outcome == 'success' }}
-        run: node --test tools/rust-owned-process.test.mjs
+        run: node --test tools/rust-owned-process.test.mjs tools/rust-owned-process-atomic-job.test.mjs
       - name: Test bounded dependency preparation fixtures
         if: ${{ !cancelled() && steps.rust.outcome == 'success' && steps.emmy.outcome == 'success' }}
         run: python -m unittest discover -s third_party/emmy -p test_prepare.py

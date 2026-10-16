@@ -147,8 +147,8 @@ pub(super) struct Correlation<'a> {
 /// its current row resolver is installed separately by executeRows.
 #[derive(Clone, Copy)]
 pub(super) struct Scope<'a> {
-    pub outer: Option<&'a Frame<'a>>,
-    pub callback: Option<&'a BTreeMap<String, &'a Source>>,
+    pub outer: Option<&'a dyn OuterFrame>,
+    pub callback: Option<Callback<'a>>,
     pub fields: Fields<'a>,
     pub allowed: Option<Correlation<'a>>,
 }
@@ -172,49 +172,75 @@ impl<'a> Scope<'a> {
     {
         Scope {
             outer: self.outer,
-            callback: Some(sources),
+            callback: Some(Callback::Map(sources)),
             fields: self.fields,
             allowed: None,
         }
     }
 }
+#[cfg(test)]
 pub(super) struct Frame<'a> {
     row: &'a [Scalar],
     fields: Fields<'a>,
     resolver: Fields<'a>,
     mapping: Option<&'a [Option<usize>]>,
     allowed: Option<Correlation<'a>>,
-    parent: Option<&'a Frame<'a>>,
+    parent: Option<&'a dyn OuterFrame>,
 }
-impl Frame<'_> {
-    pub(super) fn value(&self, index: usize) -> Result<&Scalar> {
-        // A UNION-tail callback may bind using inherited outer fields while
-        // its current resolver owns numeric-qualified compound columns.
-        let (qualifier, name) = self.fields.part(index)?;
-        let index = local_parts(self.resolver.columns, self.resolver.alias, qualifier, name)?
-            .ok_or_else(binding)?;
-        let index = self.mapping.map_or(Ok(index), |mapping| {
-            mapping.get(index).copied().flatten().ok_or_else(binding)
-        })?;
-        self.row.get(index).ok_or_else(binding)
-    }
-    fn check_allowed(&self, index: usize) -> Result<()> {
-        let Some(allowed) = self.allowed else {
+#[derive(Clone, Copy)]
+pub(super) enum Callback<'a> {
+    Map(&'a BTreeMap<String, &'a Source>),
+    Owned(&'a execution::Sources<'a>),
+}
+pub(super) trait OuterFrame {
+    fn fields(&self) -> Fields<'_>;
+    fn parent(&self) -> Option<&dyn OuterFrame>;
+    fn allowed(&self) -> Option<Correlation<'_>>;
+    fn clone_value(&self, index: usize, work: &mut Work<'_>) -> Result<Scalar>;
+}
+pub(super) fn resolved_index(
+    fields: Fields<'_>,
+    resolver: Fields<'_>,
+    mapping: Option<&[Option<usize>]>,
+    index: usize,
+) -> Result<usize> {
+    let (qualifier, name) = fields.part(index)?;
+    let index =
+        local_parts(resolver.columns, resolver.alias, qualifier, name)?.ok_or_else(binding)?;
+    mapping.map_or(Ok(index), |mapping| {
+        mapping.get(index).copied().flatten().ok_or_else(binding)
+    })
+}
+fn check_allowed(fields: Fields<'_>, allowed: Option<Correlation<'_>>, index: usize) -> Result<()> {
+    let Some(allowed) = allowed else {
+        return Ok(());
+    };
+    let field = fields.part(index)?;
+    let fields = Fields {
+        columns: allowed.columns,
+        alias: allowed.alias,
+    };
+    for (index, entry) in allowed.mapping.iter().enumerate() {
+        if entry.is_some() && fields.part(index)? == field {
             return Ok(());
-        };
-        let field = self.fields.part(index)?;
-        let fields = Fields {
-            columns: allowed.columns,
-            alias: allowed.alias,
-        };
-        // Go groupAllowed is a map keyed by canonical field identity, not by
-        // the ordinal of whatever schema a nested bind temporarily installs.
-        for (index, entry) in allowed.mapping.iter().enumerate() {
-            if entry.is_some() && fields.part(index)? == field {
-                return Ok(());
-            }
         }
-        Err(binding())
+    }
+    Err(binding())
+}
+#[cfg(test)]
+impl OuterFrame for Frame<'_> {
+    fn fields(&self) -> Fields<'_> {
+        self.fields
+    }
+    fn parent(&self) -> Option<&dyn OuterFrame> {
+        self.parent
+    }
+    fn allowed(&self) -> Option<Correlation<'_>> {
+        self.allowed
+    }
+    fn clone_value(&self, index: usize, work: &mut Work<'_>) -> Result<Scalar> {
+        let index = resolved_index(self.fields, self.resolver, self.mapping, index)?;
+        work.clone_scalar(self.row.get(index).ok_or_else(binding)?)
     }
 }
 #[derive(Clone, Copy)]
@@ -226,7 +252,7 @@ pub(super) struct Context<'a> {
 impl<'a> Context<'a> {
     pub(super) fn new(
         sources: &'a BTreeMap<String, &'a Source>,
-        outer: Option<&'a Frame<'a>>,
+        outer: Option<&'a dyn OuterFrame>,
     ) -> Self {
         Self {
             scope: Scope {
@@ -241,7 +267,7 @@ impl<'a> Context<'a> {
 }
 pub(super) enum Position<'a> {
     Local(usize),
-    Outer(&'a Frame<'a>, usize),
+    Outer(&'a dyn OuterFrame, usize),
 }
 fn local(columns: &[String], alias: ColumnOwners<'_>, name: &ColumnRef) -> Result<Option<usize>> {
     local_parts(columns, alias, &name.qualifier, &name.name)
@@ -278,17 +304,17 @@ pub(super) fn resolve<'a>(
     columns: &[String],
     alias: ColumnOwners<'_>,
     name: &ColumnRef,
-    mut outer: Option<&'a Frame<'a>>,
+    mut outer: Option<&'a dyn OuterFrame>,
 ) -> Result<Position<'a>> {
     if let Some(index) = local(columns, alias, name)? {
         return Ok(Position::Local(index));
     }
     while let Some(frame) = outer {
-        if let Some(index) = local(frame.fields.columns, frame.fields.alias, name)? {
-            frame.check_allowed(index)?;
+        if let Some(index) = local(frame.fields().columns, frame.fields().alias, name)? {
+            check_allowed(frame.fields(), frame.allowed(), index)?;
             return Ok(Position::Outer(frame, index));
         }
-        outer = frame.parent;
+        outer = frame.parent();
     }
     Err(missing_column(columns, alias, name))
 }
@@ -296,7 +322,7 @@ pub(super) fn display_column(
     columns: &[String],
     alias: ColumnOwners<'_>,
     name: &ColumnRef,
-    outer: Option<&Frame<'_>>,
+    outer: Option<&dyn OuterFrame>,
 ) -> Result<Option<String>> {
     let Position::Local(index) = resolve(columns, alias, name, outer)? else {
         // Go's bound outer-column node is an expression, not a local column.
@@ -305,6 +331,7 @@ pub(super) fn display_column(
     Ok(Some(columns[index].clone()))
 }
 
+#[cfg(test)]
 pub(super) fn execute(
     query: &Program,
     row: &[Scalar],
@@ -320,6 +347,7 @@ pub(super) fn execute(
     }
     Ok(result)
 }
+#[cfg(test)]
 pub(super) fn execute_any(
     query: &Program,
     row: &[Scalar],
@@ -330,7 +358,18 @@ pub(super) fn execute_any(
     work: &mut Work<'_>,
 ) -> Result<QueryResult> {
     work.consume(0)?;
-    let sources = context.scope.callback.ok_or_else(unsupported)?;
+    let callback = context.scope.callback.ok_or_else(unsupported)?;
+    let owned;
+    let sources = match callback {
+        Callback::Map(sources) => sources,
+        Callback::Owned(sources) => {
+            owned = sources
+                .iter()
+                .map(|(name, source)| (name.clone(), &**source))
+                .collect();
+            &owned
+        }
+    };
     let resolver = context
         .group
         .map_or(Fields { columns, alias }, |group| Fields {

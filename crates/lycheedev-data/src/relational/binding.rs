@@ -12,6 +12,7 @@ enum Task<'a> {
     List(&'a [Term], Mode),
     Cases(&'a [(Term, Term)], Option<&'a Term>, Mode),
 }
+#[cfg(test)]
 pub(super) fn bind(
     term: &Term,
     columns: &[String],
@@ -80,9 +81,9 @@ pub(super) fn bind(
                 context
             };
             if request.any {
-                subquery::execute_any(request.query, &[], columns, alias, params, context, work)?;
+                subquery::execute_any(&request.query, &[], columns, alias, params, context, work)?;
             } else {
-                subquery::execute(request.query, &[], columns, alias, params, context, work)?;
+                subquery::execute(&request.query, &[], columns, alias, params, context, work)?;
             }
             if let Some(input) = request.input {
                 tasks.push(Task::Node(input, request.mode, true))?;
@@ -93,7 +94,7 @@ pub(super) fn bind(
 }
 
 struct Request<'a> {
-    query: &'a Program,
+    query: std::sync::Arc<Program>,
     any: bool,
     mode: Mode,
     input: Option<&'a Term>,
@@ -143,7 +144,7 @@ fn step<'a>(
             }
             if work.planning {
                 return Ok(Some(Request {
-                    query,
+                    query: query.clone(),
                     any: false,
                     mode,
                     input: Some(input),
@@ -157,7 +158,7 @@ fn step<'a>(
             }
             if work.planning {
                 return Ok(Some(Request {
-                    query,
+                    query: query.clone(),
                     any: matches!(term, Term::Exists(_)),
                     mode,
                     input: None,
@@ -199,4 +200,89 @@ fn step<'a>(
         _ => {}
     }
     Ok(None)
+}
+
+pub(super) async fn bind_async<'a, 'w: 'a>(
+    term: &Term,
+    fields: &execution::Fields<'a>,
+    allow_aggregates: bool,
+    context: &execution::Context<'a>,
+    control: &execution::Control<'a, 'w>,
+) -> Result<()> {
+    let input_context = execution::Context {
+        group: None,
+        scope: execution::Scope {
+            allowed: None,
+            ..context.scope.clone()
+        },
+        ..context.clone()
+    };
+    let mut tasks = task_stack::Stack::new(control.shared_budget())?;
+    let mut root = Some(Task::Node(
+        term,
+        Mode {
+            aggregates: allow_aggregates,
+            clear_group: false,
+        },
+        false,
+    ));
+    while let Some(task) = root.take().or_else(|| tasks.pop()) {
+        let (term, mode, argument) = match task {
+            Task::List(values, mode) => {
+                if let Some((first, rest)) = values.split_first() {
+                    tasks.push(Task::List(rest, mode))?;
+                    tasks.push(Task::Node(first, mode, true))?;
+                }
+                continue;
+            }
+            Task::Cases(cases, fallback, mode) => {
+                if let Some(((condition, result), rest)) = cases.split_first() {
+                    tasks.push(Task::Cases(rest, fallback, mode))?;
+                    tasks.push(Task::Node(result, mode, true))?;
+                    tasks.push(Task::Node(condition, mode, true))?;
+                } else if let Some(fallback) = fallback {
+                    tasks.push(Task::Node(fallback, mode, true))?;
+                }
+                continue;
+            }
+            Task::Node(term, mode, argument) => (term, mode, argument),
+        };
+        if argument && matches!(term, Term::Star(_)) {
+            return Err(type_error());
+        }
+        control.work(|work| work.spend())?;
+        if let Some(request) = control.work(|work| {
+            let fields = fields.view();
+            step(
+                term,
+                mode,
+                &mut tasks,
+                fields.columns,
+                fields.alias,
+                control.parameters(),
+                &context.view(),
+                &input_context.view(),
+                work,
+            )
+        })? {
+            let context = if request.mode.clear_group {
+                &input_context
+            } else {
+                context
+            };
+            control
+                .subquery(
+                    request.query,
+                    execution::Row::Empty,
+                    fields.clone(),
+                    context,
+                    request.any,
+                )
+                .await?;
+            if let Some(input) = request.input {
+                tasks.push(Task::Node(input, request.mode, true))?;
+            }
+        }
+    }
+    Ok(())
 }

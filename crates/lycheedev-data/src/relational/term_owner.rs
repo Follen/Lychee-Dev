@@ -49,12 +49,44 @@ fn child(value: &mut Box<Term>, pending: &mut Vec<Pending>) {
         Term::Value(Scalar::Null),
     )));
 }
+fn empty_query() -> std::sync::Arc<Program> {
+    // A permanent leaf lets Drop take ownership of an Arc field safely.
+    // Cloning this sentinel allocates nothing and cannot release a query tree.
+    static EMPTY: std::sync::OnceLock<std::sync::Arc<Program>> = std::sync::OnceLock::new();
+    EMPTY
+        .get_or_init(|| {
+            std::sync::Arc::new(Program {
+                explain: false,
+                analyze: false,
+                recursive: false,
+                bindings: Vec::new(),
+                branches: Vec::new(),
+                derived: None,
+                table: RelationName::internal(""),
+                alias: String::new(),
+                projection: Vec::new(),
+                filter: None,
+                order: Vec::new(),
+                parameters: BTreeSet::new(),
+                limit: None,
+                offset: None,
+                distinct: false,
+                joins: Vec::new(),
+                groups: Vec::new(),
+                having: None,
+            })
+        })
+        .clone()
+}
 fn shared(value: &mut std::sync::Arc<Program>, pending: &mut Vec<Pending>) {
-    // Shared query children stay shared. Never clone a Program to release it.
-    // If other owners remain, their final Program::drop is the same iterative
-    // boundary; if unique now, detach its edges before Arc's ordinary drop.
-    if let Some(value) = std::sync::Arc::get_mut(value) {
-        query(value, pending);
+    // get_mut is insufficient: a Weak prevents it even for the final strong
+    // owner, and another strong owner may disappear immediately afterwards.
+    // into_inner atomically either transfers the final body or releases our
+    // strong reference without dropping that body. Weak handles do not stop
+    // transfer. Thus no Arc destructor can reenter a child Program::drop here.
+    let owned = std::mem::replace(value, empty_query());
+    if let Some(mut value) = std::sync::Arc::into_inner(owned) {
+        query(&mut value, pending);
     }
 }
 fn term(value: &mut Term, pending: &mut Vec<Pending>) {
