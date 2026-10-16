@@ -2108,11 +2108,11 @@ mod facts_cache_tests {
         let raw = BTreeMap::from([
             (
                 "A.lua".into(),
-                "function A() return 'literal-你好' end\r\n".into(),
+                "function A()\r\n return 'literal-你好'\r\nend\r\n".into(),
             ),
             (
                 "Nested/B.lua".into(),
-                "function B() return 'literal-你好' end\n".into(),
+                "function B()\n return 'literal-你好'\nend\n".into(),
             ),
             ("Empty.lua".into(), String::new()),
             (
@@ -2122,6 +2122,15 @@ mod facts_cache_tests {
         ]);
         let pin = fixture.pin(&raw);
         let cold = build_with_control(&fixture.home, &pin, &control).unwrap();
+        // A declaration signature retains its first source line. Keep this
+        // token solely in the body so default mode really reaches fallback,
+        // rather than returning a structural indexed_text match and reading
+        // only the one document selected by the page limit.
+        assert!(cold.symbols.iter().all(|symbol| {
+            ![&symbol.name, &symbol.target, &symbol.signature]
+                .iter()
+                .any(|field| field.contains("literal-你好"))
+        }));
         assert!(!fixture.home.join("cache/source-originals-rust").exists());
         let warm = build_with_control(&fixture.home, &pin, &control).unwrap();
         // Fresh originals use one demand reader including shared nested trees.
@@ -2142,8 +2151,9 @@ mod facts_cache_tests {
             let expected = cold
                 .search_with_control(&pin, "snapshot", "literal-你好", mode, "", 1, "", &control)
                 .unwrap();
-            assert_eq!(without_query_io(actual.clone()), without_query_io(expected));
-            assert_eq!(actual["coverage"]["io"]["sourceDocumentsRead"], 4);
+            assert_eq!(without_query_io(actual.clone()), without_query_io(expected), "mode={mode:?}");
+            assert_eq!(actual["results"][0]["matchedBy"], "body_text", "mode={mode:?}");
+            assert_eq!(actual["coverage"]["io"]["sourceDocumentsRead"], 4, "mode={mode:?}");
             let cursor = actual["nextCursor"].as_str().unwrap();
             let next = warm
                 .search_with_control(
