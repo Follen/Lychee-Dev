@@ -155,6 +155,12 @@ pub struct OwnedQuery<'a, 'control, E> {
     workspace_facts: Arc<WorkspaceFactsCache>,
     expressions: Memo<LuaSyntaxId, OwnedValue>,
     declarations: Memo<(FileId, SemanticId), Option<OwnedValue>>,
+    // The initializer producer already probes selection before inferring a
+    // declaration/member. Consumers reuse that immutable provider fact when
+    // deciding whether destination metadata can accompany the resulting value.
+    // This is not an inference cache: fresh model scopes still execute their
+    // own initializer probes and keep independent expression/declaration memos.
+    initializer_selection: Rc<RefCell<HashMap<BindingSite, bool>>>,
     members: Memo<(FileId, SemanticId), Option<OwnedValue>>,
     member_lists: HashMap<OwnedValue, Vec<OwnedMemberInfo>>,
     member_items: HashMap<(OwnedValue, LuaMemberKey), Option<OwnedMemberInfo>>,
@@ -191,6 +197,7 @@ impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
             workspace_facts: Arc::new(WorkspaceFactsCache::default()),
             expressions: Rc::new(RefCell::new(HashMap::new())),
             declarations: Rc::new(RefCell::new(HashMap::new())),
+            initializer_selection: Rc::new(RefCell::new(HashMap::new())),
             members: Rc::new(RefCell::new(HashMap::new())),
             member_lists: HashMap::new(),
             member_items: HashMap::new(),
@@ -374,7 +381,14 @@ impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
         };
         self.checkpoint()?;
         match site {
-            Some(site) => self.manages_initializer_site(site),
+            Some(site) => {
+                let observed = self.initializer_selection.borrow().get(&site).copied();
+                self.checkpoint()?;
+                match observed {
+                    Some(managed) => Ok(managed),
+                    None => self.manages_initializer_site(site),
+                }
+            }
             None => Ok(false),
         }
     }
@@ -394,6 +408,7 @@ impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
         );
         self.checkpoint()?;
         if managed {
+            self.initializer_selection.borrow_mut().insert(site, true);
             return Ok(true);
         }
         let managed = !matches!(
@@ -402,6 +417,7 @@ impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
         );
         self.checkpoint()?;
         if managed {
+            self.initializer_selection.borrow_mut().insert(site, true);
             return Ok(true);
         }
         let managed = !matches!(
@@ -409,6 +425,9 @@ impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
             BindingDecision::NotManaged
         );
         self.checkpoint()?;
+        self.initializer_selection
+            .borrow_mut()
+            .insert(site, managed);
         Ok(managed)
     }
 
@@ -457,6 +476,7 @@ impl<E> SelectedProjectionBackend for OwnedQuery<'_, '_, E> {
         foreign.contribution_order = self.contribution_order.clone();
         foreign.workspace_facts = Arc::clone(&self.workspace_facts);
         foreign.flow_trees = Rc::clone(&self.flow_trees);
+        foreign.initializer_selection = std::rc::Rc::clone(&self.initializer_selection);
         foreign.type_of_expr(origin.syntax).map(Ok)
     }
     fn parameter(
@@ -474,6 +494,7 @@ impl<E> SelectedProjectionBackend for OwnedQuery<'_, '_, E> {
         foreign.contribution_order = self.contribution_order.clone();
         foreign.workspace_facts = Arc::clone(&self.workspace_facts);
         foreign.flow_trees = Rc::clone(&self.flow_trees);
+        foreign.initializer_selection = std::rc::Rc::clone(&self.initializer_selection);
         let Some(declaration) = foreign
             .model
             .file_facts()
@@ -503,6 +524,7 @@ impl<E> SelectedProjectionBackend for OwnedQuery<'_, '_, E> {
         foreign.contribution_order = self.contribution_order.clone();
         foreign.workspace_facts = Arc::clone(&self.workspace_facts);
         foreign.flow_trees = Rc::clone(&self.flow_trees);
+        foreign.initializer_selection = std::rc::Rc::clone(&self.initializer_selection);
         foreign.project_function_signature(site, function.closure)
     }
     fn object(
@@ -528,8 +550,9 @@ impl<E> SelectedExpressionBackend for OwnedQuery<'_, '_, E> {
         &mut self,
         site: BindingSite,
         value: &OwnedValue,
+        decision: &BindingDecision<super::CallPermit>,
     ) -> QueryResult<(), E> {
-        self.record_call_result_quality(site, value)
+        self.record_call_result_quality(site, value, decision)
     }
 
     fn result_pack(&mut self, slots: Vec<OwnedValue>) -> OwnedValue {

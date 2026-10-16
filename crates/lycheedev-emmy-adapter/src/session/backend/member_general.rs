@@ -58,6 +58,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             foreign.contribution_order = self.contribution_order.clone();
             foreign.workspace_facts = std::sync::Arc::clone(&self.workspace_facts);
             foreign.flow_trees = Rc::clone(&self.flow_trees);
+            foreign.initializer_selection = std::rc::Rc::clone(&self.initializer_selection);
             return foreign.type_of_member(id);
         }
         self.checkpoint()?;
@@ -292,6 +293,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             foreign.contribution_order = self.contribution_order.clone();
             foreign.workspace_facts = std::sync::Arc::clone(&self.workspace_facts);
             foreign.flow_trees = Rc::clone(&self.flow_trees);
+            foreign.initializer_selection = std::rc::Rc::clone(&self.initializer_selection);
             return foreign.table_metatable_type(table);
         }
         let calls = self

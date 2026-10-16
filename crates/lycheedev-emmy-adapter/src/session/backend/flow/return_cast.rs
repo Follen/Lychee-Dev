@@ -226,6 +226,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                     foreign.contribution_order = self.contribution_order.clone();
                     foreign.workspace_facts = Arc::clone(&self.workspace_facts);
                     foreign.flow_trees = std::rc::Rc::clone(&self.flow_trees);
+                    foreign.initializer_selection = std::rc::Rc::clone(&self.initializer_selection);
                     let Some(id) = foreign
                         .resolve_owned_member(&index)?
                         .and_then(|resolved| resolved.member_id)

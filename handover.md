@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 10:52 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`1f9a8cb544b1f240813ee77410b5536df4e8d4c7`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 11:10 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`6051063ee0e3391d934831a15310ca475824a455`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -48,6 +48,9 @@
 - `d20586d`已保存首个固定Go323优化候选配对入口，42个Node检查通过、10个Windows项未执行；实际基准未跑。`1f9a8cb`已按Go实际Root上限4096修复SQL reader过量scratch准入，并将keys旧gap断言改为真实两跳编码路径回归；Rust复验待后续完整候选。
 - 本批将正式Lua与真实Driver桥入口切到独立固定Go323清单（113个原blob认证）；旧320/321/322清单原样保留。仅上游323相对322的Runtime/TOC与两个Lua版本fixture增量，Rust3.5字段采用精确可逆overlay；Node正式63及包/版本115检查通过。正式220 Lua与9桥需在新SHA实际运行，旧322补充结果不重标。
 
+
+- 本机ec503完整固定oracle已结束：reference36/36、candidate29通过7失败，双方4137行/38物理段；大边界输出与全树收尾已闭合。本批修复重复initializer/provider查询及完整键枚举被未知字段值污染的Nil→Unknown，新增5回归未运行。保留全部raw差分，必要call_result新增证据仍须按当前正式合同单独判定，不能把历史参考缺记录或当前差异归一化成通过。
+- `6051063`已保存最小非Emmy TLS依赖适配：固定native-tls/schannel三源38加4删，SNI与证书校验名分离，原验证与tokio所有权不变；49文件含官方完整源/许可与精确逆补丁，包许可及source rebuild已接。Node完整20/20通过，真实Windows/Go五项复验待跑；Emmy848仍零补丁，整个依赖树不再称零补丁。
 
 ## 4. 进入最终四阶段前的有限收口
 

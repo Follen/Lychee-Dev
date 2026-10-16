@@ -38,6 +38,7 @@ pub trait SelectedExpressionBackend: SelectedProjectionBackend {
         &mut self,
         _site: BindingSite,
         _value: &Self::Value,
+        _decision: &BindingDecision<super::CallPermit>,
     ) -> Result<(), Self::Error> {
         Ok(())
     }
@@ -70,11 +71,20 @@ impl SelectedProjector<'_> {
             .and_then(|tree| site.syntax.to_node_from_root(&tree.get_red_root()))
             .and_then(LuaCallExpr::cast);
         backend.checkpoint()?;
-        let value = self.selected_inner(site, call.as_ref(), backend)?;
-        if call.is_some()
-            && let Some(value) = &value
-        {
-            backend.finish_call_projection(site, value)?;
+        // Keep the original call-gate observation through completion. Quality
+        // describes this exact projection; rereading the provider here would
+        // add a second call observation with no semantic work of its own.
+        let call_decision = if call.is_some() {
+            backend.checkpoint()?;
+            let decision = self.session().context().call(site);
+            backend.checkpoint()?;
+            Some(decision)
+        } else {
+            None
+        };
+        let value = self.selected_inner(site, call.as_ref(), call_decision.as_ref(), backend)?;
+        if let (Some(decision), Some(value)) = (&call_decision, &value) {
+            backend.finish_call_projection(site, value, decision)?;
         }
         Ok(match (value, call) {
             (Some(value), Some(call)) if !call_expands(&call) => {
@@ -89,13 +99,14 @@ impl SelectedProjector<'_> {
         &self,
         site: BindingSite,
         call: Option<&LuaCallExpr>,
+        call_decision: Option<&BindingDecision<super::CallPermit>>,
         backend: &mut B,
     ) -> Result<Option<B::Value>, B::Error> {
         if let Some(call) = call {
-            backend.checkpoint()?;
-            let decision = self.session().context().call(site);
-            backend.checkpoint()?;
-            match decision {
+            match call_decision
+                .expect("call gate observed before projection")
+                .clone()
+            {
                 BindingDecision::KnownAbsent { proof } => {
                     self.query_record(site, "call", "known_absent", proof, None, backend)?;
                     return Ok(Some(backend.plain(LuaType::Unknown)));

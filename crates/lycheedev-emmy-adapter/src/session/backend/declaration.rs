@@ -107,6 +107,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             foreign.contribution_order = self.contribution_order.clone();
             foreign.workspace_facts = Arc::clone(&self.workspace_facts);
             foreign.flow_trees = Rc::clone(&self.flow_trees);
+            foreign.initializer_selection = std::rc::Rc::clone(&self.initializer_selection);
             if let Some(value) = foreign.type_of_decl(declaration)? {
                 return Ok(Some(value));
             }

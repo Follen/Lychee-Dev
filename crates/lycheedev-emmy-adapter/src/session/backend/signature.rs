@@ -201,6 +201,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         body.contribution_order = self.contribution_order.clone();
         body.workspace_facts = Arc::clone(&self.workspace_facts);
         body.flow_trees = std::rc::Rc::clone(&self.flow_trees);
+        body.initializer_selection = std::rc::Rc::clone(&self.initializer_selection);
         body.contextual_closure_return(signature.closure_syntax)
     }
 

@@ -433,3 +433,55 @@ fn assignment_overload_shortcut_cannot_accept_a_different_selected_result() {
     assert_eq!(errors[0].range, fixture.expr(0, "f()").get_range());
     assert_eq!(errors[0].message, "expected `number` but found `string`");
 }
+
+#[test]
+fn cached_initializer_selection_still_checks_the_original_control() {
+    use std::cell::Cell;
+    let fixture = Fixture::new(&[("main.lua", FUNCTIONS)]);
+    let origin = fixture.site(0, OLD);
+    let session = OwnedBindingSession::new_checked(
+        Arc::new(context(origin, fixture.function(0, NEW))),
+        || Ok::<_, &str>(()),
+    )
+    .unwrap();
+    let model = fixture.analysis.semantic_model(fixture.batch.file_ids[0]);
+    let declaration = model
+        .resolve_name(fixture.expr(0, "f").get_position())
+        .unwrap();
+    let stopped = Cell::new(false);
+    let mut check = || {
+        if stopped.get() {
+            Err("original-deadline")
+        } else {
+            Ok(())
+        }
+    };
+    let mut query = OwnedQuery::new_with_contribution_order(
+        &fixture.analysis,
+        &session,
+        fixture.batch.file_ids[0],
+        &mut check,
+        Arc::clone(&fixture.batch.contribution_order),
+    );
+    query.type_of_decl(&declaration).unwrap().unwrap();
+    assert_eq!(
+        query.initializer_selection.borrow().get(&origin),
+        Some(&true)
+    );
+    let before = session.coverage_checked(|| Ok::<_, ()>(())).unwrap();
+    stopped.set(true);
+    assert!(matches!(
+        query.owner_initializer_managed(&declaration),
+        Err(OwnedQueryFailure::Control("original-deadline"))
+    ));
+    assert_eq!(
+        session.coverage_checked(|| Ok::<_, ()>(())).unwrap(),
+        before
+    );
+    stopped.set(false);
+    assert!(query.owner_initializer_managed(&declaration).unwrap());
+    assert_eq!(
+        session.coverage_checked(|| Ok::<_, ()>(())).unwrap(),
+        before
+    );
+}

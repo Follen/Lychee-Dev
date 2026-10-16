@@ -85,7 +85,9 @@ fn actual_index_queries_preserve_missing_nil_unknown_any_and_nonliteral_behavior
         ("selected[1]", LuaType::Nil),
         ("selected['z']", LuaType::Nil),
         ("selected[true]", LuaType::Unknown),
-        ("selected[1.5]", LuaType::Unknown),
+        // The fixed parser presents a numeric index token, so the VM
+        // executes static member lookup even for a non-integer literal.
+        ("selected[1.5]", LuaType::Nil),
         ("selected[nil]", LuaType::Unknown),
     ] {
         let (analysis, site, provider, _) = member_case(&format!("return {expr}"), expr);
@@ -97,7 +99,7 @@ fn actual_index_queries_preserve_missing_nil_unknown_any_and_nonliteral_behavior
         assert_eq!(value.structural_type(), &expected, "{expr}");
         let rows = rows(&session);
         let lookup = rows.iter().find(|r| r.operation == "member_lookup");
-        if matches!(expr, "selected[true]" | "selected[1.5]" | "selected[nil]") {
+        if matches!(expr, "selected[true]" | "selected[nil]") {
             assert!(lookup.is_none());
         } else {
             assert_eq!(
@@ -332,4 +334,86 @@ fn interrupted_index_query_never_caches_partial_success_or_loses_the_caller_stop
         assert_eq!(query.type_of_expr(site.syntax).unwrap(), expected);
         assert_eq!(rows(&session), expected_rows);
     }
+}
+
+#[test]
+fn key_enumeration_and_value_completeness_are_independent_for_missing_members() {
+    for complete_keys in [true, false] {
+        for (expr, expected) in [
+            (
+                "selected.missing",
+                if complete_keys {
+                    LuaType::Nil
+                } else {
+                    LuaType::Unknown
+                },
+            ),
+            (
+                "selected[1]",
+                if complete_keys {
+                    LuaType::Nil
+                } else {
+                    LuaType::Unknown
+                },
+            ),
+            (
+                "selected[1.5]",
+                if complete_keys {
+                    LuaType::Nil
+                } else {
+                    LuaType::Unknown
+                },
+            ),
+            ("selected.omitted", LuaType::Nil),
+            ("selected.uncertain", LuaType::Unknown),
+            ("selected.contradictory", LuaType::Unknown),
+        ] {
+            let (analysis, site, mut provider, object) =
+                member_case(&format!("return {expr}"), expr);
+            let BindingDecision::Bound(shape) = provider.shapes.get_mut(&object.view).unwrap()
+            else {
+                unreachable!()
+            };
+            shape.enumeration = if complete_keys {
+                ShapeEnumeration::Complete
+            } else {
+                ShapeEnumeration::Unavailable("incomplete-key-set".into())
+            };
+            shape.fields.push(field(
+                "contradictory",
+                FieldPresence::Absent,
+                environment_any(),
+            ));
+            let session = session(&provider);
+            let mut check = || Ok::<_, Stop>(());
+            let mut query =
+                OwnedQuery::new_for_snapshot(&analysis, &session, site.file_id, &mut check)
+                    .unwrap();
+            assert_eq!(
+                plain_type(&query.type_of_expr(site.syntax).unwrap()),
+                expected,
+                "{expr}"
+            );
+            let ledger = rows(&session);
+            let lookup = ledger
+                .iter()
+                .find(|row| row.operation == "member_lookup")
+                .unwrap();
+            assert_eq!(lookup.state, "unavailable");
+            assert_eq!(lookup.reason.as_deref(), Some("object_shape_incomplete"));
+            assert_eq!(lookup.proof, "shape:object-1");
+            let events = provider.events.lock().unwrap().clone();
+            assert_eq!(
+                plain_type(&query.type_of_expr(site.syntax).unwrap()),
+                expected
+            );
+            assert_eq!(rows(&session), ledger);
+            assert_eq!(*provider.events.lock().unwrap(), events);
+        }
+    }
+}
+
+fn plain_type(value: &OwnedValue) -> LuaType {
+    assert!(value.is_context_free());
+    value.structural_type().clone()
 }

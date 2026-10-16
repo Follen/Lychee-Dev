@@ -2,6 +2,7 @@
 use super::{ExpressionValue, OwnedQuery, QueryResult};
 use crate::session::{
     BindingDecision, FieldPresence, OwnedValue, SelectedProjectionBackend, SelectedProjector,
+    ShapeEnumeration,
 };
 use emmylua_code_analysis::{DeclKind, LuaMemberKey, LuaType, SemanticId, TypeDefKind};
 use emmylua_parser::{LuaAstNode, LuaExpr, LuaSyntaxId};
@@ -390,23 +391,31 @@ impl<E> OwnedQuery<'_, '_, E> {
         if frozen.object.identity != metadata.identity || frozen.object.epoch != metadata.epoch {
             return Ok(OwnedValue::plain(LuaType::Unknown));
         }
-        // A specifically known-absent field remains Nil even if another field
-        // made the shape incomplete. A missing field in an incomplete or
-        // rejected shape is unknown, never permission to read the old owner.
+        // Enumeration completeness and field-value completeness are distinct.
+        // A complete key set proves an unlisted key absent even when another
+        // field's value is unavailable. A listed but contradictory absence is
+        // still Unknown, as is an unlisted key in a partial enumeration.
         for field in &frozen.shape.fields {
             self.checkpoint()?;
-            if matches!(key, LuaMemberKey::Name(name) if name.as_str() == field.key.as_str())
-                && field.presence == FieldPresence::Absent
-                && matches!(field.value, BindingDecision::KnownAbsent { .. })
-            {
-                return Ok(OwnedValue::plain(LuaType::Nil));
+            if matches!(key, LuaMemberKey::Name(name) if name.as_str() == field.key.as_str()) {
+                return Ok(OwnedValue::plain(
+                    if field.presence == FieldPresence::Absent
+                        && matches!(field.value, BindingDecision::KnownAbsent { .. })
+                    {
+                        LuaType::Nil
+                    } else {
+                        LuaType::Unknown
+                    },
+                ));
             }
         }
-        Ok(OwnedValue::plain(if metadata.complete {
-            LuaType::Nil
-        } else {
-            LuaType::Unknown
-        }))
+        Ok(OwnedValue::plain(
+            if matches!(frozen.shape.enumeration, ShapeEnumeration::Complete) {
+                LuaType::Nil
+            } else {
+                LuaType::Unknown
+            },
+        ))
     }
     fn index_owner_is_class_table(&self, owner: &SemanticId, name: &str) -> bool {
         match owner {

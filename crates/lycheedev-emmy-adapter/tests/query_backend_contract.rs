@@ -398,3 +398,225 @@ fn denied_call_initializer_slots_preserve_unknown_and_exact_call_producer() {
         );
     }
 }
+
+#[test]
+fn initializer_owner_reuses_the_producer_probe_without_changing_its_order() {
+    for mode in 0..3 {
+        let (analysis, site, mut provider) = load("local x=1\nreturn x", "x");
+        let initializer = provider.named("1");
+        let (expected_type, initializer_events) = match mode {
+            0 => (
+                LuaType::IntegerConst(1),
+                vec![
+                    Event::Resolve(initializer),
+                    Event::Call(initializer),
+                    Event::Resolve(initializer),
+                    Event::Resolve(initializer),
+                ],
+            ),
+            1 => {
+                provider.select("1", absent("initializer-absent"));
+                (LuaType::Nil, vec![Event::Resolve(initializer); 2])
+            }
+            _ => {
+                provider.select(
+                    "1",
+                    BindingDecision::Unavailable {
+                        proof: "initializer-unavailable".into(),
+                        reason: "missing".into(),
+                    },
+                );
+                (LuaType::Unknown, vec![Event::Resolve(initializer); 2])
+            }
+        };
+        let session = session(&provider);
+        let mut check = || Ok::<_, Stop>(());
+        let mut expected_events = vec![Event::Resolve(site)];
+        expected_events.extend(initializer_events);
+        for _ in 0..2 {
+            // A new query has independent inference state, even in one session.
+            let mut query =
+                OwnedQuery::new_for_snapshot(&analysis, &session, site.file_id, &mut check)
+                    .unwrap();
+            provider.events.lock().unwrap().clear();
+            assert_eq!(
+                plain_value(query.type_of_expr(site.syntax).unwrap()),
+                expected_type
+            );
+            assert_eq!(*provider.events.lock().unwrap(), expected_events);
+            let ledger = rows(&session);
+            assert_eq!(
+                plain_value(query.type_of_expr(site.syntax).unwrap()),
+                expected_type
+            );
+            assert_eq!(*provider.events.lock().unwrap(), expected_events);
+            assert_eq!(rows(&session), ledger);
+        }
+    }
+}
+
+#[test]
+fn selected_origin_still_executes_fresh_initializer_probes_after_an_ordinary_query() {
+    let (analysis, site, mut provider) = load("local seed=1\nreturn selected,seed", "selected");
+    let origin = provider.named("seed");
+    let initializer = provider.named("1");
+    provider.select("selected", expression(origin, "selected-origin"));
+    let session = session(&provider);
+    let mut check = || Ok::<_, Stop>(());
+    let mut query =
+        OwnedQuery::new_for_snapshot(&analysis, &session, site.file_id, &mut check).unwrap();
+    for syntax in [origin.syntax, site.syntax] {
+        assert_eq!(
+            plain_value(query.type_of_expr(syntax).unwrap()),
+            LuaType::IntegerConst(1)
+        );
+    }
+    assert_eq!(
+        *provider.events.lock().unwrap(),
+        [
+            Event::Resolve(origin),
+            Event::Resolve(initializer),
+            Event::Call(initializer),
+            Event::Resolve(initializer),
+            Event::Resolve(initializer),
+            Event::Resolve(site),
+            Event::Resolve(origin),
+            Event::Resolve(initializer),
+            Event::Call(initializer),
+            Event::Resolve(initializer),
+            Event::Resolve(initializer),
+        ]
+    );
+    let before = provider.events.lock().unwrap().clone();
+    assert_eq!(
+        plain_value(query.type_of_expr(origin.syntax).unwrap()),
+        LuaType::IntegerConst(1)
+    );
+    assert_eq!(*provider.events.lock().unwrap(), before);
+}
+
+#[test]
+fn call_quality_consumes_the_original_gate_and_retains_every_result_receipt_field() {
+    for mode in 0..5 {
+        let (analysis, call, mut provider) = load("return f()", "f()");
+        let callee = provider.named("f");
+        let (operation, state, proof, reason, expected_type, expected_events, quality) = match mode
+        {
+            0 => {
+                provider.values.insert(call, absent("nil-result"));
+                (
+                    "resolve",
+                    "known_absent",
+                    "nil-result",
+                    None,
+                    LuaType::Nil,
+                    vec![Event::Call(call), Event::Resolve(call)],
+                    None,
+                )
+            }
+            1 => {
+                provider.values.insert(
+                    call,
+                    BindingDecision::Unavailable {
+                        proof: "unknown-result".into(),
+                        reason: "missing".into(),
+                    },
+                );
+                (
+                    "resolve",
+                    "unavailable",
+                    "unknown-result",
+                    Some("missing"),
+                    LuaType::Unknown,
+                    vec![Event::Call(call), Event::Resolve(call)],
+                    None,
+                )
+            }
+            2 => {
+                provider.calls.insert(
+                    call,
+                    BindingDecision::KnownAbsent {
+                        proof: "denied".into(),
+                    },
+                );
+                (
+                    "call",
+                    "known_absent",
+                    "denied",
+                    None,
+                    LuaType::Unknown,
+                    vec![Event::Call(call)],
+                    Some(("unavailable", "denied", Some("known_absent_callee"))),
+                )
+            }
+            3 => {
+                provider.calls.insert(
+                    call,
+                    BindingDecision::Unavailable {
+                        proof: "denied-unknown".into(),
+                        reason: "missing-permit".into(),
+                    },
+                );
+                (
+                    "call",
+                    "unavailable",
+                    "denied-unknown",
+                    Some("missing-permit"),
+                    LuaType::Unknown,
+                    vec![Event::Call(call)],
+                    Some(("unavailable", "denied-unknown", Some("missing-permit"))),
+                )
+            }
+            _ => {
+                provider.calls.insert(
+                    call,
+                    BindingDecision::Bound(CallPermit {
+                        callee,
+                        proof: "permit".into(),
+                        capability_profile: "typed-call-v1".into(),
+                    }),
+                );
+                provider.values.insert(call, absent("selected-result"));
+                (
+                    "call_return",
+                    "known_absent",
+                    "selected-result",
+                    None,
+                    LuaType::Nil,
+                    vec![
+                        Event::Call(call),
+                        Event::Observation(call),
+                        Event::Resolve(call),
+                    ],
+                    Some(("native_projected", "permit", None)),
+                )
+            }
+        };
+        let receipt = |operation, state, proof: &str, reason: Option<&str>| BindingCoverage {
+            site: call,
+            operation,
+            state,
+            proof: proof.into(),
+            reason: reason.map(str::to_owned),
+            parameter: None,
+            parameter_index: None,
+            argument: None,
+        };
+        let mut expected_rows = vec![receipt(operation, state, proof, reason)];
+        if let Some((state, proof, reason)) = quality {
+            expected_rows.push(receipt("call_result", state, proof, reason));
+        }
+        let session = session(&provider);
+        let mut check = || Ok::<_, Stop>(());
+        let mut query =
+            OwnedQuery::new_for_snapshot(&analysis, &session, call.file_id, &mut check).unwrap();
+        for _ in 0..2 {
+            assert_eq!(
+                plain_value(query.type_of_expr(call.syntax).unwrap()),
+                expected_type
+            );
+            assert_eq!(*provider.events.lock().unwrap(), expected_events);
+            assert_eq!(rows(&session), expected_rows);
+        }
+    }
+}

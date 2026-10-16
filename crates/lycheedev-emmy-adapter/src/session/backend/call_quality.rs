@@ -66,9 +66,8 @@ impl<E> OwnedQuery<'_, '_, E> {
         &mut self,
         site: BindingSite,
         value: &OwnedValue,
+        decision: &BindingDecision<CallPermit>,
     ) -> QueryResult<(), E> {
-        self.checkpoint()?;
-        let decision = self.session.context().call(site);
         self.checkpoint()?;
         let (proof, reason) = match decision {
             BindingDecision::NotManaged => return Ok(()),
@@ -76,12 +75,12 @@ impl<E> OwnedQuery<'_, '_, E> {
                 let reason = self
                     .binding_type_has_unknown(value)?
                     .then(|| "native_call_result_type_unavailable".to_owned());
-                (permit.proof, reason)
+                (permit.proof.clone(), reason)
             }
             BindingDecision::KnownAbsent { proof } => {
-                (proof, Some("known_absent_callee".to_owned()))
+                (proof.clone(), Some("known_absent_callee".to_owned()))
             }
-            BindingDecision::Unavailable { proof, reason } => (proof, Some(reason)),
+            BindingDecision::Unavailable { proof, reason } => (proof.clone(), Some(reason.clone())),
         };
         self.record_check(
             site.syntax,
