@@ -55,8 +55,24 @@ impl<E> OwnedQuery<'_, '_, E> {
                 _ => self.type_of_expr(prefix.get_syntax_id())?,
             }
         };
-        let selected_nil = self.binding_manages(prefix.get_syntax_id())?
-            && matches!(value.structural_type(), LuaType::Nil);
+        let selected_nil = if matches!(value.structural_type(), LuaType::Nil) {
+            if self.binding_manages(prefix.get_syntax_id())? {
+                true
+            } else {
+                match &prefix {
+                    LuaExpr::NameExpr(name) => match self.model.resolve_name(name.get_position()) {
+                        Some(decl) => self.owner_initializer_managed(&decl)?,
+                        None => false,
+                    },
+                    LuaExpr::IndexExpr(index) => self
+                        .resolve_owned_member(index)?
+                        .is_some_and(|member| member.binding_token.is_some()),
+                    _ => false,
+                }
+            }
+        } else {
+            false
+        };
         if !selected_nil && self.diagnostic_is_callable(&value)? {
             return Ok(());
         }

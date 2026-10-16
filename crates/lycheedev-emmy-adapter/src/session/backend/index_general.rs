@@ -1,6 +1,8 @@
 //! VM member indexing with owned value identity and inherited execution state.
 use super::{ExpressionValue, OwnedQuery, QueryResult};
-use crate::session::{OwnedValue, SelectedProjectionBackend, SelectedProjector};
+use crate::session::{
+    BindingDecision, FieldPresence, OwnedValue, SelectedProjectionBackend, SelectedProjector,
+};
 use emmylua_code_analysis::{DeclKind, LuaMemberKey, LuaType, SemanticId, TypeDefKind};
 use emmylua_parser::{LuaAstNode, LuaExpr, LuaSyntaxId};
 use std::{cell::RefCell, rc::Rc};
@@ -46,6 +48,53 @@ impl<E> OwnedQuery<'_, '_, E> {
     ) -> QueryResult<ExpressionValue<OwnedValue>, E> {
         self.checkpoint()?;
         let receiver = Some(owner.value.clone());
+        if let Some(members) = self.selected_members(&owner.value)? {
+            let mut value = None;
+            for member in members {
+                self.checkpoint()?;
+                if &member.key == key {
+                    value = Some(member.typ);
+                    break;
+                }
+            }
+            let value = match value {
+                Some(value) => value,
+                None => self.selected_missing_member(&owner.value, key)?,
+            };
+            // The source member id remains available from selected_members and
+            // reference resolution. Passing it as an execution owner would let
+            // ordinary callable priority substitute the destination signature.
+            return Ok(ExpressionValue {
+                value,
+                owner: None,
+                closure_syntax: None,
+                receiver,
+            });
+        }
+        if !owner.value.is_context_free()
+            && matches!(
+                owner.value.structural_type(),
+                LuaType::Union(_) | LuaType::Intersection(_) | LuaType::Array(_)
+            )
+        {
+            // Composite carriers use the existing member merge/type rules, but
+            // no longer borrow the name's old execution owner or the merged
+            // member's destination signature. Callable discovery preserves each
+            // selected component before merging candidates.
+            let fallback = self.member_type(&owner.value, key)?;
+            let candidates = self.callable_candidates_from_prefix(&owner.value, key, None)?;
+            let value = if candidates.len() > 1 {
+                OwnedValue::union_checked(candidates, || self.checkpoint())?
+            } else {
+                fallback.unwrap_or_else(|| OwnedValue::plain(LuaType::Unknown))
+            };
+            return Ok(ExpressionValue {
+                value,
+                owner: None,
+                closure_syntax: None,
+                receiver,
+            });
+        }
         if owner.value.structural_type().is_any() {
             return Ok(index_plain(LuaType::Any));
         }
@@ -312,6 +361,48 @@ impl<E> OwnedQuery<'_, '_, E> {
             _ => false,
         };
         Ok(index_plain(if known {
+            LuaType::Nil
+        } else {
+            LuaType::Unknown
+        }))
+    }
+    fn selected_missing_member(
+        &mut self,
+        owner: &OwnedValue,
+        key: &LuaMemberKey,
+    ) -> QueryResult<OwnedValue, E> {
+        self.checkpoint()?;
+        let metadata = owner.object_info().expect("selected object member");
+        if !owner.object_belongs_to(self.session) {
+            return Ok(OwnedValue::plain(LuaType::Unknown));
+        }
+        let frozen = self
+            .session
+            .shapes
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(metadata.view)
+            .cloned();
+        self.checkpoint()?;
+        let Some(frozen) = frozen else {
+            return Ok(OwnedValue::plain(LuaType::Unknown));
+        };
+        if frozen.object.identity != metadata.identity || frozen.object.epoch != metadata.epoch {
+            return Ok(OwnedValue::plain(LuaType::Unknown));
+        }
+        // A specifically known-absent field remains Nil even if another field
+        // made the shape incomplete. A missing field in an incomplete or
+        // rejected shape is unknown, never permission to read the old owner.
+        for field in &frozen.shape.fields {
+            self.checkpoint()?;
+            if matches!(key, LuaMemberKey::Name(name) if name.as_str() == field.key.as_str())
+                && field.presence == FieldPresence::Absent
+                && matches!(field.value, BindingDecision::KnownAbsent { .. })
+            {
+                return Ok(OwnedValue::plain(LuaType::Nil));
+            }
+        }
+        Ok(OwnedValue::plain(if metadata.complete {
             LuaType::Nil
         } else {
             LuaType::Unknown

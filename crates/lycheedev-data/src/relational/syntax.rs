@@ -84,6 +84,7 @@ pub(super) struct QueryDialect {
     )>,
     stop: std::cell::RefCell<Option<lycheedev_core::ToolkitError>>,
     depth: std::cell::Cell<usize>,
+    rhs: std::cell::RefCell<Vec<RhsFrame>>,
 }
 impl std::fmt::Debug for QueryDialect {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -101,6 +102,7 @@ impl QueryDialect {
             controls: Some((control.clone(), budget.safety_only())),
             stop: Default::default(),
             depth: Default::default(),
+            rhs: Default::default(),
         }
     }
     pub(super) fn check(&self) -> Result<()> {
@@ -123,7 +125,7 @@ impl QueryDialect {
             Ok(())
         }
     }
-    pub(super) fn query_guard(&self) -> std::result::Result<FrameGuard<'_>, ParserError> {
+    fn enter(&self) -> std::result::Result<(), ParserError> {
         self.parser_check()?;
         let depth = self.depth.get() + 1;
         if depth > 128 {
@@ -131,12 +133,63 @@ impl QueryDialect {
             return Err(ParserError::RecursionLimitExceeded);
         }
         self.depth.set(depth);
-        Ok(FrameGuard(&self.depth))
+        Ok(())
     }
-    /// The pinned public Pratt loop owns operator associativity and moves its
-    /// binary left operand without copying growing trees. Retrieval, explicit
-    /// prefix and list entries share this guard; retained AST admission also
-    /// checks the dependency's internal infix RHS recursion before lowering.
+    pub(super) fn query_guard(&self) -> std::result::Result<FrameGuard<'_>, ParserError> {
+        let depth = self.depth.get();
+        let rhs = self.rhs.borrow().len();
+        self.enter()?;
+        Ok(FrameGuard {
+            dialect: self,
+            depth,
+            rhs,
+        })
+    }
+    // Observe the pinned public Pratt loop, without taking or copying its AST.
+    // Each fallback infix calls parse_subexpr(precedence). Its final precedence
+    // hook sees next <= minimum just before returning to the caller. An owned
+    // prefix/query inside that RHS has a greater depth and cannot close it.
+    fn begin_rhs(&self, precedence: u8, between: bool) -> std::result::Result<(), ParserError> {
+        self.enter()?;
+        self.rhs.borrow_mut().push(RhsFrame {
+            depth: self.depth.get(),
+            precedence,
+            between,
+            active: true,
+        });
+        Ok(())
+    }
+    fn end_rhs(&self, next: u8) {
+        let mut frames = self.rhs.borrow_mut();
+        let Some(frame) = frames.last_mut() else {
+            return;
+        };
+        if !frame.active || frame.depth != self.depth.get() || next > frame.precedence {
+            return;
+        }
+        self.depth.set(frame.depth - 1);
+        if frame.between {
+            // parse_between consumes AND, then enters its second RHS. If AND
+            // is missing, the enclosing RAII frame clears this pending marker.
+            frame.between = false;
+            frame.active = false;
+        } else {
+            frames.pop();
+        }
+    }
+    fn resume_rhs(&self) -> std::result::Result<(), ParserError> {
+        let mut frames = self.rhs.borrow_mut();
+        if let Some(frame) = frames.last_mut() {
+            if !frame.active && self.depth.get() + 1 == frame.depth {
+                self.enter()?;
+                frame.active = true;
+            }
+        }
+        Ok(())
+    }
+    /// Expressions retain the dependency's move-based Pratt implementation.
+    /// Owned query/prefix/list frames and observed ordinary RHS frames share
+    /// Go's active depth; AST admission remains an independent structural check.
     pub(super) fn expression(
         &self,
         parser: &mut Parser,
@@ -153,10 +206,24 @@ impl QueryDialect {
     }
 }
 
-pub(super) struct FrameGuard<'a>(&'a std::cell::Cell<usize>);
+struct RhsFrame {
+    depth: usize,
+    precedence: u8,
+    between: bool,
+    active: bool,
+}
+pub(super) struct FrameGuard<'a> {
+    dialect: &'a QueryDialect,
+    depth: usize,
+    rhs: usize,
+}
 impl Drop for FrameGuard<'_> {
     fn drop(&mut self) {
-        self.0.set(self.0.get() - 1);
+        // On an error a native infix can return without its final precedence
+        // hook. Remove only frames opened within this owned entry, preserving
+        // an outer RHS across nested queries, calls, CASE and parenthesized input.
+        self.dialect.rhs.borrow_mut().truncate(self.rhs);
+        self.dialect.depth.set(self.depth);
     }
 }
 
@@ -283,7 +350,7 @@ impl Dialect for QueryDialect {
         &self,
         parser: &mut Parser,
         expr: &Expr,
-        _precedence: u8,
+        precedence: u8,
     ) -> Option<std::result::Result<Expr, ParserError>> {
         if let Err(error) = self.parser_check() {
             return Some(Err(error));
@@ -323,6 +390,12 @@ impl Dialect for QueryDialect {
             })());
         }
         if !parser.peek_keyword(Keyword::IS) {
+            let between = parser.peek_keyword(Keyword::BETWEEN)
+                || parser.peek_keyword(Keyword::NOT)
+                    && matches!(parser.peek_nth_token(1).token, Token::Word(ref w) if w.keyword == Keyword::BETWEEN);
+            if let Err(error) = self.begin_rhs(precedence, between) {
+                return Some(Err(error));
+            }
             return None;
         }
         Some((|| {
@@ -341,7 +414,7 @@ impl Dialect for QueryDialect {
         if let Err(error) = self.parser_check() {
             return Some(Err(error));
         }
-        Some(Ok(match parser.peek_token().token {
+        let next = match parser.peek_token().token {
             Token::Word(ref word) => match word.keyword {
                 Keyword::OR => 10,
                 Keyword::AND => 20,
@@ -359,14 +432,31 @@ impl Dialect for QueryDialect {
             Token::Plus | Token::Minus => 50,
             Token::Mul | Token::Div | Token::Mod => 60,
             _ => 0,
-        }))
+        };
+        self.end_rhs(next);
+        Some(Ok(next))
     }
     fn parse_prefix(&self, parser: &mut Parser) -> Option<std::result::Result<Expr, ParserError>> {
-        if let Err(error) = self.parser_check() {
-            return Some(Err(error));
-        }
+        Some(self.primary(parser).and_then(|expr| {
+            // Go primary consumes at most qualifier.field (or qualifier.*).
+            // The public Pratt loop otherwise consumes more periods before its
+            // infix hook, including fields on literals, calls and parentheses.
+            // Stop at the same first leftover token, before any later RHS/query.
+            if parser.peek_token().token == Token::Period {
+                parser.expected("end of scalar expression", parser.peek_token())
+            } else {
+                Ok(expr)
+            }
+        }))
+    }
+}
+
+impl QueryDialect {
+    fn primary(&self, parser: &mut Parser) -> std::result::Result<Expr, ParserError> {
+        self.resume_rhs()?;
+        self.parser_check()?;
         if parser.peek_token().token == Token::LParen {
-            return Some((|| {
+            return (|| {
                 parser.next_token();
                 let expr =
                     if parser.peek_keyword(Keyword::SELECT) || parser.peek_keyword(Keyword::WITH) {
@@ -376,10 +466,10 @@ impl Dialect for QueryDialect {
                     };
                 parser.expect_token(&Token::RParen)?;
                 Ok(expr)
-            })());
+            })();
         }
         if parser.peek_keyword(Keyword::EXISTS) {
-            return Some((|| {
+            return (|| {
                 parser.next_token();
                 parser.expect_token(&Token::LParen)?;
                 let subquery = retrieval::parse(self, parser)?;
@@ -388,10 +478,10 @@ impl Dialect for QueryDialect {
                     subquery,
                     negated: false,
                 })
-            })());
+            })();
         }
         if parser.peek_keyword(Keyword::CASE) {
-            return Some((|| {
+            return (|| {
                 let case_token = AttachedToken(parser.next_token());
                 let operand = if parser.peek_keyword(Keyword::WHEN) {
                     None
@@ -421,7 +511,7 @@ impl Dialect for QueryDialect {
                     conditions,
                     else_result,
                 })
-            })());
+            })();
         }
         if matches!(parser.peek_token().token, Token::Word(ref word)
             if word.quote_style.is_none() && equal_fold(&word.value, "NOT"))
@@ -429,10 +519,10 @@ impl Dialect for QueryDialect {
             parser.next_token();
             // Generic's NOT EXISTS shortcut negates before following comparisons.
             // Go NOT always calls expression(3), including the EXISTS case.
-            return Some(self.expression(parser, 29).map(|expr| Expr::UnaryOp {
+            return self.expression(parser, 29).map(|expr| Expr::UnaryOp {
                 op: UnaryOperator::Not,
                 expr: Box::new(expr),
-            }));
+            });
         }
         if matches!(parser.peek_token().token, Token::Plus | Token::Minus) {
             let op = if parser.next_token().token == Token::Plus {
@@ -440,26 +530,35 @@ impl Dialect for QueryDialect {
             } else {
                 UnaryOperator::Minus
             };
-            return Some(self.expression(parser, 60).map(|expr| Expr::UnaryOp {
+            return self.expression(parser, 60).map(|expr| Expr::UnaryOp {
                 op,
                 expr: Box::new(expr),
-            }));
+            });
         }
         if parser.peek_token().token == Token::Colon
             && !matches!(parser.peek_nth_token(1).token, Token::Word(ref word) if word.quote_style.is_none())
         {
-            return Some(Err(ParserError::ParserError(
-                "Expected named parameter".into(),
-            )));
+            return Err(ParserError::ParserError("Expected named parameter".into()));
         }
         if parser.peek_token().token == Token::Mul {
-            return Some(Ok(Expr::Wildcard(AttachedToken(parser.next_token()))));
+            return Ok(Expr::Wildcard(AttachedToken(parser.next_token())));
         }
-        let Token::Word(word) = parser.peek_token().token else {
-            return None;
+        let token = parser.peek_token();
+        let scalar = match &token.token {
+            Token::Number(value, _) => Some(Value::Number(value.clone(), false)),
+            Token::SingleQuotedString(value) => Some(Value::SingleQuotedString(value.clone())),
+            Token::Placeholder(value) => Some(Value::Placeholder(value.clone())),
+            _ => None,
+        };
+        if let Some(value) = scalar {
+            parser.next_token();
+            return Ok(Expr::Value(value.with_span(token.span)));
+        }
+        let Token::Word(word) = token.token else {
+            return parser.expected("scalar expression", parser.peek_token());
         };
         if word.quote_style.is_none() && equal_fold(&word.value, "CAST") {
-            return Some((|| {
+            return (|| {
                 parser.next_token();
                 parser.expect_token(&Token::LParen)?;
                 let expr = Box::new(self.expression(parser, 0)?);
@@ -473,35 +572,42 @@ impl Dialect for QueryDialect {
                     data_type: DataType::Custom(ObjectName::from(vec![name]), Vec::new()),
                     format: None,
                 })
-            })());
+            })();
         }
-        // The remaining Go primary productions stay with the existing parser.
-        if word.quote_style.is_none()
-            && ["NULL", "TRUE", "FALSE"]
-                .iter()
-                .any(|keyword| equal_fold(&word.value, keyword))
-        {
-            return None;
+        if word.quote_style.is_none() {
+            let value = if equal_fold(&word.value, "NULL") {
+                Some(Value::Null)
+            } else if equal_fold(&word.value, "TRUE") {
+                Some(Value::Boolean(true))
+            } else if equal_fold(&word.value, "FALSE") {
+                Some(Value::Boolean(false))
+            } else {
+                None
+            };
+            if let Some(value) = value {
+                parser.next_token();
+                return Ok(Expr::Value(value.with_span(token.span)));
+            }
         }
         if word.quote_style.is_none() && reserved(&word.value) {
-            return Some(Err(ParserError::ParserError("Expected identifier".into())));
+            return Err(ParserError::ParserError("Expected identifier".into()));
         }
         if parser.peek_nth_token(1).token == Token::Period
             && parser.peek_nth_token(2).token == Token::Mul
         {
-            return Some((|| {
+            return (|| {
                 let name = parser.parse_identifier()?;
                 parser.expect_token(&Token::Period)?;
                 Ok(Expr::QualifiedWildcard(
                     ObjectName::from(vec![name]),
                     AttachedToken(parser.next_token()),
                 ))
-            })());
+            })();
         }
         if parser.peek_nth_token(1).token != Token::LParen {
             // CURRENT_DATE, INTERVAL and other sqlparser-specific words are
             // ordinary Go names, rather than special expressions or functions.
-            return Some((|| {
+            return (|| {
                 let first = parser.parse_identifier()?;
                 identifier(&first).map_err(|e| ParserError::ParserError(e.message))?;
                 if parser.consume_token(&Token::Period) {
@@ -511,9 +617,9 @@ impl Dialect for QueryDialect {
                 } else {
                     Ok(Expr::Identifier(first))
                 }
-            })());
+            })();
         }
-        Some((|| {
+        (|| {
             let name = ObjectName::from(vec![parser.parse_identifier()?]);
             parser.expect_token(&Token::LParen)?;
             let distinct = matches!(parser.peek_token().token, Token::Word(ref word)
@@ -548,6 +654,6 @@ impl Dialect for QueryDialect {
                 null_treatment: None,
                 over: None,
             }))
-        })())
+        })()
     }
 }

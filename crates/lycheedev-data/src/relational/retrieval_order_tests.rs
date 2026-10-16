@@ -229,3 +229,195 @@ fn union_declared_sources_preserve_go_inspection_scope_separately_from_execution
         ]
     );
 }
+
+#[test]
+fn invalid_primary_field_extensions_stop_at_the_first_period() {
+    for value in [
+        "t.ID.extra",
+        "t.*.extra",
+        "(ID).extra",
+        "TRUE.extra",
+        "NULL.extra",
+        "'text'.extra",
+        "1 .extra",
+        ":p.extra",
+        "COUNT(ID).extra",
+        "CAST(ID AS INT).extra",
+        "CASE WHEN TRUE THEN ID END.extra",
+        "(SELECT ID FROM t).extra",
+        "EXISTS(SELECT ID FROM t).extra",
+    ] {
+        for sql in [
+            format!("SELECT {value} FROM t"),
+            format!("SELECT {value}+ ( WHERE ("),
+            format!("SELECT COALESCE({value}, ( WHERE () FROM t"),
+        ] {
+            let error = Program::compile(&sql).unwrap_err();
+            assert_eq!(error.code, "relational.invalid_syntax", "{sql}: {error:?}");
+            assert!(
+                error.message.contains("end of scalar expression"),
+                "{sql}: {error:?}"
+            );
+        }
+    }
+}
+#[test]
+fn valid_primary_forms_retain_exact_typed_values_and_two_component_names() {
+    let program = Program::compile("SELECT t.ID,((t.*)),TRUE,FALSE,NULL,'a''b',1.25,1e-7,:p,CAST(ID AS INT),CASE ID WHEN 1 THEN 7 END,COALESCE(NULL,ID) FROM t").unwrap();
+    let result = program
+        .execute(
+            &input(),
+            &BTreeMap::from([("p".into(), Scalar::UInt(u64::MAX))]),
+            Limits::default(),
+            None,
+        )
+        .unwrap();
+    assert_eq!(
+        result.rows,
+        vec![vec![
+            Scalar::Int(1),
+            Scalar::Int(1),
+            Scalar::Bool(true),
+            Scalar::Bool(false),
+            Scalar::Null,
+            Scalar::String("a'b".into()),
+            Scalar::Float(1.25),
+            Scalar::Float(1e-7),
+            Scalar::UInt(u64::MAX),
+            Scalar::Int(1),
+            Scalar::Int(7),
+            Scalar::Int(1)
+        ]]
+    );
+}
+
+fn parenthesized(value: &str, count: usize) -> String {
+    format!("{}{}{}", "(".repeat(count), value, ")".repeat(count))
+}
+#[test]
+fn native_infix_rhs_observation_preserves_go_128_and_129_boundaries() {
+    for value in [
+        "1+1",
+        "1-1",
+        "1*1",
+        "1/1",
+        "1%1",
+        "'a'||'b'",
+        "1=1",
+        "1<>1",
+        "1<1",
+        "1<=1",
+        "1>1",
+        "1>=1",
+        "TRUE AND TRUE",
+        "FALSE OR TRUE",
+        "'a' LIKE 'a'",
+        "'a' NOT LIKE 'a'",
+        "1 BETWEEN 0 AND 2",
+        "1 NOT BETWEEN 0 AND 2",
+    ] {
+        // retrieve + outer expression +125 nested expressions +one native RHS.
+        let valid = format!("SELECT {} FROM t", parenthesized(value, 125));
+        Program::compile(&valid).unwrap_or_else(|error| panic!("{value}: {error:?}"));
+        let too_deep = format!("SELECT {} FROM t", parenthesized(value, 126));
+        assert_eq!(
+            Program::compile(&too_deep).unwrap_err().code,
+            "relational.resource_limit",
+            "{value}"
+        );
+    }
+}
+#[test]
+fn native_rhs_depth_stops_before_later_malformed_primary_for_binary_and_between() {
+    for value in [
+        "1+(WHERE",
+        "1 BETWEEN (WHERE",
+        "1 BETWEEN 0 AND (WHERE",
+        "'a' LIKE (WHERE",
+    ] {
+        let sql = format!("SELECT {}{value}", "(".repeat(125));
+        assert_eq!(
+            Program::compile(&sql).unwrap_err().code,
+            "relational.resource_limit",
+            "{sql}"
+        );
+        let within_limit = format!("SELECT {}{value}", "(".repeat(124));
+        assert_eq!(
+            Program::compile(&within_limit).unwrap_err().code,
+            "relational.invalid_syntax",
+            "{within_limit}"
+        );
+    }
+}
+#[test]
+fn native_rhs_depth_combines_with_every_query_entry_without_extra_wrapper_frames() {
+    for template in [
+        "WITH c AS (SELECT VALUE FROM t) SELECT ID FROM t",
+        "SELECT ID FROM (SELECT VALUE FROM t) c",
+        "SELECT (SELECT VALUE FROM t) FROM t",
+        "SELECT EXISTS(SELECT VALUE FROM t) FROM t",
+        "SELECT ID IN (SELECT VALUE FROM t) FROM t",
+    ] {
+        // CTE/derived have one extra retrieve frame. Expression subqueries also
+        // retain their outer expression frame while the nested query is parsed.
+        let extra = if template.starts_with("WITH") || template.starts_with("SELECT ID FROM (") {
+            1
+        } else {
+            2
+        };
+        let valid = template.replace("VALUE", &parenthesized("1+1", 125 - extra));
+        Program::compile(&valid).unwrap_or_else(|error| panic!("{valid}: {error:?}"));
+        let invalid = template.replace("VALUE", &parenthesized("1+1", 126 - extra));
+        assert_eq!(
+            Program::compile(&invalid).unwrap_err().code,
+            "relational.resource_limit",
+            "{invalid}"
+        );
+    }
+}
+#[test]
+fn native_rhs_markers_release_after_errors_and_do_not_accumulate_left_associative_chains() {
+    let dialect = syntax::QueryDialect::default();
+    for sql in [
+        "SELECT 1+ FROM t",
+        "SELECT 1 BETWEEN 0 WHERE (",
+        "SELECT 1 BETWEEN 0 AND WHERE (",
+    ] {
+        let mut parser =
+            Parser::new(&dialect).with_tokens_with_locations(lexical::tokens(sql).unwrap());
+        assert!(retrieval::parse(&dialect, &mut parser).is_err(), "{sql}");
+        dialect.take_stop().unwrap();
+        let valid = format!("SELECT {} FROM t", parenthesized("1+1", 125));
+        let mut parser = Parser::new(&dialect)
+            .with_recursion_limit(256)
+            .with_tokens_with_locations(lexical::tokens(&valid).unwrap());
+        retrieval::parse(&dialect, &mut parser)
+            .unwrap_or_else(|error| panic!("after {sql}: {error:?}"));
+        dialect.take_stop().unwrap();
+    }
+    // Each next '+' closes the preceding RHS at the same precedence, so a
+    // hundred operators use two active expression frames, not a hundred.
+    let sql = format!(
+        "SELECT {} FROM t",
+        std::iter::repeat_n("1", 100).collect::<Vec<_>>().join("+")
+    );
+    assert_eq!(run(&sql).unwrap().rows, vec![vec![Scalar::Int(100)]]);
+}
+#[test]
+fn between_rhs_phase_does_not_consume_outer_infix_or_owned_prefix_depth() {
+    for sql in [
+        "SELECT 1+2*3 FROM t",
+        "SELECT 1 BETWEEN 0+0 AND 1+2 AND TRUE FROM t",
+        "SELECT 1 BETWEEN (CASE WHEN TRUE THEN 0 END) AND (SELECT ID+1 FROM t) FROM t",
+        "SELECT 1 + CASE WHEN TRUE THEN 1 BETWEEN 0 AND 2 ELSE FALSE END FROM t",
+    ] {
+        // The final case is a runtime type error, but its grammar must compile.
+        Program::compile(sql).unwrap_or_else(|error| panic!("{sql}: {error:?}"));
+    }
+    assert_eq!(
+        run("SELECT 1+2*3,1 BETWEEN 0+0 AND 1+2 AND TRUE FROM t")
+            .unwrap()
+            .rows,
+        vec![vec![Scalar::Int(7), Scalar::Bool(true)]]
+    );
+}

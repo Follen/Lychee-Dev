@@ -77,8 +77,19 @@ impl<E> OwnedQuery<'_, '_, E> {
         let Some(LuaExpr::NameExpr(name)) = call.get_prefix_expr() else {
             return Ok(false);
         };
-        let Some(SemanticId::Decl(key)) = self.model.resolve_name(name.get_position()) else {
+        if self.binding_manages_call(call.get_syntax_id())?
+            || self.binding_manages(name.get_syntax_id())?
+        {
             return Ok(false);
+        }
+        let Some(id @ SemanticId::Decl(_)) = self.model.resolve_name(name.get_position()) else {
+            return Ok(false);
+        };
+        if self.owner_initializer_managed(&id)? {
+            return Ok(false);
+        }
+        let SemanticId::Decl(key) = &id else {
+            unreachable!()
         };
         let Some(facts) = self.model.file_facts_of(key.file_id) else {
             return Ok(false);

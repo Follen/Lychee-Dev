@@ -1,6 +1,8 @@
 //! Call-site/diagnostic candidate queries with the original separate caches.
 //! These candidates intentionally differ from VM alias/callable expansion.
 mod constraints;
+#[cfg(test)]
+mod selected_initializer_tests;
 use super::{OwnedQuery, QueryResult, call_unify::Bindings};
 use crate::session::{OwnedValue, SelectedProjectionBackend, SelectedProjector};
 use emmylua_code_analysis::{
@@ -135,6 +137,10 @@ impl<E> OwnedQuery<'_, '_, E> {
         let Some(owner) = self.model.resolve_name(name.get_position()) else {
             return Ok(Vec::new());
         };
+        if self.owner_initializer_managed(&owner)? {
+            let value = self.type_of_expr(callee.get_syntax_id())?;
+            return self.callable_functions_cached(&value);
+        }
         let SemanticId::Decl(key) = &owner else {
             return Ok(Vec::new());
         };
@@ -180,6 +186,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         let mut out = self.callable_candidates_uncached(callee)?;
         if let LuaExpr::NameExpr(name) = callee
             && let Some(owner) = self.model.resolve_name(name.get_position())
+            && !self.owner_initializer_managed(&owner)?
             && let Some(candidates) = self.callable_candidates_for_owner(&owner)?
         {
             for candidate in candidates {
@@ -258,6 +265,9 @@ impl<E> OwnedQuery<'_, '_, E> {
         decl: &SemanticId,
     ) -> QueryResult<Option<OwnedValue>, E> {
         self.checkpoint()?;
+        if self.owner_initializer_managed(decl)? {
+            return Ok(None);
+        }
         let SemanticId::Decl(key) = decl else {
             return Ok(None);
         };
@@ -273,14 +283,33 @@ impl<E> OwnedQuery<'_, '_, E> {
     }
     fn access_index_callables(&mut self, index: &LuaIndexExpr) -> QueryResult<Vec<OwnedValue>, E> {
         let Some(resolved) = self.resolve_owned_member(index)? else {
+            // A carried union/intersection can have a known callable value
+            // without one declaration id. Preserve that value-level answer;
+            // failure to name a source write is not failed type inference.
+            if let Some(prefix) = index.get_prefix_expr()
+                && let Some(key) = index.get_index_key().and_then(access_literal_member_key)
+            {
+                let value = self.type_of_expr(prefix.get_syntax_id())?;
+                if !value.is_context_free() {
+                    return self.callable_candidates_from_prefix(&value, &key, None);
+                }
+            }
             return Ok(Vec::new());
         };
+        if resolved.binding_token.is_some() {
+            // The member id is reference provenance for the destination write.
+            // Even an empty actual callable set is authoritative here.
+            return match resolved.member_type.as_ref() {
+                Some(value) => self.callable_functions_cached(value),
+                None => Ok(Vec::new()),
+            };
+        }
         if let Some(prefix) = index.get_prefix_expr() {
             let value = self.type_of_expr(prefix.get_syntax_id())?;
             let key = LuaMemberKey::Name(resolved.name.clone().into());
             let candidates =
                 self.callable_candidates_from_prefix(&value, &key, resolved.member_id.as_ref())?;
-            if !candidates.is_empty() {
+            if value.object_info().is_some() || !candidates.is_empty() {
                 return Ok(candidates);
             }
         }
@@ -293,6 +322,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         if candidates.is_empty()
             && let Some(file) = resolved.file_id
             && let Some(id) = &resolved.member_id
+            && !self.owner_initializer_managed(id)?
             && let Some(syntax) = self
                 .model
                 .file_facts_of(file)
@@ -426,4 +456,18 @@ pub(super) fn first_param_is_self(value: &OwnedValue) -> bool {
                 t.is_self_infer() || matches!(t,LuaType::Ref(id) if id.get_name()=="self")
             })
     })
+}
+
+fn access_literal_member_key(key: LuaIndexKey) -> Option<LuaMemberKey> {
+    match key {
+        LuaIndexKey::Name(name) => Some(LuaMemberKey::Name(name.get_name_text().into())),
+        LuaIndexKey::String(string) => Some(LuaMemberKey::Name(string.get_value().into())),
+        LuaIndexKey::Integer(number) => match number.get_number_value() {
+            emmylua_parser::NumberResult::Int(value) => Some(LuaMemberKey::Integer(value)),
+            emmylua_parser::NumberResult::Uint(value) => Some(LuaMemberKey::Integer(value as i64)),
+            _ => None,
+        },
+        LuaIndexKey::Idx(index) => Some(LuaMemberKey::Integer(index as i64)),
+        LuaIndexKey::Expr(_) => None,
+    }
 }

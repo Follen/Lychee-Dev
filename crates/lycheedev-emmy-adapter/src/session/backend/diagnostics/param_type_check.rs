@@ -45,6 +45,17 @@ impl<E> OwnedQuery<'_, '_, E> {
         Ok(())
     }
 
+    fn pt_name_initializer_managed(&mut self, callee: &LuaExpr) -> QueryResult<bool, E> {
+        let LuaExpr::NameExpr(name) = callee else {
+            return Ok(false);
+        };
+        self.checkpoint()?;
+        match self.model.resolve_name(name.get_position()) {
+            Some(decl) => self.owner_initializer_managed(&decl),
+            None => Ok(false),
+        }
+    }
+
     fn pt_check_pcall_forward(
         &mut self,
         context: &mut CheckContext<'_>,
@@ -106,6 +117,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         if !self.binding_manages(callee.get_syntax_id())?
             && let LuaExpr::NameExpr(name) = &callee
             && let Some(decl) = self.model.resolve_name(name.get_position())
+            && !self.owner_initializer_managed(&decl)?
             && let Some(facts) = self.model.file_facts()
             && let Some(decl) = facts.decl_by_id(&decl)
             && let Some(syntax) = decl.doc_type_syntax
@@ -122,6 +134,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         if !self.binding_manages(callee.get_syntax_id())?
             && let LuaExpr::NameExpr(name) = &callee
             && name.get_name_text().as_deref() == Some("pcall")
+            && !self.pt_name_initializer_managed(&callee)?
             && !args.is_empty()
             && self.pt_check_pcall_forward(context, &args)?
         {
@@ -160,7 +173,13 @@ impl<E> OwnedQuery<'_, '_, E> {
             }
         }
         if let Some(mismatches) = best {
-            let literal_names = doc_overload_literal_names(&self.model, &callee);
+            let literal_names = if self.binding_manages(callee.get_syntax_id())?
+                || self.pt_name_initializer_managed(&callee)?
+            {
+                Vec::new()
+            } else {
+                doc_overload_literal_names(&self.model, &callee)
+            };
             for mismatch in mismatches {
                 let message = if literal_names.len() >= 2 {
                     let found = mismatch

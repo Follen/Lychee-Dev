@@ -45,6 +45,9 @@ impl<E> OwnedQuery<'_, '_, E> {
         else {
             return Ok(None);
         };
+        if self.owner_initializer_managed(&id)? {
+            return Ok(None);
+        }
         let SemanticId::Decl(key) = &id else {
             return Ok(None);
         };

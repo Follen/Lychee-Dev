@@ -150,9 +150,14 @@ impl<E> OwnedQuery<'_, '_, E> {
             {
                 value = OwnedValue::plain(LuaType::Nil);
             }
+            let owner = if self.owner_initializer_managed(&declaration)? {
+                None
+            } else {
+                Some(declaration)
+            };
             return Ok(ExpressionValue {
                 value,
-                owner: Some(declaration),
+                owner,
                 closure_syntax: None,
                 receiver: None,
             });
@@ -197,9 +202,14 @@ impl<E> OwnedQuery<'_, '_, E> {
             }
             _ => OwnedValue::plain(LuaType::Unknown),
         };
+        let owner = if self.owner_initializer_managed(&owner)? {
+            None
+        } else {
+            Some(owner)
+        };
         Ok(ExpressionValue {
             value,
-            owner: Some(owner),
+            owner,
             closure_syntax: None,
             receiver: None,
         })

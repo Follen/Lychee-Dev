@@ -342,8 +342,48 @@ impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
         Ok(value)
     }
 
+    /// A declaration/member id identifies a source write, not necessarily the
+    /// function value currently selected for that write. Keep this distinction
+    /// when supplementing actual values with original signature metadata.
+    pub(super) fn owner_initializer_managed(&mut self, owner: &SemanticId) -> QueryResult<bool, E> {
+        self.checkpoint()?;
+        let resolved = match owner {
+            SemanticId::Name(_) => self.model.resolve_owner(owner),
+            _ => Some(owner.clone()),
+        };
+        let site = match resolved.as_ref() {
+            Some(id @ SemanticId::Decl(key)) => self
+                .model
+                .file_facts_of(key.file_id)
+                .and_then(|facts| facts.decl_by_id(id))
+                .and_then(|decl| decl.value_expr_syntax)
+                .map(|syntax| BindingSite {
+                    file_id: key.file_id,
+                    syntax,
+                }),
+            Some(id @ SemanticId::Member(key)) => self
+                .model
+                .file_facts_of(key.file_id)
+                .and_then(|facts| facts.member_by_id(id))
+                .and_then(|member| member.value_syntax)
+                .map(|syntax| BindingSite {
+                    file_id: key.file_id,
+                    syntax,
+                }),
+            _ => None,
+        };
+        self.checkpoint()?;
+        match site {
+            Some(site) => self.manages_initializer_site(site),
+            None => Ok(false),
+        }
+    }
+
     fn manages_initializer(&mut self, syntax: LuaSyntaxId) -> QueryResult<bool, E> {
-        let site = self.site(syntax);
+        self.manages_initializer_site(self.site(syntax))
+    }
+
+    fn manages_initializer_site(&mut self, site: BindingSite) -> QueryResult<bool, E> {
         // Preserve resolve || (call || resolve), including the second resolve
         // when both preceding decisions are NotManaged. These probes do not
         // themselves project or append a receipt.

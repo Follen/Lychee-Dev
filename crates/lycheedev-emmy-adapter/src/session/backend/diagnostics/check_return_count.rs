@@ -224,18 +224,35 @@ impl<E> OwnedQuery<'_, '_, E> {
             return Ok(None);
         };
         let location = match &callee {
-            LuaExpr::NameExpr(name) => (|| {
-                let SemanticId::Decl(key) = self.model.resolve_name(name.get_position())? else {
-                    return None;
+            LuaExpr::NameExpr(name) => {
+                let Some(id @ SemanticId::Decl(_)) = self.model.resolve_name(name.get_position())
+                else {
+                    return Ok(None);
                 };
-                let facts = self.model.file_facts_of(key.file_id)?;
-                let decl = facts.decl_by_id(&SemanticId::Decl(key.clone()))?;
-                Some((decl.file_id, decl.value_expr_syntax?))
-            })(),
+                if self.owner_initializer_managed(&id)? {
+                    return Ok(None);
+                }
+                let SemanticId::Decl(key) = &id else {
+                    unreachable!()
+                };
+                (|| {
+                    let facts = self.model.file_facts_of(key.file_id)?;
+                    let decl = facts.decl_by_id(&id)?;
+                    Some((decl.file_id, decl.value_expr_syntax?))
+                })()
+            }
             LuaExpr::IndexExpr(index) => {
                 let Some(resolved) = self.resolve_owned_member(index)? else {
                     return Ok(None);
                 };
+                if resolved.binding_token.is_some() {
+                    return Ok(None);
+                }
+                if let Some(id) = &resolved.member_id
+                    && self.owner_initializer_managed(id)?
+                {
+                    return Ok(None);
+                }
                 (|| {
                     let file = resolved.file_id?;
                     let facts = self.model.file_facts_of(file)?;

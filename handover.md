@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 02:44 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`4641fe7f4dcb127c0bc0b149b8847fa17520627b`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 02:50 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`c81da0895560706bba77641c398121ad25a39431`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -24,6 +24,8 @@
 - 2026-10-15 18:24 用户调整实施节奏：先按完整端到端功能实现并接入默认生产消费者，再集中补测试和统一验证；取消自行增加的逐小片冻结/独审/CI先行门禁。实现过程中仍及时分批提交推送同一草稿PR，真实安全边界和文件单写协调保留；已有CI旁路诊断，不等待每轮才继续编码。最终四阶段循环审计与完整验收要求不变。
 
 ## 2. 当前实现与未闭环事项
+
+SQL有限两项后继已实现：Go primary首个多余点号立即Syntax，公共Pratt仍move AST，通过原infix/precedence观察RHS活跃深度，BETWEEN分低/高相，RAII失败只退本入口标记；7新边界回归未跑。Emmy有限来源收口18路径已组合：selected initializer与Lua/XML字段的实际函数值贯通VM、参数/泛型/返回/赋值/await/assert，不被旧声明overload/docs复活覆盖，原静态声明检查仍保留；17新Rust未跑，43调度入口的静态边界已扫完。SQL与Emmy本轮有限实现现转集中真实回归，未宣称全行为或资源验收完成；Data三组默认入口仍在实施。
 
 实现收口限已有Go323合同及43checker：Data仍需asset export/demux复用真实query准入和CDN路径、asset search/listfile共享可取消transport、Wago/Raidbots外层pin/receipt受控收尾三组；SQL尚余非法三段字段首错与Pratt RHS深度；Emmy尚余selected实际函数来源被旧声明/docs覆盖的统一收口。Source默认存储已接。完成这些既有差距并集中修闭编译/实际回归后进入第一轮架构与使用质量审计；不扩为通用SQL数据库，不以基础切片数量代替完成度。
 

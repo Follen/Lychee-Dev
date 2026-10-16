@@ -9,6 +9,9 @@ use emmylua_code_analysis::{
 use emmylua_parser::{LuaAstNode, LuaDocFuncType, LuaDocType, LuaSyntaxId};
 use std::{collections::HashMap, sync::Arc};
 
+#[cfg(test)]
+mod selected_member_tests;
+
 impl<E> OwnedQuery<'_, '_, E> {
     pub(super) fn callable_candidates_from_type(
         &mut self,
@@ -139,6 +142,42 @@ impl<E> OwnedQuery<'_, '_, E> {
         member: Option<&SemanticId>,
     ) -> QueryResult<Vec<OwnedValue>, E> {
         self.checkpoint()?;
+        if let Some(members) = self.selected_members(prefix)? {
+            // A selected field's id names the destination write for reference
+            // provenance. Its callable value may come from a different closure
+            // (or be absent/unavailable), so that id cannot supply signatures.
+            // Validate the selected shape even when no callable is found.
+            let mut out = Vec::new();
+            for info in members {
+                self.checkpoint()?;
+                if &info.key != key {
+                    continue;
+                }
+                for candidate in self.callable_candidates_from_type(&info.typ)? {
+                    self.checkpoint()?;
+                    if !out.contains(&candidate) {
+                        out.push(candidate);
+                    }
+                }
+            }
+            return Ok(out);
+        }
+        if let Some(components) = self.selected_member_prefix_components(prefix)? {
+            // Member collection merges composite rows and retains one source
+            // id. Resolve each carried component before that merge so a Lua
+            // destination id cannot replace any selected component's value.
+            let mut out = Vec::new();
+            for component in components {
+                self.checkpoint()?;
+                for candidate in self.callable_candidates_from_prefix(&component, key, None)? {
+                    self.checkpoint()?;
+                    if !out.contains(&candidate) {
+                        out.push(candidate);
+                    }
+                }
+            }
+            return Ok(out);
+        }
         let allow_cross_file = member
             .and_then(|member| self.callable_member_cross_file(member))
             .unwrap_or(true);
@@ -168,6 +207,28 @@ impl<E> OwnedQuery<'_, '_, E> {
         }
         Ok(unique)
     }
+    fn selected_member_prefix_components(
+        &mut self,
+        value: &OwnedValue,
+    ) -> QueryResult<Option<Vec<OwnedValue>>, E> {
+        self.checkpoint()?;
+        if value.is_context_free() {
+            return Ok(None);
+        }
+        Ok(match value.structural_type() {
+            LuaType::Union(_) => value.union_components(),
+            LuaType::Intersection(intersection) => {
+                let mut components = Vec::new();
+                for (index, ty) in intersection.get_types().iter().enumerate() {
+                    self.checkpoint()?;
+                    components.push(self.owned_child(value, index, ty));
+                }
+                Some(components)
+            }
+            LuaType::Array(array) => Some(vec![self.owned_child(value, 0, array.get_base())]),
+            _ => None,
+        })
+    }
     fn push_owned_callable_member(
         &mut self,
         info: &OwnedMemberInfo,
@@ -184,6 +245,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         }
         if out.len() == before
             && let (Some(member), Some(file)) = (&info.id, info.file_id)
+            && !self.owner_initializer_managed(member)?
             && let Some(syntax) = self
                 .model
                 .file_facts_of(file)
@@ -214,6 +276,9 @@ impl<E> OwnedQuery<'_, '_, E> {
         owner: &SemanticId,
     ) -> QueryResult<Option<Vec<OwnedValue>>, E> {
         self.checkpoint()?;
+        if self.owner_initializer_managed(owner)? {
+            return self.callable_candidates_for_owner_single(owner);
+        }
         if let SemanticId::Decl(key) = owner
             && let Some(decl) = self
                 .model
@@ -241,6 +306,21 @@ impl<E> OwnedQuery<'_, '_, E> {
         owner: &SemanticId,
     ) -> QueryResult<Option<Vec<OwnedValue>>, E> {
         self.checkpoint()?;
+        if self.owner_initializer_managed(owner)? {
+            let selected_owner = match owner {
+                SemanticId::Name(_) => self.model.resolve_owner(owner),
+                _ => Some(owner.clone()),
+            };
+            let value = match selected_owner.as_ref() {
+                Some(id @ SemanticId::Decl(_)) => self.type_of_decl(id)?,
+                Some(id @ SemanticId::Member(_)) => self.type_of_member(id)?,
+                _ => None,
+            };
+            return match value {
+                Some(value) => self.callable_functions_cached(&value).map(Some),
+                None => Ok(Some(Vec::new())),
+            };
+        }
         let (file, syntax) = match owner {
             SemanticId::Decl(key) => match self
                 .model

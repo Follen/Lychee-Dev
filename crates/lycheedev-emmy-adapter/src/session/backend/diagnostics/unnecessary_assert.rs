@@ -30,7 +30,9 @@ impl<E> OwnedQuery<'_, '_, E> {
             };
             let ty = if let Some(value) = self.binding_type_of_expr(first.get_syntax_id())? {
                 value
-            } else if let Some(ty) = doc_literal_type(&self.model, &first) {
+            } else if !self.assert_argument_initializer_managed(&first)?
+                && let Some(ty) = doc_literal_type(&self.model, &first)
+            {
                 OwnedValue::plain(ty)
             } else {
                 self.type_of_expr_at(first.get_syntax_id(), first.get_range().start().into())?
@@ -50,6 +52,17 @@ impl<E> OwnedQuery<'_, '_, E> {
             }
         }
         Ok(())
+    }
+
+    fn assert_argument_initializer_managed(&mut self, expr: &LuaExpr) -> QueryResult<bool, E> {
+        let LuaExpr::NameExpr(name) = expr else {
+            return Ok(false);
+        };
+        self.checkpoint()?;
+        match self.model.resolve_name(name.get_position()) {
+            Some(decl) => self.owner_initializer_managed(&decl),
+            None => Ok(false),
+        }
     }
 }
 fn doc_literal_type(

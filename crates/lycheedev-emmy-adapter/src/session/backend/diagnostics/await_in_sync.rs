@@ -43,6 +43,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                 .resolve_name(name.get_position())
                 .or_else(|| self.model.global_decl(text.as_str()));
             if let Some(decl) = decl
+                && !self.owner_initializer_managed(&decl)?
                 && let Some(func) = doc_signature_for_decl(&self.model, &decl)
             {
                 let func = OwnedValue::plain(LuaType::DocFunction(std::sync::Arc::new(func)));

@@ -50,6 +50,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         if matches!(constrained.structural_type(), LuaType::Function)
             && let LuaExpr::NameExpr(name) = arg
             && let Some(decl) = self.model.resolve_name(name.get_position())
+            && !self.owner_initializer_managed(&decl)?
         {
             if let Some(function) = self.access_decl_signature(&decl)? {
                 return Ok(function);

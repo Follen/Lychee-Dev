@@ -29,9 +29,15 @@ impl<E> OwnedQuery<'_, '_, E> {
         let Some(resolved) = self.resolve_owned_member(&index)? else {
             return Ok(out);
         };
+        if resolved.binding_token.is_some() {
+            return Ok(out);
+        }
         let (Some(id), Some(file)) = (resolved.member_id, resolved.file_id) else {
             return Ok(out);
         };
+        if self.owner_initializer_managed(&id)? {
+            return Ok(out);
+        }
         let Some(facts) = self.model.file_facts_of(file) else {
             return Ok(out);
         };

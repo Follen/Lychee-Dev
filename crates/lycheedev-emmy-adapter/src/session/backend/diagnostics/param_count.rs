@@ -65,6 +65,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         if !managed
             && let LuaExpr::NameExpr(name) = &callee
             && let Some(id) = self.model.resolve_name(name.get_position())
+            && !self.owner_initializer_managed(&id)?
             && let SemanticId::Decl(key) = &id
             && let Some(decl) = self
                 .model
@@ -87,7 +88,9 @@ impl<E> OwnedQuery<'_, '_, E> {
             && candidates.is_empty()
             && let Some(index) = LuaIndexExpr::cast(callee.syntax().clone())
             && let Some(resolved) = self.resolve_owned_member(&index)?
+            && resolved.binding_token.is_none()
             && let Some(id) = resolved.member_id
+            && !self.owner_initializer_managed(&id)?
         {
             if let Some(value) = self.type_of_member(&id)? {
                 candidates = self.callable_functions_cached(&value)?;
@@ -413,6 +416,9 @@ impl<E> OwnedQuery<'_, '_, E> {
     }
     fn count_has_variadic_doc(&mut self, callee: &LuaExpr) -> QueryResult<bool, E> {
         self.checkpoint()?;
+        if self.binding_manages(callee.get_syntax_id())? {
+            return Ok(false);
+        }
         let source = match callee {
             LuaExpr::NameExpr(name) => {
                 let Some(text) = name.get_name_text() else {
@@ -425,6 +431,9 @@ impl<E> OwnedQuery<'_, '_, E> {
                 else {
                     return Ok(false);
                 };
+                if self.owner_initializer_managed(&id)? {
+                    return Ok(false);
+                }
                 let SemanticId::Decl(key) = &id else {
                     return Ok(false);
                 };
@@ -438,6 +447,14 @@ impl<E> OwnedQuery<'_, '_, E> {
                 let Some(resolved) = self.resolve_owned_member(index)? else {
                     return Ok(false);
                 };
+                if resolved.binding_token.is_some() {
+                    return Ok(false);
+                }
+                if let Some(id) = &resolved.member_id
+                    && self.owner_initializer_managed(id)?
+                {
+                    return Ok(false);
+                }
                 match (resolved.file_id, resolved.member_id) {
                     (Some(file), Some(id)) => self
                         .model
