@@ -2,6 +2,7 @@
 //! results both have iterative cleanup, including cancellation and rejection.
 use super::*;
 use ast_owner::Owned;
+use sqlparser::ast::helpers::attached_token::AttachedToken;
 
 pub(super) enum QueryKind {
     Scalar,
@@ -64,7 +65,7 @@ fn run(
     check: &dyn Fn() -> Result<()>,
 ) -> Result<(Option<Term>, Option<Program>)> {
     let mut values = Vec::new();
-    let mut query_result = None;
+    let mut query_result: Option<Program> = None;
     while let Some(task) = tasks.pop() {
         check()?;
         match task {
@@ -312,7 +313,7 @@ fn visit(
                     }
                     FunctionArg::Unnamed(FunctionArgExpr::Wildcard) => {
                         tasks.push(Task::Visit(
-                            Owned::new(Box::new(Expr::Wildcard(Default::default()))),
+                            Owned::new(Box::new(Expr::Wildcard(AttachedToken::empty()))),
                             depth + 1,
                             scope,
                         ));
@@ -321,7 +322,7 @@ fn visit(
                         tasks.push(Task::Visit(
                             Owned::new(Box::new(Expr::QualifiedWildcard(
                                 name.clone(),
-                                Default::default(),
+                                AttachedToken::empty(),
                             ))),
                             depth + 1,
                             scope,

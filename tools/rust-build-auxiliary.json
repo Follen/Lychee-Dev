@@ -20,6 +20,15 @@
       "fileVersion": "14.51.36260.0",
       "signerSubject": "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
       "signerThumbprint": "1D77A9B9E8FE2075D9AD15123257FB90DB0DA4A1"
+    },
+    {
+      "kind": "msvc-vctip",
+      "programFilesPath": "Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.51.36231/bin/Hostx64/x64/vctip.exe",
+      "bytes": 514528,
+      "sha256": "41fe46f8a0b41f6dd94c68c85fba20a10aacb662a9ef04784a632e37f3692371",
+      "fileVersion": "14.51.36260.0",
+      "signerSubject": "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+      "signerThumbprint": "1D77A9B9E8FE2075D9AD15123257FB90DB0DA4A1"
     }
   ],
   "msvcCompilers": [
@@ -45,6 +54,31 @@
         "run": "https://github.com/Follen/Lychee-Dev/actions/runs/38633376782",
         "artifactId": 11927191491,
         "archiveSHA256": "aca83ccda413ec62def5ac93939ae3e8e0d7d6623d44cbc8b5bee6918ec72275"
+      }
+    },
+    {
+      "kind": "msvc-cl",
+      "programFilesPath": "Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.51.36231/bin/Hostx64/x64/cl.exe",
+      "bytes": 893288,
+      "sha256": "b0a1818ebae6da7f18230a84e76ce839212584ac4c2ab55b97a0d5268085da57",
+      "fileVersion": "19.51.36260.0",
+      "signerSubject": "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+      "signerThumbprint": "AB172913A2960A224809EE8A0C371CD47A079B72",
+      "linker": {
+        "kind": "msvc-link",
+        "programFilesPath": "Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.51.36231/bin/Hostx64/x64/link.exe",
+        "bytes": 3701088,
+        "sha256": "a8c42e25c91ca2453e1110540ac08f0fc12d7539454a11b9af8baeecb469837d",
+        "fileVersion": "14.51.36260.0",
+        "signerSubject": "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+        "signerThumbprint": "AB172913A2960A224809EE8A0C371CD47A079B72"
+      },
+      "helperProgramFilesPath": "Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.51.36231/bin/Hostx64/x64/vctip.exe",
+      "observation": {
+        "comment": "https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6214810996",
+        "observedCommit": "0d0da9f056126835f6a5e0c372f8e78f3f630de8",
+        "signatureStatus": "Valid",
+        "identityMatchesReviewedEnterprise": true
       }
     }
   ]

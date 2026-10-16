@@ -67,16 +67,26 @@ test('Cargo and exact MSVC admission requests are explicit, typed, and mutually 
   assert.throws(()=>auxiliaryRequest({cargoBuild:true,msvcCompile:true}),/conflicting_auxiliary_request/);
   for(const options of [{msvcCompile:'true'},{cargoBuild:1},{msvcCompile:null}])assert.throws(()=>auxiliaryRequest(options),/invalid_auxiliary_request/);
 });
-test('MSVC policy binds one exact compiler, linker, and existing same-directory helper',()=>{
+test('MSVC policy binds exact Enterprise and Community tool identities and same-directory helpers',()=>{
   const policy=JSON.parse(readFileSync(new URL('./rust-build-auxiliary.json',import.meta.url)));
-  assert.equal(policy.msvcCompilers.length,1);
-  const cl=policy.msvcCompilers[0],link=cl.linker,helper=policy.helpers.find(row=>row.programFilesPath===cl.helperProgramFilesPath);
+  assert.equal(policy.msvcCompilers.length,2);
+  assert.deepEqual(policy.msvcCompilers.map(row=>row.programFilesPath.split('/')[2]),['Enterprise','Community']);
+  for(const compiler of policy.msvcCompilers){
+  const cl=compiler,link=cl.linker,helper=policy.helpers.find(row=>row.programFilesPath===cl.helperProgramFilesPath);
   assert(helper);assert.equal(cl.kind,'msvc-cl');assert.equal(link.kind,'msvc-link');assert.equal(helper.kind,'msvc-vctip');
   const directory=path=>path.slice(0,path.lastIndexOf('/'));
   assert.equal(directory(cl.programFilesPath),directory(link.programFilesPath));assert.equal(directory(cl.programFilesPath),directory(helper.programFilesPath));
   assert.equal(cl.sha256,'b0a1818ebae6da7f18230a84e76ce839212584ac4c2ab55b97a0d5268085da57');
   assert.equal(link.sha256,'a8c42e25c91ca2453e1110540ac08f0fc12d7539454a11b9af8baeecb469837d');
   for(const entry of [cl,link,helper]){assert.match(entry.sha256,/^[a-f0-9]{64}$/);assert.ok(entry.bytes>0);assert.match(entry.fileVersion,/^\d+\.\d+\.\d+\.\d+$/);assert.match(entry.signerThumbprint,/^[A-F0-9]{40}$/);assert.equal(entry.signerSubject,'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US');}
+  }
+  const enterprise=policy.msvcCompilers[0],community=policy.msvcCompilers[1];
+  const identity=entry=>Object.fromEntries(['kind','bytes','sha256','fileVersion','signerSubject','signerThumbprint'].map(key=>[key,entry[key]]));
+  assert.deepEqual(identity(community),identity(enterprise));
+  assert.deepEqual(identity(community.linker),identity(enterprise.linker));
+  const helper=compiler=>policy.helpers.find(row=>row.programFilesPath===compiler.helperProgramFilesPath);
+  assert.deepEqual(identity(helper(community)),identity(helper(enterprise)));
+  assert.equal(community.observation.comment,'https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6214810996');
 });
 test('a caller flag cannot grant MSVC helper approval to another executable',{skip:process.platform!=='win32'},t=>{
   const options={...fixture(t),msvcCompile:true};

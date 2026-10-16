@@ -236,6 +236,7 @@ fn index<'w>(
         right,
         example,
         buckets,
+        _allocation: allocation,
     }))
 }
 struct Right<'a> {
