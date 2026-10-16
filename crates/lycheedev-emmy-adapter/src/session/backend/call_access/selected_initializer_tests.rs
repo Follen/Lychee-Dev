@@ -102,7 +102,15 @@ impl Fixture {
         context: Context,
         codes: &[DiagnosticCode],
     ) -> (DiagnosticRun, Vec<BindingCoverage>) {
-        self.run(0, context, |query| {
+        self.diagnose_file(0, context, codes)
+    }
+    fn diagnose_file(
+        &self,
+        file: usize,
+        context: Context,
+        codes: &[DiagnosticCode],
+    ) -> (DiagnosticRun, Vec<BindingCoverage>) {
+        self.run(file, context, |query| {
             let mut config = Emmyrc::default();
             config.diagnostics.enables.extend(codes.iter().copied());
             let mut run = DiagnosticRun::default();
@@ -113,6 +121,47 @@ impl Fixture {
             run
         })
     }
+    fn native_diagnostics(&self, file: usize, code: DiagnosticCode) -> Vec<lsp_types::Diagnostic> {
+        let mut config = Emmyrc::default();
+        config.diagnostics.enables.push(code);
+        config.diagnostics.disable.extend(
+            DiagnosticCode::all()
+                .iter()
+                .copied()
+                .filter(|candidate| *candidate != code),
+        );
+        self.analysis
+            .diagnose_file_with_config(
+                self.batch.file_ids[file],
+                Arc::new(CheckConfig::new(&config)),
+            )
+            .unwrap()
+    }
+    fn lsp_range(&self, file: usize, range: rowan::TextRange) -> lsp_types::Range {
+        let file = self.batch.file_ids[file];
+        let index = self.analysis.db.line_index(file).unwrap();
+        let text = self.analysis.db.get_file_text(file).unwrap();
+        let position = |offset| {
+            let (line, character) = index.get_line_col(offset, text).unwrap();
+            lsp_types::Position::new(line as u32, character as u32)
+        };
+        lsp_types::Range::new(position(range.start()), position(range.end()))
+    }
+}
+fn assert_native_diagnostic(owned: &Diagnostic, native: &lsp_types::Diagnostic) {
+    assert_eq!(
+        native.code,
+        Some(lsp_types::NumberOrString::String(
+            owned.code.get_name().into()
+        ))
+    );
+    assert_eq!(native.message, owned.message);
+    assert_eq!(native.severity, Some(owned.severity));
+    assert_eq!(native.tags, owned.tags);
+    assert_eq!(native.data, owned.data);
+    assert_eq!(native.source.as_deref(), Some("EmmyLua"));
+    assert_eq!(native.related_information, None);
+    assert_eq!(native.code_description, None);
 }
 fn diagnostics(run: &DiagnosticRun, code: DiagnosticCode) -> Vec<&Diagnostic> {
     run.diagnostics
@@ -127,38 +176,111 @@ const OLD: &str = "function(old) return old end";
 const NEW: &str = "function(value) return value end";
 const FUNCTIONS: &str = "---@param old number\n---@return number\nlocal f = function(old) return old end\n---@param value string\n---@return string\nlocal replacement = function(value) return value end\nlocal result = f(1)\n";
 
+// The fixed VM rejects an incompatible fixed argument, but an unknown argument
+// may still use the declared return. Compare both query and diagnostic results
+// with the unmodified engine on a direct call to the selected signature. This
+// keeps initializer provenance separate from the overload matching contract.
+fn selected_call_matches_direct_native(
+    fixture: &Fixture,
+    native: &Fixture,
+    file: usize,
+    argument: &str,
+    expected: LuaType,
+    mismatches: usize,
+) {
+    let origin = fixture.site(0, OLD);
+    let call = format!("f({argument})");
+    let native_model = native.analysis.semantic_model(native.batch.file_ids[file]);
+    let native_value = native_model.type_of_expr(native.site(file, &call).syntax);
+    assert_eq!(native_value, expected, "direct native call: {call}");
+    if argument == "unresolved_argument" {
+        assert_eq!(
+            native_model.type_of_expr(native.site(file, argument).syntax),
+            LuaType::Unknown
+        );
+    }
+    let (_, rows) = fixture.run(
+        file,
+        context(origin, fixture.function(file, NEW)),
+        |query| {
+            let callee = fixture.expr(file, "f");
+            let candidates = query.callable_candidates_for_expr(&callee).unwrap();
+            assert_eq!(candidates.len(), 1);
+            assert_eq!(
+                candidates[0].function_parameters().unwrap(),
+                [Some(crate::session::OwnedValue::plain(LuaType::String))]
+            );
+            assert_eq!(
+                candidates[0].function_return().unwrap().structural_type(),
+                &LuaType::String
+            );
+            let value = query
+                .type_of_expr(fixture.site(file, &call).syntax)
+                .unwrap();
+            assert_eq!(value.structural_type(), &expected, "selected call: {call}");
+            assert_eq!(
+                value,
+                crate::session::OwnedValue::plain(native_value.clone())
+            );
+            assert_eq!(
+                query
+                    .type_of_expr(fixture.site(file, &call).syntax)
+                    .unwrap(),
+                value
+            );
+        },
+    );
+    let expected_rows = [BindingCoverage {
+        site: origin,
+        operation: "resolve",
+        state: "bound",
+        proof: "initializer-proof".into(),
+        reason: None,
+        parameter: None,
+        parameter_index: None,
+        argument: None,
+    }];
+    assert_eq!(rows, expected_rows);
+    let (run, rows) = fixture.diagnose_file(
+        file,
+        context(origin, fixture.function(file, NEW)),
+        &[DiagnosticCode::ParamTypeMismatch],
+    );
+    let owned_errors = diagnostics(&run, DiagnosticCode::ParamTypeMismatch);
+    let native_errors = native.native_diagnostics(file, DiagnosticCode::ParamTypeMismatch);
+    assert_eq!(
+        owned_errors.len(),
+        mismatches,
+        "{call}: {:?}",
+        run.diagnostics
+    );
+    assert_eq!(native_errors.len(), mismatches, "{call}: {native_errors:?}");
+    for (owned, direct) in owned_errors.iter().zip(&native_errors) {
+        assert_eq!(owned.range, fixture.expr(file, argument).get_range());
+        assert_eq!(
+            direct.range,
+            native.lsp_range(file, native.expr(file, argument).get_range())
+        );
+        assert_native_diagnostic(owned, direct);
+    }
+    assert_eq!(rows, expected_rows);
+}
+
 #[test]
 fn selected_initializer_drives_vm_candidates_and_keeps_exact_source_receipt() {
-    let fixture = Fixture::new(&[("main.lua", FUNCTIONS)]);
-    let origin = fixture.site(0, OLD);
-    let (_, rows) = fixture.run(0, context(origin, fixture.function(0, NEW)), |query| {
-        let callee = fixture.expr(0, "f");
-        let candidates = query.callable_candidates_for_expr(&callee).unwrap();
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(
-            candidates[0].function_parameters().unwrap(),
-            [Some(crate::session::OwnedValue::plain(LuaType::String))]
+    for (argument, expected, mismatches) in [
+        ("'ok'", LuaType::String, 0),
+        ("unresolved_argument", LuaType::String, 0),
+        ("1", LuaType::Unknown, 1),
+    ] {
+        let source = FUNCTIONS.replace("f(1)", &format!("f({argument})"));
+        let fixture = Fixture::new(&[("main.lua", &source)]);
+        let direct_source = format!(
+            "---@param value string\n---@return string\nlocal f = {NEW}\nlocal result = f({argument})\n"
         );
-        assert_eq!(
-            candidates[0].function_return().unwrap().structural_type(),
-            &LuaType::String
-        );
-        let value = query.type_of_expr(fixture.site(0, "f(1)").syntax).unwrap();
-        assert_eq!(value.structural_type(), &LuaType::String);
-    });
-    assert_eq!(
-        rows,
-        [BindingCoverage {
-            site: origin,
-            operation: "resolve",
-            state: "bound",
-            proof: "initializer-proof".into(),
-            reason: None,
-            parameter: None,
-            parameter_index: None,
-            argument: None,
-        }]
-    );
+        let native = Fixture::new(&[("main.lua", &direct_source)]);
+        selected_call_matches_direct_native(&fixture, &native, 0, argument, expected, mismatches);
+    }
 }
 
 #[test]
@@ -371,23 +493,31 @@ fn async_and_assert_consumers_use_selected_initializer_values() {
 
 #[test]
 fn foreign_initializer_uses_its_own_file_identity_and_original_control() {
-    let fixture = Fixture::new(&[
-        (
-            "definition.lua",
-            "---@param old number\n---@return number\nf = function(old) return old end\n",
-        ),
-        (
-            "consumer.lua",
-            "---@param value string\n---@return string\nlocal replacement = function(value) return value end\nlocal result = f(1)\n",
-        ),
-    ]);
+    const DEFINITION: &str =
+        "---@param old number\n---@return number\nf = function(old) return old end\n";
+    const DIRECT_DEFINITION: &str =
+        "---@param value string\n---@return string\nf = function(value) return value end\n";
+    let consumer = |argument: &str| {
+        format!(
+            "---@param value string\n---@return string\nlocal replacement = {NEW}\nlocal result = f({argument})\n"
+        )
+    };
+    for (argument, expected, mismatches) in [
+        ("'ok'", LuaType::String, 0),
+        ("unresolved_argument", LuaType::String, 0),
+        ("1", LuaType::Unknown, 1),
+    ] {
+        let source = consumer(argument);
+        let fixture = Fixture::new(&[("definition.lua", DEFINITION), ("consumer.lua", &source)]);
+        let native = Fixture::new(&[
+            ("definition.lua", DIRECT_DEFINITION),
+            ("consumer.lua", &source),
+        ]);
+        selected_call_matches_direct_native(&fixture, &native, 1, argument, expected, mismatches);
+    }
+    let source = consumer("'ok'");
+    let fixture = Fixture::new(&[("definition.lua", DEFINITION), ("consumer.lua", &source)]);
     let origin = fixture.site(0, OLD);
-    let (_, rows) = fixture.run(1, context(origin, fixture.function(1, NEW)), |query| {
-        let value = query.type_of_expr(fixture.site(1, "f(1)").syntax).unwrap();
-        assert_eq!(value.structural_type(), &LuaType::String);
-    });
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].site, origin);
     let model = fixture.analysis.semantic_model(fixture.batch.file_ids[1]);
     let id = model
         .resolve_name(fixture.expr(1, "f").get_position())
@@ -431,7 +561,22 @@ fn assignment_overload_shortcut_cannot_accept_a_different_selected_result() {
     let errors = diagnostics(&run, DiagnosticCode::AssignTypeMismatch);
     assert_eq!(errors.len(), 1, "{:?}", run.diagnostics);
     assert_eq!(errors[0].range, fixture.expr(0, "f()").get_range());
-    assert_eq!(errors[0].message, "expected `number` but found `string`");
+    // Detailed assignment failures include the fixed checker's reason suffix.
+    // Keep both clauses and compare the full diagnostic with a direct native
+    // assignment; deleting the suffix would change production diagnostics.
+    assert_eq!(
+        errors[0].message,
+        "expected `number` but found `string`. expected `number`, found `string`"
+    );
+    let direct_source = "---@return string\nlocal replacement = function() return 'ok' end\n---@type number\nlocal result = replacement()\n";
+    let native = Fixture::new(&[("main.lua", direct_source)]);
+    let native_errors = native.native_diagnostics(0, DiagnosticCode::AssignTypeMismatch);
+    assert_eq!(native_errors.len(), 1);
+    assert_eq!(
+        native_errors[0].range,
+        native.lsp_range(0, native.expr(0, "replacement()").get_range())
+    );
+    assert_native_diagnostic(errors[0], &native_errors[0]);
 }
 
 #[test]

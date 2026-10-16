@@ -1315,7 +1315,11 @@ mod tests {
             ),
             (
                 root.join("metatable.lua"),
-                Some("local meta={}\nlocal t={}\nsetmetatable(t,meta)\nreturn t".into()),
+                // The public fixed-engine index records declaration initializers.
+                Some(
+                    "local meta={}\nlocal t={}\nlocal applied=setmetatable(t,meta)\nreturn t"
+                        .into(),
+                ),
             ),
         ]);
         let member_model = analysis.semantic_model(files[1]);
@@ -1334,6 +1338,7 @@ mod tests {
             .collect();
         let meta_model = analysis.semantic_model(files[2]);
         let meta_facts = meta_model.file_facts().unwrap();
+        assert_eq!(meta_facts.setmetatable_calls().len(), 1);
         let table = |name: &str| {
             InFiled::new(
                 files[2],
@@ -1400,6 +1405,59 @@ mod tests {
         ));
         assert!(!Arc::ptr_eq(&member_cfg, &meta_cfg));
         assert_eq!(query.flow_trees.borrow().len(), 2);
+        assert!(
+            session
+                .coverage_checked(|| Ok::<_, ()>(()))
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn standalone_metatable_call_does_not_invent_an_unindexed_mutation() {
+        let mut analysis = EmmyLuaAnalysis::new();
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("standalone-metatable-test");
+        analysis.add_main_workspace(root.clone());
+        let files = analysis.update_files_by_path(vec![
+            (root.join("entry.lua"), Some("return 0".into())),
+            (
+                root.join("metatable.lua"),
+                Some("local meta={}\nlocal t={}\nsetmetatable(t,meta)\nreturn t".into()),
+            ),
+        ]);
+        let model = analysis.semantic_model(files[1]);
+        let facts = model.file_facts().unwrap();
+        // The fixed public facts and member helper have no standalone mutation
+        // record or query-position state. Scanning the whole file here would
+        // incorrectly invent effects before/after a call or in a nested scope.
+        assert!(facts.setmetatable_calls().is_empty());
+        let table_syntax = facts
+            .decls
+            .iter()
+            .find(|decl| decl.name.as_str() == "t")
+            .unwrap()
+            .value_expr_syntax
+            .unwrap();
+        let table = InFiled::new(files[1], table_syntax.get_range());
+        assert_eq!(
+            model.type_of_expr(table_syntax),
+            LuaType::TableConst(table.clone())
+        );
+        let probes = Arc::new(AtomicUsize::new(0));
+        let session =
+            OwnedBindingSession::new_checked(Arc::new(Unmanaged(Arc::clone(&probes))), || {
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+        let mut check = || Ok::<_, ()>(());
+        let mut query =
+            OwnedQuery::new_for_snapshot(&analysis, &session, files[0], &mut check).unwrap();
+        assert_eq!(query.table_metatable_type(&table).unwrap(), None);
+        assert_eq!(query.table_metatable_type(&table).unwrap(), None);
+        assert_eq!(probes.load(Ordering::Relaxed), 0);
+        assert!(query.flow_trees.borrow().is_empty());
         assert!(
             session
                 .coverage_checked(|| Ok::<_, ()>(()))
