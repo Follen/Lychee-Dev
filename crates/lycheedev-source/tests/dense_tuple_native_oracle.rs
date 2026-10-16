@@ -1,77 +1,22 @@
+//! Candidate consumes full values from a completed fixed-engine A/B reference run.
 //! Dense RHS tuple projection through the real fixed contextual model and the
 //! owned compiler/executor/binary/tuple path. No general logical union backend.
 #![cfg(feature = "emmy-prototype")]
 #[path = "../../lycheedev-emmy-adapter/tests/support/expression_execution_cases.rs"]
 mod support;
-use emmylua_code_analysis::{LuaType, binding_context as native};
+#[path = "support/fixed_oracle_trace.rs"]
+mod trace;
+use emmylua_code_analysis::LuaType;
 use emmylua_parser::{LuaAstNode, LuaExpr};
 use lycheedev_emmy_adapter::session as owned;
 use std::sync::Arc;
 use support::{Backend, Provider, Stop, absent, load, select};
 
-struct NativeProvider(Provider);
-fn to_owned(site: native::BindingSite) -> owned::BindingSite {
-    owned::BindingSite {
-        file_id: site.file_id,
-        syntax: site.syntax,
-    }
-}
-impl native::BindingContext for NativeProvider {
-    fn identity(&self) -> &str {
-        "expression-execution-oracle"
-    }
-    fn resolve(&self, site: native::BindingSite) -> native::BindingDecision<native::BoundValue> {
-        match self.0.values.get(&to_owned(site)) {
-            Some(owned::BindingDecision::KnownAbsent { proof }) => {
-                native::BindingDecision::KnownAbsent {
-                    proof: proof.clone(),
-                }
-            }
-            Some(owned::BindingDecision::Unavailable { proof, reason }) => {
-                native::BindingDecision::Unavailable {
-                    proof: proof.clone(),
-                    reason: reason.clone(),
-                }
-            }
-            Some(owned::BindingDecision::Bound(value)) => {
-                let owned::SelectedValue::Expression(origin) = &value.value else {
-                    panic!("this oracle only projects real selected expressions")
-                };
-                native::BindingDecision::Bound(native::BoundValue {
-                    identity: value.identity.clone(),
-                    proof: value.proof.clone(),
-                    value: native::SelectedValue::Expression(native::BindingSite {
-                        file_id: origin.file_id,
-                        syntax: origin.syntax,
-                    }),
-                })
-            }
-            _ => native::BindingDecision::NotManaged,
-        }
-    }
-}
-fn row(row: native::BindingCoverage) -> owned::BindingCoverage {
-    owned::BindingCoverage {
-        site: to_owned(row.site),
-        operation: row.operation,
-        state: row.state,
-        proof: row.proof,
-        reason: row.reason,
-        parameter: row.parameter,
-        parameter_index: row.parameter_index,
-        argument: row.argument.map(to_owned),
-    }
-}
 fn compare(
     analysis: &emmylua_code_analysis::EmmyLuaAnalysis,
     query: owned::BindingSite,
     provider: Provider,
 ) -> (LuaType, Vec<owned::BindingCoverage>) {
-    let native = native::BindingSession::new(Arc::new(NativeProvider(provider.clone())));
-    let old = analysis
-        .semantic_model_with_context(query.file_id, native.clone())
-        .type_of_expr(query.syntax);
-    let old_rows = native.coverage().into_iter().map(row).collect::<Vec<_>>();
     let session =
         owned::OwnedBindingSession::new_checked(Arc::new(provider.clone()), || Ok::<_, Stop>(()))
             .unwrap();
@@ -82,20 +27,21 @@ fn compare(
         .evaluate_expression(query, &mut backend)
         .unwrap();
     let rows = session.coverage_checked(|| Ok::<_, Stop>(())).unwrap();
-    assert_eq!(new.ty, old, "complete type and tuple status");
-    assert_eq!(
-        rows, old_rows,
-        "complete coverage fields and producer order, including failed tuple attempts"
+    trace::check(&format!("{}:full_type", provider.names[&query]), &(new.ty));
+    trace::check(
+        &format!("{}:ordered_ledger", provider.names[&query]),
+        &(rows),
     );
     println!(
         "DENSE_TUPLE_NATIVE {}",
-        serde_json::json!({"expression":provider.names[&query],"oldType":format!("{old:?}"),"ownedType":format!("{:?}",new.ty),"coverage":format!("{rows:?}")})
+        serde_json::json!({"expression":provider.names[&query],"ownedType":format!("{:?}",new.ty),"coverage":format!("{rows:?}")})
     );
-    (old, rows)
+    (new.ty, rows)
 }
 
 #[test]
 fn actual_dense_hole_named_duplicate_and_nested_rhs_tables_keep_full_type_and_producer_order() {
+    let _trace = trace::begin_candidate();
     let mut count = 0;
     for table in [
         "{}",
@@ -140,6 +86,7 @@ fn actual_dense_hole_named_duplicate_and_nested_rhs_tables_keep_full_type_and_pr
 
 #[test]
 fn original_contextual_fast_paths_do_not_query_rhs_table_fields() {
+    let _trace = trace::begin_candidate();
     for prefix in ["false and", "true or"] {
         let expression = format!("{prefix} {{first,second}}");
         let (analysis, query, mut provider) = load(&format!("return {expression}"), &expression);
@@ -153,6 +100,7 @@ fn original_contextual_fast_paths_do_not_query_rhs_table_fields() {
 
 #[test]
 fn foreign_table_members_keep_current_model_file_query_behavior_in_the_fixed_engine() {
+    let _trace = trace::begin_candidate();
     let (mut analysis, query, mut provider) = load("return true and foreign", "true and foreign");
     let path = std::env::current_dir()
         .unwrap()

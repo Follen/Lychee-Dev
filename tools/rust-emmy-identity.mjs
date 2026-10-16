@@ -71,7 +71,7 @@ export function inspectEmmy(root){
   root=emmyNoLinks(root);const recipe=join(root,emmyRecipePath),source=join(root,emmySourcePath);
   const identityBytes=readBounded(join(recipe,'identity.json'),64*1024);
   const identity=JSON.parse(identityBytes),files=JSON.parse(readBounded(join(recipe,'files.json'),4*2**20));
-  check(identity.schema==='lycheedev.emmy-reconstruction.v1'&&identity.identity==='public-base-binding-context-reconstruction-v1'&&identity.historicalPrivatePatchRecovered===false,'identity_schema');
+  check(identity.schema==='lycheedev.emmy-reconstruction.v1'&&['public-base-binding-context-reconstruction-v1','public-upstream-unmodified-v1'].includes(identity.identity)&&identity.historicalPrivatePatchRecovered===false,'identity_schema');
   check(identity.base?.repository==='https://github.com/CppCXY/emmylua-analyzer-rust'&&identity.base.commit==='08b0873962e83bb8307e9a81052e3f41578fbc78'&&
     identity.base.archiveSHA256==='ae529a06b551dbb301744bea2b58ba94cb3e30340f63a8c83f9335be9086fdb7'&&identity.base.archiveBytes===2386393&&
     identity.base.treeSHA256==='375d92c5d5e503d77232fabf22a21a82f504c2b38dc5def8fcca1d6ecf06e104'&&identity.base.files===848&&identity.base.bytes===8382174,'base_identity');
@@ -86,14 +86,19 @@ export function inspectEmmy(root){
   }
   check(total<=maxTotal&&total===identity.bytes,'inventory_bytes');
   check(hex(identity.patchedTreeSHA256)&&emmyTreeDigest(files)===identity.patchedTreeSHA256,'inventory_digest');
-  check(Array.isArray(identity.patches)&&identity.patches.length>0&&identity.patches.length<=32,'patch_budget');
+  check(Array.isArray(identity.patches)&&identity.patches.length<=32,'patch_budget');
+  const unmodified=identity.identity==='public-upstream-unmodified-v1';
+  check(unmodified?identity.patches.length===0&&identity.patchedTreeSHA256===identity.base.treeSHA256&&identity.files===identity.base.files&&identity.bytes===identity.base.bytes:identity.patches.length>0,'unmodified_identity');
   const patches=[];
   for(const patch of identity.patches){
     emmyRelativePath(patch.path);check(/^patches\/[^/]+\.patch$/.test(patch.path)&&hex(patch.sha256)&&!patches.includes(patch.path),'patch_path');
     check(row(recipe,patch.path,8*2**20).sha256===patch.sha256,'patch_digest');patches.push(patch.path);
   }
-  const patchDirectory=opendirSync(emmyNoLinks(join(recipe,'patches'))),patchNames=[];
-  try{let entry;while((entry=patchDirectory.readSync())){check(patchNames.length<32&&entry.isFile()&&!entry.isSymbolicLink(),'unknown_patch');patchNames.push(entry.name);}}finally{patchDirectory.closeSync();}
+  const patchNames=[];
+  let patchDirectory;
+  try { patchDirectory=opendirSync(emmyNoLinks(join(recipe,'patches'))); }
+  catch(error){if(!unmodified||error.code!=='ENOENT')throw error;}
+  if(patchDirectory)try{let entry;while((entry=patchDirectory.readSync())){check(patchNames.length<32&&entry.isFile()&&!entry.isSymbolicLink(),'unknown_patch');patchNames.push(entry.name);}}finally{patchDirectory.closeSync();}
   check(JSON.stringify(patchNames.sort(sorted))===JSON.stringify(patches.map(path=>path.slice(8)).sort(sorted)),'unknown_patch');
   const recipeFiles=[...emmyRecipeFiles,...patches].sort(sorted).map(path=>row(recipe,path,8*2**20));
   const owned=emmyInventory(join(root,emmyOwnedCrate)).files.map(file=>({...file,path:`${emmyOwnedCrate}/${file.path}`}));

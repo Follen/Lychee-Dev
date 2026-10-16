@@ -129,10 +129,15 @@ checks remain required by the release contract.
 
 The owned control-flow, relation, member, transform, signature, diagnostic and
 checker implementations in
-`crates/lycheedev-emmy-adapter/src/session/backend/` adapts portions of
+`crates/lycheedev-emmy-adapter/src/session/backend/` adapt portions of
 [EmmyLua Analyzer Rust, commit 08b0873962e83bb8307e9a81052e3f41578fbc78](https://github.com/CppCXY/emmylua-analyzer-rust/tree/08b0873962e83bb8307e9a81052e3f41578fbc78).
 Those portions remain copyright 2024–2026 CppCXY, licensed under MIT. The exact
 upstream permission and warranty notice is preserved in
 [the adapter's EmmyLua license](crates/lycheedev-emmy-adapter/LICENSE-EmmyLua)
 and in the npm package notices. Moving implementation into an owned crate does
 not reattribute the upstream code or remove its license requirements.
+
+The production engine is the unmodified fixed upstream tree. Contextual business
+semantics and derived diagnostic algorithms live in the owned adapter. A frozen
+historical patched reference is retained only for differential tests and keeps
+its original attribution; it is not the production engine.

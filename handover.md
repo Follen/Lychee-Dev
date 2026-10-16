@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 21:27 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`d3b226059c996a1e0207d3c0bb2624bab5973e90`。实现进行中，尚未完成全量验收。
+更新：2026-10-15 21:48 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`98f8811322ff53afac84b9bacd9d13b89fa4ce1c`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -25,7 +25,7 @@
 
 ## 2. 当前实现与未闭环事项
 
-Emmy后继83路径现已把真实 Source freeze→OwnedBindingSession→OwnedQuery→43项诊断调度接入生产源码，24项contextual与19项普通检查保持原顺序、配置过滤及force-enable消费者，统一证据ledger。raw TypeShell、调用/返回与泛型约束、参数/返回计数等已组合；仅81 Rust语法检查通过，未编译执行。旧增强tests/examples仍有patched API消费者，正迁到owned入口并保独立冻结旧基线差分；当前recipe仍26路径/24生产文件，尚未删除其余补丁，也未宣称完整等价。新增adapter直接依赖仅现锁定emmy_lsp_types0.1.0/rust-i18n3.1.5/smol_str0.3.6，无新包或升级；根与npm完整MIT通知增加diagnostic/checker派生范围。
+当前零补丁生产候选已组合：Source freeze→OwnedBindingSession→OwnedQuery→43项诊断调度使用自有实现；上游恢复固定原版848文件、8,382,174字节，树SHA256 `375d92c5d5e503d77232fabf22a21a82f504c2b38dc5def8fcca1d6ecf06e104`，生产patch清单为空，删除旧补丁文件及引擎对自有binding-contracts依赖。增强测试和examples已转向自有公开入口；独立历史参照固定cd871181，测试专用417文件归档不进入生产引擎。原生差分保留历史真实expected及独立失败状态，不把新实现当旧oracle。40 Rust文件语法检查和39项Node检查通过；当前产品锁编译、完整差分、Retail与资源验收仍未运行。已知固定context合同中的已知签名结果投影、独立参数不可用及call_result/return_check真实证据仍在完成，不能因生产recipe归零就称功能等价或验收完成。
 
 默认target list/add/show/remove现已接同一typed配置与受控分页/SQLite owner：取消旧10000截断，精确name/大小写优先与raw历史引用验证，show输出resolvedPins；remove按Go先独立CAS删除配置、再读取引用generation、每64项删除，保可见部分提交与removedPins。17项新Rust回归已写未跑；target resolve --file现已接实际65537字节受控读取、独立Go typed JSON规则、同一Metadata writer的parent/CAS/winner验证及checked input close；按Go不额外生成snapshot context，已知提交pin保在既有error.details。14 Core＋3 CLI新测试未运行；generic JSON/type/time精确错误文案仍待补齐，不误套project更严duplicate/depth限制。后继project init/status/lock已组合原control、严格项目读取、同一Metadata原Vec认证与held Stage同目录no-replace/replace/checked关闭，默认resolve_pinned/optional和doctor项目边也已接；21新Rust测试未跑。cd576旧持有reader替换失败的回归现走真实project lock并保新旧reader断言。workspace同步open/native Drop、doctor其余metadata/list/probe及generic错误文案仍未闭合。
 
@@ -76,12 +76,12 @@ Data 323自适应基础R23.1已独审并组合：真实workspace准入后采样W
 
 ### Emmy 全量替换当前顺序
 
-当前 recipe 为26个变更路径、其中24个生产源文件。摄取已切两处真实生产消费者并退役对应补丁；剩余 context 递归推断、对象/member、call/return/generic、诊断与 coverage 必须全部迁移。
+当前生产recipe为零源码补丁，固定848文件与上游原始树完全一致。源码迁移完成不等于行为验收；以下工作继续：
 
-1. public declaration rendering 已替代，历史27+27/450 trace只证明其原冻结范围。
-2. 6699独立Windows三方契约已成功：A旧构造/B新构造/C原版公开API各31测试，450完整parity记录及6构造outcome全部相同，307份sealed日志hash已核、owner已回收。未比较constructor中间checkpoint数量，资源压力与产品硬deadline未测；这是冻结focused实验，不代表最新生产recipe全量通过。旧Linux未确认回收owner仍保留。
-3. 当前按完整真实Source链路继续 owned query→flow/type relation→调用返回→全部诊断/checker与来源映射，原版公开API承接基础分析。6699的DeclarationFlow失败是必须解决的正常能力，不能用Unknown、Continue或省略checker冒充完成。旧S3的448组合必须在后继完整路径集中重跑。
-4. 最后恢复全部上游原始文件，核产品锁、全部43个registry入口与完整Retail/增强回归，再进行最终四阶段循环审计。
+1. public declaration rendering的历史27+27/450 trace与6699独立Windows三方31×3/450/6相等，仅证明各自冻结范围。constructor中间checkpoint、资源压力及产品硬deadline未测。
+2. 完成正常查询与43项诊断的完整增强合同，包括已知签名结果、未知参数独立不可用、真实返回类型检查与同proof证据；不以Unknown或空coverage代替正常能力。
+3. 新测试runner先运行固定历史引擎，再运行当前原版引擎＋自有实现，认证完整trace并逐字段比较；任一侧失败仍使整组失败。历史参照仅用于测试。
+4. 集中执行当前产品锁all-target、全部增强/取消/资源回归及完整Retail cold/warm/session，再进入最终四阶段循环审计。旧Linux未确认回收owner保持保留。
 
 ## 3. 最近已验证证据与限制
 

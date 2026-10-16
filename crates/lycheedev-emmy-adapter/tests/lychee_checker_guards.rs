@@ -1,13 +1,12 @@
 //! Public diagnostic regressions for context-owned values and raw AST shortcuts.
-// Migrated unchanged semantic assertions from the pinned reconstruction's tests.
-// Ingestion now exercises the owned public-API bridge. Other context APIs remain
-// transitional until their production consumers have moved to the owned session.
-#[path = "support/public_ingestion.rs"]
-mod public_ingestion;
-use emmylua_code_analysis::binding_context::*;
+// Original case names, fixtures, counterexamples and semantic assertions are
+// retained. Diagnostics and coverage now execute on one owned session/registry.
+#[path = "support/owned_query.rs"]
+mod owned_query;
 use emmylua_code_analysis::{CheckConfig, DiagnosticCode, EmmyLuaAnalysis, FileId};
 use emmylua_parser::{LuaAstNode, LuaClosureExpr, LuaExpr};
-use public_ingestion::PublicIngestionTest;
+use lycheedev_emmy_adapter::session::*;
+use owned_query::{OwnedQueryTest, SessionCoverageTest};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -41,18 +40,18 @@ impl BindingContext for Context {
             .unwrap_or(BindingDecision::NotManaged)
     }
 }
-fn load(source: &str) -> (EmmyLuaAnalysis, FileId) {
+fn load(source: &str) -> (OwnedQueryTest, FileId) {
     let mut analysis = EmmyLuaAnalysis::new();
     let root = std::env::current_dir()
         .unwrap()
         .join("binding-checker-guard-input");
     analysis.add_main_workspace(root.clone());
-    let file = analysis
-        .owned_ingest_shared(
-            vec![(root.join("guard.lua"), Some(Arc::from(source)))],
-            || Ok::<_, ()>(()),
-        )
-        .unwrap()[0];
+    let analysis = OwnedQueryTest::ingest(
+        analysis,
+        vec![(root.join("guard.lua"), Some(Arc::from(source)))],
+    )
+    .unwrap();
+    let file = analysis.file_ids()[0];
     (analysis, file)
 }
 fn site(analysis: &EmmyLuaAnalysis, file_id: FileId, text: &str) -> BindingSite {
@@ -84,12 +83,15 @@ fn expression(origin: BindingSite) -> BindingDecision<BoundValue> {
     })
 }
 fn codes(
-    analysis: &EmmyLuaAnalysis,
+    analysis: &OwnedQueryTest,
     file: FileId,
-    session: Arc<BindingSession>,
+    session: Arc<OwnedBindingSession>,
 ) -> Vec<DiagnosticCode> {
-    analysis
-        .diagnose_file_with_context(file, Arc::new(CheckConfig::default()), session)
+    let run = analysis
+        .diagnose(file, Arc::new(CheckConfig::default()), &session)
+        .unwrap();
+    assert!(run.complete, "owned diagnostic registry did not complete");
+    run.diagnostics
         .into_iter()
         .map(|diagnostic| diagnostic.code)
         .collect()
@@ -113,7 +115,7 @@ fn selected_table_syntax_uses_selected_scalar_for_assignment_checks() {
             site(&analysis, file, selected_table),
             expression(site(&analysis, file, "7")),
         );
-        let session = BindingSession::new(Arc::new(provider));
+        let session = owned_query::session(Arc::new(provider));
         let diagnostics = codes(&analysis, file, session);
         assert!(
             !diagnostics.contains(&DiagnosticCode::AssignTypeMismatch),
@@ -136,7 +138,7 @@ fn absent_or_unavailable_table_argument_does_not_check_raw_fields() {
         let mut provider = Context::default();
         let table = site(&analysis, file, "{field='raw-wrong'}");
         provider.decisions.insert(table, decision);
-        let session = BindingSession::new(Arc::new(provider));
+        let session = owned_query::session(Arc::new(provider));
         let diagnostics = codes(&analysis, file, session.clone());
         assert!(
             !diagnostics.contains(&DiagnosticCode::AssignTypeMismatch),
@@ -162,7 +164,7 @@ fn managed_callback_and_managed_container_skip_raw_parameter_counts() {
         let mut provider = Context::default();
         let managed = site(&analysis, file, managed_text);
         provider.decisions.insert(managed, unavailable());
-        let session = BindingSession::new(Arc::new(provider));
+        let session = owned_query::session(Arc::new(provider));
         let diagnostics = codes(&analysis, file, session.clone());
         assert!(
             !diagnostics.contains(&DiagnosticCode::RedundantParameter),
@@ -198,7 +200,7 @@ fn managed_condition_roots_and_children_do_not_fold_original_literals() {
             let mut provider = Context::default();
             let managed = site(&analysis, file, selected_text);
             provider.decisions.insert(managed, decision);
-            let session = BindingSession::new(Arc::new(provider));
+            let session = owned_query::session(Arc::new(provider));
             let diagnostics = codes(&analysis, file, session.clone());
             assert!(
                 diagnostics.contains(&DiagnosticCode::MissingReturn),
@@ -275,7 +277,7 @@ fn managed_variadic_argument_packs_never_claim_completed_argument_type_checks() 
                 proof: "observed-return-proof".into(),
             },
         );
-        let session = BindingSession::new(Arc::new(provider));
+        let session = owned_query::session(Arc::new(provider));
         let _diagnostics = codes(&analysis, file, session.clone());
         let coverage = session.coverage();
         assert!(
@@ -287,7 +289,7 @@ fn managed_variadic_argument_packs_never_claim_completed_argument_type_checks() 
         );
         assert!(!coverage.iter().any(|row| row.site == outer
             && row.operation == "argument_check"
-            && row.state == "native_checked"));
+            && row.state == "owned_checked"));
     }
 }
 
@@ -300,7 +302,7 @@ fn managed_initializer_does_not_replace_its_declared_assignment_contract() {
         site(&analysis, file, "1"),
         expression(site(&analysis, file, "2")),
     );
-    let session = BindingSession::new(Arc::new(provider));
+    let session = owned_query::session(Arc::new(provider));
     let diagnostics = codes(&analysis, file, session);
     assert!(
         diagnostics.contains(&DiagnosticCode::AssignTypeMismatch),

@@ -89,7 +89,7 @@ test('missing duplicate registry or unexpected owned lock packages reject before
     assert.deepEqual(readFileSync(join(root,'Cargo.toml')),before);
   }
 });
-test('current independent release agrees across all nine manifests and reconstructed owned dependency', () => {
+test('current independent release agrees across all nine manifests and the unmodified engine dependency', () => {
   const {version}=JSON.parse(readFileSync(join(repo,'release/version.json')));
   const workspace=readFileSync(join(repo,'Cargo.toml'),'utf8');
   const members=[...workspace.match(/^members = \[(.+)\]$/m)[1].matchAll(/"([^"]+)"/g)].map(m=>m[1]);
@@ -98,11 +98,14 @@ test('current independent release agrees across all nine manifests and reconstru
     const manifest=readFileSync(join(repo,member,'Cargo.toml'),'utf8');
     assert(manifest.includes('version.workspace = true') || manifest.includes(`version = "${version}"`),member);
   }
-  const patch=readFileSync(join(repo,'third_party/emmy/patches/0001-binding-context.patch'),'utf8');
-  assert(patch.includes(`+version = "${version}"`));
-  assert(patch.includes(`version = "=${version}"`));
-  assert(!patch.includes('3.1.2'));
+  const adapter=readFileSync(join(repo,'crates/lycheedev-emmy-adapter/Cargo.toml'),'utf8');
+  assert(adapter.includes(`lycheedev-binding-contracts = { path = "../lycheedev-binding-contracts", version = "=${version}" }`));
   const identity=JSON.parse(readFileSync(join(repo,'third_party/emmy/identity.json')));
   assert.equal(identity.base.commit,'08b0873962e83bb8307e9a81052e3f41578fbc78');
   assert.equal(identity.historicalPrivatePatchRecovered,false);
+  assert.equal(identity.identity,'public-upstream-unmodified-v1');
+  assert.deepEqual(identity.patches,[]);
+  assert.equal(identity.patchedTreeSHA256,identity.base.treeSHA256);
+  assert.equal(identity.files,identity.base.files);
+  assert.equal(identity.bytes,identity.base.bytes);
 });

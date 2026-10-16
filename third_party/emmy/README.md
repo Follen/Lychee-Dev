@@ -1,40 +1,36 @@
-# EmmyLua reconstruction v1
+# Fixed unmodified EmmyLua source
 
-This is a **new** dependency patch series based on the public EmmyLua commit
-`08b0873962e83bb8307e9a81052e3f41578fbc78` (MIT). It does not recover or claim
-byte equivalence with the missing historical private BindingContext fork.
+The production dependency is the complete, **unmodified** public EmmyLua commit
+`08b0873962e83bb8307e9a81052e3f41578fbc78` (MIT). Its 848 files and 8,382,174 bytes
+have tree SHA256 `375d92c5d5e503d77232fabf22a21a82f504c2b38dc5def8fcca1d6ecf06e104`.
+`identity.json` lists no patches; its final tree, count and byte size must equal
+the authenticated base. The original upstream license is included unchanged.
+This does not claim recovery of the missing historical private fork.
 
-The complete archive, including upstream license and sources, is authenticated
-before extraction. Tracked patches are applied in listed order. Preparation
-verifies every final file against the tracked inventory. No upstream programs
-or configuration are executed by preparation. The generated source is a build
-input and must be included in corresponding-source distributions with its
-identity receipt and this patch series; a network URL alone is not sufficient.
+Preparation authenticates the full archive before extraction, then checks every
+file against `files.json`. It does not execute upstream programs or configuration.
+The generated source remains a corresponding-source build input, accompanied by
+this recipe and its identity receipt; an upstream URL alone is insufficient.
 
 Preparation: `python3 third_party/emmy/prepare.py --archive /path/base.tar.gz`.
-The default destination is `.tmp/emmy-reconstruction-v1/upstream`. An existing
-destination is verified, never silently overwritten. `--download` explicitly
-fetches the pinned archive to the supplied archive path when it is absent.
+The destination remains `.tmp/emmy-reconstruction-v1/upstream` for path stability.
+An existing destination is verified and never silently overwritten. `--download`
+explicitly fetches the pinned archive to the supplied archive path if absent.
 
-Implementation status and integration gates are recorded by the project's sole
-current authority, `handover.md`. Availability of these APIs is not a claim that
-all historical binding semantics or full-source acceptance are restored.
+## Owned contextual behavior
 
-## Owned binding contracts
+`crates/lycheedev-emmy-adapter` supplies contextual query/session, selected value
+identity, flow, type relations and checker scheduling using upstream public facts
+and syntax. `crates/lycheedev-binding-contracts` supplies shared evidence records.
+Emmy no longer imports or re-exports either owned crate. The recipe continues to
+authenticate the small owned-contract inventory used by the surrounding build.
 
-`crates/lycheedev-binding-contracts` contains the engine-independent evidence
-records formerly defined inside the patch. It depends only on serde/json/std;
-Emmy re-exports its exact types, while the owned adapter depends on it directly.
-Engine syntax IDs, SemanticId, LuaType, session isolation and inference/checker
-hooks remain in Emmy. This does not remove the enhanced Lua/XML semantics.
+Fixed historical patched-engine bytes are retained only in
+`tests/rust-source-engine/fixed-emmy-oracle/historical-engine` for independent
+reference tests. They are not production dependency bytes. The reference phase
+executes the old checks; the clean phase compares their captured full values,
+producer-ordered coverage and query sequences. Missing reference evidence fails.
 
-From `upstream/crates/emmylua_code_analysis`, the dependency path climbs exactly
-five parents to the source snapshot root, then enters
-`crates/lycheedev-binding-contracts`. It never points outside that snapshot.
-The recipe identity authenticates every owned-crate file as `ownedFiles` plus
-`ownedTreeSHA256`; Python preparation and JS build/stage verification reject
-missing, changed or unexpected files. Sealing updates both inventories.
-Standalone staging includes those files and a minimal local workspace manifest;
-full corresponding-source staging preserves the product manifest and includes
-the same crate. Both root and upstream Cargo.lock record this path dependency.
-The new crate is covered by the owned unsafe-code gate.
+Implementation, unrun validation and remaining acceptance work are recorded in
+`handover.md`. Clean dependency custody is separate from semantic equivalence,
+resource measurements, Retail acceptance and the final audit loops.

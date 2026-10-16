@@ -1,6 +1,6 @@
 {
   "schema": "lycheedev.emmy-reconstruction.v1",
-  "identity": "public-base-binding-context-reconstruction-v1",
+  "identity": "public-upstream-unmodified-v1",
   "historicalPrivatePatchRecovered": false,
   "ownedFiles": [
     {
@@ -36,13 +36,8 @@
       "sha256": "7f8fd5ae0962c6757a8980592c264c8bce5004aa9f369084db761874b8969ff8"
     }
   },
-  "patches": [
-    {
-      "path": "patches/0001-binding-context.patch",
-      "sha256": "c54f788d34f276e692f5dc93b9a2b0f212d2b015bde63b5a22eb2c23e4d033f1"
-    }
-  ],
-  "patchedTreeSHA256": "cc0a3496bad44f2dfede0799b86175dc3b3332587097bacf6ed691648130fcff",
-  "files": 850,
-  "bytes": 8453968
+  "patches": [],
+  "patchedTreeSHA256": "375d92c5d5e503d77232fabf22a21a82f504c2b38dc5def8fcca1d6ecf06e104",
+  "files": 848,
+  "bytes": 8382174
 }

@@ -1,0 +1,88 @@
+[
+  {
+    "target": "binary_core_native_oracle",
+    "tests": [
+      "native_binary_literal_matrix_matches_full_types_without_raw_binary_fallback",
+      "native_selected_operand_matrix_preserves_unknown_nil_and_all_producer_fields",
+      "native_operator_overloads_keep_left_precedence_and_contextual_unknown_gate",
+      "native_contextual_any_is_unknown_for_every_nonlogical_operator"
+    ]
+  },
+  {
+    "target": "dense_tuple_native_oracle",
+    "tests": [
+      "actual_dense_hole_named_duplicate_and_nested_rhs_tables_keep_full_type_and_producer_order",
+      "original_contextual_fast_paths_do_not_query_rhs_table_fields",
+      "foreign_table_members_keep_current_model_file_query_behavior_in_the_fixed_engine"
+    ]
+  },
+  {
+    "target": "expression_execution_native_oracle",
+    "tests": [
+      "actual_native_full_types_and_all_coverage_fields_match_primitive_unary_selected_subset",
+      "actual_native_two_phase_order_matches_owned_execution_including_lhs_initializer",
+      "actual_native_unary_operator_return_types_match_owned_public_api"
+    ]
+  },
+  {
+    "target": "expression_plan_native_oracle",
+    "tests": [
+      "selected_compile_producers_match_actual_native_rows_when_execution_adds_no_producers",
+      "real_native_compiles_rhs_selected_before_evaluating_lhs_declaration"
+    ]
+  },
+  {
+    "target": "function_call_native_oracle",
+    "tests": [
+      "real_function_signature_and_direct_call_paths_match_nonempty_and_empty_bodies",
+      "contextual_children_unknown_calls_docs_and_union_rows_match_full_receipts",
+      "fixed_32_slot_and_256_return_row_boundaries_keep_exact_producer_prefixes",
+      "foreign_function_scope_uses_the_same_provider_and_missing_signature_keeps_reason",
+      "signature_children_and_callee_keep_the_original_16384_ledger_boundary"
+    ]
+  },
+  {
+    "target": "object_carrier_native_oracle",
+    "tests": [
+      "object_presence_origin_shape_and_field_failures_match_all_metadata_and_producer_rows",
+      "nested_incomplete_fields_and_active_object_depth_match_without_flattening_identity",
+      "tokens_projection_sites_hash_sets_and_cache_hits_have_the_same_equality_relations",
+      "actual_unary_tuple_logical_declaration_and_observed_return_transports_keep_nested_carriers",
+      "the_1025th_shape_keeps_its_real_unavailable_receipt_after_the_shared_freeze_budget",
+      "a_second_projection_with_the_same_view_and_different_epoch_keeps_the_frozen_identity_failure"
+    ]
+  },
+  {
+    "target": "object_member_native_oracle",
+    "tests": [
+      "member_provenance_order_presence_and_real_source_identity_match_every_field",
+      "static_and_dynamic_object_index_execute_the_real_query_successor",
+      "nested_member_results_keep_full_carrier_and_subsequent_lookup_order",
+      "same_context_foreign_token_member_lookup_is_unavailable_in_both_engines",
+      "member_lookup_keeps_the_actual_16384_last_slot_producer"
+    ]
+  },
+  {
+    "target": "query_backend_native_oracle",
+    "tests": [
+      "real_local_declarations_literals_uninitialized_nil_and_selected_docs_use_the_complete_query_path",
+      "two_phase_order_and_same_file_origin_fresh_scope_match_native_cache_and_all_provider_calls",
+      "selected_cycles_and_foreign_origin_share_guard_and_ledger_but_not_model_caches",
+      "selected_absent_unknown_and_denied_calls_keep_initializer_slot_nil_unknown_distinction",
+      "concrete_query_runs_later_fields_after_the_exact_16384_coverage_boundary"
+    ]
+  },
+  {
+    "target": "selected_projector_native_oracle",
+    "tests": [
+      "every_atomic_selected_type_and_all_coverage_fields_match_real_patched_model"
+    ]
+  },
+  {
+    "target": "selected_query_native_oracle",
+    "tests": [
+      "all_call_evidence_and_lua_positions_match_real_fixed_projector_full_fields",
+      "unmanaged_callsite_still_has_a_selected_callee_context_regression"
+    ]
+  }
+]

@@ -67,7 +67,7 @@ tree-sitter-lua = "=0.5.0"
 lycheedev-windows = { path = "../lycheedev-windows" }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 url = "2.5"
-# Public pinned upstream plus a newly reconstructed, reviewed patch recipe.
+# Unmodified public pinned upstream; enhancements live in our owned adapter.
 # Build custody verifies third_party/emmy and every generated dependency byte.
 # This identity does not claim recovery of the historical private patch.
 emmylua_code_analysis = { path = "../../.tmp/emmy-reconstruction-v1/upstream/crates/emmylua_code_analysis", version = "=0.30.0", optional = true }

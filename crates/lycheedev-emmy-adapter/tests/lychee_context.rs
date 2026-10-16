@@ -1,12 +1,14 @@
 // Migrated unchanged semantic assertions from the pinned reconstruction's tests.
-// Ingestion now exercises the owned public-API bridge. Other context APIs remain
-// transitional until their production consumers have moved to the owned session.
+// Ingestion, semantic queries, diagnostics and coverage use the owned session.
 #[path = "support/public_ingestion.rs"]
 mod public_ingestion;
 use emmylua_code_analysis::FileId;
-use emmylua_code_analysis::binding_context::*;
+use lycheedev_emmy_adapter::session::*;
+#[path = "support/owned_query.rs"]
+mod owned_query;
 use emmylua_code_analysis::{EmmyLuaAnalysis, LuaType};
 use emmylua_parser::{LuaAstNode, LuaExpr};
+use owned_query::{OwnedQueryTest, SessionCoverageTest};
 use public_ingestion::PublicIngestionTest;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -76,20 +78,20 @@ fn site(analysis: &EmmyLuaAnalysis, file_id: FileId, text: &str) -> BindingSite 
         syntax: expr.get_syntax_id(),
     }
 }
-fn load() -> (EmmyLuaAnalysis, Vec<FileId>, Arc<str>) {
+fn load() -> (OwnedQueryTest, Vec<FileId>, Arc<str>) {
     let mut analysis = EmmyLuaAnalysis::new();
     let root = std::env::current_dir().unwrap().join("binding-test-input");
     analysis.add_main_workspace(root.clone());
     let text: Arc<str> = Arc::from("local x = 42\nreturn x, x + 1\n");
-    let ids = analysis
-        .owned_ingest_shared(
-            vec![
-                (root.join("a.lua"), Some(text.clone())),
-                (root.join("b.lua"), Some(Arc::from("return true\n"))),
-            ],
-            || Ok::<_, ()>(()),
-        )
-        .unwrap();
+    let analysis = OwnedQueryTest::ingest(
+        analysis,
+        vec![
+            (root.join("a.lua"), Some(text.clone())),
+            (root.join("b.lua"), Some(Arc::from("return true\n"))),
+        ],
+    )
+    .unwrap();
+    let ids = analysis.file_ids().to_vec();
     (analysis, ids, text)
 }
 #[test]
@@ -170,8 +172,8 @@ fn managed_unavailable_and_absent_do_not_fall_back() {
     ] {
         let mut provider = context("phase");
         provider.decisions.insert(use_site, decision);
-        let session = BindingSession::new(Arc::new(provider));
-        let model = analysis.semantic_model_with_context(ids[0], session.clone());
+        let session = owned_query::session(Arc::new(provider));
+        owned_query::model!(model, analysis, ids[0], session.clone());
         assert_eq!(model.type_of_expr(use_site.syntax), expected);
         assert!(!session.coverage().is_empty());
     }
@@ -190,18 +192,22 @@ fn model_for_inherits_context_and_context_caches_are_isolated() {
             value: SelectedValue::Expression(origin),
         }),
     );
-    let session = BindingSession::new(Arc::new(provider));
-    let selected = analysis.semantic_model_with_context(ids[1], session.clone());
-    let foreign = selected.model_for(ids[0]);
+    let session = owned_query::session(Arc::new(provider));
+    owned_query::model!(selected, analysis, ids[1], session.clone());
+    owned_query::foreign_model!(foreign, selected, ids[0]);
+    owned_query::model!(
+        unmanaged,
+        analysis,
+        ids[0],
+        owned_query::session(Arc::new(context("unmanaged")))
+    );
     assert_eq!(foreign.binding_context_identity(), Some("selected"));
     assert!(matches!(
         foreign.binding_decision(use_site.syntax),
         BindingDecision::Bound(_)
     ));
     assert!(matches!(
-        analysis
-            .semantic_model(ids[0])
-            .binding_decision(use_site.syntax),
+        unmanaged.binding_decision(use_site.syntax),
         BindingDecision::NotManaged
     ));
     assert_eq!(
@@ -209,18 +215,12 @@ fn model_for_inherits_context_and_context_caches_are_isolated() {
         LuaType::BooleanConst(true)
     );
     assert_eq!(
-        analysis
-            .semantic_model(ids[0])
-            .type_of_expr(use_site.syntax),
+        unmanaged.type_of_expr(use_site.syntax),
         LuaType::IntegerConst(42)
     );
-    let raw_session = BindingSession::new(Arc::new(context("raw")));
-    assert_eq!(
-        analysis
-            .semantic_model_with_context(ids[0], raw_session)
-            .type_of_expr(use_site.syntax),
-        LuaType::IntegerConst(42)
-    );
+    let raw_session = owned_query::session(Arc::new(context("raw")));
+    owned_query::model!(raw, analysis, ids[0], raw_session);
+    assert_eq!(raw.type_of_expr(use_site.syntax), LuaType::IntegerConst(42));
     assert_eq!(
         foreign.type_of_expr(use_site.syntax),
         LuaType::BooleanConst(true)
@@ -239,13 +239,9 @@ fn selected_expression_cycles_are_bounded_and_visible() {
             value: SelectedValue::Expression(use_site),
         }),
     );
-    let session = BindingSession::new(Arc::new(provider));
-    assert_eq!(
-        analysis
-            .semantic_model_with_context(ids[0], session.clone())
-            .type_of_expr(use_site.syntax),
-        LuaType::Unknown
-    );
+    let session = owned_query::session(Arc::new(provider));
+    owned_query::model!(model, analysis, ids[0], session.clone());
+    assert_eq!(model.type_of_expr(use_site.syntax), LuaType::Unknown);
     assert!(
         session
             .coverage()
@@ -293,8 +289,8 @@ fn managed_children_are_used_inside_vm_binary_and_flow_queries() {
     }
     let binary = site(&analysis, ids[0], "x + 1");
     let use_site = site(&analysis, ids[0], "x");
-    let session = BindingSession::new(Arc::new(provider));
-    let managed = analysis.semantic_model_with_context(ids[0], session.clone());
+    let session = owned_query::session(Arc::new(provider));
+    owned_query::model!(managed, analysis, ids[0], session.clone());
     assert_eq!(managed.type_of_expr(binary.syntax), LuaType::Unknown);
     assert_eq!(
         managed.type_of_expr_at(use_site.syntax, use_site.syntax.get_range().start()),
@@ -311,10 +307,10 @@ fn managed_children_are_used_inside_vm_binary_and_flow_queries() {
 fn object_setup(
     complete: bool,
 ) -> (
-    EmmyLuaAnalysis,
+    OwnedQueryTest,
     Vec<FileId>,
     BindingSite,
-    Arc<BindingSession>,
+    Arc<OwnedBindingSession>,
 ) {
     let (mut analysis, mut ids, _) = load();
     let root = std::env::current_dir().unwrap().join("binding-test-input");
@@ -354,7 +350,7 @@ fn object_setup(
     );
     let write = FieldWriteOrigin::Lua(SourceSpan {
         file_id: ids[2],
-        range: origin.syntax.get_range(),
+        range: owned_query::byte_range(origin.syntax.get_range()),
     });
     provider.shapes.insert(
         key.clone(),
@@ -396,14 +392,14 @@ fn object_setup(
         analysis,
         ids,
         use_site,
-        BindingSession::new(Arc::new(provider)),
+        owned_query::session(Arc::new(provider)),
     )
 }
 #[test]
 fn frozen_object_member_apis_use_only_frozen_fields_and_keep_context() {
     let (analysis, ids, use_site, session) = object_setup(true);
-    let model = analysis.semantic_model_with_context(ids[2], session.clone());
-    let ty = model.type_of_expr(use_site.syntax);
+    owned_query::model!(model, analysis, ids[2], session.clone());
+    let ty = model.value_of_expr(use_site.syntax);
     let key = emmylua_code_analysis::LuaMemberKey::Name("visible".into());
     let members = model.member_infos(&ty);
     assert_eq!(members.len(), 1);
@@ -430,19 +426,17 @@ fn frozen_object_member_apis_use_only_frozen_fields_and_keep_context() {
             )
             .is_none()
     );
-    let foreign_file = model.model_for(ids[1]);
+    owned_query::foreign_model!(foreign_file, model, ids[1]);
     assert_eq!(
         foreign_file.member_type(&ty, &key),
         Some(LuaType::BooleanConst(true))
     );
-    let other_session = BindingSession::new(Arc::new(context("different-context")));
-    let other = analysis.semantic_model_with_context(ids[2], other_session);
+    let other_session = owned_query::session(Arc::new(context("different-context")));
+    owned_query::model!(other, analysis, ids[2], other_session);
     assert!(other.member_infos(&ty).is_empty());
     assert!(other.member_infos_with_key_all(&ty, &key).is_empty());
     assert!(!other.type_check(&ty, &ty));
-    let union = LuaType::Union(Arc::new(emmylua_code_analysis::LuaUnionType::from_vec(
-        vec![ty.clone(), LuaType::Nil],
-    )));
+    let union = OwnedValue::raw_union(vec![ty.clone(), OwnedValue::plain(LuaType::Nil)]);
     assert!(other.member_infos(&union).is_empty());
     assert!(!other.type_check(&union, &union));
     assert!(model.type_check(&ty, &ty));
@@ -450,10 +444,10 @@ fn frozen_object_member_apis_use_only_frozen_fields_and_keep_context() {
 #[test]
 fn incomplete_object_shape_never_claims_structural_compatibility() {
     let (analysis, ids, use_site, session) = object_setup(false);
-    let model = analysis.semantic_model_with_context(ids[2], session.clone());
-    let ty = model.type_of_expr(use_site.syntax);
+    owned_query::model!(model, analysis, ids[2], session.clone());
+    let ty = model.value_of_expr(use_site.syntax);
     assert!(!model.type_check(&ty, &ty));
-    assert!(!model.type_check(&ty, &LuaType::Any));
+    assert!(!model.type_check(&ty, &OwnedValue::plain(LuaType::Any)));
     assert!(
         session
             .coverage()
@@ -466,10 +460,10 @@ fn call_setup(
     wrong_identity: bool,
     denied: bool,
 ) -> (
-    EmmyLuaAnalysis,
+    OwnedQueryTest,
     Vec<FileId>,
     BindingSite,
-    Arc<BindingSession>,
+    Arc<OwnedBindingSession>,
 ) {
     let (mut analysis, mut ids, _) = load();
     let root = std::env::current_dir().unwrap().join("binding-test-input");
@@ -547,12 +541,17 @@ fn call_setup(
             ],
         },
     );
-    (analysis, ids, call, BindingSession::new(Arc::new(provider)))
+    (
+        analysis,
+        ids,
+        call,
+        owned_query::session(Arc::new(provider)),
+    )
 }
 #[test]
 fn observed_return_slots_replace_raw_function_returns() {
     let (analysis, ids, call, session) = call_setup(false, false);
-    let model = analysis.semantic_model_with_context(ids[2], session);
+    owned_query::model!(model, analysis, ids[2], session);
     let LuaType::Variadic(values) = model.type_of_expr(call.syntax) else {
         panic!("expected observed returns")
     };
@@ -565,7 +564,7 @@ fn observed_return_slots_replace_raw_function_returns() {
 fn mismatched_call_observation_and_denied_call_never_fall_back() {
     for (wrong, denied) in [(true, false), (false, true)] {
         let (analysis, ids, call, session) = call_setup(wrong, denied);
-        let model = analysis.semantic_model_with_context(ids[2], session.clone());
+        owned_query::model!(model, analysis, ids[2], session.clone());
         assert_eq!(model.type_of_expr(call.syntax), LuaType::Unknown);
         assert!(
             session
@@ -579,11 +578,15 @@ fn mismatched_call_observation_and_denied_call_never_fall_back() {
 #[test]
 fn denied_calls_never_report_completed_native_checks() {
     let (analysis, ids, call, session) = call_setup(false, true);
-    let _diagnostics = analysis.diagnose_file_with_context(
-        ids[2],
-        Arc::new(emmylua_code_analysis::CheckConfig::default()),
-        session.clone(),
-    );
+    let run = analysis
+        .diagnose(
+            ids[2],
+            Arc::new(emmylua_code_analysis::CheckConfig::default()),
+            &session,
+        )
+        .unwrap();
+    assert!(run.complete, "owned diagnostic registry did not complete");
+    let _diagnostics = run.diagnostics;
     let rows = session.coverage();
     for operation in ["argument_check", "argument_count_check", "callable_check"] {
         assert!(
@@ -594,7 +597,7 @@ fn denied_calls_never_report_completed_native_checks() {
         );
         assert!(!rows.iter().any(|row| row.site == call
             && row.operation == operation
-            && row.state == "native_checked"));
+            && row.state == "owned_checked"));
     }
 }
 
@@ -649,8 +652,8 @@ fn contextual_signature_body_and_initializer_do_not_use_raw_shells() {
             );
         }
     }
-    let session = BindingSession::new(Arc::new(provider));
-    let model = analysis.semantic_model_with_context(file, session);
+    let session = owned_query::session(Arc::new(provider));
+    owned_query::model!(model, analysis, file, session);
     assert_eq!(
         model.return_type(closure.get_syntax_id()),
         Some(LuaType::BooleanConst(true))
@@ -698,12 +701,16 @@ fn selected_nil_callee_is_diagnosed_instead_of_raw_nil_tolerance() {
             capability_profile: "typed-call-v1".into(),
         }),
     );
-    let session = BindingSession::new(Arc::new(provider));
-    let diagnostics = analysis.diagnose_file_with_context(
-        ids[0],
-        Arc::new(emmylua_code_analysis::CheckConfig::default()),
-        session,
-    );
+    let session = owned_query::session(Arc::new(provider));
+    let run = analysis
+        .diagnose(
+            ids[0],
+            Arc::new(emmylua_code_analysis::CheckConfig::default()),
+            &session,
+        )
+        .unwrap();
+    assert!(run.complete, "owned diagnostic registry did not complete");
+    let diagnostics = run.diagnostics;
     assert!(diagnostics.iter().any(
         |diagnostic| diagnostic.code == emmylua_code_analysis::DiagnosticCode::CallNonCallable
     ));
@@ -763,8 +770,8 @@ fn frozen_object_view_rejects_contradictory_identity_epoch_and_origin() {
                 fields: vec![],
             },
         );
-        let session = BindingSession::new(Arc::new(provider));
-        let model = analysis.semantic_model_with_context(file, session.clone());
+        let session = owned_query::session(Arc::new(provider));
+        owned_query::model!(model, analysis, file, session.clone());
         assert!(matches!(
             model.type_of_expr(first.syntax),
             LuaType::Object(_)
@@ -786,15 +793,19 @@ fn frozen_object_view_rejects_contradictory_identity_epoch_and_origin() {
 #[test]
 fn same_identity_string_does_not_authorize_foreign_session_object_types() {
     let (analysis, ids, use_site, session) = object_setup(true);
-    let model = analysis.semantic_model_with_context(ids[2], session);
-    let ty = model.type_of_expr(use_site.syntax);
-    let empty = analysis
-        .semantic_model_with_context(ids[2], BindingSession::new(Arc::new(context("objects"))));
+    owned_query::model!(model, analysis, ids[2], session);
+    let ty = model.value_of_expr(use_site.syntax);
+    owned_query::model!(
+        empty,
+        analysis,
+        ids[2],
+        owned_query::session(Arc::new(context("objects")))
+    );
     assert!(!empty.type_check(&ty, &ty));
     assert!(empty.member_infos(&ty).is_empty());
     let (other_analysis, other_ids, other_use_site, other_session) = object_setup(true);
-    let other = other_analysis.semantic_model_with_context(other_ids[2], other_session);
-    let own_ty = other.type_of_expr(other_use_site.syntax);
+    owned_query::model!(other, other_analysis, other_ids[2], other_session);
+    let own_ty = other.value_of_expr(other_use_site.syntax);
     assert!(other.type_check(&own_ty, &own_ty));
     assert!(!other.type_check(&ty, &ty));
     assert!(other.member_infos(&ty).is_empty());
@@ -814,7 +825,12 @@ fn unavailable_tail_call_does_not_invent_a_fixed_signature_return_arity() {
             reason: "return_arity_unavailable".into(),
         },
     );
-    let model = analysis.semantic_model_with_context(file, BindingSession::new(Arc::new(provider)));
+    owned_query::model!(
+        model,
+        analysis,
+        file,
+        owned_query::session(Arc::new(provider))
+    );
     let closure = model
         .syntax_tree()
         .unwrap()
@@ -861,7 +877,12 @@ fn contextual_unknown_signature_never_retries_raw_body() {
             reason: "read_unavailable".into(),
         },
     );
-    let model = analysis.semantic_model_with_context(file, BindingSession::new(Arc::new(provider)));
+    owned_query::model!(
+        model,
+        analysis,
+        file,
+        owned_query::session(Arc::new(provider))
+    );
     let closure = model
         .syntax_tree()
         .unwrap()
@@ -896,7 +917,12 @@ fn resolve_member_never_recovers_a_raw_field_absent_from_the_frozen_shape() {
             || Ok::<_, ()>(()),
         )
         .unwrap()[0];
-    let raw = analysis.semantic_model(file);
+    owned_query::model!(
+        raw,
+        analysis,
+        file,
+        owned_query::session(Arc::new(context("unmanaged")))
+    );
     let index = raw
         .syntax_tree()
         .unwrap()
@@ -935,7 +961,12 @@ fn resolve_member_never_recovers_a_raw_field_absent_from_the_frozen_shape() {
             fields: vec![],
         },
     );
-    let model = analysis.semantic_model_with_context(file, BindingSession::new(Arc::new(provider)));
+    owned_query::model!(
+        model,
+        analysis,
+        file,
+        owned_query::session(Arc::new(provider))
+    );
     assert!(model.resolve_member(&index).is_none());
 }
 
@@ -991,7 +1022,7 @@ fn resolved_frozen_member_keeps_selected_type_and_does_not_alias_dynamic_keys() 
             destination_write: FieldWriteOrigin::Xml(ExternalSourceSpan {
                 path: "fixture.xml".into(),
                 content_sha256: "b".repeat(64),
-                range: boolean.syntax.get_range(),
+                range: owned_query::byte_range(boolean.syntax.get_range()),
             }),
             source_write: None,
             copy_origin: None,
@@ -1006,10 +1037,17 @@ fn resolved_frozen_member_keeps_selected_type_and_does_not_alias_dynamic_keys() 
             fields,
         },
     );
-    let model = analysis.semantic_model_with_context(file, BindingSession::new(Arc::new(provider)));
-    let foreign = analysis.semantic_model_with_context(
+    owned_query::model!(
+        model,
+        analysis,
         file,
-        BindingSession::new(Arc::new(context("frozen-member"))),
+        owned_query::session(Arc::new(provider))
+    );
+    owned_query::model!(
+        foreign,
+        analysis,
+        file,
+        owned_query::session(Arc::new(context("frozen-member")))
     );
     for index in raw
         .syntax_tree()

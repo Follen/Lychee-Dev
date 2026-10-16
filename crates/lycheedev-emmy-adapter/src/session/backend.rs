@@ -224,6 +224,21 @@ impl<'a, 'control, E> OwnedQuery<'a, 'control, E> {
         query
     }
 
+    /// Construct over an immutable analysis built through any public intake
+    /// entry. Source uses `new_with_contribution_order` to reuse its existing
+    /// receipt; isolated public API consumers can capture the real order here.
+    pub fn new_for_snapshot(
+        analysis: &'a EmmyLuaAnalysis,
+        session: &'a OwnedBindingSession,
+        file_id: FileId,
+        check: &'control mut dyn FnMut() -> Result<(), E>,
+    ) -> Result<Self, E> {
+        let order = crate::snapshot_contribution_order(analysis, &mut *check)?;
+        Ok(Self::new_with_contribution_order(
+            analysis, session, file_id, check, order,
+        ))
+    }
+
     /// Share only immutable workspace facts with the same full-batch owner.
     /// The caller must retain this cache exclusively for this analysis snapshot;
     /// changed/rebuilt analysis requires a fresh cache, exactly as admission order.

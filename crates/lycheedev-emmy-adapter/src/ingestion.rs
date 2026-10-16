@@ -120,3 +120,31 @@ pub fn ingest_public_batch<E>(
         text_cost: cost,
     })
 }
+
+/// Capture the fixed public database's current contribution order. Callers that
+/// constructed the analysis through another public batch entry can use this
+/// receipt while keeping that analysis immutably borrowed. It becomes invalid
+/// after any database mutation; Source retains the receipt from ingestion instead
+/// of rescanning the workspace for each query.
+pub fn snapshot_contribution_order<E>(
+    analysis: &EmmyLuaAnalysis,
+    mut check: impl FnMut() -> Result<(), E>,
+) -> Result<Arc<[FileId]>, E> {
+    check()?;
+    let files = analysis.db.file_ids();
+    let mut ordered = Vec::with_capacity(files.len());
+    for file in files {
+        check()?;
+        let key = match analysis.db.workspace_id_of(file) {
+            Some(id) if id.is_main() => (0, 0),
+            Some(id) if id.is_library() => (1, id.id),
+            Some(id) if id.is_std() => (2, 0),
+            _ => (3, 0),
+        };
+        ordered.push((key, file));
+    }
+    check()?;
+    ordered.sort_by_key(|(key, _)| *key);
+    check()?;
+    Ok(ordered.into_iter().map(|(_, file)| file).collect())
+}

@@ -5,9 +5,11 @@
 mod query_support;
 #[path = "../../lycheedev-emmy-adapter/tests/support/object_carrier_cases.rs"]
 mod support;
-use emmylua_code_analysis::{EmmyLuaAnalysis, LuaType, binding_context as native};
+#[path = "support/fixed_oracle_trace.rs"]
+mod trace;
+use emmylua_code_analysis::{EmmyLuaAnalysis, LuaType};
 use lycheedev_emmy_adapter::session as owned;
-use std::{collections::HashSet, sync::Arc};
+use std::collections::HashSet;
 use support::*;
 #[path = "support/object_oracle.rs"]
 mod object_oracle;
@@ -16,43 +18,24 @@ fn compare(
     analysis: &EmmyLuaAnalysis,
     sites: &[owned::BindingSite],
     provider: &Provider,
-) -> (
-    Vec<LuaType>,
-    Vec<owned::OwnedValue>,
-    Vec<owned::BindingCoverage>,
-) {
-    let old_provider = provider.isolated();
+) -> (Vec<owned::OwnedValue>, Vec<owned::BindingCoverage>) {
     let new_provider = provider.isolated();
-    let old_session = native::BindingSession::new(Arc::new(Native(old_provider.clone())));
-    let old_model = analysis.semantic_model_with_context(sites[0].file_id, old_session.clone());
     let new_session = session(&new_provider);
     let mut check = || Ok::<_, Stop>(());
-    let mut query = owned::OwnedQuery::new(analysis, &new_session, sites[0].file_id, &mut check);
-    let mut old_values = vec![];
+    let mut query =
+        owned::OwnedQuery::new_for_snapshot(analysis, &new_session, sites[0].file_id, &mut check)
+            .unwrap();
     let mut new_values = vec![];
     for site in sites {
-        let old = old_model.type_of_expr(site.syntax);
         let new = query.type_of_expr(site.syntax).unwrap();
-        assert_eq!(
-            new_type(&new),
-            old_type(&old),
-            "all structure and visible object metadata at {site:?}"
-        );
-        old_values.push(old);
+        trace::check("object.query.type", &new_type(&new));
         new_values.push(new);
     }
     let coverage = rows(&new_session);
-    assert_eq!(
-        coverage,
-        old_session
-            .coverage()
-            .into_iter()
-            .map(row)
-            .collect::<Vec<_>>()
-    );
-    assert_eq!(
-        *new_provider.events.lock().unwrap(),
-        *old_provider.events.lock().unwrap()
+    trace::check("object.query.coverage", &coverage);
+    trace::check(
+        "object.query.provider",
+        &*new_provider.events.lock().unwrap(),
     );
     println!(
         "OWNED_OBJECT_NATIVE queries={} coverage={} providerCalls={}",
@@ -60,11 +43,12 @@ fn compare(
         coverage.len(),
         new_provider.events.lock().unwrap().len()
     );
-    (old_values, new_values, coverage)
+    (new_values, coverage)
 }
 
 #[test]
 fn object_presence_origin_shape_and_field_failures_match_all_metadata_and_producer_rows() {
+    let _trace = trace::begin_candidate();
     let mut comparisons = 0;
     for case in 0..23 {
         let (analysis, site, mut provider, mut selected) = basic_case();
@@ -216,6 +200,7 @@ fn object_presence_origin_shape_and_field_failures_match_all_metadata_and_produc
 
 #[test]
 fn nested_incomplete_fields_and_active_object_depth_match_without_flattening_identity() {
+    let _trace = trace::begin_candidate();
     for depth in [2, 64, 65] {
         let (analysis, site, mut provider, root) = basic_case();
         for index in 1..=depth {
@@ -239,39 +224,39 @@ fn nested_incomplete_fields_and_active_object_depth_match_without_flattening_ide
             );
         }
         provider.values.insert(site, bound_object(&root));
-        let (_, values, _) = compare(&analysis, &[site, site], &provider);
+        let (values, _) = compare(&analysis, &[site, site], &provider);
         assert!(values[0].object_info().unwrap().complete);
     }
 }
 
 #[test]
 fn tokens_projection_sites_hash_sets_and_cache_hits_have_the_same_equality_relations() {
+    let _trace = trace::begin_candidate();
     let (analysis, site, mut provider) = load("return first,second", "first");
     let second = provider.named("second");
     let selected = object(site, 1);
     select_shape(&mut provider, site, &selected, shape(&selected, vec![]));
     provider.values.insert(second, bound_object(&selected));
-    let (mut old, mut new, _) = compare(&analysis, &[site, site, second], &provider);
-    let (other_old, other_new, _) = compare(&analysis, &[site, site, second], &provider);
-    old.extend(other_old);
+    let (mut new, _) = compare(&analysis, &[site, site, second], &provider);
+    let (other_new, _) = compare(&analysis, &[site, site, second], &provider);
     new.extend(other_new);
-    for a in 0..old.len() {
-        for b in 0..old.len() {
-            assert_eq!(
-                old[a] == old[b],
-                new[a] == new[b],
-                "token/site equality ({a},{b})"
+    for a in 0..new.len() {
+        for b in 0..new.len() {
+            trace::check(
+                &format!("token/site equality ({a},{b})"),
+                &(new[a] == new[b]),
             );
         }
     }
-    assert_eq!(
-        old.into_iter().collect::<HashSet<_>>().len(),
-        new.into_iter().collect::<HashSet<_>>().len()
+    trace::check(
+        "object.token.unique",
+        &new.into_iter().collect::<HashSet<_>>().len(),
     );
 }
 
 #[test]
 fn actual_unary_tuple_logical_declaration_and_observed_return_transports_keep_nested_carriers() {
+    let _trace = trace::begin_candidate();
     for expression in [
         "-selected",
         "#selected",
@@ -317,6 +302,7 @@ fn actual_unary_tuple_logical_declaration_and_observed_return_transports_keep_ne
 
 #[test]
 fn the_1025th_shape_keeps_its_real_unavailable_receipt_after_the_shared_freeze_budget() {
+    let _trace = trace::begin_candidate();
     let names = (0..1025)
         .map(|i| format!("object{i}"))
         .collect::<Vec<_>>()
@@ -329,7 +315,7 @@ fn the_1025th_shape_keeps_its_real_unavailable_receipt_after_the_shared_freeze_b
         select_shape(&mut provider, site, &selected, shape(&selected, vec![]));
         sites.push(site);
     }
-    let (_, new, ledger) = compare(&analysis, &sites, &provider);
+    let (new, ledger) = compare(&analysis, &sites, &provider);
     assert!(new[..1024].iter().all(|v| v.object_info().is_some()));
     assert_eq!(new[1024].structural_type(), &LuaType::Unknown);
     assert_eq!(
@@ -340,6 +326,7 @@ fn the_1025th_shape_keeps_its_real_unavailable_receipt_after_the_shared_freeze_b
 
 #[test]
 fn a_second_projection_with_the_same_view_and_different_epoch_keeps_the_frozen_identity_failure() {
+    let _trace = trace::begin_candidate();
     let (analysis, first, mut provider) = load("return first,second", "first");
     let second = provider.named("second");
     let selected = object(first, 1);
@@ -355,7 +342,7 @@ fn a_second_projection_with_the_same_view_and_different_epoch_keeps_the_frozen_i
     let mut changed = selected.clone();
     changed.epoch = "epoch-2".into();
     provider.values.insert(second, bound_object(&changed));
-    let (_, new, ledger) = compare(&analysis, &[first, second], &provider);
+    let (new, ledger) = compare(&analysis, &[first, second], &provider);
     assert!(new[0].object_info().is_some());
     assert_eq!(new[1].structural_type(), &LuaType::Unknown);
     assert_eq!(

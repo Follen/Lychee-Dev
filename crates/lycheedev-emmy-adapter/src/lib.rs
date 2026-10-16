@@ -7,7 +7,10 @@
 //! The initial slice covers authenticated API declaration type queries only.
 mod declaration;
 mod ingestion;
-pub use ingestion::{IngestedBatch, IngestionFailure, IngestionTextCost, ingest_public_batch};
+pub use ingestion::{
+    IngestedBatch, IngestionFailure, IngestionTextCost, ingest_public_batch,
+    snapshot_contribution_order,
+};
 mod projection;
 mod types;
 

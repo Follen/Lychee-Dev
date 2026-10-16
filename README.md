@@ -6,7 +6,7 @@ This branch, `rust-refactor`, is an **unfinished Rust implementation of the tagg
 
 The unpublished Rust candidate version is **3.5.0**, with **beta** distribution configuration. This is a package identity separate from the fixed Go 3.2.3 behavior oracle; no release or npm dist-tag operation has been performed.
 
-Final acceptance now requires **unmodified Emmy upstream source**: all current patches must be replaced by equivalent owned-crate/public-API behavior while retaining the complete XML/Lua enhancement. This migration is in progress; the current dependency is still patched.
+Final acceptance now requires **unmodified Emmy upstream source**: all current patches must be replaced by equivalent owned-crate/public-API behavior while retaining the complete XML/Lua enhancement. The current source candidate now selects the unmodified upstream tree and runs contextual queries and diagnostics in the owned adapter. Compilation, complete semantic differentials, full Retail and performance acceptance remain pending.
 
 ## Goal and fixed baseline
 
@@ -31,7 +31,7 @@ Older `docs/toolkit/` plans and test reports are historical evidence. Their Go 3
 
 ## Current implementation and build boundary
 
-Nine crates exist under `crates/`: cli, core, source, data, live, delivery, windows, emmy-adapter and binding-contracts. The owned adapter centralizes engine integration; the lower-level binding contracts are shared with the pinned engine through compatibility re-exports. Source defaults to `emmy-prototype` and links EmmyLua directly. The previously missing modified dependency has been replaced by a separately identified reconstruction from public upstream commit `08b0873962e83bb8307e9a81052e3f41578fbc78`, with tracked source/patch/license inventories in [third_party/emmy](third_party/emmy/README.md). It is not a recovery of the old private bytes. The preparation recipe materializes the ignored dependency directory; Windows CI now builds and exercises sealed candidates.
+Nine crates exist under `crates/`: cli, core, source, data, live, delivery, windows, emmy-adapter and binding-contracts. Source uses the owned adapter and engine-neutral contracts; the fixed upstream engine does not depend on those contracts. Source defaults to `emmy-prototype` and links the unmodified EmmyLua commit `08b0873962e83bb8307e9a81052e3f41578fbc78` directly. The verified tree is exactly 848 upstream files; [third_party/emmy](third_party/emmy/README.md) records source, archive and license identity with no production patches. Owned algorithms retain the upstream MIT attribution. The preparation recipe materializes the ignored dependency directory. A separately fixed historical patched tree is retained only for reference tests, never as the production dependency. Source identity checks are not compilation or behavioral acceptance.
 
 Successful component runs do not establish full Source, default Live, package or performance acceptance. Full Retail native analysis has exposed real generated-API failures; new fixes require execution on their exact candidate. Formal runtime/input/backend components are connected to the default public lifecycle; exact-candidate acceptance remains open. Use [handover.md](handover.md) for exact passed/failed/not-run evidence and [the current module queue](todo.md#current-module-work-queue-derived-from-handover-no-percentage-claims) for remaining work. Independent reproducible-build and final package gates remain open.
 

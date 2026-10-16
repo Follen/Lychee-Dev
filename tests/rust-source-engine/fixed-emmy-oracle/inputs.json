@@ -1,0 +1,249 @@
+{
+  "schema": "lycheedev.emmy-fixed-inputs.v1",
+  "referenceCommit": "cd87118123fcba3d26f8ee161166629a4570bdaa",
+  "targets": [
+    {
+      "target": "binary_core_native_oracle",
+      "tests": [
+        "native_binary_literal_matrix_matches_full_types_without_raw_binary_fallback",
+        "native_selected_operand_matrix_preserves_unknown_nil_and_all_producer_fields",
+        "native_operator_overloads_keep_left_precedence_and_contextual_unknown_gate",
+        "native_contextual_any_is_unknown_for_every_nonlogical_operator"
+      ]
+    },
+    {
+      "target": "dense_tuple_native_oracle",
+      "tests": [
+        "actual_dense_hole_named_duplicate_and_nested_rhs_tables_keep_full_type_and_producer_order",
+        "original_contextual_fast_paths_do_not_query_rhs_table_fields",
+        "foreign_table_members_keep_current_model_file_query_behavior_in_the_fixed_engine"
+      ]
+    },
+    {
+      "target": "expression_execution_native_oracle",
+      "tests": [
+        "actual_native_full_types_and_all_coverage_fields_match_primitive_unary_selected_subset",
+        "actual_native_two_phase_order_matches_owned_execution_including_lhs_initializer",
+        "actual_native_unary_operator_return_types_match_owned_public_api"
+      ]
+    },
+    {
+      "target": "expression_plan_native_oracle",
+      "tests": [
+        "selected_compile_producers_match_actual_native_rows_when_execution_adds_no_producers",
+        "real_native_compiles_rhs_selected_before_evaluating_lhs_declaration"
+      ]
+    },
+    {
+      "target": "function_call_native_oracle",
+      "tests": [
+        "real_function_signature_and_direct_call_paths_match_nonempty_and_empty_bodies",
+        "contextual_children_unknown_calls_docs_and_union_rows_match_full_receipts",
+        "fixed_32_slot_and_256_return_row_boundaries_keep_exact_producer_prefixes",
+        "foreign_function_scope_uses_the_same_provider_and_missing_signature_keeps_reason",
+        "signature_children_and_callee_keep_the_original_16384_ledger_boundary"
+      ]
+    },
+    {
+      "target": "object_carrier_native_oracle",
+      "tests": [
+        "object_presence_origin_shape_and_field_failures_match_all_metadata_and_producer_rows",
+        "nested_incomplete_fields_and_active_object_depth_match_without_flattening_identity",
+        "tokens_projection_sites_hash_sets_and_cache_hits_have_the_same_equality_relations",
+        "actual_unary_tuple_logical_declaration_and_observed_return_transports_keep_nested_carriers",
+        "the_1025th_shape_keeps_its_real_unavailable_receipt_after_the_shared_freeze_budget",
+        "a_second_projection_with_the_same_view_and_different_epoch_keeps_the_frozen_identity_failure"
+      ]
+    },
+    {
+      "target": "object_member_native_oracle",
+      "tests": [
+        "member_provenance_order_presence_and_real_source_identity_match_every_field",
+        "static_and_dynamic_object_index_execute_the_real_query_successor",
+        "nested_member_results_keep_full_carrier_and_subsequent_lookup_order",
+        "same_context_foreign_token_member_lookup_is_unavailable_in_both_engines",
+        "member_lookup_keeps_the_actual_16384_last_slot_producer"
+      ]
+    },
+    {
+      "target": "query_backend_native_oracle",
+      "tests": [
+        "real_local_declarations_literals_uninitialized_nil_and_selected_docs_use_the_complete_query_path",
+        "two_phase_order_and_same_file_origin_fresh_scope_match_native_cache_and_all_provider_calls",
+        "selected_cycles_and_foreign_origin_share_guard_and_ledger_but_not_model_caches",
+        "selected_absent_unknown_and_denied_calls_keep_initializer_slot_nil_unknown_distinction",
+        "concrete_query_runs_later_fields_after_the_exact_16384_coverage_boundary"
+      ]
+    },
+    {
+      "target": "selected_projector_native_oracle",
+      "tests": [
+        "every_atomic_selected_type_and_all_coverage_fields_match_real_patched_model"
+      ]
+    },
+    {
+      "target": "selected_query_native_oracle",
+      "tests": [
+        "all_call_evidence_and_lua_positions_match_real_fixed_projector_full_fields",
+        "unmanaged_callsite_still_has_a_selected_callee_context_regression"
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 3737,
+      "sha256": "9b02d196a58afb3b0ad557926df0e74eb020b191b2bb235bb72b8b76397beaf8"
+    },
+    {
+      "path": "historical-engine/.gitignore",
+      "bytes": 13,
+      "sha256": "32dae3052f331ee34d628ef535709b301259a45df7c7522c4d35dcf49873f00b"
+    },
+    {
+      "path": "historical-engine/README.md",
+      "bytes": 2424,
+      "sha256": "b27376d51457e92594641bf565535ec17aef422bb79d138c4f82185856cb0483"
+    },
+    {
+      "path": "historical-engine/check.mjs",
+      "bytes": 5998,
+      "sha256": "3f584b531abe549225e12119a22f74523279e9f860e2f115dcf7793462764acb"
+    },
+    {
+      "path": "historical-engine/files.json",
+      "bytes": 152632,
+      "sha256": "f4bc9ed358627524e03b55f13d520160122daed30af38ed8efe34d70e0bde612"
+    },
+    {
+      "path": "historical-engine/identity.json",
+      "bytes": 1861,
+      "sha256": "cee827948dfd86134238b5c6e1a48530aa8b0ec3cafa3821b1ef5d4ae1890e4c"
+    },
+    {
+      "path": "historical-engine/patches/0001-binding-context.patch",
+      "bytes": 125410,
+      "sha256": "c54f788d34f276e692f5dc93b9a2b0f212d2b015bde63b5a22eb2c23e4d033f1"
+    },
+    {
+      "path": "historical-engine/prepare.py",
+      "bytes": 32295,
+      "sha256": "a87e80d475a81563d5e943c53f1f9bcb29698f26ee97206e56bcf7d0c18a6af7"
+    },
+    {
+      "path": "historical-engine/scratch.mjs",
+      "bytes": 3681,
+      "sha256": "82f2a607bc8b7d8f33918ff54fcd84797cec417a09ebc1eabcdce746bb297ba3"
+    },
+    {
+      "path": "historical-engine/seal.py",
+      "bytes": 6129,
+      "sha256": "700d40ce1cd37bc3714035d9ce29e7bfd2ec53a7a9f98d80f7eb8062c3a3b18f"
+    },
+    {
+      "path": "historical-engine/standalone-Cargo.toml",
+      "bytes": 284,
+      "sha256": "d91e5351aed1f37550198675e2efce32f1c47bdab4abe63685540b7c96415f57"
+    },
+    {
+      "path": "historical-engine/test_prepare.py",
+      "bytes": 23639,
+      "sha256": "4166cad5d64a52952af65f6500ae79be191f0eacbcb017f51c3dcaa64bf9eb04"
+    },
+    {
+      "path": "materialize.py",
+      "bytes": 6660,
+      "sha256": "fbfe181c9cca0fac5dedd14fc95ac2cae0dfeadd8aff8dd557eea78e9184ae94"
+    },
+    {
+      "path": "original-tests.json",
+      "bytes": 1835,
+      "sha256": "888fefc694fa1a642570e5696052997e5c6b7b99882dc8de0abd89124692a44a"
+    },
+    {
+      "path": "reference/crates/lycheedev-source/tests/binary_core_native_oracle.rs",
+      "bytes": 10296,
+      "sha256": "f0263df0a0f45b9b0d102eeb36532cd41a25b332d08d1b6fbfd21ac5ac705afb"
+    },
+    {
+      "path": "reference/crates/lycheedev-source/tests/dense_tuple_native_oracle.rs",
+      "bytes": 8557,
+      "sha256": "071722f7919674bab8590e71b5136f7388d685c76df69c380a63f7fd68886d6e"
+    },
+    {
+      "path": "reference/crates/lycheedev-source/tests/expression_execution_native_oracle.rs",
+      "bytes": 8873,
+      "sha256": "63d949fe8cb2dae293dca6f493a34fce8a0ce50bb923c21582633132d0065fd8"
+    },
+    {
+      "path": "reference/crates/lycheedev-source/tests/expression_plan_native_oracle.rs",
+      "bytes": 7924,
+      "sha256": "c1fa2451ba0d0667d78c1699805f779835ebd797f1d6f4c42518558206036959"
+    },
+    {
+      "path": "reference/crates/lycheedev-source/tests/function_call_native_oracle.rs",
+      "bytes": 14025,
+      "sha256": "7d84f5926f939350a70cc4168ceb8c44fcc10c4ee172dece3c53749657145865"
+    },
+    {
+      "path": "reference/crates/lycheedev-source/tests/object_carrier_native_oracle.rs",
+      "bytes": 14020,
+      "sha256": "43dbad90f4a8976e8df5f05096977f3a906cb99aa8f3ecf4b6b05867eb8ed0fc"
+    },
+    {
+      "path": "reference/crates/lycheedev-source/tests/object_member_native_oracle.rs",
+      "bytes": 15332,
+      "sha256": "406dd26e275cd6f43d08312754fd68d7dead063935d926f88f585cb9e0b9fe2a"
+    },
+    {
+      "path": "reference/crates/lycheedev-source/tests/query_backend_native_oracle.rs",
+      "bytes": 12896,
+      "sha256": "60508f8a9167758786e000835f96dd440f9901c64cc80163b3962dd23741ba40"
+    },
+    {
+      "path": "reference/crates/lycheedev-source/tests/selected_projector_native_oracle.rs",
+      "bytes": 6486,
+      "sha256": "0c6dadc475648c900f45ded8c2f8ab746088ec3c0d6e99deeffb300812f6d15b"
+    },
+    {
+      "path": "reference/crates/lycheedev-source/tests/selected_query_native_oracle.rs",
+      "bytes": 11688,
+      "sha256": "ce14369493f85e56e807c1c4e6369d7c850daed71e05461cf1e413a128e23e54"
+    },
+    {
+      "path": "reference/crates/lycheedev-source/tests/support/fixed_oracle_trace.rs",
+      "bytes": 7169,
+      "sha256": "96434dc6efbe913ac9e27bd18153844aa80763edda36733f58ad0df78d7b260c"
+    },
+    {
+      "path": "reference/crates/lycheedev-source/tests/support/object_oracle.rs",
+      "bytes": 11082,
+      "sha256": "191ecbd98e203b1b886ab57fc4b042634bb67e5418c5e2ccc022928eac001c23"
+    },
+    {
+      "path": "run.mjs",
+      "bytes": 9954,
+      "sha256": "a93f19cb9fb6b3a3d601227d356dec93f1bb88703f9c6fed44b03dcbadfd4a77"
+    },
+    {
+      "path": "run.test.mjs",
+      "bytes": 4848,
+      "sha256": "8ed8ebf71b11de1fa3bb31b41ecc249a45738d2d31ee3338f07880747a2123ff"
+    },
+    {
+      "path": "source-cd871181.json",
+      "bytes": 77937,
+      "sha256": "692d920e54e94cb0082f008bf9e61cf969bde63eb1d269c01b1fa26984c6c136"
+    },
+    {
+      "path": "source-cd871181.tar.gz",
+      "bytes": 1595510,
+      "sha256": "4a4657eec2b2fe7186e9815d663da938ce360fe08970240fd343fa98ea6ebdb0"
+    },
+    {
+      "path": "targets.json",
+      "bytes": 3861,
+      "sha256": "2fb97511cefe276c228bde2eda70cf8c8ebec786c4336bbd5eea4707f1f5342b"
+    }
+  ]
+}

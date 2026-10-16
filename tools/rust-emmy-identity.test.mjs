@@ -48,6 +48,7 @@ function fixture(){
   put(`${emmySourcePath}/Cargo.toml`,'fixture workspace');
   for(const name of ['emmylua_code_analysis','emmylua_parser','emmylua_diagnostic_macro'])put(`${emmySourcePath}/crates/${name}/Cargo.toml`,'fixture crate');
   const identity=JSON.parse(readFileSync(join(root,emmyRecipePath,'identity.json')));
+  identity.identity='public-base-binding-context-reconstruction-v1';
   identity.patches=[{path:'patches/test.patch',sha256:hashFile(join(root,emmyRecipePath,'patches/test.patch'))}];
   const reseal=()=>{const actual=emmyInventory(join(root,emmySourcePath));identity.files=actual.files.length;identity.bytes=actual.totalBytes;identity.patchedTreeSHA256=emmyTreeDigest(actual.files);put(`${emmyRecipePath}/files.json`,JSON.stringify(actual.files));put(`${emmyRecipePath}/identity.json`,JSON.stringify(identity));};
   reseal();return{root,put,identity,reseal,cleanup:()=>rmSync(root,{recursive:true,force:true})};
@@ -214,4 +215,10 @@ test('full-source staging preserves product manifest and rejects conflicting own
     assert.throws(()=>stageEmmySources(root,destination),/owned_contract_identity/);
     assert.equal(readFileSync(target,'utf8'),'foreign owner bytes');
   });
+});
+
+// A zero-patch identity cannot authorize a changed tree merely by omitting the patch.
+test('unmodified recipe rejects patches and non-base generated inventory',()=>{
+  withFixture(({root,identity,put})=>{identity.identity='public-upstream-unmodified-v1';put(`${emmyRecipePath}/identity.json`,JSON.stringify(identity));assert.throws(()=>inspectEmmy(root),/unmodified_identity/);});
+  withFixture(({root,identity,put})=>{identity.identity='public-upstream-unmodified-v1';identity.patches=[];put(`${emmyRecipePath}/identity.json`,JSON.stringify(identity));assert.throws(()=>inspectEmmy(root),/unmodified_identity/);});
 });

@@ -1,9 +1,13 @@
-//! Observe real fixed compiler/VM producer order. The owned plan is not an
-//! executor, so this target never labels its missing execution phase equivalent.
+//! Compare the compiler prefix with independently captured fixed-engine rows.
+//! A separate execution session checks the full two-phase order in the second test.
 #![cfg(feature = "emmy-prototype")]
+#[path = "../../lycheedev-emmy-adapter/tests/support/expression_execution_cases.rs"]
+mod execution_support;
 #[path = "../../lycheedev-emmy-adapter/tests/support/selected_query_cases.rs"]
 mod support;
-use emmylua_code_analysis::{EmmyLuaAnalysis, binding_context as native};
+#[path = "support/fixed_oracle_trace.rs"]
+mod trace;
+use emmylua_code_analysis::EmmyLuaAnalysis;
 use emmylua_parser::{LuaAstNode, LuaExpr, LuaReturnStat};
 use lycheedev_emmy_adapter::session as owned;
 use std::{collections::HashMap, sync::Arc};
@@ -24,39 +28,6 @@ impl owned::BindingContext for Provider {
                 proof: proof.clone(),
             })
             .unwrap_or(owned::BindingDecision::NotManaged)
-    }
-}
-struct NativeProvider(Provider);
-fn to_owned(site: native::BindingSite) -> owned::BindingSite {
-    owned::BindingSite {
-        file_id: site.file_id,
-        syntax: site.syntax,
-    }
-}
-impl native::BindingContext for NativeProvider {
-    fn identity(&self) -> &str {
-        "expression-plan-oracle"
-    }
-    fn resolve(&self, site: native::BindingSite) -> native::BindingDecision<native::BoundValue> {
-        self.0
-            .values
-            .get(&to_owned(site))
-            .map(|proof| native::BindingDecision::KnownAbsent {
-                proof: proof.clone(),
-            })
-            .unwrap_or(native::BindingDecision::NotManaged)
-    }
-}
-fn row(row: native::BindingCoverage) -> owned::BindingCoverage {
-    owned::BindingCoverage {
-        site: to_owned(row.site),
-        operation: row.operation,
-        state: row.state,
-        proof: row.proof,
-        reason: row.reason,
-        parameter: row.parameter,
-        parameter_index: row.parameter_index,
-        argument: row.argument.map(to_owned),
     }
 }
 fn load(
@@ -100,6 +71,7 @@ fn load(
 
 #[test]
 fn selected_compile_producers_match_actual_native_rows_when_execution_adds_no_producers() {
+    let _trace = trace::begin_candidate();
     for expression in [
         "left + right",
         "left and right",
@@ -121,11 +93,6 @@ fn selected_compile_producers_match_actual_native_rows_when_execution_adds_no_pr
                 ("g", "callee-proof"),
             ],
         );
-        let native = native::BindingSession::new(Arc::new(NativeProvider(provider.clone())));
-        let old_type = analysis
-            .semantic_model_with_context(query.file_id, native.clone())
-            .type_of_expr(query.syntax);
-        let old_rows = native.coverage().into_iter().map(row).collect::<Vec<_>>();
         let session =
             owned::OwnedBindingSession::new_checked(Arc::new(provider), || Ok::<_, Stop>(()))
                 .unwrap();
@@ -133,10 +100,7 @@ fn selected_compile_producers_match_actual_native_rows_when_execution_adds_no_pr
             .compile_expression(query, &mut Backend::default())
             .unwrap();
         let rows = session.coverage_checked(|| Ok::<_, Stop>(())).unwrap();
-        assert_eq!(
-            rows, old_rows,
-            "{expression} all compiler-produced ledger fields"
-        );
+        trace::check(&format!("{expression}:compiler_ledger"), &(rows));
         if expression == "left and right" || expression == "left or right" {
             assert_eq!(
                 rows.iter()
@@ -151,13 +115,14 @@ fn selected_compile_producers_match_actual_native_rows_when_execution_adds_no_pr
         }
         println!(
             "EXPRESSION_PLAN_NATIVE_PREFIX {}",
-            serde_json::json!({"expression":expression,"referenceType":format!("{old_type:?}"),"ownedPlan":format!("{plan:?}"),"coverage":format!("{rows:?}"),"ownedExecution":"NOT_IMPLEMENTED"})
+            serde_json::json!({"expression":expression,"ownedPlan":format!("{plan:?}"),"coverage":format!("{rows:?}"),"ownedExecution":"NOT_IMPLEMENTED"})
         );
     }
 }
 
 #[test]
 fn real_native_compiles_rhs_selected_before_evaluating_lhs_declaration() {
+    let _trace = trace::begin_candidate();
     let (analysis, query, provider) = load(
         "local left=1\nlocal right=2\nreturn left+right",
         &[
@@ -165,13 +130,24 @@ fn real_native_compiles_rhs_selected_before_evaluating_lhs_declaration() {
             ("right", "right-expression-proof"),
         ],
     );
-    let native = native::BindingSession::new(Arc::new(NativeProvider(provider.clone())));
-    let old_type = analysis
-        .semantic_model_with_context(query.file_id, native.clone())
-        .type_of_expr(query.syntax);
-    let old_rows = native.coverage().into_iter().map(row).collect::<Vec<_>>();
+    // The compiler still produces only the RHS prefix below. Use a separate
+    // session for this pre-existing full native-order assertion so execution
+    // evidence cannot contaminate the compiler ledger.
+    let execution_session =
+        owned::OwnedBindingSession::new_checked(Arc::new(provider.clone()), || Ok::<_, Stop>(()))
+            .unwrap();
+    let mut execution_backend =
+        execution_support::Backend::new(Arc::new(std::sync::Mutex::new(Vec::new())));
+    execution_backend.recursive_initializers = true;
+    let executed = owned::SelectedProjector::new(&analysis, &execution_session)
+        .evaluate_expression(query, &mut execution_backend)
+        .unwrap();
+    let full_rows = execution_session
+        .coverage_checked(|| Ok::<_, Stop>(()))
+        .unwrap();
+    trace::check("two_phase:full_ledger", &full_rows);
     assert_eq!(
-        old_rows
+        full_rows
             .iter()
             .map(|row| row.proof.as_str())
             .collect::<Vec<_>>(),
@@ -184,11 +160,7 @@ fn real_native_compiles_rhs_selected_before_evaluating_lhs_declaration() {
         .compile_expression(query, &mut Backend::default())
         .unwrap();
     let rows = session.coverage_checked(|| Ok::<_, Stop>(())).unwrap();
-    assert_eq!(
-        rows,
-        old_rows[..1],
-        "compiler finishes only the RHS selected producer"
-    );
+    trace::check("two_phase:compiler_prefix", &(rows));
     assert!(
         matches!(&plan.instructions[0],owned::ExpressionInstruction::LoadName {name,..} if name=="left")
     );
@@ -202,6 +174,6 @@ fn real_native_compiles_rhs_selected_before_evaluating_lhs_declaration() {
     ));
     println!(
         "EXPRESSION_TWO_PHASE_COUNTEREXAMPLE {}",
-        serde_json::json!({"referenceType":format!("{old_type:?}"),"nativeFullCoverage":format!("{old_rows:?}"),"ownedCompilePrefix":format!("{rows:?}"),"deferred":"LoadName(left) must append initializer after this prefix"})
+        serde_json::json!({"ownedFullCoverage":format!("{full_rows:?}"),"ownedExecutionType":format!("{:?}",executed.ty),"ownedCompilePrefix":format!("{rows:?}"),"deferred":"LoadName(left) must append initializer after this prefix"})
     );
 }

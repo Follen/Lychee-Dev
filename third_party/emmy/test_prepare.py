@@ -54,6 +54,31 @@ class PrepareTests(unittest.TestCase):
         self.temp.cleanup()
         self.custody.__exit__(None, None, None)
 
+    def test_unmodified_recipe_reproduces_base_without_a_patch(self):
+        self.identity.update(identity='public-upstream-unmodified-v1', patches=[], files=1, bytes=4,
+                             patchedTreeSHA256=self.identity['base']['treeSHA256'])
+        self.files = [{'path': 'a.txt', 'bytes': 4, 'sha256': prep.digest(self.content)}]
+        (prep.HERE / 'patches/change.patch').unlink()
+        (prep.HERE / 'patches').rmdir()
+        self.save()
+        prep.prepare(self.archive, self.destination)
+        self.assertEqual((self.destination / 'a.txt').read_bytes(), self.content)
+
+    def test_unmodified_recipe_rejects_changed_inventory(self):
+        self.identity.update(identity='public-upstream-unmodified-v1', patches=[], files=1, bytes=4)
+        (prep.HERE / 'patches/change.patch').unlink()
+        self.save()
+        with self.assertRaisesRegex(ValueError, 'unmodified_identity'):
+            prep.load_recipe()
+
+    def test_unmodified_recipe_rejects_unlisted_patch(self):
+        self.identity.update(identity='public-upstream-unmodified-v1', patches=[], files=1, bytes=4,
+                             patchedTreeSHA256=self.identity['base']['treeSHA256'])
+        self.files = [{'path': 'a.txt', 'bytes': 4, 'sha256': prep.digest(self.content)}]
+        self.save()
+        with self.assertRaisesRegex(ValueError, 'unknown_patch'):
+            prep.load_recipe()
+
     def test_owned_contract_inventory_is_required(self):
         del self.identity['ownedFiles']
         self.save()

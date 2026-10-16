@@ -88,7 +88,7 @@ def main():
         owned = prep.owned_inventory()
         identity = {
             'schema': 'lycheedev.emmy-reconstruction.v1',
-            'identity': 'public-base-binding-context-reconstruction-v1',
+            'identity': 'public-base-binding-context-reconstruction-v1' if patch else 'public-upstream-unmodified-v1',
             'historicalPrivatePatchRecovered': False,
             'ownedFiles': owned, 'ownedTreeSHA256': prep.tree_digest(owned),
             'base': BASE,
@@ -98,7 +98,12 @@ def main():
         }
         # Only this explicitly requested maintainer command replaces recipe files.
         # Preparation authenticates the complete triple and rejects partial edits.
-        (HERE / 'patches/0001-binding-context.patch').write_bytes(patch)
+        tracked_patch = HERE / 'patches/0001-binding-context.patch'
+        if patch:
+            tracked_patch.parent.mkdir(exist_ok=True)
+            tracked_patch.write_bytes(patch)
+        elif tracked_patch.exists():
+            tracked_patch.unlink()
         (HERE / 'files.json').write_text(json.dumps(files, indent=2) + '\n')
         (HERE / 'identity.json').write_text(json.dumps(identity, indent=2) + '\n')
         job.treeSHA256 = identity['patchedTreeSHA256']

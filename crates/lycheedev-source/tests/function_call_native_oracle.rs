@@ -1,127 +1,38 @@
-//! Full result, provider-call and coverage comparisons through the actual old
-//! contextual model and the concrete owned query (no fixture semantic backend).
+//! Independent fixed-engine traces versus the concrete owned query.
+//! Full types, provider calls and coverage fields retain their original checks.
 #![cfg(feature = "emmy-prototype")]
 #[path = "../../lycheedev-emmy-adapter/tests/support/function_call_cases.rs"]
 mod support;
-use emmylua_code_analysis::{EmmyLuaAnalysis, LuaType, binding_context as native};
+#[path = "support/fixed_oracle_trace.rs"]
+mod trace;
+use emmylua_code_analysis::{EmmyLuaAnalysis, LuaType};
 use lycheedev_emmy_adapter::session as owned;
-use std::sync::Arc;
 use support::*;
 
-struct NativeProvider(Provider);
-fn to_owned(site: native::BindingSite) -> owned::BindingSite {
-    owned::BindingSite {
-        file_id: site.file_id,
-        syntax: site.syntax,
-    }
-}
-fn to_native(site: owned::BindingSite) -> native::BindingSite {
-    native::BindingSite {
-        file_id: site.file_id,
-        syntax: site.syntax,
-    }
-}
-impl native::BindingContext for NativeProvider {
-    fn identity(&self) -> &str {
-        "owned-query-backend-oracle"
-    }
-    fn resolve(&self, site: native::BindingSite) -> native::BindingDecision<native::BoundValue> {
-        match owned::BindingContext::resolve(&self.0, to_owned(site)) {
-            owned::BindingDecision::NotManaged => native::BindingDecision::NotManaged,
-            owned::BindingDecision::KnownAbsent { proof } => {
-                native::BindingDecision::KnownAbsent { proof }
-            }
-            owned::BindingDecision::Unavailable { proof, reason } => {
-                native::BindingDecision::Unavailable { proof, reason }
-            }
-            owned::BindingDecision::Bound(value) => {
-                let selected = match value.value {
-                    owned::SelectedValue::Expression(origin) => {
-                        native::SelectedValue::Expression(to_native(origin))
-                    }
-                    owned::SelectedValue::Function(function) => {
-                        native::SelectedValue::Function(native::FunctionRef {
-                            file_id: function.file_id,
-                            closure: function.closure,
-                            declaration: function.declaration,
-                        })
-                    }
-                    _ => panic!("fixture must not bypass unsupported selected values"),
-                };
-                native::BindingDecision::Bound(native::BoundValue {
-                    identity: value.identity,
-                    proof: value.proof,
-                    value: selected,
-                })
-            }
-        }
-    }
-    fn call(&self, site: native::BindingSite) -> native::BindingDecision<native::CallPermit> {
-        match owned::BindingContext::call(&self.0, to_owned(site)) {
-            owned::BindingDecision::NotManaged => native::BindingDecision::NotManaged,
-            owned::BindingDecision::KnownAbsent { proof } => {
-                native::BindingDecision::KnownAbsent { proof }
-            }
-            owned::BindingDecision::Unavailable { proof, reason } => {
-                native::BindingDecision::Unavailable { proof, reason }
-            }
-            owned::BindingDecision::Bound(_) => {
-                panic!("permit validation belongs to the existing observed-call oracle")
-            }
-        }
-    }
-}
-fn row(row: native::BindingCoverage) -> owned::BindingCoverage {
-    owned::BindingCoverage {
-        site: to_owned(row.site),
-        operation: row.operation,
-        state: row.state,
-        proof: row.proof,
-        reason: row.reason,
-        parameter: row.parameter,
-        parameter_index: row.parameter_index,
-        argument: row.argument.map(to_owned),
-    }
-}
 fn compare(
     analysis: &EmmyLuaAnalysis,
     queries: &[owned::BindingSite],
     provider: &Provider,
 ) -> (Vec<LuaType>, Vec<owned::BindingCoverage>) {
-    let old_provider = provider.isolated();
     let new_provider = provider.isolated();
-    let old_session = native::BindingSession::new(Arc::new(NativeProvider(old_provider.clone())));
-    let old_model = analysis.semantic_model_with_context(queries[0].file_id, old_session.clone());
     let new_session = session(&new_provider);
     let mut check = || Ok::<_, Stop>(());
     let mut new_model =
-        owned::OwnedQuery::new(analysis, &new_session, queries[0].file_id, &mut check);
+        owned::OwnedQuery::new_for_snapshot(analysis, &new_session, queries[0].file_id, &mut check)
+            .unwrap();
     let mut results = vec![];
     for site in queries {
         assert_eq!(site.file_id, queries[0].file_id);
-        let old = old_model.type_of_expr(site.syntax);
         let value = new_model.type_of_expr(site.syntax).unwrap();
         assert!(
             value.is_context_free(),
             "inherited Function R1 cases have no selected object"
         );
         let new = value.structural_type().clone();
-        assert_eq!(new, old, "complete LuaType at {:?}", site);
-        assert_eq!(format!("{new:?}"), format!("{old:?}"), "all type fields");
-        assert_eq!(
-            rows(&new_session),
-            old_session
-                .coverage()
-                .into_iter()
-                .map(row)
-                .collect::<Vec<_>>(),
-            "every ledger field and producer order after each query"
-        );
-        assert_eq!(
-            *new_provider.events.lock().unwrap(),
-            *old_provider.events.lock().unwrap(),
-            "actual provider query sequence, including cache hits and manages probes"
-        );
+        trace::check("query.type", &new);
+        trace::check("query.type_debug", &format!("{new:?}"));
+        trace::check("query.coverage", &rows(&new_session));
+        trace::check("query.provider", &*new_provider.events.lock().unwrap());
         results.push(new);
     }
     println!(
@@ -135,6 +46,7 @@ fn compare(
 
 #[test]
 fn real_function_signature_and_direct_call_paths_match_nonempty_and_empty_bodies() {
+    let _trace = trace::begin_candidate();
     let mut comparisons = 0;
     for body in ordinary_call_bodies() {
         for query in ["selected", "selected()"] {
@@ -149,6 +61,7 @@ fn real_function_signature_and_direct_call_paths_match_nonempty_and_empty_bodies
 
 #[test]
 fn contextual_children_unknown_calls_docs_and_union_rows_match_full_receipts() {
+    let _trace = trace::begin_candidate();
     let mut comparisons = 0;
     for (source, query) in [
         (
@@ -216,6 +129,7 @@ fn contextual_children_unknown_calls_docs_and_union_rows_match_full_receipts() {
 
 #[test]
 fn fixed_32_slot_and_256_return_row_boundaries_keep_exact_producer_prefixes() {
+    let _trace = trace::begin_candidate();
     let mut comparisons = 0;
     for count in [32, 33] {
         let values = (0..count)
@@ -259,6 +173,7 @@ fn fixed_32_slot_and_256_return_row_boundaries_keep_exact_producer_prefixes() {
 
 #[test]
 fn foreign_function_scope_uses_the_same_provider_and_missing_signature_keeps_reason() {
+    let _trace = trace::begin_candidate();
     use emmylua_parser::{LuaAstNode, LuaClosureExpr};
     let (mut analysis, site, _, mut provider) =
         load_function("local function f() end\nreturn selected()", "selected()");
@@ -303,6 +218,7 @@ fn foreign_function_scope_uses_the_same_provider_and_missing_signature_keeps_rea
 
 #[test]
 fn signature_children_and_callee_keep_the_original_16384_ledger_boundary() {
+    let _trace = trace::begin_candidate();
     for count in [16_382, 16_383] {
         let names = (0..count)
             .map(|index| format!("prefix{index}"))

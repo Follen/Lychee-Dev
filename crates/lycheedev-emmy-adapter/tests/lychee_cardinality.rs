@@ -1,13 +1,12 @@
 //! Public-API regressions for the new public-base binding reconstruction.
 // Migrated unchanged semantic assertions from the pinned reconstruction's tests.
-// Ingestion now exercises the owned public-API bridge. Other context APIs remain
-// transitional until their production consumers have moved to the owned session.
-#[path = "support/public_ingestion.rs"]
-mod public_ingestion;
-use emmylua_code_analysis::binding_context::*;
+// Ingestion, semantic queries, diagnostics and coverage use the owned session.
+use lycheedev_emmy_adapter::session::*;
+#[path = "support/owned_query.rs"]
+mod owned_query;
 use emmylua_code_analysis::{EmmyLuaAnalysis, FileId, LuaType, VariadicType};
 use emmylua_parser::{LuaAstNode, LuaClosureExpr, LuaExpr, LuaReturnStat};
-use public_ingestion::PublicIngestionTest;
+use owned_query::{OwnedQueryTest, SessionCoverageTest};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -73,25 +72,22 @@ fn site(analysis: &EmmyLuaAnalysis, file_id: FileId, text: &str) -> BindingSite 
     }
 }
 
-fn load(source: &str) -> (EmmyLuaAnalysis, FileId) {
+fn load(source: &str) -> (OwnedQueryTest, FileId) {
     let mut analysis = EmmyLuaAnalysis::new();
     let root = std::env::current_dir()
         .unwrap()
         .join("binding-cardinality-input");
     analysis.add_main_workspace(root.clone());
-    let ids = analysis
-        .owned_ingest_shared(
-            vec![(root.join("cardinality.lua"), Some(Arc::from(source)))],
-            || Ok::<_, ()>(()),
-        )
-        .unwrap();
-    (analysis, ids[0])
+    let analysis = OwnedQueryTest::ingest(
+        analysis,
+        vec![(root.join("cardinality.lua"), Some(Arc::from(source)))],
+    )
+    .unwrap();
+    let file = analysis.file_ids()[0];
+    (analysis, file)
 }
 
-fn fixture(
-    statement: &str,
-    return_count: usize,
-) -> (EmmyLuaAnalysis, FileId, BindingSite, Context) {
+fn fixture(statement: &str, return_count: usize) -> (OwnedQueryTest, FileId, BindingSite, Context) {
     let source =
         format!("local observed = true\nlocal function F() return 901, 'raw' end\n{statement}\n");
     let (analysis, file_id) = load(&source);
@@ -201,8 +197,12 @@ const EXPANDING_STATEMENTS: &[&str] = &[
 fn managed_calls_adjust_to_one_result_in_scalar_positions() {
     for statement in SCALAR_STATEMENTS {
         let (analysis, file_id, call, context) = fixture(statement, 2);
-        let model =
-            analysis.semantic_model_with_context(file_id, BindingSession::new(Arc::new(context)));
+        owned_query::model!(
+            model,
+            analysis,
+            file_id,
+            owned_query::session(Arc::new(context))
+        );
         assert_eq!(
             model.type_of_expr(call.syntax),
             LuaType::BooleanConst(true),
@@ -223,8 +223,12 @@ fn managed_list_tails_keep_exact_return_packs_including_one_and_zero_slots() {
     for statement in EXPANDING_STATEMENTS {
         for count in 0..=2 {
             let (analysis, file_id, call, context) = fixture(statement, count);
-            let model = analysis
-                .semantic_model_with_context(file_id, BindingSession::new(Arc::new(context)));
+            owned_query::model!(
+                model,
+                analysis,
+                file_id,
+                owned_query::session(Arc::new(context))
+            );
             let expected = match count {
                 0 => vec![],
                 1 => vec![LuaType::BooleanConst(true)],
@@ -243,8 +247,12 @@ fn managed_list_tails_keep_exact_return_packs_including_one_and_zero_slots() {
 fn known_empty_returns_are_nil_in_scalar_positions() {
     for statement in SCALAR_STATEMENTS {
         let (analysis, file_id, call, context) = fixture(statement, 0);
-        let model =
-            analysis.semantic_model_with_context(file_id, BindingSession::new(Arc::new(context)));
+        owned_query::model!(
+            model,
+            analysis,
+            file_id,
+            owned_query::session(Arc::new(context))
+        );
         assert_eq!(model.type_of_expr(call.syntax), LuaType::Nil, "{statement}");
     }
 }
@@ -267,8 +275,12 @@ fn public_expression_lists_do_not_expand_nonlast_managed_calls() {
         ("return (F())", vec![LuaType::BooleanConst(true)]),
     ] {
         let (analysis, file_id, _, context) = fixture(statement, 2);
-        let model =
-            analysis.semantic_model_with_context(file_id, BindingSession::new(Arc::new(context)));
+        owned_query::model!(
+            model,
+            analysis,
+            file_id,
+            owned_query::session(Arc::new(context))
+        );
         let exprs = model
             .syntax_tree()
             .unwrap()
@@ -303,8 +315,8 @@ fn unknown_observations_and_unknown_slots_never_recover_raw_return_types() {
         ] {
             let (analysis, file_id, call, mut context) = fixture(statement, 2);
             context.observations.insert(call, unavailable);
-            let session = BindingSession::new(Arc::new(context));
-            let model = analysis.semantic_model_with_context(file_id, session.clone());
+            let session = owned_query::session(Arc::new(context));
+            owned_query::model!(model, analysis, file_id, session.clone());
             assert_eq!(
                 model.type_of_expr(call.syntax),
                 LuaType::Unknown,
@@ -330,8 +342,12 @@ fn unknown_observations_and_unknown_slots_never_recover_raw_return_types() {
                 panic!("fixture must have an observation")
             };
             observation.returns = vec![unavailable];
-            let model = analysis
-                .semantic_model_with_context(file_id, BindingSession::new(Arc::new(context)));
+            owned_query::model!(
+                model,
+                analysis,
+                file_id,
+                owned_query::session(Arc::new(context))
+            );
             assert_eq!(
                 model.type_of_expr(call.syntax),
                 if statement == "return F()" {
@@ -358,8 +374,12 @@ fn assignment_padding_distinguishes_known_empty_from_unknown_arity() {
                 },
             );
         }
-        let model =
-            analysis.semantic_model_with_context(file_id, BindingSession::new(Arc::new(context)));
+        owned_query::model!(
+            model,
+            analysis,
+            file_id,
+            owned_query::session(Arc::new(context))
+        );
         for name in ["first", "second"] {
             let decl = model
                 .file_facts()
@@ -385,8 +405,12 @@ fn assignment_padding_distinguishes_known_empty_from_unknown_arity() {
 fn parenthesized_calls_assign_one_value_and_pad_remaining_targets_with_nil() {
     for count in 0..=2 {
         let (analysis, file_id, _, context) = fixture("local first, second = (F())", count);
-        let model =
-            analysis.semantic_model_with_context(file_id, BindingSession::new(Arc::new(context)));
+        owned_query::model!(
+            model,
+            analysis,
+            file_id,
+            owned_query::session(Arc::new(context))
+        );
         for (name, expected) in [
             (
                 "first",
@@ -446,8 +470,8 @@ fn environment_receiver_without_native_representation_is_unavailable() {
             value: SelectedValue::EnvironmentCallable(Arc::new(callable)),
         }),
     );
-    let session = BindingSession::new(Arc::new(context));
-    let model = analysis.semantic_model_with_context(file_id, session.clone());
+    let session = owned_query::session(Arc::new(context));
+    owned_query::model!(model, analysis, file_id, session.clone());
     assert_eq!(model.type_of_expr(callee.syntax), LuaType::Unknown);
     assert!(session.coverage().iter().any(|row| {
         row.reason.as_deref() == Some("environment_receiver_unavailable")
@@ -510,8 +534,8 @@ fn object_shape_admission_is_bounded_without_evicting_frozen_views() {
             },
         );
     }
-    let session = BindingSession::new(Arc::new(context));
-    let model = analysis.semantic_model_with_context(file_id, session.clone());
+    let session = owned_query::session(Arc::new(context));
+    owned_query::model!(model, analysis, file_id, session.clone());
     for site in &sites[..1024] {
         assert!(matches!(
             model.type_of_expr(site.syntax),
@@ -523,7 +547,7 @@ fn object_shape_admission_is_bounded_without_evicting_frozen_views() {
         row.site == sites[1024] && row.reason.as_deref() == Some("object_shape_budget")
     }));
     // A new semantic model cannot hide eviction behind its expression cache.
-    let next_model = analysis.semantic_model_with_context(file_id, session);
+    owned_query::model!(next_model, analysis, file_id, session);
     assert!(matches!(
         next_model.type_of_expr(sites[0].syntax),
         LuaType::Object(_)

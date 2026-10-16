@@ -8,7 +8,9 @@ mod object_support;
 mod query_support;
 #[path = "../../lycheedev-emmy-adapter/tests/support/object_member_cases.rs"]
 mod support;
-use emmylua_code_analysis::{EmmyLuaAnalysis, FileId, LuaType, binding_context as native};
+#[path = "support/fixed_oracle_trace.rs"]
+mod trace;
+use emmylua_code_analysis::{EmmyLuaAnalysis, FileId};
 use lycheedev_emmy_adapter::{ByteRange, session as owned};
 use object_oracle::*;
 use std::sync::Arc;
@@ -19,31 +21,20 @@ fn compare_queries(
     sites: &[owned::BindingSite],
     provider: &Provider,
 ) -> Vec<owned::BindingCoverage> {
-    let old_provider = provider.isolated();
     let new_provider = provider.isolated();
-    let old_session = native::BindingSession::new(Arc::new(Native(old_provider.clone())));
-    let old_model = analysis.semantic_model_with_context(sites[0].file_id, old_session.clone());
+
     let new_session = session(&new_provider);
     let mut check = || Ok::<_, Stop>(());
-    let mut query = owned::OwnedQuery::new(analysis, &new_session, sites[0].file_id, &mut check);
+    let mut query =
+        owned::OwnedQuery::new_for_snapshot(analysis, &new_session, sites[0].file_id, &mut check)
+            .unwrap();
     for site in sites {
-        let old = old_model.type_of_expr(site.syntax);
         let new = query.type_of_expr(site.syntax).unwrap();
-        assert_eq!(new_type(&new), old_type(&old), "query at {site:?}");
+        trace::check("member.type", &(new_type(&new)));
     }
     let ledger = rows(&new_session);
-    assert_eq!(
-        ledger,
-        old_session
-            .coverage()
-            .into_iter()
-            .map(row)
-            .collect::<Vec<_>>()
-    );
-    assert_eq!(
-        *new_provider.events.lock().unwrap(),
-        *old_provider.events.lock().unwrap()
-    );
+    trace::check("member.coverage", &(ledger));
+    trace::check("member.provider", &(*new_provider.events.lock().unwrap()));
     println!(
         "OWNED_MEMBER_NATIVE queryComparisons={} coverage={}",
         sites.len(),
@@ -54,6 +45,7 @@ fn compare_queries(
 
 #[test]
 fn member_provenance_order_presence_and_real_source_identity_match_every_field() {
+    let _trace = trace::begin_candidate();
     let mut comparisons = 0;
     for case in 0..9 {
         let source = "local t={z=1,a=2}; local u={z=3}; return selected";
@@ -102,63 +94,45 @@ fn member_provenance_order_presence_and_real_source_identity_match_every_field()
                 field("omitted", owned::FieldPresence::Absent, absent("omit")),
             ],
         );
-        let old_provider = provider.isolated();
         let new_provider = provider.isolated();
-        let old_session = native::BindingSession::new(Arc::new(Native(old_provider.clone())));
-        let old_model = analysis.semantic_model_with_context(site.file_id, old_session.clone());
+
         let new_session = session(&new_provider);
         let mut check = || Ok::<_, Stop>(());
-        let mut query = owned::OwnedQuery::new(&analysis, &new_session, site.file_id, &mut check);
-        let old = old_model.type_of_expr(site.syntax);
+        let mut query =
+            owned::OwnedQuery::new_for_snapshot(&analysis, &new_session, site.file_id, &mut check)
+                .unwrap();
+
         let new = query.type_of_expr(site.syntax).unwrap();
-        assert_eq!(new_type(&new), old_type(&old));
+        trace::check("member.type", &(new_type(&new)));
         comparisons += 1;
         for _ in 0..2 {
-            let old_members = old_model.member_infos(&old);
             let new_members = query.selected_members(&new).unwrap().unwrap();
-            assert_eq!(
-                new_members
+            trace::check(
+                &format!("member case {case}"),
+                &(new_members
                     .iter()
-                    .map(|m| (
-                        m.key.clone(),
-                        new_type(&m.typ),
-                        m.id.clone(),
-                        m.file_id,
-                        m.is_method
-                    ))
-                    .collect::<Vec<_>>(),
-                old_members
-                    .iter()
-                    .map(|m| (
-                        m.key.clone(),
-                        old_type(&m.typ),
-                        m.id.clone(),
-                        m.file_id,
-                        m.is_method
-                    ))
-                    .collect::<Vec<_>>(),
-                "member case {case}"
+                    .map(|m| {
+                        (
+                            m.key.clone(),
+                            new_type(&m.typ),
+                            m.id.clone(),
+                            m.file_id,
+                            m.is_method,
+                        )
+                    })
+                    .collect::<Vec<_>>()),
             );
             comparisons += 1;
         }
-        assert_eq!(
-            rows(&new_session),
-            old_session
-                .coverage()
-                .into_iter()
-                .map(row)
-                .collect::<Vec<_>>()
-        );
-        assert_eq!(
-            *new_provider.events.lock().unwrap(),
-            *old_provider.events.lock().unwrap()
-        );
+        trace::check("member.coverage", &(rows(&new_session)));
+        trace::check("member.provider", &(*new_provider.events.lock().unwrap()));
     }
     assert_eq!(comparisons, 27);
 }
 
 #[test]
 fn static_and_dynamic_object_index_execute_the_real_query_successor() {
+    let _trace = trace::begin_candidate();
     let expressions = [
         "selected.z",
         "selected.a",
@@ -235,6 +209,7 @@ fn static_and_dynamic_object_index_execute_the_real_query_successor() {
 
 #[test]
 fn nested_member_results_keep_full_carrier_and_subsequent_lookup_order() {
+    let _trace = trace::begin_candidate();
     let (analysis, site, mut provider, parent) =
         member_case("return selected.child.z", "selected.child.z");
     let child = object(provider.named("selected"), 2);
@@ -271,47 +246,38 @@ fn nested_member_results_keep_full_carrier_and_subsequent_lookup_order() {
 
 #[test]
 fn same_context_foreign_token_member_lookup_is_unavailable_in_both_engines() {
+    let _trace = trace::begin_candidate();
     let (analysis, site, provider, _) = basic_case();
-    let old_provider = provider.isolated();
     let new_provider = provider.isolated();
-    let old_a = native::BindingSession::new(Arc::new(Native(old_provider.clone())));
-    let old_b = native::BindingSession::new(Arc::new(Native(old_provider.clone())));
-    let old = analysis
-        .semantic_model_with_context(site.file_id, old_a.clone())
-        .type_of_expr(site.syntax);
+
     let new_a = session(&new_provider);
     let new_b = session(&new_provider);
     let mut check = || Ok::<_, Stop>(());
-    let new = owned::OwnedQuery::new(&analysis, &new_a, site.file_id, &mut check)
+    let new = owned::OwnedQuery::new_for_snapshot(&analysis, &new_a, site.file_id, &mut check)
+        .unwrap()
         .type_of_expr(site.syntax)
         .unwrap();
-    assert_eq!(new_type(&new), old_type(&old));
-    let old_model = analysis.semantic_model_with_context(site.file_id, old_b.clone());
-    let mut query = owned::OwnedQuery::new(&analysis, &new_b, site.file_id, &mut check);
+    trace::check("member.type", &(new_type(&new)));
+
+    let mut query =
+        owned::OwnedQuery::new_for_snapshot(&analysis, &new_b, site.file_id, &mut check).unwrap();
     for _ in 0..2 {
-        assert!(old_model.member_infos(&old).is_empty());
-        assert!(query.selected_members(&new).unwrap().unwrap().is_empty());
+        let new_members_empty = query.selected_members(&new).unwrap().unwrap().is_empty();
+        trace::check("member.foreign.empty", &new_members_empty);
+        assert!(new_members_empty);
     }
-    assert_eq!(
-        rows(&new_a),
-        old_a.coverage().into_iter().map(row).collect::<Vec<_>>()
-    );
-    assert_eq!(
-        rows(&new_b),
-        old_b.coverage().into_iter().map(row).collect::<Vec<_>>()
-    );
+    trace::check("member.foreign.source_coverage", &(rows(&new_a)));
+    trace::check("member.foreign.target_coverage", &(rows(&new_b)));
     assert_eq!(
         rows(&new_b)[0].reason.as_deref(),
         Some("object_context_mismatch")
     );
-    assert_eq!(
-        *new_provider.events.lock().unwrap(),
-        *old_provider.events.lock().unwrap()
-    );
+    trace::check("member.provider", &(*new_provider.events.lock().unwrap()));
 }
 
 #[test]
 fn member_lookup_keeps_the_actual_16384_last_slot_producer() {
+    let _trace = trace::begin_candidate();
     for count in [16_380, 16_381, 16_382] {
         let names = (0..count)
             .map(|i| format!("prefix{i}"))

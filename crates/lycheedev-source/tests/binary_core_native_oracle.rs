@@ -1,80 +1,22 @@
+//! Candidate consumes full values from a completed fixed-engine A/B reference run.
 //! Full type/ledger comparisons against the real fixed contextual engine for
 //! the completed binary core. General logical projection remains deferred.
 #![cfg(feature = "emmy-prototype")]
 #[path = "../../lycheedev-emmy-adapter/tests/support/expression_execution_cases.rs"]
 mod support;
-use emmylua_code_analysis::{EmmyLuaAnalysis, LuaType, binding_context as native};
+#[path = "support/fixed_oracle_trace.rs"]
+mod trace;
+use emmylua_code_analysis::{EmmyLuaAnalysis, LuaType};
 use lycheedev_emmy_adapter::session as owned;
 use std::sync::Arc;
 use support::{Backend, Provider, Stop, absent, load, select};
 
-struct NativeProvider(Provider);
-fn to_owned(site: native::BindingSite) -> owned::BindingSite {
-    owned::BindingSite {
-        file_id: site.file_id,
-        syntax: site.syntax,
-    }
-}
-fn to_native(site: owned::BindingSite) -> native::BindingSite {
-    native::BindingSite {
-        file_id: site.file_id,
-        syntax: site.syntax,
-    }
-}
-impl native::BindingContext for NativeProvider {
-    fn identity(&self) -> &str {
-        "expression-execution-oracle"
-    }
-    fn resolve(&self, site: native::BindingSite) -> native::BindingDecision<native::BoundValue> {
-        match self.0.values.get(&to_owned(site)) {
-            Some(owned::BindingDecision::KnownAbsent { proof }) => {
-                native::BindingDecision::KnownAbsent {
-                    proof: proof.clone(),
-                }
-            }
-            Some(owned::BindingDecision::Unavailable { proof, reason }) => {
-                native::BindingDecision::Unavailable {
-                    proof: proof.clone(),
-                    reason: reason.clone(),
-                }
-            }
-            Some(owned::BindingDecision::Bound(value)) => {
-                let owned::SelectedValue::Expression(origin) = &value.value else {
-                    panic!("only real expression projection is in this oracle")
-                };
-                native::BindingDecision::Bound(native::BoundValue {
-                    identity: value.identity.clone(),
-                    proof: value.proof.clone(),
-                    value: native::SelectedValue::Expression(to_native(*origin)),
-                })
-            }
-            _ => native::BindingDecision::NotManaged,
-        }
-    }
-}
-fn row(row: native::BindingCoverage) -> owned::BindingCoverage {
-    owned::BindingCoverage {
-        site: to_owned(row.site),
-        operation: row.operation,
-        state: row.state,
-        proof: row.proof,
-        reason: row.reason,
-        parameter: row.parameter,
-        parameter_index: row.parameter_index,
-        argument: row.argument.map(to_owned),
-    }
-}
 fn compare(
     analysis: &EmmyLuaAnalysis,
     query: owned::BindingSite,
     provider: Provider,
     name_types: &[(&str, LuaType)],
 ) -> (LuaType, Vec<owned::BindingCoverage>) {
-    let native = native::BindingSession::new(Arc::new(NativeProvider(provider.clone())));
-    let old = analysis
-        .semantic_model_with_context(query.file_id, native.clone())
-        .type_of_expr(query.syntax);
-    let old_rows = native.coverage().into_iter().map(row).collect::<Vec<_>>();
     let session =
         owned::OwnedBindingSession::new_checked(Arc::new(provider.clone()), || Ok::<_, Stop>(()))
             .unwrap();
@@ -90,13 +32,13 @@ fn compare(
         .unwrap();
     let rows = session.coverage_checked(|| Ok::<_, Stop>(())).unwrap();
     let expression = &provider.names[&query];
-    assert_eq!(result.ty, old, "{expression} complete binary type");
-    assert_eq!(rows, old_rows, "{expression} complete ordered evidence");
+    trace::check(&format!("{expression}:full_type"), &(result.ty));
+    trace::check(&format!("{expression}:ordered_ledger"), &(rows));
     println!(
         "BINARY_CORE_NATIVE {}",
-        serde_json::json!({"expression":expression,"oldType":format!("{old:?}"),"ownedType":format!("{:?}",result.ty),"coverage":format!("{rows:?}")})
+        serde_json::json!({"expression":expression,"ownedType":format!("{:?}",result.ty),"coverage":format!("{rows:?}")})
     );
-    (old, rows)
+    (result.ty, rows)
 }
 const OPS: [&str; 19] = [
     "+", "-", "*", "/", "//", "%", "^", "..", "<", "<=", ">", ">=", "==", "~=", "&", "|", "~",
@@ -105,6 +47,7 @@ const OPS: [&str; 19] = [
 
 #[test]
 fn native_binary_literal_matrix_matches_full_types_without_raw_binary_fallback() {
+    let _trace = trace::begin_candidate();
     let mut count = 0;
     for op in OPS {
         for (left, right) in [
@@ -156,6 +99,7 @@ fn unavailable() -> owned::BindingDecision<owned::BoundValue> {
 
 #[test]
 fn native_selected_operand_matrix_preserves_unknown_nil_and_all_producer_fields() {
+    let _trace = trace::begin_candidate();
     let mut count = 0;
     for op in OPS {
         for variant in 0..4 {
@@ -212,6 +156,7 @@ fn native_selected_operand_matrix_preserves_unknown_nil_and_all_producer_fields(
 
 #[test]
 fn native_operator_overloads_keep_left_precedence_and_contextual_unknown_gate() {
+    let _trace = trace::begin_candidate();
     let source = "---@class Left\n---@operator add: string\nlocal Left={}\n---@class Right\n---@operator add: boolean\nlocal Right={}\n---@type Left\nlocal a\n---@type Right\nlocal b\nreturn a+b";
     let (analysis, query, provider) = load(source, "a+b");
     let model = analysis.semantic_model(query.file_id);
@@ -246,6 +191,7 @@ fn native_operator_overloads_keep_left_precedence_and_contextual_unknown_gate() 
 
 #[test]
 fn native_contextual_any_is_unknown_for_every_nonlogical_operator() {
+    let _trace = trace::begin_candidate();
     for op in OPS {
         let expression = format!("a {op} 1");
         let source = format!("---@type any\nlocal a\nreturn {expression}");

@@ -6,7 +6,7 @@
 
 未发布 Rust 候选版本为 **3.5.0**，发行配置渠道为 **beta**。包版本与 Go 3.2.3 行为基线分别固定；本次没有执行发布或 npm dist-tag 操作。
 
-最终验收现要求 **Emmy 上游源码零修改**：全部现有补丁须由自有 crate 与公开 API 的等价实现替代，完整保留 XML/Lua 增强。该迁移尚未完成，当前依赖仍含过渡补丁。
+最终验收现要求 **Emmy 上游源码零修改**：全部现有补丁须由自有 crate 与公开 API 的等价实现替代，完整保留 XML/Lua 增强。当前源码候选已选择未修改的上游树，真实上下文查询和诊断由自有 adapter 执行；编译、完整语义差分、全量 Retail 与性能仍待验收。
 
 ## 唯一目标与固定基线
 
@@ -31,7 +31,7 @@
 
 ## 当前代码与构建边界
 
-`crates/` 已有 cli、core、source、data、live、delivery、windows、emmy-adapter、binding-contracts 九个 crate。自有 adapter 集中引擎接入；低层 binding 合同由自有 crate 提供，通过兼容重导出供固定引擎共享。Source 默认 `emmy-prototype` 并直接链接 EmmyLua。原先缺失的修改版依赖已由公开上游固定 commit `08b0873962e83bb8307e9a81052e3f41578fbc78` 加可审补丁重新构建，对应源码、补丁和许可证清单在 [third_party/emmy](third_party/emmy/README.md)。这是独立标识的新重建版本，不冒称恢复旧私有字节。准备脚本物化被忽略的依赖目录，Windows CI 已能构建并测试封存候选。
+`crates/` 已有 cli、core、source、data、live、delivery、windows、emmy-adapter、binding-contracts 九个 crate。Source 使用自有 adapter 和中立合同，固定上游引擎不再反向依赖这些合同。默认 `emmy-prototype` 直接链接未修改的 EmmyLua commit `08b0873962e83bb8307e9a81052e3f41578fbc78`，身份与原版848个文件完全相符；[third_party/emmy](third_party/emmy/README.md) 记录源码、archive、许可证及空生产补丁清单。自有派生算法保留原MIT署名。准备脚本物化被忽略的依赖目录，历史patched版本仅作为独立固定测试参考保留，不进入生产依赖。源码身份已核不等于编译或行为验收。
 
 组件实际通过不等于完整 Source、默认 Live、最终安装包或性能已验收。完整 Retail 原生分析已暴露真实 API 生成错误，新修复须在精确候选上复跑；正式 runtime/input/backend 已接默认公共生命周期，精确候选验收仍未完成。精确通过/失败/未运行证据见 [handover.md](handover.md)，剩余模块见 [todo.md](todo.md)。独立可复建和最终打包门槛仍未完成。
 

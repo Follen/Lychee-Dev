@@ -300,6 +300,13 @@ def load_recipe():
         raise ValueError('emmy.identity_schema')
     if not isinstance(identity['patches'], list) or len(identity['patches']) > MAX_PATCHES:
         raise ValueError('emmy.patch_budget')
+    if identity.get('identity') == 'public-upstream-unmodified-v1':
+        if (identity['patches'] or identity['patchedTreeSHA256'] != base['treeSHA256']
+                or identity.get('files') != base['files'] or identity.get('bytes') != base['bytes']):
+            raise ValueError('emmy.unmodified_identity')
+        patch_dir = HERE / 'patches'
+        if patch_dir.is_symlink() or (patch_dir.exists() and (not patch_dir.is_dir() or any(patch_dir.iterdir()))):
+            raise ValueError('emmy.unknown_patch')
     patches, seen = [], set()
     for patch in identity['patches']:
         name = portable_path(patch['path'], 'emmy.patch_path')
