@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {inspectDiagnostic} from './diagnostics.mjs';
+import {inspectDiagnostic,inspectTerminal} from './diagnostics.mjs';
 const raw=Buffer.from('{"schema":"lycheedev.native-source-terminal-diagnostic.v1","workerPid":1328,"workerCreated":134365363311915552,"phase":"owner_terminal","error":{"code":"command.deadline"},"processMemory":{"identity":{"pid":1328,"created":134365363311915552}}}');
 const failed=Buffer.from('{"ok":false,"error":{"code":"external.io","details":{"workerPid":1328,"workerCreated":134365363311915552,"workerExitCode":5}}}');
 test('failure terminal preserves exact FILETIME and primary IPC error independently',()=>{
@@ -43,4 +43,54 @@ test('analysis phase memory is child-scoped and cannot claim owner aggregate att
  assert.equal(result.completionEvidence,false);
  const wrong=Buffer.from(child.toString().replace('"pid":1329','"pid":1328'));
  assert.equal(inspectDiagnostic(wrong,failed,0).identity,'invalid');
+});
+
+const terminalEvent=()=>({
+ schema:'lycheedev.native-source-analysis-terminal.v1',authentication:'same_executable_authenticated_owner_response',requestDeadlineUnixMs:1234,
+ terminal:{workerPid:1328,workerCreated:'134365363311915552',analysisPid:1329,analysisCreated:'134365363311915553',
+  childHelloAuthenticated:true,exit:{code:0xc0000017,observedBeforeTermination:true},exitWaitError:null,
+  jobMemory:{peakJobMemoryUsed:2144694272,peakProcessMemoryUsed:2144694272,jobMemoryLimit:2147483648,activeProcesses:0,limitFlags:0x2200},jobMemoryError:null,
+  terminateRequested:true,jobTerminateAccepted:true,rootKillAccepted:false,rootReaped:true,pipeWorkerJoined:true,jobEmpty:true,analysisRetired:true,handleCloseErrors:[]},
+ exitScope:'exact guarded child handle; cleanup exit does not establish original failure cause',
+ jobScope:'exact held analysis Job; historical commit peaks, not current aggregate or RSS',limitNotification:'unavailable_not_observed',
+});
+const terminalBytes=event=>Buffer.from(`${JSON.stringify(event)}\n`);
+test('authenticated held-child terminal preserves exact identities and unsigned exit without cause inference',()=>{
+ const event=terminalEvent(),result=inspectTerminal(terminalBytes(event));
+ assert.equal(result.state,'observed');assert.equal(result.identity,'authenticated_owner_held_child');
+ assert.equal(result.value.terminal.workerCreated,'134365363311915552');
+ assert.equal(result.value.terminal.analysisCreated,'134365363311915553');
+ assert.equal(result.value.terminal.exit.code,3221225495);
+ assert.equal(result.exitObservation,'before_supervisor_termination');
+ assert.equal(result.limitNotification,'unavailable_not_observed');assert.equal(result.completionEvidence,false);
+ assert.equal(result.cause,undefined);assert.equal(result.oom,undefined);
+ assert.equal(inspectTerminal(Buffer.alloc(0)).state,'unavailable');
+});
+test('cleanup exit and missing exit remain distinct from original terminal observation',()=>{
+ const event=terminalEvent();event.terminal.exit={code:7,observedBeforeTermination:false};
+ assert.equal(inspectTerminal(terminalBytes(event)).exitObservation,'after_supervisor_termination');
+ event.terminal.exit=null;event.terminal.jobMemory=null;
+ assert.equal(inspectTerminal(terminalBytes(event)).exitObservation,'unavailable');
+});
+test('terminal reader rejects partial duplicate unbound and incoherent records',()=>{
+ const bytes=terminalBytes(terminalEvent());
+ assert.equal(inspectTerminal(bytes.subarray(0,bytes.length-1)).state,'unavailable');
+ assert.equal(inspectTerminal(Buffer.concat([bytes,bytes])).state,'ambiguous');
+ for(const change of [
+  e=>{e.authentication='file_claim';},e=>{e.terminal.workerCreated='0';},
+  e=>{e.terminal.analysisPid=e.terminal.workerPid;},e=>{e.terminal.rootReaped=false;},
+  e=>{e.terminal.jobEmpty=false;},e=>{e.terminal.exit.code=-1;},
+  e=>{e.terminal.handleCloseErrors=['unconfirmed'];},e=>{e.limitNotification='memory_limit_hit';},
+ ]){const event=terminalEvent();change(event);assert.equal(inspectTerminal(terminalBytes(event)).state,'invalid');}
+});
+test('saved phase attribution requires exact owner child and request match from actual terminal stderr',()=>{
+ const phase={schema:'lycheedev.native-source-request-diagnostic.v1',workerPid:1328,workerCreated:'134365363311915552',analysisPid:1329,analysisCreated:'134365363311915553',requestDeadlineUnixMs:1234,phase:'query_execute_operations',processMemory:{identity:{pid:1329,created:'134365363311915553'}}};
+ const terminal=inspectTerminal(terminalBytes(terminalEvent())),stdout=Buffer.from('{"ok":false,"error":{"code":"external.io","message":"failed to fill whole buffer"}}');
+ const inspect=value=>inspectDiagnostic(Buffer.from(JSON.stringify(value)),stdout,0,terminal);
+ const matched=inspect(phase);assert.equal(matched.identity,'matched_authenticated_analysis_terminal');assert.equal(matched.memoryAttribution,'authenticated_owner_child_identity');assert.equal(matched.completionEvidence,false);
+ for(const change of [p=>{p.workerCreated='134365363311915554';},p=>{p.analysisCreated='134365363311915554';p.processMemory.identity.created=p.analysisCreated;},p=>{p.requestDeadlineUnixMs++;},p=>{p.analysisPid++;p.processMemory.identity.pid=p.analysisPid;}]){
+  const altered=structuredClone(phase);change(altered);assert.notEqual(inspect(altered).identity,'matched_authenticated_analysis_terminal');
+ }
+ assert.equal(inspectDiagnostic(Buffer.from(JSON.stringify(phase)),stdout,0).identity,'unmatched');
+ assert.equal(JSON.parse(stdout).error.code,'external.io');
 });

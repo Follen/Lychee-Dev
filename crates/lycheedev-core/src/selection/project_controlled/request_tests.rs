@@ -227,13 +227,45 @@ fn pin_request_independent_stop_during_real_sqlite_wait_matches_compatibility() 
         rusqlite::Connection::open(f.invocation.home.join("state/toolkit.sqlite")).unwrap();
     blocker.busy_timeout(Duration::ZERO).unwrap();
     blocker.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    // Observe the same SQLite statement outside the controlled path to retain
+    // the exact platform's real BUSY error in the expected complete cause tree.
+    let probe = rusqlite::Connection::open(f.invocation.home.join("state/toolkit.sqlite")).unwrap();
+    probe.busy_timeout(Duration::ZERO).unwrap();
+    let sqlite_error = probe
+        .pragma_query_value::<i32, _>(None, "user_version", |row| row.get(0))
+        .unwrap_err();
+    assert_eq!(
+        sqlite_error.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::DatabaseBusy)
+    );
+    probe.close().unwrap();
+    let stop = independent_stop();
+    let primary = independent_stop().with_details(json!({
+        "originalSupplemental": stop,
+        "sqliteError": ToolkitError::from(sqlite_error),
+    }));
+    let expected = json!({
+        "code": "records.query_resource_budget",
+        "message": "independent deadline\nindependent deadline",
+        "exit_code": 3,
+        "details": {
+            "schema": storage::FILE_CLEANUP_SCHEMA,
+            "primary": primary,
+            "cleanup": stop,
+            "control": null,
+        },
+    });
+    let original_deadline = f.invocation.control.deadline();
     let mut failures = Vec::new();
     for typed in [true, false] {
         let started = Instant::now();
-        let deadline = started + Duration::from_millis(80);
+        let busy_before = crate::metadata::sql_busy_observations();
         failures.push(
             resolve(&f.invocation, typed, || {
-                if Instant::now() >= deadline {
+                // An arbitrary elapsed cutoff can stop before a retry or after
+                // SQL has failed, which legitimately produces different details.
+                // Stop both entries immediately after their first actual BUSY.
+                if crate::metadata::sql_busy_observations() > busy_before {
                     Err(independent_stop())
                 } else {
                     Ok(())
@@ -241,13 +273,16 @@ fn pin_request_independent_stop_during_real_sqlite_wait_matches_compatibility() 
             })
             .unwrap_err(),
         );
+        assert_eq!(crate::metadata::sql_busy_observations() - busy_before, 1);
+        assert_eq!(json(failures.last().unwrap()), expected);
+        // This is only the fixture's existing completion bound, not the trigger.
         assert!(started.elapsed() < Duration::from_secs(3));
+        assert_eq!(f.invocation.control.deadline(), original_deadline);
         f.invocation.control.check().unwrap();
     }
     blocker.execute_batch("ROLLBACK").unwrap();
     blocker.close().unwrap();
     assert_eq!(json(&failures[0]), json(&failures[1]));
-    assert_eq!(failures[0].code, "records.query_resource_budget");
     let metadata = Metadata::open(&f.invocation.home, false).unwrap();
     assert!(metadata.list::<Value>("pin/", 10).unwrap().is_empty());
     metadata.close().unwrap();

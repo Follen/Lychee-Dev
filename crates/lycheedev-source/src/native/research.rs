@@ -3,7 +3,10 @@ include!("research_caller.rs");
 mod research_projection;
 #[path = "research_context_projection.rs"]
 mod research_context_projection;
+#[path = "research_use_index.rs"]
+mod research_use_index;
 use research_context_projection::{ContextFiles, FileProjectionRange};
+use research_use_index::ResearchUses;
 type RetainedResearchProjection<'a, R = Value> = research_projection::RetainedProjection<'a, PreparedSnapshot, crate::native_research::QueryRequest, Graph, crate::native_research::XmlResearch, R>;
 pub(crate) enum ResearchProjection<'a> {
     Incoming(RetainedResearchProjection<'a>),
@@ -300,13 +303,14 @@ impl PreparedSnapshot {
         let is_target=|decision:&Decision|matches!(decision,Decision::Bound(value) if target_values.contains(value));
         let facade=self.source_queries(&self.control)?;
         let query=graph.map(|graph|facade.with_execution(graph,QuerySelector::AllOccurrences,&self.control)).transpose()?;
-        let mut uses=BTreeMap::<(&str,u32,u32),Vec<&UseFact>>::new();
+        let mut uses=ResearchUses::default();
         let mut selected_files=std::collections::BTreeSet::new();
         if let Some(graph)=graph{for fact in &graph.uses{if fact.host_return_slot.is_none(){
             self.control.check()?;
             if is_target(&fact.decision){selected_files.insert(fact.site.file.as_str());}
-            uses.entry((fact.site.file.as_str(),fact.site.start,fact.site.end)).or_default().push(fact);
+            uses.push(fact);
         }}}
+        uses.finish(||self.control.check())?;
         let mut relations=Vec::new();let mut unresolved=0usize;
         for file in 0..self.inputs.corpus.files.len() {
             self.control.check()?;
@@ -345,7 +349,7 @@ impl PreparedSnapshot {
             let candidate_incoming=reference.declaration.is_none()&&spelling==symbol.name;
             let outgoing=direction!="incoming"&&origins.within(self,symbol,&site)?;
             let mut observations=Vec::new();
-            let observed=uses.get(&(site.file.as_str(),site.start,site.end));
+            let observed=uses.get(&site);
             let mut selected_incoming=false;let mut uncertain_incoming=false;
             if let (Some(query),Some(facts))=(query.as_ref(),observed) {
                 for fact in facts {
@@ -395,7 +399,8 @@ impl PreparedSnapshot {
             }
         }
         let control=graph.and_then(|graph|graph.native_invocations.as_ref()).map(|facts|&facts.control);
-        Ok(json!({"relations":relations,"analysis":{"state":if unresolved==0&&control.is_some_and(|control|control.complete){"complete"}else{"partial"},"engine":"native_common_facts","lexicalDeclarations":self.syntax.declarations.len(),"sourceReferences":self.syntax.reference_count,"sourceCalls":self.syntax.call_count,"unresolvedRelations":unresolved,"graphControl":control,"sourceFiles":self.inputs.corpus.files.len(),"inputIdentity":self.inputs.identity_sha256(),"sourceExecution":false}}))
+        let analysis=json!({"state":if unresolved==0&&control.is_some_and(|control|control.complete){"complete"}else{"partial"},"engine":"native_common_facts","lexicalDeclarations":self.syntax.declarations.len(),"sourceReferences":self.syntax.reference_count,"sourceCalls":self.syntax.call_count,"unresolvedRelations":unresolved,"graphControl":control,"sourceFiles":self.inputs.corpus.files.len(),"inputIdentity":self.inputs.identity_sha256(),"sourceExecution":false});
+        Ok(research_use_index::assemble_projection(relations,analysis))
     }
 
     // The graph and selected symbol are immutable for this projection. Resolve

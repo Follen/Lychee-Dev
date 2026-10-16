@@ -821,6 +821,17 @@ fn metadata_check(
     check()
 }
 
+// Test-only, thread-local observations of this actual SQL contention branch.
+// Callers compare entry/exit counts; no callback, reset or cross-test hook exists.
+#[cfg(test)]
+std::thread_local! {
+    static SQL_BUSY_OBSERVATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+#[cfg(test)]
+pub(crate) fn sql_busy_observations() -> u64 {
+    SQL_BUSY_OBSERVATIONS.with(std::cell::Cell::get)
+}
+
 fn checked_sql_with_check<T>(
     control: &crate::control::OperationControl,
     until: std::time::Instant,
@@ -845,6 +856,8 @@ fn checked_sql_with_check<T>(
                     return Err(error);
                 }
                 on_busy();
+                #[cfg(test)]
+                SQL_BUSY_OBSERVATIONS.with(|count| count.set(count.get() + 1));
                 metadata_check_after_sql_error(control, check, &error)?;
                 std::thread::sleep(
                     std::time::Duration::from_millis(5).min(

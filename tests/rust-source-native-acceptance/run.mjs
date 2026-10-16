@@ -11,7 +11,7 @@ import {beginMemoryPhase, endMemoryPhase, nativeMemoryPhase} from '../../tools/r
 import {assertEnvelope, assertAnchor, sha256} from '../rust-source-full-corpus/assertions.mjs';
 import {jsonFile, loadCurrentWorkflow} from '../rust-skill-usage/assertions.mjs';
 import {acceptanceCliArgs,createSessionPeer,parsePeerJson} from './session-ipc.mjs';
-import {snapshotDiagnostics,captureDiagnostics} from './diagnostics.mjs';
+import {snapshotDiagnostics,captureDiagnostics,inspectTerminal} from './diagnostics.mjs';
 import {assertApiType, assertContextSnippets, assertExecutedContext, assertFullNative, assertMaterial, assertNestedControllerRetired, assertPrerequisite, assertReuse, fixturePin, groupBudget, rebuildXmlInventory} from './assertions.mjs';
 
 const [binaryArg, releaseArg, scratchArg, evidenceArg, group, ...extra] = process.argv.slice(2);
@@ -58,7 +58,10 @@ function command(caseId, executable, args, {timeout = 210000, phase = 'local', i
     stdoutFiles, stderrFiles, stdoutSHA256: sha256(stdout), stderrSHA256: sha256(stderr), stdoutBytes: stdout.length, stderrBytes: stderr.length};
   // Save both latest request and owner terminal records before any exit/assertion
   // check, including EOF, deadline and process failures. Identity is explicit.
-  if(captureNative) observation.nativeDiagnostics=captureDiagnostics({home,out,prefix,stdout,before:beforeDiagnostics});
+  if(captureNative){
+    observation.nativeTerminal=inspectTerminal(stderr);
+    observation.nativeDiagnostics=captureDiagnostics({home,out,prefix,stdout,stderr,before:beforeDiagnostics});
+  }
   if (input !== undefined) observation.inputSHA256 = sha256(Buffer.from(input));
   report.commands.push(observation); if (run.error || run.signal || outputBytes > 384 << 20) fatal = true; save();
   assert(!run.error && run.signal === null, `owned command failed: ${caseId}: ${run.error?.message ?? run.signal}`);

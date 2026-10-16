@@ -42,6 +42,59 @@ struct WorkerMeta {
 struct Exchange {
     pipes: (ChildStdin, ChildStdout),
     result: Result<(WorkerMeta, Option<Response>)>,
+    authenticated: bool,
+}
+
+/// Read-only terminal facts from the supervisor's existing process/Job handles.
+/// A cleanup exit is explicitly distinct from an exit seen before termination.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct AnalysisTerminal {
+    worker_pid: u32,
+    worker_created: u64,
+    analysis_pid: Option<u32>,
+    analysis_created: Option<u64>,
+    child_hello_authenticated: bool,
+    exit: Option<ChildExit>,
+    exit_wait_error: Option<String>,
+    job_memory: Option<JobObservation>,
+    job_memory_error: Option<String>,
+    terminate_requested: bool,
+    job_terminate_accepted: bool,
+    root_kill_accepted: bool,
+    root_reaped: bool,
+    pipe_worker_joined: bool,
+    job_empty: bool,
+    analysis_retired: bool,
+    handle_close_errors: Vec<String>,
+}
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ChildExit {
+    code: Option<u32>,
+    observed_before_termination: bool,
+}
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct JobObservation {
+    peak_job_memory_used: u64,
+    peak_process_memory_used: u64,
+    job_memory_limit: u64,
+    active_processes: u32,
+    limit_flags: u32,
+}
+impl AnalysisTerminal {
+    pub(super) fn event(&self, hello: &Hello, request_deadline_unix_ms: u64) -> Option<Value> {
+        if self.worker_pid != hello.pid || self.worker_created != hello.created {
+            return None;
+        }
+        Some(json!({"schema":"lycheedev.native-source-analysis-terminal.v1",
+            "authentication":"same_executable_authenticated_owner_response",
+            "requestDeadlineUnixMs":request_deadline_unix_ms,"terminal":self,
+            "exitScope":"exact guarded child handle; cleanup exit does not establish original failure cause",
+            "jobScope":"exact held analysis Job; historical commit peaks, not current aggregate or RSS",
+            "limitNotification":"unavailable_not_observed"}))
+    }
 }
 
 pub(super) struct AnalysisProcess {
@@ -61,6 +114,10 @@ pub(super) struct AnalysisProcess {
     job_terminate_accepted: bool,
     root_kill_accepted: bool,
     close_errors: Vec<String>,
+    exit: Option<ChildExit>,
+    exit_wait_error: Option<String>,
+    job_observation: Option<JobObservation>,
+    job_memory_error: Option<String>,
 }
 impl AnalysisProcess {
     pub(super) fn key(&self) -> Option<&str> {
@@ -76,15 +133,9 @@ impl AnalysisProcess {
         if self.retiring {
             return Ok(false);
         }
-        match self
-            .child
-            .as_mut()
-            .ok_or_else(|| fault("Native analysis process missing"))?
-            .try_wait()
-        {
-            Ok(None) => Ok(true),
-            Ok(Some(_)) => {
-                self.reaped = true;
+        match self.poll_exit() {
+            Ok(false) => Ok(true),
+            Ok(true) => {
                 self.retiring = true;
                 self.cached = None;
                 Ok(false)
@@ -92,8 +143,34 @@ impl AnalysisProcess {
             Err(error) => {
                 self.retiring = true;
                 self.cached = None;
-                Err(error.into())
+                Err(error)
             }
+        }
+    }
+    fn poll_exit(&mut self) -> Result<bool> {
+        if self.reaped { return Ok(true); }
+        let waited = self.child.as_mut().ok_or_else(|| fault("Native analysis process missing"))?.try_wait();
+        match waited {
+            Ok(Some(status)) => {
+                self.exit = Some(ChildExit { code: status.code().map(|code| code as u32), observed_before_termination: !self.terminate_requested });
+                self.reaped = true;
+                Ok(true)
+            }
+            Ok(None) => Ok(false),
+            Err(error) => { self.exit_wait_error = Some(error.to_string()); Err(error.into()) }
+        }
+    }
+    fn terminal(&self, complete: bool) -> AnalysisTerminal {
+        AnalysisTerminal {
+            worker_pid:self.owner.pid, worker_created:self.owner.created,
+            analysis_pid:self.identity.as_ref().map(|identity|identity.pid),
+            analysis_created:self.identity.as_ref().map(|identity|identity.created),
+            child_hello_authenticated:self.initialized, exit:self.exit.clone(),
+            exit_wait_error:self.exit_wait_error.clone(), job_memory:self.job_observation.clone(),
+            job_memory_error:self.job_memory_error.clone(), terminate_requested:self.terminate_requested,
+            job_terminate_accepted:self.job_terminate_accepted, root_kill_accepted:self.root_kill_accepted,
+            root_reaped:self.reaped, pipe_worker_joined:self.exchange.is_none(), job_empty:self.job_empty,
+            analysis_retired:complete, handle_close_errors:self.close_errors.clone(),
         }
     }
     #[cfg(test)]
@@ -174,6 +251,7 @@ impl AnalysisProcess {
                                 job_terminate_accepted: false,
                                 root_kill_accepted: false,
                                 close_errors: startup_close_errors,
+                                exit: None, exit_wait_error: None, job_observation: None, job_memory_error: None,
                             };
                             return (Some(process), Err(error));
                         }
@@ -199,6 +277,7 @@ impl AnalysisProcess {
             job_terminate_accepted: false,
             root_kill_accepted: false,
             close_errors: startup_close_errors,
+            exit: None, exit_wait_error: None, job_observation: None, job_memory_error: None,
         };
         let result = started.and_then(|()| {
             process.identity = Some(
@@ -244,6 +323,7 @@ impl AnalysisProcess {
                     .unwrap_or_else(|error| error.into_inner())
                     .take()
                     .expect("single owned analysis transfer");
+                let mut authenticated = initialized;
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     if !initialized {
                         let hello: WorkerHello = read_frame(&mut output, 4096)?;
@@ -254,6 +334,7 @@ impl AnalysisProcess {
                         {
                             return Err(fault("Native analysis child identity differs"));
                         }
+                        authenticated = true;
                     }
                     write_frame(
                         &mut input,
@@ -282,6 +363,7 @@ impl AnalysisProcess {
                 Exchange {
                     pipes: (input, output),
                     result,
+                    authenticated,
                 }
             });
         match handle {
@@ -306,7 +388,7 @@ impl AnalysisProcess {
         Some(match self.exchange.take().unwrap().join() {
             Ok(exchange) => {
                 self.pipes = Some(exchange.pipes);
-                self.initialized = true;
+                self.initialized = exchange.authenticated;
                 exchange.result
             }
             Err(_) => {
@@ -333,8 +415,16 @@ impl AnalysisProcess {
     fn retire(&mut self, deadline: Instant) -> Result<()> {
         self.retiring = true;
         self.cached = None;
-        self.close_pipes();
         let mut errors = Vec::new();
+        // EOF can win the race with the supervision loop. Observe the existing
+        // child before requesting cleanup so an original status is not lost or
+        // retrospectively mislabeled as a termination-induced status.
+        if !self.reaped && self.child.is_some() {
+            // A failed optional early read is retained in terminal evidence;
+            // the existing retirement loop still owns public cleanup errors.
+            let _ = self.poll_exit();
+        }
+        self.close_pipes();
         if !self.job_terminate_accepted
             && let Some(job) = &self.job
         {
@@ -346,13 +436,13 @@ impl AnalysisProcess {
         }
         if !self.job_terminate_accepted
             && !self.root_kill_accepted
-            && let Some(child) = &mut self.child
+            && self.child.is_some()
         {
-            match child.try_wait() {
-                Ok(Some(_)) => self.reaped = true,
+            match self.poll_exit() {
+                Ok(true) => {},
                 _ => {
                     self.terminate_requested = true;
-                    match child.kill() {
+                    match self.child.as_mut().unwrap().kill() {
                         Ok(()) => self.root_kill_accepted = true,
                         Err(error) => errors.push(error.to_string()),
                     }
@@ -361,14 +451,13 @@ impl AnalysisProcess {
         }
         loop {
             if !self.reaped
-                && let Some(child) = &mut self.child
+                && self.child.is_some()
             {
-                match child.try_wait() {
-                    Ok(Some(_)) => self.reaped = true,
-                    Ok(None) => {}
+                match self.poll_exit() {
+                    Ok(_) => {},
                     Err(error) => {
-                        if !errors.contains(&error.to_string()) {
-                            errors.push(error.to_string());
+                        if !errors.contains(&error.message) {
+                            errors.push(error.message);
                         }
                     }
                 }
@@ -379,8 +468,17 @@ impl AnalysisProcess {
             if !self.job_empty {
                 match &self.job {
                     Some(job) => match job.memory_accounting() {
-                        Ok(memory) => self.job_empty = memory.active_processes == 0,
+                        Ok(memory) => {
+                            self.job_empty = memory.active_processes == 0;
+                            self.job_observation = Some(JobObservation {
+                                peak_job_memory_used:memory.peak_job_memory_used,
+                                peak_process_memory_used:memory.peak_process_memory_used,
+                                job_memory_limit:memory.job_memory_limit, active_processes:memory.active_processes,
+                                limit_flags:memory.limit_flags,
+                            });
+                        },
                         Err(error) => {
+                            self.job_memory_error = Some(error.clone());
                             if !errors.contains(&error) {
                                 errors.push(error);
                             }
@@ -426,16 +524,21 @@ impl AnalysisProcess {
 }
 
 pub(super) fn retire_slot(slot: &mut Option<AnalysisProcess>, deadline: Instant) -> Result<()> {
+    retire_slot_observed(slot, deadline).0
+}
+fn retire_slot_observed(slot: &mut Option<AnalysisProcess>, deadline: Instant) -> (Result<()>, Option<AnalysisTerminal>) {
+    let mut terminal = None;
     if let Some(process) = slot {
         let result = process.retire(deadline);
         // Retirement is necessary work, but writing a diagnostic is not.
         // Never insert synchronous disk operations before the response or next
         // admission. Pending custody and its exact facts stay in this slot and
         // the existing error; confirmed success releases the checked handles.
-        result?;
+        terminal = Some(process.terminal(result.is_ok()));
+        if result.is_err() { return (result, terminal); }
     }
     *slot = None;
-    Ok(())
+    (Ok(()), terminal)
 }
 pub(super) fn refresh(slot: &mut Option<AnalysisProcess>, deadline: Instant) -> Result<()> {
     if let Some(process) = slot
@@ -473,7 +576,9 @@ pub(super) fn query(
     owner: &ProcessIdentity,
     control: &OperationControl,
     retirement_deadline: Instant,
+    terminal: &mut Option<AnalysisTerminal>,
 ) -> Result<Option<Response>> {
+    *terminal = None;
     let result = (|| {
         control.check()?;
         if slot.as_ref().is_some_and(AnalysisProcess::retiring) {
@@ -515,8 +620,7 @@ pub(super) fn query(
                 }
                 return Ok(response);
             }
-            if process.child.as_mut().unwrap().try_wait()?.is_some() {
-                process.reaped = true;
+            if process.poll_exit()? {
                 return Err(fault("Native analysis child exited before its response"));
             }
             std::thread::sleep(
@@ -530,14 +634,16 @@ pub(super) fn query(
     match result {
         Ok(response) => {
             if slot.as_ref().is_some_and(|process| process.key().is_none()) {
-                retire_slot(slot, retirement_deadline)?;
+                let (retired, observed) = retire_slot_observed(slot, retirement_deadline);
+                if let Err(error) = retired { *terminal = observed; return Err(error); }
             }
             Ok(response)
         }
-        Err(error) => Err(with_retirement(
-            error,
-            retire_slot(slot, retirement_deadline),
-        )),
+        Err(error) => {
+            let (retired, observed) = retire_slot_observed(slot, retirement_deadline);
+            *terminal = observed;
+            Err(with_retirement(error, retired))
+        },
     }
 }
 
@@ -674,10 +780,12 @@ pub(super) fn worker(args: &[String]) -> Result<()> {
             Ok(value) => Response {
                 value: Some(value),
                 error: None,
+                terminal: None,
             },
             Err(error) => Response {
                 value: None,
                 error: Some(error),
+                terminal: None,
             },
         };
         write_frame(

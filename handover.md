@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 20:19 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`7a886a8a9cda5954e59160c5a35bef7a0ad23cd2`；当前本机已完成913优化产物的正常4036/profile及retained复验；旧优化产品e843结果保持原身份，runner身份独立认证。实现进行中，尚未完成全量验收。
+更新：2026-10-16 20:33 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`0e1d7e5bb4e9caea232e959a1be06b8bd2de93a0`；当前本机已完成913优化产物的正常4036/profile及retained复验；旧优化产品e843结果保持原身份，runner身份独立认证。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -56,7 +56,11 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 - **实际并行冷链候选已实现，待验证**：最多4个scoped纯Lua解析worker、8个有序槽，仅≤64KiB普通UTF8 Lua可提前计算；小XML/TOC只持有原文、按原主线程完整流程处理。cache读取/序列化/发布与所有公开错误按序，批尾drain后才启动下一Git进程；真实Git Vec capacity、原文、结果/scratch及worker栈共同受原256MiB retained余量准入。超额或未支持输入走原完整串行路径，无新增公共拒绝；第三方tree-sitter C分配不是Rust账目/RSS硬上限。26新Rust及真实默认2MiB worker栈的混合输入/跨4097对象batch回归尚未执行。并行profile只累计已消费worker任务时长，重叠不能相加；完整4036等价、取消与新20对性能仍待测。
 
 - **913优化复验已有终态**：[4036 v9完整字段/顺序0差](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6223829481)，单次等价cold index Rust18.796s/Go9.653s；其中Facts发布5.494s、原文发布5.242s、解析5.572s，总phase18.57s。相较e843单次45.104s是跨版诊断，不能当20对统计或≤0.30验收。[retained仍失败](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6223875817)：首请求11.95s EOF/exit5，最后query_execute_operations，private2142556160/kernel peak2144694272；无child退出/limit通知，不能断言OOM，外层已回收。紧凑表示没有闭合实际retained缺口，继续定位真实驻留与认证退出事实。
-- **typed组合复审发现并修正继承的字段解析与首错差异**：固定Go323 StreamDataRows先验证filter字段，再投影字段；原Rust和新增旧顺序测试相反，且投影字段错误地trim了Go保留的空格，UInt过滤错误接受Go ParseUint拒绝的正号，尾逗号空字段错误多拼了冒号。当前生产按Go原样split与顺序修复，保原真实table准入阶段，新增双故障无yield/无capture与无符号正号过滤零行manifest回归，合法filter/坏projection、原空格和超额projection先后也覆盖。语法/静态检查通过，Rust尚未运行；其余四边界仍在独立组合复审，不冒称最终第一阶段已完成。
+- **typed组合复审发现并修正继承的字段解析与首错差异**：固定Go323 StreamDataRows先验证filter字段，再投影字段；原Rust和新增旧顺序测试相反，且投影字段错误地trim了Go保留的空格，UInt过滤错误接受Go ParseUint拒绝的正号，尾逗号空字段错误多拼了冒号。当前生产按Go原样split与顺序修复，保原真实table准入阶段，新增双故障无yield/无capture与无符号正号过滤零行manifest回归，合法filter/坏projection、原空格和超额projection先后也覆盖。语法/静态检查通过，Rust尚未运行；四边界独立组合复审已完成，修订静态复核未见确认剩余问题；新增Rust仍待跑，不冒称最终第一阶段已完成。
+
+- **retained进一步去副本与真实退出诊断已实现，尚未实测**：研究关系查询将每site BTreeMap/Vec改为稳定排序的单平面借用索引，保同site观察顺序；完整relations/analysis JSON直接move组装，保原wire字节。现有guarded Child/Job句柄记录退出码、终止前/后观察及历史commit峰值，私有认证Response由调用CLI在diagnostic stderr呈现；不改公开结果/error、不加owner同步落盘、不猜limit触发。读侧仅对精确owner/child创建身份与原请求deadline匹配的完整行关联旧phase，缺失仍unavailable。新增7Rust未跑；75Node读侧/runner/IPC实际通过，收益和retained失败是否闭合待新优化产物。
+
+- **7a Core typed入口首轮17通过1失败，阶段fixture已修待复验**：[原完整失败](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6224048336)来自两条入口各用80ms墙钟，在retry前或真实SQLite BUSY后停止，合法错误树不同。当前只新增cfg(test)线程局部BUSY计数，以首次真实BUSY触发同一独立stop，逐层核完整原SQLite/补充原因/cleanup及原control deadline不变；不改生产错误选择、不扁平化断言，原失败保留。
 
 ## 4. 进入最终四阶段前的有限收口
 

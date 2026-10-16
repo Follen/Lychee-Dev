@@ -31,6 +31,76 @@ fn clean_retirement_preserves_exact_primary_error_and_details() {
     );
 }
 #[test]
+fn private_terminal_is_optional_and_does_not_change_public_error_bytes() {
+    let original = ToolkitError::new("external.io", "failed to fill whole buffer", 5);
+    let bytes = serde_json::to_vec(&original).unwrap();
+    let previous = json!({"value":null,"error":original});
+    let old: Response = serde_json::from_value(previous.clone()).unwrap();
+    assert!(old.terminal.is_none());
+    assert_eq!(serde_json::to_value(&old).unwrap(), previous);
+    let response = Response { value:None, error:Some(original), terminal:Some(terminal_process().terminal(true)) };
+    let mut framed = Vec::new();
+    write_frame(&mut framed, &response, RESPONSE_BYTES).unwrap();
+    let decoded: Response = read_frame(&mut std::io::Cursor::new(framed), RESPONSE_BYTES).unwrap();
+    assert!(decoded.terminal.is_some());
+    assert_eq!(serde_json::to_vec(decoded.error.as_ref().unwrap()).unwrap(), bytes);
+}
+
+#[test]
+fn terminal_event_requires_exact_authenticated_owner_and_keeps_unknown_exit() {
+    let process = terminal_process();
+    let terminal = process.terminal(true);
+    let mut hello = Hello { wire:WIRE.into(), executable:"same-image".into(), pid:41, created:6 };
+    let event = terminal.event(&hello, 1234).unwrap();
+    assert_eq!(event["terminal"]["analysisPid"], 42);
+    assert_eq!(event["terminal"]["analysisCreated"], 7);
+    assert!(event["terminal"]["exit"].is_null());
+    assert!(event["terminal"]["jobMemory"].is_null());
+    assert_eq!(event["limitNotification"], "unavailable_not_observed");
+    assert_eq!(event["requestDeadlineUnixMs"], 1234);
+    hello.created += 1;
+    assert!(terminal.event(&hello, 1234).is_none());
+    hello.created = 6; hello.pid += 1;
+    assert!(terminal.event(&hello, 1234).is_none());
+}
+
+#[test]
+fn natural_guarded_child_exit_is_retained_before_cleanup_and_handle_close() {
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command.arg("--list").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let (child, job) = guarded_spawn::spawn_suspended_guarded_until(command, 2 << 30, deadline, deadline, || false).unwrap();
+    let mut process = terminal_process();
+    process.identity = Some(guarded_spawn::child_identity(&child).unwrap());
+    process.child = Some(child); process.job = Some(job); process.reaped = false;
+    process.job_empty = false; process.terminate_requested = false; process.job_terminate_accepted = false;
+    while !process.poll_exit().unwrap() {
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(POLL);
+    }
+    assert_eq!(process.exit.as_ref().unwrap().code, Some(0));
+    assert!(process.exit.as_ref().unwrap().observed_before_termination);
+    let mut slot = Some(process);
+    let (retired, terminal) = retire_slot_observed(&mut slot, deadline);
+    retired.unwrap(); assert!(slot.is_none());
+    let terminal = terminal.unwrap();
+    assert_eq!(terminal.exit.as_ref().unwrap().code, Some(0));
+    assert!(terminal.exit.unwrap().observed_before_termination);
+    assert_eq!(terminal.job_memory.as_ref().unwrap().job_memory_limit, 2u64 << 30);
+    assert_eq!(terminal.job_memory.unwrap().active_processes, 0);
+    assert!(terminal.root_reaped && terminal.job_empty && terminal.analysis_retired);
+}
+
+#[test]
+fn cleanup_observation_cannot_be_reclassified_as_original_exit() {
+    let mut process = terminal_process();
+    process.exit = Some(ChildExit { code:Some(7), observed_before_termination:false });
+    let mut slot = Some(process);
+    let (retired, terminal) = retire_slot_observed(&mut slot, Instant::now());
+    retired.unwrap();
+    assert!(!terminal.unwrap().exit.unwrap().observed_before_termination);
+}
+#[test]
 fn pending_retirement_keeps_primary_and_actual_cleanup_facts() {
     let original = ToolkitError::new("command.cancelled", "original", 7)
         .with_details(json!({"location":"original-byte"}));
@@ -221,6 +291,7 @@ fn terminal_process() -> AnalysisProcess {
         job_terminate_accepted: true,
         root_kill_accepted: false,
         close_errors: Vec::new(),
+        exit: None, exit_wait_error: None, job_observation: None, job_memory_error: None,
     }
 
 }

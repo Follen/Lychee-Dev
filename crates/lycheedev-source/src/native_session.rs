@@ -239,6 +239,10 @@ struct CachedQuery {
 struct Response {
     value: Option<Value>,
     error: Option<ToolkitError>,
+    // Internal transport evidence only. Never inserted into the public result
+    // or error; the authenticated CLI may emit it on its diagnostic stderr.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    terminal: Option<analysis_process::AnalysisTerminal>,
 }
 struct Identity {
     path: PathBuf,
@@ -517,6 +521,14 @@ fn exchange(inv: &Invocation, current: &Identity, request: &Request) -> Result<O
             return Err(peer_failure(error, &hello, Some(observed), retired));
         }
     };
+    if std::env::var("LYCHEEDEV_SOURCE_PHASE_PROFILE").as_deref() == Ok("1") {
+        if let Some(event) = response.terminal.as_ref().and_then(|terminal|terminal.event(&hello,request.deadline_unix_ms)) {
+            // The IPC owner performs no filesystem or stderr writes. This is
+            // the existing diagnostic-enabled calling CLI, after receiving the
+            // authenticated response and before returning its original error.
+            let _ = writeln!(std::io::stderr().lock(), "{event}");
+        }
+    }
     if let Some(error) = response.error {
         return Err(error);
     }
@@ -934,6 +946,7 @@ fn serve_borrowed(inv: &Invocation, current: &Identity, lifetime: &SessionLifeti
                                 status
                             }),
                             error: None,
+                            terminal: None,
                         },
                         RESPONSE_BYTES,
                     )?;
@@ -942,7 +955,7 @@ fn serve_borrowed(inv: &Invocation, current: &Identity, lifetime: &SessionLifeti
                         drop(raw);
                         let retired = analysis_process::retire_slot(&mut analysis, retirement_deadline);
                         if let Err(error) = retired {
-                            write_frame(&mut stream, &Response { value:None, error:Some(error) }, RESPONSE_BYTES)?;
+                            write_frame(&mut stream, &Response { value:None, error:Some(error), terminal:None }, RESPONSE_BYTES)?;
                             idle_deadline = lifetime.idle_deadline(Instant::now());
                             continue;
                         }
@@ -951,6 +964,7 @@ fn serve_borrowed(inv: &Invocation, current: &Identity, lifetime: &SessionLifeti
                             &Response {
                                 value: Some(json!({"state":"closed","backend":"native"})),
                                 error: None,
+                                terminal: None,
                             },
                             RESPONSE_BYTES,
                         )?;
@@ -982,9 +996,11 @@ fn serve_borrowed(inv: &Invocation, current: &Identity, lifetime: &SessionLifeti
                             }
                         });
                         let control = owner_control.child(processing_deadline, cancel);
+                        let mut terminal = None;
                         let result = analysis_process::query(
                             &mut analysis, raw, request.work.is_none().then_some(request.cached.as_ref()).flatten().map(|value|value.key.as_str()),
                             current, &inv.home, own.identity(), &control, retirement_deadline,
+                            &mut terminal,
                         );
                         observer_stop.store(true, Ordering::Release);
                         read_cancel.store(true, Ordering::Release);
@@ -999,6 +1015,7 @@ fn serve_borrowed(inv: &Invocation, current: &Identity, lifetime: &SessionLifeti
                             Err(error) => Response {
                                 value: None,
                                 error: Some(error),
+                                terminal,
                             },
                         };
                         // Reply on the original transport budget, not the expired or
@@ -1339,7 +1356,7 @@ mod tests {
         // new owner has no prepared analysis until the first query is sent.
         let mut wire = Vec::new();
         write_frame(&mut wire, &Response {
-            value: Some(session_status(None, 42)), error: None,
+            value: Some(session_status(None, 42)), error: None, terminal:None,
         }, RESPONSE_BYTES).unwrap();
         let response: Response = read_frame(&mut std::io::Cursor::new(wire), RESPONSE_BYTES).unwrap();
         let status = response.value.unwrap();
