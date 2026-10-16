@@ -618,6 +618,10 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node tools/rust-cargo.mjs --owner ci-adaptive-query-memory --one-shot -- test --locked --offline -p lycheedev-data --lib resource::adaptive:: -j 1
+      - name: Run opportunistic worker shared-budget contracts
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-data-optional-workers --one-shot -- test --locked --offline -p lycheedev-data --lib resource::opportunistic:: -j 1
       - name: Run Windows available-memory query contracts
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |

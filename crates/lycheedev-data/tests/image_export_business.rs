@@ -172,3 +172,61 @@ fn prepare_image_export_public_fixture() {
         "malformedFileDataID":507,"unsupportedFileDataID":508
     })).unwrap()).unwrap();
 }
+
+#[test]
+fn large_image_export_uses_default_verified_decode_and_preserves_every_pixel() {
+    // Larger than the CPU threshold, clipped in both BC dimensions. These go
+    // through actual default CASC/VerifiedBlob/image/export consumers, including
+    // the shared safety ledger and all three durable capture identities.
+    let (width, height) = (1031u32, 519u32);
+    let count = width as usize * height as usize;
+    let mut inputs = Vec::new();
+    for (index, (name, encoding, alpha, mode)) in [
+        ("LargePalette", 1u8, 1u8, 0u8),
+        ("LargeBGRA", 3, 8, 0),
+        ("LargeBCOne", 2, 0, 0),
+        ("LargeBCTwo", 2, 4, 1),
+        ("LargeBCThree", 2, 8, 7),
+    ].into_iter().enumerate() {
+        let bytes = match encoding {
+            1 => count + count.div_ceil(8),
+            3 => count * 4,
+            _ => (width as usize).div_ceil(4) * (height as usize).div_ceil(4) * if mode == 0 { 8 } else { 16 },
+        };
+        let payload: Vec<_> = (0..bytes).map(|i| ((i * 173 + i / 7) & 255) as u8).collect();
+        let mut raw = blp(encoding, alpha, mode, width, height, &payload);
+        if encoding == 1 {
+            for (index, color) in raw[148..1172].chunks_exact_mut(4).enumerate() {
+                color.copy_from_slice(&[index as u8, (index * 3) as u8, (index * 7) as u8, 99]);
+            }
+        }
+        let mut item = table(name, 701 + index as u32, &[("ID", "uint")], &[vec![Cell::U(7)]]);
+        item.raw = raw;
+        inputs.push(item);
+    }
+    let fixture = Fixture::new(&inputs);
+    for item in &inputs {
+        // The public pure decoder intentionally stays serial: an independent
+        // ordering oracle for the default budgeted worker implementation.
+        let expected = texture::decode(&item.raw, 0, 16 << 20, &Default::default()).unwrap();
+        for encoding in ["png", "webp"] {
+            let output = fixture.root.join(format!("large-{}.{encoding}", item.id));
+            let id = item.id.to_string();
+            let inv = fixture.invocation("asset export", &[("--file-id", &id), ("--encoding", encoding), ("--output", output.to_str().unwrap())]);
+            let result = lycheedev_data::dispatch(&inv).unwrap();
+            let raw = fs::read(&output).unwrap();
+            let (actual_width, actual_height, pixels) = decoded(encoding, &raw);
+            assert_eq!((actual_width, actual_height), (width, height));
+            assert_eq!(pixels, expected.pixels);
+            assert_eq!(result.data["image"]["texture"], serde_json::to_value(&expected.description).unwrap());
+            assert_eq!(result.data["image"]["pixelsSHA256"], storage::sha256(&pixels));
+            assert_eq!(result.provenance.len(), 3);
+            assert_eq!(result.data["sourceCapture"], result.provenance[0]);
+            assert_eq!(result.data["artifactCapture"], result.provenance[2]);
+            assert_eq!(result.data["content"]["sha256"], storage::sha256(&raw));
+            assert_eq!(evidence::read_blob(&fixture.home, &result.provenance[0]["blob"], 8 << 20).unwrap(), item.raw);
+            let manifest = evidence::read_blob(&fixture.home, &result.provenance[1]["blob"], 1 << 20).unwrap();
+            assert_eq!(serde_json::from_slice::<Value>(&manifest).unwrap(), result.data);
+        }
+    }
+}

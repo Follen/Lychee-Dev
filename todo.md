@@ -15,6 +15,8 @@ Complete end-to-end production behavior first, then add the corresponding tests 
 
 - [ ] Execute and measure the implemented bounded Source scoped-parser candidate (available logical CPU parallelism with useful task count and actual byte-admitted workers, no fixed CPU-count cap, at most 8 ordered slots, actual Git allocation and shared retained admission, one operation-owned pool, full sequential fallback, original 26 new tests passed on 7a; six adaptive successor tests not_run), then close full-output/first-error/cancel/peak-memory evidence. Continue justified bounded concurrency rather than only documenting it: start with the actual Source cold-index CPU/I/O pipeline after the measured cache bottleneck, then evaluate Data independent batches and Live's required serialized state boundary. Bound both task count and in-flight bytes; preserve output order, first error, original budget/cancellation and complete verification. Go constrains public behavior, not Rust internal layout.
 
+- [ ] Validate and measure default Data texture parallelism: full palette/BGRA/BC pixels, clipped edges, real PNG/WebP export/captures, logical-CPU/work/headroom selection, no fixed CPU cap, shared-budget races, cancellation, thread failure/panic and complete join/refund. Fourteen new Rust tests are declared but not run; no speedup is claimed. Keep SQL/provider/transaction state serial where required.
+
 ### Current whole-repository consumer migrations
 
 - [ ] Core typed pin request: migrate the actual default Data provider, preserve snapshot/project priority, CAS winner and checked-close/cancel order; run compatibility and real consumer tests.

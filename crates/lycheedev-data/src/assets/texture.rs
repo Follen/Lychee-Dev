@@ -5,6 +5,7 @@ use crate::resource::{Budget, Cost, RetainedReservation};
 use lycheedev_core::{Result, control::OperationControl, evidence::VerifiedBlob};
 use serde::Serialize;
 use std::io::Read;
+mod parallel;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -126,21 +127,62 @@ fn layout(
         offset, size,
     })
 }
-fn decode_pixels(raw: &[u8], data: &[u8], description: Description, control: &OperationControl) -> Result<Image> {
-    let (width, height) = (u64::from(description.width), u64::from(description.height));
-    let (storage, alpha) = (description.storage, description.alpha_bits);
-    let count = width * height;
+fn decode_pixels(
+    raw: &[u8],
+    data: &[u8],
+    description: Description,
+    control: &OperationControl,
+) -> Result<Image> {
+    decode_pixels_budgeted(raw, data, description, control, None)
+}
+fn decode_pixels_budgeted(
+    raw: &[u8],
+    data: &[u8],
+    description: Description,
+    control: &OperationControl,
+    budget: Option<&Budget>,
+) -> Result<Image> {
+    let count = description.width as usize * description.height as usize;
     let mut pixels = Vec::new();
     pixels
-        .try_reserve_exact((count * 4) as usize)
+        .try_reserve_exact(count * 4)
         .map_err(|_| fault("texture.pixel_limit", 3))?;
-    pixels.resize((count * 4) as usize, 0);
+    pixels.resize(count * 4, 0);
+    if let Some(budget) = budget {
+        parallel::fill(&mut pixels, raw, data, &description, control, budget)?;
+    } else {
+        fill_strip(&mut pixels, 0, raw, data, &description, control, None)?;
+    }
+    control.check()?;
+    Ok(Image { pixels, description })
+}
+
+/// One disjoint band of complete four-row block groups (except the bottom
+/// edge). Input offsets stay global; paint receives only this band's output.
+/// Palette alpha bits also keep their global index across band boundaries.
+fn fill_strip(
+    pixels: &mut [u8],
+    first_row: usize,
+    raw: &[u8],
+    data: &[u8],
+    description: &Description,
+    control: &OperationControl,
+    budget: Option<&Budget>,
+) -> Result<()> {
+    let check = || {
+        control.check()?;
+        budget.map_or(Ok(()), Budget::check)
+    };
+    let width = description.width as usize;
+    let count = width * description.height as usize;
+    let height = pixels.len() / (width * 4);
+    let (storage, alpha) = (description.storage, description.alpha_bits);
     if storage == "palette" || storage == "bgra8" {
-        for index in 0..count as usize {
-            if index & 4095 == 0 {
-                control.check()?;
+        for (local, dst) in pixels.chunks_exact_mut(4).enumerate() {
+            if local & 4095 == 0 {
+                check()?;
             }
-            let dst = &mut pixels[index * 4..index * 4 + 4];
+            let index = first_row * width + local;
             if storage == "bgra8" {
                 dst.copy_from_slice(&[
                     data[index * 4 + 2],
@@ -154,35 +196,27 @@ fn decode_pixels(raw: &[u8], data: &[u8], description: Description, control: &Op
                 if alpha > 0 {
                     let bit = index * usize::from(alpha);
                     let mask = (1u16 << alpha) - 1;
-                    let value = u16::from(data[count as usize + bit / 8] >> (bit % 8)) & mask;
+                    let value = u16::from(data[count + bit / 8] >> (bit % 8)) & mask;
                     dst[3] = (value * 255 / mask) as u8;
                 }
             }
         }
     } else {
         let step = if storage == "bc1" { 8 } else { 16 };
-        let mut at = 0;
-        for y in (0..height as usize).step_by(4) {
-            control.check()?;
-            for x in (0..width as usize).step_by(4) {
-                paint(
-                    &mut pixels,
-                    width as usize,
-                    height as usize,
-                    x,
-                    y,
-                    &data[at..at + step],
-                    storage,
-                );
+        let mut at = first_row / 4 * width.div_ceil(4) * step;
+        for y in (0..height).step_by(4) {
+            check()?;
+            for x in (0..width).step_by(4) {
+                // Bound cancellation even for a valid one-row, very wide mip.
+                if x & 4095 == 0 {
+                    check()?;
+                }
+                paint(pixels, width, height, x, y, &data[at..at + step], storage);
                 at += step;
             }
         }
     }
-    control.check()?;
-    Ok(Image {
-        pixels,
-        description,
-    })
+    check()
 }
 
 /// The CASC boundary already authenticated this held blob. Decode only the
@@ -220,7 +254,9 @@ pub(crate) fn decode_verified<'a>(
         blob.read_exact(block).map_err(crate::blte::stream_io_error)?;
     }
     budget.charge(Cost::work(pixels.div_ceil(16384)))?;
-    let image = decode_pixels(&header, &data, selected.description, control)?;
+    let image = decode_pixels_budgeted(
+        &header, &data, selected.description, control, Some(budget),
+    )?;
     Ok((image, allocation))
 }
 fn expand(packed: u16) -> [u8; 4] {

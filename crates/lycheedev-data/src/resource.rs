@@ -2,6 +2,7 @@
 //! describe admitted work, not process RSS or an optimizer's cost estimate.
 use crate::fault;
 mod adaptive;
+mod opportunistic;
 pub use adaptive::MemoryBudget;
 use lycheedev_core::{Result, control::OperationControl};
 use serde::Serialize;

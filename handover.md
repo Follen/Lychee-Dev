@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 20:41 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`02498110f4ab39da447b2fa3de6738bf0ccc76db`；当前本机已完成913优化产物的正常4036/profile及retained复验；旧优化产品e843结果保持原身份，runner身份独立认证。实现进行中，尚未完成全量验收。
+更新：2026-10-16 20:52 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`cd3c8054f44e12e1b7ca477974d8a427cef1aedc`；当前本机已完成913优化产物的正常4036/profile及retained复验；旧优化产品e843结果保持原身份，runner身份独立认证。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -48,15 +48,17 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 - **7f52边界已全部差分通过**：[真实Go报告复用/52全字段比较](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6223216537)全部一致，相关47个唯一测试通过；首次本机相对路径错误改用实际绝对路径后仅补跑该一项，原失败仍留。Go报告SHA `849e3b0ab76e2252e10f183bb84c281ba96452cb0f32bc0f430e8ab9680730dc`、52输入和全部字段/顺序不改，事实v9/index指纹v10失效旧错误cache。goto/label属于固定gopher公共合同，native Lua5.1名字处理独立。这只覆盖该52输入，不冒所有非法Lua/XML已穷尽。
 
 - **retained与寿命待完整实测**：[ed6定向53/0/0](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6222429490)含5个scope旧算法差分及8个寿命单元；不能据此宣称内存收益。408普通native refs/context/API通过，但retained首请求EOF、后继依赖未跑、600秒寿命退出5失败。[e843完整native复验](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6222986269)仍8通过5依赖失败：retained首请求11.738秒EOF，最后query_build_scope；精确child67904接近2GiB但没有退出码/limit通知，不能断言OOM。原scope去副本没有闭合此项，继续结构性驻留诊断；[e843真实600秒寿命](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6223130356)600047ms退出0通过，关闭旧正常到期误报缺口。retained首请求仍独立失败。
-- **性能整体未达标**：[5bbb完整配对](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6221187576)只有warm query20对达到Rust/Go=0.202388；B01冷热约1.13、cold query约5.00失败。e843单次等价cold index Go9.554s/Rust45.104s，非20对验收；phase44.898s中Facts发布15.613s、原文发布21.874s、解析5.424s，Git inclusive阶段重叠不能相加。正实现可重建缓存发布优化，保正式捕获与最终index durability，收益未测。原内存采样有缺口，完整内存验收未完成。
+- **性能整体未达标**：[5bbb完整配对](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6221187576)只有warm query20对达到Rust/Go=0.202388；B01冷热约1.13、cold query约5.00失败。e843单次等价cold index Go9.554s/Rust45.104s，非20对验收；phase44.898s中Facts发布15.613s、原文发布21.874s、解析5.424s，Git inclusive阶段重叠不能相加。缓存发布优化后913有新单次等价诊断，原20对失败仍保留；保正式捕获与最终index durability，统计验收未完成。原内存采样有缺口，完整内存验收未完成。
 
 - **冷index发布优化已实现，定向Rust验证通过**：Facts和4036份原文分别进入固定路径的可重建cache，单次index复用已准入目录、同key原deadline锁、最多64个不确定残留stage、同目录原子可见与checked close；这些缓存不请求逐文件crash durability。暖读仍核全文SHA/长度/UTF8，缺失或损坏按已认证index内固定repository/product/commit/parser及Git树边/对象身份恢复，不能采用移动分支。正式inspect/loadEvidence/diff/closure BlobRef及4个asset、最终index/manifest保持原durable发布。三个实际CLI search入口补传原inv.control，避免恢复时换新预算。新增Core9/Source6/Windows2回归，Node读侧14/14通过；17项新增Rust已在f6实际通过；913新优化产物完整4036等价已过，单次cold index18.796s对Go9.653s，原e843慢样本保留；新20对统计验收仍待跑。
 
 - **retained结构性内存候选已实现，收益待测**：native raw Emmy观察改为共享path/原SemanticId的紧凑typed记录，序列化保持原字段/字节顺序；实际research回复不整体物化该表。全工作区managed membership改为FileId/语法种类分组的精确u64范围，每成员8字节、冻结上下文Arc共享，保持Name/Index/Call区别。新增6项Rust逐字输出、原集合、取消/输出预算测试；94项相关Node与语法解析通过；6新增Rust已在913实际通过，913完整2GiB复验仍在query执行EOF失败，未闭合。e843112原始内存行SHA已核，增长主要在analysis child；采样只有外层cold标签，不能据此归因某个内部phase或断言OOM。原4个冻结参考文件未改，上游生产仍原版848。
 - **实际并行冷链候选已实现，待验证**：按available_parallelism提供的可用逻辑并行度、实际任务量与原字节余量自适应的一次scoped纯Lua解析池，无固定CPU数量上限、8个有序槽；当前满额任务实际最多约6个worker，真实Git容量/已保留原文可使其更少，仅≤64KiB普通UTF8 Lua可提前计算；小XML/TOC只持有原文、按原主线程完整流程处理。cache读取/序列化/发布与所有公开错误按序，批尾drain后才启动下一Git进程；真实Git Vec capacity、原文、结果/scratch及worker栈共同受原256MiB retained余量准入。超额或未支持输入走原完整串行路径，无新增公共拒绝；第三方tree-sitter C分配不是Rust账目/RSS硬上限。原26新Rust与真实默认2MiB worker栈的混合输入/跨4097对象batch回归已在7a通过；后继6项自适应/真实Git/CPU可用量差分尚未执行。并行profile只累计已消费worker任务时长，重叠不能相加；完整4036等价、取消与新20对性能仍待测。
 
+- **Data默认纹理解码真实并行候选已实现，待验证**：认证输入与已准入RGBA由palette/BGRA/BC1/2/3条带借用，互不重叠原位写入；按可用逻辑CPU、有效像素/行数及原共享私有额度同锁O(1)选择，没有固定8核上限、不增长adaptive额度。每图一个scoped团队复用多行，按图像顺序join；创建失败仅串行补未写suffix，所有线程结束后退款。新增14Rust覆盖16参与者全RGBA、裁边、预算竞争、取消/失败/panic及真实PNG/WebP导出三capture链，尚未执行，吞吐和内存收益未测。原SQL单堆/事务顺序不变。
+
 - **913优化复验已有终态**：[4036 v9完整字段/顺序0差](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6223829481)，单次等价cold index Rust18.796s/Go9.653s；其中Facts发布5.494s、原文发布5.242s、解析5.572s，总phase18.57s。相较e843单次45.104s是跨版诊断，不能当20对统计或≤0.30验收。[retained仍失败](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6223875817)：首请求11.95s EOF/exit5，最后query_execute_operations，private2142556160/kernel peak2144694272；无child退出/limit通知，不能断言OOM，外层已回收。紧凑表示没有闭合实际retained缺口，继续定位真实驻留与认证退出事实。
-- **typed组合复审发现并修正继承的字段解析与首错差异**：固定Go323 StreamDataRows先验证filter字段，再投影字段；原Rust和新增旧顺序测试相反，且投影字段错误地trim了Go保留的空格，UInt过滤错误接受Go ParseUint拒绝的正号，尾逗号空字段错误多拼了冒号。当前生产按Go原样split与顺序修复，保原真实table准入阶段，新增双故障无yield/无capture与无符号正号过滤零行manifest回归，合法filter/坏projection、原空格和超额projection先后也覆盖。语法/静态检查通过，Rust尚未运行；四边界独立组合复审已完成，修订静态复核未见确认剩余问题；新增Rust仍待跑，不冒称最终第一阶段已完成。
+- **typed组合复审发现并修正继承的字段解析与首错差异**：固定Go323 StreamDataRows先验证filter字段，再投影字段；原Rust和新增旧顺序测试相反，且投影字段错误地trim了Go保留的空格，UInt过滤错误接受Go ParseUint拒绝的正号，尾逗号空字段错误多拼了冒号。当前生产按Go原样split与顺序修复，保原真实table准入阶段，新增双故障无yield/无capture与无符号正号过滤零行manifest回归，合法filter/坏projection、原空格和超额projection先后也覆盖。四边界独立组合复审已完成，0e1实际66/0/0含两新增consumer通过，完整wire断言保留；该专项闭合不冒称最终第一阶段已完成。
 
 - **retained进一步去副本与真实退出诊断已实现，尚未实测**：研究关系查询将每site BTreeMap/Vec改为稳定排序的单平面借用索引，保同site观察顺序；完整relations/analysis JSON直接move组装，保原wire字节。现有guarded Child/Job句柄记录退出码、终止前/后观察及历史commit峰值，私有认证Response由调用CLI在diagnostic stderr呈现；不改公开结果/error、不加owner同步落盘、不猜limit触发。读侧仅对精确owner/child创建身份与原请求deadline匹配的完整行关联旧phase，缺失仍unavailable。新增7Rust未跑；75Node读侧/runner/IPC实际通过，收益和retained失败是否闭合待新优化产物。
 
