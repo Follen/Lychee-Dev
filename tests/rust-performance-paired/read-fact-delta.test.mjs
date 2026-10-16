@@ -38,8 +38,8 @@ function fixture(rustLayout = 'v6') {
       diagnostics: [],
     };
     const goKey = sha256(`${parser}\0${mode}\0${document.sha256}`);
-    const layoutKey = rustLayout === 'v9' ? 'facts-layout-v9-go323-observed' : rustLayout === 'v8' ? 'facts-layout-v8-go323-malformed' : rustLayout === 'v7' ? 'facts-layout-v7-go323-public' : 'facts-layout-v6-xml-original-tags';
-    const generator = ['v7', 'v8', 'v9'].includes(rustLayout) ? 'generator-v6' : 'generator-v5';
+    const layoutKey = rustLayout === 'v10' ? 'facts-layout-v10-go323-xml-lexical' : rustLayout === 'v9' ? 'facts-layout-v9-go323-observed' : rustLayout === 'v8' ? 'facts-layout-v8-go323-malformed' : rustLayout === 'v7' ? 'facts-layout-v7-go323-public' : 'facts-layout-v6-xml-original-tags';
+    const generator = ['v7', 'v8', 'v9', 'v10'].includes(rustLayout) ? 'generator-v6' : 'generator-v5';
     const rustKey = sha256(`${layoutKey}\0tree-sitter-0.26.3\0`
       + `lua-0.5.0\0xml-0.38\0${generator}\0${document.path}\0${document.sha256}`);
     const goFile = path.join(goHome, 'source/v1/facts/files', parser, `${goKey}.json`);
@@ -65,7 +65,7 @@ function fixture(rustLayout = 'v6') {
     summary: { parser, documents: 4, declarations: 4, relationships: 4, diagnostics: 0 },
   }));
   return {
-    root, goHome, rustHome, records, manifest, files,
+    root, goHome, rustHome, records, manifest, files, documents,
     read: () => readFactDelta(goHome, rustHome, records, rustLayout),
     changeRust(index, change) {
       const file = files[index].rustFile;
@@ -239,5 +239,39 @@ test('authenticates v9 observed grammar corrections and rejects preceding v8 cac
     assert.equal(report.inputs.rustLayout, 'v9');
     assert.equal(report.differentFiles.length, 0);
     await assert.rejects(readFactDelta(f.goHome, f.rustHome, f.records, 'v8'), /ENOENT/);
+  }, 'v9');
+});
+
+test('reads explicit v10 using the exact current production key and schema', async t => {
+  const production = fs.readFileSync(new URL('../../crates/lycheedev-source/src/index.rs', import.meta.url), 'utf8');
+  const key = /fn facts_cache_path[\s\S]*?"([^"\n]+)"/.exec(production)?.[1];
+  assert.equal(key, 'facts-layout-v10-go323-xml-lexical\\0tree-sitter-0.26.3\\0lua-0.5.0\\0xml-0.38\\0generator-v6\\0{path}\\0{sha256}');
+  assert.match(production, /envelope\["schema"\] == "lycheedev\.source-facts\.rust\.v10"/);
+  await withFixture(t, async f => {
+    for (const [index, document] of f.documents.entries()) {
+      const preimage = key.replaceAll('\\0', '\0').replace('{path}', document.path).replace('{sha256}', document.sha256);
+      assert.equal(path.basename(f.files[index].rustFile), `${sha256(preimage)}.json`);
+    }
+    const report = await f.read();
+    assert.equal(report.inputs.rustLayout, 'v10');
+    assert.equal(report.documents, 4);
+    assert.equal(report.differentFiles.length, 0);
+    for (const historical of ['v6', 'v7', 'v8', 'v9']) {
+      await assert.rejects(readFactDelta(f.goHome, f.rustHome, f.records, historical), /ENOENT/);
+    }
+    await assert.rejects(readFactDelta(f.goHome, f.rustHome, f.records), /ENOENT/);
+  }, 'v10');
+});
+
+test('never discovers or relabels a historical v9 cache as v10', async t => {
+  await withFixture(t, async f => {
+    await assert.rejects(readFactDelta(f.goHome, f.rustHome, f.records, 'v10'), /ENOENT/);
+    const document = f.documents[0];
+    const currentKey = sha256(`facts-layout-v10-go323-xml-lexical\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0${document.path}\0${document.sha256}`);
+    const historical = fs.readFileSync(f.files[0].rustFile);
+    fs.writeFileSync(path.join(f.rustHome, 'cache/source-facts-rust', `${currentKey}.json`), historical);
+    await assert.rejects(readFactDelta(f.goHome, f.rustHome, f.records, 'v10'), /Fact input identity mismatch/);
+    assert.deepEqual(fs.readFileSync(f.files[0].rustFile), historical);
+    assert.equal((await f.read()).differentFiles.length, 0);
   }, 'v9');
 });

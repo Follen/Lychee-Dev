@@ -21,7 +21,8 @@ The caller chooses a new evidence destination. The reader itself writes only to
 stdout. It authenticates Go records against their manifest and both fact caches
 against their input identity and stored fact digest. It supports the fixed Go
 `lycheedev.source-file-facts.v2` and historical Rust
-`lycheedev.source-facts.rust.v6` (the default) or explicit `v7` below; unsupported or missing inputs fail
+`lycheedev.source-facts.rust.v6` (the unchanged default) or explicit `v7` through
+`v10` below; unsupported or missing inputs fail
 rather than triggering a product rebuild. Go digest verification retains its
 original JSON bytes, including HTML/U+2028/U+2029 escaping.
 
@@ -68,3 +69,20 @@ The correction based on the first actual 52-case Go observation uses explicit
 `lycheedev.source-facts.rust.v9`. Its whole-index/query fingerprint changes too.
 Use v8 only for the original e843 candidate and v9 for the subsequent corrected
 candidate; no automatic discovery or historical relabeling is performed.
+
+For the XML lexical-diagnostic candidate beginning at `6d26bd6`, explicitly
+select `v10` against that candidate's terminal Rust home:
+
+```sh
+node tests/rust-performance-paired/read-fact-delta.mjs GO_HOME RUST_HOME GO_RECORDS_JSONL v10 > NEW_EVIDENCE_DIR/static-fact-delta-v10.json
+```
+
+This authenticates the exact `facts-layout-v10-go323-xml-lexical` /
+`generator-v6` key and `lycheedev.source-facts.rust.v10` envelope. The production
+whole-index/query fingerprint is v11; the argument here selects the per-file
+Facts layout, so it is `v10`, not `v11`. Use a new evidence destination and
+retain the authenticated product, runner and input identities separately.
+Historical v6–v9 caches and prior outputs remain unchanged and require their
+own layout; neither auto-discovery nor schema relabeling is permitted. The
+default remains v6. All existing digest, complete field/array-order comparison
+and diagnostic-only limitations above remain in force.
