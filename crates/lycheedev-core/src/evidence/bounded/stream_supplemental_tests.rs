@@ -2,8 +2,8 @@ use super::*;
 use crate::control::TrackedCancellation;
 use std::{
     sync::{
-        Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc,
     },
     time::{Duration, Instant},
 };
@@ -41,12 +41,10 @@ impl Fixture {
         let path = blob_path(&self.0, &storage::sha256(bytes)).unwrap();
         assert!(!path.exists());
         if path.parent().unwrap().exists() {
-            assert!(
-                fs::read_dir(path.parent().unwrap())
-                    .unwrap()
-                    .next()
-                    .is_none()
-            );
+            assert!(fs::read_dir(path.parent().unwrap())
+                .unwrap()
+                .next()
+                .is_none());
         }
         ExclusiveLock::resource(
             &self.0.join("locks"),
@@ -403,7 +401,26 @@ fn stream_publish_retains_terminal_source_failure_and_does_not_publish() {
         &invocation,
         || Ok(()),
     ));
-    assert!(same_error(&error, &source_error));
+    let publication = &error.details["publication"];
+    assert_eq!(publication["state"], "not_published");
+    assert_eq!(publication["attemptState"], "not_published");
+    assert_eq!(
+        publication["reference"],
+        serde_json::to_value(reference(bytes)).unwrap()
+    );
+    assert_eq!(publication["reused"], false);
+    assert!(publication["prior"].is_null());
+    assert!(publication["stageName"]
+        .as_str()
+        .is_some_and(|name| !name.is_empty()));
+    // The publication fact is additive: every original typed source field stays exact.
+    let mut original = error.clone();
+    original
+        .details
+        .as_object_mut()
+        .unwrap()
+        .remove("publication");
+    assert!(same_error(&original, &source_error));
     assert_eq!(observed.load(Ordering::Acquire), bytes.len());
     f.no_publication(bytes);
 }

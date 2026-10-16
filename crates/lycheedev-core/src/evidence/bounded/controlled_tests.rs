@@ -88,12 +88,10 @@ fn capture_precancel_and_stop_before_blob_leave_no_publication() {
     })
     .unwrap_err();
     assert_eq!(error.code, "command.cancelled");
-    assert!(
-        fs::read_dir(f.home().join("blobs"))
-            .unwrap()
-            .next()
-            .is_none()
-    );
+    assert!(fs::read_dir(f.home().join("blobs"))
+        .unwrap()
+        .next()
+        .is_none());
     assert_eq!(f.count(), 0);
     f.assert_lock_released(b"{}");
 }
@@ -213,7 +211,7 @@ fn capture_metadata_contention_uses_original_deadline_and_retains_blob() {
     assert_eq!(f.count(), 1);
 }
 #[test]
-fn capture_blob_lock_contention_preserves_existing_busy_contract() {
+fn capture_blob_lock_contention_waits_for_original_stop_without_publication() {
     let f = Fixture::new();
     let bytes = b"{\"busy\":true}";
     let held = ExclusiveLock::resource(
@@ -221,18 +219,29 @@ fn capture_blob_lock_contention_preserves_existing_busy_contract() {
         &format!("blob:{}", storage::sha256(bytes)),
     )
     .unwrap();
-    let error =
-        commit_capture_bounded(&f.home(), input(bytes), &OperationControl::default()).unwrap_err();
+    let token = TrackedCancellation::new();
+    let control =
+        OperationControl::tracked(Instant::now() + Duration::from_secs(30), token.clone());
+    ExclusiveLock::set_blob_wait_observer(move || token.cancel());
+    let error = commit_capture_bounded(&f.home(), input(bytes), &control).unwrap_err();
     assert_eq!(
         (error.code.as_str(), error.exit_code),
-        ("workspace.busy", 6)
+        ("command.cancelled", 7)
+    );
+    assert_eq!(
+        ExclusiveLock::resource(
+            &f.home().join("locks"),
+            &format!("blob:{}", storage::sha256(bytes)),
+        )
+        .err()
+        .unwrap()
+        .code,
+        "workspace.busy",
     );
     assert_eq!(f.count(), 0);
-    assert!(
-        !blob_path(&f.home(), &storage::sha256(bytes))
-            .unwrap()
-            .exists()
-    );
+    assert!(!blob_path(&f.home(), &storage::sha256(bytes))
+        .unwrap()
+        .exists());
     held.close().unwrap();
     f.assert_lock_released(bytes);
 }

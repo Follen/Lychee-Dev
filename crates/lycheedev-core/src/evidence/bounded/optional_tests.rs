@@ -2,8 +2,8 @@ use super::*;
 use crate::control::TrackedCancellation;
 use std::{
     sync::{
-        Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc,
     },
     time::{Duration, Instant},
 };
@@ -371,9 +371,36 @@ fn optional_close_keeps_primary_file_cleanup_and_original_stop_priority() {
         ] {
             assert!(rendered.contains(cause), "missing cause: {cause}");
         }
-        // Returned streams preserve R2 invocation-first callback semantics.
+        // Terminal cleanup observes both independent owners. Invocation-first
+        // work checks must not suppress a distinct budget failure during close.
+        assert_eq!(
+            error.details["cleanup"],
+            serde_json::to_value(budget_stop()).unwrap()
+        );
+        let before_budget = &error.details["primary"];
         if cancel_invocation {
-            assert!(!rendered.contains("fixture.budget_stop"));
+            assert_eq!(
+                before_budget["details"]["cleanup"]["code"],
+                "command.cancelled"
+            );
+            assert_eq!(before_budget["details"]["cleanup"]["exit_code"], 7);
+            assert_eq!(
+                before_budget["details"]["primary"]["details"]["primary"]["code"],
+                "fixture.primary"
+            );
+            assert_eq!(
+                before_budget["details"]["primary"]["details"]["cleanup"]["message"],
+                "file close failure"
+            );
+        } else {
+            assert_eq!(
+                before_budget["details"]["primary"]["code"],
+                "fixture.primary"
+            );
+            assert_eq!(
+                before_budget["details"]["cleanup"]["message"],
+                "file close failure"
+            );
         }
     }
 }

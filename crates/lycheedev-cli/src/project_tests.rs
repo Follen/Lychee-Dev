@@ -20,12 +20,15 @@ impl Fixture {
     }
     fn inv(&self, args: &[&str]) -> Invocation {
         let mut args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
-        args.extend([
-            "--home".into(),
-            self.0.join("home").to_string_lossy().into_owned(),
-            "--format".into(),
-            "json".into(),
-        ]);
+        // Go 3.2.3 command_contract.go: only project lock admits --home.
+        // Init/status use the project path and must not touch a workspace.
+        if args.get(1).is_some_and(|verb| verb == "lock") {
+            args.extend([
+                "--home".into(),
+                self.0.join("home").to_string_lossy().into_owned(),
+            ]);
+        }
+        args.extend(["--format".into(), "json".into()]);
         let mut inv = parse(&args).unwrap();
         inv.cwd = self.0.join("project");
         inv
@@ -44,7 +47,7 @@ fn project_actual_argv_init_status_lock_publish_go_shapes_and_snapshot_context()
     assert!(envelope["result"].get("lock").is_none());
     assert_eq!(envelope["context"], json!({}));
     let pin = selection::pin_selection_controlled(
-        &inv.home,
+        &f.0.join("home"),
         selection::SelectionSpec {
             source: Some(selection::SourcePin {
                 repository: "wow-ui-source".into(),
@@ -132,4 +135,17 @@ fn project_cli_required_and_empty_values_preserve_parser_then_dispatch_priority(
         assert_eq!(error.message, message);
     }
     f.done();
+}
+
+#[test]
+fn project_init_and_status_reject_home_before_dispatch() {
+    for verb in ["init", "status"] {
+        let args = ["project", verb, "--home", "fixture-home"].map(str::to_owned);
+        let error = parse(&args).unwrap_err();
+        assert_eq!(error.exit_code, 2);
+        assert_eq!(
+            error.message,
+            format!("--home is not supported by project {verb}; use project {verb} --help")
+        );
+    }
 }

@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 04:04 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`dc8fccc4ec5cbc2affa8b3e582e551b3bc48ad27`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 04:13 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`3c720fa8d962fa1751c3a365fafd5b0e5431c09a`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -24,6 +24,12 @@
 - 2026-10-15 18:24 用户调整实施节奏：先按完整端到端功能实现并接入默认生产消费者，再集中补测试和统一验证；取消自行增加的逐小片冻结/独审/CI先行门禁。实现过程中仍及时分批提交推送同一草稿PR，真实安全边界和文件单写协调保留；已有CI旁路诊断，不等待每轮才继续编码。最终四阶段循环审计与完整验收要求不变。
 
 ## 2. 当前实现与未闭环事项
+
+最新集中验证 [run38849016645](https://github.com/Follen/Lychee-Dev/actions/runs/38849016645) 已在04:08启动，精确head `3c720fa`，19路径远端读回一致；包含Hotfix/CSV控制闭环及此前Source/SQL/asset组合。结果未出。后续Core三项测试合同修正、project argv fixture修正、Emmy结构相等修复与Source性能优化不在该run。
+
+e8终态204个owner/7243份sealed日志逐SHA一致。真实小型IPC quota（789请求）、idle（60.032秒）、lifetime（600.011秒）通过且完整回收。完整Retail普通refs/context/API及retained cold均耗尽原90秒总预算；API worker已写回复并完成，caller后续仍超时，不能称最终API成功。retained本次owner已回收、无retirementError，单worker采样私人内存约1.90GiB，未观察触2GiB上限；不能归因OOM。完整语义source可执行进程集合采样峰WS2370.62MiB/private2502.21MiB，retained cold集合2214.22/2323.11MiB，含多进程且有采样间隙/失败run；常驻warm/steady未测，未证明内存或70%性能目标。当前按原预算优化准备、身份索引与回复后工作。
+
+e8新增失败分别处理：adapter公开union相等及owned嵌套结构比较、Source不完整load负fixture、固定历史参考的15处编译兼容问题仍在修；Core三项旧断言（独立stop聚合、publication附加事实、blob锁等待）与project init/status误传不允许的--home已作最小测试修正，Rust未重跑。既有c5重复失败按各自已保存修复等待此后集中结果，不将未执行目标记为通过。
 
 Hotfix最后默认控制链已组合：Wago receipt同Metadata raw读取/下载后CAS/checked关闭、在途原invocation与独立Budget，Raidbots原文件/解码检查；SQL/Hotfix共用CSV持同输出owner按data→manifest发布，已提交query/CSV的1..2个ID与unknown发布事实保原错误，不重放。15新Rust加1CLI完整envelope回归待集中运行。三组默认接线已写齐，真实raw URI规范化拒绝和合法异常offset的比较/晚期marshal两合同差异仍在修；编译、旧失败重验、完整语义/资源/性能及最终四循环均未完成。
 
