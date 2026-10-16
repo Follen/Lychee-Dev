@@ -577,10 +577,10 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node tools/rust-cargo.mjs --owner ci-wdc-records --one-shot -- test --locked --offline -p lycheedev-data --test wdc_parity -j 1
-      - name: Run asset argument and committed-error unit contracts
+      - name: Run asset parsing publication and committed-error unit contracts
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
-          node tools/rust-cargo.mjs --owner ci-asset-unit --one-shot -- test --locked --offline -p lycheedev-data --lib assets::export::tests -j 1
+          node tools/rust-cargo.mjs --owner ci-asset-unit --one-shot -- test --locked --offline -p lycheedev-data --lib assets:: -j 1
       - name: Run actual local asset and image export regressions
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |

@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 02:50 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`c81da0895560706bba77641c398121ad25a39431`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 03:13 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`2720ccf497c7ded042d15068491d5c1e422876a2`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -25,23 +25,25 @@
 
 ## 2. 当前实现与未闭环事项
 
-SQL有限两项后继已实现：Go primary首个多余点号立即Syntax，公共Pratt仍move AST，通过原infix/precedence观察RHS活跃深度，BETWEEN分低/高相，RAII失败只退本入口标记；7新边界回归未跑。Emmy有限来源收口18路径已组合：selected initializer与Lua/XML字段的实际函数值贯通VM、参数/泛型/返回/赋值/await/assert，不被旧声明overload/docs复活覆盖，原静态声明检查仍保留；17新Rust未跑，43调度入口的静态边界已扫完。SQL与Emmy本轮有限实现现转集中真实回归，未宣称全行为或资源验收完成；Data三组默认入口仍在实施。
+默认 local/CDN asset export与demux现已贯通真实query准入、同Budget、单遍发布和checked收尾；demux源→frame→manifest捕获与引用保护、同目录租约和最后manifest发布接入真实路径。新两种发布/提交事实沿既有error.details进入CLI，保已发布/unknown及所有主错/cleanup，未新增顶层字段。15实现回归加2CLI回归未跑，既有asset组扩大覆盖全部assets子模块。Data有限剩余为listfile/search共享受控transport/cache、Wago/Raidbots外层pin/receipt两组，正在继续。
 
-实现收口限已有Go323合同及43checker：Data仍需asset export/demux复用真实query准入和CDN路径、asset search/listfile共享可取消transport、Wago/Raidbots外层pin/receipt受控收尾三组；SQL尚余非法三段字段首错与Pratt RHS深度；Emmy尚余selected实际函数来源被旧声明/docs覆盖的统一收口。Source默认存储已接。完成这些既有差距并集中修闭编译/实际回归后进入第一轮架构与使用质量审计；不扩为通用SQL数据库，不以基础切片数量代替完成度。
+SQL有限两项后继已实现：Go primary首个多余点号立即Syntax，公共Pratt仍move AST，通过原infix/precedence观察RHS活跃深度，BETWEEN分低/高相，RAII失败只退本入口标记；7新边界回归未跑。Emmy有限来源收口18路径已组合：selected initializer与Lua/XML字段的实际函数值贯通VM、参数/泛型/返回/赋值/await/assert，不被旧声明overload/docs复活覆盖，原静态声明检查仍保留；17新Rust未跑，43调度入口的静态边界已扫完。SQL与Emmy本轮有限实现现转集中真实回归，未宣称全行为或资源验收完成；Data剩余两组默认入口仍在实施。
+
+实现收口限已有Go323合同及43checker：Data的asset export/demux准入/CDN链已实现待测，仍需asset search/listfile共享可取消transport、Wago/Raidbots外层pin/receipt受控收尾两组；SQL非法三段字段首错与Pratt RHS深度、Emmy selected实际函数来源统一收口已实现并保存，尚待集中验证。Source默认存储已接。完成这些既有差距并集中修闭编译/实际回归后进入第一轮架构与使用质量审计；不扩为通用SQL数据库，不以基础切片数量代替完成度。
 
 默认evidence remove现已闭合原metadata-write→blob→SQLite锁序、同事务分页认证/删除CAS/tombstone/recovery、原句柄删除及checked收尾，保六字段receipt与恢复事实，15新Rust未跑。e8空scope已在实际call执行入口补仅空栈时RAII root，已有嵌套/回调scope不变、原两红测试不改；Nil/Field/Await/Export/Assert消费者保selected来源和shape，19新测试/56场景未跑。该e8原cargo exit101后另有vctip留至drain并forced=true，最终treeReaped/handlesClosed/active0；真实panic与异常辅助进程收尾并列保留。
 
 c5 SQL/Data断言后继按固定Go修正fixture：DISTINCT临时准入与累计账分开、COUNT(*)不读无用NaN、NULL实际Equal回调、合法CTE与原非法语法双测、96MiB失败/256MiB固定预算成功；semantic仅三声明timing字段核exact f64 bits，其他字段及capture仍严等。CASC固定预算/未admission拒绝、64MiB增长640−584=56MiB、local target canonical身份三测试文件修正，生产规则不放宽。原失败仍保留，全部修后Rust待集中验证。
 
-e8实际owned context已编译执行：declaration等三组4/9/6全过，lychee_context 22过2失败，合计41过2失败；失败均environment.rs58 `expression execution scope`，实际环境栈为空，正在补真实scope，不是类型等价已通过。3owner/17sealed日志全SHA核且retired/reaped。c5完整185owner/1093sealed全SHA核；三个interrupted是custody协议故障fixture，其余182为handlesReaped=true。真实SQL/Data失败交原作者按固定Go诊断；Core4项fixture已修真实阶段注入、历史raw设置用正确generation及target首错，Rust未重跑。
+e8实际owned context已编译执行：declaration等三组4/9/6全过，lychee_context 22过2失败，合计41过2失败；失败均environment.rs58 `expression execution scope`，实际环境栈为空，后继已补真实scope且保原断言，尚未重跑。3owner/17sealed日志全SHA核且retired/reaped。c5完整185owner/1093sealed全SHA核；三个interrupted是custody协议故障fixture，其余182为handlesReaped=true。真实SQL/Data失败交原作者按固定Go诊断；Core4项fixture已修真实阶段注入、历史raw设置用正确generation及target首错，Rust未重跑。
 
-SQL默认retrieval入口现统一顶层/WITH/derived/scalar/EXISTS/IN，同一token stream及公开Pratt；FROM首错、各UNION分支后缀的实际preflight、分支CTE声明扫描与执行scope分别保留。21新Rust回归未跑；细粒度Pratt递归深度混合首错和三段非法字段分类仍待闭合。既有多target关系回归加--no-fail-fast只防首失败跳过后继目标，失败退出保持。
+SQL默认retrieval入口现统一顶层/WITH/derived/scalar/EXISTS/IN，同一token stream及公开Pratt；FROM首错、各UNION分支后缀的实际preflight、分支CTE声明扫描与执行scope分别保留。21新Rust回归未跑；细粒度Pratt递归深度混合首错和三段非法字段分类后继已实现，7新回归待运行。既有多target关系回归加--no-fail-fast只防首失败跳过后继目标，失败退出保持。
 
 Source默认存储链已组合原控制：index/query/research/semantic缓存、同key manifest CAS、session startup intent/cleanup与generation读取/单次消费贯通受控Metadata、原文件/lease及checked收尾；取消留intent、generation变化不误删，未知提交不重放。缓存配额仍原即时竞争策略，不自动prune；native wire、90秒原期限与2GiB cap未改。25新Rust回归未跑，4个不重复目标已接集中验证；普通ReadDir/native process及不参与授权的best-effort生命周期诊断保原边界。
 
-默认evidence keep/bundle已完成原控制接线：keep持同一writer lease完成历史读取/retention/CAS/tombstone；bundle保输入顺序、拒重复、objects与最后manifest、32MiB单体/128MiB唯一体、原stage同目录no-replace和checked收尾，已发布/不确定结果进入既有error.details。12新Rust未跑，recoverable remove仍继续。自有诊断后继恢复return self所属类、alias/声明泛型上下文，并保union分量selected carrier，避免不完整对象绕过赋值结构检查；4新测试/12场景未跑。部分return缺口历史patched session同样存在，旧参照不改、不全局忽略差异；以固定原版普通语义与增强合同分别验证。
+默认evidence keep/bundle已完成原控制接线：keep持同一writer lease完成历史读取/retention/CAS/tombstone；bundle保输入顺序、拒重复、objects与最后manifest、32MiB单体/128MiB唯一体、原stage同目录no-replace和checked收尾，已发布/不确定结果进入既有error.details。12新Rust未跑；recoverable remove后继已接原控制并保存，15新回归待运行。自有诊断后继恢复return self所属类、alias/声明泛型上下文，并保union分量selected carrier，避免不完整对象绕过赋值结构检查；4新测试/12场景未跑。部分return缺口历史patched session同样存在，旧参照不改、不全局忽略差异；以固定原版普通语义与增强合同分别验证。
 
-本批补齐历史capture读取、Hotfix archive/origin/定义/scan与effective SQL的原invocation及独立Budget，保typed停止、历史身份和checked关闭；8项Core/Data新回归未运行。SQL默认编译入口已贯通lexer、公共parser hooks及lowering控制，17项新回归未运行；wildcard公共hook不能直接返回错误，记录停止后在parse完成且lowering/provider之前返回。非最终UNION后缀与复合错误优先级仍继续实现。keep/bundle/remove和Source默认存储受控链正在闭合，不据新API声明全链完成。
+本批补齐历史capture读取、Hotfix archive/origin/定义/scan与effective SQL的原invocation及独立Budget，保typed停止、历史身份和checked关闭；8项Core/Data新回归未运行。SQL默认编译入口已贯通lexer、公共parser hooks及lowering控制，17项新回归未运行；wildcard公共hook不能直接返回错误，记录停止后在parse完成且lowering/provider之前返回。非最终UNION后缀与复合错误优先级后继已接；keep/bundle/remove和Source默认存储受控链已保存，全部等待集中运行验证。
 
 修复后的集中验证 [38836247524](https://github.com/Follen/Lychee-Dev/actions/runs/38836247524) 针对e8ae9a3已启动，workspace all-target失败、CLI构建成功，早期58owner/170sealed已核；仅example的4处ByteRange字段仍当方法调用导致E0599，现最小修正字段访问，未重编译；不能把排队或toolidentity成功当产品编译成功。后继同session跨文件member/metatable两处CFG缓存已共享，新增真实三文件回归未跑，不宣称内存/耗时收益。
 

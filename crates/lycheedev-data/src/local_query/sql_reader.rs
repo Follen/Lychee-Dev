@@ -30,7 +30,7 @@ struct Ready<'a> {
     cdn_blob: Value,
     stats: decoded_cache::Stats,
 }
-pub(super) struct Reader<'a> {
+pub(crate) struct Reader<'a> {
     inv: &'a Invocation,
     pin: &'a selection::DataPin,
     budget: &'a Arc<Budget>,
@@ -206,26 +206,51 @@ impl<'a> Reader<'a> {
         Ok(())
     }
     pub fn read(&mut self, id: u32) -> Result<File> {
+        let file = self.read_selected(id, ReadMode::Materialized)?;
+        match file.content {
+            SelectedContent::Bytes(bytes) => Ok(File {
+                bytes: bytes.into(),
+                reading: file.reading,
+            }),
+            SelectedContent::Blob(_) => unreachable!("materialized query representation"),
+        }
+    }
+    pub fn read_verified(&mut self, id: u32) -> Result<VerifiedFile> {
+        let file = self.read_selected(id, ReadMode::Verified)?;
+        match file.content {
+            SelectedContent::Blob(blob) => Ok(VerifiedFile {
+                blob,
+                reading: file.reading,
+            }),
+            SelectedContent::Bytes(_) => unreachable!("verified query representation"),
+        }
+    }
+    fn read_selected(&mut self, id: u32, mode: ReadMode) -> Result<ResolvedFile> {
         self.inv.control.check()?;
         self.budget.check()?;
         let maximum = validate_local_file_request(self.inv, &[id])?;
-        let first = self.read_once(id, maximum);
+        let first = self.read_once(id, maximum, mode);
         match first {
             Err(error)
                 if error.code == "container.key_unavailable"
                     && error.details["missingKey"] == true
+                    && error.details.get("publication").is_none_or(|p| {
+                        p["state"] == "not_published"
+                            && p["reused"] != true
+                            && p.get("prior").is_none_or(Value::is_null)
+                    })
                     && self.keys.as_ref().is_some_and(|keys| {
                         keys.source.kind == "public" && keys.source.state != "loaded"
                     }) =>
             {
                 // No Source or row has escaped this failed resolver call.
                 self.keys.as_mut().expect("retry keys").ensure_public()?;
-                self.read_once(id, maximum)
+                self.read_once(id, maximum, mode)
             }
             result => result,
         }
     }
-    fn read_once(&mut self, id: u32, maximum: usize) -> Result<File> {
+    fn read_once(&mut self, id: u32, maximum: usize, mode: ReadMode) -> Result<ResolvedFile> {
         self.prepare()?;
         let limits = self.limits();
         let ready = self.ready.as_mut().expect("prepared local session");
@@ -268,44 +293,74 @@ impl<'a> Reader<'a> {
                 "Selected content exceeds byte budget",
             ));
         }
-        let (encoding_key, content) = decoded_cache::read_content_in_session(
-            &self.inv.home,
-            self.casc.as_ref().expect("prepared CASC index source"),
-            &ready.index,
-            &mapping,
-            limits,
-            keys,
-            &mut ready.stats,
-            self.budget,
-            Some(maximum),
-            &self.inv.control,
-        )?;
-        let content_blob = evidence::publish_blob_bounded_with_check(
-            &self.inv.home,
-            &content.bytes,
-            maximum,
-            &self.inv.control,
-            || self.budget.check(),
-        )?;
-        let safety = self.budget.safety_only();
-        let size = capture::json_size(
-            &(&ready.root_blob, &ready.build_blob, &ready.cdn_blob),
-            &safety,
-        )?;
-        safety.charge(Cost::retained(size.saturating_mul(4).saturating_add(4096)))?;
-        let mut reading = json!({"contentVerified":true,"source":"installation","pin":self.pin,"catalogSHA256":target.metadata.catalog_sha256,"buildConfiguration":ready.build_blob,"cdnConfiguration":ready.cdn_blob,"encodingKey":target.metadata.encoding_key,"root":ready.root_blob,"entry":entry,"payloadEncodingKey":encoding_key,"content":content_blob,"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"encodingIO":source.io_stats()});
-        if !variant.is_empty() {
-            reading["contentVariant"] = json!(variant);
+        let (encoding_key, content, content_blob) = match mode {
+            ReadMode::Materialized => {
+                let (key, content) = decoded_cache::read_content_in_session(
+                    &self.inv.home,
+                    self.casc.as_ref().expect("prepared CASC index source"),
+                    &ready.index,
+                    &mapping,
+                    limits,
+                    keys,
+                    &mut ready.stats,
+                    self.budget,
+                    Some(maximum),
+                    &self.inv.control,
+                )?;
+                let blob = evidence::publish_blob_bounded_with_check(
+                    &self.inv.home,
+                    &content.bytes,
+                    maximum,
+                    &self.inv.control,
+                    || self.budget.check(),
+                )?;
+                (key, SelectedContent::Bytes(content.bytes), blob)
+            }
+            ReadMode::Verified => {
+                let (key, blob) = decoded_cache::read_verified_content_in_session(
+                    &self.inv.home,
+                    self.casc.as_ref().expect("prepared CASC index source"),
+                    &ready.index,
+                    &mapping,
+                    limits,
+                    maximum,
+                    keys,
+                    &mut ready.stats,
+                    self.budget,
+                    &self.inv.control,
+                )?;
+                let reference = match serde_json::to_value(blob.reference()) {
+                    Ok(value) => value,
+                    Err(error) => return blob.close_after(Err(error.into())),
+                };
+                (key, SelectedContent::Blob(blob), reference)
+            }
+        };
+        let reported = (|| {
+            let safety = self.budget.safety_only();
+            let size = capture::json_size(
+                &(&ready.root_blob, &ready.build_blob, &ready.cdn_blob),
+                &safety,
+            )?;
+            safety.charge(Cost::retained(size.saturating_mul(4).saturating_add(4096)))?;
+            let mut reading = json!({"contentVerified":true,"source":"installation","pin":self.pin,"catalogSHA256":target.metadata.catalog_sha256,"buildConfiguration":ready.build_blob,"cdnConfiguration":ready.cdn_blob,"encodingKey":target.metadata.encoding_key,"root":ready.root_blob,"entry":entry,"payloadEncodingKey":encoding_key,"content":content_blob,"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"encodingIO":source.io_stats()});
+            if !variant.is_empty() {
+                reading["contentVariant"] = json!(variant);
+            }
+            reading["keySource"] = keys.value();
+            reading["decodedCache"] = serde_json::to_value(&ready.stats)?;
+            ready.stats = decoded_cache::Stats::default();
+            self.inv.control.check()?;
+            self.budget.check()?;
+            Ok(reading)
+        })();
+        match reported {
+            Ok(reading) => Ok(ResolvedFile { content, reading }),
+            Err(error) => match content {
+                SelectedContent::Blob(blob) => blob.close_after(Err(error)),
+                SelectedContent::Bytes(_) => Err(error),
+            },
         }
-        reading["keySource"] = keys.value();
-        reading["decodedCache"] = serde_json::to_value(&ready.stats)?;
-        ready.stats = decoded_cache::Stats::default();
-        self.inv.control.check()?;
-        self.budget.check()?;
-        Ok(File {
-            bytes: content.bytes.into(),
-            reading,
-        })
     }
     pub fn check_source(&self) -> Result<()> {
         self.inv.control.check()?;

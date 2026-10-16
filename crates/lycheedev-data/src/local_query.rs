@@ -27,7 +27,7 @@ mod effective;
 mod file_bytes;
 mod provider;
 mod resolver;
-mod sql_reader;
+pub(crate) mod sql_reader;
 pub use file_bytes::FileBytes;
 pub(crate) mod query_csv;
 #[cfg(test)]

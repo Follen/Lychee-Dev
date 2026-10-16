@@ -28,7 +28,7 @@ pub struct VerifiedCascInput {
     pub data_build: String,
     pub budget: Arc<Budget>,
 }
-/// The remote source cannot outlive its Session or real workspace admission.
+/// The selected source cannot outlive its query or real workspace admission.
 /// Only the immutable body is mutably borrowed for Read/rewind, never detached.
 pub(crate) struct VerifiedView<'a> {
     pub blob: &'a mut evidence::VerifiedBlob,
@@ -38,7 +38,7 @@ pub(crate) struct VerifiedView<'a> {
     pub data_build: &'a str,
     pub budget: &'a Arc<Budget>,
 }
-pub(crate) fn with_remote_casc_verified<R>(
+pub(crate) fn with_casc_verified<R>(
     inv: &Invocation,
     id: u32,
     callback: &mut dyn FnMut(VerifiedView<'_>) -> Result<R>,
@@ -53,24 +53,118 @@ pub(crate) fn with_remote_casc_verified<R>(
     let opened = crate::remote::provider::OpenedScope::open(inv, &budget)?;
     let (mut scope, pin) = opened.admit_asset()?;
     let data = pin.data.as_ref().expect("asset pin admitted");
-    let result = scope.with_verified_file(data, id, &mut |blob, reading| {
-        budget.charge_split(Cost::retained(blob.reference().bytes.try_into().map_err(|_| fault("records.metadata_limit", 3))?), Cost::default())?;
+    let mut consume = |blob: &mut evidence::VerifiedBlob, reading: &Value| {
+        budget.charge_split(
+            Cost::retained(
+                blob.reference()
+                    .bytes
+                    .try_into()
+                    .map_err(|_| fault("records.metadata_limit", 3))?,
+            ),
+            Cost::default(),
+        )?;
         let capture = evidence::commit_verified_capture_budgeted(
             blob,
             evidence::CaptureHeader {
                 media_type: "application/octet-stream",
                 provenance: json!({"kind":"asset","locator":format!("casc:fdid:{id}:ckey:{}",reading["entry"]["contentKey"].as_str().unwrap_or("")),"snapshot":pin.id,"dataBuild":data.full_build}),
-                complete: true, truncated: false,
+                complete: true,
+                truncated: false,
             },
-            &inv.control, &budget.safety_only(),
+            &inv.control,
+            &budget.safety_only(),
         )?;
         callback(VerifiedView {
-            blob, reading, capture: &capture, snapshot: &pin.id,
-            data_build: &data.full_build, budget: &budget,
+            blob,
+            reading,
+            capture: &capture,
+            snapshot: &pin.id,
+            data_build: &data.full_build,
+            budget: &budget,
         })
-    });
+    };
+    let result = (|| {
+        if inv.flag_bool("--cdn") {
+            scope.with_verified_file(data, id, &mut consume)
+        } else {
+            let mut reader = local_query::sql_reader::Reader::new(inv, data, &budget)?;
+            let result = (|| {
+                let mut file = reader.read_verified(id)?;
+                let result = (|| {
+                    reader.verify_source()?;
+                    consume(&mut file.blob, &file.reading)
+                })();
+                file.blob.close_after(result)
+            })();
+            reader.close_after(result)
+        }
+    })();
     scope.finish(result)
 }
+pub(crate) fn with_casc_bytes<R>(
+    inv: &Invocation,
+    id: u32,
+    maximum: usize,
+    callback: &mut dyn FnMut(CascInput, &Arc<Budget>) -> Result<R>,
+) -> Result<R> {
+    inv.control.check()?;
+    let budget = Arc::new(Budget::query_controlled(
+        inv.control.deadline(),
+        inv.control.clone(),
+    ));
+    let (mut scope, pin) =
+        crate::remote::provider::OpenedScope::open(inv, &budget)?.admit_asset()?;
+    let data = pin.data.as_ref().expect("asset pin admitted");
+    let mut consume = |file: local_query::File| {
+        if file.bytes.len() > maximum {
+            return Err(fault("records.demux_input_limit", 3));
+        }
+        let capture = evidence::commit_capture_budgeted(
+            &inv.home,
+            CaptureInput {
+                bytes: &file.bytes,
+                maximum_bytes: maximum,
+                media_type: "application/octet-stream",
+                provenance: json!({"kind":"asset","locator":format!("casc:fdid:{id}:ckey:{}",file.reading["entry"]["contentKey"].as_str().unwrap_or("")),"snapshot":pin.id,"dataBuild":data.full_build}),
+                complete: true,
+                truncated: false,
+            },
+            &inv.control,
+            &budget.safety_only(),
+        )?;
+        callback(
+            CascInput {
+                bytes: file.bytes,
+                reading: file.reading,
+                capture,
+                snapshot: pin.id.clone(),
+                data_build: data.full_build.clone(),
+            },
+            &budget,
+        )
+    };
+    let result = (|| {
+        if inv.flag_bool("--cdn") {
+            let mut result = None;
+            let read = scope.read_batches(data, &[id], &mut |mut files| {
+                let file = files.pop().ok_or_else(|| fault("records.internal", 8))?;
+                result = Some(consume(file)?);
+                Ok(Vec::new())
+            });
+            read.and_then(|()| result.ok_or_else(|| fault("records.internal", 8)))
+        } else {
+            let mut reader = local_query::sql_reader::Reader::new(inv, data, &budget)?;
+            let result = (|| {
+                let file = reader.read(id)?;
+                reader.verify_source()?;
+                consume(file)
+            })();
+            reader.close_after(result)
+        }
+    })();
+    scope.finish(result)
+}
+
 pub fn capture_casc_verified(inv: &Invocation) -> Result<VerifiedCascInput> {
     inv.control.check()?;
     let pin = selection::resolve_pinned(inv)?;
@@ -157,43 +251,60 @@ pub fn local(inv: &Invocation, path: &Path, maximum: usize) -> Result<(Vec<u8>, 
     let parent = canonical
         .parent()
         .ok_or_else(|| fault("records.file_query", 2))?;
-    let directory = storage::Directory::open(parent)?;
-    let name = canonical
-        .file_name()
-        .ok_or_else(|| fault("records.file_query", 2))?;
-    let info = directory.metadata(name)?;
-    if !info.is_file() {
-        return Err(fault("records.file_query", 2));
-    }
-    if info.len() > maximum as u64 {
-        return Err(fault("records.demux_input_limit", 3));
-    }
-    let mut file = directory.open_file(name)?;
-    let current = file.metadata()?;
-    if !current.is_file() || current.len() != info.len() {
-        return Err(fault("records.file_query", 2));
-    }
-    let mut bytes = Vec::new();
-    bytes
-        .try_reserve_exact(info.len() as usize)
-        .map_err(|_| fault("records.demux_input_limit", 3))?;
-    let mut buffer = [0u8; 65536];
-    loop {
-        inv.control.check()?;
-        let remaining = maximum.saturating_sub(bytes.len()).saturating_add(1);
-        let requested = remaining.min(buffer.len());
-        let n = file.read(&mut buffer[..requested])?;
-        inv.control.check()?;
-        if n == 0 {
-            break;
+    struct Check<'a>(&'a lycheedev_core::control::OperationControl);
+    impl storage::FileControl for Check<'_> {
+        type Error = ToolkitError;
+        fn check(&mut self) -> Result<()> {
+            self.0.check()
         }
-        if n > maximum - bytes.len() {
+        fn charge(&mut self, _: storage::FileCost) -> Result<()> {
+            self.0.check()
+        }
+    }
+    let mut check = Check(&inv.control);
+    let directory = storage::Directory::open_controlled(parent, &mut check)?;
+    let result = (|| {
+        let name = canonical
+            .file_name()
+            .ok_or_else(|| fault("records.file_query", 2))?;
+        let info = directory.metadata_controlled(name, &mut check)?;
+        if !info.is_file() {
+            return Err(fault("records.file_query", 2));
+        }
+        if info.len() > maximum as u64 {
             return Err(fault("records.demux_input_limit", 3));
         }
-        bytes.extend_from_slice(&buffer[..n]);
-    }
-    if bytes.len() as u64 != info.len() {
-        return Err(fault("records.file_query", 2));
-    }
-    Ok((bytes, canonical.to_string_lossy().into_owned()))
+        let mut file = directory.open_file_controlled(name, &mut check)?;
+        let read = (|| {
+            let current = file.metadata()?;
+            if !current.is_file() || current.len() != info.len() {
+                return Err(fault("records.file_query", 2));
+            }
+            let mut bytes = Vec::new();
+            bytes
+                .try_reserve_exact(info.len() as usize)
+                .map_err(|_| fault("records.demux_input_limit", 3))?;
+            let mut buffer = [0u8; 65536];
+            loop {
+                inv.control.check()?;
+                let remaining = maximum.saturating_sub(bytes.len()).saturating_add(1);
+                let requested = remaining.min(buffer.len());
+                let n = file.read(&mut buffer[..requested])?;
+                inv.control.check()?;
+                if n == 0 {
+                    break;
+                }
+                if n > maximum - bytes.len() {
+                    return Err(fault("records.demux_input_limit", 3));
+                }
+                bytes.extend_from_slice(&buffer[..n]);
+            }
+            if bytes.len() as u64 != info.len() {
+                return Err(fault("records.file_query", 2));
+            }
+            Ok((bytes, canonical.to_string_lossy().into_owned()))
+        })();
+        storage::finish_file(file, read, &inv.control)
+    })();
+    output::finish_closes(result, directory.close(), &inv.control)
 }

@@ -553,6 +553,13 @@ impl Directory {
     }
 }
 
+/// One consumed stage attempt, including ambiguous rename and all real cleanup.
+/// No owner or numeric handle remains available to retry after this result.
+pub struct PublicationResult<E> {
+    pub result: Result<(), E>,
+    pub publication: StagedPublication,
+    pub cleanup: Vec<io::Error>,
+}
 pub struct Destination {
     path: PathBuf,
     _directory: Directory,
@@ -595,6 +602,169 @@ impl Destination {
         };
         destination.check()?;
         Ok(destination)
+    }
+    /// Acquire the parent under the original control. The caller now owns
+    /// checked close even if the subsequent entry preflight fails. Publication
+    /// always performs its own entry check; this is not permission to overwrite.
+    pub fn prepare_controlled<C: FileControl>(
+        output: &Path,
+        overwrite: bool,
+        control: &mut C,
+    ) -> Result<Self, C::Error> {
+        control.check()?;
+        control.charge(FileCost {
+            allocation_bytes: output.as_os_str().len() as u64 * 16 + 1024,
+            work_units: output.as_os_str().len() as u64 * 16 + 1024,
+            ..FileCost::default()
+        })?;
+        if output.as_os_str().is_empty()
+            || matches!(output.as_os_str().encode_wide().last(), Some(47 | 92))
+        {
+            return Err(invalid("output must name a file").into());
+        }
+        // GetFullPathName (used by absolute) normalizes trailing dots/spaces.
+        // Validate original components before that normalization can hide them.
+        if output
+            .components()
+            .any(|component| matches!(component, Component::Normal(name) if !valid_name(name)))
+        {
+            return Err(invalid("output contains a device, stream or ambiguous name").into());
+        }
+        let path = std::path::absolute(output)?;
+        let parent = path
+            .parent()
+            .ok_or_else(|| invalid("output requires an existing parent"))?;
+        let name = path
+            .file_name()
+            .ok_or_else(|| invalid("output must name a file"))?;
+        if !valid_name(name) {
+            return Err(invalid("output contains a device, stream or ambiguous name").into());
+        }
+        let directory = Directory::open_controlled(parent, control)?;
+        let destination = Self {
+            path,
+            _directory: directory,
+            overwrite,
+        };
+        Ok(destination)
+    }
+    /// Verify the held parent and current output entry under the caller scope.
+    pub fn check_controlled<C: FileControl>(&self, control: &mut C) -> Result<(), C::Error> {
+        self._directory.verify_controlled(control)?;
+        let found = self._directory.optional_metadata_controlled(
+            self.path.file_name().expect("validated name"),
+            control,
+        )?;
+        if let Some(metadata) = found {
+            if !self.overwrite
+                || !metadata.is_file()
+                || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "output already exists or is not a regular file",
+                )
+                .into());
+            }
+        }
+        control.check()
+    }
+    /// Controlled assets use the already reviewed original-handle staged state
+    /// machine. Legacy publishers keep their existing API and behavior.
+    pub fn publish_reader_controlled<C: FileControl>(
+        &self,
+        reader: &mut impl Read,
+        length: u64,
+        maximum: u64,
+        control: &mut C,
+    ) -> PublicationResult<C::Error> {
+        let prepare = (|| {
+            control.check()?;
+            if length > maximum {
+                return Err(invalid("output exceeds publication budget").into());
+            }
+            self.check_controlled(control)?;
+            StagedFile::create(&self._directory, control)
+        })();
+        let mut stage = match prepare {
+            Ok(stage) => stage,
+            Err(error) => {
+                return PublicationResult {
+                    result: Err(error),
+                    publication: StagedPublication::NotPublished,
+                    cleanup: Vec::new(),
+                };
+            }
+        };
+        let result = (|| {
+            let mut buffer = [0; 65536];
+            let mut remaining = length;
+            while remaining != 0 {
+                control.check()?;
+                let count = buffer.len().min(remaining.min(usize::MAX as u64) as usize);
+                control.charge(FileCost {
+                    io_operations: 1,
+                    work_units: 1,
+                    ..FileCost::default()
+                })?;
+                let n = reader.read(&mut buffer[..count]).map_err(C::Error::from)?;
+                control.check()?;
+                if n == 0 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "output source ended before its declared length",
+                    )
+                    .into());
+                }
+                control.charge(FileCost {
+                    io_operations: 1,
+                    work_units: 1,
+                    ..FileCost::default()
+                })?;
+                stage.write_all(&buffer[..n]).map_err(C::Error::from)?;
+                remaining -= n as u64;
+            }
+            control.check()?;
+            control.charge(FileCost {
+                io_operations: 1,
+                work_units: 1,
+                ..FileCost::default()
+            })?;
+            if reader.read(&mut buffer[..1]).map_err(C::Error::from)? != 0 {
+                return Err(invalid("output source exceeds its declared length").into());
+            }
+            control.check()?;
+            control.charge(FileCost {
+                io_operations: 2,
+                work_units: 1,
+                ..FileCost::default()
+            })?;
+            stage.seal().map_err(C::Error::from)?;
+            control.check()?;
+            self.check_controlled(control)?;
+            let state = if self.overwrite {
+                stage.replace_name(self.path.file_name().expect("validated name"), control)?
+            } else {
+                stage.publish_name(self.path.file_name().expect("validated name"), control)?
+            };
+            if state == StagedPublication::NotPublished {
+                return Err(
+                    io::Error::new(io::ErrorKind::AlreadyExists, "output already exists").into(),
+                );
+            }
+            Ok(())
+        })();
+        let publication = stage.publication();
+        let cleanup = stage.close();
+        PublicationResult {
+            result,
+            publication,
+            cleanup,
+        }
+    }
+    /// Consume the held parent identity once after publication or failure.
+    pub fn close(self) -> Result<(), Vec<io::Error>> {
+        self._directory.close()
     }
     pub fn path(&self) -> &Path {
         &self.path
@@ -1073,3 +1243,7 @@ mod admission_tests;
 
 mod staged;
 pub use staged::{StagedFile, StagedPublication};
+
+#[cfg(test)]
+#[path = "destination/asset_publication_tests.rs"]
+mod asset_publication_tests;

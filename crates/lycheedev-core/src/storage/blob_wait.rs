@@ -4,6 +4,19 @@ use super::*;
 use std::time::{Duration, Instant};
 
 impl ExclusiveLock {
+    /// Fixed-Go multi-file publishers share one original lock handle while
+    /// waiting, with invocation-first supplemental checks on every attempt.
+    pub fn resource_wait_controlled_with_check(
+        scope: &Path,
+        resource: &str,
+        control: &crate::control::OperationControl,
+        mut supplemental: impl FnMut() -> Result<()>,
+    ) -> Result<Self> {
+        Self::resource_wait_checked(scope, resource, Some(control.deadline()), || {
+            control.check()?;
+            supplemental()
+        })
+    }
     /// The original deadline only caps sleeps; `check` owns typed invocation and
     /// independent budget stops. One open File is retained across every retry.
     pub(crate) fn resource_wait_checked(

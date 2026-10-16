@@ -67,6 +67,33 @@ pub(crate) fn read_verified_content(
     )
 }
 #[allow(clippy::too_many_arguments)]
+pub(crate) fn read_verified_content_in_session(
+    home: &Path,
+    source: &casc::QuerySource<'_>,
+    index: &dyn crate::metadata_format::EncodingLookup,
+    record: &EncodingRecord,
+    limits: casc::Limits,
+    maximum: usize,
+    keys: &mut keys::Context,
+    stats: &mut Stats,
+    budget: &Budget,
+    control: &OperationControl,
+) -> Result<(String, evidence::VerifiedBlob)> {
+    read_verified_content_source(
+        home,
+        source.root(),
+        index,
+        record,
+        limits,
+        maximum,
+        keys,
+        stats,
+        budget,
+        control,
+        Some(source),
+    )
+}
+#[allow(clippy::too_many_arguments)]
 fn read_verified_content_source(
     home: &Path,
     root: &Path,

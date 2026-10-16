@@ -126,11 +126,6 @@ pub fn run(inv: &Invocation) -> Result<Outcome> {
     {
         return Err(fault("records.export_options", 2));
     }
-    let destination = output::destination(
-        &inv.home,
-        Path::new(output_path),
-        inv.flag_bool("--overwrite"),
-    )?;
     let options = Options {
         encoding,
         mipmap,
@@ -145,39 +140,14 @@ pub fn run(inv: &Invocation) -> Result<Outcome> {
                 .collect()
         },
     };
+    let destination =
+        output::destination_scoped(inv, Path::new(output_path), inv.flag_bool("--overwrite"))?;
     let mut progress = Progress::default();
-    let result = if inv.flag_bool("--cdn") {
-        input::with_remote_casc_verified(inv, id, &mut |source| {
-            progress.committed(source.capture);
-            publish(inv, &destination, source, &options, &mut progress)
-        })
-    } else {
-        // Preserve the existing local source selection/verified body path; only
-        // borrow its bytes for the shared export consumer and checked-close it.
-        match input::capture_casc_verified(inv) {
-            Err(error) => Err(error),
-            Ok(mut source) => {
-                progress.committed(&source.capture);
-                let result = publish(
-                    inv,
-                    &destination,
-                    input::VerifiedView {
-                        blob: &mut source.blob,
-                        reading: &source.reading,
-                        capture: &source.capture,
-                        snapshot: &source.snapshot,
-                        data_build: &source.data_build,
-                        budget: &source.budget,
-                    },
-                    &options,
-                    &mut progress,
-                );
-                source.blob.close_after(result)
-            }
-        }
-    };
-    // The remote callback returns before VerifiedBlob, Session and admission
-    // checked-close. Destination still has its inherited native Drop boundary.
+    let result = input::with_casc_verified(inv, id, &mut |source| {
+        progress.committed(source.capture);
+        publish(inv, &destination, source, &options, &mut progress)
+    });
+    let result = output::finish_closes(result, destination.close(), &inv.control);
     progress.finish(result)
 }
 fn publish(
@@ -194,15 +164,10 @@ fn publish(
         pixels,
         maximum,
     } = options;
-    // Fixed Go export image/capture/output work is outside FileQuery usage.
-    // Keep the existing local accounting behavior until its own admitted path
-    // is migrated; remote uses the same shared safety ledger without Go units.
+    // Fixed Go image/capture/output work is outside FileQuery usage on both
+    // sources. Keep actual Rust work/allocation in the same safety ledger.
     let safety = source.budget.safety_only();
-    let meter = if inv.flag_bool("--cdn") {
-        &safety
-    } else {
-        source.budget.as_ref()
-    };
+    let meter = &safety;
     let encoded = if *encoding == "raw" {
         None
     } else {
@@ -275,13 +240,33 @@ fn publish(
         .as_u64()
         .expect("committed artifact length");
     let _copy_buffer = source.budget.reserve_retained(65536)?;
-    meter.charge(crate::resource::Cost::work(bytes.div_ceil(65536) as usize))?;
+    let mut observed = |state| {
+        if state == lycheedev_core::storage::StagedPublication::Published {
+            progress.output_published = true;
+        }
+    };
     if let Some(encoded) = &encoded {
-        output::publish(inv, destination, &encoded.bytes, *maximum)?;
+        output::publish_reader_scoped(
+            inv,
+            destination,
+            &mut std::io::Cursor::new(&encoded.bytes),
+            bytes,
+            *maximum,
+            Some(source.budget),
+            &mut observed,
+        )?;
     } else {
-        output::publish_reader(inv, destination, source.blob, bytes, *maximum)?;
+        output::publish_reader_scoped(
+            inv,
+            destination,
+            source.blob,
+            bytes,
+            *maximum,
+            Some(source.budget),
+            &mut observed,
+        )?;
     }
-    progress.output_published = true;
+
     let mut outcome = Outcome::new(manifest);
     outcome.selection = json!({"snapshot":source.snapshot});
     outcome.provenance = vec![source.capture.clone(), capture];

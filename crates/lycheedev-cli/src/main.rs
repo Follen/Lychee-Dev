@@ -1244,12 +1244,45 @@ fn capture_commit_leaf(error: &ToolkitError) -> bool {
         _ => false,
     }
 }
-// Traverse only the two typed cleanup envelopes emitted by the actual owner
+// Publication facts use the existing error.details envelope. Demux has one
+// source, up to 2^24 frames and one manifest; its bound is not export's three.
+fn asset_publication_context(error: &ToolkitError) -> bool {
+    let details = &error.details;
+    let Ok(primary) = serde_json::from_value::<ToolkitError>(details["primary"].clone()) else {
+        return false;
+    };
+    if primary.code != error.code || primary.exit_code != error.exit_code {
+        return false;
+    }
+    let nonempty_path = |value: &Value| value.as_str().is_some_and(|path| !path.is_empty());
+    match details["schema"].as_str() {
+        Some("lycheedev.asset-publication-error.v1") => {
+            matches!(details["publication"]["state"].as_str(),
+                Some("not_published" | "published" | "unknown"))
+                && nonempty_path(&details["publication"]["path"])
+        }
+        Some("lycheedev.demux-committed-error.v1") => {
+            let (Some(captures), Some(outputs)) =
+                (details["completedCaptures"].as_array(), details["publishedOutputs"].as_array())
+            else { return false; };
+            (1..=((1usize << 24) + 2)).contains(&captures.len())
+                && outputs.len() <= (1usize << 24) + 1
+                && outputs.iter().all(nonempty_path)
+                && captures.iter().all(|value| value.as_str().is_some_and(|id| {
+                    id.len() == 68 && id.starts_with("CAP-")
+                        && id.as_bytes()[4..].iter().all(|byte|
+                            byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
+                }))
+        }
+        _ => false,
+    }
+}
+// Traverse only the typed cleanup envelopes emitted by the actual owner
 // boundaries. Arbitrary nested JSON cannot authenticate publication facts.
 fn capture_commit_context(error: &ToolkitError) -> bool {
     let mut pending = vec![error.clone()];
     while let Some(error) = pending.pop() {
-        if capture_commit_leaf(&error) {
+        if capture_commit_leaf(&error) || asset_committed_context(&error) || asset_publication_context(&error) {
             return true;
         }
         let details = &error.details;
@@ -2356,6 +2389,68 @@ mod tests {
             assert!(!capture_commit_context(&malformed));
             let arbitrary = primary.clone().with_details(json!({"payload":error}));
             assert!(!capture_commit_context(&arbitrary));
+        }
+    }
+    #[test]
+    fn asset_output_publication_and_demux_facts_survive_typed_cleanup() {
+        use lycheedev_core::metadata::historical_write::finish_historical;
+        let primary = ToolkitError::new("records.metadata_limit", "allocation stopped", 3);
+        let cleanup = ToolkitError::new("external.io", "checked close failed", 5);
+        for state in ["not_published", "published", "unknown"] {
+            let publication = primary.clone().with_details(json!({
+                "schema":"lycheedev.asset-publication-error.v1", "primary":primary,
+                "publication":{"state":state,"path":"C:/out/帧.webp"}
+            }));
+            let joined = finish_historical::<()>(Err(publication.clone()), Err(cleanup.clone())).unwrap_err();
+            let ids: Vec<_> = (0..5).map(|i| format!("CAP-{}", format!("{i:x}").repeat(64))).collect();
+            let demux = joined.clone().with_details(json!({
+                "schema":"lycheedev.demux-committed-error.v1", "primary":joined,
+                "completedCaptures":ids,"publishedOutputs":["C:/out/frame-1.webp"]
+            }));
+            for error in [publication, joined, demux] {
+                assert!(capture_commit_context(&error));
+                for command in ["inspect", "export", "demux"] {
+                    let inv = parse(&args(&["asset", command])).unwrap();
+                    let details = error.details.clone();
+                    let message = error.message.clone();
+                    let actual = command_fault(&inv, error.clone());
+                    assert_eq!(actual.message, message);
+                    let public = envelope(&Err(actual));
+                    assert_eq!(public["error"]["details"], details);
+                    assert_eq!(public["captures"], json!([]));
+                    assert!(public.get("publishedOutputs").is_none());
+                }
+            }
+        }
+    }
+    #[test]
+    fn asset_output_publication_rejects_malformed_facts() {
+        let primary = ToolkitError::new("records.metadata_limit", "limit", 3);
+        let inv = parse(&args(&["asset", "export"])).unwrap();
+        let valid = json!({"schema":"lycheedev.asset-publication-error.v1", "primary":primary,
+            "publication":{"state":"unknown","path":"out.webp"}});
+        for (pointer, replacement) in [
+            ("/schema", json!("unrecognized")), ("/primary", json!(null)),
+            ("/primary/code", json!("external.io")), ("/primary/exit_code", json!(5)),
+            ("/publication/state", json!("maybe")), ("/publication/path", json!("")),
+        ] {
+            let mut details = valid.clone();
+            *details.pointer_mut(pointer).unwrap() = replacement;
+            let error = primary.clone().with_details(details);
+            assert!(!capture_commit_context(&error), "{pointer}");
+            assert_eq!(command_fault(&inv, error).details, json!({"stage":"query"}));
+        }
+        let demux = json!({"schema":"lycheedev.demux-committed-error.v1", "primary":primary,
+            "completedCaptures":[format!("CAP-{}", "a".repeat(64))], "publishedOutputs":[]});
+        assert!(asset_publication_context(&primary.clone().with_details(demux.clone())));
+        for (pointer, replacement) in [
+            ("/completedCaptures", json!([])),
+            ("/completedCaptures", json!([format!("CAP-{}", "A".repeat(64))])),
+            ("/publishedOutputs", json!([""])), ("/publishedOutputs", json!(null)),
+        ] {
+            let mut details = demux.clone();
+            *details.pointer_mut(pointer).unwrap() = replacement;
+            assert!(!capture_commit_context(&primary.clone().with_details(details)), "{pointer}");
         }
     }
     #[test]

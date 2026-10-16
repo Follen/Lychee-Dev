@@ -388,6 +388,40 @@ pub fn commit_capture_budgeted_referencing(
     commit_capture_referencing(home, input, &[], references, control, meter)
 }
 
+/// Authenticate all typed manifest references in the same writer transaction,
+/// while emitting only the caller's exact ordered identity dependencies.
+/// Demux keeps frame references in its bounded payload and only the source in
+/// Dependencies, so a valid 16 MiB manifest does not overflow a 1 MiB document.
+pub fn commit_capture_budgeted_with_references(
+    home: &Path,
+    input: CaptureInput<'_>,
+    dependencies: &[&str],
+    references: &[&str],
+    control: &OperationControl,
+    meter: &impl CaptureAccounting,
+) -> Result<Value> {
+    // Declared dependencies are always authenticated, even if an additional
+    // references caller omitted one. Preserve additional-reference order first.
+    if dependencies.iter().all(|id| references.contains(id)) {
+        return commit_capture_referencing(home, input, dependencies, references, control, meter);
+    }
+    check(control, meter)?;
+    let capacity = references
+        .len()
+        .checked_add(dependencies.len())
+        .ok_or_else(|| ToolkitError::invalid("capture reference capacity overflow"))?;
+    meter.admit_allocation(capacity.saturating_mul(std::mem::size_of::<&str>()))?;
+    let mut required = Vec::with_capacity(capacity);
+    required.extend_from_slice(references);
+    for id in dependencies {
+        check(control, meter)?;
+        if !required.contains(id) {
+            required.push(id);
+        }
+    }
+    commit_capture_referencing(home, input, dependencies, &required, control, meter)
+}
+
 fn commit_capture_referencing(
     home: &Path,
     input: CaptureInput<'_>,
@@ -636,3 +670,7 @@ mod tests {
 
 #[cfg(test)]
 mod lifecycle_tests;
+
+#[cfg(test)]
+#[path = "budgeted/manifest_reference_tests.rs"]
+mod manifest_reference_tests;

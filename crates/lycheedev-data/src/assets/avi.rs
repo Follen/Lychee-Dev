@@ -70,10 +70,22 @@ impl Chunk<'_> {
 }
 pub fn parse<'a>(
     data: &'a [u8],
-    mut limits: Limits,
+    limits: Limits,
     control: &OperationControl,
 ) -> Result<Container<'a>> {
+    parse_scoped(data, limits, control, None)
+}
+fn check(control: &OperationControl, budget: Option<&crate::resource::Budget>) -> Result<()> {
     control.check()?;
+    budget.map_or(Ok(()), crate::resource::Budget::check)
+}
+pub(crate) fn parse_scoped<'a>(
+    data: &'a [u8],
+    mut limits: Limits,
+    control: &OperationControl,
+    budget: Option<&crate::resource::Budget>,
+) -> Result<Container<'a>> {
+    check(control, budget)?;
     if limits.max_frames == 0 {
         limits.max_frames = 100_000;
     }
@@ -110,7 +122,7 @@ pub fn parse<'a>(
     let mut movi = None;
     let mut pos = 12;
     while data.len() - pos >= 8 {
-        control.check()?;
+        check(control, budget)?;
         let current = chunk(data, pos, data.len())?;
         match current.id {
             b"LIST" => {
@@ -122,7 +134,7 @@ pub fn parse<'a>(
                         movi = Some((pos + 12, current.end));
                     }
                 } else {
-                    result.scan_headers(data, pos + 12, current.end, 1, control)?;
+                    result.scan_headers(data, pos + 12, current.end, 1, control, budget)?;
                 }
             }
             b"movi" => {
@@ -148,7 +160,7 @@ pub fn parse<'a>(
     let mut timestamp = 0.0;
     let mut retained = 0usize;
     while end - pos >= 8 {
-        control.check()?;
+        check(control, budget)?;
         let current = chunk(data, pos, end)?;
         let kind = match current.id {
             b"00dc" => "00dc",
@@ -178,10 +190,33 @@ pub fn parse<'a>(
                 result.truncated = true;
                 result.truncation_reason = reason;
             } else {
-                result
-                    .frames
-                    .try_reserve(1)
-                    .map_err(|_| fault("records.frame_limit_exceeded", 3))?;
+                if result.frames.len() == result.frames.capacity() {
+                    let capacity = result.frames.capacity().saturating_mul(2).max(4);
+                    if let Some(budget) = budget {
+                        // Admit the whole replacement while the old allocation
+                        // may still exist; private safety does not change Go usage.
+                        budget
+                            .safety_only()
+                            .charge(crate::resource::Cost::metadata(
+                                capacity
+                                    .checked_mul(std::mem::size_of::<Frame<'_>>())
+                                    .ok_or_else(|| fault("records.metadata_limit", 3))?,
+                            ))?;
+                    }
+                    result
+                        .frames
+                        .try_reserve_exact(capacity - result.frames.len())
+                        .map_err(|_| fault("records.frame_limit_exceeded", 3))?;
+                }
+                if let Some(budget) = budget {
+                    // VP9's four candidate layouts each allocate at most eight
+                    // usize sizes; the successful one stays with this frame.
+                    budget
+                        .safety_only()
+                        .charge(crate::resource::Cost::metadata(
+                            4 * 8 * std::mem::size_of::<usize>(),
+                        ))?;
+                }
                 let payload = &data[pos + 8..current.end];
                 result.frames.push(Frame {
                     timestamp,
@@ -197,7 +232,7 @@ pub fn parse<'a>(
         }
         pos = current.next(end);
     }
-    control.check()?;
+    check(control, budget)?;
     Ok(result)
 }
 impl Container<'_> {
@@ -208,19 +243,20 @@ impl Container<'_> {
         end: usize,
         depth: usize,
         control: &OperationControl,
+        budget: Option<&crate::resource::Budget>,
     ) -> Result<()> {
         if depth > 16 {
             return Err(fault("records.avi_invalid", 4));
         }
         while end - pos >= 8 {
-            control.check()?;
+            check(control, budget)?;
             let current = chunk(data, pos, end)?;
             match current.id {
                 b"LIST" => {
                     if current.size < 4 {
                         return Err(fault("records.avi_invalid", 4));
                     }
-                    self.scan_headers(data, pos + 12, current.end, depth + 1, control)?;
+                    self.scan_headers(data, pos + 12, current.end, depth + 1, control, budget)?;
                 }
                 b"avih" => {
                     if current.size < 4 {

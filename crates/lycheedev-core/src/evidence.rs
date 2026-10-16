@@ -31,7 +31,8 @@ pub use bounded::{
 };
 pub use budgeted::{
     CaptureAccounting, CaptureHeader, commit_capture_budgeted, commit_capture_budgeted_referencing,
-    commit_capture_budgeted_with_dependencies, commit_verified_capture_budgeted,
+    commit_capture_budgeted_with_dependencies, commit_capture_budgeted_with_references,
+    commit_verified_capture_budgeted,
 };
 pub use dependencies::{
     GoCaptureDecode, GoSignedInteger, GoTimestamp, normalize_go_json_strings,

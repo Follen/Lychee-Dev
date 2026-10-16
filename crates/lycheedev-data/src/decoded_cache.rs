@@ -14,6 +14,7 @@ use std::{path::Path, time::Instant};
 mod streaming;
 pub(crate) use streaming::{
     read_content_controlled, read_content_in_session, read_verified_content,
+    read_verified_content_in_session,
 };
 #[derive(Default, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

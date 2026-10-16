@@ -290,14 +290,16 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 
 - [ ] 集中验证历史capture/Hotfix/effective SQL原控制与独立Budget读取链（8新回归）、默认SQL lexer/parser/lowering控制（17新回归）；公共wildcard hook停止在parse后、lowering/provider前返回。继续UNION后缀/复合首错、evidence keep/bundle/remove与Source默认存储闭环，不把语法检查算Rust通过。
 
-- [ ] 集中执行默认evidence keep/bundle 12项新回归与owned return/union 4项管线测试；保原版普通语义及历史差异完整证据。继续recoverable remove与Source存储闭环，已发布/unknown输出不能重放或伪撤回。
+- [ ] 集中执行默认evidence keep/bundle 12项新回归与owned return/union 4项管线测试；保原版普通语义及历史差异完整证据。recoverable remove与Source存储闭环后继已保存待测，已发布/unknown输出不能重放或伪撤回。
 
 - [ ] 集中执行Source默认存储闭环25新回归：Metadata generation/单次intent消费、原scope缓存发布、manifest CAS与checked cleanup。4唯一目标已接；90秒、2GiB与不自动prune边界不变，实际Windows会话/资源尚未验收。
 
-- [ ] 集中验证统一SQL retrieval入口21新回归与c5真实失败修复；保UNION分支CTE声明/执行scope差别，补Pratt混合深度首错与三段非法字段分类。e8适配层41过2失败，修真实expression execution scope后保原断言重跑；workspace编译仍以真实结果为准。
+- [ ] 集中验证统一SQL retrieval入口21新回归与c5真实失败修复；保UNION分支CTE声明/执行scope差别，验证已实现的Pratt混合深度首错与三段非法字段分类。e8适配层41过2失败，修真实expression execution scope后保原断言重跑；workspace编译仍以真实结果为准。
 
 - [ ] 统一重跑evidence remove15新回归、owned scope/selected checker19新回归及c5 SQL/Data修正fixture；原e8 2panic和vctip forced收尾分开验，不能只修断言就称owner正常。其余实现限已确认Go323/43checker差距，不扩SQL能力。
 
-- [ ] 有限收口：Data assets准入/CDN与共享transport、Wago/Raidbots控制3组；SQL非法字段首错/RHS深度2项；Emmy selected实际函数来源/docs统一1组。完成默认链并集中修闭实际失败后进入第一轮架构/功能/Skill/Source/Data质量审计，不扩通用SQL能力。
+- [ ] 有限收口：Data assets准入/CDN已接待测，剩listfile/search共享transport与Wago/Raidbots控制2组；SQL非法字段首错/RHS深度2项和Emmy selected实际函数来源/docs统一1组已保存待测。完成默认链并集中修闭实际失败后进入第一轮架构/功能/Skill/Source/Data质量审计，不扩通用SQL能力。
 
-- [ ] SQL最后2入口（7新回归）与Emmy实际函数来源完整消费者（17新回归）已组合，转集中native编译/旧完整差分/43checker/实际Source测试；静态扫完不算运行通过。Data三组未齐入口继续完成后统一收口。
+- [ ] SQL最后2入口（7新回归）与Emmy实际函数来源完整消费者（17新回归）已组合，转集中native编译/旧完整差分/43checker/实际Source测试；静态扫完不算运行通过。Data余下两组入口继续完成后统一收口。
+
+- [ ] 集中验证默认local/CDN export与demux新15项及CLI两项：同query准入、单遍输出、目录租约、source/frame/manifest引用事务、完整wire与published/unknown错误事实；保既有全部asset回归，不以静态解析当运行通过。

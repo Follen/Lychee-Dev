@@ -271,7 +271,7 @@ fn actual_remote_captured_consumer_cancel_is_terminal_and_releases_admission() {
     let inv = f.invocation("unused");
     let mut calls = 0;
     let mut id = String::new();
-    let error = crate::assets::input::with_remote_casc_verified(&inv, 7, &mut |source| {
+    let error = crate::assets::input::with_casc_verified(&inv, 7, &mut |source| {
         calls += 1;
         id = source.capture["id"].as_str().unwrap().to_owned();
         let mut bytes = [0; 2];
@@ -300,3 +300,5 @@ fn actual_remote_captured_consumer_cancel_is_terminal_and_releases_admission() {
     probe.finish(Ok(())).unwrap();
     f.close();
 }
+
+mod scoped_demux;

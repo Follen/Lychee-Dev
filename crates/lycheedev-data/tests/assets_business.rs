@@ -128,7 +128,7 @@ fn registered_demux_publishes_exact_frames_and_manifest_last_with_verified_captu
     assert_eq!(result.data["frames"][1]["timestamp"], 40000.0);
     assert_eq!(fs::read(output.join("frame-000001.00dc")).unwrap(), [1, 2, 3, 4, 5, 0xc1, 2, 3, 0xc1]);
     assert_eq!(fs::read(output.join("frame-000002.00db")).unwrap(), [4, 5]);
-    let manifest = fs::read(output.join("demux-manifest.json")).unwrap(); assert_eq!(serde_json::from_slice::<Value>(&manifest).unwrap(), result.data);
+    let manifest = fs::read(output.join("demux-manifest.json")).unwrap(); scoped_consumers::assert_manifest_value(&manifest, &result.data);
     fs::write(&input, b"broken input").unwrap();
     let conflict = lycheedev_data::dispatch(&inv).unwrap_err(); assert_eq!(conflict.code, "records.export_conflict");
     assert_eq!(fs::read(output.join("demux-manifest.json")).unwrap(), manifest);
@@ -235,3 +235,6 @@ fn authenticated_local_casc_raw_export_captures_exact_bytes_and_preserves_confli
     assert_eq!(fs::read(&external).unwrap(), raw);
 }
 
+
+#[path = "support/assets_scoped.rs"]
+mod scoped_consumers;
