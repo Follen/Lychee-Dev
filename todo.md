@@ -25,6 +25,8 @@ Complete end-to-end production behavior first, then add the corresponding tests 
 - [ ] Source engine-host boundary: centralize unchanged Lua51/diagnostic configuration and authenticated-input policy, verify complete config identity; keep engine types local without copying AST/Graph or modifying upstream.
 - [ ] Consolidate the four migrations with the retained Core/Data ownership models and legitimate Live-to-Delivery dependency. Then perform the mandatory whole-repository architecture audit, followed by the remaining final audit stages. Declared tests and static checks alone do not close these items.
 
+- [ ] Verify the connected demand-original pipeline: byte-identical borrowed metadata, moved cold text, explicit empty documents, one authenticated Git request stream, bounded real-capacity memo, original cancellation and cleanup, and actual-demand cache publication. Thirty-one new tests are declared; run the new process::git_batch::tests plus existing index/git/query_store/batch/refs_context groups. Preserve full 4036/52 comparisons and measure index→precise/broad plus independent cold/warm query, since publication work moves to consumption rather than disappearing.
+
 ## 0. Documentation scope
 
 - [x] Freeze Go v3.2.0 at 3057a9666ab078270b63c7f06de748069b0d1f4b and record Rust starting HEAD.

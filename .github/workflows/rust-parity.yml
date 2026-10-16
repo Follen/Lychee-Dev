@@ -408,6 +408,9 @@ jobs:
       - name: Run actual Source child scope and cleanup fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-source-process --one-shot -- test --locked --offline -p lycheedev-source --lib process::tests -j 1
+      - name: Run demand-only Git child ownership fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: node tools/rust-cargo.mjs --owner ci-source-git-demand --one-shot -- test --locked --offline -p lycheedev-source --lib process::git_batch::tests -j 1
       - name: Run Source pending completion control and cause ordering fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-source-completion --one-shot -- test --locked --offline -p lycheedev-source --lib process::lifetime::completion_tests -j 1

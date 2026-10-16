@@ -369,7 +369,7 @@ mod tests {
         let mut index = index::Index {
             documents: vec![index::Document {
                 path: "Entry.lua".into(),
-                text: vec![],
+                text: None,
                 sha256: storage::sha256(text.as_bytes()),
                 bytes: text.len(),
                 facts: Default::default(),
@@ -380,7 +380,7 @@ mod tests {
             compatibility_gaps: Default::default(),
             home: Default::default(),
         };
-        for(path,text)in &snapshot.load_documents{index.documents.push(index::Document{path:path.clone(),text:vec![],sha256:storage::sha256(text.as_bytes()),bytes:text.len(),facts:Default::default()});}
+        for(path,text)in &snapshot.load_documents{index.documents.push(index::Document{path:path.clone(),text:None,sha256:storage::sha256(text.as_bytes()),bytes:text.len(),facts:Default::default()});}
         (
             StoredMaterial {
                 schema: SCHEMA.into(),

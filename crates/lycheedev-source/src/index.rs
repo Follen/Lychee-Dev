@@ -1,5 +1,7 @@
 mod facts_pipeline;
 mod original_cache;
+#[cfg(test)]
+pub(crate) use original_cache::take_read_observations;
 mod profile;
 use crate::{
     facts::{self, Facts},
@@ -13,6 +15,7 @@ use profile::{Phase, Profile};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     io::Read,
     path::{Path, PathBuf},
@@ -65,7 +68,8 @@ fn render_span(raw: &[u8], hash: &str, first: usize, last: usize) -> Value {
 pub struct Document {
     pub path: String,
     #[serde(skip)]
-    pub text: Vec<u8>,
+    // Some(empty) is an authenticated empty document; None needs recovery.
+    pub text: Option<Vec<u8>>,
     pub sha256: String,
     pub bytes: usize,
     #[serde(skip)]
@@ -576,19 +580,7 @@ fn build_uncached_profiled(
     let files = git::tree_with_control(home, pin, control)?;
     drop(tree_phase);
     let cache_owner = lycheedev_core::cache::SourceFactsCache::open(home, control)?;
-    let result = (|| {
-        let originals = lycheedev_core::cache::SourceOriginalCache::open(home, control)?;
-        let result = build_uncached_cached(
-            home,
-            pin,
-            control,
-            profile,
-            &files,
-            started,
-            (&cache_owner, &originals),
-        );
-        originals.finish(result, control)
-    })();
+    let result = build_uncached_cached(home, pin, control, profile, &files, started, &cache_owner);
     cache_owner.finish(result, control)
 }
 fn build_uncached_cached(
@@ -598,10 +590,7 @@ fn build_uncached_cached(
     profile: &Profile,
     files: &[git::TreeFile],
     started: std::time::Instant,
-    (cache_owner, originals): (
-        &lycheedev_core::cache::SourceFactsCache,
-        &lycheedev_core::cache::SourceOriginalCache,
-    ),
+    cache_owner: &lycheedev_core::cache::SourceFactsCache,
 ) -> Result<Index> {
     let deadline = control.deadline();
     let (mut cached, mut parsed_documents, mut read_bytes) = (0usize, 0usize, 0usize);
@@ -692,9 +681,6 @@ fn build_uncached_cached(
             } else {
                 parsed_documents += 1;
             }
-            let publish_phase = profile.span(Phase::OriginalPublish);
-            originals.publish(&sha256, &data, control)?;
-            drop(publish_phase);
             let _symbols_phase = profile.span(Phase::Symbols);
             for (ordinal, d) in facts.declarations.iter().enumerate() {
                 let mut s = Symbol {
@@ -768,7 +754,7 @@ fn build_uncached_cached(
             }
             index.documents.push(Document {
                 path: file.path.clone(),
-                text: data,
+                text: Some(data),
                 sha256,
                 bytes: file.bytes,
                 facts,
@@ -826,30 +812,20 @@ fn check_search(control: Option<&lycheedev_core::control::OperationControl>) -> 
     control.map_or(Ok(()), lycheedev_core::control::OperationControl::check)
 }
 impl Index {
-    fn read_document(&self, doc: &Document) -> Result<Vec<u8>> {
-        self.read_document_controlled(doc, None)
+    pub(crate) fn original_reader(&self) -> original_cache::OriginalReader<'_> {
+        original_cache::OriginalReader::new(self)
     }
+    #[cfg(test)]
     pub(crate) fn read_document_controlled(
         &self,
         doc: &Document,
         control: Option<&lycheedev_core::control::OperationControl>,
     ) -> Result<Vec<u8>> {
-        check_search(control)?;
-        if !doc.text.is_empty() {
-            let mut bytes = Vec::with_capacity(doc.text.len());
-            for block in doc.text.chunks(64 << 10) {
-                check_search(control)?;
-                bytes.extend_from_slice(block);
-            }
-            check_search(control)?;
-            return Ok(bytes);
-        }
-        match control {
-            Some(control) => original_cache::read(&self.home, &self.summary, doc, control),
-            // Standalone compatibility helpers have no invocation. Production
-            // query/inspect/context always pass their original control above.
-            None => original_cache::read(&self.home, &self.summary, doc, &Default::default()),
-        }
+        let standalone = lycheedev_core::control::OperationControl::default();
+        let control = control.unwrap_or(&standalone);
+        let mut originals = self.original_reader();
+        let result = originals.read(doc, control).map(Cow::into_owned);
+        originals.finish(result, control)
     }
     pub fn coverage(&self) -> Value {
         let mut v = json!({"analyzedDocuments":self.documents.len(),"skippedDocuments":self.summary["skippedDocuments"],"diagnostics":self.summary["diagnostics"],"complete":self.summary["complete"]});
@@ -863,18 +839,23 @@ impl Index {
         let Some(doc) = self.documents.iter().find(|d| d.path == path) else {
             return Ok(path.into());
         };
-        Ok(render_excerpt(&self.read_document(doc)?, start, end))
+        let control = lycheedev_core::control::OperationControl::default();
+        let mut originals = self.original_reader();
+        let result = originals
+            .read(doc, &control)
+            .map(|raw| render_excerpt(&raw, start, end));
+        originals.finish(result, &control)
     }
     pub fn span(&self, path: &str, first: usize, last: usize) -> Result<Value> {
         let Some(doc) = self.documents.iter().find(|d| d.path == path) else {
             return Ok(Value::Null);
         };
-        Ok(render_span(
-            &self.read_document(doc)?,
-            &doc.sha256,
-            first,
-            last,
-        ))
+        let control = lycheedev_core::control::OperationControl::default();
+        let mut originals = self.original_reader();
+        let result = originals
+            .read(doc, &control)
+            .map(|raw| render_span(&raw, &doc.sha256, first, last));
+        originals.finish(result, &control)
     }
     #[allow(clippy::too_many_arguments)] // Public legacy query contract has seven independent selectors.
     pub fn search(
@@ -986,7 +967,11 @@ impl Index {
             .split_whitespace()
             .map(str::to_ascii_lowercase)
             .collect();
-        let mut loaded = BTreeMap::<String, Vec<u8>>::new();
+        let standalone = lycheedev_core::control::OperationControl::default();
+        let original_control = control.unwrap_or(&standalone);
+        let mut originals = self.original_reader();
+        let result = (|| {
+        let mut loaded = BTreeMap::<&str, Cow<'_, [u8]>>::new();
         let mut exact = Vec::<(Symbol, &str, i32)>::new();
         let mut prefix = vec![];
         let mut full = vec![];
@@ -1090,9 +1075,9 @@ impl Index {
                 {
                     continue;
                 }
-                let raw = self.read_document_controlled(doc, control)?;
-                loaded.insert(doc.path.clone(), raw);
-                for (i, l) in String::from_utf8_lossy(&loaded[&doc.path])
+                let raw = originals.read(doc, original_control)?;
+                loaded.insert(&doc.path, raw);
+                for (i, l) in String::from_utf8_lossy(&loaded[doc.path.as_str()])
                     .split('\n')
                     .enumerate()
                 {
@@ -1149,12 +1134,12 @@ impl Index {
         for (s, by, rank) in candidates.iter().skip(offset).take(limit) {
             observer("result", results.len());
             check_search(control)?;
-            if !loaded.contains_key(&s.path)
+            if !loaded.contains_key(s.path.as_str())
                 && let Some(doc) = self.documents.iter().find(|d| d.path == s.path)
             {
-                loaded.insert(s.path.clone(), self.read_document_controlled(doc, control)?);
+                loaded.insert(&doc.path, originals.read(doc, original_control)?);
             }
-            let raw = loaded.get(&s.path).map(Vec::as_slice).unwrap_or(&[]);
+            let raw = loaded.get(s.path.as_str()).map(|raw| raw.as_ref()).unwrap_or(&[]);
             let penalty = penalty(role(&s.path));
             let hash = self
                 .documents
@@ -1204,7 +1189,7 @@ impl Index {
         let truncated = more || cut || relation_cut;
         let mut response = json!({"sourceId":pin.repository,"product":pin.product,"requestedRef":pin.requested_ref,"matchedTag":null,"resolvedCommit":pin.exact_commit,"snapshotId":snapshot,"results":results,"complete":self.summary["complete"]==true&&!truncated,"truncated":truncated,"coverage":self.coverage()});
         response["coverage"]["io"]["sourceBytesRead"] =
-            json!(loaded.values().map(Vec::len).sum::<usize>());
+            json!(loaded.values().map(|raw| raw.len()).sum::<usize>());
         response["coverage"]["io"]["sourceDocumentsRead"] = json!(loaded.len());
         response["matchCoverage"] = json!({"exactMatches":exact_matches,"candidateMatches":candidates.len(),"returned":results.len(),"offset":offset,"candidateBudget":10000,"candidateBudgetExceeded":cut,"relationPreviewTruncated":relation_cut,"strategy":if broad{"exploratory"}else{"exact-then-prefix-then-indexed-then-literal"},"fallbackReason":if exact_matches>0{Value::Null}else if results.is_empty(){json!("no_structural_or_literal_match")}else{json!("no_exact_declaration")}});
         response["analysis"] = json!({"structure":"tree-sitter-lua-0.5.0","semantic":"not_requested","syntaxCompilation":"not_requested","aliases":"lexical static inference"});
@@ -1222,6 +1207,8 @@ impl Index {
         }
         check_search(control)?;
         Ok(response)
+        })();
+        originals.finish(result, original_control)
     }
 }
 
@@ -1765,10 +1752,8 @@ mod facts_cache_tests {
         let pin = fixture.pin(&raw);
         let cold = build_with_control(&fixture.home, &pin, &control).unwrap();
         for doc in &cold.documents {
-            assert_eq!(
-                fs::read(original_path(&fixture.home, doc)).unwrap(),
-                raw[&doc.path].as_bytes()
-            );
+            assert!(!original_path(&fixture.home, doc).exists());
+            assert_eq!(doc.text.as_deref(), Some(raw[&doc.path].as_bytes()));
             assert!(
                 !evidence::blob_path(&fixture.home, &doc.sha256)
                     .unwrap()
@@ -1776,7 +1761,7 @@ mod facts_cache_tests {
             );
         }
         let warm = build_with_control(&fixture.home, &pin, &control).unwrap();
-        assert!(warm.documents.iter().all(|doc| doc.text.is_empty()));
+        assert!(warm.documents.iter().all(|doc| doc.text.is_none()));
         for doc in &warm.documents {
             assert_eq!(
                 warm.read_document_controlled(doc, Some(&control)).unwrap(),
@@ -1826,6 +1811,7 @@ mod facts_cache_tests {
         let warm = build_with_control(&fixture.home, &pin, &control).unwrap();
         let doc = &warm.documents[0];
         let path = original_path(&fixture.home, doc);
+        warm.read_document_controlled(doc, Some(&control)).unwrap();
         // A newer commit at the same source path must never become recovery input.
         let newer = fixture.pin(&BTreeMap::from([(
             "Main.lua".into(),
@@ -1874,6 +1860,13 @@ mod facts_cache_tests {
         build_with_control(&fixture.home, &pin, &control).unwrap();
         let warm = build_with_control(&fixture.home, &pin, &control).unwrap();
         let mut wrong = warm.documents[0].clone();
+        wrong.bytes -= 1;
+        assert_eq!(
+            warm.read_document_controlled(&wrong, Some(&control)).unwrap_err().code,
+            "codebase.source_integrity",
+            "indexed-length mismatch retains integrity error, not frame budget"
+        );
+        let mut wrong = warm.documents[0].clone();
         wrong.sha256 = storage::sha256(b"different bytes");
         assert_eq!(
             warm.read_document_controlled(&wrong, Some(&control))
@@ -1899,7 +1892,7 @@ mod facts_cache_tests {
         );
         let mut tampered = build_with_control(&fixture.home, &pin, &control).unwrap();
         tampered.summary["repository"] = json!("../uncontrolled");
-        fs::remove_file(original_path(&fixture.home, &warm.documents[0])).unwrap();
+        assert!(!original_path(&fixture.home, &warm.documents[0]).exists());
         assert!(
             tampered
                 .read_document_controlled(&warm.documents[0], Some(&control))
@@ -1917,7 +1910,7 @@ mod facts_cache_tests {
         build_with_control(&fixture.home, &pin, &control).unwrap();
         let warm = build_with_control(&fixture.home, &pin, &control).unwrap();
         let path = original_path(&fixture.home, &warm.documents[0]);
-        fs::remove_file(&path).unwrap();
+        assert!(!path.exists());
         let cancelled = OperationControl::default();
         cancelled
             .cancel_handle()
@@ -1935,7 +1928,7 @@ mod facts_cache_tests {
         );
     }
     #[test]
-    fn source_original_publication_failure_cannot_commit_final_manifest() {
+    fn source_original_publication_failure_is_demanded_not_an_index_side_effect() {
         let fixture = Fixture::new();
         let control = OperationControl::default();
         let raw = "function Blocked() end\n";
@@ -1945,19 +1938,25 @@ mod facts_cache_tests {
             .join("cache/source-originals-rust")
             .join(storage::sha256(raw.as_bytes()));
         fs::create_dir_all(&path).unwrap();
-        assert!(build_with_control(&fixture.home, &pin, &control).is_err());
-        assert!(!is_ready_with_control(&fixture.home, &pin, &control).unwrap());
+        let cold = build_with_control(&fixture.home, &pin, &control).unwrap();
+        assert!(is_ready_with_control(&fixture.home, &pin, &control).unwrap());
         let key = format!("source/rust-index/{}", fingerprint(&pin));
+        let manifest = crate::persistence::read::<Value>(&fixture.home, &key, &control).unwrap();
+        assert!(
+            cold.search_with_control(&pin, "snapshot", "Blocked", "precise", "", 20, "", &control)
+                .is_err()
+        );
         assert_eq!(
-            crate::persistence::read::<Value>(&fixture.home, &key, &control)
-                .unwrap_err()
-                .code,
-            "vault.record_missing"
+            crate::persistence::read::<Value>(&fixture.home, &key, &control).unwrap(),
+            manifest
         );
         fs::remove_dir(&path).unwrap();
         let recovered = build_with_control(&fixture.home, &pin, &control).unwrap();
         assert_eq!(recovered.documents.len(), 1);
         assert!(is_ready_with_control(&fixture.home, &pin, &control).unwrap());
+        recovered
+            .search_with_control(&pin, "snapshot", "Blocked", "precise", "", 20, "", &control)
+            .unwrap();
         assert_eq!(fs::read(path).unwrap(), raw.as_bytes());
     }
     #[test]
@@ -1982,7 +1981,7 @@ mod facts_cache_tests {
         }
         let loads = load_facts_with_control(&fixture.home, &pin, &index, &control).unwrap();
         assert_eq!(loads.len(), 2);
-        fs::remove_dir_all(fixture.home.join("cache/source-originals-rust")).unwrap();
+        assert!(!fixture.home.join("cache/source-originals-rust").exists());
         fs::remove_dir_all(fixture.home.join("cache/source-facts-rust")).unwrap();
         assert_load_bytes(&fixture.home, &loads, &raw);
         for load in &loads {
@@ -2005,5 +2004,324 @@ mod facts_cache_tests {
         after["summary"].as_object_mut().unwrap().remove("io");
         assert_eq!(after, before);
         assert_load_bytes(&fixture.home, &loads, &raw);
+    }
+    #[test]
+    fn source_cold_query_moves_text_and_precise_publishes_only_consumed_originals() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let raw = BTreeMap::from([
+            (
+                "Main.lua".into(),
+                "function DemandProbe()\r\n return '你好'\r\nend\r\n".into(),
+            ),
+            ("Empty.lua".into(), String::new()),
+            ("Unused.lua".into(), "function Unused() end\n".into()),
+        ]);
+        let pin = fixture.pin(&raw);
+        let cold = crate::query_store::load_with_control(
+            &fixture.home,
+            &pin,
+            "DemandProbe",
+            "precise",
+            "",
+            &control,
+        )
+        .unwrap();
+        assert!(cold.documents.iter().all(|doc| doc.text.is_some()));
+        assert!(!fixture.home.join("cache/source-originals-rust").exists());
+        // A genuinely cold query must own its authenticated bytes after full
+        // index/image publication. No cache or Git reread can rescue this test.
+        let mirror = git::mirror(&fixture.home, &pin.repository);
+        fs::rename(&mirror, fixture.home.join("parked.git")).unwrap();
+        let first = cold
+            .search_with_control(
+                &pin,
+                "snapshot",
+                "DemandProbe",
+                "precise",
+                "",
+                20,
+                "",
+                &control,
+            )
+            .unwrap();
+        let main = cold
+            .documents
+            .iter()
+            .find(|doc| doc.path == "Main.lua")
+            .unwrap();
+        assert_eq!(
+            fs::read(original_path(&fixture.home, main)).unwrap(),
+            raw["Main.lua"].as_bytes()
+        );
+        for doc in cold.documents.iter().filter(|doc| doc.path != "Main.lua") {
+            assert!(!original_path(&fixture.home, doc).exists());
+}
+        let (held, _) = storage::locked_sha256(
+            &original_path(&fixture.home, main),
+            main.bytes as u64,
+            &control,
+        )
+        .unwrap();
+        let warm = crate::query_store::load_with_control(
+            &fixture.home,
+            &pin,
+            "DemandProbe",
+            "precise",
+            "",
+            &control,
+        )
+        .unwrap();
+        assert!(warm.documents.iter().all(|doc| doc.text.is_none()));
+        let second = warm
+            .search_with_control(
+                &pin,
+                "snapshot",
+                "DemandProbe",
+                "precise",
+                "",
+                20,
+                "",
+                &control,
+            )
+            .unwrap();
+        assert_eq!(without_query_io(first), without_query_io(second));
+        storage::finish_file(held, Ok(()), &control).unwrap();
+        let empty = cold
+            .documents
+            .iter()
+            .find(|doc| doc.path == "Empty.lua")
+            .unwrap();
+        let mut originals = cold.original_reader();
+        let bytes = originals.read(empty, &control).unwrap();
+        assert!(matches!(&bytes, Cow::Borrowed(_)));
+        assert!(bytes.is_empty());
+        assert!(!originals.git_started());
+        originals.finish(Ok(()), &control).unwrap();
+        assert_eq!(fs::read(original_path(&fixture.home, empty)).unwrap(), b"");
+    }
+
+    #[test]
+    fn source_index_then_broad_default_fallback_and_warm_queries_keep_complete_results() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let raw = BTreeMap::from([
+            (
+                "A.lua".into(),
+                "function A() return 'literal-你好' end\r\n".into(),
+            ),
+            (
+                "Nested/B.lua".into(),
+                "function B() return 'literal-你好' end\n".into(),
+            ),
+            ("Empty.lua".into(), String::new()),
+            (
+                "Main.xml".into(),
+                "<Ui><Script file=\"A.lua\"/></Ui>".into(),
+            ),
+        ]);
+        let pin = fixture.pin(&raw);
+        let cold = build_with_control(&fixture.home, &pin, &control).unwrap();
+        assert!(!fixture.home.join("cache/source-originals-rust").exists());
+        let warm = build_with_control(&fixture.home, &pin, &control).unwrap();
+        // Fresh originals use one demand reader including shared nested trees.
+        let mut originals = warm.original_reader();
+        for doc in &warm.documents {
+            assert_eq!(
+                originals.read(doc, &control).unwrap().as_ref(),
+                raw[&doc.path].as_bytes()
+            );
+            assert!(originals.git_started());
+        }
+        originals.finish(Ok(()), &control).unwrap();
+        fs::remove_dir_all(fixture.home.join("cache/source-originals-rust")).unwrap();
+        for mode in ["", "exploratory"] {
+            let actual = warm
+                .search_with_control(&pin, "snapshot", "literal-你好", mode, "", 1, "", &control)
+                .unwrap();
+            let expected = cold
+                .search_with_control(&pin, "snapshot", "literal-你好", mode, "", 1, "", &control)
+                .unwrap();
+            assert_eq!(without_query_io(actual.clone()), without_query_io(expected));
+            assert_eq!(actual["coverage"]["io"]["sourceDocumentsRead"], 4);
+            let cursor = actual["nextCursor"].as_str().unwrap();
+            let next = warm
+                .search_with_control(
+                    &pin,
+                    "snapshot",
+                    "literal-你好",
+                    mode,
+                    "",
+                    1,
+                    cursor,
+                    &control,
+                )
+                .unwrap();
+            assert_ne!(actual["results"][0]["path"], next["results"][0]["path"]);
+        }
+        fs::rename(
+            git::mirror(&fixture.home, &pin.repository),
+            fixture.home.join("parked.git"),
+        )
+        .unwrap();
+        let mut originals = warm.original_reader();
+        for doc in &warm.documents {
+            originals.read(doc, &control).unwrap();
+        }
+        assert!(!originals.git_started());
+        originals.finish(Ok(()), &control).unwrap();
+        assert!(
+            warm.search_with_control(
+                &pin,
+                "snapshot",
+                "literal-你好",
+                "exploratory",
+                "lua",
+                20,
+                "",
+                &control
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn source_original_first_publication_error_precedes_later_missing_git_object() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let pin = fixture.pin(&BTreeMap::from([
+            ("A.lua".into(), "function A() end\n".into()),
+            ("B.lua".into(), "function B() end\n".into()),
+        ]));
+        build_with_control(&fixture.home, &pin, &control).unwrap();
+        let warm = build_with_control(&fixture.home, &pin, &control).unwrap();
+        let directory = fixture.home.join("cache/source-originals-rust");
+        fs::create_dir_all(&directory).unwrap();
+        for slot in 0..64 {
+            fs::write(
+                directory.join(format!(
+                    ".lycheedev-cache-{}-{slot}",
+                    warm.documents[0].sha256
+                )),
+                b"uncertain owner",
+            )
+            .unwrap();
+        }
+        let files = git::tree_with_control(&fixture.home, &pin, &control).unwrap();
+        let later = &files
+            .iter()
+            .find(|file| file.path == "B.lua")
+            .unwrap()
+            .object;
+        fs::remove_file(
+            git::mirror(&fixture.home, &pin.repository)
+                .join("objects")
+                .join(&later[..2])
+                .join(&later[2..]),
+        )
+        .unwrap();
+        let first = warm
+            .read_document_controlled(&warm.documents[0], Some(&control))
+            .unwrap_err();
+        assert_eq!(first.code, "vault.temporary_collision");
+        let mut visited = Vec::new();
+        let error = warm
+            .search_observed(
+                &pin,
+                "snapshot",
+                "missing literal",
+                "exploratory",
+                "",
+                20,
+                "",
+                Some(&control),
+                &mut |phase, number| {
+                    if phase == "document" {
+                        visited.push(number);
+                    }
+                },
+            )
+            .unwrap_err();
+        assert_eq!((error.code, error.message), (first.code, first.message));
+        assert_eq!(visited, [0]);
+    }
+
+    #[test]
+    fn source_original_later_cancellation_does_not_prefetch_or_publish_next_document() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let pin = fixture.pin(&BTreeMap::from([
+            ("A.lua".into(), "function A() end\n".into()),
+            ("B.lua".into(), "function B() end\n".into()),
+        ]));
+        build_with_control(&fixture.home, &pin, &control).unwrap();
+        let warm = build_with_control(&fixture.home, &pin, &control).unwrap();
+        let cancelled = OperationControl::default();
+        let cancel = cancelled.cancel_handle();
+        let error = warm
+            .search_observed(
+                &pin,
+                "snapshot",
+                "missing literal",
+                "exploratory",
+                "",
+                20,
+                "",
+                Some(&cancelled),
+                &mut |phase, number| {
+                    if phase == "document" && number == 1 {
+                        cancel.store(true, std::sync::atomic::Ordering::Release);
+                    }
+                },
+            )
+            .unwrap_err();
+        assert_eq!(error.code, "command.cancelled");
+        assert!(original_path(&fixture.home, &warm.documents[0]).is_file());
+        assert!(!original_path(&fixture.home, &warm.documents[1]).exists());
+    }
+
+    #[test]
+    fn demand_git_reader_reuses_one_process_without_tree_memo_and_rejects_wrong_pin() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let raw = BTreeMap::from([
+            ("Nested/A.lua".into(), "function A() end\n".into()),
+            ("Nested/B.lua".into(), "function B() end\n".into()),
+        ]);
+        let pin = fixture.pin(&raw);
+        let mut reader = git::Originals::new(&fixture.home, pin.clone(), 0);
+        let mut pid = None;
+        for _ in 0..2 {
+            for (path, expected) in &raw {
+                assert_eq!(
+                    reader.read(path, git::MAX_SOURCE_BYTES, &control).unwrap(),
+                    expected.as_bytes()
+                );
+                match pid {
+                    Some(pid) => assert_eq!(reader.process_id(), Some(pid)),
+                    None => pid = reader.process_id(),
+                }
+            }
+        }
+        assert!(pid.is_some());
+        reader.finish(Ok(()), &control).unwrap();
+        for field in ["product", "parser", "commit"] {
+            let mut wrong = pin.clone();
+            match field {
+                "product" => wrong.product = "not-a-product".into(),
+                "parser" => wrong.parser_revision = "not-a-parser".into(),
+                _ => wrong.exact_commit = "HEAD".into(),
+            }
+            let mut reader = git::Originals::new(&fixture.home, wrong, 1024);
+            let error = reader
+                .read("Nested/A.lua", git::MAX_SOURCE_BYTES, &control)
+                .unwrap_err();
+            assert_eq!(error.code, "codebase.invalid_source_pin");
+            assert!(!reader.started());
+            assert_eq!(
+                reader.finish::<()>(Err(error), &control).unwrap_err().code,
+                "codebase.invalid_source_pin"
+            );
+        }
     }
 }

@@ -22,7 +22,8 @@ const MAGIC: &[u8; 8] = b"LYSPIDX3";
 const MAX_BYTES: usize = 128 << 20;
 const RECORD: usize = 92;
 const DICTIONARY: usize = 16;
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
 struct Meta {
     schema: String,
     identity: String,
@@ -31,6 +32,19 @@ struct Meta {
     assets: Vec<Value>,
     #[serde(rename = "compatibilityGaps")]
     compatibility_gaps: BTreeSet<String>,
+}
+// Serialization borrows the authenticated index. In particular Document.text
+// and Facts are skipped, so cloning Documents here used to copy both complete
+// in-memory payloads only to discard those copies during serialization.
+#[derive(Serialize)]
+struct MetaRef<'a> {
+    schema: &'static str,
+    identity: &'a str,
+    summary: &'a Value,
+    documents: &'a [Document],
+    assets: &'a [Value],
+    #[serde(rename = "compatibilityGaps")]
+    compatibility_gaps: &'a BTreeSet<String>,
 }
 fn invalid(message: &str) -> ToolkitError {
     ToolkitError::new("codebase.source_integrity", message, 4)
@@ -135,6 +149,23 @@ impl<'a> Image<'a> {
             }
         }
         Ok(image)
+    }
+    fn adopt_originals(&mut self, originals: Vec<Document>) -> Result<()> {
+        if originals.len() != self.meta.documents.len() {
+            return Err(invalid("Cold query document identities differ"));
+        }
+        for (target, mut source) in self.meta.documents.iter_mut().zip(originals) {
+            if target.path != source.path
+                || target.sha256 != source.sha256
+                || target.bytes != source.bytes
+            {
+                return Err(invalid("Cold query document identities differ"));
+            }
+            target.text = source.text.take();
+            // source Facts and unselected full-index symbols are no longer
+            // needed. Only authenticated original allocations cross projection.
+        }
+        Ok(())
     }
     fn string(&self, raw: &[u8], offset: usize) -> Result<&'a str> {
         let start = number(raw, offset)?;
@@ -344,8 +375,8 @@ pub fn load_with_control(
         Err(e) => return Err(e),
     };
     let cached = raw.is_some();
-    let raw = if let Some(raw) = raw {
-        raw
+    let (raw, originals) = if let Some(raw) = raw {
+        (raw, None)
     } else {
         let lock = storage::ExclusiveLock::acquire_controlled(
             &home
@@ -364,21 +395,16 @@ pub fn load_with_control(
                 &json!({"schema":SCHEMA,"identity":identity,"blob":blob}),
                 control,
             )?;
-            Ok(raw)
+            Ok((raw, Some(full.documents)))
         })();
         crate::persistence::finish_control(finish_historical(built, lock.close()), control.check())?
     };
     control.check()?;
-    let projected = Image::decode(&raw, &identity)?.project(
-        home,
-        pin,
-        text,
-        mode,
-        topic,
-        cached,
-        raw.len(),
-        started,
-    )?;
+    let mut image = Image::decode(&raw, &identity)?;
+    if let Some(originals) = originals {
+        image.adopt_originals(originals)?;
+    }
+    let projected = image.project(home, pin, text, mode, topic, cached, raw.len(), started)?;
     control.check()?;
     Ok(projected)
 }
@@ -507,14 +533,17 @@ fn write_image(map: &Index, identity: &str) -> Result<Vec<u8>> {
         .as_object_mut()
         .ok_or_else(|| invalid("Invalid index summary"))?
         .remove("io");
-    let meta = serde_json::to_vec(&Meta {
-        schema: SCHEMA.into(),
-        identity: identity.into(),
-        summary,
-        documents: map.documents.clone(),
-        assets: map.assets.clone(),
-        compatibility_gaps: map.compatibility_gaps.clone(),
+    let meta = serde_json::to_vec(&MetaRef {
+        schema: SCHEMA,
+        identity,
+        summary: &summary,
+        documents: &map.documents,
+        assets: &map.assets,
+        compatibility_gaps: &map.compatibility_gaps,
     })?;
+    write_image_sections(map, meta)
+}
+fn write_image_sections(map: &Index, meta: Vec<u8>) -> Result<Vec<u8>> {
     let mut pool = vec![];
     let mut interned = BTreeMap::<String, (usize, usize)>::new();
     let mut records = vec![];
@@ -643,7 +672,7 @@ mod tests {
             Index {
                 documents: vec![Document {
                     path: "Fixture.lua".into(),
-                    text: b"literal unique body\n".to_vec(),
+                    text: Some(b"literal unique body\n".to_vec()),
                     bytes: 20,
                     sha256: storage::sha256(b"literal unique body\n"),
                     facts: Facts::default(),
@@ -659,7 +688,9 @@ mod tests {
     }
     #[test]
     fn file_projection_preserves_exact_suffix_prefix_indexed_body_assets_and_cursor() {
-        let (full, pin) = map();
+        let fixture = CacheFixture::new();
+        let (mut full, pin) = map();
+        full.home = fixture.0.clone();
         let identity = index::fingerprint(&pin);
         let raw = write_image(&full, &identity).unwrap();
         assert_ne!(&raw[..8], b"SQLite f");
@@ -674,7 +705,7 @@ mod tests {
             let mut projected = Image::decode(&raw, &identity)
                 .unwrap()
                 .project(
-                    Path::new("."),
+                    &fixture.0,
                     &pin,
                     text,
                     mode,
@@ -685,8 +716,8 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(projected.compatibility_gaps, full.compatibility_gaps);
-            // The real store uses separately authenticated original caches. Keep this
-            // purely projection test independent of disk/evidence behavior.
+            // Supply authenticated cold bytes to isolate projection from Git
+            // recovery; demanded cache publication uses the fixture workspace.
             projected.documents[0].text = full.documents[0].text.clone();
             let first = full.search(&pin, "PIN", text, mode, topic, 1, "").unwrap();
             let other = projected
@@ -711,6 +742,62 @@ mod tests {
                 assert_eq!(next["results"], other["results"]);
             }
         }
+    }
+    #[test]
+    fn borrowed_metadata_preserves_complete_legacy_image_bytes_with_skipped_payloads() {
+        let (mut full, pin) = map();
+        full.documents[0].facts =
+            crate::facts::lua(b"function BorrowedFact() return Other() end", false);
+        assert!(!full.documents[0].facts.declarations.is_empty());
+        full.summary["io"] = json!({"cold":true});
+        let identity = index::fingerprint(&pin);
+        let mut summary = full.summary.clone();
+        summary.as_object_mut().unwrap().remove("io");
+        // This is the previous owned metadata serializer, retained only as a
+        // differential fixture. Production cannot serialize Meta or clone it.
+        let old = Meta {
+            schema: SCHEMA.into(),
+            identity: identity.clone(),
+            summary,
+            documents: full.documents.clone(),
+            assets: full.assets.clone(),
+            compatibility_gaps: full.compatibility_gaps.clone(),
+        };
+        let old = write_image_sections(&full, serde_json::to_vec(&old).unwrap()).unwrap();
+        let current = write_image(&full, &identity).unwrap();
+        assert_eq!(current, old);
+        let decoded = Image::decode(&current, &identity).unwrap();
+        assert!(decoded.meta.documents[0].text.is_none());
+        assert!(decoded.meta.documents[0].facts.declarations.is_empty());
+    }
+    #[test]
+    fn cold_projection_moves_all_original_allocations_including_empty_documents() {
+        let (mut full, pin) = map();
+        full.documents.push(Document {
+            path: "Empty.lua".into(),
+            text: Some(Vec::new()),
+            sha256: storage::sha256(&[]),
+            bytes: 0,
+            facts: Facts::default(),
+        });
+        let pointer = full.documents[0].text.as_ref().unwrap().as_ptr();
+        let identity = index::fingerprint(&pin);
+        let raw = write_image(&full, &identity).unwrap();
+        let mut image = Image::decode(&raw, &identity).unwrap();
+        image.adopt_originals(full.documents).unwrap();
+        assert_eq!(
+            image.meta.documents[0].text.as_ref().unwrap().as_ptr(),
+            pointer
+        );
+        assert_eq!(image.meta.documents[1].text.as_deref(), Some([].as_slice()));
+        assert!(image.meta.documents[0].facts.declarations.is_empty());
+        let mut mismatched = image.meta.documents;
+        mismatched[0].path = "Wrong.lua".into();
+        let mut image = Image::decode(&raw, &identity).unwrap();
+        assert_eq!(
+            image.adopt_originals(mismatched).unwrap_err().code,
+            "codebase.source_integrity"
+        );
     }
     #[test]
     fn file_projection_rejects_truncated_offsets_identity_and_invalid_strings() {

@@ -512,3 +512,77 @@ fn actual_full_source_semantic_relations_preserve_candidates_and_client_gaps() {
     drop(runtime);
     fs::remove_dir_all(&runtime_root).unwrap();
 }
+
+#[test]
+fn context_after_index_lazily_caches_only_snippet_originals_and_reuses_locked_warm_bytes() {
+    let f = fixture();
+    let inv = invoke(
+        &f,
+        "source context",
+        &[
+            ("--symbol", "Target"),
+            ("--static-only", "true"),
+            ("--depth", "0"),
+            ("--limit", "1"),
+            ("--max-lines", "20"),
+        ],
+    );
+    let pin = selection::resolve_pinned(&inv).unwrap();
+    let index = lycheedev_source::index::build_with_control(
+        &f.home,
+        pin.source.as_ref().unwrap(),
+        &inv.control,
+    )
+    .unwrap();
+    assert!(!f.home.join("cache/source-originals-rust").exists());
+    let first = context::dispatch(&inv).unwrap();
+    assert_eq!(first.data["snippets"].as_array().unwrap().len(), 1);
+    assert_eq!(first.data["snippets"][0]["path"], "a.lua");
+    let doc = index
+        .documents
+        .iter()
+        .find(|doc| doc.path == "a.lua")
+        .unwrap();
+    let original = f.home.join("cache/source-originals-rust").join(&doc.sha256);
+    assert!(original.is_file());
+    for other in index.documents.iter().filter(|doc| doc.path != "a.lua") {
+        assert!(
+            !f.home
+                .join("cache/source-originals-rust")
+                .join(&other.sha256)
+                .exists()
+        );
+    }
+    // Deny write/delete while the second actual context command reads the
+    // warmed original. Re-publication would fail instead of hiding a rewrite.
+    let (held, _) =
+        lycheedev_core::storage::locked_sha256(&original, doc.bytes as u64, &inv.control).unwrap();
+    let second = context::dispatch(&inv).unwrap();
+    for field in [
+        "symbol",
+        "relations",
+        "snippets",
+        "loadEvidence",
+        "complete",
+        "truncated",
+        "nextCursor",
+    ] {
+        assert_eq!(first.data[field], second.data[field], "{field}");
+    }
+    lycheedev_core::storage::finish_file(held, Ok(()), &inv.control).unwrap();
+    for result in [&first, &second] {
+        let captured =
+            evidence::read_blob(&f.home, &result.provenance[0]["blob"], 1 << 20).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&captured).unwrap(),
+            result.data
+        );
+        for load in result.data["loadEvidence"].as_array().unwrap() {
+            assert!(
+                !evidence::read_blob(&f.home, &load["sourceBlob"], 1 << 20)
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+    }
+}

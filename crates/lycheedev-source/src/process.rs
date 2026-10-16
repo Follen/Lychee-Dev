@@ -17,8 +17,10 @@ pub struct Output {
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
 }
+mod git_batch;
 mod lifetime;
 mod stderr_observation;
+pub(crate) use git_batch::GitBatchProcess;
 use lifetime::{ProcessState, Retirement, WorkerSet};
 pub(crate) use stderr_observation::{Snapshot as StderrSnapshot, StderrObservation};
 

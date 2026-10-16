@@ -142,6 +142,34 @@ fn bytes_controlled(
     timeout: Duration,
     cancel: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<Vec<u8>> {
+    let cmd = command(directory, args);
+    let out = crate::process::run_with_limits(cmd, cap, 32768, timeout, input, cancel).map_err(
+        |mut error| {
+            error.code = match error.code.as_str() {
+                "luals.unavailable" => "codebase.source_not_ready",
+                "luals.input_budget" => "codebase.source_budget",
+                "process.cancelled" => "command.cancelled",
+                _ => "codebase.git_failed",
+            }
+            .into();
+            error
+        },
+    )?;
+    if out.status != 0 {
+        return Err(ToolkitError::new(
+            "codebase.git_failed",
+            String::from_utf8_lossy(&out.stderr).trim(),
+            5,
+        ));
+    }
+    Ok(out.stdout)
+}
+/// Fixed Git-only launch surface for the demand reader. The request stream
+/// contains authenticated object IDs, never shell text or revision expressions.
+pub(crate) fn batch_command(directory: &Path) -> Command {
+    command(Some(directory), &["cat-file", "--batch"])
+}
+fn command(directory: Option<&Path>, args: &[&str]) -> Command {
     let null = if cfg!(windows) { "NUL" } else { "/dev/null" };
     let mut cmd = Command::new("git");
     #[cfg(windows)]
@@ -181,27 +209,10 @@ fn bytes_controlled(
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GCM_INTERACTIVE", "never")
         .env("GIT_NO_REPLACE_OBJECTS", "1");
-    let out = crate::process::run_with_limits(cmd, cap, 32768, timeout, input, cancel).map_err(
-        |mut error| {
-            error.code = match error.code.as_str() {
-                "luals.unavailable" => "codebase.source_not_ready",
-                "luals.input_budget" => "codebase.source_budget",
-                "process.cancelled" => "command.cancelled",
-                _ => "codebase.git_failed",
-            }
-            .into();
-            error
-        },
-    )?;
-    if out.status != 0 {
-        return Err(ToolkitError::new(
-            "codebase.git_failed",
-            String::from_utf8_lossy(&out.stderr).trim(),
-            5,
-        ));
-    }
-    Ok(out.stdout)
+    cmd
 }
+mod originals;
+pub(crate) use originals::{Originals, read_object_frame};
 /// Read only objects already authenticated by the pinned immutable tree. One
 /// batch is bounded to 64 MiB plus framing; every returned object is rehashed.
 pub fn visit_blobs(

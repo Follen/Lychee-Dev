@@ -1,8 +1,8 @@
 //! Bounded original-source snippets. Structural candidate sites are not runtime binding proof.
-use crate::{SourceTools, git, index, relations};
+use crate::{SourceTools, index, relations};
 use lycheedev_core::{Invocation, Outcome, Result, ToolkitError, evidence, selection, storage};
 use serde_json::json;
-use std::{collections::{BTreeMap, BTreeSet}, sync::Arc};
+use std::{borrow::Cow, collections::{BTreeMap, BTreeSet}, sync::Arc};
 pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
     dispatch_with_tools(inv, SourceTools::default())
 }
@@ -232,7 +232,11 @@ pub(crate) fn evaluate(
     let (mut lines, mut bytes) = (0usize, 0usize);
     let mut truncated = reading.data["truncated"] == true;
     let mut next_cursor = None;
-    crate::research_material::measured("source.context.snippets", || {
+    let mut originals = reading.index.original_reader();
+    // Cold bytes already belong to this immutable index. Memoize references
+    // within the context request; the batch's existing map owns warm reads.
+    let mut borrowed_documents = BTreeMap::<&str, &[u8]>::new();
+    let snippets_result = crate::research_material::measured("source.context.snippets", || {
     for (i, (path, first, last, basis)) in sites.iter().enumerate().skip(cursor.site) {
         inv.control.check()?;
         let start = if i == cursor.site && cursor.line > 0 {
@@ -254,17 +258,15 @@ pub(crate) fn evaluate(
             );
             break;
         }
-        if !documents.contains_key(path) {
-            let raw = if prepared.is_some() {
-                let document = reading.index.documents.iter().find(|document| document.path == *path)
-                    .expect("site admitted from shared immutable index");
-                reading.index.read_document_controlled(document, Some(&inv.control))?
-            } else {
-                git::blob_with_control(&inv.home, source, path, git::MAX_SOURCE_BYTES, &inv.control)?.0
-            };
-            documents.insert(path.clone(), raw);
+        if !documents.contains_key(path) && !borrowed_documents.contains_key(path.as_str()) {
+            let document = reading.index.documents.iter().find(|document| document.path == *path)
+                .expect("site admitted from shared immutable index");
+            match originals.read(document, &inv.control)? {
+                Cow::Borrowed(raw) => { borrowed_documents.insert(&document.path, raw); }
+                Cow::Owned(raw) => { documents.insert(path.clone(), raw); }
+            }
         }
-        let raw = &documents[path];
+        let raw = borrowed_documents.get(path.as_str()).copied().unwrap_or_else(|| documents[path].as_slice());
         let excerpt = context_excerpt(
             raw,
             start,
@@ -309,7 +311,9 @@ pub(crate) fn evaluate(
         }
     }
     Ok(())
-    })?;
+    });
+    drop(borrowed_documents);
+    originals.finish(snippets_result, &inv.control)?;
     if next_cursor.is_none() && !relation_next.is_empty() {
         next_cursor = Some(
             Cursor {

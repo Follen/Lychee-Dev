@@ -790,3 +790,20 @@ fn aggregate_measurement_matches_exact_wire_and_keeps_control_errors() {
         "command.deadline"
     );
 }
+
+
+#[test]
+fn cold_context_multiple_sites_borrow_each_original_once() {
+    let f = fixture();
+    let request = parse(br#"{"requests":[{"context":{"symbol":"Target","depth":1,"limit":25,"maxLines":120,"maxBytes":16384}}]}"#).unwrap();
+    crate::index::take_read_observations();
+    let result = dispatch_request(&f.inv, request, SourceTools::default()).unwrap();
+    let reads = crate::index::take_read_observations();
+    let snippets = result.data["results"][0]["context"]["snippets"].as_array().unwrap();
+    assert!(snippets.len() > 1, "fixture must exercise distinct same-file sites");
+    assert!(snippets.iter().all(|snippet| snippet["path"] == "a.lua"));
+    assert_eq!(reads, vec![("a.lua".to_owned(), true)], "cold bytes stay borrowed and per-path memoized");
+    for text in ["## Interface: 120100\na.lua\n", "function Unicode()\n return '汉字🙂abcdef'\nend\n"] {
+        assert!(!f.inv.home.join("cache/source-originals-rust").join(storage::sha256(text.as_bytes())).exists());
+    }
+}
