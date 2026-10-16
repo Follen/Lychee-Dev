@@ -29,3 +29,11 @@ tokio = { version = "=1.53.2", default-features = false, features = ["rt", "net"
 tokio-util = { version = "=0.7.19", default-features = false, features = ["io"] }
 futures-util = { version = "=0.3.34", default-features = false, features = ["std"] }
 idna = "=1.1.0"
+
+# Preserve admitted Go request targets without WHATWG path normalization.
+hyper = { version = "=1.12.0", default-features = false, features = ["client", "http1"] }
+hyper-util = { version = "=0.1.21", default-features = false, features = ["client-legacy", "client-proxy", "http1", "tokio"] }
+hyper-tls = "=0.6.0"
+native-tls = "=0.2.18"
+tokio-native-tls = "=0.3.1"
+tower-service = "=0.3.3"

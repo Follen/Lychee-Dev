@@ -27,11 +27,16 @@ Complete end-to-end production behavior first, then add the corresponding tests 
 - [ ] Validate that the implemented owned-crate replacements preserve the complete XML/Lua behavior through the fixed unmodified public API. No minimal-hook final exemption remains; a zero-patch recipe alone does not complete acceptance.
 - [ ] Prove each replacement with full output/diagnostic/coverage/cancellation/resource differentials, then exact-lock native and full Retail cold/warm/session acceptance. Keep prior failures and transitional patches honestly identified until removed.
 
-## Current consolidated validation queue
+## Current finite closure queue (2026-10-16 04:30 UTC)
 
-- [ ] Validate the integrated public-miniz gzip transport with the current product lock, prefix drains, cancellation/accounting and all 233 fixed vectors; preserve the earlier 71/72 harness failure and denied rerun.
-- [ ] Complete retained Source session startup/recovery. Exact bc2 ordinary full-Retail refs/context/API now have successful runs; subsequent optimizations and the performance target are still unverified.
-- [ ] Validate the connected owned Emmy query/43-diagnostic/default-consumer chain, fix actual compile and semantic failures, then prove final zero-patch acceptance with full Retail and retained-session results.
+- [ ] Finish the shared HTTP raw-target path, including the explicitly identified host-normalization boundaries. Preserve original proxy/TLS/redirect/cancellation/accounting; do not expand this into a general URL platform.
+- [ ] Finish retained Source short-budget isolation using existing process/Job ownership, retaining warm analysis state and the original aggregate 2GiB/absolute deadline. A 1-second request currently loses its typed response during synchronous analysis; do not lengthen the test or the product budget.
+- [ ] Run the saved `fbba2e7` composed batch (`38850381033`): Core bundle compile annotation, Core/project fixture corrections, owned Eq/Hash and explicit historical compile overlay, Source preparation-copy/index changes, and Go timestamp comparison/late-marshal behavior. Original failures and skipped later targets remain evidence until rerun.
+- [ ] Complete zero-patch semantic/coverage/cancellation/resource acceptance, including all 448 selected-query comparisons and 43 diagnostic entries. The `3c720fa` context scope has 56 real passes, including both prior empty-scope failures; this is not full product acceptance.
+- [ ] Verify complete Retail refs/context/API and retained sessions within original budgets. e8 full paths exhausted 90 seconds; its small IPC quota/idle/lifetime fixtures passed. Measure completed equal results against Go before claiming elapsed or memory targets.
+- [ ] After these known implementation gaps and actual concentrated failures close, begin the four final sequential audit loops. Include independent real Skill, Source and Data usage in the first loop; no arbitrary new SQL/database feature scope.
+
+The dated checklists below preserve earlier implementation and verification obligations. Their old “connect/implement” wording is not evidence that a currently integrated consumer is still unwired; current scope and results are governed by handover.md and the queue above.
 
 ## Current tagged increment: Go 3.2.3
 

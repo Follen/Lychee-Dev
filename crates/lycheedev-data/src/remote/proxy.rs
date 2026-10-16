@@ -8,6 +8,14 @@ use reqwest::{ClientBuilder, Proxy, Url};
 use std::net::IpAddr;
 
 pub(super) fn install(builder: ClientBuilder, locator: &str) -> Result<ClientBuilder> {
+    let builder = builder.no_proxy();
+    match select_environment(locator)? {
+        None => Ok(builder),
+        Some(url) => Ok(builder.proxy(Proxy::all(url).map_err(|_| configuration_error())?)),
+    }
+}
+
+pub(super) fn select_environment(locator: &str) -> Result<Option<Url>> {
     let is_http = locator.starts_with("http://");
     let policy = Policy {
         proxy: env_first("HTTPS_PROXY", "https_proxy")?,
@@ -22,11 +30,7 @@ pub(super) fn install(builder: ClientBuilder, locator: &str) -> Result<ClientBui
             .filter_map(Rule::parse)
             .collect(),
     };
-    let builder = builder.no_proxy();
-    match policy.select(locator)? {
-        None => Ok(builder),
-        Some(url) => Ok(builder.proxy(Proxy::all(url).map_err(|_| configuration_error())?)),
-    }
+    policy.select(locator)
 }
 
 fn configuration_error() -> ToolkitError {

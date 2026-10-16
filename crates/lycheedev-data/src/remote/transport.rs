@@ -18,6 +18,7 @@ use std::{
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio_util::io::StreamReader;
 
+mod raw_uri;
 pub(crate) mod redirect_url;
 
 pub const MAX_RANGE_BYTES: i64 = 64 << 20;
@@ -493,28 +494,35 @@ pub(crate) async fn get_once(
             }
         }
     }
-    // A redirect can change scheme, host, or NO_PROXY matching. Always select
-    // this locator's route and create its own no-pool client in the same runtime.
-    let client = client(deadline, &route_locator)?;
     let encoding = match policy.body {
         BodyPolicy::Identity => "identity",
         BodyPolicy::GoAutomaticGzip => "gzip",
     };
-    let mut request = client.get(locator).header("Accept-Encoding", encoding);
-    if let Some(accept) = policy.accept {
-        request = request.header("Accept", accept);
-    }
-    if let Some(referer) = policy.referer {
-        request = request.header("Referer", referer);
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "Accept-Encoding",
+        reqwest::header::HeaderValue::from_static(encoding),
+    );
+    for (name, value) in [("Accept", policy.accept), ("Referer", policy.referer)] {
+        if let Some(value) = value {
+            headers.insert(
+                name,
+                reqwest::header::HeaderValue::from_str(value)
+                    .map_err(|_| http(format!("invalid {name} header")))?,
+            );
+        }
     }
     if let Some(user_agent) = policy.user_agent {
         if user_agent != "Go-http-client/1.1" {
             return Err(http("unsupported fixed user agent"));
         }
-        request = request.header("User-Agent", user_agent);
+        headers.insert(
+            "User-Agent",
+            reqwest::header::HeaderValue::from_static("Go-http-client/1.1"),
+        );
     }
     if let Some(authorization) = policy.authorization {
-        let encoded = authorization
+        authorization
             .strip_prefix("Basic ")
             .filter(|value| {
                 !value.is_empty()
@@ -524,12 +532,38 @@ pub(crate) async fn get_once(
                         .all(|b| b.is_ascii_alphanumeric() || b"+/=".contains(&b))
             })
             .ok_or_else(|| http("invalid fixed Basic authorization"))?;
-        let _ = encoded; // The consumer encoded bytes; no arbitrary header input.
         let mut value = reqwest::header::HeaderValue::from_str(authorization)
             .map_err(|_| http("invalid authorization header"))?;
         value.set_sensitive(true);
-        request = request.header(reqwest::header::AUTHORIZATION, value);
+        headers.insert(reqwest::header::AUTHORIZATION, value);
     }
+    send_once(locator, &route_locator, headers, control, budget, deadline).await
+}
+
+async fn send_once(
+    locator: &str,
+    route_locator: &str,
+    headers: HeaderMap,
+    control: &OperationControl,
+    budget: Option<&Budget>,
+    deadline: Instant,
+) -> Result<reqwest::Response> {
+    // Each redirect selects its new locator's route and owns a no-pool client
+    // in this same runtime, with no automatic redirects or request retry.
+    if let Some(target) = raw_uri::target(locator)? {
+        let prepared = raw_uri::Prepared::new(target, headers, route_locator)?;
+        check(control, budget)?;
+        if Instant::now() >= deadline {
+            return Err(http("remote request timeout"));
+        }
+        attempt(budget)?;
+        let response = controlled(prepared.send(), control, budget, deadline).await?;
+        check(control, budget)?;
+        return response;
+    }
+    let request = client(deadline, route_locator)?
+        .get(locator)
+        .headers(headers);
     check(control, budget)?;
     if Instant::now() >= deadline {
         return Err(http("remote request timeout"));
@@ -607,21 +641,17 @@ pub fn fetch_range(
     url(locator)?;
     let deadline = request_deadline(control, budget)?;
     run(async {
-        let client = client(deadline, locator)?;
-        attempt(budget)?;
-        let response = controlled(
-            client
-                .get(locator)
-                .header("Range", format!("bytes={}-{}", request.offset, end))
-                .header("Accept-Encoding", "identity")
-                .send(),
-            control,
-            budget,
-            deadline,
-        )
-        .await?;
-        check(control, budget)?;
-        let response = response.map_err(|e| http(e.to_string()))?;
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Range",
+            reqwest::header::HeaderValue::from_str(&format!("bytes={}-{}", request.offset, end))
+                .map_err(|_| range("invalid range header"))?,
+        );
+        headers.insert(
+            "Accept-Encoding",
+            reqwest::header::HeaderValue::from_static("identity"),
+        );
+        let response = send_once(locator, locator, headers, control, budget, deadline).await?;
         match response.status().as_u16() {
             404 => {
                 return Err(fault(

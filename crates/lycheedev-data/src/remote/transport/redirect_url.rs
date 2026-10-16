@@ -146,24 +146,17 @@ impl RedirectUrl {
         if !matches!(self.scheme.as_str(), "http" | "https") {
             return Err(error("wago_http", 5, "Hotfix URL requires HTTP or HTTPS"));
         }
-        // The current reqwest seam cannot send Go's encoded-dot request targets.
-        // Reject the mismatch explicitly rather than request a different path.
-        // This is a known compatibility gap, not a claim of full URL equivalence.
-        let path = if self.path.is_empty() {
-            "/"
-        } else {
-            &self.path
-        };
-        if !same_endpoint(&parsed, self.authority.as_deref().unwrap_or(""))
-            || parsed.path() != path
-            || parsed.query() != self.query.as_deref()
-        {
+        // Preserve endpoint admission separately from request-target spelling.
+        // The controlled transport uses hyper's public raw Uri path whenever
+        // WHATWG parsing would normalize an encoded dot segment or query.
+        if !same_endpoint(&parsed, self.authority.as_deref().unwrap_or("")) {
             return Err(error(
                 "wago_http",
                 5,
-                "Go redirect target cannot be represented by HTTP transport",
+                "Go redirect endpoint cannot be represented by HTTP transport",
             ));
         }
+        super::raw_uri::target(&text)?;
         Ok(text)
     }
     pub(crate) fn authorization(&self) -> Result<Option<String>> {
@@ -185,7 +178,7 @@ impl RedirectUrl {
         }
     }
 }
-fn unescape_userinfo(raw: &str) -> Result<Vec<u8>> {
+pub(super) fn unescape_userinfo(raw: &str) -> Result<Vec<u8>> {
     let bytes = raw.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut i = 0;

@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 04:17 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`3679ae948bc07855ba7678a204275cf7f3dffcb0`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 04:32 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`fbba2e7cdb55b11e068be1faea27dd2b22580b07`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -24,6 +24,8 @@
 - 2026-10-15 18:24 用户调整实施节奏：先按完整端到端功能实现并接入默认生产消费者，再集中补测试和统一验证；取消自行增加的逐小片冻结/独审/CI先行门禁。实现过程中仍及时分批提交推送同一草稿PR，真实安全边界和文件单写协调保留；已有CI旁路诊断，不等待每轮才继续编码。最终四阶段循环审计与完整验收要求不变。
 
 ## 2. 当前实现与未闭环事项
+
+`fbba2e7`集中run38850381033已创建，等待既有运行完成。新增raw request-target默认链已组合：仅reqwest会改写已认证path/query时使用既有锁定hyper公开connector，保direct/HTTP代理/CONNECT/TLS代理/SOCKS远端DNS，响应回原gzip/计量/取消路径。10新Rust及1原gap成功回归未跑，Cargo仅Data增加6条已有锁定直接依赖边，无新package/version/checksum。host/IDNA/numeric/IPv6-zone无损差异后继仍在做，不能宣称全部URL输入已等价。
 
 Hotfix合法异常时区合同后继已组合：Core保UTC秒/纳秒，Wago逐页按真实瞬间严格After选择；原始时间表示保留到pin/result晚期marshal，参数from/to同步使用Go接受规则。6新Rust未跑；共享HTTP原始URI/host无损传输仍在实现。下一集中批同时复验Core bundle类型编译、Core/CLI测试修正及Source/Emmy后继，不把历史失败改标通过。
 

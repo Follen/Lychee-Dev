@@ -687,7 +687,7 @@ fn raw_path_is_reescaped_as_a_whole_only_when_go_requires_it() {
 }
 
 #[test]
-fn known_encoded_dot_gap_is_explicit_and_does_not_send_normalized_target() {
+fn encoded_dot_redirect_sends_original_target_through_controlled_transport() {
     let server = Server::new(2, |index, stream| {
         if index == 0 {
             send(
@@ -697,16 +697,15 @@ fn known_encoded_dot_gap_is_explicit_and_does_not_send_normalized_target() {
                 b"",
             );
         } else {
-            body(stream, b"wrong-target");
+            body(stream, b"raw-target");
         }
     });
     let (control, budget) = scope(Cost::defaults());
-    let failure = PublicFetcher
-        .fetch(&server.url, &control, &budget)
-        .unwrap_err();
-    assert_eq!(failure.code, "records.hotfix_wago_http");
-    assert!(failure.message.contains("cannot be represented"));
-    assert_eq!(server.finish().len(), 1);
+    let fetched = PublicFetcher.fetch(&server.url, &control, &budget).unwrap();
+    assert_eq!(fetched, b"raw-target");
+    let requests = server.finish();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].starts_with("GET /keep/%2e%2e/target HTTP/1.1\r\n"));
     assert_eq!(budget.snapshot().unwrap().network_requests, 0);
 }
 
