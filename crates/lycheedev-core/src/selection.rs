@@ -12,8 +12,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub mod target;
 mod file;
+pub mod target;
 pub use file::resolve_selection_file_controlled;
 mod project_controlled;
 pub use project_controlled::resolve_pinned_controlled_with_check;
@@ -47,9 +47,33 @@ pub struct ChangePin {
     pub full_build: String,
     pub region: String,
     pub scope: String,
+    #[serde(serialize_with = "serialize_change_time")]
     pub fetched_at: String,
     #[serde(rename = "sha256")]
     pub sha256: String,
+}
+fn change_time_marshal_error() -> ToolkitError {
+    ToolkitError::new(
+        "command.failed",
+        "json: error calling MarshalJSON for type time.Time: Time.MarshalJSON: timezone hour outside of range [0,23]",
+        5,
+    )
+}
+fn serialize_change_time<S: serde::Serializer>(
+    value: &str,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    match crate::evidence::parse_go_timestamp(value) {
+        Some(time) => match time.canonical() {
+            Some(canonical) => serializer.serialize_str(canonical),
+            None => Err(serde::ser::Error::custom(
+                change_time_marshal_error().message,
+            )),
+        },
+        // Historical public Rust callers use String; raw Go wire readers own
+        // malformed-input admission. Do not invent a new string parse policy here.
+        None => serializer.serialize_str(value),
+    }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SelectionSpec {
@@ -169,6 +193,8 @@ fn validate(spec: &SelectionSpec) -> Result<()> {
             || !valid_build(&changes.full_build)
             || !valid_digest(&changes.sha256, 64)
             || changes.fetched_at.is_empty()
+            || crate::evidence::parse_go_timestamp(&changes.fetched_at)
+                .is_some_and(|time| time.is_zero())
         {
             return Err(ToolkitError::new(
                 "selection.unresolved_changes",
@@ -194,6 +220,17 @@ fn validate(spec: &SelectionSpec) -> Result<()> {
     Ok(())
 }
 fn identity(pin: &PinnedSet) -> Result<String> {
+    // Fixed Go validates/merges the selection before its first json.Marshal.
+    // A parsed >=24h offset is comparable but fails only at this publication
+    // identity boundary, not while reading or choosing the latest Wago page.
+    if pin
+        .changes
+        .as_ref()
+        .and_then(|change| crate::evidence::parse_go_timestamp(&change.fetched_at))
+        .is_some_and(|time| time.canonical().is_none())
+    {
+        return Err(change_time_marshal_error());
+    }
     let mut unsigned = pin.clone();
     unsigned.id.clear();
     Ok(format!(
@@ -307,9 +344,10 @@ fn pin_selection_observed_with_check(
 ) -> Result<PinnedSet> {
     selection_check(control, &mut check)?;
     if let Some(change) = spec.changes.as_mut()
-        && let Ok(time) = chrono::DateTime::parse_from_rfc3339(&change.fetched_at)
+        && let Some(time) = crate::evidence::parse_go_timestamp(&change.fetched_at)
+        && let Some(canonical) = time.canonical()
     {
-        change.fetched_at = storage::timestamp_offset(time);
+        change.fetched_at = canonical.to_owned();
     }
     if !spec.parent.is_empty() {
         let parent = match control {
@@ -373,13 +411,19 @@ fn inherit_parent(spec: &mut SelectionSpec, parent: PinnedSet) -> Result<()> {
 pub fn find_project(start: &Path) -> Result<PathBuf> {
     find_project_controlled(start, &crate::control::OperationControl::default())
 }
-pub fn find_project_controlled(start: &Path, control: &crate::control::OperationControl) -> Result<PathBuf> {
+pub fn find_project_controlled(
+    start: &Path,
+    control: &crate::control::OperationControl,
+) -> Result<PathBuf> {
     project_controlled::find_controlled(start, control)
 }
 pub fn inspect_project(path: &Path) -> Result<Value> {
     inspect_project_controlled(path, &crate::control::OperationControl::default())
 }
-pub fn inspect_project_controlled(path: &Path, control: &crate::control::OperationControl) -> Result<Value> {
+pub fn inspect_project_controlled(
+    path: &Path,
+    control: &crate::control::OperationControl,
+) -> Result<Value> {
     project_controlled::inspect_value(path, control)
 }
 pub fn resolve_pinned(inv: &Invocation) -> Result<PinnedSet> {
@@ -428,6 +472,39 @@ mod product_tests {
             sha256: "f".repeat(64),
         }
     }
+    #[test]
+    fn change_time_admission_comparison_and_identity_marshal_have_distinct_boundaries() {
+        let mut change = changes("retail");
+        change.fetched_at = "2026-10-16T00:00:00+24:00".into();
+        let mut spec = SelectionSpec {
+            changes: Some(change),
+            ..Default::default()
+        };
+        validate(&spec).unwrap();
+        let failure = identity(&PinnedSet {
+            schema: "lycheedev.selection.v1".into(),
+            id: String::new(),
+            spec: spec.clone(),
+        })
+        .unwrap_err();
+        assert_eq!(
+            (failure.code.as_str(), failure.exit_code),
+            ("command.failed", 5)
+        );
+        assert!(serde_json::to_value(&spec).is_err());
+        spec.changes.as_mut().unwrap().fetched_at = "0001-01-02T00:00:00+24:00".into();
+        assert_eq!(
+            validate(&spec).unwrap_err().code,
+            "selection.unresolved_changes"
+        );
+        spec.changes.as_mut().unwrap().fetched_at = "2026-10-16T00:00:00+00:60".into();
+        let normalized = serde_json::to_value(&spec).unwrap();
+        assert_eq!(
+            normalized["changes"]["fetchedAt"],
+            "2026-10-16T00:00:00+01:00"
+        );
+    }
+
     #[test]
     fn shared_source_supports_each_exact_track_without_collapsing_pin_identity() {
         let mut identities = vec![];

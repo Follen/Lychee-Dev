@@ -7,7 +7,7 @@ use base64::{
         DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig, general_purpose::URL_SAFE_NO_PAD,
     },
 };
-use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, Datelike, FixedOffset, TimeZone, Timelike, Utc};
 use serde::{
     Deserialize, Deserializer, Serialize,
     de::{DeserializeSeed, MapAccess},
@@ -35,8 +35,10 @@ pub(super) struct Query {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(serialize_with = "serialize_optional_time")]
     pub from: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(serialize_with = "serialize_optional_time")]
     pub to: Option<String>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub search: String,
@@ -126,48 +128,99 @@ pub(super) fn validate_option(key: &str, value: &str) -> Result<()> {
     };
     message.map_or(Ok(()), |m| Err(ToolkitError::arguments(m)))
 }
-pub(super) fn parse_time(value: &str) -> Result<DateTime<FixedOffset>> {
-    static FORM: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let pattern=FORM.get_or_init(||regex::Regex::new(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}(T[0-9]{1,2}:[0-9]{2}:[0-9]{2}([.,][0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})| [0-9]{1,2}:[0-9]{2}:[0-9]{2}([.,][0-9]+)?)$").expect("fixed timestamp pattern"));
-    if !pattern.is_match(value) {
-        return Err(error(
-            "query",
-            2,
-            "time must be RFC3339 or 2006-01-02 15:04:05",
-        ));
+fn parsed_time(value: &str) -> Result<evidence::GoTimestamp> {
+    if let Some(time) = evidence::parse_go_timestamp(value) {
+        return Ok(time);
     }
-    let mut normalized = value.replace(',', ".");
-    if normalized.as_bytes().get(12) == Some(&b':') {
-        normalized.insert(11, '0');
-    }
-    if let Some(dot) = normalized.find('.') {
-        let end = normalized[dot + 1..]
-            .find(|c: char| !c.is_ascii_digit())
-            .map_or(normalized.len(), |n| dot + 1 + n);
-        if end > dot + 10 {
-            normalized.replace_range(dot + 10..end, "");
+    // The only fallback is Go's source-native layout. It has no zone. Reuse
+    // the same exact date/hour/fraction parser instead of chrono's wider grammar.
+    if value.as_bytes().get(10) == Some(&b' ') {
+        let rfc = format!("{}T{}Z", &value[..10], value[10..].trim_start_matches(' '));
+        if let Some(time) = evidence::parse_go_timestamp(&rfc) {
+            return Ok(time);
         }
     }
-    // chrono models leap seconds as second59+nanos>=1e9; Go time.Parse rejects :60.
-    if normalized
-        .as_bytes()
-        .get(17..19)
-        .is_some_and(|seconds| seconds == b"60")
-    {
-        return Err(error(
-            "query",
-            2,
-            "time must be RFC3339 or 2006-01-02 15:04:05",
-        ));
-    }
-    DateTime::parse_from_rfc3339(&normalized)
-        .or_else(|_| {
-            NaiveDateTime::parse_from_str(&normalized, "%Y-%m-%d %H:%M:%S%.f")
-                .map(|t| Utc.from_utc_datetime(&t).fixed_offset())
-        })
-        .map_err(|_| error("query", 2, "time must be RFC3339 or 2006-01-02 15:04:05"))
+    Err(error(
+        "query",
+        2,
+        "time must be RFC3339 or 2006-01-02 15:04:05",
+    ))
 }
+fn time_wire(value: &str) -> Result<String> {
+    let parsed = parsed_time(value)?;
+    Ok(parsed.canonical().unwrap_or(value).to_owned())
+}
+pub(super) fn parse_time(value: &str) -> Result<DateTime<FixedOffset>> {
+    let parsed = parsed_time(value)?;
+    if let Some(canonical) = parsed.canonical() {
+        return DateTime::parse_from_rfc3339(canonical)
+            .map_err(|_| fault("records.internal", 8, "Go time canonical conversion failed"));
+    }
+    let (seconds, nanos) = parsed.instant();
+    // A >=24h zone cannot be represented by chrono::FixedOffset, but its exact
+    // UTC instant can. Callers use this result only for comparisons/UTC scope;
+    // time_wire retains the original zone for the later JSON marshal boundary.
+    DateTime::<Utc>::from_timestamp(seconds, nanos)
+        .map(|time| time.fixed_offset())
+        .ok_or_else(|| fault("records.internal", 8, "Go time instant conversion failed"))
+}
+fn utc_scope_time(value: &str) -> Result<String> {
+    let time = parse_time(value)?.with_timezone(&Utc);
+    // Go Format permits UTC normalization across year 0000/9999 without a
+    // leading plus sign for a five-digit year. JSON marshal has its own check.
+    let year = if time.year() < 0 {
+        format!("-{:04}", -time.year())
+    } else {
+        format!("{:04}", time.year())
+    };
+    let mut out = format!(
+        "{}-{:02}-{:02}T{:02}:{:02}:{:02}",
+        year,
+        time.month(),
+        time.day(),
+        time.hour(),
+        time.minute(),
+        time.second()
+    );
+    if time.nanosecond() != 0 {
+        out.push('.');
+        out.push_str(format!("{:09}", time.nanosecond()).trim_end_matches('0'));
+    }
+    out.push('Z');
+    Ok(out)
+}
+fn time_marshal_failure() -> ToolkitError {
+    fault(
+        "command.failed",
+        5,
+        "json: error calling MarshalJSON for type time.Time: Time.MarshalJSON: timezone hour outside of range [0,23]",
+    )
+}
+fn serialize_optional_time<S: serde::Serializer>(
+    value: &Option<String>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    match value {
+        None => serializer.serialize_none(),
+        Some(raw) => {
+            let parsed = parsed_time(raw).map_err(serde::ser::Error::custom)?;
+            let canonical = parsed
+                .canonical()
+                .ok_or_else(|| serde::ser::Error::custom(time_marshal_failure().message))?;
+            serializer.serialize_some(canonical)
+        }
+    }
+}
+
 impl Query {
+    pub(super) fn check_time_marshal(&self) -> Result<()> {
+        for raw in [&self.from, &self.to].into_iter().flatten() {
+            if parsed_time(raw)?.canonical().is_none() {
+                return Err(time_marshal_failure());
+            }
+        }
+        Ok(())
+    }
     pub fn from_invocation(inv: &Invocation) -> Result<Self> {
         for (key, value) in &inv.flags {
             validate_option(key, value)?;
@@ -204,7 +257,7 @@ impl Query {
         let time = |flag| {
             inv.flag(flag)
                 .filter(|s| !s.is_empty())
-                .map(|v| parse_time(v).map(storage::timestamp_offset))
+                .map(time_wire)
                 .transpose()
         };
         let query = Self {
@@ -305,16 +358,10 @@ impl Query {
             p.push(format!("status:{v}"));
         }
         if let Some(v) = &self.from {
-            p.push(format!(
-                "from:{}",
-                storage::timestamp(parse_time(v)?.with_timezone(&Utc))
-            ));
+            p.push(format!("from:{}", utc_scope_time(v)?));
         }
         if let Some(v) = &self.to {
-            p.push(format!(
-                "to:{}",
-                storage::timestamp(parse_time(v)?.with_timezone(&Utc))
-            ));
+            p.push(format!("to:{}", utc_scope_time(v)?));
         }
         if !self.search.is_empty() {
             p.push(format!("search:{}", lower(&self.search)));
@@ -500,6 +547,7 @@ pub(super) struct Coverage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selected_push: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(serialize_with = "serialize_optional_time")]
     pub captured_at: Option<String>,
     #[serde(rename = "ref", skip_serializing_if = "String::is_empty")]
     pub reference: String,

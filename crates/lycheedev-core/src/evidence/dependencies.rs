@@ -650,11 +650,19 @@ deserialize_object!(Scan, Page, Export, Demux, Frame, EmbeddedCapture);
 // chrono's general parser. That fallback also accepts a one-digit hour,
 // comma fractions, and offsets with hour=24 or minute=60. JSON escape bytes
 // are NOT unescaped by Time.UnmarshalJSON (go.dev/issue/47353).
+#[derive(Clone, Debug)]
 pub struct GoTimestamp {
+    utc_seconds: i64,
+    nanoseconds: u32,
     canonical: Option<String>,
     zero: bool,
 }
 impl GoTimestamp {
+    /// Exact wall-clock UTC instant, including parsed offsets that Go cannot
+    /// later marshal. Comparison success never implies JSON marshal success.
+    pub fn instant(&self) -> (i64, u32) {
+        (self.utc_seconds, self.nanoseconds)
+    }
     /// Go JSON marshal form, absent when a parsed timezone cannot be marshalled.
     pub fn canonical(&self) -> Option<&str> {
         self.canonical.as_deref()
@@ -669,6 +677,8 @@ impl GoTimestamp {
 impl Default for GoTimestamp {
     fn default() -> Self {
         Self {
+            utc_seconds: -62135596800,
+            nanoseconds: 0,
             canonical: Some("0001-01-01T00:00:00Z".into()),
             zero: true,
         }
@@ -759,12 +769,19 @@ pub fn parse_go_timestamp(value: &str) -> Option<GoTimestamp> {
     };
     let local = chrono::NaiveDate::from_ymd_opt(year as i32, month, day)?
         .and_hms_opt(hour, minute, second)?;
-    let zero = fraction.is_empty()
-        && local.checked_sub_signed(chrono::Duration::minutes(signed_minutes))
-            == chrono::NaiveDate::from_ymd_opt(1, 1, 1).and_then(|date| date.and_hms_opt(0, 0, 0));
+    let utc = local.checked_sub_signed(chrono::Duration::minutes(signed_minutes))?;
+    let utc_seconds = utc.and_utc().timestamp();
+    let nanoseconds = if fraction.is_empty() {
+        0
+    } else {
+        number(fraction.as_bytes())? * 10u32.pow(9 - fraction.len() as u32)
+    };
+    let zero = utc_seconds == -62135596800 && nanoseconds == 0;
     // Go can parse a >=24h offset but refuses to marshal it into an identity.
     if offset >= 24 * 60 {
         return Some(GoTimestamp {
+            utc_seconds,
+            nanoseconds,
             canonical: None,
             zero,
         });
@@ -781,6 +798,8 @@ pub fn parse_go_timestamp(value: &str) -> Option<GoTimestamp> {
         canonical.push_str(&format!("{:02}:{:02}", offset / 60, offset % 60));
     }
     Some(GoTimestamp {
+        utc_seconds,
+        nanoseconds,
         canonical: Some(canonical),
         zero,
     })
@@ -999,6 +1018,35 @@ fn normalize_go_strings_checked<'a>(
 mod compatibility_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn go_timestamp_unmarshalable_offsets_keep_exact_comparable_instants() {
+        for (raw, utc, can_marshal) in [
+            ("2026-10-16T00:00:00+24:00", "2026-10-15T00:00:00Z", false),
+            ("2026-10-16T00:00:00-24:60", "2026-10-17T01:00:00Z", false),
+            ("2026-10-16T00:00:00+00:60", "2026-10-15T23:00:00Z", true),
+            ("0000-01-01T00:00:00+24:00", "0000-01-01T00:00:00Z", false),
+        ] {
+            let parsed = parse_go_timestamp(raw).unwrap();
+            let comparison = parse_go_timestamp(utc).unwrap();
+            if raw.starts_with("0000") {
+                assert_eq!(parsed.instant().0, comparison.instant().0 - 86400);
+            } else {
+                assert_eq!(parsed.instant(), comparison.instant());
+            }
+            assert_eq!(parsed.canonical().is_some(), can_marshal);
+        }
+        let earlier = parse_go_timestamp("2026-10-16T1:02:03,1234567899+24:00").unwrap();
+        let later = parse_go_timestamp("2026-10-15T01:02:03.123456790Z").unwrap();
+        assert!(earlier.instant() < later.instant());
+        assert_eq!(earlier.instant().1, 123456789);
+        assert!(
+            parse_go_timestamp("0001-01-02T00:00:00+24:00")
+                .unwrap()
+                .is_zero()
+        );
+        assert_eq!(GoTimestamp::default().instant(), (-62135596800, 0));
+    }
 
     #[test]
     fn go_timestamp_canonical_identity_uses_layout_fallback_normalization() {

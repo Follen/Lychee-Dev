@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 04:17 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`c92638888ed53693e04b185d87ef758683c0a258`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 04:17 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`3679ae948bc07855ba7678a204275cf7f3dffcb0`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -24,6 +24,8 @@
 - 2026-10-15 18:24 用户调整实施节奏：先按完整端到端功能实现并接入默认生产消费者，再集中补测试和统一验证；取消自行增加的逐小片冻结/独审/CI先行门禁。实现过程中仍及时分批提交推送同一草稿PR，真实安全边界和文件单写协调保留；已有CI旁路诊断，不等待每轮才继续编码。最终四阶段循环审计与完整验收要求不变。
 
 ## 2. 当前实现与未闭环事项
+
+Hotfix合法异常时区合同后继已组合：Core保UTC秒/纳秒，Wago逐页按真实瞬间严格After选择；原始时间表示保留到pin/result晚期marshal，参数from/to同步使用Go接受规则。6新Rust未跑；共享HTTP原始URI/host无损传输仍在实现。下一集中批同时复验Core bundle类型编译、Core/CLI测试修正及Source/Emmy后继，不把历史失败改标通过。
 
 本地后继已组合18路径：owned Structural按外层metadata与完整owned children比较/哈希，raw union保重数与token；Source负fixture分别保递归停止与未知调用继续事实。历史比较采用明确可逆compile-compatibility overlay，原归档/expected/448输入不变，Node13/13实际通过；Rust比较尚未运行。Source表达式身份改每文件紧凑索引，保原AST遍历/范围/计量与重复range最后值，释放准备临时文本/父请求并move回复rows；7新回归未跑，收益未测。原90秒/2GiB不变，独立1秒短预算响应仍有broker.deadline待闭合。
 

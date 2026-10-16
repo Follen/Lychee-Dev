@@ -85,7 +85,21 @@ fn budget(inv: &Invocation) -> Budget {
     }
     Budget::controlled(limits, inv.control.deadline(), inv.control.clone())
 }
+#[cfg(test)]
 fn pin(inv: &Invocation, change: selection::ChangePin, budget: &Budget) -> Result<String> {
+    check_scope(inv, budget)?;
+    // Go PinHotfixChange enters WriteMetadata before comparing the parent or
+    // marshaling the new selection identity. Keep that observable precedence.
+    let owner = lycheedev_core::metadata::Metadata::open_controlled_with_check(
+        &inv.home,
+        true,
+        &inv.control,
+        || budget.check(),
+    )?;
+    let result = pin_opened(inv, change, budget);
+    close_metadata(owner, result, inv, budget)
+}
+fn pin_opened(inv: &Invocation, change: selection::ChangePin, budget: &Budget) -> Result<String> {
     inv.control.check()?;
     let parent = inv.flag("--snapshot").unwrap_or_default();
     if !parent.is_empty() {
@@ -159,23 +173,36 @@ fn run(inv: &Invocation, budget: &Budget) -> Result<RemoteResult> {
             ));
         }
     };
-    result.snapshot = pin(inv, result.change.clone(), budget)?;
-    if result.change.provider == "wago" {
-        let raw = go_bytes(&result, budget, 32 << 20)?;
-        result.capture = Some(evidence::commit_capture_budgeted(
-            &inv.home,
-            evidence::CaptureInput {
-                bytes: &raw,
-                maximum_bytes: 32 << 20,
-                media_type: "application/json",
-                provenance: json!({"kind":"hotfix-records","locator":format!("{}:sha256:{}",result.change.provider,result.change.sha256),"snapshot":result.snapshot,"dataBuild":result.query.full_build}),
-                complete: result.complete,
-                truncated: result.truncated,
-            },
-            &inv.control,
-            budget,
-        )?);
-    }
+    // Fixed QueryWagoHotfix holds WriteMetadata through pin, result marshal and
+    // capture. Raidbots uses the same owner through its pin before presentation.
+    let owner = lycheedev_core::metadata::Metadata::open_controlled_with_check(
+        &inv.home,
+        true,
+        &inv.control,
+        || budget.check(),
+    )?;
+    let published: Result<()> = (|| {
+        result.snapshot = pin_opened(inv, result.change.clone(), budget)?;
+        if result.change.provider == "wago" {
+            result.query.check_time_marshal()?;
+            let raw = go_bytes(&result, budget, 32 << 20)?;
+            result.capture = Some(evidence::commit_capture_budgeted(
+                &inv.home,
+                evidence::CaptureInput {
+                    bytes: &raw,
+                    maximum_bytes: 32 << 20,
+                    media_type: "application/json",
+                    provenance: json!({"kind":"hotfix-records","locator":format!("{}:sha256:{}",result.change.provider,result.change.sha256),"snapshot":result.snapshot,"dataBuild":result.query.full_build}),
+                    complete: result.complete,
+                    truncated: result.truncated,
+                },
+                &inv.control,
+                budget,
+            )?);
+        }
+        Ok(())
+    })();
+    committed_result(close_metadata(owner, published, inv, budget), &result)?;
     Ok(result)
 }
 fn outcome(result: &RemoteResult, data: Value) -> Outcome {

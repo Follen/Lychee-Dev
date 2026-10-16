@@ -644,6 +644,7 @@ pub(super) fn query(
     let mut stop = "";
     let mut last: Option<CursorPage> = None;
     let mut captured = String::new();
+    let mut captured_instant = None;
     loop {
         check_scope(inv, budget)?;
         if walked >= max_pages {
@@ -745,8 +746,10 @@ pub(super) fn query(
         if fetched.from_cache {
             hits += 1;
         }
-        let stamp = model::parse_time(&fetched.captured_at).map_err(corrupted)?;
-        if captured.is_empty() || stamp > model::parse_time(&captured)? {
+        let stamp = evidence::parse_go_timestamp(&fetched.captured_at)
+            .ok_or_else(|| error("cache_corrupt", 4, "invalid receipt timestamp"))?;
+        if captured_instant.is_none_or(|instant| stamp.instant() > instant) {
+            captured_instant = Some(stamp.instant());
             captured = fetched.captured_at;
         }
         chain = storage::sha256(
