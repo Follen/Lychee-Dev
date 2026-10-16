@@ -351,11 +351,14 @@ mod tests {
     }
     #[test]
     fn reply_boundaries_are_canonical_observations_inside_existing_caps() {
-        for phase in ["reply_serialized","reply_written","reply_values_released"] {
-            assert!(allowed(phase));assert!(super::super::allocation_phase(phase));
-            let now=Instant::now();
-            let mut coarse=Phases{enabled:true,started:now,last:now,count:0,bytes:0,omitted:0};
-            coarse.record(phase);assert_eq!((coarse.count,coarse.bytes,coarse.omitted),(0,0,0));
+        let now=Instant::now();
+        let mut coarse=Phases{enabled:true,started:now,last:now,count:0,bytes:0,omitted:0};
+        for (index,phase) in ["reply_serialized","reply_written","reply_values_released"].into_iter().enumerate() {
+            assert!(allowed(phase));assert!(!super::super::allocation_phase(phase),"coarse reply boundary: {phase}");
+            let before=coarse.bytes;
+            coarse.record(phase);
+            assert_eq!(coarse.count,index+1,"coarse reply boundary was filtered: {phase}");
+            assert!(coarse.bytes>before);assert_eq!(coarse.omitted,0);
             let event=Event{schema:PHASE_SCHEMA.into(),phase:phase.into(),elapsed_ms:u64::MAX,phase_ms:u64::MAX,omitted:usize::MAX};
             let bytes=serde_json::to_vec(&event).unwrap();
             assert!((bytes.len()+1)*RECORD_LIMIT<=BYTE_LIMIT as usize);

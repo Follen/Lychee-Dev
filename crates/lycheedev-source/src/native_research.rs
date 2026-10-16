@@ -724,21 +724,35 @@ mod projection_tests {
     #[test]
     fn xml_named_function_plan_uses_actual_index_ranges_and_excludes_nested_calls() {
         let xml="<Ui>\n<Script>\nfunction Named()\n local function Inner() Hidden() end\n Target()\nend\n</Script>\n</Ui>";
-        let facts=crate::facts::xml(xml.as_bytes());
-        let declaration=facts.declarations.iter().find(|item|item.name=="Named").unwrap();
-        assert_eq!(declaration.category,"function");
-        let query=planned_query("Named","Logic.xml",declaration.line,declaration.end_line,&declaration.category,"both");
+        // Go-compatible public XML facts do not index Lua inside Script bodies.
+        // Native planning consumes the independently mapped decoded script below.
+        let public_facts=crate::facts::xml(xml.as_bytes());
+        assert!(!public_facts.declarations.iter().any(|item|item.name=="Named"));
         let control=OperationControl::default();
         let session=ResearchSession::prepare(SnapshotRequest{
             files:BTreeMap::new(),load_documents:BTreeMap::from([("Main.toc".into(),"Logic.xml\n".into()),("Logic.xml".into(),xml.into())]),environment_documents:BTreeMap::new(),source:json!({"repository":"xml-named-test","product":"retail"}),
             luac:LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
             api:vec![],environment_manifest:None,load_plans:vec![LoadEvidence{manifest:"Main.toc".into(),ordered:vec![],issues:vec![]}],input_gaps:vec![]},&control).unwrap();
+        assert_eq!(session.xml.scripts.len(),1);
+        let script=session.xml.scripts.values().next().unwrap();
+        assert_eq!(script.path,"Logic.xml");
+        let body_facts=crate::facts::lua(script.body_text().as_bytes(),false);
+        let declaration=body_facts.declarations.iter().find(|item|item.name=="Named").unwrap();
+        assert_eq!(declaration.category,"function");
+        let line=script.original_body_line(declaration.line).unwrap();
+        let end_line=script.original_body_line(declaration.end_line).unwrap();
+        assert_eq!((line,end_line),(3,6),"native decoded-body range must map to original XML");
+        let query=planned_query("Named","Logic.xml",line,end_line,&declaration.category,"both");
         let plan=session.prepared.plan_research_operations(&query,&session.xml,None).unwrap();
         let evidence=plan.evidence();
         assert_eq!(evidence["plan"]["batch_sizes"],json!([3]),"{evidence}");
         assert!(evidence["plan"]["unavailable"].as_array().unwrap().is_empty(),"{evidence}");
         let operations=evidence["plan"]["operations"].as_array().unwrap();
         assert_eq!(operations[0]["kind"],"references");assert_eq!(operations[1]["kind"],"type");assert_eq!(operations[2]["kind"],"definition");
+        let named_position=&operations[0]["target"]["position"];
+        assert_eq!(named_position["path"],"Logic.xml");
+        assert_eq!(named_position["coveringRange"]["start"]["line"],2);
+        assert_eq!(named_position["xmlContentHash"],storage::sha256(xml.as_bytes()));
         let site:&Value=&operations[2]["target"]["site"];
         let source=session.prepared.inputs().original(site["file"].as_str().unwrap()).unwrap();
         assert_eq!(&source[site["start"].as_u64().unwrap() as usize..site["end"].as_u64().unwrap() as usize],"Target");

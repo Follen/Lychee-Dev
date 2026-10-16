@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 21:27 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`f088d5cbd7730a11bd77412b5490fa8b81d35792`；当前024优化retained仍失败，f088全部受影响回归已过，唯一新优化构建正在执行；各旧产物与runner身份独立保留。实现进行中，尚未完成全量验收。
+更新：2026-10-16 21:50 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`c924f53adf547171bc528ecd5a4225d54fc6c8e1`；当前f088优化4036完整等价，retained仍失败；c924仅增加有界细阶段定位，等待新候选验证；各旧产物与runner身份独立保留。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -67,9 +67,11 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 - **0e1 Data typed stream四项Go差异修复实测通过**：[正式66/0/0](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6224216164)，stream8与default_sql58，含2个新增实际consumer回归；all-target通过，完整wire断言与字段/过滤首错均保留。未重跑Go，不把跨批重叠计为唯一总数。024的Core阶段fixture已闭合，retained定向回归通过但优化完整Retail仍失败。
 
 - **024优化完整Retail仍有一个retained根失败**：[完整终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6224633237)8通过5失败，其中首次retained请求12.174秒EOF/exit5，另4项缺首次owner而依赖失败。普通cold refs18.412秒及context/API等通过。现已认证owner65368/child33216和创建身份；child退出0xc0000409是在supervisor termination后观察，不能当自然崩溃原因。held Job峰值2145964032字节、上限2147483648，无limit通知；最后query_execute_operations，仍不能断言OOM。所有句柄/进程回收确认。完整116行305536字节内存窗口SHA `0507f3894e356485e44c847cb7db97372d4f13f0244fbad4c9659c6c64152245`及4原命令保留。继续定位References/Type/结果保留与scope阶段实际驻留，原90秒/2GiB不变。
-- **f088并行组合实际40通过1原忽略**：[正式结果](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6224715307)Source pipeline21、Data texture11、resource5、image export3通过；image fixture准备项1原忽略，workspace all-target通过。新增6Source与14Data全部包含在上述计数中，不重复累计。16实际参与者全RGBA及默认导出capture路径均命中，所有owner封存/回收；部分使用已认证辅助进程强制清理，如实保留。当前唯一f088优化构建在途，后续4036完整等价/profile/retained尚未有新结果，不据正确性测试宣称吞吐或内存收益。
+- **f088并行组合实际40通过1原忽略**：[正式结果](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6224715307)Source pipeline21、Data texture11、resource5、image export3通过；image fixture准备项1原忽略，workspace all-target通过。新增6Source与14Data全部包含在上述计数中，不重复累计。16实际参与者全RGBA及默认导出capture路径均命中，所有owner封存/回收；部分使用已认证辅助进程强制清理，如实保留。[f088优化完整4036字段/顺序0差](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6224923482)，单次cold index Rust15.432s/Go9.528s；总phase15.223s，Facts发布5.458s、原文发布5.291s，worker累计时间重叠不能相加或代替wall time。不是20对统计或≤0.30验收。[完整retained仍8通过5失败](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6224961726)，首次EOF、后4项依赖失败；认证退出仍只在终止后观察，无limit通知。并行正确性通过不等于内存闭合。
 
 - **retained操作级定位后继已实现，尚未证明内存修复**：References目标/use索引/源行/XML/control序列化、digest/保留、Type、执行identity及scope/reply分为22个精确私有阶段。killable child在原控制下持CREATE_NEW句柄追加JSONL，不fsync、不重写历史、owner不落盘；每请求128条/128KiB、每行2KiB，每home固定32槽合计最多4MiB。每文件细事件只采24条，后续常数计数，保Type/最终装配额度；采样缺口、截断和槽满明确标记，未认证旧槽不采用。旧粗诊断与公共wire保持。新增8项Rust待执行，现有workflow过滤已覆盖；既有完整Node入口81/81实际通过（含诊断15）。继续检查完整驻留链，不能将更细日志称作问题已解决。
+
+- **c924前置111通过2失败2忽略，完整定位未运行**：[真实报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6225166479)session44通过、research67通过2失败2原fixture忽略；新增8诊断测试全部通过，all-target通过，Windows Node80通过1平台跳过。两失败已在test-only后继修正：XML命名函数fixture改从真实native Script解码/原文行映射取范围，公共XML不补错误声明；c924误复制到原reply测试的细阶段断言改回三条真实粗事件计数/字节增长验证，生产分类保持原字节。新补丁Rust待复测，Node81/81通过。因前置失败，本机未构建c924优化产物，未取得新的22阶段Retail证据，不冒用f088。
 
 ## 4. 进入最终五阶段前的有限收口
 
@@ -92,7 +94,7 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 本机测试通道已正常恢复，原unknown历史保留，无需再次apply或重启。仅云端实现，用户指定本机线程负责固定SHA测试并将报告写回同一PR。普通push不自动切换其正在测试的树；不另排重复长CI。
 
-当前固定 **f088d5cbd7730a11bd77412b5490fa8b81d35792** 已完成all-target与40通过1原忽略，正在一次优化构建，之后按原计划核4036完整字段/顺序、单次冷index profile与完整retained。不要中途切换后继源码。024优化完整Retail8通过5失败，根因仍retained首请求EOF；原终态和精确进程证据保留。7a全仓typed边界测试与0e1 Data后继已过，Core阶段fixture亦由024闭合，不重复历史失败树。
+固定 **f088d5cbd7730a11bd77412b5490fa8b81d35792** 已完成all-target与40通过1原忽略、优化4036完整等价及单次profile，retained仍失败。后继 **c924f53adf547171bc528ecd5a4225d54fc6c8e1** 的8新Rust/优化retained细阶段定位已由协调排队；待原操作安全终态后固定切换，不拿f088旧EXE冒新诊断。024优化完整Retail8通过5失败，根因仍retained首请求EOF；原终态和精确进程证据保留。7a全仓typed边界测试与0e1 Data后继已过，Core阶段fixture亦由024闭合，不重复历史失败树。
 
 - 所有Rust检查沿仓库受控 `tools/rust-cargo.mjs`、固定工具链和原owner/cache合同，先all-target编译，再受影响组；默认线程栈不加大。完整SQL299及7db预算组已过，不机械重跑历史失败树。
 - 正式Lua与9桥使用[现有入口](tools/rust-formal-lua-bridge.mjs)，每次新输出目录；原runtime与CLI封存产物必须通过全部身份验证，不能覆盖旧失败目录。当前正式Go323220/9已有实证。
