@@ -1,0 +1,106 @@
+{
+  "schema": "lycheedev.emmy-current-object-contract.v1",
+  "identity": "ac8-observed-object-call-result-r1",
+  "measuredCommit": "ac8bfbe656e81501e64ec572fc2c5c2be909a758",
+  "measuredSourceTree": "73ebb0f797b20187dd8c135812e3d64c26a94410e39b3a4828014f31adf7b5b4",
+  "evidenceSource": "https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6219800482",
+  "cleanTree": "375d92c5d5e503d77232fabf22a21a82f504c2b38dc5def8fcca1d6ecf06e104",
+  "historicalTree": "cc0a3496bad44f2dfede0799b86175dc3b3332587097bacf6ed691648130fcff",
+  "oracleOwner": "b532b66c-ac2d-49f4-8fa3-8539eb8190be",
+  "referenceCargoOwner": "30e1bb09-454d-45e4-bebe-d098270c2ca0",
+  "candidateCargoOwner": "9d500d4e-3b3a-4e1e-8fa2-6881af7aeb52",
+  "receiptSHA256": "cedf5cee4963ed9a3849f45fb63d1255411b6213dfca9547f229e42563504fca",
+  "reportSHA256": "a175893f79feda89908576736d1a01eb0c65463af5b63265617aeb66e0196ad7",
+  "referenceCargoReceiptSHA256": "a3238136481aa30a893954cc4fea9e68ea0f65ed6bb5f8a3a3de1ffe14d77538",
+  "candidateCargoReceiptSHA256": "9599a5bc7c03f3bfe2e99c242e1791a77be64fc8c51308c74e7af57501644f33",
+  "sourceFiles": [
+    {
+      "path": "crates/lycheedev-emmy-adapter/src/session/query.rs",
+      "bytes": 14952,
+      "sha256": "bd6c9d96b9a29ce2321799e4e0abcad85ada36e4160efd4a685b855270043877"
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/src/session/backend.rs",
+      "bytes": 28321,
+      "sha256": "af59b61721a7499920ee064450673e7b60caae9ab3805d3c98235dd747bd536a"
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/src/session/backend/call_quality.rs",
+      "bytes": 5868,
+      "sha256": "36e955c86b4d7f771e6eb1fd0d4e9209e59545233d77f05564b63352d8cdf498"
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/src/session/backend/check_gate.rs",
+      "bytes": 7466,
+      "sha256": "d989f48bdaf7c65d4d75f4c6a4511a4482af5bc6601bbef936c5e3d9e1f15851"
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/src/session/evidence.rs",
+      "bytes": 4936,
+      "sha256": "92aa1526bbcfbbe2ad688161a9fdaea0991357972750f69da37086386a25acc4"
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/tests/object_carrier_contract.rs",
+      "bytes": 17020,
+      "sha256": "695937919a936330fea2184fff7b110870573441250ee89524faf547a1555101"
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/tests/support/object_carrier_cases.rs",
+      "bytes": 5084,
+      "sha256": "593d769a2def0ab36acea670f14bd10dc92a4ebe58a1a753ccc1bd85554c78bc"
+    },
+    {
+      "path": "crates/lycheedev-emmy-adapter/tests/support/query_backend_cases.rs",
+      "bytes": 5038,
+      "sha256": "766f518659f0235367476d3616b74953ff97cfe6961bbae7bae8a0a06962c36b"
+    },
+    {
+      "path": "crates/lycheedev-source/tests/object_carrier_native_oracle.rs",
+      "bytes": 12696,
+      "sha256": "0a46579d4f81ca44f68ce2b9be87b3131bd74a015e8a3b00056c9c1d24854e65"
+    },
+    {
+      "path": "crates/lycheedev-source/tests/support/object_oracle.rs",
+      "bytes": 3579,
+      "sha256": "02483ba7e8d6ca8920ba0583663f26e0cb2635a7034b5f6a3cceaa70f66346d1"
+    },
+    {
+      "path": "crates/lycheedev-source/tests/support/fixed_oracle_trace.rs",
+      "bytes": 6640,
+      "sha256": "b6d54d5b9644bc25848c07a1620ecef434ab375bcfb0298d6d320414d5244fa3"
+    },
+    {
+      "path": "crates/lycheedev-source/tests/support/fixed_oracle_storage.rs",
+      "bytes": 6082,
+      "sha256": "4ce7ae238a931a118b4905a1fd624bc322dba04d971dfe4ff10aab5819998b04"
+    },
+    {
+      "path": "crates/lycheedev-source/examples/support/native_context.rs",
+      "bytes": 34678,
+      "sha256": "540cfd216e8ad25044e0e70bcb6cb7c0f98e90258894aecb297231fa682ffbb6"
+    },
+    {
+      "path": "tests/rust-source-engine/fixed-emmy-oracle/run.mjs",
+      "bytes": 15011,
+      "sha256": "38dec2daa0a40427d2200a57754510aec3a21907826ed765a33bb9625bcf0759"
+    },
+    {
+      "path": "tests/rust-source-engine/fixed-emmy-oracle/inputs.json",
+      "bytes": 17532,
+      "sha256": "3a96d170b8580dce289ffd6f3636dcfd78117fa2e3f0841bee7574de898d0c3f"
+    },
+    {
+      "path": "crates/lycheedev-source/src/native_semantic.rs",
+      "bytes": 22790,
+      "sha256": "c2b9b5d02de88860e538b60df751cffd0610f82cd2419ad82e94db88c6475aea"
+    },
+    {
+      "path": "tests/rust-source-engine/coverage-independent-verify.mjs",
+      "bytes": 5337,
+      "sha256": "9b9fbaa74ff05deb41346fb4b69afe45036b493f49570073ba5f0a24fd7082b4"
+    }
+  ],
+  "custodyPinSource": "https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6220009285",
+  "historicalSourceTree": "b4e4ab4dd687fde69271cc262e2c9208aa1b6d3b861e0519e3cc9d1e00263c9f",
+  "cargoCommandSHA256": "50035bced8e892eb42d0121d24e09473bca0ae7c6bf4f640df5e1fc110d6c771"
+}

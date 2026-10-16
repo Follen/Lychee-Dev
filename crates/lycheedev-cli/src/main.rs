@@ -1138,7 +1138,7 @@ fn operation_seconds(inv: &Invocation) -> Result<u64> {
         return Ok(600);
     }
     let command = contract::all()
-        .into_iter()
+        .iter()
         .find(|definition| definition.path == inv.command);
     if let Some(seconds) = data_timeout_seconds(inv)? {
         return Ok(seconds);

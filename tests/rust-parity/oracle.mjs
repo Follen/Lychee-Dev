@@ -15,11 +15,11 @@ const PINNED_HASHES = Object.freeze({
   commands: 'b56c73427279a89196dcdebc720827e4eb4bc79f55f0d76f7561d49f69eed9fa',
   products: 'a3fbfc49221c2e9ea5eeba175ab18e6c3c2ee0d02ea31750b3b25d45f996423b',
 });
-// Reviewed 2026-10-15: name/takes_value/all/implemented remain byte-identical to
-// 5d0cac6; Rust tests changed for Source batch/Emmy metadata and now remove the
-// former live-doctor exclusion. No production advertised/arity adapter change.
-// Keep the whole-file guard: even test-only edits require a fresh review.
-export const RUST_FILTER_HASH = '1f6a3882606682b3b658c1325987f39d8d630dcdaa72c9c7b816d0800af5e194';
+// Reviewed 2026-10-16: the advertised filter and Flag arity bodies remain
+// byte-identical to 7dbcd1c. Immutable OnceLock catalog and borrowed implemented
+// definitions preserve every serialized field, order and selection; three new
+// Rust regressions cover full catalog/help equality. Keep the whole-file guard.
+export const RUST_FILTER_HASH = '640f49e4911e39fbc674e5012a77dad01511dfef99bda1faa3936fb84fb9e0dc';
 export const sha256 = data => createHash('sha256').update(data).digest('hex');
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 

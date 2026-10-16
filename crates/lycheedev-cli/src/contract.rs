@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Definition {
     pub path: String,
@@ -122,12 +123,19 @@ impl Flag {
         }
     }
 }
-pub fn all() -> Vec<Definition> {
-    serde_json::from_str(include_str!("commands.json")).expect("checked command contract")
+pub fn all() -> &'static [Definition] {
+    // Parsing, dispatch and rendering read the same immutable embedded bytes.
+    // Validate them once per process; this is not a persistent metadata cache.
+    static DEFINITIONS: OnceLock<Vec<Definition>> = OnceLock::new();
+    DEFINITIONS
+        .get_or_init(|| {
+            serde_json::from_str(include_str!("commands.json")).expect("checked command contract")
+        })
+        .as_slice()
 }
-pub fn implemented() -> Vec<Definition> {
+pub fn implemented() -> Vec<&'static Definition> {
     all()
-        .into_iter()
+        .iter()
         .filter(|d| match d.path.as_str() {
             "version" | "describe" | "project init" | "project status" | "project lock"
             | "target available" => true,
@@ -187,6 +195,79 @@ mod tests {
             }
         }
         assert_eq!(serde_json::to_value(all()).unwrap(), Value::Array(expected));
+    }
+
+    #[test]
+    fn catalog_reuses_immutable_definitions_with_identical_serialization() {
+        let first = all();
+        let second = all();
+        assert!(std::ptr::eq(first, second));
+        let independently_parsed: Vec<Definition> =
+            serde_json::from_str(include_str!("commands.json")).unwrap();
+        assert_eq!(
+            serde_json::to_vec(first).unwrap(),
+            serde_json::to_vec(&independently_parsed).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(first).unwrap(),
+            serde_json::from_str::<Value>(include_str!("commands.json")).unwrap()
+        );
+    }
+
+    #[test]
+    fn implemented_catalog_borrows_the_complete_current_inventory_in_order() {
+        let current = all();
+        let selected = implemented();
+        // Every current route has a concrete handler. Keep this exhaustive
+        // contract rather than accepting a filtered subset after caching.
+        assert_eq!(current.len(), 84);
+        assert_eq!(selected.len(), current.len());
+        for (borrowed, original) in selected.iter().zip(current) {
+            assert!(std::ptr::eq(*borrowed, original));
+        }
+        let independently_parsed: Vec<Definition> =
+            serde_json::from_str(include_str!("commands.json")).unwrap();
+        assert_eq!(
+            serde_json::to_vec(&selected).unwrap(),
+            serde_json::to_vec(&independently_parsed).unwrap()
+        );
+        let repeated = implemented();
+        for (first, second) in selected.iter().zip(&repeated) {
+            assert!(std::ptr::eq(*first, *second));
+        }
+        assert_eq!(selected.len(), repeated.len());
+    }
+
+    #[test]
+    fn cached_describe_and_command_help_keep_all_fields_across_repeated_reads() {
+        let expected = serde_json::from_str::<Value>(include_str!("commands.json")).unwrap();
+        let describe = ["describe", "--format", "json"].map(str::to_owned);
+        for _ in 0..2 {
+            let result = crate::dispatch(&crate::parse(&describe).unwrap()).unwrap();
+            assert_eq!(result.data, serde_json::json!({
+                "commands":expected,
+                "formats":["text", "json", "jsonl"],
+                "development":crate::VERSION.contains('-')
+            }));
+            let input = ["--help".to_owned()];
+            let result = crate::dispatch(&crate::parse(&input).unwrap()).unwrap();
+            assert_eq!(result.data, serde_json::json!({
+                "commands":expected,
+                "flags":["--home <root>", "--format text|json|jsonl", "--help"]
+            }));
+            for definition in all() {
+                let mut input: Vec<String> =
+                    definition.path.split_whitespace().map(str::to_owned).collect();
+                input.push("--help".into());
+                let mut flags: Vec<&str> =
+                    definition.flags.iter().map(|flag| flag.0.as_str()).collect();
+                flags.push("--help");
+                let result = crate::dispatch(&crate::parse(&input).unwrap()).unwrap();
+                assert_eq!(result.data, serde_json::json!({
+                    "commands":[definition], "flags":flags
+                }), "{}", definition.path);
+            }
+        }
     }
 
     #[test]
