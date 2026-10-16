@@ -39,6 +39,7 @@
 - **本机ec503**：process47、native_session28、trace storage5通过，父启动故障peer1项单列ignored。固定oracle reference36/36、candidate29通过7失败，双方4137行/38段，完整回收；大边界trace输出修复已实证，语义差异仍保留。公开差异见[PR证据](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6213988386)，3336修复尚待同输入复验。
 - **本机4092344当前批**：Root/keys定向17项及CLI dev构建已通过，正式Lua固定MSVC/SDK已安装，等待本批Community精确路径适配，优化release构建在旧600秒准备期限命中且完整回收、无artifact；本批仅buildRust release/symbols准备期限固定30分钟，dev/test/check/fetch及产品原90秒保持，Node8/8通过。优化配对实际测量尚未运行。后续普通push不打断固定SHA测试、不自动排重复长CI；本机只测试，云端负责实现修复。
 - **本机0d0da9f编译失败**：[原始记录](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6214850678)为lowering局部Option类型不明确、两处AttachedToken没有Default、KeyIndex构造漏预算lease四点。本批最小修复明确Program类型、使用原empty token构造并接回真实allocation lease；尚未重新编译。Community辅助进程此前未被精确路径清单认可而强制收尾，所有句柄已回收，与四个编译错误分别记录。SQL/TLS/性能被编译前置阻断，不能报已运行。
+- **本机7c后继**：四个生产编译点已通过，独立SQL集成43项和48个Node/Windows前置通过；libtest仍因compound::branches的成功值不实现Debug而不能使用unwrap_err。本批改为显式match，原取消原因/7次回调断言不动，默认栈组仍未跑。Community身份已实际生效。Emmy原版36通过/候选33通过3失败，剩12行仅新增call_result coverage，原provider重复及Nil/Unknown差异消失；完整raw比较仍失败，当前证据必要性正在独立核对，不泛忽略字段。
 - 历史run、原失败和前版交接正文完整保留在[历史证据](docs/toolkit/rust-migration-evidence-2026-10-15.md)。四阶段最终循环审计尚未开始，实机清单仍在本文最后。
 
 ## 4. 进入最终四阶段前的有限收口

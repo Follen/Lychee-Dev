@@ -272,7 +272,7 @@ fn iterative_union_lowering_keeps_branch_scope_tail_and_original_stop() {
     assert!(branches[2].order_by.is_some());
     assert!(branches[2].limit_clause.is_some());
     let calls = Cell::new(0);
-    let error = compound::branches(parse().body, &|| {
+    let error = match compound::branches(parse().body, &|| {
         calls.set(calls.get() + 1);
         if calls.get() == 7 {
             Err(fault(
@@ -283,8 +283,10 @@ fn iterative_union_lowering_keeps_branch_scope_tail_and_original_stop() {
         } else {
             Ok(())
         }
-    })
-    .unwrap_err();
+    }) {
+        Err(error) => error,
+        Ok(_) => panic!("expected original union traversal stop"),
+    };
     assert_eq!(error.code, "fixture.union_stop");
     assert_eq!(calls.get(), 7);
 }
