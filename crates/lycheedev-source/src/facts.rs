@@ -88,7 +88,61 @@ pub fn toc(raw: &[u8]) -> Facts {
     f
 }
 
+/// One index invocation may reuse the immutable embedded catalog, including an
+/// authentication failure. Each document still runs its complete extraction and
+/// produces its own original diagnostic; a cache hit never initializes this.
+#[derive(Default)]
+pub(crate) struct XmlFactsContext {
+    catalog: Option<std::result::Result<crate::xml_program::Catalog, String>>,
+}
+impl XmlFactsContext {
+    fn extract(&mut self, raw: &[u8]) -> std::result::Result<crate::xml_program::XmlProgram, String> {
+        match self.catalog.get_or_insert_with(crate::xml_program::catalog) {
+            Ok(catalog) => crate::xml_program::extract_production_with_catalog("@index.xml", raw, catalog),
+            Err(error) => Err(error.clone()),
+        }
+    }
+}
+
+/// LF positions are queried in parser order. Keep the exact prefix definition
+/// for a backwards query as well, without adding an assumption to parsing.
+struct XmlLines<'a> {
+    raw: &'a [u8],
+    cursor: usize,
+    line: usize,
+    #[cfg(test)]
+    scanned: usize,
+}
+impl<'a> XmlLines<'a> {
+    fn new(raw: &'a [u8]) -> Self {
+        Self { raw, cursor: 0, line: 1, #[cfg(test)] scanned: 0 }
+    }
+    fn at(&mut self, offset: usize) -> usize {
+        if offset < self.cursor {
+            #[cfg(test)]
+            { self.scanned += offset; }
+            return 1 + self.raw[..offset].iter().filter(|byte| **byte == b'\n').count();
+        }
+        #[cfg(test)]
+        { self.scanned += offset - self.cursor; }
+        self.line += self.raw[self.cursor..offset].iter().filter(|byte| **byte == b'\n').count();
+        self.cursor = offset;
+        self.line
+    }
+}
+
 pub fn xml(raw: &[u8]) -> Facts {
+    xml_with_context(raw, &mut XmlFactsContext::default())
+}
+pub(crate) fn xml_with_context(raw: &[u8], context: &mut XmlFactsContext) -> Facts {
+    let mut lines = XmlLines::new(raw);
+    xml_with_line_counter(raw, context, |offset| lines.at(offset))
+}
+fn xml_with_line_counter(
+    raw: &[u8],
+    context: &mut XmlFactsContext,
+    mut line_at: impl FnMut(usize) -> usize,
+) -> Facts {
     use quick_xml::{Reader, events::Event};
     let mut reader = Reader::from_reader(raw);
     let mut f = Facts::default();
@@ -96,16 +150,13 @@ pub fn xml(raw: &[u8]) -> Facts {
     let prefix=if raw.starts_with(b"\xef\xbb\xbf"){3}else{0};
     loop {
         let at = crate::xml_inline::source_map::raw_cursor(raw.len(),prefix,reader.buffer_position()).expect("slice reader original cursor");
-        let n = 1 + raw[..at.min(raw.len())]
-            .iter()
-            .filter(|b| **b == b'\n')
-            .count();
+        let n = line_at(at.min(raw.len()));
         let event=reader.read_event();
         let empty=matches!(&event,Ok(Event::Empty(_)));
         match event {
             Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
                 let tag_start=crate::xml_inline::source_map::borrowed_span(raw,e.as_ref()).expect("slice reader original element bytes").start-1;
-                let n=1+raw[..tag_start].iter().filter(|byte|**byte==b'\n').count();
+                let n=line_at(tag_start);
                 let tag = String::from_utf8_lossy(e.local_name().as_ref()).into_owned();
                 let mut attrs = BTreeMap::new();
                 let mut bad = false;
@@ -211,7 +262,7 @@ pub fn xml(raw: &[u8]) -> Facts {
     // Structural XML attributes above remain candidates. Inline source facts
     // use the production decoder and its original-byte source map.
     let mapped=(||->lycheedev_core::Result<()> {
-        let program=crate::xml_program::extract_production("@index.xml",raw).map_err(|error|lycheedev_core::ToolkitError::new("codebase.xml_invalid",error,4))?;
+        let program=context.extract(raw).map_err(|error|lycheedev_core::ToolkitError::new("codebase.xml_invalid",error,4))?;
         let scripts=crate::xml_inline::scripts(&program,raw)?;
         for (ordinal,script) in scripts.iter().enumerate(){
             let mut owner=String::new();
@@ -310,5 +361,80 @@ mod tests {
                 .iter()
                 .any(|r| r.from == "Demo:OnLoad" && r.to == "PLAYER_LOGIN")
         );
+    }
+    #[test]
+    fn xml_linear_lines_match_legacy_prefix_all_fact_fields() {
+        let documents = [
+            "<Ui>\n <Frame name=\"Demo\" inherits=\"A, B\"><Scripts>\n<OnLoad>\nlocal function F() return 1 end\nF()\nself:RegisterEvent(&quot;READY&quot;)\n</OnLoad>\n<OnShow method=\"Show\"/><OnHide function=\"Hide\"/>\n</Scripts></Frame>\n<Script FiLe=\"Other.lua\"/><Include file=\"Other.xml\"/>\n</Ui>",
+            "<?xml version=\"1.0\"?>\n<!-- note\n -->\n<Ui><Frame name=\"Entity\"><Scripts><OnLoad>&#10;local x=1&#10;<![CDATA[x = x + 1]]></OnLoad></Scripts></Frame></Ui>",
+            "<Ui>\n<Frame name=\"Bad &unknown;\"/>\n</Ui>",
+            "<Ui>\n<Frame name=\"First\" name=\"Again\"/>\n</Ui>",
+            "<Ui>\n<Frame name=\"Unclosed\">\n</Ui>",
+            "<Ui>\n<Frame name=\"Truncated\"",
+            "<Ui>\n<Frame name=\"Before\"/>\n<Broken attr=no_quote/>\n</Ui>",
+            "<Ui>\n<Frame name=\"Unicode界🙂\"/>\n</Ui>",
+            "",
+        ];
+        for bom in ["", "\u{feff}"] {
+            for newline in ["\n", "\r\n", "\r"] {
+                for document in documents {
+                    let text = format!("{bom}{}", document.replace('\n', newline));
+                    let raw = text.as_bytes();
+                    let mut lines = XmlLines::new(raw);
+                    let actual = xml_with_line_counter(raw, &mut XmlFactsContext::default(), |at| lines.at(at));
+                    let expected = xml_with_line_counter(raw, &mut XmlFactsContext::default(), |at| {
+                        1 + raw[..at].iter().filter(|byte| **byte == b'\n').count()
+                    });
+                    assert_eq!(serde_json::to_value(actual).unwrap(), serde_json::to_value(expected).unwrap(), "{text:?}");
+                    assert!(lines.scanned <= raw.len(), "ordered events rescanned source: {text:?}");
+                }
+            }
+        }
+    }
+    #[test]
+    fn xml_line_cursor_preserves_repeated_and_backwards_prefix_queries() {
+        let raw = b"\xef\xbb\xbf<Ui>\r\n\n<Frame/>\r</Ui>";
+        let mut lines = XmlLines::new(raw);
+        for at in 0..=raw.len() {
+            let expected = 1 + raw[..at].iter().filter(|byte| **byte == b'\n').count();
+            assert_eq!(lines.at(at), expected);
+            assert_eq!(lines.at(at), expected);
+        }
+        assert_eq!(lines.scanned, raw.len());
+        for at in (0..=raw.len()).rev() {
+            assert_eq!(lines.at(at), 1 + raw[..at].iter().filter(|byte| **byte == b'\n').count());
+        }
+    }
+    #[test]
+    fn xml_catalog_failure_keeps_each_documents_original_facts_and_gap() {
+        let failure = "xml.companion_identity_mismatch".to_owned();
+        let mut shared = XmlFactsContext { catalog: Some(Err(failure.clone())) };
+        for raw in [b"<Ui>\n<Frame name=\"First\"/>\n</Ui>".as_slice(), b"<Ui>\n<Frame name=\"Second\"/>\n</Ui>".as_slice()] {
+            let actual = xml_with_context(raw, &mut shared);
+            let expected = xml_with_line_counter(raw, &mut XmlFactsContext { catalog: Some(Err(failure.clone())) }, |at| {
+                1 + raw[..at].iter().filter(|byte| **byte == b'\n').count()
+            });
+            assert_eq!(serde_json::to_value(&actual).unwrap(), serde_json::to_value(expected).unwrap());
+            assert_eq!(actual.declarations.len(), 1);
+            assert_eq!(actual.diagnostics.len(), 1);
+            assert_eq!(actual.diagnostics[0].message, failure);
+            assert_eq!(actual.diagnostics[0].line, 0);
+        }
+    }
+    #[test]
+    fn shared_catalog_keeps_each_xml_validation_and_all_fact_fields() {
+        let mut shared = XmlFactsContext::default();
+        for raw in [
+            b"<Ui><Frame name=\"First\"/></Ui>".as_slice(),
+            b"<Ui><Frame name=\"Broken\"></Ui>".as_slice(),
+            b"<Ui><Frame name=\"Last\"><Scripts><OnLoad>self:Show()</OnLoad></Scripts></Frame></Ui>".as_slice(),
+        ] {
+            let expected = xml(raw);
+            let before = crate::xml_program::catalog_verifications();
+            let initialized = shared.catalog.is_some();
+            let actual = xml_with_context(raw, &mut shared);
+            assert_eq!(crate::xml_program::catalog_verifications(), before + usize::from(!initialized));
+            assert_eq!(serde_json::to_value(actual).unwrap(), serde_json::to_value(expected).unwrap());
+        }
     }
 }

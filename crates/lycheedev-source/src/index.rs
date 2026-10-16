@@ -459,6 +459,16 @@ fn document_facts(
     sha256: &str,
     control: &lycheedev_core::control::OperationControl,
 ) -> Result<(Facts, bool)> {
+    document_facts_with_xml_context(home, path, data, sha256, control, &mut facts::XmlFactsContext::default())
+}
+fn document_facts_with_xml_context(
+    home: &Path,
+    path: &str,
+    data: &[u8],
+    sha256: &str,
+    control: &lycheedev_core::control::OperationControl,
+    xml_context: &mut facts::XmlFactsContext,
+) -> Result<(Facts, bool)> {
     control.check()?;
     let cache = facts_cache_path(home, path, sha256);
     // Facts are rebuildable observations. Authenticate both source and serialized facts before reuse.
@@ -498,7 +508,7 @@ fn document_facts(
     } else if lower_path.ends_with(".toc") {
         facts::toc(data)
     } else {
-        facts::xml(data)
+        facts::xml_with_context(data, xml_context)
     };
     control.check()?;
     let f = serde_json::to_value(&parsed)?;
@@ -533,6 +543,7 @@ fn build_uncached(
     };
     let (mut skipped, mut diagnostics, mut relationships) = (0, Vec::new(), 0usize);
     let mut retained = 0usize;
+    let mut xml_context = facts::XmlFactsContext::default();
     for file in &files {
         if file.oversized {
             skipped += 1;
@@ -585,7 +596,7 @@ fn build_uncached(
             return Ok(());
         }
         let sha256 = storage::sha256(&data);
-        let (facts, cache_hit) = document_facts(home, &file.path, &data, &sha256, control)?;
+        let (facts, cache_hit) = document_facts_with_xml_context(home, &file.path, &data, &sha256, control, &mut xml_context)?;
         if cache_hit {
             cached += 1;
         } else {
@@ -1311,5 +1322,71 @@ mod facts_cache_tests {
                 .code,
             "codebase.source_integrity"
         );
+    }
+    #[test]
+    fn static_index_lazily_shares_catalog_only_within_one_cold_build() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let raw = BTreeMap::from([
+            ("First.xml".into(), "<Ui>\n<Frame name=\"First\"/>\n</Ui>".into()),
+            ("Second.xml".into(), "<Ui>\n<Frame name=\"Second\"><Scripts><OnLoad>self:Show()</OnLoad></Scripts></Frame>\n</Ui>".into()),
+            ("Main.toc".into(), "First.xml\nSecond.xml\n".into()),
+            ("Main.lua".into(), "function Run() end\n".into()),
+        ]);
+        let pin = fixture.pin(&raw);
+        let before = crate::xml_program::catalog_verifications();
+        let cold = build_uncached(&fixture.home, &pin, &control).unwrap();
+        assert_eq!(crate::xml_program::catalog_verifications(), before + 1);
+        assert_eq!(cold.summary["io"]["parsedDocuments"], 4);
+        let hit = build_uncached(&fixture.home, &pin, &control).unwrap();
+        assert_eq!(crate::xml_program::catalog_verifications(), before + 1);
+        assert_eq!(hit.summary["io"]["cachedFacts"], 4);
+        for (expected, cached) in cold.documents.iter().zip(&hit.documents) {
+            assert_eq!(serde_json::to_value(&expected.facts).unwrap(), serde_json::to_value(&cached.facts).unwrap());
+            if expected.path.ends_with(".xml") {
+                fs::remove_file(facts_cache_path(&fixture.home, &expected.path, &expected.sha256)).unwrap();
+            }
+        }
+        let next = build_uncached(&fixture.home, &pin, &control).unwrap();
+        assert_eq!(crate::xml_program::catalog_verifications(), before + 2);
+        assert_eq!(next.summary["io"]["parsedDocuments"], 2);
+        assert_eq!(next.summary["io"]["cachedFacts"], 2);
+        for (expected, fresh) in cold.documents.iter().zip(&next.documents) {
+            assert_eq!(serde_json::to_value(&expected.facts).unwrap(), serde_json::to_value(&fresh.facts).unwrap());
+        }
+        let without_io = |index: &Index| {
+            let mut value = serde_json::to_value(index).unwrap();
+            value["summary"].as_object_mut().unwrap().remove("io");
+            value
+        };
+        assert_eq!(without_io(&cold), without_io(&hit));
+        assert_eq!(without_io(&cold), without_io(&next));
+    }
+    #[test]
+    fn static_facts_non_xml_and_stop_boundaries_never_initialize_catalog() {
+        use std::{sync::{Arc, atomic::AtomicBool}, time::{Duration, Instant}};
+        let fixture = Fixture::new();
+        let before = crate::xml_program::catalog_verifications();
+        let mut context = facts::XmlFactsContext::default();
+        let control = OperationControl::default();
+        for (path, raw) in [("Run.lua", "function Run() end"), ("Main.toc", "Run.lua\n")] {
+            document_facts_with_xml_context(&fixture.home, path, raw.as_bytes(), &storage::sha256(raw.as_bytes()), &control, &mut context).unwrap();
+        }
+        assert_eq!(crate::xml_program::catalog_verifications(), before);
+        let raw = b"<Ui><Frame name=\"Stopped\"/></Ui>";
+        let digest = storage::sha256(raw);
+        let cancelled = OperationControl::new(Instant::now() + Duration::from_secs(180), Arc::new(AtomicBool::new(true)));
+        let expired = OperationControl::uncancelable(Instant::now());
+        for (stopped, code) in [(&cancelled, "command.cancelled"), (&expired, "command.deadline")] {
+            assert_eq!(document_facts_with_xml_context(&fixture.home, "Stopped.xml", raw, &digest, stopped, &mut context).unwrap_err().code, code);
+            assert_eq!(crate::xml_program::catalog_verifications(), before);
+            assert!(!facts_cache_path(&fixture.home, "Stopped.xml", &digest).exists());
+        }
+        document_facts_with_xml_context(&fixture.home, "First.xml", raw, &digest, &control, &mut context).unwrap();
+        assert_eq!(crate::xml_program::catalog_verifications(), before + 1);
+        // Reuse never bypasses the original entry check, even after initialization.
+        assert_eq!(document_facts_with_xml_context(&fixture.home, "Stopped.xml", raw, &digest, &cancelled, &mut context).unwrap_err().code, "command.cancelled");
+        assert!(!facts_cache_path(&fixture.home, "Stopped.xml", &digest).exists());
+        assert_eq!(crate::xml_program::catalog_verifications(), before + 1);
     }
 }

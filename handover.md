@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 17:18 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端文档批次：`a1fd6e170d69908e027f5394ad80b2e3b5cff1ab`；当前受测产品树为 `5bbb1fea69d8377d1b73c1afd98728895f908899`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 17:38 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`3ea1dc7bd5205746df1704136458a5014fc77170`；当前受测产品树为 `5bbb1fea69d8377d1b73c1afd98728895f908899`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -32,6 +32,11 @@
 - **正式 Lua 已明确切到 Go323**：`4092344`保存113原blob认证、精确Rust3.5 overlay与220/9正式入口，旧320/321/322原清单保留。Node正式63及包/版本115通过；本机已安装官方固定MSVC14.51与SDK，Community三工具字节/版本/签名均匹配原Enterprise固定身份；Community精确路径已实际验证。固定7c07的Go323正式Lua220/0/0与Rust桥9/0/0现已真实通过，全部owner回收；只是该自动化范围，不含实机或性能。
 
 ## 3. 最新实际验证与证据
+
+- **静态index确定重复开销优化已实现、Rust待验**：仅facts/index两文件，在一次冷index内惰性复用已认证不可变XML catalog，原每XML miss重建变为一次，cachehit/纯Lua/TOC零次；XML事件行号从反复prefix计数改为顺序增量扫描。保逐文档解析/哈希/校验、原检查位置、cache格式、fsync与全部输出，不删重复验证。一个解析Catalog延长驻留至调用结束，heap大小未测；未承诺42秒降幅。新增6项完整Facts旧算法差分、错误/取消、冷/暖及跨调用重新认证回归，rustfmt解析/diff通过，Rust NOT_RUN。
+- **公开static差异的只读取证入口**：[read-fact-delta说明](tests/rust-performance-paired/read-fact-delta.README.md)及正式Node10/10已保存；在原query队列安全终态后读取失败pair保留的两home与唯一匹配Go records，核输入/缓存摘要再列每文件/类别/顺序/重复项差异，不执行CLI、不改cache或原strict verdict。当前算法已发现额外local-mixin/alias-call/XML handler和缺失inherits/赋值LHS调用等候选，仍须原缓存逐项取证和完整消费者设计，不能只扣summary或删已批准增强。
+
+- **5bbb配对尚在运行，index已发现真实结果差异**：[首个cold index](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6220856562)两侧4036文档、assets4、diagnostics0、complete=true，但Go声明65320/关系227786，Rust65483/231513，严格等价失败。8.325/42.859秒只是该失败调用耗时，不能计为通过样本；余cold19与warm20未执行，独立query组继续。源解析差异正在定位，不删除能力或放宽比较。此路径实际产品deadline为180秒、outer210秒；refs/context/batch仍90秒，不能笼统称所有Source都是90秒。
 
 - **Skill当前使用入口已对齐固定Go323，真实后继尚待执行**：普通入口和owned controller改读独立workflow-go323；原320 workflow、三条Source实际任务与原断言逐字保留。两个23文件manifest重建认证原Git tree，四个累积321/322/323变化reference保原blob，候选包必须精确匹配。新增四项Data/Live任务在报告中明确NOT_RUN及真实pin/数据/压力/授权输入要求，静态资料检查不冒充运行成功。云端Skill Node38/38、联合Source checker49/49通过，协调方另核46个原Git blob及38测试；Windows真实Skill后继未跑，不打断5bbb性能队列。
 

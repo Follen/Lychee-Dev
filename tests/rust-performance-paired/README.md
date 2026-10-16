@@ -9,6 +9,7 @@ This entry has real Windows execution evidence. The [first ac8 optimized run](ht
   `source query GetActionButtonForID --topic lua --limit 10`, each on its own
   independent application-cache-cold home, followed by the identical warm
   command against that engine's own home and pin.
+- Preserve the actual route deadlines: `source index/query` use the existing 180-second product default and 210-second outer invocation cap; `source refs/context/batch` use their existing 90-second product budget. Do not relabel index/query as 90-second routes or increase either deadline to obtain a sample.
 - Exactly 20 paired iterations per path and cache group; Go/Rust execution
   order alternates. Every output is compared, not only the last sample.
 - Each group independently requires median Rust/Go <= 0.30. Reports preserve
