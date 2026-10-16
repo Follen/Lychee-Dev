@@ -11,6 +11,7 @@ pub(in crate::remote::transport) struct Target {
     pub dial: Option<Uri>,
     pub tls_host: String,
     pub connect_host: String,
+    pub connect_target: String,
     pub route: String,
 }
 impl Target {
@@ -105,6 +106,7 @@ impl Target {
             dial_host: lookup.clone(),
             dial_port: dial_port.to_owned(),
             tls_host: tls_host.to_owned(),
+            connect_target: authority(&lookup, Some(dial_port)),
             connect_host: authority(
                 &if bracketed {
                     tls_host.to_owned()

@@ -1,6 +1,7 @@
 //! Raw request-target adapter over the already locked hyper HTTP/1 connectors.
 //! Routing, TLS validation, cancellation and body accounting remain caller-owned.
-//! No HTTP parser, proxy protocol, resolver worker or alternate runtime lives here.
+//! HTTP/TLS parsing and DNS stay in public upstream owners. Only the bounded
+//! fixed-Go SOCKS negotiation adapts a contract absent from the public connector.
 use super::*;
 use hyper::{
     Request, Uri,
@@ -9,7 +10,7 @@ use hyper::{
 use hyper_util::{
     client::legacy::{
         Client,
-        connect::{Connect, Connected, Connection, HttpConnector, proxy::SocksV5},
+        connect::{Connect, Connected, Connection, HttpConnector},
     },
     rt::TokioExecutor,
 };
@@ -22,48 +23,77 @@ use std::{
 use tower_service::Service;
 
 type BoxError = Box<dyn Error + Send + Sync>;
-type Direct = hyper_tls::HttpsConnector<HttpConnector>;
 
 mod connect;
+mod connect_target;
+mod socks;
 mod target;
 use connect::{ExactName, ExactTunnel, NamedTls};
+use socks::GoSocks;
 use target::Target;
 
 /// Normal requests keep the existing reqwest route. Use the raw connector if
 /// WHATWG changes any wire or endpoint identity, or cannot represent the URL.
 pub(super) fn target(locator: &str) -> Result<Option<Target>> {
+    let (target, raw) = classify(locator)?;
+    Ok(raw.then_some(target))
+}
+fn classify(locator: &str) -> Result<(Target, bool)> {
     let target = Target::parse(locator)?;
     let normalized = reqwest::Url::parse(locator).ok().map(|mut parsed| {
         parsed.set_fragment(None);
         parsed.to_string()
     });
-    if normalized.as_deref() == Some(target.wire.to_string().as_str()) {
-        Ok(None)
-    } else {
-        Ok(Some(target))
+    let raw = normalized.as_deref() != Some(target.wire.to_string().as_str());
+    Ok((target, raw))
+}
+
+/// Select one Go proxy route per attempt. All proxied requests use the exact
+/// connector: the proxy's authority must not pass through WHATWG either.
+pub(super) fn prepare(locator: &str, headers: &HeaderMap) -> Result<Option<Prepared>> {
+    let (target, raw) = classify(locator)?;
+    let proxy = crate::remote::proxy::select_environment_raw(&target.route)?;
+    if !raw && proxy.is_none() {
+        return Ok(None);
     }
+    Prepared::with_route(target, headers.clone(), proxy).map(Some)
 }
 
 pub(super) struct Prepared {
     request: Request<reqwest::Body>,
     target: Target,
-    proxy: Option<reqwest::Url>,
-    direct: Direct,
+    proxy: Option<crate::remote::proxy::ProxyEndpoint>,
     tls: tokio_native_tls::TlsConnector,
 }
 impl Prepared {
-    pub(super) fn new(target: Target, headers: HeaderMap, _locator: &str) -> Result<Self> {
-        let proxy = crate::remote::proxy::select_environment(&target.route)?;
-        Self::with_target(target, headers, proxy)
-    }
     #[cfg(test)]
     fn with_proxy(uri: Uri, headers: HeaderMap, proxy: Option<reqwest::Url>) -> Result<Self> {
         Self::with_target(Target::parse(&uri.to_string())?, headers, proxy)
     }
+    #[cfg(test)]
     fn with_target(
         target: Target,
-        mut headers: HeaderMap,
+        headers: HeaderMap,
         proxy: Option<reqwest::Url>,
+    ) -> Result<Self> {
+        let proxy = proxy.map(|p| crate::remote::proxy::ProxyEndpoint {
+            scheme: p.scheme().to_owned(),
+            authority: p
+                .as_str()
+                .split_once("://")
+                .unwrap()
+                .1
+                .split('/')
+                .next()
+                .unwrap()
+                .to_owned(),
+        });
+        Self::with_route(target, headers, proxy)
+    }
+    fn with_route(
+        target: Target,
+        mut headers: HeaderMap,
+        proxy: Option<crate::remote::proxy::ProxyEndpoint>,
     ) -> Result<Self> {
         // Native roots, certificate and hostname validation are never disabled.
         // No ALPN protocols are requested: this adapter is strictly HTTP/1.
@@ -71,10 +101,6 @@ impl Prepared {
             .build()
             .map_err(|_| http("platform TLS configuration failed"))?
             .into();
-        let mut tcp = HttpConnector::new();
-        tcp.enforce_http(false);
-        tcp.set_nodelay(true);
-        let direct = hyper_tls::HttpsConnector::from((tcp, tls.clone()));
         let mut request = Request::new(reqwest::Body::from(Vec::<u8>::new()));
         headers.insert(
             reqwest::header::HOST,
@@ -87,7 +113,6 @@ impl Prepared {
             request,
             target,
             proxy,
-            direct,
             tls,
         })
     }
@@ -95,74 +120,57 @@ impl Prepared {
         let secure = self.target.wire.scheme_str() == Some("https");
         let tls = secure.then(|| (self.target.tls_host.clone(), self.tls.clone()));
         let Some(proxy) = self.proxy.take() else {
-            // Only an actual direct dial interprets this numeric port. HTTP
-            // proxy requests retain the original authority for the proxy.
-            let port = self
-                .target
-                .dial_port
-                .parse::<u16>()
-                .map_err(|_| http("invalid remote port"))?;
-            let name = self
-                .target
-                .dial_host
-                .parse()
-                .map_err(|_| http("invalid remote dial name"))?;
-            let mut tcp = HttpConnector::new_with_resolver(ExactName { name });
-            tcp.enforce_http(false);
-            tcp.set_nodelay(true);
-            // This private URI is only HttpConnector input. ExactName always
-            // substitutes the admitted Go dial name; it never resolves this
-            // placeholder. Neither HTTP nor TLS receives the placeholder.
-            let destination: Uri = format!("http://lycheedev-dial.invalid:{port}/")
-                .parse()
-                .map_err(|_| http("invalid remote dial port"))?;
-            return send(
-                NamedTls {
-                    inner: tcp,
-                    destination,
-                    tls,
-                },
-                self.request,
-            )
-            .await;
+            return send(direct(&self.target, tls)?, self.request).await;
         };
-        let port = proxy
-            .port_or_known_default()
-            .unwrap_or(if proxy.scheme() == "socks5h" {
-                1080
-            } else {
-                80
-            });
-        let host = proxy
-            .host_str()
-            .ok_or_else(|| http("invalid proxy endpoint"))?;
-        let proxy_uri: Uri = format!(
-            "{}://{host}:{port}/",
-            if proxy.scheme() == "https" {
-                "https"
-            } else {
-                "http"
-            }
-        )
-        .parse()
-        .map_err(|_| http("invalid proxy endpoint"))?;
-        if proxy.scheme() == "socks5h" {
-            self.target
-                .dial_port
-                .parse::<u16>()
-                .map_err(|_| http("invalid remote port"))?;
-            let mut tcp = HttpConnector::new();
-            tcp.enforce_http(false);
-            let mut socks = SocksV5::new(proxy_uri, tcp).local_dns(false);
-            if !proxy.username().is_empty() || proxy.password().is_some() {
-                socks = socks.with_auth(
-                    user_text(proxy.username())?,
-                    user_text(proxy.password().unwrap_or(""))?,
-                );
-            }
-            let destination = self.target.dial.clone().ok_or_else(|| {
-                http("SOCKS target cannot be represented by the public connector")
-            })?;
+        let reference =
+            redirect_url::RedirectUrl::absolute(&format!("http://{}", proxy.authority))?;
+        let credential = reference
+            .authority
+            .as_deref()
+            .and_then(|a| a.rsplit_once('@'))
+            .map(|(u, _)| u);
+        let authority = reference
+            .authority
+            .as_deref()
+            .unwrap()
+            .rsplit('@')
+            .next()
+            .unwrap();
+        let scheme = if proxy.scheme == "https" {
+            "https"
+        } else {
+            "http"
+        };
+        let mut endpoint = Target::parse(&format!("{scheme}://{authority}/"))?;
+        if proxy.scheme == "socks5h" && !explicit_port(authority) {
+            endpoint.dial_port = "1080".into();
+        }
+        let proxy_tls =
+            (proxy.scheme == "https").then(|| (endpoint.tls_host.clone(), self.tls.clone()));
+        let connector = direct(&endpoint, proxy_tls)?;
+        // This Uri is connector plumbing only. The connector always dials the
+        // exact selected proxy name, and its TLS name is separately captured.
+        let proxy_uri: Uri = "http://lycheedev-proxy.invalid/".parse().unwrap();
+        if proxy.scheme == "socks5h" {
+            let credentials = credential
+                .map(|raw| {
+                    let (user, password) = raw.split_once(':').unwrap_or((raw, ""));
+                    Ok::<_, ToolkitError>((
+                        redirect_url::unescape_userinfo(user)?,
+                        redirect_url::unescape_userinfo(password)?,
+                    ))
+                })
+                .transpose()?;
+            let socks = GoSocks {
+                inner: connector,
+                proxy: proxy_uri,
+                host: self.target.dial_host.clone(),
+                port: self.target.dial_port.clone(),
+                credentials,
+            };
+            // GoSocks holds the exact destination bytes; this URI is unused
+            // connector plumbing and cannot change the SOCKS address.
+            let destination: Uri = "http://lycheedev-socks.invalid/".parse().unwrap();
             return send(
                 NamedTls {
                     inner: socks,
@@ -173,15 +181,24 @@ impl Prepared {
             )
             .await;
         }
-        let authorization = proxy_authorization(&proxy)?;
+        let authorization = reference
+            .authorization()?
+            .map(|value| {
+                let mut value = reqwest::header::HeaderValue::from_str(&value)
+                    .map_err(|_| http("invalid proxy authorization"))?;
+                value.set_sensitive(true);
+                Ok::<_, ToolkitError>(value)
+            })
+            .transpose()?;
         if self.request.uri().scheme_str() == Some("https") {
-            let destination = self.target.dial.clone().ok_or_else(|| {
-                http("CONNECT target cannot be represented by the public connector")
-            })?;
+            // ExactTunnel owns the original target; the passed connector URI
+            // is never used as an origin or as a proxy destination.
+            let destination: Uri = "http://lycheedev-connect.invalid/".parse().unwrap();
             let tunnel = ExactTunnel {
-                inner: self.direct,
+                inner: connector,
                 proxy: proxy_uri,
                 host: self.target.connect_host.clone(),
+                target: self.target.connect_target.clone(),
                 authorization,
             };
             return send(
@@ -201,7 +218,7 @@ impl Prepared {
         }
         send(
             Forward {
-                inner: self.direct,
+                inner: connector,
                 proxy: proxy_uri,
             },
             self.request,
@@ -209,26 +226,38 @@ impl Prepared {
         .await
     }
 }
-fn proxy_authorization(proxy: &reqwest::Url) -> Result<Option<reqwest::header::HeaderValue>> {
-    if proxy.username().is_empty() && proxy.password().is_none() {
-        return Ok(None);
-    }
-    let reference = redirect_url::RedirectUrl::absolute(proxy.as_str())?;
-    reference
-        .authorization()?
-        .map(|raw| {
-            let mut value = reqwest::header::HeaderValue::from_str(&raw)
-                .map_err(|_| http("invalid proxy authorization"))?;
-            value.set_sensitive(true);
-            Ok(value)
-        })
-        .transpose()
+fn explicit_port(authority: &str) -> bool {
+    let suffix = authority
+        .strip_prefix('[')
+        .and_then(|s| s.split_once(']'))
+        .map_or(authority, |(_, s)| s);
+    suffix.rsplit_once(':').is_some_and(|(_, p)| !p.is_empty())
 }
-fn user_text(raw: &str) -> Result<String> {
-    // The locked public SOCKS connector accepts String credentials, matching
-    // reqwest's existing adapter. Keep its UTF-8 replacement behavior explicit.
-    let bytes = redirect_url::unescape_userinfo(raw)?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+fn direct(
+    target: &Target,
+    tls: Option<(String, tokio_native_tls::TlsConnector)>,
+) -> Result<NamedTls<HttpConnector<ExactName>>> {
+    // Never reinterpret an invalid port as 80/443. This runs inside the
+    // controlled/admitted send, preserving the original attempt accounting.
+    let port = target
+        .dial_port
+        .parse::<u16>()
+        .map_err(|_| http("invalid remote port"))?;
+    let name = target
+        .dial_host
+        .parse()
+        .map_err(|_| http("invalid remote dial name"))?;
+    let mut tcp = HttpConnector::new_with_resolver(ExactName { name });
+    tcp.enforce_http(false);
+    tcp.set_nodelay(true);
+    let destination = format!("http://lycheedev-dial.invalid:{port}/")
+        .parse()
+        .map_err(|_| http("invalid remote dial port"))?;
+    Ok(NamedTls {
+        inner: tcp,
+        destination,
+        tls,
+    })
 }
 async fn send<C>(connector: C, request: Request<reqwest::Body>) -> Result<reqwest::Response>
 where

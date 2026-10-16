@@ -141,3 +141,16 @@ The production engine is the unmodified fixed upstream tree. Contextual business
 semantics and derived diagnostic algorithms live in the owned adapter. A frozen
 historical patched reference is retained only for differential tests and keeps
 its original attribution; it is not the production engine.
+
+## Go-derived Data HTTP compatibility code
+
+The Rust Data redirect/reference and SOCKS5 compatibility code under
+`crates/lycheedev-data/src/remote/transport/` adapts the Go 1.27.1 standard
+library's `net/url/url.go`, `net/http/request.go`, and
+`net/http/socks_bundle.go` (which bundles `golang.org/x/net/internal/socks`).
+These portions remain Copyright 2009 The Go Authors, under BSD-3-Clause.
+Toolkit changes adapt the fixed Go behavior to the existing asynchronous
+Rust connector and IO owners; the upstream attribution is retained.
+The complete copyright, conditions and disclaimer are in
+[the transport Go license](crates/lycheedev-data/src/remote/transport/GO-LICENSE)
+and in the distributed npm package notices.

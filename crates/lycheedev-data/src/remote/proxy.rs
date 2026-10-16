@@ -4,18 +4,9 @@
 //! Do not use reqwest's system matcher: ALL_PROXY and NO_PROXY semantics differ.
 use idna::uts46::{AsciiDenyList, DnsLength, Hyphens, Uts46};
 use lycheedev_core::{Result, ToolkitError};
-use reqwest::{ClientBuilder, Proxy, Url};
 use std::net::IpAddr;
 
-pub(super) fn install(builder: ClientBuilder, locator: &str) -> Result<ClientBuilder> {
-    let builder = builder.no_proxy();
-    match select_environment(locator)? {
-        None => Ok(builder),
-        Some(url) => Ok(builder.proxy(Proxy::all(url).map_err(|_| configuration_error())?)),
-    }
-}
-
-pub(super) fn select_environment(locator: &str) -> Result<Option<Url>> {
+pub(super) fn select_environment_raw(locator: &str) -> Result<Option<ProxyEndpoint>> {
     let is_http = locator.starts_with("http://");
     let policy = Policy {
         proxy: env_first("HTTPS_PROXY", "https_proxy")?,
@@ -30,7 +21,7 @@ pub(super) fn select_environment(locator: &str) -> Result<Option<Url>> {
             .filter_map(Rule::parse)
             .collect(),
     };
-    policy.select(locator)
+    policy.select_raw(locator)
 }
 
 fn configuration_error() -> ToolkitError {
@@ -80,7 +71,16 @@ impl Policy {
         }
     }
 
-    fn select(&self, locator: &str) -> Result<Option<Url>> {
+    #[cfg(test)]
+    fn select(&self, locator: &str) -> Result<Option<reqwest::Url>> {
+        self.select_raw(locator)?
+            .map(|p| {
+                reqwest::Url::parse(&format!("{}://{}", p.scheme, p.authority))
+                    .map_err(|_| configuration_error())
+            })
+            .transpose()
+    }
+    fn select_raw(&self, locator: &str) -> Result<Option<ProxyEndpoint>> {
         let (rest, proxy, default_port) = if let Some(rest) = locator.strip_prefix("https://") {
             (rest, &self.proxy, "443")
         } else if let Some(rest) = locator.strip_prefix("http://") {
@@ -114,7 +114,7 @@ impl Policy {
         if self.bypass.iter().any(|rule| rule.matches(&host, port, ip)) {
             return Ok(None);
         }
-        selected_proxy(proxy)
+        selected_proxy_raw(proxy)
     }
 }
 
@@ -326,7 +326,11 @@ fn parsed_proxy<'a>(value: &'a str, prefixed: &'a str) -> Option<ProxyParts<'a>>
         original
     }
 }
-fn selected_proxy(value: &str) -> Result<Option<Url>> {
+pub(super) struct ProxyEndpoint {
+    pub(super) scheme: String,
+    pub(super) authority: String,
+}
+fn selected_proxy_raw(value: &str) -> Result<Option<ProxyEndpoint>> {
     let prefixed = format!("http://{value}");
     let parsed = parsed_proxy(value, &prefixed);
     let Some(parsed) = parsed else {
@@ -348,12 +352,10 @@ fn selected_proxy(value: &str) -> Result<Option<Url>> {
         }
         _ => return Err(configuration_error()),
     };
-    let url = Url::parse(&format!("{scheme}://{}", parsed.authority))
-        .map_err(|_| configuration_error())?;
-    if url.host_str().is_none() {
-        return Err(configuration_error());
-    }
-    Ok(Some(url))
+    Ok(Some(ProxyEndpoint {
+        scheme: scheme.to_owned(),
+        authority: parsed.authority.to_owned(),
+    }))
 }
 
 fn proxy_parts(value: &str) -> Option<ProxyParts<'_>> {

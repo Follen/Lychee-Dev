@@ -96,6 +96,59 @@ impl Drop for Fixture {
         }
     }
 }
+fn analysis_child(_home: &Path, owner: u32) -> lycheedev_windows::Process {
+    // Optional phase files are not discovery or completion receipts. Inventory
+    // the real owner's children with the installed Windows management provider,
+    // then authenticate the selected child through an actual held OS handle.
+    // This fixture observation is outside the measured request budget.
+    let owner_process=lycheedev_windows::Process::open(owner).unwrap();
+    owner_process.verify().unwrap();
+    let powershell=PathBuf::from(std::env::var_os("SystemRoot").expect("Windows system root"))
+        .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+    let script=format!("$ErrorActionPreference='Stop'; $p=@(Get-CimInstance Win32_Process -Filter 'ParentProcessId = {owner}'); ConvertTo-Json -Compress -InputObject @($p | ForEach-Object {{ [uint32] $_.ProcessId }})");
+    let mut command=Command::new(powershell);
+    command.args(["-NoLogo","-NoProfile","-NonInteractive","-Command",&script]);
+    let observation_control=OperationControl::uncancelable(Instant::now()+Duration::from_secs(5));
+    let output=lycheedev_core::process::run(command,None,65536,65536,&observation_control).unwrap();
+    assert_eq!(output.status,0,"{}",String::from_utf8_lossy(&output.stderr));
+    assert!(output.stdout.len()<=65536);
+    let pids:Vec<u32>=serde_json::from_slice(&output.stdout).unwrap();
+    let expected=PathBuf::from(env!("CARGO_BIN_EXE_lycheedev")).canonicalize().unwrap();
+    let mut children=Vec::new();
+    for pid in pids {
+        let Ok(child)=lycheedev_windows::Process::open(pid) else {continue};
+        if child.image_path().unwrap().canonicalize().unwrap()==expected {
+            assert_ne!(pid,owner);
+            assert_eq!(child.parent_pid().unwrap(),owner);
+            child.verify().unwrap();
+            children.push(child);
+        }
+    }
+    owner_process.verify().unwrap();
+    assert_eq!(children.len(),1,"one actual retained analysis child");
+    children.pop().unwrap()
+}
+fn rejects_unowned_private_analysis_entry(home: &Path) {
+    let marker="--source-native-session-worker";
+    let malformed=Command::new(env!("CARGO_BIN_EXE_lycheedev")).arg(marker).output().unwrap();
+    assert_eq!(malformed.status.code(),Some(2)); assert!(malformed.stdout.is_empty());
+    let own=lycheedev_windows::Process::open(std::process::id()).unwrap();
+    let token=lycheedev_windows::random::token().unwrap();
+    for created in [own.identity().created.saturating_add(1),own.identity().created] {
+        let output=Command::new(env!("CARGO_BIN_EXE_lycheedev"))
+            .arg(marker).arg("--home").arg(home)
+            .arg("--owner-pid").arg(own.identity().pid.to_string())
+            .arg("--owner-created").arg(created.to_string())
+            .arg("--start-token").arg(&token)
+            .env("LYCHEEDEV_NATIVE_SOURCE_ANALYSIS_START",&token)
+            .stdin(std::process::Stdio::null()).output().unwrap();
+        // Wrong creation and then correct identity/wrong parent executable must
+        // both fail before a private Hello or any source analysis is emitted.
+        assert_eq!(output.status.code(),Some(5));assert!(output.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("actual owner differs"));
+    }
+}
+
 fn captured(home: &Path, value: &Value) {
     let bytes = evidence::read_blob(home, &value["captures"][0]["blob"], 32 << 20).unwrap();
     assert_eq!(
@@ -173,6 +226,7 @@ APIDocumentation:AddDocumentationTable(API)
     );
     let first_pin = pin(&home, first_commit);
     let second_pin = pin(&home, second_commit);
+    rejects_unowned_private_analysis_entry(&home);
     let before = cli(&home, &["source", "session", "status"]);
     assert_eq!(before["result"]["state"], "closed");
     assert_eq!(before["result"]["backend"], "native");
@@ -206,6 +260,8 @@ APIDocumentation:AddDocumentationTable(API)
     let pid = first["nativeSession"]["workerPid"].as_u64().unwrap() as u32;
     let owner = lycheedev_windows::Process::open(pid).unwrap();
     let created = owner.identity().created;
+    let first_analysis = analysis_child(&home,pid);
+    let first_analysis_identity = first_analysis.identity().clone();
     let helper = refs["result"]["relations"]
         .as_array()
         .unwrap()
@@ -265,6 +321,8 @@ APIDocumentation:AddDocumentationTable(API)
         ],
     );
     let second = &context["result"]["nativeResearch"];
+    assert_eq!(analysis_child(&home,pid).identity(),&first_analysis_identity,"warm cache must stay in the same real child");
+    first_analysis.verify().unwrap();
     assert_eq!(second["nativeSession"]["workerPid"], pid);
     assert_eq!(second["analysis"]["cacheHit"], true);
     assert_eq!(second["nativeSession"]["snapshotTransfer"], "identity_only");
@@ -303,6 +361,8 @@ APIDocumentation:AddDocumentationTable(API)
     assert_eq!(third["nativeSession"]["snapshotTransfer"], "full");
     assert_ne!(third["inputIdentity"], first["inputIdentity"]);
     captured(&home, &changed);
+    first_analysis.wait_exit(Instant::now()+Duration::from_secs(2),&AtomicBool::new(false)).unwrap();
+    assert_ne!(analysis_child(&home,pid).identity(),&first_analysis_identity);
     let inv = Invocation {
         command: "source refs".into(),
         positional: None,
@@ -354,8 +414,10 @@ APIDocumentation:AddDocumentationTable(API)
     assert_eq!(recovered_native["nativeSession"]["snapshotTransfer"], "full");
     assert_eq!(recovered_native["inputIdentity"], first["inputIdentity"]);
     captured(&home, &recovered);
+    let recovered_analysis = analysis_child(&home,pid);
     let closed = cli(&home, &["source", "session", "close"]);
     assert_eq!(closed["result"]["state"], "closed");
+    assert_ne!(lycheedev_windows::process::observe_lifetime(recovered_analysis.identity(),||Ok(())).unwrap(),lycheedev_windows::process::ProcessLifetime::Running);
     let worker_exit = owner
         .wait_exit(
             Instant::now() + Duration::from_secs(5),
@@ -378,12 +440,18 @@ APIDocumentation:AddDocumentationTable(API)
     let reopened_pid = reopened_native["nativeSession"]["workerPid"].as_u64().unwrap() as u32;
     let reopened_owner = lycheedev_windows::Process::open(reopened_pid).unwrap();
     assert_ne!((reopened_pid, reopened_owner.identity().created), (pid, created));
+    let idle_analysis = analysis_child(&home,reopened_pid);
     let reopened_status = cli(&home, &["source", "session", "status"]);
     assert_eq!(reopened_status["result"]["ownerPid"], reopened_pid);
     assert_eq!(reopened_status["result"]["state"], "ready");
-    let reopened_closed = cli(&home, &["source", "session", "close"]);
-    assert_eq!(reopened_closed["result"]["state"], "closed");
-    assert_eq!(reopened_owner.wait_exit(Instant::now() + Duration::from_secs(5), &AtomicBool::new(false)).unwrap(), 0);
+    // Real warm analysis must retire on the original 60-second idle trigger.
+    // Waiting observes the fixed owner lifecycle; it grants no request grace.
+    let idle_begun=Instant::now();
+    let idle_exit=reopened_owner.wait_exit(idle_begun+Duration::from_secs(65),&AtomicBool::new(false)).unwrap();
+    let idle_elapsed=idle_begun.elapsed();
+    assert_eq!(idle_exit,0);
+    assert!(idle_elapsed>=Duration::from_secs(58),"warm owner retired before its idle boundary");
+    assert_ne!(lycheedev_windows::process::observe_lifetime(idle_analysis.identity(),||Ok(())).unwrap(),lycheedev_windows::process::ProcessLifetime::Running);
     let final_status = cli(&home, &["source", "session", "status"]);
     assert_eq!(final_status["result"]["state"], "closed");
     if std::env::var_os("LYCHEEDEV_SOURCE_NATIVE_KEEP_FIXTURE").is_some() {
@@ -391,8 +459,8 @@ APIDocumentation:AddDocumentationTable(API)
         fs::write(&worker_request, serde_json::to_vec(&request).unwrap()).unwrap();
         fs::write(root.join("report.json"), serde_json::to_vec_pretty(&json!({"home":home,"pin":first_pin,"changedPin":second_pin,
             "release":release,"cli":env!("CARGO_BIN_EXE_lycheedev"),"workerRequestPath":worker_request,
-            "workerPid":pid,"workerCreated":created,"workerExit":worker_exit,"before":before,"refs":refs,"context":context,
-            "status":status,"changed":changed,"faults":faults,"recovered":recovered,"closed":closed,"after":after,"reopened":reopened,"reopenedStatus":reopened_status,"reopenedClosed":reopened_closed,"finalStatus":final_status})).unwrap()).unwrap();
+            "workerPid":pid,"workerCreated":created,"analysisIdentity":first_analysis_identity,"closedAnalysisIdentity":recovered_analysis.identity(),"workerExit":worker_exit,"before":before,"refs":refs,"context":context,
+            "status":status,"changed":changed,"faults":faults,"recovered":recovered,"closed":closed,"after":after,"reopened":reopened,"reopenedStatus":reopened_status,"idleAnalysisIdentity":idle_analysis.identity(),"idleExit":idle_exit,"idleElapsedMs":idle_elapsed.as_millis(),"finalStatus":final_status})).unwrap()).unwrap();
         println!("{}", root.display());
     }
 }

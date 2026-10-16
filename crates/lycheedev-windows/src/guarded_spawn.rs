@@ -2,7 +2,10 @@
 //! Uses stable std Child/stdio ownership and bounded Windows thread discovery.
 use crate::{JobGuard, ProcessIdentity};
 use std::{
-    os::windows::{io::AsRawHandle, process::CommandExt},
+    os::windows::{
+        io::{AsRawHandle, IntoRawHandle},
+        process::CommandExt,
+    },
     process::{Child, Command},
     time::{Duration, Instant},
 };
@@ -32,6 +35,41 @@ pub struct StartupFailure {
     pub stage: &'static str,
     pub cause: String,
     pub cleanup: StartupCleanup,
+    // Retain exact custody when the caller's absolute retirement deadline ends
+    // before reap. Callers must not mistake the cleanup record for completion.
+    #[serde(skip)]
+    pending: Option<PendingStartup>,
+}
+struct PendingStartup {
+    child: Option<Child>,
+    job: Option<JobGuard>,
+}
+impl std::fmt::Debug for PendingStartup {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PendingStartup")
+            .field("pid", &self.child.as_ref().map(Child::id))
+            .finish()
+    }
+}
+impl Drop for PendingStartup {
+    fn drop(&mut self) {
+        if let Some(job) = &self.job {
+            let _ = job.terminate();
+        }
+        if let Some(child) = &mut self.child {
+            let _ = child.kill();
+        }
+        // Unwind/legacy fallback only. No completion is claimed by Drop.
+    }
+}
+impl StartupFailure {
+    pub fn take_pending(&mut self) -> Option<(Child, Option<JobGuard>)> {
+        let mut pending = self.pending.take()?;
+        Some((
+            pending.child.take().expect("pending owned child"),
+            pending.job.take(),
+        ))
+    }
 }
 #[derive(Debug, serde::Serialize)]
 pub struct StartupCleanup {
@@ -41,6 +79,7 @@ pub struct StartupCleanup {
     pub child_waited: bool,
     pub job_empty: Option<bool>,
     pub error: Option<String>,
+    pub handle_close_errors: Vec<String>,
 }
 fn serialize_identity<S: serde::Serializer>(
     identity: &Option<ProcessIdentity>,
@@ -68,19 +107,27 @@ impl StartupCleanup {
             child_waited: true,
             job_empty: None,
             error: None,
+            handle_close_errors: Vec::new(),
         }
     }
 }
 struct Custody {
     child: Option<Child>,
     job: Option<JobGuard>,
+    retirement_deadline: Option<Instant>,
 }
 impl Custody {
     fn fail(mut self, cause: String) -> StartupFailure {
+        let cleanup = self.reap();
+        let pending = self.child.take().map(|child| PendingStartup {
+            child: Some(child),
+            job: self.job.take(),
+        });
         StartupFailure {
             stage: "prepare",
             cause,
-            cleanup: self.reap(),
+            cleanup,
+            pending,
         }
     }
     fn reap(&mut self) -> StartupCleanup {
@@ -92,8 +139,16 @@ impl Custody {
             created,
         });
         let mut errors = Vec::new();
-        let deadline = Instant::now() + Duration::from_secs(2);
-        child.stdin.take();
+        let mut handle_close_errors = Vec::new();
+        let deadline = self
+            .retirement_deadline
+            .unwrap_or_else(|| Instant::now() + Duration::from_secs(2));
+        if let Some(pipe) = child.stdin.take() {
+            if let Err(error) = close_owned_handle(pipe) {
+                handle_close_errors.push(error.clone());
+                errors.push(error);
+            }
+        }
         if let Some(job) = &self.job
             && let Err(error) = job.terminate()
         {
@@ -114,7 +169,7 @@ impl Custody {
             let wait = unsafe {
                 WaitForSingleObject(
                     HANDLE(child.as_raw_handle()),
-                    remaining.as_millis().clamp(1, 50) as u32,
+                    remaining.as_millis().min(50) as u32,
                 )
             };
             if wait == WAIT_OBJECT_0 {
@@ -156,14 +211,27 @@ impl Custody {
                 }
             }
         }
-        self.child.take();
-        self.job.take();
+        if child_waited && (job_empty == Some(true) || self.job.is_none()) {
+            if let Some(child) = self.child.take() {
+                if let Err(error) = close_child(child) {
+                    handle_close_errors.push(error.clone());
+                    errors.push(error);
+                }
+            }
+            if let Some(job) = self.job.take() {
+                if let Err(error) = job.close() {
+                    handle_close_errors.push(error.clone());
+                    errors.push(error);
+                }
+            }
+        }
         StartupCleanup {
             identity,
             terminate_requested,
             child_waited,
             job_empty,
             error: (!errors.is_empty()).then(|| errors.join("; ")),
+            handle_close_errors,
         }
     }
 }
@@ -279,10 +347,79 @@ pub fn spawn_suspended_guarded(
 ) -> Result<(Child, JobGuard), StartupFailure> {
     spawn_with_probe(command, limit, deadline, cancel, |_, _, _| Ok(()))
 }
+/// Same suspended/assigned launch, but all failure retirement uses this existing
+/// absolute boundary. An unfinished child is returned as owned pending custody.
+pub fn spawn_suspended_guarded_until(
+    command: Command,
+    limit: usize,
+    deadline: Instant,
+    retirement_deadline: Instant,
+    cancel: impl FnMut() -> bool,
+) -> Result<(Child, JobGuard), StartupFailure> {
+    spawn_with_probe_until(
+        command,
+        limit,
+        deadline,
+        Some(retirement_deadline),
+        cancel,
+        |_, _, _| Ok(()),
+    )
+}
+
+/// Read identity from the original held Child, never by reopening a PID.
+pub fn child_identity(child: &Child) -> Result<ProcessIdentity, String> {
+    Ok(ProcessIdentity {
+        pid: child.id(),
+        created: creation(child)?,
+    })
+}
+/// Consume an owned process/pipe handle exactly once. Failed close is not retried.
+pub fn close_owned_handle(owner: impl IntoRawHandle) -> Result<(), String> {
+    let handle = HANDLE(owner.into_raw_handle());
+    // SAFETY: IntoRawHandle transfers the unique owner. No borrow is retained;
+    // this is its sole CloseHandle attempt, including when the OS reports error.
+    unsafe { CloseHandle(handle) }.map_err(|error| error.to_string())
+}
+pub fn close_child(mut child: Child) -> Result<(), String> {
+    let mut errors = Vec::new();
+    if let Some(pipe) = child.stdin.take() {
+        if let Err(e) = close_owned_handle(pipe) {
+            errors.push(e);
+        }
+    }
+    if let Some(pipe) = child.stdout.take() {
+        if let Err(e) = close_owned_handle(pipe) {
+            errors.push(e);
+        }
+    }
+    if let Some(pipe) = child.stderr.take() {
+        if let Err(e) = close_owned_handle(pipe) {
+            errors.push(e);
+        }
+    }
+    if let Err(e) = close_owned_handle(child) {
+        errors.push(e);
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
+}
 fn spawn_with_probe(
+    command: Command,
+    limit: usize,
+    deadline: Instant,
+    cancel: impl FnMut() -> bool,
+    probe: impl FnMut(PrepareStage, &Child, Option<&JobGuard>) -> Result<(), String>,
+) -> Result<(Child, JobGuard), StartupFailure> {
+    spawn_with_probe_until(command, limit, deadline, None, cancel, probe)
+}
+fn spawn_with_probe_until(
     mut command: Command,
     limit: usize,
     deadline: Instant,
+    retirement_deadline: Option<Instant>,
     mut cancel: impl FnMut() -> bool,
     mut probe: impl FnMut(PrepareStage, &Child, Option<&JobGuard>) -> Result<(), String>,
 ) -> Result<(Child, JobGuard), StartupFailure> {
@@ -291,6 +428,7 @@ fn spawn_with_probe(
             stage: "control",
             cause,
             cleanup: StartupCleanup::no_child(),
+            pending: None,
         });
     }
     if !(1 << 20..=4usize << 30).contains(&limit) {
@@ -298,6 +436,7 @@ fn spawn_with_probe(
             stage: "prepare",
             cause: "job.commit_budget_invalid".into(),
             cleanup: StartupCleanup::no_child(),
+            pending: None,
         });
     }
     command.creation_flags((CREATE_NO_WINDOW | CREATE_SUSPENDED).0);
@@ -305,10 +444,12 @@ fn spawn_with_probe(
         stage: "spawn",
         cause: error.to_string(),
         cleanup: StartupCleanup::no_child(),
+        pending: None,
     })?;
     let mut custody = Custody {
         child: Some(child),
         job: None,
+        retirement_deadline,
     };
     let prepare = (|| -> Result<Handle, String> {
         check(deadline, &mut cancel)?;

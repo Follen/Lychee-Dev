@@ -6,7 +6,7 @@ import {createHash} from 'node:crypto';
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 export const names=Object.freeze(['source-native-last-request.json','source-native-last-terminal.json']);
 const schemas=Object.freeze(['lycheedev.native-source-request-diagnostic.v1','lycheedev.native-source-terminal-diagnostic.v1']);
-const peerJson=raw=>JSON.parse(raw.replace(/("(?:created|workerCreated|parent_created)"\s*:\s*)([0-9]+)(?=\s*[,}])/g,'$1"$2"'));
+const peerJson=raw=>JSON.parse(raw.replace(/("(?:created|workerCreated|analysisCreated|ownerCreated|parent_created)"\s*:\s*)([0-9]+)(?=\s*[,}])/g,'$1"$2"'));
 export function inspectDiagnostic(raw,stdout,index){
   let value,envelope;
   try{value=peerJson(raw.toString('utf8'));}catch{return {identity:'unavailable',reason:'invalid_diagnostic_json'};}
@@ -15,12 +15,18 @@ export function inspectDiagnostic(raw,stdout,index){
   const pid=error?.workerPid??envelope?.result?.nativeResearch?.nativeSession?.workerPid;
   const created=error?.workerCreated;
   const identity=value.processMemory?.identity;
-  const coherent=value.schema===schemas[index]&&Number.isInteger(value.workerPid)&&value.workerPid>0
+  const hasAnalysis=value.analysisPid!==undefined&&value.analysisPid!==null;
+  const memoryPid=hasAnalysis?value.analysisPid:value.workerPid;
+  const memoryCreated=hasAnalysis?value.analysisCreated:value.workerCreated;
+  const analysisCoherent=!hasAnalysis||(Number.isInteger(value.analysisPid)&&value.analysisPid>0&&value.analysisPid!==value.workerPid
+    &&typeof value.analysisCreated==='string'&&/^[1-9][0-9]*$/.test(value.analysisCreated));
+  const coherent=analysisCoherent&&value.schema===schemas[index]&&Number.isInteger(value.workerPid)&&value.workerPid>0
     &&typeof value.workerCreated==='string'&&/^[0-9]+$/.test(value.workerCreated)
-    &&(!identity||(identity.pid===value.workerPid&&identity.created===value.workerCreated));
+    &&(!identity||(identity.pid===memoryPid&&identity.created===memoryCreated));
   const matched=coherent&&pid===value.workerPid&&created===value.workerCreated;
   return {identity:matched?'matched_authenticated_failure_peer':!coherent?'invalid':pid===value.workerPid&&created===undefined?'pid_only':'unmatched',
-    expectedPeer:{pid:pid??null,created:created??null},value};
+    expectedPeer:{pid:pid??null,created:created??null},completionEvidence:false,
+    memoryAttribution:hasAnalysis?'child_identity_only_parent_unverified':'owner_identity_only',value};
 }
 function read(home,name){
   const path=join(home,'tmp',name),stat=lstatSync(path);

@@ -763,3 +763,267 @@ fn tls_uses_admitted_verification_name_and_cancel_drops_direct_socket() {
             .any(|w| w == b"lycheedev-dial.invalid")
     );
 }
+
+#[test]
+fn proxy_own_literal_port_and_raw_basic_use_the_original_endpoint() {
+    let (address, peer) = server(|mut stream| {
+        let request = header(&mut stream);
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: close\r\n\r\nx")
+            .unwrap();
+        request
+    });
+    let port = address.rsplit(':').next().unwrap();
+    let proxy = crate::remote::proxy::ProxyEndpoint {
+        scheme: "http".into(),
+        authority: format!("u%FF:p%FE@127.0.0.1:0{port}"),
+    };
+    let (control, budget) = scope();
+    let result: Result<Vec<u8>> = run(async {
+        let prepared = Prepared::with_route(
+            Target::parse("http://origin.invalid/a")?,
+            HeaderMap::new(),
+            Some(proxy),
+        )?;
+        let deadline = request_deadline(&control, Some(&budget))?;
+        let response = controlled(prepared.send(), &control, Some(&budget), deadline).await??;
+        read_response(
+            response,
+            BodyPolicy::Identity,
+            1,
+            &control,
+            Some(&budget),
+            deadline,
+        )
+        .await
+    });
+    let request = peer.join().unwrap().unwrap();
+    assert_eq!(result.unwrap(), b"x");
+    assert!(request.starts_with("GET http://origin.invalid/a HTTP/1.1\r\n"));
+    assert!(request.contains("proxy-authorization: Basic df86cP4=\r\n"));
+    assert!(!request.contains("\r\nauthorization:"));
+}
+
+#[test]
+fn socks_offers_go_methods_preserves_raw_credentials_and_unicode_fallback_target() {
+    for selected in [0u8, 2] {
+        let (address, peer) = server(move |mut stream| {
+            let mut greeting = [0; 4];
+            stream.read_exact(&mut greeting).unwrap();
+            assert_eq!(greeting, [5, 2, 0, 2]);
+            stream.write_all(&[5, selected]).unwrap();
+            if selected == 2 {
+                let mut auth = [0; 7];
+                stream.read_exact(&mut auth).unwrap();
+                assert_eq!(auth, [1, 2, b'u', 255, 2, b'p', 254]);
+                stream.write_all(&[1, 0]).unwrap();
+            }
+            let mut prefix = [0; 5];
+            stream.read_exact(&mut prefix).unwrap();
+            assert_eq!(&prefix[..4], &[5, 1, 0, 3]);
+            let mut host = vec![0; usize::from(prefix[4])];
+            stream.read_exact(&mut host).unwrap();
+            let mut port = [0; 2];
+            stream.read_exact(&mut port).unwrap();
+            stream
+                .write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 80])
+                .unwrap();
+            let request = header(&mut stream);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .unwrap();
+            (host, port, request)
+        });
+        let (control, budget) = scope();
+        let result: Result<reqwest::Response> = run(async {
+            let proxy = crate::remote::proxy::ProxyEndpoint {
+                scheme: "socks5h".into(),
+                authority: format!("u%FF:p%FE@{address}"),
+            };
+            let prepared = Prepared::with_route(
+                Target::parse("http://-bücher.example:8080/a")?,
+                HeaderMap::new(),
+                Some(proxy),
+            )?;
+            controlled(
+                prepared.send(),
+                &control,
+                Some(&budget),
+                request_deadline(&control, Some(&budget))?,
+            )
+            .await?
+        });
+        let (host, port, request) = peer.join().unwrap().unwrap();
+        assert_eq!(result.unwrap().status(), hyper::StatusCode::OK);
+        assert_eq!(host, "-bücher.example".as_bytes());
+        assert_eq!(u16::from_be_bytes(port), 8080);
+        assert!(request.contains("host: xn---bcher-4ya.example:8080\r\n"));
+        assert!(!request.contains("authorization:"));
+    }
+}
+
+#[test]
+fn socks_auth_validation_is_after_method_selection_and_cancel_owns_socket() {
+    for selected in [0u8, 2] {
+        let (ready, received) = mpsc::channel();
+        let (address, peer) = server(move |mut stream| {
+            let mut greeting = [0; 4];
+            stream.read_exact(&mut greeting).unwrap();
+            assert_eq!(greeting, [5, 2, 0, 2]);
+            stream.write_all(&[5, selected]).unwrap();
+            if selected == 0 {
+                let mut prefix = [0; 5];
+                stream.read_exact(&mut prefix).unwrap();
+                let mut rest = vec![0; usize::from(prefix[4]) + 2];
+                stream.read_exact(&mut rest).unwrap();
+                ready.send(()).unwrap();
+            }
+            closed(&mut stream)
+        });
+        let (control, budget) = scope();
+        let cancel = control.tracked_cancel_handle().unwrap();
+        let stop = thread::spawn(move || {
+            if selected == 0 {
+                let observed = received.recv_timeout(Duration::from_secs(5)).is_ok();
+                cancel.cancel();
+                observed
+            } else {
+                true
+            }
+        });
+        let result: Result<reqwest::Response> = run(async {
+            let proxy = crate::remote::proxy::ProxyEndpoint {
+                scheme: "socks5h".into(),
+                authority: format!(":p@{address}"),
+            };
+            let prepared = Prepared::with_route(
+                Target::parse("http://origin.invalid/a")?,
+                HeaderMap::new(),
+                Some(proxy),
+            )?;
+            controlled(
+                prepared.send(),
+                &control,
+                Some(&budget),
+                request_deadline(&control, Some(&budget))?,
+            )
+            .await?
+        });
+        assert!(stop.join().unwrap());
+        assert!(peer.join().unwrap().unwrap());
+        assert_eq!(
+            result.unwrap_err().code,
+            if selected == 0 {
+                "command.cancelled"
+            } else {
+                "records.remote_http"
+            }
+        );
+    }
+}
+
+#[test]
+fn socks_rejects_malformed_reply_and_retains_original_request_budget() {
+    for reply in [[4, 0, 0, 1], [5, 0, 1, 1], [5, 0, 0, 9], [5, 5, 0, 1]] {
+        let (address, peer) = server(move |mut stream| {
+            let mut greeting = [0; 3];
+            stream.read_exact(&mut greeting).unwrap();
+            assert_eq!(greeting, [5, 1, 0]);
+            stream.write_all(&[5, 0]).unwrap();
+            let mut prefix = [0; 5];
+            stream.read_exact(&mut prefix).unwrap();
+            let mut rest = vec![0; usize::from(prefix[4]) + 2];
+            stream.read_exact(&mut rest).unwrap();
+            stream.write_all(&reply).unwrap();
+            closed(&mut stream)
+        });
+        let (control, budget) = scope();
+        let result: Result<reqwest::Response> = run(async {
+            let proxy = crate::remote::proxy::ProxyEndpoint {
+                scheme: "socks5h".into(),
+                authority: address,
+            };
+            let prepared = Prepared::with_route(
+                Target::parse("http://origin.invalid/a")?,
+                HeaderMap::new(),
+                Some(proxy),
+            )?;
+            attempt(Some(&budget))?;
+            controlled(
+                prepared.send(),
+                &control,
+                Some(&budget),
+                request_deadline(&control, Some(&budget))?,
+            )
+            .await?
+        });
+        assert!(peer.join().unwrap().unwrap());
+        assert_eq!(result.unwrap_err().code, "records.remote_http");
+        let used = budget.snapshot().unwrap();
+        assert_eq!((used.network_requests, used.network_bytes), (1, 0));
+    }
+}
+
+#[test]
+fn unicode_connect_fallback_preserves_target_host_headers_and_cancelled_owner() {
+    for cancel_wait in [false, true] {
+        let (ready, received) = mpsc::channel();
+        let (address, peer) = server(move |mut stream| {
+            let request = header(&mut stream);
+            ready.send(()).unwrap();
+            if !cancel_wait {
+                stream
+                    .write_all(
+                        b"HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n",
+                    )
+                    .unwrap();
+            }
+            (request, closed(&mut stream))
+        });
+        let (control, budget) = scope();
+        let cancel = control.tracked_cancel_handle().unwrap();
+        let stop = thread::spawn(move || {
+            let ready = received.recv_timeout(Duration::from_secs(5)).is_ok();
+            if cancel_wait {
+                cancel.cancel();
+            }
+            ready
+        });
+        let result: Result<reqwest::Response> = run(async {
+            let proxy = crate::remote::proxy::ProxyEndpoint {
+                scheme: "http".into(),
+                authority: format!("u:p@{address}"),
+            };
+            let prepared = Prepared::with_route(
+                Target::parse("https://-bücher.example:00443/a")?,
+                HeaderMap::new(),
+                Some(proxy),
+            )?;
+            attempt(Some(&budget))?;
+            controlled(
+                prepared.send(),
+                &control,
+                Some(&budget),
+                request_deadline(&control, Some(&budget))?,
+            )
+            .await?
+        });
+        assert!(stop.join().unwrap());
+        let (request, closed) = peer.join().unwrap().unwrap();
+        assert!(closed);
+        assert!(request.starts_with("CONNECT -bücher.example:00443 HTTP/1.1\r\n"));
+        assert!(request.contains("host: xn---bcher-4ya.example:00443\r\n"));
+        assert!(request.contains("proxy-authorization: Basic dTpw\r\n"));
+        assert!(!request.contains("lycheedev-connect.invalid"));
+        assert_eq!(
+            result.unwrap_err().code,
+            if cancel_wait {
+                "command.cancelled"
+            } else {
+                "records.remote_http"
+            }
+        );
+        let used = budget.snapshot().unwrap();
+        assert_eq!((used.network_requests, used.network_bytes), (1, 0));
+    }
+}

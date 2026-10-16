@@ -10,7 +10,7 @@ import os from 'node:os';
 import {beginMemoryPhase, endMemoryPhase, nativeMemoryPhase} from '../../tools/rust-owned-memory.mjs';
 import {assertEnvelope, assertAnchor, sha256} from '../rust-source-full-corpus/assertions.mjs';
 import {jsonFile} from '../rust-skill-usage/assertions.mjs';
-import {acceptanceCliArgs} from './session-ipc.mjs';
+import {acceptanceCliArgs,createSessionPeer,parsePeerJson} from './session-ipc.mjs';
 import {snapshotDiagnostics,captureDiagnostics} from './diagnostics.mjs';
 import {assertApiType, assertContextSnippets, assertExecutedContext, assertFullNative, assertMaterial, assertNestedControllerRetired, assertPrerequisite, assertReuse, fixturePin, groupBudget, rebuildXmlInventory} from './assertions.mjs';
 
@@ -29,7 +29,8 @@ const report = {schema: 'lycheedev.source-native-acceptance.v1', group, state: '
   machine: {platform: process.platform, arch: process.arch, release: os.release(), node: process.version, cpu: os.cpus()[0]?.model, cores: os.cpus().length, totalMemory: os.totalmem()},
   performance: {state: 'not_evaluated', targetRatio: 0.30, sampleKind: 'single correctness execution; independent cold/warm observations only', goOracle: '3057a9666ab078270b63c7f06de748069b0d1f4b', goDifferential: 'not_run', cpu: 'not_measured', io: 'not_measured', aggregateRSS: 'not_measured', windowsMemory: 'outer owned Job observation; see owned-report.json; aggregateRSS remains unmeasured', reason: 'No same-machine Go candidate/repeated paired samples. Source sync includes network and local validation; no guessed download subtraction.'},
   boundaries: ['No studied Lua/configuration execution, game or publication', 'Passed selected cases never mean complete semantic resolution or complete Source acceptance', 'Quota/idle/lifetime are separate real small-material IPC groups, never substitutes for this full Retail group']};
-let sequence = 0, outputBytes = 0, fatal = false, pin, corpus, originals;
+let sequence = 0, outputBytes = 0, fatal = false, pin, corpus, originals, resourcePeer;
+report.resourceAuthentication=[];
 const save = () => writeFileSync(join(out, 'report.json'), JSON.stringify(report, null, 2) + '\n'); save();
 const env = {...process.env, LYCHEEDEV_SOURCE_PHASE_PROFILE: '1'};
 function command(caseId, executable, args, {timeout = 210000, phase = 'local', input, maxBuffer = 32 << 20, cwd = scratch, environment = env} = {}) {
@@ -82,18 +83,39 @@ function relation(command, {reuse = false, project} = {}) {
   if (reuse) args.push('--session-reuse');
   return project ? [...args, '--project', project] : fixed(args);
 }
-function diagnostic(caseId, expectedPid) {
-  const path = join(home, 'tmp/source-native-last-request.json');
-  assert(existsSync(path), 'actual native owner diagnostic required');
-  const raw = readFileSync(path); assert(raw.length <= 1 << 20);
-  writeFileSync(join(out, `${caseId}.diagnostic.json`), raw);
-  const value = JSON.parse(raw.toString().replace(/("(?:workerCreated|created)"\s*:\s*)(\d+)/g, '$1"$2"'));
-  assert.equal(value.schema, 'lycheedev.native-source-request-diagnostic.v1'); assert.equal(value.phase, 'replying'); assert.equal(value.workerPid, expectedPid);
-  assert.match(value.workerCreated, /^\d+$/); assert.equal(value.processMemory?.identity?.pid, expectedPid); assert.equal(value.processMemory.identity.created, value.workerCreated);
-  for (const field of ['private_commit', 'working_set', 'peak_working_set', 'peak_private_commit']) assert(Number.isSafeInteger(value.processMemory[field]) && value.processMemory[field] >= 0);
-  assert.equal(value.memory?.job_memory_limit, 2 ** 31);
-  report.resources.push({caseId, diagnostic: `${caseId}.diagnostic.json`, sha256: sha256(raw), ...value}); save();
-  return {pid: value.workerPid, created: value.workerCreated};
+async function finishResourcePeer(caseId,{requireExit=false}={}) {
+  if(!resourcePeer)return;
+  const peer=resourcePeer;resourcePeer=undefined;
+  try{if(requireExit){const proof=await peer.waitForExit(caseId+'-exit',0);
+    assert.equal(proof.value.exited,true);assert.equal(proof.value.exitCode,0);}}
+  finally{const before=peer.stats;await peer.finish();report.resourceAuthentication.push({caseId,event:'peer_finished',...before});save();}
+}
+async function diagnostic(caseId, expectedPid) {
+  const begun=performance.now();
+  if(!resourcePeer)resourcePeer=await createSessionPeer({binary,home,evidenceDir:join(out,caseId+'-identity-peer'),ownerPid:expectedPid,
+    timeoutMs:Math.min(600_000,Math.floor(deadline-performance.now()))});
+  // Independently authenticate the live pipe and continuously held process.
+  // This separate fixture Status does not consume semantic batch quota. Record
+  // its timing/admission explicitly; it is not part of the measured CLI call.
+  const observed=await resourcePeer.status(caseId+'-identity');
+  assert.equal(observed.owner.pid,expectedPid);
+  report.resourceAuthentication.push({caseId,event:'authenticated_status',wallMillis:performance.now()-begun,
+    requestCount:resourcePeer.stats.requestCount,semanticBatchesCharged:0,idleRestarted:true,owner:observed.owner});
+  const path=join(home,'tmp/source-native-last-request.json');
+  let raw,value,reason;
+  try{const stat=lstatSync(path);assert(stat.isFile()&&!stat.isSymbolicLink()&&stat.size<=1<<20);
+    raw=readFileSync(path);assert(raw.length<=1<<20);value=parsePeerJson(raw.toString());
+  }catch(error){reason=String(error);}
+  if(raw)writeFileSync(join(out,`${caseId}.diagnostic.json`),raw);
+  const matches=value?.schema==='lycheedev.native-source-request-diagnostic.v1'
+    &&value.workerPid===observed.owner.pid&&value.workerCreated===observed.owner.created;
+  report.resources.push({caseId,state:matches?'same_owner_optional_phase':'unavailable',reason:reason??(matches?null:'owner_identity_not_matched'),
+    diagnostic:raw?`${caseId}.diagnostic.json`:null,sha256:raw?sha256(raw):null,
+    authenticatedOwner:{pid:observed.owner.pid,created:observed.owner.created},completionEvidence:false,
+    requestAttribution:'unavailable: public CLI reply does not expose the private request deadline; this phase is not asserted as current-request evidence',
+    memoryAttribution:'unavailable: child parent/tree identity has not been independently authenticated here; raw phase memory is not owner aggregate memory',
+    aggregateMemorySource:'independent outer owned-report.json; production owner retains its original 2 GiB tree limit'});save();
+  return {pid:observed.owner.pid,created:observed.owner.created};
 }
 function materialEvidence(caseId, commit = oracle.commit) {
   const cache = join(home, 'cache/objects'); let examined = 0, found = 0, detail;
@@ -210,17 +232,17 @@ try {
       const types = assertApiType(native, anchor);
       return {inputIdentity: native.inputIdentity, analysis: native.analysis, semanticReceipt: native.semanticExecution.receipt, types};
     });
-    await check('full-retail-session-cold', () => {
+    await check('full-retail-session-cold', async () => {
       assert.equal(invoke('session-before', ['source', 'session', 'status']).result.state, 'closed');
       first = assertFullNative(invoke('session-cold-refs', relation('refs', {reuse: true})).result, oracle, corpus, workflow.nativeCallsite, {mode: 'session'});
-      assert.equal(first.analysis.cacheHit, false); assert.equal(first.nativeSession.snapshotTransfer, 'full'); firstOwner = diagnostic('session-cold', first.nativeSession.workerPid);
+      assert.equal(first.analysis.cacheHit, false); assert.equal(first.nativeSession.snapshotTransfer, 'full'); firstOwner = await diagnostic('session-cold', first.nativeSession.workerPid);
       return {inputIdentity: first.inputIdentity, nativeSession: first.nativeSession, owner: firstOwner};
     });
-    await check('full-retail-cross-cli-warm-context', () => {
+    await check('full-retail-cross-cli-warm-context', async () => {
       assert(first); const result = invoke('session-warm-context', relation('context', {reuse: true})).result;
       second = assertFullNative(result, oracle, corpus, null, {mode: 'session'});
       const snippets = contextEvidence(result);
-      assertReuse(first, second); assert.deepEqual(diagnostic('session-warm', second.nativeSession.workerPid), firstOwner);
+      assertReuse(first, second); assert.deepEqual(await diagnostic('session-warm', second.nativeSession.workerPid), firstOwner);
       assert.equal(second.nativeSession.batches, first.nativeSession.batches + second.nativeSession.admittedSemanticBatches);
       const status = invoke('session-ready', ['source', 'session', 'status']).result;
       assert.equal(status.ownerPid, firstOwner.pid); assert.equal(status.workerPid, firstOwner.pid); assert.equal(status.state, 'ready'); assert.equal(status.batches, second.nativeSession.batches);
@@ -235,21 +257,22 @@ try {
       assert.equal(status.ownerPid, firstOwner.pid); assert.equal(status.workerPid, firstOwner.pid); assert.equal(status.state, 'ready');
       return {owner: firstOwner, idleWindowMillis: 1000, scope: 'Post-warm idle observation only; does not prove convergence or leak absence'};
     });
-    await check('changed-full-corpus-identity-reprepares-and-restores', () => {
+    await check('changed-full-corpus-identity-reprepares-and-restores', async () => {
       assert(second); const variant = makeIdentityVariant();
       const changed = assertFullNative(invoke('session-changed-identity', relation('refs', {reuse: true, project: variant.project})).result, oracle, corpus, workflow.nativeCallsite, {mode: 'session', commit: variant.commit});
-      assertReuse(second, changed, {changed: true}); assert.deepEqual(diagnostic('session-changed', changed.nativeSession.workerPid), firstOwner);
+      assertReuse(second, changed, {changed: true}); assert.deepEqual(await diagnostic('session-changed', changed.nativeSession.workerPid), firstOwner);
       const actualMaterial = materialEvidence('variant', variant.commit);
       const restored = assertFullNative(invoke('session-restored-retail', relation('refs', {reuse: true})).result, oracle, corpus, workflow.nativeCallsite, {mode: 'session'});
       assertReuse(changed, restored, {changed: true}); assert.equal(restored.inputIdentity, first.inputIdentity);
       return {scope: 'Local synthetic commit with one non-source note; all 4036 exact upstream documents retained', variant, actualMaterial, changed: changed.nativeSession, restored: restored.nativeSession};
     });
-    await check('session-close-real-exit-and-new-owner', () => {
+    await check('session-close-real-exit-and-new-owner', async () => {
       assert(firstOwner); assert.equal(invoke('session-close', ['source', 'session', 'close']).result.state, 'closed');
       assert.equal(invoke('session-closed', ['source', 'session', 'status']).result.state, 'closed');
+      await finishResourcePeer('session-closed',{requireExit:true});
       const reopened = assertFullNative(invoke('session-reopened', relation('refs', {reuse: true})).result, oracle, corpus, workflow.nativeCallsite, {mode: 'session'});
       assert.equal(reopened.analysis.cacheHit, false); assert.equal(reopened.nativeSession.snapshotTransfer, 'full');
-      reopenedOwner = diagnostic('session-reopened', reopened.nativeSession.workerPid); assert.notDeepEqual(reopenedOwner, firstOwner);
+      reopenedOwner = await diagnostic('session-reopened', reopened.nativeSession.workerPid); assert.notDeepEqual(reopenedOwner, firstOwner);
       return {firstOwner, reopenedOwner, closureProof: 'Public close waits for the authenticated held process handle to exit; outer Job independently reaps all descendants'};
     });
     await check('same-pin-recovery-after-native-lifecycle', () => {
@@ -268,6 +291,10 @@ finally {
   });
   report.fatalProcessFailure = fatal;
   report.finishedAt = new Date().toISOString(); report.wallMillis = performance.now() - started; report.outputBytes = outputBytes;
+  if(resourcePeer){
+    try{await finishResourcePeer('final-resource',{requireExit:!fatal});report.checks.push({caseId:'resource-peer-checked-finish',state:'passed'});}
+    catch(error){report.checks.push({caseId:'resource-peer-checked-finish',state:'failed',reason:error.message});if(error.fatalProcessFailure)fatal=true;}
+  }
   report.state = !report.blocker && !fatal && report.checks.length > 1 && report.checks.every(row => row.state === 'passed') ? `passed_native_${group}` : 'failed';
   report.completeSourceAcceptance = false; report.remaining = ['same-machine fixed Go differential', 'paired independent cold/warm 20-repeat performance', 'other separate acceptance groups and complete product/Skill coverage']; save();
 }

@@ -23,7 +23,22 @@ function budget(start,total){const left=Math.floor(total-(performance.now()-star
 
 // FILETIME is wider than JavaScript's exact integer range. Preserve these
 // protocol/diagnostic fields as decimal strings, before JSON.parse rounds them.
-export function parsePeerJson(raw){return JSON.parse(raw.replace(/("(?:created|workerCreated|parent_created)"\s*:\s*)([0-9]+)(?=\s*[,}])/g,'$1"$2"'));}
+export function parsePeerJson(raw){return JSON.parse(raw.replace(/("(?:created|workerCreated|analysisCreated|ownerCreated|parent_created)"\s*:\s*)([0-9]+)(?=\s*[,}])/g,'$1"$2"'));}
+// Phase files are optional observations from the killable analysis child.
+// Neither their presence nor a phase name establishes a request's outcome.
+// A previous owner/request must never be presented as this request's progress.
+export function classifyPhaseDiagnostic(diagnostic,request,hello){
+  const unavailable=reason=>({state:'unavailable',reason,completionEvidence:false});
+  if(!diagnostic)return unavailable('absent_or_unreadable');
+  if(typeof request!=='object'||request?.action!=='query')return unavailable('not_a_query_observation');
+  if(diagnostic.workerPid!==hello.pid||diagnostic.workerCreated!==hello.created)return unavailable('different_owner');
+  if(diagnostic.requestDeadlineUnixMs!==request.deadline_unix_ms)return unavailable('different_request_deadline');
+  assert.equal(diagnostic.schema,'lycheedev.native-source-request-diagnostic.v1');
+  assert(Number.isSafeInteger(diagnostic.analysisPid)&&diagnostic.analysisPid>0&&diagnostic.analysisPid!==hello.pid);
+  assert(/^[1-9][0-9]*$/.test(diagnostic.analysisCreated));
+  assert(typeof diagnostic.phase==='string'&&diagnostic.phase.length>0);
+  return {state:'matching_optional_phase',phase:diagnostic.phase,completionEvidence:false};
+}
 export function nativePipeName(canonicalHome,logonSid){
   assert(/^S-1-5-5-[0-9]+-[0-9]+$/.test(logonSid),'kernel logon SID required');
   const identity=canonicalHome.replace(/^\\\\\?\\/,'').toLowerCase();
@@ -270,13 +285,17 @@ export async function createSessionPeer({binary,home,evidenceDir,ownerPid,timeou
     if(!reject){assert.equal(Buffer.byteLength(row.response),row.responseBytes);assert(row.responseBytes<=SESSION_LIMITS.responseBytes);
       saveData(join(evidenceDir,prefix+'.response.json'),row.response);response=JSON.parse(row.response);}
     const diagnosticPath=join(home,'tmp','source-native-last-request.json');
-    let diagnostic=null;if(existsSync(diagnosticPath)){
-      const bytes=boundedRead(diagnosticPath,1<<20);saveData(join(evidenceDir,prefix+'.diagnostic.json'),bytes);diagnostic=parsePeerJson(bytes.toString('utf8'));
-      if((typeof request==='object'&&request.action==='query')&&!reject){assert.equal(diagnostic.workerPid,ownerPid);
-        assert.equal(diagnostic.workerCreated,hello.created);assert.equal(diagnostic.phase,'replying');}
-    }
+    let diagnostic=null,diagnosticReadError=null;
+    try{if(existsSync(diagnosticPath)){
+      const bytes=boundedRead(diagnosticPath,1<<20);saveData(join(evidenceDir,prefix+'.diagnostic.json'),bytes);
+      diagnostic=parsePeerJson(bytes.toString('utf8'));
+    }}catch(error){diagnosticReadError=String(error);}
+    const diagnosticObservation=classifyPhaseDiagnostic(diagnostic,request,hello);
+    // The authenticated response remains the sole completion/error fact. No
+    // owner-side synchronous "replying" sidecar is required before the next IPC.
+    saveData(join(evidenceDir,prefix+'.diagnostic-observation.json'),pretty({...diagnosticObservation,readError:diagnosticReadError}));
     traffic+=row.requestBytes+row.responseBytes+Buffer.byteLength(row.hello)+8;assert(traffic<=SESSION_LIMITS.trafficBytes);
-    return {response,owner:row.owner,hello,diagnostic,startedElapsedMs:row.startedElapsedMs,finishedElapsedMs:row.finishedElapsedMs,
+    return {response,owner:row.owner,hello,diagnostic,diagnosticObservation,startedElapsedMs:row.startedElapsedMs,finishedElapsedMs:row.finishedElapsedMs,
       evidencePrefix:prefix,requestBytes:row.requestBytes,responseBytes:row.responseBytes};
   }
   function envelope(action,work=null,cached=undefined){return {wire:SESSION_WIRE,deadline_unix_ms:Date.now()+10_000,action,work,...(cached?{cached}:{})};}

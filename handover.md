@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 04:53 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`9b5b09f91b2423140f0d659130664a1970c579dc`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 05:10 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`35411917cc27d3c2aa2e6be4214cc7cfe487e527`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -25,11 +25,11 @@
 
 ## 2. 当前实现与未闭环事项
 
-`fbba2e7`集中run38850381033正在执行，static/context步骤成功；early产物55个owner/76份sealed日志逐SHA通过。all-target与CLI同两处真实E0308：native_session.rs及session.rs将retire的Result<u32>传入要求Result<()>的cleanup。session已最小修正成功值映射，native_session随隔离后继修正；未重新编译。旧selected_member_tests集合类型修复上传仍待精确授权，未混入其他批。
+`fbba2e7`集中run38850381033正在执行，static/context步骤成功；early产物55个owner/76份sealed日志逐SHA通过。all-target与CLI同两处真实E0308：native_session.rs及session.rs将retire的Result<u32>传入要求Result<()>的cleanup。两处已最小修正成功值映射，native_session随隔离后继组合；未重新编译。旧selected_member_tests集合类型修复上传仍待精确授权，未混入其他批。
 
-原始HTTP目标后继已组合：wire Host、实际DNS拨号名及TLS校验名分离，numeric/Unicode/IPv6-zone origin不再经WHATWG改写；标准hyper CONNECT保原始端口与zone，仍在原取消future内回收driver。7新测试及1原gap成功回归尚未运行，无Cargo变化。剩余有限边界为代理自身authority、Lookup失败Unicode代理表示及SOCKS原字节认证；继续实现，不将其作为永久unsupported豁免。前批raw path/query已有6条锁定直接依赖边，无新包/版本/checksum。
+原始HTTP目标后继已组合：wire Host、实际DNS拨号名及TLS校验名分离，numeric/Unicode/IPv6-zone origin不再经WHATWG改写；标准hyper CONNECT保原始端口与zone，仍在原取消future内回收driver。7新测试及1原gap成功回归尚未运行，无Cargo变化。代理自身authority、Lookup失败Unicode CONNECT固定请求行投影及SOCKS原字节认证后继也已组合；标准HTTP/TLS连接器不重写，握手沿原future取消，13新回归未跑。Go衍生部分补齐原许可全文及正式npm notice。最后有限边界为Host非法字节/空authority/未知proxy scheme的失败阶段、TLS尾点与非ASCII zone；继续实现，不将其作为永久unsupported豁免。前批raw path/query已有6条锁定直接依赖边，无新包/版本/checksum。
 
-短预算Source分析子进程已组合候选，沿原aggregate 2GiB Job及请求绝对deadline，保warm状态、身份和未知结果不重放。旁核发现退休诊断同步写与idle到期清理两个deadline问题，作者正在修订，当前未验收/未声称1秒用例通过。
+短预算Source分析子进程已完整接入私有CLI入口，沿原aggregate 2GiB Job及请求绝对deadline，保warm状态、身份和未知结果不重放。退休诊断同步写与idle清理问题已修订：owner不再同步写可选sidecar，child保可终止阶段诊断；idle回收使用仍原有owner lifetime，失败请求仍原截止。测试改用已认证peer/held handle验证实际身份与退出，可选诊断缺失为unavailable；不把child观察当owner aggregate内存。组合Node34/34实过、语法检查通过，Rust/Windows未跑，1秒响应、真实warm idle、完整Retail90秒和性能目标均待实际验证。累计14项新unit与CLI integration已由现有测试组覆盖，无重复新增job。
 
 Hotfix合法异常时区合同后继已组合：Core保UTC秒/纳秒，Wago逐页按真实瞬间严格After选择；原始时间表示保留到pin/result晚期marshal，参数from/to同步使用Go接受规则。6新Rust未跑；共享HTTP原始URI/host无损传输仍在实现。下一集中批同时复验Core bundle类型编译、Core/CLI测试修正及Source/Emmy后继，不把历史失败改标通过。
 

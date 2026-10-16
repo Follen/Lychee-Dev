@@ -23,6 +23,12 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+mod analysis_process;
+
+/// Private CLI entry for the retained analysis child. Public IPC remains owned
+/// by `server`; this entry only uses its exact parent's private stdio handles.
+pub fn analysis_worker(args: &[String]) -> Result<()> { analysis_process::worker(args) }
+
 const WIRE: &str = "lycheedev.native-source-session.v1";
 const REQUEST_BYTES: usize = 768 << 20;
 const RESPONSE_BYTES: usize = 32 << 20;
@@ -93,7 +99,7 @@ fn session_status(cached_key: Option<&str>, owner_pid: u32) -> Value {
 fn verify_status_owner(status: &Value, expected_owner: u32) -> Result<()> {
     let owner = u64::from(expected_owner);
     let coherent = match status["state"].as_str() {
-        Some("idle") => status["workerPid"].as_u64() == Some(0)
+        Some("idle" | "retiring") => status["workerPid"].as_u64() == Some(0)
             && status["cachedSnapshot"].is_null(),
         Some("ready") => status["workerPid"].as_u64() == Some(owner)
             && status["cachedSnapshot"].as_str().is_some(),
@@ -120,6 +126,15 @@ fn reply_reserve(deadline: Instant) -> Duration {
     REPLY_RESERVE.min(deadline.saturating_duration_since(Instant::now()) / 4)
 }
 
+// Use one receive-time reserve throughout the request. The client's existing
+// response cutoff uses half this reserve; retirement ends earlier, leaving a
+// quarter for observer join/serialization/transport before that caller cutoff.
+fn request_cutoffs(total: Instant, received: Instant) -> (Instant, Instant) {
+    let reserve = REPLY_RESERVE.min(total.saturating_duration_since(received) / 4);
+    (total.checked_sub(reserve).unwrap_or(received),
+     total.checked_sub(reserve * 3 / 4).unwrap_or(received))
+}
+
 #[derive(Serialize, Deserialize)]
 struct Hello {
     wire: String,
@@ -142,6 +157,17 @@ struct Request {
     action: Action,
     work: Option<WorkerRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    cached: Option<CachedQuery>,
+}
+// Inspect only the bounded envelope in the IPC owner. Full typed Snapshot
+// decoding and its potentially expensive destruction belong to the child.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RequestHead {
+    wire: String,
+    deadline_unix_ms: u64,
+    action: Action,
+    work: Option<serde::de::IgnoredAny>,
     cached: Option<CachedQuery>,
 }
 #[derive(Serialize, Deserialize)]
@@ -303,12 +329,19 @@ fn write_frame(writer: &mut dyn Write, value: &impl Serialize, maximum: usize) -
             3,
         )
     })?;
-    writer.write_all(&(bytes.len() as u32).to_be_bytes())?;
-    writer.write_all(&bytes)?;
+    write_raw_frame(writer, &bytes)
+}
+fn write_raw_frame(writer: &mut dyn Write, bytes: &[u8]) -> Result<()> {
+    let size = u32::try_from(bytes.len()).map_err(|_| fault("Native frame length overflow"))?;
+    writer.write_all(&size.to_be_bytes())?;
+    writer.write_all(bytes)?;
     writer.flush()?;
     Ok(())
 }
 fn read_frame<T: DeserializeOwned>(reader: &mut dyn Read, maximum: usize) -> Result<T> {
+    Ok(serde_json::from_slice(&read_raw_frame(reader, maximum)?)?)
+}
+fn read_raw_frame(reader: &mut dyn Read, maximum: usize) -> Result<Vec<u8>> {
     let mut size = [0u8; 4];
     reader.read_exact(&mut size)?;
     let size = u32::from_be_bytes(size) as usize;
@@ -321,7 +354,7 @@ fn read_frame<T: DeserializeOwned>(reader: &mut dyn Read, maximum: usize) -> Res
     }
     let mut bytes = vec![0u8; size];
     reader.read_exact(&mut bytes)?;
-    Ok(serde_json::from_slice(&bytes)?)
+    Ok(bytes)
 }
 // Cleanup is an observation about the failed exchange, never its replacement.
 // Keep unknown exit state distinct from successfully observed retirement.
@@ -424,12 +457,12 @@ fn exchange(inv: &Invocation, current: &Identity, request: &Request) -> Result<O
             return Err(peer_failure(error, &hello, Some(observed), retired));
         }
     };
+    if let Some(error) = response.error {
+        return Err(error);
+    }
     if closing {
         peer.wait_exit(inv.control.deadline(), inv.control.token())
             .map_err(platform)?;
-    }
-    if let Some(error) = response.error {
-        return Err(error);
     }
     if matches!(request.action, Action::Status) {
         let status = response.value.as_ref().ok_or_else(|| fault("Native Source status is missing"))?;
@@ -544,7 +577,7 @@ pub fn analyze(inv: &Invocation, work: WorkerRequest) -> Result<Value> {
                     .map_err(platform);
                 let failed = lycheedev_core::metadata::historical_write::finish_historical(
                     Err(error),
-                    retired,
+                    retired.map(|_| ()),
                 );
                 return lycheedev_core::metadata::historical_write::finish_historical(
                     failed,
@@ -718,12 +751,17 @@ fn serve_borrowed(inv: &Invocation, current: &Identity) -> Result<()> {
         let mut job = BrokerJob::own_current_process(2 << 30).map_err(platform)?;
         let own = Process::open(std::process::id()).map_err(platform)?;
         let mut listener = BrokerListener::bind(&scope).map_err(platform)?;
-        let mut cached: Option<Cached> = None;
+        let mut analysis: Option<analysis_process::AnalysisProcess> = None;
+        let mut terminal_deadline = lifetime.deadline;
         let run = (|| -> Result<()> {
             let mut idle_deadline = lifetime.idle_deadline(Instant::now());
             loop {
                 // Only an admitted request may restart idle. Failed handshakes and
                 // malformed envelopes retain this absolute idle boundary.
+                // Idle expiry stops admission at the original idle boundary.
+                // Cleanup still belongs to this owner's already-fixed lifetime;
+                // an expired idle cutoff cannot prove a warm child was reaped.
+                terminal_deadline = lifetime.deadline;
                 owner_control.check()?;
                 let mut stream = match listener.accept(idle_deadline, owner_control.token()) {
                     Ok(stream) => stream,
@@ -748,10 +786,20 @@ fn serve_borrowed(inv: &Invocation, current: &Identity) -> Result<()> {
                 {
                     continue;
                 }
-                let request: Request = match read_frame(&mut stream, REQUEST_BYTES) {
+                let raw = match read_raw_frame(&mut stream, REQUEST_BYTES) {
+                    Ok(raw) => raw,
+                    Err(_) => continue,
+                };
+                let observed = Instant::now();
+                let received_unix_ms = utc_ms()?;
+                let request: RequestHead = match serde_json::from_slice(&raw) {
                     Ok(request) => request,
                     Err(_) => continue,
                 };
+                // Status/close never enter the child, so retain their complete
+                // historical typed validation here, including unused payloads.
+                if !matches!(request.action, Action::Query)
+                    && serde_json::from_slice::<Request>(&raw).is_err() { continue; }
                 if request.wire != WIRE {
                     continue;
                 }
@@ -763,36 +811,55 @@ fn serve_borrowed(inv: &Invocation, current: &Identity) -> Result<()> {
                 if remaining.is_zero() {
                     // Go dequeues an already-cancelled task without touching its
                     // worker, then resets idle. Its expired transport cannot reply.
-                    idle_deadline = lifetime.idle_deadline(Instant::now());
+                    // A skipped work member is not proof of a typed request.
+                    // Preserve the old expired-envelope validation/no-admission
+                    // rule; this path neither starts nor touches analysis.
+                    if serde_json::from_slice::<Request>(&raw).is_ok() {
+                        idle_deadline = lifetime.idle_deadline(Instant::now());
+                    }
                     continue;
                 }
-                let total_deadline = Instant::now()
-                    .checked_add(remaining)
+                let received_remaining = Duration::from_millis(request.deadline_unix_ms.saturating_sub(received_unix_ms));
+                let total_deadline = observed.checked_add(received_remaining)
                     .ok_or_else(|| fault("Native request deadline range"))?;
                 let total_deadline = lifetime.request_deadline(total_deadline);
+                terminal_deadline = total_deadline;
+                let (processing_deadline, retirement_deadline) = request_cutoffs(total_deadline, observed);
                 let response_control =
                     owner_control.child(total_deadline, owner_control.cancel_handle());
                 stream.set_deadline(total_deadline, response_control.cancel_handle());
                 match request.action {
-                    Action::Status => write_frame(
+                    Action::Status => {
+                        analysis_process::refresh(&mut analysis, retirement_deadline)?;
+                        write_frame(
                         &mut stream,
                         &Response {
                             value: Some({
                                 let mut status = session_status(
-                                    cached.as_ref().map(|value| value.key.as_str()),
+                                    analysis.as_ref().and_then(|value| value.key()),
                                     own.identity().pid,
                                 );
                                 status["batches"] = json!(
-                                    cached.as_ref().map_or(0, |value| value.admission.batches)
+                                    analysis.as_ref().map_or(0, |value| value.batches())
                                 );
+                                if analysis.as_ref().is_some_and(|value| value.retiring()) {
+                                    status["state"] = json!("retiring");
+                                }
                                 status
                             }),
                             error: None,
                         },
                         RESPONSE_BYTES,
-                    )?,
+                    )?;
+                    }
                     Action::Close => {
-                        drop(cached.take());
+                        drop(raw);
+                        let retired = analysis_process::retire_slot(&mut analysis, retirement_deadline);
+                        if let Err(error) = retired {
+                            write_frame(&mut stream, &Response { value:None, error:Some(error) }, RESPONSE_BYTES)?;
+                            idle_deadline = lifetime.idle_deadline(Instant::now());
+                            continue;
+                        }
                         write_frame(
                             &mut stream,
                             &Response {
@@ -804,13 +871,15 @@ fn serve_borrowed(inv: &Invocation, current: &Identity) -> Result<()> {
                         return Ok(());
                     }
                     Action::Query => {
-                        let work = request.work;
-                        let reuse = request.cached;
                         let cancel = Arc::new(AtomicBool::new(false));
                         let observer_stop = Arc::new(AtomicBool::new(false));
                         let read_cancel = Arc::new(AtomicBool::new(false));
                         let mut observer = stream.try_clone().map_err(platform)?;
-                        observer.set_deadline(total_deadline, read_cancel.clone());
+                        // Observation is needed only while analysis can run.
+                        // Its original processing cutoff also bounds the final
+                        // join; a short request must not wait through its reply
+                        // reserve for the broker's cancellation polling slice.
+                        observer.set_deadline(processing_deadline, read_cancel.clone());
                         let observing = observer_stop.clone();
                         let request_cancel = cancel.clone();
                         let handle = std::thread::spawn(move || {
@@ -826,38 +895,21 @@ fn serve_borrowed(inv: &Invocation, current: &Identity) -> Result<()> {
                                 _ => {}
                             }
                         });
-                        let deadline = total_deadline
-                            .checked_sub(reply_reserve(total_deadline))
-                            .unwrap_or_else(Instant::now);
-                        let control = owner_control.child(deadline, cancel);
-                        let diagnostic = inv.home.join("tmp/source-native-last-request.json");
-                        let begun = Instant::now();
-                        let record = |phase: &str, error: Option<&ToolkitError>| {
-                            let _ = storage::atomic_json(
-                                &diagnostic,
-                                &json!({"schema":"lycheedev.native-source-request-diagnostic.v1","workerPid":own.identity().pid,"workerCreated":own.identity().created,"phase":phase,"elapsedMs":begun.elapsed().as_millis(),"memory":job.memory_accounting().ok(),"processMemory":own.memory().ok(),"error":error}),
-                            );
-                        };
-                        record("processing", None);
-                        let result = execute_cached_query(
-                            &mut cached,
-                            work,
-                            reuse,
-                            &control,
-                            own.identity().pid,
-                            &record,
+                        let control = owner_control.child(processing_deadline, cancel);
+                        let result = analysis_process::query(
+                            &mut analysis, raw, request.work.is_none().then_some(request.cached.as_ref()).flatten().map(|value|value.key.as_str()),
+                            current, &inv.home, own.identity(), &control, retirement_deadline,
                         );
                         observer_stop.store(true, Ordering::Release);
                         read_cancel.store(true, Ordering::Release);
                         if handle.join().is_err() {
                             return Err(fault("Source request observer failed"));
                         }
-                        record("replying", result.as_ref().err());
                         let response = match result {
-                            Ok(value) => Response {
-                                value: Some(value),
-                                error: None,
-                            },
+                            Ok(Some(response)) => response,
+                            // Full typed decoding rejected the envelope in the
+                            // child without touching its retained cache.
+                            Ok(None) => continue,
                             Err(error) => Response {
                                 value: None,
                                 error: Some(error),
@@ -867,33 +919,28 @@ fn serve_borrowed(inv: &Invocation, current: &Identity) -> Result<()> {
                         // cancelled processing token that produced the typed error.
                         response_control.check()?;
                         write_frame(&mut stream, &response, RESPONSE_BYTES)?;
+                        // No optional owner-side filesystem diagnostics here,
+                        // including after the reply: a synchronous write/fsync
+                        // would also block admission of the next short request.
+                        // The killable analysis child retains phase diagnostics;
+                        // only this authenticated reply establishes the outcome.
                     }
                 }
                 // Active work suspends idle, but cannot extend owner lifetime.
                 idle_deadline = lifetime.idle_deadline(Instant::now());
             }
         })();
-        // Preserve the actual owner failure before destruction can consume the
-        // remaining reply budget. This diagnostic does not grant extra time or
-        // replace the authenticated transport outcome.
-        let terminal = inv.home.join("tmp/source-native-last-terminal.json");
-        let cleanup_started = Instant::now();
-        let terminal_record = |phase: &str, cleanup_error: Option<&ToolkitError>| {
-            let _ = storage::atomic_json(
-                &terminal,
-                &json!({"schema":"lycheedev.native-source-terminal-diagnostic.v1",
-            "workerPid":own.identity().pid,"workerCreated":own.identity().created,"phase":phase,
-            "cleanupElapsedMs":cleanup_started.elapsed().as_millis(),"error":run.as_ref().err(),
-            "cleanupError":cleanup_error,"processMemory":own.memory().ok()}),
-            );
-        };
-        terminal_record("retiring_analysis", None);
         // Retire analysis before releasing the process ownership boundary on every
         // exit, including owner expiry, transport failure and cancellation.
-        drop(cached.take());
-        let disarmed = job.disarm().map_err(platform);
-        terminal_record("owner_terminal", disarmed.as_ref().err());
-        lycheedev_core::metadata::historical_write::finish_historical(run, disarmed)
+        let retired = analysis_process::retire_slot(&mut analysis, terminal_deadline);
+        let disarmed = if retired.is_ok() { job.disarm().map_err(platform) } else { Ok(()) };
+        if retired.is_err() {
+            // Retain the armed aggregate Job until OS process exit. Do not
+            // disarm a tree whose actual retirement remains unconfirmed.
+            std::mem::forget(job);
+        }
+        lycheedev_core::metadata::historical_write::finish_historical(
+            lycheedev_core::metadata::historical_write::finish_historical(run, retired), disarmed)
     })();
     crate::persistence::finish_control(
         lycheedev_core::metadata::historical_write::finish_historical(owned, owner.close()),
@@ -904,6 +951,45 @@ fn serve_borrowed(inv: &Invocation, current: &Identity) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_receive_time_reserve_orders_execution_retirement_and_client_reply() {
+        let received=Instant::now();
+        for duration in [Duration::from_millis(1),Duration::from_millis(1000),REQUEST_LIMIT] {
+            let total=received+duration;
+            let (processing,retirement)=request_cutoffs(total,received);
+            let reserve=REPLY_RESERVE.min(duration/4);
+            let caller_reply=total-reserve/2;
+            assert!(received<=processing&&processing<=retirement);
+            assert!(retirement<=caller_reply&&caller_reply<=total);
+            assert_eq!(processing,total-reserve);
+            assert_eq!(retirement,total-reserve*3/4);
+        }
+    }
+    #[test]
+    fn raw_frame_transfer_preserves_exact_bytes_and_existing_cap() {
+        let bytes=br#" { "wire": "unchanged", "unicode": "\u4e2d", "n": 1e0 } "#;
+        let mut framed=Vec::new();write_raw_frame(&mut framed,bytes).unwrap();
+        assert_eq!(read_raw_frame(&mut std::io::Cursor::new(&framed),bytes.len()).unwrap(),bytes);
+        assert_eq!(read_raw_frame(&mut std::io::Cursor::new(&framed),bytes.len()-1).unwrap_err().code,"source.native_frame_limit");
+    }
+    #[test]
+    fn envelope_head_does_not_replace_full_typed_admission() {
+        let malformed=json!({"wire":WIRE,"deadline_unix_ms":1,"action":"query","work":false});
+        assert!(serde_json::from_value::<RequestHead>(malformed.clone()).is_ok());
+        assert!(serde_json::from_value::<Request>(malformed).is_err());
+        let unknown=json!({"wire":WIRE,"deadline_unix_ms":1,"action":"query","work":null,"extra":true});
+        assert!(serde_json::from_value::<RequestHead>(unknown).is_err());
+        let bad_cached=json!({"wire":WIRE,"deadline_unix_ms":1,"action":"query","work":null,"cached":{"key":"x","query":false}});
+        assert!(serde_json::from_value::<RequestHead>(bad_cached).is_err());
+    }
+    #[test]
+    fn unconfirmed_retirement_is_distinct_from_ready_and_idle() {
+        let mut status=session_status(None,42);status["state"]=json!("retiring");
+        verify_status_owner(&status,42).unwrap();
+        assert_ne!(status["state"],"idle");assert_ne!(status["state"],"ready");
+        status["cachedSnapshot"]=json!("stale");assert!(verify_status_owner(&status,42).is_err());
+    }
 
     #[test]
     fn client_exchange_never_waits_past_the_issued_wire_budget() {

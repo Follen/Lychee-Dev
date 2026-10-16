@@ -1557,6 +1557,11 @@ fn main() {
         }
         std::process::exit(result.err().map_or(0, |error| error.exit_code));
     }
+    if args.first().is_some_and(|value| value == "--source-native-session-worker") {
+        let result = lycheedev_source::native_session::analysis_worker(&args);
+        if let Err(error) = &result { let _ = writeln!(std::io::stderr(), "{error}"); }
+        std::process::exit(result.err().map_or(0, |error| error.exit_code));
+    }
     if args.first().is_some_and(|value| value == "--source-native-batch-worker") {
         let result = if args.len() == 1 { lycheedev_source::batch::worker_stdio() }
             else { Err(ToolkitError::arguments("private Source batch worker accepts stdin only")) };

@@ -213,6 +213,15 @@ impl JobGuard {
             Ok(guard)
         }
     }
+    /// Consume this unique Job handle after the caller observes terminal custody.
+    /// Do not retry a failed close, which may already have consumed the OS handle.
+    pub fn close(self) -> crate::Result<()> {
+        let handle = self.handle;
+        std::mem::forget(self);
+        // SAFETY: self was the unique handle owner and its Drop is disarmed;
+        // no references survive this consuming call and no retry is performed.
+        unsafe { CloseHandle(handle) }.map_err(|error| error.to_string())
+    }
     pub fn terminate(&self) -> crate::Result<()> {
         unsafe { TerminateJobObject(self.handle, 7).map_err(|e| e.to_string()) }
     }

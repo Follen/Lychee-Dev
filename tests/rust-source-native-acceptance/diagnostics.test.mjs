@@ -33,3 +33,14 @@ test('real failed-command evidence is saved even when terminal JSON is malformed
   assert.equal(captureDiagnostics({home,out,prefix:'010-too-large',stdout:failed,before})[0].state,'capture_failed');
  }finally{rmSync(root,{recursive:true});}
 });
+
+test('analysis phase memory is child-scoped and cannot claim owner aggregate attribution',()=>{
+ const child=Buffer.from('{"schema":"lycheedev.native-source-request-diagnostic.v1","workerPid":1328,"workerCreated":134365363311915552,"analysisPid":1329,"analysisCreated":134365363311915553,"requestDeadlineUnixMs":1234,"phase":"emmy_indexed","processMemory":{"identity":{"pid":1329,"created":134365363311915553}}}');
+ const result=inspectDiagnostic(child,failed,0);
+ assert.equal(result.identity,'matched_authenticated_failure_peer');
+ assert.equal(result.value.analysisCreated,'134365363311915553');
+ assert.equal(result.memoryAttribution,'child_identity_only_parent_unverified');
+ assert.equal(result.completionEvidence,false);
+ const wrong=Buffer.from(child.toString().replace('"pid":1329','"pid":1328'));
+ assert.equal(inspectDiagnostic(wrong,failed,0).identity,'invalid');
+});

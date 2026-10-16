@@ -72,6 +72,7 @@ pub(super) struct ExactTunnel<C> {
     pub(super) inner: C,
     pub(super) proxy: Uri,
     pub(super) host: String,
+    pub(super) target: String,
     pub(super) authorization: Option<reqwest::header::HeaderValue>,
 }
 impl<C> Service<Uri> for ExactTunnel<C>
@@ -88,18 +89,25 @@ where
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<std::result::Result<(), BoxError>> {
         self.inner.poll_ready(cx).map_err(Into::into)
     }
-    fn call(&mut self, destination: Uri) -> Self::Future {
+    fn call(&mut self, _: Uri) -> Self::Future {
         let connecting = self.inner.call(self.proxy.clone());
         let host = self.host.clone();
+        let target = self.target.clone();
         let authorization = self.authorization.clone();
         Box::pin(async move {
             let stream = connecting.await.map_err(Into::into)?;
-            let authority = destination
-                .authority()
-                .ok_or_else(|| io::Error::other("missing CONNECT authority"))?;
+            let representable = target
+                .parse::<Uri>()
+                .ok()
+                .filter(|uri| uri.authority().is_some());
+            let projected = representable.is_none();
+            let uri: Uri =
+                representable.unwrap_or_else(|| connect_target::PLACEHOLDER.parse().unwrap());
+            let stream =
+                connect_target::ConnectTargetIo::new(stream, projected.then_some(target.as_str()))?;
             let mut request = Request::builder()
                 .method(hyper::Method::CONNECT)
-                .uri(authority.as_str())
+                .uri(uri)
                 .header(reqwest::header::HOST, host)
                 .header(reqwest::header::USER_AGENT, "Go-http-client/1.1")
                 .body(reqwest::Body::from(Vec::<u8>::new()))?;

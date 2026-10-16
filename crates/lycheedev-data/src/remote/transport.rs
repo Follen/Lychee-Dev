@@ -99,7 +99,7 @@ pub(crate) fn request_deadline(
     }
     Ok(deadline)
 }
-fn client(deadline: Instant, locator: &str) -> Result<reqwest::Client> {
+fn client(deadline: Instant) -> Result<reqwest::Client> {
     let builder = reqwest::Client::builder()
         .http1_only()
         .pool_max_idle_per_host(0)
@@ -110,7 +110,10 @@ fn client(deadline: Instant, locator: &str) -> Result<reqwest::Client> {
         .no_deflate()
         .no_zstd()
         .timeout(deadline.saturating_duration_since(Instant::now()));
-    super::proxy::install(builder, locator)?
+    // The route was selected once before this direct-only fallback. Never
+    // re-read proxy environment or enable reqwest's different system matcher.
+    builder
+        .no_proxy()
         .build()
         .map_err(|error| http(error.to_string()))
 }
@@ -542,7 +545,7 @@ pub(crate) async fn get_once(
 
 async fn send_once(
     locator: &str,
-    route_locator: &str,
+    _route_locator: &str,
     headers: HeaderMap,
     control: &OperationControl,
     budget: Option<&Budget>,
@@ -550,8 +553,7 @@ async fn send_once(
 ) -> Result<reqwest::Response> {
     // Each redirect selects its new locator's route and owns a no-pool client
     // in this same runtime, with no automatic redirects or request retry.
-    if let Some(target) = raw_uri::target(locator)? {
-        let prepared = raw_uri::Prepared::new(target, headers, route_locator)?;
+    if let Some(prepared) = raw_uri::prepare(locator, &headers)? {
         check(control, budget)?;
         if Instant::now() >= deadline {
             return Err(http("remote request timeout"));
@@ -561,9 +563,7 @@ async fn send_once(
         check(control, budget)?;
         return response;
     }
-    let request = client(deadline, route_locator)?
-        .get(locator)
-        .headers(headers);
+    let request = client(deadline)?.get(locator).headers(headers);
     check(control, budget)?;
     if Instant::now() >= deadline {
         return Err(http("remote request timeout"));

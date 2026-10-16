@@ -7,7 +7,7 @@ import {spawnSync} from 'node:child_process';
 import {mkdirSync,mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {bootstrapApiSource,bootstrapEnvironmentInputSHA256,assertBootstrapEnvironment,BOOTSTRAP_API_PATH,bootstrapTinyOwner,acceptanceCliArgs,nativePipeName,parsePeerJson,tinyQuery,tinySnapshot,tinySource,fixtureSelection,SESSION_LIMITS,runSessionGroup} from './session-ipc.mjs';
+import {classifyPhaseDiagnostic,bootstrapApiSource,bootstrapEnvironmentInputSHA256,assertBootstrapEnvironment,BOOTSTRAP_API_PATH,bootstrapTinyOwner,acceptanceCliArgs,nativePipeName,parsePeerJson,tinyQuery,tinySnapshot,tinySource,fixtureSelection,SESSION_LIMITS,runSessionGroup} from './session-ipc.mjs';
 
 const sha=value=>createHash('sha256').update(value).digest('hex');
 const luac={version:'5.1.5',platform:'windows-amd64',executable_sha256:'a'.repeat(64),executable_bytes:1};
@@ -240,4 +240,32 @@ test('reflection-populated Hello fields retain required validation without unass
   const ps=readFileSync(new URL('./peer.ps1',import.meta.url),'utf8');
   for(const field of ['string wire = null','string executable = null','uint pid = 0','ulong created = 0']) assert(ps.includes(`[DataMember(IsRequired=true)] public ${field};`));
   assert(!/pragma warning disable|IgnoreWarnings|nowarn/i.test(ps));
+});
+
+
+test('optional child phases bind owner and request without claiming completion',()=>{
+  const hello={pid:42,created:'134049006123456789'},request={action:'query',deadline_unix_ms:1234};
+  const diagnostic={schema:'lycheedev.native-source-request-diagnostic.v1',workerPid:42,workerCreated:hello.created,
+    analysisPid:43,analysisCreated:'134049006123456790',requestDeadlineUnixMs:1234,phase:'emmy_indexed'};
+  assert.deepEqual(classifyPhaseDiagnostic(diagnostic,request,hello),{state:'matching_optional_phase',phase:'emmy_indexed',completionEvidence:false});
+  for(const changed of [{workerPid:44},{workerCreated:'134049006123456788'},{requestDeadlineUnixMs:1233}]){
+    const observed=classifyPhaseDiagnostic({...diagnostic,...changed},request,hello);
+    assert.equal(observed.state,'unavailable');assert.equal(observed.completionEvidence,false);
+  }
+  assert.equal(classifyPhaseDiagnostic(null,request,hello).state,'unavailable');
+  assert.equal(classifyPhaseDiagnostic(diagnostic,{action:'status'},hello).state,'unavailable');
+  assert.throws(()=>classifyPhaseDiagnostic({...diagnostic,analysisPid:42},request,hello));
+  assert.throws(()=>classifyPhaseDiagnostic({...diagnostic,analysisCreated:0},request,hello));
+});
+test('child and owner FILETIME diagnostic fields preserve all digits',()=>{
+  const parsed=parsePeerJson('{"analysisCreated":134049006123456790,"ownerCreated":134049006123456789}');
+  assert.equal(parsed.analysisCreated,'134049006123456790');assert.equal(parsed.ownerCreated,'134049006123456789');
+});
+
+test('Retail resource authentication stays separate from measured CLI calls and optional memory',()=>{
+  const js=readFileSync(new URL('./run.mjs',import.meta.url),'utf8');
+  for(const token of ['await createSessionPeer','await resourcePeer.status','semanticBatchesCharged:0,idleRestarted:true',
+    "await finishResourcePeer('session-closed',{requireExit:true})",'memoryAttribution:',
+    'raw phase memory is not owner aggregate memory'])assert(js.includes(token),token);
+  assert(!js.includes("assert.equal(value.phase, 'replying')"));
 });

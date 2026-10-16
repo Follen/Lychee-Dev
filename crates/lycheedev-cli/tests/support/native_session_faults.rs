@@ -29,6 +29,7 @@ fn read_frame(stream: &mut BrokerStream) -> Value {
 /// source files make deadline checkpoints observable without a blocking giant
 /// parse, executing source or introducing a production delay hook.
 pub fn exercise(home: &Path, mut work: Value) -> Vec<Value> {
+    let normal_work = work.clone();
     let files = work["snapshot"]["files"].as_object_mut().unwrap();
     for index in 0..1500 {
         let text = (0..24)
@@ -69,10 +70,25 @@ pub fn exercise(home: &Path, mut work: Value) -> Vec<Value> {
         assert_eq!(after_status, retained_status);
         observations.push(json!({"event":"native_session_rejected_envelope","case":case,"request":envelope,"status":after_status}));
     }
-    for (cancel, code, exit) in [
-        (true, "command.cancelled", 7),
-        (false, "command.deadline", 5),
+    // Keep the original cancel then cold-deadline cases. A third independent
+    // deadline case also proves retirement of a child held BEFORE the request;
+    // preparing it does not renew either original stress request's budget.
+    for (cancel, code, exit, warm) in [
+        (true, "command.cancelled", 7, false),
+        (false, "command.deadline", 5, false),
+        (false, "command.deadline", 5, true),
     ] {
+        if warm {
+            let mut prepare = BrokerStream::connect(&scope, Instant::now()+Duration::from_secs(90), Arc::new(AtomicBool::new(false))).unwrap();
+            let hello = read_frame(&mut prepare);
+            assert_eq!(hello["pid"],retained_hello["pid"]);
+            assert_eq!(hello["created"],retained_hello["created"]);
+            let now=SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+            write_frame(&mut prepare,&json!({"wire":"lycheedev.native-source-session.v1","deadline_unix_ms":now+90_000,"action":"query","work":normal_work}));
+            let prepared=read_frame(&mut prepare);
+            assert!(prepared["error"].is_null(),"{prepared}");
+        }
+        let held_child = (cancel || warm).then(||super::analysis_child(home,retained_hello["pid"].as_u64().unwrap() as u32));
         let begun = Instant::now();
         let total = if cancel {
             Duration::from_secs(8)
@@ -81,7 +97,7 @@ pub fn exercise(home: &Path, mut work: Value) -> Vec<Value> {
         };
         println!(
             "{}",
-            json!({"event":"native_session_fault_started","cancel":cancel,"budgetMs":total.as_millis()})
+            json!({"event":"native_session_fault_started","cancel":cancel,"warm":warm,"budgetMs":total.as_millis()})
         );
         let mut stream = BrokerStream::connect(
             &scope,
@@ -95,9 +111,10 @@ pub fn exercise(home: &Path, mut work: Value) -> Vec<Value> {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64;
+        let request_deadline = now+total.as_millis() as u64;
         write_frame(
             &mut stream,
-            &json!({"wire":"lycheedev.native-source-session.v1","deadline_unix_ms":now+total.as_millis() as u64,"action":"query","work":work}),
+            &json!({"wire":"lycheedev.native-source-session.v1","deadline_unix_ms":request_deadline,"action":"query","work":work}),
         );
         if cancel {
             stream.write_all(&[1]).unwrap();
@@ -106,7 +123,7 @@ pub fn exercise(home: &Path, mut work: Value) -> Vec<Value> {
         let response = read_frame(&mut stream);
         println!(
             "{}",
-            json!({"event":"native_session_fault_response","cancel":cancel,"elapsedMs":begun.elapsed().as_millis(),"response":response})
+            json!({"event":"native_session_fault_response","cancel":cancel,"warm":warm,"elapsedMs":begun.elapsed().as_millis(),"response":response})
         );
         assert_eq!(response["error"]["code"], code, "{response}");
         assert_eq!(response["error"]["exit_code"], exit, "{response}");
@@ -115,27 +132,53 @@ pub fn exercise(home: &Path, mut work: Value) -> Vec<Value> {
             begun.elapsed() < total,
             "typed error must return inside original request budget"
         );
-        observations.push(json!({"response":response,"workerPid":hello["pid"],"elapsedMs":begun.elapsed().as_millis()}));
+        let response_elapsed = begun.elapsed();
+        assert!(response["error"]["details"]["analysisRetirementError"].is_null(),"retirement must be confirmed within the original deadline: {response}");
+        if let Some(child)=&held_child {
+            // The response is sent only after retirement. This zero-wait OS
+            // observation cannot turn a later exit into in-budget completion.
+            assert_ne!(lycheedev_windows::process::observe_lifetime(child.identity(),||Ok(())).unwrap(),lycheedev_windows::process::ProcessLifetime::Running);
+        }
         drop(stream);
         // Failed processing releases the cached snapshot, but retains its owner
         // so a later public CLI request can prepare a fresh analysis.
+        let status_started=Instant::now();
         let mut status = BrokerStream::connect(
             &scope,
-            Instant::now() + Duration::from_secs(2),
+            status_started + Duration::from_secs(1),
             Arc::new(AtomicBool::new(false)),
         )
         .unwrap();
         let status_hello = read_frame(&mut status);
         assert_eq!(status_hello["pid"], hello["pid"]);
+        assert_eq!(status_hello["created"], hello["created"]);
+        let status_now=SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
         write_frame(
             &mut status,
-            &json!({"wire":"lycheedev.native-source-session.v1","deadline_unix_ms":now+10_000,"action":"status","work":null}),
+            &json!({"wire":"lycheedev.native-source-session.v1","deadline_unix_ms":status_now+1_000,"action":"status","work":null}),
         );
         let status = read_frame(&mut status);
         assert_eq!(status["value"]["state"], "idle");
         assert_eq!(status["value"]["workerPid"], 0);
         assert_eq!(status["value"]["ownerPid"], hello["pid"]);
         assert!(status["value"]["cachedSnapshot"].is_null());
+        assert!(status_started.elapsed()<Duration::from_secs(1),"previous response diagnostics must not block a subsequent short request");
+        // Phase files are optional, never completion receipts. Read only after
+        // authenticated Status synchronization; bind any observation to this
+        // exact request and owner rather than accepting a stale sidecar.
+        let diagnostic=std::fs::read(home.join("tmp/source-native-last-request.json")).ok()
+            .and_then(|bytes|serde_json::from_slice::<Value>(&bytes).ok())
+            .filter(|value|value["workerPid"]==hello["pid"] && value["workerCreated"]==hello["created"] && value["requestDeadlineUnixMs"]==request_deadline);
+        let phase_lifetime=diagnostic.as_ref().map(|value| {
+            let identity=lycheedev_windows::ProcessIdentity{pid:value["analysisPid"].as_u64().unwrap() as u32,created:value["analysisCreated"].as_u64().unwrap()};
+            assert_ne!(identity.pid,hello["pid"].as_u64().unwrap() as u32);
+            let observed=lycheedev_windows::process::observe_lifetime(&identity,||Ok(())).unwrap();
+            assert_ne!(observed,lycheedev_windows::process::ProcessLifetime::Running);
+            json!({"identity":identity,"lifetime":format!("{observed:?}")})
+        });
+        observations.push(json!({"response":response,"workerPid":hello["pid"],"warm":warm,"elapsedMs":response_elapsed.as_millis(),
+            "heldAnalysisIdentity":held_child.as_ref().map(|child|child.identity()),"heldChildExitedAtReply":held_child.is_some(),
+            "phaseObservation":phase_lifetime,"phaseDiagnosticState":if diagnostic.is_some(){"matching_optional_phase"}else{"unavailable"},"status":status}));
     }
     observations
 }

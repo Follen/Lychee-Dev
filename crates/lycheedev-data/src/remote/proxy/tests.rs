@@ -188,8 +188,11 @@ fn malformed_configuration_order_and_redaction() {
     let parts = proxy_parts("http://http://[bad").unwrap();
     assert_eq!(parts.host, "http:");
     assert_eq!(
-        selected_proxy("http://[bad").unwrap().unwrap().host_str(),
-        Some("http")
+        selected_proxy_raw("http://[bad")
+            .unwrap()
+            .unwrap()
+            .authority,
+        "http:"
     );
 }
 
@@ -270,4 +273,52 @@ fn cgi_only_rejects_successfully_parsed_http_proxy_before_bypass() {
         assert!(error.message.contains("CGI"));
         assert!(!error.message.contains("secret"));
     }
+}
+
+#[test]
+fn raw_selected_proxy_preserves_own_authority_and_credentials() {
+    for authority in [
+        "u%FF:p%FE@127.1:0080",
+        "0x7f000001:80",
+        "BÜCHER.example:00443",
+        "b%C3%BCcher.example:8443",
+        "[fe80::1%25Ethernet]:8443",
+    ] {
+        let selected = Policy::new(format!("https://{authority}"), "")
+            .select_raw("https://origin.example/a")
+            .unwrap()
+            .unwrap();
+        assert_eq!(selected.scheme, "https");
+        assert_eq!(selected.authority, authority);
+    }
+}
+
+#[test]
+fn raw_proxy_route_keeps_go_cgi_and_cross_origin_bypass_order() {
+    let mut policy = Policy::new("https://BÜCHER.proxy:00443".into(), ".bypass.test");
+    policy.http_proxy = "http://u%FF:p@0x7f000001:0080".into();
+    let selected = policy.select_raw("http://first.test/a").unwrap().unwrap();
+    assert_eq!(selected.authority, "u%FF:p@0x7f000001:0080");
+    assert!(
+        policy
+            .select_raw("http://next.bypass.test/a")
+            .unwrap()
+            .is_none()
+    );
+    policy.cgi = true;
+    assert_eq!(
+        policy
+            .select_raw("http://next.bypass.test/a")
+            .err()
+            .unwrap()
+            .code,
+        "records.remote_http"
+    );
+    policy.http_proxy = "%".into();
+    assert!(
+        policy
+            .select_raw("http://next.bypass.test/a")
+            .unwrap()
+            .is_none()
+    );
 }
