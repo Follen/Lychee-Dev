@@ -1,7 +1,9 @@
 //! Canonicalize only the text carried by serde's private RawValue escape hatch.
 //! The owner otherwise retains the original frame. This local pass preserves
 //! its former Value decode/encode without constructing or dropping a Value DOM.
-use super::{response_validation, RESPONSE_BYTES};
+use super::response_validation;
+#[cfg(test)]
+use super::RESPONSE_BYTES;
 use lycheedev_core::{Result, ToolkitError};
 use serde::{de::{DeserializeSeed, MapAccess, Visitor}, Serialize};
 use serde_json::value::RawValue;
@@ -74,11 +76,10 @@ fn frame_limit() -> ToolkitError {
 struct Output { bytes: Vec<u8>, exceeded: bool }
 impl Write for Output {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        if self.bytes.len().saturating_add(bytes.len()) > RESPONSE_BYTES {
+        super::raw_response::append_bounded(&mut self.bytes, bytes).map_err(|_| {
             self.exceeded = true;
-            return Err(io::Error::other("Source frame exceeds budget"));
-        }
-        self.bytes.extend_from_slice(bytes);
+            io::Error::other("Source frame byte or allocation budget")
+        })?;
         Ok(bytes.len())
     }
     fn flush(&mut self) -> io::Result<()> { Ok(()) }
@@ -265,4 +266,21 @@ mod tests {
             assert_eq!(canonical_value(oversized).unwrap_err().code, "source.native_frame_limit");
         }).join().unwrap();
     }
+    #[test]
+    fn private_canonical_writer_caps_capacity_across_incremental_growth() {
+        let chunk=vec![b'x';7<<20];
+        let mut output=Output::default();
+        for _ in 0..4 {
+            output.append(&chunk).unwrap();
+            assert!(output.bytes.capacity()<=RESPONSE_BYTES);
+        }
+        output.append(&chunk[..4<<20]).unwrap();
+        assert_eq!(output.bytes.len(),RESPONSE_BYTES);
+        assert!(output.bytes.capacity()<=RESPONSE_BYTES);
+        let capacity=output.bytes.capacity();
+        assert_eq!(output.append(b"x").unwrap_err().code,"source.native_frame_limit");
+        assert_eq!(output.bytes.len(),RESPONSE_BYTES);assert_eq!(output.bytes.capacity(),capacity);
+        assert!(output.exceeded);
+    }
+
 }

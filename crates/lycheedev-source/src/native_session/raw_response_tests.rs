@@ -200,3 +200,19 @@ fn noncanonical_private_key_order_is_outside_the_authenticated_child_writer(){
     assert_ne!(canonical.as_slice(),bytes.as_slice());
     assert!(old_owner_and_cli(&canonical).is_err());assert!(receive(canonical).is_err());
 }
+
+#[test]
+fn replacement_frame_caps_capacity_before_incremental_growth(){
+    let chunk=vec![b'x';7<<20];
+    let mut output=Vec::new();
+    for _ in 0..4 {
+        append_bounded(&mut output,&chunk).unwrap();
+        assert!(output.capacity()<=RESPONSE_BYTES);
+    }
+    append_bounded(&mut output,&chunk[..4<<20]).unwrap();
+    assert_eq!(output.len(),RESPONSE_BYTES);assert!(output.capacity()<=RESPONSE_BYTES);
+    let capacity=output.capacity();
+    assert_eq!(append_bounded(&mut output,b"x").unwrap_err().code,"source.native_frame_limit");
+    assert_eq!(output.len(),RESPONSE_BYTES);assert_eq!(output.capacity(),capacity);
+    assert!(output.iter().all(|byte|*byte==b'x'));
+}

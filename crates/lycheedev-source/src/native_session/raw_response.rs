@@ -114,8 +114,14 @@ impl RawResponse {
             details:RetirementDetails{original:details,retirement}},terminal},RESPONSE_BYTES)
     }
 }
-fn append_bounded(output:&mut Vec<u8>,bytes:&[u8])->Result<()> {
-    if output.len().saturating_add(bytes.len())>RESPONSE_BYTES{return Err(frame_limit());}
+pub(super) fn append_bounded(output:&mut Vec<u8>,bytes:&[u8])->Result<()> {
+    let needed=output.len().checked_add(bytes.len()).filter(|needed|*needed<=RESPONSE_BYTES).ok_or_else(frame_limit)?;
+    if needed>output.capacity() {
+        // Same fallible, capped growth as lsp_frame::serialize. A length-only
+        // check would still allow Vec's implicit doubling beyond the wire cap.
+        let target=needed.max(output.capacity().max(1024).saturating_mul(2)).min(RESPONSE_BYTES);
+        output.try_reserve_exact(target-output.len()).map_err(|_|frame_limit())?;
+    }
     output.extend_from_slice(bytes);Ok(())
 }
 fn frame_limit()->ToolkitError {ToolkitError::new("source.native_frame_limit","Source frame exceeds budget",3)}
