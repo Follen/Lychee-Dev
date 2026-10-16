@@ -20,7 +20,8 @@ try{
  if((Local-Hash $preparedBytes) -cne $intent.preparationSHA256){throw 'readmit.preparation_digest'}
  $prepared=[Text.Encoding]::UTF8.GetString($preparedBytes)|ConvertFrom-Json
  if($prepared.schema -cne 'lycheedev.channel-recovery-prepare.v1' -or $prepared.fenceId -cne $BootFenceId -or $prepared.snapshot.ownerId -cne $OwnerId -or $prepared.snapshot.channel -cne 'ordinary' -or $prepared.oldOwnerHistoricalState -cne 'unknown' -or $prepared.oldOwnerReaped -ne $false){throw 'readmit.preparation_target'}
- # Reuse the exact pinned original native type/functions, without running probe/commit.
+ # Authenticate the immutable boot preparation dependencies; only reuse its counter/helpers.
+ # The old native rename is retained for historical evidence and is never invoked here.
  $legacyBytes=Hold-Bytes (Join-Path $PSScriptRoot 'rust-channel-recovery.ps1') 1048576
  if((Local-Hash $legacyBytes) -cne $prepared.toolHashes.powershell -or (Local-Hash (Hold-Bytes (Join-Path $PSScriptRoot 'rust-channel-recovery.mjs') 1048576)) -cne $prepared.toolHashes.javascript){throw 'readmit.original_boot_tools_changed'}
  if((Local-Hash (Hold-Bytes $PSCommandPath 1048576)) -cne $intent.tools.powershell -or (Local-Hash (Hold-Bytes (Join-Path $PSScriptRoot 'rust-channel-readmit.mjs') 1048576)) -cne $intent.tools.javascript){throw 'readmit.tools_changed'}
@@ -41,7 +42,7 @@ try{
  Assert-Same $intent.archive $archive;Assert-Same $intent.target $target
  foreach($path in @($archive,$recordPath,$target)){Assert-NoReparse $path}
  if([IO.File]::Exists($archive) -or [IO.File]::Exists($recordPath) -or [IO.File]::Exists((Join-Path $directory 'ordinary.lease.original'))){throw 'readmit.inspect_existing_commit'}
- # BEGIN READMIT NATIVE: observation only; no termination or OS setting changes.
+ # BEGIN READMIT NATIVE: current observers and same-held-handle no-replace rename; no termination or OS setting changes.
  Add-Type -TypeDefinition @'
 using System;
 using System.ComponentModel;
@@ -49,7 +50,34 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using Microsoft.Win32.SafeHandles;
 public static class ToolkitReadmit {
+ [DllImport("kernel32.dll",CharSet=CharSet.Unicode,ExactSpelling=true,SetLastError=true)] static extern IntPtr CreateFileW(string path,uint access,uint share,IntPtr security,uint disposition,uint flags,IntPtr template);
+ [DllImport("kernel32.dll",ExactSpelling=true,SetLastError=true)] static extern bool SetFileInformationByHandle(IntPtr file,int kind,IntPtr data,uint size);
+ [DllImport("kernel32.dll",ExactSpelling=true,SetLastError=true)] static extern bool CloseHandle(IntPtr handle);
+ // WCHAR is explicit UInt16. Keep the DWORD flag union and native HANDLE alignment.
+ [StructLayout(LayoutKind.Sequential)] struct RenameInfo {public uint flags;public IntPtr root;public uint length;public ushort first;}
+ public static byte[] RenameBuffer(string destination){
+  if(String.IsNullOrEmpty(destination)||destination.IndexOf('\0')>=0||!Path.IsPathRooted(destination))throw new ArgumentException("readmit.rename_destination");
+  byte[] name=Encoding.Unicode.GetBytes(destination);
+  int offset=(int)Marshal.OffsetOf(typeof(RenameInfo),"first"),lengthOffset=(int)Marshal.OffsetOf(typeof(RenameInfo),"length");
+  if(offset!=(IntPtr.Size==8?20:12)||lengthOffset!=offset-4)throw new Exception("readmit.rename_layout");
+  // Count excludes NUL; allocation includes it. Win32 path conversion must never
+  // read past the buffer even when it consults FileName as a terminated string.
+  int size=checked(Math.Max(Marshal.SizeOf(typeof(RenameInfo)),offset+name.Length+2));
+  byte[] data=new byte[size]; // zero flags (no replace), root NULL, tail and NUL.
+  Buffer.BlockCopy(BitConverter.GetBytes(name.Length),0,data,lengthOffset,4);
+  Buffer.BlockCopy(name,0,data,offset,name.Length);
+  return data;
+ }
+ public sealed class LockedFile:IDisposable {
+  IntPtr handle;FileStream stream;
+  public LockedFile(string path,bool rename){handle=CreateFileW(path,0x80000000u|(rename?0x10000u:0u),1,IntPtr.Zero,3,0x00200000,IntPtr.Zero);if(handle==new IntPtr(-1))throw new Win32Exception(Marshal.GetLastWin32Error(),"readmit.lock_original");try{stream=new FileStream(new SafeFileHandle(handle,false),FileAccess.Read);}catch{CloseHandle(handle);handle=IntPtr.Zero;throw;}}
+  public byte[] Read(int maximum){if(stream.Length>maximum)throw new Exception("readmit.file_budget");stream.Position=0;var bytes=new byte[(int)stream.Length];int offset=0,count;while(offset<bytes.Length&&(count=stream.Read(bytes,offset,bytes.Length-offset))>0)offset+=count;if(offset!=bytes.Length)throw new Exception("readmit.short_read");return bytes;}
+  public void RenameNoReplace(string destination){byte[] buffer=RenameBuffer(destination);IntPtr data=Marshal.AllocHGlobal(buffer.Length);try{Marshal.Copy(buffer,0,data,buffer.Length);if(!SetFileInformationByHandle(handle,3,data,(uint)buffer.Length))throw new Win32Exception(Marshal.GetLastWin32Error(),"readmit.archive_commit");}finally{Marshal.FreeHGlobal(data);}}
+  public void Dispose(){Exception failure=null;try{if(stream!=null){stream.Dispose();stream=null;}}catch(Exception e){failure=e;}if(handle!=IntPtr.Zero){IntPtr closing=handle;handle=IntPtr.Zero;if(!CloseHandle(closing)){var e=new Win32Exception(Marshal.GetLastWin32Error(),"readmit.close_original");failure=failure==null?(Exception)e:new AggregateException(failure,e);}}if(failure!=null)throw failure;}
+ }
+
  [StructLayout(LayoutKind.Sequential)] public struct FT {public uint low,high;}
  [StructLayout(LayoutKind.Sequential)] public struct UniqueProcess {public uint pid;public FT started;}
  [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)] struct Info {
@@ -95,7 +123,7 @@ public static class ToolkitReadmit {
  $decoded=@();$originalLocks=@();$originalPaths=@()
  for($i=0;$i -lt 3;$i++){
   $row=$rows[$i];$path=Join-Path $Root $row.path;Assert-NoReparse $path
-  $lock=New-Object ToolkitChannelFence+LockedFile $path,($i -eq 0);$held.Add($lock);$originalLocks+=@($lock);$originalPaths+=@($path)
+  $lock=New-Object ToolkitReadmit+LockedFile $path,($i -eq 0);$held.Add($lock);$originalLocks+=@($lock);$originalPaths+=@($path)
   $bytes=$lock.Read(1048576)
   if($bytes.Length -ne $row.bytes -or (Hash-Bytes $bytes) -cne $row.sha256 -or [Convert]::ToBase64String($bytes) -cne $row.base64){throw 'readmit.original_evidence_changed'}
   $decoded+=@([Text.Encoding]::UTF8.GetString($bytes)|ConvertFrom-Json)

@@ -30,12 +30,20 @@ foreach($entry in @(@('identity',($expectedStem+'.identity.json')),@('rootIdenti
 }
 if($requestData.schema -ceq 'lycheedev.owned-request.v2' -and $null -eq $requestData.runId){throw 'owned.start_identity_run'}
 $requestData|Add-Member -NotePropertyMembers @{runId=$runId;identity=$expectedStem+'.identity.json';rootIdentity=$expectedStem+'.root.json'} -Force
+# Match the request's .NET stream hash without autoloading a Security module
+# inherited from a PowerShell 7 caller into Windows PowerShell 5.1.
+$wrapperFile=[IO.File]::Open($PSCommandPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+$wrapperDigest=$null
+try{
+ $wrapperDigest=[Security.Cryptography.SHA256]::Create()
+ $wrapperObservedSHA256=[BitConverter]::ToString($wrapperDigest.ComputeHash($wrapperFile)).Replace('-','').ToLowerInvariant()
+}finally{if($wrapperDigest){$wrapperDigest.Dispose()};$wrapperFile.Dispose()}
 # Startup identity is evidence, never a substitute for the terminal reap receipt.
 $wrapperProcess=[Diagnostics.Process]::GetCurrentProcess()
 Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class ToolkitBootCounter{[DllImport("kernel32.dll",SetLastError=true)]public static extern bool QueryUnbiasedInterruptTime(out ulong time);}'
 [UInt64]$bootCounter=0
 if(-not [ToolkitBootCounter]::QueryUnbiasedInterruptTime([ref]$bootCounter)){throw 'owned.boot_counter'}
-$identity=@{schema='lycheedev.owned-start.v1';runId=$requestData.runId;identitySource=$identitySource;requestPath=$requestPath;bootClock='QueryUnbiasedInterruptTime';coordinatorPid=$requestData.coordinatorPid;wrapperPid=$PID;wrapperCreationFileTime=$wrapperProcess.StartTime.ToUniversalTime().ToFileTimeUtc().ToString([Globalization.CultureInfo]::InvariantCulture);bootUptime100ns=$bootCounter.ToString([Globalization.CultureInfo]::InvariantCulture);requestSHA256=$requestSHA256;wrapperObservedSHA256=(Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant();rootIdentity=[string]$requestData.rootIdentity;state='wrapper-started';rootAssignment='PROC_THREAD_ATTRIBUTE_JOB_LIST';historicalReapProof=$false}
+$identity=@{schema='lycheedev.owned-start.v1';runId=$requestData.runId;identitySource=$identitySource;requestPath=$requestPath;bootClock='QueryUnbiasedInterruptTime';coordinatorPid=$requestData.coordinatorPid;wrapperPid=$PID;wrapperCreationFileTime=$wrapperProcess.StartTime.ToUniversalTime().ToFileTimeUtc().ToString([Globalization.CultureInfo]::InvariantCulture);bootUptime100ns=$bootCounter.ToString([Globalization.CultureInfo]::InvariantCulture);requestSHA256=$requestSHA256;wrapperObservedSHA256=$wrapperObservedSHA256;rootIdentity=[string]$requestData.rootIdentity;state='wrapper-started';rootAssignment='PROC_THREAD_ATTRIBUTE_JOB_LIST';historicalReapProof=$false}
 $identityBytes=[Text.Encoding]::UTF8.GetBytes(($identity|ConvertTo-Json -Depth 4))
 $identityFile=New-Object IO.FileStream ([string]$requestData.identity),([IO.FileMode]::CreateNew),([IO.FileAccess]::Write),([IO.FileShare]::Read),4096,([IO.FileOptions]::WriteThrough)
 try{$identityFile.Write($identityBytes,0,$identityBytes.Length);$identityFile.Flush($true)}finally{$identityFile.Dispose()}

@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 13:31 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`93952820a1074b50395cb918697a69858335c9d5`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 13:45 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`3d18752bad19b467e9601a4264d7c7d3f38abedc`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -45,7 +45,7 @@
 - **fa封存EXE的TLS实证**：[remote329及Go五项](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6215452005)零失败/跳过，双多尾点SNI现相等、错误名和原证书校验拒绝保留，两个独立owner均完整回收。EXE SHA `5093d4a541a2b44fc4e7fbcfcabf28b7a7e8ead5e32210b5f29cc589b9274458`绑定同fa源码；这是保全EXE补充运行，非官方Cargo阶段，旧unknown owner未改。[Go323性能包准备](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6215390982)成功：clean固定commit、Go1.27.1、VCS未修改、优化构建和完整LuaLS私有包验证通过，EXE SHA `9f9a39ecaff18622b1dc9295bcd5ea671cb04dd4ba6961ad4a295dc53f1913f6`。Rust优化构建和20对实际测量仍未执行。
 - **9395282完整SQL/进程所有权已保存**：30源的堆驱动、真实Physical/Overlay游标与最深错误/取消清理已接生产；修正固定Go bare关联列Equal/IN首错及JOIN ON临时量逐候选释放，保全部历史失败和原10栈样例。30源rustfmt/diff通过，22净新增测试NOT_RUN。另原子JOB_LIST随CreateProcess创建归属、启动/根身份在Resume前持久化，消除未来create/assign间隙；仅未来执行生效，旧unknown不追认。对应Node32项在云端16通过/16Windows跳过；[集中Windows run38907640603](https://github.com/Follen/Lychee-Dev/actions/runs/38907640603)已启动，实际产品/context前置失败：新增PowerShell sidecar数组逗号/加法优先级使合法路径被拒，Cargo fetch未启动，SQL编译/业务均NOT_RUN。本轮仅两处拼接加括号，原路径校验不松；补实际PowerShell数组/校验块测试。失败产物56owners/60sealed日志全hash通过，原unknown保留。
 - **32c80d9已保存**：通用gate/result阶段修正及7c正式Lua通过记录，Rust语义复验尚未执行。原0d严格raw失败保留，两个object正向receipt仍在；不得预先豁免全coverage或报告完整oracle通过。
-- **bed恢复准备已实际完成**：[本机记录](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6215888111)正式恢复测试17/17通过（含Windows真实C#与8项持柄锁/rename检查），prepare成功，原lease/owner/request字节不变。fence `cc31783a-9ed6-47a8-a150-e656b88bd90e`，prepared SHA `f4ef4175d09553b39fea44ebf85866cbba6c438e10dab3ed12214a66e3e9dd1b`。用户当前不方便重启，因此暂不重启/apply，旧owner仍unknown。原本机线程正在检查是否能凭当前执行域、进程创建身份与资源占用证据安全恢复通道；没有结果前不清lease、不追认历史回收。云端完整实现与必要的集中GitHub CI继续。恢复工具4文件字节保持不变，未来用户方便时才用真实系统计数证明恢复。
+- **bed恢复准备已实际完成**：[本机记录](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6215888111)正式恢复测试17/17通过（含Windows真实C#与8项持柄锁/rename检查），prepare成功，原lease/owner/request字节不变。fence `cc31783a-9ed6-47a8-a150-e656b88bd90e`，prepared SHA `f4ef4175d09553b39fea44ebf85866cbba6c438e10dab3ed12214a66e3e9dd1b`。用户当前不方便重启，因此暂不重启/apply，旧owner仍unknown。原本机线程正在检查是否能凭当前执行域、进程创建身份与资源占用证据安全恢复通道；没有结果前不清lease、不追认历史回收。云端完整实现与必要的集中GitHub CI继续。恢复工具4文件字节保持不变。后续3d本机测试发现旧rename尾部名字损坏，当前禁止执行旧boot apply；改用本轮修正的独立readmit原子归档路径，具体失败与验证入口见§6。
 - 历史run、原失败和前版交接正文完整保留在[历史证据](docs/toolkit/rust-migration-evidence-2026-10-15.md)。四阶段最终循环审计尚未开始，实机清单仍在本文最后。
 
 ## 4. 进入最终四阶段前的有限收口
@@ -67,12 +67,16 @@
 
 ## 6. 本机线程接力验证入口（2026-10-16）
 
-当前 ordinary 中断的正式恢复入口见 [恢复说明](tools/rust-channel-recovery.md)。先执行 `node --test tools/rust-channel-recovery.test.mjs`，实际验证Windows自有fixture的锁/no-replace rename，再在同机重启前执行 `node tools/rust-channel-recovery.mjs prepare <repo绝对路径> 9f053173-8472-4860-be36-19a455a32e62`。保存返回的fence ID与prepared SHA后，用户自行选择完整重启时机，再按说明apply/inspect。工具不重启、不清旧owner；旧结果与回收永远unknown，该boot模式以真实系统计数重置和原lease字节匹配证明新epoch；它不是唯一允许的恢复方式。用户已明确授权停止本批并重跑：可通过同一临界区真实进程/资源空闲核实、持续持有原文件与Cargo协调锁，保全旧lease后登记新的准入generation；旧结果/回收仍unknown，不能由dead PID单点推断。对应[无重启正式入口](tools/rust-channel-readmit.md)已实现：固定本次owner/fence与实际15资源、Data EXE/PDB身份，重新获取并持有全部锁、核进程/RM及target稳定窗口后持柄no-replace归档。旧owner/原prepared及bed四工具字节不改；本机历史已释放诊断句柄不能替代执行时实时证明。先运行 `node --test tools/rust-channel-recovery.test.mjs tools/rust-channel-readmit.test.mjs`，再按说明实际apply并inspect，随后原ordinary/target低成本check。云端29项27通过/2Windows未跑，正式apply尚未执行。固定bed本机已17/17通过且prepare成功，精确fence/摘要见§3；重启与apply仍未执行；本机另在调查无重启恢复的实际证据，尚未确认可恢复，不要求用户现在重启。
+当前 ordinary 的旧owner `9f053173-8472-4860-be36-19a455a32e62` 保持unknown，原lease/receipt/request与已生成prepared全部保留。用户已授权停止本批后重跑，且不方便重启。采用[无重启正式入口](tools/rust-channel-readmit.md)：在同一临界区持续持有原文件和Cargo协调锁，重新核真实进程/资源空闲及target稳定窗口，持原句柄no-replace归档后登记新准入。历史已释放诊断句柄不能替代实时证明，不追认旧owner回收。
+
+固定3d的[本机39项](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6216740087)实际33通过6失败：两处native rename产生错误UTF-16尾部名字，四处atomic Job启动受Windows PowerShell继承PS7模块路径影响而找不到Get-FileHash。原lease未动，SQL未编译。本批为readmit引入自己的明确WCHAR/含NUL缓冲并验证精确目录名；Job哈希使用.NET流API，无系统环境修改。旧bed四工具和prepared字节保持原样；旧boot rename已发现缺陷，**不要执行旧boot apply，也不要将旧native fixture的失败隐藏或重标通过**。新的验证入口为 `node --test tools/rust-owned-process-atomic-job.test.mjs tools/rust-channel-readmit.test.mjs`；两组实际Windows通过后，再按readmit说明apply/inspect与同ordinary低成本check。本批新Windows结果尚未取得。
+
+原[boot准备记录](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6215888111)保留当时17/17与prepare成功的历史身份，prepared SHA `f4ef4175d09553b39fea44ebf85866cbba6c438e10dab3ed12214a66e3e9dd1b`、fence `cc31783a-9ed6-47a8-a150-e656b88bd90e` 不变；后续实际发现的旧rename缺陷优先约束当前操作。
 
 用户指定现有本机线程接力，双方只经同一草稿PR同步源码与结果。先拉取本节标题上方已确认commit，保存自己的未提交修改，读AGENTS与本文件；不要把另一环境的历史lease复制或清除。89f61b9集中CI已终态；当前本机fa587f测试发现执行栈溢出，ordinary channel另有未证实回收的owner；用户当前不方便重启，保留原证据与lease，完整修复后必要时统一GitHub CI验证，不逐小片排长CI。
 
 1. 在本机明确记录OS/架构、Rust1.99.0、Node24、Windows SDK/编译器和可用空间。Windows正式产品命令沿[当前workflow](.github/workflows/rust-parity.yml)的准备步骤：认证原版Emmy、受控`rust-cargo.mjs --owner local-fetch -- fetch --locked`，随后`--owner local-check --one-shot -- check --locked --offline --workspace --all-targets -j 1`。Linux只能报告其真实支持的子集，不假称Windows测试通过；不用裸Cargo绕现有owner/cache控制。
-2. 本机当前固定`fa587f1236e6a9fc88776b827842f2f86bf093ec`，不随普通push自动换树。先受控all-target编译，再`node tools/rust-cargo.mjs --owner local-sql-stack-tests --one-shot -- test --locked --offline -p lycheedev-data --lib relational:: -j 1 -- --test-threads=1 --nocapture`，包括原三个崩溃、原10个执行栈样例及当前新增所有权回归；单线程用于定位，保持默认线程栈，不设置更大RUST_MIN_STACK。之后跑原joins/CTE/derived/recursive及资源集成组、完整adapter组与`node tests/rust-source-engine/fixed-emmy-oracle/controlled-run.mjs`。保原63/64、128/129边界、全部输入/分段trace、完整panic/退出码及实际回收，不能只改期望。
+2. 本机每批固定协调明确指定的完整SHA，不随普通push自动换树；fa为历史失败，939已保存完整执行架构修复，待本轮工具修复后验证。先受控all-target编译，再`node tools/rust-cargo.mjs --owner local-sql-stack-tests --one-shot -- test --locked --offline -p lycheedev-data --lib relational:: -j 1 -- --test-threads=1 --nocapture`，包括原三个崩溃、原10个执行栈样例及当前新增所有权回归；单线程用于定位，保持默认线程栈，不设置更大RUST_MIN_STACK。之后跑原joins/CTE/derived/recursive及资源集成组、完整adapter组与`node tests/rust-source-engine/fixed-emmy-oracle/controlled-run.mjs`。保原63/64、128/129边界、全部输入/分段trace、完整panic/退出码及实际回收，不能只改期望。
 3. TLS新组按[专用README](tests/rust-parity/tls-name-oracle/README.md)先运行一次真实remote组，再以其精确owner执行Go对照；Go1.27.1与私有测试CA准备沿同workflow，不安装系统信任。随后依workflow检查Core修复与其他失败组，不能跳过尚未跑的组来报全绿。
 4. 正式Lua重试不得删除旧失败输出。先沿`tools/rust-formal-lua.mjs build <新的runtime目录>`和`run <新目录/build-report.json> <已封存CLI目录/artifact.json>`实际执行220项；9桥可用`node tools/rust-formal-lua-bridge.mjs <新runtime目录/build-report.json> <已封存CLI目录/artifact.json> <新的bridge输出目录>`，三个路径须均在repo内且输出不存在，原身份验证完整保留。无参数仍为原CI固定路径。
 5. Source真实短预算/暖态回收及完整Retail使用现有sealed CLI、package与native acceptance入口及固定Gethe输入；性能另用[专用优化候选配对入口](tests/rust-performance-paired/README.md)（Node42通过、10个Windows项未在云端运行；实际基准未跑），不拿dev单次结果冒充70%达标。报告commit、命令、通过/失败/跳过、证据位置与结果摘要回同PR；不操作游戏、不发布。最终四阶段审计仍未开始。

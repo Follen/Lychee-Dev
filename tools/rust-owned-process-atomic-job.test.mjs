@@ -43,6 +43,76 @@ function run(f) {
 
 function proof(f) { return JSON.parse(readFileSync(f.request.receipt)); }
 
+function startupHashBlock() {
+  const start = source.indexOf('$wrapperFile=[IO.File]::Open(');
+  const end = source.indexOf('\n# Startup identity is evidence,', start);
+  assert(start >= 0 && end > start, 'extract the actual production wrapper hash block');
+  return source.slice(start, end);
+}
+
+test('startup wrapper identity uses the existing .NET stream hash without Security module autoload', () => {
+  const block = startupHashBlock();
+  assert.doesNotMatch(source, /Get-FileHash/);
+  assert.match(block, /\[Security\.Cryptography\.SHA256\]::Create\(\)/);
+  assert.match(block, /ComputeHash\(\$wrapperFile\)/);
+  assert.match(block, /finally\{if\(\$wrapperDigest\)\{\$wrapperDigest\.Dispose\(\)\};\$wrapperFile\.Dispose\(\)\}/);
+  assert.match(source, /wrapperObservedSHA256=\$wrapperObservedSHA256;/);
+  assert.ok(source.indexOf(block) < source.indexOf('$identity=@{'));
+  assert.doesNotMatch(block, /PSModulePath|PSModuleAutoLoadingPreference|Import-Module|SetEnvironmentVariable/);
+});
+
+test('Windows hashes the actual startup block in an empty runspace with no Get-FileHash or module autoload', windows, t => {
+  const f = fixture(t, 'hash-no-modules'), script = join(f.evidence, 'hash-no-modules.ps1');
+  const binary = join(f.evidence, 'raw hash [literal].bin'), empty = join(f.evidence, 'empty.bin');
+  writeFileSync(binary, Buffer.from([0xef, 0xbb, 0xbf, 0, 0xff, 0x80, 10, 13, 0x61]));
+  writeFileSync(empty, Buffer.alloc(0));
+  const inputs = [wrapper, binary, empty];
+  const literal = value => "'" + value.replaceAll("'", "''") + "'";
+  writeFileSync(script, '\uFEFF' + `$ErrorActionPreference='Stop'
+# A fresh runspace has no cmdlets or imported modules. Disable module autoload
+# only inside this isolated fixture; the production process environment is untouched.
+$initial=[System.Management.Automation.Runspaces.InitialSessionState]::Create()
+$initial.LanguageMode=[System.Management.Automation.PSLanguageMode]::FullLanguage
+$initial.Variables.Add([System.Management.Automation.Runspaces.SessionStateVariableEntry]::new('PSModuleAutoLoadingPreference','None','fixture isolation'))
+$runspace=[System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace($initial)
+$probe=$null;$hash=$null
+try{
+ $runspace.Open()
+ $probe=[System.Management.Automation.PowerShell]::Create();$probe.Runspace=$runspace
+ [void]$probe.AddScript(@'
+$ErrorActionPreference='Stop'
+try{Get-FileHash;'unexpected-command'}catch [System.Management.Automation.CommandNotFoundException]{'missing-command'}
+'@)
+ $absent=@($probe.Invoke())
+ if($absent.Count -ne 1 -or [string]$absent[0] -cne 'missing-command'){throw 'hash_cmdlet_not_absent'}
+ foreach($path in @(${inputs.map(literal).join(',')})){
+  $hash=[System.Management.Automation.PowerShell]::Create();$hash.Runspace=$runspace
+  [void]$hash.AddScript(@'
+param([string]$path)
+$ErrorActionPreference='Stop'
+if($PSModuleAutoLoadingPreference -cne 'None'){throw 'hash_module_autoload_enabled'}
+$PSCommandPath=$path
+${startupHashBlock()}
+# Exclusive reopen also proves that the extracted block released its file handle.
+$released=[IO.File]::Open($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
+$released.Dispose()
+$wrapperObservedSHA256
+'@).AddArgument($path)
+  $values=@($hash.Invoke())
+  if($hash.HadErrors -or $values.Count -ne 1){throw ('hash_block_failed: '+[string]$hash.Streams.Error)}
+  [Console]::Out.WriteLine([string]$values[0])
+  $hash.Dispose();$hash=$null
+ }
+}finally{if($hash){$hash.Dispose()};if($probe){$probe.Dispose()};$runspace.Dispose()}
+`);
+  const execution = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script],
+    {encoding: 'utf8', windowsHide: true, shell: false, timeout: 30000, maxBuffer: 1 << 20});
+  writeFileSync(join(f.evidence, 'wrapper-result.json'), JSON.stringify({status: execution.status, error: execution.error?.message,
+    stdout: execution.stdout, stderr: execution.stderr}, null, 2));
+  assert.equal(execution.error, undefined); assert.equal(execution.status, 0, execution.stderr);
+  assert.deepEqual(execution.stdout.trim().split(/\r?\n/), inputs.map(path => createHash('sha256').update(readFileSync(path)).digest('hex')));
+});
+
 test('atomic startup retains the handle list and persists exact root before Resume', () => {
   assert.match(source, /InitializeProcThreadAttributeList\(attributes,2,/);
   assert.match(source, /new IntPtr\(0x20002\)/);
@@ -85,6 +155,7 @@ for (const [label, options, expectedSource] of [
   assert.equal(p.identitySource, expectedSource);
   assert.equal(start.requestPath, f.path);
   assert.equal(start.requestSHA256, createHash('sha256').update(readFileSync(f.path)).digest('hex'));
+  assert.equal(start.wrapperObservedSHA256, createHash('sha256').update(readFileSync(wrapper)).digest('hex'));
   assert.equal(start.historicalReapProof, false);
   assert.equal(root.historicalReapProof, false);
   assert.equal(start.bootClock, 'QueryUnbiasedInterruptTime');

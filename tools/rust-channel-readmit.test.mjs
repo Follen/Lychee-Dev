@@ -107,7 +107,7 @@ test('corrupt archive and foreign path/digest reject without touching existing e
 });
 test('production commit holds originals and all coordination locks through final live checks and no-replace rename', () => {
   const ps = readFileSync(new URL('./rust-channel-readmit.ps1', import.meta.url), 'utf8');
-  assert.match(ps, /ToolkitChannelFence\+LockedFile/); assert.match(ps, /\[IO.FileShare\]::None/);
+  assert.match(ps, /ToolkitReadmit\+LockedFile/); assert.match(ps, /\[IO.FileShare\]::None/);
   assert.match(ps, /Write-NewFlushed \$recordPath[\s\S]*Related-Processes\)\.Count[\s\S]*\$originalLocks\[0\]\.RenameNoReplace\(\$archive\)[\s\S]*finally\{/);
   assert.match(ps, /\$created -ceq \$selfCreated/); assert.match(ps, /\$created -ceq \$coordinatorCreated/);
   assert.doesNotMatch(ps, /Stop-Process|TerminateProcess|TerminateJobObject|RmShutdown|Restart-Computer|Remove-Item|Move-Item/);
@@ -118,6 +118,20 @@ test('production commit holds originals and all coordination locks through final
   assert.match(ps, /renameReturnedSuccess=\$committed/);
 });
 
+test('readmit owns the corrected terminated rename buffer without altering the prepared boot tools', () => {
+  const ps = readFileSync(new URL('./rust-channel-readmit.ps1', import.meta.url), 'utf8');
+  assert.match(ps, /public ushort first/);
+  assert.match(ps, /offset\+name.Length\+2/);
+  assert.match(ps, /new byte\[size\]/);
+  assert.match(ps, /BitConverter.GetBytes\(name.Length\)/);
+  assert.match(ps, /SetFileInformationByHandle\(handle,3,data,\(uint\)buffer.Length\)/);
+  assert.doesNotMatch(ps, /New-Object ToolkitChannelFence\+LockedFile/);
+  assert.equal(sha256(readFileSync(new URL('./rust-channel-recovery.ps1', import.meta.url))), '9bd7678a559eb7685d54c458ce9d51719c8cb14159c23f15f703c7f2bce15060');
+  assert.equal(sha256(readFileSync(new URL('./rust-channel-recovery.mjs', import.meta.url))), '778aaed82e73527f9b4e9b55ca91fa1ef03003332488db6310e01eea7a5b45da');
+  assert.equal(sha256(readFileSync(new URL('./rust-channel-recovery.test.mjs', import.meta.url))), 'f546982374eb79481f6902f8c60a964c672539c45313bbd3a27af5324484e772');
+  assert.equal(sha256(readFileSync(new URL('./rust-channel-recovery.md', import.meta.url))), 'b2cf4568c011176f5a384b10972ac7b073172dddd83514ecde93da1ad9c1ec5d');
+});
+
 test('Windows fixture compiles actual native observers and holds every fixture lock across no-replace rename', {skip: process.platform !== 'win32'}, t => {
   const directory = join(process.cwd(), '.tmp', `channel-readmit-native-${randomUUID()}`);
   mkdirSync(directory, {recursive: true}); t.diagnostic(`Preserved native readmission fixture: ${directory}`);
@@ -125,16 +139,12 @@ test('Windows fixture compiles actual native observers and holds every fixture l
   const cleanupMarker = '}catch{$primaryFailure=$_;throw}finally{\n';
   const cleanupBody = productionSource.slice(productionSource.lastIndexOf(cleanupMarker) + cleanupMarker.length).trim().slice(0, -1);
   const nativeSource = productionSource.match(/# BEGIN READMIT NATIVE:[\s\S]*?Add-Type -TypeDefinition @'\r?\n([\s\S]*?)\r?\n'@/);
-  const legacySource = readFileSync(new URL('./rust-channel-recovery.ps1', import.meta.url), 'utf8').match(/Add-Type -TypeDefinition @'\r?\n([\s\S]*?)\r?\n'@/);
-  assert(nativeSource && legacySource);
+  assert(nativeSource);
   const path = fileURLToPath(new URL('./rust-channel-readmit.ps1', import.meta.url)).replaceAll("'", "''"), script = join(directory, 'native-fixture.ps1');
   writeFileSync(script, '\uFEFF' + `$ErrorActionPreference='Stop'
 $tokens=$null;$errors=$null
 [void][Management.Automation.Language.Parser]::ParseFile('${path}',[ref]$tokens,[ref]$errors)
 if($errors.Count -ne 0){throw ($errors|Out-String)}
-Add-Type -TypeDefinition @'
-${legacySource[1]}
-'@
 Add-Type -TypeDefinition @'
 ${nativeSource[1]}
 '@
@@ -144,8 +154,8 @@ foreach($p in @($lease,$owner,$request,$cargo)){[IO.File]::WriteAllText($p,'orig
 [IO.File]::WriteAllText($blocked,'must preserve')
 $held=New-Object 'System.Collections.Generic.List[System.IDisposable]';$watch=$null
 try{
- $original=New-Object ToolkitChannelFence+LockedFile $lease,$true;$held.Add($original)
- foreach($p in @($owner,$request)){$held.Add((New-Object ToolkitChannelFence+LockedFile $p,$false))}
+ $original=New-Object ToolkitReadmit+LockedFile $lease,$true;$held.Add($original)
+ foreach($p in @($owner,$request)){$held.Add((New-Object ToolkitReadmit+LockedFile $p,$false))}
  $held.Add([IO.File]::Open($cargo,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None))
  $own=[Diagnostics.Process]::GetCurrentProcess();try{$created=$own.StartTime.ToUniversalTime().ToFileTimeUtc().ToString([Globalization.CultureInfo]::InvariantCulture)}finally{$own.Dispose()}
  $users=@([ToolkitReadmit]::ResourceUsers([string[]]@($lease,$owner,$request,$cargo))|Where-Object {-not ($_.pid -eq $PID -and $_.creationFileTime -ceq $created)})
@@ -161,6 +171,25 @@ try{
  if([IO.File]::Exists($lease) -or -not [IO.File]::Exists($archive)){throw 'fixture_rename_missing'}
 }finally{if($watch){$watch.Dispose()};for($i=$held.Count-1;$i -ge 0;$i--){$held[$i].Dispose()}}
 if([IO.File]::ReadAllText($archive) -cne 'original bytes'){throw 'archive_bytes_changed'}
+# Inspect the exact production buffer and directory names, not only File.Exists.
+# Include both failed historical names, short/long, BMP and surrogate-pair names.
+$caseRoot=Join-Path $PSScriptRoot 'rename-cases';[void][IO.Directory]::CreateDirectory($caseRoot)
+$names=@('archive','committed.archive','a','abc',('long-'+('x'*31)),('归档-'+[char]0xD83D+[char]0xDE00))
+$caseNumber=0
+foreach($name in $names){
+ $case=Join-Path $caseRoot ($caseNumber.ToString());$caseNumber++;[void][IO.Directory]::CreateDirectory($case)
+ $source=Join-Path $case 'source';$destination=Join-Path $case $name
+ $expected=[Text.Encoding]::Unicode.GetBytes($destination);$buffer=[ToolkitReadmit]::RenameBuffer($destination)
+ $offset=12;if([IntPtr]::Size -eq 8){$offset=20}
+ if([BitConverter]::ToUInt32($buffer,$offset-4) -ne $expected.Length -or $buffer.Length -lt ($offset+$expected.Length+2)){throw 'rename_buffer_length'}
+ for($i=0;$i -lt ($offset-4);$i++){if($buffer[$i] -ne 0){throw 'rename_buffer_flags_or_root'}}
+ for($i=0;$i -lt $expected.Length;$i++){if($buffer[$offset+$i] -ne $expected[$i]){throw 'rename_buffer_name'}}
+ for($i=$offset+$expected.Length;$i -lt $buffer.Length;$i++){if($buffer[$i] -ne 0){throw 'rename_buffer_terminator'}}
+ [IO.File]::WriteAllBytes($source,[byte[]]@(0,255,128,7,0,10));$lock=New-Object ToolkitReadmit+LockedFile $source,$true
+ try{$lock.RenameNoReplace($destination);$actual=@([IO.Directory]::GetFiles($case));if($actual.Count -ne 1 -or -not [String]::Equals([IO.Path]::GetFileName($actual[0]),$name,[StringComparison]::Ordinal)){throw 'rename_exact_utf16_name'}}finally{$lock.Dispose()}
+ if([Convert]::ToBase64String([IO.File]::ReadAllBytes($destination)) -cne 'AP+ABwAK'){throw 'rename_case_bytes'}
+}
+$invalidRejected=$false;try{[void][ToolkitReadmit]::RenameBuffer(('C:'+ [char]92 +'bad'+[char]0+'name'))}catch{$invalidRejected=$true};if(-not $invalidRejected){throw 'rename_embedded_nul_accepted'}
 Add-Type -TypeDefinition 'using System;public static class ReadmitCleanupFixture{public static int attempts;public sealed class Bad:IDisposable{public void Dispose(){attempts++;throw new Exception("fixture-close-failed");}}public sealed class Good:IDisposable{public void Dispose(){attempts++;}}}'
 $watch=New-Object ReadmitCleanupFixture+Bad;$coordinator=New-Object ReadmitCleanupFixture+Bad;$self=New-Object ReadmitCleanupFixture+Good
 $held=New-Object 'System.Collections.Generic.List[System.IDisposable]';$held.Add((New-Object ReadmitCleanupFixture+Bad));$held.Add((New-Object ReadmitCleanupFixture+Good))

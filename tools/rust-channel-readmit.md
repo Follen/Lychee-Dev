@@ -8,19 +8,30 @@
 没有 kill、重启、系统配置变更、旧 receipt 改写或新 Cargo target。
 
 原 `rust-channel-recovery.{mjs,ps1,test.mjs,md}` 和 `prepared.json` 不修改。
-旧 boot apply 仍严格要求实际 counter 下降；新模式不是旧 preparation 的既有授权。
-新入口只借用其原字节快照和经过原工具 SHA 验证的 LockedFile/no-replace rename。
+原 boot 合同的 counter 下降条件保持原样；新模式不是旧 preparation 的既有授权。
+新入口借用经过原工具 SHA 验证的字节快照、counter 与纯校验 helper，
+归档改用 readmit 自身的同句柄 no-replace 实现，不调用旧 LockedFile。
+
+**已知历史缺陷：** [3d18752 本机测试](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6216740087)
+实测两个旧 rename 调用把额外 UTF-16 字符附到归档名。原 boot 四文件因 prepared 哈希绑定而保留，
+其原 native fixture 本轮失败仍有效；此前 bed 历史通过不能覆盖本次失败。
+在单独正式版本化修复前，不再执行原 boot apply。这里修复的是新 readmit 的正式提交实现，
+不改旧 prepared 的哈希，不改旧测试断言，也不声称旧工具已修复。
 
 ## 本机执行
 
-先在保存这四个新增文件的精确 commit 上运行：
+先在保存当前修复的精确 commit 上运行新路径的完整工具测试：
 
 ```powershell
-node --test tools/rust-channel-recovery.test.mjs tools/rust-channel-readmit.test.mjs
+node --test tools/rust-channel-readmit.test.mjs tools/rust-owned-process-atomic-job.test.mjs
 ```
 
 Windows native fixture 只使用自己新建的 fixture 文件，验证实际 C# 编译、Restart Manager、
-精确自身创建身份、文件监听、锁持续持有及 no-replace 提交。它不操作真实 lease 或跑 Cargo。
+精确自身创建身份、文件监听、锁持续持有及 no-replace 提交。还逐字节验证实际 FILE_RENAME_INFO
+的 WCHAR 字节数、零 flags/RootDirectory、显式 NUL 终止与缓冲范围，并对 ASCII、短/长、
+中文和代理对名称实际归档后枚举目录、精确比较 UTF-16 名称及完整原文件内容。
+它不操作真实 lease 或跑 Cargo。旧 boot native fixture 作为独立已失败的历史路径保留，
+不加入此新路径的通过统计；没有将其断言改宽或标成通过。
 任何失败保留该 fixture 证据，先修复，不执行正式 apply。
 
 随后使用**此前保存的原 prepared SHA256**，在原 repo 执行：
@@ -83,6 +94,8 @@ node tools/rust-channel-readmit.mjs inspect '<repo绝对路径>' '<原prepared S
 - [本机第一轮当前资源观察](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6216084938)
 - [明确停止授权后的第二轮，实际终止 0 个](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6216190221)
 - [精确十五资源及 Data bytes/SHA](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6216305777)
+- [FILE_RENAME_INFO 字节长度、NUL 字符串及 no-replace 合同](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info)
+- [SetFileInformationByHandle 及缓冲字节大小](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfileinformationbyhandle)
 - [Windows 文件共享与持柄生命周期](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)
 - [Restart Manager 当前资源占用列表](https://learn.microsoft.com/en-us/windows/win32/api/restartmanager/nf-restartmanager-rmgetlist)
 - [Cargo 1.99 协调锁布局](https://doc.rust-lang.org/stable/nightly-rustc/src/cargo/compiler/layout.rs.html)
