@@ -16,13 +16,17 @@ pub fn dispatch_with_services(
     let reading = relations::with_native_services(inv, &tools, broker)?;
     let complete = reading.data["complete"] == true;
     let source = reading.pin.source.as_ref().unwrap();
-    let capture = evidence::commit_capture(
+    let capture = evidence::commit_capture_bounded(
         &inv.home,
-        &serde_json::to_vec(&reading.data)?,
-        "application/json",
-        json!({"kind":"source-refs","locator":inv.flag("--symbol-id").or(inv.flag("--symbol")).unwrap(),"snapshot":reading.pin.id,"sourceCommit":source.exact_commit}),
-        complete,
-        reading.data["truncated"] == true,
+        lycheedev_core::evidence::CaptureInput {
+            bytes: &serde_json::to_vec(&reading.data)?,
+            maximum_bytes: lycheedev_core::evidence::DEFAULT_CAPTURE_BYTES,
+            media_type: "application/json",
+            provenance: json!({"kind":"source-refs","locator":inv.flag("--symbol-id").or(inv.flag("--symbol")).unwrap(),"snapshot":reading.pin.id,"sourceCommit":source.exact_commit}),
+            complete: complete,
+            truncated: reading.data["truncated"] == true,
+        },
+        &inv.control,
     )?;
     let mut result = Outcome::new(reading.data);
     result.complete = complete;

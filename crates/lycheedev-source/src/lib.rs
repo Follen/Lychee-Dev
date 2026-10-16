@@ -139,13 +139,17 @@ pub fn dispatch_with_services(
             let mut out = Outcome::new(data);
             out.complete = out.data["complete"] == true;
             out.coverage = out.data["coverage"].clone();
-            let capture = lycheedev_core::evidence::commit_capture(
+            let capture = lycheedev_core::evidence::commit_capture_bounded(
                 &inv.home,
-                &serde_json::to_vec(&out.data)?,
-                "application/json",
-                serde_json::json!({"kind":"addon-validate","locator":root,"snapshot":pin.id,"sourceCommit":source.exact_commit}),
-                out.complete,
-                false,
+                lycheedev_core::evidence::CaptureInput {
+                    bytes: &serde_json::to_vec(&out.data)?,
+                    maximum_bytes: lycheedev_core::evidence::DEFAULT_CAPTURE_BYTES,
+                    media_type: "application/json",
+                    provenance: serde_json::json!({"kind":"addon-validate","locator":root,"snapshot":pin.id,"sourceCommit":source.exact_commit}),
+                    complete: out.complete,
+                    truncated: false,
+                },
+                &inv.control,
             )?;
             out.provenance.push(capture);
             out.selection = serde_json::to_value(&pin)?;
@@ -310,13 +314,17 @@ pub fn dispatch_with_services(
             } else {
                 "source-query"
             };
-            let capture = evidence::commit_capture(
+            let capture = evidence::commit_capture_bounded(
                 &inv.home,
-                &serde_json::to_vec(&out.data)?,
-                "application/json",
-                json!({"kind":kind,"locator":inv.flag("--path").or(inv.positional.as_deref()).unwrap_or(&source.repository),"snapshot":pin.id,"sourceCommit":source.exact_commit}),
-                out.complete,
-                out.data["truncated"] == true,
+                lycheedev_core::evidence::CaptureInput {
+                    bytes: &serde_json::to_vec(&out.data)?,
+                    maximum_bytes: lycheedev_core::evidence::DEFAULT_CAPTURE_BYTES,
+                    media_type: "application/json",
+                    provenance: json!({"kind":kind,"locator":inv.flag("--path").or(inv.positional.as_deref()).unwrap_or(&source.repository),"snapshot":pin.id,"sourceCommit":source.exact_commit}),
+                    complete: out.complete,
+                    truncated: out.data["truncated"] == true,
+                },
+                &inv.control,
             )?;
             out.provenance.push(capture);
             out.selection = serde_json::to_value(pin)?;

@@ -330,13 +330,17 @@ pub fn validate_with_resolver(
     let mut out = Outcome::new(merge(&root, &targets));
     out.complete = out.data["valid"] == true;
     out.coverage = json!({"targets":targets.len(),"complete":targets.iter().all(|t|t["complete"]==true),"scope":"independently validated target closures; target semantic and unresolved coverage remain explicit"});
-    out.provenance.push(evidence::commit_capture(
+    out.provenance.push(evidence::commit_capture_bounded(
         &inv.home,
-        &serde_json::to_vec(&out.data)?,
-        "application/json",
-        json!({"kind":"addon-matrix-validate","locator":matrix}),
-        out.complete,
-        false,
+        lycheedev_core::evidence::CaptureInput {
+            bytes: &serde_json::to_vec(&out.data)?,
+            maximum_bytes: lycheedev_core::evidence::DEFAULT_CAPTURE_BYTES,
+            media_type: "application/json",
+            provenance: json!({"kind":"addon-matrix-validate","locator":matrix}),
+            complete: out.complete,
+            truncated: false,
+        },
+        &inv.control,
     )?);
     if !out.complete {
         return Err(ToolkitError::new("codebase.addon_static_check_failed","Addon validation found invalid source",4).with_details(json!({"result":out.data,"captures":out.provenance,"context":{"coverage":out.coverage}})));

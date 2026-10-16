@@ -224,7 +224,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                 let owner = SemanticId::member(table.file_id, table.value);
                 let mut keys = Vec::new();
                 let mut values = Vec::new();
-                for reference in self.model.members_of_owner(&owner) {
+                for reference in self.model.members_of_owner(&owner).iter() {
                     self.checkpoint()?;
                     let Some(member) = self
                         .model
@@ -285,7 +285,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                     return Ok(None);
                 };
                 let mut values = Vec::new();
-                for reference in self.model.members_of_owner(&def.id) {
+                for reference in self.model.members_of_owner(&def.id).iter() {
                     self.checkpoint()?;
                     let Some(member) = self
                         .model
@@ -387,7 +387,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             return Ok(None);
         };
         let mut values = Vec::new();
-        for reference in self.model.members_of_owner(&def.id) {
+        for reference in self.model.members_of_owner(&def.id).iter() {
             self.checkpoint()?;
             let Some(member) = self
                 .model

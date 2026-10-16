@@ -1,6 +1,6 @@
 #[path = "support/query_backend_cases.rs"]
 mod support;
-use emmylua_code_analysis::LuaType;
+use emmylua_code_analysis::{AsyncState, LuaFunctionType, LuaType, VariadicType};
 use lycheedev_emmy_adapter::session::*;
 use std::{
     cell::Cell,
@@ -242,28 +242,20 @@ fn unwind_removes_the_pending_root_without_resetting_session_or_deadline() {
 }
 
 #[test]
-fn unsupported_metadata_flow_continue_while_missing_object_shapes_are_authoritative_unknown() {
-    for (source, text, capability) in [
-        (
-            "---@type string\nlocal x=1\nreturn x",
-            "x",
-            OwnedQueryCapability::DeclarationMetadata,
-        ),
-        (
-            "local x=1\nx=2\nreturn x",
-            "x",
-            OwnedQueryCapability::DeclarationFlow,
-        ),
-        (
-            "return missing",
-            "missing",
-            OwnedQueryCapability::UnresolvedName,
-        ),
-        (
-            "local f=function() end\nreturn f",
-            "f",
-            OwnedQueryCapability::Function,
-        ),
+fn completed_metadata_flow_and_functions_keep_missing_object_shapes_authoritative_unknown() {
+    let empty_function = LuaType::DocFunction(Arc::new(LuaFunctionType::new(
+        AsyncState::None,
+        false,
+        false,
+        vec![],
+        LuaType::Variadic(Arc::new(VariadicType::Multi(vec![]))),
+        None,
+    )));
+    for (source, text, expected) in [
+        ("---@type string\nlocal x=1\nreturn x", "x", LuaType::String),
+        ("local x=1\nx=2\nreturn x", "x", LuaType::IntegerConst(2)),
+        ("return missing", "missing", LuaType::Unknown),
+        ("local f=function() end\nreturn f", "f", empty_function),
     ] {
         // The repeated assignment name has two AST occurrences: select the last.
         let query_text = if source.contains("x=2") { "2" } else { text };
@@ -279,14 +271,22 @@ fn unsupported_metadata_flow_continue_while_missing_object_shapes_are_authoritat
         }
         let session = session(&provider);
         let mut check = || Ok::<_, Stop>(());
-        let mut query = OwnedQuery::new(&analysis, &session, site.file_id, &mut check);
-        for _ in 0..2 {
-            let OwnedQueryFailure::Continue(value) = query.type_of_expr(site.syntax).unwrap_err()
-            else {
-                panic!("missing typed continuation")
-            };
-            assert_eq!(value.capability, capability);
-        }
+        let mut query =
+            OwnedQuery::new_for_snapshot(&analysis, &session, site.file_id, &mut check).unwrap();
+        assert_eq!(
+            plain_value(query.type_of_expr(site.syntax).unwrap()),
+            expected
+        );
+        let events = provider.events.lock().unwrap().clone();
+        assert_eq!(
+            plain_value(query.type_of_expr(site.syntax).unwrap()),
+            expected
+        );
+        assert_eq!(
+            *provider.events.lock().unwrap(),
+            events,
+            "completed query is cached"
+        );
         assert!(rows(&session).is_empty());
     }
     for epoch in ["epoch-a", "epoch-b"] {

@@ -63,7 +63,18 @@ pub fn check(
     for (name, raw) in files {
         control.check()?;
         let provenance = json!({"kind":"source-semantic-input","locator":name,"snapshot":snapshot,"sourceCommit":client.exact_commit});
-        let capture = evidence::commit_capture(home, raw, "text/x-lua", provenance, true, false)?;
+        let capture = evidence::commit_capture_bounded(
+            home,
+            lycheedev_core::evidence::CaptureInput {
+                bytes: raw,
+                maximum_bytes: lycheedev_core::evidence::DEFAULT_CAPTURE_BYTES,
+                media_type: "text/x-lua",
+                provenance: provenance,
+                complete: true,
+                truncated: false,
+            },
+            control,
+        )?;
         inputs.push(json!({"path":name,"blob":capture["blob"],"capture":capture}));
     }
     let mut artifacts = BTreeMap::new();
@@ -82,13 +93,17 @@ pub fn check(
         ),
     ] {
         control.check()?;
-        let capture = evidence::commit_capture(
+        let capture = evidence::commit_capture_bounded(
             home,
-            bytes,
-            media,
-            json!({"kind":"source-semantic-artifact","locator":name,"snapshot":snapshot,"sourceCommit":client.exact_commit}),
-            true,
-            false,
+            lycheedev_core::evidence::CaptureInput {
+                bytes: bytes,
+                maximum_bytes: lycheedev_core::evidence::DEFAULT_CAPTURE_BYTES,
+                media_type: media,
+                provenance: json!({"kind":"source-semantic-artifact","locator":name,"snapshot":snapshot,"sourceCommit":client.exact_commit}),
+                complete: true,
+                truncated: false,
+            },
+            control,
         )?;
         artifacts.insert(name, capture["blob"].clone());
         captures.insert(name, capture);

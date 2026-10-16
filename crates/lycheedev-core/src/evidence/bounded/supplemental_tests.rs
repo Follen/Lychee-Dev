@@ -123,17 +123,18 @@ fn supplemental_hash_stop_does_not_reach_blob_lock_or_publication() {
     let (budget, token) = independent();
     let bytes = vec![9u8; BLOCK * 3];
     let calls = Cell::new(0);
-    let error = publish_blob_bounded_with_check(&f.0, &bytes, bytes.len(), &invocation, || {
+    let error = digest_bytes_with_check(&bytes, Some(&invocation), &mut || {
         calls.set(calls.get() + 1);
-        // API entrance plus the first and second digest block checks.
-        if calls.get() == 3 {
+        // Check the real digest block boundary directly, independent of the
+        // now-controlled workspace/Directory checks preceding this phase.
+        if calls.get() == 2 {
             token.cancel();
         }
         budget.check()
     })
     .unwrap_err();
     stopped(&error, &invocation);
-    assert_eq!(calls.get(), 3);
+    assert_eq!(calls.get(), 2);
     assert!(fs::read_dir(f.0.join("blobs")).unwrap().next().is_none());
     assert!(fs::read_dir(f.0.join("locks")).unwrap().next().is_none());
 }
@@ -317,7 +318,10 @@ fn supplemental_publication_and_close_failures_keep_original_causes() {
         .with_details(serde_json::json!({"owner":"independent"}));
     let discard = ToolkitError::new("external.io", "discard failed", 5);
     let close = ToolkitError::new("external.io", "lock close failed", 5);
-    let result = finish_publication(Some(stop.clone()), Err(discard.clone()), false);
+    let result = crate::metadata::historical_write::finish_historical::<()>(
+        Err(stop.clone()),
+        Err(discard.clone()),
+    );
     let error = crate::metadata::historical_write::finish_historical(result, Err(close.clone()))
         .unwrap_err();
     assert_eq!(error.code, "command.cancelled");
@@ -333,7 +337,7 @@ fn supplemental_publication_and_close_failures_keep_original_causes() {
         error.details["cleanup"],
         serde_json::to_value(close).unwrap()
     );
-    let error = finish_publication(Some(stop.clone()), Err(stop.clone()), true).unwrap_err();
+    let error = finish_check::<()>(Err(stop.clone()), Err(stop.clone())).unwrap_err();
     assert!(same_error(&stop, &error));
 }
 #[test]
@@ -397,7 +401,11 @@ fn supplemental_blob_contention_waits_for_original_stop_and_preserves_existing_o
 #[test]
 fn supplemental_publication_does_not_deduplicate_identical_distinct_discard_failure() {
     let same = ToolkitError::new("external.io", "same failure text", 5);
-    let error = finish_publication(Some(same.clone()), Err(same.clone()), false).unwrap_err();
+    let error = crate::metadata::historical_write::finish_historical::<()>(
+        Err(same.clone()),
+        Err(same.clone()),
+    )
+    .unwrap_err();
     assert_eq!(
         error.details["primary"],
         serde_json::to_value(&same).unwrap()

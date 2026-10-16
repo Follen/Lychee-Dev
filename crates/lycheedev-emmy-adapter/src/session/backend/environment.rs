@@ -317,6 +317,13 @@ impl<E> OwnedQuery<'_, '_, E> {
                 types.push(value);
             }
         }
+        // The closure-return producer filters Unknown/Any candidates above.
+        // Its empty result means unavailable inference, not Lua's Nil value:
+        // the fixed VM explicitly returns Unknown here before LuaType::from_vec.
+        if types.is_empty() {
+            self.checkpoint()?;
+            return Ok(OwnedValue::plain(LuaType::Unknown));
+        }
         OwnedValue::union_checked(types, || self.checkpoint())
     }
 }

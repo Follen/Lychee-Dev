@@ -19,15 +19,15 @@ impl FileControl for Checks<'_> {
         stream_check(self.control, self.supplemental)
     }
 }
-struct Publication {
-    state: StagedPublication,
-    reference: Option<BlobRef>,
-    stage_name: Option<String>,
-    source_stage_name: Option<String>,
-    reused: bool,
+pub(super) struct Publication {
+    pub(super) state: StagedPublication,
+    pub(super) reference: Option<BlobRef>,
+    pub(super) stage_name: Option<String>,
+    pub(super) source_stage_name: Option<String>,
+    pub(super) reused: bool,
 }
 impl Publication {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             state: StagedPublication::NotPublished,
             reference: None,
@@ -36,7 +36,7 @@ impl Publication {
             reused: false,
         }
     }
-    fn annotate(&self, mut error: ToolkitError) -> ToolkitError {
+    pub(super) fn annotate(&self, mut error: ToolkitError) -> ToolkitError {
         // Preserve a source's structured missingKey and every compound cleanup
         // field. Annotation must not flatten or replace the original cause.
         if !error.details.is_object() {
@@ -141,7 +141,7 @@ fn publish_stream(
     if expected_bytes > maximum || expected_bytes > MAX_CAPTURE_BYTES {
         return Err(limit("stream exceeds publication budget"));
     }
-    workspace::open(home)?;
+    open_workspace(home, Some(control), &mut || optional_check(supplemental))?;
     let parent = Directory::open_controlled(
         &home.join("blobs"),
         &mut Checks {
@@ -242,7 +242,7 @@ fn close_stage(stage: &mut Option<StagedFile<'_>>) -> Result<()> {
     }
     result
 }
-fn finish_opened(
+pub(super) fn finish_opened(
     result: Result<OpenBlob>,
     cleanup: Result<()>,
     control: &OperationControl,

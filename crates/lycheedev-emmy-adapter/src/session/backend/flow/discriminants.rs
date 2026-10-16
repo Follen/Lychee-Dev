@@ -162,7 +162,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             return Ok(None);
         };
         let owner = SemanticId::member(table.file_id, table.value);
-        for member in self.model.members_of_owner(&owner) {
+        for member in self.model.members_of_owner(&owner).iter() {
             self.checkpoint()?;
             let Some(member_def) = self
                 .model

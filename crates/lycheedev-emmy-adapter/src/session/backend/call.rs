@@ -376,7 +376,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             return Ok(());
         };
         let root = tree.get_red_root();
-        for reference in self.model.members_of_owner(&owner) {
+        for reference in self.model.members_of_owner(&owner).iter() {
             self.checkpoint()?;
             let Some(member) = self
                 .model

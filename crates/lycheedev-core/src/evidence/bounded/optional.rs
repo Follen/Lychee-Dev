@@ -74,7 +74,7 @@ fn open_optional_blob(
 ) -> Result<Option<OpenBlob>> {
     check_with(Some(control), supplemental)?;
     let path = blob_path(home, &reference.sha256)?;
-    storage::guard_path(home, &path)?;
+    storage::guard_path_with_check(home, &path, || check_with(Some(control), supplemental))?;
     // Hold every workspace/blobs ancestor against deletion. Failure to open
     // that required parent is an error. Only the subsequent shard can be absent.
     let parent = Directory::open_shared_controlled(
@@ -209,7 +209,7 @@ pub fn read_blob_bounded_optional_with_check(
     mut supplemental: impl FnMut() -> Result<()>,
 ) -> Result<Option<Vec<u8>>> {
     check_with(Some(control), &mut supplemental)?;
-    workspace::open(home)?;
+    open_workspace(home, Some(control), &mut supplemental)?;
     let reference = admitted_ref(blob, maximum as u64)?;
     let Some(mut opened) = open_optional_blob(home, reference, control, &mut supplemental)? else {
         return Ok(None);
@@ -240,7 +240,9 @@ pub fn open_verified_blob_bounded_optional_with_check(
 ) -> Result<Option<VerifiedBlob>> {
     let mut supplemental: Option<BlobCheck> = Some(Box::new(supplemental));
     stream_check(control, &mut supplemental)?;
-    workspace::open(home)?;
+    open_workspace(home, Some(control), &mut || {
+        optional_check(&mut supplemental)
+    })?;
     let reference = admitted_ref(blob, maximum)?;
     let Some(opened) = open_optional_blob(home, reference, control, &mut || {
         optional_check(&mut supplemental)

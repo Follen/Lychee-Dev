@@ -297,7 +297,9 @@ fn stream_invocation_stop_precedes_supplemental_during_consumption() {
     );
     assert_eq!(calls.load(Ordering::Acquire), 0);
     assert_eq!(blob.close().unwrap_err().code, "command.cancelled");
-    assert_eq!(calls.load(Ordering::Acquire), 0);
+    // Cleanup has consumed the original handle and must observe the independent
+    // scope too. The failed read entrance above still invokes no supplemental.
+    assert_eq!(calls.load(Ordering::Acquire), 1);
 }
 #[test]
 fn stream_initial_observer_order_stops_next_block_and_closes_opened_file() {
@@ -453,7 +455,10 @@ fn stream_source_discard_and_file_close_failures_retain_all_three_causes() {
         .with_details(serde_json::json!({"source":"original"}));
     let discard = ToolkitError::new("external.io", "discard failed", 5);
     let close = ToolkitError::new("external.io", "close failed", 5);
-    let result = finish_publication(Some(source.clone()), Err(discard.clone()), false);
+    let result = crate::metadata::historical_write::finish_historical::<()>(
+        Err(source.clone()),
+        Err(discard.clone()),
+    );
     let error = blob
         .close_after_with(result, |file| {
             lycheedev_windows::filesystem::close_file(file)?;

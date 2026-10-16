@@ -372,7 +372,7 @@ impl<E> OwnedQuery<'_, '_, E> {
     ) -> QueryResult<Option<TypeShell>, E> {
         let order = self.owner_contribution_order()?;
         for owner in self.owned_resolve_owner_ids(owner, &order)? {
-            for member in self.model.members_of_owner(&owner) {
+            for member in self.model.members_of_owner(&owner).iter() {
                 self.checkpoint()?;
                 if member.name != name {
                     continue;

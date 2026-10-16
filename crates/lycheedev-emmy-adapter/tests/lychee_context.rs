@@ -1185,6 +1185,24 @@ fn fixed_return_quality_fixture() -> (
     (fixture, ids, call, provider, checks)
 }
 
+fn quality_receipt(
+    site: BindingSite,
+    operation: &'static str,
+    state: &'static str,
+    reason: Option<&str>,
+) -> BindingCoverage {
+    BindingCoverage {
+        site,
+        operation,
+        state,
+        proof: "same-result-proof".into(),
+        reason: reason.map(str::to_owned),
+        parameter: None,
+        parameter_index: None,
+        argument: None,
+    }
+}
+
 #[test]
 fn known_signature_result_and_actual_return_check_survive_unknown_argument() {
     use emmylua_code_analysis::DiagnosticCode;
@@ -1192,17 +1210,25 @@ fn known_signature_result_and_actual_return_check_survive_unknown_argument() {
     let session = owned_query::session(Arc::new(provider));
     owned_query::model!(model, fixture, ids[4], session.clone());
     assert_eq!(model.type_of_expr(call.syntax), LuaType::String);
-    let before_check = session.coverage();
-    assert!(before_check.iter().any(|row| row.site == call
-        && row.operation == "call_result"
-        && row.state == "native_projected"
-        && row.proof == "same-result-proof"
-        && row.reason.is_none()));
-    assert!(
-        !before_check
-            .iter()
-            .any(|row| row.site == call
-                && matches!(row.operation, "argument_check" | "return_check"))
+    let before_check: Vec<_> = session
+        .coverage()
+        .into_iter()
+        .filter(|row| {
+            row.site == call
+                && matches!(
+                    row.operation,
+                    "call_result" | "argument_check" | "return_check"
+                )
+        })
+        .collect();
+    assert_eq!(
+        before_check,
+        [quality_receipt(
+            call,
+            "call_result",
+            "native_projected",
+            None
+        )]
     );
     let run = fixture.diagnose(ids[4], checks, &session).unwrap();
     assert!(run.complete);
@@ -1225,22 +1251,29 @@ fn known_signature_result_and_actual_return_check_survive_unknown_argument() {
         .collect();
     assert_eq!(actual, [(DiagnosticCode::ReturnTypeMismatch, 98, 122)]);
     let coverage = session.coverage();
-    for (operation, state) in [
-        ("call_result", "native_projected"),
-        ("argument_check", "unavailable"),
-        ("return_check", "native_checked"),
-    ] {
-        let rows: Vec<_> = coverage
-            .iter()
-            .filter(|row| row.site == call && row.operation == operation)
-            .collect();
-        assert_eq!(rows.len(), 1, "{operation}: {rows:?}");
-        assert_eq!(rows[0].state, state, "{operation}");
-        assert_eq!(rows[0].proof, "same-result-proof", "{operation}");
-        assert!(rows[0].parameter.is_none());
-        assert!(rows[0].parameter_index.is_none());
-        assert!(rows[0].argument.is_none());
-    }
+    let quality: Vec<_> = coverage
+        .into_iter()
+        .filter(|row| {
+            row.site == call
+                && matches!(
+                    row.operation,
+                    "call_result" | "argument_check" | "return_check"
+                )
+        })
+        .collect();
+    assert_eq!(
+        quality,
+        [
+            quality_receipt(call, "call_result", "native_projected", None),
+            quality_receipt(
+                call,
+                "argument_check",
+                "unavailable",
+                Some("native_check_inputs_or_signature_unavailable")
+            ),
+            quality_receipt(call, "return_check", "native_checked", None),
+        ]
+    );
 }
 
 #[test]
@@ -1341,21 +1374,40 @@ fn generic_result_depending_on_unknown_argument_never_claims_known_result_or_ret
     assert_eq!(model.type_of_expr(call.syntax), LuaType::Unknown);
     let run = fixture.diagnose(ids[4], checks, &session).unwrap();
     assert!(run.complete);
-    let rows = session.coverage();
-    for operation in ["call_result", "argument_check", "return_check"] {
-        assert!(
-            rows.iter().any(|row| row.site == call
-                && row.operation == operation
-                && row.state == "unavailable"),
-            "{operation}: {rows:?}"
-        );
-        assert!(
-            !rows.iter().any(|row| row.site == call
-                && row.operation == operation
-                && matches!(row.state, "native_projected" | "native_checked")),
-            "{operation}: {rows:?}"
-        );
-    }
+    let quality: Vec<_> = session
+        .coverage()
+        .into_iter()
+        .filter(|row| {
+            row.site == call
+                && matches!(
+                    row.operation,
+                    "call_result" | "argument_check" | "return_check"
+                )
+        })
+        .collect();
+    assert_eq!(
+        quality,
+        [
+            quality_receipt(
+                call,
+                "call_result",
+                "unavailable",
+                Some("native_call_result_type_unavailable")
+            ),
+            quality_receipt(
+                call,
+                "argument_check",
+                "unavailable",
+                Some("native_check_inputs_or_signature_unavailable")
+            ),
+            quality_receipt(
+                call,
+                "return_check",
+                "unavailable",
+                Some("native_return_check_inputs_unavailable")
+            ),
+        ]
+    );
 }
 
 #[test]

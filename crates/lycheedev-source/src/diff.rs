@@ -269,13 +269,17 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
     )?;
     inv.control.check()?;
     let complete = data["truncated"] != true;
-    let capture = evidence::commit_capture(
+    let capture = evidence::commit_capture_bounded(
         &inv.home,
-        &serde_json::to_vec(&data)?,
-        "application/json",
-        json!({"kind":"source-diff","locator":format!("{from}..{to}"),"snapshot":to,"sourceCommit":pair.1.exact_commit,"baseSnapshot":from,"baseSourceCommit":pair.0.exact_commit}),
-        complete,
-        !complete,
+        lycheedev_core::evidence::CaptureInput {
+            bytes: &serde_json::to_vec(&data)?,
+            maximum_bytes: lycheedev_core::evidence::DEFAULT_CAPTURE_BYTES,
+            media_type: "application/json",
+            provenance: json!({"kind":"source-diff","locator":format!("{from}..{to}"),"snapshot":to,"sourceCommit":pair.1.exact_commit,"baseSnapshot":from,"baseSourceCommit":pair.0.exact_commit}),
+            complete: complete,
+            truncated: !complete,
+        },
+        &inv.control,
     )?;
     let mut result = Outcome::new(data);
     result.complete = complete;

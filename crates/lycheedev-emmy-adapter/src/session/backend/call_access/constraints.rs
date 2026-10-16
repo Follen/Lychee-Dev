@@ -299,7 +299,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             return Ok(());
         }
         visited.push(def.full_name.to_string());
-        for member in self.model.members_of_owner(&def.id) {
+        for member in self.model.members_of_owner(&def.id).iter() {
             self.checkpoint()?;
             if !keys.iter().any(|k| k == member.name.as_str()) {
                 keys.push(member.name.to_string());

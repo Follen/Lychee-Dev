@@ -2,7 +2,9 @@
 mod query_support;
 #[path = "support/object_carrier_cases.rs"]
 mod support;
-use emmylua_code_analysis::{LuaMemberKey, LuaType};
+use emmylua_code_analysis::{
+    AsyncState, LuaFunctionType, LuaMemberKey, LuaObjectType, LuaType, LuaUnionType,
+};
 use lycheedev_emmy_adapter::session::*;
 use std::{cell::Cell, collections::HashSet, sync::Arc};
 use support::*;
@@ -113,7 +115,8 @@ fn metadata_token_and_nested_slot_identity_survive_all_accepted_transports() {
     let first_session = session(&provider);
     let second_session = session(&provider);
     let mut check = || Ok::<_, Stop>(());
-    let mut first_query = OwnedQuery::new(&analysis, &first_session, site.file_id, &mut check);
+    let mut first_query =
+        OwnedQuery::new_for_snapshot(&analysis, &first_session, site.file_id, &mut check).unwrap();
     let value = first_query.type_of_expr(site.syntax).unwrap();
     let ready = first_query.type_of_expr(site.syntax).unwrap();
     assert_eq!(value, ready);
@@ -152,13 +155,61 @@ fn metadata_token_and_nested_slot_identity_survive_all_accepted_transports() {
     tuples.insert(inferred_tuple);
     tuples.insert(documented_tuple);
     assert_eq!(tuples.len(), 2);
-    assert!(matches!(
-        first_query.merge_value(value, token_peer),
-        Err(OwnedQueryFailure::Continue(OwnedQueryContinuation {
-            capability: OwnedQueryCapability::SelectedTypeMerge,
-            ..
-        }))
-    ));
+    // Equal public structures from distinct sessions remain two union members.
+    // Deduplication uses owned identity, never the erased Object structure.
+    let object_type = LuaType::Object(Arc::new(LuaObjectType::new_with_fields(
+        [(LuaMemberKey::Name("nil".into()), LuaType::Nil)]
+            .into_iter()
+            .collect(),
+        vec![],
+    )));
+    assert_eq!(value.structural_type(), &object_type);
+    let merged = first_query
+        .merge_value(value.clone(), token_peer.clone())
+        .unwrap();
+    assert_eq!(
+        merged.structural_type(),
+        &LuaType::Union(Arc::new(LuaUnionType::Multi(vec![
+            object_type.clone(),
+            object_type,
+        ])))
+    );
+    assert!(!merged.is_context_free());
+    assert_eq!(
+        merged.carried_union().unwrap(),
+        [value.clone(), token_peer.clone()]
+    );
+    assert_eq!(
+        first_query
+            .merge_value(value.clone(), value.clone())
+            .unwrap(),
+        value
+    );
+    let flattened = first_query
+        .merge_value(merged.clone(), value.clone())
+        .unwrap();
+    assert_eq!(flattened, merged);
+    assert_eq!(flattened.carried_union().unwrap(), [value, token_peer]);
+    for session in [&first_session, &second_session] {
+        assert_eq!(
+            rows(session),
+            [
+                ("object_field", "known_absent", "field-nil"),
+                ("object_shape", "bound", "shape:object-1"),
+                ("resolve", "bound", "selected:object-1"),
+            ]
+            .map(|(operation, state, proof)| BindingCoverage {
+                site,
+                operation,
+                state,
+                proof: proof.into(),
+                reason: None,
+                parameter: None,
+                parameter_index: None,
+                argument: None,
+            })
+        );
+    }
 }
 #[test]
 fn unary_tuple_selected_initializer_and_observed_result_slots_retain_the_carrier() {
@@ -212,11 +263,32 @@ fn unary_tuple_selected_initializer_and_observed_result_slots_retain_the_carrier
     );
     let session = session(&provider);
     let mut check = || Ok::<_, Stop>(());
-    let mut query = OwnedQuery::new(&analysis, &session, site.file_id, &mut check);
+    let mut query =
+        OwnedQuery::new_for_snapshot(&analysis, &session, site.file_id, &mut check).unwrap();
     let value = query.type_of_expr(site.syntax).unwrap();
     assert_eq!(value.object_info().unwrap().site, call);
     let decl = declaration(&analysis, site.file_id, "second");
     assert_eq!(query.type_of_decl(&decl).unwrap().unwrap(), value);
+    assert_eq!(
+        rows(&session),
+        [
+            ("call_return", "known_absent", "first-nil"),
+            ("object_shape", "bound", "shape:object-1"),
+            ("call_return", "bound", "selected:object-1"),
+            ("call", "bound", "permit"),
+            ("call_result", "native_projected", "permit"),
+        ]
+        .map(|(operation, state, proof)| BindingCoverage {
+            site: call,
+            operation,
+            state,
+            proof: proof.into(),
+            reason: None,
+            parameter: None,
+            parameter_index: None,
+            argument: None,
+        })
+    );
 }
 #[test]
 fn duplicate_failure_keeps_earlier_receipts_and_shape_freeze_without_faking_completion() {
@@ -308,8 +380,7 @@ fn every_object_checkpoint_stop_releases_guard_and_keeps_original_error_and_pref
 }
 
 #[test]
-fn a_function_returning_a_selected_object_preserves_child_work_and_defers_instead_of_erasing_identity()
- {
+fn a_function_returning_a_selected_object_preserves_return_carrier_and_child_producer_order() {
     use emmylua_parser::{LuaAstNode, LuaClosureExpr};
     let (analysis, site, mut provider) = load(
         "local function f() return object_value end\nreturn function_value",
@@ -345,19 +416,56 @@ fn a_function_returning_a_selected_object_preserves_child_work_and_defers_instea
     );
     let session = session(&provider);
     let mut check = || Ok::<_, Stop>(());
-    let mut query = OwnedQuery::new(&analysis, &session, site.file_id, &mut check);
-    let Err(OwnedQueryFailure::Continue(continuation)) = query.type_of_expr(site.syntax) else {
-        panic!("selected object return carrier must not be erased")
-    };
+    let mut query =
+        OwnedQuery::new_for_snapshot(&analysis, &session, site.file_id, &mut check).unwrap();
+    let value = query.type_of_expr(site.syntax).unwrap();
+    let return_type = LuaType::Object(Arc::new(LuaObjectType::new_with_fields(
+        Default::default(),
+        vec![],
+    )));
     assert_eq!(
-        continuation.capability,
-        OwnedQueryCapability::FunctionReturnType
+        value.structural_type(),
+        &LuaType::DocFunction(Arc::new(LuaFunctionType::new(
+            AsyncState::None,
+            false,
+            false,
+            vec![],
+            return_type.clone(),
+            Some(vec![]),
+        )))
     );
-    assert_eq!(continuation.syntax, Some(object_site.syntax));
-    let coverage = rows(&session);
+    assert!(!value.is_context_free());
+    let (params, returned) = value.carried_function().unwrap();
+    assert!(params.is_empty());
+    assert_eq!(returned.structural_type(), &return_type);
+    assert!(returned.carried_fields().unwrap().is_empty());
+    let info = returned.object_info().unwrap();
+    assert_eq!(info.site, object_site);
+    assert_eq!(info.context, provider.identity());
+    assert_eq!(info.identity, selected.identity);
+    assert_eq!(info.epoch, selected.epoch);
+    assert_eq!(info.view, &selected.view);
+    assert_eq!(info.proof, "shape:object-1");
+    assert!(info.complete);
+    assert_eq!(value.function_return().unwrap(), *returned);
+    assert_eq!(query.type_of_expr(object_site.syntax).unwrap(), *returned);
+    assert_eq!(query.type_of_expr(site.syntax).unwrap(), value);
     assert_eq!(
-        coverage.iter().map(|row| row.operation).collect::<Vec<_>>(),
-        ["object_shape", "resolve"]
+        rows(&session),
+        [
+            (object_site, "object_shape", "shape:object-1"),
+            (object_site, "resolve", "selected:object-1"),
+            (site, "resolve", "function-proof"),
+        ]
+        .map(|(site, operation, proof)| BindingCoverage {
+            site,
+            operation,
+            state: "bound",
+            proof: proof.into(),
+            reason: None,
+            parameter: None,
+            parameter_index: None,
+            argument: None,
+        })
     );
-    assert!(coverage.iter().all(|row| row.proof != "function-proof"));
 }

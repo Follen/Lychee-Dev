@@ -198,7 +198,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             LuaType::TableConst(table) => {
                 let owner = SemanticId::member(table.file_id, table.value);
                 let mut indexed = Vec::new();
-                for reference in self.model.members_of_owner(&owner) {
+                for reference in self.model.members_of_owner(&owner).iter() {
                     self.checkpoint()?;
                     if let Some(member) = self
                         .model

@@ -119,7 +119,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             && let Some(LuaExpr::NameExpr(prefix)) = index.get_prefix_expr()
             && let Some(text) = prefix.get_name_text()
             && let Some(def) = facts.type_def_by_name(&text)
-            && let Some(member) = facts.field_members_of_type(&def.id, &name.clone().into())
+            && let Some(member) = facts.field_members_of_type(&def.id, &name)
         {
             return Ok(Some(self.assemble_owned_member(
                 Some(member.id.clone()),

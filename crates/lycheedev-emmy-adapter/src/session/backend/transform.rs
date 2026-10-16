@@ -1290,7 +1290,7 @@ fn owned_literal_keys(value: &OwnedValue) -> Vec<(LuaMemberKey, OwnedValue)> {
 }
 fn owned_key_literal(key: &LuaMemberKey) -> OwnedValue {
     OwnedValue::plain(match key {
-        LuaMemberKey::Name(name) => LuaType::StringConst(name.as_str().into()),
+        LuaMemberKey::Name(name) => LuaType::StringConst(name.clone().into()),
         LuaMemberKey::Integer(index) => LuaType::IntegerConst(*index),
         _ => LuaType::Unknown,
     })

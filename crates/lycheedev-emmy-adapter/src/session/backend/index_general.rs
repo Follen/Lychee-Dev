@@ -440,7 +440,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                         return Ok(index_plain(LuaType::Unknown));
                     };
                     let mut types = Vec::new();
-                    for member in self.model.members_of_owner(&enum_owner) {
+                    for member in self.model.members_of_owner(&enum_owner).iter() {
                         let result = self
                             .index_member_general(
                                 clone_index_value(&owner),

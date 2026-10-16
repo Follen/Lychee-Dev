@@ -2,8 +2,12 @@
 //! admitted by the producer; the existing bounded body path keeps its control.
 use super::{BlobRef, CaptureInput, Provenance, VerifiedBlob, bounded};
 use crate::{
-    Result, ToolkitError, control::OperationControl, metadata::Metadata, storage, workspace,
+    Result, ToolkitError,
+    control::OperationControl,
+    metadata::{CaptureWriteState, Metadata},
+    storage, workspace,
 };
+use bounded::lifecycle::{PathControl, capture_result, close_directory, finish_controls};
 use lycheedev_windows::filesystem::Directory;
 use serde::Serialize;
 use serde_json::{
@@ -12,6 +16,7 @@ use serde_json::{
 };
 use sha2::{Digest, Sha256};
 use std::{
+    cell::Cell,
     io::{self, Write},
     path::Path,
 };
@@ -306,15 +311,40 @@ fn prepare(
 
 fn persist(
     home: &Path,
-    prepared: PreparedCapture,
+    prepared: &PreparedCapture,
+    references: &[String],
     control: &OperationControl,
     meter: &impl CaptureAccounting,
-) -> Result<Value> {
+    publish: impl FnOnce() -> Result<()>,
+    state: &Cell<CaptureWriteState>,
+) -> Result<()> {
     check(control, meter)?;
-    Metadata::open(home, true)?.put_serialized(&prepared.key, &prepared.document, None, || {
-        check(control, meter)
-    })?;
-    Ok(prepared.value)
+    let mut metadata = Metadata::open_controlled_with_check(home, true, control, || meter.check())?;
+    let written = metadata.put_capture_serialized(
+        &prepared.key,
+        &prepared.document,
+        references,
+        control,
+        || meter.check(),
+        |length| {
+            check(control, meter)?;
+            meter.admit_dependency(length)
+        },
+        |key, raw| {
+            check(control, meter)?;
+            let parsed =
+                serde_json::from_slice::<super::CaptureRef>(raw).map_err(ToolkitError::from);
+            let capture = finish_controls(parsed, Some(control), &mut || meter.check())?;
+            super::validate_capture(
+                &capture,
+                key.strip_prefix("capture/").expect("capture reference"),
+            )
+        },
+        publish,
+        state,
+    );
+    let result = crate::metadata::historical_write::finish_historical(written, metadata.close());
+    finish_controls(result, Some(control), &mut || meter.check())
 }
 
 /// The body belongs to the producer's existing allocation budget. All capture
@@ -374,7 +404,7 @@ fn commit_capture_referencing(
         truncated: input.truncated,
     };
     validate(&header)?;
-    workspace::open(home)?;
+    workspace::open_controlled_with_check(home, control, || meter.check())?;
     if input.bytes.len() > input.maximum_bytes
         || input.bytes.len() as u64 > bounded::MAX_CAPTURE_BYTES
     {
@@ -388,65 +418,72 @@ fn commit_capture_referencing(
     let body_work = input.bytes.len().div_ceil(65536);
     meter.admit_work(body_work)?;
     let reference = BlobRef {
-        sha256: bounded::digest_bytes(input.bytes, Some(control))?,
+        sha256: bounded::digest_bytes_with_check(input.bytes, Some(control), &mut || {
+            meter.check()
+        })?,
         bytes: input.bytes.len() as u64,
     };
     let prepared = prepare(&reference, header, dependencies, control, meter)?;
-    let _home = Directory::open_shared(home)?;
-    workspace::open(home)?;
-    let _guard = storage::ExclusiveLock::resource(
-        &home.join("locks"),
-        &format!("blob:{}", reference.sha256),
+    let state = Cell::new(CaptureWriteState::NotCommitted);
+    let home_owner = Directory::open_shared_controlled(
+        home,
+        &mut PathControl {
+            control: Some(control),
+            supplemental: &mut || meter.check(),
+        },
     )?;
-    let publish = || {
-        check(control, meter)?;
-        meter.admit_work(body_work)?;
-        bounded::publish_locked(
-            home,
-            input.bytes,
-            input.maximum_bytes,
-            reference.sha256,
-            Some(control),
+    let result = (|| {
+        workspace::open_controlled_with_check(home, control, || meter.check())?;
+        let guard = storage::ExclusiveLock::resource_wait_checked(
+            &home.join("locks"),
+            &format!("blob:{}", reference.sha256),
+            Some(control.deadline()),
+            || check(control, meter),
         )?;
-        Ok(())
-    };
-    if required.is_empty() {
-        publish()?;
-        return persist(home, prepared, control, meter);
-    }
-    meter.admit_allocation(required.len().saturating_mul(std::mem::size_of::<String>()))?;
-    let mut references = Vec::with_capacity(required.len());
-    for id in required {
-        check(control, meter)?;
-        meter.admit_allocation("capture/".len() + id.len())?;
-        references.push(format!("capture/{id}"));
-    }
-    Metadata::open(home, true)?.put_serialized_referencing(
-        &prepared.key,
-        &prepared.document,
-        &references,
-        control,
-        || check(control, meter),
-        |length| {
-            check(control, meter)?;
-            // Includes raw bytes, decoded strings/arrays, the identity clone
-            // and Go-escaped identity buffers. The document is at most 1 MiB.
-            meter.admit_dependency(length)
-        },
-        |key, raw| {
-            check(control, meter)?;
-            let capture: super::CaptureRef = serde_json::from_slice(raw)?;
-            super::validate_capture(
-                &capture,
-                key.strip_prefix("capture/").expect("capture reference"),
+        let written = (|| {
+            let publish = || {
+                check(control, meter)?;
+                meter.admit_work(body_work)?;
+                bounded::publish_locked_with_check(
+                    home,
+                    input.bytes,
+                    input.maximum_bytes,
+                    reference.sha256,
+                    Some(control),
+                    &mut || meter.check(),
+                )?;
+                Ok(())
+            };
+            if required.is_empty() {
+                publish()?;
+                return persist(home, &prepared, &[], control, meter, || Ok(()), &state);
+            }
+            meter.admit_allocation(required.len().saturating_mul(std::mem::size_of::<String>()))?;
+            let mut references = Vec::with_capacity(required.len());
+            for id in required {
+                check(control, meter)?;
+                meter.admit_allocation("capture/".len() + id.len())?;
+                references.push(format!("capture/{id}"));
+            }
+            persist(
+                home,
+                &prepared,
+                &references,
+                control,
+                meter,
+                publish,
+                &state,
             )
-        },
-        publish,
-    )?;
-    Ok(prepared.value)
+        })();
+        crate::metadata::historical_write::finish_historical(written, guard.close())
+    })();
+    let result = close_directory(result, home_owner);
+    let result = finish_controls(result, Some(control), &mut || meter.check());
+    capture_result(result, prepared.value, state.get())
 }
 
 /// Uses the held verified blob; no body copy, reopen or SHA256 scan is added.
+/// The operation's supplied meter is checked inside the real writer/lock wait.
 pub fn commit_verified_capture_budgeted(
     blob: &VerifiedBlob,
     header: CaptureHeader<'_>,
@@ -454,11 +491,25 @@ pub fn commit_verified_capture_budgeted(
     meter: &impl CaptureAccounting,
 ) -> Result<Value> {
     let prepared = prepare(blob.reference(), header, &[], control, meter)?;
-    let _guard = storage::ExclusiveLock::resource(
+    let state = Cell::new(CaptureWriteState::NotCommitted);
+    let guard = storage::ExclusiveLock::resource_wait_checked(
         &blob.home.join("locks"),
         &format!("blob:{}", blob.reference().sha256),
+        Some(control.deadline()),
+        || check(control, meter),
     )?;
-    persist(&blob.home, prepared, control, meter)
+    let result = persist(
+        &blob.home,
+        &prepared,
+        &[],
+        control,
+        meter,
+        || Ok(()),
+        &state,
+    );
+    let result = crate::metadata::historical_write::finish_historical(result, guard.close());
+    let result = finish_controls(result, Some(control), &mut || meter.check());
+    capture_result(result, prepared.value, state.get())
 }
 
 #[cfg(test)]
@@ -582,3 +633,6 @@ mod tests {
         assert_eq!(format!("CAP-{}", storage::sha256(&writer.sink)), expected);
     }
 }
+
+#[cfg(test)]
+mod lifecycle_tests;

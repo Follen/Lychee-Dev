@@ -1,6 +1,8 @@
 #[path = "support/function_call_cases.rs"]
 mod support;
-use emmylua_code_analysis::{LuaType, VariadicType};
+use emmylua_code_analysis::{
+    AsyncState, GenericTpl, GenericTplId, InFiled, LuaFunctionType, LuaType, VariadicType,
+};
 use lycheedev_emmy_adapter::session::*;
 use std::{cell::Cell, sync::Arc};
 use support::*;
@@ -56,11 +58,49 @@ fn child_producers_precede_the_selected_callee_receipt_and_survive_the_call() {
         ])))
     );
     assert_eq!(
-        rows(&session)
-            .iter()
-            .map(|row| row.proof.as_str())
-            .collect::<Vec<_>>(),
-        ["nil-slot", "denied-call", "selected-function-proof"]
+        rows(&session),
+        vec![
+            BindingCoverage {
+                site: provider.named("absent"),
+                operation: "resolve".into(),
+                state: "known_absent".into(),
+                proof: "nil-slot".into(),
+                reason: None,
+                parameter: None,
+                parameter_index: None,
+                argument: None
+            },
+            BindingCoverage {
+                site: provider.named("denied()"),
+                operation: "call".into(),
+                state: "unavailable".into(),
+                proof: "denied-call".into(),
+                reason: Some("no-call-evidence".into()),
+                parameter: None,
+                parameter_index: None,
+                argument: None
+            },
+            BindingCoverage {
+                site: provider.named("denied()"),
+                operation: "call_result".into(),
+                state: "unavailable".into(),
+                proof: "denied-call".into(),
+                reason: Some("no-call-evidence".into()),
+                parameter: None,
+                parameter_index: None,
+                argument: None
+            },
+            BindingCoverage {
+                site: provider.named("selected"),
+                operation: "resolve".into(),
+                state: "bound".into(),
+                proof: "selected-function-proof".into(),
+                reason: None,
+                parameter: None,
+                parameter_index: None,
+                argument: None
+            },
+        ]
     );
 }
 
@@ -101,23 +141,24 @@ fn explicit_docs_parameters_and_async_metadata_do_not_query_body_returns() {
 }
 
 #[test]
-fn unavailable_raw_fallback_and_complex_metadata_keep_typed_continuations() {
-    for (source, expected) in [
+fn selected_function_preserves_unknown_returns_generic_metadata_and_table_identity() {
+    for (case, source) in [
         (
+            0,
             "local function f() return unavailable end\nreturn selected",
-            OwnedQueryCapability::FunctionRawReturnFallback,
         ),
         (
+            1,
             "---@generic T\nlocal function f() return 1 end\nreturn selected",
-            OwnedQueryCapability::FunctionMetadata,
         ),
+        (2, "local function f() return {} end\nreturn selected"),
         (
-            "local function f() return {} end\nreturn selected",
-            OwnedQueryCapability::FunctionReturnType,
+            3,
+            "local function f() return undocumented end\nreturn selected",
         ),
     ] {
         let (analysis, site, _, mut provider) = load_function(source, "selected");
-        if provider.names.values().any(|name| name == "unavailable") {
+        if case == 0 {
             provider.select(
                 "unavailable",
                 BindingDecision::Unavailable {
@@ -126,21 +167,70 @@ fn unavailable_raw_fallback_and_complex_metadata_keep_typed_continuations() {
                 },
             );
         }
+        let ret = match case {
+            0 | 3 => LuaType::Unknown,
+            1 => LuaType::IntegerConst(1),
+            _ => LuaType::TableConst(InFiled::new(
+                site.file_id,
+                provider.named("{}").syntax.get_range(),
+            )),
+        };
+        let generic = if case == 1 {
+            Some(vec![GenericTpl::new(
+                GenericTplId::Type(0),
+                "T".into(),
+                None,
+                None,
+                false,
+                None,
+            )])
+        } else {
+            None
+        };
+        let expected = LuaType::DocFunction(Arc::new(LuaFunctionType::new(
+            AsyncState::None,
+            false,
+            false,
+            vec![],
+            ret,
+            generic,
+        )));
         let session = session(&provider);
         let mut check = || Ok::<_, Stop>(());
-        let mut query = OwnedQuery::new(&analysis, &session, site.file_id, &mut check);
-        for _ in 0..2 {
-            let Err(OwnedQueryFailure::Continue(continuation)) = query.type_of_expr(site.syntax)
-            else {
-                panic!("no fabricated Unknown/Ready result")
-            };
-            assert_eq!(continuation.capability, expected);
-        }
-        assert!(
-            !rows(&session)
-                .iter()
-                .any(|row| row.proof == "selected-function-proof")
+        let mut query =
+            OwnedQuery::new_for_snapshot(&analysis, &session, site.file_id, &mut check).unwrap();
+        assert_eq!(plain(query.type_of_expr(site.syntax).unwrap()), expected);
+        let events = provider.events.lock().unwrap().clone();
+        assert_eq!(plain(query.type_of_expr(site.syntax).unwrap()), expected);
+        assert_eq!(
+            *provider.events.lock().unwrap(),
+            events,
+            "completed signature is cached"
         );
+        let mut expected_rows = vec![];
+        if case == 0 {
+            expected_rows.push(BindingCoverage {
+                site: provider.named("unavailable"),
+                operation: "resolve".into(),
+                state: "unavailable".into(),
+                proof: "uncertain".into(),
+                reason: Some("missing".into()),
+                parameter: None,
+                parameter_index: None,
+                argument: None,
+            });
+        }
+        expected_rows.push(BindingCoverage {
+            site,
+            operation: "resolve".into(),
+            state: "bound".into(),
+            proof: "selected-function-proof".into(),
+            reason: None,
+            parameter: None,
+            parameter_index: None,
+            argument: None,
+        });
+        assert_eq!(rows(&session), expected_rows);
     }
 }
 

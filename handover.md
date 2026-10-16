@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 01:25 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`31f1fa0a2e3add4f149b4f87bcc5c11261e7d08f`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 01:35 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`c5b3962f193b4adca408a05b9f1137d1aca6cdd7`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -24,6 +24,10 @@
 - 2026-10-15 18:24 用户调整实施节奏：先按完整端到端功能实现并接入默认生产消费者，再集中补测试和统一验证；取消自行增加的逐小片冻结/独审/CI先行门禁。实现过程中仍及时分批提交推送同一草稿PR，真实安全边界和文件单写协调保留；已有CI旁路诊断，不等待每轮才继续编码。最终四阶段循环审计与完整验收要求不变。
 
 ## 2. 当前实现与未闭环事项
+
+当前集中验证 [38835081872](https://github.com/Follen/Lychee-Dev/actions/runs/38835081872) 针对 c5b3962：静态组成功，all-target 编译与 owned context 组失败，产品其余步骤仍在运行；冻结三方组按策略跳过。context完整产物3个owner/17份sealed日志及product早期55个owner/76份sealed日志已逐SHA核实，原版引擎树身份正确；实际15条编译诊断为公开MemberList借用迭代、字符串类型与临时值寿命适配问题，后继已一次聚合修正全部15条诊断，并保空返回候选为Unknown；当前过渡Continue测试改为已实现的完整类型/carrier/缓存及真实quality事件断言，历史参照/448不变。17路径只通过语法检查，修后编译和语义执行仍待。生产零patch recipe 已保存不等于已编译或语义等价。
+
+捕获收尾后继现已组合：默认Data捕获的原invocation与独立meter贯通Metadata打开、实际BEGIN/引用读取/INSERT/COMMIT等待和checked关闭；仅重试busy SQL语句，不重放body发布。已提交或不确定的CAP身份进入既有error.details，外层Scope关闭错误仍保typed事实。Source refs/context/diff/query/inspect及验证/语义的11个捕获调用也已改用原control的bounded入口，保持原字节、provenance和128MiB上界。新增15项Core测试和3项CLI事实/组合测试尚未运行；新metadata组已接集中CI，Source消费者实际取消仍待集中验证。同步系统调用与遗留无control API、其余evidence读取命令仍有明确后继工作。
 
 当前零补丁生产候选已组合：Source freeze→OwnedBindingSession→OwnedQuery→43项诊断调度使用自有实现；上游恢复固定原版848文件、8,382,174字节，树SHA256 `375d92c5d5e503d77232fabf22a21a82f504c2b38dc5def8fcca1d6ecf06e104`，生产patch清单为空，删除旧补丁文件及引擎对自有binding-contracts依赖。增强测试和examples已转向自有公开入口；独立历史参照固定cd871181，测试专用417文件归档不进入生产引擎。原生差分保留历史真实expected及独立失败状态，不把新实现当旧oracle。40 Rust文件语法检查和39项Node检查通过；当前产品锁编译、完整差分、Retail与资源验收仍未运行。恢复后在主树执行版本工具发现退役Lua fixture引用导致6项失败，现明确当前report及5个signal样本为required、历史归档不参与版本同步；修后10/10与version --check通过。当前rust-parity的7条Node测试命令219通过、0失败、3个Windows专属launcher在Linux跳过。后继已把已认证签名结果的真实owned VM执行、独立Unknown参数不可用、结果完成后的call_result与真实返回比较后的return_check接入同一ledger，保持原公开native_projected/native_checked状态字面及proof来源；4条新真实管线回归已写未跑。五个被换行规范化破坏的固定Lua/XML输入恢复原合同字节/SHA，并只对这五路径禁文本转换；expected原字节不改。缺runtime observation的后继仅允许明确返回声明或已认证EnvironmentCallable，无声明函数仍保持原Unknown，不从任意body猜值。两侧历史/当前差分启用--no-fail-fast并收集全部精确字段差异，任何真实失败仍使整组失败；原448输入与完整旧trace保留。新增真实quality receipt与公开重建参照的已知缺口独立报告，不全局忽略字段。不能因生产recipe归零或源码接线完成就称功能等价或验收完成。
 

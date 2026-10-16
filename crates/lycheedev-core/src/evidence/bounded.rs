@@ -8,7 +8,7 @@ use crate::{
     storage::{self, ExclusiveLock},
     workspace,
 };
-use lycheedev_windows::filesystem::{Destination, Directory};
+use lycheedev_windows::filesystem::Directory;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
@@ -17,6 +17,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+pub(super) mod lifecycle;
+use lifecycle::{PathControl, finish_controls, open_workspace};
 mod staged;
 pub use staged::publish_blob_stream_bounded_with_check;
 
@@ -83,10 +85,7 @@ fn io_error(error: io::Error) -> ToolkitError {
         ToolkitError::io(error)
     }
 }
-pub(super) fn digest_bytes(bytes: &[u8], control: Option<&OperationControl>) -> Result<String> {
-    digest_bytes_with_check(bytes, control, &mut || Ok(()))
-}
-fn digest_bytes_with_check(
+pub(super) fn digest_bytes_with_check(
     bytes: &[u8],
     control: Option<&OperationControl>,
     supplemental: &mut impl FnMut() -> Result<()>,
@@ -154,11 +153,9 @@ impl VerifiedBlob {
             .seek(SeekFrom::Start(0))
             .map(|_| ())
             .map_err(ToolkitError::from);
-        if self.supplemental.is_some() {
-            finish_check(result, stream_check(&self.control, &mut self.supplemental))
-        } else {
-            result
-        }
+        optional::finish_checks(result, &self.control, &mut || {
+            optional_check(&mut self.supplemental)
+        })
     }
     /// Preserve complete typed IO/stop details. This reads at most one 64 KiB
     /// block; it neither records network usage nor implies complete consumption.
@@ -183,7 +180,9 @@ impl VerifiedBlob {
         let closed = close(self.opened.file).map_err(ToolkitError::from);
         let result = crate::metadata::historical_write::finish_historical(result, closed);
         let result = optional::finish_directory(result, self.opened._directory);
-        finish_check(result, stream_check(&self.control, &mut self.supplemental))
+        optional::finish_checks(result, &self.control, &mut || {
+            optional_check(&mut self.supplemental)
+        })
     }
 }
 impl Read for VerifiedBlob {
@@ -191,16 +190,11 @@ impl Read for VerifiedBlob {
         stream_check(&self.control, &mut self.supplemental).map_err(io::Error::other)?;
         let n = out.len().min(BLOCK);
         let result = self.opened.file.read(&mut out[..n]);
-        // The None path preserves the original Read contract and raw IO error.
-        // Sources/accounting owners record actual consumed work themselves;
-        // cached disk bytes are not network bytes and are not charged here.
-        if self.supplemental.is_none() {
-            return result;
-        }
-        finish_check(
-            result.map_err(io_error),
-            stream_check(&self.control, &mut self.supplemental),
-        )
+        // Cached disk bytes are not network bytes; accounting remains with
+        // the caller. A delivered read still observes both original scopes.
+        optional::finish_checks(result.map_err(io_error), &self.control, &mut || {
+            optional_check(&mut self.supplemental)
+        })
         .map_err(io::Error::other)
     }
 }
@@ -232,34 +226,59 @@ fn open_blob_with_check(
 ) -> Result<OpenBlob> {
     check_with(control, supplemental)?;
     let path = blob_path(home, &reference.sha256)?;
-    storage::guard_path(home, &path)?;
-    let directory = Directory::open(path.parent().expect("blob shard"))?;
-    check_with(control, supplemental)?;
-    // Preserve size/kind admission even when an existing writer would prevent
-    // taking the subsequent immutable data-read handle. No body is allocated.
-    validate_metadata(
-        &directory.metadata(path.file_name().expect("blob digest name"))?,
-        reference.bytes,
+    storage::guard_path_with_check(home, &path, || check_with(control, supplemental))?;
+    let directory = Directory::open_controlled(
+        path.parent().expect("blob shard"),
+        &mut PathControl {
+            control,
+            supplemental,
+        },
     )?;
-    check_with(control, supplemental)?;
-    let file = directory.open_file(path.file_name().expect("blob digest name"))?;
     let result = (|| {
-        let info = file.metadata()?;
-        validate_metadata(&info, reference.bytes)?;
-        check_with(control, supplemental)
+        let name = path.file_name().expect("blob name");
+        validate_metadata(
+            &directory.metadata_controlled(
+                name,
+                &mut PathControl {
+                    control,
+                    supplemental,
+                },
+            )?,
+            reference.bytes,
+        )?;
+        let file = directory.open_file_controlled(
+            name,
+            &mut PathControl {
+                control,
+                supplemental,
+            },
+        )?;
+        let result = (|| {
+            validate_metadata(&file.metadata()?, reference.bytes)?;
+            check_with(control, supplemental)
+        })();
+        match finish_controls(result, control, supplemental) {
+            Ok(()) => Ok(file),
+            Err(error) => crate::metadata::historical_write::finish_historical(
+                Err(error),
+                storage::close_file(file).map_err(Into::into),
+            ),
+        }
     })();
-    if let Err(error) = result {
-        return crate::metadata::historical_write::finish_historical(
-            Err(error),
-            lycheedev_windows::filesystem::close_file(file).map_err(Into::into),
-        );
+    match result {
+        Ok(file) => Ok(OpenBlob {
+            file,
+            _directory: directory,
+            reference,
+        }),
+        Err(error) => finish_controls(
+            optional::finish_directory(Err(error), directory),
+            control,
+            supplemental,
+        ),
     }
-    Ok(OpenBlob {
-        file,
-        _directory: directory,
-        reference,
-    })
 }
+
 fn scan_blob(
     opened: OpenBlob,
     control: Option<&OperationControl>,
@@ -274,11 +293,7 @@ fn scan_blob_with_check(
     accept: impl FnMut(&[u8]) -> Result<()>,
 ) -> Result<()> {
     let result = scan_open_blob_with_check(&mut opened, control, supplemental, accept);
-    let result = crate::metadata::historical_write::finish_historical(
-        result,
-        lycheedev_windows::filesystem::close_file(opened.file).map_err(Into::into),
-    );
-    finish_check(result, check_with(control, supplemental))
+    lifecycle::close_blob(opened, result, control, supplemental)
 }
 fn scan_open_blob(
     opened: &mut OpenBlob,
@@ -395,10 +410,8 @@ fn prepare_verified_blob(
     accept: impl FnMut(&[u8]) -> Result<()>,
     supplemental: &mut Option<BlobCheck>,
 ) -> Result<OpenBlob> {
-    if supplemental.is_some() {
-        stream_check(control, supplemental)?;
-    }
-    workspace::open(home)?;
+    stream_check(control, supplemental)?;
+    open_workspace(home, Some(control), &mut || optional_check(supplemental))?;
     let opened = open_blob_with_check(
         home,
         admitted_ref(blob, maximum)?,
@@ -427,19 +440,13 @@ fn prepare_opened_verified_blob(
         } else {
             scan_open_blob(&mut opened, Some(control), accept)?;
         }
-        if supplemental.is_some() {
-            stream_check(control, supplemental)?;
-        }
+        stream_check(control, supplemental)?;
         let result = opened
             .file
             .seek(SeekFrom::Start(0))
             .map(|_| ())
             .map_err(ToolkitError::from);
-        if supplemental.is_some() {
-            finish_check(result, stream_check(control, supplemental))
-        } else {
-            result
-        }
+        optional::finish_checks(result, control, &mut || optional_check(supplemental))
     })();
     match result {
         Ok(()) => Ok(opened),
@@ -457,7 +464,7 @@ fn close_opened_blob<T>(
         lycheedev_windows::filesystem::close_file(opened.file).map_err(ToolkitError::from),
     );
     let result = optional::finish_directory(result, opened._directory);
-    finish_check(result, stream_check(control, supplemental))
+    optional::finish_checks(result, control, &mut || optional_check(supplemental))
 }
 
 struct DigestReader<'a, R: Read> {
@@ -465,13 +472,6 @@ struct DigestReader<'a, R: Read> {
     expected: &'a str,
     hash: Sha256,
     terminal: bool,
-    failure: Option<ToolkitError>,
-}
-impl<R: Read> DigestReader<'_, R> {
-    fn failed(&mut self, error: ToolkitError) -> io::Error {
-        self.failure.get_or_insert_with(|| error.clone());
-        io::Error::other(error)
-    }
 }
 impl<R: Read> Read for DigestReader<'_, R> {
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
@@ -482,11 +482,13 @@ impl<R: Read> Read for DigestReader<'_, R> {
         // consumed bytes before returning, including a concurrent stop/error.
         let n = match self.source.read(out) {
             Ok(n) => n,
-            Err(error) => return Err(self.failed(io_error(error))),
+            Err(error) => return Err(io::Error::other(io_error(error))),
         };
         if n == 0 {
             if hex::encode(self.hash.clone().finalize()) != self.expected {
-                return Err(self.failed(integrity("published stream digest differs")));
+                return Err(io::Error::other(integrity(
+                    "published stream digest differs",
+                )));
             }
             self.terminal = true;
         } else {
@@ -536,83 +538,82 @@ fn publish_blob_reader_internal(
     mut supplemental: Option<BlobCheck>,
 ) -> Result<VerifiedBlob> {
     stream_check(control, &mut supplemental)?;
-    workspace::open(home)?;
+    open_workspace(home, Some(control), &mut || {
+        optional_check(&mut supplemental)
+    })?;
     let value = serde_json::to_value(reference)?;
     let admitted = admitted_ref(&value, maximum)?;
-    let _home = Directory::open_shared(home)?;
-    let guard = ExclusiveLock::resource_checked(
-        &home.join("locks"),
-        &format!("blob:{}", admitted.sha256),
-        || stream_check(control, &mut supplemental),
+    let home_owner = Directory::open_shared_controlled(
+        home,
+        &mut PathControl {
+            control: Some(control),
+            supplemental: &mut || optional_check(&mut supplemental),
+        },
     )?;
     let result = (|| {
-        let path = blob_path(home, &admitted.sha256)?;
-        storage::guard_path(home, &path)?;
-        if !path.try_exists()? {
-            let shard = path.parent().expect("blob shard");
-            match fs::create_dir(shard) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(error) => return Err(error.into()),
+        let guard = ExclusiveLock::resource_wait_checked(
+            &home.join("locks"),
+            &format!("blob:{}", admitted.sha256),
+            Some(control.deadline()),
+            || stream_check(control, &mut supplemental),
+        )?;
+        let result = (|| {
+            let path = blob_path(home, &admitted.sha256)?;
+            storage::guard_path_with_check(home, &path, || {
+                stream_check(control, &mut supplemental)
+            })?;
+            if !path.try_exists()? {
+                let shard = path.parent().expect("blob shard");
+                match fs::create_dir(shard) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+                    Err(e) => return Err(e.into()),
+                }
+                storage::guard_path_with_check(home, &path, || {
+                    stream_check(control, &mut supplemental)
+                })?;
+                let mut checked = DigestReader {
+                    source: reader,
+                    expected: &admitted.sha256,
+                    hash: Sha256::new(),
+                    terminal: false,
+                };
+                lifecycle::publish_known(
+                    home,
+                    &path,
+                    &mut checked,
+                    &admitted,
+                    maximum,
+                    Some(control),
+                    &mut || optional_check(&mut supplemental),
+                )?;
             }
-            storage::guard_path(home, &path)?;
-            let destination = Destination::open(&path, false)?;
-            let mut checked = DigestReader {
-                source: reader,
-                expected: &admitted.sha256,
-                hash: Sha256::new(),
-                terminal: false,
-                failure: None,
-            };
-            let mut first_stop = None;
-            let result = destination.publish_reader(&mut checked, admitted.bytes, maximum, || {
-                stream_check(control, &mut supplemental).map_err(|error| {
-                    first_stop.get_or_insert_with(|| error.clone());
-                    io::Error::other(error)
-                })
-            });
-            let returned_original = result.as_ref().err().is_some_and(|error| {
-                error
-                    .get_ref()
-                    .and_then(|inner| inner.downcast_ref::<ToolkitError>())
-                    .is_some()
-            });
-            // The first source/callback failure ends publication immediately;
-            // discard can fail afterward. Do not let it erase the original.
-            let result = finish_publication(
-                checked.failure.or(first_stop),
-                result.map_err(io_error),
-                returned_original,
-            );
-            finish_check(result, stream_check(control, &mut supplemental))?;
-        }
-        // Verify under this same owner; keep the immutable file across guard
-        // close and transfer it only after all failure/cleanup checks succeed.
-        prepare_verified_blob(
-            home,
-            &value,
-            maximum,
-            control,
-            |_| Ok(()),
-            &mut supplemental,
-        )
+            prepare_verified_blob(
+                home,
+                &value,
+                maximum,
+                control,
+                |_| Ok(()),
+                &mut supplemental,
+            )
+        })();
+        staged::finish_opened(result, guard.close(), control, &mut supplemental)
     })();
-    let closed = guard.close();
-    match result {
-        Ok(opened) => match finish_check(closed, stream_check(control, &mut supplemental)) {
-            Ok(()) => Ok(VerifiedBlob {
-                opened,
-                home: home.to_owned(),
-                control: control.clone(),
-                supplemental,
-            }),
-            Err(error) => close_opened_blob(opened, Err(error), control, &mut supplemental),
-        },
-        Err(error) => finish_check(
-            crate::metadata::historical_write::finish_historical(Err(error), closed),
-            stream_check(control, &mut supplemental),
-        ),
-    }
+    let result = staged::finish_opened(
+        result,
+        optional::finish_directory(Ok(()), home_owner),
+        control,
+        &mut supplemental,
+    );
+    let stopped =
+        optional::finish_checks(Ok(()), control, &mut || optional_check(&mut supplemental));
+    let opened = staged::finish_opened(result, stopped, control, &mut supplemental)?;
+    Ok(VerifiedBlob {
+        opened,
+        home: home.to_owned(),
+        control: control.clone(),
+        supplemental,
+    })
 }
 
 /// Capture an already verified held blob without allocating or rehashing it.
@@ -630,21 +631,53 @@ pub fn commit_verified_capture(
         || provenance["locator"].as_str().unwrap_or("").is_empty()
         || complete && truncated
     {
-        return Err(ToolkitError::new("evidence.invalid_capture", "invalid media/provenance/completeness", 4));
+        return Err(ToolkitError::new(
+            "evidence.invalid_capture",
+            "invalid media/provenance/completeness",
+            4,
+        ));
     }
-    let _guard = ExclusiveLock::resource(&blob.home.join("locks"), &format!("blob:{}", blob.reference().sha256))?;
-    let mut capture = CaptureRef {
-        schema: "lycheedev.capture.v1".into(), id: String::new(),
-        blob: blob.reference().clone(), media_type: media_type.into(),
-        provenance: serde_json::from_value(provenance)?, complete, truncated,
-        captured_at: storage::utc_now(),
-        dependencies: Vec::new(),
-    };
-    capture.id = capture_identity(&capture)?;
-    Metadata::open(&blob.home, true)?.put(&format!("capture/{}", capture.id), &capture, None)?;
-    control.check()?;
-    Ok(serde_json::to_value(capture)?)
+    let guard = ExclusiveLock::resource_wait_checked(
+        &blob.home.join("locks"),
+        &format!("blob:{}", blob.reference().sha256),
+        Some(control.deadline()),
+        || control.check(),
+    )?;
+    let state = std::cell::Cell::new(crate::metadata::CaptureWriteState::NotCommitted);
+    let mut value = None;
+    let result = (|| {
+        let mut capture = CaptureRef {
+            schema: "lycheedev.capture.v1".into(),
+            id: String::new(),
+            blob: blob.reference().clone(),
+            media_type: media_type.into(),
+            provenance: serde_json::from_value(provenance)?,
+            complete,
+            truncated,
+            captured_at: storage::utc_now(),
+            dependencies: Vec::new(),
+        };
+        capture.id = capture_identity(&capture)?;
+        control.check()?;
+        let raw = serde_json::to_vec(&capture)?;
+        value = Some(serde_json::to_value(&capture)?);
+        lifecycle::persist_capture(
+            &blob.home,
+            &format!("capture/{}", capture.id),
+            &raw,
+            Some(control),
+            &mut || Ok(()),
+            &state,
+        )
+    })();
+    let result = crate::metadata::historical_write::finish_historical(result, guard.close());
+    let result = finish_controls(result, Some(control), &mut || Ok(()));
+    match value {
+        Some(value) => lifecycle::capture_result(result, value, state.get()),
+        None => result.map(|()| unreachable!("capture preparation did not complete")),
+    }
 }
+
 /// Verify without allocating a second body. The fixed maximum and exact open
 /// file length are checked before the first read.
 pub fn verify_blob_bounded(
@@ -654,7 +687,7 @@ pub fn verify_blob_bounded(
     control: &OperationControl,
 ) -> Result<()> {
     control.check()?;
-    workspace::open(home)?;
+    open_workspace(home, Some(control), &mut || Ok(()))?;
     verify_internal(home, blob, maximum, Some(control))
 }
 pub(super) fn verify_internal(
@@ -685,7 +718,7 @@ pub fn read_blob_bounded_with_check(
     mut supplemental: impl FnMut() -> Result<()>,
 ) -> Result<Vec<u8>> {
     check_with(Some(control), &mut supplemental)?;
-    workspace::open(home)?;
+    open_workspace(home, Some(control), &mut supplemental)?;
     read_internal_with_check(home, blob, maximum, Some(control), &mut supplemental)
 }
 pub(super) fn read_internal(
@@ -711,9 +744,11 @@ fn read_internal_with_check(
         .try_reserve_exact(opened.reference.bytes as usize)
         .is_err()
     {
-        return crate::metadata::historical_write::finish_historical(
+        return lifecycle::close_blob(
+            opened,
             Err(limit("body allocation was not admitted")),
-            lycheedev_windows::filesystem::close_file(opened.file).map_err(Into::into),
+            control,
+            supplemental,
         );
     }
     scan_blob_with_check(opened, control, supplemental, |block| {
@@ -755,34 +790,34 @@ fn publish_internal_with_check(
     supplemental: &mut impl FnMut() -> Result<()>,
 ) -> Result<Value> {
     check_with(control, supplemental)?;
-    workspace::open(home)?;
+    open_workspace(home, control, supplemental)?;
     if bytes.len() > maximum || bytes.len() as u64 > MAX_CAPTURE_BYTES {
         return Err(limit("blob exceeds budget"));
     }
-    let _home = Directory::open_shared(home)?;
-    workspace::open(home)?;
-    let digest = digest_bytes_with_check(bytes, control, supplemental)?;
-    let guard = ExclusiveLock::resource_wait_checked(
-        &home.join("locks"),
-        &format!("blob:{digest}"),
-        control.map(OperationControl::deadline),
-        || check_with(control, supplemental),
+    let home_owner = Directory::open_shared_controlled(
+        home,
+        &mut PathControl {
+            control,
+            supplemental,
+        },
     )?;
-    let result = publish_locked_with_check(home, bytes, maximum, digest, control, supplemental)
-        .and_then(|reference| serde_json::to_value(reference).map_err(Into::into));
-    let result = crate::metadata::historical_write::finish_historical(result, guard.close());
-    finish_check(result, check_with(control, supplemental))
+    let result = (|| {
+        open_workspace(home, control, supplemental)?;
+        let digest = digest_bytes_with_check(bytes, control, supplemental)?;
+        let guard = ExclusiveLock::resource_wait_checked(
+            &home.join("locks"),
+            &format!("blob:{digest}"),
+            control.map(OperationControl::deadline),
+            || check_with(control, supplemental),
+        )?;
+        let result = publish_locked_with_check(home, bytes, maximum, digest, control, supplemental)
+            .and_then(|reference| serde_json::to_value(reference).map_err(Into::into));
+        crate::metadata::historical_write::finish_historical(result, guard.close())
+    })();
+    let result = optional::finish_directory(result, home_owner);
+    finish_controls(result, control, supplemental)
 }
-pub(super) fn publish_locked(
-    home: &Path,
-    bytes: &[u8],
-    maximum: usize,
-    digest: String,
-    control: Option<&OperationControl>,
-) -> Result<BlobRef> {
-    publish_locked_with_check(home, bytes, maximum, digest, control, &mut || Ok(()))
-}
-fn publish_locked_with_check(
+pub(super) fn publish_locked_with_check(
     home: &Path,
     bytes: &[u8],
     maximum: usize,
@@ -796,7 +831,7 @@ fn publish_locked_with_check(
         sha256: digest,
         bytes: bytes.len() as u64,
     };
-    storage::guard_path(home, &path)?;
+    storage::guard_path_with_check(home, &path, || check_with(control, supplemental))?;
     if path.exists() {
         // This reference was just computed from the admitted body. Verify it
         // directly instead of allocating and re-parsing a temporary JSON Value.
@@ -811,40 +846,19 @@ fn publish_locked_with_check(
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
             Err(error) => return Err(error.into()),
         }
-        storage::guard_path(home, &path)?;
-        let destination = Destination::open(&path, false)?;
-        let mut first_stop = None;
-        let result = destination
-            .publish(bytes, maximum as u64, || {
-                check_with(control, supplemental).map_err(|error| {
-                    first_stop.get_or_insert_with(|| error.clone());
-                    io::Error::new(io::ErrorKind::Interrupted, error)
-                })
-            });
-        let returned_callback = result.as_ref().err().is_some_and(|error| {
-            error.get_ref().and_then(|inner| inner.downcast_ref::<ToolkitError>()).is_some()
-        });
-        let result = result.map_err(io_error);
-        // Destination may report its stage-discard failure in place of the
-        // callback error. Retain the original typed stop and the later failure.
-        let result = finish_publication(first_stop, result, returned_callback);
-        finish_check(result, check_with(control, supplemental))?;
+        storage::guard_path_with_check(home, &path, || check_with(control, supplemental))?;
+        lifecycle::publish_bytes(
+            home,
+            &path,
+            bytes,
+            &reference,
+            maximum as u64,
+            control,
+            supplemental,
+        )?;
     }
     check_with(control, supplemental)?;
     Ok(reference)
-}
-fn finish_publication(
-    first_stop: Option<ToolkitError>,
-    result: Result<()>,
-    returned_callback: bool,
-) -> Result<()> {
-    match (first_stop, result) {
-        (Some(stop), Err(error)) if !returned_callback || !same_error(&stop, &error) => {
-            crate::metadata::historical_write::finish_historical(Err(stop), Err(error))
-        }
-        (Some(stop), Ok(())) => Err(stop),
-        (_, result) => result,
-    }
 }
 pub fn commit_capture_bounded(
     home: &Path,
@@ -904,68 +918,77 @@ fn commit_internal_observed_with_check(
             4,
         ));
     }
-    workspace::open(home)?;
+    open_workspace(home, control, &mut supplemental)?;
     if input.bytes.len() > input.maximum_bytes || input.bytes.len() as u64 > MAX_CAPTURE_BYTES {
         return Err(limit("blob exceeds budget"));
     }
     let provenance = serde_json::from_value(input.provenance)?;
-    let _home = Directory::open_shared(home)?;
-    workspace::open(home)?;
-    let digest = digest_bytes_with_check(input.bytes, control, &mut supplemental)?;
-    // Publication and manifest insertion hold the same content guard as remove.
-    let guard =
-        ExclusiveLock::resource_checked(&home.join("locks"), &format!("blob:{digest}"), || {
-            check_with(control, &mut supplemental)
-        })?;
-    let result = (|| {
-        publication(CapturePublication::BeforeBlob);
-        let blob = publish_locked_with_check(
-            home,
-            input.bytes,
-            input.maximum_bytes,
-            digest,
+    let home_owner = Directory::open_shared_controlled(
+        home,
+        &mut PathControl {
             control,
-            &mut supplemental,
+            supplemental: &mut supplemental,
+        },
+    )?;
+    let state = std::cell::Cell::new(crate::metadata::CaptureWriteState::NotCommitted);
+    let mut value = None;
+    let result = (|| {
+        open_workspace(home, control, &mut supplemental)?;
+        let digest = digest_bytes_with_check(input.bytes, control, &mut supplemental)?;
+        let guard = ExclusiveLock::resource_wait_checked(
+            &home.join("locks"),
+            &format!("blob:{digest}"),
+            control.map(OperationControl::deadline),
+            || check_with(control, &mut supplemental),
         )?;
-        publication(CapturePublication::BlobPublished);
-        check_with(control, &mut supplemental)?;
-        let mut capture = CaptureRef {
-            schema: "lycheedev.capture.v1".into(),
-            id: String::new(),
-            blob,
-            media_type: input.media_type.into(),
-            provenance,
-            complete: input.complete,
-            truncated: input.truncated,
-            captured_at: storage::utc_now(),
-            dependencies: Vec::new(),
-        };
-        capture.id = capture_identity(&capture)?;
-        check_with(control, &mut supplemental)?;
-        let key = format!("capture/{}", capture.id);
-        if let Some(control) = control {
-            let mut metadata =
-                Metadata::open_controlled_with_check(home, true, control, &mut supplemental)?;
-            let written = metadata.put_controlled_with_check(
-                &key,
-                &capture,
-                None,
+        let result = (|| {
+            publication(CapturePublication::BeforeBlob);
+            let blob = publish_locked_with_check(
+                home,
+                input.bytes,
+                input.maximum_bytes,
+                digest,
                 control,
                 &mut supplemental,
+            )?;
+            publication(CapturePublication::BlobPublished);
+            check_with(control, &mut supplemental)?;
+            let mut capture = CaptureRef {
+                schema: "lycheedev.capture.v1".into(),
+                id: String::new(),
+                blob,
+                media_type: input.media_type.into(),
+                provenance,
+                complete: input.complete,
+                truncated: input.truncated,
+                captured_at: storage::utc_now(),
+                dependencies: Vec::new(),
+            };
+            capture.id = capture_identity(&capture)?;
+            check_with(control, &mut supplemental)?;
+            let raw = serde_json::to_vec(&capture)?;
+            value = Some(serde_json::to_value(&capture)?);
+            let written = lifecycle::persist_capture(
+                home,
+                &format!("capture/{}", capture.id),
+                &raw,
+                control,
+                &mut supplemental,
+                &state,
             );
-            if written.is_ok() {
+            if state.get() == crate::metadata::CaptureWriteState::Committed {
                 publication(CapturePublication::ManifestPublished);
             }
-            crate::metadata::historical_write::finish_historical(written, metadata.close())?;
-        } else {
-            Metadata::open(home, true)?.put(&key, &capture, None)?;
-            publication(CapturePublication::ManifestPublished);
-        }
-        check_with(control, &mut supplemental)?;
-        Ok(serde_json::to_value(capture)?)
+            written
+        })();
+        crate::metadata::historical_write::finish_historical(result, guard.close())
     })();
-    let result = crate::metadata::historical_write::finish_historical(result, guard.close());
-    finish_check(result, check_with(control, &mut supplemental))
+    let result = optional::finish_directory(result, home_owner);
+    let result = finish_controls(result, control, &mut supplemental);
+    match value {
+        Some(value) => lifecycle::capture_result(result, value, state.get()),
+        None => result.map(|()| unreachable!("capture preparation did not complete")),
+    }
 }
 
 #[cfg(test)]

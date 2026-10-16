@@ -152,12 +152,10 @@ impl<E> OwnedQuery<'_, '_, E> {
             };
             (file, id)
         } else {
-            let Some(member) = self
+            let members = self
                 .model
-                .members_of_owner(&SemanticId::name(def.name.clone()))
-                .into_iter()
-                .find(|member| member.name == attribute.name)
-            else {
+                .members_of_owner(&SemanticId::name(def.name.clone()));
+            let Some(member) = members.iter().find(|member| member.name == attribute.name) else {
                 return Ok(None);
             };
             // Original fallback computes the member type even though only its id

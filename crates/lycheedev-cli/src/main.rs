@@ -1218,6 +1218,67 @@ fn asset_committed_context(error: &ToolkitError) -> bool {
             })
         })
 }
+fn capture_commit_leaf(error: &ToolkitError) -> bool {
+    let details = &error.details;
+    if details["schema"] != "lycheedev.capture-commit-error.v1" {
+        return false;
+    }
+    let Ok(primary) = serde_json::from_value::<ToolkitError>(details["primary"].clone()) else {
+        return false;
+    };
+    let Some(id) = details["capturePublication"]["id"].as_str() else {
+        return false;
+    };
+    if primary.code != error.code || primary.exit_code != error.exit_code
+        || id.len() != 68 || !id.starts_with("CAP-")
+        || !id.as_bytes()[4..].iter().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
+    {
+        return false;
+    }
+    let Some(completed) = details["completedCaptures"].as_array() else {
+        return false;
+    };
+    match details["capturePublication"]["state"].as_str() {
+        Some("committed") => completed.len() == 1 && completed[0].as_str() == Some(id),
+        Some("unknown") => completed.is_empty(),
+        _ => false,
+    }
+}
+// Traverse only the two typed cleanup envelopes emitted by the actual owner
+// boundaries. Arbitrary nested JSON cannot authenticate publication facts.
+fn capture_commit_context(error: &ToolkitError) -> bool {
+    let mut pending = vec![error.clone()];
+    while let Some(error) = pending.pop() {
+        if capture_commit_leaf(&error) {
+            return true;
+        }
+        let details = &error.details;
+        let values: Vec<&Value> = match details["schema"].as_str() {
+            Some("lycheedev.file-cleanup.v1") => {
+                let mut values = Vec::new();
+                for key in ["primary", "cleanup", "control"] {
+                    let Some(value) = details.get(key) else { return false; };
+                    if !value.is_null() { values.push(value); }
+                }
+                values
+            }
+            Some("lycheedev.admitted-workspace-errors.v1") => {
+                let Some(causes) = details["causes"].as_array() else { return false; };
+                causes.iter().collect()
+            }
+            _ => continue,
+        };
+        if values.len() < 2 { return false; }
+        let Ok(causes) = values.into_iter()
+            .map(|value| serde_json::from_value::<ToolkitError>(value.clone()))
+            .collect::<std::result::Result<Vec<_>, _>>() else { return false; };
+        if causes[0].code != error.code || causes[0].exit_code != error.exit_code {
+            return false;
+        }
+        pending.extend(causes.into_iter().rev());
+    }
+    false
+}
 fn command_fault(inv: &Invocation, mut error: ToolkitError) -> ToolkitError {
     if inv.command == "target resolve" && inv.flag("--target").is_some_and(|name| !name.is_empty()) {
         error = target_remote::named_fault(error);
@@ -1266,7 +1327,7 @@ fn command_fault(inv: &Invocation, mut error: ToolkitError) -> ToolkitError {
     if matches!(inv.command.as_str(), "asset inspect" | "asset export")
         && error.code == "records.metadata_limit"
     {
-        if asset_committed_context(&error) {
+        if asset_committed_context(&error) || capture_commit_context(&error) {
             // Keep the completed side effects and every original cleanup cause;
             // the public error message tells callers not to replay this work.
             error.details["stage"] = json!("query");
@@ -2234,6 +2295,92 @@ mod tests {
             args(&["live", "connect", "--passive"]),
         ] {
             assert_eq!(parse(&command).unwrap_err().exit_code, 2);
+        }
+    }
+    #[test]
+    fn asset_capture_commit_context_preserves_committed_and_unknown_facts() {
+        for command in ["inspect", "export"] {
+            let inv = parse(&args(&["asset", command])).unwrap();
+            for state in ["committed", "unknown"] {
+                let id = format!("CAP-{}", "b".repeat(64));
+                let completed = if state == "committed" { json!([id]) } else { json!([]) };
+                let primary = ToolkitError::new("records.metadata_limit", "budget stopped after commit attempt", 3)
+                    .with_details(json!({"causes":[{"code":"external.io","message":"checked close failed"}]}));
+                let details = json!({"schema":"lycheedev.capture-commit-error.v1", "primary":primary,
+                    "capturePublication":{"state":state,"id":id}, "completedCaptures":completed});
+                let message = format!("capture publication {state}; do not replay {id}");
+                let actual = command_fault(&inv, ToolkitError::new("records.metadata_limit", &message, 3).with_details(details.clone()));
+                assert_eq!(actual.message, message);
+                assert_eq!(actual.details["stage"], "query");
+                let result = Err(actual);
+                let public = envelope(&result);
+                assert_eq!(public["error"]["details"], details);
+                assert_eq!(public["captures"], json!([]));
+                assert!(public.get("capturePublication").is_none());
+                let mut bytes = Vec::new();
+                render(&mut bytes, "jsonl", &result).unwrap();
+                let frames: Vec<Value> = std::str::from_utf8(&bytes).unwrap().lines()
+                    .map(|line| serde_json::from_str(line).unwrap()).collect();
+                assert_eq!(frames, vec![json!({"type":"begin","schema":"lycheedev.result.v1"}),
+                    json!({"type":"error","envelope":public})]);
+            }
+        }
+    }
+    #[test]
+    fn asset_capture_commit_context_survives_typed_owner_cleanup() {
+        use lycheedev_core::metadata::historical_write::finish_historical;
+        let id = format!("CAP-{}", "d".repeat(64));
+        let primary = ToolkitError::new("records.metadata_limit", "budget exhausted", 3);
+        let committed = primary.clone().with_details(json!({
+            "schema":"lycheedev.capture-commit-error.v1", "primary":primary,
+            "capturePublication":{"state":"committed","id":id}, "completedCaptures":[id]
+        }));
+        let cleanup = ToolkitError::new("external.io", "directory close failed", 5);
+        // This is the same typed join used by Session/Scope cleanup. Repeated
+        // enclosing owners retain every cause and the original committed ID.
+        let joined = finish_historical::<()>(Err(committed), Err(cleanup.clone())).unwrap_err();
+        let joined = finish_historical::<()>(Err(joined), Err(cleanup.clone())).unwrap_err();
+        let admitted = joined.clone().with_details(json!({
+            "schema":"lycheedev.admitted-workspace-errors.v1", "causes":[joined,cleanup]
+        }));
+        for error in [joined, admitted] {
+            assert!(capture_commit_context(&error));
+            for command in ["inspect", "export"] {
+                let inv = parse(&args(&["asset", command])).unwrap();
+                let before = error.details.clone();
+                let actual = command_fault(&inv, error.clone());
+                assert_eq!(envelope(&Err(actual))["error"]["details"], before);
+            }
+            let mut malformed = error.clone();
+            malformed.code = "external.io".into();
+            assert!(!capture_commit_context(&malformed));
+            let arbitrary = primary.clone().with_details(json!({"payload":error}));
+            assert!(!capture_commit_context(&arbitrary));
+        }
+    }
+    #[test]
+    fn asset_capture_commit_context_rejects_inconsistent_typed_facts() {
+        let inv = parse(&args(&["asset", "export"])).unwrap();
+        let id = format!("CAP-{}", "b".repeat(64));
+        let primary = ToolkitError::new("records.metadata_limit", "limit", 3);
+        let valid = json!({"schema":"lycheedev.capture-commit-error.v1", "primary":primary,
+            "capturePublication":{"state":"committed","id":id}, "completedCaptures":[id]});
+        for (pointer, replacement) in [
+            ("/schema", json!("other")), ("/primary", json!(null)),
+            ("/primary/code", json!("external.io")), ("/primary/exit_code", json!(5)),
+            ("/capturePublication/state", json!("unknown")),
+            ("/capturePublication/state", json!("uncommitted")),
+            ("/capturePublication/id", json!("CAP-short")),
+            ("/capturePublication/id", json!(format!("CAP-{}", "B".repeat(64)))),
+            ("/completedCaptures", json!([])),
+            ("/completedCaptures", json!([format!("CAP-{}", "c".repeat(64))])),
+            ("/completedCaptures", json!([id, id])),
+        ] {
+            let mut details = valid.clone();
+            *details.pointer_mut(pointer).unwrap() = replacement;
+            let actual = command_fault(&inv, primary.clone().with_details(details));
+            assert_eq!(actual.message, "records.metadata_limit", "{pointer}");
+            assert_eq!(actual.details, json!({"stage":"query"}), "{pointer}");
         }
     }
     #[test]

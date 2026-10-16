@@ -44,13 +44,17 @@ pub fn check(
     let mut inputs = Vec::new();
     for (path, bytes) in files {
         control.check()?;
-        let capture = evidence::commit_capture(
+        let capture = evidence::commit_capture_bounded(
             home,
-            bytes,
-            "text/x-lua",
-            json!({"kind":"source-semantic-input","locator":path,"snapshot":snapshot,"sourceCommit":client.exact_commit}),
-            true,
-            false,
+            lycheedev_core::evidence::CaptureInput {
+                bytes: bytes,
+                maximum_bytes: lycheedev_core::evidence::DEFAULT_CAPTURE_BYTES,
+                media_type: "text/x-lua",
+                provenance: json!({"kind":"source-semantic-input","locator":path,"snapshot":snapshot,"sourceCommit":client.exact_commit}),
+                complete: true,
+                truncated: false,
+            },
+            control,
         )?;
         inputs.push(json!({"path":path,"blob":capture["blob"],"capture":capture,"generated":inline.contains_key(path)}));
     }
@@ -90,13 +94,17 @@ pub fn check(
         ("rawReport", raw.as_slice()),
         ("sourceMaps", source_maps.as_slice()),
     ] {
-        let capture = evidence::commit_capture(
+        let capture = evidence::commit_capture_bounded(
             home,
-            bytes,
-            "application/json",
-            json!({"kind":"source-semantic-artifact","locator":name,"snapshot":snapshot,"sourceCommit":client.exact_commit}),
-            true,
-            false,
+            lycheedev_core::evidence::CaptureInput {
+                bytes: bytes,
+                maximum_bytes: lycheedev_core::evidence::DEFAULT_CAPTURE_BYTES,
+                media_type: "application/json",
+                provenance: json!({"kind":"source-semantic-artifact","locator":name,"snapshot":snapshot,"sourceCommit":client.exact_commit}),
+                complete: true,
+                truncated: false,
+            },
+            control,
         )?;
         artifacts.insert(name, capture["blob"].clone());
         captures.insert(name, capture);

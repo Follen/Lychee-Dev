@@ -4,7 +4,7 @@ mod object_support;
 mod query_support;
 #[path = "support/object_member_cases.rs"]
 mod support;
-use emmylua_code_analysis::{LuaMemberKey, LuaType};
+use emmylua_code_analysis::{LuaMemberKey, LuaType, SemanticId};
 use lycheedev_emmy_adapter::session::*;
 use std::{cell::Cell, sync::Arc};
 use support::*;
@@ -225,7 +225,7 @@ fn each_member_checkpoint_keeps_original_stop_prefix_and_retry() {
 }
 
 #[test]
-fn source_member_callable_recovery_remains_explicit_after_real_member_lookup() {
+fn source_member_callable_lookup_preserves_selected_value_and_destination_producer() {
     let (analysis, site, mut provider, object) =
         member_case("local t={z=1}; return selected.z", "selected.z");
     let mut z = field("z", FieldPresence::Present, absent("z"));
@@ -233,13 +233,62 @@ fn source_member_callable_recovery_remains_explicit_after_real_member_lookup() {
     replace_fields(&mut provider, &object, vec![z]);
     let session = session(&provider);
     let mut check = || Ok::<_, Stop>(());
-    let error = OwnedQuery::new(&analysis, &session, site.file_id, &mut check)
-        .type_of_expr(site.syntax)
-        .unwrap_err();
-    let OwnedQueryFailure::Continue(c) = error else {
-        panic!("unexpected control")
-    };
-    assert_eq!(c.capability, OwnedQueryCapability::MemberCallable);
+    let mut query =
+        OwnedQuery::new_for_snapshot(&analysis, &session, site.file_id, &mut check).unwrap();
+    let value = query.type_of_expr(site.syntax).unwrap();
+    // The destination identifies the producer; its source initializer (1) must
+    // not override the selected KnownAbsent field while discovering callables.
+    assert_eq!(value, OwnedValue::plain(LuaType::Nil));
+    assert!(value.is_context_free());
+    let object_site = provider.named("selected");
+    let owner = query.type_of_expr(object_site.syntax).unwrap();
+    let expected_member = SemanticId::member(
+        site.file_id,
+        rowan::TextRange::new(9.into(), 10.into()), // The source field's `z` token.
+    );
+    assert_eq!(
+        query.selected_members(&owner).unwrap().unwrap(),
+        [OwnedMemberInfo {
+            key: LuaMemberKey::Name("z".into()),
+            typ: OwnedValue::plain(LuaType::Nil),
+            id: Some(expected_member),
+            file_id: Some(site.file_id),
+            is_method: false,
+        }]
+    );
+    let projector = SelectedProjector::new(&analysis, &session);
+    let indexed = ExpressionExecutionBackend::index_member(
+        &mut query,
+        &projector,
+        site.file_id,
+        ExpressionValue::plain(owner.clone()),
+        &LuaMemberKey::Name("z".into()),
+    )
+    .unwrap();
+    assert_eq!(indexed.value, value);
+    assert_eq!(indexed.receiver, Some(owner));
+    assert_eq!(indexed.owner, None);
+    assert_eq!(indexed.closure_syntax, None);
+    assert_eq!(query.type_of_expr(site.syntax).unwrap(), value);
+    assert_eq!(
+        rows(&session),
+        [
+            ("object_field", "known_absent", "z"),
+            ("object_shape", "bound", "shape:object-1"),
+            ("resolve", "bound", "selected:object-1"),
+            ("member_lookup", "bound", "shape:object-1"),
+        ]
+        .map(|(operation, state, proof)| BindingCoverage {
+            site: object_site,
+            operation,
+            state,
+            proof: proof.into(),
+            reason: None,
+            parameter: None,
+            parameter_index: None,
+            argument: None,
+        })
+    );
     assert_eq!(rows(&session).last().unwrap().operation, "member_lookup");
 }
 

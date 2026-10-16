@@ -75,13 +75,17 @@ pub fn toc_with_environment(
             .filter(|d| d.path.to_ascii_lowercase().ends_with(".lua"))
             .count()
     );
-    let audit = lycheedev_core::evidence::commit_capture(
+    let audit = lycheedev_core::evidence::commit_capture_bounded(
         home,
-        &serde_json::to_vec(&syntax)?,
-        "application/json",
-        json!({"kind":"lua-syntax","locator":manifest,"snapshot":snapshot,"sourceCommit":pin.exact_commit}),
-        true,
-        false,
+        lycheedev_core::evidence::CaptureInput {
+            bytes: &serde_json::to_vec(&syntax)?,
+            maximum_bytes: lycheedev_core::evidence::DEFAULT_CAPTURE_BYTES,
+            media_type: "application/json",
+            provenance: json!({"kind":"lua-syntax","locator":manifest,"snapshot":snapshot,"sourceCommit":pin.exact_commit}),
+            complete: true,
+            truncated: false,
+        },
+        control,
     )?;
     if let Some(rows) = syntax["diagnostics"].as_array_mut() {
         for row in rows {
