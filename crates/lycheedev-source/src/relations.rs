@@ -54,7 +54,14 @@ pub fn with_services(
 pub fn with_native_services(inv:&Invocation,tools:&crate::SourceTools<'_>,broker:Option<&crate::session::BrokerIdentity>)->Result<Reading>{
     with_engine(inv,None,broker,tools.luac.filter(|_|!inv.flag_bool("--static-only")),None,None)
 }
-fn with_engine(inv:&Invocation,runtime:Option<&luals::Runtime>,broker:Option<&crate::session::BrokerIdentity>,native:Option<&crate::luac::Runtime>,prepared:Option<&PreparedResearch>,native_response:Option<Value>)->Result<Reading>{
+fn with_engine(
+    inv: &Invocation,
+    runtime: Option<&luals::Runtime>,
+    broker: Option<&crate::session::BrokerIdentity>,
+    native: Option<&crate::luac::Runtime>,
+    prepared: Option<&PreparedResearch>,
+    native_response: Option<Value>,
+) -> Result<Reading> {
     inv.control.check()?;
     if inv.flag("--snapshot").is_none()
         || inv.flag("--symbol-id").is_some() == inv.flag("--symbol").is_some()
@@ -71,9 +78,14 @@ fn with_engine(inv:&Invocation,runtime:Option<&luals::Runtime>,broker:Option<&cr
         ));
     }
     if inv.flag_bool("--flow") {
-        return Err(ToolkitError::arguments("--flow is evaluated by source context"));
+        return Err(ToolkitError::arguments(
+            "--flow is evaluated by source context",
+        ));
     }
-    if native.is_none() && inv.flag_bool("--session-reuse") && (broker.is_none() || runtime.is_none()) {
+    if native.is_none()
+        && inv.flag_bool("--session-reuse")
+        && (broker.is_none() || runtime.is_none())
+    {
         return Err(ToolkitError::new(
             "luals.session_unavailable",
             "verified persistent broker provider is not yet connected",
@@ -95,15 +107,19 @@ fn with_engine(inv:&Invocation,runtime:Option<&luals::Runtime>,broker:Option<&cr
             "--direction must be incoming, outgoing, or both",
         ));
     }
-    let pin = match prepared { Some(shared) => shared.pin.clone(), None => selection::resolve_pinned(inv)? };
+    let pin = match prepared {
+        Some(shared) => shared.pin.clone(),
+        None => selection::resolve_pinned(inv)?,
+    };
     let source = pin.source.as_ref().ok_or_else(|| {
         ToolkitError::new("selection.source_missing", "selected pin has no source", 3)
     })?;
     let (index, index_digest) = if let Some(shared) = prepared {
         (Arc::clone(&shared.index), String::new())
     } else {
-        let (index, digest) = crate::research_material::measured("source.index", ||
-            index::build_material_with_control(&inv.home, source, &inv.control))?;
+        let (index, digest) = crate::research_material::measured("source.index", || {
+            index::build_material_with_control(&inv.home, source, &inv.control)
+        })?;
         (Arc::new(index), digest)
     };
     let declarations: Vec<_> = index
@@ -147,15 +163,45 @@ fn with_engine(inv:&Invocation,runtime:Option<&luals::Runtime>,broker:Option<&cr
             None
         });
     let material = if prepared.is_none() && declarations.len() == 1 {
-        native.map(|runtime| crate::research_material::load_or_build(inv, source, environment_source, &index, &index_digest, runtime)).transpose()?
-    } else { None };
-    let (client_environment, mut prepared_snapshot, mut load_facts) = if let Some(shared) = prepared {
-        (shared.environment.clone(), None, Some(Arc::clone(&shared.load_facts)))
-    } else if let Some(material) = material {
-        (material.environment.map(Arc::new), Some(material.snapshot), Some(Arc::new(material.load_facts)))
+        native
+            .map(|runtime| {
+                crate::research_material::load_or_build(
+                    inv,
+                    source,
+                    environment_source,
+                    &index,
+                    &index_digest,
+                    runtime,
+                )
+            })
+            .transpose()?
     } else {
-        (crate::research_material::measured("source.environment", || environment_source
-            .map(|source| environment::from_pin(&inv.home, source, &inv.control)).transpose())?.map(Arc::new), None, None)
+        None
+    };
+    let (client_environment, mut prepared_snapshot, mut load_facts) = if let Some(shared) = prepared
+    {
+        (
+            shared.environment.clone(),
+            None,
+            Some(Arc::clone(&shared.load_facts)),
+        )
+    } else if let Some(material) = material {
+        (
+            material.environment.map(Arc::new),
+            Some(material.snapshot),
+            Some(Arc::new(material.load_facts)),
+        )
+    } else {
+        (
+            crate::research_material::measured("source.environment", || {
+                environment_source
+                    .map(|source| environment::from_pin(&inv.home, source, &inv.control))
+                    .transpose()
+            })?
+            .map(Arc::new),
+            None,
+            None,
+        )
     };
     let environment_state = if let Some(env) = &client_environment {
         data["environmentManifest"] = serde_json::to_value(&env.manifest)?;
@@ -187,16 +233,27 @@ fn with_engine(inv:&Invocation,runtime:Option<&luals::Runtime>,broker:Option<&cr
         } else {
             inv.required("--symbol")?
         };
-        let runtime_key = if native.is_some(){crate::native_research::RESEARCH_RULES.into()}else{runtime
-            .map(|runtime| {
-                format!(
-                    "{}:{}",
-                    runtime.identity()["version"].as_str().unwrap_or(""),
-                    runtime.identity()["sha256"].as_str().unwrap_or("")
-                )
-            })
-            .unwrap_or_else(|| "static".into())};
-        let (offset, key) = relation_cursor(inv, source, limit, direction, &runtime_key, client_environment.as_deref())?;
+        let runtime_key = if native.is_some() {
+            crate::native_research::RESEARCH_RULES.into()
+        } else {
+            runtime
+                .map(|runtime| {
+                    format!(
+                        "{}:{}",
+                        runtime.identity()["version"].as_str().unwrap_or(""),
+                        runtime.identity()["sha256"].as_str().unwrap_or("")
+                    )
+                })
+                .unwrap_or_else(|| "static".into())
+        };
+        let (offset, key) = relation_cursor(
+            inv,
+            source,
+            limit,
+            direction,
+            &runtime_key,
+            client_environment.as_deref(),
+        )?;
         let mut relations = Vec::new();
         let mut overflow = false;
         for edge in index
@@ -231,23 +288,57 @@ fn with_engine(inv:&Invocation,runtime:Option<&luals::Runtime>,broker:Option<&cr
             };
             relations.push(json!({"source":edge.name,"target":edge.target,"kind":edge.category,"state":state,"path":edge.path,"line":edge.line,"basis":["static-extraction"],"reason":reason}));
         }
-        if let (Some(native),Some(symbol))=(native,declarations.first()) {
-            let mut response = if let Some(response) = native_response { response } else if prepared.is_some() {
-                return Err(ToolkitError::new("source.native_worker_protocol", "Batch native result is missing for the selected declaration", 4));
+        if let (Some(native), Some(symbol)) = (native, declarations.first()) {
+            let mut response = if let Some(response) = native_response {
+                response
+            } else if prepared.is_some() {
+                return Err(ToolkitError::new(
+                    "source.native_worker_protocol",
+                    "Batch native result is missing for the selected declaration",
+                    4,
+                ));
             } else {
-            let snapshot=if let Some(snapshot)=prepared_snapshot.take(){snapshot}else{
-                let (snapshot, facts)=crate::research_material::measured("source.snapshot", || crate::native_research::snapshot_material(inv,source,&index,client_environment.as_deref(),native))?;
-                load_facts=Some(Arc::new(facts));snapshot
+                let snapshot = if let Some(snapshot) = prepared_snapshot.take() {
+                    snapshot
+                } else {
+                    let (snapshot, facts) =
+                        crate::research_material::measured("source.snapshot", || {
+                            crate::native_research::snapshot_material(
+                                inv,
+                                source,
+                                &index,
+                                client_environment.as_deref(),
+                                native,
+                            )
+                        })?;
+                    load_facts = Some(Arc::new(facts));
+                    snapshot
+                };
+                let request = crate::native_research::WorkerRequest {
+                    snapshot,
+                    query: crate::native_research::QueryRequest {
+                        symbol: (*symbol).clone(),
+                        direction: direction.into(),
+                    },
+                };
+                crate::research_material::measured("source.native_analyze", || {
+                    if inv.flag_bool("--session-reuse") {
+                        crate::native_session::analyze(inv, request)
+                    } else {
+                        crate::native_research::one_shot(inv, request)
+                    }
+                })?
             };
-            let request=crate::native_research::WorkerRequest{snapshot,query:crate::native_research::QueryRequest{symbol:(*symbol).clone(),direction:direction.into()}};
-            crate::research_material::measured("source.native_analyze", || if inv.flag_bool("--session-reuse"){
-                crate::native_session::analyze(inv,request)
-            }else{crate::native_research::one_shot(inv,request)})?
-            };
-            data["semanticRuntime"]=json!({"engine":"native-common-source","rulesVersion":crate::native_research::RESEARCH_RULES});
-            data["semanticAnalysis"]=response["analysis"].clone();
-            if let Some(rows)=response.as_object_mut().and_then(|value|value.remove("relations")).and_then(|value|value.as_array().cloned()){relations.extend(rows);}
-            data["nativeResearch"]=response;
+            data["semanticRuntime"] = json!({"engine":"native-common-source","rulesVersion":crate::native_research::RESEARCH_RULES});
+            data["semanticAnalysis"] = response["analysis"].clone();
+            if let Some(rows) = response
+                .as_object_mut()
+                .and_then(|value| value.remove("relations"))
+                .and_then(|value| value.as_array().cloned())
+            {
+                relations.extend(rows);
+            }
+            data["nativeResearch"] = response;
         } else if let (Some(runtime), Some(symbol)) = (runtime, declarations.first()) {
             let cache = SemanticCache::admit(
                 inv,
@@ -262,44 +353,83 @@ fn with_engine(inv:&Invocation,runtime:Option<&luals::Runtime>,broker:Option<&cr
                     environment_pin: environment_source,
                 },
             )?;
-            let cached = cache
-                .as_ref()
-                .and_then(|cache| cache.read(inv).ok().flatten());
-            inv.control.check()?;
-            let (semantic, analysis) = if let Some(rows) = cached {
-                (
-                    rows,
-                    json!({"state":"complete","cacheHit":true,"queryBatches":0,"results":[],"coverage":{"state":"complete","basis":"authenticated complete semantic cache"}}),
-                )
-            } else {
-                let mut computed = semantic_relations(
-                    inv,
-                    source,
-                    &index,
-                    symbol,
-                    direction,
-                    client_environment.as_deref(),
-                    SemanticProvider {
-                        runtime,
-                        environment_pin: environment_source,
-                        broker: broker.filter(|_| inv.flag_bool("--session-reuse")),
-                    },
-                )?;
-                if computed.1["state"] == "complete"
-                    && let Some(cache) = &cache
-                    && let Err(error) = cache.write(inv, &computed.0)
-                {
-                    inv.control.check()?;
-                    computed.1["cacheWriteState"] =
-                        json!({"state":"not_stored","reason":error.code});
-                }
-                computed
-            };
+            let semantic_result = (|| {
+                let cached = match cache.as_ref().map(|cache| cache.read(inv)).transpose() {
+                    Ok(value) => value.flatten(),
+                    Err(error) => {
+                        let error = crate::persistence::finish_control::<()>(
+                            Err(error),
+                            inv.control.check(),
+                        )
+                        .unwrap_err();
+                        if !error.details.is_null()
+                            || matches!(
+                                error.code.as_str(),
+                                "command.cancelled" | "command.deadline"
+                            )
+                        {
+                            return Err(error);
+                        }
+                        None
+                    }
+                };
+                inv.control.check()?;
+                let (semantic, analysis) = if let Some(rows) = cached {
+                    (
+                        rows,
+                        json!({"state":"complete","cacheHit":true,"queryBatches":0,"results":[],"coverage":{"state":"complete","basis":"authenticated complete semantic cache"}}),
+                    )
+                } else {
+                    let mut computed = semantic_relations(
+                        inv,
+                        source,
+                        &index,
+                        symbol,
+                        direction,
+                        client_environment.as_deref(),
+                        SemanticProvider {
+                            runtime,
+                            environment_pin: environment_source,
+                            broker: broker.filter(|_| inv.flag_bool("--session-reuse")),
+                        },
+                    )?;
+                    if computed.1["state"] == "complete"
+                        && let Some(cache) = &cache
+                        && let Err(error) = cache.write(inv, &computed.0)
+                    {
+                        let error = crate::persistence::finish_control::<()>(
+                            Err(error),
+                            inv.control.check(),
+                        )
+                        .unwrap_err();
+                        if !error.details.is_null()
+                            || matches!(
+                                error.code.as_str(),
+                                "command.cancelled" | "command.deadline"
+                            )
+                        {
+                            return Err(error);
+                        }
+                        computed.1["cacheWriteState"] =
+                            json!({"state":"not_stored","reason":error.code});
+                    }
+                    computed
+                };
+                Ok((semantic, analysis))
+            })();
+            let released = cache.map_or(Ok(()), |cache| cache._lease.close());
+            let (semantic, analysis) = crate::persistence::finish_control(
+                lycheedev_core::metadata::historical_write::finish_historical(
+                    semantic_result,
+                    released,
+                ),
+                inv.control.check(),
+            )?;
             data["semanticRuntime"] = runtime.identity();
             data["semanticAnalysis"] = json!({"state":analysis["state"],"cacheHit":analysis["cacheHit"]==true,"queryCount":analysis["results"].as_array().map_or(0,Vec::len),"queryBatches":analysis["queryBatches"],"workspaceCoverage":analysis["coverage"],"positionCoverage":analysis["positionCoverage"]});
             relations.extend(semantic);
         }
-        project_relation_page(&mut data,&mut relations,offset,&key,limit,overflow)?;
+        project_relation_page(&mut data, &mut relations, offset, &key, limit, overflow)?;
         if overflow {
             reasons.push("matching structural relations exceeded 10000-entry budget");
         }
@@ -307,14 +437,15 @@ fn with_engine(inv:&Invocation,runtime:Option<&luals::Runtime>,broker:Option<&cr
             reasons.push("no declaration or structural relation in indexed coverage");
         }
     }
-    let semantic_state = if (runtime.is_some()||native.is_some()) && data.get("semanticAnalysis").is_some() {
-        data["semanticAnalysis"]["state"]
-            .as_str()
-            .unwrap_or("partial")
-    } else {
-        "unavailable"
-    }
-    .to_owned();
+    let semantic_state =
+        if (runtime.is_some() || native.is_some()) && data.get("semanticAnalysis").is_some() {
+            data["semanticAnalysis"]["state"]
+                .as_str()
+                .unwrap_or("partial")
+        } else {
+            "unavailable"
+        }
+        .to_owned();
     if semantic_state == "unavailable" {
         reasons.push("semantic source provider unavailable or static-only requested");
     }
@@ -442,18 +573,21 @@ impl SemanticCache {
         else {
             return Ok(None);
         };
-        let store = lycheedev_core::metadata::Metadata::open(&inv.home, false)?;
-        let manifest: Value =
-            store.read(&format!("source/rust-index/{}", index::fingerprint(pin)))?;
+        let manifest: Value = crate::persistence::read(
+            &inv.home,
+            &format!("source/rust-index/{}", index::fingerprint(pin)),
+            &inv.control,
+        )?;
         let key = storage::sha256(&serde_json::to_vec(
             &json!({"schema":"lycheedev.source-semantic.rust.v1","source":pin,"indexFingerprint":index::fingerprint(pin),"recordsHash":manifest["blob"]["sha256"],"environment":environment.manifest,"runtime":runtime.identity(),"executable":runtime.executable_identity()["sha256"],"release":broker.map(|id|(&id.release_manifest_sha256,&id.exe_sha256)),"configuration":luals::configuration(std::path::Path::new("@environment")),"symbolId":symbol.id,"direction":direction}),
         )?);
-        let lease = match storage::ExclusiveLock::resource(
+        let lease = match storage::ExclusiveLock::resource_controlled(
             &inv.home.join("locks"),
             &format!("source:v1:semantic:{key}"),
+            &inv.control,
         ) {
             Ok(lease) => lease,
-            Err(error) if error.exit_code == 6 => return Ok(None),
+            Err(error) if error.exit_code == 6 && error.details.is_null() => return Ok(None),
             Err(error) => return Err(error),
         };
         Ok(Some(Self { key, _lease: lease }))
@@ -463,12 +597,14 @@ impl SemanticCache {
     }
     fn read(&self, inv: &Invocation) -> Result<Option<Vec<Value>>> {
         inv.control.check()?;
-        let store = lycheedev_core::metadata::Metadata::open(&inv.home, false)?;
-        let manifest: Value = match store.read(&self.metadata_key()) {
-            Ok(value) => value,
-            Err(error) if error.code == "vault.record_missing" => return Ok(None),
-            Err(error) => return Err(error),
-        };
+        let manifest: Value =
+            match crate::persistence::read(&inv.home, &self.metadata_key(), &inv.control) {
+                Ok(value) => value,
+                Err(error) if error.code == "vault.record_missing" && error.details.is_null() => {
+                    return Ok(None);
+                }
+                Err(error) => return Err(error),
+            };
         if manifest["schema"] != "lycheedev.source-semantic.rust.v1" || manifest["key"] != self.key
         {
             return Ok(None);
@@ -500,15 +636,18 @@ impl SemanticCache {
         if raw.len() > 4 << 20 {
             return Ok(());
         }
-        let blob = lycheedev_core::cache::publish(&inv.home, &raw, 4 << 20, None)?;
+        let blob = lycheedev_core::cache::publish_derived_controlled(
+            &inv.home,
+            &raw,
+            4 << 20,
+            &inv.control,
+        )?;
         inv.control.check()?;
-        let mut store = lycheedev_core::metadata::Metadata::open(&inv.home, true)?;
-        let key = self.metadata_key();
-        let generation = store.generation(&key)?;
-        store.put(
-            &key,
+        crate::persistence::put_manifest(
+            &inv.home,
+            &self.metadata_key(),
             &json!({"schema":"lycheedev.source-semantic.rust.v1","key":self.key,"blob":blob}),
-            generation,
+            &inv.control,
         )?;
         Ok(())
     }

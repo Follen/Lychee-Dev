@@ -138,47 +138,58 @@ pub fn consume_startup(
     {
         return Err(fault("Broker launcher creation/executable differs"));
     }
-    let (_held_parent, digest) = locked_hash(&expected.exe_path, 128 << 20, &inv.control)?;
-    if digest != expected.exe_sha256 {
-        return Err(fault("Broker launcher content differs"));
-    }
-    parent.verify().map_err(native)?;
-    let (key, _held_identity) = identity(&inv.home, expected, &inv.control)?;
-    let store_key = format!("source/broker-start/{token}");
-    let mut store = Metadata::open(&inv.home, true)?;
-    let intent: StartupIntent = store.read(&store_key)?;
-    let now = utc_ms()?;
-    if intent.identity != key
-        || intent.parent_pid != parent_pid
-        || intent.parent_created != parent_created
-        || intent.expires_unix_ms <= now
-        || intent.expires_unix_ms > now + 10_000
-    {
-        return Err(fault("Broker durable startup intent differs or expired"));
-    }
-    let generation = store
-        .generation(&store_key)?
-        .ok_or_else(|| fault("Broker startup intent disappeared"))?;
-    store.delete_checked(
-        std::slice::from_ref(&store_key),
-        &[(store_key.clone(), generation)],
-        |documents| {
-            let doc = documents
-                .iter()
-                .find(|d| d.key == store_key)
-                .ok_or_else(|| fault("Broker startup intent was already consumed"))?;
-            let current: StartupIntent = serde_json::from_value(doc.value.clone())?;
-            if current.identity != intent.identity
-                || current.parent_pid != intent.parent_pid
-                || current.parent_created != intent.parent_created
-                || current.expires_unix_ms != intent.expires_unix_ms
-            {
-                return Err(fault("Broker startup intent changed"));
-            }
-            Ok(())
-        },
-    )?;
-    Ok(())
+    let (held_parent, digest) = locked_hash(&expected.exe_path, 128 << 20, &inv.control)?;
+    let result = (|| {
+        if digest != expected.exe_sha256 {
+            return Err(fault("Broker launcher content differs"));
+        }
+        parent.verify().map_err(native)?;
+        let (key, held_identity) = identity(&inv.home, expected, &inv.control)?;
+        let result = (|| {
+            let store_key = format!("source/broker-start/{token}");
+            let mut store = Metadata::open_controlled(&inv.home, true, &inv.control)?;
+            let checked = (|| {
+                let intent: StartupIntent = store.read_controlled(&store_key, &inv.control)?;
+                let now = utc_ms()?;
+                if intent.identity != key
+                    || intent.parent_pid != parent_pid
+                    || intent.parent_created != parent_created
+                    || intent.expires_unix_ms <= now
+                    || intent.expires_unix_ms > now + 10_000
+                {
+                    return Err(fault("Broker durable startup intent differs or expired"));
+                }
+                let generation = store
+                    .generation_controlled(&store_key, &inv.control)?
+                    .ok_or_else(|| fault("Broker startup intent disappeared"))?;
+                store.consume_generation_controlled(
+                    &store_key,
+                    generation,
+                    &inv.control,
+                    |current: StartupIntent| {
+                        if current.identity != intent.identity
+                            || current.parent_pid != intent.parent_pid
+                            || current.parent_created != intent.parent_created
+                            || current.expires_unix_ms != intent.expires_unix_ms
+                        {
+                            return Err(fault("Broker startup intent changed"));
+                        }
+                        Ok(())
+                    },
+                )
+            })();
+            let consumed = checked.is_ok();
+            crate::persistence::finish_control(
+                lycheedev_core::metadata::historical_write::finish_historical(checked, store.close()), inv.control.check()).map_err(|mut error| {
+                    if consumed {
+                        error.details = json!({"schema":"lycheedev.source-persistence.v1","key":store_key,"mutation":"consume","state":"committed","cause":error.clone()});
+                    }
+                    error
+                })
+        })();
+        crate::persistence::finish_files(held_identity, result, &inv.control)
+    })();
+    storage::finish_file(held_parent, result, &inv.control)
 }
 struct DisconnectObserver {
     stop: Arc<AtomicBool>,
@@ -291,30 +302,38 @@ fn locked_hash(
     options.read(true);
     use std::os::windows::fs::OpenOptionsExt;
     options.share_mode(1);
+    control.check()?;
     let mut file = options.open(path)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() > maximum {
-        return Err(fault("Broker identity file exceeds budget"));
-    }
-    let mut hash = Sha256::new();
-    let mut buffer = [0; 65536];
-    let mut bytes = 0u64;
-    loop {
+    let hashed = (|| {
+        let metadata = file.metadata()?;
+        if !metadata.is_file() || metadata.len() > maximum {
+            return Err(fault("Broker identity file exceeds budget"));
+        }
+        let mut hash = Sha256::new();
+        let mut buffer = [0; 65536];
+        let mut bytes = 0u64;
+        loop {
+            control.check()?;
+            let read = file.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            bytes += read as u64;
+            if bytes > maximum {
+                return Err(fault("Broker identity grew"));
+            }
+            hash.update(&buffer[..read]);
+        }
+        if bytes != metadata.len() {
+            return Err(fault("Broker identity length changed"));
+        }
         control.check()?;
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        bytes += read as u64;
-        if bytes > maximum {
-            return Err(fault("Broker identity grew"));
-        }
-        hash.update(&buffer[..read]);
+        Ok(format!("{:x}", hash.finalize()))
+    })();
+    match hashed {
+        Ok(digest) => Ok((file, digest)),
+        Err(error) => storage::finish_file(file, Err(error), control),
     }
-    if bytes != metadata.len() {
-        return Err(fault("Broker identity length changed"));
-    }
-    Ok((file, format!("{:x}", hash.finalize())))
 }
 fn identity(
     home: &Path,
@@ -333,19 +352,29 @@ fn identity(
     let release = canonical(&expected.release_root)?;
     storage::guard_path(&release, &release.join("release.json"))?;
     let (exe, exe_hash) = locked_hash(&current, 128 << 20, control)?;
-    let (manifest, manifest_hash) = locked_hash(&release.join("release.json"), 1 << 20, control)?;
-    if exe_hash != expected.exe_sha256 || manifest_hash != expected.release_manifest_sha256 {
-        return Err(fault("Verified broker release/executable identity changed"));
+    let (manifest, manifest_hash) =
+        match locked_hash(&release.join("release.json"), 1 << 20, control) {
+            Ok(value) => value,
+            Err(error) => return storage::finish_file(exe, Err(error), control),
+        };
+    let verified = (|| {
+        if exe_hash != expected.exe_sha256 || manifest_hash != expected.release_manifest_sha256 {
+            return Err(fault("Verified broker release/executable identity changed"));
+        }
+        let key = storage::sha256(
+            format!(
+                "{WIRE}\0{}\0{}\0{exe_hash}\0{manifest_hash}",
+                canonical(home)?.to_string_lossy().to_lowercase(),
+                current.to_string_lossy().to_lowercase()
+            )
+            .as_bytes(),
+        );
+        Ok(key)
+    })();
+    match verified {
+        Ok(key) => Ok((key, vec![exe, manifest])),
+        Err(error) => crate::persistence::finish_files(vec![exe, manifest], Err(error), control),
     }
-    let key = storage::sha256(
-        format!(
-            "{WIRE}\0{}\0{}\0{exe_hash}\0{manifest_hash}",
-            canonical(home)?.to_string_lossy().to_lowercase(),
-            current.to_string_lossy().to_lowercase()
-        )
-        .as_bytes(),
-    );
-    Ok((key, vec![exe, manifest]))
 }
 fn peer(
     stream: &BrokerStream,
@@ -366,11 +395,17 @@ fn peer(
         return Err(fault("Broker peer executable path differs"));
     }
     let (file, digest) = locked_hash(&image, 128 << 20, control)?;
-    if digest != expected.exe_sha256 {
-        return Err(fault("Broker peer executable content differs"));
+    let verified = (|| {
+        if digest != expected.exe_sha256 {
+            return Err(fault("Broker peer executable content differs"));
+        }
+        process.verify().map_err(native)?;
+        control.check()
+    })();
+    match verified {
+        Ok(()) => Ok(file),
+        Err(error) => storage::finish_file(file, Err(error), control),
     }
-    process.verify().map_err(native)?;
-    Ok(file)
 }
 fn utc_ms() -> Result<u64> {
     u64::try_from(
@@ -396,7 +431,12 @@ fn request_control(request: &Request, parent: &OperationControl) -> Result<Opera
     ))
 }
 fn processing_control(response: &OperationControl) -> OperationControl {
-    let reserve = REPLY_RESERVE.min(response.deadline().saturating_duration_since(Instant::now()) / 4);
+    let reserve = REPLY_RESERVE.min(
+        response
+            .deadline()
+            .saturating_duration_since(Instant::now())
+            / 4,
+    );
     response.child(
         response.deadline() - reserve,
         Arc::new(AtomicBool::new(false)),
@@ -531,178 +571,202 @@ fn analyze_request(
 /// one-time startup token, executable and sealed release. This function owns
 /// only this broker and its workers; it never kills or takes over a stale PID.
 pub fn serve(inv: &Invocation, tools: SourceTools<'_>, expected: BrokerIdentity) -> Result<()> {
-    workspace::open(&inv.home)?;
+    workspace::open_controlled(&inv.home, &inv.control)?;
     inv.control.check()?;
-    let (key, _held_identity) = identity(&inv.home, &expected, &inv.control)?;
-    let scope = BrokerScope::for_home(&inv.home).map_err(native)?;
-    let _aggregate = lycheedev_windows::NamedLock::acquire(&format!(
-        "Local\\LycheeDev.SourceBroker.{}",
-        scope.logon_hash()
-    ))
-    .map_err(native)?;
-    let _owner = ExclusiveLock::resource(&inv.home.join("locks"), "source:v1:broker-owner")?;
-    let mut custody = BrokerJob::own_current_process(2 << 30).map_err(native)?;
-    // This bounded, replaceable diagnostic is never an authorization source.
-    // Retain actual OS creation identity so an absent endpoint is not mistaken
-    // for a known process exit, or a recycled PID for the owned server.
-    let own = Process::open(std::process::id())
-        .map_err(native)?
-        .identity()
-        .clone();
-    let diagnostic = inv.home.join("tmp/source-broker-last-run.json");
-    let begun = Instant::now();
-    let record = |phase: &str, result: Option<&Result<()>>| {
-        let error = result.and_then(|r| r.as_ref().err()).map(|e| {
-            let message = e.message.chars().take(512).collect::<String>();
-            json!({"code":e.code,"exitCode":e.exit_code,"message":message})
-        });
-        let value = json!({"schema":"lycheedev.source-broker-lifecycle.v1","pid":own.pid,"created":own.created.to_string(),"phase":phase,"terminal":result.is_some(),"error":error,"unixMs":utc_ms().ok(),"elapsedMs":begun.elapsed().as_millis()});
-        let _ = storage::atomic_json(&diagnostic, &value);
-    };
-    record("starting", None);
-    let mut phase = "starting";
-    let result = (|| -> Result<()> {
-        let release_changed = Arc::new(AtomicBool::new(false));
-        let _release_watch =
-            ChangeWatch::start(&expected.release_root, true, release_changed.clone())
-                .map_err(native)?;
-        let mut listener = BrokerListener::bind(&scope).map_err(native)?;
-        let process = Process::open(std::process::id()).map_err(native)?;
-        let hello = Hello {
-            wire: WIRE.into(),
-            identity: key.clone(),
-            pid: std::process::id(),
-            started: process.identity().created,
-            executable: expected.exe_sha256.clone(),
-            release: canonical(&expected.release_root)?.to_string_lossy().into(),
-        };
-        let life = inv
-            .control
-            .deadline()
-            .min(Instant::now() + Duration::from_secs(600));
-        let mut worker = None;
-        loop {
-            phase = "accept";
-            record(phase, None);
-            inv.control.check()?;
-            if release_changed.load(Ordering::Acquire) {
-                return Err(fault("Broker sealed release changed"));
-            }
-            let idle = life.min(Instant::now() + Duration::from_secs(60));
-            let mut connection = match listener.accept(idle, inv.control.token()) {
-                Ok(c) => c,
-                Err(e) if e == "broker.deadline" => break,
-                Err(e) => return Err(native(e)),
+    let (key, held_identity) = identity(&inv.home, &expected, &inv.control)?;
+    let result = (|| {
+        let scope = BrokerScope::for_home(&inv.home).map_err(native)?;
+        let _aggregate = lycheedev_windows::NamedLock::acquire(&format!(
+            "Local\\LycheeDev.SourceBroker.{}",
+            scope.logon_hash()
+        ))
+        .map_err(native)?;
+        let owner = ExclusiveLock::resource_controlled(
+            &inv.home.join("locks"),
+            "source:v1:broker-owner",
+            &inv.control,
+        )?;
+        let owned = (|| {
+            let mut custody = BrokerJob::own_current_process(2 << 30).map_err(native)?;
+            // This bounded, replaceable diagnostic is never an authorization source.
+            // Retain actual OS creation identity so an absent endpoint is not mistaken
+            // for a known process exit, or a recycled PID for the owned server.
+            let own = Process::open(std::process::id())
+                .map_err(native)?
+                .identity()
+                .clone();
+            let diagnostic = inv.home.join("tmp/source-broker-last-run.json");
+            let begun = Instant::now();
+            let record = |phase: &str, result: Option<&Result<()>>| {
+                let error = result.and_then(|r| r.as_ref().err()).map(|e| {
+                    let message = e.message.chars().take(512).collect::<String>();
+                    json!({"code":e.code,"exitCode":e.exit_code,"message":message})
+                });
+                let value = json!({"schema":"lycheedev.source-broker-lifecycle.v1","pid":own.pid,"created":own.created.to_string(),"phase":phase,"terminal":result.is_some(),"error":error,"unixMs":utc_ms().ok(),"elapsedMs":begun.elapsed().as_millis()});
+                let _ = storage::atomic_json(&diagnostic, &value);
             };
-            let handshake = OperationControl::new(
-                life.min(Instant::now() + Duration::from_secs(5)),
-                inv.control.cancel_handle(),
-            );
-            connection.set_deadline(handshake.deadline(), handshake.cancel_handle());
-            let client_pid = connection.peer_pid().map_err(native)?;
-            let held_peer = match peer(&connection, &expected, client_pid, None, &handshake) {
-                Ok(p) => p,
-                Err(_) => continue,
-            };
-            if write_frame(&mut connection, &hello, 4096).is_err() {
-                continue;
-            }
-            let request: Request = match read_frame(&mut connection, REQUEST) {
-                Ok(r) => r,
-                Err(_) => continue,
-            };
-            if request.wire != WIRE || request.identity != key {
-                continue;
-            }
-            let life_control = OperationControl::new(life, inv.control.cancel_handle());
-            let response_control = match request_control(&request, &life_control) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-            // Both stages stay inside the original request and owner lifetime.
-            // Business cancellation cannot prevent its typed error from replying.
-            let control = processing_control(&response_control);
-            connection.set_deadline(response_control.deadline(), response_control.cancel_handle());
-            phase = "request";
-            let monitor = match DisconnectObserver::start(&connection, &control) {
-                Ok(monitor) => monitor,
-                Err(error) => {
-                    // No observer was admitted. Reap the retained semantic worker
-                    // before a bounded typed resource failure, then retire this
-                    // owner instead of panicking or proceeding without monitoring.
-                    worker.take();
-                    let response = Response {
-                        state: "partial".into(),
-                        worker_pid: None,
-                        batches: 0,
-                        reused: false,
-                        analysis: None,
-                        error: Some(error.clone()),
+            record("starting", None);
+            let mut phase = "starting";
+            let result = (|| -> Result<()> {
+                let release_changed = Arc::new(AtomicBool::new(false));
+                let _release_watch =
+                    ChangeWatch::start(&expected.release_root, true, release_changed.clone())
+                        .map_err(native)?;
+                let mut listener = BrokerListener::bind(&scope).map_err(native)?;
+                let process = Process::open(std::process::id()).map_err(native)?;
+                let hello = Hello {
+                    wire: WIRE.into(),
+                    identity: key.clone(),
+                    pid: std::process::id(),
+                    started: process.identity().created,
+                    executable: expected.exe_sha256.clone(),
+                    release: canonical(&expected.release_root)?.to_string_lossy().into(),
+                };
+                let life = inv
+                    .control
+                    .deadline()
+                    .min(Instant::now() + Duration::from_secs(600));
+                let mut worker = None;
+                loop {
+                    phase = "accept";
+                    record(phase, None);
+                    inv.control.check()?;
+                    if release_changed.load(Ordering::Acquire) {
+                        return Err(fault("Broker sealed release changed"));
+                    }
+                    let idle = life.min(Instant::now() + Duration::from_secs(60));
+                    let mut connection = match listener.accept(idle, inv.control.token()) {
+                        Ok(c) => c,
+                        Err(e) if e == "broker.deadline" => break,
+                        Err(e) => return Err(native(e)),
                     };
-                    write_frame(&mut connection, &response, RESPONSE)?;
-                    return Err(error);
-                }
-            };
-            let response = match request.action {
-                Action::Status => Response::status(&mut worker),
-                Action::Retire => {
-                    worker.take();
-                    Response {
-                        state: "closed".into(),
-                        worker_pid: None,
-                        batches: 0,
-                        reused: false,
-                        analysis: None,
-                        error: None,
-                    }
-                }
-                Action::Analyze => {
-                    match analyze_request(inv, &tools, &request, &mut worker, &control) {
-                        Ok(r) => r,
-                        Err(e) => {
-                            worker.take();
-                            Response {
-                                state: "partial".into(),
-                                worker_pid: None,
-                                batches: 0,
-                                reused: false,
-                                analysis: None,
-                                error: Some(e),
-                            }
+                    let handshake = OperationControl::new(
+                        life.min(Instant::now() + Duration::from_secs(5)),
+                        inv.control.cancel_handle(),
+                    );
+                    connection.set_deadline(handshake.deadline(), handshake.cancel_handle());
+                    let client_pid = connection.peer_pid().map_err(native)?;
+                    let held_peer = match peer(&connection, &expected, client_pid, None, &handshake)
+                    {
+                        Ok(p) => p,
+                        Err(error) if !error.details.is_null() => return Err(error),
+                        Err(_) => continue,
+                    };
+                    let handled = (|| -> Result<bool> {
+                        if write_frame(&mut connection, &hello, 4096).is_err() {
+                            return Ok(false);
                         }
+                        let request: Request = match read_frame(&mut connection, REQUEST) {
+                            Ok(r) => r,
+                            Err(_) => return Ok(false),
+                        };
+                        if request.wire != WIRE || request.identity != key {
+                            return Ok(false);
+                        }
+                        let life_control = OperationControl::new(life, inv.control.cancel_handle());
+                        let response_control = match request_control(&request, &life_control) {
+                            Ok(c) => c,
+                            Err(_) => return Ok(false),
+                        };
+                        // Both stages stay inside the original request and owner lifetime.
+                        // Business cancellation cannot prevent its typed error from replying.
+                        let control = processing_control(&response_control);
+                        connection.set_deadline(
+                            response_control.deadline(),
+                            response_control.cancel_handle(),
+                        );
+                        phase = "request";
+                        let monitor = match DisconnectObserver::start(&connection, &control) {
+                            Ok(monitor) => monitor,
+                            Err(error) => {
+                                // No observer was admitted. Reap the retained semantic worker
+                                // before a bounded typed resource failure, then retire this
+                                // owner instead of panicking or proceeding without monitoring.
+                                worker.take();
+                                let response = Response {
+                                    state: "partial".into(),
+                                    worker_pid: None,
+                                    batches: 0,
+                                    reused: false,
+                                    analysis: None,
+                                    error: Some(error.clone()),
+                                };
+                                write_frame(&mut connection, &response, RESPONSE)?;
+                                return Err(error);
+                            }
+                        };
+                        let response = match request.action {
+                            Action::Status => Response::status(&mut worker),
+                            Action::Retire => {
+                                worker.take();
+                                Response {
+                                    state: "closed".into(),
+                                    worker_pid: None,
+                                    batches: 0,
+                                    reused: false,
+                                    analysis: None,
+                                    error: None,
+                                }
+                            }
+                            Action::Analyze => {
+                                match analyze_request(inv, &tools, &request, &mut worker, &control)
+                                {
+                                    Ok(r) => r,
+                                    Err(e) => {
+                                        worker.take();
+                                        Response {
+                                            state: "partial".into(),
+                                            worker_pid: None,
+                                            batches: 0,
+                                            reused: false,
+                                            analysis: None,
+                                            error: Some(e),
+                                        }
+                                    }
+                                }
+                            }
+                        };
+                        // Stop and drain the read observer before returning a normal reply;
+                        // the successful client will then close its connection legitimately.
+                        drop(monitor);
+                        complete_response(
+                            &mut connection,
+                            &response,
+                            &control,
+                            &response_control,
+                            &release_changed,
+                            &mut worker,
+                        );
+                        if request.action == Action::Retire {
+                            phase = "retired";
+                            return Ok(true);
+                        }
+                        if worker.as_ref().is_some_and(|w| w.session.batches() >= 256) {
+                            worker.take();
+                        }
+                        Ok(false)
+                    })();
+                    if storage::finish_file(held_peer, handled, &inv.control)? {
+                        break;
                     }
                 }
-            };
-            // Stop and drain the read observer before returning a normal reply;
-            // the successful client will then close its connection legitimately.
-            drop(monitor);
-            complete_response(
-                &mut connection,
-                &response,
-                &control,
-                &response_control,
-                &release_changed,
-                &mut worker,
+                drop(worker);
+                drop(listener);
+                Ok(())
+            })();
+            let result = lycheedev_core::metadata::historical_write::finish_historical(
+                result,
+                custody.disarm().map_err(native),
             );
-            drop(held_peer);
-            if request.action == Action::Retire {
-                phase = "retired";
-                break;
-            }
-            if worker.as_ref().is_some_and(|w| w.session.batches() >= 256) {
-                worker.take();
-            }
-        }
-        drop(worker);
-        drop(listener);
-        Ok(())
+            record(phase, Some(&result));
+            result
+        })();
+        crate::persistence::finish_control(
+            lycheedev_core::metadata::historical_write::finish_historical(owned, owner.close()),
+            inv.control.check(),
+        )
     })();
-    let result = match custody.disarm().map_err(native) {
-        Ok(()) => result,
-        Err(error) => Err(error),
-    };
-    record(phase, Some(&result));
-    result
+    crate::persistence::finish_files(held_identity, result, &inv.control)
 }
 // Reply only within the original transport deadline, after business has stopped.
 fn complete_response(
@@ -716,7 +780,10 @@ fn complete_response(
     if control.check().is_err() {
         worker.take();
     }
-    connection.set_deadline(response_control.deadline(), response_control.cancel_handle());
+    connection.set_deadline(
+        response_control.deadline(),
+        response_control.cancel_handle(),
+    );
     // A disconnected writer never leaves an analyzed result reusable.
     if release_changed.load(Ordering::Acquire)
         || response_control.check().is_err()
@@ -739,10 +806,14 @@ fn transact_with_owner(
     owner: Option<&lycheedev_windows::ProcessIdentity>,
 ) -> Result<Option<Response>> {
     let retiring = request.action == Action::Retire;
-    let (key, _held_identity) = identity(&inv.home, expected, &inv.control)?;
-    let scope = BrokerScope::for_home(&inv.home).map_err(native)?;
-    let mut stream =
-        match BrokerStream::connect(&scope, inv.control.deadline(), inv.control.cancel_handle()) {
+    let (key, held_identity) = identity(&inv.home, expected, &inv.control)?;
+    let result = (|| {
+        let scope = BrokerScope::for_home(&inv.home).map_err(native)?;
+        let mut stream = match BrokerStream::connect(
+            &scope,
+            inv.control.deadline(),
+            inv.control.cancel_handle(),
+        ) {
             Ok(s) => s,
             Err(e) if e.starts_with("broker.not_found:") => return Ok(None),
             Err(e) => {
@@ -750,70 +821,73 @@ fn transact_with_owner(
                 return Err(native(e));
             }
         };
-    let exchange = (|| -> Result<Response> {
-        let hello: Hello = read_frame(&mut stream, 4096)?;
-        if owner.is_some_and(|p| p.pid != hello.pid || p.created != hello.started) {
-            return Err(fault(
-                "Broker readiness came from a different process creation identity",
-            ));
-        }
-        let _held_peer = peer(
-            &stream,
-            expected,
-            hello.pid,
-            Some(hello.started),
-            &inv.control,
-        )?;
-        if hello.wire != WIRE
-            || hello.identity != key
-            || hello.executable != expected.exe_sha256
-            || !same_path(
-                Path::new(&hello.release),
-                &canonical(&expected.release_root)?,
-            )
-        {
-            return Err(fault("Broker hello identity differs"));
-        }
-        // Keep the exact authenticated process handle before asking it to exit.
-        // A Retire response acknowledges worker shutdown, but the server still
-        // holds its owner lease until its function/CLI has actually terminated.
-        let retiring_process = if retiring {
-            let process = Process::open(hello.pid).map_err(native)?;
-            if process.identity().created != hello.started {
-                return Err(fault("Broker retirement process creation identity differs"));
+        let exchange = (|| -> Result<Response> {
+            let hello: Hello = read_frame(&mut stream, 4096)?;
+            if owner.is_some_and(|p| p.pid != hello.pid || p.created != hello.started) {
+                return Err(fault(
+                    "Broker readiness came from a different process creation identity",
+                ));
             }
-            Some(process)
-        } else {
-            None
-        };
-        write_frame(&mut stream, &request, REQUEST)?;
-        let response: Response = read_frame(&mut stream, RESPONSE)?;
-        if let Some(error) = response.error.clone() {
-            return Err(error);
-        }
-        if let Some(process) = retiring_process {
-            let exit = match process.wait_exit(inv.control.deadline(), inv.control.token()) {
-                Ok(exit) => exit,
-                Err(error) => {
-                    inv.control.check()?;
-                    return Err(native(error));
+            let held_peer = peer(
+                &stream,
+                expected,
+                hello.pid,
+                Some(hello.started),
+                &inv.control,
+            )?;
+            let result = (|| {
+                if hello.wire != WIRE
+                    || hello.identity != key
+                    || hello.executable != expected.exe_sha256
+                    || !same_path(
+                        Path::new(&hello.release),
+                        &canonical(&expected.release_root)?,
+                    )
+                {
+                    return Err(fault("Broker hello identity differs"));
                 }
-            };
-            if exit != 0 {
-                return Err(fault(format!(
-                    "Broker retirement exited unsuccessfully ({exit})"
-                )));
-            }
+                // Keep the exact authenticated process handle before asking it to exit.
+                // A Retire response acknowledges worker shutdown, but the server still
+                // holds its owner lease until its function/CLI has actually terminated.
+                let retiring_process = if retiring {
+                    let process = Process::open(hello.pid).map_err(native)?;
+                    if process.identity().created != hello.started {
+                        return Err(fault("Broker retirement process creation identity differs"));
+                    }
+                    Some(process)
+                } else {
+                    None
+                };
+                write_frame(&mut stream, &request, REQUEST)?;
+                let response: Response = read_frame(&mut stream, RESPONSE)?;
+                if let Some(error) = response.error.clone() {
+                    return Err(error);
+                }
+                if let Some(process) = retiring_process {
+                    let exit = match process.wait_exit(inv.control.deadline(), inv.control.token())
+                    {
+                        Ok(exit) => exit,
+                        Err(error) => {
+                            inv.control.check()?;
+                            return Err(native(error));
+                        }
+                    };
+                    if exit != 0 {
+                        return Err(fault(format!(
+                            "Broker retirement exited unsuccessfully ({exit})"
+                        )));
+                    }
+                }
+                Ok(response)
+            })();
+            storage::finish_file(held_peer, result, &inv.control)
+        })();
+        match exchange {
+            Ok(response) => Ok(Some(response)),
+            Err(error) => crate::persistence::finish_control(Err(error), inv.control.check()),
         }
-        Ok(response)
     })();
-    match exchange {
-        Ok(response) => Ok(Some(response)),
-        Err(error) => {
-            inv.control.check()?;
-            Err(error)
-        }
-    }
+    crate::persistence::finish_files(held_identity, result, &inv.control)
 }
 fn request(
     inv: &Invocation,
@@ -823,23 +897,26 @@ fn request(
     environment: Option<SourcePin>,
     batches: Vec<Vec<Value>>,
 ) -> Result<Request> {
-    let (key, _held) = identity(&inv.home, expected, &inv.control)?;
-    let remaining = inv.control.remaining()?.min(Duration::from_secs(90));
-    Ok(Request {
-        wire: WIRE.into(),
-        identity: key,
-        action,
-        deadline_unix_ms: utc_ms()?
-            .checked_add(remaining.as_millis() as u64)
-            .ok_or_else(|| fault("Deadline range"))?,
-        pin,
-        environment,
-        batches,
-    })
+    let (key, held_identity) = identity(&inv.home, expected, &inv.control)?;
+    let result = (|| {
+        let remaining = inv.control.remaining()?.min(Duration::from_secs(90));
+        Ok(Request {
+            wire: WIRE.into(),
+            identity: key,
+            action,
+            deadline_unix_ms: utc_ms()?
+                .checked_add(remaining.as_millis() as u64)
+                .ok_or_else(|| fault("Deadline range"))?,
+            pin,
+            environment,
+            batches,
+        })
+    })();
+    crate::persistence::finish_files(held_identity, result, &inv.control)
 }
 /// No implicit launch: absent endpoint is closed. An unknown owner stays owned.
 pub fn dispatch(inv: &Invocation, expected: &BrokerIdentity) -> Result<Outcome> {
-    workspace::open(&inv.home)?;
+    workspace::open_controlled(&inv.home, &inv.control)?;
     let action = match inv.command.as_str() {
         "source session status" => Action::Status,
         "source session close" => Action::Retire,
@@ -922,141 +999,176 @@ pub fn launch(inv: &Invocation, expected: &BrokerIdentity) -> Result<()> {
     let mut phases = vec![];
     let mut attempt_count = 0usize;
     let mut child_identity = None;
-    workspace::open(&inv.home)?;
-    let (key, _held) = identity(&inv.home, expected, &inv.control)?;
-    phases.push(json!({"phase":"identity-verified","elapsedMs":begun.elapsed().as_millis()}));
-    let _launch = ExclusiveLock::resource(&inv.home.join("locks"), "source:v1:broker-launch")?;
-    if transact(
-        inv,
-        expected,
-        request(inv, expected, Action::Status, None, None, vec![])?,
-    )?
-    .is_some()
-    {
-        return Ok(());
-    }
-    let parent = Process::open(std::process::id()).map_err(native)?;
-    let token = lycheedev_windows::random::token().map_err(native)?;
-    let store_key = format!("source/broker-start/{token}");
-    let intent = StartupIntent {
-        identity: key,
-        parent_pid: std::process::id(),
-        parent_created: parent.identity().created,
-        expires_unix_ms: utc_ms()?
-            .checked_add(10_000)
-            .ok_or_else(|| fault("Startup clock range"))?,
-    };
-    let mut store = Metadata::open(&inv.home, true)?;
-    store.put(&store_key, &intent, None)?;
-    let generation = store
-        .generation(&store_key)?
-        .ok_or_else(|| fault("Published startup intent missing"))?;
-    let arguments: Vec<OsString> = vec![
-        "--source-broker-server".into(),
-        "--home".into(),
-        canonical(&inv.home)?.into_os_string(),
-        "--release".into(),
-        canonical(&expected.release_root)?.into_os_string(),
-        "--parent-pid".into(),
-        intent.parent_pid.to_string().into(),
-        "--parent-created".into(),
-        intent.parent_created.to_string().into(),
-        "--start-token".into(),
-        token.clone().into(),
-    ];
-    // A retained broker communicates exclusively through its authenticated
-    // named pipe. Broad std Command inheritance would retain the caller's
-    // unrelated stdout handles even when all three configured streams are null.
-    let spawned = lycheedev_windows::detached::spawn_hidden_no_inherit(
-        &expected.exe_path,
-        &arguments,
-        &canonical(&inv.cwd)?,
-        &[("LYCHEEDEV_BROKER_START".into(), token.clone().into())],
-    )
-    .map_err(native);
-    let started = (|| -> Result<()> {
-        let mut child = spawned?;
-        child_identity =
-            Some(json!({"pid":child.id(),"created":child.identity().created.to_string()}));
-        phases.push(json!({"phase":"spawned","elapsedMs":begun.elapsed().as_millis()}));
-        let deadline = inv
-            .control
-            .deadline()
-            .min(Instant::now() + Duration::from_secs(5));
-        let mut startup = inv.clone();
-        // Native readiness waits observe the original caller token directly;
-        // a fresh child token would not asynchronously inherit Console Ctrl+C.
-        startup.control = OperationControl::new(deadline, inv.control.cancel_handle());
-        let ready = (|| -> Result<()> {
-            loop {
-                startup.control.check()?;
-                if let Some(exit) = child.try_wait().map_err(native)? {
-                    return Err(fault(format!(
-                        "Owned Source broker exited before readiness ({exit})"
-                    )));
-                }
-                attempt_count += 1;
-                let request = request(&startup, expected, Action::Status, None, None, vec![])?;
-                if phases.len() < 24 {
-                    phases.push(json!({"phase":"readiness-request-verified","attempt":attempt_count,"elapsedMs":begun.elapsed().as_millis()}));
-                }
-                let response =
-                    transact_with_owner(&startup, expected, request, Some(child.identity()))?;
-                if phases.len() < 24 {
-                    phases.push(json!({"phase":"readiness-exchange","attempt":attempt_count,"available":response.is_some(),"elapsedMs":begun.elapsed().as_millis()}));
-                }
-                if response.is_some() {
-                    return Ok(());
-                }
-                // This short bounded startup wait never extends the operation
-                // deadline and never probes or takes over an unknown owner.
-                std::thread::sleep(Duration::from_millis(20));
-            }
-        })();
-        if ready.is_err() {
-            child
-                .terminate_and_wait(Instant::now() + Duration::from_secs(2))
-                .map_err(native)?;
-            inv.control.check()?;
-            if Instant::now() >= deadline {
-                return Err(fault(
-                    "Owned Source broker startup unavailable within five seconds",
-                ));
-            }
-        }
-        ready?;
-        child.handoff().map_err(native)?;
-        Ok(())
-    })();
-    let diagnostic = inv.home.join("tmp/source-broker-launch-last.json");
-    let value = json!({"schema":"lycheedev.source-broker-launch-diagnostic.v1","parentPid":std::process::id(),"child":child_identity,"attempts":attempt_count,"phaseTruncated":phases.len()>=24,"phases":phases,"terminal":true,"complete":started.is_ok(),"elapsedMs":begun.elapsed().as_millis(),"error":started.as_ref().err().map(|e|json!({"code":e.code,"exitCode":e.exit_code}))});
-    if storage::guard_path(&inv.home, &diagnostic).is_ok() {
-        let _ = storage::atomic_json(&diagnostic, &value);
-    }
-    // Successful server consumes this key transactionally. On failed launch,
-    // remove only our unchanged intent, never another launcher's metadata.
-    if store.generation(&store_key)? == Some(generation) {
-        store.delete_checked(
-            std::slice::from_ref(&store_key),
-            &[(store_key.clone(), generation)],
-            |documents| {
-                let doc = documents
-                    .iter()
-                    .find(|d| d.key == store_key)
-                    .ok_or_else(|| fault("Startup intent disappeared"))?;
-                let current: StartupIntent = serde_json::from_value(doc.value.clone())?;
-                if current.identity != intent.identity
-                    || current.parent_pid != intent.parent_pid
-                    || current.parent_created != intent.parent_created
-                    || current.expires_unix_ms != intent.expires_unix_ms
-                {
-                    return Err(fault("Startup intent changed during launch"));
-                }
-                Ok(())
-            },
+    workspace::open_controlled(&inv.home, &inv.control)?;
+    let (key, held_identity) = identity(&inv.home, expected, &inv.control)?;
+    let result = (|| {
+        phases.push(json!({"phase":"identity-verified","elapsedMs":begun.elapsed().as_millis()}));
+        let launch = ExclusiveLock::resource_controlled(
+            &inv.home.join("locks"),
+            "source:v1:broker-launch",
+            &inv.control,
         )?;
+        let result = (|| {
+            if transact(
+                inv,
+                expected,
+                request(inv, expected, Action::Status, None, None, vec![])?,
+            )?
+            .is_some()
+            {
+                return Ok(());
+            }
+            let parent = Process::open(std::process::id()).map_err(native)?;
+            let token = lycheedev_windows::random::token().map_err(native)?;
+            let store_key = format!("source/broker-start/{token}");
+            let intent = StartupIntent {
+                identity: key,
+                parent_pid: std::process::id(),
+                parent_created: parent.identity().created,
+                expires_unix_ms: utc_ms()?
+                    .checked_add(10_000)
+                    .ok_or_else(|| fault("Startup clock range"))?,
+            };
+            let generation =
+                crate::persistence::create_intent(&inv.home, &store_key, &intent, &inv.control)?;
+            let arguments: Vec<OsString> = vec![
+                "--source-broker-server".into(),
+                "--home".into(),
+                canonical(&inv.home).map_err(|error| crate::persistence::retained_intent(error, &store_key, generation))?.into_os_string(),
+                "--release".into(),
+                canonical(&expected.release_root).map_err(|error| crate::persistence::retained_intent(error, &store_key, generation))?.into_os_string(),
+                "--parent-pid".into(),
+                intent.parent_pid.to_string().into(),
+                "--parent-created".into(),
+                intent.parent_created.to_string().into(),
+                "--start-token".into(),
+                token.clone().into(),
+            ];
+            // A retained broker communicates exclusively through its authenticated
+            // named pipe. Broad std Command inheritance would retain the caller's
+            // unrelated stdout handles even when all three configured streams are null.
+            let spawned = lycheedev_windows::detached::spawn_hidden_no_inherit(
+                &expected.exe_path,
+                &arguments,
+                &canonical(&inv.cwd).map_err(|error| crate::persistence::retained_intent(error, &store_key, generation))?,
+                &[("LYCHEEDEV_BROKER_START".into(), token.clone().into())],
+            )
+            .map_err(native);
+            let started = (|| -> Result<()> {
+                let mut child = spawned?;
+                child_identity =
+                    Some(json!({"pid":child.id(),"created":child.identity().created.to_string()}));
+                phases.push(json!({"phase":"spawned","elapsedMs":begun.elapsed().as_millis()}));
+                let deadline = inv
+                    .control
+                    .deadline()
+                    .min(Instant::now() + Duration::from_secs(5));
+                let mut startup = inv.clone();
+                // Native readiness waits observe the original caller token directly;
+                // a fresh child token would not asynchronously inherit Console Ctrl+C.
+                startup.control = OperationControl::new(deadline, inv.control.cancel_handle());
+                let ready = (|| -> Result<()> {
+                    loop {
+                        startup.control.check()?;
+                        if let Some(exit) = child.try_wait().map_err(native)? {
+                            return Err(fault(format!(
+                                "Owned Source broker exited before readiness ({exit})"
+                            )));
+                        }
+                        attempt_count += 1;
+                        let request =
+                            request(&startup, expected, Action::Status, None, None, vec![])?;
+                        if phases.len() < 24 {
+                            phases.push(json!({"phase":"readiness-request-verified","attempt":attempt_count,"elapsedMs":begun.elapsed().as_millis()}));
+                        }
+                        let response = transact_with_owner(
+                            &startup,
+                            expected,
+                            request,
+                            Some(child.identity()),
+                        )?;
+                        if phases.len() < 24 {
+                            phases.push(json!({"phase":"readiness-exchange","attempt":attempt_count,"available":response.is_some(),"elapsedMs":begun.elapsed().as_millis()}));
+                        }
+                        if response.is_some() {
+                            return Ok(());
+                        }
+                        // This short bounded startup wait never extends the operation
+                        // deadline and never probes or takes over an unknown owner.
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                })();
+                if let Err(error) = ready {
+                    let retired = child
+                        .terminate_and_wait(Instant::now() + Duration::from_secs(2))
+                        .map_err(native);
+                    return crate::persistence::finish_control(
+                        lycheedev_core::metadata::historical_write::finish_historical(
+                            Err(error),
+                            retired,
+                        ),
+                        inv.control.check(),
+                    );
+                }
+                child.handoff().map_err(native)?;
+                Ok(())
+            })();
+            let diagnostic = inv.home.join("tmp/source-broker-launch-last.json");
+            let value = json!({"schema":"lycheedev.source-broker-launch-diagnostic.v1","parentPid":std::process::id(),"child":child_identity,"attempts":attempt_count,"phaseTruncated":phases.len()>=24,"phases":phases,"terminal":true,"complete":started.is_ok(),"elapsedMs":begun.elapsed().as_millis(),"error":started.as_ref().err().map(|e|json!({"code":e.code,"exitCode":e.exit_code}))});
+            if storage::guard_path(&inv.home, &diagnostic).is_ok() {
+                let _ = storage::atomic_json(&diagnostic, &value);
+            }
+            // Successful server consumes this key transactionally. On failed launch,
+            // remove only our unchanged intent, never another launcher's metadata.
+            let cleanup = remove_startup_intent(inv, &store_key, generation, &intent);
+            lycheedev_core::metadata::historical_write::finish_historical(started, cleanup)
+        })();
+        crate::persistence::finish_control(
+            lycheedev_core::metadata::historical_write::finish_historical(result, launch.close()),
+            inv.control.check(),
+        )
+    })();
+    crate::persistence::finish_files(held_identity, result, &inv.control)
+}
+
+fn remove_startup_intent(
+    inv: &Invocation,
+    key: &str,
+    generation: i64,
+    expected: &StartupIntent,
+) -> Result<()> {
+    let result = crate::persistence::consume(
+        &inv.home,
+        key,
+        Some(generation),
+        &inv.control,
+        |current: StartupIntent| {
+            if current.identity != expected.identity
+                || current.parent_pid != expected.parent_pid
+                || current.parent_created != expected.parent_created
+                || current.expires_unix_ms != expected.expires_unix_ms
+            {
+                return Err(fault("Startup intent changed during launch"));
+            }
+            Ok(())
+        },
+    );
+    match result {
+        Err(error)
+            if matches!(
+                error.code.as_str(),
+                "vault.record_missing" | "vault.generation_conflict"
+            ) && error.details.is_null() =>
+        {
+            Ok(())
+        }
+        Err(mut error) => {
+            error.details = json!({"schema":"lycheedev.source-persistence.v1","key":key,"generation":generation,"mutation":"consume","state":"unconfirmed","cause":error.clone()}
+            );
+            Err(error)
+        }
+        Ok(()) => Ok(()),
     }
-    started
 }
 
 #[cfg(test)]

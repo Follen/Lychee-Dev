@@ -330,7 +330,7 @@ pub fn prune_with_control(
     control: &lycheedev_core::control::OperationControl,
 ) -> Result<PruneResult> {
     control.check()?;
-    workspace::open(home)?;
+    workspace::open_controlled(home, control)?;
     let _capacity = ExclusiveLock::resource(&home.join("locks"), "source:v1:worktree-capacity")?;
     // Broker retirement has a separate process identity protocol. Never infer it from age/PID absence.
     let _broker = ExclusiveLock::resource(&home.join("locks"), "source:v1:broker-owner")

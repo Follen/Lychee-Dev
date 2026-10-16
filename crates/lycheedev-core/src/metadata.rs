@@ -1292,3 +1292,4 @@ mod raw_page;
 
 mod capture_write;
 pub(crate) use capture_write::CaptureWriteState;
+mod source_controlled;

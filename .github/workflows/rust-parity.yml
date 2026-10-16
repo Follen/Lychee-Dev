@@ -676,6 +676,22 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node tools/rust-cargo.mjs --owner ci-metadata-capture-write --one-shot -- test --locked --offline -p lycheedev-core --lib metadata::capture_write:: -j 1
+      - name: Run Source single-use metadata generation fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-source-metadata --one-shot -- test --locked --offline -p lycheedev-core --lib metadata::source_controlled::tests -j 1
+      - name: Run controlled derived cache publication fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-source-cache-publication --one-shot -- test --locked --offline -p lycheedev-core --lib cache::publication::tests -j 1
+      - name: Run Source persistence owner and intent fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-source-persistence --one-shot -- test --locked --offline -p lycheedev-source --lib persistence::tests -j 1
+      - name: Run Source authenticated query storage fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-source-query-storage --one-shot -- test --locked --offline -p lycheedev-source --lib query_store::tests -j 1
       - name: Run independent metadata budget and cleanup fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-metadata-supplemental --one-shot -- test --locked --offline -p lycheedev-core --lib metadata::supplemental_tests -j 1

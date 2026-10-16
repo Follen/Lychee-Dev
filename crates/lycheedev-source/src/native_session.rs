@@ -2,8 +2,7 @@
 //! Windows Source mechanisms; the cached analysis never executes studied code.
 use crate::native_research::{QueryRequest, ResearchSession, WorkerRequest};
 use lycheedev_core::{
-    Invocation, Outcome, Result, ToolkitError, control::OperationControl, metadata::Metadata,
-    storage, workspace,
+    Invocation, Outcome, Result, ToolkitError, control::OperationControl, storage, workspace,
 };
 use lycheedev_windows::{
     BrokerJob, Process,
@@ -273,21 +272,28 @@ fn identity(control: &OperationControl) -> Result<Identity> {
         options.share_mode(1);
     }
     let mut file = options.open(&path)?;
-    let mut hash = Sha256::new();
-    let mut bytes = [0u8; 65536];
-    loop {
-        control.check()?;
-        let n = file.read(&mut bytes)?;
-        if n == 0 {
-            break;
+    let hashed = (|| {
+        let mut hash = Sha256::new();
+        let mut bytes = [0u8; 65536];
+        loop {
+            control.check()?;
+            let n = file.read(&mut bytes)?;
+            if n == 0 {
+                break;
+            }
+            hash.update(&bytes[..n]);
         }
-        hash.update(&bytes[..n]);
+        control.check()?;
+        Ok(format!("{:x}", hash.finalize()))
+    })();
+    match hashed {
+        Ok(digest) => Ok(Identity {
+            path,
+            digest,
+            _file: file,
+        }),
+        Err(error) => storage::finish_file(file, Err(error), control),
     }
-    Ok(Identity {
-        path,
-        digest: format!("{:x}", hash.finalize()),
-        _file: file,
-    })
 }
 fn write_frame(writer: &mut dyn Write, value: &impl Serialize, maximum: usize) -> Result<()> {
     let bytes = crate::lsp_frame::serialize(value, maximum).map_err(|_| {
@@ -433,7 +439,7 @@ fn exchange(inv: &Invocation, current: &Identity, request: &Request) -> Result<O
 }
 
 pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
-    workspace::open(&inv.home)?;
+    workspace::open_controlled(&inv.home, &inv.control)?;
     let action = match inv.command.as_str() {
         "source session status" => Action::Status,
         "source session close" => Action::Close,
@@ -444,88 +450,149 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
         }
     };
     let current = identity(&inv.control)?;
-    Ok(Outcome::new(
-        exchange(inv, &current, &request(inv, action, None)?)?
-            .unwrap_or_else(|| json!({"state":"closed","backend":"native"})),
-    ))
+    let result = (|| {
+        Ok(Outcome::new(
+            exchange(inv, &current, &request(inv, action, None)?)?
+                .unwrap_or_else(|| json!({"state":"closed","backend":"native"})),
+        ))
+    })();
+    storage::finish_file(current._file, result, &inv.control)
 }
 pub fn analyze(inv: &Invocation, work: WorkerRequest) -> Result<Value> {
-    workspace::open(&inv.home)?;
+    workspace::open_controlled(&inv.home, &inv.control)?;
     let current = identity(&inv.control)?;
-    let mut reuse = request(inv, Action::Query, None)?;
-    reuse.cached = Some(CachedQuery {
-        key: work.snapshot.cache_key(&inv.control)?,
-        query: work.query.clone(),
-    });
-    match exchange(inv, &current, &reuse) {
-        Ok(Some(value)) => return Ok(value),
-        Ok(None) => {},
-        Err(error) if error.code == "source.native_snapshot_missing" => {},
-        Err(error) => return Err(error),
-    }
-    let query = request(inv, Action::Query, Some(work))?;
-    if let Some(value) = exchange(inv, &current, &query)? {
-        return Ok(value);
-    }
-    let _launch =
-        storage::ExclusiveLock::resource(&inv.home.join("locks"), "source:native-session-launch")?;
-    if let Some(value) = exchange(inv, &current, &query)? {
-        return Ok(value);
-    }
-    let parent = Process::open(std::process::id()).map_err(platform)?;
-    let token = lycheedev_windows::random::token().map_err(platform)?;
-    let store_key = format!("source/native-session-start/{token}");
-    let intent = StartupIntent {
-        identity: startup_identity(inv, &current)?,
-        parent_pid: std::process::id(),
-        parent_created: parent.identity().created,
-        expires_unix_ms: utc_ms()?.saturating_add(10_000),
-    };
-    Metadata::open(&inv.home, true)?.put(&store_key, &intent, None)?;
-    let args = vec![
-        "--source-native-session-server".into(),
-        "--home".into(),
-        inv.home.canonicalize()?.into_os_string(),
-        "--parent-pid".into(),
-        intent.parent_pid.to_string().into(),
-        "--parent-created".into(),
-        intent.parent_created.to_string().into(),
-        "--start-token".into(),
-        token.clone().into(),
-    ];
-    let spawned = lycheedev_windows::detached::spawn_hidden_no_inherit(
-        &current.path,
-        &args,
-        &inv.cwd.canonicalize()?,
-        &[("LYCHEEDEV_NATIVE_SOURCE_START".into(), token.into())],
-    );
-    let mut child = match spawned {
-        Ok(child) => child,
-        Err(message) => {
-            Metadata::open(&inv.home, true)?.delete(&store_key)?;
-            return Err(platform(message));
+    let result = (|| {
+        let mut reuse = request(inv, Action::Query, None)?;
+        reuse.cached = Some(CachedQuery {
+            key: work.snapshot.cache_key(&inv.control)?,
+            query: work.query.clone(),
+        });
+        match exchange(inv, &current, &reuse) {
+            Ok(Some(value)) => return Ok(value),
+            Ok(None) => {}
+            Err(error) if error.code == "source.native_snapshot_missing" => {}
+            Err(error) => return Err(error),
         }
-    };
-    let ready = (|| -> Result<()> {
-        loop {
-            inv.control.check()?;
-            if child.try_wait().map_err(platform)?.is_some() {
-                return Err(fault("Native Source owner exited during startup"));
-            }
-            if let Some(status) = exchange(inv, &current, &request(inv, Action::Status, None)?)? {
-                verify_status_owner(&status, child.id())?;
-                return Ok(());
-            }
-            std::thread::sleep(Duration::from_millis(10));
+        let query = request(inv, Action::Query, Some(work))?;
+        if let Some(value) = exchange(inv, &current, &query)? {
+            return Ok(value);
         }
+        let launch = storage::ExclusiveLock::resource_controlled(
+            &inv.home.join("locks"),
+            "source:native-session-launch",
+            &inv.control,
+        )?;
+        let result = (|| {
+            if let Some(value) = exchange(inv, &current, &query)? {
+                return Ok(value);
+            }
+            let parent = Process::open(std::process::id()).map_err(platform)?;
+            let token = lycheedev_windows::random::token().map_err(platform)?;
+            let store_key = format!("source/native-session-start/{token}");
+            let intent = StartupIntent {
+                identity: startup_identity(inv, &current)?,
+                parent_pid: std::process::id(),
+                parent_created: parent.identity().created,
+                expires_unix_ms: utc_ms()?.saturating_add(10_000),
+            };
+            let generation =
+                crate::persistence::create_intent(&inv.home, &store_key, &intent, &inv.control)?;
+            let args = vec![
+                "--source-native-session-server".into(),
+                "--home".into(),
+                inv.home.canonicalize().map_err(ToolkitError::from).map_err(|error| crate::persistence::retained_intent(error, &store_key, generation))?.into_os_string(),
+                "--parent-pid".into(),
+                intent.parent_pid.to_string().into(),
+                "--parent-created".into(),
+                intent.parent_created.to_string().into(),
+                "--start-token".into(),
+                token.clone().into(),
+            ];
+            let spawned = lycheedev_windows::detached::spawn_hidden_no_inherit(
+                &current.path,
+                &args,
+                &inv.cwd.canonicalize().map_err(ToolkitError::from).map_err(|error| crate::persistence::retained_intent(error, &store_key, generation))?,
+                &[("LYCHEEDEV_NATIVE_SOURCE_START".into(), token.into())],
+            );
+            let mut child = match spawned {
+                Ok(child) => child,
+                Err(message) => {
+                    return lycheedev_core::metadata::historical_write::finish_historical(
+                        Err(platform(message)),
+                        remove_startup_intent(inv, &store_key, generation, &intent),
+                    );
+                }
+            };
+            let ready = (|| -> Result<()> {
+                loop {
+                    inv.control.check()?;
+                    if child.try_wait().map_err(platform)?.is_some() {
+                        return Err(fault("Native Source owner exited during startup"));
+                    }
+                    if let Some(status) =
+                        exchange(inv, &current, &request(inv, Action::Status, None)?)?
+                    {
+                        verify_status_owner(&status, child.id())?;
+                        return Ok(());
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            })();
+            if let Err(error) = ready {
+                let retired = child
+                    .terminate_and_wait(inv.control.deadline())
+                    .map_err(platform);
+                let failed = lycheedev_core::metadata::historical_write::finish_historical(
+                    Err(error),
+                    retired,
+                );
+                return lycheedev_core::metadata::historical_write::finish_historical(
+                    failed,
+                    remove_startup_intent(inv, &store_key, generation, &intent),
+                );
+            }
+            child.handoff().map_err(platform)?;
+            exchange(inv, &current, &query)?
+                .ok_or_else(|| fault("Source owner disappeared after startup"))
+        })();
+        crate::persistence::finish_control(
+            lycheedev_core::metadata::historical_write::finish_historical(result, launch.close()),
+            inv.control.check(),
+        )
     })();
-    if let Err(error) = ready {
-        let _ = child.terminate_and_wait(inv.control.deadline());
-        Metadata::open(&inv.home, true)?.delete(&store_key)?;
-        return Err(error);
+    storage::finish_file(current._file, result, &inv.control)
+}
+
+fn remove_startup_intent(
+    inv: &Invocation,
+    key: &str,
+    generation: i64,
+    expected: &StartupIntent,
+) -> Result<()> {
+    let result = crate::persistence::consume(
+        &inv.home,
+        key,
+        Some(generation),
+        &inv.control,
+        |current: StartupIntent| {
+            if current.identity != expected.identity
+                || current.parent_pid != expected.parent_pid
+                || current.parent_created != expected.parent_created
+                || current.expires_unix_ms != expected.expires_unix_ms
+            {
+                return Err(fault("Native Source startup intent changed during launch"));
+            }
+            Ok(())
+        },
+    );
+    match result {
+        Err(error) if error.code == "vault.record_missing" && error.details.is_null() => Ok(()),
+        Err(mut error) => {
+            error.details = json!({"schema":"lycheedev.source-persistence.v1","key":key,"generation":generation,"mutation":"consume","state":"unconfirmed","cause":error.clone()});
+            Err(error)
+        }
+        Ok(()) => Ok(()),
     }
-    child.handoff().map_err(platform)?;
-    exchange(inv, &current, &query)?.ok_or_else(|| fault("Source owner disappeared after startup"))
 }
 
 fn startup_identity(inv: &Invocation, current: &Identity) -> Result<String> {
@@ -592,31 +659,39 @@ pub fn server(args: &[String]) -> Result<()> {
         control: OperationControl::new(Instant::now() + OWNER_LIFETIME, console.token()),
     };
     let current = identity(&inv.control)?;
-    let own = Process::open(std::process::id()).map_err(platform)?;
-    let parent = Process::open(pid).map_err(platform)?;
-    if own.parent_pid().map_err(platform)? != pid
-        || parent.identity().created != created
-        || parent.image_path().map_err(platform)?.canonicalize()? != current.path
-    {
-        return Err(fault("Native Source actual launcher differs"));
+    let startup = (|| {
+        let own = Process::open(std::process::id()).map_err(platform)?;
+        let parent = Process::open(pid).map_err(platform)?;
+        if own.parent_pid().map_err(platform)? != pid
+            || parent.identity().created != created
+            || parent.image_path().map_err(platform)?.canonicalize()? != current.path
+        {
+            return Err(fault("Native Source actual launcher differs"));
+        }
+        parent.verify().map_err(platform)?;
+        let expected = startup_identity(&inv, &current)?;
+        let now = utc_ms()?;
+        crate::persistence::consume::<StartupIntent, _>(
+            &inv.home,
+            &format!("source/native-session-start/{token}"),
+            None,
+            &inv.control,
+            |intent| {
+                if intent.identity != expected
+                    || intent.parent_pid != pid
+                    || intent.parent_created != created
+                    || intent.expires_unix_ms <= now
+                    || intent.expires_unix_ms > now.saturating_add(10_000)
+                {
+                    return Err(fault("Native Source startup intent differs or expired"));
+                }
+                Ok(())
+            },
+        )
+    })();
+    if let Err(error) = startup {
+        return storage::finish_file(current._file, Err(error), &inv.control);
     }
-    parent.verify().map_err(platform)?;
-    let expected = startup_identity(&inv, &current)?;
-    let now = utc_ms()?;
-    Metadata::open(&inv.home, true)?.consume::<StartupIntent, _>(
-        &format!("source/native-session-start/{token}"),
-        |intent| {
-            if intent.identity != expected
-                || intent.parent_pid != pid
-                || intent.parent_created != created
-                || intent.expires_unix_ms <= now
-                || intent.expires_unix_ms > now.saturating_add(10_000)
-            {
-                return Err(fault("Native Source startup intent differs or expired"));
-            }
-            Ok(())
-        },
-    )?;
     serve_owned(&inv, current)
 }
 
@@ -624,175 +699,206 @@ pub fn serve(inv: &Invocation) -> Result<()> {
     serve_owned(inv, identity(&inv.control)?)
 }
 fn serve_owned(inv: &Invocation, current: Identity) -> Result<()> {
+    let result = serve_borrowed(inv, &current);
+    storage::finish_file(current._file, result, &inv.control)
+}
+fn serve_borrowed(inv: &Invocation, current: &Identity) -> Result<()> {
     let lifetime = SessionLifetime::new(Instant::now(), inv.control.deadline());
     let owner_control = inv
         .control
         .child(lifetime.deadline, inv.control.cancel_handle());
-    workspace::open(&inv.home)?;
+    workspace::open_controlled(&inv.home, &inv.control)?;
     let scope = BrokerScope::for_native_source(&inv.home).map_err(platform)?;
-    let _owner =
-        storage::ExclusiveLock::resource(&inv.home.join("locks"), "source:native-session-owner")?;
-    let mut job = BrokerJob::own_current_process(2 << 30).map_err(platform)?;
-    let own = Process::open(std::process::id()).map_err(platform)?;
-    let mut listener = BrokerListener::bind(&scope).map_err(platform)?;
-    let mut cached: Option<Cached> = None;
-    let run = (|| -> Result<()> {
-        let mut idle_deadline = lifetime.idle_deadline(Instant::now());
-        loop {
-            // Only an admitted request may restart idle. Failed handshakes and
-            // malformed envelopes retain this absolute idle boundary.
-            owner_control.check()?;
-            let mut stream = match listener.accept(
-                idle_deadline,
-                owner_control.token(),
-            ) {
-                Ok(stream) => stream,
-                Err(message) if message.contains("deadline") => return Ok(()),
-                Err(message) => return Err(platform(message)),
-            };
-            stream.set_deadline(
-                lifetime.handshake_deadline(Instant::now(), idle_deadline),
-                owner_control.cancel_handle(),
-            );
-            if write_frame(
-                &mut stream,
-                &Hello {
-                    wire: WIRE.into(),
-                    executable: current.digest.clone(),
-                    pid: own.identity().pid,
-                    created: own.identity().created,
-                },
-                4096,
-            ).is_err() {
-                continue;
-            }
-            let request: Request = match read_frame(&mut stream, REQUEST_BYTES) {
-                Ok(request) => request,
-                Err(_) => continue,
-            };
-            if request.wire != WIRE {
-                continue;
-            }
-            let Some(remaining) = admitted_request_remaining(request.deadline_unix_ms, utc_ms()?) else {
-                continue;
-            };
-            if remaining.is_zero() {
-                // Go dequeues an already-cancelled task without touching its
-                // worker, then resets idle. Its expired transport cannot reply.
-                idle_deadline = lifetime.idle_deadline(Instant::now());
-                continue;
-            }
-            let total_deadline = Instant::now()
-                .checked_add(remaining)
-                .ok_or_else(|| fault("Native request deadline range"))?;
-            let total_deadline = lifetime.request_deadline(total_deadline);
-            let response_control =
-                owner_control.child(total_deadline, owner_control.cancel_handle());
-            stream.set_deadline(total_deadline, response_control.cancel_handle());
-            match request.action {
-                Action::Status => write_frame(
+    let owner = storage::ExclusiveLock::resource_controlled(
+        &inv.home.join("locks"),
+        "source:native-session-owner",
+        &owner_control,
+    )?;
+    let owned = (|| {
+        let mut job = BrokerJob::own_current_process(2 << 30).map_err(platform)?;
+        let own = Process::open(std::process::id()).map_err(platform)?;
+        let mut listener = BrokerListener::bind(&scope).map_err(platform)?;
+        let mut cached: Option<Cached> = None;
+        let run = (|| -> Result<()> {
+            let mut idle_deadline = lifetime.idle_deadline(Instant::now());
+            loop {
+                // Only an admitted request may restart idle. Failed handshakes and
+                // malformed envelopes retain this absolute idle boundary.
+                owner_control.check()?;
+                let mut stream = match listener.accept(idle_deadline, owner_control.token()) {
+                    Ok(stream) => stream,
+                    Err(message) if message.contains("deadline") => return Ok(()),
+                    Err(message) => return Err(platform(message)),
+                };
+                stream.set_deadline(
+                    lifetime.handshake_deadline(Instant::now(), idle_deadline),
+                    owner_control.cancel_handle(),
+                );
+                if write_frame(
                     &mut stream,
-                    &Response {
-                        value: Some({let mut status=session_status(cached.as_ref().map(|value|value.key.as_str()),own.identity().pid);
-                            status["batches"]=json!(cached.as_ref().map_or(0,|value|value.admission.batches));status}),
-                        error: None,
+                    &Hello {
+                        wire: WIRE.into(),
+                        executable: current.digest.clone(),
+                        pid: own.identity().pid,
+                        created: own.identity().created,
                     },
-                    RESPONSE_BYTES,
-                )?,
-                Action::Close => {
-                    drop(cached.take());
-                    write_frame(
+                    4096,
+                )
+                .is_err()
+                {
+                    continue;
+                }
+                let request: Request = match read_frame(&mut stream, REQUEST_BYTES) {
+                    Ok(request) => request,
+                    Err(_) => continue,
+                };
+                if request.wire != WIRE {
+                    continue;
+                }
+                let Some(remaining) =
+                    admitted_request_remaining(request.deadline_unix_ms, utc_ms()?)
+                else {
+                    continue;
+                };
+                if remaining.is_zero() {
+                    // Go dequeues an already-cancelled task without touching its
+                    // worker, then resets idle. Its expired transport cannot reply.
+                    idle_deadline = lifetime.idle_deadline(Instant::now());
+                    continue;
+                }
+                let total_deadline = Instant::now()
+                    .checked_add(remaining)
+                    .ok_or_else(|| fault("Native request deadline range"))?;
+                let total_deadline = lifetime.request_deadline(total_deadline);
+                let response_control =
+                    owner_control.child(total_deadline, owner_control.cancel_handle());
+                stream.set_deadline(total_deadline, response_control.cancel_handle());
+                match request.action {
+                    Action::Status => write_frame(
                         &mut stream,
                         &Response {
-                            value: Some(json!({"state":"closed","backend":"native"})),
+                            value: Some({
+                                let mut status = session_status(
+                                    cached.as_ref().map(|value| value.key.as_str()),
+                                    own.identity().pid,
+                                );
+                                status["batches"] = json!(
+                                    cached.as_ref().map_or(0, |value| value.admission.batches)
+                                );
+                                status
+                            }),
                             error: None,
                         },
                         RESPONSE_BYTES,
-                    )?;
-                    return Ok(());
-                }
-                Action::Query => {
-                    let work = request.work;
-                    let reuse = request.cached;
-                    let cancel = Arc::new(AtomicBool::new(false));
-                    let observer_stop = Arc::new(AtomicBool::new(false));
-                    let read_cancel = Arc::new(AtomicBool::new(false));
-                    let mut observer = stream.try_clone().map_err(platform)?;
-                    observer.set_deadline(total_deadline, read_cancel.clone());
-                    let observing = observer_stop.clone();
-                    let request_cancel = cancel.clone();
-                    let handle = std::thread::spawn(move || {
-                        let mut marker = [0u8; 1];
-                        match observer.read(&mut marker) {
-                            Ok(0) if !observing.load(Ordering::Acquire) => {
-                                request_cancel.store(true, Ordering::Release)
-                            }
-                            Ok(_) if marker[0] == 1 && !observing.load(Ordering::Acquire) => {
-                                request_cancel.store(true, Ordering::Release)
-                            }
-                            // Timeout/stop of our observation is not a peer disconnect.
-                            _ => {}
-                        }
-                    });
-                    let deadline = total_deadline
-                        .checked_sub(reply_reserve(total_deadline))
-                        .unwrap_or_else(Instant::now);
-                    let control = owner_control.child(deadline, cancel);
-                    let diagnostic = inv.home.join("tmp/source-native-last-request.json");
-                    let begun = Instant::now();
-                    let record = |phase: &str, error: Option<&ToolkitError>| {
-                        let _ = storage::atomic_json(
-                            &diagnostic,
-                            &json!({"schema":"lycheedev.native-source-request-diagnostic.v1","workerPid":own.identity().pid,"workerCreated":own.identity().created,"phase":phase,"elapsedMs":begun.elapsed().as_millis(),"memory":job.memory_accounting().ok(),"processMemory":own.memory().ok(),"error":error}),
-                        );
-                    };
-                    record("processing", None);
-                    let result=execute_cached_query(&mut cached,work,reuse,&control,own.identity().pid,&record);
-                    observer_stop.store(true, Ordering::Release);
-                    read_cancel.store(true, Ordering::Release);
-                    if handle.join().is_err() {
-                        return Err(fault("Source request observer failed"));
+                    )?,
+                    Action::Close => {
+                        drop(cached.take());
+                        write_frame(
+                            &mut stream,
+                            &Response {
+                                value: Some(json!({"state":"closed","backend":"native"})),
+                                error: None,
+                            },
+                            RESPONSE_BYTES,
+                        )?;
+                        return Ok(());
                     }
-                    record("replying", result.as_ref().err());
-                    let response = match result {
-                        Ok(value) => Response {
-                            value: Some(value),
-                            error: None,
-                        },
-                        Err(error) => Response {
-                            value: None,
-                            error: Some(error),
-                        },
-                    };
-                    // Reply on the original transport budget, not the expired or
-                    // cancelled processing token that produced the typed error.
-                    response_control.check()?;
-                    write_frame(&mut stream, &response, RESPONSE_BYTES)?;
+                    Action::Query => {
+                        let work = request.work;
+                        let reuse = request.cached;
+                        let cancel = Arc::new(AtomicBool::new(false));
+                        let observer_stop = Arc::new(AtomicBool::new(false));
+                        let read_cancel = Arc::new(AtomicBool::new(false));
+                        let mut observer = stream.try_clone().map_err(platform)?;
+                        observer.set_deadline(total_deadline, read_cancel.clone());
+                        let observing = observer_stop.clone();
+                        let request_cancel = cancel.clone();
+                        let handle = std::thread::spawn(move || {
+                            let mut marker = [0u8; 1];
+                            match observer.read(&mut marker) {
+                                Ok(0) if !observing.load(Ordering::Acquire) => {
+                                    request_cancel.store(true, Ordering::Release)
+                                }
+                                Ok(_) if marker[0] == 1 && !observing.load(Ordering::Acquire) => {
+                                    request_cancel.store(true, Ordering::Release)
+                                }
+                                // Timeout/stop of our observation is not a peer disconnect.
+                                _ => {}
+                            }
+                        });
+                        let deadline = total_deadline
+                            .checked_sub(reply_reserve(total_deadline))
+                            .unwrap_or_else(Instant::now);
+                        let control = owner_control.child(deadline, cancel);
+                        let diagnostic = inv.home.join("tmp/source-native-last-request.json");
+                        let begun = Instant::now();
+                        let record = |phase: &str, error: Option<&ToolkitError>| {
+                            let _ = storage::atomic_json(
+                                &diagnostic,
+                                &json!({"schema":"lycheedev.native-source-request-diagnostic.v1","workerPid":own.identity().pid,"workerCreated":own.identity().created,"phase":phase,"elapsedMs":begun.elapsed().as_millis(),"memory":job.memory_accounting().ok(),"processMemory":own.memory().ok(),"error":error}),
+                            );
+                        };
+                        record("processing", None);
+                        let result = execute_cached_query(
+                            &mut cached,
+                            work,
+                            reuse,
+                            &control,
+                            own.identity().pid,
+                            &record,
+                        );
+                        observer_stop.store(true, Ordering::Release);
+                        read_cancel.store(true, Ordering::Release);
+                        if handle.join().is_err() {
+                            return Err(fault("Source request observer failed"));
+                        }
+                        record("replying", result.as_ref().err());
+                        let response = match result {
+                            Ok(value) => Response {
+                                value: Some(value),
+                                error: None,
+                            },
+                            Err(error) => Response {
+                                value: None,
+                                error: Some(error),
+                            },
+                        };
+                        // Reply on the original transport budget, not the expired or
+                        // cancelled processing token that produced the typed error.
+                        response_control.check()?;
+                        write_frame(&mut stream, &response, RESPONSE_BYTES)?;
+                    }
                 }
+                // Active work suspends idle, but cannot extend owner lifetime.
+                idle_deadline = lifetime.idle_deadline(Instant::now());
             }
-            // Active work suspends idle, but cannot extend owner lifetime.
-            idle_deadline = lifetime.idle_deadline(Instant::now());
-        }
-    })();
-    // Preserve the actual owner failure before destruction can consume the
-    // remaining reply budget. This diagnostic does not grant extra time or
-    // replace the authenticated transport outcome.
-    let terminal=inv.home.join("tmp/source-native-last-terminal.json");
-    let cleanup_started=Instant::now();
-    let terminal_record=|phase:&str,cleanup_error:Option<&ToolkitError>| {
-        let _=storage::atomic_json(&terminal,&json!({"schema":"lycheedev.native-source-terminal-diagnostic.v1",
+        })();
+        // Preserve the actual owner failure before destruction can consume the
+        // remaining reply budget. This diagnostic does not grant extra time or
+        // replace the authenticated transport outcome.
+        let terminal = inv.home.join("tmp/source-native-last-terminal.json");
+        let cleanup_started = Instant::now();
+        let terminal_record = |phase: &str, cleanup_error: Option<&ToolkitError>| {
+            let _ = storage::atomic_json(
+                &terminal,
+                &json!({"schema":"lycheedev.native-source-terminal-diagnostic.v1",
             "workerPid":own.identity().pid,"workerCreated":own.identity().created,"phase":phase,
             "cleanupElapsedMs":cleanup_started.elapsed().as_millis(),"error":run.as_ref().err(),
-            "cleanupError":cleanup_error,"processMemory":own.memory().ok()}));
-    };
-    terminal_record("retiring_analysis",None);
-    // Retire analysis before releasing the process ownership boundary on every
-    // exit, including owner expiry, transport failure and cancellation.
-    drop(cached.take());
-    let disarmed=job.disarm().map_err(platform);
-    terminal_record("owner_terminal",disarmed.as_ref().err());
-    disarmed?;
-    run
+            "cleanupError":cleanup_error,"processMemory":own.memory().ok()}),
+            );
+        };
+        terminal_record("retiring_analysis", None);
+        // Retire analysis before releasing the process ownership boundary on every
+        // exit, including owner expiry, transport failure and cancellation.
+        drop(cached.take());
+        let disarmed = job.disarm().map_err(platform);
+        terminal_record("owner_terminal", disarmed.as_ref().err());
+        lycheedev_core::metadata::historical_write::finish_historical(run, disarmed)
+    })();
+    crate::persistence::finish_control(
+        lycheedev_core::metadata::historical_write::finish_historical(owned, owner.close()),
+        owner_control.check(),
+    )
 }
 
 #[cfg(test)]

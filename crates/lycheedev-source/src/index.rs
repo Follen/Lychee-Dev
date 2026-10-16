@@ -2,7 +2,10 @@ use crate::{
     facts::{self, Facts},
     git,
 };
-use lycheedev_core::{Result, ToolkitError, evidence, selection::SourcePin, storage};
+use lycheedev_core::{
+    Result, ToolkitError, evidence, metadata::historical_write::finish_historical,
+    selection::SourcePin, storage,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
@@ -192,7 +195,7 @@ fn append_load_facts(
         ));
     }
     let (parsed, _) = document_facts(home, &document.path, raw, &document.sha256, control)?;
-    let blob = evidence::publish_blob(home, raw, git::MAX_SOURCE_BYTES)?;
+    let blob = evidence::publish_blob_bounded(home, raw, git::MAX_SOURCE_BYTES, control)?;
     for load in parsed.loads {
         control.check()?;
         if result.len() >= 100000 {
@@ -287,14 +290,15 @@ pub(crate) fn build_material_with_control(
     control.check()?;
     let identity = fingerprint(pin);
     let key = format!("source/rust-index/{identity}");
-    let metadata = match lycheedev_core::metadata::Metadata::open(home, false) {
+    let metadata = match lycheedev_core::metadata::Metadata::open_controlled(home, false, control) {
         Ok(m) => m,
-        Err(e) if e.code == "vault.record_missing" => {
-            lycheedev_core::metadata::Metadata::open(home, true)?
+        Err(e) if e.code == "vault.record_missing" && e.details.is_null() => {
+            lycheedev_core::metadata::Metadata::open_controlled(home, true, control)?
         }
         Err(e) => return Err(e),
     };
-    let manifest = metadata.read::<Value>(&key);
+    let manifest = metadata.read_controlled::<Value>(&key, control);
+    let manifest = finish_historical(manifest, metadata.close());
     if let Ok(manifest) = &manifest {
         if manifest["schema"] == "lycheedev.source-index.rust.v5"
             && manifest["identity"] == identity
@@ -316,101 +320,125 @@ pub(crate) fn build_material_with_control(
                 let started = std::time::Instant::now();
                 let mut raw = vec![];
                 let mut file = std::fs::File::open(&path)?.take((128 << 20) + 1);
-                let mut chunk = [0; 65536];
-                loop {
-                    control.check()?;
-                    let n = file.read(&mut chunk)?;
-                    if n == 0 {
-                        break;
+                let loaded = (|| {
+                    let mut chunk = [0; 65536];
+                    loop {
+                        control.check()?;
+                        let n = file.read(&mut chunk)?;
+                        if n == 0 {
+                            break;
+                        }
+                        raw.extend_from_slice(&chunk[..n]);
                     }
-                    raw.extend_from_slice(&chunk[..n]);
-                }
-                if raw.len() > 128 << 20
-                    || manifest["blob"]["bytes"] != raw.len()
-                    || storage::sha256(&raw) != digest
-                {
-                    return Err(ToolkitError::new(
-                        "codebase.source_integrity",
-                        "Cached index content differs",
-                        4,
-                    ));
-                }
-                let mut map: Index = serde_json::from_slice(&raw)?;
-                control.check()?;
-                if map.documents.len() > 100000
-                    || map.symbols.len() > 2000000
-                    || map.assets.len() > 200000
-                    || map.summary["commit"] != pin.exact_commit
-                    || map.summary["repository"] != pin.repository
-                    || map.summary["product"] != pin.product
-                    || map.summary["parser"] != pin.parser_revision
-                {
-                    return Err(ToolkitError::new(
-                        "codebase.source_integrity",
-                        "Cached index identity or budget differs",
-                        4,
-                    ));
-                }
-                map.home = home.into();
-                map.summary["io"] = json!({"gitTreeProcesses":0,"gitBlobProcesses":0,"cachedIndex":true,"indexBytesRead":raw.len(),"sourceBytesRead":0,"cachedFacts":map.documents.len(),"parsedDocuments":0,"elapsedMs":started.elapsed().as_millis(),"deadlineMs":180000});
-                return Ok((map, digest.to_owned()));
+                    if raw.len() > 128 << 20
+                        || manifest["blob"]["bytes"] != raw.len()
+                        || storage::sha256(&raw) != digest
+                    {
+                        return Err(ToolkitError::new(
+                            "codebase.source_integrity",
+                            "Cached index content differs",
+                            4,
+                        ));
+                    }
+                    let mut map: Index = serde_json::from_slice(&raw)?;
+                    control.check()?;
+                    if map.documents.len() > 100000
+                        || map.symbols.len() > 2000000
+                        || map.assets.len() > 200000
+                        || map.summary["commit"] != pin.exact_commit
+                        || map.summary["repository"] != pin.repository
+                        || map.summary["product"] != pin.product
+                        || map.summary["parser"] != pin.parser_revision
+                    {
+                        return Err(ToolkitError::new(
+                            "codebase.source_integrity",
+                            "Cached index identity or budget differs",
+                            4,
+                        ));
+                    }
+                    map.home = home.into();
+                    map.summary["io"] = json!({"gitTreeProcesses":0,"gitBlobProcesses":0,"cachedIndex":true,"indexBytesRead":raw.len(),"sourceBytesRead":0,"cachedFacts":map.documents.len(),"parsedDocuments":0,"elapsedMs":started.elapsed().as_millis(),"deadlineMs":180000});
+                    Ok((map, digest.to_owned()))
+                })();
+                return storage::finish_file(file.into_inner(), loaded, control);
             }
         }
-    } else if manifest.as_ref().unwrap_err().code != "vault.record_missing" {
+    } else if manifest.as_ref().unwrap_err().code != "vault.record_missing"
+        || !manifest.as_ref().unwrap_err().details.is_null()
+    {
         return Err(manifest.unwrap_err());
     }
-    let _lock = storage::ExclusiveLock::acquire(
+    let lock = storage::ExclusiveLock::acquire_controlled(
         &home
             .join("locks")
             .join(format!("source-index-{identity}.lock")),
+        control,
     )?;
-    let map = build_uncached(home, pin, control)?;
-    let mut persisted = serde_json::to_value(&map)?;
-    persisted["summary"].as_object_mut().unwrap().remove("io");
-    let raw = serde_json::to_vec(&persisted)?;
-    let blob = lycheedev_core::cache::publish(home, &raw, 128 << 20, None)?;
-    let mut metadata = lycheedev_core::metadata::Metadata::open(home, true)?;
-    let generation = metadata.generation(&key)?;
-    metadata.put(
-        &key,
-        &json!({"schema":"lycheedev.source-index.rust.v5","identity":identity,"blob":blob}),
-        generation,
-    )?;
-    Ok((map, blob["sha256"].as_str().unwrap().to_owned()))
+    let result = (|| {
+        let map = build_uncached(home, pin, control)?;
+        let mut persisted = serde_json::to_value(&map)?;
+        persisted["summary"].as_object_mut().unwrap().remove("io");
+        let raw = serde_json::to_vec(&persisted)?;
+        let blob =
+            lycheedev_core::cache::publish_derived_controlled(home, &raw, 128 << 20, control)?;
+        crate::persistence::put_manifest(
+            home,
+            &key,
+            &json!({"schema":"lycheedev.source-index.rust.v5","identity":identity,"blob":blob}),
+            control,
+        )?;
+        Ok((map, blob["sha256"].as_str().unwrap().to_owned()))
+    })();
+    crate::persistence::finish_control(finish_historical(result, lock.close()), control.check())
 }
 /// Existing authenticated-index registration gate. Readiness never builds or
 /// hashes a replacement: build() authenticates the cached content separately.
 pub fn is_ready(home: &Path, pin: &SourcePin) -> Result<bool> {
+    is_ready_with_control(home, pin, &Default::default())
+}
+pub fn is_ready_with_control(
+    home: &Path,
+    pin: &SourcePin,
+    control: &lycheedev_core::control::OperationControl,
+) -> Result<bool> {
+    control.check()?;
     let identity = fingerprint(pin);
-    let metadata = lycheedev_core::metadata::Metadata::open(home, false)?;
-    let manifest = match metadata.read::<Value>(&format!("source/rust-index/{identity}")) {
-        Ok(v) => v,
-        Err(e) if e.code == "vault.record_missing" => return Ok(false),
-        Err(e) => return Err(e),
-    };
-    if manifest["schema"] != "lycheedev.source-index.rust.v5" || manifest["identity"] != identity {
-        return Ok(false);
-    }
-    let digest = manifest["blob"]["sha256"].as_str().unwrap_or("");
-    if !lycheedev_core::selection::valid_digest(digest, 64) {
-        return Err(ToolkitError::new(
-            "codebase.source_integrity",
-            "Invalid cached index identity",
-            4,
-        ));
-    }
-    let path = home
-        .join("cache/objects")
-        .join(&digest[..2])
-        .join(&digest[2..]);
-    storage::guard_path(home, &path)?;
-    match std::fs::metadata(path) {
-        Ok(m) => Ok(m.is_file()
-            && m.len() <= 128 << 20
-            && manifest["blob"]["bytes"].as_u64() == Some(m.len())),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(e) => Err(e.into()),
-    }
+    let metadata = lycheedev_core::metadata::Metadata::open_controlled(home, false, control)?;
+    let result = (|| {
+        let manifest = match metadata
+            .read_controlled::<Value>(&format!("source/rust-index/{identity}"), control)
+        {
+            Ok(v) => v,
+            Err(e) if e.code == "vault.record_missing" && e.details.is_null() => return Ok(false),
+            Err(e) => return Err(e),
+        };
+        if manifest["schema"] != "lycheedev.source-index.rust.v5"
+            || manifest["identity"] != identity
+        {
+            return Ok(false);
+        }
+        let digest = manifest["blob"]["sha256"].as_str().unwrap_or("");
+        if !lycheedev_core::selection::valid_digest(digest, 64) {
+            return Err(ToolkitError::new(
+                "codebase.source_integrity",
+                "Invalid cached index identity",
+                4,
+            ));
+        }
+        let path = home
+            .join("cache/objects")
+            .join(&digest[..2])
+            .join(&digest[2..]);
+        storage::guard_path(home, &path)?;
+        match std::fs::metadata(path) {
+            Ok(m) => Ok(m.is_file()
+                && m.len() <= 128 << 20
+                && manifest["blob"]["bytes"].as_u64() == Some(m.len())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e.into()),
+        }
+    })();
+    crate::persistence::finish_control(finish_historical(result, metadata.close()), control.check())
 }
 fn facts_cache_path(home: &Path, path: &str, sha256: &str) -> PathBuf {
     let key = storage::sha256(
@@ -435,7 +463,21 @@ fn document_facts(
     let cache = facts_cache_path(home, path, sha256);
     // Facts are rebuildable observations. Authenticate both source and serialized facts before reuse.
     if cache.exists() {
-        let envelope: Value = storage::read_json(&cache)?;
+        let mut file = std::fs::File::open(&cache)?;
+        let loaded = (|| {
+            let mut raw = Vec::new();
+            let mut buffer = [0; 65536];
+            loop {
+                control.check()?;
+                let n = file.read(&mut buffer)?;
+                if n == 0 {
+                    break;
+                }
+                raw.extend_from_slice(&buffer[..n]);
+            }
+            Ok(serde_json::from_slice::<Value>(&raw)?)
+        })();
+        let envelope = storage::finish_file(file, loaded, control)?;
         if envelope["schema"] == "lycheedev.source-facts.rust.v6" {
             let digest = storage::sha256(&serde_json::to_vec(&envelope["facts"])?);
             if envelope["inputSHA256"] != sha256 || envelope["factsSHA256"] != digest {
@@ -460,10 +502,17 @@ fn document_facts(
     };
     control.check()?;
     let f = serde_json::to_value(&parsed)?;
-    storage::atomic_json(
+    storage::atomic_write_controlled(
         &cache,
-        &json!({"schema":"lycheedev.source-facts.rust.v6","inputSHA256":sha256,"factsSHA256":storage::sha256(&serde_json::to_vec(&f)?),"facts":f}),
+        &serde_json::to_vec(
+            &json!({"schema":"lycheedev.source-facts.rust.v6","inputSHA256":sha256,"factsSHA256":storage::sha256(&serde_json::to_vec(&f)?),"facts":f}),
+        )?,
+        control,
     )?;
+    control.check().map_err(|mut error| {
+        error.details = json!({"schema":"lycheedev.source-persistence.v1","path":cache,"mutation":"facts","state":"committed","cause":error.clone()});
+        error
+    })?;
     Ok((parsed, false))
 }
 fn build_uncached(
@@ -506,7 +555,7 @@ fn build_uncached(
         read_bytes += data.len();
         if file.asset {
             let hash = storage::sha256(&data);
-            let local = evidence::publish_blob(home, &data, 64 << 20)?;
+            let local = evidence::publish_blob_bounded(home, &data, 64 << 20, control)?;
             let ext = Path::new(&file.path)
                 .extension()
                 .and_then(|s| s.to_str())
@@ -542,7 +591,7 @@ fn build_uncached(
         } else {
             parsed_documents += 1;
         }
-        evidence::publish_blob(home, &data, git::MAX_SOURCE_BYTES)?;
+        evidence::publish_blob_bounded(home, &data, git::MAX_SOURCE_BYTES, control)?;
         for (ordinal, d) in facts.declarations.iter().enumerate() {
             let mut s = Symbol {
                 id: String::new(),
@@ -630,17 +679,26 @@ impl Index {
     fn read_document(&self, doc: &Document) -> Result<Vec<u8>> {
         self.read_document_controlled(doc, None)
     }
-    fn read_document_controlled(&self, doc: &Document, control: Option<&lycheedev_core::control::OperationControl>) -> Result<Vec<u8>> {
+    fn read_document_controlled(
+        &self,
+        doc: &Document,
+        control: Option<&lycheedev_core::control::OperationControl>,
+    ) -> Result<Vec<u8>> {
         check_search(control)?;
         if !doc.text.is_empty() {
             let mut bytes = Vec::with_capacity(doc.text.len());
-            for block in doc.text.chunks(64 << 10) { check_search(control)?; bytes.extend_from_slice(block); }
+            for block in doc.text.chunks(64 << 10) {
+                check_search(control)?;
+                bytes.extend_from_slice(block);
+            }
             check_search(control)?;
             return Ok(bytes);
         }
         let blob = json!({"sha256":doc.sha256,"bytes":doc.bytes});
         match control {
-            Some(control) => evidence::read_blob_bounded(&self.home, &blob, git::MAX_SOURCE_BYTES, control),
+            Some(control) => {
+                evidence::read_blob_bounded(&self.home, &blob, git::MAX_SOURCE_BYTES, control)
+            }
             None => evidence::read_blob(&self.home, &blob, git::MAX_SOURCE_BYTES),
         }
     }
@@ -680,19 +738,53 @@ impl Index {
         limit: usize,
         cursor: &str,
     ) -> Result<Value> {
-        self.search_observed(pin, snapshot, text, mode, topic, limit, cursor, None, &mut |_, _| {})
+        self.search_observed(
+            pin,
+            snapshot,
+            text,
+            mode,
+            topic,
+            limit,
+            cursor,
+            None,
+            &mut |_, _| {},
+        )
     }
     #[allow(clippy::too_many_arguments)]
     pub fn search_with_control(
-        &self, pin: &SourcePin, snapshot: &str, text: &str, mode: &str, topic: &str,
-        limit: usize, cursor: &str, control: &lycheedev_core::control::OperationControl,
+        &self,
+        pin: &SourcePin,
+        snapshot: &str,
+        text: &str,
+        mode: &str,
+        topic: &str,
+        limit: usize,
+        cursor: &str,
+        control: &lycheedev_core::control::OperationControl,
     ) -> Result<Value> {
-        self.search_observed(pin, snapshot, text, mode, topic, limit, cursor, Some(control), &mut |_, _| {})
+        self.search_observed(
+            pin,
+            snapshot,
+            text,
+            mode,
+            topic,
+            limit,
+            cursor,
+            Some(control),
+            &mut |_, _| {},
+        )
     }
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn search_observed(
-        &self, pin: &SourcePin, snapshot: &str, text: &str, mode: &str, topic: &str,
-        limit: usize, cursor: &str, control: Option<&lycheedev_core::control::OperationControl>,
+        &self,
+        pin: &SourcePin,
+        snapshot: &str,
+        text: &str,
+        mode: &str,
+        topic: &str,
+        limit: usize,
+        cursor: &str,
+        control: Option<&lycheedev_core::control::OperationControl>,
         observer: &mut impl FnMut(&'static str, usize),
     ) -> Result<Value> {
         check_search(control)?;
@@ -752,7 +844,8 @@ impl Index {
         let mut relations = Vec::new();
         let mut cut = false;
         for (number, s) in self.symbols.iter().enumerate() {
-            observer("symbol", number); check_search(control)?;
+            observer("symbol", number);
+            check_search(control)?;
             if s.kind == "relationship" {
                 if s.name == text
                     || s.target == text
@@ -812,7 +905,8 @@ impl Index {
             candidates.clear();
             let normalized = text.replace('/', "\\").to_ascii_lowercase();
             for (number, a) in self.assets.iter().enumerate() {
-                observer("asset", number); check_search(control)?;
+                observer("asset", number);
+                check_search(control)?;
                 let p = a["path"].as_str().unwrap_or("");
                 let n = p.replace('/', "\\").to_ascii_lowercase();
                 if n.contains(&normalized) {
@@ -838,7 +932,8 @@ impl Index {
             }
         } else if broad || candidates.is_empty() {
             for (number, doc) in self.documents.iter().enumerate() {
-                observer("document", number); check_search(control)?;
+                observer("document", number);
+                check_search(control)?;
                 let lower = doc.path.to_ascii_lowercase();
                 if topic == "api" && !lower.contains("/blizzard_apidocumentationgenerated/")
                     || ["lua", "xml", "toc"].contains(&topic)
@@ -852,7 +947,8 @@ impl Index {
                     .split('\n')
                     .enumerate()
                 {
-                    observer("line", i); check_search(control)?;
+                    observer("line", i);
+                    check_search(control)?;
                     if l.to_ascii_lowercase().contains(&text.to_ascii_lowercase()) {
                         candidates.push((
                             Symbol {
@@ -902,7 +998,8 @@ impl Index {
         let more = candidates.len() > offset + limit;
         let mut results = Vec::new();
         for (s, by, rank) in candidates.iter().skip(offset).take(limit) {
-            observer("result", results.len()); check_search(control)?;
+            observer("result", results.len());
+            check_search(control)?;
             if !loaded.contains_key(&s.path)
                 && let Some(doc) = self.documents.iter().find(|d| d.path == s.path)
             {

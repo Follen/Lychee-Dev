@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 02:06 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`19db78bd19444b865f2841cc410129f7c504e500`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 02:15 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`2ef36e40a5a6e89ded56eeb6b61c7f2f15344c95`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -24,6 +24,8 @@
 - 2026-10-15 18:24 用户调整实施节奏：先按完整端到端功能实现并接入默认生产消费者，再集中补测试和统一验证；取消自行增加的逐小片冻结/独审/CI先行门禁。实现过程中仍及时分批提交推送同一草稿PR，真实安全边界和文件单写协调保留；已有CI旁路诊断，不等待每轮才继续编码。最终四阶段循环审计与完整验收要求不变。
 
 ## 2. 当前实现与未闭环事项
+
+Source默认存储链已组合原控制：index/query/research/semantic缓存、同key manifest CAS、session startup intent/cleanup与generation读取/单次消费贯通受控Metadata、原文件/lease及checked收尾；取消留intent、generation变化不误删，未知提交不重放。缓存配额仍原即时竞争策略，不自动prune；native wire、90秒原期限与2GiB cap未改。25新Rust回归未跑，4个不重复目标已接集中验证；普通ReadDir/native process及不参与授权的best-effort生命周期诊断保原边界。
 
 默认evidence keep/bundle已完成原控制接线：keep持同一writer lease完成历史读取/retention/CAS/tombstone；bundle保输入顺序、拒重复、objects与最后manifest、32MiB单体/128MiB唯一体、原stage同目录no-replace和checked收尾，已发布/不确定结果进入既有error.details。12新Rust未跑，recoverable remove仍继续。自有诊断后继恢复return self所属类、alias/声明泛型上下文，并保union分量selected carrier，避免不完整对象绕过赋值结构检查；4新测试/12场景未跑。部分return缺口历史patched session同样存在，旧参照不改、不全局忽略差异；以固定原版普通语义与增强合同分别验证。
 

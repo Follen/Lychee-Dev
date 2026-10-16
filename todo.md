@@ -291,3 +291,5 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] 集中验证历史capture/Hotfix/effective SQL原控制与独立Budget读取链（8新回归）、默认SQL lexer/parser/lowering控制（17新回归）；公共wildcard hook停止在parse后、lowering/provider前返回。继续UNION后缀/复合首错、evidence keep/bundle/remove与Source默认存储闭环，不把语法检查算Rust通过。
 
 - [ ] 集中执行默认evidence keep/bundle 12项新回归与owned return/union 4项管线测试；保原版普通语义及历史差异完整证据。继续recoverable remove与Source存储闭环，已发布/unknown输出不能重放或伪撤回。
+
+- [ ] 集中执行Source默认存储闭环25新回归：Metadata generation/单次intent消费、原scope缓存发布、manifest CAS与checked cleanup。4唯一目标已接；90秒、2GiB与不自动prune边界不变，实际Windows会话/资源尚未验收。

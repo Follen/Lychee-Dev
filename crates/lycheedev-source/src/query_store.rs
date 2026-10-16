@@ -4,7 +4,7 @@
 use crate::index::{self, Document, Index, Symbol};
 use lycheedev_core::{
     Result, ToolkitError,
-    metadata::Metadata,
+    metadata::{Metadata, historical_write::finish_historical},
     selection::{SourcePin, valid_digest},
     storage,
 };
@@ -328,35 +328,41 @@ pub fn load_with_control(
     let started = std::time::Instant::now();
     let identity = index::fingerprint(pin);
     let key = format!("source/rust-query-file/{identity}");
-    let mut metadata = Metadata::open(home, true)?;
-    let existing = metadata.read::<Value>(&key);
+    let metadata = Metadata::open_controlled(home, true, control)?;
+    let existing = metadata.read_controlled::<Value>(&key, control);
+    let existing = finish_historical(existing, metadata.close());
     let raw = match existing {
         Ok(manifest) if manifest["schema"] == SCHEMA && manifest["identity"] == identity => {
-            read_image(home, &manifest["blob"])?
+            read_image(home, &manifest["blob"], control)?
         }
         Ok(_) => None,
-        Err(e) if e.code == "vault.record_missing" => None,
+        Err(e) if e.code == "vault.record_missing" && e.details.is_null() => None,
         Err(e) => return Err(e),
     };
     let cached = raw.is_some();
     let raw = if let Some(raw) = raw {
         raw
     } else {
-        let _lock = storage::ExclusiveLock::acquire(
+        let lock = storage::ExclusiveLock::acquire_controlled(
             &home
                 .join("locks")
                 .join(format!("source-query-file-{identity}.lock")),
+            control,
         )?;
-        let full = index::build_with_control(home, pin, control)?;
-        let raw = write_image(&full, &identity)?;
-        let blob = lycheedev_core::cache::publish(home, &raw, MAX_BYTES, None)?;
-        let generation = metadata.generation(&key)?;
-        metadata.put(
-            &key,
-            &json!({"schema":SCHEMA,"identity":identity,"blob":blob}),
-            generation,
-        )?;
-        raw
+        let built = (|| {
+            let full = index::build_with_control(home, pin, control)?;
+            let raw = write_image(&full, &identity)?;
+            let blob =
+                lycheedev_core::cache::publish_derived_controlled(home, &raw, MAX_BYTES, control)?;
+            crate::persistence::put_manifest(
+                home,
+                &key,
+                &json!({"schema":SCHEMA,"identity":identity,"blob":blob}),
+                control,
+            )?;
+            Ok(raw)
+        })();
+        crate::persistence::finish_control(finish_historical(built, lock.close()), control.check())?
     };
     control.check()?;
     let projected = Image::decode(&raw, &identity)?.project(
@@ -375,75 +381,91 @@ pub fn load_with_control(
 /// Readiness is read-only: absent or obsolete derived cache is reported without
 /// fetching, warming or mutating source state.
 pub fn status(home: &Path, pin: &SourcePin) -> Result<Value> {
+    status_with_control(home, pin, &Default::default())
+}
+pub fn status_with_control(
+    home: &Path,
+    pin: &SourcePin,
+    control: &lycheedev_core::control::OperationControl,
+) -> Result<Value> {
+    control.check()?;
     let mut status = json!({"activeSnapshot":pin.exact_commit,"readySnapshots":0,"snapshotFiles":0,"astFiles":0,"parserSchema":pin.parser_revision,"indexSchema":"lycheedev.source-map.v2","storage":"file-cache","assets":0,"ready":false,"complete":false,"coverage":{"analyzedDocuments":0,"skippedDocuments":0,"diagnostics":0,"complete":false}});
-    let metadata = match Metadata::open(home, false) {
+    let metadata = match Metadata::open_controlled(home, false, control) {
         Ok(m) => m,
-        Err(e) if e.code == "vault.record_missing" => return Ok(status),
+        Err(e) if e.code == "vault.record_missing" && e.details.is_null() => return Ok(status),
         Err(e) => return Err(e),
     };
-    let identity = index::fingerprint(pin);
-    for (key, schema) in [
-        (format!("source/rust-query-file/{identity}"), SCHEMA),
-        (
-            format!("source/rust-index/{identity}"),
-            "lycheedev.source-index.rust.v5",
-        ),
-    ] {
-        let manifest = match metadata.read::<Value>(&key) {
-            Ok(m) => m,
-            Err(e) if e.code == "vault.record_missing" => continue,
-            Err(e) => return Err(e),
-        };
-        if manifest["schema"] != schema || manifest["identity"] != identity {
-            continue;
+    let result = (|| {
+        let identity = index::fingerprint(pin);
+        for (key, schema) in [
+            (format!("source/rust-query-file/{identity}"), SCHEMA),
+            (
+                format!("source/rust-index/{identity}"),
+                "lycheedev.source-index.rust.v5",
+            ),
+        ] {
+            let manifest = match metadata.read_controlled::<Value>(&key, control) {
+                Ok(m) => m,
+                Err(e) if e.code == "vault.record_missing" && e.details.is_null() => continue,
+                Err(e) => return Err(e),
+            };
+            if manifest["schema"] != schema || manifest["identity"] != identity {
+                continue;
+            }
+            let Some(raw) = read_image(home, &manifest["blob"], control)? else {
+                continue;
+            };
+            let (summary, documents) = if schema == SCHEMA {
+                let image = Image::decode(&raw, &identity)?;
+                (image.meta.summary, image.meta.documents.len())
+            } else {
+                let full: Index = serde_json::from_slice(&raw)?;
+                (full.summary, full.documents.len())
+            };
+            if summary["repository"] != pin.repository
+                || summary["commit"] != pin.exact_commit
+                || summary["product"] != pin.product
+                || summary["parser"] != pin.parser_revision
+            {
+                return Err(invalid("Readiness cache source identity differs"));
+            }
+            status["ready"] = json!(true);
+            status["readySnapshots"] = json!(1);
+            status["snapshotFiles"] =
+                json!(documents + summary["skippedDocuments"].as_u64().unwrap_or(0) as usize);
+            status["assets"] = summary["assets"].clone();
+            status["complete"] = summary["complete"].clone();
+            status["coverage"] = json!({"analyzedDocuments":documents,"skippedDocuments":summary["skippedDocuments"],"diagnostics":summary["diagnostics"],"complete":summary["complete"]});
+            status["astFiles"] = if let Some(count) = summary.get("astFiles") {
+                count.clone()
+            } else if summary["diagnostics"] == 0 {
+                json!(documents)
+            } else if summary["diagnostics"].as_u64().unwrap_or(u64::MAX) <= 25 {
+                let failed: BTreeSet<_> = summary["diagnosticSample"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|d| d["path"].as_str())
+                    .collect();
+                json!(documents.saturating_sub(failed.len()))
+            } else {
+                status["astFilesState"] = json!("unknown");
+                status["astFilesReason"] =
+                    json!("older derived cache retained only sampled diagnostic paths");
+                Value::Null
+            };
+            return Ok(status);
         }
-        let Some(raw) = read_image(home, &manifest["blob"])? else {
-            continue;
-        };
-        let (summary, documents) = if schema == SCHEMA {
-            let image = Image::decode(&raw, &identity)?;
-            (image.meta.summary, image.meta.documents.len())
-        } else {
-            let full: Index = serde_json::from_slice(&raw)?;
-            (full.summary, full.documents.len())
-        };
-        if summary["repository"] != pin.repository
-            || summary["commit"] != pin.exact_commit
-            || summary["product"] != pin.product
-            || summary["parser"] != pin.parser_revision
-        {
-            return Err(invalid("Readiness cache source identity differs"));
-        }
-        status["ready"] = json!(true);
-        status["readySnapshots"] = json!(1);
-        status["snapshotFiles"] =
-            json!(documents + summary["skippedDocuments"].as_u64().unwrap_or(0) as usize);
-        status["assets"] = summary["assets"].clone();
-        status["complete"] = summary["complete"].clone();
-        status["coverage"] = json!({"analyzedDocuments":documents,"skippedDocuments":summary["skippedDocuments"],"diagnostics":summary["diagnostics"],"complete":summary["complete"]});
-        status["astFiles"] = if let Some(count) = summary.get("astFiles") {
-            count.clone()
-        } else if summary["diagnostics"] == 0 {
-            json!(documents)
-        } else if summary["diagnostics"].as_u64().unwrap_or(u64::MAX) <= 25 {
-            let failed: BTreeSet<_> = summary["diagnosticSample"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|d| d["path"].as_str())
-                .collect();
-            json!(documents.saturating_sub(failed.len()))
-        } else {
-            status["astFilesState"] = json!("unknown");
-            status["astFilesReason"] =
-                json!("older derived cache retained only sampled diagnostic paths");
-            Value::Null
-        };
-        return Ok(status);
-    }
-    Ok(status)
+        Ok(status)
+    })();
+    crate::persistence::finish_control(finish_historical(result, metadata.close()), control.check())
 }
-fn read_image(home: &Path, blob: &Value) -> Result<Option<Vec<u8>>> {
+fn read_image(
+    home: &Path,
+    blob: &Value,
+    control: &lycheedev_core::control::OperationControl,
+) -> Result<Option<Vec<u8>>> {
+    control.check()?;
     let digest = blob["sha256"].as_str().unwrap_or("");
     if !valid_digest(digest, 64) {
         return Err(invalid("Query index digest invalid"));
@@ -456,14 +478,24 @@ fn read_image(home: &Path, blob: &Value) -> Result<Option<Vec<u8>>> {
         return Ok(None);
     }
     storage::guard_path(home, &path)?;
-    let mut raw = vec![];
-    fs::File::open(path)?
-        .take((MAX_BYTES + 1) as u64)
-        .read_to_end(&mut raw)?;
-    if raw.len() > MAX_BYTES || blob["bytes"] != raw.len() || storage::sha256(&raw) != digest {
-        return Err(invalid("Query index content differs"));
-    }
-    Ok(Some(raw))
+    let mut file = fs::File::open(path)?.take((MAX_BYTES + 1) as u64);
+    let result = (|| {
+        let mut raw = vec![];
+        let mut buffer = [0; 65536];
+        loop {
+            control.check()?;
+            let n = file.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            raw.extend_from_slice(&buffer[..n]);
+        }
+        if raw.len() > MAX_BYTES || blob["bytes"] != raw.len() || storage::sha256(&raw) != digest {
+            return Err(invalid("Query index content differs"));
+        }
+        Ok(Some(raw))
+    })();
+    storage::finish_file(file.into_inner(), result, control)
 }
 fn write_image(map: &Index, identity: &str) -> Result<Vec<u8>> {
     let mut summary = map.summary.clone();
@@ -689,5 +721,113 @@ mod tests {
         let mut altered = raw;
         *altered.last_mut().unwrap() = 0xff;
         assert!(Image::decode(&altered, &identity).is_err());
+    }
+    struct CacheFixture(std::path::PathBuf);
+    impl CacheFixture {
+        fn new() -> Self {
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let home = std::env::temp_dir().join(format!(
+                "lychee-query-persistence-{}-{}-{}",
+                std::process::id(),
+                storage::sha256(storage::utc_now().as_bytes()),
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            ));
+            lycheedev_core::workspace::initialize(&home).unwrap();
+            Self(home)
+        }
+    }
+    impl Drop for CacheFixture {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+    #[test]
+    fn controlled_readiness_is_read_only_for_absent_metadata() {
+        let f = CacheFixture::new();
+        let (_, pin) = map();
+        let status = status_with_control(&f.0, &pin, &Default::default()).unwrap();
+        assert_eq!(status["ready"], false);
+        assert!(!f.0.join("state/toolkit.sqlite").exists());
+        assert_eq!(
+            index::is_ready_with_control(&f.0, &pin, &Default::default())
+                .unwrap_err()
+                .code,
+            "vault.record_missing"
+        );
+    }
+    #[test]
+    fn controlled_warm_query_and_readiness_preserve_authenticated_identity() {
+        let f = CacheFixture::new();
+        let (full, pin) = map();
+        let control = lycheedev_core::control::OperationControl::default();
+        let identity = index::fingerprint(&pin);
+        let raw = write_image(&full, &identity).unwrap();
+        let blob =
+            lycheedev_core::cache::publish_derived_controlled(&f.0, &raw, MAX_BYTES, &control)
+                .unwrap();
+        crate::persistence::put_manifest(
+            &f.0,
+            &format!("source/rust-query-file/{identity}"),
+            &json!({"schema":SCHEMA,"identity":identity,"blob":blob}),
+            &control,
+        )
+        .unwrap();
+        let loaded =
+            load_with_control(&f.0, &pin, "Timer.After", "precise", "api", &control).unwrap();
+        assert_eq!(loaded.summary["io"]["cachedIndex"], true);
+        assert_eq!(loaded.summary["commit"], pin.exact_commit);
+        let status = status_with_control(&f.0, &pin, &control).unwrap();
+        assert_eq!(status["ready"], true);
+        assert_eq!(status["activeSnapshot"], pin.exact_commit);
+    }
+    #[test]
+    fn controlled_readiness_rejects_corrupt_cache_without_rebuilding() {
+        let f = CacheFixture::new();
+        let (full, pin) = map();
+        let control = lycheedev_core::control::OperationControl::default();
+        let identity = index::fingerprint(&pin);
+        let raw = write_image(&full, &identity).unwrap();
+        let blob =
+            lycheedev_core::cache::publish_derived_controlled(&f.0, &raw, MAX_BYTES, &control)
+                .unwrap();
+        crate::persistence::put_manifest(
+            &f.0,
+            &format!("source/rust-query-file/{identity}"),
+            &json!({"schema":SCHEMA,"identity":identity,"blob":blob}),
+            &control,
+        )
+        .unwrap();
+        let digest = blob["sha256"].as_str().unwrap();
+        let path =
+            f.0.join("cache/objects")
+                .join(&digest[..2])
+                .join(&digest[2..]);
+        fs::write(&path, b"corrupt").unwrap();
+        assert_eq!(
+            status_with_control(&f.0, &pin, &control).unwrap_err().code,
+            "codebase.source_integrity"
+        );
+        assert_eq!(fs::read(path).unwrap(), b"corrupt");
+    }
+    #[test]
+    fn original_cancel_wins_before_readiness_or_query_storage() {
+        let f = CacheFixture::new();
+        let (_, pin) = map();
+        let token = lycheedev_core::control::TrackedCancellation::new();
+        let control = lycheedev_core::control::OperationControl::tracked(
+            std::time::Instant::now() + std::time::Duration::from_secs(10),
+            token.clone(),
+        );
+        token.cancel();
+        assert_eq!(
+            status_with_control(&f.0, &pin, &control).unwrap_err().code,
+            "command.cancelled"
+        );
+        let error = match load_with_control(&f.0, &pin, "Timer.After", "precise", "api", &control) {
+            Err(error) => error,
+            Ok(_) => panic!("cancelled query succeeded"),
+        };
+        assert_eq!(error.code, "command.cancelled");
+        assert!(!f.0.join("state/toolkit.sqlite").exists());
     }
 }

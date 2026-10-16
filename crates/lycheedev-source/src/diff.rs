@@ -114,12 +114,16 @@ fn verified_blob(
             4,
         ));
     }
-    evidence::publish_blob(home, &raw, git::MAX_SOURCE_BYTES)?;
+    evidence::publish_blob_bounded(home, &raw, git::MAX_SOURCE_BYTES, control)?;
     Ok(json!({"commit":pin.exact_commit,"gitObject":object,"sha256":hash,"bytes":raw.len()}))
 }
-fn ready(home: &Path, pin: &SourcePin) -> Result<bool> {
-    match index::is_ready(home, pin) {
-        Err(error) if error.code == "vault.record_missing" => Ok(false),
+fn ready(
+    home: &Path,
+    pin: &SourcePin,
+    control: &lycheedev_core::control::OperationControl,
+) -> Result<bool> {
+    match index::is_ready_with_control(home, pin, control) {
+        Err(error) if error.code == "vault.record_missing" && error.details.is_null() => Ok(false),
         result => result,
     }
 }
@@ -146,7 +150,7 @@ pub fn compare_with_control(
     }
     git::validate_pin(from)?;
     git::validate_pin(to)?;
-    if !ready(home, from)? || !ready(home, to)? {
+    if !ready(home, from, control)? || !ready(home, to, control)? {
         return Err(ToolkitError::new(
             "codebase.index_not_ready",
             "codebase.index_not_ready: run source index with the same snapshot",

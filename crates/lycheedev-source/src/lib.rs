@@ -22,6 +22,7 @@ pub mod native_research;
 #[cfg(feature = "emmy-prototype")]
 pub mod native_semantic;
 pub mod native_session;
+mod persistence;
 mod process;
 pub mod prune;
 mod query_store;
@@ -170,7 +171,11 @@ pub fn dispatch_with_services(
                     3,
                 )
             })?;
-            let mut out = Outcome::new(query_store::status(&inv.home, source)?);
+            let mut out = Outcome::new(query_store::status_with_control(
+                &inv.home,
+                source,
+                &inv.control,
+            )?);
             out.coverage = out.data["coverage"].clone();
             out.selection = serde_json::to_value(&pin)?;
             return Ok(out);

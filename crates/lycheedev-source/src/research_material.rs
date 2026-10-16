@@ -1,8 +1,6 @@
 //! Reusable authenticated whole-source inputs, independent of the requested query.
 use crate::{environment, index, luac, native, native_research};
-use lycheedev_core::{
-    Invocation, Result, ToolkitError, cache, metadata::Metadata, selection::SourcePin, storage,
-};
+use lycheedev_core::{Invocation, Result, ToolkitError, cache, selection::SourcePin, storage};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::time::Instant;
@@ -100,14 +98,15 @@ fn identity(
 ) -> Result<Value> {
     let executable = std::env::current_exe()?;
     let bytes = std::fs::metadata(&executable)?.len();
-    let (_file, digest) = storage::locked_sha256(&executable, bytes, &inv.control)?;
-    Ok(
+    let (file, digest) = storage::locked_sha256(&executable, bytes, &inv.control)?;
+    let result = Ok(
         json!({"schema":SCHEMA,"source":source,"environment":environment,
         "index":{"sha256":index_digest,"fingerprint":index::fingerprint(source)},
         "implementation":{"sha256":digest,"bytes":bytes,"engine":native::ENGINE_COMMIT,"engineArchive":native::ENGINE_ARCHIVE_SHA256,"enginePatch":option_env!("LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256"),"lock":storage::sha256(native::DEPENDENCY_LOCK)},
         "rules":{"native":native::RULES_VERSION,"research":native_research::RESEARCH_RULES,"entry":native::ENTRY_RULES,"sourceMap":native::SOURCE_MAP_PROFILE,"xmlSourceMap":crate::xml_inline::SOURCE_MAP_RULES,"xmlProgram":crate::xml_load::RULES,"environment":environment::GENERATOR,"declaration":environment::DECLARATION_RULES},
         "luac":runtime.manifest(),"limits":native::SourceLimits::research(),"wireBytes":MAX_BYTES}),
-    )
+    );
+    storage::finish_file(file, result, &inv.control)
 }
 
 /// Source spans are deliberately excluded from the public ApiRecord JSON. The
@@ -203,10 +202,11 @@ fn admit(
 }
 
 fn read(inv: &Invocation, key: &str, identity: &Value) -> Result<Option<StoredMaterial>> {
-    let metadata = Metadata::open(&inv.home, false)?;
-    let manifest = match metadata.read::<Value>(key) {
+    let manifest = match crate::persistence::read::<Value>(&inv.home, key, &inv.control) {
         Ok(value) => value,
-        Err(error) if error.code == "vault.record_missing" => return Ok(None),
+        Err(error) if error.code == "vault.record_missing" && error.details.is_null() => {
+            return Ok(None);
+        }
         Err(error) => return Err(error),
     };
     if manifest["schema"] != SCHEMA || manifest["identity"] != *identity {
@@ -276,21 +276,21 @@ pub(crate) fn load_or_build(
         let Some(raw) = serialize(&material, inv, MAX_BYTES)? else {
             return Ok(());
         };
-        let blob = cache::publish(&inv.home, &raw, MAX_BYTES, None)?;
-        let mut metadata = Metadata::open(&inv.home, true)?;
-        let generation = metadata.generation(&key)?;
-        metadata.put(
+        let blob = cache::publish_derived_controlled(&inv.home, &raw, MAX_BYTES, &inv.control)?;
+        crate::persistence::put_manifest(
+            &inv.home,
             &key,
             &json!({"schema":SCHEMA,"identity":identity,"blob":blob}),
-            generation,
+            &inv.control,
         )?;
         inv.control.check()
     });
     // A full cache must not turn valid source research into a failed operation.
     // Integrity failures still surface, and cancellation/deadline always wins.
     if let Err(error) = stored {
-        inv.control.check()?;
-        if error.code != "vault.cache_budget_exceeded" {
+        let error =
+            crate::persistence::finish_control::<()>(Err(error), inv.control.check()).unwrap_err();
+        if error.code != "vault.cache_budget_exceeded" || !error.details.is_null() {
             return Err(error);
         }
     }
@@ -304,6 +304,7 @@ pub(crate) fn load_or_build(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lycheedev_core::metadata::Metadata;
     use std::collections::BTreeMap;
 
     fn fixture() -> (StoredMaterial, index::Index) {

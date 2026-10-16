@@ -10,6 +10,8 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
+mod publication;
+pub use publication::publish_derived_controlled;
 mod verification;
 pub(crate) use verification::{verify, walk_files};
 #[derive(Clone)]
@@ -252,33 +254,37 @@ pub fn read_object(
         .join("cache/objects")
         .join(&digest[..2])
         .join(&digest[2..]);
-    storage::guard_path(home, &path)?;
+    storage::guard_path_with_check(home, &path, || control.check())?;
     let (mut file, actual) = storage::locked_sha256(&path, length, control)?;
-    if actual != digest || file.metadata()?.len() != length {
-        return Err(ToolkitError::new(
-            "vault.cache_integrity",
-            "cache object digest/length differs",
-            4,
-        ));
-    }
-    file.seek(SeekFrom::Start(0))?;
-    let mut raw = Vec::with_capacity(length as usize);
-    let mut buffer = [0; 65536];
-    loop {
+    let result = (|| {
+        if actual != digest || file.metadata()?.len() != length {
+            return Err(ToolkitError::new(
+                "vault.cache_integrity",
+                "cache object digest/length differs",
+                4,
+            ));
+        }
+        file.seek(SeekFrom::Start(0))?;
+        let mut raw = Vec::with_capacity(length as usize);
+        let mut buffer = [0; 65536];
+        loop {
+            control.check()?;
+            let n = file.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            if raw.len() + n > length as usize {
+                return Err(ToolkitError::invalid("cache object grew"));
+            }
+            raw.extend_from_slice(&buffer[..n]);
+        }
+        if raw.len() != length as usize {
+            return Err(ToolkitError::invalid("cache length changed"));
+        }
         control.check()?;
-        let n = file.read(&mut buffer)?;
-        if n == 0 {
-            break;
-        }
-        if raw.len() + n > length as usize {
-            return Err(ToolkitError::invalid("cache object grew"));
-        }
-        raw.extend_from_slice(&buffer[..n]);
-    }
-    if raw.len() != length as usize {
-        return Err(ToolkitError::invalid("cache length changed"));
-    }
-    Ok(raw)
+        Ok(raw)
+    })();
+    storage::finish_file(file, result, control)
 }
 pub fn commands() -> &'static [&'static str] {
     &["cache status", "cache verify", "cache prune"]
