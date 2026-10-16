@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 12:13 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`fa587f1236e6a9fc88776b827842f2f86bf093ec`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 12:25 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`32c80d9a59a5d80f8cee600479064b23184a2b21`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -25,9 +25,9 @@
 
 ## 2. 当前实现与有限剩余项
 
-- **Data 默认链已接入**：本地/CDN、Prepared/cache、SQL、导航、asset、Hotfix、自适应内存与 checked 收尾均已有实现。当前重点是 SQL 默认线程栈安全：原合法 scalar 深度63在 parse 实际溢出；本批25文件完整候选已实现堆任务栈解析/降低、bind/eval与迭代树 clone/equality/drop、flat JOIN及visitors，新增18项默认栈深度/混合嵌套/错误析构回归。仍有同步 provider callback 的原生重入，原默认栈实际编译运行尚未完成，不能称问题闭合。
+- **Data 默认链已接入**：本地/CDN、Prepared/cache、SQL、导航、asset、Hotfix、自适应内存与 checked 收尾均已有实现。当前重点是 SQL 默认线程栈安全：原合法 scalar 深度63在 parse 实际溢出；本批25文件完整候选已实现堆任务栈解析/降低、bind/eval与迭代树 clone/equality/drop、flat JOIN及visitors，新增18项默认栈深度/混合嵌套/错误析构回归。最新fa587f已通过all-target与原三个parse边界测试，但同步 provider callback 的原生重入已在默认栈实际导致6项执行/错误回收溢出。正在将query/CTE/derived/UNION及bind/eval统一为可暂停任务，provider单次open逐行cursor保留当前行与预算lease；不得用全表缓冲、抬栈或降低深度规避。
 - **Emmy 已使用原版848文件，语义验证未完成**：`3336d82`已保存 initializer/provider 重复查询、call quality 多余查询和完整键集合被未知值污染的修复。原固定参考与当前候选的全量类型/provider/coverage差分保留；最新 adapter 另四项失败已用固定公开 API 证明测试合同偏差并补对照：不兼容参数仍Unknown、完整诊断双句保留、metatable只采原引擎已索引的initializer；新增合法/未知/非法参数与standalone负例，实际Rust复验待跑。
-- **HTTP 后继已保存待 Windows 复验**：`6051063`使用固定 native-tls/schannel 三源38加4删的最小适配，将SNI名与证书校验名分离，保原验证与tokio所有权。完整来源/许可/逆补丁和打包已接，Node20/20通过；真实五项Go对照及取消/错误连接器仍待测试。Emmy零补丁不等于整个依赖树零补丁。
+- **HTTP 后继已保存并取得定向实证**：`6051063`使用固定 native-tls/schannel 三源38加4删的最小适配，将SNI名与证书校验名分离，保原验证与tokio所有权。完整来源/许可/逆补丁和打包已接，Node20/20通过；固定fa封存Data EXE实际remote329项与私有根TLS五项Go1.27.1对照已全部通过，多尾点SNI一致且证书拒绝保留。官方Cargo入口仍因未知lease未重跑，不能外推系统根/撤销全部策略。Emmy零补丁不等于整个依赖树零补丁。
 - **Source 正确性与性能仍未验收**：短预算隔离/暖态回收已有实际测试；完整Retail仍在原90秒内未完成。最新 dev 候选准备约72秒，API虽写完回复，最终 capture 仍耗尽总预算。不得增加deadline、减少输入或校验来通过。优化候选同机Go323配对入口已保存，实际结果尚无；先覆盖 describe 与静态Retail index/query，不能外推完整 B01–B07。
 - **正式 Lua 已明确切到 Go323**：`4092344`保存113原blob认证、精确Rust3.5 overlay与220/9正式入口，旧320/321/322原清单保留。Node正式63及包/版本115通过；本机已安装官方固定MSVC14.51与SDK，Community三工具字节/版本/签名均匹配原Enterprise固定身份；Community精确路径已实际验证。固定7c07的Go323正式Lua220/0/0与Rust桥9/0/0现已真实通过，全部owner回收；只是该自动化范围，不含实机或性能。
 
@@ -41,6 +41,9 @@
 - **本机0d0da9f编译失败**：[原始记录](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6214850678)为lowering局部Option类型不明确、两处AttachedToken没有Default、KeyIndex构造漏预算lease四点。本批最小修复明确Program类型、使用原empty token构造并接回真实allocation lease；尚未重新编译。Community辅助进程此前未被精确路径清单认可而强制收尾，所有句柄已回收，与四个编译错误分别记录。SQL/TLS/性能被编译前置阻断，不能报已运行。
 - **本机7c后继**：四个生产编译点已通过，独立SQL集成43项和48个Node/Windows前置通过；libtest仍因compound::branches的成功值不实现Debug而不能使用unwrap_err。本批改为显式match，原取消原因/7次回调断言不动，默认栈组仍未跑。Community身份已实际生效。Emmy原版36通过/候选33通过3失败，剩12行仅新增call_result coverage，原provider重复及Nil/Unknown差异消失；完整raw比较仍失败。独立审确认denied gate未进入投影，本批通用修正只对有效Bound且实际尝试投影生成result receipt，拒绝/无效permit保原gate+Unknown；两object正向结果完成证据保留。实际重跑前不预测通过，不忽略字段；仅剩object差异也需精确当前合同并列证据，历史raw verdict不重标。
 - **正式Go323自动Lua闭环**：固定`7c07f2406f1866abc533c421c8629ccf119c282a`的[220项Lua](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6215206258)与[9项真实Driver桥](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6215231080)全部通过、零失败/跳过，CLI/解释器构建exit0，Community身份按原hash/签名验证，所有owner sealed/retired/handlesReaped。旧7c libtest编译失败和0d oracle raw差异仍保留。本机该批已安全结束，下一固定fa587f验证SQL修复；dev产物不作性能证明。
+- **本机fa587f实际执行仍失败**：[完整组](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6215304345)all-target与原3个parse边界入口已通过，relational声明284项、207通过后scalar63-late-error栈溢出，后76未执行；[追加独立证据](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6215417969)使10个stack_safety用例共4通过、6个执行/错误清理栈溢出。CTE126、长左链销毁、flat4095通过不代表混合callback链安全。全部已完成的失败均保原默认栈与深度。另owner `9f053173-8472-4860-be36-19a455a32e62`只有request而无native receipt，ordinary lease保留、结果/回收未知；不得按dead PID清锁或伪造reaped。独立已封存EXE补测有自己的真实owner，不追认旧owner。
+- **fa封存EXE的TLS实证**：[remote329及Go五项](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6215452005)零失败/跳过，双多尾点SNI现相等、错误名和原证书校验拒绝保留，两个独立owner均完整回收。EXE SHA `5093d4a541a2b44fc4e7fbcfcabf28b7a7e8ead5e32210b5f29cc589b9274458`绑定同fa源码；这是保全EXE补充运行，非官方Cargo阶段，旧unknown owner未改。[Go323性能包准备](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6215390982)成功：clean固定commit、Go1.27.1、VCS未修改、优化构建和完整LuaLS私有包验证通过，EXE SHA `9f9a39ecaff18622b1dc9295bcd5ea671cb04dd4ba6961ad4a295dc53f1913f6`。Rust优化构建和20对实际测量仍未执行。
+- **32c80d9已保存**：通用gate/result阶段修正及7c正式Lua通过记录，Rust语义复验尚未执行。原0d严格raw失败保留，两个object正向receipt仍在；不得预先豁免全coverage或报告完整oracle通过。
 - 历史run、原失败和前版交接正文完整保留在[历史证据](docs/toolkit/rust-migration-evidence-2026-10-15.md)。四阶段最终循环审计尚未开始，实机清单仍在本文最后。
 
 ## 4. 进入最终四阶段前的有限收口
@@ -62,7 +65,9 @@
 
 ## 6. 本机线程接力验证入口（2026-10-16）
 
-用户指定现有本机线程接力，双方只经同一草稿PR同步源码与结果。先拉取本节标题上方已确认commit，保存自己的未提交修改，读AGENTS与本文件；不要把另一环境的历史lease复制或清除。89f61b9集中CI已终态；当前本机固定fa587f测试，后续普通push不自动排重复长CI。
+当前 ordinary 中断的正式恢复入口见 [恢复说明](tools/rust-channel-recovery.md)。先执行 `node --test tools/rust-channel-recovery.test.mjs`，实际验证Windows自有fixture的锁/no-replace rename，再在同机重启前执行 `node tools/rust-channel-recovery.mjs prepare <repo绝对路径> 9f053173-8472-4860-be36-19a455a32e62`。保存返回的fence ID与prepared SHA后，用户自行选择完整重启时机，再按说明apply/inspect。工具不重启、不清旧owner；旧结果与回收永远unknown，只有真实系统计数重置和原lease字节匹配才恢复原channel/target。云端17项中16通过、1Windows native未跑；真实prepare/reboot/apply均待本机。
+
+用户指定现有本机线程接力，双方只经同一草稿PR同步源码与结果。先拉取本节标题上方已确认commit，保存自己的未提交修改，读AGENTS与本文件；不要把另一环境的历史lease复制或清除。89f61b9集中CI已终态；当前本机fa587f测试发现执行栈溢出，ordinary channel另有未证实回收的owner；先保留其原证据并按合法恢复合同处理，后续普通push不自动排重复长CI。
 
 1. 在本机明确记录OS/架构、Rust1.99.0、Node24、Windows SDK/编译器和可用空间。Windows正式产品命令沿[当前workflow](.github/workflows/rust-parity.yml)的准备步骤：认证原版Emmy、受控`rust-cargo.mjs --owner local-fetch -- fetch --locked`，随后`--owner local-check --one-shot -- check --locked --offline --workspace --all-targets -j 1`。Linux只能报告其真实支持的子集，不假称Windows测试通过；不用裸Cargo绕现有owner/cache控制。
 2. 本机当前固定`fa587f1236e6a9fc88776b827842f2f86bf093ec`，不随普通push自动换树。先受控all-target编译，再`node tools/rust-cargo.mjs --owner local-sql-stack-tests --one-shot -- test --locked --offline -p lycheedev-data --lib relational:: -j 1 -- --test-threads=1 --nocapture`，包括原三个崩溃和18项新回归；单线程用于定位，保持默认线程栈，不设置更大RUST_MIN_STACK。之后跑原joins/CTE/derived/recursive及资源集成组、完整adapter组与`node tests/rust-source-engine/fixed-emmy-oracle/controlled-run.mjs`。保原63/64、128/129边界、全部输入/分段trace、完整panic/退出码及实际回收，不能只改期望。
