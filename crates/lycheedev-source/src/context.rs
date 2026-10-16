@@ -258,9 +258,7 @@ pub(crate) fn evaluate(
             let raw = if prepared.is_some() {
                 let document = reading.index.documents.iter().find(|document| document.path == *path)
                     .expect("site admitted from shared immutable index");
-                if document.text.is_empty() {
-                    evidence::read_blob_bounded(&inv.home, &json!({"sha256":document.sha256,"bytes":document.bytes}), git::MAX_SOURCE_BYTES, &inv.control)?
-                } else { document.text.clone() }
+                reading.index.read_document_controlled(document, Some(&inv.control))?
             } else {
                 git::blob_with_control(&inv.home, source, path, git::MAX_SOURCE_BYTES, &inv.control)?.0
             };

@@ -1,6 +1,7 @@
 //! Bounded rebuildable file index. Exact names use sorted postings; other
 //! strategies scan borrowed string slices and allocate only matched facts.
-//! Original document bytes remain separately authenticated evidence blobs.
+//! Original document bytes use an authenticated rebuildable Source cache;
+//! missing or corrupt entries are recovered from the fixed Git identity.
 use crate::index::{self, Document, Index, Symbol};
 use lycheedev_core::{
     Result, ToolkitError,
@@ -684,7 +685,7 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(projected.compatibility_gaps, full.compatibility_gaps);
-            // The real store uses original content-addressed blobs. Keep this
+            // The real store uses separately authenticated original caches. Keep this
             // purely projection test independent of disk/evidence behavior.
             projected.documents[0].text = full.documents[0].text.clone();
             let first = full.search(&pin, "PIN", text, mode, topic, 1, "").unwrap();

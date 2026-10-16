@@ -32,6 +32,8 @@ Before sending input, all keyboard virtual keys (VK 0x03–0xFE, excluding mouse
 
 Do not translate Go line by line. Preserve the external contract while using Rust ownership/borrowing to reduce unnecessary copying, enums/type-state where they prevent invalid transitions, Result for explicit errors, RAII for owned resources and bounded safe concurrency where measurements justify it. Prefer clear concrete abstractions over gratuitous generic frameworks. Review lifecycle/cancellation/drop ordering and thread ownership as architecture, not style-only concerns. These choices do not relax unsafe boundaries or replace measured performance evidence.
 
+The user's 2026-10-16 refinement makes this an explicit all-module acceptance requirement. Stage 1 must assess Core, Source, Data, Live, CLI and Skill/delivery boundaries individually: identify who owns each large allocation and handle, which borrows or moves avoid copies, whether enums prevent invalid states, how streaming and explicit heap tasks bound memory and native stack depth, and where concurrency has measured benefit. Include cancellation, error and destruction paths. Record concrete costs and evidence for retaining or changing each design. Preserve good existing Rust implementations; neither blanket rewrites nor generic frameworks count as progress. Skill is evaluated at its workflow/implementation boundary rather than rewritten into Rust merely for appearance. Fixed Go external behavior, resource limits and independent measured acceptance remain mandatory.
+
 ## 2. Boundaries and ownership
 
 | Rust boundary | Responsibilities | Go reference at fixed release |

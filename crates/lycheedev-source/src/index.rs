@@ -1,3 +1,4 @@
+mod original_cache;
 mod profile;
 use crate::{
     facts::{self, Facts},
@@ -476,7 +477,9 @@ fn document_facts(
     sha256: &str,
     control: &lycheedev_core::control::OperationControl,
 ) -> Result<(Facts, bool)> {
-    document_facts_profiled(home, path, data, sha256, control, None)
+    let cache = lycheedev_core::cache::SourceFactsCache::open(home, control)?;
+    let result = document_facts_profiled(home, path, data, sha256, control, None, &cache);
+    cache.finish(result, control)
 }
 fn document_facts_profiled(
     home: &Path,
@@ -485,6 +488,7 @@ fn document_facts_profiled(
     sha256: &str,
     control: &lycheedev_core::control::OperationControl,
     profile: Option<&Profile>,
+    cache_owner: &lycheedev_core::cache::SourceFactsCache,
 ) -> Result<(Facts, bool)> {
     control.check()?;
     let cache = facts_cache_path(home, path, sha256);
@@ -492,28 +496,16 @@ fn document_facts_profiled(
     // the fixed Go 32 MiB limit plus one byte, then regenerate from authenticated
     // input bytes. Cancellation and owned-handle close failures still propagate.
     const MAX_FACT_CACHE_BYTES: usize = 32 << 20;
-    if cache.exists() {
+    let key = cache
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .expect("hashed cache name");
+    {
         let _phase = profile.map(|p| p.span(Phase::FactsRead));
-        let mut file = std::fs::File::open(&cache)?;
-        let loaded = (|| -> Result<Option<Value>> {
-            let mut raw = Vec::new();
-            let mut buffer = [0; 65536];
-            while raw.len() <= MAX_FACT_CACHE_BYTES {
-                control.check()?;
-                let remaining = MAX_FACT_CACHE_BYTES + 1 - raw.len();
-                let count = remaining.min(buffer.len());
-                let n = file.read(&mut buffer[..count])?;
-                if n == 0 {
-                    break;
-                }
-                raw.extend_from_slice(&buffer[..n]);
-            }
-            if raw.len() > MAX_FACT_CACHE_BYTES {
-                return Ok(None);
-            }
-            Ok(serde_json::from_slice::<Value>(&raw).ok())
-        })();
-        if let Some(envelope) = storage::finish_file(file, loaded, control)?
+        let envelope = cache_owner
+            .read(key, control)?
+            .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok());
+        if let Some(envelope) = envelope
             && envelope["schema"] == "lycheedev.source-facts.rust.v9"
             && envelope["inputSHA256"] == sha256
             && envelope["factsSHA256"] == storage::sha256(&serde_json::to_vec(&envelope["facts"])?)
@@ -548,7 +540,7 @@ fn document_facts_profiled(
     }
     drop(serialize_phase);
     let _publish_phase = profile.map(|p| p.span(Phase::FactsPublish));
-    storage::atomic_write_controlled(&cache, &envelope, control)?;
+    cache_owner.publish(key, &envelope, control)?;
     control.check().map_err(|mut error| {
         error.details = json!({"schema":"lycheedev.source-persistence.v1","path":cache,"mutation":"facts","state":"committed","cause":error.clone()});
         error
@@ -570,11 +562,39 @@ fn build_uncached_profiled(
     profile: &Profile,
 ) -> Result<Index> {
     let started = std::time::Instant::now();
-    let deadline = control.deadline();
-    let (mut cached, mut parsed_documents, mut read_bytes) = (0usize, 0usize, 0usize);
     let tree_phase = profile.span(Phase::GitTree);
     let files = git::tree_with_control(home, pin, control)?;
     drop(tree_phase);
+    let cache_owner = lycheedev_core::cache::SourceFactsCache::open(home, control)?;
+    let result = (|| {
+        let originals = lycheedev_core::cache::SourceOriginalCache::open(home, control)?;
+        let result = build_uncached_cached(
+            home,
+            pin,
+            control,
+            profile,
+            &files,
+            started,
+            (&cache_owner, &originals),
+        );
+        originals.finish(result, control)
+    })();
+    cache_owner.finish(result, control)
+}
+fn build_uncached_cached(
+    home: &Path,
+    pin: &SourcePin,
+    control: &lycheedev_core::control::OperationControl,
+    profile: &Profile,
+    files: &[git::TreeFile],
+    started: std::time::Instant,
+    (cache_owner, originals): (
+        &lycheedev_core::cache::SourceFactsCache,
+        &lycheedev_core::cache::SourceOriginalCache,
+    ),
+) -> Result<Index> {
+    let deadline = control.deadline();
+    let (mut cached, mut parsed_documents, mut read_bytes) = (0usize, 0usize, 0usize);
     let mut index = Index {
         documents: vec![],
         assets: vec![],
@@ -585,7 +605,7 @@ fn build_uncached_profiled(
     };
     let (mut skipped, mut diagnostics, mut relationships) = (0, Vec::new(), 0usize);
     let mut retained = 0usize;
-    for file in &files {
+    for file in files {
         if file.asset && file.bytes > 64 << 20 {
             index
                 .assets
@@ -593,7 +613,7 @@ fn build_uncached_profiled(
         }
     }
     let visit_phase = profile.span(Phase::GitBlobs);
-    let batches = git::visit_blobs_with_control(home, pin, &files, control, |file, data| {
+    let batches = git::visit_blobs_with_control(home, pin, files, control, |file, data| {
         control.check()?;
         if std::time::Instant::now() >= deadline {
             return Err(ToolkitError::new(
@@ -641,15 +661,22 @@ fn build_uncached_profiled(
             ));
         }
         let sha256 = storage::sha256(&data);
-        let (facts, cache_hit) =
-            document_facts_profiled(home, &file.path, &data, &sha256, control, Some(profile))?;
+        let (facts, cache_hit) = document_facts_profiled(
+            home,
+            &file.path,
+            &data,
+            &sha256,
+            control,
+            Some(profile),
+            cache_owner,
+        )?;
         if cache_hit {
             cached += 1;
         } else {
             parsed_documents += 1;
         }
         let publish_phase = profile.span(Phase::OriginalPublish);
-        evidence::publish_blob_bounded(home, &data, git::MAX_SOURCE_BYTES, control)?;
+        originals.publish(&sha256, &data, control)?;
         drop(publish_phase);
         let _symbols_phase = profile.span(Phase::Symbols);
         for (ordinal, d) in facts.declarations.iter().enumerate() {
@@ -759,6 +786,7 @@ fn build_uncached_profiled(
     }
     Ok(index)
 }
+
 fn record_compatibility_gap(gaps: &mut BTreeSet<String>, path: &str) {
     let path = path.to_ascii_lowercase();
     let categories: &[&str] = if path.ends_with(".lua") {
@@ -783,7 +811,7 @@ impl Index {
     fn read_document(&self, doc: &Document) -> Result<Vec<u8>> {
         self.read_document_controlled(doc, None)
     }
-    fn read_document_controlled(
+    pub(crate) fn read_document_controlled(
         &self,
         doc: &Document,
         control: Option<&lycheedev_core::control::OperationControl>,
@@ -798,12 +826,11 @@ impl Index {
             check_search(control)?;
             return Ok(bytes);
         }
-        let blob = json!({"sha256":doc.sha256,"bytes":doc.bytes});
         match control {
-            Some(control) => {
-                evidence::read_blob_bounded(&self.home, &blob, git::MAX_SOURCE_BYTES, control)
-            }
-            None => evidence::read_blob(&self.home, &blob, git::MAX_SOURCE_BYTES),
+            Some(control) => original_cache::read(&self.home, &self.summary, doc, control),
+            // Standalone compatibility helpers have no invocation. Production
+            // query/inspect/context always pass their original control above.
+            None => original_cache::read(&self.home, &self.summary, doc, &Default::default()),
         }
     }
     pub fn coverage(&self) -> Value {
@@ -1193,8 +1220,11 @@ mod facts_cache_tests {
     #[test]
     fn malformed_contract_invalidates_previous_index_and_file_facts() {
         let pin = SourcePin {
-            repository: "elvui".into(), product: "main".into(), requested_ref: "fixture".into(),
-            exact_commit: "a".repeat(40), parser_revision: git::PARSER.into(),
+            repository: "elvui".into(),
+            product: "main".into(),
+            requested_ref: "fixture".into(),
+            exact_commit: "a".repeat(40),
+            parser_revision: git::PARSER.into(),
         };
         let previous = storage::sha256(format!("rust-index-v8\0facts-layout-v7-go323-public\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}", pin.repository, pin.product, pin.exact_commit, pin.parser_revision).as_bytes());
         assert_ne!(fingerprint(&pin), previous);
@@ -1203,7 +1233,12 @@ mod facts_cache_tests {
         let input = storage::sha256(b"function goto() end");
         let previous_file = storage::sha256(format!("facts-layout-v7-go323-public\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0Example.lua\0{input}").as_bytes());
         let current = facts_cache_path(Path::new("fixture-home"), "Example.lua", &input);
-        assert_ne!(current, Path::new("fixture-home").join("cache/source-facts-rust").join(format!("{previous_file}.json")));
+        assert_ne!(
+            current,
+            Path::new("fixture-home")
+                .join("cache/source-facts-rust")
+                .join(format!("{previous_file}.json"))
+        );
     }
 
     struct Fixture {
@@ -1254,12 +1289,7 @@ mod facts_cache_tests {
                 .stderr(Stdio::piped())
                 .spawn()
                 .unwrap();
-            child
-                .stdin
-                .take()
-                .unwrap()
-                .write_all(input)
-                .unwrap();
+            child.stdin.take().unwrap().write_all(input).unwrap();
             let output = child.wait_with_output().unwrap();
             assert!(
                 output.status.success(),
@@ -1594,7 +1624,9 @@ mod facts_cache_tests {
             &["mktree"],
         );
         let pin = SourcePin {
-            repository: "elvui".into(), product: "main".into(), requested_ref: "fixture".into(),
+            repository: "elvui".into(),
+            product: "main".into(),
+            requested_ref: "fixture".into(),
             exact_commit: fixture.git("invalid encoding fixture", &["commit-tree", &tree]),
             parser_revision: git::PARSER.into(),
         };
@@ -1602,15 +1634,20 @@ mod facts_cache_tests {
         // A retry may reuse the earlier good document's facts, but cannot turn
         // the invalid document into a successful partial index.
         for _ in 0..2 {
-            let error = build_material_with_control(&fixture.home, &pin, &control).err().unwrap();
+            let error = build_material_with_control(&fixture.home, &pin, &control)
+                .err()
+                .unwrap();
             assert_eq!(error.code, "command.failed");
             assert_eq!(error.message, "codebase.analysis_encoding_or_budget");
             assert_eq!(error.exit_code, 5);
             assert!(error.details.is_null());
             assert!(!is_ready_with_control(&fixture.home, &pin, &control).unwrap());
-            let missing = crate::persistence::read::<Value>(&fixture.home, &key, &control).unwrap_err();
+            let missing =
+                crate::persistence::read::<Value>(&fixture.home, &key, &control).unwrap_err();
             assert_eq!(missing.code, "vault.record_missing");
-            assert!(!facts_cache_path(&fixture.home, "ZZBad.lua", &storage::sha256(bad_raw)).exists());
+            assert!(
+                !facts_cache_path(&fixture.home, "ZZBad.lua", &storage::sha256(bad_raw)).exists()
+            );
         }
     }
     #[test]
@@ -1684,5 +1721,271 @@ mod facts_cache_tests {
             serde_json::to_value(&cold.symbols).unwrap(),
             serde_json::to_value(&warm.symbols).unwrap()
         );
+    }
+    fn original_path(home: &Path, doc: &Document) -> PathBuf {
+        home.join("cache/source-originals-rust").join(&doc.sha256)
+    }
+    fn without_query_io(mut value: Value) -> Value {
+        value["coverage"].as_object_mut().unwrap().remove("io");
+        value
+    }
+    #[test]
+    fn source_original_cache_cold_warm_and_query_store_keep_full_results() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let raw = BTreeMap::from([
+            (
+                "Main.lua".into(),
+                "function CacheProbe()\n  return 'literal-original-marker'\nend\n".into(),
+            ),
+            ("Empty.lua".into(), String::new()),
+            (
+                "Main.xml".into(),
+                "<Ui><Script file=\"Main.lua\"/></Ui>".into(),
+            ),
+        ]);
+        let pin = fixture.pin(&raw);
+        let cold = build_with_control(&fixture.home, &pin, &control).unwrap();
+        for doc in &cold.documents {
+            assert_eq!(
+                fs::read(original_path(&fixture.home, doc)).unwrap(),
+                raw[&doc.path].as_bytes()
+            );
+            assert!(
+                !evidence::blob_path(&fixture.home, &doc.sha256)
+                    .unwrap()
+                    .exists()
+            );
+        }
+        let warm = build_with_control(&fixture.home, &pin, &control).unwrap();
+        assert!(warm.documents.iter().all(|doc| doc.text.is_empty()));
+        for doc in &warm.documents {
+            assert_eq!(
+                warm.read_document_controlled(doc, Some(&control)).unwrap(),
+                raw[&doc.path].as_bytes()
+            );
+        }
+        for (text, mode) in [
+            ("CacheProbe", "precise"),
+            ("literal-original-marker", "exploratory"),
+        ] {
+            let expected = without_query_io(
+                cold.search_with_control(&pin, "snapshot", text, mode, "", 20, "", &control)
+                    .unwrap(),
+            );
+            for _ in 0..2 {
+                let projected = crate::query_store::load_with_control(
+                    &fixture.home,
+                    &pin,
+                    text,
+                    mode,
+                    "",
+                    &control,
+                )
+                .unwrap();
+                let actual = projected
+                    .search_with_control(&pin, "snapshot", text, mode, "", 20, "", &control)
+                    .unwrap();
+                assert_eq!(without_query_io(actual), expected);
+            }
+        }
+        assert_eq!(
+            warm.excerpt("Main.lua", 1, 3).unwrap(),
+            cold.excerpt("Main.lua", 1, 3).unwrap()
+        );
+        assert_eq!(
+            warm.span("Main.lua", 1, 3).unwrap(),
+            cold.span("Main.lua", 1, 3).unwrap()
+        );
+    }
+    #[test]
+    fn source_original_missing_corrupt_and_oversized_cache_recover_fixed_git_bytes() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let raw = BTreeMap::from([("Main.lua".into(), "function Original() end\n".into())]);
+        let pin = fixture.pin(&raw);
+        build_with_control(&fixture.home, &pin, &control).unwrap();
+        let warm = build_with_control(&fixture.home, &pin, &control).unwrap();
+        let doc = &warm.documents[0];
+        let path = original_path(&fixture.home, doc);
+        // A newer commit at the same source path must never become recovery input.
+        let newer = fixture.pin(&BTreeMap::from([(
+            "Main.lua".into(),
+            "function Newer() end\n".into(),
+        )]));
+        assert_ne!(newer.exact_commit, pin.exact_commit);
+        fixture.git("", &["update-ref", "refs/heads/main", &newer.exact_commit]);
+        for damage in 0..5 {
+            match damage {
+                0 => fs::remove_file(&path).unwrap(),
+                1 => fs::write(&path, b"partial").unwrap(),
+                2 => fs::write(&path, vec![b'x'; doc.bytes]).unwrap(),
+                3 => fs::write(&path, vec![0xff; doc.bytes]).unwrap(),
+                _ => fs::OpenOptions::new()
+                    .write(true)
+                    .open(&path)
+                    .unwrap()
+                    .set_len((32 << 20) + 1)
+                    .unwrap(),
+            }
+            assert_eq!(
+                warm.read_document_controlled(doc, Some(&control)).unwrap(),
+                raw[&doc.path].as_bytes()
+            );
+            assert_eq!(fs::read(&path).unwrap(), raw[&doc.path].as_bytes());
+            assert!(
+                !evidence::blob_path(&fixture.home, &doc.sha256)
+                    .unwrap()
+                    .exists()
+            );
+        }
+        fs::remove_dir_all(fixture.home.join("cache/source-originals-rust")).unwrap();
+        assert_eq!(
+            warm.read_document_controlled(doc, Some(&control)).unwrap(),
+            raw[&doc.path].as_bytes()
+        );
+    }
+    #[test]
+    fn source_original_recovery_rejects_wrong_index_identity_and_unsafe_paths() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let pin = fixture.pin(&BTreeMap::from([(
+            "Main.lua".into(),
+            "function Real() end\n".into(),
+        )]));
+        build_with_control(&fixture.home, &pin, &control).unwrap();
+        let warm = build_with_control(&fixture.home, &pin, &control).unwrap();
+        let mut wrong = warm.documents[0].clone();
+        wrong.sha256 = storage::sha256(b"different bytes");
+        assert_eq!(
+            warm.read_document_controlled(&wrong, Some(&control))
+                .unwrap_err()
+                .code,
+            "codebase.source_integrity"
+        );
+        assert!(!original_path(&fixture.home, &wrong).exists());
+        wrong.bytes = git::MAX_SOURCE_BYTES + 1;
+        assert_eq!(
+            warm.read_document_controlled(&wrong, Some(&control))
+                .unwrap_err()
+                .code,
+            "vault.blob_limit"
+        );
+        wrong.bytes = 0;
+        wrong.path = "../outside.lua".into();
+        assert_eq!(
+            warm.read_document_controlled(&wrong, Some(&control))
+                .unwrap_err()
+                .code,
+            "codebase.source_integrity"
+        );
+        let mut tampered = build_with_control(&fixture.home, &pin, &control).unwrap();
+        tampered.summary["repository"] = json!("../uncontrolled");
+        fs::remove_file(original_path(&fixture.home, &warm.documents[0])).unwrap();
+        assert!(
+            tampered
+                .read_document_controlled(&warm.documents[0], Some(&control))
+                .is_err()
+        );
+    }
+    #[test]
+    fn source_original_recovery_cancellation_never_publishes_replacement() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let pin = fixture.pin(&BTreeMap::from([(
+            "Main.lua".into(),
+            "function Stop() end\n".into(),
+        )]));
+        build_with_control(&fixture.home, &pin, &control).unwrap();
+        let warm = build_with_control(&fixture.home, &pin, &control).unwrap();
+        let path = original_path(&fixture.home, &warm.documents[0]);
+        fs::remove_file(&path).unwrap();
+        let cancelled = OperationControl::default();
+        cancelled
+            .cancel_handle()
+            .store(true, std::sync::atomic::Ordering::Release);
+        assert_eq!(
+            warm.read_document_controlled(&warm.documents[0], Some(&cancelled))
+                .unwrap_err()
+                .code,
+            "command.cancelled"
+        );
+        assert!(!path.exists());
+        assert!(
+            warm.read_document_controlled(&warm.documents[0], Some(&control))
+                .is_ok()
+        );
+    }
+    #[test]
+    fn source_original_publication_failure_cannot_commit_final_manifest() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let raw = "function Blocked() end\n";
+        let pin = fixture.pin(&BTreeMap::from([("Main.lua".into(), raw.into())]));
+        let path = fixture
+            .home
+            .join("cache/source-originals-rust")
+            .join(storage::sha256(raw.as_bytes()));
+        fs::create_dir_all(&path).unwrap();
+        assert!(build_with_control(&fixture.home, &pin, &control).is_err());
+        assert!(!is_ready_with_control(&fixture.home, &pin, &control).unwrap());
+        let key = format!("source/rust-index/{}", fingerprint(&pin));
+        assert_eq!(
+            crate::persistence::read::<Value>(&fixture.home, &key, &control)
+                .unwrap_err()
+                .code,
+            "vault.record_missing"
+        );
+        fs::remove_dir(&path).unwrap();
+        let recovered = build_with_control(&fixture.home, &pin, &control).unwrap();
+        assert_eq!(recovered.documents.len(), 1);
+        assert!(is_ready_with_control(&fixture.home, &pin, &control).unwrap());
+        assert_eq!(fs::read(path).unwrap(), raw.as_bytes());
+    }
+    #[test]
+    fn source_original_full_cache_loss_rebuilds_index_and_preserves_formal_evidence() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let raw = BTreeMap::from([
+            (
+                "Main.xml".into(),
+                "<Ui><Script file=\"Main.lua\"/></Ui>".into(),
+            ),
+            ("Main.toc".into(), "Main.xml\n".into()),
+        ]);
+        let pin = fixture.pin(&raw);
+        let index = build_with_control(&fixture.home, &pin, &control).unwrap();
+        for doc in &index.documents {
+            assert!(
+                !evidence::blob_path(&fixture.home, &doc.sha256)
+                    .unwrap()
+                    .exists()
+            );
+        }
+        let loads = load_facts_with_control(&fixture.home, &pin, &index, &control).unwrap();
+        assert_eq!(loads.len(), 2);
+        fs::remove_dir_all(fixture.home.join("cache/source-originals-rust")).unwrap();
+        fs::remove_dir_all(fixture.home.join("cache/source-facts-rust")).unwrap();
+        assert_load_bytes(&fixture.home, &loads, &raw);
+        for load in &loads {
+            assert!(
+                evidence::blob_path(&fixture.home, load.source_blob["sha256"].as_str().unwrap())
+                    .unwrap()
+                    .is_file()
+            );
+        }
+        // A crash/prune can also remove final derived objects while their
+        // durable metadata pointers remain. The fixed Git pin must reconstruct
+        // the complete index rather than accept any missing/partial object.
+        fs::remove_dir_all(fixture.home.join("cache")).unwrap();
+        fs::create_dir(fixture.home.join("cache")).unwrap();
+        let recovered = build_with_control(&fixture.home, &pin, &control).unwrap();
+        assert_eq!(recovered.summary["io"]["parsedDocuments"], 2);
+        let mut before = serde_json::to_value(&index).unwrap();
+        let mut after = serde_json::to_value(&recovered).unwrap();
+        before["summary"].as_object_mut().unwrap().remove("io");
+        after["summary"].as_object_mut().unwrap().remove("io");
+        assert_eq!(after, before);
+        assert_load_bytes(&fixture.home, &loads, &raw);
     }
 }

@@ -37,6 +37,56 @@ impl<'a> StagedFile<'a> {
     pub fn name(&self) -> &str {
         &self.stage.name
     }
+    /// Disposable-cache targets retain at most 64 uncertain original stages.
+    /// Names are fixed by one lowercase SHA-256 key, never caller paths. None
+    /// means all slots are occupied; no existing or foreign entry is adopted.
+    /// The caller serializes same-key publication and owns the returned handle
+    /// before performing its next cancellation check.
+    pub fn create_rebuildable_cache<C: FileControl>(
+        parent: &'a Directory,
+        key: &str,
+        control: &mut C,
+    ) -> Result<Option<Self>, C::Error> {
+        if key.len() != 64
+            || !key
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(invalid("cache stage requires one lowercase SHA-256 key").into());
+        }
+        parent.verify_controlled(control)?;
+        for slot in 0..64 {
+            control.charge(FileCost {
+                io_operations: 4,
+                allocation_bytes: 4096,
+                work_units: 4096,
+            })?;
+            control.check()?;
+            let name = format!(".lycheedev-cache-{key}-{slot}");
+            match relative_file(
+                parent.parent_handle(),
+                std::ffi::OsStr::new(&name),
+                RelativeOpen::Stage,
+            ) {
+                Ok(file) => {
+                    return Ok(Some(Self {
+                        stage: Stage {
+                            file: Some(file),
+                            name,
+                            published: false,
+                        },
+                        parent,
+                        publication: StagedPublication::NotPublished,
+                        sealed: false,
+                    }));
+                }
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error.into()),
+            }
+        }
+        control.check()?;
+        Ok(None)
+    }
     pub fn publication(&self) -> StagedPublication {
         self.publication
     }
@@ -71,6 +121,19 @@ impl<'a> StagedFile<'a> {
             return Err(invalid("spool is already sealed"));
         }
         self.stage.file_mut().sync_all()?;
+        self.stage.file_mut().seek(SeekFrom::Start(0))?;
+        self.sealed = true;
+        Ok(())
+    }
+    /// Seal a disposable, authenticated cache entry without requesting crash
+    /// durability. Only cache owners that can reconstruct missing/corrupt bytes
+    /// may use this boundary. Evidence, manifests and ordinary output must use
+    /// `seal`, whose sync behavior is unchanged.
+    pub fn seal_rebuildable_cache(&mut self) -> io::Result<()> {
+        self.require_private()?;
+        if self.sealed {
+            return Err(invalid("spool is already sealed"));
+        }
         self.stage.file_mut().seek(SeekFrom::Start(0))?;
         self.sealed = true;
         Ok(())
@@ -167,3 +230,70 @@ mod tests;
 
 #[cfg(test)]
 mod zip_tests;
+
+#[cfg(test)]
+mod rebuildable_cache_tests {
+    use super::*;
+    #[test]
+    fn rebuildable_seal_keeps_original_owner_and_complete_atomic_visibility() {
+        let path = std::env::temp_dir().join(format!(
+            "lychee-cache-seal-{}",
+            crate::random::token().unwrap()
+        ));
+        std::fs::create_dir(&path).unwrap();
+        let directory = Directory::open(&path).unwrap();
+        let mut stage = StagedFile::create(&directory, &mut Uncontrolled).unwrap();
+        let temporary = stage.name().to_owned();
+        stage.write_all(b"complete cache").unwrap();
+        stage.seal_rebuildable_cache().unwrap();
+        assert!(stage.write_all(b"late mutation").is_err());
+        assert!(stage.seal().is_err());
+        let mut bytes = Vec::new();
+        stage.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, b"complete cache");
+        assert_eq!(
+            stage
+                .publish_name(std::ffi::OsStr::new("entry"), &mut Uncontrolled)
+                .unwrap(),
+            StagedPublication::Published
+        );
+        // A reported checked-close failure retains the complete publication;
+        // no path cleanup or second close can erase it or disguise success.
+        let errors = stage.close_with(|file| {
+            crate::filesystem::close_file(file)?;
+            Err(io::Error::other("injected close failure"))
+        });
+        assert_eq!(errors.len(), 1);
+        assert_eq!(
+            std::fs::read(path.join("entry")).unwrap(),
+            b"complete cache"
+        );
+        assert!(!path.join(temporary).exists());
+        directory.close().unwrap();
+        std::fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
+    fn rebuildable_seal_no_replace_preserves_complete_concurrent_winner() {
+        let path = std::env::temp_dir().join(format!(
+            "lychee-cache-winner-{}",
+            crate::random::token().unwrap()
+        ));
+        std::fs::create_dir(&path).unwrap();
+        let directory = Directory::open(&path).unwrap();
+        let mut stage = StagedFile::create(&directory, &mut Uncontrolled).unwrap();
+        stage.write_all(b"candidate").unwrap();
+        stage.seal_rebuildable_cache().unwrap();
+        std::fs::write(path.join("entry"), b"winner").unwrap();
+        assert_eq!(
+            stage
+                .publish_name(std::ffi::OsStr::new("entry"), &mut Uncontrolled)
+                .unwrap(),
+            StagedPublication::NotPublished
+        );
+        assert!(stage.close().is_empty());
+        assert_eq!(std::fs::read(path.join("entry")).unwrap(), b"winner");
+        assert_eq!(std::fs::read_dir(&path).unwrap().count(), 1);
+        directory.close().unwrap();
+        std::fs::remove_dir_all(path).unwrap();
+    }
+}

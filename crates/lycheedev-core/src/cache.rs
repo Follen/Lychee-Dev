@@ -10,6 +10,8 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
+mod source_facts;
+pub use source_facts::{SourceFactsCache, SourceOriginalCache};
 mod publication;
 pub use publication::publish_derived_controlled;
 mod verification;

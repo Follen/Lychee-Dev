@@ -282,7 +282,7 @@ pub fn dispatch_with_services(
                 let coverage = index.coverage();
                 let data = match inv.command.as_str() {
                     "source index" => index.summary.clone(),
-                    "source query" => index.search(
+                    "source query" => index.search_with_control(
                         source,
                         &pin.id,
                         inv.argument()?,
@@ -290,6 +290,7 @@ pub fn dispatch_with_services(
                         inv.flag("--topic").unwrap_or(""),
                         query_limit(inv)?,
                         inv.flag("--cursor").unwrap_or(""),
+                        &inv.control,
                     )?,
                     _ => {
                         if let Some(symbol) = inv.flag("--symbol") {
@@ -298,9 +299,27 @@ pub fn dispatch_with_services(
                                     "source inspect selector conflict",
                                 ));
                             }
-                            index.search(source, &pin.id, symbol, "precise", "", 25, "")?
+                            index.search_with_control(
+                                source,
+                                &pin.id,
+                                symbol,
+                                "precise",
+                                "",
+                                25,
+                                "",
+                                &inv.control,
+                            )?
                         } else if let Some(path) = inv.flag("--target-path") {
-                            index.search(source, &pin.id, path, "precise", "asset", 25, "")?
+                            index.search_with_control(
+                                source,
+                                &pin.id,
+                                path,
+                                "precise",
+                                "asset",
+                                25,
+                                "",
+                                &inv.control,
+                            )?
                         } else {
                             return Err(ToolkitError::arguments(
                                 "source inspect requires a selector",
