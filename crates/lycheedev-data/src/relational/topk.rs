@@ -34,8 +34,8 @@ impl TopRows {
         })
     }
     fn worse(&self, a: &Ranked, b: &Ranked, work: &mut Work<'_>) -> Result<bool> {
-        work.spend()?;
         let order = if let Some((desc, nulls)) = self.order {
+            work.spend()?;
             ordering(&a.row.1[0], &b.row.1[0], desc, nulls)?
         } else {
             Ordering::Equal
@@ -67,15 +67,19 @@ impl TopRows {
             if let Some(example) = &self.example {
                 compare(example, value)?;
             } else {
-                self.example = Some(work.clone_scalar(value)?);
+                // Only scalar comparability is needed. Keep a zero-allocation
+                // representative rather than a second owned copy of text.
+                self.example = Some(match value {
+                    Scalar::String(_) => Scalar::String(String::new()),
+                    Scalar::Bool(_) => Scalar::Bool(false),
+                    _ => Scalar::Int(0),
+                });
             }
         }
         if self.size == 0 {
             return Ok(());
         }
-        let charged = row_cost(&row.0)?
-            .checked_add(row_cost(&row.1)? + 80)
-            .ok_or_else(budget)?;
+        let charged = results::output_cost(&row, 128)?;
         let mut candidate = Ranked {
             row,
             ordinal,
@@ -104,7 +108,7 @@ impl TopRows {
         Ok(())
     }
     pub(super) fn finish(mut self, work: &mut Work<'_>) -> Result<Vec<Output>> {
-        work.retain(
+        work.safety_retain(
             self.rows
                 .len()
                 .checked_mul(std::mem::size_of::<Output>())
@@ -112,7 +116,7 @@ impl TopRows {
         )?;
         let mut out = Vec::with_capacity(self.rows.len());
         while !self.rows.is_empty() {
-            work.spend()?;
+            work.consume(0)?;
             let last = self.rows.swap_remove(0);
             out.push(last.row);
             if !self.rows.is_empty() {

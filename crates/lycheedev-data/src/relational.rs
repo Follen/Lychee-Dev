@@ -24,6 +24,7 @@ mod joins;
 mod provider;
 pub(crate) use provider::{EqualityOutcome, PreparedSource, RootResolver, RowProvider, RowYield};
 mod recursive;
+mod results;
 mod scalar;
 pub(crate) use scalar::text as scalar_text;
 mod selection;
@@ -400,13 +401,6 @@ fn term(expr: &Expr, parameters: &mut BTreeSet<String>, depth: usize) -> Result<
             if args.duplicate_treatment.is_some() {
                 return Err(unsupported());
             }
-            if ![
-                "LOWER", "UPPER", "LENGTH", "COALESCE", "NULLIF", "HAS_FLAG", "BIT_AND",
-            ]
-            .contains(&name.as_str())
-            {
-                return Err(unsupported());
-            }
             let mut terms = vec![];
             for arg in &args.args {
                 let FunctionArg::Unnamed(FunctionArgExpr::Expr(expr)) = arg else {
@@ -430,10 +424,13 @@ fn term(expr: &Expr, parameters: &mut BTreeSet<String>, depth: usize) -> Result<
                 .iter()
                 .map(|pair| Ok((nested(&pair.condition)?, nested(&pair.result)?)))
                 .collect::<Result<_>>()?,
-            else_result
-                .as_ref()
-                .map(|e| nested(e).map(Box::new))
-                .transpose()?,
+            Some(
+                else_result
+                    .as_ref()
+                    .map(|e| nested(e))
+                    .transpose()?
+                    .map_or_else(|| Box::new(Term::Value(Scalar::Null)), Box::new),
+            ),
         ),
         _ => return Err(unsupported()),
     })
@@ -466,6 +463,7 @@ fn bind_with_aggregates(
     context: &subquery::Context<'_>,
     work: &mut Work<'_>,
 ) -> Result<()> {
+    work.spend()?;
     match term {
         Term::Ordinal(index) if *index >= columns.len() => return Err(binding()),
         Term::Column(name) => {
@@ -538,7 +536,15 @@ fn bind_with_aggregates(
                 return Err(type_error());
             }
             if let Some(input) = input {
-                bind_with_aggregates(input, columns, alias, params, false, context, work)?;
+                let input_context = subquery::Context {
+                    group: None,
+                    scope: subquery::Scope {
+                        allowed: None,
+                        ..context.scope
+                    },
+                    ..*context
+                };
+                bind_with_aggregates(input, columns, alias, params, false, &input_context, work)?;
             }
         }
         Term::Call(name, list) => {
@@ -671,6 +677,8 @@ struct Work<'a> {
     cancel: Option<&'a AtomicBool>,
     shared: Option<&'a crate::resource::Budget>,
     planning: bool,
+    // Only temporary Rust allocations, never Go logical retention/work.
+    temporaries: Vec<crate::resource::RetainedReservation<'a>>,
     // Only explicitly prepared physical inputs may use equality selection.
     // Materialized CTE/derived/effective/meta sources never inherit a capability.
     selection_sources: Vec<(&'a Source, usize)>,
@@ -748,6 +756,47 @@ impl<'a> Work<'a> {
     }
 }
 impl Work<'_> {
+    fn temporary(&mut self, bytes: usize) -> Result<()> {
+        self.consume(0)?;
+        if let Some(shared) = self.shared {
+            if self.temporaries.len() == self.temporaries.capacity() {
+                let capacity = self
+                    .temporaries
+                    .capacity()
+                    .max(2)
+                    .checked_mul(2)
+                    .ok_or_else(budget)?;
+                self.safety_retain(
+                    (capacity - self.temporaries.capacity())
+                        .checked_mul(
+                            std::mem::size_of::<crate::resource::RetainedReservation<'_>>(),
+                        )
+                        .ok_or_else(budget)?,
+                )?;
+                self.temporaries
+                    .try_reserve_exact(capacity - self.temporaries.len())
+                    .map_err(|_| budget())?;
+            }
+            self.temporaries.push(shared.reserve_retained(bytes)?);
+        }
+        Ok(())
+    }
+    fn temporary_scope<T>(&mut self, work: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        let mark = self.temporaries.len();
+        let result = work(self);
+        self.temporaries.truncate(mark);
+        result
+    }
+
+    fn safety_retain(&mut self, bytes: usize) -> Result<()> {
+        self.consume(0)?;
+        if let Some(shared) = self.shared {
+            shared
+                .safety_only()
+                .charge(crate::resource::Cost::retained(bytes))?;
+        }
+        Ok(())
+    }
     fn scan_index(&self, source: &Source) -> Option<usize> {
         self.scans
             .iter()
@@ -801,17 +850,15 @@ impl Work<'_> {
         Ok(())
     }
     fn clone_scalar(&mut self, value: &Scalar) -> Result<Scalar> {
+        if let Scalar::Float(value) = value
+            && !value.is_finite()
+        {
+            return Err(numeric());
+        }
         if let Scalar::String(text) = value {
-            if text.len() > 1 << 20 {
-                return Err(budget());
-            }
             // Go scalars share immutable strings; row/group ownership has its
             // own logical charge. Only Rust's necessary clone is additional.
-            if let Some(shared) = self.shared {
-                shared
-                    .safety_only()
-                    .charge(crate::resource::Cost::retained(text.len()))?;
-            }
+            self.temporary(text.len())?;
         }
         Ok(value.clone())
     }
@@ -835,11 +882,7 @@ fn case_text(text: &str, upper: bool, work: &mut Work<'_>) -> Result<String> {
     if bytes > 1 << 20 {
         return Err(budget());
     }
-    if let Some(shared) = work.shared {
-        shared
-            .safety_only()
-            .charge(crate::resource::Cost::retained(bytes))?;
-    }
+    work.temporary(bytes)?;
     let mut output = String::with_capacity(bytes);
     for (i, c) in text.chars().enumerate() {
         if i % 4096 == 0 {
@@ -904,8 +947,9 @@ fn eval_scoped(
         Term::Binary(a, op, b) => {
             let a = value(a)?;
             if matches!(op, BinaryOperator::And | BinaryOperator::Or) {
+                let b = value(b)?;
                 let a = truth(&a)?;
-                let b = truth(&value(b)?)?;
+                let b = truth(&b)?;
                 return Ok(match op {
                     BinaryOperator::And if a == Some(false) || b == Some(false) => {
                         Scalar::Bool(false)
@@ -952,7 +996,7 @@ fn eval_scoped(
                     if bytes > 1 << 20 {
                         return Err(budget());
                     }
-                    work.retain(bytes)?;
+                    work.temporary(bytes)?;
                     let mut output = String::with_capacity(bytes);
                     output.push_str(&a);
                     output.push_str(&b);
@@ -965,7 +1009,7 @@ fn eval_scoped(
                         || matches!(b, Scalar::Float(_))
                         || op == &BinaryOperator::Divide
                     {
-                        work.retain(8 << 10)?;
+                        work.temporary(8 << 10)?;
                     }
                     arithmetic(&a, op, &b)
                 }
@@ -1209,6 +1253,7 @@ impl Source {
             cancel,
             shared,
             planning: false,
+            temporaries: Vec::new(),
             selection_sources: Vec::new(),
             providers: &[],
             resolver: None,
@@ -1276,9 +1321,6 @@ fn row_cost(row: &[Scalar]) -> Result<usize> {
         match v {
             Scalar::Float(f) if !f.is_finite() => return Err(numeric()),
             Scalar::String(s) => {
-                if s.len() > 1 << 20 {
-                    return Err(budget());
-                }
                 cost = cost.checked_add(s.len()).ok_or_else(budget)?;
             }
             _ => {}
@@ -1722,9 +1764,16 @@ impl Program {
         shared: Option<&'a crate::resource::Budget>,
         equal_columns: &BTreeMap<String, String>,
     ) -> Result<QueryResult> {
+        if let Some(shared) = shared {
+            shared.check()?;
+        }
+        if cancel.is_some_and(|cancel| cancel.load(AtomicOrdering::Acquire)) {
+            return Err(fault("operation.cancelled", 7, "SQL query cancelled"));
+        }
         if limits.work == 0 || limits.memory_bytes == 0 || limits.memory_bytes > 1 << 30 {
             return Err(budget());
         }
+        let resolver = provider::MapResolver::Owned(sources);
         let mut work = Work {
             left: limits.work,
             bytes: limits.memory_bytes,
@@ -1732,14 +1781,15 @@ impl Program {
             cancel,
             shared,
             planning: true,
+            temporaries: Vec::new(),
             selection_sources: Vec::new(),
             providers: &[],
-            resolver: None,
+            resolver: Some(&resolver),
             roots: BTreeMap::new(),
             measure: self.analyze,
             scans: Vec::new(),
         };
-        work.spend()?;
+        work.consume(0)?;
         if self
             .parameters
             .iter()
@@ -1750,7 +1800,7 @@ impl Program {
         for name in &self.parameters {
             row_cost(std::slice::from_ref(&parameters[name]))?;
         }
-        work.retain(
+        work.safety_retain(
             equal_columns
                 .len()
                 .checked_mul(std::mem::size_of::<(&Source, usize)>())
@@ -1758,14 +1808,8 @@ impl Program {
         )?;
         work.selection_sources = Vec::with_capacity(equal_columns.len());
         for (name, field) in equal_columns {
-            let key = compound::physical_key(name)?;
-            let mut matches = sources.iter().filter(|(candidate, _)| {
-                compound::physical_key(candidate).is_ok_and(|candidate| candidate == key)
-            });
-            let (_, source) = matches.next().ok_or_else(binding)?;
-            if matches.next().is_some() {
-                return Err(binding());
-            }
+            let name = RelationName::from_key(name)?;
+            let source = resolver.resolve(name.table_use())?;
             let index = column(
                 &source.columns,
                 ColumnOwners::Single(""),
@@ -1773,19 +1817,7 @@ impl Program {
             )?;
             work.selection_sources.push((source, index));
         }
-        let mut inputs = BTreeMap::new();
-        work.retain(sources.keys().map(|s| s.len() + 103).sum())?;
-        for (name, source) in sources {
-            compound::insert_root(&mut inputs, name, source)?;
-            if work.measure {
-                if let Some(shared) = work.shared {
-                    shared
-                        .safety_only()
-                        .charge(crate::resource::Cost::retained(name.len() + 103))?;
-                }
-                work.roots.insert(compound::physical_key(name)?, source);
-            }
-        }
+        let inputs = BTreeMap::new();
         self.execute_and_explain(&inputs, parameters, limits, &mut work)
     }
 
@@ -1800,9 +1832,16 @@ impl Program {
         cancel: Option<&'a AtomicBool>,
         shared: Option<&'a crate::resource::Budget>,
     ) -> Result<QueryResult> {
+        if let Some(shared) = shared {
+            shared.check()?;
+        }
+        if cancel.is_some_and(|cancel| cancel.load(AtomicOrdering::Acquire)) {
+            return Err(fault("operation.cancelled", 7, "SQL query cancelled"));
+        }
         if limits.work == 0 || limits.memory_bytes == 0 || limits.memory_bytes > 1 << 30 {
             return Err(budget());
         }
+        let resolver = provider::MapResolver::Borrowed(sources);
         let mut work = Work {
             left: limits.work,
             bytes: limits.memory_bytes,
@@ -1810,14 +1849,15 @@ impl Program {
             cancel,
             shared,
             planning: true,
+            temporaries: Vec::new(),
             selection_sources: Vec::new(),
             providers,
-            resolver: None,
+            resolver: Some(&resolver),
             roots: BTreeMap::new(),
             measure: self.analyze,
             scans: Vec::new(),
         };
-        work.spend()?;
+        work.consume(0)?;
         if self
             .parameters
             .iter()
@@ -1839,39 +1879,7 @@ impl Program {
                 return Err(binding());
             }
         }
-        // Go caches immutable source schemas across both passes. No second
-        // source resolution, per-provider Work, or reset of retained allowance.
-        for source in sources.values() {
-            let bytes = source.columns.iter().try_fold(
-                128usize
-                    .checked_add(source.columns.len().checked_mul(32).ok_or_else(budget)?)
-                    .ok_or_else(budget)?,
-                |bytes, name| bytes.checked_add(name.len()).ok_or_else(budget),
-            )?;
-            work.retain(bytes)?;
-        }
-        // Canonical-key map storage is a Rust representation cost. The Go
-        // source-cache schema charge above already owns the logical allowance;
-        // do not shrink IN's half-buffer allowance for this second map.
-        if let Some(shared) = work.shared {
-            shared
-                .safety_only()
-                .charge(crate::resource::Cost::retained(
-                    sources.keys().map(|name| name.len() + 103).sum(),
-                ))?;
-        }
-        let mut inputs = BTreeMap::new();
-        for (name, source) in sources {
-            compound::insert_root(&mut inputs, name, source)?;
-            if work.measure {
-                if let Some(shared) = work.shared {
-                    shared
-                        .safety_only()
-                        .charge(crate::resource::Cost::retained(name.len() + 103))?;
-                }
-                work.roots.insert(compound::physical_key(name)?, source);
-            }
-        }
+        let inputs = BTreeMap::new();
         self.execute_and_explain(&inputs, parameters, limits, &mut work)
     }
 
@@ -1885,6 +1893,12 @@ impl Program {
         cancel: Option<&'a AtomicBool>,
         shared: Option<&'a crate::resource::Budget>,
     ) -> Result<QueryResult> {
+        if let Some(shared) = shared {
+            shared.check()?;
+        }
+        if cancel.is_some_and(|cancel| cancel.load(AtomicOrdering::Acquire)) {
+            return Err(fault("operation.cancelled", 7, "SQL query cancelled"));
+        }
         if limits.work == 0 || limits.memory_bytes == 0 || limits.memory_bytes > 1 << 30 {
             return Err(budget());
         }
@@ -1895,6 +1909,7 @@ impl Program {
             cancel,
             shared,
             planning: true,
+            temporaries: Vec::new(),
             selection_sources: Vec::new(),
             providers: &[],
             resolver: Some(resolver),
@@ -1902,7 +1917,7 @@ impl Program {
             measure: self.analyze,
             scans: Vec::new(),
         };
-        work.spend()?;
+        work.consume(0)?;
         if self
             .parameters
             .iter()
@@ -2003,21 +2018,31 @@ impl Program {
             group: None,
             complete: Some(&complete),
         };
+        // Acquire each input exactly once, in relation order. The local vector
+        // owns derived results until the complete synchronous query returns.
+        let prepared_inputs = if projection_mode == ProjectionMode::NamedSource {
+            Some(joins::inputs(self, sources, scope, parameters, work)?)
+        } else {
+            None
+        };
+        let base_source = if let Some(inputs) = &prepared_inputs {
+            inputs[0].source()
+        } else {
+            compound::source(sources, &self.table, work)?
+        };
         let joined = if self.joins.is_empty() {
             None
         } else {
             Some(joins::prepare_scoped(
-                &self.table,
+                prepared_inputs.as_deref().ok_or_else(binding)?,
                 &self.alias,
                 &self.joins,
-                sources,
                 parameters,
                 work,
                 self,
                 &context,
             )?)
         };
-        let base_source = compound::source(sources, &self.table, work)?;
         let ordinal_owners: Vec<String> = if projection_mode == ProjectionMode::CompoundOrdinals {
             let count = base_source.columns.len();
             if let Some(shared) = work.shared {
@@ -2040,22 +2065,6 @@ impl Program {
             ColumnOwners::Single(&self.alias)
         };
         let source = joined.as_ref().map(|p| &p.source).unwrap_or(base_source);
-        if source.columns.is_empty() || source.columns.len() > 4096 {
-            return Err(binding());
-        }
-        for column in &source.columns {
-            if column.is_empty() || column.len() > 4096 {
-                return Err(binding());
-            }
-        }
-        if work.planning && projection_mode == ProjectionMode::NamedSource {
-            let mut names = BTreeSet::new();
-            for (i, column) in source.columns.iter().enumerate() {
-                if !names.insert((identifier_lower(alias.owner(i)), identifier_lower(column))) {
-                    return Err(binding());
-                }
-            }
-        }
         if projection_mode == ProjectionMode::NamedSource {
             context.scope.fields = subquery::Fields {
                 columns: &source.columns,
@@ -2090,6 +2099,9 @@ impl Program {
                     }
                     selected += 1;
                     outputs.push(if projection_mode == ProjectionMode::CompoundOrdinals {
+                        // Go's synthetic UNION projection is a bound column,
+                        // not a user wildcard, and pays one bind node.
+                        work.spend()?;
                         Term::Ordinal(ordinal)
                     } else {
                         Term::Column(ColumnRef::qualified(alias.owner(ordinal), column.clone()))
@@ -2102,19 +2114,21 @@ impl Program {
             }
         }
         if let Some(t) = &self.filter {
-            if aggregate::contains(t) {
-                return Err(type_error());
-            }
-            bind(t, &source.columns, alias, parameters, &context, work)?;
+            bind_with_aggregates(t, &source.columns, alias, parameters, false, &context, work)?;
         }
         if let Some(t) = &self.having {
             bind(t, &source.columns, alias, parameters, &context, work)?;
         }
         for key in &self.groups {
-            if aggregate::contains(key) {
-                return Err(type_error());
-            }
-            bind(key, &source.columns, alias, parameters, &context, work)?;
+            bind_with_aggregates(
+                key,
+                &source.columns,
+                alias,
+                parameters,
+                false,
+                &context,
+                work,
+            )?;
         }
         for (t, _, _) in &mut ordering_terms {
             // Go resolves a bare ORDER BY output name before binding against
@@ -2139,27 +2153,26 @@ impl Program {
             }
             bind(t, &source.columns, alias, parameters, &context, work)?;
         }
-        for t in self.limit.iter().chain(self.offset.iter()) {
-            bind(t, &[], ColumnOwners::Single(""), parameters, &context, work)?;
-        }
         let count = |term: &Option<Term>, default: usize, work: &mut Work<'_>| -> Result<usize> {
             let Some(t) = term else {
                 return Ok(default);
             };
-            let v = eval_scoped(
-                t,
-                &[],
-                &[],
-                ColumnOwners::Single(""),
-                parameters,
-                &context,
-                work,
-            )?;
-            let n = int(&v).filter(|n| *n >= 0).ok_or_else(type_error)?;
-            usize::try_from(n).map_err(|_| budget())
+            work.temporary_scope(|work| {
+                let v = eval_scoped(
+                    t,
+                    &[],
+                    &[],
+                    ColumnOwners::Single(""),
+                    parameters,
+                    &context,
+                    work,
+                )?;
+                let n = int(&v).filter(|n| *n >= 0).ok_or_else(type_error)?;
+                usize::try_from(n).map_err(|_| budget())
+            })
         };
-        let limit = count(&self.limit, usize::MAX, work)?;
-        let offset = count(&self.offset, 0, work)?;
+        count(&self.limit, usize::MAX, work)?;
+        count(&self.offset, 0, work)?;
         let is_grouped = !self.groups.is_empty()
             || self.having.is_some()
             || outputs.iter().any(aggregate::contains)
@@ -2186,27 +2199,21 @@ impl Program {
                 }),
             ..context
         };
+        let mut grouping = if is_grouped {
+            Some(aggregate::Grouping::new(
+                &self.groups,
+                &mut outputs,
+                &mut ordering_terms,
+                self.having.as_ref(),
+                &columns,
+                parameters,
+                &group_context,
+                work,
+            )?)
+        } else {
+            None
+        };
         if work.planning {
-            // Binding uses the real schema, validates all CASE branches,
-            // aggregate/group rules and LIMIT/OFFSET, but never visits a row.
-            if !self.groups.is_empty()
-                || self.having.is_some()
-                || outputs.iter().any(aggregate::contains)
-                || ordering_terms
-                    .iter()
-                    .any(|(t, _, _)| aggregate::contains(t))
-            {
-                aggregate::Grouping::new(
-                    &self.groups,
-                    &mut outputs,
-                    &mut ordering_terms,
-                    self.having.as_ref(),
-                    &columns,
-                    parameters,
-                    &group_context,
-                    work,
-                )?;
-            }
             return Ok(QueryResult {
                 plan: None,
                 columns,
@@ -2222,46 +2229,108 @@ impl Program {
         } else {
             None
         };
-        let grouped = if !self.groups.is_empty()
-            || self.having.is_some()
-            || outputs.iter().any(aggregate::contains)
-            || ordering_terms
-                .iter()
-                .any(|(t, _, _)| aggregate::contains(t))
-        {
-            let mut grouping = aggregate::Grouping::new(
-                &self.groups,
-                &mut outputs,
-                &mut ordering_terms,
-                self.having.as_ref(),
-                &columns,
-                parameters,
-                &group_context,
-                work,
+        let mut bounded =
+            if !is_grouped && !self.distinct && self.limit.is_some() && self.order.len() <= 1 {
+                let limit = count(&self.limit, 0, work)?;
+                let offset = count(&self.offset, 0, work)?;
+                topk::TopRows::new(self, false, limit, offset)
+            } else {
+                None
+            };
+        // Rust owns scalar vectors and copied strings; these temporary owners
+        // do not add Go logical result-retention or work charges.
+        work.safety_retain(
+            (outputs.len() + ordering_terms.len())
+                .checked_mul(std::mem::size_of::<Scalar>())
+                .ok_or_else(budget)?,
+        )?;
+        let group_columns = if let Some(grouping) = &grouping {
+            work.safety_retain(
+                grouping
+                    .columns()
+                    .iter()
+                    .map(|name| name.len() + std::mem::size_of::<String>())
+                    .sum(),
             )?;
-            let mut add = |row: &[Scalar], work: &mut Work<'_>| -> Result<()> {
-                work.spend()?;
-                if row.len() != source.columns.len() {
-                    return Err(binding());
-                }
-                row_cost(row)?;
-                if let Some(t) = &self.filter
-                    && truth(&eval_scoped(
-                        t,
+            Some(grouping.columns().to_vec())
+        } else {
+            None
+        };
+        let output_columns = group_columns.as_deref().unwrap_or(&source.columns);
+        let output_alias = if is_grouped {
+            ColumnOwners::Single("")
+        } else {
+            alias
+        };
+        let output_context = if is_grouped { &group_context } else { &context };
+        let mut result: Vec<results::Output> = vec![];
+        let mut project_row = |row: &[Scalar], work: &mut Work<'_>| -> Result<()> {
+            let projected = outputs
+                .iter()
+                .map(|term| {
+                    eval_scoped(
+                        term,
                         row,
-                        &source.columns,
-                        alias,
+                        output_columns,
+                        output_alias,
                         parameters,
-                        &context,
+                        output_context,
                         work,
-                    )?)? != Some(true)
-                {
-                    return Ok(());
-                }
-                grouping.add(row, &source.columns, alias, parameters, &context, work)
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let ordering = ordering_terms
+                .iter()
+                .map(|(term, _, _)| {
+                    eval_scoped(
+                        term,
+                        row,
+                        output_columns,
+                        output_alias,
+                        parameters,
+                        output_context,
+                        work,
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let output = (projected, ordering);
+            if let Some(bounded) = &mut bounded {
+                bounded.add(output, work)?;
+            } else {
+                work.retain(results::output_cost(&output, 64)?)?;
+                result.push(output);
+            }
+            Ok(())
+        };
+        {
+            let mut consume = |row: &[Scalar], work: &mut Work<'_>| -> Result<()> {
+                work.temporary_scope(|work| {
+                    work.spend()?;
+                    if row.len() != source.columns.len() {
+                        return Err(binding());
+                    }
+                    if let Some(term) = &self.filter
+                        && truth(&eval_scoped(
+                            term,
+                            row,
+                            &source.columns,
+                            alias,
+                            parameters,
+                            &context,
+                            work,
+                        )?)? != Some(true)
+                    {
+                        return Ok(());
+                    }
+                    if let Some(grouping) = &mut grouping {
+                        grouping.add(row, &source.columns, alias, parameters, &context, work)
+                    } else {
+                        project_row(row, work)
+                    }
+                })
             };
             if let Some(plan) = &joined {
-                plan.visit(parameters, &context, work, &mut add)?;
+                plan.visit(parameters, &context, work, &mut consume)?;
             } else {
                 selection::visit(
                     source,
@@ -2270,244 +2339,35 @@ impl Program {
                     alias,
                     parameters,
                     work,
-                    &mut add,
+                    &mut |row, work| {
+                        if row.len() != source.columns.len() {
+                            return Err(binding());
+                        }
+                        // executeSelect always visits joinRow(0), even without
+                        // joins. A compound tail invokes executeRows directly.
+                        if projection_mode == ProjectionMode::NamedSource {
+                            work.spend()?;
+                        }
+                        consume(row, work)
+                    },
                 )?;
             }
-            Some(grouping.finish(
-                source.complete && complete.get(),
-                parameters,
-                &group_context,
-                work,
-            )?)
-        } else {
-            None
-        };
-        let output_context = if grouped.is_some() {
-            &group_context
-        } else {
-            &context
-        };
-        let source = grouped.as_ref().unwrap_or(source);
-        let alias = if grouped.is_some() {
-            ColumnOwners::Single("")
-        } else {
-            alias
-        };
-        let mut bounded = topk::TopRows::new(self, grouped.is_some(), limit, offset);
-        if bounded.is_some() {
-            // One projected candidate remains live beside the retained heap.
-            // Admit its scalar-vector storage once; string payloads retain
-            // their existing, separately checked clone admission.
-            work.retain(
-                (outputs.len() + ordering_terms.len())
-                    .checked_mul(std::mem::size_of::<Scalar>())
-                    .and_then(|n| n.checked_add(2 * std::mem::size_of::<Vec<Scalar>>()))
-                    .ok_or_else(budget)?,
-            )?;
         }
-        let mut result: Vec<(Vec<Scalar>, Vec<Scalar>)> = vec![];
-        let mut seen = BTreeSet::new();
-        let mut project_row = |row: &[Scalar], work: &mut Work<'_>| -> Result<()> {
-            work.spend()?;
-            if row.len() != source.columns.len() {
-                return Err(binding());
-            }
-            row_cost(row)?;
-            if grouped.is_none()
-                && let Some(t) = &self.filter
-                && truth(&eval_scoped(
-                    t,
-                    row,
-                    &source.columns,
-                    alias,
-                    parameters,
-                    output_context,
-                    work,
-                )?)? != Some(true)
-            {
-                return Ok(());
-            }
-            let projected = outputs
-                .iter()
-                .map(|t| {
-                    eval_scoped(
-                        t,
-                        row,
-                        &source.columns,
-                        alias,
-                        parameters,
-                        output_context,
-                        work,
-                    )
-                })
-                .collect::<Result<Vec<_>>>()?;
-            if self.distinct {
-                let key = projected
-                    .iter()
-                    .map(|v| match v {
-                        v if int(v).is_some() => format!("integer:{}", int(v).unwrap()),
-                        Scalar::Float(v)
-                            if v.is_finite()
-                                && v.fract() == 0.
-                                && *v >= i64::MIN as f64
-                                && *v <= u64::MAX as f64 =>
-                        {
-                            format!("integer:{}", *v as i128)
-                        }
-                        _ => serde_json::to_string(v).unwrap(),
-                    })
-                    .map(|part| format!("{}:{}", part.len(), part))
-                    .collect::<String>();
-                work.retain(key.len() + 32)?;
-                if !seen.insert(key) {
-                    return Ok(());
-                }
-            }
-            let mut ordering = vec![];
-            for (t, _, _) in &ordering_terms {
-                let v = if bind(t, &source.columns, alias, parameters, output_context, work).is_ok()
-                {
-                    eval_scoped(
-                        t,
-                        row,
-                        &source.columns,
-                        alias,
-                        parameters,
-                        output_context,
-                        work,
-                    )?
-                } else {
-                    eval_scoped(
-                        t,
-                        &projected,
-                        &columns,
-                        alias.output(),
-                        parameters,
-                        output_context,
-                        work,
-                    )?
-                };
-                ordering.push(v);
-            }
-            if let Some(bounded) = &mut bounded {
-                bounded.add((projected, ordering), work)?;
-            } else {
-                work.retain(row_cost(&projected)? + row_cost(&ordering)? + 48)?;
-                result.push((projected, ordering));
-            }
-            Ok(())
-        };
-        if grouped.is_none()
-            && let Some(plan) = &joined
-        {
-            plan.visit(parameters, &context, work, &mut project_row)?;
-        } else if grouped.is_none() {
-            selection::visit(
-                source,
-                selected.as_deref(),
-                self.filter.as_ref(),
-                alias,
-                parameters,
-                work,
-                &mut project_row,
-            )?;
-        } else {
-            for row in &source.rows {
-                project_row(row, work)?;
-            }
+        if let Some(grouping) = grouping {
+            grouping.finish(parameters, &group_context, work, &mut project_row)?;
         }
         if let Some(bounded) = bounded {
-            return Ok(QueryResult {
-                plan: None,
-                columns,
-                rows: bounded
-                    .finish(work)?
-                    .into_iter()
-                    .skip(offset)
-                    .take(limit)
-                    .map(|r| r.0)
-                    .collect(),
-                complete: source.complete && complete.get(),
-            });
+            result = bounded.finish(work)?;
         }
-        // Fallible stable merge sort: comparison errors never become a fake
-        // ordering relation and no partial result is returned on failure.
-        let mut width = 1;
-        work.retain(
-            result
-                .len()
-                .checked_mul(std::mem::size_of::<(Vec<Scalar>, Vec<Scalar>)>())
-                .ok_or_else(budget)?,
-        )?;
-        while !ordering_terms.is_empty() && width < result.len() {
-            let mut start = 0;
-            while start < result.len() {
-                let middle = (start + width).min(result.len());
-                let end = (middle + width).min(result.len());
-                let mut left = start;
-                let mut right = middle;
-                let mut merged = Vec::with_capacity(end - start);
-                while left < middle || right < end {
-                    work.spend()?;
-                    let take_left = if right == end {
-                        true
-                    } else if left == middle {
-                        false
-                    } else {
-                        let mut order = Ordering::Equal;
-                        for ((_, desc, nulls), (a, b)) in ordering_terms
-                            .iter()
-                            .zip(result[left].1.iter().zip(&result[right].1))
-                        {
-                            order = if a == &Scalar::Null && b == &Scalar::Null {
-                                Ordering::Equal
-                            } else if a == &Scalar::Null || b == &Scalar::Null {
-                                let first = nulls.unwrap_or(!desc);
-                                if (a == &Scalar::Null) == first {
-                                    Ordering::Less
-                                } else {
-                                    Ordering::Greater
-                                }
-                            } else {
-                                let mut c = compare(a, b)?;
-                                if *desc {
-                                    c = c.reverse();
-                                }
-                                c
-                            };
-                            if order != Ordering::Equal {
-                                break;
-                            }
-                        }
-                        order != Ordering::Greater
-                    };
-                    let index = if take_left {
-                        let n = left;
-                        left += 1;
-                        n
-                    } else {
-                        let n = right;
-                        right += 1;
-                        n
-                    };
-                    merged.push(std::mem::take(&mut result[index]));
-                }
-                for (slot, row) in result[start..end].iter_mut().zip(merged) {
-                    *slot = row;
-                }
-                start = end;
-            }
-            width = width.saturating_mul(2);
-        }
+        // Go evaluates pagination again after the complete input, then
+        // finishes DISTINCT/order/slice. Do not reuse an earlier result or
+        // move this expression evaluation ahead of a provider's late failure.
+        let limit = count(&self.limit, usize::MAX, work)?;
+        let offset = count(&self.offset, 0, work)?;
         Ok(QueryResult {
             plan: None,
             columns,
-            rows: result
-                .into_iter()
-                .skip(offset)
-                .take(limit)
-                .map(|r| r.0)
-                .collect(),
+            rows: results::finish(result, self.distinct, &ordering_terms, limit, offset, work)?,
             complete: source.complete && complete.get(),
         })
     }
@@ -2520,3 +2380,7 @@ mod identifier_tests;
 #[cfg(test)]
 #[path = "relational/resolver_tests.rs"]
 mod resolver_tests;
+
+#[cfg(test)]
+#[path = "relational/execution_contract_tests.rs"]
+mod execution_contract_tests;

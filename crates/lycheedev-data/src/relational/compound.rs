@@ -61,18 +61,6 @@ pub(super) fn validate_all_keyword(sql: &str) -> Result<()> {
 pub(super) fn physical_key(name: &str) -> Result<String> {
     Ok(RelationName::from_key(name)?.physical_key())
 }
-pub(super) fn insert_root<'a>(
-    inputs: &mut BTreeMap<String, &'a Source>,
-    name: &str,
-    source: &'a Source,
-) -> Result<()> {
-    let key = physical_key(name)?;
-    if inputs.contains_key(&key) {
-        return Err(binding());
-    }
-    inputs.insert(key, source);
-    Ok(())
-}
 pub(super) fn source<'a, 'w: 'a>(
     inputs: &BTreeMap<String, &'a Source>,
     name: &RelationName,
@@ -153,7 +141,7 @@ fn visible<'a>(
         .try_fold(0usize, |n, name| {
             n.checked_add(name.len() + 96).ok_or_else(budget)
         })?;
-    work.retain(
+    work.safety_retain(
         bytes
             .checked_add(reserved.iter().map(|name| name.len() + 96).sum::<usize>())
             .ok_or_else(budget)?,
@@ -180,57 +168,28 @@ pub(super) fn execute(
     parameters: &BTreeMap<String, Scalar>,
     work: &mut Work<'_>,
 ) -> Result<QueryResult> {
-    if program.bindings.is_empty()
-        && program.derived.is_none()
-        && program.joins.iter().all(|j| j.derived.is_none())
-    {
+    if program.bindings.is_empty() {
         return execute_body(program, sources, scope, parameters, work);
     }
-    work.retain(program.bindings.iter().map(|(n, _)| n.len() + 96).sum())?;
+    work.safety_retain(program.bindings.iter().map(|(n, _)| n.len() + 96).sum())?;
     // Reserve every local name before any definition runs: a self or forward
     // reference must fail binding rather than resolve a physical/outer table.
-    let mut reserved: BTreeSet<_> = program
+    let reserved: BTreeSet<_> = program
         .bindings
         .iter()
         .map(|(n, _)| identifiers::lexical_key(n))
         .collect();
-    reserved.extend(
-        std::iter::once((&program.table, &program.derived))
-            .chain(program.joins.iter().map(|j| (&j.table, &j.derived)))
-            .filter(|(_, body)| body.is_some())
-            .map(|(name, _)| name.lexical_key().expect("derived name is internal")),
-    );
     let mut results = BTreeMap::new();
     for (name, body) in &program.bindings {
-        work.spend()?;
         let inputs = visible(sources, &reserved, &results, work)?;
         let result = if program.recursive && recursive::references(body, name) > 0 {
             recursive::execute(name, body, &inputs, scope, parameters, work)?
         } else {
             body.execute_scoped_with(&inputs, scope, parameters, work)?
         };
-        work.retain(name.len() + 96)?;
+        work.safety_retain(name.len() + 96)?;
         results.insert(
             identifiers::lexical_key(name),
-            Source {
-                columns: result.columns,
-                rows: result.rows,
-                complete: result.complete,
-            },
-        );
-    }
-    for (name, body) in std::iter::once((&program.table, &program.derived))
-        .chain(program.joins.iter().map(|j| (&j.table, &j.derived)))
-    {
-        let Some(body) = body else {
-            continue;
-        };
-        work.spend()?;
-        let inputs = visible(sources, &reserved, &results, work)?;
-        let result = body.execute_scoped_with(&inputs, scope.select(&inputs), parameters, work)?;
-        work.retain(name.key().len() + 96)?;
-        results.insert(
-            name.lexical_key().expect("derived name is internal"),
             Source {
                 columns: result.columns,
                 rows: result.rows,
@@ -287,7 +246,6 @@ fn execute_body(
     }
     let mut combined = None::<Source>;
     for branch in &program.branches {
-        work.spend()?;
         let result = branch.execute_scoped_with(sources, scope, parameters, work)?;
         // Move retained rows; never deep-clone scalar payloads between branches.
         // The row-vector extension itself has a separate admission cost.
@@ -309,9 +267,9 @@ fn execute_body(
     let combined = combined.ok_or_else(binding)?;
     // Ordinal owners are installed by the compound tail without changing
     // these raw public names (which may contain dots or escaped quotes).
-    work.retain(program.table.key().len() + 96)?;
+    work.safety_retain(program.table.key().len() + 96)?;
 
-    work.retain(sources.keys().map(|name| name.len() + 96).sum())?;
+    work.safety_retain(sources.keys().map(|name| name.len() + 96).sum())?;
     let mut inputs = sources.clone();
     inputs.insert(program.table.key().to_owned(), &combined);
     // Internal result columns may repeat. Project them by ordinal rather

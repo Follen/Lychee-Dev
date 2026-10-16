@@ -685,7 +685,7 @@ fn subquery_cancel_and_deadline_propagate_without_restart_or_partial_result() {
 #[test]
 fn subquery_uses_one_work_and_memory_allowance_including_preflight() {
     let (_, a, b) = providers();
-    let sources = BTreeMap::from([
+    let sources: BTreeMap<String, Source> = BTreeMap::from([
         ("a".into(), source(&["ID", "Name"], vec![])),
         ("b".into(), source(&["ID", "Name"], vec![])),
     ]);
@@ -705,6 +705,7 @@ fn subquery_uses_one_work_and_memory_allowance_including_preflight() {
     ];
     let program = Program::compile("SELECT ID IN (SELECT ID FROM b GROUP BY ID) FROM a").unwrap();
     let limits = Limits::default();
+    let resolver = provider::MapResolver::Borrowed(&inputs);
     let mut work = Work {
         left: limits.work,
         bytes: limits.memory_bytes,
@@ -712,22 +713,23 @@ fn subquery_uses_one_work_and_memory_allowance_including_preflight() {
         cancel: None,
         shared: None,
         planning: true,
+        temporaries: Vec::new(),
         selection_sources: vec![],
         providers: &providers,
-        resolver: None,
+        resolver: Some(&resolver),
         roots: BTreeMap::new(),
         measure: false,
         scans: Vec::new(),
     };
     program
-        .execute_scoped(&inputs, &BTreeMap::new(), &mut work)
+        .execute_scoped(&BTreeMap::new(), &BTreeMap::new(), &mut work)
         .unwrap();
     let (left, bytes) = (work.left, work.bytes);
     assert!(left < limits.work);
     assert!(bytes < limits.memory_bytes);
     work.planning = false;
     program
-        .execute_scoped(&inputs, &BTreeMap::new(), &mut work)
+        .execute_scoped(&BTreeMap::new(), &BTreeMap::new(), &mut work)
         .unwrap();
     assert!(work.left < left);
     assert!(work.bytes < bytes);

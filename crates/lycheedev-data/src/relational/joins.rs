@@ -104,27 +104,68 @@ pub(super) fn compile(
         condition: Some(term(on, parameters, depth)?),
     })
 }
-fn source<'a, 'w: 'a>(
+/// Derived results stay in caller-owned slots. Sources are borrowed only after
+/// this vector is complete, so no self-reference or provider replay is needed.
+pub(super) enum Input<'a> {
+    Borrowed(&'a Source),
+    Derived(Source),
+}
+impl Input<'_> {
+    pub(super) fn source(&self) -> &Source {
+        match self {
+            Self::Borrowed(source) => source,
+            Self::Derived(source) => source,
+        }
+    }
+}
+pub(super) fn inputs<'a, 'w: 'a>(
+    program: &Program,
     sources: &BTreeMap<String, &'a Source>,
-    name: &RelationName,
+    scope: subquery::Scope<'_>,
+    params: &BTreeMap<String, Scalar>,
     work: &mut Work<'w>,
-) -> Result<&'a Source> {
-    let result = compound::source(sources, name, work)?;
-    if result.columns.is_empty() || result.columns.len() > 4096 {
-        return Err(binding());
-    }
-    if result
-        .columns
-        .iter()
-        .any(|s| s.is_empty() || s.len() > 4096)
+) -> Result<Vec<Input<'a>>> {
+    work.safety_retain((program.joins.len() + 1) * std::mem::size_of::<Input<'_>>())?;
+    let mut result = Vec::with_capacity(program.joins.len() + 1);
+    let mut aliases = BTreeSet::new();
+    let mut width = 0usize;
+    for (table, alias, derived) in
+        std::iter::once((&program.table, &program.alias, &program.derived)).chain(
+            program
+                .joins
+                .iter()
+                .map(|link| (&link.table, &link.alias, &link.derived)),
+        )
     {
-        return Err(binding());
-    }
-    let mut names = BTreeSet::new();
-    for name in &result.columns {
-        if !names.insert(identifier_lower(name)) {
+        work.spend()?;
+        if !aliases.insert(identifier_lower(alias)) {
             return Err(binding());
         }
+        let input = if let Some(query) = derived {
+            let computed =
+                query.execute_scoped_with(sources, scope.select(sources), params, work)?;
+            Input::Derived(Source {
+                columns: computed.columns,
+                rows: computed.rows,
+                complete: computed.complete,
+            })
+        } else {
+            Input::Borrowed(compound::source(sources, table, work)?)
+        };
+        let source = input.source();
+        width = width
+            .checked_add(source.columns.len())
+            .ok_or_else(binding)?;
+        if source.columns.is_empty() || width > 4096 {
+            return Err(binding());
+        }
+        let mut names = BTreeSet::new();
+        for name in &source.columns {
+            if name.is_empty() || !names.insert(identifier_lower(name)) {
+                return Err(binding());
+            }
+        }
+        result.push(input);
     }
     Ok(result)
 }
@@ -149,90 +190,94 @@ fn equality_indices(
     }
     (a < boundary && b >= boundary).then_some((a, b - boundary))
 }
-fn key(v: &Scalar, work: &mut Work<'_>) -> Result<String> {
-    let result = match v {
-        Scalar::String(s) => {
-            work.retain(s.len() + 2)?;
-            format!("s:{s}")
-        }
-        Scalar::Bool(v) => format!("b:{v}"),
-        Scalar::Int(v) => format!("n:{v}/1"),
-        Scalar::UInt(v) => format!("n:{v}/1"),
-        Scalar::Float(_) => {
-            work.retain(8192)?;
-            let n = rational(v)?;
-            format!("n:{}/{}", n.numer(), n.denom())
-        }
-        Scalar::Null => return Err(type_error()),
-    };
-    work.retain(result.len())?;
-    Ok(result)
+struct KeyIndex<'a> {
+    left: usize,
+    right: usize,
+    example: Option<usize>,
+    buckets: BTreeMap<String, Vec<usize>>,
+    _allocation: Option<crate::resource::RetainedReservation<'a>>,
 }
-type KeyIndex = (usize, Option<Scalar>, BTreeMap<String, Vec<usize>>);
-fn index(
+fn index<'w>(
     condition: Option<&Term>,
     columns: &[String],
     owners: &[String],
     boundary: usize,
-    right: &[Vec<Scalar>],
-    work: &mut Work<'_>,
-) -> Result<Option<KeyIndex>> {
-    let Some((left, right_column)) = equality_indices(condition, columns, owners, boundary) else {
+    rows: &[Vec<Scalar>],
+    work: &mut Work<'w>,
+) -> Result<Option<KeyIndex<'w>>> {
+    let Some((left, right)) = equality_indices(condition, columns, owners, boundary) else {
         return Ok(None);
     };
-    let mut example = None;
-    for row in right {
+    let allowance = work.bytes / 2;
+    let mut charged = 0usize;
+    let mut example: Option<usize> = None;
+    for (i, row) in rows.iter().enumerate() {
         work.spend()?;
-        let value = row.get(right_column).ok_or_else(binding)?;
+        let value = row.get(right).ok_or_else(binding)?;
         if value == &Scalar::Null {
             continue;
         }
-        if let Some(example) = &example {
-            if compare(example, value).is_err() {
+        if let Some(previous) = example {
+            if compare(&rows[previous][right], value).is_err() {
                 return Ok(None);
             }
         } else {
-            example = Some(work.clone_scalar(value)?);
+            example = Some(i);
         }
     }
+    let shared = work.shared;
+    let mut allocation = shared
+        .map(|budget| budget.reserve_retained(0))
+        .transpose()?;
     let mut buckets = BTreeMap::<String, Vec<usize>>::new();
-    // Optional acceleration may consume at most half the remaining local
-    // allocation allowance. Fall back before allocating, so shared cumulative
-    // admission never needs an inaccurate refund.
-    let required = right.iter().try_fold(0usize, |n, row| {
-        let extra = match &row[right_column] {
-            Scalar::Null => 0,
-            Scalar::String(s) => s.len().saturating_mul(2).saturating_add(256),
-            Scalar::Float(_) => 8448,
-            _ => 256,
-        };
-        n.checked_add(extra).ok_or_else(budget)
-    })?;
-    if required > work.bytes / 2 {
-        return Ok(None);
-    }
-    for (i, row) in right.iter().enumerate() {
+    for (i, row) in rows.iter().enumerate() {
         work.spend()?;
-        let value = &row[right_column];
+        let value = &row[right];
         if value == &Scalar::Null {
             continue;
         }
-        let key = key(value, work)?;
-        work.retain(128 + std::mem::size_of::<usize>())?;
+        let payload = if let Scalar::String(text) = value {
+            text.len()
+        } else {
+            0
+        };
+        let _temporary = shared
+            .map(|budget| budget.reserve_retained(payload + 8192))
+            .transpose()?;
+        let key = results::equal_key(value)?;
+        let cost = 32
+            + if buckets.contains_key(&key) {
+                0
+            } else {
+                96 + key.len()
+            };
+        if cost > allowance - charged {
+            // Refund exactly this failed optional index's logical retention.
+            // Its consumed work remains, and safety/stop errors never fallback.
+            work.bytes += charged;
+            return Ok(None);
+        }
+        if let Some(allocation) = &mut allocation {
+            allocation.grow(cost * 2)?;
+        }
+        work.bytes -= cost;
+        charged += cost;
         buckets.entry(key).or_default().push(i);
     }
-    Ok(Some((left, example, buckets)))
+    Ok(Some(KeyIndex {
+        left,
+        right,
+        example,
+        buckets,
+        _allocation: allocation,
+    }))
 }
 struct Right<'a> {
     source: &'a Source,
-    // Even owned lexical inputs are copied here: the fixed Go executor owns
-    // every retained right row and charges its full materialization cost.
-    rows: Vec<Vec<Scalar>>,
     selected: Vec<usize>,
     link: &'a Link,
     start: usize,
     end: usize,
-    keys: Option<KeyIndex>,
 }
 pub(super) struct Plan<'a> {
     pub source: Source,
@@ -246,94 +291,47 @@ pub(super) struct Plan<'a> {
     // No cross product or intermediate join is materialized.
     selected: Vec<bool>,
 }
-pub(super) fn prepare<'a, 'w: 'a>(
-    first: &RelationName,
+pub(super) fn prepare_scoped<'a>(
+    inputs: &'a [Input<'_>],
     alias: &str,
     links: &'a [Link],
-    sources: &BTreeMap<String, &'a Source>,
     params: &BTreeMap<String, Scalar>,
-    work: &mut Work<'w>,
-    program: &Program,
-) -> Result<Plan<'a>> {
-    prepare_scoped(
-        first,
-        alias,
-        links,
-        sources,
-        params,
-        work,
-        program,
-        &subquery::Context::new(sources, None),
-    )
-}
-pub(super) fn prepare_scoped<'a, 'w: 'a>(
-    first: &RelationName,
-    alias: &str,
-    links: &'a [Link],
-    sources: &BTreeMap<String, &'a Source>,
-    params: &BTreeMap<String, Scalar>,
-    work: &mut Work<'w>,
+    work: &mut Work<'_>,
     program: &Program,
     context: &subquery::Context<'_>,
 ) -> Result<Plan<'a>> {
-    let first = source(sources, first, work)?;
-    let mut aliases = BTreeSet::from([identifier_lower(alias)]);
-    work.retain(
+    let first = inputs[0].source();
+    work.safety_retain(
         first
             .columns
             .iter()
-            .map(|s| alias.len() + s.len() + 1 + std::mem::size_of::<String>())
+            .map(|s| alias.len() + s.len() + 2 * std::mem::size_of::<String>())
             .sum(),
     )?;
-    let mut columns: Vec<_> = first.columns.iter().cloned().collect();
-    // The existing logical schema charge owns alias/name bytes. The extra
-    // Rust String header is representation-only, not additional Go work.
-    if let Some(shared) = work.shared {
-        shared
-            .safety_only()
-            .charge(crate::resource::Cost::retained(
-                first.columns.len() * std::mem::size_of::<String>(),
-            ))?;
-    }
+    let mut columns = first.columns.clone();
     let mut owners = vec![alias.to_owned(); first.columns.len()];
-    work.retain(links.len() * std::mem::size_of::<Right<'_>>())?;
+    work.safety_retain(links.len() * std::mem::size_of::<Right<'_>>())?;
     let mut rights = Vec::with_capacity(links.len());
     let mut complete = first.complete;
-    for link in links {
-        work.spend()?;
-        if !aliases.insert(identifier_lower(&link.alias)) {
-            return Err(binding());
-        }
-        let right = source(sources, &link.table, work)?;
+    for (link, input) in links.iter().zip(&inputs[1..]) {
+        let right = input.source();
         let start = columns.len();
         complete &= right.complete;
-        work.retain(
+        work.safety_retain(
             right
                 .columns
                 .iter()
-                .map(|c| link.alias.len() + c.len() + 1 + std::mem::size_of::<String>())
+                .map(|c| link.alias.len() + c.len() + 2 * std::mem::size_of::<String>())
                 .sum(),
         )?;
-        if let Some(shared) = work.shared {
-            shared
-                .safety_only()
-                .charge(crate::resource::Cost::retained(
-                    right.columns.len() * std::mem::size_of::<String>(),
-                ))?;
-        }
         columns.extend(right.columns.iter().cloned());
         owners.extend(std::iter::repeat_n(link.alias.clone(), right.columns.len()));
-        if columns.len() > 4096 {
-            return Err(binding());
-        }
         rights.push(Right {
             source: right,
-            rows: vec![],
             selected: vec![],
             link,
             start,
             end: columns.len(),
-            keys: None,
         });
     }
     // Bind every ON expression against real schemas before touching any row.
@@ -354,13 +352,13 @@ pub(super) fn prepare_scoped<'a, 'w: 'a>(
     }
     // Admit the joined scalar/string buffers and all per-input selected
     // ordinals before allocating them. Collect requirements before any scan.
-    work.retain(
+    work.safety_retain(
         columns.len()
             * (std::mem::size_of::<Scalar>()
                 + std::mem::size_of::<String>()
                 + std::mem::size_of::<usize>()),
     )?;
-    work.retain(columns.len())?;
+    work.safety_retain(columns.len())?;
     let mut selected = vec![false; columns.len()];
     for p in &program.projection {
         if let Some(expr) = &p.expr {
@@ -428,38 +426,6 @@ pub(super) fn prepare_scoped<'a, 'w: 'a>(
                 )
             })
         });
-    if !work.planning {
-        for right in &mut rights {
-            let mut rows = vec![];
-            provider::visit(
-                right.source,
-                projected.then_some(right.selected.as_slice()),
-                work,
-                &mut |row, work| {
-                    work.spend()?;
-                    if row.len() != right.source.columns.len() {
-                        return Err(binding());
-                    }
-                    // Validate every supplied scalar, including unused ones,
-                    // before admitting and copying provider-owned scratch.
-                    // row_cost includes 24 bytes; Go retains 64 per right row.
-                    let bytes = row_cost(row)?.checked_add(40).ok_or_else(budget)?;
-                    work.retain(bytes)?;
-                    rows.push(row.to_vec());
-                    Ok(())
-                },
-            )?;
-            right.rows = rows;
-            right.keys = index(
-                right.link.condition.as_ref(),
-                &columns[..right.end],
-                &owners[..right.end],
-                right.start,
-                &right.rows,
-                work,
-            )?;
-        }
-    }
     Ok(Plan {
         source: Source {
             columns,
@@ -552,14 +518,14 @@ fn assign(
         }
         values[i] = match value {
             Scalar::String(text) => {
-                work.consume(text.len().div_ceil(32) + 1)?;
+                work.consume(0)?;
                 let buffer = &mut strings[i];
                 buffer.clear();
                 // A lazy input cannot be pre-scanned for maximum string sizes.
                 // Reuse the old capacity and admit only checked growth before
                 // allocating. Failed admission cannot enlarge this buffer.
                 if buffer.capacity() < text.len() {
-                    work.retain(text.len() - buffer.capacity())?;
+                    work.safety_retain(text.len() - buffer.capacity())?;
                     buffer.try_reserve_exact(text.len()).map_err(|_| budget())?;
                 }
                 buffer.push_str(text);
@@ -578,6 +544,37 @@ impl Plan<'_> {
         work: &mut Work<'_>,
         yield_row: &mut dyn FnMut(&[Scalar], &mut Work<'_>) -> Result<()>,
     ) -> Result<()> {
+        let mut materialized = Vec::with_capacity(self.rights.len());
+        for right in &self.rights {
+            let mut rows = vec![];
+            provider::visit(
+                right.source,
+                self.projected.then_some(right.selected.as_slice()),
+                work,
+                &mut |row, work| {
+                    work.spend()?;
+                    if row.len() != right.source.columns.len() {
+                        return Err(binding());
+                    }
+                    // Validate every supplied scalar, including unused ones,
+                    // before admitting and copying provider-owned scratch.
+                    // row_cost includes 24 bytes; Go retains 64 per right row.
+                    let bytes = row_cost(row)?.checked_add(40).ok_or_else(budget)?;
+                    work.retain(bytes)?;
+                    rows.push(row.to_vec());
+                    Ok(())
+                },
+            )?;
+            let keys = index(
+                right.link.condition.as_ref(),
+                &self.source.columns[..right.end],
+                &self.owners[..right.end],
+                right.start,
+                &rows,
+                work,
+            )?;
+            materialized.push((rows, keys));
+        }
         let mut values = vec![Scalar::Null; self.selected.len()];
         let mut strings = vec![String::new(); self.selected.len()];
         provider::visit(
@@ -585,15 +582,14 @@ impl Plan<'_> {
             self.projected.then_some(self.first_selected.as_slice()),
             work,
             &mut |row, work| {
-                work.spend()?;
                 if row.len() != self.first.columns.len() {
                     return Err(binding());
                 }
-                // Projection never waives scalar validation for owned sources;
-                // projected providers must also validate their unused fields.
-                row_cost(row)?;
+                // A provider owns validation of unused physical fields. Go's
+                // first-row callback itself checks width, not unused scalars.
                 assign(&mut values, &mut strings, 0, row, work, &self.selected)?;
                 self.link(
+                    &materialized,
                     0,
                     &mut values,
                     &mut strings,
@@ -607,6 +603,7 @@ impl Plan<'_> {
     }
     fn link(
         &self,
+        materialized: &[(Vec<Vec<Scalar>>, Option<KeyIndex<'_>>)],
         at: usize,
         values: &mut [Scalar],
         strings: &mut [String],
@@ -620,14 +617,27 @@ impl Plan<'_> {
             return yield_row(values, work);
         }
         let right = &self.rights[at];
-        let indexed = right.keys.is_some();
-        let candidates = if let Some((left, example, buckets)) = &right.keys {
-            let value = &values[*left];
-            if value == &Scalar::Null || example.is_none() {
+        let (rows, keys) = &materialized[at];
+        let indexed = keys.is_some();
+        let candidates = if let Some(index) = keys {
+            let value = &values[index.left];
+            if value == &Scalar::Null || index.example.is_none() {
                 None
             } else {
-                compare(value, example.as_ref().unwrap())?;
-                buckets.get(&key(value, work)?).map(Vec::as_slice)
+                compare(value, &rows[index.example.unwrap()][index.right])?;
+                let payload = if let Scalar::String(text) = value {
+                    text.len()
+                } else {
+                    0
+                };
+                let _temporary = work
+                    .shared
+                    .map(|budget| budget.reserve_retained(payload + 8192))
+                    .transpose()?;
+                index
+                    .buckets
+                    .get(&results::equal_key(value)?)
+                    .map(Vec::as_slice)
             }
         } else {
             None
@@ -635,31 +645,14 @@ impl Plan<'_> {
         let count = if indexed {
             candidates.map_or(0, <[usize]>::len)
         } else {
-            right.rows.len()
+            rows.len()
         };
         let mut matched = false;
         for n in 0..count {
             work.spend()?;
             let right = &self.rights[at];
-            let i = if indexed {
-                // The index remains immutable while deeper links run. Avoid a
-                // per-left candidate vector or boxed iterator.
-                let (left, _, buckets) = right.keys.as_ref().unwrap();
-                // Candidate identity is rebuilt only for lookup, preserving
-                // exact numeric equality and original provider order.
-                let k = key(&values[*left], work)?;
-                buckets[&k][n]
-            } else {
-                n
-            };
-            assign(
-                values,
-                strings,
-                right.start,
-                &right.rows[i],
-                work,
-                &self.selected,
-            )?;
+            let i = candidates.map_or(n, |indices| indices[n]);
+            assign(values, strings, right.start, &rows[i], work, &self.selected)?;
             let yes = if let Some(condition) = &right.link.condition {
                 // Like Go's ON evaluator, expose only this join prefix to
                 // nested callbacks. Later aliases must not hide an outer row.
@@ -687,7 +680,16 @@ impl Plan<'_> {
             };
             if yes {
                 matched = true;
-                self.link(at + 1, values, strings, params, context, work, yield_row)?;
+                self.link(
+                    materialized,
+                    at + 1,
+                    values,
+                    strings,
+                    params,
+                    context,
+                    work,
+                    yield_row,
+                )?;
             }
         }
         let right = &self.rights[at];
@@ -697,8 +699,21 @@ impl Plan<'_> {
                     strings[i] = s;
                 }
             }
-            self.link(at + 1, values, strings, params, context, work, yield_row)?;
+            self.link(
+                materialized,
+                at + 1,
+                values,
+                strings,
+                params,
+                context,
+                work,
+                yield_row,
+            )?;
         }
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "join_index_contract_tests.rs"]
+mod contract_tests;

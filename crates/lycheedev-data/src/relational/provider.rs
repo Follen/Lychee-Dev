@@ -40,6 +40,58 @@ pub(crate) trait RootResolver {
     fn resolve(&self, table: SourceTableUse<'_>) -> Result<&Source>;
     fn provider(&self, schema: &Source) -> Option<&dyn RowProvider>;
 }
+/// Compatibility map entrypoints use the same lazy cache as a real resolver.
+/// Like the frozen map oracle, a bare static key takes precedence; a qualified
+/// key supplies catalogs and the static fallback. Unused aliases neither reject the query nor consume schema cost.
+pub(super) enum MapResolver<'a> {
+    Owned(&'a BTreeMap<String, Source>),
+    Borrowed(&'a BTreeMap<String, &'a Source>),
+}
+impl MapResolver<'_> {
+    fn lookup<'a>(
+        entries: impl Iterator<Item = (&'a String, &'a Source)>,
+        table: SourceTableUse<'_>,
+    ) -> Result<&'a Source> {
+        let mut selected = None;
+        let mut qualified = false;
+        let mut ambiguous = false;
+        for (key, source) in entries {
+            let Ok(name) = RelationName::from_key(key) else {
+                continue;
+            };
+            if identifier_lower(&name.name) != identifier_lower(table.name)
+                || identifier_lower(name.table_use().catalog) != identifier_lower(table.catalog)
+            {
+                continue;
+            }
+            let preferred = name.catalog.is_none();
+            if selected.is_none() || preferred && !qualified {
+                selected = Some(source);
+                qualified = preferred;
+                ambiguous = false;
+            } else if preferred == qualified {
+                ambiguous = true;
+            }
+        }
+        if ambiguous {
+            return Err(binding());
+        }
+        selected.ok_or_else(binding)
+    }
+}
+impl RootResolver for MapResolver<'_> {
+    fn resolve(&self, table: SourceTableUse<'_>) -> Result<&Source> {
+        match self {
+            Self::Owned(sources) => Self::lookup(sources.iter(), table),
+            Self::Borrowed(sources) => {
+                Self::lookup(sources.iter().map(|(name, source)| (name, *source)), table)
+            }
+        }
+    }
+    fn provider(&self, _: &Source) -> Option<&dyn RowProvider> {
+        None
+    }
+}
 #[derive(Clone, Copy)]
 pub(crate) struct PreparedSource<'query> {
     pub(crate) schema: &'query Source,

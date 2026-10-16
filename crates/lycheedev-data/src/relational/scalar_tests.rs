@@ -129,6 +129,7 @@ fn work(shared: Option<&Budget>) -> Work<'_> {
         cancel: None,
         shared,
         planning: false,
+        temporaries: Vec::new(),
         selection_sources: vec![],
         providers: &[],
         resolver: None,

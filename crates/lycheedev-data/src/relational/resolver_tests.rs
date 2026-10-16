@@ -179,6 +179,7 @@ fn schema_memory_is_charged_once_to_original_executor_allowance() {
         cancel: None,
         shared: None,
         planning: true,
+        temporaries: Vec::new(),
         selection_sources: vec![],
         providers: &[],
         resolver: Some(&resolver),
@@ -257,4 +258,86 @@ fn root_schema_budget_failure_never_replays_preflight_or_scans() {
         .unwrap_err();
     assert_eq!(error.code, "relational.resource_limit");
     assert_eq!(*resolver.events.borrow(), ["resolve:static:z"]);
+}
+
+#[test]
+fn physical_input_failure_precedes_a_later_derived_input_resolution() {
+    let resolver = Resolver::new(&["later"]);
+    let error = resolver
+        .execute("SELECT d.ID FROM absent CROSS JOIN (SELECT ID FROM later) d")
+        .unwrap_err();
+    assert_eq!(error.code, "fixture.missing_root");
+    assert_eq!(*resolver.events.borrow(), ["resolve:static:absent"]);
+}
+#[test]
+fn invalid_physical_schema_precedes_later_derived_input() {
+    let mut resolver = Resolver::new(&["bad", "later"]);
+    resolver
+        .roots
+        .get_mut(&("static".into(), "bad".into()))
+        .unwrap()
+        .schema
+        .columns
+        .clear();
+    assert_eq!(
+        resolver
+            .execute("SELECT d.ID FROM bad CROSS JOIN (SELECT ID FROM later) d")
+            .unwrap_err()
+            .code,
+        "relational.invalid_binding"
+    );
+    assert_eq!(*resolver.events.borrow(), ["resolve:static:bad"]);
+}
+#[test]
+fn duplicate_alias_is_rejected_before_that_derived_body_resolves() {
+    let resolver = Resolver::new(&["a", "later"]);
+    assert_eq!(
+        resolver
+            .execute("SELECT a.ID FROM a CROSS JOIN (SELECT ID FROM later) a")
+            .unwrap_err()
+            .code,
+        "relational.invalid_binding"
+    );
+    assert_eq!(*resolver.events.borrow(), ["resolve:static:a"]);
+}
+#[test]
+fn derived_execution_in_relation_order_finishes_before_right_materialization() {
+    let resolver = Resolver::new(&["a", "b", "c"]);
+    resolver
+        .execute("SELECT d.ID FROM a CROSS JOIN (SELECT ID FROM b) d CROSS JOIN c")
+        .unwrap();
+    assert_eq!(
+        *resolver.events.borrow(),
+        [
+            "resolve:static:a",
+            "resolve:static:b",
+            "resolve:static:c",
+            "scan:b",
+            "scan:c",
+            "scan:a"
+        ]
+    );
+}
+
+#[test]
+fn unknown_function_binding_waits_for_the_real_source_resolver() {
+    let resolver = Resolver::new(&["a"]);
+    let program = Program::compile("SELECT UNKNOWN_CALL(ID) FROM absent").unwrap();
+    assert_eq!(
+        program
+            .execute_resolved_budgeted(&resolver, &BTreeMap::new(), Limits::default(), None, None)
+            .unwrap_err()
+            .code,
+        "fixture.missing_root"
+    );
+    assert_eq!(*resolver.events.borrow(), ["resolve:static:absent"]);
+    resolver.events.borrow_mut().clear();
+    assert_eq!(
+        resolver
+            .execute("SELECT UNKNOWN_CALL(ID) FROM a")
+            .unwrap_err()
+            .code,
+        "relational.unsupported"
+    );
+    assert_eq!(*resolver.events.borrow(), ["resolve:static:a"]);
 }

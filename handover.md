@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-15 21:48 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`98f8811322ff53afac84b9bacd9d13b89fa4ce1c`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 01:00 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`93acdcb7c21d76d840d93e2f087a0ce6691ba626`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -29,7 +29,7 @@
 
 默认target list/add/show/remove现已接同一typed配置与受控分页/SQLite owner：取消旧10000截断，精确name/大小写优先与raw历史引用验证，show输出resolvedPins；remove按Go先独立CAS删除配置、再读取引用generation、每64项删除，保可见部分提交与removedPins。17项新Rust回归已写未跑；target resolve --file现已接实际65537字节受控读取、独立Go typed JSON规则、同一Metadata writer的parent/CAS/winner验证及checked input close；按Go不额外生成snapshot context，已知提交pin保在既有error.details。14 Core＋3 CLI新测试未运行；generic JSON/type/time精确错误文案仍待补齐，不误套project更严duplicate/depth限制。后继project init/status/lock已组合原control、严格项目读取、同一Metadata原Vec认证与held Stage同目录no-replace/replace/checked关闭，默认resolve_pinned/optional和doctor项目边也已接；21新Rust测试未跑。cd576旧持有reader替换失败的回归现走真实project lock并保新旧reader断言。workspace同步open/native Drop、doctor其余metadata/list/probe及generic错误文案仍未闭合。
 
-默认SQL进一步接入typed quoted identifiers与真实单次schema preflight按需RootResolver：local/CDN/effective/meta不再提前准备全部根源；owned WDC Table移动原FileBytes并保留资源owner，local复用Prepared Encoding/Root。32物理源、固定Go100万rows/4096columns/partitions及caller ContentBytes边界已接，capture仍在同一checked-close范围，后续关闭失败保已提交ID。24源与41项新增Rust回归已组合，尚未执行。后继默认local SQL的Encoding/Root/selected现共用query内CASC索引owner：64MiB缓存、XOR首选bucket、原累计逻辑账、真实内存释放与成功capture前原Directory逐块SHA256/最新generation复核已接，8新Rust回归未跑。独立legacy local API仍原路径。后继19路径现已实现默认local/CDN/effective的EXISTS、标量子查询、EXPLAIN ANALYZE、CAST和LIKE；ANALYZE取同一次真实执行的provider回调行数/逻辑账而非RSS。32新增与2更新Rust测试未跑，typed aggregate alias断口及bit函数NULL/首错顺序一并修复。投影→DISTINCT→ORDER/slice精确顺序及全执行work/内存收费仍继续按固定Go收口，未称全SQL等价。
+默认SQL进一步接入typed quoted identifiers与真实单次schema preflight按需RootResolver：local/CDN/effective/meta不再提前准备全部根源；owned WDC Table移动原FileBytes并保留资源owner，local复用Prepared Encoding/Root。32物理源、固定Go100万rows/4096columns/partitions及caller ContentBytes边界已接，capture仍在同一checked-close范围，后续关闭失败保已提交ID。24源与41项新增Rust回归已组合，尚未执行。后继默认local SQL的Encoding/Root/selected现共用query内CASC索引owner：64MiB缓存、XOR首选bucket、原累计逻辑账、真实内存释放与成功capture前原Directory逐块SHA256/最新generation复核已接，8新Rust回归未跑。独立legacy local API仍原路径。后继19路径现已实现默认local/CDN/effective的EXISTS、标量子查询、EXPLAIN ANALYZE、CAST和LIKE；ANALYZE取同一次真实执行的provider回调行数/逻辑账而非RSS。32新增与2更新Rust测试未跑，typed aggregate alias断口及bit函数NULL/首错顺序一并修复。后继18路径已组合真实执行顺序：逐行投影与ORDER表达式先完成，再DISTINCT、稳定排序和slice；每组HAVING→投影→ORDER、MIN/MAX增量驻留、JOIN索引精确成本与仅局部预算fallback退款、真实work与临时安全账均接默认消费者。25新增/1替换回归未跑；cd576子查询类型推断与compound测试适配已修，原expected不改。malformed aggregate/普通函数DISTINCT校验相对真实source binding的首错顺序仍在后继完成，未称全SQL等价。
 
 默认 named target 现已组合完整配置-only分页查找、严格解码/名称匹配、真实local/remote pin准备及create-only引用；不读取旧引用历史，不因准备期间配置删除拒绝已认证目标，named结果不冒认底层capture为公开provenance。默认local同时恢复固定Go的client/build→parent/definitions→复查→pin→配置blob→capture顺序。12源与17项新Rust测试已写，未编译执行；原目录/客户端读取的native Drop边界仍待后续收口。
 

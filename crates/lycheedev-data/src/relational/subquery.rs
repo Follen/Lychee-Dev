@@ -453,7 +453,7 @@ pub(super) fn group_mapping(
     alias: ColumnOwners<'_>,
     work: &mut Work<'_>,
 ) -> Result<Vec<Option<usize>>> {
-    work.retain(
+    work.safety_retain(
         columns
             .len()
             .checked_mul(std::mem::size_of::<Option<usize>>())

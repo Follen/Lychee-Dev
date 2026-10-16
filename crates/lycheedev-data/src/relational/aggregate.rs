@@ -11,6 +11,8 @@ struct State {
     sum: BigRational,
     integer: bool,
     extreme: Scalar,
+    extreme_bytes: usize,
+    extreme_allocation: Option<crate::resource::OwnedRetainedReservation>,
     seen: Option<BTreeSet<String>>,
     admitted_numeric_bytes: usize,
 }
@@ -21,6 +23,8 @@ impl State {
             sum: BigRational::zero(),
             integer: true,
             extreme: Scalar::Null,
+            extreme_bytes: 0,
+            extreme_allocation: None,
             seen: spec.distinct.then(BTreeSet::new),
             admitted_numeric_bytes: 512,
         }
@@ -30,8 +34,19 @@ impl State {
         if spec.input.is_some() && value == Scalar::Null {
             return Ok(());
         }
+        if let Scalar::String(text) = &value
+            && text.len() > 1 << 20
+        {
+            return Err(budget());
+        }
         if let Some(seen) = &mut self.seen {
-            let key = equal_key(&value, work)?;
+            let payload = if let Scalar::String(text) = &value {
+                text.len()
+            } else {
+                0
+            };
+            work.temporary(payload + 8192)?;
+            let key = results::equal_key(&value)?;
             if seen.contains(&key) {
                 return Ok(());
             }
@@ -48,14 +63,35 @@ impl State {
                     (spec.name == "MIN" && cmp == Ordering::Less)
                         || (spec.name == "MAX" && cmp == Ordering::Greater)
                 } {
-                    self.extreme = work.clone_scalar(&value)?;
+                    let bytes = if let Scalar::String(text) = &value {
+                        text.len()
+                    } else {
+                        0
+                    };
+                    if bytes > self.extreme_bytes {
+                        work.bytes = work
+                            .bytes
+                            .checked_sub(bytes - self.extreme_bytes)
+                            .ok_or_else(budget)?;
+                    } else {
+                        work.bytes = work
+                            .bytes
+                            .checked_add(self.extreme_bytes - bytes)
+                            .ok_or_else(budget)?;
+                    }
+                    let allocation = if let Some(shared) = work.shared {
+                        let owner = std::sync::Arc::new(shared.safety_only());
+                        Some(owner.reserve_retained(bytes)?.into_owned(&owner)?)
+                    } else {
+                        None
+                    };
+                    self.extreme_bytes = bytes;
+                    self.extreme = value;
+                    self.extreme_allocation = allocation;
                 }
             }
             "SUM" | "AVG" => {
                 let n = rational(&value)?;
-                if n.numer().bits() > 4096 || n.denom().bits() > 4096 {
-                    return Err(budget());
-                }
                 let numerator_bits = (self.sum.numer().bits() + n.denom().bits())
                     .max(n.numer().bits() + self.sum.denom().bits())
                     + 1;
@@ -66,14 +102,11 @@ impl State {
                     .and_then(|n| n.checked_add(128))
                     .ok_or_else(budget)?;
                 if capacity > self.admitted_numeric_bytes {
-                    work.retain(capacity - self.admitted_numeric_bytes)?;
+                    work.safety_retain(capacity - self.admitted_numeric_bytes)?;
                     self.admitted_numeric_bytes = capacity;
                 }
                 self.sum += n;
                 self.integer &= int(&value).is_some();
-                if self.sum.numer().bits() > 4096 || self.sum.denom().bits() > 4096 {
-                    return Err(budget());
-                }
             }
             "COUNT" => {}
             _ => return Err(unsupported()),
@@ -82,7 +115,7 @@ impl State {
         Ok(())
     }
     fn result(&self, spec: &Spec, work: &mut Work<'_>) -> Result<Scalar> {
-        work.spend()?;
+        work.consume(0)?;
         if spec.name == "COUNT" {
             return Ok(Scalar::Int(self.count));
         }
@@ -111,21 +144,6 @@ impl State {
         }
     }
 }
-fn equal_key(value: &Scalar, work: &mut Work<'_>) -> Result<String> {
-    work.spend()?;
-    Ok(match value {
-        Scalar::Null => "z".into(),
-        Scalar::Bool(v) => format!("b{}", u8::from(*v)),
-        Scalar::String(s) => {
-            work.consume(s.len())?;
-            if s.len() > 1 << 20 {
-                return Err(budget());
-            }
-            format!("s{s}")
-        }
-        _ => format!("n{}", rational(value)?),
-    })
-}
 pub(super) fn contains(term: &Term) -> bool {
     match term {
         Term::Aggregate(..) => true,
@@ -143,6 +161,76 @@ pub(super) fn contains(term: &Term) -> bool {
         }
         _ => false,
     }
+}
+// Go validates grouped correlations after prepareGroups has inspected every
+// expression. This is distinct from the allocation-only rewrite above.
+fn validate_correlations(
+    node: &Term,
+    keys: &[Term],
+    params: &BTreeMap<String, Scalar>,
+    context: &subquery::Context<'_>,
+    work: &mut Work<'_>,
+) -> Result<()> {
+    work.spend()?;
+    if keys
+        .iter()
+        .any(|key| subquery::same_group_expression(node, key, context))
+    {
+        return Ok(());
+    }
+    if matches!(
+        node,
+        Term::Aggregate(..) | Term::InSubquery(..) | Term::ScalarSubquery(_) | Term::Exists(_)
+    ) {
+        let group = context.group.ok_or_else(binding)?;
+        return bind_with_aggregates(
+            node,
+            group.columns,
+            group.alias,
+            params,
+            true,
+            context,
+            work,
+        );
+    }
+    let mut visit = |node: &Term| validate_correlations(node, keys, params, context, work);
+    match node {
+        Term::Unary(_, node) | Term::NullTest(node, _) | Term::Cast(node, _) => visit(node)?,
+        Term::Binary(left, _, right) | Term::Like(left, right, _) => {
+            visit(left)?;
+            visit(right)?;
+        }
+        Term::Between(a, b, c, _) => {
+            visit(a)?;
+            visit(b)?;
+            visit(c)?;
+        }
+        Term::In(node, args, _) => {
+            visit(node)?;
+            for arg in args {
+                visit(arg)?;
+            }
+        }
+        Term::Call(_, args) => {
+            for arg in args {
+                visit(arg)?;
+            }
+        }
+        Term::Case(base, branches, fallback) => {
+            if let Some(base) = base {
+                visit(base)?;
+            }
+            for (condition, value) in branches {
+                visit(condition)?;
+                visit(value)?;
+            }
+            if let Some(fallback) = fallback {
+                visit(fallback)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 struct Group {
     values: Vec<Scalar>,
@@ -167,7 +255,7 @@ impl Grouping {
         context: &subquery::Context<'_>,
         work: &mut Work<'_>,
     ) -> Result<Self> {
-        work.retain(keys.len() * 64 + outputs.len() * 64 + order.len() * 64 + 256)?;
+        work.safety_retain(keys.len() * 64 + outputs.len() * 64 + order.len() * 64 + 256)?;
         let mut this = Self {
             keys: keys.to_vec(),
             specs: vec![],
@@ -176,22 +264,32 @@ impl Grouping {
             order: vec![],
             columns: (0..keys.len()).map(|i| format!("__key_{i}")).collect(),
         };
-        for t in outputs {
-            *t = this.rewrite(t, false, output_columns, params, context, work)?;
-        }
-        for (t, _, _) in order {
-            *t = this.rewrite(t, true, output_columns, params, context, work)?;
-        }
-        if this
-            .specs
+        let rewritten_outputs = outputs
             .iter()
-            .any(|s| ["SUM", "AVG"].contains(&s.name.as_str()))
-        {
-            work.retain(4096)?;
-        }
+            .map(|term| this.rewrite(term, false, output_columns, params, context, work))
+            .collect::<Result<Vec<_>>>()?;
         this.having = having
-            .map(|t| this.rewrite(t, false, output_columns, params, context, work))
+            .map(|term| this.rewrite(term, false, output_columns, params, context, work))
             .transpose()?;
+        let rewritten_order = order
+            .iter()
+            .map(|(term, _, _)| this.rewrite(term, false, output_columns, params, context, work))
+            .collect::<Result<Vec<_>>>()?;
+        if work.planning {
+            for term in outputs
+                .iter()
+                .chain(having)
+                .chain(order.iter().map(|(term, _, _)| term))
+            {
+                validate_correlations(term, keys, params, context, work)?;
+            }
+        }
+        for (output, rewritten) in outputs.iter_mut().zip(rewritten_outputs) {
+            *output = rewritten;
+        }
+        for ((order, _, _), rewritten) in order.iter_mut().zip(rewritten_order) {
+            *order = rewritten;
+        }
         Ok(this)
     }
     fn rewrite(
@@ -203,7 +301,7 @@ impl Grouping {
         context: &subquery::Context<'_>,
         work: &mut Work<'_>,
     ) -> Result<Term> {
-        work.spend()?;
+        work.consume(0)?;
         if let Some(i) = self
             .keys
             .iter()
@@ -220,7 +318,7 @@ impl Grouping {
                     return Err(type_error());
                 }
                 let column = format!("__agg_{}", self.specs.len());
-                work.retain(128)?;
+                work.safety_retain(128)?;
                 self.columns.push(column.clone());
                 self.specs.push(Spec {
                     name: name.clone(),
@@ -279,53 +377,12 @@ impl Grouping {
                     .collect::<Result<Vec<_>>>()?,
                 *n,
             ),
-            Term::ScalarSubquery(query) | Term::Exists(query) => {
-                if work.planning {
-                    if matches!(node, Term::Exists(_)) {
-                        subquery::execute_any(
-                            query,
-                            &[],
-                            &[],
-                            ColumnOwners::Single(""),
-                            params,
-                            context,
-                            work,
-                        )?;
-                    } else {
-                        subquery::execute(
-                            query,
-                            &[],
-                            &[],
-                            ColumnOwners::Single(""),
-                            params,
-                            context,
-                            work,
-                        )?;
-                    }
-                }
-                node.clone()
-            }
-            Term::InSubquery(input, query, negated) => {
-                if work.planning {
-                    // Only direct GROUP BY columns are visible to correlated
-                    // output/HAVING/order subqueries. Never retain or expose a
-                    // representative input row to make a query appear valid.
-                    subquery::execute(
-                        query,
-                        &[],
-                        &[],
-                        ColumnOwners::Single(""),
-                        params,
-                        context,
-                        work,
-                    )?;
-                }
-                Term::InSubquery(
-                    Box::new(recurse(self, input, work)?),
-                    query.clone(),
-                    *negated,
-                )
-            }
+            Term::ScalarSubquery(_) | Term::Exists(_) => node.clone(),
+            Term::InSubquery(input, query, negated) => Term::InSubquery(
+                Box::new(recurse(self, input, work)?),
+                query.clone(),
+                *negated,
+            ),
             Term::Call(name, args) => Term::Call(
                 name.clone(),
                 args.iter()
@@ -351,7 +408,7 @@ impl Grouping {
         // Scalar states use the original per-aggregate admission. Numeric
         // persistent growth is charged before addition, and the plan reserves
         // one bounded scratch buffer shared by sequential arithmetic work.
-        work.retain(key.len() + row_cost(&values)? + self.specs.len() * 512 + 128)?;
+        work.retain(key.len() + row_cost(&values)? - 24 + self.specs.len() * 512 + 128)?;
         let i = self.order.len();
         self.order.push(Group {
             values,
@@ -374,8 +431,20 @@ impl Grouping {
         let mut key = String::new();
         for node in &self.keys {
             let v = eval_scoped(node, row, columns, alias, params, context, work)?;
-            let part = equal_key(&v, work)?;
+            let payload = if let Scalar::String(text) = &v {
+                text.len()
+            } else {
+                0
+            };
+            work.temporary(payload + 8192)?;
+            let part = results::equal_key(&v)?;
             work.consume(part.len())?;
+            work.temporary(
+                part.len()
+                    .checked_add(32)
+                    .and_then(|n| n.checked_mul(2))
+                    .ok_or_else(budget)?,
+            )?;
             key.push_str(&format!("{}:{part}", part.len()));
             if key.len() > work.bytes {
                 return Err(budget());
@@ -397,43 +466,42 @@ impl Grouping {
         }
         Ok(())
     }
+    pub(super) fn columns(&self) -> &[String] {
+        &self.columns
+    }
     pub(super) fn finish(
         mut self,
-        complete: bool,
         params: &BTreeMap<String, Scalar>,
         context: &subquery::Context<'_>,
         work: &mut Work<'_>,
-    ) -> Result<Source> {
+        emit: &mut dyn FnMut(&[Scalar], &mut Work<'_>) -> Result<()>,
+    ) -> Result<()> {
         if self.order.is_empty() && self.keys.is_empty() {
             self.create(String::new(), vec![], work)?;
         }
-        let mut rows = vec![];
         for group in self.order {
-            work.spend()?;
-            let mut row = group.values;
-            for (spec, state) in self.specs.iter().zip(group.states) {
-                row.push(state.result(spec, work)?);
-            }
-            if let Some(node) = &self.having
-                && truth(&eval_scoped(
-                    node,
-                    &row,
-                    &self.columns,
-                    ColumnOwners::Single(""),
-                    params,
-                    context,
-                    work,
-                )?)? != Some(true)
-            {
-                continue;
-            }
-            work.retain(row_cost(&row)? + 24)?;
-            rows.push(row);
+            work.temporary_scope(|work| {
+                work.spend()?;
+                let mut row = group.values;
+                for (spec, state) in self.specs.iter().zip(group.states) {
+                    row.push(state.result(spec, work)?);
+                }
+                if let Some(node) = &self.having
+                    && truth(&eval_scoped(
+                        node,
+                        &row,
+                        &self.columns,
+                        ColumnOwners::Single(""),
+                        params,
+                        context,
+                        work,
+                    )?)? != Some(true)
+                {
+                    return Ok(());
+                }
+                emit(&row, work)
+            })?;
         }
-        Ok(Source {
-            columns: self.columns,
-            rows,
-            complete,
-        })
+        Ok(())
     }
 }

@@ -119,9 +119,13 @@ fn frozen_go_union_all_order_scope_and_exact_rows() {
                 };
                 assert_eq!(
                     legacy,
-                    expected["error"].as_str().unwrap(),
-                    "{}",
-                    case["name"]
+                    expected["error"].as_str().unwrap_or_else(|| panic!(
+                        "case={} sql={} expected success but actual error={error:?}",
+                        case["name"], case["sql"]
+                    )),
+                    "case={} sql={} actual error={error:?}",
+                    case["name"],
+                    case["sql"]
                 );
                 continue;
             }

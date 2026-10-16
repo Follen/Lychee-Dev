@@ -66,6 +66,12 @@ impl Fixture {
                 // Match ScanSelected's validation contract before null-filling
                 // unused positions; never make projection hide bad scalars.
                 row_cost(row)?;
+                if row
+                    .iter()
+                    .any(|value| matches!(value, Scalar::String(text) if text.len() > 1 << 20))
+                {
+                    return Err(budget());
+                }
                 for (column, value) in scratch.iter_mut().enumerate() {
                     if !selected.contains(&column) {
                         *value = Scalar::Null;
@@ -182,6 +188,7 @@ fn visit_selection(
         cancel,
         shared,
         planning: false,
+        temporaries: Vec::new(),
         selection_sources: vec![],
         providers: &providers,
         resolver: None,
@@ -353,7 +360,7 @@ fn join_validates_right_even_with_empty_left_and_never_scans_left_after_right_fa
 }
 
 #[test]
-fn join_growth_failure_stops_left_stream_before_its_next_row() {
+fn join_discarded_candidate_does_not_spend_retained_result_allowance() {
     let trace = Trace::default();
     let left = schema(&["ID", "Name"]);
     let right = schema(&["ID"]);
@@ -367,7 +374,7 @@ fn join_growth_failure_stops_left_stream_before_its_next_row() {
         ],
     );
     let b = Fixture::new("b", &trace, vec![vec![Scalar::Int(1)]]);
-    let error = run(
+    let result = run(
         "SELECT a.Name FROM a CROSS JOIN b LIMIT 1",
         &[("a", &left, &a), ("b", &right, &b)],
         &BTreeMap::new(),
@@ -377,11 +384,11 @@ fn join_growth_failure_stops_left_stream_before_its_next_row() {
         },
         None,
     )
-    .unwrap_err();
-    assert_eq!(error.code, "relational.resource_limit");
+    .unwrap();
+    assert_eq!(result.rows, vec![vec![Scalar::String("small".into())]]);
     assert_eq!(
         *trace.borrow(),
-        ["b.scan", "b.row", "a.scan", "a.row", "a.row"]
+        ["b.scan", "b.row", "a.scan", "a.row", "a.row", "a.row"]
     );
 }
 
@@ -399,7 +406,7 @@ fn join_validates_unselected_left_scalar_before_another_provider_row() {
         let trace = Trace::default();
         let sa = schema(&["ID", "Unused"]);
         let sb = schema(&["ID"]);
-        let a = Fixture::new(
+        let mut a = Fixture::new(
             "a",
             &trace,
             vec![
@@ -407,6 +414,7 @@ fn join_validates_unselected_left_scalar_before_another_provider_row() {
                 vec![Scalar::Int(2), Scalar::Null],
             ],
         );
+        a.projected = true;
         let b = Fixture::new("b", &trace, vec![vec![Scalar::Int(1)]]);
         let error = run(
             "SELECT a.ID FROM a CROSS JOIN b",
@@ -417,7 +425,7 @@ fn join_validates_unselected_left_scalar_before_another_provider_row() {
         )
         .unwrap_err();
         assert_eq!(error.code, expected);
-        assert_eq!(*trace.borrow(), ["b.scan", "b.row", "a.scan", "a.row"]);
+        assert_eq!(*trace.borrow(), ["b.scan", "b.row", "a.scan"]);
     }
 }
 
@@ -922,6 +930,7 @@ fn schema_preflight_and_execution_share_the_original_remaining_work() {
         cancel: None,
         shared: None,
         planning: true,
+        temporaries: Vec::new(),
         selection_sources: vec![],
         providers: &registry,
         resolver: None,
@@ -933,8 +942,8 @@ fn schema_preflight_and_execution_share_the_original_remaining_work() {
         .execute_scoped(&sources, &BTreeMap::new(), &mut work)
         .unwrap();
     assert!(trace.borrow().is_empty());
-    // The public lazy entry spends once before this exact schema pass. Give
-    // it precisely enough for those phases, leaving nothing to start rows.
+    // Give precisely the preflight work plus the execution query node;
+    // the first input cannot start with a fresh allowance.
     let error = program
         .execute_providers_budgeted(
             &sources,
@@ -966,6 +975,7 @@ fn owned_join_right_rows_pay_the_same_full_copy_cost_as_provider_rows() {
             cancel: None,
             shared: None,
             planning: false,
+            temporaries: Vec::new(),
             selection_sources: vec![],
             providers: &[],
             resolver: None,
@@ -973,16 +983,28 @@ fn owned_join_right_rows_pay_the_same_full_copy_cost_as_provider_rows() {
             measure: false,
             scans: Vec::new(),
         };
-        let plan = joins::prepare(
-            &program.table,
-            &program.alias,
-            &program.joins,
-            &sources,
-            &BTreeMap::new(),
-            &mut work,
+        let parameters = BTreeMap::new();
+        let context = subquery::Context::new(&sources, None);
+        let inputs = joins::inputs(
             &program,
+            &sources,
+            subquery::Scope::root(),
+            &parameters,
+            &mut work,
         )
         .unwrap();
+        let plan = joins::prepare_scoped(
+            &inputs,
+            &program.alias,
+            &program.joins,
+            &parameters,
+            &mut work,
+            &program,
+            &context,
+        )
+        .unwrap();
+        plan.visit(&parameters, &context, &mut work, &mut |_, _| Ok(()))
+            .unwrap();
         drop(plan);
         initial - work.bytes
     }
@@ -1251,5 +1273,76 @@ fn analyze_preflight_is_complete_before_any_real_execution() {
         .code,
         "relational.invalid_binding"
     );
+    assert!(trace.borrow().is_empty());
+}
+
+#[test]
+fn real_join_materialization_waits_until_all_local_bind_nodes_finish() {
+    let trace = Trace::default();
+    let a_schema = schema(&["ID"]);
+    let b_schema = schema(&["ID"]);
+    let a = Fixture::new("a", &trace, vec![vec![Scalar::Int(1)]]);
+    let mut b = Fixture::new("b", &trace, vec![vec![Scalar::Int(1)]]);
+    b.scan_fail_after = Some(0);
+    for sql in [
+        "SELECT Missing FROM a CROSS JOIN b",
+        "SELECT a.ID FROM a CROSS JOIN b ORDER BY Missing",
+        "SELECT a.ID FROM a CROSS JOIN b LIMIT -1",
+    ] {
+        let error = run(
+            sql,
+            &[("a", &a_schema, &a), ("b", &b_schema, &b)],
+            &BTreeMap::new(),
+            Limits::default(),
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                error.code.as_str(),
+                "relational.invalid_binding" | "relational.type_mismatch"
+            ),
+            "{sql}: {error:?}"
+        );
+        assert!(
+            trace.borrow().is_empty(),
+            "{sql}: no provider callback before binding"
+        );
+    }
+}
+#[test]
+fn recursive_empty_seed_scans_only_the_seed_after_preflight() {
+    let trace = Trace::default();
+    let a_schema = schema(&["ID"]);
+    let b_schema = schema(&["ID"]);
+    let a = Fixture::new("a", &trace, vec![]);
+    let b = Fixture::new("b", &trace, vec![vec![Scalar::Int(1)]]);
+    let result = run("WITH RECURSIVE r AS (SELECT ID FROM a UNION ALL SELECT b.ID FROM r CROSS JOIN b) SELECT ID FROM r", &[("a", &a_schema, &a), ("b", &b_schema, &b)], &BTreeMap::new(), Limits::default(), None).unwrap();
+    assert!(result.rows.is_empty());
+    assert_eq!(*trace.borrow(), ["a.scan"]);
+}
+
+#[test]
+fn execution_binding_work_exhaustion_precedes_the_first_right_scan() {
+    let trace = Trace::default();
+    let a_schema = schema(&["ID"]);
+    let b_schema = schema(&["ID"]);
+    let a = Fixture::new("a", &trace, vec![vec![Scalar::Int(1)]]);
+    let mut b = Fixture::new("b", &trace, vec![]);
+    b.scan_fail_after = Some(0);
+    // Four preflight nodes, then query and two inputs. No eighth unit is
+    // available for execution binding, so the right provider is never called.
+    let error = run(
+        "SELECT a.ID FROM a CROSS JOIN b",
+        &[("a", &a_schema, &a), ("b", &b_schema, &b)],
+        &BTreeMap::new(),
+        Limits {
+            work: 7,
+            ..Limits::default()
+        },
+        None,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "relational.resource_limit");
     assert!(trace.borrow().is_empty());
 }

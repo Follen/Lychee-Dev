@@ -17,6 +17,7 @@ fn work(bytes: usize, units: u64) -> Work<'static> {
         cancel: None,
         shared: None,
         planning: false,
+        temporaries: Vec::new(),
         selection_sources: Vec::new(),
         providers: &[],
         resolver: None,

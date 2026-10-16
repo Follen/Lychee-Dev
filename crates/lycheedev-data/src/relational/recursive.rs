@@ -51,7 +51,7 @@ fn delta_scope<'a>(
     let bytes = sources.keys().try_fold(name.len() + 96, |n, k| {
         n.checked_add(k.len() + 96).ok_or_else(budget)
     })?;
-    work.retain(bytes)?;
+    work.safety_retain(bytes)?;
     let mut inputs = sources.clone();
     let key = identifiers::lexical_key(name);
     inputs.retain(|n, _| identifier_lower(n) != key);
@@ -82,7 +82,7 @@ pub(super) fn execute(
         return Err(unsupported());
     }
     let first = seed.execute_scoped_with(sources, scope, parameters, work)?;
-    work.retain(columns_cost(&first.columns)? + 96)?;
+    work.safety_retain(columns_cost(&first.columns)? + 96)?;
     let columns = first.columns.clone();
     let mut complete = first.complete;
     let mut blocks = vec![Source {
@@ -92,7 +92,7 @@ pub(super) fn execute(
     }];
     // Bind and validate the member even if the seed is empty. Its computed
     // zero-delta rows are discarded: an aggregate cannot invent a starting row.
-    if blocks[0].rows.is_empty() {
+    if work.planning {
         let inputs = delta_scope(sources, name, &blocks[0], work)?;
         let checked = step.execute_scoped_with(&inputs, scope, parameters, work)?;
         if checked.columns.len() != columns.len() {
@@ -108,10 +108,11 @@ pub(super) fn execute(
             return Err(binding());
         }
         complete &= next.complete;
+        work.retain(next.rows.len().checked_mul(24).ok_or_else(budget)?)?;
         if next.rows.is_empty() {
             break;
         }
-        work.retain(columns_cost(&columns)? + 96)?;
+        work.safety_retain(columns_cost(&columns)? + 96)?;
         blocks.push(Source {
             columns: columns.clone(),
             rows: next.rows,
@@ -121,10 +122,10 @@ pub(super) fn execute(
     let length = blocks.iter().try_fold(0usize, |n, b| {
         n.checked_add(b.rows.len()).ok_or_else(budget)
     })?;
-    work.retain(length.checked_mul(24).ok_or_else(budget)?)?;
+    work.safety_retain(length.checked_mul(24).ok_or_else(budget)?)?;
     let mut rows = Vec::with_capacity(length);
     for block in blocks {
-        work.spend()?;
+        work.consume(0)?;
         rows.extend(block.rows);
     }
     Ok(QueryResult {

@@ -121,11 +121,7 @@ pub(super) fn cast(value: Scalar, kind: &str, work: &mut Work<'_>) -> Result<Sca
         if let Scalar::String(_) = &value {
             return Ok(value);
         }
-        if let Some(shared) = work.shared {
-            shared
-                .safety_only()
-                .charge(crate::resource::Cost::retained(64))?;
-        }
+        work.temporary(64)?;
         return Ok(Scalar::String(text(&value)?.into_owned()));
     }
     if matches!(kind, "BOOL" | "BOOLEAN") {
