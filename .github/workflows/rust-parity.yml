@@ -646,6 +646,10 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |
           node tools/rust-cargo.mjs --owner ci-query-reference-publication --one-shot -- test --locked --offline -p lycheedev-core --test capture_query_references -j 1
+      - name: Run held-owner listfile metadata and cancellation fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-listfile-metadata --one-shot -- test --locked --offline -p lycheedev-core --lib metadata::listfile_controlled:: -j 1
       - name: Run immutable capture dependency transaction fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-capture-dependencies --one-shot -- test --locked --offline -p lycheedev-core --test capture_dependencies -j 1

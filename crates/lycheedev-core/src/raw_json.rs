@@ -98,7 +98,7 @@ impl From<InvalidJson> for ScanFailure {
 }
 /// Same Go grammar and 10000-depth scanner with bounded caller checkpoints.
 /// Syntax remains a distinct result so callers retain it if a later stop joins.
-pub(crate) fn validate_with_check(
+pub fn validate_with_check(
     bytes: &[u8],
     mut check: impl FnMut() -> crate::Result<()>,
 ) -> crate::Result<Result<(), InvalidJson>> {

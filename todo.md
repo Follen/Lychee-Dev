@@ -298,8 +298,10 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 
 - [ ] 统一重跑evidence remove15新回归、owned scope/selected checker19新回归及c5 SQL/Data修正fixture；原e8 2panic和vctip forced收尾分开验，不能只修断言就称owner正常。其余实现限已确认Go323/43checker差距，不扩SQL能力。
 
-- [ ] 有限收口：Data assets准入/CDN已接待测，剩listfile/search共享transport与Wago/Raidbots控制2组；SQL非法字段首错/RHS深度2项和Emmy selected实际函数来源/docs统一1组已保存待测。完成默认链并集中修闭实际失败后进入第一轮架构/功能/Skill/Source/Data质量审计，不扩通用SQL能力。
+- [ ] 有限收口：Data assets准入/CDN已接待测，listfile/search共享transport已接待测，剩Wago/Raidbots控制1组；SQL非法字段首错/RHS深度2项和Emmy selected实际函数来源/docs统一1组已保存待测。完成默认链并集中修闭实际失败后进入第一轮架构/功能/Skill/Source/Data质量审计，不扩通用SQL能力。
 
-- [ ] SQL最后2入口（7新回归）与Emmy实际函数来源完整消费者（17新回归）已组合，转集中native编译/旧完整差分/43checker/实际Source测试；静态扫完不算运行通过。Data余下两组入口继续完成后统一收口。
+- [ ] SQL最后2入口（7新回归）与Emmy实际函数来源完整消费者（17新回归）已组合，转集中native编译/旧完整差分/43checker/实际Source测试；静态扫完不算运行通过。Data余下Hotfix外层入口继续完成后统一收口；保留共享URL兼容差异不得冒称已闭合。
 
 - [ ] 集中验证默认local/CDN export与demux新15项及CLI两项：同query准入、单遍输出、目录租约、source/frame/manifest引用事务、完整wire与published/unknown错误事实；保既有全部asset回归，不以静态解析当运行通过。
+
+- [ ] 集中执行listfile/search默认链17新回归：原120秒/五请求/gzip/停止、真实loopback取消、单Metadata raw/generation CAS/checked关闭及Go重复/null/time/depth；保持共享编码点URL拒绝差异可见并在完整合同验收中解决。

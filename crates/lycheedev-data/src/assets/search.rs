@@ -62,13 +62,14 @@ pub fn run(inv: &Invocation) -> Result<Outcome> {
     )?;
     let pin = match implicit {
         Some(pin) => pin,
-        None => selection::load_pinned(&inv.home, inv.required("--snapshot")?)?,
+        None => {
+            selection::load_pinned_controlled(&inv.home, inv.required("--snapshot")?, &inv.control)?
+        }
     };
     let data = pin.data.as_ref().ok_or_else(|| {
         ToolkitError::new("records.data_pin_required", "records.data_pin_required", 2)
     })?;
-    let context =
-        json!({"snapshot":pin.id,"pin":data,"source":"listfile","listfile":reading.provenance});
+    let context = json!({"snapshot":pin.id,"pin":data,"source":"listfile","listfile":serde_json::to_value(&reading.provenance)?});
     let mut truncated = false;
     let result = if let Some(query) = query {
         let (total, files) = reading.index.search(query, limit, false, &inv.control)?;

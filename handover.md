@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 03:13 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`2720ccf497c7ded042d15068491d5c1e422876a2`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 03:27 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`aaaf9884bebdf9070568f1bdfb1d75f47aec6aa8`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -25,11 +25,13 @@
 
 ## 2. 当前实现与未闭环事项
 
-默认 local/CDN asset export与demux现已贯通真实query准入、同Budget、单遍发布和checked收尾；demux源→frame→manifest捕获与引用保护、同目录租约和最后manifest发布接入真实路径。新两种发布/提交事实沿既有error.details进入CLI，保已发布/unknown及所有主错/cleanup，未新增顶层字段。15实现回归加2CLI回归未跑，既有asset组扩大覆盖全部assets子模块。Data有限剩余为listfile/search共享受控transport/cache、Wago/Raidbots外层pin/receipt两组，正在继续。
+默认asset search/listfile已接共享可取消HTTP，原总deadline内120秒/最多五请求/gzip及原redirect合同；单受控Metadata owner保raw历史JSON与下载后generation CAS/checked关闭，显式pin走原control。17新Rust未跑。此操作按Go不新建query Budget或虚构网络账。共享RedirectUrl对reqwest会规范化的编码点等target仍有明确兼容拒绝缺口，不能称完整等价；Hotfix外层控制最后一组继续，之后集中验证并处理保留合同差异。
 
-SQL有限两项后继已实现：Go primary首个多余点号立即Syntax，公共Pratt仍move AST，通过原infix/precedence观察RHS活跃深度，BETWEEN分低/高相，RAII失败只退本入口标记；7新边界回归未跑。Emmy有限来源收口18路径已组合：selected initializer与Lua/XML字段的实际函数值贯通VM、参数/泛型/返回/赋值/await/assert，不被旧声明overload/docs复活覆盖，原静态声明检查仍保留；17新Rust未跑，43调度入口的静态边界已扫完。SQL与Emmy本轮有限实现现转集中真实回归，未宣称全行为或资源验收完成；Data剩余两组默认入口仍在实施。
+默认 local/CDN asset export与demux现已贯通真实query准入、同Budget、单遍发布和checked收尾；demux源→frame→manifest捕获与引用保护、同目录租约和最后manifest发布接入真实路径。新两种发布/提交事实沿既有error.details进入CLI，保已发布/unknown及所有主错/cleanup，未新增顶层字段。15实现回归加2CLI回归未跑，既有asset组扩大覆盖全部assets子模块。listfile/search共享受控transport/cache后继已实现待测；Data默认接线剩Wago/Raidbots外层pin/receipt一组，兼容差异仍须后续验证闭合。
 
-实现收口限已有Go323合同及43checker：Data的asset export/demux准入/CDN链已实现待测，仍需asset search/listfile共享可取消transport、Wago/Raidbots外层pin/receipt受控收尾两组；SQL非法三段字段首错与Pratt RHS深度、Emmy selected实际函数来源统一收口已实现并保存，尚待集中验证。Source默认存储已接。完成这些既有差距并集中修闭编译/实际回归后进入第一轮架构与使用质量审计；不扩为通用SQL数据库，不以基础切片数量代替完成度。
+SQL有限两项后继已实现：Go primary首个多余点号立即Syntax，公共Pratt仍move AST，通过原infix/precedence观察RHS活跃深度，BETWEEN分低/高相，RAII失败只退本入口标记；7新边界回归未跑。Emmy有限来源收口18路径已组合：selected initializer与Lua/XML字段的实际函数值贯通VM、参数/泛型/返回/赋值/await/assert，不被旧声明overload/docs复活覆盖，原静态声明检查仍保留；17新Rust未跑，43调度入口的静态边界已扫完。SQL与Emmy本轮有限实现现转集中真实回归，未宣称全行为或资源验收完成；Data剩余Hotfix外层默认入口仍在实施。
+
+实现收口限已有Go323合同及43checker：Data的asset export/demux准入/CDN链已实现待测，search/listfile共享可取消transport已接待测，仍需Wago/Raidbots外层pin/receipt受控收尾；SQL非法三段字段首错与Pratt RHS深度、Emmy selected实际函数来源统一收口已实现并保存，尚待集中验证。Source默认存储已接。完成这些既有差距并集中修闭编译/实际回归后进入第一轮架构与使用质量审计；不扩为通用SQL数据库，不以基础切片数量代替完成度。
 
 默认evidence remove现已闭合原metadata-write→blob→SQLite锁序、同事务分页认证/删除CAS/tombstone/recovery、原句柄删除及checked收尾，保六字段receipt与恢复事实，15新Rust未跑。e8空scope已在实际call执行入口补仅空栈时RAII root，已有嵌套/回调scope不变、原两红测试不改；Nil/Field/Await/Export/Assert消费者保selected来源和shape，19新测试/56场景未跑。该e8原cargo exit101后另有vctip留至drain并forced=true，最终treeReaped/handlesClosed/active0；真实panic与异常辅助进程收尾并列保留。
 

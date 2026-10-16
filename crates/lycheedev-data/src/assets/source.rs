@@ -3,15 +3,9 @@
 use super::{fault, listfile};
 use lycheedev_core::{
     Result, ToolkitError, control::OperationControl, evidence, metadata::Metadata, storage,
-    workspace,
 };
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::BTreeMap,
-    io::Read,
-    path::Path,
-    time::{Duration, Instant},
-};
+use std::{collections::BTreeMap, path::Path};
 
 const SCHEMA: &str = "lycheedev.listfile-source.v1";
 #[derive(Clone, Serialize, Deserialize)]
@@ -30,6 +24,7 @@ pub struct SourceFile {
 pub struct Provenance {
     pub kind: String,
     pub files: Vec<SourceFile>,
+    #[serde(serialize_with = "wire::serialize_time")]
     pub fetched_at: String,
     pub entry_count: usize,
     pub rejected: usize,
@@ -63,148 +58,26 @@ fn format(message: impl Into<String>) -> ToolkitError {
         4,
     )
 }
-fn url(value: &str) -> Result<ureq::http::Uri> {
-    let parsed: ureq::http::Uri = value
-        .parse()
-        .map_err(|_| fault("records.listfile_query", 2))?;
-    if parsed.scheme_str() != Some("https")
-        || parsed
-            .authority()
-            .is_none_or(|authority| authority.as_str().contains('@') || authority.host().is_empty())
-    {
-        return Err(fault("records.listfile_query", 2));
-    }
-    Ok(parsed)
-}
-fn redirected(base: &ureq::http::Uri, location: &str) -> Result<String> {
-    let absolute = if location.starts_with("https://") || location.contains("://") {
-        location.to_owned()
-    } else if location.starts_with("//") {
-        format!("https:{location}")
-    } else if location.starts_with('/') {
-        format!(
-            "https://{}{location}",
-            base.authority().expect("validated authority")
-        )
-    } else {
-        let parent = base
-            .path()
-            .rsplit_once('/')
-            .map_or("", |(parent, _)| parent);
-        format!(
-            "https://{}{parent}/{location}",
-            base.authority().expect("validated authority")
-        )
-    };
-    url(&absolute)?;
-    Ok(absolute)
-}
 impl Fetcher for PublicFetcher {
     fn fetch(&self, locator: &str, maximum: usize, control: &OperationControl) -> Result<Vec<u8>> {
-        control.check()?;
-        if maximum == 0 {
-            return Err(fault("records.listfile_query", 2));
-        }
-        let end = Instant::now() + control.remaining()?.min(Duration::from_secs(120));
-        let mut locator = locator.to_owned();
-        for hop in 0..5 {
-            control.check()?;
-            let parsed = url(&locator)?;
-            let remaining = end
-                .checked_duration_since(Instant::now())
-                .ok_or_else(|| unavailable("request deadline exceeded"))?;
-            let agent = ureq::Agent::config_builder()
-                .max_redirects(0)
-                .http_status_as_error(false)
-                .timeout_global(Some(remaining))
-                .tls_config(
-                    ureq::tls::TlsConfig::builder()
-                        .provider(ureq::tls::TlsProvider::NativeTls)
-                        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
-                        .build(),
-                )
-                .build()
-                .new_agent();
-            let mut response = agent
-                .get(&locator)
-                .header("Accept-Encoding", "identity")
-                .call()
-                .map_err(|error| {
-                    control
-                        .check()
-                        .err()
-                        .unwrap_or_else(|| unavailable(error.to_string()))
-                })?;
-            let status = response.status().as_u16();
-            if [301, 302, 303, 307, 308].contains(&status) {
-                if hop == 4 {
-                    return Err(fault("records.listfile_query", 2));
-                }
-                let location = response
-                    .headers()
-                    .get("location")
-                    .and_then(|value| value.to_str().ok())
-                    .ok_or_else(|| fault("records.listfile_query", 2))?;
-                locator = redirected(&parsed, location)?;
-                continue;
-            }
-            if status != 200 {
-                return Err(unavailable(format!("HTTP {status}")));
-            }
-            if response
-                .headers()
-                .get("content-length")
-                .and_then(|value| value.to_str().ok())
-                .and_then(|value| value.parse::<u64>().ok())
-                .is_some_and(|length| length > maximum as u64)
-            {
-                return Err(fault("records.listfile_limit", 3));
-            }
-            let mut bytes = Vec::new();
-            let mut reader = response.body_mut().as_reader();
-            let mut buffer = [0u8; 65536];
-            loop {
-                control.check()?;
-                let requested = buffer
-                    .len()
-                    .min(maximum.saturating_sub(bytes.len()).saturating_add(1));
-                let n = reader.read(&mut buffer[..requested]).map_err(|error| {
-                    control
-                        .check()
-                        .err()
-                        .unwrap_or_else(|| unavailable(error.to_string()))
-                })?;
-                control.check()?;
-                if n == 0 {
-                    break;
-                }
-                if n > maximum - bytes.len() {
-                    return Err(fault("records.listfile_limit", 3));
-                }
-                bytes
-                    .try_reserve(n)
-                    .map_err(|_| fault("records.listfile_limit", 3))?;
-                bytes.extend_from_slice(&buffer[..n]);
-            }
-            if bytes.is_empty() {
-                return Err(unavailable("empty listfile response"));
-            }
-            return Ok(bytes);
-        }
-        Err(fault("records.listfile_query", 2))
+        http::fetch(locator, maximum, control)
     }
 }
+mod http;
+#[cfg(test)]
+mod tests;
+mod wire;
 
 fn load(
     home: &Path,
+    metadata: &Metadata,
     kind: &str,
     limits: listfile::Limits,
     control: &OperationControl,
 ) -> Result<Prepared> {
     control.check()?;
-    let raw: serde_json::Value = Metadata::open(home, false)?.read(&format!("listfile/{kind}"))?;
-    let document: Document =
-        serde_json::from_value(raw).map_err(|_| fault("records.listfile_format", 4))?;
+    let raw = metadata.read_document_on_owner_controlled(&format!("listfile/{kind}"), control)?;
+    let document = wire::decode(&raw.bytes, control)?;
     if document.schema != SCHEMA || document.provenance.kind != kind {
         return Err(fault("records.listfile_format", 4));
     }
@@ -212,16 +85,25 @@ fn load(
     let mut total = 0usize;
     for file in &document.provenance.files {
         control.check()?;
-        let expected = listfile::source_url(kind, &file.component)?;
+        let expected = if kind == "wowexport-binary" {
+            // Go authenticates the template for every historical component;
+            // only the downstream parser requires the eight known files.
+            format!(
+                "https://www.kruithne.net/wow.export/data/listfile/bin/{}",
+                file.component
+            )
+        } else {
+            listfile::source_url(kind, &file.component)?
+        };
         if file.url != expected {
             return Err(unavailable("cached origin differs from requested source"));
         }
-        if total >= limits.bytes || file.blob.bytes > (limits.bytes - total) as u64 {
+        if total >= limits.bytes || file.blob.bytes > (limits.bytes - total) as i64 {
             return Err(fault("records.listfile_limit", 3));
         }
         let blob = serde_json::to_value(&file.blob)?;
         let bytes = evidence::read_blob_bounded(home, &blob, limits.bytes - total, control)?;
-        if file.bytes != bytes.len() as u64 || file.sha256 != file.blob.sha256 {
+        if file.bytes != bytes.len() as i64 || file.sha256 != file.blob.sha256 {
             return Err(format(format!(
                 "cached payload {} failed digest check",
                 file.component
@@ -230,25 +112,25 @@ fn load(
         total += bytes.len();
         payloads.insert(file.component.clone(), bytes);
     }
-    if total as u64 != document.provenance.total_bytes {
+    if total as i64 != document.provenance.total_bytes {
         return Err(format("cached payload sizes changed"));
     }
     let index = listfile::parse(kind, &payloads, limits, control)?;
-    if index.entries.len() != document.provenance.entry_count
-        || index.rejected != document.provenance.rejected
+    if index.entries.len() as i64 != document.provenance.entry_count
+        || index.rejected as i64 != document.provenance.rejected
     {
         return Err(format("cached entry counts changed"));
     }
     Ok(Prepared {
         index,
-        provenance: document.provenance,
+        provenance: document.provenance.into_public()?,
     })
 }
 fn wrapped_cache(kind: &str, error: ToolkitError) -> ToolkitError {
     if ["command.cancelled", "command.deadline"].contains(&error.code.as_str()) {
         return error;
     }
-    if error.code == "vault.record_missing" {
+    if error.code == "vault.record_missing" && error.details.is_null() {
         return unavailable(format!("no {kind} listfile cached in this workspace"));
     }
     let message = format!(
@@ -264,7 +146,12 @@ fn wrapped_cache(kind: &str, error: ToolkitError) -> ToolkitError {
     {
         ToolkitError { message, ..error }
     } else {
-        ToolkitError::new("records.listfile_unavailable", message, 5)
+        ToolkitError {
+            code: "records.listfile_unavailable".into(),
+            message,
+            exit_code: 5,
+            ..error
+        }
     }
 }
 pub fn prepare(
@@ -277,7 +164,6 @@ pub fn prepare(
     fetcher: &impl Fetcher,
 ) -> Result<Prepared> {
     control.check()?;
-    workspace::open(home)?;
     if !listfile::valid_kind(kind) || offline && refresh {
         return Err(fault("records.listfile_query", 2));
     }
@@ -301,8 +187,46 @@ pub fn prepare(
     {
         return Err(fault("records.listfile_limit", 3));
     }
+    let mut metadata = Metadata::open_controlled(home, true, control)?;
+    let result = prepare_owned(
+        home,
+        kind,
+        offline,
+        refresh,
+        limits,
+        control,
+        fetcher,
+        &mut metadata,
+    );
+    finish_stop(
+        lycheedev_core::metadata::historical_write::finish_historical(result, metadata.close()),
+        control.check(),
+    )
+}
+fn finish_stop<T>(result: Result<T>, cleanup: Result<()>) -> Result<T> {
+    if let (Err(primary), Err(later)) = (&result, &cleanup) {
+        if primary.code == later.code
+            && primary.message == later.message
+            && primary.exit_code == later.exit_code
+            && primary.details == later.details
+        {
+            return result;
+        }
+    }
+    lycheedev_core::metadata::historical_write::finish_historical(result, cleanup)
+}
+fn prepare_owned(
+    home: &Path,
+    kind: &str,
+    offline: bool,
+    refresh: bool,
+    limits: listfile::Limits,
+    control: &OperationControl,
+    fetcher: &impl Fetcher,
+    metadata: &mut Metadata,
+) -> Result<Prepared> {
     if offline || !refresh {
-        match load(home, kind, limits, control) {
+        match load(home, metadata, kind, limits, control) {
             Ok(mut prepared) => {
                 prepared.provenance.cache = if offline {
                     "offline-cache"
@@ -318,12 +242,13 @@ pub fn prepare(
             {
                 return Err(error);
             }
+            // Cache validation may fall through, but a failed checked close or
+            // timeout restoration is a real resource failure, not a cache miss.
+            Err(error) if !error.details.is_null() => return Err(error),
             Err(_) => {}
         }
     }
     let key = format!("listfile/{kind}");
-    let mut metadata = Metadata::open(home, true)?;
-    let expected_generation = metadata.generation(&key)?;
     let components: Vec<&str> = if kind == "wowexport-binary" {
         listfile::COMPONENTS.to_vec()
     } else {
@@ -362,7 +287,12 @@ pub fn prepare(
                 {
                     ToolkitError { message, ..error }
                 } else {
-                    ToolkitError::new("records.listfile_unavailable", message, 5)
+                    ToolkitError {
+                        code: "records.listfile_unavailable".into(),
+                        message,
+                        exit_code: 5,
+                        ..error
+                    }
                 }
             })?;
         if body.len() > limits.bytes - total {
@@ -396,13 +326,22 @@ pub fn prepare(
         cache: "fetched".into(),
     };
     control.check()?;
-    metadata.put(
-        &key,
-        &Document {
-            schema: SCHEMA.into(),
-            provenance: provenance.clone(),
-        },
-        expected_generation,
-    )?;
+    // Go reads the current generation only after the exact bytes are fetched,
+    // authenticated and parsed. An intervening earlier cache write is replaceable.
+    let expected_generation = match metadata.read_document_on_owner_controlled(&key, control) {
+        Ok(document) => Some(document.generation),
+        Err(error) if error.code == "vault.record_missing" && error.details.is_null() => None,
+        Err(error) => return Err(error),
+    };
+    let document = Document {
+        schema: SCHEMA.into(),
+        provenance: provenance.clone(),
+    };
+    // Absent means strict create; equal bytes cannot hide a lost create CAS.
+    if expected_generation.is_none() {
+        metadata.create_controlled(&key, &document, control)?;
+    } else {
+        metadata.put_controlled(&key, &document, expected_generation, control)?;
+    }
     Ok(Prepared { index, provenance })
 }
