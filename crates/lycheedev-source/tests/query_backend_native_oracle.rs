@@ -210,7 +210,7 @@ fn selected_absent_unknown_and_denied_calls_keep_initializer_slot_nil_unknown_di
                     Some("missing_permit"),
                 ),
             };
-            let mut expected = vec![owned::BindingCoverage {
+            let expected = vec![owned::BindingCoverage {
                 site: call,
                 operation,
                 state,
@@ -220,20 +220,9 @@ fn selected_absent_unknown_and_denied_calls_keep_initializer_slot_nil_unknown_di
                 parameter_index: None,
                 argument: None,
             }];
-            if mode >= 2 {
-                expected.push(owned::BindingCoverage {
-                    site: call,
-                    operation: "call_result",
-                    state: "unavailable",
-                    proof: proof.into(),
-                    reason: Some(reason.unwrap_or("known_absent_callee").into()),
-                    parameter: None,
-                    parameter_index: None,
-                    argument: None,
-                });
-            }
             // Current complete contract, separate from the immutable native
-            // trace comparison above. No native expected row is rewritten.
+            // trace comparison above: denial retains its exact gate and
+            // Unknown, but never enters result projection or completion.
             assert_eq!(coverage, expected);
             comparisons += 2;
         }

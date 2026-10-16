@@ -66,22 +66,15 @@ impl<E> OwnedQuery<'_, '_, E> {
         &mut self,
         site: BindingSite,
         value: &OwnedValue,
-        decision: &BindingDecision<CallPermit>,
+        permit: &CallPermit,
     ) -> QueryResult<(), E> {
         self.checkpoint()?;
-        let (proof, reason) = match decision {
-            BindingDecision::NotManaged => return Ok(()),
-            BindingDecision::Bound(permit) => {
-                let reason = self
-                    .binding_type_has_unknown(value)?
-                    .then(|| "native_call_result_type_unavailable".to_owned());
-                (permit.proof.clone(), reason)
-            }
-            BindingDecision::KnownAbsent { proof } => {
-                (proof.clone(), Some("known_absent_callee".to_owned()))
-            }
-            BindingDecision::Unavailable { proof, reason } => (proof.clone(), Some(reason.clone())),
-        };
+        // Only the admitted projection phase invokes this hook. A denied or
+        // invalid permit has a call-gate receipt and Unknown, but no result
+        // attempt to report. Reuse the original permit without another probe.
+        let reason = self
+            .binding_type_has_unknown(value)?
+            .then(|| "native_call_result_type_unavailable".to_owned());
         self.record_check(
             site.syntax,
             "call_result",
@@ -90,7 +83,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             } else {
                 "unavailable"
             },
-            proof,
+            permit.proof.clone(),
             reason,
         )
     }

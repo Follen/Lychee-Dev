@@ -550,9 +550,9 @@ impl<E> SelectedExpressionBackend for OwnedQuery<'_, '_, E> {
         &mut self,
         site: BindingSite,
         value: &OwnedValue,
-        decision: &BindingDecision<super::CallPermit>,
+        permit: &super::CallPermit,
     ) -> QueryResult<(), E> {
-        self.record_call_result_quality(site, value, decision)
+        self.record_call_result_quality(site, value, permit)
     }
 
     fn result_pack(&mut self, slots: Vec<OwnedValue>) -> OwnedValue {

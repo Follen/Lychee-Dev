@@ -81,16 +81,6 @@ fn child_producers_precede_the_selected_callee_receipt_and_survive_the_call() {
                 argument: None
             },
             BindingCoverage {
-                site: provider.named("denied()"),
-                operation: "call_result".into(),
-                state: "unavailable".into(),
-                proof: "denied-call".into(),
-                reason: Some("no-call-evidence".into()),
-                parameter: None,
-                parameter_index: None,
-                argument: None
-            },
-            BindingCoverage {
                 site: provider.named("selected"),
                 operation: "resolve".into(),
                 state: "bound".into(),

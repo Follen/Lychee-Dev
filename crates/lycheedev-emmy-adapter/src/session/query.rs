@@ -32,13 +32,14 @@ pub trait SelectedExpressionBackend: SelectedProjectionBackend {
         Ok(None)
     }
 
-    /// The complete backend records result quality only after actual projection
-    /// finishes. Argument-check availability is deliberately independent.
+    /// The complete backend records quality after a validated permit's return
+    /// projection attempt. A rejected call gate never enters this phase;
+    /// argument-check availability is deliberately independent.
     fn finish_call_projection(
         &mut self,
         _site: BindingSite,
         _value: &Self::Value,
-        _decision: &BindingDecision<super::CallPermit>,
+        _permit: &super::CallPermit,
     ) -> Result<(), Self::Error> {
         Ok(())
     }
@@ -71,9 +72,9 @@ impl SelectedProjector<'_> {
             .and_then(|tree| site.syntax.to_node_from_root(&tree.get_red_root()))
             .and_then(LuaCallExpr::cast);
         backend.checkpoint()?;
-        // Keep the original call-gate observation through completion. Quality
-        // describes this exact projection; rereading the provider here would
-        // add a second call observation with no semantic work of its own.
+        // Keep the original call-gate observation through projection. The
+        // validated Bound branch alone owns result completion; rereading the
+        // provider later would add an observation without semantic work.
         let call_decision = if call.is_some() {
             backend.checkpoint()?;
             let decision = self.session().context().call(site);
@@ -83,9 +84,6 @@ impl SelectedProjector<'_> {
             None
         };
         let value = self.selected_inner(site, call.as_ref(), call_decision.as_ref(), backend)?;
-        if let (Some(decision), Some(value)) = (&call_decision, &value) {
-            backend.finish_call_projection(site, value, decision)?;
-        }
         Ok(match (value, call) {
             (Some(value), Some(call)) if !call_expands(&call) => {
                 backend.checkpoint()?;
@@ -138,139 +136,11 @@ impl SelectedProjector<'_> {
                         )?;
                         return Ok(Some(backend.plain(LuaType::Unknown)));
                     }
-                    backend.checkpoint()?;
-                    let observation = self.session().context().call_observation(site);
-                    backend.checkpoint()?;
-                    match observation {
-                        BindingDecision::Bound(observation) => {
-                            let selected = self.session().context().resolve(permit.callee);
-                            backend.checkpoint()?;
-                            let valid = match selected {
-                                BindingDecision::Bound(value)
-                                    if value.identity == observation.selected_callee_identity =>
-                                {
-                                    match (&value.value, &observation.callee) {
-                                        (SelectedValue::Function(a), ObservedCallee::Source(b)) => {
-                                            a == b
-                                        }
-                                        (
-                                            SelectedValue::EnvironmentCallable(a),
-                                            ObservedCallee::Environment(b),
-                                        ) => {
-                                            a.origin.identity == b.origin.identity
-                                                && a.origin.material_sha256
-                                                    == b.origin.material_sha256
-                                                && a.origin.pointer == b.origin.pointer
-                                        }
-                                        _ => false,
-                                    }
-                                }
-                                _ => false,
-                            };
-                            if !valid
-                                || observation.returns.len() > 32
-                                || observation.invocation_identity.is_empty()
-                                || matches!(&observation.callee, ObservedCallee::Source(_))
-                                    && observation.closure_identity.is_empty()
-                            {
-                                self.query_record(
-                                    site,
-                                    "call_return",
-                                    "unavailable",
-                                    observation.proof,
-                                    Some("call_observation_identity_or_budget".into()),
-                                    backend,
-                                )?;
-                                return Ok(Some(backend.plain(LuaType::Unknown)));
-                            }
-                            if matches!(&observation.callee, ObservedCallee::Environment(callable)
-                                if callable.declaration.raw.get("MayReturnNothing") == Some(&serde_json::Value::Bool(true)))
-                            {
-                                self.query_record(
-                                    site,
-                                    "call_return",
-                                    "unavailable",
-                                    observation.proof,
-                                    Some("environment_return_cardinality_unavailable".into()),
-                                    backend,
-                                )?;
-                                return Ok(Some(backend.plain(LuaType::Variadic(Arc::new(
-                                    VariadicType::Base(LuaType::Unknown),
-                                )))));
-                            }
-                            let mut slots = Vec::with_capacity(observation.returns.len());
-                            for decision in observation.returns {
-                                backend.checkpoint()?;
-                                let value =
-                                    self.project_decision(site, decision, "call_return", backend)?;
-                                slots.push(match value {
-                                    Some(value) => value,
-                                    None => {
-                                        self.query_record(
-                                            site,
-                                            "call_return",
-                                            "unavailable",
-                                            String::new(),
-                                            Some("observed_return_slot_not_managed".into()),
-                                            backend,
-                                        )?;
-                                        backend.plain(LuaType::Unknown)
-                                    }
-                                });
-                            }
-                            self.query_record(site, "call", "bound", permit.proof, None, backend)?;
-                            return Ok(Some(backend.result_pack(slots)));
-                        }
-                        BindingDecision::Unavailable { proof, reason } => {
-                            self.query_record(
-                                site,
-                                "call_return",
-                                "unavailable",
-                                proof,
-                                Some(reason),
-                                backend,
-                            )?;
-                            return Ok(Some(backend.plain(LuaType::Unknown)));
-                        }
-                        BindingDecision::KnownAbsent { proof } => {
-                            self.query_record(
-                                site,
-                                "call_return",
-                                "unavailable",
-                                proof,
-                                Some("call_return_observation_absent".into()),
-                                backend,
-                            )?;
-                            return Ok(Some(backend.plain(LuaType::Unknown)));
-                        }
-                        BindingDecision::NotManaged => {
-                            let decision = self.session().context().resolve(site);
-                            backend.checkpoint()?;
-                            if let Some(value) =
-                                self.project_decision(site, decision, "call_return", backend)?
-                            {
-                                return Ok(Some(value));
-                            }
-                            // Absence of an observation is not a denial of the
-                            // authenticated native signature. Execute the same
-                            // owned VM and selected children, never a raw model
-                            // fallback or a synthetic result from the permit.
-                            if let Some(value) =
-                                backend.infer_permitted_call(self, site, &permit)?
-                            {
-                                return Ok(Some(value));
-                            }
-                            self.query_record(
-                                site,
-                                "call_return",
-                                "unavailable",
-                                permit.proof,
-                                Some("call_return_observation_missing".into()),
-                                backend,
-                            )?;
-                            return Ok(Some(backend.plain(LuaType::Unknown)));
-                        }
+                    let value = self.permitted_call_inner(site, &permit, backend)?;
+                    if let Some(value) = &value {
+                        backend.finish_call_projection(site, value, &permit)?;
                     }
+                    return Ok(value);
                 }
                 BindingDecision::NotManaged => {}
             }
@@ -279,6 +149,144 @@ impl SelectedProjector<'_> {
         let decision = self.session().context().resolve(site);
         backend.checkpoint()?;
         self.project_decision(site, decision, "resolve", backend)
+    }
+
+    // Admission has already checked the actual callee and capability profile.
+    // Every return below belongs to a real projection attempt, including an
+    // unavailable observation. Gate denial must never synthesize its completion.
+    fn permitted_call_inner<B: SelectedExpressionBackend>(
+        &self,
+        site: BindingSite,
+        permit: &super::CallPermit,
+        backend: &mut B,
+    ) -> Result<Option<B::Value>, B::Error> {
+        backend.checkpoint()?;
+        let observation = self.session().context().call_observation(site);
+        backend.checkpoint()?;
+        match observation {
+            BindingDecision::Bound(observation) => {
+                let selected = self.session().context().resolve(permit.callee);
+                backend.checkpoint()?;
+                let valid = match selected {
+                    BindingDecision::Bound(value)
+                        if value.identity == observation.selected_callee_identity =>
+                    {
+                        match (&value.value, &observation.callee) {
+                            (SelectedValue::Function(a), ObservedCallee::Source(b)) => a == b,
+                            (
+                                SelectedValue::EnvironmentCallable(a),
+                                ObservedCallee::Environment(b),
+                            ) => {
+                                a.origin.identity == b.origin.identity
+                                    && a.origin.material_sha256 == b.origin.material_sha256
+                                    && a.origin.pointer == b.origin.pointer
+                            }
+                            _ => false,
+                        }
+                    }
+                    _ => false,
+                };
+                if !valid
+                    || observation.returns.len() > 32
+                    || observation.invocation_identity.is_empty()
+                    || matches!(&observation.callee, ObservedCallee::Source(_))
+                        && observation.closure_identity.is_empty()
+                {
+                    self.query_record(
+                        site,
+                        "call_return",
+                        "unavailable",
+                        observation.proof,
+                        Some("call_observation_identity_or_budget".into()),
+                        backend,
+                    )?;
+                    return Ok(Some(backend.plain(LuaType::Unknown)));
+                }
+                if matches!(&observation.callee, ObservedCallee::Environment(callable)
+                    if callable.declaration.raw.get("MayReturnNothing") == Some(&serde_json::Value::Bool(true)))
+                {
+                    self.query_record(
+                        site,
+                        "call_return",
+                        "unavailable",
+                        observation.proof,
+                        Some("environment_return_cardinality_unavailable".into()),
+                        backend,
+                    )?;
+                    return Ok(Some(backend.plain(LuaType::Variadic(Arc::new(
+                        VariadicType::Base(LuaType::Unknown),
+                    )))));
+                }
+                let mut slots = Vec::with_capacity(observation.returns.len());
+                for decision in observation.returns {
+                    backend.checkpoint()?;
+                    let value = self.project_decision(site, decision, "call_return", backend)?;
+                    slots.push(match value {
+                        Some(value) => value,
+                        None => {
+                            self.query_record(
+                                site,
+                                "call_return",
+                                "unavailable",
+                                String::new(),
+                                Some("observed_return_slot_not_managed".into()),
+                                backend,
+                            )?;
+                            backend.plain(LuaType::Unknown)
+                        }
+                    });
+                }
+                self.query_record(site, "call", "bound", permit.proof.clone(), None, backend)?;
+                return Ok(Some(backend.result_pack(slots)));
+            }
+            BindingDecision::Unavailable { proof, reason } => {
+                self.query_record(
+                    site,
+                    "call_return",
+                    "unavailable",
+                    proof,
+                    Some(reason),
+                    backend,
+                )?;
+                return Ok(Some(backend.plain(LuaType::Unknown)));
+            }
+            BindingDecision::KnownAbsent { proof } => {
+                self.query_record(
+                    site,
+                    "call_return",
+                    "unavailable",
+                    proof,
+                    Some("call_return_observation_absent".into()),
+                    backend,
+                )?;
+                return Ok(Some(backend.plain(LuaType::Unknown)));
+            }
+            BindingDecision::NotManaged => {
+                let decision = self.session().context().resolve(site);
+                backend.checkpoint()?;
+                if let Some(value) =
+                    self.project_decision(site, decision, "call_return", backend)?
+                {
+                    return Ok(Some(value));
+                }
+                // Absence of an observation is not a denial of the
+                // authenticated native signature. Execute the same
+                // owned VM and selected children, never a raw model
+                // fallback or a synthetic result from the permit.
+                if let Some(value) = backend.infer_permitted_call(self, site, permit)? {
+                    return Ok(Some(value));
+                }
+                self.query_record(
+                    site,
+                    "call_return",
+                    "unavailable",
+                    permit.proof.clone(),
+                    Some("call_return_observation_missing".into()),
+                    backend,
+                )?;
+                return Ok(Some(backend.plain(LuaType::Unknown)));
+            }
+        }
     }
 
     fn query_record<B: SelectedProjectionBackend>(

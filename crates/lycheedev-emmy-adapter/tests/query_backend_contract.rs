@@ -369,33 +369,36 @@ fn denied_call_initializer_slots_preserve_unknown_and_exact_call_producer() {
         let reason = unavailable.then(|| "capability_missing".to_owned());
         assert_eq!(
             coverage,
-            vec![
-                BindingCoverage {
-                    site: call,
-                    operation: "call",
-                    state: if unavailable {
-                        "unavailable"
-                    } else {
-                        "known_absent"
-                    },
-                    proof: proof.into(),
-                    reason: reason.clone(),
-                    parameter: None,
-                    parameter_index: None,
-                    argument: None,
+            vec![BindingCoverage {
+                site: call,
+                operation: "call",
+                state: if unavailable {
+                    "unavailable"
+                } else {
+                    "known_absent"
                 },
-                BindingCoverage {
-                    site: call,
-                    operation: "call_result",
-                    state: "unavailable",
-                    proof: proof.into(),
-                    reason: Some(reason.unwrap_or_else(|| "known_absent_callee".into())),
-                    parameter: None,
-                    parameter_index: None,
-                    argument: None,
-                },
-            ]
+                proof: proof.into(),
+                reason,
+                parameter: None,
+                parameter_index: None,
+                argument: None,
+            }]
         );
+        // Initializer selection and the actual call gate are separate original
+        // producers. Neither gate denial performs observation/argument work.
+        let expected_events = vec![
+            Event::Resolve(site),
+            Event::Resolve(call),
+            Event::Call(call),
+            Event::Call(call),
+        ];
+        assert_eq!(*provider.events.lock().unwrap(), expected_events);
+        assert_eq!(
+            plain_value(query.type_of_expr(site.syntax).unwrap()),
+            LuaType::Unknown
+        );
+        assert_eq!(*provider.events.lock().unwrap(), expected_events);
+        assert_eq!(rows(&session), coverage);
     }
 }
 
@@ -497,7 +500,7 @@ fn selected_origin_still_executes_fresh_initializer_probes_after_an_ordinary_que
 
 #[test]
 fn call_quality_consumes_the_original_gate_and_retains_every_result_receipt_field() {
-    for mode in 0..5 {
+    for mode in 0..8 {
         let (analysis, call, mut provider) = load("return f()", "f()");
         let callee = provider.named("f");
         let (operation, state, proof, reason, expected_type, expected_events, quality) = match mode
@@ -546,7 +549,7 @@ fn call_quality_consumes_the_original_gate_and_retains_every_result_receipt_fiel
                     None,
                     LuaType::Unknown,
                     vec![Event::Call(call)],
-                    Some(("unavailable", "denied", Some("known_absent_callee"))),
+                    None,
                 )
             }
             3 => {
@@ -564,7 +567,61 @@ fn call_quality_consumes_the_original_gate_and_retains_every_result_receipt_fiel
                     Some("missing-permit"),
                     LuaType::Unknown,
                     vec![Event::Call(call)],
-                    Some(("unavailable", "denied-unknown", Some("missing-permit"))),
+                    None,
+                )
+            }
+            5 | 6 => {
+                provider.calls.insert(
+                    call,
+                    BindingDecision::Bound(CallPermit {
+                        callee: if mode == 6 { call } else { callee },
+                        proof: "invalid-permit".into(),
+                        capability_profile: if mode == 5 {
+                            "untrusted-profile"
+                        } else {
+                            "typed-call-v1"
+                        }
+                        .into(),
+                    }),
+                );
+                (
+                    "call",
+                    "unavailable",
+                    "invalid-permit",
+                    Some("call_permit_callee_or_profile_mismatch"),
+                    LuaType::Unknown,
+                    vec![Event::Call(call)],
+                    None,
+                )
+            }
+            7 => {
+                provider.calls.insert(
+                    call,
+                    BindingDecision::Bound(CallPermit {
+                        callee,
+                        proof: "permit".into(),
+                        capability_profile: "typed-call-v1".into(),
+                    }),
+                );
+                provider.observations.insert(
+                    call,
+                    BindingDecision::Unavailable {
+                        proof: "observation-proof".into(),
+                        reason: "not-observed".into(),
+                    },
+                );
+                (
+                    "call_return",
+                    "unavailable",
+                    "observation-proof",
+                    Some("not-observed"),
+                    LuaType::Unknown,
+                    vec![Event::Call(call), Event::Observation(call)],
+                    Some((
+                        "unavailable",
+                        "permit",
+                        Some("native_call_result_type_unavailable"),
+                    )),
                 )
             }
             _ => {

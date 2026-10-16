@@ -1329,15 +1329,76 @@ fn signature_projection_does_not_bypass_denied_or_invalid_selected_calls() {
         let session = owned_query::session(Arc::new(provider));
         owned_query::model!(model, fixture, ids[4], session.clone());
         assert_eq!(model.type_of_expr(call.syntax), LuaType::Unknown, "{case}");
+        let expected_gate = match case {
+            "denied" => Some(("unavailable", "denied-proof", Some("effect_unavailable"))),
+            "absent" => Some(("known_absent", "absent-proof", None)),
+            "wrong-profile" | "wrong-callee" => Some((
+                "unavailable",
+                "same-result-proof",
+                Some("call_permit_callee_or_profile_mismatch"),
+            )),
+            "unavailable-callee" => None,
+            _ => unreachable!(),
+        };
+        let gate_row = expected_gate.map(|(state, proof, reason)| BindingCoverage {
+            site: call,
+            operation: "call",
+            state,
+            proof: proof.into(),
+            reason: reason.map(str::to_owned),
+            parameter: None,
+            parameter_index: None,
+            argument: None,
+        });
+        let before_check = session.coverage();
+        if let Some(gate) = &gate_row {
+            // No admitted projection ran. The original gate is the complete
+            // explanation for Unknown; no result-completion row is synthesized.
+            assert_eq!(before_check, vec![gate.clone()], "{case}");
+        } else {
+            assert_eq!(
+                before_check,
+                vec![
+                    quality_receipt(
+                        call,
+                        "call_return",
+                        "unavailable",
+                        Some("call_return_observation_missing")
+                    ),
+                    quality_receipt(
+                        call,
+                        "call_result",
+                        "unavailable",
+                        Some("native_call_result_type_unavailable")
+                    ),
+                ],
+                "{case}"
+            );
+        }
+        assert_eq!(model.type_of_expr(call.syntax), LuaType::Unknown, "{case}");
+        assert_eq!(session.coverage(), before_check, "cached query: {case}");
         let run = fixture.diagnose(ids[4], checks, &session).unwrap();
         assert!(run.complete, "{case}");
         let rows = session.coverage();
-        assert!(
-            rows.iter().any(|row| row.site == call
-                && row.operation == "call_result"
-                && row.state == "unavailable"),
-            "{case}: {rows:?}"
-        );
+        if let Some(gate) = gate_row {
+            assert!(rows.contains(&gate), "{case}: {rows:?}");
+            assert!(
+                !rows
+                    .iter()
+                    .any(|row| row.site == call && row.operation == "call_result"),
+                "a rejected gate cannot complete a result: {case}: {rows:?}"
+            );
+        } else {
+            assert!(
+                rows.contains(&quality_receipt(
+                    call,
+                    "call_result",
+                    "unavailable",
+                    Some("native_call_result_type_unavailable")
+                )),
+                "{case}: {rows:?}"
+            );
+        }
         assert!(
             !rows.iter().any(|row| row.site == call
                 && matches!(row.operation, "call_result" | "return_check")
