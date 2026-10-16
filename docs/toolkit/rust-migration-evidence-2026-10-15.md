@@ -1254,3 +1254,37 @@ Data 323自适应基础R23.1已独审并组合：真实workspace准入后采样W
 4. named target完整local/remote默认链已组合，下一集中批验证真实分页、历史坏配置、准备期间删除/引用冲突及CLI输出。SQL typed标识符与真实按需解析已接线；local SQL的query内CASC索引缓存/原路径rehash也已接线；EXISTS/标量/ANALYZE/CAST/LIKE已组合待集中运行，继续投影/DISTINCT/排序和完整执行计账差异。
 5. 继续全部Emmy hook实际外移、真实Source可读性、Skill/Data使用质量及旧消费者替代；完成后依次执行下列四阶段审计。
 6. 每批及时普通push保留工作。只有有意义的验证批使用 `[rust-native]`；fast成功/长组skip不等于产品通过。只维护此handover，历史细节移至证据文档而不持续堆叠当前页。
+
+
+## 2026-10-16 11:26：保存的前版交接第2–3节
+
+以下为被当前状态替换的历史原文，不作为最新执行状态。
+
+## 2. 当前实现与未闭环事项
+
+- **默认业务链已接入，仍在修真实集中失败**：Data 的本地/CDN读取、Prepared/cache、SQL、导航、asset、Hotfix及独立控制/预算/checked收尾已接；Go323自适应内存与紧凑记录已组合。当前收口是实际SQL资源/部分结果合同、HTTP边界的实际Windows验证及失败测试，不能按功能清单称成熟或验收完成。
+- **Emmy生产已零上游源码补丁**：固定原版848文件由自有语义/诊断层接入；完整等价仍须集中验证。8a3历史参考在两个16384边界case输出单文件超过16MiB，输出assert在析构中再次触发并abort。已按原每段上限分段保留全部trace，接入受控外层收尾；Node23项及外壳3项通过，Rust分段/异常peer及两侧完整比较待重跑；不得删除原448输入、覆盖证据或边界检查。
+- **Source短预算隔离已保存**：私有analysis child保warm状态，沿原请求绝对deadline与整个子树aggregate 2GiB，owner无同步可选sidecar写；失败确认回收且未知不重放。8a3的28项生命周期unit已通过，实际1秒/warm idle及完整Retail后续组因前步耗尽job未执行。原90秒/2GiB不扩张。
+- **剩余性能验收**：此前e8完整Retail四路径均耗尽原90秒；API worker虽已写回复，caller未完成。其失败run source进程集合采样峰WS2370.62MiB/private2502.21MiB，有采样间隙且含多进程；retained warm/steady未测。后续准备/身份索引/释放优化不能在新完整结果出现前称改善；尚无同机Go对照或70%目标证明。历史CLI由dev配置构建，不能作为release性能对比；新配对入口使用固定Go323完整包与优化Rust候选，先覆盖describe和静态Retail index/query，仍未执行。
+- **HTTP有限边界后继已组合**：原始Host、非UTF8/空authority/未知proxy scheme的错误阶段与固定请求行投影已接；TLS保Go精确验证名，IP通过公开配置禁SNI且仍严格验证。13新增Rust正在当前集中批验证；后继已接5个私有CA TLS loopback观察与同次封存Rust输出的固定Go1.27.1对照，Node13/13通过。实际TLS后继尚未执行，默认Windows系统根验证仍另有边界，未宣称多尾点等价。
+- **本次集中候选**：SQL保原合法深度63/拒绝64边界，移出递归帧的大型AST临时值、move嵌套Query代替clone、迭代展开UNION；3新增测试及原崩溃用例尚未运行，栈问题不能先标解决。五项SQL旧fixture按Go323改正并保负例。Data九个失败的五类fixture已按规范路径、真实body长度提示、必需provenance、CAS generation与typed cleanup原因修正；新增2回归待跑。
+- **当前修复状态**：149d90已保存adapter集合类型编译修复。8a3另一个all-target失败为Lua integration测试仍访问移除的Script.source字段，已保存改为source_bytes()，89f61b9的all-target实际编译通过。Core非法历史大行fixture与并发临时目录碰撞、SQL及Data对应修复均已保存，运行复验仍在进行；bundle原目录计数漏了初始化既有的`.lycheedev-locks`，已改为严格对照操作前完整目录名集合。
+
+## 3. 最近集中验证的真实边界
+
+- [89f61b9 run38880882451](https://github.com/Follen/Lychee-Dev/actions/runs/38880882451)：10:45核实static/context成功，product仍运行；all-target编译、CLI构建、真实describe、静态Retail及22–75各组已通过，76 adapter组失败（详细封存诊断待取），77固定oracle失败且已受控返回，后续继续执行至142；keys109、SQL118/126另有失败，78–141其余已执行组成功。SQL深度、分段trace、完整Retail与后续产品组尚不能报通过。
+
+- [8a3 run38854701834](https://github.com/Follen/Lychee-Dev/actions/runs/38854701834)：context/static成功，product取消；final产物122 owners/2210 sealed日志逐SHA一致。CLI构建、真实describe、静态Retail、正式Lua/桥、slot维护17/移除8/修复25、Source准备47/research65（另2ignored）及生命周期28等组实际通过。all-target旧Script字段与adapter旧集合类型失败。历史参考cargo真实异常退出；outer在06:29报错后直至08:08取消，后续组未执行，不能当成用户取消或完整产品通过。最新149修复不在该run。
+- [fbba run38850381033](https://github.com/Follen/Lychee-Dev/actions/runs/38850381033)：context/static成功，product失败；191 owners/1171 sealed日志逐SHA一致。CLI/Source多数目标受旧cleanup Result类型编译阻断（现已修）。独立Data remote284等组真实通过；另有SQL断言及IN测试栈溢出、Hotfix、asset、Core等真实失败，不能全部归为编译连锁。
+- 两次产物ZIP SHA分别为 `1b7404f8430c2daa048f9f1d1cf99bf982bd06cfc602c33f861d673e75846d7e`（8a3）与 `0e6074a9bcedd905ec60877a8242c0555916642b134ffa28633e465eda281bd7`（fbba）。测试完成与外层回收分开记：参考cargo已回收，不等于取消的outer/preparation owners全部确认回收。
+- 本地Node/静态检查可执行；原Rust构建owner尚无合法完整回收证明，保留lease，不新开cache/channel绕行。用户已选择继续Windows CI。独立A/B/C历史31×3/450trace/6outcomes通过只适用于其原冻结输入；当前变更仍须受影响验证。
+- 原始批次、owner/hash和失败记录见[历史证据](rust-migration-evidence-2026-10-15.md)。PR正文更新曾两次被拒，仍暂停该动作；已授权源码推送继续，未发布或合并。
+
+- 本机ec503实际复验已确认SQL三个0xc00000fd，合法scalar深度63最后停在parse；TLS两多尾点SNI与固定Go不等价；keys redirect fixture与local_query scratch_bytes另有失败。编译已过不代表这些运行问题解决。本机负责测试与PR证据，修复仍在云端进行。
+- 本机同ec503补测：process47与native_session28通过；trace storage5通过、1个由父进程实际启动的故障peer例单列ignored；完整固定oracle仍运行。源码原版848认证通过，不代表完整语义等价已通过。
+- `d20586d`已保存首个固定Go323优化候选配对入口，42个Node检查通过、10个Windows项未执行；实际基准未跑。`1f9a8cb`已按Go实际Root上限4096修复SQL reader过量scratch准入，并将keys旧gap断言改为真实两跳编码路径回归；Rust复验待后续完整候选。
+- 本批将正式Lua与真实Driver桥入口切到独立固定Go323清单（113个原blob认证）；旧320/321/322清单原样保留。仅上游323相对322的Runtime/TOC与两个Lua版本fixture增量，Rust3.5字段采用精确可逆overlay；Node正式63及包/版本115检查通过。正式220 Lua与9桥需在新SHA实际运行，旧322补充结果不重标。
+
+
+- 本机ec503完整固定oracle已结束：reference36/36、candidate29通过7失败，双方4137行/38物理段；大边界输出与全树收尾已闭合。本批修复重复initializer/provider查询及完整键枚举被未知字段值污染的Nil→Unknown，新增5回归未运行。保留全部raw差分，必要call_result新增证据仍须按当前正式合同单独判定，不能把历史参考缺记录或当前差异归一化成通过。
+- `6051063`已保存最小非Emmy TLS依赖适配：固定native-tls/schannel三源38加4删，SNI与证书校验名分离，原验证与tokio所有权不变；49文件含官方完整源/许可与精确逆补丁，包许可及source rebuild已接。Node完整20/20通过，真实Windows/Go五项复验待跑；Emmy848仍零补丁，整个依赖树不再称零补丁。

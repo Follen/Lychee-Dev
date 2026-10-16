@@ -102,15 +102,39 @@ test('source tracks are data; malformed catalogs require review', () => {
 test('Go extraction rejects source mutation instead of trusting a moving source', () => {
   assert.throws(() => extractPinnedGo(Buffer.from('not fixed Go'), Buffer.from('anything')), /hash/);
 });
-test('filesystem inventory never runs Lua and rejects links/traversal', () => {
+test('filesystem inventory never runs Lua and rejects traversal', () => {
   const temp = mkdtempSync(join(tmpdir(), 'lycheedev-static-parity-'));
   try {
     mkdirSync(join(temp, 'addon')); writeFileSync(join(temp, 'addon/evil.lua'), 'os.execute("must never run")');
     writeFileSync(join(temp, 'addon/new.txt'), 'extra'); assert.equal(addonInventory(temp).length, 2);
     assert.throws(() => readBounded(temp, '../outside'), /unsafe/);
     assert.throws(() => readBounded(temp, 'addon\\evil.lua'), /unsafe/);
-    symlinkSync('evil.lua', join(temp, 'addon/link.lua'));
-    assert.throws(() => addonInventory(temp), /symlink/); assert.throws(() => readBounded(temp, 'addon/link.lua'), /symlink/);
+  } finally { rmSync(temp, { recursive: true, force: true }); }
+});
+test('filesystem inventory and bounded read reject actual file symlinks', t => {
+  const temp = mkdtempSync(join(tmpdir(), 'lycheedev-static-file-link-'));
+  try {
+    mkdirSync(join(temp, 'addon')); writeFileSync(join(temp, 'addon/evil.lua'), 'return "not executed"');
+    try { symlinkSync('evil.lua', join(temp, 'addon/link.lua'), 'file'); }
+    catch (error) {
+      if (process.platform === 'win32' && ['EPERM', 'EACCES'].includes(error.code)) {
+        t.skip(`Windows denied creating this fixture file symlink (${error.code}); rejection behavior is unmeasured`);
+        return;
+      }
+      throw error;
+    }
+    assert.throws(() => addonInventory(temp), /symlink/);
+    assert.throws(() => readBounded(temp, 'addon/link.lua'), /symlink/);
+  } finally { rmSync(temp, { recursive: true, force: true }); }
+});
+test('Windows junction ancestor is rejected independently of file symlink support', { skip: process.platform !== 'win32' }, () => {
+  const temp = mkdtempSync(join(tmpdir(), 'lycheedev-static-junction-'));
+  try {
+    mkdirSync(join(temp, 'addon')); mkdirSync(join(temp, 'target'));
+    writeFileSync(join(temp, 'target/value.lua'), 'return "not executed"');
+    symlinkSync(join(temp, 'target'), join(temp, 'addon/link'), 'junction');
+    assert.throws(() => addonInventory(temp), /symlink/);
+    assert.throws(() => readBounded(temp, 'addon/link/value.lua'), /symlink/);
   } finally { rmSync(temp, { recursive: true, force: true }); }
 });
 test('manifest regenerates byte-for-byte from fixed Go objects, with shared flags', () => {

@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 11:10 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`6051063ee0e3391d934831a15310ca475824a455`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 11:26 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`3336d8240f5a32cbf3ec4d5e910cc316ea746d0a`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -23,34 +23,22 @@
 
 - 2026-10-15 18:24 用户调整实施节奏：先按完整端到端功能实现并接入默认生产消费者，再集中补测试和统一验证；取消自行增加的逐小片冻结/独审/CI先行门禁。实现过程中仍及时分批提交推送同一草稿PR，真实安全边界和文件单写协调保留；已有CI旁路诊断，不等待每轮才继续编码。最终四阶段循环审计与完整验收要求不变。
 
-## 2. 当前实现与未闭环事项
+## 2. 当前实现与有限剩余项
 
-- **默认业务链已接入，仍在修真实集中失败**：Data 的本地/CDN读取、Prepared/cache、SQL、导航、asset、Hotfix及独立控制/预算/checked收尾已接；Go323自适应内存与紧凑记录已组合。当前收口是实际SQL资源/部分结果合同、HTTP边界的实际Windows验证及失败测试，不能按功能清单称成熟或验收完成。
-- **Emmy生产已零上游源码补丁**：固定原版848文件由自有语义/诊断层接入；完整等价仍须集中验证。8a3历史参考在两个16384边界case输出单文件超过16MiB，输出assert在析构中再次触发并abort。已按原每段上限分段保留全部trace，接入受控外层收尾；Node23项及外壳3项通过，Rust分段/异常peer及两侧完整比较待重跑；不得删除原448输入、覆盖证据或边界检查。
-- **Source短预算隔离已保存**：私有analysis child保warm状态，沿原请求绝对deadline与整个子树aggregate 2GiB，owner无同步可选sidecar写；失败确认回收且未知不重放。8a3的28项生命周期unit已通过，实际1秒/warm idle及完整Retail后续组因前步耗尽job未执行。原90秒/2GiB不扩张。
-- **剩余性能验收**：此前e8完整Retail四路径均耗尽原90秒；API worker虽已写回复，caller未完成。其失败run source进程集合采样峰WS2370.62MiB/private2502.21MiB，有采样间隙且含多进程；retained warm/steady未测。后续准备/身份索引/释放优化不能在新完整结果出现前称改善；尚无同机Go对照或70%目标证明。历史CLI由dev配置构建，不能作为release性能对比；新配对入口使用固定Go323完整包与优化Rust候选，先覆盖describe和静态Retail index/query，仍未执行。
-- **HTTP有限边界后继已组合**：原始Host、非UTF8/空authority/未知proxy scheme的错误阶段与固定请求行投影已接；TLS保Go精确验证名，IP通过公开配置禁SNI且仍严格验证。13新增Rust正在当前集中批验证；后继已接5个私有CA TLS loopback观察与同次封存Rust输出的固定Go1.27.1对照，Node13/13通过。实际TLS后继尚未执行，默认Windows系统根验证仍另有边界，未宣称多尾点等价。
-- **本次集中候选**：SQL保原合法深度63/拒绝64边界，移出递归帧的大型AST临时值、move嵌套Query代替clone、迭代展开UNION；3新增测试及原崩溃用例尚未运行，栈问题不能先标解决。五项SQL旧fixture按Go323改正并保负例。Data九个失败的五类fixture已按规范路径、真实body长度提示、必需provenance、CAS generation与typed cleanup原因修正；新增2回归待跑。
-- **当前修复状态**：149d90已保存adapter集合类型编译修复。8a3另一个all-target失败为Lua integration测试仍访问移除的Script.source字段，已保存改为source_bytes()，89f61b9的all-target实际编译通过。Core非法历史大行fixture与并发临时目录碰撞、SQL及Data对应修复均已保存，运行复验仍在进行；bundle原目录计数漏了初始化既有的`.lycheedev-locks`，已改为严格对照操作前完整目录名集合。
+- **Data 默认链已接入**：本地/CDN、Prepared/cache、SQL、导航、asset、Hotfix、自适应内存与 checked 收尾均已有实现。当前重点是 SQL 默认线程栈安全：原合法 scalar 深度63在 parse 实际溢出；完整堆任务栈解析/降低、迭代树 clone/equality/drop 已在云端改写，仍在收尾同步 provider callback 的混合嵌套执行和错误析构，尚未保存或实际验证，不能称问题闭合。
+- **Emmy 已使用原版848文件，语义验证未完成**：`3336d82`已保存 initializer/provider 重复查询、call quality 多余查询和完整键集合被未知值污染的修复。原固定参考与当前候选的全量类型/provider/coverage差分保留；最新 adapter 另四项失败正在逐项用固定公开 API 合同核对，不能统一改期望或隐藏额外证据。
+- **HTTP 后继已保存待 Windows 复验**：`6051063`使用固定 native-tls/schannel 三源38加4删的最小适配，将SNI名与证书校验名分离，保原验证与tokio所有权。完整来源/许可/逆补丁和打包已接，Node20/20通过；真实五项Go对照及取消/错误连接器仍待测试。Emmy零补丁不等于整个依赖树零补丁。
+- **Source 正确性与性能仍未验收**：短预算隔离/暖态回收已有实际测试；完整Retail仍在原90秒内未完成。最新 dev 候选准备约72秒，API虽写完回复，最终 capture 仍耗尽总预算。不得增加deadline、减少输入或校验来通过。优化候选同机Go323配对入口已保存，实际结果尚无；先覆盖 describe 与静态Retail index/query，不能外推完整 B01–B07。
+- **正式 Lua 已明确切到 Go323**：`4092344`保存113原blob认证、精确Rust3.5 overlay与220/9正式入口，旧320/321/322原清单保留。Node正式63及包/版本115通过；本机缺固定MSVC组件，用户已授权官方必要组件安装，实际220/9仍NOT_RUN。
 
-## 3. 最近集中验证的真实边界
+## 3. 最新实际验证与证据
 
-- [89f61b9 run38880882451](https://github.com/Follen/Lychee-Dev/actions/runs/38880882451)：10:45核实static/context成功，product仍运行；all-target编译、CLI构建、真实describe、静态Retail及22–75各组已通过，76 adapter组失败（详细封存诊断待取），77固定oracle失败且已受控返回，后续继续执行至142；keys109、SQL118/126另有失败，78–141其余已执行组成功。SQL深度、分段trace、完整Retail与后续产品组尚不能报通过。
-
-- [8a3 run38854701834](https://github.com/Follen/Lychee-Dev/actions/runs/38854701834)：context/static成功，product取消；final产物122 owners/2210 sealed日志逐SHA一致。CLI构建、真实describe、静态Retail、正式Lua/桥、slot维护17/移除8/修复25、Source准备47/research65（另2ignored）及生命周期28等组实际通过。all-target旧Script字段与adapter旧集合类型失败。历史参考cargo真实异常退出；outer在06:29报错后直至08:08取消，后续组未执行，不能当成用户取消或完整产品通过。最新149修复不在该run。
-- [fbba run38850381033](https://github.com/Follen/Lychee-Dev/actions/runs/38850381033)：context/static成功，product失败；191 owners/1171 sealed日志逐SHA一致。CLI/Source多数目标受旧cleanup Result类型编译阻断（现已修）。独立Data remote284等组真实通过；另有SQL断言及IN测试栈溢出、Hotfix、asset、Core等真实失败，不能全部归为编译连锁。
-- 两次产物ZIP SHA分别为 `1b7404f8430c2daa048f9f1d1cf99bf982bd06cfc602c33f861d673e75846d7e`（8a3）与 `0e6074a9bcedd905ec60877a8242c0555916642b134ffa28633e465eda281bd7`（fbba）。测试完成与外层回收分开记：参考cargo已回收，不等于取消的outer/preparation owners全部确认回收。
-- 本地Node/静态检查可执行；原Rust构建owner尚无合法完整回收证明，保留lease，不新开cache/channel绕行。用户已选择继续Windows CI。独立A/B/C历史31×3/450trace/6outcomes通过只适用于其原冻结输入；当前变更仍须受影响验证。
-- 原始批次、owner/hash和失败记录见[历史证据](docs/toolkit/rust-migration-evidence-2026-10-15.md)。PR正文更新曾两次被拒，仍暂停该动作；已授权源码推送继续，未发布或合并。
-
-- 本机ec503实际复验已确认SQL三个0xc00000fd，合法scalar深度63最后停在parse；TLS两多尾点SNI与固定Go不等价；keys redirect fixture与local_query scratch_bytes另有失败。编译已过不代表这些运行问题解决。本机负责测试与PR证据，修复仍在云端进行。
-- 本机同ec503补测：process47与native_session28通过；trace storage5通过、1个由父进程实际启动的故障peer例单列ignored；完整固定oracle仍运行。源码原版848认证通过，不代表完整语义等价已通过。
-- `d20586d`已保存首个固定Go323优化候选配对入口，42个Node检查通过、10个Windows项未执行；实际基准未跑。`1f9a8cb`已按Go实际Root上限4096修复SQL reader过量scratch准入，并将keys旧gap断言改为真实两跳编码路径回归；Rust复验待后续完整候选。
-- 本批将正式Lua与真实Driver桥入口切到独立固定Go323清单（113个原blob认证）；旧320/321/322清单原样保留。仅上游323相对322的Runtime/TOC与两个Lua版本fixture增量，Rust3.5字段采用精确可逆overlay；Node正式63及包/版本115检查通过。正式220 Lua与9桥需在新SHA实际运行，旧322补充结果不重标。
-
-
-- 本机ec503完整固定oracle已结束：reference36/36、candidate29通过7失败，双方4137行/38物理段；大边界输出与全树收尾已闭合。本批修复重复initializer/provider查询及完整键枚举被未知字段值污染的Nil→Unknown，新增5回归未运行。保留全部raw差分，必要call_result新增证据仍须按当前正式合同单独判定，不能把历史参考缺记录或当前差异归一化成通过。
-- `6051063`已保存最小非Emmy TLS依赖适配：固定native-tls/schannel三源38加4删，SNI与证书校验名分离，原验证与tokio所有权不变；49文件含官方完整源/许可与精确逆补丁，包许可及source rebuild已接。Node完整20/20通过，真实Windows/Go五项复验待跑；Emmy848仍零补丁，整个依赖树不再称零补丁。
+- [89f61b9 run38880882451](https://github.com/Follen/Lychee-Dev/actions/runs/38880882451)已终态：static/context成功、product失败。final产物211 owners、8194 sealed日志逐SHA匹配，ZIP `1534ce9c1aca3718ec62d2b53b69f46e9f66884f44731c25c8e8b92e49d03c17`。all-target/CLI、Core、slot、正式旧Lua与桥、HTTP及IPC等已执行组通过；adapter、固定oracle、keys、local SQL、relational、Skill、fullRetail失败，不报全绿。
+- **89具体失败**：adapter lib50通过4失败，object member6通过1失败；member缺键Nil/Unknown真差异已在3336修，其他四项核固定函数参数/诊断/metatable合同后复测。relational在 scalar63/parse发生 `0xc00000fd`，未超deadline且完整回收；另外8个SQL集成target共43项通过。keys旧fixture与local SQL scratch准入已在1f9修，随后本机定向1+1+15实际全部通过。
+- **完整Retail**：4049文件/4036文档及1091 XML/4018映射认证通过；普通refs/context/API和retained冷启动均原deadline失败，后续依赖暖态无前置而未测。API最终 `source.refs.commit_capture` 耗尽预算，不能把worker产出当CLI成功。retained同身份child观测private峰1,995,444,224字节，低于2GiB，未证明OOM；全Source多进程集合private峰2,495,275,008字节且有采样缺口。Skill静态流程通过，唯一原生refs/context同样deadline。此为dev失败记录，无70%速度或内存验收结论。
+- **本机ec503**：process47、native_session28、trace storage5通过，父启动故障peer1项单列ignored。固定oracle reference36/36、candidate29通过7失败，双方4137行/38段，完整回收；大边界trace输出修复已实证，语义差异仍保留。公开差异见[PR证据](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6213988386)，3336修复尚待同输入复验。
+- **本机4092344当前批**：Root/keys定向17项及CLI dev构建已通过，正式Lua等待缺失的固定MSVC14.51.36231/SDK10.0.26100.0准备，优化配对测量独立准备中。后续普通push不打断固定SHA测试、不自动排重复长CI；本机只测试，云端负责实现修复。
+- 历史run、原失败和前版交接正文完整保留在[历史证据](docs/toolkit/rust-migration-evidence-2026-10-15.md)。四阶段最终循环审计尚未开始，实机清单仍在本文最后。
 
 ## 4. 进入最终四阶段前的有限收口
 
@@ -71,7 +59,7 @@
 
 ## 6. 本机线程接力验证入口（2026-10-16）
 
-用户指定现有本机线程接力，双方只经同一草稿PR同步源码与结果。先拉取本节标题上方已确认commit，保存自己的未提交修改，读AGENTS与本文件；不要把另一环境的历史lease复制或清除。当前89f61b9集中CI继续，后续普通push不自动排重复长CI。
+用户指定现有本机线程接力，双方只经同一草稿PR同步源码与结果。先拉取本节标题上方已确认commit，保存自己的未提交修改，读AGENTS与本文件；不要把另一环境的历史lease复制或清除。89f61b9集中CI已终态；当前本机固定4092344测试，后续普通push不自动排重复长CI。
 
 1. 在本机明确记录OS/架构、Rust1.99.0、Node24、Windows SDK/编译器和可用空间。Windows正式产品命令沿[当前workflow](.github/workflows/rust-parity.yml)的准备步骤：认证原版Emmy、受控`rust-cargo.mjs --owner local-fetch -- fetch --locked`，随后`--owner local-check --one-shot -- check --locked --offline --workspace --all-targets -j 1`。Linux只能报告其真实支持的子集，不假称Windows测试通过；不用裸Cargo绕现有owner/cache控制。
 2. 优先复验历史失败：workflow中完整adapter组；固定oracle的`node tests/rust-source-engine/fixed-emmy-oracle/controlled-run.mjs`（保全部输入与分段trace）；Data `relational::`与原joins/CTE/derived/recursive资源组。保持原63/64深度与预算，保存完整panic/退出码及实际句柄回收，不能只改期望。
