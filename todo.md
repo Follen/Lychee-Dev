@@ -1,19 +1,19 @@
 <!-- Current candidate: production Emmy recipe is unmodified upstream (848 files, zero patches); owned Source query and 43 diagnostic entries are wired. Historical initial zero-patch compilation failures are retained; current all-targets and focused behavioral results are recorded in handover.md. Complete behavioral/resource parity remains unaccepted. -->
-<!-- Preserve historical patched-engine test references separately. Complete known context/result-proof contracts, then run concentrated verification and the final four audit loops. -->
-<!-- Current batch: legacy addon production extras are now zero under the fixed oracle; Node 60/60 passed. Current formal Go323 Lua220/bridge9 execution passed on its recorded tree; final four audit loops remain pending. -->
+<!-- Preserve historical patched-engine test references separately. Complete known context/result-proof contracts, then run concentrated verification and the final five audit loops. -->
+<!-- Current batch: legacy addon production extras are now zero under the fixed oracle; Node 60/60 passed. Current formal Go323 Lua220/bridge9 execution passed on its recorded tree; final five audit loops remain pending. -->
 # Rust migration checklist
 
 Authority for decisions, status and evidence: [handover.md](handover.md). This checklist gives execution order only. The first delivery is documentation; full implementation is now authorized. Unchecked work does not authorize game input, publication or main merge. Existing Rust code and historical passing tests do not check these boxes automatically.
 
 ## Current implementation rhythm (user decision, 2026-10-15 18:24 UTC)
 
-Complete end-to-end production behavior first, then add the corresponding tests and run them in consolidated batches. Do not block each small implementation slice on a self-imposed freeze, independent review or CI gate. Persist meaningful batches to the same draft PR promptly. Preserve actual safety/ownership rules and single-writer boundaries; monitor existing CI alongside implementation. The four final sequential audit/fix/test/review loops remain mandatory after full implementation.
+Complete end-to-end production behavior first, then add the corresponding tests and run them in consolidated batches. Do not block each small implementation slice on a self-imposed freeze, independent review or CI gate. Persist meaningful batches to the same draft PR promptly. Preserve actual safety/ownership rules and single-writer boundaries; monitor existing CI alongside implementation. The five final sequential audit/fix/test/review loops remain mandatory after full implementation.
 
 ## Rust-native architecture acceptance (user refinement, 2026-10-16)
 
 - [ ] During Stage 1, assess every Core/Source/Data/Live/CLI/Skill-delivery boundary for concrete ownership/borrowing, avoidable clones, typed states, compact storage, streaming, explicit heap execution and measured safe concurrency. Include cancel/error/drop behavior, actual allocation/stack/IO costs and consumer evidence. Retain already appropriate implementations; do not translate Go mechanically, rewrite everything indiscriminately or add generic frameworks without need. This is a required architectural outcome, not permission to change the fixed Go business contract or interrupt current implementation/testing.
 
-- [ ] Execute and measure the implemented bounded Source scoped-parser candidate (4 workers/8 ordered slots, actual Git allocation and shared retained admission, full sequential fallback, 26 new tests not_run), then close full-output/first-error/cancel/peak-memory evidence. Continue justified bounded concurrency rather than only documenting it: start with the actual Source cold-index CPU/I/O pipeline after the measured cache bottleneck, then evaluate Data independent batches and Live's required serialized state boundary. Bound both task count and in-flight bytes; preserve output order, first error, original budget/cancellation and complete verification. Go constrains public behavior, not Rust internal layout.
+- [ ] Execute and measure the implemented bounded Source scoped-parser candidate (available logical CPU parallelism with useful task count and actual byte-admitted workers, no fixed CPU-count cap, at most 8 ordered slots, actual Git allocation and shared retained admission, one operation-owned pool, full sequential fallback, original 26 new tests passed on 7a; six adaptive successor tests not_run), then close full-output/first-error/cancel/peak-memory evidence. Continue justified bounded concurrency rather than only documenting it: start with the actual Source cold-index CPU/I/O pipeline after the measured cache bottleneck, then evaluate Data independent batches and Live's required serialized state boundary. Bound both task count and in-flight bytes; preserve output order, first error, original budget/cancellation and complete verification. Go constrains public behavior, not Rust internal layout.
 
 ### Current whole-repository consumer migrations
 
@@ -51,7 +51,7 @@ Complete end-to-end production behavior first, then add the corresponding tests 
 
 - [ ] Reconcile current zero-patch, Data/SQL/Core/TLS and formal-Lua evidence with their exact candidate/input/test mappings, then validate only genuinely uncovered or changed consumers. ac8 Data/TLS/adapter/context, 7db shared-budget regressions, 7d Core/Metadata and 7c Go323 Lua220/bridge9 have real results. The narrow ac8 Emmy current-contract check passed while historical raw comparison remains failed; neither proves full Retail or final audit convergence.
 - [ ] Keep complete B01–B07 performance, final-candidate package/install/upgrade/uninstall/restore and two fresh offline corresponding-source rebuilds open. The paired runner covers describe and static index/query only; remaining semantic/session/Data/Live-local/delivery paths and required metrics need their own equivalent-work evidence. Do not substitute historical 50%/five-sample runners or assembly-only reports.
-- [ ] After the finite production failures close, begin Stage 1 with independent actual Source, Skill and Data CLI usage, then the four sequential audit/fix/actual-verify/independent-review loops. Existing SQL/provider/Emmy/source-slice reviews remain specialist reviews, not Stage 1–4 results. Keep H01–H09 last and not_run, and do not wait on game cooperation to advance independent work.
+- [ ] After the finite production failures close, begin Stage 1 with independent actual Source, Skill and Data CLI usage, then the five sequential audit/fix/actual-verify/independent-review loops. Existing SQL/provider/Emmy/source-slice reviews remain specialist reviews, not Stage 1–5 results. Keep H01–H09 last and not_run, and do not wait on game cooperation to advance independent work.
 
 The dated checklists below preserve historical obligations. Their unchecked “implement”, “untested” and “not_run” wording does not override current handover evidence and does not require rerunning unchanged passing groups. Current execution and remaining acceptance are governed by handover.md.
 
@@ -115,7 +115,7 @@ This is an execution view, not a second evidence authority. A component being im
 ### Performance and repository-wide convergence remain unmeasured/open
 
 - [ ] Establish same-machine fixed-Go and Rust equivalent outputs for every B01–B07 path; independent cold/warm >=20 repeats, raw timings and excluded waits. Current isolated timings do not prove Rust <=30% of Go. The optimized paired entry has actual Windows validation. ac8 describe cold/warm 20 pairs were equivalent but measured ratios 1.127/1.126, failing ≤0.30; static Retail had zero samples after seed rejection. The seed contract is repaired and verified; a fresh fixed-5bbb build and full paired run are queued. B03–B07 and full semantic performance remain open.
-- [ ] Complete all F01–F13/P01–P14 functional rows before the four sequential whole-repository audit loops. Per-batch independent reviews do not count as Stage 1–4 convergence.
+- [ ] Complete all F01–F13/P01–P14 functional rows before the five sequential whole-repository audit loops. Per-batch independent reviews do not count as Stage 1–5 convergence.
 - [ ] Keep user/game cooperation H01–H09 at handover's end and unfilled until real execution; do not hold unrelated automated work for them.
 
 ### Current validation cadence and new Source priorities
@@ -173,7 +173,7 @@ This is an execution view, not a second evidence authority. A component being im
 - [ ] Run full offline/automated Windows and install/upgrade/uninstall/restore/package regressions on that exact candidate.
 - [ ] Run B01–B07 automatic performance cases: independent cold/warm samples, equivalent output, per-path ≤0.30, raw timing and excluded waits disclosed.
 
-## 5. Four sequential audit loops after full implementation
+## 5. Five sequential audit loops after full implementation
 
 Each stage repeats independent audit → actionable findings → fixes → verification → independent re-audit until no new actionable finding remains on the fixed reviewed tree. Only then advance. Record scope, commit, findings and evidence; never claim mathematical zero bugs. Human/game-dependent exceptions stay unverified in handover’s final section while independent work continues.
 
@@ -185,6 +185,7 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] Map fixed Go tests to Rust equivalents, explicit non-applicability reasons or uncovered gaps; preserve recovery/unknown-result-no-replay/transaction/cancellation/protocol/empty-map/slot-migration boundaries without copying obsolete or redundant fixtures merely to inflate counts.
 - [ ] Stage 3: dedicated dead-code audit including dynamic/platform/feature/tool/package consumers converges after cleanup and regression.
 - [ ] Stage 4: combined whole-repository audit across all three dimensions converges after fixes, verification and independent re-review.
+- [ ] Stage 5 (added by the user on 2026-10-16): whole-repository Rust-native design converges. Check crate direction, ownership/borrowing, typed states, allocations/clones, streaming, bounded CPU/task/byte admission and backpressure, cancellation/error/RAII and unsafe. Require concrete structural and measured evidence; preserve useful existing code, do not count superficial syntax or gratuitous rewrites. Fix, actually verify and independently re-audit this stage as well.
 - [ ] Push every authorized batch promptly to the same draft PR and update handover; never transfer a clean review of an old tree to a changed tree.
 
 ## 6. Actual cooperation last
@@ -235,7 +236,7 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] Skill: independent agent completes real CLI workflows; verify entry discovery, correct arguments, concise steps and faithful recovery without bypasses.
 - [ ] Source: independent actual fixed full-corpus queries prove accurate/readable results, file/symbol/line/source access, Chinese/large/empty/error and refs/context contracts.
 - [ ] Data: independent actual queries/Hotfix/SQL/export tasks prove values, product/build/pin provenance, partial/coverage/error reliability, cold/warm behavior, cancellation and no false successful captures.
-- [ ] For each, independently use/review → fix → actually validate → independently review again until the frozen tree has no new actionable finding; candidate checks during implementation do not replace the four sequential final audit stages. User-assisted exceptions stay at the end of handover, with no fabricated result.
+- [ ] For each, independently use/review → fix → actually validate → independently review again until the frozen tree has no new actionable finding; candidate checks during implementation do not replace the five sequential final audit stages. User-assisted exceptions stay at the end of handover, with no fabricated result.
 
 ## Public API and remaining runtime closure
 

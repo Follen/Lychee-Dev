@@ -36,10 +36,11 @@ Use only `DESIGN.md`, never add a case-only `Design.md` duplicate. Do not create
 - The first delivery is documentation-only; subsequent full implementation is
   now authorized. Do not operate games, publish, merge main or change other
   projects/Go PR #13. Push each authorized batch promptly to the same dedicated
-  Rust draft PR, updating handover. After implementation, complete its four
+  Rust draft PR, updating handover. After implementation, complete its five
   sequential audit/fix/verify/independent-review loops to convergence; record
   exact trees and evidence, never promise mathematical zero bugs.
-- Latest user execution order (2026-10-15 18:24 UTC): complete end-to-end production implementation first, then supplement tests and validate in consolidated batches. Do not impose a per-small-slice freeze/review/CI prerequisite. Keep meaningful batch pushes, real safety/ownership constraints and the final four audit loops.
+- Latest user execution order (2026-10-15 18:24 UTC): complete end-to-end production implementation first, then supplement tests and validate in consolidated batches. Do not impose a per-small-slice freeze/review/CI prerequisite. Keep meaningful batch pushes, real safety/ownership constraints and the final five audit loops.
+- Latest 2026-10-16 user requirement adds Stage 5, whole-repository Rust-native architecture, after the original four stages. Audit real ownership/borrowing, typed states, allocations/clones, streaming, bounded parallelism/backpressure, cancellation/errors, RAII and unsafe boundaries; fix, actually verify and independently re-review to convergence. This does not authorize gratuitous rewrites or changing Go-visible behavior.
 - Run independent offline and automated Windows checks before tests requiring
   user/game/specific interactive-machine cooperation. Keep all such tests in
   the final section of handover.md. Windows-only does not mean game-dependent.
