@@ -410,7 +410,7 @@ fn selected_composite_members_do_not_merge_destination_signatures() {
     // Preserve the existing conflicting-intersection result even when only one
     // member happens to be callable. A singleton candidate is not a new type.
     let scalar = OwnedValue::plain(LuaType::Object(Arc::new(LuaObjectType::new_with_fields(
-        HashMap::from([(key(), LuaType::Number)]),
+        [(key(), LuaType::Number)].into_iter().collect(),
         Vec::new(),
     ))));
     let conflict = OwnedValue::with_structural_children(
