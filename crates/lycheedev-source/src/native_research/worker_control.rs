@@ -134,6 +134,28 @@ fn allowed(phase: &str) -> bool {
             | "query_scope_built"
             | "query_build_entry"
             | "query_execute_operations"
+            | "query_operation_authenticate"
+            | "query_references_project"
+            | "query_relations_target_declarations"
+            | "query_relations_target_values"
+            | "query_relations_use_index"
+            | "query_relations_use_sort"
+            | "query_relations_source_rows"
+            | "query_relations_file_syntax"
+            | "query_relations_reference_rows"
+            | "query_relations_file_complete"
+            | "query_relations_xml_rows"
+            | "query_relations_control_json"
+            | "query_relations_assemble"
+            | "query_references_digest"
+            | "query_references_retain"
+            | "query_definition_resolve"
+            | "query_type_api"
+            | "query_type_observations"
+            | "query_operation_answer"
+            | "query_execution_identity"
+            | "query_operations_executed"
+            | "query_scope_evidence"
             | "query_project"
             | "query_projected"
             | "query_assemble_reply"
@@ -181,7 +203,9 @@ impl Phases {
         }
     }
     pub(super) fn record(&mut self, phase: &str) {
-        if !self.enabled || !allowed(phase) {
+        // Fine allocation stages belong to the retained child's private journal.
+        // Do not consume this original coarse-only stderr profiling allowance.
+        if !self.enabled || super::allocation_phase(phase) || !allowed(phase) {
             return;
         }
         let terminal = matches!(phase, "worker_complete" | "worker_error");
@@ -288,9 +312,50 @@ mod tests {
         assert!(serde_json::from_str::<Event>(r#"{"schema":"x","phase":"emmy_indexed","elapsed_ms":1,"phase_ms":1,"omitted":0,"source":"private"}"#).is_err());
     }
     #[test]
+    fn allocation_boundaries_are_canonical_and_keep_existing_caps() {
+        for phase in [
+            "query_operation_authenticate",
+            "query_references_project",
+            "query_relations_target_declarations",
+            "query_relations_target_values",
+            "query_relations_use_index",
+            "query_relations_use_sort",
+            "query_relations_source_rows",
+            "query_relations_file_syntax",
+            "query_relations_reference_rows",
+            "query_relations_file_complete",
+            "query_relations_xml_rows",
+            "query_relations_control_json",
+            "query_relations_assemble",
+            "query_references_digest",
+            "query_references_retain",
+            "query_definition_resolve",
+            "query_type_api",
+            "query_type_observations",
+            "query_operation_answer",
+            "query_execution_identity",
+            "query_operations_executed",
+            "query_scope_evidence",
+        ] {
+            assert!(allowed(phase));assert!(super::super::allocation_phase(phase));
+            let now=Instant::now();
+            let mut coarse=Phases{enabled:true,started:now,last:now,count:0,bytes:0,omitted:0};
+            coarse.record(phase);assert_eq!((coarse.count,coarse.bytes,coarse.omitted),(0,0,0));
+            let event=Event{schema:PHASE_SCHEMA.into(),phase:phase.into(),elapsed_ms:u64::MAX,phase_ms:u64::MAX,omitted:usize::MAX};
+            let bytes=serde_json::to_vec(&event).unwrap();
+            assert!((bytes.len()+1)*RECORD_LIMIT<=BYTE_LIMIT as usize);
+            let mut line=bytes.clone();line.push(b'\n');
+            assert_eq!(canonical_phase(&bytes),Some(line));
+        }
+        assert!(!allowed("query_references_success"));
+    }
+    #[test]
     fn reply_boundaries_are_canonical_observations_inside_existing_caps() {
         for phase in ["reply_serialized","reply_written","reply_values_released"] {
-            assert!(allowed(phase));
+            assert!(allowed(phase));assert!(super::super::allocation_phase(phase));
+            let now=Instant::now();
+            let mut coarse=Phases{enabled:true,started:now,last:now,count:0,bytes:0,omitted:0};
+            coarse.record(phase);assert_eq!((coarse.count,coarse.bytes,coarse.omitted),(0,0,0));
             let event=Event{schema:PHASE_SCHEMA.into(),phase:phase.into(),elapsed_ms:u64::MAX,phase_ms:u64::MAX,omitted:usize::MAX};
             let bytes=serde_json::to_vec(&event).unwrap();
             assert!((bytes.len()+1)*RECORD_LIMIT<=BYTE_LIMIT as usize);

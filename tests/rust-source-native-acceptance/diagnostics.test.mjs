@@ -94,3 +94,88 @@ test('saved phase attribution requires exact owner child and request match from 
  assert.equal(inspectDiagnostic(Buffer.from(JSON.stringify(phase)),stdout,0).identity,'unmatched');
  assert.equal(JSON.parse(stdout).error.code,'external.io');
 });
+
+import {inspectPhaseJournal} from './diagnostics.mjs';
+const phaseEvent=(sequence=0,phase='query_references_project')=>({
+ schema:'lycheedev.native-source-request-phase.v1',workerPid:1328,workerCreated:'134365363311915552',analysisPid:1329,analysisCreated:'134365363311915553',requestDeadlineUnixMs:1234,
+ phase,elapsedMs:sequence,sequence,callbackOrdinal:sequence+1,previousCallbackOrdinal:sequence?sequence:null,fileVisit:0,
+ omittedBeforeThisSample:0,detailSamplingExhausted:false,ordinarySamplingExhausted:false,
+ processMemory:{identity:{pid:1329,created:'134365363311915553'},private_commit:1000+sequence,working_set:2000,peak_private_commit:1000+sequence,peak_working_set:2000},privateCommitDelta:sequence?1:null,workingSetDelta:sequence?0:null,
+});
+const journalBytes=events=>Buffer.from(events.map(event=>JSON.stringify(event)+'\n').join(''));
+test('phase journal authenticates complete sample prefix and preserves incomplete trailing bytes',()=>{
+ const terminal=inspectTerminal(terminalBytes(terminalEvent()));
+ const complete=journalBytes([phaseEvent(0),phaseEvent(1,'query_type_observations')]);
+ const prefix=Buffer.concat([complete,Buffer.from('{"schema":"interrupted')]);
+ const result=inspectPhaseJournal(prefix,failed,terminal);
+ assert.equal(result.state,'prefix_with_incomplete_tail');assert.equal(result.records,2);assert.equal(result.identity,'matched_authenticated_analysis_terminal');
+ assert.equal(result.tailBytes,prefix.length-complete.length);assert.equal(result.completionEvidence,false);assert.equal(result.cause,undefined);
+ assert.equal(result.samples[1].value.phase,'query_type_observations');assert.equal(result.samples[1].value.analysisCreated,'134365363311915553');
+ assert.equal(inspectPhaseJournal(complete,failed,terminal).state,'observed_prefix');
+ assert.equal(inspectPhaseJournal(complete,failed).identity,'unverified_or_empty');
+});
+test('phase journal exposes sampling gaps and capacity while rejecting duplicate or incoherent events',()=>{
+ const second=phaseEvent(1,'query_type_api');second.callbackOrdinal=200;second.fileVisit=49;second.omittedBeforeThisSample=198;second.detailSamplingExhausted=true;second.ordinarySamplingExhausted=true;
+ const accepted=inspectPhaseJournal(journalBytes([phaseEvent(),second]),failed,inspectTerminal(terminalBytes(terminalEvent())));
+ assert.equal(accepted.records,2);assert.equal(accepted.samplingGaps,198);assert.equal(accepted.detailSamplingExhausted,true);assert.equal(accepted.ordinarySamplingExhausted,true);
+ for(const change of [e=>{e.sequence=0;},e=>{e.previousCallbackOrdinal=0;},e=>{e.callbackOrdinal=0;},e=>{e.processMemory.identity.pid=42;},e=>{e.elapsedMs=-1;},e=>{e.phase='x'.repeat(65);}]){
+  const altered=phaseEvent(1);change(altered);assert.equal(inspectPhaseJournal(journalBytes([phaseEvent(),altered]),failed).state,'invalid');
+ }
+ const other=phaseEvent(1);other.requestDeadlineUnixMs++;
+ assert.equal(inspectPhaseJournal(journalBytes([phaseEvent(),other]),failed,inspectTerminal(terminalBytes(terminalEvent()))).identity,'unverified_or_empty');
+ assert.equal(inspectPhaseJournal(Buffer.alloc(128*1024+1),failed).reason,'phase_byte_limit');
+ assert.equal(inspectPhaseJournal(journalBytes(Array.from({length:129},(_,i)=>phaseEvent(i))),failed).state,'invalid');
+});
+test('phase journal capture preserves exact bytes and forbids supplied path traversal',()=>{
+ const root=mkdtempSync(join(tmpdir(),'source-phase-journal-'));
+ try{
+  const home=join(root,'home'),out=join(root,'out');mkdirSync(join(home,'tmp'),{recursive:true});mkdirSync(out);
+  const name='source-native-phases-10.jsonl';
+  const phase=phaseEvent();phase.schema='lycheedev.native-source-request-diagnostic.v1';phase.phaseJournal={file:name,state:'opened'};
+  const bytes=Buffer.concat([journalBytes([phaseEvent()]),Buffer.from('{')]);
+  writeFileSync(join(home,'tmp',name),bytes);writeFileSync(join(home,'tmp','source-native-last-request.json'),JSON.stringify(phase));
+  const results=captureDiagnostics({home,out,prefix:'001-with-journal',stdout:failed,stderr:terminalBytes(terminalEvent())});
+  assert.equal(results.length,3);assert.equal(results[2].identity,'matched_authenticated_analysis_terminal');assert.equal(results[2].tailBytes,1);
+  assert.deepEqual(readFileSync(join(out,results[2].path)),bytes);assert.equal(results[2].changedSinceCommand,null);
+  phase.phaseJournal.file='../private';writeFileSync(join(home,'tmp','source-native-last-request.json'),JSON.stringify(phase));
+  const blocked=captureDiagnostics({home,out,prefix:'002-invalid-name',stdout:failed});assert.equal(blocked[2].reason,'invalid_phase_journal_name');
+ }finally{rmSync(root,{recursive:true});}
+});
+
+test('an unowned collision journal is never adopted even when its filename matches',()=>{
+ const root=mkdtempSync(join(tmpdir(),'source-phase-collision-'));
+ try{
+  const home=join(root,'home'),out=join(root,'out');mkdirSync(join(home,'tmp'),{recursive:true});mkdirSync(out);
+  const name='source-native-phases-10.jsonl';
+  const phase=phaseEvent();phase.schema='lycheedev.native-source-request-diagnostic.v1';phase.phaseJournal={file:name,state:'unavailable'};
+  writeFileSync(join(home,'tmp',name),journalBytes([phaseEvent()]));writeFileSync(join(home,'tmp','source-native-last-request.json'),JSON.stringify(phase));
+  const results=captureDiagnostics({home,out,prefix:'003-unowned-journal',stdout:failed,stderr:terminalBytes(terminalEvent())});
+  assert.equal(results[2].state,'unavailable');assert.equal(results[2].reason,'journal_not_opened_for_request');assert.equal(results[2].path,undefined);
+ }finally{rmSync(root,{recursive:true});}
+});
+
+
+test('non-object JSON records preserve a validated prefix without throwing',()=>{
+ const terminal=inspectTerminal(terminalBytes(terminalEvent()));
+ for(const invalid of [null,[],42,true,'text']){
+  const result=inspectPhaseJournal(journalBytes([phaseEvent(),invalid]),failed,terminal);
+  assert.equal(result.state,'invalid');assert.equal(result.records,1);assert.equal(result.completionEvidence,false);
+  assert.equal(inspectDiagnostic(Buffer.from(JSON.stringify(invalid)),failed,0).identity,'unavailable');
+ }
+ assert.equal(inspectTerminal(Buffer.from('null\n[]\n42\n')).state,'unavailable');
+});
+
+test('exhausted slots and unauthenticated slot pointers are never sealed',()=>{
+ const root=mkdtempSync(join(tmpdir(),'source-phase-unverified-'));
+ try{
+  const home=join(root,'home'),out=join(root,'out');mkdirSync(join(home,'tmp'),{recursive:true});mkdirSync(out);
+  const name='source-native-phases-10.jsonl',phase=phaseEvent();phase.schema='lycheedev.native-source-request-diagnostic.v1';
+  writeFileSync(join(home,'tmp',name),journalBytes([phaseEvent()]));
+  for(const [i,journal] of [{file:null,state:'slots_exhausted'},{file:name,state:'opened'}].entries()){
+   phase.phaseJournal=journal;writeFileSync(join(home,'tmp','source-native-last-request.json'),JSON.stringify(phase));
+   const results=captureDiagnostics({home,out,prefix:`004-unavailable-${i}`,stdout:failed});
+   assert.equal(results[2].state,'unavailable');assert.equal(results[2].path,undefined);
+   assert.equal(results[2].reason,i?'journal_identity_unverified':'journal_not_opened_for_request');
+  }
+ }finally{rmSync(root,{recursive:true});}
+});

@@ -324,3 +324,87 @@ fn already_reaped_slot_releases_without_diagnostic_io_or_new_grace() {
     retire_slot(&mut slot,expired).unwrap();
     assert!(slot.is_none());
 }
+
+
+fn phase_test_memory(private_commit:u64,working_set:u64)->lycheedev_windows::process::ProcessMemory {
+    lycheedev_windows::process::ProcessMemory{identity:ProcessIdentity{pid:42,created:7},
+        private_commit,working_set,peak_private_commit:private_commit,peak_working_set:working_set,
+        scope:"test held handle".into()}
+}
+#[test]
+fn private_phase_policy_bounds_file_detail_and_preserves_late_stages() {
+    let mut sampling=PhaseSampling::default();
+    for _ in 0..4036 {for phase in ["query_relations_file_syntax","query_relations_reference_rows","query_relations_file_complete"] {sampling.admit(phase,0);}}
+    assert_eq!(sampling.details,PHASE_DETAIL_LIMIT);assert_eq!(sampling.records,PHASE_DETAIL_LIMIT);
+    assert_eq!(sampling.file_visits,4036);assert_eq!(sampling.omitted,4036*3-PHASE_DETAIL_LIMIT);
+    for phase in ["query_references_digest","query_references_retain","query_type_api","query_execution_identity","query_operations_executed","query_scope_evidence"] {assert!(sampling.admit(phase,0),"lost {phase}");}
+    while sampling.admit("query_definition_resolve",0){}
+    for phase in ["query_assemble_reply","query_reply_assembled","retiring_analysis","analysis_retired"] {assert!(sampling.admit(phase,0),"lost final {phase}");}
+    assert!(sampling.records<=PHASE_SAMPLE_LIMIT);
+    assert!(!sampling.admit("x",PHASE_BYTE_LIMIT));
+    assert!(!sampling.admit(&"x".repeat(65),0));
+}
+#[test]
+fn private_phase_policy_reserves_bytes_for_late_errors() {
+    let mut sampling=PhaseSampling::default();
+    let normal_end=PHASE_BYTE_LIMIT-PHASE_FINAL_RESERVE*PHASE_LINE_LIMIT;
+    assert!(!sampling.admit("query_relations_file_syntax",normal_end));
+    assert!(sampling.admit("retiring_analysis",normal_end));
+    assert!(!sampling.admit("analysis_retired",PHASE_BYTE_LIMIT));
+}
+#[test]
+fn private_phase_journal_appends_bounded_lines_and_never_reopens_collision() {
+    let home=std::env::temp_dir().join(format!("lycheedev-phase-journal-{}-{}",std::process::id(),utc_ms().unwrap()));
+    std::fs::create_dir_all(&home).unwrap();
+    let control=OperationControl::default();let own=ProcessIdentity{pid:42,created:7};let owner=ProcessIdentity{pid:41,created:6};
+    let mut journal=PhaseJournal::open(&home,&own,&control);assert!(journal.file.is_some());
+    let name=journal.name.clone();
+    let occupied=(1..PHASE_FILE_SLOTS).map(|_|{
+        let slot=PhaseJournal::open(&home,&own,&control);assert!(slot.file.is_some());assert_ne!(slot.name,name);slot
+    }).collect::<Vec<_>>();
+    let collision=PhaseJournal::open(&home,&own,&control);assert!(collision.file.is_none());
+    assert_eq!(collision.state,"slots_exhausted");assert!(collision.metadata()["file"].is_null());
+    assert_eq!(std::fs::read_dir(home.join("tmp")).unwrap().count(),PHASE_FILE_SLOTS);
+    let cases=[("preparing",Some(phase_test_memory(100,200))),("query_build_scope",Some(phase_test_memory(150,180))),("query_scope_built",None),("query_type_api",Some(phase_test_memory(1000,2000))),("query_operation_answer",Some(phase_test_memory(900,2100)))];
+    for (i,(phase,memory)) in cases.iter().enumerate(){assert!(journal.admit(phase));journal.append(phase,i as u128,memory.as_ref(),&owner,&own,1234,&control);}
+    drop(journal);drop(collision);drop(occupied);
+    let bytes=std::fs::read(home.join("tmp").join(name)).unwrap();
+    assert!(bytes.len()<=PHASE_BYTE_LIMIT);assert!(bytes.ends_with(b"\n"));
+    let samples=bytes.split(|byte|*byte==b'\n').filter(|line|!line.is_empty()).map(|line|{assert!(line.len()<PHASE_LINE_LIMIT);serde_json::from_slice::<Value>(line).unwrap()}).collect::<Vec<_>>();
+    assert_eq!(samples.len(),5);assert_eq!(samples[1]["privateCommitDelta"],50);assert_eq!(samples[1]["workingSetDelta"],-20);
+    assert!(samples[0]["privateCommitDelta"].is_null());assert!(samples[2]["processMemory"].is_null());assert!(samples[3]["privateCommitDelta"].is_null());assert_eq!(samples[4]["privateCommitDelta"],-100);
+    for (i,sample) in samples.iter().enumerate(){assert_eq!(sample["sequence"],i);assert_eq!(sample["workerPid"],41);assert_eq!(sample["workerCreated"],6);assert_eq!(sample["analysisPid"],42);assert_eq!(sample["analysisCreated"],7);assert_eq!(sample["requestDeadlineUnixMs"],1234);}
+    std::fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn private_phase_policy_keeps_real_multifile_query_and_stops_on_cancellation() {
+    for cancel_type in [false,true] {
+        let control=OperationControl::default();
+        let mut files=BTreeMap::from([("target.lua".into(),"function Target() end\n".into())]);
+        for id in 0..48 {files.insert(format!("caller-{id:03}.lua"),"Target()\n".into());}
+        let snapshot=crate::native_research::SnapshotRequest{files,load_documents:BTreeMap::new(),environment_documents:BTreeMap::new(),
+            source:json!({"repository":"phase-cap-fixture","product":"retail"}),
+            luac:crate::native::LuacIdentity{version:"5.1.5".into(),platform:"windows-amd64".into(),executable_sha256:"a".repeat(64),executable_bytes:1},
+            api:vec![],environment_manifest:None,load_plans:vec![],input_gaps:vec![]};
+        let query=crate::native_research::QueryRequest{symbol:crate::index::Symbol{id:String::new(),kind:"declaration".into(),name:"Target".into(),target:String::new(),category:"function".into(),confidence:String::new(),path:"target.lua".into(),line:1,end_line:1,signature:String::new(),scope:String::new(),ordinal:0},direction:"incoming".into()};
+        let sampling=std::cell::RefCell::new(PhaseSampling::default());let recorded=std::cell::RefCell::new(Vec::new());
+        let cancel=control.cancel_handle();let mut cached=None;
+        let result=execute_cached_query(&mut cached,Some(WorkerRequest{snapshot,query}),None,&control,41,|phase,_|{
+            // Match production: cancellation suppresses optional diagnostics,
+            // including retirement callbacks. Policy-only reserve is tested above.
+            observe_if_active(&control,||{
+                if sampling.borrow_mut().admit(phase,0){recorded.borrow_mut().push(phase.to_owned());}Ok(())
+            });
+            if cancel_type&&phase=="query_type_observations"{cancel.store(true,Ordering::Release);}
+        });
+        let sampling=sampling.into_inner();let recorded=recorded.into_inner();
+        assert_eq!(sampling.details,PHASE_DETAIL_LIMIT);assert!(sampling.file_visits>=48);assert!(sampling.omitted>0);
+        for phase in ["query_references_digest","query_references_retain","query_type_observations"] {assert!(recorded.iter().any(|item|item==phase),"missing {phase}");}
+        if cancel_type {
+            assert_eq!(result.unwrap_err().code,"command.cancelled");assert!(cached.is_none());
+            for phase in ["retiring_analysis","analysis_retired"] {assert!(!recorded.iter().any(|item|item==phase),"observed cancelled {phase}");}
+        } else {result.unwrap();assert!(recorded.iter().any(|item|item=="query_scope_evidence"));assert!(recorded.iter().any(|item|item=="query_reply_assembled"));}
+        assert!(sampling.records<=PHASE_SAMPLE_LIMIT);
+    }
+}

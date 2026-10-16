@@ -180,7 +180,11 @@ impl PreparedSnapshot {
         self.inputs.shared_steps.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    #[cfg(test)]
     pub(crate) fn execute_research_operations<'a>(&'a self,plan:&crate::native_research::plan::ResearchPlan,query:&'a crate::native_research::QueryRequest,graph:Option<&'a Graph>,origins:&'a crate::native_research::XmlResearch,api:Option<&crate::native_research::plan::VerifiedApiDefinitions>)->lycheedev_core::Result<ResearchScopeCompletion<'a>> {
+        self.execute_research_operations_observed(plan,query,graph,origins,api,&mut |_|{})
+    }
+    pub(crate) fn execute_research_operations_observed<'a>(&'a self,plan:&crate::native_research::plan::ResearchPlan,query:&'a crate::native_research::QueryRequest,graph:Option<&'a Graph>,origins:&'a crate::native_research::XmlResearch,api:Option<&crate::native_research::plan::VerifiedApiDefinitions>,observer:&mut impl FnMut(&'static str))->lycheedev_core::Result<ResearchScopeCompletion<'a>> {
         use crate::native_research::plan::LogicalOperation;
         self.validate_research_plan(plan,query)?;
         let mut answers=Vec::with_capacity(plan.operations().len());
@@ -189,6 +193,7 @@ impl PreparedSnapshot {
         for (batch,operations) in plan.operations().chunks(crate::native_research::plan::BATCH_QUERIES).enumerate(){
             for operation in operations {
                 self.control.check()?;self.inputs.charge(1)?;
+                observer("query_operation_authenticate");
                 let target=match operation {LogicalOperation::References(target)|LogicalOperation::Type(target)|LogicalOperation::Definition(target)=>target};
                 if target.material["kind"]=="source" {
                     let file=self.inputs.file(&target.site.file).map_err(|message|input_error(&message))?;
@@ -199,13 +204,16 @@ impl PreparedSnapshot {
                     LogicalOperation::References(_)=>{
                         let before=self.research_steps();
                         let mut files=Vec::new();
-                        let result=self.research_relations_with_context(&query.symbol,"incoming",graph,origins,
-                            (query.direction=="both").then_some(&mut files),None)?;
+                        observer("query_references_project");
+                        let result=self.research_relations_with_context_observed(&query.symbol,"incoming",graph,origins,
+                            (query.direction=="both").then_some(&mut files),None,observer)?;
                         let steps=self.research_steps().checked_sub(before).ok_or_else(||input_error("projection step counter moved backwards"))?;
                         let rows=result["relations"].as_array().ok_or_else(||input_error("reference projection rows missing"))?;
+                        observer("query_references_digest");
                         let answer=json!({"kind":"references","state":if result["analysis"]["state"]=="complete"{"known"}else{"partial"},
                             "result":{"relationsSHA256":digest(&rows),"relationCount":rows.len(),"analysis":result["analysis"]},
                             "evidence":"full relation projection digest and coverage; source research retains the complete projected rows"});
+                        observer("query_references_retain");
                         if query.direction=="incoming"&&projection.is_none(){
                             projection=RetainedResearchProjection::new(self,query,graph,origins,result,steps,||self.control.check())?.map(ResearchProjection::Incoming);
                         } else if query.direction=="both"&&projection.is_none()&&!files.is_empty(){
@@ -218,6 +226,7 @@ impl PreparedSnapshot {
                         answer
                     },
                     LogicalOperation::Definition(_)=>{
+                        observer("query_definition_resolve");
                         let facade=self.source_queries(&self.control)?;
                         let facade=if let Some(graph)=graph {facade.with_execution(graph,QuerySelector::AllOccurrences,&self.control)?}else{facade};
                         let result=facade.definitions(&target.site)?;
@@ -225,10 +234,12 @@ impl PreparedSnapshot {
                         json!({"kind":"definition","state":if known{"known"}else{"partial"},"result":result})
                     },
                     LogicalOperation::Type(_) if target.material["kind"]=="api_definition"=>{
+                        observer("query_type_api");
                         if let Some(api)=api {api.semantic_type(target,self.inputs.host.bindings(),&self.control,||self.inputs.charge(1))?}
                         else{json!({"kind":"type","state":"unavailable","executed":false,"reason":"authenticated_api_type_model_unavailable"})}
                     },
                     LogicalOperation::Type(_)=>{
+                        observer("query_type_observations");
                         if let Some(graph)=graph {
                             let facade=Facade{graph};let mut observations=Vec::new();let mut omitted=0usize;
                             for fact in &graph.uses {self.inputs.charge(1)?;if fact.site==target.site&&fact.host_return_slot.is_none(){
@@ -242,6 +253,7 @@ impl PreparedSnapshot {
                         } else {json!({"kind":"type","state":"unavailable","reason":"no_execution_scope_for_selected_type"})}
                     },
                 };
+                observer("query_operation_answer");
                 let executed=if matches!(operation,LogicalOperation::Type(target) if target.material["kind"]=="api_definition") {answer["executed"].as_bool().unwrap_or(false)}else{graph.is_some()};
                 answer["executed"]=json!(executed);
                 answer["operationIdentity"]=json!(digest(operation));
@@ -251,7 +263,9 @@ impl PreparedSnapshot {
             }
         }
         self.control.check()?;
+        observer("query_execution_identity");
         let (identity,owner)=plan.execution_identity();
+        observer("query_operations_executed");
         Ok(ResearchScopeCompletion{identity,owner,answers,performed,projection})
     }
 
@@ -267,14 +281,18 @@ impl PreparedSnapshot {
     /// Only the immediately completed operation can supply these rows. Exact
     /// borrowed inputs bind source, request/options, graph and XML maps; the plan
     /// still authenticates execution and the original control remains live.
+    #[cfg(test)]
     pub(crate) fn project_research_relations(&self,plan:&crate::native_research::plan::ResearchPlan,query:&crate::native_research::QueryRequest,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,projection:Option<ResearchProjection<'_>>)->lycheedev_core::Result<Value> {
+        self.project_research_relations_observed(plan,query,graph,origins,projection,&mut |_|{})
+    }
+    pub(crate) fn project_research_relations_observed(&self,plan:&crate::native_research::plan::ResearchPlan,query:&crate::native_research::QueryRequest,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,projection:Option<ResearchProjection<'_>>,observer:&mut impl FnMut(&'static str))->lycheedev_core::Result<Value> {
         self.validate_research_plan(plan,query)?;
         match projection {
             Some(ResearchProjection::Incoming(projection))=>{
                 if query.direction!="incoming"||!projection.matches(self,query,graph,origins){return Err(input_error("relation projection belongs to another source, query or scope"));}
                 if !self.research_replay_has_reserve(projection.steps()) {
                     drop(projection);
-                    return self.research_relations(&query.symbol,&query.direction,graph,origins);
+                    return self.research_relations_with_context_observed(&query.symbol,&query.direction,graph,origins,None,None,observer);
                 }
                 let facade=self.source_queries(&self.control)?;
                 let _selected=graph.map(|graph|facade.with_execution(graph,QuerySelector::AllOccurrences,&self.control)).transpose()?;
@@ -283,26 +301,32 @@ impl PreparedSnapshot {
             Some(ResearchProjection::Context(projection))=>{
                 if query.direction!="both"||!projection.matches(self,query,graph,origins){return Err(input_error("relation projection belongs to another source, query or scope"));}
                 let files=projection.finish(||self.control.check(),||Ok(()))?;
-                self.research_relations_with_context(&query.symbol,&query.direction,graph,origins,None,Some(files))
+                self.research_relations_with_context_observed(&query.symbol,&query.direction,graph,origins,None,Some(files),observer)
             },
-            None=>self.research_relations(&query.symbol,&query.direction,graph,origins),
+            None=>self.research_relations_with_context_observed(&query.symbol,&query.direction,graph,origins,None,None,observer),
         }
     }
 
     pub(crate) fn research_relations(&self,symbol:&crate::index::Symbol,direction:&str,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch)->lycheedev_core::Result<Value> {
         self.research_relations_with_context(symbol,direction,graph,origins,None,None)
     }
-    fn research_relations_with_context(&self,symbol:&crate::index::Symbol,direction:&str,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,mut capture:Option<&mut Vec<FileProjectionRange>>,mut retained:Option<ContextFiles>)->lycheedev_core::Result<Value> {
+    fn research_relations_with_context(&self,symbol:&crate::index::Symbol,direction:&str,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,capture:Option<&mut Vec<FileProjectionRange>>,retained:Option<ContextFiles>)->lycheedev_core::Result<Value> {
+        self.research_relations_with_context_observed(symbol,direction,graph,origins,capture,retained,&mut |_|{})
+    }
+    fn research_relations_with_context_observed(&self,symbol:&crate::index::Symbol,direction:&str,graph:Option<&Graph>,origins:&crate::native_research::XmlResearch,mut capture:Option<&mut Vec<FileProjectionRange>>,mut retained:Option<ContextFiles>,observer:&mut impl FnMut(&'static str))->lycheedev_core::Result<Value> {
         self.control.check()?;
+        observer("query_relations_target_declarations");
         #[cfg(test)]
         RESEARCH_PROJECTION_PASSES.with(|count|count.set(count.get()+1));
         let mut target_files=std::collections::BTreeSet::new();
         let target=self.syntax.declarations.iter().filter(|decl|decl.name==symbol.name.rsplit(['.',':']).next().unwrap_or(&symbol.name)
             && origins.matches_location(self,symbol,&decl.site.public(&self.inputs)).unwrap_or(false)).map(|decl|{target_files.insert(decl.site.file);decl.id.as_str()}).collect::<std::collections::BTreeSet<_>>();
+        observer("query_relations_target_values");
         let target_values=graph.map(|graph|self.research_target_values(graph,symbol,origins)).transpose()?.unwrap_or_default();
         let is_target=|decision:&Decision|matches!(decision,Decision::Bound(value) if target_values.contains(value));
         let facade=self.source_queries(&self.control)?;
         let query=graph.map(|graph|facade.with_execution(graph,QuerySelector::AllOccurrences,&self.control)).transpose()?;
+        observer("query_relations_use_index");
         let mut uses=ResearchUses::default();
         let mut selected_files=std::collections::BTreeSet::new();
         if let Some(graph)=graph{for fact in &graph.uses{if fact.host_return_slot.is_none(){
@@ -310,8 +334,10 @@ impl PreparedSnapshot {
             if is_target(&fact.decision){selected_files.insert(fact.site.file.as_str());}
             uses.push(fact);
         }}}
+        observer("query_relations_use_sort");
         uses.finish(||self.control.check())?;
         let mut relations=Vec::new();let mut unresolved=0usize;
+        observer("query_relations_source_rows");
         for file in 0..self.inputs.corpus.files.len() {
             self.control.check()?;
             let path=self.inputs.corpus.files[file].path.as_str();
@@ -340,7 +366,9 @@ impl PreparedSnapshot {
                 drop(cached);
             }
             let first=relations.len();let prior_unresolved=unresolved;let prior_steps=self.research_steps();
+            observer("query_relations_file_syntax");
             let syntax=public_result(self.file_syntax(file),&self.control)?;
+            observer("query_relations_reference_rows");
             for reference in &syntax.references {
             self.control.check()?;
             let site=reference.site.public(&self.inputs);
@@ -373,11 +401,13 @@ impl PreparedSnapshot {
             if !outgoing&&kind=="call" {self.project_incoming_caller(&mut row,&syntax,reference,origins)?;}
             origins.project_row(self,&mut row,&site)?;relations.push(row);
             }
+            observer("query_relations_file_complete");
             if let Some(capture)=capture.as_mut()&& !origins.may_contain_outgoing(symbol,path) {
                 capture.push(FileProjectionRange{file,first,end:relations.len(),steps:self.research_steps()-prior_steps,unresolved:unresolved-prior_unresolved});
             }
         }
         if retained.as_ref().is_some_and(|files|!files.is_empty()) {return Err(input_error("retained context files differ from current traversal"));}
+        observer("query_relations_xml_rows");
         // XML declared references and mixin copies have additional owner rules;
         // always retain their original traversal, observations and ordering.
         if let (Some(graph),Some(query))=(graph,query.as_ref())&&let Some(xml)=&graph.xml{
@@ -398,8 +428,10 @@ impl PreparedSnapshot {
                 origins.project_row(self,&mut row,&xml_site(&copy.origin))?;relations.push(row);
             }
         }
+        observer("query_relations_control_json");
         let control=graph.and_then(|graph|graph.native_invocations.as_ref()).map(|facts|&facts.control);
         let analysis=json!({"state":if unresolved==0&&control.is_some_and(|control|control.complete){"complete"}else{"partial"},"engine":"native_common_facts","lexicalDeclarations":self.syntax.declarations.len(),"sourceReferences":self.syntax.reference_count,"sourceCalls":self.syntax.call_count,"unresolvedRelations":unresolved,"graphControl":control,"sourceFiles":self.inputs.corpus.files.len(),"inputIdentity":self.inputs.identity_sha256(),"sourceExecution":false});
+        observer("query_relations_assemble");
         Ok(research_use_index::assemble_projection(relations,analysis))
     }
 

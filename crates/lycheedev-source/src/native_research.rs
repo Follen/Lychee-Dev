@@ -10,6 +10,34 @@ pub(crate) mod plan;
 mod xml;
 mod worker_control;
 pub(crate) use xml::XmlResearch;
+// Only these added fine stages use the private append journal. Existing coarse
+// phase publication and its single-record readers remain unchanged.
+pub(crate) fn allocation_phase(phase:&str)->bool {
+    matches!(phase,
+        "query_operation_authenticate"
+        | "query_references_project"
+        | "query_relations_target_declarations"
+        | "query_relations_target_values"
+        | "query_relations_use_index"
+        | "query_relations_use_sort"
+        | "query_relations_source_rows"
+        | "query_relations_file_syntax"
+        | "query_relations_reference_rows"
+        | "query_relations_file_complete"
+        | "query_relations_xml_rows"
+        | "query_relations_control_json"
+        | "query_relations_assemble"
+        | "query_references_digest"
+        | "query_references_retain"
+        | "query_definition_resolve"
+        | "query_type_api"
+        | "query_type_observations"
+        | "query_operation_answer"
+        | "query_execution_identity"
+        | "query_operations_executed"
+        | "query_scope_evidence"
+    )
+}
 pub const RESEARCH_RULES:&str="source-native-research-v8-incoming-callers";
 #[derive(Clone,Serialize,Deserialize)]
 pub struct LoadEvidence { pub manifest:String,pub ordered:Vec<String>,pub issues:Vec<Value> }
@@ -151,10 +179,11 @@ impl ResearchSession {
                     Ok(graph)=>graph,Err(error)=>{control.check()?;execution.unavailable_scope(json!({"code":error.code,"detail":error.message,"manifest":program.manifest}));gaps.push(json!({"code":error.code,"detail":error.message,"manifest":program.manifest}));continue;}
                 }}else{loaded.take().expect("load-only graph")};
                 observer("query_execute_operations");
-                let answers=self.prepared.execute_research_operations(&semantic_plan,&query,Some(&graph),&self.xml,self.snapshot.api_definitions.as_ref())?;
+                let answers=self.prepared.execute_research_operations_observed(&semantic_plan,&query,Some(&graph),&self.xml,self.snapshot.api_definitions.as_ref(),&mut observer)?;
+                observer("query_scope_evidence");
                 let projection=execution.scope(json!({"manifest":program.manifest,"snapshot":graph.snapshot_key}),answers)?;
                 observer("query_project");
-                let mut result=self.prepared.project_research_relations(&semantic_plan,&query,Some(&graph),&self.xml,projection)?;
+                let mut result=self.prepared.project_research_relations_observed(&semantic_plan,&query,Some(&graph),&self.xml,projection,&mut observer)?;
                 observer("query_projected");
                 complete&=result["analysis"]["state"]=="complete";analysis=result["analysis"].clone();
                 if let Some(native)=&graph.native_invocations{entry_facts.extend(native.entries.iter().map(|entry|json!(entry)));}
@@ -168,10 +197,11 @@ impl ResearchSession {
         if programs.is_empty(){
             gaps.push(json!({"code":"load_order_unknown","detail":"no TOC/XML program contains the selected declaration"}));
             observer("query_execute_operations");
-            let answers=self.prepared.execute_research_operations(&semantic_plan,&query,None,&self.xml,self.snapshot.api_definitions.as_ref())?;
+            let answers=self.prepared.execute_research_operations_observed(&semantic_plan,&query,None,&self.xml,self.snapshot.api_definitions.as_ref(),&mut observer)?;
+            observer("query_scope_evidence");
             let projection=execution.scope(json!({"kind":"unknown_load_order"}),answers)?;
             observer("query_project");
-            let mut result=self.prepared.project_research_relations(&semantic_plan,&query,None,&self.xml,projection)?;
+            let mut result=self.prepared.project_research_relations_observed(&semantic_plan,&query,None,&self.xml,projection,&mut observer)?;
             observer("query_projected");
             rows=take_relation_rows(&mut result);analysis=result["analysis"].take();complete=false;
         }
@@ -400,6 +430,7 @@ mod projection_tests {
     use super::*;
     include!("native_research/caller_tests.rs");
     include!("native_research/context_projection_tests.rs");
+    include!("native_research/observation_tests.rs");
 
     // This exact inverse applies only to the newly labelled incoming call rows.
     // The old eager/full-scan implementations remain unchanged, including row

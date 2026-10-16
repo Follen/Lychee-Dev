@@ -12,6 +12,123 @@ const PRIVATE_WIRE: &str = "lycheedev.native-source-analysis.v1";
 const START_ENV: &str = "LYCHEEDEV_NATIVE_SOURCE_ANALYSIS_START";
 const POLL: Duration = Duration::from_millis(5);
 
+// The optional journal is owned only by this killable analysis child. Each
+// bounded sample is appended once through its CREATE_NEW handle, without fsync.
+// Original coarse diagnostics retain their existing atomic publication path.
+const PHASE_SAMPLE_LIMIT: usize = 128;
+const PHASE_DETAIL_LIMIT: usize = 24;
+const PHASE_FINAL_RESERVE: usize = 8;
+const PHASE_LINE_LIMIT: usize = 2048;
+const PHASE_BYTE_LIMIT: usize = 128 * 1024;
+const PHASE_FILE_SLOTS: usize = 32;
+#[derive(Default)]
+struct PhaseSampling {
+    callbacks: usize, records: usize, details: usize, omitted: usize, file_visits: usize,
+}
+fn final_phase(phase: &str) -> bool {
+    matches!(phase,"query_assemble_reply"|"query_reply_assembled"|"retiring_analysis"|"analysis_retired")
+}
+fn file_phase(phase: &str) -> bool {
+    matches!(phase,"query_relations_file_syntax"|"query_relations_reference_rows"|"query_relations_file_complete")
+}
+impl PhaseSampling {
+    fn admit(&mut self, phase:&str, bytes:usize) -> bool {
+        self.callbacks=self.callbacks.saturating_add(1);
+        if phase=="query_relations_file_syntax" {self.file_visits=self.file_visits.saturating_add(1);}
+        let final_stage=final_phase(phase);
+        let record_limit=if final_stage{PHASE_SAMPLE_LIMIT}else{PHASE_SAMPLE_LIMIT-PHASE_FINAL_RESERVE};
+        let byte_limit=if final_stage{PHASE_BYTE_LIMIT}else{PHASE_BYTE_LIMIT-PHASE_FINAL_RESERVE*PHASE_LINE_LIMIT};
+        if phase.len()>64||self.records>=record_limit||bytes.saturating_add(PHASE_LINE_LIMIT)>byte_limit
+            ||file_phase(phase)&&self.details>=PHASE_DETAIL_LIMIT {
+            self.omitted=self.omitted.saturating_add(1);return false;
+        }
+        self.records+=1;if file_phase(phase){self.details+=1;}true
+    }
+}
+struct PhaseJournal {
+    file: Option<File>, name:String, state:&'static str, bytes:usize, sampling:PhaseSampling,
+    previous_memory:Option<(u64,u64)>, previous_callback:Option<usize>,
+}
+#[derive(Serialize)]
+#[serde(rename_all="camelCase")]
+struct PhaseEvent<'a> {
+    schema:&'static str,worker_pid:u32,worker_created:u64,analysis_pid:u32,analysis_created:u64,
+    request_deadline_unix_ms:u64,phase:&'a str,elapsed_ms:u128,
+    sequence:usize,callback_ordinal:usize,file_visit:usize,previous_callback_ordinal:Option<usize>,
+    omitted_before_this_sample:usize,detail_sampling_exhausted:bool,ordinary_sampling_exhausted:bool,
+    process_memory:Option<&'a lycheedev_windows::process::ProcessMemory>,
+    private_commit_delta:Option<i64>,working_set_delta:Option<i64>,
+}
+impl PhaseJournal {
+    fn open(home:&std::path::Path,own:&ProcessIdentity,control:&OperationControl)->Self {
+        // Fixed home-wide admission, including other sessions and restarts. Never
+        // adopt, truncate or remove an occupied slot, even after its writer exits.
+        let opened=(||->Result<Option<(File,String)>>{
+            control.check()?;std::fs::create_dir_all(home.join("tmp"))?;control.check()?;
+            let mut options=std::fs::OpenOptions::new();options.write(true).create_new(true);
+            use std::os::windows::fs::OpenOptionsExt;
+            options.share_mode(1); // Readers may observe a prefix; no second writer/deleter.
+            for offset in 0..PHASE_FILE_SLOTS {
+                control.check()?;
+                let slot=(own.pid as usize%PHASE_FILE_SLOTS+offset)%PHASE_FILE_SLOTS;
+                let name=format!("source-native-phases-{slot:02}.jsonl");
+                match options.open(home.join("tmp").join(&name)) {
+                    Ok(file)=>{control.check()?;return Ok(Some((file,name)));}
+                    Err(error) if error.kind()==std::io::ErrorKind::AlreadyExists=>continue,
+                    Err(error)=>return Err(error.into()),
+                }
+            }
+            Ok(None)
+        })();
+        let (file,name,state)=match opened {
+            Ok(Some((file,name)))=>(Some(file),name,"opened"),
+            Ok(None)=>(None,String::new(),"slots_exhausted"),
+            Err(_)=>(None,String::new(),"unavailable"),
+        };
+        Self{file,name,state,bytes:0,sampling:PhaseSampling::default(),previous_memory:None,previous_callback:None}
+    }
+    fn admit(&mut self,phase:&str)->bool {
+        // After disable/saturation the hot callbacks do no memory sampling,
+        // serialization or filesystem work. Only bounded integer counters move.
+        self.file.is_some()&&self.sampling.admit(phase,self.bytes)
+    }
+    fn metadata(&self)->Value {
+        json!({"file":if self.name.is_empty(){None}else{Some(self.name.as_str())},"state":self.state,"recordsAttempted":self.sampling.records,"bytes":self.bytes,
+            "recordLimit":PHASE_SAMPLE_LIMIT,"byteLimit":PHASE_BYTE_LIMIT,"lineLimit":PHASE_LINE_LIMIT,
+            "detailLimit":PHASE_DETAIL_LIMIT,"finalReserve":PHASE_FINAL_RESERVE,
+            "homeFileSlots":PHASE_FILE_SLOTS,"homeByteLimit":PHASE_FILE_SLOTS*PHASE_BYTE_LIMIT,
+            "scope":"same analysis child; samples precede stages; deltas include observer work and skipped callbacks; fileVisit counts eligible file traversals; OS-buffered append without durability or completion claim"})
+    }
+    fn append(&mut self,phase:&str,elapsed_ms:u128,memory:Option<&lycheedev_windows::process::ProcessMemory>,
+        owner:&ProcessIdentity,own:&ProcessIdentity,deadline:u64,control:&OperationControl) {
+        let current=memory.map(|memory|(memory.private_commit,memory.working_set));
+        let delta=|working_set:bool|self.previous_memory.zip(current).and_then(|(before,after)|{
+            let (before,after)=if working_set{(before.1,after.1)}else{(before.0,after.0)};
+            i64::try_from(i128::from(after)-i128::from(before)).ok()
+        });
+        let event=PhaseEvent{schema:"lycheedev.native-source-request-phase.v1",worker_pid:owner.pid,worker_created:owner.created,
+            analysis_pid:own.pid,analysis_created:own.created,request_deadline_unix_ms:deadline,phase,elapsed_ms,
+            sequence:self.sampling.records-1,callback_ordinal:self.sampling.callbacks,file_visit:self.sampling.file_visits,
+            previous_callback_ordinal:self.previous_callback,omitted_before_this_sample:self.sampling.omitted,
+            detail_sampling_exhausted:self.sampling.details>=PHASE_DETAIL_LIMIT,
+            ordinary_sampling_exhausted:self.sampling.records>=PHASE_SAMPLE_LIMIT-PHASE_FINAL_RESERVE,
+            process_memory:memory,private_commit_delta:delta(false),working_set_delta:delta(true)};
+        let result=(||->Result<()>{
+            control.check()?;
+            // Fixed stack storage; no retained history or growable JSON buffer.
+            let mut bytes=[0u8;PHASE_LINE_LIMIT];
+            let mut cursor=std::io::Cursor::new(&mut bytes[..PHASE_LINE_LIMIT-1]);
+            serde_json::to_writer(&mut cursor,&event)?;
+            let length=cursor.position() as usize;bytes[length]=b'\n';let length=length+1;
+            if self.bytes.saturating_add(length)>PHASE_BYTE_LIMIT{return Err(fault("Private phase journal byte limit"));}
+            self.file.as_mut().expect("admitted phase journal").write_all(&bytes[..length])?;
+            self.bytes+=length;control.check()
+        })();
+        self.previous_memory=current;self.previous_callback=Some(self.sampling.callbacks);
+        if result.is_err(){self.state="write_stopped";self.file=None;}
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CacheState {
@@ -755,17 +872,25 @@ pub(super) fn worker(args: &[String]) -> Result<()> {
         let begun = Instant::now();
         let diagnostic = home.join("tmp/source-native-last-request.json");
         let request_deadline_unix_ms = request.deadline_unix_ms;
+        let journal = std::cell::RefCell::new(PhaseJournal::open(&home,own.identity(),&control));
         let record = |phase: &str, error: Option<&ToolkitError>| {
-            // A diagnostic can fail or be absent. Its synchronous filesystem
-            // calls live only in this killable child, under the owner's original
-            // processing cutoff; they can never stall the IPC owner itself.
+            // All optional filesystem work stays in this killable child under
+            // the original processing cutoff. The IPC owner never writes here.
             observe_if_active(&control, || {
-                let value = json!({
-                "schema":"lycheedev.native-source-request-diagnostic.v1", "workerPid":owner.pid,
-                "workerCreated":owner.created,"analysisPid":own.identity().pid,
-                "analysisCreated":own.identity().created,"requestDeadlineUnixMs":request_deadline_unix_ms,"phase":phase,
-                "elapsedMs":begun.elapsed().as_millis(),"processMemory":own.memory().ok(),"error":error});
-                storage::atomic_write_controlled(&diagnostic, &serde_json::to_vec(&value)?, &control)
+                let coarse=!crate::native_research::allocation_phase(phase);
+                let mut journal=journal.borrow_mut();
+                let sampled=journal.admit(phase);
+                if !coarse&&!sampled{return Ok(());}
+                let elapsed=begun.elapsed().as_millis();let memory=own.memory().ok();
+                if sampled{journal.append(phase,elapsed,memory.as_ref(),&owner,own.identity(),request_deadline_unix_ms,&control);}
+                if coarse {
+                    let value=json!({"schema":"lycheedev.native-source-request-diagnostic.v1","workerPid":owner.pid,
+                        "workerCreated":owner.created,"analysisPid":own.identity().pid,"analysisCreated":own.identity().created,
+                        "requestDeadlineUnixMs":request_deadline_unix_ms,"phase":phase,"elapsedMs":elapsed,
+                        "processMemory":memory,"error":error,"phaseJournal":journal.metadata()});
+                    storage::atomic_write_controlled(&diagnostic,&serde_json::to_vec(&value)?,&control)?;
+                }
+                Ok(())
             });
         };
         let result = execute_cached_query(
