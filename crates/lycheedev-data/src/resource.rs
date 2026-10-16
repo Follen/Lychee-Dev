@@ -61,6 +61,9 @@ struct State {
     pending: Option<adaptive::MemorySource>,
     peak_scratch: u64,
     used: Cost,
+    // Test observation only: live refund obligations, excluding committed costs.
+    #[cfg(test)]
+    refundable_retained_bytes: u64,
     logical: Cost,
     logical_scratch: u64,
     once: BTreeSet<String>,
@@ -91,6 +94,10 @@ impl Drop for OwnedRetainedReservation {
             && let Some(remaining) = state.used.retained_bytes.checked_sub(self.bytes)
         {
             state.used.retained_bytes = remaining;
+            #[cfg(test)]
+            {
+                state.refundable_retained_bytes -= self.bytes;
+            }
         }
     }
 }
@@ -150,10 +157,18 @@ impl RetainedReservation<'_> {
                 ..Default::default()
             },
         )?;
+        #[cfg(test)]
+        {
+            self.budget.state.lock().unwrap().refundable_retained_bytes += bytes;
+        }
         self.bytes = total;
         Ok(())
     }
     pub(crate) fn commit(mut self) {
+        #[cfg(test)]
+        {
+            self.budget.state.lock().unwrap().refundable_retained_bytes -= self.bytes;
+        }
         self.committed = true;
     }
 }
@@ -164,6 +179,10 @@ impl Drop for RetainedReservation<'_> {
             && let Some(remaining) = state.used.retained_bytes.checked_sub(self.bytes)
         {
             state.used.retained_bytes = remaining;
+            #[cfg(test)]
+            {
+                state.refundable_retained_bytes -= self.bytes;
+            }
         }
     }
 }
@@ -177,6 +196,8 @@ impl Budget {
                 pending: None,
                 peak_scratch: 0,
                 used: Cost::default(),
+                #[cfg(test)]
+                refundable_retained_bytes: 0,
                 logical: Cost::default(),
                 logical_scratch: 0,
                 once: BTreeSet::new(),
@@ -329,6 +350,12 @@ impl Budget {
             },
         )
     }
+    /// Observe outstanding guard ownership even after cancellation. Tests also
+    /// reconcile this value with snapshot(), so bookkeeping cannot mask a leak.
+    #[cfg(test)]
+    pub(crate) fn refundable_retained_bytes(&self) -> u64 {
+        self.state.lock().unwrap().refundable_retained_bytes
+    }
     pub fn snapshot(&self) -> Result<Cost> {
         let state = self
             .state
@@ -346,6 +373,10 @@ impl Budget {
     }
     pub(crate) fn reserve_retained(&self, bytes: usize) -> Result<RetainedReservation<'_>> {
         self.charge_split(Cost::default(), Cost::retained(bytes))?;
+        #[cfg(test)]
+        {
+            self.state.lock().unwrap().refundable_retained_bytes += bytes as u64;
+        }
         Ok(RetainedReservation {
             budget: self,
             bytes: bytes as u64,
@@ -458,6 +489,40 @@ impl Budget {
 mod temporary_tests {
     use super::*;
     use std::time::Duration;
+    #[test]
+    fn refundable_observer_tracks_guard_growth_commit_transfer_and_rejection() {
+        let budget = Arc::new(Budget::new(
+            Cost {
+                retained_bytes: 100,
+                ..Cost::defaults()
+            },
+            Instant::now() + Duration::from_secs(5),
+            None,
+        ));
+        budget.charge(Cost::retained(10)).unwrap();
+        let foreign = budget.reserve_retained(20).unwrap();
+        let mut guard = budget.reserve_retained(30).unwrap();
+        guard.grow(10).unwrap();
+        assert_eq!(budget.refundable_retained_bytes(), 60);
+        let before = budget.snapshot().unwrap();
+        assert!(guard.grow(31).is_err());
+        assert!(budget.reserve_retained(31).is_err());
+        assert_eq!(budget.refundable_retained_bytes(), 60);
+        assert_eq!(budget.snapshot().unwrap(), before);
+        let owned = guard.into_owned(&budget).unwrap();
+        assert_eq!(budget.refundable_retained_bytes(), 60);
+        assert_eq!(budget.snapshot().unwrap(), before);
+        drop(owned);
+        assert_eq!(budget.refundable_retained_bytes(), 20);
+        assert_eq!(budget.snapshot().unwrap().retained_bytes, 30);
+        budget.reserve_retained(11).unwrap().commit();
+        assert_eq!(budget.refundable_retained_bytes(), 20);
+        assert_eq!(budget.snapshot().unwrap().retained_bytes, 41);
+        drop(foreign);
+        assert_eq!(budget.refundable_retained_bytes(), 0);
+        assert_eq!(budget.snapshot().unwrap().retained_bytes, 21);
+        assert_eq!(budget.logical_snapshot().unwrap().retained_bytes, 10);
+    }
     #[test]
     fn failed_allocation_release_preserves_work_and_committed_ownership() {
         let budget = Budget::new(

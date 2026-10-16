@@ -645,6 +645,284 @@ fn mixed_128_provider_failure_and_cancel_unwind_the_full_owned_chain() {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SharedFailure {
+    LateError,
+    Cancel,
+    Admission,
+}
+#[derive(Clone, Copy)]
+struct FailureLedger {
+    used: crate::resource::Cost,
+    logical: crate::resource::Cost,
+    refundable: u64,
+    queries: usize,
+    future_bytes: usize,
+}
+struct BudgetFailureProvider<'a> {
+    base: LateProvider<'a>,
+    shared: &'a crate::resource::Budget,
+    flag: &'a AtomicBool,
+    ceiling: u64,
+    target_open: usize,
+    failure: SharedFailure,
+    terminal: Cell<Option<FailureLedger>>,
+}
+impl BudgetFailureProvider<'_> {
+    fn record_terminal(&self) {
+        assert!(
+            self.terminal.get().is_none(),
+            "only the first error is observed"
+        );
+        self.terminal.set(Some(FailureLedger {
+            used: self.shared.snapshot().unwrap(),
+            logical: self.shared.logical_snapshot().unwrap(),
+            refundable: self.shared.refundable_retained_bytes(),
+            queries: ACTIVE.get(),
+            future_bytes: LIVE_FUTURE_BYTES.get(),
+        }));
+    }
+}
+struct BudgetFailureCursor<'p, 'a> {
+    owner: &'p BudgetFailureProvider<'a>,
+    cursor: Box<dyn RowCursor + 'p>,
+    first: bool,
+    target: bool,
+    row_lease: Option<crate::resource::RetainedReservation<'a>>,
+}
+impl RowCursor for BudgetFailureCursor<'_, '_> {
+    fn advance(&mut self) -> Result<bool> {
+        self.row_lease = None;
+        if self.first {
+            self.first = false;
+            if self.target && self.owner.failure == SharedFailure::Admission {
+                // Fail one real physical admission at the deepest live query,
+                // one byte beyond remaining capacity. No allocation is made,
+                // limit mutated, or internal driver failure hook installed.
+                self.owner.record_terminal();
+                let before = self.owner.shared.snapshot().unwrap();
+                let bytes =
+                    usize::try_from(self.owner.ceiling - before.retained_bytes + 1).unwrap();
+                let error = self.owner.shared.reserve_retained(bytes).err().unwrap();
+                assert_eq!(self.owner.shared.snapshot().unwrap(), before);
+                assert_eq!(
+                    self.owner.shared.refundable_retained_bytes(),
+                    self.owner.terminal.get().unwrap().refundable
+                );
+                return Err(error);
+            }
+            self.row_lease = Some(
+                self.owner
+                    .shared
+                    .reserve_retained(std::mem::size_of::<Scalar>())?,
+            );
+        }
+        let result = self.cursor.advance();
+        match &result {
+            Ok(true) if self.target && self.owner.failure == SharedFailure::Cancel => {
+                // Cancel after the deepest current row and its actual lease
+                // exist. Cancelling in cursor() would reject the cursor owner
+                // before advance and miss this fully suspended ownership case.
+                self.owner.flag.store(true, AtomicOrdering::Release);
+                self.owner.record_terminal();
+            }
+            Err(_) => self.owner.record_terminal(),
+            _ => {}
+        }
+        result
+    }
+    fn row(&self) -> &[Scalar] {
+        self.cursor.row()
+    }
+}
+impl RowProvider for BudgetFailureProvider<'_> {
+    fn cursor(&self, _: Option<&[usize]>) -> Result<Box<dyn RowCursor + '_>> {
+        let cursor = self.base.cursor(None)?;
+        Ok(Box::new(BudgetFailureCursor {
+            owner: self,
+            cursor,
+            first: true,
+            target: self.base.calls.get() == self.target_open,
+            row_lease: None,
+        }))
+    }
+    fn scan(&self, emit: &mut RowYield<'_>) -> Result<()> {
+        let mut cursor = self.cursor(None)?;
+        while cursor.advance()? {
+            emit(cursor.row())?;
+        }
+        Ok(())
+    }
+}
+fn deep_shared_failure(mixed: bool, failure: SharedFailure) {
+    use crate::resource::{Budget, Cost};
+    let label = format!(
+        "{}-shared-{failure:?}",
+        if mixed { "mixed128" } else { "scalar63" }
+    );
+    let _trace = Trace::new(&label);
+    let limits = Limits::default();
+    let flag = std::sync::Arc::new(AtomicBool::new(false));
+    let shared = Budget::new(Cost::defaults(), limits.deadline, Some(flag.clone()));
+    // Preserve a foreign owner's reservation and unrelated cumulative usage.
+    // Neither successful unwind nor cancellation may erase this baseline.
+    shared
+        .charge(Cost {
+            retained_bytes: 29,
+            decode_work: 7,
+            ..Cost::default()
+        })
+        .unwrap();
+    let foreign = shared.reserve_retained(113).unwrap();
+    let before = shared.snapshot().unwrap();
+    let before_logical = shared.logical_snapshot().unwrap();
+    let before_refundable = shared.refundable_retained_bytes();
+    assert_eq!(before_refundable, 113);
+    let provider = BudgetFailureProvider {
+        base: LateProvider {
+            calls: Cell::new(0),
+            cancel: None,
+            cancel_on: 0,
+            live_cursors: Cell::new(0),
+            live_rows: Cell::new(0),
+            peak_rows: Cell::new(0),
+            drops: Cell::new(0),
+        },
+        shared: &shared,
+        flag: &flag,
+        ceiling: Cost::defaults().retained_bytes,
+        target_open: if mixed { 1 } else { 64 },
+        failure,
+        terminal: Cell::new(None),
+    };
+    let physical = Source {
+        columns: vec!["ID".into()],
+        rows: vec![vec![Scalar::Int(1)]],
+        complete: true,
+    };
+    let failing = Source {
+        columns: physical.columns.clone(),
+        rows: vec![],
+        complete: physical.complete,
+    };
+    let inputs = if mixed {
+        BTreeMap::from([("t".into(), &physical), ("bad".into(), &failing)])
+    } else {
+        BTreeMap::from([("t".into(), &failing)])
+    };
+    let prepared = [PreparedSource {
+        schema: &failing,
+        provider: &provider,
+    }];
+    let sql = if mixed {
+        mixed_chain("SELECT root.ID AS ID FROM bad leaf", 3)
+    } else {
+        scalar_chain()
+    };
+    let program = Program::compile(&sql).unwrap();
+    let error = program
+        .execute_providers_budgeted(
+            &inputs,
+            &prepared,
+            &BTreeMap::new(),
+            limits,
+            Some(&flag),
+            Some(&shared),
+        )
+        .unwrap_err();
+    let expected = match failure {
+        SharedFailure::LateError => "fixture.late_scan",
+        SharedFailure::Cancel => "operation.cancelled",
+        SharedFailure::Admission => "records.query_resource_budget",
+    };
+    assert_eq!(error.code, expected, "{label}");
+    let terminal = provider
+        .terminal
+        .get()
+        .expect("failure must reach the deepest provider");
+    assert!(terminal.queries >= if mixed { 60 } else { 64 }, "{label}");
+    assert!(terminal.future_bytes > 0, "{label}");
+    assert!(
+        terminal.refundable >= before_refundable + terminal.future_bytes as u64,
+        "{label}"
+    );
+    assert_eq!(provider.base.calls.get(), provider.target_open, "{label}");
+    assert_eq!(provider.base.drops.get(), provider.target_open, "{label}");
+    assert_eq!(provider.base.live_cursors.get(), 0, "{label}");
+    assert_eq!(provider.base.live_rows.get(), 0, "{label}");
+    assert_eq!(
+        provider.base.peak_rows.get(),
+        provider.target_open - usize::from(failure == SharedFailure::Admission),
+        "{label}"
+    );
+    assert_eq!(ACTIVE.get(), 0, "{label}");
+    assert_eq!(LIVE_FUTURE_BYTES.get(), 0, "{label}");
+    assert_eq!(
+        shared.refundable_retained_bytes(),
+        before_refundable,
+        "{label}"
+    );
+    let after = shared.snapshot().unwrap();
+    let logical = shared.logical_snapshot().unwrap();
+    // Reconcile the observer against the real retained ledger. A standalone
+    // owner counter could otherwise hide a broken actual refund. No retained
+    // admission occurs after this first failure, but accumulated Go work and
+    // persistent executor estimates intentionally remain charged.
+    assert_eq!(
+        after.retained_bytes,
+        terminal.used.retained_bytes - (terminal.refundable - before_refundable),
+        "{label}: actual retained ledger must refund every suspended owner"
+    );
+    assert!(after.retained_bytes >= before.retained_bytes, "{label}");
+    assert!(logical.decode_work > before_logical.decode_work, "{label}");
+    assert_eq!(
+        logical, terminal.logical,
+        "{label}: cumulative logical usage must survive unwind"
+    );
+    assert_eq!(
+        after,
+        crate::resource::Cost {
+            retained_bytes: terminal.used.retained_bytes
+                - (terminal.refundable - before_refundable),
+            ..terminal.used
+        },
+        "{label}: only live retained obligations may refund"
+    );
+    marker(&format!(
+        "{label}: baseline refundable={before_refundable}; deepest refundable={}; deepest future bytes={}; remaining refundable={}; retained cumulative={}; logical work={}",
+        terminal.refundable,
+        terminal.future_bytes,
+        shared.refundable_retained_bytes(),
+        after.retained_bytes,
+        logical.decode_work
+    ));
+    drop(foreign);
+    assert_eq!(shared.refundable_retained_bytes(), 0, "{label}");
+    assert_eq!(
+        shared.snapshot().unwrap().retained_bytes,
+        after.retained_bytes - 113,
+        "{label}"
+    );
+}
+#[test]
+fn deep_shared_budget_late_error_refunds_all_suspended_owners() {
+    for mixed in [false, true] {
+        deep_shared_failure(mixed, SharedFailure::LateError);
+    }
+}
+#[test]
+fn deep_shared_budget_cancellation_refunds_all_suspended_owners() {
+    for mixed in [false, true] {
+        deep_shared_failure(mixed, SharedFailure::Cancel);
+    }
+}
+#[test]
+fn deep_shared_budget_physical_admission_failure_refunds_all_suspended_owners() {
+    for mixed in [false, true] {
+        deep_shared_failure(mixed, SharedFailure::Admission);
+    }
+}
+
 #[test]
 fn last_strong_query_owner_with_live_weak_handles_drops_iteratively() {
     let _trace = Trace::new("weak-query-cleanup");
