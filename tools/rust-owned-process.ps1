@@ -23,7 +23,7 @@ if($name -cmatch '^process-(?<id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}
 else{$runId=[Guid]::NewGuid().ToString('D');$identitySource='legacy-generated'}
 $expectedStem=Join-Path ([IO.Path]::GetDirectoryName($requestPath)) ('process-'+$runId)
 if($null -ne $requestData.runId -and $requestData.runId -cne $runId){throw 'owned.start_identity_run'}
-foreach($entry in @(@('identity',$expectedStem+'.identity.json'),@('rootIdentity',$expectedStem+'.root.json'))){
+foreach($entry in @(@('identity',($expectedStem+'.identity.json')),@('rootIdentity',($expectedStem+'.root.json')))){
  $value=$requestData.($entry[0])
  if($null -eq $value){if($requestData.schema -ceq 'lycheedev.owned-request.v2'){throw 'owned.start_identity_path'}}
  elseif(-not [string]::Equals([IO.Path]::GetFullPath([string]$value),[IO.Path]::GetFullPath($entry[1]),[StringComparison]::OrdinalIgnoreCase)){throw 'owned.start_identity_path'}

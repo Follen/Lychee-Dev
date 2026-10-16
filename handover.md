@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 13:10 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`bed345f97a3f2fc13ff12fa8e5ad45ead1c98dfa`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 13:31 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`93952820a1074b50395cb918697a69858335c9d5`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -43,7 +43,7 @@
 - **正式Go323自动Lua闭环**：固定`7c07f2406f1866abc533c421c8629ccf119c282a`的[220项Lua](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6215206258)与[9项真实Driver桥](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6215231080)全部通过、零失败/跳过，CLI/解释器构建exit0，Community身份按原hash/签名验证，所有owner sealed/retired/handlesReaped。旧7c libtest编译失败和0d oracle raw差异仍保留。本机该批已安全结束；dev产物不作性能证明。
 - **本机fa587f实际执行仍失败**：[完整组](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6215304345)all-target与原3个parse边界入口已通过，relational声明284项、207通过后scalar63-late-error栈溢出，后76未执行；[追加独立证据](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6215417969)使10个stack_safety用例共4通过、6个执行/错误清理栈溢出。CTE126、长左链销毁、flat4095通过不代表混合callback链安全。随后逐名称补充诊断共观察284项中的278通过、6项执行栈溢出，另68项subquery补充通过；这些封存EXE诊断不重标完整Cargo组成功。全部已完成的失败均保原默认栈与深度。另owner `9f053173-8472-4860-be36-19a455a32e62`只有request而无native receipt，ordinary lease保留、结果/回收未知；不得按dead PID清锁或伪造reaped。独立已封存EXE补测有自己的真实owner，不追认旧owner。
 - **fa封存EXE的TLS实证**：[remote329及Go五项](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6215452005)零失败/跳过，双多尾点SNI现相等、错误名和原证书校验拒绝保留，两个独立owner均完整回收。EXE SHA `5093d4a541a2b44fc4e7fbcfcabf28b7a7e8ead5e32210b5f29cc589b9274458`绑定同fa源码；这是保全EXE补充运行，非官方Cargo阶段，旧unknown owner未改。[Go323性能包准备](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6215390982)成功：clean固定commit、Go1.27.1、VCS未修改、优化构建和完整LuaLS私有包验证通过，EXE SHA `9f9a39ecaff18622b1dc9295bcd5ea671cb04dd4ba6961ad4a295dc53f1913f6`。Rust优化构建和20对实际测量仍未执行。
-- **当前完整SQL/进程所有权候选**：30源的堆驱动、真实Physical/Overlay游标与最深错误/取消清理已接生产；修正固定Go bare关联列Equal/IN首错及JOIN ON临时量逐候选释放，保全部历史失败和原10栈样例。30源rustfmt/diff通过，22净新增测试NOT_RUN。另原子JOB_LIST随CreateProcess创建归属、启动/根身份在Resume前持久化，消除未来create/assign间隙；仅未来执行生效，旧unknown不追认。对应Node32项在云端16通过/16Windows跳过，真实Windows待集中跑。
+- **9395282完整SQL/进程所有权已保存**：30源的堆驱动、真实Physical/Overlay游标与最深错误/取消清理已接生产；修正固定Go bare关联列Equal/IN首错及JOIN ON临时量逐候选释放，保全部历史失败和原10栈样例。30源rustfmt/diff通过，22净新增测试NOT_RUN。另原子JOB_LIST随CreateProcess创建归属、启动/根身份在Resume前持久化，消除未来create/assign间隙；仅未来执行生效，旧unknown不追认。对应Node32项在云端16通过/16Windows跳过；[集中Windows run38907640603](https://github.com/Follen/Lychee-Dev/actions/runs/38907640603)已启动，实际产品/context前置失败：新增PowerShell sidecar数组逗号/加法优先级使合法路径被拒，Cargo fetch未启动，SQL编译/业务均NOT_RUN。本轮仅两处拼接加括号，原路径校验不松；补实际PowerShell数组/校验块测试。失败产物56owners/60sealed日志全hash通过，原unknown保留。
 - **32c80d9已保存**：通用gate/result阶段修正及7c正式Lua通过记录，Rust语义复验尚未执行。原0d严格raw失败保留，两个object正向receipt仍在；不得预先豁免全coverage或报告完整oracle通过。
 - **bed恢复准备已实际完成**：[本机记录](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6215888111)正式恢复测试17/17通过（含Windows真实C#与8项持柄锁/rename检查），prepare成功，原lease/owner/request字节不变。fence `cc31783a-9ed6-47a8-a150-e656b88bd90e`，prepared SHA `f4ef4175d09553b39fea44ebf85866cbba6c438e10dab3ed12214a66e3e9dd1b`。用户当前不方便重启，因此暂不重启/apply，旧owner仍unknown。原本机线程正在检查是否能凭当前执行域、进程创建身份与资源占用证据安全恢复通道；没有结果前不清lease、不追认历史回收。云端完整实现与必要的集中GitHub CI继续。恢复工具4文件字节保持不变，未来用户方便时才用真实系统计数证明恢复。
 - 历史run、原失败和前版交接正文完整保留在[历史证据](docs/toolkit/rust-migration-evidence-2026-10-15.md)。四阶段最终循环审计尚未开始，实机清单仍在本文最后。
@@ -67,7 +67,7 @@
 
 ## 6. 本机线程接力验证入口（2026-10-16）
 
-当前 ordinary 中断的正式恢复入口见 [恢复说明](tools/rust-channel-recovery.md)。先执行 `node --test tools/rust-channel-recovery.test.mjs`，实际验证Windows自有fixture的锁/no-replace rename，再在同机重启前执行 `node tools/rust-channel-recovery.mjs prepare <repo绝对路径> 9f053173-8472-4860-be36-19a455a32e62`。保存返回的fence ID与prepared SHA后，用户自行选择完整重启时机，再按说明apply/inspect。工具不重启、不清旧owner；旧结果与回收永远unknown，只有真实系统计数重置和原lease字节匹配才恢复原channel/target。固定bed本机已17/17通过且prepare成功，精确fence/摘要见§3；重启与apply仍未执行；本机另在调查无重启恢复的实际证据，尚未确认可恢复，不要求用户现在重启。
+当前 ordinary 中断的正式恢复入口见 [恢复说明](tools/rust-channel-recovery.md)。先执行 `node --test tools/rust-channel-recovery.test.mjs`，实际验证Windows自有fixture的锁/no-replace rename，再在同机重启前执行 `node tools/rust-channel-recovery.mjs prepare <repo绝对路径> 9f053173-8472-4860-be36-19a455a32e62`。保存返回的fence ID与prepared SHA后，用户自行选择完整重启时机，再按说明apply/inspect。工具不重启、不清旧owner；旧结果与回收永远unknown，该boot模式以真实系统计数重置和原lease字节匹配证明新epoch；它不是唯一允许的恢复方式。用户已明确授权停止本批并重跑：可通过同一临界区真实进程/资源空闲核实、持续持有原文件与Cargo协调锁，保全旧lease后登记新的准入generation；旧结果/回收仍unknown，不能由dead PID单点推断。对应[无重启正式入口](tools/rust-channel-readmit.md)已实现：固定本次owner/fence与实际15资源、Data EXE/PDB身份，重新获取并持有全部锁、核进程/RM及target稳定窗口后持柄no-replace归档。旧owner/原prepared及bed四工具字节不改；本机历史已释放诊断句柄不能替代执行时实时证明。先运行 `node --test tools/rust-channel-recovery.test.mjs tools/rust-channel-readmit.test.mjs`，再按说明实际apply并inspect，随后原ordinary/target低成本check。云端29项27通过/2Windows未跑，正式apply尚未执行。固定bed本机已17/17通过且prepare成功，精确fence/摘要见§3；重启与apply仍未执行；本机另在调查无重启恢复的实际证据，尚未确认可恢复，不要求用户现在重启。
 
 用户指定现有本机线程接力，双方只经同一草稿PR同步源码与结果。先拉取本节标题上方已确认commit，保存自己的未提交修改，读AGENTS与本文件；不要把另一环境的历史lease复制或清除。89f61b9集中CI已终态；当前本机fa587f测试发现执行栈溢出，ordinary channel另有未证实回收的owner；用户当前不方便重启，保留原证据与lease，完整修复后必要时统一GitHub CI验证，不逐小片排长CI。
 

@@ -134,3 +134,40 @@ test('Windows root identity CreateNew failure never resumes and reaps exact alre
   assert.equal(p.outputReadersComplete, false, 'unstarted readers do not become a successful run');
   assert.match(p.error, /System\.IO\.IOException/);
 });
+
+test('sidecar array values group path concatenation before the PowerShell comma operator', () => {
+  assert.match(source, /@\('identity',\(\$expectedStem\+'\.identity\.json'\)\)/);
+  assert.match(source, /@\('rootIdentity',\(\$expectedStem\+'\.root\.json'\)\)/);
+});
+
+test('Windows evaluates the exact production sidecar array and admission block before launching any root', windows, t => {
+  const f = fixture(t, 'path-expression');
+  const start = source.indexOf('foreach($entry in @('), end = source.indexOf('\nif($requestData.schema', start);
+  assert(start >= 0 && end > start);
+  const block = source.slice(start, end), expression = block.match(/^foreach\(\$entry in (.*)\)\{/)[1];
+  const script = join(f.evidence, 'path-expression.ps1');
+  writeFileSync(script, '\uFEFF' + `$ErrorActionPreference='Stop'
+$expectedStem=Join-Path $PSScriptRoot 'process-00000000-0000-4000-8000-000000000001'
+$entries=${expression}
+if($entries.Count -ne 2 -or $entries[0].Count -ne 2 -or $entries[1].Count -ne 2){throw 'sidecar_array_shape'}
+if($entries[0][1] -cne ($expectedStem+'.identity.json') -or $entries[1][1] -cne ($expectedStem+'.root.json')){throw 'sidecar_array_precedence'}
+function Test-ActualAdmission($requestData){
+${block}
+}
+$good=[pscustomobject]@{schema='lycheedev.owned-request.v2';identity=($expectedStem+'.identity.json');rootIdentity=($expectedStem+'.root.json')}
+Test-ActualAdmission $good
+Test-ActualAdmission ([pscustomobject]@{})
+foreach($field in @('identity','rootIdentity')){
+ $bad=[pscustomobject]@{schema='lycheedev.owned-request.v2';identity=$good.identity;rootIdentity=$good.rootIdentity}
+ $bad.$field=Join-Path $PSScriptRoot 'foreign.json'
+ $rejected=$false;try{Test-ActualAdmission $bad}catch{if($_.Exception.Message -cne 'owned.start_identity_path'){throw};$rejected=$true}
+ if(-not $rejected){throw 'conflicting_sidecar_accepted'}
+}
+@{passed=$true;cases=5;scope='actual PowerShell evaluation of unchanged production block; no root process or Cargo'}|ConvertTo-Json -Compress
+`);
+  const execution = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script],
+    {encoding: 'utf8', windowsHide: true, shell: false, timeout: 30000, maxBuffer: 1 << 20});
+  writeFileSync(join(f.evidence, 'wrapper-result.json'), JSON.stringify({status: execution.status, error: execution.error?.message, stdout: execution.stdout, stderr: execution.stderr}, null, 2));
+  assert.equal(execution.error, undefined); assert.equal(execution.status, 0, execution.stderr);
+  assert.equal(JSON.parse(execution.stdout.replace(/^\uFEFF/, '')).passed, true);
+});
