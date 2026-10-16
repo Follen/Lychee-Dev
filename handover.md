@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 02:02 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`6921933c5dc2ec3b8034a5a8f1c50fb8f17f6777`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 02:06 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`19db78bd19444b865f2841cc410129f7c504e500`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -24,6 +24,8 @@
 - 2026-10-15 18:24 用户调整实施节奏：先按完整端到端功能实现并接入默认生产消费者，再集中补测试和统一验证；取消自行增加的逐小片冻结/独审/CI先行门禁。实现过程中仍及时分批提交推送同一草稿PR，真实安全边界和文件单写协调保留；已有CI旁路诊断，不等待每轮才继续编码。最终四阶段循环审计与完整验收要求不变。
 
 ## 2. 当前实现与未闭环事项
+
+默认evidence keep/bundle已完成原控制接线：keep持同一writer lease完成历史读取/retention/CAS/tombstone；bundle保输入顺序、拒重复、objects与最后manifest、32MiB单体/128MiB唯一体、原stage同目录no-replace和checked收尾，已发布/不确定结果进入既有error.details。12新Rust未跑，recoverable remove仍继续。自有诊断后继恢复return self所属类、alias/声明泛型上下文，并保union分量selected carrier，避免不完整对象绕过赋值结构检查；4新测试/12场景未跑。部分return缺口历史patched session同样存在，旧参照不改、不全局忽略差异；以固定原版普通语义与增强合同分别验证。
 
 本批补齐历史capture读取、Hotfix archive/origin/定义/scan与effective SQL的原invocation及独立Budget，保typed停止、历史身份和checked关闭；8项Core/Data新回归未运行。SQL默认编译入口已贯通lexer、公共parser hooks及lowering控制，17项新回归未运行；wildcard公共hook不能直接返回错误，记录停止后在parse完成且lowering/provider之前返回。非最终UNION后缀与复合错误优先级仍继续实现。keep/bundle/remove和Source默认存储受控链正在闭合，不据新API声明全链完成。
 

@@ -17,6 +17,7 @@ use std::{
 enum Transform<'a> {
     Substitute(&'a HashMap<GenericTplId, OwnedValue>),
     Named(&'a HashMap<String, OwnedValue>),
+    ReturnNames(&'a HashMap<String, OwnedValue>),
     Bind(&'a [GenericTpl]),
     Alias,
     Conditional,
@@ -38,6 +39,12 @@ impl<E> OwnedQuery<'_, '_, E> {
     ) -> OwnedValue {
         if let Some(slots) = value.carried_slots() {
             return slots[index].clone();
+        }
+        // Union evidence is a dedicated carrier, not Structural. Consumers
+        // enumerate LuaUnionType::into_vec in this same semantic order, including
+        // Nullable's trailing Nil. Preserve identity before any relation/gate.
+        if let Some(members) = value.carried_union() {
+            return members[index].clone();
         }
         if let Some(children) = value.structural_children() {
             let position = match value.structural_type() {
@@ -144,6 +151,31 @@ impl<E> OwnedQuery<'_, '_, E> {
         names: &HashMap<String, OwnedValue>,
     ) -> QueryResult<OwnedValue, E> {
         self.transform_owned(value, Transform::Named(names), &mut Vec::new())
+    }
+    /// Bind declared return names with the same unconstrained Type(index)
+    /// identity as the public doc shell projection. Rich object/index shapes
+    /// remain intact; using the shell alone would reduce nonempty objects to
+    /// broad Table. Existing nested function template identities stay local.
+    pub(super) fn bind_owned_return_generics(
+        &mut self,
+        value: OwnedValue,
+        generics: &[emmylua_code_analysis::DocGenericParam],
+    ) -> QueryResult<OwnedValue, E> {
+        let mut names = HashMap::new();
+        for (index, generic) in generics.iter().enumerate() {
+            self.checkpoint()?;
+            names.entry(generic.name.to_string()).or_insert_with(|| {
+                OwnedValue::plain(LuaType::TplRef(Arc::new(GenericTpl::new(
+                    GenericTplId::Type(index as u32),
+                    generic.name.clone(),
+                    None,
+                    None,
+                    false,
+                    None,
+                ))))
+            });
+        }
+        self.transform_owned(value, Transform::ReturnNames(&names), &mut Vec::new())
     }
     pub(super) fn bind_owned_signature_generics(
         &mut self,
@@ -278,7 +310,10 @@ impl<E> OwnedQuery<'_, '_, E> {
             (Transform::Substitute(bindings), LuaType::TplRef(tpl)) => {
                 return Ok(bindings.get(&tpl.get_tpl_id()).cloned().unwrap_or(value));
             }
-            (Transform::Named(names), LuaType::Ref(id) | LuaType::Def(id)) => {
+            (
+                Transform::Named(names) | Transform::ReturnNames(names),
+                LuaType::Ref(id) | LuaType::Def(id),
+            ) => {
                 return Ok(names.get(id.get_name()).cloned().unwrap_or(value));
             }
             (Transform::Bind(generics), LuaType::TplRef(tpl)) => {
@@ -344,7 +379,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             LuaType::DocFunction(function)
                 if !matches!(op, Transform::Alias | Transform::Conditional) =>
             {
-                if matches!(op, Transform::Bind(_))
+                if matches!(op, Transform::Bind(_) | Transform::ReturnNames(_))
                     && function
                         .get_generic_params()
                         .iter()
@@ -671,6 +706,17 @@ impl<E> OwnedQuery<'_, '_, E> {
                 }
             }
             LuaType::Mapped(mapped) if !matches!(op, Transform::Conditional) => {
+                let scoped_names = match op {
+                    Transform::ReturnNames(names)
+                        if names.contains_key(mapped.param.1.name.as_str()) =>
+                    {
+                        let mut names = names.clone();
+                        names.remove(mapped.param.1.name.as_str());
+                        Some(names)
+                    }
+                    _ => None,
+                };
+                let op = scoped_names.as_ref().map_or(op, Transform::ReturnNames);
                 if matches!(op, Transform::Alias)
                     && let Some(expanded) = self.expand_owned_mapped(&value)?
                 {
@@ -729,16 +775,32 @@ impl<E> OwnedQuery<'_, '_, E> {
                 children.extend(default);
                 Ok(OwnedValue::with_structural_children(ty, children))
             }
-            LuaType::StrTplRef(tpl) if matches!(op, Transform::Substitute(_)) => {
+            LuaType::StrTplRef(tpl)
+                if matches!(op, Transform::Substitute(_) | Transform::ReturnNames(_)) =>
+            {
                 let constraint = if let Some(ty) = tpl.get_constraint() {
                     Some(self.transform_owned(self.owned_child(&value, 0, ty), op, visiting)?)
                 } else {
                     None
                 };
+                let id = match op {
+                    Transform::ReturnNames(names)
+                        if matches!(tpl.get_tpl_id(), GenericTplId::Type(_)) =>
+                    {
+                        names
+                            .get(tpl.get_name())
+                            .and_then(|value| match value.structural_type() {
+                                LuaType::TplRef(generic) => Some(generic.get_tpl_id()),
+                                _ => None,
+                            })
+                            .unwrap_or_else(|| tpl.get_tpl_id())
+                    }
+                    _ => tpl.get_tpl_id(),
+                };
                 let ty = LuaType::StrTplRef(Arc::new(LuaStringTplType::new(
                     tpl.get_prefix(),
                     tpl.get_name(),
-                    tpl.get_tpl_id(),
+                    id,
                     tpl.get_suffix(),
                     constraint.as_ref().map(|v| v.structural_type().clone()),
                 )));
@@ -748,7 +810,10 @@ impl<E> OwnedQuery<'_, '_, E> {
                 ))
             }
             LuaType::MultiLineUnion(union)
-                if matches!(op, Transform::Substitute(_) | Transform::SelfType(_)) =>
+                if matches!(
+                    op,
+                    Transform::Substitute(_) | Transform::SelfType(_) | Transform::ReturnNames(_)
+                ) =>
             {
                 let mut values = Vec::new();
                 let mut types = Vec::new();
@@ -765,7 +830,10 @@ impl<E> OwnedQuery<'_, '_, E> {
                 ))
             }
             LuaType::TypeGuard(inner)
-                if matches!(op, Transform::Substitute(_) | Transform::SelfType(_)) =>
+                if matches!(
+                    op,
+                    Transform::Substitute(_) | Transform::SelfType(_) | Transform::ReturnNames(_)
+                ) =>
             {
                 let inner =
                     self.transform_owned(self.owned_child(&value, 0, inner), op, visiting)?;
@@ -775,7 +843,10 @@ impl<E> OwnedQuery<'_, '_, E> {
                 ))
             }
             LuaType::Instance(instance)
-                if matches!(op, Transform::Substitute(_) | Transform::SelfType(_)) =>
+                if matches!(
+                    op,
+                    Transform::Substitute(_) | Transform::SelfType(_) | Transform::ReturnNames(_)
+                ) =>
             {
                 let base = self.transform_owned(
                     self.owned_child(&value, 0, instance.get_base()),

@@ -13,6 +13,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
 };
+mod archive_commands;
 mod bounded;
 mod budgeted;
 mod dependencies;
@@ -177,6 +178,9 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
     ) {
         return read_commands::dispatch(inv);
     }
+    if matches!(inv.command.as_str(), "evidence keep" | "evidence bundle") {
+        return archive_commands::dispatch(inv);
+    }
     workspace::open(&inv.home)?;
     match inv.command.as_str() {
         "evidence remove" => Ok(Outcome::new(remove_capture_controlled(
@@ -184,33 +188,6 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
             inv.argument()?,
             &inv.control,
         )?)),
-        "evidence keep" => {
-            let value = read_capture(&inv.home, inv.argument()?)?;
-            let mut metadata = Metadata::open(&inv.home, true)?;
-            let key = format!("evidence/keep/{}", inv.argument()?);
-            let existing = metadata.generation(&key)?;
-            let retention = if existing.is_some() {
-                metadata.read::<Value>(&key)?
-            } else {
-                let retained = json!({"schema":"lycheedev.evidence-retention.v1","captureId":inv.argument()?,"blob":value["blob"],"keptAt":storage::utc_now()});
-                metadata.put(&key, &retained, None)?;
-                retained
-            };
-            if retention["schema"] != "lycheedev.evidence-retention.v1"
-                || retention["captureId"] != inv.argument()?
-                || retention["blob"] != value["blob"]
-            {
-                return Err(ToolkitError::new(
-                    "evidence.invalid_retention",
-                    "retention identity differs",
-                    4,
-                ));
-            }
-            Ok(Outcome::new(
-                json!({"capture":value,"retention":retention,"created":existing.is_none()}),
-            ))
-        }
-        "evidence bundle" => bundle(inv),
         _ => Err(ToolkitError::new(
             "evidence.migration_incomplete",
             "reference-safe removal is not yet migrated",
@@ -485,71 +462,4 @@ pub fn remove_capture_controlled(
             Ok((removal, Some((removal_key.clone(), record))))
         })?;
     finish_removal(home, &mut metadata, &removal_key, removal, control)
-}
-fn bundle(inv: &Invocation) -> Result<Outcome> {
-    let ids: std::collections::BTreeSet<_> = inv.required("--ids")?.split(',').collect();
-    if ids.is_empty() || ids.len() > 100 {
-        return Err(ToolkitError::arguments("bundle requires 1..100 captures"));
-    }
-    let output = Path::new(inv.required("--output")?);
-    if output.exists() {
-        return Err(ToolkitError::new(
-            "evidence.output_exists",
-            "output already exists",
-            4,
-        ));
-    }
-    let mut captures = vec![];
-    let mut blobs = std::collections::BTreeMap::new();
-    let mut total = 0usize;
-    for id in &ids {
-        let capture = read_capture(&inv.home, id)?;
-        let digest = capture["blob"]["sha256"].as_str().unwrap().to_owned();
-        if let std::collections::btree_map::Entry::Vacant(entry) = blobs.entry(digest) {
-            let bytes = read_blob(&inv.home, &capture["blob"], 128 << 20)?;
-            total += bytes.len();
-            if total > 128 << 20 {
-                return Err(ToolkitError::new(
-                    "evidence.bundle_limit",
-                    "unique bundle bytes exceed 128 MiB",
-                    4,
-                ));
-            }
-            entry.insert(bytes);
-        }
-        captures.push(capture);
-    }
-    let file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(output)?;
-    let result = (|| -> Result<()> {
-        let mut zip = zip::ZipWriter::new(file);
-        let opts = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated);
-        for capture in &captures {
-            zip.start_file(
-                format!("captures/{}.json", capture["id"].as_str().unwrap()),
-                opts,
-            )
-            .map_err(|e| ToolkitError::invalid(e.to_string()))?;
-            zip.write_all(&serde_json::to_vec_pretty(capture)?)?;
-        }
-        for (digest, bytes) in &blobs {
-            zip.start_file(format!("blobs/{digest}"), opts)
-                .map_err(|e| ToolkitError::invalid(e.to_string()))?;
-            zip.write_all(bytes)?;
-        }
-        zip.finish()
-            .map_err(|e| ToolkitError::invalid(e.to_string()))?
-            .sync_all()?;
-        Ok(())
-    })();
-    if let Err(error) = result {
-        let _ = fs::remove_file(output);
-        return Err(error);
-    }
-    Ok(Outcome::new(
-        json!({"output":output,"captures":captures.len(),"blobBytes":total,"complete":true}),
-    ))
 }

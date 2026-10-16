@@ -8,7 +8,7 @@ fn finish<T>(metadata: Metadata, result: Result<T>, control: &OperationControl) 
     let result = finish_historical(result, metadata.close());
     crate::selection::selection_finish(result, control.check())
 }
-fn read_metadata(home: &Path, control: &OperationControl) -> Result<Metadata> {
+pub(super) fn read_metadata(home: &Path, control: &OperationControl) -> Result<Metadata> {
     read_metadata_with_check(home, control, &mut || Ok(()))
 }
 fn read_metadata_with_check(
@@ -38,7 +38,11 @@ fn read_metadata_with_check(
         }
     }
 }
-fn inspect(metadata: &Metadata, id: &str, control: &OperationControl) -> Result<GoCaptureDecode> {
+pub(super) fn inspect(
+    metadata: &Metadata,
+    id: &str,
+    control: &OperationControl,
+) -> Result<GoCaptureDecode> {
     let raw =
         metadata.read_bytes_controlled_with_check(&format!("capture/{id}"), control, || Ok(()))?;
     dependencies::inspect_capture_projection(&raw, id, control)

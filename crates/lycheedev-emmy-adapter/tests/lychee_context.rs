@@ -1472,3 +1472,389 @@ fn interrupted_signature_projection_keeps_typed_control_and_never_caches_a_succe
         Err(OwnedQueryFailure::Control("original-deadline"))
     ));
 }
+
+fn one_checker_fixture(
+    name: &str,
+    source: &str,
+    code: emmylua_code_analysis::DiagnosticCode,
+) -> (
+    OwnedQueryTest,
+    FileId,
+    Arc<emmylua_code_analysis::CheckConfig>,
+) {
+    use emmylua_code_analysis::{CheckConfig, DiagnosticCode, Emmyrc};
+    let mut config = Emmyrc::default();
+    config.diagnostics.disable = DiagnosticCode::all()
+        .into_iter()
+        .filter(|candidate| *candidate != code)
+        .collect();
+    config.diagnostics.enables = vec![code];
+    let checks = Arc::new(CheckConfig::new(&config));
+    let mut analysis = EmmyLuaAnalysis::new();
+    analysis.update_config(Arc::new(config));
+    let root = std::env::current_dir()
+        .unwrap()
+        .join("owned-consumer-contracts");
+    analysis.add_main_workspace(root.clone());
+    let fixture =
+        OwnedQueryTest::ingest(analysis, vec![(root.join(name), Some(Arc::from(source)))]).unwrap();
+    let file = fixture.file_ids()[0];
+    (fixture, file, checks)
+}
+
+#[test]
+fn return_query_and_checker_normalize_method_self_and_generic_alias_like_fixed_upstream() {
+    use emmylua_code_analysis::{DiagnosticCode, LuaTypeDeclId};
+    use emmylua_parser::LuaClosureExpr;
+    const CASES: [(&str, &str, usize); 3] = [
+        (
+            "self-mismatch.lua",
+            "---@class A\nlocal A = {}\n---@class B\nlocal B = {}\n---@param b B\n---@return self\nfunction A:copy(b) return b end\n",
+            1,
+        ),
+        (
+            "self-match.lua",
+            "---@class A\nlocal A = {}\n---@return self\nfunction A:copy() return self end\n",
+            0,
+        ),
+        (
+            "return-alias.lua",
+            "---@alias Identity<T> T\n---@return Identity<string>\nlocal function f() return 'ok' end\n",
+            0,
+        ),
+    ];
+    for (name, source, expected_count) in CASES {
+        let (fixture, file, checks) =
+            one_checker_fixture(name, source, DiagnosticCode::ReturnTypeMismatch);
+        let raw = fixture.semantic_model(file);
+        let closure = raw
+            .syntax_tree()
+            .unwrap()
+            .get_red_root()
+            .descendants()
+            .find_map(LuaClosureExpr::cast)
+            .unwrap();
+        let expected_type = if name == "return-alias.lua" {
+            LuaType::String
+        } else {
+            LuaType::Ref(LuaTypeDeclId::global("A"))
+        };
+        // Independent ordinary upstream is the source of this normal contract.
+        // The archived patched session's early-return gap stays in its traces.
+        assert_eq!(
+            raw.return_type(closure.get_syntax_id()),
+            Some(expected_type.clone()),
+            "{name}"
+        );
+        let expected = fixture
+            .diagnose_file_with_config(file, checks.clone())
+            .unwrap();
+        assert_eq!(expected.len(), expected_count, "{name}: {expected:?}");
+        let session = owned_query::session(Arc::new(context("return-normalization")));
+        owned_query::model!(model, fixture, file, session.clone());
+        assert_eq!(
+            model.return_type(closure.get_syntax_id()),
+            Some(expected_type),
+            "{name}"
+        );
+        let run = fixture.diagnose(file, checks, &session).unwrap();
+        assert!(run.complete, "{name}");
+        assert_eq!(run.diagnostics.len(), expected.len(), "{name}: {run:?}");
+        let index = fixture.db.line_index(file).unwrap();
+        for (actual, expected) in run.diagnostics.iter().zip(expected) {
+            let start = index.get_line_col(actual.range.start(), source).unwrap();
+            let end = index.get_line_col(actual.range.end(), source).unwrap();
+            assert_eq!(
+                expected.range,
+                lsp_types::Range::new(
+                    lsp_types::Position::new(start.0 as u32, start.1 as u32),
+                    lsp_types::Position::new(end.0 as u32, end.1 as u32),
+                )
+            );
+            assert_eq!(
+                expected.code,
+                Some(lsp_types::NumberOrString::String(
+                    actual.code.get_name().into()
+                ))
+            );
+            assert_eq!(expected.severity, Some(actual.severity));
+            assert_eq!(expected.message, actual.message);
+            assert_eq!(expected.tags, actual.tags);
+            assert_eq!(expected.data, actual.data);
+        }
+        assert!(session.coverage().is_empty(), "{name}");
+    }
+}
+
+#[test]
+fn normalized_method_return_checks_selected_actual_value_with_its_original_proof() {
+    use emmylua_code_analysis::{DiagnosticCode, LuaTypeDeclId};
+    const SOURCE: &str = "---@class A\nlocal A = {}\n---@class B\nlocal B = {}\n---@param b B\n---@return self\nfunction A:copy(b) return b end\n";
+    for absent in [true, false] {
+        let (fixture, file, checks) = one_checker_fixture(
+            "selected-method.lua",
+            SOURCE,
+            DiagnosticCode::ReturnTypeMismatch,
+        );
+        let returned = site(&fixture, file, "b");
+        let origin = site(&fixture, file, "A");
+        let mut provider = context("selected-method-return");
+        provider.decisions.insert(
+            returned,
+            if absent {
+                BindingDecision::KnownAbsent {
+                    proof: "selected-return-proof".into(),
+                }
+            } else {
+                BindingDecision::Bound(BoundValue {
+                    identity: "selected-A".into(),
+                    proof: "selected-return-proof".into(),
+                    value: SelectedValue::Expression(origin),
+                })
+            },
+        );
+        let session = owned_query::session(Arc::new(provider));
+        owned_query::model!(model, fixture, file, session.clone());
+        assert_eq!(
+            model.type_of_expr(returned.syntax),
+            if absent {
+                LuaType::Nil
+            } else {
+                LuaType::Ref(LuaTypeDeclId::global("A"))
+            }
+        );
+        let run = fixture.diagnose(file, checks, &session).unwrap();
+        assert!(run.complete);
+        assert_eq!(run.diagnostics.len(), usize::from(absent), "{run:?}");
+        if absent {
+            let diagnostic = &run.diagnostics[0];
+            assert_eq!(diagnostic.code, DiagnosticCode::ReturnTypeMismatch);
+            assert_eq!(diagnostic.range, returned.syntax.get_range());
+            assert_eq!(diagnostic.message, "expected `A` but found `nil`. ");
+            assert_eq!(diagnostic.tags, None);
+            assert_eq!(diagnostic.data, None);
+        }
+        assert_eq!(
+            session.coverage(),
+            [BindingCoverage {
+                site: returned,
+                operation: "resolve",
+                state: if absent { "known_absent" } else { "bound" },
+                proof: "selected-return-proof".into(),
+                reason: None,
+                parameter: None,
+                parameter_index: None,
+                argument: None,
+            }]
+        );
+    }
+}
+
+#[test]
+fn table_assignment_union_keeps_selected_shape_identity_before_compatibility() {
+    use emmylua_code_analysis::DiagnosticCode;
+    const SOURCE: &str = "---@param flag boolean\nlocal function f(flag)\n---@type { x: table }\nlocal out = { x = flag and selected }\nend\n";
+    for complete in [true, false] {
+        let (fixture, file, checks) = one_checker_fixture(
+            "union-assignment.lua",
+            SOURCE,
+            DiagnosticCode::AssignTypeMismatch,
+        );
+        let selected = site(&fixture, file, "selected");
+        let value_site = site(&fixture, file, "flag and selected");
+        let mut provider = context("union-assignment");
+        let object = ObjectRef {
+            identity: "selected-object".into(),
+            epoch: "epoch-1".into(),
+            origin: ObjectOrigin::Lua(selected),
+            view: ObjectViewKey {
+                context: provider.identity.clone(),
+                observation: 1,
+                object_id: 1,
+            },
+        };
+        provider.decisions.insert(
+            selected,
+            BindingDecision::Bound(BoundValue {
+                identity: object.identity.clone(),
+                proof: "selected-object-proof".into(),
+                value: SelectedValue::Object(object.clone()),
+            }),
+        );
+        provider.shapes.insert(
+            object.view.clone(),
+            ObjectShape {
+                key: object.view,
+                fields: vec![],
+                enumeration: if complete {
+                    ShapeEnumeration::Complete
+                } else {
+                    ShapeEnumeration::Unavailable("enumeration-unavailable".into())
+                },
+                proof: "object-shape-proof".into(),
+            },
+        );
+        let session = owned_query::session(Arc::new(provider));
+        owned_query::model!(model, fixture, file, session.clone());
+        let value = model.value_of_expr(value_site.syntax);
+        let components = value
+            .carried_union()
+            .expect("selected union must retain its evidence");
+        assert_eq!(components.len(), 2);
+        assert_eq!(
+            components[0].structural_type(),
+            &LuaType::BooleanConst(false)
+        );
+        let info = components[1].object_info().unwrap();
+        assert_eq!(info.identity, "selected-object");
+        assert_eq!(info.complete, complete);
+        let run = fixture.diagnose(file, checks, &session).unwrap();
+        assert!(run.complete);
+        assert_eq!(run.diagnostics.len(), usize::from(!complete), "{run:?}");
+        if !complete {
+            let diagnostic = &run.diagnostics[0];
+            assert_eq!(diagnostic.code, DiagnosticCode::AssignTypeMismatch);
+            assert_eq!(diagnostic.range, value_site.syntax.get_range());
+            assert!(
+                diagnostic
+                    .message
+                    .ends_with("binding object context or shape unavailable")
+            );
+            assert_eq!(diagnostic.tags, None);
+            assert_eq!(diagnostic.data, None);
+        }
+        assert_eq!(
+            session.coverage(),
+            [
+                (
+                    "object_shape",
+                    if complete { "bound" } else { "unavailable" },
+                    "object-shape-proof",
+                    (!complete).then_some("object_shape_incomplete")
+                ),
+                ("resolve", "bound", "selected-object-proof", None),
+                (
+                    "structure_check",
+                    if complete {
+                        "native_checked"
+                    } else {
+                        "unavailable"
+                    },
+                    "object-shape-proof",
+                    (!complete).then_some("object_context_or_shape_unavailable")
+                ),
+            ]
+            .map(|(operation, state, proof, reason)| BindingCoverage {
+                site: selected,
+                operation,
+                state,
+                proof: proof.into(),
+                reason: reason.map(str::to_owned),
+                parameter: None,
+                parameter_index: None,
+                argument: None,
+            })
+        );
+    }
+}
+
+#[test]
+fn return_expected_generic_context_preserves_unconstrained_shell_identity_and_rich_fields() {
+    use emmylua_code_analysis::{DiagnosticCode, GenericTplId, LuaMemberKey};
+    use emmylua_parser::LuaClosureExpr;
+    for generic in ["T", "T: string"] {
+        let source =
+            format!("---@generic {generic}\n---@return T\nlocal function f() return 42 end\n");
+        let (fixture, file, checks) = one_checker_fixture(
+            "return-generic.lua",
+            &source,
+            DiagnosticCode::ReturnTypeMismatch,
+        );
+        let raw = fixture.semantic_model(file);
+        let closure = raw
+            .syntax_tree()
+            .unwrap()
+            .get_red_root()
+            .descendants()
+            .find_map(LuaClosureExpr::cast)
+            .unwrap();
+        let expected = raw.return_type(closure.get_syntax_id()).unwrap();
+        let LuaType::TplRef(template) = &expected else {
+            panic!("{expected:?}");
+        };
+        assert_eq!(template.get_tpl_id(), GenericTplId::Type(0));
+        assert_eq!(template.get_name(), "T");
+        assert_eq!(template.get_constraint(), None);
+        assert_eq!(template.get_default_type(), None);
+        assert!(!template.is_const());
+        assert!(
+            fixture
+                .diagnose_file_with_config(file, checks.clone())
+                .unwrap()
+                .is_empty()
+        );
+        let session = owned_query::session(Arc::new(context("return-generic")));
+        owned_query::model!(model, fixture, file, session.clone());
+        assert_eq!(model.return_type(closure.get_syntax_id()), Some(expected));
+        let run = fixture.diagnose(file, checks, &session).unwrap();
+        assert!(run.complete);
+        assert!(run.diagnostics.is_empty(), "{run:?}");
+        assert!(session.coverage().is_empty());
+    }
+    for annotation in ["fun<T>(value: T): T", "fun<U>(value: T): U"] {
+        let source = format!(
+            "---@generic T\n---@return {annotation}\nlocal function f() return missing end\n"
+        );
+        let (fixture, file, _) = one_checker_fixture(
+            "nested-generic.lua",
+            &source,
+            DiagnosticCode::ReturnTypeMismatch,
+        );
+        let raw = fixture.semantic_model(file);
+        let signature = &raw.file_facts().unwrap().signatures[0];
+        let syntax = signature.docs.as_ref().unwrap().returns[0];
+        let expected = raw.doc_type_lua_rich_in(file, syntax);
+        let LuaType::DocFunction(function) = &expected else {
+            panic!("{expected:?}");
+        };
+        assert!(
+            function
+                .get_generic_params()
+                .iter()
+                .all(|param| param.get_tpl_id().is_func())
+        );
+        let session = owned_query::session(Arc::new(context("nested-return-generic")));
+        owned_query::model!(model, fixture, file, session.clone());
+        assert_eq!(model.return_type(signature.closure_syntax), Some(expected));
+        assert!(session.coverage().is_empty());
+    }
+    // The session's approved rich annotation survives generic normalization.
+    // Falling back to doc shell alone would discard x and yield broad Table.
+    let (fixture, file, _) = one_checker_fixture(
+        "rich-return-generic.lua",
+        "---@generic T\n---@return { x: T }\nlocal function f() return missing end\n",
+        DiagnosticCode::ReturnTypeMismatch,
+    );
+    let closure = fixture
+        .semantic_model(file)
+        .syntax_tree()
+        .unwrap()
+        .get_red_root()
+        .descendants()
+        .find_map(LuaClosureExpr::cast)
+        .unwrap();
+    let session = owned_query::session(Arc::new(context("rich-return-generic")));
+    owned_query::model!(model, fixture, file, session.clone());
+    let expected = model.return_type(closure.get_syntax_id()).unwrap();
+    let LuaType::Object(object) = expected else {
+        panic!("{expected:?}");
+    };
+    assert_eq!(object.get_fields().len(), 1);
+    let LuaType::TplRef(template) = &object.get_fields()[&LuaMemberKey::Name("x".into())] else {
+        panic!("field lost its generic identity");
+    };
+    assert_eq!(template.get_tpl_id(), GenericTplId::Type(0));
+    assert_eq!(template.get_name(), "T");
+    assert_eq!(template.get_constraint(), None);
+    assert!(session.coverage().is_empty());
+}

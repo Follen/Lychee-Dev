@@ -54,6 +54,16 @@ impl<'a> StagedFile<'a> {
         }
         self.stage.file_mut().write_all(bytes)
     }
+    /// Random access is limited to the same private unsealed output owner.
+    /// ZIP finalization may patch its local header before seal; neither sealed
+    /// readers nor committed/uncertain files gain mutable access.
+    pub fn seek_private(&mut self, position: SeekFrom) -> io::Result<u64> {
+        self.require_private()?;
+        if self.sealed {
+            return Err(invalid("a sealed spool cannot be repositioned for writing"));
+        }
+        self.stage.file_mut().seek(position)
+    }
     /// Sync and rewind the original held handle, not a temporary pathname.
     pub fn seal(&mut self) -> io::Result<()> {
         self.require_private()?;
@@ -154,3 +164,6 @@ impl Read for StagedFile<'_> {
 }
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod zip_tests;

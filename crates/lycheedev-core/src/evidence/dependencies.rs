@@ -1286,3 +1286,6 @@ pub(crate) fn decode_workspace_identity_with_check(
 }
 #[cfg(test)]
 mod workspace_control_tests;
+
+pub(super) mod retention;
+pub(super) use retention::decode_retention;

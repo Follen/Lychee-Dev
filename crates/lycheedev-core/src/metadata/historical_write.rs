@@ -17,6 +17,7 @@ pub struct HistoricalWriter<'a> {
     connection: &'a Connection,
     home: &'a Path,
     control: &'a OperationControl,
+    write_lease_held: bool,
 }
 /// Preserve the first typed cause and retain every later cleanup failure.
 pub fn finish_historical<T>(result: Result<T>, cleanup: Result<()>) -> Result<T> {
@@ -79,13 +80,13 @@ impl Metadata {
         run: impl FnOnce(&HistoricalWriter<'_>) -> Result<T>,
     ) -> Result<T> {
         control.check()?;
-        crate::workspace::open(home)?;
+        crate::workspace::open_controlled(home, control)?;
         control.check()?;
         let schema = historical_lease(home, "metadata-schema", control)?;
         let opened = (|| {
             std::fs::create_dir_all(home.join("state"))?;
             control.check()?;
-            let until = Instant::now() + Duration::from_secs(5);
+            let until = control.deadline();
             let connection = checked_sql(control, until, &mut || {}, || {
                 Connection::open_with_flags(
                     home.join("state/toolkit.sqlite"),
@@ -162,11 +163,12 @@ impl Metadata {
             connection: &connection,
             home,
             control,
+            write_lease_held: false,
         });
-        finish_historical(result, close(connection)).and_then(|value| {
-            control.check()?;
-            Ok(value)
-        })
+        crate::selection::selection_finish(
+            finish_historical(result, close(connection)),
+            control.check(),
+        )
     }
 }
 fn close(connection: Connection) -> Result<()> {
@@ -175,10 +177,34 @@ fn close(connection: Connection) -> Result<()> {
         .map_err(|(_connection, error)| error.into())
 }
 impl HistoricalWriter<'_> {
+    /// Hold the fixed metadata-write namespace across inspect -> mutation.
+    /// Nested commit/delete borrow this owner instead of acquiring it twice.
+    pub(crate) fn with_write_lease<T>(
+        &self,
+        run: impl FnOnce(&HistoricalWriter<'_>) -> Result<T>,
+    ) -> Result<T> {
+        self.control.check()?;
+        if self.write_lease_held {
+            return run(self);
+        }
+        let lease = historical_lease(self.home, "metadata-write", self.control)?;
+        let writer = HistoricalWriter {
+            connection: self.connection,
+            home: self.home,
+            control: self.control,
+            write_lease_held: true,
+        };
+        let result = run(&writer);
+        crate::selection::selection_finish(
+            finish_historical(result, lease.close()),
+            self.control.check(),
+        )
+    }
+
     pub fn document(&self, key: &str) -> Result<RawDocument> {
         let row: Option<(i64, i64, Option<Vec<u8>>)> = checked_sql(
             self.control,
-            Instant::now() + Duration::from_secs(5),
+            self.control.deadline(),
             &mut || {},
             || {
                 self.connection.query_row("SELECT generation,length(CAST(value AS BLOB)),CASE WHEN length(CAST(value AS BLOB))<=1048576 THEN CAST(value AS BLOB) ELSE NULL END FROM documents WHERE key=?1", [key], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()
@@ -240,7 +266,11 @@ impl HistoricalWriter<'_> {
                 ));
             }
         }
-        let lease = historical_lease(self.home, "metadata-write", self.control)?;
+        let lease = if self.write_lease_held {
+            None
+        } else {
+            Some(historical_lease(self.home, "metadata-write", self.control)?)
+        };
         let result = (|| {
             let until = self.control.deadline();
             let mut transaction = checked_sql(self.control, until, &mut || {}, || {
@@ -277,7 +307,7 @@ impl HistoricalWriter<'_> {
             })();
             finish_transaction(&mut transaction, result)
         })();
-        let result = finish_historical(result, lease.close());
+        let result = finish_historical(result, lease.map_or(Ok(()), ExclusiveLock::close));
         crate::selection::selection_finish(result, self.control.check())
     }
     pub fn commit(&self, changes: &[HistoricalMutation<'_>]) -> Result<()> {
@@ -314,9 +344,13 @@ impl HistoricalWriter<'_> {
                 ));
             }
         }
-        let lease = historical_lease(self.home, "metadata-write", self.control)?;
+        let lease = if self.write_lease_held {
+            None
+        } else {
+            Some(historical_lease(self.home, "metadata-write", self.control)?)
+        };
         let result = (|| {
-            let until = Instant::now() + Duration::from_secs(5);
+            let until = self.control.deadline();
             let mut transaction = checked_sql(self.control, until, on_busy, || {
                 rusqlite::Transaction::new_unchecked(
                     self.connection,
@@ -347,7 +381,10 @@ impl HistoricalWriter<'_> {
             })();
             finish_transaction(&mut transaction, result)
         })();
-        finish_historical(result, lease.close())
+        crate::selection::selection_finish(
+            finish_historical(result, lease.map_or(Ok(()), ExclusiveLock::close)),
+            self.control.check(),
+        )
     }
 }
 #[cfg(test)]
@@ -363,12 +400,14 @@ fn finish_transaction(
     }
     // Cleanup must run even after the caller stopped. One nonblocking rollback;
     // retain its failure with the original cause, never claim successful CAS.
-    let rollback = transaction
-        .execute_batch("ROLLBACK")
-        .map_err(ToolkitError::from);
-    if rollback.is_ok() {
-        transaction.set_drop_behavior(rusqlite::DropBehavior::Ignore);
-    }
+    let rollback = if transaction.is_autocommit() {
+        Ok(())
+    } else {
+        transaction
+            .execute_batch("ROLLBACK")
+            .map_err(ToolkitError::from)
+    };
+    transaction.set_drop_behavior(rusqlite::DropBehavior::Ignore);
     finish_historical(result, rollback)
 }
 

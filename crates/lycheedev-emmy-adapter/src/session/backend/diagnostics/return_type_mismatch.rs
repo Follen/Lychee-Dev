@@ -33,10 +33,10 @@ impl<E> OwnedQuery<'_, '_, E> {
                 if docs.returns.is_empty() {
                     continue;
                 }
-                (
-                    self.contextual_signature_return(self.model.file_id(), signature)?,
-                    docs,
-                )
+                let Some(expected) = self.return_type(signature.closure_syntax)? else {
+                    continue;
+                };
+                (expected, docs)
             } else {
                 let Some(function) = self
                     .expected_member_signatures_for_closure(signature.closure_syntax)?

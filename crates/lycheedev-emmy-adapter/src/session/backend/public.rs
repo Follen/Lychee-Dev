@@ -56,10 +56,23 @@ impl<E> OwnedQuery<'_, '_, E> {
         else {
             return Ok(None);
         };
-        // The contextual contract returns Some(Unknown), unlike the raw shell
-        // entry. No fallback through the ordinary no-context model is permitted.
-        self.contextual_signature_return(self.model.file_id(), signature)
-            .map(Some)
+        // Keep contextual body inference and Some(Unknown), but retain the
+        // ordinary public return query's normalization before its consumers
+        // compare values: `self` denotes this member's owner, then aliases
+        // expand. The historical patched session early return omitted these
+        // steps; using its raw SelfInfer here accepts unrelated named classes.
+        // Both transformations keep selected carriers and the original control.
+        let mut value = self.contextual_signature_return(self.model.file_id(), signature)?;
+        if let Some(docs) = &signature.docs
+            && (!docs.returns.is_empty() || !docs.return_overload_rows.is_empty())
+            && !docs.generic_params.is_empty()
+        {
+            value = self.bind_owned_return_generics(value, &docs.generic_params)?;
+        }
+        if let Some(owner) = self.method_owner_type(closure)? {
+            value = self.replace_owned_self(value, &owner)?;
+        }
+        self.expand_aliases(value).map(Some)
     }
 
     pub fn resolve_member(
