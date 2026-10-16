@@ -2,6 +2,7 @@ import {readFileSync,readdirSync} from 'node:fs';
 import {dirname,join,resolve,sep} from 'node:path';
 import {createHash} from 'node:crypto';
 import {emmySourcePath,inspectEmmy} from './rust-emmy-identity.mjs';
+import {inspectTlsNameAdaptation} from './rust-tls-identity.mjs';
 
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 export function licensedDependencies(root,metadata,supplements){
@@ -11,7 +12,15 @@ export function licensedDependencies(root,metadata,supplements){
   const reachable=new Set(metadata.resolve.nodes.map(node=>node.id));
   for(const pkg of metadata.packages)if(reachable.has(pkg.id)&&!pkg.source&&pkg.name.startsWith('emmylua_')&&!emmyPackage(pkg))
     throw new Error(`dependencies.emmy_source_outside_custody: ${pkg.name}`);
-  const packages=metadata.packages.filter(pkg=>reachable.has(pkg.id)&&(pkg.source||emmyPackage(pkg)))
+  const tlsCandidates=metadata.packages.filter(pkg=>reachable.has(pkg.id)&&!pkg.source&&['native-tls','schannel'].includes(pkg.name));
+  const tls=tlsCandidates.length?inspectTlsNameAdaptation(root):null;
+  const tlsPackage=pkg=>tls?.packages.find(record=>record.name===pkg.name&&resolve(pkg.manifest_path)===record.manifestPath);
+  for(const pkg of tlsCandidates){
+    const record=tlsPackage(pkg);
+    if(!record||pkg.version!==record.version||pkg.license!==record.license||pkg.repository!==record.repository)
+      throw new Error(`dependencies.tls_source_identity: ${pkg.name}`);
+  }
+  const packages=metadata.packages.filter(pkg=>reachable.has(pkg.id)&&(pkg.source||emmyPackage(pkg)||tlsPackage(pkg)))
     .sort((a,b)=>a.name.localeCompare(b.name)||a.version.localeCompare(b.version));
   const emmy=packages.some(emmyPackage)?inspectEmmy(root):null;
   if(emmy)for(const pkg of packages.filter(emmyPackage)){
@@ -54,8 +63,11 @@ export function licensedDependencies(root,metadata,supplements){
         correspondingSource:{schema:emmy.schema,historicalPrivatePatchRecovered:false,baseCommit:emmy.base.commit,
           baseArchiveSHA256:emmy.base.archiveSHA256,identitySHA256:emmy.identitySHA256,recipeSHA256:emmy.recipeSHA256,
           patchedTreeSHA256:emmy.patchedTreeSHA256,path:resolve(pkg.manifest_path).slice(emmyRoot.length+1).replaceAll('\\','/')}
-      }:{})});
+      }:tlsPackage(pkg)?{correspondingSource:{schema:tls.schema,manifestSHA256:tls.manifestSHA256,
+        patchSHA256:tls.patchSHA256,archiveSHA256:tlsPackage(pkg).archiveSHA256,path:tlsPackage(pkg).path,
+        adaptation:'Windows verification-name separation; original certificate policy retained'}}:{})});
   }
   if(emmy){const after=inspectEmmy(root);if(after.recipeSHA256!==emmy.recipeSHA256||after.patchedTreeSHA256!==emmy.patchedTreeSHA256)throw new Error('dependencies.emmy_changed_during_inventory');}
+  if(tls)inspectTlsNameAdaptation(root);
   return records;
 }

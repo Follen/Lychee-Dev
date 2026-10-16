@@ -154,3 +154,21 @@ Rust connector and IO owners; the upstream attribution is retained.
 The complete copyright, conditions and disclaimer are in
 [the transport Go license](crates/lycheedev-data/src/remote/transport/GO-LICENSE)
 and in the distributed npm package notices.
+
+## Pinned Windows TLS name adaptation
+
+`vendor/native-tls-0.2.18` preserves the rust-native-tls Developers' MIT OR
+Apache-2.0 license and copyright in [LICENSE-MIT](vendor/native-tls-0.2.18/LICENSE-MIT)
+and [LICENSE-APACHE](vendor/native-tls-0.2.18/LICENSE-APACHE).
+`vendor/schannel-0.1.29` preserves Copyright (c) 2015 steffengy and its
+[MIT license](vendor/schannel-0.1.29/LICENSE.md).
+
+These exact official registry releases have a narrowly identified local
+adaptation: separate SNI and certificate-verification names inside the existing
+Windows connector. Original chain/name validation, trust policy and asynchronous
+owners remain in their original libraries. They are not unmodified upstream
+packages; the complete source identities and replayable three-file delta are in
+[the adaptation record](vendor/tls-name-adaptation.json) and
+[patch](vendor/tls-verification-name.patch). Other platforms use the original
+native-tls API and implementation. The unmodified Emmy dependency requirement
+is separate and unchanged.

@@ -1448,8 +1448,13 @@ fn client_hello_sni(stream: &mut impl std::io::Read) -> Option<Vec<u8>> {
 }
 
 #[test]
-fn single_dot_tls_uses_go_name_without_changing_wire_identity_and_cancels() {
-    for name in ["example.test", "example.test."] {
+fn dot_tls_uses_go_name_without_changing_wire_identity_and_cancels() {
+    for name in [
+        "example.test",
+        "example.test.",
+        "example.test..",
+        "example.test...",
+    ] {
         let (ready, received) = mpsc::channel();
         let (address, peer) = server(move |mut stream| {
             let name = client_hello_sni(&mut stream);
@@ -1485,8 +1490,8 @@ fn single_dot_tls_uses_go_name_without_changing_wire_identity_and_cancels() {
         assert_eq!(result.unwrap_err().code, "command.cancelled");
         assert_eq!(budget.snapshot().unwrap().network_requests, 1);
     }
-    // These prove our exact certificate-policy input, not Schannel's observed
-    // multi-dot SNI or certificate acceptance. Those require Windows evidence.
+    // Certificate-policy names intentionally remain distinct from the SNI
+    // asserted above. Actual strict verification is covered by tls_names.
     assert_eq!(tls_name("example.test.."), "example.test.");
     assert_eq!(tls_name("example.test..."), "example.test..");
 }

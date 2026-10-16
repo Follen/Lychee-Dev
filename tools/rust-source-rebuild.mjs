@@ -5,6 +5,7 @@ import {join,resolve} from 'node:path';
 import {admission,contained,sha256} from './rust-disk.mjs';
 import {hashFile,runCargo,sourceDigest} from './rust-build.mjs';
 import {stageEmmySources} from './rust-source-dependencies.mjs';
+import {stageTlsNameSources} from './rust-tls-identity.mjs';
 
 const root=resolve(process.cwd()),out=contained(root,resolve(process.argv[2]||'.tmp/rust-source-rebuild'));
 admission(root,{requiredBytes:2*1024**3});mkdirSync(out);
@@ -13,9 +14,10 @@ for(const name of ['Cargo.toml','Cargo.lock','crates','release','LICENSE','THIRD
 mkdirSync(join(source,'tests/rust-source-data'),{recursive:true});
 copyFileSync(join(root,'tests/rust-source-data/generate-unicode-simple.mjs'),join(source,'tests/rust-source-data/generate-unicode-simple.mjs'));
 const emmy=stageEmmySources(root,source);
-cpSync(join(root,'.tmp/rust-vendor/source'),join(source,'vendor'),{recursive:true});
+const tls=stageTlsNameSources(root,source);
+cpSync(join(root,'.tmp/rust-vendor/source'),join(source,'vendor/registry'),{recursive:true});
 mkdirSync(join(source,'.cargo'));
-writeFileSync(join(source,'.cargo/config.toml'),'[source.crates-io]\nreplace-with="vendored-sources"\n[source.vendored-sources]\ndirectory="vendor"\n[target.x86_64-pc-windows-msvc]\nrustflags=["-C","target-feature=+crt-static"]\n');
+writeFileSync(join(source,'.cargo/config.toml'),'[source.crates-io]\nreplace-with="vendored-sources"\n[source.vendored-sources]\ndirectory="vendor/registry"\n[target.x86_64-pc-windows-msvc]\nrustflags=["-C","target-feature=+crt-static"]\n');
 const compiler=JSON.parse(readFileSync(join(source,'release/tools/rust.json'))),tools=[];
 for(const [name,expected] of [['rustc',compiler.rustc],['cargo',compiler.cargo]]){
   const located=spawnSync('where.exe',[name],{encoding:'utf8',windowsHide:true,shell:false,timeout:30000});
@@ -30,7 +32,7 @@ for(const [name,expected] of [['rustc',compiler.rustc],['cargo',compiler.cargo]]
 const sourceCommit=spawnSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8',windowsHide:true,shell:false,timeout:30000,maxBuffer:1<<20});
 if(sourceCommit.status!==0||!(/^[a-f0-9]{40}$/.test(sourceCommit.stdout.trim())))throw new Error('rust-rebuild.source_commit_unavailable');
 const sealedSource={commit:sourceCommit.stdout.trim(),snapshotSHA256:sourceDigest(source),dirty:true};
-const report={schema:'lycheedev.rust-source-rebuild.v1',state:'running',offline:true,locked:true,compiler,tools,emmy,sourceIdentity:sealedSource,sourceDigest:sealedSource.snapshotSHA256,sourceCargoLockSHA256:hashFile(join(source,'Cargo.lock')),builds:[],scope:`uncommitted immutable Rust-only snapshot including the complete ${emmy.identity==='public-upstream-unmodified-v1'?'unmodified public Emmy dependency and zero-patch recipe':'historical public-base Emmy reconstruction and patch recipe'}; historical private patch not recovered; two fresh Cargo homes and sequential empty controlled caches; not an official tagged release source archive`};
+const report={schema:'lycheedev.rust-source-rebuild.v1',state:'running',offline:true,locked:true,compiler,tools,emmy,tls,sourceIdentity:sealedSource,sourceDigest:sealedSource.snapshotSHA256,sourceCargoLockSHA256:hashFile(join(source,'Cargo.lock')),builds:[],scope:`uncommitted immutable Rust-only snapshot including the complete ${emmy.identity==='public-upstream-unmodified-v1'?'unmodified public Emmy dependency and zero-patch recipe':'historical public-base Emmy reconstruction and patch recipe'}; historical private patch not recovered; two fresh Cargo homes and sequential empty controlled caches; not an official tagged release source archive`};
 const reportPath=join(out,'report.json'),save=()=>writeFileSync(reportPath,JSON.stringify(report,null,2)+'\n');save();
 for(const name of ['first','second']){
   const environment={CARGO_NET_OFFLINE:'true',LYCHEEDEV_BUILD_COMMIT:sealedSource.commit,LYCHEEDEV_BUILD_DIRTY:'true',CFLAGS:'/DNDEBUG /Brepro',CXXFLAGS:'/DNDEBUG /Brepro',CARGO_ENCODED_RUSTFLAGS:['-C','target-feature=+crt-static','-C','link-arg=/Brepro','--remap-path-prefix',`${source}=/lycheedev`,'--remap-path-prefix',`${source.replaceAll('\\','/')}=/lycheedev`].join('\x1f')};

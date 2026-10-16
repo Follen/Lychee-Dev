@@ -45,3 +45,33 @@ disabled to make the comparison pass.
 Pure Node runner/custody tests use synthetic bytes and injected executors. They
 do not execute Go, Cargo, Rust, a TLS server, or change trust settings. Runtime
 status belongs to the subsequent actual Windows workflow, not those unit tests.
+
+## Windows SNI/verification-name correction
+
+The ec503 Windows results are retained in PR14 comments
+[6213137313](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6213137313)
+and [6213169897](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6213169897):
+all five cases were actually observed, and both multi-dot cases had different
+SNI bytes despite matching TLS rejection. That failure is not converted into a
+pass by changing the expected observations.
+
+The successor uses the same native-tls → Schannel → tokio-native-tls connector.
+Two pinned dependency adaptations expose a separate Windows verification name;
+Data supplies Go's all-final-dots-trimmed SNI and one-final-dot-trimmed Windows
+certificate-policy input. No hostname pre-rejection is introduced: unusual SAN
+and exact-name behavior remains in the original platform certificate policy.
+No ClientHello bytes, trust policy, validation flags, TLS algorithms, protocol
+versions, async IO, resolver, proxy routing or cancellation owners are changed.
+Normal native-tls callers with no override retain the original domain behavior.
+The stream owns both names, so any original renegotiation validation uses the
+same verification input rather than reverting to SNI.
+
+The source and upgrade procedure are recorded in
+[the pinned adaptation](../../../vendor/TLS-NAME-ADAPTATION.md).
+The existing five-case oracle, normal/IP/proxy loopbacks, and original stop
+checks remain in `remote::`; the dot-name cancellation loop now includes both
+multi-dot cases. A separate private-root regression checks the pinned builder's
+None/default behavior, clone propagation, independent positive/negative names
+and an untrusted root. Its observations do not add cases to the fixed five-case
+oracle output or relax the oracle. These new Rust declarations require the
+next ordinary Windows build/test batch; source checks are not runtime evidence.

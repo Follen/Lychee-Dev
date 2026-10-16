@@ -133,3 +133,78 @@ fn private_root_tls_observes_all_dot_names_and_strict_certificate_results() {
         serde_json::to_string(&observations).unwrap()
     );
 }
+
+#[cfg(target_os = "windows")]
+#[test]
+fn pinned_native_connector_preserves_defaults_and_separates_strict_verification() {
+    // This exercises the pinned public builder, including its default None
+    // behavior. It must not implement the compatibility fix by rejecting every
+    // split name or by accepting every certificate matching the SNI name.
+    for (sni, verification, trusted, accepted) in [
+        ("example.test", None, true, true),
+        ("wrong.test", None, true, false),
+        ("wrong.test", Some("example.test"), true, true),
+        ("example.test", Some("wrong.test"), true, false),
+        ("example.test", Some("example.test."), true, false),
+        ("example.test", Some("example.test"), false, false),
+    ] {
+        let identity = native_tls::Identity::from_pkcs12(IDENTITY, "public-test-fixture").unwrap();
+        let acceptor = native_tls::TlsAcceptor::new(identity).unwrap();
+        let input = Arc::new(Mutex::new(Vec::new()));
+        let recorded = input.clone();
+        let (address, peer) = server(move |socket| {
+            let input = ObserveHello {
+                socket,
+                input: recorded,
+            };
+            acceptor
+                .accept(input)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        });
+        let (control, budget) = scope();
+        let result: Result<()> = run(async {
+            let mut builder = native_tls::TlsConnector::builder();
+            builder.disable_built_in_roots(true);
+            if trusted {
+                builder.add_root_certificate(
+                    native_tls::Certificate::from_pem(ROOT).map_err(|e| http(e.to_string()))?,
+                );
+            }
+            if let Some(name) = verification {
+                builder.verification_name(name);
+            }
+            // Clone uses the same pinned name policy; async ownership and the
+            // original control future remain the unchanged tokio-native-tls path.
+            let connector: tokio_native_tls::TlsConnector = builder
+                .build()
+                .map_err(|e| http(e.to_string()))?
+                .clone()
+                .into();
+            let operation = async {
+                let socket = tokio::net::TcpStream::connect(&address)
+                    .await
+                    .map_err(|e| http(e.to_string()))?;
+                connector
+                    .connect(sni, socket)
+                    .await
+                    .map_err(|e| http(e.to_string()))?;
+                Ok::<(), ToolkitError>(())
+            };
+            controlled(operation, &control, Some(&budget), control.deadline()).await?
+        });
+        let server_result = peer.join().unwrap();
+        let recorded = input.lock().unwrap().clone();
+        let actual_sni = client_hello_sni(&mut io::Cursor::new(recorded));
+        assert_eq!(actual_sni.as_deref(), Some(sni.as_bytes()));
+        assert_eq!(
+            result.is_ok(),
+            accepted,
+            "SNI={sni}, verify={verification:?}, trusted={trusted}: {result:?}"
+        );
+        if accepted {
+            assert!(server_result.unwrap().is_ok());
+        }
+        assert!(control.check().is_ok());
+    }
+}

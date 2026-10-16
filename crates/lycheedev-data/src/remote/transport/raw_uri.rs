@@ -261,10 +261,10 @@ impl Prepared {
         .await
     }
 }
-// Go's Windows certificate-policy input removes exactly one final dot. The
-// locked native connector shares this name with SNI: it matches Go SNI for
-// zero/one dot, while multiple dots still require supported-Windows evidence.
-// Strict platform trust/hostname verification is always retained.
+// Go's Windows certificate-policy input removes exactly one final dot, while
+// ClientHello SNI removes every final dot. The pinned native/Schannel adaptation
+// separates these inputs within the original connector and certificate policy.
+// It does not pre-reject unusual names or disable platform verification.
 fn tls_name(name: &str) -> String {
     name.strip_suffix('.').unwrap_or(name).to_owned()
 }
@@ -286,11 +286,23 @@ fn platform_tls_with_builder(
         .unwrap_or(name);
     let ip = ip.rsplit_once('%').map_or(ip, |(address, _)| address);
     let use_sni = ip.parse::<std::net::IpAddr>().is_err() && !name.trim_end_matches('.').is_empty();
+    #[cfg(target_os = "windows")]
+    builder.verification_name(&tls_name(name));
     let connector = builder
         .use_sni(use_sni)
         .build()
         .map_err(|_| http("platform TLS configuration failed"))?;
-    Ok((tls_name(name), connector.into()))
+    #[cfg(target_os = "windows")]
+    let connect_name = if use_sni {
+        name.trim_end_matches('.').to_owned()
+    } else {
+        // Keep literal IP/bracket/zone and all-dot behavior on the existing
+        // SNI-disabled path; the independent verification input remains exact.
+        tls_name(name)
+    };
+    #[cfg(not(target_os = "windows"))]
+    let connect_name = tls_name(name);
+    Ok((connect_name, connector.into()))
 }
 fn explicit_port(authority: &str) -> bool {
     let suffix = authority

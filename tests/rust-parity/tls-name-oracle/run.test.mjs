@@ -196,3 +196,6 @@ test('CI pins official Go, reuses the remote owner output, and never adds a seco
   assert(!workflow.includes("steps.data_remote.outcome == 'success'"));
   assert(!workflow.includes("steps.data_remote.outputs.tls_rust_owner != ''"));
 });
+
+// Pinned dependency custody is checked by the existing runner-test group.
+import './adaptation.test.mjs';
