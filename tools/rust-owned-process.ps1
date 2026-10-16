@@ -138,7 +138,7 @@ public static class ToolkitOwnedProcess {
  [StructLayout(LayoutKind.Sequential)] struct ACCOUNTING {public long user,kernel,periodUser,periodKernel;public uint faults,total,active,terminated;}
  [StructLayout(LayoutKind.Sequential)] struct FT {public uint low,high;}
  public sealed class ObservedProcess {public long pid,creationFileTime;public string image,error;public bool exited,jobMember,reviewedAuxiliary;}
- public sealed class Result {public uint pid,exitCode=259,activeProcesses;public long creationFileTime;public bool rootReaped,treeReaped,handlesClosed,outputReadersComplete,outputLimit,forced,deadlineHit,parentExitedBeforeChildren,drainCompletedByAccounting,knownAuxiliaryCleanup;public string error;public ToolkitMemory.Status memory;public List<ObservedProcess> atDrainDeadline,auxiliaryProcesses;}
+ public sealed class Result {public uint pid,exitCode=259,activeProcesses;public long creationFileTime,commandStartTicks,rootExitTicks,treeReapedTicks;public bool rootReaped,treeReaped,handlesClosed,outputReadersComplete,outputLimit,forced,deadlineHit,parentExitedBeforeChildren,drainCompletedByAccounting,knownAuxiliaryCleanup;public string error;public ToolkitMemory.Status memory;public List<ObservedProcess> atDrainDeadline,auxiliaryProcesses;}
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr CreateJobObjectW(IntPtr security,string name);
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetInformationJobObject(IntPtr job,int kind,IntPtr data,uint size);
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr job,int kind,out ACCOUNTING data,uint size,IntPtr returned);
@@ -215,6 +215,8 @@ public static class ToolkitOwnedProcess {
    handles=Marshal.AllocHGlobal(3*IntPtr.Size);Marshal.WriteIntPtr(handles,0,input);Marshal.WriteIntPtr(handles,IntPtr.Size,output);Marshal.WriteIntPtr(handles,2*IntPtr.Size,error);
    if(!UpdateProcThreadAttribute(attributes,0,new IntPtr(0x20002),handles,new IntPtr(3*IntPtr.Size),IntPtr.Zero,IntPtr.Zero))throw Error("owned.handle_list");
    var start=new SIX{start=new SI{size=Marshal.SizeOf(typeof(SIX)),flags=0x101,show=0,input=input,output=output,error=error},attributes=attributes};var command=new StringBuilder(Quote(binary));foreach(string arg in args)command.Append(" ").Append(Quote(arg));
+   // Same monotonic clock: exclude PowerShell/compiler startup, retain all CLI work.
+   result.commandStartTicks=Stopwatch.GetTimestamp();
    if(!CreateProcessW(binary,command,IntPtr.Zero,IntPtr.Zero,true,0x08080004,IntPtr.Zero,cwd,ref start,out process))throw Error("owned.create_suspended");
    result.pid=process.pid;FT created,exited,kernel,user;if(!GetProcessTimes(process.process,out created,out exited,out kernel,out user))throw Error("owned.process_identity");result.creationFileTime=((long)created.high<<32)|created.low;
    if(!AssignProcessToJobObject(job,process.process))throw Error("owned.assign_job");assigned=true;
@@ -224,7 +226,7 @@ public static class ToolkitOwnedProcess {
    // Observation failure is evidence-only and must not abort the business run.
    if(!String.IsNullOrEmpty(memoryPrefix))try{memory=new ToolkitMemory.Observer(job,process.pid,result.creationFileTime,memoryPrefix,memoryMarker);}catch(Exception failure){result.memory=new ToolkitMemory.Status{error=failure.ToString(),threadStopped=true,handlesClosed=!failure.Message.Contains("memory.close_startup_job")};}
    if(ResumeThread(process.thread)==UInt32.MaxValue)throw Error("owned.resume");
-   rootWatcher=Task.Run(()=>{if(WaitForSingleObject(process.process,0xffffffff)==0)PostQueuedCompletionStatus(port,0x80000001,job,new IntPtr(process.pid));});
+   rootWatcher=Task.Run(()=>{if(WaitForSingleObject(process.process,0xffffffff)==0){Interlocked.CompareExchange(ref result.rootExitTicks,Stopwatch.GetTimestamp(),0);PostQueuedCompletionStatus(port,0x80000001,job,new IntPtr(process.pid));}});
    while(true){
     long remaining=Math.Min(timeoutMs-clock.ElapsedMilliseconds,orphanDeadline-clock.ElapsedMilliseconds);
     if(remaining<=0){
@@ -258,6 +260,12 @@ public static class ToolkitOwnedProcess {
    }
    if(output!=IntPtr.Zero&&output!=new IntPtr(-1)){CloseHandle(output);output=IntPtr.Zero;}if(error!=IntPtr.Zero&&error!=new IntPtr(-1)){CloseHandle(error);error=IntPtr.Zero;}
    if(stdoutReader!=null&&stderrReader!=null)result.outputReadersComplete=Task.WaitAll(new Task[]{stdoutReader,stderrReader},10000);
+   // Do not include observer shutdown in the product interval. A successful
+   // receipt still requires observer, watcher and native handle closure below.
+   if(result.rootReaped&&result.treeReaped&&result.outputReadersComplete){
+    Interlocked.CompareExchange(ref result.rootExitTicks,Stopwatch.GetTimestamp(),0);
+    result.treeReapedTicks=Stopwatch.GetTimestamp();
+   }
    if(memory!=null)try{result.memory=memory.Stop();}catch(Exception failure){result.memory=new ToolkitMemory.Status{error=failure.ToString()};}
    // Always wait for the original watcher, even when observation shutdown failed.
    bool watcherClosed=rootWatcher==null||rootWatcher.Wait(10000);
@@ -400,7 +408,7 @@ function Convert-ObservedProcesses($rows) {
   @{pid=$_.pid;creationFileTime=$_.creationFileTime.ToString([Globalization.CultureInfo]::InvariantCulture);image=$_.image;error=$_.error;exited=$_.exited;jobMember=$_.jobMember;reviewedAuxiliary=$_.reviewedAuxiliary}
  })
 }
-$receipt=@{schema='lycheedev.owned-process.v1';binary=$binary;pid=$result.pid;creationFileTime=$result.creationFileTime.ToString([Globalization.CultureInfo]::InvariantCulture);exitCode=$result.exitCode;rootReaped=$result.rootReaped;treeReaped=$result.treeReaped;handlesClosed=$result.handlesClosed;toolIdentityLocksClosed=$true;outputReadersComplete=$result.outputReadersComplete;outputLimit=$result.outputLimit;activeProcesses=$result.activeProcesses;forced=$result.forced;knownAuxiliaryCleanup=$result.knownAuxiliaryCleanup;auxiliaryProcesses=(Convert-ObservedProcesses $result.auxiliaryProcesses);helperAdmission=$helperAdmission;deadlineHit=$result.deadlineHit;parentExitedBeforeChildren=$result.parentExitedBeforeChildren;drainCompletedByAccounting=$result.drainCompletedByAccounting;atDrainDeadline=(Convert-ObservedProcesses $result.atDrainDeadline);error=$result.error;memory=$result.memory}
+$receipt=@{schema='lycheedev.owned-process.v1';binary=$binary;pid=$result.pid;creationFileTime=$result.creationFileTime.ToString([Globalization.CultureInfo]::InvariantCulture);exitCode=$result.exitCode;rootReaped=$result.rootReaped;treeReaped=$result.treeReaped;handlesClosed=$result.handlesClosed;toolIdentityLocksClosed=$true;outputReadersComplete=$result.outputReadersComplete;outputLimit=$result.outputLimit;activeProcesses=$result.activeProcesses;forced=$result.forced;knownAuxiliaryCleanup=$result.knownAuxiliaryCleanup;auxiliaryProcesses=(Convert-ObservedProcesses $result.auxiliaryProcesses);helperAdmission=$helperAdmission;deadlineHit=$result.deadlineHit;parentExitedBeforeChildren=$result.parentExitedBeforeChildren;drainCompletedByAccounting=$result.drainCompletedByAccounting;atDrainDeadline=(Convert-ObservedProcesses $result.atDrainDeadline);error=$result.error;memory=$result.memory;timing=@{schema="lycheedev.owned-timing.v1";frequency=[Diagnostics.Stopwatch]::Frequency;startTicks=$result.commandStartTicks.ToString([Globalization.CultureInfo]::InvariantCulture);rootExitTicks=$result.rootExitTicks.ToString([Globalization.CultureInfo]::InvariantCulture);treeReapedTicks=$result.treeReapedTicks.ToString([Globalization.CultureInfo]::InvariantCulture);boundary="before CreateProcessW through root/tree reap and output drain; excludes PowerShell startup and observer shutdown"}}
 [IO.File]::WriteAllText([string]$requestData.receipt,($receipt|ConvertTo-Json -Depth 5))
 if(!$result.treeReaped -or !$result.rootReaped -or !$result.handlesClosed -or !$result.outputReadersComplete){exit 8}
 exit 0

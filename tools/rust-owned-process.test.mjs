@@ -263,3 +263,20 @@ test('an ordinary-child exit before the drain deadline does not trigger an early
   assert.equal(state.orphanDeadline,110);assert.equal(state.timeoutMs,1000);
   drainDeadline(state);assert.equal(state.result.knownAuxiliaryCleanup,true);
 });
+
+test('native command clock excludes wrapper startup and includes finite descendant drain', {skip:process.platform!=='win32'}, t => {
+  const options={...fixture(t),orphanMs:3000};
+  const code=`const child=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},750)'],{detached:true,stdio:'ignore'});child.unref();`;
+  const wall=performance.now();
+  const result=ownedSpawnSync(process.execPath,['-e',code],options);
+  const wallMillis=performance.now()-wall;
+  assert.equal(result.error,undefined);assert.equal(result.handlesReaped,true);
+  const timing=result.proof.timing;assert.equal(timing.schema,'lycheedev.owned-timing.v1');
+  for(const key of ['startTicks','rootExitTicks','treeReapedTicks'])assert.match(timing[key],/^[1-9]\d*$/);
+  const start=BigInt(timing.startTicks),exit=BigInt(timing.rootExitTicks),end=BigInt(timing.treeReapedTicks);
+  assert.ok(start<=exit&&exit<=end);
+  const millis=Number(end-start)*1000/timing.frequency;
+  assert.ok(millis>=700,'finite worker lifetime must remain in measured command');
+  assert.ok(millis<wallMillis,'PowerShell startup is outside native command interval');
+  assert.equal(result.proof.forced,false);
+});

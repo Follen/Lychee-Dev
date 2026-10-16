@@ -1,0 +1,180 @@
+// Synthetic runner contract tests. No product, benchmark or Windows pass claim.
+import test from 'node:test';
+import {execFileSync} from 'node:child_process';
+import assert from 'node:assert/strict';
+import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {runInNewContext} from 'node:vm';
+import {CASES, GO_COMMIT, REPETITIONS, compareSamples, elapsed, orderFor, semantic, statistics, summarize} from './contract.mjs';
+import {LUALS, assertSeedCold, cloneSeed, derivedIdentity, inventory, proveWarmReuse, safeRelative, verifyGoMetadata, verifySeedMetadata} from './inputs.mjs';
+import {DatabaseSync} from 'node:sqlite';
+import {APPROVED_ENGINE_SUMMARIES} from '../rust-parity/describe-contract.mjs';
+const oracle = JSON.parse(readFileSync(new URL('../rust-source-full-corpus/retail-oracle.json', import.meta.url)));
+const pin = 'PIN-paired', anchor = oracle.anchors[0];
+const envelope = result => ({schema: 'lycheedev.result.v1', ok: true, error: null, result});
+function query() {
+  return envelope({sourceId: oracle.repository, product: oracle.product, requestedRef: oracle.commit, matchedTag: null, resolvedCommit: oracle.commit, snapshotId: pin, complete: true, truncated: false,
+    coverage: {analyzedDocuments: oracle.documents, skippedDocuments: 0, diagnostics: 0, complete: true},
+    results: [{symbolId: 'SYM-1', kind: 'function', name: anchor.symbol, path: anchor.path, matchedBy: 'exact_symbol', role: 'declaration', excerpt: anchor.declarationLine, contentHash: anchor.sha256, line: anchor.line, score: 100, scoreParts: {exact: 100}}]});
+}
+function index() { return envelope({repository: oracle.repository, product: oracle.product, commit: oracle.commit, documents: oracle.documents, declarations: 22, relationships: 11, assets: 9, diagnostics: 0, complete: true, parser: 'source-v1', storage: 'file-cache', schema: 'lycheedev.source-map.v2'}); }
+function proof() { return {schema: 'lycheedev.owned-process.v1', rootReaped: true, treeReaped: true, handlesClosed: true, toolIdentityLocksClosed: true, outputReadersComplete: true, activeProcesses: 0, forced: false, timing: {schema: 'lycheedev.owned-timing.v1', frequency: 10000000, startTicks: '9007199254740993000', rootExitTicks: '9007199254741993000', treeReapedTicks: '9007199254742993000'}}; }
+function pairs() { return CASES.flatMap(({id}) => Array.from({length: REPETITIONS}, (_, iteration) => ['cold', 'warm'].map(cacheMode => ({caseId: id, iteration, cacheMode, order: orderFor(iteration), resultEquivalent: true, ...Object.fromEntries(['go', 'rust'].map(engine => [engine, {valid: true, home: `${id}/${iteration}/${engine}`, binary: engine, snapshot: pin, warmReuse: {verified: true}, controllableMillis: engine === 'go' ? 100 : 30}]))}))).flat()); }
+test('fixed oracle, workload, exact pair count and 30% target cannot drift to historical five/50%', () => {
+  assert.equal(GO_COMMIT, '3766f9cacb52e93a803a626187e2a1d54a445468'); assert.equal(REPETITIONS, 20);
+  assert.equal(CASES.length, 3); assert.equal(oracle.documents, 4036); assert.equal(oracle.documentBytes, 32269051);
+  assert.deepEqual(orderFor(0), ['go', 'rust']); assert.deepEqual(orderFor(1), ['rust', 'go']);
+  assert(summarize(pairs()).every(row => row.state === 'passed_selected_path' && row.targetRatio === .30));
+});
+test('high-resolution integer clock preserves >2^53 ticks and includes worker drain', () => {
+  const timing = elapsed(proof()); assert.equal(timing.controllableMillis, 200); assert.equal(timing.rootObservedMillis, 100); assert.equal(timing.reapAndDrainMillis, 100);
+});
+test('missing, forced, output-failed and unreaped process clocks cannot pass', () => {
+  for (const mutate of [p => delete p.timing, p => p.forced = true, p => p.handlesClosed = false, p => p.outputReadersComplete = false, p => p.activeProcesses = 1, p => p.error = 'failed', p => p.deadlineHit = true, p => p.timing.rootExitTicks = '0', p => p.timing.treeReapedTicks = p.timing.startTicks, p => p.timing.frequency = 0]) { const value = proof(); mutate(value); assert.throws(() => elapsed(value)); }
+});
+test('near-resolution sample cannot be used to claim a speedup', () => { const value = proof(); value.timing.rootExitTicks = value.timing.startTicks; value.timing.treeReapedTicks = (BigInt(value.timing.startTicks) + 1n).toString(); assert.throws(() => elapsed(value), /100 clock ticks/); });
+test('20-sample statistics use averaged middle pair and nearest-rank p95', () => { assert.deepEqual(statistics(Array.from({length: 20}, (_, i) => i + 1)), {count: 20, median: 10.5, p95: 19, min: 1, max: 20}); });
+test('missing sample and duplicate/out-of-range iterations fail acceptance', () => {
+  for (const mutate of [p => p.splice(0, 1), p => p[2].iteration = p[0].iteration, p => p[0].iteration = 20]) { const value = pairs(); mutate(value); assert(summarize(value).some(row => row.state === 'failed_correctness_or_missing_samples')); }
+});
+test('one intermediate mismatch cannot be hidden by final matching pair', () => { const value = pairs(); value[8].resultEquivalent = false; assert(summarize(value).some(row => !row.correctAndComplete)); });
+test('invalid failure time is never dropped from a success-only distribution', () => {
+  const value = pairs(); value[4].rust.valid = false; value[4].rust.controllableMillis = null;
+  const summary = summarize(value)[0]; assert.equal(summary.state, 'failed_correctness_or_missing_samples'); assert.equal(summary.timings, null);
+});
+test('a path just above 0.30 fails regardless of other fast paths', () => {
+  const value = pairs(); for (const row of value.filter(row => row.caseId === CASES[1].id && row.cacheMode === 'warm')) row.rust.controllableMillis = 30.01;
+  const summary = summarize(value); assert.equal(summary.filter(row => row.state === 'failed_performance').length, 1);
+});
+test('warm requires its own successful cold with same home/binary/pin', () => {
+  for (const field of ['home', 'binary', 'snapshot']) { const value = pairs(); value[1].rust[field] = 'other'; assert.equal(summarize(value)[1].correctAndComplete, false); }
+});
+test('reused homes and unbalanced engine order are rejected', () => {
+  for (const mutate of [p => p[2].rust.home = p[0].rust.home, p => p[2].order = ['go', 'rust']]) { const value = pairs(); mutate(value); assert.equal(summarize(value)[0].correctAndComplete, false); }
+});
+test('query compares all public semantic values and ordered rows', () => {
+  compareSamples(CASES[2].id, query(), query(), oracle, pin);
+  for (const field of ['score', 'scoreParts', 'role', 'symbolId', 'excerpt', 'contentHash', 'line']) {
+    const changed = query(); changed.result.results[0][field] = field === 'score' || field === 'line' ? 99 : 'different';
+    assert.throws(() => compareSamples(CASES[2].id, query(), changed, oracle, pin));
+  }
+});
+test('missing full coverage and incomplete/truncated query cannot count as equivalent', () => {
+  for (const mutate of [r => r.coverage.analyzedDocuments--, r => r.coverage.skippedDocuments++, r => r.complete = false, r => r.truncated = true, r => r.resolvedCommit = 'wrong', r => r.results = []]) { const changed = query(); mutate(changed.result); assert.throws(() => semantic(CASES[2].id, changed, 'rust', oracle, pin)); }
+});
+test('Emmy-only proof fields are not erroneously demanded from Go', () => {
+  const changed = query(); changed.result.matchCoverage = {exactMatches: 1}; changed.result.emmyProof = {extra: true}; changed.result.results[0].ownedProvenance = 'extra';
+  assert.equal(compareSamples(CASES[2].id, query(), changed, oracle, pin).resultEquivalent, true);
+});
+test('relationships, suggestions, cursors and diagnostic values are not dropped', () => {
+  for (const mutate of [r => r.relations = [{source: 'x', target: 'y', kind: 'call', confidence: 'high', path: 'x.lua', line: 1}], r => r.suggestions = ['changed'], r => r.nextCursor = 'unexpected', r => r.coverage.diagnostics = 1, r => r.coverage.diagnosticSample = [{path: 'x', line: 1, message: 'failed'}]]) {
+    const changed = query(); mutate(changed.result); assert.throws(() => compareSamples(CASES[2].id, query(), changed, oracle, pin));
+  }
+});
+test('index keeps public schema/storage/parser and all business counts exact', () => {
+  compareSamples(CASES[1].id, index(), index(), oracle, pin);
+  for (const field of ['schema', 'storage', 'parser']) { const changed = index(); changed.result[field] = 'different'; assert.throws(() => compareSamples(CASES[1].id, index(), changed, oracle, pin)); }
+  for (const field of ['declarations', 'relationships', 'assets', 'diagnostics', 'documents']) { const changed = index(); changed.result[field]++; assert.throws(() => compareSamples(CASES[1].id, index(), changed, oracle, pin)); }
+});
+test('describe accepts only the two exact approved engine summary changes', () => {
+  const base = envelope({commands: APPROVED_ENGINE_SUMMARIES.map(v => ({path: v.path, summary: v.expected, flags: [], arguments: [], mutates: false})), formats: ['json'], development: false});
+  const actual = structuredClone(base); for (let i = 0; i < actual.result.commands.length; i++) actual.result.commands[i].summary = APPROVED_ENGINE_SUMMARIES[i].actual;
+  assert.equal(compareSamples(CASES[0].id, base, actual).approvedEngineSummaryChanges.length, 2);
+  actual.result.commands[0].summary += ' hidden change'; assert.throws(() => compareSamples(CASES[0].id, base, actual));
+});
+test('describe does not normalize changed flags, formats, extras or order', () => {
+  const base = envelope({commands: [{path: 'a', flags: []}, {path: 'b', flags: []}], formats: ['json']});
+  for (const mutate of [r => r.commands.reverse(), r => r.commands[0].flags.push('missing'), r => r.formats.push('jsonl'), r => r.unreviewed = true]) { const actual = structuredClone(base); mutate(actual.result); assert.throws(() => compareSamples(CASES[0].id, base, actual)); }
+});
+function goMetadata() { return `binary.exe: go1.27.1\n${Object.entries({'vcs.revision': GO_COMMIT, 'vcs.modified': 'false', CGO_ENABLED: '0', GOOS: 'windows', GOARCH: 'amd64', '-trimpath': 'true'}).map(([k, v]) => `\tbuild\t${k}=${v}`).join('\n')}\n`; }
+test('Go metadata requires exact clean fixed build and optimized target identity', () => {
+  assert.equal(verifyGoMetadata(goMetadata()).commit, GO_COMMIT);
+  for (const [from, to] of [[GO_COMMIT, '0'.repeat(40)], ['modified=false', 'modified=true'], ['go1.27.1', 'go1.27.0'], ['CGO_ENABLED=0', 'CGO_ENABLED=1'], ['GOOS=windows', 'GOOS=linux'], ['-trimpath=true', '-trimpath=false']]) assert.throws(() => verifyGoMetadata(goMetadata().replace(from, to)));
+  assert.throws(() => verifyGoMetadata(goMetadata() + '\tbuild\t-gcflags=all=-N -l\n'));
+});
+test('Go preparer owns caches and temp, ignores user Go config, and preserves dependency networking', () => {
+  const preparer = readFileSync(new URL('../../tools/rust-performance-prepare-go.mjs', import.meta.url), 'utf8');
+  const setup = preparer.slice(preparer.indexOf('const env ='), preparer.indexOf('function run('));
+  for (const proxy of [undefined, 'https://proxy.golang.org,direct']) {
+    const inherited = {Path: 'installed-tools', gocache: 'unowned-cache', GoModCache: 'unowned-modules', gotmpdir: 'unowned-temp', GoEnv: 'user-config', GoToolchain: 'auto', ...(proxy ? {GOPROXY: proxy} : {})};
+    const directory = join(tmpdir(), 'owned-go-prepare');
+    const actual = runInNewContext(setup + '\nenv;', {process: {env: inherited}, job: {directory}, join});
+    for (const [key, name] of Object.entries({GOCACHE: 'go-cache', GOMODCACHE: 'go-mod-cache', GOTMPDIR: 'go-tmp'})) assert.equal(actual[key], join(directory, name));
+    assert.equal(actual.GOENV, 'off'); assert.equal(actual.GOTOOLCHAIN, 'local'); assert.equal(actual.Path, inherited.Path);
+    assert.equal(actual.GOPROXY, proxy); assert.equal(Object.hasOwn(actual, 'GOPROXY'), proxy !== undefined);
+    for (const key of ['gocache', 'GoModCache', 'gotmpdir', 'GoEnv', 'GoToolchain']) assert.equal(Object.hasOwn(actual, key), false);
+  }
+  assert(preparer.includes('for (const directory of [env.GOCACHE, env.GOMODCACHE, env.GOTMPDIR]) mkdirSync(directory);'));
+  assert(preparer.includes('ownedSpawnSync(command, args, {cwd: source, env, evidence: job.evidence, timeout})'));
+});
+test('package/corpus relative paths reject traversal and absolute inputs', () => { for (const name of ['../x', '/x', 'C:/x', 'x\\y', 'a//b', 'a/./b']) assert.throws(() => safeRelative(name)); assert.equal(safeRelative('a/b.lua'), 'a/b.lua'); });
+test('fresh seed clone proves independent equal bytes and detects prewarmed state', t => {
+  const temp = mkdtempSync(join(tmpdir(), 'paired-runner-')); t.after(() => rmSync(temp, {recursive: true, force: true}));
+  const seed = join(temp, 'seed'); mkdirSync(seed);
+  for (const name of ['state', 'pins', 'mirrors', 'blobs', 'indexes', 'cache', 'runs', 'captures', 'locks', 'tmp']) mkdirSync(join(seed, name));
+  writeFileSync(join(seed, 'workspace.json'), '{}'); writeFileSync(join(seed, 'pins', 'pin.json'), '{"pin":"same"}');
+  const source = assertSeedCold(seed), a = join(temp, 'a'), b = join(temp, 'b'); cloneSeed(seed, a, source); cloneSeed(seed, b, source);
+  assert.equal(inventory(a).sha256, inventory(b).sha256); assert.throws(() => cloneSeed(seed, a, source));
+  writeFileSync(join(a, 'indexes', 'cache'), 'warm'); assert.equal(inventory(b).sha256, source.sha256); assert.throws(() => assertSeedCold(a), /preseeded/);
+  writeFileSync(join(seed, 'pins', 'pin.json'), 'changed'); assert.throws(() => cloneSeed(seed, join(temp, 'c'), source), /seed changed/);
+});
+test('native timing starts at creation, ends after all output/tree reap, excludes observer shutdown', () => {
+  const owner = readFileSync(new URL('../../tools/rust-owned-process.ps1', import.meta.url), 'utf8');
+  const start = owner.indexOf('result.commandStartTicks=Stopwatch.GetTimestamp();');
+  assert(start > owner.indexOf('var start=new SIX')); assert(start < owner.indexOf('if(!CreateProcessW(binary,command'));
+  const end = owner.indexOf('result.treeReapedTicks=Stopwatch.GetTimestamp();'); assert(end > owner.indexOf('if(stdoutReader!=null&&stderrReader!=null)result.outputReadersComplete')); assert(end < owner.indexOf('if(memory!=null)try{result.memory=memory.Stop();}'));
+  assert.match(owner, /startTicks=\$result\.commandStartTicks\.ToString/);
+});
+
+test('source warm repetition without verified reuse cannot pass', () => {
+  const value = pairs(); const row = value.find(row => row.caseId === CASES[1].id && row.cacheMode === 'warm');
+  delete row.go.warmReuse; assert.equal(summarize(value).find(row => row.caseId === CASES[1].id && row.cacheMode === 'warm').correctAndComplete, false);
+});
+test('seed refuses unexpected source facts outside generic cache directories', t => {
+  const home = mkdtempSync(join(tmpdir(), 'paired-seed-root-')); t.after(() => rmSync(home, {recursive: true, force: true}));
+  mkdirSync(join(home, 'source')); assert.throws(() => assertSeedCold(home), /unknown seed root/);
+});
+test('checkpointed seed metadata contains only the actual public pin document', t => {
+  const home = mkdtempSync(join(tmpdir(), 'paired-seed-db-')); t.after(() => rmSync(home, {recursive: true, force: true}));
+  mkdirSync(join(home, 'state')); mkdirSync(join(home, 'pins'));
+  const file = join(home, 'state/toolkit.sqlite'), pinned = {schema: 'lycheedev.selection.v1', id: pin, source: {exactCommit: oracle.commit}};
+  const read = (commit, path) => execFileSync('git', ['--no-replace-objects', 'show', `${commit}:${path}`], {encoding: 'utf8', maxBuffer: 2 << 20});
+  const go = read(GO_COMMIT, 'internal/vault/metadata.go'), rust = read('HEAD', 'crates/lycheedev-core/src/metadata/historical_write.rs');
+  const documents = go.match(/CREATE TABLE documents .*? WITHOUT ROWID; PRAGMA user_version=1;/)?.[0];
+  const deleted = go.match(/CREATE TABLE IF NOT EXISTS deleted_generations .*? WITHOUT ROWID/)?.[0];
+  assert(documents && deleted, 'use actual fixed Go writable DDL'); assert(rust.includes(documents) && rust.includes(deleted), 'Rust writer implements the same schema');
+  const db = new DatabaseSync(file); db.exec(documents);
+  db.prepare('INSERT INTO documents VALUES (?,1,?)').run(`pin/${pin}`, Buffer.from(JSON.stringify(pinned))); db.close();
+  const evidence = join(home, 'metadata-copy.sqlite'); assert.throws(() => verifySeedMetadata(home, pinned, evidence), /complete fixed Go\/Rust writable schema/);
+  const writable = new DatabaseSync(file); writable.exec(deleted); writable.close();
+  const verified = verifySeedMetadata(home, pinned, evidence); assert.equal(verified.checkpointed, true); assert.equal(verified.deletedGenerations, 0);
+  writeFileSync(file + '-wal', 'unfinished'); assert.throws(() => verifySeedMetadata(home, pinned, evidence), /checkpointed and closed/); rmSync(file + '-wal');
+  const tombstone = new DatabaseSync(file); tombstone.prepare('INSERT INTO deleted_generations VALUES (?,1)').run('pin/previous'); tombstone.close();
+  assert.throws(() => verifySeedMetadata(home, pinned, evidence), /no deleted generations/);
+  const clean = new DatabaseSync(file); clean.exec('DELETE FROM deleted_generations'); clean.close();
+  const changed = new DatabaseSync(file); changed.prepare('INSERT INTO documents VALUES (?,1,?)').run('source/rust-index/cached', Buffer.from('{}')); changed.close();
+  assert.throws(() => verifySeedMetadata(home, pinned, evidence), /exactly one pin/);
+});
+test('warm proof keeps actual derived file identity and requires Rust public hit counter', t => {
+  const home = mkdtempSync(join(tmpdir(), 'paired-derived-')); t.after(() => rmSync(home, {recursive: true, force: true}));
+  for (const directory of ['source/v1/facts/snapshots', 'cache/objects']) { mkdirSync(join(home, directory), {recursive: true}); writeFileSync(join(home, directory, 'index'), 'derived'); }
+  const go = derivedIdentity(home, 'go'), rust = derivedIdentity(home, 'rust');
+  assert.equal(proveWarmReuse('go', go, derivedIdentity(home, 'go'), {}).verified, true);
+  const hit = envelope({coverage: {io: {cachedIndex: true, parsedDocuments: 0}}});
+  assert.equal(proveWarmReuse('rust', rust, derivedIdentity(home, 'rust'), hit).verified, true);
+  assert.throws(() => proveWarmReuse('rust', rust, rust, envelope({})), /actual cachedIndex/);
+  writeFileSync(join(home, 'cache/objects/index'), 'replaced'); assert.throws(() => proveWarmReuse('rust', rust, derivedIdentity(home, 'rust'), hit), /identity changed/);
+});
+
+test('package/runtime validation matches actual immutable Go 3.2.3 source', () => {
+  const read = path => execFileSync('git', ['--no-replace-objects', 'show', `${GO_COMMIT}:${path}`], {encoding: 'utf8', maxBuffer: 2 << 20});
+  const runtime = read('release/tools/luals.json'); assert.deepEqual(JSON.parse(runtime), LUALS);
+  const release = read('tools/release.mjs'), lua = read('tools/luals.mjs'), open = read('internal/luals/runtime.go');
+  assert(release.includes("return { schema: 'lycheedev.release.v1', version, commit, binaries, resources, correspondingSource };"));
+  assert(release.includes("runOk('go', ['build', '-trimpath', '-buildvcs=true', '-o', output, './cmd/lycheedev']"));
+  assert(release.includes("env.CGO_ENABLED = '0'")); assert(release.includes('verifyBinaryIdentity(stage,{commit:id.commit,dirty:id.dirty,version});'));
+  assert(lua.includes("files.set('runtime.json', runtimeBytes)")); assert(lua.includes('const path = `tool/luals/${name}`'));
+  assert(open.includes('bytes.Equal(bytes.TrimSpace(metadata), []byte(pinnedRuntimeJSON))'));
+  for (const name of ['bin/lua-language-server.exe', 'bin/main.lua', 'main.lua', 'LICENSE']) assert(open.includes(`"${name}"`));
+});
