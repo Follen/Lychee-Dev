@@ -59,6 +59,11 @@ impl<E> OwnedQuery<'_, '_, E> {
         Ok(())
     }
     fn nil_prefix_type(&mut self, prefix: &LuaExpr) -> QueryResult<OwnedValue, E> {
+        // The selected read is authoritative even when ordinary declaration
+        // flow (or the array-index fallback below) could infer another value.
+        if let Some(value) = self.binding_type_of_expr(prefix.get_syntax_id())? {
+            return Ok(value);
+        }
         if let LuaExpr::NameExpr(name) = prefix
             && let Some(decl) = self.model.resolve_name(name.get_position())
         {

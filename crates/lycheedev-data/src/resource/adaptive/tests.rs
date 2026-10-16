@@ -121,7 +121,15 @@ fn large_tables_and_decoder_scratch_grow_only_on_demand() {
         (584 * MIB, 445 * MIB)
     );
     assert_eq!(b.memory_snapshot().unwrap().peak_scratch_bytes, 180 * MIB);
-    assert_eq!(b.remaining_retained().unwrap(), 24 * MIB);
+    // Fixed Go growMemory rounds 584 MiB to the next 64 MiB step (640),
+    // after the prior 180 MiB scratch reservation has been released.
+    let report = b.memory_snapshot().unwrap();
+    assert_eq!(report.retained_bytes, 640 * MIB);
+    assert_eq!(b.remaining_retained().unwrap(), 56 * MIB);
+    assert_eq!(
+        b.remaining_retained().unwrap(),
+        report.retained_bytes - usage.retained_bytes
+    );
     f.admission.close().unwrap();
 }
 

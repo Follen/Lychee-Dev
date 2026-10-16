@@ -180,13 +180,36 @@ fn groups_aggregates_inherit_partial_work_memory_and_cancellation() {
         Scalar::String("unused".into()),
         Scalar::Float(f64::NAN),
     ]);
+    // Fixed Go group.go:grouping.add evaluates group keys and non-star
+    // aggregate arguments only. COUNT(*) must not read the unused V column.
+    let result = program
+        .execute(&sources, &BTreeMap::new(), Limits::default(), None)
+        .unwrap();
+    assert!(!result.complete);
     assert_eq!(
-        program
-            .execute(&sources, &BTreeMap::new(), Limits::default(), None)
-            .unwrap_err()
-            .code,
-        "relational.numeric_range"
+        result.rows,
+        vec![
+            vec![Scalar::String("a".into()), Scalar::Int(1)],
+            vec![Scalar::String("b".into()), Scalar::Int(1)],
+            vec![Scalar::String("unused".into()), Scalar::Int(1)],
+        ]
     );
+    // Reading that same NaN as an aggregate argument or group key must still
+    // fail canonicalScalar, rather than exposing a partial result.
+    for sql in [
+        "SELECT G,COUNT(V) FROM t GROUP BY G ORDER BY G",
+        "SELECT V,COUNT(*) FROM t GROUP BY V",
+    ] {
+        assert_eq!(
+            Program::compile(sql)
+                .unwrap()
+                .execute(&sources, &BTreeMap::new(), Limits::default(), None)
+                .unwrap_err()
+                .code,
+            "relational.numeric_range",
+            "{sql}"
+        );
+    }
 }
 
 #[test]

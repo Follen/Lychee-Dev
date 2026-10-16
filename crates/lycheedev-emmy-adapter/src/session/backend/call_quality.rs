@@ -47,6 +47,16 @@ impl<E> OwnedQuery<'_, '_, E> {
         if !declared_signature {
             return Ok(None);
         }
+        // Diagnostics can request a selected call directly (for example the
+        // return-count checker), without entering type_of_expr's VM scope.
+        // Own a root scope for that entry, but reuse an active scope so callback
+        // parameter bindings/depth are not reset during nested evaluation.
+        let needs_scope = self.environments.borrow().is_empty();
+        let _scope = if needs_scope {
+            Some(self.enter_execution(Default::default()))
+        } else {
+            None
+        };
         let value = projector.evaluate_permitted_call(site, self)?;
         self.checkpoint()?;
         Ok(Some(value))
@@ -142,3 +152,6 @@ impl<E> OwnedQuery<'_, '_, E> {
         )
     }
 }
+
+#[cfg(test)]
+mod scope_tests;

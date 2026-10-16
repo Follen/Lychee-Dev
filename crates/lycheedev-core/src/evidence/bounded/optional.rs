@@ -259,6 +259,31 @@ pub fn open_verified_blob_bounded_optional_with_check(
     }))
 }
 
+/// Removal's historical streaming verification has no new production payload
+/// cap. The signed Go length is validated before the original native lookup.
+pub(in crate::evidence) fn verify_historical_blob_optional(
+    home: &Path,
+    digest: &str,
+    bytes: i64,
+    control: &OperationControl,
+) -> Result<bool> {
+    control.check()?;
+    if bytes < 0 || !crate::selection::valid_digest(digest, 64) {
+        return Err(integrity("vault.blob_integrity"));
+    }
+    open_workspace(home, Some(control), &mut || Ok(()))?;
+    let reference = BlobRef {
+        sha256: digest.into(),
+        bytes: bytes as u64,
+    };
+    let Some(opened) = open_optional_blob(home, reference, control, &mut || Ok(()))? else {
+        return Ok(false);
+    };
+    scan_blob_with_check(opened, Some(control), &mut || Ok(()), |_| Ok(()))?;
+    control.check()?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

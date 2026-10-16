@@ -55,3 +55,45 @@ pub fn hold_cleanup_ancestor(
         Err(e) => finish_file(file, Err(e), control),
     }
 }
+
+/// Only absence from the original native acquisition is optional. Once opened,
+/// metadata/hash/close failures remain errors, including disappearance races.
+pub(crate) fn authenticate_cleanup_file_optional(
+    path: &Path,
+    bytes: u64,
+    digest: &str,
+    control: &crate::control::OperationControl,
+) -> Result<Option<AuthenticatedCleanup>> {
+    control.check()?;
+    let candidate = match CleanupCandidate::open(path, false) {
+        Ok(candidate) => candidate,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            control.check()?;
+            return Ok(None);
+        }
+        Err(error) => {
+            return crate::selection::selection_finish(Err(error.into()), control.check());
+        }
+    };
+    match candidate.authenticate::<ToolkitError>(|file| {
+        if file.metadata()?.len() != bytes {
+            return Err(ToolkitError::new(
+                "vault.blob_integrity",
+                "vault.blob_integrity",
+                4,
+            ));
+        }
+        let actual = hash_locked_file(file, bytes, || control.check())?;
+        if actual != digest {
+            return Err(ToolkitError::new(
+                "vault.blob_integrity",
+                "vault.blob_integrity",
+                4,
+            ));
+        }
+        control.check()
+    }) {
+        Ok(held) => Ok(Some(held)),
+        Err((error, candidate)) => finish_file(candidate.into_file(), Err(error), control),
+    }
+}

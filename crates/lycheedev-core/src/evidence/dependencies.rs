@@ -1,11 +1,7 @@
 //! Fixed Go 3.2.0 archive.go dependency consumers. Historical payloads are
 //! inspected only through their original typed representations and byte caps.
-use super::{BlobRef, CaptureRef, Provenance, bounded, names_capture, validate_capture};
-use crate::{
-    Result, ToolkitError,
-    control::OperationControl,
-    metadata::{Document, TransactionReader},
-};
+use super::{BlobRef, CaptureRef, Provenance, bounded};
+use crate::{Result, ToolkitError, control::OperationControl};
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor},
@@ -123,29 +119,18 @@ pub(super) fn deserialize_dependencies<'de, D: Deserializer<'de>>(
     Ok(Option::<Vec<String>>::deserialize(deserializer)?.unwrap_or_default())
 }
 
-pub(super) fn references_capture(
+/// Fixed-Go raw reference matching. Called under the removal SQLite snapshot;
+/// no Value normalization may invent an escaped literal reference.
+pub(super) fn references_capture_raw(
     home: &Path,
-    document: &Document,
-    reader: &TransactionReader<'_>,
-    target: &CaptureRef,
+    key: &str,
+    manifest: &[u8],
+    target: &GoCaptureDecode,
     control: &OperationControl,
 ) -> Result<bool> {
     control.check()?;
-    if names_capture(&document.value, &target.id) {
-        return Ok(true);
-    }
-    let Some(id) = document.key.strip_prefix("capture/") else {
-        return Ok(false);
-    };
-    // Go reads a permissive projection before deciding whether this is a
-    // known payload consumer. Unknown extension fields never invalidate an
-    // unrelated capture; only selected consumers undergo manifest identity.
-    // Read under the SAME write transaction. A Value map sorts names and
-    // collapses repeated fields, which can reverse Go's last-field-wins rules
-    // and hide a real payload consumer. Raw tokens also preserve time escapes.
-    let manifest = reader.read_raw(&document.key)?;
-    let needle = format!("\"{}\"", target.id);
-    let locator = format!("\"capture:{}\"", target.id);
+    let needle = format!("\"{}\"", target.id());
+    let locator = format!("\"capture:{}\"", target.id());
     if manifest
         .windows(needle.len())
         .any(|bytes| bytes == needle.as_bytes())
@@ -155,8 +140,10 @@ pub(super) fn references_capture(
     {
         return Ok(true);
     }
-    let manifest = normalize_go_strings(&manifest, control)?;
-    let reference: EmbeddedCapture = serde_json::from_slice(&manifest)?;
+    let Some(id) = key.strip_prefix("capture/") else {
+        return Ok(false);
+    };
+    let reference = decode_capture_projection(manifest, control)?.0;
     if reference.media_type != "application/json"
         || reference.provenance.kind != "asset-demux-manifest"
             && !reference.dependencies.values().is_empty()
@@ -165,7 +152,7 @@ pub(super) fn references_capture(
     }
     let maximum = match (
         reference.provenance.kind.as_str(),
-        target.provenance.kind.as_str(),
+        target.0.provenance.kind.as_str(),
     ) {
         ("hotfix-scan", "hotfix-records") => 4 << 20,
         ("hotfix-records", "hotfix-cache")
@@ -177,46 +164,56 @@ pub(super) fn references_capture(
         ("asset-demux-manifest", "asset" | "asset-demux-source" | "asset-demux-frame") => 16 << 20,
         _ => return Ok(false),
     };
-    let reference = reference.into_capture()?;
-    validate_capture(&reference, id)?;
-    let raw = bounded::read_internal(
+    let reference = inspect_capture_projection(manifest, id, control)?.0;
+    if reference.blob.bytes < 0 || !crate::selection::valid_digest(&reference.blob.sha256, 64) {
+        return Err(ToolkitError::new(
+            "vault.blob_integrity",
+            "vault.blob_integrity",
+            4,
+        ));
+    }
+    let raw = bounded::read_blob_bounded_with_check(
         home,
         &serde_json::to_value(&reference.blob)?,
         maximum,
-        Some(control),
+        control,
+        || Ok(()),
     )?;
     control.check()?;
+    if crate::raw_json::validate_with_check(&raw, || control.check())?.is_err() {
+        return Err(ToolkitError::invalid("invalid dependency payload JSON"));
+    }
     let normalized = normalize_go_strings(&raw, control)?;
     let raw = normalized.as_ref();
     let found = match reference.provenance.kind.as_str() {
         "hotfix-scan" => {
             let scan: Scan = serde_json::from_slice(raw)?;
-            scan.pages.values().iter().any(|page| page == &target.id)
+            scan.pages.values().iter().any(|page| page == &target.0.id)
         }
         "hotfix-records" => {
             let page: Page = serde_json::from_slice(raw)?;
             page.snapshot == reference.provenance.snapshot
                 && page.source.schema == "lycheedev.capture.v1"
-                && page.source.id == target.id
+                && page.source.id == target.0.id
         }
         "asset-export-manifest" => {
             let manifest: Export = serde_json::from_slice(raw)?;
             manifest.schema == "lycheedev.asset-export.v1"
                 && manifest.artifact.is_some_and(|artifact| {
-                    artifact.schema == "lycheedev.capture.v1" && artifact.id == target.id
+                    artifact.schema == "lycheedev.capture.v1" && artifact.id == target.0.id
                 })
         }
         "asset-demux-manifest" => {
             let manifest: Demux = serde_json::from_slice(raw)?;
             manifest.schema == "lycheedev.asset-demux.v1"
-                && if target.provenance.kind == "asset-demux-frame" {
+                && if target.0.provenance.kind == "asset-demux-frame" {
                     manifest
                         .frames
                         .values()
                         .iter()
-                        .any(|frame| frame.capture == target.id)
+                        .any(|frame| frame.capture == target.0.id)
                 } else {
-                    manifest.source == target.id
+                    manifest.source == target.0.id
                 }
         }
         _ => unreachable!("known typed payload"),

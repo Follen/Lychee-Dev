@@ -164,7 +164,7 @@ fn explain_callback_can_resolve_physical_root_absent_from_syntactic_dependencies
 #[test]
 fn reserved_forward_cte_never_falls_through_to_root_resolver() {
     let resolver = Resolver::new(&["base", "forward"]);
-    let error = resolver.execute("WITH first AS (SELECT ID FROM forward), forward AS (SELECT ID FROM base) SELECT ID FROM first").unwrap_err();
+    let error = resolver.execute("WITH early AS (SELECT ID FROM forward), forward AS (SELECT ID FROM base) SELECT ID FROM early").unwrap_err();
     assert_eq!(error.code, "relational.invalid_binding");
     assert!(resolver.events.borrow().is_empty());
 }

@@ -405,7 +405,7 @@ fn original_numeric_list_in_inside_rhs_keeps_distinct_candidate_callbacks() {
     b.equal = true;
     assert_eq!(
         lazy(
-            "SELECT ID FROM a WHERE ID IN (SELECT ID FROM b WHERE ID IN (3,1,3,NULL))",
+            "SELECT ID FROM a WHERE ID IN (SELECT ID FROM b WHERE ID IN (3,1,3,NULL,NULL))",
             &a,
             &b,
             Limits::default(),
@@ -429,10 +429,13 @@ fn original_numeric_list_in_inside_rhs_keeps_distinct_candidate_callbacks() {
         vec![
             "b.equal:Int(3)",
             "b.equal:Int(1)",
+            "b.equal:Null",
             "b.equal:Int(3)",
             "b.equal:Int(1)",
+            "b.equal:Null",
             "b.equal:Int(3)",
-            "b.equal:Int(1)"
+            "b.equal:Int(1)",
+            "b.equal:Null"
         ]
     );
 }
@@ -1082,10 +1085,13 @@ fn explicit_static_root_bypasses_cte_but_forward_reserved_names_never_fall_throu
     }
 }
 #[test]
-fn duplicate_canonical_roots_are_rejected_before_provider_reads() {
+fn duplicate_same_priority_canonical_roots_fail_before_provider_reads() {
+    // Bare and explicit static keys have a defined preference (the fixed map
+    // oracle resolves by Name). Two bare aliases at the same priority remain
+    // ambiguous, and must fail before any provider callback.
     let sources = BTreeMap::from([
         ("a".into(), source(&["ID"], ids(&[1]))),
-        ("static.a".into(), source(&["ID"], ids(&[2]))),
+        ("A".into(), source(&["ID"], ids(&[2]))),
     ]);
     assert_eq!(
         owned("SELECT ID FROM a", &sources).unwrap_err().code,
@@ -1094,7 +1100,7 @@ fn duplicate_canonical_roots_are_rejected_before_provider_reads() {
     let (trace, a, b) = providers();
     let sa = source(&["ID", "Name"], vec![]);
     let sb = source(&["ID", "Name"], vec![]);
-    let inputs = BTreeMap::from([("a".into(), &sa), ("static.a".into(), &sb)]);
+    let inputs = BTreeMap::from([("a".into(), &sa), ("A".into(), &sb)]);
     let providers = [
         PreparedSource {
             schema: &sa,

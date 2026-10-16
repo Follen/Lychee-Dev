@@ -56,6 +56,13 @@ impl<E> OwnedQuery<'_, '_, E> {
         };
         // Inference intentionally precedes recognizing the require import.
         let prefix_ty = self.type_of_expr(prefix.get_syntax_id())?;
+        // This checker is specifically about an imported module's export
+        // surface. An authoritative selected value is not that old import,
+        // even when its source spelling still names the original declaration.
+        // General field/type checkers inspect the actual selected shape.
+        if !prefix_ty.is_context_free() || self.binding_manages_call(prefix.get_syntax_id())? {
+            return Ok(());
+        }
         let Some(file) = self.export_import_module(&prefix)? else {
             return Ok(());
         };
@@ -116,6 +123,11 @@ impl<E> OwnedQuery<'_, '_, E> {
             }
             _ => return Ok(None),
         };
+        // The declaration can be unmanaged while its initializer was selected.
+        // Do not recover the original module through that initializer's syntax.
+        if self.binding_manages_call(call.get_syntax_id())? {
+            return Ok(None);
+        }
         let Some(arg) = call.get_args_list().and_then(|list| list.get_args().next()) else {
             return Ok(None);
         };

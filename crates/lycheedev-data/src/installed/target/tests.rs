@@ -56,7 +56,9 @@ fn local_target_publishes_exact_go_capture_body_and_original_scope() {
     assert_eq!(result.pin.data.as_ref().unwrap().build_config, f.key);
     assert_eq!(
         result.installation,
-        client::display_path(&f.root.join("game"))
+        // Go resolves the selected directory before taking its parent. TEMP
+        // may contain an 8.3 alias; display_path alone does not resolve it.
+        client::display_path(&std::fs::canonicalize(f.root.join("game")).unwrap())
     );
     let capture = serde_json::to_value(&result.capture).unwrap();
     let raw = evidence::read_blob(&f.home, &capture["blob"], 65536).unwrap();

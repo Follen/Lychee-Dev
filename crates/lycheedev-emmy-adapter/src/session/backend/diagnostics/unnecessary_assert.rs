@@ -28,7 +28,9 @@ impl<E> OwnedQuery<'_, '_, E> {
             let Some(first) = args.get_args().next() else {
                 continue;
             };
-            let ty = if let Some(ty) = doc_literal_type(&self.model, &first) {
+            let ty = if let Some(value) = self.binding_type_of_expr(first.get_syntax_id())? {
+                value
+            } else if let Some(ty) = doc_literal_type(&self.model, &first) {
                 OwnedValue::plain(ty)
             } else {
                 self.type_of_expr_at(first.get_syntax_id(), first.get_range().start().into())?

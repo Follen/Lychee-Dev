@@ -295,3 +295,5 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] 集中执行Source默认存储闭环25新回归：Metadata generation/单次intent消费、原scope缓存发布、manifest CAS与checked cleanup。4唯一目标已接；90秒、2GiB与不自动prune边界不变，实际Windows会话/资源尚未验收。
 
 - [ ] 集中验证统一SQL retrieval入口21新回归与c5真实失败修复；保UNION分支CTE声明/执行scope差别，补Pratt混合深度首错与三段非法字段分类。e8适配层41过2失败，修真实expression execution scope后保原断言重跑；workspace编译仍以真实结果为准。
+
+- [ ] 统一重跑evidence remove15新回归、owned scope/selected checker19新回归及c5 SQL/Data修正fixture；原e8 2panic和vctip forced收尾分开验，不能只修断言就称owner正常。其余实现限已确认Go323/43checker差距，不扩SQL能力。

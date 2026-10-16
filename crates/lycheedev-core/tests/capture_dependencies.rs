@@ -789,12 +789,12 @@ fn selected_legacy_consumer_ignores_extensions_but_authenticates_known_manifest_
     assert_eq!(metadata.read::<Value>(&key).unwrap(), extended);
     extended["provenance"]["snapshot"] = json!("changed identity");
     metadata.put(&key, &extended, Some(2)).unwrap();
+    let error = evidence::remove_capture(&home.0, id(&target)).unwrap_err();
     assert_eq!(
-        evidence::remove_capture(&home.0, id(&target))
-            .unwrap_err()
-            .code,
-        "evidence.capture_integrity"
+        (error.code.as_str(), error.exit_code),
+        ("command.failed", 5)
     );
+    assert_eq!(error.message, "evidence.manifest_integrity");
     assert_eq!(
         evidence::read_capture(&home.0, id(&target)).unwrap(),
         target

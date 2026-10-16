@@ -66,6 +66,25 @@ pub(in crate::evidence) fn decode_retention(
     require_schema: bool,
     control: &OperationControl,
 ) -> Result<Value> {
+    let record = checked_record(raw, capture, require_schema, control)?;
+    let result = serde_json::to_value(wire(&record)?).map_err(Into::into);
+    crate::selection::selection_finish(result, control.check())
+}
+
+// Remove validates typed fields but never marshals the ignored retention time.
+pub(in crate::evidence) fn validate_removal_retention(
+    raw: &[u8],
+    capture: &GoCaptureDecode,
+    control: &OperationControl,
+) -> Result<()> {
+    checked_record(raw, capture, false, control).map(|_| ())
+}
+fn checked_record(
+    raw: &[u8],
+    capture: &GoCaptureDecode,
+    require_schema: bool,
+    control: &OperationControl,
+) -> Result<Retention> {
     control.check()?;
     let parsed = (|| {
         if crate::raw_json::validate_with_check(raw, || control.check())?.is_err() {
@@ -111,6 +130,5 @@ pub(in crate::evidence) fn decode_retention(
             control.check(),
         );
     }
-    let result = serde_json::to_value(wire(&record)?).map_err(Into::into);
-    crate::selection::selection_finish(result, control.check())
+    Ok(record)
 }

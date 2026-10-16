@@ -1858,3 +1858,709 @@ fn return_expected_generic_context_preserves_unconstrained_shell_identity_and_ri
     assert_eq!(template.get_constraint(), None);
     assert!(session.coverage().is_empty());
 }
+
+#[test]
+fn nil_checker_uses_selected_reads_before_declaration_flow() {
+    use emmylua_code_analysis::DiagnosticCode;
+    for expression in ["value()", "value.field"] {
+        let source = format!("local origin = true\nlocal value = {{}}\nreturn {expression}\n");
+        for selected in ["absent", "unavailable", "bound"] {
+            let (fixture, file, checks) =
+                one_checker_fixture("selected-nil.lua", &source, DiagnosticCode::NeedCheckNil);
+            assert!(
+                fixture
+                    .diagnose_file_with_config(file, checks.clone())
+                    .unwrap()
+                    .is_empty()
+            );
+            let prefix = site(&fixture, file, "value");
+            let mut provider = context("nil-checker-selected-read");
+            let decision = match selected {
+                "absent" => BindingDecision::KnownAbsent {
+                    proof: "selected-read-proof".into(),
+                },
+                "unavailable" => BindingDecision::Unavailable {
+                    proof: "selected-read-proof".into(),
+                    reason: "read-not-observed".into(),
+                },
+                _ => BindingDecision::Bound(BoundValue {
+                    identity: "selected-boolean".into(),
+                    proof: "selected-read-proof".into(),
+                    value: SelectedValue::Expression(site(&fixture, file, "true")),
+                }),
+            };
+            provider.decisions.insert(prefix, decision);
+            let session = owned_query::session(Arc::new(provider));
+            let run = fixture.diagnose(file, checks, &session).unwrap();
+            assert!(run.complete);
+            assert!(run.execution.contains(&CheckerExecution::Completed(
+                "lycheedev_emmy_adapter::need_check_nil::NeedCheckNilChecker"
+            )));
+            assert_eq!(run.diagnostics.len(), usize::from(selected == "absent"));
+            if selected == "absent" {
+                let diagnostic = &run.diagnostics[0];
+                assert_eq!(diagnostic.code, DiagnosticCode::NeedCheckNil);
+                assert_eq!(diagnostic.range, prefix.syntax.get_range());
+                assert_eq!(
+                    diagnostic.message,
+                    if expression == "value()" {
+                        "function `value` may be nil"
+                    } else {
+                        "value may be nil"
+                    }
+                );
+                assert_eq!(diagnostic.tags, None);
+                assert_eq!(diagnostic.data, None);
+            }
+            assert_eq!(
+                session.coverage(),
+                [BindingCoverage {
+                    site: prefix,
+                    operation: "resolve",
+                    state: match selected {
+                        "absent" => "known_absent",
+                        "unavailable" => "unavailable",
+                        _ => "bound",
+                    },
+                    proof: "selected-read-proof".into(),
+                    reason: (selected == "unavailable").then(|| "read-not-observed".into()),
+                    parameter: None,
+                    parameter_index: None,
+                    argument: None,
+                }]
+            );
+        }
+    }
+}
+
+#[test]
+fn nil_checker_does_not_replace_selected_index_unknown_with_array_fallback() {
+    use emmylua_code_analysis::DiagnosticCode;
+    const SOURCE: &str = "---@type (string?)[]\nlocal items = {}\nreturn items[1].field\n";
+    for absent in [false, true] {
+        let (fixture, file, checks) = one_checker_fixture(
+            "selected-index-nil.lua",
+            SOURCE,
+            DiagnosticCode::NeedCheckNil,
+        );
+        let expected = fixture
+            .diagnose_file_with_config(file, checks.clone())
+            .unwrap();
+        assert_eq!(expected.len(), 1, "ordinary nullable array element");
+        let prefix = site(&fixture, file, "items[1]");
+        let mut provider = context("nil-checker-selected-index");
+        provider.decisions.insert(
+            prefix,
+            if absent {
+                BindingDecision::KnownAbsent {
+                    proof: "index-proof".into(),
+                }
+            } else {
+                BindingDecision::Unavailable {
+                    proof: "index-proof".into(),
+                    reason: "index-not-observed".into(),
+                }
+            },
+        );
+        let session = owned_query::session(Arc::new(provider));
+        let run = fixture.diagnose(file, checks, &session).unwrap();
+        assert!(run.complete);
+        assert_eq!(run.diagnostics.len(), usize::from(absent));
+        if absent {
+            let diagnostic = &run.diagnostics[0];
+            assert_eq!(diagnostic.code, DiagnosticCode::NeedCheckNil);
+            assert_eq!(diagnostic.range, prefix.syntax.get_range());
+            assert_eq!(diagnostic.message, "items[1] may be nil");
+            assert_eq!(diagnostic.severity, expected[0].severity.unwrap());
+            assert_eq!(diagnostic.tags, expected[0].tags);
+            assert_eq!(diagnostic.data, expected[0].data);
+        }
+        assert_eq!(
+            session.coverage(),
+            [BindingCoverage {
+                site: prefix,
+                operation: "resolve",
+                state: if absent {
+                    "known_absent"
+                } else {
+                    "unavailable"
+                },
+                proof: "index-proof".into(),
+                reason: (!absent).then(|| "index-not-observed".into()),
+                parameter: None,
+                parameter_index: None,
+                argument: None,
+            }]
+        );
+    }
+}
+
+#[test]
+fn unmanaged_nil_checker_preserves_normal_flow_and_all_upstream_diagnostic_fields() {
+    use emmylua_code_analysis::DiagnosticCode;
+    for (source, count) in [
+        ("local value = nil\nreturn value.field\n", 1),
+        ("local value = nil\nvalue = {}\nreturn value.field\n", 0),
+        (
+            "---@param value table?\nlocal function f(value)\nif value then return value.field end\nend\n",
+            0,
+        ),
+        (
+            "---@param value table?\nlocal function f(value)\nif not value then return value.field end\nend\n",
+            1,
+        ),
+    ] {
+        let (fixture, file, checks) = one_checker_fixture(
+            "ordinary-nil-flow.lua",
+            source,
+            DiagnosticCode::NeedCheckNil,
+        );
+        let expected = fixture
+            .diagnose_file_with_config(file, checks.clone())
+            .unwrap();
+        assert_eq!(expected.len(), count, "{source}: {expected:?}");
+        let session = owned_query::session(Arc::new(context("ordinary-nil-flow")));
+        let run = fixture.diagnose(file, checks, &session).unwrap();
+        assert!(run.complete);
+        assert_eq!(run.diagnostics.len(), expected.len(), "{source}: {run:?}");
+        let lines = fixture.db.line_index(file).unwrap();
+        for (actual, expected) in run.diagnostics.iter().zip(expected) {
+            let start = lines.get_line_col(actual.range.start(), source).unwrap();
+            let end = lines.get_line_col(actual.range.end(), source).unwrap();
+            assert_eq!(
+                expected.range,
+                lsp_types::Range::new(
+                    lsp_types::Position::new(start.0 as u32, start.1 as u32),
+                    lsp_types::Position::new(end.0 as u32, end.1 as u32),
+                )
+            );
+            assert_eq!(
+                expected.code,
+                Some(lsp_types::NumberOrString::String(
+                    actual.code.get_name().into()
+                ))
+            );
+            assert_eq!(expected.severity, Some(actual.severity));
+            assert_eq!(expected.message, actual.message);
+            assert_eq!(expected.tags, actual.tags);
+            assert_eq!(expected.data, actual.data);
+        }
+        assert!(session.coverage().is_empty());
+    }
+}
+
+#[test]
+fn undefined_field_checker_keeps_xml_selected_shape_instead_of_raw_named_type() {
+    use emmylua_code_analysis::DiagnosticCode;
+    use emmylua_parser::LuaIndexExpr;
+    const SOURCE: &str = "---@class Raw\nlocal Raw = {}\nlocal truth = true\n---@type Raw\nlocal value = {}\nreturn value.visible\n";
+    for complete in [true, false] {
+        let (fixture, file, checks) = one_checker_fixture(
+            "selected-xml-field.lua",
+            SOURCE,
+            DiagnosticCode::UndefinedField,
+        );
+        let raw = fixture
+            .diagnose_file_with_config(file, checks.clone())
+            .unwrap();
+        assert_eq!(
+            raw.len(),
+            1,
+            "the ordinary class has no visible field: {raw:?}"
+        );
+        assert_eq!(raw[0].message, "Undefined field: `visible`");
+        let prefix = site(&fixture, file, "value");
+        let index_site = site(&fixture, file, "value.visible");
+        let mut provider = context("selected-xml-field");
+        let object = ObjectRef {
+            identity: "xml-object".into(),
+            epoch: "epoch-1".into(),
+            origin: ObjectOrigin::Lua(prefix),
+            view: ObjectViewKey {
+                context: provider.identity.clone(),
+                observation: 1,
+                object_id: 1,
+            },
+        };
+        provider.decisions.insert(
+            prefix,
+            BindingDecision::Bound(BoundValue {
+                identity: object.identity.clone(),
+                proof: "object-proof".into(),
+                value: SelectedValue::Object(object.clone()),
+            }),
+        );
+        provider.shapes.insert(
+            object.view.clone(),
+            ObjectShape {
+                key: object.view,
+                proof: "shape-proof".into(),
+                enumeration: if complete {
+                    ShapeEnumeration::Complete
+                } else {
+                    ShapeEnumeration::Unavailable("other-fields-unknown".into())
+                },
+                fields: vec![ObjectField {
+                    key: "visible".into(),
+                    presence: FieldPresence::Present,
+                    value: BindingDecision::Bound(BoundValue {
+                        identity: "field-boolean".into(),
+                        proof: "field-proof".into(),
+                        value: SelectedValue::Expression(site(&fixture, file, "true")),
+                    }),
+                    destination_write: FieldWriteOrigin::Xml(ExternalSourceSpan {
+                        path: "fixture.xml".into(),
+                        content_sha256: "a".repeat(64),
+                        range: lycheedev_emmy_adapter::ByteRange { start: 0, end: 1 },
+                    }),
+                    source_write: None,
+                    copy_origin: None,
+                }],
+            },
+        );
+        let session = owned_query::session(Arc::new(provider));
+        let run = fixture.diagnose(file, checks, &session).unwrap();
+        assert!(run.complete);
+        assert!(run.diagnostics.is_empty(), "{run:?}");
+        assert!(run.execution.contains(&CheckerExecution::Completed(
+            "lycheedev_emmy_adapter::undefined_field::UndefinedFieldChecker"
+        )));
+        owned_query::model!(model, fixture, file, session.clone());
+        let index = LuaIndexExpr::cast(
+            index_site
+                .syntax
+                .to_node_from_root(
+                    &fixture
+                        .semantic_model(file)
+                        .syntax_tree()
+                        .unwrap()
+                        .get_red_root(),
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        let member = model.resolve_member(&index).unwrap();
+        assert_eq!(member.member_id, None);
+        assert_eq!(member.file_id, None);
+        assert_eq!(member.name, "visible");
+        assert_eq!(
+            member.member_type.as_ref().unwrap().structural_type(),
+            &LuaType::BooleanConst(true)
+        );
+        assert_eq!(
+            session.coverage(),
+            [
+                ("object_field", "bound", "field-proof", None),
+                (
+                    "object_shape",
+                    if complete { "bound" } else { "unavailable" },
+                    "shape-proof",
+                    (!complete).then_some("object_shape_incomplete")
+                ),
+                ("resolve", "bound", "object-proof", None),
+                (
+                    "member_lookup",
+                    if complete { "bound" } else { "unavailable" },
+                    "shape-proof",
+                    (!complete).then_some("object_shape_incomplete")
+                ),
+            ]
+            .map(|(operation, state, proof, reason)| BindingCoverage {
+                site: prefix,
+                operation,
+                state,
+                proof: proof.into(),
+                reason: reason.map(str::to_owned),
+                parameter: None,
+                parameter_index: None,
+                argument: None,
+            })
+        );
+    }
+}
+
+#[test]
+fn await_checker_does_not_resurrect_raw_async_docs_over_a_selected_callee() {
+    use emmylua_code_analysis::DiagnosticCode;
+    use emmylua_parser::LuaClosureExpr;
+    const SOURCE: &str =
+        "---@async\nlocal function work() end\nlocal function replacement() end\nwork()\n";
+    for selected in ["unmanaged", "absent", "unavailable", "sync", "async"] {
+        let (fixture, file, checks) =
+            one_checker_fixture("selected-async.lua", SOURCE, DiagnosticCode::AwaitInSync);
+        let expected = fixture
+            .diagnose_file_with_config(file, checks.clone())
+            .unwrap();
+        assert_eq!(
+            expected.len(),
+            1,
+            "ordinary async declaration: {expected:?}"
+        );
+        let prefix = site(&fixture, file, "work");
+        let closures = fixture
+            .semantic_model(file)
+            .syntax_tree()
+            .unwrap()
+            .get_red_root()
+            .descendants()
+            .filter_map(LuaClosureExpr::cast)
+            .collect::<Vec<_>>();
+        assert_eq!(closures.len(), 2);
+        let mut provider = context("selected-async-callee");
+        let decision = match selected {
+            "unmanaged" => BindingDecision::NotManaged,
+            "absent" => BindingDecision::KnownAbsent {
+                proof: "callee-proof".into(),
+            },
+            "unavailable" => BindingDecision::Unavailable {
+                proof: "callee-proof".into(),
+                reason: "callee-not-observed".into(),
+            },
+            _ => BindingDecision::Bound(BoundValue {
+                identity: "actual-callee".into(),
+                proof: "callee-proof".into(),
+                value: SelectedValue::Function(FunctionRef {
+                    file_id: file,
+                    closure: closures[usize::from(selected == "sync")].get_syntax_id(),
+                    declaration: None,
+                }),
+            }),
+        };
+        provider.decisions.insert(prefix, decision);
+        let session = owned_query::session(Arc::new(provider));
+        let run = fixture.diagnose(file, checks, &session).unwrap();
+        assert!(run.complete);
+        assert!(run.execution.contains(&CheckerExecution::Completed(
+            "lycheedev_emmy_adapter::await_in_sync::AwaitInSyncChecker"
+        )));
+        let reports = matches!(selected, "unmanaged" | "async");
+        assert_eq!(
+            run.diagnostics.len(),
+            usize::from(reports),
+            "{selected}: {run:?}"
+        );
+        if reports {
+            let diagnostic = &run.diagnostics[0];
+            assert_eq!(diagnostic.code, DiagnosticCode::AwaitInSync);
+            assert_eq!(diagnostic.range, prefix.syntax.get_range());
+            assert_eq!(diagnostic.message, expected[0].message);
+            assert_eq!(diagnostic.severity, expected[0].severity.unwrap());
+            assert_eq!(diagnostic.tags, expected[0].tags);
+            assert_eq!(diagnostic.data, expected[0].data);
+        }
+        if selected == "unmanaged" {
+            assert!(session.coverage().is_empty());
+        } else {
+            assert_eq!(
+                session.coverage(),
+                [BindingCoverage {
+                    site: prefix,
+                    operation: "resolve",
+                    state: match selected {
+                        "absent" => "known_absent",
+                        "unavailable" => "unavailable",
+                        _ => "bound",
+                    },
+                    proof: "callee-proof".into(),
+                    reason: (selected == "unavailable").then(|| "callee-not-observed".into()),
+                    parameter: None,
+                    parameter_index: None,
+                    argument: None,
+                }]
+            );
+        }
+    }
+}
+
+#[test]
+fn unnecessary_assert_uses_selected_argument_before_raw_literal_annotation() {
+    use emmylua_code_analysis::DiagnosticCode;
+    const SOURCE: &str =
+        "local replacement = false\n---@type true\nlocal value = true\nassert(value)\n";
+    for selected in ["unmanaged", "absent", "unavailable", "false"] {
+        let (fixture, file, checks) = one_checker_fixture(
+            "selected-assert.lua",
+            SOURCE,
+            DiagnosticCode::UnnecessaryAssert,
+        );
+        let expected = fixture
+            .diagnose_file_with_config(file, checks.clone())
+            .unwrap();
+        assert_eq!(expected.len(), 1);
+        assert_eq!(
+            expected[0].message,
+            "Unnecessary assert: this expression is always truthy"
+        );
+        let argument = site(&fixture, file, "value");
+        let call = site(&fixture, file, "assert(value)");
+        let mut provider = context("selected-assert-argument");
+        provider.decisions.insert(
+            argument,
+            match selected {
+                "unmanaged" => BindingDecision::NotManaged,
+                "absent" => BindingDecision::KnownAbsent {
+                    proof: "argument-proof".into(),
+                },
+                "unavailable" => BindingDecision::Unavailable {
+                    proof: "argument-proof".into(),
+                    reason: "argument-not-observed".into(),
+                },
+                _ => BindingDecision::Bound(BoundValue {
+                    identity: "actual-argument".into(),
+                    proof: "argument-proof".into(),
+                    value: SelectedValue::Expression(site(&fixture, file, "false")),
+                }),
+            },
+        );
+        let session = owned_query::session(Arc::new(provider));
+        let run = fixture.diagnose(file, checks, &session).unwrap();
+        assert!(run.complete);
+        assert!(run.execution.contains(&CheckerExecution::Completed(
+            "lycheedev_emmy_adapter::unnecessary_assert::UnnecessaryAssertChecker"
+        )));
+        assert_eq!(
+            run.diagnostics.len(),
+            usize::from(selected != "unavailable")
+        );
+        if selected != "unavailable" {
+            let diagnostic = &run.diagnostics[0];
+            assert_eq!(diagnostic.code, DiagnosticCode::UnnecessaryAssert);
+            assert_eq!(diagnostic.range, call.syntax.get_range());
+            assert_eq!(
+                diagnostic.message,
+                if selected == "unmanaged" {
+                    "Unnecessary assert: this expression is always truthy"
+                } else {
+                    "Impossible assert: this expression is always falsy; prefer `error()`"
+                }
+            );
+            assert_eq!(diagnostic.severity, expected[0].severity.unwrap());
+            assert_eq!(diagnostic.tags, expected[0].tags);
+            assert_eq!(diagnostic.data, expected[0].data);
+        }
+        if selected == "unmanaged" {
+            assert!(session.coverage().is_empty());
+        } else {
+            assert_eq!(
+                session.coverage(),
+                [BindingCoverage {
+                    site: argument,
+                    operation: "resolve",
+                    state: match selected {
+                        "absent" => "known_absent",
+                        "unavailable" => "unavailable",
+                        _ => "bound",
+                    },
+                    proof: "argument-proof".into(),
+                    reason: (selected == "unavailable").then(|| "argument-not-observed".into()),
+                    parameter: None,
+                    parameter_index: None,
+                    argument: None,
+                }]
+            );
+        }
+    }
+}
+
+#[test]
+fn module_export_checker_does_not_recover_a_replaced_import_surface() {
+    use emmylua_code_analysis::{CheckConfig, DiagnosticCode, Emmyrc};
+    for (code, suffix) in [
+        (
+            DiagnosticCode::UndefinedField,
+            "local result = imported.selected\n",
+        ),
+        (DiagnosticCode::InjectField, "imported.selected = 1\n"),
+    ] {
+        for selected in [
+            "unmanaged",
+            "unavailable",
+            "absent",
+            "bound",
+            "initializer-unavailable",
+        ] {
+            let source = format!("local truth = true\nlocal imported = require('m')\n{suffix}");
+            let mut config = Emmyrc::default();
+            config.diagnostics.disable = DiagnosticCode::all()
+                .into_iter()
+                .filter(|other| *other != code)
+                .collect();
+            config.diagnostics.enables = vec![code];
+            let checks = Arc::new(CheckConfig::new(&config));
+            let mut analysis = EmmyLuaAnalysis::new();
+            analysis.update_config(Arc::new(config));
+            let root = std::env::current_dir()
+                .unwrap()
+                .join("owned-export-contracts");
+            analysis.add_main_workspace(root.clone());
+            let fixture = OwnedQueryTest::ingest(
+                analysis,
+                vec![
+                    (root.join("main.lua"), Some(Arc::from(source.as_str()))),
+                    (root.join("m.lua"), Some(Arc::from("return { raw = 1 }\n"))),
+                ],
+            )
+            .unwrap();
+            let file = fixture.file_ids()[0];
+            assert_eq!(
+                fixture.semantic_model(file).module_file_of("m"),
+                Some(fixture.file_ids()[1])
+            );
+            let expected = fixture
+                .diagnose_file_with_config(file, checks.clone())
+                .unwrap();
+            assert!(!expected.is_empty(), "the raw module has no selected field");
+            let prefix = site(&fixture, file, "imported");
+            let index = site(&fixture, file, "imported.selected");
+            let managed = if selected == "initializer-unavailable" {
+                site(&fixture, file, "require('m')")
+            } else {
+                prefix
+            };
+            let mut provider = context("selected-module-surface");
+            let decision = match selected {
+                "unmanaged" => BindingDecision::NotManaged,
+                "unavailable" | "initializer-unavailable" => BindingDecision::Unavailable {
+                    proof: "selected-import-proof".into(),
+                    reason: "import-not-observed".into(),
+                },
+                "absent" => BindingDecision::KnownAbsent {
+                    proof: "selected-import-proof".into(),
+                },
+                _ => {
+                    let object = ObjectRef {
+                        identity: "selected-import".into(),
+                        epoch: "epoch-1".into(),
+                        origin: ObjectOrigin::Lua(prefix),
+                        view: ObjectViewKey {
+                            context: provider.identity.clone(),
+                            observation: 1,
+                            object_id: 1,
+                        },
+                    };
+                    provider.shapes.insert(
+                        object.view.clone(),
+                        ObjectShape {
+                            key: object.view.clone(),
+                            proof: "import-shape-proof".into(),
+                            enumeration: ShapeEnumeration::Complete,
+                            fields: vec![ObjectField {
+                                key: "selected".into(),
+                                presence: FieldPresence::Present,
+                                value: BindingDecision::Bound(BoundValue {
+                                    identity: "selected-field".into(),
+                                    proof: "import-field-proof".into(),
+                                    value: SelectedValue::Expression(site(&fixture, file, "true")),
+                                }),
+                                destination_write: FieldWriteOrigin::Xml(ExternalSourceSpan {
+                                    path: "fixture.xml".into(),
+                                    content_sha256: "b".repeat(64),
+                                    range: lycheedev_emmy_adapter::ByteRange { start: 0, end: 1 },
+                                }),
+                                source_write: None,
+                                copy_origin: None,
+                            }],
+                        },
+                    );
+                    BindingDecision::Bound(BoundValue {
+                        identity: object.identity.clone(),
+                        proof: "selected-import-proof".into(),
+                        value: SelectedValue::Object(object),
+                    })
+                }
+            };
+            provider.decisions.insert(managed, decision);
+            let session = owned_query::session(Arc::new(provider));
+            let run = fixture.diagnose(file, checks, &session).unwrap();
+            assert!(run.complete);
+            assert!(run.execution.contains(&CheckerExecution::Completed(
+                "lycheedev_emmy_adapter::check_export::CheckExportChecker"
+            )));
+            if selected == "unmanaged" {
+                assert_eq!(run.diagnostics.len(), expected.len());
+                let lines = fixture.db.line_index(file).unwrap();
+                for (actual, expected) in run.diagnostics.iter().zip(expected) {
+                    let start = lines.get_line_col(actual.range.start(), &source).unwrap();
+                    let end = lines.get_line_col(actual.range.end(), &source).unwrap();
+                    assert_eq!(
+                        expected.range,
+                        lsp_types::Range::new(
+                            lsp_types::Position::new(start.0 as u32, start.1 as u32),
+                            lsp_types::Position::new(end.0 as u32, end.1 as u32),
+                        )
+                    );
+                    assert_eq!(
+                        expected.code,
+                        Some(lsp_types::NumberOrString::String(
+                            actual.code.get_name().into()
+                        ))
+                    );
+                    assert_eq!(expected.severity, Some(actual.severity));
+                    assert_eq!(expected.message, actual.message);
+                    assert_eq!(expected.tags, actual.tags);
+                    assert_eq!(expected.data, actual.data);
+                }
+                assert!(session.coverage().is_empty());
+                continue;
+            }
+            assert!(run.diagnostics.is_empty(), "{code:?}/{selected}: {run:?}");
+            let receipt =
+                |site, operation, state, proof: &str, reason: Option<&str>| BindingCoverage {
+                    site,
+                    operation,
+                    state,
+                    proof: proof.into(),
+                    reason: reason.map(str::to_owned),
+                    parameter: None,
+                    parameter_index: None,
+                    argument: None,
+                };
+            let mut coverage = if selected == "bound" {
+                vec![
+                    receipt(prefix, "object_field", "bound", "import-field-proof", None),
+                    receipt(prefix, "object_shape", "bound", "import-shape-proof", None),
+                    receipt(prefix, "resolve", "bound", "selected-import-proof", None),
+                ]
+            } else {
+                vec![receipt(
+                    managed,
+                    "resolve",
+                    if selected == "absent" {
+                        "known_absent"
+                    } else {
+                        "unavailable"
+                    },
+                    "selected-import-proof",
+                    (selected != "absent").then_some("import-not-observed"),
+                )]
+            };
+            if selected == "bound" {
+                if code == DiagnosticCode::InjectField {
+                    coverage.push(receipt(
+                        prefix,
+                        "structure_check",
+                        "native_checked",
+                        "import-shape-proof",
+                        None,
+                    ));
+                }
+                coverage.push(receipt(
+                    prefix,
+                    "member_lookup",
+                    "bound",
+                    "import-shape-proof",
+                    None,
+                ));
+            } else if code == DiagnosticCode::UndefinedField {
+                coverage.push(receipt(
+                    index,
+                    "resolve_member",
+                    "unavailable",
+                    "",
+                    Some("managed_member_declaration_unavailable"),
+                ));
+            }
+            assert_eq!(session.coverage(), coverage, "{code:?}/{selected}");
+        }
+    }
+}

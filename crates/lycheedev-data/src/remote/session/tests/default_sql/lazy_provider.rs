@@ -158,7 +158,7 @@ fn default_remote_quoted_meta_identifier_avoids_unrequested_physical_options() {
 fn default_remote_schema_preflight_binding_precedes_later_missing_definition() {
     let f = SqlFixture::new(true, true);
     for sql in [
-        "WITH first AS (SELECT Missing FROM RemoteSample), later AS (SELECT ID FROM NoSuchTable) SELECT ID FROM later",
+        "WITH early AS (SELECT Missing FROM RemoteSample), later AS (SELECT ID FROM NoSuchTable) SELECT ID FROM later",
         "SELECT Missing FROM RemoteSample UNION ALL SELECT ID FROM NoSuchTable",
     ] {
         let before = f.captures().len();
@@ -172,7 +172,9 @@ fn default_remote_schema_preflight_binding_precedes_later_missing_definition() {
 #[test]
 fn default_remote_binding_only_cte_does_not_prepare_casc_or_keys() {
     let f = SqlFixture::new(false, false);
-    let mut inv = f.invocation("WITH first AS (SELECT Missing), later AS (SELECT ID FROM NoSuchTable) SELECT ID FROM later");
+    // A forward CTE is reserved before definitions run, so binding fails
+    // without requesting a physical source. FROM and names obey Go grammar.
+    let mut inv = f.invocation("WITH early AS (SELECT Missing FROM later), later AS (SELECT ID FROM NoSuchTable) SELECT ID FROM later");
     inv.flags
         .insert("--installation".into(), "unrequested-installation".into());
     inv.flags.insert("--keys".into(), "unrequested-keys".into());
@@ -334,5 +336,25 @@ fn default_remote_right_union_cte_and_nested_suffix_use_one_complete_compiler() 
     let error=crate::dispatch(&f.invocation("SELECT EXISTS(SELECT ID FROM RemoteSample LIMIT 1 UNION ALL SELECT ID FROM RemoteSample) FROM RemoteSample")).unwrap_err();
     assert_eq!(error.code, "query.invalid_syntax");
     assert_eq!(f.captures().len(), before);
+    f.close();
+}
+
+#[test]
+fn default_remote_invalid_cte_grammar_fails_before_any_physical_options() {
+    let f = SqlFixture::new(false, false);
+    for sql in [
+        "WITH early AS (SELECT Missing), later AS (SELECT ID FROM NoSuchTable) SELECT ID FROM later",
+        "WITH first AS (SELECT Missing FROM later), later AS (SELECT ID FROM NoSuchTable) SELECT ID FROM later",
+    ] {
+        let mut inv = f.invocation(sql);
+        inv.flags
+            .insert("--installation".into(), "unrequested-installation".into());
+        inv.flags.insert("--keys".into(), "unrequested-keys".into());
+        let before = f.captures().len();
+        let error = crate::dispatch(&inv).unwrap_err();
+        assert_eq!(error.code, "query.invalid_syntax", "{sql}: {error:?}");
+        assert!(f.source.backend.calls.lock().unwrap().is_empty());
+        assert_eq!(f.captures().len(), before);
+    }
     f.close();
 }

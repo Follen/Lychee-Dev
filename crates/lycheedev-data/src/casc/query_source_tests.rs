@@ -15,7 +15,10 @@ fn root() -> PathBuf {
     root
 }
 fn budget(control: &OperationControl) -> Arc<Budget> {
-    Arc::new(Budget::query_controlled(
+    // These narrow index tests inject Go's fixed budget directly. QuerySource
+    // is not a workspace-admission owner and must not activate a deferred query.
+    Arc::new(Budget::controlled(
+        Cost::defaults(),
         Instant::now() + Duration::from_secs(30),
         control.clone(),
     ))
@@ -195,4 +198,33 @@ fn query_index_verification_keeps_independent_budget_stop_and_control_identity()
     assert!(control.stop_cause().unwrap().is_none());
     let closed = source.close_after::<()>(Err(error)).unwrap_err();
     assert_eq!(closed.code, "operation.cancelled");
+}
+
+#[test]
+fn query_source_cannot_silently_activate_a_query_without_workspace_admission() {
+    let (root, key, _) = fixture();
+    let control = OperationControl::default();
+    let budget = Arc::new(Budget::query_controlled(
+        control.deadline(),
+        control.clone(),
+    ));
+    let source = QuerySource::open(&root, Limits::default(), &budget, &control).unwrap();
+    let error = source.find(0, "0000000001.idx", &key).unwrap_err();
+    assert_eq!(
+        (error.code.as_str(), error.exit_code),
+        ("records.internal", 8)
+    );
+    assert_eq!(
+        error.message,
+        "Query accounting used before workspace admission"
+    );
+    assert!(source.cache.borrow().indexes.is_empty());
+    assert_eq!(
+        budget.memory_snapshot().unwrap_err().code,
+        "records.internal"
+    );
+    source.close_after(Ok(())).unwrap();
+    assert!(control.stop_cause().unwrap().is_none());
+    control.ordered_child(control.deadline()).unwrap();
+    fs::remove_dir_all(root).unwrap();
 }

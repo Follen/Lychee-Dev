@@ -56,7 +56,22 @@ fn verify(fx: &Fixture, out: &Outcome) {
     assert_eq!(serde_json::from_slice::<Value>(&raw).unwrap(), out.data);
     let mut public = Vec::new();
     lycheedev_core::public_json::write_line(&mut public, &out.data, &out.public_numbers).unwrap();
-    assert_eq!(serde_json::from_slice::<Value>(&public).unwrap(), out.data);
+    let mut wire: Value = serde_json::from_slice(&public).unwrap();
+    // These three schema-declared fields are binary64. Go's public encoder
+    // renders integral floats without .0, while the archived Value retains
+    // serde's token. Compare their exact f64 values and retain exact Value
+    // equality for every other field, especially u64 cells and parameters.
+    for key in ["definitionsMs", "preparationMs", "executionMs"] {
+        let actual = wire["timings"][key].as_f64().unwrap();
+        let expected = out.data["timings"][key].as_f64().unwrap();
+        assert!(actual.is_finite() && expected.is_finite(), "{key}");
+        assert_eq!(actual.to_bits(), expected.to_bits(), "{key}");
+        if expected == 0.0 {
+            assert_eq!(wire["timings"][key], json!(0), "{key}");
+        }
+        wire["timings"][key] = out.data["timings"][key].clone();
+    }
+    assert_eq!(wire, out.data);
     assert_eq!(out.data["complete"], true);
     assert_eq!(out.data["partial"], false);
     assert_eq!(capture["complete"], true);

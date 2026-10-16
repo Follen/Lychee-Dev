@@ -1,7 +1,8 @@
 //! Fixed-Go metadata mutation boundary for historical Book retirement.
-//! Every multi-document transition is one SQLite CAS transaction. No business
-//! callback runs inside that transaction; no new native execution is exposed.
+//! Every multi-document transition is one SQLite CAS transaction. The private
+//! removal callback scans/authenticates within its fenced transaction.
 use super::*;
+pub(crate) mod removal;
 use crate::{control::OperationControl, storage::ExclusiveLock};
 use std::{
     collections::BTreeSet,

@@ -23,6 +23,7 @@ mod staged;
 pub use staged::publish_blob_stream_bounded_with_check;
 
 mod optional;
+pub(super) use optional::verify_historical_blob_optional;
 pub use optional::{
     open_verified_blob_bounded_optional_with_check, read_blob_bounded_optional_with_check,
 };

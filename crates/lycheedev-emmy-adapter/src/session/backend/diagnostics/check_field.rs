@@ -1,5 +1,8 @@
 //! Adapted from EmmyLua Analyzer Rust 08b0873962e83bb8307e9a81052e3f41578fbc78,
 //! check/checker/check_field.rs; Copyright (c) CppCXY, MIT (LICENSE-EmmyLua).
+#[cfg(test)]
+mod selected_tests;
+
 use super::CheckContext;
 use crate::session::backend::{OwnedQuery, QueryResult};
 use crate::session::{OwnedValue, SelectedProjectionBackend};
@@ -95,7 +98,18 @@ impl<E> OwnedQuery<'_, '_, E> {
             };
             let prefix_ty = self.field_expand_alias(&prefix_ty).unwrap_or(prefix_ty);
             if let LuaType::Object(object) = prefix_ty.structural_type() {
-                if object.get_field(&key).is_none()
+                // A frozen selected shape must be authenticated and complete
+                // before a missing key can prove an injected field. The public
+                // Object view alone does not carry that evidence.
+                if !prefix_ty.is_context_free() && !self.structure_allowed(&prefix_ty)? {
+                    continue;
+                }
+                let missing = if prefix_ty.object_info().is_some() {
+                    self.member_info(&prefix_ty, &key)?.is_none()
+                } else {
+                    object.get_field(&key).is_none()
+                };
+                if missing
                     && !object
                         .get_index_access()
                         .iter()
@@ -165,6 +179,9 @@ impl<E> OwnedQuery<'_, '_, E> {
         context: &mut CheckContext<'_>,
         call: &LuaCallExpr,
     ) -> QueryResult<(), E> {
+        if !self.binding_call_allowed(call, "argument_check")? {
+            return Ok(());
+        }
         let Some(callee) = call.get_prefix_expr() else {
             return Ok(());
         };
@@ -213,26 +230,91 @@ impl<E> OwnedQuery<'_, '_, E> {
         table: &LuaTableExpr,
     ) -> QueryResult<(), E> {
         self.checkpoint()?;
+        let fields = if self.binding_manages(table.get_syntax_id())? {
+            let actual = self.type_of_expr(table.get_syntax_id())?;
+            if !self.structure_allowed(&actual)? {
+                return Ok(());
+            }
+            let Some(fields) = self.field_selected_keys(&actual)? else {
+                // Nil/Unknown/scalars are not table shapes. Their actual type is
+                // consumed by the assignment/argument checker; raw table syntax
+                // is not a replacement for the selected value.
+                return Ok(());
+            };
+            fields
+        } else {
+            table
+                .get_fields_with_keys()
+                .into_iter()
+                .map(|(_, key)| key.get_path_part())
+                .collect()
+        };
+        self.field_against_keys(context, target, &fields, table.get_range())
+    }
+    fn field_selected_keys(&mut self, actual: &OwnedValue) -> QueryResult<Option<Vec<String>>, E> {
+        self.checkpoint()?;
+        let actual = self.expand_aliases(actual.clone())?;
+        let named = match actual.structural_type() {
+            LuaType::Object(_) | LuaType::TableConst(_) => None,
+            LuaType::Ref(id) | LuaType::Def(id) => Some(id),
+            LuaType::Generic(generic) => Some(generic.get_base_type_id_ref()),
+            _ => return Ok(None),
+        };
+        // A missing definition is an unknown shape, never a known empty one.
+        // Alias cycles/unresolved alias targets likewise cannot prove absence.
+        if let Some(id) = named
+            && self
+                .model
+                .type_def_of(id)
+                .is_none_or(|def| def.kind != TypeDefKind::Class)
+        {
+            return Ok(None);
+        }
+        let mut fields = Vec::new();
+        // Query the selected carrier/source, never the selected site's original
+        // table literal. This preserves frozen field order and source ownership.
+        for member in self.member_infos(&actual)? {
+            self.checkpoint()?;
+            let name = match member.key {
+                LuaMemberKey::Name(name) => name.to_string(),
+                LuaMemberKey::Integer(index) => index.to_string(),
+                _ => continue,
+            };
+            fields.push(name);
+        }
+        Ok(Some(fields))
+    }
+    fn field_against_keys(
+        &mut self,
+        context: &mut CheckContext<'_>,
+        target: &OwnedValue,
+        fields: &[String],
+        range: rowan::TextRange,
+    ) -> QueryResult<(), E> {
+        self.checkpoint()?;
+        if !target.is_context_free() && !self.structure_allowed(target)? {
+            return Ok(());
+        }
         if let Some(expanded) = self.field_expand_alias(target) {
-            return self.field_against_type(context, &expanded, table);
+            return self.field_against_keys(context, &expanded, fields, range);
         }
         match target.structural_type() {
             LuaType::Intersection(intersection) => {
                 for (index, component) in intersection.get_types().iter().enumerate() {
                     let component = self.owned_child(target, index, component);
-                    self.field_against_type(context, &component, table)?;
+                    self.field_against_keys(context, &component, fields, range)?;
                 }
                 return Ok(());
             }
             LuaType::Union(_) => {
-                let count = table.get_fields_with_keys().len();
+                let count = fields.len();
                 for component in target.union_components().expect("union") {
                     if matches!(
                         component.structural_type(),
                         LuaType::Ref(_) | LuaType::Def(_) | LuaType::Generic(_)
                     ) && count > 0
                     {
-                        return self.field_against_type(context, &component, table);
+                        return self.field_against_keys(context, &component, fields, range);
                     }
                     if matches!(component.structural_type(), LuaType::Array(_)) && count == 0 {
                         return Ok(());
@@ -241,7 +323,6 @@ impl<E> OwnedQuery<'_, '_, E> {
                 return Ok(());
             }
             LuaType::Object(object) => {
-                let fields = table.get_fields_with_keys().to_vec();
                 let mut missing = Vec::new();
                 for (key, ty) in object.get_fields() {
                     let name = match key {
@@ -249,16 +330,14 @@ impl<E> OwnedQuery<'_, '_, E> {
                         LuaMemberKey::Integer(i) => i.to_string(),
                         _ => continue,
                     };
-                    if !fields.iter().any(|(_, key)| key.get_path_part() == name)
-                        && !ty.is_nullable()
-                    {
+                    if !fields.contains(&name) && !ty.is_nullable() {
                         missing.push(name);
                     }
                 }
                 if !missing.is_empty() {
                     context.add_diagnostic(
                         DiagnosticCode::MissingFields,
-                        table.get_range(),
+                        range,
                         format!(
                             "Missing required fields: {}",
                             missing
@@ -285,16 +364,11 @@ impl<E> OwnedQuery<'_, '_, E> {
                     .map(|(name, ty)| (name, OwnedValue::plain(ty))),
             );
         }
-        let fields = table
-            .get_fields_with_keys()
-            .into_iter()
-            .map(|(_, key)| key.get_path_part())
-            .collect::<Vec<_>>();
-        for field in &fields {
+        for field in fields {
             if !members.iter().any(|(name, _)| name == field) {
                 context.add_diagnostic(
                     DiagnosticCode::InjectField,
-                    table.get_range(),
+                    range,
                     format!("Field `{}` cannot be injected into the target type.", field),
                 );
             }
@@ -307,7 +381,7 @@ impl<E> OwnedQuery<'_, '_, E> {
         if !missing.is_empty() {
             context.add_diagnostic(
                 DiagnosticCode::MissingFields,
-                table.get_range(),
+                range,
                 format!(
                     "Missing required fields: {}",
                     missing

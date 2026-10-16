@@ -47,14 +47,15 @@ fn fixed_go_work_and_memory_boundaries_drive_real_program() {
             "SELECT DISTINCT ID FROM t",
             vec![Scalar::Int(1), Scalar::Float(1.0)],
             20,
-            614,
+            // Go charges 614 bytes: schema 162, outputs 192, finish 192,
+            // and one "2:n1" key 68. results.go:rowKey additionally requires
+            // 34 bytes of remaining allowance before recognizing the duplicate.
+            648,
         ),
     ];
     for (sql, values, work, bytes) in cases {
-        assert!(
-            run(sql, source("ID", values.clone()), work, bytes).is_ok(),
-            "{sql}: exact boundary"
-        );
+        let result = run(sql, source("ID", values.clone()), work, bytes);
+        assert!(result.is_ok(), "{sql}: exact boundary: {result:?}");
         assert_eq!(
             run(sql, source("ID", values.clone()), work - 1, bytes)
                 .unwrap_err()
@@ -67,7 +68,7 @@ fn fixed_go_work_and_memory_boundaries_drive_real_program() {
                 .unwrap_err()
                 .code,
             "relational.resource_limit",
-            "{sql}: one retained byte short"
+            "{sql}: one memory-admission byte short"
         );
     }
 }
@@ -92,6 +93,32 @@ fn analyze_reports_the_same_real_work_and_logical_bytes() {
     assert_eq!(
         (measurement.scans[0].calls, measurement.scans[0].rows),
         (1, 1)
+    );
+}
+#[test]
+fn distinct_duplicate_key_headroom_is_not_reported_as_charged_memory() {
+    // Fixed Go explain.go adds 228 bytes (select 70, input 70, distinct 88)
+    // and four work units. results.go needs 34 bytes of uncharged headroom
+    // for the second equal key even though it retains no second DISTINCT entry.
+    let sql = "EXPLAIN ANALYZE SELECT DISTINCT ID FROM t";
+    let values = vec![Scalar::Int(1), Scalar::Float(1.0)];
+    let result = run(sql, source("ID", values.clone()), 24, 876).unwrap();
+    let measurement = result.plan.unwrap().measured.unwrap();
+    assert_eq!(
+        (
+            measurement.work_units,
+            measurement.charged_bytes,
+            measurement.output_rows
+        ),
+        (24, 842, 1)
+    );
+    assert_eq!(
+        (measurement.scans[0].calls, measurement.scans[0].rows),
+        (1, 2)
+    );
+    assert_eq!(
+        run(sql, source("ID", values), 24, 875).unwrap_err().code,
+        "relational.resource_limit"
     );
 }
 #[test]

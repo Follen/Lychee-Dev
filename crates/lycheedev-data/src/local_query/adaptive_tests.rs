@@ -142,8 +142,10 @@ fn actual_local_sql_samples_only_while_admitted_and_reuses_one_budget_through_gr
 fn actual_local_sql_explicit_fixed_budget_is_not_silently_replaced() {
     let fx = fixture();
     let inv = fx.invocation("data sql", &[("--sql", "SELECT ID FROM Sample")]);
+    // Go ranges.copyPart reserves 2*64MiB chunk scratch in addition to the
+    // existing 64MiB SQL executor reservation, even for this small fixture.
     let limits = Cost {
-        retained_bytes: 96 << 20,
+        retained_bytes: 256 << 20,
         metadata_bytes: 80 << 20,
         ..Cost::defaults()
     };
@@ -155,7 +157,7 @@ fn actual_local_sql_explicit_fixed_budget_is_not_silently_replaced() {
     let out = sql_inner_budgeted(&inv, &budget, &mut || Ok(())).unwrap();
     assert_eq!(
         out.data["memoryBudget"],
-        json!({"mode":"fixed","retainedBytes":96<<20,"metadataBytes":80<<20,
+        json!({"mode":"fixed","retainedBytes":256<<20,"metadataBytes":80<<20,
         "peakScratchBytes":budget.memory_snapshot().unwrap().peak_scratch_bytes,"growths":0})
     );
     verify_capture(&fx, &out);
@@ -382,7 +384,11 @@ fn default_local_navigation_and_asset_use_admission_with_go_report_shapes() {
 fn default_local_read_files_waits_for_real_owner_and_releases_after_return() {
     let fx = fixture();
     let mut inv = fx.invocation("data sql", &[]);
-    let pin = selection::resolve_pinned(&inv).unwrap().data.clone().unwrap();
+    let pin = selection::resolve_pinned(&inv)
+        .unwrap()
+        .data
+        .clone()
+        .unwrap();
     let holder =
         data_resources::acquire(&fx.home, Policy::Measurement, &OperationControl::default())
             .unwrap();
@@ -407,7 +413,11 @@ fn default_local_read_files_waits_for_real_owner_and_releases_after_return() {
 fn default_local_reader_request_errors_precede_busy_slots_but_pin_identity_follows() {
     let fx = fixture();
     let original = fx.invocation("data sql", &[]);
-    let pin = selection::resolve_pinned(&original).unwrap().data.clone().unwrap();
+    let pin = selection::resolve_pinned(&original)
+        .unwrap()
+        .data
+        .clone()
+        .unwrap();
     let holder =
         data_resources::acquire(&fx.home, Policy::Measurement, &OperationControl::default())
             .unwrap();
@@ -488,7 +498,11 @@ fn default_local_reader_request_errors_precede_busy_slots_but_pin_identity_follo
 fn default_local_reader_original_stop_and_independent_deadline_precede_invalid_request() {
     let fx = fixture();
     let mut inv = fx.invocation("data sql", &[("--content-variant", "bad")]);
-    let mut pin = selection::resolve_pinned(&inv).unwrap().data.clone().unwrap();
+    let mut pin = selection::resolve_pinned(&inv)
+        .unwrap()
+        .data
+        .clone()
+        .unwrap();
     pin.full_build = "invalid".into();
     inv.control.cancel_handle().store(true, Ordering::Release);
     assert_eq!(
@@ -555,6 +569,32 @@ fn actual_local_asset_capture_id_survives_late_close_with_cli_marker_contract() 
             primary.message
         )
     );
+    released(&fx);
+    fs::remove_dir_all(fx.root).unwrap();
+}
+
+#[test]
+fn actual_local_sql_fixed_budget_below_decoder_scratch_fails_without_growth_or_capture() {
+    let fx = fixture();
+    let inv = fx.invocation("data sql", &[("--sql", "SELECT ID FROM Sample")]);
+    let budget = Arc::new(Budget::controlled(
+        Cost {
+            retained_bytes: 96 << 20,
+            metadata_bytes: 80 << 20,
+            ..Cost::defaults()
+        },
+        inv.control.deadline(),
+        inv.control.clone(),
+    ));
+    let before = captures(&fx);
+    let error = sql_inner_budgeted(&inv, &budget, &mut || Ok(())).unwrap_err();
+    assert_eq!(error.code, "records.query_resource_budget");
+    assert!(error.message.contains("scratch_bytes"), "{error:?}");
+    let memory = serde_json::to_value(budget.memory_snapshot().unwrap()).unwrap();
+    assert_eq!(memory["mode"], "fixed");
+    assert_eq!(memory["retainedBytes"], 96 << 20);
+    assert_eq!(memory["growths"], 0);
+    assert_eq!(captures(&fx), before);
     released(&fx);
     fs::remove_dir_all(fx.root).unwrap();
 }

@@ -32,8 +32,11 @@ impl<E> OwnedQuery<'_, '_, E> {
             return Ok(Vec::new());
         };
         let mut candidates = self.callable_candidates_cached(&prefix)?;
+        // Declaration docs supplement ordinary VM signatures, but cannot
+        // resurrect a different callee after an authoritative selected read.
         if let LuaExpr::NameExpr(name) = &prefix
             && let Some(text) = name.get_name_text()
+            && !self.binding_manages(prefix.get_syntax_id())?
         {
             let decl = self
                 .model

@@ -6,6 +6,7 @@ pub use lycheedev_windows::filesystem::{
     Destination, Directory, close_file, durable_move_noreplace,
 };
 mod owned_cleanup;
+pub(crate) use owned_cleanup::authenticate_cleanup_file_optional;
 mod slot_preflight;
 pub use owned_cleanup::{
     AuthenticatedCleanup, authenticate_cleanup_directory, authenticate_cleanup_file,

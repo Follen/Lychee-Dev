@@ -295,7 +295,7 @@ fn local_default_schema_preflight_stops_before_later_physical_resolver() {
         &[vec![Cell::U(1), Cell::BadString]],
     )]);
     for sql in [
-        "WITH first AS (SELECT Missing FROM Sample), later AS (SELECT ID FROM NoSuchTable) SELECT ID FROM later",
+        "WITH early AS (SELECT Missing FROM Sample), later AS (SELECT ID FROM NoSuchTable) SELECT ID FROM later",
         "SELECT Missing FROM Sample UNION ALL SELECT ID FROM NoSuchTable",
         "SELECT ID IN (SELECT Missing FROM Sample) FROM Sample UNION ALL SELECT ID FROM NoSuchTable",
     ] {
@@ -310,7 +310,7 @@ fn local_default_schema_preflight_stops_before_later_physical_resolver() {
 #[test]
 fn local_default_binding_only_cte_never_opens_unrequested_installation() {
     let f = Fixture::new(&[table("Sample", 201, &[("ID", "uint")], &[vec![Cell::U(1)]])]);
-    let mut inv = f.invocation("data sql", &[("--sql", "WITH first AS (SELECT Missing), later AS (SELECT ID FROM NoSuchTable) SELECT ID FROM later")]);
+    let mut inv = f.invocation("data sql", &[("--sql", "WITH early AS (SELECT Missing FROM later), later AS (SELECT ID FROM NoSuchTable) SELECT ID FROM later")]);
     let missing = f.root.join("unrequested-installation");
     inv.flags
         .insert("--installation".into(), missing.display().to_string());

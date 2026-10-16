@@ -49,12 +49,19 @@ impl<E> OwnedQuery<'_, '_, E> {
         {
             return Ok(());
         }
-        let prefix_ty = match &prefix {
-            LuaExpr::NameExpr(name) => match self.model.resolve_name(name.get_position()) {
-                Some(decl) => self.type_of_decl_at(&decl, name.get_position().into())?,
-                None => self.type_of_expr(prefix.get_syntax_id())?,
-            },
-            _ => self.type_of_expr(prefix.get_syntax_id())?,
+        // XML-backed selected fields have no upstream member id. Rechecking
+        // them against the ordinary declaration would discard the very shape
+        // that resolve_owned_member just authenticated.
+        let prefix_ty = if let Some(value) = self.binding_type_of_expr(prefix.get_syntax_id())? {
+            value
+        } else {
+            match &prefix {
+                LuaExpr::NameExpr(name) => match self.model.resolve_name(name.get_position()) {
+                    Some(decl) => self.type_of_decl_at(&decl, name.get_position().into())?,
+                    None => self.type_of_expr(prefix.get_syntax_id())?,
+                },
+                _ => self.type_of_expr(prefix.get_syntax_id())?,
+            }
         };
         if is_invalid_prefix_type(prefix_ty.structural_type()) {
             return Ok(());

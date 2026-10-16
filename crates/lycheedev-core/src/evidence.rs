@@ -19,6 +19,7 @@ mod budgeted;
 mod dependencies;
 mod history_read;
 mod read_commands;
+mod remove_commands;
 pub use bounded::{
     CaptureInput, DEFAULT_CAPTURE_BYTES, MAX_CAPTURE_BYTES, VerifiedBlob, commit_capture_bounded,
     commit_capture_bounded_with_check, commit_verified_capture, open_verified_blob_bounded,
@@ -181,160 +182,16 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
     if matches!(inv.command.as_str(), "evidence keep" | "evidence bundle") {
         return archive_commands::dispatch(inv);
     }
-    workspace::open(&inv.home)?;
     match inv.command.as_str() {
-        "evidence remove" => Ok(Outcome::new(remove_capture_controlled(
-            &inv.home,
-            inv.argument()?,
-            &inv.control,
-        )?)),
+        "evidence remove" => {
+            remove_capture_controlled(&inv.home, inv.argument()?, &inv.control).map(Outcome::new)
+        }
         _ => Err(ToolkitError::new(
             "evidence.migration_incomplete",
-            "reference-safe removal is not yet migrated",
+            "unknown evidence command",
             3,
         )),
     }
-}
-fn names_capture(value: &Value, id: &str) -> bool {
-    match value {
-        Value::String(text) => text == id || text.strip_prefix("capture:") == Some(id),
-        Value::Array(values) => values.iter().any(|v| names_capture(v, id)),
-        Value::Object(fields) => fields.iter().any(|(key, value)| {
-            key == id || key.strip_prefix("capture:") == Some(id) || names_capture(value, id)
-        }),
-        _ => false,
-    }
-}
-fn names_blob(value: &Value, blob: &Value) -> bool {
-    match value {
-        Value::Array(values) => values.iter().any(|value| names_blob(value, blob)),
-        Value::Object(fields) => {
-            value.get("sha256") == blob.get("sha256") && value.get("bytes") == blob.get("bytes")
-                || fields.values().any(|value| names_blob(value, blob))
-        }
-        _ => false,
-    }
-}
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Removal {
-    schema: String,
-    capture_id: String,
-    capture: Option<CaptureRef>,
-    blob_was_present: bool,
-    result: Value,
-}
-fn read_removal(metadata: &Metadata, key: &str, id: &str) -> Result<Removal> {
-    let removal: Removal = metadata.read(key)?;
-    if removal.schema != "lycheedev.evidence-removal.v1"
-        || removal.capture_id != id
-        || removal.result["captureId"] != id
-        || removal.result["manifestRemoved"] != true
-        || removal.result.as_object().is_none_or(|result| {
-            result.len() != 6
-                || [
-                    "manifestRemoved",
-                    "retentionRemoved",
-                    "blobRemoved",
-                    "blobShared",
-                    "blobMissing",
-                ]
-                .iter()
-                .any(|field| !result[*field].is_boolean())
-        })
-    {
-        return Err(ToolkitError::new(
-            "evidence.removal_integrity",
-            "removal record identity differs",
-            4,
-        ));
-    }
-    let removed = removal.result["blobRemoved"] == true;
-    let missing = removal.result["blobMissing"] == true;
-    let shared = removal.result["blobShared"] == true;
-    if removed && missing
-        || shared && (removed || missing)
-        || removal.capture.is_some() && (removed || missing || shared)
-        || removal.capture.is_none() && !(removed || missing || shared)
-    {
-        return Err(ToolkitError::new(
-            "evidence.removal_integrity",
-            "removal disposition is inconsistent",
-            4,
-        ));
-    }
-    if let Some(capture) = &removal.capture
-        && (capture.schema != "lycheedev.capture.v1"
-            || capture.id != id
-            || capture_identity(capture)? != id)
-    {
-        return Err(ToolkitError::new(
-            "evidence.removal_integrity",
-            "pending original capture identity differs",
-            4,
-        ));
-    }
-    Ok(removal)
-}
-fn finish_removal(
-    home: &Path,
-    metadata: &mut Metadata,
-    key: &str,
-    mut removal: Removal,
-    control: &crate::control::OperationControl,
-) -> Result<Value> {
-    control.check()?;
-    let Some(capture) = removal.capture.take() else {
-        return Ok(removal.result);
-    };
-    let blob = serde_json::to_value(&capture.blob)?;
-    let generation = metadata
-        .generation(key)?
-        .ok_or_else(|| ToolkitError::invalid("removal record disappeared"))?;
-    // Recheck any documents published since the manifest transaction. The content
-    // lock also fences all capture publication until the exact disposition is durable.
-    let shared = metadata.delete_checked_controlled(
-        &[],
-        &[(key.into(), generation)],
-        control,
-        |documents, reader| {
-            let mut shared = false;
-            for document in documents {
-                if document.key == key {
-                    continue;
-                }
-                control.check()?;
-                if dependencies::references_capture(home, document, reader, &capture, control)? {
-                    return Err(ToolkitError::new(
-                        "evidence.capture_referenced",
-                        "capture was referenced after removal preparation; original bytes retained",
-                        3,
-                    )
-                    .with_details(json!({"documentKey":document.key,"result":removal.result})));
-                }
-                shared |= names_blob(&document.value, &blob);
-            }
-            Ok(shared)
-        },
-    )?;
-    removal.result["blobShared"] = json!(shared);
-    if !shared {
-        let path = blob_path(home, &capture.blob.sha256)?;
-        storage::guard_path(home, &path)?;
-        if path.exists() {
-            bounded::verify_internal(home, &blob, MAX_CAPTURE_BYTES, Some(control))?;
-            control.check()?;
-            fs::remove_file(path).map_err(|error| {
-                ToolkitError::from(error)
-                    .with_details(json!({"result":removal.result,"resumeCaptureId":capture.id}))
-            })?;
-        }
-        // A crash after exact deletion but before this checkpoint is recoverable.
-        removal.result["blobRemoved"] = json!(removal.blob_was_present);
-        removal.result["blobMissing"] = json!(!removal.blob_was_present);
-    }
-    metadata.put_controlled(key, &removal, Some(generation), control)?;
-    Ok(removal.result)
 }
 pub fn remove_capture(home: &Path, id: &str) -> Result<Value> {
     remove_capture_controlled(home, id, &crate::control::OperationControl::default())
@@ -344,122 +201,5 @@ pub fn remove_capture_controlled(
     id: &str,
     control: &crate::control::OperationControl,
 ) -> Result<Value> {
-    control.check()?;
-    if !id
-        .strip_prefix("CAP-")
-        .is_some_and(|digest| valid_digest(digest, 64))
-    {
-        return Err(ToolkitError::new(
-            "evidence.invalid_capture",
-            "invalid capture identity",
-            4,
-        ));
-    }
-    let removal_key = format!("evidence/remove/{id}");
-    let mut metadata = Metadata::open(home, true)?;
-    if metadata.generation(&removal_key)?.is_some() {
-        let removal = read_removal(&metadata, &removal_key, id)?;
-        let Some(capture) = &removal.capture else {
-            if metadata.generation(&format!("capture/{id}"))?.is_some() {
-                return Err(ToolkitError::new(
-                    "evidence.removal_integrity",
-                    "completed removal conflicts with a present capture",
-                    4,
-                ));
-            }
-            return Ok(removal.result);
-        };
-        let _guard = ExclusiveLock::resource(
-            &home.join("locks"),
-            &format!("blob:{}", capture.blob.sha256),
-        )?;
-        let removal = read_removal(&metadata, &removal_key, id)?;
-        return finish_removal(home, &mut metadata, &removal_key, removal, control);
-    }
-    let capture = read_capture(home, id)?;
-    let target: CaptureRef = serde_json::from_value(capture.clone())?;
-    control.check()?;
-    let digest = capture["blob"]["sha256"]
-        .as_str()
-        .ok_or_else(|| ToolkitError::invalid("capture blob digest missing"))?;
-    let _guard = ExclusiveLock::resource(&home.join("locks"), &format!("blob:{digest}"))?;
-    if metadata.generation(&removal_key)?.is_some() {
-        let removal = read_removal(&metadata, &removal_key, id)?;
-        return finish_removal(home, &mut metadata, &removal_key, removal, control);
-    }
-    let key = format!("capture/{id}");
-    let keep = format!("evidence/keep/{id}");
-    let generation = metadata
-        .generation(&key)?
-        .ok_or_else(|| ToolkitError::new("vault.record_missing", "capture disappeared", 3))?;
-    let retention_generation = metadata.generation(&keep)?;
-    let retained = retention_generation.is_some();
-    if retained {
-        let retention: Value = metadata.read(&keep)?;
-        if retention["schema"] != "lycheedev.evidence-retention.v1"
-            || retention["captureId"] != id
-            || retention["blob"] != capture["blob"]
-        {
-            return Err(ToolkitError::new(
-                "evidence.invalid_retention",
-                "retention identity differs",
-                4,
-            ));
-        }
-    }
-    let path = blob_path(home, digest)?;
-    storage::guard_path(home, &path)?;
-    let present = path.exists();
-    if present {
-        bounded::verify_internal(home, &capture["blob"], MAX_CAPTURE_BYTES, Some(control))?;
-    }
-    let deletions = vec![key.clone(), keep.clone()];
-    let mut expected = vec![(key.clone(), generation)];
-    if let Some(generation) = retention_generation {
-        expected.push((keep.clone(), generation));
-    }
-    let removal =
-        metadata.delete_checked_record_controlled_with_raw(&deletions, &expected, control, |documents, reader| {
-            let mut shared = false;
-            let current = documents.iter().find(|document| document.key == key);
-            let current_keep = documents.iter().find(|document| document.key == keep);
-            // Older manifests can spell omitted dependencies as null or [].
-            // Compare the validated typed representation, without rewriting the
-            // original document or changing its content-addressed identity.
-            let current_capture = current
-                .map(|document| serde_json::from_value::<CaptureRef>(document.value.clone())
-                    .and_then(serde_json::to_value))
-                .transpose()?;
-            if current_capture.as_ref() != Some(&capture)
-                || current_keep.map(|document| document.generation) != retention_generation
-            {
-                return Err(ToolkitError::new("vault.generation_conflict", "capture or retention changed during removal preparation", 4));
-            }
-            for doc in documents {
-                if doc.key == key || doc.key == keep {
-                    continue;
-                }
-                control.check()?;
-                if dependencies::references_capture(home, doc, reader, &target, control)? {
-                    return Err(ToolkitError::new(
-                        "evidence.capture_referenced",
-                        "another metadata document still names this exact capture",
-                        3,
-                    )
-                    .with_details(json!({"documentKey":doc.key})));
-                }
-                if names_blob(&doc.value, &capture["blob"]) {
-                    shared = true;
-                }
-            }
-            let removal = Removal {
-                schema: "lycheedev.evidence-removal.v1".into(), capture_id: id.into(),
-                capture: if shared { None } else { Some(serde_json::from_value(capture.clone())?) },
-                blob_was_present: present,
-                result: json!({"captureId":id,"manifestRemoved":true,"retentionRemoved":retained,"blobRemoved":false,"blobShared":shared,"blobMissing":false}),
-            };
-            let record = serde_json::to_value(&removal)?;
-            Ok((removal, Some((removal_key.clone(), record))))
-        })?;
-    finish_removal(home, &mut metadata, &removal_key, removal, control)
+    remove_commands::run(home, id, control)
 }
