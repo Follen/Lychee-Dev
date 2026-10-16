@@ -35,6 +35,10 @@ const RESPONSE_BYTES: usize = 32 << 20;
 const REPLY_RESERVE: Duration = Duration::from_millis(500);
 const OWNER_IDLE: Duration = Duration::from_secs(60);
 const OWNER_LIFETIME: Duration = Duration::from_secs(600);
+// Rust's bounded terminal reap after the fixed service cutoff. Two seconds is
+// consistent with existing guarded-startup cleanup and Go's WaitDelay, but Go
+// does not promise a two-second bound for its complete broker shutdown.
+const OWNER_RETIRE_LIMIT: Duration = Duration::from_secs(2);
 const REQUEST_LIMIT: Duration = Duration::from_secs(90);
 const SEMANTIC_BATCH_LIMIT: usize = 256;
 
@@ -71,11 +75,31 @@ fn admitted_request_remaining(deadline_unix_ms: u64, now_unix_ms: u64) -> Option
 /// but neither work nor status may extend the fixed owner lifetime.
 struct SessionLifetime {
     deadline: Instant,
+    normal_expiry: bool,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SessionEnd {
+    Closed,
+    IdleExpired,
+    LifetimeExpired(Instant),
 }
 impl SessionLifetime {
     fn new(started: Instant, caller_deadline: Instant) -> Self {
+        let owner_deadline = started + OWNER_LIFETIME;
         Self {
-            deadline: caller_deadline.min(started + OWNER_LIFETIME),
+            deadline: caller_deadline.min(owner_deadline),
+            normal_expiry: caller_deadline >= owner_deadline,
+        }
+    }
+    /// Only the admission loop may classify the owner's fixed lifetime as a
+    /// normal end. An active request's deadline and a shorter caller deadline
+    /// remain errors; neither is converted by final cleanup.
+    fn admission_end(&self, control: &OperationControl) -> Result<Option<SessionEnd>> {
+        match control.check() {
+            Ok(()) => Ok(None),
+            Err(error) if self.normal_expiry && control.deadline() == self.deadline
+                && error.code == "command.deadline" => Ok(Some(SessionEnd::LifetimeExpired(self.deadline))),
+            Err(error) => Err(error),
         }
     }
     fn idle_deadline(&self, now: Instant) -> Instant {
@@ -87,6 +111,42 @@ impl SessionLifetime {
     fn request_deadline(&self, requested: Instant) -> Instant {
         self.deadline.min(requested)
     }
+}
+
+/// Only normal owner expiry has a separate terminal reap window. Derive it
+/// from the original service cutoff, never from the time cleanup starts; other
+/// exits retain the request/idle cleanup deadline already owned by the caller.
+fn terminal_retirement_deadline(end: &Result<SessionEnd>, original: Instant) -> Instant {
+    match end {
+        Ok(SessionEnd::LifetimeExpired(deadline)) => *deadline + OWNER_RETIRE_LIMIT,
+        _ => original,
+    }
+}
+
+/// Cleanup is still checked after normal expiry. Only a successful, explicitly
+/// classified lifetime end may consume the expected owner-deadline observation;
+/// cancellation and any primary/cleanup failure retain their original cause.
+fn finish_session_end(
+    result: Result<SessionEnd>,
+    cleanup: Result<()>,
+    control: &OperationControl,
+) -> Result<SessionEnd> {
+    let mut result = lycheedev_core::metadata::historical_write::finish_historical(result, cleanup);
+    if let Ok(SessionEnd::LifetimeExpired(deadline)) = &result
+        && Instant::now() >= *deadline + OWNER_RETIRE_LIMIT
+    {
+        // The same fixed bound covers disarming, lock release and the final
+        // identity-file close too. A late checked close is not timely success.
+        result = Err(fault("Native Source owner cleanup deadline exhausted")
+            .with_details(json!({"cleanupDeadlineExceeded":true,
+                "cleanupBudgetMs":OWNER_RETIRE_LIMIT.as_millis()})));
+    }
+    let stopped = match (result.as_ref(), control.check()) {
+        (Ok(SessionEnd::LifetimeExpired(deadline)), Err(error))
+            if control.deadline() == *deadline && error.code == "command.deadline" => Ok(()),
+        (_, stopped) => stopped,
+    };
+    crate::persistence::finish_control(result, stopped)
 }
 
 fn session_status(cached_key: Option<&str>, owner_pid: u32) -> Value {
@@ -725,18 +785,32 @@ pub fn server(args: &[String]) -> Result<()> {
     if let Err(error) = startup {
         return storage::finish_file(current._file, Err(error), &inv.control);
     }
-    serve_owned(&inv, current)
+    // This is the same lifetime fixed before authentication/startup above, not
+    // a fresh 600-second interval after startup finishes.
+    let lifetime = SessionLifetime { deadline: inv.control.deadline(), normal_expiry: true };
+    serve_owned(&inv, current, lifetime)
 }
 
 pub fn serve(inv: &Invocation) -> Result<()> {
-    serve_owned(inv, identity(&inv.control)?)
-}
-fn serve_owned(inv: &Invocation, current: Identity) -> Result<()> {
-    let result = serve_borrowed(inv, &current);
-    storage::finish_file(current._file, result, &inv.control)
-}
-fn serve_borrowed(inv: &Invocation, current: &Identity) -> Result<()> {
+    let current = identity(&inv.control)?;
     let lifetime = SessionLifetime::new(Instant::now(), inv.control.deadline());
+    serve_owned(inv, current, lifetime)
+}
+fn serve_owned(inv: &Invocation, current: Identity, lifetime: SessionLifetime) -> Result<()> {
+    let result = serve_borrowed(inv, &current, &lifetime);
+    finish_session_file(current._file, result, &inv.control)
+}
+fn finish_session_file(file: File, result: Result<SessionEnd>, control: &OperationControl) -> Result<()> {
+    if matches!(&result, Ok(SessionEnd::LifetimeExpired(_))) {
+        // A checked close is mandatory even though the expected lifetime has
+        // ended. Do not manufacture a new control/deadline for this close.
+        let closed = lycheedev_windows::filesystem::close_file(file).map_err(ToolkitError::io);
+        finish_session_end(result, closed, control).map(|_| ())
+    } else {
+        storage::finish_file(file, result.map(|_| ()), control)
+    }
+}
+fn serve_borrowed(inv: &Invocation, current: &Identity, lifetime: &SessionLifetime) -> Result<SessionEnd> {
     let owner_control = inv
         .control
         .child(lifetime.deadline, inv.control.cancel_handle());
@@ -753,21 +827,28 @@ fn serve_borrowed(inv: &Invocation, current: &Identity) -> Result<()> {
         let mut listener = BrokerListener::bind(&scope).map_err(platform)?;
         let mut analysis: Option<analysis_process::AnalysisProcess> = None;
         let mut terminal_deadline = lifetime.deadline;
-        let run = (|| -> Result<()> {
+        let run = (|| -> Result<SessionEnd> {
             let mut idle_deadline = lifetime.idle_deadline(Instant::now());
             loop {
                 // Only an admitted request may restart idle. Failed handshakes and
                 // malformed envelopes retain this absolute idle boundary.
                 // Idle expiry stops admission at the original idle boundary.
-                // Cleanup still belongs to this owner's already-fixed lifetime;
-                // an expired idle cutoff cannot prove a warm child was reaped.
+                // Idle cleanup retains the original owner boundary. Normal
+                // lifetime expiry alone has a separately bounded terminal reap.
                 terminal_deadline = lifetime.deadline;
-                owner_control.check()?;
+                if let Some(end) = lifetime.admission_end(&owner_control)? {
+                    return Ok(end);
+                }
                 let mut stream = match listener.accept(idle_deadline, owner_control.token()) {
                     Ok(stream) => stream,
-                    Err(message) if message.contains("deadline") => return Ok(()),
+                    Err(message) if message.contains("deadline") => {
+                        return Ok(lifetime.admission_end(&owner_control)?.unwrap_or(SessionEnd::IdleExpired));
+                    }
                     Err(message) => return Err(platform(message)),
                 };
+                if let Some(end) = lifetime.admission_end(&owner_control)? {
+                    return Ok(end);
+                }
                 stream.set_deadline(
                     lifetime.handshake_deadline(Instant::now(), idle_deadline),
                     owner_control.cancel_handle(),
@@ -802,6 +883,11 @@ fn serve_borrowed(inv: &Invocation, current: &Identity) -> Result<()> {
                     && serde_json::from_slice::<Request>(&raw).is_err() { continue; }
                 if request.wire != WIRE {
                     continue;
+                }
+                // Decoding/validation consumes service time too. A connected
+                // peer cannot turn the terminal cleanup window into admission.
+                if let Some(end) = lifetime.admission_end(&owner_control)? {
+                    return Ok(end);
                 }
                 let Some(remaining) =
                     admitted_request_remaining(request.deadline_unix_ms, utc_ms()?)
@@ -868,7 +954,7 @@ fn serve_borrowed(inv: &Invocation, current: &Identity) -> Result<()> {
                             },
                             RESPONSE_BYTES,
                         )?;
-                        return Ok(());
+                        return Ok(SessionEnd::Closed);
                     }
                     Action::Query => {
                         let cancel = Arc::new(AtomicBool::new(false));
@@ -932,7 +1018,8 @@ fn serve_borrowed(inv: &Invocation, current: &Identity) -> Result<()> {
         })();
         // Retire analysis before releasing the process ownership boundary on every
         // exit, including owner expiry, transport failure and cancellation.
-        let retired = analysis_process::retire_slot(&mut analysis, terminal_deadline);
+        let retirement_deadline = terminal_retirement_deadline(&run, terminal_deadline);
+        let retired = analysis_process::retire_slot(&mut analysis, retirement_deadline);
         let disarmed = if retired.is_ok() { job.disarm().map_err(platform) } else { Ok(()) };
         if retired.is_err() {
             // Retain the armed aggregate Job until OS process exit. Do not
@@ -942,10 +1029,7 @@ fn serve_borrowed(inv: &Invocation, current: &Identity) -> Result<()> {
         lycheedev_core::metadata::historical_write::finish_historical(
             lycheedev_core::metadata::historical_write::finish_historical(run, retired), disarmed)
     })();
-    crate::persistence::finish_control(
-        lycheedev_core::metadata::historical_write::finish_historical(owned, owner.close()),
-        owner_control.check(),
-    )
+    finish_session_end(owned, owner.close(), &owner_control)
 }
 
 #[cfg(test)]
@@ -1088,6 +1172,165 @@ mod tests {
         cancelled.store(true, Ordering::Release);
         assert!(transport_token.load(Ordering::Acquire));
         assert_eq!(request.check().unwrap_err().code, "command.cancelled");
+    }
+
+    #[test]
+    fn fixed_lifetime_expiry_is_a_normal_admission_end_without_a_new_deadline() {
+        let now = Instant::now();
+        let live = SessionLifetime::new(now, now + Duration::from_secs(900));
+        let live_control = OperationControl::uncancelable(live.deadline);
+        assert_eq!(live.deadline, now + Duration::from_secs(600));
+        assert_eq!(live.admission_end(&live_control).unwrap(), None);
+        // Move only the test's origin into the past, not the production 600s
+        // lifetime. The real IPC acceptance continues to wait the full 600s.
+        let expired = SessionLifetime::new(now - OWNER_LIFETIME, now);
+        let control = OperationControl::uncancelable(expired.deadline);
+        let end = expired.admission_end(&control).unwrap().unwrap();
+        assert_eq!(end, SessionEnd::LifetimeExpired(now));
+        assert_eq!(finish_session_end(Ok(end), Ok(()), &control).unwrap(), end);
+        assert_eq!(expired.deadline, now);
+        assert_eq!(control.deadline(), now);
+        assert_eq!(control.check().unwrap_err().code, "command.deadline");
+    }
+
+    #[test]
+    fn lifetime_reap_window_never_shortens_service_or_renews_a_late_cleanup() {
+        let start = Instant::now();
+        let lifetime = SessionLifetime::new(start, start + Duration::from_secs(900));
+        let service = start + Duration::from_secs(600);
+        // Even the last nanosecond remains service time; no 500ms early cutoff.
+        let last_request = service - Duration::from_nanos(1);
+        assert_eq!(lifetime.request_deadline(last_request), last_request);
+        assert_eq!(lifetime.handshake_deadline(last_request, service), service);
+        assert_eq!(lifetime.request_deadline(service + OWNER_RETIRE_LIMIT), service);
+        let end = Ok(SessionEnd::LifetimeExpired(service));
+        let reap = terminal_retirement_deadline(&end, last_request);
+        assert_eq!(reap, start + Duration::from_secs(602));
+        assert_eq!(terminal_retirement_deadline(&end, reap + Duration::from_secs(60)), reap);
+        let control = OperationControl::uncancelable(lifetime.deadline);
+        assert_eq!(lifetime.admission_end(&control).unwrap(), None);
+        assert_eq!(control.deadline(), service);
+        // An already elapsed original cutoff ends admission, even though its
+        // independently fixed reap window may still have time remaining.
+        let expired_at = Instant::now();
+        let expired = SessionLifetime::new(expired_at - OWNER_LIFETIME, expired_at);
+        let stopped = OperationControl::uncancelable(expired_at);
+        let end = expired.admission_end(&stopped).unwrap().unwrap();
+        assert_eq!(end, SessionEnd::LifetimeExpired(expired_at));
+        assert_eq!(terminal_retirement_deadline(&Ok(end), expired_at), expired_at + OWNER_RETIRE_LIMIT);
+    }
+
+    #[test]
+    fn only_normal_lifetime_end_receives_the_fixed_terminal_reap_window() {
+        let original = Instant::now();
+        for end in [Ok(SessionEnd::Closed), Ok(SessionEnd::IdleExpired),
+            Err(ToolkitError::new("command.cancelled", "original cancellation", 7)),
+            Err(ToolkitError::new("command.deadline", "original request cutoff", 5)),
+            Err(ToolkitError::new("external.io", "original close failure", 5))]
+        {
+            assert_eq!(terminal_retirement_deadline(&end, original), original);
+        }
+        // Delayed entry never gets a new now+2s window or a successful terminal.
+        let service = original - Duration::from_secs(3);
+        let end = SessionEnd::LifetimeExpired(service);
+        let control = OperationControl::uncancelable(service);
+        assert!(terminal_retirement_deadline(&Ok(end), original) < original);
+        let failure = finish_session_end(Ok(end), Ok(()), &control).unwrap_err();
+        assert_eq!(failure.code, "source.native_session");
+        assert_eq!(failure.details["primary"]["details"]["cleanupDeadlineExceeded"], true);
+        assert_eq!(failure.details["primary"]["details"]["cleanupBudgetMs"], 2000);
+    }
+
+    #[test]
+    fn terminal_cleanup_preserves_primary_cancellation_and_close_errors() {
+        let original = Instant::now();
+        let cancelled = OperationControl::new(original, Arc::new(AtomicBool::new(true)));
+        let primary = cancelled.check().unwrap_err();
+        let cleanup = fault("Native analysis retirement is unconfirmed");
+        let failure = finish_session_end(Err(primary), Err(cleanup), &cancelled).unwrap_err();
+        assert_eq!(failure.code, "command.cancelled");
+        assert_eq!(failure.exit_code, 7);
+        assert_eq!(failure.details["primary"]["details"]["primary"]["code"], "command.cancelled");
+        assert_eq!(failure.details["primary"]["details"]["cleanup"]["code"], "source.native_session");
+        let close = ToolkitError::io(std::io::Error::other("original close failure"));
+        let stopped = OperationControl::uncancelable(original);
+        let failure = finish_session_end(Err(close), Ok(()), &stopped).unwrap_err();
+        assert_eq!(failure.code, "external.io");
+        assert_eq!(failure.details["primary"]["message"], "original close failure");
+        assert_eq!(failure.details["cleanup"]["code"], "command.deadline");
+    }
+
+    #[test]
+    fn shorter_caller_expiry_is_not_a_normal_owner_lifetime_end() {
+        let now = Instant::now();
+        let lifetime = SessionLifetime::new(now - Duration::from_secs(30), now);
+        let control = OperationControl::uncancelable(now);
+        assert!(!lifetime.normal_expiry);
+        assert_eq!(lifetime.deadline, now);
+        assert_eq!(lifetime.admission_end(&control).unwrap_err().code, "command.deadline");
+        let owner = SessionLifetime::new(now, now + OWNER_LIFETIME);
+        // Equal error text from an unrelated shorter request is insufficient.
+        assert_eq!(owner.admission_end(&control).unwrap_err().code, "command.deadline");
+        // A normal end cannot waive a different outer control's later expiry.
+        let earlier_owner = now - Duration::from_secs(1);
+        assert_eq!(finish_session_end(Ok(SessionEnd::LifetimeExpired(earlier_owner)), Ok(()), &control)
+            .unwrap_err().code, "command.deadline");
+    }
+
+    #[test]
+    fn normal_lifetime_end_never_hides_cancellation_or_unconfirmed_retirement() {
+        let now = Instant::now();
+        let lifetime = SessionLifetime::new(now - OWNER_LIFETIME, now);
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let control = OperationControl::new(now, cancelled.clone());
+        let end = lifetime.admission_end(&control).unwrap().unwrap();
+        let cleanup = fault("Native analysis retirement is unconfirmed")
+            .with_details(json!({"analysisRetired":false,"rootReaped":false,"jobEmpty":false}));
+        let failure = finish_session_end(Ok(end), Err(cleanup), &control).unwrap_err();
+        assert_eq!(failure.code, "source.native_session");
+        assert_eq!(failure.details["primary"]["details"]["analysisRetired"], false);
+        assert_eq!(failure.details["primary"]["details"]["rootReaped"], false);
+        assert_eq!(failure.details["cleanup"]["code"], "command.deadline");
+        // Cancellation arriving during cleanup also wins over the expected end.
+        cancelled.store(true, Ordering::Release);
+        assert_eq!(finish_session_end(Ok(end), Ok(()), &control).unwrap_err().code, "command.cancelled");
+        assert_eq!(lifetime.admission_end(&control).unwrap_err().code, "command.cancelled");
+    }
+
+    #[test]
+    fn active_request_and_non_lifetime_ends_keep_original_deadline_failure() {
+        let control = OperationControl::uncancelable(Instant::now());
+        let primary = control.check().unwrap_err();
+        let expected = serde_json::to_value(&primary).unwrap();
+        let failure = finish_session_end(Err(primary), Ok(()), &control).unwrap_err();
+        assert_eq!(serde_json::to_value(&failure).unwrap(), expected);
+        for end in [SessionEnd::Closed, SessionEnd::IdleExpired] {
+            assert_eq!(finish_session_end(Ok(end), Ok(()), &control).unwrap_err().code, "command.deadline");
+        }
+        let original = ToolkitError::new("external.io", "failed to fill whole buffer", 5)
+            .with_details(json!({"request":"original"}));
+        let failure = finish_session_end(Err(original), Ok(()), &control).unwrap_err();
+        assert_eq!(failure.code, "external.io");
+        assert_eq!(failure.details["primary"]["details"]["request"], "original");
+    }
+
+    #[test]
+    fn normal_expiry_identity_file_close_is_checked_without_renewing_control() {
+        let control = OperationControl::uncancelable(Instant::now());
+        let original_deadline = control.deadline();
+        // Use an existing regular file and the real checked OS close boundary;
+        // no worker, new process, fixture source, or replacement control.
+        let file = File::open(std::env::current_exe().unwrap()).unwrap();
+        finish_session_file(file, Ok(SessionEnd::LifetimeExpired(original_deadline)), &control).unwrap();
+        assert_eq!(control.deadline(), original_deadline);
+        assert_eq!(control.check().unwrap_err().code, "command.deadline");
+        let close_error = ToolkitError::io(std::io::Error::other("checked close failed"));
+        let failure = finish_session_end(Ok(SessionEnd::LifetimeExpired(original_deadline)), Err(close_error), &control).unwrap_err();
+        assert_eq!(failure.code, "external.io");
+        assert_eq!(failure.details["primary"]["message"], "checked close failed");
+        let cancelled = OperationControl::new(original_deadline, Arc::new(AtomicBool::new(true)));
+        let file = File::open(std::env::current_exe().unwrap()).unwrap();
+        assert_eq!(finish_session_file(file, Ok(SessionEnd::LifetimeExpired(original_deadline)), &cancelled).unwrap_err().code, "command.cancelled");
     }
 
     #[test]

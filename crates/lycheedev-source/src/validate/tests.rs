@@ -153,6 +153,137 @@ fn single_ignores_alias_call_extension_and_uses_callback_declarations() {
     assert_eq!(result["references"].as_array().unwrap().len(), 1);
 }
 #[test]
+fn single_fresh_lua_uses_original_escaped_bytes_without_changing_public_names() {
+    let closure = closure(
+        r#"C_Test['\255'](); C_Test['�'](); frame:RegisterEvent('\254'); frame:RegisterEvent('�')"#,
+        "",
+    );
+    let index = map(
+        vec![
+            symbol("declaration", "C_Test.�", "api-function", "API.lua", 1),
+            symbol("declaration", "�", "api-event", "API.lua", 2),
+        ],
+        &[],
+    );
+    let result = check::assess(&pin(), &closure, &index, &Default::default()).unwrap();
+    assert_eq!(result["staticValid"], true);
+    assert_eq!(result["resolved"], 2);
+    assert_eq!(result["unresolved"], 4);
+    let calls = result["references"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["name"] == "C_Test.�")
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0]["status"], "unresolved");
+    assert_eq!(calls[1]["status"], "source-present");
+    let events = result["references"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["category"] == "event-registration")
+        .collect::<Vec<_>>();
+    assert_eq!(events[0]["name"], events[1]["name"]);
+    assert_eq!(events[0]["status"], "unresolved");
+    assert_eq!(events[1]["status"], "source-present");
+}
+#[test]
+fn single_inline_xml_offsets_raw_relationship_ordinals_after_xml_references() {
+    let mut closure = closure("", "");
+    let raw = r#"<Ui><Frame inherits='BaseTemplate'><Scripts><OnLoad>C_Test['\255'](); C_Test['�']()</OnLoad></Scripts></Frame></Ui>"#;
+    closure.documents.push(document(
+        "UI.xml",
+        raw.as_bytes(),
+        crate::facts::xml(raw.as_bytes()),
+    ));
+    let index = map(
+        vec![
+            symbol("declaration", "BaseTemplate", "xml-Frame", "UI.xml", 1),
+            symbol("declaration", "C_Test.�", "api-function", "API.lua", 1),
+        ],
+        &[],
+    );
+    let result = check::assess(&pin(), &closure, &index, &Default::default()).unwrap();
+    assert_eq!(result["resolved"], 2);
+    assert_eq!(result["unresolved"], 1);
+    assert_eq!(result["references"][0]["category"], "xml-inherits");
+    assert_eq!(result["references"][1]["name"], "C_Test.�");
+    assert_eq!(result["references"][1]["status"], "unresolved");
+    assert_eq!(result["references"][2]["status"], "source-present");
+}
+#[test]
+fn single_real_closure_keeps_raw_identity_through_archival_and_reinspection() {
+    let home = std::env::temp_dir().join(format!(
+        "lycheedev-validate-raw-targets-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    lycheedev_core::workspace::initialize(&home).unwrap();
+    let root = home.join("addon");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("Main.toc"), b"Main.lua\nUI.xml\n").unwrap();
+    std::fs::write(root.join("Main.lua"), r#"C_Test['\255'](); C_Test['�']()"#).unwrap();
+    std::fs::write(
+        root.join("UI.xml"),
+        r#"<Ui><Frame inherits='BaseTemplate'><Scripts><OnLoad>C_Test['\254'](); C_Test['�']()</OnLoad></Scripts></Frame></Ui>"#,
+    )
+    .unwrap();
+    let index = map(
+        vec![
+            symbol("declaration", "BaseTemplate", "xml-Frame", "UI.xml", 1),
+            symbol("declaration", "C_Test.�", "api-function", "API.lua", 1),
+        ],
+        &[],
+    );
+    for _ in 0..2 {
+        let closure =
+            Closure::inspect_with_control(&home, &root, "Main.toc", &Default::default()).unwrap();
+        assert!(closure.valid, "{:?}", closure.issues);
+        assert_eq!(closure.documents.len(), 3);
+        assert_eq!(
+            closure.documents[1].facts.relationship_target_bytes(0),
+            Some(b"C_Test.\xff".as_slice())
+        );
+        assert_eq!(
+            closure.documents[2].facts.relationship_target_bytes(1),
+            Some(b"C_Test.\xfe".as_slice())
+        );
+        assert!(closure.documents.iter().all(|doc| {
+            doc.blob["sha256"]
+                .as_str()
+                .is_some_and(|hash| hash.len() == 64)
+                && doc.facts.raw_relationship_targets.is_some()
+        }));
+        let result = check::assess(&pin(), &closure, &index, &Default::default()).unwrap();
+        assert_eq!(result["staticValid"], true);
+        assert_eq!(result["resolved"], 3);
+        assert_eq!(result["unresolved"], 2);
+    }
+    // Preserve the authenticated inputs and blobs for consolidated evidence.
+}
+#[test]
+fn single_never_guesses_original_byte_identity_from_deserialized_public_facts() {
+    let mut closure = closure(r#"C_Test['\255']()"#, "");
+    let public = serde_json::to_value(&closure.documents[1].facts).unwrap();
+    assert_eq!(public["relationships"][0]["to"], "C_Test.�");
+    assert!(public.get("raw_relationship_targets").is_none());
+    let fresh = check::assess(&pin(), &closure, &baseline(&[]), &Default::default()).unwrap();
+    assert_eq!(fresh["unresolved"], 1);
+    closure.documents[1].facts = serde_json::from_value(public.clone()).unwrap();
+    assert_eq!(
+        serde_json::to_value(&closure.documents[1].facts).unwrap(),
+        public
+    );
+    let error = check::assess(&pin(), &closure, &baseline(&[]), &Default::default()).unwrap_err();
+    assert_eq!(error.code, "codebase.source_integrity");
+    assert_eq!(error.details["path"], "Main.lua");
+    assert_eq!(error.details["relationshipOrdinal"], 0);
+}
+#[test]
 fn single_interface_missing_ambiguous_mismatch_and_match_are_distinct() {
     for (headers, status, valid, complete) in [
         ("", "unresolved", true, false),

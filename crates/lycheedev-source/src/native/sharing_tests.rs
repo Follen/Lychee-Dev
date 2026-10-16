@@ -107,9 +107,11 @@ fn graph_fixture_inputs(
     .unwrap()
 }
 
-// Both files are compiled only through this cfg(test) module.
+// These differential references/tests are compiled only through this cfg(test) module.
+include!("scope_copying_reference.rs");
 include!("graph_move_copying_reference.rs");
 include!("graph_move_tests.rs");
+include!("scope_copy_tests.rs");
 
 // The prior eager Value formulas are retained here as the compatibility oracle.
 // Equality checks bytes as well as Values, covering nested canonical key order.

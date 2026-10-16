@@ -47,12 +47,26 @@ pub struct Facts {
     pub loads: Vec<LoadReference>,
     pub headers: Vec<HeaderValue>,
     pub diagnostics: Vec<SyntaxNote>,
+    /// Only fresh parser observations retain pre-JSON target identity. None
+    /// after deserialization means that raw identity cannot be authenticated.
+    #[serde(skip)]
+    pub(crate) raw_relationship_targets: Option<BTreeMap<usize, Vec<u8>>>,
+}
+impl Facts {
+    pub(crate) fn fresh() -> Self {
+        Self { raw_relationship_targets: Some(BTreeMap::new()), ..Self::default() }
+    }
+    pub(crate) fn relationship_target_bytes(&self, ordinal: usize) -> Option<&[u8]> {
+        let edge = self.relationships.get(ordinal)?;
+        let originals = self.raw_relationship_targets.as_ref()?;
+        Some(originals.get(&ordinal).map_or(edge.to.as_bytes(), Vec::as_slice))
+    }
 }
 pub fn lua(raw: &[u8], generated: bool) -> Facts {
     match crate::lua_tree::SyntaxDocument::new_public(raw) {
         Ok(d) => d.facts(generated),
         Err(e) => {
-            let mut f = Facts::default();
+            let mut f = Facts::fresh();
             f.diagnostics.push(SyntaxNote {
                 message: e.to_string(),
                 line: 0,
@@ -62,7 +76,7 @@ pub fn lua(raw: &[u8], generated: bool) -> Facts {
     }
 }
 pub fn toc(raw: &[u8]) -> Facts {
-    let mut f = Facts::default();
+    let mut f = Facts::fresh();
     let text = String::from_utf8_lossy(raw.strip_prefix(&[239, 187, 191]).unwrap_or(raw));
     for (i, line) in text.split('\n').enumerate() {
         let line = line.trim();
@@ -227,6 +241,13 @@ fn append_inline(facts: &mut Facts, script: &str, script_line: usize, owner: &st
             script_line
         };
     }
+    // Relations are appended in token order. Preserve the exact ordinal of
+    // invalid literal targets without exposing a second public fact model.
+    let offset = facts.relationships.len();
+    match (&mut facts.raw_relationship_targets, inner.raw_relationship_targets.take()) {
+        (Some(targets), Some(inner)) => targets.extend(inner.into_iter().map(|(ordinal, raw)| (offset + ordinal, raw))),
+        _ => facts.raw_relationship_targets = None,
+    }
     facts.declarations.extend(inner.declarations);
     facts.relationships.extend(inner.relationships);
     facts.diagnostics.extend(inner.diagnostics);
@@ -270,7 +291,7 @@ fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) ->
     use quick_xml::{Reader, events::Event};
     let mut reader = Reader::from_reader(raw);
     reader.config_mut().check_comments = true;
-    let mut facts = Facts::default();
+    let mut facts = Facts::fresh();
     let mut stack = Vec::<(String, String)>::new();
     let mut script = String::new();
     let mut script_line = 0;
@@ -471,6 +492,50 @@ mod tests {
                 .iter()
                 .any(|r| r.from == "two" && r.to == "one")
         );
+    }
+    #[test]
+    fn fresh_literal_targets_keep_raw_identity_without_changing_public_json() {
+        let raw = r#"C_X["\255"](); frame:RegisterEvent("\254"); C_X["�"]()"#.as_bytes();
+        let fresh = lua(raw, false);
+        assert!(fresh.diagnostics.is_empty());
+        assert_eq!(fresh.relationship_target_bytes(0).unwrap(), b"C_X.\xff");
+        assert_eq!(fresh.relationship_target_bytes(1).unwrap(), b"frame:RegisterEvent");
+        assert_eq!(fresh.relationship_target_bytes(2).unwrap(), b"\xfe");
+        assert_eq!(fresh.relationship_target_bytes(3).unwrap(), "C_X.�".as_bytes());
+        assert_eq!(fresh.raw_relationship_targets.as_ref().unwrap().len(), 2);
+        let public = serde_json::to_value(&fresh).unwrap();
+        assert_eq!(public.as_object().unwrap().len(), 5);
+        assert_eq!(public["relationships"][0]["to"], public["relationships"][3]["to"]);
+        let cached: Facts = serde_json::from_value(public.clone()).unwrap();
+        assert!(cached.raw_relationship_targets.is_none());
+        assert!(cached.relationship_target_bytes(0).is_none());
+        assert!(cached.relationship_target_bytes(1).is_none());
+        assert_eq!(serde_json::to_value(&cached).unwrap(), public);
+        let reparsed = lua(raw, false);
+        assert_eq!(reparsed.relationship_target_bytes(0), fresh.relationship_target_bytes(0));
+        assert_eq!(serde_json::to_value(&reparsed).unwrap(), public);
+    }
+    #[test]
+    fn inline_raw_targets_follow_appended_relationship_ordinals() {
+        let raw = br#"<Ui><Frame name="F" inherits="T"><Scripts><OnLoad>C_X["\255"](); frame:RegisterEvent("\254")</OnLoad></Scripts></Frame></Ui>"#;
+        let facts = xml(raw);
+        assert!(facts.diagnostics.is_empty());
+        assert_eq!(facts.relationship_target_bytes(0).unwrap(), b"T");
+        assert_eq!(facts.relationship_target_bytes(1).unwrap(), b"C_X.\xff");
+        assert_eq!(facts.relationship_target_bytes(2).unwrap(), b"frame:RegisterEvent");
+        assert_eq!(facts.relationship_target_bytes(3).unwrap(), b"\xfe");
+        assert_eq!(facts.raw_relationship_targets.as_ref().unwrap().keys().copied().collect::<Vec<_>>(), [1, 3]);
+    }
+    #[test]
+    fn rejected_program_clears_raw_targets_but_empty_fresh_identity_is_known() {
+        let facts = lua(br#"C_X["\255"](); function Broken("#, false);
+        assert!(!facts.diagnostics.is_empty());
+        assert!(facts.relationships.is_empty());
+        assert!(facts.raw_relationship_targets.as_ref().unwrap().is_empty());
+        assert!(lua(b"", false).raw_relationship_targets.as_ref().unwrap().is_empty());
+        assert!(xml(b"<Root/>").raw_relationship_targets.as_ref().unwrap().is_empty());
+        assert!(toc(b"## Interface: 120100\n").raw_relationship_targets.as_ref().unwrap().is_empty());
+        assert!(Facts::default().raw_relationship_targets.is_none());
     }
     #[test]
     fn descriptors_are_literal_metadata() {

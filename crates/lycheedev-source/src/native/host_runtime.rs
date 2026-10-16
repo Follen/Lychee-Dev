@@ -255,24 +255,31 @@ impl Builder {
     }
     fn host_finish_facts(&mut self)->Result<()> {
         if self.graph.host_runtime.is_none(){return Ok(())}
-        for fact in self.graph.uses.clone(){
+        // Projection only appends transfers/capture references. Keep the original
+        // source lengths and order without retaining a second whole fact vector.
+        for index in 0..self.graph.uses.len(){
+            let fact=self.graph.uses[index].clone();
             if !fact.writes.is_empty(){self.host_transfer("storage_read",vec![],fact.writes,TransferDestination::Use{use_fact:fact.id},fact.decision,vec![])?;}
         }
-        for write in self.graph.writes.clone(){
+        for index in 0..self.graph.writes.len(){
+            let write=self.graph.writes[index].clone();
             let conditions=write.conditional_branch.map(|branch|self.graph.branches[branch].condition_facts.clone()).unwrap_or_default();
             self.host_transfer("storage_write",write.inputs,vec![],TransferDestination::Write{write:write.id},write.decision,conditions)?;
         }
-        for join in self.native.facts.control.write_joins.clone(){
+        for index in 0..self.native.facts.control.write_joins.len(){
+            let join=self.native.facts.control.write_joins[index].clone();
             let sources=join.candidates.iter().filter_map(|candidate|candidate.write).collect();
             self.host_transfer("conditional_write_candidates",vec![],sources,TransferDestination::Write{write:join.destination},self.graph.writes[join.destination].decision.clone(),self.graph.branches[join.branch].condition_facts.clone())?;
         }
-        for call in self.graph.host_runtime.as_ref().expect("host facts").calls.clone(){
+        for index in 0..self.graph.host_runtime.as_ref().expect("host facts").calls.len(){
+            let call=self.graph.host_runtime.as_ref().expect("host facts").calls[index].clone();
             for slot in call.arguments{self.host_transfer("argument_slot",vec![slot.use_fact],slot.writes,TransferDestination::Argument{call:call.call,slot:slot.slot},slot.selected,vec![])?;}
             for slot in &call.returns{self.host_transfer("return_slot",vec![slot.use_fact],slot.writes.clone(),TransferDestination::Return{call:call.call,slot:slot.slot},slot.selected.clone(),vec![])?;}
             self.host_transfer("scalar_adjustment",call.returns.first().map(|slot|slot.use_fact).into_iter().collect(),vec![],TransferDestination::ScalarResult{call:call.call},self.graph.uses[call.scalar_result].decision.clone(),vec![])?;
             self.host_transfer("scalar_result_use",call.returns.first().map(|slot|slot.use_fact).into_iter().collect(),vec![],TransferDestination::Use{use_fact:call.scalar_result},self.graph.uses[call.scalar_result].decision.clone(),vec![])?;
         }
-        for capture in self.native.facts.capture_facts.clone(){
+        for index in 0..self.native.facts.capture_facts.len(){
+            let capture=self.native.facts.capture_facts[index].clone();
             self.budget()?;
             let owner_value=self.native.facts.closures[capture.closure].value;
             let proof_id=digest(&(self.graph.snapshot_key.as_str(),"structural_capture_reference",capture.closure,&capture.cell,&capture.declaration,&capture.creation_context,owner_value));

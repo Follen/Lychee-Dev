@@ -124,8 +124,10 @@ impl Builder {
                 crate::xml_load::Action::Definition{..}=>{},
             }
         }
-        let handlers=self.graph.xml.as_ref().expect("XML facts").handlers.clone();
-        for handler in handlers{
+        // Resolution updates only the current handler and appends references/uses;
+        // later handlers remain unchanged. Clone one item, not the whole vector.
+        for index in 0..self.graph.xml.as_ref().expect("XML facts").handlers.len(){
+            let handler=self.graph.xml.as_ref().expect("XML facts").handlers[index].clone();
             let ctx=self.xml_context(handler.action,&xml_site(&handler.origin));
             let fact=match &handler.target{
                 crate::xml_load::HandlerTarget::Method{reference}=>Some(self.xml_reference(reference,Some(handler.object),&ctx,"handler_method")?),

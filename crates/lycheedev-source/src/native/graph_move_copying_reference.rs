@@ -1,4 +1,5 @@
-// Frozen copy of the pre-move build_graph only. All other implementation
+// Frozen copy of the pre-move build_graph. Scope finalization and XML loading
+// call the separately frozen whole-Vec-copy methods; all other implementation
 // and types are the same as the candidate. Included only by sharing_tests.
 // Source SHA256: d1618420541509af71975b4e448f80259f865475af5ea4b018e93dd92986d3c8
 // This temporary differential oracle is not a second production evaluator.
@@ -18,7 +19,7 @@ fn graph_move_copying_reference(prepared:&PreparedSnapshot,name:&str,snapshot_in
         builder.native.facts.control.complete=false;builder.native.facts.control.coverage="unavailable_execution_plan".into();
         builder.native.facts.execution_boundaries.push(ExecutionBoundary{kind:NativeBoundaryKind::Knowledge,reason:"load_order_unknown".into(),load_plan:plan.clone()});
     }
-    let load_result=if let Some(program)=inputs.xml.as_ref(){builder.xml_load(program)}else{
+    let load_result=if let Some(program)=inputs.xml.as_ref(){builder.xml_load_copying_reference(program)}else{
         let mut result=Ok(());
         for (occurrence,file) in ordered.iter().enumerate(){
             result=builder.load_file(file,occurrence);
@@ -42,7 +43,7 @@ fn graph_move_copying_reference(prepared:&PreparedSnapshot,name:&str,snapshot_in
     }
     if native_profile {
         builder.flow_publish_contexts();
-        builder.host_finish_facts()?;
+        builder.host_finish_facts_copying_reference()?;
         if builder.native.typed_cells.borrow().len()>8192{return Err("typed storage identity budget exceeded".into())}
         builder.native.facts.storages=builder.native.typed_cells.borrow().iter().map(|(cell,owner)|StorageFact{cell:cell.clone(),owner:owner.clone()}).collect();
         builder.graph.native_invocations=Some(builder.native.facts.clone());

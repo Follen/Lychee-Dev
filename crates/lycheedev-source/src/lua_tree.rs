@@ -127,7 +127,7 @@ impl SyntaxDocument {
     pub fn facts(&self, generated: bool) -> Facts {
         let mut w = Walker {
             raw: &self.bytes,
-            facts: Facts::default(),
+            facts: Facts::fresh(),
             scopes: vec!["<file>".into()],
             api_roots: Vec::new(),
             rejected_syntax: false,
@@ -146,6 +146,7 @@ impl SyntaxDocument {
         if self.tree.root_node().has_error() || w.rejected_syntax {
             w.facts.declarations.clear();
             w.facts.relationships.clear();
+            if let Some(targets) = &mut w.facts.raw_relationship_targets { targets.clear(); }
         } else {
             for root in std::mem::take(&mut w.api_roots) {
                 w.documentation(root, "");
@@ -336,57 +337,31 @@ pub(crate) fn lua_line_starts(raw: &[u8]) -> Vec<usize> {
     starts
 }
 
-fn name(raw: &[u8], n: Node<'_>) -> String {
-    name_limited(raw, n, 0)
+fn name(raw: &[u8], node: Node<'_>) -> String {
+    String::from_utf8(name_bytes(raw, node, 0))
+        .unwrap_or_else(|error| lua_json_string(error.as_bytes()))
 }
-fn name_limited(raw: &[u8], n: Node<'_>, depth: usize) -> String {
-    if depth > 256 {
-        return String::new();
-    }
-    let n = unparenthesized(n);
-    match n.kind() {
-        "identifier" => text(raw, n).into(),
-        "dot_index_expression" | "method_index_expression" => {
-            let Some(t) = n.child_by_field_name("table") else {
-                return String::new();
+fn name_bytes(raw: &[u8], node: Node<'_>, depth: usize) -> Vec<u8> {
+    if depth > 256 { return Vec::new(); }
+    let node = unparenthesized(node);
+    match node.kind() {
+        "identifier" => raw[node.byte_range()].to_vec(),
+        "dot_index_expression" | "method_index_expression" | "bracket_index_expression" => {
+            let Some(table) = node.child_by_field_name("table") else { return Vec::new(); };
+            let Some(field) = node.child_by_field_name("field").or_else(|| node.child_by_field_name("method")) else { return Vec::new(); };
+            let mut base = name_bytes(raw, table, depth + 1);
+            if base.is_empty() { return base; }
+            let value = if node.kind() == "bracket_index_expression" {
+                let Some(value) = string_bytes(raw, field) else { return Vec::new(); };
+                value
+            } else {
+                raw[field.byte_range()].to_vec()
             };
-            let Some(f) = n
-                .child_by_field_name("field")
-                .or_else(|| n.child_by_field_name("method"))
-            else {
-                return String::new();
-            };
-            let base = name_limited(raw, t, depth + 1);
-            if base.is_empty() {
-                return base;
-            }
-            format!(
-                "{base}{}{}",
-                if n.kind() == "method_index_expression" {
-                    ":"
-                } else {
-                    "."
-                },
-                text(raw, f)
-            )
+            base.push(if node.kind() == "method_index_expression" { b':' } else { b'.' });
+            base.extend(value);
+            base
         }
-        "bracket_index_expression" => {
-            let Some(t) = n.child_by_field_name("table") else {
-                return String::new();
-            };
-            let Some(f) = n.child_by_field_name("field") else {
-                return String::new();
-            };
-            let base = name_limited(raw, t, depth + 1);
-            let Some(field) = string(raw, f) else {
-                return String::new();
-            };
-            if base.is_empty() {
-                return base;
-            }
-            format!("{base}.{field}")
-        }
-        _ => String::new(),
+        _ => Vec::new(),
     }
 }
 // gopher-lua's lexer emits bytes for escapes (including wrapping decimal
@@ -578,6 +553,19 @@ impl<'tree> Walker<'_, 'tree> {
             line: self.line(n),
         });
     }
+    fn link_raw(&mut self, node: Node<'_>, from: String, target: Vec<u8>, category: &str, confidence: &str) {
+        let ordinal = self.facts.relationships.len();
+        let display = match String::from_utf8(target) {
+            Ok(value) => value,
+            Err(error) => {
+                let target = error.into_bytes();
+                let display = lua_json_string(&target);
+                self.facts.raw_relationship_targets.as_mut().expect("fresh parser target identity").insert(ordinal, target);
+                display
+            }
+        };
+        self.link(node, from, display, category, confidence);
+    }
     fn function(
         &mut self,
         n: Node<'tree>,
@@ -703,41 +691,42 @@ impl<'tree> Walker<'_, 'tree> {
             }
             "function_call" if !n.has_error() => {
                 if let Some(f) = n.child_by_field_name("name") {
-                    let target = name(self.raw, f);
-                    let confidence = if target.is_empty() {
+                    let target_bytes = name_bytes(self.raw, f, 0);
+                    let event_target = target_bytes.ends_with(b":RegisterEvent")
+                        || target_bytes.ends_with(b":RegisterUnitEvent");
+                    let confidence = if target_bytes.is_empty() {
                         "dynamic-unresolved"
                     } else {
                         "inferred"
                     };
-                    self.link(
+                    self.link_raw(
                         n,
                         self.scope(),
-                        if target.is_empty() {
-                            "<dynamic>".into()
+                        if target_bytes.is_empty() {
+                            b"<dynamic>".to_vec()
                         } else {
-                            target.clone()
+                            target_bytes
                         },
                         "call",
                         confidence,
                     );
-                    if (target.ends_with(":RegisterEvent")
-                        || target.ends_with(":RegisterUnitEvent"))
+                    if event_target
                         && n.child_by_field_name("arguments")
                             .is_some_and(|a| !children(a).is_empty())
                     {
                         let value = n
                             .child_by_field_name("arguments")
                             .and_then(|a| children(a).into_iter().next())
-                            .and_then(|v| string(self.raw, v));
+                            .and_then(|v| string_bytes(self.raw, v));
                         let confidence = if value.is_some() {
                             "exact"
                         } else {
                             "dynamic-unresolved"
                         };
-                        self.link(
+                        self.link_raw(
                             n,
                             self.scope(),
-                            value.unwrap_or_else(|| "<dynamic>".into()),
+                            value.unwrap_or_else(|| b"<dynamic>".to_vec()),
                             "event-registration",
                             confidence,
                         );

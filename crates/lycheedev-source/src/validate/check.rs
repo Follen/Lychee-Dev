@@ -1,6 +1,9 @@
 //! The single pinned-addon route is Go 3.2.3 CheckClosure, not matrix
 //! compatibility validation. Missing declarations are unresolved observations.
-use crate::{closure::Closure, index::Index};
+use crate::{
+    closure::{Closure, Document},
+    index::Index,
+};
 use lycheedev_core::{
     Result, ToolkitError,
     control::OperationControl,
@@ -16,6 +19,26 @@ fn checked(category: &str) -> bool {
     )
 }
 
+fn indexable_target(doc: &Document, ordinal: usize) -> Result<bool> {
+    // The public single entry always freshly parses Closure document bytes.
+    // A deserialized Facts value cannot certify the pre-JSON byte identity;
+    // never infer it from a lossy display name or a coincident file/line.
+    let bytes = doc
+        .facts
+        .relationship_target_bytes(ordinal)
+        .ok_or_else(|| {
+            ToolkitError::new(
+                "codebase.source_integrity",
+                "Compatibility reference lacks its original byte identity",
+                4,
+            )
+            .with_details(json!({"path":doc.path,"relationshipOrdinal":ordinal}))
+        })?;
+    // Pinned index records have crossed encoding/json's UTF-8 boundary. Go's
+    // invalid-byte Lua name cannot equal any such indexed Unicode string.
+    Ok(std::str::from_utf8(bytes).is_ok())
+}
+
 pub(super) fn assess(
     pin: &SourcePin,
     closure: &Closure,
@@ -26,7 +49,7 @@ pub(super) fn assess(
     let mut wanted = BTreeMap::<(&str, &str), Vec<&crate::index::Symbol>>::new();
     let mut count = 0usize;
     for doc in &closure.documents {
-        for edge in &doc.facts.relationships {
+        for (ordinal, edge) in doc.facts.relationships.iter().enumerate() {
             control.check()?;
             if !checked(&edge.category) {
                 continue;
@@ -39,7 +62,7 @@ pub(super) fn assess(
                     3,
                 ));
             }
-            if edge.confidence != "dynamic-unresolved" {
+            if edge.confidence != "dynamic-unresolved" && indexable_target(doc, ordinal)? {
                 wanted.entry((&edge.to, &edge.category)).or_default();
             }
         }
@@ -93,18 +116,23 @@ pub(super) fn assess(
     let mut resolved = 0usize;
     let mut unresolved = 0usize;
     for doc in &closure.documents {
-        for edge in &doc.facts.relationships {
+        for (ordinal, edge) in doc.facts.relationships.iter().enumerate() {
             control.check()?;
             if !checked(&edge.category) {
                 continue;
             }
             let mut reference = json!({"path":doc.path,"line":edge.line,"name":edge.to,"category":edge.category,"status":"unresolved","evidence":[]});
+            let sites =
+                if edge.confidence != "dynamic-unresolved" && indexable_target(doc, ordinal)? {
+                    wanted
+                        .get(&(edge.to.as_str(), edge.category.as_str()))
+                        .filter(|sites| !sites.is_empty())
+                } else {
+                    None
+                };
             if edge.confidence == "dynamic-unresolved" {
                 reference["reason"] = json!("dynamic source expression");
-            } else if let Some(sites) = wanted
-                .get(&(edge.to.as_str(), edge.category.as_str()))
-                .filter(|sites| !sites.is_empty())
-            {
+            } else if let Some(sites) = sites {
                 reference["status"] = json!("source-present");
                 reference["evidence"] = json!(sites.iter().map(|s| json!({"path":s.path,"line":s.line,"endLine":s.end_line,"signature":s.signature})).collect::<Vec<_>>());
             } else {
