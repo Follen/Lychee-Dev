@@ -341,3 +341,150 @@ fn default_remote_stream_keeps_capture_and_multiple_close_causes_when_error_mark
     assert_eq!(attempted[2]["error"].as_object().unwrap().len(), 2);
     f.close();
 }
+
+#[test]
+fn default_remote_stream_native_service_exposes_typed_rows_and_checked_summary() {
+    use stream::{StreamEvent, StreamRequest};
+    let f = SqlFixture::with_rows(false, true, 3);
+    let inv = invocation(&f, &[("--fields", "ID,ID"), ("--filter", " ID = +08 ")]);
+    let mut yielded = Vec::new();
+    let mut records = 0;
+    let summary = stream::run(
+        StreamRequest::from_invocation(&inv).unwrap(),
+        &mut |event| {
+            match event {
+                StreamEvent::Begin(begin) => {
+                    assert_eq!(begin.snapshot, f.snapshot);
+                    assert_eq!(begin.filter, " ID = +08 ");
+                    assert_eq!(begin.projection.fields(), ["ID", "ID"]);
+                    assert_eq!(begin.limit.get(), 1);
+                }
+                StreamEvent::Record(record) => {
+                    assert_eq!(record.index, 0);
+                    assert_eq!(record.record_id, 8);
+                    assert_eq!(record.row.len(), 1);
+                    assert_eq!(record.row["ID"], crate::table::Value::UInt(8));
+                    records += 1;
+                }
+                StreamEvent::End(walk) => {
+                    assert_eq!(walk.count, 1);
+                    assert!(walk.complete());
+                    assert_eq!(f.captures().len(), 1);
+                    // The same admission must really be gone before native End.
+                    lycheedev_core::workspace::data_resources::acquire(
+                        &f.source.home,
+                        Policy::Measurement,
+                        &OperationControl::default(),
+                    )
+                    .unwrap()
+                    .close()
+                    .unwrap();
+                }
+                StreamEvent::Error { .. } => panic!("successful fixture emitted error"),
+            }
+            yielded.push(stream::wire::event(event));
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(records, 1);
+    assert_eq!(summary.walk.count, records);
+    assert_eq!(summary.begin.projection.fields(), ["ID", "ID"]);
+    assert_eq!(summary.captures.len(), 1);
+    assert_eq!(summary.resource_usage.network_requests, 0);
+    assert_eq!(frames(&yielded), ["begin", "record", "end"]);
+    verify_manifest(
+        &f,
+        &summary.captures[0],
+        &yielded[0]["begin"],
+        &yielded[2]["end"],
+    );
+    let out = stream::wire::into_outcome(summary);
+    assert_eq!(out.data["filter"], " ID = +08 ");
+    assert_eq!(out.data["fields"], json!(["ID", "ID"]));
+    assert!(out.complete);
+    f.close();
+}
+
+#[test]
+fn default_remote_stream_native_service_never_reinvokes_failed_sink_and_keeps_capture() {
+    use stream::{StreamEvent, StreamRequest};
+    for fail_at in 1..=3 {
+        let f = SqlFixture::new(false, true);
+        let inv = invocation(&f, &[]);
+        let mut calls = 0;
+        let error = stream::run(
+            StreamRequest::from_invocation(&inv).unwrap(),
+            &mut |event| {
+                assert!(!matches!(event, StreamEvent::Error { .. }));
+                calls += 1;
+                if calls == fail_at {
+                    Err(writer_error())
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .unwrap_err();
+        assert_eq!(calls, fail_at);
+        assert_eq!(error.code, "external.io");
+        assert_eq!(f.captures().len(), usize::from(fail_at == 3));
+        if fail_at == 3 {
+            assert_eq!(error.details["primary"]["code"], "external.io");
+            let capture = &error.details["completedCaptures"][0];
+            assert_eq!(
+                evidence::read_capture(&f.source.home, capture["id"].as_str().unwrap()).unwrap(),
+                *capture
+            );
+        }
+        f.close();
+    }
+}
+
+#[test]
+fn default_remote_stream_native_cancellation_preserves_one_terminal_error() {
+    use stream::{StreamEvent, StreamRequest};
+    let f = SqlFixture::new(false, true);
+    let inv = invocation(&f, &[]);
+    let mut phases = Vec::new();
+    let error = stream::run(
+        StreamRequest::from_invocation(&inv).unwrap(),
+        &mut |event| {
+            phases.push(match event {
+                StreamEvent::Begin(_) => "begin",
+                StreamEvent::Record(_) => {
+                    inv.control.cancel_handle().store(true, Ordering::Release);
+                    "record"
+                }
+                StreamEvent::End(_) => panic!("cancelled stream cannot end successfully"),
+                StreamEvent::Error { code, .. } => {
+                    assert_eq!(code, "records.cancelled");
+                    "error"
+                }
+            });
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.exit_code, 7);
+    assert_eq!(phases, ["begin", "record", "error"]);
+    assert!(f.captures().is_empty());
+    f.close();
+}
+
+#[test]
+fn default_remote_stream_provider_error_precedes_deferred_projection_validation() {
+    let f = SqlFixture::new(false, false);
+    let inv = invocation(&f, &[("--fields", "Missing")]);
+    let request = stream::StreamRequest::from_invocation(&inv).unwrap();
+    let mut calls = 0;
+    let error = stream::run(request, &mut |_| {
+        calls += 1;
+        Ok(())
+    })
+    .unwrap_err();
+    assert_eq!(calls, 0);
+    assert_eq!(error.code, "records.remote_unavailable_offline");
+    assert!(f.captures().is_empty());
+    f.close();
+}

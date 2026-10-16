@@ -427,6 +427,7 @@ jobs:
         # and reply_assembly_tests; native_research::tests matched zero tests.
         run: |
           node tools/rust-cargo.mjs --owner ci-source-research --one-shot -- test --locked --offline -p lycheedev-source --lib native_research:: -j 1
+          node tools/rust-cargo.mjs --owner ci-source-engine-config --one-shot -- test --locked --offline -p lycheedev-source --lib engine_config::tests -j 1
       - name: Run incoming caller cursor and page identity regressions
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-incoming-caller-cursor --one-shot -- test --locked --offline -p lycheedev-source --lib relations::incoming_caller_cursor_tests -j 1
@@ -553,6 +554,11 @@ jobs:
       - name: Run Data advertised command surface fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: node tools/rust-cargo.mjs --owner ci-data-registry --one-shot -- test --locked --offline -p lycheedev-data --lib command_surface_tests -j 1
+      - name: Run typed Data stream application and wire fixtures
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: |
+          node tools/rust-cargo.mjs --owner ci-data-typed-stream --one-shot -- test --locked --offline -p lycheedev-data --lib stream::tests -j 1
+          node tools/rust-cargo.mjs --owner ci-cli-typed-stream --one-shot -- test --locked --offline -p lycheedev-cli --bin lycheedev tests::native_stream_writer -j 1
       - name: Run typed Hotfix budget and field encoding fixtures
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: |

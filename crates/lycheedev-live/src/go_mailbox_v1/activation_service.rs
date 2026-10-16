@@ -82,10 +82,10 @@ where
     /// unknown historic generations are not migrated or treated as fresh work.
     pub fn status_with_activation(&self, id: &str, control: &OperationControl) -> ServiceOutcome {
         match self.book.status(id, control) {
-            Ok(record) => ServiceOutcome::result(self.project(&record, "", "")),
+            Ok(record) => ServiceOutcome::Completed(self.project(&record, "", "")),
             Err(e) if missing(&e) => match self.book.activation_status(id, control) {
                 Ok(record) => {
-                    ServiceOutcome::result(status_record(&record, self.clock.unix_millis()))
+                    ServiceOutcome::Completed(status_record(&record, self.clock.unix_millis()))
                 }
                 Err(e) => ServiceOutcome::failure(e),
             },
@@ -145,22 +145,23 @@ where
             if metadata.owner != owner || !metadata.target.same_connection_target(&target) {
                 return ServiceOutcome::failure(contract("live.channel_ownership_changed"));
             }
-            let status = self.status_with_activation(&owner.operation_id, control);
-            if status.error.is_some() {
-                return status;
-            }
-            if let Some(result) = &status.result {
-                if !result.identity.runtime.is_empty()
-                    && ((!request.filter.character.is_empty()
-                        && request.filter.character != result.identity.character)
-                        || (!request.filter.realm.is_empty()
-                            && request.filter.realm != result.identity.realm))
-                {
-                    return ServiceOutcome::with_result(
-                        result.clone(),
-                        Err(contract("live.channel_target_mismatch")),
-                    );
+            let result = match self.status_with_activation(&owner.operation_id, control) {
+                ServiceOutcome::Completed(result) => result,
+                failed @ (ServiceOutcome::Failed(_)
+                | ServiceOutcome::ReportedWithFailure { .. }) => {
+                    return failed;
                 }
+            };
+            if !result.identity.runtime.is_empty()
+                && ((!request.filter.character.is_empty()
+                    && request.filter.character != result.identity.character)
+                    || (!request.filter.realm.is_empty()
+                        && request.filter.realm != result.identity.realm))
+            {
+                return ServiceOutcome::ReportedWithFailure {
+                    result,
+                    error: contract("live.channel_target_mismatch"),
+                };
             }
             return self.resume_with_activation(&owner.operation_id, control);
         }
@@ -214,7 +215,7 @@ where
         match selected {
             Err(e) => {
                 let mut out = ServiceOutcome::failure(e);
-                out.join(channel(closed));
+                out = out.join(channel(closed));
                 out
             }
             Ok(Selected::Connection(record)) => {
@@ -317,7 +318,7 @@ where
                     status_record(&lease.record, self.clock.unix_millis()),
                     Err(e.into()),
                 );
-                o.join(channel(lease.close()));
+                o = o.join(channel(lease.close()));
                 return o;
             }
         }
@@ -334,10 +335,10 @@ where
         };
         let mut outcome = ServiceOutcome::with_result(projected, channel(result));
         let closed = lease.close();
-        let can_retire = outcome.error.is_none() && closed.is_ok();
-        outcome.join(channel(closed));
+        let can_retire = matches!(&outcome, ServiceOutcome::Completed(_)) && closed.is_ok();
+        outcome = outcome.join(channel(closed));
         if can_retire {
-            outcome.join(self.book.retire_activation(id, control).map(|_| ()));
+            outcome = outcome.join(self.book.retire_activation(id, control).map(|_| ()));
         }
         outcome
     }
@@ -381,7 +382,7 @@ where
                     status_record(&lease.record, self.clock.unix_millis()),
                     Err(e.into()),
                 );
-                o.join(channel(lease.close()));
+                o = o.join(channel(lease.close()));
                 return o;
             }
         }
@@ -407,7 +408,7 @@ where
                     status_record(&lease.record, self.clock.unix_millis()),
                     Err(e.into()),
                 );
-                o.join(channel(lease.close()));
+                o = o.join(channel(lease.close()));
                 return o;
             }
         };
@@ -419,7 +420,7 @@ where
                     status_record(&lease.record, self.clock.unix_millis()),
                     Err(ChannelError::from(e).into()),
                 );
-                o.join(channel(lease.close()));
+                o = o.join(channel(lease.close()));
                 return o;
             }
         };
@@ -463,7 +464,8 @@ where
                         let mut state = selected_state(id, candidate.clone(), a.budget.clone());
                         state.reload = Some(ReloadAttempt {
                             automatic: false,
-                            slot_enablement: false, slot_budget_source: None,
+                            slot_enablement: false,
+                            slot_budget_source: None,
                             recovery_budget: a.budget.clone(),
                             reconcile_pending: false,
                             request: a.request.clone(),
@@ -553,29 +555,29 @@ where
                     == Some(lycheedev_core::control::StopCause::DeadlineExceeded)
             {
                 lease.record.activation.budget.as_mut().unwrap().exhausted = true;
-                outcome.join(channel(lease.save(&flush)));
+                outcome = outcome.join(channel(lease.save(&flush)));
             }
-            outcome.join(channel(
+            outcome = outcome.join(channel(
                 observe_activation(&mut lease, self.clock.unix_millis(), &flush).map(|_| ()),
             ));
-            outcome.result = Some(status_record(&lease.record, self.clock.unix_millis()));
+            outcome = outcome.with_report(status_record(&lease.record, self.clock.unix_millis()));
         }
         if waiting_runtime && !selected {
-            if let Some(result) = outcome.result.as_mut() {
+            if let Some(result) = outcome.report_mut() {
                 result.stage = "activation_waiting_runtime".into();
             }
         }
-        outcome.join(channel(lease.close()));
+        outcome = outcome.join(channel(lease.close()));
         if let Some(native) = backend.as_mut() {
-            outcome.join(channel(native.checked_close()));
+            outcome = outcome.join(channel(native.checked_close()));
         }
-        if selected && outcome.error.is_none() {
+        if selected && matches!(&outcome, ServiceOutcome::Completed(_)) {
             return self.resume(id, control);
         }
         // A failed activation phase write after the first channel log must still
         // expose that durable connection rather than invent an unbound success.
         if let Ok(record) = self.book.status(id, control) {
-            outcome.result = Some(self.project(&record, "", ""));
+            outcome = outcome.with_report(self.project(&record, "", ""));
         }
         outcome
     }

@@ -65,9 +65,10 @@ where
         let target = if !session.is_empty() {
             match self.book.metadata(session, control) {
                 Ok(metadata) => {
-                    let status = self.status_with_activation(session, control);
-                    if status.error.is_none() {
-                        report.connection = status.result;
+                    if let ServiceOutcome::Completed(result) =
+                        self.status_with_activation(session, control)
+                    {
+                        report.connection = Some(result);
                     }
                     match self.environment.confirm_target(&metadata.target, control) {
                         Ok(()) => metadata.target,
@@ -146,16 +147,15 @@ where
                 );
             } else {
                 report.add("live.ownership", "ok", &owner.operation_id, "");
-                let status = self.status_with_activation(&owner.operation_id, control);
-                if let Some(e) = status.error {
-                    report.add(
+                match self.status_with_activation(&owner.operation_id, control) {
+                    ServiceOutcome::Completed(result) => report.connection = Some(result),
+                    ServiceOutcome::Failed(error)
+                    | ServiceOutcome::ReportedWithFailure { error, .. } => report.add(
                         "live.connection",
                         "error",
-                        e.to_string(),
+                        error.to_string(),
                         "restore the original project's recovery files",
-                    );
-                } else {
-                    report.connection = status.result;
+                    ),
                 }
             }
             report.owner = Some(owner);

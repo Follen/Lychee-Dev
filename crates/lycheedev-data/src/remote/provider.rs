@@ -16,7 +16,16 @@ fn resolve_pin(
     invocation: &Invocation,
     budget: &Arc<Budget>,
 ) -> Result<lycheedev_core::selection::PinnedSet> {
-    lycheedev_core::selection::resolve_pinned_controlled_with_check(invocation, || budget.check())
+    lycheedev_core::selection::resolve_pin_request_controlled_with_check(
+        lycheedev_core::selection::PinSelectionRequest {
+            home: &invocation.home,
+            cwd: &invocation.cwd,
+            snapshot: invocation.flag("--snapshot"),
+            project: invocation.flag("--project"),
+        },
+        &invocation.control,
+        || budget.check(),
+    )
 }
 
 /// No file-read method exists until this owner has acquired real workspace slots.

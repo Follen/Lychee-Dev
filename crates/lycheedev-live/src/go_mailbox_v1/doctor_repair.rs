@@ -290,7 +290,7 @@ where
             // Close intent is persisted before any ordinary continuation. A
             // pending opaque/unknown operation is never executed as pre-repair.
             let closed = self.close_for_repair(&owner.operation_id, control);
-            if closed.error.is_some() {
+            if !matches!(&closed, ServiceOutcome::Completed(_)) {
                 return closed;
             }
         }
@@ -389,7 +389,7 @@ where
                 self.project(&record, "", ""),
                 Err(contract("live.channel_closed")),
             );
-            result.join(channel(journal.close()));
+            result = result.join(channel(journal.close()));
             return result;
         }
         let mut state = record.state.clone();
@@ -399,7 +399,7 @@ where
         if let Err(e) = validation {
             let mut result =
                 ServiceOutcome::with_result(self.project(&record, "", ""), Err(e.into()));
-            result.join(channel(journal.close()));
+            result = result.join(channel(journal.close()));
             return result;
         }
         let backend = match self.environment.open_for_repair(
@@ -412,7 +412,7 @@ where
             Err(e) => {
                 let mut result =
                     ServiceOutcome::with_result(self.project(&record, "", ""), Err(e.into()));
-                result.join(channel(journal.close()));
+                result = result.join(channel(journal.close()));
                 return result;
             }
         };
@@ -440,12 +440,12 @@ where
             driver.backend.scans(),
         );
         let mut outcome = ServiceOutcome::with_result(projected, channel(result));
-        outcome.join(channel(driver.backend.checked_close()));
+        outcome = outcome.join(channel(driver.backend.checked_close()));
         let closed = driver.journal.close();
         let released = closed.is_ok();
-        outcome.join(channel(closed));
+        outcome = outcome.join(channel(closed));
         if retire && released {
-            outcome.join(self.book.retire_closed(id, control).map(|_| ()));
+            outcome = outcome.join(self.book.retire_closed(id, control).map(|_| ()));
         }
         outcome
     }

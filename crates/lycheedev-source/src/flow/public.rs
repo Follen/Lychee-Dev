@@ -500,8 +500,7 @@ fn execute(request: Request, control: &OperationControl) -> Result<Value> {
         total_milliseconds: WORKER_MILLIS,
         ..Default::default()
     };
-    let mut config = emmylua_code_analysis::Emmyrc::default();
-    config.runtime.version = emmylua_code_analysis::EmmyrcLuaVersion::Lua51;
+    let config = crate::engine_config::research();
     let plan = match &request.ordered {
         Some(order) => LoadPlan::Known(order.clone()),
         None => LoadPlan::Unknown(request.files.keys().cloned().collect()),

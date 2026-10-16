@@ -88,10 +88,9 @@ impl Services for Fake {
             c.cancel();
             assert_eq!(control.stop_cause().unwrap(), Some(StopCause::Cancelled));
         }
-        self.outcome.take().unwrap_or(ServiceOutcome {
-            result: Some(project_result()),
-            error: None,
-        })
+        self.outcome
+            .take()
+            .unwrap_or(ServiceOutcome::Completed(project_result()))
     }
     fn doctor(
         &mut self,
@@ -105,10 +104,9 @@ impl Services for Fake {
     }
     fn fix(&mut self, _: &DoctorResult, _: &Invocation, _: &OperationControl) -> ServiceOutcome {
         self.calls.borrow_mut().push(Call::Fix);
-        self.outcome.take().unwrap_or(ServiceOutcome {
-            result: Some(project_result()),
-            error: None,
-        })
+        self.outcome
+            .take()
+            .unwrap_or(ServiceOutcome::Completed(project_result()))
     }
 }
 fn fake(root: &Path, calls: Rc<RefCell<Vec<Call>>>) -> Fake {
@@ -456,9 +454,9 @@ fn execute_reuses_exact_stored_probe_revision_without_reput() {
 }
 #[test]
 fn typed_verified_report_survives_pending_error_without_number_or_duplicate_loss() {
-    let outcome = ServiceOutcome {
-        result: Some(project_result()),
-        error: Some(ChannelError::Pending { causes: vec![] }.into()),
+    let outcome = ServiceOutcome::ReportedWithFailure {
+        result: project_result(),
+        error: ChannelError::Pending { causes: vec![] }.into(),
     };
     let response = connection_response(Path::new("fixture"), outcome);
     assert_eq!(response.exit_code(), 6);
@@ -491,10 +489,7 @@ fn typed_verified_report_survives_pending_error_without_number_or_duplicate_loss
 fn success_jsonl_ends_once_and_business_false_does_not_fail_transport() {
     let response = connection_response(
         Path::new("fixture"),
-        ServiceOutcome {
-            result: Some(project_result()),
-            error: None,
-        },
+        ServiceOutcome::Completed(project_result()),
     );
     assert_eq!(response.exit_code(), 0);
     let text = rendered(&response, "jsonl");
@@ -527,9 +522,9 @@ fn trace_flush_precedes_cancel_and_pending_with_original_result() {
     ]);
     let response = connection_response(
         Path::new("fixture"),
-        ServiceOutcome {
-            result: Some(project_result()),
-            error: Some(cause),
+        ServiceOutcome::ReportedWithFailure {
+            result: project_result(),
+            error: cause,
         },
     );
     assert_eq!(response.exit_code(), 5);
@@ -594,9 +589,9 @@ fn doctor_fix_preserves_result_on_error_and_does_not_reinspect_after_failure() {
     );
     let calls = Rc::new(RefCell::new(vec![]));
     let mut services = fake(&f.0, calls.clone());
-    services.outcome = Some(ServiceOutcome {
-        result: Some(project_result()),
-        error: Some(ChannelError::Pending { causes: vec![] }.into()),
+    services.outcome = Some(ServiceOutcome::ReportedWithFailure {
+        result: project_result(),
+        error: ChannelError::Pending { causes: vec![] }.into(),
     });
     let response = run(&inv, services);
     assert_eq!(
@@ -645,10 +640,7 @@ fn finish_flush_failure_is_not_reported_as_success() {
     }
     let response = connection_response(
         Path::new("fixture"),
-        ServiceOutcome {
-            result: Some(project_result()),
-            error: None,
-        },
+        ServiceOutcome::Completed(project_result()),
     );
     let mut sink = Sink::default();
     let e = render(&mut sink, "json", &response).unwrap_err();
@@ -887,10 +879,7 @@ fn wait_child_cannot_extend_original_deadline_or_lose_ancestor_cancel() {
 fn deadline_without_pending_wrapper_uses_go_live_deadline_classification() {
     let response = connection_response(
         Path::new("fixture"),
-        ServiceOutcome {
-            result: None,
-            error: Some(ChannelError::DeadlineExceeded.into()),
-        },
+        ServiceOutcome::Failed(ChannelError::DeadlineExceeded.into()),
     );
     assert_eq!(response.exit_code(), 6);
     assert_eq!(
@@ -1113,17 +1102,14 @@ fn doctor_fix_without_target_projects_check_failed_at_query_stage() {
     let inv = invocation(&["live", "doctor", "--fix"], &f.0);
     let calls = Rc::new(RefCell::new(vec![]));
     let mut services = fake(&f.0, calls);
-    services.outcome = Some(ServiceOutcome {
-        result: None,
-        error: Some(
-            ChannelError::from(ToolkitError::new(
-                "doctor.check_failed",
-                "doctor.check_failed",
-                3,
-            ))
-            .into(),
-        ),
-    });
+    services.outcome = Some(ServiceOutcome::Failed(
+        ChannelError::from(ToolkitError::new(
+            "doctor.check_failed",
+            "doctor.check_failed",
+            3,
+        ))
+        .into(),
+    ));
     let response = run(&inv, services);
     let value: Value = serde_json::from_str(&rendered(&response, "json")).unwrap();
     assert_eq!(value["error"]["code"], "doctor.check_failed");
@@ -1290,3 +1276,204 @@ mod history;
 
 #[path = "formal_live_retire_tests.rs"]
 mod retirement;
+
+// The pre-enum CLI adapter is kept only as a test oracle. The production
+// service cannot construct its old (None, None) state or bypass enum matching.
+fn legacy_connection_response(
+    project: &Path,
+    result: Option<ProjectResult>,
+    error: Option<AdmissionError>,
+) -> Response {
+    let mut response = Response::default();
+    response.context.insert(
+        "project".into(),
+        json!(lycheedev_core::client::display_path(project)),
+    );
+    response
+        .context
+        .insert("transport".into(), json!(TRANSPORT));
+    if let Some(result) = result.filter(|r| !r.session.is_empty()) {
+        response.operation_id = result.session.clone();
+        response
+            .context
+            .insert("session".into(), json!(result.session));
+        response.context.insert("stage".into(), json!(result.stage));
+        if !result.operation.is_empty() {
+            response
+                .context
+                .insert("operation".into(), json!(result.operation));
+        }
+        response.result = Some(LiveResult::Connection(result));
+    }
+    response.error = error.as_ref().map(public_error);
+    merge_context(&mut response);
+    response
+}
+
+fn assert_legacy_outcome_wire(outcome: ServiceOutcome) {
+    let (result, error) = match &outcome {
+        ServiceOutcome::Completed(result) => (Some(result.clone()), None),
+        ServiceOutcome::Failed(error) => (None, Some(error.clone())),
+        ServiceOutcome::ReportedWithFailure { result, error } => {
+            (Some(result.clone()), Some(error.clone()))
+        }
+    };
+    let expected = legacy_connection_response(Path::new("fixture"), result, error);
+    let actual = connection_response(Path::new("fixture"), outcome);
+    assert_eq!(actual.exit_code(), expected.exit_code());
+    for format in ["json", "jsonl", "text"] {
+        assert_eq!(
+            rendered(&actual, format),
+            rendered(&expected, format),
+            "{format}"
+        );
+    }
+}
+
+#[test]
+fn service_outcome_variants_preserve_exact_legacy_wire_and_exit() {
+    assert_legacy_outcome_wire(ServiceOutcome::Completed(project_result()));
+    assert_legacy_outcome_wire(ServiceOutcome::Failed(
+        ChannelError::DeadlineExceeded.into(),
+    ));
+    assert_legacy_outcome_wire(ServiceOutcome::ReportedWithFailure {
+        result: project_result(),
+        error: ChannelError::Pending { causes: vec![] }.into(),
+    });
+}
+
+#[test]
+fn service_outcome_wire_preserves_primary_and_cleanup_error_priority() {
+    for primary in [
+        ChannelError::Cancelled,
+        ChannelError::Pending { causes: vec![] },
+        ChannelError::DeadlineExceeded,
+    ] {
+        let error = AdmissionError::Joined(vec![
+            primary.into(),
+            ChannelError::Contract(lycheedev_live::go_mailbox_v1::ContractError(
+                "live.channel_trace_flush",
+            ))
+            .into(),
+        ]);
+        assert_legacy_outcome_wire(ServiceOutcome::ReportedWithFailure {
+            result: project_result(),
+            error: error.clone(),
+        });
+        assert_legacy_outcome_wire(ServiceOutcome::Failed(error));
+    }
+}
+
+#[test]
+fn service_outcome_empty_session_stays_filtered_for_success_and_failure() {
+    for failed in [false, true] {
+        let mut result = project_result();
+        result.session.clear();
+        let outcome = if failed {
+            ServiceOutcome::ReportedWithFailure {
+                result,
+                error: ChannelError::Cancelled.into(),
+            }
+        } else {
+            ServiceOutcome::Completed(result)
+        };
+        assert_legacy_outcome_wire(outcome);
+    }
+}
+
+#[test]
+fn doctor_failed_without_result_preserves_prior_report_and_skips_reinspection() {
+    let f = Fixture::new();
+    let inv = invocation(
+        &["live", "doctor", "--session", "CON-original", "--fix"],
+        &f.0,
+    );
+    let calls = Rc::new(RefCell::new(vec![]));
+    let mut services = fake(&f.0, calls.clone());
+    services.report.connection = Some(project_result());
+    services.outcome = Some(ServiceOutcome::Failed(ChannelError::Cancelled.into()));
+    let response = run(&inv, services);
+    assert_eq!(
+        *calls.borrow(),
+        [Call::Doctor("CON-original".into()), Call::Fix]
+    );
+    assert_eq!(response.exit_code(), 7);
+    assert!(response.operation_id.is_empty());
+    let Some(LiveResult::Doctor(report)) = response.result else {
+        panic!("doctor report lost");
+    };
+    assert!(!report.healthy);
+    assert_eq!(report.connection.unwrap().session, "CON-original");
+    assert_eq!(
+        report.checks.last().unwrap().next_step,
+        "resolve the repair error, then run live doctor --fix for the same target"
+    );
+}
+
+#[test]
+fn doctor_completed_reinspects_and_retains_original_repair_projection() {
+    let f = Fixture::new();
+    let inv = invocation(
+        &["live", "doctor", "--session", "CON-original", "--fix"],
+        &f.0,
+    );
+    let calls = Rc::new(RefCell::new(vec![]));
+    let mut services = fake(&f.0, calls.clone());
+    services.report.healthy = true;
+    services.outcome = Some(ServiceOutcome::Completed(project_result()));
+    let response = run(&inv, services);
+    assert_eq!(
+        *calls.borrow(),
+        [
+            Call::Doctor("CON-original".into()),
+            Call::Fix,
+            Call::Doctor("CON-original".into())
+        ]
+    );
+    assert_eq!(response.exit_code(), 0);
+    let Some(LiveResult::Doctor(report)) = response.result else {
+        panic!("doctor report lost");
+    };
+    assert_eq!(report.connection.unwrap().stage, "result_verified");
+}
+
+#[test]
+fn doctor_empty_session_projection_does_not_replace_previous_connection() {
+    for failed in [false, true] {
+        let f = Fixture::new();
+        let inv = invocation(
+            &["live", "doctor", "--session", "CON-original", "--fix"],
+            &f.0,
+        );
+        let calls = Rc::new(RefCell::new(vec![]));
+        let mut services = fake(&f.0, calls.clone());
+        services.report.connection = Some(project_result());
+        let mut result = project_result();
+        result.session.clear();
+        services.outcome = Some(if failed {
+            ServiceOutcome::ReportedWithFailure {
+                result,
+                error: ChannelError::Cancelled.into(),
+            }
+        } else {
+            ServiceOutcome::Completed(result)
+        });
+        let response = run(&inv, services);
+        assert!(response.operation_id.is_empty());
+        assert_eq!(response.exit_code(), if failed { 7 } else { 0 });
+        let expected = if failed {
+            vec![Call::Doctor("CON-original".into()), Call::Fix]
+        } else {
+            vec![
+                Call::Doctor("CON-original".into()),
+                Call::Fix,
+                Call::Doctor(String::new()),
+            ]
+        };
+        assert_eq!(*calls.borrow(), expected);
+        let Some(LiveResult::Doctor(report)) = response.result else {
+            panic!("doctor report lost");
+        };
+        assert_eq!(report.connection.unwrap().session, "CON-original");
+    }
+}

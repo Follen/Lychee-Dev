@@ -3,7 +3,7 @@ use crate::{
     ParseIssues, TypeProjection,
 };
 use emmylua_code_analysis::{
-    BatchChange, EmmyLuaAnalysis, Emmyrc, EmmyrcLuaVersion, FileId, LuaType, file_path_to_uri,
+    BatchChange, EmmyLuaAnalysis, FileId, LuaType, file_path_to_uri,
     humanize_semantic_type_detailed,
 };
 use emmylua_parser::{LuaAstNode, LuaExpr};
@@ -29,8 +29,7 @@ impl DeclarationModel {
             ));
         }
         let mut analysis = EmmyLuaAnalysis::new();
-        let mut config = Emmyrc::default();
-        config.runtime.version = EmmyrcLuaVersion::Lua51;
+        let config = crate::lua51_config();
         analysis.update_config(Arc::new(config));
         // The synthetic workspace exists only in Emmy's in-memory VFS. Its
         // file URI still requires an absolute path on the current host.

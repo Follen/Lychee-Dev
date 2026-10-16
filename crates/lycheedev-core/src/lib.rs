@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
-//! Shared contracts and durable mechanisms. Business crates do not depend on one another.
+//! Shared contracts and durable mechanisms, without dependencies on business crates.
+//! Business dependencies remain directed and acyclic: CLI composes the domains,
+//! while Live uses Delivery for controlled installation of managed mailbox slots.
+//! Source and Data do not depend on each other or on Live/Delivery.
 pub mod archive;
 pub mod availability;
 pub mod cache;

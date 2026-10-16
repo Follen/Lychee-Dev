@@ -1,5 +1,5 @@
-//! Actual Data automatic/project pin resolution with the original invocation
-//! and an independent supplemental budget at file and SQLite wait boundaries.
+//! Snapshot/project resolution from borrowed selection inputs, retaining the
+//! original control and supplemental budget at file and SQLite wait boundaries.
 use super::*;
 use crate::control::OperationControl;
 use std::{ffi::OsStr, io::Read};
@@ -170,44 +170,66 @@ fn inspect<C: FnMut() -> Result<()>>(path: &Path, scope: &mut Scope<'_, C>) -> R
         .ok_or_else(|| error("selection.project_unlocked"))
 }
 
+/// Compatibility entry for command consumers. The resolver itself only borrows
+/// selection inputs and does not interpret an invocation or own its control.
 pub fn resolve_pinned_controlled_with_check(
     inv: &Invocation,
     supplemental: impl FnMut() -> Result<()>,
 ) -> Result<PinnedSet> {
+    resolve_pin_request_controlled_with_check(
+        PinSelectionRequest {
+            home: &inv.home,
+            cwd: &inv.cwd,
+            snapshot: inv.flag("--snapshot"),
+            project: inv.flag("--project"),
+        },
+        &inv.control,
+        supplemental,
+    )
+}
+
+/// Resolve and authenticate the persisted immutable winner without requiring a
+/// command-shaped input. Control, supplemental checks and checked cleanup retain
+/// their original ordering; this entry neither clones nor replaces their owners.
+pub fn resolve_pin_request_controlled_with_check(
+    request: PinSelectionRequest<'_>,
+    control: &OperationControl,
+    supplemental: impl FnMut() -> Result<()>,
+) -> Result<PinnedSet> {
     let mut scope = Scope {
-        control: &inv.control,
+        control,
         supplemental,
     };
     let result = (|| {
         scope.check()?;
-        if let Some(id) = inv.flag("--snapshot").filter(|id| !id.is_empty()) {
-            return load_pinned_controlled_with_check(&inv.home, id, &inv.control, || {
+        if let Some(id) = request.snapshot.filter(|id| !id.is_empty()) {
+            return load_pinned_controlled_with_check(request.home, id, control, || {
                 (scope.supplemental)()
             });
         }
-        let path = match inv.flag("--project").filter(|path| !path.is_empty()) {
-            Some(path) => absolute(&inv.cwd.join(path))?,
-            None => find(&inv.cwd, &mut scope)?,
+        let path = match request.project.filter(|path| !path.is_empty()) {
+            Some(path) => absolute(&request.cwd.join(path))?,
+            None => find(request.cwd, &mut scope)?,
         };
         let pin = inspect(&path, &mut scope)?;
-        // Go LoadProjectSelection creates only the immutable pin document, then
-        // authenticates the actual persisted winner even on generation conflict.
+        // Create only the immutable pin document, then authenticate the actual
+        // persisted winner even on generation conflict.
         let mut metadata =
-            Metadata::open_controlled_with_check(&inv.home, true, &inv.control, || {
+            Metadata::open_controlled_with_check(request.home, true, control, || {
                 (scope.supplemental)()
             })?;
         let result = (|| {
             let key = format!("pin/{}", pin.id);
             match metadata
-                .create_controlled_with_check(&key, &pin, &inv.control, || (scope.supplemental)())
+                .create_controlled_with_check(&key, &pin, control, || (scope.supplemental)())
             {
                 Ok(_) => {}
                 Err(error) if pure(&error, "vault.generation_conflict") => {}
                 Err(error) => return Err(error),
             }
             let raw = metadata
-                .read_bytes_controlled_with_check(&key, &inv.control, || (scope.supplemental)())?;
-            let winner = super::file::stored_pin(&raw, &pin.id, &inv.control)?;
+                .read_bytes_controlled_with_check(&key, control, || (scope.supplemental)())?;
+            let winner = super::file::stored_pin(&raw, &pin.id, control)?;
             scope.check()?;
             Ok(winner)
         })();

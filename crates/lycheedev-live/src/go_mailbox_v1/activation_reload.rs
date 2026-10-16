@@ -55,7 +55,7 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
                     .as_ref()
                     .is_some_and(|r| r.phase == ReloadPhase::Complete) =>
             {
-                return ServiceOutcome::result(present_reload(
+                return ServiceOutcome::Completed(present_reload(
                     present(
                         &state,
                         before.paths.log_path(),
@@ -82,7 +82,7 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
                     .as_ref()
                     .is_some_and(|r| r.phase == ReloadPhase::Complete) =>
             {
-                let mut o = ServiceOutcome::result(present_reload(
+                let mut o = ServiceOutcome::Completed(present_reload(
                     present(
                         &state,
                         record.paths.log_path(),
@@ -92,7 +92,7 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
                     ),
                     request,
                 ));
-                o.join(channel(journal.close()));
+                o = o.join(channel(journal.close()));
                 return o;
             }
             Err(e) => {
@@ -100,7 +100,7 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
                     present_reload(self.project(&record, "", ""), request),
                     Err(e.into()),
                 );
-                o.join(channel(journal.close()));
+                o = o.join(channel(journal.close()));
                 return o;
             }
             _ => (),
@@ -118,7 +118,7 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
                 present_reload(self.project(&record, "", ""), request),
                 Err(e.into()),
             );
-            o.join(channel(journal.close()));
+            o = o.join(channel(journal.close()));
             return o;
         }
         let backend = match self.environment.open(
@@ -132,7 +132,7 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
                     present_reload(self.project(&record, "", ""), request),
                     Err(e.into()),
                 );
-                o.join(channel(journal.close()));
+                o = o.join(channel(journal.close()));
                 return o;
             }
         };
@@ -177,12 +177,12 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
             ),
             channel(result),
         );
-        outcome.join(channel(driver.backend.checked_close()));
+        outcome = outcome.join(channel(driver.backend.checked_close()));
         let closed = driver.journal.close();
         let released = closed.is_ok();
-        outcome.join(channel(closed));
+        outcome = outcome.join(channel(closed));
         if retire && released {
-            outcome.join(self.book.retire_closed(id, control).map(|_| ()));
+            outcome = outcome.join(self.book.retire_closed(id, control).map(|_| ()));
         }
         outcome
     }

@@ -179,8 +179,8 @@ fn completed_byte_history_compares_before_native_open_without_lossy_aliasing() {
         byte_request("\u{fffd}\u{fffd}".as_bytes()),
         &control(),
     );
-    assert!(completed.error.is_none(), "{:?}", completed.error);
-    assert!(completed.result.unwrap().complete);
+    assert!(completed.error().is_none(), "{:?}", completed.error());
+    assert!(completed.into_report().unwrap().complete);
     assert_eq!(service.environment.counts.borrow().opens, 0);
     assert_eq!(fs::read(f.log()).unwrap(), before);
 }

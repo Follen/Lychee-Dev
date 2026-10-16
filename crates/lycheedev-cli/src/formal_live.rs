@@ -168,10 +168,7 @@ impl Services for NativeService {
         {
             Ok(delivery) => delivery,
             Err(error) => {
-                return ServiceOutcome {
-                    result: None,
-                    error: Some(error.into()),
-                };
+                return ServiceOutcome::Failed(error.into());
             }
         };
         let bundled = bundled_doctor_release();
@@ -705,7 +702,18 @@ fn connection_response(project: &Path, outcome: ServiceOutcome) -> Response {
     response
         .context
         .insert("transport".into(), json!(TRANSPORT));
-    if let Some(result) = outcome.result.filter(|r| !r.session.is_empty()) {
+    let result = match outcome {
+        ServiceOutcome::Completed(result) => Some(result),
+        ServiceOutcome::Failed(error) => {
+            response.error = Some(public_error(&error));
+            None
+        }
+        ServiceOutcome::ReportedWithFailure { result, error } => {
+            response.error = Some(public_error(&error));
+            Some(result)
+        }
+    };
+    if let Some(result) = result.filter(|r| !r.session.is_empty()) {
         response.operation_id = result.session.clone();
         response
             .context
@@ -718,7 +726,6 @@ fn connection_response(project: &Path, outcome: ServiceOutcome) -> Response {
         }
         response.result = Some(LiveResult::Connection(result));
     }
-    response.error = outcome.error.as_ref().map(public_error);
     merge_context(&mut response);
     response
 }
@@ -754,26 +761,23 @@ fn run_doctor(
     );
     response.context.insert("protocol".into(), json!(TRANSPORT));
     if inv.flag_bool("--fix") {
-        let fixed = services.fix(&report, inv, control);
-        if let Some(result) = &fixed.result {
-            response.operation_id = result.session.clone();
-        }
-        if let Some(error) = fixed.error {
-            report.healthy = false;
-            let next = if response.operation_id.is_empty() {
-                "resolve the repair error, then run live doctor --fix for the same target".into()
-            } else {
-                format!(
-                    "live resume {} --project <original-project>",
-                    response.operation_id
-                )
-            };
-            report.add("live.repair", "blocked", error.to_string(), &next);
-            response.error = Some(public_error(&error));
-        } else {
-            report = services.doctor(&target, &response.operation_id, control);
-        }
-        if let Some(result) = fixed.result.filter(|r| !r.session.is_empty()) {
+        let result = match services.fix(&report, inv, control) {
+            ServiceOutcome::Completed(result) => {
+                response.operation_id = result.session.clone();
+                report = services.doctor(&target, &response.operation_id, control);
+                Some(result)
+            }
+            ServiceOutcome::Failed(error) => {
+                record_repair_failure(&mut report, &mut response, error);
+                None
+            }
+            ServiceOutcome::ReportedWithFailure { result, error } => {
+                response.operation_id = result.session.clone();
+                record_repair_failure(&mut report, &mut response, error);
+                Some(result)
+            }
+        };
+        if let Some(result) = result.filter(|r| !r.session.is_empty()) {
             report.connection = Some(result);
         }
     }
@@ -783,6 +787,24 @@ fn run_doctor(
     response.result = Some(LiveResult::Doctor(report));
     merge_context(&mut response);
     response
+}
+
+fn record_repair_failure(
+    report: &mut DoctorResult,
+    response: &mut Response,
+    error: AdmissionError,
+) {
+    report.healthy = false;
+    let next = if response.operation_id.is_empty() {
+        "resolve the repair error, then run live doctor --fix for the same target".into()
+    } else {
+        format!(
+            "live resume {} --project <original-project>",
+            response.operation_id
+        )
+    };
+    report.add("live.repair", "blocked", error.to_string(), &next);
+    response.error = Some(public_error(&error));
 }
 
 /// Compose the same read-only checks into ordinary doctor. No selected target

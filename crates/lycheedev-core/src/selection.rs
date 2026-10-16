@@ -16,7 +16,22 @@ mod file;
 pub mod target;
 pub use file::resolve_selection_file_controlled;
 mod project_controlled;
-pub use project_controlled::resolve_pinned_controlled_with_check;
+pub use project_controlled::{
+    resolve_pin_request_controlled_with_check, resolve_pinned_controlled_with_check,
+};
+
+/// Borrowed inputs for resolving an immutable snapshot or project selection.
+///
+/// Nonempty snapshots take precedence over projects; empty selectors retain
+/// nearest-project fallback. The caller keeps ownership of paths and selectors,
+/// and supplies the original operation control separately.
+#[derive(Debug, Clone, Copy)]
+pub struct PinSelectionRequest<'a> {
+    pub home: &'a Path,
+    pub cwd: &'a Path,
+    pub snapshot: Option<&'a str>,
+    pub project: Option<&'a str>,
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

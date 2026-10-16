@@ -296,8 +296,7 @@ fn request(key: &str) -> ExecuteRequest<'_> {
 }
 fn code(outcome: &ServiceOutcome, expected: &str) -> bool {
     outcome
-        .error
-        .as_ref()
+        .error()
         .is_some_and(|e| e.to_string().contains(expected))
 }
 
@@ -313,8 +312,8 @@ fn completed_history_precedes_native_open_and_keeps_later_operation() {
     let mut service = f.service();
     service.environment.open_error = Some(error("fixture.native_must_not_open"));
     let result = service.execute(&f.id, request("first"), &control());
-    assert!(result.error.is_none(), "{:?}", result.error);
-    let result = result.result.unwrap();
+    assert!(result.error().is_none(), "{:?}", result.error());
+    let result = result.into_report().unwrap();
     assert!(result.complete);
     assert_eq!(result.operation, format!("LMO-{}", "4".repeat(32)));
     assert_eq!(
@@ -362,10 +361,10 @@ fn report_and_status_do_not_need_a_claim_or_game_handle() {
     });
     f.book().retire_closed(&f.id, &control()).unwrap();
     let s = f.service();
-    assert!(s.status(&f.id, &control()).error.is_none());
+    assert!(s.status(&f.id, &control()).error().is_none());
     assert!(
         s.report(&f.id, "report", &control())
-            .result
+            .into_report()
             .unwrap()
             .report
             .is_some()
@@ -376,7 +375,7 @@ fn report_and_status_do_not_need_a_claim_or_game_handle() {
 fn verified_report_and_failed_report_ok_remain_independent_of_cleanup() {
     let f = Fixture::new();
     f.operation(OperationStage::ResultVerified, "report");
-    let result = f.service().status(&f.id, &control()).result.unwrap();
+    let result = f.service().status(&f.id, &control()).into_report().unwrap();
     assert!(!result.complete);
     assert_eq!(result.report_state, "verified");
     assert_eq!(result.cleanup, "pending");
@@ -395,8 +394,8 @@ fn closed_unknown_never_inherits_connection_completion() {
     });
     let mut s = f.service();
     let result = s.disconnect(&f.id, &control());
-    assert!(result.error.is_none());
-    let result = result.result.unwrap();
+    assert!(result.error().is_none());
+    let result = result.into_report().unwrap();
     assert!(result.closed);
     assert!(!result.complete);
     assert_eq!(result.report_state, "unavailable");
@@ -427,7 +426,7 @@ fn active_execution_lease_blocks_second_service_before_native_open() {
     let result = s.resume(&f.id, &control());
     assert!(code(&result, "live.channel_pending"));
     assert_eq!(
-        result.result.unwrap().continuation.kind,
+        result.into_report().unwrap().continuation.kind,
         "wait_active_driver"
     );
     assert_eq!(s.environment.counts.borrow().opens, 0);
@@ -450,7 +449,7 @@ fn successful_turn_still_returns_checked_close_failure_and_releases_lease() {
     s.environment.close_error = Some(error("fixture.native_close_failed"));
     let result = s.resume(&f.id, &control());
     assert!(code(&result, "fixture.native_close_failed"));
-    assert!(result.result.unwrap().bound);
+    assert!(result.into_report().unwrap().bound);
     assert_eq!(s.environment.counts.borrow().closes, 1);
     let (_, mut next) = f.book().acquire(&f.id, &control()).unwrap();
     next.close().unwrap();
@@ -489,8 +488,8 @@ fn process_end_model_rechecks_under_lease_and_preserves_unknown_evidence() {
     let mut s = f.service();
     s.environment.end = ProcessEnd::PidReused;
     let result = s.disconnect(&f.id, &control());
-    assert!(result.error.is_none(), "{:?}", result.error);
-    let result = result.result.unwrap();
+    assert!(result.error().is_none(), "{:?}", result.error());
+    let result = result.into_report().unwrap();
     assert!(result.closed);
     assert!(!result.complete);
     assert_eq!(result.process_end, "pid_reused");
@@ -501,7 +500,7 @@ fn process_end_model_rechecks_under_lease_and_preserves_unknown_evidence() {
         !inspect_window_owner(&f.target.addon_parent(), &f.target.resource(), &control()).occupied
     );
     let before = fs::read(f.log()).unwrap();
-    assert!(s.disconnect(&f.id, &control()).error.is_none());
+    assert!(s.disconnect(&f.id, &control()).error().is_none());
     assert_eq!(before, fs::read(f.log()).unwrap());
 }
 #[test]
@@ -521,8 +520,8 @@ fn ended_process_promotes_only_already_verified_report() {
         let mut s = f.service();
         s.environment.end = ProcessEnd::ProcessExited;
         let result = s.disconnect(&f.id, &control());
-        assert!(result.error.is_none(), "{:?}", result.error);
-        let r = result.result.unwrap();
+        assert!(result.error().is_none(), "{:?}", result.error());
+        let r = result.into_report().unwrap();
         assert_eq!(
             r.complete,
             matches!(
@@ -587,7 +586,7 @@ fn torn_tail_is_archived_before_terminal_retry_without_native_open() {
     let torn = fs::read(&path).unwrap();
     let mut s = f.service();
     let result = s.execute(&f.id, request("done"), &control());
-    assert!(result.error.is_none(), "{:?}", result.error);
+    assert!(result.error().is_none(), "{:?}", result.error());
     assert_eq!(fs::read(&path).unwrap(), original);
     assert_eq!(s.environment.counts.borrow().opens, 0);
     let backup = path.with_file_name(format!(
@@ -605,7 +604,7 @@ fn malformed_complete_record_and_empty_prefix_are_never_repaired() {
         fs::write(&path, bytes).unwrap();
         let mut s = f.service();
         let result = s.resume(&f.id, &control());
-        assert!(result.error.is_some());
+        assert!(result.error().is_some());
         assert_eq!(fs::read(&path).unwrap(), bytes);
         assert_eq!(s.environment.counts.borrow().opens, 0);
         assert!(
@@ -624,7 +623,7 @@ fn pending_close_projection_keeps_bound_separate_from_complete() {
         s.bound = true;
         s.closing = true;
     });
-    let r = f.service().status(&f.id, &control()).result.unwrap();
+    let r = f.service().status(&f.id, &control()).into_report().unwrap();
     assert!(r.bound);
     assert!(!r.complete);
     assert_eq!(r.stage, "closing");
@@ -691,8 +690,8 @@ fn fresh_process_history_helper() {
     let mut s = service(&root, record.metadata.target);
     s.environment.open_error = Some(error("fixture.no_native_in_subprocess"));
     let result = s.execute(&id, request("done"), &control());
-    assert!(result.error.is_none());
-    assert!(result.result.unwrap().complete);
+    assert!(result.error().is_none());
+    assert!(result.into_report().unwrap().complete);
     assert_eq!(s.environment.counts.borrow().opens, 0);
 }
 
@@ -739,7 +738,7 @@ fn request_conflict_mapping_and_raw_report_keep_public_contract() {
     assert_eq!(mapped.exit_code, 2);
     let f = Fixture::new();
     f.operation(OperationStage::Cancelled, "cancelled");
-    let r = f.service().status(&f.id, &control()).result.unwrap();
+    let r = f.service().status(&f.id, &control()).into_report().unwrap();
     assert!(!r.complete);
     assert_eq!(r.cleanup, "complete");
     assert_eq!(r.cleanup_method, "not_executed");
@@ -770,7 +769,11 @@ fn terminal_history_survives_rotation_and_missing_archive_is_not_a_new_request()
     journal.close().unwrap();
     assert!(!record.state.archive.is_empty());
     let mut s = f.service();
-    assert!(s.execute(&f.id, request("old"), &control()).error.is_none());
+    assert!(
+        s.execute(&f.id, request("old"), &control())
+            .error()
+            .is_none()
+    );
     assert_eq!(s.environment.counts.borrow().opens, 0);
     let archive = record
         .paths
@@ -780,7 +783,7 @@ fn terminal_history_survives_rotation_and_missing_archive_is_not_a_new_request()
     // exclusively owned fixture; never remove another test's tree.
     fs::rename(&archive, archive.with_extension("saved")).unwrap();
     let result = s.execute(&f.id, request("old"), &control());
-    assert!(result.error.is_some());
+    assert!(result.error().is_some());
     assert_eq!(s.environment.counts.borrow().opens, 0);
 }
 #[test]
@@ -830,8 +833,8 @@ fn real_owned_process_creation_mismatch_retires_con_without_any_game() {
     )
     .unwrap();
     let result = service.disconnect(&f.id, &control());
-    assert!(result.error.is_none(), "{:?}", result.error);
-    let result = result.result.unwrap();
+    assert!(result.error().is_none(), "{:?}", result.error());
+    let result = result.into_report().unwrap();
     assert!(result.closed);
     assert!(!result.complete);
     assert_eq!(result.process_end, "pid_reused");
@@ -839,7 +842,7 @@ fn real_owned_process_creation_mismatch_retires_con_without_any_game() {
         !inspect_window_owner(&f.target.addon_parent(), &f.target.resource(), &control()).occupied
     );
     let before = fs::read(f.log()).unwrap();
-    assert!(service.disconnect(&f.id, &control()).error.is_none());
+    assert!(service.disconnect(&f.id, &control()).error().is_none());
     assert_eq!(before, fs::read(f.log()).unwrap());
 }
 
@@ -848,8 +851,8 @@ fn connect_existing_selection_resumes_original_connection() {
     let f = Fixture::new();
     let mut s = f.service();
     let result = s.connect(&TargetRequest::default(), &control());
-    assert!(result.error.is_none(), "{:?}", result.error);
-    assert_eq!(result.result.unwrap().session, f.id);
+    assert!(result.error().is_none(), "{:?}", result.error());
+    assert_eq!(result.into_report().unwrap().session, f.id);
     assert_eq!(s.environment.counts.borrow().opens, 1);
     assert_eq!(s.environment.counts.borrow().closes, 1);
 }
@@ -863,8 +866,8 @@ fn fresh_connect_persists_claim_then_binds_with_checked_resource_closes() {
     f.book().retire_closed(&f.id, &control()).unwrap();
     let mut s = f.service();
     let result = s.connect(&TargetRequest::default(), &control());
-    assert!(result.error.is_none(), "{:?}", result.error);
-    let result = result.result.unwrap();
+    assert!(result.error().is_none(), "{:?}", result.error());
+    let result = result.into_report().unwrap();
     assert_ne!(result.session, f.id);
     assert!(result.bound);
     assert!(result.complete);
@@ -911,7 +914,7 @@ fn toolkit_exit_and_details_survive_service_and_public_projection() {
             .with_details(details.clone());
     service.environment.open_error = Some(durable_journal::storage_error(original));
     let result = service.resume(&f.id, &control());
-    let mapped = classify_error(result.error.as_ref().unwrap()).unwrap();
+    let mapped = classify_error(result.error().unwrap()).unwrap();
     assert_eq!(mapped.code, "selection.installation_ambiguous");
     assert_eq!(mapped.exit_code, 2);
     assert_eq!(mapped.details, details);
@@ -980,8 +983,8 @@ fn legacy_unfinished_unbind_resume_checks_original_process_before_native_open() 
     service.environment.end = ProcessEnd::PidReused;
     service.environment.open_error = Some(error("fixture.native_must_not_open"));
     let result = service.resume(&f.id, &control());
-    assert!(result.error.is_none(), "{:?}", result.error);
-    assert!(result.result.unwrap().closed);
+    assert!(result.error().is_none(), "{:?}", result.error());
+    assert!(result.into_report().unwrap().closed);
     assert_eq!(service.environment.counts.borrow().ended, 2);
     assert_eq!(service.environment.counts.borrow().opens, 0);
     assert_eq!(service.environment.counts.borrow().retired.len(), 1);
@@ -1222,8 +1225,8 @@ fn native_raw_byte_report_survives_service_projection_and_public_json_frames() {
         f.service().status(&f.id, &control()),
         f.service().report(&f.id, "raw report", &control()),
     ] {
-        assert!(result.error.is_none());
-        let result = result.result.unwrap();
+        assert!(result.error().is_none());
+        let result = result.into_report().unwrap();
         assert_eq!(result.report.as_ref().unwrap().0, raw);
         assert!(serde_json::to_vec(&result).is_err());
         let mut output = Vec::new();

@@ -248,8 +248,8 @@ fn service(f: &Fixture, counts: &Rc<RefCell<Counts>>, clock: &Rc<Cell<i64>>) -> 
 fn start(f: &Fixture, counts: &Rc<RefCell<Counts>>, clock: &Rc<Cell<i64>>) -> (Service, String) {
     let mut service = service(f, counts, clock);
     let outcome = service.activate(&f.request(), "activation-key", &OperationControl::default());
-    assert!(outcome.error.is_some());
-    let result = outcome.result.unwrap();
+    assert!(outcome.error().is_some());
+    let result = outcome.into_report().unwrap();
     assert_eq!(result.stage, "activation_waiting_manual_reload");
     (service, result.session)
 }
@@ -263,7 +263,7 @@ fn manual_activation_wait_is_read_only_unbudgeted_and_reuses_exact_con() {
     clock.set(9_000_000);
     let status = service
         .status_with_activation(&id, &OperationControl::default())
-        .result
+        .into_report()
         .unwrap();
     assert_eq!(status.continuation.kind, "wait_external");
     assert_eq!(status.continuation.remaining_budget_ms, None);
@@ -271,7 +271,7 @@ fn manual_activation_wait_is_read_only_unbudgeted_and_reuses_exact_con() {
     assert!(!status.bound);
     let retried = service
         .activate(&f.request(), "activation-key", &OperationControl::default())
-        .result
+        .into_report()
         .unwrap();
     assert_eq!(retried.session, id);
     assert_eq!(counts.borrow().inputs, 0);
@@ -298,8 +298,8 @@ fn activation_disconnect_is_durable_idempotent_and_never_opens_native() {
         } else {
             service.disconnect_with_activation(&id, &OperationControl::default())
         };
-        assert!(out.error.is_none(), "{:?}", out.error);
-        let r = out.result.unwrap();
+        assert!(out.error().is_none(), "{:?}", out.error());
+        let r = out.into_report().unwrap();
         assert!(r.closed);
         assert!(!r.complete);
         assert_eq!(r.stage, "activation_cancelled");
@@ -355,8 +355,8 @@ fn activation_cannot_cancel_unknown_input_or_fake_not_sent() {
         });
         let bytes = fs::read(f.path(&id)).unwrap();
         let out = service.disconnect_with_activation(&id, &OperationControl::default());
-        assert!(out.error.is_some(), "{kind}");
-        assert!(out.result.is_none_or(|r| !r.closed));
+        assert!(out.error().is_some(), "{kind}");
+        assert!(out.into_report().is_none_or(|r| !r.closed));
         assert_eq!(bytes, fs::read(f.path(&id)).unwrap());
         assert_eq!(counts.borrow().inputs, 0);
         assert!(
@@ -379,14 +379,17 @@ fn activation_expiry_stops_before_native_and_persists_sticky_budget() {
     let opens = counts.borrow().opens;
     clock.set(1_000_000);
     let out = service.resume_with_activation(&id, &OperationControl::default());
-    assert!(out.error.is_some());
-    assert_eq!(out.result.unwrap().continuation.kind, "budget_exhausted");
+    assert!(out.error().is_some());
+    assert_eq!(
+        out.into_report().unwrap().continuation.kind,
+        "budget_exhausted"
+    );
     assert!(f.read(&id).budget.unwrap().exhausted);
     clock.set(1000);
     assert!(
         service
             .resume_with_activation(&id, &OperationControl::default())
-            .error
+            .error()
             .is_some()
     );
     assert_eq!(counts.borrow().opens, opens);
@@ -403,7 +406,7 @@ fn activation_clock_rollback_status_does_not_mutate_then_resume_persists() {
     assert_eq!(
         service
             .status_with_activation(&id, &OperationControl::default())
-            .result
+            .into_report()
             .unwrap()
             .continuation
             .kind,
@@ -413,7 +416,7 @@ fn activation_clock_rollback_status_does_not_mutate_then_resume_persists() {
     assert!(
         service
             .resume_with_activation(&id, &OperationControl::default())
-            .error
+            .error()
             .is_some()
     );
     assert!(f.read(&id).budget.unwrap().clock_rollback);
@@ -433,8 +436,11 @@ fn activation_unknown_legacy_attempt_never_resends_or_resets_deadline() {
     let deadline = f.read(&id).budget.unwrap().deadline_ms;
     for _ in 0..2 {
         let outcome = service.resume_with_activation(&id, &OperationControl::default());
-        assert!(outcome.error.is_some());
-        assert_eq!(outcome.result.unwrap().stage, "activation_waiting_runtime");
+        assert!(outcome.error().is_some());
+        assert_eq!(
+            outcome.into_report().unwrap().stage,
+            "activation_waiting_runtime"
+        );
     }
     assert_eq!(counts.borrow().inputs, 0);
     assert_eq!(f.read(&id).budget.unwrap().deadline_ms, deadline);
@@ -452,8 +458,8 @@ fn activation_active_driver_returns_structured_blocker_without_mutation() {
         .acquire_activation(&id, &OperationControl::default())
         .unwrap();
     let out = service.resume_with_activation(&id, &OperationControl::default());
-    let r = out.result.unwrap();
-    assert!(out.error.is_some());
+    assert!(out.error().is_some());
+    let r = out.into_report().unwrap();
     assert_eq!(r.continuation.kind, "wait_active_driver");
     assert_eq!(r.continuation.blocker.unwrap().consumer, id);
     assert_eq!(fs::read(f.path(&id)).unwrap(), bytes);
@@ -477,7 +483,7 @@ fn activation_old_generations_missing_phase_and_unsafe_manual_are_rejected() {
         assert!(
             service
                 .status_with_activation(&id, &OperationControl::default())
-                .error
+                .error()
                 .is_some()
         );
     }
@@ -487,7 +493,7 @@ fn activation_old_generations_missing_phase_and_unsafe_manual_are_rejected() {
     assert!(
         service
             .status_with_activation(&id, &OperationControl::default())
-            .error
+            .error()
             .is_some()
     );
     let mut a = original;
@@ -510,7 +516,7 @@ fn activation_diagnostic_close_error_is_joined_with_manual_wait() {
     let clock = Rc::new(Cell::new(1000));
     let (mut service, id) = start(&f, &counts, &clock);
     let out = service.resume_with_activation(&id, &OperationControl::default());
-    let error = out.error.unwrap().to_string();
+    let error = out.error().unwrap().to_string();
     assert!(error.contains("manual_reload_required"));
     assert!(error.contains("fixture.close_failed"));
     assert_eq!(counts.borrow().inputs, 0);
@@ -524,18 +530,18 @@ fn cancelled_activation_preserves_replacement_owner() {
     assert!(
         service
             .disconnect_with_activation(&id, &OperationControl::default())
-            .error
+            .error()
             .is_none()
     );
     let new = service
         .activate(&f.request(), "different-key", &OperationControl::default())
-        .result
+        .into_report()
         .unwrap();
     assert_ne!(new.session, id);
     assert!(
         service
             .resume_with_activation(&id, &OperationControl::default())
-            .error
+            .error()
             .is_none()
     );
     let owner = inspect_window_owner(
@@ -556,8 +562,8 @@ fn activation_manual_observation_handoff_retains_con_and_starts_budget_once() {
     clock.set(9_000_000);
     counts.borrow_mut().candidates = vec![identity('3')];
     let out = service.resume_with_activation(&id, &OperationControl::default());
-    assert!(out.error.is_none(), "{:?}", out.error);
-    assert_eq!(out.result.unwrap().session, id);
+    assert!(out.error().is_none(), "{:?}", out.error());
+    assert_eq!(out.into_report().unwrap().session, id);
     let book = ConnectionBook::open(&f.root).unwrap();
     let state = book
         .status(&id, &OperationControl::default())
@@ -584,7 +590,7 @@ fn explicit_reload_completed_history_is_read_only_after_later_reload() {
     assert!(
         service
             .resume_with_activation(&id, &OperationControl::default())
-            .error
+            .error()
             .is_none()
     );
     let book = ConnectionBook::open(&f.root).unwrap();
@@ -592,7 +598,8 @@ fn explicit_reload_completed_history_is_read_only_after_later_reload() {
     for key in ["first-reload", "later-reload"] {
         record.state.reload = Some(ReloadAttempt {
             automatic: false,
-            slot_enablement: false, slot_budget_source: None,
+            slot_enablement: false,
+            slot_budget_source: None,
             recovery_budget: Some(budget(1000, DEFAULT_RECOVERY_MILLIS).unwrap()),
             reconcile_pending: false,
             request: key.into(),
@@ -613,8 +620,8 @@ fn explicit_reload_completed_history_is_read_only_after_later_reload() {
     let opens = counts.borrow().opens;
     let inputs = counts.borrow().inputs;
     let result = service.reload(&id, "first-reload", &OperationControl::default());
-    assert!(result.error.is_none());
-    let result = result.result.unwrap();
+    assert!(result.error().is_none());
+    let result = result.into_report().unwrap();
     assert!(result.complete);
     assert_eq!(result.continuation.goal, "reload");
     assert_eq!(result.continuation.request_id, "first-reload");
@@ -758,7 +765,7 @@ fn doctor_fix_delivery_failure_stops_before_activation_and_foreign_owner_stops_b
                 &mut delivery,
                 &OperationControl::default()
             )
-            .error
+            .error()
             .is_some()
     );
     assert_eq!(delivery.calls, 1);
@@ -780,7 +787,7 @@ fn doctor_fix_delivery_failure_stops_before_activation_and_foreign_owner_stops_b
                 &mut delivery,
                 &OperationControl::default()
             )
-            .error
+            .error()
             .is_some()
     );
     assert_eq!(delivery.calls, 1);
@@ -819,7 +826,7 @@ fn repair_closes_original_prepared_business_before_delivery_without_preparing_it
     assert!(
         service
             .resume_with_activation(&id, &OperationControl::default())
-            .error
+            .error()
             .is_none()
     );
     let book = ConnectionBook::open(&f.root).unwrap();
@@ -865,7 +872,7 @@ fn repair_closes_original_prepared_business_before_delivery_without_preparing_it
     );
     assert!(
         outcome
-            .error
+            .error()
             .unwrap()
             .to_string()
             .contains("fixture.delivery_stop_after_close")
@@ -896,14 +903,15 @@ fn explicit_reload_torn_current_log_never_repairs_even_with_completed_history() 
     assert!(
         service
             .resume_with_activation(&id, &OperationControl::default())
-            .error
+            .error()
             .is_none()
     );
     let book = ConnectionBook::open(&f.root).unwrap();
     let (mut record, mut journal) = book.acquire(&id, &OperationControl::default()).unwrap();
     record.state.reload = Some(ReloadAttempt {
         automatic: false,
-        slot_enablement: false, slot_budget_source: None,
+        slot_enablement: false,
+        slot_budget_source: None,
         recovery_budget: Some(budget(1000, DEFAULT_RECOVERY_MILLIS).unwrap()),
         reconcile_pending: false,
         request: "completed".into(),
@@ -953,7 +961,7 @@ fn explicit_reload_torn_current_log_never_repairs_even_with_completed_history() 
         assert!(
             service
                 .reload(&id, request, &OperationControl::default())
-                .error
+                .error()
                 .is_some()
         );
         assert_eq!(snapshot(&f.root), before);
@@ -1018,7 +1026,7 @@ fn repair_publication_authenticates_original_durable_close_and_exact_unbind() {
     assert!(
         service
             .resume_with_activation(&id, &control)
-            .error
+            .error()
             .is_none()
     );
     let book = ConnectionBook::open(&f.root).unwrap();
@@ -1142,7 +1150,7 @@ fn repair_unknown_business_never_republishes_or_dispatches_before_delivery() {
     assert!(
         service
             .resume_with_activation(&id, &control)
-            .error
+            .error()
             .is_none()
     );
     let book = ConnectionBook::open(&f.root).unwrap();
@@ -1208,7 +1216,7 @@ fn repair_unknown_business_never_republishes_or_dispatches_before_delivery() {
         &mut NeverDelivery,
         &control,
     );
-    assert!(result.error.is_some());
+    assert!(result.error().is_some());
     assert!(
         counts.borrow().actions[before..]
             .iter()
@@ -1240,7 +1248,7 @@ fn repair_finalization_requires_durable_exact_operation_and_release_artifact() {
         assert!(
             service
                 .resume_with_activation(&id, &control)
-                .error
+                .error()
                 .is_none()
         );
         let book = ConnectionBook::open(&f.root).unwrap();

@@ -225,3 +225,110 @@ fn default_remote_db2_original_stop_precedes_corrupt_metadata_and_missing_pin() 
     assert_eq!(crate::dispatch(&inv).unwrap_err().code, "command.cancelled");
     f.close();
 }
+
+#[test]
+fn default_remote_db2_typed_project_selection_matches_snapshot_result_and_capture() {
+    let f = SqlFixture::new(false, true);
+    let pin = selection::load_pinned(&f.source.home, &f.snapshot).unwrap();
+    let project = f.source.home.join("pin-request-project");
+    std::fs::create_dir_all(project.join("nested")).unwrap();
+    std::fs::write(
+        project.join("lycheedev.json"),
+        serde_json::to_vec(&json!({
+            "schema":"lycheedev.project.v1", "product":f.source.pin.product,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("lycheedev.lock.json"),
+        serde_json::to_vec(&json!({
+            "schema":"lycheedev.project-lock.v1", "selection":pin,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    // The default CDN provider must ignore a bad project when a snapshot wins.
+    let mut snapshot = invocation(&f, "data db2", &[("--id", "7"), ("--project", "absent")]);
+    snapshot.cwd = project.join("nested");
+    let expected = crate::dispatch(&snapshot).unwrap();
+    f.verify(&expected);
+    for explicit in [false, true] {
+        let mut project_inv = snapshot.clone();
+        project_inv.flags.insert("--snapshot".into(), String::new());
+        if explicit {
+            project_inv
+                .flags
+                .insert("--project".into(), "absent/../../".into());
+        } else {
+            project_inv.flags.insert("--project".into(), String::new());
+        }
+        let actual = crate::dispatch(&project_inv).unwrap();
+        assert_eq!(actual.data, expected.data);
+        assert_eq!(actual.selection, expected.selection);
+        assert_eq!(actual.complete, expected.complete);
+        assert_eq!(actual.warnings, expected.warnings);
+        assert_eq!(actual.coverage, expected.coverage);
+        assert_eq!(actual.operation, expected.operation);
+        // Captures have separate publication identities; each authenticates its
+        // whole actual result and the same immutable pin, without normalizing data.
+        f.verify(&actual);
+    }
+    let metadata = Metadata::open(&f.source.home, false).unwrap();
+    assert_eq!(
+        metadata.generation(&format!("pin/{}", f.snapshot)).unwrap(),
+        Some(1)
+    );
+    metadata.close().unwrap();
+    f.close();
+}
+
+#[test]
+fn default_provider_typed_pin_resolution_retains_invocation_and_budget_owner_identity() {
+    let f = SqlFixture::new(false, false);
+    let inv = invocation(&f, "data db2 schema", &[]);
+    let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let budget = Arc::new(Budget::new(
+        Cost::defaults(),
+        inv.control.deadline(),
+        Some(stopped.clone()),
+    ));
+    let scope = OpenedScope::open(&inv, &budget).unwrap().admit().unwrap();
+    let pin = scope.resolve_pin().unwrap();
+    assert_eq!(
+        serde_json::to_value(&pin).unwrap(),
+        serde_json::to_value(selection::load_pinned(&inv.home, &f.snapshot).unwrap()).unwrap(),
+    );
+    scope.check_consumer(&inv, &Arc::clone(&budget)).unwrap();
+    let other_inv = inv.clone();
+    let other_budget = Arc::new(Budget::new(Cost::defaults(), inv.control.deadline(), None));
+    for error in [
+        scope.check_consumer(&other_inv, &budget).unwrap_err(),
+        scope.check_consumer(&inv, &other_budget).unwrap_err(),
+    ] {
+        assert_eq!(error.code, "records.file_query");
+        assert_eq!(
+            error.message,
+            "Consumer differs from admitted invocation/budget"
+        );
+        assert_eq!(error.exit_code, 4);
+    }
+    stopped.store(true, Ordering::Release);
+    let error = scope.resolve_pin().unwrap_err();
+    assert_eq!(
+        serde_json::to_value(&error).unwrap(),
+        serde_json::to_value(budget.check().unwrap_err()).unwrap(),
+    );
+    inv.control.check().unwrap();
+    assert!(scope.finish::<()>(Err(error)).is_err());
+    lycheedev_core::workspace::data_resources::acquire(
+        &f.source.home,
+        Policy::Measurement,
+        &inv.control,
+    )
+    .unwrap()
+    .close()
+    .unwrap();
+    assert!(f.captures().is_empty());
+    f.close();
+}

@@ -27,12 +27,14 @@ use std::path::Path;
 
 mod errors;
 mod native;
+mod outcome;
 mod projection;
 pub use errors::{PublicFailure, classify_error};
 pub use native::{
     NativeEnvironment, ProcessLifetimeObserver, SystemClock, SystemScheduler, SystemTokens,
     WindowsProcessLifetime,
 };
+pub use outcome::ServiceOutcome;
 pub use projection::{ProjectResult, RawReport, present};
 
 /// Existing public target selectors; no new command or protocol is introduced.
@@ -94,41 +96,6 @@ pub trait ConnectionEnvironment {
     ) -> ChannelResult<()>;
 }
 
-/// Result and failure are independent, as Go's (ProjectResult, error). A usable
-/// verified report survives pending cleanup, cancellation, and close failures.
-#[derive(Debug)]
-pub struct ServiceOutcome {
-    pub result: Option<ProjectResult>,
-    pub error: Option<AdmissionError>,
-}
-impl ServiceOutcome {
-    fn result(value: ProjectResult) -> Self {
-        Self {
-            result: Some(value),
-            error: None,
-        }
-    }
-    fn failure(error: impl Into<AdmissionError>) -> Self {
-        Self {
-            result: None,
-            error: Some(error.into()),
-        }
-    }
-    fn with_result(value: ProjectResult, result: Result<(), AdmissionError>) -> Self {
-        Self {
-            result: Some(value),
-            error: result.err(),
-        }
-    }
-    fn join(&mut self, result: impl Into<Result<(), AdmissionError>>) {
-        if let Err(e) = result.into() {
-            self.error = Some(match self.error.take() {
-                None => e,
-                Some(previous) => AdmissionError::Joined(vec![previous, e]),
-            });
-        }
-    }
-}
 fn channel(result: ChannelResult<()>) -> Result<(), AdmissionError> {
     result.map_err(Into::into)
 }
@@ -180,7 +147,7 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
     /// acquire an execution lease, retire claims, or change a durable deadline.
     pub fn status(&self, id: &str, control: &OperationControl) -> ServiceOutcome {
         match self.book.status(id, control) {
-            Ok(record) => ServiceOutcome::result(self.project(&record, "", "")),
+            Ok(record) => ServiceOutcome::Completed(self.project(&record, "", "")),
             Err(e) => ServiceOutcome::failure(e),
         }
     }
@@ -192,7 +159,7 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
             Err(e) => return ServiceOutcome::failure(e),
         };
         match durable_journal::historical_request(&record.paths, request, control) {
-            Ok(Some(state)) => ServiceOutcome::result(present(
+            Ok(Some(state)) => ServiceOutcome::Completed(present(
                 &state,
                 record.paths.log_path(),
                 self.clock.unix_millis(),
@@ -256,7 +223,7 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
         match created {
             Err(e) => {
                 let mut result = ServiceOutcome::failure(e);
-                result.join(channel(closed));
+                result = result.join(channel(closed));
                 result
             }
             Ok(record) => {
@@ -299,7 +266,7 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
                 .as_ref()
                 .is_some_and(|o| o.stage == OperationStage::Complete)
         {
-            return ServiceOutcome::result(self.project(&record, "", ""));
+            return ServiceOutcome::Completed(self.project(&record, "", ""));
         }
         // Fixed Go retains the pre-close-budget unbind shape. Route it through
         // Disconnect so original-process retirement is checked before native
@@ -333,7 +300,7 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
         };
         match historical(&record, request, control) {
             Ok(Some(state)) if complete(&state) => {
-                return ServiceOutcome::result(present(
+                return ServiceOutcome::Completed(present(
                     &state,
                     record.paths.log_path(),
                     self.clock.unix_millis(),
@@ -465,7 +432,7 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
             Ok(None) => (),
             other => {
                 let mut outcome = match other {
-                    Ok(Some(state)) => ServiceOutcome::result(present(
+                    Ok(Some(state)) => ServiceOutcome::Completed(present(
                         &state,
                         record.paths.log_path(),
                         self.clock.unix_millis(),
@@ -475,7 +442,7 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
                     Err(e) => ServiceOutcome::with_result(self.project(&record, "", ""), Err(e)),
                     Ok(None) => unreachable!(),
                 };
-                outcome.join(channel(journal.close()));
+                outcome = outcome.join(channel(journal.close()));
                 return outcome;
             }
         }
@@ -488,7 +455,7 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
             Err(e) => {
                 let mut outcome =
                     ServiceOutcome::with_result(self.project(&record, "", ""), Err(e.into()));
-                outcome.join(channel(journal.close()));
+                outcome = outcome.join(channel(journal.close()));
                 return outcome;
             }
         };
@@ -504,8 +471,8 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
                 self.project(&record, "", backend.scans()),
                 Err(e.into()),
             );
-            outcome.join(channel(backend.checked_close()));
-            outcome.join(channel(journal.close()));
+            outcome = outcome.join(channel(backend.checked_close()));
+            outcome = outcome.join(channel(journal.close()));
             return outcome;
         }
         let mut driver = Driver::from_state(
@@ -566,12 +533,12 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
         let should_retire = result.is_ok() && driver.state.closed;
         let mut outcome = ServiceOutcome::with_result(projected, channel(result));
         // Native close first stops process ownership; both closes always run.
-        outcome.join(channel(driver.backend.checked_close()));
+        outcome = outcome.join(channel(driver.backend.checked_close()));
         let released = driver.journal.close();
         let lease_closed = released.is_ok();
-        outcome.join(channel(released));
+        outcome = outcome.join(channel(released));
         if should_retire && lease_closed {
-            outcome.join(self.book.retire_closed(id, control).map(|_| ()));
+            outcome = outcome.join(self.book.retire_closed(id, control).map(|_| ()));
         }
         outcome
     }
@@ -637,9 +604,9 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
             ServiceOutcome::with_result(self.project(&record, "", ""), channel(result));
         let closed = journal.close();
         let lease_closed = closed.is_ok();
-        outcome.join(channel(closed));
+        outcome = outcome.join(channel(closed));
         if completed && lease_closed {
-            outcome.join(self.book.retire_closed(id, control).map(|_| ()));
+            outcome = outcome.join(self.book.retire_closed(id, control).map(|_| ()));
         }
         outcome
     }

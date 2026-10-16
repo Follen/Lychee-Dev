@@ -1,6 +1,6 @@
 //! Native selected-value diagnostic checking over authenticated addon bytes and API facts.
 use crate::{closure::Closure, environment, luac, native::*, xml_inline};
-use emmylua_code_analysis::{CheckConfig, DiagnosticCode, Emmyrc, EmmyrcLuaVersion};
+use emmylua_code_analysis::CheckConfig;
 use lycheedev_core::{
     Result, ToolkitError, control::OperationControl, evidence, selection::SourcePin, storage,
 };
@@ -143,36 +143,7 @@ fn analyze(
 ) -> Result<Value> {
     let host =
         crate::native_research::api_environment(&catalog.facts, Some(&catalog.manifest), control)?;
-    let mut config = Emmyrc::default();
-    config.runtime.version = EmmyrcLuaVersion::Lua51;
-    // Preserve the Source command's selected eight-code policy. The complete
-    // owned registry also honors explicit file-level enables for other codes.
-    config.diagnostics.disable = DiagnosticCode::all()
-        .into_iter()
-        .filter(|code| {
-            !matches!(
-                code,
-                DiagnosticCode::ParamTypeMismatch
-                    | DiagnosticCode::ReturnTypeMismatch
-                    | DiagnosticCode::MissingParameter
-                    | DiagnosticCode::RedundantParameter
-                    | DiagnosticCode::CallNonCallable
-                    | DiagnosticCode::MissingReturnValue
-                    | DiagnosticCode::RedundantReturnValue
-                    | DiagnosticCode::MissingReturn
-            )
-        })
-        .collect();
-    config.diagnostics.enables = vec![
-        DiagnosticCode::ParamTypeMismatch,
-        DiagnosticCode::ReturnTypeMismatch,
-        DiagnosticCode::MissingParameter,
-        DiagnosticCode::RedundantParameter,
-        DiagnosticCode::CallNonCallable,
-        DiagnosticCode::MissingReturnValue,
-        DiagnosticCode::RedundantReturnValue,
-        DiagnosticCode::MissingReturn,
-    ];
+    let config = crate::engine_config::addon_diagnostics();
     let mut source_files = Vec::new();
     for (path, bytes) in files {
         control.check()?;

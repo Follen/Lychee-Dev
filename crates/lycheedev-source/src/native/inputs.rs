@@ -113,9 +113,7 @@ impl SourceInputs {
             if control.remaining()?.as_millis()>u128::from(flow.max_millis) { return Err(input_error("flow requires the original total operation deadline")); }
         }
         require_same_control(&spec.host.admission_control,control)?;
-        if !spec.config.workspace.library.is_empty() || !spec.config.workspace.packages.is_empty() || !spec.config.workspace.workspace_roots.is_empty()
-            || !spec.config.workspace.ignore_dir.is_empty() || !spec.config.workspace.ignore_globs.is_empty() || !spec.config.workspace.module_map.is_empty()
-            || spec.config.workspace.encoding!="utf-8" || spec.config.runtime.version!=emmylua_code_analysis::EmmyrcLuaVersion::Lua51 {
+        if !crate::engine_config::explicit_authenticated_inputs(&spec.config) {
             return Err(input_error("only explicit authenticated Lua 5.1 UTF8 inputs are admitted; external workspaces/libraries or filters are unsupported"));
         }
         if control.remaining()?.as_millis()>u128::from(spec.limits.total_milliseconds) {return Err(input_error("caller control exceeds the declared total operation budget"));}

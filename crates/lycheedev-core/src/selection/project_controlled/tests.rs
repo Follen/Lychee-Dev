@@ -317,3 +317,6 @@ fn project_shared_file_survives_atomic_lock_replacement() {
     directory.close().unwrap();
     f.cleanup();
 }
+
+#[path = "request_tests.rs"]
+mod request_tests;

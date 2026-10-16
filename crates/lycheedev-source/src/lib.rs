@@ -6,6 +6,8 @@ pub mod closure;
 pub mod context;
 pub mod diff;
 pub mod environment;
+#[cfg(feature = "emmy-prototype")]
+mod engine_config;
 pub mod facts;
 pub mod flow;
 pub mod git;

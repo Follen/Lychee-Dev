@@ -1518,7 +1518,10 @@ struct StreamWriter<'a, W: Write> {
     yielded: bool,
 }
 impl<W: Write> StreamWriter<'_, W> {
-    fn emit(&mut self, frame: &Value) -> Result<()> {
+    fn emit(&mut self, event: lycheedev_data::stream::StreamEvent<'_>) -> Result<()> {
+        self.emit_value(&lycheedev_data::stream::wire::event(event))
+    }
+    fn emit_value(&mut self, frame: &Value) -> Result<()> {
         self.yielded = true;
         lycheedev_core::public_json::write_line(
             self.out, frame, &lycheedev_core::public_json::NumberLayout::Verbatim,
@@ -1662,8 +1665,9 @@ fn main() {
                         out: &mut stdout,
                         yielded: false,
                     };
-                    let result =
-                        lycheedev_data::stream::stream(inv, &mut |frame| stream.emit(frame));
+                    let result = lycheedev_data::stream::StreamRequest::from_invocation(inv)
+                        .and_then(|request| lycheedev_data::stream::run(request, &mut |event| stream.emit(event)))
+                        .map(lycheedev_data::stream::wire::into_outcome);
                     yielded = stream.yielded;
                     result.map_err(|error| stream_fault(error, yielded))
                 } else if inv.command == "data hotfix"
@@ -2966,7 +2970,7 @@ mod tests {
         assert!(text.contains(r#"<>&\u2028"#));
         let mut out = Vec::new();
         let mut writer = StreamWriter { out: &mut out, yielded: false };
-        writer.emit(&json!({"type":"record","record":raw})).unwrap();
+        writer.emit_value(&json!({"type":"record","record":raw})).unwrap();
         assert!(writer.yielded);
         let text = String::from_utf8(out).unwrap();
         assert_eq!(text.lines().count(), 1);
@@ -3186,10 +3190,10 @@ mod tests {
             yielded: false,
         };
         writer
-            .emit(&json!({"frame":"begin","begin":{"table":"Map"}}))
+            .emit_value(&json!({"frame":"begin","begin":{"table":"Map"}}))
             .unwrap();
         writer
-            .emit(&json!({"frame":"record","record":{"ID":1,"Float":-230.989}}))
+            .emit_value(&json!({"frame":"record","record":{"ID":1,"Float":-230.989}}))
             .unwrap();
         assert!(writer.yielded);
         let text = String::from_utf8(out).unwrap();
@@ -3205,11 +3209,67 @@ mod tests {
         };
         assert_eq!(
             writer
-                .emit(&json!({"frame":"begin"}))
+                .emit_value(&json!({"frame":"begin"}))
                 .unwrap_err()
                 .exit_code,
             5
         );
+        assert!(writer.yielded);
+    }
+    #[test]
+    fn native_stream_writer_uses_shared_wire_and_flushes_each_typed_event() {
+        use lycheedev_data::stream::{StreamEvent, StreamRecord, WalkSummary};
+        #[derive(Default)]
+        struct Output { bytes: Vec<u8>, flushes: usize }
+        impl Write for Output {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.bytes.extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                self.flushes += 1;
+                Ok(())
+            }
+        }
+        let row = BTreeMap::from([
+            ("ID".into(), lycheedev_data::table::Value::UInt(u64::MAX)),
+            ("Float".into(), lycheedev_data::table::Value::Float(-0.0)),
+        ]);
+        let mut out = Output::default();
+        let mut writer = StreamWriter { out: &mut out, yielded: false };
+        writer.emit(StreamEvent::Record(StreamRecord { index: 0, record_id: 7, row: &row })).unwrap();
+        writer.emit(StreamEvent::End(WalkSummary { count: 1, truncated: false })).unwrap();
+        assert!(writer.yielded);
+        assert_eq!(out.flushes, 2);
+        let text = String::from_utf8(out.bytes).unwrap();
+        assert!(text.contains("18446744073709551615"));
+        assert!(text.contains(r#""Float":-0.0"#));
+        assert!(!text.contains("lycheedev.result.v1"));
+        let frames: Vec<Value> = text.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        assert_eq!(frames[0]["frame"], "record");
+        assert_eq!(frames[1]["frame"], "end");
+    }
+    #[test]
+    fn native_stream_writer_marks_yielded_before_write_or_flush_failure() {
+        use lycheedev_data::stream::{StreamEvent, WalkSummary};
+        struct FlushFailure { writes: usize }
+        impl Write for FlushFailure {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.writes += 1;
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "fixture flush failed"))
+            }
+        }
+        let mut out = FlushFailure { writes: 0 };
+        let mut writer = StreamWriter { out: &mut out, yielded: false };
+        assert_eq!(writer.emit(StreamEvent::End(WalkSummary { count: 0, truncated: false })).unwrap_err().exit_code, 5);
+        assert!(writer.yielded);
+        assert!(out.writes > 0);
+        let mut out = Closed;
+        let mut writer = StreamWriter { out: &mut out, yielded: false };
+        assert_eq!(writer.emit(StreamEvent::Error { code: "test", message: "test" }).unwrap_err().exit_code, 5);
         assert!(writer.yielded);
     }
     #[test]

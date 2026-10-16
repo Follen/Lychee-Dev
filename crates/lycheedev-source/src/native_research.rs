@@ -76,7 +76,7 @@ impl ResearchSession {
             let map=if text.starts_with('\u{feff}'){SourceMap::Utf8BomPrefix}else{SourceMap::Identity};
             SourceFileInput{path,original_utf8:text,content_sha256,analysis_utf8,map}
         }).collect();
-        let mut config=emmylua_code_analysis::Emmyrc::default();config.runtime.version=emmylua_code_analysis::EmmyrcLuaVersion::Lua51;
+        let config=crate::engine_config::research();
         let inputs=SourceInputs::admit(SourceInputSpec{files,workspace_root:PathBuf::from("C:/lycheedev/pinned-source-research"),source_identity:json!({"source":source,"environment":environment_manifest,"researchRules":RESEARCH_RULES,"xml":xml_identity}),phase:"unknown".into(),ordered_occurrences:vec![],config,host,luac,limits:SourceLimits::research()},control)?;
         observer("source_admitted");
         let prepared=prepare_observed(inputs,control,observer)?;

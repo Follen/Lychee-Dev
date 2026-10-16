@@ -15,6 +15,14 @@ Complete end-to-end production behavior first, then add the corresponding tests 
 
 - [ ] Implement and measure justified bounded concurrency rather than only documenting it: start with the actual Source cold-index CPU/I/O pipeline after the measured cache bottleneck, then evaluate Data independent batches and Live's required serialized state boundary. Bound both task count and in-flight bytes; preserve output order, first error, original budget/cancellation and complete verification. Go constrains public behavior, not Rust internal layout.
 
+### Current whole-repository consumer migrations
+
+- [ ] Core typed pin request: migrate the actual default Data provider, preserve snapshot/project priority, CAS winner and checked-close/cancel order; run compatibility and real consumer tests.
+- [ ] Data/CLI typed DB2 stream: move request/event/summary types through admission, row execution and a shared wire renderer; preserve post-prepare field errors, streaming backpressure and capture/cleanup facts; run full wire and failure tests.
+- [ ] Live/CLI typed completion: replace invalid optional-state pairs across connection/activation/doctor with three exhaustive variants and consuming cleanup joins; run original JSON/JSONL/text and error-tree regressions.
+- [ ] Source engine-host boundary: centralize unchanged Lua51/diagnostic configuration and authenticated-input policy, verify complete config identity; keep engine types local without copying AST/Graph or modifying upstream.
+- [ ] Consolidate the four migrations with the retained Core/Data ownership models and legitimate Live-to-Delivery dependency. Then perform the mandatory whole-repository architecture audit, followed by the remaining final audit stages. Declared tests and static checks alone do not close these items.
+
 ## 0. Documentation scope
 
 - [x] Freeze Go v3.2.0 at 3057a9666ab078270b63c7f06de748069b0d1f4b and record Rust starting HEAD.

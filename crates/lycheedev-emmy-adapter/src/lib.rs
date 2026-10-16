@@ -3,8 +3,11 @@
 //!
 //! Source owns authentication, load/graph policy, original coordinates and
 //! public reports. This crate owns engine sessions and projects small owned
-//! results without exposing Emmy identities or executing studied code.
-//! The initial slice covers authenticated API declaration type queries only.
+//! results without executing studied code. Engine-host configuration and ingestion
+//! may use pinned public engine types; business contracts and worker wire records
+//! do not borrow engine AST/model lifetimes.
+mod config;
+pub use config::lua51_config;
 mod declaration;
 mod ingestion;
 pub use ingestion::{

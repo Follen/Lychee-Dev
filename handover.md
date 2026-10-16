@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 19:44 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`f6cfc2a6a36381ea4e40dc44fdae00167e079908`；当前本机受测优化产品树为 `e8434bfbdb3e26c19c3c2c84c4be3624a63a3499`，runner身份独立认证。实现进行中，尚未完成全量验收。
+更新：2026-10-16 19:55 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`913112a6ce628812f824513aac853ccd088fd265`；当前本机已通过913定向编译/回归，正构建该树优化产物；旧优化产品e843结果保持原身份，runner身份独立认证。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -31,10 +31,17 @@
 - **Source 正确性与性能仍未验收**：5bbb完整配对中暖query20对等价且Rust/Go比0.202388，只有该组达到≤0.30；describe两组约1.13、cold query约5.00未达标，cold index因完整公共事实不同而失败。Metadata前置与SQL预算缺口已实际闭合。当前完整修复统一Go公共Facts字段/顺序、两个不同validate入口及完整类别gap缓存；native XML/Emmy语义增强保留在独立真实消费者，不用summary扣数掩盖差异。e843已通过Rust编译及4036文档逐字段/顺序0差；7f畸形输入52项已全字段差分通过，冷性能仍不达标。非法Lua诊断文本与全部非法XML错误文本尚未完整对照，是明确剩余边界。完整Retail refs/context/batch维持原90秒，旧dev仍deadline失败；优化408普通native refs/context/API已实际通过；retained首次请求EOF仍未闭合；e843真实600秒lifetime已退出0通过。完整B01–B07、内存与四阶段审计均未验收。
 - **正式 Lua 已明确切到 Go323**：`4092344`保存113原blob认证、精确Rust3.5 overlay与220/9正式入口，旧320/321/322原清单保留。Node正式63及包/版本115通过；本机已安装官方固定MSVC14.51与SDK，Community三工具字节/版本/签名均匹配原Enterprise固定身份；Community精确路径已实际验证。固定7c07的Go323正式Lua220/0/0与Rust桥9/0/0现已真实通过，全部owner回收；只是该自动化范围，不含实机或性能。
 
+### 当前全仓架构实施批
+
+正在贯通四个真实消费者边界，详细设计见 [DESIGN](DESIGN.md#whole-repository-rust-native-implementation-plan)：Core 借用型 pin 请求已接默认 Data provider；Data typed stream 已接 CLI、逐行执行和统一 wire renderer；Live 三态结果已迁移 connection/activation/doctor/CLI，清理合并消费原结果而不 clone；Source 集中原 Lua51 配置、八类诊断顺序和准入策略。Live 新增12项、Data/CLI新增13项、Core/Data新增10项、Source配置新增3项回归，全部本架构批新 Rust 尚未执行；Node合同/身份45项实际通过。保留原预算、错误次序、输出和已提交事实；本批不代表最终四阶段审计已完成。
+
+Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共同占用原 retained 额度；不把所有模块强行并发。Core/Data 现有所有权与单堆 SQL 保留，Live 输入状态仍串行。成熟库按实际能力、成本、许可与升级验证选用，不为架构名义另造空 crate 或通用调度框架。
+
 ## 3. 当前实际验证与证据
 
 完整逐批结果、原失败和工具恢复记录保留在[10月16日验证历史](docs/toolkit/rust-migration-evidence-2026-10-16.md)与[前期历史](docs/toolkit/rust-migration-evidence-2026-10-15.md)。以下只列当前结论；不同版本结果不能相互替代。
 
+- **缓存与紧凑表示已通过定向回归**：[f6 53通过3忽略](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6223486548)包含全部17新增；[913 111通过3忽略](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6223576658)包含native58与6项紧凑表示回归，52完整字段仍52/52，all-target实际通过。忽略项保留原边界。913优化构建和完整4036/profile/retained复验仍进行中，不能据定向测试宣称冷缓存或内存收益。
 - **SQL/Data/Core**：ac8默认栈正式relational299通过，6个原执行溢出逐项通过；local_query76通过1原fixture忽略，Data库1063通过1忽略。36集成256通过1预算断言失败20忽略，后续7db定向27/0/0关闭该断言缺口；[证据](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6220137512)。[Core492/0/0](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6220479350)含真实ABA/取消回归，不能把重叠子组重复累计。
 - **Emmy/HTTP/Lua**：原版Emmy848身份不变；历史严格比较4137行仍有2条必要成功receipt差异，独立当前合同检查4135相同+2精确通过，原raw失败保留，[当前合同证据](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6220362319)。正式TLS329及固定Go五loopback通过，不外推全部系统根策略。Go323正式Lua220与Rust桥9已实际通过，原证据见历史链接。
 - **完整正常Source公共事实已等价**：[e843真实4036文档全字段/顺序0差](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6222922847)，声明65320、关系227786、loads4169、headers1888、diagnostics0。报告SHA `bd73dcb164b11cd30f60e967805aaedcc8434214c695f092546d4ba2981d4d39`。这不覆盖畸形输入或native语义完整性。
@@ -43,9 +50,9 @@
 - **retained与寿命待完整实测**：[ed6定向53/0/0](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6222429490)含5个scope旧算法差分及8个寿命单元；不能据此宣称内存收益。408普通native refs/context/API通过，但retained首请求EOF、后继依赖未跑、600秒寿命退出5失败。[e843完整native复验](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6222986269)仍8通过5依赖失败：retained首请求11.738秒EOF，最后query_build_scope；精确child67904接近2GiB但没有退出码/limit通知，不能断言OOM。原scope去副本没有闭合此项，继续结构性驻留诊断；[e843真实600秒寿命](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6223130356)600047ms退出0通过，关闭旧正常到期误报缺口。retained首请求仍独立失败。
 - **性能整体未达标**：[5bbb完整配对](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6221187576)只有warm query20对达到Rust/Go=0.202388；B01冷热约1.13、cold query约5.00失败。e843单次等价cold index Go9.554s/Rust45.104s，非20对验收；phase44.898s中Facts发布15.613s、原文发布21.874s、解析5.424s，Git inclusive阶段重叠不能相加。正实现可重建缓存发布优化，保正式捕获与最终index durability，收益未测。原内存采样有缺口，完整内存验收未完成。
 
-- **冷index发布优化已实现，尚未Rust验证**：Facts和4036份原文分别进入固定路径的可重建cache，单次index复用已准入目录、同key原deadline锁、最多64个不确定残留stage、同目录原子可见与checked close；这些缓存不请求逐文件crash durability。暖读仍核全文SHA/长度/UTF8，缺失或损坏按已认证index内固定repository/product/commit/parser及Git树边/对象身份恢复，不能采用移动分支。正式inspect/loadEvidence/diff/closure BlobRef及4个asset、最终index/manifest保持原durable发布。三个实际CLI search入口补传原inv.control，避免恢复时换新预算。新增Core9/Source6/Windows2回归，Node读侧14/14通过；17项Rust、完整4036与新性能全部待跑。原e843慢样本保留，不预报降幅。
+- **冷index发布优化已实现，定向Rust验证通过**：Facts和4036份原文分别进入固定路径的可重建cache，单次index复用已准入目录、同key原deadline锁、最多64个不确定残留stage、同目录原子可见与checked close；这些缓存不请求逐文件crash durability。暖读仍核全文SHA/长度/UTF8，缺失或损坏按已认证index内固定repository/product/commit/parser及Git树边/对象身份恢复，不能采用移动分支。正式inspect/loadEvidence/diff/closure BlobRef及4个asset、最终index/manifest保持原durable发布。三个实际CLI search入口补传原inv.control，避免恢复时换新预算。新增Core9/Source6/Windows2回归，Node读侧14/14通过；17项新增Rust已在f6实际通过；新优化产物完整4036与新性能仍待跑。原e843慢样本保留，不预报降幅。
 
-- **retained结构性内存候选已实现，收益待测**：native raw Emmy观察改为共享path/原SemanticId的紧凑typed记录，序列化保持原字段/字节顺序；实际research回复不整体物化该表。全工作区managed membership改为FileId/语法种类分组的精确u64范围，每成员8字节、冻结上下文Arc共享，保持Name/Index/Call区别。新增6项Rust逐字输出、原集合、取消/输出预算测试；94项相关Node与语法解析通过，Rust/完整2GiB复验未跑。e843112原始内存行SHA已核，增长主要在analysis child；采样只有外层cold标签，不能据此归因某个内部phase或断言OOM。原4个冻结参考文件未改，上游生产仍原版848。
+- **retained结构性内存候选已实现，收益待测**：native raw Emmy观察改为共享path/原SemanticId的紧凑typed记录，序列化保持原字段/字节顺序；实际research回复不整体物化该表。全工作区managed membership改为FileId/语法种类分组的精确u64范围，每成员8字节、冻结上下文Arc共享，保持Name/Index/Call区别。新增6项Rust逐字输出、原集合、取消/输出预算测试；94项相关Node与语法解析通过；6新增Rust已在913实际通过，完整2GiB复验仍未完成。e843112原始内存行SHA已核，增长主要在analysis child；采样只有外层cold标签，不能据此归因某个内部phase或断言OOM。原4个冻结参考文件未改，上游生产仍原版848。
 - **实际并行路线正在实施评估**：用户进一步要求主动采用Rust并发，Go只约束功能/结果。下一工作单元选择Source冷链独立解析/校验与I/O流水线，必须同时限制在途字节和任务数、稳定原顺序与首错/取消；之后按证据审Data批处理与Live必须串行的交易边界。不为并发名义改变合同或造通用框架，当前本机测试持续。
 
 ## 4. 进入最终四阶段前的有限收口
@@ -69,8 +76,9 @@
 
 本机测试通道已正常恢复，原unknown历史保留，无需再次apply或重启。仅云端实现，用户指定本机线程负责固定SHA测试并将报告写回同一PR。普通push不自动切换其正在测试的树；不另排重复长CI。
 
-当前 **e8434bfbdb3e26c19c3c2c84c4be3624a63a3499** 优化EXE SHA `a413febf012185fa1c3c124ce89c4eac7266565fa497221ab3400149c7784d39` 已结束正常4036 Facts、单次profile、完整native（retained仍失败）和真实600秒寿命（通过）。后继7f52完整差分也已通过；新的缓存/紧凑内存候选必须新编译与认证，不能冒用e843优化产物。下一批固定协调指定SHA，先all-target及受影响组，再新优化产物的完整4036/冷index与retained实测。
+当前 **e8434bfbdb3e26c19c3c2c84c4be3624a63a3499** 优化EXE SHA `a413febf012185fa1c3c124ce89c4eac7266565fa497221ab3400149c7784d39` 已结束正常4036 Facts、单次profile、完整native（retained仍失败）和真实600秒寿命（通过）。后继7f52完整差分也已通过；新的缓存/紧凑内存候选必须新编译与认证，不能冒用e843优化产物。当前913已通过all-target及定向111项，优化构建正进行，随后完整4036/冷index与retained实测。后继全仓架构批先完成本批再按协调指定SHA切换。
 
+- 后继全仓架构批定向：Core `selection::project_controlled::tests`；Data `stream::tests` 与默认provider的 `default_db2`/`default_stream`；Live `go_mailbox_v1`；CLI `formal_live`、`native_stream_writer` 与原 raw-number tests；Source `engine_config::tests` 和 adapter `--lib`。所有新增测试当前未执行。
 - 所有Rust检查沿仓库受控 `tools/rust-cargo.mjs`、固定工具链和原owner/cache合同，先all-target编译，再受影响组；默认线程栈不加大。完整SQL299及7db预算组已过，不机械重跑历史失败树。
 - 正式Lua与9桥使用[现有入口](tools/rust-formal-lua-bridge.mjs)，每次新输出目录；原runtime与CLI封存产物必须通过全部身份验证，不能覆盖旧失败目录。当前正式Go323220/9已有实证。
 - 性能沿[专用配对入口](tests/rust-performance-paired/README.md)，独立优化构建、原20cold/20warm及完整输出等价。单次profile只诊断；索引/query180秒，refs/context/batch90秒，整棵retained分析树2GiB不变。不可扣除未测成本来宣称达标。
