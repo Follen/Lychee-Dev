@@ -880,46 +880,22 @@ fn go_parse_valid_transport_invalid_urls_drain_before_failure() {
 }
 
 #[test]
-fn whatwg_numeric_host_changes_cannot_contact_a_different_target() {
-    for numeric in [
+fn go_numeric_authorities_reach_transport_without_whatwg_rewriting() {
+    // Do not perform DNS for these names in a test: OS getaddrinfo owns their
+    // interpretation. The raw connector's local forward-proxy regression
+    // independently inspects the actual request and preserves these names.
+    for host in [
         "127.1",
         "0177.0.0.1",
         "0x7f000001",
         "2130706433",
         "127.0.0.1.",
     ] {
-        let server = Server::new(2, move |index, stream| {
-            if index == 0 {
-                let port = stream.local_addr().unwrap().port();
-                send(
-                    stream,
-                    302,
-                    &format!(
-                        "Location: http://{numeric}:{port}/normalized\r\nContent-Length: 3\r\n"
-                    ),
-                    b"",
-                );
-                assert_waiting_for_body(stream);
-                stream.write_all(b"abc").unwrap();
-            } else {
-                body(stream, b"wrong-target");
-            }
-        });
-        let (control, budget) = scope(Cost::defaults());
-        let failure = PublicFetcher
-            .fetch(&server.url, &control, &budget)
-            .unwrap_err();
-        assert_eq!(failure.code, "records.hotfix_wago_http", "{numeric}");
-        assert!(
-            failure.message.contains("cannot be represented"),
-            "{numeric}"
-        );
-        assert_eq!(server.finish().len(), 1);
-        let used = budget.snapshot().unwrap();
+        let reference =
+            RedirectUrl::absolute(&format!("http://{host}:80/keep/%2e/target")).unwrap();
         assert_eq!(
-            (used.network_requests, used.network_bytes),
-            (0, 0),
-            "{numeric}"
+            reference.wire().unwrap(),
+            format!("http://{host}:80/keep/%2e/target")
         );
     }
 }

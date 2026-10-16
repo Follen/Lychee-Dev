@@ -87,7 +87,7 @@ fn raw_targets_preserve_encoded_dot_and_query_without_fragments() {
         let full = format!("https://EXAMPLE.test{path}");
         let uri = target(&full).unwrap().unwrap();
         assert_eq!(
-            uri.path_and_query().unwrap().as_str(),
+            uri.wire.path_and_query().unwrap().as_str(),
             path.split('#').next().unwrap()
         );
     }
@@ -486,4 +486,280 @@ fn raw_header_wait_respects_independent_deadline_without_reset_or_second_attempt
     control.check().unwrap();
     let used = budget.snapshot().unwrap();
     assert_eq!((used.network_requests, used.network_bytes), (1, 0));
+}
+
+#[test]
+fn go_authority_identities_keep_numeric_names_ports_case_and_ipv6_zone() {
+    for host in [
+        "127.1",
+        "0177.0.0.1",
+        "0x7f000001",
+        "2130706433",
+        "127.0.0.1.",
+    ] {
+        let locator = format!("http://{host}:80/a");
+        let target = target(&locator).unwrap().unwrap();
+        assert_eq!(target.wire.to_string(), locator);
+        assert_eq!(target.dial_host, host);
+        assert_eq!(target.tls_host, host);
+        assert_eq!(
+            target.dial.as_ref().unwrap().authority().unwrap().as_str(),
+            format!("{host}:80")
+        );
+    }
+    let target = Target::parse("https://LOCALHOST:00443/a").unwrap();
+    assert_eq!(target.wire.authority().unwrap().as_str(), "LOCALHOST:00443");
+    assert_eq!(target.dial_host, "LOCALHOST");
+    assert_eq!(target.dial_port, "00443");
+    let target = Target::parse("https://[fe80::1%25Ethernet]:443/a").unwrap();
+    assert_eq!(target.wire.authority().unwrap().as_str(), "[fe80::1]:443");
+    assert_eq!(target.dial_host, "fe80::1%Ethernet");
+    assert_eq!(target.tls_host, "fe80::1");
+    assert_eq!(target.route, "https://[fe80::1%Ethernet]:443/a");
+    assert_eq!(
+        target.dial.unwrap().authority().unwrap().as_str(),
+        "[fe80::1%Ethernet]:443"
+    );
+}
+
+#[test]
+fn go_wire_raw_punycode_and_lookup_dial_are_distinct() {
+    // Go idna.ToASCII (wire) preserves raw casing/mapping; Lookup (dial)
+    // performs UTS46 mapping. Codec vectors are independently known Punycode.
+    let target = Target::parse("http://BÜCHER.example/a").unwrap();
+    assert_eq!(
+        target.wire.authority().unwrap().as_str(),
+        "xn--BCHER-2pa.example"
+    );
+    assert_eq!(target.dial_host, "xn--bcher-kva.example");
+    assert_eq!(target.tls_host, "xn--bcher-kva.example");
+    let target = Target::parse("http://b%C3%BCcher.example/a").unwrap();
+    assert_eq!(
+        target.wire.authority().unwrap().as_str(),
+        "xn--bcher-kva.example"
+    );
+    assert_eq!(target.dial_host, "xn--bcher-kva.example");
+    // Lookup rejects the leading hyphen; direct DNS still receives the exact
+    // original name, never the different wire Punycode endpoint.
+    let target = Target::parse("http://-bücher.example/a").unwrap();
+    assert_eq!(target.dial_host, "-bücher.example");
+    assert!(target.dial.is_none());
+    assert!(target.wire.authority().unwrap().as_str().is_ascii());
+}
+
+#[test]
+fn forward_proxy_sends_original_numeric_and_raw_idna_wire_authorities() {
+    for (locator, authority) in [
+        ("http://127.1:80/keep/%2e/target", "127.1:80"),
+        ("http://0177.0.0.1/keep/%2e/target", "0177.0.0.1"),
+        ("http://0x7f000001/keep/%2e/target", "0x7f000001"),
+        ("http://2130706433/keep/%2e/target", "2130706433"),
+        (
+            "http://BÜCHER.example/keep/%2e/target",
+            "xn--BCHER-2pa.example",
+        ),
+        ("http://[fe80::1%25Ethernet]/keep/%2e/target", "[fe80::1]"),
+    ] {
+        let (address, peer) = server(|mut stream| {
+            let request = header(&mut stream);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .unwrap();
+            request
+        });
+        let (control, budget) = scope();
+        let result: Result<Vec<u8>> = run(async {
+            let prepared = Prepared::with_target(
+                Target::parse(locator)?,
+                HeaderMap::new(),
+                Some(reqwest::Url::parse(&format!("http://{address}")).unwrap()),
+            )?;
+            let deadline = request_deadline(&control, Some(&budget))?;
+            attempt(Some(&budget))?;
+            let response = controlled(prepared.send(), &control, Some(&budget), deadline).await??;
+            read_response(
+                response,
+                BodyPolicy::Identity,
+                1,
+                &control,
+                Some(&budget),
+                deadline,
+            )
+            .await
+        });
+        let request = peer.join().unwrap().unwrap();
+        result.unwrap();
+        assert!(
+            request.starts_with(&format!(
+                "GET http://{authority}/keep/%2e/target HTTP/1.1\r\n"
+            )),
+            "{request}"
+        );
+        assert!(
+            request.contains(&format!("host: {authority}\r\n")),
+            "{request}"
+        );
+        assert_eq!(budget.snapshot().unwrap().network_requests, 1);
+    }
+}
+
+#[test]
+fn raw_direct_resolver_receives_exact_name_not_whatwg_or_private_placeholder() {
+    let (address, peer) = server(|mut stream| {
+        let request = header(&mut stream);
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: close\r\n\r\nx")
+            .unwrap();
+        request
+    });
+    let port = address.rsplit(':').next().unwrap();
+    // An admitted raw target can have a DNS spelling independent from wire
+    // Host. This is the production ExactName+HttpConnector path, with a local
+    // literal test endpoint; no environment or resolver process is changed.
+    let mut target = Target::parse(&format!("http://ORIGINAL.test:{port}/a")).unwrap();
+    target.dial_host = "127.0.0.1".into();
+    let (control, budget) = scope();
+    let result: Result<Vec<u8>> = run(async {
+        let deadline = request_deadline(&control, Some(&budget))?;
+        let prepared = Prepared::with_target(target, HeaderMap::new(), None)?;
+        let response = controlled(prepared.send(), &control, Some(&budget), deadline).await??;
+        read_response(
+            response,
+            BodyPolicy::Identity,
+            1,
+            &control,
+            Some(&budget),
+            deadline,
+        )
+        .await
+    });
+    let request = peer.join().unwrap().unwrap();
+    assert_eq!(result.unwrap(), b"x");
+    assert!(request.contains(&format!("host: ORIGINAL.test:{port}\r\n")));
+    assert!(!request.contains("lycheedev-dial.invalid"));
+}
+
+#[test]
+fn invalid_explicit_port_is_admitted_but_never_dials_a_default_endpoint() {
+    let (control, budget) = scope();
+    let result: Result<reqwest::Response> = run(async {
+        let prepared = Prepared::with_target(
+            Target::parse("http://127.0.0.1:65536/a")?,
+            HeaderMap::new(),
+            None,
+        )?;
+        let deadline = request_deadline(&control, Some(&budget))?;
+        attempt(Some(&budget))?;
+        controlled(prepared.send(), &control, Some(&budget), deadline).await?
+    });
+    assert_eq!(result.unwrap_err().code, "records.remote_http");
+    assert_eq!(budget.snapshot().unwrap().network_requests, 1);
+}
+
+#[test]
+fn connect_uses_exact_padded_port_zone_target_and_zone_free_host() {
+    for (locator, target, host) in [
+        (
+            "https://origin.invalid:00443/a",
+            "origin.invalid:00443",
+            "origin.invalid:00443",
+        ),
+        (
+            "https://[fe80::1%25Ethernet]:00443/a",
+            "[fe80::1%Ethernet]:00443",
+            "[fe80::1]:00443",
+        ),
+        (
+            "https://origin.invalid:65536/a",
+            "origin.invalid:65536",
+            "origin.invalid:65536",
+        ),
+    ] {
+        let (address, peer) = server(|mut stream| {
+            let request = header(&mut stream);
+            stream
+                .write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+                .unwrap();
+            (request, closed(&mut stream))
+        });
+        let (control, budget) = scope();
+        let result: Result<reqwest::Response> = run(async {
+            let prepared = Prepared::with_target(
+                Target::parse(locator)?,
+                HeaderMap::new(),
+                Some(reqwest::Url::parse(&format!("http://u:p@{address}")).unwrap()),
+            )?;
+            let deadline = request_deadline(&control, Some(&budget))?;
+            attempt(Some(&budget))?;
+            controlled(prepared.send(), &control, Some(&budget), deadline).await?
+        });
+        let (request, closed) = peer.join().unwrap().unwrap();
+        assert!(closed);
+        assert_eq!(result.unwrap_err().code, "records.remote_http");
+        assert!(
+            request.starts_with(&format!("CONNECT {target} HTTP/1.1\r\n")),
+            "{request}"
+        );
+        assert!(request.contains(&format!("host: {host}\r\n")), "{request}");
+        assert!(
+            request.contains("proxy-authorization: Basic dTpw\r\n"),
+            "{request}"
+        );
+        assert!(!request.contains("\r\nauthorization:"));
+        assert_eq!(budget.snapshot().unwrap().network_requests, 1);
+    }
+}
+
+#[test]
+fn tls_uses_admitted_verification_name_and_cancel_drops_direct_socket() {
+    let (ready, received) = mpsc::channel();
+    let (address, peer) = server(move |mut stream| {
+        let mut prefix = [0; 5];
+        stream.read_exact(&mut prefix).unwrap();
+        assert_eq!(prefix[0], 22);
+        let mut hello = vec![0; u16::from_be_bytes([prefix[3], prefix[4]]) as usize];
+        stream.read_exact(&mut hello).unwrap();
+        ready.send(()).unwrap();
+        (hello, closed(&mut stream))
+    });
+    let port = address.rsplit(':').next().unwrap();
+    let mut target = Target::parse(&format!("https://WIRE.invalid:{port}/a")).unwrap();
+    target.dial_host = "127.0.0.1".into();
+    target.tls_host = "verify.invalid".into();
+    let (control, budget) = scope();
+    let cancel = control.tracked_cancel_handle().unwrap();
+    let stop = thread::spawn(move || {
+        let ready = received.recv_timeout(Duration::from_secs(5)).is_ok();
+        cancel.cancel();
+        ready
+    });
+    let result: Result<reqwest::Response> = run(async {
+        let prepared = Prepared::with_target(target, HeaderMap::new(), None)?;
+        controlled(
+            prepared.send(),
+            &control,
+            Some(&budget),
+            request_deadline(&control, Some(&budget))?,
+        )
+        .await?
+    });
+    let ready = stop.join().unwrap();
+    let (hello, closed) = peer.join().unwrap().unwrap();
+    assert!(ready && closed);
+    assert_eq!(result.unwrap_err().code, "command.cancelled");
+    assert!(
+        hello
+            .windows(b"verify.invalid".len())
+            .any(|w| w == b"verify.invalid")
+    );
+    assert!(
+        !hello
+            .windows(b"WIRE.invalid".len())
+            .any(|w| w == b"WIRE.invalid")
+    );
+    assert!(
+        !hello
+            .windows(b"lycheedev-dial.invalid".len())
+            .any(|w| w == b"lycheedev-dial.invalid")
+    );
 }

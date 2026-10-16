@@ -1105,7 +1105,7 @@ pub fn launch(inv: &Invocation, expected: &BrokerIdentity) -> Result<()> {
                     return crate::persistence::finish_control(
                         lycheedev_core::metadata::historical_write::finish_historical(
                             Err(error),
-                            retired,
+                            retired.map(|_| ()),
                         ),
                         inv.control.check(),
                     );

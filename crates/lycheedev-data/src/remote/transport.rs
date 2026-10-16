@@ -483,14 +483,14 @@ pub(crate) async fn get_once(
             url(locator)?;
         }
         LocatorPolicy::HotfixRedirect => {
-            let parsed = reqwest::Url::parse(locator).map_err(|_| http("invalid Hotfix URL"))?;
-            if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+            let parsed = redirect_url::RedirectUrl::absolute(locator)?;
+            if !matches!(parsed.scheme.as_str(), "http" | "https") || parsed.authority.is_none() {
                 return Err(http("Hotfix URL requires HTTP or HTTPS"));
             }
             // Go lowercases the scheme but retains authority spelling for its
             // localhost special case. Do not reuse WHATWG host normalization.
             if let Some((_, rest)) = locator.split_once(':') {
-                route_locator = format!("{}:{rest}", parsed.scheme());
+                route_locator = format!("{}:{rest}", parsed.scheme);
             }
         }
     }

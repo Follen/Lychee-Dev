@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 04:32 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`fbba2e7cdb55b11e068be1faea27dd2b22580b07`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 04:53 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`9b5b09f91b2423140f0d659130664a1970c579dc`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -25,7 +25,11 @@
 
 ## 2. 当前实现与未闭环事项
 
-`fbba2e7`集中run38850381033已创建，等待既有运行完成。新增raw request-target默认链已组合：仅reqwest会改写已认证path/query时使用既有锁定hyper公开connector，保direct/HTTP代理/CONNECT/TLS代理/SOCKS远端DNS，响应回原gzip/计量/取消路径。10新Rust及1原gap成功回归未跑，Cargo仅Data增加6条已有锁定直接依赖边，无新package/version/checksum。host/IDNA/numeric/IPv6-zone无损差异后继仍在做，不能宣称全部URL输入已等价。
+`fbba2e7`集中run38850381033正在执行，static/context步骤成功；early产物55个owner/76份sealed日志逐SHA通过。all-target与CLI同两处真实E0308：native_session.rs及session.rs将retire的Result<u32>传入要求Result<()>的cleanup。session已最小修正成功值映射，native_session随隔离后继修正；未重新编译。旧selected_member_tests集合类型修复上传仍待精确授权，未混入其他批。
+
+原始HTTP目标后继已组合：wire Host、实际DNS拨号名及TLS校验名分离，numeric/Unicode/IPv6-zone origin不再经WHATWG改写；标准hyper CONNECT保原始端口与zone，仍在原取消future内回收driver。7新测试及1原gap成功回归尚未运行，无Cargo变化。剩余有限边界为代理自身authority、Lookup失败Unicode代理表示及SOCKS原字节认证；继续实现，不将其作为永久unsupported豁免。前批raw path/query已有6条锁定直接依赖边，无新包/版本/checksum。
+
+短预算Source分析子进程已组合候选，沿原aggregate 2GiB Job及请求绝对deadline，保warm状态、身份和未知结果不重放。旁核发现退休诊断同步写与idle到期清理两个deadline问题，作者正在修订，当前未验收/未声称1秒用例通过。
 
 Hotfix合法异常时区合同后继已组合：Core保UTC秒/纳秒，Wago逐页按真实瞬间严格After选择；原始时间表示保留到pin/result晚期marshal，参数from/to同步使用Go接受规则。6新Rust未跑；共享HTTP原始URI/host无损传输仍在实现。下一集中批同时复验Core bundle类型编译、Core/CLI测试修正及Source/Emmy后继，不把历史失败改标通过。
 

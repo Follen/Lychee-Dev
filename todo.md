@@ -27,9 +27,9 @@ Complete end-to-end production behavior first, then add the corresponding tests 
 - [ ] Validate that the implemented owned-crate replacements preserve the complete XML/Lua behavior through the fixed unmodified public API. No minimal-hook final exemption remains; a zero-patch recipe alone does not complete acceptance.
 - [ ] Prove each replacement with full output/diagnostic/coverage/cancellation/resource differentials, then exact-lock native and full Retail cold/warm/session acceptance. Keep prior failures and transitional patches honestly identified until removed.
 
-## Current finite closure queue (2026-10-16 04:30 UTC)
+## Current finite closure queue (2026-10-16 04:53 UTC)
 
-- [ ] Finish the shared HTTP raw-target path, including the explicitly identified host-normalization boundaries. Preserve original proxy/TLS/redirect/cancellation/accounting; do not expand this into a general URL platform.
+- [ ] Finish the shared HTTP raw-target path, including the remaining proxy authority and SOCKS byte/auth boundaries. Origin numeric/Unicode/zone and exact CONNECT are implemented but untested. Preserve original proxy/TLS/redirect/cancellation/accounting; do not expand this into a general URL platform.
 - [ ] Finish retained Source short-budget isolation using existing process/Job ownership, retaining warm analysis state and the original aggregate 2GiB/absolute deadline. A 1-second request currently loses its typed response during synchronous analysis; do not lengthen the test or the product budget.
 - [ ] Run the saved `fbba2e7` composed batch (`38850381033`): Core bundle compile annotation, Core/project fixture corrections, owned Eq/Hash and explicit historical compile overlay, Source preparation-copy/index changes, and Go timestamp comparison/late-marshal behavior. Original failures and skipped later targets remain evidence until rerun.
 - [ ] Complete zero-patch semantic/coverage/cancellation/resource acceptance, including all 448 selected-query comparisons and 43 diagnostic entries. The `3c720fa` context scope has 56 real passes, including both prior empty-scope failures; this is not full product acceptance.

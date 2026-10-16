@@ -141,21 +141,11 @@ impl RedirectUrl {
         // URL-derived Basic is supplied from exact bytes by authorization();
         // reqwest must never decode userinfo through its UTF-8-only helper.
         let text = self.text(false);
-        let parsed =
-            reqwest::Url::parse(&text).map_err(|_| error("wago_http", 5, "invalid Hotfix URL"))?;
         if !matches!(self.scheme.as_str(), "http" | "https") {
             return Err(error("wago_http", 5, "Hotfix URL requires HTTP or HTTPS"));
         }
-        // Preserve endpoint admission separately from request-target spelling.
-        // The controlled transport uses hyper's public raw Uri path whenever
-        // WHATWG parsing would normalize an encoded dot segment or query.
-        if !same_endpoint(&parsed, self.authority.as_deref().unwrap_or("")) {
-            return Err(error(
-                "wago_http",
-                5,
-                "Go redirect endpoint cannot be represented by HTTP transport",
-            ));
-        }
+        // The transport keeps Go's wire, dial and TLS identities separately.
+        // WHATWG host normalization must not choose a different endpoint.
         super::raw_uri::target(&text)?;
         Ok(text)
     }
@@ -304,33 +294,6 @@ fn host_escapes(host: &str, zone: bool) -> Result<()> {
         }
     }
     Ok(())
-}
-fn same_endpoint(parsed: &reqwest::Url, authority: &str) -> bool {
-    let host = authority
-        .rsplit_once('@')
-        .map_or(authority, |(_, host)| host);
-    let actual = parsed.host_str().unwrap_or("");
-    if let Some(literal) = host.strip_prefix('[') {
-        let Some((literal, _)) = literal.split_once(']') else {
-            return false;
-        };
-        return literal
-            .parse::<std::net::Ipv6Addr>()
-            .ok()
-            .zip(
-                actual
-                    .trim_start_matches('[')
-                    .trim_end_matches(']')
-                    .parse::<std::net::Ipv6Addr>()
-                    .ok(),
-            )
-            .is_some_and(|(expected, actual)| expected == actual);
-    }
-    let host = host.split_once(':').map_or(host, |(host, _)| host);
-    // ASCII DNS case folding does not select a different endpoint. WHATWG's
-    // IPv4 shorthand/octal/hex conversion does; reject rather than contact it.
-    // IDNA/escaped hosts remain explicit representation gaps for this adapter.
-    host.is_ascii() && host.eq_ignore_ascii_case(actual)
 }
 pub(crate) fn url_component(raw: &str, fragment: bool) -> Result<String> {
     // Go keeps valid RawPath/RawFragment verbatim; when a raw space, Unicode or
