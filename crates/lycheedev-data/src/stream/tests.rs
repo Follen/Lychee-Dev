@@ -87,10 +87,17 @@ fn begin() -> StreamBegin {
 #[test]
 fn typed_filter_retains_exact_signed_unsigned_and_array_rendering() {
     use execute::matches;
-    assert!(matches(
+    assert!(!matches(
         &table::Value::UInt(u64::MAX),
         "+18446744073709551615"
     ));
+    assert!(matches(
+        &table::Value::UInt(u64::MAX),
+        "18446744073709551615"
+    ));
+    assert!(!matches(&table::Value::UInt(8), "+08"));
+    assert!(matches(&table::Value::UInt(8), "08"));
+    assert!(matches(&table::Value::Int(8), "+08"));
     assert!(!matches(
         &table::Value::UInt(u64::MAX),
         "18446744073709551616"
@@ -168,11 +175,14 @@ fn typed_request_preserves_validation_order_and_original_borrows() {
 }
 
 #[test]
-fn typed_projection_keeps_duplicates_and_projection_errors_before_filter() {
+fn typed_projection_keeps_duplicates_and_go_filter_error_priority() {
     let raw = row_fixture(Cell::Text("second".into()));
     let definition = definition(&raw);
-    let projection = Projection::resolve(Some(" Name , ID,ID "), None, &definition).unwrap();
+    let projection = Projection::resolve(Some("Name,ID,ID"), None, &definition).unwrap();
     assert_eq!(projection.fields(), ["Name", "ID", "ID"]);
+    let error = Projection::resolve(Some(" Name , ID"), None, &definition).unwrap_err();
+    assert_eq!(error.message, "records.field_unknown:  Name ");
+
     let error = Projection::resolve(
         Some("Missing"),
         Some(Filter {
@@ -182,10 +192,33 @@ fn typed_projection_keeps_duplicates_and_projection_errors_before_filter() {
         &definition,
     )
     .unwrap_err();
-    assert_eq!(error.message, "records.field_unknown: Missing");
+    assert_eq!(error.message, "records.field_unknown: Other");
     assert_eq!(error.details, json!({"stage":"query"}));
+    let error = Projection::resolve(
+        Some("Missing"),
+        Some(Filter {
+            field: "ID",
+            value: "1",
+        }),
+        &definition,
+    )
+    .unwrap_err();
+    assert_eq!(error.message, "records.field_unknown: Missing");
+    let oversized = std::iter::repeat_n("Missing", 1025)
+        .collect::<Vec<_>>()
+        .join(",");
+    let error = Projection::resolve(
+        Some(&oversized),
+        Some(Filter {
+            field: "Other",
+            value: "1",
+        }),
+        &definition,
+    )
+    .unwrap_err();
+    assert_eq!(error.message, "records.field_unknown: Other");
     let error = Projection::resolve(Some("ID,"), None, &definition).unwrap_err();
-    assert_eq!(error.message, "records.field_unknown: ");
+    assert_eq!(error.message, "records.field_unknown");
 }
 
 #[test]
@@ -197,7 +230,7 @@ fn native_row_executor_projects_one_row_and_filters_before_limit_probe() {
         (
             Some(Filter {
                 field: "ID",
-                value: "+08",
+                value: "08",
             }),
             8,
             false,

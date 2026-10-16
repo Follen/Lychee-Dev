@@ -346,7 +346,7 @@ fn default_remote_stream_keeps_capture_and_multiple_close_causes_when_error_mark
 fn default_remote_stream_native_service_exposes_typed_rows_and_checked_summary() {
     use stream::{StreamEvent, StreamRequest};
     let f = SqlFixture::with_rows(false, true, 3);
-    let inv = invocation(&f, &[("--fields", "ID,ID"), ("--filter", " ID = +08 ")]);
+    let inv = invocation(&f, &[("--fields", "ID,ID"), ("--filter", " ID = 08 ")]);
     let mut yielded = Vec::new();
     let mut records = 0;
     let summary = stream::run(
@@ -355,7 +355,7 @@ fn default_remote_stream_native_service_exposes_typed_rows_and_checked_summary()
             match event {
                 StreamEvent::Begin(begin) => {
                     assert_eq!(begin.snapshot, f.snapshot);
-                    assert_eq!(begin.filter, " ID = +08 ");
+                    assert_eq!(begin.filter, " ID = 08 ");
                     assert_eq!(begin.projection.fields(), ["ID", "ID"]);
                     assert_eq!(begin.limit.get(), 1);
                 }
@@ -400,7 +400,7 @@ fn default_remote_stream_native_service_exposes_typed_rows_and_checked_summary()
         &yielded[2]["end"],
     );
     let out = stream::wire::into_outcome(summary);
-    assert_eq!(out.data["filter"], " ID = +08 ");
+    assert_eq!(out.data["filter"], " ID = 08 ");
     assert_eq!(out.data["fields"], json!(["ID", "ID"]));
     assert!(out.complete);
     f.close();
@@ -486,5 +486,60 @@ fn default_remote_stream_provider_error_precedes_deferred_projection_validation(
     assert_eq!(calls, 0);
     assert_eq!(error.code, "records.remote_unavailable_offline");
     assert!(f.captures().is_empty());
+    f.close();
+}
+
+#[test]
+fn default_remote_stream_checks_filter_before_projection_without_yield_or_capture() {
+    let f = SqlFixture::new(false, true);
+    for (fields, filter, expected) in [
+        ("Missing", "Other=1", "Other"),
+        ("Missing", "ID=7", "Missing"),
+        (" ID", "ID=7", " ID"),
+        ("ID,", "ID=7", ""),
+    ] {
+        let inv = invocation(&f, &[("--fields", fields), ("--filter", filter)]);
+        let mut yielded = Vec::new();
+        let error = stream::stream(&inv, &mut |frame| {
+            yielded.push(frame.clone());
+            Ok(())
+        })
+        .unwrap_err();
+        assert_eq!(error.code, "records.field_unknown");
+        assert_eq!(
+            error.message,
+            if expected.is_empty() {
+                "records.field_unknown".to_owned()
+            } else {
+                format!("records.field_unknown: {expected}")
+            }
+        );
+        assert!(yielded.is_empty());
+        assert!(f.captures().is_empty());
+    }
+    f.close();
+}
+
+#[test]
+fn default_remote_stream_unsigned_filter_rejects_sign_like_go_parse_uint() {
+    let f = SqlFixture::with_rows(false, true, 3);
+    let inv = invocation(&f, &[("--filter", "ID=+08")]);
+    let mut yielded = Vec::new();
+    let out = stream::stream(&inv, &mut |frame| {
+        yielded.push(frame.clone());
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(frames(&yielded), ["begin", "end"]);
+    assert_eq!(yielded[0]["begin"]["filter"], "ID=+08");
+    assert_eq!(yielded[1]["end"]["count"], 0);
+    assert_eq!(yielded[1]["end"]["complete"], true);
+    assert_eq!(f.captures().len(), 1);
+    verify_manifest(
+        &f,
+        &out.provenance[0],
+        &yielded[0]["begin"],
+        &yielded[1]["end"],
+    );
     f.close();
 }

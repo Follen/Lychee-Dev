@@ -17,11 +17,10 @@ pub(super) fn matches(value: &table::Value, want: &str) -> bool {
     }
     match value {
         table::Value::Int(n) => want.parse::<i64>().is_ok_and(|value| value == *n),
-        table::Value::UInt(n) => want
-            .strip_prefix('+')
-            .unwrap_or(want)
-            .parse::<u64>()
-            .is_ok_and(|value| value == *n),
+        // Go ParseUint rejects a leading sign; Rust's integer parser accepts '+'.
+        table::Value::UInt(n) => {
+            !want.starts_with('+') && want.parse::<u64>().is_ok_and(|value| value == *n)
+        }
         _ => false,
     }
 }

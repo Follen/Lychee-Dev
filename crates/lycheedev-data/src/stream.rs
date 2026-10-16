@@ -110,11 +110,18 @@ impl Projection {
         filter: Option<Filter<'_>>,
         definition: &schema::Definition,
     ) -> Result<Self> {
+        // Go323 StreamDataRows resolves the filter before any projected field.
+        // Keep that first-error order after the authenticated table is opened.
+        if let Some(filter) = filter
+            && !definition
+                .fields
+                .iter()
+                .any(|field| field.name == filter.field)
+        {
+            return Err(field_error(filter.field));
+        }
         let fields: Vec<String> = match text {
-            Some(text) => text
-                .split(',')
-                .map(|value| value.trim().to_owned())
-                .collect(),
+            Some(text) => text.split(',').map(str::to_owned).collect(),
             None => definition
                 .fields
                 .iter()
@@ -128,11 +135,7 @@ impl Projection {
                 "Stream projection field budget exceeded",
             ));
         }
-        for name in fields
-            .iter()
-            .map(String::as_str)
-            .chain(filter.iter().map(|filter| filter.field))
-        {
+        for name in fields.iter().map(String::as_str) {
             if !definition.fields.iter().any(|field| field.name == name) {
                 return Err(field_error(name));
             }
@@ -247,7 +250,11 @@ fn field_error(name: &str) -> lycheedev_core::ToolkitError {
     fault(
         "records.field_unknown",
         2,
-        format!("records.field_unknown: {name}"),
+        if name.is_empty() {
+            "records.field_unknown".to_owned()
+        } else {
+            format!("records.field_unknown: {name}")
+        },
     )
     .with_details(wire::query_stage())
 }
