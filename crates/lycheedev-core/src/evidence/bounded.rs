@@ -690,6 +690,28 @@ pub fn verify_blob_bounded(
     open_workspace(home, Some(control), &mut || Ok(()))?;
     verify_internal(home, blob, maximum, Some(control))
 }
+// Go VerifyBlob has no producer/capture size ceiling. It is a streaming
+// verification of an already authenticated signed historical reference.
+pub(super) fn verify_historical_blob(
+    home: &Path,
+    digest: &str,
+    bytes: i64,
+    control: &OperationControl,
+) -> Result<()> {
+    control.check()?;
+    if bytes < 0 || !crate::selection::valid_digest(digest, 64) {
+        return Err(integrity("vault.blob_integrity"));
+    }
+    let reference = BlobRef {
+        sha256: digest.into(),
+        bytes: bytes as u64,
+    };
+    scan_blob(
+        open_blob(home, reference, Some(control))?,
+        Some(control),
+        |_| Ok(()),
+    )
+}
 pub(super) fn verify_internal(
     home: &Path,
     blob: &Value,

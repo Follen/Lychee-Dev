@@ -36,6 +36,35 @@ impl Metadata {
         let result = crate::selection::selection_finish(result, control.check());
         crate::selection::selection_finish(result, check())
     }
+    /// One bounded Go ListDocuments page, moving each row's original bytes.
+    /// Callers which re-read selected IDs must finish this cursor first, exactly
+    /// as Go's one-connection ListDocuments -> InspectCapture sequence does.
+    pub(crate) fn read_raw_page_controlled(
+        &self,
+        prefix: &str,
+        after: &str,
+        limit: usize,
+        control: &OperationControl,
+    ) -> Result<Vec<RawDocument>> {
+        let mut documents = Vec::new();
+        visit_owned_raw_page(
+            &self.connection,
+            prefix,
+            after,
+            limit,
+            control,
+            Duration::from_secs(5),
+            || Ok(()),
+            |_, generation, bytes| {
+                documents.try_reserve(1).map_err(|_| {
+                    ToolkitError::new("command.failed", "metadata page allocation failed", 5)
+                })?;
+                documents.push(RawDocument { generation, bytes });
+                Ok(())
+            },
+        )?;
+        Ok(documents)
+    }
     pub fn visit_raw_page_controlled_with_check(
         &self,
         prefix: &str,
@@ -66,6 +95,27 @@ pub(super) fn visit_raw_page(
     restore_timeout: Duration,
     mut check: impl FnMut() -> Result<()>,
     mut visit: impl FnMut(&str, i64, &[u8]) -> Result<()>,
+) -> Result<(usize, String)> {
+    visit_owned_raw_page(
+        connection,
+        prefix,
+        after,
+        limit,
+        control,
+        restore_timeout,
+        &mut check,
+        |key, generation, bytes| visit(key, generation, &bytes),
+    )
+}
+fn visit_owned_raw_page(
+    connection: &Connection,
+    prefix: &str,
+    after: &str,
+    limit: usize,
+    control: &OperationControl,
+    restore_timeout: Duration,
+    mut check: impl FnMut() -> Result<()>,
+    mut visit: impl FnMut(&str, i64, Vec<u8>) -> Result<()>,
 ) -> Result<(usize, String)> {
     metadata_check(control, &mut check)?;
     if !(1..=1000).contains(&limit) {
@@ -121,7 +171,7 @@ pub(super) fn visit_raw_page(
                         )));
                     };
                     if let Err(error) = metadata_check(control, &mut *supplemental.borrow_mut())
-                        .and_then(|_| visit(&key, generation, &bytes))
+                        .and_then(|_| visit(&key, generation, bytes))
                     {
                         return Ok(Err(error));
                     }

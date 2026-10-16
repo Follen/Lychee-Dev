@@ -2,34 +2,31 @@
 //! All definitions run under the caller's original work/memory/cancel budget.
 use super::*;
 
-pub(super) fn validate_all_keyword(sql: &str) -> Result<()> {
-    use sqlparser::tokenizer::{Token, Tokenizer};
-    let tokens = Tokenizer::new(&GenericDialect {}, sql)
-        .tokenize_with_location()
-        .map_err(|e| problem("relational.invalid_syntax", &e.to_string()))?;
-    let tokens: Vec<_> = tokens
-        .iter()
-        .filter(|t| !matches!(t.token, Token::Whitespace(_)))
-        .collect();
+pub(super) fn validate_all_keyword(
+    sql: &str,
+    tokens: &[sqlparser::tokenizer::TokenWithSpan],
+    consumed: usize,
+) -> Result<()> {
+    use sqlparser::tokenizer::Token;
     for (i, token) in tokens.iter().enumerate() {
-        // The Go tokenizer treats :ALL and :UNION as one parameter token.
-        // GenericDialect splits ':' and Word; parameter names are not keywords.
-        if i > 0 && tokens[i - 1].token == Token::Colon {
-            continue;
+        // On a parser error, only an already-consumed UNION may supersede
+        // that error. A malformed earlier projection keeps its original turn.
+        if i >= consumed {
+            break;
         }
         // Go reserves ALL everywhere except UNION ALL. sqlparser erases
         // SELECT ALL and LIMIT ALL, so reject those tokens before AST lowering.
-        if matches!(&token.token, Token::Word(word) if word.quote_style.is_none() && word.value.eq_ignore_ascii_case("ALL"))
+        if matches!(&token.token, Token::Word(word) if word.quote_style.is_none() && equal_fold(&word.value, "ALL"))
             && (i == 0
-                || !matches!(&tokens[i-1].token, Token::Word(word) if word.quote_style.is_none() && word.value.eq_ignore_ascii_case("UNION")))
+                || !matches!(&tokens[i-1].token, Token::Word(word) if word.quote_style.is_none() && equal_fold(&word.value, "UNION")))
         {
             return Err(problem("relational.invalid_syntax", "Unexpected ALL"));
         }
-        if !matches!(&token.token, Token::Word(word) if word.quote_style.is_none() && word.value.eq_ignore_ascii_case("UNION"))
+        if !matches!(&token.token, Token::Word(word) if word.quote_style.is_none() && equal_fold(&word.value, "UNION"))
         {
             continue;
         }
-        if tokens.get(i + 1).is_some_and(|t| matches!(&t.token, Token::Word(word) if word.quote_style.is_none() && word.value.eq_ignore_ascii_case("ALL"))) {
+        if tokens.get(i + 1).is_some_and(|t| matches!(&t.token, Token::Word(word) if word.quote_style.is_none() && equal_fold(&word.value, "ALL"))) {
             continue;
         }
         let (offset, line, column) = if let Some(next) = tokens.get(i + 1) {
@@ -233,9 +230,6 @@ pub(super) fn branches(body: SetExpr) -> Result<Vec<SetExpr>> {
                 "Only UNION ALL is supported by the retrieval contract",
             )),
             SetExpr::Select(_) => {
-                if result.len() >= 128 {
-                    return Err(budget());
-                }
                 result.push(body);
                 Ok(())
             }

@@ -57,6 +57,7 @@ impl<E> OwnedQuery<'_, '_, E> {
             let mut foreign = OwnedQuery::new(self.analysis, self.session, file, &mut *self.check);
             foreign.contribution_order = self.contribution_order.clone();
             foreign.workspace_facts = std::sync::Arc::clone(&self.workspace_facts);
+            foreign.flow_trees = Rc::clone(&self.flow_trees);
             return foreign.type_of_member(id);
         }
         self.checkpoint()?;
@@ -290,6 +291,7 @@ impl<E> OwnedQuery<'_, '_, E> {
                 OwnedQuery::new(self.analysis, self.session, table.file_id, &mut *self.check);
             foreign.contribution_order = self.contribution_order.clone();
             foreign.workspace_facts = std::sync::Arc::clone(&self.workspace_facts);
+            foreign.flow_trees = Rc::clone(&self.flow_trees);
             return foreign.table_metatable_type(table);
         }
         let calls = self
@@ -1270,5 +1272,137 @@ impl<E> OwnedQuery<'_, '_, E> {
 fn push_owner(out: &mut Vec<SemanticId>, owner: SemanticId) {
     if !out.contains(&owner) {
         out.push(owner);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::{
+        BindingContext, BindingDecision, BindingSite, BoundValue, OwnedBindingSession,
+    };
+    use emmylua_code_analysis::EmmyLuaAnalysis;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    struct Unmanaged(Arc<AtomicUsize>);
+    impl BindingContext for Unmanaged {
+        fn identity(&self) -> &str {
+            "foreign-flow-cache-test"
+        }
+        fn resolve(&self, _: BindingSite) -> BindingDecision<BoundValue> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            BindingDecision::NotManaged
+        }
+    }
+
+    #[test]
+    fn foreign_member_and_metatable_queries_share_cfg_but_keep_fresh_expression_scopes() {
+        let mut analysis = EmmyLuaAnalysis::new();
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("foreign-flow-cache-test");
+        analysis.add_main_workspace(root.clone());
+        let files = analysis.update_files_by_path(vec![
+            (root.join("entry.lua"), Some("return 0".into())),
+            (
+                root.join("members.lua"),
+                Some("local seed=1\nlocal t={first=seed,second=seed}\nreturn t".into()),
+            ),
+            (
+                root.join("metatable.lua"),
+                Some("local meta={}\nlocal t={}\nsetmetatable(t,meta)\nreturn t".into()),
+            ),
+        ]);
+        let member_model = analysis.semantic_model(files[1]);
+        let facts = member_model.file_facts().unwrap();
+        let members: Vec<_> = ["first", "second"]
+            .map(|name| {
+                facts
+                    .members
+                    .iter()
+                    .find(|member| member.key == LuaMemberKey::Name(name.into()))
+                    .unwrap()
+                    .id
+                    .clone()
+            })
+            .into_iter()
+            .collect();
+        let meta_model = analysis.semantic_model(files[2]);
+        let meta_facts = meta_model.file_facts().unwrap();
+        let table = |name: &str| {
+            InFiled::new(
+                files[2],
+                meta_facts
+                    .decls
+                    .iter()
+                    .find(|decl| decl.name.as_str() == name)
+                    .unwrap()
+                    .value_expr_syntax
+                    .unwrap()
+                    .get_range(),
+            )
+        };
+        let (table, metatable) = (table("t"), table("meta"));
+        let probes = Arc::new(AtomicUsize::new(0));
+        let session =
+            OwnedBindingSession::new_checked(Arc::new(Unmanaged(Arc::clone(&probes))), || {
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+        let mut check = || Ok::<_, ()>(());
+        let mut query =
+            OwnedQuery::new_for_snapshot(&analysis, &session, files[0], &mut check).unwrap();
+        assert!(query.flow_trees.borrow().is_empty());
+        assert_eq!(
+            query.type_of_member(&members[0]).unwrap().unwrap(),
+            OwnedValue::plain(LuaType::IntegerConst(1))
+        );
+        let member_cfg = query
+            .flow_trees
+            .borrow()
+            .get(&files[1])
+            .cloned()
+            .expect("foreign member publishes its one CFG");
+        assert_eq!(
+            query.type_of_member(&members[1]).unwrap().unwrap(),
+            OwnedValue::plain(LuaType::IntegerConst(1))
+        );
+        assert!(Arc::ptr_eq(
+            &member_cfg,
+            query.flow_trees.borrow().get(&files[1]).unwrap()
+        ));
+        assert_eq!(query.flow_trees.borrow().len(), 1);
+        let expected = OwnedValue::plain(LuaType::TableConst(metatable));
+        assert_eq!(
+            query.table_metatable_type(&table).unwrap(),
+            Some(expected.clone())
+        );
+        let meta_cfg = query
+            .flow_trees
+            .borrow()
+            .get(&files[2])
+            .cloned()
+            .expect("foreign metatable publishes its one CFG");
+        let before = probes.load(Ordering::Relaxed);
+        assert_eq!(query.table_metatable_type(&table).unwrap(), Some(expected));
+        assert!(
+            probes.load(Ordering::Relaxed) > before,
+            "fresh model expression probes must not be cached with the CFG"
+        );
+        assert!(Arc::ptr_eq(
+            &meta_cfg,
+            query.flow_trees.borrow().get(&files[2]).unwrap()
+        ));
+        assert!(!Arc::ptr_eq(&member_cfg, &meta_cfg));
+        assert_eq!(query.flow_trees.borrow().len(), 2);
+        assert!(
+            session
+                .coverage_checked(|| Ok::<_, ()>(()))
+                .unwrap()
+                .is_empty()
+        );
     }
 }

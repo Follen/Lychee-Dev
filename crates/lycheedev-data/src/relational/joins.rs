@@ -26,7 +26,8 @@ pub(super) fn relation(
         }
         let alias = alias
             .as_ref()
-            .map(|a| a.name.value.clone())
+            .map(|a| syntax::identifier(&a.name).map(str::to_owned))
+            .transpose()?
             .unwrap_or_default();
         return Ok((
             RelationName::internal(virtual_name),
@@ -67,7 +68,8 @@ pub(super) fn relation(
     let table = RelationName::from_object(name)?;
     let alias = alias
         .as_ref()
-        .map(|a| a.name.value.clone())
+        .map(|a| syntax::identifier(&a.name).map(str::to_owned))
+        .transpose()?
         .unwrap_or_else(|| table.name.clone());
     Ok((table, alias, None))
 }

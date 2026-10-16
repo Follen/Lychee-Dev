@@ -1,7 +1,6 @@
 //! Go 3.2.3 plans and actual query-scoped callback measurements.
 //! Plain EXPLAIN binds schemas without evaluating or visiting source rows.
 use super::*;
-use std::borrow::Cow;
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct PlanStep {
@@ -44,43 +43,20 @@ pub struct ExecutionMeasurement {
     pub output_rows: usize,
 }
 
-pub(super) fn prefix(sql: &str) -> Result<(bool, bool, Cow<'_, str>)> {
-    use sqlparser::tokenizer::{Token, Tokenizer};
-    let tokens = Tokenizer::new(&GenericDialect {}, sql)
-        .tokenize_with_location()
-        .map_err(|e| problem("relational.invalid_syntax", &e.to_string()))?;
-    let mut significant = tokens
-        .iter()
-        .filter(|t| !matches!(t.token, Token::Whitespace(_)));
-    let is_word = |token: &Token, expected: &str| matches!(token, Token::Word(w) if w.quote_style.is_none() && w.value.eq_ignore_ascii_case(expected));
-    let Some(first) = significant.next().filter(|t| is_word(&t.token, "EXPLAIN")) else {
-        return Ok((false, false, Cow::Borrowed(sql)));
+pub(super) fn prefix(tokens: &mut Vec<sqlparser::tokenizer::TokenWithSpan>) -> (bool, bool) {
+    use sqlparser::tokenizer::Token;
+    let is_word = |token: &Token, expected: &str| {
+        matches!(token, Token::Word(w)
+        if w.quote_style.is_none() && equal_fold(&w.value, expected))
     };
-    let analyze = significant.next().filter(|t| is_word(&t.token, "ANALYZE"));
-    // Mask only the recognized keywords, retaining comments and parser offsets.
-    // Extra sqlparser EXPLAIN options still go through normal SELECT rejection.
-    let mut masked = sql.to_owned();
-    for token in std::iter::once(first).chain(analyze) {
-        let location = token.span.start;
-        let (mut line, mut column) = (1u64, 1u64);
-        let mut offset = None;
-        for (at, ch) in sql.char_indices() {
-            if line == location.line && column == location.column {
-                offset = Some(at);
-                break;
-            }
-            if ch == '\n' {
-                line += 1;
-                column = 1;
-            } else {
-                column += 1;
-            }
-        }
-        let offset = offset
-            .ok_or_else(|| problem("relational.invalid_syntax", "Missing EXPLAIN keyword"))?;
-        masked.replace_range(offset..offset + 7, "       ");
+    if !tokens.first().is_some_and(|t| is_word(&t.token, "EXPLAIN")) {
+        return (false, false);
     }
-    Ok((true, analyze.is_some(), Cow::Owned(masked)))
+    let analyze = tokens.get(1).is_some_and(|t| is_word(&t.token, "ANALYZE"));
+    // Original-source admission and spans are already complete. Remove just
+    // these tokens, without masking Unicode or scanning a second SQL string.
+    tokens.drain(..if analyze { 2 } else { 1 });
+    (true, analyze)
 }
 
 pub(super) fn build(

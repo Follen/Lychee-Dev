@@ -46,7 +46,7 @@ pub(super) fn name(name: &ObjectName) -> Result<String> {
     let [ObjectNamePart::Identifier(name)] = name.0.as_slice() else {
         return Err(unsupported());
     };
-    Ok(upper(&name.value))
+    Ok(upper(syntax::identifier(name)?))
 }
 pub(super) fn cast_name(kind: &DataType) -> Result<String> {
     match kind {

@@ -17,7 +17,10 @@ mod aggregate;
 mod compound;
 mod explain;
 pub use explain::{ExecutionMeasurement, Explanation, MeasuredTable, PlanStep, ScanMeasurement};
+mod identifier_categories;
 mod identifiers;
+mod lexical;
+mod parser_admission;
 pub(crate) use identifiers::SourceTableUse;
 use identifiers::{ColumnOwners, ColumnRef, RelationName};
 mod joins;
@@ -247,7 +250,7 @@ enum Term {
     Case(Option<Box<Term>>, Vec<(Term, Term)>, Option<Box<Term>>),
 }
 fn term(expr: &Expr, parameters: &mut BTreeSet<String>, depth: usize) -> Result<Term> {
-    if depth > 128 {
+    if depth > 256 {
         return Err(budget());
     }
     let mut nested = |e: &Expr| term(e, parameters, depth + 1);
@@ -257,12 +260,14 @@ fn term(expr: &Expr, parameters: &mut BTreeSet<String>, depth: usize) -> Result<
             let [ObjectNamePart::Identifier(name)] = name.0.as_slice() else {
                 return Err(unsupported());
             };
-            Term::Star(name.value.clone())
+            Term::Star(syntax::identifier(name)?.to_owned())
         }
-        Expr::Identifier(name) => Term::Column(ColumnRef::new(name.value.clone())),
+        Expr::Identifier(name) => {
+            Term::Column(ColumnRef::new(syntax::identifier(name)?.to_owned()))
+        }
         Expr::CompoundIdentifier(names) if names.len() == 2 => Term::Column(ColumnRef::qualified(
-            names[0].value.clone(),
-            names[1].value.clone(),
+            syntax::identifier(&names[0])?.to_owned(),
+            syntax::identifier(&names[1])?.to_owned(),
         )),
         Expr::Value(v) => match &v.value {
             Value::Null => Term::Value(Scalar::Null),
@@ -406,7 +411,7 @@ fn term(expr: &Expr, parameters: &mut BTreeSet<String>, depth: usize) -> Result<
                         let [ObjectNamePart::Identifier(name)] = name.0.as_slice() else {
                             return Err(unsupported());
                         };
-                        Term::Star(name.value.clone())
+                        Term::Star(syntax::identifier(name)?.to_owned())
                     }
                     _ => return Err(unsupported()),
                 });
@@ -1452,30 +1457,39 @@ impl Program {
         self.explain
     }
     pub fn compile(sql: &str) -> Result<Self> {
-        if sql.is_empty() || sql.len() > 1 << 20 {
-            return Err(budget());
-        }
-        let (explain, analyze, sql) = explain::prefix(sql)?;
-        compound::validate_all_keyword(&sql)?;
+        let mut tokens = lexical::tokens(sql)?;
+        let (explain, analyze) = explain::prefix(&mut tokens);
+        // sqlparser's implementation guards count more frames than Go's
+        // retrieve/expression stack. Its independent ceiling stays bounded;
+        // the Go syntax admission below uses the actual logical structure.
         let mut parser = Parser::new(&syntax::QueryDialect)
-            .with_recursion_limit(128)
-            .try_with_sql(&sql)
-            .map_err(|e| problem("relational.invalid_syntax", &e.to_string()))?;
-        let mut statements = parser
-            .parse_statements()
-            .map_err(|e| problem("relational.invalid_syntax", &e.to_string()))?;
-        if statements.len() != 1 {
+            .with_recursion_limit(256)
+            .with_tokens_with_locations(tokens.clone());
+        let query = match parser.parse_query() {
+            Ok(query) => query,
+            Err(error) => {
+                compound::validate_all_keyword(
+                    sql,
+                    &tokens,
+                    parser.get_current_index().saturating_add(1),
+                )?;
+                return Err(match error {
+                    sqlparser::parser::ParserError::RecursionLimitExceeded => budget(),
+                    error => problem("relational.invalid_syntax", &error.to_string()),
+                });
+            }
+        };
+        parser.consume_token(&sqlparser::tokenizer::Token::SemiColon);
+        if parser.peek_token().token != sqlparser::tokenizer::Token::EOF {
             return Err(problem(
                 "relational.invalid_syntax",
-                "Exactly one read-only retrieval required",
+                "Expected end of retrieval",
             ));
         }
-        let Statement::Query(query) = statements.remove(0) else {
-            return Err(problem(
-                "relational.invalid_syntax",
-                "Only SELECT retrieval is permitted",
-            ));
-        };
+        // Check UNION's retained token after normal left-to-right parsing, so
+        // a later missing ALL cannot conceal an earlier malformed expression.
+        compound::validate_all_keyword(sql, &tokens, usize::MAX)?;
+        parser_admission::validate(&query, &tokens)?;
         let mut program = Self::compile_query(*query, 0)?;
         subquery::validate_nodes(&program)?;
         program.explain = explain;
@@ -1483,26 +1497,20 @@ impl Program {
         Ok(program)
     }
     fn compile_query(mut query: Query, depth: usize) -> Result<Self> {
-        if depth > 64 {
+        if depth > 256 {
             return Err(budget());
         }
         let mut bindings = vec![];
         let mut recursive = false;
         if let Some(with) = query.with.take() {
             recursive = with.recursive;
-            if with.cte_tables.len() > 128 {
-                return Err(budget());
-            }
             let mut names = BTreeSet::new();
             for cte in with.cte_tables {
                 if cte.from.is_some() || cte.materialized.is_some() || !cte.alias.columns.is_empty()
                 {
                     return Err(unsupported());
                 }
-                let name = cte.alias.name.value;
-                if name.is_empty() || name.len() > 512 {
-                    return Err(binding());
-                }
+                let name = syntax::identifier(&cte.alias.name)?.to_owned();
                 if !names.insert(identifier_lower(&name)) {
                     return Err(problem("relational.invalid_syntax", "Duplicate CTE name"));
                 }
@@ -1526,7 +1534,7 @@ impl Program {
                 branch.body = Box::new(body);
                 branch.order_by = None;
                 branch.limit_clause = None;
-                branches.push(Self::compile_query(branch, depth + 1)?);
+                branches.push(Self::compile_query(branch, depth)?);
             }
             let mut parameters = BTreeSet::new();
             for body in branches.iter().chain(bindings.iter().map(|(_, b)| b)) {
@@ -1594,9 +1602,6 @@ impl Program {
         let (table, alias, derived) =
             joins::relation(&select.from[0].relation, "\0derived:base", depth)?;
         let mut parameters = BTreeSet::new();
-        if select.from[0].joins.len() > 31 {
-            return Err(budget());
-        }
         let joins = select.from[0]
             .joins
             .iter()
@@ -1612,7 +1617,7 @@ impl Program {
                 },
                 SelectItem::ExprWithAlias { expr, alias } => Projection {
                     expr: Some(term(expr, &mut parameters, depth)?),
-                    name: alias.value.clone(),
+                    name: syntax::identifier(alias)?.to_owned(),
                 },
                 SelectItem::Wildcard(options)
                     if options == &WildcardAdditionalOptions::default() =>
@@ -1628,7 +1633,7 @@ impl Program {
                 ) if options == &WildcardAdditionalOptions::default() => Projection {
                     expr: None,
                     name: match name.0.as_slice() {
-                        [ObjectNamePart::Identifier(name)] => name.value.clone(),
+                        [ObjectNamePart::Identifier(name)] => syntax::identifier(name)?.to_owned(),
                         _ => return Err(unsupported()),
                     },
                 },
@@ -2488,3 +2493,6 @@ mod execution_contract_tests;
 #[cfg(test)]
 #[path = "relational/function_binding_tests.rs"]
 mod function_binding_tests;
+
+#[cfg(test)]
+mod identifier_grammar_tests;

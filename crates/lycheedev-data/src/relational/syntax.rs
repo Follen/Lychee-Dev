@@ -2,11 +2,14 @@
 //! source text. Function semantic checks remain in the real schema binder.
 use super::*;
 use sqlparser::{
-    ast::helpers::attached_token::AttachedToken, dialect::Dialect, keywords::Keyword,
-    parser::ParserError, tokenizer::Token,
+    ast::helpers::attached_token::AttachedToken,
+    dialect::{Dialect, Precedence},
+    keywords::Keyword,
+    parser::ParserError,
+    tokenizer::Token,
 };
 
-fn reserved(value: &str) -> bool {
+pub(super) fn reserved(value: &str) -> bool {
     matches!(
         scalar::upper(value).as_str(),
         "SELECT"
@@ -59,11 +62,23 @@ fn reserved(value: &str) -> bool {
     )
 }
 
+pub(super) fn identifier(name: &Ident) -> Result<&str> {
+    if name.value.is_empty()
+        || name.value.contains('\0')
+        || !matches!(name.quote_style, None | Some('"' | '`' | '['))
+        || name.quote_style.is_none() && reserved(&name.value)
+    {
+        return Err(problem("relational.invalid_syntax", "Expected identifier"));
+    }
+    Ok(&name.value)
+}
+
 #[derive(Debug)]
 pub(super) struct QueryDialect;
 
 // Delegate the pinned GenericDialect's feature overrides. This adapter changes
-// only expression prefixes; unrelated accepted/rejected ASTs stay unchanged.
+// expression prefixes and identifier boundaries. Tokens retain the fixed Go
+// lexical contract before entering the existing parser.
 macro_rules! generic_flags {
     ($($name:ident),* $(,)?) => {$(
         fn $name(&self) -> bool { GenericDialect {}.$name() }
@@ -74,13 +89,13 @@ impl Dialect for QueryDialect {
         std::any::TypeId::of::<GenericDialect>()
     }
     fn is_delimited_identifier_start(&self, ch: char) -> bool {
-        GenericDialect {}.is_delimited_identifier_start(ch)
+        matches!(ch, '"' | '`' | '[')
     }
     fn is_identifier_start(&self, ch: char) -> bool {
-        GenericDialect {}.is_identifier_start(ch)
+        ch == '_' || identifier_categories::letter(ch)
     }
     fn is_identifier_part(&self, ch: char) -> bool {
-        GenericDialect {}.is_identifier_part(ch)
+        self.is_identifier_start(ch) || identifier_categories::digit(ch) || ch == '$'
     }
     generic_flags!(
         supports_unicode_string_literal,
@@ -155,7 +170,88 @@ impl Dialect for QueryDialect {
         supports_aliased_function_args,
     );
 
+    fn is_select_item_alias(&self, _explicit: bool, kw: &Keyword, _parser: &mut Parser) -> bool {
+        *kw == Keyword::NoKeyword
+    }
+    fn is_table_factor_alias(&self, _explicit: bool, kw: &Keyword, _parser: &mut Parser) -> bool {
+        *kw == Keyword::NoKeyword
+    }
+    fn prec_value(&self, precedence: Precedence) -> u8 {
+        match precedence {
+            Precedence::Or => 10,
+            Precedence::And => 20,
+            Precedence::UnaryNot => 29,
+            Precedence::Is | Precedence::Between | Precedence::Like | Precedence::Eq => 30,
+            Precedence::PlusMinus => 50,
+            Precedence::MulDivModOp => 60,
+            _ => GenericDialect {}.prec_value(precedence),
+        }
+    }
+    fn parse_infix(
+        &self,
+        parser: &mut Parser,
+        expr: &Expr,
+        _precedence: u8,
+    ) -> Option<std::result::Result<Expr, ParserError>> {
+        if !matches!(parser.peek_token().token, Token::Word(ref w) if w.keyword == Keyword::IS) {
+            return None;
+        }
+        Some((|| {
+            parser.next_token();
+            let negated = parser.parse_keyword(Keyword::NOT);
+            parser.expect_keyword(Keyword::NULL)?;
+            let expr = Box::new(expr.clone());
+            Ok(if negated {
+                Expr::IsNotNull(expr)
+            } else {
+                Expr::IsNull(expr)
+            })
+        })())
+    }
+    fn get_next_precedence(&self, parser: &Parser) -> Option<std::result::Result<u8, ParserError>> {
+        Some(Ok(match parser.peek_token().token {
+            Token::Word(ref word) => match word.keyword {
+                Keyword::OR => 10,
+                Keyword::AND => 20,
+                Keyword::IS | Keyword::IN | Keyword::BETWEEN | Keyword::LIKE => 30,
+                Keyword::NOT
+                    if matches!(parser.peek_nth_token(1).token, Token::Word(ref next)
+                    if matches!(next.keyword, Keyword::IN | Keyword::BETWEEN | Keyword::LIKE)) =>
+                {
+                    30
+                }
+                _ => 0,
+            },
+            Token::Eq | Token::Neq | Token::Lt | Token::LtEq | Token::Gt | Token::GtEq => 30,
+            Token::StringConcat => 40,
+            Token::Plus | Token::Minus => 50,
+            Token::Mul | Token::Div | Token::Mod => 60,
+            _ => 0,
+        }))
+    }
     fn parse_prefix(&self, parser: &mut Parser) -> Option<std::result::Result<Expr, ParserError>> {
+        if matches!(parser.peek_token().token, Token::Word(ref word)
+            if word.quote_style.is_none() && equal_fold(&word.value, "NOT"))
+        {
+            parser.next_token();
+            // Generic's NOT EXISTS shortcut negates before following comparisons.
+            // Go NOT always calls expression(3), including the EXISTS case.
+            return Some(parser.parse_subexpr(29).map(|expr| Expr::UnaryOp {
+                op: UnaryOperator::Not,
+                expr: Box::new(expr),
+            }));
+        }
+        if matches!(parser.peek_token().token, Token::Plus | Token::Minus) {
+            let op = if parser.next_token().token == Token::Plus {
+                UnaryOperator::Plus
+            } else {
+                UnaryOperator::Minus
+            };
+            return Some(parser.parse_subexpr(60).map(|expr| Expr::UnaryOp {
+                op,
+                expr: Box::new(expr),
+            }));
+        }
         if parser.peek_token().token == Token::Colon
             && !matches!(parser.peek_nth_token(1).token, Token::Word(ref word) if word.quote_style.is_none())
         {
@@ -169,18 +265,28 @@ impl Dialect for QueryDialect {
         let Token::Word(word) = parser.peek_token().token else {
             return None;
         };
-        // These are primary productions in Go, not ordinary function names.
+        if word.quote_style.is_none() && equal_fold(&word.value, "CAST") {
+            return Some((|| {
+                parser.next_token();
+                parser.expect_token(&Token::LParen)?;
+                let expr = Box::new(parser.parse_expr()?);
+                parser.expect_keyword(Keyword::AS)?;
+                let name = parser.parse_identifier()?;
+                identifier(&name).map_err(|e| ParserError::ParserError(e.message))?;
+                parser.expect_token(&Token::RParen)?;
+                Ok(Expr::Cast {
+                    kind: CastKind::Cast,
+                    expr,
+                    data_type: DataType::Custom(ObjectName::from(vec![name]), Vec::new()),
+                    format: None,
+                })
+            })());
+        }
+        // The remaining Go primary productions stay with the existing parser.
         if word.quote_style.is_none()
-            && matches!(
-                word.keyword,
-                Keyword::NOT
-                    | Keyword::EXISTS
-                    | Keyword::CAST
-                    | Keyword::CASE
-                    | Keyword::NULL
-                    | Keyword::TRUE
-                    | Keyword::FALSE
-            )
+            && ["EXISTS", "CASE", "NULL", "TRUE", "FALSE"]
+                .iter()
+                .any(|keyword| equal_fold(&word.value, keyword))
         {
             return None;
         }
@@ -200,12 +306,28 @@ impl Dialect for QueryDialect {
             })());
         }
         if parser.peek_nth_token(1).token != Token::LParen {
-            return None;
+            // CURRENT_DATE, INTERVAL and other sqlparser-specific words are
+            // ordinary Go names, rather than special expressions or functions.
+            return Some((|| {
+                let first = parser.parse_identifier()?;
+                identifier(&first).map_err(|e| ParserError::ParserError(e.message))?;
+                if parser.consume_token(&Token::Period) {
+                    let second = parser.parse_identifier()?;
+                    identifier(&second).map_err(|e| ParserError::ParserError(e.message))?;
+                    Ok(Expr::CompoundIdentifier(vec![first, second]))
+                } else {
+                    Ok(Expr::Identifier(first))
+                }
+            })());
         }
         Some((|| {
             let name = ObjectName::from(vec![parser.parse_identifier()?]);
             parser.expect_token(&Token::LParen)?;
-            let distinct = parser.parse_keyword(Keyword::DISTINCT);
+            let distinct = matches!(parser.peek_token().token, Token::Word(ref word)
+                if word.quote_style.is_none() && equal_fold(&word.value, "DISTINCT"));
+            if distinct {
+                parser.next_token();
+            }
             let mut args = Vec::new();
             if !parser.consume_token(&Token::RParen) {
                 loop {

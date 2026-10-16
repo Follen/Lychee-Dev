@@ -17,23 +17,24 @@ mod bounded;
 mod budgeted;
 mod dependencies;
 mod history_read;
+mod read_commands;
 pub use bounded::{
     CaptureInput, DEFAULT_CAPTURE_BYTES, MAX_CAPTURE_BYTES, VerifiedBlob, commit_capture_bounded,
     commit_capture_bounded_with_check, commit_verified_capture, open_verified_blob_bounded,
     open_verified_blob_bounded_optional_with_check, open_verified_blob_bounded_with_check,
-    publish_blob_bounded, publish_blob_bounded_with_check,
-    publish_blob_reader_bounded, publish_blob_reader_bounded_with_check,
-    publish_blob_stream_bounded_with_check, read_blob_bounded,
-    read_blob_bounded_optional_with_check, read_blob_bounded_with_check, verify_blob_bounded,
+    publish_blob_bounded, publish_blob_bounded_with_check, publish_blob_reader_bounded,
+    publish_blob_reader_bounded_with_check, publish_blob_stream_bounded_with_check,
+    read_blob_bounded, read_blob_bounded_optional_with_check, read_blob_bounded_with_check,
+    verify_blob_bounded,
 };
 pub use budgeted::{
     CaptureAccounting, CaptureHeader, commit_capture_budgeted, commit_capture_budgeted_referencing,
     commit_capture_budgeted_with_dependencies, commit_verified_capture_budgeted,
 };
-pub(crate) use dependencies::{decode_workspace_identity, decode_workspace_identity_with_check};
 pub use dependencies::{
     GoCaptureDecode, GoSignedInteger, GoTimestamp, normalize_go_json_strings, parse_go_timestamp,
 };
+pub(crate) use dependencies::{decode_workspace_identity, decode_workspace_identity_with_check};
 pub use history_read::fetch_capture_controlled;
 pub fn blob_path(home: &Path, digest: &str) -> Result<PathBuf> {
     if !valid_digest(digest, 64) {
@@ -168,6 +169,12 @@ pub fn commands() -> &'static [&'static str] {
     ]
 }
 pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
+    if matches!(
+        inv.command.as_str(),
+        "evidence show" | "evidence verify" | "evidence list"
+    ) {
+        return read_commands::dispatch(inv);
+    }
     workspace::open(&inv.home)?;
     match inv.command.as_str() {
         "evidence remove" => Ok(Outcome::new(remove_capture_controlled(
@@ -175,17 +182,6 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
             inv.argument()?,
             &inv.control,
         )?)),
-        "evidence show" => Ok(Outcome::new(read_capture(&inv.home, inv.argument()?)?)),
-        "evidence verify" => {
-            let value = read_capture(&inv.home, inv.argument()?)?;
-            verify_blob_bounded(&inv.home, &value["blob"], MAX_CAPTURE_BYTES, &inv.control)?;
-            Ok(Outcome::new(json!({"capture":value,"verified":true})))
-        }
-        "evidence list" => {
-            let limit = inv.usize_flag("--limit", 100, 1, 1000)?;
-            let values: Vec<Value> = Metadata::open(&inv.home, false)?.list("capture/", limit)?;
-            Ok(Outcome::new(json!({"captures":values})))
-        }
         "evidence keep" => {
             let value = read_capture(&inv.home, inv.argument()?)?;
             let mut metadata = Metadata::open(&inv.home, true)?;

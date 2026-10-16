@@ -1,4 +1,4 @@
-<!-- Current candidate: production Emmy recipe is unmodified upstream (848 files, zero patches); owned Source query and 43 diagnostic entries are wired. Current product compilation and complete behavioral/resource parity remain NOT_RUN. -->
+<!-- Current candidate: production Emmy recipe is unmodified upstream (848 files, zero patches); owned Source query and 43 diagnostic entries are wired. The first zero-patch product compilation failed on owned public-API adaptation; the integrated repair awaits concentrated validation. Complete behavioral/resource parity remains unaccepted. -->
 <!-- Preserve historical patched-engine test references separately. Complete known context/result-proof contracts, then run concentrated verification and the final four audit loops. -->
 <!-- Current batch: legacy addon production extras are now zero under the fixed oracle; Node 60/60 passed. Lua/Go/Rust execution and final four audit loops remain pending. -->
 # Rust migration checklist
@@ -22,23 +22,23 @@ Complete end-to-end production behavior first, then add the corresponding tests 
 
 ## Hard requirement: unmodified Emmy upstream
 
-- [ ] Inventory every remaining production hook and actual consumer, including shared ingestion, contextual inference, identity/cardinality and diagnostic receipts.
-- [ ] Execute the composed owned-session S1–S8 regressions (72 new Rust tests; 498 S2 atomic passed; S3 successor regression remains failing, with all 448 comparisons retained), implement recursive backends, and connect real consumers before removing upstream hooks; the source-only slices are independently reviewed, not production equivalence.
-- [ ] Replace all upstream source changes with owned-crate behavior through the fixed unmodified public API, preserving the complete approved XML/Lua design. No minimal-hook final exemption remains.
+- [x] Inventory and replace the historical production hook consumers in the owned implementation; the current production recipe restores the exact 848-file upstream tree with no patches. This checks source integration, not behavioral acceptance.
+- [ ] Execute the complete composed owned query/flow/call/member/type/diagnostic chain and original enhanced regressions, including all 448 selected-query comparisons. Keep historical S1–S8 failures and exact patched reference traces; current production consumers are connected, but their equivalence remains unverified.
+- [ ] Validate that the implemented owned-crate replacements preserve the complete XML/Lua behavior through the fixed unmodified public API. No minimal-hook final exemption remains; a zero-patch recipe alone does not complete acceptance.
 - [ ] Prove each replacement with full output/diagnostic/coverage/cancellation/resource differentials, then exact-lock native and full Retail cold/warm/session acceptance. Keep prior failures and transitional patches honestly identified until removed.
 
 ## Current consolidated validation queue
 
 - [ ] Validate the integrated public-miniz gzip transport with the current product lock, prefix drains, cancellation/accounting and all 233 fixed vectors; preserve the earlier 71/72 harness failure and denied rerun.
 - [ ] Complete retained Source session startup/recovery. Exact bc2 ordinary full-Retail refs/context/API now have successful runs; subsequent optimizations and the performance target are still unverified.
-- [ ] Finish the complete owned Emmy query/diagnostic/default-consumer chain and remove the remaining upstream source changes before final zero-patch acceptance.
+- [ ] Validate the connected owned Emmy query/43-diagnostic/default-consumer chain, fix actual compile and semantic failures, then prove final zero-patch acceptance with full Retail and retained-session results.
 
 ## Current tagged increment: Go 3.2.3
 
 - [x] Pin v3.2.3 tag `7a24532cf0fe294faeb96e8224797b6fe69386d5` to `3766f9cacb52e93a803a626187e2a1d54a445468`. Keep 320/321/322 source, tests and results unchanged; Rust stays 3.5.0 beta.
 - [ ] Implement G323-01–G323-06 in the [increment matrix](docs/toolkit/rust-go-3.2.3-increment.md): admission capacity, adaptive Windows memory/scratch, shared consumers, compact records, IN selection and Skill/oracle integration.
-- [ ] Execute the reviewed R23.1 adaptive/admission foundation (26 new Rust tests), connect real default query consumers and exact memoryBudget output; foundation composition alone does not complete G323-01–03.
-- [ ] Map fixed Go323 tests and run exact-candidate local/Windows/independent Data usage checks. Current fixed-cost Rust candidates are prior implementation evidence, not new adaptive acceptance.
+- [ ] Validate the implemented adaptive/admission policy and connected local/CDN/effective/asset default consumers with exact memoryBudget output; source integration alone does not complete G323-01–03.
+- [ ] Map fixed Go323 tests and run exact-candidate local/Windows/independent Data usage checks. Prior fixed-cost Rust candidates remain historical evidence, not new adaptive acceptance.
 
 - [ ] Execute compact-record R2 (11 new Rust tests plus existing WDC regressions); verify actual Go323 rows, resource outputs and memory, not just static capacity arithmetic.
 - [ ] Execute default remote asset export and existing local image/output regressions, including committed-error CLI context; finish local adaptive consumers and legacy inner close boundaries.
@@ -86,7 +86,7 @@ This is an execution view, not a second evidence authority. A component being im
 - [ ] Obtain terminal Windows evidence for each new frozen candidate; verify selected Rust test groups execute nonzero matching tests and preserve failures. Early describe failure must not short-circuit unrelated product groups.
 - [ ] Retain the actual historical 363-run 214/214 fixed-Go formal Lua/addon result; rerun on the final candidate and finish the three retained Go host bridges plus remaining bootstrap/input_mailbox/focus boundaries. Current same-named legacy Lua tests are not evidence for Mailbox v1.
 - [ ] Migrate valuable legacy native_e2e installation/transaction/unknown-result tests to the formal protocol before removing their extra addon/TOC consumers.
-- [ ] Audit dynamic TOC, build/include, tool, package, feature and test consumers before removing 21 extra addon files, optical/WGC/LuaLS/old protocol branches or superseded guidance.
+- [ ] Verify the implemented retirement of 21 extra addon files and migrated current consumers in final package/Lua tests; independently inspect remaining optical/WGC/LuaLS/old-protocol dynamic consumers before any further removal.
 - [ ] Finish corresponding-source, npm install/upgrade/uninstall/restore, official addon-only package closure and exact final candidate validation.
 - [ ] Run independent Source and Skill quality acceptance against actual CLI outputs; do not replace semantic evidence with checker-test counts.
 

@@ -3,87 +3,116 @@
 //! Go 3.2.3 completes each expression query on each evaluation.
 use super::*;
 
-/// Bound total compiled syntax after removing the old 1024-column/group
-/// caps. This is a conservative structural admission, not Go work accounting.
+/// Go inspect() counts logical retrieval, relation and expression nodes. The
+/// Rust compound wrapper is synthetic; its branches model a right-linked Go
+/// UNION chain and its tail expressions belong to that chain's last query.
 pub(super) fn validate_nodes(program: &Program) -> Result<()> {
     enum Node<'a> {
         Query(&'a Program),
         Term(&'a Term),
+        Leaf,
     }
-    let mut pending = vec![Node::Query(program)];
+    let mut pending = vec![(Node::Query(program), 1usize)];
     let mut count = 0usize;
-    while let Some(node) = pending.pop() {
+    while let Some((node, depth)) = pending.pop() {
+        if depth > 128 {
+            return Err(budget());
+        }
+        if let Node::Query(query) = &node {
+            if !query.branches.is_empty() {
+                for (_, body) in &query.bindings {
+                    pending.push((Node::Query(body), depth + 1));
+                }
+                for (index, branch) in query.branches.iter().enumerate() {
+                    pending.push((Node::Query(branch), depth + index));
+                }
+                let tail = depth + query.branches.len();
+                pending.extend(
+                    query
+                        .order
+                        .iter()
+                        .map(|(term, _, _)| (Node::Term(term), tail)),
+                );
+                pending.extend(
+                    query
+                        .limit
+                        .iter()
+                        .chain(query.offset.iter())
+                        .map(|term| (Node::Term(term), tail)),
+                );
+                continue;
+            }
+        }
         count += 1;
         if count > 32768 {
             return Err(budget());
         }
+        let next = depth + 1;
         match node {
             Node::Query(query) => {
-                // Physical/derived relation nodes and wildcard projections.
-                if query.branches.is_empty() {
-                    count += 1
-                        + query.joins.len()
-                        + query.projection.iter().filter(|p| p.expr.is_none()).count();
-                } else {
-                    // Rust's synthetic compound wrapper is not a Go retrieval;
-                    // the actual branches carry those query/relation nodes.
-                    count -= 1;
-                }
+                pending.push((Node::Leaf, next)); // primary relation
+                pending.extend(
+                    query
+                        .projection
+                        .iter()
+                        .filter(|p| p.expr.is_none())
+                        .map(|_| (Node::Leaf, next)),
+                );
                 for (_, body) in &query.bindings {
-                    pending.push(Node::Query(body));
-                }
-                for body in &query.branches {
-                    pending.push(Node::Query(body));
+                    pending.push((Node::Query(body), next));
                 }
                 if let Some(body) = &query.derived {
-                    pending.push(Node::Query(body));
+                    pending.push((Node::Query(body), next + 1));
                 }
                 for link in &query.joins {
+                    pending.push((Node::Leaf, next));
                     if let Some(body) = &link.derived {
-                        pending.push(Node::Query(body));
+                        pending.push((Node::Query(body), next + 1));
                     }
                 }
-                pending.extend(query.terms().map(Node::Term));
+                pending.extend(query.terms().map(|term| (Node::Term(term), next)));
             }
             Node::Term(term) => match term {
                 Term::ScalarSubquery(query) | Term::Exists(query) => {
-                    pending.push(Node::Query(query));
+                    pending.push((Node::Query(query), next))
                 }
                 Term::InSubquery(input, query, _) => {
-                    pending.push(Node::Query(query));
-                    pending.push(Node::Term(input));
+                    pending.push((Node::Query(query), next));
+                    pending.push((Node::Term(input), next));
                 }
                 Term::Unary(_, t) | Term::NullTest(t, _) | Term::Cast(t, _) => {
-                    pending.push(Node::Term(t))
+                    pending.push((Node::Term(t), next))
                 }
                 Term::Binary(a, _, b) | Term::Like(a, b, _) => {
-                    pending.push(Node::Term(a));
-                    pending.push(Node::Term(b));
+                    pending.push((Node::Term(a), next));
+                    pending.push((Node::Term(b), next));
                 }
                 Term::Between(a, b, c, _) => {
-                    pending.push(Node::Term(a));
-                    pending.push(Node::Term(b));
-                    pending.push(Node::Term(c));
+                    pending.push((Node::Term(a), next));
+                    pending.push((Node::Term(b), next));
+                    pending.push((Node::Term(c), next));
                 }
                 Term::In(t, args, _) => {
-                    pending.push(Node::Term(t));
-                    pending.extend(args.iter().map(Node::Term));
+                    pending.push((Node::Term(t), next));
+                    pending.extend(args.iter().map(|term| (Node::Term(term), next)));
                 }
                 Term::Call(_, args, _) | Term::Aggregate(_, args, _) => {
-                    pending.extend(args.iter().map(Node::Term))
+                    pending.extend(args.iter().map(|term| (Node::Term(term), next)))
                 }
                 Term::Case(base, cases, other) => {
-                    pending.extend(base.iter().chain(other.iter()).map(|t| Node::Term(t)));
+                    pending.extend(
+                        base.iter()
+                            .chain(other.iter())
+                            .map(|t| (Node::Term(t), next)),
+                    );
                     for (a, b) in cases {
-                        pending.push(Node::Term(a));
-                        pending.push(Node::Term(b));
+                        pending.push((Node::Term(a), next));
+                        pending.push((Node::Term(b), next));
                     }
                 }
                 _ => {}
             },
-        }
-        if count.checked_add(pending.len()).is_none_or(|n| n > 32768) {
-            return Err(budget());
+            Node::Leaf => {}
         }
     }
     Ok(())

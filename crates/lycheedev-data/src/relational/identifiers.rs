@@ -67,7 +67,7 @@ pub(crate) struct SourceTableUse<'a> {
 }
 fn identifier_key(value: &str) -> String {
     use sqlparser::dialect::Dialect;
-    let dialect = GenericDialect {};
+    let dialect = syntax::QueryDialect;
     let mut chars = value.chars();
     if chars.next().is_some_and(|c| dialect.is_identifier_start(c))
         && chars.all(|c| dialect.is_identifier_part(c))
@@ -101,17 +101,14 @@ impl RelationName {
             .0
             .iter()
             .map(|part| match part {
-                ObjectNamePart::Identifier(name) => Ok(name.value.clone()),
+                ObjectNamePart::Identifier(name) => Ok(syntax::identifier(name)?.to_owned()),
                 _ => Err(unsupported()),
             })
             .collect::<Result<Vec<_>>>()?;
         Self::from_parts(parts)
     }
     fn from_parts(mut parts: Vec<String>) -> Result<Self> {
-        if !(1..=2).contains(&parts.len())
-            || parts
-                .iter()
-                .any(|s| s.is_empty() || s.len() > 512 || s.contains('\0'))
+        if !(1..=2).contains(&parts.len()) || parts.iter().any(|s| s.is_empty() || s.contains('\0'))
         {
             return Err(binding());
         }
@@ -126,7 +123,7 @@ impl RelationName {
             return Self::from_parts(vec![key.to_owned()]);
         }
         use sqlparser::tokenizer::{Token, Tokenizer};
-        let tokens = Tokenizer::new(&GenericDialect {}, key)
+        let tokens = Tokenizer::new(&syntax::QueryDialect, key)
             .tokenize()
             .map_err(|_| binding())?;
         let tokens: Vec<_> = tokens

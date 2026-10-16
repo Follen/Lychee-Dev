@@ -1040,20 +1040,31 @@ mod compatibility_tests {
     }
 }
 
-// Preserve the Go signed wire representation through manifest authentication.
-// The blob reader, not the manifest decoder, rejects a negative byte length.
-pub(super) fn decode_historical_capture(
+// Keep the signed historical wire representation through inspection. Show and
+// list may return a negative BlobRef.Bytes; only a blob-consuming command rejects it.
+pub(super) fn decode_capture_projection(
+    raw: &[u8],
+    control: &OperationControl,
+) -> Result<GoCaptureDecode> {
+    control.check()?;
+    let syntax = crate::raw_json::validate_with_check(raw, || control.check())?;
+    if syntax.is_err() {
+        return crate::selection::selection_finish(
+            Err(ToolkitError::invalid("invalid capture JSON")),
+            control.check(),
+        );
+    }
+    let normalized = normalize_go_strings(raw, control)?;
+    let parsed: Result<EmbeddedCapture> = serde_json::from_slice(&normalized).map_err(Into::into);
+    crate::selection::selection_finish(parsed.map(GoCaptureDecode), control.check())
+}
+pub(super) fn inspect_capture_projection(
     raw: &[u8],
     id: &str,
     control: &OperationControl,
-) -> Result<(CaptureRef, i64)> {
-    control.check()?;
-    if !crate::raw_json::is_valid(raw) {
-        return Err(ToolkitError::invalid("invalid capture JSON"));
-    }
-    let normalized = normalize_go_strings(raw, control)?;
-    let mut value: EmbeddedCapture = serde_json::from_slice(&normalized)?;
-    control.check()?;
+) -> Result<GoCaptureDecode> {
+    let decoded = decode_capture_projection(raw, control)?;
+    let value = &decoded.0;
     if value.schema != "lycheedev.capture.v1" || value.id != id || value.complete && value.truncated
     {
         return Err(ToolkitError::new(
@@ -1098,9 +1109,23 @@ pub(super) fn decode_historical_capture(
             5,
         ));
     }
+    control.check()?;
+    Ok(decoded)
+}
+impl GoCaptureDecode {
+    pub(super) fn signed_blob(&self) -> (&str, i64) {
+        (&self.0.blob.sha256, self.0.blob.bytes)
+    }
+}
+// Fetch's existing public type uses u64. Carry the original signed length
+// separately until its blob boundary; never expose that projection via show/list.
+pub(super) fn decode_historical_capture(
+    raw: &[u8],
+    id: &str,
+    control: &OperationControl,
+) -> Result<(CaptureRef, i64)> {
+    let mut value = inspect_capture_projection(raw, id, control)?.0;
     let signed_bytes = value.blob.bytes;
-    // A negative length remains carried separately until FetchCapture's blob
-    // boundary; no unsigned projection is returned to its public consumer.
     value.blob.bytes = signed_bytes.max(0);
     let capture = value.into_capture()?;
     control.check()?;
