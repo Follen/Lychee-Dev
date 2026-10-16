@@ -280,7 +280,7 @@ pub fn penalty(role: &str) -> i32 {
     }
 }
 pub(crate) fn fingerprint(pin: &SourcePin) -> String {
-    storage::sha256(format!("rust-index-v10\0facts-layout-v9-go323-observed\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}",pin.repository,pin.product,pin.exact_commit,pin.parser_revision).as_bytes())
+    storage::sha256(format!("rust-index-v11\0facts-layout-v10-go323-xml-lexical\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}",pin.repository,pin.product,pin.exact_commit,pin.parser_revision).as_bytes())
 }
 pub fn build(home: &Path, pin: &SourcePin) -> Result<Index> {
     build_with_control(home, pin, &Default::default())
@@ -466,7 +466,7 @@ pub fn is_ready_with_control(
 fn facts_cache_path(home: &Path, path: &str, sha256: &str) -> PathBuf {
     let key = storage::sha256(
         format!(
-            "facts-layout-v9-go323-observed\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0{path}\0{sha256}"
+            "facts-layout-v10-go323-xml-lexical\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0{path}\0{sha256}"
         ).as_bytes(),
     );
     home.join("cache/source-facts-rust")
@@ -512,7 +512,7 @@ fn document_facts_profiled(
             .read(key, control)?
             .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok());
         if let Some(envelope) = envelope
-            && envelope["schema"] == "lycheedev.source-facts.rust.v9"
+            && envelope["schema"] == "lycheedev.source-facts.rust.v10"
             && envelope["inputSHA256"] == sha256
             && envelope["factsSHA256"] == storage::sha256(&serde_json::to_vec(&envelope["facts"])?)
             && let Ok(parsed) = serde_json::from_value(envelope["facts"].clone())
@@ -543,7 +543,7 @@ fn document_facts_profiled(
     let serialize_phase = profile.map(|p| p.span(Phase::FactsSerialize));
     let f = serde_json::to_value(&parsed)?;
     let envelope = serde_json::to_vec(
-        &json!({"schema":"lycheedev.source-facts.rust.v9","inputSHA256":sha256,"factsSHA256":storage::sha256(&serde_json::to_vec(&f)?),"facts":f}),
+        &json!({"schema":"lycheedev.source-facts.rust.v10","inputSHA256":sha256,"factsSHA256":storage::sha256(&serde_json::to_vec(&f)?),"facts":f}),
     )?;
     if envelope.len() > MAX_FACT_CACHE_BYTES {
         return Err(ToolkitError::new(
@@ -1243,6 +1243,67 @@ mod facts_cache_tests {
             Path::new("fixture-home")
                 .join("cache/source-facts-rust")
                 .join(format!("{previous_file}.json"))
+        );
+    }
+
+    #[test]
+    fn xml_lexical_contract_invalidates_previous_index_and_file_facts() {
+        let pin = SourcePin {
+            repository: "elvui".into(),
+            product: "main".into(),
+            requested_ref: "fixture".into(),
+            exact_commit: "a".repeat(40),
+            parser_revision: git::PARSER.into(),
+        };
+        let previous = storage::sha256(format!("rust-index-v10\0facts-layout-v9-go323-observed\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}", pin.repository, pin.product, pin.exact_commit, pin.parser_revision).as_bytes());
+        assert_ne!(fingerprint(&pin), previous);
+        let input = storage::sha256(b"<Ui></Ui junk>");
+        let previous_file = storage::sha256(format!("facts-layout-v9-go323-observed\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0Example.xml\0{input}").as_bytes());
+        assert_ne!(
+            facts_cache_path(Path::new("fixture-home"), "Example.xml", &input),
+            Path::new("fixture-home")
+                .join("cache/source-facts-rust")
+                .join(format!("{previous_file}.json"))
+        );
+    }
+
+    #[test]
+    fn xml_lexical_contract_rebuilds_previous_schema_even_with_valid_digests() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let raw = b"<Ui><Frame name=\"Before\"/></Ui junk>";
+        let digest = storage::sha256(raw);
+        let (expected, hit) =
+            document_facts(&fixture.home, "Example.xml", raw, &digest, &control).unwrap();
+        assert!(!hit);
+        assert_eq!(expected.declarations.len(), 1);
+        assert_eq!(
+            expected.diagnostics[0].message,
+            "XML syntax error on line 1: invalid characters between </Ui and >"
+        );
+        let path = facts_cache_path(&fixture.home, "Example.xml", &digest);
+        let original: Value = storage::read_json(&path).unwrap();
+        let mut obsolete = original.clone();
+        obsolete["schema"] = json!("lycheedev.source-facts.rust.v9");
+        obsolete["facts"]["diagnostics"][0]["message"] =
+            json!("XML syntax error on line 1: element <Ui> closed by </Ui junk>");
+        obsolete["factsSHA256"] =
+            json!(storage::sha256(&serde_json::to_vec(&obsolete["facts"]).unwrap()));
+        storage::atomic_json(&path, &obsolete).unwrap();
+        let (rebuilt, hit) =
+            document_facts(&fixture.home, "Example.xml", raw, &digest, &control).unwrap();
+        assert!(!hit);
+        assert_eq!(
+            serde_json::to_value(&rebuilt).unwrap(),
+            serde_json::to_value(&expected).unwrap()
+        );
+        assert_eq!(storage::read_json::<Value>(&path).unwrap(), original);
+        let (warm, hit) =
+            document_facts(&fixture.home, "Example.xml", raw, &digest, &control).unwrap();
+        assert!(hit);
+        assert_eq!(
+            serde_json::to_value(&warm).unwrap(),
+            serde_json::to_value(&expected).unwrap()
         );
     }
 

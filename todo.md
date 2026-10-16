@@ -29,6 +29,8 @@ Complete end-to-end production behavior first, then add the corresponding tests 
 
 - [ ] Validate the implemented retained ownership fix: streaming digest, one immutable Graph control tree shared across direction-specific analysis and retained answers, full-value expansion after scope Graph release, compact declaration lookups and reused authenticated XML originals. Run all 18 new tests with existing native/native_research groups, then the complete optimized retained request/warm lifecycle under the original 2 GiB/90-second limits. Keep d75 second-scope failure and all prior EOF evidence; syntax/Node success is not runtime memory acceptance.
 
+- [ ] Execute the independent 32-case public XML lexical diagnostic supplement and unchanged 52-case corpus against fixed Go1.27.1/Go323, with complete Facts/error/order comparison and six Rust regressions including private cache invalidation. Preserve XML tolerances; non-ASCII name ranges and other diagnostics remain unverified rather than tightened by specification.
+
 ## 0. Documentation scope
 
 - [x] Freeze Go v3.2.0 at 3057a9666ab078270b63c7f06de748069b0d1f4b and record Rust starting HEAD.

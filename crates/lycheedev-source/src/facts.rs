@@ -339,6 +339,79 @@ fn xml_name(name: &str) -> (&str, &str) {
         _ => ("", name),
     }
 }
+// The fixed Go decoder rejects these lexical failures before it compares end
+// tags or returns a token to scanMarkup. quick-xml either accepts the bytes or
+// reports a later error. Return the Go consumed offset, not the event's end.
+// Keep this separate from the native XML profile: that profile has its own
+// grammar and is not the public Go scanner contract.
+fn public_xml_token_failure(raw: &[u8]) -> Option<(String, usize)> {
+    if raw.starts_with(b"<!-") {
+        return match raw.get(3) {
+            None => Some(("unexpected EOF".into(), raw.len())),
+            Some(b'-') => None,
+            Some(_) => Some(("invalid sequence <!- not part of <!--".into(), 4)),
+        };
+    }
+    if raw.starts_with(b"<![") {
+        for (index, expected) in b"CDATA[".iter().enumerate() {
+            match raw.get(3 + index) {
+                None => return Some(("unexpected EOF".into(), raw.len())),
+                Some(actual) if actual != expected => {
+                    return Some(("invalid <![ sequence".into(), 4 + index));
+                }
+                Some(_) => {}
+            }
+        }
+        return None;
+    }
+    if !raw.starts_with(b"</") {
+        return None;
+    }
+    // Go readName consumes every name byte before validating the name, and
+    // unreads the delimiter. An unterminated name therefore reports EOF even
+    // when its first character would otherwise be invalid.
+    let mut end = 2;
+    while raw.get(end).is_some_and(|byte| {
+        byte.is_ascii_alphanumeric()
+            || matches!(*byte, b'_' | b':' | b'.' | b'-')
+            || *byte >= 128
+    }) {
+        end += 1;
+    }
+    // Go's Unicode name tables differ from the native XML 1.0 Fifth Edition
+    // profile. Do not silently impose that profile on this public path. Those
+    // names retain the existing parser until independently compared.
+    if !raw[2..end].is_ascii() {
+        return None;
+    }
+    if end == raw.len() {
+        return Some(("unexpected EOF".into(), end));
+    }
+    if end == 2 {
+        return Some(("expected element name after </".into(), end));
+    }
+    let name = std::str::from_utf8(&raw[2..end]).expect("ASCII end name");
+    if !raw[2].is_ascii_alphabetic() && !matches!(raw[2], b'_' | b':') {
+        return Some((format!("invalid XML name: {name}"), end));
+    }
+    if name.bytes().filter(|byte| *byte == b':').count() > 1 {
+        return Some(("expected element name after </".into(), end));
+    }
+    while raw
+        .get(end)
+        .is_some_and(|byte| matches!(*byte, b' ' | b'\t' | b'\r' | b'\n'))
+    {
+        end += 1;
+    }
+    match raw.get(end) {
+        None => Some(("unexpected EOF".into(), end)),
+        Some(b'>') => None,
+        Some(_) => Some((
+            format!("invalid characters between </{} and >", xml_name(name).1),
+            end + 1,
+        )),
+    }
+}
 fn xml_reference_end(raw: &[u8]) -> usize {
     let mut at = 1; // The initial & belongs to the error token.
     if raw.get(at) == Some(&b'#') {
@@ -609,6 +682,10 @@ fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) ->
                 error_offset = Some(at + consumed);
                 return Err(message);
             }
+            if let Some((message, consumed)) = public_xml_token_failure(&raw[at..]) {
+                error_offset = Some(at + consumed);
+                return Err(message);
+            }
             if raw.get(at..at + 4) == Some(b"<!--") {
                 if let Some(bad) = raw[at + 4..]
                     .windows(3)
@@ -801,8 +878,20 @@ mod tests {
     use super::*;
     #[test]
     fn fixed_go_malformed_observations() {
+        fixed_go_facts_observations(
+            include_str!("../../../tests/rust-parity/source-facts-malformed/cases.json"),
+            "LYCHEEDEV_SOURCE_FACTS_GO_REPORT",
+        );
+    }
+    #[test]
+    fn fixed_go_xml_diagnostic_observations() {
+        fixed_go_facts_observations(
+            include_str!("../../../tests/rust-parity/source-facts-xml-diagnostics/cases.json"),
+            "LYCHEEDEV_SOURCE_FACTS_XML_GO_REPORT",
+        );
+    }
+    fn fixed_go_facts_observations(fixture: &str, report_variable: &str) {
         use sha2::{Digest, Sha256};
-        let fixture = include_str!("../../../tests/rust-parity/source-facts-malformed/cases.json");
         let input: serde_json::Value = serde_json::from_str(fixture).unwrap();
         let mut observations = Vec::new();
         for case in input["cases"].as_array().unwrap() {
@@ -819,7 +908,7 @@ mod tests {
             println!("SOURCE_FACT_ORACLE_JSON {row}");
             observations.push(row);
         }
-        if let Some(path) = std::env::var_os("LYCHEEDEV_SOURCE_FACTS_GO_REPORT") {
+        if let Some(path) = std::env::var_os(report_variable) {
             let report: serde_json::Value =
                 serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
             assert_eq!(
@@ -840,6 +929,78 @@ mod tests {
         } else {
             println!(
                 "SOURCE_FACT_ORACLE_NOT_COMPARED: no sealed fixed-Go report supplied; observations only"
+            );
+        }
+    }
+    #[test]
+    fn public_xml_bang_markers_keep_first_consumed_failure() {
+        for (raw, expected, consumed) in [
+            ("<!-", "unexpected EOF", 3),
+            ("<!-x>", "invalid sequence <!- not part of <!--", 4),
+            ("<!-\n-->", "invalid sequence <!- not part of <!--", 4),
+            ("<![", "unexpected EOF", 3),
+            ("<![CDA", "unexpected EOF", 6),
+            ("<![CDATx[x]]>", "invalid <![ sequence", 8),
+            ("<![CD\nATA[x]]>", "invalid <![ sequence", 6),
+        ] {
+            assert_eq!(
+                public_xml_token_failure(raw.as_bytes()),
+                Some((expected.into(), consumed)),
+                "{raw:?}"
+            );
+        }
+        for raw in ["<!-- valid -->", "<![CDATA[valid]]>", "<!anything>"] {
+            assert_eq!(public_xml_token_failure(raw.as_bytes()), None, "{raw:?}");
+        }
+    }
+    #[test]
+    fn public_xml_end_syntax_precedes_mismatch_and_preserves_go_tolerance() {
+        for (raw, expected, consumed) in [
+            ("</>", "expected element name after </", 2),
+            ("</\nUi>", "expected element name after </", 2),
+            ("</", "unexpected EOF", 2),
+            ("</1Ui", "unexpected EOF", 5),
+            ("</1Ui>", "invalid XML name: 1Ui", 5),
+            ("</-Ui>", "invalid XML name: -Ui", 5),
+            ("</a:b:c>", "expected element name after </", 7),
+            ("</Ui junk>", "invalid characters between </Ui and >", 6),
+            ("</x:Ui/>", "invalid characters between </Ui and >", 7),
+            ("</Ui \n", "unexpected EOF", 6),
+        ] {
+            assert_eq!(
+                public_xml_token_failure(raw.as_bytes()),
+                Some((expected.into(), consumed)),
+                "{raw:?}"
+            );
+        }
+        for raw in ["</Ui>", "</Ui \n >", "</:Ui>", "</Ui:>", "</x:Ui>"] {
+            assert_eq!(public_xml_token_failure(raw.as_bytes()), None, "{raw:?}");
+        }
+        // A different native XML-name profile must not get substituted here.
+        assert_eq!(public_xml_token_failure("</界 junk>".as_bytes()), None);
+    }
+    #[test]
+    fn public_xml_lexical_failures_keep_prior_facts_and_distinct_diagnostic_lines() {
+        for (suffix, message, message_line) in [
+            ("<!-\nx>", "invalid sequence <!- not part of <!--", 4),
+            ("<![CD\nATA[x]]>", "invalid <![ sequence", 4),
+            ("</Ui\n junk>", "invalid characters between </Ui and >", 4),
+            ("</\nUi>", "expected element name after </", 3),
+        ] {
+            let raw = format!(
+                "<Ui>\n<Frame name=\"Before\" inherits=\"Base\"/><Include file=\"Earlier.xml\"/>\n{suffix}\n<Frame name=\"After\"/>"
+            );
+            let actual = serde_json::to_value(xml(raw.as_bytes())).unwrap();
+            assert_eq!(
+                actual,
+                serde_json::json!({
+                    "declarations":[{"name":"Before","category":"xml-Frame","line":2,"endLine":2}],
+                    "relationships":[{"from":"Before","to":"Base","category":"xml-inherits","confidence":"exact","line":2}],
+                    "loads":[{"path":"Earlier.xml","line":2,"kind":"include"}],
+                    "headers":[],
+                    "diagnostics":[{"message":format!("XML syntax error on line {message_line}: {message}"),"line":3}]
+                }),
+                "{raw:?}"
             );
         }
     }

@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 22:39 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`6ce6451f6d7f4b8e54d37a195d3465dede59d664`；当前f088优化4036完整等价，retained仍失败；c924仅增加有界细阶段定位，等待新候选验证；各旧产物与runner身份独立保留。实现进行中，尚未完成全量验收。
+更新：2026-10-16 22:49 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`76d540aae28219bde5576c2745337aab6eccedc2`；当前f088优化4036完整等价，retained仍失败；c924仅增加有界细阶段定位，等待新候选验证；各旧产物与runner身份独立保留。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -77,9 +77,11 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 - **6ed按需原文首轮编译失败已最小修复，待复验**：[本机真实错误](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6225713150)是新batch测试未限定`storage::sha256`模块，E0433；后继仅改为`lycheedev_core::storage::sha256`，原断言不变。新增31项、52差分及优化profile均NOT_RUN，不能将静态审当编译通过。d75细阶段已确认同首请求第二轮References停在digest/answer装配前；第一轮完整query_projected成功。原retained失败仍保留，正在据真实持有图修复。
 
-- **8ee按需原文真实69通过1失败2原忽略**：[正式结果](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6225952545)all-target与52/52差分通过，新增31项中30通过；Git需求流17项均真实Windows通过。唯一fallback测试将literal写在单行function的signature，默认搜索实际命中结构候选，limit1只读1文档正确，未进入它想验证的4文档扫描。当前仅改多行body并断言结构字段不含token/结果matchedBy=body_text，保4文档、完整结果、cursor与warm断言；修后NOT_RUN。原batch子串filter也匹配git_batch，本批显式skip已独立执行的Git组，不改变任何测试断言。本轮未构建优化产物或跑profile。
+- **8ee按需原文真实69通过1失败2原忽略**：[正式结果](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6225952545)all-target与52/52差分通过，新增31项中30通过；Git需求流17项均真实Windows通过。唯一fallback测试将literal写在单行function的signature，默认搜索实际命中结构候选，limit1只读1文档正确，未进入它想验证的4文档扫描。当前仅改多行body并断言结构字段不含token/结果matchedBy=body_text，保4文档、完整结果、cursor与warm断言；[6ce实际完整facts_cache19/0/0及all-target通过](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6226082277)，body-only/matchedBy、4文档、cursor与禁镜像warm均实际命中，关闭该前置缺口；优化性能仍未测。原batch子串filter也匹配git_batch，本批显式skip已独立执行的Git组，不改变任何测试断言。本轮未构建优化产物或跑profile。
 
 - **retained真实峰值持有链修复已实现，尚未实测**：[d75操作级证据](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6225634434)同首请求第一scope完整query_projected，第二scope停在References digest/answer装配前；61条完整prefix无证据限额/截断，不能从cleanup后退出码推断自然OOM。当前摘要直接流式SHA，不分配整串；同一冻结Graph的完整graphControl由懒Arc共享，各方向metadata独立，References answer、retained projection及跨scope证据保共享至所有Graph释放后再展开公共Value。大于1MiB不保留/近预算重算仍保原费用与完整控制证据，32MiB输出计数不减。声明lookup改排序usize索引保重复键最后值，XML仅复用已有且完全同字节的raw Arc，未共享项保原String。新增18 Rust（digest3/shared2/syntax6/projection4/XML3）NOT_RUN；16文件语法解析、Node81/81、diff检查通过；原版848逐文件认证无变化。不声称本次已压进2GiB或完整Retail成功。
+
+- **公开XML诊断有限后继已实现，真实差分待测**：按固定Go1.27.1 decoder的消费顺序补坏comment/CDATA前缀、ASCII结束名与尾部语法，在栈匹配前返回原错误并保之前Facts；无属性空格、重复属性、空namespace宽容不加严。私有Facts v10/index v11使旧畸形cache失效，公共schema/parser及native XML不变。[独立32输入与命令](tests/rust-parity/source-facts-xml-diagnostics/README.md)保旧52/Go overlay原字节，新增6 Rust及32完整Go差分NOT_RUN；Node2/2、两源语法/diff检查通过。Unicode名称/其他诊断仍待实证，不宣称全XML已闭合。先完成当前76d测试，再按固定后继树一次跑新32+旧52和6回归，不能用未匹配候选旧EXE验证。
 
 ## 4. 进入最终五阶段前的有限收口
 
@@ -102,7 +104,7 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 本机测试通道已正常恢复，原unknown历史保留，无需再次apply或重启。仅云端实现，用户指定本机线程负责固定SHA测试并将报告写回同一PR。普通push不自动切换其正在测试的树；不另排重复长CI。
 
-当前本机按固定树逐批验证：d75细定位已结束，8ee按需原文31新增30通过1测试输入失败，52/52与all-target通过；6ce只修真实fallback测试前提并排除重复Git filter，正在等待其结果。接续本批retained共享/索引/XML所有权完整实现，先all-target，再现native::与native_research::全组（包含18新增与旧诊断/引用测试），通过后一次构建新优化CLI、认证候选，跑完整retained首请求/暖态/实际回收及同机性能。未完成当前树前不切后继，不拿旧EXE冒新内存实现。
+当前本机按固定树逐批验证：d75细定位已结束，8ee按需原文31新增30通过1测试输入失败，52/52与all-target通过；6ce真实完整facts_cache19/0/0及all-target通过，已关闭fallback测试前提缺口。接续本批retained共享/索引/XML所有权完整实现，先all-target，再现native::与native_research::全组（包含18新增与旧诊断/引用测试），通过后一次构建新优化CLI、认证候选，跑完整retained首请求/暖态/实际回收及同机性能。未完成当前树前不切后继，不拿旧EXE冒新内存实现。
 
 - 所有Rust检查沿仓库受控 `tools/rust-cargo.mjs`、固定工具链和原owner/cache合同，先all-target编译，再受影响组；默认线程栈不加大。完整SQL299及7db预算组已过，不机械重跑历史失败树。
 - 正式Lua与9桥使用[现有入口](tools/rust-formal-lua-bridge.mjs)，每次新输出目录；原runtime与CLI封存产物必须通过全部身份验证，不能覆盖旧失败目录。当前正式Go323220/9已有实证。
