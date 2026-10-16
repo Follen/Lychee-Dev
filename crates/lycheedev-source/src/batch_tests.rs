@@ -804,6 +804,6 @@ fn cold_context_multiple_sites_borrow_each_original_once() {
     assert!(snippets.iter().all(|snippet| snippet["path"] == "a.lua"));
     assert_eq!(reads, vec![("a.lua".to_owned(), true)], "cold bytes stay borrowed and per-path memoized");
     for text in ["## Interface: 120100\na.lua\n", "function Unicode()\n return '汉字🙂abcdef'\nend\n"] {
-        assert!(!f.inv.home.join("cache/source-originals-rust").join(storage::sha256(text.as_bytes())).exists());
+        assert!(!f.inv.home.join("cache/source-originals-rust").join(lycheedev_core::storage::sha256(text.as_bytes())).exists());
     }
 }

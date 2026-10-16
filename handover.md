@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 22:04 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`d75defcf8ddc1444c42ae416262f97e73893e79a`；当前f088优化4036完整等价，retained仍失败；c924仅增加有界细阶段定位，等待新候选验证；各旧产物与runner身份独立保留。实现进行中，尚未完成全量验收。
+更新：2026-10-16 22:20 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`6ed20a0d4928b679cdfd94383cff41a1ac2d2111`；当前f088优化4036完整等价，retained仍失败；c924仅增加有界细阶段定位，等待新候选验证；各旧产物与runner身份独立保留。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -74,6 +74,8 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 - **c924前置111通过2失败2忽略，完整定位未运行**：[真实报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6225166479)session44通过、research67通过2失败2原fixture忽略；新增8诊断测试全部通过，all-target通过，Windows Node80通过1平台跳过。两失败已在test-only后继修正：XML命名函数fixture改从真实native Script解码/原文行映射取范围，公共XML不补错误声明；c924误复制到原reply测试的细阶段断言改回三条真实粗事件计数/字节增长验证，生产分类保持原字节。[d75正式research69通过0失败2原忽略及all-target通过](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6225451158)，原两失败逐名称已命中，关闭这两个测试前置缺口；session44与Windows Node80通过1跳过保c924原身份未重跑。c924因前置失败没有优化产物；现正在构建匹配d75的新产物进行22阶段Retail定位，尚无结果，不冒用f088。
 
 - **Source冷链按需原文完整路线已实现，Rust未测**：query image metadata改借用序列化，不再深clone被serde跳过的全文/Facts；冷构建全文move进投影并释放旧Facts，明确Some(empty)/None。index不再逐文档eager发布原文；search/context仅给实际消费文档填同一可重建cache，同路径请求内复用。缺失cache通过一个固定Git需求流逐commit/tree-edge/blob认证，单个在途请求、无后文档预取，复用现OwnedProcess/WorkerSet/retire；memo不足同进程重读，不变成4036次spawn。原文实际capacity与最多16MiB tree memo共用原256MiB额度，原bounded frame/cache scratch独立，不称全RAM界。失败收尾仍有既有CLEANUP_GRACE，不是请求延期。最终index/capture durability、祖先reparse校验、公共Facts/格式不改。新增31测试与1旧测试重命名，语法检查通过，Rust/4036/52及性能NOT_RUN。冷index原original_publish阶段现只余原asset durable支路，文档发布成本转到实际query；必须测index→precise/broad、独立cold query及warm，不能把单阶段消失冒充全流程加速。
+
+- **6ed按需原文首轮编译失败已最小修复，待复验**：[本机真实错误](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6225713150)是新batch测试未限定`storage::sha256`模块，E0433；后继仅改为`lycheedev_core::storage::sha256`，原断言不变。新增31项、52差分及优化profile均NOT_RUN，不能将静态审当编译通过。d75细阶段已确认同首请求第二轮References停在digest/answer装配前；第一轮完整query_projected成功。原retained失败仍保留，正在据真实持有图修复。
 
 ## 4. 进入最终五阶段前的有限收口
 
