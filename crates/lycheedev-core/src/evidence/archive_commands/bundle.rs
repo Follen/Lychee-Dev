@@ -117,7 +117,7 @@ fn build(
         bytes: 0,
         complete: true,
     };
-    let result = (|| {
+    let result: Result<()> = (|| {
         let metadata = read_commands::read_metadata(&inv.home, &inv.control)?;
         let captures = (|| {
             let mut used = BTreeSet::new();
