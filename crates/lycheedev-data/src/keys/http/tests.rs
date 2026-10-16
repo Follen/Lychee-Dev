@@ -1,5 +1,5 @@
 //! Scripted responses exercise the real redirect consumer and shared readers.
-//! No sockets, external endpoints, subprocesses or stalled-server runner.
+//! One bounded loopback verifies actual raw request bytes; no external endpoints or subprocesses.
 use super::*;
 use crate::resource::Cost;
 use std::{cell::RefCell, collections::VecDeque, time::Duration};
@@ -257,19 +257,124 @@ fn public_fetcher_uses_one_capped_deadline_for_all_actual_consumer_hops() {
     assert!(deadlines[0] < control.deadline());
 }
 #[test]
-fn public_fetcher_known_legal_encoded_dot_redirect_gap_remains_explicit() {
-    let next = RedirectUrl::absolute(URL).unwrap().resolve("/a/%2e/b").unwrap();
-    assert!(allowed(&next)); // Fixed Go keys CheckRedirect admits this URL.
-    assert!(next.text(false).ends_with("/a/%2e/b"));
-    let script = Script::new(vec![response(302, Some("/a/%2e/b"), b"abc".to_vec())]);
-    let (control, budget) = scope();
-    let failure = PublicFetcher.fetch_with(&script, &control, Some(&budget), control.deadline()).unwrap_err();
-    // This asserts an acknowledged incompatibility, not a passing Go parity
-    // vector: reqwest cannot yet emit this escaped-dot target unchanged.
-    assert_eq!(failure.code, "records.invalid_key_document");
-    assert_eq!(script.seen.borrow().len(), 1);
-    assert_eq!(budget.snapshot().unwrap().network_bytes, 3);
-    assert!(failure.details["transportCause"]["message"].as_str().unwrap().contains("cannot be represented"));
+fn public_fetcher_legal_encoded_dot_redirects_preserve_actual_request_bytes() {
+    use std::{
+        io::{self, Read, Write},
+        net::TcpListener,
+        thread,
+    };
+
+    struct Loopback {
+        address: String,
+        seen: RefCell<Vec<String>>,
+    }
+    impl Sender for Loopback {
+        async fn get(
+            &self,
+            url: &str,
+            policy: GetPolicy<'_>,
+            control: &OperationControl,
+            budget: Option<&Budget>,
+            deadline: Instant,
+        ) -> Result<reqwest::Response> {
+            assert!(matches!(policy.locator, LocatorPolicy::HttpsOnly));
+            assert!(matches!(policy.body, BodyPolicy::GoAutomaticGzip));
+            // Only the socket destination is substituted. The real consumer
+            // retains its pinned HTTPS authority guard, and the shared sender
+            // must emit the untouched path/query through its raw-URI route.
+            let target = url.strip_prefix("https://raw.githubusercontent.com").unwrap();
+            assert!(target.starts_with('/'));
+            self.seen.borrow_mut().push(url.to_owned());
+            transport::get_once(
+                &format!("http://{}{target}", self.address),
+                policy,
+                control,
+                budget,
+                deadline,
+            )
+            .await
+        }
+    }
+    fn serve(listener: TcpListener, location: &'static str) -> io::Result<Vec<Vec<u8>>> {
+        let mut requests = Vec::new();
+        for body in [b"abc".to_vec(), vec![b'x'; PUBLIC_BYTES]] {
+            let until = Instant::now() + Duration::from_secs(5);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                        if Instant::now() >= until {
+                            return Err(io::Error::new(io::ErrorKind::TimedOut, "missing request"));
+                        }
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => return Err(error),
+                }
+            };
+            stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+            stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                if request.len() >= 16384 {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "oversized request"));
+                }
+                let mut byte = [0];
+                stream.read_exact(&mut byte)?;
+                request.push(byte[0]);
+            }
+            let status = if requests.is_empty() {
+                format!("302 Found\r\nLocation: {location}")
+            } else {
+                "200 OK".to_owned()
+            };
+            stream.write_all(format!(
+                "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len(),
+            ).as_bytes())?;
+            stream.write_all(&body)?;
+            requests.push(request);
+        }
+        Ok(requests)
+    }
+
+    for location in ["/a/%2e/b", "/a/%2E%2E/b?x=%2f&x=+", "/a/.%2e/b?"] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let sender = Loopback {
+            address: listener.local_addr().unwrap().to_string(),
+            seen: RefCell::new(Vec::new()),
+        };
+        let peer = thread::spawn(move || serve(listener, location));
+        let (control, budget) = scope();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            PublicFetcher.fetch_with(&sender, &control, Some(&budget), control.deadline())
+        }));
+        // Join on both errors and panics before asserting the client result.
+        let requests = peer.join().unwrap();
+        let result = result.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+        assert_eq!(result.unwrap(), vec![b'x'; PUBLIC_BYTES], "{location}");
+        let requests = requests.unwrap();
+        let expected = format!("https://raw.githubusercontent.com{location}");
+        let seen = sender.seen.borrow();
+        assert_eq!(seen.len(), 2);
+        assert_eq!(seen[0].as_bytes(), URL.as_bytes());
+        assert_eq!(seen[1].as_bytes(), expected.as_bytes());
+        assert_eq!(requests.len(), 2);
+        let first_target = URL.strip_prefix("https://raw.githubusercontent.com").unwrap();
+        assert!(requests[0].starts_with(format!("GET {first_target} HTTP/1.1\r\n").as_bytes()));
+        assert!(requests[1].starts_with(format!("GET {location} HTTP/1.1\r\n").as_bytes()));
+        let redirect_headers = String::from_utf8(requests[1].clone()).unwrap();
+        let header_value = |name: &str| {
+            redirect_headers.lines().filter_map(|line| line.split_once(": "))
+                .find(|(key, _)| key.eq_ignore_ascii_case(name)).map(|(_, value)| value)
+        };
+        assert_eq!(header_value("Referer"), Some(URL));
+        assert_eq!(header_value("Accept-Encoding"), Some("gzip"));
+        assert_eq!(header_value("User-Agent"), Some("Go-http-client/1.1"));
+        let usage = budget.snapshot().unwrap();
+        assert_eq!(usage.network_requests, 2);
+        assert_eq!(usage.network_bytes, PUBLIC_BYTES as u64 + 3);
+    }
 }
 #[test]
 fn public_context_memoizes_corrected_public_fetcher_first_failure_with_all_causes() {

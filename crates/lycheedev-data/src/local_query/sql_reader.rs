@@ -22,6 +22,17 @@ impl RootContent for Root {
         &self.0
     }
 }
+fn root_limits(operation: casc::Limits) -> metadata_format::RootLimits {
+    // Fixed Go v3.2.3 readSession.prepare uses these query limits, not the
+    // generic Root parser's absolute ceilings. Matches also determines its
+    // temporary lookup reservation: 4096 * 256 bytes, not 256 MiB.
+    metadata_format::RootLimits {
+        groups: 65536,
+        matches: 4096,
+        operation,
+        ..Default::default()
+    }
+}
 struct Ready<'a> {
     index: PreparedEncoding<SharedReader<'a>>,
     root: RootIndex<Root>,
@@ -188,10 +199,7 @@ impl<'a> Reader<'a> {
         )?;
         let root = RootIndex::open(
             Root(root),
-            metadata_format::RootLimits {
-                operation: limits,
-                ..Default::default()
-            },
+            root_limits(limits),
             self.budget.clone(),
             check,
         )?;
@@ -415,6 +423,58 @@ impl<'a> Reader<'a> {
         match self.casc.take() {
             Some(source) => source.close_after(result),
             None => result,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lycheedev_core::control::OperationControl;
+
+    fn root_groups(count: usize) -> Root {
+        let mut bytes = Vec::new();
+        for _ in 0..count {
+            // Classic Root: one ID, standard content, one locale, CKey/name.
+            bytes.extend_from_slice(&1u32.to_le_bytes());
+            bytes.extend_from_slice(&0u32.to_le_bytes());
+            bytes.extend_from_slice(&2u32.to_le_bytes());
+            bytes.extend_from_slice(&7u32.to_le_bytes());
+            bytes.extend_from_slice(&[7; 16]);
+            bytes.extend_from_slice(&0u64.to_le_bytes());
+        }
+        Root(blte::Content { bytes, missing: Vec::new() })
+    }
+
+    #[test]
+    fn actual_local_reader_uses_go_session_root_limits_for_each_file_id() {
+        let limits = root_limits(casc::Limits::default());
+        assert_eq!((limits.groups, limits.matches), (65536, 4096));
+        for count in [4096, 4097] {
+            let control = OperationControl::default();
+            let budget = Arc::new(Budget::controlled(
+                Cost::defaults(), control.deadline(), control.clone(),
+            ));
+            let index = RootIndex::open(root_groups(count), limits, budget.clone(), || {
+                control.check()
+            }).unwrap();
+            let before = budget.logical_snapshot().unwrap();
+            let actual = index.lookup(7, || control.check());
+            if count == 4096 {
+                let actual = actual.unwrap();
+                assert_eq!(actual.len(), 4096);
+                assert!(actual.iter().all(|record| record.file_data_id == 7));
+            } else {
+                let error = actual.err().unwrap();
+                assert_eq!((error.code.as_str(), error.exit_code), ("records.metadata_limit", 3));
+            }
+            let after = budget.logical_snapshot().unwrap();
+            assert_eq!(after.retained_bytes, before.retained_bytes);
+            assert_eq!(budget.memory_snapshot().unwrap().peak_scratch_bytes, 4096 * 256);
+            assert_eq!(
+                budget.remaining_retained().unwrap(),
+                Cost::defaults().retained_bytes - after.retained_bytes,
+            );
         }
     }
 }

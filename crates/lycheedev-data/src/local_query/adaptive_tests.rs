@@ -144,6 +144,8 @@ fn actual_local_sql_explicit_fixed_budget_is_not_silently_replaced() {
     let inv = fx.invocation("data sql", &[("--sql", "SELECT ID FROM Sample")]);
     // Go ranges.copyPart reserves 2*64MiB chunk scratch in addition to the
     // existing 64MiB SQL executor reservation, even for this small fixture.
+    // Its session Root lookup reserves 4096*256 bytes, not the generic parser's
+    // 1<<20 match ceiling. This explicit 256MiB cap must therefore suffice.
     let limits = Cost {
         retained_bytes: 256 << 20,
         metadata_bytes: 80 << 20,
@@ -155,6 +157,15 @@ fn actual_local_sql_explicit_fixed_budget_is_not_silently_replaced() {
         inv.control.clone(),
     ));
     let out = sql_inner_budgeted(&inv, &budget, &mut || Ok(())).unwrap();
+    assert_eq!(out.data["result"]["rows"], json!([[7]]));
+    let memory = budget.memory_snapshot().unwrap();
+    assert!(memory.peak_scratch_bytes >= 128 << 20);
+    assert!(memory.peak_scratch_bytes < 192 << 20);
+    assert_eq!(budget.deadline, inv.control.deadline());
+    assert_eq!(
+        budget.remaining_retained().unwrap(),
+        limits.retained_bytes - budget.logical_snapshot().unwrap().retained_bytes,
+    );
     assert_eq!(
         out.data["memoryBudget"],
         json!({"mode":"fixed","retainedBytes":256<<20,"metadataBytes":80<<20,
@@ -594,6 +605,11 @@ fn actual_local_sql_fixed_budget_below_decoder_scratch_fails_without_growth_or_c
     assert_eq!(memory["mode"], "fixed");
     assert_eq!(memory["retainedBytes"], 96 << 20);
     assert_eq!(memory["growths"], 0);
+    assert!(memory["peakScratchBytes"].as_u64().unwrap() < 128 << 20);
+    assert_eq!(
+        budget.remaining_retained().unwrap(),
+        (96 << 20) - budget.logical_snapshot().unwrap().retained_bytes,
+    );
     assert_eq!(captures(&fx), before);
     released(&fx);
     fs::remove_dir_all(fx.root).unwrap();
