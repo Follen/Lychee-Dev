@@ -307,3 +307,32 @@ fn default_remote_sql_compiler_stop_publishes_no_capture_or_file() {
     assert_eq!(f.captures().len(), before);
     f.close();
 }
+
+#[test]
+fn default_remote_nonfinal_suffix_reaches_real_cte_resolver_before_syntax() {
+    let f = SqlFixture::new(false, true);
+    let before = f.captures().len();
+    let sql = "WITH c AS (SELECT Missing FROM RemoteSample) SELECT ID FROM RemoteSample LIMIT 1 UNION ALL SELECT ID FROM RemoteSample";
+    let error = crate::dispatch(&f.invocation(sql)).unwrap_err();
+    assert_eq!(error.code, "query.unresolved_binding");
+    assert_eq!(f.captures().len(), before);
+    let error = crate::dispatch(
+        &f.invocation("SELECT ID FROM RemoteSample LIMIT 1 UNION ALL SELECT ID FROM RemoteSample"),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "query.invalid_syntax");
+    assert_eq!(f.captures().len(), before);
+    f.close();
+}
+#[test]
+fn default_remote_right_union_cte_and_nested_suffix_use_one_complete_compiler() {
+    let f = SqlFixture::new(false, true);
+    let out=crate::dispatch(&f.invocation("SELECT ID FROM RemoteSample UNION ALL WITH c AS (SELECT ID FROM RemoteSample) SELECT ID FROM c ORDER BY ID LIMIT 1")).unwrap();
+    assert_eq!(out.data["result"]["rows"], json!([[7]]));
+    f.verify(&out);
+    let before = f.captures().len();
+    let error=crate::dispatch(&f.invocation("SELECT EXISTS(SELECT ID FROM RemoteSample LIMIT 1 UNION ALL SELECT ID FROM RemoteSample) FROM RemoteSample")).unwrap_err();
+    assert_eq!(error.code, "query.invalid_syntax");
+    assert_eq!(f.captures().len(), before);
+    f.close();
+}

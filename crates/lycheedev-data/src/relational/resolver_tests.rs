@@ -504,3 +504,52 @@ fn grouped_root_star_is_binding_error_before_any_scan() {
         assert_eq!(*resolver.events.borrow(), ["resolve:static:z"]);
     }
 }
+
+#[test]
+fn nonfinal_union_suffix_runs_outer_cte_before_rejecting_branch() {
+    let resolver = Resolver::new(&["z"]);
+    let sql = "WITH c AS (SELECT ID FROM z) SELECT ID FROM absent LIMIT 1 UNION ALL SELECT ID FROM also_absent";
+    let program = Program::compile(sql).unwrap();
+    let error = program
+        .execute_resolved_budgeted(&resolver, &BTreeMap::new(), Limits::default(), None, None)
+        .unwrap_err();
+    assert_eq!(error.code, "relational.invalid_syntax");
+    assert_eq!(*resolver.events.borrow(), ["resolve:static:z"]);
+}
+#[test]
+fn failing_outer_cte_precedes_nonfinal_union_suffix_syntax() {
+    let resolver = Resolver::new(&[]);
+    let error=resolver.execute("WITH c AS (SELECT ID FROM missing) SELECT ID FROM absent LIMIT 1 UNION ALL SELECT ID FROM later").unwrap_err();
+    assert_eq!(error.code, "fixture.missing_root");
+    assert_eq!(*resolver.events.borrow(), ["resolve:static:missing"]);
+}
+#[test]
+fn middle_union_suffix_follows_earlier_binding_failure() {
+    let resolver = Resolver::new(&["z"]);
+    let error=resolver.execute("SELECT Missing FROM z UNION ALL SELECT ID FROM absent LIMIT 1 UNION ALL SELECT ID FROM later").unwrap_err();
+    assert_eq!(error.code, "relational.invalid_binding");
+    assert_eq!(*resolver.events.borrow(), ["resolve:static:z"]);
+}
+#[test]
+fn middle_union_suffix_precedes_its_own_cte_or_source_resolution() {
+    let resolver = Resolver::new(&["z"]);
+    let error=resolver.execute("SELECT ID FROM z UNION ALL WITH c AS (SELECT ID FROM absent) SELECT ID FROM c OFFSET 1 UNION ALL SELECT ID FROM later").unwrap_err();
+    assert_eq!(error.code, "relational.invalid_syntax");
+    assert_eq!(*resolver.events.borrow(), ["resolve:static:z"]);
+}
+#[test]
+fn right_branch_cte_is_resolved_once_in_real_preflight_then_scanned() {
+    let resolver = Resolver::new(&["a", "z"]);
+    let result=resolver.execute("SELECT ID FROM z UNION ALL WITH c AS (SELECT ID FROM a) SELECT ID FROM c UNION ALL SELECT ID FROM z").unwrap();
+    assert_eq!(result.rows, vec![vec![Scalar::Int(1)]; 3]);
+    assert_eq!(
+        *resolver.events.borrow(),
+        [
+            "resolve:static:z",
+            "resolve:static:a",
+            "scan:z",
+            "scan:a",
+            "scan:z"
+        ]
+    );
+}

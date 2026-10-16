@@ -42,19 +42,33 @@ impl Metadata {
         home: &Path,
         write: bool,
         control: &OperationControl,
+        check: impl FnMut() -> Result<()>,
+        on_busy: impl FnMut(),
+    ) -> Result<Self> {
+        Self::open_controlled_with_events(home, write, control, check, on_busy, || {})
+    }
+
+    // Narrow lifecycle observations for deterministic fault injection. Ordinary
+    // callers use empty observers; checks and ownership stay in this one path.
+    pub(super) fn open_controlled_with_events(
+        home: &Path,
+        write: bool,
+        control: &OperationControl,
         mut check: impl FnMut() -> Result<()>,
         mut on_busy: impl FnMut(),
+        mut on_open: impl FnMut(),
     ) -> Result<Self> {
         // This must precede even workspace validation or directory inspection.
         metadata_check(control, &mut check)?;
         crate::workspace::open_controlled_with_check(home, control, &mut check)?;
         metadata_check(control, &mut check)?;
         let schema = if write {
-            Some(historical_write::historical_lease_with_check(
+            Some(historical_write::historical_lease_observed_with_check(
                 home,
                 "metadata-schema",
                 control,
                 &mut check,
+                &mut on_busy,
             )?)
         } else {
             None
@@ -85,6 +99,7 @@ impl Metadata {
                     Connection::open_with_flags(&path, flags)
                 })?;
             let initialized = (|| {
+                on_open();
                 metadata_check(control, &mut check)?;
                 connection.busy_timeout(Duration::ZERO)?;
                 let version: i32 =

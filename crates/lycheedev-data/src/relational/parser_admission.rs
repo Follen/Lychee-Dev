@@ -63,7 +63,9 @@ pub(super) fn validate(
                 for (i, body) in branches.into_iter().enumerate() {
                     match body {
                         SetExpr::Select(select) => pending.push((Node::Select(select), depth + i)),
-                        SetExpr::Query(query) => pending.push((Node::Query(query), depth + i + 1)),
+                        // Query wrappers are created by the retrieval shell for
+                        // Go branches, not source parentheses or extra frames.
+                        SetExpr::Query(query) => pending.push((Node::Query(query), depth + i)),
                         _ => {}
                     }
                 }

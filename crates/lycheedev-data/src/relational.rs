@@ -21,6 +21,7 @@ mod identifier_categories;
 mod identifiers;
 mod lexical;
 mod parser_admission;
+mod retrieval;
 pub(crate) use identifiers::SourceTableUse;
 use identifiers::{ColumnOwners, ColumnRef, RelationName};
 mod joins;
@@ -1483,7 +1484,7 @@ impl Program {
             .with_recursion_limit(256)
             .with_tokens_with_locations(tokens.clone());
         check()?;
-        let parsed = parser.parse_query();
+        let parsed = retrieval::parse(dialect, &mut parser);
         // A dialect hook may stop a speculative parse that sqlparser otherwise
         // rewinds. It must never become a syntax error or silently disappear.
         dialect.take_stop()?;
@@ -1555,27 +1556,24 @@ impl Program {
             return Err(unsupported());
         }
         if matches!(*query.body, SetExpr::SetOperation { .. }) {
-            let bodies = compound::branches(*query.body.clone())?;
+            let mut bodies = compound::branches(*query.body)?;
+            let tail = bodies.last_mut().ok_or_else(unsupported)?;
+            let tail_order = query.order_by.take().or_else(|| tail.order_by.take());
+            let tail_limit = query
+                .limit_clause
+                .take()
+                .or_else(|| tail.limit_clause.take());
             let mut branches = Vec::with_capacity(bodies.len());
-            for body in bodies {
+            for branch in bodies {
                 check()?;
-                let mut branch = query.clone();
-                branch.body = Box::new(body);
-                branch.order_by = None;
-                branch.limit_clause = None;
                 branches.push(Self::compile_query(branch, depth, check)?);
             }
             let mut parameters = BTreeSet::new();
             for body in branches.iter().chain(bindings.iter().map(|(_, b)| b)) {
                 parameters.extend(body.parameters.iter().cloned());
             }
-            let (order, limit, offset) = Self::suffix(
-                query.order_by,
-                query.limit_clause,
-                &mut parameters,
-                depth,
-                check,
-            )?;
+            let (order, limit, offset) =
+                Self::suffix(tail_order, tail_limit, &mut parameters, depth, check)?;
             return Ok(Self {
                 explain: false,
                 analyze: false,
@@ -2542,3 +2540,6 @@ mod identifier_grammar_tests;
 
 #[cfg(test)]
 mod compiler_control_tests;
+
+#[cfg(test)]
+mod retrieval_order_tests;

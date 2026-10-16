@@ -264,11 +264,13 @@ fn import_authenticates_duplicate_historical_winner_under_same_metadata_owner() 
     let mut raw = serde_json::to_string(&pin).unwrap();
     raw.insert_str(1, "\"schema\":\"ignored-earlier\",");
     let mut metadata = Metadata::open(&f.inv.home, true).unwrap();
+    let key = format!("pin/{}", pin.id);
+    let generation = metadata.generation(&key).unwrap().expect("existing pin");
     metadata
         .put(
-            &format!("pin/{}", pin.id),
+            &key,
             &serde_json::value::RawValue::from_string(raw).unwrap(),
-            None,
+            Some(generation),
         )
         .unwrap();
     metadata.close().unwrap();

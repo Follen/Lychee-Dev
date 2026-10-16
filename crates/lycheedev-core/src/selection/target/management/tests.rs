@@ -141,7 +141,7 @@ fn add_reads_only_exact_generation_and_replace_recreate_preserve_monotonic_cas()
     // Old unrelated malformed config must block show/list, but never add.
     assert_eq!(
         f.run("target show", Some("name")).unwrap_err().code,
-        "selection.unsupported_data_product"
+        "selection.target_format"
     );
     f.sql("DELETE FROM documents WHERE key='target/unrelated'");
     assert_eq!(
@@ -373,5 +373,18 @@ fn all_named_read_routes_reject_every_non_one_metadata_version() {
             "vault.unsupported_workspace"
         );
     }
+    f.cleanup();
+}
+
+#[test]
+fn show_rejects_unsupported_product_after_valid_target_name() {
+    let f = Fixture::new();
+    let mut config = f.config("bad-product");
+    config["product"] = json!("not-a-wow-product");
+    f.seed([("target/bad-product".into(), config)]);
+    assert_eq!(
+        f.run("target show", Some("bad-product")).unwrap_err().code,
+        "selection.unsupported_data_product"
+    );
     f.cleanup();
 }

@@ -83,6 +83,7 @@ pub(super) struct QueryDialect {
         crate::resource::Budget,
     )>,
     stop: std::cell::RefCell<Option<lycheedev_core::ToolkitError>>,
+    depth: std::cell::Cell<usize>,
 }
 impl std::fmt::Debug for QueryDialect {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -99,6 +100,7 @@ impl QueryDialect {
         Self {
             controls: Some((control.clone(), budget.safety_only())),
             stop: Default::default(),
+            depth: Default::default(),
         }
     }
     pub(super) fn check(&self) -> Result<()> {
@@ -110,7 +112,7 @@ impl QueryDialect {
     }
     // sqlparser has a closed error enum. Preserve the actual typed error in
     // this one compilation, rather than inferring cancellation from a string.
-    fn parser_check(&self) -> std::result::Result<(), ParserError> {
+    pub(super) fn parser_check(&self) -> std::result::Result<(), ParserError> {
         let mut stop = self.stop.borrow_mut();
         if stop.is_none() {
             *stop = self.check().err();
@@ -121,11 +123,40 @@ impl QueryDialect {
             Ok(())
         }
     }
+    pub(super) fn query_guard(&self) -> std::result::Result<FrameGuard<'_>, ParserError> {
+        self.parser_check()?;
+        let depth = self.depth.get() + 1;
+        if depth > 128 {
+            *self.stop.borrow_mut() = Some(budget());
+            return Err(ParserError::RecursionLimitExceeded);
+        }
+        self.depth.set(depth);
+        Ok(FrameGuard(&self.depth))
+    }
+    /// The pinned public Pratt loop owns operator associativity and moves its
+    /// binary left operand without copying growing trees. Retrieval, explicit
+    /// prefix and list entries share this guard; retained AST admission also
+    /// checks the dependency's internal infix RHS recursion before lowering.
+    pub(super) fn expression(
+        &self,
+        parser: &mut Parser,
+        precedence: u8,
+    ) -> std::result::Result<Expr, ParserError> {
+        let _frame = self.query_guard()?;
+        parser.parse_subexpr(precedence)
+    }
     pub(super) fn take_stop(&self) -> Result<()> {
         match self.stop.borrow_mut().take() {
             Some(error) => Err(error),
             None => Ok(()),
         }
+    }
+}
+
+pub(super) struct FrameGuard<'a>(&'a std::cell::Cell<usize>);
+impl Drop for FrameGuard<'_> {
+    fn drop(&mut self) {
+        self.0.set(self.0.get() - 1);
     }
 }
 
@@ -257,7 +288,41 @@ impl Dialect for QueryDialect {
         if let Err(error) = self.parser_check() {
             return Some(Err(error));
         }
-        if !matches!(parser.peek_token().token, Token::Word(ref w) if w.keyword == Keyword::IS) {
+        let is_in = parser.peek_keyword(Keyword::IN)
+            || parser.peek_keyword(Keyword::NOT)
+                && matches!(parser.peek_nth_token(1).token, Token::Word(ref w) if w.keyword == Keyword::IN);
+        if is_in {
+            return Some((|| {
+                let negated = parser.parse_keyword(Keyword::NOT);
+                parser.expect_keyword(Keyword::IN)?;
+                parser.expect_token(&Token::LParen)?;
+                let input = Box::new(expr.clone());
+                let result =
+                    if parser.peek_keyword(Keyword::SELECT) || parser.peek_keyword(Keyword::WITH) {
+                        Expr::InSubquery {
+                            expr: input,
+                            subquery: retrieval::parse(self, parser)?,
+                            negated,
+                        }
+                    } else {
+                        let mut list = Vec::new();
+                        loop {
+                            list.push(self.expression(parser, 0)?);
+                            if !parser.consume_token(&Token::Comma) {
+                                break;
+                            }
+                        }
+                        Expr::InList {
+                            expr: input,
+                            list,
+                            negated,
+                        }
+                    };
+                parser.expect_token(&Token::RParen)?;
+                Ok(result)
+            })());
+        }
+        if !parser.peek_keyword(Keyword::IS) {
             return None;
         }
         Some((|| {
@@ -300,13 +365,71 @@ impl Dialect for QueryDialect {
         if let Err(error) = self.parser_check() {
             return Some(Err(error));
         }
+        if parser.peek_token().token == Token::LParen {
+            return Some((|| {
+                parser.next_token();
+                let expr =
+                    if parser.peek_keyword(Keyword::SELECT) || parser.peek_keyword(Keyword::WITH) {
+                        Expr::Subquery(retrieval::parse(self, parser)?)
+                    } else {
+                        Expr::Nested(Box::new(self.expression(parser, 0)?))
+                    };
+                parser.expect_token(&Token::RParen)?;
+                Ok(expr)
+            })());
+        }
+        if parser.peek_keyword(Keyword::EXISTS) {
+            return Some((|| {
+                parser.next_token();
+                parser.expect_token(&Token::LParen)?;
+                let subquery = retrieval::parse(self, parser)?;
+                parser.expect_token(&Token::RParen)?;
+                Ok(Expr::Exists {
+                    subquery,
+                    negated: false,
+                })
+            })());
+        }
+        if parser.peek_keyword(Keyword::CASE) {
+            return Some((|| {
+                let case_token = AttachedToken(parser.next_token());
+                let operand = if parser.peek_keyword(Keyword::WHEN) {
+                    None
+                } else {
+                    Some(Box::new(self.expression(parser, 0)?))
+                };
+                let mut conditions = Vec::new();
+                while parser.parse_keyword(Keyword::WHEN) {
+                    let condition = self.expression(parser, 0)?;
+                    parser.expect_keyword(Keyword::THEN)?;
+                    let result = self.expression(parser, 0)?;
+                    conditions.push(CaseWhen { condition, result });
+                }
+                if conditions.is_empty() {
+                    return Err(ParserError::ParserError("CASE requires WHEN".into()));
+                }
+                let else_result = if parser.parse_keyword(Keyword::ELSE) {
+                    Some(Box::new(self.expression(parser, 0)?))
+                } else {
+                    None
+                };
+                let end_token = AttachedToken(parser.expect_keyword(Keyword::END)?);
+                Ok(Expr::Case {
+                    case_token,
+                    end_token,
+                    operand,
+                    conditions,
+                    else_result,
+                })
+            })());
+        }
         if matches!(parser.peek_token().token, Token::Word(ref word)
             if word.quote_style.is_none() && equal_fold(&word.value, "NOT"))
         {
             parser.next_token();
             // Generic's NOT EXISTS shortcut negates before following comparisons.
             // Go NOT always calls expression(3), including the EXISTS case.
-            return Some(parser.parse_subexpr(29).map(|expr| Expr::UnaryOp {
+            return Some(self.expression(parser, 29).map(|expr| Expr::UnaryOp {
                 op: UnaryOperator::Not,
                 expr: Box::new(expr),
             }));
@@ -317,7 +440,7 @@ impl Dialect for QueryDialect {
             } else {
                 UnaryOperator::Minus
             };
-            return Some(parser.parse_subexpr(60).map(|expr| Expr::UnaryOp {
+            return Some(self.expression(parser, 60).map(|expr| Expr::UnaryOp {
                 op,
                 expr: Box::new(expr),
             }));
@@ -339,7 +462,7 @@ impl Dialect for QueryDialect {
             return Some((|| {
                 parser.next_token();
                 parser.expect_token(&Token::LParen)?;
-                let expr = Box::new(parser.parse_expr()?);
+                let expr = Box::new(self.expression(parser, 0)?);
                 parser.expect_keyword(Keyword::AS)?;
                 let name = parser.parse_identifier()?;
                 identifier(&name).map_err(|e| ParserError::ParserError(e.message))?;
@@ -354,7 +477,7 @@ impl Dialect for QueryDialect {
         }
         // The remaining Go primary productions stay with the existing parser.
         if word.quote_style.is_none()
-            && ["EXISTS", "CASE", "NULL", "TRUE", "FALSE"]
+            && ["NULL", "TRUE", "FALSE"]
                 .iter()
                 .any(|keyword| equal_fold(&word.value, keyword))
         {
@@ -404,7 +527,7 @@ impl Dialect for QueryDialect {
                     // parse_expr retains nested stars and argument order. The
                     // generic argument helper otherwise consumes '*' early or
                     // rejects DISTINCT with no argument before source binding.
-                    args.push(FunctionArg::Unnamed(parser.parse_expr()?.into()));
+                    args.push(FunctionArg::Unnamed(self.expression(parser, 0)?.into()));
                     if !parser.consume_token(&Token::Comma) {
                         break;
                     }

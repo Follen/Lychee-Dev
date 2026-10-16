@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 02:15 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`2ef36e40a5a6e89ded56eeb6b61c7f2f15344c95`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 02:27 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`e896379d441514797a9c78dac2962c8768a4a545`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -25,15 +25,19 @@
 
 ## 2. 当前实现与未闭环事项
 
+e8实际owned context已编译执行：declaration等三组4/9/6全过，lychee_context 22过2失败，合计41过2失败；失败均environment.rs58 `expression execution scope`，实际环境栈为空，正在补真实scope，不是类型等价已通过。3owner/17sealed日志全SHA核且retired/reaped。c5完整185owner/1093sealed全SHA核；三个interrupted是custody协议故障fixture，其余182为handlesReaped=true。真实SQL/Data失败交原作者按固定Go诊断；Core4项fixture已修真实阶段注入、历史raw设置用正确generation及target首错，Rust未重跑。
+
+SQL默认retrieval入口现统一顶层/WITH/derived/scalar/EXISTS/IN，同一token stream及公开Pratt；FROM首错、各UNION分支后缀的实际preflight、分支CTE声明扫描与执行scope分别保留。21新Rust回归未跑；细粒度Pratt递归深度混合首错和三段非法字段分类仍待闭合。既有多target关系回归加--no-fail-fast只防首失败跳过后继目标，失败退出保持。
+
 Source默认存储链已组合原控制：index/query/research/semantic缓存、同key manifest CAS、session startup intent/cleanup与generation读取/单次消费贯通受控Metadata、原文件/lease及checked收尾；取消留intent、generation变化不误删，未知提交不重放。缓存配额仍原即时竞争策略，不自动prune；native wire、90秒原期限与2GiB cap未改。25新Rust回归未跑，4个不重复目标已接集中验证；普通ReadDir/native process及不参与授权的best-effort生命周期诊断保原边界。
 
 默认evidence keep/bundle已完成原控制接线：keep持同一writer lease完成历史读取/retention/CAS/tombstone；bundle保输入顺序、拒重复、objects与最后manifest、32MiB单体/128MiB唯一体、原stage同目录no-replace和checked收尾，已发布/不确定结果进入既有error.details。12新Rust未跑，recoverable remove仍继续。自有诊断后继恢复return self所属类、alias/声明泛型上下文，并保union分量selected carrier，避免不完整对象绕过赋值结构检查；4新测试/12场景未跑。部分return缺口历史patched session同样存在，旧参照不改、不全局忽略差异；以固定原版普通语义与增强合同分别验证。
 
 本批补齐历史capture读取、Hotfix archive/origin/定义/scan与effective SQL的原invocation及独立Budget，保typed停止、历史身份和checked关闭；8项Core/Data新回归未运行。SQL默认编译入口已贯通lexer、公共parser hooks及lowering控制，17项新回归未运行；wildcard公共hook不能直接返回错误，记录停止后在parse完成且lowering/provider之前返回。非最终UNION后缀与复合错误优先级仍继续实现。keep/bundle/remove和Source默认存储受控链正在闭合，不据新API声明全链完成。
 
-修复后的集中验证 [38836247524](https://github.com/Follen/Lychee-Dev/actions/runs/38836247524) 针对e8ae9a3已排队，仍由前一运行保留独立测试证据；不能把排队或toolidentity成功当产品编译成功。后继同session跨文件member/metatable两处CFG缓存已共享，新增真实三文件回归未跑，不宣称内存/耗时收益。
+修复后的集中验证 [38836247524](https://github.com/Follen/Lychee-Dev/actions/runs/38836247524) 针对e8ae9a3已启动，workspace all-target仍在编译；不能把排队或toolidentity成功当产品编译成功。后继同session跨文件member/metatable两处CFG缓存已共享，新增真实三文件回归未跑，不宣称内存/耗时收益。
 
-当前集中验证 [38835081872](https://github.com/Follen/Lychee-Dev/actions/runs/38835081872) 针对 c5b3962：静态组成功，all-target 编译与 owned context 组失败，产品其余步骤仍在运行；冻结三方组按策略跳过。context完整产物3个owner/17份sealed日志及product早期55个owner/76份sealed日志已逐SHA核实，原版引擎树身份正确；实际15条编译诊断为公开MemberList借用迭代、字符串类型与临时值寿命适配问题，后继已一次聚合修正全部15条诊断，并保空返回候选为Unknown；当前过渡Continue测试改为已实现的完整类型/carrier/缓存及真实quality事件断言，历史参照/448不变。17路径只通过语法检查，修后编译和语义执行仍待。生产零patch recipe 已保存不等于已编译或语义等价。
+当前集中验证 [38835081872](https://github.com/Follen/Lychee-Dev/actions/runs/38835081872) 针对 c5b3962：静态组成功，all-target 编译与 owned context 组失败，产品终态失败；冻结三方组按策略跳过。context完整产物3个owner/17份sealed日志及product早期55个owner/76份sealed日志已逐SHA核实，原版引擎树身份正确；实际15条编译诊断为公开MemberList借用迭代、字符串类型与临时值寿命适配问题，后继已一次聚合修正全部15条诊断，并保空返回候选为Unknown；当前过渡Continue测试改为已实现的完整类型/carrier/缓存及真实quality事件断言，历史参照/448不变。17路径只通过语法检查，修后编译和语义执行仍待。生产零patch recipe 已保存不等于已编译或语义等价。
 
 捕获收尾后继现已组合：默认Data捕获的原invocation与独立meter贯通Metadata打开、实际BEGIN/引用读取/INSERT/COMMIT等待和checked关闭；仅重试busy SQL语句，不重放body发布。已提交或不确定的CAP身份进入既有error.details，外层Scope关闭错误仍保typed事实。Source refs/context/diff/query/inspect及验证/语义的11个捕获调用也已改用原control的bounded入口，保持原字节、provenance和128MiB上界。新增15项Core测试和3项CLI事实/组合测试尚未运行；新metadata组已接集中CI，Source消费者实际取消仍待集中验证。同步系统调用与遗留无control API仍有明确边界。后继默认evidence show/list/verify已接同一受控只读Metadata、固定历史CaptureRef认证及checked收尾；list按完整有界页中的embedded ID重新inspect，verify保持原库receipt/CLI投影并流式核SHA，不误套生产大小cap。10新Rust未运行；keep/bundle/remove及其他legacy消费者继续闭合。
 

@@ -484,23 +484,19 @@ fn supplemental_open_schema_wait_stops_inside_held_lease_retry() {
     let held = ExclusiveLock::resource(&fixture.0.join("locks"), "metadata-schema").unwrap();
     let invocation = alive();
     let (token, budget) = independent();
-    let mut checks = 0;
-    let error = open_error(Metadata::open_controlled_with_check(
+    let busy = Cell::new(0);
+    let error = open_error(Metadata::open_controlled_with_events(
         &fixture.0,
         true,
         &invocation,
+        || budget.check(),
         || {
-            checks += 1;
-            // Checks 4 and 5 guard resource creation, 6 is after the failed
-            // try-lock handle was closed, and 7 is the pure-busy retry boundary.
-            // Thus this cancels only after genuine schema-lock contention.
-            if checks == 7 {
-                token.cancel();
-            }
-            budget.check()
+            busy.set(busy.get() + 1);
+            token.cancel();
         },
+        || panic!("schema contention must stop before opening SQLite"),
     ));
-    assert_eq!(checks, 7);
+    assert_eq!(busy.get(), 1);
     check_stopped(&error, &invocation);
     assert!(!fixture.database().exists());
     assert!(ExclusiveLock::resource(&fixture.0.join("locks"), "metadata-schema").is_err());
@@ -517,22 +513,19 @@ fn supplemental_post_open_stop_closes_owned_handle_before_return() {
     fixture.seed().close().unwrap();
     let invocation = alive();
     let (token, budget) = independent();
-    let mut checks = 0;
-    let error = open_error(Metadata::open_controlled_with_check(
+    let opened = Cell::new(0);
+    let error = open_error(Metadata::open_controlled_with_events(
         &fixture.0,
         false,
         &invocation,
+        || budget.check(),
+        || panic!("uncontended read-only fixture must not wait"),
         || {
-            checks += 1;
-            // The fifth check runs after Connection::open succeeded, inside
-            // initialized, whose failure path consumes Metadata::close.
-            if checks == 5 {
-                token.cancel();
-            }
-            budget.check()
+            opened.set(opened.get() + 1);
+            token.cancel();
         },
     ));
-    assert_eq!(checks, 5);
+    assert_eq!(opened.get(), 1);
     check_stopped(&error, &invocation);
     std::fs::remove_file(fixture.database()).unwrap();
 }

@@ -113,14 +113,23 @@ pub(super) fn dependencies<'a>(
     for (_, body) in &program.bindings {
         dependencies(body, &names, tables);
     }
-    for term in program.terms() {
-        subquery::visit_queries(term, &mut |query| dependencies(query, &names, tables));
-    }
     if !program.branches.is_empty() {
+        // Go inspect walks the original right-linked query tree. Its declared
+        // SourceTables scope carries a branch's WITH into later chain nodes,
+        // although executeQuery executes each branch in the outer scope. Keep
+        // that public inspection contract separate from actual lazy resolution.
+        let mut inspected = names;
         for body in &program.branches {
-            dependencies(body, &names, tables);
+            dependencies(body, &inspected, tables);
+            inspected.extend(body.bindings.iter().map(|(name, _)| identifier_lower(name)));
+        }
+        for term in program.terms() {
+            subquery::visit_queries(term, &mut |query| dependencies(query, &inspected, tables));
         }
         return;
+    }
+    for term in program.terms() {
+        subquery::visit_queries(term, &mut |query| dependencies(query, &names, tables));
     }
     for (table, derived) in std::iter::once((&program.table, &program.derived))
         .chain(program.joins.iter().map(|j| (&j.table, &j.derived)))
@@ -213,8 +222,25 @@ pub(super) fn execute(
     Ok(result)
 }
 
-pub(super) fn branches(body: SetExpr) -> Result<Vec<SetExpr>> {
-    fn walk(body: SetExpr, result: &mut Vec<SetExpr>) -> Result<()> {
+/// Retrieval shells retain suffixes and WITH at their actual query node.
+/// Flatten only UNION's right chain, transferring each local WITH to that
+/// branch (not the subsequent branches), just as executeQuery's copied branch.
+pub(super) fn branches(body: SetExpr) -> Result<Vec<Query>> {
+    fn plain(body: SetExpr) -> Query {
+        Query {
+            with: None,
+            body: Box::new(body),
+            order_by: None,
+            limit_clause: None,
+            fetch: None,
+            locks: Vec::new(),
+            for_clause: None,
+            settings: None,
+            format_clause: None,
+            pipe_operators: Vec::new(),
+        }
+    }
+    fn walk(body: SetExpr, result: &mut Vec<Query>) -> Result<()> {
         match body {
             SetExpr::SetOperation {
                 op: SetOperator::Union,
@@ -229,8 +255,31 @@ pub(super) fn branches(body: SetExpr) -> Result<Vec<SetExpr>> {
                 "relational.invalid_syntax",
                 "Only UNION ALL is supported by the retrieval contract",
             )),
+            SetExpr::Query(mut query) if matches!(*query.body, SetExpr::SetOperation { .. }) => {
+                let start = result.len();
+                let with = query.with.take();
+                let order = query.order_by.take();
+                let limit = query.limit_clause.take();
+                walk(*query.body, result)?;
+                result[start].with = with;
+                // Ordinary public-parser AST callers may carry a tail outside
+                // the set body. The owned shell normally retains it in its
+                // final branch; neither representation duplicates evaluation.
+                let tail = result.last_mut().ok_or_else(unsupported)?;
+                if order.is_some() {
+                    tail.order_by = order;
+                }
+                if limit.is_some() {
+                    tail.limit_clause = limit;
+                }
+                Ok(())
+            }
+            SetExpr::Query(query) => {
+                result.push(*query);
+                Ok(())
+            }
             SetExpr::Select(_) => {
-                result.push(body);
+                result.push(plain(body));
                 Ok(())
             }
             _ => Err(unsupported()),
@@ -252,7 +301,19 @@ fn execute_body(
         return program.execute_select(sources, scope, parameters, work);
     }
     let mut combined = None::<Source>;
-    for branch in &program.branches {
+    for (index, branch) in program.branches.iter().enumerate() {
+        // This is intentionally after the outer WITH definitions and after
+        // every earlier branch, but before this branch's own WITH or source.
+        // Go accepts these tokens at compile time and rejects them here in
+        // both the real schema preflight and execution traversal.
+        if index + 1 < program.branches.len()
+            && (!branch.order.is_empty() || branch.limit.is_some() || branch.offset.is_some())
+        {
+            return Err(problem(
+                "relational.invalid_syntax",
+                "Non-final UNION ALL branch has a suffix",
+            ));
+        }
         let result = branch.execute_scoped_with(sources, scope, parameters, work)?;
         // Move retained rows; never deep-clone scalar payloads between branches.
         // The row-vector extension itself has a separate admission cost.
