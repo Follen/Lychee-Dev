@@ -158,7 +158,7 @@ fn object_origin_json(input: &NativeInput, origin: &ObjectOrigin) -> Value {
     match origin {
         ObjectOrigin::Lua(site) => binding_site_json(input, *site),
         ObjectOrigin::Xml(span) => {
-            json!({"file":span.path,"contentSHA256":span.content_sha256,"start":u32::from(span.range.start()),"end":u32::from(span.range.end())})
+            json!({"file":span.path,"contentSHA256":span.content_sha256,"start":span.range.start,"end":span.range.end})
         }
     }
 }
@@ -179,7 +179,7 @@ fn decision_json(input: &NativeInput, decision: &BindingDecision<BoundValue>) ->
                     json!({"kind":"parameter","declaration":format!("{decl:?}")})
                 }
                 SelectedValue::DerivedNumber(number) => {
-                    json!({"kind":"derived_number","value":number.value,"origin":{"file":input.files().iter().find(|(_,id)|**id==number.origin.file_id).map(|(file,_)|file),"start":u32::from(number.origin.range.start()),"end":u32::from(number.origin.range.end())},"occurrence":number.occurrence_identity,"proof":number.proof})
+                    json!({"kind":"derived_number","value":number.value,"origin":{"file":input.files().iter().find(|(_,id)|**id==number.origin.file_id).map(|(file,_)|file),"start":number.origin.range.start,"end":number.origin.range.end},"occurrence":number.occurrence_identity,"proof":number.proof})
                 }
                 SelectedValue::EnvironmentCallable(function) => {
                     json!({"kind":"environment_callable","material":function.origin.material,"materialSHA256":function.origin.material_sha256,"pointer":function.origin.pointer,"identity":function.origin.identity})
