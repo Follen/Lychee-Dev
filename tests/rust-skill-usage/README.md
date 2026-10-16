@@ -1,11 +1,40 @@
 # Independent real Skill workflow acceptance
 
-The evaluator read the fixed Go 3.2.0 Skill at
-`3057a9666ab078270b63c7f06de748069b0d1f4b` before designing this controller.
-`workflow.json` freezes the full original 23-file Skill inventory (entry,
-references, agent metadata and launcher) and three representative user tasks.
-The selected candidate can add necessary Emmy migration notes; it cannot reduce
-the fixed Skill's business contract to make a test pass.
+The normal entry now selects `workflow-go323.json`, fixed to Go 3.2.3
+`3766f9cacb52e93a803a626187e2a1d54a445468`. `workflow.json` remains byte-for-byte
+the historical Go 3.2.0 contract at
+`3057a9666ab078270b63c7f06de748069b0d1f4b`; neither its fixtures nor any historical
+report is relabeled. The three full-Retail Source tasks, original windows,
+native-callsite evidence and all their runtime checks are unchanged.
+
+The [fixed baseline manifests](baselines/README.md) preserve both complete
+23-file inventories as original Git blob identities, bytes and SHA256 values.
+The checker reconstructs both immutable Git trees and authenticates the exact
+four changed references. Packaged copies must retain those Go323 bytes:
+
+- Go321 `live-recovery.md`: every key released, 500ms quiet, fresh INPUT,
+  original request/deadline, owned key cleanup and no submitted/unknown replay
+- Go322 `live-startup.md`: character slot activation, `slotReloadRequired`,
+  read-only `live.slot_activation` and same-CON reload/recovery
+- Go323 `data-tables.md`: admitted adaptive memory ceiling and fresh headroom,
+  `memoryBudget`, shared preparation, numeric indexed IN and logical accounting
+- Go323 `data-recovery.md`: dimension/used/requested/limit diagnostics and bounded
+  same-pin retry only after pressure changes, without killing other work
+
+These four packaged-document checks are static contract evidence only. Each has
+a separate representative task with explicit inputs and `state: not_run` in the
+current report. This Source controller has no authenticated DataPin/build/locale,
+CASC-or-CDN/DBD/key fixture, expected ordered rows or controlled memory-pressure
+failure; it does not fabricate real Data query/CSV/partial/capture recovery.
+Live keyboard and slot tasks need an authorized selected process/actor and actual
+INPUT/CON evidence. It never operates the game. Supplying a future Data fixture
+requires a separately reviewed real execution path; the present entry has no
+Data-fixture option. Passing selected Source tasks or checking Skill bytes cannot
+change those pending tasks to passed or `completeSkillAcceptance` to true.
+
+The selected candidate may add necessary Emmy migration notes outside these
+unchanged incremental references; it cannot reduce the fixed Skill's business
+contract to make a test pass.
 
 ## Execute on Windows CI
 
@@ -17,7 +46,10 @@ node tools/rust-skill-usage.mjs .tmp/ci-cli-artifact/artifact.json .tmp/ci-sourc
 ```
 
 The outer tool checks artifact/report/binary/source-tree/manifest/resource and
-current packaged Skill identities. It starts exactly one controlled Windows Job
+current packaged Skill identities. It seals the current/historical workflows,
+both fixed manifests and all four original reference snapshots as test inputs,
+and rejects a report carrying the old identity or claiming unrun increments.
+It starts exactly one controlled Windows Job
 and gives its controller a fresh registered scratch directory. The controller
 stages an exact package copy into a space-and-Chinese-character npm-prefix
 layout. An unexecuted `.cmd` marker lets the real packaged Skill launcher follow
@@ -88,7 +120,7 @@ inputs. `owned-report.json` and the process/disk receipts are necessary before
 claiming even selected-workflow success. Source captures are scoped to the
 retired isolated home; sealed stdout contains the actual returned evidence.
 
-The Node tests run on Linux and exercise checker/fault behavior only. They do
+The Node tests run on Linux and exercise exact baseline and checker/fault behavior only. They do
 not run the Windows CLI, execute the Skill, or prove product acceptance. Only a
 real Windows run followed by independent review can supply actual usage evidence.
 This selected workflow also does not establish Data/Live/addon branches, complete

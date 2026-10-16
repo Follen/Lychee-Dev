@@ -2,11 +2,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
-import {dirname, join} from 'node:path';
+import {dirname, join, resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import os from 'node:os';
-import {assertApiAnswer, assertBoundedCoverage, assertNativeContext, assertNativeEvidence, commandFlags, evaluateWorkflowCheck, inventory, inventoryHash, jsonFile, nativeOperationDigest, nativePlanDigest, POST_SEMANTIC_REQUIREMENTS, sha256, verifyCandidate, within} from './assertions.mjs';
+import {assertApiAnswer, assertBoundedCoverage, assertCurrentSelectedReport, assertNativeContext, assertNativeEvidence, assertPackagedIncrement, commandFlags, CURRENT_GO_CONTRACT, CURRENT_WORKFLOW, currentWorkflowInputs, evaluateWorkflowCheck, inventory, inventoryHash, jsonFile, loadCurrentWorkflow, nativeOperationDigest, nativePlanDigest, pendingIncrementTasks, POST_SEMANTIC_REQUIREMENTS, sha256, skillTreeIdentity, verifyCandidate, within} from './assertions.mjs';
 
-const workflow = jsonFile(new URL('./workflow.json', import.meta.url));
+const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const historicalWorkflow = jsonFile(new URL('./workflow.json', import.meta.url));
+const workflow = loadCurrentWorkflow(repository);
 const oracle = jsonFile(new URL('../rust-source-full-corpus/retail-oracle.json', import.meta.url));
 const write = (path, text) => { mkdirSync(dirname(path), {recursive: true}); writeFileSync(path, text); };
 const json = (path, value) => write(path, JSON.stringify(value, null, 2) + '\n');
@@ -18,8 +21,10 @@ function fixture(t) {
   write(join(root, 'packages/npm/lycheedev/bin/lycheedev-rust.mjs'), launcher);
   write(join(packageRoot, 'bin/lycheedev.mjs'), launcher);
   for (const path of workflow.requiredSkillFiles) {
-    write(join(root, 'skills/lycheedev', path), `synthetic ${path}\n`);
-    write(join(packageRoot, 'payload/skill', path), `synthetic ${path}\n`);
+    const increment = workflow.increments.find(row => row.file === path);
+    const bytes = increment ? readFileSync(new URL(increment.fixture, import.meta.url)) : `synthetic ${path}\n`;
+    write(join(root, 'skills/lycheedev', path), bytes);
+    write(join(packageRoot, 'payload/skill', path), bytes);
   }
   write(join(packageRoot, 'payload/tool/luac/luac.exe'), 'synthetic compiler');
   write(join(packageRoot, 'native/windows-amd64/lycheedev.exe'), binary);
@@ -36,12 +41,89 @@ function fixture(t) {
   return {root, packageRoot, reportPath, artifact, manifest, report, verify: () => verifyCandidate(root, reportPath, artifact, workflow), rewrite: () => json(reportPath, report)};
 }
 
-test('workflow binds fixed Go contract and complete original Skill entry/reference tree', () => {
-  assert.equal(workflow.goContract, '3057a9666ab078270b63c7f06de748069b0d1f4b');
+test('current workflow binds Go323 and retains the exact Go320 Source fixtures and prompts', () => {
+  assert.equal(workflow.goContract, CURRENT_GO_CONTRACT);
+  assert.equal(historicalWorkflow.goContract, '3057a9666ab078270b63c7f06de748069b0d1f4b');
+  for (const field of ['requiredSkillFiles', 'prompts', 'apiOriginalWindow', 'nativeCallsite']) assert.deepEqual(workflow[field], historicalWorkflow[field]);
   assert.equal(workflow.requiredSkillFiles.length, 23);
   assert.equal(new Set(workflow.requiredSkillFiles).size, 23);
   for (const name of ['SKILL.md', 'scripts/lycheedev.mjs', 'references/source-research.md', 'references/source-relations.md', 'references/source-preparation.md', 'references/live-investigation.md', 'references/data-investigation.md']) assert(workflow.requiredSkillFiles.includes(name));
   assert(workflow.prompts.every(row => typeof row.text === 'string' && row.text.length > 20));
+});
+function workflowFixture(t) {
+  const root = mkdtempSync(join(os.tmpdir(), 'lycheedev-current-skill-'));
+  t.after(() => rmSync(root, {recursive: true, force: true}));
+  for (const path of currentWorkflowInputs(workflow)) write(join(root, path), readFileSync(join(repository, path)));
+  return {root, read: path => jsonFile(join(root, 'tests/rust-skill-usage', path)), write: (path, value) => json(join(root, 'tests/rust-skill-usage', path), value), verify: () => loadCurrentWorkflow(root)};
+}
+test('both complete fixed Skill manifests reconstruct their exact immutable Git trees', () => {
+  for (const [file, expected] of [['go3.2.0-skill.json', '7145d71201e7b1b63a3fbcd880ec78d6a1589e26'], ['go3.2.3-skill.json', 'b9e162ace7abe7ea4a2feecef822283767eb1210']]) {
+    const manifest = jsonFile(new URL(`baselines/${file}`, import.meta.url));
+    assert.equal(manifest.files.length, 23); assert.equal(skillTreeIdentity(manifest.files), expected);
+    assert.notEqual(skillTreeIdentity(manifest.files.slice(1)), expected);
+    assert.throws(() => skillTreeIdentity([...manifest.files, manifest.files[0]]), /unique/);
+  }
+});
+test('normal outer and owned controller entries both load current authenticated workflow', () => {
+  for (const path of ['tools/rust-skill-usage.mjs', 'tests/rust-skill-usage/run.mjs']) {
+    const source = readFileSync(join(repository, path), 'utf8');
+    assert.match(source, /const workflow = loadCurrentWorkflow\(root\)/);
+    assert.doesNotMatch(source, /const workflow = jsonFile\(/);
+  }
+  assert.equal(CURRENT_WORKFLOW, 'tests/rust-skill-usage/workflow-go323.json');
+  assert.equal(new Set(currentWorkflowInputs(workflow)).size, 8);
+});
+test('current workflow rejects historical relabeling, missing increments and weakened Source tasks', t => {
+  const f = workflowFixture(t), original = f.read('workflow-go323.json');
+  assert.equal(f.verify().goContract, CURRENT_GO_CONTRACT);
+  for (const mutate of [
+    row => { row.goContract = historicalWorkflow.goContract; },
+    row => { row.goVersion = '3.2.0'; }, row => { row.increments.pop(); },
+    row => { row.prompts.pop(); }, row => { row.apiOriginalWindow.firstLine++; },
+    row => { row.nativeCallsite.site.start++; }, row => { row.requiredSkillFiles.pop(); },
+    row => { row.increments[0].sourceCommit = CURRENT_GO_CONTRACT; },
+    row => { row.increments[2].fixture = '../other.md'; }, row => { row.increments[2].requires = []; },
+  ]) { const changed = structuredClone(original); mutate(changed); f.write('workflow-go323.json', changed); assert.throws(f.verify); }
+});
+test('historical workflow cannot be edited and rehashed as a new baseline', t => {
+  const f = workflowFixture(t), historical = f.read('workflow.json');
+  historical.goContract = CURRENT_GO_CONTRACT; f.write('workflow.json', historical);
+  assert.throws(f.verify, /historical workflow bytes/);
+  const current = f.read('workflow-go323.json'); current.historical.sha256 = sha256(readFileSync(join(f.root, 'tests/rust-skill-usage/workflow.json')));
+  f.write('workflow-go323.json', current); assert.throws(f.verify);
+});
+test('fixed manifest and increment snapshots reject changed blobs, omitted files and text regressions', t => {
+  const f = workflowFixture(t), manifest = f.read(workflow.baselineManifest);
+  for (const mutate of [row => { row.files.pop(); }, row => { row.files[0].gitBlob = '0'.repeat(40); }, row => { row.tree = '0'.repeat(40); }]) {
+    const changed = structuredClone(manifest); mutate(changed); f.write(workflow.baselineManifest, changed); assert.throws(f.verify);
+  }
+  f.write(workflow.baselineManifest, manifest);
+  write(join(f.root, 'tests/rust-skill-usage', workflow.increments[2].fixture), 'old fixed 512/128 MiB budget guidance\n');
+  assert.throws(f.verify, /fixed increment/);
+});
+test('all four current packaged increment contracts are byte-exact, never runtime evidence', () => {
+  for (const increment of workflow.increments) {
+    const result = assertPackagedIncrement(join(repository, 'skills/lycheedev'), workflow, increment);
+    assert.equal(result.basis, 'exact_fixed_go323_skill_bytes_only'); assert.equal(result.runtimeVerified, false);
+  }
+  const pending = pendingIncrementTasks(workflow);
+  assert.equal(pending.length, 4); assert(pending.every(row => row.state === 'not_run' && row.runtimeVerified === false));
+  assert(pending.find(row => row.taskId === 'g323-data-query').reason.includes('DataPin/CASC-or-CDN/DBD/key'));
+  assert(pending.find(row => row.taskId === 'g321-keyboard-recovery').reason.includes('no game'));
+});
+test('owned success cannot relabel Go320, omit current checks or turn static increments into runtime passes', () => {
+  const report = {goContract: CURRENT_GO_CONTRACT, goVersion: '3.2.3', state: 'passed_selected_skill_workflows', completeSkillAcceptance: false,
+    prompts: workflow.prompts, pendingTasks: pendingIncrementTasks(workflow), checks: [
+      ...POST_SEMANTIC_REQUIREMENTS.map(caseId => ({caseId, state: 'passed'})),
+      ...workflow.increments.map(increment => ({...assertPackagedIncrement(join(repository, 'skills/lycheedev'), workflow, increment), caseId: `fixed-skill-contract-${increment.id}`, state: 'passed'})),
+    ]};
+  assertCurrentSelectedReport(report, workflow);
+  for (const mutate of [
+    row => { row.goContract = historicalWorkflow.goContract; }, row => { row.completeSkillAcceptance = true; },
+    row => { row.pendingTasks = []; }, row => { row.pendingTasks[2].state = 'passed'; }, row => { row.pendingTasks[0].runtimeVerified = true; },
+    row => { row.checks.pop(); }, row => { row.checks.shift(); }, row => { row.checks.push(row.checks.at(-1)); },
+    row => { row.checks.at(-1).runtimeVerified = true; }, row => { row.checks.at(-1).sha256 = '0'.repeat(64); },
+  ]) { const changed = structuredClone(report); mutate(changed); assert.throws(() => assertCurrentSelectedReport(changed, workflow)); }
 });
 test('relative paths reject traversal, rooted paths and links', t => {
   const f = fixture(t);
@@ -60,6 +142,15 @@ test('complete manifest-bound candidate checker accepts only synthetic fixture i
   const f = fixture(t), verified = f.verify();
   assert.equal(verified.reportSHA256, sha256(readFileSync(f.reportPath)));
   assert.equal(verified.packageSHA256, inventoryHash(inventory(f.packageRoot)));
+});
+test('a self-consistent package and source tree cannot replace current Data guidance with old bytes', t => {
+  const f = fixture(t), path = 'references/data-tables.md', bytes = Buffer.from('historical fixed memory limits; not Go323\n');
+  write(join(f.root, 'skills/lycheedev', path), bytes); write(join(f.packageRoot, 'payload/skill', path), bytes);
+  const row = f.manifest.resources.find(row => row.path === `skill/${path}`); row.bytes = bytes.length; row.sha256 = sha256(bytes);
+  json(join(f.packageRoot, 'release.json'), f.manifest);
+  f.report.releaseManifestSHA256 = sha256(readFileSync(join(f.packageRoot, 'release.json')));
+  f.report.resourceInventorySHA256 = sha256(Buffer.from(JSON.stringify(f.manifest.resources))); f.rewrite();
+  assert.throws(f.verify, /packaged Go323 increment/);
 });
 test('different sealed binary, source or report manifest is rejected', t => {
   const f = fixture(t);

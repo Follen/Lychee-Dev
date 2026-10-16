@@ -6,7 +6,7 @@ import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFil
 import {dirname, delimiter, join, resolve} from 'node:path';
 import os from 'node:os';
 import {performance} from 'node:perf_hooks';
-import {assertApiAnswer, assertBoundedCoverage, assertNativeContext, assertNativeEvidence, commandFlags, evaluateWorkflowCheck, inventory, inventoryHash, jsonFile, POST_SEMANTIC_REQUIREMENTS, sha256, within} from './assertions.mjs';
+import {assertApiAnswer, assertBoundedCoverage, assertNativeContext, assertNativeEvidence, assertPackagedIncrement, commandFlags, evaluateWorkflowCheck, inventory, inventoryHash, jsonFile, loadCurrentWorkflow, pendingIncrementTasks, POST_SEMANTIC_REQUIREMENTS, sha256, within} from './assertions.mjs';
 import {assertAnchor, assertEnvelope, assertPageContinuation, assertQuery, assertStaticCall} from '../rust-source-full-corpus/assertions.mjs';
 
 const [packageArg, scratchArg, evidenceArg, packageSHA256, ...extra] = process.argv.slice(2);
@@ -17,14 +17,15 @@ const owner = jsonFile(join(out, 'receipt.json'));
 assert.equal(owner.owner, 'skill-real-usage'); assert.equal(owner.state, 'active');
 assert.equal(resolve(owner.directory), scratch, 'controlled scratch owner');
 assert.equal(readdirSync(scratch).length, 0, 'fresh controlled scratch');
-const workflow = jsonFile(new URL('./workflow.json', import.meta.url));
+const workflow = loadCurrentWorkflow(root);
 const oracle = jsonFile(new URL('../rust-source-full-corpus/retail-oracle.json', import.meta.url));
 const report = {
   schema: 'lycheedev.skill-real-usage.v1', state: 'running', startedAt: new Date().toISOString(),
-  goContract: workflow.goContract, oracle, prompts: workflow.prompts, inputMode: 'full-fixed-retail-public-source-sync',
+  goContract: workflow.goContract, goVersion: workflow.goVersion, historicalWorkflow: workflow.historical,
+  oracle, prompts: workflow.prompts, sourceTaskScope: workflow.sourceTaskScope, pendingTasks: pendingIncrementTasks(workflow), inputMode: 'full-fixed-retail-public-source-sync',
   packageSHA256, machine: {platform: process.platform, release: os.release(), arch: process.arch, node: process.version, cpu: os.cpus()[0]?.model, cores: os.cpus().length},
   checks: [], commands: [], answers: [],
-  boundaries: ['staged npm-prefix resolution fixture, not npm installation acceptance', 'selected full-Retail tasks; complete byte-authenticated corpus gate is separate', 'ordinary semantic refs/context do not establish complete native lifecycle or flow coverage', 'no game, source/config execution, release publication or performance claim', 'capture IDs belong to retired isolated home; their actual returned envelopes and excerpts remain in sealed evidence'],
+  boundaries: ['staged npm-prefix resolution fixture, not npm installation acceptance', 'selected full-Retail tasks; complete byte-authenticated corpus gate is separate', 'Go321 keyboard, Go322 slot startup and Go323 Data increments are checked as exact Skill bytes only; their runtime tasks remain not_run', 'ordinary semantic refs/context do not establish complete native lifecycle or flow coverage', 'no game, source/config execution, release publication or performance claim', 'capture IDs belong to retired isolated home; their actual returned envelopes and excerpts remain in sealed evidence'],
 };
 const save = () => writeFileSync(join(out, 'report.json'), JSON.stringify(report, null, 2) + '\n');
 save();
@@ -99,6 +100,7 @@ try {
     return {files: files.length, requiredSkillFiles: workflow.requiredSkillFiles.length};
   });
   assert(stagedReady, 'authenticated package staging failed; no launcher run');
+  for (const increment of workflow.increments) check(`fixed-skill-contract-${increment.id}`, () => assertPackagedIncrement(join(staged, 'payload', 'skill'), workflow, increment));
   check('packaged-version', () => { const {result} = invoke('version', ['version']); assert.equal(result.platform, 'windows/amd64'); assert.equal(typeof result.rust, 'string'); assert(result.rust.length > 0); return {version: result.version, rust: result.rust}; });
   check('installed-command-discovery', () => { const {result} = invoke('describe', ['describe']); assert(Array.isArray(result.commands)); directory = result.commands; return {commands: directory.length}; });
   check('installed-help', () => { const {result} = invoke('help', ['--help']); assert(Array.isArray(result.commands)); });
@@ -206,8 +208,9 @@ try {
   report.finishedAt = new Date().toISOString(); report.wallMillis = performance.now() - started; report.outputBytes = outputBytes;
   report.state = !report.blocker && report.stagedPackageStable && report.checks.every(row => row.state === 'passed') ? 'passed_selected_skill_workflows' : 'failed';
   report.completeSkillAcceptance = false;
-  report.remaining = ['independent review of this real output trail', 'full Data/addon/Live Skill branches', 'complete fixed-Go differential', 'native lifecycle/corpus/performance gates'];
+  report.remaining = ['independent review of this real output trail', ...report.pendingTasks.map(row => `${row.taskId}: ${row.reason}`), 'full Data/addon/Live Skill branches', 'complete fixed-Go differential', 'native lifecycle/corpus/performance gates'];
   save();
 }
-console.log(JSON.stringify({state: report.state, report: join(out, 'report.json'), passed: report.checks.filter(row => row.state === 'passed').length, failed: report.checks.filter(row => row.state === 'failed').length}));
+console.log(JSON.stringify({state: report.state, goContract: report.goContract, completeSkillAcceptance: false, pendingTasks: report.pendingTasks,
+  report: join(out, 'report.json'), passed: report.checks.filter(row => row.state === 'passed').length, failed: report.checks.filter(row => row.state === 'failed').length}));
 if (report.state !== 'passed_selected_skill_workflows') process.exitCode = 1;

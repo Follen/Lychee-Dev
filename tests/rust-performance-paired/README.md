@@ -1,9 +1,6 @@
 # First paired performance acceptance entry
 
-This is implemented runner infrastructure, not a benchmark result. No Windows
-performance run has been performed for this change. Existing dev-profile CI,
-the historical five-sample/50% script, and prior full-corpus failures retain
-their original meanings.
+This entry has real Windows execution evidence. The [first ac8 optimized run](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6220085568) completed 20 cold and 20 warm describe pairs with equivalent output but Rust/Go median ratios 1.127/1.126, failing the ≤0.30 target. Static Retail produced no timed samples after seed validation found the subsequently repaired metadata-generation contract. A new fixed-5bbb optimized build and complete paired run are queued; no result is implied before execution. See [handover](../../handover.md) for the current exact candidate and results. Existing dev-profile CI, the historical five-sample/50% script, and prior failures retain their original meanings.
 
 ## Selected scope and pass conditions
 
@@ -228,5 +225,4 @@ observations fail the diagnostic report without changing a business exit.
 Successful observation has `state=startup_diagnostics_observed`,
 `performanceAcceptanceEvaluated=false`, `passedSelectedPaths=false` and no
 performance groups. Failed/mismatched/unreaped observations retain evidence;
-there are no replacement samples. Native Windows execution and this mode's
-actual Go/Rust observations are still required before reporting measured costs.
+there are no replacement samples. [5bbb Windows observation tests and the first diagnostic](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6220553599) have executed: 61 tests passed, and the separately authenticated ac8 product ran once per engine with original totals Go48.3713ms/Rust50.8590ms. The diagnostic preserved all original timing and ownership facts. One pair is not a stable performance estimate and does not change the failed ac8 20-pair verdict or prove a newer product's speed.

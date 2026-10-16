@@ -1,10 +1,6 @@
 # Real native Source acceptance
 
-Status: the entrypoints and checker tests are implemented. Windows product
-execution is **not_run** until the exact sealed candidate runs these commands.
-A Node checker pass is never a product pass. No Cargo build, source/config
-execution, game operation, release publication or ownership-support change is
-performed here.
+Status is candidate-specific. Historical Windows runs include real quota/idle/lifetime passes and full-Retail deadline failures; see [handover](../../handover.md) for exact trees and evidence. A new sealed optimized candidate still must execute the applicable groups. A Node checker pass is never a product pass. These commands do not execute studied source/configuration, operate games or publish a release.
 
 ## Invocation and independent groups
 
@@ -119,8 +115,7 @@ Offline Node tests run the JavaScript bootstrap with real local Git commits and
 mirrors but injected CLI observations. They check input custody, command order,
 and rejection behavior only. They do not prove Rust API extraction, actual
 Windows owner startup, named-pipe traffic, quota, idle, or lifetime acceptance.
-All those product outcomes remain `NOT_RUN` for this change until a sealed
-Windows candidate executes the corresponding group.
+Actual product outcomes require a sealed Windows execution of each corresponding group; preserve historical pass/fail identities separately from any newly changed candidate.
 
 The authenticated peer holds the named pipe and corresponding process handles,
 checks the operating-system pipe server PID, exact process creation time,
