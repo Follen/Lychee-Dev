@@ -9,7 +9,7 @@ import {performance} from 'node:perf_hooks';
 import os from 'node:os';
 import {beginMemoryPhase, endMemoryPhase, nativeMemoryPhase} from '../../tools/rust-owned-memory.mjs';
 import {assertEnvelope, assertAnchor, sha256} from '../rust-source-full-corpus/assertions.mjs';
-import {jsonFile} from '../rust-skill-usage/assertions.mjs';
+import {jsonFile, loadCurrentWorkflow} from '../rust-skill-usage/assertions.mjs';
 import {acceptanceCliArgs,createSessionPeer,parsePeerJson} from './session-ipc.mjs';
 import {snapshotDiagnostics,captureDiagnostics} from './diagnostics.mjs';
 import {assertApiType, assertContextSnippets, assertExecutedContext, assertFullNative, assertMaterial, assertNestedControllerRetired, assertPrerequisite, assertReuse, fixturePin, groupBudget, rebuildXmlInventory} from './assertions.mjs';
@@ -22,9 +22,10 @@ const owner = jsonFile(join(out, 'receipt.json'));
 assert.equal(owner.owner, `source-native-${group}`); assert.equal(owner.state, 'active'); assert.equal(resolve(owner.directory), scratch);
 assert.equal(readdirSync(scratch).length, 0, 'fresh controlled scratch');
 const oracle = jsonFile(new URL('../rust-source-full-corpus/retail-oracle.json', import.meta.url));
-const workflow = jsonFile(new URL('../rust-skill-usage/workflow.json', import.meta.url));
+const runnerRoot = resolve(import.meta.dirname, '../..');
+const workflow = loadCurrentWorkflow(runnerRoot);
 const started = performance.now(), deadline = started + groupBudget(group) - 15000;
-const report = {schema: 'lycheedev.source-native-acceptance.v1', group, state: 'running', startedAt: new Date().toISOString(), oracle,
+const report = {schema: 'lycheedev.source-native-acceptance.v1', group, goContract: workflow.goContract, runnerRoot, state: 'running', startedAt: new Date().toISOString(), oracle,
   binarySHA256: sha256(readFileSync(binary)), checks: [], commands: [], resources: [], memoryWindows: [],
   machine: {platform: process.platform, arch: process.arch, release: os.release(), node: process.version, cpu: os.cpus()[0]?.model, cores: os.cpus().length, totalMemory: os.totalmem()},
   performance: {state: 'not_evaluated', targetRatio: 0.30, sampleKind: 'single correctness execution; independent cold/warm observations only', goOracle: '3766f9cacb52e93a803a626187e2a1d54a445468', goDifferential: 'not_run', cpu: 'not_measured', io: 'not_measured', aggregateRSS: 'not_measured', windowsMemory: 'outer owned Job observation; see owned-report.json; aggregateRSS remains unmeasured', reason: 'No same-machine Go candidate/repeated paired samples. Source sync includes network and local validation; no guessed download subtraction.'},
@@ -195,7 +196,7 @@ try {
   if (group === 'full') {
     const prerequisite = join(out, 'full-corpus'); mkdirSync(prerequisite);
     const ready = await check('fresh-complete-retail-prerequisite', () => {
-      const run = command('full-corpus-controller', process.execPath, [join(root, 'tests/rust-source-full-corpus/run.mjs'), binary, home, prerequisite], {cwd: root, timeout: 900000, phase: 'complete-fresh-corpus-and-static-quality'});
+      const run = command('full-corpus-controller', process.execPath, [join(runnerRoot, 'tests/rust-source-full-corpus/run.mjs'), binary, home, prerequisite], {cwd: root, timeout: 900000, phase: 'complete-fresh-corpus-and-static-quality'});
       let previous;
       try { previous = jsonFile(join(prerequisite, 'report.json')); } catch (error) { error.fatalProcessFailure = true; throw error; }
       assertNestedControllerRetired(run.observation, previous);

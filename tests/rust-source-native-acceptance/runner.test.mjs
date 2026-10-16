@@ -240,3 +240,29 @@ test('semantic hashes reconstruct declared Rust struct order and sorted nested V
   assert.equal(semanticPlanDigest(plan), sha256(Buffer.from(planWire)));
   assert.notEqual(semanticPlanDigest(plan), sha256(Buffer.from(JSON.stringify(plan))));
 });
+
+test('native wrapper and controller authenticate the current workflow with all increment inputs', () => {
+  const outer = readFileSync(new URL('../../tools/rust-source-native-acceptance.mjs', import.meta.url), 'utf8');
+  const inner = readFileSync(new URL('./run.mjs', import.meta.url), 'utf8');
+  for (const source of [outer, inner]) {
+    assert(source.includes('const workflow = loadCurrentWorkflow(runnerRoot);'));
+    assert(!source.includes("jsonFile(new URL('../rust-skill-usage/workflow.json'"));
+    assert(!source.includes("jsonFile(join(root, 'tests/rust-skill-usage/workflow.json'"));
+    assert(source.includes('goContract: workflow.goContract'));
+  }
+  assert(outer.includes('...currentWorkflowInputs(workflow)'));
+  assert(outer.includes('verifyCandidate(root, candidatePath, artifact, workflow)'));
+});
+test('separate native runner keeps product identity and hashes every executing workflow input', () => {
+  const outer = readFileSync(new URL('../../tools/rust-source-native-acceptance.mjs', import.meta.url), 'utf8');
+  const inner = readFileSync(new URL('./run.mjs', import.meta.url), 'utf8');
+  assert(outer.includes("const runnerRoot = resolve(import.meta.dirname, '..');"));
+  assert(outer.includes('artifact = verifyArtifact(root, artifactPath)'));
+  assert(outer.includes("assert.equal(artifact.inputHashes?.sourceTree, tree"));
+  assert(outer.includes('sourceDigest(root) === tree'));
+  assert(outer.includes('hashFile(join(runnerRoot, path)) === hash'));
+  assert(outer.includes("join(runnerRoot, 'tests/rust-source-native-acceptance/run.mjs')"));
+  assert(inner.includes("join(runnerRoot, 'tests/rust-source-full-corpus/run.mjs')"));
+  assert(outer.includes('inventoryHash(inventory(candidate.packageRoot)) === candidate.packageSHA256'));
+  assert(outer.includes('hashFile(candidatePath) === candidate.reportSHA256'));
+});

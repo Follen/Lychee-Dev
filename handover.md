@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 17:46 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`408ca6bf8364fbe4348a9cf52fcfcbc5d6b08510`；当前受测产品树为 `5bbb1fea69d8377d1b73c1afd98728895f908899`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 18:03 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`49106d74d8832884f6c7d06063fb3df1556f39bf`；当前受测产品树为 `5bbb1fea69d8377d1b73c1afd98728895f908899`。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -89,7 +89,7 @@
 
 ## 6. 本机线程接力验证入口（2026-10-16）
 
-**本机已恢复正常测试，无需再次apply或重启。** 固定fed的[新工具25/25真实Windows通过与正式再准入](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6216965340)已完成；generation `329c17de-52c7-4cd0-bfe7-383cabb2ff3e`，apply/inspect均 `readmission_commit_observed`。原lease精确归档，原prepared/owner/request/scratch保留，旧历史仍unknown，不伪造reaped。旧boot rename缺陷仍保留且禁止旧apply；新readmit的UTF-16名称、同句柄no-replace和Job模块无关哈希已实际验证。
+**本机已恢复正常测试，无需再次apply或重启。** native wrapper/controller旧读Go320 workflow与当前323认证冲突的接线已修，两处统一认证当前workflow及全部增量输入，保历史原文件；Node联合75/75通过，真实完整native尚待执行。可按[独立runner导出](tests/rust-source-native-acceptance/README.md#current-workflow-and-separately-sealed-runner)在原408源码/封存优化CLI上执行新runner，不改产品身份或原失败。 固定fed的[新工具25/25真实Windows通过与正式再准入](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6216965340)已完成；generation `329c17de-52c7-4cd0-bfe7-383cabb2ff3e`，apply/inspect均 `readmission_commit_observed`。原lease精确归档，原prepared/owner/request/scratch保留，旧历史仍unknown，不伪造reaped。旧boot rename缺陷仍保留且禁止旧apply；新readmit的UTF-16名称、同句柄no-replace和Job模块无关哈希已实际验证。
 
 随后[首条Data lib check](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6217011842)真正进入SQL编译并报5处E0603：joins/selection子模块的prepare/Cursor/open使用pub(super)，兄弟execution_select不能访问。ac8仅将所需接口限于共同relational模块可见，后续生产lib/workspace all-target与完整relational299组均真实通过。该失败Cargo101、无超时或强制终止，owner已sealed/retired/完整回收，ordinary lease正常释放。不要重复恢复或重复跑同一编译失败的全部组。
 
