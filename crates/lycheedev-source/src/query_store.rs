@@ -16,8 +16,8 @@ use std::{
     io::Read,
     path::Path,
 };
-const SCHEMA: &str = "lycheedev.source-query-file.rust.v2";
-const MAGIC: &[u8; 8] = b"LYSPIDX2";
+const SCHEMA: &str = "lycheedev.source-query-file.rust.v3";
+const MAGIC: &[u8; 8] = b"LYSPIDX3";
 const MAX_BYTES: usize = 128 << 20;
 const RECORD: usize = 92;
 const DICTIONARY: usize = 16;
@@ -28,6 +28,8 @@ struct Meta {
     summary: Value,
     documents: Vec<Document>,
     assets: Vec<Value>,
+    #[serde(rename = "compatibilityGaps")]
+    compatibility_gaps: BTreeSet<String>,
 }
 fn invalid(message: &str) -> ToolkitError {
     ToolkitError::new("codebase.source_integrity", message, 4)
@@ -304,6 +306,7 @@ impl<'a> Image<'a> {
             assets,
             symbols,
             summary: self.meta.summary,
+            compatibility_gaps: self.meta.compatibility_gaps,
             home: home.into(),
         })
     }
@@ -401,7 +404,7 @@ pub fn status_with_control(
             (format!("source/rust-query-file/{identity}"), SCHEMA),
             (
                 format!("source/rust-index/{identity}"),
-                "lycheedev.source-index.rust.v5",
+                "lycheedev.source-index.rust.v6",
             ),
         ] {
             let manifest = match metadata.read_controlled::<Value>(&key, control) {
@@ -509,6 +512,7 @@ fn write_image(map: &Index, identity: &str) -> Result<Vec<u8>> {
         summary,
         documents: map.documents.clone(),
         assets: map.assets.clone(),
+        compatibility_gaps: map.compatibility_gaps.clone(),
     })?;
     let mut pool = vec![];
     let mut interned = BTreeMap::<String, (usize, usize)>::new();
@@ -646,6 +650,7 @@ mod tests {
                 symbols,
                 assets: vec![json!({"path":"Assets/Timer.blp"})],
                 summary: json!({"repository":pin.repository,"product":pin.product,"commit":pin.exact_commit,"parser":pin.parser_revision,"complete":true,"skippedDocuments":0,"diagnostics":0}),
+                compatibility_gaps: BTreeSet::from(["api".into(), "event".into()]),
                 home: Path::new(".").into(),
             },
             pin,
@@ -678,6 +683,7 @@ mod tests {
                     std::time::Instant::now(),
                 )
                 .unwrap();
+            assert_eq!(projected.compatibility_gaps, full.compatibility_gaps);
             // The real store uses original content-addressed blobs. Keep this
             // purely projection test independent of disk/evidence behavior.
             projected.documents[0].text = full.documents[0].text.clone();

@@ -19,7 +19,7 @@ function sorted(value) {
   return value;
 }
 
-function fixture() {
+function fixture(rustLayout = 'v6') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lycheedev-fact-delta-'));
   const goHome = path.join(root, 'go');
   const rustHome = path.join(root, 'rust');
@@ -38,8 +38,10 @@ function fixture() {
       diagnostics: [],
     };
     const goKey = sha256(`${parser}\0${mode}\0${document.sha256}`);
-    const rustKey = sha256('facts-layout-v6-xml-original-tags\0tree-sitter-0.26.3\0'
-      + `lua-0.5.0\0xml-0.38\0generator-v5\0${document.path}\0${document.sha256}`);
+    const layoutKey = rustLayout === 'v7' ? 'facts-layout-v7-go323-public' : 'facts-layout-v6-xml-original-tags';
+    const generator = rustLayout === 'v7' ? 'generator-v6' : 'generator-v5';
+    const rustKey = sha256(`${layoutKey}\0tree-sitter-0.26.3\0`
+      + `lua-0.5.0\0xml-0.38\0${generator}\0${document.path}\0${document.sha256}`);
     const goFile = path.join(goHome, 'source/v1/facts/files', parser, `${goKey}.json`);
     const rustFile = path.join(rustHome, 'cache/source-facts-rust', `${rustKey}.json`);
     for (const file of [goFile, rustFile]) fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -48,7 +50,7 @@ function fixture() {
       inputSHA256: document.sha256, factsSHA256: sha256(goJSON(facts)), facts,
     }));
     fs.writeFileSync(rustFile, JSON.stringify(sorted({
-      schema: 'lycheedev.source-facts.rust.v6', inputSHA256: document.sha256,
+      schema: `lycheedev.source-facts.rust.${rustLayout}`, inputSHA256: document.sha256,
       factsSHA256: sha256(JSON.stringify(sorted(facts))), facts,
     })));
     files.push({ goFile, rustFile });
@@ -64,7 +66,7 @@ function fixture() {
   }));
   return {
     root, goHome, rustHome, records, manifest, files,
-    read: () => readFactDelta(goHome, rustHome, records),
+    read: () => readFactDelta(goHome, rustHome, records, rustLayout),
     changeRust(index, change) {
       const file = files[index].rustFile;
       const envelope = JSON.parse(fs.readFileSync(file));
@@ -75,8 +77,8 @@ function fixture() {
   };
 }
 
-async function withFixture(context, callback) {
-  const value = fixture();
+async function withFixture(context, callback, rustLayout = 'v6') {
+  const value = fixture(rustLayout);
   let passed = false;
   try {
     await callback(value);
@@ -203,4 +205,18 @@ test('never changes input bytes and leaves original acceptance authoritative', a
     assert.equal(report.diagnosticOnly, true);
     assert.match(report.acceptanceUnchanged, /original comparison/);
   });
+});
+
+
+test('authenticates explicit v7 public facts without relabeling historical v6', async t => {
+  await withFixture(t, async f => {
+    const report = await f.read();
+    assert.equal(report.inputs.rustLayout, 'v7');
+    assert.equal(report.differentFiles.length, 0);
+    await assert.rejects(readFactDelta(f.goHome, f.rustHome, f.records), /ENOENT/);
+  }, 'v7');
+});
+
+test('rejects an unknown layout instead of discovering or mixing cache identities', async () => {
+  await assert.rejects(readFactDelta('', '', '', 'latest'), /Unsupported Rust facts layout/);
 });

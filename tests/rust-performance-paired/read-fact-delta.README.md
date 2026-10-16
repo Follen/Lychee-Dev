@@ -20,8 +20,8 @@ node tests/rust-performance-paired/read-fact-delta.mjs "GO_HOME" "RUST_HOME" "GO
 The caller chooses a new evidence destination. The reader itself writes only to
 stdout. It authenticates Go records against their manifest and both fact caches
 against their input identity and stored fact digest. It supports the fixed Go
-`lycheedev.source-file-facts.v2` and current Rust
-`lycheedev.source-facts.rust.v6` layouts; unsupported or missing inputs fail
+`lycheedev.source-file-facts.v2` and historical Rust
+`lycheedev.source-facts.rust.v6` (the default) or explicit `v7` below; unsupported or missing inputs fail
 rather than triggering a product rebuild. Go digest verification retains its
 original JSON bytes, including HTML/U+2028/U+2029 escaping.
 
@@ -36,3 +36,16 @@ the Rust aggregate index and cannot establish complete Go/Rust acceptance.
 
 Tests use distinct `os.tmpdir()` fixtures. A successful test removes only its own
 fixture; a failed test prints and retains that fixture for inspection.
+
+
+For a newly built public-facts v7 candidate, pass an explicit fourth argument:
+
+```sh
+node tests/rust-performance-paired/read-fact-delta.mjs GO_HOME RUST_HOME GO_RECORDS_JSONL v7 > static-fact-delta-v7.json
+```
+
+The default remains `v6` for the original failed 5bbb pair. `v7` selects the
+`facts-layout-v7-go323-public` / `generator-v6` identity and authenticates the
+`lycheedev.source-facts.rust.v7` envelope. The reader never mixes layouts or
+chooses whichever cache happens to exist. Both modes compare every field and
+array position; neither changes the original paired-run verdict.

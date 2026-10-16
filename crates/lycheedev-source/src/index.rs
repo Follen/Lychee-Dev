@@ -1,3 +1,4 @@
+mod profile;
 use crate::{
     facts::{self, Facts},
     git,
@@ -6,6 +7,7 @@ use lycheedev_core::{
     Result, ToolkitError, evidence, metadata::historical_write::finish_historical,
     selection::SourcePin, storage,
 };
+use profile::{Phase, Profile};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
@@ -221,6 +223,10 @@ pub struct Index {
     pub assets: Vec<Value>,
     pub symbols: Vec<Symbol>,
     pub summary: Value,
+    // At most six compatibility categories, derived from every diagnostic,
+    // before the public sample is capped. Required when deserializing caches.
+    #[serde(rename = "compatibilityGaps")]
+    pub(crate) compatibility_gaps: BTreeSet<String>,
     #[serde(skip)]
     pub(crate) home: PathBuf,
 }
@@ -268,7 +274,7 @@ pub fn penalty(role: &str) -> i32 {
     }
 }
 pub(crate) fn fingerprint(pin: &SourcePin) -> String {
-    storage::sha256(format!("rust-index-v7\0facts-layout-v6-xml-original-tags\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v5\0{}\0{}\0{}\0{}",pin.repository,pin.product,pin.exact_commit,pin.parser_revision).as_bytes())
+    storage::sha256(format!("rust-index-v8\0facts-layout-v7-go323-public\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}",pin.repository,pin.product,pin.exact_commit,pin.parser_revision).as_bytes())
 }
 pub fn build(home: &Path, pin: &SourcePin) -> Result<Index> {
     build_with_control(home, pin, &Default::default())
@@ -287,6 +293,8 @@ pub(crate) fn build_material_with_control(
     pin: &SourcePin,
     control: &lycheedev_core::control::OperationControl,
 ) -> Result<(Index, String)> {
+    let profile = Profile::new();
+    let metadata_phase = profile.span(Phase::Metadata);
     control.check()?;
     let identity = fingerprint(pin);
     let key = format!("source/rust-index/{identity}");
@@ -299,8 +307,9 @@ pub(crate) fn build_material_with_control(
     };
     let manifest = metadata.read_controlled::<Value>(&key, control);
     let manifest = finish_historical(manifest, metadata.close());
+    drop(metadata_phase);
     if let Ok(manifest) = &manifest {
-        if manifest["schema"] == "lycheedev.source-index.rust.v5"
+        if manifest["schema"] == "lycheedev.source-index.rust.v6"
             && manifest["identity"] == identity
         {
             let digest = manifest["blob"]["sha256"].as_str().unwrap_or("");
@@ -316,6 +325,7 @@ pub(crate) fn build_material_with_control(
                 .join(&digest[..2])
                 .join(&digest[2..]);
             if path.exists() {
+                let _phase = profile.span(Phase::CachedIndex);
                 storage::guard_path(home, &path)?;
                 let started = std::time::Instant::now();
                 let mut raw = vec![];
@@ -368,23 +378,30 @@ pub(crate) fn build_material_with_control(
     {
         return Err(manifest.unwrap_err());
     }
+    let lock_phase = profile.span(Phase::IndexLock);
     let lock = storage::ExclusiveLock::acquire_controlled(
         &home
             .join("locks")
             .join(format!("source-index-{identity}.lock")),
         control,
     )?;
+    drop(lock_phase);
     let result = (|| {
-        let map = build_uncached(home, pin, control)?;
+        let map = build_uncached_profiled(home, pin, control, &profile)?;
+        let serialize_phase = profile.span(Phase::IndexSerialize);
         let mut persisted = serde_json::to_value(&map)?;
         persisted["summary"].as_object_mut().unwrap().remove("io");
         let raw = serde_json::to_vec(&persisted)?;
+        drop(serialize_phase);
+        let publish_phase = profile.span(Phase::IndexPublish);
         let blob =
             lycheedev_core::cache::publish_derived_controlled(home, &raw, 128 << 20, control)?;
+        drop(publish_phase);
+        let _manifest_phase = profile.span(Phase::Manifest);
         crate::persistence::put_manifest(
             home,
             &key,
-            &json!({"schema":"lycheedev.source-index.rust.v5","identity":identity,"blob":blob}),
+            &json!({"schema":"lycheedev.source-index.rust.v6","identity":identity,"blob":blob}),
             control,
         )?;
         Ok((map, blob["sha256"].as_str().unwrap().to_owned()))
@@ -412,7 +429,7 @@ pub fn is_ready_with_control(
             Err(e) if e.code == "vault.record_missing" && e.details.is_null() => return Ok(false),
             Err(e) => return Err(e),
         };
-        if manifest["schema"] != "lycheedev.source-index.rust.v5"
+        if manifest["schema"] != "lycheedev.source-index.rust.v6"
             || manifest["identity"] != identity
         {
             return Ok(false);
@@ -443,7 +460,7 @@ pub fn is_ready_with_control(
 fn facts_cache_path(home: &Path, path: &str, sha256: &str) -> PathBuf {
     let key = storage::sha256(
         format!(
-            "facts-layout-v6-xml-original-tags\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v5\0{path}\0{sha256}"
+            "facts-layout-v7-go323-public\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0{path}\0{sha256}"
         ).as_bytes(),
     );
     home.join("cache/source-facts-rust")
@@ -459,101 +476,123 @@ fn document_facts(
     sha256: &str,
     control: &lycheedev_core::control::OperationControl,
 ) -> Result<(Facts, bool)> {
-    document_facts_with_xml_context(home, path, data, sha256, control, &mut facts::XmlFactsContext::default())
+    document_facts_profiled(home, path, data, sha256, control, None)
 }
-fn document_facts_with_xml_context(
+fn document_facts_profiled(
     home: &Path,
     path: &str,
     data: &[u8],
     sha256: &str,
     control: &lycheedev_core::control::OperationControl,
-    xml_context: &mut facts::XmlFactsContext,
+    profile: Option<&Profile>,
 ) -> Result<(Facts, bool)> {
     control.check()?;
     let cache = facts_cache_path(home, path, sha256);
-    // Facts are rebuildable observations. Authenticate both source and serialized facts before reuse.
+    // A corrupt or obsolete rebuildable cache is never evidence. Read at most
+    // the fixed Go 32 MiB limit plus one byte, then regenerate from authenticated
+    // input bytes. Cancellation and owned-handle close failures still propagate.
+    const MAX_FACT_CACHE_BYTES: usize = 32 << 20;
     if cache.exists() {
+        let _phase = profile.map(|p| p.span(Phase::FactsRead));
         let mut file = std::fs::File::open(&cache)?;
-        let loaded = (|| {
+        let loaded = (|| -> Result<Option<Value>> {
             let mut raw = Vec::new();
             let mut buffer = [0; 65536];
-            loop {
+            while raw.len() <= MAX_FACT_CACHE_BYTES {
                 control.check()?;
-                let n = file.read(&mut buffer)?;
+                let remaining = MAX_FACT_CACHE_BYTES + 1 - raw.len();
+                let count = remaining.min(buffer.len());
+                let n = file.read(&mut buffer[..count])?;
                 if n == 0 {
                     break;
                 }
                 raw.extend_from_slice(&buffer[..n]);
             }
-            Ok(serde_json::from_slice::<Value>(&raw)?)
-        })();
-        let envelope = storage::finish_file(file, loaded, control)?;
-        if envelope["schema"] == "lycheedev.source-facts.rust.v6" {
-            let digest = storage::sha256(&serde_json::to_vec(&envelope["facts"])?);
-            if envelope["inputSHA256"] != sha256 || envelope["factsSHA256"] != digest {
-                return Err(ToolkitError::new(
-                    "codebase.source_integrity",
-                    "Derived source facts digest mismatch",
-                    4,
-                ));
+            if raw.len() > MAX_FACT_CACHE_BYTES {
+                return Ok(None);
             }
-            let parsed = serde_json::from_value(envelope["facts"].clone())?;
+            Ok(serde_json::from_slice::<Value>(&raw).ok())
+        })();
+        if let Some(envelope) = storage::finish_file(file, loaded, control)?
+            && envelope["schema"] == "lycheedev.source-facts.rust.v7"
+            && envelope["inputSHA256"] == sha256
+            && envelope["factsSHA256"] == storage::sha256(&serde_json::to_vec(&envelope["facts"])?)
+            && let Ok(parsed) = serde_json::from_value(envelope["facts"].clone())
+        {
             control.check()?;
             return Ok((parsed, true));
         }
     }
+    let parse_phase = profile.map(|p| p.span(Phase::FactsParse));
     let lower_path = path.to_ascii_lowercase();
     let parsed = if lower_path.ends_with(".lua") {
-        facts::lua(data, lower_path.contains("apidocumentationgenerated"))
+        facts::lua(data, path.contains("/Blizzard_APIDocumentationGenerated/"))
     } else if lower_path.ends_with(".toc") {
         facts::toc(data)
     } else {
-        facts::xml_with_context(data, xml_context)
+        facts::xml(data)
     };
     control.check()?;
+    drop(parse_phase);
+    let serialize_phase = profile.map(|p| p.span(Phase::FactsSerialize));
     let f = serde_json::to_value(&parsed)?;
-    storage::atomic_write_controlled(
-        &cache,
-        &serde_json::to_vec(
-            &json!({"schema":"lycheedev.source-facts.rust.v6","inputSHA256":sha256,"factsSHA256":storage::sha256(&serde_json::to_vec(&f)?),"facts":f}),
-        )?,
-        control,
+    let envelope = serde_json::to_vec(
+        &json!({"schema":"lycheedev.source-facts.rust.v7","inputSHA256":sha256,"factsSHA256":storage::sha256(&serde_json::to_vec(&f)?),"facts":f}),
     )?;
+    if envelope.len() > MAX_FACT_CACHE_BYTES {
+        return Err(ToolkitError::new(
+            "codebase.fact_budget",
+            "Source fact cache exceeds the 32 MiB limit",
+            3,
+        ));
+    }
+    drop(serialize_phase);
+    let _publish_phase = profile.map(|p| p.span(Phase::FactsPublish));
+    storage::atomic_write_controlled(&cache, &envelope, control)?;
     control.check().map_err(|mut error| {
         error.details = json!({"schema":"lycheedev.source-persistence.v1","path":cache,"mutation":"facts","state":"committed","cause":error.clone()});
         error
     })?;
     Ok((parsed, false))
 }
+#[cfg(test)]
 fn build_uncached(
     home: &Path,
     pin: &SourcePin,
     control: &lycheedev_core::control::OperationControl,
 ) -> Result<Index> {
+    build_uncached_profiled(home, pin, control, &Profile::new())
+}
+fn build_uncached_profiled(
+    home: &Path,
+    pin: &SourcePin,
+    control: &lycheedev_core::control::OperationControl,
+    profile: &Profile,
+) -> Result<Index> {
     let started = std::time::Instant::now();
     let deadline = control.deadline();
     let (mut cached, mut parsed_documents, mut read_bytes) = (0usize, 0usize, 0usize);
+    let tree_phase = profile.span(Phase::GitTree);
     let files = git::tree_with_control(home, pin, control)?;
+    drop(tree_phase);
     let mut index = Index {
         documents: vec![],
         assets: vec![],
         symbols: vec![],
         summary: Value::Null,
+        compatibility_gaps: BTreeSet::new(),
         home: home.into(),
     };
     let (mut skipped, mut diagnostics, mut relationships) = (0, Vec::new(), 0usize);
     let mut retained = 0usize;
-    let mut xml_context = facts::XmlFactsContext::default();
     for file in &files {
-        if file.oversized {
-            skipped += 1;
-            diagnostics.push(json!({"path":file.path,"line":0,"message":"source_byte_limit"}));
-        } else if file.asset && file.bytes > 64 << 20 {
+        if file.asset && file.bytes > 64 << 20 {
             index
                 .assets
                 .push(json!({"path":file.path,"contentHash":"","bytes":file.bytes,"local":null}));
         }
     }
+    let visit_phase = profile.span(Phase::GitBlobs);
     let batches = git::visit_blobs_with_control(home, pin, &files, control, |file, data| {
         control.check()?;
         if std::time::Instant::now() >= deadline {
@@ -566,7 +605,9 @@ fn build_uncached(
         read_bytes += data.len();
         if file.asset {
             let hash = storage::sha256(&data);
+            let publish_phase = profile.span(Phase::OriginalPublish);
             let local = evidence::publish_blob_bounded(home, &data, 64 << 20, control)?;
+            drop(publish_phase);
             let ext = Path::new(&file.path)
                 .extension()
                 .and_then(|s| s.to_str())
@@ -589,20 +630,24 @@ fn build_uncached(
                 3,
             ));
         }
-        if std::str::from_utf8(&data).is_err() || data.contains(&0) {
+        if std::str::from_utf8(&data).is_err() {
             skipped += 1;
             diagnostics
                 .push(json!({"path":file.path,"line":0,"message":"source_encoding_or_size"}));
             return Ok(());
         }
         let sha256 = storage::sha256(&data);
-        let (facts, cache_hit) = document_facts_with_xml_context(home, &file.path, &data, &sha256, control, &mut xml_context)?;
+        let (facts, cache_hit) =
+            document_facts_profiled(home, &file.path, &data, &sha256, control, Some(profile))?;
         if cache_hit {
             cached += 1;
         } else {
             parsed_documents += 1;
         }
+        let publish_phase = profile.span(Phase::OriginalPublish);
         evidence::publish_blob_bounded(home, &data, git::MAX_SOURCE_BYTES, control)?;
+        drop(publish_phase);
+        let _symbols_phase = profile.span(Phase::Symbols);
         for (ordinal, d) in facts.declarations.iter().enumerate() {
             let mut s = Symbol {
                 id: String::new(),
@@ -638,6 +683,22 @@ fn build_uncached(
                 ordinal: 0,
             });
         }
+        for load in &facts.loads {
+            index.symbols.push(Symbol {
+                id: String::new(),
+                kind: "load".into(),
+                name: file.path.clone(),
+                target: load.path.clone(),
+                category: load.kind.clone(),
+                confidence: "exact".into(),
+                path: file.path.clone(),
+                line: load.line,
+                end_line: load.line,
+                signature: String::new(),
+                scope: String::new(),
+                ordinal: 0,
+            });
+        }
         for h in &facts.headers {
             index.symbols.push(Symbol {
                 id: String::new(),
@@ -666,6 +727,17 @@ fn build_uncached(
         });
         Ok(())
     })?;
+    drop(visit_phase);
+    // Go emits skipped oversized documents after all analyzed documents.
+    for file in files.iter().filter(|file| file.oversized) {
+        skipped += 1;
+        diagnostics.push(json!({"path":file.path,"line":0,"message":format!("source file has {} bytes, exceeding the {}-byte analysis limit; skipped",file.bytes,git::MAX_SOURCE_BYTES)}));
+    }
+    for diagnostic in &diagnostics {
+        if let Some(path) = diagnostic["path"].as_str() {
+            record_compatibility_gap(&mut index.compatibility_gaps, path);
+        }
+    }
     let failed_paths: BTreeSet<_> = diagnostics
         .iter()
         .filter_map(|d| d["path"].as_str())
@@ -679,9 +751,26 @@ fn build_uncached(
     index.summary["io"] = json!({"gitTreeProcesses":1,"gitBlobProcesses":batches,"cachedFacts":cached,"parsedDocuments":parsed_documents,"readBytes":read_bytes,"elapsedMs":started.elapsed().as_millis(),"deadlineMs":180000});
     if !diagnostics.is_empty() {
         index.summary["diagnosticSample"] =
-            json!(diagnostics.into_iter().take(25).collect::<Vec<_>>());
+            json!(diagnostics.into_iter().take(20).collect::<Vec<_>>());
     }
     Ok(index)
+}
+fn record_compatibility_gap(gaps: &mut BTreeSet<String>, path: &str) {
+    let path = path.to_ascii_lowercase();
+    let categories: &[&str] = if path.ends_with(".lua") {
+        if path.contains("/blizzard_apidocumentationgenerated/") {
+            &["mixin", "api", "event"]
+        } else {
+            &["mixin"]
+        }
+    } else if path.ends_with(".xml") {
+        &["template", "frame-type"]
+    } else if path.ends_with(".toc") {
+        &["interface"]
+    } else {
+        &[]
+    };
+    gaps.extend(categories.iter().map(|category| (*category).to_owned()));
 }
 fn check_search(control: Option<&lycheedev_core::control::OperationControl>) -> Result<()> {
     control.map_or(Ok(()), lycheedev_core::control::OperationControl::check)
@@ -1157,12 +1246,34 @@ mod facts_cache_tests {
             String::from_utf8(output.stdout).unwrap().trim().to_owned()
         }
         fn pin(&self, documents: &BTreeMap<String, String>) -> SourcePin {
-            let mut tree = String::new();
-            for (path, raw) in documents {
-                let blob = self.git(raw, &["hash-object", "-w", "--stdin"]);
-                tree.push_str(&format!("100644 blob {blob}\t{path}\n"));
+            fn tree(fixture: &Fixture, blobs: &BTreeMap<String, String>, prefix: &str) -> String {
+                let mut entries = String::new();
+                let mut directories = BTreeSet::new();
+                for (path, blob) in blobs {
+                    if let Some(relative) = path.strip_prefix(prefix) {
+                        if let Some((directory, _)) = relative.split_once('/') {
+                            directories.insert(directory);
+                        } else {
+                            entries.push_str(&format!("100644 blob {blob}\t{relative}\n"));
+                        }
+                    }
+                }
+                for directory in directories {
+                    let child = tree(fixture, blobs, &format!("{prefix}{directory}/"));
+                    entries.push_str(&format!("040000 tree {child}\t{directory}\n"));
+                }
+                fixture.git(&entries, &["mktree"])
             }
-            let tree = self.git(&tree, &["mktree"]);
+            let blobs = documents
+                .iter()
+                .map(|(path, raw)| {
+                    (
+                        path.clone(),
+                        self.git(raw, &["hash-object", "-w", "--stdin"]),
+                    )
+                })
+                .collect();
+            let tree = tree(self, &blobs, "");
             SourcePin {
                 repository: "elvui".into(),
                 product: "main".into(),
@@ -1277,26 +1388,35 @@ mod facts_cache_tests {
         for field in ["factsSHA256", "inputSHA256"] {
             let mut corrupt = original.clone();
             corrupt[field] = json!("0".repeat(64));
-            storage::atomic_json(&path, &corrupt).unwrap();
-            assert_eq!(
-                load_facts_with_control(&fixture.home, &pin, &index, &control)
-                    .unwrap_err()
-                    .code,
-                "codebase.source_integrity"
-            );
-            assert_eq!(
-                load_facts_from_documents_with_control(&fixture.home, &index, &raw, &control)
-                    .unwrap_err()
-                    .code,
-                "codebase.source_integrity"
-            );
-            assert_eq!(
-                build_uncached(&fixture.home, &pin, &control)
-                    .err()
-                    .unwrap()
-                    .code,
-                "codebase.source_integrity"
-            );
+            corrupt["facts"]["loads"][0]["path"] = json!("Untrusted.lua");
+            for consumer in 0..3 {
+                storage::atomic_json(&path, &corrupt).unwrap();
+                match consumer {
+                    0 => assert_eq!(
+                        load_facts_with_control(&fixture.home, &pin, &index, &control).unwrap()[0]
+                            .target,
+                        "Real.lua"
+                    ),
+                    1 => assert_eq!(
+                        load_facts_from_documents_with_control(
+                            &fixture.home,
+                            &index,
+                            &raw,
+                            &control
+                        )
+                        .unwrap()[0]
+                            .target,
+                        "Real.lua"
+                    ),
+                    _ => assert_eq!(
+                        build_uncached(&fixture.home, &pin, &control)
+                            .unwrap()
+                            .summary["io"]["parsedDocuments"],
+                        1
+                    ),
+                }
+                assert_eq!(storage::read_json::<Value>(&path).unwrap(), original);
+            }
         }
         // Unsupported cache schemas retain the existing parser-rebuild behavior.
         let mut obsolete = original.clone();
@@ -1308,12 +1428,26 @@ mod facts_cache_tests {
         assert_eq!(loads.len(), 1);
         assert_eq!(loads[0].target, "Real.lua");
         assert_eq!(storage::read_json::<Value>(&path).unwrap(), original);
-        // A malformed cache is an error, not a parser fallback or empty loads.
+        // Invalid JSON and oversized cache files also regenerate from the
+        // verified original document instead of unbounded reads or empty facts.
         fs::write(&path, b"{").unwrap();
-        assert!(
-            load_facts_from_documents_with_control(&fixture.home, &index, &raw, &control).is_err()
+        assert_eq!(
+            load_facts_from_documents_with_control(&fixture.home, &index, &raw, &control).unwrap()
+                [0]
+            .target,
+            "Real.lua"
         );
-        assert!(build_uncached(&fixture.home, &pin, &control).is_err());
+        assert_eq!(storage::read_json::<Value>(&path).unwrap(), original);
+        let oversized = fs::File::create(&path).unwrap();
+        oversized.set_len((32 << 20) + 1).unwrap();
+        drop(oversized);
+        assert_eq!(
+            build_uncached(&fixture.home, &pin, &control)
+                .unwrap()
+                .summary["io"]["parsedDocuments"],
+            1
+        );
+        assert_eq!(storage::read_json::<Value>(&path).unwrap(), original);
         let mut missing = raw.clone();
         missing.clear();
         assert_eq!(
@@ -1324,7 +1458,7 @@ mod facts_cache_tests {
         );
     }
     #[test]
-    fn static_index_lazily_shares_catalog_only_within_one_cold_build() {
+    fn public_index_cold_warm_and_rebuild_do_not_require_native_catalog() {
         let fixture = Fixture::new();
         let control = OperationControl::default();
         let raw = BTreeMap::from([
@@ -1336,23 +1470,34 @@ mod facts_cache_tests {
         let pin = fixture.pin(&raw);
         let before = crate::xml_program::catalog_verifications();
         let cold = build_uncached(&fixture.home, &pin, &control).unwrap();
-        assert_eq!(crate::xml_program::catalog_verifications(), before + 1);
+        assert_eq!(crate::xml_program::catalog_verifications(), before);
         assert_eq!(cold.summary["io"]["parsedDocuments"], 4);
         let hit = build_uncached(&fixture.home, &pin, &control).unwrap();
-        assert_eq!(crate::xml_program::catalog_verifications(), before + 1);
+        assert_eq!(crate::xml_program::catalog_verifications(), before);
         assert_eq!(hit.summary["io"]["cachedFacts"], 4);
         for (expected, cached) in cold.documents.iter().zip(&hit.documents) {
-            assert_eq!(serde_json::to_value(&expected.facts).unwrap(), serde_json::to_value(&cached.facts).unwrap());
+            assert_eq!(
+                serde_json::to_value(&expected.facts).unwrap(),
+                serde_json::to_value(&cached.facts).unwrap()
+            );
             if expected.path.ends_with(".xml") {
-                fs::remove_file(facts_cache_path(&fixture.home, &expected.path, &expected.sha256)).unwrap();
+                fs::remove_file(facts_cache_path(
+                    &fixture.home,
+                    &expected.path,
+                    &expected.sha256,
+                ))
+                .unwrap();
             }
         }
         let next = build_uncached(&fixture.home, &pin, &control).unwrap();
-        assert_eq!(crate::xml_program::catalog_verifications(), before + 2);
+        assert_eq!(crate::xml_program::catalog_verifications(), before);
         assert_eq!(next.summary["io"]["parsedDocuments"], 2);
         assert_eq!(next.summary["io"]["cachedFacts"], 2);
         for (expected, fresh) in cold.documents.iter().zip(&next.documents) {
-            assert_eq!(serde_json::to_value(&expected.facts).unwrap(), serde_json::to_value(&fresh.facts).unwrap());
+            assert_eq!(
+                serde_json::to_value(&expected.facts).unwrap(),
+                serde_json::to_value(&fresh.facts).unwrap()
+            );
         }
         let without_io = |index: &Index| {
             let mut value = serde_json::to_value(index).unwrap();
@@ -1364,29 +1509,126 @@ mod facts_cache_tests {
     }
     #[test]
     fn static_facts_non_xml_and_stop_boundaries_never_initialize_catalog() {
-        use std::{sync::{Arc, atomic::AtomicBool}, time::{Duration, Instant}};
+        use std::{
+            sync::{Arc, atomic::AtomicBool},
+            time::{Duration, Instant},
+        };
         let fixture = Fixture::new();
         let before = crate::xml_program::catalog_verifications();
-        let mut context = facts::XmlFactsContext::default();
         let control = OperationControl::default();
         for (path, raw) in [("Run.lua", "function Run() end"), ("Main.toc", "Run.lua\n")] {
-            document_facts_with_xml_context(&fixture.home, path, raw.as_bytes(), &storage::sha256(raw.as_bytes()), &control, &mut context).unwrap();
+            document_facts(
+                &fixture.home,
+                path,
+                raw.as_bytes(),
+                &storage::sha256(raw.as_bytes()),
+                &control,
+            )
+            .unwrap();
         }
         assert_eq!(crate::xml_program::catalog_verifications(), before);
         let raw = b"<Ui><Frame name=\"Stopped\"/></Ui>";
         let digest = storage::sha256(raw);
-        let cancelled = OperationControl::new(Instant::now() + Duration::from_secs(180), Arc::new(AtomicBool::new(true)));
+        let cancelled = OperationControl::new(
+            Instant::now() + Duration::from_secs(180),
+            Arc::new(AtomicBool::new(true)),
+        );
         let expired = OperationControl::uncancelable(Instant::now());
-        for (stopped, code) in [(&cancelled, "command.cancelled"), (&expired, "command.deadline")] {
-            assert_eq!(document_facts_with_xml_context(&fixture.home, "Stopped.xml", raw, &digest, stopped, &mut context).unwrap_err().code, code);
+        for (stopped, code) in [
+            (&cancelled, "command.cancelled"),
+            (&expired, "command.deadline"),
+        ] {
+            assert_eq!(
+                document_facts(&fixture.home, "Stopped.xml", raw, &digest, stopped)
+                    .unwrap_err()
+                    .code,
+                code
+            );
             assert_eq!(crate::xml_program::catalog_verifications(), before);
             assert!(!facts_cache_path(&fixture.home, "Stopped.xml", &digest).exists());
         }
-        document_facts_with_xml_context(&fixture.home, "First.xml", raw, &digest, &control, &mut context).unwrap();
-        assert_eq!(crate::xml_program::catalog_verifications(), before + 1);
+        document_facts(&fixture.home, "First.xml", raw, &digest, &control).unwrap();
+        assert_eq!(crate::xml_program::catalog_verifications(), before);
         // Reuse never bypasses the original entry check, even after initialization.
-        assert_eq!(document_facts_with_xml_context(&fixture.home, "Stopped.xml", raw, &digest, &cancelled, &mut context).unwrap_err().code, "command.cancelled");
+        assert_eq!(
+            document_facts(&fixture.home, "Stopped.xml", raw, &digest, &cancelled)
+                .unwrap_err()
+                .code,
+            "command.cancelled"
+        );
         assert!(!facts_cache_path(&fixture.home, "Stopped.xml", &digest).exists());
-        assert_eq!(crate::xml_program::catalog_verifications(), before + 1);
+        assert_eq!(crate::xml_program::catalog_verifications(), before);
+    }
+    #[test]
+    fn compatibility_gaps_cover_unsampled_diagnostics_and_survive_warm_index() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let mut raw = BTreeMap::new();
+        for i in 0..25 {
+            raw.insert(format!("Early/{i:02}.lua"), "function Broken(".to_owned());
+        }
+        raw.insert(
+            "Late/Blizzard_APIDocumentationGenerated/Api.lua".into(),
+            "function Broken(".into(),
+        );
+        raw.insert("Late/Frames.xml".into(), "<Ui><Frame>".into());
+        let pin = fixture.pin(&raw);
+        let cold = build_uncached(&fixture.home, &pin, &control).unwrap();
+        assert_eq!(
+            cold.summary["diagnosticSample"].as_array().unwrap().len(),
+            20
+        );
+        assert_eq!(
+            cold.compatibility_gaps,
+            BTreeSet::from(["mixin", "api", "event", "template", "frame-type"].map(str::to_owned))
+        );
+        let serialized = serde_json::to_value(&cold).unwrap();
+        let warm: Index = serde_json::from_value(serialized.clone()).unwrap();
+        assert_eq!(warm.compatibility_gaps, cold.compatibility_gaps);
+        let mut legacy = serialized;
+        legacy.as_object_mut().unwrap().remove("compatibilityGaps");
+        assert!(serde_json::from_value::<Index>(legacy).is_err());
+        let mut all = cold.compatibility_gaps;
+        record_compatibility_gap(&mut all, "Late/Main.TOC");
+        assert_eq!(all.len(), 6);
+        assert!(all.contains("interface"));
+    }
+    #[test]
+    fn generated_mode_matches_exact_go_path_and_load_symbols_are_public() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let source = "local api={Name='System',Type='System'}";
+        let raw = BTreeMap::from([
+            (
+                "Interface/Blizzard_APIDocumentationGenerated/Api.lua".into(),
+                source.into(),
+            ),
+            (
+                "Interface/blizzard_apidocumentationgenerated/Api.lua".into(),
+                source.into(),
+            ),
+            (
+                "OtherAPIDocumentationGenerated/Api.lua".into(),
+                source.into(),
+            ),
+            ("Main.toc".into(), "Api.lua\n".into()),
+        ]);
+        let pin = fixture.pin(&raw);
+        let cold = build_uncached(&fixture.home, &pin, &control).unwrap();
+        assert_eq!(cold.summary["declarations"], 1);
+        assert_eq!(
+            cold.symbols
+                .iter()
+                .filter(|s| s.kind == "load")
+                .map(|s| (s.name.as_str(), s.target.as_str(), s.category.as_str()))
+                .collect::<Vec<_>>(),
+            [("Main.toc", "Api.lua", "toc")]
+        );
+        let warm = build_uncached(&fixture.home, &pin, &control).unwrap();
+        assert_eq!(warm.summary["io"]["cachedFacts"], 4);
+        assert_eq!(
+            serde_json::to_value(&cold.symbols).unwrap(),
+            serde_json::to_value(&warm.symbols).unwrap()
+        );
     }
 }

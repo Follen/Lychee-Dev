@@ -377,6 +377,7 @@ mod tests {
             assets: vec![],
             symbols: vec![],
             summary: Value::Null,
+            compatibility_gaps: Default::default(),
             home: Default::default(),
         };
         for(path,text)in &snapshot.load_documents{index.documents.push(index::Document{path:path.clone(),text:vec![],sha256:storage::sha256(text.as_bytes()),bytes:text.len(),facts:Default::default()});}

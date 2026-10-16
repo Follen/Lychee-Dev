@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 18:03 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`49106d74d8832884f6c7d06063fb3df1556f39bf`；当前受测产品树为 `5bbb1fea69d8377d1b73c1afd98728895f908899`。实现进行中，尚未完成全量验收。
+更新：2026-10-16 18:17 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`95ac866f04b6d8bb4731259f9efdb912583514d2`；当前本机受测优化产品树为 `408ca6bf8364fbe4348a9cf52fcfcbc5d6b08510`，runner身份独立认证。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -28,10 +28,15 @@
 - **Data 默认链已接入**：本地/CDN、Prepared/cache、SQL、导航、asset、Hotfix、自适应内存与 checked 收尾均已有实现。当前重点是 SQL 默认线程栈安全：原合法 scalar 深度63在 parse 实际溢出；本批25文件完整候选已实现堆任务栈解析/降低、bind/eval与迭代树 clone/equality/drop、flat JOIN及visitors，新增18项默认栈深度/混合嵌套/错误析构回归。最新fa587f已通过all-target与原三个parse边界测试，但同步 provider callback 的原生重入已在默认栈实际导致6项执行/错误回收溢出。本轮30源已完整实现统一单堆query/CTE/derived/UNION/JOIN与bind/eval任务驱动，子查询通过请求返回主循环而不嵌套poll；provider单次open逐行cursor保留当前行与预算lease。原右侧JOIN物化策略保留，未新增全表缓冲、抬栈或降低深度。迭代Drop/Debug涵盖Weak与并发最后引用；独立结构与固定Go审查已完成，净增22测试，fed首次生产lib的5处子模块可见域错误已在ac8最窄修复；ac8生产lib与workspace all-target编译真实通过，原6个执行崩溃逐项通过，完整正式Cargo relational组299/0/0通过。原预算、深度与默认线程栈不变；专项独立架构/provider/固定Go差分深审完成、无确认新缺陷，local_query76/0/1与全Data库1063/0/1通过；36集成256通过1预算断言失败20忽略，7db补强定向27/0/0已通过，关闭该预算测试缺口，原ac8失败保留。
 - **Emmy 已使用原版848文件，语义验证未完成**：`3336d82`已保存 initializer/provider 重复查询、call quality 多余查询和完整键集合被未知值污染的修复。原固定参考与当前候选的全量类型/provider/coverage差分保留；ac8实际Adapter140项、context56项已通过；完整历史严格差分参考36通过、候选35通过1失败，4137行中仅object成功投影的两条正向call_result证据有差异。独立当前合同检查已在原ac8真实sealed产物通过（4135相同行+2精确当前receipt），原始严格失败、全部类型/provider/coverage原文和Cargo退出结果保留；不能将新增检查冒充原历史比较通过。
 - **HTTP 后继已保存并取得定向实证**：`6051063`使用固定 native-tls/schannel 三源38加4删的最小适配，将SNI名与证书校验名分离，保原验证与tokio所有权。完整来源/许可/逆补丁和打包已接，Node20/20通过；固定fa封存Data EXE实际remote329项与私有根TLS五项Go1.27.1对照已全部通过，多尾点SNI一致且证书拒绝保留。后续ac8正式Cargo remote329及固定Go五loopback也已通过；不能外推系统根/撤销全部策略。Emmy零补丁不等于整个依赖树零补丁。
-- **Source 正确性与性能仍未验收**：短预算隔离/暖态回收已有实际测试；完整Retail仍在原90秒内未完成。最新 dev 候选准备约72秒，API虽写完回复，最终 capture 仍耗尽总预算。不得增加deadline、减少输入或校验来通过。ac8优化release实际构建成功，describe冷热各20对输出全部等价，但Rust/Go中位数比为1.127/1.126，未达到≤0.30；静态Retail四组在真实init/sync后因Rust metadata缺deleted_generations而无计时样本。默认Metadata删除generation真实ABA修复已在7d完整Core492项与9项新增回归通过；5bbb启动观测61项真实Windows测试通过，旧ac8一次/引擎诊断已完成；CLI已实现同进程不可变commands目录一次解析和只读引用，3项Rust回归与CLI contract/describe/help全部已过、收益未测；不能放宽基准校验掩盖。完整 B01–B07仍未通过。
+- **Source 正确性与性能仍未验收**：5bbb完整配对中暖query20对等价且Rust/Go比0.202388，只有该组达到≤0.30；describe两组约1.13、cold query约5.00未达标，cold index因完整公共事实不同而失败。Metadata前置与SQL预算缺口已实际闭合。当前完整修复统一Go公共Facts字段/顺序、两个不同validate入口及完整类别gap缓存；native XML/Emmy语义增强保留在独立真实消费者，不用summary扣数掩盖差异。新代码尚待Rust编译、4036文档逐字段/顺序差分及冷暖复验。非法Lua诊断文本与全部非法XML错误文本尚未完整对照，是明确剩余边界。完整Retail refs/context/batch维持原90秒，旧dev仍deadline失败；优化408 native验证正在使用新95ac runner，尚无成功结论。完整B01–B07、内存与四阶段审计均未验收。
 - **正式 Lua 已明确切到 Go323**：`4092344`保存113原blob认证、精确Rust3.5 overlay与220/9正式入口，旧320/321/322原清单保留。Node正式63及包/版本115通过；本机已安装官方固定MSVC14.51与SDK，Community三工具字节/版本/签名均匹配原Enterprise固定身份；Community精确路径已实际验证。固定7c07的Go323正式Lua220/0/0与Rust桥9/0/0现已真实通过，全部owner回收；只是该自动化范围，不含实机或性能。
 
 ## 3. 最新实际验证与证据
+
+- **408优化版普通native已通过，retained首请求仍失败**：[真实本机报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6221889834)full为8项通过、5项失败检查；普通cold refs/context/API及21项static通过。唯一retained首因是session-cold-refs在11.08秒返回external.io/failed to fill whole buffer，最后query_build_scope，四项后继缺首owner，不能当四个独立根因。child观测private2,121,555,968字节接近2GiB，但terminal缺失/parent未认证，尚不能断言OOM。quota和idle已通过，实际600秒lifetime仍在运行。原95ac独立runner导出漏commands.json造成1项Node失败，精确同版本补导出后70通过1平台skip；本批修正导出说明，旧失败保留。
+
+- **408优化冷index单次诊断仍失败**：[真实报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6221628043)Rust40.696秒、Go8.840秒，原公共声明/关系差异仍在；与5bbb的42.859秒不能据单次归因或宣称统计收益。新公共Facts修复尚未跑，原408样本不属于新语义实现。[408正式候选准备](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6221669424)已完成；95ac修复native wrapper/controller仍读旧320 workflow的真实接线错误，历史文件原样保留，当前独立runner对原408产品身份验证后执行。
+- **本批新增可选index阶段观测**：沿既有`LYCHEEDEV_SOURCE_PHASE_PROFILE=1`输出单条聚合stderr，记录metadata、Git树/批量读取、事实cache读取/解析/序列化/发布、原文blob、symbol构造及最终index/manifest成本。所有时间是wall clock，包含调度；嵌套阶段不相加、不从原验收时间扣除。未改durability、公共结果、身份、产品预算或性能判据。新2项Rust观测回归仍NOT_RUN，下一实测再判断40秒主要成本。
 
 - **静态index确定重复开销优化已实现、Rust待验**：仅facts/index两文件，在一次冷index内惰性复用已认证不可变XML catalog，原每XML miss重建变为一次，cachehit/纯Lua/TOC零次；XML事件行号从反复prefix计数改为顺序增量扫描。保逐文档解析/哈希/校验、原检查位置、cache格式、fsync与全部输出，不删重复验证。一个解析Catalog延长驻留至调用结束，heap大小未测；未承诺42秒降幅。新增6项完整Facts旧算法差分、错误/取消、冷/暖及跨调用重新认证回归，rustfmt解析/diff通过，Rust NOT_RUN。
 - **公开static差异的只读取证入口**：[read-fact-delta说明](tests/rust-performance-paired/read-fact-delta.README.md)及正式Node10/10已保存；在原query队列安全终态后读取失败pair保留的两home与唯一匹配Go records，核输入/缓存摘要再列每文件/类别/顺序/重复项差异，不执行CLI、不改cache或原strict verdict。当前算法已发现额外local-mixin/alias-call/XML handler和缺失inherits/赋值LHS调用等候选，仍须原缓存逐项取证和完整消费者设计，不能只扣summary或删已批准增强。
@@ -93,7 +98,7 @@
 
 随后[首条Data lib check](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6217011842)真正进入SQL编译并报5处E0603：joins/selection子模块的prepare/Cursor/open使用pub(super)，兄弟execution_select不能访问。ac8仅将所需接口限于共同relational模块可见，后续生产lib/workspace all-target与完整relational299组均真实通过。该失败Cargo101、无超时或强制终止，owner已sealed/retired/完整回收，ordinary lease正常释放。不要重复恢复或重复跑同一编译失败的全部组。
 
-7d Metadata/Core与5bbb配对均已安全结束，不重复原样本。下一固定 `408ca6bf8364fbe4348a9cf52fcfcbc5d6b08510`，[原缓存只读差异](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6221341009)已经认证：756路径计数不同、1394文件完整字段或顺序不同（含638同计数），净163声明/3727关系差额与独立解析定位一致。正在统一公共Facts的字段/顺序/类别及两条不同validate合同，不以summary扣数或忽略字段通过。[408受影响回归](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6221358264)6项新增、facts10/cache4及all-target实际通过；计数有重叠，不加总。该优化尚无实测收益。新增`--cold-index-diagnostics`复用正式认证和独立seed，只执行每引擎一次cold index；原比较保持、已知语义差异仍失败，原时间仅诊断，不能当20对验收。完整Retail native语义与retained生命周期可使用已封存5bbb优化CLI独立验证，原refs/context/batch90秒及整棵分析树2GiB保持；不将408优化收益归给5bbb。
+7d Metadata/Core与5bbb配对均已安全结束，不重复原样本。下一固定 `408ca6bf8364fbe4348a9cf52fcfcbc5d6b08510`，[原缓存只读差异](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6221341009)已经认证：756路径计数不同、1394文件完整字段或顺序不同（含638同计数），净163声明/3727关系差额与独立解析定位一致。正在统一公共Facts的字段/顺序/类别及两条不同validate合同，不以summary扣数或忽略字段通过。[408受影响回归](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6221358264)6项新增、facts10/cache4及all-target实际通过；计数有重叠，不加总。该优化单次诊断40.696秒仍不等价，收益未获统计证明。新增`--cold-index-diagnostics`复用正式认证和独立seed，只执行每引擎一次cold index；原比较保持、已知语义差异仍失败，原时间仅诊断，不能当20对验收。完整Retail native语义与retained生命周期可使用已封存5bbb优化CLI独立验证，原refs/context/batch90秒及整棵分析树2GiB保持；不将408优化收益归给5bbb。
 
 启动归因的独立一次诊断已结束：5bbb runner与ac8 product身份分别认证，完整原始时间见§3。后续若需分段仍附原总时钟，不从已测结果扣除框架开销宣布达标。
 

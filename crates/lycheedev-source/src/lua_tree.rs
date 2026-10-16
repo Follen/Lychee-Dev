@@ -1,21 +1,30 @@
-//! Structural Lua observations from tree-sitter. Alias links are local static
-//! evidence; semantic definitions/references are provided by the LuaLS adapter.
+//! Public source facts preserve the fixed Go scanner contract. Native semantic
+//! analysis uses the syntax tree independently of these literal observations.
 use crate::facts::{Declaration, Facts, Relationship, SyntaxNote};
 use lycheedev_core::{Result, ToolkitError};
-use std::{borrow::Cow, collections::BTreeMap};
+use std::borrow::Cow;
 use tree_sitter::{InputEdit, Node, Parser, Tree};
 
 pub struct SyntaxDocument {
     bytes: Vec<u8>,
     tree: Tree,
     parser: Parser,
+    lua51_identifiers: bool,
 }
 impl SyntaxDocument {
     pub(crate) fn root(&self) -> Node<'_> {
         self.tree.root_node()
     }
     pub fn new(bytes: &[u8]) -> Result<Self> {
-        if std::str::from_utf8(bytes).is_err() || bytes.contains(&0) {
+        Self::new_with_identifiers(bytes, true)
+    }
+    /// The fixed Go source scanner reserves goto, whereas native WoW Lua 5.1
+    /// permits that identifier. Both consumers retain the original source bytes.
+    pub(crate) fn new_public(bytes: &[u8]) -> Result<Self> {
+        Self::new_with_identifiers(bytes, false)
+    }
+    fn new_with_identifiers(bytes: &[u8], lua51_identifiers: bool) -> Result<Self> {
+        if std::str::from_utf8(bytes).is_err() || (lua51_identifiers && bytes.contains(&0)) {
             return Err(ToolkitError::new(
                 "codebase.source_integrity",
                 "Lua structural input must be UTF-8 source without NUL",
@@ -33,7 +42,7 @@ impl SyntaxDocument {
         parser
             .set_language(&tree_sitter_lua::LANGUAGE.into())
             .map_err(|e| ToolkitError::new("codebase.parser_unavailable", e.to_string(), 3))?;
-        let grammar = lua51_grammar_input(bytes);
+        let grammar = lua51_grammar_input(bytes, lua51_identifiers);
         let tree = parser.parse(grammar.as_ref(), None).ok_or_else(|| {
             ToolkitError::new("codebase.source_budget", "Lua parser cancelled", 3)
         })?;
@@ -41,6 +50,7 @@ impl SyntaxDocument {
             bytes: bytes.to_vec(),
             tree,
             parser,
+            lua51_identifiers,
         })
     }
     /// Caller supplies one exact edit in byte/point coordinates of old/new content.
@@ -51,7 +61,7 @@ impl SyntaxDocument {
             || edit.new_end_byte > new_bytes.len()
             || edit.start_byte > edit.new_end_byte
             || std::str::from_utf8(new_bytes).is_err()
-            || new_bytes.contains(&0)
+            || (self.lua51_identifiers && new_bytes.contains(&0))
         {
             return Err(ToolkitError::new(
                 "codebase.invalid_span",
@@ -72,8 +82,8 @@ impl SyntaxDocument {
             ));
         }
         self.tree.edit(&edit);
-        let old_grammar = lua51_grammar_input(&self.bytes);
-        let new_grammar = lua51_grammar_input(new_bytes);
+        let old_grammar = lua51_grammar_input(&self.bytes, self.lua51_identifiers);
+        let new_grammar = lua51_grammar_input(new_bytes, self.lua51_identifiers);
         // A comment/string delimiter edit can change token classification
         // outside the edited extent. Such an edit requires a full reparse.
         let reusable = old_grammar[..edit.start_byte] == new_grammar[..edit.start_byte]
@@ -87,30 +97,70 @@ impl SyntaxDocument {
         self.bytes = new_bytes.to_vec();
         Ok(())
     }
+    /// Reject newer grammar forms absent from the fixed gopher-lua parser.
+    /// This is shared by public facts and matrix usages, never by native flow.
+    pub(crate) fn public_parse_note(&self) -> Option<SyntaxNote> {
+        let mut cursor = self.tree.walk();
+        loop {
+            let node = cursor.node();
+            let unsupported = public_unsupported(&self.bytes, node);
+            if unsupported {
+                return Some(SyntaxNote {
+                    message: "Syntax unavailable in fixed Go Lua parser".into(),
+                    line: lua_line_starts(&self.bytes)
+                        .partition_point(|start| *start <= node.start_byte()),
+                });
+            }
+            if !matches!(node.kind(), "comment" | "string") && cursor.goto_first_child() {
+                continue;
+            }
+            loop {
+                if cursor.goto_next_sibling() {
+                    break;
+                }
+                if !cursor.goto_parent() {
+                    return None;
+                }
+            }
+        }
+    }
     pub fn facts(&self, generated: bool) -> Facts {
         let mut w = Walker {
             raw: &self.bytes,
             facts: Facts::default(),
             scopes: vec!["<file>".into()],
-            aliases: vec![BTreeMap::new()],
+            api_roots: Vec::new(),
+            rejected_syntax: false,
             generated,
             work: 0,
             depth: 0,
+            source_lines: lua_line_starts(&self.bytes),
             lines: std::str::from_utf8(&self.bytes)
                 .unwrap_or("")
                 .split('\n')
                 .collect(),
         };
         w.walk(self.tree.root_node());
+        // Go rejects a malformed program as a whole, rather than publishing
+        // declarations recovered by tree-sitter. The native tree stays intact.
+        if self.tree.root_node().has_error() || w.rejected_syntax {
+            w.facts.declarations.clear();
+            w.facts.relationships.clear();
+        } else {
+            for root in std::mem::take(&mut w.api_roots) {
+                w.documentation(root, "");
+            }
+        }
         w.facts
     }
 }
 /// Lua 5.1's `goto` is an identifier. The pinned modern grammar reserves it.
 /// Token-only, same-width masking makes the grammar see an identifier while
-/// every observation/name/hash/span reads unchanged original bytes. Strings,
-/// comments and longer identifiers are never rewritten. This is structural
-/// compatibility; bundled luac remains the syntax authority.
-fn lua51_grammar_input(raw: &[u8]) -> Cow<'_, [u8]> {
+/// every observation/name/hash/span reads unchanged original bytes. Comments
+/// and longer identifiers are untouched. Unsupported modern string escapes
+/// receive a same-width grammar-only mask; the literal decoder reads originals.
+/// Bundled luac remains the separate native WoW syntax authority.
+fn lua51_grammar_input(raw: &[u8], mask_goto: bool) -> Cow<'_, [u8]> {
     fn long_end(raw: &[u8], at: usize) -> Option<usize> {
         if raw.get(at) != Some(&b'[') {
             return None;
@@ -159,6 +209,15 @@ fn lua51_grammar_input(raw: &[u8]) -> Cow<'_, [u8]> {
             at += 1;
             while at < raw.len() {
                 if raw[at] == b'\\' {
+                    if let Some(next) = raw.get(at + 1)
+                        && !b"abfnrtv\\'\"0123456789\r\n".contains(next)
+                    {
+                        // Lua 5.1/gopher-lua accept arbitrary escaped bytes.
+                        // The modern grammar rejects some and gives others
+                        // newer meanings. Only the grammar view is masked;
+                        // literal decoding always reads the original bytes.
+                        changed.get_or_insert_with(|| raw.to_vec())[at] = b' ';
+                    }
                     at = (at + 2).min(raw.len());
                 } else if raw[at] == quote {
                     at += 1;
@@ -179,7 +238,7 @@ fn lua51_grammar_input(raw: &[u8]) -> Cow<'_, [u8]> {
             while at < raw.len() && identifier(raw[at]) {
                 at += 1;
             }
-            if &raw[start..at] == b"goto" {
+            if mask_goto && &raw[start..at] == b"goto" {
                 changed.get_or_insert_with(|| raw.to_vec())[start + 1] = b'0';
             }
         } else {
@@ -198,13 +257,85 @@ fn point_at(raw: &[u8], at: usize) -> tree_sitter::Point {
         .unwrap_or(at);
     tree_sitter::Point::new(row, column)
 }
+fn public_unsupported(raw: &[u8], node: Node<'_>) -> bool {
+    match node.kind() {
+        "attribute" => true,
+        "binary_expression" | "unary_expression" => node
+            .child_by_field_name("operator")
+            .is_some_and(|operator| {
+                matches!(operator.kind(), "//" | "&" | "|" | "~" | "<<" | ">>")
+            }),
+        "identifier" => !text(raw, node).is_ascii(),
+        "number" => {
+            let token = text(raw, node).to_ascii_lowercase();
+            token.starts_with("0x") && token.contains(['.', 'p'])
+        }
+        "hash_bang_line" => !raw.contains(&b'\n'),
+        _ => false,
+    }
+}
 fn children(n: Node<'_>) -> Vec<Node<'_>> {
     let mut cursor = n.walk();
-    n.named_children(&mut cursor).collect()
+    n.named_children(&mut cursor)
+        .filter(|node| node.kind() != "comment")
+        .collect()
 }
 fn text<'a>(raw: &'a [u8], n: Node<'_>) -> &'a str {
     std::str::from_utf8(&raw[n.byte_range()]).unwrap_or("")
 }
+fn unparenthesized(mut node: Node<'_>) -> Node<'_> {
+    while node.kind() == "parenthesized_expression" {
+        let Some(child) = children(node).into_iter().next() else {
+            break;
+        };
+        node = child;
+    }
+    node
+}
+// gopher-lua folds parentheses into their expression and assigns the opening
+// line, except that an adjusted parenthesized call retains its callee line.
+pub(crate) fn expression_start(mut node: Node<'_>) -> usize {
+    for _ in 0..256 {
+        let next = match node.kind() {
+            "parenthesized_expression" => {
+                let inner = unparenthesized(node);
+                if inner.kind() != "function_call" {
+                    return node.start_byte();
+                }
+                Some(inner)
+            }
+            "function_call" => node.child_by_field_name("name"),
+            "dot_index_expression" | "method_index_expression" | "bracket_index_expression" => {
+                node.child_by_field_name("table")
+            }
+            _ => None,
+        };
+        let Some(next) = next else { break };
+        node = next;
+    }
+    node.start_byte()
+}
+pub(crate) fn lua_line_starts(raw: &[u8]) -> Vec<usize> {
+    let mut starts = vec![0];
+    let mut at = 0;
+    while at < raw.len() {
+        if matches!(raw[at], b'\r' | b'\n') {
+            let first = raw[at];
+            at += 1;
+            if raw
+                .get(at)
+                .is_some_and(|byte| matches!(*byte, b'\r' | b'\n') && *byte != first)
+            {
+                at += 1;
+            }
+            starts.push(at);
+        } else {
+            at += 1;
+        }
+    }
+    starts
+}
+
 fn name(raw: &[u8], n: Node<'_>) -> String {
     name_limited(raw, n, 0)
 }
@@ -212,6 +343,7 @@ fn name_limited(raw: &[u8], n: Node<'_>, depth: usize) -> String {
     if depth > 256 {
         return String::new();
     }
+    let n = unparenthesized(n);
     match n.kind() {
         "identifier" => text(raw, n).into(),
         "dot_index_expression" | "method_index_expression" => {
@@ -257,74 +389,111 @@ fn name_limited(raw: &[u8], n: Node<'_>, depth: usize) -> String {
         _ => String::new(),
     }
 }
-fn string(raw: &[u8], node: Node<'_>) -> Option<String> {
+// gopher-lua's lexer emits bytes for escapes (including wrapping decimal
+// escapes). JSON replaces each invalid UTF-8 byte, rather than Latin-1 widening.
+pub(crate) fn string(raw: &[u8], node: Node<'_>) -> Option<String> {
+    fn json_string(bytes: &[u8]) -> String {
+        let mut out = String::new();
+        let mut rest = bytes;
+        while !rest.is_empty() {
+            match std::str::from_utf8(rest) {
+                Ok(value) => {
+                    out.push_str(value);
+                    break;
+                }
+                Err(error) => {
+                    let valid = error.valid_up_to();
+                    out.push_str(std::str::from_utf8(&rest[..valid]).expect("validated prefix"));
+                    out.push('\u{fffd}');
+                    rest = &rest[valid + 1..];
+                }
+            }
+        }
+        out
+    }
+    fn newline(bytes: &[u8], at: &mut usize) -> u8 {
+        let value = bytes[*at];
+        *at += 1;
+        if matches!(value, b'\r' | b'\n') {
+            if bytes
+                .get(*at)
+                .is_some_and(|next| matches!(*next, b'\r' | b'\n') && *next != value)
+            {
+                *at += 1;
+            }
+            b'\n'
+        } else {
+            value
+        }
+    }
+    let node = unparenthesized(node);
     if node.kind() != "string" {
         return None;
     }
-    let s = text(raw, node);
-    let first = s.as_bytes().first().copied()?;
+    let value = &raw[node.byte_range()];
+    let first = *value.first()?;
+    let mut out = Vec::new();
     if first == b'[' {
-        let open = s.find('[')?;
-        let second = s[open + 1..].find('[')? + open + 1;
+        let second = value[1..].iter().position(|byte| *byte == b'[')? + 1;
         let width = second + 1;
-        let mut content = s.get(width..s.len().checked_sub(width)?)?;
-        if let Some(rest) = content
-            .strip_prefix("\r\n")
-            .or_else(|| content.strip_prefix('\n'))
+        let content = value.get(width..value.len().checked_sub(width)?)?;
+        let mut at = 0;
+        if content
+            .first()
+            .is_some_and(|byte| matches!(*byte, b'\r' | b'\n'))
         {
-            content = rest;
+            newline(content, &mut at);
         }
-        return Some(content.into());
+        while at < content.len() {
+            out.push(newline(content, &mut at));
+        }
+        return Some(json_string(&out));
     }
-    if !b"'\"".contains(&first) || s.len() < 2 {
+    if !b"'\"".contains(&first) || value.len() < 2 {
         return None;
     }
-    let mut out = String::new();
-    let mut chars = s[1..s.len() - 1].chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '\\' {
-            out.push(c);
+    let content = &value[1..value.len() - 1];
+    let mut at = 0;
+    while at < content.len() {
+        let byte = newline(content, &mut at);
+        if byte != b'\\' {
+            out.push(byte);
             continue;
         }
-        let escaped = chars.next()?;
-        match escaped {
-            'a' => out.push('\u{7}'),
-            'b' => out.push('\u{8}'),
-            'f' => out.push('\u{c}'),
-            'n' => out.push('\n'),
-            'r' => out.push('\r'),
-            't' => out.push('\t'),
-            'v' => out.push('\u{b}'),
-            '\\' | '\'' | '"' => out.push(escaped),
-            '\n' => out.push('\n'),
-            '\r' => {
-                if chars.peek() == Some(&'\n') {
-                    chars.next();
-                }
-                out.push('\n');
-            }
-            '0'..='9' => {
-                let mut digits = escaped.to_string();
-                for _ in 0..2 {
-                    if chars.peek().is_some_and(char::is_ascii_digit) {
-                        digits.push(chars.next().unwrap());
-                    } else {
-                        break;
-                    }
-                }
-                let value: u8 = digits.parse().ok()?;
-                out.push(char::from(value));
-            }
-            _ => return None,
+        if at == content.len() {
+            return None;
         }
+        let escaped = newline(content, &mut at);
+        out.push(match escaped {
+            b'a' => 7,
+            b'b' => 8,
+            b'f' => 12,
+            b'n' => b'\n',
+            b'r' => b'\r',
+            b't' => b'\t',
+            b'v' => 11,
+            b'0'..=b'9' => {
+                let mut number = u16::from(escaped - b'0');
+                for _ in 0..2 {
+                    let Some(digit) = content.get(at).filter(|digit| digit.is_ascii_digit()) else {
+                        break;
+                    };
+                    number = number * 10 + u16::from(*digit - b'0');
+                    at += 1;
+                }
+                (number & 255) as u8
+            }
+            other => other,
+        });
     }
-    Some(out)
+    Some(json_string(&out))
 }
+
 fn field<'a>(raw: &[u8], table: Node<'a>, key: &str) -> Option<Node<'a>> {
     for f in children(table).into_iter().filter(|f| f.kind() == "field") {
         let n = f.child_by_field_name("name");
         if n.is_some_and(|n| text(raw, n) == key || string(raw, n).as_deref() == Some(key)) {
-            return f.child_by_field_name("value");
+            return f.child_by_field_name("value").map(unparenthesized);
         }
     }
     None
@@ -334,17 +503,27 @@ fn table_text(raw: &[u8], table: Node<'_>, key: &str) -> String {
         .and_then(|n| string(raw, n))
         .unwrap_or_default()
 }
-struct Walker<'a> {
+struct Walker<'a, 'tree> {
     raw: &'a [u8],
     facts: Facts,
     scopes: Vec<String>,
-    aliases: Vec<BTreeMap<String, Option<String>>>,
+    api_roots: Vec<Node<'tree>>,
+    rejected_syntax: bool,
     generated: bool,
     work: usize,
     depth: usize,
     lines: Vec<&'a str>,
+    source_lines: Vec<usize>,
 }
-impl Walker<'_> {
+impl<'tree> Walker<'_, 'tree> {
+    fn line(&self, node: Node<'_>) -> usize {
+        self.source_lines
+            .partition_point(|start| *start <= expression_start(node))
+    }
+    fn end_line(&self, node: Node<'_>) -> usize {
+        self.source_lines
+            .partition_point(|start| *start <= node.end_byte().saturating_sub(1))
+    }
     fn scope(&self) -> String {
         self.scopes
             .last()
@@ -362,12 +541,13 @@ impl Walker<'_> {
         if name.is_empty() {
             return;
         }
-        let line = n.start_position().row + 1;
+        let line = self.line(n);
         let signature = signature.unwrap_or_else(|| {
             self.lines
                 .get(line - 1)
                 .copied()
                 .unwrap_or("")
+                .trim_start_matches('\u{feff}')
                 .trim()
                 .into()
         });
@@ -376,7 +556,11 @@ impl Walker<'_> {
             category: category.into(),
             scope: if scope { self.scope() } else { String::new() },
             line,
-            end_line: n.end_position().row + 1,
+            end_line: if matches!(n.kind(), "assignment_statement" | "variable_declaration") {
+                0
+            } else {
+                self.end_line(n)
+            },
             signature,
         });
     }
@@ -386,50 +570,31 @@ impl Walker<'_> {
             to,
             category: category.into(),
             confidence: confidence.into(),
-            line: n.start_position().row + 1,
+            line: self.line(n),
         });
     }
-    fn resolve_alias(&self, target: &str) -> Option<String> {
-        let split = target.find(['.', ':']).unwrap_or(target.len());
-        let base = &target[..split];
-        for scope in self.aliases.iter().rev() {
-            if let Some(v) = scope.get(base) {
-                return v.as_ref().map(|v| format!("{v}{}", &target[split..]));
-            }
-        }
-        Some(target.into())
-    }
-    fn function(&mut self, n: Node<'_>, declared: Option<(String, &str, Node<'_>)>) {
+    fn function(
+        &mut self,
+        n: Node<'tree>,
+        declared: Option<(String, &str, Node<'tree>)>,
+        line: usize,
+    ) {
         let scope = if let Some((name, category, source)) = declared {
             self.declare(source, name.clone(), category, true, None);
             name
         } else {
-            format!(
-                "{}/<anonymous:{}>",
-                self.scope(),
-                n.start_position().row + 1
-            )
+            format!("{}/<anonymous:{line}>", self.scope())
         };
         self.scopes.push(scope);
-        self.aliases.push(BTreeMap::new());
-        if let Some(params) = n.child_by_field_name("parameters") {
-            for p in children(params)
-                .into_iter()
-                .filter(|p| p.kind() == "identifier")
-            {
-                self.aliases
-                    .last_mut()
-                    .unwrap()
-                    .insert(text(self.raw, p).into(), None);
-            }
+        if let Some(parameters) = n.child_by_field_name("parameters") {
+            self.walk(parameters);
         }
         if let Some(body) = n.child_by_field_name("body") {
             self.walk(body);
         }
-        self.aliases.pop();
         self.scopes.pop();
     }
-    fn walk(&mut self, n: Node<'_>) {
+    fn walk(&mut self, n: Node<'tree>) {
         if self.depth >= 256 {
             if !self
                 .facts
@@ -448,7 +613,17 @@ impl Walker<'_> {
         self.walk_inner(n);
         self.depth -= 1;
     }
-    fn walk_inner(&mut self, n: Node<'_>) {
+    fn walk_inner(&mut self, n: Node<'tree>) {
+        if public_unsupported(self.raw, n) {
+            if !self.rejected_syntax {
+                self.facts.diagnostics.push(SyntaxNote {
+                    message: "Syntax unavailable in fixed Go Lua parser".into(),
+                    line: self.line(n),
+                });
+                self.rejected_syntax = true;
+            }
+            return;
+        }
         self.work += 1;
         if self.work > 2_000_000 {
             if self.work == 2_000_001 {
@@ -475,50 +650,50 @@ impl Walker<'_> {
         match n.kind() {
             "function_declaration" => {
                 if !n.has_error() {
+                    if let Some(target) = n.child_by_field_name("name") {
+                        self.walk(target);
+                    }
                     let target = n
                         .child_by_field_name("name")
                         .map(|n| name(self.raw, n))
                         .unwrap_or_default();
-                    let local = text(self.raw, n).trim_start().starts_with("local ");
-                    if local {
-                        self.aliases
-                            .last_mut()
-                            .unwrap()
-                            .insert(target.clone(), Some(target.clone()));
-                    }
+                    let local = text(self.raw, n).split_whitespace().next() == Some("local");
                     self.function(
                         n,
                         Some((target, if local { "local-function" } else { "function" }, n)),
+                        self.line(n),
                     );
                     return;
                 }
             }
             "function_definition" => {
                 if !n.has_error() {
-                    self.function(n, None);
+                    self.function(n, None, self.line(n));
+                    return;
+                }
+            }
+            "parenthesized_expression" => {
+                let inner = unparenthesized(n);
+                if inner.kind() == "function_definition" && !inner.has_error() {
+                    self.function(inner, None, self.line(n));
                     return;
                 }
             }
             "variable_declaration" => {
-                let nodes = children(n);
-                if let Some(a) = nodes.iter().find(|a| a.kind() == "assignment_statement") {
-                    self.assignment(*a, true);
-                    return;
-                }
-                for v in nodes
+                if let Some(a) = children(n)
                     .into_iter()
-                    .flat_map(children)
-                    .filter(|n| n.kind() == "identifier")
+                    .find(|a| a.kind() == "assignment_statement")
                 {
-                    self.aliases
-                        .last_mut()
-                        .unwrap()
-                        .insert(text(self.raw, v).into(), None);
+                    self.assignment(a, true, n);
+                } else {
+                    for child in children(n) {
+                        self.walk(child);
+                    }
                 }
                 return;
             }
             "assignment_statement" => {
-                self.assignment(n, false);
+                self.assignment(n, false, n);
                 return;
             }
             "function_call" if !n.has_error() => {
@@ -540,12 +715,10 @@ impl Walker<'_> {
                         "call",
                         confidence,
                     );
-                    if let Some(resolved) = self.resolve_alias(&target)
-                        && resolved != target
-                    {
-                        self.link(n, self.scope(), resolved, "alias-call", "static-resolved");
-                    }
-                    if target.ends_with(":RegisterEvent") || target.ends_with(":RegisterUnitEvent")
+                    if (target.ends_with(":RegisterEvent")
+                        || target.ends_with(":RegisterUnitEvent"))
+                        && n.child_by_field_name("arguments")
+                            .is_some_and(|a| !children(a).is_empty())
                     {
                         let value = n
                             .child_by_field_name("arguments")
@@ -569,29 +742,19 @@ impl Walker<'_> {
             "table_constructor"
                 if self.generated && table_text(self.raw, n, "Type") == "System" =>
             {
-                self.documentation(n, "")
+                self.api_roots.push(n)
             }
-            "block" => {
-                self.aliases.push(BTreeMap::new());
-                for c in children(n) {
-                    self.walk(c);
-                }
-                self.aliases.pop();
-                return;
-            }
-            "goto_statement" | "label_statement" | "attribute" => {
-                self.facts.diagnostics.push(SyntaxNote {
-                    message: "Syntax unavailable in WoW Lua 5.1".into(),
-                    line: n.start_position().row + 1,
-                })
-            }
+            "attribute" => self.facts.diagnostics.push(SyntaxNote {
+                message: "Syntax unavailable in WoW Lua 5.1".into(),
+                line: n.start_position().row + 1,
+            }),
             _ => {}
         }
         for c in children(n) {
             self.walk(c);
         }
     }
-    fn assignment(&mut self, n: Node<'_>, local: bool) {
+    fn assignment(&mut self, n: Node<'tree>, local: bool, source: Node<'tree>) {
         let nodes = children(n);
         let vars = nodes
             .iter()
@@ -603,52 +766,44 @@ impl Walker<'_> {
             .find(|v| v.kind() == "expression_list")
             .map(|v| children(*v))
             .unwrap_or_default();
-        let mapped: Vec<_> = values
-            .iter()
-            .map(|v| self.resolve_alias(&name(self.raw, *v)))
-            .collect();
-        for (i, var) in vars.iter().enumerate() {
-            let target = name(self.raw, *var);
-            if local {
-                self.aliases.last_mut().unwrap().insert(
-                    target.clone(),
-                    mapped.get(i).cloned().flatten().filter(|s| !s.is_empty()),
+        // Assignment targets may contain calls. Go visits all targets before
+        // any RHS, including targets that cannot produce a declaration name.
+        for var in &vars {
+            self.walk(*var);
+        }
+        for (i, expression) in values.into_iter().enumerate() {
+            let value = unparenthesized(expression);
+            let target = vars.get(i).map(|v| name(self.raw, *v)).unwrap_or_default();
+            if value.kind() == "function_definition" && !target.is_empty() && !value.has_error() {
+                self.function(
+                    value,
+                    Some((
+                        target,
+                        if local { "local-function" } else { "function" },
+                        source,
+                    )),
+                    self.line(expression),
                 );
             } else {
-                for scope in self.aliases.iter_mut().rev() {
-                    if scope.contains_key(&target) {
-                        scope.insert(target.clone(), None);
-                        break;
+                if !local
+                    && !target.is_empty()
+                    && value.kind() == "function_call"
+                    && value
+                        .child_by_field_name("name")
+                        .is_some_and(|f| name(self.raw, f) == "CreateFromMixins")
+                {
+                    self.declare(source, target.clone(), "mixin", true, None);
+                    if let Some(arguments) = value.child_by_field_name("arguments") {
+                        for base in children(arguments) {
+                            let parent = name(self.raw, base);
+                            if !parent.is_empty() {
+                                self.link(source, target.clone(), parent, "inherits", "inferred");
+                            }
+                        }
                     }
                 }
+                self.walk(expression);
             }
-            if let Some(value) = values.get(i) {
-                if value.kind() == "function_definition" && !value.has_error() {
-                    if local {
-                        self.aliases
-                            .last_mut()
-                            .unwrap()
-                            .insert(target.clone(), Some(target.clone()));
-                    }
-                    self.function(
-                        *value,
-                        Some((target, if local { "local-function" } else { "function" }, n)),
-                    );
-                } else {
-                    if value.kind() == "function_call"
-                        && value
-                            .child_by_field_name("name")
-                            .is_some_and(|f| name(self.raw, f) == "CreateFromMixins")
-                        && !target.is_empty()
-                    {
-                        self.declare(n, target, "mixin", true, None);
-                    }
-                    self.walk(*value);
-                }
-            }
-        }
-        for value in values.iter().skip(vars.len()) {
-            self.walk(*value);
         }
     }
     fn documentation(&mut self, n: Node<'_>, namespace: &str) {
@@ -766,7 +921,7 @@ mod tests {
     #[test]
     fn lua51_goto_identifiers_preserve_trivia_ranges_and_incremental_facts() {
         let raw=b"-- goto\nlocal text = 'goto'; local long = [==[goto]==]\n--[=[ goto ]=]\nfunction goto() return text, long end\nlocal obj={}; obj.goto(); goto()\nlocal gotox = 1\n";
-        let masked = lua51_grammar_input(raw);
+        let masked = lua51_grammar_input(raw, true);
         assert_eq!(masked.len(), raw.len());
         let changed: Vec<_> = raw
             .iter()
@@ -818,7 +973,7 @@ mod tests {
         assert_eq!(document.bytes, new);
     }
     #[test]
-    fn exact_ranges_scope_alias_and_reassignment() {
+    fn public_calls_preserve_lexical_targets_without_alias_rows() {
         let d=SyntaxDocument::new(b"local api = C_Test\nlocal function run(api) api.Do() end\nlocal function ok() api.Do() end\napi = Other\napi.Do()\n").unwrap();
         let f = d.facts(false);
         assert_eq!(f.declarations[0].line, 2);
@@ -828,15 +983,16 @@ mod tests {
                 .iter()
                 .any(|r| r.from == "run" && r.to == "C_Test.Do")
         );
-        assert!(
+        assert_eq!(
             f.relationships
                 .iter()
-                .any(|r| r.from == "ok" && r.to == "C_Test.Do" && r.category == "alias-call")
-        );
-        assert!(
-            !f.relationships
-                .iter()
-                .any(|r| r.line == 5 && r.category == "alias-call")
+                .map(|r| (r.from.as_str(), r.to.as_str(), r.category.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                ("run", "api.Do", "call"),
+                ("ok", "api.Do", "call"),
+                ("<file>", "api.Do", "call")
+            ]
         );
     }
     #[test]
@@ -845,7 +1001,8 @@ mod tests {
         let mut d = SyntaxDocument::new(old).unwrap();
         let f = d.facts(false);
         assert!(!f.diagnostics.is_empty());
-        assert!(f.declarations.iter().any(|d| d.name == "Good"));
+        assert!(f.declarations.is_empty());
+        assert!(d.root().has_error());
         let new = b"function Better() return 1 end\nfunction Broken(\n";
         d.edit(
             InputEdit {
@@ -859,11 +1016,156 @@ mod tests {
             new,
         )
         .unwrap();
-        assert!(
-            d.facts(false)
+        assert!(d.facts(false).declarations.is_empty());
+        assert!(d.root().has_error());
+        assert_eq!(d.bytes, new);
+    }
+    #[test]
+    fn go323_assignments_keep_exact_declarations_relations_and_order() {
+        let raw = b"local api = C_Test\nlocal Item = CreateFromMixins(LocalBase)\nGlobal = CreateFromMixins(Base, C.Base)\nGetHolder()[GetKey()] = function() Ping() end\nNamed = (function() Run() end)\nlocal Local = function() Stop() end\nfunction Declared() Tail() end\n";
+        let facts = SyntaxDocument::new(raw).unwrap().facts(false);
+        assert!(facts.diagnostics.is_empty(), "{:?}", facts.diagnostics);
+        assert_eq!(
+            serde_json::to_value(&facts.declarations).unwrap(),
+            serde_json::json!([
+                {"name":"Global","category":"mixin","scope":"<file>","line":3,"endLine":0,"signature":"Global = CreateFromMixins(Base, C.Base)"},
+                {"name":"Named","category":"function","scope":"<file>","line":5,"endLine":0,"signature":"Named = (function() Run() end)"},
+                {"name":"Local","category":"local-function","scope":"<file>","line":6,"endLine":0,"signature":"local Local = function() Stop() end"},
+                {"name":"Declared","category":"function","scope":"<file>","line":7,"endLine":7,"signature":"function Declared() Tail() end"}
+            ])
+        );
+        assert_eq!(
+            serde_json::to_value(&facts.relationships).unwrap(),
+            serde_json::json!([
+                {"from":"<file>","to":"CreateFromMixins","category":"call","confidence":"inferred","line":2},
+                {"from":"Global","to":"Base","category":"inherits","confidence":"inferred","line":3},
+                {"from":"Global","to":"C.Base","category":"inherits","confidence":"inferred","line":3},
+                {"from":"<file>","to":"CreateFromMixins","category":"call","confidence":"inferred","line":3},
+                {"from":"<file>","to":"GetHolder","category":"call","confidence":"inferred","line":4},
+                {"from":"<file>","to":"GetKey","category":"call","confidence":"inferred","line":4},
+                {"from":"<file>/<anonymous:4>","to":"Ping","category":"call","confidence":"inferred","line":4},
+                {"from":"Named","to":"Run","category":"call","confidence":"inferred","line":5},
+                {"from":"Local","to":"Stop","category":"call","confidence":"inferred","line":6},
+                {"from":"Declared","to":"Tail","category":"call","confidence":"inferred","line":7}
+            ])
+        );
+    }
+    #[test]
+    fn generated_metadata_follows_all_ordinary_ast_observations() {
+        let raw = br#"local api = {Name="Demo", Type="System", Namespace="C_Demo", Functions={{Name="Run", Type="Function"}}}
+APIDocumentation:AddDocumentationTable(api)"#;
+        let facts = SyntaxDocument::new(raw).unwrap().facts(true);
+        assert!(facts.diagnostics.is_empty());
+        assert_eq!(
+            serde_json::to_value(&facts.relationships).unwrap(),
+            serde_json::json!([
+                {"from":"<file>","to":"APIDocumentation:AddDocumentationTable","category":"call","confidence":"inferred","line":2},
+                {"from":"C_Demo","to":"C_Demo.Run","category":"contains","confidence":"exact","line":1}
+            ])
+        );
+        assert_eq!(
+            facts
                 .declarations
                 .iter()
-                .any(|d| d.name == "Better")
+                .map(|d| (d.name.as_str(), d.line, d.end_line))
+                .collect::<Vec<_>>(),
+            [("Demo", 1, 1), ("C_Demo.Run", 1, 1)]
         );
+    }
+    #[test]
+    fn comments_do_not_shift_assignments_or_event_arguments() {
+        let raw = br#"local -- first
+ a, -- second
+ b = function() A() end, -- between
+ function() B() end
+frame:RegisterEvent()
+frame:RegisterEvent(-- note
+ ("READY"))
+;(C_Test)[("Run")]()"#;
+        let facts = SyntaxDocument::new(raw).unwrap().facts(false);
+        assert!(facts.diagnostics.is_empty(), "{:?}", facts.diagnostics);
+        assert_eq!(
+            facts
+                .declarations
+                .iter()
+                .map(|d| (d.name.as_str(), d.line, d.end_line))
+                .collect::<Vec<_>>(),
+            [("a", 1, 0), ("b", 1, 0)]
+        );
+        assert_eq!(
+            facts
+                .relationships
+                .iter()
+                .filter(|r| r.category == "event-registration")
+                .map(|r| r.to.as_str())
+                .collect::<Vec<_>>(),
+            ["READY"]
+        );
+        assert_eq!(facts.relationships.last().unwrap().to, "C_Test.Run");
+    }
+
+    #[test]
+    fn go323_literal_decoder_keeps_byte_escapes_parentheses_and_newlines() {
+        let raw = br#"frame:RegisterEvent(("\195\169"))
+frame:RegisterEvent("\255\300\q\x41")
+frame:RegisterEvent([=[
+READY
+]=])"#;
+        let facts = SyntaxDocument::new(raw).unwrap().facts(false);
+        assert!(facts.diagnostics.is_empty(), "{:?}", facts.diagnostics);
+        assert_eq!(
+            facts
+                .relationships
+                .iter()
+                .filter(|r| r.category == "event-registration")
+                .map(|r| r.to.as_str())
+                .collect::<Vec<_>>(),
+            ["é", "�,qx41", "READY\n"]
+        );
+        let cr = SyntaxDocument::new(b"function A() end\rfunction B() end\n\rfunction C() end")
+            .unwrap()
+            .facts(false);
+        assert_eq!(
+            cr.declarations
+                .iter()
+                .map(|d| (d.line, d.end_line))
+                .collect::<Vec<_>>(),
+            [(1, 1), (2, 2), (3, 3)]
+        );
+    }
+
+    #[test]
+    fn public_goto_keywords_and_native_lua51_identifiers_have_separate_consumers() {
+        let identifier = b"function goto() end";
+        assert!(!SyntaxDocument::new(identifier).unwrap().root().has_error());
+        assert!(
+            SyntaxDocument::new_public(identifier)
+                .unwrap()
+                .root()
+                .has_error()
+        );
+        let keyword = SyntaxDocument::new_public(b"goto done; ::done:: Run()")
+            .unwrap()
+            .facts(false);
+        assert!(keyword.diagnostics.is_empty());
+        assert_eq!(keyword.relationships.len(), 1);
+        assert_eq!(keyword.relationships[0].to, "Run");
+    }
+
+    #[test]
+    fn public_newer_syntax_never_leaks_partial_observations() {
+        for raw in [
+            "function Good() end; local x=1//2",
+            "Run(); local x <const> = 1",
+            "Run(); local x=0x1p2",
+            "Run(); local 界=1",
+        ] {
+            let document = SyntaxDocument::new_public(raw.as_bytes()).unwrap();
+            assert!(document.public_parse_note().is_some());
+            let facts = document.facts(false);
+            assert!(facts.declarations.is_empty());
+            assert!(facts.relationships.is_empty());
+            assert!(!facts.diagnostics.is_empty());
+        }
     }
 }

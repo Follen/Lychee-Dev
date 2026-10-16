@@ -49,7 +49,7 @@ pub struct Facts {
     pub diagnostics: Vec<SyntaxNote>,
 }
 pub fn lua(raw: &[u8], generated: bool) -> Facts {
-    match crate::lua_tree::SyntaxDocument::new(raw) {
+    match crate::lua_tree::SyntaxDocument::new_public(raw) {
         Ok(d) => d.facts(generated),
         Err(e) => {
             let mut f = Facts::default();
@@ -88,22 +88,6 @@ pub fn toc(raw: &[u8]) -> Facts {
     f
 }
 
-/// One index invocation may reuse the immutable embedded catalog, including an
-/// authentication failure. Each document still runs its complete extraction and
-/// produces its own original diagnostic; a cache hit never initializes this.
-#[derive(Default)]
-pub(crate) struct XmlFactsContext {
-    catalog: Option<std::result::Result<crate::xml_program::Catalog, String>>,
-}
-impl XmlFactsContext {
-    fn extract(&mut self, raw: &[u8]) -> std::result::Result<crate::xml_program::XmlProgram, String> {
-        match self.catalog.get_or_insert_with(crate::xml_program::catalog) {
-            Ok(catalog) => crate::xml_program::extract_production_with_catalog("@index.xml", raw, catalog),
-            Err(error) => Err(error.clone()),
-        }
-    }
-}
-
 /// LF positions are queried in parser order. Keep the exact prefix definition
 /// for a backwards query as well, without adding an assumption to parsing.
 struct XmlLines<'a> {
@@ -115,175 +99,355 @@ struct XmlLines<'a> {
 }
 impl<'a> XmlLines<'a> {
     fn new(raw: &'a [u8]) -> Self {
-        Self { raw, cursor: 0, line: 1, #[cfg(test)] scanned: 0 }
+        Self {
+            raw,
+            cursor: 0,
+            line: 1,
+            #[cfg(test)]
+            scanned: 0,
+        }
     }
     fn at(&mut self, offset: usize) -> usize {
         if offset < self.cursor {
             #[cfg(test)]
-            { self.scanned += offset; }
-            return 1 + self.raw[..offset].iter().filter(|byte| **byte == b'\n').count();
+            {
+                self.scanned += offset;
+            }
+            return 1 + self.raw[..offset]
+                .iter()
+                .filter(|byte| **byte == b'\n')
+                .count();
         }
         #[cfg(test)]
-        { self.scanned += offset - self.cursor; }
-        self.line += self.raw[self.cursor..offset].iter().filter(|byte| **byte == b'\n').count();
+        {
+            self.scanned += offset - self.cursor;
+        }
+        self.line += self.raw[self.cursor..offset]
+            .iter()
+            .filter(|byte| **byte == b'\n')
+            .count();
         self.cursor = offset;
         self.line
     }
 }
 
+// The public Go scanner consumes XML tokens, not the native UI profile. Native
+// xml_program/xml_inline retain their authenticated catalog, all script kinds,
+// segmented source maps and stricter profile checks at their own entrypoints.
 pub fn xml(raw: &[u8]) -> Facts {
-    xml_with_context(raw, &mut XmlFactsContext::default())
-}
-pub(crate) fn xml_with_context(raw: &[u8], context: &mut XmlFactsContext) -> Facts {
     let mut lines = XmlLines::new(raw);
-    xml_with_line_counter(raw, context, |offset| lines.at(offset))
+    xml_with_line_counter(raw, |offset| lines.at(offset))
 }
-fn xml_with_line_counter(
-    raw: &[u8],
-    context: &mut XmlFactsContext,
-    mut line_at: impl FnMut(usize) -> usize,
-) -> Facts {
-    use quick_xml::{Reader, events::Event};
-    let mut reader = Reader::from_reader(raw);
-    let mut f = Facts::default();
-    let mut stack = Vec::<(String, String)>::new();
-    let prefix=if raw.starts_with(b"\xef\xbb\xbf"){3}else{0};
-    loop {
-        let at = crate::xml_inline::source_map::raw_cursor(raw.len(),prefix,reader.buffer_position()).expect("slice reader original cursor");
-        let n = line_at(at.min(raw.len()));
-        let event=reader.read_event();
-        let empty=matches!(&event,Ok(Event::Empty(_)));
-        match event {
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
-                let tag_start=crate::xml_inline::source_map::borrowed_span(raw,e.as_ref()).expect("slice reader original element bytes").start-1;
-                let n=line_at(tag_start);
-                let tag = String::from_utf8_lossy(e.local_name().as_ref()).into_owned();
-                let mut attrs = BTreeMap::new();
-                let mut bad = false;
-                for a in e.attributes() {
-                    match a {
-                        Ok(a) => match a.decode_and_unescape_value(reader.decoder()) {
-                            Ok(v) => {
-                                attrs.insert(
-                                    String::from_utf8_lossy(a.key.local_name().as_ref())
-                                        .to_ascii_lowercase(),
-                                    v.into_owned(),
-                                );
-                            }
-                            Err(error) => {
-                                f.diagnostics.push(SyntaxNote {
-                                    message: error.to_string(),
-                                    line: n,
-                                });
-                                bad = true;
-                            }
-                        },
-                        Err(error) => {
-                            f.diagnostics.push(SyntaxNote {
-                                message: error.to_string(),
-                                line: n,
-                            });
-                            bad = true;
-                        }
-                    }
-                }
-                if bad {
-                    break;
-                }
-                let mut owner = attrs.get("name").cloned().unwrap_or_default();
-                if !owner.is_empty() {
-                    f.declarations.push(Declaration {
-                        name: owner.clone(),
-                        category: format!("xml-{tag}"),
-                        scope: String::new(),
-                        line: n,
-                        end_line: n,
-                        signature: String::new(),
-                    });
-                } else if let Some((_, parent)) = stack.last() {
-                    owner = parent.clone();
-                }
-                if let Some(file) = attrs.get("file") {
-                    let kind = match tag.to_ascii_lowercase().as_str() {
-                        "script" => "script",
-                        "include" => "include",
-                        _ => "",
-                    };
-                    if !kind.is_empty() {
-                        f.loads.push(LoadReference {
-                            path: file.clone(),
-                            line: n,
-                            kind: kind.into(),
-                        });
-                    }
-                }
-                for base in attrs
-                    .get("inherits")
-                    .into_iter()
-                    .flat_map(|s| s.split(','))
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                {
-                    f.relationships.push(Relationship {
-                        from: owner.clone(),
-                        to: base.into(),
-                        category: "xml-inherits".into(),
-                        confidence: "exact".into(),
-                        line: n,
-                    });
-                }
-                for attr in ["function", "method"] {
-                    if let Some(target) = attrs.get(attr) {
-                        f.relationships.push(Relationship {
-                            from: owner.clone(),
-                            to: target.clone(),
-                            category: format!("xml-{attr}"),
-                            confidence: "exact".into(),
-                            line: n,
-                        });
-                    }
-                }
-                if !empty {
-                    stack.push((tag, owner));
-                }
+// encoding/xml normalizes physical CR/CRLF before expanding entities. It
+// retains tabs/LF and character-reference CRs, including inside attributes.
+pub(crate) fn xml_attribute(
+    attribute: &quick_xml::events::attributes::Attribute<'_>,
+    decoder: quick_xml::encoding::Decoder,
+) -> std::result::Result<String, String> {
+    let decoded = decoder
+        .decode(attribute.value.as_ref())
+        .map_err(|_| "invalid UTF-8".to_owned())?;
+    if decoded.contains('<') {
+        return Err("unescaped < inside quoted string".into());
+    }
+    let normalized = decoded.replace("\r\n", "\n").replace('\r', "\n");
+    let mut value = String::new();
+    let mut rest = normalized.as_str();
+    while let Some(at) = rest.find('&') {
+        value.push_str(&rest[..at]);
+        let entity = &rest[at..];
+        let end = entity
+            .find(';')
+            .ok_or_else(|| format!("invalid character entity {entity} (no semicolon)"))?;
+        value.push_str(&xml_entity(&entity[1..end])?);
+        rest = &entity[end + 1..];
+    }
+    value.push_str(rest);
+    xml_characters(&value)?;
+    Ok(value)
+}
+pub(crate) fn xml_entity(reference: &str) -> std::result::Result<String, String> {
+    let value = match reference {
+        "lt" => Some('<'),
+        "gt" => Some('>'),
+        "amp" => Some('&'),
+        "apos" => Some('\''),
+        "quot" => Some('"'),
+        _ => reference.strip_prefix('#').and_then(|number| {
+            let (number, radix) = number
+                .strip_prefix('x')
+                .map_or((number, 10), |number| (number, 16));
+            if number.is_empty() || !number.chars().all(|ch| ch.is_digit(radix)) {
+                return None;
             }
-            Ok(Event::End(_)) => { stack.pop(); }
-            Ok(Event::Eof) => break,
-            Err(e) => {
-                f.diagnostics.push(SyntaxNote {
-                    message: e.to_string(),
-                    line: n,
-                });
-                break;
-            }
-            _ => {}
+            u32::from_str_radix(number, radix)
+                .ok()
+                .filter(|number| *number <= 0x10ffff)
+                .map(|number| char::from_u32(number).unwrap_or('\u{fffd}'))
+        }),
+    }
+    .ok_or_else(|| format!("invalid character entity &{reference};"))?;
+    let value = value.to_string();
+    xml_characters(&value)?;
+    Ok(value)
+}
+pub(crate) fn xml_characters(text: &str) -> std::result::Result<(), String> {
+    for ch in text.chars() {
+        if !matches!(ch,'\t'|'\n'|'\r'|' '..='\u{d7ff}'|'\u{e000}'..='\u{fffd}'|'\u{10000}'..='\u{10ffff}')
+        {
+            return Err(format!("illegal character code U+{:04X}", ch as u32));
         }
     }
-    // Structural XML attributes above remain candidates. Inline source facts
-    // use the production decoder and its original-byte source map.
-    let mapped=(||->lycheedev_core::Result<()> {
-        let program=context.extract(raw).map_err(|error|lycheedev_core::ToolkitError::new("codebase.xml_invalid",error,4))?;
-        let scripts=crate::xml_inline::scripts(&program,raw)?;
-        for (ordinal,script) in scripts.iter().enumerate(){
-            let mut owner=String::new();
-            let mut node=program.occurrences.iter().find(|node|node.script==Some(ordinal));
-            while let Some(current)=node{
-                if let Some(name)=current.attributes.get("name"){owner=name.value.clone();break;}
-                node=current.parent.map(|parent|&program.occurrences[parent]);
-            }
-            let mut inner=lua(script.body_text().as_bytes(),false);
-            for declaration in &mut inner.declarations{declaration.line=script.original_body_line(declaration.line)?;declaration.end_line=script.original_body_line(declaration.end_line)?;}
-            for relation in &mut inner.relationships{
-                relation.line=script.original_body_line(relation.line)?;
-                if relation.from=="<file>"{relation.from=format!("{owner}:{}",script.handler);}
-            }
-            for diagnostic in &mut inner.diagnostics{if diagnostic.line>0{diagnostic.line=script.original_body_line(diagnostic.line)?;}}
-            f.declarations.extend(inner.declarations);f.relationships.extend(inner.relationships);f.diagnostics.extend(inner.diagnostics);
+    Ok(())
+}
+fn is_public_handler(tag: &str) -> bool {
+    tag.len() > 2 && tag.starts_with("On")
+}
+fn append_inline(facts: &mut Facts, script: &str, script_line: usize, owner: &str, tag: &str) {
+    if script.trim().is_empty() {
+        return;
+    }
+    let mut inner = lua(script.as_bytes(), false);
+    let offset = script_line.saturating_sub(1);
+    for declaration in &mut inner.declarations {
+        declaration.line += offset;
+        // Go adds the offset even to the zero LastLine of assignments.
+        declaration.end_line += offset;
+    }
+    for relation in &mut inner.relationships {
+        relation.line += offset;
+        if relation.from == "<file>" {
+            relation.from = format!("{owner}:{tag}");
         }
-        Ok(())
-    })();
-    if let Err(error)=mapped{f.diagnostics.push(SyntaxNote{message:error.message,line:0});}
-    f
+    }
+    for diagnostic in &mut inner.diagnostics {
+        diagnostic.line = if diagnostic.line > 0 {
+            diagnostic.line + offset
+        } else {
+            script_line
+        };
+    }
+    facts.declarations.extend(inner.declarations);
+    facts.relationships.extend(inner.relationships);
+    facts.diagnostics.extend(inner.diagnostics);
+}
+fn xml_error_message(error: quick_xml::Error) -> String {
+    use quick_xml::errors::{IllFormedError, SyntaxError};
+    match error {
+        quick_xml::Error::Syntax(SyntaxError::UnclosedCData) => {
+            "unexpected EOF in CDATA section".into()
+        }
+        quick_xml::Error::Syntax(_) => "unexpected EOF".into(),
+        quick_xml::Error::IllFormed(IllFormedError::MismatchedEndTag { expected, found }) => {
+            format!(
+                "element <{}> closed by </{}>",
+                expected.rsplit(':').next().unwrap_or(&expected),
+                found.rsplit(':').next().unwrap_or(&found)
+            )
+        }
+        quick_xml::Error::IllFormed(IllFormedError::UnmatchedEndTag(found)) => format!(
+            "unexpected end element </{}>",
+            found.rsplit(':').next().unwrap_or(&found)
+        ),
+        quick_xml::Error::IllFormed(IllFormedError::DoubleHyphenInComment) => {
+            "invalid sequence \"--\" not allowed in comments".into()
+        }
+        other => other.to_string(),
+    }
+}
+fn xml_attribute_error(error: quick_xml::events::attributes::AttrError) -> String {
+    use quick_xml::events::attributes::AttrError;
+    match error {
+        AttrError::ExpectedEq(_) => "attribute name without = in element".into(),
+        AttrError::ExpectedValue(_) | AttrError::UnquotedValue(_) => {
+            "unquoted or missing attribute value in element".into()
+        }
+        AttrError::ExpectedQuote(_, _) => "unexpected EOF".into(),
+        other => other.to_string(),
+    }
+}
+fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) -> Facts {
+    use quick_xml::{Reader, events::Event};
+    let mut reader = Reader::from_reader(raw);
+    reader.config_mut().check_comments = true;
+    let mut facts = Facts::default();
+    let mut stack = Vec::<(String, String)>::new();
+    let mut script = String::new();
+    let mut script_line = 0;
+    let mut character_data_line = None;
+    let prefix = if raw.starts_with(b"\xef\xbb\xbf") {
+        3
+    } else {
+        0
+    };
+    loop {
+        let at =
+            crate::xml_inline::source_map::raw_cursor(raw.len(), prefix, reader.buffer_position())
+                .expect("slice reader original cursor");
+        let line = line_at(at.min(raw.len()));
+        let event = reader.read_event();
+        let empty = matches!(&event, Ok(Event::Empty(_)));
+        // quick-xml exposes references separately; Go returns one CharData
+        // token for the entire adjacent text/reference sequence.
+        let diagnostic_line = if matches!(&event, Ok(Event::Text(_) | Event::GeneralRef(_))) {
+            *character_data_line.get_or_insert(line)
+        } else {
+            character_data_line = None;
+            line
+        };
+        let result: std::result::Result<(), String> = (|| {
+            match event.map_err(xml_error_message)? {
+                Event::Start(element) | Event::Empty(element) => {
+                    let tag = String::from_utf8_lossy(element.local_name().as_ref()).into_owned();
+                    let mut attrs = BTreeMap::new();
+                    for attribute in element.attributes().with_checks(false) {
+                        let attribute = attribute.map_err(xml_attribute_error)?;
+                        let value = xml_attribute(&attribute, reader.decoder())?;
+                        attrs.insert(
+                            String::from_utf8_lossy(attribute.key.local_name().as_ref())
+                                .to_ascii_lowercase(),
+                            value,
+                        );
+                    }
+                    let mut owner = attrs.get("name").cloned().unwrap_or_default();
+                    if !owner.is_empty() {
+                        facts.declarations.push(Declaration {
+                            name: owner.clone(),
+                            category: format!("xml-{tag}"),
+                            scope: String::new(),
+                            line,
+                            end_line: line,
+                            signature: String::new(),
+                        });
+                    } else if let Some((_, parent)) = stack.last() {
+                        owner = parent.clone();
+                    }
+                    if let Some(file) = attrs.get("file").filter(|file| !file.is_empty()) {
+                        let kind = match tag.to_ascii_lowercase().as_str() {
+                            "script" => "script",
+                            "include" => "include",
+                            _ => "",
+                        };
+                        if !kind.is_empty() {
+                            facts.loads.push(LoadReference {
+                                path: file.clone(),
+                                line,
+                                kind: kind.into(),
+                            });
+                        }
+                    }
+                    for base in attrs
+                        .get("inherits")
+                        .into_iter()
+                        .flat_map(|s| s.split(','))
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                    {
+                        facts.relationships.push(Relationship {
+                            from: owner.clone(),
+                            to: base.into(),
+                            category: "xml-inherits".into(),
+                            confidence: "exact".into(),
+                            line,
+                        });
+                    }
+                    for attr in ["function", "method"] {
+                        if let Some(target) = attrs.get(attr).filter(|target| !target.is_empty()) {
+                            facts.relationships.push(Relationship {
+                                from: owner.clone(),
+                                to: target.clone(),
+                                category: format!("xml-{attr}"),
+                                confidence: "exact".into(),
+                                line,
+                            });
+                        }
+                    }
+                    if is_public_handler(&tag) {
+                        script.clear();
+                        script_line = 0;
+                    }
+                    if !empty {
+                        stack.push((tag, owner));
+                    }
+                }
+                Event::End(element) => {
+                    let tag = String::from_utf8_lossy(element.local_name().as_ref()).into_owned();
+                    if is_public_handler(&tag) {
+                        let owner = stack.last().map_or("", |(_, owner)| owner.as_str());
+                        append_inline(&mut facts, &script, script_line, owner, &tag);
+                    }
+                    stack.pop();
+                }
+                Event::Text(text) => {
+                    let text = text.xml10_content().map_err(|error| error.to_string())?;
+                    xml_characters(&text)?;
+                    if text.contains("]]>") {
+                        return Err("unescaped ]]> not in CDATA section".into());
+                    }
+                    if stack.last().is_some_and(|(tag, _)| is_public_handler(tag)) {
+                        if script_line == 0 {
+                            script_line = line;
+                        }
+                        script.push_str(&text);
+                    }
+                }
+                Event::CData(text) => {
+                    let text = text.xml10_content().map_err(|error| error.to_string())?;
+                    xml_characters(&text)?;
+                    if stack.last().is_some_and(|(tag, _)| is_public_handler(tag)) {
+                        if script_line == 0 {
+                            script_line = line;
+                        }
+                        script.push_str(&text);
+                    }
+                }
+                Event::GeneralRef(reference) => {
+                    let reference = reference.decode().map_err(|error| error.to_string())?;
+                    let decoded = xml_entity(&reference)?;
+                    if stack.last().is_some_and(|(tag, _)| is_public_handler(tag)) {
+                        if script_line == 0 {
+                            script_line = line;
+                        }
+                        script.push_str(&decoded);
+                    }
+                }
+                Event::Eof => {
+                    if !stack.is_empty() {
+                        return Err("unexpected EOF".into());
+                    }
+                }
+                // Go accepts XML declarations, directives, processing
+                // instructions and comments without imposing a UI schema.
+                Event::Decl(_) | Event::DocType(_) | Event::PI(_) | Event::Comment(_) => {}
+            }
+            Ok(())
+        })();
+        if let Err(message) = result {
+            let after = crate::xml_inline::source_map::raw_cursor(
+                raw.len(),
+                prefix,
+                reader.buffer_position(),
+            )
+            .unwrap_or(raw.len());
+            let error_line = line_at(after.min(raw.len()));
+            facts.diagnostics.push(SyntaxNote {
+                message: format!("XML syntax error on line {error_line}: {message}"),
+                line: diagnostic_line,
+            });
+            break;
+        }
+        if reader.buffer_position() as usize + prefix >= raw.len() {
+            if !stack.is_empty() {
+                let line = line_at(raw.len());
+                facts.diagnostics.push(SyntaxNote {
+                    message: format!("XML syntax error on line {line}: unexpected EOF"),
+                    line,
+                });
+            }
+            break;
+        }
+    }
+    facts
 }
 
 #[cfg(test)]
@@ -327,29 +491,95 @@ mod tests {
         assert!(f.declarations.is_empty());
     }
     #[test]
-    fn xml_structural_rows_use_original_tags_after_bom_and_whitespace(){
-        for bom in ["","\u{feff}"]{for newline in ["\n","\r\n"]{
-            let text=format!("{bom}<Ui>{newline}  <Frame name=\"First\"/>{newline}  <Frame name=\"Second\"><Scripts>{newline}    <OnShow method=\"Run\"/>{newline}    <OnHide function=\"Stop\"/>{newline}  </Scripts></Frame>{newline}</Ui>");
-            let facts=xml(text.as_bytes());assert!(facts.diagnostics.is_empty(),"{:?}",facts.diagnostics);
-            assert_eq!(facts.declarations.iter().map(|declaration|(declaration.name.as_str(),declaration.line)).collect::<Vec<_>>(),[("First",2),("Second",3)]);
-            assert!(facts.relationships.iter().any(|relation|relation.from=="Second"&&relation.to=="Run"&&relation.line==4));
-            assert!(facts.relationships.iter().any(|relation|relation.from=="Second"&&relation.to=="Stop"&&relation.line==5));
-            let program=crate::xml_program::extract_production("Frames.xml",text.as_bytes()).unwrap();
-            for node in program.occurrences.iter().filter(|node|node.tag=="Frame"){
-                assert_eq!(&text.as_bytes()[node.raw.start..node.raw.start+6],b"<Frame");
-                let declaration=facts.declarations.iter().find(|declaration|declaration.name==node.attributes["name"].value).unwrap();
-                assert_eq!(declaration.line,1+text.as_bytes()[..node.raw.start].iter().filter(|byte|**byte==b'\n').count());
+    fn xml_structural_rows_use_original_tags_after_bom_and_whitespace() {
+        for bom in ["", "\u{feff}"] {
+            for newline in ["\n", "\r\n"] {
+                let text = format!(
+                    "{bom}<Ui>{newline}  <Frame name=\"First\"/>{newline}  <Frame name=\"Second\"><Scripts>{newline}    <OnShow method=\"Run\"/>{newline}    <OnHide function=\"Stop\"/>{newline}  </Scripts></Frame>{newline}</Ui>"
+                );
+                let facts = xml(text.as_bytes());
+                assert!(facts.diagnostics.is_empty(), "{:?}", facts.diagnostics);
+                assert_eq!(
+                    facts
+                        .declarations
+                        .iter()
+                        .map(|declaration| (declaration.name.as_str(), declaration.line))
+                        .collect::<Vec<_>>(),
+                    [("First", 2), ("Second", 3)]
+                );
+                assert!(
+                    facts
+                        .relationships
+                        .iter()
+                        .any(|relation| relation.from == "Second"
+                            && relation.to == "Run"
+                            && relation.line == 4)
+                );
+                assert!(
+                    facts
+                        .relationships
+                        .iter()
+                        .any(|relation| relation.from == "Second"
+                            && relation.to == "Stop"
+                            && relation.line == 5)
+                );
+                let program =
+                    crate::xml_program::extract_production("Frames.xml", text.as_bytes()).unwrap();
+                for node in program
+                    .occurrences
+                    .iter()
+                    .filter(|node| node.tag == "Frame")
+                {
+                    assert_eq!(
+                        &text.as_bytes()[node.raw.start..node.raw.start + 6],
+                        b"<Frame"
+                    );
+                    let declaration = facts
+                        .declarations
+                        .iter()
+                        .find(|declaration| declaration.name == node.attributes["name"].value)
+                        .unwrap();
+                    assert_eq!(
+                        declaration.line,
+                        1 + text.as_bytes()[..node.raw.start]
+                            .iter()
+                            .filter(|byte| **byte == b'\n')
+                            .count()
+                    );
+                }
             }
-        }}
+        }
     }
     #[test]
-    fn inline_entity_newlines_preserve_original_declaration_and_relation_rows(){
-        let raw="\u{feff}<Ui>\r\n<Frame name=\"Demo\"><Scripts><OnLoad>&#10;local function Inline()&#10; return 1&#10;end&#10;Inline()</OnLoad></Scripts></Frame>\r\n<Script>&#10;function Loaded()&#10; Inline()&#10;end</Script>\r\n</Ui>";
-        let facts=xml(raw.as_bytes());assert!(facts.diagnostics.is_empty(),"{:?}",facts.diagnostics);
-        let local=facts.declarations.iter().find(|declaration|declaration.name=="Inline").unwrap();assert_eq!((local.line,local.end_line),(2,2));
-        let loaded=facts.declarations.iter().find(|declaration|declaration.name=="Loaded").unwrap();assert_eq!((loaded.line,loaded.end_line),(3,3));
-        assert!(facts.relationships.iter().any(|relation|relation.from=="Demo:OnLoad"&&relation.to=="Inline"&&relation.line==2));
-        assert!(facts.relationships.iter().any(|relation|relation.from=="Loaded"&&relation.to=="Inline"&&relation.line==3));
+    fn public_inline_lines_follow_go_decoded_lines_native_keeps_source_map() {
+        let raw = "\u{feff}<Ui>\r\n<Frame name=\"Demo\"><Scripts><OnLoad>&#10;local function Inline()&#10; return 1&#10;end&#10;Inline()</OnLoad></Scripts></Frame>\r\n<Script>&#10;function Loaded()&#10; Inline()&#10;end</Script>\r\n</Ui>";
+        let facts = xml(raw.as_bytes());
+        assert!(facts.diagnostics.is_empty(), "{:?}", facts.diagnostics);
+        let local = facts
+            .declarations
+            .iter()
+            .find(|declaration| declaration.name == "Inline")
+            .unwrap();
+        assert_eq!((local.line, local.end_line), (3, 5));
+        assert!(
+            !facts
+                .declarations
+                .iter()
+                .any(|declaration| declaration.name == "Loaded")
+        );
+        assert_eq!(facts.relationships.len(), 1);
+        assert_eq!(
+            (
+                facts.relationships[0].from.as_str(),
+                facts.relationships[0].to.as_str(),
+                facts.relationships[0].line
+            ),
+            ("Demo:OnLoad", "Inline", 6)
+        );
+        let scripts = crate::xml_inline::extract("Native.xml", raw.as_bytes()).unwrap();
+        assert_eq!(scripts.len(), 2);
+        assert_eq!(scripts[0].original_body_line(2).unwrap(), 2);
+        assert_eq!(scripts[1].original_body_line(2).unwrap(), 3);
     }
     #[test]
     fn xml_loads_and_inline_scope() {
@@ -381,12 +611,19 @@ mod tests {
                     let text = format!("{bom}{}", document.replace('\n', newline));
                     let raw = text.as_bytes();
                     let mut lines = XmlLines::new(raw);
-                    let actual = xml_with_line_counter(raw, &mut XmlFactsContext::default(), |at| lines.at(at));
-                    let expected = xml_with_line_counter(raw, &mut XmlFactsContext::default(), |at| {
+                    let actual = xml_with_line_counter(raw, |at| lines.at(at));
+                    let expected = xml_with_line_counter(raw, |at| {
                         1 + raw[..at].iter().filter(|byte| **byte == b'\n').count()
                     });
-                    assert_eq!(serde_json::to_value(actual).unwrap(), serde_json::to_value(expected).unwrap(), "{text:?}");
-                    assert!(lines.scanned <= raw.len(), "ordered events rescanned source: {text:?}");
+                    assert_eq!(
+                        serde_json::to_value(actual).unwrap(),
+                        serde_json::to_value(expected).unwrap(),
+                        "{text:?}"
+                    );
+                    assert!(
+                        lines.scanned <= raw.len(),
+                        "ordered events rescanned source: {text:?}"
+                    );
                 }
             }
         }
@@ -402,39 +639,97 @@ mod tests {
         }
         assert_eq!(lines.scanned, raw.len());
         for at in (0..=raw.len()).rev() {
-            assert_eq!(lines.at(at), 1 + raw[..at].iter().filter(|byte| **byte == b'\n').count());
-        }
-    }
-    #[test]
-    fn xml_catalog_failure_keeps_each_documents_original_facts_and_gap() {
-        let failure = "xml.companion_identity_mismatch".to_owned();
-        let mut shared = XmlFactsContext { catalog: Some(Err(failure.clone())) };
-        for raw in [b"<Ui>\n<Frame name=\"First\"/>\n</Ui>".as_slice(), b"<Ui>\n<Frame name=\"Second\"/>\n</Ui>".as_slice()] {
-            let actual = xml_with_context(raw, &mut shared);
-            let expected = xml_with_line_counter(raw, &mut XmlFactsContext { catalog: Some(Err(failure.clone())) }, |at| {
+            assert_eq!(
+                lines.at(at),
                 1 + raw[..at].iter().filter(|byte| **byte == b'\n').count()
-            });
-            assert_eq!(serde_json::to_value(&actual).unwrap(), serde_json::to_value(expected).unwrap());
-            assert_eq!(actual.declarations.len(), 1);
-            assert_eq!(actual.diagnostics.len(), 1);
-            assert_eq!(actual.diagnostics[0].message, failure);
-            assert_eq!(actual.diagnostics[0].line, 0);
+            );
         }
     }
     #[test]
-    fn shared_catalog_keeps_each_xml_validation_and_all_fact_fields() {
-        let mut shared = XmlFactsContext::default();
-        for raw in [
-            b"<Ui><Frame name=\"First\"/></Ui>".as_slice(),
-            b"<Ui><Frame name=\"Broken\"></Ui>".as_slice(),
-            b"<Ui><Frame name=\"Last\"><Scripts><OnLoad>self:Show()</OnLoad></Scripts></Frame></Ui>".as_slice(),
-        ] {
-            let expected = xml(raw);
-            let before = crate::xml_program::catalog_verifications();
-            let initialized = shared.catalog.is_some();
-            let actual = xml_with_context(raw, &mut shared);
-            assert_eq!(crate::xml_program::catalog_verifications(), before + usize::from(!initialized));
-            assert_eq!(serde_json::to_value(actual).unwrap(), serde_json::to_value(expected).unwrap());
-        }
+    fn public_xml_does_not_require_native_profile_or_catalog() {
+        let raw = br#"<?xml version="1.0"?><!DOCTYPE Root><?tool test?><Root xmlns:x="urn:test"><x:Frame name="Demo"><OnLoad>Run()</OnLoad></x:Frame></Root>"#;
+        let before = crate::xml_program::catalog_verifications();
+        let facts = xml(raw);
+        assert_eq!(crate::xml_program::catalog_verifications(), before);
+        assert!(facts.diagnostics.is_empty(), "{:?}", facts.diagnostics);
+        assert_eq!(facts.declarations[0].category, "xml-Frame");
+        assert_eq!(facts.relationships[0].from, "Demo:OnLoad");
+        assert_eq!(facts.relationships[0].to, "Run");
+        assert!(crate::xml_program::extract_production("Native.xml", raw).is_err());
+    }
+    #[test]
+    fn public_xml_inline_facts_are_interleaved_and_empty_attributes_ignored() {
+        let raw = br#"<Ui>
+<Frame name="First"><Scripts><OnLoad>function Inline() end
+Run()</OnLoad><PreClick>Ignored()</PreClick><OnShow function="" method="Shown"/></Scripts></Frame>
+<Frame name="Last" inherits="Base"/><Script file=""/><Include file="next.xml"/>
+<Script>IgnoredTopLevel()</Script><Binding>IgnoredBinding()</Binding>
+</Ui>"#;
+        let facts = xml(raw);
+        assert!(facts.diagnostics.is_empty(), "{:?}", facts.diagnostics);
+        assert_eq!(
+            facts
+                .declarations
+                .iter()
+                .map(|d| (d.name.as_str(), d.line, d.end_line))
+                .collect::<Vec<_>>(),
+            [("First", 2, 2), ("Inline", 2, 2), ("Last", 4, 4)]
+        );
+        assert_eq!(
+            serde_json::to_value(&facts.relationships).unwrap(),
+            serde_json::json!([
+                {"from":"First:OnLoad","to":"Run","category":"call","confidence":"inferred","line":3},
+                {"from":"First","to":"Shown","category":"xml-method","confidence":"exact","line":3},
+                {"from":"Last","to":"Base","category":"xml-inherits","confidence":"exact","line":4}
+            ])
+        );
+        assert_eq!(
+            serde_json::to_value(&facts.loads).unwrap(),
+            serde_json::json!([{"path":"next.xml","line":4,"kind":"include"}])
+        );
+    }
+    #[test]
+    fn public_xml_character_data_concatenates_entities_cdata_and_comment_gaps() {
+        let facts=xml(br#"<Ui><Frame name="Demo"><OnLoad>R<![CDATA[u]]><!-- omitted -->n(); frame:RegisterEvent(&quot;READY&quot;)</OnLoad></Frame></Ui>"#);
+        assert!(facts.diagnostics.is_empty(), "{:?}", facts.diagnostics);
+        assert_eq!(
+            facts
+                .relationships
+                .iter()
+                .map(|r| r.to.as_str())
+                .collect::<Vec<_>>(),
+            ["Run", "frame:RegisterEvent", "READY"]
+        );
+        assert!(xml(b"").diagnostics.is_empty());
+        assert!(xml(b"<Root/> <Another/>").diagnostics.is_empty());
+        assert!(!xml(b"<Ui><Frame>").diagnostics.is_empty());
+        assert!(!xml(b"<Ui>&unknown;</Ui>").diagnostics.is_empty());
+    }
+
+    #[test]
+    fn public_xml_attribute_newlines_are_normalized_before_entities() {
+        let facts = xml(b"<Ui><Frame name=\"A\r\nB\tC&#13;D&#10;E\"/></Ui>");
+        assert!(facts.diagnostics.is_empty());
+        assert_eq!(facts.declarations[0].name, "A\nB\tC\rD\nE");
+        assert!(
+            !xml(b"<Ui><Frame name=\"&#0;\"/></Ui>")
+                .diagnostics
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn public_xml_error_keeps_go_prior_rows_and_token_diagnostic_position() {
+        let facts = xml(b"<Ui>\n<Frame name=\"Before\">\n</Ui>");
+        assert_eq!(facts.declarations.len(), 1);
+        assert_eq!(
+            serde_json::to_value(&facts.diagnostics).unwrap(),
+            serde_json::json!([{"message":"XML syntax error on line 3: element <Frame> closed by </Ui>","line":3}])
+        );
+        let eof = xml(b"<Ui>\n<Frame>");
+        assert_eq!(
+            serde_json::to_value(eof.diagnostics).unwrap(),
+            serde_json::json!([{"message":"XML syntax error on line 2: unexpected EOF","line":2}])
+        );
     }
 }

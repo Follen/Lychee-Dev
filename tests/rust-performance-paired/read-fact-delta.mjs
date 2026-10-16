@@ -5,6 +5,10 @@ import crypto from 'node:crypto';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
+const RUST_LAYOUTS = Object.freeze({
+  v6: { key: 'facts-layout-v6-xml-original-tags', generator: 'generator-v5', schema: 'lycheedev.source-facts.rust.v6' },
+  v7: { key: 'facts-layout-v7-go323-public', generator: 'generator-v6', schema: 'lycheedev.source-facts.rust.v7' },
+});
 const SECTIONS = ['declarations', 'relationships', 'loads', 'headers', 'diagnostics'];
 export const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
 
@@ -40,7 +44,9 @@ function compareRows(go, rust) {
   };
 }
 
-export async function readFactDelta(goHome, rustHome, goRecords) {
+export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v6') {
+  const layout = RUST_LAYOUTS[rustLayout];
+  if (!layout) throw new Error(`Unsupported Rust facts layout: ${rustLayout}`);
   const manifestFile = path.join(path.dirname(goRecords), 'manifest.json');
   const manifestRaw = fs.readFileSync(manifestFile);
   const manifest = JSON.parse(manifestRaw);
@@ -61,7 +67,7 @@ export async function readFactDelta(goHome, rustHome, goRecords) {
     diagnosticOnly: true,
     acceptanceUnchanged: 'original comparison and failure remain authoritative',
     goSummary: manifest.summary,
-    inputs: { goRecords, goManifestSHA256: sha256(manifestRaw), goHome, rustHome },
+    inputs: { rustLayout, goRecords, goManifestSHA256: sha256(manifestRaw), goHome, rustHome },
     documents: documents.length,
     totals: { go: {}, rust: {} },
     categories: {},
@@ -76,8 +82,8 @@ export async function readFactDelta(goHome, rustHome, goRecords) {
     const mode = extension + (generated ? ':generated-api' : '');
     const parser = manifest.summary.parser;
     const goKey = sha256(`${parser}\0${mode}\0${document.sha256}`);
-    const rustKey = sha256('facts-layout-v6-xml-original-tags\0tree-sitter-0.26.3\0'
-      + `lua-0.5.0\0xml-0.38\0generator-v5\0${document.path}\0${document.sha256}`);
+    const rustKey = sha256(`${layout.key}\0tree-sitter-0.26.3\0`
+      + `lua-0.5.0\0xml-0.38\0${layout.generator}\0${document.path}\0${document.sha256}`);
     const goFile = path.join(goHome, 'source/v1/facts/files', parser, `${goKey}.json`);
     const rustFile = path.join(rustHome, 'cache/source-facts-rust', `${rustKey}.json`);
     const goRaw = fs.readFileSync(goFile);
@@ -86,7 +92,7 @@ export async function readFactDelta(goHome, rustHome, goRecords) {
     const rust = JSON.parse(rustRaw);
     if (go.schema !== 'lycheedev.source-file-facts.v2'
       || go.inputSHA256 !== document.sha256 || go.mode !== mode || go.parser !== parser
-      || rust.schema !== 'lycheedev.source-facts.rust.v6'
+      || rust.schema !== layout.schema
       || rust.inputSHA256 !== document.sha256) {
       throw new Error(`Fact input identity mismatch: ${document.path}`);
     }
@@ -159,9 +165,9 @@ export async function readFactDelta(goHome, rustHome, goRecords) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [goHome, rustHome, goRecords] = process.argv.slice(2);
-  if (!goRecords || process.argv.length !== 5) {
-    throw new Error('usage: node read-fact-delta.mjs GO_HOME RUST_HOME GO_RECORDS_JSONL');
+  const [goHome, rustHome, goRecords, rustLayout] = process.argv.slice(2);
+  if (!goRecords || ![5, 6].includes(process.argv.length)) {
+    throw new Error('usage: node read-fact-delta.mjs GO_HOME RUST_HOME GO_RECORDS_JSONL [v6|v7]');
   }
-  console.log(JSON.stringify(await readFactDelta(goHome, rustHome, goRecords), null, 2));
+  console.log(JSON.stringify(await readFactDelta(goHome, rustHome, goRecords, rustLayout), null, 2));
 }
