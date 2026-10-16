@@ -143,6 +143,14 @@ struct WorkerHello {
     identity: ProcessIdentity,
     owner: ProcessIdentity,
 }
+impl WorkerHello {
+    fn authenticate(&self, expected: &ProcessIdentity, owner: &ProcessIdentity, token: &str) -> Result<()> {
+        if self.wire != PRIVATE_WIRE || self.token != token || &self.identity != expected || &self.owner != owner {
+            return Err(fault("Native analysis child identity differs"));
+        }
+        Ok(())
+    }
+}
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WorkerCall {
@@ -158,7 +166,7 @@ struct WorkerMeta {
 }
 struct Exchange {
     pipes: (ChildStdin, ChildStdout),
-    result: Result<(WorkerMeta, Option<Response>)>,
+    result: Result<(WorkerMeta, Option<RawResponse>)>,
     authenticated: bool,
 }
 
@@ -444,13 +452,7 @@ impl AnalysisProcess {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     if !initialized {
                         let hello: WorkerHello = read_frame(&mut output, 4096)?;
-                        if hello.wire != PRIVATE_WIRE
-                            || hello.token != token
-                            || hello.identity != expected
-                            || hello.owner != owner
-                        {
-                            return Err(fault("Native analysis child identity differs"));
-                        }
+                        hello.authenticate(&expected, &owner, &token)?;
                         authenticated = true;
                     }
                     write_frame(
@@ -470,7 +472,7 @@ impl AnalysisProcess {
                         return Err(fault("Native analysis reply wire differs"));
                     }
                     let response = if meta.accepted {
-                        Some(read_frame(&mut output, RESPONSE_BYTES)?)
+                        Some(RawResponse::decode(read_raw_frame(&mut output, RESPONSE_BYTES)?)?)
                     } else {
                         None
                     };
@@ -498,7 +500,7 @@ impl AnalysisProcess {
         }
         Ok(())
     }
-    fn complete_exchange(&mut self) -> Option<Result<(WorkerMeta, Option<Response>)>> {
+    fn complete_exchange(&mut self) -> Option<Result<(WorkerMeta, Option<RawResponse>)>> {
         if !self.exchange.as_ref().is_some_and(JoinHandle::is_finished) {
             return None;
         }
@@ -694,7 +696,7 @@ pub(super) fn query(
     control: &OperationControl,
     retirement_deadline: Instant,
     terminal: &mut Option<AnalysisTerminal>,
-) -> Result<Option<Response>> {
+) -> Result<Option<OwnerReply>> {
     *terminal = None;
     let result = (|| {
         control.check()?;
@@ -730,11 +732,6 @@ pub(super) fn query(
                 let (meta, response) = reply?;
                 control.check()?;
                 process.cached = meta.cached;
-                if let Some(response) = &response
-                    && let Some(error) = &response.error
-                {
-                    return Err(error.clone());
-                }
                 return Ok(response);
             }
             if process.poll_exit()? {
@@ -750,11 +747,15 @@ pub(super) fn query(
     })();
     match result {
         Ok(response) => {
+            if response.as_ref().is_some_and(RawResponse::failed) {
+                let (retired, observed)=retire_slot_observed(slot,retirement_deadline);
+                return Ok(response.map(|response|OwnerReply::ChildError{response,retirement:retired.err(),terminal:observed}));
+            }
             if slot.as_ref().is_some_and(|process| process.key().is_none()) {
                 let (retired, observed) = retire_slot_observed(slot, retirement_deadline);
                 if let Err(error) = retired { *terminal = observed; return Err(error); }
             }
-            Ok(response)
+            Ok(response.map(OwnerReply::Forward))
         }
         Err(error) => {
             let (retired, observed) = retire_slot_observed(slot, retirement_deadline);

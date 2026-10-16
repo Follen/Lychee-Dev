@@ -408,3 +408,65 @@ fn private_phase_policy_keeps_real_multifile_query_and_stops_on_cancellation() {
         assert!(sampling.records<=PHASE_SAMPLE_LIMIT);
     }
 }
+
+#[test]
+fn raw_exchange_authentication_keeps_exact_wire_token_child_and_owner() {
+    let expected=ProcessIdentity{pid:42,created:7};
+    let owner=ProcessIdentity{pid:41,created:6};
+    for field in 0..7 {
+        let mut hello=WorkerHello{wire:PRIVATE_WIRE.into(),token:"exact-token".into(),identity:expected.clone(),owner:owner.clone()};
+        match field {
+            0=>{},1=>hello.wire.push('x'),2=>hello.token.push('x'),
+            3=>hello.identity.pid+=1,4=>hello.identity.created+=1,
+            5=>hello.owner.pid+=1,6=>hello.owner.created+=1,_=>unreachable!(),
+        }
+        let mut bytes=Vec::new();write_frame(&mut bytes,&hello,4096).unwrap();
+        let hello:WorkerHello=read_frame(&mut std::io::Cursor::new(bytes),4096).unwrap();
+        match hello.authenticate(&expected,&owner,"exact-token") {
+            Ok(())=>assert_eq!(field,0),
+            Err(error)=>{assert_ne!(field,0);assert_eq!(error.code,"source.native_session");assert_eq!(error.message,"Native analysis child identity differs");}
+        }
+    }
+}
+
+#[test]
+fn cancelled_and_expired_requests_retire_completed_raw_exchange_on_default_stack() {
+    std::thread::spawn(|| {
+        for cancelled in [false,true] {
+            let deadline=Instant::now()+Duration::from_secs(5);
+            let executable=std::env::current_exe().unwrap();
+            let current=Identity{_file:File::open(&executable).unwrap(),path:executable.clone(),digest:"fixture".into()};
+            let mut command=Command::new(executable);
+            // A real owned child supplies the handles; its --list output is not
+            // treated as an authenticated protocol reply. The completed reply
+            // below is the deliberate transport fixture being abandoned.
+            command.arg("--list").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+            let (mut child,job)=guarded_spawn::spawn_suspended_guarded_until(command,2<<30,deadline,deadline,||false).unwrap();
+            let identity=guarded_spawn::child_identity(&child).unwrap();
+            let pipes=(child.stdin.take().unwrap(),child.stdout.take().unwrap());
+            let mut process=terminal_process();
+            process.identity=Some(identity);process.child=Some(child);process.job=Some(job);
+            process.reaped=false;process.job_empty=false;process.retiring=false;
+            process.terminate_requested=false;process.job_terminate_accepted=false;
+            process.exchange=Some(std::thread::spawn(move || {
+                let mut bytes=b"{\"value\":".to_vec();
+                bytes.extend(std::iter::repeat_n(b'[',126));bytes.push(b'"');
+                bytes.extend(std::iter::repeat_n(b'x',1<<20));bytes.push(b'"');
+                bytes.extend(std::iter::repeat_n(b']',126));bytes.extend_from_slice(b",\"error\":null}");
+                let response=RawResponse::decode(bytes).unwrap();
+                Exchange{pipes,result:Ok((WorkerMeta{wire:PRIVATE_WIRE.into(),accepted:true,cached:None},Some(response))),authenticated:true}
+            }));
+            let owner=process.owner.clone();
+            let mut slot=Some(process);let mut terminal=None;
+            let control=OperationControl::new(if cancelled{deadline}else{Instant::now()},Arc::new(AtomicBool::new(cancelled)));
+            let result=query(&mut slot,Vec::new(),None,&current,std::path::Path::new("unused"),&owner,&control,deadline,&mut terminal);
+            let error=match result{Err(error)=>error,Ok(_)=>panic!("stopped request admitted")};
+            assert_eq!(error.code,if cancelled{"command.cancelled"}else{"command.deadline"});
+            assert!(slot.is_none());
+            let terminal=terminal.unwrap();
+            assert!(terminal.root_reaped&&terminal.pipe_worker_joined&&terminal.job_empty&&terminal.analysis_retired);
+            assert!(terminal.child_hello_authenticated);
+            assert!(terminal.handle_close_errors.is_empty());
+        }
+    }).join().unwrap();
+}

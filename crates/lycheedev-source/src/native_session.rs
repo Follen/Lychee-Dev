@@ -24,6 +24,10 @@ use std::{
 };
 
 mod analysis_process;
+mod raw_response;
+mod private_raw_value;
+mod response_validation;
+use raw_response::{OwnerReply,RawResponse};
 
 /// Private CLI entry for the retained analysis child. Public IPC remains owned
 /// by `server`; this entry only uses its exact parent's private stdio handles.
@@ -1012,16 +1016,16 @@ fn serve_borrowed(inv: &Invocation, current: &Identity, lifetime: &SessionLifeti
                             // Full typed decoding rejected the envelope in the
                             // child without touching its retained cache.
                             Ok(None) => continue,
-                            Err(error) => Response {
+                            Err(error) => OwnerReply::Local(Response {
                                 value: None,
                                 error: Some(error),
                                 terminal,
-                            },
+                            }),
                         };
                         // Reply on the original transport budget, not the expired or
                         // cancelled processing token that produced the typed error.
                         response_control.check()?;
-                        write_frame(&mut stream, &response, RESPONSE_BYTES)?;
+                        response.write(&mut stream)?;
                         // No optional owner-side filesystem diagnostics here,
                         // including after the reply: a synchronous write/fsync
                         // would also block admission of the next short request.
