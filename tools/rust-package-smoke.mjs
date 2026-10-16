@@ -37,6 +37,10 @@ export function assertArtifactSource(artifact, currentSourceDigest, profile) {
   if ((profile === 'release' && !['release', 'symbols'].includes(artifact.profile)) || (profile === 'debug' && !['dev', 'debug'].includes(artifact.profile)) || !['debug', 'release'].includes(profile)) throw new Error('candidate.artifact_profile_mismatch');
 }
 
+export function assertSourceSyntaxValidation(response, compilerSHA256) {
+  if (!response.ok || !response.result?.staticValid || !response.result.syntaxCompilation?.passed || response.result.syntaxCompilation.compilerSHA256 !== compilerSHA256) throw new Error('candidate.source_syntax_validation_failed');
+}
+
 export async function packageSmoke(argv, root = process.cwd()) {
   const {outArg, luacArg, homeArg, pinArg, lualsArg, artifactPath, profile, assemblyOnly} = parsePackageOptions(argv);
   if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('candidate.windows_amd64_required');
@@ -125,7 +129,7 @@ export async function packageSmoke(argv, root = process.cwd()) {
         writeFileSync(join(addon, 'Test.toc'), '## Interface: 120100\nGood.lua\n'); writeFileSync(join(addon, 'Good.lua'), 'local value = 1\nreturn value\n');
         const response = JSON.parse(run(process.execPath, [join(installed, 'bin/lycheedev.mjs'), 'source', 'validate', '--home', resolve(homeArg), '--snapshot', pinArg, '--path', addon, '--toc', 'Test.toc', '--format', 'json'], out));
         writeJson(join(out, 'source-validate.json'), response);
-        if (!response.ok || !response.result.valid || !response.result.syntaxCompilation?.passed || response.result.syntaxCompilation.compilerSHA256 !== report.compilerSHA256) throw new Error('candidate.source_syntax_validation_failed');
+        assertSourceSyntaxValidation(response, report.compilerSHA256);
         report.validation = {state: 'passed', compilerSHA256: response.result.syntaxCompilation.compilerSHA256, checkedLua: response.result.syntaxCompilation.checkedLua, captures: response.captures.map(c => c.id)};
       }
       Object.assign(report, {state: 'partial_passed', npmSmoke: 'passed', ignoreScripts: true, offlineInstall: true, installedRoot: installed, runtimeDependencies: pkg.dependencies || {}, platform: version.result.platform, tgz: join(out, packed.filename), tgzSHA256: hash(readFileSync(join(out, packed.filename))), version});

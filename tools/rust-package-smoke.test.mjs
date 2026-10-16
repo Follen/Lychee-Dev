@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync, mkdirSync, writeFileSync, rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {parsePackageOptions, assertArtifactSource} from './rust-package-smoke.mjs';
+import {parsePackageOptions, assertArtifactSource, assertSourceSyntaxValidation} from './rust-package-smoke.mjs';
 import {sourceDigest} from './rust-build.mjs';
 
 test('artifact and assembly-only flags are never mistaken for home, pin, or LuaLS input', () => {
@@ -38,6 +38,17 @@ test('artifact admission requires exact source digest and compatible build profi
   assert.throws(() => assertArtifactSource(artifact, digest, 'release'), /artifact_profile_mismatch/);
   assertArtifactSource({...artifact, profile: 'symbols'}, digest, 'release');
   assert.throws(() => assertArtifactSource(artifact, 'latest', 'debug'), /artifact_source_mismatch/);
+});
+test('single-addon smoke requires staticValid and never substitutes matrix valid', () => {
+  const compilerSHA256 = 'a'.repeat(64), syntaxCompilation = {passed: true, compilerSHA256};
+  assertSourceSyntaxValidation({ok: true, result: {staticValid: true, syntaxCompilation}}, compilerSHA256);
+  for (const response of [
+    {ok: true, result: {valid: true, syntaxCompilation}},
+    {ok: true, result: {staticValid: false, valid: true, syntaxCompilation}},
+    {ok: false, result: {staticValid: true, syntaxCompilation}},
+    {ok: true, result: {staticValid: true, syntaxCompilation: {...syntaxCompilation, passed: false}}},
+    {ok: true, result: {staticValid: true, syntaxCompilation: {...syntaxCompilation, compilerSHA256: 'b'.repeat(64)}}},
+  ]) assert.throws(() => assertSourceSyntaxValidation(response, compilerSHA256), /candidate.source_syntax_validation_failed/);
 });
 test('a different luac pin invalidates an otherwise unchanged sealed CLI', t => {
   const root = mkdtempSync(join(tmpdir(), 'lycheedev-candidate-source-')); t.after(() => rmSync(root, {recursive: true}));

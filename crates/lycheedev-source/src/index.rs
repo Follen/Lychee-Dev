@@ -631,10 +631,14 @@ fn build_uncached_profiled(
             ));
         }
         if std::str::from_utf8(&data).is_err() {
-            skipped += 1;
-            diagnostics
-                .push(json!({"path":file.path,"line":0,"message":"source_encoding_or_size"}));
-            return Ok(());
+            // Fixed Go AnalyzeDocument returns an untyped error here, which
+            // aborts the index and maps to command.failed / dispatch / exit 5.
+            // It is not a recoverable parse note or an oversized-file skip.
+            return Err(ToolkitError::new(
+                "command.failed",
+                "codebase.analysis_encoding_or_budget",
+                5,
+            ));
         }
         let sha256 = storage::sha256(&data);
         let (facts, cache_hit) =
@@ -1218,6 +1222,9 @@ mod facts_cache_tests {
             Self { home }
         }
         fn git(&self, input: &str, args: &[&str]) -> String {
+            self.git_bytes(input.as_bytes(), args)
+        }
+        fn git_bytes(&self, input: &[u8], args: &[&str]) -> String {
             let mut child = Command::new("git")
                 .arg("--git-dir")
                 .arg(git::mirror(&self.home, "elvui"))
@@ -1235,7 +1242,7 @@ mod facts_cache_tests {
                 .stdin
                 .take()
                 .unwrap()
-                .write_all(input.as_bytes())
+                .write_all(input)
                 .unwrap();
             let output = child.wait_with_output().unwrap();
             assert!(
@@ -1558,6 +1565,37 @@ mod facts_cache_tests {
         );
         assert!(!facts_cache_path(&fixture.home, "Stopped.xml", &digest).exists());
         assert_eq!(crate::xml_program::catalog_verifications(), before);
+    }
+    #[test]
+    fn invalid_utf8_git_blob_aborts_index_without_publishing_a_ready_manifest() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let good = fixture.git("function Before() end\n", &["hash-object", "-w", "--stdin"]);
+        let bad_raw = b"local broken = \xff\n";
+        let bad = fixture.git_bytes(bad_raw, &["hash-object", "-w", "--stdin"]);
+        let tree = fixture.git(
+            &format!("100644 blob {good}\tAAGood.lua\n100644 blob {bad}\tZZBad.lua\n"),
+            &["mktree"],
+        );
+        let pin = SourcePin {
+            repository: "elvui".into(), product: "main".into(), requested_ref: "fixture".into(),
+            exact_commit: fixture.git("invalid encoding fixture", &["commit-tree", &tree]),
+            parser_revision: git::PARSER.into(),
+        };
+        let key = format!("source/rust-index/{}", fingerprint(&pin));
+        // A retry may reuse the earlier good document's facts, but cannot turn
+        // the invalid document into a successful partial index.
+        for _ in 0..2 {
+            let error = build_material_with_control(&fixture.home, &pin, &control).err().unwrap();
+            assert_eq!(error.code, "command.failed");
+            assert_eq!(error.message, "codebase.analysis_encoding_or_budget");
+            assert_eq!(error.exit_code, 5);
+            assert!(error.details.is_null());
+            assert!(!is_ready_with_control(&fixture.home, &pin, &control).unwrap());
+            let missing = crate::persistence::read::<Value>(&fixture.home, &key, &control).unwrap_err();
+            assert_eq!(missing.code, "vault.record_missing");
+            assert!(!facts_cache_path(&fixture.home, "ZZBad.lua", &storage::sha256(bad_raw)).exists());
+        }
     }
     #[test]
     fn compatibility_gaps_cover_unsampled_diagnostics_and_survive_warm_index() {

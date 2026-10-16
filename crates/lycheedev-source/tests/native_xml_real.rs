@@ -73,7 +73,7 @@ fn run_xml_case(selected:&str){
         fs::write(addon.join("report.json"),serde_json::to_vec_pretty(&report).unwrap()).unwrap();
         if mismatches>0{assert_eq!(error,Some(("codebase.addon_static_check_failed".into(),4)),"{name}: negative semantic result must use the public validation error");}
         else{assert!(error.is_none(),"{name}: expected successful public validation, got {error:?}");}
-        assert_eq!(report["valid"],mismatches==0,"{name}: public valid result");
+        assert_eq!(report["staticValid"],mismatches==0,"{name}: public staticValid result");
         assert_eq!(report["syntaxCompilation"]["passed"],true,"{name}: syntax remains valid");
         let semantic=&report["semantic"];
         assert_eq!(semantic["passed"],mismatches==0,"{name}: semantic pass state");

@@ -117,14 +117,171 @@ pub(crate) fn scripts(program:&crate::xml_program::XmlProgram,raw:&[u8])->Result
 pub type CompilerInputs=(BTreeMap<String,Vec<u8>>,BTreeMap<String,Script>);
 pub fn inputs(documents:&[crate::closure::Document])->Result<CompilerInputs>{
     let mut files=BTreeMap::new();let mut scripts=BTreeMap::new();
+    // Match native_research's request-local lifetime: authenticate only when
+    // XML is first encountered and reuse the immutable catalog for this batch.
+    let mut catalog=None;
     for document in documents{
         if document.path.to_ascii_lowercase().ends_with(".lua"){files.insert(document.path.clone(),document.bytes.clone());}
         else if document.path.to_ascii_lowercase().ends_with(".xml"){
-            for script in extract(&document.path,&document.bytes)?{files.insert(script.key.clone(),script.source_bytes().to_vec());scripts.insert(script.key.clone(),script);}
+            let catalog=catalog.get_or_insert_with(crate::xml_program::catalog).as_ref().map_err(invalid)?;
+            let program=crate::xml_program::extract_production_with_catalog(&document.path,&document.bytes,catalog).map_err(invalid)?;
+            for script in self::scripts(&program,&document.bytes)?{files.insert(script.key.clone(),script.source_bytes().to_vec());scripts.insert(script.key.clone(),script);}
         }
     }
     Ok((files,scripts))
 }
+/// Syntax checking needs decoded inline Lua, not native object-schema acceptance.
+/// Public facts own XML diagnostics; stop at a malformed token and retain only
+/// fully closed earlier scripts. Native semantic inputs still use `inputs`.
+pub(crate) fn syntax_inputs(documents: &[crate::closure::Document], control: &lycheedev_core::control::OperationControl) -> Result<CompilerInputs> {
+    control.check()?;
+    let mut files = BTreeMap::new();
+    let mut scripts = BTreeMap::new();
+    for document in documents {
+        control.check()?;
+        if document.path.to_ascii_lowercase().ends_with(".lua") {
+            files.insert(document.path.clone(), document.bytes.clone());
+        } else if document.path.to_ascii_lowercase().ends_with(".xml") {
+            for script in syntax_scripts(&document.path, &document.bytes, control)? {
+                files.insert(script.key.clone(), script.source_bytes().to_vec());
+                scripts.insert(script.key.clone(), script);
+            }
+        }
+    }
+    Ok((files, scripts))
+}
+
+fn syntax_scripts(path: &str, raw: &[u8], control: &lycheedev_core::control::OperationControl) -> Result<Vec<Script>> {
+    control.check()?;
+    use quick_xml::{Reader, events::Event};
+    use source_map::{borrowed_span, raw_cursor};
+    struct Element {
+        tag: String,
+        start: usize,
+        body: Option<(&'static str, MappedText)>,
+    }
+    if raw.len() > crate::xml_program::MAX_FILE || path.len() > 4096 {
+        return Err(invalid("xml.input_budget"));
+    }
+    let raw_text: Arc<str> = std::str::from_utf8(raw).map_err(invalid)?.into();
+    let digest = storage::sha256(raw);
+    let mut reader = Reader::from_reader(raw);
+    reader.config_mut().check_comments = true;
+    let prefix = if raw.starts_with(b"\xef\xbb\xbf") { 3 } else { 0 };
+    let mut stack = Vec::<Element>::new();
+    let mut scripts = Vec::new();
+    let mut decoded_bytes = 0usize;
+    let mut decoded_segments = 0usize;
+    'tokens: loop {
+        control.check()?;
+        let before = raw_cursor(raw.len(), prefix, reader.buffer_position()).map_err(invalid)?;
+        let Ok(event) = reader.read_event() else { break };
+        let empty = matches!(&event, Event::Empty(_));
+        let after = raw_cursor(raw.len(), prefix, reader.buffer_position()).map_err(invalid)?;
+        match event {
+            Event::Start(element) | Event::Empty(element) => {
+                // Go accepts duplicate attributes. Validate values before using
+                // the start token, without native attribute/schema restrictions.
+                for attribute in element.attributes().with_checks(false) {
+                    let Ok(attribute) = attribute else { break 'tokens };
+                    if crate::facts::xml_attribute(&attribute, reader.decoder()).is_err() {
+                        break 'tokens;
+                    }
+                }
+                let tag = String::from_utf8_lossy(element.local_name().as_ref()).into_owned();
+                let content = borrowed_span(raw, element.as_ref()).map_err(invalid)?;
+                let start = content.start.checked_sub(1).ok_or_else(|| invalid("xml.tag_position"))?;
+                if stack.len() >= crate::xml_program::MAX_DEPTH {
+                    return Err(invalid("xml.depth_budget"));
+                }
+                let under_scripts = stack.last().is_some_and(|parent| parent.tag == "Scripts");
+                let kind = if tag == "Script" {
+                    Some("top_level")
+                } else if tag == "Binding" {
+                    Some("binding")
+                } else if under_scripts || (tag.len() > 2 && tag.starts_with("On")) {
+                    Some("handler")
+                } else {
+                    None
+                };
+                if !empty {
+                    stack.push(Element { tag, start, body: kind.map(|kind| (kind, MappedText::default())) });
+                }
+            }
+            Event::End(_) => {
+                let Some(element) = stack.pop() else { break };
+                if let Some((kind, decoded)) = element.body {
+                    if kind == "binding" && decoded.text.is_empty() { continue; }
+                    if scripts.len() >= crate::xml_program::MAX_SCRIPTS {
+                        return Err(invalid("xml.script_budget"));
+                    }
+                    let range = Span::new(element.start, after);
+                    let wrapped = matches!(kind, "handler" | "binding");
+                    let mut compiler = MappedText::with_limits(MAX_XML_BYTES, raw.len() + 2);
+                    if wrapped {
+                        compiler.append(if kind == "handler" { WRAPPER } else { "return function(...)\n" },
+                            None, Origin::Synthetic, Some(Span::new(element.start, element.start))).map_err(invalid)?;
+                    }
+                    let body = Span::new(compiler.text.len(), compiler.text.len() + decoded.text.len());
+                    compiler.extend(&decoded).map_err(invalid)?;
+                    if wrapped {
+                        compiler.append("\nend\n", None, Origin::Synthetic, Some(Span::new(before, after))).map_err(invalid)?;
+                    }
+                    scripts.push(Script {
+                        key: format!("{path}/__inline_{}.lua", scripts.len()), path: path.into(),
+                        handler: element.tag, kind: kind.into(), xml_sha256: digest.clone(), compiler,
+                        element: range, body, raw: Arc::clone(&raw_text),
+                    });
+                }
+            }
+            Event::Text(text) => {
+                let Ok(decoded) = text.xml10_content() else { break };
+                if crate::facts::xml_characters(&decoded).is_err() || decoded.contains("]]>") { break; }
+                if let Some((_, body)) = stack.last_mut().and_then(|element| element.body.as_mut()) {
+                    let old_bytes = body.text.len();
+                    let old_segments = body.segments.len();
+                    body.append_physical(raw, borrowed_span(raw, text.as_ref()).map_err(invalid)?).map_err(invalid)?;
+                    decoded_bytes += body.text.len() - old_bytes;
+                    decoded_segments += body.segments.len() - old_segments;
+                }
+            }
+            Event::CData(text) => {
+                let Ok(decoded) = text.xml10_content() else { break };
+                if crate::facts::xml_characters(&decoded).is_err() { break; }
+                if let Some((_, body)) = stack.last_mut().and_then(|element| element.body.as_mut()) {
+                    let old_bytes = body.text.len();
+                    let old_segments = body.segments.len();
+                    body.append_physical(raw, borrowed_span(raw, text.as_ref()).map_err(invalid)?).map_err(invalid)?;
+                    decoded_bytes += body.text.len() - old_bytes;
+                    decoded_segments += body.segments.len() - old_segments;
+                }
+            }
+            Event::GeneralRef(reference) => {
+                let Ok(name) = reference.decode() else { break };
+                let Ok(decoded) = crate::facts::xml_entity(&name) else { break };
+                if let Some((_, body)) = stack.last_mut().and_then(|element| element.body.as_mut()) {
+                    let inner = borrowed_span(raw, reference.as_ref()).map_err(invalid)?;
+                    let span = Span::new(inner.start.checked_sub(1).ok_or_else(|| invalid("xml.entity_position"))?, inner.end + 1);
+                    let old_bytes = body.text.len();
+                    let old_segments = body.segments.len();
+                    body.append(&decoded, Some(span), Origin::Entity, None).map_err(invalid)?;
+                    decoded_bytes += body.text.len() - old_bytes;
+                    decoded_segments += body.segments.len() - old_segments;
+                }
+            }
+            Event::Eof => break,
+            Event::Decl(_) | Event::DocType(_) | Event::PI(_) | Event::Comment(_) => {}
+        }
+        if decoded_bytes > crate::xml_program::MAX_DECODED {
+            return Err(invalid("xml.aggregate_decoded_budget"));
+        }
+        if decoded_segments > crate::xml_program::MAX_SEGMENTS {
+            return Err(invalid("xml.aggregate_segment_budget"));
+        }
+    }
+    Ok(scripts)
+}
+
 pub fn remap(result:&mut Value,scripts:&BTreeMap<String,Script>)->Result<()>{
     if let Some(rows)=result["diagnostics"].as_array_mut(){for row in rows{
         if let Some(script)=row["file"].as_str().and_then(|path|scripts.get(path)){
@@ -141,6 +298,94 @@ pub fn remap(result:&mut Value,scripts:&BTreeMap<String,Script>)->Result<()>{
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]
+    fn compiler_inputs_lazily_share_catalog_per_batch_and_keep_native_scripts(){
+        let document=|path:&str,raw:&[u8]|crate::closure::Document{path:path.into(),bytes:raw.to_vec(),facts:Default::default(),blob:Value::Null};
+        let lua=document("Only.lua",b"local x=1");
+        let first=document("First.xml",b"<Ui><Script>Run()</Script></Ui>");
+        let second=document("Second.xml",b"<Ui><Frame><Scripts><PreClick>Click()</PreClick></Scripts></Frame></Ui>");
+        let before=crate::xml_program::catalog_verifications();
+        assert_eq!(inputs(&[lua]).unwrap().0.len(),1);
+        assert_eq!(crate::xml_program::catalog_verifications(),before);
+        let (_,scripts)=inputs(&[first,second]).unwrap();
+        assert_eq!(crate::xml_program::catalog_verifications(),before+1);
+        assert_eq!(scripts.values().map(|s|s.handler.as_str()).collect::<Vec<_>>(),["Script","PreClick"]);
+        let bad=document("Bad.xml",b"<Root/>");
+        assert!(inputs(&[bad]).is_err());
+        assert_eq!(crate::xml_program::catalog_verifications(),before+2);
+    }
+    #[test]
+    fn syntax_inputs_accept_public_xml_without_native_profile_or_catalog() {
+        let raw = b"<x:Root xmlns:x='urn:test'><x:Frame name='one' name='two'><x:Scripts><x:PreClick>Run()</x:PreClick></x:Scripts><x:OnLoad>R&#117;<![CDATA[n]]>()</x:OnLoad></x:Frame><x:Script>Top()</x:Script><x:Binding>Bind()</x:Binding></x:Root>";
+        let facts = crate::facts::xml(raw);
+        assert!(facts.diagnostics.is_empty(), "{:?}", facts.diagnostics);
+        let document = crate::closure::Document { path: "Public.xml".into(), bytes: raw.to_vec(), facts, blob: Value::Null };
+        let before = crate::xml_program::catalog_verifications();
+        let (files, scripts) = syntax_inputs(std::slice::from_ref(&document), &lycheedev_core::control::OperationControl::default()).unwrap();
+        assert_eq!(crate::xml_program::catalog_verifications(), before);
+        assert_eq!(scripts.values().map(|script| script.handler.as_str()).collect::<Vec<_>>(), ["PreClick", "OnLoad", "Script", "Binding"]);
+        assert!(String::from_utf8_lossy(&files["Public.xml/__inline_1.lua"]).contains("Run()"));
+        let script = &scripts["Public.xml/__inline_1.lua"];
+        let start = script.compiler.text.find("Run()").unwrap();
+        let mapping = script.project(Span::new(start, start + 3)).unwrap();
+        assert_eq!(mapping["segments"].as_array().unwrap().len(), 3);
+        assert_eq!(mapping["segments"][1]["origin"], "Entity");
+        assert_eq!(mapping["segments"][2]["origin"], "Exact");
+        assert!(inputs(&[document]).is_err());
+    }
+    #[test]
+    fn syntax_inputs_match_native_bytes_keys_order_and_mapping_for_native_fixtures() {
+        let fixtures: &[(&str, &[u8])] = &[
+            ("Golden.xml", include_bytes!("../../../tests/rust-source-engine/xml-golden-204.xml")),
+            ("Split.xml", include_bytes!("../../../tests/rust-source-engine/xml-split.xml")),
+            ("Bindings.xml", b"<Bindings><Binding name='RUN'>R&#117;<![CDATA[n]]>()</Binding><Binding name='EMPTY'></Binding></Bindings>"),
+            ("Empty.xml", b"<Ui><Script></Script><Frame><Scripts><OnLoad></OnLoad><PreClick>return self</PreClick></Scripts></Frame></Ui>"),
+        ];
+        for &(path, raw) in fixtures {
+            let document = crate::closure::Document { path: path.into(), bytes: raw.to_vec(), facts: Default::default(), blob: Value::Null };
+            let (syntax_files, syntax) = syntax_inputs(std::slice::from_ref(&document), &lycheedev_core::control::OperationControl::default()).unwrap();
+            let (native_files, native) = inputs(&[document]).unwrap();
+            assert_eq!(syntax_files, native_files, "{path}");
+            assert_eq!(syntax.keys().collect::<Vec<_>>(), native.keys().collect::<Vec<_>>(), "{path}");
+            for (key, script) in syntax {
+                let expected = &native[&key];
+                assert_eq!(script.mapping_manifest(), expected.mapping_manifest(), "{key}");
+                assert_eq!(script.body_text(), expected.body_text(), "{key}");
+            }
+        }
+    }
+    #[test]
+    fn syntax_inputs_keep_closed_scripts_before_public_xml_failure() {
+        let raw = b"<Root><Script>Before()</Script><OnLoad>&unknown;</OnLoad><Script>After()</Script></Root>";
+        let facts = crate::facts::xml(raw);
+        assert_eq!(facts.diagnostics.len(), 1);
+        let document = crate::closure::Document { path: "Broken.xml".into(), bytes: raw.to_vec(), facts, blob: Value::Null };
+        let (files, scripts) = syntax_inputs(&[document], &lycheedev_core::control::OperationControl::default()).unwrap();
+        assert_eq!(scripts.len(), 1);
+        assert_eq!(files["Broken.xml/__inline_0.lua"], b"Before()");
+        let unclosed = syntax_scripts("Unclosed.xml", b"<Root><OnLoad>Partial()", &lycheedev_core::control::OperationControl::default()).unwrap();
+        assert!(unclosed.is_empty());
+    }
+    #[test]
+    fn syntax_inputs_keep_existing_depth_and_script_budgets() {
+        let deep = format!("{}{}", "<Root>".repeat(crate::xml_program::MAX_DEPTH + 1), "</Root>".repeat(crate::xml_program::MAX_DEPTH + 1));
+        assert_eq!(syntax_scripts("Deep.xml", deep.as_bytes(), &lycheedev_core::control::OperationControl::default()).err().unwrap().message, "xml.depth_budget");
+        let many = format!("<Root>{}</Root>", "<Script></Script>".repeat(crate::xml_program::MAX_SCRIPTS + 1));
+        assert_eq!(syntax_scripts("Many.xml", many.as_bytes(), &lycheedev_core::control::OperationControl::default()).err().unwrap().message, "xml.script_budget");
+    }
+    #[test]
+    fn syntax_inputs_preserve_original_cancelled_and_expired_controls() {
+        use lycheedev_core::control::OperationControl;
+        use std::{sync::{Arc, atomic::AtomicBool}, time::{Duration, Instant}};
+        let document = crate::closure::Document { path: "Stopped.xml".into(), bytes: b"<Root><Script>Run()</Script></Root>".to_vec(), facts: Default::default(), blob: Value::Null };
+        let cancelled = OperationControl::new(Instant::now() + Duration::from_secs(180), Arc::new(AtomicBool::new(true)));
+        let expired = OperationControl::uncancelable(Instant::now());
+        for (control, code) in [(&cancelled, "command.cancelled"), (&expired, "command.deadline")] {
+            assert_eq!(syntax_inputs(std::slice::from_ref(&document), control).err().unwrap().code, code);
+            assert_eq!(syntax_scripts(&document.path, &document.bytes, control).err().unwrap().code, code);
+            assert_eq!(syntax_inputs(&[], control).err().unwrap().code, code);
+        }
+    }
     #[test]
     fn xml_entities_cdata_and_logical_lines_keep_original_line_map(){
         let raw=b"<Ui>\n<Frame><Scripts><OnLoad>\nlocal x = 1 &lt; 2\n<![CDATA[local y = ...]]>&#10;local z = &quot;text&quot;\n</OnLoad></Scripts></Frame></Ui>";

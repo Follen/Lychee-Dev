@@ -391,26 +391,31 @@ fn name_limited(raw: &[u8], n: Node<'_>, depth: usize) -> String {
 }
 // gopher-lua's lexer emits bytes for escapes (including wrapping decimal
 // escapes). JSON replaces each invalid UTF-8 byte, rather than Latin-1 widening.
-pub(crate) fn string(raw: &[u8], node: Node<'_>) -> Option<String> {
-    fn json_string(bytes: &[u8]) -> String {
-        let mut out = String::new();
-        let mut rest = bytes;
-        while !rest.is_empty() {
-            match std::str::from_utf8(rest) {
-                Ok(value) => {
-                    out.push_str(value);
-                    break;
-                }
-                Err(error) => {
-                    let valid = error.valid_up_to();
-                    out.push_str(std::str::from_utf8(&rest[..valid]).expect("validated prefix"));
-                    out.push('\u{fffd}');
-                    rest = &rest[valid + 1..];
-                }
+pub(crate) fn lua_json_string(bytes: &[u8]) -> String {
+    let mut out = String::new();
+    let mut rest = bytes;
+    while !rest.is_empty() {
+        match std::str::from_utf8(rest) {
+            Ok(value) => {
+                out.push_str(value);
+                break;
+            }
+            Err(error) => {
+                let valid = error.valid_up_to();
+                out.push_str(std::str::from_utf8(&rest[..valid]).expect("validated prefix"));
+                out.push('\u{fffd}');
+                rest = &rest[valid + 1..];
             }
         }
-        out
     }
+    out
+}
+pub(crate) fn string(raw: &[u8], node: Node<'_>) -> Option<String> {
+    string_bytes(raw, node).map(|bytes| lua_json_string(&bytes))
+}
+/// Internal literal identity before Go's JSON replacement of invalid UTF-8.
+/// Public fact strings keep the encoding/json-compatible wrapper above.
+pub(crate) fn string_bytes(raw: &[u8], node: Node<'_>) -> Option<Vec<u8>> {
     fn newline(bytes: &[u8], at: &mut usize) -> u8 {
         let value = bytes[*at];
         *at += 1;
@@ -447,7 +452,7 @@ pub(crate) fn string(raw: &[u8], node: Node<'_>) -> Option<String> {
         while at < content.len() {
             out.push(newline(content, &mut at));
         }
-        return Some(json_string(&out));
+        return Some(out);
     }
     if !b"'\"".contains(&first) || value.len() < 2 {
         return None;
@@ -486,7 +491,7 @@ pub(crate) fn string(raw: &[u8], node: Node<'_>) -> Option<String> {
             other => other,
         });
     }
-    Some(json_string(&out))
+    Some(out)
 }
 
 fn field<'a>(raw: &[u8], table: Node<'a>, key: &str) -> Option<Node<'a>> {
@@ -1134,6 +1139,21 @@ READY
         );
     }
 
+    #[test]
+    fn internal_literal_bytes_keep_identity_before_public_json_replacement() {
+        let raw = r#"Call("\255", "\226\130", "\195\169", "�")"#.as_bytes();
+        let document = SyntaxDocument::new_public(raw).unwrap();
+        let call = children(document.root()).into_iter().next().unwrap();
+        let arguments = children(call.child_by_field_name("arguments").unwrap());
+        assert_eq!(string_bytes(raw, arguments[0]).unwrap(), vec![255]);
+        assert_eq!(string_bytes(raw, arguments[1]).unwrap(), vec![226, 130]);
+        assert_eq!(string_bytes(raw, arguments[2]).unwrap(), "é".as_bytes());
+        assert_eq!(string_bytes(raw, arguments[3]).unwrap(), "�".as_bytes());
+        assert_eq!(string(raw, arguments[0]).unwrap(), "�");
+        assert_eq!(string(raw, arguments[1]).unwrap(), "��");
+        assert_eq!(string(raw, arguments[2]).unwrap(), "é");
+        assert_eq!(string(raw, arguments[3]).unwrap(), "�");
+    }
     #[test]
     fn public_goto_keywords_and_native_lua51_identifiers_have_separate_consumers() {
         let identifier = b"function goto() end";

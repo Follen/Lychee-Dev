@@ -126,7 +126,7 @@ pub fn dispatch_with_services(
             } else {
                 None
             };
-            let data = validate::toc_with_environment(
+            let data = validate::addon_with_environment(
                 &inv.home,
                 source,
                 &pin.id,
@@ -139,14 +139,13 @@ pub fn dispatch_with_services(
             )?;
             let mut out = Outcome::new(data);
             out.complete = out.data["complete"] == true;
-            out.coverage = out.data["coverage"].clone();
             let capture = lycheedev_core::evidence::commit_capture_bounded(
                 &inv.home,
                 lycheedev_core::evidence::CaptureInput {
                     bytes: &serde_json::to_vec(&out.data)?,
                     maximum_bytes: lycheedev_core::evidence::DEFAULT_CAPTURE_BYTES,
                     media_type: "application/json",
-                    provenance: serde_json::json!({"kind":"addon-validate","locator":root,"snapshot":pin.id,"sourceCommit":source.exact_commit}),
+                    provenance: serde_json::json!({"kind":"addon-static-check","locator":format!("{}/{}",inv.required("--path")?,inv.required("--toc")?),"snapshot":pin.id,"sourceCommit":source.exact_commit}),
                     complete: out.complete,
                     truncated: false,
                 },
@@ -154,8 +153,11 @@ pub fn dispatch_with_services(
             )?;
             out.provenance.push(capture);
             out.selection = serde_json::to_value(&pin)?;
-            if out.data["valid"] == false {
+            if out.data["staticValid"] == false {
                 return Err(ToolkitError::new("codebase.addon_static_check_failed","Addon validation found invalid source",4).with_details(serde_json::json!({"result":out.data,"captures":out.provenance,"context":{"selection":out.selection,"coverage":out.coverage,"snapshot":pin.id}})));
+            }
+            if !out.complete {
+                out.warnings.push(serde_json::json!("Static coverage is incomplete; inspect unresolved references and notChecked."));
             }
             return Ok(out);
         }

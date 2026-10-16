@@ -52,7 +52,7 @@ fn public_dispatch_fixed_catalog_luac_native_and_inline_semantic_line_map() {
     };
     fs::write(addon.join("界 面.xml"),"<Ui>\n<Frame><Scripts><OnLoad>\nlocal value = UnitHealth(\"player\", true)\nself.value = value\n</OnLoad></Scripts></Frame></Ui>\n").unwrap();
     let good = lycheedev_source::dispatch_with_tools(&inv, tools()).unwrap();
-    assert_eq!(good.data["valid"], true, "{}",semantic_summary(&good.data["semantic"]));
+    assert_eq!(good.data["staticValid"], true, "{}",semantic_summary(&good.data["semantic"]));
     assert_eq!(good.data["syntaxCompilation"]["passed"], true);
     assert_eq!(good.data["semantic"]["passed"], true);
     assert_eq!(good.data["semantic"]["engine"], "emmy_native_common_facts");
@@ -61,6 +61,9 @@ fn public_dispatch_fixed_catalog_luac_native_and_inline_semantic_line_map() {
     assert!(good.data["semantic"]["coverage"].as_array().unwrap().iter().any(|row|
         row["operation"]=="argument_check"&&row["parameter"]=="unit"&&row["state"]=="unavailable"));
     assert_eq!(good.data["semantic"]["complete"],false);
+    assert_eq!(good.data["complete"],false);
+    assert!(!good.complete);
+    assert_eq!(good.provenance[0]["complete"],false);
     assert_eq!(good.data["semantic"]["definitions"]["state"], "partial");
     for capture in good.data["semantic"]["captures"]
         .as_object()
@@ -126,13 +129,29 @@ fn public_dispatch_fixed_catalog_luac_native_and_inline_semantic_line_map() {
         fs::write(addon.join(format!("{name}.lua")),format!("local health = UnitHealth(\"player\", {argument})\n")).unwrap();
     }
     let matrix_path=addon.join("matrix.json");
+    // Go matrix capture completion is static compatibility completeness. The
+    // approved native checker keeps its partial evidence independently: the
+    // unknown UnitHealth unit argument does not become a complete type check.
     fs::write(&matrix_path,serde_json::to_vec(&json!({"targets":[
-        {"id":"good","toc":"Good.toc","source":source.repository,"product":source.product,"ref":source.exact_commit},
-        {"id":"bad","toc":"Bad.toc","source":source.repository,"product":source.product,"ref":source.exact_commit}
+        {"id":"good","toc":"Good.toc","source":source.repository,"product":source.product,"ref":source.exact_commit}
     ]})).unwrap()).unwrap();
     let matrix_inv=Invocation{command:"source validate".into(),positional:None,home:home.clone(),cwd:addon.clone(),flags:BTreeMap::from([
         ("--matrix".into(),matrix_path.to_string_lossy().into_owned()),("--semantic".into(),"true".into())
     ]),control:Default::default()};
+    let partial_semantic_matrix=lycheedev_source::dispatch_with_tools(&matrix_inv,tools()).unwrap();
+    let partial_target=&partial_semantic_matrix.data["targets"][0];
+    assert_eq!(partial_target["semantic"]["passed"],true);
+    assert_eq!(partial_target["semantic"]["complete"],false);
+    assert_eq!(partial_target["coverage"]["unresolved"],0);
+    let expected_capture_complete=partial_semantic_matrix.data["valid"]==true
+        && partial_target["coverage"]["unresolved"]==0
+        && partial_target["sourceCoverage"]["complete"]==true;
+    assert_eq!(partial_semantic_matrix.complete,expected_capture_complete);
+    assert_eq!(partial_semantic_matrix.provenance[0]["complete"],expected_capture_complete);
+    fs::write(&matrix_path,serde_json::to_vec(&json!({"targets":[
+        {"id":"good","toc":"Good.toc","source":source.repository,"product":source.product,"ref":source.exact_commit},
+        {"id":"bad","toc":"Bad.toc","source":source.repository,"product":source.product,"ref":source.exact_commit}
+    ]})).unwrap()).unwrap();
     let matrix=lycheedev_source::dispatch_with_tools(&matrix_inv,tools()).unwrap_err();
     assert_eq!(matrix.exit_code,4);
     let targets=matrix.details["result"]["targets"].as_array().unwrap();
@@ -143,7 +162,7 @@ fn public_dispatch_fixed_catalog_luac_native_and_inline_semantic_line_map() {
     assert_eq!(matrix_good["semantic"]["passed"],true);
     assert_eq!(matrix_bad["semantic"]["passed"],false);
     assert!(matrix_bad["semantic"]["diagnostics"].as_array().unwrap().iter().any(|row|row["code"]=="param-type-mismatch"));
-    fs::write(stage.join("report.json"),serde_json::to_vec_pretty(&json!({"good":good.data,"bad":bad.details,"mappedXml":mapped_error.details,"wrongReturn":wrong_return.details,"matrix":matrix.details,"profile":"SDK public dispatcher; actual packaged CLI semantic not_run"})).unwrap()).unwrap();
+    fs::write(stage.join("report.json"),serde_json::to_vec_pretty(&json!({"good":good.data,"bad":bad.details,"mappedXml":mapped_error.details,"wrongReturn":wrong_return.details,"partialSemanticMatrix":partial_semantic_matrix.data,"partialSemanticMatrixCaptures":partial_semantic_matrix.provenance,"matrix":matrix.details,"profile":"SDK public dispatcher; actual packaged CLI semantic not_run"})).unwrap()).unwrap();
 }
 fn semantic_summary(value:&Value)->Value{
     json!({"coverage":value["coverage"],"gaps":value["gaps"],"diagnostics":value["diagnostics"],"state":value["state"],"complete":value["complete"]})

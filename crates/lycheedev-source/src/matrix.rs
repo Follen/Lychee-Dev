@@ -328,7 +328,8 @@ pub fn validate_with_resolver(
         targets.push(value);
     }
     let mut out = Outcome::new(merge(&root, &targets));
-    out.complete = out.data["valid"] == true;
+    let valid = out.data["valid"] == true;
+    out.complete = capture_complete(valid, &targets);
     out.coverage = json!({"targets":targets.len(),"complete":targets.iter().all(|t|t["complete"]==true),"scope":"independently validated target closures; target semantic and unresolved coverage remain explicit"});
     out.provenance.push(evidence::commit_capture_bounded(
         &inv.home,
@@ -342,10 +343,37 @@ pub fn validate_with_resolver(
         },
         &inv.control,
     )?);
-    if !out.complete {
+    if !valid {
         return Err(ToolkitError::new("codebase.addon_static_check_failed","Addon validation found invalid source",4).with_details(json!({"result":out.data,"captures":out.provenance,"context":{"coverage":out.coverage}})));
     }
     Ok(out)
+}
+fn capture_complete(valid: bool, targets: &[Value]) -> bool {
+    // Fixed Go's matrix capture means valid static compatibility coverage.
+    // Native semantic.complete/coverage are independent evidence dimensions;
+    // a passed checker can still report partial or unavailable semantic facts.
+    valid && targets.iter().all(|target| {
+        target["coverage"]["unresolved"] == 0
+            && target["sourceCoverage"]["complete"] == true
+    })
+}
+
+#[cfg(test)]
+mod capture_tests {
+    use super::*;
+    #[test]
+    fn valid_matrix_with_unresolved_or_source_gap_is_not_complete() {
+        let complete=json!({"coverage":{"unresolved":0},"sourceCoverage":{"complete":true},"complete":true});
+        assert!(capture_complete(true,&[complete.clone()]));
+        assert!(!capture_complete(false,&[complete.clone()]));
+        let mut unresolved=complete.clone();unresolved["coverage"]["unresolved"]=json!(1);
+        assert!(!capture_complete(true,&[complete.clone(),unresolved]));
+        let mut gap=complete.clone();gap["sourceCoverage"]["complete"]=json!(false);
+        assert!(!capture_complete(true,&[complete.clone(),gap]));
+        let mut semantic=complete;semantic["complete"]=json!(false);
+        semantic["semantic"]=json!({"passed":true,"complete":false,"coverage":[{"state":"unavailable"}]});
+        assert!(capture_complete(true,&[semantic]));
+    }
 }
 struct OutputBudget(usize);
 impl Write for OutputBudget {

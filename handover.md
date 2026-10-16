@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-16 18:17 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`95ac866f04b6d8bb4731259f9efdb912583514d2`；当前本机受测优化产品树为 `408ca6bf8364fbe4348a9cf52fcfcbc5d6b08510`，runner身份独立认证。实现进行中，尚未完成全量验收。
+更新：2026-10-16 18:30 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`be55cc49f5ef32f3615eec6d919ccaeb7e04927d`；当前本机受测优化产品树为 `408ca6bf8364fbe4348a9cf52fcfcbc5d6b08510`，runner身份独立认证。实现进行中，尚未完成全量验收。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -33,7 +33,9 @@
 
 ## 3. 最新实际验证与证据
 
-- **408优化版普通native已通过，retained首请求仍失败**：[真实本机报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6221889834)full为8项通过、5项失败检查；普通cold refs/context/API及21项static通过。唯一retained首因是session-cold-refs在11.08秒返回external.io/failed to fill whole buffer，最后query_build_scope，四项后继缺首owner，不能当四个独立根因。child观测private2,121,555,968字节接近2GiB，但terminal缺失/parent未认证，尚不能断言OOM。quota和idle已通过，实际600秒lifetime仍在运行。原95ac独立runner导出漏commands.json造成1项Node失败，精确同版本补导出后70通过1平台skip；本批修正导出说明，旧失败保留。
+- **当前两条validate公共合同修复已实现、Rust待跑**：单addon使用Go CheckClosure的staticValid/loadValid/references，cycle为error；matrix保Go AST usage解析、兼容类别和cycle warning。index准备置于addon/luac/capture前，完整类别gap不受20条诊断sample截断且暖cache保留。matrix capture.complete只按valid、零unresolved和sourceCoverage.complete计算，semantic.complete独立如实呈现。普通语法检查使用保映射的轻量XML输入，接受公共Root/namespace而不误投native schema；显式semantic保原严格认证。新入口继承原control逐token检查。非法UTF8源码的index路径改按固定Go返回command.failed/exit5及原message，不再成功跳过；新增真实Git非法字节、重复失败与无最终manifest回归，仍NOT_RUN。matrix内部非法Lua字节保持原byte身份与公开JSON替换分开，single同类raw-byte关系身份尚有明确待修缺口。27个validate单测、1个matrix单测、1个真实Git/认证luac集成、XML6与Lua1新测试均NOT_RUN；Node消费者6/6已过，语法解析不等于编译。
+
+- **408优化版普通native已通过，retained首请求仍失败**：[真实本机报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6221889834)full为8项通过、5项失败检查；普通cold refs/context/API及21项static通过。唯一retained首因是session-cold-refs在11.08秒返回external.io/failed to fill whole buffer，最后query_build_scope，四项后继缺首owner，不能当四个独立根因。child观测private2,121,555,968字节接近2GiB，但terminal缺失/parent未认证，尚不能断言OOM。quota和idle已通过；[600秒lifetime终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6222038453)实际600045ms退出5、断言失败，最终close通过。已定位正常到期后无条件owner_control.check误转deadline，修复进行中；不是full analysis child同一进程。原95ac独立runner导出漏commands.json造成1项Node失败，精确同版本补导出后70通过1平台skip；本批修正导出说明，旧失败保留。
 
 - **408优化冷index单次诊断仍失败**：[真实报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6221628043)Rust40.696秒、Go8.840秒，原公共声明/关系差异仍在；与5bbb的42.859秒不能据单次归因或宣称统计收益。新公共Facts修复尚未跑，原408样本不属于新语义实现。[408正式候选准备](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6221669424)已完成；95ac修复native wrapper/controller仍读旧320 workflow的真实接线错误，历史文件原样保留，当前独立runner对原408产品身份验证后执行。
 - **本批新增可选index阶段观测**：沿既有`LYCHEEDEV_SOURCE_PHASE_PROFILE=1`输出单条聚合stderr，记录metadata、Git树/批量读取、事实cache读取/解析/序列化/发布、原文blob、symbol构造及最终index/manifest成本。所有时间是wall clock，包含调度；嵌套阶段不相加、不从原验收时间扣除。未改durability、公共结果、身份、产品预算或性能判据。新2项Rust观测回归仍NOT_RUN，下一实测再判断40秒主要成本。

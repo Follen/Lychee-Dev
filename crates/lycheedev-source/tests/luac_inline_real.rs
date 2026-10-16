@@ -117,20 +117,42 @@ fn public_validate_inline_51_errors_original_lines_and_legacy_cycle_order() {
         luac: Some(&runtime),
         luals: None,
     };
-    let good = lycheedev_source::dispatch_with_tools(&inv, tools()).unwrap();
-    assert_eq!(good.data["valid"], true, "{}", good.data);
-    assert_eq!(good.data["syntaxCompilation"]["checkedLua"], 0);
-    assert_eq!(good.data["syntaxCompilation"]["checkedInlineScripts"], 1);
-    assert_eq!(good.data["loadClosure"][0]["loadOrder"], 0);
+    let cycle = lycheedev_source::dispatch_with_tools(&inv, tools()).unwrap_err();
+    assert_eq!(cycle.code, "codebase.addon_static_check_failed");
+    let single_cycle=&cycle.details["result"];
+    assert_eq!(single_cycle["staticValid"],false);
+    assert_eq!(single_cycle["load"]["loadValid"],false);
+    assert_eq!(single_cycle["complete"],false);
+    assert_eq!(single_cycle["syntaxCompilation"]["passed"],true);
+    assert!(single_cycle["load"]["issues"].as_array().unwrap().iter().any(|issue|issue["code"]=="load_cycle"&&issue["severity"]=="error"));
+    assert_eq!(single_cycle["load"]["documents"][0]["path"], "Main.toc");
+    assert_eq!(single_cycle["load"]["documents"][1]["path"], xml_path);
+    let matrix_path=root.join("matrix.json");
+    let source=pin.source.as_ref().unwrap();
+    fs::write(&matrix_path,serde_json::to_vec(&json!({"targets":[{"id":"inline","toc":"Main.toc","product":source.product,"ref":source.exact_commit}]})).unwrap()).unwrap();
+    let matrix_inv=Invocation{flags:BTreeMap::from([("--matrix".into(),matrix_path.to_string_lossy().into_owned())]),..inv.clone()};
+    let good=lycheedev_source::matrix::validate_with_resolver(&matrix_inv,tools(),&mut |_|Ok(source.clone())).unwrap();
+    let target=&good.data["targets"][0];
+    assert_eq!(target["valid"],true,"{}",good.data);
+    assert_eq!(target["syntaxCompilation"]["checkedLua"], 0);
+    assert_eq!(target["syntaxCompilation"]["checkedInlineScripts"], 1);
+    assert_eq!(target["loadClosure"][0]["loadOrder"],0);
+    let expected_complete=good.data["valid"]==true&&target["coverage"]["unresolved"]==0&&target["sourceCoverage"]["complete"]==true;
+    assert_eq!(good.complete,expected_complete);
+    assert_eq!(good.provenance[0]["complete"],expected_complete);
     for code in ["circular_load_reference", "duplicate_load_reference"] {
         assert!(
-            good.data["diagnostics"]
+            target["diagnostics"]
                 .as_array()
                 .unwrap()
                 .iter()
                 .any(|d| d["code"] == code && d["severity"] == "warning")
         );
     }
+    fs::write(root.join(xml_path),legal.replace("<Include file=\"界 面.xml\"/>","")).unwrap();
+    let single_good=lycheedev_source::dispatch_with_tools(&inv,tools()).unwrap();
+    assert_eq!(single_good.data["staticValid"],true);
+    assert_eq!(single_good.data["syntaxCompilation"]["checkedInlineScripts"],1);
     let mut invalid = vec![];
     for (expression, expected_line) in [
         ("goto done", 4),
@@ -162,7 +184,7 @@ fn public_validate_inline_51_errors_original_lines_and_legacy_cycle_order() {
     );
     fs::write(
         home.parent().unwrap().join("inline-public-report.json"),
-        serde_json::to_vec_pretty(&json!({"valid":good,"invalid":invalid,"sourcePin":pin}))
+        serde_json::to_vec_pretty(&json!({"valid":good,"singleCycle":cycle.details,"singleValid":single_good,"invalid":invalid,"sourcePin":pin}))
             .unwrap(),
     )
     .unwrap();
