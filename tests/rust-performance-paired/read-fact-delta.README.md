@@ -22,7 +22,7 @@ stdout. It authenticates Go records against their manifest and both fact caches
 against their input identity and stored fact digest. It supports the fixed Go
 `lycheedev.source-file-facts.v2` and historical Rust
 `lycheedev.source-facts.rust.v6` (the unchanged default) or explicit `v7` through
-`v10` below; unsupported or missing inputs fail
+`v11` below; unsupported or missing inputs fail
 rather than triggering a product rebuild. Go digest verification retains its
 original JSON bytes, including HTML/U+2028/U+2029 escaping.
 
@@ -78,7 +78,7 @@ node tests/rust-performance-paired/read-fact-delta.mjs GO_HOME RUST_HOME GO_RECO
 ```
 
 This authenticates the exact `facts-layout-v10-go323-xml-lexical` /
-`generator-v6` key and `lycheedev.source-facts.rust.v10` envelope. The production
+`generator-v6` key and `lycheedev.source-facts.rust.v10` envelope. That candidate's
 whole-index/query fingerprint is v11; the argument here selects the per-file
 Facts layout, so it is `v10`, not `v11`. Use a new evidence destination and
 retain the authenticated product, runner and input identities separately.
@@ -86,3 +86,38 @@ Historical v6–v9 caches and prior outputs remain unchanged and require their
 own layout; neither auto-discovery nor schema relabeling is permitted. The
 default remains v6. All existing digest, complete field/array-order comparison
 and diagnostic-only limitations above remain in force.
+
+
+The generated-parenthesis/public-operator cache migration after `8cab848` uses
+explicit per-file `v11`:
+
+```sh
+node tests/rust-performance-paired/read-fact-delta.mjs GO_HOME NEW_RUST_HOME GO_RECORDS_JSONL v11 > NEW_EVIDENCE_DIR/static-fact-delta-v11.json
+```
+
+This selects `facts-layout-v11-go323-generated-origins`, `generator-v6`, and
+`lycheedev.source-facts.rust.v11`. The whole-index/query fingerprint is v12;
+the serialized index container remains v6 because its shape is unchanged.
+The public `source-v1` parser revision is unchanged. This invalidates valid old
+caches for restored parenthesized documentation/parameters, accurate outer-origin
+and table-body-end spans, and source-order public operator diagnostics.
+
+The migration tests write authenticated v10 envelopes containing the two actual
+9a public observations, retain their old paths and bytes, verify current-path
+schema rejection/rebuild, and require subsequent current warm hits. A valid old
+whole-index container is reconstructed from those sealed rows with recomputed
+symbol ordinals/IDs, content digest and old manifest identity. The integration
+regression requires readiness to remain false until a current rebuild, then
+checks complete-index and query-cache warm reuse under the new fingerprint.
+These fixtures are reconstructed test caches, not claimed captures of old cache
+files. Rust execution of these new regressions remains NOT_RUN until recorded.
+
+The original full-4036 comparison at 8cab used v10 and stays v10. Existing paired
+bbfe/ab4 product identities still explicitly use v10. The reader is one of the
+runner-hashed inputs, so its additive v11 support changes the current runner
+input digest; preserve the earlier exact runner bytes/receipts rather than
+claiming their identity is unchanged. Historical v6–v10 layouts,
+source/fixture bytes, reports, digest checks and comparison order remain intact;
+the reader default stays v6. Never auto-discover a layout or relabel a prior
+report. The new explicit reader support does not itself rerun either product or
+prove cache migration in Rust.

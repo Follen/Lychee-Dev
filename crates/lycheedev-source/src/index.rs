@@ -280,7 +280,7 @@ pub fn penalty(role: &str) -> i32 {
     }
 }
 pub(crate) fn fingerprint(pin: &SourcePin) -> String {
-    storage::sha256(format!("rust-index-v11\0facts-layout-v10-go323-xml-lexical\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}",pin.repository,pin.product,pin.exact_commit,pin.parser_revision).as_bytes())
+    storage::sha256(format!("rust-index-v12\0facts-layout-v11-go323-generated-origins\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}",pin.repository,pin.product,pin.exact_commit,pin.parser_revision).as_bytes())
 }
 pub fn build(home: &Path, pin: &SourcePin) -> Result<Index> {
     build_with_control(home, pin, &Default::default())
@@ -466,7 +466,7 @@ pub fn is_ready_with_control(
 fn facts_cache_path(home: &Path, path: &str, sha256: &str) -> PathBuf {
     let key = storage::sha256(
         format!(
-            "facts-layout-v10-go323-xml-lexical\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0{path}\0{sha256}"
+            "facts-layout-v11-go323-generated-origins\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0{path}\0{sha256}"
         ).as_bytes(),
     );
     home.join("cache/source-facts-rust")
@@ -512,7 +512,7 @@ fn document_facts_profiled(
             .read(key, control)?
             .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok());
         if let Some(envelope) = envelope
-            && envelope["schema"] == "lycheedev.source-facts.rust.v10"
+            && envelope["schema"] == "lycheedev.source-facts.rust.v11"
             && envelope["inputSHA256"] == sha256
             && envelope["factsSHA256"] == storage::sha256(&serde_json::to_vec(&envelope["facts"])?)
             && let Ok(parsed) = serde_json::from_value(envelope["facts"].clone())
@@ -538,7 +538,7 @@ fn document_facts_profiled(
     let serialize_phase = profile.map(|p| p.span(Phase::FactsSerialize));
     let f = serde_json::to_value(&parsed)?;
     let envelope = serde_json::to_vec(
-        &json!({"schema":"lycheedev.source-facts.rust.v10","inputSHA256":sha256,"factsSHA256":storage::sha256(&serde_json::to_vec(&f)?),"facts":f}),
+        &json!({"schema":"lycheedev.source-facts.rust.v11","inputSHA256":sha256,"factsSHA256":storage::sha256(&serde_json::to_vec(&f)?),"facts":f}),
     )?;
     if envelope.len() > MAX_FACT_CACHE_BYTES {
         return Err(ToolkitError::new(
@@ -1371,6 +1371,273 @@ mod facts_cache_tests {
         );
         assert_eq!(profile.calls(Phase::FactsRead), 0);
         assert_eq!(profile.calls(Phase::FactsParse), 0);
+    }
+
+    // These two public rows are the actual 9a generated-20 observations retained
+    // in PR #14 comment 6232293175. The fixture source/path bytes stay original.
+    fn generated_contract_9a_cases() -> Vec<(String, Vec<u8>, Value)> {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../tests/rust-parity/source-facts-generated/cases.json"
+        ))
+        .unwrap();
+        [
+            (
+                "parenthesized_field_and_entry",
+                json!({
+                    "declarations":[
+                        {"name":"Root","category":"api-system","line":1,"endLine":1,"signature":"Root"},
+                        {"name":"Run","category":"api-function","line":1,"endLine":1,"signature":"Run(y: string)"}
+                    ],
+                    "relationships":[],"loads":[],"headers":[],"diagnostics":[]
+                }),
+            ),
+            (
+                "unsupported_clears_all",
+                json!({
+                    "declarations":[],"relationships":[],"loads":[],"headers":[],
+                    "diagnostics":[{"message":"Syntax unavailable in fixed Go Lua parser","line":1}]
+                }),
+            ),
+        ]
+        .into_iter()
+        .map(|(id, facts)| {
+            let case = fixture["cases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|case| case["id"] == id)
+                .unwrap();
+            (
+                case["path"].as_str().unwrap().to_owned(),
+                case["source"].as_str().unwrap().as_bytes().to_vec(),
+                facts,
+            )
+        })
+        .collect()
+    }
+    fn generated_contract_9a_fingerprint(pin: &SourcePin) -> String {
+        storage::sha256(format!("rust-index-v11\0facts-layout-v10-go323-xml-lexical\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}", pin.repository, pin.product, pin.exact_commit, pin.parser_revision).as_bytes())
+    }
+    fn generated_contract_9a_envelope(raw: &[u8], facts: &Value) -> Value {
+        json!({
+            "schema":"lycheedev.source-facts.rust.v10",
+            "inputSHA256":storage::sha256(raw),
+            "factsSHA256":storage::sha256(&serde_json::to_vec(facts).unwrap()),
+            "facts":facts
+        })
+    }
+    fn generated_contract_9a_file(home: &Path, path: &str, raw: &[u8]) -> PathBuf {
+        let digest = storage::sha256(raw);
+        let key = storage::sha256(format!("facts-layout-v10-go323-xml-lexical\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0{path}\0{digest}").as_bytes());
+        home.join("cache/source-facts-rust")
+            .join(format!("{key}.json"))
+    }
+    fn assert_corrected_generated_contract(path: &str, facts: &Facts) {
+        if path.ends_with("parenthesized_field_and_entry.lua") {
+            assert_eq!(
+                facts
+                    .declarations
+                    .iter()
+                    .map(|row| (row.name.as_str(), row.signature.as_str()))
+                    .collect::<Vec<_>>(),
+                [
+                    ("Root", "Root"),
+                    ("Ignored", "Ignored()"),
+                    ("Run", "Run(x: number, y: string)")
+                ]
+            );
+        } else {
+            assert!(path.ends_with("unsupported_clears_all.lua"));
+            assert_eq!(facts.diagnostics.len(), 1);
+            assert_eq!(facts.diagnostics[0].line, 1);
+            assert_eq!(
+                facts.diagnostics[0].message,
+                "source line:1(column:48) near '/':   syntax error\n"
+            );
+        }
+    }
+
+    #[test]
+    fn generated_contract_rebuilds_valid_9a_file_caches_and_reuses_current_envelopes() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        for (path, raw, old_facts) in generated_contract_9a_cases() {
+            let digest = storage::sha256(&raw);
+            let old_path = generated_contract_9a_file(&fixture.home, &path, &raw);
+            let old_envelope = generated_contract_9a_envelope(&raw, &old_facts);
+            storage::atomic_json(&old_path, &old_envelope).unwrap();
+            let old_bytes = fs::read(&old_path).unwrap();
+            let current_path = facts_cache_path(&fixture.home, &path, &digest);
+            assert_ne!(old_path, current_path);
+            let expected = facts::lua(&raw, true);
+            assert_corrected_generated_contract(&path, &expected);
+            assert_ne!(serde_json::to_value(&expected).unwrap(), old_facts);
+            let (rebuilt, hit) =
+                document_facts(&fixture.home, &path, &raw, &digest, &control).unwrap();
+            assert!(
+                !hit,
+                "the authenticated old layout cannot satisfy current facts"
+            );
+            assert_eq!(
+                serde_json::to_value(&rebuilt).unwrap(),
+                serde_json::to_value(&expected).unwrap()
+            );
+            let current: Value = storage::read_json(&current_path).unwrap();
+            assert_eq!(current["schema"], "lycheedev.source-facts.rust.v11");
+            assert_eq!(fs::read(&old_path).unwrap(), old_bytes);
+            // Even valid old digests copied under the new key cannot bypass
+            // the envelope schema gate. Rebuild, then prove a real warm hit.
+            storage::atomic_json(&current_path, &old_envelope).unwrap();
+            let (rebuilt, hit) =
+                document_facts(&fixture.home, &path, &raw, &digest, &control).unwrap();
+            assert!(!hit);
+            assert_eq!(
+                serde_json::to_value(&rebuilt).unwrap(),
+                serde_json::to_value(&expected).unwrap()
+            );
+            assert_eq!(storage::read_json::<Value>(&current_path).unwrap(), current);
+            let (warm, hit) =
+                document_facts(&fixture.home, &path, &raw, &digest, &control).unwrap();
+            assert!(hit);
+            assert_eq!(
+                serde_json::to_value(&warm).unwrap(),
+                serde_json::to_value(&expected).unwrap()
+            );
+            assert_eq!(fs::read(&old_path).unwrap(), old_bytes);
+        }
+    }
+
+    #[test]
+    fn generated_contract_rejects_9a_index_and_rekeys_query_readiness_and_warm_hits() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let cases = generated_contract_9a_cases();
+        let raw = cases
+            .iter()
+            .map(|(path, raw, _)| (path.clone(), String::from_utf8(raw.clone()).unwrap()))
+            .collect();
+        let pin = fixture.pin(&raw);
+        assert_eq!(pin.parser_revision, "source-v1");
+        let old_identity = generated_contract_9a_fingerprint(&pin);
+        let identity = fingerprint(&pin);
+        assert_ne!(identity, old_identity);
+        let current = build_uncached(&fixture.home, &pin, &control).unwrap();
+        let without_io = |index: &Index| {
+            let mut value = serde_json::to_value(index).unwrap();
+            value["summary"].as_object_mut().unwrap().remove("io");
+            value
+        };
+        let expected = without_io(&current);
+        // Reconstruct the valid v6 index container from the sealed old public
+        // rows. Recompute its declaration ordinals/IDs, content hash and manifest
+        // exactly; rejection must be due to the new identity, not bad bytes.
+        let mut old = current;
+        old.symbols.retain(|symbol| symbol.name != "Ignored");
+        for (ordinal, symbol) in old.symbols.iter_mut().enumerate() {
+            symbol.ordinal = ordinal;
+            if symbol.name == "Run" {
+                symbol.signature = "Run(y: string)".into();
+            }
+            symbol.id = stable_id(&pin, symbol);
+        }
+        old.summary["declarations"] = json!(2);
+        old.summary["diagnosticSample"][0]["message"] =
+            json!("Syntax unavailable in fixed Go Lua parser");
+        for (path, raw, facts) in &cases {
+            old.documents
+                .iter_mut()
+                .find(|doc| doc.path == *path)
+                .unwrap()
+                .facts = serde_json::from_value(facts.clone()).unwrap();
+            let digest = storage::sha256(raw);
+            fs::remove_file(facts_cache_path(&fixture.home, path, &digest)).unwrap();
+            storage::atomic_json(
+                &generated_contract_9a_file(&fixture.home, path, raw),
+                &generated_contract_9a_envelope(raw, facts),
+            )
+            .unwrap();
+        }
+        let old_raw = serde_json::to_vec(&without_io(&old)).unwrap();
+        let old_blob = lycheedev_core::cache::publish_derived_controlled(
+            &fixture.home,
+            &old_raw,
+            128 << 20,
+            &control,
+        )
+        .unwrap();
+        let old_key = format!("source/rust-index/{old_identity}");
+        let old_manifest = json!({"schema":"lycheedev.source-index.rust.v6","identity":old_identity,"blob":old_blob});
+        crate::persistence::put_manifest(&fixture.home, &old_key, &old_manifest, &control).unwrap();
+        assert!(!is_ready_with_control(&fixture.home, &pin, &control).unwrap());
+        assert_eq!(
+            crate::query_store::status_with_control(&fixture.home, &pin, &control).unwrap()["ready"],
+            false
+        );
+        let (rebuilt, _) = build_material_with_control(&fixture.home, &pin, &control).unwrap();
+        assert_eq!(rebuilt.summary["io"]["parsedDocuments"], 2);
+        assert_eq!(rebuilt.summary["io"]["cachedFacts"], 0);
+        assert_eq!(without_io(&rebuilt), expected);
+        for doc in &rebuilt.documents {
+            assert_corrected_generated_contract(&doc.path, &doc.facts);
+        }
+        assert!(is_ready_with_control(&fixture.home, &pin, &control).unwrap());
+        assert_eq!(
+            crate::query_store::status_with_control(&fixture.home, &pin, &control).unwrap()["ready"],
+            true
+        );
+        let (warm, _) = build_material_with_control(&fixture.home, &pin, &control).unwrap();
+        assert_eq!(warm.summary["io"]["cachedIndex"], true);
+        assert_eq!(without_io(&warm), expected);
+        let query = crate::query_store::load_with_control(
+            &fixture.home,
+            &pin,
+            "Ignored",
+            "precise",
+            "api",
+            &control,
+        )
+        .unwrap();
+        assert_eq!(query.summary["io"]["cachedIndex"], false);
+        assert!(
+            query
+                .symbols
+                .iter()
+                .any(|symbol| symbol.name == "Ignored" && symbol.signature == "Ignored()")
+        );
+        let query_manifest: Value = crate::persistence::read(
+            &fixture.home,
+            &format!("source/rust-query-file/{identity}"),
+            &control,
+        )
+        .unwrap();
+        assert_eq!(query_manifest["identity"], identity);
+        let query = crate::query_store::load_with_control(
+            &fixture.home,
+            &pin,
+            "Ignored",
+            "precise",
+            "api",
+            &control,
+        )
+        .unwrap();
+        assert_eq!(query.summary["io"]["cachedIndex"], true);
+        assert!(query.symbols.iter().any(|symbol| symbol.name == "Ignored"));
+        assert_eq!(
+            crate::persistence::read::<Value>(&fixture.home, &old_key, &control).unwrap(),
+            old_manifest
+        );
+        let digest = old_blob["sha256"].as_str().unwrap();
+        assert_eq!(
+            fs::read(
+                fixture
+                    .home
+                    .join("cache/objects")
+                    .join(&digest[..2])
+                    .join(&digest[2..])
+            )
+            .unwrap(),
+            old_raw
+        );
     }
 
     #[test]

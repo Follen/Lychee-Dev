@@ -6,6 +6,7 @@ import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 const RUST_LAYOUTS = Object.freeze({
+  v11: { key: 'facts-layout-v11-go323-generated-origins', generator: 'generator-v6', schema: 'lycheedev.source-facts.rust.v11' },
   v6: { key: 'facts-layout-v6-xml-original-tags', generator: 'generator-v5', schema: 'lycheedev.source-facts.rust.v6' },
   v10: { key: 'facts-layout-v10-go323-xml-lexical', generator: 'generator-v6', schema: 'lycheedev.source-facts.rust.v10' },
   v9: { key: 'facts-layout-v9-go323-observed', generator: 'generator-v6', schema: 'lycheedev.source-facts.rust.v9' },
@@ -190,7 +191,7 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [goHome, rustHome, goRecords, rustLayout] = process.argv.slice(2);
   if (!goRecords || ![5, 6].includes(process.argv.length)) {
-    throw new Error('usage: node read-fact-delta.mjs GO_HOME RUST_HOME GO_RECORDS_JSONL [v6|v7|v8|v9|v10]');
+    throw new Error('usage: node read-fact-delta.mjs GO_HOME RUST_HOME GO_RECORDS_JSONL [v6|v7|v8|v9|v10|v11]');
   }
   console.log(JSON.stringify(await readFactDelta(goHome, rustHome, goRecords, rustLayout), null, 2));
 }
