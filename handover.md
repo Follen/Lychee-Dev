@@ -1,6 +1,25 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 17:52 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`7d8c5e984c97c055581798d64736db4a450033ee`（正式runner；00d产品前置/匹配构建通过，首次冷调用完成但完整对照被空WAL误拒挡住）。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 18:20 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`e4751f83d8ca26e725e8fe29a43d1d3c612c5a0f`（正式runner，产品00d）；完整六场景运行时Facts/summary均通过，增量失效已局部化但四变体总wall仍慢于Go。新变体Rust pack原件归档缺口明确保留，不能凭附件完全重放。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+
+### 最新实测：稳定分组完整六场景
+
+[e475/00d正式终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6238394989)，[原始证据索引](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6238369445)：wrapper0/succeeded、finalIntegrityVerified=true、NOT_RUN空；恰7新产品调用，原cold/warm/Go单改5调用原身份复用，不重跑。全部六场景五Facts数组/字段/顺序与共同summary完整运行时一致。10新owner sealed/reaped，9正常retired、工具stage保留；7旧failed与3claims不改。
+
+| 场景 | Go native ms | Rust native ms | Rust parsed/cached |
+|---|---:|---:|---:|
+| cold | 9658.291 | 5579.8315 | 4036/0 |
+| warm | 638.8264 | 434.5645 | 0/4036 |
+| single-content-change | 3544.9285 | 4402.9541 | 9/4027 |
+| root-insert | 3028.1771 | 4376.3258 | 1/4036 |
+| first-delete | 3424.6243 | 4288.7907 | 8/4027 |
+| cross-prefix-rename | 3265.7518 | 4428.2166 | 9/4027 |
+
+局部失效9/1/8/9已真实成立；四变体仍为Go的1.242–1.445倍，不算性能达标。各为单对且准备隔开，原Go单改来自前次失败；不是20对验收。原31phase重叠不相加、不从nativewall扣除；controller587307.5352ms不是产品wall。memory gaps保留，不代表完整RSS峰。
+
+14附件由本机实际公开GET/CRC/SHA核过；云端Source作者正在唯一解取复核同run细账，尚不冒称云端全部验证。12片本轮Brotli93440390B/SHA c8e6db1d2998a1fd0b6b830af29ee5734e5149f3fd7ebd0a2202c71240b3186b；旧2d1两片10308120B/SHA0b2af57b730dbd5eb932f1656ba300406bc4152bfececf3e96b0b29b57a3e5a9。
+
+证据真实限制：runner成功cleanup前没有归档新Rust Facts pack body，全部成功变体副本已清理；附件含完整GoFacts、双方index分片与实际比较结果，但不能独立完整重放新变体readFactDelta。禁止补造原件或重跑替历史。下一薄修仅把已认证index实际引用的pack/合法loose分片归档并核验后再cleanup；性能下一步依据同run缓存读取/整index构建序列化发布关键路径，不继续靠少parse宣传收益。
 
 ## 1. 当前决定与不可漂移基线
 
