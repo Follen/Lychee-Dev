@@ -644,7 +644,7 @@ remove a read, hash, durable transaction, control check or checked cleanup.
 The recorder remains off by default without extra clock reads.
 
 These spans are nested diagnostic wall times, not a new additive business
-ledger. `winner_open` includes `final_verify_inclusive`; error-path closes in
+ledger. `winner_open` ends when `open_winner` returns its file; `final_verify_inclusive` starts later in `verify_opened`, so these two are disjoint on successful fresh and reused publication paths (the earlier documentation incorrectly called them nested); error-path closes in
 those scopes remain included there. `checked_close` covers explicit publisher
 closes only; a delivered blob's later close belongs to the original
 `source_close` phase. Initial parent opening and work between spans remain in
@@ -655,5 +655,4 @@ Use the unchanged `--data-phase-profile` entry with a newly matched product.
 The reader strictly accepts v1, v2 and v3, preserving absent historical vectors
 rather than inventing observations. The new reader has actually accepted all
 24 original ab4 v1 stderr records and all 24 original 8cab v2 records unchanged;
-that compatibility check is not a v3 Windows measurement. New Core/Data Rust
-regressions and matching v3 product measurements remain pending.
+that compatibility check is not a v3 Windows measurement. The new Core/Data Rust regressions passed on the fixed 5d4 tree (PR14 comment 6233193157). Matching b3d v3 diagnostic measurements completed: 12 paths, 24 cold/warm rows and 48 CLI calls were equivalent with valid timing and complete process cleanup (PR14 comments 6233589545 and 6233633639). This is one pair per path, not 20-pair performance acceptance; 46 memory observations succeeded and two have sampling gaps.
