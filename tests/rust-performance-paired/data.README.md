@@ -309,6 +309,7 @@ $files = @(
   "tests/rust-performance-paired/data-contract.mjs",
   "tests/rust-performance-paired/data-inputs.mjs",
   "tests/rust-performance-paired/data-resume.mjs",
+  "tests/rust-performance-paired/data-phase-profile.mjs",
   "tests/rust-performance-paired/data-runner.test.mjs",
   "tests/rust-performance-paired/data-resume.test.mjs",
   "tests/rust-performance-paired/data.README.md",
@@ -363,7 +364,7 @@ Those remain a separate explicit ownership/recovery obligation.
 ## Fresh full acceptance with the unchanged 30d product
 
 Use a **fresh stage of the reviewed all-mode entry fix**, exported with the
-complete 24-file list above, while keeping the product checkout and sealed
+complete 25-file list above, while keeping the product checkout and sealed
 artifact unchanged. The d86 entry alone does not support separate-stage
 acceptance: it chooses the product checkout's old runner for that mode. The
 fixed entry always hashes and launches its own stage, records `runnerRoot`,
@@ -382,7 +383,7 @@ machine/load, updating the new copy if conditions changed. Runtime power and
 toolchain checks remain enabled.
 
 ```powershell
-# $runner is the fresh authenticated 24-file export from the preceding block.
+# $runner is the fresh authenticated 25-file export from the preceding block.
 Set-Location "<unchanged 30d product checkout>"
 $prior = Join-Path (Get-Location) ".tmp/rust-disk/evidence/811dac59-a06f-4f11-b0b4-43b0c37bb7d6/owned-report.json"
 $original = Get-Content -Raw (Join-Path (Split-Path $prior) "configuration.json") | ConvertFrom-Json
@@ -439,7 +440,7 @@ Actual failure policy is unchanged:
 ## Optional startup attribution on the same 30d product
 
 `--startup-diagnostics` is an independent observation mode, mutually exclusive
-with both `--acceptance` and `--resume-unattempted`. It runs the existing twelve
+with `--acceptance`, `--resume-unattempted` and `--data-phase-profile`. It runs the existing twelve
 paths once cold and once warm: twelve fresh pair owners, 24 pair rows and 48
 measured CLI invocations, plus the unchanged 15 preparation invocations. It
 does not import, replace or add fields to any of the old 928 samples. The
@@ -466,7 +467,7 @@ the ≤0.30 target. A successful diagnostic run is still only
 `equivalent_data_observation_only`, with `startupDiagnostics=true` and
 `performanceAcceptanceEvaluated=false`.
 
-Use the same 24-file Git export above from the reviewed **new diagnostic
+Use the same 25-file Git export above from the reviewed **new diagnostic
 runner commit**, in fresh coordinator-owned stage, not the old 5bc runner.
 Keep the current directory at the unchanged 30d product checkout and reuse
 its already sealed release. Use the full acceptance's authenticated original
@@ -496,4 +497,125 @@ isolates the next observation need without a new product build or another
 928-invocation acceptance run. It does not isolate BLTE, texture decoding,
 PNG/WebP, metadata or file-publication costs inside the product; those require
 separately justified product phase observation if startup evidence points
-there. All existing command budgets and the five-hour outer cap remain.
+there. The separate opt-in Data phase mode below supplies that narrower product
+observation with a new matching artifact. All existing command budgets and the
+five-hour outer cap remain.
+
+
+## Optional Data business-phase profile with a matching new product
+
+`--data-phase-profile` is a fresh diagnostic observation mode. It is mutually
+exclusive with `--acceptance`, `--resume-unattempted` and the standalone
+`--startup-diagnostics` flag. It automatically enables the same startup
+attribution described above for both measured engines. It runs all twelve
+existing paths once cold and once warm: twelve fresh pair owners, 24 pair rows
+and 48 measured CLI invocations, plus the unchanged 15 preparation invocations.
+Preparation is not a sample. There is no performance acceptance, sample import,
+replacement, shortcut or extra product run to obtain a missing profile.
+
+This mode requires a **new sealed optimized Rust artifact built from the exact
+product source containing the Data recorder and its actual consumers**. The
+unchanged 30d product cannot emit `lycheedev.data-query-phases.v1`; running this
+mode against it would fail the required diagnostic proof. Startup-only mode
+can still use 30d as documented above. A runner-only export cannot add product
+instrumentation. Source digest, complete packaged resources and binary identity
+must all match the new artifact through the existing preparation/verification
+workflow. This measurement entry performs no build. Reuse only authenticated
+unchanged Go323, fixture and decoder inputs; preserve all older failures and
+samples under their original product/runner identities.
+
+Only a measured Rust invocation receives `LYCHEEDEV_DATA_PHASE_PROFILE=1`.
+The runner removes inherited case variants of that variable from every other
+invocation, including Go, `init`, toolchain/identity preparation, ordinary
+measurement, acceptance and startup-only measurement. Their stderr-empty
+contract stays unchanged. Profiled Rust stderr must contain exactly one compact
+JSON record, optionally followed by one line ending, with the exact v1 fields,
+fixed ordered eleven phases and nonnegative safe integer call/time values.
+Missing, duplicate, malformed, oversized or unknown stderr is rejected. For
+these known successful fixtures, admission, prepare, payload, source capture
+and source close must each have at least one call; image exports require all
+eleven phases. Failed invocations may legitimately report zero calls where
+work was never reached. This requirement is not applied to unknown paths.
+
+Each Rust sample retains its original raw stderr logs, `stderrSHA256`, byte
+count, full process proof, exit/error and original `controllableMillis`.
+The parsed record is stored separately as `dataPhaseProfile`; failures are
+`dataPhaseProfileFailure`. Both engines retain the independent `startup` or
+`startupFailure`. The profile has no invented invocation identity: its link to
+the exact sample is the original stderr hash/log, owned process proof and
+matched product artifact recorded with that sample/run. Diagnostic parsing
+never replaces product output validation
+or a product failure. Equivalent successful products with missing diagnostic
+proof remain `valid=true` and `resultEquivalent=true`, while their pair and
+overall diagnostic run fail (`failed_diagnostics`) and retain evidence. When
+product and diagnostic checks both fail, both original findings remain; failed
+cold products still do not obtain a warm sample. A success is only
+`equivalent_data_observation_only`, with `dataPhaseProfile=true`,
+`startupDiagnostics=true` and `performanceAcceptanceEvaluated=false`.
+
+The actual recorder observes these fixed business scopes:
+
+- `admission`: existing workspace/provider admission and pin checks in that
+  scope, after earlier request validation where the product already places it.
+- `prepare_inclusive`: local target/CASC/Encoding setup, full Root
+  authentication/cache handling, Root materialization and checked close,
+  build/CDN evidence and RootIndex construction where that consumer uses it.
+  The legacy inspect reader prepares keys before this span. This is not metadata-only.
+- `payload_inclusive`: selected lookup, full encoded hash, decoded-cache
+  handling or decode/extraction, body materialization and reading metadata.
+  The legacy inspect reader's batched Root lookup precedes its per-file span.
+- `texture_decode`: verified BLP texture decode; `pixel_transform_and_hash`:
+  channel transformation and RGBA digest; `encode`: the existing PNG/WebP
+  encoder call, including its writes and in-call error handling.
+- `source_capture_metadata_inclusive`, `artifact_capture_metadata_inclusive`
+  and `manifest_capture_metadata_inclusive`: the respective existing capture
+  calls, including metadata construction/publication and blob work. Source
+  capture is the SQL query capture or asset source capture, as appropriate.
+  They do not independently time metadata open/write/close.
+- `output`: bounded external export-file publication: copy/stage/seal/publish
+  and its inner checked close. Final destination close occurs after the request
+  budget is dropped; it and CLI JSON render/flush are outside this phase.
+- `source_close`: explicit outer checked blob, reader and admission-scope
+  cleanup, including repeated and potentially nested close scopes. Internal
+  closes stay inclusive in prepare/payload/capture rather than being split out.
+
+Every phase reports calls and elapsed microseconds, including observed scopes
+that return errors. Unused phases are present with zero calls/time. The one
+record is emitted when the final shared query-budget recorder is dropped;
+safety-only views and borrowed spans do not create duplicate output owners.
+Its top-level `elapsedMicros` is that budget's diagnostic lifetime, not the full
+CLI interval. The scopes can nest and overlap, including existing worker
+activity and repeated cleanup. Do not add them into a supposed total, subtract
+them from the original interval, call them CPU time or use them to pass the
+≤0.30 requirement. They do not cover every operation; notably there is no
+separate SQL parse/bind/definitions/row-execution phase or metadata-internal
+split; SQL observes its shared admission, physical prepare/payload, query
+capture and close. The exact
+boundaries are the instrumented consumers, not a promise of exhaustive cost
+accounting. All command limits, authentication and content/pixel/capture checks
+remain unchanged.
+
+Export the current reviewed 25-file runner/test closure above, then run against
+the matching **new** product checkout and artifact, with fresh owned evidence.
+The nine existing inputs have the same meanings; no global environment change
+is needed:
+
+```powershell
+$phaseProductRoot = "<new product checkout matching the sealed profiled artifact>"
+$phaseRustArtifact = "<absolute matching optimized artifact.json>"
+$conditions = "<fresh truthful phase-diagnostic conditions.json>"
+# $runner, $goSource, $goPackage, $luaLS, $prepared.fixtures and $sharp
+# are the reviewed absolute runner and authenticated prepared input paths.
+Set-Location $phaseProductRoot
+node --test "$runner/tests/rust-performance-paired/data-runner.test.mjs" "$runner/tests/rust-performance-paired/data-resume.test.mjs" "$runner/tools/rust-owned-process.test.mjs"
+if ($LASTEXITCODE -ne 0) { throw "Staged Data/native owner checks failed" }
+node "$runner/tools/rust-data-performance-paired.mjs" $phaseRustArtifact $goSource $goPackage $luaLS $conditions $prepared.fixtures.catalog $prepared.fixtures.content $prepared.fixtures.images $sharp --data-phase-profile
+if ($LASTEXITCODE -ne 0) { throw "Data phase diagnostics failed; preserve independent product and diagnostic evidence" }
+```
+
+Cloud Node tests exercise the real entry/controller with synthetic product and
+native-owner boundaries, including all 48 measured calls, environment isolation,
+strict stderr parsing and preservation of simultaneous failures. They are not
+Windows execution, product phase measurements or a speedup claim. The source
+checkout also checks the parser's phase names against the Rust recorder; that
+source-only check is explicitly skipped in a runner export without Rust source.

@@ -84,6 +84,8 @@ impl<'a> Reader<'a> {
         if self.ready.is_some() {
             return self.check_source();
         }
+        let budget = self.budget;
+        let _phase = budget.phase(Phase::Prepare);
         if self.keys.is_none() {
             self.keys = Some(keys::Context::prepare_budgeted(
                 self.inv,
@@ -164,7 +166,7 @@ impl<'a> Reader<'a> {
             check,
         )?;
         let mut stats = decoded_cache::Stats::default();
-        let (_, root) = decoded_cache::read_content_in_session(
+        let (_, root, root_reference) = decoded_cache::read_content_with_reference_in_session(
             &self.inv.home,
             casc_source,
             &index,
@@ -176,13 +178,9 @@ impl<'a> Reader<'a> {
             None,
             &self.inv.control,
         )?;
-        let root_blob = evidence::publish_blob_bounded_with_check(
-            &self.inv.home,
-            &root.bytes,
-            256 << 20,
-            &self.inv.control,
-            || self.budget.check(),
-        )?;
+        // Reuse the reference authenticated by the same materialization owner;
+        // its checked close still precedes all following publication work.
+        let root_blob = serde_json::to_value(root_reference)?;
         let build_blob = evidence::publish_blob_bounded_with_check(
             &self.inv.home,
             &target.metadata.build_document.raw,
@@ -260,6 +258,8 @@ impl<'a> Reader<'a> {
     }
     fn read_once(&mut self, id: u32, maximum: usize, mode: ReadMode) -> Result<ResolvedFile> {
         self.prepare()?;
+        let budget = self.budget;
+        let _phase = budget.phase(Phase::Payload);
         let limits = self.limits();
         let ready = self.ready.as_mut().expect("prepared local session");
         let target = self.target.as_ref().expect("prepared local target");
@@ -408,6 +408,8 @@ impl<'a> Reader<'a> {
         Ok(())
     }
     pub fn close_after<T>(mut self, result: Result<T>) -> Result<T> {
+        let budget = self.budget;
+        let _phase = budget.phase(Phase::SourceClose);
         drop(self.ready.take());
         let result = match self.source.take() {
             Some(source) => match Arc::try_unwrap(source) {

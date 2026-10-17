@@ -12,12 +12,14 @@ export function dataMode(extra) {
   if (!extra.length) return {acceptance: false, resumeFrom: null};
   if (extra.length === 1 && extra[0] === '--acceptance') return {acceptance: true, resumeFrom: null};
   if (extra.length === 1 && extra[0] === '--startup-diagnostics') return {acceptance: false, resumeFrom: null, startupDiagnostics: true};
-  assert(extra.length === 2 && extra[0] === '--resume-unattempted' && extra[1] && !extra[1].startsWith('--'), 'expected --acceptance OR --startup-diagnostics OR --resume-unattempted <prior-owned-report.json>');
+  if (extra.length === 1 && extra[0] === '--data-phase-profile') return {acceptance: false, resumeFrom: null, startupDiagnostics: true, dataPhaseProfile: true};
+  assert(extra.length === 2 && extra[0] === '--resume-unattempted' && extra[1] && !extra[1].startsWith('--'), 'expected --acceptance OR --startup-diagnostics OR --data-phase-profile OR --resume-unattempted <prior-owned-report.json>');
   return {acceptance: false, resumeFrom: resolve(extra[1])};
 }
 
 export function remainingDataCases(entries, previous) {
   assert.equal(previous.performanceAcceptanceEvaluated, false, 'cannot resume/merge acceptance samples');
+  assert(!previous.startupDiagnostics && !previous.dataPhaseProfile, 'cannot continue diagnostic samples');
   assert.equal(previous.preflightPairs.length, 0); assert.equal(previous.requiresOuterRetirement, false);
   assert.equal(previous.state, 'failed'); assert(!previous.continuation, 'one-hop continuation only');
   const attempted = [...new Set(previous.pairs.map(row => row.caseId))];
@@ -69,13 +71,13 @@ export function verifyDataContinuation(root, priorPath, current) {
   assert.equal(outer.process.exit, 1); assert.equal(outer.process.handlesReaped, true); assert(!outer.process.error);
   assert.equal(outer.observation, join(evidence, 'report.json'));
   assert.equal(old.root, root); assert.equal(old.evidence, evidence); assert.equal(old.scratch, owner.value.directory);
-  assert.equal(old.acceptance, false); assert(!old.resumeFrom && !old.runnerRoot, 'original full single-root observation required');
+  assert.equal(old.acceptance, false); assert(!old.startupDiagnostics && !old.dataPhaseProfile && !outer.startupDiagnostics && !outer.dataPhaseProfile, 'original non-diagnostic observation required'); assert(!old.resumeFrom && !old.runnerRoot, 'original full single-root observation required');
   assert.deepEqual(outer.inputs, old.inputs);
   // Authenticate the old runner against the unchanged artifact checkout, while
   // the new executing runner has its own separately sealed identity.
   for (const [path, sha] of Object.entries(old.inputs)) assert.equal(hashFile(contained(root, join(root, path))), sha, 'original runner checkout changed');
   const now = current.config;
-  assert.deepEqual(Object.keys(old.inputs).sort(), Object.keys(now.inputs).filter(path => path !== 'tests/rust-performance-paired/data-resume.mjs').sort(), 'complete original runner inventory required');
+  assert.deepEqual(Object.keys(old.inputs).sort(), Object.keys(now.inputs).filter(path => !['tests/rust-performance-paired/data-resume.mjs', 'tests/rust-performance-paired/data-phase-profile.mjs'].includes(path)).sort(), 'complete original runner inventory required');
   assert.deepEqual(old.rust, now.rust); assert.deepEqual(outer.rust, now.rust);
   for (const key of ['root', 'binary', 'binarySHA256', 'packageSHA256']) { assert.equal(old.go[key], now.go[key]); assert.equal(outer.go[key], now.go[key]); }
   for (const key of ['goSource', 'luaLSArchive', 'rustArtifact', 'sharpModule']) assert.equal(old[key], now[key], `continuation ${key} identity changed`);

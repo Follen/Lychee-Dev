@@ -6,6 +6,7 @@ use crate::{
     hotfix::remote::equal_fold,
     installed, keys,
     metadata_format::{self, Encoding},
+    phase_profile::Phase,
     relational,
     resource::{Budget, Cost},
     schema, table,
@@ -89,11 +90,15 @@ pub fn read_files(
     inv.control.check()?;
     budget.check()?;
     validate_local_file_request(inv, ids)?;
-    let scope = crate::remote::provider::OpenedScope::open(inv, &budget)?.admit()?;
+    let scope = {
+        let _phase = budget.phase(Phase::Admission);
+        crate::remote::provider::OpenedScope::open(inv, &budget)?.admit()?
+    };
     let result = (|| {
         scope.check_pin(pin)?;
         read_files_budgeted(inv, pin, ids, &budget)
     })();
+    let _phase = budget.phase(Phase::SourceClose);
     scope.finish(result)
 }
 /// No IO, allocation admission, key preparation or pin lookup. Keep Go's
@@ -175,8 +180,20 @@ pub(crate) fn read_verified_file_budgeted(
     id: u32,
     budget: &Arc<Budget>,
 ) -> Result<VerifiedFile> {
+    read_verified_file_after_read(inv, pin, id, budget, &mut || Ok(()), &mut |result| result)
+}
+// Observe only after ownership delivery and after the real batch/reader close.
+// Production observers are identities; the actual read and close cannot be skipped.
+fn read_verified_file_after_read(
+    inv: &Invocation,
+    pin: &selection::DataPin,
+    id: u32,
+    budget: &Arc<Budget>,
+    after_delivery: &mut impl FnMut() -> Result<()>,
+    after_read: &mut impl FnMut(Result<()>) -> Result<()>,
+) -> Result<VerifiedFile> {
     let mut result = None;
-    read_batches(
+    let read = read_batches(
         inv,
         pin,
         &[id],
@@ -201,10 +218,20 @@ pub(crate) fn read_verified_file_budgeted(
                     ));
                 }
             }
+            after_delivery()?;
             Ok(Vec::new())
         },
-    )?;
-    result.ok_or_else(|| fault("records.internal", 8, "Selected content missing"))
+    );
+    match after_read(read) {
+        Ok(()) => result.ok_or_else(|| fault("records.internal", 8, "Selected content missing")),
+        Err(error) => match result {
+            Some(file) => {
+                let _phase = budget.phase(Phase::SourceClose);
+                file.blob.close_after(Err(error))
+            }
+            None => Err(error),
+        },
+    }
 }
 fn read_batches(
     inv: &Invocation,
@@ -262,6 +289,7 @@ fn read_files_with_keys(
     mode: ReadMode,
     callback: &mut dyn FnMut(Vec<ResolvedFile>) -> Result<Vec<u32>>,
 ) -> Result<()> {
+    let prepare = budget.phase(Phase::Prepare);
     let max = validate_local_file_request(inv, ids)?;
     let variant = inv.flag("--content-variant").unwrap_or("");
     budget.charge(Cost::metadata(
@@ -329,7 +357,7 @@ fn read_files_with_keys(
         let index = Encoding::open_with_check(&metered, limits, None, check)?;
         let root_record =
             index.find_with_check(&target.metadata.root_content_key, limits, None, check)?;
-        let (_, root) = decoded_cache::read_content_controlled(
+        let (_, root, root_reference) = decoded_cache::read_content_with_reference_controlled(
             &inv.home,
             &target.common_root,
             &index,
@@ -341,13 +369,10 @@ fn read_files_with_keys(
             None,
             &inv.control,
         )?;
-        let root_blob = evidence::publish_blob_bounded_with_check(
-            &inv.home,
-            &root.bytes,
-            256 << 20,
-            &inv.control,
-            || budget.check(),
-        )?;
+        // The bounded materialization returned the reference of its actual
+        // verified owner only after its original checked close succeeded.
+        // Republishing these same Root bytes would re-lock/reopen/re-hash them.
+        let root_blob = serde_json::to_value(root_reference)?;
         let build_blob = evidence::publish_blob_bounded_with_check(
             &inv.home,
             &target.metadata.build_document.raw,
@@ -365,6 +390,7 @@ fn read_files_with_keys(
         let mask = locale(&pin.language)?;
         let mut pending = ids.to_vec();
         let mut requested = 0usize;
+        drop(prepare);
         while !pending.is_empty() {
             budget.check()?;
             requested = requested
@@ -388,101 +414,131 @@ fn read_files_with_keys(
                 check,
             )?;
             let mut result = vec![];
-            for id in &pending {
-                budget.check()?;
-                if Instant::now() >= deadline {
-                    return Err(fault(
-                        "records.resource_limit",
-                        3,
-                        "Local query deadline exceeded",
-                    ));
-                }
-                let candidates = entries
-                    .iter()
-                    .filter(|e| {
-                        e.file_data_id == *id
-                            && e.locale_mask & mask != 0
-                            && (variant != "standard" || e.content_flags & 0x80 == 0)
-                            && (variant != "low-violence" || e.content_flags & 0x80 != 0)
-                    })
-                    .collect::<Vec<_>>();
-                if candidates.len() != 1 {
-                    return Err(fault(
-                        if candidates.is_empty() {
-                            "records.content_missing"
-                        } else {
-                            "records.file_ambiguous"
-                        },
-                        if candidates.is_empty() { 3 } else { 4 },
-                        "Pinned file locale/content variant must select exactly one Root record",
-                    ));
-                }
-                let entry = candidates[0];
-                let mapping = index.find_with_check(&entry.content_key, limits, None, check)?;
-                if mapping.decoded_bytes > max as u64 {
-                    return Err(fault(
-                        "records.metadata_limit",
-                        3,
-                        "Selected content exceeds byte budget",
-                    ));
-                }
-                // Go 3.2.3 removed the cumulative raw-content cap. Each file
-                // retains its explicit maximum; shared logical/safety accounting
-                // admits real allocations and may grow only after a fresh probe.
-                // Selected encoded and decoded lengths share --max-bytes; metadata
-                // keeps its independent allowance. Pass the selected bound separately
-                // so a 512 MiB allowance does not alter CASC allocation limits.
-                let (payload_key, content, content_blob) = match mode {
-                    ReadMode::Materialized => {
-                        let (encoding_key, content) = decoded_cache::read_content_controlled(
-                            &inv.home,
-                            &target.common_root,
-                            &index,
-                            &mapping,
-                            limits,
-                            keys,
-                            &mut stats,
-                            budget,
-                            Some(max),
-                            &inv.control,
-                        )?;
-                        let blob = evidence::publish_blob_bounded_with_check(
-                            &inv.home,
-                            &content.bytes,
-                            max,
-                            &inv.control,
-                            || budget.check(),
-                        )?;
-                        (encoding_key, SelectedContent::Bytes(content.bytes), blob)
+            let collected = (|| {
+                for id in &pending {
+                    let _phase = budget.phase(Phase::Payload);
+                    budget.check()?;
+                    if Instant::now() >= deadline {
+                        return Err(fault(
+                            "records.resource_limit",
+                            3,
+                            "Local query deadline exceeded",
+                        ));
                     }
-                    ReadMode::Verified => {
-                        let (encoding_key, blob) = decoded_cache::read_verified_content(
-                            &inv.home,
-                            &target.common_root,
-                            &index,
-                            &mapping,
-                            limits,
-                            max,
-                            keys,
-                            &mut stats,
-                            budget,
-                            &inv.control,
-                        )?;
-                        let reference = serde_json::to_value(blob.reference())?;
-                        (encoding_key, SelectedContent::Blob(blob), reference)
+                    let candidates = entries
+                        .iter()
+                        .filter(|e| {
+                            e.file_data_id == *id
+                                && e.locale_mask & mask != 0
+                                && (variant != "standard" || e.content_flags & 0x80 == 0)
+                                && (variant != "low-violence" || e.content_flags & 0x80 != 0)
+                        })
+                        .collect::<Vec<_>>();
+                    if candidates.len() != 1 {
+                        return Err(fault(
+                            if candidates.is_empty() {
+                                "records.content_missing"
+                            } else {
+                                "records.file_ambiguous"
+                            },
+                            if candidates.is_empty() { 3 } else { 4 },
+                            "Pinned file locale/content variant must select exactly one Root record",
+                        ));
                     }
-                };
-                let mut reading = json!({"contentVerified":true,"source":"installation","pin":pin,"catalogSHA256":target.metadata.catalog_sha256,"buildConfiguration":build_blob,"cdnConfiguration":cdn_blob,"encodingKey":target.metadata.encoding_key,"root":root_blob,"entry":entry,"payloadEncodingKey":payload_key,"content":content_blob,"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"encodingIO":reader.io_stats()});
-                if !variant.is_empty() {
-                    reading["contentVariant"] = json!(variant);
+                    let entry = candidates[0];
+                    let mapping = index.find_with_check(&entry.content_key, limits, None, check)?;
+                    if mapping.decoded_bytes > max as u64 {
+                        return Err(fault(
+                            "records.metadata_limit",
+                            3,
+                            "Selected content exceeds byte budget",
+                        ));
+                    }
+                    // Go 3.2.3 removed the cumulative raw-content cap. Each file
+                    // retains its explicit maximum; shared logical/safety accounting
+                    // admits real allocations and may grow only after a fresh probe.
+                    // Selected encoded and decoded lengths share --max-bytes; metadata
+                    // keeps its independent allowance. Pass the selected bound separately
+                    // so a 512 MiB allowance does not alter CASC allocation limits.
+                    let (payload_key, content, content_blob) = match mode {
+                        ReadMode::Materialized => {
+                            let (encoding_key, content) = decoded_cache::read_content_controlled(
+                                &inv.home,
+                                &target.common_root,
+                                &index,
+                                &mapping,
+                                limits,
+                                keys,
+                                &mut stats,
+                                budget,
+                                Some(max),
+                                &inv.control,
+                            )?;
+                            let blob = evidence::publish_blob_bounded_with_check(
+                                &inv.home,
+                                &content.bytes,
+                                max,
+                                &inv.control,
+                                || budget.check(),
+                            )?;
+                            (encoding_key, SelectedContent::Bytes(content.bytes), blob)
+                        }
+                        ReadMode::Verified => {
+                            let (encoding_key, blob) = decoded_cache::read_verified_content(
+                                &inv.home,
+                                &target.common_root,
+                                &index,
+                                &mapping,
+                                limits,
+                                max,
+                                keys,
+                                &mut stats,
+                                budget,
+                                &inv.control,
+                            )?;
+                            let reference = match serde_json::to_value(blob.reference()) {
+                                Ok(reference) => reference,
+                                Err(error) => {
+                                    let _phase = budget.phase(Phase::SourceClose);
+                                    return blob.close_after(Err(error.into()));
+                                }
+                            };
+                            (encoding_key, SelectedContent::Blob(blob), reference)
+                        }
+                    };
+                    // Own verified bodies before any fallible report step. Keep
+                    // materialized bytes on their original move/drop path.
+                    // A partial batch never escapes; verified owners close in
+                    // acquisition order if a later file/report/check fails.
+                    let content = match content {
+                        SelectedContent::Blob(blob) => {
+                            result.push(ResolvedFile {
+                                content: SelectedContent::Blob(blob),
+                                reading: Value::Null,
+                            });
+                            None
+                        }
+                        bytes => Some(bytes),
+                    };
+                    let mut reading = json!({"contentVerified":true,"source":"installation","pin":pin,"catalogSHA256":target.metadata.catalog_sha256,"buildConfiguration":build_blob,"cdnConfiguration":cdn_blob,"encodingKey":target.metadata.encoding_key,"root":root_blob,"entry":entry,"payloadEncodingKey":payload_key,"content":content_blob,"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"encodingIO":reader.io_stats()});
+                    if !variant.is_empty() {
+                        reading["contentVariant"] = json!(variant);
+                    }
+                    reading["keySource"] = keys.value();
+                    reading["decodedCache"] = serde_json::to_value(&stats)?;
+                    if let Some(content) = content {
+                        result.push(ResolvedFile { content, reading });
+                    } else {
+                        result.last_mut().expect("owned selected file").reading = reading;
+                    }
+                    stats = decoded_cache::Stats::default();
                 }
-                reading["keySource"] = keys.value();
-                reading["decodedCache"] = serde_json::to_value(&stats)?;
-                result.push(ResolvedFile { content, reading });
-                stats = decoded_cache::Stats::default();
+                Ok(())
+            })();
+            if let Err(error) = collected {
+                return close_resolved_files(result, Err(error), budget);
             }
-            budget.check()?;
-            pending = callback(result)?;
+            pending = deliver_resolved_files(result, budget, callback)?;
         }
         let after = installed::resolve_local_budgeted(
             &target.common_root,
@@ -502,8 +558,35 @@ fn read_files_with_keys(
         }
         budget.check()
     })();
+    let _phase = budget.phase(Phase::SourceClose);
     reader.close_after(result)
 }
+// Callback transfer happens only after the original final budget check. On a
+// failed batch/check, retain its first typed error and every actual close cause.
+fn close_resolved_files<T>(
+    files: Vec<ResolvedFile>,
+    mut result: Result<T>,
+    budget: &Budget,
+) -> Result<T> {
+    for file in files {
+        if let SelectedContent::Blob(blob) = file.content {
+            let _phase = budget.phase(Phase::SourceClose);
+            result = blob.close_after(result);
+        }
+    }
+    result
+}
+fn deliver_resolved_files(
+    files: Vec<ResolvedFile>,
+    budget: &Budget,
+    callback: &mut dyn FnMut(Vec<ResolvedFile>) -> Result<Vec<u32>>,
+) -> Result<Vec<u32>> {
+    match budget.check() {
+        Ok(()) => callback(files),
+        Err(error) => close_resolved_files(files, Err(error), budget),
+    }
+}
+
 struct MetadataSource<'a> {
     inner: &'a dyn ByteSource,
     budget: &'a Budget,
@@ -721,12 +804,14 @@ pub(crate) fn sql_inner_budgeted(
     request.admit_encoded(&safety)?;
     // Ordinary SQL keeps Go's Metadata -> pin -> admission ordering for
     // both physical sources. Only file IO branches on --cdn.
-    let (mut scope, pin) =
+    let (mut scope, pin) = {
+        let _phase = budget.phase(Phase::Admission);
         crate::remote::provider::OpenedScope::open(inv, budget)?.admit_pinned(fault(
             "records.data_pin_required",
             2,
             "SQL requires a fixed DataPin",
-        ))?;
+        ))?
+    };
     let mut committed = Vec::new();
     let mut output_published = false;
     let mut execute_sql = |scope: &mut dyn crate::remote::provider::FileScope| -> Result<Outcome> {
@@ -816,6 +901,7 @@ pub(crate) fn sql_inner_budgeted(
             // Reserve the small success identities before the commit; later
             // checked close cannot erase an already-published capture.
             safety.charge(Cost::retained(512))?;
+            let capture_phase = budget.phase(Phase::SourceCapture);
             let capture = evidence::commit_capture_budgeted_referencing(
                 &inv.home,
                 evidence::CaptureInput {
@@ -830,6 +916,7 @@ pub(crate) fn sql_inner_budgeted(
                 &inv.control,
                 &reference_accounting,
             )?;
+            drop(capture_phase);
             committed.push(
                 capture["id"]
                     .as_str()
@@ -873,6 +960,7 @@ pub(crate) fn sql_inner_budgeted(
     } else {
         execute_sql(&mut scope)
     };
+    let _phase = budget.phase(Phase::SourceClose);
     scope
         .finish(result)
         .map_err(|error| sql_committed_error(error, &committed, output_published))
@@ -902,6 +990,15 @@ pub(crate) fn asset_after_finish(
     inv: &Invocation,
     after_finish: &mut impl FnMut(Result<Outcome>) -> Result<Outcome>,
 ) -> Result<Outcome> {
+    asset_after_closes(inv, after_finish, &mut |result| result)
+}
+// Narrow close observer, like the existing final-scope observer: production
+// forwards the actual checked result. Tests cannot bypass or substitute close.
+fn asset_after_closes(
+    inv: &Invocation,
+    after_finish: &mut impl FnMut(Result<Outcome>) -> Result<Outcome>,
+    after_blob_close: &mut impl FnMut(Result<Outcome>) -> Result<Outcome>,
+) -> Result<Outcome> {
     inv.control.check()?;
     let id = inv.required("--file-id")?.parse::<u32>().map_err(|_| {
         fault(
@@ -916,8 +1013,10 @@ pub(crate) fn asset_after_finish(
     ));
     // Asset reads resolve DataSome before admission, then validate DataIdentity
     // inside the admitted Reader scope, exactly as fixed Go captureAsset does.
-    let (mut scope, pin) =
-        crate::remote::provider::OpenedScope::open(inv, &budget)?.admit_asset()?;
+    let (mut scope, pin) = {
+        let _phase = budget.phase(Phase::Admission);
+        crate::remote::provider::OpenedScope::open(inv, &budget)?.admit_asset()?
+    };
     let mut committed = None;
     let result = (|| {
         let data = pin.data.as_ref().expect("asset admission checked DataPin");
@@ -935,6 +1034,7 @@ pub(crate) fn asset_after_finish(
             let mut reading = reading.clone();
             reading["resourceAccounting"] =
                 json!({"wholeQueryAccountingComplete":false,"used":budget.snapshot()?});
+            let capture_phase = budget.phase(Phase::SourceCapture);
             let saved = evidence::commit_verified_capture_budgeted(
                 blob,
                 evidence::CaptureHeader {
@@ -946,6 +1046,7 @@ pub(crate) fn asset_after_finish(
                 &inv.control,
                 &safety,
             )?;
+            drop(capture_phase);
             // A successful commit cannot be rolled back by later Session/owner
             // close failure. Keep its returned identity outside those fallible steps.
             committed = Some(
@@ -963,10 +1064,17 @@ pub(crate) fn asset_after_finish(
             scope.with_verified_file(data, id, &mut capture)
         } else {
             let mut file = read_verified_file_budgeted(inv, data, id, &budget)?;
-            capture(&mut file.blob, &file.reading)
+            let result = capture(&mut file.blob, &file.reading);
+            // Preserve capture failure as primary and any committed identity;
+            // successful capture does not excuse an unchecked source close.
+            finish_asset_blob(file.blob, result, &budget, after_blob_close)
         }
     })();
-    after_finish(scope.finish(result)).map_err(|mut error| {
+    let result = {
+        let _phase = budget.phase(Phase::SourceClose);
+        scope.finish(result)
+    };
+    after_finish(result).map_err(|mut error| {
         if let Some(id) = committed {
             let primary = error.clone();
             error.details = json!({"schema":"lycheedev.asset-committed-error.v1", "primary":primary,
@@ -978,6 +1086,16 @@ pub(crate) fn asset_after_finish(
         }
         error
     })
+}
+
+fn finish_asset_blob(
+    blob: evidence::VerifiedBlob,
+    result: Result<Outcome>,
+    budget: &Budget,
+    after_close: &mut impl FnMut(Result<Outcome>) -> Result<Outcome>,
+) -> Result<Outcome> {
+    let _phase = budget.phase(Phase::SourceClose);
+    after_close(blob.close_after(result))
 }
 
 #[cfg(test)]

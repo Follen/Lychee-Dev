@@ -1,7 +1,7 @@
 // Synthetic harness tests only. No Cargo, product CLI, game or Windows claim.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
@@ -11,6 +11,45 @@ import {DatabaseSync} from 'node:sqlite';
 import {CONTENT_BYTES, GO_COMMIT, PROOF, REPETITIONS, SQL, SQL_ROWS, auditCache, compareData, dataCases, orderFor, semanticData, summarizeData, usage} from './data-contract.mjs';
 import {blob, decodeDataImage, decodeFixtureBLTE, decodedIdentity, digest, goJSON, parse, seedDataHome, validateDataOutput} from './data-inputs.mjs';
 import {fixtureArgs, fixturePreparers} from './prepare-data.mjs';
+import {DATA_CAPTURE_TIMING, DATA_PHASE_NAMES, DATA_PHASE_TIMING, dataPhaseEnvironment, dataPhaseProfile} from './data-phase-profile.mjs';
+
+function phaseProfile() {
+  return {schema: 'lycheedev.data-query-phases.v1', elapsedMicros: 1000, timing: DATA_PHASE_TIMING, captureTiming: DATA_CAPTURE_TIMING,
+    phases: DATA_PHASE_NAMES.map(phase => ({phase, calls: 1, elapsedMicros: 500}))};
+}
+test('Data phase contract matches the actual recorder in the source checkout', {skip: !existsSync(new URL('../../crates/lycheedev-data/src/phase_profile.rs', import.meta.url))}, () => {
+  const source = readFileSync(new URL('../../crates/lycheedev-data/src/phase_profile.rs', import.meta.url), 'utf8');
+  assert.deepEqual([...source.match(/const NAMES:.*?= \[([\s\S]*?)\];/)[1].matchAll(/"([^"]+)"/g)].map(match => match[1]), DATA_PHASE_NAMES);
+  assert(source.includes(DATA_PHASE_TIMING)); assert(source.includes(DATA_CAPTURE_TIMING)); assert(source.includes('lycheedev.data-query-phases.v1'));
+});
+test('Data profile retains overlapping durations without treating their sum as a total', () => {
+  const value = phaseProfile();
+  for (const ending of ['', '\n', '\r\n']) assert.deepEqual(dataPhaseProfile(Buffer.from(JSON.stringify(value) + ending)), value);
+  assert(value.phases.reduce((sum, phase) => sum + phase.elapsedMicros, 0) > value.elapsedMicros, 'overlap must not be rejected as a supposed total');
+});
+test('Data profile parser requires one exact record and rejects unknown stderr, schema, keys, phases and numbers', () => {
+  for (const change of [x => x.schema += '.unknown', x => x.extra = 1, x => delete x.captureTiming, x => x.timing = 'cpu', x => x.captureTiming = 'exclusive',
+    x => x.phases.reverse(), x => x.phases.pop(), x => x.phases.push(x.phases[0]), x => x.phases[0].phase = 'unknown', x => x.phases[0].extra = 0,
+    x => x.phases[0].calls = -1, x => x.phases[0].calls = 0.5, x => x.phases[0].calls = 0, x => x.phases[0].elapsedMicros = 0.5,
+    x => x.elapsedMicros = -1, x => x.elapsedMicros = Number.MAX_SAFE_INTEGER + 1, x => x.elapsedMicros = null, x => x.phases[0] = null]) {
+    const value = phaseProfile(); change(value); assert.throws(() => dataPhaseProfile(Buffer.from(JSON.stringify(value))));
+  }
+  const good = JSON.stringify(phaseProfile());
+  for (const text of ['', 'warning\n', good + '\n' + good, good + '\nwarning\n', 'warning\n' + good, good + '\n\n', '\ufeff' + good,
+    '{"schema":"unknown",' + good.slice(1), good.replace('"elapsedMicros":1000', '"elapsedMicros":1e3'), 'x'.repeat(16385)]) assert.throws(() => dataPhaseProfile(Buffer.from(text)));
+  assert.throws(() => dataPhaseProfile(Buffer.concat([Buffer.from(good), Buffer.from([255])])));
+  assert.throws(() => dataPhaseProfile(good));
+  const untouched = phaseProfile(); untouched.phases[0] = {...untouched.phases[0], calls: 0, elapsedMicros: 0};
+  assert.deepEqual(dataPhaseProfile(Buffer.from(JSON.stringify(untouched))), untouched);
+});
+test('profile environment is opt-in only for measured Rust; Go, preparation and inherited values stay disabled', () => {
+  const original = {KEEP: 'unchanged', LYCHEEDEV_DATA_PHASE_PROFILE: '1', lycheedev_data_phase_profile: '1'};
+  for (const enabled of [false, true]) for (const measured of [false, true]) for (const engine of [null, 'go', 'rust']) {
+    const actual = dataPhaseEnvironment(original, {enabled, measured, engine});
+    assert.deepEqual(actual, enabled && measured && engine === 'rust' ? {KEEP: 'unchanged', LYCHEEDEV_DATA_PHASE_PROFILE: '1'} : {KEEP: 'unchanged'});
+  }
+  assert.deepEqual(original, {KEEP: 'unchanged', LYCHEEDEV_DATA_PHASE_PROFILE: '1', lycheedev_data_phase_profile: '1'});
+});
 
 function images() { return {schema: 'lycheedev.large-image-paired-fixture.v1', encodings: ['png', 'webp'], channels: ['rgba'], cases: ['palette', 'bgra8', 'bc1', 'bc2', 'bc3'].map((storage, index) => ({fileDataID: 701 + index, mipmap: 0, pixelsPath: `pixels/${701 + index}.rgba`, pixelsBytes: 1031 * 519 * 4, pixelsSHA256: 'a'.repeat(64), texture: {format: 'BLP2', storage, width: 1031, height: 519, mipmap: 0, levels: 1, alphaBits: 8}}))}; }
 function cache(mode = 'cold') { return {hits: mode === 'warm' ? 2 : 0, reusedBytes: mode === 'warm' ? 100 : 0, contentHashCalls: 2, contentHashBytes: 120, contentDecodeCalls: mode === 'warm' ? 0 : 2, extractedBytes: 100, blobReads: 2, blobReadBytes: 100, fragmentLoads: 2, blockCacheHits: 0}; }
@@ -27,6 +66,24 @@ function envelope(kind = 'sql', engine = 'go', mode = 'cold') {
   return {schema: 'lycheedev.result.v1', ok: true, operationId: '', context: {snapshot: 'PIN-fixture'}, result, captures: [], warnings: [], error: null};
 }
 const sqlCase = dataCases(images())[0], contentCase = dataCases(images())[1];
+test('known successful fixture paths require executed business scopes; early failures and unknown paths do not invent them', () => {
+  for (const entry of dataCases(images())) {
+    assert.deepEqual(dataPhaseProfile(Buffer.from(JSON.stringify(phaseProfile())), {entry, successful: true}), phaseProfile());
+    const required = entry.kind === 'image' ? DATA_PHASE_NAMES : ['admission', 'prepare_inclusive', 'payload_inclusive', 'source_capture_metadata_inclusive', 'source_close'];
+    for (const name of required) {
+      const value = phaseProfile(); Object.assign(value.phases.find(phase => phase.phase === name), {calls: 0, elapsedMicros: 0});
+      const bytes = Buffer.from(JSON.stringify(value));
+      assert.throws(() => dataPhaseProfile(bytes, {entry, successful: true}), /required successful fixture scope/);
+      assert.deepEqual(dataPhaseProfile(bytes, {entry, successful: false}), value);
+    }
+  }
+  const zero = phaseProfile(); zero.phases.forEach(phase => Object.assign(phase, {calls: 0, elapsedMicros: 0}));
+  assert.deepEqual(dataPhaseProfile(Buffer.from(JSON.stringify(zero)), {entry: {kind: 'sql', id: 'unknown-path'}, successful: true}), zero);
+  const sql = phaseProfile(); for (const name of ['texture_decode', 'pixel_transform_and_hash', 'encode', 'artifact_capture_metadata_inclusive', 'manifest_capture_metadata_inclusive', 'output']) {
+    Object.assign(sql.phases.find(phase => phase.phase === name), {calls: 0, elapsedMicros: 0});
+  }
+  assert.deepEqual(dataPhaseProfile(Buffer.from(JSON.stringify(sql)), {entry: sqlCase, successful: true}), sql);
+});
 function pairs(entry = contentCase, count = 20) { return Array.from({length: count}, (_, iteration) => ['cold', 'warm'].map(cacheMode => ({caseId: entry.id, iteration, cacheMode, resultEquivalent: true, pairTerminal: {state: 'verified'}, order: orderFor(iteration),
   ...Object.fromEntries(['go', 'rust'].map(engine => [engine, {valid: true, home: `${iteration}/${engine}`, binary: engine, snapshot: 'PIN-input', reuse: {verified: true}, controllableMillis: engine === 'go' ? 100 : 30}]))}))).flat(); }
 
@@ -113,19 +170,33 @@ test('final pair integrity is required independently of equivalent product rows,
   legacy[0].pairTerminal = {state: 'failed_final_integrity'};
   assert(summarizeData([sqlCase], legacy, false, {allowLegacyTerminal: true}).every(group => group.state === 'failed_final_integrity'));
 });
-test('real controller preserves product results across final-integrity and startup-diagnostic failures', t => {
+test('real controller preserves product results and raw timings across final-integrity, startup and Data phase failures', t => {
   const directory = mkdtempSync(join(tmpdir(), 'paired-data-terminal-')); t.after(() => rmSync(directory, {recursive: true, force: true}));
   const controller = readFileSync(new URL('./data-run.mjs', import.meta.url));
   const real = file => JSON.stringify(new URL(file, import.meta.url).href);
-  for (const [name, entry, failAt, expectedOwners, diagnostics = false, missingDiagnostics = false] of [
+  for (const [name, entry, failAt, expectedOwners, diagnostics = false, missingDiagnostics = false, profileCase = 'none'] of [
     ['sql-only', sqlCase, 2, 1], ['last-performance', contentCase, 42, 21], ['middle-performance', contentCase, 22, 11], ['complete-performance', contentCase, 0, 21],
     ['startup-complete', contentCase, 0, 1, true], ['startup-missing', contentCase, 0, 1, true, true],
+    ['profile-all-twelve', dataCases(images()), 0, 12, true, false, 'complete'],
+    ['profile-missing', contentCase, 0, 1, true, false, 'missing'], ['profile-unknown', contentCase, 0, 1, true, false, 'unknown'],
+    ['profile-zero', contentCase, 0, 1, true, false, 'zero'],
+    ['profile-malformed', contentCase, 0, 1, true, false, 'malformed'], ['profile-product-failure', contentCase, 0, 1, true, false, 'product-failure'],
+    ['profile-product-failure-zero', contentCase, 0, 1, true, false, 'product-failure-zero'],
+    ['profile-both-failed', contentCase, 0, 1, true, true, 'product-failure-missing'], ['ordinary-stderr', contentCase, 0, 1, false, false, 'ordinary-stderr'],
   ]) {
+    const profileEnabled = profileCase !== 'none' && profileCase !== 'ordinary-stderr';
+    const productFailed = profileCase.startsWith('product-failure') || profileCase === 'ordinary-stderr';
+    const profileFailed = ['missing', 'unknown', 'malformed', 'zero', 'product-failure-missing'].includes(profileCase);
+    const profile = phaseProfile(); if (profileCase === 'malformed') profile.phases[0].calls = 0.5;
+    if (['zero', 'product-failure-zero'].includes(profileCase)) profile.phases.forEach(phase => Object.assign(phase, {calls: 0, elapsedMicros: 0}));
+    const stderr = ['complete', 'product-failure', 'product-failure-zero', 'malformed', 'zero'].includes(profileCase) ? JSON.stringify(profile) + '\n'
+      : profileCase === 'unknown' ? JSON.stringify(profile) + '\nunknown stderr\n' : profileCase === 'ordinary-stderr' ? 'unexpected ordinary stderr\n' : '';
     const root = join(directory, name), out = join(root, 'evidence'), scratch = join(root, 'scratch'); mkdirSync(out, {recursive: true}); mkdirSync(scratch);
     const put = (file, body) => { const path = join(root, file); mkdirSync(dirname(path), {recursive: true}); writeFileSync(path, body); };
     put('tests/rust-performance-paired/data-run.mjs', controller);
     put('tests/rust-performance-paired/contract.mjs', `export * from ${real('./contract.mjs')};`);
-    put('tests/rust-performance-paired/data-contract.mjs', `export * from ${real('./data-contract.mjs')}; export const dataCases=()=>[${JSON.stringify(entry)}];`);
+    put('tests/rust-performance-paired/data-phase-profile.mjs', `export * from ${real('./data-phase-profile.mjs')};`);
+    put('tests/rust-performance-paired/data-contract.mjs', `export * from ${real('./data-contract.mjs')}; export const dataCases=()=>${JSON.stringify(Array.isArray(entry) ? entry : [entry])};`);
     put('tests/rust-performance-paired/data-resume.mjs', `export function verifyDataContinuation(){throw Error('acceptance cannot resume');}`);
     put('tests/rust-performance-paired/inputs.mjs', `import {mkdirSync} from 'node:fs';
       let inventories=0; export function inventory(path){ return {sha256:++inventories===${failAt}?'changed-fixture':'fixture'}; }
@@ -142,33 +213,51 @@ test('real controller preserves product results across final-integrity and start
     put('tools/rust-disk.mjs', `import {mkdirSync,writeFileSync} from 'node:fs'; import {join} from 'node:path'; let id=0;
       export function beginScratch(root){ const directory=join(root,'pairs',String(++id)), evidence=join(root,'pair-evidence',String(id)); mkdirSync(directory,{recursive:true}); mkdirSync(evidence,{recursive:true});
         return {directory,evidence,receipt:join(evidence,'receipt.json'),seal:value=>writeFileSync(join(evidence,'receipt.json'),JSON.stringify(value)),cleanup:()=>writeFileSync(join(evidence,'cleaned'),'yes')}; }`);
-    put('tools/rust-owned-process.mjs', `export function ownedSpawnSync(binary,args,options){
+    put('tools/rust-owned-process.mjs', `import assert from 'node:assert/strict'; import {appendFileSync,writeFileSync} from 'node:fs'; import {join} from 'node:path'; let invocation=0;
+      export function ownedSpawnSync(binary,args,options){
+      const measured=options.memoryObservation, rust=binary==='rust.exe', expectedProfile=${profileEnabled}&&measured&&rust;
+      const profileKeys=Object.keys(options.env).filter(key=>key.toUpperCase()==='LYCHEEDEV_DATA_PHASE_PROFILE');
+      assert.deepEqual(profileKeys,expectedProfile?['LYCHEEDEV_DATA_PHASE_PROFILE']:[]);
+      if(expectedProfile) assert.equal(options.env.LYCHEEDEV_DATA_PHASE_PROFILE,'1');
+      appendFileSync(${JSON.stringify(join(out, 'invocations.jsonl'))},JSON.stringify({binary,args,measured,startupDiagnostics:options.startupDiagnostics,profile:options.env.LYCHEEDEV_DATA_PHASE_PROFILE})+'\\n');
       if(options.startupDiagnostics&&!options.memoryObservation) throw Error('preparation must not request startup diagnostics');
       let output=''; if(binary==='git'&&args.includes('rev-parse')) output=${JSON.stringify(GO_COMMIT)};
       else if(binary==='rustc') output='rustc 1.99.0 synthetic'; else if(binary==='powercfg.exe') output='power';
       else if(args[0]==='init') output=JSON.stringify({ok:true}); else if(options.memoryObservation){output='{}';(globalThis.decoded??=new Set()).add(args[args.indexOf('--home')+1]);}
       const end=binary==='rust.exe'?'400':'1100';
-      return {status:0,handlesReaped:true,stdout:Buffer.from(output),stderr:Buffer.alloc(0),logs:[],proof:{schema:'lycheedev.owned-process.v1',rootReaped:true,treeReaped:true,handlesClosed:true,toolIdentityLocksClosed:true,outputReadersComplete:true,activeProcesses:0,forced:false,
+      const stderr=Buffer.from(measured&&rust?${JSON.stringify(stderr)}:''); const log=join(options.evidence,'raw-'+(++invocation)+'.stderr.bin'); writeFileSync(log,stderr);
+      return {status:measured&&rust&&${profileCase.startsWith('product-failure')}?17:0,error:measured&&rust&&${profileCase.startsWith('product-failure')}?new Error('original product error'):undefined,
+        handlesReaped:true,stdout:Buffer.from(output),stderr,logs:[log],proof:{schema:'lycheedev.owned-process.v1',rootReaped:true,treeReaped:true,handlesClosed:true,toolIdentityLocksClosed:true,outputReadersComplete:true,activeProcesses:0,forced:false,
         ...(options.startupDiagnostics&&${!missingDiagnostics}?{diagnostics:{schema:'lycheedev.owned-startup-diagnostics.v1',createReturnTicks:'110',rootPersistBeginTicks:'120',rootPersistEndTicks:'130',observerSetupEndTicks:'140',resumeBeforeTicks:'150',resumeAfterTicks:'160',rootCpuObserved:true,rootKernel100ns:'10000',rootUser100ns:'20000'}}:{}),
         timing:{schema:'lycheedev.owned-timing.v1',frequency:10000,startTicks:'100',rootExitTicks:end,treeReapedTicks:end}}}; }`);
     put('release/npm-channel.json', JSON.stringify({version: '3.5.0', distTag: 'beta'}));
     put('sharp.cjs', `module.exports=Object.assign(()=>{}, {versions:{sharp:'synthetic',vips:'synthetic'},cache:()=>({memory:{max:0},files:{max:0},items:{max:0}})});`);
-    const config = {root, runnerRoot: root, evidence: out, scratch, acceptance: !diagnostics, resumeFrom: null, startupDiagnostics: diagnostics, inputs: {}, conditions: {},
+    const config = {root, runnerRoot: root, evidence: out, scratch, acceptance: !diagnostics, resumeFrom: null, startupDiagnostics: diagnostics, dataPhaseProfile: profileEnabled, inputs: {}, conditions: {},
       rustArtifact: 'synthetic', rust: {sourceBinary: 'rust.exe', binarySHA256: 'rust'}, go: {root: 'go', binary: 'go.exe', binarySHA256: 'go', packageSHA256: 'go'},
       goSource: 'go-source', luaLSArchive: 'luals', sharpModule: join(root, 'sharp.cjs'), fixtures: {catalog: 'catalog', content: 'content', images: 'images'}};
     put('configuration.json', JSON.stringify(config));
     const script = join(root, 'tests/rust-performance-paired/data-run.mjs');
     const bootstrap = `Object.defineProperty(process,'platform',{value:'win32'}); process.argv=[process.execPath,${JSON.stringify(script)},${JSON.stringify(join(root, 'configuration.json'))}]; await import(${JSON.stringify(pathToFileURL(script).href)});`;
-    const run = spawnSync(process.execPath, ['--input-type=module', '--eval', bootstrap], {cwd: root, encoding: 'utf8', timeout: 15000, env: {...process.env, RUSTFLAGS: '', CARGO_ENCODED_RUSTFLAGS: ''}});
-    assert.equal(run.error, undefined); assert.equal(run.status, failAt || missingDiagnostics ? 1 : 0, run.stderr);
+    const run = spawnSync(process.execPath, ['--input-type=module', '--eval', bootstrap], {cwd: root, encoding: 'utf8', timeout: 15000, env: {...process.env, RUSTFLAGS: '', CARGO_ENCODED_RUSTFLAGS: '', LYCHEEDEV_DATA_PHASE_PROFILE: '1', lycheedev_data_phase_profile: '1'}});
+    assert.equal(run.error, undefined); assert.equal(run.status, failAt || missingDiagnostics || profileFailed || productFailed ? 1 : 0, run.stderr);
     const report = JSON.parse(readFileSync(join(out, 'report.json'))); assert.equal(report.pairOwners.length, expectedOwners, JSON.stringify(report));
-    assert(report.pairs.every(row => row.resultEquivalent && row.go.valid && row.rust.valid));
+    const measuredRows = [...report.preflightPairs, ...report.pairs];
+    assert(measuredRows.every(row => productFailed ? !row.resultEquivalent && row.go.valid && !row.rust.valid : row.resultEquivalent && row.go.valid && row.rust.valid));
+    assert.equal(report.dataPhaseProfile, profileEnabled);
     assert.equal(report.startupDiagnostics, diagnostics); assert.equal(report.performanceAcceptanceEvaluated, !diagnostics);
     if (diagnostics) assert.match(report.metrics.cpu, /original-root GetProcessTimes requested.*startupFailure/);
     else assert.equal(report.metrics.cpu, 'not_measured');
-    for (const row of [...report.preflightPairs, ...report.pairs]) for (const engine of ['go', 'rust']) {
+    for (const row of measuredRows) for (const engine of ['go', 'rust']) {
       assert.equal(row[engine].controllableMillis, engine === 'go' ? 100 : 30, 'original total never reduced');
       assert.equal(row[engine].handlesReaped, true);
+      assert.equal(row[engine].stderrSHA256, digest(engine === 'rust' ? stderr : '')); assert.equal(row[engine].stderrBytes, Buffer.byteLength(engine === 'rust' ? stderr : ''));
+      assert.equal(readFileSync(row[engine].logs[0], 'utf8'), engine === 'rust' ? stderr : '');
+      assert.equal(row[engine].exit, engine === 'rust' && profileCase.startsWith('product-failure') ? 17 : 0);
+      assert.equal(row[engine].error, engine === 'rust' && profileCase.startsWith('product-failure') ? 'original product error' : undefined);
+      if (engine === 'rust' && profileEnabled) {
+        assert.equal(Boolean(row[engine].dataPhaseProfileFailure), profileFailed);
+        if (!profileFailed) assert.deepEqual(row[engine].dataPhaseProfile, profile);
+      } else { assert.equal(row[engine].dataPhaseProfile, undefined); assert.equal(row[engine].dataPhaseProfileFailure, undefined); }
       if (diagnostics && !missingDiagnostics) { assert.equal(row[engine].startup.controllableMillis, row[engine].controllableMillis); assert.equal(row[engine].startup.preResumeMillis, 5); }
       else { assert.equal(row[engine].startup, undefined); assert.equal(Boolean(row[engine].startupFailure), missingDiagnostics); }
     }
@@ -178,11 +267,20 @@ test('real controller preserves product results across final-integrity and start
       const pair = JSON.parse(readFileSync(join(dirname(terminal.receipt), 'pair.json'))); assert.equal(pair.valid, false); assert.equal(pair.rows.length, 2);
       assert(pair.rows.every(row => row.resultEquivalent && row.pairTerminal.state === 'failed_final_integrity'));
       assert.equal(JSON.parse(readFileSync(terminal.receipt)).state, 'failed');
-    } else if (missingDiagnostics) {
+    } else if (productFailed) {
+      assert.equal(report.state, 'failed'); assert.equal(measuredRows.length, 1, 'failed cold has no warm replacement');
+      assert.equal(report.pairOwners[0].pairTerminal.state, 'failed_pair'); assert(measuredRows[0].rust.failure);
+    } else if (missingDiagnostics || profileFailed) {
       assert.equal(report.state, 'failed'); assert(report.groups.every(group => group.state === 'failed_diagnostics' && !group.correctAndComplete));
       const terminal = report.pairOwners.at(-1); assert.equal(terminal.pairTerminal.state, 'failed_diagnostics');
       assert.equal(JSON.parse(readFileSync(terminal.receipt)).handlesReaped, true); assert.equal(JSON.parse(readFileSync(terminal.receipt)).state, 'failed');
     } else { assert.equal(report.state, diagnostics ? 'equivalent_data_observation_only' : 'passed_selected_data_paths_full_acceptance_open'); assert(report.groups.every(group => group.correctAndComplete && group.pairTerminalVerified)); }
+    const invocations = readFileSync(join(out, 'invocations.jsonl'), 'utf8').trim().split('\n').map(text => JSON.parse(text));
+    assert.equal(invocations.filter(row => !row.measured).length, 15, 'preparation stays outside measurement');
+    assert(invocations.filter(row => !row.measured).every(row => !row.profile && row.startupDiagnostics === false));
+    const measured = invocations.filter(row => row.measured);
+    assert.equal(measured.length, (report.pairs.length + report.preflightPairs.length) * 2);
+    if (name === 'profile-all-twelve') { assert.equal(measured.length, 48); assert.equal(report.pairs.length, 24); assert.equal(report.groups.length, 24); }
   }
 });
 function framed(blocks) {

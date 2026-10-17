@@ -604,8 +604,34 @@ impl ExclusiveLock {
     }
     fn acquire_prepared_observed_with(
         path: &Path,
+        check: impl FnMut() -> Result<()>,
+        prepare: impl FnOnce() -> Result<()>,
+        lock: impl FnOnce(&File, &mut dyn FnMut() -> Result<()>) -> Result<()>,
+        close: impl FnOnce(File) -> std::io::Result<()>,
+        observer: blob_wait::LockObserver<'_>,
+    ) -> Result<Self> {
+        Self::acquire_prepared_open_observed_with(
+            check,
+            prepare,
+            || {
+                OpenOptions::new()
+                    .create(true)
+                    .truncate(false)
+                    .read(true)
+                    .write(true)
+                    .open(path)
+            },
+            lock,
+            close,
+            observer,
+        )
+    }
+    // The opener must transfer the File before any fallible post-open check.
+    // Source supplies a relative open; all other callers keep OpenOptions above.
+    fn acquire_prepared_open_observed_with(
         mut check: impl FnMut() -> Result<()>,
         prepare: impl FnOnce() -> Result<()>,
+        open: impl FnOnce() -> std::io::Result<File>,
         lock: impl FnOnce(&File, &mut dyn FnMut() -> Result<()>) -> Result<()>,
         close: impl FnOnce(File) -> std::io::Result<()>,
         observer: blob_wait::LockObserver<'_>,
@@ -614,14 +640,7 @@ impl ExclusiveLock {
         check()?;
         measured_lock(LockPhase::Verify, observer, prepare)?;
         check()?;
-        let file = measured_lock(LockPhase::Open, observer, || {
-            OpenOptions::new()
-                .create(true)
-                .truncate(false)
-                .read(true)
-                .write(true)
-                .open(path)
-        })?;
+        let file = measured_lock(LockPhase::Open, observer, open)?;
         let result = lock(&file, &mut check).and_then(|_| check());
         if let Err(error) = result {
             return finish_file_with(file, Err(error), check, |file| {

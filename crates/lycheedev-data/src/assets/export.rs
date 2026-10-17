@@ -1,6 +1,6 @@
 //! Captured original bytes and a manifest precede one atomic external publish.
 use super::{fault, image, input, output};
-use crate::capture;
+use crate::{capture, phase_profile::Phase};
 use lycheedev_core::{
     Invocation, Outcome, Result, ToolkitError,
     evidence::{self, CaptureInput},
@@ -186,6 +186,7 @@ fn publish(
         .as_str()
         .expect("committed source identity");
     let artifact = if let Some(encoded) = &encoded {
+        let capture_phase = meter.phase(Phase::ArtifactCapture);
         let artifact = evidence::commit_capture_budgeted_with_dependencies(
             &inv.home,
             CaptureInput {
@@ -200,6 +201,7 @@ fn publish(
             &inv.control,
             meter,
         )?;
+        drop(capture_phase);
         progress.committed(&artifact);
         artifact
     } else {
@@ -221,6 +223,7 @@ fn publish(
     } else {
         &[source_id]
     };
+    let capture_phase = meter.phase(Phase::ManifestCapture);
     let capture = evidence::commit_capture_budgeted_with_dependencies(
         &inv.home,
         CaptureInput {
@@ -235,10 +238,12 @@ fn publish(
         &inv.control,
         meter,
     )?;
+    drop(capture_phase);
     progress.committed(&capture);
     let bytes = artifact["blob"]["bytes"]
         .as_u64()
         .expect("committed artifact length");
+    let output_phase = meter.phase(Phase::Output);
     let _copy_buffer = source.budget.reserve_retained(65536)?;
     let mut observed = |state| {
         if state == lycheedev_core::storage::StagedPublication::Published {
@@ -267,6 +272,7 @@ fn publish(
         )?;
     }
 
+    drop(output_phase);
     let mut outcome = Outcome::new(manifest);
     outcome.selection = json!({"snapshot":source.snapshot});
     outcome.provenance = vec![source.capture.clone(), capture];

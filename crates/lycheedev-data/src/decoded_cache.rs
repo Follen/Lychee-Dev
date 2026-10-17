@@ -13,7 +13,8 @@ use sha2::Sha256;
 use std::{path::Path, time::Instant};
 mod streaming;
 pub(crate) use streaming::{
-    read_content_controlled, read_content_in_session, read_verified_content,
+    read_content_controlled, read_content_in_session, read_content_with_reference_controlled,
+    read_content_with_reference_in_session, read_verified_content,
     read_verified_content_in_session,
 };
 #[derive(Default, Clone, Debug, Serialize)]

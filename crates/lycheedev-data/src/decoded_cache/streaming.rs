@@ -334,9 +334,6 @@ fn read_verified_content_source(
     }))
 }
 
-/// Actual local DB2/root consumers need a bounded decoded owner, not the old
-/// additional whole encoded allocation. The verified source keeps both controls
-/// through this second, disk-only read. It never restarts decode or publication.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn read_content_controlled(
     home: &Path,
@@ -350,6 +347,46 @@ pub(crate) fn read_content_controlled(
     selected_maximum: Option<usize>,
     control: &OperationControl,
 ) -> Result<(String, blte::Content)> {
+    read_content_with_reference_controlled(
+        home, root, index, record, limits, keys, stats, budget,
+        selected_maximum, control,
+    ).map(|(key, content, _)| (key, content))
+}
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn read_content_in_session(
+    home: &Path,
+    source: &casc::QuerySource<'_>,
+    index: &dyn crate::metadata_format::EncodingLookup,
+    record: &EncodingRecord,
+    limits: casc::Limits,
+    keys: &mut keys::Context,
+    stats: &mut Stats,
+    budget: &Budget,
+    selected_maximum: Option<usize>,
+    control: &OperationControl,
+) -> Result<(String, blte::Content)> {
+    read_content_with_reference_in_session(
+        home, source, index, record, limits, keys, stats, budget,
+        selected_maximum, control,
+    ).map(|(key, content, _)| (key, content))
+}
+
+/// Actual local DB2/root consumers need a bounded decoded owner, not the old
+/// additional whole encoded allocation. The verified source keeps both controls
+/// through this second, disk-only read. It never restarts decode or publication.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn read_content_with_reference_controlled(
+    home: &Path,
+    root: &Path,
+    index: &dyn crate::metadata_format::EncodingLookup,
+    record: &EncodingRecord,
+    limits: casc::Limits,
+    keys: &mut keys::Context,
+    stats: &mut Stats,
+    budget: &Budget,
+    selected_maximum: Option<usize>,
+    control: &OperationControl,
+) -> Result<(String, blte::Content, evidence::BlobRef)> {
     read_content_source(
         home,
         root,
@@ -365,7 +402,7 @@ pub(crate) fn read_content_controlled(
     )
 }
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn read_content_in_session(
+pub(crate) fn read_content_with_reference_in_session(
     home: &Path,
     source: &casc::QuerySource<'_>,
     index: &dyn crate::metadata_format::EncodingLookup,
@@ -376,7 +413,7 @@ pub(crate) fn read_content_in_session(
     budget: &Budget,
     selected_maximum: Option<usize>,
     control: &OperationControl,
-) -> Result<(String, blte::Content)> {
+) -> Result<(String, blte::Content, evidence::BlobRef)> {
     read_content_source(
         home,
         source.root(),
@@ -404,7 +441,7 @@ fn read_content_source(
     selected_maximum: Option<usize>,
     control: &OperationControl,
     source: Option<&casc::QuerySource<'_>>,
-) -> Result<(String, blte::Content)> {
+) -> Result<(String, blte::Content, evidence::BlobRef)> {
     control.check()?;
     budget.check()?;
     let (decoded, maximum) = materialized_extent(record.decoded_bytes, limits, selected_maximum)?;
@@ -439,6 +476,9 @@ fn read_content_source(
         }
         Ok((bytes, allocation))
     })();
+    // The reference comes from this same authenticated owner while it is still
+    // held, never from caller-supplied bytes/path or a second publication. Keep
+    // the original checked close before any caller-visible value/next work.
     let reference = blob.reference().clone();
     let (bytes, allocation) = blob
         .close_after(result)
@@ -452,6 +492,7 @@ fn read_content_source(
             bytes,
             missing: vec![],
         },
+        reference,
     ))
 }
 

@@ -16,6 +16,7 @@ pub mod keys;
 pub mod local_query;
 pub mod metadata_format;
 pub mod navigate;
+pub(crate) mod phase_profile;
 pub mod relational;
 pub mod remote;
 pub mod resource;

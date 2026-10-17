@@ -240,3 +240,304 @@ fn sql_detects_new_index_generation_after_explain_before_capture() {
     fs::remove_file(path).unwrap();
     assert!(sql(&inv).unwrap().data["result"]["plan"].is_object());
 }
+
+fn root_read(fx: &Fixture, session: bool) -> Result<File> {
+    let inv = fx.invocation("asset inspect", &[("--file-id", "201")]);
+    let pin = selection::resolve_pinned(&inv)?.data.unwrap();
+    if session {
+        let budget = Arc::new(Budget::controlled(
+            Cost::defaults(),
+            inv.control.deadline(),
+            inv.control.clone(),
+        ));
+        let mut reader = sql_reader::Reader::new(&inv, &pin, &budget)?;
+        let result = reader.read(201);
+        reader.close_after(result)
+    } else {
+        Ok(read_files(&inv, &pin, &[201], inv.control.deadline())?.remove(0))
+    }
+}
+
+#[test]
+fn actual_root_reference_handoff_matches_cold_warm_cache_and_complete_body_in_both_consumers() {
+    for session in [false, true] {
+        let item = table("Sample", 201, &[("ID", "uint")], &[vec![U(7)]]);
+        let expected = item.raw.clone();
+        let fx = Fixture::new(&[item]);
+        let mut reference = Value::Null;
+        for warm in [false, true] {
+            let file = root_read(&fx, session).unwrap();
+            assert_eq!(&*file.bytes, expected.as_slice());
+            let root = &file.reading["root"];
+            let bytes = evidence::read_blob(&fx.home, root, 256 << 20).unwrap();
+            assert_eq!(root["bytes"], bytes.len());
+            assert_eq!(root["sha256"], lycheedev_core::storage::sha256(&bytes));
+            let metadata = Metadata::open(&fx.home, false).unwrap();
+            let aliases = metadata.list::<Value>("decoded-v1/", 100).unwrap();
+            metadata.close().unwrap();
+            assert_eq!(
+                aliases
+                    .iter()
+                    .filter(|entry| entry["blob"] == *root)
+                    .count(),
+                1
+            );
+            assert_eq!(file.reading["decodedCache"]["contentHashCalls"], 2);
+            assert_eq!(
+                file.reading["decodedCache"]["contentDecodeCalls"],
+                if warm { 0 } else { 2 }
+            );
+            assert_eq!(
+                file.reading["decodedCache"]["hits"],
+                if warm { 2 } else { 0 }
+            );
+            if warm {
+                assert_eq!(*root, reference);
+            } else {
+                reference = root.clone();
+            }
+        }
+        fs::remove_dir_all(fx.root).unwrap();
+    }
+}
+
+#[test]
+fn actual_root_reference_handoff_rejects_same_length_warm_digest_corruption_in_both_consumers() {
+    for session in [false, true] {
+        let fx = Fixture::new(&[table("Sample", 201, &[("ID", "uint")], &[vec![U(7)]])]);
+        let file = root_read(&fx, session).unwrap();
+        let reference = &file.reading["root"];
+        let path = evidence::blob_path(&fx.home, reference["sha256"].as_str().unwrap()).unwrap();
+        let original = fs::read(&path).unwrap();
+        let mut changed = original.clone();
+        changed[0] ^= 1;
+        fs::write(&path, changed).unwrap();
+        let error = root_read(&fx, session).err().unwrap();
+        assert_eq!(error.code, "vault.blob_integrity");
+        fs::write(&path, original).unwrap();
+        assert_eq!(root_read(&fx, session).unwrap().reading["root"], *reference);
+        fs::remove_dir_all(fx.root).unwrap();
+    }
+}
+
+#[test]
+fn actual_sql_profile_uses_one_recorder_through_prepare_payload_capture_and_checked_close() {
+    let fx = Fixture::new(&[table("Sample", 201, &[("ID", "uint")], &[vec![U(7)]])]);
+    let inv = fx.invocation("data sql", &[("--sql", "SELECT ID FROM Sample")]);
+    let (budget, profile) = Budget::controlled(
+        Cost::defaults(),
+        inv.control.deadline(),
+        inv.control.clone(),
+    )
+    .with_test_phase_profile();
+    let budget = Arc::new(budget);
+    let out = sql_inner_budgeted(&inv, &budget, &mut || Ok(())).unwrap();
+    assert_eq!(out.data["result"]["rows"], json!([[7]]));
+    assert!(out.data.get("phases").is_none());
+    let body = evidence::read_blob(&fx.home, &out.provenance[0]["blob"], 16 << 20).unwrap();
+    assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), out.data);
+    assert!(profile.lock().unwrap().is_empty());
+    drop(budget);
+    let observations = profile.lock().unwrap();
+    assert_eq!(observations.len(), 1);
+    let phases = observations[0]["phases"].as_array().unwrap();
+    for name in [
+        "admission",
+        "prepare_inclusive",
+        "payload_inclusive",
+        "source_capture_metadata_inclusive",
+        "source_close",
+    ] {
+        assert!(
+            phases.iter().find(|phase| phase["phase"] == name).unwrap()["calls"]
+                .as_u64()
+                .unwrap()
+                > 0,
+            "{name}"
+        );
+    }
+    for name in [
+        "texture_decode",
+        "encode",
+        "artifact_capture_metadata_inclusive",
+        "output",
+    ] {
+        assert_eq!(
+            phases.iter().find(|phase| phase["phase"] == name).unwrap()["calls"],
+            0,
+            "{name}"
+        );
+    }
+    drop(observations);
+    fs::remove_dir_all(fx.root).unwrap();
+}
+
+#[test]
+fn actual_verified_delivery_closes_owned_blob_after_late_source_and_reader_close_failures() {
+    for source_change in [true, false] {
+        let fx = Fixture::new(&[table("Sample", 201, &[("ID", "uint")], &[vec![U(7)]])]);
+        let inv = fx.invocation("asset inspect", &[("--file-id", "201")]);
+        let pin = selection::resolve_pinned(&inv).unwrap().data.unwrap();
+        let (budget, profile) = Budget::controlled(
+            Cost::defaults(),
+            inv.control.deadline(),
+            inv.control.clone(),
+        )
+        .with_test_phase_profile();
+        let budget = Arc::new(budget);
+        let catalog = fx.client.parent().unwrap().join(".build.info");
+        let original = fs::read(&catalog).unwrap();
+        let close = fault(
+            "storage.close_failed",
+            5,
+            "injected after actual reader checked close",
+        );
+        let mut delivered = false;
+        let mut closed = false;
+        let error = read_verified_file_after_read(
+            &inv,
+            &pin,
+            201,
+            &budget,
+            &mut || {
+                delivered = true;
+                if source_change {
+                    let mut changed = original.clone();
+                    changed.push(b'\n');
+                    fs::write(&catalog, changed)?;
+                }
+                Ok(())
+            },
+            &mut |result| {
+                closed = true;
+                if source_change {
+                    assert_eq!(
+                        result.as_ref().unwrap_err().code,
+                        "records.pinned_build_changed"
+                    );
+                    result
+                } else {
+                    result?;
+                    Err(close.clone())
+                }
+            },
+        )
+        .err()
+        .unwrap();
+        assert!(delivered && closed);
+        assert_eq!(
+            error.code,
+            if source_change {
+                "records.pinned_build_changed"
+            } else {
+                "storage.close_failed"
+            }
+        );
+        // The destination rename is a real Windows deny-delete-owner probe.
+        // It happens only after the batch has failed and closed the delivered blob.
+        let metadata = Metadata::open(&fx.home, false).unwrap();
+        let aliases = metadata.list::<Value>("decoded-v1/", 100).unwrap();
+        metadata.close().unwrap();
+        for entry in aliases {
+            let path =
+                evidence::blob_path(&fx.home, entry["blob"]["sha256"].as_str().unwrap()).unwrap();
+            let moved = path.with_extension("closed-probe");
+            fs::rename(&path, &moved).unwrap();
+            fs::rename(&moved, &path).unwrap();
+        }
+        drop(budget);
+        let observations = profile.lock().unwrap();
+        assert_eq!(observations.len(), 1);
+        assert_eq!(
+            observations[0]["phases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["phase"] == "source_close")
+                .unwrap()["calls"],
+            2
+        );
+        drop(observations);
+        fs::write(catalog, original).unwrap();
+        fs::remove_dir_all(fx.root).unwrap();
+    }
+}
+
+#[test]
+fn actual_verified_batch_closes_every_constructed_owner_on_later_error_and_delivery_stop() {
+    use std::sync::atomic::Ordering;
+    for delivery_stop in [false, true] {
+        let fx = Fixture::new(&[
+            table("First", 201, &[("ID", "uint")], &[vec![U(7)]]),
+            table("Second", 202, &[("ID", "uint")], &[vec![U(8)]]),
+        ]);
+        let inv = fx.invocation("asset inspect", &[("--file-id", "201")]);
+        let pin = selection::resolve_pinned(&inv).unwrap().data.unwrap();
+        let (budget, profile) = Budget::controlled(
+            Cost::defaults(),
+            inv.control.deadline(),
+            inv.control.clone(),
+        )
+        .with_test_phase_profile();
+        let budget = Arc::new(budget);
+        let ids: &[u32] = if delivery_stop {
+            &[201, 202]
+        } else {
+            &[201, 202, 999]
+        };
+        let mut transferred = false;
+        let error = read_batches(&inv, &pin, ids, &budget, ReadMode::Verified, &mut |files| {
+            assert!(
+                delivery_stop,
+                "a partial batch must never reach its callback"
+            );
+            assert_eq!(files.len(), 2);
+            // Exercise the same final-check/transfer consumer with both real
+            // verified owners, stopping before it can transfer either one.
+            inv.control.cancel_handle().store(true, Ordering::Release);
+            deliver_resolved_files(files, &budget, &mut |_| {
+                transferred = true;
+                Ok(Vec::new())
+            })
+        })
+        .unwrap_err();
+        assert!(!transferred);
+        assert_eq!(
+            error.code,
+            if delivery_stop {
+                "command.cancelled"
+            } else {
+                "records.content_missing"
+            }
+        );
+        let metadata = Metadata::open(&fx.home, false).unwrap();
+        let aliases = metadata.list::<Value>("decoded-v1/", 100).unwrap();
+        metadata.close().unwrap();
+        assert_eq!(
+            aliases.len(),
+            3,
+            "Root and both actual selected payloads were constructed"
+        );
+        for entry in aliases {
+            let path =
+                evidence::blob_path(&fx.home, entry["blob"]["sha256"].as_str().unwrap()).unwrap();
+            let moved = path.with_extension("closed-probe");
+            fs::rename(&path, &moved).unwrap();
+            fs::rename(&moved, &path).unwrap();
+        }
+        drop(budget);
+        let observations = profile.lock().unwrap();
+        assert_eq!(observations.len(), 1);
+        assert_eq!(
+            observations[0]["phases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["phase"] == "source_close")
+                .unwrap()["calls"],
+            3
+        );
+        drop(observations);
+        fs::remove_dir_all(fx.root).unwrap();
+    }
+}

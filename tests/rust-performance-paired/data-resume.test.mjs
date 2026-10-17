@@ -1,7 +1,7 @@
 // Pure synthetic evidence/selection tests. No product, Cargo or native claims.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname, join, posix, relative, resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -19,8 +19,9 @@ function previous() { return {state: 'failed', performanceAcceptanceEvaluated: f
 test('continuation is an explicit observation-only mode and rejects mode combinations', () => {
   assert.deepEqual(dataMode([]), {acceptance: false, resumeFrom: null}); assert.equal(dataMode(['--acceptance']).acceptance, true);
   assert.deepEqual(dataMode(['--startup-diagnostics']), {acceptance: false, resumeFrom: null, startupDiagnostics: true});
+  assert.deepEqual(dataMode(['--data-phase-profile']), {acceptance: false, resumeFrom: null, startupDiagnostics: true, dataPhaseProfile: true});
   assert.deepEqual(dataMode(['--resume-unattempted', 'old.json']), {acceptance: false, resumeFrom: resolve('old.json')});
-  for (const args of [['--resume-unattempted'], ['--resume-unattempted', '--startup-diagnostics'], ['--resume-unattempted', '--acceptance'], ['--acceptance', '--resume-unattempted', 'old.json'], ['--acceptance', '--acceptance'], ['--startup-diagnostics', '--acceptance'], ['--resume-unattempted', 'old.json', '--startup-diagnostics'], ['--startup-diagnostics', '--startup-diagnostics'], ['--unknown']]) assert.throws(() => dataMode(args));
+  for (const args of [['--resume-unattempted'], ['--resume-unattempted', '--startup-diagnostics'], ['--resume-unattempted', '--acceptance'], ['--acceptance', '--resume-unattempted', 'old.json'], ['--acceptance', '--acceptance'], ['--startup-diagnostics', '--acceptance'], ['--resume-unattempted', 'old.json', '--startup-diagnostics'], ['--startup-diagnostics', '--startup-diagnostics'], ['--data-phase-profile', '--acceptance'], ['--data-phase-profile', '--startup-diagnostics'], ['--startup-diagnostics', '--data-phase-profile'], ['--resume-unattempted', 'old.json', '--data-phase-profile'], ['--data-phase-profile', '--data-phase-profile'], ['--unknown']]) assert.throws(() => dataMode(args));
 });
 test('documented separate stage contains the complete relative module dependency closure', () => {
   const root = resolve(import.meta.dirname, '../..'), readme = readFileSync(join(root, 'tests/rust-performance-paired/data.README.md'), 'utf8');
@@ -38,11 +39,17 @@ test('real Node entry authenticates and launches its own stage in every mode whi
   const directory = mkdtempSync(join(tmpdir(), 'paired-data-entry-')); t.after(() => rmSync(directory, {recursive: true, force: true}));
   const source = readFileSync(new URL('../../tools/rust-data-performance-paired.mjs', import.meta.url), 'utf8');
   const paths = [...source.matchAll(/['"]((?:tools|tests|release)\/[^'"]+)['"]/g)].map(match => match[1]).filter(path => /\.(mjs|ps1|json)$/.test(path));
-  for (const [name, extra, separate, mutate] of [
+  for (const [name, extra, separate, mutate, invalid = false, wrongReport = false] of [
     ['same-root', [], false, false], ['staged-observation', [], true, false], ['staged-acceptance', ['--acceptance'], true, false],
-    ['staged-startup-diagnostics', ['--startup-diagnostics'], true, false],
+    ['staged-startup-diagnostics', ['--startup-diagnostics'], true, false], ['staged-data-phase', ['--data-phase-profile'], true, false],
     ['staged-continuation', ['--resume-unattempted', 'old-owned-report.json'], true, false], ['changed-stage', ['--acceptance'], true, true],
+    ['changed-phase-helper', ['--data-phase-profile'], true, 'tests/rust-performance-paired/data-phase-profile.mjs'],
+    ['profile-report-lost', ['--data-phase-profile'], true, false, false, true],
+    ['reject-acceptance-profile', ['--acceptance', '--data-phase-profile'], true, false, true],
+    ['reject-startup-profile', ['--startup-diagnostics', '--data-phase-profile'], true, false, true],
+    ['reject-resume-profile', ['--resume-unattempted', 'old-owned-report.json', '--data-phase-profile'], true, false, true],
   ]) {
+    const changedFile = typeof mutate === 'string' ? mutate : 'tests/rust-performance-paired/data-run.mjs';
     const root = join(directory, name, 'product'), stage = separate ? join(directory, name, 'runner') : root;
     const put = (base, path, body) => { const file = join(base, path); mkdirSync(dirname(file), {recursive: true}); writeFileSync(file, body); };
     for (const path of new Set(paths)) { put(root, path, 'old product runner'); if (separate) put(stage, path, 'new staged runner'); }
@@ -55,39 +62,46 @@ test('real Node entry authenticates and launches its own stage in every mode whi
       export const verifyArtifact = root => ({profile:'release', binarySHA256:'rust', inputHashes:{sourceTree:sourceDigest(root)}});`);
     put(stage, 'tests/rust-performance-paired/inputs.mjs', `export const verifyGoPackage = root => ({root, packageSHA256:'go'});`);
     put(stage, 'tests/rust-performance-paired/data-resume.mjs', `export {dataMode} from ${JSON.stringify(new URL('./data-resume.mjs', import.meta.url).href)};`);
+    put(stage, 'tests/rust-performance-paired/data-phase-profile.mjs', `export {dataPhaseEnvironment} from ${JSON.stringify(new URL('./data-phase-profile.mjs', import.meta.url).href)};`);
     put(stage, 'tools/rust-disk.mjs', `import assert from 'node:assert/strict'; import {mkdirSync,writeFileSync} from 'node:fs'; import {join} from 'node:path';
       export function beginScratch(root) { assert.equal(root, ${JSON.stringify(root)}); const evidence=join(root,'evidence'); mkdirSync(evidence); return {evidence,directory:join(root,'scratch'),
         seal(value) { writeFileSync(join(evidence,'sealed.json'),JSON.stringify(value)); }, cleanup() { writeFileSync(join(evidence,'cleaned'),'yes'); }}; }`);
-    put(stage, 'tools/rust-owned-process.mjs', `import {readFileSync,writeFileSync} from 'node:fs'; import {join} from 'node:path';
+    put(stage, 'tools/rust-owned-process.mjs', `import assert from 'node:assert/strict'; import {readFileSync,writeFileSync} from 'node:fs'; import {join} from 'node:path';
       export function ownedSpawnSync(binary,args,options) { const config=JSON.parse(readFileSync(args[1]));
+        assert(!Object.keys(options.env).some(key=>key.toUpperCase()==='LYCHEEDEV_DATA_PHASE_PROFILE'), 'outer controller must not inherit profiling');
         writeFileSync(join(options.evidence,'launched.json'),JSON.stringify({binary,args,cwd:options.cwd,timeout:options.timeout,config}));
         const state=config.resumeFrom?'equivalent_data_continuation_only':config.acceptance?'passed_selected_data_paths_full_acceptance_open':'equivalent_data_observation_only';
-        writeFileSync(join(options.evidence,'report.json'),JSON.stringify({state,startupDiagnostics:config.startupDiagnostics,continuation:config.resumeFrom?{priorEvidenceStable:true}:undefined}));
-        ${mutate ? "writeFileSync(join(config.runnerRoot,'tests/rust-performance-paired/data-run.mjs'),'mutated while running');" : ''}
+        writeFileSync(join(options.evidence,'report.json'),JSON.stringify({state,startupDiagnostics:config.startupDiagnostics,dataPhaseProfile:${wrongReport ? 'false' : 'config.dataPhaseProfile'},continuation:config.resumeFrom?{priorEvidenceStable:true}:undefined}));
+        ${mutate ? `writeFileSync(join(config.runnerRoot,${JSON.stringify(changedFile)}),'mutated while running');` : ''}
         return {status:0,handlesReaped:true,proof:{synthetic:true}}; }`);
     const conditions = join(root, 'conditions.json'); writeFileSync(conditions, JSON.stringify(Object.fromEntries(['machine', 'powerAndThermal', 'competingLoad', 'disk', 'operator'].map(key => [key, 'synthetic']))));
     const args = ['artifact.json', 'go-source', 'go-package', 'luals.zip', conditions, 'catalog', 'content', 'images', 'sharp', ...extra];
     const entry = join(stage, 'tools/rust-data-performance-paired.mjs');
     const bootstrap = `Object.defineProperty(process,'platform',{value:'win32'}); process.argv=[process.execPath,${JSON.stringify(entry)},...${JSON.stringify(args)}]; await import(${JSON.stringify(pathToFileURL(entry).href)});`;
-    const result = spawnSync(process.execPath, ['--input-type=module', '--eval', bootstrap], {cwd: root, encoding: 'utf8', timeout: 15000});
-    assert.equal(result.error, undefined); assert.equal(result.status, mutate ? 1 : 0, result.stderr);
+    const result = spawnSync(process.execPath, ['--input-type=module', '--eval', bootstrap], {cwd: root, encoding: 'utf8', timeout: 15000,
+      env: {...process.env, LYCHEEDEV_DATA_PHASE_PROFILE: '1', lycheedev_data_phase_profile: '1'}});
+    assert.equal(result.error, undefined); assert.equal(result.status, mutate || invalid || wrongReport ? 1 : 0, result.stderr);
+    if (invalid) { assert.match(result.stderr, /expected --acceptance OR --startup-diagnostics OR --data-phase-profile/); assert(!existsSync(join(root, 'evidence')), 'invalid flag combination must not create an owner'); continue; }
     const launched = JSON.parse(readFileSync(join(root, 'evidence/launched.json'))), owned = JSON.parse(readFileSync(join(root, 'evidence/owned-report.json')));
     assert.equal(launched.args[0], join(stage, 'tests/rust-performance-paired/data-run.mjs')); assert.equal(launched.cwd, root); assert.equal(launched.timeout, 18000000);
     assert.equal(launched.config.root, root); assert.equal(launched.config.runnerRoot, stage); assert.equal(owned.runnerRoot, stage);
     assert.equal(launched.config.acceptance, extra[0] === '--acceptance'); assert.equal(Boolean(launched.config.resumeFrom), extra[0] === '--resume-unattempted');
-    assert.equal(launched.config.startupDiagnostics, extra[0] === '--startup-diagnostics'); assert.equal(owned.startupDiagnostics, extra[0] === '--startup-diagnostics');
+    assert.equal(launched.config.startupDiagnostics, ['--startup-diagnostics', '--data-phase-profile'].includes(extra[0])); assert.equal(owned.startupDiagnostics, launched.config.startupDiagnostics);
+    assert.equal(launched.config.dataPhaseProfile, extra[0] === '--data-phase-profile'); assert.equal(owned.dataPhaseProfile, launched.config.dataPhaseProfile);
     for (const [path, sha] of Object.entries(launched.config.inputs)) {
-      if (mutate && path === 'tests/rust-performance-paired/data-run.mjs') continue;
+      if (mutate && path === changedFile) continue;
       assert.equal(sha, digest(readFileSync(join(stage, path))), `executing stage identity: ${path}`);
     }
-    assert.equal(owned.artifactAndRunnerStable, !mutate); assert.equal(owned.state === 'failed', mutate);
-    assert.equal(JSON.parse(readFileSync(join(root, 'evidence/sealed.json'))).state, mutate ? 'failed' : 'succeeded');
+    assert.equal(owned.artifactAndRunnerStable, !mutate); assert.equal(owned.state === 'failed', Boolean(mutate || wrongReport));
+    assert.equal(owned.process.exit, 0); assert.deepEqual(owned.process.proof, {synthetic: true});
+    assert.equal(JSON.parse(readFileSync(join(root, 'evidence/sealed.json'))).state, mutate || wrongReport ? 'failed' : 'succeeded');
+    assert.equal(existsSync(join(root, 'evidence/cleaned')), !mutate && !wrongReport);
     if (separate) assert.equal(readFileSync(join(root, 'tools/rust-data-performance-paired.mjs'), 'utf8'), 'old product runner');
   }
 });
 test('only unattempted whole paths are selected; failed or partial attempts never get replaced', () => {
   assert.deepEqual(remainingDataCases(entries, previous()).selected.map(entry => entry.id), ['second', 'third']);
-  for (const change of [x => x.performanceAcceptanceEvaluated = true, x => x.requiresOuterRetirement = true, x => x.continuation = {}, x => x.state = 'passed', x => x.pairs.pop(), x => x.pairs.push(x.pairs[0]),
+  for (const change of [x => x.performanceAcceptanceEvaluated = true, x => x.startupDiagnostics = true, x => x.dataPhaseProfile = true, x => x.requiresOuterRetirement = true, x => x.continuation = {}, x => x.state = 'passed', x => x.pairs.pop(), x => x.pairs.push(x.pairs[0]),
     x => x.pairs[0].resultEquivalent = false, x => x.pairs[0].go.handlesReaped = false, x => x.pairs[0].go.proof.forced = true, x => x.pairs[0].go.controllableMillis++, x => x.pairs[0].go.error = 'failed',
     x => x.pairs.forEach(row => row.caseId = 'second'), x => x.pairs = []]) {
     const value = structuredClone(previous()); change(value); assert.throws(() => remainingDataCases(entries, value));
@@ -109,7 +123,7 @@ function fixture(t, mutate = () => {}) {
     decoder: {entryPath: 'sharp', versions: {sharp: '0.35.5'}, loadedModuleSHA256: {'sharp': 'hash'}}};
   const owned = {schema: 'lycheedev.paired-data-owned.v1', state: 'failed', performanceAcceptanceEvaluated: false, artifactAndRunnerStable: true, process: {exit: 1, handlesReaped: true},
     observation: join(evidence, 'report.json'), inputs: config.inputs, rust: config.rust, go: config.go};
-  const current = {config: structuredClone(config), report: structuredClone(report), entries}; current.config.inputs['tests/rust-performance-paired/data-resume.mjs'] = 'new';
+  const current = {config: structuredClone(config), report: structuredClone(report), entries}; current.config.inputs['tests/rust-performance-paired/data-resume.mjs'] = 'new'; current.config.inputs['tests/rust-performance-paired/data-phase-profile.mjs'] = 'new-phase-helper';
   const pair = {caseId: 'first', iteration: 0, preflight: true, valid: true, rows: structuredClone(report.pairs)};
   const pairOwner = {schema: 'lycheedev.disk-owner.v1', id: pairId, owner: 'paired-data-first-preflight', state: 'succeeded', handlesReaped: true, activePid: null, directory: join(root, '.tmp/rust-scratch', pairId),
     inputHashes: {go: 'go', rust: 'rust', fixture: 'fixture'}};
@@ -136,7 +150,7 @@ test('sealed continuation authenticates old source, complete inputs and owners w
 });
 test('changed source, evidence, machine, binary, fixture, decoder or failed retirement blocks continuation', t => {
   for (const change of [f => f.current.config.rust.binarySHA256 = 'different', f => f.current.report.machine.hostname = 'other', f => f.current.report.decoder.versions.sharp = 'other',
-    f => f.current.report.inputs.fixtures.images.inventory.sha256 = 'other', f => f.config.acceptance = true, f => f.config.runnerRoot = 'other-stage',
+    f => f.current.report.inputs.fixtures.images.inventory.sha256 = 'other', f => f.config.acceptance = true, f => f.config.dataPhaseProfile = true, f => f.config.startupDiagnostics = true, f => f.owned.dataPhaseProfile = true, f => f.config.runnerRoot = 'other-stage',
     f => f.owner.handlesReaped = false, f => f.pairOwner.state = 'failed', f => f.pairOwner.handlesReaped = false, f => f.report.blocker = 'other failure', f => f.pair.valid = false,
     f => f.pair.rows[0].go.valid = false, f => f.owned.artifactAndRunnerStable = false]) {
     const f = fixture(t, change); assert.throws(() => verifyDataContinuation(f.root, f.priorPath, f.current));

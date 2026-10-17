@@ -99,8 +99,9 @@ impl Budget {
     /// The same object is activated only after actual workspace admission.
     /// Explicit `new`/`controlled` budgets remain fixed, as injected Go budgets do.
     pub fn query_controlled(deadline: Instant, control: OperationControl) -> Self {
-        let budget = Self::controlled(Cost::defaults(), deadline, control);
+        let mut budget = Self::controlled(Cost::defaults(), deadline, control);
         budget.state.lock().expect("new query state").pending = Some(MemorySource::Platform);
+        budget.phase_profile = crate::phase_profile::Profile::from_env();
         budget
     }
 

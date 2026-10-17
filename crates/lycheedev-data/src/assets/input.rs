@@ -3,6 +3,7 @@
 use super::{fault, output};
 use crate::{
     local_query,
+    phase_profile::Phase,
     resource::{Budget, Cost},
 };
 use lycheedev_core::{
@@ -50,8 +51,21 @@ pub(crate) fn with_casc_verified<R>(
         inv.control.deadline(),
         inv.control.clone(),
     ));
-    let opened = crate::remote::provider::OpenedScope::open(inv, &budget)?;
-    let (mut scope, pin) = opened.admit_asset()?;
+    with_casc_verified_budgeted(inv, id, &budget, callback)
+}
+// Explicit budgets let focused regressions observe the actual consumer without
+// process-global environment mutation or replacing any source/capture operation.
+pub(super) fn with_casc_verified_budgeted<R>(
+    inv: &Invocation,
+    id: u32,
+    budget: &Arc<Budget>,
+    callback: &mut dyn FnMut(VerifiedView<'_>) -> Result<R>,
+) -> Result<R> {
+    let (mut scope, pin) = {
+        let _phase = budget.phase(Phase::Admission);
+        let opened = crate::remote::provider::OpenedScope::open(inv, budget)?;
+        opened.admit_asset()?
+    };
     let data = pin.data.as_ref().expect("asset pin admitted");
     let mut consume = |blob: &mut evidence::VerifiedBlob, reading: &Value| {
         budget.charge_split(
@@ -63,6 +77,7 @@ pub(crate) fn with_casc_verified<R>(
             ),
             Cost::default(),
         )?;
+        let capture_phase = budget.phase(Phase::SourceCapture);
         let capture = evidence::commit_verified_capture_budgeted(
             blob,
             evidence::CaptureHeader {
@@ -74,31 +89,34 @@ pub(crate) fn with_casc_verified<R>(
             &inv.control,
             &budget.safety_only(),
         )?;
+        drop(capture_phase);
         callback(VerifiedView {
             blob,
             reading,
             capture: &capture,
             snapshot: &pin.id,
             data_build: &data.full_build,
-            budget: &budget,
+            budget,
         })
     };
     let result = (|| {
         if inv.flag_bool("--cdn") {
             scope.with_verified_file(data, id, &mut consume)
         } else {
-            let mut reader = local_query::sql_reader::Reader::new(inv, data, &budget)?;
+            let mut reader = local_query::sql_reader::Reader::new(inv, data, budget)?;
             let result = (|| {
                 let mut file = reader.read_verified(id)?;
                 let result = (|| {
                     reader.verify_source()?;
                     consume(&mut file.blob, &file.reading)
                 })();
+                let _phase = budget.phase(Phase::SourceClose);
                 file.blob.close_after(result)
             })();
             reader.close_after(result)
         }
     })();
+    let _phase = budget.phase(Phase::SourceClose);
     scope.finish(result)
 }
 pub(crate) fn with_casc_bytes<R>(

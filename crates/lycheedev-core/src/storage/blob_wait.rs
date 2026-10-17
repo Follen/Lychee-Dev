@@ -55,12 +55,11 @@ impl ExclusiveLock {
                 self.0.check()
             }
         }
-        Self::acquire_prepared_observed_with(
-            &scope
-                .path()
-                .join(format!("{}.lock", sha256(resource.as_bytes()))),
+        let name = format!("{}.lock", sha256(resource.as_bytes()));
+        Self::acquire_prepared_open_observed_with(
             || control.check(),
             || scope.verify_controlled(&mut Controlled(control)),
+            || scope.open_lock_file_owner(std::ffi::OsStr::new(&name)),
             |file, check| {
                 Self::wait_on_file_observed(
                     file,

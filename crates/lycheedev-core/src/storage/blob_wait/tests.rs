@@ -511,3 +511,124 @@ fn source_lock_profile_stops_after_open_or_contended_attempt_without_a_backoff()
         ExclusiveLock::acquire(&path).unwrap().close().unwrap();
     }
 }
+
+#[test]
+fn source_relative_lock_preserves_path_lock_identity_and_real_contention() {
+    let f = Fixture::new();
+    let resource = "source-cache:source-facts-rust:fixture";
+    let first = ExclusiveLock::resource(&f.0, resource).unwrap();
+    let directory = Directory::open(&f.0).unwrap();
+    ExclusiveLock::set_blob_wait_observer(move || first.close().unwrap());
+    let phases = RefCell::new(Vec::new());
+    let observe = |phase, _| phases.borrow_mut().push(phase);
+    let acquired = ExclusiveLock::resource_wait_in_directory(
+        &directory,
+        resource,
+        &crate::control::OperationControl::default(),
+        Some(&observe),
+    )
+    .unwrap();
+    use LockPhase::*;
+    assert_eq!(
+        *phases.borrow(),
+        [
+            Verify,
+            Open,
+            KernelAttempt,
+            ContentionBackoff,
+            KernelAttempt
+        ]
+    );
+    assert!(
+        matches!(ExclusiveLock::resource(&f.0, resource), Err(e) if e.code == "workspace.busy")
+    );
+    acquired.close().unwrap();
+    ExclusiveLock::resource(&f.0, resource)
+        .unwrap()
+        .close()
+        .unwrap();
+    directory.close().unwrap();
+}
+
+#[test]
+fn source_relative_open_stop_retains_owner_for_checked_close_and_all_causes() {
+    let f = Fixture::new();
+    let directory = Directory::open(&f.0).unwrap();
+    for enabled in [false, true] {
+        let state = Cell::new(0);
+        let closes = Cell::new(0);
+        let phases = RefCell::new(Vec::new());
+        let observe = |phase, _| phases.borrow_mut().push(phase);
+        let observer: LockObserver<'_> = enabled.then_some(&observe);
+        let error = failed(ExclusiveLock::acquire_prepared_open_observed_with(
+            || match state.get() {
+                0 => Ok(()),
+                1 => Err(ToolkitError::new("fixture.budget", "original stop", 7)),
+                _ => Err(ToolkitError::new("fixture.invocation", "late stop", 6)),
+            },
+            || directory.verify().map_err(ToolkitError::io),
+            || {
+                let file = directory.open_lock_file_owner("owner.lock".as_ref())?;
+                state.set(1);
+                Ok(file)
+            },
+            |file, check| {
+                ExclusiveLock::wait_on_file_observed(
+                    file,
+                    check,
+                    None,
+                    |_| panic!("post-open stop precedes the first kernel attempt"),
+                    |_| panic!("post-open stop cannot sleep"),
+                    observer,
+                )
+            },
+            |file| {
+                closes.set(closes.get() + 1);
+                lycheedev_windows::filesystem::close_file(file)?;
+                state.set(2);
+                Err(std::io::Error::other("close failed after consuming owner"))
+            },
+            observer,
+        ));
+        assert_eq!(closes.get(), 1);
+        assert_eq!(error.code, "fixture.budget");
+        assert_eq!(error.details["primary"]["code"], "fixture.budget");
+        assert_eq!(error.details["cleanup"]["code"], "external.io");
+        assert_eq!(error.details["control"]["code"], "fixture.invocation");
+        if enabled {
+            assert_eq!(
+                *phases.borrow(),
+                [LockPhase::Verify, LockPhase::Open, LockPhase::FailureClose]
+            );
+        } else {
+            assert!(phases.borrow().is_empty());
+        }
+        // Failure cleanup has consumed the original owner; no lock survives it.
+        ExclusiveLock::acquire(&f.0.join("owner.lock"))
+            .unwrap()
+            .close()
+            .unwrap();
+    }
+    directory.close().unwrap();
+}
+
+#[test]
+fn source_relative_open_failure_has_no_kernel_attempt_or_failure_close() {
+    let f = Fixture::new();
+    let resource = "source-cache:source-facts-rust:blocked";
+    let path = f.0.join(format!("{}.lock", sha256(resource.as_bytes())));
+    fs::create_dir(&path).unwrap();
+    let directory = Directory::open(&f.0).unwrap();
+    let phases = RefCell::new(Vec::new());
+    let observe = |phase, _| phases.borrow_mut().push(phase);
+    let error = failed(ExclusiveLock::resource_wait_in_directory(
+        &directory,
+        resource,
+        &crate::control::OperationControl::default(),
+        Some(&observe),
+    ));
+    assert_eq!(error.code, "external.io");
+    assert_eq!(*phases.borrow(), [LockPhase::Verify, LockPhase::Open]);
+    assert!(path.is_dir());
+    directory.close().unwrap();
+}

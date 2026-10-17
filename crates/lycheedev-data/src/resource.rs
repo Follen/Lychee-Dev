@@ -1,6 +1,9 @@
 //! One query's shared conservative allocation/work/network ledger. Counters
 //! describe admitted work, not process RSS or an optimizer's cost estimate.
-use crate::fault;
+use crate::{
+    fault,
+    phase_profile::{Phase, Profile, Span},
+};
 mod adaptive;
 mod opportunistic;
 pub use adaptive::MemoryBudget;
@@ -72,6 +75,8 @@ struct State {
 pub struct Budget {
     state: Arc<Mutex<State>>,
     safety_only: bool,
+    // Diagnostics share query ownership, never accounting or cancellation state.
+    phase_profile: Option<Arc<Profile>>,
     pub deadline: Instant,
     cancel: Option<Arc<AtomicBool>>,
     control: Option<OperationControl>,
@@ -204,6 +209,7 @@ impl Budget {
                 once: BTreeSet::new(),
             })),
             safety_only: false,
+            phase_profile: None,
             deadline,
             cancel,
             control: None,
@@ -216,12 +222,26 @@ impl Budget {
             ..Self::new(limits, deadline, None)
         }
     }
+    /// Observe a business scope without adding clocks or ownership when disabled.
+    pub(crate) fn phase(&self, phase: Phase) -> Span<'_> {
+        Span::new(self.phase_profile.as_deref(), phase)
+    }
+    /// Inject diagnostics into an explicit test budget without changing env.
+    /// The returned sink receives its single JSON record at final owner drop.
+    #[cfg(test)]
+    pub(crate) fn with_test_phase_profile(mut self) -> (Self, crate::phase_profile::TestOutput) {
+        assert!(self.phase_profile.is_none(), "test budget already has a recorder");
+        let (profile, output) = Profile::observed();
+        self.phase_profile = Some(profile);
+        (self, output)
+    }
     /// A view sharing the same hard safety caps, cancellation and allocations,
     /// but excluding Rust-only request/executor/publication costs from Go usage.
     pub(crate) fn safety_only(&self) -> Self {
         Self {
             state: self.state.clone(),
             safety_only: true,
+            phase_profile: self.phase_profile.clone(),
             deadline: self.deadline,
             cancel: self.cancel.clone(),
             control: self.control.clone(),
@@ -739,3 +759,72 @@ mod network_observed_tests {
 
 #[cfg(test)]
 mod owned_retained_tests;
+
+#[cfg(test)]
+mod phase_profile_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn explicit_budgets_and_their_safety_views_keep_profiling_disabled() {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let fixed = Budget::new(Cost::defaults(), deadline, None);
+        let controlled = Budget::controlled(
+            Cost::defaults(),
+            deadline,
+            OperationControl::uncancelable(deadline),
+        );
+        for budget in [fixed, controlled] {
+            assert!(budget.phase_profile.is_none());
+            let safety = budget.safety_only();
+            assert!(safety.phase_profile.is_none());
+            {
+                let _original = budget.phase(Phase::Prepare);
+                let _safety = safety.phase(Phase::Prepare);
+            }
+            assert_eq!(budget.snapshot().unwrap(), Cost::default());
+            assert_eq!(budget.logical_snapshot().unwrap(), Cost::default());
+        }
+    }
+
+    #[test]
+    fn safety_views_share_one_recorder_until_the_final_owner_drops() {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let (budget, output) =
+            Budget::new(Cost::defaults(), deadline, None).with_test_phase_profile();
+        let weak = Arc::downgrade(budget.phase_profile.as_ref().unwrap());
+        let safety = budget.safety_only();
+        let final_owner = safety.safety_only();
+        assert!(Arc::ptr_eq(
+            budget.phase_profile.as_ref().unwrap(),
+            safety.phase_profile.as_ref().unwrap(),
+        ));
+        assert_eq!(weak.strong_count(), 3);
+        let result: std::result::Result<(), &'static str> = (|| {
+            let _span = budget.phase(Phase::Payload);
+            assert_eq!(weak.strong_count(), 3, "a span must only borrow");
+            Err("original query failure")
+        })();
+        assert_eq!(result, Err("original query failure"));
+        drop(budget);
+        assert!(output.lock().unwrap().is_empty());
+        {
+            let _span = safety.phase(Phase::Payload);
+        }
+        drop(safety);
+        assert_eq!(weak.strong_count(), 1);
+        assert!(output.lock().unwrap().is_empty());
+        {
+            let _span = final_owner.phase(Phase::SourceClose);
+        }
+        assert_eq!(final_owner.snapshot().unwrap(), Cost::default());
+        assert_eq!(final_owner.logical_snapshot().unwrap(), Cost::default());
+        drop(final_owner);
+        assert!(weak.upgrade().is_none());
+        let output = output.lock().unwrap();
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0]["schema"], "lycheedev.data-query-phases.v1");
+        assert_eq!(output[0]["phases"][2]["calls"], 2);
+        assert_eq!(output[0]["phases"][10]["calls"], 1);
+    }
+}

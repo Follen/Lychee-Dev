@@ -13,7 +13,7 @@ use std::{
 };
 use windows::{
     Win32::{
-        Foundation::HANDLE,
+        Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE},
         Storage::FileSystem::{
             CreateFileW, DELETE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
             FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
@@ -90,6 +90,7 @@ enum RelativeOpen {
     Inspect,
     Reader,
     ProjectReader,
+    Lock,
 }
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FileCost {
@@ -175,8 +176,9 @@ fn relative_file_optional<C: FileControl>(
         security_descriptor: std::ptr::null_mut(),
         security_quality_of_service: std::ptr::null_mut(),
     };
-    // All handles are synchronous, every named component opens the reparse
-    // object itself, and stages cannot replace a pre-existing directory entry.
+    // All handles are synchronous. Directories/stages/readers open the reparse
+    // object itself; Lock retains OpenOptions' historical leaf-follow policy.
+    // Stages cannot replace a pre-existing directory entry.
     let (access, share, disposition, options) = match kind {
         RelativeOpen::Directory { deny_write } => (
             FILE_LIST_DIRECTORY.0 | FILE_READ_ATTRIBUTES.0 | 0x20 | 0x100000, // TRAVERSE | SYNCHRONIZE
@@ -210,6 +212,16 @@ fn relative_file_optional<C: FileControl>(
             1,
             0x00200000 | 0x20,
         ),
+        // Rust 1.99 read(true)/write(true)/create(true)/truncate(false):
+        // GENERIC_READ | GENERIC_WRITE, share read/write/delete, OPEN_IF.
+        // As in std's relative Dir open, add SYNCHRONIZE and NON_DIRECTORY.
+        // Do not inherit Stage's DELETE access, deny-delete or reparse flags.
+        RelativeOpen::Lock => (
+            GENERIC_READ.0 | GENERIC_WRITE.0 | 0x100000,
+            1 | 2 | 4,
+            3,
+            0x20 | 0x40,
+        ),
     };
     let mut raw = HANDLE::default();
     let mut status_block = IoStatusBlock {
@@ -221,6 +233,9 @@ fn relative_file_optional<C: FileControl>(
         io_operations: 3,
         ..FileCost::default()
     })?;
+    // SAFETY: repr(C) structures and the UTF-16 buffer remain live and aligned
+    // throughout this synchronous call. RootDirectory borrows the live parent
+    // File; the kernel does not acquire Rust ownership of it or retain pointers.
     let status = unsafe {
         NtCreateFile(
             &mut raw,
@@ -237,6 +252,8 @@ fn relative_file_optional<C: FileControl>(
         )
     };
     if status < 0 {
+        // SAFETY: translating the returned status neither borrows nor consumes
+        // a file handle. A failed open has not transferred an owner to us.
         let error = io::Error::from_raw_os_error(unsafe { RtlNtStatusToDosError(status) } as i32);
         if optional && error.kind() == io::ErrorKind::NotFound {
             control.check()?;
@@ -244,6 +261,8 @@ fn relative_file_optional<C: FileControl>(
         }
         return Err(error.into());
     }
+    // SAFETY: NT_SUCCESS supplies one valid owned handle, transferred exactly
+    // once into File. No second raw-handle owner is constructed or retained.
     let file = unsafe { File::from_raw_handle(raw.0) };
     control.check()?;
     Ok(Some(file))
@@ -472,6 +491,16 @@ impl Directory {
     }
     fn parent_handle(&self) -> &File {
         self._directories.last().expect("held selected directory")
+    }
+    /// Open/create one lock entry relative to this still-held directory.
+    /// The caller verifies ancestry immediately before calling, then owns the
+    /// returned File before performing any fallible post-open check. In
+    /// particular, do not route this through a controlled reader: its post-open
+    /// stop could drop the handle before the caller can check its close result.
+    /// Access, sharing and leaf-reparse behavior match read/write OpenOptions
+    /// with create(true), truncate(false); existing bytes are never truncated.
+    pub fn open_lock_file_owner(&self, name: &std::ffi::OsStr) -> io::Result<File> {
+        relative_file(self.parent_handle(), name, RelativeOpen::Lock)
     }
     /// Open this exact directory entry without following a reparse point.
     /// The consumer must validate its regular-file kind and admitted length.
@@ -1247,3 +1276,7 @@ pub use staged::{StagedFile, StagedPublication};
 #[cfg(test)]
 #[path = "destination/asset_publication_tests.rs"]
 mod asset_publication_tests;
+
+#[cfg(test)]
+#[path = "destination/lock_open_tests.rs"]
+mod lock_open_tests;

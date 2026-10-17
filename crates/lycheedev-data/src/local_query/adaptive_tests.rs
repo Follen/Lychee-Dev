@@ -614,3 +614,116 @@ fn actual_local_sql_fixed_budget_below_decoder_scratch_fails_without_growth_or_c
     released(&fx);
     fs::remove_dir_all(fx.root).unwrap();
 }
+
+#[test]
+fn actual_local_asset_blob_checked_close_failure_preserves_committed_capture_and_releases_owner() {
+    let fx = fixture();
+    let inv = fx.invocation("asset inspect", &[("--file-id", "201")]);
+    let close = fault(
+        "storage.close_failed",
+        5,
+        "injected after actual blob checked close",
+    );
+    let mut observed = false;
+    let error = asset_after_closes(&inv, &mut |result| result, &mut |result| {
+        let out = result?;
+        observed = true;
+        let reference = &out.provenance[0]["blob"];
+        let path = evidence::blob_path(&fx.home, reference["sha256"].as_str().unwrap())?;
+        let moved = path.with_extension("closed-probe");
+        fs::rename(&path, &moved)?;
+        fs::rename(&moved, &path)?;
+        Err(close.clone())
+    })
+    .unwrap_err();
+    assert!(observed);
+    assert_eq!(captures(&fx), 1);
+    assert_eq!(error.code, close.code);
+    assert_eq!(
+        error.details["primary"],
+        serde_json::to_value(&close).unwrap()
+    );
+    assert_eq!(error.details["outputPublished"], false);
+    let ids = error.details["completedCaptures"].as_array().unwrap();
+    assert_eq!(ids.len(), 1);
+    let committed = evidence::read_capture(&fx.home, ids[0].as_str().unwrap()).unwrap();
+    assert_eq!(committed["provenance"]["kind"], "asset");
+    released(&fx);
+    fs::remove_dir_all(fx.root).unwrap();
+}
+
+#[test]
+fn actual_capture_failure_and_blob_close_diagnostic_keep_both_causes_and_profile_real_close() {
+    let fx = fixture();
+    let inv = fx.invocation("asset inspect", &[("--file-id", "201")]);
+    let pin = selection::resolve_pinned(&inv).unwrap().data.unwrap();
+    let (budget, profile) = Budget::controlled(
+        Cost::defaults(),
+        inv.control.deadline(),
+        inv.control.clone(),
+    )
+    .with_test_phase_profile();
+    let budget = Arc::new(budget);
+    let file = read_verified_file_budgeted(&inv, &pin, 201, &budget).unwrap();
+    let path = evidence::blob_path(&fx.home, &file.blob.reference().sha256).unwrap();
+    let stopped_capture = OperationControl::default();
+    stopped_capture
+        .cancel_handle()
+        .store(true, Ordering::Release);
+    let capture_error = evidence::commit_verified_capture_budgeted(
+        &file.blob,
+        evidence::CaptureHeader {
+            media_type: "application/octet-stream",
+            provenance: json!({"kind":"asset","locator":"fixture","snapshot":fx.pin,"dataBuild":pin.full_build}),
+            complete: true, truncated: false,
+        },
+        &stopped_capture, budget.as_ref(),
+    ).unwrap_err();
+    assert_eq!(capture_error.code, "command.cancelled");
+    let close = fault(
+        "storage.close_failed",
+        5,
+        "injected after actual blob checked close",
+    );
+    let result = finish_asset_blob(
+        file.blob,
+        Err(capture_error.clone()),
+        &budget,
+        &mut |result| {
+            let moved = path.with_extension("closed-probe");
+            fs::rename(&path, &moved).unwrap();
+            fs::rename(&moved, &path).unwrap();
+            lycheedev_core::metadata::historical_write::finish_historical(
+                result,
+                Err(close.clone()),
+            )
+        },
+    )
+    .unwrap_err();
+    assert_eq!(result.code, capture_error.code);
+    assert_eq!(result.exit_code, capture_error.exit_code);
+    assert_eq!(
+        result.details["primary"],
+        serde_json::to_value(&capture_error).unwrap()
+    );
+    assert_eq!(
+        result.details["cleanup"],
+        serde_json::to_value(&close).unwrap()
+    );
+    assert_eq!(captures(&fx), 0);
+    drop(budget);
+    let observations = profile.lock().unwrap();
+    assert_eq!(observations.len(), 1);
+    assert_eq!(
+        observations[0]["phases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["phase"] == "source_close")
+            .unwrap()["calls"],
+        2
+    );
+    drop(observations);
+    released(&fx);
+    fs::remove_dir_all(fx.root).unwrap();
+}
