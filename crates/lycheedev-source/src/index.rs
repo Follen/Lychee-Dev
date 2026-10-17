@@ -289,7 +289,7 @@ pub fn penalty(role: &str) -> i32 {
     }
 }
 pub(crate) fn fingerprint(pin: &SourcePin) -> String {
-    storage::sha256(format!("rust-index-v13\0facts-pack-v1\0facts-layout-v11-go323-generated-origins\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}",pin.repository,pin.product,pin.exact_commit,pin.parser_revision).as_bytes())
+    storage::sha256(format!("rust-index-v14\0facts-pack-v2-path-radix512\0facts-layout-v11-go323-generated-origins\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}",pin.repository,pin.product,pin.exact_commit,pin.parser_revision).as_bytes())
 }
 pub fn build(home: &Path, pin: &SourcePin) -> Result<Index> {
     build_with_control(home, pin, &Default::default())
@@ -1857,12 +1857,18 @@ mod facts_cache_tests {
                 }
                 fixture.git(&entries, &["mktree"])
             }
+            // Large path-partition fixtures intentionally reuse a handful of
+            // source bodies. Authenticate each distinct body once rather than
+            // launching a redundant hash-object child for every path.
+            let mut objects = BTreeMap::new();
             let blobs = documents
                 .iter()
                 .map(|(path, raw)| {
                     (
                         path.clone(),
-                        self.git(raw, &["hash-object", "-w", "--stdin"]),
+                        objects.entry(raw.as_str()).or_insert_with(|| {
+                            self.git(raw, &["hash-object", "-w", "--stdin"])
+                        }).clone(),
                     )
                 })
                 .collect();

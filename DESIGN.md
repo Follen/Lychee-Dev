@@ -273,3 +273,44 @@ number of stage/create/replace operations instead of omitting ancestry checks.
 Concurrency, malformed/range-corrupt caches, cross-snapshot reuse, partial-group
 failure, cancellation, default consumer reconstruction and memory accounting
 require formal tests before runtime acceptance or a performance claim.
+
+#### Stable path partitions for incremental cohorts
+
+The first ordinal-pack implementation (`b3d`, pack1) passed full Facts comparison,
+but actual insertion/deletion invalidated all 4,037/4,035 documents. Its cold
+benefit does not establish incremental performance. The replacement partitions
+eligible paths by a deterministic binary radix tree: maximal prefix leaves hold
+at most 512 documents, and each leaf is consumed in original order as packs of
+at most 64 records. Path terminators participate in the prefix ordering; UTF-8
+bytes and original Git order remain authoritative. Content does not choose the
+leaf, while the complete path/object/size identities still choose each pack key.
+The implementation uses bounded scalar scans and the existing 64-index scratch,
+not a materialized trie, global lookup catalog or extra pack body.
+
+For a healthy, usable previous cache with only the stated membership change,
+insertion affects at most 513 candidate documents, deletion at most 512 surviving
+documents, and rename conservatively at most 1,025 across its removal/addition.
+A deletion may collapse several trie ancestors, but the highest newly eligible
+ancestor has at most 512 survivors; it does not invalidate an arbitrary suffix.
+An unchanged-membership content edit still affects at most one 64-record pack.
+These are membership-induced recomputation bounds, not guarantees against
+independent eviction, corrupt cache, failed publication, changed eligibility or
+first-time format migration. Existing byte-cap overflow/per-file fallback does
+not enlarge affected pack membership.
+
+Static planning on the authenticated public 4,036-path corpus predicts 74 cold
+packs versus the historical 64. Smaller leaf limits 64/128/256 yield 155/103/87
+packs. The observed test's first-path edit, root insertion and first-path deletion
+predict 9/1/8 recomputations with the selected partition; these are specific
+static results, not general bounds or measured product speed. The extra cold
+publications and real change/insert/delete/rename costs require matching-runtime
+measurement. Independent complete-trie and default-consumer regressions must
+cover skipped assets/oversized documents at exact pack/leaf boundaries as well
+as split, merge, cancellation, corrupt groups and concurrent publishers.
+
+Use a new `facts-pack-v2-path-radix512` key domain and `rust-index-v14`
+fingerprint to prevent old ordinal index reuse. The pack wire magic, locator
+shape and complete v11 envelope stay unchanged. Explicit `v11-pack2` diagnostics
+bind the authenticated candidate and exact index SHA; a naked index blob does
+not identify which grouping algorithm produced it. Historical `v11-pack1`
+readers and raw reports remain available, with their original identities.

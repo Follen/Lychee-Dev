@@ -6,6 +6,9 @@ import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 const RUST_LAYOUTS = Object.freeze({
+  // Same authenticated wire format as pack1; the caller must bind this new
+  // grouping domain to the exact candidate source/artifact and index SHA.
+  'v11-pack2': { key: 'facts-layout-v11-go323-generated-origins', generator: 'generator-v6', schema: 'lycheedev.source-facts.rust.v11', packed: true },
   'v11-pack1': { key: 'facts-layout-v11-go323-generated-origins', generator: 'generator-v6', schema: 'lycheedev.source-facts.rust.v11', packed: true },
   v11: { key: 'facts-layout-v11-go323-generated-origins', generator: 'generator-v6', schema: 'lycheedev.source-facts.rust.v11' },
   v6: { key: 'facts-layout-v6-xml-original-tags', generator: 'generator-v5', schema: 'lycheedev.source-facts.rust.v6' },
@@ -246,7 +249,7 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [goHome, rustHome, goRecords, rustLayout, rustIndexFile, expectedIndexSHA256] = process.argv.slice(2);
   if (!goRecords || ![5, 6, 8].includes(process.argv.length)) {
-    throw new Error('usage: node read-fact-delta.mjs GO_HOME RUST_HOME GO_RECORDS_JSONL [v6|v7|v8|v9|v10|v11|v11-pack1] [RUST_INDEX_JSON EXPECTED_INDEX_SHA256]');
+    throw new Error('usage: node read-fact-delta.mjs GO_HOME RUST_HOME GO_RECORDS_JSONL [v6|v7|v8|v9|v10|v11|v11-pack1|v11-pack2] [RUST_INDEX_JSON EXPECTED_INDEX_SHA256]');
   }
   console.log(JSON.stringify(await readFactDelta(goHome, rustHome, goRecords, rustLayout, rustIndexFile, expectedIndexSHA256), null, 2));
 }

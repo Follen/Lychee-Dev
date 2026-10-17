@@ -401,7 +401,33 @@ node --check tests/rust-performance-paired/source-candidates.mjs
 node --test tests/rust-performance-paired/source-candidates.test.mjs tests/rust-performance-paired/read-fact-delta.test.mjs
 ```
 
-## Current Source Facts packs: explicit `v11-pack1` reader
+## Stable-path Source Facts packs: explicit `v11-pack2` reader
+
+The successor uses `rust-index-v14` and the `facts-pack-v2-path-radix512`
+group-key domain. Maximal binary path-trie leaves contain at most 512 eligible
+documents; each leaf is still streamed into packs of at most 64 records and
+32 MiB. Planning uses two bounded scalar scans, preserves Git/document order,
+and does not retain a global directory or add writers. The fixed public Retail
+4036-path tree predicts 74 cold packs instead of the original 64; that is a
+publication-count tradeoff, not measured runtime acceptance.
+
+With a healthy, available prior pack2 cache and otherwise unchanged membership,
+a single content modification invalidates at most 64 records. One insertion can
+change at most 513 records in its leaf, one deletion at most 512 survivors, and
+a rename conservatively at most 1025 across the two affected regions. A shrinking
+ancestor can absorb its descendants only once its complete surviving membership
+is at most 512, so cascading unary ancestors do not add independent affected
+regions. Initial pack1 migration, missing/corrupt caches and multiple edits are
+outside these bounds. Byte overflow still publishes the complete pack prefix
+and uses per-file records; it never changes path-leaf membership.
+
+Use the same command shown below with explicit `v11-pack2` and its actual
+same-run index blob/SHA. `LYCFPK01`, locators and v11 Facts are unchanged; a bare
+blob cannot prove the grouping algorithm. Bind the candidate source/artifact
+identity as well as index SHA. See the [reader identity details](read-fact-delta.README.md).
+Old pack1 data and results retain their original identity.
+
+## Historical ordinal Source Facts packs: explicit `v11-pack1` reader
 
 The grouped-cache candidate retains the complete public `source-v1` Facts
 contract and the v11 per-document envelope. Its whole-index fingerprint is
@@ -517,7 +543,14 @@ and deletion test
 uses an original 128-document snapshot, asserts 129 parsed/zero hits after a
 front insertion and 127 parsed/zero hits after deleting its first original
 member, then 128 original-snapshot hits. These are real Git/cache operations,
-with full Facts comparisons, not synthesized timing results. Formal performance
+with full Facts comparisons, not synthesized timing results. These small cases
+remain within one 512-document leaf, so their ordinal invalidation is expected;
+they do not show the new partition's cross-leaf locality. New real-consumer
+tests use 1024 documents for modification/insertion/deletion/rename and complete
+five-array/order comparisons, cross the 512/513 split/merge threshold, race two
+builders after corruption, preserve old v1/v13 caches, and place both a real
+asset and an oversized document after an exact 64-record leaf boundary.
+Formal performance
 observations must include cold, unchanged, single-change and insertion/deletion
 cases rather than presenting only a cold improvement.
 
@@ -538,6 +571,6 @@ node --check tests/rust-performance-paired/read-fact-delta.mjs
 node --test tests/rust-performance-paired/read-fact-delta.test.mjs tests/rust-performance-paired/source-candidates.test.mjs tests/rust-parity/source-facts-generated/fixture.test.mjs
 ```
 
-The current combined fixture run passes 64/64 (reader 27, historical-candidate
+The current combined fixture run passes 66/66 (reader 29, historical-candidate
 runner 32, generated fixture structure 5). This verifies Node fixtures and
 historical-reader compatibility, not Rust execution or performance acceptance.

@@ -1,5 +1,6 @@
 //! Bounded, immutable cohorts of complete public Facts. A cohort is at most 64
-//! ordered Git inputs, never a global key catalog. Missing/corrupt cache bytes
+//! ordered Git inputs within a stable path leaf, never a global key catalog.
+//! Missing/corrupt cache bytes
 //! recover from the caller's authenticated input, not from another snapshot.
 use super::{
     Document, Facts, Phase, Profile, decode_facts, encode_facts, facts_cache_key, facts_pipeline,
@@ -20,6 +21,9 @@ const MAGIC: &[u8; 8] = b"LYCFPK01";
 const HEADER: usize = 68;
 const MAXIMUM: usize = 32 << 20;
 const GROUP: usize = 64;
+// An insertion/deletion may repartition one path leaf, never the corpus suffix.
+// Packs inside that leaf keep the original 64-record and 32 MiB bounds.
+const LEAF: usize = 512;
 // Locator has only fixed arrays/integers (no String/Vec capacity). The document
 // Vec is reserved once at its known final count, before workers start; its real
 // capacity * 256 is held in the same 256 MiB admission throughout the invocation.
@@ -205,6 +209,78 @@ fn budget() -> ToolkitError {
     )
 }
 
+// Source paths are nonempty UTF-8 with no NUL. Treat their byte strings as
+// NUL-terminated binary keys: a proper prefix sorts before its continuation,
+// including when the discriminating bit lies inside that terminal zero byte.
+// Equal paths share every prefix; tree admission supplies unique Git paths.
+fn shared_path_bits(left: &str, right: &str) -> usize {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    let mut at = 0;
+    while at < left.len().min(right.len()) && left[at] == right[at] {
+        at += 1;
+    }
+    let difference = left.get(at).copied().unwrap_or(0) ^ right.get(at).copied().unwrap_or(0);
+    if difference == 0 {
+        usize::MAX
+    } else {
+        at * 8 + difference.leading_zeros() as usize
+    }
+}
+
+// Find the next maximal <=512 leaf of the full binary path trie without
+// constructing that trie or retaining a corpus-sized directory. The previous
+// leaf's last path excludes already consumed leaves; the 513th future eligible
+// path excludes every oversized ancestor. Their longest common prefix with the
+// first path therefore gives exactly the next leaf. A second bounded scan finds
+// its end. Assets and oversized inputs do not participate in the partition.
+fn leaf_end(
+    files: &[git::TreeFile],
+    start: usize,
+    previous: Option<usize>,
+    control: &OperationControl,
+) -> Result<usize> {
+    let mut first = None;
+    let mut previous_path = previous.map(|at| files[at].path.as_str());
+    let mut count = 0;
+    let mut prefix = 0;
+    let mut end = files.len();
+    for (at, file) in files.iter().enumerate().skip(start) {
+        control.check()?;
+        if file.asset || file.oversized {
+            continue;
+        }
+        if previous_path.is_some_and(|path| path.as_bytes() >= file.path.as_bytes()) {
+            return Err(ToolkitError::invalid("Facts path leaf input order differs"));
+        }
+        previous_path = Some(&file.path);
+        let first = *first.get_or_insert(at);
+        if count == 0 {
+            if let Some(previous) = previous {
+                prefix = shared_path_bits(&files[previous].path, &file.path) + 1;
+            }
+        } else if count == LEAF {
+            prefix = prefix.max(shared_path_bits(&files[first].path, &file.path) + 1);
+            end = at;
+            break;
+        }
+        count += 1;
+    }
+    let Some(first) = first else {
+        return Err(budget());
+    };
+    for (at, file) in files.iter().enumerate().take(end).skip(first + 1) {
+        control.check()?;
+        if !file.asset
+            && !file.oversized
+            && shared_path_bits(&files[first].path, &file.path) < prefix
+        {
+            return Ok(at);
+        }
+    }
+    Ok(end)
+}
+
 fn observe(profile: &Profile, phase: SourceCachePublicationPhase, elapsed: Duration) {
     use SourceCachePublicationPhase as P;
     profile.record(
@@ -253,6 +329,8 @@ pub(super) struct Groups<'a> {
     control: &'a OperationControl,
     profile: &'a Profile,
     next_file: usize,
+    leaf_end: usize,
+    previous_file: Option<usize>,
     group: Option<GroupState<'a>>,
 }
 impl<'a> Groups<'a> {
@@ -268,16 +346,30 @@ impl<'a> Groups<'a> {
             control,
             profile,
             next_file: 0,
+            leaf_end: 0,
+            previous_file: None,
             group: None,
         }
     }
     fn begin(&mut self, first_document: usize) -> Result<()> {
         let _phase = self.profile.span(Phase::FactsRead);
+        // A full 64-record pack can stop before skipped trailing rows of its
+        // leaf. Advance those rows before deciding whether a new leaf starts;
+        // otherwise an asset between leaves would produce an empty cohort.
+        while self.next_file < self.files.len()
+            && (self.files[self.next_file].asset || self.files[self.next_file].oversized)
+        {
+            self.control.check()?;
+            self.next_file += 1;
+        }
+        if self.next_file >= self.leaf_end {
+            self.leaf_end = leaf_end(self.files, self.next_file, self.previous_file, self.control)?;
+        }
         let mut hash = Sha256::new();
-        hash.update(b"facts-pack-v1\0facts-layout-v11-go323-generated-origins\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0");
+        hash.update(b"facts-pack-v2-path-radix512\0facts-layout-v11-go323-generated-origins\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0");
         let mut inputs = [0; GROUP];
         let mut count = 0;
-        while self.next_file < self.files.len() && count < GROUP {
+        while self.next_file < self.leaf_end && count < GROUP {
             self.control.check()?;
             let at = self.next_file;
             self.next_file += 1;
@@ -286,6 +378,7 @@ impl<'a> Groups<'a> {
                 continue;
             }
             inputs[count] = at;
+            self.previous_file = Some(at);
             count += 1;
             for value in [file.path.as_bytes(), file.object.as_bytes()] {
                 hash.update((value.len() as u64).to_le_bytes());

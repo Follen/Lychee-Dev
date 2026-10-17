@@ -126,3 +126,18 @@ prove cache migration in Rust.
 The cohort-pack successor is selected explicitly as `v11-pack1`. Its command
 requires this run's Rust index blob and authenticated manifest SHA in addition
 to the original inputs; see the [full pack reader and storage contract](README.md#full-same-run-facts-comparison). Historical per-file modes remain unchanged.
+
+The stable-path successor is selected explicitly as `v11-pack2`, with the same
+required same-run index file and SHA arguments. Its production group-key domain
+is `facts-pack-v2-path-radix512`; the whole-index fingerprint is `rust-index-v14`.
+It partitions authenticated paths into deterministic binary-radix leaves of at
+most 512 eligible documents, then emits at most 64 documents per pack. The wire
+magic `LYCFPK01`, locator and complete v11 envelopes deliberately remain unchanged.
+
+The requested reader layout is recorded in the report, but the bare pack/index
+bytes cannot identify which grouping algorithm created them. Bind pack2 results
+to the exact candidate source/artifact as well as the authenticated index SHA;
+selecting pack2 does not authenticate or relabel a historical pack1 result. The
+original pack1/per-file readers and all old reports stay unchanged. The new
+reader performs the same complete five-array, input, range, header and digest
+checks; it does not discover groups by scanning cache directories.

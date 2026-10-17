@@ -506,3 +506,442 @@ fn one_oversized_envelope_retains_the_original_fact_budget_error() {
         "codebase.fact_budget"
     );
 }
+
+fn tree_inputs(paths: impl IntoIterator<Item = String>) -> Vec<git::TreeFile> {
+    let mut files = paths
+        .into_iter()
+        .map(|path| git::TreeFile {
+            path,
+            object: "a".repeat(40),
+            bytes: 1,
+            asset: false,
+            oversized: false,
+        })
+        .collect::<Vec<_>>();
+    files.sort_by(|a, b| a.path.as_bytes().cmp(b.path.as_bytes()));
+    files
+}
+
+fn planned_leaves(files: &[git::TreeFile]) -> Vec<Vec<String>> {
+    let control = OperationControl::default();
+    let mut start = 0;
+    let mut previous = None;
+    let mut leaves = Vec::new();
+    while files[start..].iter().any(|f| !f.asset && !f.oversized) {
+        let end = leaf_end(files, start, previous, &control).unwrap();
+        let paths = files[start..end]
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| !f.asset && !f.oversized)
+            .map(|(at, f)| {
+                previous = Some(start + at);
+                f.path.clone()
+            })
+            .collect::<Vec<_>>();
+        assert!(!paths.is_empty() && paths.len() <= LEAF);
+        leaves.push(paths);
+        start = end;
+    }
+    leaves
+}
+
+// Independent full trie oracle. It partitions every oversized node by the next
+// individual bit, including the terminating zero byte. It never uses a previous
+// leaf, a lookahead window, shared_path_bits or the production boundary helper.
+fn reference_leaves(paths: &[String]) -> Vec<Vec<String>> {
+    let mut leaves = Vec::new();
+    let mut pending = vec![(0, paths.len(), 0)];
+    while let Some((start, end, depth)) = pending.pop() {
+        if start == end {
+            continue;
+        }
+        if end - start <= LEAF {
+            leaves.push(paths[start..end].to_vec());
+            continue;
+        }
+        let split = start
+            + paths[start..end].partition_point(|path| {
+                let byte = path.as_bytes().get(depth / 8).copied().unwrap_or(0);
+                byte & (1 << (7 - depth % 8)) == 0
+            });
+        if split < end {
+            pending.push((split, end, depth + 1));
+        }
+        if start < split {
+            pending.push((start, split, depth + 1));
+        }
+    }
+    leaves
+}
+
+fn pack_members(leaves: &[Vec<String>]) -> Vec<Vec<String>> {
+    leaves
+        .iter()
+        .flat_map(|leaf| leaf.chunks(GROUP).map(<[String]>::to_vec))
+        .collect()
+}
+
+fn changed_members(before: &[Vec<String>], after: &[Vec<String>]) -> usize {
+    after
+        .iter()
+        .filter(|members| !before.contains(members))
+        .map(Vec::len)
+        .sum()
+}
+
+#[test]
+fn path_leaf_scalar_plan_matches_full_binary_trie_with_prefixes_utf8_and_skips() {
+    let mut paths = Vec::new();
+    for prefix in ["a", "a/b", "a/b/c", "ab", "é", "界面", "😀"] {
+        paths.push(prefix.to_string());
+        paths.extend((0..129).map(|i| format!("{prefix}{i:04}.lua")));
+    }
+    paths.extend((0..513).map(|i| format!("{}{i:04}.xml", "x".repeat(4000))));
+    let mut files = tree_inputs(paths);
+    for (i, file) in files.iter_mut().enumerate() {
+        file.asset = i % 19 == 0;
+        file.oversized = i % 23 == 0;
+    }
+    let eligible = files
+        .iter()
+        .filter(|f| !f.asset && !f.oversized)
+        .map(|f| f.path.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(planned_leaves(&files), reference_leaves(&eligible));
+    assert_eq!(shared_path_bits("a", "a\u{1}"), 15);
+    assert_eq!(shared_path_bits("a", "a/b"), 10);
+    assert_eq!(shared_path_bits("界", "界"), usize::MAX);
+    assert_eq!(GROUP, 64);
+    assert_eq!(LEAF, 512);
+    assert!(
+        size_of::<GroupState<'_>>() + GROUP * size_of::<Record>() + 4096 + 2048
+            < GROUP_RETAINED_BYTES
+    );
+}
+
+#[test]
+fn path_leaf_insert_delete_rename_locality_matches_independent_complete_trie() {
+    let mut state = 0x627a_c5f3_u32;
+    let mut next = || {
+        state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+        state
+    };
+    for round in 0..32 {
+        let mut names = std::collections::BTreeSet::new();
+        while names.len() < 513 + round * 31 {
+            let prefixes = ["A/", "A/a/", "Z/", "é/", "界/", "😀/"];
+            names.insert(format!(
+                "{}{:08}.lua",
+                prefixes[next() as usize % prefixes.len()],
+                next()
+            ));
+        }
+        let files = tree_inputs(names);
+        let paths = files.iter().map(|f| f.path.clone()).collect::<Vec<_>>();
+        let leaves = planned_leaves(&files);
+        assert_eq!(leaves, reference_leaves(&paths));
+        let old = pack_members(&leaves);
+        for at in [0, 1, paths.len() / 3, paths.len() / 2, paths.len() - 1] {
+            let mut deleted = paths.clone();
+            deleted.remove(at);
+            let new_name = format!("{}-new.lua", paths[at]);
+            let mut inserted = paths.clone();
+            inserted.push(new_name.clone());
+            inserted.sort();
+            let mut renamed = deleted.clone();
+            renamed.push(new_name);
+            renamed.sort();
+            for (changed, maximum) in [
+                (deleted, LEAF),
+                (inserted, LEAF + 1),
+                (renamed, 2 * LEAF + 1),
+            ] {
+                let expected = reference_leaves(&changed);
+                let actual = planned_leaves(&tree_inputs(changed));
+                assert_eq!(actual, expected);
+                assert!(changed_members(&old, &pack_members(&actual)) <= maximum);
+            }
+        }
+    }
+    // Exhaust all subsets of seven byte/prefix families. Their 129-path weight
+    // crosses the real 512 threshold; this is not a reduced-cap toy planner.
+    for mask in 1..128 {
+        let families = ["a", "a/b", "ab", "b", "é", "界", "😀"];
+        let files = tree_inputs(
+            families
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| mask & (1 << i) != 0)
+                .flat_map(|(_, prefix)| (0..129).map(move |i| format!("{prefix}{i:04}.lua"))),
+        );
+        let paths = files.iter().map(|f| f.path.clone()).collect::<Vec<_>>();
+        assert_eq!(planned_leaves(&files), reference_leaves(&paths));
+    }
+}
+
+fn wide_files(count_per_side: usize) -> BTreeMap<String, String> {
+    ["A", "Z"]
+        .into_iter()
+        .flat_map(|side| {
+            (0..count_per_side).map(move |i| {
+                let (extension, raw) = match i % 4 {
+                    0 => ("lua", "function Full() Target() end"),
+                    1 => (
+                        "xml",
+                        "<Ui><Frame name=\"Frame\"/><Script file=\"Full.lua\"/></Ui>",
+                    ),
+                    2 => ("toc", "## Interface: 120100\nFull.xml\n"),
+                    _ => ("lua", "return 1 // 2"),
+                };
+                (format!("{side}{i:04}.{extension}"), raw.to_string())
+            })
+        })
+        .collect()
+}
+
+fn assert_original_fact_order(before: &index::Index, after: &index::Index, except: &[&str]) {
+    let common = |index: &index::Index| {
+        index
+            .documents
+            .iter()
+            .filter(|d| !except.contains(&d.path.as_str()))
+            .map(|d| serde_json::json!({"path":d.path,"facts":d.facts}))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(common(before), common(after));
+}
+
+#[test]
+fn stable_path_leaves_default_consumer_preserves_full_facts_across_snapshot_edits() {
+    let fixture = Fixture::new();
+    let original = wide_files(512);
+    let first = fixture.pin(&original);
+    let control = OperationControl::default();
+    let profile = Profile::enabled(true);
+    let cold = index::build_uncached_profiled(&fixture.home, &first, &control, &profile).unwrap();
+    assert_eq!(cold.documents.len(), 1024);
+    assert_eq!(profile.calls(Phase::FactsPublishRename), 16);
+    for section in [
+        "declarations",
+        "relationships",
+        "loads",
+        "headers",
+        "diagnostics",
+    ] {
+        assert!(cold.documents.iter().any(|d| {
+            !serde_json::to_value(&d.facts).unwrap()[section]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        }));
+    }
+    let modified_name = "A0000.lua";
+    let inserted_name = "000_Inserted.lua";
+    let renamed_name = "Z9000.lua";
+    let mut modified = original.clone();
+    modified.get_mut(modified_name).unwrap().push('\n');
+    let mut inserted = original.clone();
+    inserted.insert(inserted_name.into(), "function Inserted() end".into());
+    let mut deleted = original.clone();
+    deleted.remove(modified_name);
+    let mut renamed = deleted.clone();
+    renamed.insert(renamed_name.into(), original[modified_name].clone());
+    for (raw, exact_parsed, maximum, except) in [
+        (modified, Some(64), 64, vec![modified_name]),
+        (inserted, Some(1), LEAF + 1, vec![inserted_name]),
+        (deleted, Some(511), LEAF, vec![modified_name]),
+        (
+            renamed,
+            None,
+            2 * LEAF + 1,
+            vec![modified_name, renamed_name],
+        ),
+    ] {
+        let pin = fixture.pin(&raw);
+        let changed = index::build_uncached(&fixture.home, &pin, &control).unwrap();
+        let parsed = changed.summary["io"]["parsedDocuments"].as_u64().unwrap() as usize;
+        if let Some(expected) = exact_parsed {
+            assert_eq!(parsed, expected);
+        }
+        assert!(parsed <= maximum);
+        assert_eq!(
+            parsed + changed.summary["io"]["cachedFacts"].as_u64().unwrap() as usize,
+            raw.len()
+        );
+        assert_original_fact_order(&cold, &changed, &except);
+        let warm = index::build_uncached(&fixture.home, &pin, &control).unwrap();
+        assert_eq!(warm.summary["io"]["parsedDocuments"], 0);
+        assert_eq!(all_facts(&warm), all_facts(&changed));
+    }
+    let restored = index::build_uncached(&fixture.home, &first, &control).unwrap();
+    assert_eq!(restored.summary["io"]["cachedFacts"], 1024);
+    assert_eq!(all_facts(&restored), all_facts(&cold));
+}
+
+#[test]
+fn stable_path_leaf_split_merge_corruption_and_concurrent_recovery_use_real_cache() {
+    let fixture = Fixture::new();
+    let original = wide_files(256);
+    let first = fixture.pin(&original);
+    let control = OperationControl::default();
+    let cold = index::build_uncached(&fixture.home, &first, &control).unwrap();
+    // Exactly 512 paths are one leaf. Insertion splits it; deletion restores the
+    // complete original leaf identity, even when this crosses several unary
+    // ancestors. This exercises the real count threshold and cache consumer.
+    let mut inserted = original.clone();
+    inserted.insert("A0000.extra.lua".into(), "function Inserted() end".into());
+    let second = fixture.pin(&inserted);
+    let split = index::build_uncached(&fixture.home, &second, &control).unwrap();
+    assert!(split.summary["io"]["parsedDocuments"].as_u64().unwrap() <= (LEAF + 1) as u64);
+    assert_original_fact_order(&cold, &split, &["A0000.extra.lua"]);
+    let old = index::build_uncached(&fixture.home, &first, &control).unwrap();
+    assert_eq!(old.summary["io"]["cachedFacts"], 512);
+    assert_eq!(all_facts(&old), all_facts(&cold));
+    // Also start from only the 513-input snapshot, so a deletion-triggered
+    // ancestor merge cannot be satisfied by an older preexisting 512 cache.
+    let merge_fixture = Fixture::new();
+    let split_pin = merge_fixture.pin(&inserted);
+    let split_only = index::build_uncached(&merge_fixture.home, &split_pin, &control).unwrap();
+    assert_eq!(all_facts(&split_only), all_facts(&split));
+    let merge_pin = merge_fixture.pin(&original);
+    let merged = index::build_uncached(&merge_fixture.home, &merge_pin, &control).unwrap();
+    let reparsed = merged.summary["io"]["parsedDocuments"].as_u64().unwrap();
+    assert!(reparsed > 0 && reparsed <= LEAF as u64);
+    assert_eq!(all_facts(&merged), all_facts(&cold));
+    // Corrupt one complete pack. Two default builders race through authenticated
+    // Git reconstruction and private atomic replacement, with unrelated leaves
+    // and the old snapshot still present. Neither may publish partial Facts.
+    let location = split.documents[0].facts_locator.as_ref().unwrap();
+    fs::write(pack(&fixture.home, location), b"corrupt").unwrap();
+    let barrier = std::sync::Barrier::new(2);
+    let rebuilt = std::thread::scope(|scope| {
+        let run = || {
+            barrier.wait();
+            index::build_uncached(&fixture.home, &second, &OperationControl::default()).unwrap()
+        };
+        let first = scope.spawn(run);
+        let second = scope.spawn(run);
+        [first.join().unwrap(), second.join().unwrap()]
+    });
+    for result in &rebuilt {
+        assert_eq!(all_facts(result), all_facts(&split));
+    }
+    let warm = index::build_uncached(&fixture.home, &second, &control).unwrap();
+    assert_eq!(warm.summary["io"]["cachedFacts"], 513);
+    assert_eq!(all_facts(&warm), all_facts(&split));
+}
+
+#[test]
+fn exact_pack_leaf_boundary_skips_real_asset_and_oversized_document_before_next_leaf() {
+    let fixture = Fixture::new();
+    let mut raw = wide_files(512);
+    raw.insert("M.png".into(), "opaque fixture asset".into());
+    raw.insert("M.lua".into(), " ".repeat(git::MAX_SOURCE_BYTES + 1));
+    let pin = fixture.pin(&raw);
+    let control = OperationControl::default();
+    let cold = index::build_uncached(&fixture.home, &pin, &control).unwrap();
+    assert_eq!(cold.documents.len(), 1024);
+    assert_eq!(cold.summary["io"]["parsedDocuments"], 1024);
+    assert_eq!(cold.summary["skippedDocuments"], 1);
+    assert_eq!(cold.assets.len(), 1);
+    let warm = index::build_uncached(&fixture.home, &pin, &control).unwrap();
+    assert_eq!(warm.summary["io"]["cachedFacts"], 1024);
+    assert_eq!(all_facts(&warm), all_facts(&cold));
+}
+
+#[test]
+fn path_leaf_planning_keeps_original_cancellation_deadline_and_rejects_unsorted_inputs() {
+    let files = tree_inputs((0..1024).map(|i| format!("D{i:04}.lua")));
+    for control in [
+        OperationControl::new(
+            Instant::now() + Duration::from_secs(60),
+            Arc::new(AtomicBool::new(true)),
+        ),
+        OperationControl::uncancelable(Instant::now() - Duration::from_secs(1)),
+    ] {
+        assert!(leaf_end(&files, 0, None, &control).is_err());
+    }
+    let mut unsorted = files;
+    unsorted.swap(1, 2);
+    assert_eq!(
+        leaf_end(&unsorted, 0, None, &OperationControl::default())
+            .unwrap_err()
+            .code,
+        "input.invalid"
+    );
+}
+
+#[test]
+fn legacy_ordinal_pack_and_v13_index_keep_identity_while_current_default_rebuilds() {
+    let fixture = Fixture::new();
+    let raw = files(3);
+    let pin = fixture.pin(&raw);
+    let control = OperationControl::default();
+    let mut old = index::build_uncached(&fixture.home, &pin, &control).unwrap();
+    let expected = all_facts(&old);
+    let current_pack = pack(
+        &fixture.home,
+        old.documents[0].facts_locator.as_ref().unwrap(),
+    );
+    let old_pack_bytes = fs::read(&current_pack).unwrap();
+    let inputs = git::tree_with_control(&fixture.home, &pin, &control).unwrap();
+    let mut hash = Sha256::new();
+    hash.update(b"facts-pack-v1\0facts-layout-v11-go323-generated-origins\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0");
+    for file in &inputs {
+        for value in [file.path.as_bytes(), file.object.as_bytes()] {
+            hash.update((value.len() as u64).to_le_bytes());
+            hash.update(value);
+        }
+        hash.update((file.bytes as u64).to_le_bytes());
+    }
+    let old_group: [u8; 32] = hash.finalize().into();
+    for doc in &mut old.documents {
+        doc.facts_locator.as_mut().unwrap().group = old_group;
+    }
+    let old_pack = pack(
+        &fixture.home,
+        old.documents[0].facts_locator.as_ref().unwrap(),
+    );
+    assert_ne!(old_pack, current_pack);
+    fs::write(&old_pack, &old_pack_bytes).unwrap();
+    fs::remove_file(&current_pack).unwrap();
+    for doc in &old.documents {
+        assert_eq!(
+            serde_json::to_value(
+                read_locator(
+                    &fixture.home,
+                    doc.facts_locator.as_ref().unwrap(),
+                    &doc.path,
+                    &doc.sha256,
+                    &control
+                )
+                .unwrap()
+                .unwrap()
+            )
+            .unwrap(),
+            serde_json::to_value(&doc.facts).unwrap()
+        );
+    }
+    let old_identity = storage::sha256(format!("rust-index-v13\0facts-pack-v1\0facts-layout-v11-go323-generated-origins\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}",pin.repository,pin.product,pin.exact_commit,pin.parser_revision).as_bytes());
+    assert_ne!(old_identity, index::fingerprint(&pin));
+    let old_bytes = serde_json::to_vec(&old).unwrap();
+    let old_blob = lycheedev_core::cache::publish_derived_controlled(
+        &fixture.home,
+        &old_bytes,
+        128 << 20,
+        &control,
+    )
+    .unwrap();
+    let old_key = format!("source/rust-index/{old_identity}");
+    let manifest = serde_json::json!({"schema":"lycheedev.source-index.rust.v6","identity":old_identity,"blob":old_blob});
+    crate::persistence::put_manifest(&fixture.home, &old_key, &manifest, &control).unwrap();
+    assert!(!index::is_ready_with_control(&fixture.home, &pin, &control).unwrap());
+    let rebuilt = index::build_with_control(&fixture.home, &pin, &control).unwrap();
+    assert_eq!(rebuilt.summary["io"]["parsedDocuments"], 3);
+    assert_eq!(rebuilt.summary["io"]["cachedFacts"], 0);
+    assert_eq!(all_facts(&rebuilt), expected);
+    assert_eq!(fs::read(old_pack).unwrap(), old_pack_bytes);
+    let warm = index::build_with_control(&fixture.home, &pin, &control).unwrap();
+    assert_eq!(warm.summary["io"]["cachedIndex"], true);
+    assert_eq!(warm.summary["io"]["cachedFacts"], 3);
+}
