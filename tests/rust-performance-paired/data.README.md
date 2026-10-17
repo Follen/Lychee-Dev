@@ -2,10 +2,15 @@
 
 The [30d Windows observation](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6228602282)
 verified four paths (16 actual CLI invocations), then failed while removing the
-fourth pair's already-sealed scratch. Eight paths and all 20-pair acceptance
-were not run. This revision's decoder/continuation changes are candidate code
-until separately executed; synthetic Node tests establish no product speedup
-or B04 acceptance. Use the
+fourth pair's already-sealed scratch. The separate
+[d86 runner / 30d product continuation](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6228983589)
+then verified the remaining eight paths (32 CLI invocations), with all new
+owners retired/reaped. It imported no prior samples and left the original
+failure unchanged. Rust BC1 WebP warm memory was `not_measured`; all memory
+observations retain their sampling gaps. Full 20-pair acceptance remains
+unrun. The separate-stage acceptance entry fix below is covered by synthetic
+Node regression only until its own Windows execution. None of these results
+establishes a product speedup or B04 acceptance. Use the
 existing [paired ownership/identity/timing contract](README.md); do not use the
 historical Go 3.1.2 WDC driver. The Data sibling adds no build or fallback to its
 measured entry and does not change the Source runner.
@@ -51,9 +56,12 @@ only once process retirement is proved.
 
 ## Required prepared inputs
 
-Run from the frozen, reviewed candidate checkout on Windows, under the existing
-single local test queue. Use committed tools, not a historical dirty working
-copy. Do not run additional Cargo jobs, borrow a target directory, remove a
+Run with the frozen product checkout as the current directory on Windows,
+under the existing single local test queue. All modes authenticate the runner
+from the executing entry's directory, which can be that same checkout or a
+separate committed export described below. Product source/artifact checks
+still use the current directory. Use committed tools, not a historical dirty
+working copy. Do not run additional Cargo jobs, borrow a target directory, remove a
 lease or change source bytes while preparing/running this candidate.
 
 - Installed Node 24 (including `node:sqlite`), official Rust 1.99.0 toolchain
@@ -274,13 +282,13 @@ source digest. Stage/archive/conditions paths below must be fresh paths inside
 the coordinator's already registered test scratch. Preparing that stage is test
 coordination in the same single local queue, not an additional build channel.
 
-From a checkout containing the reviewed continuation commit, export this exact
+From a checkout containing the reviewed runner commit, export this exact
 runtime and test dependency closure. Use a tar file, not a binary PowerShell 5.1
 pipeline; do not copy unrelated dirty files:
 
 ```powershell
 $reviewedCheckout = "<checkout containing the reviewed new runner commit>"
-$runnerCommit = "<reviewed continuation commit>"
+$runnerCommit = "<reviewed runner commit, including the all-mode stage fix for acceptance>"
 $runner = "<fresh empty runner directory in coordinator-owned scratch>"
 $archive = "<fresh archive.tar in that same owner>"
 $files = @(
@@ -339,3 +347,77 @@ The new report includes `continuation.selectedCases`, `skippedCompletedCases`,
 `importedSamples=0`, original evidence/file digests and `priorEvidenceStable`.
 It does not mark the old EPERM owner retired or remove its residual files.
 Those remain a separate explicit ownership/recovery obligation.
+
+## Fresh full acceptance with the unchanged 30d product
+
+Use a **fresh stage of the reviewed all-mode entry fix**, exported with the
+complete 24-file list above, while keeping the product checkout and sealed
+artifact unchanged. The d86 entry alone does not support separate-stage
+acceptance: it chooses the product checkout's old runner for that mode. The
+fixed entry always hashes and launches its own stage, records `runnerRoot`,
+and authenticates those same runner files again at completion. Normal
+same-checkout execution is unchanged. This requires no product rebuild or
+replacement of the old checkout's tools.
+
+The following is a new run with new owners, seeds and samples. The original
+configuration supplies the exact absolute artifact, Go package/source, LuaLS,
+fixture and decoder paths. Reading it supplies parameters only: acceptance
+does not load either previous report's samples, skip any path, repair the old
+failure or combine with `--resume-unattempted`. Keep the old evidence and
+unretired cleanup obligation intact. Copy the recorded conditions without a
+BOM; before execution, ensure this new copy truthfully describes the current
+machine/load, updating the new copy if conditions changed. Runtime power and
+toolchain checks remain enabled.
+
+```powershell
+# $runner is the fresh authenticated 24-file export from the preceding block.
+Set-Location "<unchanged 30d product checkout>"
+$prior = Join-Path (Get-Location) ".tmp/rust-disk/evidence/811dac59-a06f-4f11-b0b4-43b0c37bb7d6/owned-report.json"
+$original = Get-Content -Raw (Join-Path (Split-Path $prior) "configuration.json") | ConvertFrom-Json
+$conditions = "<fresh acceptance-conditions.json in coordinator-owned scratch>"
+[IO.File]::WriteAllText($conditions, ($original.conditions | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+foreach ($inputPath in @($runner, $original.rustArtifact, $original.goSource, $original.go.root, $original.luaLSArchive, $conditions, $original.fixtures.catalog, $original.fixtures.content, $original.fixtures.images, $original.sharpModule)) {
+  if (-not [IO.Path]::IsPathRooted($inputPath)) { throw "Every runner/artifact/input path must be absolute" }
+}
+node --test "$runner/tests/rust-performance-paired/data-runner.test.mjs" "$runner/tests/rust-performance-paired/data-resume.test.mjs" "$runner/tools/rust-owned-process.test.mjs"
+if ($LASTEXITCODE -ne 0) { throw "Staged Data/native owner checks failed" }
+node "$runner/tools/rust-data-performance-paired.mjs" $original.rustArtifact $original.goSource $original.go.root $original.luaLSArchive $conditions $original.fixtures.catalog $original.fixtures.content $original.fixtures.images $original.sharpModule --acceptance
+if ($LASTEXITCODE -ne 0) { throw "Data acceptance failed; retain complete report and owner evidence" }
+```
+
+Successful scheduling comprises twelve fresh preflights, each one cold pair
+and one warm pair. For each of the eleven performance paths, a passing
+preflight is followed immediately by exactly 20 new cold Go/Rust pairs and 20
+matching warm pairs; preflight samples are separate. Tiny SQL runs only its
+one cold and one warm correctness pair. That is 232 pair owners, 464 cold/warm
+pair rows and 928 measured CLI invocations in total, including 44 performance
+preflight CLI invocations, 880 performance sample invocations and four SQL
+invocations. There are also 15 owned preparation invocations on the complete
+successful route. Every result still receives full validation and comparison.
+
+The fixed five-hour controller cap and 330-second per-owned-command cap are
+unchanged. Five hours is an operational ceiling, **not** a guarantee that all
+commands can consume 330 seconds: the 928 measured invocations alone would
+need 85 hours 4 minutes at that limit. Completion within five hours requires
+an average below about 19.4 seconds per measured invocation, with additional
+room for preparation, cloning, independent audits, process-owner overhead and
+sealing. The observed eight-path continuation's native intervals were about
+0.108–0.261 seconds, so they do not suggest a per-command budget problem, but
+they neither predict full controller wall time nor guarantee completion. No
+deadline is extended and no late or missing sample is filled in.
+
+Actual failure policy is unchanged:
+
+- A failed preflight skips that path's 20 samples. A failed measured iteration
+  stops further iterations of that path. A failed cold comparison never gets
+  a warm sample or replacement; already reaped engine results are retained.
+  Other independent paths may proceed only with process retirement proved.
+- Unproved retirement, identity/setup errors or any pair cleanup failure stop
+  the controller. The five-hour outer deadline stops its owned tree; partial
+  reports remain failed or incomplete and ownership evidence is retained.
+- A median ratio above 0.30 is reported after collection, not used to stop or
+  cherry-pick samples. Every cold/warm performance group must independently
+  pass; SQL has no performance ratio. Missing memory samples remain explicit
+  gaps, not zero or a full-memory acceptance claim. Even a successful elapsed
+  result remains `passed_selected_data_paths_full_acceptance_open` for these
+  synthetic paths, with full B04 and full resource acceptance still open.

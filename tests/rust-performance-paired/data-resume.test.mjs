@@ -3,7 +3,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join, posix, relative, resolve} from 'node:path';
+import {dirname, join, posix, relative, resolve} from 'node:path';
+import {spawnSync} from 'node:child_process';
+import {pathToFileURL} from 'node:url';
 import {dataMode, remainingDataCases, verifyDataContinuation} from './data-resume.mjs';
 import {digest} from './data-inputs.mjs';
 import {summarizeData} from './data-contract.mjs';
@@ -29,6 +31,55 @@ test('documented separate stage contains the complete relative module dependency
     for (const match of bytes.toString().matchAll(/\bfrom\s+['"]([^'"]+)['"]/g)) if (match[1].startsWith('.')) {
       assert(paths.includes(posix.normalize(posix.join(posix.dirname(path), match[1]))), `${path} missing dependency ${match[1]}`);
     }
+  }
+});
+test('real Node entry authenticates and launches its own stage in every mode while preserving product cwd', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'paired-data-entry-')); t.after(() => rmSync(directory, {recursive: true, force: true}));
+  const source = readFileSync(new URL('../../tools/rust-data-performance-paired.mjs', import.meta.url), 'utf8');
+  const paths = [...source.matchAll(/['"]((?:tools|tests|release)\/[^'"]+)['"]/g)].map(match => match[1]).filter(path => /\.(mjs|ps1|json)$/.test(path));
+  for (const [name, extra, separate, mutate] of [
+    ['same-root', [], false, false], ['staged-observation', [], true, false], ['staged-acceptance', ['--acceptance'], true, false],
+    ['staged-continuation', ['--resume-unattempted', 'old-owned-report.json'], true, false], ['changed-stage', ['--acceptance'], true, true],
+  ]) {
+    const root = join(directory, name, 'product'), stage = separate ? join(directory, name, 'runner') : root;
+    const put = (base, path, body) => { const file = join(base, path); mkdirSync(dirname(file), {recursive: true}); writeFileSync(file, body); };
+    for (const path of new Set(paths)) { put(root, path, 'old product runner'); if (separate) put(stage, path, 'new staged runner'); }
+    put(stage, 'tools/rust-data-performance-paired.mjs', source);
+    // Execute the unchanged real entry. Only its product and native-owner
+    // boundaries are synthetic; no product, Windows Job or speedup is claimed.
+    put(stage, 'tools/rust-build.mjs', `import assert from 'node:assert/strict'; import {readFileSync} from 'node:fs'; import {createHash} from 'node:crypto';
+      export const hashFile = path => createHash('sha256').update(readFileSync(path)).digest('hex');
+      export const sourceDigest = root => { assert.equal(root, ${JSON.stringify(root)}); return 'unchanged-product'; };
+      export const verifyArtifact = root => ({profile:'release', binarySHA256:'rust', inputHashes:{sourceTree:sourceDigest(root)}});`);
+    put(stage, 'tests/rust-performance-paired/inputs.mjs', `export const verifyGoPackage = root => ({root, packageSHA256:'go'});`);
+    put(stage, 'tests/rust-performance-paired/data-resume.mjs', `export {dataMode} from ${JSON.stringify(new URL('./data-resume.mjs', import.meta.url).href)};`);
+    put(stage, 'tools/rust-disk.mjs', `import assert from 'node:assert/strict'; import {mkdirSync,writeFileSync} from 'node:fs'; import {join} from 'node:path';
+      export function beginScratch(root) { assert.equal(root, ${JSON.stringify(root)}); const evidence=join(root,'evidence'); mkdirSync(evidence); return {evidence,directory:join(root,'scratch'),
+        seal(value) { writeFileSync(join(evidence,'sealed.json'),JSON.stringify(value)); }, cleanup() { writeFileSync(join(evidence,'cleaned'),'yes'); }}; }`);
+    put(stage, 'tools/rust-owned-process.mjs', `import {readFileSync,writeFileSync} from 'node:fs'; import {join} from 'node:path';
+      export function ownedSpawnSync(binary,args,options) { const config=JSON.parse(readFileSync(args[1]));
+        writeFileSync(join(options.evidence,'launched.json'),JSON.stringify({binary,args,cwd:options.cwd,timeout:options.timeout,config}));
+        const state=config.resumeFrom?'equivalent_data_continuation_only':config.acceptance?'passed_selected_data_paths_full_acceptance_open':'equivalent_data_observation_only';
+        writeFileSync(join(options.evidence,'report.json'),JSON.stringify({state,continuation:config.resumeFrom?{priorEvidenceStable:true}:undefined}));
+        ${mutate ? "writeFileSync(join(config.runnerRoot,'tests/rust-performance-paired/data-run.mjs'),'mutated while running');" : ''}
+        return {status:0,handlesReaped:true,proof:{synthetic:true}}; }`);
+    const conditions = join(root, 'conditions.json'); writeFileSync(conditions, JSON.stringify(Object.fromEntries(['machine', 'powerAndThermal', 'competingLoad', 'disk', 'operator'].map(key => [key, 'synthetic']))));
+    const args = ['artifact.json', 'go-source', 'go-package', 'luals.zip', conditions, 'catalog', 'content', 'images', 'sharp', ...extra];
+    const entry = join(stage, 'tools/rust-data-performance-paired.mjs');
+    const bootstrap = `Object.defineProperty(process,'platform',{value:'win32'}); process.argv=[process.execPath,${JSON.stringify(entry)},...${JSON.stringify(args)}]; await import(${JSON.stringify(pathToFileURL(entry).href)});`;
+    const result = spawnSync(process.execPath, ['--input-type=module', '--eval', bootstrap], {cwd: root, encoding: 'utf8', timeout: 15000});
+    assert.equal(result.error, undefined); assert.equal(result.status, mutate ? 1 : 0, result.stderr);
+    const launched = JSON.parse(readFileSync(join(root, 'evidence/launched.json'))), owned = JSON.parse(readFileSync(join(root, 'evidence/owned-report.json')));
+    assert.equal(launched.args[0], join(stage, 'tests/rust-performance-paired/data-run.mjs')); assert.equal(launched.cwd, root); assert.equal(launched.timeout, 18000000);
+    assert.equal(launched.config.root, root); assert.equal(launched.config.runnerRoot, stage); assert.equal(owned.runnerRoot, stage);
+    assert.equal(launched.config.acceptance, extra[0] === '--acceptance'); assert.equal(Boolean(launched.config.resumeFrom), extra[0] === '--resume-unattempted');
+    for (const [path, sha] of Object.entries(launched.config.inputs)) {
+      if (mutate && path === 'tests/rust-performance-paired/data-run.mjs') continue;
+      assert.equal(sha, digest(readFileSync(join(stage, path))), `executing stage identity: ${path}`);
+    }
+    assert.equal(owned.artifactAndRunnerStable, !mutate); assert.equal(owned.state === 'failed', mutate);
+    assert.equal(JSON.parse(readFileSync(join(root, 'evidence/sealed.json'))).state, mutate ? 'failed' : 'succeeded');
+    if (separate) assert.equal(readFileSync(join(root, 'tools/rust-data-performance-paired.mjs'), 'utf8'), 'old product runner');
   }
 });
 test('only unattempted whole paths are selected; failed or partial attempts never get replaced', () => {

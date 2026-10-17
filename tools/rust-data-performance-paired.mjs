@@ -14,7 +14,9 @@ const [artifact, goSource, goPackage, luaLSArchive, conditionsFile, catalog, con
 assert([artifact, goSource, goPackage, luaLSArchive, conditionsFile, catalog, content, images, sharpModule].every(Boolean),
   'usage: node tools/rust-data-performance-paired.mjs <optimized-artifact.json> <clean-Go323-checkout> <Go-dev-npm-stage> <pinned-LuaLS.zip> <conditions.json> <catalog-fixture> <17MiB-fixture> <large-image-fixture> <installed-sharp-module> [--acceptance | --resume-unattempted <prior-owned-report.json>]');
 assert.equal(process.platform, 'win32');
-const {acceptance, resumeFrom} = dataMode(extra), root = resolve('.'), runnerRoot = resumeFrom ? resolve(import.meta.dirname, '..') : root;
+// Product identity belongs to cwd; executing runner identity belongs to this
+// entry's stage in every mode, including a fresh full acceptance run.
+const {acceptance, resumeFrom} = dataMode(extra), root = resolve('.'), runnerRoot = resolve(import.meta.dirname, '..');
 const rust = verifyArtifact(root, artifact), go = verifyGoPackage(goPackage, luaLSArchive);
 assert(['release', 'symbols'].includes(rust.profile)); assert.equal(sourceDigest(root), rust.inputHashes.sourceTree);
 assert(lstatSync(conditionsFile).size <= 16384);
