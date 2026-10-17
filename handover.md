@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 00:21 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`97811071b2f3bfd27102754da16bdd5b54d614ce`。正常4036事实与84个固定边界输入已有等价实证；retained冷请求已通过，跨CLI暖context仍EOF失败，继续修暖scope资源峰值。性能与全量验收未完成。
+更新：2026-10-17 00:40 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`de903bd4d150e274f2fa7279ea5648d303a8b96d`。正常4036事实与84个固定边界输入已有等价实证；retained冷请求已通过，跨CLI暖context仍EOF失败，继续修暖scope资源峰值。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -46,7 +46,7 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 - **全仓架构消费者**：[7a的13组](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6224181570)622通过1个Core阶段fixture失败0忽略，后继024闭合该项。Live348、CLI69、adapter57及Source新26并行回归均在原组实际命中；0e1、f088后继各保原身份。专项通过不等于最终五阶段审计完成。
 - **按需原文与retained结构回归**：8ee Git需求流17项真实Windows通过，原fallback fixture在[6ce完整facts_cache19/0/0](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6226082277)闭合，保4文档body扫描/cursor/禁镜像warm。76d all-target、native72及research76通过2原忽略，包含18个共享分析/流式摘要/索引/XML所有权新回归；匹配优化CLI构建成功。完整retained仍失败，见下一项。
 - **retained冷请求已通过，暖context仍失败**：[978完整复验](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6226997732)full11通过3失败；首冷refs11.443秒exit0，完整stdout7213878字节，close/recreate/same-pin恢复与最终回收通过；冷回复semantic complete=false且155 gaps，不能将传输/check成功冒充语义完整。新根失败跨CLI暖context1.8035秒EOF/exit5，另2项依赖失败。认证warm child56208/creation134366686791803877、owner16580/134366686789752091；journal止于query_build_scope34ms/private2122149888，未scope_built。原Job2GiB、历史peakJob2148704256/peakProcess2147418112，无limit通知；0xc0000409仅supervisor终止后观察，不证明自然OOM或旧owner栈故障复发。匹配release成功、package仅assembly通过，Node80通过1平台skip；完整内存/暖稳态未验收。继续修暖scope与前请求保留状态真实同时存活峰值。
-- **暖scope完整所有权后继已实现，尚未运行**：XML Program身份不再物化整份Value再仅为hash分配字节，按原canonical字段借用流式验证/hash；Graph snapshot JSON在原构建点完整验证/计量/hash，字符串仅真实消费者需要时共享物化。lexical read、closure/parameter索引改精确原file:start:end紧凑坐标，保同键最后覆盖、公开cell/capture ID及原scope生命周期。新增19 Rust（身份9/紧凑索引7/共享3）由现native::正式组覆盖，14源语法/diff和Node81/81通过；Rust/完整暖Retail仍NOT_RUN。独立完整组合审阅通过，全部14源身份与canonical/错误/容量/精确键消费者已核；不把静态审或消除副本冒充2GiB或性能达标。
+- **暖scope后继已运行前置，修复三处fixture阻断待复验**：XML Program身份不再物化整份Value再仅为hash分配字节，按原canonical字段借用流式验证/hash；Graph snapshot JSON在原构建点完整验证/计量/hash，字符串仅真实消费者需要时共享物化。lexical read、closure/parameter索引改精确原file:start:end紧凑坐标，保同键最后覆盖、公开cell/capture ID及原scope生命周期。新增19 Rust（身份9/紧凑索引7/共享3）由现native::正式组覆盖，14源语法/diff和Node81/81通过；[de903实际前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6227348428)all-target通过，native::91项88通过3失败，原72全过、新19为16过3败。三失败均在共享fixture构图返回source.native_unavailable/block，尚未到descriptor/entry/stop断言：空文件被选为执行body，而原版parser的合法空Chunk没有Block。本轮仅调整测试的执行计划为原三个有body脚本，保零字节文件准入、空索引与原全部目标断言，并显式验证空Chunk；生产未改。修订Rust、匹配release/package与完整暖Retail仍NOT_RUN。真实空脚本执行是否应作为no-op另列候选合同缺口，不能用旧978同样失败证明正确。独立完整组合审阅通过，全部14源身份与canonical/错误/容量/精确键消费者已核；不把静态审或消除副本冒充2GiB或性能达标。
 - **owner raw回复修复已取得实际闭环子证据**：76d旧owner0xc00000fd与8/5原失败保留。978完整native_session66/0/0/all-target通过，22新回归默认栈逐名称命中；完整Retail首冷请求也通过。独审找到的两异常buffer容量/分配失败遗漏已复用有界try_reserve_exact修复并复审通过。成功路径不再创建第二业务DOM，真实API私有marker兼容及取消/清理保留；不能将冷成功外推暖态/内存已达标。
 
 - **正常Facts与有限畸形输入**：[76d完整4036文档v9](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6226409878)逐字段/顺序0差。后继[e8d新增XML32与旧52](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6226448382)全字段/顺序全部等价，Rust15/0/0、Node18/0/0；关闭该明确输入集差异，不称非法Lua/XML已穷尽。Facts v10/index v11及[显式v10读侧](tests/rust-performance-paired/read-fact-delta.README.md)已保存，[e8d独立新home完整4036 v10](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6226520186)逐字段/顺序0差，声明65320/关系227786/loads4169/headers1888/diagnostics0；报告SHA `722f3ea2ca4dfb2b3ba6b2aef4020d0a8bbc39cadd6fc50cf608b3c547d4a202`，匹配优化构建成功，未重跑retained/20对性能。
@@ -73,7 +73,7 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 本机测试通道已正常恢复，原unknown历史保留，无需再次apply或重启。仅云端实现，用户指定本机线程负责固定SHA测试并将报告写回同一PR。普通push不自动切换其正在测试的树；不另排重复长CI。
 
-当前本机76d已完成结构回归、优化构建、完整retained和4036 v9/单次性能诊断；retained owner栈故障详见§3。e8d的新增XML32+旧52、匹配优化构建及独立新home完整4036 v10零差已全部完成；本机已安全结束，等待后继retained修复固定SHA。978已完成all-target/native_session66/0/0、优化构建与完整retained11通过3失败；本机已安全结束，等待暖scope后继固定SHA。后继先all-target与native::完整组（含19新增），再一次匹配优化构建/package/fullretained，原32+52/XML不机械重复。不要重复已闭合XML批或扩大栈。
+当前本机76d已完成结构回归、优化构建、完整retained和4036 v9/单次性能诊断；retained owner栈故障详见§3。e8d的新增XML32+旧52、匹配优化构建及独立新home完整4036 v10零差已全部完成；本机已安全结束，等待后继retained修复固定SHA。978已完成all-target/native_session66/0/0、优化构建与完整retained11通过3失败；本机已安全结束，等待暖scope后继固定SHA。de903前置all-target已过、native::88过3fixture失败，未构建release；本轮最小测试修复后先all-target与native::完整组（含19新增），再一次匹配优化构建/package/fullretained，原32+52/XML不机械重复。不要重复已闭合XML批或扩大栈。
 
 - 所有Rust检查沿仓库受控 `tools/rust-cargo.mjs`、固定工具链和原owner/cache合同，先all-target编译，再受影响组；默认线程栈不加大。完整SQL299及7db预算组已过，不机械重跑历史失败树。
 - 正式Lua与9桥使用[现有入口](tools/rust-formal-lua-bridge.mjs)，每次新输出目录；原runtime与CLI封存产物必须通过全部身份验证，不能覆盖旧失败目录。当前正式Go323220/9已有实证。

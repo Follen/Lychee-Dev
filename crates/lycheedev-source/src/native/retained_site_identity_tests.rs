@@ -46,7 +46,10 @@ fn fixture() -> PreparedSnapshot {
             workspace_root: std::env::current_dir().unwrap().join("retained-site-fixture"),
             source_identity: json!({"test":"retained-site-identity"}),
             phase: "after_load".into(),
-            ordered_occurrences: vec!["dir/same.lua".into(), "other/same.lua".into(), "bom.lua".into(), "empty.lua".into()],
+            // Keep the empty document admitted for identity-index coverage.
+            // The graph fixture exercises these three concrete script bodies;
+            // the pinned parser omits a Block for the zero-byte document.
+            ordered_occurrences: vec!["dir/same.lua".into(), "other/same.lua".into(), "bom.lua".into()],
             config: crate::engine_config::research(),
             host,
             luac: LuacIdentity {
@@ -85,6 +88,12 @@ fn previous_maps(prepared: &PreparedSnapshot) -> (BTreeMap<String, LuaSyntaxId>,
 fn compact_retained_maps_match_previous_exact_lookup_for_all_original_ranges() {
     let prepared = fixture();
     let (closures, parameters) = previous_maps(&prepared);
+    assert_eq!(prepared.inputs.original("empty.lua").unwrap(), "");
+    assert!(!prepared.inputs.ordered.iter().any(|file| file == "empty.lua"));
+    let empty = prepared.analysis.semantic_model(prepared.files["empty.lua"]);
+    assert!(empty.parse_errors().unwrap().is_empty());
+    let chunk = LuaChunk::cast(empty.syntax_tree().unwrap().get_red_root()).unwrap();
+    assert!(chunk.get_block().is_none(), "empty input has no body to select for this graph fixture");
     assert_eq!(prepared.closures.len(), closures.len());
     assert_eq!(prepared.parameters.len(), parameters.len());
     let identity = prepared.inputs.identity_sha256().to_owned();
