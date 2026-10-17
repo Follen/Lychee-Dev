@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 13:24 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`e0215fb5955abe32fd85d20bd177e90d96b57e08`（e253生产与v4真实结果已保存）。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 13:47 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`0890a7627e83251af73235c7aabe220c3f1a496c`（Live/MD5独立基准已保存）。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -41,15 +41,17 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 ## 3. 当前实际验证与证据
 
-### 当前 Live 离线量级入口（尚未实跑）
+### 当前 Live 离线量级入口与0890实测
 
 新增独立 opt-in ignored 库测试与[正式 runner](tests/rust-performance-paired/live.README.md)，复用固定Go323 Lua peer/113文件认证与真实Driver、codec、durable journal、owned projection；原9桥入口不改。结果字符串256/16384/131072字节×原journal 1/255/256事件×3独立fixture共27样本，实际BODY长度另记。真实Instant覆盖setup、checkpoint、Driver、校验和checked收尾；互斥段+余量加回总wall，Lua交换与重复record解码嵌套在backend，不能再叠加或称游戏延迟。复制字节/容量有实际代码证据，allocator总数/RSS仍null。没有可比Go host时标，不能报Go速度比或B06验收。
 
-独立静态审已纠正disconnect与service.closed不同层级、原close失败被空二次close遮盖、wrapper墙钟误命名三点，复核无剩余确认缺陷。无消费者的CLI artifact门禁已移除，只构建本次优化库测试EXE并认证其真实source/receipt/runtime，不重建整CLI。新Node32+原桥controller24=56/56已实际通过，rustfmt解析通过；Rust编译、27样本及量级结论仍NOT_RUN。唯一测试队列待本批固定SHA后执行，不能拿合成Node计时输入当性能结果。
+独立静态审已纠正disconnect与service.closed不同层级、原close失败被空二次close遮盖、wrapper墙钟误命名三点，复核无剩余确认缺陷。无消费者的CLI artifact门禁已移除，只构建本次优化库测试EXE并认证其真实source/receipt/runtime，不重建整CLI。新Node32+原桥controller24=56/56已实际通过；[0890本机前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234472215)Node56/MD5Node71及all-targets均通过、3owner回收。[真实Live27/27](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234522594)及27peer寿命收尾全部通过，优化库测试build/run均回收。先校旧7c Lua report被runtime_support_identity拒绝，改用已有ab4认证report后通过，未改清单或重建解释器；保[原拒绝记录](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234455923)。
 
-### Data 哈希生命周期筛选入口（尚未实跑）
+[原证据索引](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234550692)及7块已逐SHA核742引用/196唯一blob，原report每样本互斥账、27sample/peer、45journal文件5868event链与27BODY完整匹配。27sample墙钟合34.921s：实际fixture历史构造17.437s、peer启动6.380s、身份重验2.503s均属诊断完整成本，不能称产品热路径。Driver合7.551s中journal5.640s、backend1.884s、余27.875ms；journal里1215次append合5.346908s（每sample45次，占Driver70.81%）、54checkpoint132.072ms、27write_result160.611ms。nestedLua408.987ms/codec2.552ms已含backend，不再相加。真实BODY为362/16490/131178B；history255保172200B/255event，history256先checkpoint为682B/1event，二者不是单纯多一事件的增长对照。下一结构候选针对append重复链解析而非2.552ms codec；性能收益与Go host/游戏/20对验收仍未证明。
 
-保原example的1/16/64MiB整片RustCrypto/CNG比较和历史64MiB负结果；另加认证44B Root与17MiB payload、64KiB增量及fused SHA256/MD5。payload真实272次update，Root独立1次，合计273不拼成一个消息。三个现RustCrypto模式分别测clone-finalize、consuming finalize、fused完整new/update/clone/finalize/drop；六次正反序迭代全部保留，完整hash和向量先验，实际CPU仅原root进程总体。CNG现安全入口只有整片生命周期，明确不伪造增量等价，不加新依赖/FFI。仅构建原Windows example；没有整CLI构建或生产哈希替换。详见[专用说明](tests/rust-performance-paired/md5-benchmark.README.md)。Node71/71已由作者与整合者实际通过，Rustfmt仅解析；独立审发现的Root错误分支checked close与准备期固定fixture前置边界已修。新Windows编译/结果尚未取得，不能将21ms CKey子段视为可全部省去或宣称达到性能目标。
+### Data 哈希生命周期筛选0890实测
+
+保原example的1/16/64MiB整片RustCrypto/CNG比较和历史64MiB负结果；另加认证44B Root与17MiB payload、64KiB增量及fused SHA256/MD5。payload真实272次update，Root独立1次，合计273不拼成一个消息。三个现RustCrypto模式分别测clone-finalize、consuming finalize、fused完整new/update/clone/finalize/drop；六次正反序迭代全部保留，完整hash和向量先验，实际CPU仅原root进程总体。CNG现安全入口只有整片生命周期，明确不伪造增量等价，不加新依赖/FFI。仅构建原Windows example；没有整CLI构建或生产哈希替换。详见[专用说明](tests/rust-performance-paired/md5-benchmark.README.md)。Node71/71已由作者与整合者实际通过，Rustfmt仅解析；独立审发现的Root错误分支checked close与准备期固定fixture前置边界已修。[0890真实报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234539195)与[终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234563055)原3行+新36/36全部通过、0skip、7owner回收；RFC7、8长度×4分片×3模式及取消/期限/完整摘要检查均过。payload完整生命周期中位数clone21.318650ms（20.9972–24.4811）、consume21.598150ms（21.2522–22.2369）、fused SHA256/MD5 consume28.431950ms（28.2561–28.8888）；44B Root分别0.0007/0.0006/0.00095ms。CNG整片均值1MiB1.332ms对Rust1.275、16MiB23.647对20.218、64MiB86.969对81.711，没有更快且非相同增量API；不换生产backend。当前主要update成本，不把clone改consume当已证收益，不将21ms子段视为可全部省去；微基准仍不是完整CLI性能验收。
 
 ### 4a1 三模块优化前置与两项测试修订
 

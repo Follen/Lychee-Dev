@@ -135,3 +135,11 @@ node --test tests/rust-performance-paired/md5-benchmark.test.mjs
 
 Rust syntax parsing is not Windows compilation. Actual build/run results must be
 recorded against their exact commit, executable, fixture and original receipts.
+
+## First actual screening: 0890
+
+The [fixed 0890 report](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234539195) and [terminal evidence](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234563055) passed the three legacy rows, all36 streaming rows, full correctness/stop checks and both measured process lifetimes; all seven build/preparation/execution owners were reaped. No skipped or replacement samples.
+
+For the authenticated17MiB payload, full-lifecycle median wall was21.318650ms for clone-finalize (range20.9972–24.4811),21.598150ms consuming (21.2522–22.2369), and28.431950ms fused SHA256/MD5 consuming (28.2561–28.8888). Independent44B Root medians were0.0007/0.0006/0.00095ms. These are microbench measurements with the complete lifecycle above, not CLI elapsed or per-sample CPU.
+
+Legacy CNG mean wall was slower at every size:1MiB1.332ms versus RustCrypto1.275ms;16MiB23.647 versus20.218;64MiB86.969 versus81.711. Its whole-slice API remains a distinct comparison. These results do not justify switching the production backend or claiming consuming-finalize saves elapsed time. Historical64MiB results above and all individual new samples remain; no favorable subset replaces them.
