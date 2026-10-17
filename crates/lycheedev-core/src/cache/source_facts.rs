@@ -8,6 +8,7 @@ use lycheedev_windows::filesystem::destination::{
     Directory, FileControl, FileCost, StagedFile, StagedPublication,
 };
 use std::{
+    cell::RefCell,
     ffi::OsStr,
     fs,
     io::Read,
@@ -28,6 +29,14 @@ pub enum SourceCachePublicationPhase {
     Rename,
     StageClose,
     LockClose,
+    // Nested within Lock, not additional publication time. KernelAttempt counts
+    // every try; ContentionBackoff counts only actual retry sleeps. FailureClose
+    // is the consumed acquisition handle on failure, never successful LockClose.
+    LockVerify,
+    LockOpen,
+    LockKernelAttempt,
+    LockContentionBackoff,
+    LockFailureClose,
 }
 type PublicationObserver<'a> = Option<&'a mut dyn FnMut(SourceCachePublicationPhase, Duration)>;
 fn measured<T>(
@@ -222,13 +231,48 @@ impl SourceCache {
         // Same-key publishers serialize through the existing bounded,
         // cancellation-aware lock primitive. Different files/directories do
         // not contend; readers keep old complete bytes across replacement.
-        let lock = measured(SourceCachePublicationPhase::Lock, &mut timings, || {
-            storage::ExclusiveLock::resource_wait_in_directory(
-                self.lock_directory(control)?,
-                &format!("source-cache:{}:{key}", self.kind.directory()),
-                control,
-            )
-        })?;
+        let lock_started = timings.is_some().then(Instant::now);
+        let lock_result = (|| {
+            let directory = self.lock_directory(control)?;
+            let resource = format!("source-cache:{}:{key}", self.kind.directory());
+            if let Some(observer) = timings.as_deref_mut() {
+                // The synchronous closures borrow one callback; no handle or
+                // error ownership is transferred to this observation adapter.
+                let observer = RefCell::new(observer);
+                storage::ExclusiveLock::resource_wait_in_directory(
+                    directory,
+                    &resource,
+                    control,
+                    Some(&|phase, elapsed| {
+                        use storage::LockPhase;
+                        observer.borrow_mut()(
+                            match phase {
+                                LockPhase::Verify => SourceCachePublicationPhase::LockVerify,
+                                LockPhase::Open => SourceCachePublicationPhase::LockOpen,
+                                LockPhase::KernelAttempt => {
+                                    SourceCachePublicationPhase::LockKernelAttempt
+                                }
+                                LockPhase::ContentionBackoff => {
+                                    SourceCachePublicationPhase::LockContentionBackoff
+                                }
+                                LockPhase::FailureClose => {
+                                    SourceCachePublicationPhase::LockFailureClose
+                                }
+                            },
+                            elapsed,
+                        );
+                    }),
+                )
+            } else {
+                storage::ExclusiveLock::resource_wait_in_directory(
+                    directory, &resource, control, None,
+                )
+            }
+        })();
+        if let (Some(started), Some(observer)) = (lock_started, timings.as_deref_mut()) {
+            observer(SourceCachePublicationPhase::Lock, started.elapsed());
+        }
+        let lock = lock_result?;
         let mut publication = None;
         let result =
             self.publish_locked(key, bytes, control, observe, &mut publication, &mut timings);
@@ -409,18 +453,82 @@ mod tests {
             use SourceCachePublicationPhase::*;
             if fail_after_write {
                 assert_eq!(result.unwrap_err().code, "fixture.write");
-                assert_eq!(phases, [Lock, Stage, Write, StageClose, LockClose]);
+                assert_eq!(
+                    phases,
+                    [
+                        LockVerify,
+                        LockOpen,
+                        LockKernelAttempt,
+                        Lock,
+                        Stage,
+                        Write,
+                        StageClose,
+                        LockClose
+                    ]
+                );
                 assert!(cache.read(&key, &control).unwrap().is_none());
             } else {
                 result.unwrap();
                 assert_eq!(
                     phases,
-                    [Lock, Stage, Write, Seal, Rename, StageClose, LockClose]
+                    [
+                        LockVerify,
+                        LockOpen,
+                        LockKernelAttempt,
+                        Lock,
+                        Stage,
+                        Write,
+                        Seal,
+                        Rename,
+                        StageClose,
+                        LockClose
+                    ]
                 );
                 assert_eq!(cache.read(&key, &control).unwrap().unwrap(), b"complete");
             }
             cache.finish(Ok(()), &control).unwrap();
         }
+    }
+    #[test]
+    fn publication_profile_failed_acquire_closes_once_without_a_success_close_phase() {
+        let f = Fixture::new();
+        let control = OperationControl::default();
+        let cancel = control.cancel_handle();
+        let cache = SourceCache::open(&f.0, Kind::Facts, &control).unwrap();
+        let key = storage::sha256(b"profile stop after kernel lock");
+        let mut phases = Vec::new();
+        let error = cache
+            .publish_profiled(
+                &key,
+                b"complete",
+                &control,
+                &mut |_| Ok(()),
+                Some(&mut |phase, _| {
+                    phases.push(phase);
+                    if phase == SourceCachePublicationPhase::LockKernelAttempt {
+                        cancel.store(true, std::sync::atomic::Ordering::Release);
+                    }
+                }),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, "command.cancelled");
+        use SourceCachePublicationPhase::*;
+        assert_eq!(
+            phases,
+            [
+                LockVerify,
+                LockOpen,
+                LockKernelAttempt,
+                LockFailureClose,
+                Lock
+            ]
+        );
+        let next_control = OperationControl::default();
+        assert!(cache.read(&key, &next_control).unwrap().is_none());
+        // A successful second publisher proves the failed acquisition consumed
+        // its original handle and did not leave the kernel lock owned.
+        cache.publish(&key, b"complete", &next_control).unwrap();
+        cache.finish(Ok(()), &next_control).unwrap();
     }
     #[test]
     fn lock_directory_is_lazy_reused_and_pins_replacement_until_checked_finish() {

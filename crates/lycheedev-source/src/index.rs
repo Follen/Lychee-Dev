@@ -567,6 +567,11 @@ fn document_facts_profiled(
                     Published::Rename => Phase::FactsPublishRename,
                     Published::StageClose => Phase::FactsPublishStageClose,
                     Published::LockClose => Phase::FactsPublishLockClose,
+                    Published::LockVerify => Phase::FactsPublishLockVerify,
+                    Published::LockOpen => Phase::FactsPublishLockOpen,
+                    Published::LockKernelAttempt => Phase::FactsPublishLockKernelAttempt,
+                    Published::LockContentionBackoff => Phase::FactsPublishLockContentionBackoff,
+                    Published::LockFailureClose => Phase::FactsPublishLockFailureClose,
                 },
                 elapsed,
             );

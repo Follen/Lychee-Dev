@@ -32,8 +32,13 @@ pub(super) enum Phase {
     FactsPublishLockClose,
     FactsParseSequential,
     FactsWorkerAbandoned,
+    FactsPublishLockVerify,
+    FactsPublishLockOpen,
+    FactsPublishLockKernelAttempt,
+    FactsPublishLockContentionBackoff,
+    FactsPublishLockFailureClose,
 }
-const NAMES: [&str; 26] = [
+const NAMES: [&str; 31] = [
     "metadata",
     "cached_index",
     "index_lock",
@@ -60,6 +65,11 @@ const NAMES: [&str; 26] = [
     "facts_publish_lock_close",
     "facts_parse_sequential",
     "facts_worker_abandoned",
+    "facts_publish_lock_verify",
+    "facts_publish_lock_open",
+    "facts_publish_lock_kernel_attempt",
+    "facts_publish_lock_contention_backoff",
+    "facts_publish_lock_failure_close",
 ];
 
 pub(super) struct Profile {
@@ -101,7 +111,8 @@ impl Profile {
     }
     fn value(&self) -> serde_json::Value {
         let phases: Vec<_> = NAMES.iter().enumerate().map(|(i, name)| serde_json::json!({"phase":name,"calls":self.calls[i].get(),"elapsedMicros":self.elapsed[i].get().as_micros()})).collect();
-        serde_json::json!({"schema":"lycheedev.source-index-phases.v1","elapsedMicros":self.started.map(|s|s.elapsed().as_micros()),"timing":"wall-clock; worker phase sums consumed job durations; phases overlap; not additive","phases":phases})
+        serde_json::json!({"schema":"lycheedev.source-index-phases.v1","elapsedMicros":self.started.map(|s|s.elapsed().as_micros()),"timing":"wall-clock; worker phase sums consumed job durations; phases overlap; not additive","phases":phases,
+            "lockTiming":"verify/open/kernel_attempt/contention_backoff/failure_close are nested in facts_publish_lock; not additive with their parent. kernel_attempt counts every kernel try, including immediate success; contention_backoff measures actual sleep calls only after real contention, including scheduler delay. failure_close measures only failed-acquisition handle close; successful close remains facts_publish_lock_close. Verification includes the unchanged controlled ancestry checks; lock preparation and other checks remain in the parent."})
     }
 }
 impl Drop for Profile {
@@ -163,5 +174,72 @@ mod tests {
             value["timing"],
             "wall-clock; worker phase sums consumed job durations; phases overlap; not additive"
         );
+    }
+    #[test]
+    fn lock_subphases_append_without_relabeling_the_original_twenty_six() {
+        assert_eq!(
+            &NAMES[..26],
+            &[
+                "metadata",
+                "cached_index",
+                "index_lock",
+                "git_tree",
+                "git_blobs_inclusive",
+                "facts_read",
+                "facts_parse",
+                "facts_serialize",
+                "facts_publish",
+                "original_publish",
+                "symbols",
+                "index_serialize",
+                "index_publish",
+                "manifest",
+                "facts_worker_consumed",
+                "facts_worker_wait",
+                "facts_refill_dispatched",
+                "facts_publish_lock",
+                "facts_publish_stage",
+                "facts_publish_write",
+                "facts_publish_seal",
+                "facts_publish_rename",
+                "facts_publish_stage_close",
+                "facts_publish_lock_close",
+                "facts_parse_sequential",
+                "facts_worker_abandoned",
+            ]
+        );
+        for enabled in [false, true] {
+            let p = Profile::enabled(enabled);
+            p.record(
+                Phase::FactsPublishLockKernelAttempt,
+                Duration::from_micros(7),
+            );
+            p.record(
+                Phase::FactsPublishLockKernelAttempt,
+                Duration::from_micros(11),
+            );
+            p.record(
+                Phase::FactsPublishLockContentionBackoff,
+                Duration::from_micros(13),
+            );
+            let value = p.value();
+            let phases = value["phases"].as_array().unwrap();
+            assert_eq!(phases.len(), 31);
+            assert_eq!(phases[28]["phase"], "facts_publish_lock_kernel_attempt");
+            assert_eq!(phases[28]["calls"], if enabled { 2 } else { 0 });
+            assert_eq!(phases[28]["elapsedMicros"], if enabled { 18 } else { 0 });
+            assert_eq!(phases[29]["calls"], if enabled { 1 } else { 0 });
+            assert_eq!(phases[29]["elapsedMicros"], if enabled { 13 } else { 0 });
+            // A successful close and a failure close are different events;
+            // merely recording attempts does not invent either one.
+            assert_eq!(phases[23]["calls"], 0);
+            assert_eq!(phases[30]["calls"], 0);
+            assert!(
+                value["lockTiming"]
+                    .as_str()
+                    .unwrap()
+                    .contains("nested in facts_publish_lock; not additive")
+            );
+        }
     }
 }

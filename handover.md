@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 03:29 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`bbee33587a8bbfe31a1ea192be645884f0e67b97`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 03:45 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`5bc0ab5f349ca3f77f65093e01873a6579ef34e2`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -59,7 +59,7 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 ### 冷索引发布与流水线（正确性通过，单次性能未达标）
 
-固定76d原始profile实核：总9.409秒，facts发布5.060秒/4036次；worker解析累计6.403秒与主线程重叠，不相加。当前实现仅在原资源边界内复用严格持有的locks目录，每次仍验证祖先、按原资源hash取得跨进程kernel锁并checked close；首次并发准备的多余目录owner明确关闭。收到最早已完成纯parse后，仍对Facts/原文字节/Ready槽计费，只释放已经销毁的parser scratch，允许下一份已读取/认证输入先进入空闲worker，再按原顺序提交上一份。原256MiB/槽上限、首错与线程回收保持。增加锁、暂存、写、seal、rename及两类close的分段profile，关闭profile时不读时钟。30d本机alltargets通过，正式pipeline28/0/0、profile2/0/0、facts_cache21/0/0、Core sourcefacts13/0/0、blobwait6/0/0均已通过；不得重复累加新增与继承测试。[30d匹配优化实测](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6228621264)全4036字段/顺序0差；单次Go8457.3107ms/Rust9551.7776ms，比1.12941075未达≤0.30。Facts发布4.931秒中锁1.594、stage1.496、rename1.314秒；write仅277ms、seal3ms。worker等待383ms，累计解析不与总墙钟相加。20对仍未执行，无已证加速结论。
+固定76d原始profile实核：总9.409秒，facts发布5.060秒/4036次；worker解析累计6.403秒与主线程重叠，不相加。当前实现仅在原资源边界内复用严格持有的locks目录，每次仍验证祖先、按原资源hash取得跨进程kernel锁并checked close；首次并发准备的多余目录owner明确关闭。收到最早已完成纯parse后，仍对Facts/原文字节/Ready槽计费，只释放已经销毁的parser scratch，允许下一份已读取/认证输入先进入空闲worker，再按原顺序提交上一份。原256MiB/槽上限、首错与线程回收保持。增加锁、暂存、写、seal、rename及两类close的分段profile，关闭profile时不读时钟。30d本机alltargets通过，正式pipeline28/0/0、profile2/0/0、facts_cache21/0/0、Core sourcefacts13/0/0、blobwait6/0/0均已通过；不得重复累加新增与继承测试。[30d匹配优化实测](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6228621264)全4036字段/顺序0差；单次Go8457.3107ms/Rust9551.7776ms，比1.12941075未达≤0.30。Facts发布4.931秒中锁1.594、stage1.496、rename1.314秒；write仅277ms、seal3ms。worker等待383ms，累计解析不与总墙钟相加。20对仍未执行，无已证加速结论。 后继仅增加五个锁内观测段verify/open/kernel attempt/contention backoff/failure close，旧26段保序；失败close与成功LockClose分开，无竞争不计backoff，所有子段嵌套不能加总。保原open flags/逐次祖先验证/取消/真实句柄与checked close，关闭profile不增加clock。八个新Rust回归及原组待后续有意义批执行，当前只静态/语法与工具Node6/6通过；不为该片单独重建或打断Data验收。
 
 ### Data 专用配对（前4路径等价，清理失败阻断后继）
 

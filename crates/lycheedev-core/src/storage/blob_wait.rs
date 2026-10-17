@@ -3,6 +3,38 @@
 use super::*;
 use std::time::{Duration, Instant};
 
+/// Source-only nested wall observations. An attempt is not necessarily a wait;
+/// backoff is recorded only after the existing kernel contention predicate.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum LockPhase {
+    Verify,
+    Open,
+    KernelAttempt,
+    ContentionBackoff,
+    FailureClose,
+}
+pub(crate) type LockObserver<'a> = Option<&'a dyn Fn(LockPhase, Duration)>;
+pub(super) fn measured_lock<T>(
+    phase: LockPhase,
+    observer: LockObserver<'_>,
+    run: impl FnOnce() -> T,
+) -> T {
+    measured_lock_with_clock(phase, observer, Instant::now, run)
+}
+fn measured_lock_with_clock<T>(
+    phase: LockPhase,
+    observer: LockObserver<'_>,
+    clock: impl FnOnce() -> Instant,
+    run: impl FnOnce() -> T,
+) -> T {
+    let started = observer.map(|_| clock());
+    let result = run();
+    if let (Some(started), Some(observer)) = (started, observer) {
+        observer(phase, started.elapsed());
+    }
+    result
+}
+
 impl ExclusiveLock {
     /// Source-cache-only repeated publication. Keep the exact resource hash,
     /// kernel lock, original deadline and checked close, while a real held
@@ -11,6 +43,7 @@ impl ExclusiveLock {
         scope: &Directory,
         resource: &str,
         control: &crate::control::OperationControl,
+        observer: LockObserver<'_>,
     ) -> Result<Self> {
         struct Controlled<'a>(&'a crate::control::OperationControl);
         impl FileControl for Controlled<'_> {
@@ -22,22 +55,24 @@ impl ExclusiveLock {
                 self.0.check()
             }
         }
-        Self::acquire_prepared_with(
+        Self::acquire_prepared_observed_with(
             &scope
                 .path()
                 .join(format!("{}.lock", sha256(resource.as_bytes()))),
             || control.check(),
             || scope.verify_controlled(&mut Controlled(control)),
             |file, check| {
-                Self::wait_on_file(
+                Self::wait_on_file_observed(
                     file,
                     check,
                     Some(control.deadline()),
                     fs2::FileExt::try_lock_exclusive,
                     std::thread::sleep,
+                    observer,
                 )
             },
             lycheedev_windows::filesystem::close_file,
+            observer,
         )
     }
     /// Fixed-Go multi-file publishers share one original lock handle while
@@ -89,12 +124,22 @@ impl ExclusiveLock {
         file: &File,
         check: &mut dyn FnMut() -> Result<()>,
         deadline: Option<Instant>,
+        lock: impl FnMut(&File) -> std::io::Result<()>,
+        sleep: impl FnMut(Duration),
+    ) -> Result<()> {
+        Self::wait_on_file_observed(file, check, deadline, lock, sleep, None)
+    }
+    fn wait_on_file_observed(
+        file: &File,
+        check: &mut dyn FnMut() -> Result<()>,
+        deadline: Option<Instant>,
         mut lock: impl FnMut(&File) -> std::io::Result<()>,
         mut sleep: impl FnMut(Duration),
+        observer: LockObserver<'_>,
     ) -> Result<()> {
         loop {
             check()?;
-            match lock(file) {
+            match measured_lock(LockPhase::KernelAttempt, observer, || lock(file)) {
                 Ok(()) => return check(),
                 Err(error)
                     if error.raw_os_error().is_some()
@@ -110,7 +155,7 @@ impl ExclusiveLock {
             let delay = deadline.map_or(interval, |until| {
                 interval.min(until.saturating_duration_since(Instant::now()))
             });
-            sleep(delay);
+            measured_lock(LockPhase::ContentionBackoff, observer, || sleep(delay));
             check()?;
         }
     }

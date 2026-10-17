@@ -595,23 +595,38 @@ impl ExclusiveLock {
     // re-verifies that owner here. Other lock callers keep create_dir_all.
     fn acquire_prepared_with(
         path: &Path,
-        mut check: impl FnMut() -> Result<()>,
+        check: impl FnMut() -> Result<()>,
         prepare: impl FnOnce() -> Result<()>,
         lock: impl FnOnce(&File, &mut dyn FnMut() -> Result<()>) -> Result<()>,
         close: impl FnOnce(File) -> std::io::Result<()>,
     ) -> Result<Self> {
+        Self::acquire_prepared_observed_with(path, check, prepare, lock, close, None)
+    }
+    fn acquire_prepared_observed_with(
+        path: &Path,
+        mut check: impl FnMut() -> Result<()>,
+        prepare: impl FnOnce() -> Result<()>,
+        lock: impl FnOnce(&File, &mut dyn FnMut() -> Result<()>) -> Result<()>,
+        close: impl FnOnce(File) -> std::io::Result<()>,
+        observer: blob_wait::LockObserver<'_>,
+    ) -> Result<Self> {
+        use blob_wait::{LockPhase, measured_lock};
         check()?;
-        prepare()?;
+        measured_lock(LockPhase::Verify, observer, prepare)?;
         check()?;
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(path)?;
+        let file = measured_lock(LockPhase::Open, observer, || {
+            OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .read(true)
+                .write(true)
+                .open(path)
+        })?;
         let result = lock(&file, &mut check).and_then(|_| check());
         if let Err(error) = result {
-            return finish_file_with(file, Err(error), check, close);
+            return finish_file_with(file, Err(error), check, |file| {
+                measured_lock(LockPhase::FailureClose, observer, || close(file))
+            });
         }
         Ok(Self { file: Some(file) })
     }
@@ -828,3 +843,4 @@ mod controlled_lock_tests;
 
 #[path = "storage/blob_wait.rs"]
 mod blob_wait;
+pub(crate) use blob_wait::LockPhase;
