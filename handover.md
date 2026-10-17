@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 15:38 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`01f845f657cd5820fa91ec22fa84b7f452bbfdb3`（Source原续验已保存；下述稳定分组候选待实测）。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 16:18 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`00d215a937513609e482c1ef65f3b43f0288beee`（稳定分组前置与匹配构建已通过，六场景待正式runner）。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -113,7 +113,9 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 下一窄结构候选把全局序号组改为稳定path二进制radix叶（最多512个eligible文档），叶内仍最多64记录/32MiB pack；不新增全局索引/GC/另一数据库。固定公开4036path静态筛选为74pack（原64），代价增加10次冷发布；64/128/256叶分别155/103/87pack。三个上述真实路径静态推导分别仅9/1/8重算，尚不是运行实证或一般上界；新算法与默认消费者已接：现64索引/16KiB group charge不增，两个scalar扫描求叶边界，whole-index改v14、group域facts-pack-v2-path-radix512；pack字节/MAGIC/locator/v11envelope不变。显式v11-pack2 reader必须绑定candidate与indexSHA，裸blob不自动证明分组算法；旧pack1读者/证据保留。
 
-健康可用旧缓存下，单次membership变动导致的候选重算上界insert513/delete512/rename保守1025；单content仍≤64。不含首次格式迁移、独立损坏/驱逐/发布失败/eligibility变化，不能冒称所有cache miss上界。公开路径另110个跨位置rename静态范围2–511，未当运行耗时。独立复核发现叶恰64倍数且夹asset/超限文档导致空group的真实问题已修，新增1024真实文档加asset/32MiB+1输入回归；最终无剩余确认缺陷。Node组合66/66（reader29/candidates32/generated5）实际通过，另reader+resume+custody44/44为重叠验证不累加；Rustfmt仅解析，所有Rust/新产物性能NOT_RUN。
+健康可用旧缓存下，单次membership变动导致的候选重算上界insert513/delete512/rename保守1025；单content仍≤64。不含首次格式迁移、独立损坏/驱逐/发布失败/eligibility变化，不能冒称所有cache miss上界。公开路径另110个跨位置rename静态范围2–511，未当运行耗时。独立复核发现叶恰64倍数且夹asset/超限文档导致空group的真实问题已修，新增1024真实文档加asset/32MiB+1输入回归；最终无剩余确认缺陷。Node组合66/66（reader29/candidates32/generated5）实际通过，另reader+resume+custody44/44为重叠验证不累加；Rustfmt仅解析；随后[00d实际前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6236073579)all-targets通过，pack18含7新逐名、旧cache26、retained admission1、Corestream10含1 helper、Node66全部通过；旧104严格相同、11边界保5全等/6endLine增强，8owner回收。1024+asset/超32MiB尾实际通过，原pack Cargo保认证辅助forced收尾。
+
+[00d匹配release/assembly](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6236213281)及[终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6236225116)成功，EXE44717568B/SHA3169c2187b966b40ed3622fe14cfb81527e8dd3a52a6d99a888e8ab482c1b1fb、artifact SHA02ebe1eb57d552d1c8ebf6c86697fdbc77d6eba4ee847edd33c4d7d19b6253ad、sourceTree06a5a0e39c46c786d946b8c429c90c0eb4e9e1291028375e329fc9457776b4e3。前置与构建合11owner回收，六场景仍NOT_RUN，不能把新算法静态收益写成实测。
 
 后继本机固定新SHA：all-targets→Source `index::facts_cache::tests`完整18、`index::facts_cache_tests`完整旧组、`facts_pipeline::retained_cohort_metadata_reduces_real_worker_admission_without_changing_facts`与Core `cache::source_facts::streaming_tests`，及旧104/新11正式Go边界→前置全过后唯一匹配优化CLI/assembly→显式v11-pack2全4036字段顺序、冷/暖与同一首文档LF/根插入/首删除，再覆盖不同位置rename。保原b3d原始结果、全部计时/预算，不能用旧EXE冒新分组。7新增完整名称均前缀`index::facts_cache::tests::`：
 - `path_leaf_scalar_plan_matches_full_binary_trie_with_prefixes_utf8_and_skips`
@@ -123,6 +125,10 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 - `exact_pack_leaf_boundary_skips_real_asset_and_oversized_document_before_next_leaf`
 - `path_leaf_planning_keeps_original_cancellation_deadline_and_rejects_unsorted_inputs`
 - `legacy_ordinal_pack_and_v13_index_keep_identity_while_current_default_rebuilds`
+
+正式六场景runner经独立复审，6组Node共116/116通过、无skip；新隔离25文件导出与导入、syntax及diff检查通过。Windows六场景仍NOT_RUN。正式六场景入口缺口已由云端补最小runner-only后继，见[配置与完整流程](tests/rust-performance-paired/source-pack-scenarios.README.md)。复用上述00d产物，runner另目录25文件导出/身份认证，不在产品clean checkout覆盖工具，不重编。各engine真实init/sync认证后cold→warm成为健康base；4变体逐engine独立clone同base，精确Git tree/blob/输入与公共project pin先认证，再保原180s产品/210s调用/原native完整墙钟和31phase。Go完整已认证records/manifest/逐fileFacts作为必要比较证据流式8MiB分片封存后，才正常回收自己的成功scratch；Rust用独立baseclone与该完整证据逐字段/顺序比较，不把整个home移到evidence。原b3d/历史失败不导入、不替样。
+
+[原配额阻塞](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6236089985)及[只读54owner清单](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6236196237)：现scratch4,612,057,341B/5GiB，余756,651,779B；原1GiB申请缺317,090,045B，非物理磁盘不足。没有已证明可安全释放的足够旧scratch，旧active/preserve/diagnostic-inputs未动。新runner以明确历史cold估计、当前健康base实际inventory及完整新index/Facts增长逐engine准入；环境quota override在首owner前拒绝，20GiB cache/5GiB scratch/2GiB free reserve保持。实际postusage检查不是事前hardcap保证，仍可能真实block；失败保原停止点与证据、不盲重跑已完成cold/warm或扩quota。
 
 ### 固定历史双Rust witness后继
 

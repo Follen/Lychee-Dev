@@ -18,6 +18,9 @@ const RUST_LAYOUTS = Object.freeze({
   v7: { key: 'facts-layout-v7-go323-public', generator: 'generator-v6', schema: 'lycheedev.source-facts.rust.v7' },
 });
 const SECTIONS = ['declarations', 'relationships', 'loads', 'headers', 'diagnostics'];
+function exactFactSections(value, label) {
+  if (!value || Array.isArray(value) || Object.keys(value).sort().join('\0') !== [...SECTIONS].sort().join('\0')) throw new Error(`Invalid exact five Facts arrays: ${label}`);
+}
 export const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
 
 function stable(value) {
@@ -107,21 +110,24 @@ export function readRustFact(home, document, rustLayout = 'v6') {
   if (sha256(signature(envelope.facts)) !== envelope.factsSHA256) {
     throw new Error(`Rust facts digest mismatch: ${document.path}`);
   }
+  exactFactSections(envelope.facts, document.path);
   for (const section of SECTIONS) if (!Array.isArray(envelope.facts[section])) {
     throw new Error(`Invalid fact array ${section}: ${document.path}`);
   }
   return {file, fileSHA256: locator ? null : sha256(raw), ...(locator ? {record: locator, recordSHA256: sha256(raw)} : {}), factsSHA256: envelope.factsSHA256, facts: envelope.facts};
 }
 
-export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v6', rustIndexFile, expectedIndexSHA256) {
+export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v6', rustIndexFile, expectedIndexSHA256, retainedGo = undefined) {
   const layout = RUST_LAYOUTS[rustLayout];
   if (!layout) throw new Error(`Unsupported Rust facts layout: ${rustLayout}`);
   const manifestFile = path.join(path.dirname(goRecords), 'manifest.json');
-  const manifestRaw = fs.readFileSync(manifestFile);
+  // The formal sequential runner supplies authenticated immutable custody streams.
+  // CLI calls use the original on-disk inputs; no configuration injects readers.
+  const manifestRaw = retainedGo?.manifestRaw ?? fs.readFileSync(manifestFile);
   const manifest = JSON.parse(manifestRaw);
   const sourceHash = crypto.createHash('sha256');
   let sourceBytes = 0;
-  const input = fs.createReadStream(goRecords);
+  const input = retainedGo?.recordsStream ?? fs.createReadStream(goRecords);
   input.on('data', chunk => { sourceHash.update(chunk); sourceBytes += chunk.length; });
   const documents = [];
   for await (const line of readline.createInterface({ input, crlfDelay: Infinity })) {
@@ -146,6 +152,7 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
     for (const field of ['repository', 'product', 'commit']) {
       if (typeof manifest.summary[field] === 'string' && index.summary?.[field] !== manifest.summary[field]) throw new Error('Rust index snapshot identity mismatch');
     }
+    if (index.documents.some((doc, i) => doc.path !== documents[i].path)) throw new Error('Rust index document order mismatch');
     rustDocuments = new Map(index.documents.map(doc => [doc.path, doc]));
     if (rustDocuments.size !== documents.length) throw new Error('Duplicate Rust index document');
     for (const document of documents) {
@@ -175,7 +182,7 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
     const goKey = sha256(`${parser}\0${mode}\0${document.sha256}`);
     const goFile = path.join(goHome, 'source/v1/facts/files', parser, `${goKey}.json`);
     const rust = readRustFact(rustHome, rustDocuments?.get(document.path) ?? document, rustLayout), rustFile = rust.file;
-    const goRaw = fs.readFileSync(goFile);
+    const goRaw = retainedGo ? retainedGo.readFact(goFile) : fs.readFileSync(goFile);
     const go = JSON.parse(goRaw);
     if (go.schema !== 'lycheedev.source-file-facts.v2'
       || go.inputSHA256 !== document.sha256 || go.mode !== mode || go.parser !== parser) {
@@ -189,6 +196,7 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
     if (offset < 0 || sha256(goText.slice(offset + marker.length, -1)) !== go.factsSHA256) {
       throw new Error(`Go facts digest mismatch: ${document.path}`);
     }
+    exactFactSections(go.facts, document.path);
     const difference = {
       path: document.path, sha256: document.sha256,
       counts: {}, delta: {}, exactRowsDiffer: [],
