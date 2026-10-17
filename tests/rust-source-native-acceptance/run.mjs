@@ -192,7 +192,7 @@ function makeIdentityVariant() {
   const declaration = {schema: 'lycheedev.project.v1', product: oracle.product}, lock = {schema: 'lycheedev.project-lock.v1', selection};
   writeFileSync(join(project, 'lycheedev.json'), JSON.stringify(declaration)); writeFileSync(join(project, 'lycheedev.lock.json'), JSON.stringify(lock));
   writeFileSync(join(out, 'identity-variant.json'), JSON.stringify({scope: 'Synthetic local descendant, not upstream product evidence', base: oracle.commit, commit, tree, note, blob, declaration, lock, commitRaw}, null, 2) + '\n');
-  invoke('variant-project-validate', ['project', 'status', '--path', project]);
+  invoke('variant-project-validate', ['project', 'status', '--path', project], {useHome: false});
   return {project, commit};
 }
 try {

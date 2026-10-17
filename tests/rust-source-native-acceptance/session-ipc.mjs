@@ -118,10 +118,10 @@ function releaseLuac(release){
  * the generated API literals before native refs opens the owner. invoke(caseId,args,options) is the
  * caller's bounded, evidence-recording CLI launcher (it supplies --home/json).
  */
-// project init is path-local in the fixed Go public contract and has no --home.
+// project init/status are path-local in the fixed public contract and have no --home.
 // All workspace-backed operations retain the explicit isolated acceptance home.
 export function acceptanceCliArgs(args, home, {useHome = true} = {}) {
-  if (!useHome) assert(args[0] === 'project' && args[1] === 'init', 'only project init omits workspace home');
+  if (!useHome) assert(args[0] === 'project' && ['init', 'status'].includes(args[1]), 'only path-local project init/status omit workspace home');
   return [...args, ...(useHome ? ['--home', home] : []), '--format', 'json'];
 }
 

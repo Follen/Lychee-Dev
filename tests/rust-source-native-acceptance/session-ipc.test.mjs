@@ -91,11 +91,24 @@ test('bootstrap project uses fixed path-local CLI contract without home while so
   assert.deepEqual(acceptanceCliArgs(args,'C:\\isolated\\home',{useHome:false}),[...args,'--format','json']);
   assert.deepEqual(acceptanceCliArgs(['source','session','status'],'C:\\isolated\\home'),
     ['source','session','status','--home','C:\\isolated\\home','--format','json']);
-  assert.throws(()=>acceptanceCliArgs(['source','refs'],'ignored',{useHome:false}),/only project init/);
+  assert.throws(()=>acceptanceCliArgs(['source','refs'],'ignored',{useHome:false}),/only path-local project init\/status/);
   const controller=readFileSync(new URL('./run.mjs',import.meta.url),'utf8');
   assert(controller.includes('acceptanceCliArgs(args, home, options)'));
   const bootstrap=readFileSync(new URL('./session-ipc.mjs',import.meta.url),'utf8');
   assert(bootstrap.includes("'--product','retail'],{useHome:false})"));
+});
+
+test('identity variant project status uses its real path-local contract without leaking home',()=>{
+  const args=['project','status','--path','C:\\isolated\\identity-variant'];
+  assert.deepEqual(acceptanceCliArgs(args,'C:\\isolated\\home',{useHome:false}),[...args,'--format','json']);
+  const contract=JSON.parse(readFileSync(new URL('../../crates/lycheedev-cli/src/commands.json',import.meta.url),'utf8'));
+  const row=contract.find(row=>row.path==='project status');
+  assert(row);assert(row.flags.includes('--path <directory>'));
+  assert(!row.flags.some(flag=>flag.startsWith('--home ')));
+  for(const path of [['source','refs'],['source','session','status'],['project','sync']])
+    assert.throws(()=>acceptanceCliArgs(path,'home',{useHome:false}),/only path-local/);
+  const controller=readFileSync(new URL('./run.mjs',import.meta.url),'utf8');
+  assert(controller.includes("invoke('variant-project-validate', ['project', 'status', '--path', project], {useHome: false})"));
 });
 
 test('all bootstrap public commands and flags exist in the fixed production contract',()=>{

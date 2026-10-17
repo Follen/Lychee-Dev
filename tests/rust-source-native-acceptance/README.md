@@ -62,6 +62,12 @@ dependency from the same authenticated runner tree. This changes no product
 budget, case, corpus, cleanup requirement or acceptance criterion. A repaired
 runner does not turn an old failed report into a pass.
 
+The identity-variant `project status --path` preflight is path-local and receives
+only `--format json`, without `--home`. Source and workspace operations still
+receive the explicit isolated home. A runner repair for this preflight may use
+the existing separately sealed-runner procedure above; record both identities
+and preserve the original failed report.
+
 ## Full Retail group
 
 The existing full-corpus controller is run again, in the same newly owned home
