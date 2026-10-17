@@ -99,7 +99,7 @@ pub struct ReturnCheck { pub function: usize, pub expression: usize, pub context
 #[derive(Clone, Debug, Serialize)]
 pub struct BranchFact { pub id:usize, pub site:Site, pub parent:Option<usize>, pub condition_sites:Vec<Site>, pub condition_facts:Vec<usize>, pub call_facts:Vec<usize>, pub write_versions:Vec<usize>, pub footprints:Vec<Value>, pub coverage_gaps:Vec<Value> }
 #[derive(Clone, Debug, Serialize)]
-pub struct GraphFacts { pub snapshot_key: String, pub snapshot_inputs: GraphSnapshotEvidence, pub snapshot_inputs_json: String, pub scenario: String, pub phase: String, pub script_load_occurrences: Vec<String>, pub values: Vec<AbstractValue>, pub functions: Vec<Function>, pub writes: Vec<WriteVersion>, pub uses: Vec<UseFact>, pub calls: Vec<CallFact>, pub copies: Vec<CopyEdge>, pub returns: Vec<ReturnCheck>, pub branches:Vec<BranchFact>, pub raw_emmy: Vec<RawEmmyEvidence>,
+pub struct GraphFacts { pub snapshot_key: String, #[serde(serialize_with="serialize_graph_snapshot")] pub snapshot_inputs: Arc<GraphSnapshotEvidence>, pub snapshot_inputs_json: SnapshotInputsJson, pub scenario: String, pub phase: String, pub script_load_occurrences: Vec<String>, pub values: Vec<AbstractValue>, pub functions: Vec<Function>, pub writes: Vec<WriteVersion>, pub uses: Vec<UseFact>, pub calls: Vec<CallFact>, pub copies: Vec<CopyEdge>, pub returns: Vec<ReturnCheck>, pub branches:Vec<BranchFact>, pub raw_emmy: Vec<RawEmmyEvidence>,
     #[serde(skip_serializing_if="Vec::is_empty")]
     pub object_views: Vec<ObjectShapeFacts>,
     #[serde(skip_serializing_if="Vec::is_empty")]
@@ -112,7 +112,11 @@ pub struct GraphFacts { pub snapshot_key: String, pub snapshot_inputs: GraphSnap
     pub xml:Option<XmlRuntimeFacts>,
 }
 
-struct Harvest { declaration_sites:BTreeMap<String,Site>, blocks: BTreeMap<String,LuaBlock>, local_reads: BTreeMap<String,String>, signatures: BTreeMap<String,Signature>, intrinsic_declarations:BTreeMap<String,String>, raw: Vec<RawEmmyEvidence> }
+fn serialize_graph_snapshot<S:serde::Serializer>(snapshot:&Arc<GraphSnapshotEvidence>,serializer:S)->std::result::Result<S::Ok,S::Error> {
+    snapshot.as_ref().serialize(serializer)
+}
+
+struct Harvest { declaration_sites:BTreeMap<String,SyntaxSite>, blocks: BTreeMap<String,LuaBlock>, local_reads: BTreeMap<SyntaxSite,SyntaxSite>, signatures: BTreeMap<String,Signature>, intrinsic_declarations:BTreeMap<String,String>, raw: Vec<RawEmmyEvidence> }
 fn harvest(analysis: &EmmyLuaAnalysis, names: &[&str],inputs:&SourceInputs,control:&OperationControl) -> Result<Harvest> {
     let mut result=Harvest { declaration_sites:BTreeMap::new(), blocks:BTreeMap::new(), local_reads:BTreeMap::new(), signatures:BTreeMap::new(), intrinsic_declarations:BTreeMap::new(), raw:vec![] };
     let mut node_count=0;
@@ -131,7 +135,7 @@ fn harvest(analysis: &EmmyLuaAnalysis, names: &[&str],inputs:&SourceInputs,contr
             if let Some(policy)=inputs.host.data.intrinsics.iter().find(|policy|policy.file==*name&&policy.start==site.start&&policy.end==site.end){result.intrinsic_declarations.insert(site.id(),policy.name.clone());}
         }}
         let facts=model.file_facts().ok_or("file facts")?;
-        for decl in &facts.decls {if decl.kind.is_local(){let site=inputs.site(name,decl.name_range);result.declaration_sites.insert(site.id(),site);}}
+        for decl in &facts.decls {if decl.kind.is_local(){let site=inputs.site(name,decl.name_range);result.declaration_sites.insert(site.id(),SyntaxSite::from_site(inputs,&site).expect("admitted declaration file"));}}
         let evidence_file:Arc<str>=Arc::from(*name);
         for node in root.descendants() {
             node_count+=1;
@@ -141,7 +145,7 @@ fn harvest(analysis: &EmmyLuaAnalysis, names: &[&str],inputs:&SourceInputs,contr
                 let site=inputs.site(name,expr.get_range());
                 let raw=model.resolve_name(expr.get_position());
                 let local=raw.as_ref().and_then(|id|facts.decl_by_id(id)).filter(|decl|decl.kind.is_local());
-                if let Some(decl)=local { result.local_reads.insert(site.id(),inputs.site(name,decl.name_range).id()); }
+                if let Some(decl)=local { result.local_reads.insert(SyntaxSite::from_site(inputs,&site).expect("admitted reference file"),SyntaxSite::from_site(inputs,&inputs.site(name,decl.name_range)).expect("admitted declaration file")); }
                 result.raw.push(RawEmmyEvidence::new(Arc::clone(&evidence_file),&site,raw));
             }
         }
@@ -266,7 +270,7 @@ impl Builder {
                 self.budget()?;
                 nodes+=1;if nodes>6000{return Err("unknown call capture footprint budget exceeded".into())}
                 let Some(name)=LuaNameExpr::cast(node)else{continue};let site=self.inputs.site(&declaration.declaration.file,name.get_range());
-                let cell=self.harvest.local_reads.get(&site.id()).map(|local|format!("local:{local}:load:{}",declaration.load_occurrence)).unwrap_or_else(||format!("global:{}",site.text(&self.inputs).expect("admitted parser Site")));
+                let cell=self.harvest.local_read(&self.inputs,&site).map(|local|format!("local:{local}:load:{}",declaration.load_occurrence)).unwrap_or_else(||format!("global:{}",site.text(&self.inputs).expect("admitted parser Site")));
                 if let Some(write)=self.cells.get(&cell){
                     let decision=&self.graph.writes[*write].decision;
                     if let Some(object)=self.object(decision){objects.push(object)}
@@ -357,7 +361,7 @@ impl Builder {
     fn local_key(site:&Site,ctx:&Context)->String { format!("local:{}:load:{}",site.id(),ctx.occurrence) }
     fn key(&self,site:&Site,ctx:&Context)->String {
         if self.native_profile { return self.native_key(site,ctx); }
-        self.harvest.local_reads.get(&site.id()).map(|id|format!("local:{id}:load:{}",ctx.occurrence)).unwrap_or_else(||format!("global:{}",site.text(&self.inputs).expect("admitted parser Site")))
+        self.harvest.local_read(&self.inputs,&site).map(|id|format!("local:{id}:load:{}",ctx.occurrence)).unwrap_or_else(||format!("global:{}",site.text(&self.inputs).expect("admitted parser Site")))
     }
     fn read(&self,key:&str,ctx:&Context)->(Decision,Vec<usize>) {
         if let Some(value)=ctx.parameters.get(key) {return(value.clone(),vec![])}
@@ -417,8 +421,8 @@ impl Builder {
             let receiver=index.get_prefix_expr().ok_or("effect_summary_receiver_missing")?;
             if !matches!(receiver,LuaExpr::NameExpr(_)){return Err("effect_summary_receiver_not_parameter_name")}
             let receiver_site=self.inputs.site(file,receiver.get_range());
-            let lexical_id=self.harvest.local_reads.get(&receiver_site.id()).ok_or("effect_summary_receiver_lexical_identity_missing")?;
-            let parameter=parameters.iter().find(|param|param.declaration.id()==*lexical_id).ok_or("effect_summary_receiver_is_not_this_function_parameter")?.clone();
+            let lexical_id=self.harvest.local_read(&self.inputs,&receiver_site).ok_or("effect_summary_receiver_lexical_identity_missing")?;
+            let parameter=parameters.iter().find(|param|param.declaration.id()==lexical_id).ok_or("effect_summary_receiver_is_not_this_function_parameter")?.clone();
             let value_site=self.inputs.site(file,values[0].get_range());
             let value=match &values[0] {
                 LuaExpr::NameExpr(_)=>EffectExpression::Name{site:value_site},
@@ -915,8 +919,8 @@ fn build_graph(prepared:&PreparedSnapshot,name:&str,snapshot_inputs:GraphSnapsho
     let phase=inputs.phase.clone();let occurrence_files=inputs.ordered.clone();let ordered:Vec<&str>=occurrence_files.iter().map(String::as_str).collect();
     control.check().map_err(|e|e.to_string())?;
     let mut unique=match &inputs.load_plan{Some(LoadPlan::Unknown(files))=>files.iter().map(String::as_str).collect(),_=>ordered.to_vec()};unique.sort();unique.dedup();
-    let snapshot_inputs_json=String::from_utf8(serialize_json(&snapshot_inputs,control,if inputs.corpus.limits.research{32<<20}else{2097152}).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
-    let snapshot_key=controlled_hash(snapshot_inputs_json.as_bytes(),control).map_err(|e|e.to_string())?;
+    let snapshot_inputs=Arc::new(snapshot_inputs);
+    let (snapshot_inputs_json,snapshot_key)=SnapshotInputsJson::new(Arc::clone(&snapshot_inputs),control,if inputs.corpus.limits.research{32<<20}else{2097152}).map_err(|e|e.to_string())?;
     let mut harvest=harvest(analysis,&unique,&inputs,control)?;
     let graph=GraphFacts{snapshot_key,snapshot_inputs,snapshot_inputs_json,scenario:name.into(),phase,script_load_occurrences:ordered.iter().enumerate().map(|(i,n)|format!("{i}:{n}")).collect(),values:vec![],functions:vec![],writes:vec![],uses:vec![],calls:vec![],copies:vec![],returns:vec![],branches:vec![],raw_emmy:std::mem::take(&mut harvest.raw),object_views:vec![],object_mutations:vec![],native_invocations:None,host_runtime:None,xml:None};
     let mut builder=Builder{inputs:inputs.clone(),control:control.clone(),native_profile,graph,harvest,cells:BTreeMap::new(),objects:vec![],bodies:vec![],heap_observation:0,object_versions:vec![],object_view_ids:BTreeMap::new(),object_slots:0,field_write_observations:BTreeMap::new(),observation_failure:None,native:NativeInvocationState::default(),xml_objects:BTreeMap::new()};

@@ -65,3 +65,15 @@ impl Serialize for RawEmmyEvidence {
         map.end()
     }
 }
+
+// The immutable lexical lookup stores original byte coordinates, not two full
+// path-bearing strings for every read. Public cell/capture identities still use
+// the original Site::id formula at the actual graph consumer.
+impl Harvest {
+    fn local_read(&self, inputs: &SourceInputs, site: &Site) -> Option<String> {
+        let site = SyntaxSite::from_site(inputs, site)?;
+        let declaration = self.local_reads.get(&site)?;
+        Some(format!("{}:{}:{}", inputs.corpus.files[declaration.file].path,
+            declaration.start, declaration.end))
+    }
+}

@@ -10,6 +10,10 @@ fn graph_move_copying_reference(prepared:&PreparedSnapshot,name:&str,snapshot_in
     let mut unique=match &inputs.load_plan{Some(LoadPlan::Unknown(files))=>files.iter().map(String::as_str).collect(),_=>ordered.to_vec()};unique.sort();unique.dedup();
     let snapshot_inputs_json=String::from_utf8(serialize_json(&snapshot_inputs,control,if inputs.corpus.limits.research{32<<20}else{2097152}).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
     let snapshot_key=controlled_hash(snapshot_inputs_json.as_bytes(),control).map_err(|e|e.to_string())?;
+    // Keep the frozen eager byte/hash path above as the independent oracle;
+    // only adapt its already materialized result to the current field type.
+    let snapshot_inputs=Arc::new(snapshot_inputs);
+    let snapshot_inputs_json=SnapshotInputsJson::from_serialized(Arc::clone(&snapshot_inputs),snapshot_inputs_json);
     let harvest=harvest(analysis,&unique,&inputs,control)?;
     let graph=GraphFacts{snapshot_key,snapshot_inputs,snapshot_inputs_json,scenario:name.into(),phase,script_load_occurrences:ordered.iter().enumerate().map(|(i,n)|format!("{i}:{n}")).collect(),values:vec![],functions:vec![],writes:vec![],uses:vec![],calls:vec![],copies:vec![],returns:vec![],branches:vec![],raw_emmy:harvest.raw.clone(),object_views:vec![],object_mutations:vec![],native_invocations:None,host_runtime:None,xml:None};
     let mut builder=Builder{inputs:inputs.clone(),control:control.clone(),native_profile,graph,harvest,cells:BTreeMap::new(),objects:vec![],bodies:vec![],heap_observation:0,object_versions:vec![],object_view_ids:BTreeMap::new(),object_slots:0,field_write_observations:BTreeMap::new(),observation_failure:None,native:NativeInvocationState::default(),xml_objects:BTreeMap::new()};

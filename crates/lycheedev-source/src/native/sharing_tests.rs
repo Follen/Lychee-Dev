@@ -170,7 +170,7 @@ fn assert_graph(graph: &Graph, c: &OperationControl, native: bool, scope: Option
         expected["validationScope"] = json!(scope);
     }
     let bytes = serde_json::to_vec(&expected).unwrap();
-    assert_eq!(serde_json::to_vec(&graph.snapshot_inputs).unwrap(), bytes);
+    assert_eq!(serde_json::to_vec(graph.snapshot_inputs.as_ref()).unwrap(), bytes);
     assert_eq!(graph.snapshot_inputs_json.as_bytes(), bytes);
     assert_eq!(graph.snapshot_key, hash(&bytes));
     assert!(Arc::ptr_eq(&graph.snapshot_inputs.admission, &i.identity));

@@ -236,3 +236,131 @@ fn packed_managed_sites_match_original_sets_for_every_admitted_syntax_identity()
         matches!(provider.call(all[0]), BindingDecision::Unavailable { reason, .. } if reason == "command.cancelled")
     );
 }
+
+// Reconstruct the former two-string lookup directly from the same public Emmy
+// resolution API. Do not derive the oracle from the new packed representation.
+fn eager_lexical_lookups(prepared: &PreparedSnapshot, names: &[&str])
+    -> (BTreeMap<String, String>, BTreeMap<String, Site>, Vec<Site>)
+{
+    let mut reads = BTreeMap::new();
+    let mut declarations = BTreeMap::new();
+    let mut sites = Vec::new();
+    for name in names {
+        let model = prepared.analysis.semantic_model(prepared.files[*name]);
+        let facts = model.file_facts().unwrap();
+        for declaration in &facts.decls {
+            if declaration.kind.is_local() {
+                let site = prepared.inputs.site(name, declaration.name_range);
+                declarations.insert(site.id(), site);
+            }
+        }
+        for node in model.syntax_tree().unwrap().get_red_root().descendants() {
+            if let Some(expression) = LuaNameExpr::cast(node) {
+                let site = prepared.inputs.site(name, expression.get_range());
+                let identity = model.resolve_name(expression.get_position());
+                if let Some(declaration) = identity.as_ref().and_then(|id| facts.decl_by_id(id))
+                    .filter(|declaration| declaration.kind.is_local())
+                {
+                    reads.insert(site.id(), prepared.inputs.site(name, declaration.name_range).id());
+                }
+                sites.push(site);
+            }
+        }
+    }
+    (reads, declarations, sites)
+}
+
+#[test]
+fn compact_lexical_lookup_preserves_all_local_capture_shadow_and_bom_identities() {
+    let c = control();
+    let source = "local captured=1\nlocal function Outer(x) local x=x; return function(y) return captured+x+y end end\nM={}\nfunction M:Run(arg) return self,Outer(arg),Unknown end\nlocal a,b=1,2\nlocal a=a+b\n";
+    let prepared = prepare(graph_fixture_inputs(&c, false, source, None), &c).unwrap();
+    let names = ["a.lua", "bom.lua"];
+    let compact = harvest(&prepared.analysis, &names, &prepared.inputs, &c).unwrap();
+    let (reads, declarations, sites) = eager_lexical_lookups(&prepared, &names);
+    assert!(!reads.is_empty());
+    assert!(sites.iter().any(|site| site.file == "bom.lua" && site.start >= 3));
+    assert!(sites.iter().any(|site| !reads.contains_key(&site.id())));
+    assert_eq!(compact.local_reads.len(), reads.len());
+    assert_eq!(compact.declaration_sites.len(), declarations.len());
+    for site in sites {
+        assert_eq!(compact.local_read(&prepared.inputs, &site).as_ref(), reads.get(&site.id()));
+    }
+    for (id, site) in declarations {
+        assert_eq!(compact.declaration_sites[&id].public(&prepared.inputs), site);
+    }
+    // Original file identity remains part of the key. Unknown paths cannot
+    // alias an admitted file even if their byte ranges happen to be identical.
+    let (site, _) = compact.local_reads.first_key_value().unwrap();
+    let mut unknown = site.public(&prepared.inputs);
+    unknown.file = "not-admitted.lua".into();
+    assert_eq!(compact.local_read(&prepared.inputs, &unknown), None);
+    // Complete graph consumers include captures, storage identities and exact
+    // caller/parameter summaries, with the frozen full-output comparison.
+    let graph = prepared.build("compact-lexical", EvaluatorProfile::Native, None, &c).unwrap();
+    assert!(!graph.native_invocations.as_ref().unwrap().capture_facts.is_empty());
+    assert_graph_move_equivalent(&prepared, &graph, true);
+}
+
+#[test]
+fn compact_lexical_lookup_keeps_last_write_without_per_read_path_heaps() {
+    let c = control();
+    let source = "local first,second=1,2\nlocal a=first+second\nlocal b=first+second\n";
+    let prepared = prepare(graph_fixture_inputs(&c, false, source, None), &c).unwrap();
+    let names = ["a.lua", "bom.lua"];
+    let mut compact = harvest(&prepared.analysis, &names, &prepared.inputs, &c).unwrap();
+    let (reads, declarations, _) = eager_lexical_lookups(&prepared, &names);
+    let removed_read_string_capacities: usize = reads.iter().map(|(key, value)| key.capacity() + value.capacity()).sum();
+    let removed_site_path_capacities: usize = declarations.values().map(|site| site.file.capacity()).sum();
+    assert!(removed_read_string_capacities > 0);
+    assert!(removed_site_path_capacities > 0);
+    // These are exact payload/owned-String bounds, not claims about allocator
+    // arenas, B-tree node overhead or process private-byte reduction.
+    assert_eq!(std::mem::size_of::<SyntaxSite>(), 16);
+    assert!(std::mem::size_of::<(SyntaxSite, SyntaxSite)>() < std::mem::size_of::<(String, String)>());
+    let (&key, &first) = compact.local_reads.first_key_value().unwrap();
+    let second = *compact.declaration_sites.values().find(|site| **site != first).unwrap();
+    let public = key.public(&prepared.inputs);
+    let mut old = reads;
+    old.insert(public.id(), second.public(&prepared.inputs).id());
+    compact.local_reads.insert(key, second);
+    assert_eq!(compact.local_read(&prepared.inputs, &public).as_ref(), old.get(&public.id()));
+    compact.local_reads.insert(key, first);
+    old.insert(public.id(), first.public(&prepared.inputs).id());
+    assert_eq!(compact.local_read(&prepared.inputs, &public).as_ref(), old.get(&public.id()));
+}
+
+#[test]
+fn repeated_research_scope_keeps_snapshot_bytes_lazy_and_releases_prior_scope() {
+    let initial = control();
+    let mut prepared = prepare(inputs(&initial, false), &initial).unwrap();
+    let program = Arc::new(crate::xml_load::Program::from_sources("Main.toc", [
+        ("Main.toc", b"a.lua\nbom.lua\n".as_slice()),
+        ("a.lua", prepared.inputs.original("a.lua").unwrap().as_bytes()),
+        ("bom.lua", prepared.inputs.original("bom.lua").unwrap().as_bytes()),
+    ], &initial).unwrap());
+    let mut expected = None;
+    let mut expected_steps = None;
+    for _ in 0..3 {
+        let current = control();
+        prepared.begin_research_request(&current).unwrap();
+        let graph = prepared.build_xml_plan("same-scope", Arc::clone(&program), None, &current).unwrap();
+        assert!(!graph.snapshot_inputs_json.is_materialized());
+        let snapshot = Arc::downgrade(&graph.snapshot_inputs);
+        let execution_identity = Arc::downgrade(&graph.inputs.identity);
+        let steps = prepared.inputs.shared_steps.load(Ordering::Relaxed);
+        if let Some(expected) = expected_steps { assert_eq!(steps, expected); }
+        else { expected_steps = Some(steps); }
+        // The public complete graph still emits the identical string and tree;
+        // serialization is its first actual string consumer.
+        let bytes = serde_json::to_vec(&graph.facts).unwrap();
+        assert!(graph.snapshot_inputs_json.is_materialized());
+        if let Some(expected) = &expected { assert_eq!(&bytes, expected); }
+        else { expected = Some(bytes); }
+        drop(graph);
+        assert!(snapshot.upgrade().is_none());
+        assert!(execution_identity.upgrade().is_none());
+        assert_eq!(Arc::strong_count(&prepared.inputs), 1);
+    }
+    assert_eq!(Arc::strong_count(&program), 1);
+}

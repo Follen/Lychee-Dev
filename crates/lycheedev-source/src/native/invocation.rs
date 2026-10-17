@@ -151,7 +151,7 @@ impl Builder {
         let frame=self.native.context_frames.get(&ctx.name).copied();
         let mut cell=match frame{Some(frame)=>format!("frame:{frame}:local:{declaration}"),None=>format!("local:{declaration}:load:{}",ctx.occurrence)};
         if let Some(activation)=self.native.contexts.get(&ctx.name).and_then(|state|state.activations.get(declaration)){cell.push_str(&format!(":activation:{activation}"));}
-        if let Some(site)=self.harvest.declaration_sites.get(declaration){self.native.typed_cells.borrow_mut().entry(cell.clone()).or_insert_with(||StorageOwner::Local{declaration:site.clone(),load_occurrence:ctx.occurrence,frame});}
+        if let Some(site)=self.harvest.declaration_sites.get(declaration){self.native.typed_cells.borrow_mut().entry(cell.clone()).or_insert_with(||StorageOwner::Local{declaration:site.public(&self.inputs),load_occurrence:ctx.occurrence,frame});}
         cell
     }
     fn native_cell_for_decl(&self,declaration:&str,ctx:&Context)->String {
@@ -160,7 +160,7 @@ impl Builder {
         self.native_local_key(declaration,ctx)
     }
     fn native_key(&self,site:&Site,ctx:&Context)->String {
-        if let Some(declaration)=self.harvest.local_reads.get(&site.id()){return self.native_cell_for_decl(declaration,ctx)}
+        if let Some(declaration)=self.harvest.local_read(&self.inputs,&site){return self.native_cell_for_decl(&declaration,ctx)}
         if site.text(&self.inputs).expect("admitted parser Site")=="self" && let Some(frame)=self.native.context_frames.get(&ctx.name)
             && let Some(cell)=&self.native.facts.frames[*frame].implicit_self{return cell.clone()}
         let name=site.text(&self.inputs).expect("admitted parser Site").to_string();let cell=format!("global:{name}");
@@ -227,9 +227,9 @@ impl Builder {
             self.budget()?;
             let Some(expr)=LuaNameExpr::cast(node)else{continue};
             let site=self.inputs.site(&ctx.file,expr.get_range());
-            let Some(lexical)=self.harvest.local_reads.get(&site.id())else{continue};
-            if Self::native_definition_contains(&closure_site,lexical)||self_parameter.as_ref().is_some_and(|site|site.id()==*lexical){continue}
-            captures.insert(lexical.clone(),self.native_cell_for_decl(lexical,ctx));
+            let Some(lexical)=self.harvest.local_read(&self.inputs,&site)else{continue};
+            if Self::native_definition_contains(&closure_site,&lexical)||self_parameter.as_ref().is_some_and(|site|site.id()==lexical){continue}
+            let cell=self.native_cell_for_decl(&lexical,ctx);captures.insert(lexical,cell);
             if captures.len()>INVOCATION_CAPTURE_LIMIT{return Err("native closure capture budget exceeded".into())}
         }
         if !module_binding{self.native.capture_edges+=captures.len();}
@@ -237,7 +237,7 @@ impl Builder {
         let decision=self.value(&declaration,ValueKind::Function(function));
         let Decision::Bound(value)=decision else{unreachable!()};
         let id=self.native.facts.closures.len();
-        for (declaration,cell) in &captures {let site=self.harvest.declaration_sites.get(declaration).ok_or("capture declaration source identity missing")?;self.native.facts.capture_facts.push(CaptureFact{closure:id,declaration:site.clone(),cell:cell.clone(),creation_context:ctx.name.clone()});}
+        for (declaration,cell) in &captures {let site=self.harvest.declaration_sites.get(declaration).ok_or("capture declaration source identity missing")?;self.native.facts.capture_facts.push(CaptureFact{closure:id,declaration:site.public(&self.inputs),cell:cell.clone(),creation_context:ctx.name.clone()});}
         self.native.facts.closures.push(NativeClosureInstance{id,function,value,creation_context:ctx.name.clone(),load_occurrence:ctx.occurrence,captures,method,self_parameter});
         self.native.closure_values.insert(value,id);
         Ok(Decision::Bound(value))

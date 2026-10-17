@@ -6,7 +6,7 @@ fn assert_graph_move_equivalent(prepared: &PreparedSnapshot, seed: &Graph, nativ
     let candidate = build_graph(
         prepared,
         &seed.scenario,
-        seed.snapshot_inputs.clone(),
+        seed.snapshot_inputs.as_ref().clone(),
         native,
         seed.inputs.clone(),
     )
@@ -15,7 +15,7 @@ fn assert_graph_move_equivalent(prepared: &PreparedSnapshot, seed: &Graph, nativ
     let reference = graph_move_copying_reference(
         prepared,
         &seed.scenario,
-        seed.snapshot_inputs.clone(),
+        seed.snapshot_inputs.as_ref().clone(),
         native,
         seed.inputs.clone(),
     )
@@ -67,7 +67,7 @@ fn assert_graph_move_cancelled(prepared: &PreparedSnapshot, seed: &Graph, native
         let result = builder(
             prepared,
             &seed.scenario,
-            seed.snapshot_inputs.clone(),
+            seed.snapshot_inputs.as_ref().clone(),
             native,
             seed.inputs.clone(),
         );

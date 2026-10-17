@@ -171,7 +171,7 @@ impl SourceInputs {
             "luac":self.corpus.luac,"syntaxCheck":{"state":"pending","requires":"trusted checker result bound to exact original source and executable bytes"},
             "limits":self.corpus.limits,"fixedGraphLimits":fixed_graph_limits(),"sourceMapProfile":self.source_map_profile(),"sourceExecution":false,"configExecution":false,
             "control":{"deadline":"caller-owned-total-operation","stages":"same-admission-deadline-and-token-required","constructionSteps":"shared-by-all-prepares-and-execution-views-of-one-admission","synchronousEngine":"external-owned-process-hard-deadline-required"}}));
-        self.identity=Arc::new(SourceIdentityEvidence{common:Arc::new(common),execution:serde_json::Map::new()});
+        self.identity=Arc::new(SourceIdentityEvidence{common:Arc::new(common),execution:serde_json::Map::new(),xml:None,xml_value:std::sync::OnceLock::new()});
         let effective_json=serde_json::to_string(&config).map_err(|_|input_error("effective Emmy config serialization"))?;
         self.graph_common=Arc::new(evidence_fields(json!({"schema":"lycheedev.native-context-snapshot-inputs.v2",
             "engine":{"baseCommit":ENGINE_COMMIT,"baseArchiveSHA256":ENGINE_ARCHIVE_SHA256,"patchSHA256":patch},
@@ -187,12 +187,11 @@ impl SourceInputs {
             "rules":{"native":NATIVE_RULES,"legacy":RULES_VERSION,"capabilityProfile":NATIVE_PROFILE,"dependencyLockSHA256":hash(DEPENDENCY_LOCK)}});
         if let Some(plan)=&self.load_plan{execution["loadPlan"]=json!(plan);execution["rules"]["explicitExecution"]=json!(ENTRY_RULES);}
         if let Some(entry)=&self.entry{execution["explicitEntry"]=json!(entry);}
-        if let Some(program)=&self.xml{execution["xmlProgram"]=json!(program.as_ref());}
         if !self.host.data.bindings.is_empty(){execution["rules"]["hostRuntime"]=host_runtime_profile_for(self.entry.is_some(),self.corpus.limits.research);}
         if self.corpus.limits.flow.is_some(){execution["rules"]["flow"]=json!(FLOW_RULES);}
-        self.identity=Arc::new(SourceIdentityEvidence{common:self.identity.common.clone(),execution:evidence_fields(execution)});
-        let bytes=serialize_json(self.identity.as_ref(),control,if self.corpus.limits.research{32<<20}else{2097152})?;
-        self.identity_sha256=controlled_hash(&bytes,control)?;Ok(())
+        self.identity=Arc::new(SourceIdentityEvidence{common:self.identity.common.clone(),execution:evidence_fields(execution),xml:self.xml.clone(),xml_value:std::sync::OnceLock::new()});
+        let (sha256,_)=serialize_json_hash(self.identity.as_ref(),control,if self.corpus.limits.research{32<<20}else{2097152})?;
+        self.identity_sha256=sha256;Ok(())
     }
     pub fn source_map_profile(&self)->&'static str {if self.corpus.files.iter().all(|file|file.prefix==0){SOURCE_MAP_PROFILE}else{"verified-per-file-identity-or-utf8-bom-prefix-v1"}}
     pub fn identity(&self)->&SourceIdentityEvidence{&self.identity}

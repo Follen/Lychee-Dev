@@ -116,7 +116,7 @@ impl Builder {
         for instance in &self.native.facts.closures {
             self.inputs.charge(1).map_err(|error|error.to_string())?;
             let function=&self.graph.functions[instance.function];
-            let syntax=*prepared.closures.get(&function.closure.id()).ok_or("entry closure source identity missing")?;
+            let syntax=prepared.closure_syntax(&function.closure).ok_or("entry closure source identity missing")?;
             let candidate=prepared.entry_candidate(&function.closure.file,syntax).map_err(|error|error.to_string())?;
             if candidate.id==request.candidate && request.load_occurrence.is_none_or(|load|load==instance.load_occurrence)
                 && request.creation_context.as_ref().is_none_or(|context|context==&instance.creation_context){candidates.push(instance.id);}

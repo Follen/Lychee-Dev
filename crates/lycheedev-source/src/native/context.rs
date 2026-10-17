@@ -7,6 +7,9 @@ mod managed_sites;
 #[cfg(test)]
 #[path = "expression_identity_tests.rs"]
 mod expression_identity_tests;
+#[cfg(test)]
+#[path = "retained_site_identity_tests.rs"]
+mod retained_site_identity_tests;
 
 use emmylua_code_analysis::{FileId, SemanticId};
 use emmylua_parser::LuaSyntaxId;
@@ -149,10 +152,12 @@ pub struct PreparedSnapshot {
     // Exact original-byte lookups only: one packed sorted range index per file.
     // File IDs and B-tree nodes are not repeated for every expression.
     expressions: BTreeMap<FileId, expression_index::ExpressionIndex<LuaSyntaxId>>,
-    closures: BTreeMap<String, LuaSyntaxId>,
+    // Paths are owned by SourceInputs. These exact original-byte keys retain
+    // only the admitted file ordinal and range, never another Site::id string.
+    closures: BTreeMap<SyntaxSite, LuaSyntaxId>,
     entry_catalog: Vec<EntryCandidate>,
     original_lines: BTreeMap<FileId, original_lines::OriginalLines>,
-    parameters: BTreeMap<String, SemanticId>,
+    parameters: BTreeMap<SyntaxSite, SemanticId>,
     managed_sites: Arc<managed_sites::ManagedSites>,
 }
 impl PreparedSnapshot {
@@ -252,7 +257,13 @@ impl PreparedSnapshot {
                 }
                 if let Some(closure) = LuaClosureExpr::cast(node) {
                     input.closures.insert(
-                        input.inputs.site(name, closure.get_range()).id(),
+                        SyntaxSite::at(
+                            file_index,
+                            input
+                                .inputs
+                                .original_range(name, closure.get_range())
+                                .expect("admitted parser range"),
+                        ),
                         closure.get_syntax_id(),
                     );
                     input.entry_catalog.push(
@@ -276,7 +287,13 @@ impl PreparedSnapshot {
                 control.check().map_err(|e| e.to_string())?;
                 if matches!(declaration.kind, emmylua_code_analysis::DeclKind::Param) {
                     input.parameters.insert(
-                        input.inputs.site(name, declaration.name_range).id(),
+                        SyntaxSite::at(
+                            file_index,
+                            input
+                                .inputs
+                                .original_range(name, declaration.name_range)
+                                .expect("admitted parser range"),
+                        ),
                         declaration.id.clone(),
                     );
                 }
@@ -309,6 +326,15 @@ impl PreparedSnapshot {
         let file_id = *self.files.get(&site.file)?;
         let syntax = *self.expressions.get(&file_id)?.get(site.start, site.end)?;
         Some(BindingSite { file_id, syntax })
+    }
+    fn closure_syntax(&self, site: &Site) -> Option<LuaSyntaxId> {
+        self.closures
+            .get(&SyntaxSite::from_site(&self.inputs, site)?)
+            .copied()
+    }
+    fn parameter_identity(&self, site: &Site) -> Option<&SemanticId> {
+        self.parameters
+            .get(&SyntaxSite::from_site(&self.inputs, site)?)
     }
     fn graph_inner(
         &self,
@@ -1066,9 +1092,8 @@ impl PreparedSnapshot {
                         let function = &graph.functions[*function];
                         SelectedValue::Function(FunctionRef {
                             file_id: self.files[&function.closure.file],
-                            closure: *self
-                                .closures
-                                .get(&function.closure.id())
+                            closure: self
+                                .closure_syntax(&function.closure)
                                 .ok_or("closure identity")?,
                             declaration: None,
                         })
@@ -1093,8 +1118,7 @@ impl PreparedSnapshot {
                         SelectedValue::Expression(self.binding_site(origin)?)
                     }
                     ValueKind::NativeParameter(site) => SelectedValue::Parameter(
-                        self.parameters
-                            .get(&site.id())
+                        self.parameter_identity(site)
                             .ok_or("formal parameter identity")?
                             .clone(),
                     ),

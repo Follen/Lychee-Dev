@@ -309,3 +309,41 @@ fn require_same_control(
     }
     Ok(())
 }
+
+// Hash-only identity consumers must not retain a serialized copy of the XML
+// tree. Keep the same writes, byte ceiling and error mapping as serialize_json.
+struct ControlledHashWriter<'a> {
+    control: &'a OperationControl,
+    hasher: Sha256,
+    bytes: usize,
+    limit: usize,
+}
+impl Write for ControlledHashWriter<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.control.check().map_err(std::io::Error::other)?;
+        let total = self.bytes.checked_add(bytes.len()).filter(|total| *total <= self.limit)
+            .ok_or_else(|| std::io::Error::other("native serialized output byte budget exceeded"))?;
+        for chunk in bytes.chunks(16384) {
+            self.control.check().map_err(std::io::Error::other)?;
+            self.hasher.update(chunk);
+        }
+        self.bytes = total;
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.control.check().map_err(std::io::Error::other)
+    }
+}
+fn serialize_json_hash<T: Serialize>(value: &T, control: &OperationControl, limit: usize) -> lycheedev_core::Result<(String, usize)> {
+    control.check()?;
+    if limit == 0 || limit > 32 << 20 {
+        return Err(input_error("serialization limit exceeds admitted ceiling"));
+    }
+    let mut writer = ControlledHashWriter { control, hasher: Sha256::new(), bytes: 0, limit };
+    let result = serde_json::to_writer(&mut writer, value);
+    control.check()?;
+    result.map_err(|error| ToolkitError::new("source.native_output", error.to_string(), 5))?;
+    let digest = format!("{:x}", writer.hasher.finalize());
+    control.check()?;
+    Ok((digest, writer.bytes))
+}
