@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 //! Unified native lifecycle, bounded route ledger and independent static locator.
+// Reuse the authenticated integration fixture from the opt-in unit benchmark.
+#[cfg(test)]
+extern crate self as lycheedev_live;
 pub mod binding;
 pub mod go_mailbox_v1;
 pub mod host;

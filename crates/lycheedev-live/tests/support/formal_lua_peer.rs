@@ -59,7 +59,9 @@ impl OwnedPeer {
         inputs.verify();
         let mut command = Command::new(&inputs.lua);
         command
-            .arg(fixture::lua_path(&inputs.fixture.join("tests/protocol/slot_server.lua"))?)
+            .arg(fixture::lua_path(
+                &inputs.fixture.join("tests/protocol/slot_server.lua"),
+            )?)
             .arg(fixture::lua_path(&inputs.fixture.join("addon"))?)
             .arg(fixture::lua_path(directory)?)
             .arg(if fault == "reload_bind" { "2" } else { "1" })
@@ -361,6 +363,14 @@ pub struct Peer {
     pub input_samples: Vec<InputObservation>,
     millis: i64,
     pub release_checks: usize,
+    // Disabled for all original formal9 cases; no production instrumentation.
+    performance_bytes: Option<usize>,
+    pub exchange_wall_nanos: u64,
+    pub exchange_calls: usize,
+    pub record_read_bytes: usize,
+    pub record_decode_calls: usize,
+    pub record_decode_wall_nanos: u64,
+    pub record_payload_copy_bytes: usize,
 }
 impl Peer {
     pub fn start(
@@ -382,7 +392,26 @@ impl Peer {
             input_samples: Vec::new(),
             millis: 0,
             release_checks: 0,
+            performance_bytes: None,
+            exchange_wall_nanos: 0,
+            exchange_calls: 0,
+            record_read_bytes: 0,
+            record_decode_calls: 0,
+            record_decode_wall_nanos: 0,
+            record_payload_copy_bytes: 0,
         }
+    }
+    pub fn start_performance(
+        inputs: &Inputs,
+        directory: &Path,
+        paths: ChannelPaths,
+        bytes: usize,
+        control: &OperationControl,
+    ) -> Self {
+        assert!(fixture::PERFORMANCE_RESULT_STRING_BYTES.contains(&bytes));
+        let mut peer = Self::start(inputs, directory, paths, "", control);
+        peer.performance_bytes = Some(bytes);
+        peer
     }
     pub fn owner(&self) -> PeerOwner {
         PeerOwner(Rc::clone(&self.process))
@@ -441,10 +470,17 @@ impl Peer {
         }
         let path = fixture::lua_path(&payload).map_err(external)?;
         self.sends.push(envelope.clone());
-        self.process
+        let started = self.performance_bytes.map(|_| Instant::now());
+        let exchanged = self
+            .process
             .borrow()
             .exchange(format!("{}|{path}\n", envelope.index).into_bytes())
-            .map_err(external)?;
+            .map_err(external);
+        if let Some(started) = started {
+            self.exchange_wall_nanos += u64::try_from(started.elapsed().as_nanos()).unwrap();
+            self.exchange_calls += 1;
+        }
+        exchanged?;
         if self.fault == envelope.action {
             self.fault.clear();
             return Err(external("injected host death after input"));
@@ -489,7 +525,20 @@ impl RecordReader for Peer {
             }
             // The actual production codec/correlator qualifies retained stale
             // records. No test code constructs a receipt or result payload.
-            let Ok(record) = decode(&bytes) else {
+            let started = self.performance_bytes.map(|_| Instant::now());
+            let decoded = decode(&bytes);
+            if let Some(started) = started {
+                self.record_decode_wall_nanos +=
+                    u64::try_from(started.elapsed().as_nanos()).unwrap();
+                self.record_read_bytes += bytes.len();
+                self.record_decode_calls += 1;
+                if let Ok(record) = &decoded {
+                    // Production mailbox::decode copies this exact payload to
+                    // its owned Vec, even if selector qualification rejects it.
+                    self.record_payload_copy_bytes += record.payload.len();
+                }
+            }
+            let Ok(record) = decoded else {
                 continue;
             };
             if !record.contract().is_ok_and(|r| selector.matches(&r.header)) {
@@ -523,6 +572,9 @@ impl Backend for Peer {
         check_control(control)?;
         if envelope.action == "prepare"
             && !matches!(envelope.code.as_bytes(), bytes if bytes == CODE.as_bytes() || bytes == BROKEN_CODE.as_bytes())
+            && !self.performance_bytes.is_some_and(|bytes| {
+                envelope.code.as_bytes() == fixture::performance_code(bytes).as_bytes()
+            })
         {
             return Err(external("fixture source not in fixed Go test"));
         }

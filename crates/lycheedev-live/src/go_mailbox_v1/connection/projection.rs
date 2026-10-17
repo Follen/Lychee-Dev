@@ -231,3 +231,7 @@ fn present_metadata(
 #[cfg(test)]
 #[path = "projection_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "offline_performance_tests.rs"]
+mod offline_performance;

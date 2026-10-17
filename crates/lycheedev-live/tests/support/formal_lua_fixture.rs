@@ -28,6 +28,18 @@ const MANIFEST: &[u8] =
 pub const CODE: &str = "return { message = \"荔枝\\n\\000123\", quoted = [=[x\\y]=] }";
 pub const BROKEN_CODE: &str = "return { broken =";
 
+// A closed test-only input set, never arbitrary caller-supplied Lua. These
+// fixtures execute in the authenticated offline Lua peer, never in a client.
+pub const PERFORMANCE_RESULT_STRING_BYTES: [usize; 3] = [256, 16384, 131072];
+pub const PERFORMANCE_HISTORY_EVENTS: [usize; 3] = [1, 255, 256];
+pub const PERFORMANCE_REPEATS: usize = 3;
+pub fn performance_code(bytes: usize) -> String {
+    assert!(PERFORMANCE_RESULT_STRING_BYTES.contains(&bytes));
+    format!(
+        "return {{ message = \"荔枝\\n\\000123\", quoted = [=[x\\y]=], payload = string.rep(\"x\", {bytes}) }}"
+    )
+}
+
 pub fn ordinary(path: &Path) {
     for ancestor in path.ancestors() {
         let metadata = fs::symlink_metadata(ancestor).expect("input path must exist");
@@ -292,6 +304,16 @@ impl Inputs {
         ));
         let root = self.cases.join(name);
         fs::create_dir(&root).expect("exclusive case directory, no stale fixture reuse");
+        Case::new(root)
+    }
+    pub fn performance_case(&self, bytes: usize, events: usize, repeat: usize) -> Case {
+        assert!(PERFORMANCE_RESULT_STRING_BYTES.contains(&bytes));
+        assert!(PERFORMANCE_HISTORY_EVENTS.contains(&events));
+        assert!(repeat < PERFORMANCE_REPEATS);
+        let root = self
+            .cases
+            .join(format!("string-{bytes}-events-{events}-repeat-{repeat}"));
+        fs::create_dir(&root).expect("exclusive performance fixture, no stale reuse");
         Case::new(root)
     }
 }

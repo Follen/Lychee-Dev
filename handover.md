@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 13:01 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`b3d24460c6586926314a0ed9e76e7e624ec6c014`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 13:24 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`e0215fb5955abe32fd85d20bd177e90d96b57e08`（e253生产与v4真实结果已保存）。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -40,6 +40,16 @@ e734已保存四个真实消费者边界，详细设计见 [DESIGN](DESIGN.md#wh
 Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共同占用原 retained 额度；不把所有模块强行并发。Core/Data 现有所有权与单堆 SQL 保留，Live 输入状态仍串行。成熟库按实际能力、成本、许可与升级验证选用，不为架构名义另造空 crate 或通用调度框架。
 
 ## 3. 当前实际验证与证据
+
+### 当前 Live 离线量级入口（尚未实跑）
+
+新增独立 opt-in ignored 库测试与[正式 runner](tests/rust-performance-paired/live.README.md)，复用固定Go323 Lua peer/113文件认证与真实Driver、codec、durable journal、owned projection；原9桥入口不改。结果字符串256/16384/131072字节×原journal 1/255/256事件×3独立fixture共27样本，实际BODY长度另记。真实Instant覆盖setup、checkpoint、Driver、校验和checked收尾；互斥段+余量加回总wall，Lua交换与重复record解码嵌套在backend，不能再叠加或称游戏延迟。复制字节/容量有实际代码证据，allocator总数/RSS仍null。没有可比Go host时标，不能报Go速度比或B06验收。
+
+独立静态审已纠正disconnect与service.closed不同层级、原close失败被空二次close遮盖、wrapper墙钟误命名三点，复核无剩余确认缺陷。无消费者的CLI artifact门禁已移除，只构建本次优化库测试EXE并认证其真实source/receipt/runtime，不重建整CLI。新Node32+原桥controller24=56/56已实际通过，rustfmt解析通过；Rust编译、27样本及量级结论仍NOT_RUN。唯一测试队列待本批固定SHA后执行，不能拿合成Node计时输入当性能结果。
+
+### Data 哈希生命周期筛选入口（尚未实跑）
+
+保原example的1/16/64MiB整片RustCrypto/CNG比较和历史64MiB负结果；另加认证44B Root与17MiB payload、64KiB增量及fused SHA256/MD5。payload真实272次update，Root独立1次，合计273不拼成一个消息。三个现RustCrypto模式分别测clone-finalize、consuming finalize、fused完整new/update/clone/finalize/drop；六次正反序迭代全部保留，完整hash和向量先验，实际CPU仅原root进程总体。CNG现安全入口只有整片生命周期，明确不伪造增量等价，不加新依赖/FFI。仅构建原Windows example；没有整CLI构建或生产哈希替换。详见[专用说明](tests/rust-performance-paired/md5-benchmark.README.md)。Node71/71已由作者与整合者实际通过，Rustfmt仅解析；独立审发现的Root错误分支checked close与准备期固定fixture前置边界已修。新Windows编译/结果尚未取得，不能将21ms CKey子段视为可全部省去或宣称达到性能目标。
 
 ### 4a1 三模块优化前置与两项测试修订
 
