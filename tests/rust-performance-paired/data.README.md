@@ -679,8 +679,8 @@ Use the existing `--data-phase-profile` command with a newly matched v4 product;
 old b3d v3 measurements cannot be relabeled as v4. Compare the two new seal
 spans and unchanged full native time only within their real run. The original
 four-call v3 `stage_seal=30.570ms` does not reveal the private/final split and is
-not a predicted saving. Matching Windows regression and product measurements
-are pending for this candidate.
+not a predicted saving. The e253 Windows regressions passed (PR14 comment 6233947994); matching
+optimized single-pair measurements also completed (PR14 comments 6234095130 and 6234117922): 48 CLI calls / 24 rows equivalent with valid v4 profiles and 14 owners reclaimed. This is not 20-pair acceptance, and none of these 24 rows met Rust ≤ 30% of Go.
 
 Focused verification uses the existing controlled Cargo entry, after the normal
 workspace all-target check:
@@ -699,6 +699,7 @@ cases, five Core failure/stop/cleanup cases and two Data profile cases. The
 compile-fail publication example is separate from those twelve. Historical
 collision, corruption, fresh/reused publication and budget tests remain in the
 selected full groups. The resource selector includes overlap with profile
-consumers, so do not add all group counts as independent coverage. Cloud Node
-31/31 and source parsing passed; Rust and the doc example remain not_run until
-the fixed candidate is actually tested.
+consumers, so do not add all group counts as independent coverage. Cloud Node31/31 and source parsing passed. Fixed e253 then passed all-targets,
+Windows staged28, Core staged24, Data phase10/resource37, doc1 and Node31 on
+the real Windows test host; all twelve new tests were observed once. Group
+coverage overlaps and is not summed as independent tests. The matching v4 single-pair measurement subsequently completed. Cold BLTE total was 201.3286ms, private readiness 0.002ms across two calls and final durable sealing 11.711ms across two calls. Preserve full native timing and all historical results; these single-run figures do not establish causal savings or repeated acceptance.

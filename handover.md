@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 12:18 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`b3d24460c6586926314a0ed9e76e7e624ec6c014`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 13:01 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`b3d24460c6586926314a0ed9e76e7e624ec6c014`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -91,7 +91,7 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 已实现独立PrivateSpool，限制为同命令临时原handle，不能publish/replace/Deref/取inner；完成写入后只读与checked discard，不请求私有sync。最终shard stage原sync_all、三次内容读/哈希/EOF检查、业务capture独立durable事务与原控制/预算保持。显式内部差异：仅原私有sync会观察到的错误不再请求，实际write/read/seek/finalsync/close错误保全，不能宣称所有错误时序完全相同。无新FFI/unsafe/全body分配，无跨命令恢复/后台推迟成本。
 
-v4把原stage_seal拆为private_spool_read_ready/final_stage_seal，保11业务段/10detail及v1–v3严格reader；已逐字复读历史96份profile（48v1、24v2、24v3）。12新Rust与compile-fail示例已写并独立静态复核无确认缺陷，尚NOT_RUN。11Rust文件rustfmt解析过，Node31/31由作者及协调者实际各通过。后继按[正式Data说明](tests/rust-performance-paired/data.README.md#private-spool-and-final-seal-diagnostic-scopes-v4)全相关组验证，通过后只构建一次匹配优化产物再作同run实际诊断；原30.570ms四次seal总数不能预报可省一半或全部，完整elapsed/内存目标仍未验收。
+v4把原stage_seal拆为private_spool_read_ready/final_stage_seal，保11业务段/10detail及v1–v3严格reader；已逐字复读历史96份profile（48v1、24v2、24v3）。[e253真实前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6233947994)alltargets通过，Windows staged28/0/0、Core staged24/0/0、Data phase10/0/0与resource37/0/0、compile-fail doc1/0/0单列；12新增逐名各一次（Win5/Core5/Data2），Node31/0/0、7owner回收，组间覆盖重叠不累加。独立静态复核无确认缺陷，11Rust解析亦过。[匹配release/assembly](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234058245)已成功并回收，EXE 44,704,256B、SHA `ad2d17fe4a1431ee3cadfd18235ceb8df6ab35d55dc339be02993c091cff3aa2`；[v4主报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234095130)及[终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234117922)48CLI/24冷暖行全等价、计时/profile有效、14owner回收。48内存均sampled_successful_run，仍为采样下界而非完整峰保证。26段812路径/626唯一blob共17,662,793B认证，24行互斥账加回原T。cold BLTE T201.3286ms、warm123.2666ms；同row publisher83.255ms=三pass61.959ms（35.668/15.822/10.469）+私有read-ready0.002ms/2次+最终durable seal11.711ms/2次+其它9.583ms。CKey21.002ms在source pass内，不再次加。warm两cacheverify35.395ms，无publisher。图像三capture冷32.320–40.024ms/暖30.893–33.397ms；24行没有≤0.30。相较b3d单次cold228.0321ms有端到端下降观察，但条件未控且只有一对，不能宣称因果节省或20对达标。本批按[正式Data说明](tests/rust-performance-paired/data.README.md#private-spool-and-final-seal-diagnostic-scopes-v4)验证和一次匹配构建已完成；原30.570ms四次seal历史合计不重标，完整elapsed/内存目标仍未验收。
 
 ### 8cab 同run性能诊断终态
 
