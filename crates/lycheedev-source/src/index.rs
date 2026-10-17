@@ -1,4 +1,6 @@
 mod facts_cache;
+#[cfg(test)]
+mod facts_decode_tests;
 mod facts_pipeline;
 mod original_cache;
 mod persistence_wire;
@@ -517,11 +519,13 @@ fn document_facts_profiled(
         let envelope = cache_owner
             .read(key, control)?
             .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok());
-        if let Some(envelope) = envelope
+        if let Some(mut envelope) = envelope
             && envelope["schema"] == "lycheedev.source-facts.rust.v11"
             && envelope["inputSHA256"] == sha256
             && envelope["factsSHA256"] == storage::sha256(&serde_json::to_vec(&envelope["facts"])?)
-            && let Ok(parsed) = serde_json::from_value(envelope["facts"].clone())
+            && let Ok(parsed) = serde_json::from_value(
+                envelope.get_mut("facts").map(Value::take).unwrap_or(Value::Null),
+            )
         {
             control.check()?;
             return Ok((parsed, true));
@@ -599,11 +603,13 @@ fn encode_facts(parsed: &Facts, sha256: &str, profile: Option<&Profile>) -> Resu
 }
 fn decode_facts(raw: &[u8], sha256: &str, control: &lycheedev_core::control::OperationControl) -> Result<Option<Facts>> {
     let envelope = serde_json::from_slice::<Value>(raw).ok();
-    if let Some(envelope) = envelope
+    if let Some(mut envelope) = envelope
         && envelope["schema"] == "lycheedev.source-facts.rust.v11"
         && envelope["inputSHA256"] == sha256
         && envelope["factsSHA256"] == storage::sha256(&serde_json::to_vec(&envelope["facts"])?)
-        && let Ok(parsed) = serde_json::from_value(envelope["facts"].clone())
+        && let Ok(parsed) = serde_json::from_value(
+            envelope.get_mut("facts").map(Value::take).unwrap_or(Value::Null),
+        )
     {
         control.check()?;
         return Ok(Some(parsed));

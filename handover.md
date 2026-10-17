@@ -2,6 +2,12 @@
 
 更新：2026-10-17 20:53 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `31a873a677e355f39b54ea5635ac22135c271904` 六fresh场景全Facts/字段/重复/顺序/共同summary等价，完整实际读取证据归档核过后cleanup。冷4.315s、暖0.387s、四变体1.269–1.281s；六个Rust/Go比值0.435–0.682，均未达≤0.30，仍是单组诊断。完整性能与最终五阶段循环审计未完成。
 
+### 当前未测候选：认证Facts子树所有权转移
+
+默认loose与pack两处在原schema/input/canonical FactsSHA认证完成后，用get_mut/map(Value::take)/unwrap_or(Null)替代整子树clone，再进入原typed反序列化。缺key不插入新null；两处原控制检查、miss回退、pack外层完整性与checked-close次序不动，不合并helper或更换缓存布局。只减少重复所有权树，仍完整解析/验证/哈希，不把约480ms FactsRead全部称可节省。
+
+新增正式9项：`index::facts_decode_tests::take_facts_*`八项和`index::facts_cache::tests::take_facts_packed_inner_validation_keeps_outer_integrity_and_exact_recovery`，覆盖历史clone全bytes、五数组/Unicode/可选/重复/深unknown/数值、缺null/坏类型、取消/过期、真实loose/pack/legacy默认消费者与外层认证仍成立的内部损坏恢复。rustfmt解析、diff检查和独立静态审阅通过，Rust/业务/性能NOT_RUN。下一固定批alltargets→完整index（9新逐名）及Facts/Go104→唯一匹配release/assembly→完整fresh六场景，原31a实测不重标。
+
 ### 最新实测：31a借用canonical序列化完整六场景
 
 [前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6240462842) alltargets通过，index107/0/0含10新增逐名，facts48/0/0；155主Rust测试不重复加新增、helper或Go104输入。固定Go104严格等价，受影响Node单项1/0/0；完整Node沿ba0原304pass/2文件symlink创建EPERM环境skip，不称31a重跑306或负例通过。

@@ -358,3 +358,23 @@ including real cold/warm persisted blobs and downstream failure contracts.
 Static review is not execution; default-stack Windows tests and matched end-to-end
 measurement remain required. A reduction may also affect profile_other because
 the old DOM was dropped outside IndexSerialize; judge complete native wall.
+
+
+#### Authenticated Facts ownership transfer
+
+After the unchanged envelope schema, input SHA and canonical whole-Facts digest
+checks, both default loose and packed decode consumers move the existing Value
+subtree into typed Facts rather than cloning it. get_mut/map(Value::take) leaves
+missing keys absent and supplies the same Null miss value without inserting a key.
+Keep both original call-site control checkpoints and fallback paths; do not merge
+them into a helper that adds a miss-path check before parsing. Packed outer
+header/body verification and checked reader closing remain unchanged.
+
+This removes only the authenticated subtree clone. JSON parsing, canonical hash
+serialization, typed vector allocations and full reads remain. The entire
+FactsRead span is not a savings estimate. Nine formal regressions retain clone
+reference bytes, all five arrays, Unicode/optionals/duplicates, deep unknown fields,
+number spellings, missing/null/malformed inputs, cancellation/expiry, real loose
+and pack/legacy consumers, and inner corruption with a valid outer checksum.
+Cache version/layout and original bytes do not change. Windows execution and
+matched end-to-end measurement of this slice are pending.

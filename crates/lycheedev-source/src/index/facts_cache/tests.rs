@@ -318,6 +318,105 @@ fn corrupt_record_keys_lengths_hashes_and_locator_ranges_are_misses() {
     }
 }
 #[test]
+fn take_facts_packed_inner_validation_keeps_outer_integrity_and_exact_recovery() {
+    use serde_json::{Value, json};
+
+    let fixture = Fixture::new();
+    let raw = files(1);
+    let pin = fixture.pin(&raw);
+    let control = OperationControl::default();
+    let original_index = index::build_uncached(&fixture.home, &pin, &control).unwrap();
+    let doc = &original_index.documents[0];
+    let location = doc.facts_locator.as_ref().unwrap();
+    let path = pack(&fixture.home, location);
+    let original_pack = fs::read(&path).unwrap();
+    let valid: Value =
+        serde_json::from_slice(&index::encode_facts(&doc.facts, &doc.sha256, None).unwrap())
+            .unwrap();
+    let mut cases = Vec::new();
+    for field in ["schema", "inputSHA256", "factsSHA256"] {
+        let mut bad = valid.clone();
+        bad[field] = json!("wrong");
+        cases.push((field, bad));
+    }
+    let mut missing = valid.clone();
+    missing.as_object_mut().unwrap().remove("facts");
+    missing["factsSHA256"] = json!(storage::sha256(b"null"));
+    cases.push(("absent facts", missing));
+    for (name, facts) in [
+        ("null facts", Value::Null),
+        ("scalar facts", json!(7)),
+        ("missing arrays", json!({"declarations":[]})),
+        ("wrong typed field", {
+            let mut facts = valid["facts"].clone();
+            facts["loads"][0]["line"] = json!(-1);
+            facts
+        }),
+    ] {
+        let mut bad = valid.clone();
+        bad["factsSHA256"] = json!(storage::sha256(&serde_json::to_vec(&facts).unwrap()));
+        bad["facts"] = facts;
+        cases.push((name, bad));
+    }
+    for (name, bad) in cases {
+        let body = serde_json::to_vec(&bad).unwrap();
+        let body_hash: [u8; 32] = Sha256::digest(&body).into();
+        let mut header = [0; HEADER];
+        header[..4].copy_from_slice(&(body.len() as u32).to_le_bytes());
+        header[4..36].copy_from_slice(&digest(&facts_cache_key(&doc.path, &doc.sha256)).unwrap());
+        header[36..].copy_from_slice(&body_hash);
+        let mut packed = MAGIC.to_vec();
+        packed.extend_from_slice(&header);
+        packed.extend_from_slice(&body);
+        fs::write(&path, packed).unwrap();
+        let updated = Locator {
+            group: location.group,
+            offset: MAGIC.len() as u64,
+            bytes: body.len() as u32,
+            sha256: body_hash,
+        };
+        // Header/key/bounds/body SHA are all valid: this must reach the inner
+        // envelope's original validation, rather than pass on an outer miss.
+        let cache = SourceFactsCache::open(&fixture.home, &control).unwrap();
+        let mut reader = cache
+            .open_reader(&hex(&updated.group), &control)
+            .unwrap()
+            .unwrap();
+        let records = directory(&mut reader, &control).unwrap().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].sha256, body_hash);
+        let mut observed = vec![0; body.len()];
+        assert!(
+            reader
+                .read_at(updated.offset + HEADER as u64, &mut observed, &control)
+                .unwrap()
+        );
+        assert_eq!(observed, body);
+        assert_eq!(<[u8; 32]>::from(Sha256::digest(&observed)), updated.sha256);
+        reader.finish(Ok(()), &control).unwrap();
+        cache.finish(Ok(()), &control).unwrap();
+        assert!(
+            read_locator(&fixture.home, &updated, &doc.path, &doc.sha256, &control)
+                .unwrap()
+                .is_none(),
+            "{name}"
+        );
+        let repaired = index::build_uncached(&fixture.home, &pin, &control).unwrap();
+        assert_eq!(repaired.summary["io"]["parsedDocuments"], 1, "{name}");
+        assert_eq!(repaired.summary["io"]["cachedFacts"], 0, "{name}");
+        assert_eq!(
+            serde_json::to_vec(&repaired.documents[0].facts).unwrap(),
+            serde_json::to_vec(&doc.facts).unwrap(),
+            "{name}"
+        );
+        assert_eq!(
+            repaired.documents[0].facts_locator, doc.facts_locator,
+            "{name}"
+        );
+        assert_eq!(fs::read(&path).unwrap(), original_pack, "{name}");
+    }
+}
+#[test]
 fn failed_partial_cohort_discards_only_its_private_stage_and_keeps_committed_groups() {
     let fixture = Fixture::new();
     let control = OperationControl::default();
