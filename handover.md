@@ -129,7 +129,7 @@ ba0四变体同row仍有FactsRead483–542ms、IndexSerialize465–596ms、publi
 
 ## 2. 当前实现与有限剩余项
 
-- **Data 默认链已接入**：本地/CDN、Prepared/cache、SQL、导航、asset、Hotfix、自适应内存与checked收尾已有实现。统一单堆SQL保持默认栈、原深度、逐行provider与真实预算lease；正式relational299及原6执行崩溃回归通过。local_query76/0/1、全Data库1063/0/1已有证据，原集成预算失败经7db27/0/0闭合。当前剩余为新Data配对入口真实执行、代表性SQL/读写/解码性能和最终独立审计。
+- **Data 默认链已接入**：本地/CDN、Prepared/cache、SQL、导航、asset、Hotfix、自适应内存与checked收尾已有实现。统一单堆SQL保持默认栈、原深度、逐行provider与真实预算lease；正式relational299及原6执行崩溃回归通过。local_query76/0/1、全Data库1063/0/1已有证据，原集成预算失败经7db27/0/0闭合。Data配对已执行并保留22组性能未达结果；剩代表性SQL/读写/解码性能、独立实际使用与最终审计。
 - **Emmy 已使用原版848文件，语义验证未完成**：`3336d82`已保存 initializer/provider 重复查询、call quality 多余查询和完整键集合被未知值污染的修复。原固定参考与当前候选的全量类型/provider/coverage差分保留；ac8实际Adapter140项、context56项已通过；完整历史严格差分参考36通过、候选35通过1失败，4137行中仅object成功投影的两条正向call_result证据有差异。独立当前合同检查已在原ac8真实sealed产物通过（4135相同行+2精确当前receipt），原始严格失败、全部类型/provider/coverage原文和Cargo退出结果保留；不能将新增检查冒充原历史比较通过。
 - **HTTP 后继已保存并取得定向实证**：`6051063`使用固定 native-tls/schannel 三源38加4删的最小适配，将SNI名与证书校验名分离，保原验证与tokio所有权。完整来源/许可/逆补丁和打包已接，Node20/20通过；固定fa封存Data EXE实际remote329项与私有根TLS五项Go1.27.1对照已全部通过，多尾点SNI一致且证书拒绝保留。后续ac8正式Cargo remote329及固定Go五loopback也已通过；不能外推系统根/撤销全部策略。Emmy零补丁不等于整个依赖树零补丁。
 - **Source 正确性与性能仍未验收**：5bbb完整配对中暖query20对等价且Rust/Go比0.202388，只有该组达到≤0.30；describe两组约1.13、cold query约5.00未达标，cold index因完整公共事实不同而失败。Metadata前置与SQL预算缺口已实际闭合。当前完整修复统一Go公共Facts字段/顺序、两个不同validate入口及完整类别gap缓存；native XML/Emmy语义增强保留在独立真实消费者，不用summary扣数掩盖差异。e843已通过Rust编译及4036文档逐字段/顺序0差；7f畸形输入52项已全字段差分通过，冷性能仍不达标。旧52与新增32 XML边界已完整差分通过；不将有限输入集冒称所有非法文本已穷尽。完整Retail refs/context/batch维持原90秒，旧dev仍deadline失败；优化408普通native refs/context/API已实际通过；2d7 runner/a338产品完整full14项已通过，包含身份变更/恢复和同owner；e843真实600秒lifetime已退出0通过。完整B01–B07、内存与五阶段审计均未验收。
@@ -358,14 +358,17 @@ snapshot改显式持久元数据投影，去整State JSON/base64中间副本；�
 
 refs/context省略snapshot时复用现有受控project/最近父级锁选择，显式snapshot仍优先。context把认证后的同一pin移交relations，避免cursor认证后再次读取可变project锁，保原control和绝对deadline。固定Go命令先解析数值、后project、再research selector的顺序已核；本片保context数值首错和project错误优先于selector。新增12 Rust＝2移交/控制单元＋9公开消费者回归＋1需要匹配包的真实CLI static/native显式ignored项。30d本机两单元2/0/0、完整refs_context14/0/3实际通过；[匹配30d release/package后真实CLI测试1/1通过](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6228578918)，新增12项逐名全通过；其余原ignored保持原边界。云端Node默认3通过1明确Go源码复核skip，指定持有固定Go323对象的checkout后4/4真实通过；核心3项不要求本机Rust仓有旧Go对象。普通产品consumer/cursor切pin与恢复、immutable pin认证已有上述Windows组证据；真实packaged static/native已在本轮命中。此修复独立于已通过的runner显式variant snapshot路线。
 
-## 4. 进入最终五阶段前的有限收口
+## 4. 第一阶段正式审计进行中
 
-当前优化以 Source、Data、Live 同次请求的完整端到端墙钟为主：互斥已测区间加明确余量，嵌套与并行累计单列，不扣除成本或转移到首次查询。逐项核算法、数据结构、分配复制、存储与调度。Source 当前优先已实施发布去锁的真实总收益及格式受控纯解析；Data 等匹配11段业务观测选择热点；Live 先复用正式离线 service/Lua bridge 检查 journal 重扫与 payload/snapshot 复制，游戏项仍留本文末尾。
+2026-10-17 21:40 UTC正式启动五循环Stage 1第一轮，固定生产`b4d8b22a666648ee0fe18a3f2656a84c586e5bd3`与状态文档`7753776964af6b84a0130e1afaf46bb65497dd8b`。先前三个专项review不追认为本阶段完成。三个独立只读组分别审架构/功能bugs（Core、CLI、Live、Windows、Delivery）、Source/Data结果质量、Skill实际工作流；协调者唯一整合写入，必要测试仍由父线程唯一队列执行。发现须绑定真实合同、消费者、文件位置和可验证输入，修复后集中测试并独立复审；一轮零新增可操作finding才收敛该轮，不承诺数学零bug。
 
-1. SQL结构性栈修复与预算回归已有实证，保完整实现供最终独立审计；当前集中闭合retained owner回复处理/回收和真实冷链全路径性能；已通过的52+32边界与600秒正常寿命保留原身份，不扩展新数据库或通用框架。
-2. 在同草稿PR保存完整修复批，集中跑实际生产链与原全量比较；外层验证必须有界失败并让后续独立组执行，不提高产品deadline。
-3. 验证Source短预算/暖态回收与完整Retail输出、诊断、性能/内存；未完成组清楚列NOT_RUN，不以unit或静态Retail替代。
-4. 完成上述实现闭环后进入下节五阶段循环。继续以完整功能为单位实施与集中验证，不恢复逐几十行独审门禁。
+- 逐当前公开命令与F01–F13/P01–P14映射实际路由、参数、完整结果、错误/取消/已提交事实和恢复。旧89/58命令盘点是历史，不充当前分母。
+- Source核query/inspect/refs/context/flow/batch/session、来源坐标/不确定性/缓存；Data核SQL/DB2/Hotfix/资产/capture/adaptive真实消费者。parentArray两条是已知未建模增强能力，现诚实partial合同允许；先核实际可达与承诺，不预设Go回归或新增功能门禁。
+- Skill两个Go323 Data实际任务仍缺完整独立使用证据：真实DataPin下IN/CSV/capture，真实压力释放后的同pin有界恢复。现Source runner不能替代，属于可自动离线项，不能挪到游戏人工末尾。
+- 最终候选安装/升级/卸载/恢复和两fresh offline对应源码重建仍需映射准确证据。SQL默认栈、retained14/0、project选择、正式Lua及模块已测行为保原身份，不重列待首次实现。
+- Source、Data、Live端到端/内存性能未达标仍独立open；可并行架构功能审查，不能以所有性能先≤0.30无限延后第一阶段。FactsRead性能作者仅只读提出候选，不与本轮审计写入冲突。
+
+Source最新状态见顶部b4d，Data/Live/retained/Lua保各自已封存身份。后继只汇总源码变化、明确未覆盖消费者及审计finding形成固定SHA正式批，不重复旧统一批；旧EXE不归新树，游戏H01–H09保持文末NOT_RUN。
 
 ## 5. 验收与循环审计
 
@@ -381,7 +384,7 @@ refs/context省略snapshot时复用现有受控project/最近父级锁选择，�
 
 本机测试通道已正常恢复，原unknown历史保留，无需再次apply或重启。仅云端实现，用户指定本机线程负责固定SHA测试并将报告写回同一PR。普通push不自动切换其正在测试的树；不另排重复长CI。
 
-当前bbfe匹配优化产物、4036 Facts差分与Source/Data单次诊断已安全终态；2d7独立runner/a338产品full14/0继续保原身份，不重复跑旧retained故障。下一统一Source/Data/Live源码批先alltargets，再Source facts::（含迁入guard及84边界）、index::、lua_tree::，Core evidence::budgeted/metadata::capture_write/metadata::controlled_open，Data assets::export/local_query/remote::admission，Live go_mailbox_v1完整离线组。新增测试按精确名称去重，未运行保持NOT_RUN。前置过后一次匹配release/assembly，运行4036全字段顺序差分、同输入Source/Data阶段诊断及正式9桥；不得用旧EXE归新源码收益。全部本机任务仍由唯一父协调队列发送。
+当前Source按顶部b4d实证与Stage 1审计finding安排后继；Data/Live/retained/正式Lua保各自已封存身份。仅实际源码变化、明确未覆盖消费者及审计修复进入固定SHA集中验证，由唯一父协调队列安排alltargets、受影响正式组和必要匹配产物。旧EXE不归新树，旧通过不重标，游戏项仍在文末。
 
 - 所有Rust检查沿仓库受控 `tools/rust-cargo.mjs`、固定工具链和原owner/cache合同，先all-target编译，再受影响组；默认线程栈不加大。完整SQL299及7db预算组已过，不机械重跑历史失败树。
 - 正式Lua与9桥使用[现有入口](tools/rust-formal-lua-bridge.mjs)，每次新输出目录；原runtime与CLI封存产物必须通过全部身份验证，不能覆盖旧失败目录。当前正式Go323220/9已有实证。
