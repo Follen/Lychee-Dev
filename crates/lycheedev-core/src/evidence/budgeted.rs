@@ -28,6 +28,27 @@ const CAPTURE_ID_BYTES: usize = 68;
 // serialized length, which bounds the decoded string payload.
 const VALUE_STRUCTURE_BYTES: usize = 4096;
 
+/// Fixed diagnostic scopes of the existing private stream publisher. These
+/// include nested producer/check work and are not additional accounting costs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BlobStreamPhase {
+    SourceSpool,
+    ShardCopy,
+    FinalVerify,
+    StageCreate,
+    StageSeal,
+    DigestLock,
+    ShardOpen,
+    Rename,
+    WinnerOpen,
+    CheckedClose,
+}
+
+struct NoopBlobStreamSpan;
+impl Drop for NoopBlobStreamSpan {
+    fn drop(&mut self) {}
+}
+
 /// Metadata allocations and work join the caller's existing ledger. JSON work
 /// uses emitted/input bytes; each binary body pass uses one unit per 64 KiB.
 /// Errors are returned unchanged, including cancellation and limits.
@@ -35,6 +56,12 @@ pub trait CaptureAccounting {
     fn check(&self) -> Result<()>;
     fn admit_allocation(&self, bytes: usize) -> Result<()>;
     fn admit_work(&self, units: usize) -> Result<()>;
+    /// Borrow an optional diagnostic recorder. The default is a zero-sized
+    /// no-op: no clock, allocation, checks or changed business result. Observers
+    /// must not perform accounting or turn observation into a fallible action.
+    fn blob_stream_phase(&self, _phase: BlobStreamPhase) -> impl Drop + '_ {
+        NoopBlobStreamSpan
+    }
     /// Admit one dependency's raw/typed/identity scratch before its read.
     /// Calls are sequential: the prior dependency's raw bytes and parsed value
     /// have been dropped before the next admission. An implementation may keep

@@ -631,3 +631,29 @@ stream publication and cache commit. They nest in existing business phases and
 may overlap; do not add them to the parent or deduct them from CLI time. Use the
 same `--data-phase-profile` command with a newly matched artifact. No change to
 the old 928 samples, acceptance thresholds, fixtures, deadlines or owner rules.
+
+### Publisher diagnostic scopes (v3)
+
+New matching products emit `lycheedev.data-query-phases.v3`, retaining the same
+11 business phases and the same 10 v2 details, plus a separate `publisher`
+vector of 10 fixed spans: `source_to_spool_inclusive`,
+`spool_to_shard_inclusive`, `final_verify_inclusive`, `stage_create`,
+`stage_seal`, `digest_lock`, `shard_open`, `rename`, `winner_open`, and
+`checked_close`. This is the existing verified publisher path; it does not
+remove a read, hash, durable transaction, control check or checked cleanup.
+The recorder remains off by default without extra clock reads.
+
+These spans are nested diagnostic wall times, not a new additive business
+ledger. `winner_open` includes `final_verify_inclusive`; error-path closes in
+those scopes remain included there. `checked_close` covers explicit publisher
+closes only; a delivered blob's later close belongs to the original
+`source_close` phase. Initial parent opening and work between spans remain in
+the measured remainder. Never add parent/child values or subtract them from
+original native CLI time.
+
+Use the unchanged `--data-phase-profile` entry with a newly matched product.
+The reader strictly accepts v1, v2 and v3, preserving absent historical vectors
+rather than inventing observations. The new reader has actually accepted all
+24 original ab4 v1 stderr records and all 24 original 8cab v2 records unchanged;
+that compatibility check is not a v3 Windows measurement. New Core/Data Rust
+regressions and matching v3 product measurements remain pending.

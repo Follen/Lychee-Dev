@@ -1,6 +1,6 @@
 //! One source traversal, one private stage, and no digest-name publication until
 //! the producer has returned a real nonempty-read EOF (including business checks).
-use super::super::CaptureAccounting;
+use super::super::{BlobStreamPhase, CaptureAccounting};
 use super::*;
 use lycheedev_windows::filesystem::destination::{
     FileControl, FileCost, StagedFile, StagedPublication,
@@ -152,18 +152,16 @@ fn publish_stream(
     let mut staged = None;
     let mut guard = None;
     let result = (|| {
-        staged = Some(StagedFile::create(
-            &parent,
-            &mut Checks {
-                control,
-                supplemental,
-            },
-        )?);
+        staged = Some({
+            let _phase = accounting.blob_stream_phase(BlobStreamPhase::StageCreate);
+            StagedFile::create(&parent, &mut Checks { control, supplemental })?
+        });
         publication.stage_name = Some(staged.as_ref().expect("owned stage").name().to_owned());
         publication.source_stage_name = publication.stage_name.clone();
         // Ownership exists before this post-acquisition stop, so every failure
         // takes the original-handle discard/checked-close path below.
         stream_check(control, supplemental)?;
+        let source_phase = accounting.blob_stream_phase(BlobStreamPhase::SourceSpool);
         let reference = copy_stream(
             reader,
             staged.as_mut().expect("owned stage"),
@@ -172,20 +170,23 @@ fn publish_stream(
             supplemental,
             accounting,
         )?;
+        drop(source_phase);
         publication.reference = Some(reference.clone());
         stream_check(control, supplemental)?;
-        let synced = staged
-            .as_mut()
-            .expect("owned stage")
-            .seal()
-            .map_err(ToolkitError::from);
+        let synced = {
+            let _phase = accounting.blob_stream_phase(BlobStreamPhase::StageSeal);
+            staged.as_mut().expect("owned stage").seal().map_err(ToolkitError::from)
+        };
         finish_checks(synced, control, supplemental)?;
-        guard = Some(ExclusiveLock::resource_wait_checked(
-            &home.join("locks"),
-            &format!("blob:{}", reference.sha256),
-            Some(control.deadline()),
-            || stream_check(control, supplemental),
-        )?);
+        guard = Some({
+            let _phase = accounting.blob_stream_phase(BlobStreamPhase::DigestLock);
+            ExclusiveLock::resource_wait_checked(
+                &home.join("locks"),
+                &format!("blob:{}", reference.sha256),
+                Some(control.deadline()),
+                || stream_check(control, supplemental),
+            )?
+        });
         publish_in_shard(
             home,
             &parent,
@@ -197,20 +198,23 @@ fn publish_stream(
             accounting,
         )
     })();
-    let result = finish_opened(result, close_stage(&mut staged), control, supplemental);
+    let result = finish_opened(result, close_stage(&mut staged, accounting), control, supplemental);
     let result = if let Some(guard) = guard {
-        finish_opened(result, guard.close(), control, supplemental)
+        let cleanup = {
+            let _phase = accounting.blob_stream_phase(BlobStreamPhase::CheckedClose);
+            guard.close()
+        };
+        finish_opened(result, cleanup, control, supplemental)
     } else {
         result
     };
     // No stage borrow remains when the original staging parent is consumed.
     drop(staged);
-    let result = finish_opened(
-        result,
-        optional::finish_directory(Ok(()), parent),
-        control,
-        supplemental,
-    );
+    let cleanup = {
+        let _phase = accounting.blob_stream_phase(BlobStreamPhase::CheckedClose);
+        optional::finish_directory(Ok(()), parent)
+    };
+    let result = finish_opened(result, cleanup, control, supplemental);
     let checked = finish_checks(Ok(()), control, supplemental);
     finish_opened(result, checked, control, supplemental)
 }
@@ -221,10 +225,11 @@ fn finish_checks<T>(
 ) -> Result<T> {
     optional::finish_checks(result, control, &mut || optional_check(supplemental))
 }
-fn close_stage(stage: &mut Option<StagedFile<'_>>) -> Result<()> {
+fn close_stage(stage: &mut Option<StagedFile<'_>>, accounting: &impl CaptureAccounting) -> Result<()> {
     let Some(stage) = stage.take() else {
         return Ok(());
     };
+    let _phase = accounting.blob_stream_phase(BlobStreamPhase::CheckedClose);
     let errors = stage.close();
     let mut result = Ok(());
     for error in errors {
@@ -322,6 +327,7 @@ fn publish_in_shard(
     publication: &mut Publication,
     accounting: &impl CaptureAccounting,
 ) -> Result<OpenBlob> {
+    let shard_phase = accounting.blob_stream_phase(BlobStreamPhase::ShardOpen);
     let path = blob_path(home, &reference.sha256)?;
     storage::guard_path(home, &path)?;
     parent.verify_controlled(&mut Checks {
@@ -344,26 +350,25 @@ fn publish_in_shard(
             supplemental,
         },
     )?;
+    drop(shard_phase);
     let mut destination = None;
     let result = (|| {
         let name = path.file_name().expect("digest name");
-        if let Some(file) = open_winner(&directory, name, &reference, control, supplemental)? {
+        if let Some(file) = open_winner(&directory, name, &reference, control, supplemental, accounting)? {
             publication.reused = true;
             return Ok(file);
         }
-        destination = Some(StagedFile::create(
-            &directory,
-            &mut Checks {
-                control,
-                supplemental,
-            },
-        )?);
+        destination = Some({
+            let _phase = accounting.blob_stream_phase(BlobStreamPhase::StageCreate);
+            StagedFile::create(&directory, &mut Checks { control, supplemental })?
+        });
         let stage = destination.as_mut().expect("owned final stage");
         publication.stage_name = Some(format!("{}/{}", &reference.sha256[..2], stage.name()));
         stream_check(control, supplemental)?;
         // A second bounded *disk* pass, reading the original sealed handle.
         // The Data reader and its business EOF callback are never invoked here.
         // This copy owns the only live Core body buffer at this phase.
+        let copy_phase = accounting.blob_stream_phase(BlobStreamPhase::ShardCopy);
         let copied = copy_stream(
             spool.as_mut().expect("owned sealed spool"),
             stage,
@@ -375,31 +380,32 @@ fn publish_in_shard(
         if copied.sha256 != reference.sha256 {
             return Err(integrity("sealed spool digest differs"));
         }
+        drop(copy_phase);
         stream_check(control, supplemental)?;
-        let sealed = stage.seal().map_err(ToolkitError::from);
+        let sealed = {
+            let _phase = accounting.blob_stream_phase(BlobStreamPhase::StageSeal);
+            stage.seal().map_err(ToolkitError::from)
+        };
         finish_checks(sealed, control, supplemental)?;
         #[cfg(test)]
         test_hooks::before_rename();
-        let committed = stage.publish_name(
-            name,
-            &mut Checks {
-                control,
-                supplemental,
-            },
-        );
+        let committed = {
+            let _phase = accounting.blob_stream_phase(BlobStreamPhase::Rename);
+            stage.publish_name(name, &mut Checks { control, supplemental })
+        };
         publication.state = stage.publication();
         let committed = finish_checks(committed, control, supplemental)?;
         publication.reused = committed == StagedPublication::NotPublished;
         // Preserve its Published/Unknown fact before consuming this handle.
         // A fresh immutable reader cannot open while this write handle is live.
-        close_stage(&mut destination)?;
+        close_stage(&mut destination, accounting)?;
         stream_check(control, supplemental)?;
-        open_winner(&directory, name, &reference, control, supplemental)?
+        open_winner(&directory, name, &reference, control, supplemental, accounting)?
             .ok_or_else(|| integrity("published blob or concurrent winner disappeared"))
     })();
     // Both stages have separate original-handle cleanup. The root spool remains
     // owned by publish_stream even if this final stage is Unknown.
-    let cleanup = close_stage(&mut destination);
+    let cleanup = close_stage(&mut destination, accounting);
     let result = match (result, cleanup) {
         (Ok(file), Ok(())) => Ok(file),
         (Ok(file), Err(error)) => crate::metadata::historical_write::finish_historical(
@@ -422,7 +428,10 @@ fn publish_in_shard(
             supplemental,
             accounting,
         ),
-        Err(error) => optional::finish_directory(Err(error), directory),
+        Err(error) => {
+            let _phase = accounting.blob_stream_phase(BlobStreamPhase::CheckedClose);
+            optional::finish_directory(Err(error), directory)
+        },
     }
 }
 fn verify_opened(
@@ -431,6 +440,7 @@ fn verify_opened(
     supplemental: &mut Option<BlobCheck>,
     accounting: &impl CaptureAccounting,
 ) -> Result<OpenBlob> {
+    let _phase = accounting.blob_stream_phase(BlobStreamPhase::FinalVerify);
     let result = (|| {
         scan_open_blob_accounted_with_check(
             &mut opened,
@@ -458,7 +468,9 @@ fn open_winner(
     reference: &BlobRef,
     control: &OperationControl,
     supplemental: &mut Option<BlobCheck>,
+    accounting: &impl CaptureAccounting,
 ) -> Result<Option<File>> {
+    let _phase = accounting.blob_stream_phase(BlobStreamPhase::WinnerOpen);
     let info = directory.optional_metadata_controlled(
         name,
         &mut Checks {

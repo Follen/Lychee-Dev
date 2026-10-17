@@ -30,7 +30,7 @@ pub use bounded::{
     verify_blob_bounded,
 };
 pub use budgeted::{
-    CaptureAccounting, CaptureHeader, commit_capture_budgeted, commit_capture_budgeted_referencing,
+    BlobStreamPhase, CaptureAccounting, CaptureHeader, commit_capture_budgeted, commit_capture_budgeted_referencing,
     commit_capture_budgeted_with_dependencies, commit_capture_budgeted_with_references,
     commit_verified_capture_budgeted, commit_verified_capture_budgeted_with_metadata,
     commit_capture_budgeted_with_dependencies_and_metadata,

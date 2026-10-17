@@ -6,7 +6,7 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {sha256, rustFactPath} from './read-fact-delta.mjs';
-import {PAIRS, OUTER_TIMEOUT_MS, verifyObservedReport, COMMITS, CANDIDATE_IDENTITIES, PROFILE_SOURCE_SHA256, PHASE_NAMES, PHASE_TIMING, LOCK_TIMING, RUNNER_FILES, orderForCandidatePair, validateRequest, validateConditions, sourcePhaseEnvironment, sourcePhaseProfile, verifyColdProfile, verifyCandidateRecord, compareCandidateFacts, compareCandidateSummaries, runCandidateController, runnerIdentity} from './source-candidates.mjs';
+import {PAIRS, OUTER_TIMEOUT_MS, verifyObservedReport, COMMITS, CANDIDATE_IDENTITIES, HISTORICAL_WITNESS_FILES, verifyHistoricalWitnessState, readHistoricalWitnessFiles, PROFILE_SOURCE_SHA256, PHASE_NAMES, PHASE_TIMING, LOCK_TIMING, RUNNER_FILES, orderForCandidatePair, validateRequest, validateConditions, sourcePhaseEnvironment, sourcePhaseProfile, verifyColdProfile, verifyCandidateRecord, compareCandidateFacts, compareCandidateSummaries, runCandidateController, runnerIdentity} from './source-candidates.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const oracle = JSON.parse(fs.readFileSync(path.join(root, 'tests/rust-source-full-corpus/retail-oracle.json')));
@@ -104,7 +104,7 @@ test('fixed three AB/BA/AB pairs and original sealed commit/binary/source identi
   
 });
 
-test('request separates original artifact owner from independent clean-source witnesses and rejects configurable pairs', t => {
+test('request separates original artifact owner from independent fixed-source witnesses and rejects configurable pairs', t => {
   const request = requestAt(temporary(t)), result = validateRequest(request);
   assert.equal(result.baseline.artifactRoot, result.candidate.artifactRoot); assert.notEqual(result.baseline.sourceRoot, result.baseline.artifactRoot);
   for (const field of ['pairs', 'repetitions']) assert.throws(() => validateRequest({...request, [field]: 3}), /exact fields/);
@@ -113,6 +113,87 @@ test('request separates original artifact owner from independent clean-source wi
   const outside = structuredClone(request); outside.baseline.artifact = path.join(request.ownerRoot, 'outside.json'); assert.throws(() => validateRequest(outside));
   assert.equal(validateConditions(conditions), conditions); assert.throws(() => validateConditions({...conditions, disk: ''}));
   
+});
+
+function witnessState(side = 'baseline', status = Buffer.from(HISTORICAL_WITNESS_FILES.map(file => ` M ${file.path}\0`).join(''))) {
+  return {head: COMMITS[side], sourceTreeSHA256: CANDIDATE_IDENTITIES[side].sourceTreeSHA256, status, files: HISTORICAL_WITNESS_FILES.map(file => ({...file}))};
+}
+const witnessInput = side => ({commit: COMMITS[side], ...CANDIDATE_IDENTITIES[side]});
+
+test('historical witness binds all seven published physical identities to each original artifact and reports real dirty state', () => {
+  assert.equal(HISTORICAL_WITNESS_FILES.length, 7);
+  assert(Object.isFrozen(HISTORICAL_WITNESS_FILES) && HISTORICAL_WITNESS_FILES.every(Object.isFrozen));
+  for (const side of sides) {
+    const observed = witnessState(side), result = verifyHistoricalWitnessState(witnessInput(side), observed);
+    assert.equal(result.policy, 'artifact-bound-historical-inputs'); assert.equal(result.gitDirty, true);
+    assert.deepEqual(result.gitStatusRows, observed.status.toString().slice(0, -1).split('\0'));
+    assert.equal(result.gitStatusSHA256, sha256(observed.status)); assert.deepEqual(result.physicalFiles, observed.files);
+    // Git's text treatment may hide physical line-ending differences. Physical
+    // identities and the complete original digest are still mandatory if clean.
+    assert.equal(verifyHistoricalWitnessState(witnessInput(side), witnessState(side, Buffer.alloc(0))).gitDirty, false);
+    assert.equal(verifyHistoricalWitnessState(witnessInput(side), witnessState(side, Buffer.from(` M ${HISTORICAL_WITNESS_FILES[0].path}\0`))).gitDirty, true);
+  }
+});
+
+test('historical witness rejects changed HEAD artifact binding full digest and any seven-file path size or hash', () => {
+  const input = witnessInput('baseline');
+  for (const key of ['commit', 'artifactSHA256', 'binarySHA256', 'sourceTreeSHA256']) assert.throws(() => verifyHistoricalWitnessState({...input, [key]: '0'.repeat(key === 'commit' ? 40 : 64)}, witnessState()));
+  for (const mutate of [v => v.head = COMMITS.candidate, v => v.sourceTreeSHA256 = CANDIDATE_IDENTITIES.candidate.sourceTreeSHA256, v => v.files.pop(), v => v.files.reverse(), v => v.files.push({...v.files[0]}), v => v.files[0].path += '.extra', v => v.files[0].bytes++, v => v.files[0].sha256 = '0'.repeat(64), v => v.files[0].extra = 'not admitted']) {
+    const state = witnessState(); mutate(state); assert.throws(() => verifyHistoricalWitnessState(input, state));
+  }
+});
+
+test('historical witness rejects staged untracked deleted renamed conflicted duplicate and unapproved status paths', () => {
+  const file = HISTORICAL_WITNESS_FILES[0].path;
+  for (const row of [`M  ${file}\0`, `MM ${file}\0`, `A  ${file}\0`, `?? ${file}\0`, ` D ${file}\0`, ` T ${file}\0`, `UU ${file}\0`, `R  ${file}\0old-name\0`, ` M README.md\0`, ` M ${file.toUpperCase()}\0`, ` M ../${file}\0`, ` M ${file}\0 M ${file}\0`, ` M ${file}`, ` M ${file}\0\0`, ` M "${file}"\0`]) {
+    assert.throws(() => verifyHistoricalWitnessState(witnessInput('baseline'), witnessState('baseline', Buffer.from(row))), row);
+  }
+  for (const status of ['not a buffer', Buffer.from([0xff, 0]), Buffer.alloc((1 << 20) + 1)]) assert.throws(() => verifyHistoricalWitnessState(witnessInput('baseline'), witnessState('baseline', status)));
+});
+
+test('historical witness collector hashes actual bounded files and rejects changed bytes sizes missing files and symlinks', t => {
+  const directory = temporary(t);
+  for (const file of HISTORICAL_WITNESS_FILES) { const full = path.join(directory, file.path); fs.mkdirSync(path.dirname(full), {recursive: true}); fs.writeFileSync(full, Buffer.alloc(file.bytes, 120)); }
+  const rows = readHistoricalWitnessFiles(directory);
+  assert.deepEqual(rows.map(row => row.sha256), HISTORICAL_WITNESS_FILES.map(file => sha256(Buffer.alloc(file.bytes, 120))));
+  assert.throws(() => verifyHistoricalWitnessState(witnessInput('baseline'), {...witnessState(), files: rows}), /exact seven physical/);
+  // Reconstruct the two small public files with their exact physical endings:
+  // context has mixed endings, while the two-line binding probe is CRLF.
+  // This is fixture preparation only; production never normalizes any input.
+  for (const [file, crlfLines] of [[HISTORICAL_WITNESS_FILES[1], [1, 2, 3, 4, 5, 10, 11]], [HISTORICAL_WITNESS_FILES[2], [1, 2]]]) {
+    const original = execFileSync('git', ['show', `${COMMITS.baseline}:${file.path}`], {cwd: root});
+    assert(!original.includes(13)); let line = 0;
+    const restored = Buffer.from(original.toString('utf8').replace(/\n/g, () => crlfLines.includes(++line) ? '\r\n' : '\n'));
+    assert.equal(restored.length, file.bytes); assert.equal(sha256(restored), file.sha256);
+    fs.writeFileSync(path.join(directory, file.path), restored);
+  }
+  assert.deepEqual(readHistoricalWitnessFiles(directory).slice(1, 3), HISTORICAL_WITNESS_FILES.slice(1, 3));
+  const first = HISTORICAL_WITNESS_FILES[0], full = path.join(directory, first.path);
+  fs.appendFileSync(full, 'x'); assert.throws(() => readHistoricalWitnessFiles(directory), /type\/size/);
+  fs.rmSync(full); assert.throws(() => readHistoricalWitnessFiles(directory), /ENOENT/);
+  // A directory replacement is rejected on Windows without symlink privilege.
+  fs.mkdirSync(full); assert.throws(() => readHistoricalWitnessFiles(directory), /type\/size/); fs.rmdirSync(full);
+  if (process.platform !== 'win32') { fs.symlinkSync(path.join(directory, HISTORICAL_WITNESS_FILES[1].path), full); assert.throws(() => readHistoricalWitnessFiles(directory)); }
+});
+
+test('historical witness validates real porcelain from an isolated Git fixture without changing its index or files', t => {
+  const directory = temporary(t);
+  const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith('GIT_')));
+  const git = args => execFileSync('git', ['--no-optional-locks', '-c', 'core.autocrlf=false', '-c', 'core.fsmonitor=false', ...args], {cwd: directory, env: {...environment, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null', GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid', GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@example.invalid'}, stdio: ['pipe', 'pipe', 'pipe']});
+  git(['init']);
+  for (const file of HISTORICAL_WITNESS_FILES) { const full = path.join(directory, file.path); fs.mkdirSync(path.dirname(full), {recursive: true}); fs.writeFileSync(full, 'fixture original\n'); }
+  fs.writeFileSync(path.join(directory, 'other.txt'), 'original\n'); git(['add', '.']); git(['commit', '-m', 'isolated identity fixture']);
+  for (const file of HISTORICAL_WITNESS_FILES) fs.appendFileSync(path.join(directory, file.path), 'fixture modified\n');
+  const status = () => git(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=none']);
+  const validateStatus = () => verifyHistoricalWitnessState(witnessInput('baseline'), witnessState('baseline', status()));
+  // Only the Git-state observations are real here. Fixed metadata is a unit
+  // fixture; no claim that these synthetic files match the historical bytes.
+  const index = fs.readFileSync(path.join(directory, '.git/index')), before = status();
+  assert.equal(validateStatus().gitStatusRows.length, 7); assert.deepEqual(status(), before); assert.deepEqual(fs.readFileSync(path.join(directory, '.git/index')), index);
+  fs.appendFileSync(path.join(directory, 'other.txt'), 'changed\n'); assert.throws(validateStatus, /dirty path/); git(['checkout', '--', 'other.txt']);
+  fs.writeFileSync(path.join(directory, 'extra.txt'), 'untracked\n'); assert.throws(validateStatus, /unstaged tracked/); fs.rmSync(path.join(directory, 'extra.txt'));
+  git(['add', '--', HISTORICAL_WITNESS_FILES[0].path]); assert.throws(validateStatus, /unstaged tracked/);
+  assert.throws(() => verifyHistoricalWitnessState(witnessInput('baseline'), {...witnessState(), head: git(['rev-parse', 'HEAD']).toString().trim()}), /HEAD changed/);
 });
 
 test('sealed record validation preserves historical sourceRoot and rejects changed binary/source/profile/invocation', t => {

@@ -63,6 +63,49 @@ fn temporary_count(home: &Path) -> usize {
 struct Meter {
     reads: Cell<usize>,
 }
+
+#[derive(Default)]
+struct ObservedMeter {
+    meter: Meter,
+    events: std::cell::RefCell<Vec<(BlobStreamPhase, bool)>>,
+}
+struct ObservedSpan<'a> {
+    events: &'a std::cell::RefCell<Vec<(BlobStreamPhase, bool)>>,
+    phase: BlobStreamPhase,
+}
+impl Drop for ObservedSpan<'_> {
+    fn drop(&mut self) {
+        self.events.borrow_mut().push((self.phase, false));
+    }
+}
+impl CaptureAccounting for ObservedMeter {
+    fn check(&self) -> Result<()> { self.meter.check() }
+    fn admit_allocation(&self, bytes: usize) -> Result<()> { self.meter.admit_allocation(bytes) }
+    fn admit_work(&self, units: usize) -> Result<()> { self.meter.admit_work(units) }
+    fn blob_stream_phase(&self, phase: BlobStreamPhase) -> impl Drop + '_ {
+        self.events.borrow_mut().push((phase, true));
+        ObservedSpan { events: &self.events, phase }
+    }
+}
+impl ObservedMeter {
+    fn count(&self, phase: BlobStreamPhase) -> usize {
+        let events = self.events.borrow();
+        let started = events.iter().filter(|e| **e == (phase, true)).count();
+        assert_eq!(started, events.iter().filter(|e| **e == (phase, false)).count());
+        started
+    }
+    fn assert_not_nested(&self) {
+        let mut active = None;
+        for (phase, start) in self.events.borrow().iter().copied() {
+            if start {
+                assert_eq!(active.replace(phase), None);
+            } else {
+                assert_eq!(active.take(), Some(phase));
+            }
+        }
+        assert_eq!(active, None);
+    }
+}
 impl CaptureAccounting for Meter {
     fn check(&self) -> Result<()> {
         Ok(())
@@ -177,6 +220,60 @@ fn staged_generated_body_uses_one_source_traversal_and_one_live_block_per_pass()
     assert_eq!(offset, size);
     assert_eq!(hex::encode(hash.finalize()), blob.reference().sha256);
     blob.close().unwrap();
+    f.no_temps();
+}
+
+#[test]
+fn staged_publisher_observer_preserves_bytes_work_and_real_passes_on_new_and_reused_blob() {
+    use BlobStreamPhase::*;
+    let f = Fixture::new();
+    let body = vec![31; 2 * BLOCK + 17];
+    let blocks = body.len().div_ceil(BLOCK) + 1;
+    for reused in [false, true] {
+        let meter = ObservedMeter::default();
+        let mut source = io::Cursor::new(&body);
+        let mut blob = publish(&f, &mut source, body.len() as u64, &meter).unwrap();
+        assert_eq!(source.position(), body.len() as u64);
+        assert_eq!(meter.meter.reads.get(), if reused { 2 } else { 3 } * blocks);
+        assert_eq!(blob.reference().sha256, storage::sha256(&body));
+        let mut readback = Vec::new();
+        blob.read_to_end(&mut readback).unwrap();
+        assert_eq!(readback, body);
+        blob.close().unwrap();
+        for phase in [SourceSpool, FinalVerify, DigestLock, ShardOpen] {
+            assert_eq!(meter.count(phase), 1);
+        }
+        for phase in [ShardCopy, Rename] {
+            assert_eq!(meter.count(phase), usize::from(!reused));
+        }
+        for phase in [StageCreate, StageSeal, WinnerOpen] {
+            assert_eq!(meter.count(phase), if reused { 1 } else { 2 });
+        }
+        assert_eq!(meter.count(CheckedClose), if reused { 3 } else { 4 });
+        meter.assert_not_nested();
+        f.no_temps();
+    }
+}
+
+#[test]
+fn staged_publisher_observer_keeps_source_error_and_only_observes_acquired_cleanup() {
+    use BlobStreamPhase::*;
+    let f = Fixture::new();
+    let meter = ObservedMeter::default();
+    let mut source = EofFailure { source: io::Cursor::new(b"abc".to_vec()), calls: 0 };
+    let error = failed(publish(&f, &mut source, 3, &meter));
+    assert_eq!(error.code, cause().code);
+    assert_eq!(error.details["publication"]["state"], "not_published");
+    assert_eq!(source.calls, 2);
+    assert_eq!(meter.meter.reads.get(), 2);
+    assert_eq!(meter.count(SourceSpool), 1);
+    assert_eq!(meter.count(StageCreate), 1);
+    assert_eq!(meter.count(CheckedClose), 2);
+    for phase in [ShardCopy, FinalVerify, StageSeal, DigestLock, ShardOpen, Rename, WinnerOpen] {
+        assert_eq!(meter.count(phase), 0);
+    }
+    meter.assert_not_nested();
+    assert!(!f.path(b"abc").exists());
     f.no_temps();
 }
 #[test]

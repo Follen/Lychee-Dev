@@ -11,7 +11,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {CONTENT_BYTES, GO_COMMIT, PROOF, REPETITIONS, SQL, SQL_ROWS, auditCache, compareData, dataCases, orderFor, semanticData, summarizeData, usage} from './data-contract.mjs';
 import {blob, decodeDataImage, decodeFixtureBLTE, decodedIdentity, digest, goJSON, parse, seedDataHome, validateDataOutput} from './data-inputs.mjs';
 import {fixtureArgs, fixturePreparers} from './prepare-data.mjs';
-import {DATA_CAPTURE_TIMING, DATA_DETAIL_NAMES, DATA_PHASE_NAMES, DATA_PHASE_TIMING, dataPhaseEnvironment, dataPhaseProfile} from './data-phase-profile.mjs';
+import {DATA_CAPTURE_TIMING, DATA_DETAIL_NAMES, DATA_PUBLISHER_NAMES, DATA_PHASE_NAMES, DATA_PHASE_TIMING, dataPhaseEnvironment, dataPhaseProfile} from './data-phase-profile.mjs';
 
 function phaseProfile() {
   return {schema: 'lycheedev.data-query-phases.v1', elapsedMicros: 1000, timing: DATA_PHASE_TIMING, captureTiming: DATA_CAPTURE_TIMING,
@@ -21,7 +21,30 @@ test('Data phase contract matches the actual recorder in the source checkout', {
   const source = readFileSync(new URL('../../crates/lycheedev-data/src/phase_profile.rs', import.meta.url), 'utf8');
   assert.deepEqual([...source.match(/const NAMES:.*?= \[([\s\S]*?)\];/)[1].matchAll(/"([^"]+)"/g)].map(match => match[1]), DATA_PHASE_NAMES);
   assert.deepEqual([...source.match(/const DETAIL_NAMES:.*?= \[([\s\S]*?)\];/)[1].matchAll(/"([^"]+)"/g)].map(match => match[1]), DATA_DETAIL_NAMES);
-  assert(source.includes(DATA_PHASE_TIMING)); assert(source.includes(DATA_CAPTURE_TIMING)); assert(source.includes('lycheedev.data-query-phases.v2'));
+  assert.deepEqual([...source.match(/const PUBLISHER_NAMES:.*?= \[([\s\S]*?)\];/)[1].matchAll(/"([^"]+)"/g)].map(match => match[1]), DATA_PUBLISHER_NAMES);
+  assert(source.includes(DATA_PHASE_TIMING)); assert(source.includes(DATA_CAPTURE_TIMING)); assert(source.includes('lycheedev.data-query-phases.v3'));
+});
+test('Data v3 preserves v1 and v2 bytes and validates fixed nested publisher counters', () => {
+  const v1 = phaseProfile();
+  const v2 = {...v1, schema: 'lycheedev.data-query-phases.v2', details: DATA_DETAIL_NAMES.map(phase => ({phase, calls: 1, elapsedMicros: 700}))};
+  const v3 = {...v2, schema: 'lycheedev.data-query-phases.v3', publisher: DATA_PUBLISHER_NAMES.map(phase => ({phase, calls: 2, elapsedMicros: 900}))};
+  for (const value of [v1, v2, v3]) {
+    const raw = Buffer.from(JSON.stringify(value) + '\n');
+    assert.deepEqual(dataPhaseProfile(raw), value);
+    assert.equal(JSON.stringify(dataPhaseProfile(raw)) + '\n', raw.toString());
+  }
+  assert.deepEqual(v3.phases, v1.phases); assert.deepEqual(v3.details, v2.details);
+  assert(v3.publisher.reduce((n, p) => n + p.elapsedMicros, 0) > v3.elapsedMicros, 'nested diagnostics are never treated as additive');
+  for (const change of [x => delete x.publisher, x => x.publisher.reverse(), x => x.publisher.pop(), x => x.publisher.push(x.publisher[0]),
+    x => x.publisher[0].phase = 'unknown', x => x.publisher[0].extra = 0, x => x.publisher[0].calls = -1,
+    x => x.publisher[0].calls = 0, x => x.publisher[0].elapsedMicros = 0.5, x => x.schema = v2.schema,
+    x => delete x.details, x => x.schema = v1.schema]) {
+    const invalid = structuredClone(v3); change(invalid);
+    assert.throws(() => dataPhaseProfile(Buffer.from(JSON.stringify(invalid))));
+  }
+  const empty = structuredClone(v3);
+  empty.publisher = DATA_PUBLISHER_NAMES.map(phase => ({phase, calls: 0, elapsedMicros: 0}));
+  assert.deepEqual(dataPhaseProfile(Buffer.from(JSON.stringify(empty))), empty);
 });
 test('Data v2 keeps the original eleven phases and validates separate inclusive details without rewriting v1', () => {
   const old = phaseProfile();

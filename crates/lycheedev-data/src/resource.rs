@@ -823,7 +823,7 @@ mod phase_profile_tests {
         assert!(weak.upgrade().is_none());
         let output = output.lock().unwrap();
         assert_eq!(output.len(), 1);
-        assert_eq!(output[0]["schema"], "lycheedev.data-query-phases.v2");
+        assert_eq!(output[0]["schema"], "lycheedev.data-query-phases.v3");
         assert_eq!(output[0]["phases"][2]["calls"], 2);
         assert_eq!(output[0]["phases"][10]["calls"], 1);
     }

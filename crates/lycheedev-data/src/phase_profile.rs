@@ -29,6 +29,16 @@ pub(crate) enum Phase {
     ZlibInflate,
     WholeContentKeyHash,
     DecodedCacheCommit,
+    PublisherSourceSpool,
+    PublisherShardCopy,
+    PublisherFinalVerify,
+    PublisherStageCreate,
+    PublisherStageSeal,
+    PublisherDigestLock,
+    PublisherShardOpen,
+    PublisherRename,
+    PublisherWinnerOpen,
+    PublisherCheckedClose,
 }
 const NAMES: [&str; 11] = [
     "admission",
@@ -59,7 +69,22 @@ const DETAIL_NAMES: [&str; 10] = [
     "whole_content_key_hash",
     "decoded_cache_commit",
 ];
-const COUNTERS: usize = NAMES.len() + DETAIL_NAMES.len();
+// Exact Core publisher operations, nested inside stream publish. SourceSpool
+// contains the existing decoder details; failures can include nested cleanup.
+// These are a separate diagnostic level, never extra command time.
+const PUBLISHER_NAMES: [&str; 10] = [
+    "source_to_spool_inclusive",
+    "spool_to_shard_inclusive",
+    "final_verify_inclusive",
+    "stage_create",
+    "stage_seal",
+    "digest_lock",
+    "shard_open",
+    "rename",
+    "winner_open",
+    "checked_close",
+];
+const COUNTERS: usize = NAMES.len() + DETAIL_NAMES.len() + PUBLISHER_NAMES.len();
 const TIMING: &str = "wall-clock; phases may nest or overlap across workers; not additive; budget lifetime and phases are diagnostics, not accepted command total or CPU time";
 
 #[derive(Clone, Copy, Default)]
@@ -128,13 +153,25 @@ impl Profile {
                 })
             })
             .collect();
+        let publisher: Vec<_> = PUBLISHER_NAMES
+            .iter()
+            .zip(counters[NAMES.len() + DETAIL_NAMES.len()..].iter())
+            .map(|(name, counter)| {
+                serde_json::json!({
+                    "phase":name,
+                    "calls":counter.calls,
+                    "elapsedMicros":counter.elapsed.as_micros(),
+                })
+            })
+            .collect();
         serde_json::json!({
-            "schema":"lycheedev.data-query-phases.v2",
+            "schema":"lycheedev.data-query-phases.v3",
             "elapsedMicros":self.started.elapsed().as_micros(),
             "timing":TIMING,
             "captureTiming":"capture_metadata_inclusive includes capture and metadata work; metadata open/write/close are not separately observed",
             "phases":phases,
             "details":details,
+            "publisher":publisher,
         })
     }
 
@@ -264,7 +301,7 @@ mod tests {
         let mut span = Span::new(Some(&profile), Phase::ZlibInflate);
         span.finish(|_| Duration::from_micros(23));
         let value = profile.value();
-        assert_eq!(value["schema"], "lycheedev.data-query-phases.v2");
+        assert_eq!(value["schema"], "lycheedev.data-query-phases.v3");
         assert_eq!(value["phases"].as_array().unwrap().len(), 11);
         assert!(
             value["phases"]
@@ -277,6 +314,32 @@ mod tests {
         assert_eq!(value["details"][7]["calls"], 1);
         assert_eq!(value["details"][7]["elapsedMicros"], 23);
         drop(span);
+        drop(profile);
+        assert_eq!(output.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn publisher_observation_is_disabled_without_clock_and_keeps_three_levels_separate() {
+        let mut disabled = Span::with_clock(None, Phase::PublisherSourceSpool, || {
+            panic!("disabled publisher read a clock")
+        });
+        disabled.finish(|_| panic!("disabled publisher read elapsed time"));
+        let (profile, output) = Profile::observed();
+        let mut publisher = Span::new(Some(&profile), Phase::PublisherSourceSpool);
+        let mut decoder = Span::new(Some(&profile), Phase::ZlibInflate);
+        decoder.finish(|_| Duration::from_micros(7));
+        publisher.finish(|_| Duration::from_micros(19));
+        let value = profile.value();
+        assert_eq!(value["phases"].as_array().unwrap().len(), 11);
+        assert_eq!(value["details"].as_array().unwrap().len(), 10);
+        assert_eq!(value["publisher"].as_array().unwrap().len(), 10);
+        assert_eq!(value["details"][7]["elapsedMicros"], 7);
+        assert_eq!(value["publisher"][0]["phase"], "source_to_spool_inclusive");
+        assert_eq!(value["publisher"][0]["calls"], 1);
+        assert_eq!(value["publisher"][0]["elapsedMicros"], 19);
+        assert!(value["phases"].as_array().unwrap().iter().all(|p| p["calls"] == 0));
+        drop(decoder);
+        drop(publisher);
         drop(profile);
         assert_eq!(output.lock().unwrap().len(), 1);
     }

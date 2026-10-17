@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 10:39 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`8cab84824a8e50f55170293d7210ea464f931e3f`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 11:01 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`afbeb5498388812961cf23cbe50500cf0c881a20`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -71,11 +71,25 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 已新增[专用入口与操作说明](tests/rust-performance-paired/README.md)：固定bbfe/ab4两份原sealed优化产物、各自完整匹配源码见证，原artifact路径/记录不改；独立导出18个runner依赖。固定3对AB/BA/AB，每次独立application-cold home，原180秒产品/210秒调用/默认栈不变；两调用紧邻，完成后验证4036完整Facts所有字段/顺序及完整31phase，再封存/清理。失败不替样、未知回收停后继。外层固定60分钟，计入准备/身份/对照/收尾。Node定向47/47（0skip）已由作者及协调者各实际运行；Windows实际前置在bbfe源码见证digest不匹配处停止，6次产品调用均NOT_RUN，3个owner已回收（[原阻塞报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6232021715)，[证据索引](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6232021948)）。bbfe EXE/artifact匹配，clean见证1061文件逐Git blob匹配，但计算digest为cc35ac5c386a45010f90f1f518720800c5a0c35f721b6e73f76616a281f2194e，原artifact要求76bea4b27798356c9f5194f56c97c3a1292b214166b84c875dfc0bb75dfc7b34；必须核原构建输入清单/算法，不重标产物。ab4身份通过。本机Node导出遗漏先46/1、补齐后47/47，原失败保留。三对仍不是20对验收，不重建产品。另扩大既有runner测试时两项因云端固定Go对象缺文件失败，未更改原测试/未冒全套通过。generated完整guard/字段算法及Data私有流式解压由后继生产批保存，不混入b150 runner-only身份。
 
+### 固定历史双Rust witness后继
+
+[历史恢复实际报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6232226662)已逐字认证7个公开原始文件，独立bbfe/ab4 witness的完整sourceDigest均匹配原artifact，但Git七项未暂存M触旧clean条件，6个产品调用仍NOT_RUN，原失败owner封存回收。现最窄专用入口将该已证历史输入合同显式化：固定HEAD/artifact/EXE/原完整digest、七路径逐size/SHA、其它Git状态必须clean；通用verifyCandidate仍严格clean，不改Gitconfig/index/旧artifact，不接受任意dirty。报告保真实dirty与artifact-bound-witness标记。32项Node通过，真实双Rust3pair尚未执行。正式固定命令和反例范围见[专用说明](tests/rust-performance-paired/SOURCE-CANDIDATE-WITNESS.md)，不能用它放行其它产品或重标旧失败。
+
+### Data publisher v3观测后继
+
+已完成原publisher十个固定子段观测，保原11业务段与v2十detail，默认关闭不增加clock。没有删除读/哈希/事务/校验/收尾；source→spool、spool→shard、finalverify为inclusive，winner-open内包含finalverify，不能跨层相加。原48份v1/v2 stderr已由新reader实际读取且不改对象；Node30/30、七Rust文件rustfmt解析及独立静态核通过，新3项Rust仍NOT_RUN。完整字段和计时限制见[Data正式入口](tests/rust-performance-paired/data.README.md#publisher-diagnostic-scopes-v3)。未引入OpenSSL/CNG或更换MD5依赖，现阶段不凭21ms哈希子段贸然增加原生依赖面。
+
+### 8cab 同run性能诊断终态
+
+[Source31段](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6232776993)和[批主报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6232891216)：完整4036字段/顺序零差，Rust8015.3771ms、Go10113.785ms。git_blobs6886.849ms内互斥为read324.377、serial parse1189.303、serialize471.953、publish3649.523、original26.774、symbols134.061、worker wait721.033、未细分369.825ms。外层已测合7560.288ms，profile7781.565ms另留221.277ms未埋点，native与profile相差233.8121ms仅是测量边界差。worker累计5095.419ms重叠，不相加。3983次worker尝试减23 abandoned=3960采用，加76串行=4036；609小generated均进入worker，其成功数仅能界定586–609，不能从aggregate推断23个失败所属模式。发布stage1740.808＋rename1426.979ms为最大已定位部分，locks全0、seal3.210ms。
+
+[Data v2终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6232888659)：12路径48CLI、24cold/warm行全部等价，12pairs及outer回收，24×11业务段和240嵌套detail、48startup均有效；内存Go20成功4gap，Rust15成功6gap3未测，保原缺口。43段包1533引用/770唯一blob已逐SHA核验，24行互斥账均回原总T。cold BLTE总221.3877ms，prepare51.074＋payload98.426ms；跨Root与payload的publish98.910ms包含read0.069、encoded MD5 0.199、Z refill1.000、whole CKey21.673和其余75.969ms，不能把该publish全算payload独占。warm总123.8675ms，cache verify34.879ms跨两次，payload39.358ms。Z refill包含控制/工作/EOF检查，不是纯CPU；warm无decode。24单次ratio最小0.4474，全部未≤0.30；不得用跨run差值或不完整内存样本宣称流式收益。原正式20对性能失败仍保留。
+
 ### 公共 Facts 缓存身份后继
 
 8cab纠正括号声明/参数、操作符诊断及跨行位置后，仍沿用旧index/facts身份，旧合法缓存可能继续返回9a旧结果。此真实一致性缺口已补最窄后继：index fingerprint v12，facts key/layout/envelope v11-go323-generated-origins；公开source-v1、generator-v6和完整index container v6形状不变。query/readiness/session/research/relations消费者继续派生统一fingerprint。旧文件不改写、不重标。
 
-新增2个Rust真实写盘迁移回归，按9a封存原行重构合法旧缓存与旧whole-index，验证拒绝旧身份、完整重建、当前envelope/warm命中、query manifest及readiness迁移；不冒称这些重构文件是原捕获文件。正式read-fact-delta新增显式v11，保历史v6–v10与默认v6；新reader改变新runner输入身份，旧runner/receipt保持原字节。Node组合56/56、rustfmt及静态模板检查通过，Rust迁移回归尚未运行。此后继不打断正在使用8cab产物的Data诊断，后续新产物和reader须分别核准身份。
+新增2个Rust真实写盘迁移回归，按9a封存原行重构合法旧缓存与旧whole-index，验证拒绝旧身份、完整重建、当前envelope/warm命中、query manifest及readiness迁移；不冒称这些重构文件是原捕获文件。正式read-fact-delta新增显式v11，保历史v6–v10与默认v6；新reader改变新runner输入身份，旧runner/receipt保持原字节。[afbeb实际验证](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6232978472)：all-targets通过，完整facts_cache26/0/0、两项新迁移逐名通过，Node56/56，六owner回收；[原证据](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6232979009)保留。此后继不打断正在使用8cab产物的Data诊断，后续新产物和reader须分别核准身份。
 
 ### 8cab 完整前置与真实位置增强
 

@@ -37,6 +37,22 @@ impl serde_json::ser::Formatter for GoCaptureFormatter {
 }
 
 impl CaptureAccounting for Budget {
+    fn blob_stream_phase(&self, phase: lycheedev_core::evidence::BlobStreamPhase) -> impl Drop + '_ {
+        use crate::phase_profile::Phase;
+        use lycheedev_core::evidence::BlobStreamPhase;
+        self.phase(match phase {
+            BlobStreamPhase::SourceSpool => Phase::PublisherSourceSpool,
+            BlobStreamPhase::ShardCopy => Phase::PublisherShardCopy,
+            BlobStreamPhase::FinalVerify => Phase::PublisherFinalVerify,
+            BlobStreamPhase::StageCreate => Phase::PublisherStageCreate,
+            BlobStreamPhase::StageSeal => Phase::PublisherStageSeal,
+            BlobStreamPhase::DigestLock => Phase::PublisherDigestLock,
+            BlobStreamPhase::ShardOpen => Phase::PublisherShardOpen,
+            BlobStreamPhase::Rename => Phase::PublisherRename,
+            BlobStreamPhase::WinnerOpen => Phase::PublisherWinnerOpen,
+            BlobStreamPhase::CheckedClose => Phase::PublisherCheckedClose,
+        })
+    }
     fn check(&self) -> Result<()> {
         Budget::check(self)
     }

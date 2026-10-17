@@ -23,6 +23,18 @@ export const CANDIDATE_IDENTITIES = Object.freeze({
   baseline: Object.freeze({artifactSHA256: '43429c85cac9e0a3bb130c5de4d939e19a8219dca81001d426ae9a1c9ebd0d4e', binarySHA256: 'f25d5fbe4e43eb0ae2f28e310f28e4de51ab6be701d2919f94729132c76a39e6', sourceTreeSHA256: '76bea4b27798356c9f5194f56c97c3a1292b214166b84c875dfc0bb75dfc7b34'}),
   candidate: Object.freeze({artifactSHA256: '280c42204696a00d2a8e134347c726282c818e6353083c22a7d6737cf17a8450', binarySHA256: '3b124671486c476e55fabf8358d737ebe541005111585837f6ce03a609f95e47', sourceTreeSHA256: '9b45e843f8f4759e729a5574a6af4d5bca6a37bbfefaea9b7f6c03c6e65d71cc'}),
 });
+// Exact physical inputs already authenticated in PR #14 comments 6232226662 /
+// 6232231317. This exception belongs only to the fixed historical controller;
+// verifyCandidate below retains its default clean-checkout requirement.
+export const HISTORICAL_WITNESS_FILES = Object.freeze([
+  ['crates/lycheedev-cli/tests/source_native_xml_public.rs', 8312, 'fcb9372ce1be4226e8868bd0f66ef6255416e91eaa06365024db4c23d195d5e3'],
+  ['crates/lycheedev-source/examples/emmy_native_context_probe.rs', 429, '9170633c310e9aa7a9a78f2d6b7d185fe5206c3d7a1116d0c773433770237142'],
+  ['crates/lycheedev-source/examples/emmy_wow_binding_probe.rs', 68, '8083dc26123fdeb5d3c09a4ebda0c032ef118aff5d06a061b5cfc88d9df69f52'],
+  ['crates/lycheedev-source/examples/support/wow_binding.rs', 20748, '36d07bb41f28dfd80b597d607fd83ea9ab6df53d09ca535821d9c54d9ffe2419'],
+  ['crates/lycheedev-source/src/closure.rs', 12657, 'edbe9535a6c05f027029fb16bc1dcaf1a58232b030de4a834724f23d38dd6a16'],
+  ['crates/lycheedev-source/tests/native_checker_families_real.rs', 6532, '402f8df04955fc7bcaf5967935bd9ec8ea0fec03f9f3f8db9aa4f0cbf2a66c04'],
+  ['crates/lycheedev-source/tests/native_return_count_real.rs', 8570, '33aa2dfb8cdf05fc46fa70983367d964512bcd59c4615de21925f3d073fcb687'],
+].map(([path, bytes, sha256]) => Object.freeze({path, bytes, sha256})));
 export const PROFILE_SOURCE_SHA256 = 'a47cd78ffc979b20ce4a9d94974dac5ee0022b2ce9302eb910066da781062989';
 export const PHASE_NAMES = Object.freeze(['metadata', 'cached_index', 'index_lock', 'git_tree', 'git_blobs_inclusive', 'facts_read', 'facts_parse', 'facts_serialize', 'facts_publish', 'original_publish', 'symbols', 'index_serialize', 'index_publish', 'manifest', 'facts_worker_consumed', 'facts_worker_wait', 'facts_refill_dispatched', 'facts_publish_lock', 'facts_publish_stage', 'facts_publish_write', 'facts_publish_seal', 'facts_publish_rename', 'facts_publish_stage_close', 'facts_publish_lock_close', 'facts_parse_sequential', 'facts_worker_abandoned', 'facts_publish_lock_verify', 'facts_publish_lock_open', 'facts_publish_lock_kernel_attempt', 'facts_publish_lock_contention_backoff', 'facts_publish_lock_failure_close']);
 export const PHASE_TIMING = 'wall-clock; worker phase sums consumed job durations; phases overlap; not additive';
@@ -119,21 +131,65 @@ export function verifyCandidateRecord(input, artifact) {
 export function runnerIdentity(root) {
   return Object.fromEntries(RUNNER_FILES.map(file => [file, hashFile(join(root, file))]));
 }
+// Validate observations, not caller-supplied policy. The production collector
+// below obtains every field itself; neither CLI configuration nor artifacts can
+// supply a different allowlist, digest, status, file hash or HEAD.
+export function verifyHistoricalWitnessState(input, {head, sourceTreeSHA256, status, files}) {
+  const side = SIDES.find(side => input.commit === COMMITS[side]);
+  assert(side, 'historical witness: fixed HEAD required');
+  for (const key of ['artifactSHA256', 'binarySHA256', 'sourceTreeSHA256']) assert.equal(input[key], CANDIDATE_IDENTITIES[side][key], `historical witness: fixed sealed ${key} required`);
+  assert.equal(head, input.commit, 'historical witness: HEAD changed');
+  assert.equal(sourceTreeSHA256, input.sourceTreeSHA256, 'historical witness: complete source digest changed');
+  assert.deepEqual(files, HISTORICAL_WITNESS_FILES, 'historical witness: exact seven physical file identities required');
+  assert(Buffer.isBuffer(status) && status.length <= (1 << 20), 'historical witness: bounded raw Git status required');
+  const text = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true}).decode(status);
+  assert(text === '' || text.endsWith('\0'), 'historical witness: NUL-terminated porcelain required');
+  const rows = text === '' ? [] : text.slice(0, -1).split('\0');
+  const allowed = new Set(HISTORICAL_WITNESS_FILES.map(file => file.path)), modified = new Set();
+  for (const row of rows) {
+    assert(row.startsWith(' M '), 'historical witness: only unstaged tracked modifications admitted; staged/untracked/renamed/deleted/conflicted paths rejected');
+    const path = row.slice(3);
+    assert(allowed.has(path) && !modified.has(path), `historical witness: unexpected or duplicate dirty path: ${path}`);
+    modified.add(path);
+  }
+  return {schema: 'lycheedev.source-historical-witness.v1', policy: 'artifact-bound-historical-inputs', head, sourceTreeSHA256, gitDirty: rows.length !== 0, gitStatusRows: rows, gitStatusSHA256: sha256(status), physicalFiles: files};
+}
+export function readHistoricalWitnessFiles(root) {
+  return HISTORICAL_WITNESS_FILES.map(({path, bytes: expectedBytes}) => {
+    const file = contained(root, join(root, path)), info = lstatSync(file);
+    assert(info.isFile() && !info.isSymbolicLink() && info.size === expectedBytes, `historical witness: physical file type/size changed: ${path}`);
+    return {path, bytes: info.size, sha256: hashFile(file, expectedBytes)};
+  });
+}
 export function verifyCandidate(input, git) {
+  return verifyCandidateCheckout(input, git, false);
+}
+export function verifyHistoricalCandidate(input, git) {
+  return verifyCandidateCheckout(input, git, true);
+}
+function verifyCandidateCheckout(input, git, historicalWitness) {
   assert.equal(hashFile(input.artifact, 65536), input.artifactSHA256, 'artifact record changed');
   const artifact = verifyArtifact(input.artifactRoot, input.artifact);
   verifyCandidateRecord(input, artifact);
   assert.equal(realpathSync(git(['rev-parse', '--show-toplevel'], undefined, input.sourceRoot).toString().trim()), input.sourceRoot, 'source root is not checkout root');
-  assert.equal(git(['rev-parse', 'HEAD'], undefined, input.sourceRoot).toString().trim(), input.commit, 'candidate checkout commit');
-  assert.equal(git(['status', '--porcelain', '--untracked-files=all'], undefined, input.sourceRoot).toString().trim(), '', 'candidate checkout must be clean');
-  assert.equal(sourceDigest(input.sourceRoot), artifact.inputHashes.sourceTree, 'source/build identity mismatch');
+  const head = git(['rev-parse', 'HEAD'], undefined, input.sourceRoot).toString().trim();
+  assert.equal(head, input.commit, 'candidate checkout commit');
+  let sourceWitness;
+  if (historicalWitness) {
+    const status = git(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=none'], undefined, input.sourceRoot);
+    const files = readHistoricalWitnessFiles(input.sourceRoot);
+    sourceWitness = verifyHistoricalWitnessState(input, {head, sourceTreeSHA256: sourceDigest(input.sourceRoot), status, files});
+  } else {
+    assert.equal(git(['status', '--porcelain', '--untracked-files=all'], undefined, input.sourceRoot).toString().trim(), '', 'candidate checkout must be clean');
+    assert.equal(sourceDigest(input.sourceRoot), artifact.inputHashes.sourceTree, 'source/build identity mismatch');
+  }
   const emmy = inspectEmmy(input.sourceRoot);
   assert.equal(emmy.identity, 'public-upstream-unmodified-v1');
   assert.equal(emmy.patchedTreeSHA256, artifact.inputHashes.emmy?.patchedTreeSHA256);
   const channel = JSON.parse(readFileSync(join(input.sourceRoot, 'release/npm-channel.json')));
   assert.equal(channel.version, '3.5.0'); assert.equal(channel.distTag, 'beta');
   assert.equal(hashFile(join(input.sourceRoot, 'crates/lycheedev-source/src/index/profile.rs')), PROFILE_SOURCE_SHA256, 'fixed 31-phase source identity');
-  return {...input, artifact, emmy: {identity: emmy.identity, baseCommit: emmy.base.commit, treeSHA256: emmy.patchedTreeSHA256}};
+  return {...input, artifact, ...(sourceWitness ? {sourceWitness} : {}), emmy: {identity: emmy.identity, baseCommit: emmy.base.commit, treeSHA256: emmy.patchedTreeSHA256}};
 }
 export function compareCandidateFacts(documents, homes, summaries, oracle) {
   assert.equal(documents.length, oracle.documents);
@@ -193,7 +249,7 @@ export const evidenceFiles = directory => readdirSync(directory).filter(name => 
 // Dependency injection is only for deterministic orchestration/fault fixtures;
 // the CLI uses all real implementations and admits no override configuration.
 export function runCandidateController(config, overrides = {}) {
-  const services = {beginScratch, ownedSpawnSync, collectOwnedMemory, verifyCandidate, compareCandidateFacts, runnerIdentity, ...overrides};
+  const services = {beginScratch, ownedSpawnSync, collectOwnedMemory, verifyCandidate: verifyHistoricalCandidate, compareCandidateFacts, runnerIdentity, ...overrides};
   const {request, runnerRoot, inputs, conditions, scratch, evidence: out} = config;
   const oracle = JSON.parse(readFileSync(join(runnerRoot, 'tests/rust-source-full-corpus/retail-oracle.json')));
   assert.equal(oracle.commit, '31c7f7b9cc79e56c986b365c06a6afbcf3c9177b'); assert.equal(oracle.documents, 4036);
