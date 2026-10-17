@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 07:40 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`4a1da276664f236b081ca53cfb411245edae43de`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 08:26 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`ab4fc03605a08b544476742d07a3af08e4cc7ce9`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -43,9 +43,9 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 ### 4a1 三模块优化前置与两项测试修订
 
-4a1 已保存 Source XML/TOC typed parse、Data 请求内 Metadata owner 复用、Live owned projection。当前本机反馈：remote admission 14通过1失败，Live 358通过1失败；controlled_open 19通过、local_query 83通过1原忽略，Source三组及Core evidence/capture通过，精确封存报告链接待补。release/package/新性能尚未运行；未提供固定Go报告的观察运行不计正式84项Go差分，既有Lua runtime身份不匹配也尚待核实。
+4a1 已保存 Source XML/TOC typed parse、Data 请求内 Metadata owner 复用、Live owned projection。[正式前置结果](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6231331899)及[原证据](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6231332319)：all-targets通过，Source facts39/index68/lua19、Core evidence14/capture9/open19、Data export5/local83加1原忽略/admission14加1失败、Live358加1失败，总628通过2失败1忽略；新41为40通过1失败，迁移3/改名3均过，12个owner已回收。Source后续补验2个测试的84条完整Go差分通过，最初仅观察运行不重标。ab4只修下述两个fixture，本机实际remote admission 15/15、Live主组359/359均通过，原两失败逐名通过，嵌套子进程不重复累计；两个owner已封存回收，[ab4正式终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6231683736)已出。唯一匹配release及assembly成功，EXE 44541952B / SHA256 `3b124671486c476e55fabf8358d737ebe541005111585837f6ce03a609f95e47`；不是发布或npm smoke。旧7c Lua解释器报告绑定旧owned-process两文件身份，当前正式verifyInterpreter明确要求当前SUPPORT及原sealed build receipt一致；已在新目录用固定原tar和当前正式build入口重建并认证、回收成功，旧报告/清单未改；正式Lua9桥已在新runtime/匹配候选通过9/0/0，所有真实case root退出0并回收；未操作客户端。
 
-两处失败已定位并仅修测试，修订 Rust **NOT_RUN**：Data 原50ms在初次SQLite schema持久提交前开始，失败于open_metadata而未到目标acquire；现先用原control建立真实owner，再启动同50ms执行实际被占用的admission，保probe零调用、原owner仍持锁、原control正常及释放后成功准入断言。Live新测试从ResultVerified进入resume需要业务release，而所用recovery Peer只支持bind/unbind；现从真实Complete走disconnect/unbind，仍注入native checked-close失败，严格保完整raw report、持久关闭/无事务、一次打开关闭及owner claim已释放。生产实现、Peer防线、预算与deadline均未变；原4a1失败保留，不将静态修订计为复验通过。
+两处失败已定位并仅修测试，修订已由上述ab4正式组实测通过：Data 原50ms在初次SQLite schema持久提交前开始，失败于open_metadata而未到目标acquire；现先用原control建立真实owner，再启动同50ms执行实际被占用的admission，保probe零调用、原owner仍持锁、原control正常及释放后成功准入断言。Live新测试从ResultVerified进入resume需要业务release，而所用recovery Peer只支持bind/unbind；现从真实Complete走disconnect/unbind，仍注入native checked-close失败，严格保完整raw report、持久关闭/无事务、一次打开关闭及owner claim已释放。生产实现、Peer防线、预算与deadline均未变；原4a1失败保留，当前通过仅归属ab4对应正式组。
 
 逐批结果、原失败及迁移前完整条目保留在[10月16日验证历史](docs/toolkit/rust-migration-evidence-2026-10-16.md)与[前期历史](docs/toolkit/rust-migration-evidence-2026-10-15.md)。不同版本、重叠过滤组不累计为当前唯一总数。
 
@@ -58,6 +58,14 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 - **正常Facts与有限畸形输入**：[76d完整4036文档v9](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6226409878)逐字段/顺序0差。后继[e8d新增XML32与旧52](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6226448382)全字段/顺序全部等价，Rust15/0/0、Node18/0/0；关闭该明确输入集差异，不称非法Lua/XML已穷尽。Facts v10/index v11及[显式v10读侧](tests/rust-performance-paired/read-fact-delta.README.md)已保存，[e8d独立新home完整4036 v10](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6226520186)逐字段/顺序0差，声明65320/关系227786/loads4169/headers1888/diagnostics0；报告SHA `722f3ea2ca4dfb2b3ba6b2aef4020d0a8bbc39cadd6fc50cf608b3c547d4a202`，匹配优化构建成功，未重跑retained/20对性能。
 - **寿命与性能**：e843真实600047ms正常寿命退出0通过，原失败保留。76d单次等价诊断cold index Go8626ms/Rust9617ms、cold query9199/10107ms、warm query642/130ms；不是20对验收。旧[5bbb完整20对](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6221187576)仅warm query比0.202388达≤0.30，B01约1.13/cold query约5.00失败。新的完整B01–B07配对与内存验收仍未完成，单次改善不能覆盖旧统计失败。
+
+### ab4 三模块优化实测边界
+
+[完整4036 v10及同run Source分账](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6231623390)字段/顺序0差。单次native Rust9918.747ms/Go10654.6351ms，比0.9309326，未达≤0.30，也不是20对验收。bbfe对应7.905/8.546秒比0.92505；两侧跨run都变慢，不能把Rust绝对增时直接归因某一改动，也不能宣称typed解析已提速。新增1473次worker与减少1473次串行解析对应；串行仍2095.311ms/685次、worker等待1003.759ms/3374、abandon仍23次，剩余重路径需按实际格式/任务成本继续归因。
+
+同run非重叠主线程账（毫秒）：metadata0.349、index锁0.673、git tree109.393、facts读346.910、串行parse2095.311、facts序列化514.373、facts发布4038.019、original24.041、symbols146.331、worker等待1003.759、Git/流水线未细分377.847、index序列化645.354、index发布102.806、manifest7.893、profile内其它252.989、profile外252.699，合9918.747。未细分余量不是CPU或物理磁盘标签；worker累计parse和发布子桶均不再相加。Facts发布的7个锁字段全部0，stage1782.109ms、rename1714.018ms仍为嵌套子段。
+
+同批Data正式诊断48测量CLI加15准备、24个cold/warm行完整结果/校验等价，全部测量exit0并回收，12pair全部retired；24份Rust11字段profile和48份startup有效。仅单pair观察，不能替代旧22组20对性能失败。内存46次successful、2次Go cold样本有gap，不补样。Capture仍每次durable事务，连接owner复用收益尚须按同run完整分账核实；不得用仅6–17ms的capture范围推断已达标。原4a1两失败、旧runtime身份失败、历史严格差分及EPERM均保留。
 
 ### 实际155条semantic gaps的范围
 
