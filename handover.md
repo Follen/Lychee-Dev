@@ -1,8 +1,27 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 20:13 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新产品/runner `ba0c2f1e1da0ea6001797323bc720af00335b85f` 六个fresh场景实际完整Facts/字段/顺序/共同summary均等价，12调用成功并完成身份与owner收尾；本次引用的Go Facts/Rust pack或loose/index完整归档核验后cleanup。四变体真实派单9/1/8/9，等待仅0.117–3.526ms，总wall1.946–2.159s；原约2s无用worker等待已消除，但与本轮Go比值约0.65–0.71，仍未达≤0.30，也非20对验收。两项Windows文件symlink创建EPERM环境限制明确保留。全量性能与最终五阶段循环审计未完成。
+更新：2026-10-17 20:53 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `31a873a677e355f39b54ea5635ac22135c271904` 六fresh场景全Facts/字段/重复/顺序/共同summary等价，完整实际读取证据归档核过后cleanup。冷4.315s、暖0.387s、四变体1.269–1.281s；六个Rust/Go比值0.435–0.682，均未达≤0.30，仍是单组诊断。完整性能与最终五阶段循环审计未完成。
 
-### 最新实测：ba0 cache-aware完整六场景
+### 最新实测：31a借用canonical序列化完整六场景
+
+[前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6240462842) alltargets通过，index107/0/0含10新增逐名，facts48/0/0；155主Rust测试不重复加新增、helper或Go104输入。固定Go104严格等价，受影响Node单项1/0/0；完整Node沿ba0原304pass/2文件symlink创建EPERM环境skip，不称31a重跑306或负例通过。
+
+[正式终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6240736797)、[完整证据索引](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6240780687)、[交付](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6240808510)：匹配release/assembly各一次。EXE44,728,832B，SHA `72a0c9c09a431f663e3cd8f15e8c5f4197761edad6089f68d26c0200aa35e5f0`，artifact `286d1acce0ef2fa2bf61aaf4ea70b20184b6dcc7abd8f84ce76fe30a1d409800`，sourceDigest `035611e6703efe88f57f506a302d01ec866da7966bc81a74ca1bc6f6285cf62c`。
+
+| 场景 | Go native ms | Rust native ms | Rust/Go | Rust serialize ms | 推导profile余量 ms |
+|---|---:|---:|---:|---:|---:|
+| cold | 8366.7413 | 4315.2788 | 0.515766 | 88.106 | 5.334 |
+| warm | 568.3142 | 387.3169 | 0.681519 | 0 | 0.080 |
+| single-content-change | 2834.1901 | 1268.5967 | 0.447605 | 90.648 | 5.191 |
+| root-insert | 2937.4934 | 1278.4102 | 0.435204 | 91.469 | 4.823 |
+| first-delete | 2910.6008 | 1275.5650 | 0.438248 | 93.667 | 5.078 |
+| cross-prefix-rename | 2831.3599 | 1281.2283 | 0.452513 | 92.577 | 6.314 |
+
+12fresh index+4准备调用，wrapper0/succeeded、finalIntegrity=true、NOT_RUN空。17新owner sealed/reaped，16retired、Node stage保留；12产品native无forced/deadline，编译knownAuxiliaryCleanup原事实保留。完整五Facts数组与实际Go/Rust pack/loose/index/manifest读取tuple均归档验证。16附件/52,802files、完整包131,137,681B SHA `b8fcd61effb36761a2dbe8048aa9c15a47313fe434a5aa0046229446a940345d`由本机GET/CRC/片与wholeSHA实际核过，云端独立复核待原唯一作者完成。
+
+余量是profile.elapsed减8个已核互斥顶层span，不是独立测量或CPU/IO归因；不叠加嵌套worker桶、不扣native总wall。相比ba0观察到明显端到端下降，但非交错重复因果验收。warm原本零parse/serialize，不能归因本次serializer；12内存样本均有gap，不报完整RSS。四变体仍实际只派9/1/8/9；single/insert/delete FactsRead约477–485ms，下一最窄候选是在原schema/input/canonical digest认证后转移Facts子树，去clone，不改校验/错误/取消/缓存布局。
+
+### 历史实测：ba0 cache-aware完整六场景
 
 [匹配release/assembly](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6239892161)：EXE44,729,856B，SHA `dd0a750f815f87fbc10c618db060f927127c8aff824dba40dbf41bdbd40ecb36`；artifact SHA `901277b950dca0b7e63a61d09bfdaab370e5f1a0712c672ceee9c7e937817896`。sourceDigest `3e579f87ace9ff533bdd9af4bccdd46c4d1600ce093540b7367ad5e11dda7c47` 与fc001相同，原Rust176与8新增保持fc001身份而不重跑/重标。assembly启动引号错误在owner创建前被拒，修启动参数后首次实际组包成功，无重复release。
 
@@ -15,15 +34,15 @@
 | [first-delete](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6240082268) | 2991.7317 | 1946.3790 | 8/4027 | 8 / 3358 |
 | [cross-prefix-rename](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6240085930) | 3181.9718 | 2133.5056 | 9/4027 | 9 / 3526 |
 
-本轮finalIntegrity=true、NOT_RUN空、12实际产品调用，四变体8owner sealed/reaped/retired。完整读取tuple与归档一致，解决未来变体pack证据缺件；原e475缺件和全部旧失败不补造。附件仍在整理，尚未独立下载重放本轮全部归档。各为一次诊断，不是20对；内存原采样缺口保留。cold worker_wait含不同等待边界，group drain未单独计时，不能把1.986s全部归因于drain，也不能将嵌套phase累计当native总wall。下一优先依据同run剩余约2s中完整index物化/编码与Facts读取结构，不继续优化已为零的命中worker等待。
+本轮finalIntegrity=true、NOT_RUN空、12实际产品调用，四变体8owner sealed/reaped/retired。完整读取tuple与归档一致，解决未来变体pack证据缺件；原e475缺件和全部旧失败不补造。[ba0完整索引](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6240361205)与[终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6240381566)现已由云端唯一作者独立复核：16 ZIP/CRC/片及wholeSHA、137965 chunks、52599 files全过；12原native receipts/ticks、14owner/52416 sealed引用无缺件，六场景原Facts全部字段/重复/顺序与custody逐字节重放通过。原尾4片403与partial记录保留，随后同URL正常恢复，没有替代route。各为一次诊断，不是20对；内存原采样缺口保留。cold worker_wait含不同等待边界，group drain未单独计时，不能把1.986s全部归因于drain，也不能将嵌套phase累计当native总wall。下一优先依据同run剩余约2s中完整index物化/编码与Facts读取结构，不继续优化已为零的命中worker等待。
 
 [Windows Node](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6239635558)实际306总、304pass/0fail/2skip；仅pack file-symlink和dangling output file-symlink创建EPERM，负例未执行，不称通过。目录junction、Rust/Go replay、duplicate Go key真实mutation与原reject均通过。原fc001 Node299/4fail完整保留。
 
-### 当前未测候选：完整index借用canonical序列化
+### 已验证实现：完整index借用canonical序列化
 
 ba0四变体同row仍有FactsRead483–542ms、IndexSerialize465–596ms、publish91–115ms。已实现最窄默认链切片：`index::persistence_wire::encode(&map)`替代完整`to_value`副本与二次编码，只借用现有Index/Value；私有wrapper精确保对象排序、数组/重复、可选省略、locator小写hex与仅summary顶层io剔除。128MiB仍在完整Vec生成后由原publisher判断，原内容hash、manifest、锁/checked-close及取消边界不动；pack2/v14、公共Serialize与Emmy原版不变。原DOM析构在span外，潜在收益不能全归IndexSerialize。warm整index读取不受此片优化。
 
-3源码/测试文件已rustfmt解析与独立静态审阅，10个`index::persistence_wire::tests::borrowed_index_*`正式回归仍NOT_RUN：旧新完整bytes、32可选组合/Unicode/重复、locator极值、合法数值/deep/null、private-marker普通对象、非法summary、writer短写/失败、真实cold/warm blob+manifest、publisher大小/取消/损坏、非持久字段。下一固定批alltargets→完整index::（10新逐名）及相关Facts/既有Go输入→匹配一次release/assembly→正式六场景；此前ba0结果不重标，性能不预报。详细新测试名以源码为准。
+3源码/测试文件经rustfmt解析与独立静态审阅，31a完整index107包含10个`borrowed_index_*`正式回归全部实测通过：旧新完整bytes、32可选组合/Unicode/重复、locator极值、合法数值/deep/null、private-marker普通对象、非法summary、writer短写/失败、真实cold/warm blob+manifest、publisher大小/取消/损坏、非持久字段。匹配六场景结果见上，不将实现回归闭合冒充20对性能达标。
 
 ### 历史实测：e475/00d稳定分组完整六场景
 
