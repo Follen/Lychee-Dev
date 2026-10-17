@@ -432,8 +432,8 @@ where
             .request_close(control)
             .and_then(|_| driver.continue_or_retire(control, target, true, &mut self.scheduler));
         let retire = result.is_ok() && driver.state.closed;
-        let projected = present(
-            &driver.state,
+        let projected = present_owned(
+            driver.state,
             record.paths.log_path(),
             self.clock.unix_millis(),
             &driver.waiting,

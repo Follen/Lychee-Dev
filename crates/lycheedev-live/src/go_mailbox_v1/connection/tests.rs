@@ -454,6 +454,75 @@ fn successful_turn_still_returns_checked_close_failure_and_releases_lease() {
     let (_, mut next) = f.book().acquire(&f.id, &control()).unwrap();
     next.close().unwrap();
 }
+
+#[test]
+fn owned_terminal_projection_keeps_durable_raw_report_after_native_close_failure() {
+    let f = Fixture::new();
+    f.operation(OperationStage::ResultVerified, "owned-report");
+    let original = f.state().operation.unwrap().result_bytes.0;
+    let mut service = f.service();
+    service.environment.close_error = Some(error("fixture.native_close_failed"));
+    let outcome = service.resume(&f.id, &control());
+    assert!(code(&outcome, "fixture.native_close_failed"));
+    let ServiceOutcome::ReportedWithFailure { result, .. } = outcome else {
+        panic!("checked close failure must preserve the completed report");
+    };
+    assert_eq!(result.report_state, "verified");
+    assert_eq!(result.report.unwrap().0, original);
+    assert_eq!(f.state().operation.unwrap().result_bytes.0, original);
+    assert_eq!(service.environment.counts.borrow().opens, 1);
+    assert_eq!(service.environment.counts.borrow().closes, 1);
+    let (_, mut next) = f.book().acquire(&f.id, &control()).unwrap();
+    next.close().unwrap();
+}
+
+#[test]
+fn owned_driver_budget_failure_keeps_original_projection_and_checked_resource_closes() {
+    use crate::go_mailbox_v1::state::{DurableBudget, ReloadAttempt, ReloadPhase};
+    let f = Fixture::new();
+    f.operation(OperationStage::ReleaseReady, "owned-budget-error");
+    f.edit(|s| {
+        let operation = s.operation.as_mut().unwrap();
+        operation.cleanup_method = CleanupMethod::ReloadRequired;
+        let budget = DurableBudget {
+            started_at_ms: 1000,
+            deadline_ms: 9000,
+            last_observed_ms: 1000,
+            ..DurableBudget::default()
+        };
+        operation.recovery_budget = Some(budget.clone());
+        s.reload = Some(ReloadAttempt {
+            automatic: true,
+            slot_enablement: false,
+            slot_budget_source: None,
+            recovery_budget: Some(DurableBudget { deadline_ms: 9001, ..budget }),
+            reconcile_pending: false,
+            request: format!("cleanup-{}", operation.id),
+            from: s.identity.runtime.clone(),
+            phase: ReloadPhase::Intent,
+            input_step: 0,
+            patch_transitions: 0,
+        });
+    });
+    let original = f.state();
+    let log = fs::read(f.log()).unwrap();
+    let expected = present(&original, &f.log(), 1000, "", "fixture-scans");
+    let mut service = f.service();
+    service.environment.close_error = Some(error("fixture.native_close_failed"));
+    let outcome = service.resume(&f.id, &control());
+    assert!(code(&outcome, "live.channel_budget_invalid"));
+    assert!(code(&outcome, "fixture.native_close_failed"));
+    assert_eq!(
+        serde_json::to_vec(&outcome.into_report().unwrap()).unwrap(),
+        serde_json::to_vec(&expected).unwrap(),
+    );
+    assert_eq!(f.state(), original);
+    assert_eq!(fs::read(f.log()).unwrap(), log);
+    assert_eq!(service.environment.counts.borrow().opens, 1);
+    assert_eq!(service.environment.counts.borrow().closes, 1);
+    let (_, mut next) = f.book().acquire(&f.id, &control()).unwrap();
+    next.close().unwrap();
+}
 #[test]
 fn durable_deadline_is_not_restarted_by_another_invocation() {
     let f = Fixture::new();

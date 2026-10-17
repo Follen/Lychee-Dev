@@ -1,11 +1,12 @@
 //! Public source facts preserve the fixed Go scanner contract. Native semantic
 //! analysis uses the syntax tree independently of these literal observations.
+use crate::facts::worker::{self, WorkerGuard};
 use crate::facts::{Declaration, Facts, Relationship, SyntaxNote};
-use lycheedev_core::{Result, ToolkitError, control::OperationControl};
+#[cfg(test)]
+use lycheedev_core::control::OperationControl;
+use lycheedev_core::{Result, ToolkitError};
 use std::borrow::Cow;
 use tree_sitter::{InputEdit, Node, ParseOptions, Parser, Tree};
-mod worker;
-use worker::WorkerGuard;
 
 pub struct SyntaxDocument {
     bytes: Vec<u8>,
@@ -281,22 +282,20 @@ impl SyntaxDocument {
         worker::check(guard).then_some(w.facts)
     }
 }
-/// Pure speculative preparation. Failure is an abandonment, not a public error.
-/// Caller holds the 32 MiB scratch prerequisite documented by WorkerGuard.
-pub(crate) fn facts_for_worker(
-    raw: &[u8],
-    control: &OperationControl,
-    max_owned_bytes: usize,
-) -> Option<Facts> {
-    if raw.len() > 64 << 10 || std::str::from_utf8(raw).is_err() {
+/// Nested XML handlers share their document's owned/scratch admission. The
+/// caller keeps the original input <=64 KiB and the same observation-only guard.
+pub(crate) fn facts_with_worker_guard(raw: &[u8], guard: &WorkerGuard<'_>) -> Option<Facts> {
+    if raw.len() > 64 << 10 || !guard.check() {
+        guard.abandon();
         return None;
     }
-    let guard = WorkerGuard::new(control, max_owned_bytes);
-    if !guard.check() {
-        return None;
+    let result = SyntaxDocument::new_with_guard(raw, false, Some(guard))
+        .ok()
+        .and_then(|document| document.facts_with_guard(false, Some(guard)));
+    if result.is_none() {
+        guard.abandon();
     }
-    let document = SyntaxDocument::new_with_guard(raw, false, Some(&guard)).ok()?;
-    document.facts_with_guard(false, Some(&guard))
+    result
 }
 /// Lua 5.1's `goto` is an identifier. The pinned modern grammar reserves it.
 /// Token-only, same-width masking makes the grammar see an identifier while

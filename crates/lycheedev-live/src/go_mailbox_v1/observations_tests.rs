@@ -113,6 +113,37 @@ fn go_mailbox_v1_observations_requalify_fake_head_and_body_without_sequence_equa
     );
     assert_eq!(reader.calls, vec![Kind::Receipt, Kind::Body]);
 }
+
+#[test]
+fn go_mailbox_v1_observations_report_moves_validated_body_allocation_and_capacity() {
+    for large in [false, true] {
+        let payload = if large {
+            let mut bytes = b"{\"s\":\"".to_vec();
+            bytes.resize(MAX_PAYLOAD - 2, b'x');
+            bytes.extend_from_slice(b"\"}");
+            bytes
+        } else {
+            b" {\"s\":\"\xff\",\"n\":1e400,\"n\":-0} \n".to_vec()
+        };
+        let mut r = receipt();
+        r.report_bytes = payload.len() as u32;
+        r.report_checksum = checksum(&payload);
+        let head = record(Kind::Receipt, 8, serde_json::to_vec(&r).unwrap());
+        let mut body = record(Kind::Body, 3, payload.clone());
+        body.payload.reserve(123);
+        let pointer = body.payload.as_ptr();
+        let capacity = body.payload.capacity();
+        let mut reader = fake(vec![vec![head], vec![body]]);
+        let Observation::Reported { receipt: observed, payload: moved } = observe_records(
+            &OperationControl::default(), &mut reader, &query(ObservationKind::Result),
+        ).unwrap() else { panic!("complete validated body was not reported"); };
+        assert_eq!(observed, r);
+        assert_eq!(moved, payload);
+        assert_eq!(moved.as_ptr(), pointer, "actual allocation must transfer");
+        assert_eq!(moved.capacity(), capacity, "capacity cannot be rebuilt from length");
+        assert_eq!(reader.calls, vec![Kind::Receipt, Kind::Body]);
+    }
+}
 #[test]
 fn go_mailbox_v1_observations_rejected_receipt_retained_and_target_checked() {
     let mut r = receipt();

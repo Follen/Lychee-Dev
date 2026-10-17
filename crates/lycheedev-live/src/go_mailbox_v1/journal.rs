@@ -89,42 +89,57 @@ fn artifact_digest(s: &str) -> bool {
             .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
 }
 pub fn snapshot(state: &State) -> Result<Snapshot> {
-    // Match Go's JSON copy: code invalid UTF-8 is replaced on the COPY only;
-    // host observedAtMillis is not restored as freshness.
-    let bytes =
-        serde_json::to_vec(state).map_err(|_| ContractError("live.channel_journal_invalid"))?;
-    let mut copy: State = serde_json::from_slice(&bytes)
-        .map_err(|_| ContractError("live.channel_journal_invalid"))?;
-    copy.artifacts.clear();
+    let mut copy = state.snapshot_metadata()?;
     let mut artifacts = BTreeMap::new();
-    let mut put = |key: &str, bytes: Vec<u8>| {
+    let mut put = |key: &str, bytes: &[u8]| {
         if bytes.is_empty() {
             return;
         }
-        let digest = hash(&bytes);
+        let digest = hash(bytes);
         copy.artifacts.insert(key.into(), digest.clone());
-        artifacts.entry(digest).or_insert(bytes);
+        // Only the first owner of identical artifact bytes needs an allocation.
+        artifacts.entry(digest).or_insert_with(|| bytes.to_vec());
     };
-    if let Some(o) = &mut copy.operation {
-        put("code", std::mem::take(&mut o.code).into_bytes());
-        put("result", std::mem::take(&mut o.result_bytes.0));
+    if let Some(o) = &state.operation {
+        put("code", &json_code_bytes(o.code.as_bytes()));
+        put("result", &o.result_bytes.0);
     }
-    if let Some(t) = &mut copy.transaction {
-        put(
-            "transaction",
-            std::mem::take(&mut t.envelope.code).into_bytes(),
-        );
+    if let Some(t) = &state.transaction {
+        put("transaction", &json_code_bytes(t.envelope.code.as_bytes()));
     }
-    if let Some(t) = copy.recovery.as_mut().and_then(|r| r.transaction.as_mut()) {
-        put(
-            "recovery",
-            std::mem::take(&mut t.envelope.code).into_bytes(),
-        );
+    if let Some(t) = state.recovery.as_ref().and_then(|r| r.transaction.as_ref()) {
+        put("recovery", &json_code_bytes(t.envelope.code.as_bytes()));
     }
     Ok(Snapshot {
         state: copy,
         artifacts,
     })
+}
+
+/// CodeBytes' JSON-copy relation: ONE replacement character for EACH invalid
+/// byte, including a truncated multibyte prefix. Valid code is borrowed until
+/// the artifact map acquires its one owned copy; no intermediate JSON/base64.
+fn json_code_bytes(bytes: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    if std::str::from_utf8(bytes).is_ok() {
+        return std::borrow::Cow::Borrowed(bytes);
+    }
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut rest = bytes;
+    while !rest.is_empty() {
+        match std::str::from_utf8(rest) {
+            Ok(_) => {
+                output.extend_from_slice(rest);
+                break;
+            }
+            Err(error) => {
+                let valid = error.valid_up_to();
+                output.extend_from_slice(&rest[..valid]);
+                output.extend_from_slice("\u{fffd}".as_bytes());
+                rest = &rest[valid + 1..];
+            }
+        }
+    }
+    std::borrow::Cow::Owned(output)
 }
 pub fn hydrate(mut state: State, mut read: impl FnMut(&str) -> Result<Vec<u8>>) -> Result<State> {
     for (key, digest) in std::mem::take(&mut state.artifacts) {
@@ -329,3 +344,7 @@ pub fn prepare_event(previous: &[MemoryEvent], kind: &str, state: &State) -> Res
 #[cfg(test)]
 #[path = "journal_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "journal_snapshot_tests.rs"]
+mod snapshot_tests;

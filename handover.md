@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 06:16 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`46678bff2aa54c251a9865cffb302a109cd7fa96`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 06:55 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`bbfe88265ee431b9ad925ab86dc52561742dd5ee`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -81,7 +81,7 @@ Data新增16个唯一Rust测试（profile8、真实consumer8）已在4c2实际�
 
 [现Data入口](tests/rust-performance-paired/data.README.md)新增独占--data-phase-profile，需本批匹配优化产品：12路径各1冷/1暖、48测量CLI＋15准备，原startup proof/完整结果等价/总时钟保留；只Rust测量进程开启env，严格接受单条完整profile，默认与Go仍空stderr，错误/未知stderr不吞。它不能与acceptance/resume/startup-only组合，不把子段相加或扣除后宣称达标。统一一次新构建后同时验证Source4036及Data阶段，本机已重连，父线程统一安排后继编译及当前独立组，不擅自重复运行。
 
-### Facts 无独立锁文件原子发布（实测发现writer-close竞争，后继待复验）
+### Facts 无独立锁文件原子发布（bbfe 正确性通过，性能测量进行中）
 
 用户要求核清只读输入与缓存锁的实际必要性。输入与cache.read原本无该锁；旧锁仅包已解析完整bytes的发布，不防重复解析。现Facts-only改为私有排他CREATE→完整写/seal→同目录atomic replace，Originals、整index、metadata锁保持。公开Core接口本就允许同key不同完整body，保last-writer及原NotPublished等价fallback，不新增首赢家/不同body拒绝或正常成功路径额外读取。
 
@@ -89,13 +89,35 @@ Data新增16个唯一Rust测试（profile8、真实consumer8）已在4c2实际�
 
 [466本机完整前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6230454742)alltargets通过，六组165通过1失败：Facts23/storage55/Sourcecache21/pipeline28/profile4通过，Windows34通过1失败。新增15断言中14过1败，真实双进程helper命中。唯一失败为前writer已rename但原stage句柄未close，第二replace返回Win32 sharing32；旧rename fixture已过。优化构建/4036/性能均未跑，不能称去锁方案已闭合。
 
-本后继保stage原share READ与严格父目录，不能放宽DELETE-sharing让私有stage被迁到别的父目录。仅exact同步native STATUS_SHARING_VIOLATION转typed SharingBlocked且保持NotPublished；Facts-only保同sealed句柄在原remaining内最多25ms一等再试，每次仍原parentverify/控制/计费。普通rename与Originals错误合同不变，任意io error32、已提交后伪32、其它不确定结果仍Unknown终态不重试。原窗口test改为两次真Blocked→原writer真实关闭→同owner发布；新增6项覆盖真实pending/取消/原deadline、普通API、非cache拒绝及Unknown不重放。新6及修订test全部NOT_RUN，Node22/22和静态/解析通过。后续完整前置后一次匹配优化构建/4036差分及Data阶段观测，原失败保留，无性能收益结论。
+本后继保stage原share READ与严格父目录，不能放宽DELETE-sharing让私有stage被迁到别的父目录。仅exact同步native STATUS_SHARING_VIOLATION转typed SharingBlocked且保持NotPublished；Facts-only保同sealed句柄在原remaining内最多25ms一等再试，每次仍原parentverify/控制/计费。普通rename与Originals错误合同不变，任意io error32、已提交后伪32、其它不确定结果仍Unknown终态不重试。原窗口test改为两次真Blocked→原writer真实关闭→同owner发布；新增6项覆盖真实pending/取消/原deadline、普通API、非cache拒绝及Unknown不重放。[bbfe 实际前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6230696383)all-targets通过，六组172/172，新6及修订writer窗口逐名通过，7个owner封存回收；Node22/22和静态/解析通过。[匹配优化构建与assembly](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6230789929)已成功，EXE SHA-256 `f25d5fbe4e43eb0ae2f28e310f28e4de51ab6be701d2919f94729132c76a39e6`；完整4036 Facts v10字段和顺序零差异。[同次Source冷profile](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6230905817)原完整native墙钟Rust7905.3876ms、Go8545.909ms，ratio0.925049，单次等价但未达≤0.30，不能替代20对验收。Facts发布3168.351ms，其中stage1462.106、rename1251.122、write283.678、seal3.023、close158.258、其余10.164；7个锁字段均为0。串行解析2005.918ms/2158份，主线程worker等待565.354ms；worker累计不加入端到端总和。Data48个诊断样本已实际完成，完整11段同row归因正在核验；原466失败保留。
+
+### 当前 Source 多格式纯解析候选（实现完成，待集中验证）
+
+普通Lua、XML、TOC使用同一typed纯解析任务，原文字节移动而非复制，worker无cache/目录/可变index；协调端仍按原顺序认证cache、处理首错、序列化及发布。XML与inline Lua共用同文档4MiB Facts和32MiB保守scratch准入，保64KiB输入、2MiB线程栈、原256MiB共享额度及逻辑核选择；generated Lua仍走完整原串行路径。预算不足或取消丢弃整个投机结果，在原消费位置走原完整解析，不把partial当成功。固定属性结构仍校验每个属性，保重复最后胜出和未知属性错误顺序。
+
+新增21个唯一回归覆盖混合并发/顺序、84固定Lua/XML边界全字段、共享scratch与cache优先；原3个guard测试仅移到facts::worker模块，3个pipeline测试改名不重复计数。当前仅rustfmt解析、diff和unsafe扫描通过，Cargo/Windows/性能NOT_RUN。目标是同次bbfe串行解析2.006秒的实际关键路径，不能预先把它全部算作可省时间。
+
+### 当前 Data request-owned Metadata 候选（实现完成，待集中验证）
+
+bbfe真实48诊断样本/40段封存证据已核：图片冷prepare42.292–47.727ms，三类capture合计30.909–36.743ms；暖capture29.898–34.752ms，texture+pixel/hash+encode仅4.351–9.588ms。17MiB BLTE payload冷95.022ms/暖36.639ms包含完整认证与缓存发布，不等同纯解压。全段原时钟保留，单pair诊断不是20对验收。证据见[全批报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6230863009)与[索引](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6230863476)。
+
+本候选在image三capture、inspect、SQL/CSV同步工作中借用OpenWorkspace已持有的Metadata；每次仍独立schema/依赖验证及BEGIN IMMEDIATE/COMMIT，不跨codec/输出持事务。显式架构变化是每capture物理SQLite close合并到原scope最终close：晚close失败继续保全部已提交capture IDs与outputPublished，外部artifact时点不移动，成功CLI Outcome只在最终checkedclose后返回。原outer SQLite连接本就在Windows请求全程持有，固定bundled Win32 VFS无FILE_SHARE_DELETE，正常生产协议不能同时替换整DB；合法行事务仍可并发，引用依赖每次重新认证。此说明不声称防任意裸写或提供Unix同等共享保证。
+
+新增9项回归覆盖三阶段事务失败/取消、post-commit事实、跨owner拒绝、删除依赖后重验和PNG/WebP最终真实close后的错误注入。13文件rustfmt语法与diff检查通过；Cargo/新测试与收益NOT_RUN。不改变BLTE双stage同目录发布链、原完整hash及phase字段，不新增全局连接池。
+
+### 当前 Live owned 投影候选（实现完成，待集中验证）
+
+snapshot改显式持久元数据投影，去整State JSON/base64中间副本；小INPUT仍用原自定义codec，保legacy绑定/host时间/inputAttempt清理。CodeBytes每个非法UTF-8字节的旧替换语义与原始report字节保留，artifact去重只持首次副本。BODY及终态report Vec转移所有权，drive去整State clone并释放已取得lease前的旧快照；reload/repair在backend打开失败前仍需的副本不机械删除。原backend checked-close→journal close→条件retirement顺序不变。
+
+新增11项离线回归，以独立旧snapshot/present实现比较完整raw、artifact、事件/checksum，并核Vec指针/容量、verified report与cleanup失败并存及预算失败关闭顺序。当前仅12文件rustfmt语法、独立静态复核和diff通过，Cargo/离线执行/收益NOT_RUN。日志解析缓存只保留设计：每次仍须完整认证当前字节，变化走原错误路径，不能用mtime/长度略过同长篡改；本批未引入常驻日志缓存或改变durability。
 
 ### 公开 Source project 选择修复（新增12项实测通过）
 
 refs/context省略snapshot时复用现有受控project/最近父级锁选择，显式snapshot仍优先。context把认证后的同一pin移交relations，避免cursor认证后再次读取可变project锁，保原control和绝对deadline。固定Go命令先解析数值、后project、再research selector的顺序已核；本片保context数值首错和project错误优先于selector。新增12 Rust＝2移交/控制单元＋9公开消费者回归＋1需要匹配包的真实CLI static/native显式ignored项。30d本机两单元2/0/0、完整refs_context14/0/3实际通过；[匹配30d release/package后真实CLI测试1/1通过](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6228578918)，新增12项逐名全通过；其余原ignored保持原边界。云端Node默认3通过1明确Go源码复核skip，指定持有固定Go323对象的checkout后4/4真实通过；核心3项不要求本机Rust仓有旧Go对象。普通产品consumer/cursor切pin与恢复、immutable pin认证已有上述Windows组证据；真实packaged static/native已在本轮命中。此修复独立于已通过的runner显式variant snapshot路线。
 
 ## 4. 进入最终五阶段前的有限收口
+
+当前优化以 Source、Data、Live 同次请求的完整端到端墙钟为主：互斥已测区间加明确余量，嵌套与并行累计单列，不扣除成本或转移到首次查询。逐项核算法、数据结构、分配复制、存储与调度。Source 当前优先已实施发布去锁的真实总收益及格式受控纯解析；Data 等匹配11段业务观测选择热点；Live 先复用正式离线 service/Lua bridge 检查 journal 重扫与 payload/snapshot 复制，游戏项仍留本文末尾。
 
 1. SQL结构性栈修复与预算回归已有实证，保完整实现供最终独立审计；当前集中闭合retained owner回复处理/回收和真实冷链全路径性能；已通过的52+32边界与600秒正常寿命保留原身份，不扩展新数据库或通用框架。
 2. 在同草稿PR保存完整修复批，集中跑实际生产链与原全量比较；外层验证必须有界失败并让后续独立组执行，不提高产品deadline。
@@ -116,7 +138,7 @@ refs/context省略snapshot时复用现有受控project/最近父级锁选择，�
 
 本机测试通道已正常恢复，原unknown历史保留，无需再次apply或重启。仅云端实现，用户指定本机线程负责固定SHA测试并将报告写回同一PR。普通push不自动切换其正在测试的树；不另排重复长CI。
 
-当前2d7独立runner/a338产品full14/0已安全终态，身份变更和恢复闭环；all-target/native99与匹配优化构建保持a338原身份。下一统一源码批先alltargets及受影响Source/Core/Data组，再匹配优化产物做profile和Data配对；不得将旧EXE当新性能产物。其余XML84/4036及quota/idle/lifetime保原身份不机械重跑。
+当前bbfe匹配优化产物、4036 Facts差分与Source/Data单次诊断已安全终态；2d7独立runner/a338产品full14/0继续保原身份，不重复跑旧retained故障。下一统一Source/Data/Live源码批先alltargets，再Source facts::（含迁入guard及84边界）、index::、lua_tree::，Core evidence::budgeted/metadata::capture_write/metadata::controlled_open，Data assets::export/local_query/remote::admission，Live go_mailbox_v1完整离线组。新增测试按精确名称去重，未运行保持NOT_RUN。前置过后一次匹配release/assembly，运行4036全字段顺序差分、同输入Source/Data阶段诊断及正式9桥；不得用旧EXE归新源码收益。全部本机任务仍由唯一父协调队列发送。
 
 - 所有Rust检查沿仓库受控 `tools/rust-cargo.mjs`、固定工具链和原owner/cache合同，先all-target编译，再受影响组；默认线程栈不加大。完整SQL299及7db预算组已过，不机械重跑历史失败树。
 - 正式Lua与9桥使用[现有入口](tools/rust-formal-lua-bridge.mjs)，每次新输出目录；原runtime与CLI封存产物必须通过全部身份验证，不能覆盖旧失败目录。当前正式Go323220/9已有实证。

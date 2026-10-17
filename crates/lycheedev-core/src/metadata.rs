@@ -26,6 +26,9 @@ pub struct RawDocument {
 
 pub struct Metadata {
     connection: Connection,
+    // Bound at open, never supplied by a later capture caller.
+    home: std::path::PathBuf,
+    writable: bool,
 }
 #[derive(Debug, Clone)]
 pub struct Document {
@@ -102,7 +105,11 @@ impl Metadata {
             connection.pragma_update(None, "synchronous", "FULL")?;
             connection.execute_batch(DELETED_GENERATIONS_SCHEMA)?;
         }
-        Ok(Self { connection })
+        Ok(Self {
+            connection,
+            home: std::path::absolute(home)?,
+            writable: write,
+        })
     }
     /// Read one historical Go document as original bytes. Unlike `read`, this
     /// path never UTF-8/JSON-decodes before the caller's Go-compatible decoder.

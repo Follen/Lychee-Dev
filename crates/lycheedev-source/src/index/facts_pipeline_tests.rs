@@ -19,7 +19,7 @@ fn file(path: &str, bytes: usize) -> git::TreeFile {
 // regression. The fake parser is only for deterministic scheduling faults.
 fn with_workers(
     count: usize,
-    parse: impl Fn(usize, LuaInput) -> LuaOutput + Sync,
+    parse: impl Fn(usize, ParseInput) -> ParseOutput + Sync,
     body: impl FnOnce(Vec<Worker>),
 ) {
     thread::scope(|scope| {
@@ -50,8 +50,9 @@ fn with_workers(
     });
 }
 
-fn empty(input: LuaInput) -> LuaOutput {
-    LuaOutput {
+fn empty(input: ParseInput) -> ParseOutput {
+    ParseOutput {
+        mode: input.mode,
         data: input.data,
         facts: Some(Facts::default()),
         parse_elapsed: Duration::ZERO,
@@ -73,25 +74,318 @@ fn pipeline(workers: Vec<Worker>, profile: &Profile) -> Pipeline<'_> {
 }
 
 #[test]
-fn only_bounded_ordinary_utf8_lua_is_speculative() {
-    for path in ["A.lua", "A.LUA"] {
-        assert!(eligible(&file(path, 1), b"x"));
+fn only_bounded_utf8_supported_modes_are_speculative() {
+    for path in ["A.lua", "A.LUA", "A.xml", "A.XmL", "A.toc", "A.TOC"] {
+        assert!(eligible(&file(path, 1), b"x"), "{path}");
+        let mut asset = file(path, 1);
+        asset.asset = true;
+        assert!(!eligible(&asset, b"x"));
+        let mut oversized = file(path, 1);
+        oversized.oversized = true;
+        assert!(!eligible(&oversized, b"x"));
+        assert!(!eligible(&file(path, 1), b"\xff"));
+        assert!(!eligible(&file(path, MAX_SOURCE_BYTES + 1), b"x"));
+        assert!(!eligible(&file(path, 1), &vec![b' '; MAX_SOURCE_BYTES + 1]));
+        assert!(eligible(
+            &file(path, MAX_SOURCE_BYTES),
+            &vec![b' '; MAX_SOURCE_BYTES]
+        ));
     }
     for path in [
-        "A.xml",
-        "A.toc",
+        "A.txt",
+        "A.luax",
+        "lua",
+        "",
         "Interface/Blizzard_APIDocumentationGenerated/A.lua",
+        "Interface/Blizzard_APIDocumentationGenerated/A.LUA",
     ] {
-        assert!(!eligible(&file(path, 1), b"x"));
+        assert!(!eligible(&file(path, 1), b"x"), "{path}");
     }
-    let mut asset = file("A.lua", 1);
-    asset.asset = true;
-    assert!(!eligible(&asset, b"x"));
-    assert!(!eligible(&file("A.lua", 1), b"\xff"));
-    assert!(!eligible(
-        &file("A.lua", MAX_SOURCE_BYTES + 1),
-        &vec![b' '; MAX_SOURCE_BYTES + 1]
-    ));
+}
+
+#[test]
+fn parse_modes_keep_exact_generated_marker_and_ascii_insensitive_extensions() {
+    for (path, mode, worker) in [
+        ("A.LuA", ParseMode::LuaOrdinary, true),
+        ("A.XmL", ParseMode::Xml, true),
+        ("A.ToC", ParseMode::Toc, true),
+        (
+            "Interface/Blizzard_APIDocumentationGenerated/A.LUA",
+            ParseMode::LuaGenerated,
+            false,
+        ),
+        (
+            "Blizzard_APIDocumentationGenerated/A.lua",
+            ParseMode::LuaOrdinary,
+            true,
+        ),
+        (
+            "Interface/blizzard_APIDocumentationGenerated/A.lua",
+            ParseMode::LuaOrdinary,
+            true,
+        ),
+        (
+            "Interface/Blizzard_APIDocumentationGeneratedSuffix/A.lua",
+            ParseMode::LuaOrdinary,
+            true,
+        ),
+        (
+            "Interface/Blizzard_APIDocumentationGenerated/A.xml",
+            ParseMode::Xml,
+            true,
+        ),
+        (
+            "Interface/Blizzard_APIDocumentationGenerated/A.toc",
+            ParseMode::Toc,
+            true,
+        ),
+    ] {
+        assert_eq!(ParseMode::for_path(path), mode, "{path}");
+        assert_eq!(eligible(&file(path, 1), b"x"), worker, "{path}");
+    }
+}
+
+fn original_facts(mode: ParseMode, data: &[u8]) -> Facts {
+    match mode {
+        ParseMode::LuaOrdinary => crate::facts::lua(data, false),
+        ParseMode::LuaGenerated => crate::facts::lua(data, true),
+        ParseMode::Xml => crate::facts::xml(data),
+        ParseMode::Toc => crate::facts::toc(data),
+    }
+}
+
+#[test]
+fn typed_worker_tasks_preserve_mode_and_the_original_allocation() {
+    let control = OperationControl::default();
+    let sources = [
+        ("Source.LUA", b"function Exact() Call() end".as_slice()),
+        (
+            "Source.XML",
+            b"<Ui><Script file=\"Exact.lua\"/></Ui>".as_slice(),
+        ),
+        (
+            "Source.TOC",
+            b"## Interface: 120100\nExact.lua\n".as_slice(),
+        ),
+        (
+            "Interface/Blizzard_APIDocumentationGenerated/Source.lua",
+            b"local T={Name='Exact',Type='System'}".as_slice(),
+        ),
+    ];
+    let inputs = sources
+        .iter()
+        .map(|(path, raw)| {
+            let mut data = Vec::with_capacity(1024);
+            data.extend_from_slice(raw);
+            (*path, data)
+        })
+        .collect::<Vec<_>>();
+    let owners = inputs
+        .iter()
+        .map(|(path, data)| {
+            (
+                *path,
+                data.as_ptr() as usize,
+                data.capacity(),
+                ParseMode::for_path(path),
+                original_facts(ParseMode::for_path(path), data),
+            )
+        })
+        .collect::<Vec<_>>();
+    let jobs = AtomicUsize::new(0);
+    with_workers(
+        2,
+        |_, input| {
+            jobs.fetch_add(1, Ordering::SeqCst);
+            assert_ne!(input.mode, ParseMode::LuaGenerated);
+            let original = input.data.as_ptr() as usize;
+            let capacity = input.data.capacity();
+            let mode = input.mode;
+            let output = prepare_input(input, &control, false);
+            assert_eq!(output.mode, mode);
+            assert_eq!(output.data.as_ptr() as usize, original);
+            assert_eq!(output.data.capacity(), capacity);
+            assert_eq!(output.parse_elapsed, Duration::ZERO);
+            output
+        },
+        |workers| {
+            let profile = Profile::new();
+            let mut p = pipeline(workers, &profile);
+            let mut ordinal = 0;
+            let mut consume =
+                |file: &git::TreeFile, data: Vec<u8>, prepared: Option<PreparedFacts>| {
+                    let (path, original, capacity, mode, expected) = &owners[ordinal];
+                    assert_eq!(file.path, *path);
+                    assert_eq!(data.as_ptr() as usize, *original);
+                    assert_eq!(data.capacity(), *capacity);
+                    let facts = if *mode == ParseMode::LuaGenerated {
+                        assert!(prepared.is_none());
+                        original_facts(*mode, &data)
+                    } else {
+                        let prepared = prepared.expect("supported mode must return owned facts");
+                        assert_eq!(prepared.mode, *mode);
+                        assert_eq!(prepared.parse_elapsed, Duration::ZERO);
+                        prepared.facts
+                    };
+                    assert_eq!(
+                        serde_json::to_vec(&facts).unwrap(),
+                        serde_json::to_vec(expected).unwrap()
+                    );
+                    assert_eq!(
+                        facts.raw_relationship_targets,
+                        expected.raw_relationship_targets
+                    );
+                    ordinal += 1;
+                    Ok(())
+                };
+            for (path, data) in inputs {
+                p.push(&file(path, data.len()), data, &mut consume).unwrap();
+            }
+            p.finish(Ok(1), &mut consume).unwrap();
+            assert_eq!(ordinal, owners.len());
+            assert_eq!(p.pending_bytes, 0);
+        },
+    );
+    assert_eq!(jobs.load(Ordering::SeqCst), 3);
+}
+
+#[test]
+fn real_xml_and_toc_workers_overlap_with_full_facts_in_source_order() {
+    let control = OperationControl::default();
+    let barrier = (Mutex::new(0usize), Condvar::new());
+    let modes = Mutex::new(Vec::new());
+    let sources = [
+        ("First.XML", b"<Ui><Frame name=\"Owner\"><Scripts><OnLoad>Run()</OnLoad></Scripts></Frame><Script file=\"Full.lua\"/></Ui>".as_slice(), ParseMode::Xml),
+        ("Second.TOC", b"## Interface: 120100\n## Title: Complete\nFull.lua\n".as_slice(), ParseMode::Toc),
+    ];
+    with_workers(
+        2,
+        |_, input| {
+            modes.lock().unwrap().push(input.mode);
+            let mut arrived = barrier.0.lock().unwrap();
+            *arrived += 1;
+            barrier.1.notify_all();
+            let (arrived, timeout) = barrier
+                .1
+                .wait_timeout_while(arrived, Duration::from_secs(5), |n| *n < 2)
+                .unwrap();
+            assert!(
+                !timeout.timed_out() && *arrived == 2,
+                "XML and TOC must both enter real worker tasks before ordered consumption"
+            );
+            drop(arrived);
+            prepare_input(input, &control, true)
+        },
+        |workers| {
+            let profile = Profile::enabled(true);
+            let mut p = pipeline(workers, &profile);
+            let mut ordinal = 0;
+            let mut consume =
+                |file: &git::TreeFile, data: Vec<u8>, prepared: Option<PreparedFacts>| {
+                    let (path, raw, mode) = sources[ordinal];
+                    assert_eq!(file.path, path);
+                    assert_eq!(data, raw);
+                    let prepared = prepared.expect("XML/TOC must have real worker facts");
+                    assert_eq!(prepared.mode, mode);
+                    let expected = original_facts(mode, raw);
+                    assert_eq!(
+                        serde_json::to_vec(&prepared.facts).unwrap(),
+                        serde_json::to_vec(&expected).unwrap()
+                    );
+                    assert_eq!(
+                        prepared.facts.raw_relationship_targets,
+                        expected.raw_relationship_targets
+                    );
+                    ordinal += 1;
+                    Ok(())
+                };
+            for (path, raw, _) in sources {
+                p.push(&file(path, raw.len()), raw.to_vec(), &mut consume)
+                    .unwrap();
+            }
+            assert_eq!(p.pending.len(), 2);
+            p.finish(Ok(1), &mut consume).unwrap();
+            assert_eq!(ordinal, 2);
+            assert_eq!(profile.calls(Phase::FactsWorker), 2);
+            assert_eq!(profile.calls(Phase::FactsWorkerAbandoned), 0);
+            assert_eq!(p.pending_bytes, 0);
+        },
+    );
+    let modes = modes.into_inner().unwrap();
+    assert_eq!(modes.len(), 2);
+    assert!(modes.contains(&ParseMode::Xml));
+    assert!(modes.contains(&ParseMode::Toc));
+}
+
+#[test]
+fn cancelled_or_expired_xml_toc_jobs_abandon_and_preserve_the_original_stop() {
+    for expired in [false, true] {
+        let control = if expired {
+            OperationControl::uncancelable(Instant::now())
+        } else {
+            let control = OperationControl::default();
+            control.tracked_cancel_handle().unwrap().cancel();
+            control
+        };
+        let completed = AtomicUsize::new(0);
+        with_workers(
+            2,
+            |_, input| {
+                let output = prepare_input(input, &control, false);
+                assert!(output.facts.is_none());
+                completed.fetch_add(1, Ordering::SeqCst);
+                output
+            },
+            |workers| {
+                let profile = Profile::enabled(true);
+                let mut p = pipeline(workers, &profile);
+                let mut consumed = Vec::new();
+                let mut consume =
+                    |file: &git::TreeFile, _: Vec<u8>, prepared: Option<PreparedFacts>| {
+                        assert!(prepared.is_none());
+                        consumed.push(file.path.clone());
+                        control.check()
+                    };
+                p.push(&file("First.xml", 5), b"<Ui/>".to_vec(), &mut consume)
+                    .unwrap();
+                p.push(&file("Second.toc", 9), b"Full.lua\n".to_vec(), &mut consume)
+                    .unwrap();
+                let error = p.finish(Ok(1), &mut consume).unwrap_err();
+                assert_eq!(
+                    error.code,
+                    if expired {
+                        "command.deadline"
+                    } else {
+                        "command.cancelled"
+                    }
+                );
+                assert_eq!(consumed, ["First.xml"]);
+                assert_eq!(profile.calls(Phase::FactsWorkerAbandoned), 1);
+                assert_eq!(profile.calls(Phase::FactsRefill), 0);
+            },
+        );
+        assert_eq!(completed.load(Ordering::SeqCst), 2);
+    }
+}
+
+#[test]
+fn all_parser_modes_keep_the_existing_worker_resource_envelope() {
+    assert_eq!(MAX_SOURCE_BYTES, 64 << 10);
+    assert_eq!(MAX_FACT_BYTES, 4 << 20);
+    assert_eq!(PARSER_SCRATCH_BYTES, 32 << 20);
+    assert_eq!(WORKER_STACK_BYTES, 2 << 20);
+    assert_eq!(SOURCE_RETAINED_LIMIT, 256 << 20);
+    assert_eq!(MAX_PENDING_SLOTS, 8);
+    for path in ["Source.lua", "Source.xml", "Source.toc"] {
+        let mut data = Vec::with_capacity(MAX_SOURCE_BYTES * 2);
+        data.extend_from_slice(b"x");
+        assert!(eligible(&file(path, data.len()), &data));
+        assert_eq!(
+            reservation(&data),
+            Some(data.capacity() + MAX_FACT_BYTES + PARSER_SCRATCH_BYTES + JOB_METADATA_BYTES)
+        );
+    }
+    assert_eq!(reservation_for_capacity(usize::MAX), None);
 }
 
 #[test]
@@ -289,7 +583,10 @@ fn ready_owner_keeps_its_slot_when_the_mixed_queue_is_full() {
             }
             for ordinal in 4..8 {
                 p.push(
-                    &file(&format!("{ordinal}.xml"), 1),
+                    &file(
+                        &format!("Interface/Blizzard_APIDocumentationGenerated/{ordinal}.lua"),
+                        1,
+                    ),
                     vec![b'x'],
                     &mut consume,
                 )
@@ -303,7 +600,15 @@ fn ready_owner_keeps_its_slot_when_the_mixed_queue_is_full() {
             assert_eq!(
                 order,
                 [
-                    "0.lua", "1.lua", "2.lua", "3.lua", "4.xml", "5.xml", "6.xml", "7.xml", "8.lua"
+                    "0.lua",
+                    "1.lua",
+                    "2.lua",
+                    "3.lua",
+                    "Interface/Blizzard_APIDocumentationGenerated/4.lua",
+                    "Interface/Blizzard_APIDocumentationGenerated/5.lua",
+                    "Interface/Blizzard_APIDocumentationGenerated/6.lua",
+                    "Interface/Blizzard_APIDocumentationGenerated/7.lua",
+                    "8.lua"
                 ]
             );
         },
@@ -314,7 +619,8 @@ fn ready_owner_keeps_its_slot_when_the_mixed_queue_is_full() {
 fn abandoned_results_keep_the_complete_path_and_do_not_trigger_refill() {
     with_workers(
         2,
-        |_, input| LuaOutput {
+        |_, input| ParseOutput {
+            mode: input.mode,
             data: input.data,
             facts: None,
             parse_elapsed: Duration::ZERO,
@@ -556,30 +862,38 @@ fn a_callback_error_never_commits_remaining_speculative_documents() {
 }
 
 #[test]
-fn small_xml_retains_its_complete_ordered_coordinator_path() {
+fn small_xml_prepares_complete_facts_for_its_ordered_consumer() {
+    let control = OperationControl::default();
     with_workers(
         2,
-        |_, input| empty(input),
+        |_, input| prepare_input(input, &control, false),
         |workers| {
             let profile = Profile::new();
             let mut p = pipeline(workers, &profile);
             let mut seen = Vec::new();
             let mut consume =
                 |f: &git::TreeFile, bytes: Vec<u8>, prepared: Option<PreparedFacts>| {
-                    seen.push((f.path.clone(), bytes, prepared.is_some()));
+                    let prepared = prepared.expect("small XML and ordinary Lua are worker tasks");
+                    assert_eq!(prepared.mode, ParseMode::for_path(&f.path));
+                    if prepared.mode == ParseMode::Xml {
+                        assert_eq!(prepared.facts.loads[0].path, "Full.lua");
+                    }
+                    seen.push((f.path.clone(), bytes, prepared.mode));
                     Ok(())
                 };
-            p.push(&file("first.lua", 1), vec![b'a'], &mut consume)
+            let lua = b"function First() end".to_vec();
+            p.push(&file("first.lua", lua.len()), lua.clone(), &mut consume)
                 .unwrap();
-            p.push(&file("second.xml", 4), b"<X/>".to_vec(), &mut consume)
+            let xml = b"<Ui><Script file=\"Full.lua\"/></Ui>".to_vec();
+            p.push(&file("second.xml", xml.len()), xml.clone(), &mut consume)
                 .unwrap();
             assert_eq!(p.pending.len(), 2);
             p.finish(Ok(1), &mut consume).unwrap();
             assert_eq!(
                 seen,
                 [
-                    ("first.lua".into(), vec![b'a'], true),
-                    ("second.xml".into(), b"<X/>".to_vec(), false)
+                    ("first.lua".into(), lua, ParseMode::LuaOrdinary),
+                    ("second.xml".into(), xml, ParseMode::Xml)
                 ]
             );
         },
@@ -619,10 +933,86 @@ fn exhausted_speculative_allowance_uses_the_original_complete_path() {
 }
 
 #[test]
+fn xml_toc_ineligible_inputs_and_exhausted_allowance_keep_full_original_facts() {
+    for (path, mode, valid, invalid) in [
+        (
+            "Full.xml",
+            ParseMode::Xml,
+            b"<Ui><Script file=\"Full.lua\"/></Ui>".as_slice(),
+            b"<Ui><Script file=\"\xff.lua\"/></Ui>".as_slice(),
+        ),
+        (
+            "Full.toc",
+            ParseMode::Toc,
+            b"## Title: Complete\nFull.lua\n".as_slice(),
+            b"## Title: \xff\nFull.lua\n".as_slice(),
+        ),
+    ] {
+        for scenario in 0..3 {
+            let jobs = AtomicUsize::new(0);
+            let mut raw = if scenario == 0 {
+                invalid.to_vec()
+            } else {
+                valid.to_vec()
+            };
+            if scenario == 1 {
+                raw.resize(MAX_SOURCE_BYTES + 1, b' ');
+            }
+            let original = raw.as_ptr() as usize;
+            let capacity = raw.capacity();
+            let expected = original_facts(mode, &raw);
+            with_workers(
+                2,
+                |_, input| {
+                    jobs.fetch_add(1, Ordering::SeqCst);
+                    empty(input)
+                },
+                |workers| {
+                    let profile = Profile::new();
+                    let mut p = pipeline(workers, &profile);
+                    if scenario == 2 {
+                        p.retained_bytes = SOURCE_RETAINED_LIMIT - GIT_BATCH_BYTES;
+                    }
+                    let mut consumed = 0;
+                    let mut consume =
+                        |file: &git::TreeFile, data: Vec<u8>, prepared: Option<PreparedFacts>| {
+                            assert_eq!(file.path, path);
+                            assert!(prepared.is_none());
+                            assert_eq!(data.as_ptr() as usize, original);
+                            assert_eq!(data.capacity(), capacity);
+                            let actual = original_facts(mode, &data);
+                            assert_eq!(
+                                serde_json::to_vec(&actual).unwrap(),
+                                serde_json::to_vec(&expected).unwrap()
+                            );
+                            assert_eq!(
+                                actual.raw_relationship_targets,
+                                expected.raw_relationship_targets
+                            );
+                            consumed += 1;
+                            Ok(())
+                        };
+                    p.push(&file(path, raw.len()), raw, &mut consume).unwrap();
+                    p.finish(Ok(1), &mut consume).unwrap();
+                    assert_eq!(consumed, 1);
+                    assert_eq!(p.pending_bytes, 0);
+                },
+            );
+            assert_eq!(
+                jobs.load(Ordering::SeqCst),
+                0,
+                "{path}: scenario {scenario}"
+            );
+        }
+    }
+}
+
+#[test]
 fn an_abandoned_pure_result_is_reparsed_without_public_truncation() {
     with_workers(
         2,
-        |_, input| LuaOutput {
+        |_, input| ParseOutput {
+            mode: input.mode,
             data: input.data,
             facts: None,
             parse_elapsed: Duration::ZERO,
@@ -735,7 +1125,7 @@ fn an_existing_public_error_is_not_replaced_during_worker_join() {
 }
 
 #[test]
-fn lua_workers_overlap_across_small_xml_without_processing_xml_ahead() {
+fn lua_workers_overlap_across_generated_lua_without_processing_it_ahead() {
     let gate = (Mutex::new(0usize), Condvar::new());
     with_workers(
         2,
@@ -756,32 +1146,38 @@ fn lua_workers_overlap_across_small_xml_without_processing_xml_ahead() {
             let mut order = Vec::new();
             let mut consume =
                 |f: &git::TreeFile, data: Vec<u8>, prepared: Option<PreparedFacts>| {
-                    if f.path.ends_with(".xml") {
+                    if ParseMode::for_path(&f.path) == ParseMode::LuaGenerated {
                         assert!(prepared.is_none());
-                        let facts = crate::facts::xml(&data);
-                        assert_eq!(facts.loads[0].path, "Full.lua");
+                        let facts = crate::facts::lua(&data, true);
+                        assert!(!facts.declarations.is_empty());
                     } else {
                         assert!(prepared.is_some());
                     }
                     order.push(f.path.clone());
                     Ok(())
                 };
-            let xml = b"<Ui><Script file=\"Full.lua\"/></Ui>".to_vec();
-            let xml_capacity = xml.capacity();
+            let generated =
+                b"local T={Name=\"Full\", Type=\"System\", Namespace=\"C_Full\"}".to_vec();
+            let generated_capacity = generated.capacity();
+            let generated_path = "Interface/Blizzard_APIDocumentationGenerated/middle.lua";
             p.push(&file("first.lua", 1), vec![b'a'], &mut consume)
                 .unwrap();
             let previous = p.pending_bytes;
-            p.push(&file("middle.xml", xml.len()), xml, &mut consume)
-                .unwrap();
+            p.push(
+                &file(generated_path, generated.len()),
+                generated,
+                &mut consume,
+            )
+            .unwrap();
             assert_eq!(
                 p.pending_bytes - previous,
-                xml_capacity + JOB_METADATA_BYTES
+                generated_capacity + JOB_METADATA_BYTES
             );
             p.push(&file("last.lua", 1), vec![b'b'], &mut consume)
                 .unwrap();
             assert_eq!(p.pending.len(), 3);
             p.finish(Ok(1), &mut consume).unwrap();
-            assert_eq!(order, ["first.lua", "middle.xml", "last.lua"]);
+            assert_eq!(order, ["first.lua", generated_path, "last.lua"]);
         },
     );
 }
@@ -801,8 +1197,19 @@ fn real_mixed_parser_run(cpu_limit: usize) -> (usize, Vec<Facts>) {
     let mut inputs = (0..8)
         .map(|i| {
             (
-                format!("Initial{i}.lua"),
-                format!("function F{i}() RegisterEvent('EVENT_{i}') end\n").into_bytes(),
+                match i % 3 {
+                    0 => format!("Initial{i}.lua"),
+                    1 => format!("Initial{i}.xml"),
+                    _ => format!("Initial{i}.toc"),
+                },
+                match i % 3 {
+                    0 => format!("function F{i}() RegisterEvent('EVENT_{i}') end\n").into_bytes(),
+                    1 => {
+                        format!("<Ui><Frame name=\"Initial{i}\"/><Script file=\"Full.lua\"/></Ui>")
+                            .into_bytes()
+                    }
+                    _ => format!("## Title: Initial{i}\nFull.lua\n").into_bytes(),
+                },
             )
         })
         .collect::<Vec<_>>();
@@ -861,6 +1268,11 @@ fn real_mixed_parser_run(cpu_limit: usize) -> (usize, Vec<Facts>) {
             let mut consume = |f: &git::TreeFile, raw: Vec<u8>, prepared: Option<PreparedFacts>| {
                 assert_eq!(f.path, inputs[ordinal].0);
                 assert_eq!(raw, inputs[ordinal].1);
+                let mode = ParseMode::for_path(&f.path);
+                assert_eq!(prepared.is_some(), mode != ParseMode::LuaGenerated);
+                if let Some(prepared) = &prepared {
+                    assert_eq!(prepared.mode, mode);
+                }
                 prepared_documents += usize::from(prepared.is_some());
                 let facts =
                     prepared.map_or_else(|| parse(&f.path, &raw), |prepared| prepared.facts);
@@ -894,7 +1306,7 @@ fn real_mixed_parser_run(cpu_limit: usize) -> (usize, Vec<Facts>) {
             }
             p.finish(Ok(1), &mut consume).unwrap();
             assert_eq!(ordinal, inputs.len());
-            assert!(prepared_documents >= worker_count);
+            assert_eq!(prepared_documents, inputs.len() - 8);
             assert!(max_slots > 4 && max_slots <= MAX_PENDING_SLOTS);
             assert!(
                 max_owned_reservation
@@ -1247,6 +1659,10 @@ fn actual_git_pipeline_cpu_limits_preserve_full_facts_order_and_first_error() {
             |file, raw, prepared| {
                 assert_eq!(file.path, inputs[ordinal].0);
                 assert_eq!(raw, inputs[ordinal].1);
+                if let Some(prepared) = &prepared {
+                    assert_eq!(prepared.mode, ParseMode::for_path(&file.path));
+                    assert_ne!(prepared.mode, ParseMode::LuaGenerated);
+                }
                 prepared_count += usize::from(prepared.is_some());
                 let facts = prepared.map_or_else(|| parse(&file.path, &raw), |value| value.facts);
                 assert_eq!(
@@ -1291,5 +1707,48 @@ fn actual_git_pipeline_cpu_limits_preserve_full_facts_order_and_first_error() {
         assert_eq!(error.code, "test.original_failure");
         assert_eq!(consumed, 2);
     }
+    // XML/TOC alone must count as candidates and create the production scoped
+    // worker set. No ordinary Lua file may accidentally make this pass.
+    let xml_toc = files
+        .iter()
+        .filter(|file| {
+            matches!(
+                ParseMode::for_path(&file.path),
+                ParseMode::Xml | ParseMode::Toc
+            )
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(xml_toc.len(), 2);
+    let control = OperationControl::default();
+    let profile = Profile::enabled(true);
+    let mut prepared_modes = Vec::new();
+    let batches = visit_with_cpu_limit(
+        &home,
+        &pin,
+        &xml_toc,
+        &control,
+        &profile,
+        2,
+        |file, raw, prepared| {
+            let prepared = prepared.expect("two XML/TOC candidates must start production workers");
+            assert_eq!(prepared.mode, ParseMode::for_path(&file.path));
+            let expected = original_facts(prepared.mode, &raw);
+            assert_eq!(
+                serde_json::to_vec(&prepared.facts).unwrap(),
+                serde_json::to_vec(&expected).unwrap()
+            );
+            assert_eq!(
+                prepared.facts.raw_relationship_targets,
+                expected.raw_relationship_targets
+            );
+            prepared_modes.push(prepared.mode);
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(batches, 1);
+    assert_eq!(prepared_modes, [ParseMode::Xml, ParseMode::Toc]);
+    assert_eq!(profile.calls(Phase::FactsWorker), 2);
     std::fs::remove_dir_all(home).unwrap();
 }

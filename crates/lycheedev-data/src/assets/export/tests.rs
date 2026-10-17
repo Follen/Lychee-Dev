@@ -227,3 +227,75 @@ fn actual_profiled_image_export_covers_consumer_phases_success_and_codec_failure
         }
     }
 }
+
+#[test]
+fn request_metadata_final_close_failure_keeps_commits_and_actual_output_publication() {
+    use crate::resource::{Budget, Cost};
+    use catalog_fixture::{Cell::U, Fixture, table};
+    use lycheedev_core::metadata::Metadata;
+    use std::{cell::Cell, fs, sync::Arc};
+
+    for encoding in ["png", "webp"] {
+        for codec_failure in [false, true] {
+            let mut item = table("Image", 201, &[("ID", "uint")], &[vec![U(7)]]);
+            let mut raw = vec![0; 148];
+            raw[..4].copy_from_slice(b"BLP2");
+            raw[4] = 1;
+            raw[8..12].copy_from_slice(&[3, 8, 0, 0x11]);
+            raw[12..16].copy_from_slice(&2u32.to_le_bytes());
+            raw[16..20].copy_from_slice(&1u32.to_le_bytes());
+            raw[20..24].copy_from_slice(&148u32.to_le_bytes());
+            raw[84..88].copy_from_slice(&8u32.to_le_bytes());
+            raw.extend_from_slice(&[3, 2, 1, 255, 6, 5, 4, 128]);
+            item.raw = raw;
+            let fx = Fixture::new(&[item]);
+            let path = fx.root.join(format!("final-close.{encoding}"));
+            let inv = fx.invocation("asset export", &[
+                ("--file-id", "201"), ("--encoding", encoding), ("--output", path.to_str().unwrap()),
+            ]);
+            let budget = Arc::new(Budget::controlled(Cost::defaults(), inv.control.deadline(), inv.control.clone()));
+            let destination = output::destination_scoped(&inv, &path, false).unwrap();
+            let options = Options { encoding, mipmap: 0, channels: "rgba".into(), pixels: 16,
+                maximum: if codec_failure { 1 } else { 1 << 20 } };
+            let mut progress = Progress::default();
+            let closes = Cell::new(0);
+            let result = input::with_casc_verified_budgeted_after_metadata_close(
+                &inv, 201, &budget,
+                &mut |source| {
+                    progress.committed(source.capture);
+                    publish(&inv, &destination, source, &options, &mut progress)
+                },
+                &mut || {
+                    closes.set(closes.get() + 1);
+                    // This observer runs after the actual SQLite close. Moving
+                    // the database proves that no borrowed capture connection
+                    // or statement leaked beyond the request's final boundary.
+                    let database = fx.home.join("state/toolkit.sqlite");
+                    let moved = fx.home.join("state/checked-close.sqlite");
+                    fs::rename(&database, &moved).unwrap();
+                    fs::rename(&moved, &database).unwrap();
+                    Err(ToolkitError::new("fixture.metadata_close", "late checked metadata close", 5))
+                },
+            );
+            let result = output::finish_closes(result, destination.close(), &inv.control);
+            let error = progress.finish(result).unwrap_err();
+            assert_eq!(closes.get(), 1);
+            assert_eq!(error.code, if codec_failure { "records.image_output_limit" } else { "fixture.metadata_close" });
+            assert!(error.details.to_string().contains("fixture.metadata_close"));
+            assert_eq!(error.details["outputPublished"], !codec_failure);
+            let ids = error.details["completedCaptures"].as_array().unwrap();
+            assert_eq!(ids.len(), if codec_failure { 1 } else { 3 });
+            for id in ids {
+                let id = id.as_str().unwrap();
+                assert_eq!(evidence::read_capture(&fx.home, id).unwrap()["id"], id);
+            }
+            assert_eq!(path.exists(), !codec_failure);
+            if !codec_failure { assert!(!fs::read(&path).unwrap().is_empty()); }
+            let metadata = Metadata::open(&fx.home, false).unwrap();
+            assert_eq!(metadata.list::<Value>("capture/", 10).unwrap().len(), ids.len());
+            metadata.close().unwrap();
+            drop(budget);
+            fs::remove_dir_all(fx.root).unwrap();
+        }
+    }
+}

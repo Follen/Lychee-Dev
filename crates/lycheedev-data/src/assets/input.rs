@@ -32,6 +32,7 @@ pub struct VerifiedCascInput {
 /// The selected source cannot outlive its query or real workspace admission.
 /// Only the immutable body is mutably borrowed for Read/rewind, never detached.
 pub(crate) struct VerifiedView<'a> {
+    pub metadata: &'a mut lycheedev_core::metadata::Metadata,
     pub blob: &'a mut evidence::VerifiedBlob,
     pub reading: &'a Value,
     pub capture: &'a Value,
@@ -61,63 +62,90 @@ pub(super) fn with_casc_verified_budgeted<R>(
     budget: &Arc<Budget>,
     callback: &mut dyn FnMut(VerifiedView<'_>) -> Result<R>,
 ) -> Result<R> {
+    with_casc_verified_budgeted_finish(inv, id, budget, callback, |scope, result| scope.finish(result))
+}
+// Observe only after the real SQLite close. Tests can add a late diagnostic,
+// never replace the real close result or skip any production cleanup.
+#[cfg(test)]
+pub(super) fn with_casc_verified_budgeted_after_metadata_close<R>(
+    inv: &Invocation,
+    id: u32,
+    budget: &Arc<Budget>,
+    callback: &mut dyn FnMut(VerifiedView<'_>) -> Result<R>,
+    after_close: &mut dyn FnMut() -> Result<()>,
+) -> Result<R> {
+    with_casc_verified_budgeted_finish(inv, id, budget, callback, |scope, result| {
+        scope.finish_after_metadata_close(result, after_close)
+    })
+}
+fn with_casc_verified_budgeted_finish<'a, R>(
+    inv: &'a Invocation,
+    id: u32,
+    budget: &'a Arc<Budget>,
+    callback: &mut dyn FnMut(VerifiedView<'_>) -> Result<R>,
+    finish: impl FnOnce(crate::remote::provider::Scope<'a>, Result<R>) -> Result<R>,
+) -> Result<R> {
     let (mut scope, pin) = {
         let _phase = budget.phase(Phase::Admission);
         let opened = crate::remote::provider::OpenedScope::open(inv, budget)?;
         opened.admit_asset()?
     };
     let data = pin.data.as_ref().expect("asset pin admitted");
-    let mut consume = |blob: &mut evidence::VerifiedBlob, reading: &Value| {
-        budget.charge_split(
-            Cost::retained(
-                blob.reference()
-                    .bytes
-                    .try_into()
-                    .map_err(|_| fault("records.metadata_limit", 3))?,
-            ),
-            Cost::default(),
-        )?;
-        let capture_phase = budget.phase(Phase::SourceCapture);
-        let capture = evidence::commit_verified_capture_budgeted(
-            blob,
-            evidence::CaptureHeader {
-                media_type: "application/octet-stream",
-                provenance: json!({"kind":"asset","locator":format!("casc:fdid:{id}:ckey:{}",reading["entry"]["contentKey"].as_str().unwrap_or("")),"snapshot":pin.id,"dataBuild":data.full_build}),
-                complete: true,
-                truncated: false,
-            },
-            &inv.control,
-            &budget.safety_only(),
-        )?;
-        drop(capture_phase);
-        callback(VerifiedView {
-            blob,
-            reading,
-            capture: &capture,
-            snapshot: &pin.id,
-            data_build: &data.full_build,
-            budget,
-        })
-    };
-    let result = (|| {
-        if inv.flag_bool("--cdn") {
-            scope.with_verified_file(data, id, &mut consume)
-        } else {
-            let mut reader = local_query::sql_reader::Reader::new(inv, data, budget)?;
-            let result = (|| {
-                let mut file = reader.read_verified(id)?;
+    let result = scope.with_capture_metadata(|scope, metadata| {
+        let mut consume = |blob: &mut evidence::VerifiedBlob, reading: &Value| {
+            budget.charge_split(
+                Cost::retained(
+                    blob.reference()
+                        .bytes
+                        .try_into()
+                        .map_err(|_| fault("records.metadata_limit", 3))?,
+                ),
+                Cost::default(),
+            )?;
+            let capture_phase = budget.phase(Phase::SourceCapture);
+            let capture = evidence::commit_verified_capture_budgeted_with_metadata(
+                blob,
+                metadata,
+                evidence::CaptureHeader {
+                    media_type: "application/octet-stream",
+                    provenance: json!({"kind":"asset","locator":format!("casc:fdid:{id}:ckey:{}",reading["entry"]["contentKey"].as_str().unwrap_or("")),"snapshot":pin.id,"dataBuild":data.full_build}),
+                    complete: true,
+                    truncated: false,
+                },
+                &inv.control,
+                &budget.safety_only(),
+            )?;
+            drop(capture_phase);
+            callback(VerifiedView {
+                metadata: &mut *metadata,
+                blob,
+                reading,
+                capture: &capture,
+                snapshot: &pin.id,
+                data_build: &data.full_build,
+                budget,
+            })
+        };
+        (|| {
+            if inv.flag_bool("--cdn") {
+                scope.with_verified_file(data, id, &mut consume)
+            } else {
+                let mut reader = local_query::sql_reader::Reader::new(inv, data, budget)?;
                 let result = (|| {
-                    reader.verify_source()?;
-                    consume(&mut file.blob, &file.reading)
+                    let mut file = reader.read_verified(id)?;
+                    let result = (|| {
+                        reader.verify_source()?;
+                        consume(&mut file.blob, &file.reading)
+                    })();
+                    let _phase = budget.phase(Phase::SourceClose);
+                    file.blob.close_after(result)
                 })();
-                let _phase = budget.phase(Phase::SourceClose);
-                file.blob.close_after(result)
-            })();
-            reader.close_after(result)
-        }
-    })();
+                reader.close_after(result)
+            }
+        })()
+    });
     let _phase = budget.phase(Phase::SourceClose);
-    scope.finish(result)
+    finish(scope, result)
 }
 pub(crate) fn with_casc_bytes<R>(
     inv: &Invocation,

@@ -162,9 +162,19 @@ impl<'a> OpenWorkspace<'a> {
     pub fn finish<T>(self, result: Result<T>) -> Result<T> {
         self.finish_after(result, Vec::new())
     }
-    fn finish_after<T>(mut self, result: Result<T>, mut cleanup: Vec<ToolkitError>) -> Result<T> {
+    fn finish_after<T>(self, result: Result<T>, cleanup: Vec<ToolkitError>) -> Result<T> {
+        self.finish_after_metadata_close(result, cleanup, || Ok(()))
+    }
+    fn finish_after_metadata_close<T>(
+        mut self,
+        result: Result<T>,
+        mut cleanup: Vec<ToolkitError>,
+        after_close: impl FnOnce() -> Result<()>,
+    ) -> Result<T> {
         if let Some(metadata) = self.metadata.take() {
-            if let Err(error) = metadata.close() {
+            if let Err(error) = lycheedev_core::metadata::historical_write::finish_historical(
+                metadata.close(), after_close(),
+            ) {
                 cleanup.push(error);
             }
         }
@@ -206,6 +216,13 @@ impl<'a> AdmittedWorkspace<'a> {
     pub fn budget(&self) -> Option<&'a Budget> {
         self.workspace.budget
     }
+    pub(super) fn take_capture_metadata(&mut self) -> Metadata {
+        self.workspace.metadata.take().expect("query owns one metadata writer")
+    }
+    pub(super) fn restore_capture_metadata(&mut self, metadata: Metadata) {
+        assert!(self.workspace.metadata.is_none(), "metadata owner must not be replaced");
+        self.workspace.metadata = Some(metadata);
+    }
     pub fn download_workers(&self) -> usize {
         self.resources
             .as_ref()
@@ -221,6 +238,18 @@ impl<'a> AdmittedWorkspace<'a> {
             cleanup.extend(resources.close_cleanup());
         }
         self.workspace.finish_after(result, cleanup)
+    }
+    #[cfg(test)]
+    pub(super) fn finish_after_metadata_close<T>(
+        mut self,
+        result: Result<T>,
+        after_close: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<T> {
+        let mut cleanup = Vec::new();
+        if let Some(resources) = self.resources.take() {
+            cleanup.extend(resources.close_cleanup());
+        }
+        self.workspace.finish_after_metadata_close(result, cleanup, after_close)
     }
 }
 

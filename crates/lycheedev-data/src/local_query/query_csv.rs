@@ -36,6 +36,7 @@ struct Manifest<'a> {
     complete: bool,
 }
 
+#[cfg(test)]
 pub(super) fn export(
     inv: &Invocation,
     snapshot: &str,
@@ -45,6 +46,17 @@ pub(super) fn export(
 ) -> Result<(Value, Value)> {
     export_after_data(inv, snapshot, query, result, budget, || Ok(()))
 }
+pub(super) fn export_with_metadata(
+    inv: &Invocation,
+    metadata: &mut lycheedev_core::metadata::Metadata,
+    snapshot: &str,
+    query: &Value,
+    result: &QueryResult,
+    budget: &Budget,
+) -> Result<(Value, Value)> {
+    export_after_data_with_metadata(inv, Some(metadata), snapshot, query, result, budget, || Ok(()))
+}
+#[cfg(test)]
 fn export_after_data(
     inv: &Invocation,
     snapshot: &str,
@@ -53,7 +65,18 @@ fn export_after_data(
     budget: &Budget,
     after_data: impl FnOnce() -> Result<()>,
 ) -> Result<(Value, Value)> {
-    let outcome = export_after_data_inner(inv, snapshot, query, result, budget, after_data);
+    export_after_data_with_metadata(inv, None, snapshot, query, result, budget, after_data)
+}
+fn export_after_data_with_metadata(
+    inv: &Invocation,
+    metadata: Option<&mut lycheedev_core::metadata::Metadata>,
+    snapshot: &str,
+    query: &Value,
+    result: &QueryResult,
+    budget: &Budget,
+    after_data: impl FnOnce() -> Result<()>,
+) -> Result<(Value, Value)> {
+    let outcome = export_after_data_inner(inv, metadata, snapshot, query, result, budget, after_data);
     outcome.map_err(|mut error| {
         // The caller supplies a successfully committed query capture. If CSV
         // commit is unknown, retain its typed Core publication below primary;
@@ -70,6 +93,7 @@ fn export_after_data(
 }
 fn export_after_data_inner(
     inv: &Invocation,
+    metadata: Option<&mut lycheedev_core::metadata::Metadata>,
     snapshot: &str,
     query: &Value,
     result: &QueryResult,
@@ -104,20 +128,22 @@ fn export_after_data_inner(
             MAX_BYTES,
             Some(&inv.control),
         )?;
-        let csv = evidence::commit_capture_budgeted_with_dependencies(
-            &inv.home,
-            evidence::CaptureInput {
-                bytes: &raw,
-                maximum_bytes: MAX_BYTES,
-                media_type: "text/csv; charset=utf-8",
-                provenance: json!({"kind":"data-query-csv","locator":query_id,"snapshot":snapshot}),
-                complete: result.complete,
-                truncated: false,
-            },
-            &[query_id],
-            &inv.control,
-            budget,
-        )?;
+        let input = evidence::CaptureInput {
+            bytes: &raw,
+            maximum_bytes: MAX_BYTES,
+            media_type: "text/csv; charset=utf-8",
+            provenance: json!({"kind":"data-query-csv","locator":query_id,"snapshot":snapshot}),
+            complete: result.complete,
+            truncated: false,
+        };
+        let csv = match metadata {
+            Some(metadata) => evidence::commit_capture_budgeted_with_dependencies_and_metadata(
+                &inv.home, metadata, input, &[query_id], &inv.control, budget,
+            ),
+            None => evidence::commit_capture_budgeted_with_dependencies(
+                &inv.home, input, &[query_id], &inv.control, budget,
+            ),
+        }?;
         let csv_id = csv["id"]
             .as_str()
             .ok_or_else(|| fault("records.internal", 8, "Missing CSV capture"))?;

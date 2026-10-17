@@ -437,7 +437,7 @@ pub fn observe_records(
     };
     let body = reader.find(control, &body_selector, None, true)?;
     check_control(control)?;
-    let Some(record) = body.first() else {
+    let Some(record) = body.into_iter().next() else {
         return Ok(Observation::Pending { diagnostic: None });
     };
     let valid = record
@@ -454,7 +454,7 @@ pub fn observe_records(
     }
     Ok(Observation::Reported {
         receipt,
-        payload: record.payload.clone(),
+        payload: record.payload,
     })
 }
 

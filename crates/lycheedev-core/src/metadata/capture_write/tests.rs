@@ -356,3 +356,40 @@ fn capture_busy_wait_observes_independent_deadline_without_new_invocation_deadli
     blocker.close().unwrap();
     metadata.close().unwrap();
 }
+
+#[test]
+fn request_owned_three_capture_sequence_preserves_begin_commit_failure_and_cancel_boundaries() {
+    for failing_stage in 0..3 {
+        for commit in [false, true] {
+            let f = Fixture::new();
+            let mut writer = f.open();
+            let state = Cell::new(CaptureWriteState::NotCommitted);
+            for stage in 0..failing_stage {
+                writer.put_capture_serialized(&format!("capture/stage-{stage}"), b"{}", &[],
+                    &alive(), || Ok(()), |_| Ok(()), |_, _| Ok(()), || Ok(()), &state).unwrap();
+            }
+            let blocker = Connection::open(f.0.join("state/toolkit.sqlite")).unwrap();
+            blocker.execute_batch(if commit { "BEGIN; SELECT * FROM documents;" } else { "BEGIN IMMEDIATE;" }).unwrap();
+            let token = TrackedCancellation::new();
+            let invocation = OperationControl::tracked(Instant::now() + Duration::from_secs(30), token.clone());
+            let publications = Cell::new(0);
+            let busy = Cell::new(0);
+            let error = writer.put_capture_serialized_observed(
+                &format!("capture/stage-{failing_stage}"), b"{}", &[], &invocation,
+                || Ok(()), |_| Ok(()), |_, _| Ok(()),
+                || { publications.set(publications.get() + 1); Ok(()) }, &state,
+                &mut || { busy.set(busy.get() + 1); token.cancel(); },
+            ).unwrap_err();
+            assert_eq!(error.code, "command.cancelled");
+            assert_eq!(busy.get(), 1);
+            assert_eq!(publications.get(), usize::from(commit));
+            assert_eq!(state.get(), CaptureWriteState::NotCommitted);
+            assert!(writer.connection.is_autocommit());
+            blocker.execute_batch("ROLLBACK;").unwrap();
+            let retained: usize = blocker.query_row("SELECT count(*) FROM documents WHERE key LIKE 'capture/%'", [], |row| row.get(0)).unwrap();
+            assert_eq!(retained, failing_stage);
+            blocker.close().unwrap();
+            writer.close().unwrap();
+        }
+    }
+}

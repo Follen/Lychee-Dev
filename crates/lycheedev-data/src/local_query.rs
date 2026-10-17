@@ -814,152 +814,155 @@ pub(crate) fn sql_inner_budgeted(
     };
     let mut committed = Vec::new();
     let mut output_published = false;
-    let mut execute_sql = |scope: &mut dyn crate::remote::provider::FileScope| -> Result<Outcome> {
-        let data = pin.data.as_ref().ok_or_else(|| {
-            fault(
-                "records.data_pin_required",
-                2,
-                "SQL requires a fixed DataPin",
-            )
-        })?;
-        // Go reserves the executor once before source preparation. Its separate
-        // 64 MiB Work limit still bounds Rust execution, whose actual allocations
-        // remain charged to the safety ledger rather than charged twice logically.
-        budget.charge_split(Cost::retained(64 << 20), Cost::default())?;
-        // Canonical scalar errors still precede every source resolver.
-        let parameters = request.bindings()?;
-        let resolver = resolver::Resolver::new(inv, data, budget, scope, maximum, &request.hotfix);
-        let resolved = (|| {
-            let execution = Instant::now();
-            let result = program.execute_resolved_budgeted(
-                &resolver,
-                &parameters,
-                relational::Limits {
-                    deadline,
-                    work: 10_000_000,
-                    ..Default::default()
-                },
-                // Work preserves the original ordered control through this Budget.
-                None,
-                Some(&safety),
-            )?;
-            after_execute()?;
-            resolver.check_source()?;
-            let resolver::Report {
-                provenance,
-                semantic: semantic_provenance,
-                effective: effective_sources,
-                decoded_bytes,
-                definitions_ms,
-                preparation_ms,
-            } = resolver.take_report()?;
-            let execution_ms =
-                (execution.elapsed().as_secs_f64() * 1000.0 - definitions_ms - preparation_ms)
-                    .max(0.0);
-            let physical_empty = provenance.is_empty();
-            let complete = result.complete;
-            let resources = budget.logical_snapshot()?;
-            let memory_budget = budget.memory_snapshot()?;
-            let public_numbers = public_query_numbers(&request, &result.rows, &safety)?;
-            budget.check()?;
-            let mut reading = json!({"resources":resources,"memoryBudget":memory_budget,"complete":complete,"partial":!complete,"query":request,"result":result.public(),"sources":provenance,"timings":{"definitionsMs":definitions_ms,"preparationMs":preparation_ms,"executionMs":execution_ms,"decodedSourceBytes":decoded_bytes},"resourceAccounting":{"scope":"admitted allocation and work across local CASC/Encoding/decoded cache/definitions/WDC/SQL","strategy":"conservative cumulative admission","wholeQueryAccountingComplete":false,"logicalProviderParityComplete":physical_empty,"used":budget.snapshot()?,"remainingGaps":["physical/effective provider logical counters not audited against Go 3.2","SQL plan/order-container transient allocations","uninterruptible single codec call"]}});
-            if !semantic_provenance.is_empty() {
-                let size = capture::json_size(&semantic_provenance, &safety)?;
-                safety.charge(Cost::metadata(size.saturating_mul(4).saturating_add(4096)))?;
-                reading["semanticSources"] = serde_json::to_value(&semantic_provenance)?;
-            }
-            if !effective_sources.is_empty() {
-                reading["effectiveSources"] =
-                    effective::reports_value(&effective_sources, &safety)?;
-            }
-            let raw = capture::json_bytes(
-                &request::CaptureBody {
-                    reading: &reading,
-                    request: &request,
-                },
-                &safety,
-                16 << 20,
-                || {
-                    fault(
-                        "relational.resource_limit",
-                        3,
-                        "SQL result exceeds evidence budget",
-                    )
-                },
-            )?;
-            let request_digest = request.digest(&safety)?;
-            let required_sources = if effective_sources.is_empty() {
-                vec![]
-            } else {
-                request
-                    .hotfix
-                    .iter()
-                    .map(String::as_str)
-                    .collect::<Vec<_>>()
-            };
-            let reference_accounting = effective::ReferenceAccounting::new(&safety, &inv.control);
-            // Reserve the small success identities before the commit; later
-            // checked close cannot erase an already-published capture.
-            safety.charge(Cost::retained(512))?;
-            let capture_phase = budget.phase(Phase::SourceCapture);
-            let capture = evidence::commit_capture_budgeted_referencing(
-                &inv.home,
-                evidence::CaptureInput {
-                    bytes: &raw,
-                    maximum_bytes: 16 << 20,
-                    media_type: "application/json",
-                    provenance: json!({"kind":"data-query","locator":format!("sql:sha256:{request_digest}"),"snapshot":pin.id,"dataBuild":data.full_build}),
-                    complete,
-                    truncated: false,
-                },
-                &required_sources,
-                &inv.control,
-                &reference_accounting,
-            )?;
-            drop(capture_phase);
-            committed.push(
-                capture["id"]
-                    .as_str()
-                    .expect("committed SQL capture identity")
-                    .to_owned(),
-            );
-            if csv {
-                let (manifest, csv_capture) =
-                    query_csv::export(inv, &pin.id, &capture, &result, &safety)?;
+    let result = scope.with_capture_metadata(|scope, metadata| {
+        let mut execute_sql = |scope: &mut dyn crate::remote::provider::FileScope| -> Result<Outcome> {
+            let data = pin.data.as_ref().ok_or_else(|| {
+                fault(
+                    "records.data_pin_required",
+                    2,
+                    "SQL requires a fixed DataPin",
+                )
+            })?;
+            // Go reserves the executor once before source preparation. Its separate
+            // 64 MiB Work limit still bounds Rust execution, whose actual allocations
+            // remain charged to the safety ledger rather than charged twice logically.
+            budget.charge_split(Cost::retained(64 << 20), Cost::default())?;
+            // Canonical scalar errors still precede every source resolver.
+            let parameters = request.bindings()?;
+            let resolver = resolver::Resolver::new(inv, data, budget, scope, maximum, &request.hotfix);
+            let resolved = (|| {
+                let execution = Instant::now();
+                let result = program.execute_resolved_budgeted(
+                    &resolver,
+                    &parameters,
+                    relational::Limits {
+                        deadline,
+                        work: 10_000_000,
+                        ..Default::default()
+                    },
+                    // Work preserves the original ordered control through this Budget.
+                    None,
+                    Some(&safety),
+                )?;
+                after_execute()?;
+                resolver.check_source()?;
+                let resolver::Report {
+                    provenance,
+                    semantic: semantic_provenance,
+                    effective: effective_sources,
+                    decoded_bytes,
+                    definitions_ms,
+                    preparation_ms,
+                } = resolver.take_report()?;
+                let execution_ms =
+                    (execution.elapsed().as_secs_f64() * 1000.0 - definitions_ms - preparation_ms)
+                        .max(0.0);
+                let physical_empty = provenance.is_empty();
+                let complete = result.complete;
+                let resources = budget.logical_snapshot()?;
+                let memory_budget = budget.memory_snapshot()?;
+                let public_numbers = public_query_numbers(&request, &result.rows, &safety)?;
+                budget.check()?;
+                let mut reading = json!({"resources":resources,"memoryBudget":memory_budget,"complete":complete,"partial":!complete,"query":request,"result":result.public(),"sources":provenance,"timings":{"definitionsMs":definitions_ms,"preparationMs":preparation_ms,"executionMs":execution_ms,"decodedSourceBytes":decoded_bytes},"resourceAccounting":{"scope":"admitted allocation and work across local CASC/Encoding/decoded cache/definitions/WDC/SQL","strategy":"conservative cumulative admission","wholeQueryAccountingComplete":false,"logicalProviderParityComplete":physical_empty,"used":budget.snapshot()?,"remainingGaps":["physical/effective provider logical counters not audited against Go 3.2","SQL plan/order-container transient allocations","uninterruptible single codec call"]}});
+                if !semantic_provenance.is_empty() {
+                    let size = capture::json_size(&semantic_provenance, &safety)?;
+                    safety.charge(Cost::metadata(size.saturating_mul(4).saturating_add(4096)))?;
+                    reading["semanticSources"] = serde_json::to_value(&semantic_provenance)?;
+                }
+                if !effective_sources.is_empty() {
+                    reading["effectiveSources"] =
+                        effective::reports_value(&effective_sources, &safety)?;
+                }
+                let raw = capture::json_bytes(
+                    &request::CaptureBody {
+                        reading: &reading,
+                        request: &request,
+                    },
+                    &safety,
+                    16 << 20,
+                    || {
+                        fault(
+                            "relational.resource_limit",
+                            3,
+                            "SQL result exceeds evidence budget",
+                        )
+                    },
+                )?;
+                let request_digest = request.digest(&safety)?;
+                let required_sources = if effective_sources.is_empty() {
+                    vec![]
+                } else {
+                    request
+                        .hotfix
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>()
+                };
+                let reference_accounting = effective::ReferenceAccounting::new(&safety, &inv.control);
+                // Reserve the small success identities before the commit; later
+                // checked close cannot erase an already-published capture.
+                safety.charge(Cost::retained(512))?;
+                let capture_phase = budget.phase(Phase::SourceCapture);
+                let capture = evidence::commit_capture_budgeted_referencing_with_metadata(
+                    &inv.home,
+                    metadata,
+                    evidence::CaptureInput {
+                        bytes: &raw,
+                        maximum_bytes: 16 << 20,
+                        media_type: "application/json",
+                        provenance: json!({"kind":"data-query","locator":format!("sql:sha256:{request_digest}"),"snapshot":pin.id,"dataBuild":data.full_build}),
+                        complete,
+                        truncated: false,
+                    },
+                    &required_sources,
+                    &inv.control,
+                    &reference_accounting,
+                )?;
+                drop(capture_phase);
                 committed.push(
-                    csv_capture["id"]
+                    capture["id"]
                         .as_str()
-                        .expect("committed CSV capture identity")
+                        .expect("committed SQL capture identity")
                         .to_owned(),
                 );
-                output_published = true;
-                let mut out = Outcome::new(manifest);
+                if csv {
+                    let (manifest, csv_capture) =
+                        query_csv::export_with_metadata(inv, metadata, &pin.id, &capture, &result, &safety)?;
+                    committed.push(
+                        csv_capture["id"]
+                            .as_str()
+                            .expect("committed CSV capture identity")
+                            .to_owned(),
+                    );
+                    output_published = true;
+                    let mut out = Outcome::new(manifest);
+                    out.complete = complete;
+                    out.selection = serde_json::to_value(&pin)?;
+                    out.provenance = vec![capture, csv_capture];
+                    return Ok(out);
+                }
+                let mut out = Outcome::new(reading);
+                out.public_numbers = public_numbers;
                 out.complete = complete;
                 out.selection = serde_json::to_value(&pin)?;
-                out.provenance = vec![capture, csv_capture];
-                return Ok(out);
+                out.provenance = vec![capture];
+                Ok(out)
+            })();
+            resolver.close_after(resolved)
+        };
+        if inv.flag_bool("--cdn") {
+            match pin.data.as_ref() {
+                Some(data) => scope.with_session(data, |reader| execute_sql(reader)),
+                None => Err(fault(
+                    "records.data_pin_required",
+                    2,
+                    "SQL requires a fixed DataPin",
+                )),
             }
-            let mut out = Outcome::new(reading);
-            out.public_numbers = public_numbers;
-            out.complete = complete;
-            out.selection = serde_json::to_value(&pin)?;
-            out.provenance = vec![capture];
-            Ok(out)
-        })();
-        resolver.close_after(resolved)
-    };
-    let result = if inv.flag_bool("--cdn") {
-        match pin.data.as_ref() {
-            Some(data) => scope.with_session(data, |reader| execute_sql(reader)),
-            None => Err(fault(
-                "records.data_pin_required",
-                2,
-                "SQL requires a fixed DataPin",
-            )),
+        } else {
+            execute_sql(scope)
         }
-    } else {
-        execute_sql(&mut scope)
-    };
+    });
     let _phase = budget.phase(Phase::SourceClose);
     scope
         .finish(result)
@@ -1018,7 +1021,7 @@ fn asset_after_closes(
         crate::remote::provider::OpenedScope::open(inv, &budget)?.admit_asset()?
     };
     let mut committed = None;
-    let result = (|| {
+    let result = scope.with_capture_metadata(|scope, metadata| {
         let data = pin.data.as_ref().expect("asset admission checked DataPin");
         scope.check_pin(data)?;
         let mut capture = |blob: &mut evidence::VerifiedBlob, reading: &Value| {
@@ -1035,8 +1038,9 @@ fn asset_after_closes(
             reading["resourceAccounting"] =
                 json!({"wholeQueryAccountingComplete":false,"used":budget.snapshot()?});
             let capture_phase = budget.phase(Phase::SourceCapture);
-            let saved = evidence::commit_verified_capture_budgeted(
+            let saved = evidence::commit_verified_capture_budgeted_with_metadata(
                 blob,
+                metadata,
                 evidence::CaptureHeader {
                     media_type: "application/octet-stream",
                     provenance: json!({"kind":"asset","locator":format!("casc:fdid:{id}:ckey:{}",reading["entry"]["contentKey"].as_str().unwrap_or("")),"snapshot":pin.id,"dataBuild":data.full_build}),
@@ -1069,7 +1073,7 @@ fn asset_after_closes(
             // successful capture does not excuse an unchecked source close.
             finish_asset_blob(file.blob, result, &budget, after_blob_close)
         }
-    })();
+    });
     let result = {
         let _phase = budget.phase(Phase::SourceClose);
         scope.finish(result)

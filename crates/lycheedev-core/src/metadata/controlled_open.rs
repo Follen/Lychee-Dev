@@ -94,83 +94,20 @@ impl Metadata {
             };
             // One absolute deadline spans open, schema reads, BEGIN and COMMIT.
             let until = control.deadline();
+            let bound_home = std::path::absolute(home)?;
             let connection =
                 checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
                     Connection::open_with_flags(&path, flags)
                 })?;
-            let initialized = (|| {
-                on_open();
-                metadata_check(control, &mut check)?;
-                connection.busy_timeout(Duration::ZERO)?;
-                let version: i32 =
-                    checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
-                        connection.pragma_query_value(None, "user_version", |row| row.get(0))
-                    })?;
-                metadata_check(control, &mut check)?;
-                // Deliberately retain open's existing schema/version diagnostics.
-                // Historical Go migration has its separate, stricter boundary.
-                if version > 1 {
-                    return Err(ToolkitError::new(
-                        "vault.schema_newer",
-                        "workspace schema is newer than this toolkit",
-                        4,
-                    ));
-                }
-                if version == 0 {
-                    if !write {
-                        return Err(ToolkitError::new(
-                            "vault.schema_invalid",
-                            "uninitialized workspace schema",
-                            4,
-                        ));
-                    }
-                    checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
-                        connection.pragma_update(None, "synchronous", "FULL")
-                    })?;
-                    let mut transaction =
-                        checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
-                            rusqlite::Transaction::new_unchecked(
-                                &connection,
-                                rusqlite::TransactionBehavior::Immediate,
-                            )
-                        })?;
-                    let created = (|| {
-                        checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
-                            transaction.execute_batch("CREATE TABLE IF NOT EXISTS documents (key TEXT PRIMARY KEY NOT NULL, generation INTEGER NOT NULL CHECK(generation>0), value BLOB NOT NULL CHECK(length(value)<=1048576)) WITHOUT ROWID")
-                        })?;
-                        checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
-                            transaction.pragma_update(None, "user_version", 1)
-                        })?;
-                        checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
-                            transaction.execute_batch("COMMIT")
-                        })?;
-                        Ok(())
-                    })();
-                    // Roll back even after cancellation/deadline. Each attempt is
-                    // nonblocking; close below is checked after this guard ends.
-                    // SQLite can itself roll back some storage errors already.
-                    let rollback = if created.is_err() && !transaction.is_autocommit() {
-                        transaction
-                            .execute_batch("ROLLBACK")
-                            .map_err(ToolkitError::from)
-                    } else {
-                        Ok(())
-                    };
-                    // Do not silently retry a failed rollback through Drop.
-                    transaction.set_drop_behavior(rusqlite::DropBehavior::Ignore);
-                    finish_historical(created, rollback)?;
-                }
-                if write {
-                    checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
-                        connection.pragma_update(None, "synchronous", "FULL")
-                    })?;
-                    checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
-                        connection.execute_batch(DELETED_GENERATIONS_SCHEMA)
-                    })?;
-                }
-                metadata_check(control, &mut check)
-            })();
-            let metadata = Self { connection };
+            on_open();
+            let initialized = initialize_connection(
+                &connection, write, control, &mut check, &mut on_busy,
+            );
+            let metadata = Self {
+                connection,
+                home: bound_home,
+                writable: write,
+            };
             match initialized {
                 Ok(()) => Ok(metadata),
                 Err(error) => finish_historical(Err(error), metadata.close()),
@@ -303,3 +240,115 @@ mod tests;
 
 #[cfg(test)]
 mod consumer_tests;
+
+// The request-owned capture route repeats the same live schema/authentication
+// checks as opening a writer, but borrows the existing SQLite connection.
+fn initialize_connection(
+    connection: &Connection,
+    write: bool,
+    control: &OperationControl,
+    check: &mut impl FnMut() -> Result<()>,
+    on_busy: &mut impl FnMut(),
+) -> Result<()> {
+    let until = control.deadline();
+    metadata_check(control, check)?;
+    connection.busy_timeout(Duration::ZERO)?;
+    let version: i32 =
+        checked_sql_with_check(control, until, check, on_busy, || {
+            connection.pragma_query_value(None, "user_version", |row| row.get(0))
+        })?;
+    metadata_check(control, check)?;
+    // Deliberately retain open's existing schema/version diagnostics.
+    // Historical Go migration has its separate, stricter boundary.
+    if version > 1 {
+        return Err(ToolkitError::new(
+            "vault.schema_newer",
+            "workspace schema is newer than this toolkit",
+            4,
+        ));
+    }
+    if version == 0 {
+        if !write {
+            return Err(ToolkitError::new(
+                "vault.schema_invalid",
+                "uninitialized workspace schema",
+                4,
+            ));
+        }
+        checked_sql_with_check(control, until, check, on_busy, || {
+            connection.pragma_update(None, "synchronous", "FULL")
+        })?;
+        let mut transaction =
+            checked_sql_with_check(control, until, check, on_busy, || {
+                rusqlite::Transaction::new_unchecked(
+                    connection,
+                    rusqlite::TransactionBehavior::Immediate,
+                )
+            })?;
+        let created = (|| {
+            checked_sql_with_check(control, until, check, on_busy, || {
+                transaction.execute_batch("CREATE TABLE IF NOT EXISTS documents (key TEXT PRIMARY KEY NOT NULL, generation INTEGER NOT NULL CHECK(generation>0), value BLOB NOT NULL CHECK(length(value)<=1048576)) WITHOUT ROWID")
+            })?;
+            checked_sql_with_check(control, until, check, on_busy, || {
+                transaction.pragma_update(None, "user_version", 1)
+            })?;
+            checked_sql_with_check(control, until, check, on_busy, || {
+                transaction.execute_batch("COMMIT")
+            })?;
+            Ok(())
+        })();
+        // Roll back even after cancellation/deadline. Each attempt is
+        // nonblocking; close below is checked after this guard ends.
+        // SQLite can itself roll back some storage errors already.
+        let rollback = if created.is_err() && !transaction.is_autocommit() {
+            transaction
+                .execute_batch("ROLLBACK")
+                .map_err(ToolkitError::from)
+        } else {
+            Ok(())
+        };
+        // Do not silently retry a failed rollback through Drop.
+        transaction.set_drop_behavior(rusqlite::DropBehavior::Ignore);
+        finish_historical(created, rollback)?;
+    }
+    if write {
+        checked_sql_with_check(control, until, check, on_busy, || {
+            connection.pragma_update(None, "synchronous", "FULL")
+        })?;
+        checked_sql_with_check(control, until, check, on_busy, || {
+            connection.execute_batch(DELETED_GENERATIONS_SCHEMA)
+        })?;
+    }
+    metadata_check(control, check)
+}
+
+impl Metadata {
+    pub(crate) fn check_capture_binding(&self, home: &Path) -> Result<()> {
+        if !self.writable || (home != self.home.as_path() && std::path::absolute(home)? != self.home) {
+            return Err(ToolkitError::invalid("capture metadata belongs to a different workspace or is read-only"));
+        }
+        if !self.connection.is_autocommit() {
+            return Err(ToolkitError::invalid("capture metadata already has an active transaction"));
+        }
+        Ok(())
+    }
+    pub(crate) fn check_capture_owner_controlled(
+        &self,
+        home: &Path,
+        control: &OperationControl,
+        mut check: impl FnMut() -> Result<()>,
+    ) -> Result<()> {
+        metadata_check(control, &mut check)?;
+        self.check_capture_binding(home)?;
+        crate::workspace::open_controlled_with_check(home, control, &mut check)?;
+        let schema = historical_write::historical_lease_observed_with_check(
+            home, "metadata-schema", control, &mut check, &mut || {},
+        )?;
+        // Do not memoize user_version or dependency authentication. No writer
+        // transaction is kept alive between source, codec, artifact and manifest.
+        let checked = initialize_connection(&self.connection, true, control, &mut check, &mut || {});
+        let checked = finish_historical(checked, schema.close());
+        let checked = crate::selection::selection_finish(checked, control.check());
+        crate::selection::selection_finish(checked, check())
+    }
+}

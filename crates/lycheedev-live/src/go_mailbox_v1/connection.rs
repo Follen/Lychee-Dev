@@ -36,6 +36,7 @@ pub use native::{
 };
 pub use outcome::ServiceOutcome;
 pub use projection::{ProjectResult, RawReport, present};
+use projection::present_owned;
 
 /// Existing public target selectors; no new command or protocol is introduced.
 #[derive(Debug, Clone, Default)]
@@ -147,7 +148,7 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
     /// acquire an execution lease, retire claims, or change a durable deadline.
     pub fn status(&self, id: &str, control: &OperationControl) -> ServiceOutcome {
         match self.book.status(id, control) {
-            Ok(record) => ServiceOutcome::Completed(self.project(&record, "", "")),
+            Ok(record) => ServiceOutcome::Completed(self.project_owned(record, "", "")),
             Err(e) => ServiceOutcome::failure(e),
         }
     }
@@ -159,8 +160,8 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
             Err(e) => return ServiceOutcome::failure(e),
         };
         match durable_journal::historical_request(&record.paths, request, control) {
-            Ok(Some(state)) => ServiceOutcome::Completed(present(
-                &state,
+            Ok(Some(state)) => ServiceOutcome::Completed(present_owned(
+                state,
                 record.paths.log_path(),
                 self.clock.unix_millis(),
                 "",
@@ -266,7 +267,7 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
                 .as_ref()
                 .is_some_and(|o| o.stage == OperationStage::Complete)
         {
-            return ServiceOutcome::Completed(self.project(&record, "", ""));
+            return ServiceOutcome::Completed(self.project_owned(record, "", ""));
         }
         // Fixed Go retains the pre-close-budget unbind shape. Route it through
         // Disconnect so original-process retirement is checked before native
@@ -300,8 +301,8 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
         };
         match historical(&record, request, control) {
             Ok(Some(state)) if complete(&state) => {
-                return ServiceOutcome::Completed(present(
-                    &state,
+                return ServiceOutcome::Completed(present_owned(
+                    state,
                     record.paths.log_path(),
                     self.clock.unix_millis(),
                     "",
@@ -357,6 +358,15 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
             scans,
         )
     }
+    fn project_owned(&self, record: ConnectionRecord, waiting: &str, scans: &str) -> ProjectResult {
+        present_owned(
+            record.state,
+            record.paths.log_path(),
+            self.clock.unix_millis(),
+            waiting,
+            scans,
+        )
+    }
     fn retire(&mut self, record: ConnectionRecord, control: &OperationControl) -> ServiceOutcome {
         let projected = self.project(&record, "", "");
         ServiceOutcome::with_result(
@@ -404,10 +414,13 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
                 Err(contract("live.channel_closed")),
             );
         }
-        let (record, mut journal) = match self.book.acquire(id, control) {
+        let (mut record, mut journal) = match self.book.acquire(id, control) {
             Ok(owned) => owned,
             Err(e) => return self.acquired(&before, e),
         };
+        // Only the under-lease replay can drive this turn. Release the earlier
+        // read-only projection rather than retaining another code/report owner.
+        drop(before);
         // All predicates are rechecked on the under-lease replay before native
         // open, including a concurrent CLI's just-completed request.
         let check = (|| -> Result<Option<State>, AdmissionError> {
@@ -432,8 +445,8 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
             Ok(None) => (),
             other => {
                 let mut outcome = match other {
-                    Ok(Some(state)) => ServiceOutcome::Completed(present(
-                        &state,
+                    Ok(Some(state)) => ServiceOutcome::Completed(present_owned(
+                        state,
                         record.paths.log_path(),
                         self.clock.unix_millis(),
                         "",
@@ -461,11 +474,14 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
         };
         // Validate/synchronize before transferring resources to Driver, whose
         // constructor can otherwise drop them on an invalid recovered budget.
-        let mut state = record.state.clone();
-        if let Err(e) = state
+        // Budget synchronization validates every candidate before committing
+        // either field: its error leaves the original projection unchanged.
+        // Native open already succeeded, so no intervening open failure needs
+        // the old budget view after a successful synchronization.
+        if let Err(e) = record.state
             .validate()
             .map_err(ChannelError::from)
-            .and_then(|_| super::recovery::synchronize_automatic_budget(&mut state).map(|_| ()))
+            .and_then(|_| super::recovery::synchronize_automatic_budget(&mut record.state).map(|_| ()))
         {
             let mut outcome = ServiceOutcome::with_result(
                 self.project(&record, "", backend.scans()),
@@ -476,7 +492,7 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
             return outcome;
         }
         let mut driver = Driver::from_state(
-            state,
+            record.state,
             backend,
             journal,
             BorrowClock(&self.clock),
@@ -523,14 +539,14 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
                 )
             }
         })();
-        let projected = present(
-            &driver.state,
+        let should_retire = result.is_ok() && driver.state.closed;
+        let projected = present_owned(
+            driver.state,
             record.paths.log_path(),
             driver.clock.unix_millis(),
             &driver.waiting,
             driver.backend.scans(),
         );
-        let should_retire = result.is_ok() && driver.state.closed;
         let mut outcome = ServiceOutcome::with_result(projected, channel(result));
         // Native close first stops process ownership; both closes always run.
         outcome = outcome.join(channel(driver.backend.checked_close()));

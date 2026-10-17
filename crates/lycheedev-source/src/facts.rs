@@ -2,6 +2,73 @@
 // Source fact contracts ported from the MIT wowdoc-derived Lychee Dev scanner.
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+pub(crate) mod worker;
+use worker::{ScratchFrame, WorkerGuard};
+
+/// The public parser mode belongs to the immutable source path. Generated Lua
+/// retains its original complete sequential parser until its own guarded path
+/// exists; adding a format must not silently disable generated observations.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ParseMode {
+    LuaOrdinary,
+    LuaGenerated,
+    Xml,
+    Toc,
+}
+impl ParseMode {
+    pub(crate) fn for_path(path: &str) -> Self {
+        let suffix = path
+            .as_bytes()
+            .get(path.len().saturating_sub(4)..)
+            .unwrap_or_default();
+        if suffix.eq_ignore_ascii_case(b".lua") {
+            if path.contains("/Blizzard_APIDocumentationGenerated/") {
+                Self::LuaGenerated
+            } else {
+                Self::LuaOrdinary
+            }
+        } else if suffix.eq_ignore_ascii_case(b".toc") {
+            Self::Toc
+        } else {
+            Self::Xml
+        }
+    }
+    pub(crate) fn parse(self, raw: &[u8]) -> Facts {
+        match self {
+            Self::LuaOrdinary => lua(raw, false),
+            Self::LuaGenerated => lua(raw, true),
+            Self::Xml => xml(raw),
+            Self::Toc => toc(raw),
+        }
+    }
+}
+/// Pure, optional preparation with one shared document allowance. Admission or
+/// cancellation failure abandons every partial fact; the ordered caller keeps
+/// the full original parser and selects the public result at its original turn.
+pub(crate) fn for_worker(
+    raw: &[u8],
+    mode: ParseMode,
+    control: &lycheedev_core::control::OperationControl,
+    max_owned_bytes: usize,
+) -> Option<Facts> {
+    if raw.len() > 64 << 10 || std::str::from_utf8(raw).is_err() || mode == ParseMode::LuaGenerated
+    {
+        return None;
+    }
+    let guard = WorkerGuard::new(control, max_owned_bytes);
+    if !guard.check() {
+        return None;
+    }
+    match mode {
+        ParseMode::LuaOrdinary => crate::lua_tree::facts_with_worker_guard(raw, &guard),
+        ParseMode::Toc => toc_with_guard(raw, Some(&guard)),
+        ParseMode::Xml => {
+            let mut lines = XmlLines::new(raw);
+            xml_guarded(raw, |offset| lines.at(offset), Some(&guard))
+        }
+        ParseMode::LuaGenerated => None,
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -83,33 +150,49 @@ pub fn lua(raw: &[u8], generated: bool) -> Facts {
     }
 }
 pub(crate) const LUA_WORKER_SCRATCH_BYTES: usize = 32 << 20;
-/// Optional pure preparation; callers retain document order and reparse normally
-/// after abandonment. Requires <=64 KiB UTF-8, nongenerated Lua and a separate
-/// 32 MiB scratch reservation, excluding opaque tree-sitter C allocations.
+/// Keep the original Lua regression entry pointed at the production dispatcher.
+#[cfg(test)]
 pub(crate) fn lua_for_worker(
     raw: &[u8],
     control: &lycheedev_core::control::OperationControl,
     max_owned_bytes: usize,
 ) -> Option<Facts> {
-    crate::lua_tree::facts_for_worker(raw, control, max_owned_bytes)
+    for_worker(raw, ParseMode::LuaOrdinary, control, max_owned_bytes)
 }
 pub fn toc(raw: &[u8]) -> Facts {
+    toc_with_guard(raw, None).expect("unrestricted TOC facts")
+}
+fn toc_with_guard(raw: &[u8], guard: Option<&WorkerGuard<'_>>) -> Option<Facts> {
     let mut f = Facts::fresh();
     let text = String::from_utf8_lossy(raw.strip_prefix(&[239, 187, 191]).unwrap_or(raw));
     for (i, line) in text.split('\n').enumerate() {
+        if !worker::check(guard) {
+            return None;
+        }
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
         if let Some(header) = line.strip_prefix("##") {
             if let Some((key, value)) = header.trim().split_once(':') {
+                let (key, value) = (key.trim(), value.trim());
+                if !worker::charge(guard, key.len().saturating_add(value.len()))
+                    || !worker::prepare_push(guard, &mut f.headers)
+                {
+                    return None;
+                }
                 f.headers.push(HeaderValue {
-                    key: key.trim().into(),
-                    value: value.trim().into(),
+                    key: key.into(),
+                    value: value.into(),
                     line: i + 1,
                 });
             }
         } else if !line.starts_with('#') {
+            if !worker::charge(guard, line.len().saturating_add(3))
+                || !worker::prepare_push(guard, &mut f.loads)
+            {
+                return None;
+            }
             f.loads.push(LoadReference {
                 path: line.into(),
                 line: i + 1,
@@ -117,7 +200,7 @@ pub fn toc(raw: &[u8]) -> Facts {
             });
         }
     }
-    f
+    worker::check(guard).then_some(f)
 }
 
 /// LF positions are queried in parser order. Keep the exact prefix definition
@@ -176,6 +259,13 @@ pub(crate) fn xml_attribute(
     attribute: &quick_xml::events::attributes::Attribute<'_>,
     decoder: quick_xml::encoding::Decoder,
 ) -> std::result::Result<String, String> {
+    xml_attribute_guarded(attribute, decoder, None)
+}
+fn xml_attribute_guarded(
+    attribute: &quick_xml::events::attributes::Attribute<'_>,
+    decoder: quick_xml::encoding::Decoder,
+    guard: Option<&WorkerGuard<'_>>,
+) -> std::result::Result<String, String> {
     let decoded = decoder
         .decode(attribute.value.as_ref())
         .map_err(|_| "invalid UTF-8".to_owned())?;
@@ -183,6 +273,9 @@ pub(crate) fn xml_attribute(
     let mut value = String::new();
     let mut rest = normalized.as_str();
     while let Some(at) = rest.find('&') {
+        if !worker::check(guard) {
+            return Err(String::new());
+        }
         if rest[..at].contains('<') {
             return Err("unescaped < inside quoted string".into());
         }
@@ -202,7 +295,7 @@ pub(crate) fn xml_attribute(
         return Err("unescaped < inside quoted string".into());
     }
     value.push_str(rest);
-    xml_characters(&value)?;
+    xml_characters_guarded(&value, guard)?;
     Ok(value)
 }
 pub(crate) fn xml_entity(reference: &str) -> std::result::Result<String, String> {
@@ -234,7 +327,16 @@ fn xml_entity_value(reference: &str) -> std::result::Result<String, String> {
     Ok(value.to_string())
 }
 pub(crate) fn xml_characters(text: &str) -> std::result::Result<(), String> {
-    for ch in text.chars() {
+    xml_characters_guarded(text, None)
+}
+fn xml_characters_guarded(
+    text: &str,
+    guard: Option<&WorkerGuard<'_>>,
+) -> std::result::Result<(), String> {
+    for (offset, ch) in text.chars().enumerate() {
+        if offset % 256 == 0 && !worker::check(guard) {
+            return Err(String::new());
+        }
         if !matches!(ch,'\t'|'\n'|'\r'|' '..='\u{d7ff}'|'\u{e000}'..='\u{fffd}'|'\u{10000}'..='\u{10ffff}')
         {
             return Err(format!("illegal character code U+{:04X}", ch as u32));
@@ -245,48 +347,93 @@ pub(crate) fn xml_characters(text: &str) -> std::result::Result<(), String> {
 fn is_public_handler(tag: &str) -> bool {
     tag.len() > 2 && tag.starts_with("On")
 }
-fn append_inline(facts: &mut Facts, script: &str, script_line: usize, owner: &str, tag: &str) {
+fn append_inline(
+    facts: &mut Facts,
+    script: &str,
+    script_line: usize,
+    owner: &str,
+    tag: &str,
+    guard: Option<&WorkerGuard<'_>>,
+) -> Option<()> {
     if script.trim().is_empty() {
-        return;
+        return worker::check(guard).then_some(());
     }
-    let mut inner = lua(script.as_bytes(), false);
+    let mut inner = if let Some(guard) = guard {
+        crate::lua_tree::facts_with_worker_guard(script.as_bytes(), guard)?
+    } else {
+        lua(script.as_bytes(), false)
+    };
     let offset = script_line.saturating_sub(1);
     for declaration in &mut inner.declarations {
+        if !worker::check(guard) {
+            return None;
+        }
         declaration.line += offset;
         // Go adds the offset even to the zero LastLine of assignments.
         declaration.end_line += offset;
     }
     for relation in &mut inner.relationships {
+        if !worker::check(guard) {
+            return None;
+        }
         relation.line += offset;
         if relation.from == "<file>" {
-            relation.from = format!("{owner}:{tag}");
+            let from = format!("{owner}:{tag}");
+            if !worker::charge(guard, from.capacity()) {
+                return None;
+            }
+            relation.from = from;
         }
     }
     for diagnostic in &mut inner.diagnostics {
+        if !worker::check(guard) {
+            return None;
+        }
         diagnostic.line = if diagnostic.line > 0 {
             diagnostic.line + offset
         } else {
             script_line
         };
     }
-    // Relations are appended in token order. Preserve the exact ordinal of
-    // invalid literal targets without exposing a second public fact model.
+    // Keep token order and raw target ownership. Inner strings/Vec payloads
+    // move, but destination vector/map growth is additionally admitted while
+    // the original buffers still coexist. No handler gets a fresh Facts cap.
     let offset = facts.relationships.len();
     match (
         &mut facts.raw_relationship_targets,
         inner.raw_relationship_targets.take(),
     ) {
-        (Some(targets), Some(inner)) => targets.extend(
-            inner
-                .into_iter()
-                .map(|(ordinal, raw)| (offset + ordinal, raw)),
-        ),
+        (Some(targets), Some(inner)) => {
+            for (ordinal, raw) in inner {
+                if guard.is_some_and(|guard| !guard.raw_target(targets.len(), 0)) {
+                    return None;
+                }
+                targets.insert(offset + ordinal, raw);
+            }
+        }
         _ => facts.raw_relationship_targets = None,
     }
-    facts.declarations.extend(inner.declarations);
-    facts.relationships.extend(inner.relationships);
-    facts.diagnostics.extend(inner.diagnostics);
+    for declaration in inner.declarations {
+        if !worker::prepare_push(guard, &mut facts.declarations) {
+            return None;
+        }
+        facts.declarations.push(declaration);
+    }
+    for relationship in inner.relationships {
+        if !worker::prepare_push(guard, &mut facts.relationships) {
+            return None;
+        }
+        facts.relationships.push(relationship);
+    }
+    for diagnostic in inner.diagnostics {
+        if !worker::prepare_push(guard, &mut facts.diagnostics) {
+            return None;
+        }
+        facts.diagnostics.push(diagnostic);
+    }
+    worker::check(guard).then_some(())
 }
+
 fn xml_error_message(error: quick_xml::Error) -> String {
     use quick_xml::errors::{IllFormedError, SyntaxError};
     match error {
@@ -372,9 +519,7 @@ fn public_xml_token_failure(raw: &[u8]) -> Option<(String, usize)> {
     // when its first character would otherwise be invalid.
     let mut end = 2;
     while raw.get(end).is_some_and(|byte| {
-        byte.is_ascii_alphanumeric()
-            || matches!(*byte, b'_' | b':' | b'.' | b'-')
-            || *byte >= 128
+        byte.is_ascii_alphanumeric() || matches!(*byte, b'_' | b':' | b'.' | b'-') || *byte >= 128
     }) {
         end += 1;
     }
@@ -443,7 +588,7 @@ fn xml_reference_end(raw: &[u8]) -> usize {
 // A Go CharData token contains adjacent text and references. Validate the
 // entire token once, preserving first-failure precedence and the scanner's
 // consumed-byte position (which can precede quick-xml's final event cursor).
-fn xml_text_failure(raw: &[u8]) -> Option<(String, usize)> {
+fn xml_text_failure(raw: &[u8], guard: Option<&WorkerGuard<'_>>) -> Option<(String, usize)> {
     let end = raw
         .iter()
         .position(|byte| *byte == b'<')
@@ -453,6 +598,9 @@ fn xml_text_failure(raw: &[u8]) -> Option<(String, usize)> {
     let mut at = 0;
     let mut copied = 0;
     while at < text.len() {
+        if !worker::check(guard) {
+            return None;
+        }
         if text[at..].starts_with(b"]]>") {
             return Some(("unescaped ]]> not in CDATA section".into(), at + 3));
         }
@@ -490,7 +638,9 @@ fn xml_text_failure(raw: &[u8]) -> Option<(String, usize)> {
         std::borrow::Cow::Owned(expanded)
     };
     let value = std::str::from_utf8(&value).ok()?;
-    xml_characters(value).err().map(|error| (error, end))
+    xml_characters_guarded(value, guard)
+        .err()
+        .map(|error| (error, end))
 }
 fn xml_attribute_failure_offset(raw: &[u8]) -> usize {
     let mut at = 0;
@@ -551,10 +701,16 @@ fn xml_declaration(content: &[u8]) -> std::result::Result<(), String> {
 // Go ignores arbitrary <!directives>, with nested brackets and quoted >,
 // without installing declared entities. Quick-xml only admits DOCTYPE. Mask
 // those tokens to same-width ignored PIs; positions and source bytes stay raw.
-fn public_xml_grammar(raw: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+fn public_xml_grammar<'a>(
+    raw: &'a [u8],
+    guard: Option<&WorkerGuard<'_>>,
+) -> std::borrow::Cow<'a, [u8]> {
     let mut changed: Option<Vec<u8>> = None;
     let mut at = 0;
     while at < raw.len() {
+        if !worker::check(guard) {
+            return std::borrow::Cow::Borrowed(raw);
+        }
         if raw[at..].starts_with(b"<!--")
             || raw[at..].starts_with(b"<![CDATA[")
             || raw[at..].starts_with(b"<?")
@@ -579,6 +735,9 @@ fn public_xml_grammar(raw: &[u8]) -> std::borrow::Cow<'_, [u8]> {
             let mut quote = 0;
             let mut complete = false;
             while at < raw.len() {
+                if !worker::check(guard) {
+                    return std::borrow::Cow::Borrowed(raw);
+                }
                 let byte = raw[at];
                 if quote != 0 {
                     if byte == quote {
@@ -622,6 +781,9 @@ fn public_xml_grammar(raw: &[u8]) -> std::borrow::Cow<'_, [u8]> {
             at += 1;
             let mut quote = 0;
             while at < raw.len() {
+                if !worker::check(guard) {
+                    return std::borrow::Cow::Borrowed(raw);
+                }
                 let byte = raw[at];
                 at += 1;
                 if quote != 0 {
@@ -642,13 +804,51 @@ fn public_xml_grammar(raw: &[u8]) -> std::borrow::Cow<'_, [u8]> {
         .map(std::borrow::Cow::Owned)
         .unwrap_or(std::borrow::Cow::Borrowed(raw))
 }
-fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) -> Facts {
+fn xml_with_line_counter(raw: &[u8], line_at: impl FnMut(usize) -> usize) -> Facts {
+    xml_guarded(raw, line_at, None).expect("unrestricted XML facts")
+}
+/// Only these five attributes affect public Facts. Every attribute is still
+/// decoded and validated in input order, and duplicate local names keep the
+/// last value exactly as the former BTreeMap did.
+#[derive(Default)]
+struct XmlAttributes {
+    values: [Option<String>; 5],
+}
+impl XmlAttributes {
+    const NAMES: [&'static str; 5] = ["name", "file", "inherits", "function", "method"];
+    fn insert(&mut self, name: &str, value: String) {
+        if let Some(index) = Self::NAMES
+            .iter()
+            .position(|key| name.eq_ignore_ascii_case(key))
+        {
+            self.values[index] = Some(value);
+        }
+    }
+    fn get(&self, name: &str) -> Option<&String> {
+        let index = Self::NAMES.iter().position(|key| name == *key)?;
+        self.values[index].as_ref()
+    }
+}
+struct XmlFrame<'a> {
+    tag: String,
+    owner: String,
+    // Live inherited owner copies count against the same scratch as Lua frames.
+    _strings: Option<ScratchFrame<'a>>,
+}
+fn xml_guarded(
+    raw: &[u8],
+    mut line_at: impl FnMut(usize) -> usize,
+    guard: Option<&WorkerGuard<'_>>,
+) -> Option<Facts> {
     use quick_xml::{Reader, events::Event};
-    let grammar = public_xml_grammar(raw);
+    let grammar = public_xml_grammar(raw, guard);
+    if !worker::check(guard) {
+        return None;
+    }
     let mut reader = Reader::from_reader(grammar.as_ref());
     reader.config_mut().check_comments = true;
     let mut facts = Facts::fresh();
-    let mut stack = Vec::<(String, String)>::new();
+    let mut stack = Vec::<XmlFrame<'_>>::new();
     let mut script = String::new();
     let mut script_line = 0;
     let mut character_data_line = None;
@@ -658,14 +858,23 @@ fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) ->
         0
     };
     loop {
+        if !worker::check(guard) {
+            return None;
+        }
+        // The whole input bounds decoded attribute/text/error temporaries.
+        // Keep this frame live during inline Lua: its existing scratch and
+        // retained XML stack/script must fit together, never independent caps.
+        let _event_scratch = if let Some(guard) = guard {
+            Some(guard.frame(raw.len())?)
+        } else {
+            None
+        };
         let at =
             crate::xml_inline::source_map::raw_cursor(raw.len(), prefix, reader.buffer_position())
                 .expect("slice reader original cursor");
         let line = line_at(at.min(raw.len()));
         let event = reader.read_event();
         let empty = matches!(&event, Ok(Event::Empty(_)));
-        // quick-xml exposes references separately; Go returns one CharData
-        // token for the entire adjacent text/reference sequence.
         let is_character_data = matches!(&event, Ok(Event::Text(_) | Event::GeneralRef(_)))
             || raw.get(at) == Some(&b'&');
         let first_character_data = is_character_data && character_data_line.is_none();
@@ -677,10 +886,14 @@ fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) ->
         };
         let mut error_offset = None;
         let result: std::result::Result<(), String> = (|| {
-            if first_character_data && let Some((message, consumed)) = xml_text_failure(&raw[at..])
+            if first_character_data
+                && let Some((message, consumed)) = xml_text_failure(&raw[at..], guard)
             {
                 error_offset = Some(at + consumed);
                 return Err(message);
+            }
+            if !worker::check(guard) {
+                return Err(String::new());
             }
             if let Some((message, consumed)) = public_xml_token_failure(&raw[at..]) {
                 error_offset = Some(at + consumed);
@@ -701,11 +914,14 @@ fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) ->
                 Event::Start(element) | Event::Empty(element) => {
                     let qualified = String::from_utf8_lossy(element.name().as_ref()).into_owned();
                     let tag = xml_name(&qualified).1.to_owned();
-                    let mut attrs = BTreeMap::new();
+                    let mut attrs = XmlAttributes::default();
                     for attribute in element.attributes().with_checks(false) {
+                        if !worker::check(guard) {
+                            return Err(String::new());
+                        }
                         let attribute = attribute.map_err(xml_attribute_error)?;
-                        let value =
-                            xml_attribute(&attribute, reader.decoder()).map_err(|error| {
+                        let value = xml_attribute_guarded(&attribute, reader.decoder(), guard)
+                            .map_err(|error| {
                                 if let Some(value_at) = (attribute.value.as_ptr() as usize)
                                     .checked_sub(grammar.as_ptr() as usize)
                                     .filter(|offset| *offset <= raw.len())
@@ -720,24 +936,28 @@ fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) ->
                                 error
                             })?;
                         attrs.insert(
-                            xml_name(&String::from_utf8_lossy(attribute.key.as_ref()))
-                                .1
-                                .to_ascii_lowercase(),
+                            xml_name(&String::from_utf8_lossy(attribute.key.as_ref())).1,
                             value,
                         );
                     }
                     let mut owner = attrs.get("name").cloned().unwrap_or_default();
                     if !owner.is_empty() {
+                        let category = format!("xml-{tag}");
+                        if !worker::charge(guard, owner.len().saturating_add(category.capacity()))
+                            || !worker::prepare_push(guard, &mut facts.declarations)
+                        {
+                            return Err(String::new());
+                        }
                         facts.declarations.push(Declaration {
                             name: owner.clone(),
-                            category: format!("xml-{tag}"),
+                            category,
                             scope: String::new(),
                             line,
                             end_line: line,
                             signature: String::new(),
                         });
-                    } else if let Some((_, parent)) = stack.last() {
-                        owner = parent.clone();
+                    } else if let Some(parent) = stack.last() {
+                        owner = parent.owner.clone();
                     }
                     if let Some(file) = attrs.get("file").filter(|file| !file.is_empty()) {
                         let kind = match tag.to_ascii_lowercase().as_str() {
@@ -746,6 +966,11 @@ fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) ->
                             _ => "",
                         };
                         if !kind.is_empty() {
+                            if !worker::charge(guard, file.len().saturating_add(kind.len()))
+                                || !worker::prepare_push(guard, &mut facts.loads)
+                            {
+                                return Err(String::new());
+                            }
                             facts.loads.push(LoadReference {
                                 path: file.clone(),
                                 line,
@@ -760,6 +985,13 @@ fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) ->
                         .map(str::trim)
                         .filter(|s| !s.is_empty())
                     {
+                        if !worker::charge(
+                            guard,
+                            owner.len().saturating_add(base.len()).saturating_add(17),
+                        ) || !worker::prepare_push(guard, &mut facts.relationships)
+                        {
+                            return Err(String::new());
+                        }
                         facts.relationships.push(Relationship {
                             from: owner.clone(),
                             to: base.into(),
@@ -770,10 +1002,22 @@ fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) ->
                     }
                     for attr in ["function", "method"] {
                         if let Some(target) = attrs.get(attr).filter(|target| !target.is_empty()) {
+                            let category = format!("xml-{attr}");
+                            if !worker::charge(
+                                guard,
+                                owner
+                                    .len()
+                                    .saturating_add(target.len())
+                                    .saturating_add(category.capacity())
+                                    .saturating_add(5),
+                            ) || !worker::prepare_push(guard, &mut facts.relationships)
+                            {
+                                return Err(String::new());
+                            }
                             facts.relationships.push(Relationship {
                                 from: owner.clone(),
                                 to: target.clone(),
-                                category: format!("xml-{attr}"),
+                                category,
                                 confidence: "exact".into(),
                                 line,
                             });
@@ -784,49 +1028,83 @@ fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) ->
                         script_line = 0;
                     }
                     if !empty {
-                        stack.push((tag, owner));
+                        if !worker::prepare_scratch_push(guard, &mut stack) {
+                            return Err(String::new());
+                        }
+                        let strings = if let Some(guard) = guard {
+                            Some(
+                                guard
+                                    .reserve_scratch(
+                                        tag.capacity().saturating_add(owner.capacity()),
+                                    )
+                                    .ok_or_else(String::new)?,
+                            )
+                        } else {
+                            None
+                        };
+                        stack.push(XmlFrame {
+                            tag,
+                            owner,
+                            _strings: strings,
+                        });
                     }
                 }
                 Event::End(element) => {
                     let qualified = String::from_utf8_lossy(element.name().as_ref()).into_owned();
                     let tag = xml_name(&qualified).1.to_owned();
                     if is_public_handler(&tag) {
-                        let owner = stack.last().map_or("", |(_, owner)| owner.as_str());
-                        append_inline(&mut facts, &script, script_line, owner, &tag);
+                        let owner = stack.last().map_or("", |frame| frame.owner.as_str());
+                        append_inline(&mut facts, &script, script_line, owner, &tag, guard)
+                            .ok_or_else(String::new)?;
                     }
                     stack.pop();
                 }
                 Event::Text(text) => {
                     let text = text.xml10_content().map_err(|error| error.to_string())?;
-                    xml_characters(&text)?;
+                    xml_characters_guarded(&text, guard)?;
                     if text.contains("]]>") {
                         return Err("unescaped ]]> not in CDATA section".into());
                     }
-                    if stack.last().is_some_and(|(tag, _)| is_public_handler(tag)) {
+                    if stack
+                        .last()
+                        .is_some_and(|frame| is_public_handler(&frame.tag))
+                    {
                         if script_line == 0 {
                             script_line = line;
                         }
-                        script.push_str(&text);
+                        if !worker::append_scratch(guard, &mut script, &text) {
+                            return Err(String::new());
+                        }
                     }
                 }
                 Event::CData(text) => {
                     let text = text.xml10_content().map_err(|error| error.to_string())?;
-                    xml_characters(&text)?;
-                    if stack.last().is_some_and(|(tag, _)| is_public_handler(tag)) {
+                    xml_characters_guarded(&text, guard)?;
+                    if stack
+                        .last()
+                        .is_some_and(|frame| is_public_handler(&frame.tag))
+                    {
                         if script_line == 0 {
                             script_line = line;
                         }
-                        script.push_str(&text);
+                        if !worker::append_scratch(guard, &mut script, &text) {
+                            return Err(String::new());
+                        }
                     }
                 }
                 Event::GeneralRef(reference) => {
                     let reference = reference.decode().map_err(|error| error.to_string())?;
                     let decoded = xml_entity(&reference)?;
-                    if stack.last().is_some_and(|(tag, _)| is_public_handler(tag)) {
+                    if stack
+                        .last()
+                        .is_some_and(|frame| is_public_handler(&frame.tag))
+                    {
                         if script_line == 0 {
                             script_line = line;
                         }
-                        script.push_str(&decoded);
+                        if !worker::append_scratch(guard, &mut script, &decoded) {
+                            return Err(String::new());
+                        }
                     }
                 }
                 Event::Eof => {
@@ -834,13 +1112,16 @@ fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) ->
                         return Err("unexpected EOF".into());
                     }
                 }
-                // Go accepts XML declarations, directives, processing
-                // instructions and comments without imposing a UI schema.
                 Event::Decl(declaration) => xml_declaration(declaration.as_ref())?,
                 Event::DocType(_) | Event::PI(_) | Event::Comment(_) => {}
             }
             Ok(())
         })();
+        // Resource/cancellation abandonment is never serialized as an XML
+        // diagnostic, even if it happened while validating an earlier token.
+        if !worker::check(guard) {
+            return None;
+        }
         if let Err(message) = result {
             let after = crate::xml_inline::source_map::raw_cursor(
                 raw.len(),
@@ -849,12 +1130,18 @@ fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) ->
             )
             .unwrap_or(raw.len());
             let error_line = line_at(error_offset.unwrap_or(after).min(raw.len()));
+            let message = if message.starts_with("xml: ") {
+                message
+            } else {
+                format!("XML syntax error on line {error_line}: {message}")
+            };
+            if !worker::charge(guard, message.capacity())
+                || !worker::prepare_push(guard, &mut facts.diagnostics)
+            {
+                return None;
+            }
             facts.diagnostics.push(SyntaxNote {
-                message: if message.starts_with("xml: ") {
-                    message
-                } else {
-                    format!("XML syntax error on line {error_line}: {message}")
-                },
+                message,
                 line: diagnostic_line,
             });
             break;
@@ -862,15 +1149,18 @@ fn xml_with_line_counter(raw: &[u8], mut line_at: impl FnMut(usize) -> usize) ->
         if reader.buffer_position() as usize + prefix >= raw.len() {
             if !stack.is_empty() {
                 let line = line_at(raw.len());
-                facts.diagnostics.push(SyntaxNote {
-                    message: format!("XML syntax error on line {line}: unexpected EOF"),
-                    line,
-                });
+                let message = format!("XML syntax error on line {line}: unexpected EOF");
+                if !worker::charge(guard, message.capacity())
+                    || !worker::prepare_push(guard, &mut facts.diagnostics)
+                {
+                    return None;
+                }
+                facts.diagnostics.push(SyntaxNote { message, line });
             }
             break;
         }
     }
-    facts
+    worker::check(guard).then_some(facts)
 }
 
 #[cfg(test)]
@@ -1461,3 +1751,7 @@ Run()</OnLoad><PreClick>Ignored()</PreClick><OnShow function="" method="Shown"/>
         );
     }
 }
+
+#[cfg(test)]
+#[path = "facts/worker_tests.rs"]
+mod worker_tests;

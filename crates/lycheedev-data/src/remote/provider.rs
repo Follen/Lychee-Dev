@@ -97,6 +97,21 @@ pub(crate) struct Scope<'a> {
     budget: &'a Arc<Budget>,
 }
 impl<'a> Scope<'a> {
+    /// Lend the original admitted writer for one synchronous consumer scope.
+    /// Sessions may borrow the admission while captures separately borrow this
+    /// connection. No transaction spans a callback, codec or external output.
+    /// Every ordinary result restores ownership before the existing checked
+    /// resource -> metadata -> root teardown. Panic fallback drops the local
+    /// connection before the still-held workspace owner.
+    pub fn with_capture_metadata<T>(
+        &mut self,
+        work: impl FnOnce(&mut Self, &mut lycheedev_core::metadata::Metadata) -> Result<T>,
+    ) -> Result<T> {
+        let mut metadata = self.admitted.take_capture_metadata();
+        let result = work(self, &mut metadata);
+        self.admitted.restore_capture_metadata(metadata);
+        result
+    }
     pub fn check(&self) -> Result<()> {
         self.admitted.check()
     }
@@ -170,6 +185,14 @@ impl<'a> Scope<'a> {
     }
     pub fn finish<T>(self, result: Result<T>) -> Result<T> {
         self.admitted.finish(result)
+    }
+    #[cfg(test)]
+    pub(crate) fn finish_after_metadata_close<T>(
+        self,
+        result: Result<T>,
+        after_close: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<T> {
+        self.admitted.finish_after_metadata_close(result, after_close)
     }
 }
 

@@ -1,7 +1,10 @@
-//! A bounded, typed cold-index pipeline. Only pure public Lua observations may
+//! A bounded, typed cold-index pipeline. Only pure public source observations may
 //! run ahead; authentication, cache I/O, controls and publication stay ordered.
 use super::profile::{Phase, Profile};
-use crate::{facts::Facts, git};
+use crate::{
+    facts::{Facts, ParseMode},
+    git,
+};
 use lycheedev_core::{
     Result, ToolkitError, control::OperationControl, metadata::historical_write::finish_historical,
     selection::SourcePin,
@@ -33,20 +36,22 @@ const JOB_METADATA_BYTES: usize = 8192;
 
 /// Moving the original bytes through one slot authenticates the result's owner;
 /// no source snapshot clone, mutable shared parser or speculative cache handle.
-struct LuaInput {
+struct ParseInput {
+    mode: ParseMode,
     data: Vec<u8>,
 }
-struct LuaOutput {
+struct ParseOutput {
+    mode: ParseMode,
     data: Vec<u8>,
     facts: Option<Facts>,
     parse_elapsed: Duration,
 }
 struct Worker {
-    input: SyncSender<LuaInput>,
-    output: Receiver<LuaOutput>,
+    input: SyncSender<ParseInput>,
+    output: Receiver<ParseOutput>,
 }
 enum Preparation {
-    LuaWorker(usize),
+    ParseWorker(usize),
     Sequential(Vec<u8>),
 }
 struct Pending {
@@ -67,6 +72,7 @@ struct Ready {
 /// None preserves the exact complete parser path. A worker cap is never a new
 /// public syntax diagnostic, truncation, or operation-budget failure.
 pub(super) struct PreparedFacts {
+    pub(super) mode: ParseMode,
     pub(super) facts: Facts,
     pub(super) parse_elapsed: Duration,
 }
@@ -80,8 +86,12 @@ fn eligible(file: &git::TreeFile, data: &[u8]) -> bool {
             .path
             .as_bytes()
             .get(file.path.len().saturating_sub(4)..)
-            .is_some_and(|suffix| suffix.eq_ignore_ascii_case(b".lua"))
-        && !file.path.contains("/Blizzard_APIDocumentationGenerated/")
+            .is_some_and(|suffix| {
+                [b".lua", b".xml", b".toc"]
+                    .iter()
+                    .any(|extension| suffix.eq_ignore_ascii_case(*extension))
+            })
+        && ParseMode::for_path(&file.path) != ParseMode::LuaGenerated
         && std::str::from_utf8(data).is_ok()
 }
 
@@ -152,26 +162,24 @@ fn worker_failed() -> ToolkitError {
 }
 
 fn run_worker(
-    input: Receiver<LuaInput>,
-    output: SyncSender<LuaOutput>,
+    input: Receiver<ParseInput>,
+    output: SyncSender<ParseOutput>,
     control: &OperationControl,
     observe: bool,
 ) {
-    while let Ok(LuaInput { data }) = input.recv() {
-        if output
-            .send(prepare_input(LuaInput { data }, control, observe))
-            .is_err()
-        {
+    while let Ok(input) = input.recv() {
+        if output.send(prepare_input(input, control, observe)).is_err() {
             break;
         }
     }
 }
 
-fn prepare_input(input: LuaInput, control: &OperationControl, observe: bool) -> LuaOutput {
+fn prepare_input(input: ParseInput, control: &OperationControl, observe: bool) -> ParseOutput {
     let started = observe.then(Instant::now);
-    let facts = crate::facts::lua_for_worker(&input.data, control, MAX_FACT_BYTES);
+    let facts = crate::facts::for_worker(&input.data, input.mode, control, MAX_FACT_BYTES);
     let parse_elapsed = started.map_or(Duration::ZERO, |at| at.elapsed());
-    LuaOutput {
+    ParseOutput {
+        mode: input.mode,
         data: input.data,
         facts,
         parse_elapsed,
@@ -324,7 +332,7 @@ impl Pipeline<'_> {
             return Ok(None);
         };
         let (data, prepared) = match pending.preparation {
-            Preparation::LuaWorker(worker) => {
+            Preparation::ParseWorker(worker) => {
                 let wait = self.profile.span(Phase::FactsWorkerWait);
                 let output = self.workers[worker]
                     .output
@@ -339,6 +347,7 @@ impl Pipeline<'_> {
                         .record(Phase::FactsWorkerAbandoned, Duration::ZERO);
                 }
                 let prepared = output.facts.map(|facts| PreparedFacts {
+                    mode: output.mode,
                     facts,
                     parse_elapsed: output.parse_elapsed,
                 });
@@ -386,11 +395,14 @@ impl Pipeline<'_> {
         let worker = self.free_workers.pop_front().expect("worker slot admitted");
         self.workers[worker]
             .input
-            .send(LuaInput { data })
+            .send(ParseInput {
+                mode: ParseMode::for_path(&file.path),
+                data,
+            })
             .map_err(|_| worker_failed())?;
         self.pending.push_back(Pending {
             file: file.clone(),
-            preparation: Preparation::LuaWorker(worker),
+            preparation: Preparation::ParseWorker(worker),
             reservation: reserved,
         });
         self.pending_bytes += reserved;
@@ -469,8 +481,8 @@ impl Pipeline<'_> {
         }
         // A small non-worker document is only an owned ordered input slot.
         // Its original admission, parser and I/O still run on the coordinator.
-        // This lets pure Lua work overlap adjacent XML/TOC processing without
-        // changing the XML catalog or admitting/publishing it ahead of its turn.
+        // This lets bounded pure parsing overlap adjacent generated Lua or other
+        // ineligible sources without admitting/publishing them ahead of turn.
         if !self.workers.is_empty()
             && !file.asset
             && !file.oversized

@@ -164,6 +164,12 @@ Optimize reuse, indexing, allocation, bounded parallelism and native worker/sess
 
 Record independent cold and warm repetitions, interleave Go/Rust on the same machine and inputs, and preserve raw timings, median, p95, CPU, peak memory and I/O. No cross-path average can hide a failing path. Incomplete, failed or unmeasured paths are not passes. The plan's exact collection/report protocol is in handover.
 
+### Source, Data and Live end-to-end optimization requirement (2026-10-17)
+
+The user explicitly requires sufficiently detailed cost attribution for all three modules, including algorithms, data structures, architecture and bounded scheduling. The acceptance clock remains the complete observed request/process lifecycle, not a selected inner bucket. For each exact run, present mutually exclusive measured wall-clock intervals plus named unmeasured remainder; keep nested inclusive timings and summed parallel-worker durations separate. Never combine different commits/runs into a synthetic total, subtract framework costs from the agreed metric, or defer required work to the next query/background to manufacture a speedup.
+
+Use real critical-path proportions to choose complete, attributable changes: eliminate repeated traversal/conversion and unnecessary cloning, use compact ownership and suitable lookup structures, specialize bulk operations, and parallelize genuinely independent work under existing memory/cancellation/order constraints. Source publication and sequential parsing are the current measured priorities; Data uses its same-call business phases and native startup proof. Live begins with existing offline protocol/driver/journal and self-owned fixture boundaries; synthetic clocks/input do not establish real game latency. Keep real-game acceptance last and do not operate games. Reuse the existing scoped profilers and add only missing necessary intervals, not a global observability framework. Validate unchanged full outputs/recovery/resource contracts and improved complete walltime and memory; the five final audits remain separate.
+
 ## 6. Cleanup and delivery
 
 Inventory dead code/doc candidates; prove absence of production/feature/test/package consumers, identify replacement coverage, then remove in reviewable batches. Preserve immutable historical evidence in git/history and label superseded documents. Do not delete caches/evidence/user data opportunistically. Follow existing owned-process/disk admission tooling.

@@ -311,6 +311,7 @@ fn prepare(
 
 fn persist(
     home: &Path,
+    metadata: Option<&mut Metadata>,
     prepared: &PreparedCapture,
     references: &[String],
     control: &OperationControl,
@@ -319,8 +320,29 @@ fn persist(
     state: &Cell<CaptureWriteState>,
 ) -> Result<()> {
     check(control, meter)?;
+    if let Some(metadata) = metadata {
+        metadata.check_capture_owner_controlled(home, control, || meter.check())?;
+        let written = persist_to(metadata, prepared, references, control, meter, publish, state);
+        // The request owner performs the only physical close after all consumers
+        // finish. Each call below still owns one complete durable transaction.
+        return finish_controls(written, Some(control), &mut || meter.check());
+    }
     let mut metadata = Metadata::open_controlled_with_check(home, true, control, || meter.check())?;
-    let written = metadata.put_capture_serialized(
+    let written = persist_to(&mut metadata, prepared, references, control, meter, publish, state);
+    let result = crate::metadata::historical_write::finish_historical(written, metadata.close());
+    finish_controls(result, Some(control), &mut || meter.check())
+}
+
+fn persist_to(
+    metadata: &mut Metadata,
+    prepared: &PreparedCapture,
+    references: &[String],
+    control: &OperationControl,
+    meter: &impl CaptureAccounting,
+    publish: impl FnOnce() -> Result<()>,
+    state: &Cell<CaptureWriteState>,
+) -> Result<()> {
+    metadata.put_capture_serialized(
         &prepared.key,
         &prepared.document,
         references,
@@ -342,9 +364,7 @@ fn persist(
         },
         publish,
         state,
-    );
-    let result = crate::metadata::historical_write::finish_historical(written, metadata.close());
-    finish_controls(result, Some(control), &mut || meter.check())
+    )
 }
 
 /// The body belongs to the producer's existing allocation budget. All capture
@@ -370,7 +390,7 @@ pub fn commit_capture_budgeted_with_dependencies(
     control: &OperationControl,
     meter: &impl CaptureAccounting,
 ) -> Result<Value> {
-    commit_capture_referencing(home, input, dependencies, dependencies, control, meter)
+    commit_capture_referencing(home, None, input, dependencies, dependencies, control, meter)
 }
 
 /// Verify immutable inputs at publication under the same writer boundary as
@@ -385,7 +405,7 @@ pub fn commit_capture_budgeted_referencing(
     control: &OperationControl,
     meter: &impl CaptureAccounting,
 ) -> Result<Value> {
-    commit_capture_referencing(home, input, &[], references, control, meter)
+    commit_capture_referencing(home, None, input, &[], references, control, meter)
 }
 
 /// Authenticate all typed manifest references in the same writer transaction,
@@ -403,7 +423,7 @@ pub fn commit_capture_budgeted_with_references(
     // Declared dependencies are always authenticated, even if an additional
     // references caller omitted one. Preserve additional-reference order first.
     if dependencies.iter().all(|id| references.contains(id)) {
-        return commit_capture_referencing(home, input, dependencies, references, control, meter);
+        return commit_capture_referencing(home, None, input, dependencies, references, control, meter);
     }
     check(control, meter)?;
     let capacity = references
@@ -419,11 +439,36 @@ pub fn commit_capture_budgeted_with_references(
             required.push(id);
         }
     }
-    commit_capture_referencing(home, input, dependencies, &required, control, meter)
+    commit_capture_referencing(home, None, input, dependencies, &required, control, meter)
+}
+
+/// Reuse a request-owned writer without widening the lifetime of the transaction.
+/// Dependencies are authenticated afresh under this capture's BEGIN IMMEDIATE.
+pub fn commit_capture_budgeted_with_dependencies_and_metadata(
+    home: &Path,
+    metadata: &mut Metadata,
+    input: CaptureInput<'_>,
+    dependencies: &[&str],
+    control: &OperationControl,
+    meter: &impl CaptureAccounting,
+) -> Result<Value> {
+    commit_capture_referencing(home, Some(metadata), input, dependencies, dependencies, control, meter)
+}
+
+pub fn commit_capture_budgeted_referencing_with_metadata(
+    home: &Path,
+    metadata: &mut Metadata,
+    input: CaptureInput<'_>,
+    references: &[&str],
+    control: &OperationControl,
+    meter: &impl CaptureAccounting,
+) -> Result<Value> {
+    commit_capture_referencing(home, Some(metadata), input, &[], references, control, meter)
 }
 
 fn commit_capture_referencing(
     home: &Path,
+    metadata: Option<&mut Metadata>,
     input: CaptureInput<'_>,
     dependencies: &[&str],
     required: &[&str],
@@ -431,6 +476,9 @@ fn commit_capture_referencing(
     meter: &impl CaptureAccounting,
 ) -> Result<Value> {
     check(control, meter)?;
+    if let Some(metadata) = metadata.as_deref() {
+        metadata.check_capture_binding(home)?;
+    }
     let header = CaptureHeader {
         media_type: input.media_type,
         provenance: input.provenance,
@@ -490,7 +538,7 @@ fn commit_capture_referencing(
             };
             if required.is_empty() {
                 publish()?;
-                return persist(home, &prepared, &[], control, meter, || Ok(()), &state);
+                return persist(home, metadata, &prepared, &[], control, meter, || Ok(()), &state);
             }
             meter.admit_allocation(required.len().saturating_mul(std::mem::size_of::<String>()))?;
             let mut references = Vec::with_capacity(required.len());
@@ -501,6 +549,7 @@ fn commit_capture_referencing(
             }
             persist(
                 home,
+                metadata,
                 &prepared,
                 &references,
                 control,
@@ -524,6 +573,28 @@ pub fn commit_verified_capture_budgeted(
     control: &OperationControl,
     meter: &impl CaptureAccounting,
 ) -> Result<Value> {
+    commit_verified_capture_in(blob, None, header, control, meter)
+}
+
+/// Borrow the request's existing writer; the caller must check its final close
+/// before returning success. Capture commit and blob ownership stay synchronous.
+pub fn commit_verified_capture_budgeted_with_metadata(
+    blob: &VerifiedBlob,
+    metadata: &mut Metadata,
+    header: CaptureHeader<'_>,
+    control: &OperationControl,
+    meter: &impl CaptureAccounting,
+) -> Result<Value> {
+    commit_verified_capture_in(blob, Some(metadata), header, control, meter)
+}
+
+fn commit_verified_capture_in(
+    blob: &VerifiedBlob,
+    metadata: Option<&mut Metadata>,
+    header: CaptureHeader<'_>,
+    control: &OperationControl,
+    meter: &impl CaptureAccounting,
+) -> Result<Value> {
     let prepared = prepare(blob.reference(), header, &[], control, meter)?;
     let state = Cell::new(CaptureWriteState::NotCommitted);
     let guard = storage::ExclusiveLock::resource_wait_checked(
@@ -534,6 +605,7 @@ pub fn commit_verified_capture_budgeted(
     )?;
     let result = persist(
         &blob.home,
+        metadata,
         &prepared,
         &[],
         control,
@@ -674,3 +746,7 @@ mod lifecycle_tests;
 #[cfg(test)]
 #[path = "budgeted/manifest_reference_tests.rs"]
 mod manifest_reference_tests;
+
+#[cfg(test)]
+#[path = "budgeted/borrowed_tests.rs"]
+mod borrowed_tests;

@@ -521,7 +521,8 @@ fn document_facts_profiled(
             return Ok((parsed, true));
         }
     }
-    let parsed = if let Some(prepared) = prepared {
+    let mode = facts::ParseMode::for_path(path);
+    let parsed = if let Some(prepared) = prepared.filter(|prepared| prepared.mode == mode) {
         if let Some(profile) = profile {
             profile.record(Phase::FactsParse, prepared.parse_elapsed);
         }
@@ -529,14 +530,7 @@ fn document_facts_profiled(
     } else {
         let _parse_phase = profile.map(|p| p.span(Phase::FactsParse));
         let _sequential_phase = profile.map(|p| p.span(Phase::FactsParseSequential));
-        let lower_path = path.to_ascii_lowercase();
-        if lower_path.ends_with(".lua") {
-            facts::lua(data, path.contains("/Blizzard_APIDocumentationGenerated/"))
-        } else if lower_path.ends_with(".toc") {
-            facts::toc(data)
-        } else {
-            facts::xml(data)
-        }
+        mode.parse(data)
     };
     // The original control decides stop/error ordering at the original stage;
     // speculative workers only observe its cancellation and absolute deadline.
@@ -1245,6 +1239,139 @@ mod facts_cache_tests {
         io::Write,
         process::{Command, Stdio},
     };
+
+    #[test]
+    fn typed_xml_toc_preparation_preserves_authenticated_cache_precedence() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let cache = lycheedev_core::cache::SourceFactsCache::open(&fixture.home, &control).unwrap();
+        for (path, raw) in [
+            (
+                "Prepared.xml",
+                b"<Ui><Frame name=\"Prepared\"/><Script file=\"Full.lua\"/></Ui>".as_slice(),
+            ),
+            (
+                "Prepared.toc",
+                b"## Interface: 120100\nFull.lua\n".as_slice(),
+            ),
+        ] {
+            let mode = facts::ParseMode::for_path(path);
+            let expected = mode.parse(raw);
+            let digest = storage::sha256(raw);
+            let prepared = facts_pipeline::PreparedFacts {
+                mode,
+                facts: facts::for_worker(raw, mode, &control, 4 << 20).unwrap(),
+                parse_elapsed: std::time::Duration::ZERO,
+            };
+            let profile = Profile::enabled(true);
+            let (cold, hit) = document_facts_profiled(
+                &fixture.home,
+                path,
+                raw,
+                &digest,
+                &control,
+                Some(&profile),
+                &cache,
+                Some(prepared),
+            )
+            .unwrap();
+            assert!(!hit);
+            assert_eq!(profile.calls(Phase::FactsParseSequential), 0);
+            assert_eq!(
+                serde_json::to_value(&cold).unwrap(),
+                serde_json::to_value(&expected).unwrap()
+            );
+            assert_eq!(
+                cold.raw_relationship_targets,
+                expected.raw_relationship_targets
+            );
+            let ignored = facts_pipeline::PreparedFacts {
+                mode,
+                facts: Facts::fresh(),
+                parse_elapsed: std::time::Duration::ZERO,
+            };
+            let (warm, hit) = document_facts_profiled(
+                &fixture.home,
+                path,
+                raw,
+                &digest,
+                &control,
+                Some(&profile),
+                &cache,
+                Some(ignored),
+            )
+            .unwrap();
+            assert!(hit, "authenticated persisted facts win over speculation");
+            assert_eq!(
+                serde_json::to_value(&warm).unwrap(),
+                serde_json::to_value(&expected).unwrap()
+            );
+            assert_eq!(profile.calls(Phase::FactsParseSequential), 0);
+        }
+        cache.finish(Ok(()), &control).unwrap();
+    }
+    #[test]
+    fn mismatched_preparation_mode_uses_the_original_complete_parser() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let cache = lycheedev_core::cache::SourceFactsCache::open(&fixture.home, &control).unwrap();
+        let raw = b"<Ui><Frame name=\"Right\"/></Ui>";
+        let prepared = facts_pipeline::PreparedFacts {
+            mode: facts::ParseMode::LuaOrdinary,
+            facts: facts::lua(b"function Wrong() end", false),
+            parse_elapsed: std::time::Duration::ZERO,
+        };
+        let profile = Profile::enabled(true);
+        let (actual, hit) = document_facts_profiled(
+            &fixture.home,
+            "Mismatch.xml",
+            raw,
+            &storage::sha256(raw),
+            &control,
+            Some(&profile),
+            &cache,
+            Some(prepared),
+        )
+        .unwrap();
+        assert!(!hit);
+        assert_eq!(profile.calls(Phase::FactsParseSequential), 1);
+        assert_eq!(
+            serde_json::to_value(&actual).unwrap(),
+            serde_json::to_value(facts::xml(raw)).unwrap()
+        );
+        cache.finish(Ok(()), &control).unwrap();
+    }
+    #[test]
+    fn typed_preparation_cannot_bypass_the_original_stop_checkpoint() {
+        let fixture = Fixture::new();
+        let control = OperationControl::default();
+        let signal = control.tracked_cancel_handle().unwrap();
+        let cache = lycheedev_core::cache::SourceFactsCache::open(&fixture.home, &control).unwrap();
+        let raw = b"<Ui/>";
+        let prepared = facts_pipeline::PreparedFacts {
+            mode: facts::ParseMode::Xml,
+            facts: facts::xml(raw),
+            parse_elapsed: std::time::Duration::ZERO,
+        };
+        signal.cancel();
+        let profile = Profile::enabled(true);
+        let result = document_facts_profiled(
+            &fixture.home,
+            "Stopped.xml",
+            raw,
+            &storage::sha256(raw),
+            &control,
+            Some(&profile),
+            &cache,
+            Some(prepared),
+        );
+        assert_eq!(
+            cache.finish(result, &control).unwrap_err().code,
+            "command.cancelled"
+        );
+        assert_eq!(profile.calls(Phase::FactsRead), 0);
+        assert_eq!(profile.calls(Phase::FactsParse), 0);
+    }
 
     #[test]
     fn malformed_contract_invalidates_previous_index_and_file_facts() {

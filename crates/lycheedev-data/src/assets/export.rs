@@ -187,8 +187,9 @@ fn publish(
         .expect("committed source identity");
     let artifact = if let Some(encoded) = &encoded {
         let capture_phase = meter.phase(Phase::ArtifactCapture);
-        let artifact = evidence::commit_capture_budgeted_with_dependencies(
+        let artifact = evidence::commit_capture_budgeted_with_dependencies_and_metadata(
             &inv.home,
+            &mut *source.metadata,
             CaptureInput {
                 bytes: &encoded.bytes,
                 maximum_bytes: *maximum,
@@ -224,8 +225,9 @@ fn publish(
         &[source_id]
     };
     let capture_phase = meter.phase(Phase::ManifestCapture);
-    let capture = evidence::commit_capture_budgeted_with_dependencies(
+    let capture = evidence::commit_capture_budgeted_with_dependencies_and_metadata(
         &inv.home,
+        &mut *source.metadata,
         CaptureInput {
             bytes: &body,
             maximum_bytes: 1 << 20,

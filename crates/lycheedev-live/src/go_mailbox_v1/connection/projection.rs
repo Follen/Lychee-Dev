@@ -89,6 +89,41 @@ pub fn present(
     waiting: &str,
     scans: &str,
 ) -> ProjectResult {
+    let mut result = present_metadata(state, journal, now_ms, waiting, scans);
+    if let Some(operation) = state.operation.as_ref().filter(|o| reported(o.stage)) {
+        result.report = Some(RawReport(operation.result_bytes.0.clone()));
+    }
+    result
+}
+
+/// The invocation has finished using State. Transfer the verified report's
+/// existing allocation into the public result, including when cleanup fails.
+/// No persistent or borrowed State is emptied to manufacture this ownership.
+pub(super) fn present_owned(
+    state: State,
+    journal: &Path,
+    now_ms: i64,
+    waiting: &str,
+    scans: &str,
+) -> ProjectResult {
+    let mut result = present_metadata(&state, journal, now_ms, waiting, scans);
+    if let Some(operation) = state.operation.filter(|o| reported(o.stage)) {
+        result.report = Some(RawReport(operation.result_bytes.0));
+    }
+    result
+}
+
+fn reported(stage: OperationStage) -> bool {
+    matches!(stage, OperationStage::ResultVerified | OperationStage::ReleaseReady | OperationStage::Complete)
+}
+
+fn present_metadata(
+    state: &State,
+    journal: &Path,
+    now_ms: i64,
+    waiting: &str,
+    scans: &str,
+) -> ProjectResult {
     let mut result = ProjectResult {
         continuation: continuation(state, now_ms),
         process_end: match state.process_end {
@@ -139,14 +174,8 @@ pub fn present(
         result.operation = operation.id.clone();
         result.complete = operation.stage == OperationStage::Complete;
         result.cleanup = "pending".into();
-        if matches!(
-            operation.stage,
-            OperationStage::ResultVerified
-                | OperationStage::ReleaseReady
-                | OperationStage::Complete
-        ) {
+        if reported(operation.stage) {
             result.report_state = "verified".into();
-            result.report = Some(RawReport(operation.result_bytes.0.clone()));
         }
         match operation.stage {
             OperationStage::Complete => result.cleanup = "complete".into(),
@@ -198,3 +227,7 @@ pub fn present(
     }
     result
 }
+
+#[cfg(test)]
+#[path = "projection_tests.rs"]
+mod tests;

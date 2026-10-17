@@ -56,8 +56,8 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
                     .is_some_and(|r| r.phase == ReloadPhase::Complete) =>
             {
                 return ServiceOutcome::Completed(present_reload(
-                    present(
-                        &state,
+                    present_owned(
+                        state,
                         before.paths.log_path(),
                         self.clock.unix_millis(),
                         "",
@@ -83,8 +83,8 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
                     .is_some_and(|r| r.phase == ReloadPhase::Complete) =>
             {
                 let mut o = ServiceOutcome::Completed(present_reload(
-                    present(
-                        &state,
+                    present_owned(
+                        state,
                         record.paths.log_path(),
                         self.clock.unix_millis(),
                         "",
@@ -166,8 +166,8 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
         let retire = result.is_ok() && driver.state.closed;
         let mut outcome = ServiceOutcome::with_result(
             present_reload(
-                present(
-                    &driver.state,
+                present_owned(
+                    driver.state,
                     record.paths.log_path(),
                     self.clock.unix_millis(),
                     &driver.waiting,

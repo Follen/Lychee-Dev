@@ -9,6 +9,9 @@ pub use lycheedev_core::mailbox::{CodeBytes, SlotEnvelope};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+#[path = "state_snapshot.rs"]
+mod snapshot;
+
 pub const CHANNEL_SCHEMA: &str = "lycheedev.channel.v2";
 pub const DEFAULT_CONNECT_MILLIS: i64 = 120_000;
 pub const DEFAULT_CLOSE_MILLIS: i64 = 120_000;
