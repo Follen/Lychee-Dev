@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 20:06 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新产品/runner `ba0c2f1e1da0ea6001797323bc720af00335b85f` 六个fresh场景实际完整Facts/字段/顺序/共同summary均等价，12调用成功并完成身份与owner收尾；本次引用的Go Facts/Rust pack或loose/index完整归档核验后cleanup。四变体真实派单9/1/8/9，等待仅0.117–3.526ms，总wall1.946–2.159s；原约2s无用worker等待已消除，但与本轮Go比值约0.65–0.71，仍未达≤0.30，也非20对验收。两项Windows文件symlink创建EPERM环境限制明确保留。全量性能与最终五阶段循环审计未完成。
+更新：2026-10-17 20:13 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新产品/runner `ba0c2f1e1da0ea6001797323bc720af00335b85f` 六个fresh场景实际完整Facts/字段/顺序/共同summary均等价，12调用成功并完成身份与owner收尾；本次引用的Go Facts/Rust pack或loose/index完整归档核验后cleanup。四变体真实派单9/1/8/9，等待仅0.117–3.526ms，总wall1.946–2.159s；原约2s无用worker等待已消除，但与本轮Go比值约0.65–0.71，仍未达≤0.30，也非20对验收。两项Windows文件symlink创建EPERM环境限制明确保留。全量性能与最终五阶段循环审计未完成。
 
 ### 最新实测：ba0 cache-aware完整六场景
 
@@ -18,6 +18,12 @@
 本轮finalIntegrity=true、NOT_RUN空、12实际产品调用，四变体8owner sealed/reaped/retired。完整读取tuple与归档一致，解决未来变体pack证据缺件；原e475缺件和全部旧失败不补造。附件仍在整理，尚未独立下载重放本轮全部归档。各为一次诊断，不是20对；内存原采样缺口保留。cold worker_wait含不同等待边界，group drain未单独计时，不能把1.986s全部归因于drain，也不能将嵌套phase累计当native总wall。下一优先依据同run剩余约2s中完整index物化/编码与Facts读取结构，不继续优化已为零的命中worker等待。
 
 [Windows Node](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6239635558)实际306总、304pass/0fail/2skip；仅pack file-symlink和dangling output file-symlink创建EPERM，负例未执行，不称通过。目录junction、Rust/Go replay、duplicate Go key真实mutation与原reject均通过。原fc001 Node299/4fail完整保留。
+
+### 当前未测候选：完整index借用canonical序列化
+
+ba0四变体同row仍有FactsRead483–542ms、IndexSerialize465–596ms、publish91–115ms。已实现最窄默认链切片：`index::persistence_wire::encode(&map)`替代完整`to_value`副本与二次编码，只借用现有Index/Value；私有wrapper精确保对象排序、数组/重复、可选省略、locator小写hex与仅summary顶层io剔除。128MiB仍在完整Vec生成后由原publisher判断，原内容hash、manifest、锁/checked-close及取消边界不动；pack2/v14、公共Serialize与Emmy原版不变。原DOM析构在span外，潜在收益不能全归IndexSerialize。warm整index读取不受此片优化。
+
+3源码/测试文件已rustfmt解析与独立静态审阅，10个`index::persistence_wire::tests::borrowed_index_*`正式回归仍NOT_RUN：旧新完整bytes、32可选组合/Unicode/重复、locator极值、合法数值/deep/null、private-marker普通对象、非法summary、writer短写/失败、真实cold/warm blob+manifest、publisher大小/取消/损坏、非持久字段。下一固定批alltargets→完整index::（10新逐名）及相关Facts/既有Go输入→匹配一次release/assembly→正式六场景；此前ba0结果不重标，性能不预报。详细新测试名以源码为准。
 
 ### 历史实测：e475/00d稳定分组完整六场景
 

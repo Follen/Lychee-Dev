@@ -337,3 +337,24 @@ Cold misses remain parallel inside a cohort; cross-cohort parse/publication over
 is deliberately narrower. Both cold and incremental native wall must be measured;
 zero worker results on complete hits is a structural assertion, not a speed claim.
 See [same-row attribution](docs/toolkit/source-pack2-incremental-attribution-2026-10-17.md).
+
+#### Borrowed canonical whole-index persistence
+
+The measured ba0 incremental IndexSerialize span remains465–596ms after eliminating
+unused pure-parse work. The default writer now projects borrowed Index fields
+straight into the same complete byte Vec, avoiding a second whole-index Value
+DOM and its later destruction. Private wire wrappers preserve lexical object keys,
+array order/duplicates, existing optional omissions, exact locator hex, and remove
+only summary's own io field. Existing Value subtrees stay borrowed; supported
+Number constructors/parser and pinned formatter preserve historical numeric bytes.
+The hidden unchecked-number constructor is not a supported Index producer.
+Public Serialize implementations and cache fingerprint/layout remain unchanged.
+
+Do not stream around admission: encode the complete Vec, then use the original
+128MiB publisher cap, content hashing, manifest update, lock and checked-close
+sequence. This slice does not change Facts reading or warm index loading. Ten
+formal regressions compare full historical to_value/remove-io/to_vec bytes,
+including real cold/warm persisted blobs and downstream failure contracts.
+Static review is not execution; default-stack Windows tests and matched end-to-end
+measurement remain required. A reduction may also affect profile_other because
+the old DOM was dropped outside IndexSerialize; judge complete native wall.

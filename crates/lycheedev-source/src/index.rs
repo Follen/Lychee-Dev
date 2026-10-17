@@ -1,6 +1,7 @@
 mod facts_cache;
 mod facts_pipeline;
 mod original_cache;
+mod persistence_wire;
 #[cfg(test)]
 pub(crate) use original_cache::take_read_observations;
 mod profile;
@@ -404,9 +405,7 @@ pub(crate) fn build_material_with_control(
     let result = (|| {
         let map = build_uncached_profiled(home, pin, control, &profile)?;
         let serialize_phase = profile.span(Phase::IndexSerialize);
-        let mut persisted = serde_json::to_value(&map)?;
-        persisted["summary"].as_object_mut().unwrap().remove("io");
-        let raw = serde_json::to_vec(&persisted)?;
+        let raw = persistence_wire::encode(&map)?;
         drop(serialize_phase);
         let publish_phase = profile.span(Phase::IndexPublish);
         let blob =
