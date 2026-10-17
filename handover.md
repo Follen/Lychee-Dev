@@ -1,14 +1,33 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 20:53 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `31a873a677e355f39b54ea5635ac22135c271904` 六fresh场景全Facts/字段/重复/顺序/共同summary等价，完整实际读取证据归档核过后cleanup。冷4.315s、暖0.387s、四变体1.269–1.281s；六个Rust/Go比值0.435–0.682，均未达≤0.30，仍是单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-17 21:36 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
 
-### 当前未测候选：认证Facts子树所有权转移
+### 最新实测：b4d认证Facts所有权转移完整六场景
+
+[前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6241017528) alltargets通过，index116/0/0含9新增逐名，facts48/0/0；164主Rust项不额外累加新9、Go104输入或helper。Go104完整严格比较通过，受影响Node1/0/0，完整Node仍引用ba0原304pass/2 file-symlink环境skip。
+
+[正式终态/交付](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6241367241)、[17附件索引](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6241356459)：匹配release/assembly各一次。EXE44,728,832B SHA `73a38915daa9c2a696831bab8d6012b0f39bcee33c92edd3e60768b2892b3db4`；artifact `7e6e72f3741463e8fe5c54167e89aa5d729ce027743f90a8ced30a61f91ae500`；sourceDigest `745a539b73063a3fe199719d5dd21e335b32ae9455cc546b46ba72d120c02068`。
+
+| 场景 | Go native ms | Rust native ms | Rust/Go | FactsRead ms | Serialize ms |
+|---|---:|---:|---:|---:|---:|
+| cold | 8336.8397 | 4380.7566 | 0.525470 | 257.496 | 91.496 |
+| warm | 564.2785 | 368.6635 | 0.653336 | 0 | 0 |
+| single-content-change | 2820.0586 | 1167.9437 | 0.414156 | 379.089 | 89.825 |
+| root-insert | 2795.7986 | 1183.6059 | 0.423352 | 372.138 | 93.240 |
+| first-delete | 2785.9070 | 1199.6514 | 0.430614 | 400.388 | 93.848 |
+| cross-prefix-rename | 2744.3274 | 1200.7922 | 0.437554 | 393.979 | 91.764 |
+
+12新index+4准备调用，wrapper0/finalIntegrity=true/NOT_RUN空，17新owner sealed/reaped，16retired、工具stage保留。五数组/字段/重复/顺序及共同summary全等；完整实际GoFacts/Rustpack或loose/index/manifest读取tuple归档核过后cleanup。本机17GET/CRC/片与wholeSHA过，52,819files/158,185chunks，包136,680,709B SHA `98ec1942a2bd378220da7ac106646557374f7677582cedaadc3f15104d751de2`；云端唯一作者独立复核进行中。11内存样本有gap，Rustwarm1项sampled_successful仍非完整RSS峰；CPU/IO未测。12产品native无forced/deadline，编译knownAuxiliaryCleanup原事实保留。
+
+四变体派单仍9/1/8/9；FactsRead372–400ms仍含完整Value解析、canonical hash编码、typed转换与IO，去clone份额不等于整个桶。跨run观察增量总wall下降，但cold略慢、warm路径不经过此take，均不虚构因果或20对达标。下一先独立分析剩余真实成本，同时准备五轮第一阶段正式审计进入条件/剩功能差距，不无限以微优化代替审计。
+
+### 已验证实现：认证Facts子树所有权转移
 
 默认loose与pack两处在原schema/input/canonical FactsSHA认证完成后，用get_mut/map(Value::take)/unwrap_or(Null)替代整子树clone，再进入原typed反序列化。缺key不插入新null；两处原控制检查、miss回退、pack外层完整性与checked-close次序不动，不合并helper或更换缓存布局。只减少重复所有权树，仍完整解析/验证/哈希，不把约480ms FactsRead全部称可节省。
 
-新增正式9项：`index::facts_decode_tests::take_facts_*`八项和`index::facts_cache::tests::take_facts_packed_inner_validation_keeps_outer_integrity_and_exact_recovery`，覆盖历史clone全bytes、五数组/Unicode/可选/重复/深unknown/数值、缺null/坏类型、取消/过期、真实loose/pack/legacy默认消费者与外层认证仍成立的内部损坏恢复。rustfmt解析、diff检查和独立静态审阅通过，Rust/业务/性能NOT_RUN。下一固定批alltargets→完整index（9新逐名）及Facts/Go104→唯一匹配release/assembly→完整fresh六场景，原31a实测不重标。
+新增正式9项：`index::facts_decode_tests::take_facts_*`八项和`index::facts_cache::tests::take_facts_packed_inner_validation_keeps_outer_integrity_and_exact_recovery`，覆盖历史clone全bytes、五数组/Unicode/可选/重复/深unknown/数值、缺null/坏类型、取消/过期、真实loose/pack/legacy默认消费者与外层认证仍成立的内部损坏恢复。rustfmt解析、diff检查和独立静态审阅通过；b4d正式index116含9新增全部通过，匹配fresh六场景正确性及custody通过，性能仍未达目标（见上）。原31a实测不重标。
 
-### 最新实测：31a借用canonical序列化完整六场景
+### 历史实测：31a借用canonical序列化完整六场景
 
 [前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6240462842) alltargets通过，index107/0/0含10新增逐名，facts48/0/0；155主Rust测试不重复加新增、helper或Go104输入。固定Go104严格等价，受影响Node单项1/0/0；完整Node沿ba0原304pass/2文件symlink创建EPERM环境skip，不称31a重跑306或负例通过。
 
@@ -23,7 +42,7 @@
 | first-delete | 2910.6008 | 1275.5650 | 0.438248 | 93.667 | 5.078 |
 | cross-prefix-rename | 2831.3599 | 1281.2283 | 0.452513 | 92.577 | 6.314 |
 
-12fresh index+4准备调用，wrapper0/succeeded、finalIntegrity=true、NOT_RUN空。17新owner sealed/reaped，16retired、Node stage保留；12产品native无forced/deadline，编译knownAuxiliaryCleanup原事实保留。完整五Facts数组与实际Go/Rust pack/loose/index/manifest读取tuple均归档验证。16附件/52,802files、完整包131,137,681B SHA `b8fcd61effb36761a2dbe8048aa9c15a47313fe434a5aa0046229446a940345d`由本机GET/CRC/片与wholeSHA实际核过，云端独立复核待原唯一作者完成。
+12fresh index+4准备调用，wrapper0/succeeded、finalIntegrity=true、NOT_RUN空。17新owner sealed/reaped，16retired、Node stage保留；12产品native无forced/deadline，编译knownAuxiliaryCleanup原事实保留。完整五Facts数组与实际Go/Rust pack/loose/index/manifest读取tuple均归档验证。16附件/52,802files、完整包131,137,681B SHA `b8fcd61effb36761a2dbe8048aa9c15a47313fe434a5aa0046229446a940345d`由本机GET/CRC/片与wholeSHA实际核过，云端唯一作者现已独立核全部52,802files/141,919chunks、12native receipt/ticks、17owner/52,446sealed引用及六场景custody/Facts重放。六份约82MB持久index与各ba0对应场景完整SHA相同，证明字节一致而非性能因果。
 
 余量是profile.elapsed减8个已核互斥顶层span，不是独立测量或CPU/IO归因；不叠加嵌套worker桶、不扣native总wall。相比ba0观察到明显端到端下降，但非交错重复因果验收。warm原本零parse/serialize，不能归因本次serializer；12内存样本均有gap，不报完整RSS。四变体仍实际只派9/1/8/9；single/insert/delete FactsRead约477–485ms，下一最窄候选是在原schema/input/canonical digest认证后转移Facts子树，去clone，不改校验/错误/取消/缓存布局。
 
