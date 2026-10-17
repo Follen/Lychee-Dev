@@ -1,0 +1,288 @@
+{
+  "schema": "lycheedev.source-project-selection-test-map.v1",
+  "createdAt": "2026-10-17T01:53:15.581Z",
+  "baseCommit": "2c2bf6b38a472ff4967cb0e57405bade4fcc09dc",
+  "goOracle": "3766f9cacb52e93a803a626187e2a1d54a445468",
+  "status": "implemented; Rust/native execution NOT_RUN",
+  "scope": "Source refs/context omitted-snapshot project fallback; same authenticated context pin reaches relation evaluation",
+  "boundaries": [
+    "No Core/index/cache/native engine edits in this slice",
+    "No Cargo or desktop execution",
+    "Original control/deadline, budgets, immutable pin authentication, explicit snapshot precedence, coverage and runtime capability checks remain"
+  ],
+  "evidence": [
+    {
+      "path": "internal/command/entry.go",
+      "commit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "sha256": "7cf08eb6397dee743f9398ce3b11df241f2d41a6103aeefd192e711914fb724b",
+      "claim": "Execute:150 parses first; :181-186 selects project before dispatch (selectProject call :183). parseOptions:1188-1207 validates max-bytes/max-lines/depth; limit branch begins :1288."
+    },
+    {
+      "path": "internal/command/project.go",
+      "commit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "sha256": "407001e753e1f4c934fb3160220c965c816fdc9e20708a8729e2f1226d720429",
+      "claim": "Only absent implicit project is optional; selected project supplies opts.snapshot at line 27."
+    },
+    {
+      "path": "internal/command/dispatch_source.go",
+      "commit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "sha256": "d05973b0811e33a2a0f7e1a7acd8ce4b7dd072660f3d80cc2bf9342e42c0fcb6",
+      "claim": "Research receives snapshot already selected by command entry; original missing selection/selector error remains."
+    }
+  ],
+  "files": [
+    {
+      "path": "crates/lycheedev-source/src/relations.rs",
+      "bytes": 47690,
+      "sha256": "30525313ffed8cf4525c8355fd6a4a59d7c74faf96599e3869cebaf0e06344b2",
+      "beforeSHA256": "3054403bf3465a807550477a712ea22b28b68dbbc624f030ff5675f9d3118f95"
+    },
+    {
+      "path": "crates/lycheedev-source/src/context.rs",
+      "bytes": 23604,
+      "sha256": "d03b12cf7ca670ca4015966c7c571d035ce85dbb6b969304a75d2c65f6ad819e",
+      "beforeSHA256": "fe1038525418c8658881aaf986236826b450a373eeada56161f8b99716a546e1"
+    },
+    {
+      "path": "crates/lycheedev-source/src/relations/project_selection_tests.rs",
+      "bytes": 5449,
+      "sha256": "5624e2f61b08b514e69844549c6b6f064d987d425d905a6fc0c1e2c19dd27e28",
+      "beforeSHA256": null
+    },
+    {
+      "path": "crates/lycheedev-source/tests/refs_context.rs",
+      "bytes": 19186,
+      "sha256": "fc13aae78415b6a5fc78ebf381c0255631d7705db5e7fe44bafefc83accf7908",
+      "beforeSHA256": "1f047d22a3300e11e88b89f639f075f29917528f6d98444764753285ee8f74f4"
+    },
+    {
+      "path": "crates/lycheedev-source/tests/refs_context/project_selection.rs",
+      "bytes": 15969,
+      "sha256": "ff328885df6a9e57dd915af9d6d96c828faeec437228c0e1dbcfcf27bdc88be3",
+      "beforeSHA256": null
+    },
+    {
+      "path": "tests/rust-parity/source-project-selection.test.mjs",
+      "bytes": 4685,
+      "sha256": "f0b1ab569c98781d4cf37d978fab278dd3632df92de435af66154dcf36b379bc",
+      "beforeSHA256": null
+    }
+  ],
+  "rustTests": [
+    {
+      "path": "crates/lycheedev-source/src/relations/project_selection_tests.rs",
+      "status": "NOT_RUN",
+      "cases": [
+        "context_selected_pin_handoff_survives_replaced_project_without_reselection",
+        "context_selected_pin_handoff_keeps_cancellation_and_deadline_after_selection"
+      ]
+    },
+    {
+      "path": "crates/lycheedev-source/tests/refs_context/project_selection.rs",
+      "status": "NOT_RUN",
+      "cases": [
+        "project_refs_and_context_match_explicit_snapshot_with_exact_evidence",
+        "project_research_explicit_snapshot_ignores_invalid_project_and_nearer_declaration",
+        "project_research_reselects_new_lock_rejects_old_cursor_and_restores_original",
+        "project_research_nearer_malformed_lock_and_selector_error_priority_are_preserved",
+        "project_research_missing_unlocked_and_conflicting_projects_keep_specific_failures",
+        "project_context_numeric_errors_precede_malformed_project_selection",
+        "project_research_authenticates_persisted_pin_instead_of_trusting_lock_copy",
+        "project_research_keeps_original_cancel_and_absolute_deadline_before_selection",
+        "project_research_does_not_relax_static_or_provider_constraints",
+        "project_research_actual_cli_static_and_native_use_project_selection_and_reselect_identity"
+      ]
+    }
+  ],
+  "staticChecks": [
+    {
+      "name": "rustfmt syntax parse only",
+      "path": "crates/lycheedev-source/src/relations.rs",
+      "argv": [
+        "/workspace/shared/rust-dev/rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustfmt",
+        "--edition",
+        "2024",
+        "--config",
+        "skip_children=true",
+        "--emit",
+        "stdout",
+        "crates/lycheedev-source/src/relations.rs"
+      ],
+      "status": "passed",
+      "exitCode": 0,
+      "stdoutSHA256": "35c2ab0bf50cd9b108b98d2afe596326e5e271305e68efb3be9d2043553351d4",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "rustfmt syntax parse only",
+      "path": "crates/lycheedev-source/src/context.rs",
+      "argv": [
+        "/workspace/shared/rust-dev/rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustfmt",
+        "--edition",
+        "2024",
+        "--config",
+        "skip_children=true",
+        "--emit",
+        "stdout",
+        "crates/lycheedev-source/src/context.rs"
+      ],
+      "status": "passed",
+      "exitCode": 0,
+      "stdoutSHA256": "b2a479eb09b01a920616c476b06a7cbb4b3872a047721186f7cb6e0c01d49ad0",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "rustfmt syntax parse only",
+      "path": "crates/lycheedev-source/src/relations/project_selection_tests.rs",
+      "argv": [
+        "/workspace/shared/rust-dev/rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustfmt",
+        "--edition",
+        "2024",
+        "--config",
+        "skip_children=true",
+        "--emit",
+        "stdout",
+        "crates/lycheedev-source/src/relations/project_selection_tests.rs"
+      ],
+      "status": "passed",
+      "exitCode": 0,
+      "stdoutSHA256": "5783e033ff34acfd97d61c64ecdc755ad1bdd74a681b28a1ff8c87d685ecc807",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "rustfmt syntax parse only",
+      "path": "crates/lycheedev-source/tests/refs_context.rs",
+      "argv": [
+        "/workspace/shared/rust-dev/rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustfmt",
+        "--edition",
+        "2024",
+        "--config",
+        "skip_children=true",
+        "--emit",
+        "stdout",
+        "crates/lycheedev-source/tests/refs_context.rs"
+      ],
+      "status": "passed",
+      "exitCode": 0,
+      "stdoutSHA256": "f89eba0cb5ab2e602c5c11bbf5fdec9c3b60de254a878d37e39cf42d08457264",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "rustfmt syntax parse only",
+      "path": "crates/lycheedev-source/tests/refs_context/project_selection.rs",
+      "argv": [
+        "/workspace/shared/rust-dev/rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustfmt",
+        "--edition",
+        "2024",
+        "--config",
+        "skip_children=true",
+        "--emit",
+        "stdout",
+        "crates/lycheedev-source/tests/refs_context/project_selection.rs"
+      ],
+      "status": "passed",
+      "exitCode": 0,
+      "stdoutSHA256": "65682c7081e3202c15131a3f20dfc80080ff7e46a16c9b3b1cd0e68db57b2f47",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "git diff --check",
+      "status": "passed",
+      "exitCode": 0,
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "rustfmt syntax parse with module traversal",
+      "argv": [
+        "/workspace/shared/rust-dev/rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustfmt",
+        "--edition",
+        "2024",
+        "--emit",
+        "stdout",
+        "crates/lycheedev-source/src/relations.rs"
+      ],
+      "status": "passed",
+      "exitCode": 0,
+      "stdoutSHA256": "086b3166752198f54f2a224ff17fc4cd5337b598ba8676ccc91728e3967b6a1f",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "nodeCheck": {
+    "argv": [
+      "node",
+      "--test",
+      "tests/rust-parity/source-project-selection.test.mjs"
+    ],
+    "status": "passed",
+    "scope": "3 local checks pass with no git on PATH; optional Go source review explicitly skipped, not counted as a pass.",
+    "exitCode": 0,
+    "passed": 3,
+    "failed": 0,
+    "skipped": 1,
+    "environment": {
+      "PATH": "/tmp/lychee-project-selection-no-git",
+      "LYCHEEDEV_GO323_CHECKOUT": null
+    },
+    "stdoutSHA256": "6f432271a87a92d2a2605cbdcfecca42abc37ecbc4a6d9842d26cedcabcde74f",
+    "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "requiredExecution": [
+    {
+      "case": "Controlled workspace all-target compilation",
+      "status": "NOT_RUN"
+    },
+    {
+      "case": "Source lib relations::project_selection_tests (2)",
+      "status": "NOT_RUN"
+    },
+    {
+      "case": "Source refs_context integration (9 new nonignored cases plus existing suite)",
+      "status": "NOT_RUN"
+    },
+    {
+      "case": "Explicit ignored project_research_actual_cli_static_and_native_use_project_selection_and_reselect_identity",
+      "status": "NOT_RUN",
+      "environment": {
+        "LYCHEEDEV_PROJECT_SELECTION_EXE": "Exact sealed packaged CLI",
+        "LYCHEEDEV_PROJECT_SELECTION_RELEASE": "Matching authenticated release root"
+      }
+    },
+    {
+      "case": "Full Retail retained variant --project path using the coordinator-owned native acceptance runner",
+      "status": "NOT_RUN"
+    }
+  ],
+  "fixtureIsolation": "Both unit and public-consumer fixture factories add AtomicU64 Relaxed sequence and require create_dir before workspace initialization; existing homes cannot be adopted.",
+  "nodeCheckHistory": [
+    {
+      "argv": [
+        "node",
+        "--test",
+        "tests/rust-parity/source-project-selection.test.mjs"
+      ],
+      "status": "passed",
+      "exitCode": 0,
+      "passed": 3,
+      "failed": 0,
+      "stdoutSHA256": "b2feb061f2921b8e0782ff6feeb3ceff96676a04d7cf02410d77daffe923611f",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "scope": "Static contract/custody only; no Rust compilation or execution"
+    }
+  ],
+  "optionalGoSourceReview": {
+    "environment": "LYCHEEDEV_GO323_CHECKOUT",
+    "commit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+    "meaning": "Explicit repository holding the fixed Go commit. git show reads that exact commit and checks each source SHA against evidence, never moving HEAD or mutable working-tree bytes.",
+    "withoutEnvironment": "Only the optional source-review test is SKIP/NOT_RUN; all 3 local checks still run.",
+    "status": "passed",
+    "exitCode": 0,
+    "passed": 4,
+    "failed": 0,
+    "skipped": 0,
+    "configuredRepository": "/workspace/shared/Lychee-Dev-rust-docs",
+    "stdoutSHA256": "75741df32c95324e06b9eabd98a55ce8941862d74e1391c988bc05347162d479",
+    "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "scope": "All 4 static checks pass with an explicit fixed-Go-object repository; does not execute Go or Rust product code."
+  }
+}

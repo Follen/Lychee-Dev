@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 01:55 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`1584974fa04e027cb107602871fed6c8528802f3`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；最后变更身份场景仍未闭合：project status已修通过，refs仅project被产品入口拒绝；当前先真实持久variant snapshot后显式查询，另修公开project合同偏差。性能与全量验收未完成。
+更新：2026-10-17 01:57 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`7ad866b092be5a2c4c522c54230c6c1b724ea01e`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择修复已实现待测试。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -48,6 +48,7 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 - **全仓架构消费者**：[7a的13组](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6224181570)622通过1个Core阶段fixture失败0忽略，后继024闭合该项。Live348、CLI69、adapter57及Source新26并行回归均在原组实际命中；0e1、f088后继各保原身份。专项通过不等于最终五阶段审计完成。
 - **按需原文与retained结构回归**：8ee Git需求流17项真实Windows通过，原fallback fixture在[6ce完整facts_cache19/0/0](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6226082277)闭合，保4文档body扫描/cursor/禁镜像warm。76d all-target、native72及research76通过2原忽略，包含18个共享分析/流式摘要/索引/XML所有权新回归；匹配优化CLI构建成功。完整retained仍失败，见下一项。
 - **最新a338冷暖通过，完整组13通过1失败**：[实际结果](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6227762436)all-target通过、native::99/0/0，新27项逐名全部通过，关闭de903/02b fixture与空脚本实现前置缺口。匹配release一次6m13成功、assembly成功；EXE SHA `f2e10d4022f1a4a004496d985d581cc917e895a162e295da39c94409efd80822`。冷refs10.9307秒与暖context3.6395秒均exit0，真实同owner identity-only/cacheHit通过，close/reopen恢复和最终回收通过。唯一失败variant-project-validate给path-local project status误传--home而exit2，身份变更reprepare/restore未执行。本轮只修正式runner的现有参数例外及合同回归，Node82/82通过；产品无改，可沿README独立runner导出方式复用精确a338 sealed artifact与candidate报告，复验仍NOT_RUN。五条ordinary/session成功输出均complete=false/partial/155 gaps；不以传输成功称语义全覆盖。
+- **2d7 runner/a338产品完整full14/0**：[本机完整结果](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6228204406)全部14项实际通过、exit0；变体pin真实准入、changed/restored inputIdentity和同owner均成立，owner e30c7e06-acf4-401f-a937-24e7134dce4e封存回收、active0、无forced/deadline。产品仍是精确a338，runner为2d7，不能归后继性能/项目选择源码。仍semantic.partial/155gaps，公开project参数产品修复尚未验收；原a338与2c2的13/1保留如下。
 - **2c2 runner/a338产品复验仍13/1**：project status已实际通过，冷11.681秒/暖3.839秒均过；变体refs仅传--project无--snapshot被relations入口exit2拒绝，后继reprepare/restore未执行。当前runner完整核各命令，新增真实source index --project认证/持久variant pin，严格核公开context.snapshot、repository/product/commit/4036/complete，再refs显式--snapshot。保changed/restored inputIdentity变更、恢复原inputIdentity及同owner完整断言；Node83/83通过，Windows复验NOT_RUN，可继续复用原a338产品。公开commands宣称refs/context可用project而实际入口硬拒另列真实产品合同修复，不能因runner改用snapshot就视为闭合。
 - **978历史retained冷通过、暖失败**：[978完整复验](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6226997732)full11通过3失败；首冷refs11.443秒exit0，完整stdout7213878字节，close/recreate/same-pin恢复与最终回收通过；冷回复semantic complete=false且155 gaps，不能将传输/check成功冒充语义完整。新根失败跨CLI暖context1.8035秒EOF/exit5，另2项依赖失败。认证warm child56208/creation134366686791803877、owner16580/134366686789752091；journal止于query_build_scope34ms/private2122149888，未scope_built。原Job2GiB、历史peakJob2148704256/peakProcess2147418112，无limit通知；0xc0000409仅supervisor终止后观察，不证明自然OOM或旧owner栈故障复发。匹配release成功、package仅assembly通过，Node80通过1平台skip；完整内存/暖稳态未验收。继续修暖scope与前请求保留状态真实同时存活峰值。
 - **暖scope后继已运行前置，修复三处fixture阻断待复验**：XML Program身份不再物化整份Value再仅为hash分配字节，按原canonical字段借用流式验证/hash；Graph snapshot JSON在原构建点完整验证/计量/hash，字符串仅真实消费者需要时共享物化。lexical read、closure/parameter索引改精确原file:start:end紧凑坐标，保同键最后覆盖、公开cell/capture ID及原scope生命周期。新增19 Rust（身份9/紧凑索引7/共享3）由现native::正式组覆盖，14源语法/diff和Node81/81通过；[de903实际前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6227348428)all-target通过，native::91项88通过3失败，原72全过、新19为16过3败。三失败均在共享fixture构图返回source.native_unavailable/block，尚未到descriptor/entry/stop断言：空文件被选为执行body，而原版parser的合法空Chunk没有Block。本轮仅调整测试的执行计划为原三个有body脚本，保零字节文件准入、空索引与原全部目标断言，并显式验证空Chunk；生产未改。修订Rust、匹配release/package与完整暖Retail仍NOT_RUN。真实空脚本执行是否应作为no-op另列候选合同缺口，不能用旧978同样失败证明正确。独立完整组合审阅通过，全部14源身份与canonical/错误/容量/精确键消费者已核；不把静态审或消除副本冒充2GiB或性能达标。
@@ -58,6 +59,10 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 - **正常Facts与有限畸形输入**：[76d完整4036文档v9](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6226409878)逐字段/顺序0差。后继[e8d新增XML32与旧52](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6226448382)全字段/顺序全部等价，Rust15/0/0、Node18/0/0；关闭该明确输入集差异，不称非法Lua/XML已穷尽。Facts v10/index v11及[显式v10读侧](tests/rust-performance-paired/read-fact-delta.README.md)已保存，[e8d独立新home完整4036 v10](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6226520186)逐字段/顺序0差，声明65320/关系227786/loads4169/headers1888/diagnostics0；报告SHA `722f3ea2ca4dfb2b3ba6b2aef4020d0a8bbc39cadd6fc50cf608b3c547d4a202`，匹配优化构建成功，未重跑retained/20对性能。
 - **寿命与性能**：e843真实600047ms正常寿命退出0通过，原失败保留。76d单次等价诊断cold index Go8626ms/Rust9617ms、cold query9199/10107ms、warm query642/130ms；不是20对验收。旧[5bbb完整20对](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6221187576)仅warm query比0.202388达≤0.30，B01约1.13/cold query约5.00失败。新的完整B01–B07配对与内存验收仍未完成，单次改善不能覆盖旧统计失败。
 
+### 实际155条semantic gaps的范围
+
+已认证a338冷refs与暖context原始stdout，155对象逐项相同：load_file_missing17＋toc_load_target_unavailable17（同17个Classic TOC行的两层记录），load_condition_unavailable2＋toc_load_condition_unavailable2（同2行）；xml_template_unavailable65、xml_mixin_source_unavailable49、xml_parent_key_receiver_unavailable1、xml_native_or_parent_binding_unavailable2。两个scope都为alternative_manifest_hypothetical_after_load，不是客户端实际加载观察；template65仅21种位置/模板组合，mixin49仅21种位置/名称组合。不能把155说成155独立bug或全属动态Lua。最后两条真实来自StatusTrackingBar.xml:3的parentArray，当前实现直接记gap，属于可确认绑定覆盖缺口；其他项须逐消费者/可达范围核因，不能自动称全Go等价或全Rust回归。完整请求/响应通过不代表semantic.complete=true。
+
 ### 冷索引发布与流水线后继（待实测）
 
 固定76d原始profile实核：总9.409秒，facts发布5.060秒/4036次；worker解析累计6.403秒与主线程重叠，不相加。当前实现仅在原资源边界内复用严格持有的locks目录，每次仍验证祖先、按原资源hash取得跨进程kernel锁并checked close；首次并发准备的多余目录owner明确关闭。收到最早已完成纯parse后，仍对Facts/原文字节/Ready槽计费，只释放已经销毁的parser scratch，允许下一份已读取/认证输入先进入空闲worker，再按原顺序提交上一份。原256MiB/槽上限、首错与线程回收保持。增加锁、暂存、写、seal、rename及两类close的分段profile，关闭profile时不读时钟。新增12 Rust回归仍NOT_RUN；未宣称加速或性能达标。下一正式组为 Source index::facts_pipeline::tests::、index::profile::tests::、index::facts_cache_tests::，Core cache::source_facts::tests::、storage::blob_wait::tests::，随后匹配优化产物全4036/单次profile，再决定20对验收。
@@ -65,6 +70,10 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 ### Data 专用配对入口（产品实测未运行）
 
 沿现有paired身份/owner/Windows原计时新增[Data入口与完整命令](tests/rust-performance-paired/data.README.md)，固定Go323完整优化包与匹配Rust优化artifact。独立受控preparer串行生成三个原fixture：微型SQL只核正确性；17MiB/三BLTE块真实内容读取；1031×519五种BLP存储模式分别默认PNG/WebP导出。逐样本验证完整行/顺序、源blob、全部像素、capture身份与有序依赖、原预算及真实冷热缓存工作。默认cold/warm各一对仅观察；显式acceptance内置单对preflight，再每性能路径20冷/20暖，SQL不冒性能样本。Node19/19真实通过，独审修正实际encodingIO布尔字段、完整byte-work及Go323 capture依赖三个问题；Rust fixture构造/Go产品/性能全部NOT_RUN。准备、构建和测试仍由唯一Windows队列安排，不新增清缓存/改配额/下载路径。
+
+### 公开 Source project 选择修复（待实测）
+
+refs/context省略snapshot时复用现有受控project/最近父级锁选择，显式snapshot仍优先。context把认证后的同一pin移交relations，避免cursor认证后再次读取可变project锁，保原control和绝对deadline。固定Go命令先解析数值、后project、再research selector的顺序已核；本片保context数值首错和project错误优先于selector。新增12 Rust＝2移交/控制单元＋9公开消费者回归＋1需要匹配包的真实CLI static/native显式ignored项，均NOT_RUN。云端Node默认3通过1明确Go源码复核skip，指定持有固定Go323对象的checkout后4/4真实通过；核心3项不要求本机Rust仓有旧Go对象。实际产品入口、cursor切pin/恢复、immutable pin认证及真实native仍待集中Windows。此修复独立于已通过的runner显式variant snapshot路线。
 
 ## 4. 进入最终五阶段前的有限收口
 
@@ -87,7 +96,7 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 本机测试通道已正常恢复，原unknown历史保留，无需再次apply或重启。仅云端实现，用户指定本机线程负责固定SHA测试并将报告写回同一PR。普通push不自动切换其正在测试的树；不另排重复长CI。
 
-当前本机a338已安全终态：all-target/native99全过，匹配优化构建与assembly成功，full13通过1runner参数失败。下一从新固定runner提交导出README依赖集合，在原a338产品checkout运行，复用EXE与candidate全部认证；不得混新产品sourceDigest或覆盖旧证据。仅runner修复不需要新release，完整full重跑后确认变更身份与恢复最终场景。其余XML84/4036及quota/idle/lifetime保原身份不机械重跑。
+当前2d7独立runner/a338产品full14/0已安全终态，身份变更和恢复闭环；all-target/native99与匹配优化构建保持a338原身份。下一统一源码批先alltargets及受影响Source/Core/Data组，再匹配优化产物做profile和Data配对；不得将旧EXE当新性能产物。其余XML84/4036及quota/idle/lifetime保原身份不机械重跑。
 
 - 所有Rust检查沿仓库受控 `tools/rust-cargo.mjs`、固定工具链和原owner/cache合同，先all-target编译，再受影响组；默认线程栈不加大。完整SQL299及7db预算组已过，不机械重跑历史失败树。
 - 正式Lua与9桥使用[现有入口](tools/rust-formal-lua-bridge.mjs)，每次新输出目录；原runtime与CLI封存产物必须通过全部身份验证，不能覆盖旧失败目录。当前正式Go323220/9已有实证。

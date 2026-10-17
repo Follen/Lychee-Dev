@@ -44,7 +44,7 @@ with this fixed dependency set (retain commit/archive/file hashes):
 $RunnerCommit = '<exact selected runner commit>'
 $RunnerStage = '<new runner directory>'
 $Archive = '<new archive path>'
-git archive --format=tar --output=$Archive $RunnerCommit -- tools/rust-source-native-acceptance.mjs tools/rust-build.mjs tools/rust-disk.mjs tools/rust-emmy-identity.mjs tools/rust-owned-process.mjs tools/rust-owned-process.ps1 tools/rust-owned-memory.mjs tools/rust-build-auxiliary.json tools/zip.mjs release/rust-disk-policy.json commands.json tests/rust-source-native-acceptance tests/rust-source-full-corpus/run.mjs tests/rust-source-full-corpus/assertions.mjs tests/rust-source-full-corpus/retail-oracle.json tests/rust-skill-usage/assertions.mjs tests/rust-skill-usage/workflow.json tests/rust-skill-usage/workflow-go323.json tests/rust-skill-usage/baselines
+git archive --format=tar --output=$Archive $RunnerCommit -- tools/rust-source-native-acceptance.mjs tools/rust-build.mjs tools/rust-disk.mjs tools/rust-emmy-identity.mjs tools/rust-owned-process.mjs tools/rust-owned-process.ps1 tools/rust-owned-memory.mjs tools/rust-build-auxiliary.json tools/zip.mjs release/rust-disk-policy.json crates/lycheedev-cli/src/commands.json tests/rust-source-native-acceptance tests/rust-source-full-corpus/run.mjs tests/rust-source-full-corpus/assertions.mjs tests/rust-source-full-corpus/retail-oracle.json tests/rust-skill-usage/assertions.mjs tests/rust-skill-usage/workflow.json tests/rust-skill-usage/workflow-go323.json tests/rust-skill-usage/baselines
 if ($LASTEXITCODE -ne 0) { throw "runner archive failed" }
 New-Item -ItemType Directory -Path $RunnerStage -ErrorAction Stop | Out-Null
 tar -xf $Archive -C $RunnerStage

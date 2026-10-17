@@ -33,7 +33,7 @@ pub(crate) fn with_prepared(
     prepared: &PreparedResearch,
     native_response: Option<Value>,
 ) -> Result<Reading> {
-    with_engine(inv, None, None, tools.luac.filter(|_| !inv.flag_bool("--static-only")), Some(prepared), native_response)
+    with_engine(inv, None, None, tools.luac.filter(|_| !inv.flag_bool("--static-only")), Some(prepared), native_response, None)
 }
 fn invalid(code: &str, message: &str) -> ToolkitError {
     ToolkitError::new(code, message, 2)
@@ -49,10 +49,40 @@ pub fn with_services(
     runtime: Option<&luals::Runtime>,
     broker: Option<&crate::session::BrokerIdentity>,
 ) -> Result<Reading> {
-    with_engine(inv,runtime,broker,None,None,None)
+    with_engine(inv,runtime,broker,None,None,None,None)
 }
 pub fn with_native_services(inv:&Invocation,tools:&crate::SourceTools<'_>,broker:Option<&crate::session::BrokerIdentity>)->Result<Reading>{
-    with_engine(inv,None,broker,tools.luac.filter(|_|!inv.flag_bool("--static-only")),None,None)
+    with_engine(inv,None,broker,tools.luac.filter(|_|!inv.flag_bool("--static-only")),None,None,None)
+}
+/// Context has already authenticated the cursor's source selection. Move that
+/// same pin into relation evaluation, without reopening a mutable project lock
+/// or replacing the caller's control/deadline.
+pub(crate) fn with_selected_pin(
+    inv: &Invocation,
+    tools: &crate::SourceTools<'_>,
+    broker: Option<&crate::session::BrokerIdentity>,
+    pin: PinnedSet,
+) -> Result<Reading> {
+    with_engine(
+        inv, None, broker, tools.luac.filter(|_| !inv.flag_bool("--static-only")),
+        None, None, Some(pin),
+    )
+}
+fn selection_arguments() -> ToolkitError {
+    ToolkitError::arguments(
+        "source refs/context require --snapshot and exactly one of --symbol-id or --symbol",
+    )
+}
+/// Match Go's command-level project fallback: an absent implicit project leaves
+/// the original argument error, while an explicit or malformed project fails.
+pub(crate) fn resolve_research_pin(inv: &Invocation) -> Result<PinnedSet> {
+    if let Some((_, pin)) = selection::resolve_optional_project(inv)? {
+        return Ok(pin);
+    }
+    if inv.flag("--snapshot").is_none_or(str::is_empty) {
+        return Err(selection_arguments());
+    }
+    selection::resolve_pinned(inv)
 }
 fn with_engine(
     inv: &Invocation,
@@ -61,14 +91,23 @@ fn with_engine(
     native: Option<&crate::luac::Runtime>,
     prepared: Option<&PreparedResearch>,
     native_response: Option<Value>,
+    selected_pin: Option<PinnedSet>,
 ) -> Result<Reading> {
     inv.control.check()?;
-    if inv.flag("--snapshot").is_none()
+    // The fixed Go entry resolves an omitted snapshot before research selector
+    // checks. Prepared/context callers already own that authenticated winner.
+    let selected_pin = match selected_pin {
+        Some(pin) => Some(pin),
+        None if prepared.is_none() => {
+            selection::resolve_optional_project(inv)?.map(|(_, pin)| pin)
+        }
+        None => None,
+    };
+    if (prepared.is_none() && selected_pin.is_none()
+        && inv.flag("--snapshot").is_none_or(str::is_empty))
         || inv.flag("--symbol-id").is_some() == inv.flag("--symbol").is_some()
     {
-        return Err(ToolkitError::arguments(
-            "source refs/context require --snapshot and exactly one of --symbol-id or --symbol",
-        ));
+        return Err(selection_arguments());
     }
     if inv.flag_bool("--static-only")
         && (inv.flag("--release").is_some() || inv.flag_bool("--session-reuse"))
@@ -109,7 +148,10 @@ fn with_engine(
     }
     let pin = match prepared {
         Some(shared) => shared.pin.clone(),
-        None => selection::resolve_pinned(inv)?,
+        None => match selected_pin {
+            Some(pin) => pin,
+            None => selection::resolve_pinned(inv)?,
+        },
     };
     let source = pin.source.as_ref().ok_or_else(|| {
         ToolkitError::new("selection.source_missing", "selected pin has no source", 3)
@@ -1051,3 +1093,7 @@ mod incoming_caller_cursor_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "relations/project_selection_tests.rs"]
+mod project_selection_tests;

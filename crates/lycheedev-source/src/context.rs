@@ -61,7 +61,7 @@ pub(crate) fn evaluate(
     let depth = inv
         .usize_flag("--depth", 1, 0, 4)
         .map_err(|_| ToolkitError::arguments("--depth must be between 0 and 4"))?;
-    let pin = match prepared { Some(shared) => shared.pin.clone(), None => selection::resolve_pinned(inv)? };
+    let pin = match prepared { Some(shared) => shared.pin.clone(), None => relations::resolve_research_pin(inv)? };
     let source = pin.source.as_ref().ok_or_else(|| {
         ToolkitError::new("selection.source_missing", "selected pin has no source", 3)
     })?;
@@ -83,10 +83,10 @@ pub(crate) fn evaluate(
         related_inv.flags.insert("--static-only".into(),"true".into());
         if let Some(shared) = prepared {
             relations::with_prepared(&related_inv, tools, shared, None)?
-        } else { relations::with_services(&related_inv,None,None)? }
+        } else { relations::with_selected_pin(&related_inv, tools, None, pin)? }
     } else if let Some(shared) = prepared {
         relations::with_prepared(&related_inv, tools, shared, native_response)?
-    } else {relations::with_native_services(&related_inv, tools, broker)?};
+    } else {relations::with_selected_pin(&related_inv, tools, broker, pin)?};
     let source = reading.pin.source.as_ref().unwrap();
     let relation_next = reading.data["nextCursor"].as_str().unwrap_or("").to_owned();
     reading.data.as_object_mut().unwrap().remove("nextCursor");

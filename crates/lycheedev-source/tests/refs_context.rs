@@ -28,14 +28,17 @@ fn fixture() -> Fixture {
     fixture_with(&[])
 }
 fn fixture_with(extra: &[(&str, &str)]) -> Fixture {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let home = std::env::temp_dir().join(format!(
-        "lycheedev-research-{}-{}",
+        "lycheedev-research-{}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
+    fs::create_dir(&home).expect("fresh research fixture");
     workspace::initialize(&home).unwrap();
     let mirror = git::mirror(&home, "elvui");
     fs::create_dir_all(mirror.parent().unwrap()).unwrap();
@@ -586,3 +589,6 @@ fn context_after_index_lazily_caches_only_snippet_originals_and_reuses_locked_wa
         }
     }
 }
+
+#[path = "refs_context/project_selection.rs"]
+mod project_selection;
