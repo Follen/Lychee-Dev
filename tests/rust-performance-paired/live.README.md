@@ -196,6 +196,23 @@ reaped: [sealed result](https://github.com/Follen/Lychee-Dev/pull/14#issuecommen
 [public original package](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234550692).
 Its 7.5512702-s cumulative Driver wall includes 5.3469076 s across 1,215 appends.
 Fixture history construction is outside that product-path total. Those results
-motivated the cache; they do not measure its effect. The new cache candidate's
-Rust compilation/regressions and repeat 27-sample Windows run remain **NOT_RUN**
-until the coordinator records its exact tested artifact and sealed run.
+motivated the cache; they do not measure its effect.
+
+The subsequent fixed `1360e563d99883a0b7e48ace72a2c9be18c3744c` passed
+[all-targets, complete Live 608 tests and one ignored diagnostic, all seven new
+named regressions](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234930599),
+then [all 27 real diagnostic samples](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234976464)
+and [all peer/owner cleanup](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234995631).
+Every input/BODY/history and all 45 original journal byte streams match 0890.
+The eight-part original package was hash-verified, and read/equality/replay
+counters independently reconciled against those complete journal prefixes.
+
+This run's Driver total was 7.1078032 s, journal 5.238447 s and append 4.955697 s.
+Within append, sync was 2.688615 s, snapshot/artifacts 0.850453 s and complete
+read/verify 0.159487 s; ten phases plus both remainder layers reconstruct each
+original interval. Comparing these with a prior run is an observation, not an
+interleaved causal experiment or 20-pair acceptance. Fixture history construction
+is still excluded from Driver benefits. The 45 per-sample append durability
+boundaries remain, and no safe sync coalescing has been established. The remaining
+snapshot/artifact bucket is about 31 ms per sample in total, not a promised
+removable amount. No game or comparable Go-host latency was measured.

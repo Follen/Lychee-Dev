@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 14:03 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`044b549802c80a5837f29cee592e4406c8a08b31`（0890真实Live/MD5结果已保存）。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 14:27 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`1360e563d99883a0b7e48ace72a2c9be18c3744c`（Live认证链复用已保存）。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -49,13 +49,15 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 [原证据索引](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234550692)及7块已逐SHA核742引用/196唯一blob，原report每样本互斥账、27sample/peer、45journal文件5868event链与27BODY完整匹配。27sample墙钟合34.921s：实际fixture历史构造17.437s、peer启动6.380s、身份重验2.503s均属诊断完整成本，不能称产品热路径。Driver合7.551s中journal5.640s、backend1.884s、余27.875ms；journal里1215次append合5.346908s（每sample45次，占Driver70.81%）、54checkpoint132.072ms、27write_result160.611ms。nestedLua408.987ms/codec2.552ms已含backend，不再相加。真实BODY为362/16490/131178B；history255保172200B/255event，history256先checkpoint为682B/1event，二者不是单纯多一事件的增长对照。下一结构候选针对append重复链解析而非2.552ms codec；性能收益与Go host/游戏/20对验收仍未证明。
 
-### Live journal认证链复用候选（待Windows复验）
+### Live journal认证链复用1360实测
 
 按0890真实append大头实施lease内可选认证raw链缓存。每次append仍原owner检查、完整真实read与checked close、逐字节比较；只有字节完全相同复用count/head，变化原parser/hash/head conflict；成功write+sync+checked close+control后才推进，Unknown/失败仍poison并驱逐。load/history先驱逐，checkpoint全验重建，close释放。prepare_event内部一次返回bytes+已有checksum，保公共bytes API及恰2MiB JSON+LF旧可写/下次读拒绝边缘，不借cache吞错误。
 
 缓存资格用现8MiB checkpoint阈值；保留的observable capacity≤8MiB，cache活跃时新read请求≤8MiB。长度变/增长分配前驱逐，返回capacity超资格立即驱逐；合格post-allocation pair观察≤16MiB，不能称任意allocator瞬时/总heap/RSS硬上限。较大合法log走原64MiB完整路径，无新用户输入拒绝或通用budget。新增7项覆盖真实同长度改动、owner优先、等价JSON重排、checkpoint/close、增长/容量fallback、LF边缘与prepared bytes/checksum；原cancel/Unknown断言亦增强。
 
-新10个cfg(test) append互斥段在Driver接手后才启用，保原总wall及内部/外部余量，actual hits/replay/read/equality input/capacity另记；旧原27report已由新reader真实接受，新profile只允许全27或全无。Node42+原桥24共66/66由作者与整合者实际通过，Rustfmt解析/diff及独立静态审无剩余确认缺陷；Rust编译/新7项/同27样本尚未跑。仍O(log bytes)读取比较，任何收益等待完整Driver与样本墙钟，fixture历史构造不能冒算产品热路径节省。
+新10个cfg(test) append互斥段在Driver接手后才启用，保原总wall及内部/外部余量，actual hits/replay/read/equality input/capacity另记；旧原27report已由新reader真实接受，新profile只允许全27或全无。Node42+原桥24共66/66由作者与整合者实际通过，Rustfmt解析/diff及独立静态审无剩余确认缺陷。[1360本机前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234930599)all-targets通过、Live完整608/0/1（诊断ignored单列），新7逐名一次过，原journal35声明入口通过、helper不重复。[正式离线27/27](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234976464)与[终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234995631)27peer/5owner均回收，10append子段完整。8段698引用/165唯一blob共12,843,610B逐SHA核；原sample/peer、45journal共5868event链、27输入/BODY/history及全部45journal原bytes均与0890一致。
+
+同run Driver合7.1078032s、journal5.238447s；append4.955697s中sync2.688615s(54.25%)、snapshot/artifacts0.850453s(17.16%)、完整read+verify0.159487s(3.22%)，子段及两层余量逐row精确加回。每sample45append真实为6次输入×7持久状态加3个operation/report/result事件，没有可证安全合并sync的结论；61次artifact访问中2首发、59已有全读，大BODY重复读取3,020,628B而首发131,271B。相较0890 Driver7.5512702s/journal5.640s仅跨run改善观察，非因果或20对验收；fixture历史构造变化不冒算产品收益。缓存仍O(log bytes)完整读取比较，后续优先有证据的snapshot/artifact重复构造，不以删durability追速度。
 
 ### Data 哈希生命周期筛选0890实测
 
