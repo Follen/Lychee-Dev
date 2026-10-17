@@ -1,4 +1,8 @@
 <!-- Current candidate: production Emmy recipe is unmodified upstream (848 files, zero patches); owned Source query and 43 diagnostic entries are wired. Historical initial zero-patch compilation failures are retained; current all-targets and focused behavioral results are recorded in handover.md. Complete behavioral/resource parity remains unaccepted. -->
+
+- [ ] Run the cold-index publication/refill successor on its exact candidate: new 12 Rust regressions plus existing pipeline/profile/cache/lock groups, full 4036 output/order equality, then matched optimized single-phase diagnosis and repeated paired acceptance. Held lock-directory reuse and receive/refill must preserve cross-process serialization, original admission/first-error order and checked cleanup; phase durations overlap and are not additive. Implementation/static review is not a speedup result.
+
+- [ ] Apply the 2026-10-17 explicit enhancement decision throughout Source acceptance: retain source-proven more accurate/complete Rust results with exact current-contract regressions and a documented compatibility difference; preserve historical raw comparisons. Keep the two independently verified object call-result receipts. Investigate unclassified differences rather than labeling extra output an improvement or mechanically deleting it to match Go.
 <!-- Preserve historical patched-engine test references separately. Complete known context/result-proof contracts, then run concentrated verification and the final five audit loops. -->
 <!-- Current batch: legacy addon production extras are now zero under the fixed oracle; Node 60/60 passed. Current formal Go323 Lua220/bridge9 execution passed on its recorded tree; final five audit loops remain pending. -->
 # Rust migration checklist

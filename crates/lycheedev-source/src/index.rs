@@ -528,6 +528,7 @@ fn document_facts_profiled(
         prepared.facts
     } else {
         let _parse_phase = profile.map(|p| p.span(Phase::FactsParse));
+        let _sequential_phase = profile.map(|p| p.span(Phase::FactsParseSequential));
         let lower_path = path.to_ascii_lowercase();
         if lower_path.ends_with(".lua") {
             facts::lua(data, path.contains("/Blizzard_APIDocumentationGenerated/"))
@@ -554,7 +555,25 @@ fn document_facts_profiled(
     }
     drop(serialize_phase);
     let _publish_phase = profile.map(|p| p.span(Phase::FactsPublish));
-    cache_owner.publish(key, &envelope, control)?;
+    if let Some(profile) = profile.filter(|profile| profile.is_enabled()) {
+        use lycheedev_core::cache::SourceCachePublicationPhase as Published;
+        cache_owner.publish_profiled(key, &envelope, control, &mut |phase, elapsed| {
+            profile.record(
+                match phase {
+                    Published::Lock => Phase::FactsPublishLock,
+                    Published::Stage => Phase::FactsPublishStage,
+                    Published::Write => Phase::FactsPublishWrite,
+                    Published::Seal => Phase::FactsPublishSeal,
+                    Published::Rename => Phase::FactsPublishRename,
+                    Published::StageClose => Phase::FactsPublishStageClose,
+                    Published::LockClose => Phase::FactsPublishLockClose,
+                },
+                elapsed,
+            );
+        })?;
+    } else {
+        cache_owner.publish(key, &envelope, control)?;
+    }
     control.check().map_err(|mut error| {
         error.details = json!({"schema":"lycheedev.source-persistence.v1","path":cache,"mutation":"facts","state":"committed","cause":error.clone()});
         error

@@ -54,6 +54,15 @@ struct Pending {
     preparation: Preparation,
     reservation: usize,
 }
+/// A received result remains charged until its ordered consumer returns. Only
+/// its finished parser scratch may be released before then; Facts and source
+/// bytes must coexist with any newly admitted job.
+struct Ready {
+    file: git::TreeFile,
+    data: Vec<u8>,
+    prepared: Option<PreparedFacts>,
+    reservation: usize,
+}
 
 /// None preserves the exact complete parser path. A worker cap is never a new
 /// public syntax diagnostic, truncation, or operation-budget failure.
@@ -310,22 +319,25 @@ struct Pipeline<'a> {
     profile: &'a Profile,
 }
 impl Pipeline<'_> {
-    fn consume_one(
-        &mut self,
-        consume: &mut impl FnMut(&git::TreeFile, Vec<u8>, Option<PreparedFacts>) -> Result<()>,
-    ) -> Result<()> {
+    fn receive_one(&mut self) -> Result<Option<Ready>> {
         let Some(pending) = self.pending.pop_front() else {
-            return Ok(());
+            return Ok(None);
         };
         let (data, prepared) = match pending.preparation {
             Preparation::LuaWorker(worker) => {
+                let wait = self.profile.span(Phase::FactsWorkerWait);
                 let output = self.workers[worker]
                     .output
                     .recv()
                     .map_err(|_| worker_failed())?;
+                drop(wait);
                 self.free_workers.push_back(worker);
                 self.profile
                     .record(Phase::FactsWorker, output.parse_elapsed);
+                if output.facts.is_none() {
+                    self.profile
+                        .record(Phase::FactsWorkerAbandoned, Duration::ZERO);
+                }
                 let prepared = output.facts.map(|facts| PreparedFacts {
                     facts,
                     parse_elapsed: output.parse_elapsed,
@@ -334,9 +346,54 @@ impl Pipeline<'_> {
             }
             Preparation::Sequential(data) => (data, None),
         };
-        consume(&pending.file, data, prepared)?;
-        self.pending_bytes -= pending.reservation;
-        self.retained_bytes = self.retained_bytes.saturating_add(pending.file.bytes);
+        // prepare_input returns only after SyntaxDocument/WorkerGuard and all
+        // parser temporaries have dropped. Keep the whole bounded Facts owner,
+        // original capacity and metadata charged. Abandoned/ordinary inputs
+        // retain their original reservation and are not early-refill points.
+        let reservation = if prepared.is_some() {
+            pending.reservation - PARSER_SCRATCH_BYTES
+        } else {
+            pending.reservation
+        };
+        self.pending_bytes -= pending.reservation - reservation;
+        Ok(Some(Ready {
+            file: pending.file,
+            data,
+            prepared,
+            reservation,
+        }))
+    }
+    fn consume_ready(
+        &mut self,
+        ready: Ready,
+        consume: &mut impl FnMut(&git::TreeFile, Vec<u8>, Option<PreparedFacts>) -> Result<()>,
+    ) -> Result<()> {
+        consume(&ready.file, ready.data, ready.prepared)?;
+        self.pending_bytes -= ready.reservation;
+        self.retained_bytes = self.retained_bytes.saturating_add(ready.file.bytes);
+        Ok(())
+    }
+    fn consume_one(
+        &mut self,
+        consume: &mut impl FnMut(&git::TreeFile, Vec<u8>, Option<PreparedFacts>) -> Result<()>,
+    ) -> Result<()> {
+        if let Some(ready) = self.receive_one()? {
+            self.consume_ready(ready, consume)?;
+        }
+        Ok(())
+    }
+    fn dispatch(&mut self, file: &git::TreeFile, data: Vec<u8>, reserved: usize) -> Result<()> {
+        let worker = self.free_workers.pop_front().expect("worker slot admitted");
+        self.workers[worker]
+            .input
+            .send(LuaInput { data })
+            .map_err(|_| worker_failed())?;
+        self.pending.push_back(Pending {
+            file: file.clone(),
+            preparation: Preparation::LuaWorker(worker),
+            reservation: reserved,
+        });
+        self.pending_bytes += reserved;
         Ok(())
     }
     fn drain(
@@ -370,7 +427,34 @@ impl Pipeline<'_> {
                         self.batch_bytes,
                     ))
             {
-                self.consume_one(consume)?;
+                let ready = self.receive_one()?.expect("pending front exists");
+                // Refill at most this already authenticated incoming document,
+                // before the earlier consumer's synchronous cache publication.
+                // Count the current ready owner as a slot and in pending_bytes;
+                // no completed Facts/source owner disappears from admission.
+                if ready.prepared.is_some()
+                    && !self.free_workers.is_empty()
+                    && self.pending.len() + 2 <= (self.workers.len() * 2).min(MAX_PENDING_SLOTS)
+                    && fits(
+                        self.retained_bytes,
+                        self.pending_bytes,
+                        reserved,
+                        self.workers.len(),
+                        self.incoming_bytes,
+                        self.batch_bytes,
+                    )
+                {
+                    let dispatched = self.dispatch(file, data, reserved);
+                    if dispatched.is_ok() {
+                        self.profile.record(Phase::FactsRefill, Duration::ZERO);
+                    }
+                    // Even a failed speculative send cannot replace the error
+                    // of the earlier document. No later consumer is invoked if
+                    // this one fails; invocation-owned workers are still joined.
+                    self.consume_ready(ready, consume)?;
+                    return dispatched;
+                }
+                self.consume_ready(ready, consume)?;
             }
             if fits(
                 self.retained_bytes,
@@ -380,18 +464,7 @@ impl Pipeline<'_> {
                 self.incoming_bytes,
                 self.batch_bytes,
             ) {
-                let worker = self.free_workers.pop_front().expect("worker slot admitted");
-                self.workers[worker]
-                    .input
-                    .send(LuaInput { data })
-                    .map_err(|_| worker_failed())?;
-                self.pending.push_back(Pending {
-                    file: file.clone(),
-                    preparation: Preparation::LuaWorker(worker),
-                    reservation: reserved,
-                });
-                self.pending_bytes += reserved;
-                return Ok(());
+                return self.dispatch(file, data, reserved);
             }
         }
         // A small non-worker document is only an owned ordered input slot.

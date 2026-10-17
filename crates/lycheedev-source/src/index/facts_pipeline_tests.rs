@@ -185,6 +185,275 @@ fn two_workers_really_overlap_but_results_commit_in_source_order() {
 }
 
 #[test]
+fn admitted_refill_starts_before_the_earlier_consumer_returns() {
+    let (started, entered) = mpsc::sync_channel(1);
+    with_workers(
+        2,
+        |_, input| {
+            if input.data == b"c" {
+                started.send(()).unwrap();
+            }
+            empty(input)
+        },
+        |workers| {
+            let profile = Profile::enabled(true);
+            let mut p = pipeline(workers, &profile);
+            let mut order = Vec::new();
+            let mut consume = |f: &git::TreeFile, _: Vec<u8>, prepared: Option<PreparedFacts>| {
+                assert!(prepared.is_some());
+                if f.path == "0.lua" {
+                    entered.recv_timeout(Duration::from_secs(5)).expect(
+                        "next pure parse must start before synchronous ordered publication returns",
+                    );
+                }
+                order.push(f.path.clone());
+                Ok(())
+            };
+            for (ordinal, byte) in [b'a', b'b', b'c'].into_iter().enumerate() {
+                p.push(
+                    &file(&format!("{ordinal}.lua"), 1),
+                    vec![byte],
+                    &mut consume,
+                )
+                .unwrap();
+            }
+            p.finish(Ok(1), &mut consume).unwrap();
+            assert_eq!(order, ["0.lua", "1.lua", "2.lua"]);
+            assert_eq!(profile.calls(Phase::FactsRefill), 1);
+            assert_eq!(profile.calls(Phase::FactsWorkerWait), 3);
+            assert_eq!(p.pending_bytes, 0);
+            assert_eq!(p.retained_bytes, 3);
+        },
+    );
+}
+
+#[test]
+fn refill_counts_ready_facts_and_incoming_scratch_at_the_exact_byte_boundary() {
+    for (extra_retained, expected_refills) in [(0, 1), (1, 0)] {
+        with_workers(
+            2,
+            |_, input| empty(input),
+            |workers| {
+                let profile = Profile::enabled(true);
+                let mut p = pipeline(workers, &profile);
+                let job = reservation_for_capacity(1).unwrap();
+                let ready = job - PARSER_SCRATCH_BYTES;
+                let fixed = p.batch_bytes + p.incoming_bytes + 2 * WORKER_STACK_BYTES;
+                p.retained_bytes =
+                    SOURCE_RETAINED_LIMIT - fixed - (2 * job + ready) + extra_retained;
+                let mut consume = |_: &git::TreeFile, _: Vec<u8>, _: Option<PreparedFacts>| Ok(());
+                for ordinal in 0..3 {
+                    p.push(
+                        &file(&format!("{ordinal}.lua"), 1),
+                        vec![b'x'],
+                        &mut consume,
+                    )
+                    .unwrap();
+                    assert!(fits(
+                        p.retained_bytes,
+                        p.pending_bytes,
+                        0,
+                        2,
+                        p.incoming_bytes,
+                        p.batch_bytes
+                    ));
+                }
+                assert_eq!(profile.calls(Phase::FactsRefill), expected_refills);
+                p.finish(Ok(1), &mut consume).unwrap();
+                assert_eq!(p.pending_bytes, 0);
+            },
+        );
+    }
+}
+
+#[test]
+fn ready_owner_keeps_its_slot_when_the_mixed_queue_is_full() {
+    with_workers(
+        4,
+        |_, input| empty(input),
+        |workers| {
+            let profile = Profile::enabled(true);
+            let mut p = pipeline(workers, &profile);
+            let mut order = Vec::new();
+            let mut consume = |f: &git::TreeFile, _: Vec<u8>, _: Option<PreparedFacts>| {
+                order.push(f.path.clone());
+                Ok(())
+            };
+            for ordinal in 0..4 {
+                p.push(
+                    &file(&format!("{ordinal}.lua"), 1),
+                    vec![b'x'],
+                    &mut consume,
+                )
+                .unwrap();
+            }
+            for ordinal in 4..8 {
+                p.push(
+                    &file(&format!("{ordinal}.xml"), 1),
+                    vec![b'x'],
+                    &mut consume,
+                )
+                .unwrap();
+            }
+            assert_eq!(p.pending.len(), MAX_PENDING_SLOTS);
+            p.push(&file("8.lua", 1), vec![b'x'], &mut consume).unwrap();
+            assert_eq!(profile.calls(Phase::FactsRefill), 0);
+            assert_eq!(p.pending.len(), MAX_PENDING_SLOTS);
+            p.finish(Ok(1), &mut consume).unwrap();
+            assert_eq!(
+                order,
+                [
+                    "0.lua", "1.lua", "2.lua", "3.lua", "4.xml", "5.xml", "6.xml", "7.xml", "8.lua"
+                ]
+            );
+        },
+    );
+}
+
+#[test]
+fn abandoned_results_keep_the_complete_path_and_do_not_trigger_refill() {
+    with_workers(
+        2,
+        |_, input| LuaOutput {
+            data: input.data,
+            facts: None,
+            parse_elapsed: Duration::ZERO,
+        },
+        |workers| {
+            let profile = Profile::enabled(true);
+            let mut p = pipeline(workers, &profile);
+            let mut consumed = 0;
+            let mut consume = |_: &git::TreeFile, _: Vec<u8>, prepared: Option<PreparedFacts>| {
+                assert!(prepared.is_none());
+                consumed += 1;
+                Ok(())
+            };
+            for ordinal in 0..3 {
+                p.push(
+                    &file(&format!("{ordinal}.lua"), 1),
+                    vec![b'x'],
+                    &mut consume,
+                )
+                .unwrap();
+            }
+            p.finish(Ok(1), &mut consume).unwrap();
+            assert_eq!(consumed, 3);
+            assert_eq!(profile.calls(Phase::FactsWorkerAbandoned), 3);
+            assert_eq!(profile.calls(Phase::FactsRefill), 0);
+            assert_eq!(p.pending_bytes, 0);
+        },
+    );
+}
+
+#[test]
+fn early_refill_never_consumes_after_the_first_error_and_all_jobs_finish() {
+    let completed = AtomicUsize::new(0);
+    with_workers(
+        2,
+        |_, input| {
+            completed.fetch_add(1, Ordering::SeqCst);
+            empty(input)
+        },
+        |workers| {
+            let profile = Profile::enabled(true);
+            let mut p = pipeline(workers, &profile);
+            let mut consumed = Vec::new();
+            let mut consume = |f: &git::TreeFile, _: Vec<u8>, _: Option<PreparedFacts>| {
+                consumed.push(f.path.clone());
+                Err(ToolkitError::new("test.first", "original ordered error", 4))
+            };
+            p.push(&file("0.lua", 1), vec![b'a'], &mut consume).unwrap();
+            p.push(&file("1.lua", 1), vec![b'b'], &mut consume).unwrap();
+            let error = p
+                .push(&file("2.lua", 1), vec![b'c'], &mut consume)
+                .unwrap_err();
+            assert_eq!(error.code, "test.first");
+            assert_eq!(profile.calls(Phase::FactsRefill), 1);
+            assert_eq!(consumed, ["0.lua"]);
+        },
+    );
+    assert_eq!(completed.load(Ordering::SeqCst), 3);
+}
+
+#[test]
+fn early_refill_preserves_the_original_typed_cancellation() {
+    let control = OperationControl::default();
+    let token = control.cancel_handle();
+    let completed = AtomicUsize::new(0);
+    with_workers(
+        2,
+        |_, input| {
+            completed.fetch_add(1, Ordering::SeqCst);
+            empty(input)
+        },
+        |workers| {
+            let profile = Profile::enabled(true);
+            let mut p = pipeline(workers, &profile);
+            let mut calls = 0;
+            let mut consume = |_: &git::TreeFile, _: Vec<u8>, _: Option<PreparedFacts>| {
+                calls += 1;
+                token.store(true, Ordering::Release);
+                control.check()
+            };
+            p.push(&file("0.lua", 1), vec![b'a'], &mut consume).unwrap();
+            p.push(&file("1.lua", 1), vec![b'b'], &mut consume).unwrap();
+            let error = p
+                .push(&file("2.lua", 1), vec![b'c'], &mut consume)
+                .unwrap_err();
+            assert_eq!(error.code, "command.cancelled");
+            assert_eq!(calls, 1);
+            assert_eq!(profile.calls(Phase::FactsRefill), 1);
+        },
+    );
+    assert_eq!(completed.load(Ordering::SeqCst), 3);
+}
+
+#[test]
+fn refill_send_failure_is_deferred_until_the_earlier_consumer_selects_its_result() {
+    for earlier_fails in [false, true] {
+        let mut workers = Vec::new();
+        let mut inputs = Vec::new();
+        let mut outputs = Vec::new();
+        for _ in 0..2 {
+            let (input, receive) = mpsc::sync_channel(1);
+            let (send, output) = mpsc::sync_channel(1);
+            workers.push(Worker { input, output });
+            inputs.push(receive);
+            outputs.push(send);
+        }
+        let profile = Profile::enabled(true);
+        let mut p = pipeline(workers, &profile);
+        let mut calls = 0;
+        let mut consume = |_: &git::TreeFile, _: Vec<u8>, _: Option<PreparedFacts>| {
+            calls += 1;
+            if earlier_fails {
+                Err(ToolkitError::new("test.first", "original ordered error", 4))
+            } else {
+                Ok(())
+            }
+        };
+        p.push(&file("0.lua", 1), vec![b'a'], &mut consume).unwrap();
+        p.push(&file("1.lua", 1), vec![b'b'], &mut consume).unwrap();
+        let first = inputs.remove(0);
+        assert!(outputs[0].send(empty(first.recv().unwrap())).is_ok());
+        drop(first); // Its completed result is valid, but refill cannot send.
+        let error = p
+            .push(&file("2.lua", 1), vec![b'c'], &mut consume)
+            .unwrap_err();
+        assert_eq!(
+            error.code,
+            if earlier_fails {
+                "test.first"
+            } else {
+                "codebase.source_worker_failed"
+            }
+        );
+        assert_eq!(calls, 1);
+        assert_eq!(profile.calls(Phase::FactsRefill), 0);
+    }
+}
+
+#[test]
 fn a_later_ready_result_cannot_commit_ahead_of_the_first() {
     let (released, wait) = mpsc::sync_channel(1);
     let wait = std::sync::Mutex::new(wait);

@@ -11,7 +11,7 @@ use std::{
     path::{Path, PathBuf},
 };
 mod source_facts;
-pub use source_facts::{SourceFactsCache, SourceOriginalCache};
+pub use source_facts::{SourceCachePublicationPhase, SourceFactsCache, SourceOriginalCache};
 mod publication;
 pub use publication::publish_derived_controlled;
 mod verification;

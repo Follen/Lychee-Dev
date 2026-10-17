@@ -166,6 +166,56 @@ fn blob_wait_stop_close_and_late_stop_keep_all_distinct_causes() {
     assert_eq!(error.details["control"]["code"], "fixture.invocation");
 }
 #[test]
+fn prepared_parent_wait_preserves_stop_close_and_late_stop_causes() {
+    let f = Fixture::new();
+    let phase = Cell::new(0);
+    let preparations = Cell::new(0);
+    let closes = Cell::new(0);
+    let attempts = Cell::new(0);
+    let error = failed(ExclusiveLock::acquire_prepared_with(
+        &f.0.join("lock"),
+        || match phase.get() {
+            0 => Ok(()),
+            1 => Err(ToolkitError::new("fixture.budget", "budget stop", 7)),
+            _ => Err(ToolkitError::new(
+                "fixture.invocation",
+                "late invocation",
+                6,
+            )),
+        },
+        || {
+            preparations.set(preparations.get() + 1);
+            Ok(())
+        },
+        |file, check| {
+            ExclusiveLock::wait_on_file(
+                file,
+                check,
+                None,
+                |_| {
+                    attempts.set(attempts.get() + 1);
+                    Err(fs2::lock_contended_error())
+                },
+                |_| phase.set(1),
+            )
+        },
+        |file| {
+            closes.set(closes.get() + 1);
+            lycheedev_windows::filesystem::close_file(file)?;
+            phase.set(2);
+            Err(std::io::Error::other("close failed"))
+        },
+    ));
+    assert_eq!(
+        (preparations.get(), attempts.get(), closes.get()),
+        (1, 1, 1)
+    );
+    assert_eq!(error.code, "fixture.budget");
+    assert_eq!(error.details["primary"]["code"], "fixture.budget");
+    assert_eq!(error.details["cleanup"]["code"], "external.io");
+    assert_eq!(error.details["control"]["code"], "fixture.invocation");
+}
+#[test]
 fn blob_wait_pause_is_capped_by_original_deadline_without_replacing_error() {
     let f = Fixture::new();
     let tries = Cell::new(0);

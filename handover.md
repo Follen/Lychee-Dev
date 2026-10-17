@@ -1,8 +1,10 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 01:45 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`2c2bf6b38a472ff4967cb0e57405bade4fcc09dc`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；最后变更身份场景仍未闭合：project status已修通过，refs仅project被产品入口拒绝；当前先真实持久variant snapshot后显式查询，另修公开project合同偏差。性能与全量验收未完成。
+更新：2026-10-17 01:51 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`2d7ec89765f18c6b2d134085dfa127a0e7aa9b49`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；最后变更身份场景仍未闭合：project status已修通过，refs仅project被产品入口拒绝；当前先真实持久variant snapshot后显式查询，另修公开project合同偏差。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
+
+- 2026-10-17用户明确“更优秀的肯定是要留下来的”：经源码与真实消费者证明更准确/完整的Rust结果保留，单列兼容差异并正式回归；历史raw差异和精确当前合同检查并列。既有两条必要object call_result保留，未核差异不得自动称增强，也不机械删正确结果只求Go逐字一致。
 
 - 唯一验收目标：以固定 **Go 3.2.3** tag 源码为当前行为基线，实现 Rust 宿主并保留 **EmmyLua 直接分析库/native-worker/session** 替代 LuaLS。除此之外，全部业务、同一 addon、CLI、Skill、完整 Mailbox 协议、错误恢复、诊断和输入合同对齐正式版本。
 - 当前 Go tag `v3.2.3`：tag object `7a24532cf0fe294faeb96e8224797b6fe69386d5`，peeled commit **`3766f9cacb52e93a803a626187e2a1d54a445468`**；2026-10-15远端tag/main与本地精确对象已核。322→323为2提交、41文件；业务在该正式提交，另一个提交为322发布文档。新增自适应Data内存/准入容量、紧凑记录、IN选择及Data Skill，详见[323增量矩阵](docs/toolkit/rust-go-3.2.3-increment.md)。新增验收PENDING；未验证发行二进制/资产。
@@ -55,6 +57,10 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 - **正常Facts与有限畸形输入**：[76d完整4036文档v9](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6226409878)逐字段/顺序0差。后继[e8d新增XML32与旧52](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6226448382)全字段/顺序全部等价，Rust15/0/0、Node18/0/0；关闭该明确输入集差异，不称非法Lua/XML已穷尽。Facts v10/index v11及[显式v10读侧](tests/rust-performance-paired/read-fact-delta.README.md)已保存，[e8d独立新home完整4036 v10](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6226520186)逐字段/顺序0差，声明65320/关系227786/loads4169/headers1888/diagnostics0；报告SHA `722f3ea2ca4dfb2b3ba6b2aef4020d0a8bbc39cadd6fc50cf608b3c547d4a202`，匹配优化构建成功，未重跑retained/20对性能。
 - **寿命与性能**：e843真实600047ms正常寿命退出0通过，原失败保留。76d单次等价诊断cold index Go8626ms/Rust9617ms、cold query9199/10107ms、warm query642/130ms；不是20对验收。旧[5bbb完整20对](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6221187576)仅warm query比0.202388达≤0.30，B01约1.13/cold query约5.00失败。新的完整B01–B07配对与内存验收仍未完成，单次改善不能覆盖旧统计失败。
+
+### 冷索引发布与流水线后继（待实测）
+
+固定76d原始profile实核：总9.409秒，facts发布5.060秒/4036次；worker解析累计6.403秒与主线程重叠，不相加。当前实现仅在原资源边界内复用严格持有的locks目录，每次仍验证祖先、按原资源hash取得跨进程kernel锁并checked close；首次并发准备的多余目录owner明确关闭。收到最早已完成纯parse后，仍对Facts/原文字节/Ready槽计费，只释放已经销毁的parser scratch，允许下一份已读取/认证输入先进入空闲worker，再按原顺序提交上一份。原256MiB/槽上限、首错与线程回收保持。增加锁、暂存、写、seal、rename及两类close的分段profile，关闭profile时不读时钟。新增12 Rust回归仍NOT_RUN；未宣称加速或性能达标。下一正式组为 Source index::facts_pipeline::tests::、index::profile::tests::、index::facts_cache_tests::，Core cache::source_facts::tests::、storage::blob_wait::tests::，随后匹配优化产物全4036/单次profile，再决定20对验收。
 
 ## 4. 进入最终五阶段前的有限收口
 

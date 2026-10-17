@@ -12,9 +12,36 @@ use std::{
     fs,
     io::Read,
     path::{Path, PathBuf},
+    sync::OnceLock,
+    time::{Duration, Instant},
 };
 
 const MAXIMUM: usize = 32 << 20;
+/// Optional cumulative wall observations, including failed phase attempts.
+/// These subdivide publish's inclusive wall time; they are not CPU timings.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SourceCachePublicationPhase {
+    Lock,
+    Stage,
+    Write,
+    Seal,
+    Rename,
+    StageClose,
+    LockClose,
+}
+type PublicationObserver<'a> = Option<&'a mut dyn FnMut(SourceCachePublicationPhase, Duration)>;
+fn measured<T>(
+    phase: SourceCachePublicationPhase,
+    observer: &mut PublicationObserver<'_>,
+    run: impl FnOnce() -> T,
+) -> T {
+    let started = observer.is_some().then(Instant::now);
+    let result = run();
+    if let (Some(started), Some(observer)) = (started, observer.as_deref_mut()) {
+        observer(phase, started.elapsed());
+    }
+    result
+}
 struct Controlled<'a>(&'a OperationControl);
 impl FileControl for Controlled<'_> {
     type Error = ToolkitError;
@@ -25,8 +52,15 @@ impl FileControl for Controlled<'_> {
         self.0.check()
     }
 }
-fn finish_directory<T>(mut result: Result<T>, directory: Directory) -> Result<T> {
-    if let Err(errors) = directory.close() {
+fn finish_directory<T>(result: Result<T>, directory: Directory) -> Result<T> {
+    finish_directory_with(result, directory, Directory::close)
+}
+fn finish_directory_with<T>(
+    mut result: Result<T>,
+    directory: Directory,
+    close: impl FnOnce(Directory) -> std::result::Result<(), Vec<std::io::Error>>,
+) -> Result<T> {
+    if let Err(errors) = close(directory) {
         for error in errors {
             result = finish_historical(result, Err(error.into()));
         }
@@ -51,6 +85,9 @@ impl Kind {
 struct SourceCache {
     directory: Directory,
     locks: PathBuf,
+    // Lazy: reads retain their original no-lock-publication path. A successful
+    // first publication holds the real locks ancestry until checked finish.
+    lock_directory: OnceLock<Directory>,
     kind: Kind,
 }
 impl SourceCache {
@@ -81,6 +118,7 @@ impl SourceCache {
         Ok(Self {
             directory: directory.expect("opened cache directory"),
             locks: home.join("locks"),
+            lock_directory: OnceLock::new(),
             kind,
         })
     }
@@ -135,12 +173,39 @@ impl SourceCache {
     pub fn publish(&self, key: &str, bytes: &[u8], control: &OperationControl) -> Result<()> {
         self.publish_observed(key, bytes, control, |_| Ok(()))
     }
+    fn lock_directory(&self, control: &OperationControl) -> Result<&Directory> {
+        if self.lock_directory.get().is_none() {
+            control.check()?;
+            fs::create_dir_all(&self.locks)?;
+            control.check()?;
+            let directory = Directory::open_controlled(&self.locks, &mut Controlled(control))?;
+            // Concurrent callers may both acquire valid owners. Close the
+            // unused owner once, rather than losing a close failure in Drop.
+            if let Err(directory) = self.lock_directory.set(directory) {
+                finish_directory(Ok(()), directory)?;
+            }
+        }
+        Ok(self
+            .lock_directory
+            .get()
+            .expect("held Source locks directory"))
+    }
     fn publish_observed(
         &self,
         key: &str,
         bytes: &[u8],
         control: &OperationControl,
         mut observe: impl FnMut(&'static str) -> Result<()>,
+    ) -> Result<()> {
+        self.publish_profiled(key, bytes, control, &mut observe, None)
+    }
+    fn publish_profiled(
+        &self,
+        key: &str,
+        bytes: &[u8],
+        control: &OperationControl,
+        observe: &mut impl FnMut(&'static str) -> Result<()>,
+        mut timings: PublicationObserver<'_>,
     ) -> Result<()> {
         control.check()?;
         let name = self.name(key)?;
@@ -157,15 +222,20 @@ impl SourceCache {
         // Same-key publishers serialize through the existing bounded,
         // cancellation-aware lock primitive. Different files/directories do
         // not contend; readers keep old complete bytes across replacement.
-        let lock = storage::ExclusiveLock::resource_wait_checked(
-            &self.locks,
-            &format!("source-cache:{}:{key}", self.kind.directory()),
-            Some(control.deadline()),
-            || control.check(),
-        )?;
+        let lock = measured(SourceCachePublicationPhase::Lock, &mut timings, || {
+            storage::ExclusiveLock::resource_wait_in_directory(
+                self.lock_directory(control)?,
+                &format!("source-cache:{}:{key}", self.kind.directory()),
+                control,
+            )
+        })?;
         let mut publication = None;
-        let result = self.publish_locked(key, bytes, control, &mut observe, &mut publication);
-        finish_historical(finish_historical(result, lock.close()), control.check()).map_err(|mut error| {
+        let result =
+            self.publish_locked(key, bytes, control, observe, &mut publication, &mut timings);
+        let closed = measured(SourceCachePublicationPhase::LockClose, &mut timings, || {
+            lock.close()
+        });
+        finish_historical(finish_historical(result, closed), control.check()).map_err(|mut error| {
             if let Some((temporary, state)) = publication {
                 error.details = serde_json::json!({"schema":"lycheedev.source-cache-publication.v1","path":self.directory.path().join(name),"temporary":temporary,"state":format!("{state:?}"),"durable":false,"cause":error.clone()});
             }
@@ -179,9 +249,11 @@ impl SourceCache {
         control: &OperationControl,
         observe: &mut impl FnMut(&'static str) -> Result<()>,
         publication: &mut Option<(String, StagedPublication)>,
+        timings: &mut PublicationObserver<'_>,
     ) -> Result<()> {
         let name = self.name(key)?;
-        let mut stage = StagedFile::create_rebuildable_cache(&self.directory, key, &mut Controlled(control))?
+        let mut stage = measured(SourceCachePublicationPhase::Stage, timings, ||
+            StagedFile::create_rebuildable_cache(&self.directory, key, &mut Controlled(control)))?
             .ok_or_else(|| ToolkitError::new("vault.temporary_collision", "all bounded temporary slots for this target are occupied; preserve and inspect uncertain residues", 6)
                 .with_details(serde_json::json!({"target":self.directory.path().join(&name),"maximumSlots":64,"namespace":format!(".lycheedev-cache-{key}-")})))?;
         let temporary = stage.name().to_owned();
@@ -189,15 +261,20 @@ impl SourceCache {
             control.check()?;
             for chunk in bytes.chunks(65536) {
                 control.check()?;
-                stage.write_all(chunk)?;
+                measured(SourceCachePublicationPhase::Write, timings, || {
+                    stage.write_all(chunk)
+                })?;
                 observe("written")?;
             }
             control.check()?;
-            stage.seal_rebuildable_cache()?;
+            measured(SourceCachePublicationPhase::Seal, timings, || {
+                stage.seal_rebuildable_cache()
+            })?;
             observe("sealed")?;
             control.check()?;
-            if stage.replace_name(OsStr::new(&name), &mut Controlled(control))?
-                == StagedPublication::NotPublished
+            if measured(SourceCachePublicationPhase::Rename, timings, || {
+                stage.replace_name(OsStr::new(&name), &mut Controlled(control))
+            })? == StagedPublication::NotPublished
                 && self.read(key, control)?.as_deref() != Some(bytes)
             {
                 return Err(ToolkitError::invalid(
@@ -209,13 +286,30 @@ impl SourceCache {
         })();
         *publication = Some((temporary, stage.publication()));
         let mut result = result;
-        for error in stage.close() {
+        for error in measured(SourceCachePublicationPhase::StageClose, timings, || {
+            stage.close()
+        }) {
             result = finish_historical(result, Err(error.into()));
         }
         result
     }
     pub fn finish<T>(self, result: Result<T>, control: &OperationControl) -> Result<T> {
-        finish_historical(finish_directory(result, self.directory), control.check())
+        self.finish_with(result, control, Directory::close)
+    }
+    fn finish_with<T>(
+        self,
+        result: Result<T>,
+        control: &OperationControl,
+        mut close: impl FnMut(Directory) -> std::result::Result<(), Vec<std::io::Error>>,
+    ) -> Result<T> {
+        let result = match self.lock_directory.into_inner() {
+            Some(directory) => finish_directory_with(result, directory, &mut close),
+            None => result,
+        };
+        finish_historical(
+            finish_directory_with(result, self.directory, close),
+            control.check(),
+        )
     }
 }
 
@@ -250,6 +344,21 @@ macro_rules! source_cache_owner {
 source_cache_owner!(SourceFactsCache, Facts);
 source_cache_owner!(SourceOriginalCache, Originals);
 
+impl SourceFactsCache {
+    /// The ordinary path never reads a clock. Call only when the caller has
+    /// explicitly enabled diagnostic phase observations.
+    pub fn publish_profiled(
+        &self,
+        key: &str,
+        bytes: &[u8],
+        control: &OperationControl,
+        observer: &mut dyn FnMut(SourceCachePublicationPhase, Duration),
+    ) -> Result<()> {
+        self.0
+            .publish_profiled(key, bytes, control, &mut |_| Ok(()), Some(observer))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,6 +384,129 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+    #[test]
+    fn publication_profile_subdivides_success_and_preserves_failed_attempts() {
+        for fail_after_write in [false, true] {
+            let f = Fixture::new();
+            let control = OperationControl::default();
+            let cache = SourceCache::open(&f.0, Kind::Facts, &control).unwrap();
+            let key = storage::sha256(b"profile key");
+            let mut phases = Vec::new();
+            let result = cache.publish_profiled(
+                &key,
+                b"complete",
+                &control,
+                &mut |at| {
+                    if fail_after_write && at == "written" {
+                        Err(ToolkitError::new("fixture.write", "ordered failure", 5))
+                    } else {
+                        Ok(())
+                    }
+                },
+                Some(&mut |phase, _| phases.push(phase)),
+            );
+            use SourceCachePublicationPhase::*;
+            if fail_after_write {
+                assert_eq!(result.unwrap_err().code, "fixture.write");
+                assert_eq!(phases, [Lock, Stage, Write, StageClose, LockClose]);
+                assert!(cache.read(&key, &control).unwrap().is_none());
+            } else {
+                result.unwrap();
+                assert_eq!(
+                    phases,
+                    [Lock, Stage, Write, Seal, Rename, StageClose, LockClose]
+                );
+                assert_eq!(cache.read(&key, &control).unwrap().unwrap(), b"complete");
+            }
+            cache.finish(Ok(()), &control).unwrap();
+        }
+    }
+    #[test]
+    fn lock_directory_is_lazy_reused_and_pins_replacement_until_checked_finish() {
+        let f = Fixture::new();
+        let control = OperationControl::default();
+        let cache = SourceCache::open(&f.0, Kind::Facts, &control).unwrap();
+        let key = storage::sha256(b"held lock directory");
+        assert!(cache.lock_directory.get().is_none());
+        assert!(cache.read(&key, &control).unwrap().is_none());
+        assert!(cache.lock_directory.get().is_none());
+        cache.publish(&key, b"first", &control).unwrap();
+        let held = cache.lock_directory.get().unwrap() as *const Directory;
+        let moved = f.0.join("moved-locks");
+        assert!(fs::rename(&cache.locks, &moved).is_err());
+        cache.publish(&key, b"second", &control).unwrap();
+        assert_eq!(
+            cache.lock_directory.get().unwrap() as *const Directory,
+            held
+        );
+        assert_eq!(cache.read(&key, &control).unwrap().unwrap(), b"second");
+        cache.finish(Ok(()), &control).unwrap();
+        fs::rename(f.0.join("locks"), &moved).unwrap();
+        fs::rename(&moved, f.0.join("locks")).unwrap();
+    }
+    #[test]
+    fn concurrent_first_publications_share_one_held_lock_directory() {
+        let f = Fixture::new();
+        let control = OperationControl::default();
+        let cache = SourceCache::open(&f.0, Kind::Facts, &control).unwrap();
+        let barrier = Barrier::new(4);
+        std::thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for ordinal in 0..4 {
+                let cache = &cache;
+                let barrier = &barrier;
+                handles.push(scope.spawn(move || {
+                    let control = OperationControl::default();
+                    let key = storage::sha256(format!("concurrent-{ordinal}").as_bytes());
+                    barrier.wait();
+                    cache.publish(&key, b"complete", &control).unwrap();
+                    assert_eq!(cache.read(&key, &control).unwrap().unwrap(), b"complete");
+                }));
+            }
+            for handle in handles {
+                handle.join().unwrap();
+            }
+        });
+        assert!(cache.lock_directory.get().is_some());
+        cache.finish(Ok(()), &control).unwrap();
+        let moved = f.0.join("moved-locks");
+        fs::rename(f.0.join("locks"), &moved).unwrap();
+    }
+    #[test]
+    fn both_held_directory_closes_preserve_primary_and_late_control_causes() {
+        let f = Fixture::new();
+        let control = OperationControl::default();
+        let cache = SourceCache::open(&f.0, Kind::Facts, &control).unwrap();
+        cache
+            .publish(&storage::sha256(b"close"), b"complete", &control)
+            .unwrap();
+        let token = control.cancel_handle();
+        let mut closes = 0;
+        let result: Result<()> = Err(ToolkitError::new("fixture.primary", "first failure", 5));
+        let error = cache
+            .finish_with(result, &control, |directory| {
+                closes += 1;
+                let mut errors = directory.close().err().unwrap_or_default();
+                errors.push(std::io::Error::other(format!(
+                    "injected-directory-close-{closes}"
+                )));
+                token.store(true, std::sync::atomic::Ordering::Release);
+                Err(errors)
+            })
+            .unwrap_err();
+        assert_eq!(closes, 2);
+        assert_eq!(error.code, "fixture.primary");
+        let causes = error.details.to_string();
+        for cause in [
+            "fixture.primary",
+            "injected-directory-close-1",
+            "injected-directory-close-2",
+            "command.cancelled",
+        ] {
+            assert!(causes.contains(cause), "missing original cause: {cause}");
+        }
+        fs::rename(f.0.join("locks"), f.0.join("released-locks")).unwrap();
     }
     #[test]
     fn fixed_domains_reject_paths_and_preserve_distinct_budget_errors() {

@@ -574,14 +574,34 @@ impl ExclusiveLock {
     // callers. The lock operation never owns or reopens this original File.
     fn acquire_checked_with(
         path: &Path,
+        check: impl FnMut() -> Result<()>,
+        lock: impl FnOnce(&File, &mut dyn FnMut() -> Result<()>) -> Result<()>,
+        close: impl FnOnce(File) -> std::io::Result<()>,
+    ) -> Result<Self> {
+        Self::acquire_prepared_with(
+            path,
+            check,
+            || {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                Ok(())
+            },
+            lock,
+            close,
+        )
+    }
+    // The private Source-cache caller supplies a still-held Directory and
+    // re-verifies that owner here. Other lock callers keep create_dir_all.
+    fn acquire_prepared_with(
+        path: &Path,
         mut check: impl FnMut() -> Result<()>,
+        prepare: impl FnOnce() -> Result<()>,
         lock: impl FnOnce(&File, &mut dyn FnMut() -> Result<()>) -> Result<()>,
         close: impl FnOnce(File) -> std::io::Result<()>,
     ) -> Result<Self> {
         check()?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
+        prepare()?;
         check()?;
         let file = OpenOptions::new()
             .create(true)

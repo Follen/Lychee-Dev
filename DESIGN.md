@@ -8,6 +8,10 @@ Go tagged baseline `3766f9cacb52e93a803a626187e2a1d54a445468` (v3.2.3) defines c
 
 The allowed implementation differences are Rust host code and EmmyLua direct-library analysis replacing LuaLS. Preserve equivalent Source business semantics and honest engine/coverage provenance; engine-specific implementation metadata must accurately name EmmyLua, never impersonate LuaLS. No other compatibility exception is silently grandfathered from old plans. Any unavoidable business difference requires a separately approved decision before acceptance.
 
+### Evidence-backed Rust enhancements
+
+The user explicitly confirmed on 2026-10-17 that demonstrably better Rust results should remain. Fixed Go323 remains the compatibility reference, but a source-proven improvement in accuracy or completeness is retained with an explicit compatibility record and focused regression coverage rather than mechanically restoring a reference limitation. Preserve the original raw comparison and separately check the exact enhanced contract, including all unaffected fields, provider order and coverage. The two necessary successful object call-result receipts are the existing example. Unknown differences, speculative extra evaluation, changed error order and incomplete coverage are not improvements merely because Rust emits more output. Classify and establish each difference before acceptance; this does not relax business safety, budgets or the zero-patch Emmy requirement.
+
 ### Independent candidate package identity
 
 The user selected Rust package version **3.5.0** and the **beta** npm distribution configuration, while Go **3.2.3** remains the behavior oracle. The version is not `3.5.0-beta.1`. Version synchronization covers nine owned crates, addon and npm metadata, owned dependency pins and reconstruction custody. Exact full-file release-field overlays permit only the approved Runtime/TOC version literals and restore the original Go bytes for comparison; historical oracle artifacts retain their identities. This configuration does not publish, tag, alter external channels or move `latest` from its retained 2.5.1 value.

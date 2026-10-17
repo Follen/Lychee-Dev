@@ -21,8 +21,19 @@ pub(super) enum Phase {
     IndexPublish,
     Manifest,
     FactsWorker,
+    FactsWorkerWait,
+    FactsRefill,
+    FactsPublishLock,
+    FactsPublishStage,
+    FactsPublishWrite,
+    FactsPublishSeal,
+    FactsPublishRename,
+    FactsPublishStageClose,
+    FactsPublishLockClose,
+    FactsParseSequential,
+    FactsWorkerAbandoned,
 }
-const NAMES: [&str; 15] = [
+const NAMES: [&str; 26] = [
     "metadata",
     "cached_index",
     "index_lock",
@@ -38,18 +49,29 @@ const NAMES: [&str; 15] = [
     "index_publish",
     "manifest",
     "facts_worker_consumed",
+    "facts_worker_wait",
+    "facts_refill_dispatched",
+    "facts_publish_lock",
+    "facts_publish_stage",
+    "facts_publish_write",
+    "facts_publish_seal",
+    "facts_publish_rename",
+    "facts_publish_stage_close",
+    "facts_publish_lock_close",
+    "facts_parse_sequential",
+    "facts_worker_abandoned",
 ];
 
 pub(super) struct Profile {
     started: Option<Instant>,
-    elapsed: [Cell<Duration>; 15],
-    calls: [Cell<u64>; 15],
+    elapsed: [Cell<Duration>; NAMES.len()],
+    calls: [Cell<u64>; NAMES.len()],
 }
 impl Profile {
     pub(super) fn new() -> Self {
         Self::enabled(std::env::var_os("LYCHEEDEV_SOURCE_PHASE_PROFILE").is_some_and(|v| v == "1"))
     }
-    fn enabled(enabled: bool) -> Self {
+    pub(super) fn enabled(enabled: bool) -> Self {
         Self {
             started: enabled.then(Instant::now),
             elapsed: std::array::from_fn(|_| Cell::new(Duration::ZERO)),
@@ -58,6 +80,10 @@ impl Profile {
     }
     pub(super) fn is_enabled(&self) -> bool {
         self.started.is_some()
+    }
+    #[cfg(test)]
+    pub(super) fn calls(&self, phase: Phase) -> u64 {
+        self.calls[phase as usize].get()
     }
     pub(super) fn record(&self, phase: Phase, elapsed: Duration) {
         if self.is_enabled() {
@@ -132,7 +158,7 @@ mod tests {
         assert_eq!(result, Err("original"));
         assert_eq!(p.calls[Phase::FactsParse as usize].get(), 2);
         let value = p.value();
-        assert_eq!(value["phases"].as_array().unwrap().len(), 15);
+        assert_eq!(value["phases"].as_array().unwrap().len(), NAMES.len());
         assert_eq!(
             value["timing"],
             "wall-clock; worker phase sums consumed job durations; phases overlap; not additive"
