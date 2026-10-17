@@ -15,9 +15,16 @@ export const DATA_DETAIL_NAMES = Object.freeze([
   'encoded_chunk_read', 'encoded_chunk_md5', 'zlib_inflate',
   'whole_content_key_hash', 'decoded_cache_commit',
 ]);
-export const DATA_PUBLISHER_NAMES = Object.freeze([
+// Historical v3 combines private and final stage sealing. Keep its exact
+// vector separate; neither historical records nor their bytes are upgraded.
+export const DATA_PUBLISHER_NAMES_V3 = Object.freeze([
   'source_to_spool_inclusive', 'spool_to_shard_inclusive', 'final_verify_inclusive',
   'stage_create', 'stage_seal', 'digest_lock', 'shard_open', 'rename', 'winner_open', 'checked_close',
+]);
+export const DATA_PUBLISHER_NAMES = Object.freeze([
+  'source_to_spool_inclusive', 'spool_to_shard_inclusive', 'final_verify_inclusive',
+  'stage_create', 'private_spool_read_ready', 'final_stage_seal', 'digest_lock',
+  'shard_open', 'rename', 'winner_open', 'checked_close',
 ]);
 export const DATA_PHASE_TIMING = 'wall-clock; phases may nest or overlap across workers; not additive; budget lifetime and phases are diagnostics, not accepted command total or CPU time';
 export const DATA_CAPTURE_TIMING = 'capture_metadata_inclusive includes capture and metadata work; metadata open/write/close are not separately observed';
@@ -41,7 +48,9 @@ export function dataPhaseProfile(stderr, {entry = null, successful = false} = {}
   // The recorder emits compact JSON. Round-trip identity also rejects duplicate
   // keys, lossy numbers, BOMs, and additional non-profile stderr bytes.
   assert.equal(JSON.stringify(value), line, 'Data phase record must be compact, exact JSON without duplicate keys');
-  const publisher = value.schema === 'lycheedev.data-query-phases.v3';
+  const publisherNames = value.schema === 'lycheedev.data-query-phases.v4' ? DATA_PUBLISHER_NAMES
+    : value.schema === 'lycheedev.data-query-phases.v3' ? DATA_PUBLISHER_NAMES_V3 : null;
+  const publisher = publisherNames !== null;
   const detailed = publisher || value.schema === 'lycheedev.data-query-phases.v2';
   assert(detailed || value.schema === 'lycheedev.data-query-phases.v1', 'known Data profile schema required');
   assert.deepEqual(Object.keys(value).sort(), publisher
@@ -63,7 +72,7 @@ export function dataPhaseProfile(stderr, {entry = null, successful = false} = {}
   }
   counters(value.phases, DATA_PHASE_NAMES);
   if (detailed) counters(value.details, DATA_DETAIL_NAMES);
-  if (publisher) counters(value.publisher, DATA_PUBLISHER_NAMES);
+  if (publisher) counters(value.publisher, publisherNames);
   // Only these authenticated twelve fixture paths require these known scopes
   // on success. Early product failures legitimately finish before any phase.
   const image = entry?.kind === 'image' && /^B04-(palette|bgra8|bc1|bc2|bc3)-(png|webp)$/.test(entry.id);

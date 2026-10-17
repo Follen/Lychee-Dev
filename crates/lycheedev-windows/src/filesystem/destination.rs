@@ -1294,7 +1294,7 @@ mod tests {
 mod admission_tests;
 
 mod staged;
-pub use staged::{CacheReplaceAttempt, StagedFile, StagedPublication};
+pub use staged::{CacheReplaceAttempt, PrivateSpool, StagedFile, StagedPublication};
 
 #[cfg(test)]
 #[path = "destination/asset_publication_tests.rs"]

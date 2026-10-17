@@ -33,7 +33,8 @@ pub(crate) enum Phase {
     PublisherShardCopy,
     PublisherFinalVerify,
     PublisherStageCreate,
-    PublisherStageSeal,
+    PublisherPrivateSpoolReadReady,
+    PublisherFinalStageSeal,
     PublisherDigestLock,
     PublisherShardOpen,
     PublisherRename,
@@ -71,13 +72,15 @@ const DETAIL_NAMES: [&str; 10] = [
 ];
 // Exact Core publisher operations, nested inside stream publish. SourceSpool
 // contains the existing decoder details; failures can include nested cleanup.
-// These are a separate diagnostic level, never extra command time.
-const PUBLISHER_NAMES: [&str; 10] = [
+// Private-spool read readiness and final-stage durable sealing have distinct
+// counters. These are a separate diagnostic level, never extra command time.
+const PUBLISHER_NAMES: [&str; 11] = [
     "source_to_spool_inclusive",
     "spool_to_shard_inclusive",
     "final_verify_inclusive",
     "stage_create",
-    "stage_seal",
+    "private_spool_read_ready",
+    "final_stage_seal",
     "digest_lock",
     "shard_open",
     "rename",
@@ -165,7 +168,7 @@ impl Profile {
             })
             .collect();
         serde_json::json!({
-            "schema":"lycheedev.data-query-phases.v3",
+            "schema":"lycheedev.data-query-phases.v4",
             "elapsedMicros":self.started.elapsed().as_micros(),
             "timing":TIMING,
             "captureTiming":"capture_metadata_inclusive includes capture and metadata work; metadata open/write/close are not separately observed",
@@ -301,7 +304,7 @@ mod tests {
         let mut span = Span::new(Some(&profile), Phase::ZlibInflate);
         span.finish(|_| Duration::from_micros(23));
         let value = profile.value();
-        assert_eq!(value["schema"], "lycheedev.data-query-phases.v3");
+        assert_eq!(value["schema"], "lycheedev.data-query-phases.v4");
         assert_eq!(value["phases"].as_array().unwrap().len(), 11);
         assert!(
             value["phases"]
@@ -332,7 +335,7 @@ mod tests {
         let value = profile.value();
         assert_eq!(value["phases"].as_array().unwrap().len(), 11);
         assert_eq!(value["details"].as_array().unwrap().len(), 10);
-        assert_eq!(value["publisher"].as_array().unwrap().len(), 10);
+        assert_eq!(value["publisher"].as_array().unwrap().len(), 11);
         assert_eq!(value["details"][7]["elapsedMicros"], 7);
         assert_eq!(value["publisher"][0]["phase"], "source_to_spool_inclusive");
         assert_eq!(value["publisher"][0]["calls"], 1);
@@ -342,6 +345,61 @@ mod tests {
         drop(publisher);
         drop(profile);
         assert_eq!(output.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn private_read_ready_and_final_seal_are_disabled_without_clocks() {
+        let profile = Profile::enabled(false, || panic!("disabled creation read a clock"));
+        for phase in [
+            Phase::PublisherPrivateSpoolReadReady,
+            Phase::PublisherFinalStageSeal,
+        ] {
+            let mut span = Span::with_clock(profile.as_deref(), phase, || {
+                panic!("disabled seal span read a clock")
+            });
+            assert!(span.active.is_none());
+            span.finish(|_| panic!("disabled seal span read elapsed time"));
+            drop(span);
+        }
+        assert!(profile.is_none());
+    }
+
+    #[test]
+    fn private_read_ready_and_final_seal_keep_separate_durations_and_counts() {
+        let (profile, output) = Profile::observed();
+        for (phase, elapsed) in [
+            (Phase::PublisherPrivateSpoolReadReady, 3),
+            (Phase::PublisherFinalStageSeal, 29),
+            (Phase::PublisherPrivateSpoolReadReady, 5),
+        ] {
+            let mut span = Span::new(Some(&profile), phase);
+            span.finish(|_| Duration::from_micros(elapsed));
+            span.finish(|_| panic!("finished seal span read another clock"));
+        }
+        let value = profile.value();
+        assert_eq!(value["schema"], "lycheedev.data-query-phases.v4");
+        assert_eq!(value["timing"], TIMING);
+        assert_eq!(value["phases"].as_array().unwrap().len(), 11);
+        assert_eq!(value["details"].as_array().unwrap().len(), 10);
+        assert_eq!(value["publisher"].as_array().unwrap().len(), 11);
+        assert_eq!(value["publisher"][4]["phase"], "private_spool_read_ready");
+        assert_eq!(value["publisher"][4]["calls"], 2);
+        assert_eq!(value["publisher"][4]["elapsedMicros"], 8);
+        assert_eq!(value["publisher"][5]["phase"], "final_stage_seal");
+        assert_eq!(value["publisher"][5]["calls"], 1);
+        assert_eq!(value["publisher"][5]["elapsedMicros"], 29);
+        for key in ["phases", "details"] {
+            assert!(value[key].as_array().unwrap().iter().all(|p| {
+                p["calls"] == 0 && p["elapsedMicros"] == 0
+            }));
+        }
+        assert!(value["publisher"].as_array().unwrap().iter().enumerate().all(
+            |(index, p)| matches!(index, 4 | 5) || (p["calls"] == 0 && p["elapsedMicros"] == 0)
+        ));
+        drop(profile);
+        let output = output.lock().unwrap();
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0]["publisher"], value["publisher"]);
     }
 
     #[test]

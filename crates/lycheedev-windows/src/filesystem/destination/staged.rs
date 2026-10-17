@@ -140,11 +140,14 @@ impl<'a> StagedFile<'a> {
     }
     /// Sync and rewind the original held handle, not a temporary pathname.
     pub fn seal(&mut self) -> io::Result<()> {
+        self.seal_with(File::sync_all)
+    }
+    fn seal_with(&mut self, sync: impl FnOnce(&File) -> io::Result<()>) -> io::Result<()> {
         self.require_private()?;
         if self.sealed {
             return Err(invalid("spool is already sealed"));
         }
-        self.stage.file_mut().sync_all()?;
+        sync(self.stage.file_mut())?;
         self.stage.file_mut().seek(SeekFrom::Start(0))?;
         self.sealed = true;
         Ok(())
@@ -288,6 +291,8 @@ impl Read for StagedFile<'_> {
         self.stage.file_mut().read(&mut bytes[..admitted])
     }
 }
+mod private_spool;
+pub use private_spool::PrivateSpool;
 #[cfg(test)]
 mod tests;
 

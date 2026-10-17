@@ -656,3 +656,49 @@ The reader strictly accepts v1, v2 and v3, preserving absent historical vectors
 rather than inventing observations. The new reader has actually accepted all
 24 original ab4 v1 stderr records and all 24 original 8cab v2 records unchanged;
 that compatibility check is not a v3 Windows measurement. The new Core/Data Rust regressions passed on the fixed 5d4 tree (PR14 comment 6233193157). Matching b3d v3 diagnostic measurements completed: 12 paths, 24 cold/warm rows and 48 CLI calls were equivalent with valid timing and complete process cleanup (PR14 comments 6233589545 and 6233633639). This is one pair per path, not 20-pair performance acceptance; 46 memory observations succeeded and two have sampling gaps.
+
+### Private spool and final seal diagnostic scopes (v4)
+
+A matching v4 product uses a dedicated, nonpublishable `PrivateSpool` for the
+same-command intermediate. Finishing its writes rewinds the original handle
+without requesting crash durability. It cannot publish or expose its inner
+File; later writes fail, and checked close discards it. Source EOF and the
+bounded copy/hash passes remain. The different final stage still uses its
+original `sync_all`, publication and winner verification, and captures retain
+their durable transactions. Errors observable only at the omitted private sync
+are no longer requested; actual writes, reads, rewind, final sync and cleanup
+errors remain checked. This internal difference is deliberate, not a claim of
+identical double-fault ordering or private-file crash recovery.
+
+The v4 publisher vector replaces `stage_seal` with
+`private_spool_read_ready` and `final_stage_seal` (eleven publisher spans).
+It preserves the eleven business phases and ten decoder/cache details.
+The strict reader retains the exact historical v1, v2 and v3 schemas without
+inventing new values for old samples. Default-disabled recording adds no clocks.
+Use the existing `--data-phase-profile` command with a newly matched v4 product;
+old b3d v3 measurements cannot be relabeled as v4. Compare the two new seal
+spans and unchanged full native time only within their real run. The original
+four-call v3 `stage_seal=30.570ms` does not reveal the private/final split and is
+not a predicted saving. Matching Windows regression and product measurements
+are pending for this candidate.
+
+Focused verification uses the existing controlled Cargo entry, after the normal
+workspace all-target check:
+
+```powershell
+node tools/rust-cargo.mjs --owner private-spool-windows -- test -p lycheedev-windows --lib --locked --offline filesystem::destination::staged -- --nocapture
+node tools/rust-cargo.mjs --owner private-spool-core -- test -p lycheedev-core --lib --locked --offline evidence::bounded::staged -- --nocapture
+node tools/rust-cargo.mjs --owner private-spool-profile -- test -p lycheedev-data --lib --locked --offline phase_profile:: -- --nocapture
+node tools/rust-cargo.mjs --owner private-spool-resource -- test -p lycheedev-data --lib --locked --offline resource:: -- --nocapture
+node tools/rust-cargo.mjs --owner private-spool-type-contract -- test -p lycheedev-windows --doc --locked --offline PrivateSpool
+node --test tests/rust-performance-paired/data-runner.test.mjs
+```
+
+There are twelve added Rust unit tests: five Windows private-spool/durable-stage
+cases, five Core failure/stop/cleanup cases and two Data profile cases. The
+compile-fail publication example is separate from those twelve. Historical
+collision, corruption, fresh/reused publication and budget tests remain in the
+selected full groups. The resource selector includes overlap with profile
+consumers, so do not add all group counts as independent coverage. Cloud Node
+31/31 and source parsing passed; Rust and the doc example remain not_run until
+the fixed candidate is actually tested.

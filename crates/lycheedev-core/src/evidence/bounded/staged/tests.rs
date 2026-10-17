@@ -37,7 +37,7 @@ impl Drop for Fixture {
         }
     }
 }
-fn temporary_count(home: &Path) -> usize {
+pub(super) fn temporary_count(home: &Path) -> usize {
     fn walk(path: &Path) -> usize {
         fs::read_dir(path)
             .unwrap()
@@ -240,13 +240,13 @@ fn staged_publisher_observer_preserves_bytes_work_and_real_passes_on_new_and_reu
         blob.read_to_end(&mut readback).unwrap();
         assert_eq!(readback, body);
         blob.close().unwrap();
-        for phase in [SourceSpool, FinalVerify, DigestLock, ShardOpen] {
+        for phase in [SourceSpool, PrivateSpoolReadReady, FinalVerify, DigestLock, ShardOpen] {
             assert_eq!(meter.count(phase), 1);
         }
-        for phase in [ShardCopy, Rename] {
+        for phase in [ShardCopy, FinalStageSeal, Rename] {
             assert_eq!(meter.count(phase), usize::from(!reused));
         }
-        for phase in [StageCreate, StageSeal, WinnerOpen] {
+        for phase in [StageCreate, WinnerOpen] {
             assert_eq!(meter.count(phase), if reused { 1 } else { 2 });
         }
         assert_eq!(meter.count(CheckedClose), if reused { 3 } else { 4 });
@@ -269,7 +269,7 @@ fn staged_publisher_observer_keeps_source_error_and_only_observes_acquired_clean
     assert_eq!(meter.count(SourceSpool), 1);
     assert_eq!(meter.count(StageCreate), 1);
     assert_eq!(meter.count(CheckedClose), 2);
-    for phase in [ShardCopy, FinalVerify, StageSeal, DigestLock, ShardOpen, Rename, WinnerOpen] {
+    for phase in [ShardCopy, FinalVerify, PrivateSpoolReadReady, FinalStageSeal, DigestLock, ShardOpen, Rename, WinnerOpen] {
         assert_eq!(meter.count(phase), 0);
     }
     meter.assert_not_nested();

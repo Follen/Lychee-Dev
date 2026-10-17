@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 12:06 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`b3d24460c6586926314a0ed9e76e7e624ec6c014`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 12:18 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`b3d24460c6586926314a0ed9e76e7e624ec6c014`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -86,6 +86,12 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 ### Data publisher v3观测后继
 
 已完成原publisher十个固定子段观测，保原11业务段与v2十detail，默认关闭不增加clock。没有删除读/哈希/事务/校验/收尾；source→spool、spool→shard、finalverify各自为inclusive；成功路径winner-open在返回File时结束，随后才进入finalverify，两者互斥（先前文档误写嵌套，现按固定b3d源码及assert_not_nested测试更正）。业务11段与publisher子段仍不能跨层相加，错误分支close保各自inclusive边界。原48份v1/v2 stderr已由新reader实际读取且不改对象；Node30/30、七Rust文件rustfmt解析及独立静态核通过，新3项Rust已在5d4真实前置逐名通过，Corestaged19、Data phase10/resource37均通过（覆盖重叠不重复累计），[b3d v3真实主报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6233589545)和[终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6233633639)：12路径24冷暖行全部等价，48CLI exit0/计时有效/回收，12pair及全部14owner回收；24份profile含264业务段、240 detail、240 publisher，原0保留。内存46成功2gap（Go palette PNG warm、Rust BGRA8 WebP warm），不补样；单pair不是20对验收。24证据段692文件/545唯一blob共17,153,184B逐SHA核，48native原时间、441日志引用和48内存块认证，24行互斥账加回各自原T。cold BLTE原T228.0321ms；同row publisher103.289ms=source→spool35.585（CKey20.956、inflate1.050、read0.067、块MD5 0.206、其余13.306）+spool→shard16.959+finalverify10.709+seal30.570+其它9.466。warm原T125.5419ms、两次cacheverify合34.888ms，无decoder/publisher。seal四次合并值只是待核上界，不代表全部可删；不把嵌套子项与父项重复相加，也不由跨版差值宣称流式收益。完整字段和计时限制见[Data正式入口](tests/rust-performance-paired/data.README.md#publisher-diagnostic-scopes-v3)。未引入OpenSSL/CNG或更换MD5依赖，现阶段不凭21ms哈希子段贸然增加原生依赖面。
+
+### Data 私有spool typed read-ready后继
+
+已实现独立PrivateSpool，限制为同命令临时原handle，不能publish/replace/Deref/取inner；完成写入后只读与checked discard，不请求私有sync。最终shard stage原sync_all、三次内容读/哈希/EOF检查、业务capture独立durable事务与原控制/预算保持。显式内部差异：仅原私有sync会观察到的错误不再请求，实际write/read/seek/finalsync/close错误保全，不能宣称所有错误时序完全相同。无新FFI/unsafe/全body分配，无跨命令恢复/后台推迟成本。
+
+v4把原stage_seal拆为private_spool_read_ready/final_stage_seal，保11业务段/10detail及v1–v3严格reader；已逐字复读历史96份profile（48v1、24v2、24v3）。12新Rust与compile-fail示例已写并独立静态复核无确认缺陷，尚NOT_RUN。11Rust文件rustfmt解析过，Node31/31由作者及协调者实际各通过。后继按[正式Data说明](tests/rust-performance-paired/data.README.md#private-spool-and-final-seal-diagnostic-scopes-v4)全相关组验证，通过后只构建一次匹配优化产物再作同run实际诊断；原30.570ms四次seal总数不能预报可省一半或全部，完整elapsed/内存目标仍未验收。
 
 ### 8cab 同run性能诊断终态
 

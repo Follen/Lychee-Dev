@@ -3,7 +3,7 @@
 use super::super::{BlobStreamPhase, CaptureAccounting};
 use super::*;
 use lycheedev_windows::filesystem::destination::{
-    FileControl, FileCost, StagedFile, StagedPublication,
+    FileControl, FileCost, PrivateSpool, StagedFile, StagedPublication,
 };
 
 struct Checks<'a> {
@@ -82,8 +82,13 @@ impl Publication {
 /// Core always probes one extra byte after the exact length, even when another
 /// publisher has already stored the final digest. The source is never replayed.
 ///
-/// After source EOF, a sealed original-handle spool is copied into a second
-/// private stage within the final shard; only same-directory rename is used.
+/// After source EOF, a nonpublishable original-handle spool becomes read-ready
+/// without requesting crash durability. It has no recovery consumer. Its bytes
+/// are copied and rehashed into a different, durably sealed final-shard stage;
+/// only same-directory rename is used. Private-spool-only sync errors are no
+/// longer requested; real read/write/seek/final-sync and checked-close failures
+/// still terminate this call. Final sync guarantees the final object, not the
+/// crash survival of the disposable spool.
 /// The three binary passes run sequentially with one 64 KiB Core body buffer
 /// live at a time. The caller admits that buffer with its retained reservation;
 /// this borrowed meter admits per-read work only and never escapes into the blob.
@@ -154,7 +159,7 @@ fn publish_stream(
     let result = (|| {
         staged = Some({
             let _phase = accounting.blob_stream_phase(BlobStreamPhase::StageCreate);
-            StagedFile::create(&parent, &mut Checks { control, supplemental })?
+            PrivateSpool::create(&parent, &mut Checks { control, supplemental })?
         });
         publication.stage_name = Some(staged.as_ref().expect("owned stage").name().to_owned());
         publication.source_stage_name = publication.stage_name.clone();
@@ -164,7 +169,7 @@ fn publish_stream(
         let source_phase = accounting.blob_stream_phase(BlobStreamPhase::SourceSpool);
         let reference = copy_stream(
             reader,
-            staged.as_mut().expect("owned stage"),
+            &mut |bytes| staged.as_mut().expect("owned stage").write_all(bytes),
             expected_bytes,
             control,
             supplemental,
@@ -173,11 +178,14 @@ fn publish_stream(
         drop(source_phase);
         publication.reference = Some(reference.clone());
         stream_check(control, supplemental)?;
-        let synced = {
-            let _phase = accounting.blob_stream_phase(BlobStreamPhase::StageSeal);
-            staged.as_mut().expect("owned stage").seal().map_err(ToolkitError::from)
+        let readable = {
+            let _phase = accounting.blob_stream_phase(BlobStreamPhase::PrivateSpoolReadReady);
+            let result = staged.as_mut().expect("owned stage").finish_writes().map_err(ToolkitError::from);
+            #[cfg(test)]
+            let result = result.and_then(|()| test_hooks::after_private_read_ready());
+            result
         };
-        finish_checks(synced, control, supplemental)?;
+        finish_checks(readable, control, supplemental)?;
         guard = Some({
             let _phase = accounting.blob_stream_phase(BlobStreamPhase::DigestLock);
             ExclusiveLock::resource_wait_checked(
@@ -198,7 +206,7 @@ fn publish_stream(
             accounting,
         )
     })();
-    let result = finish_opened(result, close_stage(&mut staged, accounting), control, supplemental);
+    let result = finish_opened(result, close_spool(&mut staged, accounting), control, supplemental);
     let result = if let Some(guard) = guard {
         let cleanup = {
             let _phase = accounting.blob_stream_phase(BlobStreamPhase::CheckedClose);
@@ -230,7 +238,16 @@ fn close_stage(stage: &mut Option<StagedFile<'_>>, accounting: &impl CaptureAcco
         return Ok(());
     };
     let _phase = accounting.blob_stream_phase(BlobStreamPhase::CheckedClose);
-    let errors = stage.close();
+    close_errors(stage.close())
+}
+fn close_spool(stage: &mut Option<PrivateSpool<'_>>, accounting: &impl CaptureAccounting) -> Result<()> {
+    let Some(stage) = stage.take() else {
+        return Ok(());
+    };
+    let _phase = accounting.blob_stream_phase(BlobStreamPhase::CheckedClose);
+    close_errors(stage.close())
+}
+fn close_errors(errors: Vec<io::Error>) -> Result<()> {
     let mut result = Ok(());
     for error in errors {
         result = crate::metadata::historical_write::finish_historical(
@@ -263,7 +280,7 @@ pub(super) fn finish_opened(
 }
 fn copy_stream(
     reader: &mut impl Read,
-    stage: &mut StagedFile<'_>,
+    write: &mut impl FnMut(&[u8]) -> io::Result<()>,
     expected_bytes: u64,
     control: &OperationControl,
     supplemental: &mut Option<BlobCheck>,
@@ -276,10 +293,12 @@ fn copy_stream(
         stream_check(control, supplemental)?;
         let admitted = remaining.min(BLOCK as u64) as usize;
         accounting.admit_work(1)?;
-        let read = reader
-            .read(&mut buffer[..admitted])
-            .map_err(io_error)
-            .and_then(|n| {
+        #[cfg(test)]
+        let read = test_hooks::before_stream_read()
+            .and_then(|()| reader.read(&mut buffer[..admitted]).map_err(io_error));
+        #[cfg(not(test))]
+        let read = reader.read(&mut buffer[..admitted]).map_err(io_error);
+        let read = read.and_then(|n| {
                 if n == 0 {
                     Err(integrity("stream ended before its declared length"))
                 } else {
@@ -290,9 +309,9 @@ fn copy_stream(
         digest.update(&buffer[..n]);
         #[cfg(test)]
         let written = test_hooks::before_stage_write()
-            .unwrap_or_else(|| stage.write_all(&buffer[..n]).map_err(ToolkitError::from));
+            .unwrap_or_else(|| write(&buffer[..n]).map_err(ToolkitError::from));
         #[cfg(not(test))]
-        let written = stage.write_all(&buffer[..n]).map_err(ToolkitError::from);
+        let written = write(&buffer[..n]).map_err(ToolkitError::from);
         finish_checks(written, control, supplemental)?;
         remaining -= n as u64;
     }
@@ -320,7 +339,7 @@ fn copy_stream(
 fn publish_in_shard(
     home: &Path,
     parent: &Directory,
-    spool: &mut Option<StagedFile<'_>>,
+    spool: &mut Option<PrivateSpool<'_>>,
     reference: BlobRef,
     control: &OperationControl,
     supplemental: &mut Option<BlobCheck>,
@@ -371,7 +390,7 @@ fn publish_in_shard(
         let copy_phase = accounting.blob_stream_phase(BlobStreamPhase::ShardCopy);
         let copied = copy_stream(
             spool.as_mut().expect("owned sealed spool"),
-            stage,
+            &mut |bytes| stage.write_all(bytes),
             reference.bytes,
             control,
             supplemental,
@@ -383,8 +402,11 @@ fn publish_in_shard(
         drop(copy_phase);
         stream_check(control, supplemental)?;
         let sealed = {
-            let _phase = accounting.blob_stream_phase(BlobStreamPhase::StageSeal);
-            stage.seal().map_err(ToolkitError::from)
+            let _phase = accounting.blob_stream_phase(BlobStreamPhase::FinalStageSeal);
+            let result = stage.seal().map_err(ToolkitError::from);
+            #[cfg(test)]
+            let result = result.and_then(|()| test_hooks::after_final_stage_seal());
+            result
         };
         finish_checks(sealed, control, supplemental)?;
         #[cfg(test)]
@@ -517,6 +539,9 @@ mod test_hooks {
         static BEFORE_RENAME: RefCell<Option<Box<dyn FnOnce()>>> = RefCell::new(None);
         static AFTER_STAGE_CLOSE: RefCell<Option<Box<dyn FnOnce() -> Result<()>>>> = RefCell::new(None);
         static BEFORE_STAGE_WRITE: RefCell<Option<Box<dyn FnOnce() -> Result<()>>>> = RefCell::new(None);
+        static AFTER_PRIVATE_READ_READY: RefCell<Option<Box<dyn FnOnce() -> Result<()>>>> = RefCell::new(None);
+        static AFTER_FINAL_STAGE_SEAL: RefCell<Option<Box<dyn FnOnce() -> Result<()>>>> = RefCell::new(None);
+        static BEFORE_STREAM_READ: RefCell<Option<Box<dyn FnOnce() -> Result<()>>>> = RefCell::new(None);
     }
     pub(super) fn set_before_rename(run: impl FnOnce() + 'static) {
         BEFORE_RENAME.with(|s| {
@@ -550,5 +575,32 @@ mod test_hooks {
         BEFORE_STAGE_WRITE
             .with(|s| s.borrow_mut().take())
             .map(|run| run())
+    }
+    pub(super) fn set_after_private_read_ready(run: impl FnOnce() -> Result<()> + 'static) {
+        AFTER_PRIVATE_READ_READY.with(|s| {
+            assert!(s.borrow().is_none());
+            *s.borrow_mut() = Some(Box::new(run));
+        });
+    }
+    pub(super) fn after_private_read_ready() -> Result<()> {
+        AFTER_PRIVATE_READ_READY.with(|s| s.borrow_mut().take()).map_or(Ok(()), |run| run())
+    }
+    pub(super) fn set_after_final_stage_seal(run: impl FnOnce() -> Result<()> + 'static) {
+        AFTER_FINAL_STAGE_SEAL.with(|s| {
+            assert!(s.borrow().is_none());
+            *s.borrow_mut() = Some(Box::new(run));
+        });
+    }
+    pub(super) fn after_final_stage_seal() -> Result<()> {
+        AFTER_FINAL_STAGE_SEAL.with(|s| s.borrow_mut().take()).map_or(Ok(()), |run| run())
+    }
+    pub(super) fn set_before_stream_read(run: impl FnOnce() -> Result<()> + 'static) {
+        BEFORE_STREAM_READ.with(|s| {
+            assert!(s.borrow().is_none());
+            *s.borrow_mut() = Some(Box::new(run));
+        });
+    }
+    pub(super) fn before_stream_read() -> Result<()> {
+        BEFORE_STREAM_READ.with(|s| s.borrow_mut().take()).map_or(Ok(()), |run| run())
     }
 }
