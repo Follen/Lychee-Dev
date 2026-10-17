@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 01:51 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`2d7ec89765f18c6b2d134085dfa127a0e7aa9b49`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；最后变更身份场景仍未闭合：project status已修通过，refs仅project被产品入口拒绝；当前先真实持久variant snapshot后显式查询，另修公开project合同偏差。性能与全量验收未完成。
+更新：2026-10-17 01:55 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`1584974fa04e027cb107602871fed6c8528802f3`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；最后变更身份场景仍未闭合：project status已修通过，refs仅project被产品入口拒绝；当前先真实持久variant snapshot后显式查询，另修公开project合同偏差。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -61,6 +61,10 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 ### 冷索引发布与流水线后继（待实测）
 
 固定76d原始profile实核：总9.409秒，facts发布5.060秒/4036次；worker解析累计6.403秒与主线程重叠，不相加。当前实现仅在原资源边界内复用严格持有的locks目录，每次仍验证祖先、按原资源hash取得跨进程kernel锁并checked close；首次并发准备的多余目录owner明确关闭。收到最早已完成纯parse后，仍对Facts/原文字节/Ready槽计费，只释放已经销毁的parser scratch，允许下一份已读取/认证输入先进入空闲worker，再按原顺序提交上一份。原256MiB/槽上限、首错与线程回收保持。增加锁、暂存、写、seal、rename及两类close的分段profile，关闭profile时不读时钟。新增12 Rust回归仍NOT_RUN；未宣称加速或性能达标。下一正式组为 Source index::facts_pipeline::tests::、index::profile::tests::、index::facts_cache_tests::，Core cache::source_facts::tests::、storage::blob_wait::tests::，随后匹配优化产物全4036/单次profile，再决定20对验收。
+
+### Data 专用配对入口（产品实测未运行）
+
+沿现有paired身份/owner/Windows原计时新增[Data入口与完整命令](tests/rust-performance-paired/data.README.md)，固定Go323完整优化包与匹配Rust优化artifact。独立受控preparer串行生成三个原fixture：微型SQL只核正确性；17MiB/三BLTE块真实内容读取；1031×519五种BLP存储模式分别默认PNG/WebP导出。逐样本验证完整行/顺序、源blob、全部像素、capture身份与有序依赖、原预算及真实冷热缓存工作。默认cold/warm各一对仅观察；显式acceptance内置单对preflight，再每性能路径20冷/20暖，SQL不冒性能样本。Node19/19真实通过，独审修正实际encodingIO布尔字段、完整byte-work及Go323 capture依赖三个问题；Rust fixture构造/Go产品/性能全部NOT_RUN。准备、构建和测试仍由唯一Windows队列安排，不新增清缓存/改配额/下载路径。
 
 ## 4. 进入最终五阶段前的有限收口
 

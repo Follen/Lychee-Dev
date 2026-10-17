@@ -173,11 +173,7 @@ fn prepare_image_export_public_fixture() {
     })).unwrap()).unwrap();
 }
 
-#[test]
-fn large_image_export_uses_default_verified_decode_and_preserves_every_pixel() {
-    // Larger than the CPU threshold, clipped in both BC dimensions. These go
-    // through actual default CASC/VerifiedBlob/image/export consumers, including
-    // the shared safety ledger and all three durable capture identities.
+fn large_tables() -> Vec<Table> {
     let (width, height) = (1031u32, 519u32);
     let count = width as usize * height as usize;
     let mut inputs = Vec::new();
@@ -204,6 +200,40 @@ fn large_image_export_uses_default_verified_decode_and_preserves_every_pixel() {
         item.raw = raw;
         inputs.push(item);
     }
+    inputs
+}
+
+#[test]
+#[ignore = "prepare retained large BLP inputs for owned Go323/Rust public paired measurements"]
+fn prepare_large_image_export_public_fixture() {
+    let root = PathBuf::from(std::env::var_os("LYCHEEDEV_IMAGE_EXPORT_FIXTURE").expect("fresh fixture directory"));
+    let inputs = large_tables();
+    let fixture = Fixture::at(root, &inputs, "zhCN", 0x40);
+    fs::create_dir(fixture.root.join("pixels")).unwrap();
+    let cases: Vec<_> = inputs.iter().map(|item| {
+        // The public decoder is serial. Keep the complete expected RGBA bytes;
+        // the paired runner independently decodes both actual exported images.
+        let expected = texture::decode(&item.raw, 0, 16 << 20, &Default::default()).unwrap();
+        let path = format!("pixels/{}.rgba", item.id);
+        fs::write(fixture.root.join(&path), &expected.pixels).unwrap();
+        json!({"name":item.name,"fileDataID":item.id,"mipmap":0,
+            "texture":expected.description,"pixelsPath":path,
+            "pixelsBytes":expected.pixels.len(),"pixelsSHA256":storage::sha256(&expected.pixels)})
+    }).collect();
+    fs::write(fixture.root.join("image-cases.json"), serde_json::to_vec_pretty(&json!({
+        "schema":"lycheedev.large-image-paired-fixture.v1","cases":cases,
+        "encodings":["png","webp"],"channels":["rgba"],
+        "scope":"1031x519 synthetic BLP2; default authenticated CASC decode and lossless export; no real-client claim"
+    })).unwrap()).unwrap();
+}
+
+#[test]
+fn large_image_export_uses_default_verified_decode_and_preserves_every_pixel() {
+    // Larger than the CPU threshold, clipped in both BC dimensions. These go
+    // through actual default CASC/VerifiedBlob/image/export consumers, including
+    // the shared safety ledger and all three durable capture identities.
+    let (width, height) = (1031u32, 519u32);
+    let inputs = large_tables();
     let fixture = Fixture::new(&inputs);
     for item in &inputs {
         // The public pure decoder intentionally stays serial: an independent
