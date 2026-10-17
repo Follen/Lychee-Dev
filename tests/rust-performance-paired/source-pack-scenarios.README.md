@@ -172,24 +172,21 @@ foreign or unregistered owner is reclaimed.
 The initial cold reservation is explicitly a planning estimate: historical
 complete b3d home bytes 257,058,598 + 131,416,885 plus 64 MiB setup/growth allowance.
 It is not a measured 00d size or an OS allocation cap. Current cold home sizes and
-admission are recorded before proceeding. Each changed engine then reserves its
-measured complete healthy home, a complete new measured index, Facts growth and
-8 MiB fixture/metadata allowance. Go's exact one-file mutation recipes use its
-largest existing fact plus 1 MiB allowance; Rust conservatively reserves a full
-additional Facts generation rather than predicted hits. Complete retained output
-copies, all four cold/warm indexes, raw full-corpus Git audit outputs and bounded
-metadata/report allowances are included separately in free-space admission. Actual post-run usage is
-also checked and retained; that check is not presented as a preallocation cap.
-The run may still reject admission under the unchanged quota. It must not lower
-an estimate or omit ownership to fit a desired run.
+admission are recorded before proceeding. Changed-engine admission now uses the
+complete v2 format model below. The older “measured index + largest fact + 8 MiB”
+estimate was wrong: it omitted Go offsets and owner-external fixture files; its
+failed result remains unchanged. Current pre/post inventories cover the entire
+new owner directory, including the prepared Git index and project. Post-run
+measurement is not a preallocation limit or evidence of the transient peak.
+The run may still reject admission; never lower a submission to fit the cap.
 
 Only successful, fully reaped, sealed owners are cleaned through their existing
 `beginScratch` handle. A failed/interrupted owner is retained. Go success before
 Rust is explicitly “awaiting independent Rust” and is not a completed comparison.
 If any sample, custody, identity, profile, cleanup or power-policy check fails,
 the current invocation stops without replacement samples or a successful outer
-result. Reports preserve the exact stopping point and blocker. The sole explicit
-continuation below first revalidates and seals the fixed, already completed cold
+result. Reports preserve the exact stopping point and blocker. The fixed continuations
+below first revalidates and seals the fixed, already completed cold
 calls; it never changes the original failed status.
 
 ## Cloud-safe checks
@@ -341,4 +338,106 @@ retains 5 GiB. Arbitrary amounts, authorization references, scopes or environmen
 overrides are rejected. No machine environment, policy file, product runtime
 budget or old evidence is changed. First Go admission previously needed
 380,939,478 B above 5,005,736,596 B already used, a 17,966,954 B gap at 5 GiB;
-actual reservations and usage checks remain unchanged under the approved cap.
+that old estimate is historical. The corrected complete-format model below applies to new variant owners.
+
+
+## Continue the seven unexecuted calls after 2d1
+
+[The retained 2d1 failure](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6237641406)
+is a post-run footprint-model failure, not a 6 GiB admission failure. Go
+single-content-change completed once: run `32ebcee6-42ee-46bf-ada0-5362b2cd457e`,
+native 3544.9285 ms, exit 0/valid/reaped. Its full Facts pair is **not yet verified**.
+The old three owners and both earlier claims remain unchanged. Do not rerun the
+four-variant entry or remove a claim to obtain replacement samples.
+
+```powershell
+node <reviewed-runner-stage>/tools/rust-source-pack-diagnostics.mjs <pack2-config.json> <machine-conditions.json> --inspect-go <NEW-go-reference.json>
+node <reviewed-runner-stage>/tools/rust-source-pack-diagnostics.mjs <pack2-config.json> <machine-conditions.json> --resume-go <go-reference.json> --scratch-6gib
+```
+
+The same original config, machine-conditions file, exact 00d release and 25-file
+isolated runner export are used. Inspection hashes only existing evidence and
+writes a new bounded reference; no product is called. It authenticates:
+
+- outer `620316bf-04c6-4e21-9c47-f25c901fbcd5`, coordinator
+  `dd94aed1-1137-4bb5-8d4c-659bf367468c`, Go owner
+  `6a2dc3a8-f133-4330-ac54-542ff403a1a4`, all failed/sealed/reaped;
+- exact original 2d1 runtime bundle, claim SHA
+  `80fea14f348f94dcc5829da925c218d59f86575f1ff8dc9124b3bf8940e83d6d`,
+  complete earlier cold/warm/custody chain, fixed successful Go request/proof,
+  raw output, native timing, memory gaps, mutation and current home inventory;
+- synthetic commit `752e113c973639dc8eb8654b50808e65cf9847bd`, one original Go
+  attempt, no original Rust/other variant attempt, and all seven not-run entries.
+
+The new coordinator copies only the necessary retained Go comparison evidence
+into 8 MiB parts. The old Go home stays read-only and remains charged to its old
+owner. Then the existing variant loop starts with single-change Rust, followed
+by insertion/deletion/rename Go→Rust, each from its independent healthy base.
+No cold/warm/init/sync or completed Go invocation is replayed. New lineage says
+five calls reused, zero fresh cold/warm/single-change-Go calls; complete pair
+verification must still succeed. The new single-use seven-call claim is written
+only after the first Rust owner passes admission. Any later failure stops with
+its actual completed/not-run calls preserved. Every admission uses the same
+explicit task-local 6 GiB allowance, with cache20/free2 unchanged.
+
+### Complete changed-owner logical-byte submission
+
+The model is restricted to these fixed Go323/Rust00d formats and four recipes.
+The baseline clone is measured in full, including old snapshots, Facts, blobs,
+metadata, mirror and empty lock files. New growth is charged separately:
+
+| Growth | Go323 | Rust00d |
+|---|---|---|
+| New aggregate index | Baseline records bytes; insertion adds at most `2 * (1 MiB + 1)` | 128 MiB product publication limit |
+| Go derived offsets / manifest | 128 MiB / 1 MiB | None |
+| New Facts | 32 MiB for LF/insert; zero for delete/same-mode rename | All measured baseline pack bytes + `76 * documents` + 32 MiB for LF/insert |
+| Original-source cache | No index-path write | No index-path write |
+| Asset blobs | Already represented in snapshot records | Conservatively one entire corpus's bytes, even though unchanged assets can reuse existing blobs |
+| Public summary capture blob | None on fixed Go index command | 128 MiB existing capture limit; capture manifest is a metadata row |
+| Metadata | One new pin transaction | Three transactions: pin, index manifest, capture |
+| Mirror loose objects | All original tree entries plus bounded changed blob/commit, zlib expansion and one concurrent stage | Same |
+| Owner-external Git index | Two complete v2, non-split index bounds, including `.lock` and cache-tree extension | Same |
+| Project files / lock contents | 16 KiB / zero logical bytes | Same |
+
+Go's ordinary Lua parser ignores appended LF; deletion removes records; rename
+uses the same ordinary-Lua mode and a shorter path. New commit-dependent IDs keep
+fixed length. The exact inserted empty function adds one document and one
+declaration. Those facts justify the records bound; no arbitrary input-growth
+claim is made. Go offsets and Facts limits are taken from the pinned
+[323 index writer](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/internal/codebase/index.go)
+and [offset format](https://github.com/Follen/Lychee-Dev/blob/3766f9cacb52e93a803a626187e2a1d54a445468/internal/codebase/derived_index.go),
+not the historical Go files in the Rust branch.
+
+Rust's full-generation bound includes every 68-byte record header and up to one
+8-byte pack magic per document, covering repartition, prefix publication and
+per-file overflow. The new envelopes for unchanged sources retain the same
+Facts; only the one changed/new source gets the full 32 MiB per-file allowance.
+Stage→rename publication uses the same bytes under a new name rather than a
+second full generation. Git preparation explicitly disables split index,
+untracked-cache and fsmonitor and selects index v2. Its index and project live
+outside the home and are included in whole-owner inventories.
+
+SQLite has no product hard WAL-size cap. The finite-fixture estimate authenticates
+the actual DB page size (512–65536), admits only the existing small healthy DB,
+and allocates 64 extra whole pages per <=1 KiB transaction, every resulting page
+again per transaction as WAL frames, and 1 MiB for SHM. This is a conservative
+structural estimate for the fixed healthy execution, **not** an enforced runtime
+ceiling, physical disk-allocation guarantee or measured transient peak. Unknown
+formats, changed inputs and overrun stop and retain evidence.
+
+Free-space admission separately includes a complete bounded index, Go Facts
+custody, the whole raw Git audit plus path/header records, the existing 64 MiB
+memory-log ceiling, two 16 MiB stdout/stderr slots (the actual combined process
+ceiling is 16 MiB), and four 16 MiB metadata/report slots. Evidence is not counted
+as scratch and is not used to relocate whole homes or bypass quota.
+
+Using the previously published Go base 257,058,598 B, Rust base 131,416,885 B,
+Go records 114,148,002 B, and actual fixed tree, the Go insertion submission is
+546,495,450 B; deletion/rename 510,843,864 B. Conservatively treating **all** Rust
+non-index/non-DB bytes as Facts gives at most 522,584,261 B for a changed/inserted
+case (actual admission uses actual Facts bytes). These figures assume the
+observed 4096-byte DB page. Old used bytes plus the retained Go home alone are
+5,470,101,975 B; adding the largest submission yields 6,016,597,425 B, about
+425,853,519 B below 6 GiB before other new owner/preparation bytes. This is only
+planning: current measured usage and exact owner admission decide whether the
+run may start. No cleanup or extra cap increase is implied.
