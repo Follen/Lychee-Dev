@@ -209,7 +209,7 @@ fn generated_large_namespace_amplification_abandons_all_partial_worker_facts() {
 fn generated_signature_dynamic_and_replacement_expansion_keep_exact_bytes() {
     on_stack(|| {
         let raw = format!(
-            r#"local T={{Type='System',Name='C_Test',Functions={{{{Type='Function',Name='Run',Arguments={{{}}},Returns={{{{Name='\255\254',Type='\253'}}}}}}}},Events={{{{Type='Event',Name='E',LiteralName='\252',Payload={{{}}}}}}}}"#,
+            r#"local T={{Type='System',Name='C_Test',Functions={{{{Type='Function',Name='Run',Arguments={{{}}},Returns={{{{Name='\255\254',Type='\253'}}}}}}}},Events={{{{Type='Event',Name='E',LiteralName='\252',Payload={{{}}}}}}}}}"#,
             "{},".repeat(800),
             "{},".repeat(600)
         );
