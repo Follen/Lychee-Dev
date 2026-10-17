@@ -685,7 +685,7 @@ fn build_uncached_cached(
         control,
         profile,
         metadata_retained,
-        |file, data, prepared| {
+        grouped.consumer(|grouped, file, data, prepared| {
             control.check()?;
             if std::time::Instant::now() >= deadline {
                 return Err(ToolkitError::new(
@@ -708,31 +708,7 @@ fn build_uncached_cached(
                 index.assets.push(json!({"path":file.path,"contentHash":hash,"bytes":file.bytes,"extension":format!(".{ext}"),"mime":"application/octet-stream","format":ext,"width":0,"height":0,"local":local}));
                 return Ok(());
             }
-            retained = retained.checked_add(file.bytes).ok_or_else(|| {
-                ToolkitError::new(
-                    "codebase.source_budget",
-                    "Source memory admission overflow",
-                    3,
-                )
-            })?;
-            if retained > 256 << 20 {
-                return Err(ToolkitError::new(
-                    "codebase.source_budget",
-                    "Source query memory budget exceeded",
-                    3,
-                ));
-            }
-            if std::str::from_utf8(&data).is_err() {
-                // Fixed Go AnalyzeDocument returns an untyped error here, which
-                // aborts the index and maps to command.failed / dispatch / exit 5.
-                // It is not a recoverable parse note or an oversized-file skip.
-                return Err(ToolkitError::new(
-                    "command.failed",
-                    "codebase.analysis_encoding_or_budget",
-                    5,
-                ));
-            }
-            let sha256 = storage::sha256(&data);
+            let sha256 = document_input_sha(file, &data, &mut retained)?;
             let (facts, cache_hit, facts_locator) = grouped.document(
                 file, &data, &sha256, prepared, &mut index.documents,
             )?;
@@ -821,7 +797,7 @@ fn build_uncached_cached(
                 facts_locator,
             });
             Ok(())
-        },
+        }),
     );
     let batches = grouped.finish(batches)?;
     drop(visit_phase);
@@ -853,6 +829,35 @@ fn build_uncached_cached(
     Ok(index)
 }
 
+// The ordered consumer's original retention/encoding prelude remains before
+// every cache error, including a deferred read-admission error for this row.
+fn document_input_sha(file: &git::TreeFile, data: &[u8], retained: &mut usize) -> Result<String> {
+    *retained = retained.checked_add(file.bytes).ok_or_else(|| {
+        ToolkitError::new(
+            "codebase.source_budget",
+            "Source memory admission overflow",
+            3,
+        )
+    })?;
+    if *retained > 256 << 20 {
+        return Err(ToolkitError::new(
+            "codebase.source_budget",
+            "Source query memory budget exceeded",
+            3,
+        ));
+    }
+    if std::str::from_utf8(data).is_err() {
+        // Fixed Go AnalyzeDocument returns an untyped error here, which
+        // aborts the index and maps to command.failed / dispatch / exit 5.
+        // It is not a recoverable parse note or an oversized-file skip.
+        return Err(ToolkitError::new(
+            "command.failed",
+            "codebase.analysis_encoding_or_budget",
+            5,
+        ));
+    }
+    Ok(storage::sha256(data))
+}
 fn record_compatibility_gap(gaps: &mut BTreeSet<String>, path: &str) {
     let path = path.to_ascii_lowercase();
     let categories: &[&str] = if path.ends_with(".lua") {

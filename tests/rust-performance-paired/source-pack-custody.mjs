@@ -1,7 +1,7 @@
 // Immutable, comparison-only Go output custody for sequential engine diagnostics.
 // This is not a cache or alternate product index; never move/adopt a home here.
 import assert from 'node:assert/strict';
-import {createReadStream, lstatSync, readFileSync, writeFileSync} from 'node:fs';
+import {closeSync, createReadStream, fstatSync, lstatSync, openSync, readFileSync, readSync, writeFileSync} from 'node:fs';
 import {join, relative, resolve, sep} from 'node:path';
 import {Readable} from 'node:stream';
 import readline from 'node:readline';
@@ -11,7 +11,7 @@ import {splitIndexEvidence, verifyParts, INDEX_BYTES} from '../../tools/rust-sou
 const MAX_FACT_BYTES = 32 << 20, MAX_FACTS_BYTES = 512 << 20, MAX_FILES = 100000;
 const exact = (value, fields) => assert.deepEqual(Object.keys(value ?? {}).sort(), [...fields].sort(), 'exact custody fields');
 const digest = value => assert.match(value, /^[0-9a-f]{64}$/);
-function readBounded(path, maximum) { const stat = lstatSync(path); assert(stat.isFile() && !stat.isSymbolicLink() && stat.size <= maximum, 'custody file budget/type'); return readFileSync(path); }
+function readBounded(path, maximum) { const stat = lstatSync(path); assert(stat.isFile() && !stat.isSymbolicLink() && stat.size <= maximum, 'custody file budget/type'); return readExpected(path, {bytes: stat.size}); }
 export function goFactRelative(document, parser) {
   assert.equal(parser, 'source-v1'); assert(typeof document.path === 'string' && document.path && !document.path.includes('\\') && !document.path.split('/').some(p => !p || p === '.' || p === '..')); digest(document.sha256);
   const extension = document.path.slice(document.path.lastIndexOf('.')).toLowerCase(); assert(['.lua', '.xml', '.toc'].includes(extension));
@@ -24,7 +24,25 @@ function authenticateFact(raw, document, parser, mode) {
   const marker = ',"facts":', offset = text.indexOf(marker); assert(offset > 0); assert.equal(sha256(text.slice(offset + marker.length, -1)), value.factsSHA256);
   exact(value.facts, ['declarations', 'relationships', 'loads', 'headers', 'diagnostics']); for (const rows of Object.values(value.facts)) assert(Array.isArray(rows));
 }
-export async function captureGoCustody(home, index, directory, root) {
+// An admitted tuple bounds the actual read as well as the later streamed copy.
+// Never readFileSync after only a size check: a concurrent growth could exceed
+// the admitted amount before the final digest check notices it.
+function readExpected(path, expected) {
+  const before = lstatSync(path); assert(before.isFile() && !before.isSymbolicLink() && before.size === expected.bytes, 'admitted Go Facts size/type changed');
+  const same = after => { assert(after.isFile()); for (const key of ['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs']) assert.equal(after[key], before[key], 'admitted Go Facts identity changed'); };
+  const fd = openSync(path, 'r'), raw = Buffer.alloc(expected.bytes);
+  try { same(fstatSync(fd)); let offset = 0; while (offset < raw.length) { const n = readSync(fd, raw, offset, Math.min(65536, raw.length - offset), null); assert(n > 0, 'admitted Go Facts truncated'); offset += n; } assert.equal(readSync(fd, Buffer.alloc(1), 0, 1, null), 0, 'admitted Go Facts grew'); same(fstatSync(fd)); const after = lstatSync(path); assert(!after.isSymbolicLink()); same(after); }
+  finally { closeSync(fd); }
+  if (expected.sha256 !== undefined) assert.equal(sha256(raw), expected.sha256, 'admitted Go Facts SHA changed'); return raw;
+}
+export async function captureGoCustody(home, index, directory, root, {expectedSources, expectedDocuments} = {}) {
+  let admitted;
+  if (expectedSources !== undefined) {
+    assert(Number.isSafeInteger(expectedDocuments) && expectedDocuments > 0 && expectedDocuments <= MAX_FILES && expectedDocuments === index.manifest.summary.documents); assert(Array.isArray(expectedSources) && expectedSources.length > 0 && expectedSources.length <= expectedDocuments); admitted = new Map(); let bytes = 0;
+    for (const source of expectedSources) { exact(source, ['relative', 'bytes', 'sha256']); assert.match(source.relative, /^source\/v1\/facts\/files\/source-v1\/[0-9a-f]{64}\.json$/); digest(source.sha256); assert(Number.isSafeInteger(source.bytes) && source.bytes >= 0 && source.bytes <= MAX_FACT_BYTES); assert(!admitted.has(source.relative), 'duplicate admitted Go Facts source'); bytes += source.bytes; assert(bytes <= MAX_FACTS_BYTES); admitted.set(source.relative, source); }
+    // Preflight the full finite set before creating any body/manifest evidence.
+    for (const source of admitted.values()) readExpected(contained(home, join(home, source.relative)), source);
+  } else assert.equal(expectedDocuments, undefined);
   assert.equal(hashFile(index.path, INDEX_BYTES), index.sha256); assert.equal(index.manifest.recordsHash, index.sha256); assert.equal(index.manifest.recordBytes, index.bytes);
   const manifestPath = join(directory, 'go-original-manifest.json');
   const originalManifest = readBounded(join(resolve(index.path, '..'), 'manifest.json'), 1 << 20); assert.deepEqual(JSON.parse(originalManifest), index.manifest); writeFileSync(manifestPath, originalManifest, {flag: 'wx'});
@@ -35,13 +53,15 @@ export async function captureGoCustody(home, index, directory, root) {
     if (!line) continue; const doc = JSON.parse(line); if (doc.kind !== 'document') continue;
     assert(!documents.has(doc.path) && documents.size < MAX_FILES, 'duplicate/budget Go document'); documents.add(doc.path);
     const item = goFactRelative(doc, index.manifest.summary.parser), path = contained(home, join(home, item.relative));
-    const raw = readBounded(path, MAX_FACT_BYTES); authenticateFact(raw, doc, index.manifest.summary.parser, item.mode);
+    const expected = admitted?.get(item.relative); if (admitted) assert(expected, 'unadmitted Go Facts source');
+    const raw = expected ? readExpected(path, expected) : readBounded(path, MAX_FACT_BYTES); authenticateFact(raw, doc, index.manifest.summary.parser, item.mode);
     if (known.has(item.relative)) continue; known.add(item.relative);
     total += raw.length; assert(total <= MAX_FACTS_BYTES, 'custody total Facts budget');
     const source = {path, bytes: raw.length, sha256: sha256(raw)}, name = `go-fact-${String(files.length).padStart(5, '0')}`;
     splitIndexEvidence(root, source, join(directory, name));
     files.push({relative: item.relative, bytes: raw.length, sha256: source.sha256, manifest: `${name}/manifest.json`, manifestSHA256: hashFile(join(directory, name, 'manifest.json'), 65536)});
   }
+  if (admitted) { assert.equal(documents.size, expectedDocuments); assert.equal(known.size, admitted.size, 'complete admitted Go Facts source set'); }
   assert.equal(documents.size, index.manifest.summary.documents); assert.equal(hashFile(index.path, INDEX_BYTES), index.sha256, 'Go records changed while capturing Facts');
   const catalog = {schema: 'lycheedev.source-go-facts-custody.v1', home: resolve(home), documents: documents.size, factsBytes: total,
     records: {manifest: 'go-index-parts/manifest.json', manifestSHA256: hashFile(recordsManifestPath, 65536), bytes: index.bytes, sha256: index.sha256},

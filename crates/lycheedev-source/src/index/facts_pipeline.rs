@@ -77,7 +77,7 @@ pub(super) struct PreparedFacts {
     pub(super) parse_elapsed: Duration,
 }
 
-fn eligible(file: &git::TreeFile, data: &[u8]) -> bool {
+pub(super) fn eligible(file: &git::TreeFile, data: &[u8]) -> bool {
     !file.asset
         && !file.oversized
         && file.bytes <= MAX_SOURCE_BYTES
@@ -92,6 +92,38 @@ fn eligible(file: &git::TreeFile, data: &[u8]) -> bool {
                     .any(|extension| suffix.eq_ignore_ascii_case(*extension))
             })
         && std::str::from_utf8(data).is_ok()
+}
+
+/// Cache admission never queues decoded Facts. A possible hit is consumed only
+/// after all earlier documents; a cohort boundary first drains and retries.
+pub(super) enum Admission {
+    Parse,
+    Barrier,
+    Drain,
+}
+pub(super) trait Consumer {
+    fn admit(&mut self, _file: &git::TreeFile, _data: &[u8], _ordered: bool) -> Admission {
+        Admission::Parse
+    }
+    fn consume(
+        &mut self,
+        file: &git::TreeFile,
+        data: Vec<u8>,
+        prepared: Option<PreparedFacts>,
+    ) -> Result<()>;
+}
+impl<F> Consumer for F
+where
+    F: FnMut(&git::TreeFile, Vec<u8>, Option<PreparedFacts>) -> Result<()>,
+{
+    fn consume(
+        &mut self,
+        file: &git::TreeFile,
+        data: Vec<u8>,
+        prepared: Option<PreparedFacts>,
+    ) -> Result<()> {
+        self(file, data, prepared)
+    }
 }
 
 fn reservation(data: &Vec<u8>) -> Option<usize> {
@@ -195,10 +227,19 @@ pub(super) fn visit(
     control: &OperationControl,
     profile: &Profile,
     retained_metadata: usize,
-    consume: impl FnMut(&git::TreeFile, Vec<u8>, Option<PreparedFacts>) -> Result<()>,
+    consume: impl Consumer,
 ) -> Result<usize> {
     let available_cpus = thread::available_parallelism().map_or(1, usize::from);
-    visit_with_cpu_limit_and_retained(home, pin, files, control, profile, available_cpus, retained_metadata, consume)
+    visit_with_cpu_limit_and_retained(
+        home,
+        pin,
+        files,
+        control,
+        profile,
+        available_cpus,
+        retained_metadata,
+        consume,
+    )
 }
 
 #[cfg(test)]
@@ -214,7 +255,7 @@ fn visit_with_cpu_limit(
     visit_with_cpu_limit_and_retained(home, pin, files, control, profile, cpu_limit, 0, consume)
 }
 
-fn visit_with_cpu_limit_and_retained(
+pub(super) fn visit_with_cpu_limit_and_retained(
     home: &Path,
     pin: &SourcePin,
     files: &[git::TreeFile],
@@ -222,13 +263,13 @@ fn visit_with_cpu_limit_and_retained(
     profile: &Profile,
     cpu_limit: usize,
     retained_metadata: usize,
-    mut consume: impl FnMut(&git::TreeFile, Vec<u8>, Option<PreparedFacts>) -> Result<()>,
+    mut consume: impl Consumer,
 ) -> Result<usize> {
     let mut candidates = files.iter().filter(|file| eligible(file, b"")).count();
     let cpu_limit = cpu_limit.min(candidates);
     if cpu_limit < 2 {
         return git::visit_blobs_with_control(home, pin, files, control, |file, data| {
-            consume(file, data, None)
+            consume.consume(file, data, None)
         });
     }
     thread::scope(|scope| {
@@ -252,7 +293,7 @@ fn visit_with_cpu_limit_and_retained(
         let mut tried_this_batch = false;
         let mut thread_capacity_available = true;
         let visited = git::visit_blob_batches_with_control(home, pin, files, control, |event| {
-            let result = match event {
+            let result = (|| match event {
                 git::BlobBatchVisit::BatchStart { allocation_bytes } => {
                     debug_assert!(pipeline.pending.is_empty());
                     pipeline.batch_bytes = allocation_bytes;
@@ -260,6 +301,26 @@ fn visit_with_cpu_limit_and_retained(
                     Ok(())
                 }
                 git::BlobBatchVisit::Blob(file, data) => {
+                    let admission = match consume.admit(file, &data, pipeline.pending.is_empty()) {
+                        Admission::Drain => {
+                            pipeline.drain(&mut consume)?;
+                            consume.admit(file, &data, true)
+                        }
+                        admission => admission,
+                    };
+                    if !matches!(admission, Admission::Parse) {
+                        // Possible cache hits (or deferred lookup errors) are
+                        // ordered barriers. No decoded Facts owner enters the
+                        // worker queue, and prior publication errors still win.
+                        pipeline.drain(&mut consume)?;
+                        consume.consume(file, data, None)?;
+                        if !file.asset {
+                            pipeline.retained_bytes =
+                                pipeline.retained_bytes.saturating_add(file.bytes);
+                        }
+                        candidates = candidates.saturating_sub(usize::from(eligible(file, b"")));
+                        return Ok(());
+                    }
                     if pipeline.workers.is_empty()
                         && !tried_this_batch
                         && thread_capacity_available
@@ -310,7 +371,7 @@ fn visit_with_cpu_limit_and_retained(
                     pipeline.push(file, data, &mut consume)
                 }
                 git::BlobBatchVisit::BatchEnd => pipeline.drain(&mut consume),
-            };
+            })();
             pipeline.failed |= result.is_err();
             result
         });
@@ -386,20 +447,13 @@ impl Pipeline<'_> {
             reservation,
         }))
     }
-    fn consume_ready(
-        &mut self,
-        ready: Ready,
-        consume: &mut impl FnMut(&git::TreeFile, Vec<u8>, Option<PreparedFacts>) -> Result<()>,
-    ) -> Result<()> {
-        consume(&ready.file, ready.data, ready.prepared)?;
+    fn consume_ready(&mut self, ready: Ready, consume: &mut impl Consumer) -> Result<()> {
+        consume.consume(&ready.file, ready.data, ready.prepared)?;
         self.pending_bytes -= ready.reservation;
         self.retained_bytes = self.retained_bytes.saturating_add(ready.file.bytes);
         Ok(())
     }
-    fn consume_one(
-        &mut self,
-        consume: &mut impl FnMut(&git::TreeFile, Vec<u8>, Option<PreparedFacts>) -> Result<()>,
-    ) -> Result<()> {
+    fn consume_one(&mut self, consume: &mut impl Consumer) -> Result<()> {
         if let Some(ready) = self.receive_one()? {
             self.consume_ready(ready, consume)?;
         }
@@ -422,10 +476,7 @@ impl Pipeline<'_> {
         self.pending_bytes += reserved;
         Ok(())
     }
-    fn drain(
-        &mut self,
-        consume: &mut impl FnMut(&git::TreeFile, Vec<u8>, Option<PreparedFacts>) -> Result<()>,
-    ) -> Result<()> {
+    fn drain(&mut self, consume: &mut impl Consumer) -> Result<()> {
         while !self.pending.is_empty() {
             self.consume_one(consume)?;
         }
@@ -435,7 +486,7 @@ impl Pipeline<'_> {
         &mut self,
         file: &git::TreeFile,
         data: Vec<u8>,
-        consume: &mut impl FnMut(&git::TreeFile, Vec<u8>, Option<PreparedFacts>) -> Result<()>,
+        consume: &mut impl Consumer,
     ) -> Result<()> {
         let reserved = (!self.workers.is_empty() && eligible(file, &data))
             .then(|| reservation(&data))
@@ -537,17 +588,13 @@ impl Pipeline<'_> {
         // Large inputs, assets and exhausted shared allowance are barriers.
         // The complete original path remains available with no new failure.
         self.drain(consume)?;
-        consume(file, data, None)?;
+        consume.consume(file, data, None)?;
         if !file.asset {
             self.retained_bytes = self.retained_bytes.saturating_add(file.bytes);
         }
         Ok(())
     }
-    fn finish(
-        &mut self,
-        visited: Result<usize>,
-        consume: &mut impl FnMut(&git::TreeFile, Vec<u8>, Option<PreparedFacts>) -> Result<()>,
-    ) -> Result<usize> {
+    fn finish(&mut self, visited: Result<usize>, consume: &mut impl Consumer) -> Result<usize> {
         if !self.failed {
             self.drain(consume)?;
         }
@@ -563,7 +610,8 @@ mod tests;
 #[test]
 fn retained_cohort_metadata_reduces_real_worker_admission_without_changing_facts() {
     let fixture = super::facts_cache_tests::Fixture::new();
-    let raw = (0..8).map(|n| (format!("{n}.lua"), format!("function F{n}() Call() end")))
+    let raw = (0..8)
+        .map(|n| (format!("{n}.lua"), format!("function F{n}() Call() end")))
         .collect::<std::collections::BTreeMap<_, _>>();
     let pin = fixture.pin(&raw);
     let control = OperationControl::default();
@@ -572,13 +620,29 @@ fn retained_cohort_metadata_reduces_real_worker_admission_without_changing_facts
     for retained in [0, SOURCE_RETAINED_LIMIT - (1 << 20)] {
         let mut output = Vec::new();
         let mut prepared_count = 0;
-        visit_with_cpu_limit_and_retained(&fixture.home, &pin, &files, &control,
-            &Profile::new(), 8, retained, |file, bytes, prepared| {
+        visit_with_cpu_limit_and_retained(
+            &fixture.home,
+            &pin,
+            &files,
+            &control,
+            &Profile::new(),
+            8,
+            retained,
+            |file: &git::TreeFile, bytes: Vec<u8>, prepared: Option<PreparedFacts>| {
                 prepared_count += usize::from(prepared.is_some());
-                let facts = prepared.map_or_else(|| ParseMode::for_path(&file.path).parse(&bytes), |p| p.facts);
-                output.push((file.path.clone(), bytes, serde_json::to_value(facts).unwrap()));
+                let facts = prepared.map_or_else(
+                    || ParseMode::for_path(&file.path).parse(&bytes),
+                    |p| p.facts,
+                );
+                output.push((
+                    file.path.clone(),
+                    bytes,
+                    serde_json::to_value(facts).unwrap(),
+                ));
                 Ok(())
-            }).unwrap();
+            },
+        )
+        .unwrap();
         assert_eq!(prepared_count, if retained == 0 { 8 } else { 0 });
         observed.push(output);
     }

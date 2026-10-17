@@ -114,10 +114,10 @@ export function readRustFact(home, document, rustLayout = 'v6') {
   for (const section of SECTIONS) if (!Array.isArray(envelope.facts[section])) {
     throw new Error(`Invalid fact array ${section}: ${document.path}`);
   }
-  return {file, fileSHA256: locator ? null : sha256(raw), ...(locator ? {record: locator, recordSHA256: sha256(raw)} : {}), factsSHA256: envelope.factsSHA256, facts: envelope.facts};
+  return {file, bytes: raw.length, fileSHA256: locator ? null : sha256(raw), ...(locator ? {record: locator, recordSHA256: sha256(raw)} : {}), factsSHA256: envelope.factsSHA256, facts: envelope.facts};
 }
 
-export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v6', rustIndexFile, expectedIndexSHA256, retainedGo = undefined) {
+export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v6', rustIndexFile, expectedIndexSHA256, retainedGo = undefined, {captureSources = false} = {}) {
   const layout = RUST_LAYOUTS[rustLayout];
   if (!layout) throw new Error(`Unsupported Rust facts layout: ${rustLayout}`);
   const manifestFile = path.join(path.dirname(goRecords), 'manifest.json');
@@ -173,6 +173,7 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
     differentFiles: [],
     firstDifferences: [],
   };
+  const goSources = new Map(), rustSources = [];
   for (const document of documents) {
     const extension = path.extname(document.path).toLowerCase();
     const generated = extension === '.lua'
@@ -183,6 +184,12 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
     const goFile = path.join(goHome, 'source/v1/facts/files', parser, `${goKey}.json`);
     const rust = readRustFact(rustHome, rustDocuments?.get(document.path) ?? document, rustLayout), rustFile = rust.file;
     const goRaw = retainedGo ? retainedGo.readFact(goFile) : fs.readFileSync(goFile);
+    if (captureSources) {
+      const source = {file: goFile, bytes: goRaw.length, sha256: sha256(goRaw)}, previous = goSources.get(goFile);
+      if (previous && signature(previous) !== signature(source)) throw new Error('Go comparison source changed between duplicate references');
+      goSources.set(goFile, source);
+      rustSources.push({path: document.path, file: rustFile, bytes: rust.bytes, sha256: rust.recordSHA256 ?? rust.fileSHA256, ...(rust.record ? {record: rust.record} : {})});
+    }
     const go = JSON.parse(goRaw);
     if (go.schema !== 'lycheedev.source-file-facts.v2'
       || go.inputSHA256 !== document.sha256 || go.mode !== mode || go.parser !== parser) {
@@ -251,6 +258,7 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
   if (documents.length !== manifest.summary.documents) {
     throw new Error('Go document total differs from sealed summary');
   }
+  if (captureSources) report.factSources = {go: [...goSources.values()], rust: rustSources};
   return report;
 }
 

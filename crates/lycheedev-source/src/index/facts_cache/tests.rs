@@ -422,6 +422,8 @@ fn bounded_pack_prefix_commits_and_remaining_complete_record_uses_per_file_cache
         inputs: [0; GROUP],
         count: 2,
         seen: 2,
+        admitted: 2,
+        missing: 0,
         first_document: 0,
         reader: None,
         records: Vec::new(),
@@ -944,4 +946,442 @@ fn legacy_ordinal_pack_and_v13_index_keep_identity_while_current_default_rebuild
     let warm = index::build_with_control(&fixture.home, &pin, &control).unwrap();
     assert_eq!(warm.summary["io"]["cachedIndex"], true);
     assert_eq!(warm.summary["io"]["cachedFacts"], 3);
+}
+
+#[test]
+fn cache_aware_default_consumer_avoids_all_workers_on_complete_pack_hits() {
+    let fixture = Fixture::new();
+    let raw = wide_files(40);
+    let pin = fixture.pin(&raw);
+    let control = OperationControl::default();
+    let cold_profile = Profile::enabled(true);
+    let cold =
+        index::build_uncached_profiled(&fixture.home, &pin, &control, &cold_profile).unwrap();
+    assert_eq!(cold.summary["io"]["parsedDocuments"], 80);
+    if std::thread::available_parallelism().is_ok_and(|n| n.get() >= 2) {
+        assert_eq!(cold_profile.calls(Phase::FactsWorker), 80);
+    }
+    let profile = Profile::enabled(true);
+    // This is the real index rebuild consumer, not the whole-index shortcut.
+    let warm = index::build_uncached_profiled(&fixture.home, &pin, &control, &profile).unwrap();
+    assert_eq!(warm.summary["io"]["cachedFacts"], 80);
+    assert_eq!(profile.calls(Phase::FactsWorker), 0);
+    assert_eq!(profile.calls(Phase::FactsWorkerWait), 0);
+    assert_eq!(profile.calls(Phase::FactsParse), 0);
+    assert_eq!(all_facts(&cold), all_facts(&warm));
+    for section in [
+        "declarations",
+        "relationships",
+        "loads",
+        "headers",
+        "diagnostics",
+    ] {
+        assert!(cold.documents.iter().any(|d| {
+            !serde_json::to_value(&d.facts).unwrap()[section]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        }));
+    }
+}
+
+#[test]
+fn cache_aware_default_consumer_dispatches_only_missing_snapshot_groups() {
+    let fixture = Fixture::new();
+    let raw = wide_files(512);
+    let original = fixture.pin(&raw);
+    let control = OperationControl::default();
+    let baseline = index::build_uncached(&fixture.home, &original, &control).unwrap();
+    let mut modified = raw.clone();
+    modified.get_mut("A0000.lua").unwrap().push('\n');
+    let mut inserted = raw.clone();
+    inserted.insert("000_Inserted.lua".into(), "function Inserted() end".into());
+    let mut deleted = raw.clone();
+    deleted.remove("A0000.lua");
+    let mut renamed = deleted.clone();
+    renamed.insert("Z9000.lua".into(), raw["A0000.lua"].clone());
+    for (changed, expected, except) in [
+        (modified, Some(64), vec!["A0000.lua"]),
+        (inserted, Some(1), vec!["000_Inserted.lua"]),
+        (deleted, Some(511), vec!["A0000.lua"]),
+        (renamed, None, vec!["A0000.lua", "Z9000.lua"]),
+    ] {
+        let pin = fixture.pin(&changed);
+        let profile = Profile::enabled(true);
+        let rebuilt =
+            index::build_uncached_profiled(&fixture.home, &pin, &control, &profile).unwrap();
+        let parsed = rebuilt.summary["io"]["parsedDocuments"].as_u64().unwrap();
+        if let Some(expected) = expected {
+            assert_eq!(parsed, expected);
+        }
+        assert!(parsed <= 1025);
+        assert_eq!(profile.calls(Phase::FactsParse), parsed);
+        // No generated/large/capped parser inputs in this fixture. On a
+        // parallel host, exactly the real miss set can enter pure workers.
+        if std::thread::available_parallelism().is_ok_and(|n| n.get() >= 2) {
+            assert_eq!(
+                profile.calls(Phase::FactsWorker) + profile.calls(Phase::FactsParseSequential),
+                parsed
+            );
+            assert_eq!(
+                profile.calls(Phase::FactsWorkerWait),
+                profile.calls(Phase::FactsWorker)
+            );
+            if expected.is_some() {
+                assert_eq!(profile.calls(Phase::FactsWorker), parsed);
+            }
+        }
+        assert_original_fact_order(&baseline, &rebuilt, &except);
+    }
+}
+
+fn admitted_document(
+    groups: &mut Groups<'_>,
+    file: &git::TreeFile,
+    raw: &[u8],
+    docs: &mut Vec<Document>,
+) -> Result<bool> {
+    let sha256 = storage::sha256(raw);
+    let (facts, hit, facts_locator) = groups.document(file, raw, &sha256, None, docs)?;
+    docs.push(Document {
+        path: file.path.clone(),
+        text: Some(raw.to_vec()),
+        sha256,
+        bytes: raw.len(),
+        facts,
+        facts_locator,
+    });
+    Ok(hit)
+}
+
+#[test]
+fn cache_aware_legacy_presence_rechecks_same_key_replacement_and_growth() {
+    use facts_pipeline::Admission;
+    for change in ["replace", "grow", "remove"] {
+        let fixture = Fixture::new();
+        let raw = files(2);
+        let pin = fixture.pin(&raw);
+        let control = OperationControl::default();
+        let profile = Profile::enabled(true);
+        let inputs = git::tree_with_control(&fixture.home, &pin, &control).unwrap();
+        let cache = SourceFactsCache::open(&fixture.home, &control).unwrap();
+        let body = raw[&inputs[0].path].as_bytes();
+        let sha = storage::sha256(body);
+        let key = facts_cache_key(&inputs[0].path, &sha);
+        let expected = crate::facts::ParseMode::for_path(&inputs[0].path).parse(body);
+        let envelope = encode_facts(&expected, &sha, None).unwrap();
+        cache.publish(&key, &envelope, &control).unwrap();
+        let path = fixture
+            .home
+            .join("cache/source-facts-rust")
+            .join(format!("{key}.json"));
+        let mut groups = Groups::new(&cache, &inputs, &control, &profile);
+        assert!(matches!(
+            groups.admit(&inputs[0], body, true),
+            Admission::Barrier
+        ));
+        match change {
+            "replace" => fs::write(&path, b"different complete bytes").unwrap(),
+            "grow" => {
+                use std::io::Write;
+                fs::OpenOptions::new()
+                    .append(true)
+                    .open(&path)
+                    .unwrap()
+                    .write_all(b" trailing garbage")
+                    .unwrap();
+            }
+            _ => fs::remove_file(&path).unwrap(),
+        }
+        let mut docs = Vec::new();
+        assert!(!admitted_document(&mut groups, &inputs[0], body, &mut docs).unwrap());
+        assert_eq!(
+            serde_json::to_value(&docs[0].facts).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        admitted_document(
+            &mut groups,
+            &inputs[1],
+            raw[&inputs[1].path].as_bytes(),
+            &mut docs,
+        )
+        .unwrap();
+        groups.finish(Ok(())).unwrap();
+        cache.finish(Ok(()), &control).unwrap();
+    }
+}
+
+#[test]
+fn cache_aware_later_probe_error_is_bound_to_its_own_document() {
+    use facts_pipeline::Admission;
+    let fixture = Fixture::new();
+    let raw = files(2);
+    let pin = fixture.pin(&raw);
+    let control = OperationControl::default();
+    let profile = Profile::enabled(true);
+    let inputs = git::tree_with_control(&fixture.home, &pin, &control).unwrap();
+    let cache = SourceFactsCache::open(&fixture.home, &control).unwrap();
+    let second = raw[&inputs[1].path].as_bytes();
+    let key = facts_cache_key(&inputs[1].path, &storage::sha256(second));
+    fs::create_dir(
+        fixture
+            .home
+            .join("cache/source-facts-rust")
+            .join(format!("{key}.json")),
+    )
+    .unwrap();
+    let mut groups = Groups::new(&cache, &inputs, &control, &profile);
+    let first = raw[&inputs[0].path].as_bytes();
+    assert!(matches!(
+        groups.admit(&inputs[0], first, true),
+        Admission::Parse
+    ));
+    assert!(matches!(
+        groups.admit(&inputs[1], second, false),
+        Admission::Barrier
+    ));
+    assert_eq!(groups.admission_error.as_ref().unwrap().0, 1);
+    let mut docs = Vec::new();
+    assert!(!admitted_document(&mut groups, &inputs[0], first, &mut docs).unwrap());
+    assert_eq!(docs.len(), 1);
+    assert_eq!(profile.calls(Phase::FactsParse), 1);
+    // The later probe must not be consumed by the earlier pending document.
+    let expected = groups.admission_error.as_ref().unwrap().1.code.clone();
+    let error = admitted_document(&mut groups, &inputs[1], second, &mut docs).unwrap_err();
+    assert_eq!(error.code, expected);
+    assert_eq!(groups.finish::<()>(Err(error)).unwrap_err().code, expected);
+    cache.finish(Ok(()), &control).unwrap();
+    assert!(
+        !fs::read_dir(fixture.home.join("cache/source-facts-rust"))
+            .unwrap()
+            .any(|p| p
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".lycheedev-cache-"))
+    );
+}
+
+#[test]
+fn cache_aware_pipeline_preserves_earlier_consumer_failure_over_later_probe_error() {
+    let fixture = Fixture::new();
+    let raw = files(3);
+    let pin = fixture.pin(&raw);
+    let control = OperationControl::default();
+    let profile = Profile::enabled(true);
+    let inputs = git::tree_with_control(&fixture.home, &pin, &control).unwrap();
+    let cache = SourceFactsCache::open(&fixture.home, &control).unwrap();
+    let key = facts_cache_key(
+        &inputs[1].path,
+        &storage::sha256(raw[&inputs[1].path].as_bytes()),
+    );
+    fs::create_dir(
+        fixture
+            .home
+            .join("cache/source-facts-rust")
+            .join(format!("{key}.json")),
+    )
+    .unwrap();
+    let mut groups = Groups::new(&cache, &inputs, &control, &profile);
+    let mut docs = Vec::new();
+    let mut consumed = Vec::new();
+    let result = facts_pipeline::visit_with_cpu_limit_and_retained(
+        &fixture.home,
+        &pin,
+        &inputs,
+        &control,
+        &profile,
+        2,
+        GROUP_RETAINED_BYTES,
+        groups.consumer(|groups, file, data, prepared| {
+            consumed.push(file.path.clone());
+            let sha = storage::sha256(&data);
+            let (facts, _, facts_locator) =
+                groups.document(file, &data, &sha, prepared, &mut docs)?;
+            docs.push(Document {
+                path: file.path.clone(),
+                text: Some(data),
+                sha256: sha,
+                bytes: file.bytes,
+                facts,
+                facts_locator,
+            });
+            // An earlier ordered publication/consumer error must still win
+            // after the later file's real cache-directory probe has failed.
+            Err(ToolkitError::new(
+                "fixture.earlier_consumer",
+                "first document failed after Facts",
+                5,
+            ))
+        }),
+    );
+    assert_eq!(
+        result.as_ref().unwrap_err().code,
+        "fixture.earlier_consumer"
+    );
+    assert_eq!(consumed, [inputs[0].path.clone()]);
+    assert_eq!(profile.calls(Phase::FactsWorker), 1);
+    assert_eq!(groups.admission_error.as_ref().unwrap().0, 1);
+    assert_eq!(
+        groups.finish(result).unwrap_err().code,
+        "fixture.earlier_consumer"
+    );
+    cache.finish(Ok(()), &control).unwrap();
+    assert!(
+        !fs::read_dir(fixture.home.join("cache/source-facts-rust"))
+            .unwrap()
+            .any(|p| p
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".lycheedev-cache-"))
+    );
+}
+
+#[test]
+fn cache_aware_cancelled_pipeline_joins_and_recovers_without_losing_committed_groups() {
+    let fixture = Fixture::new();
+    let raw = files(80);
+    let pin = fixture.pin(&raw);
+    let control = OperationControl::default();
+    let cancel = control.tracked_cancel_handle().unwrap();
+    let profile = Profile::enabled(true);
+    let inputs = git::tree_with_control(&fixture.home, &pin, &control).unwrap();
+    let cache = SourceFactsCache::open(&fixture.home, &control).unwrap();
+    let mut groups = Groups::new(&cache, &inputs, &control, &profile);
+    let mut docs = Vec::new();
+    let result = facts_pipeline::visit_with_cpu_limit_and_retained(
+        &fixture.home,
+        &pin,
+        &inputs,
+        &control,
+        &profile,
+        2,
+        GROUP_RETAINED_BYTES,
+        groups.consumer(|groups, file, data, prepared| {
+            control.check()?;
+            let sha = storage::sha256(&data);
+            let (facts, _, facts_locator) =
+                groups.document(file, &data, &sha, prepared, &mut docs)?;
+            docs.push(Document {
+                path: file.path.clone(),
+                text: Some(data),
+                sha256: sha,
+                bytes: file.bytes,
+                facts,
+                facts_locator,
+            });
+            if docs.len() == 65 {
+                cancel.cancel();
+            }
+            Ok(())
+        }),
+    );
+    let error = result.unwrap_err();
+    assert_eq!(error.code, control.check().unwrap_err().code);
+    assert_eq!(docs.len(), 65);
+    assert_eq!(profile.calls(Phase::FactsPublishRename), 1);
+    assert!(groups.finish::<()>(Err(error)).is_err());
+    // finish closes the held native owners even when its original control is
+    // already stopped; every pure worker was joined before visit returned.
+    assert!(cache.finish(Ok(()), &control).is_err());
+    let entries = fs::read_dir(fixture.home.join("cache/source-facts-rust"))
+        .unwrap()
+        .map(|p| p.unwrap().file_name())
+        .collect::<Vec<_>>();
+    assert_eq!(entries.len(), 1);
+    assert!(
+        !entries[0]
+            .to_string_lossy()
+            .starts_with(".lycheedev-cache-")
+    );
+    let live = OperationControl::default();
+    let recovered = index::build_uncached(&fixture.home, &pin, &live).unwrap();
+    assert_eq!(recovered.summary["io"]["cachedFacts"], 64);
+    assert_eq!(recovered.summary["io"]["parsedDocuments"], 16);
+    let profile = Profile::enabled(true);
+    let warm = index::build_uncached_profiled(&fixture.home, &pin, &live, &profile).unwrap();
+    assert_eq!(profile.calls(Phase::FactsWorker), 0);
+    assert_eq!(all_facts(&warm), all_facts(&recovered));
+}
+
+#[test]
+fn cache_aware_non_worker_rows_and_corrupt_record_keep_original_order() {
+    let fixture = Fixture::new();
+    let mut raw = files(66);
+    raw.insert(
+        "D000a.lua".into(),
+        format!("--{}\nfunction Large() end", "x".repeat(65 << 10)),
+    );
+    raw.insert("D030a.png".into(), "opaque asset".into());
+    let pin = fixture.pin(&raw);
+    let control = OperationControl::default();
+    let baseline = index::build_uncached(&fixture.home, &pin, &control).unwrap();
+    assert_eq!(baseline.documents.len(), 67);
+    let location = baseline.documents[63].facts_locator.as_ref().unwrap();
+    let path = pack(&fixture.home, location);
+    let mut bytes = fs::read(&path).unwrap();
+    bytes[location.offset as usize + HEADER] ^= 0xff;
+    fs::write(&path, bytes).unwrap();
+    let profile = Profile::enabled(true);
+    let repaired = index::build_uncached_profiled(&fixture.home, &pin, &control, &profile).unwrap();
+    assert_eq!(repaired.summary["io"]["parsedDocuments"], 1);
+    assert_eq!(repaired.summary["io"]["cachedFacts"], 66);
+    assert_eq!(profile.calls(Phase::FactsWorker), 0);
+    assert_eq!(profile.calls(Phase::FactsParseSequential), 1);
+    assert_eq!(all_facts(&repaired), all_facts(&baseline));
+}
+
+#[test]
+fn cache_aware_current_retention_and_encoding_prelude_precedes_deferred_cache_error() {
+    use facts_pipeline::Admission;
+    for overflow in [false, true] {
+        let fixture = Fixture::new();
+        let raw = files(2);
+        let pin = fixture.pin(&raw);
+        let control = OperationControl::default();
+        let profile = Profile::enabled(true);
+        let inputs = git::tree_with_control(&fixture.home, &pin, &control).unwrap();
+        let cache = SourceFactsCache::open(&fixture.home, &control).unwrap();
+        let body = raw[&inputs[0].path].as_bytes();
+        let key = facts_cache_key(&inputs[0].path, &storage::sha256(body));
+        fs::create_dir(
+            fixture
+                .home
+                .join("cache/source-facts-rust")
+                .join(format!("{key}.json")),
+        )
+        .unwrap();
+        let mut groups = Groups::new(&cache, &inputs, &control, &profile);
+        let mut docs = Vec::new();
+        if overflow {
+            assert!(matches!(
+                groups.admit(&inputs[0], body, true),
+                Admission::Barrier
+            ));
+            assert!(groups.admission_error.is_some());
+        } else {
+            // Invalid UTF-8 itself is a barrier and never probes the bad cache.
+            assert!(matches!(
+                groups.admit(&inputs[0], b"\xff", true),
+                Admission::Barrier
+            ));
+            assert!(groups.admission_error.is_none());
+        }
+        let mut retained = if overflow { 256 << 20 } else { 0 };
+        let data: &[u8] = if overflow { body } else { b"\xff" };
+        // This is the same prelude invoked by the default index consumer,
+        // using a synthetic retained counter rather than allocating 256 MiB.
+        let result = index::document_input_sha(&inputs[0], data, &mut retained)
+            .and_then(|sha| groups.document(&inputs[0], data, &sha, None, &mut docs));
+        let expected = if overflow {
+            "codebase.source_budget"
+        } else {
+            "command.failed"
+        };
+        assert_eq!(result.as_ref().unwrap_err().code, expected);
+        assert_eq!(groups.finish(result).unwrap_err().code, expected);
+        cache.finish(Ok(()), &control).unwrap();
+        assert_eq!(profile.calls(Phase::FactsParse), 0);
+    }
 }

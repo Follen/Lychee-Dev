@@ -2,8 +2,11 @@
 
 This is an opt-in Windows **observation**, not the 20-pair performance gate or
 complete B01–B07 acceptance. No result is implied by the Node tests. The product
-is fixed to `00d215a937513609e482c1ef65f3b43f0288beee`; the controller reuses its
-existing sealed release/symbols artifact. There is no Cargo/rustc invocation,
+is selected by explicit exact commit/artifact/EXE/source digests in the fresh
+configuration; the controller reuses that sealed release/symbols artifact. The
+three historical continuation routes remain pinned to original
+`00d215a937513609e482c1ef65f3b43f0288beee` and its published SHA trio.
+There is no Cargo/rustc invocation,
 CLI rebuild, game interaction, package installation, publication or historical
 sample import. The historical b3d/pack1 and bbfe/ab4/v10 results stay unchanged.
 
@@ -18,7 +21,7 @@ The wrapper hashes the full runtime file closure before and after execution.
 Invoke on the selected Windows test environment:
 
 ```powershell
-node <reviewed-runner-stage>/tools/rust-source-pack-diagnostics.mjs <pack2-config.json> <machine-conditions.json>
+node <reviewed-runner-stage>/tools/rust-source-pack-diagnostics.mjs <pack2-config.json> <machine-conditions.json> [--scratch-6gib]
 ```
 
 Exact runtime export list (25 files; this isolated closure has been imported in
@@ -52,8 +55,9 @@ tests/rust-source-native-acceptance/assertions.mjs
 tests/rust-skill-usage/assertions.mjs
 ```
 
-Configuration (all filesystem paths absolute; replace every placeholder with
-actual authenticated values, including the complete Go package inventory SHA):
+Historical 00d configuration example (all filesystem paths absolute; replace
+placeholders with actual values, including the complete Go package inventory
+SHA; a new fresh candidate requires its own exact identity fields):
 
 ```json
 {
@@ -77,7 +81,7 @@ actual authenticated values, including the complete Go package inventory SHA):
 }
 ```
 
-These fixed artifact/EXE/source hashes bind the existing [00d release build](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6236213281) and [assembly](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6236225116). The EXE is 44,717,568 bytes; substitute only the owner-local absolute paths, not new artifact identities.
+These fixed artifact/EXE/source hashes bind the existing [00d release build](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6236213281) and [assembly](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6236225116). The EXE is 44,717,568 bytes. For a historical continuation, substitute only owner-local absolute paths and keep these identities. A new fresh observation must instead use its own exact committed source and sealed artifact identities.
 
 The existing machine-conditions format requires nonempty `machine`,
 `powerAndThermal`, `competingLoad`, `disk`, and `operator` strings. State unknowns
@@ -145,8 +149,9 @@ for an attractive cache is forbidden. Both engines' full persisted selection
 and closed metadata schema are captured. No enhanced semantic result is removed
 to manufacture equality; any difference fails and remains available for review.
 
-For changed cases, Go's authenticated raw records, original manifest and every
-actually compared raw per-file Facts envelope are copied into immutable evidence,
+For every fresh cold/warm comparison and all changed cases, Go's authenticated
+raw records, original manifest and every actually compared raw per-file Facts
+envelope are copied into immutable evidence. In a changed case,
 then that successful Go owner is sealed and cleaned. The subsequent Rust owner
 uses the original healthy Rust base. The small `source-pack-custody.mjs` helper
 and optional authenticated stream argument to the existing `readFactDelta`
@@ -154,7 +159,7 @@ allow the identical comparison after Go scratch removal. No full home, mirror,
 mutable cache or unrelated file is moved into evidence. This is comparison data,
 not a new product catalog.
 
-All aggregate indexes/records and Go Facts evidence are streamed in 64 KiB I/O
+All aggregate indexes/records and Go/Rust Facts evidence are streamed in 64 KiB I/O
 chunks into ordered 8 MiB-or-smaller parts, each with a whole-file SHA, per-part
 SHA, offset/size and authenticated manifest. The catalog also binds the original
 manifest and every parts manifest; final verification rehashes them and all
@@ -164,8 +169,13 @@ over-budget or changed-after-open evidence prevents comparison success.
 
 ## Disk and terminal ownership
 
-The original fixed policy remains 20 GiB cache / 5 GiB scratch / 2 GiB free-space
-reserve. All `LYCHEEDEV_DISK_*` environment overrides are rejected before the
+The default fixed policy remains 20 GiB cache / 5 GiB scratch / 2 GiB free-space
+reserve. For this approved PR14 Source test task, an explicit fresh
+`--scratch-6gib` selects exactly 6 GiB through local admission/owner `limits`,
+with fixed scope `PR14-source-pack2-fresh` and authorization reference
+`Sentinel_a57db18d476081919e647f3195a645a1`. Omitting the flag keeps 5 GiB;
+there is no arbitrary amount or higher-cap option. Cache/free-space reserves
+and product budgets stay unchanged. Actual insufficiency stops the run. All `LYCHEEDEV_DISK_*` environment overrides are rejected before the
 first owner; no machine environment is changed. No existing active, preserved,
 foreign or unregistered owner is reclaimed.
 
@@ -195,6 +205,7 @@ calls; it never changes the original failed status.
 node --check tools/rust-source-pack-diagnostics.mjs
 node --check tests/rust-performance-paired/source-pack-scenarios.mjs
 node --check tests/rust-performance-paired/source-pack-custody.mjs
+node --check tests/rust-performance-paired/read-fact-delta.mjs
 node --test tests/rust-performance-paired/source-pack-scenarios.test.mjs tests/rust-performance-paired/source-pack-custody.test.mjs tests/rust-performance-paired/source-pack-resume.test.mjs tests/rust-performance-paired/read-fact-delta.test.mjs tests/rust-performance-paired/source-candidates.test.mjs tools/rust-source-pack-evidence.test.mjs
 ```
 
@@ -333,8 +344,9 @@ not-run merely because its terminal result is unavailable.
 `Sentinel_a57db18d476081919e647f3195a645a1` and this fixed be168 remaining-task
 scope. It sets only the explicit `limits` arguments for this wrapper/controller's
 admissions and owners: scratch exactly 6 GiB, cache still 20 GiB, free reserve
-still 2 GiB. The flag is rejected on fresh/cold/inspection modes; omitting it
-retains 5 GiB. Arbitrary amounts, authorization references, scopes or environment
+still 2 GiB. Fresh runs use the separately named PR14 fresh scope described
+above. The flag remains rejected on the original cold-continuation and
+inspection modes; omitting it retains 5 GiB. Arbitrary amounts, authorization references, scopes or environment
 overrides are rejected. No machine environment, policy file, product runtime
 budget or old evidence is changed. First Go admission previously needed
 380,939,478 B above 5,005,736,596 B already used, a 17,966,954 B gap at 5 GiB;
@@ -382,7 +394,9 @@ explicit task-local 6 GiB allowance, with cache20/free2 unchanged.
 
 ### Complete changed-owner logical-byte submission
 
-The model is restricted to these fixed Go323/Rust00d formats and four recipes.
+The model is inherited from the fixed Go323/Rust00d formats and four recipes;
+fresh candidates must retain that pack2 writing contract for this estimate to
+apply.
 The baseline clone is measured in full, including old snapshots, Facts, blobs,
 metadata, mirror and empty lock files. New growth is charged separately:
 
@@ -441,3 +455,106 @@ observed 4096-byte DB page. Old used bytes plus the retained Go home alone are
 425,853,519 B below 6 GiB before other new owner/preparation bytes. This is only
 planning: current measured usage and exact owner admission decide whether the
 run may start. No cleanup or extra cap increase is implied.
+
+
+## Referenced Rust output custody (future runs)
+
+The completed e475 observation compared every Rust Facts array and common
+summary while each variant home still existed. Its successful owner cleanup
+then removed the variant packs without archiving those raw bytes. The saved
+indexes, Go Facts and runtime comparison remain evidence of that observation,
+but cannot independently replay all Rust variant Facts. This follow-up does not
+recreate deleted originals, relabel historical receipts, or rerun product calls.
+
+For future comparisons, `compareFacts` now captures the exact Rust output
+closure before an owner may succeed and clean up:
+
+- Authenticate the exact same-run v14/pack2 index and its existing metadata
+  manifest, bound to the explicitly authenticated candidate identity. Enumerate
+  its documents in order.
+- Deduplicate only the referenced `factsLocator.group` pack files. For a legal
+  document without a locator, retain only its existing v11 content/path-keyed
+  loose Facts file. Unreferenced cache generations, assets, captures, mirrors
+  and other home contents are not copied.
+- Validate every original record with the existing Rust Facts reader. Stream
+  each original file through the existing 64 KiB I/O / 8 MiB parts helper.
+  `rust-custody.json` binds the index SHA, its parts manifest, the existing
+  `rust-index-manifest.json`, original relative paths, whole-file bytes/SHA,
+  every parts-manifest SHA and the actual configured commit/artifact/EXE/source
+  identity (never a different build relabeled 00d).
+- `verifyRustCustody(reference)` reopens the catalog and index parts, derives the
+  complete required file set again, and verifies every part, whole file, pack
+  header, locator/key/range, record SHA, envelope input, exact five Facts arrays
+  and canonical Facts digest. It rechecks manifests/catalog after the read.
+  This verification does not need the original home. The preserved original
+  bytes can also be restored into an independently owned minimal replay fixture
+  for the existing `readRustFact`/`readFactDelta`; no replay/product invocation is
+  added to the measured run.
+
+The limits are 32 MiB per Facts object, 512 MiB total referenced objects,
+100,000 documents and a 16 MiB catalog. Duplicate documents, overlapping
+locators, missing/extra files, path escapes/reparse points, malformed/changed
+parts and identity mismatches fail closed. Repeated capture cannot overwrite
+an existing custody. Any archive/admission/verification failure keeps the new
+owner failed and uncleaned; it never substitutes another measurement.
+
+Space accounting is separate from scratch growth. Changed Rust admission now
+adds `baseFactsBytes + newFactsBound` to evidence required bytes. A fresh
+cold/warm pair reserves four 512 MiB custody ceilings (Go and Rust, twice) for
+free-space admission; a retained cold continuation budgets actual unchanged
+Go/Rust Facts for warm.
+Immediately before copying, the helper submits the measured unique object
+bytes plus the exact encoded parts-manifest/catalog lengths and one existing
+bounded 16 MiB admission-report slot, with zero additional scratch reserve.
+It uses the same explicit task-local disk limits as the owner, retains this
+admission report, and does not alter the 2 GiB free reserve. Cold revalidation
+uses the new two catalogs through a sealed `cold-facts-custody.v2` reference,
+instead of duplicating either body copy. The restricted borrow claim verifies
+both complete catalogs; the fixed old v1 historical proof remains supported.
+All archiving and verification happen after native product timing.
+
+The formal comparison opts into an additional `factSources` record containing
+the SHA and byte count of the actual bytes read, rather than a later path
+rehash. Repeated Go content keys must yield the same tuple. Every Rust
+document contributes its loose-file tuple or exact group/offset/bytes/record
+SHA. Before returning full equality, `bindComparedCustody` requires complete
+Go file coverage and exact per-document Rust tuple equality against the saved
+catalogs and index, then re-verifies both custodies. A valid same-input Facts
+replacement between comparison and archival therefore fails and retains the
+owner. Historical reader calls keep their original report shape unless they
+explicitly request these tuples.
+
+
+Fresh Go copying also preflights the actual unique referenced bytes and encoded
+parts lengths, a 1 MiB original-manifest ceiling, and bounded
+catalog/admission-report slots. The original manifest uses the same bounded
+read/EOF/file-identity checks. Its existing
+`captureGoCustody` receives an optional admitted relative-path/size/SHA list and
+document count. Each body read is bounded to that size plus a one-byte EOF
+probe, checks opened/named file identity and SHA, and supplies the same tuple
+to the streaming copy. Post-admission growth, truncation, replacement, removal
+or an unadmitted source fails before that body can exceed its declared copy
+budget. Old callers without the optional tuple keep their previous behavior.
+Warm still performs the full Facts comparison and captures its own exact
+results; a cached count alone never substitutes for validation.
+
+## Explicit fresh candidate identity
+
+The configuration example above is the historical 00d example, not a template
+whose SHA values may be reused for another build. For a new fresh observation,
+supply the actual 40-character commit and all three independently recorded
+64-character digests. There are no `latest`, branch-name or implicit build
+selectors and no automatic build. The existing artifact verifier authenticates
+the EXE/PDB bytes; the controller checks exact optimized build command, original
+source provenance, configured source digest, clean checkout and exact HEAD,
+complete unmodified public Emmy identity/recipe/tree digests and the existing
+release channel. Those checks are repeated through the owned run.
+
+The observation report and Rust custody catalog carry this selected identity.
+Cold, remaining-four and remaining-seven historical authenticators, controller
+entry and report verifier still require the original 00d commit and SHA trio;
+fresh configuration flexibility cannot reuse another candidate's old samples.
+The footprint model remains the conservative 00d-derived pack2 writing-format
+estimate, measured against the current healthy base. A candidate that changes
+that format/write behavior needs a reviewed estimate; this is not a generic
+resource bound for arbitrary future products.

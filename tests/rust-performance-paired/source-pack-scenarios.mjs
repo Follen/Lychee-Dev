@@ -2,26 +2,27 @@
 // No builds, historical sample import or acceptance change.
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync} from 'node:fs';
+import {createReadStream, closeSync, openSync, readSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
-import {isAbsolute, join, relative, resolve} from 'node:path';
+import {basename, isAbsolute, join, relative, resolve} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {performance} from 'node:perf_hooks';
 import os from 'node:os';
+import readline from 'node:readline';
 import {beginScratch, admission, contained, sha256, policy, defaults} from '../../tools/rust-disk.mjs';
 import {hashFile, sourceDigest, verifyArtifact} from '../../tools/rust-build.mjs';
 import {ownedSpawnSync} from '../../tools/rust-owned-process.mjs';
 import {collectOwnedMemory} from '../../tools/rust-owned-memory.mjs';
 import {inspectEmmy} from '../../tools/rust-emmy-identity.mjs';
-import {splitIndexEvidence, INDEX_BYTES} from '../../tools/rust-source-pack-evidence.mjs';
+import {splitIndexEvidence, verifyParts, PART_BYTES, INDEX_BYTES} from '../../tools/rust-source-pack-evidence.mjs';
 import {assertEnvelope, assertCorpus, corpusDigest} from '../rust-source-full-corpus/assertions.mjs';
 import {fixturePin} from '../rust-source-native-acceptance/assertions.mjs';
 import {GO_COMMIT, elapsed, semantic} from './contract.mjs';
 import {assertSeedCold, auditCorpus, cloneSeed, inventory, derivedIdentity, proveWarmReuse, verifyGoMetadata, verifyGoPackage, verifySeedMetadata} from './inputs.mjs';
 import {RUNNER_FILES as HISTORICAL_RUNNER_FILES, sourcePhaseEnvironment, validateConditions} from './source-candidates.mjs';
 import {verifyPackProfile} from './source-pack-resume.mjs';
-import {readFactDelta} from './read-fact-delta.mjs';
-import {captureGoCustody, openGoCustody} from './source-pack-custody.mjs';
+import {readFactDelta, readRustFact, rustFactPath} from './read-fact-delta.mjs';
+import {captureGoCustody, openGoCustody, goFactRelative} from './source-pack-custody.mjs';
 
 export const CANDIDATE_COMMIT = '00d215a937513609e482c1ef65f3b43f0288beee';
 export const CANDIDATE_IDENTITY = Object.freeze({artifactSHA256: '02ebe1eb57d552d1c8ebf6c86697fdbc77d6eba4ee847edd33c4d7d19b6253ad', binarySHA256: '3169c2187b966b40ed3622fe14cfb81527e8dd3a52a6d99a888e8ab482c1b1fb', sourceTreeSHA256: '06a5a0e39c46c786d946b8c429c90c0eb4e9e1291028375e329fc9457776b4e3'});
@@ -51,8 +52,7 @@ export function validateRequest(value) {
   assert.equal(value.schema, 'lycheedev.source-pack-scenarios-config.v1');
   for (const path of [value.ownerRoot, value.candidate?.sourceRoot, value.candidate?.artifactRoot, value.candidate?.artifact, value.go?.sourceRoot, value.go?.packageRoot, value.go?.luaLSArchive]) assert(typeof path === 'string' && isAbsolute(path), 'absolute input paths required');
   exact(value.candidate, ['sourceRoot', 'artifactRoot', 'artifact', 'commit', 'artifactSHA256', 'binarySHA256', 'sourceTreeSHA256']);
-  assert.equal(value.candidate.commit, CANDIDATE_COMMIT, 'fixed pack2 product commit required');
-  for (const key of ['artifactSHA256', 'binarySHA256', 'sourceTreeSHA256']) { digest(value.candidate[key]); assert.equal(value.candidate[key], CANDIDATE_IDENTITY[key], `fixed 00d sealed ${key} required`); }
+  candidateIdentity(value.candidate);
   exact(value.go, ['sourceRoot', 'packageRoot', 'luaLSArchive', 'packageSHA256']); digest(value.go.packageSHA256);
   const result = structuredClone(value);
   result.ownerRoot = realpathSync(value.ownerRoot);
@@ -60,21 +60,32 @@ export function validateRequest(value) {
   result.candidate.artifact = contained(result.candidate.artifactRoot, value.candidate.artifact);
   return result;
 }
-export function verifyCandidateRecord(input) {
-  assert.equal(input.commit, CANDIDATE_COMMIT); for (const key of Object.keys(CANDIDATE_IDENTITY)) assert.equal(input[key], CANDIDATE_IDENTITY[key]);
-  assert.equal(hashFile(input.artifact, 65536), input.artifactSHA256, 'sealed artifact record changed');
-  const artifact = verifyArtifact(input.artifactRoot, input.artifact);
-  assert(['release', 'symbols'].includes(artifact.profile), 'optimized existing artifact required');
+export function candidateIdentity(input) {
+  assert.match(input?.commit, /^[0-9a-f]{40}$/, 'explicit exact candidate commit required');
+  for (const key of Object.keys(CANDIDATE_IDENTITY)) digest(input[key]);
+  return {commit: input.commit, ...Object.fromEntries(Object.keys(CANDIDATE_IDENTITY).map(key => [key, input[key]]))};
+}
+export function assertHistoricalCandidate(request) { assert.deepEqual(candidateIdentity(request.candidate), {commit: CANDIDATE_COMMIT, ...CANDIDATE_IDENTITY}, 'historical continuations require the exact original 00d artifact'); }
+export function verifyCandidateIdentity(input, artifact, sourceTree, emmy, channel) {
+  candidateIdentity(input); assert(['release', 'symbols'].includes(artifact.profile), 'optimized existing artifact required');
   assert.equal(artifact.sameInvocation, true); assert(isAbsolute(artifact.sourceRoot), 'original artifact source provenance required');
   if (artifact.profile === 'symbols') assert(artifact.pdb, 'matching symbols required');
-  assert.equal(artifact.binarySHA256, input.binarySHA256);
-  assert.equal(artifact.inputHashes?.sourceTree, input.sourceTreeSHA256);
-  assert.equal(sourceDigest(input.sourceRoot), input.sourceTreeSHA256, 'product source/build identity changed');
-  const emmy = inspectEmmy(input.sourceRoot);
-  assert.equal(emmy.identity, 'public-upstream-unmodified-v1'); assert.equal(emmy.patchedTreeSHA256, artifact.inputHashes.emmy?.patchedTreeSHA256);
-  const channel = JSON.parse(readFileSync(join(input.sourceRoot, 'release/npm-channel.json')));
-  assert.equal(channel.version, '3.5.0'); assert.equal(channel.distTag, 'beta');
-  return artifact;
+  assert.deepEqual(artifact.command, ['cargo', 'build', '--locked', '--offline', '-j', '1', '--profile', artifact.profile, '-p', 'lycheedev-cli'], 'fixed existing build recipe required');
+  assert.equal(artifact.binarySHA256, input.binarySHA256, 'candidate EXE identity'); assert.equal(artifact.inputHashes?.sourceTree, input.sourceTreeSHA256, 'candidate artifact source identity'); assert.equal(sourceTree, input.sourceTreeSHA256, 'product source/build identity changed');
+  assert.equal(emmy.identity, 'public-upstream-unmodified-v1');
+  for (const key of ['identitySHA256', 'recipeSHA256', 'patchedTreeSHA256']) { digest(emmy[key]); assert.equal(emmy[key], artifact.inputHashes.emmy?.[key], `Emmy ${key} differs from build`); }
+  assert.equal(artifact.inputHashes.emmy.schema, emmy.schema); assert.equal(artifact.inputHashes.emmy.historicalPrivatePatchRecovered, false);
+  assert.equal(channel.version, '3.5.0'); assert.equal(channel.distTag, 'beta'); return artifact;
+}
+export function verifyCandidateRecord(input) {
+  candidateIdentity(input); assert.equal(hashFile(input.artifact, 65536), input.artifactSHA256, 'sealed artifact record changed');
+  const artifact = verifyArtifact(input.artifactRoot, input.artifact); assert.equal(lstatSync(artifact.sourceBinary).size, artifact.bytes, 'artifact byte size changed');
+  return verifyCandidateIdentity(input, artifact, sourceDigest(input.sourceRoot), inspectEmmy(input.sourceRoot), JSON.parse(readFileSync(join(input.sourceRoot, 'release/npm-channel.json'))));
+}
+export function verifyCleanCheckout(root, commit, git) {
+  assert.match(commit, /^[0-9a-f]{40}$/); assert.equal(realpathSync(git(['rev-parse', '--show-toplevel'], root).toString().trim()), root, 'exact checkout root required');
+  assert.equal(git(['rev-parse', 'HEAD'], root).toString().trim(), commit, 'exact configured checkout commit');
+  assert.equal(git(['status', '--porcelain', '--untracked-files=all'], root).toString().trim(), '', 'source checkout must be clean');
 }
 export function evidenceFiles(directory) {
   const result = [];
@@ -90,7 +101,11 @@ export function evidenceFiles(directory) {
 export function assertDiskPolicy(root, environment = process.env, allowance = undefined, remaining = undefined) {
   assert(!Object.keys(environment).some(key => /^LYCHEEDEV_DISK_/i.test(key)), 'diagnostic disk policy overrides are forbidden');
   const observed = policy(root, {}); assert.deepEqual(observed, {...defaults}, 'fixed original disk policy required');
-  if (allowance) { (remaining?.schema === 'lycheedev.source-pack2-retained-go.v1' ? validateGoReference : validateRemainingReference)(remaining); assert.deepEqual(allowance, REMAINING_ALLOWANCE, 'only explicitly authorized fixed remaining-task 6 GiB allowance'); return {...observed, scratchBytes: allowance.scratchBytes}; }
+  if (allowance) {
+    if (remaining) (remaining.schema === 'lycheedev.source-pack2-retained-go.v1' ? validateGoReference : validateRemainingReference)(remaining);
+    assert.deepEqual(allowance, remaining ? REMAINING_ALLOWANCE : FRESH_ALLOWANCE, 'only explicitly authorized task-local 6 GiB allowance');
+    return {...observed, scratchBytes: allowance.scratchBytes};
+  }
   return observed;
 }
 const variantAuditBytes = oracle => { assert(Number.isSafeInteger(oracle.allBytes) && oracle.allBytes >= 0); return oracle.allBytes; };
@@ -98,7 +113,7 @@ const saveJSON = (path, value) => { const raw = Buffer.from(JSON.stringify(value
 export function footprint({cold = true} = {}) {
   assert.equal(cold, true, 'changed admission uses measured own-engine inventories');
   const scratchReserveBytes = 257058598 + 131416885 + (64 << 20);
-  const evidenceBytes = 4 * INDEX_BYTES + 2 * 32665129 + (64 << 20);
+  const evidenceBytes = 4 * INDEX_BYTES + 4 * RUST_CUSTODY_BYTES + 2 * 32665129 + (128 << 20);
   return {requiredBytes: scratchReserveBytes + evidenceBytes, scratchReserveBytes,
     basis: 'Historical b3d Go/Rust complete home bytes plus 64 MiB setup/growth allowance; an estimate, not observed 00d size or a hard allocation cap', evidenceBytes};
 }
@@ -143,15 +158,17 @@ export function mutationFootprint(engine, id, base, indexBytes, rows, oracle, pa
     metadataAndSidecars: metadata, gitObjectsAndStage: gitObjects, gitIndexAndLock: gitIndexes, projectFiles: 16384, lockFileContents: 0};
   const scratchReserveBytes = Object.values(components).reduce((n, bytes) => n + bytes, 0);
   // Each completed Go result has one complete records copy and all needed
-  // Facts; Rust has one complete index copy. Raw Git audit retains all input
+  // Facts; Rust has one complete index and every referenced Facts object.
+  // The latter is bounded by all base objects plus the complete new generation.
+  // Raw Git audit retains all input
   // bytes. Owned memory has an existing 64 MiB hard evidence ceiling; combined
   // stdout/stderr is 16 MiB bounded (reserve two slots conservatively). Other bounded
   // manifests/metadata/comparison/owner reports get four 16 MiB slots.
-  const evidence = {indexParts: INDEX_BYTES, goFacts: engine === 'go' ? factBytes + (changed ? 32 << 20 : 0) : 0, rawAudit: oracle.allBytes + rows.reduce((n, row) => n + Buffer.byteLength(row.path) + 256, 0), memory: 64 << 20, stdoutStderr: 32 << 20, metadataAndReports: 64 << 20};
+  const evidence = {indexParts: INDEX_BYTES, rustFacts: engine === 'rust' ? factBytes + components.newFacts : 0, goFacts: engine === 'go' ? factBytes + (changed ? 32 << 20 : 0) : 0, rawAudit: oracle.allBytes + rows.reduce((n, row) => n + Buffer.byteLength(row.path) + 256, 0), memory: 64 << 20, stdoutStderr: 32 << 20, metadataAndReports: 64 << 20};
   const evidenceBytes = Object.values(evidence).reduce((n, bytes) => n + bytes, 0);
   assert(Number.isSafeInteger(scratchReserveBytes + evidenceBytes));
   return {schema: 'lycheedev.source-pack2-footprint.v2', engine, scenario: id, scratchReserveBytes, requiredBytes: scratchReserveBytes + evidenceBytes, components, evidence, evidenceBytes, baseBytes: base.bytes, indexBytes, factsBytes: factBytes,
-    basis: 'Fixed Go323/Rust00d, exact four recipes, immutable healthy base; complete outputs, atomic stages, whole-owner fixture and finite SQLite transactions. Conservative logical-byte submission, not physical allocation or a runtime hard cap.'};
+    basis: 'Go323 and authenticated candidate using the pack2 format/writing contract, exact four recipes, immutable healthy base; conservative logical-byte estimate inherited from 00d, not a proof for arbitrary product changes, physical allocation or a runtime hard cap.'};
 }
 
 export function mutationRows(base, id, original) {
@@ -257,17 +274,166 @@ export function indexEvidence(home, engine, pin, directory, root) {
   const parts = splitIndexEvidence(root, sourceRef, join(directory, `${engine}-index-parts`));
   return {...sourceRef, manifest, parts, metadata};
 }
-export async function compareFacts(homes, outputs, pin, oracle, directory, root, retained = undefined) {
+// Immutable output evidence only. Keep the exact files referenced by this index,
+// never the whole cache/home or a reconstruction from the equal Go Facts.
+const RUST_FACT_BYTES = 32 << 20, RUST_CUSTODY_BYTES = 512 << 20, RUST_DOCUMENTS = 100000;
+const FACT_SECTIONS = ['declarations', 'relationships', 'loads', 'headers', 'diagnostics'];
+const jsonBytes = value => Buffer.from(JSON.stringify(value, null, 2) + '\n');
+function plannedPartsBytes(source) { return jsonBytes({schema: 'lycheedev.source-index-parts.v1', source, partBytes: PART_BYTES, parts: Array.from({length: Math.max(1, Math.ceil(source.bytes / PART_BYTES))}, (_, j) => ({path: `index.part${String(j).padStart(3, '0')}.bin`, offset: j * PART_BYTES, bytes: Math.min(PART_BYTES, source.bytes - j * PART_BYTES), sha256: '0'.repeat(64)}))}).length; }
+function custodyBytes(path, maximum) { const stat = lstatSync(path); assert(stat.isFile() && !stat.isSymbolicLink() && stat.size <= maximum, 'bounded regular custody file'); return readFileSync(path); }
+function rustReferences(index, home) {
+  assert(Array.isArray(index.documents) && index.documents.length > 0 && index.documents.length <= RUST_DOCUMENTS, 'Rust custody document budget');
+  assert.equal(index.summary?.documents, index.documents.length); assert.equal(index.summary.parser, 'source-v1');
+  const paths = new Set(), files = new Map();
+  for (const document of index.documents) {
+    assert(typeof document.path === 'string' && !isAbsolute(document.path) && !document.path.includes('\\') && !document.path.includes(':') && document.path.split('/').every(p => p && p !== '.' && p !== '..'), 'Rust custody document path');
+    assert(/\.(lua|xml|toc)$/i.test(document.path)); digest(document.sha256); assert(Number.isSafeInteger(document.bytes) && document.bytes >= 0); assert(!paths.has(document.path), 'duplicate Rust custody document'); paths.add(document.path);
+    const locator = document.factsLocator;
+    if (Object.hasOwn(document, 'factsLocator')) { exact(locator, ['group', 'offset', 'bytes', 'sha256']); digest(locator.group); digest(locator.sha256); assert(Number.isSafeInteger(locator.offset) && locator.offset >= 8 && Number.isSafeInteger(locator.bytes) && locator.bytes > 0 && locator.bytes <= RUST_FACT_BYTES && locator.offset + 68 + locator.bytes <= RUST_FACT_BYTES, 'Rust custody locator bounds'); }
+    const name = `cache/source-facts-rust/${basename(rustFactPath(home, document, 'v11-pack2'))}`, kind = locator ? 'pack' : 'loose';
+    if (!files.has(name)) files.set(name, {relative: name, kind, documents: []});
+    const file = files.get(name); assert.equal(file.kind, kind, 'Rust custody object kind collision'); file.documents.push(document);
+  }
+  for (const file of files.values()) if (file.kind === 'pack') { let end = 8; for (const doc of [...file.documents].sort((a, b) => a.factsLocator.offset - b.factsLocator.offset)) { assert(doc.factsLocator.offset >= end, 'overlapping Rust custody locators'); end = doc.factsLocator.offset + 68 + doc.factsLocator.bytes; } }
+  return [...files.values()];
+}
+function custodyManifest(directory, name, expectedSHA, maximum, expectedSource) {
+  const path = contained(directory, join(directory, name)), raw = custodyBytes(path, 65536); digest(expectedSHA); assert.equal(sha256(raw), expectedSHA, 'Rust custody parts manifest changed');
+  const manifest = JSON.parse(raw); assert(Number.isSafeInteger(manifest.source?.bytes) && manifest.source.bytes <= maximum, 'Rust custody source budget'); assert.deepEqual(manifest.source, expectedSource); verifyParts(resolve(path, '..'), manifest);
+  return {directory: resolve(path, '..'), manifest};
+}
+function custodyRange(parts, offset, bytes) {
+  assert(Number.isSafeInteger(offset) && Number.isSafeInteger(bytes) && offset >= 0 && bytes >= 0 && offset + bytes <= parts.manifest.source.bytes, 'Rust custody range');
+  const output = Buffer.alloc(bytes); let used = 0;
+  for (const part of parts.manifest.parts) {
+    const first = Math.max(offset, part.offset), last = Math.min(offset + bytes, part.offset + part.bytes); if (first >= last) continue;
+    const path = contained(parts.directory, join(parts.directory, part.path)), stat = lstatSync(path); assert(stat.isFile() && !stat.isSymbolicLink() && stat.size === part.bytes);
+    const fd = openSync(path, 'r'); try { let count = 0; while (count < last - first) { const n = readSync(fd, output, used + count, Math.min(65536, last - first - count), first - part.offset + count); assert(n > 0, 'truncated custody range'); count += n; } used += count; } finally { closeSync(fd); }
+  }
+  assert.equal(used, bytes); return output;
+}
+function verifyCustodyFact(parts, document, home) {
+  const locator = document.factsLocator; let raw;
+  if (locator) {
+    assert(custodyRange(parts, 0, 8).equals(Buffer.from('LYCFPK01')), 'Rust custody pack header');
+    const header = custodyRange(parts, locator.offset, 68);
+    assert.equal(header.readUInt32LE(0), locator.bytes); assert.equal(header.subarray(4, 36).toString('hex'), basename(rustFactPath(home, document, 'v11'), '.json')); assert.equal(header.subarray(36).toString('hex'), locator.sha256);
+    raw = custodyRange(parts, locator.offset + 68, locator.bytes); assert.equal(sha256(raw), locator.sha256, 'Rust custody record digest');
+  } else raw = custodyRange(parts, 0, parts.manifest.source.bytes);
+  const value = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(raw)); assert.equal(value.schema, 'lycheedev.source-facts.rust.v11'); assert.equal(value.inputSHA256, document.sha256); exact(value.facts, FACT_SECTIONS); for (const section of FACT_SECTIONS) assert(Array.isArray(value.facts[section]));
+  const stable = v => Array.isArray(v) ? v.map(stable) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k => [k, stable(v[k])])) : v;
+  assert.equal(sha256(JSON.stringify(stable(value.facts))), value.factsSHA256, 'Rust custody Facts digest');
+}
+export function verifyRustCustody(reference) {
+  exact(reference, ['directory', 'catalog', 'catalogSHA256', 'candidate']); candidateIdentity(reference.candidate); digest(reference.catalogSHA256);
+  const directory = realpathSync(reference.directory), catalogPath = contained(directory, reference.catalog); assert.equal(catalogPath, join(directory, 'rust-custody.json')); const raw = custodyBytes(catalogPath, 16 << 20); assert.equal(sha256(raw), reference.catalogSHA256, 'Rust custody catalog changed');
+  const catalog = JSON.parse(raw); exact(catalog, ['schema', 'candidate', 'layout', 'home', 'documents', 'factsBytes', 'index', 'indexManifest', 'files']);
+  assert.equal(catalog.schema, 'lycheedev.source-rust-facts-custody.v1'); exact(catalog.candidate, ['commit', ...Object.keys(CANDIDATE_IDENTITY)]); assert.deepEqual(candidateIdentity(catalog.candidate), reference.candidate); assert.equal(catalog.layout, 'v11-pack2'); assert(isAbsolute(catalog.home) && resolve(catalog.home) === catalog.home);
+  exact(catalog.index, ['path', 'bytes', 'sha256', 'manifest', 'manifestSHA256']); assert.equal(catalog.index.manifest, 'rust-index-parts/manifest.json');
+  const records = custodyManifest(directory, catalog.index.manifest, catalog.index.manifestSHA256, INDEX_BYTES, {path: catalog.index.path, bytes: catalog.index.bytes, sha256: catalog.index.sha256});
+  assert.equal(catalog.index.path, resolve(catalog.home, 'cache/objects', catalog.index.sha256.slice(0, 2), catalog.index.sha256.slice(2)), 'Rust custody original index path');
+  const index = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(custodyRange(records, 0, catalog.index.bytes))), references = rustReferences(index, catalog.home);
+  exact(catalog.indexManifest, ['path', 'bytes', 'sha256']); assert.equal(catalog.indexManifest.path, 'rust-index-manifest.json');
+  const manifestPath = contained(directory, join(directory, catalog.indexManifest.path)), manifestRaw = custodyBytes(manifestPath, 1 << 20); assert.equal(manifestRaw.length, catalog.indexManifest.bytes); assert.equal(sha256(manifestRaw), catalog.indexManifest.sha256);
+  const manifest = JSON.parse(manifestRaw), s = index.summary; assert.equal(manifest.schema, 'lycheedev.source-index.rust.v6'); assert.equal(manifest.blob.sha256, catalog.index.sha256); assert.equal(manifest.blob.bytes, catalog.index.bytes);
+  assert.equal(manifest.identity, sha256(['rust-index-v14', 'facts-pack-v2-path-radix512', 'facts-layout-v11-go323-generated-origins', 'TS0.26.3', 'Lua0.5.0', 'XML0.38', 'generator-v6', s.repository, s.product, s.commit, s.parser].join('\0')));
+  assert.equal(catalog.documents, index.documents.length); assert(Number.isSafeInteger(catalog.factsBytes) && catalog.factsBytes > 0 && catalog.factsBytes <= RUST_CUSTODY_BYTES, 'Rust custody total budget'); assert(Array.isArray(catalog.files)); assert.equal(catalog.files.length, references.length, 'complete Rust custody files required');
+  let total = 0;
+  for (const [i, file] of catalog.files.entries()) {
+    exact(file, ['relative', 'kind', 'bytes', 'sha256', 'manifest', 'manifestSHA256']); const expected = references[i]; assert.equal(file.relative, expected.relative, 'Rust custody referenced file/order'); assert.equal(file.kind, expected.kind); assert.equal(file.manifest, `rust-fact-${String(i).padStart(5, '0')}/manifest.json`); assert(Number.isSafeInteger(file.bytes) && file.bytes > 0 && file.bytes <= RUST_FACT_BYTES, 'Rust custody file budget');
+    total += file.bytes; assert(total <= RUST_CUSTODY_BYTES, 'Rust custody total budget');
+    const parts = custodyManifest(directory, file.manifest, file.manifestSHA256, RUST_FACT_BYTES, {path: resolve(catalog.home, file.relative), bytes: file.bytes, sha256: file.sha256});
+    for (const document of expected.documents) verifyCustodyFact(parts, document, catalog.home);
+    verifyParts(parts.directory, parts.manifest); assert.equal(hashFile(contained(directory, join(directory, file.manifest)), 65536), file.manifestSHA256, 'Rust custody manifest changed during verify');
+  }
+  assert.equal(total, catalog.factsBytes); verifyParts(records.directory, records.manifest); assert.equal(hashFile(contained(directory, join(directory, catalog.index.manifest)), 65536), catalog.index.manifestSHA256); assert.equal(hashFile(manifestPath, 1 << 20), catalog.indexManifest.sha256); assert.equal(hashFile(catalogPath, 16 << 20), reference.catalogSHA256);
+  return {documents: catalog.documents, files: catalog.files.length, factsBytes: total, indexSHA256: catalog.index.sha256};
+}
+export function captureRustCustody(home, index, directory, root, {admit = admission, limits = assertDiskPolicy(root), candidate} = {}) {
+  const authenticatedCandidate = candidateIdentity(candidate);
+  home = realpathSync(home); directory = contained(root, directory);
+  const raw = custodyBytes(contained(home, index.path), INDEX_BYTES); assert.equal(raw.length, index.bytes); assert.equal(sha256(raw), index.sha256);
+  const references = rustReferences(JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(raw)), home), files = []; let total = 0, partsBytes = 0;
+  const manifestPath = contained(directory, join(directory, 'rust-index-manifest.json')), manifestRaw = custodyBytes(manifestPath, 1 << 20); assert.deepEqual(JSON.parse(manifestRaw), index.manifest);
+  const sources = references.map(item => { const path = contained(home, join(home, item.relative)), stat = lstatSync(path); assert(stat.isFile() && !stat.isSymbolicLink() && stat.size > 0 && stat.size <= RUST_FACT_BYTES, 'bounded regular Rust Facts source'); total += stat.size; assert(total <= RUST_CUSTODY_BYTES, 'Rust custody total budget'); return {path, bytes: stat.size}; });
+  for (const [i, item] of references.entries()) {
+    const {path, bytes} = sources[i], sha = hashFile(path, RUST_FACT_BYTES);
+    for (const document of item.documents) readRustFact(home, document, 'v11-pack2');
+    partsBytes += plannedPartsBytes({path, bytes, sha256: sha});
+    files.push({relative: item.relative, kind: item.kind, bytes, sha256: sha, manifest: `rust-fact-${String(i).padStart(5, '0')}/manifest.json`, manifestSHA256: '0'.repeat(64)});
+  }
+  const catalog = {schema: 'lycheedev.source-rust-facts-custody.v1', candidate: authenticatedCandidate, layout: 'v11-pack2', home, documents: references.reduce((n, item) => n + item.documents.length, 0), factsBytes: total,
+    index: {path: index.path, bytes: index.bytes, sha256: index.sha256, manifest: 'rust-index-parts/manifest.json', manifestSHA256: hashFile(contained(directory, join(directory, 'rust-index-parts/manifest.json')), 65536)}, indexManifest: {path: 'rust-index-manifest.json', bytes: manifestRaw.length, sha256: sha256(manifestRaw)}, files};
+  assert(jsonBytes(catalog).length <= 16 << 20, 'Rust custody catalog budget');
+  // Exact measured file bytes and encoded manifests/catalog, plus the existing
+  // bounded 16 MiB admission report slot. No scratch copy is allocated.
+  for (const name of ['rust-custody.json', 'rust-custody-admission.json', ...files.map(file => file.manifest.split('/')[0])]) { let stat; try { stat = lstatSync(join(directory, name)); } catch (error) { if (error.code !== 'ENOENT') throw error; } assert(!stat, 'new Rust custody paths required'); }
+  const requiredBytes = total + partsBytes + jsonBytes(catalog).length + (16 << 20);
+  const admitted = admit(root, {limits, requiredBytes, scratchReserveBytes: 0});
+  saveJSON(join(directory, 'rust-custody-admission.json'), {requiredBytes, factsBytes: total, partsManifestBytes: partsBytes, catalogBytes: jsonBytes(catalog).length, admission: admitted});
+  for (const file of files) { const source = {path: contained(home, join(home, file.relative)), bytes: file.bytes, sha256: file.sha256}; splitIndexEvidence(root, source, resolve(directory, file.manifest, '..')); file.manifestSHA256 = hashFile(contained(directory, join(directory, file.manifest)), 65536); }
+  const catalogPath = join(directory, 'rust-custody.json'), bytes = jsonBytes(catalog); writeFileSync(catalogPath, bytes, {flag: 'wx'});
+  const reference = {directory, catalog: catalogPath, catalogSHA256: sha256(bytes), candidate: authenticatedCandidate}; verifyRustCustody(reference);
+  assert.equal(hashFile(index.path, INDEX_BYTES), index.sha256, 'Rust index changed during custody'); for (const file of files) assert.equal(hashFile(contained(home, join(home, file.relative)), RUST_FACT_BYTES), file.sha256, 'Rust Facts changed during custody');
+  return reference;
+}
+
+// Fresh cold/warm need the same immutable Go body custody as changed cases.
+// Only an existing retained Go custody can bypass this new copy, never a cache flag.
+export async function captureComparedGo(home, index, directory, root, {admit = admission, limits = assertDiskPolicy(root)} = {}) {
+  home = realpathSync(home); directory = contained(root, directory); assert.equal(hashFile(contained(home, index.path), INDEX_BYTES), index.sha256);
+  for (const name of ['go-custody.json', 'go-custody-admission.json', 'go-original-manifest.json']) { let stat; try { stat = lstatSync(join(directory, name)); } catch (error) { if (error.code !== 'ENOENT') throw error; } assert(!stat, 'new Go custody paths required'); }
+  const files = new Map(); let total = 0, documents = 0, partsBytes = 0;
+  for await (const line of readline.createInterface({input: createReadStream(index.path), crlfDelay: Infinity})) {
+    if (!line) continue; const doc = JSON.parse(line); if (doc.kind !== 'document') continue; assert(++documents <= RUST_DOCUMENTS);
+    const item = goFactRelative(doc, index.manifest.summary.parser); if (files.has(item.relative)) continue;
+    const path = contained(home, join(home, item.relative)), stat = lstatSync(path); assert(stat.isFile() && !stat.isSymbolicLink() && stat.size <= RUST_FACT_BYTES, 'bounded regular Go Facts source'); total += stat.size; assert(total <= RUST_CUSTODY_BYTES, 'Go custody total budget');
+    const source = {path, bytes: stat.size, sha256: hashFile(path, RUST_FACT_BYTES)}; files.set(item.relative, source); partsBytes += plannedPartsBytes(source);
+  }
+  assert.equal(documents, index.manifest.summary.documents); assert.equal(hashFile(index.path, INDEX_BYTES), index.sha256);
+  const originalManifestBytes = custodyBytes(contained(home, join(resolve(index.path, '..'), 'manifest.json')), 1 << 20).length;
+  const originalManifestReserveBytes = 1 << 20; // Existing helper limit, including equivalent JSON whitespace growth.
+  const requiredBytes = total + partsBytes + originalManifestReserveBytes + (32 << 20); // Two bounded slots: catalog and admission report.
+  for (let i = 0; i < files.size; i++) { let stat; try { stat = lstatSync(join(directory, `go-fact-${String(i).padStart(5, '0')}`)); } catch (error) { if (error.code !== 'ENOENT') throw error; } assert(!stat, 'new Go custody paths required'); }
+  const admitted = admit(root, {limits, requiredBytes, scratchReserveBytes: 0}); saveJSON(join(directory, 'go-custody-admission.json'), {requiredBytes, factsBytes: total, partsManifestBytes: partsBytes, originalManifestBytes, originalManifestReserveBytes, admission: admitted});
+  const reference = await captureGoCustody(home, index, directory, root, {expectedDocuments: documents, expectedSources: [...files].map(([relative, source]) => ({relative, bytes: source.bytes, sha256: source.sha256}))}); openGoCustody(reference).verify();
+  for (const source of files.values()) assert.equal(hashFile(source.path, RUST_FACT_BYTES), source.sha256, 'Go Facts changed during custody'); return reference;
+}
+
+// Bind the exact bytes used by the semantic comparison, never a later rehash
+// of the input paths. Packed record tuples are also tied to the archived index.
+export function bindComparedCustody(delta, goReference, rustReference) {
+  const readCatalog = reference => { const raw = custodyBytes(reference.catalog, 16 << 20); assert.equal(sha256(raw), reference.catalogSHA256); return JSON.parse(raw); };
+  const go = readCatalog(goReference), rust = readCatalog(rustReference), sources = delta.factSources;
+  assert(sources && Array.isArray(sources.go) && Array.isArray(sources.rust), 'comparison byte tuples required');
+  assert.equal(go.documents, delta.documents); assert.equal(rust.documents, delta.documents);
+  assert.deepEqual(sources.go, go.files.map(file => ({file: resolve(go.home, file.relative), bytes: file.bytes, sha256: file.sha256})), 'compared Go bytes differ from custody');
+  assert.equal(delta.inputs.rustIndexSHA256, rust.index.sha256, 'compared Rust index differs from custody');
+  const parts = custodyManifest(rustReference.directory, rust.index.manifest, rust.index.manifestSHA256, INDEX_BYTES, {path: rust.index.path, bytes: rust.index.bytes, sha256: rust.index.sha256});
+  const index = JSON.parse(custodyRange(parts, 0, rust.index.bytes)), files = new Map(rust.files.map(file => [resolve(rust.home, file.relative), file])), used = new Set();
+  assert.equal(sources.rust.length, index.documents.length, 'complete compared Rust document tuples');
+  for (const [i, document] of index.documents.entries()) {
+    const file = rustFactPath(rust.home, document, 'v11-pack2'), archived = files.get(file); assert(archived, 'compared Rust file missing from custody'); used.add(file);
+    const locator = document.factsLocator, expected = {path: document.path, file, bytes: locator ? locator.bytes : archived.bytes, sha256: locator ? locator.sha256 : archived.sha256, ...(locator ? {record: locator} : {})};
+    assert.deepEqual(sources.rust[i], expected, 'compared Rust bytes differ from custody');
+  }
+  assert.equal(used.size, files.size, 'complete compared Rust file set');
+  openGoCustody(goReference).verify(); verifyRustCustody(rustReference);
+}
+export async function compareFacts(homes, outputs, pin, oracle, directory, root, retained = undefined, custodyOptions = {}) {
   const indexes = retained ? {go: retained.index, rust: indexEvidence(homes.rust, 'rust', pin, directory, root)} : Object.fromEntries(['go', 'rust'].map(engine => [engine, indexEvidence(homes[engine], engine, pin, directory, root)]));
   const custody = retained && openGoCustody(retained.reference);
-  const delta = await readFactDelta(custody?.home ?? homes.go, homes.rust, indexes.go.path, 'v11-pack2', indexes.rust.path, indexes.rust.sha256, custody);
+  const delta = await readFactDelta(custody?.home ?? homes.go, homes.rust, indexes.go.path, 'v11-pack2', indexes.rust.path, indexes.rust.sha256, custody, {captureSources: true});
   custody?.verify();
   saveJSON(join(directory, 'facts-comparison.json'), delta); // Retain complete mismatch diagnostics before failing.
   assert.equal(delta.differentFiles.length, 0, 'complete five-array fields/order differ'); assert.equal(delta.documents, oracle.documents);
   const values = Object.fromEntries(['go', 'rust'].map(engine => [engine, semantic('B02-retail-index', outputs[engine], engine, oracle, pin.id).value]));
   assert.deepEqual(values.go, values.rust, 'complete shared summary differs');
   for (const engine of ['go', 'rust']) for (const field of ['declarations', 'relationships', 'diagnostics']) assert.equal(delta.totals[engine][field], values[engine][field], `${engine} full Facts totals`);
-  return {documents: delta.documents, fullFieldsAndOrderEqual: true, totals: delta.totals, indexes: Object.fromEntries(Object.entries(indexes).map(([k, v]) => [k, {path: v.path, bytes: v.bytes, sha256: v.sha256}])), summary: values.go, evidence: join(directory, 'facts-comparison.json')};
+  const goCustody = retained?.reference ?? await captureComparedGo(homes.go, indexes.go, directory, root, custodyOptions);
+  const rustCustody = captureRustCustody(homes.rust, indexes.rust, directory, root, custodyOptions);
+  bindComparedCustody(delta, goCustody, rustCustody);
+  return {goCustody, rustCustody, documents: delta.documents, fullFieldsAndOrderEqual: true, totals: delta.totals, indexes: Object.fromEntries(Object.entries(indexes).map(([k, v]) => [k, {path: v.path, bytes: v.bytes, sha256: v.sha256}])), summary: values.go, evidence: join(directory, 'facts-comparison.json')};
 }
 
 // Deliberately limited to the one 7d8 metadata failure reported in PR 14/6236649962.
@@ -304,6 +470,7 @@ export function inspectRetainedCold(request) {
   authenticateRetainedCold(request, reference); return reference;
 }
 export function authenticateRetainedCold(request, reference) {
+  assertHistoricalCandidate(request);
   validateColdReference(reference); const paths = retainedPaths(request.ownerRoot), receipts = {}, hashes = [];
   assert(!existsSync(paths.claim), 'this fixed cold continuation was already claimed; no automatic replacement samples');
   for (const [role, owner] of [['outer', 'source-pack2-diagnostics'], ['base', 'source-pack2-healthy-base']]) receipts[role] = authenticateSealedOwner(request.ownerRoot, paths[role], RETAINED_COLD[role], owner, 'failed', reference[`${role}ReceiptSHA256`], hashes);
@@ -336,14 +503,21 @@ export function claimColdBorrow(root, reference, owner, before, custodyReceipt) 
   const custody = boundedJSON(custodyReceipt); assert.equal(custody.owner, 'source-pack2-cold-revalidation'); assert(['succeeded', 'retired'].includes(custody.state)); assert.equal(custody.handlesReaped, true); assert.deepEqual(custody.inputHashes.retainedCold, reference); assert.equal(custodyReceipt, contained(root, join(root, '.tmp/rust-disk/evidence', custody.id, 'receipt.json'))); assert(custody.sealedLogs.length > 0);
   for (const log of custody.sealedLogs) { const path = contained(resolve(custodyReceipt, '..'), log.path); assert.equal(hashFile(path, 16 << 20), log.sha256, 'cold custody changed before borrow'); }
   const verified = boundedJSON(join(resolve(custodyReceipt, '..'), 'cold-revalidated.json')); assert.equal(verified.state, 'verified'); assert.equal(verified.factsEquivalent, true); assert.equal(verified.facts.fullFieldsAndOrderEqual, true); assert.equal(verified.facts.documents, 4036); assert.deepEqual(verified.lineage.reference, reference);
-  assert(custody.sealedLogs.some(log => log.path === join(resolve(custodyReceipt, '..'), 'cold-facts-custody.json')), 'complete cold Facts custody required before borrow');
+  const custodyDirectory = resolve(custodyReceipt, '..'); assert.deepEqual(evidenceFiles(custodyDirectory).sort(), custody.sealedLogs.map(log => log.path).sort(), 'complete sealed cold custody files required');
+  const factsCatalog = boundedJSON(join(custodyDirectory, 'cold-facts-custody.json'));
+  if (factsCatalog.schema === 'lycheedev.source-pack2-cold-facts.v2') {
+    exact(factsCatalog, ['schema', 'go', 'rust']); assert.deepEqual(factsCatalog.go, verified.facts.goCustody); assert.deepEqual(factsCatalog.rust, verified.facts.rustCustody);
+    for (const side of ['go', 'rust']) assert.equal(factsCatalog[side].directory, custodyDirectory, 'cold custody must belong to revalidation owner');
+    const go = openGoCustody(factsCatalog.go); assert.equal(go.home, paths.homes.go); assert.equal(JSON.parse(go.manifestRaw).summary.documents, 4036); go.verify();
+    assert.deepEqual(factsCatalog.rust.candidate, {commit: CANDIDATE_COMMIT, ...CANDIDATE_IDENTITY}); assert.equal(verifyRustCustody(factsCatalog.rust).documents, 4036); assert.equal(boundedJSON(factsCatalog.rust.catalog).home, paths.homes.rust);
+  } else assert.equal(factsCatalog.schema, 'lycheedev.source-pack2-cold-facts.v1', 'known complete cold custody required');
   for (const engine of ['go', 'rust']) { assert.equal(before[engine].sha256, reference.homeInventorySHA256[engine]); assert.equal(inventory(paths.homes[engine]).sha256, before[engine].sha256, 'borrow home changed before claim'); }
   const record = {schema: 'lycheedev.source-pack2-cold-borrow.v1', owner: owner.id, originalOwner: RETAINED_COLD.base, originalState: 'failed', reference, homes: paths.homes, before, custodyReceipt, writeScope: 'same-home warm only; changed scenarios clone these homes independently', cleanupScope: owner.directory, claimedAt: new Date().toISOString()};
   writeFileSync(paths.claim, JSON.stringify(record, null, 2) + '\n', {flag: 'wx'}); saveJSON(join(owner.evidence, 'borrow-claim.json'), record); return {path: paths.claim, sha256: hashFile(paths.claim)};
 }
-export function captureColdFactFiles(homes, inventories, directory, root) {
+export function captureColdFactFiles(homes, inventories, directory, root, {rustArchived = false} = {}) {
   const files = [];
-  for (const engine of ['go', 'rust']) for (const row of inventories[engine].rows.filter(r => r.path.startsWith(engine === 'go' ? 'source/v1/facts/files/' : 'cache/source-facts-rust/'))) {
+  for (const engine of (rustArchived ? ['go'] : ['go', 'rust'])) for (const row of inventories[engine].rows.filter(r => r.path.startsWith(engine === 'go' ? 'source/v1/facts/files/' : 'cache/source-facts-rust/'))) {
     const source = {path: contained(homes[engine], join(homes[engine], row.path)), bytes: row.bytes, sha256: row.sha256};
     const target = join(directory, `${engine}-cold-fact-${files.length}`); splitIndexEvidence(root, source, target); files.push({engine, relative: row.path, ...source, manifest: join(target, 'manifest.json'), manifestSHA256: hashFile(join(target, 'manifest.json'), 65536)});
   }
@@ -351,6 +525,7 @@ export function captureColdFactFiles(homes, inventories, directory, root) {
 }
 
 export const RETAINED_WARM = Object.freeze({outer: 'd1989b3b-573a-423e-9185-86b89fc6d2f4', base: 'bff2649b-3f34-4e15-b14e-48855cff42fe', custody: '786d460f-cfd9-4a21-9322-6b79d5e5a08d', runnerSHA256: '326d62596fdc66e2907e288d1658a2760e0d02faa668f17f1f28443aa347cf54', custodyReceiptSHA256: '2290e03f9c3df4a8a0f9ac93c9a21a76d274be4bf31ffb3bba4410c843afa461', coldSHA256: '9f0612c3b9b410b230c64ac2f550764356e14ef3ead725e9c0a3a9910060274a', claimSHA256: '514fb250a2d885f9f154609e658f5969f621c71c08ad49d65f93f64580f77a10'});
+export const FRESH_ALLOWANCE = Object.freeze({schema: 'lycheedev.source-pack2-fresh-allowance.v1', scope: 'PR14-source-pack2-fresh', scratchBytes: 6 * 1024 ** 3, authorizationReference: 'Sentinel_a57db18d476081919e647f3195a645a1'});
 export const REMAINING_ALLOWANCE = Object.freeze({schema: 'lycheedev.source-pack2-remaining-allowance.v1', scope: RETAINED_WARM.outer, scratchBytes: 6 * 1024 ** 3, authorizationReference: 'Sentinel_a57db18d476081919e647f3195a645a1'});
 const remainingPaths = root => ({...retainedPaths(root), outer: contained(root, join(root, '.tmp/rust-disk/evidence', RETAINED_WARM.outer)), base: contained(root, join(root, '.tmp/rust-disk/evidence', RETAINED_WARM.base)), custody: contained(root, join(root, '.tmp/rust-disk/evidence', RETAINED_WARM.custody)), remainingClaim: contained(root, join(root, '.tmp/rust-disk', `source-pack2-remaining-${RETAINED_WARM.outer}.json`))});
 export function validateRemainingReference(value) {
@@ -364,6 +539,7 @@ export function inspectRemaining(request) {
 // Bindings injection is for synthetic Node fixtures only; no CLI/config field
 // exposes it. Real callers always use the published exact be168 evidence pins.
 export function authenticateRemaining(request, reference, bindings = RETAINED_WARM, retainedClaimSHA256 = undefined) {
+  assertHistoricalCandidate(request);
   validateRemainingReference(reference); const paths = remainingPaths(request.ownerRoot), hashes = [], receipts = {};
   if (retainedClaimSHA256) { assert.equal(hashFile(paths.remainingClaim), retainedClaimSHA256, 'retained remaining claim changed'); hashes.push({path: paths.remainingClaim, sha256: retainedClaimSHA256}); }
   else assert(!existsSync(paths.remainingClaim), 'remaining variants already claimed; no replacement calls');
@@ -434,6 +610,7 @@ export function inspectRetainedGo(request) {
   authenticateRetainedGo(request, reference); return reference;
 }
 export function authenticateRetainedGo(request, reference, bindings = RETAINED_GO) {
+  assertHistoricalCandidate(request);
   validateGoReference(reference); const paths = goContinuationPaths(request.ownerRoot), hashes = [], receipts = {};
   assert(!existsSync(paths.claim), 'seven remaining calls already claimed; no replacement calls');
   for (const [role, owner] of [['outer', 'source-pack2-diagnostics'], ['base', 'source-pack2-remaining-cases'], ['job', 'source-pack2-single-content-change-go']]) receipts[role] = authenticateSealedOwner(request.ownerRoot, paths[role], RETAINED_GO[role], owner, 'failed', reference[`${role}ReceiptSHA256`], hashes);
@@ -476,12 +653,14 @@ export async function runController(config, overrides = {}) {
   const svc = {metadataPageSize, mutationFootprint, authenticateRetainedGo, claimSeven, authenticateRemaining, claimRemaining, assertCorpus, authenticateRetainedCold, claimColdBorrow, captureColdFactFiles, beginScratch, admission, ownedSpawnSync, collectOwnedMemory, runnerIdentity, verifyCandidateRecord, verifyGoPackage, cloneSeed, inventory, derivedIdentity, proveWarmReuse, prepareVariant, compareFacts, verifyPackProfile, indexEvidence, captureGoCustody, openGoCustody, ...overrides};
   const {request, runnerRoot, inputs, conditions, scratch, evidence: out} = config;
   assert([config.resumeCold, config.resumeRemaining, config.resumeGo].filter(Boolean).length <= 1, 'one exact continuation mode required');
+  if (config.resumeCold || config.resumeRemaining || config.resumeGo) assertHistoricalCandidate(request);
+  assert(!config.resumeCold || !config.allowance, 'cold continuation keeps original disk policy');
   const diskPolicy = assertDiskPolicy(request.ownerRoot, process.env, config.allowance, config.resumeGo ?? config.resumeRemaining);
   const oracle = JSON.parse(readFileSync(join(runnerRoot, 'tests/rust-source-full-corpus/retail-oracle.json')));
   assert.equal(oracle.commit, BASE_COMMIT); assert.equal(oracle.documents, 4036);
   let fatal = false, sequence = 0, baseOwner, baseSuccess = false, retained, borrowClaim, remaining, remainingClaim;
   const start = performance.now();
-  const report = {schema: 'lycheedev.source-pack-scenarios.v1', diskPolicy, state: 'running', request, inputs, runnerRoot, conditions, productCommit: CANDIDATE_COMMIT, layout: 'v11-pack2', importedSamples: 0, performanceAcceptanceEvaluated: false, fullB01B07Acceptance: false, preparation: [], scenarios: [], invocationAttempts: [], owners: [], finalIntegrityVerified: false,
+  const report = {schema: 'lycheedev.source-pack-scenarios.v1', diskPolicy, state: 'running', request, inputs, runnerRoot, conditions, productCommit: request.candidate.commit, layout: 'v11-pack2', importedSamples: 0, performanceAcceptanceEvaluated: false, fullB01B07Acceptance: false, preparation: [], scenarios: [], invocationAttempts: [], owners: [], finalIntegrityVerified: false,
     machine: {hostname: os.hostname(), platform: process.platform, node: process.version, cpus: os.cpus(), totalMemory: os.totalmem()},
     timing: 'Native total CreateProcessW through descendant reaping/output drain; 31 overlapping phases are attribution, never subtracted or added. Wrapper wall separate.', cacheDefinition: config.resumeGo ? 'Five original calls retained; authenticate/capture the completed Go mutation read-only, then only seven unexecuted calls on independent healthy-base clones.' : config.resumeRemaining ? 'Four original cold/warm calls retained; only the four unexecuted variants run, each on a fresh independent clone of the sealed healthy base. No base copies or baseline product calls.' : config.resumeCold ? 'Original fixed 7d8 init/sync/cold calls reauthenticated read-only; exact two retained homes borrowed for same-home warm; each changed engine copies this healthy base independently. No fresh cold calls or OS cache flush.' : 'Fresh own init/sync-only homes for cold; same successful base homes for warm; each changed pair copies the original healthy base independently. No OS cache flush.', metrics: {cpu: 'not_measured', io: 'not_measured', rss: 'not_measured; owned-Job sampled aggregate and gaps retained, not unique physical RSS'}};
   const save = () => saveJSON(join(out, 'report.json'), report);
@@ -512,11 +691,7 @@ export async function runController(config, overrides = {}) {
     assert.deepEqual(svc.runnerIdentity(runnerRoot), inputs, 'runner changed');
     const candidate = svc.verifyCandidateRecord(request.candidate);
     if (!overrides.verifyCandidateRecord) {
-      for (const [root, commit] of [[request.candidate.sourceRoot, CANDIDATE_COMMIT], [request.go.sourceRoot, GO_COMMIT]]) {
-        assert.equal(realpathSync(git(['rev-parse', '--show-toplevel'], undefined, {}, root).toString().trim()), root, 'exact checkout root required');
-        assert.equal(git(['rev-parse', 'HEAD'], undefined, {}, root).toString().trim(), commit);
-        assert.equal(git(['status', '--porcelain', '--untracked-files=all'], undefined, {}, root).toString().trim(), '', 'fixed source checkout must be clean');
-      }
+      for (const [root, commit] of [[request.candidate.sourceRoot, request.candidate.commit], [request.go.sourceRoot, GO_COMMIT]]) verifyCleanCheckout(root, commit, (args, cwd) => git(args, undefined, {}, cwd));
     }
     const go = svc.verifyGoPackage(request.go.packageRoot, request.go.luaLSArchive); assert.equal(go.packageSHA256, request.go.packageSHA256);
     return {rust: {binary: candidate.sourceBinary, cwd: request.candidate.sourceRoot}, go: {binary: go.binary, cwd: request.go.sourceRoot}};
@@ -566,7 +741,7 @@ export async function runController(config, overrides = {}) {
         }
         row[engine].valid = true;
       }
-      row.facts = await svc.compareFacts(homes, envelopes, selection.pin, selection.oracle, evidence, request.ownerRoot);
+      row.facts = await svc.compareFacts(homes, envelopes, selection.pin, selection.oracle, evidence, request.ownerRoot, undefined, {admit: svc.admission, limits: diskPolicy, candidate: request.candidate});
       row.factsEquivalent = true; identities(); row.rustToGoRatio = row.rust.controllableMillis / row.go.controllableMillis; row.state = 'verified'; return row;
     } catch (error) { row.state = fatal ? 'interrupted' : 'failed'; row.failure = error.message.slice(0, 4096); throw error; }
     finally { saveJSON(join(evidence, `${entry.id}-scenario.json`), row); save(); }
@@ -609,13 +784,14 @@ export async function runController(config, overrides = {}) {
         }
         cold = structuredClone(retained.cold); delete cold.failure; cold.state = 'revalidating'; cold.lineage = {...cold.lineage, resumedOriginalCalls: true, originalState: 'failed', originalOuter: RETAINED_COLD.outer, originalBase: RETAINED_COLD.base, originalConditions: retained.oldReport.conditions, originalMachine: {hostname: retained.oldReport.machine.hostname, platform: retained.oldReport.machine.platform, node: retained.oldReport.machine.node}, reference: config.resumeCold};
         report.scenarios.push(cold); report.continuation = {schema: 'lycheedev.source-pack2-cold-continuation.v1', reference: config.resumeCold, originalCallsReused: 2, freshColdCalls: 0, originalState: 'failed', custodyReceipt: custody.receipt}; save();
-        cold.facts = await svc.compareFacts(homes, envelopes, prepared.pin, oracle, coldEvidence, request.ownerRoot); cold.factsEquivalent = true;
-        svc.captureColdFactFiles(homes, retained.inventories, coldEvidence, request.ownerRoot);
+        cold.facts = await svc.compareFacts(homes, envelopes, prepared.pin, oracle, coldEvidence, request.ownerRoot, undefined, {admit: svc.admission, limits: diskPolicy, candidate: request.candidate}); cold.factsEquivalent = true;
+        saveJSON(join(coldEvidence, 'cold-facts-custody.json'), {schema: 'lycheedev.source-pack2-cold-facts.v2', go: cold.facts.goCustody, rust: cold.facts.rustCustody});
         retained.verifyHomes(); retained.verifyEvidence(); identities(); cold.state = 'verified'; cold.rustToGoRatio = cold.rust.controllableMillis / cold.go.controllableMillis;
         saveJSON(join(coldEvidence, 'cold-revalidated.json'), cold); complete = true;
       } finally { custody.seal({state: fatal ? 'interrupted' : complete ? 'succeeded' : 'failed', handlesReaped: !fatal, logs: evidenceFiles(custody.evidence)}); if (complete && !fatal) custody.cleanup(); save(); }
       const warmGrowth = Math.max(cold.facts.indexes.go.bytes, cold.facts.indexes.rust.bytes) + (8 << 20);
-      const warmEstimate = {scratchReserveBytes: warmGrowth, requiredBytes: warmGrowth + 2 * INDEX_BYTES + (64 << 20), basis: 'Borrow exact existing homes; sequential warm calls reserve the larger measured index for temporary replacement plus 8 MiB metadata/log growth; two complete evidence indexes plus 64 MiB allowance'};
+      const warmFacts = Object.entries(retained.inventories).reduce((sum, [engine, inv]) => sum + inv.rows.filter(row => row.path.startsWith(engine === 'go' ? 'source/v1/facts/files/' : 'cache/source-facts-rust/')).reduce((n, row) => n + row.bytes, 0), 0);
+      const warmEstimate = {scratchReserveBytes: warmGrowth, requiredBytes: warmGrowth + 2 * INDEX_BYTES + warmFacts + (128 << 20), basis: 'Borrow exact existing homes; sequential warm calls reserve the larger measured index for temporary replacement plus 8 MiB metadata/log growth; two complete evidence indexes, actual unchanged Go/Rust Facts and 128 MiB bounded report/catalog allowance'};
       baseOwner = svc.beginScratch(request.ownerRoot, 'source-pack2-cold-continuation', {command: ['source', 'index', 'warm-and-four-changes'], inputs: {...inputs, retainedCold: config.resumeCold, borrowedHomes: homes, beforeInventory: config.resumeCold.homeInventorySHA256, coldCustodyReceipt: custody.receipt}, limits: diskPolicy, admissionOptions: warmEstimate});
       report.owners.push({role: 'borrowed-healthy-base', receipt: baseOwner.receipt, estimate: warmEstimate});
       retained.verifyHomes(); retained.verifyEvidence(); borrowClaim = svc.claimColdBorrow(request.ownerRoot, config.resumeCold, baseOwner, retained.inventories, custody.receipt); report.continuation.borrow = borrowClaim; save();
@@ -688,7 +864,7 @@ export async function runController(config, overrides = {}) {
             const reference = await svc.captureGoCustody(home, index, job.evidence, request.ownerRoot); goRetained = {index, reference};
             row.go.custody = reference; row.go.comparisonState = 'awaiting-independent-rust';
           } else {
-            row.facts = await svc.compareFacts({go: row.go.home, rust: home}, outputs, variant.pin, variant.oracle, job.evidence, request.ownerRoot, goRetained);
+            row.facts = await svc.compareFacts({go: row.go.home, rust: home}, outputs, variant.pin, variant.oracle, job.evidence, request.ownerRoot, goRetained, {admit: svc.admission, limits: diskPolicy, candidate: request.candidate});
             row.factsEquivalent = true; row.go.comparisonState = 'verified'; row.rustToGoRatio = row.rust.controllableMillis / row.go.controllableMillis;
           }
           identities(); for (const side of ['go', 'rust']) assert.equal(svc.inventory(homes[side]).sha256, baseIdentity[side].sha256, 'original healthy base changed');
@@ -727,8 +903,9 @@ export function verifyObservedReport(run, report, request, inputs, resumeCold = 
   assert(run.status === 0 && !run.error && run.handlesReaped); elapsed(run.proof);
   assert.equal(report?.state, 'source_pack_scenarios_observed'); assert.equal(report.finalIntegrityVerified, true); assert.equal(report.requiresOuterRetirement, false);
   assert.equal(report.performanceAcceptanceEvaluated, false); assert.equal(report.fullB01B07Acceptance, false); assert.equal(report.importedSamples, 0);
-  assert.deepEqual(report.request, request); assert.deepEqual(report.inputs, inputs); assert.equal(report.layout, 'v11-pack2'); assert.equal(report.productCommit, CANDIDATE_COMMIT);
+  assert.deepEqual(report.request, request); assert.deepEqual(report.inputs, inputs); assert.equal(report.layout, 'v11-pack2'); assert.equal(report.productCommit, request.candidate.commit);
   assert([resumeCold, resumeRemaining, resumeGo].filter(Boolean).length <= 1);
+  if (resumeCold || resumeRemaining || resumeGo) assertHistoricalCandidate(request);
   if (resumeGo) { validateGoReference(resumeGo); assert.deepEqual(report.continuation?.reference, resumeGo); assert.equal(report.continuation.originalCallsReused, 5); assert.equal(report.continuation.freshColdCalls, 0); assert.equal(report.continuation.freshWarmCalls, 0); assert.equal(report.continuation.freshSingleGoCalls, 0); assert.equal(report.continuation.priorOuter, RETAINED_GO.outer); assert.equal(report.scenarios[2].go.proof.runId, RETAINED_GO.run); assert.equal(report.invocationAttempts.length, 7); assert(!report.invocationAttempts.some(row => row.caseId === 'single-content-change' && row.engine === 'go')); }
   else if (resumeRemaining) { validateRemainingReference(resumeRemaining); assert.deepEqual(report.continuation?.reference, resumeRemaining); assert.equal(report.continuation.originalCallsReused, 4); assert.equal(report.continuation.freshColdCalls, 0); assert.equal(report.continuation.freshWarmCalls, 0); assert.equal(report.continuation.priorOuter, RETAINED_WARM.outer); for (const engine of ['go', 'rust']) assert.equal(report.scenarios[0][engine].proof.runId, RETAINED_COLD[engine]); }
   else if (resumeCold) { validateColdReference(resumeCold); assert.deepEqual(report.continuation?.reference, resumeCold); assert.equal(report.continuation.originalCallsReused, 2); assert.equal(report.continuation.freshColdCalls, 0); assert.equal(report.scenarios[0].lineage.resumedOriginalCalls, true); assert.deepEqual(report.scenarios[0].lineage.reference, resumeCold); for (const engine of ['go', 'rust']) assert.equal(report.scenarios[0][engine].proof.runId, RETAINED_COLD[engine]); } else assert.equal(report.continuation, undefined);
@@ -737,6 +914,7 @@ export function verifyObservedReport(run, report, request, inputs, resumeCold = 
   report.scenarios.forEach((row, i) => {
     assert.equal(row.state, 'verified'); assert.equal(row.factsEquivalent, true); assert.deepEqual(row.order, orderFor(i)); assert.equal(row.mode, CASES[i].mode);
     assert.equal(row.facts.documents, CASES[i].documents); assert.equal(row.facts.fullFieldsAndOrderEqual, true);
+    if (i > 1 || !(resumeRemaining || resumeGo)) { exact(row.facts.rustCustody, ['directory', 'catalog', 'catalogSHA256', 'candidate']); assert.deepEqual(row.facts.rustCustody.candidate, candidateIdentity(request.candidate)); digest(row.facts.rustCustody.catalogSHA256); assert.equal(row.facts.rustCustody.catalog, join(row.facts.rustCustody.directory, 'rust-custody.json')); exact(row.facts.goCustody, ['directory', 'catalog', 'catalogSHA256']); digest(row.facts.goCustody.catalogSHA256); }
     for (const engine of ['go', 'rust']) { assert.equal(row[engine].valid, true); elapsed(row[engine].proof); if (i > 1) { assert(!variantHomes.has(row[engine].home)); variantHomes.add(row[engine].home); assert.notEqual(row[engine].home, report.scenarios[0][engine].home); } }
     if (i === 1) for (const engine of ['go', 'rust']) { assert.equal(row[engine].home, report.scenarios[0][engine].home); assert.equal(row[engine].warmReuse.verified, true); }
   });

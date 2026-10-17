@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 18:20 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`e4751f83d8ca26e725e8fe29a43d1d3c612c5a0f`（正式runner，产品00d）；完整六场景运行时Facts/summary均通过，增量失效已局部化但四变体总wall仍慢于Go。新变体Rust pack原件归档缺口明确保留，不能凭附件完全重放。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 18:48 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`e4751f83d8ca26e725e8fe29a43d1d3c612c5a0f`（正式runner，产品00d）；完整六场景运行时Facts/summary均通过，增量失效已局部化但四变体总wall仍慢于Go。新变体Rust pack原件归档缺口明确保留，不能凭附件完全重放。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ### 最新实测：稳定分组完整六场景
 
@@ -17,9 +17,25 @@
 
 局部失效9/1/8/9已真实成立；四变体仍为Go的1.242–1.445倍，不算性能达标。各为单对且准备隔开，原Go单改来自前次失败；不是20对验收。原31phase重叠不相加、不从nativewall扣除；controller587307.5352ms不是产品wall。memory gaps保留，不代表完整RSS峰。
 
-14附件由本机实际公开GET/CRC/SHA核过；云端Source作者正在唯一解取复核同run细账，尚不冒称云端全部验证。12片本轮Brotli93440390B/SHA c8e6db1d2998a1fd0b6b830af29ee5734e5149f3fd7ebd0a2202c71240b3186b；旧2d1两片10308120B/SHA0b2af57b730dbd5eb932f1656ba300406bc4152bfececf3e96b0b29b57a3e5a9。
+14附件已由云端唯一作者独立GET/CRC/片与wholeSHA、34565新+534旧file及10当前owner34463 sealed引用核过；四变体8原native receipts/ticks精确复算。1254个更早历史引用不在本包、cold/warm原raw缺失，明确未冒称复核。12片本轮Brotli93440390B/SHA c8e6db1d2998a1fd0b6b830af29ee5734e5149f3fd7ebd0a2202c71240b3186b；旧2d1两片10308120B/SHA0b2af57b730dbd5eb932f1656ba300406bc4152bfececf3e96b0b29b57a3e5a9。
 
 证据真实限制：runner成功cleanup前没有归档新Rust Facts pack body，全部成功变体副本已清理；附件含完整GoFacts、双方index分片与实际比较结果，但不能独立完整重放新变体readFactDelta。禁止补造原件或重跑替历史。下一薄修仅把已认证index实际引用的pack/合法loose分片归档并核验后再cleanup；性能下一步依据同run缓存读取/整index构建序列化发布关键路径，不继续靠少parse宣传收益。
+
+### 当前候选：跳过命中缓存的无用pureparse
+
+[完整同row互斥账与源码归因](docs/toolkit/source-pack2-incremental-attribution-2026-10-17.md)：四变体2.060–2.087s主线程等待近3984个最终丢弃的worker结果；Facts读解码577–605ms、整index序列化532–623ms/发布90–111ms。已实现metadata-only cache-aware调度，不派已认证命中pureparse，不排队/clone命中Facts；cold同组并行miss、组边界drain，后探测错误按绝对doc序号延迟返回，保原首错/控制/预算/EOF。pack2/v14不改。4生产/测试文件rustfmt解析与独审过，8新`cache_aware_` Rust回归NOT_RUN；需alltargets→完整index::/facts::/lua_tree::及原Go104+11→匹配release→完整六场景，测冷链重叠取舍和总wall，不能只计worker减少。
+
+同批正式runner归档薄修已完成：按已认证index实际引用去重归档Rust pack/合法loose和fresh Go Facts，8MiB分片/catalog绑定实际候选/index/manifest/partSHA。reader实际读取的bytes/SHA tuple逐项对归档，防“比较旧字节、归档新字节”；准入后增大/缩小/替换/删均在有界复制中失败并保owner。完整归档核过后才cleanup，历史e475缺件不补造。fresh使用显式配置精确commit/EXE/artifact/source与原完整verifyArtifact/sourceDigest/recipe/Emmy/cleanHEAD认证，禁止latest；历史三续验仍固定00d。用户批准的本任务6GiB可fresh显式`--scratch-6gib`，默认5GiB/其它预算不变。六组Node303/303与25文件独立导出/import、独审通过；Windows新归档/产品优化仍NOT_RUN。
+
+新增Rust全名（均`index::facts_cache::tests::`）：
+- cache_aware_default_consumer_avoids_all_workers_on_complete_pack_hits
+- cache_aware_default_consumer_dispatches_only_missing_snapshot_groups
+- cache_aware_legacy_presence_rechecks_same_key_replacement_and_growth
+- cache_aware_later_probe_error_is_bound_to_its_own_document
+- cache_aware_pipeline_preserves_earlier_consumer_failure_over_later_probe_error
+- cache_aware_cancelled_pipeline_joins_and_recovers_without_losing_committed_groups
+- cache_aware_non_worker_rows_and_corrupt_record_keep_original_order
+- cache_aware_current_retention_and_encoding_prelude_precedes_deferred_cache_error
 
 ## 1. 当前决定与不可漂移基线
 

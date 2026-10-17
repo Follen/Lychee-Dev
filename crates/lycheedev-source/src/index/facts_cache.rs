@@ -316,6 +316,9 @@ struct GroupState<'a> {
     inputs: [usize; GROUP],
     count: usize,
     seen: usize,
+    // Only fixed metadata for read-ahead misses; decoded hits never queue.
+    admitted: usize,
+    missing: u64,
     first_document: usize,
     reader: Option<SourceFactsReader>,
     records: Vec<Record>,
@@ -332,6 +335,40 @@ pub(super) struct Groups<'a> {
     leaf_end: usize,
     previous_file: Option<usize>,
     group: Option<GroupState<'a>>,
+    documents: usize,
+    admission_error: Option<(usize, ToolkitError)>,
+}
+/// Both callbacks borrow the same request-owned Groups; no RefCell, mutex or
+/// independently advancing cache catalog is needed by the pipeline.
+pub(super) struct CacheConsumer<'g, 'a, F> {
+    groups: &'g mut Groups<'a>,
+    consume: F,
+}
+impl<'a, F> facts_pipeline::Consumer for CacheConsumer<'_, 'a, F>
+where
+    F: FnMut(
+        &mut Groups<'a>,
+        &git::TreeFile,
+        Vec<u8>,
+        Option<facts_pipeline::PreparedFacts>,
+    ) -> Result<()>,
+{
+    fn admit(
+        &mut self,
+        file: &git::TreeFile,
+        data: &[u8],
+        ordered: bool,
+    ) -> facts_pipeline::Admission {
+        self.groups.admit(file, data, ordered)
+    }
+    fn consume(
+        &mut self,
+        file: &git::TreeFile,
+        data: Vec<u8>,
+        prepared: Option<facts_pipeline::PreparedFacts>,
+    ) -> Result<()> {
+        (self.consume)(self.groups, file, data, prepared)
+    }
 }
 impl<'a> Groups<'a> {
     pub fn new(
@@ -349,6 +386,90 @@ impl<'a> Groups<'a> {
             leaf_end: 0,
             previous_file: None,
             group: None,
+            documents: 0,
+            admission_error: None,
+        }
+    }
+    pub fn consumer<F>(&mut self, consume: F) -> CacheConsumer<'_, 'a, F>
+    where
+        F: FnMut(
+            &mut Groups<'a>,
+            &git::TreeFile,
+            Vec<u8>,
+            Option<facts_pipeline::PreparedFacts>,
+        ) -> Result<()>,
+    {
+        CacheConsumer {
+            groups: self,
+            consume,
+        }
+    }
+    fn admit(
+        &mut self,
+        file: &git::TreeFile,
+        data: &[u8],
+        ordered: bool,
+    ) -> facts_pipeline::Admission {
+        use facts_pipeline::Admission;
+        // Assets, invalid UTF-8 and non-worker inputs keep their full original
+        // ordered path. They cannot move the cohort admission cursor ahead.
+        if !facts_pipeline::eligible(file, data) {
+            return Admission::Barrier;
+        }
+        if self
+            .group
+            .as_ref()
+            .is_none_or(|group| group.admitted == group.count)
+        {
+            if !ordered {
+                return Admission::Drain;
+            }
+            if let Err(error) = self.begin(self.documents) {
+                self.admission_error = Some((self.documents, error));
+                return Admission::Barrier;
+            }
+        }
+        let group = self.group.as_mut().unwrap();
+        if self.files[group.inputs[group.admitted]].path != file.path {
+            self.admission_error = Some((
+                group.first_document + group.admitted,
+                ToolkitError::invalid("Facts cohort admission order differs"),
+            ));
+            return Admission::Barrier;
+        }
+        // A directory is only a possible hit. The actual record, source hash,
+        // mode-specific key and complete envelope are still authenticated at
+        // consume, after earlier documents have published successfully.
+        if !group.records.is_empty() {
+            return Admission::Barrier;
+        }
+        let _phase = self.profile.span(Phase::FactsRead);
+        let key = facts_cache_key(&file.path, &storage::sha256(data));
+        match self.cache.open_reader(&key, self.control) {
+            Ok(None) => {
+                // An authenticated absence is a bounded miss ticket, not a
+                // cached Facts value. The original source owner moves to the
+                // pure worker; publication remains in document order.
+                group.missing |= 1 << group.admitted;
+                group.admitted += 1;
+                Admission::Parse
+            }
+            Ok(Some(reader)) => {
+                // Presence is only a hint. Close this probe now, then let the
+                // original read consume and authenticate the complete current
+                // file at its ordered turn, including concurrent replacement
+                // or same-handle length changes. No loose owner or body queues.
+                if let Err(error) = reader.finish(Ok(()), self.control) {
+                    self.admission_error = Some((group.first_document + group.admitted, error));
+                }
+                Admission::Barrier
+            }
+            Err(error) => {
+                // Pipeline drains earlier documents first; document() returns
+                // this only after the CURRENT original prelude has succeeded.
+                self.admission_error = Some((group.first_document + group.admitted, error));
+                Admission::Barrier
+            }
         }
     }
     fn begin(&mut self, first_document: usize) -> Result<()> {
@@ -396,6 +517,8 @@ impl<'a> Groups<'a> {
             inputs,
             count,
             seen: 0,
+            admitted: 0,
+            missing: 0,
             first_document,
             reader: None,
             records: Vec::new(),
@@ -423,6 +546,13 @@ impl<'a> Groups<'a> {
         documents: &mut [Document],
     ) -> Result<(Facts, bool, Option<Locator>)> {
         self.control.check()?;
+        if self
+            .admission_error
+            .as_ref()
+            .is_some_and(|(ordinal, _)| *ordinal == documents.len())
+        {
+            return Err(self.admission_error.take().unwrap().1);
+        }
         if self.group.is_none() {
             self.begin(documents.len())?;
         }
@@ -449,6 +579,7 @@ impl<'a> Groups<'a> {
                 }
             }
             if cached.is_none()
+                && group.missing & (1 << group.seen) == 0
                 && let Some(raw) = self.cache.read(&hex(&key), self.control)?
             {
                 cached = decode_facts(&raw, sha256, self.control)?;
@@ -500,6 +631,8 @@ impl<'a> Groups<'a> {
             )?;
         }
         group.seen += 1;
+        group.admitted = group.admitted.max(group.seen);
+        self.documents += 1;
         if group.seen == group.count {
             self.close_group(Ok(()))?;
         }

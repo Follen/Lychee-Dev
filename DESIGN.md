@@ -314,3 +314,26 @@ shape and complete v11 envelope stay unchanged. Explicit `v11-pack2` diagnostics
 bind the authenticated candidate and exact index SHA; a naked index blob does
 not identify which grouping algorithm produced it. Historical `v11-pack1`
 readers and raw reports remain available, with their original identities.
+
+
+#### Cache-aware ordered pure-parse admission
+
+The authenticated 00d/e475 incremental observations still consumed roughly3984
+pure-parse worker results despite only1–9 cache misses; main-thread wait occupied
+2.06–2.09 seconds. The current owned pipeline uses metadata-only admission to
+avoid that work. Within one cohort, a bounded64-bit cursor tracks confirmed
+misses; only those enter the existing bounded pure worker queue. A possible
+packed/legacy hit, non-worker row or cohort boundary drains prior work and then
+uses the original ordered consumer for full content hash, envelope, mode,
+retained-budget and encoding checks. No decoded cached Facts are queued or cloned.
+Legacy presence readers checked-close immediately; consumption rereads the
+current complete file including EOF, so replacement/growth cannot turn a hint
+into trusted content. Deferred cache I/O errors bind the absolute document ordinal
+and are returned only after that row's original prelude; earlier consumer failures
+remain first. Corrupt records retain the original ordered parse fallback.
+
+This changes scheduling only: pack2/v14 bytes and identity remain unchanged.
+Cold misses remain parallel inside a cohort; cross-cohort parse/publication overlap
+is deliberately narrower. Both cold and incremental native wall must be measured;
+zero worker results on complete hits is a structural assertion, not a speed claim.
+See [same-row attribution](docs/toolkit/source-pack2-incremental-attribution-2026-10-17.md).

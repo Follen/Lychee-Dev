@@ -1,17 +1,22 @@
 import test from 'node:test';
+import fs from 'node:fs';
+import {parseArguments} from '../../tools/rust-source-pack-diagnostics.mjs';
 import assert from 'node:assert/strict';
-import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
-import {join, relative, resolve} from 'node:path';
+import {copyFileSync, closeSync, openSync, ftruncateSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
+import {basename, join, relative, resolve} from 'node:path';
 import {hostname, tmpdir} from 'node:os';
 import {DatabaseSync} from 'node:sqlite';
 import {hashFile} from '../../tools/rust-build.mjs';
+import {splitIndexEvidence} from '../../tools/rust-source-pack-evidence.mjs';
 import {fixturePin} from '../rust-source-native-acceptance/assertions.mjs';
 import {PHASE_NAMES, PHASE_TIMING, LOCK_TIMING} from './source-candidates.mjs';
 import {verifyPackProfile} from './source-pack-resume.mjs';
+import {openGoCustody} from './source-pack-custody.mjs';
+import {readFactDelta, readRustFact, rustFactPath} from './read-fact-delta.mjs';
 import {elapsed, semantic} from './contract.mjs';
 import {beginScratch, sha256} from '../../tools/rust-disk.mjs';
 import {cloneSeed, inventory, proveWarmReuse} from './inputs.mjs';
-import {metadataPageSize, mutationFootprint, RETAINED_GO, authenticateRetainedGo, validateGoReference, claimSeven, RETAINED_WARM, REMAINING_ALLOWANCE, authenticateRemaining, validateRemainingReference, claimRemaining, RETAINED_COLD, authenticateRetainedCold, inspectRetainedCold, validateColdReference, claimColdBorrow, captureColdFactFiles, metadataIdentity, captureMetadata, indexEvidence, assertDiskPolicy, CASES, BASE_COMMIT, CANDIDATE_COMMIT, CANDIDATE_IDENTITY, INSERT_TEXT, FIRST_PATH, RENAME_PATH, RUNNER_FILES, evidenceFiles, footprint, mutationRows, orderFor, runnerIdentity, runController, validateRequest, variantOracle, verifyObservedReport} from './source-pack-scenarios.mjs';
+import {bindComparedCustody, FRESH_ALLOWANCE, candidateIdentity, assertHistoricalCandidate, verifyCandidateIdentity, verifyCandidateRecord, verifyCleanCheckout, captureComparedGo, compareFacts, captureRustCustody, verifyRustCustody, metadataPageSize, mutationFootprint, RETAINED_GO, authenticateRetainedGo, validateGoReference, claimSeven, RETAINED_WARM, REMAINING_ALLOWANCE, authenticateRemaining, validateRemainingReference, claimRemaining, RETAINED_COLD, authenticateRetainedCold, inspectRetainedCold, validateColdReference, claimColdBorrow, captureColdFactFiles, metadataIdentity, captureMetadata, indexEvidence, assertDiskPolicy, CASES, BASE_COMMIT, CANDIDATE_COMMIT, CANDIDATE_IDENTITY, INSERT_TEXT, FIRST_PATH, RENAME_PATH, RUNNER_FILES, evidenceFiles, footprint, mutationRows, orderFor, runnerIdentity, runController, validateRequest, variantOracle, verifyObservedReport} from './source-pack-scenarios.mjs';
 const root = resolve(import.meta.dirname, '../..');
 const conditions = {machine: 'fixture', powerAndThermal: 'unknown', competingLoad: 'unknown', disk: 'fixture only', operator: 'Node test'};
 function temp(t) { const d = mkdtempSync(join(tmpdir(), 'pack2-runner-')); t.after(() => { if (t.passed) rmSync(d, {recursive: true}); else t.diagnostic(`retained fixture ${d}`); }); return d; }
@@ -19,6 +24,7 @@ function proof(ms = 10) { return {schema: 'lycheedev.owned-process.v1', rootReap
 function requestAt(d) { const sourceRoot = join(d, 'product'), artifactRoot = join(d, 'artifacts'), goRoot = join(d, 'go'); for (const x of [sourceRoot, artifactRoot, goRoot]) mkdirSync(x); const artifact = join(artifactRoot, 'artifact.json'); writeFileSync(artifact, '{}'); return {schema: 'lycheedev.source-pack-scenarios-config.v1', ownerRoot: d, candidate: {sourceRoot, artifactRoot, artifact, commit: CANDIDATE_COMMIT, ...CANDIDATE_IDENTITY}, go: {sourceRoot: goRoot, packageRoot: goRoot, luaLSArchive: join(d, 'luals.zip'), packageSHA256: 'd'.repeat(64)}}; }
 async function fixture(t, fault = {}) {
   const d = temp(t), request = requestAt(d), out = join(d, 'outer-evidence'), scratch = join(d, 'outer-scratch'); mkdirSync(out); mkdirSync(scratch);
+  if (fault.candidate) Object.assign(request.candidate, fault.candidate);
   const inputs = {runner: 'fixed'}, owners = [], events = [], samples = [], modes = []; let calls = 0, identityChecks = 0; const admissions = [];
   const basePin = {id: 'PIN-fixture', source: {exactCommit: BASE_COMMIT}}, baseOracle = JSON.parse(readFileSync(join(root, 'tests/rust-source-full-corpus/retail-oracle.json')));
   const svc = {
@@ -53,7 +59,7 @@ async function fixture(t, fault = {}) {
     derivedIdentity() { return {sha256: 'same', files: [1]}; }, proveWarmReuse() { if (fault.warm) throw new Error('warm identity changed'); return {verified: true}; },
     indexEvidence() { events.push('capture-index'); return {path: 'records', bytes: 100, sha256: 'a'.repeat(64)}; },
     captureGoCustody(home, index, evidence) { events.push('capture-full-go'); if (fault.custody) throw new Error('custody incomplete'); return {directory: evidence, catalog: join(evidence, 'catalog.json'), catalogSHA256: 'b'.repeat(64)}; }, openGoCustody() {},
-    compareFacts(homes, outputs, pin, oracle, evidence, _root, retained) { events.push('facts'); if (fault.facts && (fault.facts === 'cold' ? !retained : retained)) throw new Error('complete Facts differ'); return {documents: oracle.documents, fullFieldsAndOrderEqual: true, totals: {}, indexes: {go: {bytes: 100}, rust: {bytes: 100}}}; },
+    compareFacts(homes, outputs, pin, oracle, evidence, _root, retained) { events.push('facts'); if (fault.goCustody && !retained) throw new Error('Go custody archive failed'); if (fault.coldCustody) throw new Error('cold custody incomplete'); if (fault.rustCustody && retained) throw new Error('Rust archive verification failed'); if (fault.facts && (fault.facts === 'cold' ? !retained : retained)) throw new Error('complete Facts differ'); return {goCustody: {directory: evidence, catalog: join(evidence, 'go-custody.json'), catalogSHA256: 'd'.repeat(64)}, rustCustody: {directory: evidence, catalog: join(evidence, 'rust-custody.json'), catalogSHA256: 'c'.repeat(64), candidate: candidateIdentity(request.candidate)}, documents: oracle.documents, fullFieldsAndOrderEqual: true, totals: {}, indexes: {go: {bytes: 100}, rust: {bytes: 100}}}; },
   };
   let resumeCold, resumeRemaining, resumeGo;
   if (fault.resume || fault.remaining || fault.retainedGo) {
@@ -64,7 +70,7 @@ async function fixture(t, fault = {}) {
     resumeCold = {schema: 'lycheedev.source-pack2-retained-cold.v1', outerReceiptSHA256: 'a'.repeat(64), baseReceiptSHA256: 'b'.repeat(64), homeInventorySHA256: {go: 'c'.repeat(64), rust: 'd'.repeat(64)}};
     svc.assertCorpus = () => {};
     svc.authenticateRetainedCold = () => { events.push('authenticate-cold'); if (fault.authentication) throw new Error('prior sealed log changed'); return {paths: {homes, outer: 'original-outer', base: 'original-base'}, pin: basePin, rows: [], cold: old, outputs, oldReport: {machine: {hostname: fault.otherMachine ? 'other-host' : hostname(), platform: process.platform, powerBefore: 'power'}, inputs: {}}, inventories: Object.fromEntries(['go', 'rust'].map(e => [e, svc.inventory(homes[e])])), verifyHomes() { events.push('verify-old-homes'); }, verifyEvidence() { events.push('verify-old-evidence'); if (fault.originalChanged && calls > 2) throw new Error('original failed evidence changed'); }}; };
-    svc.captureColdFactFiles = () => { events.push('cold-facts-custody'); if (fault.coldCustody) throw new Error('cold custody incomplete'); };
+    svc.captureColdFactFiles = () => { events.push('cold-facts-custody'); if (fault.goCustody && !retained) throw new Error('Go custody archive failed'); if (fault.coldCustody) throw new Error('cold custody incomplete'); };
     svc.claimColdBorrow = (_root, _reference, owner) => { events.push('claim-borrow'); if (fault.claimed) throw new Error('already claimed'); const path = join(owner.evidence, 'claim.json'); writeFileSync(path, '{}'); return {path, sha256: hashFile(path)}; };
   }
   if (fault.remaining || fault.retainedGo) {
@@ -93,7 +99,7 @@ test('fixed pack2 candidate and exact six cases keep the old historical runner u
 });
 test('configuration rejects unknown policies, old candidates and malformed input identity', t => {
   const request = requestAt(temp(t)); assert.equal(validateRequest(request).candidate.commit, CANDIDATE_COMMIT);
-  for (const mutate of [r => r.pairs = 20, r => r.candidate.commit = BASE_COMMIT, r => r.candidate.binarySHA256 = 'x', r => r.go.packageSHA256 = 'x', r => r.go.extra = true, r => r.ownerRoot = '.', r => r.candidate.artifact = join(r.ownerRoot, 'foreign.json')]) { const copy = structuredClone(request); mutate(copy); assert.throws(() => validateRequest(copy)); }
+  for (const mutate of [r => r.pairs = 20, r => r.candidate.commit = 'latest', r => r.candidate.binarySHA256 = 'x', r => r.go.packageSHA256 = 'x', r => r.go.extra = true, r => r.ownerRoot = '.', r => r.candidate.artifact = join(r.ownerRoot, 'foreign.json')]) { const copy = structuredClone(request); mutate(copy); assert.throws(() => validateRequest(copy)); }
 });
 test('runner manifest closes the new imports without needing any build executable', () => { assert.equal(Object.keys(runnerIdentity(root)).length, RUNNER_FILES.length); assert(RUNNER_FILES.includes('tests/rust-performance-paired/source-pack-custody.mjs')); const source = readFileSync(join(root, 'tools/rust-source-pack-diagnostics.mjs'), 'utf8'); assert(!/buildRust\(|runCargo\(|rustc/.test(source)); });
 test('admission estimate is explicit positive and rejects malformed quantities', () => { const cold = footprint({cold: true}); assert.equal(cold.scratchReserveBytes, 257058598 + 131416885 + (64 << 20)); assert(cold.requiredBytes > cold.scratchReserveBytes); assert.throws(() => footprint({cold: false})); });
@@ -252,13 +258,17 @@ test('dangling metadata sidecar symlinks are not mistaken for missing files', t 
   for (const suffix of ['-wal', '-shm']) { const f = metadataFixture(t); symlinkSync(join(f.d, 'missing-target'), f.path + suffix, 'junction'); assert.throws(() => metadataIdentity(f.home), /WAL|file\/type/); }
 });
 
-function borrowFixture(t) {
-  const f = retainedFixture(t), before = Object.fromEntries(['go', 'rust'].map(e => [e, inventory(f.homes[e])])), options = {requiredBytes: 0, scratchReserveBytes: 0, freeBytes: 10 * 1024 ** 3};
+function borrowFixture(t, dual = false) {
+  const f = retainedFixture(t), indexes = dual ? prepareDualBorrowHomes(f) : null; if (dual) for (const e of ['go', 'rust']) f.reference.homeInventorySHA256[e] = inventory(f.homes[e]).sha256;
+  const before = Object.fromEntries(['go', 'rust'].map(e => [e, inventory(f.homes[e])])), options = {requiredBytes: 0, scratchReserveBytes: 0, freeBytes: 10 * 1024 ** 3};
   const custody = beginScratch(f.d, 'source-pack2-cold-revalidation', {inputs: {retainedCold: f.reference}, admissionOptions: options});
-  f.put(join(custody.evidence, 'cold-revalidated.json'), {state: 'verified', factsEquivalent: true, facts: {fullFieldsAndOrderEqual: true, documents: 4036}, lineage: {reference: f.reference}});
-  f.put(join(custody.evidence, 'cold-facts-custody.json'), {files: ['fixture']}); custody.seal({state: 'succeeded', handlesReaped: true, logs: evidenceFiles(custody.evidence)}); custody.cleanup();
+  const facts = {fullFieldsAndOrderEqual: true, documents: 4036};
+  if (dual) { for (const e of ['go', 'rust']) splitIndexEvidence(f.d, {path: indexes[e].path, bytes: indexes[e].bytes, sha256: indexes[e].sha256}, join(custody.evidence, `${e}-index-parts`)); f.put(join(custody.evidence, 'rust-index-manifest.json'), indexes.rust.manifest); }
+  // The async Go capture is performed by the dedicated dual-format test below.
+  f.put(join(custody.evidence, 'cold-revalidated.json'), {state: 'verified', factsEquivalent: true, facts, lineage: {reference: f.reference}});
+  f.put(join(custody.evidence, 'cold-facts-custody.json'), {schema: 'lycheedev.source-pack2-cold-facts.v1', files: ['fixture']}); if (!dual) { custody.seal({state: 'succeeded', handlesReaped: true, logs: evidenceFiles(custody.evidence)}); custody.cleanup(); }
   const owner = beginScratch(f.d, 'source-pack2-cold-continuation', {inputs: {retainedCold: f.reference, borrowedHomes: f.homes, beforeInventory: f.reference.homeInventorySHA256}, admissionOptions: options});
-  return {...f, before, custody, owner};
+  return {...f, before, custody, owner, indexes};
 }
 test('single-use borrow claim binds new active owner, exact homes and already sealed complete cold custody', t => {
   const f = borrowFixture(t), old = hashFile(join(f.dirs.base, 'receipt.json')), claim = claimColdBorrow(f.d, f.reference, f.owner, f.before, f.custody.receipt);
@@ -456,3 +466,296 @@ test('complete format model accounts for offsets, full Facts/pack generation, ca
   for (const fn of [() => mutationFootprint('other', 'root-insert', base, 1, rows, oracle), () => mutationFootprint('go', 'cold', base, 1, rows, oracle), () => mutationFootprint('go', 'root-insert', {...base, bytes: -1}, 1, rows, oracle), () => mutationFootprint('go', 'root-insert', base, 128 << 20, rows, oracle), () => mutationFootprint('go', 'root-insert', base, 1, rows, oracle, 7)]) assert.throws(fn);
 });
 test('metadata sizing authenticates the actual SQLite page unit rather than assuming 4096', t => { for (const page of [512, 8192, 65536]) { const d = join(temp(t), 'home'); mkdirSync(join(d, 'state'), {recursive: true}); const path = join(d, 'state/toolkit.sqlite'), db = new DatabaseSync(path); db.exec(`PRAGMA page_size=${page}; CREATE TABLE documents(value TEXT);`); db.close(); const identity = inventory(d); assert.equal(metadataPageSize(d, identity), page); writeFileSync(path, 'changed'); assert.throws(() => metadataPageSize(d, identity)); } });
+
+function rustCustodyFixture(t, {large = false} = {}) {
+  const f = metadataFixture(t), facts = {declarations: [{name: large ? 'x'.repeat((8 << 20) + 50) : 'Example', kind: 'function', line: 1}], relationships: [], loads: [], headers: [], diagnostics: []};
+  const stable = v => Array.isArray(v) ? v.map(stable) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k => [k, stable(v[k])])) : v;
+  const documents = ['a.lua', 'b.lua', 'c.xml'].map((path, i) => ({path, bytes: 10 + i, sha256: sha256(`input-${i}`)}));
+  const envelopes = documents.map(doc => Buffer.from(JSON.stringify({schema: 'lycheedev.source-facts.rust.v11', inputSHA256: doc.sha256, factsSHA256: sha256(JSON.stringify(stable(facts))), facts})));
+  const group = sha256('fixture-pack'), pieces = [Buffer.from('LYCFPK01')]; let offset = 8;
+  for (let i = 0; i < 2; i++) {
+    const doc = documents[i], raw = envelopes[i], header = Buffer.alloc(68); header.writeUInt32LE(raw.length); Buffer.from(basename(rustFactPath(f.home, doc, 'v11'), '.json'), 'hex').copy(header, 4); Buffer.from(sha256(raw), 'hex').copy(header, 36);
+    doc.factsLocator = {group, offset, bytes: raw.length, sha256: sha256(raw)}; pieces.push(header, raw); offset += header.length + raw.length;
+  }
+  const packPath = join(f.home, 'cache/source-facts-rust', group + '.json'); mkdirSync(resolve(packPath, '..'), {recursive: true}); writeFileSync(packPath, Buffer.concat(pieces)); const loosePath = rustFactPath(f.home, documents[2], 'v11'); writeFileSync(loosePath, envelopes[2]);
+  const unusedPath = join(resolve(packPath, '..'), sha256('unreferenced-object') + '.json'); writeFileSync(unusedPath, 'not needed and not a valid Facts envelope');
+  const summary = {schema: 'lycheedev.source-map.v2', storage: 'file-cache', parser: 'source-v1', repository: f.pin.source.repository, product: f.pin.source.product, commit: BASE_COMMIT, documents: 3, declarations: 3, relationships: 0, diagnostics: 0, assets: 0, complete: true};
+  function publish() {
+    summary.documents = documents.length;
+    const raw = Buffer.from(JSON.stringify({summary, documents})), hash = sha256(raw), path = join(f.home, 'cache/objects', hash.slice(0, 2), hash.slice(2)); mkdirSync(resolve(path, '..'), {recursive: true}); writeFileSync(path, raw);
+    const identity = sha256(['rust-index-v14', 'facts-pack-v2-path-radix512', 'facts-layout-v11-go323-generated-origins', 'TS0.26.3', 'Lua0.5.0', 'XML0.38', 'generator-v6', summary.repository, summary.product, summary.commit, summary.parser].join('\0'));
+    const db = new DatabaseSync(f.path); db.prepare('INSERT OR REPLACE INTO documents VALUES (?,1,?)').run(`source/rust-index/${identity}`, Buffer.from(JSON.stringify({schema: 'lycheedev.source-index.rust.v6', identity, blob: {sha256: hash, bytes: raw.length}}))); db.close();
+  }
+  publish(); const admissions = [];
+  const capture = () => { const index = indexEvidence(f.home, 'rust', f.pin, f.evidence, f.d); return captureRustCustody(f.home, index, f.evidence, f.d, {candidate: {commit: CANDIDATE_COMMIT, ...CANDIDATE_IDENTITY}, limits: {scratchBytes: 6 * 1024 ** 3}, admit(_root, options) { admissions.push(options); return {limits: options.limits, requiredBytes: options.requiredBytes}; }}); };
+  return {...f, documents, facts, envelopes, packPath, loosePath, unusedPath, publish, capture, admissions};
+}
+function editCustodyJSON(path, change) { const value = JSON.parse(readFileSync(path)); change(value); writeFileSync(path, JSON.stringify(value, null, 2) + '\n'); return value; }
+function rewriteRustCatalog(reference, change) { editCustodyJSON(reference.catalog, change); reference.catalogSHA256 = hashFile(reference.catalog); }
+
+test('Rust custody keeps exactly referenced pack and loose bytes, authenticates offline after source removal', t => {
+  const f = rustCustodyFixture(t), reference = f.capture(), catalog = JSON.parse(readFileSync(reference.catalog));
+  assert.deepEqual(catalog.files.map(file => file.kind), ['pack', 'loose']); assert.equal(catalog.documents, 3); assert.equal(catalog.files.length, 2); assert.equal(catalog.factsBytes, readFileSync(f.packPath).length + readFileSync(f.loosePath).length);
+  assert.equal(f.admissions.length, 1); assert.equal(f.admissions[0].scratchReserveBytes, 0); assert.equal(f.admissions[0].limits.scratchBytes, 6 * 1024 ** 3);
+  const admissionReport = JSON.parse(readFileSync(join(f.evidence, 'rust-custody-admission.json'))); assert.equal(admissionReport.requiredBytes, catalog.factsBytes + admissionReport.partsManifestBytes + admissionReport.catalogBytes + (16 << 20));
+  assert.equal(admissionReport.partsManifestBytes, catalog.files.reduce((n, file) => n + readFileSync(join(f.evidence, file.manifest)).length, 0)); assert.equal(admissionReport.catalogBytes, readFileSync(reference.catalog).length);
+  const before = Object.fromEntries(catalog.files.map(file => [file.relative, readFileSync(join(f.home, file.relative))])); rmSync(f.home, {recursive: true});
+  assert.deepEqual(verifyRustCustody(reference), {documents: 3, files: 2, factsBytes: catalog.factsBytes, indexSHA256: catalog.index.sha256});
+  const replay = join(f.d, 'replay'); for (const file of catalog.files) { const manifest = JSON.parse(readFileSync(join(f.evidence, file.manifest))), bytes = Buffer.concat(manifest.parts.map(part => readFileSync(join(resolve(f.evidence, file.manifest, '..'), part.path)))); assert(bytes.equals(before[file.relative])); const target = join(replay, file.relative); mkdirSync(resolve(target, '..'), {recursive: true}); writeFileSync(target, bytes); }
+  for (const document of f.documents) assert.deepEqual(readRustFact(replay, document, 'v11-pack2').facts, f.facts);
+});
+
+test('Rust custody streams multi-part packs and reads locator ranges across the 8 MiB boundary', t => {
+  const f = rustCustodyFixture(t, {large: true}), reference = f.capture(), catalog = JSON.parse(readFileSync(reference.catalog)), manifest = JSON.parse(readFileSync(join(f.evidence, catalog.files[0].manifest)));
+  assert(manifest.parts.length >= 3); assert(manifest.parts.every(part => part.bytes <= 8 << 20)); assert.equal(verifyRustCustody(reference).documents, 3); assert(evidenceFiles(f.evidence).every(path => readFileSync(path).length <= 16 << 20));
+});
+
+for (const [name, mutate] of [
+  ['foreign group', f => f.documents[0].factsLocator.group = '../escape'],
+  ['traversal document', f => f.documents[0].path = '../a.lua'],
+  ['absolute document', f => f.documents[0].path = '/a.lua'],
+  ['duplicate document', f => f.documents[1].path = f.documents[0].path],
+  ['negative locator', f => f.documents[0].factsLocator.offset = -1],
+  ['overlapping locators', f => f.documents[1].factsLocator.offset = f.documents[0].factsLocator.offset],
+  ['oversized locator', f => f.documents[0].factsLocator.bytes = (32 << 20) + 1],
+  ['unknown locator field', f => f.documents[0].factsLocator.extra = true],
+  ['null locator', f => f.documents[0].factsLocator = null],
+  ['missing pack', f => rmSync(f.packPath)],
+  ['missing loose', f => rmSync(f.loosePath)],
+  ['corrupt pack', f => writeFileSync(f.packPath, 'bad')],
+  ['corrupt loose', f => writeFileSync(f.loosePath, '{}')],
+  ['pack symlink', f => { rmSync(f.packPath); symlinkSync(f.unusedPath, f.packPath); }],
+  ['oversized object', f => { const fd = openSync(f.packPath, 'r+'); ftruncateSync(fd, (32 << 20) + 1); closeSync(fd); }],
+]) test(`Rust custody refuses ${name} before copying`, t => { const f = rustCustodyFixture(t); mutate(f); f.publish(); assert.throws(() => f.capture()); assert.equal(f.admissions.length, 0); assert(!existsSync(join(f.evidence, 'rust-fact-00000'))); });
+
+for (const [name, mutate] of [
+  ['missing referenced object', c => c.files.pop()],
+  ['duplicate object', c => c.files[1] = c.files[0]],
+  ['unreferenced object', c => c.files[0].relative = `cache/source-facts-rust/${sha256('unused')}.json`],
+  ['foreign file path', c => c.files[0].relative = '../foreign'],
+  ['foreign manifest path', c => c.files[0].manifest = '../foreign.json'],
+  ['object byte budget', c => c.files[0].bytes = (32 << 20) + 1],
+  ['false total', c => c.factsBytes++],
+  ['over-budget total', c => c.factsBytes = (512 << 20) + 1],
+  ['different candidate', c => c.candidate.artifactSHA256 = '0'.repeat(64)],
+  ['different layout', c => c.layout = 'v11-pack1'],
+  ['different index', c => c.index.sha256 = '0'.repeat(64)],
+]) test(`Rust custody verification rejects ${name}`, t => { const f = rustCustodyFixture(t), reference = f.capture(); rewriteRustCatalog(reference, mutate); assert.throws(() => verifyRustCustody(reference)); });
+
+for (const name of ['catalog', 'manifest', 'part', 'missing-part', 'index-manifest', 'index-parts-manifest']) test(`Rust custody final verification catches changed ${name}`, t => {
+  const f = rustCustodyFixture(t), reference = f.capture(), catalog = JSON.parse(readFileSync(reference.catalog));
+  const path = name === 'catalog' ? reference.catalog : name === 'manifest' ? join(f.evidence, catalog.files[0].manifest) : name === 'index-manifest' ? join(f.evidence, 'rust-index-manifest.json') : name === 'index-parts-manifest' ? join(f.evidence, 'rust-index-parts/manifest.json') : join(f.evidence, 'rust-fact-00000/index.part000.bin');
+  if (name === 'missing-part') rmSync(path); else writeFileSync(path, Buffer.concat([readFileSync(path), Buffer.from(' ')])); assert.throws(() => verifyRustCustody(reference));
+});
+
+test('Rust custody actual-byte admission blocks all archive writes and preserves original source', t => {
+  const f = rustCustodyFixture(t), index = indexEvidence(f.home, 'rust', f.pin, f.evidence, f.d), before = inventory(f.home).sha256;
+  assert.throws(() => captureRustCustody(f.home, index, f.evidence, f.d, {candidate: {commit: CANDIDATE_COMMIT, ...CANDIDATE_IDENTITY}, limits: {}, admit() { throw new Error('disk.insufficient_space'); }}), /insufficient_space/);
+  assert.equal(inventory(f.home).sha256, before); assert(!existsSync(join(f.evidence, 'rust-fact-00000'))); assert(!existsSync(join(f.evidence, 'rust-custody.json')));
+});
+
+test('Rust custody admission-time source mutation cannot be copied as an authenticated original', t => {
+  const f = rustCustodyFixture(t), index = indexEvidence(f.home, 'rust', f.pin, f.evidence, f.d);
+  assert.throws(() => captureRustCustody(f.home, index, f.evidence, f.d, {candidate: {commit: CANDIDATE_COMMIT, ...CANDIDATE_IDENTITY}, limits: {}, admit() { writeFileSync(f.packPath, 'changed'); }})); assert(!existsSync(join(f.evidence, 'rust-custody.json')));
+});
+
+test('Rust archive failure after a complete comparison retains the failed Rust owner', async t => {
+  const f = await fixture(t, {rustCustody: true}); assert.equal(f.report.state, 'source_pack_scenarios_failed'); assert.equal(f.samples.length, 6); assert.match(f.report.blocker, /Rust archive/);
+  const go = f.owners.find(o => o.directory.endsWith('single-content-change-go')), rust = f.owners.find(o => o.directory.endsWith('single-content-change-rust')); assert(go.cleaned); assert.equal(rust.cleaned, false); assert.equal(rust.sealed.state, 'failed'); assert.equal(f.owners[0].cleaned, false);
+});
+
+for (const [name, change] of [
+  ['part path traversal', m => m.parts[0].path = '../foreign'],
+  ['part offset gap', m => m.parts[0].offset = 1],
+  ['duplicate part', m => m.parts.push(m.parts[0])],
+  ['part size overflow', m => m.parts[0].bytes = (8 << 20) + 1],
+  ['source path substitution', m => m.source.path = '/foreign/pack'],
+]) test(`Rust custody rejects self-consistently rehashed ${name}`, t => {
+  const f = rustCustodyFixture(t), reference = f.capture(), catalog = JSON.parse(readFileSync(reference.catalog)), manifest = join(f.evidence, catalog.files[0].manifest);
+  editCustodyJSON(manifest, change); rewriteRustCatalog(reference, c => c.files[0].manifestSHA256 = hashFile(manifest)); assert.throws(() => verifyRustCustody(reference));
+});
+
+test('Rust custody aggregate preflight refuses more than 512 MiB without hashing or copying the sources', t => {
+  const f = rustCustodyFixture(t); f.documents.splice(0);
+  for (let i = 0; i < 17; i++) { const document = {path: `budget-${i}.lua`, sha256: sha256(String(i)), bytes: 1}; f.documents.push(document); const path = rustFactPath(f.home, document, 'v11'), fd = openSync(path, 'wx'); ftruncateSync(fd, 32 << 20); closeSync(fd); }
+  // The source envelopes are deliberately invalid: aggregate size must fail
+  // before reading them. These sparse fixture files consume no payload blocks.
+  f.publish();
+  assert.throws(() => f.capture(), /total budget/); assert.equal(f.admissions.length, 0);
+});
+
+test('Rust custody refuses replay and preexisting dangling output links without altering sealed evidence', t => {
+  const f = rustCustodyFixture(t), reference = f.capture(), before = inventory(f.evidence).sha256, index = {path: JSON.parse(readFileSync(reference.catalog)).index.path, ...JSON.parse(readFileSync(reference.catalog)).index, manifest: JSON.parse(readFileSync(join(f.evidence, 'rust-index-manifest.json')))};
+  assert.throws(() => captureRustCustody(f.home, index, f.evidence, f.d, {candidate: {commit: CANDIDATE_COMMIT, ...CANDIDATE_IDENTITY}, limits: {}, admit() { assert.fail('must reject before admission'); }}), /new Rust custody paths/); assert.equal(inventory(f.evidence).sha256, before);
+  const other = rustCustodyFixture(t), otherIndex = indexEvidence(other.home, 'rust', other.pin, other.evidence, other.d); symlinkSync(join(other.d, 'missing'), join(other.evidence, 'rust-custody-admission.json'));
+  assert.throws(() => captureRustCustody(other.home, otherIndex, other.evidence, other.d, {candidate: {commit: CANDIDATE_COMMIT, ...CANDIDATE_IDENTITY}, limits: {}, admit() { assert.fail('must reject before admission'); }}), /new Rust custody paths/); assert(!existsSync(join(other.d, 'missing')));
+});
+
+test('changed admission includes both retained and new Rust Facts, while Go reserve is unchanged', () => {
+  const rows = [{path: FIRST_PATH, bytes: 2533}], base = {bytes: 150, rows: [{path: 'cache/source-facts-rust/fixture.json', bytes: 100}, {path: 'state/toolkit.sqlite', bytes: 50}]}, oracle = {allBytes: 2533};
+  const result = mutationFootprint('rust', 'root-insert', base, 20, rows, oracle); assert.equal(result.evidence.rustFacts, result.factsBytes + result.components.newFacts); assert.equal(result.requiredBytes, result.scratchReserveBytes + Object.values(result.evidence).reduce((a, b) => a + b, 0));
+  assert(footprint().evidenceBytes >= 2 * (512 << 20) + 4 * (128 << 20));
+});
+
+test('a new observed report cannot omit Rust output custody', async t => { const f = await fixture(t); delete f.report.scenarios[2].facts.rustCustody; assert.throws(() => verifyObservedReport({status: 0, handlesReaped: true, proof: proof()}, f.report, f.request, f.inputs)); });
+
+function completeComparisonFixture(t) {
+  const f = rustCustodyFixture(t), go = join(f.d, 'go-home'); mkdirSync(join(go, 'state'), {recursive: true}); copyFileSync(f.path, join(go, 'state/toolkit.sqlite'));
+  const summary = {schema: 'lycheedev.source-map.v2', storage: 'file-cache', parser: 'source-v1', repository: f.pin.source.repository, product: f.pin.source.product, commit: BASE_COMMIT, documents: 3, declarations: 3, relationships: 0, diagnostics: 0, assets: 0, complete: true};
+  const source = f.pin.source, key = sha256(['lycheedev.source-map.v2', source.repository, source.product, source.exactCommit, source.parserRevision].join('\0')), snapshot = join(go, 'source/v1/facts/snapshots', key); mkdirSync(snapshot, {recursive: true});
+  const records = f.documents.map(doc => JSON.stringify({kind: 'document', path: doc.path, sha256: doc.sha256, bytes: doc.bytes})).join('\n') + '\n'; writeFileSync(join(snapshot, 'records.jsonl'), records); writeFileSync(join(snapshot, 'manifest.json'), JSON.stringify({recordsHash: sha256(records), recordBytes: Buffer.byteLength(records), summary}));
+  for (const doc of f.documents) { const mode = doc.path.endsWith('.xml') ? '.xml' : '.lua', file = join(go, 'source/v1/facts/files/source-v1', sha256(`source-v1\0${mode}\0${doc.sha256}`) + '.json'); mkdirSync(resolve(file, '..'), {recursive: true}); writeFileSync(file, JSON.stringify({schema: 'lycheedev.source-file-facts.v2', inputSHA256: doc.sha256, parser: 'source-v1', mode, factsSHA256: sha256(JSON.stringify(f.facts)), facts: f.facts})); }
+  const output = {schema: 'lycheedev.result.v1', ok: true, error: null, result: summary};
+  return {...f, go, summary, run: (admit = () => ({})) => compareFacts({go, rust: f.home}, {go: output, rust: output}, f.pin, summary, f.evidence, f.d, undefined, {candidate: {commit: CANDIDATE_COMMIT, ...CANDIDATE_IDENTITY}, limits: {}, admit})};
+}
+for (const denied of [0, 1, 2]) test(`actual complete comparison requires both custodies before returning success (denied admission=${denied})`, async t => {
+  const f = completeComparisonFixture(t), go = f.go;
+  let admissions = 0; const run = () => f.run(() => { if (++admissions === denied) throw new Error('archive disk.insufficient_space'); return {}; });
+  if (denied) { await assert.rejects(run(), /archive disk/); assert(!existsSync(join(f.evidence, 'rust-custody.json'))); } else { const result = await run(); assert.equal(result.fullFieldsAndOrderEqual, true); assert.equal(verifyRustCustody(result.rustCustody).documents, 3); rmSync(go, {recursive: true}); openGoCustody(result.goCustody).verify(); }
+  const delta = JSON.parse(readFileSync(join(f.evidence, 'facts-comparison.json'))); assert.deepEqual(delta.differentFiles, []); assert.equal(delta.documents, 3);
+});
+
+function freshIdentityFixture() {
+  const candidate = {commit: '1'.repeat(40), artifactSHA256: '2'.repeat(64), binarySHA256: '3'.repeat(64), sourceTreeSHA256: '4'.repeat(64)}, emmy = {schema: 'lycheedev.emmy-reconstruction.v1', identity: 'public-upstream-unmodified-v1', identitySHA256: '5'.repeat(64), recipeSHA256: '6'.repeat(64), patchedTreeSHA256: '7'.repeat(64)};
+  const artifact = {profile: 'release', sameInvocation: true, sourceRoot: root, binarySHA256: candidate.binarySHA256, command: ['cargo', 'build', '--locked', '--offline', '-j', '1', '--profile', 'release', '-p', 'lycheedev-cli'], inputHashes: {sourceTree: candidate.sourceTreeSHA256, emmy: {schema: emmy.schema, identitySHA256: emmy.identitySHA256, recipeSHA256: emmy.recipeSHA256, patchedTreeSHA256: emmy.patchedTreeSHA256, historicalPrivatePatchRecovered: false}}};
+  return {candidate, artifact, sourceTree: candidate.sourceTreeSHA256, emmy, channel: {version: '3.5.0', distTag: 'beta'}};
+}
+test('fresh exact configuration supports a new explicit candidate without changing historical identities', async t => {
+  const f = freshIdentityFixture(), request = requestAt(temp(t)); Object.assign(request.candidate, f.candidate); assert.deepEqual(candidateIdentity(validateRequest(request).candidate), f.candidate);
+  assert.equal(verifyCandidateIdentity(f.candidate, f.artifact, f.sourceTree, f.emmy, f.channel), f.artifact); assert.throws(() => assertHistoricalCandidate(request), /historical/);
+  const controller = await fixture(t, {candidate: f.candidate}); assert.equal(controller.report.state, 'source_pack_scenarios_observed'); assert.equal(controller.report.productCommit, f.candidate.commit); assert.deepEqual(controller.report.scenarios[2].facts.rustCustody.candidate, f.candidate); verifyObservedReport({status: 0, handlesReaped: true, proof: proof()}, controller.report, controller.request, controller.inputs);
+});
+for (const [name, mutate] of [
+  ['EXE', f => f.artifact.binarySHA256 = '0'.repeat(64)],
+  ['artifact source', f => f.artifact.inputHashes.sourceTree = '0'.repeat(64)],
+  ['current source', f => f.sourceTree = '0'.repeat(64)],
+  ['build recipe', f => f.artifact.command.push('--features=other')],
+  ['unoptimized artifact', f => f.artifact.profile = 'dev'],
+  ['different invocation', f => f.artifact.sameInvocation = false],
+  ['Emmy upstream', f => f.emmy.identity = 'private-patched'],
+  ['Emmy identity', f => f.emmy.identitySHA256 = '0'.repeat(64)],
+  ['Emmy recipe', f => f.emmy.recipeSHA256 = '0'.repeat(64)],
+  ['Emmy tree', f => f.emmy.patchedTreeSHA256 = '0'.repeat(64)],
+  ['Emmy schema', f => f.artifact.inputHashes.emmy.schema = 'other'],
+  ['Emmy private claim', f => f.artifact.inputHashes.emmy.historicalPrivatePatchRecovered = true],
+  ['channel', f => f.channel.distTag = 'latest'],
+]) test(`fresh candidate rejects mismatched ${name}`, () => { const f = freshIdentityFixture(); mutate(f); assert.throws(() => verifyCandidateIdentity(f.candidate, f.artifact, f.sourceTree, f.emmy, f.channel)); });
+
+test('fresh identity rejects implicit refs and missing expected digests', () => { const f = freshIdentityFixture(); for (const commit of ['latest', 'HEAD', 'main', '00d215a', undefined]) assert.throws(() => candidateIdentity({...f.candidate, commit})); for (const key of Object.keys(CANDIDATE_IDENTITY)) { const copy = {...f.candidate}; delete copy[key]; assert.throws(() => candidateIdentity(copy)); } });
+test('fresh checkout authentication rejects changed commit, dirty tracked and untracked inputs', t => {
+  const d = temp(t), commit = '1'.repeat(40), git = (head, status = '') => args => Buffer.from(args.includes('--show-toplevel') ? d : args.includes('HEAD') ? head : status);
+  verifyCleanCheckout(d, commit, git(commit)); assert.throws(() => verifyCleanCheckout(d, commit, git('2'.repeat(40))), /commit/);
+  for (const dirty of [' M crates/source.rs', '?? unknown-input']) assert.throws(() => verifyCleanCheckout(d, commit, git(commit, dirty)), /clean/);
+});
+test('fresh candidate authenticates actual artifact and EXE bytes before any source/build work', t => {
+  const request = requestAt(temp(t)), input = request.candidate; assert.throws(() => verifyCandidateRecord(input), /artifact record changed/);
+  const exe = join(input.artifactRoot, 'lycheedev.exe'); writeFileSync(exe, 'changed'); writeFileSync(input.artifact, JSON.stringify({schema: 'lycheedev.rust-build-artifact.v1', sourceBinary: exe, binarySHA256: '0'.repeat(64)})); input.artifactSHA256 = hashFile(input.artifact); assert.throws(() => verifyCandidateRecord(input), /artifact_integrity/);
+});
+for (const name of ['cold', 'remaining', 'go']) test(`historical ${name} continuation rejects a fresh candidate before reading old evidence`, t => {
+  const request = requestAt(temp(t)); request.candidate.commit = '1'.repeat(40); const authenticate = name === 'cold' ? authenticateRetainedCold : name === 'remaining' ? authenticateRemaining : authenticateRetainedGo; assert.throws(() => authenticate(request, {}), /historical/);
+});
+test('new Rust custody carries the selected exact candidate instead of relabeling it 00d', t => {
+  const f = rustCustodyFixture(t), index = indexEvidence(f.home, 'rust', f.pin, f.evidence, f.d), candidate = freshIdentityFixture().candidate;
+  const reference = captureRustCustody(f.home, index, f.evidence, f.d, {candidate, limits: {}, admit() { return {}; }}); assert.deepEqual(reference.candidate, candidate); assert.deepEqual(JSON.parse(readFileSync(reference.catalog)).candidate, candidate); verifyRustCustody(reference);
+  assert.throws(() => verifyRustCustody({...reference, candidate: {commit: CANDIDATE_COMMIT, ...CANDIDATE_IDENTITY}}));
+});
+test('fresh Go body custody failure retains the healthy owner and never starts warm', async t => { const f = await fixture(t, {goCustody: true}); assert.equal(f.samples.length, 2); assert.equal(f.report.state, 'source_pack_scenarios_failed'); assert.equal(f.owners[0].sealed.state, 'failed'); assert.equal(f.owners[0].cleaned, false); });
+
+function prepareDualBorrowHomes(f) {
+  const facts = {declarations: [], relationships: [], loads: [], headers: [], diagnostics: []}, sourceSHA = sha256('body'), group = sha256('4036-record-test-pack');
+  const stableFacts = Object.fromEntries(Object.keys(facts).sort().map(key => [key, facts[key]])), raw = Buffer.from(JSON.stringify({schema: 'lycheedev.source-facts.rust.v11', inputSHA256: sourceSHA, factsSHA256: sha256(JSON.stringify(stableFacts)), facts})), pieces = [Buffer.from('LYCFPK01')], documents = []; let offset = 8;
+  for (let i = 0; i < 4036; i++) { const doc = {path: `fixture-${String(i).padStart(4, '0')}.lua`, bytes: 4, sha256: sourceSHA}, header = Buffer.alloc(68); header.writeUInt32LE(raw.length); Buffer.from(basename(rustFactPath(f.homes.rust, doc, 'v11'), '.json'), 'hex').copy(header, 4); Buffer.from(sha256(raw), 'hex').copy(header, 36); doc.factsLocator = {group, offset, bytes: raw.length, sha256: sha256(raw)}; pieces.push(header, raw); offset += 68 + raw.length; documents.push(doc); }
+  const pack = join(f.homes.rust, 'cache/source-facts-rust', group + '.json'); mkdirSync(resolve(pack, '..'), {recursive: true}); writeFileSync(pack, Buffer.concat(pieces));
+  const goFact = join(f.homes.go, 'source/v1/facts/files/source-v1', sha256(`source-v1\0.lua\0${sourceSHA}`) + '.json'); mkdirSync(resolve(goFact, '..'), {recursive: true}); writeFileSync(goFact, JSON.stringify({schema: 'lycheedev.source-file-facts.v2', inputSHA256: sourceSHA, parser: 'source-v1', mode: '.lua', factsSHA256: sha256(JSON.stringify(facts)), facts}));
+  const summary = {parser: 'source-v1', repository: 'wow-ui-source', product: 'retail', commit: BASE_COMMIT, documents: 4036, declarations: 0, relationships: 0, diagnostics: 0};
+  const goRaw = documents.map(({factsLocator, ...doc}) => JSON.stringify({kind: 'document', ...doc})).join('\n') + '\n', goPath = join(f.homes.go, 'source/v1/facts/snapshots/fixture/records.jsonl'), goManifest = {summary, recordsHash: sha256(goRaw), recordBytes: Buffer.byteLength(goRaw)}; mkdirSync(resolve(goPath, '..'), {recursive: true}); writeFileSync(goPath, goRaw); f.put(join(resolve(goPath, '..'), 'manifest.json'), goManifest);
+  const index = Buffer.from(JSON.stringify({summary, documents})), indexSHA = sha256(index), rustPath = join(f.homes.rust, 'cache/objects', indexSHA.slice(0, 2), indexSHA.slice(2)); mkdirSync(resolve(rustPath, '..'), {recursive: true}); writeFileSync(rustPath, index);
+  const identity = sha256(['rust-index-v14', 'facts-pack-v2-path-radix512', 'facts-layout-v11-go323-generated-origins', 'TS0.26.3', 'Lua0.5.0', 'XML0.38', 'generator-v6', summary.repository, summary.product, summary.commit, summary.parser].join('\0'));
+  return {go: {path: goPath, bytes: Buffer.byteLength(goRaw), sha256: sha256(goRaw), manifest: goManifest}, rust: {path: rustPath, bytes: index.length, sha256: indexSHA, manifest: {schema: 'lycheedev.source-index.rust.v6', identity, blob: {sha256: indexSHA, bytes: index.length}}}};
+}
+for (const fault of [null, 'missing-go', 'foreign-candidate', 'unsealed', 'changed-part']) test(`cold borrow verifies new complete dual custody before claiming (${fault ?? 'valid'})`, async t => {
+  const f = borrowFixture(t, true), options = {candidate: {commit: CANDIDATE_COMMIT, ...CANDIDATE_IDENTITY}, limits: {}, admit() { return {}; }};
+  const go = await captureComparedGo(f.homes.go, f.indexes.go, f.custody.evidence, f.d, options), rust = captureRustCustody(f.homes.rust, f.indexes.rust, f.custody.evidence, f.d, options);
+  editCustodyJSON(join(f.custody.evidence, 'cold-revalidated.json'), v => { v.facts.goCustody = go; v.facts.rustCustody = rust; });
+  const value = {schema: 'lycheedev.source-pack2-cold-facts.v2', go, rust}; if (fault === 'missing-go') delete value.go; if (fault === 'foreign-candidate') value.rust.candidate.commit = '1'.repeat(40);
+  f.put(join(f.custody.evidence, 'cold-facts-custody.json'), value); f.custody.seal({state: 'succeeded', handlesReaped: true, logs: evidenceFiles(f.custody.evidence)}); f.custody.cleanup();
+  if (fault === 'unsealed') writeFileSync(join(f.custody.evidence, 'not-sealed'), 'x'); if (fault === 'changed-part') writeFileSync(join(f.custody.evidence, 'rust-fact-00000/index.part000.bin'), 'bad');
+  if (fault) assert.throws(() => claimColdBorrow(f.d, f.reference, f.owner, f.before, f.custody.receipt)); else assert.equal(claimColdBorrow(f.d, f.reference, f.owner, f.before, f.custody.receipt).sha256.length, 64);
+});
+
+for (const mutation of ['grow', 'shrink', 'same-size-replace', 'delete']) test(`Go copy remains within its admitted tuple when source changes after admission: ${mutation}`, async t => {
+  const f = retainedFixture(t), indexes = prepareDualBorrowHomes(f), directory = join(f.d, 'go-evidence'); mkdirSync(directory); splitIndexEvidence(f.d, {path: indexes.go.path, bytes: indexes.go.bytes, sha256: indexes.go.sha256}, join(directory, 'go-index-parts'));
+  const file = join(f.homes.go, inventory(f.homes.go).rows.find(row => row.path.startsWith('source/v1/facts/files/')).path); let submitted;
+  await assert.rejects(captureComparedGo(f.homes.go, indexes.go, directory, f.d, {limits: {}, admit(_root, options) {
+    submitted = options; const raw = readFileSync(file);
+    if (mutation === 'grow') { const value = JSON.parse(raw); value.facts.headers = [{value: 'x'.repeat(20 << 20)}]; value.factsSHA256 = sha256(JSON.stringify(value.facts)); writeFileSync(file, JSON.stringify(value)); }
+    else if (mutation === 'shrink') writeFileSync(file, raw.subarray(0, raw.length - 1));
+    else if (mutation === 'same-size-replace') { const bytes = Buffer.from(raw); bytes[10] ^= 1; writeFileSync(file, bytes); }
+    else rmSync(file);
+    return {};
+  }}));
+  assert(submitted.requiredBytes >= 32 << 20); assert(!existsSync(join(directory, 'go-fact-00000'))); assert(!existsSync(join(directory, 'go-original-manifest.json'))); assert(!existsSync(join(directory, 'go-custody.json'))); assert(existsSync(f.homes.go));
+});
+
+test('Go custody replay and dangling planned output directory reject before admission with evidence unchanged', async t => {
+  const f = retainedFixture(t), indexes = prepareDualBorrowHomes(f), directory = join(f.d, 'go-evidence'); mkdirSync(directory); splitIndexEvidence(f.d, {path: indexes.go.path, bytes: indexes.go.bytes, sha256: indexes.go.sha256}, join(directory, 'go-index-parts'));
+  const options = {limits: {}, admit() { return {}; }}; await captureComparedGo(f.homes.go, indexes.go, directory, f.d, options); const before = inventory(directory).sha256;
+  await assert.rejects(captureComparedGo(f.homes.go, indexes.go, directory, f.d, {limits: {}, admit() { assert.fail('no second admission'); }}), /new Go custody paths/); assert.equal(inventory(directory).sha256, before);
+  const other = join(f.d, 'go-other-evidence'); mkdirSync(other); splitIndexEvidence(f.d, {path: indexes.go.path, bytes: indexes.go.bytes, sha256: indexes.go.sha256}, join(other, 'go-index-parts')); symlinkSync(join(f.d, 'missing-go-output'), join(other, 'go-fact-00000'));
+  await assert.rejects(captureComparedGo(f.homes.go, indexes.go, other, f.d, {limits: {}, admit() { assert.fail('no admission with preexisting directory'); }}), /new Go custody paths/); assert(!existsSync(join(other, 'go-custody-admission.json')));
+});
+
+test('historical report verification independently rejects a new candidate paired with an old continuation', async t => {
+  const f = await fixture(t, {remaining: true}), altered = structuredClone(f.request); altered.candidate.commit = '1'.repeat(40); f.report.request = altered; f.report.productCommit = altered.candidate.commit;
+  assert.throws(() => verifyObservedReport({status: 0, handlesReaped: true, proof: proof()}, f.report, altered, f.inputs, undefined, f.resumeRemaining), /historical/);
+});
+
+for (const oversized of [false, true]) test(`Go original manifest copy is bounded by its admitted 1 MiB ceiling (oversized=${oversized})`, async t => {
+  const f = retainedFixture(t), indexes = prepareDualBorrowHomes(f), directory = join(f.d, 'manifest-evidence'); mkdirSync(directory); splitIndexEvidence(f.d, {path: indexes.go.path, bytes: indexes.go.bytes, sha256: indexes.go.sha256}, join(directory, 'go-index-parts'));
+  const manifest = join(resolve(indexes.go.path, '..'), 'manifest.json'); let submitted;
+  const run = () => captureComparedGo(f.homes.go, indexes.go, directory, f.d, {limits: {}, admit(_root, value) { submitted = value; const text = readFileSync(manifest, 'utf8'); writeFileSync(manifest, text + ' '.repeat((1 << 20) + Number(oversized) - Buffer.byteLength(text))); return {}; }});
+  if (oversized) { await assert.rejects(run(), /budget/); assert(!existsSync(join(directory, 'go-original-manifest.json'))); } else { const reference = await run(); openGoCustody(reference).verify(); assert.equal(readFileSync(join(directory, 'go-original-manifest.json')).length, 1 << 20); }
+  const record = JSON.parse(readFileSync(join(directory, 'go-custody-admission.json'))); assert.equal(record.originalManifestReserveBytes, 1 << 20); assert.equal(submitted.requiredBytes, record.factsBytes + record.partsManifestBytes + (1 << 20) + (32 << 20));
+});
+
+for (const explicit of [false, true]) test(`fresh task admissions use exactly ${explicit ? 6 : 5} GiB with unchanged cache/free reserve`, async t => {
+  const f = await fixture(t, {candidate: freshIdentityFixture().candidate, ...(explicit ? {allowance: FRESH_ALLOWANCE} : {})});
+  assert.equal(f.report.state, 'source_pack_scenarios_observed', f.report.blocker); assert.equal(f.samples.length, 12);
+  for (const limits of [f.report.diskPolicy, ...f.owners.map(o => o.options.limits), ...f.admissions.map(o => o.limits)]) { assert.equal(limits.scratchBytes, (explicit ? 6 : 5) * 1024 ** 3); assert.equal(limits.cacheBytes, 20 * 1024 ** 3); assert.equal(limits.freeReserveBytes, 2 * 1024 ** 3); }
+});
+test('fresh allowance is exact, never accepts an amount above 6 GiB or an environment override', t => {
+  const d = temp(t); assert.equal(assertDiskPolicy(d, {}, FRESH_ALLOWANCE).scratchBytes, 6 * 1024 ** 3);
+  for (const mutate of [v => v.scratchBytes++, v => v.scratchBytes = 7 * 1024 ** 3, v => v.scope = 'other', v => v.authorizationReference = 'other', v => v.freeReserveBytes = 0]) { const value = structuredClone(FRESH_ALLOWANCE); mutate(value); assert.throws(() => assertDiskPolicy(d, {}, value)); }
+  assert.throws(() => assertDiskPolicy(d, {LYCHEEDEV_DISK_SCRATCH_GIB: '6'}, FRESH_ALLOWANCE)); assert.throws(() => assertDiskPolicy(d, {}, FRESH_ALLOWANCE, {schema: 'unknown'}));
+});
+test('formal CLI accepts explicit fresh 6 GiB and preserves old continuation modes', () => {
+  assert.equal(parseArguments(['config', 'conditions']).scratch6GiB, false);
+  assert.deepEqual(parseArguments(['config', 'conditions', '--scratch-6gib']), {configuration: 'config', conditions: 'conditions', mode: undefined, reference: undefined, scratch6GiB: true});
+  for (const mode of ['--resume-remaining', '--resume-go']) assert.equal(parseArguments(['config', 'conditions', mode, 'reference', '--scratch-6gib']).scratch6GiB, true);
+  for (const args of [[], ['config'], ['config', 'conditions', '--scratch-7gib'], ['config', 'conditions', '--scratch-6gib', 'extra'], ['config', 'conditions', '--resume-cold', 'reference', '--scratch-6gib'], ['config', 'conditions', '--inspect-go', 'reference', '--scratch-6gib']]) assert.throws(() => parseArguments(args));
+});
+test('fresh allowance never relaxes the fixed identity of a historical continuation', async t => {
+  const d = temp(t), request = requestAt(d); request.candidate.commit = '1'.repeat(40);
+  for (const key of ['resumeCold', 'resumeRemaining', 'resumeGo']) await assert.rejects(runController({request, allowance: FRESH_ALLOWANCE, [key]: {}}, {beginScratch() { assert.fail('historical identity must fail first'); }}), /historical/);
+});
+for (const engine of ['go', 'rust-loose']) test(`comparison rejects a valid same-input ${engine} replacement after the actual read`, async t => {
+  const f = completeComparisonFixture(t), original = fs.readFileSync, targets = new Set(engine === 'go' ? inventory(f.go).rows.filter(row => row.path.startsWith('source/v1/facts/files/')).map(row => join(f.go, row.path)) : f.documents.filter(doc => !doc.factsLocator).map(doc => rustFactPath(f.home, doc, 'v11-pack2'))); let changed = 0;
+  fs.readFileSync = function(path, ...args) { const raw = original(path, ...args); if (targets.delete(String(path))) { const value = JSON.parse(raw); value.facts.declarations[0].name = 'Modified'; const stable = value => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])])) : value; value.factsSHA256 = sha256(JSON.stringify(engine === 'go' ? value.facts : stable(value.facts))); writeFileSync(path, JSON.stringify(value)); changed++; } return raw; };
+  try { await assert.rejects(f.run(), /compared (Go|Rust) bytes differ from custody/); } finally { fs.readFileSync = original; }
+  assert(changed > 0); assert(existsSync(f.go)); assert(existsSync(f.home)); assert(existsSync(join(f.evidence, 'facts-comparison.json')));
+});
+for (const fault of ['missing-go', 'different-go', 'missing-rust', 'different-loose', 'different-pack-offset', 'different-pack-SHA']) test(`comparison/custody binding rejects an incomplete or substituted read tuple: ${fault}`, async t => {
+  const f = completeComparisonFixture(t), result = await f.run(), delta = JSON.parse(readFileSync(result.evidence));
+  if (fault === 'missing-go') delta.factSources.go.pop(); else if (fault === 'different-go') delta.factSources.go[0].sha256 = '0'.repeat(64); else if (fault === 'missing-rust') delta.factSources.rust.pop(); else if (fault === 'different-loose') delta.factSources.rust.find(row => !row.record).sha256 = '0'.repeat(64); else if (fault === 'different-pack-offset') delta.factSources.rust.find(row => row.record).record.offset++; else delta.factSources.rust.find(row => row.record).sha256 = '0'.repeat(64);
+  assert.throws(() => bindComparedCustody(delta, result.goCustody, result.rustCustody));
+});
+
+test('direct historical cold configuration rejects the fresh allowance before any owner', async t => {
+  const request = requestAt(temp(t)); await assert.rejects(runController({request, resumeCold: {}, allowance: FRESH_ALLOWANCE}, {beginScratch() { assert.fail('no owner'); }}), /cold continuation keeps original/);
+});
+test('comparison refuses different bytes from the same Go key referenced twice', async t => {
+  const f = retainedFixture(t), indexes = prepareDualBorrowHomes(f), original = fs.readFileSync; let changed = false;
+  fs.readFileSync = function(path, ...args) { const raw = original(path, ...args); if (!changed && String(path).includes('source/v1/facts/files/')) { const value = JSON.parse(raw); value.facts.headers = [{value: 'changed after first read'}]; value.factsSHA256 = sha256(JSON.stringify(value.facts)); writeFileSync(path, JSON.stringify(value)); changed = true; } return raw; };
+  try { await assert.rejects(readFactDelta(f.homes.go, f.homes.rust, indexes.go.path, 'v11-pack2', indexes.rust.path, indexes.rust.sha256, undefined, {captureSources: true}), /changed between duplicate references/); } finally { fs.readFileSync = original; }
+  assert.equal(changed, true);
+});
