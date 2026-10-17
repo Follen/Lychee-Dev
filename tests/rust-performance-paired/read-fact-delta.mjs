@@ -6,6 +6,7 @@ import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 const RUST_LAYOUTS = Object.freeze({
+  'v11-pack1': { key: 'facts-layout-v11-go323-generated-origins', generator: 'generator-v6', schema: 'lycheedev.source-facts.rust.v11', packed: true },
   v11: { key: 'facts-layout-v11-go323-generated-origins', generator: 'generator-v6', schema: 'lycheedev.source-facts.rust.v11' },
   v6: { key: 'facts-layout-v6-xml-original-tags', generator: 'generator-v5', schema: 'lycheedev.source-facts.rust.v6' },
   v10: { key: 'facts-layout-v10-go323-xml-lexical', generator: 'generator-v6', schema: 'lycheedev.source-facts.rust.v10' },
@@ -56,6 +57,10 @@ export function rustFactPath(home, document, rustLayout = 'v6') {
   if (typeof document.path !== 'string' || !document.path || !/^[a-f0-9]{64}$/.test(document.sha256)) {
     throw new Error('Invalid Rust fact document identity');
   }
+  if (layout.packed && document.factsLocator) {
+    if (!/^[a-f0-9]{64}$/.test(document.factsLocator.group)) throw new Error('Invalid Rust Facts group identity');
+    return path.join(home, 'cache/source-facts-rust', `${document.factsLocator.group}.json`);
+  }
   const key = sha256(`${layout.key}\0tree-sitter-0.26.3\0`
     + `lua-0.5.0\0xml-0.38\0${layout.generator}\0${document.path}\0${document.sha256}`);
   return path.join(home, 'cache/source-facts-rust', `${key}.json`);
@@ -64,7 +69,34 @@ export function readRustFact(home, document, rustLayout = 'v6') {
   const file = rustFactPath(home, document, rustLayout);
   const stat = fs.lstatSync(file);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 32 << 20) throw new Error('Invalid Rust fact file');
-  const raw = fs.readFileSync(file);
+  const locator = RUST_LAYOUTS[rustLayout].packed ? document.factsLocator : null;
+  let raw;
+  if (locator) {
+    const {offset, bytes, sha256: recordSHA} = locator;
+    if (!Number.isSafeInteger(offset) || offset < 8 || !Number.isSafeInteger(bytes) || bytes < 1
+      || bytes > 32 << 20 || offset + 68 + bytes > stat.size || !/^[a-f0-9]{64}$/.test(recordSHA)) {
+      throw new Error('Invalid Rust Facts locator bounds');
+    }
+    const descriptor = fs.openSync(file, 'r');
+    const read = (at, length) => {
+      const value = Buffer.alloc(length);
+      for (let used = 0; used < length;) {
+        const n = fs.readSync(descriptor, value, used, Math.min(65536, length - used), at + used);
+        if (!n) throw new Error('Truncated Rust Facts record');
+        used += n;
+      }
+      return value;
+    };
+    try {
+      if (!read(0, 8).equals(Buffer.from('LYCFPK01'))) throw new Error('Invalid Rust Facts pack header');
+      const header = read(offset, 68);
+      const expectedKey = path.basename(rustFactPath(home, document, 'v11'), '.json');
+      if (header.readUInt32LE(0) !== bytes || header.subarray(4, 36).toString('hex') !== expectedKey
+        || header.subarray(36).toString('hex') !== recordSHA) throw new Error('Rust Facts record identity mismatch');
+      raw = read(offset + 68, bytes);
+      if (sha256(raw) !== recordSHA) throw new Error('Rust Facts record digest mismatch');
+    } finally { fs.closeSync(descriptor); }
+  } else raw = fs.readFileSync(file);
   const envelope = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(raw));
   if (envelope.schema !== RUST_LAYOUTS[rustLayout].schema || envelope.inputSHA256 !== document.sha256) {
     throw new Error(`Fact input identity mismatch: ${document.path}`);
@@ -75,10 +107,10 @@ export function readRustFact(home, document, rustLayout = 'v6') {
   for (const section of SECTIONS) if (!Array.isArray(envelope.facts[section])) {
     throw new Error(`Invalid fact array ${section}: ${document.path}`);
   }
-  return {file, fileSHA256: sha256(raw), factsSHA256: envelope.factsSHA256, facts: envelope.facts};
+  return {file, fileSHA256: locator ? null : sha256(raw), ...(locator ? {record: locator, recordSHA256: sha256(raw)} : {}), factsSHA256: envelope.factsSHA256, facts: envelope.facts};
 }
 
-export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v6') {
+export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v6', rustIndexFile, expectedIndexSHA256) {
   const layout = RUST_LAYOUTS[rustLayout];
   if (!layout) throw new Error(`Unsupported Rust facts layout: ${rustLayout}`);
   const manifestFile = path.join(path.dirname(goRecords), 'manifest.json');
@@ -97,11 +129,33 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
   if (sourceHash.digest('hex') !== manifest.recordsHash || sourceBytes !== manifest.recordBytes) {
     throw new Error('Go records authentication mismatch');
   }
+  let rustDocuments;
+  let indexIdentity;
+  if (layout.packed) {
+    if (!rustIndexFile || !/^[a-f0-9]{64}$/.test(expectedIndexSHA256 || '')) throw new Error('Packed Facts require the same-run Rust index blob and expected SHA-256');
+    const stat = fs.lstatSync(rustIndexFile);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 128 << 20) throw new Error('Invalid Rust index file');
+    const indexRaw = fs.readFileSync(rustIndexFile);
+    if (sha256(indexRaw) !== expectedIndexSHA256) throw new Error('Rust index authentication mismatch');
+    const index = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(indexRaw));
+    if (!Array.isArray(index.documents) || index.documents.length !== documents.length
+      || index.summary?.parser !== manifest.summary.parser) throw new Error('Rust index document identity mismatch');
+    for (const field of ['repository', 'product', 'commit']) {
+      if (typeof manifest.summary[field] === 'string' && index.summary?.[field] !== manifest.summary[field]) throw new Error('Rust index snapshot identity mismatch');
+    }
+    rustDocuments = new Map(index.documents.map(doc => [doc.path, doc]));
+    if (rustDocuments.size !== documents.length) throw new Error('Duplicate Rust index document');
+    for (const document of documents) {
+      const indexed = rustDocuments.get(document.path);
+      if (!indexed || indexed.sha256 !== document.sha256 || (Number.isSafeInteger(document.bytes) && indexed.bytes !== document.bytes)) throw new Error('Rust index input identity mismatch');
+    }
+    indexIdentity = {rustIndexFile, rustIndexSHA256: expectedIndexSHA256, rustIndexBytes: indexRaw.length};
+  } else if (rustIndexFile !== undefined || expectedIndexSHA256 !== undefined) throw new Error('Historical per-file layout does not accept an index binding');
   const report = {
     diagnosticOnly: true,
     acceptanceUnchanged: 'original comparison and failure remain authoritative',
     goSummary: manifest.summary,
-    inputs: { rustLayout, goRecords, goManifestSHA256: sha256(manifestRaw), goHome, rustHome },
+    inputs: { rustLayout, goRecords, goManifestSHA256: sha256(manifestRaw), goHome, rustHome, ...indexIdentity },
     documents: documents.length,
     totals: { go: {}, rust: {} },
     categories: {},
@@ -117,7 +171,7 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
     const parser = manifest.summary.parser;
     const goKey = sha256(`${parser}\0${mode}\0${document.sha256}`);
     const goFile = path.join(goHome, 'source/v1/facts/files', parser, `${goKey}.json`);
-    const rust = readRustFact(rustHome, document, rustLayout), rustFile = rust.file;
+    const rust = readRustFact(rustHome, rustDocuments?.get(document.path) ?? document, rustLayout), rustFile = rust.file;
     const goRaw = fs.readFileSync(goFile);
     const go = JSON.parse(goRaw);
     if (go.schema !== 'lycheedev.source-file-facts.v2'
@@ -171,6 +225,7 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
             goFirstRows: a.slice(0, 10), rustFirstRows: b.slice(0, 10),
             goFactFile: goFile, rustFactFile: rustFile,
             goFactFileSHA256: sha256(goRaw), rustFactFileSHA256: rust.fileSHA256,
+            ...(rust.record ? {rustFactRecord: rust.record, rustFactRecordSHA256: rust.recordSHA256} : {}),
           });
         }
       }
@@ -189,9 +244,9 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [goHome, rustHome, goRecords, rustLayout] = process.argv.slice(2);
-  if (!goRecords || ![5, 6].includes(process.argv.length)) {
-    throw new Error('usage: node read-fact-delta.mjs GO_HOME RUST_HOME GO_RECORDS_JSONL [v6|v7|v8|v9|v10|v11]');
+  const [goHome, rustHome, goRecords, rustLayout, rustIndexFile, expectedIndexSHA256] = process.argv.slice(2);
+  if (!goRecords || ![5, 6, 8].includes(process.argv.length)) {
+    throw new Error('usage: node read-fact-delta.mjs GO_HOME RUST_HOME GO_RECORDS_JSONL [v6|v7|v8|v9|v10|v11|v11-pack1] [RUST_INDEX_JSON EXPECTED_INDEX_SHA256]');
   }
-  console.log(JSON.stringify(await readFactDelta(goHome, rustHome, goRecords, rustLayout), null, 2));
+  console.log(JSON.stringify(await readFactDelta(goHome, rustHome, goRecords, rustLayout, rustIndexFile, expectedIndexSHA256), null, 2));
 }

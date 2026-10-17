@@ -194,12 +194,14 @@ pub(super) fn visit(
     files: &[git::TreeFile],
     control: &OperationControl,
     profile: &Profile,
+    retained_metadata: usize,
     consume: impl FnMut(&git::TreeFile, Vec<u8>, Option<PreparedFacts>) -> Result<()>,
 ) -> Result<usize> {
     let available_cpus = thread::available_parallelism().map_or(1, usize::from);
-    visit_with_cpu_limit(home, pin, files, control, profile, available_cpus, consume)
+    visit_with_cpu_limit_and_retained(home, pin, files, control, profile, available_cpus, retained_metadata, consume)
 }
 
+#[cfg(test)]
 fn visit_with_cpu_limit(
     home: &Path,
     pin: &SourcePin,
@@ -207,6 +209,19 @@ fn visit_with_cpu_limit(
     control: &OperationControl,
     profile: &Profile,
     cpu_limit: usize,
+    consume: impl FnMut(&git::TreeFile, Vec<u8>, Option<PreparedFacts>) -> Result<()>,
+) -> Result<usize> {
+    visit_with_cpu_limit_and_retained(home, pin, files, control, profile, cpu_limit, 0, consume)
+}
+
+fn visit_with_cpu_limit_and_retained(
+    home: &Path,
+    pin: &SourcePin,
+    files: &[git::TreeFile],
+    control: &OperationControl,
+    profile: &Profile,
+    cpu_limit: usize,
+    retained_metadata: usize,
     mut consume: impl FnMut(&git::TreeFile, Vec<u8>, Option<PreparedFacts>) -> Result<()>,
 ) -> Result<usize> {
     let mut candidates = files.iter().filter(|file| eligible(file, b"")).count();
@@ -222,7 +237,7 @@ fn visit_with_cpu_limit(
             workers: Vec::new(),
             pending: VecDeque::new(),
             pending_bytes: 0,
-            retained_bytes: 0,
+            retained_bytes: retained_metadata,
             free_workers: VecDeque::new(),
             incoming_bytes: files
                 .iter()
@@ -543,3 +558,29 @@ impl Pipeline<'_> {
 #[cfg(test)]
 #[path = "facts_pipeline_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[test]
+fn retained_cohort_metadata_reduces_real_worker_admission_without_changing_facts() {
+    let fixture = super::facts_cache_tests::Fixture::new();
+    let raw = (0..8).map(|n| (format!("{n}.lua"), format!("function F{n}() Call() end")))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let pin = fixture.pin(&raw);
+    let control = OperationControl::default();
+    let files = git::tree_with_control(&fixture.home, &pin, &control).unwrap();
+    let mut observed = Vec::new();
+    for retained in [0, SOURCE_RETAINED_LIMIT - (1 << 20)] {
+        let mut output = Vec::new();
+        let mut prepared_count = 0;
+        visit_with_cpu_limit_and_retained(&fixture.home, &pin, &files, &control,
+            &Profile::new(), 8, retained, |file, bytes, prepared| {
+                prepared_count += usize::from(prepared.is_some());
+                let facts = prepared.map_or_else(|| ParseMode::for_path(&file.path).parse(&bytes), |p| p.facts);
+                output.push((file.path.clone(), bytes, serde_json::to_value(facts).unwrap()));
+                Ok(())
+            }).unwrap();
+        assert_eq!(prepared_count, if retained == 0 { 8 } else { 0 });
+        observed.push(output);
+    }
+    assert_eq!(observed[0], observed[1]);
+}

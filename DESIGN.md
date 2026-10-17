@@ -194,6 +194,50 @@ Windows amd64 Rust executable, the same addon, generated CLI/Skill references, l
 
 The Facts-only candidate uses an exclusively created, privately owned stage and the existing same-directory atomic replacement. Inputs and cache reads were already unlocked; the removed per-key lock serialized complete publication bytes, not parsing. Preserve same-key/different-body last-writer semantics and the existing rare NotPublished equivalence fallback. Originals, whole-index and metadata locking remain independent.
 
-The 64 fixed stage names bound active writers plus unknown/foreign residues. A name collision or Windows sharing violation acquires no ownership and may advance only within that finite set; other failures remain errors. Never reclaim another slot by age or PID. Full writes, original cancellation/deadline, checked close, Published/Unknown reporting and per-document successful checkpoints remain. Readers holding the old file continue reading its complete snapshot across replacement. No new cache format, locator, quota or GC policy is introduced. This is atomic filesystem publication without an explicit lock file, not a lock-free/wait-free progress guarantee. Runtime and performance acceptance remain in handover.
+The 64 fixed stage names bound active writers plus unknown/foreign residues. A name collision or Windows sharing violation acquires no ownership and may advance only within that finite set; other failures remain errors. Never reclaim another slot by age or PID. In that original per-file revision, full writes, original cancellation/deadline, checked close, Published/Unknown reporting and per-document successful checkpoints remain. Readers holding the old file continue reading its complete snapshot across replacement. That revision introduced no new cache format, locator, quota or GC policy; the subsequent bounded cohort design below changes only the rebuildable Facts storage granularity. This is atomic filesystem publication without an explicit lock file, not a lock-free/wait-free progress guarantee. Runtime and performance acceptance remain in handover.
 
 The Windows writer-close window requires bounded coordination even without a lock file: an earlier published writable Stage still denies delete sharing until checked close. Preserve that sharing policy so a private stage cannot be moved away from its authenticated parent. Under the normal synchronous Windows filesystem status contract, only exact native STATUS_SHARING_VIOLATION maps to a cache-only SharingBlocked/NotPublished attempt; retain the sealed owner and original absolute control, wait at most 25 ms per retry, then revalidate and try the same handle. All other failures, arbitrary converted error 32 and uncertain completion remain terminal Unknown. Ordinary/durable Stage APIs retain their previous error semantics; this does not authorize general I/O retry or extend any request deadline.
+
+
+### Bounded rebuildable Facts cohorts (implemented; runtime verification pending)
+
+The next Source-only storage boundary groups at most 64 eligible documents in
+source order. A cohort key is derived from their authenticated path/object/size
+identities and the Facts format identity. Each pack is at most the original
+32 MiB bound. Fixed headers and complete per-document envelopes are streamed
+into one private stage; there is no second pack-sized aggregation buffer,
+mutable global locator, background writer or new GC subsystem. The final index
+stores a fixed-size locator for each packed document. Locator/cohort capacity is
+charged alongside existing worker and retained state under the same 256 MiB
+admission cap.
+
+Only a confirmed publication may supply locators to the final index. Unknown
+publication, cancellation and checked-close failures keep their existing error
+meaning. A group that reaches the pack byte bound publishes its completed
+prefix and uses the existing per-file path for remaining records; a record
+exceeding the original per-file limit still fails with the original budget
+error. XML/TOC and other default consumers use authenticated locator ranges,
+validate header/key/length/hash and the complete original Facts envelope, then
+fall back to authenticated Git bytes and the original parser/per-file repair
+when a rebuildable record is missing or corrupt. The index commit and original
+source authentication boundaries remain authoritative.
+
+This deliberately changes an internal optimization checkpoint: completed groups
+are reusable, but an interrupted unpublished group may need recomputation.
+With unchanged eligible membership and order, changing one member may cause
+at most 63 otherwise unchanged peers in that cohort to be rebuilt. Inserting
+or deleting an eligible document can shift later ordinal cohort boundaries
+and invalidate more groups, potentially the remaining corpus; this broader
+cross-snapshot cost must be measured and reported, not described as a global
+63-document bound. No public command promises a
+persistent checkpoint after each parsed document; no source or captured business
+data is lost by this change. Record the cache tradeoff explicitly rather than
+claiming zero migration cost. Keep the historical per-file readers and evidence;
+new diagnostics select the pack layout explicitly and bind the exact index blob
+by SHA, never infer a locator from an arbitrary directory scan.
+
+The held-directory verification policy is unchanged. This design reduces the
+number of stage/create/replace operations instead of omitting ancestry checks.
+Concurrency, malformed/range-corrupt caches, cross-snapshot reuse, partial-group
+failure, cancellation, default consumer reconstruction and memory accounting
+require formal tests before runtime acceptance or a performance claim.

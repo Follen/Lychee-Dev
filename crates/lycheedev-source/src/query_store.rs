@@ -676,6 +676,7 @@ mod tests {
                     bytes: 20,
                     sha256: storage::sha256(b"literal unique body\n"),
                     facts: Facts::default(),
+                    facts_locator: None,
                 }],
                 symbols,
                 assets: vec![json!({"path":"Assets/Timer.blp"})],
@@ -779,6 +780,7 @@ mod tests {
             sha256: storage::sha256(&[]),
             bytes: 0,
             facts: Facts::default(),
+            facts_locator: None,
         });
         let pointer = full.documents[0].text.as_ref().unwrap().as_ptr();
         let identity = index::fingerprint(&pin);

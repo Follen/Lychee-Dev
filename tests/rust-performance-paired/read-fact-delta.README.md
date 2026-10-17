@@ -110,7 +110,7 @@ symbol ordinals/IDs, content digest and old manifest identity. The integration
 regression requires readiness to remain false until a current rebuild, then
 checks complete-index and query-cache warm reuse under the new fingerprint.
 These fixtures are reconstructed test caches, not claimed captures of old cache
-files. Rust execution of these new regressions remains NOT_RUN until recorded.
+files. These two migration regressions subsequently passed in the full afbeb cache26/0/0 group; see PR14 comment 6232978472. This does not validate subsequent pack storage.
 
 The original full-4036 comparison at 8cab used v10 and stays v10. Existing paired
 bbfe/ab4 product identities still explicitly use v10. The reader is one of the
@@ -121,3 +121,8 @@ source/fixture bytes, reports, digest checks and comparison order remain intact;
 the reader default stays v6. Never auto-discover a layout or relabel a prior
 report. The new explicit reader support does not itself rerun either product or
 prove cache migration in Rust.
+
+
+The cohort-pack successor is selected explicitly as `v11-pack1`. Its command
+requires this run's Rust index blob and authenticated manifest SHA in addition
+to the original inputs; see the [full pack reader and storage contract](README.md#full-same-run-facts-comparison). Historical per-file modes remain unchanged.

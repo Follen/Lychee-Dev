@@ -319,10 +319,10 @@ test('shared Rust reader rejects nonregular files and symbolic cache leaves', as
 
 test('reads explicit v11 using the exact current generated-origin production key and schema', async t => {
   const production = fs.readFileSync(new URL('../../crates/lycheedev-source/src/index.rs', import.meta.url), 'utf8');
-  const key = /fn facts_cache_path[\s\S]*?"([^"\n]+)"/.exec(production)?.[1];
+  const key = /fn facts_cache_key[\s\S]*?"([^"\n]+)"/.exec(production)?.[1];
   assert.equal(key, 'facts-layout-v11-go323-generated-origins\\0tree-sitter-0.26.3\\0lua-0.5.0\\0xml-0.38\\0generator-v6\\0{path}\\0{sha256}');
   assert.match(production, /envelope\["schema"\] == "lycheedev\.source-facts\.rust\.v11"/);
-  assert.match(production, /rust-index-v12\\0facts-layout-v11-go323-generated-origins/);
+  assert.match(production, /rust-index-v13\\0facts-pack-v1\\0facts-layout-v11-go323-generated-origins/);
   await withFixture(t, async f => {
     for (const [index, document] of f.documents.entries()) {
       const preimage = key.replaceAll('\\0', '\0').replace('{path}', document.path).replace('{sha256}', document.sha256);
@@ -354,4 +354,104 @@ test('never discovers or relabels authenticated historical v10 Facts as v11', as
     assert.deepEqual(fs.readFileSync(f.files[0].rustFile), historical);
     assert.equal((await f.read()).differentFiles.length, 0);
   }, 'v10');
+});
+
+function packFixture(t) {
+  const f = fixture('v11');
+  t.after(() => fs.rmSync(f.root, {recursive: true, force: true}));
+  const group = sha256('fixed bounded cohort input identity');
+  const packFile = path.join(f.rustHome, 'cache/source-facts-rust', `${group}.json`);
+  const parts = [Buffer.from('LYCFPK01')];
+  let offset = 8;
+  const documents = f.documents.map((document, i) => {
+    const raw = fs.readFileSync(f.files[i].rustFile);
+    const header = Buffer.alloc(68);
+    header.writeUInt32LE(raw.length);
+    Buffer.from(path.basename(f.files[i].rustFile, '.json'), 'hex').copy(header, 4);
+    Buffer.from(sha256(raw), 'hex').copy(header, 36);
+    const factsLocator = {group, offset, bytes: raw.length, sha256: sha256(raw)};
+    offset += header.length + raw.length;
+    parts.push(header, raw);
+    fs.unlinkSync(f.files[i].rustFile);
+    return {...document, factsLocator};
+  });
+  fs.writeFileSync(packFile, Buffer.concat(parts));
+  const indexFile = path.join(f.root, 'same-run-index.json');
+  const index = {documents, summary: {parser}};
+  const writeIndex = () => {
+    const raw = Buffer.from(JSON.stringify(index));
+    fs.writeFileSync(indexFile, raw);
+    return sha256(raw);
+  };
+  const indexSHA = writeIndex();
+  return {...f, packFile, indexFile, indexSHA, index, writeIndex,
+    readPack: () => readFactDelta(f.goHome, f.rustHome, f.records, 'v11-pack1', indexFile, indexSHA)};
+}
+
+test('explicit pack layout binds the same-run index and reads complete ordered Facts by range', async t => {
+  const f = packFixture(t);
+  const before = fs.readFileSync(f.packFile);
+  const report = await f.readPack();
+  assert.equal(report.documents, 4);
+  assert.equal(report.differentFiles.length, 0);
+  assert.equal(report.inputs.rustIndexSHA256, f.indexSHA);
+  for (const document of f.index.documents) {
+    const read = readRustFact(f.rustHome, document, 'v11-pack1');
+    assert.equal(read.fileSHA256, null);
+    assert.equal(read.recordSHA256, document.factsLocator.sha256);
+  }
+  assert.deepEqual(fs.readFileSync(f.packFile), before);
+  await assert.rejects(readFactDelta(f.goHome, f.rustHome, f.records, 'v11'), /ENOENT/);
+});
+
+test('pack layout rejects absent or wrong index authentication and different input identity', async t => {
+  const f = packFixture(t);
+  await assert.rejects(readFactDelta(f.goHome, f.rustHome, f.records, 'v11-pack1'), /same-run Rust index/);
+  await assert.rejects(readFactDelta(f.goHome, f.rustHome, f.records, 'v11-pack1', f.indexFile, '0'.repeat(64)), /index authentication/);
+  f.index.documents[0].sha256 = '1'.repeat(64);
+  await assert.rejects(readFactDelta(f.goHome, f.rustHome, f.records, 'v11-pack1', f.indexFile, f.writeIndex()), /index input identity/);
+});
+
+test('pack locator rejects overflow and every header key length digest mismatch', async t => {
+  const f = packFixture(t);
+  const document = f.index.documents[0];
+  const original = fs.readFileSync(f.packFile);
+  for (const offset of [0, -1, Number.MAX_SAFE_INTEGER, 8.5, 32 << 20]) {
+    assert.throws(() => readRustFact(f.rustHome, {...document, factsLocator: {...document.factsLocator, offset}}, 'v11-pack1'), /locator bounds/);
+  }
+  for (const at of [0, 8, 12, 44, 76]) {
+    const changed = Buffer.from(original); changed[at] ^= 0xff; fs.writeFileSync(f.packFile, changed);
+    assert.throws(() => readRustFact(f.rustHome, document, 'v11-pack1'), /header|identity mismatch|digest mismatch/);
+  }
+  fs.writeFileSync(f.packFile, original.subarray(0, 76));
+  assert.throws(() => readRustFact(f.rustHome, document, 'v11-pack1'), /locator bounds/);
+});
+
+test('pack reader never reads an unrelated record body to answer a selected locator', t => {
+  const f = packFixture(t);
+  const first = f.index.documents[0];
+  const next = f.index.documents[1].factsLocator;
+  const body = fs.readFileSync(f.packFile);
+  body[next.offset + 68] ^= 0xff;
+  fs.writeFileSync(f.packFile, body);
+  assert.equal(readRustFact(f.rustHome, first, 'v11-pack1').recordSHA256, first.factsLocator.sha256);
+  assert.throws(() => readRustFact(f.rustHome, f.index.documents[1], 'v11-pack1'), /digest mismatch/);
+});
+
+test('pack layout keeps explicit per-file fallback records and validates complete envelopes', async t => {
+  const f = packFixture(t);
+  const document = f.index.documents[0];
+  const locator = document.factsLocator;
+  const packed = fs.readFileSync(f.packFile);
+  const raw = packed.subarray(locator.offset + 68, locator.offset + 68 + locator.bytes);
+  const fallback = rustFactPath(f.rustHome, document, 'v11');
+  fs.writeFileSync(fallback, raw);
+  delete document.factsLocator;
+  const digest = f.writeIndex();
+  const report = await readFactDelta(f.goHome, f.rustHome, f.records, 'v11-pack1', f.indexFile, digest);
+  assert.equal(report.differentFiles.length, 0);
+  const envelope = JSON.parse(raw);
+  envelope.inputSHA256 = '0'.repeat(64);
+  fs.writeFileSync(fallback, JSON.stringify(envelope));
+  await assert.rejects(readFactDelta(f.goHome, f.rustHome, f.records, 'v11-pack1', f.indexFile, digest), /input identity mismatch/);
 });

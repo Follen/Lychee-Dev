@@ -1,3 +1,4 @@
+mod facts_cache;
 mod facts_pipeline;
 mod original_cache;
 #[cfg(test)]
@@ -74,6 +75,8 @@ pub struct Document {
     pub bytes: usize,
     #[serde(skip)]
     pub facts: Facts,
+    #[serde(default, rename = "factsLocator", skip_serializing_if = "Option::is_none")]
+    pub(crate) facts_locator: Option<facts_cache::Locator>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -202,7 +205,13 @@ fn append_load_facts(
             4,
         ));
     }
-    let (parsed, _) = document_facts(home, &document.path, raw, &document.sha256, control)?;
+    let packed = if let Some(locator) = &document.facts_locator {
+        facts_cache::read_locator(home, locator, &document.path, &document.sha256, control)?
+    } else { None };
+    let parsed = match packed {
+        Some(facts) => facts,
+        None => document_facts(home, &document.path, raw, &document.sha256, control)?.0,
+    };
     let blob = evidence::publish_blob_bounded(home, raw, git::MAX_SOURCE_BYTES, control)?;
     for load in parsed.loads {
         control.check()?;
@@ -280,7 +289,7 @@ pub fn penalty(role: &str) -> i32 {
     }
 }
 pub(crate) fn fingerprint(pin: &SourcePin) -> String {
-    storage::sha256(format!("rust-index-v12\0facts-layout-v11-go323-generated-origins\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}",pin.repository,pin.product,pin.exact_commit,pin.parser_revision).as_bytes())
+    storage::sha256(format!("rust-index-v13\0facts-pack-v1\0facts-layout-v11-go323-generated-origins\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}",pin.repository,pin.product,pin.exact_commit,pin.parser_revision).as_bytes())
 }
 pub fn build(home: &Path, pin: &SourcePin) -> Result<Index> {
     build_with_control(home, pin, &Default::default())
@@ -463,14 +472,13 @@ pub fn is_ready_with_control(
     })();
     crate::persistence::finish_control(finish_historical(result, metadata.close()), control.check())
 }
+fn facts_cache_key(path: &str, sha256: &str) -> String {
+    storage::sha256(format!(
+        "facts-layout-v11-go323-generated-origins\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0{path}\0{sha256}"
+    ).as_bytes())
+}
 fn facts_cache_path(home: &Path, path: &str, sha256: &str) -> PathBuf {
-    let key = storage::sha256(
-        format!(
-            "facts-layout-v11-go323-generated-origins\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0{path}\0{sha256}"
-        ).as_bytes(),
-    );
-    home.join("cache/source-facts-rust")
-        .join(format!("{key}.json"))
+    home.join("cache/source-facts-rust").join(format!("{}.json", facts_cache_key(path, sha256)))
 }
 /// Return the complete observations and whether they came from the existing
 /// authenticated per-document cache. Both indexing and load evidence use this
@@ -501,7 +509,6 @@ fn document_facts_profiled(
     // A corrupt or obsolete rebuildable cache is never evidence. Read at most
     // the fixed Go 32 MiB limit plus one byte, then regenerate from authenticated
     // input bytes. Cancellation and owned-handle close failures still propagate.
-    const MAX_FACT_CACHE_BYTES: usize = 32 << 20;
     let key = cache
         .file_stem()
         .and_then(|s| s.to_str())
@@ -521,33 +528,8 @@ fn document_facts_profiled(
             return Ok((parsed, true));
         }
     }
-    let mode = facts::ParseMode::for_path(path);
-    let parsed = if let Some(prepared) = prepared.filter(|prepared| prepared.mode == mode) {
-        if let Some(profile) = profile {
-            profile.record(Phase::FactsParse, prepared.parse_elapsed);
-        }
-        prepared.facts
-    } else {
-        let _parse_phase = profile.map(|p| p.span(Phase::FactsParse));
-        let _sequential_phase = profile.map(|p| p.span(Phase::FactsParseSequential));
-        mode.parse(data)
-    };
-    // The original control decides stop/error ordering at the original stage;
-    // speculative workers only observe its cancellation and absolute deadline.
-    control.check()?;
-    let serialize_phase = profile.map(|p| p.span(Phase::FactsSerialize));
-    let f = serde_json::to_value(&parsed)?;
-    let envelope = serde_json::to_vec(
-        &json!({"schema":"lycheedev.source-facts.rust.v11","inputSHA256":sha256,"factsSHA256":storage::sha256(&serde_json::to_vec(&f)?),"facts":f}),
-    )?;
-    if envelope.len() > MAX_FACT_CACHE_BYTES {
-        return Err(ToolkitError::new(
-            "codebase.fact_budget",
-            "Source fact cache exceeds the 32 MiB limit",
-            3,
-        ));
-    }
-    drop(serialize_phase);
+    let parsed = parse_document_facts(path, data, control, profile, prepared)?;
+    let envelope = encode_facts(&parsed, sha256, profile)?;
     let _publish_phase = profile.map(|p| p.span(Phase::FactsPublish));
     if let Some(profile) = profile.filter(|profile| profile.is_enabled()) {
         use lycheedev_core::cache::SourceCachePublicationPhase as Published;
@@ -578,6 +560,57 @@ fn document_facts_profiled(
         error
     })?;
     Ok((parsed, false))
+}
+fn parse_document_facts(
+    path: &str, data: &[u8], control: &lycheedev_core::control::OperationControl,
+    profile: Option<&Profile>, prepared: Option<facts_pipeline::PreparedFacts>,
+) -> Result<Facts> {
+    let mode = facts::ParseMode::for_path(path);
+    let parsed = if let Some(prepared) = prepared.filter(|prepared| prepared.mode == mode) {
+        if let Some(profile) = profile {
+            profile.record(Phase::FactsParse, prepared.parse_elapsed);
+        }
+        prepared.facts
+    } else {
+        let _parse_phase = profile.map(|p| p.span(Phase::FactsParse));
+        let _sequential_phase = profile.map(|p| p.span(Phase::FactsParseSequential));
+        mode.parse(data)
+    };
+    // The original control decides stop/error ordering at the original stage;
+    // speculative workers only observe its cancellation and absolute deadline.
+    control.check()?;
+    Ok(parsed)
+}
+fn encode_facts(parsed: &Facts, sha256: &str, profile: Option<&Profile>) -> Result<Vec<u8>> {
+    const MAX_FACT_CACHE_BYTES: usize = 32 << 20;
+    let serialize_phase = profile.map(|p| p.span(Phase::FactsSerialize));
+    let f = serde_json::to_value(parsed)?;
+    let envelope = serde_json::to_vec(
+        &json!({"schema":"lycheedev.source-facts.rust.v11","inputSHA256":sha256,"factsSHA256":storage::sha256(&serde_json::to_vec(&f)?),"facts":f}),
+    )?;
+    if envelope.len() > MAX_FACT_CACHE_BYTES {
+        return Err(ToolkitError::new(
+            "codebase.fact_budget",
+            "Source fact cache exceeds the 32 MiB limit",
+            3,
+        ));
+    }
+    drop(serialize_phase);
+    Ok(envelope)
+}
+fn decode_facts(raw: &[u8], sha256: &str, control: &lycheedev_core::control::OperationControl) -> Result<Option<Facts>> {
+    let envelope = serde_json::from_slice::<Value>(raw).ok();
+    if let Some(envelope) = envelope
+        && envelope["schema"] == "lycheedev.source-facts.rust.v11"
+        && envelope["inputSHA256"] == sha256
+        && envelope["factsSHA256"] == storage::sha256(&serde_json::to_vec(&envelope["facts"])?)
+        && let Ok(parsed) = serde_json::from_value(envelope["facts"].clone())
+    {
+        control.check()?;
+        return Ok(Some(parsed));
+    }
+    control.check()?;
+    Ok(None)
 }
 #[cfg(test)]
 fn build_uncached(
@@ -621,7 +654,21 @@ fn build_uncached_cached(
         home: home.into(),
     };
     let (mut skipped, mut diagnostics, mut relationships) = (0, Vec::new(), 0usize);
-    let mut retained = 0usize;
+    let document_count = files.iter().filter(|file| !file.asset && !file.oversized).count();
+    if document_count.checked_mul(facts_cache::LOCATOR_RETAINED_BYTES)
+        .and_then(|n| n.checked_add(facts_cache::GROUP_RETAINED_BYTES))
+        .is_none_or(|n| n > 256 << 20) {
+        return Err(ToolkitError::new("codebase.source_budget", "Source document metadata exceeds budget", 3));
+    }
+    index.documents.try_reserve_exact(document_count).map_err(|_| ToolkitError::new(
+        "codebase.source_budget", "Source document metadata was not admitted", 3,
+    ))?;
+    let metadata_retained = index.documents.capacity().checked_mul(facts_cache::LOCATOR_RETAINED_BYTES)
+        .and_then(|n| n.checked_add(facts_cache::GROUP_RETAINED_BYTES))
+        .filter(|n| *n <= 256 << 20).ok_or_else(|| ToolkitError::new(
+            "codebase.source_budget", "Source document metadata exceeds budget", 3,
+        ))?;
+    let mut retained = metadata_retained;
     for file in files {
         if file.asset && file.bytes > 64 << 20 {
             index
@@ -629,6 +676,7 @@ fn build_uncached_cached(
                 .push(json!({"path":file.path,"contentHash":"","bytes":file.bytes,"local":null}));
         }
     }
+    let mut grouped = facts_cache::Groups::new(cache_owner, files, control, profile);
     let visit_phase = profile.span(Phase::GitBlobs);
     let batches = facts_pipeline::visit(
         home,
@@ -636,6 +684,7 @@ fn build_uncached_cached(
         files,
         control,
         profile,
+        metadata_retained,
         |file, data, prepared| {
             control.check()?;
             if std::time::Instant::now() >= deadline {
@@ -684,15 +733,8 @@ fn build_uncached_cached(
                 ));
             }
             let sha256 = storage::sha256(&data);
-            let (facts, cache_hit) = document_facts_profiled(
-                home,
-                &file.path,
-                &data,
-                &sha256,
-                control,
-                Some(profile),
-                cache_owner,
-                prepared,
+            let (facts, cache_hit, facts_locator) = grouped.document(
+                file, &data, &sha256, prepared, &mut index.documents,
             )?;
             if cache_hit {
                 cached += 1;
@@ -776,10 +818,12 @@ fn build_uncached_cached(
                 sha256,
                 bytes: file.bytes,
                 facts,
+                facts_locator,
             });
             Ok(())
         },
-    )?;
+    );
+    let batches = grouped.finish(batches)?;
     drop(visit_phase);
     // Go emits skipped oversized documents after all analyzed documents.
     for file in files.iter().filter(|file| file.oversized) {
@@ -1240,6 +1284,16 @@ mod facts_cache_tests {
         process::{Command, Stdio},
     };
 
+    fn evict_document_facts(home: &Path, document: &Document) {
+        if let Some(locator) = &document.facts_locator {
+            let key = locator.group.iter().map(|b| format!("{b:02x}")).collect::<String>();
+            let pack = home.join("cache/source-facts-rust").join(format!("{key}.json"));
+            if pack.exists() { fs::remove_file(pack).unwrap(); }
+        }
+        let old = facts_cache_path(home, &document.path, &document.sha256);
+        if old.exists() { fs::remove_file(old).unwrap(); }
+    }
+
     #[test]
     fn typed_xml_toc_preparation_preserves_authenticated_cache_precedence() {
         let fixture = Fixture::new();
@@ -1549,8 +1603,10 @@ mod facts_cache_tests {
                 .find(|doc| doc.path == *path)
                 .unwrap()
                 .facts = serde_json::from_value(facts.clone()).unwrap();
-            let digest = storage::sha256(raw);
-            fs::remove_file(facts_cache_path(&fixture.home, path, &digest)).unwrap();
+            let doc = old.documents.iter_mut().find(|d| d.path == *path).unwrap();
+            evict_document_facts(&fixture.home, doc);
+            // The reconstructed 9a index never contained a packed locator.
+            doc.facts_locator = None;
             storage::atomic_json(
                 &generated_contract_9a_file(&fixture.home, path, raw),
                 &generated_contract_9a_envelope(raw, facts),
@@ -1725,8 +1781,8 @@ mod facts_cache_tests {
         );
     }
 
-    struct Fixture {
-        home: PathBuf,
+    pub(super) struct Fixture {
+        pub(super) home: PathBuf,
     }
     impl Drop for Fixture {
         fn drop(&mut self) {
@@ -1734,7 +1790,7 @@ mod facts_cache_tests {
         }
     }
     impl Fixture {
-        fn new() -> Self {
+        pub(super) fn new() -> Self {
             let home = std::env::temp_dir().join(format!(
                 "lycheedev-load-cache-{}-{}",
                 std::process::id(),
@@ -1782,7 +1838,7 @@ mod facts_cache_tests {
             );
             String::from_utf8(output.stdout).unwrap().trim().to_owned()
         }
-        fn pin(&self, documents: &BTreeMap<String, String>) -> SourcePin {
+        pub(super) fn pin(&self, documents: &BTreeMap<String, String>) -> SourcePin {
             fn tree(fixture: &Fixture, blobs: &BTreeMap<String, String>, prefix: &str) -> String {
                 let mut entries = String::new();
                 let mut directories = BTreeSet::new();
@@ -1879,7 +1935,7 @@ mod facts_cache_tests {
         assert_load_bytes(&fixture.home, &loads, &raw);
         let xml = hit.documents.iter().find(|d| d.path == "Main.xml").unwrap();
         let cache = facts_cache_path(&fixture.home, &xml.path, &xml.sha256);
-        fs::remove_file(&cache).unwrap();
+        evict_document_facts(&fixture.home, xml);
         let rebuilt =
             load_facts_from_documents_with_control(&fixture.home, &warm, &raw, &control).unwrap();
         assert_eq!(
@@ -1921,6 +1977,8 @@ mod facts_cache_tests {
         let index = build_uncached(&fixture.home, &pin, &control).unwrap();
         let doc = &index.documents[0];
         let path = facts_cache_path(&fixture.home, &doc.path, &doc.sha256);
+        evict_document_facts(&fixture.home, doc);
+        document_facts(&fixture.home, &doc.path, raw[&doc.path].as_bytes(), &doc.sha256, &control).unwrap();
         let original: Value = storage::read_json(&path).unwrap();
         for field in ["factsSHA256", "inputSHA256"] {
             let mut corrupt = original.clone();
@@ -1945,12 +2003,18 @@ mod facts_cache_tests {
                             .target,
                         "Real.lua"
                     ),
-                    _ => assert_eq!(
-                        build_uncached(&fixture.home, &pin, &control)
-                            .unwrap()
-                            .summary["io"]["parsedDocuments"],
-                        1
-                    ),
+                    _ => {
+                        let rebuilt = build_uncached(&fixture.home, &pin, &control).unwrap();
+                        assert_eq!(rebuilt.summary["io"]["parsedDocuments"], 1);
+                        assert_eq!(serde_json::to_value(&rebuilt.documents[0].facts).unwrap(), original["facts"]);
+                    },
+                }
+                if consumer == 2 {
+                    // A successful full rebuild now commits a cohort. Remove
+                    // that reconstructible cohort before testing the next
+                    // specifically per-file corruption; do not bypass it.
+                    evict_document_facts(&fixture.home, doc);
+                    document_facts(&fixture.home, &doc.path, raw[&doc.path].as_bytes(), &doc.sha256, &control).unwrap();
                 }
                 assert_eq!(storage::read_json::<Value>(&path).unwrap(), original);
             }
@@ -1978,12 +2042,11 @@ mod facts_cache_tests {
         let oversized = fs::File::create(&path).unwrap();
         oversized.set_len((32 << 20) + 1).unwrap();
         drop(oversized);
-        assert_eq!(
-            build_uncached(&fixture.home, &pin, &control)
-                .unwrap()
-                .summary["io"]["parsedDocuments"],
-            1
-        );
+        let rebuilt = build_uncached(&fixture.home, &pin, &control).unwrap();
+        assert_eq!(rebuilt.summary["io"]["parsedDocuments"], 1);
+        assert_eq!(serde_json::to_value(&rebuilt.documents[0].facts).unwrap(), original["facts"]);
+        evict_document_facts(&fixture.home, doc);
+        document_facts(&fixture.home, &doc.path, raw[&doc.path].as_bytes(), &doc.sha256, &control).unwrap();
         assert_eq!(storage::read_json::<Value>(&path).unwrap(), original);
         let mut missing = raw.clone();
         missing.clear();
@@ -2018,18 +2081,13 @@ mod facts_cache_tests {
                 serde_json::to_value(&cached.facts).unwrap()
             );
             if expected.path.ends_with(".xml") {
-                fs::remove_file(facts_cache_path(
-                    &fixture.home,
-                    &expected.path,
-                    &expected.sha256,
-                ))
-                .unwrap();
+                evict_document_facts(&fixture.home, expected);
             }
         }
         let next = build_uncached(&fixture.home, &pin, &control).unwrap();
         assert_eq!(crate::xml_program::catalog_verifications(), before);
-        assert_eq!(next.summary["io"]["parsedDocuments"], 2);
-        assert_eq!(next.summary["io"]["cachedFacts"], 2);
+        assert_eq!(next.summary["io"]["parsedDocuments"], 4);
+        assert_eq!(next.summary["io"]["cachedFacts"], 0);
         for (expected, fresh) in cold.documents.iter().zip(&next.documents) {
             assert_eq!(
                 serde_json::to_value(&expected.facts).unwrap(),
@@ -2115,8 +2173,8 @@ mod facts_cache_tests {
             parser_revision: git::PARSER.into(),
         };
         let key = format!("source/rust-index/{}", fingerprint(&pin));
-        // A retry may reuse the earlier good document's facts, but cannot turn
-        // the invalid document into a successful partial index.
+        // A failed partial cohort is discarded. A retry must still preserve
+        // the invalid-document error and never publish a partial index.
         for _ in 0..2 {
             let error = build_material_with_control(&fixture.home, &pin, &control)
                 .err()

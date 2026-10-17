@@ -400,3 +400,144 @@ node --check tools/rust-source-candidate-diagnostics.mjs
 node --check tests/rust-performance-paired/source-candidates.mjs
 node --test tests/rust-performance-paired/source-candidates.test.mjs tests/rust-performance-paired/read-fact-delta.test.mjs
 ```
+
+## Current Source Facts packs: explicit `v11-pack1` reader
+
+The grouped-cache candidate retains the complete public `source-v1` Facts
+contract and the v11 per-document envelope. Its whole-index fingerprint is
+`rust-index-v13` plus `facts-pack-v1`; the existing v6 index container gains an
+optional `documents[].factsLocator`. Historical layouts and results keep their
+original identities. In particular, the bbfe/ab4 candidate runner above remains
+fixed to its original v10 per-file artifacts and per-document phase counts;
+it cannot be pointed at this candidate by changing only a revision string.
+
+A cold index streams up to 64 ordered eligible Git documents into each private
+cache stage. The group identity includes the ordered paths, Git blob identities,
+byte sizes, parser/dependency versions and Facts layout, but not the snapshot
+commit. Every record contains the unchanged complete envelope, including all
+five arrays, their original ordering, duplicates and every field. The cache file
+starts with `LYCFPK01`; each record has a 68-byte length/key/SHA-256 header and its
+UTF-8 JSON envelope. A locator names the group hash, header offset, body length
+and body SHA-256. The `.json` cache suffix is historical; a group body is framed
+binary data and must not be parsed as one JSON document.
+
+Both group and single-envelope limits remain 32 MiB. If the next complete record
+will not fit, the complete prefix is atomically committed and that record plus
+the rest of the cohort use the existing per-file cache. An envelope exceeding
+32 MiB retains `codebase.fact_budget`. No aggregate pack body is materialized.
+The only persistent new per-document storage is the fixed-field locator. Its
+reserved document capacity is admitted at 256 bytes per slot, plus 16 KiB for
+one cohort directory, indices and owner state, within the original 256 MiB
+retained/speculative admission. The 4 MiB Facts/32 MiB parser reservations,
+2 MiB worker stack and eight-slot queue are unchanged. These are requested
+storage/admission bounds, not physical RSS claims.
+
+The normal full-index, persisted query projection and lazy XML/TOC load paths
+retain their locators. Lazy reads use one opened file and validate the magic,
+header offset/range, v11 record key, length, record SHA and complete envelope.
+They read only the requested body, not a 32 MiB pack for every document. A
+missing, truncated or corrupt record falls back to the exact authenticated Git
+input and the existing complete parser/per-file cache. A full rebuild can repair
+one corrupt record and backfill earlier valid records into a replacement group
+without duplicating a group in memory. Same-key publishers remain lockless;
+only complete atomic replacements become visible, while an existing reader
+retains its opened snapshot. Existing directory/ancestry checks remain enabled.
+
+An internal cache checkpoint now occurs at a completed cohort or committed
+size-limited prefix. A failure before that checkpoint can discard up to 63
+already-completed, rebuildable records from the current private group. Earlier
+committed groups remain reusable. A whole index is never committed while its
+locators reference an unpublished stage; Unknown publication is terminal and
+retains its original owner/error state. Public document order and error order
+are unchanged.
+
+Cross-snapshot costs must be reported alongside cold results:
+
+- With the same ordered membership and one changed document, only that cohort's
+  key changes. At most 63 additional unchanged documents need rebuilding when
+  no per-file fallback exists; unchanged groups and the old snapshot still hit.
+- Inserting, deleting or renaming an eligible document can shift every later
+  64-document boundary. The worst case rebuilds every subsequent document.
+  There is no global 63-document bound and no hidden global locator catalog.
+- Same-snapshot complete-index hits retain the usual index/query reuse. Per-file
+  v11 caches from a prior candidate remain usable, even if no pack is created.
+
+### Full same-run Facts comparison
+
+Obtain the Rust index blob from that run's `source/rust-index/<identity>`
+manifest. Its expected SHA-256 is the authenticated manifest's `blob.sha256`;
+the corresponding exact bytes are under `cache/objects/<first-two>/<rest>`.
+Retain that manifest and blob with the original run evidence. Do not select an
+arbitrary recent object or discover a group by scanning directory contents.
+Use the existing fixed-Go records and manifest without rewriting them:
+
+```powershell
+node tests/rust-performance-paired/read-fact-delta.mjs $goHome $rustHome $goRecords v11-pack1 $rustIndexBlob $expectedRustIndexSHA256
+```
+
+The pack reader requires both extra arguments. It verifies the index hash,
+parser/snapshot identity and the full path/input-hash set against the Go records,
+then reads every document through its authenticated locator or v11 per-file
+fallback. A pack record's hash is reported as `rustFactRecordSHA256`; the reader
+does not relabel that as a hash of the entire pack. Wrong index hashes, missing
+or duplicate inputs, out-of-range locators, header key/length/hash mismatches,
+invalid UTF-8 and invalid full envelopes fail the comparison. All five arrays
+remain strict, including order and multiplicity. The default remains historical
+`v6`; explicit `v10` and `v11` retain their per-file meanings.
+
+The same 31 profile phase names remain available, but cache calls reflect real
+operations. Stage/seal/rename/close count actual groups or overflow per-file
+publications. `facts_publish` counts the individual coordinator publication
+segments; it no longer has a one-call-per-document invariant. `facts_read`
+includes group opening/directory/closing and per-record lookup. Do not reuse
+historical runner assertions that force these calls to equal 4036. No reduction
+in elapsed time is established by operation counts alone.
+
+### Executable storage/cross-snapshot regressions
+
+These commands are for the normal Windows test owner and fixed reviewed source
+checkout. Rust execution is **not_run** for this change until the owner records
+actual results; cloud rustfmt parsing does not establish compilation.
+
+```powershell
+node tools/rust-cargo.mjs --owner source-pack-core -- test -p lycheedev-core --lib --locked --offline cache::source_facts::streaming_tests -- --nocapture
+node tools/rust-cargo.mjs --owner source-pack-contract -- test -p lycheedev-source --lib --locked --offline index::facts_cache::tests -- --nocapture
+node tools/rust-cargo.mjs --owner source-pack-admission -- test -p lycheedev-source --lib --locked --offline index::facts_pipeline::retained_cohort_metadata_reduces_real_worker_admission_without_changing_facts -- --exact --nocapture
+node tools/rust-cargo.mjs --owner source-pack-cache -- test -p lycheedev-source --lib --locked --offline index::facts_cache_tests -- --nocapture
+```
+
+The cold/warm test
+`complete_cohorts_reduce_publications_and_preserve_all_five_fact_arrays` uses 65
+mixed Lua/generated Lua/XML/TOC documents and asserts two real stage/rename/close
+operations, all arrays and 65 warm hits. The single-change test
+`unchanged_cohort_reuses_across_snapshots_and_changed_cohort_rebuild_is_bounded`
+asserts 64 parsed/one hit, then 65 hits for the original snapshot. The insertion
+and deletion test
+`insertion_and_deletion_can_rebuild_all_shifted_cohorts_but_old_snapshots_still_hit`
+uses an original 128-document snapshot, asserts 129 parsed/zero hits after a
+front insertion and 127 parsed/zero hits after deleting its first original
+member, then 128 original-snapshot hits. These are real Git/cache operations,
+with full Facts comparisons, not synthesized timing results. Formal performance
+observations must include cold, unchanged, single-change and insertion/deletion
+cases rather than presenting only a cold improvement.
+
+The remaining pack tests cover one-record repair/backfill; persisted query and
+lazy-load fallback; framing/hash/range corruption; failed partial-group cleanup;
+original cancellation/deadline; the 32 MiB prefix/per-file boundary; oversized
+single envelopes; and fixed metadata admission. Core stream tests exercise the
+new owner API directly: pre-commit invisibility, bounded ranges, same-key threads
+and two processes with held old readers, exact size boundary, partial-write
+cancellation, primary/close/control errors, late Published stop and terminal
+Unknown ownership. Their subprocess helper is inert without its test-only
+environment, with bounded waits and owned kill/reap cleanup.
+
+Cloud-only static checks for this batch:
+
+```sh
+node --check tests/rust-performance-paired/read-fact-delta.mjs
+node --test tests/rust-performance-paired/read-fact-delta.test.mjs tests/rust-performance-paired/source-candidates.test.mjs tests/rust-parity/source-facts-generated/fixture.test.mjs
+```
+
+The current combined fixture run passes 64/64 (reader 27, historical-candidate
+runner 32, generated fixture structure 5). This verifies Node fixtures and
+historical-reader compatibility, not Rust execution or performance acceptance.
