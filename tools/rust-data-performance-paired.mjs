@@ -12,11 +12,11 @@ import {dataMode} from '../tests/rust-performance-paired/data-resume.mjs';
 
 const [artifact, goSource, goPackage, luaLSArchive, conditionsFile, catalog, content, images, sharpModule, ...extra] = process.argv.slice(2);
 assert([artifact, goSource, goPackage, luaLSArchive, conditionsFile, catalog, content, images, sharpModule].every(Boolean),
-  'usage: node tools/rust-data-performance-paired.mjs <optimized-artifact.json> <clean-Go323-checkout> <Go-dev-npm-stage> <pinned-LuaLS.zip> <conditions.json> <catalog-fixture> <17MiB-fixture> <large-image-fixture> <installed-sharp-module> [--acceptance | --resume-unattempted <prior-owned-report.json>]');
+  'usage: node tools/rust-data-performance-paired.mjs <optimized-artifact.json> <clean-Go323-checkout> <Go-dev-npm-stage> <pinned-LuaLS.zip> <conditions.json> <catalog-fixture> <17MiB-fixture> <large-image-fixture> <installed-sharp-module> [--acceptance | --startup-diagnostics | --resume-unattempted <prior-owned-report.json>]');
 assert.equal(process.platform, 'win32');
 // Product identity belongs to cwd; executing runner identity belongs to this
 // entry's stage in every mode, including a fresh full acceptance run.
-const {acceptance, resumeFrom} = dataMode(extra), root = resolve('.'), runnerRoot = resolve(import.meta.dirname, '..');
+const {acceptance, resumeFrom, startupDiagnostics = false} = dataMode(extra), root = resolve('.'), runnerRoot = resolve(import.meta.dirname, '..');
 const rust = verifyArtifact(root, artifact), go = verifyGoPackage(goPackage, luaLSArchive);
 assert(['release', 'symbols'].includes(rust.profile)); assert.equal(sourceDigest(root), rust.inputHashes.sourceTree);
 assert(lstatSync(conditionsFile).size <= 16384);
@@ -31,7 +31,7 @@ const job = beginScratch(root, 'paired-data', {command: process.argv, inputs: {r
 let state = 'failed', handlesReaped = true;
 const start = performance.now();
 try {
-  const config = {root, runnerRoot, evidence: job.evidence, scratch: job.directory, acceptance, resumeFrom, inputs, rustArtifact: resolve(artifact), rust, go, goSource: resolve(goSource), luaLSArchive: resolve(luaLSArchive),
+  const config = {root, runnerRoot, evidence: job.evidence, scratch: job.directory, acceptance, resumeFrom, startupDiagnostics, inputs, rustArtifact: resolve(artifact), rust, go, goSource: resolve(goSource), luaLSArchive: resolve(luaLSArchive),
     conditions, fixtures: {catalog: resolve(catalog), content: resolve(content), images: resolve(images)}, sharpModule: resolve(sharpModule)};
   const configuration = join(job.evidence, 'configuration.json'); writeFileSync(configuration, JSON.stringify(config, null, 2) + '\n');
   handlesReaped = false;
@@ -39,9 +39,9 @@ try {
   handlesReaped = run.handlesReaped === true;
   const reportPath = join(job.evidence, 'report.json'), observed = existsSync(reportPath) ? JSON.parse(readFileSync(reportPath)) : null;
   const stable = verifyArtifact(root, artifact).binarySHA256 === rust.binarySHA256 && sourceDigest(root) === rust.inputHashes.sourceTree && verifyGoPackage(goPackage, luaLSArchive).packageSHA256 === go.packageSHA256 && Object.entries(inputs).every(([path, sha]) => hashFile(join(runnerRoot, path)) === sha);
-  const passed = stable && handlesReaped && !run.error && run.status === 0 && (!resumeFrom || observed?.continuation?.priorEvidenceStable === true) && observed?.state === (resumeFrom ? 'equivalent_data_continuation_only' : acceptance ? 'passed_selected_data_paths_full_acceptance_open' : 'equivalent_data_observation_only');
+  const passed = stable && handlesReaped && !run.error && run.status === 0 && observed?.startupDiagnostics === startupDiagnostics && (!resumeFrom || observed?.continuation?.priorEvidenceStable === true) && observed?.state === (resumeFrom ? 'equivalent_data_continuation_only' : acceptance ? 'passed_selected_data_paths_full_acceptance_open' : 'equivalent_data_observation_only');
   const report = {schema: 'lycheedev.paired-data-owned.v1', state: passed ? observed.state : 'failed', performanceAcceptanceEvaluated: acceptance,
-    fullB04Acceptance: false, fullB01B07Acceptance: false, observation: reportPath, runnerRoot, continuation: observed?.continuation, inputs, rust, go, artifactAndRunnerStable: stable, wallMillis: performance.now() - start,
+    fullB04Acceptance: false, fullB01B07Acceptance: false, startupDiagnostics, observation: reportPath, runnerRoot, continuation: observed?.continuation, inputs, rust, go, artifactAndRunnerStable: stable, wallMillis: performance.now() - start,
     process: {exit: run.status, error: run.error?.message, handlesReaped, proof: run.proof}};
   writeFileSync(join(job.evidence, 'owned-report.json'), JSON.stringify(report, null, 2) + '\n');
   state = passed ? 'succeeded' : 'failed';

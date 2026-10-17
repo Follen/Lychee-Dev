@@ -10,7 +10,7 @@ import {ownedSpawnSync} from '../../tools/rust-owned-process.mjs';
 import {collectOwnedMemory} from '../../tools/rust-owned-memory.mjs';
 import {hashFile, sourceDigest, verifyArtifact} from '../../tools/rust-build.mjs';
 import {inspectEmmy} from '../../tools/rust-emmy-identity.mjs';
-import {elapsed} from './contract.mjs';
+import {elapsed, startupBreakdown} from './contract.mjs';
 import {cloneSeed, inventory, verifyGoMetadata, verifyGoPackage} from './inputs.mjs';
 import {GO_COMMIT, REPETITIONS, TARGET_RATIO, compareData, dataCases, orderFor, summarizeData} from './data-contract.mjs';
 import {decodeDataImage, decodedIdentity, digest, loadDataFixture, parse, seedDataHome, validateDataOutput} from './data-inputs.mjs';
@@ -19,12 +19,14 @@ import {verifyDataContinuation} from './data-resume.mjs';
 assert(process.argv.length === 3 && process.platform === 'win32');
 const config = parse(readFileSync(process.argv[2])), root = resolve(config.root), runnerRoot = resolve(config.runnerRoot), out = resolve(config.evidence), start = performance.now();
 assert(!config.resumeFrom || !config.acceptance);
+assert(!config.startupDiagnostics || !config.acceptance && !config.resumeFrom, 'startup diagnostics are a fresh observation only');
 let fatal = false;
 const report = {schema: 'lycheedev.paired-data.v1', state: 'running', startedAt: new Date().toISOString(), performanceAcceptanceEvaluated: config.acceptance,
+  startupDiagnostics: config.startupDiagnostics === true,
   fullB04Acceptance: false, targetRatio: TARGET_RATIO, scope: ['tiny synthetic SQL correctness only', '17 MiB three-chunk BLTE inspect', 'five 1031x519 BLP2 storage modes, PNG/WebP default export'],
   cacheDefinition: 'Independent real CLI init per engine/fixture, then imported identical authenticated synthetic pin/DBD documents and blobs. No discovery/selection/sync performance claim. New application decoded-cache-cold home per engine/path/pair; warm repeats its own successful cold, retaining actual decoded entries and checks. OS caches are not flushed.',
   timingDefinition: 'Existing native monotonic CreateProcess-to-root/tree-reap-and-output-drain clock. All product validation/hash/decode/encode/capture/output/cleanup work stays included. Fixture construction, independent audits and decoder verification are separately recorded, never subtracted from a product command.',
-  metrics: {cpu: 'not_measured', io: 'not_measured', memory: 'existing identity-deduplicated sampled owned Job working set/private bytes with gaps; not unique physical RSS; do not sum outer and inner Jobs'},
+  metrics: {cpu: config.startupDiagnostics ? 'original-root GetProcessTimes requested; see each startup.rootCpu or startupFailure; descendant/owner CPU not_measured' : 'not_measured', io: 'not_measured', memory: 'existing identity-deduplicated sampled owned Job working set/private bytes with gaps; not unique physical RSS; do not sum outer and inner Jobs'},
   remaining: ['representative SQL throughput', 'real-client inputs', 'raw export', 'Hotfix/effective/remote paths', 'full accounting and B04 acceptance'],
   machine: {hostname: os.hostname(), platform: process.platform, arch: process.arch, release: os.release(), node: process.version, cpus: os.cpus(), totalMemory: os.totalmem(), conditions: config.conditions},
   inputs: {go: config.go, rust: config.rust}, preparation: [], preflightPairs: [], pairs: [], pairOwners: [], groups: []};
@@ -32,7 +34,7 @@ const save = () => writeFileSync(join(out, 'report.json'), JSON.stringify(report
 const files = path => readdirSync(path).filter(name => name !== 'receipt.json' && lstatSync(join(path, name)).isFile()).map(name => join(path, name));
 function controlled(binary, args, evidence, measured = false, env = process.env) {
   assert(!fatal, 'unresolved prior owned process'); fatal = true;
-  const began = performance.now(), run = ownedSpawnSync(binary, args, {cwd: root, env, evidence, timeout: 330000, orphanMs: 30000, memoryObservation: measured});
+  const began = performance.now(), run = ownedSpawnSync(binary, args, {cwd: root, env, evidence, timeout: 330000, orphanMs: 30000, memoryObservation: measured, startupDiagnostics: measured && config.startupDiagnostics === true});
   fatal = run.handlesReaped !== true;
   const row = {binary, args, wallMillis: performance.now() - began, exit: run.status, error: run.error?.message, handlesReaped: run.handlesReaped, proof: run.proof,
     logs: run.logs, stdoutSHA256: digest(run.stdout), stderrSHA256: digest(run.stderr), stdoutBytes: run.stdout.length, stderrBytes: run.stderr.length};
@@ -112,6 +114,10 @@ try {
           row[engine] = {...sample, home, snapshot: fixture.identity.snapshot, valid: false, excludedDownloadMillis: 0, excludedExternalWaitMillis: 0}; save();
           try {
             assert(run.handlesReaped && !run.error && run.status === 0); assert.equal(run.stderr.toString(), ''); Object.assign(row[engine], elapsed(run.proof));
+            if (config.startupDiagnostics) {
+              try { row[engine].startup = startupBreakdown(run.proof, {required: true}); }
+              catch (error) { row[engine].startupFailure = error.message.slice(0, 4096); }
+            }
             const auditStarted = performance.now(), result = await validateDataOutput({entry, fixture, engine, cacheMode, envelope: parse(run.stdout), home, output,
               decodeImage: bytes => decodeDataImage(sharp, bytes), evidence: job.evidence});
             const after = decodedIdentity(home); assert.equal(after.length, 2); if (cacheMode === 'warm') assert.deepEqual(after, before, 'warm cache metadata/source identities changed');
@@ -127,9 +133,13 @@ try {
       phase = 'final_integrity';
       assert.equal(inventory(fixture.directory, {maxFiles: 256, maxBytes: 64 << 20}).sha256, fixture.receipt.inventory.sha256);
       valid = rows.length === 2 && rows.every(row => row.resultEquivalent);
+      if (valid && config.startupDiagnostics && rows.some(row => ['go', 'rust'].some(engine => !row[engine].startup || row[engine].startupFailure))) {
+        valid = false;
+        terminalFailure = {phase: 'startup_diagnostics', message: 'required startup attribution is incomplete; product equivalence retained'};
+      }
     } catch (error) { terminalFailure = {phase, message: error.message.slice(0, 4096)}; report.preparation.push({caseId: entry.id, iteration, preflight, failure: terminalFailure.message}); }
     finally {
-      const pairTerminal = {state: valid ? 'verified' : terminalFailure?.phase === 'final_integrity' ? 'failed_final_integrity' : 'failed_pair', ...(terminalFailure ? {failure: terminalFailure} : {})};
+      const pairTerminal = {state: valid ? 'verified' : terminalFailure?.phase === 'final_integrity' ? 'failed_final_integrity' : terminalFailure?.phase === 'startup_diagnostics' ? 'failed_diagnostics' : 'failed_pair', ...(terminalFailure ? {failure: terminalFailure} : {})};
       ownership.pairTerminal = pairTerminal;
       for (const row of rows) row.pairTerminal = pairTerminal;
       writeFileSync(join(job.evidence, 'pair.json'), JSON.stringify({caseId: entry.id, iteration, preflight, valid, rows}, null, 2) + '\n');

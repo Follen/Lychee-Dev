@@ -11,7 +11,8 @@ import {bounded, digest, parse} from './data-inputs.mjs';
 export function dataMode(extra) {
   if (!extra.length) return {acceptance: false, resumeFrom: null};
   if (extra.length === 1 && extra[0] === '--acceptance') return {acceptance: true, resumeFrom: null};
-  assert(extra.length === 2 && extra[0] === '--resume-unattempted' && extra[1], 'expected --acceptance OR --resume-unattempted <prior-owned-report.json>');
+  if (extra.length === 1 && extra[0] === '--startup-diagnostics') return {acceptance: false, resumeFrom: null, startupDiagnostics: true};
+  assert(extra.length === 2 && extra[0] === '--resume-unattempted' && extra[1] && !extra[1].startsWith('--'), 'expected --acceptance OR --startup-diagnostics OR --resume-unattempted <prior-owned-report.json>');
   return {acceptance: false, resumeFrom: resolve(extra[1])};
 }
 

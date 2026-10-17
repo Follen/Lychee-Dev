@@ -18,8 +18,9 @@ function rows() { return ['cold', 'warm'].map(cacheMode => ({caseId: 'first', it
 function previous() { return {state: 'failed', performanceAcceptanceEvaluated: false, preflightPairs: [], requiresOuterRetirement: false, pairs: rows()}; }
 test('continuation is an explicit observation-only mode and rejects mode combinations', () => {
   assert.deepEqual(dataMode([]), {acceptance: false, resumeFrom: null}); assert.equal(dataMode(['--acceptance']).acceptance, true);
+  assert.deepEqual(dataMode(['--startup-diagnostics']), {acceptance: false, resumeFrom: null, startupDiagnostics: true});
   assert.deepEqual(dataMode(['--resume-unattempted', 'old.json']), {acceptance: false, resumeFrom: resolve('old.json')});
-  for (const args of [['--resume-unattempted'], ['--acceptance', '--resume-unattempted', 'old.json'], ['--acceptance', '--acceptance'], ['--unknown']]) assert.throws(() => dataMode(args));
+  for (const args of [['--resume-unattempted'], ['--resume-unattempted', '--startup-diagnostics'], ['--resume-unattempted', '--acceptance'], ['--acceptance', '--resume-unattempted', 'old.json'], ['--acceptance', '--acceptance'], ['--startup-diagnostics', '--acceptance'], ['--resume-unattempted', 'old.json', '--startup-diagnostics'], ['--startup-diagnostics', '--startup-diagnostics'], ['--unknown']]) assert.throws(() => dataMode(args));
 });
 test('documented separate stage contains the complete relative module dependency closure', () => {
   const root = resolve(import.meta.dirname, '../..'), readme = readFileSync(join(root, 'tests/rust-performance-paired/data.README.md'), 'utf8');
@@ -39,6 +40,7 @@ test('real Node entry authenticates and launches its own stage in every mode whi
   const paths = [...source.matchAll(/['"]((?:tools|tests|release)\/[^'"]+)['"]/g)].map(match => match[1]).filter(path => /\.(mjs|ps1|json)$/.test(path));
   for (const [name, extra, separate, mutate] of [
     ['same-root', [], false, false], ['staged-observation', [], true, false], ['staged-acceptance', ['--acceptance'], true, false],
+    ['staged-startup-diagnostics', ['--startup-diagnostics'], true, false],
     ['staged-continuation', ['--resume-unattempted', 'old-owned-report.json'], true, false], ['changed-stage', ['--acceptance'], true, true],
   ]) {
     const root = join(directory, name, 'product'), stage = separate ? join(directory, name, 'runner') : root;
@@ -60,7 +62,7 @@ test('real Node entry authenticates and launches its own stage in every mode whi
       export function ownedSpawnSync(binary,args,options) { const config=JSON.parse(readFileSync(args[1]));
         writeFileSync(join(options.evidence,'launched.json'),JSON.stringify({binary,args,cwd:options.cwd,timeout:options.timeout,config}));
         const state=config.resumeFrom?'equivalent_data_continuation_only':config.acceptance?'passed_selected_data_paths_full_acceptance_open':'equivalent_data_observation_only';
-        writeFileSync(join(options.evidence,'report.json'),JSON.stringify({state,continuation:config.resumeFrom?{priorEvidenceStable:true}:undefined}));
+        writeFileSync(join(options.evidence,'report.json'),JSON.stringify({state,startupDiagnostics:config.startupDiagnostics,continuation:config.resumeFrom?{priorEvidenceStable:true}:undefined}));
         ${mutate ? "writeFileSync(join(config.runnerRoot,'tests/rust-performance-paired/data-run.mjs'),'mutated while running');" : ''}
         return {status:0,handlesReaped:true,proof:{synthetic:true}}; }`);
     const conditions = join(root, 'conditions.json'); writeFileSync(conditions, JSON.stringify(Object.fromEntries(['machine', 'powerAndThermal', 'competingLoad', 'disk', 'operator'].map(key => [key, 'synthetic']))));
@@ -73,6 +75,7 @@ test('real Node entry authenticates and launches its own stage in every mode whi
     assert.equal(launched.args[0], join(stage, 'tests/rust-performance-paired/data-run.mjs')); assert.equal(launched.cwd, root); assert.equal(launched.timeout, 18000000);
     assert.equal(launched.config.root, root); assert.equal(launched.config.runnerRoot, stage); assert.equal(owned.runnerRoot, stage);
     assert.equal(launched.config.acceptance, extra[0] === '--acceptance'); assert.equal(Boolean(launched.config.resumeFrom), extra[0] === '--resume-unattempted');
+    assert.equal(launched.config.startupDiagnostics, extra[0] === '--startup-diagnostics'); assert.equal(owned.startupDiagnostics, extra[0] === '--startup-diagnostics');
     for (const [path, sha] of Object.entries(launched.config.inputs)) {
       if (mutate && path === 'tests/rust-performance-paired/data-run.mjs') continue;
       assert.equal(sha, digest(readFileSync(join(stage, path))), `executing stage identity: ${path}`);

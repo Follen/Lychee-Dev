@@ -6,11 +6,15 @@ fourth pair's already-sealed scratch. The separate
 [d86 runner / 30d product continuation](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6228983589)
 then verified the remaining eight paths (32 CLI invocations), with all new
 owners retired/reaped. It imported no prior samples and left the original
-failure unchanged. Rust BC1 WebP warm memory was `not_measured`; all memory
-observations retain their sampling gaps. Full 20-pair acceptance remains
-unrun. The separate-stage acceptance entry fix below is covered by synthetic
-Node regression only until its own Windows execution. None of these results
-establishes a product speedup or B04 acceptance. Use the
+failure unchanged. The later
+[5bc runner / same 30d product full acceptance](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6229610505)
+completed all 928 measured CLI invocations and 232 pairs with complete
+equivalence and retirement. All eleven performance paths collected 20 cold
+and 20 warm pairs; all 22 performance groups failed the ≤0.30 target. Thirteen
+memory observations were `not_measured`, and all others retain sampling gaps.
+The outer performance failure and earlier EPERM remain intact. The optional
+startup diagnostic mode below is new runner-only code until separately run;
+it does not revise those results or establish B04 acceptance. Use the
 existing [paired ownership/identity/timing contract](README.md); do not use the
 historical Go 3.1.2 WDC driver. The Data sibling adds no build or fallback to its
 measured entry and does not change the Source runner.
@@ -431,3 +435,65 @@ Actual failure policy is unchanged:
   gaps, not zero or a full-memory acceptance claim. Even a successful elapsed
   result remains `passed_selected_data_paths_full_acceptance_open` for these
   synthetic paths, with full B04 and full resource acceptance still open.
+
+## Optional startup attribution on the same 30d product
+
+`--startup-diagnostics` is an independent observation mode, mutually exclusive
+with both `--acceptance` and `--resume-unattempted`. It runs the existing twelve
+paths once cold and once warm: twelve fresh pair owners, 24 pair rows and 48
+measured CLI invocations, plus the unchanged 15 preparation invocations. It
+does not import, replace or add fields to any of the old 928 samples. The
+ordinary mode and acceptance counts/thresholds remain unchanged.
+
+Only measured CLI invocations enable the existing native owner's
+`startupDiagnostics` option. Every sample keeps its original full
+`controllableMillis` and raw proof, and additionally records `startup` using
+the shared strict `startupBreakdown` validator. Its timestamps attribute
+CreateProcess, pre-resume root-identity durability, observer setup, Resume,
+root-exit observation and final tree/drain. Root kernel/user CPU comes from
+that original process handle; it is not descendant/owner CPU or complete
+resource accounting. Resume-through-reap still includes scheduling, loader,
+runtime, product work and cleanup; it is not pure product CPU.
+
+Missing, malformed or failed diagnostic proof records `startupFailure` and
+`failed_diagnostics`; it never invents fields or substitutes wall time. Actual
+CLI exits, native timing, reaping, captures and product `resultEquivalent`
+remain independently checked and retained. A diagnostically failed pair is
+sealed/retained with its original process retirement, and the overall run
+fails even when its product results are equivalent. Nothing is subtracted
+from the elapsed acceptance interval, and no diagnostic subinterval can pass
+the ≤0.30 target. A successful diagnostic run is still only
+`equivalent_data_observation_only`, with `startupDiagnostics=true` and
+`performanceAcceptanceEvaluated=false`.
+
+Use the same 24-file Git export above from the reviewed **new diagnostic
+runner commit**, in fresh coordinator-owned stage, not the old 5bc runner.
+Keep the current directory at the unchanged 30d product checkout and reuse
+its already sealed release. Use the full acceptance's authenticated original
+configuration only for absolute input paths; a new conditions copy describes
+this diagnostic run truthfully. No Cargo, product release or package rebuild
+is needed:
+
+```powershell
+Set-Location "<unchanged 30d product checkout>"
+$original = Get-Content -Raw ".tmp/rust-disk/evidence/5cd2078b-11f3-46be-9827-02d96767bb6b/configuration.json" | ConvertFrom-Json
+$conditions = "<fresh diagnostic-conditions.json in coordinator-owned scratch>"
+[IO.File]::WriteAllText($conditions, ($original.conditions | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+# Review this new conditions copy for the current diagnostic machine/load.
+foreach ($inputPath in @($runner, $original.rustArtifact, $original.goSource, $original.go.root, $original.luaLSArchive, $conditions, $original.fixtures.catalog, $original.fixtures.content, $original.fixtures.images, $original.sharpModule)) {
+  if (-not [IO.Path]::IsPathRooted($inputPath)) { throw "Every runner/artifact/input path must be absolute" }
+}
+node --test "$runner/tests/rust-performance-paired/data-runner.test.mjs" "$runner/tests/rust-performance-paired/data-resume.test.mjs" "$runner/tools/rust-owned-process.test.mjs"
+if ($LASTEXITCODE -ne 0) { throw "Staged Data/native owner checks failed" }
+node "$runner/tools/rust-data-performance-paired.mjs" $original.rustArtifact $original.goSource $original.go.root $original.luaLSArchive $conditions $original.fixtures.catalog $original.fixtures.content $original.fixtures.images $original.sharpModule --startup-diagnostics
+if ($LASTEXITCODE -ne 0) { throw "Data diagnostics failed; retain product and diagnostic evidence separately" }
+```
+
+The old 5bc Data runner did not enable this native option; its 928 samples
+cannot retrospectively supply pre-resume attribution. Existing root-exit to
+tree/drain ticks can still be analyzed as recorded. This new one-pair mode
+isolates the next observation need without a new product build or another
+928-invocation acceptance run. It does not isolate BLTE, texture decoding,
+PNG/WebP, metadata or file-publication costs inside the product; those require
+separately justified product phase observation if startup evidence points
+there. All existing command budgets and the five-hour outer cap remain.
