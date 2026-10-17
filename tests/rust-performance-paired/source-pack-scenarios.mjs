@@ -1,9 +1,10 @@
-// One fresh six-scenario observation. No builds, historical sample import or acceptance change.
+// One six-scenario observation; also one fixed, authenticated cold continuation.
+// No builds, historical sample import or acceptance change.
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
-import {isAbsolute, join, resolve} from 'node:path';
+import {isAbsolute, join, relative, resolve} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {performance} from 'node:perf_hooks';
 import os from 'node:os';
@@ -150,19 +151,35 @@ export function prepareVariant({homes, directory, baseRows, oracle, id, git}) {
   saveJSON(join(project, 'lycheedev.lock.json'), {schema: 'lycheedev.project-lock.v1', selection: pin});
   return {pin, project, oracle: variantOracle(oracle, change.rows, constructed.commit), mutation: {scenario: id, baseCommit: BASE_COMMIT, ...constructed, path: change.path, originalPath: FIRST_PATH, originalSHA256: change.originalSHA256, newBytes: change.bytes?.length ?? null, newSHA256: change.bytes ? sha256(change.bytes) : null, newBlob: change.blob ?? null, recipe: id === 'cross-prefix-rename' ? 'New pack2 scenario; unchanged original bytes moved across root prefix' : 'PR14 comment 6235614924 exact mutation'}, rows: change.rows};
 }
-export function captureMetadata(home, pin, directory, engine) {
-  const path = join(home, 'state/toolkit.sqlite'), info = lstatSync(path);
-  assert(info.isFile() && !info.isSymbolicLink() && info.size <= 16 << 20, 'bounded metadata');
-  assert(!['-wal', '-shm', '-journal'].some(suffix => existsSync(path + suffix)), 'closed checkpointed metadata required');
-  const expected = hashFile(path), copy = join(directory, `${engine}-metadata.sqlite`); copyFileSync(path, copy); assert.equal(hashFile(copy), expected);
+export function metadataIdentity(home) {
+  const path = contained(home, join(home, 'state/toolkit.sqlite'));
+  const identities = {};
+  for (const [suffix, maximum] of [['', 16 << 20], ['-wal', 0], ['-shm', 1 << 20], ['-journal', 0]]) {
+    const file = path + suffix;
+    let stat; try { stat = lstatSync(file, {bigint: true}); } catch (error) { if (error.code !== 'ENOENT') throw error; assert(suffix !== '', 'metadata database missing'); identities[suffix || 'database'] = null; continue; }
+    assert(suffix !== '-journal', 'rollback journal is not admitted for a read-only snapshot');
+    assert(stat.isFile() && !stat.isSymbolicLink() && stat.size <= BigInt(maximum), suffix === '-wal' ? 'nonempty WAL is not admitted for a read-only snapshot' : 'bounded metadata file/type');
+    identities[suffix || 'database'] = {path: file, bytes: Number(stat.size), sha256: hashFile(file, maximum), device: stat.dev.toString(), fileId: stat.ino.toString(), modifiedNs: stat.mtimeNs.toString(), changedNs: stat.ctimeNs.toString()};
+  }
+  // An empty/no WAL has no committed frames. SHM is nonpersistent coordination
+  // state, retained and authenticated but never copied/opened as input to SQLite.
+  return identities;
+}
+export function captureMetadata(home, pin, directory, engine, {afterCopy} = {}) {
+  const before = metadataIdentity(home), path = before.database.path, expected = before.database.sha256;
+  const copy = join(directory, `${engine}-metadata.sqlite`); copyFileSync(path, copy); assert.equal(hashFile(copy), expected);
+  afterCopy?.(); assert.deepEqual(metadataIdentity(home), before, 'original metadata/sidecars changed during copy');
   const db = new DatabaseSync(copy, {readOnly: true});
   try {
+    assert.deepEqual(db.prepare('PRAGMA integrity_check').all().map(row => ({...row})), [{integrity_check: 'ok'}], 'complete copied SQLite integrity');
     assert.equal(db.prepare('PRAGMA user_version').get().user_version, 1);
     assert.deepEqual(db.prepare("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all().map(row => ({...row})), [{type: 'table', name: 'deleted_generations'}, {type: 'table', name: 'documents'}]);
     const row = db.prepare('SELECT value FROM documents WHERE key = ?').get(`pin/${pin.id}`); assert(row, 'actual persisted command pin required'); assert.deepEqual(JSON.parse(Buffer.from(row.value)), pin);
   } finally { db.close(); }
-  assert.equal(hashFile(path), expected, 'metadata changed during capture'); assert(!['-wal', '-shm', '-journal'].some(suffix => existsSync(path + suffix)));
-  return {path: copy, sha256: expected};
+  assert.equal(hashFile(copy), expected, 'copied database changed during read');
+  assert.deepEqual(metadataIdentity(home), before, 'original metadata/sidecars changed during validation');
+  saveJSON(join(directory, `${engine}-metadata-source.json`), {schema: 'lycheedev.source-metadata-snapshot.v1', mode: 'main-database-with-absent-or-empty-WAL', originalOpened: false, originalModified: false, before, after: before, copySHA256: expected});
+  return {path: copy, sha256: expected, original: before};
 }
 export function indexEvidence(home, engine, pin, directory, root) {
   const source = pin.source; let path, manifest;
@@ -200,17 +217,93 @@ export async function compareFacts(homes, outputs, pin, oracle, directory, root,
   return {documents: delta.documents, fullFieldsAndOrderEqual: true, totals: delta.totals, indexes: Object.fromEntries(Object.entries(indexes).map(([k, v]) => [k, {path: v.path, bytes: v.bytes, sha256: v.sha256}])), summary: values.go, evidence: join(directory, 'facts-comparison.json')};
 }
 
+// Deliberately limited to the one 7d8 metadata failure reported in PR 14/6236649962.
+export const RETAINED_COLD = Object.freeze({outer: '2f0bcd33-f0f4-46b6-9bc5-5539dbc5b422', base: '058035ab-29e8-43c7-bbeb-ee54472f8147', go: 'bfae709f-783a-4eb0-ae9e-70e949163034', rust: '0ee84792-5d7e-4f59-b0a2-44d2e6779c61', runnerSHA256: 'aeeed67ad78777c8ad708d1c669684b1c7e653a6d0732fa77623d42d21c87e9e'});
+const retainedPaths = root => ({outer: contained(root, join(root, '.tmp/rust-disk/evidence', RETAINED_COLD.outer)), base: contained(root, join(root, '.tmp/rust-disk/evidence', RETAINED_COLD.base)), homes: Object.fromEntries(['go', 'rust'].map(e => [e, contained(root, join(root, '.tmp/rust-scratch', RETAINED_COLD.base, `${e}-home`))])), claim: contained(root, join(root, '.tmp/rust-disk', `source-pack2-cold-${RETAINED_COLD.base}.json`))});
+const boundedJSON = (path, maximum = 16 << 20) => { const stat = lstatSync(path); assert(stat.isFile() && !stat.isSymbolicLink() && stat.size <= maximum, 'bounded regular JSON evidence'); return JSON.parse(readFileSync(path)); };
+export function validateColdReference(value) {
+  exact(value, ['schema', 'outerReceiptSHA256', 'baseReceiptSHA256', 'homeInventorySHA256']); assert.equal(value.schema, 'lycheedev.source-pack2-retained-cold.v1');
+  digest(value.outerReceiptSHA256); digest(value.baseReceiptSHA256); exact(value.homeInventorySHA256, ['go', 'rust']); for (const hash of Object.values(value.homeInventorySHA256)) digest(hash); return value;
+}
+export function inspectRetainedCold(request) {
+  const paths = retainedPaths(request.ownerRoot);
+  const reference = {schema: 'lycheedev.source-pack2-retained-cold.v1', outerReceiptSHA256: hashFile(join(paths.outer, 'receipt.json'), 16 << 20), baseReceiptSHA256: hashFile(join(paths.base, 'receipt.json'), 16 << 20), homeInventorySHA256: Object.fromEntries(['go', 'rust'].map(e => [e, inventory(paths.homes[e]).sha256]))};
+  authenticateRetainedCold(request, reference); return reference;
+}
+export function authenticateRetainedCold(request, reference) {
+  validateColdReference(reference); const paths = retainedPaths(request.ownerRoot), receipts = {}, hashes = [];
+  assert(!existsSync(paths.claim), 'this fixed cold continuation was already claimed; no automatic replacement samples');
+  for (const [role, owner] of [['outer', 'source-pack2-diagnostics'], ['base', 'source-pack2-healthy-base']]) {
+    const path = join(paths[role], 'receipt.json'), expected = reference[`${role}ReceiptSHA256`]; assert.equal(hashFile(path, 16 << 20), expected, 'prior owner receipt changed'); hashes.push({path, sha256: expected});
+    const receipt = boundedJSON(path); receipts[role] = receipt;
+    assert.equal(receipt.schema, 'lycheedev.disk-owner.v1'); assert.equal(receipt.id, RETAINED_COLD[role]); assert.equal(receipt.owner, owner); assert.equal(receipt.category, 'scratch'); assert.equal(receipt.retention, 'rebuildable'); assert.equal(receipt.state, 'failed'); assert.equal(receipt.handlesReaped, true); assert.equal(receipt.activePid, null); assert(receipt.sealedAt);
+    assert.equal(resolve(receipt.directory), contained(request.ownerRoot, join(request.ownerRoot, '.tmp/rust-scratch', RETAINED_COLD[role])));
+    assert(Array.isArray(receipt.sealedLogs) && receipt.sealedLogs.length > 0 && receipt.sealedLogs.length < 2000); const known = new Set();
+    for (const log of receipt.sealedLogs) { const path = contained(paths[role], log.path); assert.equal(log.original, path); assert(!known.has(path), 'duplicate sealed log'); known.add(path); digest(log.sha256); assert.equal(hashFile(path, 16 << 20), log.sha256, 'prior sealed log changed'); hashes.push({path, sha256: log.sha256}); }
+    assert.deepEqual(evidenceFiles(paths[role]).sort(), [...known].sort(), 'all prior evidence must be sealed');
+    assert.deepEqual(receipt.logHashes, Object.fromEntries(receipt.sealedLogs.map(log => [relative(request.ownerRoot, log.path), log.sha256])));
+  }
+  const oldConfig = boundedJSON(join(paths.outer, 'configuration.json')), oldReport = boundedJSON(join(paths.outer, 'report.json')), owned = boundedJSON(join(paths.outer, 'owned-report.json'));
+  assert.deepEqual(oldConfig.request, request); assert.deepEqual(oldReport.request, request); assert.deepEqual(owned.request, request);
+  assert.deepEqual(Object.keys(oldConfig.inputs).sort(), [...RUNNER_FILES].sort()); assert.equal(sha256(JSON.stringify(RUNNER_FILES.map(path => [path, oldConfig.inputs[path]]))), RETAINED_COLD.runnerSHA256, 'exact original 7d8 runner required');
+  assert.deepEqual(oldReport.inputs, oldConfig.inputs); assert.deepEqual(owned.inputs, oldConfig.inputs); assert.deepEqual(receipts.outer.inputHashes.runner, oldConfig.inputs); assert.deepEqual(receipts.base.inputHashes, oldConfig.inputs);
+  assert.equal(oldConfig.evidence, paths.outer); assert.equal(oldConfig.scratch, receipts.outer.directory);
+  assert.equal(oldReport.schema, 'lycheedev.source-pack-scenarios.v1'); assert.equal(oldReport.state, 'source_pack_scenarios_failed'); assert.equal(oldReport.blocker, 'closed checkpointed metadata required'); assert.equal(oldReport.finalIntegrityVerified, false); assert.equal(oldReport.requiresOuterRetirement, false); assert.equal(oldReport.importedSamples, 0);
+  assert.equal(owned.schema, 'lycheedev.source-pack-scenarios-owned.v1'); assert.equal(owned.state, 'failed'); assert.equal(owned.process.exit, 1); assert.equal(owned.process.handlesReaped, true); elapsed(owned.process.proof);
+  assert.equal(oldReport.scenarios.length, 1); const cold = oldReport.scenarios[0]; assert.equal(cold.id, 'cold'); assert.equal(cold.mode, 'cold'); assert.equal(cold.state, 'failed'); assert.equal(cold.factsEquivalent, false); assert.equal(cold.failure, 'closed checkpointed metadata required'); assert.deepEqual(cold.order, ['go', 'rust']); assert.equal(cold.lineage.state, 'authenticated-own-sync-only');
+  const pin = fixturePin({repository: 'wow-ui-source', product: 'retail', requestedRef: BASE_COMMIT, exactCommit: BASE_COMMIT, parserRevision: 'source-v1'}); assert.deepEqual(cold.pin, pin);
+  const outputs = {}, inventories = {}, manifests = {};
+  for (const engine of ['go', 'rust']) {
+    const row = cold[engine], stem = join(paths.base, 'cold', `process-${RETAINED_COLD[engine]}`), req = boundedJSON(stem + '.request.json'), proof = boundedJSON(stem + '.receipt.json'), wrapper = boundedJSON(stem + '.request.json.wrapper.json');
+    assert.equal(row.home, paths.homes[engine]); assert.equal(row.exit, 0); assert.equal(row.valid, true); assert.equal(row.handlesReaped, true); assert(!row.error); assert.equal(req.schema, 'lycheedev.owned-request.v2'); assert.equal(req.runId, RETAINED_COLD[engine]); assert.equal(req.command, row.binary); assert.equal(req.cwd, row.cwd); assert.equal(req.timeoutMs, 210000); assert.equal(req.orphanMs, 30000); assert.equal(req.cargoBuild, false); assert.equal(req.msvcCompile, false); assert(!req.startupDiagnostics);
+    assert.deepEqual(req.args, ['source', 'index', '--snapshot', pin.id, '--home', paths.homes[engine], '--format', 'json']); assert.deepEqual(row.args, req.args);
+    for (const [key, suffix] of [['stdout', '.stdout.bin'], ['stderr', '.stderr.bin'], ['receipt', '.receipt.json'], ['identity', '.identity.json'], ['rootIdentity', '.root.json'], ['memoryPrefix', '.memory'], ['memoryMarker', '.phase']]) assert.equal(req[key], stem + suffix);
+    const startup = boundedJSON(req.identity), rootIdentity = boundedJSON(req.rootIdentity); assert.equal(startup.schema, 'lycheedev.owned-start.v1'); assert.equal(startup.runId, req.runId); assert.equal(startup.requestSHA256, hashFile(stem + '.request.json')); assert.equal(startup.wrapperObservedSHA256, oldConfig.inputs['tools/rust-owned-process.ps1']); assert.equal(startup.rootAssignment, 'PROC_THREAD_ATTRIBUTE_JOB_LIST'); assert.equal(startup.historicalReapProof, false); assert.equal(rootIdentity.schema, 'lycheedev.owned-root.v1'); assert.equal(rootIdentity.runId, req.runId); assert.equal(rootIdentity.jobAssignedAtCreation, true); assert.equal(rootIdentity.historicalReapProof, false); assert.equal(rootIdentity.pid, proof.pid); assert.equal(rootIdentity.creationFileTime, proof.creationFileTime); assert.equal(proof.startupIdentity, req.identity); assert.equal(proof.rootIdentity, req.rootIdentity);
+    assert.equal(proof.runId, req.runId); assert.equal(proof.binary, row.binary); assert.equal(proof.exitCode, 0); assert.deepEqual(proof, row.proof); const timing = elapsed(proof); for (const [key, value] of Object.entries(timing)) assert.equal(row[key], value);
+    assert.equal(wrapper.status, 0); assert(!wrapper.error && !wrapper.signal); assert(row.memory && row.memory.state, 'original memory observation/gaps required');
+    const raw = readFileSync(req.stdout), stderr = readFileSync(req.stderr); assert.equal(sha256(raw), row.stdoutSHA256); assert.equal(sha256(stderr), row.stderrSHA256); outputs[engine] = {envelope: JSON.parse(raw), stderr, row: structuredClone(row)};
+    inventories[engine] = inventory(paths.homes[engine]); assert.equal(inventories[engine].sha256, reference.homeInventorySHA256[engine], 'retained home inventory changed'); metadataIdentity(paths.homes[engine]);
+    manifests[engine] = boundedJSON(join(paths.base, `${engine}-verified-corpus-manifest.json`)); assert.equal(manifests[engine].commit, BASE_COMMIT);
+    const seed = oldReport.preparation.find(p => p.label === `${engine}-authenticated-sync-only`); assert(seed); assert.deepEqual(seed.pin, pin); assert.equal(seed.home, paths.homes[engine]); assert.equal(seed.metadata.checkpointed, true); assert.equal(seed.metadata.documents, 1); assert.equal(seed.metadata.deletedGenerations, 0); assert.equal(seed.metadata.documentKey, `pin/${pin.id}`); assert.equal(seed.metadata.evidenceCopy, join(paths.base, `${engine}-seed-metadata.sqlite`)); assert.equal(hashFile(seed.metadata.evidenceCopy, 16 << 20), seed.metadata.sha256); assert.equal(sha256(JSON.stringify(seed.identity.rows)), seed.identity.sha256); assert(seed.identity.rows.every(r => !/^(source|cache|indexes|blobs|runs|captures|tmp)\//.test(r.path)), 'original seed must contain no derived results');
+  }
+  assert.deepEqual(manifests.go, manifests.rust);
+  const verifyEvidence = () => { for (const item of hashes) assert.equal(hashFile(item.path, 16 << 20), item.sha256, 'original failed evidence changed'); };
+  const verifyHomes = () => { for (const engine of ['go', 'rust']) assert.equal(inventory(paths.homes[engine]).sha256, reference.homeInventorySHA256[engine], 'retained home changed before warm'); };
+  return {paths, reference, oldReport, cold, pin, rows: manifests.go.files, outputs, inventories, verifyEvidence, verifyHomes};
+}
+export function claimColdBorrow(root, reference, owner, before, custodyReceipt) {
+  validateColdReference(reference); const paths = retainedPaths(root);
+  const receipt = boundedJSON(owner.receipt); assert.equal(receipt.owner, 'source-pack2-cold-continuation'); assert.equal(receipt.state, 'active'); assert.equal(receipt.id, owner.id);
+  assert.equal(receipt.directory, contained(root, join(root, '.tmp/rust-scratch', owner.id))); assert.notEqual(owner.id, RETAINED_COLD.base);
+  assert.deepEqual(receipt.inputHashes.retainedCold, reference); assert.deepEqual(receipt.inputHashes.borrowedHomes, paths.homes); assert.deepEqual(receipt.inputHashes.beforeInventory, reference.homeInventorySHA256);
+  const custody = boundedJSON(custodyReceipt); assert.equal(custody.owner, 'source-pack2-cold-revalidation'); assert(['succeeded', 'retired'].includes(custody.state)); assert.equal(custody.handlesReaped, true); assert.deepEqual(custody.inputHashes.retainedCold, reference); assert.equal(custodyReceipt, contained(root, join(root, '.tmp/rust-disk/evidence', custody.id, 'receipt.json'))); assert(custody.sealedLogs.length > 0);
+  for (const log of custody.sealedLogs) { const path = contained(resolve(custodyReceipt, '..'), log.path); assert.equal(hashFile(path, 16 << 20), log.sha256, 'cold custody changed before borrow'); }
+  const verified = boundedJSON(join(resolve(custodyReceipt, '..'), 'cold-revalidated.json')); assert.equal(verified.state, 'verified'); assert.equal(verified.factsEquivalent, true); assert.equal(verified.facts.fullFieldsAndOrderEqual, true); assert.equal(verified.facts.documents, 4036); assert.deepEqual(verified.lineage.reference, reference);
+  assert(custody.sealedLogs.some(log => log.path === join(resolve(custodyReceipt, '..'), 'cold-facts-custody.json')), 'complete cold Facts custody required before borrow');
+  for (const engine of ['go', 'rust']) { assert.equal(before[engine].sha256, reference.homeInventorySHA256[engine]); assert.equal(inventory(paths.homes[engine]).sha256, before[engine].sha256, 'borrow home changed before claim'); }
+  const record = {schema: 'lycheedev.source-pack2-cold-borrow.v1', owner: owner.id, originalOwner: RETAINED_COLD.base, originalState: 'failed', reference, homes: paths.homes, before, custodyReceipt, writeScope: 'same-home warm only; changed scenarios clone these homes independently', cleanupScope: owner.directory, claimedAt: new Date().toISOString()};
+  writeFileSync(paths.claim, JSON.stringify(record, null, 2) + '\n', {flag: 'wx'}); saveJSON(join(owner.evidence, 'borrow-claim.json'), record); return {path: paths.claim, sha256: hashFile(paths.claim)};
+}
+export function captureColdFactFiles(homes, inventories, directory, root) {
+  const files = [];
+  for (const engine of ['go', 'rust']) for (const row of inventories[engine].rows.filter(r => r.path.startsWith(engine === 'go' ? 'source/v1/facts/files/' : 'cache/source-facts-rust/'))) {
+    const source = {path: contained(homes[engine], join(homes[engine], row.path)), bytes: row.bytes, sha256: row.sha256};
+    const target = join(directory, `${engine}-cold-fact-${files.length}`); splitIndexEvidence(root, source, target); files.push({engine, relative: row.path, ...source, manifest: join(target, 'manifest.json'), manifestSHA256: hashFile(join(target, 'manifest.json'), 65536)});
+  }
+  assert(files.length > 0); saveJSON(join(directory, 'cold-facts-custody.json'), {schema: 'lycheedev.source-pack2-cold-facts.v1', files}); return files.length;
+}
+
 export async function runController(config, overrides = {}) {
-  const svc = {beginScratch, admission, ownedSpawnSync, collectOwnedMemory, runnerIdentity, verifyCandidateRecord, verifyGoPackage, cloneSeed, inventory, derivedIdentity, proveWarmReuse, prepareVariant, compareFacts, verifyPackProfile, indexEvidence, captureGoCustody, openGoCustody, ...overrides};
+  const svc = {assertCorpus, authenticateRetainedCold, claimColdBorrow, captureColdFactFiles, beginScratch, admission, ownedSpawnSync, collectOwnedMemory, runnerIdentity, verifyCandidateRecord, verifyGoPackage, cloneSeed, inventory, derivedIdentity, proveWarmReuse, prepareVariant, compareFacts, verifyPackProfile, indexEvidence, captureGoCustody, openGoCustody, ...overrides};
   const {request, runnerRoot, inputs, conditions, scratch, evidence: out} = config;
   const diskPolicy = assertDiskPolicy(request.ownerRoot);
   const oracle = JSON.parse(readFileSync(join(runnerRoot, 'tests/rust-source-full-corpus/retail-oracle.json')));
   assert.equal(oracle.commit, BASE_COMMIT); assert.equal(oracle.documents, 4036);
-  let fatal = false, sequence = 0, baseOwner, baseSuccess = false;
+  let fatal = false, sequence = 0, baseOwner, baseSuccess = false, retained, borrowClaim;
   const start = performance.now();
   const report = {schema: 'lycheedev.source-pack-scenarios.v1', diskPolicy, state: 'running', request, inputs, runnerRoot, conditions, productCommit: CANDIDATE_COMMIT, layout: 'v11-pack2', importedSamples: 0, performanceAcceptanceEvaluated: false, fullB01B07Acceptance: false, preparation: [], scenarios: [], owners: [], finalIntegrityVerified: false,
     machine: {hostname: os.hostname(), platform: process.platform, node: process.version, cpus: os.cpus(), totalMemory: os.totalmem()},
-    timing: 'Native total CreateProcessW through descendant reaping/output drain; 31 overlapping phases are attribution, never subtracted or added. Wrapper wall separate.', cacheDefinition: 'Fresh own init/sync-only homes for cold; same successful base homes for warm; each changed pair copies the original healthy base independently. No OS cache flush.', metrics: {cpu: 'not_measured', io: 'not_measured', rss: 'not_measured; owned-Job sampled aggregate and gaps retained, not unique physical RSS'}};
+    timing: 'Native total CreateProcessW through descendant reaping/output drain; 31 overlapping phases are attribution, never subtracted or added. Wrapper wall separate.', cacheDefinition: config.resumeCold ? 'Original fixed 7d8 init/sync/cold calls reauthenticated read-only; exact two retained homes borrowed for same-home warm; each changed engine copies this healthy base independently. No fresh cold calls or OS cache flush.' : 'Fresh own init/sync-only homes for cold; same successful base homes for warm; each changed pair copies the original healthy base independently. No OS cache flush.', metrics: {cpu: 'not_measured', io: 'not_measured', rss: 'not_measured; owned-Job sampled aggregate and gaps retained, not unique physical RSS'}};
   const save = () => saveJSON(join(out, 'report.json'), report);
   function controlled(binary, args, cwd, evidence, measured = false, timeout = 210000, engine) {
     assert(!fatal, 'unverified process retirement; no further launch'); fatal = true;
@@ -301,21 +394,58 @@ export async function runController(config, overrides = {}) {
     const binaries = identities();
     if (!overrides.prepareSeeds) report.goMetadata = verifyGoMetadata(prepare('go', ['version', '-m', binaries.go.binary], 'Go323 binary metadata').toString());
     report.machine.powerBefore = prepare('powercfg.exe', ['/getactivescheme'], 'power-before').toString();
-    const coldEstimate = footprint({cold: true}); report.coldAdmissionEstimate = coldEstimate;
-    baseOwner = svc.beginScratch(request.ownerRoot, 'source-pack2-healthy-base', {command: ['source', 'index'], inputs, admissionOptions: coldEstimate}); report.owners.push({role: 'healthy-base', receipt: baseOwner.receipt}); save();
-    const homes = Object.fromEntries(['go', 'rust'].map(engine => [engine, join(baseOwner.directory, `${engine}-home`)]));
-    const prepared = (overrides.prepareSeeds ?? prepareSeeds)(homes, binaries, baseOwner.evidence);
+    let homes, prepared, cold, coldEvidence;
+    if (config.resumeCold) {
+      retained = svc.authenticateRetainedCold(request, config.resumeCold);
+      homes = retained.paths.homes; prepared = {pin: retained.pin, rows: retained.rows}; svc.assertCorpus(prepared.rows, oracle);
+      for (const engine of ['go', 'rust']) { assert.equal(retained.outputs[engine].row.binary, binaries[engine].binary); assert.equal(retained.outputs[engine].row.cwd, binaries[engine].cwd); }
+      assert.equal(report.machine.hostname, retained.oldReport.machine.hostname, 'original cold hostname differs'); assert.equal(report.machine.platform, retained.oldReport.machine.platform, 'original cold platform differs');
+      assert.equal(report.machine.powerBefore, retained.oldReport.machine.powerBefore, 'power plan changed since original cold samples');
+      const factsBytes = Object.entries(retained.inventories).reduce((sum, [engine, inv]) => sum + inv.rows.filter(r => r.path.startsWith(engine === 'go' ? 'source/v1/facts/files/' : 'cache/source-facts-rust/')).reduce((n, r) => n + r.bytes, 0), 0);
+      const estimate = {scratchReserveBytes: 1 << 20, requiredBytes: 2 * INDEX_BYTES + factsBytes + 2 * oracle.allBytes + (64 << 20), basis: 'Existing homes are already charged; only 1 MiB new owner scratch, two bounded indexes, actual complete Facts, two raw corpus audits and 64 MiB metadata/log allowance'};
+      const custody = svc.beginScratch(request.ownerRoot, 'source-pack2-cold-revalidation', {command: ['read-only', 'retained-cold'], inputs: {...inputs, retainedCold: config.resumeCold}, admissionOptions: estimate});
+      report.owners.push({role: 'read-only-cold-custody', receipt: custody.receipt, estimate}); save(); let complete = false;
+      try {
+        coldEvidence = custody.evidence;
+        saveJSON(join(coldEvidence, 'original-failed-cold.json'), {reference: config.resumeCold, originalOuterReceipt: join(retained.paths.outer, 'receipt.json'), originalBaseReceipt: join(retained.paths.base, 'receipt.json'), cold: retained.cold, originalInputs: retained.oldReport.inputs});
+        saveJSON(join(coldEvidence, 'borrow-before-inventories.json'), retained.inventories);
+        const envelopes = {};
+        for (const engine of ['go', 'rust']) {
+          if (!overrides.authenticateRetainedCold) auditCorpus(join(homes[engine], 'mirrors', `${oracle.repository}.git`), oracle, (args, input) => git(args, input), coldEvidence, `${engine}-retained-`);
+          const original = retained.outputs[engine]; envelopes[engine] = original.envelope;
+          semantic('B02-retail-index', original.envelope, engine, oracle, prepared.pin.id); assert.equal(original.envelope.context?.snapshot, prepared.pin.id);
+          if (engine === 'rust') assert.deepEqual(svc.verifyPackProfile(original.stderr, original.envelope, {mode: 'cold', documents: 4036}), retained.cold.rust.sourceProfile);
+        }
+        cold = structuredClone(retained.cold); delete cold.failure; cold.state = 'revalidating'; cold.lineage = {...cold.lineage, resumedOriginalCalls: true, originalState: 'failed', originalOuter: RETAINED_COLD.outer, originalBase: RETAINED_COLD.base, originalConditions: retained.oldReport.conditions, originalMachine: {hostname: retained.oldReport.machine.hostname, platform: retained.oldReport.machine.platform, node: retained.oldReport.machine.node}, reference: config.resumeCold};
+        report.scenarios.push(cold); report.continuation = {schema: 'lycheedev.source-pack2-cold-continuation.v1', reference: config.resumeCold, originalCallsReused: 2, freshColdCalls: 0, originalState: 'failed', custodyReceipt: custody.receipt}; save();
+        cold.facts = await svc.compareFacts(homes, envelopes, prepared.pin, oracle, coldEvidence, request.ownerRoot); cold.factsEquivalent = true;
+        svc.captureColdFactFiles(homes, retained.inventories, coldEvidence, request.ownerRoot);
+        retained.verifyHomes(); retained.verifyEvidence(); identities(); cold.state = 'verified'; cold.rustToGoRatio = cold.rust.controllableMillis / cold.go.controllableMillis;
+        saveJSON(join(coldEvidence, 'cold-revalidated.json'), cold); complete = true;
+      } finally { custody.seal({state: fatal ? 'interrupted' : complete ? 'succeeded' : 'failed', handlesReaped: !fatal, logs: evidenceFiles(custody.evidence)}); if (complete && !fatal) custody.cleanup(); save(); }
+      const warmGrowth = Math.max(cold.facts.indexes.go.bytes, cold.facts.indexes.rust.bytes) + (8 << 20);
+      const warmEstimate = {scratchReserveBytes: warmGrowth, requiredBytes: warmGrowth + 2 * INDEX_BYTES + (64 << 20), basis: 'Borrow exact existing homes; sequential warm calls reserve the larger measured index for temporary replacement plus 8 MiB metadata/log growth; two complete evidence indexes plus 64 MiB allowance'};
+      baseOwner = svc.beginScratch(request.ownerRoot, 'source-pack2-cold-continuation', {command: ['source', 'index', 'warm-and-four-changes'], inputs: {...inputs, retainedCold: config.resumeCold, borrowedHomes: homes, beforeInventory: config.resumeCold.homeInventorySHA256, coldCustodyReceipt: custody.receipt}, admissionOptions: warmEstimate});
+      report.owners.push({role: 'borrowed-healthy-base', receipt: baseOwner.receipt, estimate: warmEstimate});
+      retained.verifyHomes(); retained.verifyEvidence(); borrowClaim = svc.claimColdBorrow(request.ownerRoot, config.resumeCold, baseOwner, retained.inventories, custody.receipt); report.continuation.borrow = borrowClaim; save();
+    } else {
+      const coldEstimate = footprint({cold: true}); report.coldAdmissionEstimate = coldEstimate;
+      baseOwner = svc.beginScratch(request.ownerRoot, 'source-pack2-healthy-base', {command: ['source', 'index'], inputs, admissionOptions: coldEstimate}); report.owners.push({role: 'healthy-base', receipt: baseOwner.receipt}); save();
+      homes = Object.fromEntries(['go', 'rust'].map(engine => [engine, join(baseOwner.directory, `${engine}-home`)]));
+      prepared = (overrides.prepareSeeds ?? prepareSeeds)(homes, binaries, baseOwner.evidence);
+      coldEvidence = join(baseOwner.evidence, 'cold'); mkdirSync(coldEvidence);
+      cold = await scenario(CASES[0], 0, homes, {pin: prepared.pin, oracle}, coldEvidence, binaries, {state: 'authenticated-own-sync-only'});
+      const coldInventory = Object.fromEntries(['go', 'rust'].map(engine => [engine, svc.inventory(homes[engine])]));
+      report.actualColdHomeBytes = coldInventory.go.bytes + coldInventory.rust.bytes;
+      assert(report.actualColdHomeBytes <= coldEstimate.scratchReserveBytes, 'actual cold footprint exceeded admitted estimate');
+      report.postColdAdmission = svc.admission(request.ownerRoot);
+    }
     const selection = {pin: prepared.pin, oracle};
-    const coldEvidence = join(baseOwner.evidence, 'cold'); mkdirSync(coldEvidence);
-    const cold = await scenario(CASES[0], 0, homes, selection, coldEvidence, binaries, {state: 'authenticated-own-sync-only'});
-    const coldInventory = Object.fromEntries(['go', 'rust'].map(engine => [engine, svc.inventory(homes[engine])]));
-    report.actualColdHomeBytes = coldInventory.go.bytes + coldInventory.rust.bytes;
-    assert(report.actualColdHomeBytes <= coldEstimate.scratchReserveBytes, 'actual cold footprint exceeded admitted estimate');
-    report.postColdAdmission = svc.admission(request.ownerRoot);
     const warmEvidence = join(baseOwner.evidence, 'warm'); mkdirSync(warmEvidence);
     await scenario(CASES[1], 1, homes, selection, warmEvidence, binaries, {state: 'same-cold-home', cold: coldEvidence});
     const baseIdentity = Object.fromEntries(['go', 'rust'].map(engine => [engine, svc.inventory(homes[engine])]));
     saveJSON(join(baseOwner.evidence, 'healthy-base-inventories.json'), baseIdentity);
+    if (retained) { retained.verifyEvidence(); assert.equal(hashFile(borrowClaim.path), borrowClaim.sha256); const beforeBytes = Object.values(retained.inventories).reduce((n, inv) => n + inv.bytes, 0), afterBytes = Object.values(baseIdentity).reduce((n, inv) => n + inv.bytes, 0); assert(afterBytes <= beforeBytes + Math.max(cold.facts.indexes.go.bytes, cold.facts.indexes.rust.bytes) + (8 << 20), 'borrowed warm growth exceeded admitted estimate'); report.postWarmAdmission = svc.admission(request.ownerRoot); }
     for (let index = 2; index < CASES.length; index++) {
       const entry = CASES[index], row = {id: entry.id, mode: entry.mode, order: orderFor(index), state: 'running', factsEquivalent: false,
         pairing: 'Sequential own-engine owners; independently prepared between samples, not an uninterrupted adjacent pair',
@@ -379,11 +509,13 @@ export async function runController(config, overrides = {}) {
     }
     identities(); report.machine.powerAfter = prepare('powercfg.exe', ['/getactivescheme'], 'power-after').toString(); assert.equal(report.machine.powerAfter, report.machine.powerBefore);
     assert.equal(report.scenarios.length, 6); assert(report.scenarios.every(row => row.state === 'verified'));
+    if (retained) { retained.verifyEvidence(); assert.equal(hashFile(borrowClaim.path), borrowClaim.sha256); }
     report.finalIntegrityVerified = true; report.state = 'source_pack_scenarios_observed'; baseSuccess = true;
   } catch (error) { report.blocker = error.message.slice(0, 4096); if (error.report) report.admissionFailure = error.report; report.state = 'source_pack_scenarios_failed'; }
   finally {
     report.requiresOuterRetirement = fatal; report.wallMillis = performance.now() - start;
     if (baseOwner) {
+      if (retained) { try { saveJSON(join(baseOwner.evidence, 'borrow-after-inventories.json'), fatal ? {state: 'not_measured_unreaped', requiresOuterRetirement: true} : Object.fromEntries(['go', 'rust'].map(e => [e, svc.inventory(retained.paths.homes[e])]))); retained.verifyEvidence(); } catch (error) { report.state = 'source_pack_scenarios_failed'; report.borrowIntegrityFailure = error.message; baseSuccess = false; } }
       try { baseOwner.seal({state: fatal ? 'interrupted' : baseSuccess ? 'succeeded' : 'failed', handlesReaped: !fatal, logs: evidenceFiles(baseOwner.evidence)}); if (baseSuccess && !fatal) baseOwner.cleanup(); }
       catch (error) { report.state = 'source_pack_scenarios_failed'; report.cleanupFailure = error.message; }
     }
@@ -391,11 +523,12 @@ export async function runController(config, overrides = {}) {
   }
   return report;
 }
-export function verifyObservedReport(run, report, request, inputs) {
+export function verifyObservedReport(run, report, request, inputs, resumeCold = undefined) {
   assert(run.status === 0 && !run.error && run.handlesReaped); elapsed(run.proof);
   assert.equal(report?.state, 'source_pack_scenarios_observed'); assert.equal(report.finalIntegrityVerified, true); assert.equal(report.requiresOuterRetirement, false);
   assert.equal(report.performanceAcceptanceEvaluated, false); assert.equal(report.fullB01B07Acceptance, false); assert.equal(report.importedSamples, 0);
   assert.deepEqual(report.request, request); assert.deepEqual(report.inputs, inputs); assert.equal(report.layout, 'v11-pack2'); assert.equal(report.productCommit, CANDIDATE_COMMIT);
+  if (resumeCold) { validateColdReference(resumeCold); assert.deepEqual(report.continuation?.reference, resumeCold); assert.equal(report.continuation.originalCallsReused, 2); assert.equal(report.continuation.freshColdCalls, 0); assert.equal(report.scenarios[0].lineage.resumedOriginalCalls, true); assert.deepEqual(report.scenarios[0].lineage.reference, resumeCold); for (const engine of ['go', 'rust']) assert.equal(report.scenarios[0][engine].proof.runId, RETAINED_COLD[engine]); } else assert.equal(report.continuation, undefined);
   assert.deepEqual(report.scenarios.map(row => row.id), CASES.map(row => row.id));
   const variantHomes = new Set();
   report.scenarios.forEach((row, i) => {

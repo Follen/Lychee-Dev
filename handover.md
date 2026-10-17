@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 16:18 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`00d215a937513609e482c1ef65f3b43f0288beee`（稳定分组前置与匹配构建已通过，六场景待正式runner）。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 16:52 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`7d8c5e984c97c055581798d64736db4a450033ee`（正式runner；00d产品前置/匹配构建通过，首次冷调用完成但完整对照被空WAL误拒挡住）。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -125,6 +125,10 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 - `exact_pack_leaf_boundary_skips_real_asset_and_oversized_document_before_next_leaf`
 - `path_leaf_planning_keeps_original_cancellation_deadline_and_rejects_unsorted_inputs`
 - `legacy_ordinal_pack_and_v13_index_keep_identity_while_current_default_rebuilds`
+
+[7d8/00d首次正式运行](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6236649962)：455584347B冷准入成功，两真实CLI均exit0、valid/reaped、无forced/deadline。Go9658.291ms、Rust5579.8315ms；Rust parsed4036/cached0，stage/seal/rename/close各74。完整Facts/共同summary尚未完成，不能报等价或性能通过。runner的captureMetadata仅因Go主DB12288B旁有0B WAL与32768B SHM而拒绝；这是读取器过严，不证明DB损坏。原outer2f0bcd33-f0f4-46b6-9bc5-5539dbc5b422与healthy058035ab-29e8-43c7-bbeb-ee54472f8147均failed/sealed/reaped、scratch保留，未删除sidecar。warm与4变体NOT_RUN；后继应认证并复用这两cold调用，不重新init/sync/cold。Node首次缺测试依赖114/2与补齐后116/116分别保留，[前置报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6236603320)。
+
+空WAL/原cold续验后继只改测试runner：允许稳定空WAL/有界SHM，原主DB/sidecars前后身份与内容认证，只在新owner打开主DB复制件；非空WAL与journal仍拒。README新增`--inspect-cold`生成四摘要引用、`--resume-cold`固定认证上述两owner/两run，先新只读custody封存完整cold Facts，再新owner登记两home精确借用执行same-home warm与四变体。旧failed receipts/logs不改、旧scratch不cleanup、freshColdCalls=0；单次claim阻重复执行，原memory gaps/时钟保留。原5GiB/2GiB策略不变，实测大小准入可真实阻塞。该后继6组Node151/151、25文件隔离导出/import通过，Windows续验NOT_RUN。
 
 正式六场景runner经独立复审，6组Node共116/116通过、无skip；新隔离25文件导出与导入、syntax及diff检查通过。Windows六场景仍NOT_RUN。正式六场景入口缺口已由云端补最小runner-only后继，见[配置与完整流程](tests/rust-performance-paired/source-pack-scenarios.README.md)。复用上述00d产物，runner另目录25文件导出/身份认证，不在产品clean checkout覆盖工具，不重编。各engine真实init/sync认证后cold→warm成为健康base；4变体逐engine独立clone同base，精确Git tree/blob/输入与公共project pin先认证，再保原180s产品/210s调用/原native完整墙钟和31phase。Go完整已认证records/manifest/逐fileFacts作为必要比较证据流式8MiB分片封存后，才正常回收自己的成功scratch；Rust用独立baseclone与该完整证据逐字段/顺序比较，不把整个home移到evidence。原b3d/历史失败不导入、不替样。
 

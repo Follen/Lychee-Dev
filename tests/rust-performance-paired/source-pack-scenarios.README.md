@@ -187,8 +187,10 @@ Only successful, fully reaped, sealed owners are cleaned through their existing
 `beginScratch` handle. A failed/interrupted owner is retained. Go success before
 Rust is explicitly “awaiting independent Rust” and is not a completed comparison.
 If any sample, custody, identity, profile, cleanup or power-policy check fails,
-there is no replacement sample, no later warm-after-failed-cold label and no
-successful outer result. Reports preserve the exact stopping point and blocker.
+the current invocation stops without replacement samples or a successful outer
+result. Reports preserve the exact stopping point and blocker. The sole explicit
+continuation below first revalidates and seals the fixed, already completed cold
+calls; it never changes the original failed status.
 
 ## Cloud-safe checks
 
@@ -203,3 +205,86 @@ These tests validate configuration, exact mutation identities, shared reader
 contracts, streamed custody, metadata/index lookup, scheduler order, process
 failures, same-base lineage, quota rejection and terminal cleanup. They do not
 execute Windows product samples or establish performance acceptance.
+
+## Restricted continuation of the 7d8 empty-WAL stop
+
+The real [7d8 cold attempt](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6236649962)
+completed both measured invocations, then stopped before complete Facts comparison
+because the Go metadata directory retained an empty WAL and a 32,768-byte SHM.
+Those old owners and their reports remain **failed**. Their cold calls are not
+rerun, relabeled as fresh, or replaced. This continuation is limited to:
+
+- Outer owner: `2f0bcd33-f0f4-46b6-9bc5-5539dbc5b422`
+- Healthy-base owner: `058035ab-29e8-43c7-bbeb-ee54472f8147`
+- Go cold run: `bfae709f-783a-4eb0-ae9e-70e949163034`
+- Rust cold run: `0ee84792-5d7e-4f59-b0a2-44d2e6779c61`
+
+Export the revised 25-file runtime closure separately; keep the fixed product
+checkout untouched. Use the original exact pack2 configuration and a current
+machine-conditions file. First inspect the retained evidence and create a new,
+small reference file (the destination must not exist):
+
+```powershell
+node <reviewed-runner-stage>/tools/rust-source-pack-diagnostics.mjs <pack2-config.json> <machine-conditions.json> --inspect-cold <NEW-retained-cold.json>
+```
+
+This invokes no product and creates no scratch owner. It reads the two fixed
+sealed owners, all original logs, exact original 25-file runner identity, raw
+requests/proofs/stdout/stderr, sync-only seed provenance, and the two current
+home inventories. It writes only the new reference JSON, containing the two
+receipt SHA-256 values and the two current inventory SHA-256 values. The original
+failure occurred before a post-cold inventory was captured; these inventory
+hashes therefore explicitly describe the retained state at inspection, rather
+than asserting a nonexistent historical post-call inventory. The subsequent
+full input/Facts/pin checks establish whether that state is usable.
+
+Then run the existing owned controller through the formal continuation mode:
+
+```powershell
+node <reviewed-runner-stage>/tools/rust-source-pack-diagnostics.mjs <pack2-config.json> <machine-conditions.json> --resume-cold <retained-cold.json>
+```
+
+It rejects foreign/active/unreaped owners, altered/unsealed evidence, another
+runner or product identity, an extra prior scenario, changed homes, another
+hostname/platform, or a changed power plan. It revalidates the original native
+clock and cold 31-phase profile, preserves original memory observations/gaps and
+conditions, and compares the complete five Facts arrays and common summaries.
+Only a copy of the main SQLite DB is opened. The source DB, absent-or-zero-length
+WAL and bounded SHM are authenticated before and after copying/reading, including
+file identity and timestamps; nonempty WAL, any rollback journal, symlinks and
+concurrent changes fail. No original sidecar is deleted or opened by SQLite.
+An empty WAL contains no committed frames; SHM is nonpersistent coordination
+state ([SQLite WAL format](https://sqlite.org/walformat.html),
+[SQLite file format](https://sqlite.org/fileformat2.html)). This does not implement
+a backup/recovery path for a nonempty WAL.
+
+A new read-only custody owner seals complete cold indexes, metadata snapshots,
+all cold Go/Rust Facts files and input inventories before warm is allowed. Large
+files use the existing 8 MiB parts. Only comparison/reconstruction material is
+copied; no whole home, mirror or unrelated cache is moved to evidence. Original
+failed receipts/logs are repeatedly authenticated and never changed.
+
+A separate continuation owner records the exact two borrowed home paths,
+original receipt hashes, sealed cold custody receipt, and before/after inventories
+in its own inputs/evidence. Only same-home warm writes to these borrowed homes;
+changed scenarios still clone their independent healthy base into fresh owners.
+The old scratch directories are never adopted or cleaned. A single-use claim at
+`.tmp/rust-disk/source-pack2-cold-058035ab-29e8-43c7-bbeb-ee54472f8147.json`
+is created before warm and is retained even on failure. A second attempt cannot
+automatically repeat or replace warm/changed observations; stop and review the
+existing evidence. No general owner-reopening or automatic retry system exists.
+
+The resumed report marks `originalCallsReused: 2`, `freshColdCalls: 0`, and the
+original failed lineage. Fresh six-scenario reports cannot pass as continuations
+or vice versa. No performance-acceptance conclusion is added.
+
+Admission still uses the unchanged 5 GiB scratch / 2 GiB free-reserve policy.
+Existing homes are already charged. Read-only custody reserves 1 MiB new scratch;
+free-space demand is `2 * INDEX_BYTES + actual cold Facts bytes + 65,330,258 +
+64 MiB`. Warm reserves the larger measured cold index plus 8 MiB for sequential
+temporary replacement/metadata growth; its free-space demand additionally covers
+two bounded index copies plus 64 MiB. These are documented estimates, not hard
+allocation caps. Actual usage is rechecked; changed engine reservations remain
+based on actual healthy inventories. A quota or integrity failure stops with
+completed cold evidence preserved. It does not raise the cap, delete another
+owner, rebuild the product, or silently take replacement samples.
