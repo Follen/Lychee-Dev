@@ -261,5 +261,22 @@ cases; rustfmt parsing and diff checks passed. Five new Rust regressions cover
 borrowed pointer/capacity/lifetime, malformed code/first-owner normalization,
 all code-owner deduplication/empty values, same-length external artifact changes
 and append-only normalized-owner counts across a real checkpoint. Existing full
-JSON-copy oracle cases now also validate the borrowed path. Candidate Rust
-compilation/regressions and the next complete 27-sample run remain **NOT_RUN**.
+JSON-copy oracle cases now also validate the borrowed path. The fixed592 candidate actually passed all-targets, Live613/0/1 (the opt-in
+diagnostic ignore remains separate), all five named new regressions, Node76
+and the complete27-sample matrix with27 peer lifetimes and five owner cleanups.
+See [prerequisites](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6235302167),
+[report](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6235349943) and
+[terminal evidence](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6235359631).
+
+All1,215 successful append snapshots contain1,647 final-map entries totalling
+30,736,260 borrowed payload bytes; this valid-code matrix has zero normalized
+owned entries. Original45 journal byte streams and all input/BODY/history
+match1360 and0890. The same-run sample wall is31.0522414s, Driver7.0607810s,
+journal5.2046063s and append4.9289097s. Append sync is2.6914004s (54.604%);
+snapshot/artifacts remains a mixed0.8339802s bucket. Compared with1360,
+Driver is47.0222ms lower and the snapshot bucket16.4726ms lower, while total
+sample wall is167.0242ms higher. Six of nine Driver cell medians decrease,
+three increase and every old/new range overlaps. These uncontrolled cross-run
+observations establish no causal latency win, Go host/20-pair acceptance or
+game latency. They do verify the narrowly scoped removal of private payload
+Vec copies. Complete artifact verification and all durable boundaries remain.

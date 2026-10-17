@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 14:38 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`e3caf687c5474b2bd7bb6e74448b7b2cc278e9c0`（1360真实Live结果已保存）。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 15:06 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`592ea6741b45e5aebf1d223d7244ca2568a9ec8b`（Live短借用实现及真实复验已完成）。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -59,11 +59,13 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 同run Driver合7.1078032s、journal5.238447s；append4.955697s中sync2.688615s(54.25%)、snapshot/artifacts0.850453s(17.16%)、完整read+verify0.159487s(3.22%)，子段及两层余量逐row精确加回。每sample45append真实为6次输入×7持久状态加3个operation/report/result事件，没有可证安全合并sync的结论；61次artifact访问中2首发、59已有全读，大BODY重复读取3,020,628B而首发131,271B。相较0890 Driver7.5512702s/journal5.640s仅跨run改善观察，非因果或20对验收；fixture历史构造变化不冒算产品收益。缓存仍O(log bytes)完整读取比较，后续优先有证据的snapshot/artifact重复构造，不以删durability追速度。
 
-### Live短借用artifact候选（待Windows复验）
+### Live短借用artifact 592实测
 
 1360原27样本snapshot构造有1647个非空临时artifact Vec、30,736,260 payload复制字节。最窄后继改私有BorrowedSnapshot/Cow：合法code与所有raw result短借State；非法code保原逐坏字节替换并接管规范化buffer，raw binary result不规范化。public owned Snapshot继续兼容包装，digest首个owner/去重/BTreeMap顺序、metadata/INPUT投影、原owner与全部已有artifact完整read/compare/checked close/首发durability不变，不建立跨调用artifact缓存或删sync。
 
-新5项与现独立旧全JSON-copy oracle覆盖owned/borrowed完整状态与artifact等价、非法UTF8/原二进制report/空值/重复key与512KiB边界、调用后State可变、同长度外改/poison等；cfg(test)只统计成功最终append map的borrow/owned字节，非全allocator且不含setup/checkpoint/被丢弃重复规范化buffer。Node52+原桥24=76/76实际通过，两份真实0890/1360旧report仍可完整解析；独立静态审无确认缺陷，Rust编译/新5项/原27样本待执行。850.453ms是snapshot/artifact整个父桶，不能称本候选会省全部约31ms/case；完整墙钟验证后才判断收益。
+新5项与现独立旧全JSON-copy oracle覆盖owned/borrowed完整状态与artifact等价、非法UTF8/原二进制report/空值/重复key与512KiB边界、调用后State可变、同长度外改/poison等；cfg(test)只统计成功最终append map的borrow/owned字节，非全allocator且不含setup/checkpoint/被丢弃重复规范化buffer。Node52+原桥24=76/76实际通过，两份真实0890/1360旧report仍可完整解析；独立静态审无确认缺陷。[592正式前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6235302167)all-targets与Live完整613/0/1通过、新5逐名一次通过，Node76通过；[原27样本](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6235349943)和[终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6235359631)全部通过，27peer与5owner回收。build及普通lib两receipt保认证辅助进程forced/knownAuxiliaryCleanup，不能说无forced。8段700引用/167唯一blob共12,960,578B逐SHA核，45journal原字节与1360/0890相同，原输入/BODY/history、缓存计数及全部互斥计时逐row核对。
+
+1215成功append snapshot的1647个最终map条目、30,736,260B均短借用；本矩阵合法code故normalized-owned与post-normalization-copy为0。确实消除原私有map的payload Vec复制，不代表全链零复制、allocator总数或RSS下降。同run sample总31.0522414s（含fixture/peer等）、Driver7.0607810s、journal5.2046063s；append4.9289097s中sync2.6914004s(54.604%)，snapshot/artifacts0.8339802s。较1360跨run Driver少47.0222ms、snapshot父桶少16.4726ms，但sample总反增167.0242ms；9cell Driver中位数6降3升且范围全部重叠，不能宣称因果提速或Go/20对达标。父桶仍含完整认证/metadata/哈希/已有artifact全读/首发，不能把约31ms/case全称可省；此窄候选正确性与减少重复所有权工作闭合，不由剩余混合桶无依据继续删sync或新增缓存框架。
 
 ### Data 哈希生命周期筛选0890实测
 
