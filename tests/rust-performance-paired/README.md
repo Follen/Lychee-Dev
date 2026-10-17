@@ -255,3 +255,148 @@ previously sealed optimized artifact. Retain both identities; do not overwrite
 that checkout's tools or relabel the artifact as the new runner's product.
 Ordinary invocation without either flag still runs all original cases with
 20 cold and 20 warm pairs per case and the unchanged strict acceptance gate.
+
+## Fixed bbfe/ab4 three-pair Source diagnostics
+
+This separate Windows-only entry compares the two existing sealed Rust EXEs in
+exactly three adjacent cold pairs: **bbfe/ab4, ab4/bbfe, bbfe/ab4**. There is no
+pair-count option, rebuild, warm phase, Go/LuaLS preparation or acceptance gate.
+The existing 20-pair entry is unchanged. Node fixture tests do not establish a
+Windows Job or product performance result; the six real CLI calls remain
+**NOT_RUN** until the separately authorized Windows run produces its receipts.
+
+Use a separately exported reviewed runner, and supply two authenticated, clean
+source checkouts at these fixed commits. Each product and its Git identity
+checks use that candidate's own `sourceRoot` as cwd. The original artifact
+records and binaries stay at their existing paths under `artifactRoot`; both
+artifact roots may be the same historical root. In particular, the old artifact
+record's historical `sourceRoot` is provenance, not an instruction to rewrite
+that record or pretend the current checkout is its original source. A matching
+source checkout must independently satisfy HEAD, clean status, complete
+`sourceDigest`, upstream Emmy identity and the fixed 31-phase source SHA-256.
+Do not point either candidate at a newer or dirty tree.
+
+Configuration schema (replace only absolute path placeholders; hashes and
+commits are fixed and independently enforced by the runner):
+
+```json
+{
+  "schema": "lycheedev.source-candidate-diagnostics-config.v1",
+  "ownerRoot": "C:/actual/original-rust-root",
+  "baseline": {
+    "sourceRoot": "C:/actual/clean-bbfe-source",
+    "artifactRoot": "C:/actual/original-rust-root",
+    "artifact": "C:/actual/original-rust-root/.tmp/pr14-bbfe882-release-artifact/artifact.json",
+    "commit": "bbfe88265ee431b9ad925ab86dc52561742dd5ee",
+    "artifactSHA256": "43429c85cac9e0a3bb130c5de4d939e19a8219dca81001d426ae9a1c9ebd0d4e",
+    "binarySHA256": "f25d5fbe4e43eb0ae2f28e310f28e4de51ab6be701d2919f94729132c76a39e6",
+    "sourceTreeSHA256": "76bea4b27798356c9f5194f56c97c3a1292b214166b84c875dfc0bb75dfc7b34"
+  },
+  "candidate": {
+    "sourceRoot": "C:/actual/clean-ab4-source",
+    "artifactRoot": "C:/actual/original-rust-root",
+    "artifact": "C:/actual/original-rust-root/.tmp/pr14-ab4fc03-release-artifact/artifact.json",
+    "commit": "ab4fc03605a08b544476742d07a3af08e4cc7ce9",
+    "artifactSHA256": "280c42204696a00d2a8e134347c726282c818e6353083c22a7d6737cf17a8450",
+    "binarySHA256": "3b124671486c476e55fabf8358d737ebe541005111585837f6ce03a609f95e47",
+    "sourceTreeSHA256": "9b45e843f8f4759e729a5574a6af4d5bca6a37bbfefaea9b7f6c03c6e65d71cc"
+  }
+}
+```
+
+The two original artifact records are each 1511 bytes. Preserve their original
+bytes, source/binary paths and any matching PDB; do not fabricate replacement
+records or copy a binary into an invented artifact owner. Missing or mismatched
+inputs stop the run. The existing machine-conditions JSON requires nonempty
+`machine`, `powerAndThermal`, `competingLoad`, `disk` and `operator` disclosures,
+including explicit unknowns. Invoke the exported entry with just two arguments:
+
+```powershell
+node "$runner/tools/rust-source-candidate-diagnostics.mjs" "$candidateConfig" "$machineConditions"
+```
+
+Export these **18 files**, retaining the selected reviewed runner commit,
+archive SHA-256 and per-file hashes. Use the same `git archive` / extraction
+procedure above with this list, without overwriting either product checkout:
+
+```text
+tools/rust-source-candidate-diagnostics.mjs
+tests/rust-performance-paired/source-candidates.mjs
+tests/rust-performance-paired/read-fact-delta.mjs
+tests/rust-performance-paired/inputs.mjs
+tests/rust-performance-paired/contract.mjs
+tests/rust-source-full-corpus/assertions.mjs
+tests/rust-source-full-corpus/retail-oracle.json
+tests/rust-parity/describe-contract.mjs
+tests/rust-parity/oracle.mjs
+tools/rust-build.mjs
+tools/rust-disk.mjs
+tools/rust-emmy-identity.mjs
+tools/rust-owned-process.mjs
+tools/rust-owned-process.ps1
+tools/rust-owned-memory.mjs
+tools/rust-build-auxiliary.json
+tools/zip.mjs
+release/rust-disk-policy.json
+```
+
+Both source checkouts must already have their authenticated public-upstream
+Emmy materialization. The runner does not prepare or rebuild it. Configuration,
+runner bytes and both artifacts are independently recorded and rechecked.
+Each candidate performs its own real init/sync at the fixed Retail commit
+`31c7f7b9cc79e56c986b365c06a6afbcf3c9177b`; original Git blobs, all 4049 files and
+4036 documents, manifests and seed metadata are authenticated before measurement.
+Six distinct homes are cloned from the candidates' independently authenticated
+sync-only seeds. This is application-cache cold, with no OS-cache-flush claim.
+Both homes exist before the adjacent calls. Only saving their evidence occurs
+between them; corpus, Facts and source identity scans occur outside that pair.
+
+Each original `source index` keeps the 180000 ms product budget, 210000 ms owned
+invocation limit and 30000 ms orphan bound. No stack override is allowed.
+The outer owner has a fixed **3600000 ms / 60-minute total bound**: two init
+limits, two sync limits and six index limits account for 2160 seconds; two
+power-policy observations can consume another 420 seconds, leaving 1020 seconds
+for Git authentication, identities, complete Facts comparison and cleanup.
+This is a total cap, not a guarantee that every individual worst-case timeout
+fits. Exceeding it fails and retains evidence; it never extends the bound or
+replaces a sample. Native CreateProcess-through-reap/output-drain timing stays
+whole. Memory observations remain sampled lower bounds.
+
+After both calls, the same run must prove all of the following before pair
+cleanup:
+
+- Successful original owner/native timing proof, no forced termination,
+  deadline, output-limit, proof error or uncertain handle retirement.
+- Complete public Rust result equality, removing only `io.elapsedMs`; unchanged
+  180000 ms deadline, 4036 parsed documents, zero cached Facts, and `cachedIndex`
+  either absent or false. No new/shared result fields are projected away.
+- Exactly the fixed 31 Source phases and fixed timing descriptions, strict UTF-8
+  compact JSON, no duplicate keys/BOM/extra stderr/lossy numbers. Read, parse,
+  serialize and publish calls each equal 4036; worker wait equals consumed;
+  sequential + consumed - abandoned equals 4036. Worker counts are not pinned
+  to one CPU count. Phase durations overlap and must not be summed/subtracted.
+- Every manifest document's own current v10 cache envelope, input hash and Facts
+  hash. All fields in declarations, relationships, loads, headers and diagnostics
+  match, including absent/extra fields, row order and duplicate multiplicity.
+  Files are bounded to 32 MiB and must be regular non-symlink files. Comparison
+  reads one document pair at a time, retaining hashes/totals rather than all
+  4036 Facts bodies. Declaration/relation/diagnostic totals bind back to the
+  public summaries. Historical bodies are never substituted for this run.
+- Late artifact, source and runner identity checks before cleanup.
+
+Failures retain raw outputs, profiles, owner proof and pair homes, stop further
+pairs and never replace the failed sample. Uncertain retirement blocks the
+paired launch as well. Successful pairs seal their full comparison manifest
+before deleting owned scratch. The outer report is successful only after all
+three pairs and final integrity/power checks pass. Its state is
+`source_candidates_observed` or `source_candidates_failed`, always with
+`performanceAcceptanceEvaluated=false` and `fullB01B07Acceptance=false`.
+Three diagnostic ratios do not establish the formal 20-pair verdict.
+
+Cloud-safe syntax/fixture verification:
+
+```sh
+node --check tools/rust-source-candidate-diagnostics.mjs
+node --check tests/rust-performance-paired/source-candidates.mjs
+node --test tests/rust-performance-paired/source-candidates.test.mjs tests/rust-performance-paired/read-fact-delta.test.mjs
+```

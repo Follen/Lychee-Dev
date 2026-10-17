@@ -47,6 +47,36 @@ function compareRows(go, rust) {
   };
 }
 
+// Shared authenticated Rust reader for same-run candidate diagnostics. This is
+// read-only and keeps the historical Go/Rust reader's default layout unchanged.
+export function rustFactPath(home, document, rustLayout = 'v6') {
+  const layout = RUST_LAYOUTS[rustLayout];
+  if (!layout) throw new Error(`Unsupported Rust facts layout: ${rustLayout}`);
+  if (typeof document.path !== 'string' || !document.path || !/^[a-f0-9]{64}$/.test(document.sha256)) {
+    throw new Error('Invalid Rust fact document identity');
+  }
+  const key = sha256(`${layout.key}\0tree-sitter-0.26.3\0`
+    + `lua-0.5.0\0xml-0.38\0${layout.generator}\0${document.path}\0${document.sha256}`);
+  return path.join(home, 'cache/source-facts-rust', `${key}.json`);
+}
+export function readRustFact(home, document, rustLayout = 'v6') {
+  const file = rustFactPath(home, document, rustLayout);
+  const stat = fs.lstatSync(file);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 32 << 20) throw new Error('Invalid Rust fact file');
+  const raw = fs.readFileSync(file);
+  const envelope = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(raw));
+  if (envelope.schema !== RUST_LAYOUTS[rustLayout].schema || envelope.inputSHA256 !== document.sha256) {
+    throw new Error(`Fact input identity mismatch: ${document.path}`);
+  }
+  if (sha256(signature(envelope.facts)) !== envelope.factsSHA256) {
+    throw new Error(`Rust facts digest mismatch: ${document.path}`);
+  }
+  for (const section of SECTIONS) if (!Array.isArray(envelope.facts[section])) {
+    throw new Error(`Invalid fact array ${section}: ${document.path}`);
+  }
+  return {file, fileSHA256: sha256(raw), factsSHA256: envelope.factsSHA256, facts: envelope.facts};
+}
+
 export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v6') {
   const layout = RUST_LAYOUTS[rustLayout];
   if (!layout) throw new Error(`Unsupported Rust facts layout: ${rustLayout}`);
@@ -85,18 +115,12 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
     const mode = extension + (generated ? ':generated-api' : '');
     const parser = manifest.summary.parser;
     const goKey = sha256(`${parser}\0${mode}\0${document.sha256}`);
-    const rustKey = sha256(`${layout.key}\0tree-sitter-0.26.3\0`
-      + `lua-0.5.0\0xml-0.38\0${layout.generator}\0${document.path}\0${document.sha256}`);
     const goFile = path.join(goHome, 'source/v1/facts/files', parser, `${goKey}.json`);
-    const rustFile = path.join(rustHome, 'cache/source-facts-rust', `${rustKey}.json`);
+    const rust = readRustFact(rustHome, document, rustLayout), rustFile = rust.file;
     const goRaw = fs.readFileSync(goFile);
-    const rustRaw = fs.readFileSync(rustFile);
     const go = JSON.parse(goRaw);
-    const rust = JSON.parse(rustRaw);
     if (go.schema !== 'lycheedev.source-file-facts.v2'
-      || go.inputSHA256 !== document.sha256 || go.mode !== mode || go.parser !== parser
-      || rust.schema !== layout.schema
-      || rust.inputSHA256 !== document.sha256) {
+      || go.inputSHA256 !== document.sha256 || go.mode !== mode || go.parser !== parser) {
       throw new Error(`Fact input identity mismatch: ${document.path}`);
     }
     // Fixed Go factEnvelope puts facts last. Preserve its exact bytes, including
@@ -106,10 +130,6 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
     const offset = goText.indexOf(marker);
     if (offset < 0 || sha256(goText.slice(offset + marker.length, -1)) !== go.factsSHA256) {
       throw new Error(`Go facts digest mismatch: ${document.path}`);
-    }
-    // Fixed Rust hashes serde_json::Value, whose object keys are sorted.
-    if (sha256(signature(rust.facts)) !== rust.factsSHA256) {
-      throw new Error(`Rust facts digest mismatch: ${document.path}`);
     }
     const difference = {
       path: document.path, sha256: document.sha256,
@@ -149,7 +169,7 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
             sameMultisetButDifferentOrder: compared.sameMultisetButDifferentOrder,
             goFirstRows: a.slice(0, 10), rustFirstRows: b.slice(0, 10),
             goFactFile: goFile, rustFactFile: rustFile,
-            goFactFileSHA256: sha256(goRaw), rustFactFileSHA256: sha256(rustRaw),
+            goFactFileSHA256: sha256(goRaw), rustFactFileSHA256: rust.fileSHA256,
           });
         }
       }

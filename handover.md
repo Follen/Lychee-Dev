@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 08:26 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`ab4fc03605a08b544476742d07a3af08e4cc7ce9`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 08:46 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`5766dccc1fec7d20f5d8120bca7dcd79eed726c4`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -66,6 +66,10 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 同run非重叠主线程账（毫秒）：metadata0.349、index锁0.673、git tree109.393、facts读346.910、串行parse2095.311、facts序列化514.373、facts发布4038.019、original24.041、symbols146.331、worker等待1003.759、Git/流水线未细分377.847、index序列化645.354、index发布102.806、manifest7.893、profile内其它252.989、profile外252.699，合9918.747。未细分余量不是CPU或物理磁盘标签；worker累计parse和发布子桶均不再相加。Facts发布的7个锁字段全部0，stage1782.109ms、rename1714.018ms仍为嵌套子段。
 
 同批Data正式诊断48测量CLI加15准备、24个cold/warm行完整结果/校验等价，全部测量exit0并回收，12pair全部retired；24份Rust11字段profile和48份startup有效。仅单pair观察，不能替代旧22组20对性能失败。内存46次successful、2次Go cold样本有gap，不补样。Capture仍每次durable事务，连接owner复用收益尚须按同run完整分账核实；不得用仅6–17ms的capture范围推断已达标。原4a1两失败、旧runtime身份失败、历史严格差分及EPERM均保留。
+
+### 下一步：现有双Rust产物相邻诊断
+
+已新增[专用入口与操作说明](tests/rust-performance-paired/README.md)：固定bbfe/ab4两份原sealed优化产物、各自完整匹配源码见证，原artifact路径/记录不改；独立导出18个runner依赖。固定3对AB/BA/AB，每次独立application-cold home，原180秒产品/210秒调用/默认栈不变；两调用紧邻，完成后验证4036完整Facts所有字段/顺序及完整31phase，再封存/清理。失败不替样、未知回收停后继。外层固定60分钟，计入准备/身份/对照/收尾。Node定向47/47（0skip）已由作者及协调者各实际运行；Windows三对仍NOT_RUN，不等于20对验收，也不重建产品。另扩大既有runner测试时两项因云端固定Go对象缺文件失败，未更改原测试/未冒全套通过。generated完整guard/字段算法及Data私有流式解压在独立云端实现中，不混入这个runner-only批。
 
 ### 实际155条semantic gaps的范围
 

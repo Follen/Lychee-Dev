@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readFactDelta, sha256 } from './read-fact-delta.mjs';
+import { readFactDelta, readRustFact, rustFactPath, sha256 } from './read-fact-delta.mjs';
 
 const readerPath = fileURLToPath(new URL('./read-fact-delta.mjs', import.meta.url));
 const parser = 'fixture-parser';
@@ -274,4 +274,47 @@ test('never discovers or relabels a historical v9 cache as v10', async t => {
     assert.deepEqual(fs.readFileSync(f.files[0].rustFile), historical);
     assert.equal((await f.read()).differentFiles.length, 0);
   }, 'v9');
+});
+
+
+test('shared Rust reader authenticates all four v10 modes without changing source or fact bytes', async t => {
+  await withFixture(t, async f => {
+    for (const [i, document] of f.documents.entries()) {
+      const before = fs.readFileSync(f.files[i].rustFile), result = readRustFact(f.rustHome, document, 'v10');
+      assert.equal(rustFactPath(f.rustHome, document, 'v10'), f.files[i].rustFile);
+      assert.equal(result.fileSHA256, sha256(before)); assert.deepEqual(result.facts, JSON.parse(before).facts);
+      assert.deepEqual(fs.readFileSync(f.files[i].rustFile), before);
+    }
+    assert.throws(() => rustFactPath(f.rustHome, f.documents[0], 'latest'), /Unsupported/);
+    assert.throws(() => rustFactPath(f.rustHome, {...f.documents[0], sha256: 'bad'}, 'v10'), /identity/);
+  }, 'v10');
+});
+
+test('shared Rust reader rejects wrong schema/input identity and unauthenticated Facts changes', async t => {
+  await withFixture(t, async f => {
+    const file = f.files[0].rustFile, original = JSON.parse(fs.readFileSync(file));
+    for (const mutate of [v => v.schema = 'lycheedev.source-facts.rust.v9', v => v.inputSHA256 = '0'.repeat(64), v => v.facts.declarations[0].line++]) {
+      const value = structuredClone(original); mutate(value); fs.writeFileSync(file, JSON.stringify(value));
+      assert.throws(() => readRustFact(f.rustHome, f.documents[0], 'v10'), /identity mismatch|digest mismatch/);
+    }
+  }, 'v10');
+});
+
+test('shared Rust reader rejects invalid UTF8, nonarrays, missing and oversized cache files', async t => {
+  await withFixture(t, async f => {
+    const file = f.files[0].rustFile, original = fs.readFileSync(file);
+    fs.writeFileSync(file, Buffer.from([0xff])); assert.throws(() => readRustFact(f.rustHome, f.documents[0], 'v10'));
+    fs.writeFileSync(file, original); f.changeRust(0, facts => { facts.loads = null; }); assert.throws(() => readRustFact(f.rustHome, f.documents[0], 'v10'), /Invalid fact array loads/);
+    fs.truncateSync(file, (32 << 20) + 1); assert.throws(() => readRustFact(f.rustHome, f.documents[0], 'v10'), /Invalid Rust fact file/);
+    fs.unlinkSync(file); assert.throws(() => readRustFact(f.rustHome, f.documents[0], 'v10'), /ENOENT/);
+  }, 'v10');
+});
+
+test('shared Rust reader rejects nonregular files and symbolic cache leaves', async t => {
+  await withFixture(t, async f => {
+    const file = f.files[0].rustFile, saved = file + '.original'; fs.renameSync(file, saved);
+    fs.mkdirSync(file); assert.throws(() => readRustFact(f.rustHome, f.documents[0], 'v10'), /Invalid Rust fact file/); fs.rmdirSync(file);
+    try { fs.symlinkSync(saved, file); } catch (error) { if (error.code === 'EPERM') { t.diagnostic('Windows symlink privilege unavailable; nonregular branch verified'); return; } throw error; }
+    assert.throws(() => readRustFact(f.rustHome, f.documents[0], 'v10'), /Invalid Rust fact file/);
+  }, 'v10');
 });
