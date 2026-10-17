@@ -141,7 +141,13 @@ impl Builder {
         Ok(())
     }
     fn load_file(&mut self,file:&str,occurrence:usize)->Result<()>{
-        let block=self.harvest.blocks[file].clone();let ctx=Context{file:file.into(),occurrence,name:format!("load:{occurrence}:{file}"),deferred:false,parameters:BTreeMap::new(),conditional_branch:None};
-        self.block(block,&ctx)
+        let body=self.harvest.blocks[file].clone();let ctx=Context{file:file.into(),occurrence,name:format!("load:{occurrence}:{file}"),deferred:false,parameters:BTreeMap::new(),conditional_branch:None};
+        match body {
+            ScriptBody::Block(block)=>self.block(block,&ctx),
+            ScriptBody::Empty(range) if self.native_profile=>{
+                let paths=self.native_block_body(None,range,&ctx,0)?;self.native_load_terminals(paths)
+            },
+            ScriptBody::Empty(_)=>Ok(()),
+        }
     }
 }

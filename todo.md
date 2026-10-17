@@ -51,7 +51,7 @@ Complete end-to-end production behavior first, then add the corresponding tests 
 - [ ] Validate that the implemented owned-crate replacements preserve the complete XML/Lua behavior through the fixed unmodified public API. No minimal-hook final exemption remains; a zero-patch recipe alone does not complete acceptance.
 - [ ] Prove each replacement with full output/diagnostic/coverage/cancellation/resource differentials, then exact-lock native and full Retail cold/warm/session acceptance. Keep prior failures and transitional patches honestly identified until removed.
 
-- [ ] Verify the real empty-Lua execution contract against fixed Go323 and the native graph: de903 admitted zero-byte documents correctly, but selecting one as an execution body returns `source.native_unavailable/block` because the pinned parser omits an empty Block. The current test repair only separates admitted empty-file identity coverage from three concrete executed bodies; it does not fix or claim coverage of empty-script execution. Preserve this candidate production gap until checked.
+- [ ] Validate the implemented empty-Lua execution correction against fixed Go323: explicit authenticated Empty bodies preserve load occurrence, native activation, original charges and Continue; whitespace/comments/semicolons keep their real Blocks, malformed/missing inputs keep first errors. Eight new native regressions cover real TOC/XML, BOM/repetition/entry, Unknown, quota/cancellation and full nonempty old-boundary facts/charge comparison; Rust NOT_RUN. Preserve de903 fixture failure and the independent 02b fixture repair; neither proves production empty execution passed.
 
 ## Current finite closure queue (2026-10-16 19:28 UTC)
 

@@ -116,7 +116,20 @@ fn serialize_graph_snapshot<S:serde::Serializer>(snapshot:&Arc<GraphSnapshotEvid
     snapshot.as_ref().serialize(serializer)
 }
 
-struct Harvest { declaration_sites:BTreeMap<String,SyntaxSite>, blocks: BTreeMap<String,LuaBlock>, local_reads: BTreeMap<SyntaxSite,SyntaxSite>, signatures: BTreeMap<String,Signature>, intrinsic_declarations:BTreeMap<String,String>, raw: Vec<RawEmmyEvidence> }
+#[derive(Clone)]
+enum ScriptBody { Block(LuaBlock), Empty(TextRange) }
+impl ScriptBody {
+    fn from_chunk(chunk:&LuaChunk,analysis_text:&str)->Result<Self> {
+        match chunk.get_block() {
+            Some(block)=>Ok(Self::Block(block)),
+            // The pinned parser deliberately removes the Block of a zero-byte
+            // chunk. Do not turn a missing block for any other input into a no-op.
+            None if analysis_text.is_empty() && chunk.get_range().is_empty()=>Ok(Self::Empty(chunk.get_range())),
+            None=>Err("block".into()),
+        }
+    }
+}
+struct Harvest { declaration_sites:BTreeMap<String,SyntaxSite>, blocks: BTreeMap<String,ScriptBody>, local_reads: BTreeMap<SyntaxSite,SyntaxSite>, signatures: BTreeMap<String,Signature>, intrinsic_declarations:BTreeMap<String,String>, raw: Vec<RawEmmyEvidence> }
 fn harvest(analysis: &EmmyLuaAnalysis, names: &[&str],inputs:&SourceInputs,control:&OperationControl) -> Result<Harvest> {
     let mut result=Harvest { declaration_sites:BTreeMap::new(), blocks:BTreeMap::new(), local_reads:BTreeMap::new(), signatures:BTreeMap::new(), intrinsic_declarations:BTreeMap::new(), raw:vec![] };
     let mut node_count=0;
@@ -129,11 +142,12 @@ fn harvest(analysis: &EmmyLuaAnalysis, names: &[&str],inputs:&SourceInputs,contr
         if !model.parse_errors().unwrap_or_default().is_empty() { return Err(format!("fixture parse error: {name}")); }
         let root=tree.get_red_root();
         let chunk=LuaChunk::cast(root.clone()).ok_or("chunk")?;
-        result.blocks.insert((*name).into(),chunk.get_block().ok_or("block")?);
-        for stat in chunk.get_block().ok_or("host declaration block")?.get_stats(){if let LuaStat::FuncStat(stat)=stat{
+        let body=ScriptBody::from_chunk(&chunk,inputs.analysis_text(name).map_err(|error|error.to_string())?)?;
+        result.blocks.insert((*name).into(),body.clone());
+        if let ScriptBody::Block(block)=body {for stat in block.get_stats(){if let LuaStat::FuncStat(stat)=stat{
             let expr=stat.get_func_name().ok_or("host declaration")?.to_expr();let site=inputs.site(name,expr.get_range());
             if let Some(policy)=inputs.host.data.intrinsics.iter().find(|policy|policy.file==*name&&policy.start==site.start&&policy.end==site.end){result.intrinsic_declarations.insert(site.id(),policy.name.clone());}
-        }}
+        }}}
         let facts=model.file_facts().ok_or("file facts")?;
         for decl in &facts.decls {if decl.kind.is_local(){let site=inputs.site(name,decl.name_range);result.declaration_sites.insert(site.id(),SyntaxSite::from_site(inputs,&site).expect("admitted declaration file"));}}
         let evidence_file:Arc<str>=Arc::from(*name);
@@ -764,8 +778,7 @@ impl Builder {
     }
     fn block(&mut self,block:LuaBlock,ctx:&Context)->Result<()> {
         if self.native_profile { let paths=self.native_block(block,ctx,0)?;
-            if self.native.facts.control.terminals.len()+paths.len()>CONTROL_TERMINAL_LIMIT{return Err("native terminal path budget exceeded".into())}
-            let terminals=paths.iter().map(|path|self.native_terminal(path)).collect::<Vec<_>>();self.native.facts.control.terminals.extend(terminals);return Ok(()); }
+            return self.native_load_terminals(paths); }
         for stat in block.get_stats() {
             self.budget()?;
             match stat {
@@ -820,6 +833,10 @@ impl Builder {
         }Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "empty_script_tests.rs"]
+mod empty_script_tests;
 
 // All public semantic views below consume only the frozen graph. No Emmy model,
 // AST, name lookup, or fallback resolver is reachable from this facade.

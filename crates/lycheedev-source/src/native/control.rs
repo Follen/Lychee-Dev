@@ -132,11 +132,11 @@ impl Builder {
         if let Some(id)=state.occurrence{self.native.facts.control.edges.push(NativeControlEdge{from:Some(id),to:id,kind:"condition".into(),condition:Some(predicate)});}
         Ok(child)
     }
-    fn native_activate(&mut self,scope:&Site,block:&LuaBlock,ctx:&Context,extra:Option<&Site>)->Result<Context> {
+    fn native_activate(&mut self,scope:&Site,block:Option<&LuaBlock>,ctx:&Context,extra:Option<&Site>)->Result<Context> {
         self.budget()?;if self.native.facts.control.activations.len()>=CONTROL_NODE_LIMIT{return Err("native scope activation budget exceeded".into())}
         let id=self.native.facts.control.activations.len();let child=self.native_child_context(ctx,format!("{}:activation:{id}",ctx.name),ctx.conditional_branch);
         let mut declarations=Vec::new();if let Some(site)=extra{declarations.push(site.clone())}
-        for stat in block.get_stats(){self.budget()?;match stat{
+        for stat in block.into_iter().flat_map(LuaBlock::get_stats){self.budget()?;match stat{
             LuaStat::LocalStat(stat)=>for local in stat.get_local_name_list(){if let Some(name)=local.get_name_token(){declarations.push(self.inputs.site(&ctx.file,name.get_range()));}},
             LuaStat::LocalFuncStat(stat)=>if let Some(name)=stat.get_local_name().and_then(|name|name.get_name_token()){declarations.push(self.inputs.site(&ctx.file,name.get_range()));},_=>{},
         }}
@@ -176,10 +176,17 @@ impl Builder {
         stopped.push(first);Ok(stopped)
     }
     fn native_block(&mut self,block:LuaBlock,ctx:&Context,depth:usize)->Result<Vec<NativePath>> {
+        let range=block.get_range();self.native_block_body(Some(block),range,ctx,depth)
+    }
+    fn native_block_body(&mut self,block:Option<LuaBlock>,range:TextRange,ctx:&Context,depth:usize)->Result<Vec<NativePath>> {
         self.native_register_view(ctx);self.budget()?;if depth>64{return Err("native block depth budget exceeded".into())}
-        let scope=self.inputs.site(&ctx.file,block.get_range());
-        let scope_ctx=self.native_activate(&scope,&block,ctx,None)?;
-        self.native_stats(block.get_stats().collect(),&scope_ctx,depth)
+        let scope=self.inputs.site(&ctx.file,range);
+        let scope_ctx=self.native_activate(&scope,block.as_ref(),ctx,None)?;
+        self.native_stats(block.iter().flat_map(LuaBlock::get_stats).collect(),&scope_ctx,depth)
+    }
+    fn native_load_terminals(&mut self,paths:Vec<NativePath>)->Result<()> {
+        if self.native.facts.control.terminals.len()+paths.len()>CONTROL_TERMINAL_LIMIT{return Err("native terminal path budget exceeded".into())}
+        let terminals=paths.iter().map(|path|self.native_terminal(path)).collect::<Vec<_>>();self.native.facts.control.terminals.extend(terminals);Ok(())
     }
     fn native_stats(&mut self,stats:Vec<LuaStat>,ctx:&Context,depth:usize)->Result<Vec<NativePath>> {
         let mut paths=vec![NativePath::continuing(ctx)];
@@ -243,7 +250,7 @@ impl Builder {
     }
     fn native_loop_context(&mut self,site:&Site,block:&LuaBlock,ctx:&Context,iteration:usize,variable:Option<&Site>)->Result<Context> {
         self.budget()?;self.native.loop_iterations+=1;
-        let child=self.native_activate(site,block,ctx,variable)?;
+        let child=self.native_activate(site,Some(block),ctx,variable)?;
         let activation=self.native.facts.control.activations.last().ok_or("loop activation")?.id;
         let state=self.native.contexts.entry(child.name.clone()).or_default();state.loops.retain(|item|item.site!=*site);state.loops.push(NativeLoopIteration{site:site.clone(),iteration,activation});
         self.native_occurrence(site,&child,"loop_iteration")
