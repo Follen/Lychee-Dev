@@ -462,11 +462,25 @@ fn sample(inputs: &Inputs, payload_bytes: usize, history: usize, repeat: usize) 
         assert!(append.wall_nanos <= measured_append.wall_nanos);
         assert!(append.maximum_cache_capacity_bytes <= 8 << 20);
         assert!(append.maximum_eligible_paired_raw_capacity_bytes <= 16 << 20);
+        let ownership = &append.snapshot_ownership;
+        assert_eq!(ownership.snapshot_calls, append.calls);
+        assert_eq!(ownership.snapshot_calls, 45);
+        assert_eq!(ownership.artifact_entries, 61);
+        assert_eq!(ownership.borrowed_entries, 61);
+        assert_eq!(
+            ownership.borrowed_bytes,
+            38 * code.len() as u64 + 23 * body["bodyPayloadBytes"].as_u64().unwrap()
+        );
+        assert_eq!(ownership.normalized_owned_entries, 0);
+        assert_eq!(ownership.normalized_owned_bytes, 0);
+        assert_eq!(ownership.normalized_owned_capacity_bytes, 0);
+        assert_eq!(ownership.post_normalization_copy_bytes, 0);
         let append_diagnostic = json!({
             "schema":"lycheedev.live-journal-append-profile.v1", "includedIn":"calls.journal.append.wallNanos",
             "measurement":append, "unattributedWallNanos":append.wall_nanos-append_phase_wall,
             "wrapperRemainderNanos":measured_append.wall_nanos-append.wall_nanos,
             "memoryScope":"eligible post-allocation raw cache/read capacity observations; excludes allocator excess/transient growth, event/State allocations and allocator/RSS totals",
+            "snapshotOwnershipScope":"Driver append final deduplicated artifact map only; capacity sums are observations; excludes normalization writes, discarded duplicate buffers, metadata and IO allocations; not allocator/RSS totals",
             "cacheCapacityLimitBytes":8 << 20, "eligiblePairedRawCapacityLimitBytes":16 << 20
         });
         let meters = json!({"journal":d.journal.meter,"backend":d.backend.meter});

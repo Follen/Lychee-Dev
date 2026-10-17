@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 14:27 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`1360e563d99883a0b7e48ace72a2c9be18c3744c`（Live认证链复用已保存）。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 14:38 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`e3caf687c5474b2bd7bb6e74448b7b2cc278e9c0`（1360真实Live结果已保存）。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -58,6 +58,12 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 新10个cfg(test) append互斥段在Driver接手后才启用，保原总wall及内部/外部余量，actual hits/replay/read/equality input/capacity另记；旧原27report已由新reader真实接受，新profile只允许全27或全无。Node42+原桥24共66/66由作者与整合者实际通过，Rustfmt解析/diff及独立静态审无剩余确认缺陷。[1360本机前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234930599)all-targets通过、Live完整608/0/1（诊断ignored单列），新7逐名一次过，原journal35声明入口通过、helper不重复。[正式离线27/27](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234976464)与[终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234995631)27peer/5owner均回收，10append子段完整。8段698引用/165唯一blob共12,843,610B逐SHA核；原sample/peer、45journal共5868event链、27输入/BODY/history及全部45journal原bytes均与0890一致。
 
 同run Driver合7.1078032s、journal5.238447s；append4.955697s中sync2.688615s(54.25%)、snapshot/artifacts0.850453s(17.16%)、完整read+verify0.159487s(3.22%)，子段及两层余量逐row精确加回。每sample45append真实为6次输入×7持久状态加3个operation/report/result事件，没有可证安全合并sync的结论；61次artifact访问中2首发、59已有全读，大BODY重复读取3,020,628B而首发131,271B。相较0890 Driver7.5512702s/journal5.640s仅跨run改善观察，非因果或20对验收；fixture历史构造变化不冒算产品收益。缓存仍O(log bytes)完整读取比较，后续优先有证据的snapshot/artifact重复构造，不以删durability追速度。
+
+### Live短借用artifact候选（待Windows复验）
+
+1360原27样本snapshot构造有1647个非空临时artifact Vec、30,736,260 payload复制字节。最窄后继改私有BorrowedSnapshot/Cow：合法code与所有raw result短借State；非法code保原逐坏字节替换并接管规范化buffer，raw binary result不规范化。public owned Snapshot继续兼容包装，digest首个owner/去重/BTreeMap顺序、metadata/INPUT投影、原owner与全部已有artifact完整read/compare/checked close/首发durability不变，不建立跨调用artifact缓存或删sync。
+
+新5项与现独立旧全JSON-copy oracle覆盖owned/borrowed完整状态与artifact等价、非法UTF8/原二进制report/空值/重复key与512KiB边界、调用后State可变、同长度外改/poison等；cfg(test)只统计成功最终append map的borrow/owned字节，非全allocator且不含setup/checkpoint/被丢弃重复规范化buffer。Node52+原桥24=76/76实际通过，两份真实0890/1360旧report仍可完整解析；独立静态审无确认缺陷，Rust编译/新5项/原27样本待执行。850.453ms是snapshot/artifact整个父桶，不能称本候选会省全部约31ms/case；完整墙钟验证后才判断收益。
 
 ### Data 哈希生命周期筛选0890实测
 

@@ -7,7 +7,7 @@ use super::{ContractError, MAX_PAYLOAD, Result};
 use lycheedev_core::control::OperationControl;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::{borrow::Cow, collections::BTreeMap};
 
 pub const MAX_LOG_BYTES: usize = 64 << 20;
 pub const MAX_EVENT_BYTES: usize = 2 << 20;
@@ -80,6 +80,14 @@ pub struct Snapshot {
     /// SHA256 => bytes AFTER Go JSON cloning; commit durably before appending state.
     pub artifacts: BTreeMap<String, Vec<u8>>,
 }
+/// A call-local artifact view. Only lossy code normalization owns a buffer;
+/// ordinary code/results borrow the immutable State until persistence finishes.
+/// No reference is retained by the journal or installed into its chain cache.
+#[derive(Debug)]
+pub(super) struct BorrowedSnapshot<'a> {
+    pub state: State,
+    pub artifacts: BTreeMap<String, Cow<'a, [u8]>>,
+}
 fn hash(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
@@ -89,36 +97,48 @@ fn artifact_digest(s: &str) -> bool {
             .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
 }
 pub fn snapshot(state: &State) -> Result<Snapshot> {
+    let snapshot = snapshot_borrowed(state)?;
+    Ok(Snapshot {
+        state: snapshot.state,
+        artifacts: snapshot
+            .artifacts
+            .into_iter()
+            .map(|(digest, bytes)| (digest, bytes.into_owned()))
+            .collect(),
+    })
+}
+pub(super) fn snapshot_borrowed<'a>(state: &'a State) -> Result<BorrowedSnapshot<'a>> {
     let mut copy = state.snapshot_metadata()?;
     let mut artifacts = BTreeMap::new();
-    let mut put = |key: &str, bytes: &[u8]| {
+    let mut put = |key: &str, bytes: Cow<'a, [u8]>| {
         if bytes.is_empty() {
             return;
         }
-        let digest = hash(bytes);
+        let digest = hash(&bytes);
         copy.artifacts.insert(key.into(), digest.clone());
-        // Only the first owner of identical artifact bytes needs an allocation.
-        artifacts.entry(digest).or_insert_with(|| bytes.to_vec());
+        // Preserve the first digest owner and sorted publication order. An
+        // already-normalized owned buffer moves here without another copy.
+        artifacts.entry(digest).or_insert(bytes);
     };
     if let Some(o) = &state.operation {
-        put("code", &json_code_bytes(o.code.as_bytes()));
-        put("result", &o.result_bytes.0);
+        put("code", json_code_bytes(o.code.as_bytes()));
+        put("result", Cow::Borrowed(&o.result_bytes.0));
     }
     if let Some(t) = &state.transaction {
-        put("transaction", &json_code_bytes(t.envelope.code.as_bytes()));
+        put("transaction", json_code_bytes(t.envelope.code.as_bytes()));
     }
     if let Some(t) = state.recovery.as_ref().and_then(|r| r.transaction.as_ref()) {
-        put("recovery", &json_code_bytes(t.envelope.code.as_bytes()));
+        put("recovery", json_code_bytes(t.envelope.code.as_bytes()));
     }
-    Ok(Snapshot {
+    Ok(BorrowedSnapshot {
         state: copy,
         artifacts,
     })
 }
 
 /// CodeBytes' JSON-copy relation: ONE replacement character for EACH invalid
-/// byte, including a truncated multibyte prefix. Valid code is borrowed until
-/// the artifact map acquires its one owned copy; no intermediate JSON/base64.
+/// byte, including a truncated multibyte prefix. Valid code stays borrowed;
+/// the public owned snapshot wrapper acquires a copy only when requested.
 fn json_code_bytes(bytes: &[u8]) -> std::borrow::Cow<'_, [u8]> {
     if std::str::from_utf8(bytes).is_ok() {
         return std::borrow::Cow::Borrowed(bytes);

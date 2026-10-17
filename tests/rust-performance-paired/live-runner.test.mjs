@@ -51,6 +51,33 @@ test('accepts optional complete nested append profile without rewriting historic
   assert.equal(verifyPerformanceReport(profiledFixture()).samples,27);
   assert.equal(verifyPerformanceReport(fixture()).samples,27);
 });
+function ownershipFixture() {
+  const report=profiledFixture();
+  for(const row of report.samples) {
+    row.nestedJournalAppend.measurement.snapshotOwnership={snapshotCalls:30,artifactEntries:60,
+      borrowedEntries:59,borrowedBytes:1000,normalizedOwnedEntries:1,normalizedOwnedBytes:3,
+      normalizedOwnedCapacityBytes:8,postNormalizationCopyBytes:0};
+    row.nestedJournalAppend.snapshotOwnershipScope='Driver append final deduplicated artifact map only; capacity sums are observations; excludes normalization writes, discarded duplicate buffers, metadata and IO allocations; not allocator/RSS totals';
+  }
+  return report;
+}
+test('accepts complete snapshot ownership observations and both historical report generations',()=>{
+  const borrowed=ownershipFixture();
+  for(const row of borrowed.samples) Object.assign(row.nestedJournalAppend.measurement.snapshotOwnership,
+    {borrowedEntries:60,normalizedOwnedEntries:0,normalizedOwnedBytes:0,normalizedOwnedCapacityBytes:0});
+  for(const report of [borrowed,ownershipFixture(),profiledFixture(),fixture()]) assert.equal(verifyPerformanceReport(report).samples,27);
+});
+for(const [name,change] of [
+  ['partial matrix',r=>delete r.samples[0].nestedJournalAppend.measurement.snapshotOwnership],
+  ['setup calls',r=>r.samples[0].nestedJournalAppend.measurement.snapshotOwnership.snapshotCalls++],
+  ['missing field',r=>delete r.samples[0].nestedJournalAppend.measurement.snapshotOwnership.borrowedBytes],
+  ['entry mismatch',r=>r.samples[0].nestedJournalAppend.measurement.snapshotOwnership.borrowedEntries++],
+  ['impossible artifact count',r=>r.samples[0].nestedJournalAppend.measurement.snapshotOwnership.artifactEntries=121],
+  ['capacity below bytes',r=>r.samples[0].nestedJournalAppend.measurement.snapshotOwnership.normalizedOwnedCapacityBytes=2],
+  ['false zero-copy',r=>r.samples[0].nestedJournalAppend.measurement.snapshotOwnership.postNormalizationCopyBytes=1],
+  ['empty retained owner',r=>r.samples[0].nestedJournalAppend.measurement.snapshotOwnership.normalizedOwnedBytes=0],
+  ['whole-heap claim',r=>r.samples[0].nestedJournalAppend.snapshotOwnershipScope='all allocator bytes'],
+]) test(`rejects snapshot ownership ${name}`,()=>{const r=ownershipFixture();change(r);assert.throws(()=>verifyPerformanceReport(r));});
 for(const [name,change] of [
   ['partial matrix',r=>delete r.samples[0].nestedJournalAppend],
   ['phase overlap',r=>r.samples[0].nestedJournalAppend.measurement.phases.read_chain=1],

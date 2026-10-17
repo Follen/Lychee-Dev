@@ -38,6 +38,8 @@ export function verifyPerformanceReport(report) {
   // omit this nested evidence from some samples or mix old/new measurements.
   const profiled = report.samples.filter(row => row.nestedJournalAppend !== undefined).length;
   assert(profiled === 0 || profiled === 27, 'live-offline.partial_append_profile');
+  const ownershipProfiled = report.samples.filter(row => row.nestedJournalAppend?.measurement?.snapshotOwnership !== undefined).length;
+  assert(ownershipProfiled === 0 || ownershipProfiled === 27, 'live-offline.partial_snapshot_ownership');
   const names = [], hashes = new Map(), groups = new Map();
   for (const row of report.samples) {
     assert.equal(row.schema, 'lycheedev.live-offline-sample.v1');
@@ -90,6 +92,23 @@ export function verifyPerformanceReport(report) {
       integer(m.maximumEligiblePairedRawCapacityBytes, nested.eligiblePairedRawCapacityLimitBytes);
       assert.match(nested.memoryScope, /eligible post-allocation/);
       assert.match(nested.memoryScope, /excludes allocator excess\/transient growth, event\/State allocations and allocator\/RSS totals/);
+      if (m.snapshotOwnership !== undefined) {
+        const own = m.snapshotOwnership;
+        assert.deepEqual(Object.keys(own).toSorted(), ['snapshotCalls', 'artifactEntries', 'borrowedEntries', 'borrowedBytes',
+          'normalizedOwnedEntries', 'normalizedOwnedBytes', 'normalizedOwnedCapacityBytes', 'postNormalizationCopyBytes'].toSorted());
+        assert.equal(integer(own.snapshotCalls), m.calls);
+        integer(own.artifactEntries, own.snapshotCalls * 4);
+        assert.equal(own.artifactEntries, sum([own.borrowedEntries, own.normalizedOwnedEntries]));
+        integer(own.borrowedBytes, own.borrowedEntries * (3 * 262144));
+        integer(own.normalizedOwnedBytes, own.normalizedOwnedEntries * (3 * 262144));
+        assert(integer(own.normalizedOwnedCapacityBytes) >= own.normalizedOwnedBytes);
+        for (const [entries, bytes] of [[own.borrowedEntries, own.borrowedBytes], [own.normalizedOwnedEntries, own.normalizedOwnedBytes]])
+          assert(entries === 0 ? bytes === 0 : bytes >= entries, 'live-offline.empty_artifact_owner');
+        if (own.normalizedOwnedEntries === 0) assert.equal(own.normalizedOwnedCapacityBytes, 0);
+        assert.equal(own.postNormalizationCopyBytes, 0);
+        assert.match(nested.snapshotOwnershipScope, /Driver append final deduplicated artifact map only/);
+        assert.match(nested.snapshotOwnershipScope, /excludes normalization writes, discarded duplicate buffers, metadata and IO allocations; not allocator\/RSS totals/);
+      }
     }
     assert.equal(row.calls.backend.input.calls, 6); assert.equal(row.calls.backend.publish.calls, 6);
     assert.equal(row.nestedPeerExchange.calls, 6);

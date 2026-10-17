@@ -348,6 +348,101 @@ fn go_mailbox_v1_durable_artifacts_precede_log_and_result_keeps_original_bytes()
 }
 
 #[test]
+fn go_mailbox_v1_durable_borrowed_snapshot_rechecks_artifacts_and_retains_no_state_borrow() {
+    let f = Fixture::new();
+    let mut journal = f.open();
+    journal.start_append_profile();
+    let control = OperationControl::default();
+    let mut state = with_operation("borrowed", false);
+    journal.append(&control, "result_verified", &state).unwrap();
+    let first = snapshot(&state).unwrap();
+    // Mutating the caller's original storage after append is permitted; the
+    // next snapshot must use its new bytes, without a retained artifact cache.
+    let op = state.operation.as_mut().unwrap();
+    op.code.push_byte(b' ');
+    op.result_bytes.0.push(b' ');
+    op.report_bytes += 1;
+    op.report_checksum = checksum(&op.result_bytes.0);
+    journal.append(&control, "result_verified", &state).unwrap();
+    assert_eq!(journal.load(&control).unwrap(), state);
+    for (digest, bytes) in first.artifacts {
+        assert_eq!(fs::read(f.paths.artifact(&digest).unwrap()).unwrap(), bytes);
+    }
+    let profile = journal.append_profile().unwrap();
+    assert_eq!(profile.snapshot_ownership.snapshot_calls, 2);
+    assert_eq!(profile.snapshot_ownership.artifact_entries, 4);
+    assert_eq!(profile.snapshot_ownership.borrowed_entries, 4);
+    assert_eq!(profile.snapshot_ownership.normalized_owned_entries, 0);
+    assert_eq!(profile.snapshot_ownership.post_normalization_copy_bytes, 0);
+    let snap = snapshot(&state).unwrap();
+    let artifact = f.paths.artifact(&snap.state.artifacts["result"]).unwrap();
+    let mut damaged = fs::read(&artifact).unwrap();
+    damaged[0] ^= 1; // Same length, but changed content under the exact digest name.
+    fs::write(&artifact, &damaged).unwrap();
+    let log = fs::read(&f.paths.log).unwrap();
+    let head = journal.head.clone();
+    assert_code(
+        journal.append(&control, "result_verified", &state),
+        "live.channel_artifact_corrupt",
+    );
+    assert_eq!(fs::read(&f.paths.log).unwrap(), log);
+    assert_eq!(fs::read(&artifact).unwrap(), damaged);
+    assert_eq!(journal.head, head);
+    assert!(journal.poisoned);
+    assert!(journal.take_cache().is_none());
+    journal.close().unwrap();
+}
+
+#[test]
+fn go_mailbox_v1_durable_borrowed_snapshot_profiles_normalized_owners_only_in_append() {
+    let f = Fixture::new();
+    let mut journal = f.open();
+    journal.start_append_profile();
+    let control = OperationControl::default();
+    let mut state = with_operation("normalized", true);
+    state.operation.as_mut().unwrap().code = b"return '\xff\xe2\x82'".as_slice().into();
+    let expected = snapshot(&state).unwrap();
+    journal.append(&control, "result_verified", &state).unwrap();
+    let expected_code = &expected.artifacts[&expected.state.artifacts["code"]];
+    let report_len = state.operation.as_ref().unwrap().result_bytes.0.len();
+    let profile = journal.append_profile().unwrap();
+    assert_eq!(profile.snapshot_ownership.snapshot_calls, 1);
+    assert_eq!(profile.snapshot_ownership.artifact_entries, 2);
+    assert_eq!(profile.snapshot_ownership.borrowed_entries, 1);
+    assert_eq!(profile.snapshot_ownership.borrowed_bytes, report_len as u64);
+    assert_eq!(profile.snapshot_ownership.normalized_owned_entries, 1);
+    assert_eq!(
+        profile.snapshot_ownership.normalized_owned_bytes,
+        expected_code.len() as u64
+    );
+    assert!(
+        profile.snapshot_ownership.normalized_owned_capacity_bytes >= expected_code.len() as u64
+    );
+    assert_eq!(profile.snapshot_ownership.post_normalization_copy_bytes, 0);
+    // Exercise a real checkpoint snapshot while the profile is enabled. Its
+    // ownership observations must not leak into Driver append accounting.
+    for _ in 2..CHECKPOINT_EVENTS {
+        journal.append(&control, "budget_observed", &state).unwrap();
+    }
+    let before = serde_json::to_vec(&journal.append_profile().unwrap().snapshot_ownership).unwrap();
+    journal.checkpoint(&control, &mut state, false).unwrap();
+    assert_eq!(
+        serde_json::to_vec(&journal.append_profile().unwrap().snapshot_ownership).unwrap(),
+        before
+    );
+    let loaded = journal.load(&control).unwrap();
+    assert_eq!(
+        loaded.operation.as_ref().unwrap().code.as_bytes(),
+        expected_code
+    );
+    assert_eq!(
+        state.operation.as_ref().unwrap().code.as_bytes(),
+        b"return '\xff\xe2\x82'"
+    );
+    journal.close().unwrap();
+}
+
+#[test]
 fn go_mailbox_v1_durable_artifact_failure_and_cancel_leave_log_unchanged() {
     for action in [Action::Fail, Action::Cancel] {
         let f = Fixture::new();

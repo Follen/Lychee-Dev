@@ -48,6 +48,21 @@ fn equivalent(state: &State) -> Snapshot {
     let original = serde_json::to_vec(state).unwrap();
     let expected = old_snapshot(state).unwrap();
     let actual = snapshot(state).unwrap();
+    let borrowed = snapshot_borrowed(state).unwrap();
+    assert_eq!(borrowed.state, expected.state, "borrowed typed metadata");
+    assert_eq!(
+        borrowed.artifacts.keys().collect::<Vec<_>>(),
+        expected.artifacts.keys().collect::<Vec<_>>(),
+        "borrowed sorted digest keys and deduplication"
+    );
+    for (digest, bytes) in &borrowed.artifacts {
+        assert_eq!(bytes.as_ref(), expected.artifacts[digest]);
+    }
+    assert_eq!(
+        prepare_event(&[], "snapshot<&>\u{2028}", &borrowed.state).unwrap(),
+        prepare_event(&[], "snapshot<&>\u{2028}", &expected.state).unwrap(),
+        "borrowed complete event bytes and checksum"
+    );
     assert_eq!(actual.state, expected.state, "all typed metadata fields");
     assert_eq!(
         actual.artifacts, expected.artifacts,
@@ -444,6 +459,16 @@ fn go_mailbox_v1_snapshot_large_artifacts_deduplicate_without_copying_into_metad
         .code = code.into();
     state.operation.as_mut().unwrap().result_bytes = ResultBytes(vec![0xff; MAX_PAYLOAD]);
     let copy = equivalent(&state);
+    let borrowed = snapshot_borrowed(&state).unwrap();
+    let result = &borrowed.artifacts[&borrowed.state.artifacts["result"]];
+    assert!(
+        matches!(result, Cow::Borrowed(_)),
+        "raw report is never code-normalized"
+    );
+    assert_eq!(
+        result.as_ptr(),
+        state.operation.as_ref().unwrap().result_bytes.0.as_ptr()
+    );
     assert_eq!(copy.artifacts.len(), 2);
     let op = copy.state.operation.unwrap();
     assert_eq!(op.code.into_bytes().capacity(), 0);
@@ -493,4 +518,120 @@ fn go_mailbox_v1_snapshot_oversized_report_keeps_old_roundtrip_error() {
         snapshot(&state).unwrap_err(),
         ContractError("live.channel_journal_invalid")
     );
+    assert_eq!(
+        snapshot_borrowed(&state).unwrap_err(),
+        old_snapshot(&state).unwrap_err()
+    );
+}
+
+#[test]
+fn go_mailbox_v1_snapshot_borrowed_payloads_preserve_pointer_capacity_and_call_lifetime() {
+    let mut code = Vec::with_capacity(8192);
+    code.extend_from_slice("return '荔枝<&>\0'".as_bytes());
+    let code_pointer = code.as_ptr();
+    let code_capacity = code.capacity();
+    let mut state = code_state(code);
+    let mut report = Vec::with_capacity(16384);
+    report.extend_from_slice(b" { \"x\":\"\\u0000<&>\", \"n\":1.00 } \n");
+    let report_pointer = report.as_ptr();
+    let report_capacity = report.capacity();
+    state.operation.as_mut().unwrap().result_bytes = ResultBytes(report);
+    let owned = equivalent(&state);
+    {
+        let view = snapshot_borrowed(&state).unwrap();
+        assert_eq!(view.artifacts.len(), 2);
+        for (key, pointer) in [("code", code_pointer), ("result", report_pointer)] {
+            let bytes = &view.artifacts[&view.state.artifacts[key]];
+            assert!(matches!(bytes, Cow::Borrowed(_)));
+            assert_eq!(bytes.as_ptr(), pointer);
+            assert_ne!(
+                owned.artifacts[&view.state.artifacts[key]].as_ptr(),
+                pointer
+            );
+        }
+    }
+    // The view is call-local: the original owner can be mutated and then moved
+    // after it is dropped. Neither metadata nor the public owned wrapper borrows.
+    let op = state.operation.as_mut().unwrap();
+    op.code.push_byte(b' ');
+    op.result_bytes.0.push(b' ');
+    assert_eq!(op.code.as_bytes().as_ptr(), code_pointer);
+    assert_eq!(op.result_bytes.0.as_ptr(), report_pointer);
+    assert_eq!(op.result_bytes.0.capacity(), report_capacity);
+    let op = state.operation.take().unwrap();
+    assert_eq!(op.code.into_bytes().capacity(), code_capacity);
+    drop(state);
+    assert_eq!(owned.artifacts.len(), 2);
+    assert_eq!(
+        owned.artifacts[&owned.state.artifacts["result"]].last(),
+        Some(&b'\n')
+    );
+}
+
+#[test]
+fn go_mailbox_v1_snapshot_borrowed_normalization_keeps_each_bad_byte_and_first_digest_owner() {
+    let raw = b"\"\xff\xe2\x82\"".to_vec();
+    let normalized = "\"\u{fffd}\u{fffd}\u{fffd}\"".as_bytes();
+    let mut state = code_state(raw.clone());
+    // The result has the same normalized bytes, but the earlier code owner wins.
+    state.operation.as_mut().unwrap().result_bytes = ResultBytes(normalized.to_vec());
+    equivalent(&state);
+    let view = snapshot_borrowed(&state).unwrap();
+    assert_eq!(view.artifacts.len(), 1);
+    assert_eq!(view.state.artifacts["code"], view.state.artifacts["result"]);
+    let bytes = view.artifacts.values().next().unwrap();
+    assert!(matches!(bytes, Cow::Owned(_)));
+    assert_eq!(bytes.as_ref(), normalized);
+    assert_ne!(
+        bytes.as_ptr(),
+        state.operation.as_ref().unwrap().code.as_bytes().as_ptr()
+    );
+    assert_eq!(state.operation.as_ref().unwrap().code.as_bytes(), raw);
+}
+
+#[test]
+fn go_mailbox_v1_snapshot_borrowed_deduplicates_all_code_owners_and_omits_empty_values() {
+    let mut state = dense_state();
+    let code = b"same valid\0<&>";
+    state.operation.as_mut().unwrap().code = code.as_slice().into();
+    state.operation.as_mut().unwrap().result_bytes = ResultBytes(code.to_vec());
+    state.transaction.as_mut().unwrap().envelope.code = code.as_slice().into();
+    state
+        .recovery
+        .as_mut()
+        .unwrap()
+        .transaction
+        .as_mut()
+        .unwrap()
+        .envelope
+        .code = code.as_slice().into();
+    equivalent(&state);
+    {
+        let view = snapshot_borrowed(&state).unwrap();
+        assert_eq!(view.state.artifacts.len(), 4);
+        assert_eq!(view.artifacts.len(), 1);
+        let bytes = view.artifacts.values().next().unwrap();
+        assert!(matches!(bytes, Cow::Borrowed(_)));
+        assert_eq!(
+            bytes.as_ptr(),
+            state.operation.as_ref().unwrap().code.as_bytes().as_ptr()
+        );
+    }
+    state.operation.as_mut().unwrap().code.clear();
+    state.operation.as_mut().unwrap().result_bytes.0.clear();
+    state.transaction.as_mut().unwrap().envelope.code.clear();
+    state
+        .recovery
+        .as_mut()
+        .unwrap()
+        .transaction
+        .as_mut()
+        .unwrap()
+        .envelope
+        .code
+        .clear();
+    equivalent(&state);
+    let view = snapshot_borrowed(&state).unwrap();
+    assert!(view.state.artifacts.is_empty());
+    assert!(view.artifacts.is_empty());
 }

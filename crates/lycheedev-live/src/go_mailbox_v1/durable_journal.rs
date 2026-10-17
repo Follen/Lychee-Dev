@@ -10,9 +10,9 @@
 //! and a fresh load. Torn tails are retained and never repaired implicitly.
 use super::journal::read_log_bytes;
 use super::journal::{
-    CHECKPOINT_BYTES, CHECKPOINT_EVENTS, MAX_EVENT_BYTES, MAX_EVENTS, MAX_HISTORY_SEGMENTS,
-    MAX_LOG_BYTES, MemoryEvent, StateJournal, event_hash, go_json_bytes, hydrate, prepare_event,
-    prepare_event_at, snapshot,
+    BorrowedSnapshot, CHECKPOINT_BYTES, CHECKPOINT_EVENTS, MAX_EVENT_BYTES, MAX_EVENTS,
+    MAX_HISTORY_SEGMENTS, MAX_LOG_BYTES, MemoryEvent, StateJournal, event_hash, go_json_bytes,
+    hydrate, prepare_event, prepare_event_at, snapshot, snapshot_borrowed,
 };
 use super::observations::{ChannelError, ChannelResult, check_control};
 use super::state::{
@@ -72,6 +72,44 @@ pub(crate) struct AppendProfile {
     pub replayed_events: u64,
     pub maximum_cache_capacity_bytes: usize,
     pub maximum_eligible_paired_raw_capacity_bytes: usize,
+    pub snapshot_ownership: SnapshotOwnership,
+}
+#[cfg(test)]
+#[derive(Default, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SnapshotOwnership {
+    pub snapshot_calls: u64,
+    pub artifact_entries: u64,
+    pub borrowed_entries: u64,
+    pub borrowed_bytes: u64,
+    pub normalized_owned_entries: u64,
+    pub normalized_owned_bytes: u64,
+    // Sum of final deduplicated-map buffer capacities, not simultaneous memory;
+    // discarded duplicate normalization allocations are deliberately excluded.
+    pub normalized_owned_capacity_bytes: u64,
+    pub post_normalization_copy_bytes: u64,
+}
+#[cfg(test)]
+impl SnapshotOwnership {
+    fn observe(&mut self, snapshot: &BorrowedSnapshot<'_>) {
+        self.snapshot_calls += 1;
+        for bytes in snapshot.artifacts.values() {
+            self.artifact_entries += 1;
+            match bytes {
+                std::borrow::Cow::Borrowed(bytes) => {
+                    self.borrowed_entries += 1;
+                    self.borrowed_bytes += bytes.len() as u64;
+                }
+                std::borrow::Cow::Owned(bytes) => {
+                    self.normalized_owned_entries += 1;
+                    self.normalized_owned_bytes += bytes.len() as u64;
+                    self.normalized_owned_capacity_bytes += bytes.capacity() as u64;
+                }
+            }
+        }
+        // The borrowed constructor never copies the normalized payload again.
+        // This excludes normalization writes and all other State/IO allocations.
+    }
 }
 macro_rules! append_phase {
     ($journal:expr, $name:literal, $action:expr) => {{
@@ -1009,15 +1047,19 @@ impl DurableChannelJournal {
         }
         storage::atomic_write_controlled(path, bytes, control).map_err(storage_error)
     }
-    fn snapshot(&mut self, state: &State, control: &OperationControl) -> ChannelResult<State> {
+    fn snapshot<'a>(
+        &mut self,
+        state: &'a State,
+        control: &OperationControl,
+    ) -> ChannelResult<BorrowedSnapshot<'a>> {
         self.paths.check_state(state)?;
-        let snapshot = snapshot(state)?;
+        let snapshot = snapshot_borrowed(state)?;
         for (digest, bytes) in &snapshot.artifacts {
             self.check(control)?;
             write_artifact(&self.paths.artifact(digest)?, bytes, control)?;
             self.cut(FaultPoint::ArtifactDurable, control)?;
         }
-        Ok(snapshot.state)
+        Ok(snapshot)
     }
     fn append_inner(
         &mut self,
@@ -1027,7 +1069,15 @@ impl DurableChannelJournal {
     ) -> ChannelResult<()> {
         append_phase!(self, "owner_initial", self.check(control))?;
         let mut chain = self.append_chain(control)?;
-        let snapshot = append_phase!(self, "snapshot_artifacts", self.snapshot(state, control))?;
+        let snapshot = append_phase!(self, "snapshot_artifacts", {
+            self.snapshot(state, control).map(|snapshot| {
+                #[cfg(test)]
+                if let Some(profile) = &mut self.append_profile {
+                    profile.snapshot_ownership.observe(&snapshot);
+                }
+                snapshot.state
+            })
+        })?;
         let prepared = append_phase!(
             self,
             "prepare_event",
@@ -1168,7 +1218,7 @@ impl DurableChannelJournal {
         let previous = state.archive.clone();
         state.archive = expected.clone();
         let checkpoint = (|| {
-            let snapshot = self.snapshot(state, control)?;
+            let snapshot = self.snapshot(state, control)?.state;
             let prepared = prepare_event_at(0, "", "checkpoint", &snapshot)?;
             let bytes = prepared.bytes;
             let archive = self.paths.history.join(format!("{expected}.jsonl"));

@@ -185,7 +185,7 @@ work and complete timing before any Go/Rust ratio is reported.
 node --test tests/rust-performance-paired/live-runner.test.mjs tools/rust-formal-lua-bridge.test.mjs
 ```
 
-These 66 Node tests validate fixture identity, strict report arithmetic, negative
+The 1360 baseline's 66 Node tests validate fixture identity, strict report arithmetic, negative
 samples, exact executable/result selection, ownership-entry wiring and the
 unchanged original nine-case controller. Their synthetic numeric parser inputs
 are not benchmark evidence. Rustfmt parsing is also not compilation.
@@ -216,3 +216,50 @@ is still excluded from Driver benefits. The 45 per-sample append durability
 boundaries remain, and no safe sync coalescing has been established. The remaining
 snapshot/artifact bucket is about 31 ms per sample in total, not a promised
 removable amount. No game or comparable Go-host latency was measured.
+
+## Current call-local borrowed-artifact candidate
+
+The durable append/checkpoint snapshot now borrows ordinary code and raw result
+bytes directly from the immutable caller State. Invalid UTF-8 **code** keeps the
+original one-replacement-per-bad-byte normalization in an owned buffer; that
+buffer moves into the first matching digest entry without another payload copy.
+Raw result bytes, including invalid UTF-8, are never code-normalized. Sorted
+digest publication order and first-owner deduplication are unchanged. The public
+`Snapshot` API remains owned and can outlive its input State.
+
+No artifact borrow or new artifact cache survives the call. State/INPUT DTO
+validation, SHA, every owner check, complete existing-artifact read/byte compare,
+checked close, and first-publication durability stay in place. All 45 append sync
+boundaries remain. The independently verified 1360 journal snapshots account for
+61 deduplicated artifact visits per sample (38 code + 23 result), with six
+transaction-code references sharing the code digest. The previous owned-map
+construction therefore copied 30,736,260 payload bytes into 1,647 temporary Vecs
+across 27 samples. These are source-provable local construction counts, not
+allocator totals or a promised wall-time saving from the 850-ms mixed bucket.
+
+Optional `measurement.snapshotOwnership` belongs only to the existing Driver
+append profile, inside `snapshot_artifacts`. `snapshotCalls` counts completed
+artifact snapshots; `artifactEntries` splits into `borrowedEntries` and
+`normalizedOwnedEntries`, with their byte lengths. The normalized byte/capacity
+sums observe **only the final deduplicated map's retained buffers**. They omit
+discarded duplicate normalization buffers, normalization writes, metadata and
+IO allocations; capacity sums are not simultaneous retained memory or RSS.
+`postNormalizationCopyBytes=0` is the constructor's code-provable absence of an
+additional normalized-payload copy, not an assertion that normalization or the
+whole operation copies nothing. Pointer assertions independently check ordinary
+payload borrowing and caller capacity preservation.
+
+The fixed matrix additionally asserts 45 completed append snapshots, 61 borrowed
+entries and exactly `38 * code UTF-8 bytes + 23 * actual BODY bytes` per sample;
+its valid source needs no normalized owned artifact. Checkpoint/setup snapshots
+do not enter these counters. Readers accept complete historical 0890 reports
+without append profiles and 1360 reports without ownership fields, but reject
+partially omitted ownership observations in a new matrix.
+
+Current cloud checks: 76 Node tests passed, including ten added ownership-schema
+cases; rustfmt parsing and diff checks passed. Five new Rust regressions cover
+borrowed pointer/capacity/lifetime, malformed code/first-owner normalization,
+all code-owner deduplication/empty values, same-length external artifact changes
+and append-only normalized-owner counts across a real checkpoint. Existing full
+JSON-copy oracle cases now also validate the borrowed path. Candidate Rust
+compilation/regressions and the next complete 27-sample run remain **NOT_RUN**.
