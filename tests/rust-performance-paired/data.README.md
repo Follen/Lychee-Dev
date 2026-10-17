@@ -50,6 +50,14 @@ Preflight samples are retained separately and never enter those 20 samples.
 SQL still runs only its correctness pair. Every sample, not just the last, is
 checked. Each path/cache group separately requires median Rust/Go ≤ 0.30.
 Missing, failed, malformed, non-equivalent or unreaped samples cannot pass.
+New rows also carry a distinct `pairTerminal` result written only after the
+pair's final fixture-inventory check. Both cold and warm summaries require its
+verified terminal state. If that final check fails, original successful CLI
+results and `resultEquivalent=true` remain intact, while the pair and summary
+report `failed_final_integrity`; even SQL's only pair or the last of 20 cannot
+pass. Missing terminal evidence also fails new runs. Historical continuation
+alone permits older rows without this field, after separately authenticating
+their original sealed `pair.json` with `valid=true`; it never rewrites them.
 Failure stops that path, retains its inputs/evidence and never creates a
 replacement or a warm label after failed cold. Independent paths may continue
 only once process retirement is proved.
@@ -412,8 +420,10 @@ Actual failure policy is unchanged:
   stops further iterations of that path. A failed cold comparison never gets
   a warm sample or replacement; already reaped engine results are retained.
   Other independent paths may proceed only with process retirement proved.
-- Unproved retirement, identity/setup errors or any pair cleanup failure stop
-  the controller. The five-hour outer deadline stops its owned tree; partial
+- Unproved retirement, initial setup/final identity revalidation errors or any
+  pair cleanup failure stop the controller. Pair-local fixture/clone errors
+  stop that path under the same proved-retirement rule above. The five-hour
+  outer deadline stops its owned tree; partial
   reports remain failed or incomplete and ownership evidence is retained.
 - A median ratio above 0.30 is reported after collection, not used to stop or
   cherry-pick samples. Every cold/warm performance group must independently

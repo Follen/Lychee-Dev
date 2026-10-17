@@ -23,7 +23,9 @@ export function remainingDataCases(entries, previous) {
   assert(attempted.length > 0 && attempted.length < entries.length, 'partial nonempty observation required');
   assert.deepEqual(attempted, entries.slice(0, attempted.length).map(entry => entry.id), 'only an uninterrupted completed path prefix can be continued');
   const completed = entries.slice(0, attempted.length);
-  assert(summarizeData(completed, previous.pairs, false).every(group => group.state === 'equivalent_observation_only' && group.timings), 'every attempted path must already be complete/equivalent');
+  // Historical rows predate pairTerminal. Their sealed pair.json valid=true
+  // is authenticated independently below; new runs never enable this option.
+  assert(summarizeData(completed, previous.pairs, false, {allowLegacyTerminal: true}).every(group => group.state === 'equivalent_observation_only' && group.timings), 'every attempted path must already be complete/equivalent');
   assert.equal(previous.pairs.length, completed.length * 2);
   for (const row of previous.pairs) for (const engine of ['go', 'rust']) {
     const sample = row[engine]; assert.equal(sample.exit, 0); assert(!sample.error && !sample.failure); assert.equal(sample.handlesReaped, true);

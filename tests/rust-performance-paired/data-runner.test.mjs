@@ -2,7 +2,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
-import {join} from 'node:path';
+import {dirname, join} from 'node:path';
+import {spawnSync} from 'node:child_process';
+import {pathToFileURL} from 'node:url';
 import {tmpdir} from 'node:os';
 import {deflateSync} from 'node:zlib';
 import {DatabaseSync} from 'node:sqlite';
@@ -25,7 +27,7 @@ function envelope(kind = 'sql', engine = 'go', mode = 'cold') {
   return {schema: 'lycheedev.result.v1', ok: true, operationId: '', context: {snapshot: 'PIN-fixture'}, result, captures: [], warnings: [], error: null};
 }
 const sqlCase = dataCases(images())[0], contentCase = dataCases(images())[1];
-function pairs(entry = contentCase, count = 20) { return Array.from({length: count}, (_, iteration) => ['cold', 'warm'].map(cacheMode => ({caseId: entry.id, iteration, cacheMode, resultEquivalent: true, order: orderFor(iteration),
+function pairs(entry = contentCase, count = 20) { return Array.from({length: count}, (_, iteration) => ['cold', 'warm'].map(cacheMode => ({caseId: entry.id, iteration, cacheMode, resultEquivalent: true, pairTerminal: {state: 'verified'}, order: orderFor(iteration),
   ...Object.fromEntries(['go', 'rust'].map(engine => [engine, {valid: true, home: `${iteration}/${engine}`, binary: engine, snapshot: 'PIN-input', reuse: {verified: true}, controllableMillis: engine === 'go' ? 100 : 30}]))}))).flat(); }
 
 test('fixed Go323, 17MiB/3-chunk family, five full-size storage modes and no SQL performance claim', () => {
@@ -96,6 +98,74 @@ test('missing/corrupt/intermediate/nonalternating/reused-home samples cannot pas
 });
 test('failed cold also invalidates warm lineage, without replacing samples', () => {
   const value = pairs(); value[0].resultEquivalent = false; assert(summarizeData([contentCase], value, true).every(group => !group.correctAndComplete));
+});
+test('final pair integrity is required independently of equivalent product rows, including SQL and the final iteration', () => {
+  for (const [entry, count, failedIteration] of [[sqlCase, 1, 0], [contentCase, 20, 19], [contentCase, 20, 9]]) {
+    const value = pairs(entry, count);
+    for (const row of value.filter(row => row.iteration === failedIteration)) row.pairTerminal = {state: 'failed_final_integrity', failure: {phase: 'final_integrity', message: 'fixture changed'}};
+    assert(value.every(row => row.resultEquivalent));
+    const groups = summarizeData([entry], value, true);
+    assert(groups.every(group => group.state === 'failed_final_integrity' && !group.correctAndComplete && !group.pairTerminalVerified));
+  }
+  const legacy = pairs(sqlCase, 1); for (const row of legacy) delete row.pairTerminal;
+  assert(summarizeData([sqlCase], legacy, true).every(group => !group.correctAndComplete));
+  assert(summarizeData([sqlCase], legacy, false, {allowLegacyTerminal: true}).every(group => group.state === 'equivalent_observation_only'));
+  legacy[0].pairTerminal = {state: 'failed_final_integrity'};
+  assert(summarizeData([sqlCase], legacy, false, {allowLegacyTerminal: true}).every(group => group.state === 'failed_final_integrity'));
+});
+test('real controller final-inventory faults retain equivalent rows but fail SQL/last/middle pairs and stop further iterations', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'paired-data-terminal-')); t.after(() => rmSync(directory, {recursive: true, force: true}));
+  const controller = readFileSync(new URL('./data-run.mjs', import.meta.url));
+  const real = file => JSON.stringify(new URL(file, import.meta.url).href);
+  for (const [name, entry, failAt, expectedOwners] of [['sql-only', sqlCase, 2, 1], ['last-performance', contentCase, 42, 21], ['middle-performance', contentCase, 22, 11], ['complete-performance', contentCase, 0, 21]]) {
+    const root = join(directory, name), out = join(root, 'evidence'), scratch = join(root, 'scratch'); mkdirSync(out, {recursive: true}); mkdirSync(scratch);
+    const put = (file, body) => { const path = join(root, file); mkdirSync(dirname(path), {recursive: true}); writeFileSync(path, body); };
+    put('tests/rust-performance-paired/data-run.mjs', controller);
+    put('tests/rust-performance-paired/contract.mjs', `export * from ${real('./contract.mjs')};`);
+    put('tests/rust-performance-paired/data-contract.mjs', `export * from ${real('./data-contract.mjs')}; export const dataCases=()=>[${JSON.stringify(entry)}];`);
+    put('tests/rust-performance-paired/data-resume.mjs', `export function verifyDataContinuation(){throw Error('acceptance cannot resume');}`);
+    put('tests/rust-performance-paired/inputs.mjs', `import {mkdirSync} from 'node:fs';
+      let inventories=0; export function inventory(path){ return {sha256:++inventories===${failAt}?'changed-fixture':'fixture'}; }
+      export const cloneSeed=(_seed,home)=>mkdirSync(home,{recursive:true}); export const verifyGoMetadata=()=>({}); export const verifyGoPackage=()=>({packageSHA256:'go'});`);
+    put('tests/rust-performance-paired/data-inputs.mjs', `export {digest,parse} from ${real('./data-inputs.mjs')};
+      export const loadDataFixture=directory=>({directory,images:{},receipt:{inventory:{sha256:'fixture'}},identity:{snapshot:'PIN-fixed',installation:'installation'}});
+      export const seedDataHome=()=>({sha256:'seed'}); export const decodedIdentity=home=>globalThis.decoded?.has(home)?['root','payload']:[];
+      export const validateDataOutput=async()=>({value:{complete:true},observations:{reuse:{verified:true}},proofs:[]}); export const decodeDataImage=()=>{throw Error('not an image test');};`);
+    put('tools/rust-build.mjs', `import {readFileSync} from 'node:fs'; import {createHash} from 'node:crypto';
+      export const hashFile=path=>createHash('sha256').update(readFileSync(path)).digest('hex'); export const sourceDigest=()=> 'source';
+      export const verifyArtifact=()=>({profile:'release',binarySHA256:'rust',inputHashes:{sourceTree:'source',emmy:{patchedTreeSHA256:'emmy'}}});`);
+    put('tools/rust-emmy-identity.mjs', `export const inspectEmmy=()=>({identity:'public-upstream-unmodified-v1',patchedTreeSHA256:'emmy'});`);
+    put('tools/rust-owned-memory.mjs', `export const collectOwnedMemory=()=>({state:'not_measured',synthetic:true});`);
+    put('tools/rust-disk.mjs', `import {mkdirSync,writeFileSync} from 'node:fs'; import {join} from 'node:path'; let id=0;
+      export function beginScratch(root){ const directory=join(root,'pairs',String(++id)), evidence=join(root,'pair-evidence',String(id)); mkdirSync(directory,{recursive:true}); mkdirSync(evidence,{recursive:true});
+        return {directory,evidence,receipt:join(evidence,'receipt.json'),seal:value=>writeFileSync(join(evidence,'receipt.json'),JSON.stringify(value)),cleanup:()=>writeFileSync(join(evidence,'cleaned'),'yes')}; }`);
+    put('tools/rust-owned-process.mjs', `export function ownedSpawnSync(binary,args,options){
+      let output=''; if(binary==='git'&&args.includes('rev-parse')) output=${JSON.stringify(GO_COMMIT)};
+      else if(binary==='rustc') output='rustc 1.99.0 synthetic'; else if(binary==='powercfg.exe') output='power';
+      else if(args[0]==='init') output=JSON.stringify({ok:true}); else if(options.memoryObservation){output='{}';(globalThis.decoded??=new Set()).add(args[args.indexOf('--home')+1]);}
+      const end=binary==='rust.exe'?'400':'1100';
+      return {status:0,handlesReaped:true,stdout:Buffer.from(output),stderr:Buffer.alloc(0),logs:[],proof:{schema:'lycheedev.owned-process.v1',rootReaped:true,treeReaped:true,handlesClosed:true,toolIdentityLocksClosed:true,outputReadersComplete:true,activeProcesses:0,forced:false,
+        timing:{schema:'lycheedev.owned-timing.v1',frequency:10000,startTicks:'100',rootExitTicks:end,treeReapedTicks:end}}}; }`);
+    put('release/npm-channel.json', JSON.stringify({version: '3.5.0', distTag: 'beta'}));
+    put('sharp.cjs', `module.exports=Object.assign(()=>{}, {versions:{sharp:'synthetic',vips:'synthetic'},cache:()=>({memory:{max:0},files:{max:0},items:{max:0}})});`);
+    const config = {root, runnerRoot: root, evidence: out, scratch, acceptance: true, resumeFrom: null, inputs: {}, conditions: {},
+      rustArtifact: 'synthetic', rust: {sourceBinary: 'rust.exe', binarySHA256: 'rust'}, go: {root: 'go', binary: 'go.exe', binarySHA256: 'go', packageSHA256: 'go'},
+      goSource: 'go-source', luaLSArchive: 'luals', sharpModule: join(root, 'sharp.cjs'), fixtures: {catalog: 'catalog', content: 'content', images: 'images'}};
+    put('configuration.json', JSON.stringify(config));
+    const script = join(root, 'tests/rust-performance-paired/data-run.mjs');
+    const bootstrap = `Object.defineProperty(process,'platform',{value:'win32'}); process.argv=[process.execPath,${JSON.stringify(script)},${JSON.stringify(join(root, 'configuration.json'))}]; await import(${JSON.stringify(pathToFileURL(script).href)});`;
+    const run = spawnSync(process.execPath, ['--input-type=module', '--eval', bootstrap], {cwd: root, encoding: 'utf8', timeout: 15000, env: {...process.env, RUSTFLAGS: '', CARGO_ENCODED_RUSTFLAGS: ''}});
+    assert.equal(run.error, undefined); assert.equal(run.status, failAt ? 1 : 0, run.stderr);
+    const report = JSON.parse(readFileSync(join(out, 'report.json'))); assert.equal(report.pairOwners.length, expectedOwners, JSON.stringify(report));
+    assert(report.pairs.every(row => row.resultEquivalent && row.go.valid && row.rust.valid));
+    if (failAt) {
+      assert.equal(report.state, 'failed'); assert(report.groups.every(group => group.state === 'failed_final_integrity' && !group.correctAndComplete));
+      const terminal = report.pairOwners.at(-1); assert.equal(terminal.pairTerminal.state, 'failed_final_integrity');
+      const pair = JSON.parse(readFileSync(join(dirname(terminal.receipt), 'pair.json'))); assert.equal(pair.valid, false); assert.equal(pair.rows.length, 2);
+      assert(pair.rows.every(row => row.resultEquivalent && row.pairTerminal.state === 'failed_final_integrity'));
+      assert.equal(JSON.parse(readFileSync(terminal.receipt)).state, 'failed');
+    } else { assert.equal(report.state, 'passed_selected_data_paths_full_acceptance_open'); assert(report.groups.every(group => group.correctAndComplete && group.pairTerminalVerified)); }
+  }
 });
 function framed(blocks) {
   const header = Buffer.alloc(12 + blocks.length * 24); header.write('BLTE'); header.writeUInt32BE(header.length, 4); header[8] = 15; header.writeUIntBE(blocks.length, 9, 3);

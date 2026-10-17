@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 03:29 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`d86bb044db06ceceae9f23e70628efbf204756bf`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 03:29 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`bbee33587a8bbfe31a1ea192be645884f0e67b97`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -63,7 +63,7 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 ### Data 专用配对（前4路径等价，清理失败阻断后继）
 
-沿现有paired身份/owner/Windows原计时新增[Data入口与完整命令](tests/rust-performance-paired/data.README.md)，固定Go323完整优化包与匹配Rust优化artifact。独立受控preparer串行生成三个原fixture：微型SQL只核正确性；17MiB/三BLTE块真实内容读取；1031×519五种BLP存储模式分别默认PNG/WebP导出。逐样本验证完整行/顺序、源blob、全部像素、capture身份与有序依赖、原预算及真实冷热缓存工作。默认cold/warm各一对仅观察；显式acceptance内置单对preflight，再每性能路径20冷/20暖，SQL不冒性能样本。Node19/19真实通过，独审修正实际encodingIO布尔字段、完整byte-work及Go323 capture依赖三个问题；[30d实际结果](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6228602282)：三个fixture真实准备成功；SQL、17MiB BLTE、palette PNG/WebP共4路径冷暖8观察全部等价，16CLI均exit0/reaped。第4pair成功封存后scratch cleanup报EPERM，未到retired，原目录/owner/证据保留；后8路径与20对NOT_RUN。后继runner已改为已限长且完整认证的Buffer解码、关闭decoder缓存并finally销毁pipeline；尚未证明历史EPERM持有者。新增--resume-unattempted严格核原产品/输入/完整封存日志与前4完整等价路径，只用新owner执行剩8路径，不导入旧计时、不与20对模式混合。独立runnerRoot允许复用30d产品；Node26/26及独审通过。[d86 runner/30d产品实际续跑](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6228983589)前置52/52、剩8路径16冷暖观察/32CLI全等价且全部新owner清理回收成功。原4路径未重跑，旧owner不改不删；两批单pair不能拼成20对验收。BC1 WebP warm内存无完整样本，peak=null，CPU/I/O未测。完整新20对仍待执行。准备、构建和测试仍由唯一Windows队列安排，不新增清缓存/改配额/下载路径。
+沿现有paired身份/owner/Windows原计时新增[Data入口与完整命令](tests/rust-performance-paired/data.README.md)，固定Go323完整优化包与匹配Rust优化artifact。独立受控preparer串行生成三个原fixture：微型SQL只核正确性；17MiB/三BLTE块真实内容读取；1031×519五种BLP存储模式分别默认PNG/WebP导出。逐样本验证完整行/顺序、源blob、全部像素、capture身份与有序依赖、原预算及真实冷热缓存工作。默认cold/warm各一对仅观察；显式acceptance内置单对preflight，再每性能路径20冷/20暖，SQL不冒性能样本。Node19/19真实通过，独审修正实际encodingIO布尔字段、完整byte-work及Go323 capture依赖三个问题；[30d实际结果](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6228602282)：三个fixture真实准备成功；SQL、17MiB BLTE、palette PNG/WebP共4路径冷暖8观察全部等价，16CLI均exit0/reaped。第4pair成功封存后scratch cleanup报EPERM，未到retired，原目录/owner/证据保留；后8路径与20对NOT_RUN。后继runner已改为已限长且完整认证的Buffer解码、关闭decoder缓存并finally销毁pipeline；尚未证明历史EPERM持有者。新增--resume-unattempted严格核原产品/输入/完整封存日志与前4完整等价路径，只用新owner执行剩8路径，不导入旧计时、不与20对模式混合。独立runnerRoot允许复用30d产品；Node26/26及独审通过。[d86 runner/30d产品实际续跑](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6228983589)前置52/52、剩8路径16冷暖观察/32CLI全等价且全部新owner清理回收成功。原4路径未重跑，旧owner不改不删；两批单pair不能拼成20对验收。BC1 WebP warm内存无完整样本，peak=null，CPU/I/O未测。完整新20对仍待执行。bbee修复独立runner在acceptance模式误定位旧工具；后继把每pair末尾输入完整性终态纳入汇总，保输出等价事实但末核失败不得判通过。SQL唯一pair、第20pair及中间pair故障注入与成功控制组Node29/29通过，Windows正式20对待新runner。准备、构建和测试仍由唯一Windows队列安排，不新增清缓存/改配额/下载路径。
 
 ### 公开 Source project 选择修复（新增12项实测通过）
 

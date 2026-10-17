@@ -94,11 +94,12 @@ try {
       inputs: {go: config.go.binarySHA256, rust: config.rust.binarySHA256, fixture: fixture.receipt.inventory.sha256}, admissionOptions: {requiredBytes: 256 << 20, scratchReserveBytes: 256 << 20}});
     const ownership = {caseId: entry.id, iteration, preflight, receipt: job.receipt}; report.pairOwners.push(ownership);
     const destination = preflight && config.acceptance && entry.performance ? report.preflightPairs : report.pairs;
-    const rows = []; let valid = false;
+    const rows = []; let valid = false, phase = 'preparation', terminalFailure;
     try {
       assert.equal(inventory(fixture.directory, {maxFiles: 256, maxBytes: 64 << 20}).sha256, fixture.receipt.inventory.sha256);
       const homes = Object.fromEntries(['go', 'rust'].map(engine => [engine, join(job.directory, engine)]));
       for (const engine of ['go', 'rust']) { const seed = seeds[`${entry.fixture}-${engine}`]; cloneSeed(seed.home, homes[engine], seed.identity); assert.deepEqual(decodedIdentity(homes[engine]), []); }
+      phase = 'samples';
       for (const cacheMode of ['cold', 'warm']) {
         const row = {caseId: entry.id, iteration, cacheMode, preflight, order: orderFor(iteration), resultEquivalent: false, fixtureSHA256: fixture.receipt.inventory.sha256}; rows.push(row); destination.push(row); save();
         const values = {};
@@ -123,10 +124,14 @@ try {
         catch (error) { row.failure = error.message.slice(0, 4096); }
         save(); if (!row.resultEquivalent) break;
       }
+      phase = 'final_integrity';
       assert.equal(inventory(fixture.directory, {maxFiles: 256, maxBytes: 64 << 20}).sha256, fixture.receipt.inventory.sha256);
       valid = rows.length === 2 && rows.every(row => row.resultEquivalent);
-    } catch (error) { report.preparation.push({caseId: entry.id, iteration, preflight, failure: error.message.slice(0, 4096)}); }
+    } catch (error) { terminalFailure = {phase, message: error.message.slice(0, 4096)}; report.preparation.push({caseId: entry.id, iteration, preflight, failure: terminalFailure.message}); }
     finally {
+      const pairTerminal = {state: valid ? 'verified' : terminalFailure?.phase === 'final_integrity' ? 'failed_final_integrity' : 'failed_pair', ...(terminalFailure ? {failure: terminalFailure} : {})};
+      ownership.pairTerminal = pairTerminal;
+      for (const row of rows) row.pairTerminal = pairTerminal;
       writeFileSync(join(job.evidence, 'pair.json'), JSON.stringify({caseId: entry.id, iteration, preflight, valid, rows}, null, 2) + '\n');
       job.seal({state: fatal ? 'interrupted' : valid ? 'succeeded' : 'failed', handlesReaped: !fatal, logs: files(job.evidence)});
       if (!fatal && valid) {
