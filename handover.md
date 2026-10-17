@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 06:55 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`bbfe88265ee431b9ad925ab86dc52561742dd5ee`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 07:40 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`4a1da276664f236b081ca53cfb411245edae43de`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -40,6 +40,12 @@ e734已保存四个真实消费者边界，详细设计见 [DESIGN](DESIGN.md#wh
 Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共同占用原 retained 额度；不把所有模块强行并发。Core/Data 现有所有权与单堆 SQL 保留，Live 输入状态仍串行。成熟库按实际能力、成本、许可与升级验证选用，不为架构名义另造空 crate 或通用调度框架。
 
 ## 3. 当前实际验证与证据
+
+### 4a1 三模块优化前置与两项测试修订
+
+4a1 已保存 Source XML/TOC typed parse、Data 请求内 Metadata owner 复用、Live owned projection。当前本机反馈：remote admission 14通过1失败，Live 358通过1失败；controlled_open 19通过、local_query 83通过1原忽略，Source三组及Core evidence/capture通过，精确封存报告链接待补。release/package/新性能尚未运行；未提供固定Go报告的观察运行不计正式84项Go差分，既有Lua runtime身份不匹配也尚待核实。
+
+两处失败已定位并仅修测试，修订 Rust **NOT_RUN**：Data 原50ms在初次SQLite schema持久提交前开始，失败于open_metadata而未到目标acquire；现先用原control建立真实owner，再启动同50ms执行实际被占用的admission，保probe零调用、原owner仍持锁、原control正常及释放后成功准入断言。Live新测试从ResultVerified进入resume需要业务release，而所用recovery Peer只支持bind/unbind；现从真实Complete走disconnect/unbind，仍注入native checked-close失败，严格保完整raw report、持久关闭/无事务、一次打开关闭及owner claim已释放。生产实现、Peer防线、预算与deadline均未变；原4a1失败保留，不将静态修订计为复验通过。
 
 逐批结果、原失败及迁移前完整条目保留在[10月16日验证历史](docs/toolkit/rust-migration-evidence-2026-10-16.md)与[前期历史](docs/toolkit/rust-migration-evidence-2026-10-15.md)。不同版本、重叠过滤组不累计为当前唯一总数。
 

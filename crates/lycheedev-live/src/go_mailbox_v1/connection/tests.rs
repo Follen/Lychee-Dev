@@ -458,22 +458,33 @@ fn successful_turn_still_returns_checked_close_failure_and_releases_lease() {
 #[test]
 fn owned_terminal_projection_keeps_durable_raw_report_after_native_close_failure() {
     let f = Fixture::new();
-    f.operation(OperationStage::ResultVerified, "owned-report");
+    // The recovery-only Peer supports bind/unbind, not business release.
+    // Start with completed business and drive the actual unbind/close path;
+    // ResultVerified would correctly demand a release-capable business peer.
+    f.operation(OperationStage::Complete, "owned-report");
     let original = f.state().operation.unwrap().result_bytes.0;
     let mut service = f.service();
     service.environment.close_error = Some(error("fixture.native_close_failed"));
-    let outcome = service.resume(&f.id, &control());
+    let outcome = service.disconnect(&f.id, &control());
     assert!(code(&outcome, "fixture.native_close_failed"));
     let ServiceOutcome::ReportedWithFailure { result, .. } = outcome else {
         panic!("checked close failure must preserve the completed report");
     };
     assert_eq!(result.report_state, "verified");
+    assert!(result.complete && result.closed && !result.bound);
     assert_eq!(result.report.unwrap().0, original);
-    assert_eq!(f.state().operation.unwrap().result_bytes.0, original);
+    let saved = f.state();
+    assert!(saved.closed && !saved.bound && saved.transaction.is_none());
+    let operation = saved.operation.unwrap();
+    assert_eq!(operation.stage, OperationStage::Complete);
+    assert_eq!(operation.result_bytes.0, original);
     assert_eq!(service.environment.counts.borrow().opens, 1);
     assert_eq!(service.environment.counts.borrow().closes, 1);
-    let (_, mut next) = f.book().acquire(&f.id, &control()).unwrap();
-    next.close().unwrap();
+    // Retirement itself reacquires the released execution lease. A closed
+    // connection no longer has a claim that book.acquire could reopen.
+    let owner = inspect_window_owner(&f.target.addon_parent(), &f.target.resource(), &control());
+    assert!(owner.error.is_none(), "{:?}", owner.error);
+    assert!(!owner.occupied && owner.owner.is_none());
 }
 
 #[test]

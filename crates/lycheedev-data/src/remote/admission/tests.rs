@@ -283,14 +283,33 @@ fn adaptive_query_observes_only_after_actual_queued_admission() {
             Ok(available.load(Ordering::SeqCst))
         })
     });
+    // This tests admission, not a complete request finishing within 50 ms.
+    // Prepare the real owner (including the first durable SQLite schema commit)
+    // before starting the unchanged short deadline for the blocked acquire.
+    let opened = OpenWorkspace::open_metadata(&home, &original, Some(&budget)).unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
     let short = OperationControl::uncancelable(Instant::now() + Duration::from_millis(50));
-    let error = OpenWorkspace::open_metadata(&home, &short, Some(&budget))
-        .unwrap()
+    let opened = OpenWorkspace {
+        control: &short,
+        ..opened
+    };
+    let error = opened
         .acquire(Policy::Ordinary)
         .err()
         .expect("held measurement blocks admission");
     assert_eq!(error.code, "command.deadline");
+    assert_eq!(error.exit_code, 5);
+    assert_eq!(short.check().unwrap_err().code, "command.deadline");
     assert_eq!(calls.load(Ordering::SeqCst), 0);
+    // The failed waiter must not release the other owner's real kernel lock.
+    let still_held = storage::ExclusiveLock::resource(
+        &home.join("locks/data-resources-v1"),
+        "admission",
+    )
+    .err()
+    .expect("measurement still owns the admission gate");
+    assert_eq!(still_held.code, "workspace.busy");
+    original.check().unwrap();
     available.store(512 << 20, Ordering::SeqCst);
     held.close().unwrap();
     let owner = OpenWorkspace::open_metadata(&home, &original, Some(&budget))
