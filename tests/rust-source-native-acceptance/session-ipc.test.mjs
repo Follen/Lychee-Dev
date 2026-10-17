@@ -7,7 +7,7 @@ import {spawnSync} from 'node:child_process';
 import {mkdirSync,mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {classifyPhaseDiagnostic,bootstrapApiSource,bootstrapEnvironmentInputSHA256,assertBootstrapEnvironment,BOOTSTRAP_API_PATH,bootstrapTinyOwner,acceptanceCliArgs,nativePipeName,parsePeerJson,tinyQuery,tinySnapshot,tinySource,fixtureSelection,SESSION_LIMITS,runSessionGroup} from './session-ipc.mjs';
+import {classifyPhaseDiagnostic,bootstrapApiSource,bootstrapEnvironmentInputSHA256,assertBootstrapEnvironment,BOOTSTRAP_API_PATH,bootstrapTinyOwner,admitIdentityVariant,acceptanceCliArgs,nativePipeName,parsePeerJson,tinyQuery,tinySnapshot,tinySource,fixtureSelection,SESSION_LIMITS,runSessionGroup} from './session-ipc.mjs';
 
 const sha=value=>createHash('sha256').update(value).digest('hex');
 const luac={version:'5.1.5',platform:'windows-amd64',executable_sha256:'a'.repeat(64),executable_bytes:1};
@@ -108,7 +108,29 @@ test('identity variant project status uses its real path-local contract without 
   for(const path of [['source','refs'],['source','session','status'],['project','sync']])
     assert.throws(()=>acceptanceCliArgs(path,'home',{useHome:false}),/only path-local/);
   const controller=readFileSync(new URL('./run.mjs',import.meta.url),'utf8');
-  assert(controller.includes("invoke('variant-project-validate', ['project', 'status', '--path', project], {useHome: false})"));
+  assert(controller.includes("admitIdentityVariant(invoke, project, selection, oracle.documents)"));
+});
+
+test('variant admission authenticates persisted snapshot before explicit native query',()=>{
+  const selection={id:`PIN-${'a'.repeat(64)}`,source:{repository:'wow-ui-source',product:'retail',exactCommit:'b'.repeat(40)}};
+  const expected={repository:selection.source.repository,product:'retail',commit:selection.source.exactCommit,documents:4036,complete:true};
+  const calls=[];
+  const invoke=(id,args,options={})=>{calls.push({id,args:acceptanceCliArgs(args,'home',options)});return {result:expected,envelope:{context:{snapshot:selection.id}}};};
+  assert.equal(admitIdentityVariant(invoke,'project',selection,4036),selection.id);
+  assert.deepEqual(calls,[
+    {id:'variant-project-validate',args:['project','status','--path','project','--format','json']},
+    {id:'variant-project-index',args:['source','index','--project','project','--home','home','--format','json']},
+  ]);
+  for(const [key,value] of [['repository','foreign'],['product','classic'],['commit','c'.repeat(40)],['documents',4035],['complete',false]]) {
+    assert.throws(()=>admitIdentityVariant((id)=>({result:id==='variant-project-index'?{...expected,[key]:value}:expected,envelope:{context:{snapshot:selection.id}}}),'project',selection,4036));
+  }
+  assert.throws(()=>admitIdentityVariant(()=>({result:expected,envelope:{context:{snapshot:'PIN-wrong'}}}),'project',selection,4036),/persisted variant snapshot/);
+  const controller=readFileSync(new URL('./run.mjs',import.meta.url),'utf8');
+  assert(controller.includes("snapshot: variant.snapshot"));
+  assert(controller.includes("assert.notEqual(snapshot, pin"));
+  assert(controller.includes("assertReuse(second, changed, {changed: true})"));
+  assert(controller.includes("assertReuse(changed, restored, {changed: true})"));
+  assert(controller.includes("assert.equal(restored.inputIdentity, first.inputIdentity)"));
 });
 
 test('all bootstrap public commands and flags exist in the fixed production contract',()=>{

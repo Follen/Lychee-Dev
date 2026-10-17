@@ -66,7 +66,12 @@ The identity-variant `project status --path` preflight is path-local and receive
 only `--format json`, without `--home`. Source and workspace operations still
 receive the explicit isolated home. A runner repair for this preflight may use
 the existing separately sealed-runner procedure above; record both identities
-and preserve the original failed report.
+and preserve the original failed report. The variant then runs real `source index
+--project` to authenticate and persist its immutable selection; its returned
+context snapshot, source commit, repository/product, document count and complete
+index are checked before native refs uses that explicit snapshot. Changed and
+restored input identities and same-owner reuse remain mandatory. This explicit
+route does not close the separately tracked public project-selection mismatch.
 
 ## Full Retail group
 

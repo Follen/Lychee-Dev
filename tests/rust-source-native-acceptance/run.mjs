@@ -10,7 +10,7 @@ import os from 'node:os';
 import {beginMemoryPhase, endMemoryPhase, nativeMemoryPhase} from '../../tools/rust-owned-memory.mjs';
 import {assertEnvelope, assertAnchor, sha256} from '../rust-source-full-corpus/assertions.mjs';
 import {jsonFile, loadCurrentWorkflow} from '../rust-skill-usage/assertions.mjs';
-import {acceptanceCliArgs,createSessionPeer,parsePeerJson} from './session-ipc.mjs';
+import {acceptanceCliArgs,admitIdentityVariant,createSessionPeer,parsePeerJson} from './session-ipc.mjs';
 import {snapshotDiagnostics,captureDiagnostics,inspectTerminal} from './diagnostics.mjs';
 import {assertApiType, assertContextSnippets, assertExecutedContext, assertFullNative, assertMaterial, assertNestedControllerRetired, assertPrerequisite, assertReuse, fixturePin, groupBudget, rebuildXmlInventory} from './assertions.mjs';
 
@@ -81,11 +81,12 @@ async function check(caseId, work) {
   catch (error) { if (error.fatalProcessFailure) fatal = true; report.checks.push({caseId, state: 'failed', wallMillis: performance.now() - time, reason: error.message}); save(); return false; }
 }
 function fixed(args) { assert(pin); return [...args, '--snapshot', pin]; }
-function relation(command, {reuse = false, project} = {}) {
+function relation(command, {reuse = false, snapshot = pin} = {}) {
   const args = ['source', command, '--symbol', oracle.anchors[0].symbol, '--limit', command === 'refs' ? '25' : '50', '--release', release];
   if (command === 'refs') args.push('--direction', 'incoming'); else args.push('--depth', '0', '--max-lines', '80', '--max-bytes', '16384');
   if (reuse) args.push('--session-reuse');
-  return project ? [...args, '--project', project] : fixed(args);
+  assert.match(snapshot, /^PIN-[a-f0-9]{64}$/);
+  return [...args, '--snapshot', snapshot];
 }
 async function finishResourcePeer(caseId,{requireExit=false}={}) {
   if(!resourcePeer)return;
@@ -192,8 +193,9 @@ function makeIdentityVariant() {
   const declaration = {schema: 'lycheedev.project.v1', product: oracle.product}, lock = {schema: 'lycheedev.project-lock.v1', selection};
   writeFileSync(join(project, 'lycheedev.json'), JSON.stringify(declaration)); writeFileSync(join(project, 'lycheedev.lock.json'), JSON.stringify(lock));
   writeFileSync(join(out, 'identity-variant.json'), JSON.stringify({scope: 'Synthetic local descendant, not upstream product evidence', base: oracle.commit, commit, tree, note, blob, declaration, lock, commitRaw}, null, 2) + '\n');
-  invoke('variant-project-validate', ['project', 'status', '--path', project], {useHome: false});
-  return {project, commit};
+  const snapshot = admitIdentityVariant(invoke, project, selection, oracle.documents);
+  assert.notEqual(snapshot, pin, 'variant selection differs from original');
+  return {project, commit, snapshot};
 }
 try {
   if (group === 'full') {
@@ -263,7 +265,7 @@ try {
     });
     await check('changed-full-corpus-identity-reprepares-and-restores', async () => {
       assert(second); const variant = makeIdentityVariant();
-      const changed = assertFullNative(invoke('session-changed-identity', relation('refs', {reuse: true, project: variant.project})).result, oracle, corpus, workflow.nativeCallsite, {mode: 'session', commit: variant.commit});
+      const changed = assertFullNative(invoke('session-changed-identity', relation('refs', {reuse: true, snapshot: variant.snapshot})).result, oracle, corpus, workflow.nativeCallsite, {mode: 'session', commit: variant.commit});
       assertReuse(second, changed, {changed: true}); assert.deepEqual(await diagnostic('session-changed', changed.nativeSession.workerPid), firstOwner);
       const actualMaterial = materialEvidence('variant', variant.commit);
       const restored = assertFullNative(invoke('session-restored-retail', relation('refs', {reuse: true})).result, oracle, corpus, workflow.nativeCallsite, {mode: 'session'});

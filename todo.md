@@ -53,6 +53,8 @@ Complete end-to-end production behavior first, then add the corresponding tests 
 
 - [ ] Validate the implemented empty-Lua execution correction against fixed Go323: explicit authenticated Empty bodies preserve load occurrence, native activation, original charges and Continue; whitespace/comments/semicolons keep their real Blocks, malformed/missing inputs keep first errors. Eight new native regressions cover real TOC/XML, BOM/repetition/entry, Unknown, quota/cancellation and full nonempty old-boundary facts/charge comparison; Rust NOT_RUN. Preserve de903 fixture failure and the independent 02b fixture repair; neither proves production empty execution passed.
 
+- [ ] Repair and verify Source refs/context project selection against fixed Go323: public commands promise omitted snapshot uses explicit/nearest project, but relations::with_engine currently rejects it before resolve_pinned. The identity acceptance runner now prepares a real persisted variant pin through source index and uses explicit snapshot; that does not close this separate product contract gap. Preserve first errors, control, explicit snapshot priority and real consumer regressions.
+
 ## Current finite closure queue (2026-10-16 19:28 UTC)
 
 - [x] Prove normal public Facts full fields/order against fixed Go323: e843's real 4,036-document comparison has zero differing files and exact totals. This does not close malformed diagnostics, native analysis or performance.

@@ -125,6 +125,21 @@ export function acceptanceCliArgs(args, home, {useHome = true} = {}) {
   return [...args, ...(useHome ? ['--home', home] : []), '--format', 'json'];
 }
 
+// Admit the isolated project's immutable pin through a real public operation,
+// then use that authenticated explicit snapshot for the identity-reuse probe.
+export function admitIdentityVariant(invoke, project, selection, documents) {
+  assert.match(selection.id, /^PIN-[a-f0-9]{64}$/);
+  invoke('variant-project-validate', ['project', 'status', '--path', project], {useHome: false});
+  const indexed = invoke('variant-project-index', ['source', 'index', '--project', project]);
+  assert.equal(indexed.envelope.context.snapshot, selection.id, 'persisted variant snapshot');
+  for (const [key, expected] of Object.entries({repository:selection.source.repository,
+    product:selection.source.product, commit:selection.source.exactCommit, documents})) {
+    assert.equal(indexed.result[key], expected, `variant index ${key}`);
+  }
+  assert.equal(indexed.result.complete, true, 'complete variant source index');
+  return selection.id;
+}
+
 export async function bootstrapTinyOwner({binary,home,release,evidenceDir,invoke,timeoutMs=60_000}){
   assert.equal(typeof invoke,'function');const started=performance.now();mkdirSync(evidenceDir,{recursive:true});
   const command=(id,args,options={})=>invoke(id,args,{...options,timeout:Math.min(45_000,budget(started,timeoutMs)),phase:'local'});
