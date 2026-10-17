@@ -5,7 +5,7 @@ import {readFileSync, mkdtempSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {RESULT_STRING_BYTES, HISTORY_EVENTS, REPEATS, SCOPES, verifyPerformanceReport} from './live-contract.mjs';
+import {RESULT_STRING_BYTES, HISTORY_EVENTS, REPEATS, SCOPES, APPEND_PHASES, verifyPerformanceReport} from './live-contract.mjs';
 import {ORACLE} from '../rust-parity/formal-lua-3.2.3/assertions.mjs';
 import {TEST, SUPPORT, performancePaths, selectTestExecutable, verifyTestOutput} from '../../tools/rust-live-offline-performance.mjs';
 const root=fileURLToPath(new URL('../..',import.meta.url));
@@ -36,6 +36,32 @@ test('validates bounded 27-sample schema and nine diagnostic-only groups',()=>{
   assert.equal(actual.samples,27);assert.equal(actual.groups.length,9);assert.equal(actual.acceptance,'diagnostic_only');
   assert.equal(actual.goHostComparison,'not_available');
 });
+function profiledFixture() {
+  const report=fixture();
+  for(const row of report.samples) row.nestedJournalAppend={
+    schema:'lycheedev.live-journal-append-profile.v1', includedIn:'calls.journal.append.wallNanos',
+    measurement:{calls:30,wallNanos:8,phases:Object.fromEntries(APPEND_PHASES.map(key=>[key,0])),
+      cacheHits:29,fullChainReplays:1,readBytes:5000,equalityInputBytes:4000,replayedEvents:10,
+      maximumCacheCapacityBytes:2000,maximumEligiblePairedRawCapacityBytes:4000},
+    unattributedWallNanos:8,wrapperRemainderNanos:2,cacheCapacityLimitBytes:8<<20,eligiblePairedRawCapacityLimitBytes:16<<20,
+    memoryScope:'eligible post-allocation raw cache/read capacity observations; excludes allocator excess/transient growth, event/State allocations and allocator/RSS totals'};
+  return report;
+}
+test('accepts optional complete nested append profile without rewriting historical evidence',()=>{
+  assert.equal(verifyPerformanceReport(profiledFixture()).samples,27);
+  assert.equal(verifyPerformanceReport(fixture()).samples,27);
+});
+for(const [name,change] of [
+  ['partial matrix',r=>delete r.samples[0].nestedJournalAppend],
+  ['phase overlap',r=>r.samples[0].nestedJournalAppend.measurement.phases.read_chain=1],
+  ['wrapper overlap',r=>r.samples[0].nestedJournalAppend.wrapperRemainderNanos++],
+  ['setup calls included',r=>r.samples[0].nestedJournalAppend.measurement.calls++],
+  ['unaccounted replay',r=>r.samples[0].nestedJournalAppend.measurement.fullChainReplays++],
+  ['retained capacity excess',r=>r.samples[0].nestedJournalAppend.measurement.maximumCacheCapacityBytes=(8<<20)+1],
+  ['paired capacity excess',r=>r.samples[0].nestedJournalAppend.measurement.maximumEligiblePairedRawCapacityBytes=(16<<20)+1],
+  ['equality bytes exceed read',r=>r.samples[0].nestedJournalAppend.measurement.equalityInputBytes=5001],
+  ['phase missing',r=>delete r.samples[0].nestedJournalAppend.measurement.phases.close_append],
+]) test(`rejects append profile ${name}`,()=>{const r=profiledFixture();change(r);assert.throws(()=>verifyPerformanceReport(r));});
 for(const [name,change] of [
   ['missing sample',r=>r.samples.pop()],['duplicate sample',r=>r.samples[1]=clone(r.samples[0])],
   ['wrong Go oracle',r=>r.oracle='0'.repeat(40)],['failure hidden',r=>r.samples[0].completion.bodyPanicked=true],

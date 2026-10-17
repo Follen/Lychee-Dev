@@ -255,3 +255,22 @@ fn go_mailbox_v1_journal_cancelled_budget_and_blocker_saves_never_advance_progre
         assert_eq!(journal.appends[0].1.progress_version, 41, "{event}");
     }
 }
+
+#[test]
+fn go_mailbox_v1_journal_prepared_event_returns_exact_bytes_and_existing_checksum() {
+    let state = state();
+    let first = prepare_event(&[], "<&>荔枝", &state).unwrap();
+    let first_event: MemoryEvent = serde_json::from_slice(&first).unwrap();
+    let prepared = prepare_event_at(1, &first_event.checksum, "next\n<&>", &state).unwrap();
+    assert_eq!(
+        prepared.bytes,
+        prepare_event(&[first_event], "next\n<&>", &state).unwrap()
+    );
+    let decoded: MemoryEvent = serde_json::from_slice(&prepared.bytes).unwrap();
+    assert_eq!(prepared.checksum, decoded.checksum);
+    assert_eq!(prepared.checksum, event_hash(&decoded).unwrap());
+    assert_eq!(
+        prepare_event_at(MAX_EVENTS, "", "no", &state).err(),
+        Some(ContractError("journal.memory_log_limit"))
+    );
+}

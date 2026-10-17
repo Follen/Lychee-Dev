@@ -309,6 +309,13 @@ fn sample(inputs: &Inputs, payload_bytes: usize, history: usize, repeat: usize) 
             )
         });
         owner = Some(peer.owner());
+        // Setup appends remain in complete sample wall, but never enter this
+        // Driver-only nested profile or its call count.
+        pending_journal
+            .as_mut()
+            .unwrap()
+            .inner
+            .start_append_profile();
         driver = Some(timeline.run("driver_construct", || {
             Driver::from_state(
                 state,
@@ -447,6 +454,21 @@ fn sample(inputs: &Inputs, payload_bytes: usize, history: usize, repeat: usize) 
         let exchange_wall = d.backend.inner.exchange_wall_nanos;
         assert_eq!(d.backend.inner.exchange_calls, 6);
         assert!(exchange_wall <= backend_wall);
+        let append = d.journal.inner.append_profile().unwrap();
+        let append_phase_wall: u64 = append.phases.values().sum();
+        let measured_append = &d.journal.meter.0["append"];
+        assert_eq!(append.calls, measured_append.calls);
+        assert!(append_phase_wall <= append.wall_nanos);
+        assert!(append.wall_nanos <= measured_append.wall_nanos);
+        assert!(append.maximum_cache_capacity_bytes <= 8 << 20);
+        assert!(append.maximum_eligible_paired_raw_capacity_bytes <= 16 << 20);
+        let append_diagnostic = json!({
+            "schema":"lycheedev.live-journal-append-profile.v1", "includedIn":"calls.journal.append.wallNanos",
+            "measurement":append, "unattributedWallNanos":append.wall_nanos-append_phase_wall,
+            "wrapperRemainderNanos":measured_append.wall_nanos-append.wall_nanos,
+            "memoryScope":"eligible post-allocation raw cache/read capacity observations; excludes allocator excess/transient growth, event/State allocations and allocator/RSS totals",
+            "cacheCapacityLimitBytes":8 << 20, "eligiblePairedRawCapacityLimitBytes":16 << 20
+        });
         let meters = json!({"journal":d.journal.meter,"backend":d.backend.meter});
         let peer_records = json!({"readBytes":d.backend.inner.record_read_bytes, "decodeCalls":d.backend.inner.record_decode_calls, "decodeWallNanos":d.backend.inner.record_decode_wall_nanos, "payloadCopyBytes":d.backend.inner.record_payload_copy_bytes, "includedIn":"driverPartitionNanos.backendIncludingPeerExchange", "scope":"actual offline Peer record rereads/production codec, including subsequently rejected stale records; not native process-memory IO"});
         assert!(d.backend.inner.record_decode_wall_nanos <= backend_wall);
@@ -463,7 +485,7 @@ fn sample(inputs: &Inputs, payload_bytes: usize, history: usize, repeat: usize) 
         measurements = Some(
             json!({"body":body,"history":{"inputEvents":history,"inputLogBytes":before.len(),"afterCheckpointEvents":after_events,"afterCheckpointLogBytes":after.len(),"appendInputEvents":after_events},
             "driverPartitionNanos":{"journal":journal_wall,"backendIncludingPeerExchange":backend_wall,"driverAndMeasurementRemainder":driver_wall-journal_wall-backend_wall,"total":driver_wall},
-            "nestedPeerExchange":{"wallNanos":exchange_wall,"calls":6,"includedIn":"driverPartitionNanos.backendIncludingPeerExchange","meaning":"offline Lua execution, pipes, scheduling and fixture file IO; not pure wait or game latency"},"calls":meters,"nestedPeerRecords":peer_records,
+            "nestedPeerExchange":{"wallNanos":exchange_wall,"calls":6,"includedIn":"driverPartitionNanos.backendIncludingPeerExchange","meaning":"offline Lua execution, pipes, scheduling and fixture file IO; not pure wait or game latency"},"calls":meters,"nestedPeerRecords":peer_records,"nestedJournalAppend":append_diagnostic,
             "ownedBytes":{"snapshotArtifactCount":snap.artifacts.len(),"snapshotArtifactCopyBytes":copied,"snapshotArtifactCapacityBytes":capacity,"codecPayloadCopyBytes":codec_copy,"codecPayloadCapacityBytes":codec_capacity,"codecPayloadVectors":decoded.len(),"ownedProjectionReportCopyBytes":0,"ownedProjectionReportCapacityBytes":report_capacity,"borrowedProjectionReportCopyBytes":moved.len(),"stateSerializedBytes":state_bytes.len(),"terminalSerializedBytes":output.len(),"totalAllocatorCalls":null,"allocatorRequestedBytes":null,"peakRSS":null},
             "checks":{"exactReport":true,"wireRoundtrip":true,"checksumSequence":true,"checkpointBoundary":true,"persistBeforeRelease":true,"noReplay":true,"sixOrderedInputs":true,"ownedReportPointerCapacity":true,"ownedBorrowedExactWire":true,"malformedCodecRejected":true}}),
         );

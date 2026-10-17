@@ -12,7 +12,7 @@ use super::journal::read_log_bytes;
 use super::journal::{
     CHECKPOINT_BYTES, CHECKPOINT_EVENTS, MAX_EVENT_BYTES, MAX_EVENTS, MAX_HISTORY_SEGMENTS,
     MAX_LOG_BYTES, MemoryEvent, StateJournal, event_hash, go_json_bytes, hydrate, prepare_event,
-    snapshot,
+    prepare_event_at, snapshot,
 };
 use super::observations::{ChannelError, ChannelResult, check_control};
 use super::state::{
@@ -26,11 +26,74 @@ use std::{
     fs::{self, File, OpenOptions, TryLockError},
     io::{Read, Write},
     path::{Path, PathBuf},
+    sync::Mutex,
     time::Duration,
 };
 
 const OWNER_SCHEMA: &str = "lycheedev.window-owner.v1";
 const OWNER_BYTES: usize = 4096;
+// A performance eligibility limit, not a new input limit or whole-heap budget.
+// Larger legal logs keep the original complete parser. Admission bounds the
+// retained observed capacity and next read request at 8 MiB each. An allocator
+// may return extra capacity: reject retention immediately afterward. These are
+// eligible post-allocation observations, not a transient allocator/RSS limit.
+const CHAIN_CACHE_BYTES: usize = CHECKPOINT_BYTES;
+struct VerifiedChain {
+    bytes: Vec<u8>,
+    count: usize,
+    head: String,
+}
+#[derive(Default)]
+struct ReadCache {
+    chain: Option<VerifiedChain>,
+    #[cfg(test)]
+    paired_capacity: usize,
+    // Deterministic real-file growth cut, absent from production builds.
+    #[cfg(test)]
+    grow_after_metadata: bool,
+}
+impl VerifiedChain {
+    fn eligible(&self) -> bool {
+        self.bytes.capacity() <= CHAIN_CACHE_BYTES && self.count <= MAX_EVENTS
+    }
+}
+
+#[cfg(test)]
+#[derive(Default, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AppendProfile {
+    pub calls: u64,
+    pub wall_nanos: u64,
+    pub phases: BTreeMap<&'static str, u64>,
+    pub cache_hits: u64,
+    pub full_chain_replays: u64,
+    pub read_bytes: u64,
+    pub equality_input_bytes: u64,
+    pub replayed_events: u64,
+    pub maximum_cache_capacity_bytes: usize,
+    pub maximum_eligible_paired_raw_capacity_bytes: usize,
+}
+macro_rules! append_phase {
+    ($journal:expr, $name:literal, $action:expr) => {{
+        #[cfg(test)]
+        let started = $journal
+            .append_profile
+            .as_ref()
+            .map(|_| std::time::Instant::now());
+        let result = $action;
+        #[cfg(test)]
+        if let Some(started) = started {
+            *$journal
+                .append_profile
+                .as_mut()
+                .unwrap()
+                .phases
+                .entry($name)
+                .or_default() += u64::try_from(started.elapsed().as_nanos()).unwrap();
+        }
+        result
+    }};
+}
 
 pub(super) fn error(code: &'static str) -> ChannelError {
     ContractError(code).into()
@@ -246,6 +309,15 @@ pub(super) fn read_file(
     invalid: &'static str,
     control: &OperationControl,
 ) -> ChannelResult<Option<Vec<u8>>> {
+    read_file_with_cache(path, maximum, invalid, control, &mut ReadCache::default())
+}
+fn read_file_with_cache(
+    path: &Path,
+    maximum: usize,
+    invalid: &'static str,
+    control: &OperationControl,
+    cache: &mut ReadCache,
+) -> ChannelResult<Option<Vec<u8>>> {
     check_control(control)?;
     let metadata = match fs::symlink_metadata(path) {
         Ok(m) => m,
@@ -261,7 +333,38 @@ pub(super) fn read_file(
         if !metadata.is_file() || metadata.len() > maximum as u64 {
             return Err(error(invalid));
         }
+        // The opened handle, not an earlier path size or mtime, governs this
+        // allocation. Only an equal-length eligible cache can coexist with it.
+        if cache
+            .chain
+            .as_ref()
+            .is_some_and(|c| !c.eligible() || c.bytes.len() as u64 != metadata.len())
+        {
+            cache.chain = None;
+        }
         let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        // Vec's observable capacity is the accounting fact, not requested size.
+        // A requested read <=8 MiB can still return more capacity. Only after
+        // this check may two eligible <=8 MiB raw owners remain together; this
+        // does not claim an instantaneous allocator peak before eviction.
+        if bytes.capacity() > CHAIN_CACHE_BYTES {
+            cache.chain = None;
+        }
+        #[cfg(test)]
+        if let Some(prior) = &cache.chain {
+            cache.paired_capacity = cache
+                .paired_capacity
+                .max(bytes.capacity() + prior.bytes.capacity());
+        }
+        #[cfg(test)]
+        if cache.grow_after_metadata {
+            let mut writer = OpenOptions::new()
+                .append(true)
+                .open(path)
+                .map_err(io_error)?;
+            writer.write_all(b"g").map_err(io_error)?;
+            close_file(writer)?;
+        }
         let mut buffer = [0u8; 65536];
         loop {
             check_control(control)?;
@@ -273,6 +376,12 @@ pub(super) fn read_file(
             }
             if count > remaining {
                 return Err(error(invalid));
+            }
+            // A writer can grow the file after handle metadata. Evict BEFORE
+            // extend/reserve can grow the current read vector, retaining the
+            // original legal-log read behavior and its original error order.
+            if count > bytes.capacity() - bytes.len() {
+                cache.chain = None;
             }
             bytes.extend_from_slice(&buffer[..count]);
         }
@@ -326,6 +435,9 @@ fn read_segment(path: &Path, control: &OperationControl) -> ChannelResult<Segmen
     }
     let bytes =
         read_file(path, MAX_LOG_BYTES, "journal.memory_log_limit", control)?.unwrap_or_default();
+    parse_segment(bytes, control)
+}
+fn parse_segment(bytes: Vec<u8>, control: &OperationControl) -> ChannelResult<Segment> {
     let mut events: Vec<MemoryEvent> = Vec::new();
     let mut offset = 0;
     while offset < bytes.len() {
@@ -410,7 +522,8 @@ fn write_artifact(path: &Path, bytes: &[u8], control: &OperationControl) -> Chan
     if bytes.len() > MAX_WRITTEN_ARTIFACT_BYTES {
         return Err(error("live.channel_artifact_invalid"));
     }
-    if let Some(existing) = read_file(path, MAX_PAYLOAD, "live.channel_artifact_invalid", control)? {
+    if let Some(existing) = read_file(path, MAX_PAYLOAD, "live.channel_artifact_invalid", control)?
+    {
         if existing != bytes {
             return Err(error("live.channel_artifact_corrupt"));
         }
@@ -440,7 +553,11 @@ pub(super) fn seed_connection(
     let bytes = prepare_event(&[], "connection_created", &prepared.state)?;
     fs::create_dir_all(paths.log.parent().unwrap()).map_err(io_error)?;
     check_control(control)?;
-    let mut file = OpenOptions::new().write(true).create_new(true).open(&paths.log).map_err(io_error)?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&paths.log)
+        .map_err(io_error)?;
     let write = (|| {
         // The cut follows real bytes, permitting a child to exit without Drop
         // and preserve an actual torn first event. It has no production hook.
@@ -605,6 +722,11 @@ pub struct DurableChannelJournal {
     lease: Option<Lease>,
     head: String,
     poisoned: bool,
+    // Mutex preserves the existing Sync/public load(&self) contract. It is held
+    // only to take/install an optional cache, never during IO or verification.
+    chain_cache: Mutex<Option<VerifiedChain>>,
+    #[cfg(test)]
+    append_profile: Option<AppendProfile>,
     #[cfg(test)]
     fault: Option<tests::Fault>,
 }
@@ -684,6 +806,9 @@ impl DurableChannelJournal {
             lease: Some(lease),
             head,
             poisoned: false,
+            chain_cache: Mutex::new(None),
+            #[cfg(test)]
+            append_profile: None,
             #[cfg(test)]
             fault: None,
         };
@@ -693,6 +818,11 @@ impl DurableChannelJournal {
         if let Err(e) = journal.check(control) {
             return joined([Err(e), journal.close()]).map(|_| unreachable!());
         }
+        journal.install_cache(VerifiedChain {
+            count: segment.events.len(),
+            head: journal.head.clone(),
+            bytes: segment.bytes,
+        });
         Ok(journal)
     }
     pub fn paths(&self) -> &ChannelPaths {
@@ -713,7 +843,20 @@ impl DurableChannelJournal {
     /// Explicit close reports errors. Drop still releases the OS handle on
     /// unwind; no marker, log, history, artifact, or lock file is removed.
     pub fn close(&mut self) -> ChannelResult<()> {
-        self.lease.take().map_or(Ok(()), Lease::close)
+        drop(self.take_cache());
+        let result = self.lease.take().map_or(Ok(()), Lease::close);
+        #[cfg(test)]
+        if self
+            .fault
+            .as_ref()
+            .is_some_and(|f| f.point == FaultPoint::LeaseClosed)
+        {
+            return joined([
+                result,
+                self.cut(FaultPoint::LeaseClosed, &OperationControl::default()),
+            ]);
+        }
+        result
     }
     fn check(&self, control: &OperationControl) -> ChannelResult<()> {
         check_control(control)?;
@@ -726,11 +869,124 @@ impl DurableChannelJournal {
         read_owner(&self.scope, &self.owner, control)
     }
     fn segment(&self, control: &OperationControl) -> ChannelResult<Segment> {
+        // load, history and checkpoint keep their complete original readers;
+        // none may retain this cache alongside a legal 64 MiB fallback read.
+        drop(self.take_cache());
         let segment = read_segment(&self.paths.log, control)?;
         if segment.events.last().map(|e| &e.checksum) != Some(&self.head) {
             return Err(error("journal.memory_checkpoint_conflict"));
         }
         Ok(segment)
+    }
+    fn take_cache(&self) -> Option<VerifiedChain> {
+        match self.chain_cache.lock() {
+            Ok(mut cache) => cache.take(),
+            Err(poisoned) => {
+                // Memoization uncertainty cannot become a business failure or
+                // authorize a fast path. Fresh verification can install again.
+                drop(poisoned.into_inner().take());
+                None
+            }
+        }
+    }
+    fn install_cache(&mut self, chain: VerifiedChain) {
+        let cache = self
+            .chain_cache
+            .get_mut()
+            .unwrap_or_else(|e| e.into_inner());
+        *cache = chain.eligible().then_some(chain);
+        self.chain_cache.clear_poison();
+        #[cfg(test)]
+        if let (Some(profile), Some(cache)) = (
+            &mut self.append_profile,
+            self.chain_cache.get_mut().unwrap(),
+        ) {
+            profile.maximum_cache_capacity_bytes = profile
+                .maximum_cache_capacity_bytes
+                .max(cache.bytes.capacity());
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn start_append_profile(&mut self) {
+        self.append_profile = Some(AppendProfile::default());
+    }
+    #[cfg(test)]
+    pub(crate) fn append_profile(&self) -> Option<&AppendProfile> {
+        self.append_profile.as_ref()
+    }
+    fn append_chain(&mut self, control: &OperationControl) -> ChannelResult<VerifiedChain> {
+        let mut cache = ReadCache {
+            chain: self.take_cache(),
+            ..ReadCache::default()
+        };
+        let bytes = append_phase!(
+            self,
+            "read_chain",
+            (|| {
+                if let Ok(metadata) = fs::symlink_metadata(&self.paths.log) {
+                    if !metadata.is_file() {
+                        return Err(error("journal.memory_log_not_regular"));
+                    }
+                }
+                Ok(read_file_with_cache(
+                    &self.paths.log,
+                    MAX_LOG_BYTES,
+                    "journal.memory_log_limit",
+                    control,
+                    &mut cache,
+                )?
+                .unwrap_or_default())
+            })()
+        )?;
+        #[cfg(test)]
+        if let Some(profile) = &mut self.append_profile {
+            profile.read_bytes += bytes.len() as u64;
+            profile.maximum_eligible_paired_raw_capacity_bytes = profile
+                .maximum_eligible_paired_raw_capacity_bytes
+                .max(cache.paired_capacity);
+        }
+        append_phase!(
+            self,
+            "verify_chain",
+            (|| {
+                check_control(control)?;
+                if let Some(prior) = cache.chain.take() {
+                    #[cfg(test)]
+                    if let Some(profile) = &mut self.append_profile {
+                        profile.equality_input_bytes += bytes.len() as u64;
+                    }
+                    if bytes == prior.bytes {
+                        check_control(control)?;
+                        #[cfg(test)]
+                        if let Some(profile) = &mut self.append_profile {
+                            profile.cache_hits += 1;
+                        }
+                        return Ok(VerifiedChain {
+                            bytes,
+                            count: prior.count,
+                            head: prior.head,
+                        });
+                    }
+                    // Changed bytes, including a same-size rewrite, must go through
+                    // the original parser/hash/error ordering. Drop before parsing.
+                    drop(prior);
+                }
+                let segment = parse_segment(bytes, control)?;
+                if segment.events.last().map(|e| &e.checksum) != Some(&self.head) {
+                    return Err(error("journal.memory_checkpoint_conflict"));
+                }
+                #[cfg(test)]
+                if let Some(profile) = &mut self.append_profile {
+                    profile.full_chain_replays += 1;
+                    profile.replayed_events += segment.events.len() as u64;
+                }
+                Ok(VerifiedChain {
+                    bytes: segment.bytes,
+                    count: segment.events.len(),
+                    head: self.head.clone(),
+                })
+            })()
+        )
     }
     fn immutable(
         &mut self,
@@ -769,73 +1025,100 @@ impl DurableChannelJournal {
         event: &str,
         state: &State,
     ) -> ChannelResult<()> {
-        self.check(control)?;
-        let segment = self.segment(control)?;
-        let snapshot = self.snapshot(state, control)?;
-        let bytes = prepare_event(&segment.events, event, &snapshot)?;
-        // prepare_event applies Go's JSON-only 2 MiB write bound. The fixed
-        // Go reader instead bounds the LF-inclusive line; deliberately retain
-        // that upstream inconsistency at exactly 2 MiB of JSON. Total-log
-        // admission includes the newline, as AppendMemoryEvent does.
-        if bytes.len() > MAX_LOG_BYTES.saturating_sub(segment.bytes.len()) {
+        append_phase!(self, "owner_initial", self.check(control))?;
+        let mut chain = self.append_chain(control)?;
+        let snapshot = append_phase!(self, "snapshot_artifacts", self.snapshot(state, control))?;
+        let prepared = append_phase!(
+            self,
+            "prepare_event",
+            prepare_event_at(chain.count, &chain.head, event, &snapshot)
+        )?;
+        let bytes = &prepared.bytes;
+        // Preserve Go's JSON-only write bound and stricter LF-inclusive reader.
+        if bytes.len() > MAX_LOG_BYTES.saturating_sub(chain.bytes.len()) {
             return Err(error("journal.memory_log_limit"));
         }
-        self.check(control)?;
-        self.cut(FaultPoint::BeforeAppend, control)?;
-        fs::create_dir_all(self.paths.log.parent().unwrap()).map_err(io_error)?;
-        let mut options = OpenOptions::new();
-        options.create(true).append(true);
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::OpenOptionsExt;
-            options.share_mode(1); // permit readers, deny other writes/deletes while appending
-        }
-        let mut file = options.open(&self.paths.log).map_err(io_error)?;
-        let write = (|| {
-            let metadata = file.metadata().map_err(io_error)?;
-            if !metadata.is_file() || metadata.len() != segment.bytes.len() as u64 {
-                return Err(error("journal.memory_checkpoint_conflict"));
-            }
-            self.check(control)?;
-            // A deterministic fixture can leave an actual incomplete final
-            // record before the ordinary write path; no production branch.
-            #[cfg(test)]
-            if self
-                .fault
-                .as_ref()
-                .is_some_and(|f| f.point == FaultPoint::AppendPartial)
-            {
-                file.write_all(&bytes[..bytes.len() / 2])
-                    .map_err(io_error)?;
-                self.cut(FaultPoint::AppendPartial, control)?;
-            }
-            for chunk in bytes.chunks(65536) {
-                check_control(control)?;
-                file.write_all(chunk).map_err(io_error)?;
-            }
-            self.cut(FaultPoint::AppendWritten, control)
-        })();
-        // Always attempt sync AND checked close, even after a short write or
-        // cancellation. Join independent failures instead of hiding one.
-        let sync = file.sync_all().map_err(io_error);
-        let sync_fault = self.cut(FaultPoint::AppendSynced, control);
-        let close = close_file(file);
-        let close_fault = self.cut(FaultPoint::AppendClosed, control);
-        joined([
-            write,
-            sync,
-            sync_fault,
-            close,
-            close_fault,
-            check_control(control),
-        ])?;
-        // Standalone non-first event cannot replay from sequence one. Extract
-        // only its hash after the actual append has completed successfully.
-        let last: MemoryEvent =
-            serde_json::from_slice(&bytes).map_err(|_| error("journal.memory_log_corrupt"))?;
-        self.head = last.checksum;
-        Ok(())
+        let mut file = append_phase!(
+            self,
+            "open_append",
+            (|| {
+                self.check(control)?;
+                self.cut(FaultPoint::BeforeAppend, control)?;
+                fs::create_dir_all(self.paths.log.parent().unwrap()).map_err(io_error)?;
+                let mut options = OpenOptions::new();
+                options.create(true).append(true);
+                #[cfg(windows)]
+                {
+                    use std::os::windows::fs::OpenOptionsExt;
+                    options.share_mode(1); // readers allowed, competing writes/deletes denied
+                }
+                options.open(&self.paths.log).map_err(io_error)
+            })()
+        )?;
+        let write = append_phase!(
+            self,
+            "write_append",
+            (|| {
+                let metadata = file.metadata().map_err(io_error)?;
+                if !metadata.is_file() || metadata.len() != chain.bytes.len() as u64 {
+                    return Err(error("journal.memory_checkpoint_conflict"));
+                }
+                self.check(control)?;
+                #[cfg(test)]
+                if self
+                    .fault
+                    .as_ref()
+                    .is_some_and(|f| f.point == FaultPoint::AppendPartial)
+                {
+                    file.write_all(&bytes[..bytes.len() / 2])
+                        .map_err(io_error)?;
+                    self.cut(FaultPoint::AppendPartial, control)?;
+                }
+                for chunk in bytes.chunks(65536) {
+                    check_control(control)?;
+                    file.write_all(chunk).map_err(io_error)?;
+                }
+                self.cut(FaultPoint::AppendWritten, control)
+            })()
+        );
+        // Every write outcome still attempts BOTH sync and checked close.
+        let (sync, sync_fault) = append_phase!(self, "sync_append", {
+            let sync = file.sync_all().map_err(io_error);
+            (sync, self.cut(FaultPoint::AppendSynced, control))
+        });
+        let (close, close_fault) = append_phase!(self, "close_append", {
+            let close = close_file(file);
+            (close, self.cut(FaultPoint::AppendClosed, control))
+        });
+        append_phase!(
+            self,
+            "finish_append",
+            (|| {
+                joined([
+                    write,
+                    sync,
+                    sync_fault,
+                    close,
+                    close_fault,
+                    check_control(control),
+                ])?;
+                self.head = prepared.checksum.clone();
+                // Successful Go writes at exactly 2 MiB JSON + LF are NOT valid
+                // reader input. Never certify them through the cache fast path.
+                if bytes.len() <= MAX_EVENT_BYTES
+                    && chain.bytes.len() + bytes.len() <= CHAIN_CACHE_BYTES
+                {
+                    chain.bytes.reserve_exact(bytes.len());
+                    chain.bytes.extend_from_slice(bytes);
+                    chain.count += 1;
+                    chain.head = prepared.checksum;
+                    self.install_cache(chain);
+                }
+                Ok(())
+            })()
+        )
     }
+
     fn checkpoint_inner(
         &mut self,
         control: &OperationControl,
@@ -870,6 +1153,11 @@ impl DurableChannelJournal {
         }
         let segment = self.segment(control)?;
         if segment.events.len() < CHECKPOINT_EVENTS && segment.bytes.len() < CHECKPOINT_BYTES {
+            self.install_cache(VerifiedChain {
+                count: segment.events.len(),
+                head: self.head.clone(),
+                bytes: segment.bytes,
+            });
             return Ok(());
         }
         let expected = &segment
@@ -881,12 +1169,8 @@ impl DurableChannelJournal {
         state.archive = expected.clone();
         let checkpoint = (|| {
             let snapshot = self.snapshot(state, control)?;
-            let bytes = prepare_event(&[], "checkpoint", &snapshot)?;
-            // Do not run the stricter reader over the just-generated event:
-            // Go accepts 2 MiB JSON plus LF here, even though ReadMemoryLog
-            // later rejects that LF-inclusive boundary. Capture its own hash.
-            let checkpoint: MemoryEvent =
-                serde_json::from_slice(&bytes).map_err(|_| error("journal.memory_log_corrupt"))?;
+            let prepared = prepare_event_at(0, "", "checkpoint", &snapshot)?;
+            let bytes = prepared.bytes;
             let archive = self.paths.history.join(format!("{expected}.jsonl"));
             self.immutable(
                 &archive,
@@ -903,7 +1187,14 @@ impl DurableChannelJournal {
             storage::atomic_write_controlled(&self.paths.log, &bytes, control)
                 .map_err(storage_error)?;
             self.cut(FaultPoint::CheckpointDurable, control)?;
-            self.head = checkpoint.checksum;
+            self.head = prepared.checksum.clone();
+            if bytes.len() <= MAX_EVENT_BYTES {
+                self.install_cache(VerifiedChain {
+                    bytes,
+                    count: 1,
+                    head: prepared.checksum,
+                });
+            }
             Ok(())
         })();
         if checkpoint.is_err() {
@@ -927,9 +1218,21 @@ impl StateJournal for DurableChannelJournal {
         event: &str,
         state: &State,
     ) -> ChannelResult<()> {
+        #[cfg(test)]
+        let started = self
+            .append_profile
+            .as_ref()
+            .map(|_| std::time::Instant::now());
         let result = self.append_inner(control, event, state);
         if result.is_err() {
             self.poisoned = true;
+            drop(self.take_cache());
+        }
+        #[cfg(test)]
+        if let Some(started) = started {
+            let profile = self.append_profile.as_mut().unwrap();
+            profile.calls += 1;
+            profile.wall_nanos += u64::try_from(started.elapsed().as_nanos()).unwrap();
         }
         result
     }
@@ -955,8 +1258,8 @@ impl StateJournal for DurableChannelJournal {
             // that same persisted representation without mutating live source
             // or weakening any of the other Operation identity/result fields.
             let bytes = json(operation)?;
-            let persisted: Operation = serde_json::from_slice(&bytes)
-                .map_err(|_| error("live.channel_result_invalid"))?;
+            let persisted: Operation =
+                serde_json::from_slice(&bytes).map_err(|_| error("live.channel_result_invalid"))?;
             if state.operation.as_ref() != Some(&persisted)
                 || operation.stage != OperationStage::ResultVerified
                 || operation.result_bytes.0.is_empty()
@@ -974,6 +1277,7 @@ impl StateJournal for DurableChannelJournal {
         })();
         if result.is_err() {
             self.poisoned = true;
+            drop(self.take_cache());
         }
         result
     }
@@ -986,6 +1290,7 @@ impl StateJournal for DurableChannelJournal {
         let result = self.checkpoint_inner(control, state, allow_pending_known_zero);
         if result.is_err() {
             self.poisoned = true;
+            drop(self.take_cache());
         }
         result
     }
@@ -995,6 +1300,8 @@ impl StateJournal for DurableChannelJournal {
 // contains no fault configuration or environment-variable control surface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FaultPoint {
+    #[cfg(test)]
+    LeaseClosed,
     ArtifactDurable,
     BeforeAppend,
     #[cfg(test)]

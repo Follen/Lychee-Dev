@@ -95,7 +95,17 @@ fixture data; they never become elapsed-time samples. No sleeps are added.
    `nestedPeerRecords` is also inside backend time: actual repeated record reads
    and production-codec decodes, including later-rejected stale records. Their
    counters describe this offline peer, not native process-memory reads.
-6. `state_snapshot`, standalone `codec_decode`, state serialization/roundtrip,
+6. Optional `nestedJournalAppend` replaces, never adds to,
+   `calls.journal.append.wallNanos`: ten disjoint phases, an internal remainder,
+   then the measured wrapper remainder. Phases cover initial owner check, real
+   full-chain read/checked close, exact-byte compare or original parser/hash,
+   snapshot/artifacts, event preparation, append open/owner checks, write,
+   sync, checked close, and successful-head/cache update. It is `cfg(test)` and
+   enabled only immediately before Driver ownership transfer, so setup/history
+   appends stay outside this nested profile. Original 0890 reports with no
+   profile remain valid; new matrices must provide all 27 complete profiles.
+   Partial mixtures are rejected.
+7. `state_snapshot`, standalone `codec_decode`, state serialization/roundtrip,
    borrowed/owned terminal projections and their public serialization are extra
    disjoint diagnostic scopes. They are not charged a second time to Driver.
    Borrowed projection precedes owned projection and can warm data; their
@@ -128,6 +138,40 @@ bytes and peak RSS remain `null`; no unsafe allocator hook is introduced. The
 simultaneously retained diagnostic outputs also make these fixtures unsuitable
 for claiming product peak memory.
 
+## Verified-chain cache and bounded observations
+
+The journal may retain one verified raw chain/count/head for its execution lease.
+Every append still reads all current bytes, checks the opened file and checked
+close, and compares exact bytes. Equality can reuse verified chain metadata;
+any change takes the original parser/hash/head-conflict path, including valid
+same-length JSON reordering. The lease alone, file length and mtime never prove
+content identity. Success advances the cache only after write, sync, checked
+close and control checks. Uncertain writes poison and evict. Load/history reads
+evict before their original full readers; checkpoints fully verify and rebuild;
+close releases the cache even when its result is an error.
+
+The cache eligibility limit is the existing 8-MiB checkpoint byte threshold,
+not a new legal-log limit. Retained **observed capacity** must fit 8 MiB. A cache
+may coexist with a new read only when opened-handle size equals its byte length,
+so the new read **request** is also at most 8 MiB. If the allocator returns larger
+observable capacity, retention is immediately disabled. File growth evicts
+before the read vector grows. `maximumEligiblePairedRawCapacityBytes` records
+eligible **post-allocation** cache/read observations, including the pair before
+subsequent growth eviction, at most 16 MiB. This is not a bound on allocator
+excess, transient reserve/reallocation, all event/State objects, or RSS. Legal
+larger logs retain the original bounded reader/parser rather than being rejected
+for cache eligibility. Live had a 64-MiB input bound, not a long-lived whole-heap
+budget; no new generic memory ledger or operation budget is introduced.
+
+`equalityInputBytes` is the byte length submitted to equality, not a count of
+CPU-scanned bytes: equality may reject early. `readBytes`, cache hits, full
+replays and replayed-event counts are from the real Driver append calls. The
+cache retains complete raw bytes and still does O(active-log-bytes) IO/compare;
+it does not turn append into O(1) or remove durability. `prepare_event` retains
+its public byte API while its writer helper also returns the already-computed
+checksum. Exactly 2-MiB JSON plus LF remains writable but not reader-valid, so
+such writes cannot install a cache that bypasses the stricter next read.
+
 The current fixed Go host recovery test is not an equivalent timed adapter for
 this expanded result-size/history/owned-projection matrix. Reusing its Lua
 business peer establishes neither same-input Go host timing nor a speed ratio.
@@ -141,9 +185,17 @@ work and complete timing before any Go/Rust ratio is reported.
 node --test tests/rust-performance-paired/live-runner.test.mjs tools/rust-formal-lua-bridge.test.mjs
 ```
 
-These 56 Node tests validate fixture identity, strict report arithmetic, negative
+These 66 Node tests validate fixture identity, strict report arithmetic, negative
 samples, exact executable/result selection, ownership-entry wiring and the
 unchanged original nine-case controller. Their synthetic numeric parser inputs
-are not benchmark evidence. Rustfmt parsing is also not compilation. Actual
-Rust compilation and the 27-sample Windows run remain **NOT_RUN** until the
-coordinator records the exact tested artifact and sealed run.
+are not benchmark evidence. Rustfmt parsing is also not compilation.
+
+The original `0890a7627e83251af73235c7aabe220c3f1a496c` baseline completed
+27/27 real offline samples with all peer lifetimes and build/run ownership
+reaped: [sealed result](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234522594),
+[public original package](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234550692).
+Its 7.5512702-s cumulative Driver wall includes 5.3469076 s across 1,215 appends.
+Fixture history construction is outside that product-path total. Those results
+motivated the cache; they do not measure its effect. The new cache candidate's
+Rust compilation/regressions and repeat 27-sample Windows run remain **NOT_RUN**
+until the coordinator records its exact tested artifact and sealed run.

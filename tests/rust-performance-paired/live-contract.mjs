@@ -5,6 +5,8 @@ import {ORACLE} from '../rust-parity/formal-lua-3.2.3/assertions.mjs';
 export const RESULT_STRING_BYTES = Object.freeze([256, 16384, 131072]);
 export const HISTORY_EVENTS = Object.freeze([1, 255, 256]);
 export const REPEATS = 3;
+export const APPEND_PHASES = Object.freeze(['owner_initial', 'read_chain', 'verify_chain', 'snapshot_artifacts',
+  'prepare_event', 'open_append', 'write_append', 'sync_append', 'close_append', 'finish_append']);
 export const SCOPES = Object.freeze(['fixture_create', 'journal_acquire', 'history_seed', 'history_verify',
   'journal_load_at_history', 'history_state_assert', 'journal_checkpoint_at_history', 'checkpoint_verify',
   'journal_append_after_checkpoint', 'peer_startup', 'driver_construct', 'driver_connect', 'driver_prepare',
@@ -32,6 +34,10 @@ export function verifyPerformanceReport(report) {
   assert.match(report.scope, /Rust-only/); assert.match(report.scope, /no game latency/i);
   assert.equal(integer(report.totalWallNanos), sum([report.authenticationWallNanos, report.sampleWallNanos, report.betweenSamplesAndEvidenceWallNanos]));
   assert.equal(report.sampleWallNanos, sum(report.samples.map(row => row.sampleWallNanos)));
+  // Historical 0890 evidence stays valid. A new profiled matrix cannot silently
+  // omit this nested evidence from some samples or mix old/new measurements.
+  const profiled = report.samples.filter(row => row.nestedJournalAppend !== undefined).length;
+  assert(profiled === 0 || profiled === 27, 'live-offline.partial_append_profile');
   const names = [], hashes = new Map(), groups = new Map();
   for (const row of report.samples) {
     assert.equal(row.schema, 'lycheedev.live-offline-sample.v1');
@@ -66,6 +72,25 @@ export function verifyPerformanceReport(report) {
       assert.equal(expected, sum(entries.map(count => count.wallNanos)));
     }
     assert.equal(row.calls.journal.write_result.calls, 1);
+    if (row.nestedJournalAppend !== undefined) {
+      const nested = row.nestedJournalAppend, m = nested.measurement;
+      assert.equal(nested.schema, 'lycheedev.live-journal-append-profile.v1');
+      assert.equal(nested.includedIn, 'calls.journal.append.wallNanos');
+      assert.deepEqual(Object.keys(m.phases).toSorted(), [...APPEND_PHASES].toSorted());
+      assert.equal(integer(m.wallNanos), sum([...Object.values(m.phases), nested.unattributedWallNanos]));
+      assert.equal(row.calls.journal.append.wallNanos, sum([m.wallNanos, nested.wrapperRemainderNanos]));
+      assert.equal(integer(m.calls, 1024), row.calls.journal.append.calls);
+      assert.equal(m.calls, sum([m.cacheHits, m.fullChainReplays]));
+      integer(m.replayedEvents, 1024 * 1024);
+      integer(m.readBytes, 64 * 1024 * 1024 * 1024);
+      assert(integer(m.equalityInputBytes) <= m.readBytes);
+      assert.equal(nested.cacheCapacityLimitBytes, 8 << 20);
+      assert.equal(nested.eligiblePairedRawCapacityLimitBytes, 16 << 20);
+      integer(m.maximumCacheCapacityBytes, nested.cacheCapacityLimitBytes);
+      integer(m.maximumEligiblePairedRawCapacityBytes, nested.eligiblePairedRawCapacityLimitBytes);
+      assert.match(nested.memoryScope, /eligible post-allocation/);
+      assert.match(nested.memoryScope, /excludes allocator excess\/transient growth, event\/State allocations and allocator\/RSS totals/);
+    }
     assert.equal(row.calls.backend.input.calls, 6); assert.equal(row.calls.backend.publish.calls, 6);
     assert.equal(row.nestedPeerExchange.calls, 6);
     assert(integer(row.nestedPeerExchange.wallNanos) <= partition.backendIncludingPeerExchange);

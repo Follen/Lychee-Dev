@@ -355,6 +355,7 @@ fn go_mailbox_v1_durable_artifact_failure_and_cancel_leave_log_unchanged() {
         let control = OperationControl::default();
         journal.append(&control, "first", &state()).unwrap();
         let original = fs::read(&f.paths.log).unwrap();
+        let prior_head = journal.head.clone();
         inject(&mut journal, FaultPoint::ArtifactDurable, action);
         assert!(
             journal
@@ -362,6 +363,8 @@ fn go_mailbox_v1_durable_artifact_failure_and_cancel_leave_log_unchanged() {
                 .is_err()
         );
         assert_eq!(fs::read(&f.paths.log).unwrap(), original);
+        assert!(journal.take_cache().is_none());
+        assert_eq!(journal.head, prior_head);
         assert!(fs::read_dir(&f.paths.artifacts).unwrap().next().is_some());
         assert_code(
             journal.append(&OperationControl::default(), "retry", &state()),
@@ -384,8 +387,12 @@ fn go_mailbox_v1_durable_partial_or_uncertain_append_never_permits_another_write
         let control = OperationControl::default();
         journal.append(&control, "first", &state()).unwrap();
         let original = fs::read(&f.paths.log).unwrap();
+        let prior_head = journal.head.clone();
         inject(&mut journal, point, Action::Fail);
         assert!(journal.append(&control, "second", &state()).is_err());
+        assert!(journal.poisoned);
+        assert!(journal.take_cache().is_none());
+        assert_eq!(journal.head, prior_head);
         let retained = fs::read(&f.paths.log).unwrap();
         assert!(retained.starts_with(&original));
         assert_code(
@@ -485,7 +492,12 @@ fn go_mailbox_v1_durable_append_count_size_and_line_limits() {
             } else {
                 // Fixed Go writes exactly 2 MiB JSON plus LF, then its reader
                 // rejects the LF-inclusive line. Preserve this incompatibility.
+                assert!(journal.chain_cache.lock().unwrap().is_none());
                 assert_code(journal.load(&control), "journal.memory_log_limit");
+                assert_code(
+                    journal.append(&control, "must_read", &state()),
+                    "journal.memory_log_limit",
+                );
             }
         } else {
             assert_code(
@@ -1151,6 +1163,7 @@ fn go_mailbox_v1_durable_checkpoint_preserves_go_two_mib_json_write_boundary() {
     journal.checkpoint(&control, &mut s, false).unwrap();
     let bytes = fs::read(&f.paths.log).unwrap();
     assert_eq!(bytes.len(), MAX_EVENT_BYTES + 1);
+    assert!(journal.take_cache().is_none());
     let event: MemoryEvent = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(journal.head, event.checksum);
     assert_eq!(
@@ -1245,4 +1258,249 @@ fn go_mailbox_v1_durable_raw_byte_report_artifact_result_and_history_are_exact()
         .unwrap();
     assert_eq!(historic.operation.unwrap().result_bytes.0, raw);
     assert_eq!(fs::read(&f.paths.log).unwrap(), before);
+}
+
+#[test]
+fn go_mailbox_v1_durable_verified_cache_reuses_only_equal_complete_bytes() {
+    let f = Fixture::new();
+    let mut journal = f.open();
+    let control = OperationControl::default();
+    assert!(journal.chain_cache.lock().unwrap().is_some());
+    journal.start_append_profile();
+    let mut expected = fs::read(&f.paths.log).unwrap();
+    for kind in ["first", "second"] {
+        let prior = read_log_bytes(&expected).events;
+        expected.extend(prepare_event(&prior, kind, &state()).unwrap());
+        journal.append(&control, kind, &state()).unwrap();
+        assert_eq!(fs::read(&f.paths.log).unwrap(), expected);
+    }
+    let p = journal.append_profile().unwrap();
+    assert_eq!((p.calls, p.cache_hits, p.full_chain_replays), (2, 2, 0));
+    assert!(p.phases.values().sum::<u64>() <= p.wall_nanos);
+    assert!(p.maximum_cache_capacity_bytes <= CHAIN_CACHE_BYTES);
+    assert!(p.maximum_eligible_paired_raw_capacity_bytes <= 2 * CHAIN_CACHE_BYTES);
+    assert_eq!(journal.load(&control).unwrap(), state());
+    assert!(journal.chain_cache.lock().unwrap().is_none());
+    journal.append(&control, "after_load", &state()).unwrap();
+    assert_eq!(journal.append_profile().unwrap().full_chain_replays, 1);
+    assert!(
+        journal
+            .historical_request(&control, "absent")
+            .unwrap()
+            .is_none()
+    );
+    assert!(journal.chain_cache.lock().unwrap().is_none());
+    journal.close().unwrap();
+}
+
+#[test]
+fn go_mailbox_v1_durable_verified_cache_preserves_external_change_errors() {
+    let control = OperationControl::default();
+    for mode in [
+        "same_size_corrupt",
+        "same_size_valid_head",
+        "torn",
+        "truncate_prefix",
+        "append",
+        "owner",
+    ] {
+        let f = Fixture::new();
+        let mut journal = f.open();
+        journal.append(&control, "initial", &state()).unwrap();
+        let original = fs::read(&f.paths.log).unwrap();
+        let head = journal.head.clone();
+        let events = read_log_bytes(&original).events;
+        let (changed, expected) = match mode {
+            "same_size_corrupt" => (
+                String::from_utf8(original.clone())
+                    .unwrap()
+                    .replacen("initial", "changed", 1)
+                    .into_bytes(),
+                "journal.memory_log_corrupt",
+            ),
+            "same_size_valid_head" => {
+                let end = original.iter().position(|b| *b == b'\n').unwrap() + 1;
+                let mut changed = original[..end].to_vec();
+                changed.extend(prepare_event(&events[..1], "changed", &state()).unwrap());
+                assert_eq!(changed.len(), original.len());
+                (changed, "journal.memory_checkpoint_conflict")
+            }
+            "torn" => (
+                original[..original.len() - 1].to_vec(),
+                "journal.memory_torn_tail",
+            ),
+            "truncate_prefix" => {
+                let end = original.iter().position(|b| *b == b'\n').unwrap() + 1;
+                (
+                    original[..end].to_vec(),
+                    "journal.memory_checkpoint_conflict",
+                )
+            }
+            "append" => {
+                let mut changed = original.clone();
+                changed.extend(prepare_event(&events, "external", &state()).unwrap());
+                (changed, "journal.memory_checkpoint_conflict")
+            }
+            "owner" => {
+                let mut owner = f.owner.clone();
+                owner.operation_id = "changed".into();
+                fs::write(f.marker(), json(&owner).unwrap()).unwrap();
+                // Owner failure must still precede malformed log failure.
+                (b"broken".to_vec(), "journal.resource_busy")
+            }
+            _ => unreachable!(),
+        };
+        fs::write(&f.paths.log, &changed).unwrap();
+        assert_code(
+            journal.append(&control, "must_not_write", &state()),
+            expected,
+        );
+        assert_eq!(fs::read(&f.paths.log).unwrap(), changed);
+        assert_eq!(journal.head, head);
+        assert!(journal.poisoned);
+        assert!(journal.chain_cache.lock().unwrap().is_none());
+        journal.close().unwrap();
+    }
+}
+
+#[test]
+fn go_mailbox_v1_durable_verified_cache_changed_equivalent_json_still_replays() {
+    let f = Fixture::new();
+    let mut journal = f.open();
+    let control = OperationControl::default();
+    let original = fs::read(&f.paths.log).unwrap();
+    let event = read_log_bytes(&original).events.remove(0);
+    // The same event with a different outer key order keeps Go's canonical hash.
+    let changed = format!(
+        "{{\"kind\":{},\"sequence\":{},\"previous\":{},\"data\":{},\"checksum\":{}}}\n",
+        serde_json::to_string(&event.kind).unwrap(),
+        event.sequence,
+        serde_json::to_string(&event.previous).unwrap(),
+        event.data.get(),
+        serde_json::to_string(&event.checksum).unwrap()
+    )
+    .into_bytes();
+    assert_eq!(changed.len(), original.len());
+    assert_ne!(changed, original);
+    fs::write(&f.paths.log, &changed).unwrap();
+    journal.start_append_profile();
+    journal.append(&control, "accepted", &state()).unwrap();
+    assert_eq!(journal.append_profile().unwrap().full_chain_replays, 1);
+    assert_eq!(journal.append_profile().unwrap().cache_hits, 0);
+    assert!(fs::read(&f.paths.log).unwrap().starts_with(&changed));
+    journal.close().unwrap();
+}
+
+#[test]
+fn go_mailbox_v1_durable_verified_cache_checkpoint_boundary_and_close_release() {
+    let control = OperationControl::default();
+    for count in [255, 256] {
+        let f = Fixture::new();
+        f.seed(std::iter::repeat_n(state(), count));
+        let original = fs::read(&f.paths.log).unwrap();
+        let mut journal = f.open();
+        let mut s = state();
+        journal.checkpoint(&control, &mut s, false).unwrap();
+        let after = fs::read(&f.paths.log).unwrap();
+        let cached_count = journal.chain_cache.lock().unwrap().as_ref().unwrap().count;
+        assert_eq!(cached_count, if count == 256 { 1 } else { 255 });
+        if count == 255 {
+            assert_eq!(after, original);
+        } else {
+            assert_eq!(
+                fs::read(f.paths.history.join(format!("{}.jsonl", s.archive))).unwrap(),
+                original
+            );
+        }
+        journal.start_append_profile();
+        journal.append(&control, "after_checkpoint", &s).unwrap();
+        assert_eq!(journal.append_profile().unwrap().cache_hits, 1);
+        inject(&mut journal, FaultPoint::LeaseClosed, Action::Fail);
+        // This cut reports an independent failure AFTER actual checked close;
+        // no unsafe fake OS handle or claim of an actual CloseHandle failure.
+        assert_code(journal.close(), "fixture.journal_io_failure");
+        assert!(journal.chain_cache.lock().unwrap().is_none());
+        assert!(journal.lease.is_none());
+        assert_code(
+            journal.append(&control, "closed", &s),
+            "journal.window_run_closed",
+        );
+    }
+}
+
+#[test]
+fn go_mailbox_v1_durable_verified_cache_capacity_and_real_read_growth_evict() {
+    let f = Fixture::new();
+    let path = f.root.join("raw-read-capacity.bin");
+    let control = OperationControl::default();
+    fs::write(&path, b"raw").unwrap();
+    let mut cache = ReadCache {
+        chain: Some(VerifiedChain {
+            bytes: b"raw".to_vec(),
+            count: 1,
+            head: "test".into(),
+        }),
+        grow_after_metadata: true,
+        ..ReadCache::default()
+    };
+    let bytes = read_file_with_cache(&path, MAX_LOG_BYTES, "fixture.limit", &control, &mut cache)
+        .unwrap()
+        .unwrap();
+    assert_eq!(bytes, b"rawg");
+    assert!(
+        cache.chain.is_none(),
+        "growth evicts before extend can reserve"
+    );
+    assert!(
+        cache.paired_capacity >= 6,
+        "record eligible pair before growth eviction"
+    );
+    assert!(cache.paired_capacity <= 2 * CHAIN_CACHE_BYTES);
+    // File metadata differing from the retained bytes evicts before initial
+    // allocation. Large legal reads are not rejected to preserve a cache.
+    let file = File::create(&path).unwrap();
+    file.set_len((CHAIN_CACHE_BYTES + 1) as u64).unwrap();
+    close_file(file).unwrap();
+    cache.chain = Some(VerifiedChain {
+        bytes: b"raw".to_vec(),
+        count: 1,
+        head: "test".into(),
+    });
+    cache.grow_after_metadata = false;
+    let bytes = read_file_with_cache(&path, MAX_LOG_BYTES, "fixture.limit", &control, &mut cache)
+        .unwrap()
+        .unwrap();
+    assert_eq!(bytes.len(), CHAIN_CACHE_BYTES + 1);
+    assert!(cache.chain.is_none());
+    let mut journal = f.open();
+    let mut over_capacity = Vec::with_capacity(CHAIN_CACHE_BYTES + 1);
+    over_capacity.extend_from_slice(b"tiny length, ineligible capacity");
+    journal.install_cache(VerifiedChain {
+        bytes: over_capacity,
+        count: 1,
+        head: journal.head.clone(),
+    });
+    assert!(journal.chain_cache.lock().unwrap().is_none());
+    journal.close().unwrap();
+}
+
+#[test]
+fn go_mailbox_v1_durable_verified_cache_never_certifies_writer_only_line_boundary() {
+    let f = Fixture::new();
+    let mut journal = f.open();
+    let control = OperationControl::default();
+    let previous = read_log_bytes(&fs::read(&f.paths.log).unwrap()).events;
+    let base = prepare_event(&previous, "", &state()).unwrap().len();
+    let kind = "x".repeat(MAX_EVENT_BYTES + 1 - base);
+    journal.append(&control, &kind, &state()).unwrap();
+    // No load/checkpoint occurs before this assertion and next append.
+    assert!(journal.chain_cache.lock().unwrap().is_none());
+    let original = fs::read(&f.paths.log).unwrap();
+    assert_code(
+        journal.append(&control, "next", &state()),
+        "journal.memory_log_limit",
+    );
+    assert_eq!(fs::read(&f.paths.log).unwrap(), original);
+    assert!(journal.poisoned);
+    journal.close().unwrap();
 }

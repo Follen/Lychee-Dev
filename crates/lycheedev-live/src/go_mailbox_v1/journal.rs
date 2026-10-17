@@ -318,16 +318,34 @@ pub fn read_log_bytes(bytes: &[u8]) -> LogRead {
 /// Prepare bytes, not a durable append. The owning writer must validate the
 /// original whole chain, size, lease and expected predecessor before writing.
 pub fn prepare_event(previous: &[MemoryEvent], kind: &str, state: &State) -> Result<Vec<u8>> {
-    if previous.len() >= MAX_EVENTS {
+    Ok(prepare_event_at(
+        previous.len(),
+        previous.last().map_or("", |event| event.checksum.as_str()),
+        kind,
+        state,
+    )?
+    .bytes)
+}
+/// The writer may reuse a predecessor only after validating the complete current
+/// chain. Retain the already-computed checksum instead of parsing our own output.
+pub(super) struct PreparedEvent {
+    pub bytes: Vec<u8>,
+    pub checksum: String,
+}
+pub(super) fn prepare_event_at(
+    count: usize,
+    previous: &str,
+    kind: &str,
+    state: &State,
+) -> Result<PreparedEvent> {
+    if count >= MAX_EVENTS {
         return Err(ContractError("journal.memory_log_limit"));
     }
     let data = serde_json::value::to_raw_value(state)
         .map_err(|_| ContractError("journal.memory_log_corrupt"))?;
     let mut event = MemoryEvent {
-        sequence: previous.len() as i64 + 1,
-        previous: previous
-            .last()
-            .map_or(String::new(), |e| e.checksum.clone()),
+        sequence: count as i64 + 1,
+        previous: previous.into(),
         kind: kind.into(),
         data,
         checksum: String::new(),
@@ -338,7 +356,10 @@ pub fn prepare_event(previous: &[MemoryEvent], kind: &str, state: &State) -> Res
         return Err(ContractError("journal.memory_log_limit"));
     }
     bytes.push(b'\n');
-    Ok(bytes)
+    Ok(PreparedEvent {
+        bytes,
+        checksum: event.checksum,
+    })
 }
 
 #[cfg(test)]

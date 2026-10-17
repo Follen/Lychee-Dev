@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 13:47 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`0890a7627e83251af73235c7aabe220c3f1a496c`（Live/MD5独立基准已保存）。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 14:03 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`044b549802c80a5837f29cee592e4406c8a08b31`（0890真实Live/MD5结果已保存）。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -48,6 +48,14 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 独立静态审已纠正disconnect与service.closed不同层级、原close失败被空二次close遮盖、wrapper墙钟误命名三点，复核无剩余确认缺陷。无消费者的CLI artifact门禁已移除，只构建本次优化库测试EXE并认证其真实source/receipt/runtime，不重建整CLI。新Node32+原桥controller24=56/56已实际通过；[0890本机前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234472215)Node56/MD5Node71及all-targets均通过、3owner回收。[真实Live27/27](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234522594)及27peer寿命收尾全部通过，优化库测试build/run均回收。先校旧7c Lua report被runtime_support_identity拒绝，改用已有ab4认证report后通过，未改清单或重建解释器；保[原拒绝记录](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234455923)。
 
 [原证据索引](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6234550692)及7块已逐SHA核742引用/196唯一blob，原report每样本互斥账、27sample/peer、45journal文件5868event链与27BODY完整匹配。27sample墙钟合34.921s：实际fixture历史构造17.437s、peer启动6.380s、身份重验2.503s均属诊断完整成本，不能称产品热路径。Driver合7.551s中journal5.640s、backend1.884s、余27.875ms；journal里1215次append合5.346908s（每sample45次，占Driver70.81%）、54checkpoint132.072ms、27write_result160.611ms。nestedLua408.987ms/codec2.552ms已含backend，不再相加。真实BODY为362/16490/131178B；history255保172200B/255event，history256先checkpoint为682B/1event，二者不是单纯多一事件的增长对照。下一结构候选针对append重复链解析而非2.552ms codec；性能收益与Go host/游戏/20对验收仍未证明。
+
+### Live journal认证链复用候选（待Windows复验）
+
+按0890真实append大头实施lease内可选认证raw链缓存。每次append仍原owner检查、完整真实read与checked close、逐字节比较；只有字节完全相同复用count/head，变化原parser/hash/head conflict；成功write+sync+checked close+control后才推进，Unknown/失败仍poison并驱逐。load/history先驱逐，checkpoint全验重建，close释放。prepare_event内部一次返回bytes+已有checksum，保公共bytes API及恰2MiB JSON+LF旧可写/下次读拒绝边缘，不借cache吞错误。
+
+缓存资格用现8MiB checkpoint阈值；保留的observable capacity≤8MiB，cache活跃时新read请求≤8MiB。长度变/增长分配前驱逐，返回capacity超资格立即驱逐；合格post-allocation pair观察≤16MiB，不能称任意allocator瞬时/总heap/RSS硬上限。较大合法log走原64MiB完整路径，无新用户输入拒绝或通用budget。新增7项覆盖真实同长度改动、owner优先、等价JSON重排、checkpoint/close、增长/容量fallback、LF边缘与prepared bytes/checksum；原cancel/Unknown断言亦增强。
+
+新10个cfg(test) append互斥段在Driver接手后才启用，保原总wall及内部/外部余量，actual hits/replay/read/equality input/capacity另记；旧原27report已由新reader真实接受，新profile只允许全27或全无。Node42+原桥24共66/66由作者与整合者实际通过，Rustfmt解析/diff及独立静态审无剩余确认缺陷；Rust编译/新7项/同27样本尚未跑。仍O(log bytes)读取比较，任何收益等待完整Driver与样本墙钟，fixture历史构造不能冒算产品热路径节省。
 
 ### Data 哈希生命周期筛选0890实测
 
