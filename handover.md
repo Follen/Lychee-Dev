@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 05:50 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`4c2ce8b46d2e13b39aceceb3a2e9712f56b59110`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 06:16 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`46678bff2aa54c251a9865cffb302a109cd7fa96`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -71,23 +71,25 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 ### 当前 Source/Data 窄优化与真实所有权修复（首次编译失败，后继待复验）
 
-Source仅将受控Facts锁的open替换为held Directory相对OPEN_IF，精确保read/write、share read/write/delete、非截断和原leaf策略；File先转交Core再原取消检查/checked close。其它caller仍旧OpenOptions，逐文档缓存/恢复/错误合并与原等待不变，无新extern/unsafe。7新增Rust覆盖真实争用、取消关闭、失败/目录映射、非截断、共享rename及held-parent/decoy路径；静态23项、rustfmt/diff过；d69实际Core storage55/Facts14通过，Windows destination28通过1失败。失败是held父目录下Win32全路径rename第73行error32，不能据此认定叶子share差异；本后继仅修fixture，增加旧OpenOptions同失败对照、DELETE-access peer及只关闭父目录后两叶子原句柄完整rename/readback，生产flags不变。修正Windows待复验。改善范围只是原1.578秒open中的完整路径处理，不能承诺省去整段。
+Source仅将受控Facts锁的open替换为held Directory相对OPEN_IF，精确保read/write、share read/write/delete、非截断和原leaf策略；File先转交Core再原取消检查/checked close。其它caller仍旧OpenOptions，逐文档缓存/恢复/错误合并与原等待不变，无新extern/unsafe。7新增Rust覆盖真实争用、取消关闭、失败/目录映射、非截断、共享rename及held-parent/decoy路径；静态23项、rustfmt/diff过；d69实际Core storage55/Facts14通过，Windows destination28通过1失败。失败是held父目录下Win32全路径rename第73行error32，不能据此认定叶子share差异；本后继仅修fixture，增加旧OpenOptions同失败对照、DELETE-access peer及只关闭父目录后两叶子原句柄完整rename/readback，生产flags不变。466实际该旧rename修正已通过；父目录与叶子共享对照真实命中。改善范围只是原1.578秒open中的完整路径处理，不能承诺省去整段。
 
 Data两个真实Root消费者接收同一已认证materialization owner返回的BlobRef，保原checkedclose后才交付，删除再次publish/hash/reopen。新增默认关闭且不读时钟的11段query-owned profile；capture/metadata为真实inclusive，不假分SQL连接内部，沿现Budget共享且不改变计量。另修三个真实VerifiedBlob退出缺口：部分批次/交付前stop按获取顺序关闭所有已持有blob；回调接管后晚期source/reader错误关闭已交付file；本地asset inspect capture成功或失败均checkedclose，保已提交身份与原主错/全部cleanup原因。故障注入发生在真实close之后，不声称模拟原生OS关句柄失败。
 
-d69本机首次all-targets实际失败：两个新增测试文件共4处通过PinnedSet的Deref移动`.data`触发E0507；本后继只改为移动真实owned字段`.spec.data`，不clone、不改生产或断言。原进程已安全回收，Source/Core独立组仍在测试，优化构建与产品测量未启动。后继Rust编译尚待复验。
+d69本机首次all-targets实际失败：两个新增测试文件共4处通过PinnedSet的Deref移动`.data`触发E0507；本后继只改为移动真实owned字段`.spec.data`，不clone、不改生产或断言。原进程已安全回收，Source/Core独立组仍在测试，优化构建与产品测量未启动。[4c2实际复验](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6230316571)alltargets通过，Data profile8/regression12/adaptive17/export4共41/0/0，16新增逐名全部通过。
 
-Data新增16个唯一Rust测试（profile8、真实consumer8）尚未运行。原组过滤为phase_profile、local_query::regression_tests、local_query::adaptive_tests、assets::export::tests，需alltargets先真实编译；Source同时跑Core storage原锁/等待/checkedclose与cache::source_facts::、Windows filesystem::destination::原全组。Node34/34、14Rust解析、6Node语法及scoped diff已过，不替代业务实测。
+Data新增16个唯一Rust测试（profile8、真实consumer8）已在4c2实际运行通过；后继同字节不重复累加。原组过滤为phase_profile、local_query::regression_tests、local_query::adaptive_tests、assets::export::tests，需alltargets先真实编译；Source同时跑Core storage原锁/等待/checkedclose与cache::source_facts::、Windows filesystem::destination::原全组。Node34/34、14Rust解析、6Node语法及scoped diff已过，不替代业务实测。
 
 [现Data入口](tests/rust-performance-paired/data.README.md)新增独占--data-phase-profile，需本批匹配优化产品：12路径各1冷/1暖、48测量CLI＋15准备，原startup proof/完整结果等价/总时钟保留；只Rust测量进程开启env，严格接受单条完整profile，默认与Go仍空stderr，错误/未知stderr不吞。它不能与acceptance/resume/startup-only组合，不把子段相加或扣除后宣称达标。统一一次新构建后同时验证Source4036及Data阶段，本机已重连，父线程统一安排后继编译及当前独立组，不擅自重复运行。
 
-### Facts 无独立锁文件原子发布候选（未实测）
+### Facts 无独立锁文件原子发布（实测发现writer-close竞争，后继待复验）
 
 用户要求核清只读输入与缓存锁的实际必要性。输入与cache.read原本无该锁；旧锁仅包已解析完整bytes的发布，不防重复解析。现Facts-only改为私有排他CREATE→完整写/seal→同目录atomic replace，Originals、整index、metadata锁保持。公开Core接口本就允许同key不同完整body，保last-writer及原NotPublished等价fallback，不新增首赢家/不同body拒绝或正常成功路径额外读取。
 
 64个stage槽共同容纳活跃writer与未知残留，仅已获owner可关闭/清理；占用跳过、不按PID/年龄回收。Win32真实sharing32与AlreadyExists作为未获owner的占用，其他权限错误仍返回。保32MiB、原deadline、完整错误/checkedclose与Published/Unknown事实，逐文档顺序checkpoint不改。旧读句柄可持旧完整快照。此为同步文件I/O的无独立锁文件发布，不称理论lock-free；不改缓存格式/GC/耐久合同，也不删除历史锁文件。
 
-新增16个Rust函数（15个断言测试＋1个真实子进程helper），覆盖同时sealed的两个进程、同/异body、旧reader、前writer已rename但原stage句柄未close时的后writer替换、坏缓存修复、64活跃/混合残留、取消/Unknown及31字段profile的Facts锁计数真实0；全部待Windows运行。Node事实读侧与unsafe检查22/22通过，静态读审/解析通过。与上段原rename fixture失败分别记账，后续先完整前置再一次匹配优化构建/4036差分和Data阶段观测。没有性能收益结论。
+[466本机完整前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6230454742)alltargets通过，六组165通过1失败：Facts23/storage55/Sourcecache21/pipeline28/profile4通过，Windows34通过1失败。新增15断言中14过1败，真实双进程helper命中。唯一失败为前writer已rename但原stage句柄未close，第二replace返回Win32 sharing32；旧rename fixture已过。优化构建/4036/性能均未跑，不能称去锁方案已闭合。
+
+本后继保stage原share READ与严格父目录，不能放宽DELETE-sharing让私有stage被迁到别的父目录。仅exact同步native STATUS_SHARING_VIOLATION转typed SharingBlocked且保持NotPublished；Facts-only保同sealed句柄在原remaining内最多25ms一等再试，每次仍原parentverify/控制/计费。普通rename与Originals错误合同不变，任意io error32、已提交后伪32、其它不确定结果仍Unknown终态不重试。原窗口test改为两次真Blocked→原writer真实关闭→同owner发布；新增6项覆盖真实pending/取消/原deadline、普通API、非cache拒绝及Unknown不重放。新6及修订test全部NOT_RUN，Node22/22和静态/解析通过。后续完整前置后一次匹配优化构建/4036差分及Data阶段观测，原失败保留，无性能收益结论。
 
 ### 公开 Source project 选择修复（新增12项实测通过）
 

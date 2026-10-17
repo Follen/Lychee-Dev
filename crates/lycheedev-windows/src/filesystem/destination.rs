@@ -895,6 +895,14 @@ struct Stage {
     name: String,
     published: bool,
 }
+// Internal native outcome, before lossy Win32/io::Error conversion. Only the
+// rebuildable-cache try-replace API exposes sharing rejection as retryable.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RenameAttempt {
+    Published,
+    SharingBlocked,
+}
+
 impl Stage {
     fn create(parent: &Directory) -> io::Result<Self> {
         parent.verify()?;
@@ -944,6 +952,13 @@ impl Stage {
         self.file.as_mut().expect("unconsumed stage")
     }
     fn rename(&mut self, destination: &Path, overwrite: bool) -> io::Result<()> {
+        match self.rename_attempt(destination, overwrite)? {
+            RenameAttempt::Published => Ok(()),
+            // Preserve the ordinary/durable rename API's historical error.
+            RenameAttempt::SharingBlocked => Err(io::Error::from_raw_os_error(32)),
+        }
+    }
+    fn rename_attempt(&mut self, destination: &Path, overwrite: bool) -> io::Result<RenameAttempt> {
         // A simple name with NULL RootDirectory is the documented same-directory
         // rename form. It uses the stage's original parent, without reopening our
         // write-protected parent directory by pathname.
@@ -982,6 +997,14 @@ impl Stage {
                 bytes as u32,
                 if overwrite { 65 } else { 10 },
             ); // FileRenameInformationEx / FileRenameInformation
+            // Preserve the exact synchronous native sharing rejection before
+            // lossy Win32 conversion. Only the cache-specific API opts into
+            // retrying this result with the same sealed owner; an arbitrary io
+            // error with Win32 code 32 cannot grant that authority. All other
+            // failures retain StagedFile's uncertain-publication handling.
+            if status == 0xC000_0043u32 as i32 {
+                return Ok(RenameAttempt::SharingBlocked);
+            }
             if status < 0 {
                 return Err(io::Error::from_raw_os_error(
                     RtlNtStatusToDosError(status) as i32
@@ -989,7 +1012,7 @@ impl Stage {
             }
         }
         self.published = true;
-        Ok(())
+        Ok(RenameAttempt::Published)
     }
     fn discard(&mut self) -> io::Result<()> {
         if !self.published && self.file.is_some() {
@@ -1271,7 +1294,7 @@ mod tests {
 mod admission_tests;
 
 mod staged;
-pub use staged::{StagedFile, StagedPublication};
+pub use staged::{CacheReplaceAttempt, StagedFile, StagedPublication};
 
 #[cfg(test)]
 #[path = "destination/asset_publication_tests.rs"]

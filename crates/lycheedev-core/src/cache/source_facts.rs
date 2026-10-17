@@ -5,7 +5,7 @@ use crate::{
     selection::valid_digest, storage, workspace,
 };
 use lycheedev_windows::filesystem::destination::{
-    Directory, FileControl, FileCost, StagedFile, StagedPublication,
+    CacheReplaceAttempt, Directory, FileControl, FileCost, StagedFile, StagedPublication,
 };
 use std::{
     cell::RefCell,
@@ -327,7 +327,26 @@ impl SourceCache {
             observe("sealed")?;
             control.check()?;
             if measured(SourceCachePublicationPhase::Rename, timings, || {
-                stage.replace_name(OsStr::new(&name), &mut Controlled(control))
+                if self.kind == Kind::Originals {
+                    return stage.replace_name(OsStr::new(&name), &mut Controlled(control));
+                }
+                loop {
+                    match stage.try_replace_rebuildable_cache_name(
+                        OsStr::new(&name),
+                        &mut Controlled(control),
+                    )? {
+                        CacheReplaceAttempt::Complete(state) => return Ok(state),
+                        CacheReplaceAttempt::SharingBlocked => {
+                            // A prior publisher may still be closing its original
+                            // deny-delete writer handle. Keep this sealed owner;
+                            // never rewrite/reopen it or retry Unknown completion.
+                            observe("rename_blocked")?;
+                            let pause = control.remaining()?.min(Duration::from_millis(25));
+                            std::thread::sleep(pause);
+                            control.check()?;
+                        }
+                    }
+                }
             })? == StagedPublication::NotPublished
                 && self.read(key, control)?.as_deref() != Some(bytes)
             {
@@ -374,7 +393,9 @@ impl SourceCache {
 /// Success means this candidate was published, or the existing NotPublished
 /// fallback validated equivalent bytes, with the owned stage closed. A later
 /// writer may replace it. Cancellation/close errors preserve Published/Unknown.
-/// This is synchronous per document and does not promise crash durability.
+/// Sharing rejection waits under the same absolute control for a preceding
+/// writer to close; Unknown completion is never retried. Publication is still
+/// synchronous per document and does not promise crash durability.
 pub struct SourceFactsCache(SourceCache);
 /// Rebuildable original bytes, deliberately outside the durable evidence domain.
 /// The source index authenticates reads and recovers misses from its fixed Git pin.

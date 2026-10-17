@@ -169,6 +169,181 @@ fn facts_cancel_at_each_owned_stage_boundary_preserves_old_snapshot_and_foreign_
     }
 }
 
+fn hold_published_writer<'a>(
+    cache: &'a SourceCache,
+    key: &str,
+    control: &OperationControl,
+) -> StagedFile<'a> {
+    let mut first =
+        StagedFile::create_rebuildable_cache(&cache.directory, key, &mut Controlled(control))
+            .unwrap()
+            .unwrap();
+    first.write_all(b"first complete").unwrap();
+    first.seal_rebuildable_cache().unwrap();
+    assert_eq!(
+        first
+            .replace_name(
+                OsStr::new(&cache.name(key).unwrap()),
+                &mut Controlled(control)
+            )
+            .unwrap(),
+        StagedPublication::Published
+    );
+    first
+}
+
+#[test]
+fn facts_waits_on_real_published_writer_then_completes_after_its_checked_close() {
+    let f = Fixture::new();
+    let control = OperationControl::default();
+    let cache = cache(&f, &control);
+    let key = storage::sha256(b"real writer close wait");
+    let first = hold_published_writer(&cache, &key, &control);
+    let mut old_reader = cache
+        .directory
+        .open_optional_project_file_controlled(
+            OsStr::new(&cache.name(&key).unwrap()),
+            &mut Controlled(&control),
+        )
+        .unwrap()
+        .unwrap();
+    let (blocked, received) = std::sync::mpsc::channel();
+    thread::scope(|scope| {
+        let pending = scope.spawn(|| {
+            let mut phases = Vec::new();
+            let result = cache.publish_profiled(
+                &key,
+                b"second complete",
+                &control,
+                &mut |at| {
+                    if at == "rename_blocked" {
+                        blocked.send(()).unwrap();
+                    }
+                    Ok(())
+                },
+                Some(&mut |phase, _| phases.push(phase)),
+            );
+            (result, phases)
+        });
+        // Two real native rejections prove the production wait/retry path ran
+        // while first still owned its writable deny-delete handle.
+        received.recv_timeout(Duration::from_secs(10)).unwrap();
+        let temporary: Vec<_> = fs::read_dir(cache.directory.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .filter(|name| name.to_string_lossy().starts_with(".lycheedev-cache-"))
+            .collect();
+        assert_eq!(temporary.len(), 1);
+        received.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert!(!pending.is_finished());
+        assert!(cache.directory.path().join(&temporary[0]).exists());
+        assert_eq!(
+            cache.read(&key, &control).unwrap().unwrap(),
+            b"first complete"
+        );
+        assert!(first.close().is_empty());
+        let (result, phases) = pending.join().unwrap();
+        result.unwrap();
+        use SourceCachePublicationPhase::*;
+        assert_eq!(phases, [Stage, Write, Seal, Rename, StageClose]);
+        assert!(!cache.directory.path().join(&temporary[0]).exists());
+    });
+    assert_eq!(
+        cache.read(&key, &control).unwrap().unwrap(),
+        b"second complete"
+    );
+    let mut old = Vec::new();
+    old_reader.read_to_end(&mut old).unwrap();
+    assert_eq!(old, b"first complete");
+    lycheedev_windows::filesystem::close_file(old_reader).unwrap();
+    assert!(cache.lock_directory.get().is_none());
+    assert_eq!(fs::read_dir(cache.directory.path()).unwrap().count(), 1);
+    cache.finish(Ok(()), &control).unwrap();
+}
+
+#[test]
+fn facts_real_sharing_wait_cancel_discards_only_the_private_candidate() {
+    let f = Fixture::new();
+    let control = OperationControl::default();
+    let cache = cache(&f, &control);
+    let key = storage::sha256(b"cancel sharing wait");
+    let first = hold_published_writer(&cache, &key, &control);
+    let foreign = cache
+        .directory
+        .path()
+        .join(format!(".lycheedev-cache-{key}-63"));
+    fs::write(&foreign, b"foreign retained").unwrap();
+    let bounded = OperationControl::default();
+    let cancel = bounded.cancel_handle();
+    let mut blocked = 0;
+    let error = cache
+        .publish_observed(&key, b"second complete", &bounded, |at| {
+            if at == "rename_blocked" {
+                blocked += 1;
+                cancel.store(true, Ordering::Release);
+            }
+            Ok(())
+        })
+        .unwrap_err();
+    assert_eq!(blocked, 1);
+    assert_eq!(error.code, "command.cancelled");
+    assert_eq!(error.details["state"], "NotPublished");
+    assert_eq!(error.details["durable"], false);
+    assert_eq!(first.publication(), StagedPublication::Published);
+    assert_eq!(
+        cache.read(&key, &control).unwrap().unwrap(),
+        b"first complete"
+    );
+    assert_eq!(fs::read(&foreign).unwrap(), b"foreign retained");
+    assert_eq!(fs::read_dir(cache.directory.path()).unwrap().count(), 2);
+    assert!(first.close().is_empty());
+    cache.finish(Ok(()), &control).unwrap();
+}
+
+#[test]
+fn facts_real_sharing_wait_uses_original_deadline_and_preserves_published_owner() {
+    let f = Fixture::new();
+    let control = OperationControl::default();
+    let cache = cache(&f, &control);
+    let key = storage::sha256(b"deadline sharing wait");
+    let first = hold_published_writer(&cache, &key, &control);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let bounded = OperationControl::uncancelable(deadline);
+    let mut blocked = 0;
+    let error = cache
+        .publish_observed(&key, b"second complete", &bounded, |at| {
+            if at == "rename_blocked" {
+                blocked += 1;
+                // Keep preparation and real contention separate from the bounded
+                // wait: reach its last 10 ms under the original immutable deadline.
+                if blocked == 1 {
+                    thread::sleep(
+                        deadline
+                            .saturating_duration_since(Instant::now())
+                            .saturating_sub(Duration::from_millis(10)),
+                    );
+                }
+            }
+            Ok(())
+        })
+        .unwrap_err();
+    assert!(
+        blocked > 0,
+        "fixture never reached real sharing contention: {error}"
+    );
+    assert_eq!(bounded.deadline(), deadline);
+    assert_eq!(error.code, "command.deadline");
+    assert_eq!(error.details["state"], "NotPublished");
+    assert_eq!(first.publication(), StagedPublication::Published);
+    assert_eq!(
+        cache.read(&key, &control).unwrap().unwrap(),
+        b"first complete"
+    );
+    assert_eq!(fs::read_dir(cache.directory.path()).unwrap().count(), 1);
+    assert!(first.close().is_empty());
+    cache.finish(Ok(()), &control).unwrap();
+}
+
 #[test]
 fn facts_primary_failure_keeps_details_and_late_cancel_after_checked_stage_close() {
     let f = Fixture::new();

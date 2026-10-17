@@ -10,6 +10,15 @@ pub enum StagedPublication {
     Unknown,
 }
 
+/// One rebuildable-cache replace attempt. SharingBlocked is a definite native
+/// rejection, not Unknown and not an existing-winner success. The sealed private
+/// owner remains held; a caller may retry it under its original bounded control.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CacheReplaceAttempt {
+    Complete(StagedPublication),
+    SharingBlocked,
+}
+
 /// Borrows its original strict Directory and never exposes a writable File.
 /// A sealed spool may be reread through the same handle but never written again.
 pub struct StagedFile<'a> {
@@ -17,6 +26,7 @@ pub struct StagedFile<'a> {
     parent: &'a Directory,
     publication: StagedPublication,
     sealed: bool,
+    rebuildable_cache: bool,
 }
 impl<'a> StagedFile<'a> {
     /// The caller checks again immediately after receiving this owner, so a
@@ -32,6 +42,7 @@ impl<'a> StagedFile<'a> {
             parent,
             publication: StagedPublication::NotPublished,
             sealed: false,
+            rebuildable_cache: false,
         })
     }
     pub fn name(&self) -> &str {
@@ -81,6 +92,7 @@ impl<'a> StagedFile<'a> {
                         parent,
                         publication: StagedPublication::NotPublished,
                         sealed: false,
+                        rebuildable_cache: true,
                     }));
                 }
                 // FILE_CREATE can report a sharing violation for a live stage
@@ -170,12 +182,46 @@ impl<'a> StagedFile<'a> {
     ) -> Result<StagedPublication, C::Error> {
         self.publish_name_with(name, control, |stage, path| stage.rename(path, true))
     }
+    /// Cache-only nonblocking attempt. Keep Stage's deny-write/delete sharing:
+    /// the original private file cannot move to another parent before the
+    /// NULL-root same-directory rename. Only an exact synchronous native
+    /// STATUS_SHARING_VIOLATION grants SharingBlocked; unknown completion and
+    /// all other errors remain terminal. This method neither sleeps nor resets
+    /// a deadline. Ordinary stages cannot opt in, even after cache-style seal.
+    pub fn try_replace_rebuildable_cache_name<C: FileControl>(
+        &mut self,
+        name: &std::ffi::OsStr,
+        control: &mut C,
+    ) -> Result<CacheReplaceAttempt, C::Error> {
+        if !self.rebuildable_cache {
+            return Err(invalid("cache replacement requires a rebuildable-cache stage").into());
+        }
+        self.publish_attempt_with(name, control, |stage, path| {
+            stage.rename_attempt(path, true)
+        })
+    }
     fn publish_name_with<C: FileControl>(
         &mut self,
         name: &std::ffi::OsStr,
         control: &mut C,
         rename: impl FnOnce(&mut Stage, &Path) -> io::Result<()>,
     ) -> Result<StagedPublication, C::Error> {
+        self.publish_attempt_with(name, control, |stage, path| {
+            rename(stage, path).map(|()| RenameAttempt::Published)
+        })
+        .map(|attempt| match attempt {
+            CacheReplaceAttempt::Complete(state) => state,
+            CacheReplaceAttempt::SharingBlocked => {
+                unreachable!("ordinary rename returns io errors")
+            }
+        })
+    }
+    fn publish_attempt_with<C: FileControl>(
+        &mut self,
+        name: &std::ffi::OsStr,
+        control: &mut C,
+        rename: impl FnOnce(&mut Stage, &Path) -> io::Result<RenameAttempt>,
+    ) -> Result<CacheReplaceAttempt, C::Error> {
         self.require_private().map_err(C::Error::from)?;
         if !self.sealed
             || name.len() > 32768
@@ -194,14 +240,19 @@ impl<'a> StagedFile<'a> {
         self.publication = StagedPublication::Unknown;
         self.stage.published = true; // Drop must not delete a possibly committed object.
         match rename(&mut self.stage, Path::new(name)) {
-            Ok(()) => {
+            Ok(RenameAttempt::Published) => {
                 self.publication = StagedPublication::Published;
-                Ok(self.publication)
+                Ok(CacheReplaceAttempt::Complete(self.publication))
+            }
+            Ok(RenameAttempt::SharingBlocked) => {
+                self.publication = StagedPublication::NotPublished;
+                self.stage.published = false;
+                Ok(CacheReplaceAttempt::SharingBlocked)
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                 self.publication = StagedPublication::NotPublished;
                 self.stage.published = false;
-                Ok(self.publication)
+                Ok(CacheReplaceAttempt::Complete(self.publication))
             }
             Err(error) => Err(error.into()),
         }
