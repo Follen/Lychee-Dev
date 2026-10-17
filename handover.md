@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 11:18 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`5d4f2e15488850bc3ca0428dcb8b59bd6a14fa30`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 11:31 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`b3d24460c6586926314a0ed9e76e7e624ec6c014`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -77,11 +77,11 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 这是可重建缓存内部checkpoint调整，未完成组可重算，不损失源文件/业务capture。eligible成员及排序固定时，单内容变更最多连带63同行重算；插删/重命名可移动后续分组，最坏重算后续整个corpus，明确保留这项成本。正式回归含128原组命中、单改、前端插入129/删除127重建和旧cachebackfill；性能必须同时观察cold与跨snapshot，不只展示cold。
 
-正式facts reader新增显式`v11-pack1`及本run真实index blob路径/SHA，禁止扫描目录猜旧pack；历史v6–v11读者与旧报告保留。无全局locator/GC/新Windows接口，祖先身份验证未跳过。完整独立静态审阅发现的一处Document测试字段遗漏已修，未剩确认生产缺陷；本批新增22个命名测试入口，其中1个惰性子进程helper不重复算独立断言；Core/Source故障与并发测试尚未运行，Node64/64及八Rust文件解析不代替Windows验证。准确正式命令见本批reader README，待保存后统一验证与一次匹配产物。
+正式facts reader新增显式`v11-pack1`及本run真实index blob路径/SHA，禁止扫描目录猜旧pack；历史v6–v11读者与旧报告保留。无全局locator/GC/新Windows接口，祖先身份验证未跳过。完整独立静态审阅发现的一处Document测试字段遗漏已修，未剩确认生产缺陷；[b3d实际前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6233354114)all-targets通过，Corestream10/0/0、Sourcepack11/0/0、retainedadmission1/0/0、旧cache26/0/0、Node64/0/0；22个新命名入口逐名核，其中1个惰性子进程helper不重复算独立断言。旧104严格全同，boundary11仍5相同/6精确endLine增强，10owner回收。当前唯一匹配release/assembly已启动，完整4036、冷暖、单改/插删与Data v3未出新结果；不能由回归通过声称性能改进。
 
 ### 固定历史双Rust witness后继
 
-[历史恢复实际报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6232226662)已逐字认证7个公开原始文件，独立bbfe/ab4 witness的完整sourceDigest均匹配原artifact，但Git七项未暂存M触旧clean条件，6个产品调用仍NOT_RUN，原失败owner封存回收。现最窄专用入口将该已证历史输入合同显式化：固定HEAD/artifact/EXE/原完整digest、七路径逐size/SHA、其它Git状态必须clean；通用verifyCandidate仍严格clean，不改Gitconfig/index/旧artifact，不接受任意dirty。报告保真实dirty与artifact-bound-witness标记。32项Node通过；5d4本机alltargets/Core19/Data10/resource37/Node62已通过，部分Data组覆盖重叠不重复累计，见[实际前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6233193157)。历史witness认证已实际通过，双Rust3pair正在运行，终态尚待。正式固定命令和反例范围见[专用说明](tests/rust-performance-paired/SOURCE-CANDIDATE-WITNESS.md)，不能用它放行其它产品或重标旧失败。
+[历史恢复实际报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6232226662)已逐字认证7个公开原始文件，独立bbfe/ab4 witness的完整sourceDigest均匹配原artifact，但Git七项未暂存M触旧clean条件，6个产品调用仍NOT_RUN，原失败owner封存回收。现最窄专用入口将该已证历史输入合同显式化：固定HEAD/artifact/EXE/原完整digest、七路径逐size/SHA、其它Git状态必须clean；通用verifyCandidate仍严格clean，不改Gitconfig/index/旧artifact，不接受任意dirty。报告保真实dirty与artifact-bound-witness标记。32项Node通过；5d4本机alltargets/Core19/Data10/resource37/Node62已通过，部分Data组覆盖重叠不重复累计，见[实际前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6233193157)。历史witness认证及双Rust3pair已实际完成，见[主报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6233251030)与[完整终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6233277808)。三对bbfe/ab4原native分别8188.601/8465.1212、8100.1353/8144.7837、8080.0792/8211.0037ms，完整4036及31phase均通过；中位耗时比1.013687，逐对ratio中位1.016203，ab4三对均未更快，XML/TOC并行批没有观察到端到端收益。6份内存均有采样缺口，整机27–80%busy不证明CPU单因。13owner回收、37证据段齐，旧b150失败及6NOT_RUN保持。此为两版历史Rust3对诊断，非20对Go验收，也不代表后续generated或pack候选性能。正式固定命令和反例范围见[专用说明](tests/rust-performance-paired/SOURCE-CANDIDATE-WITNESS.md)，不能用它放行其它产品或重标旧失败。
 
 ### Data publisher v3观测后继
 
