@@ -167,6 +167,28 @@ impl SyntaxDocument {
                 && !node.is_missing()
             {
                 let token = text(&self.bytes, node);
+                if fixed_unsupported_binary_operator(node) {
+                    // Unsupported binary operators are observed in source
+                    // order, including mixed operators and parentheses. An
+                    // outer later '&' must not hide an earlier inner '//'.
+                    if fixed_floor_division_operator(node) {
+                        // Go scans two '/' tokens; the second one fails.
+                        return Some(public_lua_error(
+                            &self.bytes,
+                            node.start_byte() + 1,
+                            b"/",
+                            "syntax error",
+                        ));
+                    }
+                    // Preserve the prior generic diagnostic and its binary
+                    // expression origin for every other unsupported operator.
+                    return Some(SyntaxNote {
+                        message: "Syntax unavailable in fixed Go Lua parser".into(),
+                        line: lua_line_starts(&self.bytes).partition_point(|start| {
+                            *start <= node.parent().expect("binary operator parent").start_byte()
+                        }),
+                    });
+                }
                 let empty_expression = token == ")"
                     && previous_token == "("
                     && !node.parent().is_some_and(|delimiter| {
@@ -208,7 +230,11 @@ impl SyntaxDocument {
                 ));
             }
             let unsupported = public_unsupported(&self.bytes, node);
-            if unsupported {
+            let deferred_binary_operator = node.kind() == "binary_expression"
+                && node
+                    .child_by_field_name("operator")
+                    .is_some_and(fixed_unsupported_binary_operator);
+            if unsupported && !deferred_binary_operator {
                 return Some(SyntaxNote {
                     message: "Syntax unavailable in fixed Go Lua parser".into(),
                     line: lua_line_starts(&self.bytes)
@@ -787,6 +813,16 @@ fn point_at(raw: &[u8], at: usize) -> tree_sitter::Point {
         .unwrap_or(at);
     tree_sitter::Point::new(row, column)
 }
+fn fixed_floor_division_operator(node: Node<'_>) -> bool {
+    node.kind() == "//" && fixed_unsupported_binary_operator(node)
+}
+fn fixed_unsupported_binary_operator(node: Node<'_>) -> bool {
+    matches!(node.kind(), "//" | "&" | "|" | "~" | "<<" | ">>")
+        && node.parent().is_some_and(|parent| {
+            parent.kind() == "binary_expression"
+                && parent.child_by_field_name("operator") == Some(node)
+        })
+}
 fn public_unsupported(raw: &[u8], node: Node<'_>) -> bool {
     match node.kind() {
         "attribute" => true,
@@ -1093,10 +1129,23 @@ impl<'tree> Walker<'_, 'tree> {
         scope: bool,
         signature: Option<String>,
     ) {
+        self.declare_at(n, expression_start(n), name, category, scope, signature);
+    }
+    fn declare_at(
+        &mut self,
+        n: Node<'_>,
+        origin_start: usize,
+        name: String,
+        category: &str,
+        scope: bool,
+        signature: Option<String>,
+    ) {
         if name.is_empty() {
             return;
         }
-        let line = self.line(n);
+        let line = self
+            .source_lines
+            .partition_point(|start| *start <= origin_start);
         let source_signature = self
             .lines
             .get(line - 1)
@@ -1137,6 +1186,16 @@ impl<'tree> Walker<'_, 'tree> {
         });
     }
     fn link(&mut self, n: Node<'_>, from: String, to: String, category: &str, confidence: &str) {
+        self.link_at(expression_start(n), from, to, category, confidence);
+    }
+    fn link_at(
+        &mut self,
+        origin_start: usize,
+        from: String,
+        to: String,
+        category: &str,
+        confidence: &str,
+    ) {
         if !worker::charge(
             self.guard,
             from.capacity()
@@ -1152,7 +1211,9 @@ impl<'tree> Walker<'_, 'tree> {
             to,
             category: category.into(),
             confidence: confidence.into(),
-            line: self.line(n),
+            line: self
+                .source_lines
+                .partition_point(|start| *start <= origin_start),
         });
     }
     fn link_raw(

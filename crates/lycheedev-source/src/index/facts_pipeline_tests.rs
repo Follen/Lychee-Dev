@@ -565,7 +565,15 @@ fn ready_owner_keeps_its_slot_when_the_mixed_queue_is_full() {
             let profile = Profile::enabled(true);
             let mut p = pipeline(workers, &profile);
             let mut order = Vec::new();
-            let mut consume = |f: &git::TreeFile, _: Vec<u8>, _: Option<PreparedFacts>| {
+            let mut consume = |f: &git::TreeFile, raw: Vec<u8>, prepared: Option<PreparedFacts>| {
+                assert_eq!(prepared.is_some(), std::str::from_utf8(&raw).is_ok());
+                if f.path == "0.lua" {
+                    assert_eq!(
+                        profile.calls(Phase::FactsRefill),
+                        0,
+                        "the ready owner still occupies the eighth slot during consumption"
+                    );
+                }
                 order.push(f.path.clone());
                 Ok(())
             };
@@ -577,18 +585,25 @@ fn ready_owner_keeps_its_slot_when_the_mixed_queue_is_full() {
                 )
                 .unwrap();
             }
+            // Generated metadata is now eligible. Deliberately invalid UTF-8
+            // supplies real small Sequential owners without changing admission.
             for ordinal in 4..8 {
-                p.push(
-                    &file(
-                        &format!("Interface/Blizzard_APIDocumentationGenerated/{ordinal}.lua"),
-                        1,
-                    ),
-                    vec![b'x'],
-                    &mut consume,
-                )
-                .unwrap();
+                let file = file(
+                    &format!("Interface/Blizzard_APIDocumentationGenerated/{ordinal}.lua"),
+                    1,
+                );
+                let raw = vec![0xff];
+                assert!(!eligible(&file, &raw));
+                p.push(&file, raw, &mut consume).unwrap();
             }
             assert_eq!(p.pending.len(), MAX_PENDING_SLOTS);
+            assert_eq!(
+                p.pending
+                    .iter()
+                    .filter(|pending| matches!(&pending.preparation, Preparation::Sequential(_)))
+                    .count(),
+                4
+            );
             p.push(&file("8.lua", 1), vec![b'x'], &mut consume).unwrap();
             assert_eq!(profile.calls(Phase::FactsRefill), 0);
             assert_eq!(p.pending.len(), MAX_PENDING_SLOTS);
@@ -1215,6 +1230,15 @@ fn real_mixed_parser_run(cpu_limit: usize) -> (usize, Vec<Facts>) {
             )
         })
         .collect::<Vec<_>>();
+    // Retain every original four-mode worker input. These four additional
+    // non-UTF8 Lua documents exercise the genuine ordered serial route, making
+    // the mixed queue reach eight slots at both CPU limits without extra budget.
+    for i in 0..4 {
+        inputs.push((
+            format!("Sequential/InvalidUtf8{i}.lua"),
+            b"Before(); \xff".to_vec(),
+        ));
+    }
     for i in 0..8 {
         inputs.push((format!("{i}.xml"), b"<Ui><Frame name=\"Owner\"><Scripts><OnLoad>Run()</OnLoad></Scripts></Frame><Script file=\"Full.lua\"/></Ui>".to_vec()));
         inputs.push((
@@ -1265,22 +1289,47 @@ fn real_mixed_parser_run(cpu_limit: usize) -> (usize, Vec<Facts>) {
             p.batch_bytes = batch_bytes;
             let mut ordinal = 0usize;
             let mut prepared_documents = 0;
+            let mut sequential_documents = 0;
+            let mut prepared_modes = [0usize; 4];
             let mut max_slots = 0;
             let mut max_owned_reservation = 0;
             let mut consume = |f: &git::TreeFile, raw: Vec<u8>, prepared: Option<PreparedFacts>| {
                 assert_eq!(f.path, inputs[ordinal].0);
                 assert_eq!(raw, inputs[ordinal].1);
                 let mode = ParseMode::for_path(&f.path);
-                assert!(
+                let serial = f.path.starts_with("Sequential/InvalidUtf8");
+                assert_eq!(std::str::from_utf8(&raw).is_err(), serial);
+                assert_eq!(eligible(f, &raw), !serial);
+                assert_eq!(
                     prepared.is_some(),
-                    "all four bounded parse modes are guarded"
+                    !serial,
+                    "all four bounded UTF-8 modes are guarded; explicit non-UTF8 inputs stay serial: {}",
+                    f.path
                 );
                 if let Some(prepared) = &prepared {
                     assert_eq!(prepared.mode, mode);
+                    prepared_modes[match mode {
+                        ParseMode::LuaOrdinary => 0,
+                        ParseMode::LuaGenerated => 1,
+                        ParseMode::Xml => 2,
+                        ParseMode::Toc => 3,
+                    }] += 1;
                 }
                 prepared_documents += usize::from(prepared.is_some());
+                sequential_documents += usize::from(serial);
                 let facts =
                     prepared.map_or_else(|| parse(&f.path, &raw), |prepared| prepared.facts);
+                if serial {
+                    assert!(facts.declarations.is_empty());
+                    assert!(facts.relationships.is_empty());
+                    assert_eq!(facts.diagnostics.len(), 1);
+                    assert_eq!(facts.diagnostics[0].line, 0);
+                    assert!(
+                        facts.diagnostics[0]
+                            .message
+                            .contains("Lua structural input must be UTF-8 source without NUL")
+                    );
+                }
                 assert_eq!(
                     serde_json::to_value(&facts).unwrap(),
                     serde_json::to_value(&expected[ordinal]).unwrap()
@@ -1297,6 +1346,20 @@ fn real_mixed_parser_run(cpu_limit: usize) -> (usize, Vec<Facts>) {
                 p.push(&file(path, raw.len()), raw.clone(), &mut consume)
                     .unwrap();
                 max_slots = max_slots.max(p.pending.len());
+                if path == "Sequential/InvalidUtf83.lua" {
+                    assert_eq!(p.pending.len(), MAX_PENDING_SLOTS);
+                    assert_eq!(
+                        p.pending
+                            .iter()
+                            .filter(|pending| matches!(
+                                &pending.preparation,
+                                Preparation::Sequential(_)
+                            ))
+                            .count(),
+                        4,
+                        "the full queue must contain four real serial owners plus four worker owners"
+                    );
+                }
                 max_owned_reservation = max_owned_reservation.max(p.pending_bytes);
                 assert!(p.pending.len() <= MAX_PENDING_SLOTS);
                 assert!(worker_count - p.free_workers.len() <= worker_count);
@@ -1311,8 +1374,11 @@ fn real_mixed_parser_run(cpu_limit: usize) -> (usize, Vec<Facts>) {
             }
             p.finish(Ok(1), &mut consume).unwrap();
             assert_eq!(ordinal, inputs.len());
-            assert_eq!(prepared_documents, inputs.len());
-            assert!(max_slots > 4 && max_slots <= MAX_PENDING_SLOTS);
+            assert_eq!(prepared_documents, 40);
+            assert_eq!(prepared_modes, [11, 8, 11, 10]);
+            assert_eq!(sequential_documents, 4);
+            assert_eq!(prepared_documents + sequential_documents, inputs.len());
+            assert_eq!(max_slots, MAX_PENDING_SLOTS);
             assert!(
                 max_owned_reservation
                     <= SOURCE_RETAINED_LIMIT - p.batch_bytes - worker_count * WORKER_STACK_BYTES

@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 09:18 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`caa502254e8475b301e3d6b9a4724dc06e501507`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 09:51 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`9a41e7369c36a95c928cf7e23d84cff378b609f7`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -71,6 +71,14 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 已新增[专用入口与操作说明](tests/rust-performance-paired/README.md)：固定bbfe/ab4两份原sealed优化产物、各自完整匹配源码见证，原artifact路径/记录不改；独立导出18个runner依赖。固定3对AB/BA/AB，每次独立application-cold home，原180秒产品/210秒调用/默认栈不变；两调用紧邻，完成后验证4036完整Facts所有字段/顺序及完整31phase，再封存/清理。失败不替样、未知回收停后继。外层固定60分钟，计入准备/身份/对照/收尾。Node定向47/47（0skip）已由作者及协调者各实际运行；Windows实际前置在bbfe源码见证digest不匹配处停止，6次产品调用均NOT_RUN，3个owner已回收（[原阻塞报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6232021715)，[证据索引](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6232021948)）。bbfe EXE/artifact匹配，clean见证1061文件逐Git blob匹配，但计算digest为cc35ac5c386a45010f90f1f518720800c5a0c35f721b6e73f76616a281f2194e，原artifact要求76bea4b27798356c9f5194f56c97c3a1292b214166b84c875dfc0bb75dfc7b34；必须核原构建输入清单/算法，不重标产物。ab4身份通过。本机Node导出遗漏先46/1、补齐后47/47，原失败保留。三对仍不是20对验收，不重建产品。另扩大既有runner测试时两项因云端固定Go对象缺文件失败，未更改原测试/未冒全套通过。generated完整guard/字段算法及Data私有流式解压由后继生产批保存，不混入b150 runner-only身份。
 
+### 9a 真实 Source 后继与差异分类
+
+[9a实际终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6232309345) all-targets通过，Source lib597通过、4失败、4原忽略；新增19为18通过1失败，256扫描/取消回归通过。旧52＋XML32完整Go差分通过；新20与优化前Rust生成算法参考全部相同，但固定Go严格对照只有18项相同，2差异保留于[完整报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6232293175)。parenthesized表entry/参数被旧Rust忽略，是合法观察遗漏；unsupported输入两端均清空Facts，但Rust通用诊断遗漏Go token/column。它们不能自动称更优增强，也不能修改输入或规范化报告求通过。后继需保旧参考原文与实测差异，准确修正常语义。
+
+其余3失败是混合队列测试仍将generated当作Sequential填槽；新生产路径已允许它进入worker。全eligible的4-worker队列不应同时要求峰值>4。后继保全部40份正常四模式输入及完整raw/Facts对照，另用明确≤64KiB非UTF8输入验证真实Sequential pending、错误顺序、满8槽和Ready持槽；>64KiB生产分支会drain后同步执行，不能替代该测试。没有改生产预算/并发上限。两owner已回收，release/assembly/新性能仍未启动。
+
+跨行括号声明的起点与声明体结束位置另外核证：候选保最外透明括号的起始位置和实际table body的结束位置。固定Go的tableEnds行号队列可能在括号跨行时丢失真实endLine，目前这是源码推导，尚无新增跨行真实观察；后继需独立固定Go报告确认并明确记录准确位置增强，不能冒充原20个单行输入已通过，也不为重现Go队列缺陷制造另一套位置模型。原20输入、旧参考和历史失败报告保留。 当前后继已实现括号entry/参数及源码叶序binary //诊断，保19项旧生成算法完整相等并对第20项保存旧行、另核已封存Go正确合同。新增独立boundary11含6跨行位置与5首错输入，候选完整Facts快照/worker/serial对照已写；实际固定Go观察与Rust执行待本机。Node身份7/7、4个Rust文件rustfmt解析、94个format模板静态检查和diffcheck通过，不等于产品测试通过。
+
 ### caa 首轮结果与最小编译修复
 
 [caa实际前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6232136327)：workspace all-targets因 `lua_tree/generated_tests.rs` 的fixture `format!` 含未转义右花括号编译失败，Cargo101，owner回收，无timeout；rustfmt只解析语法，先前静态检查不等于宏展开编译通过。Source19新项、扫描回归、旧84及新Go20候选严格对照均未执行；Go20真实观察报告已生成封存，后继直接复用，不重跑或换输入。此处最小后继只修fixture构造，所有原比较/断言不变。
@@ -83,7 +91,7 @@ Data 本地/CDN 的已认证 publisher 已接入增量 Z：保存已验证的 en
 
 私有spool明确采用首个已观察错误：sink失败立即停止，不继续inflate坏尾或下块来重建旧 eager 双故障顺序。故“未观察坏尾＋早期写失败”和紧work预算组合可与旧内部错误先后不同，公共坏块零输出合同不变；没有发布部分spool，原取消与checked cleanup仍保留真实错误。详见[设计边界](DESIGN.md#private-streaming-decode-and-observable-errors)。新增19 Rust覆盖正常buffer/chunk边界、真实publisher、完整认证、预算/取消、sink/cleanup及历史fallback，现已在caa独立三个完整组逐名实际通过；发布时9个Rust文件rustfmt仅解析、独立静态复审及Node29/29记录仍保原边界，性能未运行。
 
-Data opt-in profile v2保留原11段和总边界，另列10个嵌套detail，严格兼容原v1报告；默认关闭无额外clock。下一匹配产物沿原正式入口执行，旧928正式样本与48次诊断不改。Source generated借用字段视图、显式文档任务栈及256扫描工作步观察粒度已完成，完整guard允许原64KiB内的generated纯解析进入同一有界worker。新增19 Rust及2个原测试重命名/扩展均NOT_RUN；8个Rust文件仅rustfmt解析通过，新fixture Node3项加旧XML身份2项实际5/5通过。临时容量推导、默认栈深树、分配/取消出口及[22个正式测试全名与Go命令](tests/rust-parity/source-facts-generated/README.md)已记录；其20个新增固定Go输入保持原文，旧Rust参考与新算法等价、固定Go实测是两条独立证据，疑似旧差异不预先豁免或换fixture。
+Data opt-in profile v2保留原11段和总边界，另列10个嵌套detail，严格兼容原v1报告；默认关闭无额外clock。下一匹配产物沿原正式入口执行，旧928正式样本与48次诊断不改。Source generated借用字段视图、显式文档任务栈及256扫描工作步观察粒度已完成，完整guard允许原64KiB内的generated纯解析进入同一有界worker。发布时新增19 Rust及2个原测试重命名/扩展尚未运行；随后9a实际新增19项为18通过1失败，具体完整组与两项Go差异见上节。8个Rust文件发布前仅rustfmt解析通过，新fixture Node3项加旧XML身份2项实际5/5通过。临时容量推导、默认栈深树、分配/取消出口及[22个正式测试全名与Go命令](tests/rust-parity/source-facts-generated/README.md)已记录；其20个新增固定Go输入保持原文，旧Rust参考与新算法等价、固定Go实测是两条独立证据，疑似旧差异不预先豁免或换fixture。
 
 ### 实际155条semantic gaps的范围
 

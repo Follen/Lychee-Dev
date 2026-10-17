@@ -145,8 +145,56 @@ impl SignatureBuffer {
     }
 }
 
+/// Parentheses are transparent to metadata semantics, but their outer opening
+/// byte is the declaration/link origin. The actual table remains the end span;
+/// a closing parenthesis on a later line must not extend that table's endLine.
+#[derive(Clone, Copy)]
+struct DocumentationNode<'tree> {
+    table: Node<'tree>,
+    origin_start: usize,
+}
+impl<'tree> DocumentationNode<'tree> {
+    fn from_expression(mut node: Node<'tree>, guard: Option<&WorkerGuard<'_>>) -> Option<Self> {
+        let origin_start = node.start_byte();
+        while node.kind() == "parenthesized_expression" {
+            if !worker::check(guard) {
+                return None;
+            }
+            let mut cursor = node.walk();
+            let mut inner = None;
+            for child in node.named_children(&mut cursor) {
+                if !worker::check(guard) {
+                    return None;
+                }
+                if child.kind() != "comment" {
+                    inner = Some(child);
+                    break;
+                }
+            }
+            node = inner?;
+        }
+        (node.kind() == "table_constructor").then_some(Self {
+            table: node,
+            origin_start,
+        })
+    }
+    fn from_root(mut node: Node<'tree>, guard: Option<&WorkerGuard<'_>>) -> Option<Self> {
+        // api_roots records semantic table nodes during the ordinary pass.
+        // Recover only their transparent outer wrappers, without another AST.
+        while let Some(parent) = node
+            .parent()
+            .filter(|parent| parent.kind() == "parenthesized_expression")
+        {
+            if !worker::check(guard) {
+                return None;
+            }
+            node = parent;
+        }
+        Self::from_expression(node, guard)
+    }
+}
 struct DocumentationFrame<'tree> {
-    node: Node<'tree>,
+    node: DocumentationNode<'tree>,
     fields: Option<LiteralFields<'tree, 14>>,
     // Only a System owns a new namespace. Descendants borrow that live ancestor
     // by stack index, so wide collections do not clone it into pending tasks.
@@ -156,7 +204,7 @@ struct DocumentationFrame<'tree> {
     cursor: Option<TreeCursor<'tree>>,
 }
 impl<'tree> DocumentationFrame<'tree> {
-    fn new(node: Node<'tree>, namespace_owner: Option<usize>) -> Self {
+    fn new(node: DocumentationNode<'tree>, namespace_owner: Option<usize>) -> Self {
         Self {
             node,
             fields: None,
@@ -166,7 +214,7 @@ impl<'tree> DocumentationFrame<'tree> {
             cursor: None,
         }
     }
-    fn next_child(&mut self, guard: Option<&WorkerGuard<'_>>) -> Option<Node<'tree>> {
+    fn next_child(&mut self, guard: Option<&WorkerGuard<'_>>) -> Option<DocumentationNode<'tree>> {
         loop {
             if !worker::check(guard) {
                 return None;
@@ -180,10 +228,8 @@ impl<'tree> DocumentationFrame<'tree> {
                 if field.is_named()
                     && field.kind() != "comment"
                     && let Some(value) = field.child_by_field_name("value")
-                    && value.kind() == "table_constructor"
+                    && let Some(value) = DocumentationNode::from_expression(value, guard)
                 {
-                    // Do not unwrap this value: the former collection loop did
-                    // not unwrap parenthesized entries, unlike field lookup.
                     return Some(value);
                 }
             } else {
@@ -206,6 +252,9 @@ impl<'tree> DocumentationFrame<'tree> {
 
 impl<'tree> Walker<'_, 'tree> {
     pub(super) fn documentation(&mut self, root: Node<'tree>) {
+        let Some(root) = DocumentationNode::from_root(root, self.guard) else {
+            return;
+        };
         let mut stack = Vec::new();
         if !worker::prepare_scratch_push(self.guard, &mut stack) {
             return;
@@ -245,7 +294,8 @@ impl<'tree> Walker<'_, 'tree> {
                     None
                 };
                 let node = stack[index].node;
-                let Some(fields) = LiteralFields::read(self.raw, node, DOC_KEYS, self.guard) else {
+                let Some(fields) = LiteralFields::read(self.raw, node.table, DOC_KEYS, self.guard)
+                else {
                     return;
                 };
                 let mut kind = fields.text(self.raw, 0);
@@ -293,15 +343,16 @@ impl<'tree> Walker<'_, 'tree> {
 
     fn emit_documentation(
         &mut self,
-        node: Node<'tree>,
+        node: DocumentationNode<'tree>,
         fields: &LiteralFields<'tree, 14>,
         display: String,
         kind: &str,
         namespace: &str,
     ) {
         if kind == "system" {
-            self.declare(
-                node,
+            self.declare_at(
+                node.table,
+                node.origin_start,
                 copy_text(&display),
                 "api-system",
                 false,
@@ -339,16 +390,17 @@ impl<'tree> Walker<'_, 'tree> {
                 "callback" => "api-callback",
                 _ => unreachable!("recognized descriptor kind"),
             };
-            self.declare(
-                node,
+            self.declare_at(
+                node.table,
+                node.origin_start,
                 copy_text(&qualified),
                 category,
                 false,
                 Some(signature),
             );
             if !namespace.is_empty() {
-                self.link(
-                    node,
+                self.link_at(
+                    node.origin_start,
                     copy_text(namespace),
                     copy_text(&qualified),
                     "contains",
@@ -360,14 +412,21 @@ impl<'tree> Walker<'_, 'tree> {
                 let Some(signature) = self.signature(fields, &literal_name, kind) else {
                     return;
                 };
-                self.declare(
-                    node,
+                self.declare_at(
+                    node.table,
+                    node.origin_start,
                     copy_text(&literal_name),
                     "api-event",
                     false,
                     Some(signature),
                 );
-                self.link(node, literal_name, qualified, "event-name", "exact");
+                self.link_at(
+                    node.origin_start,
+                    literal_name,
+                    qualified,
+                    "event-name",
+                    "exact",
+                );
             }
         }
     }
@@ -389,11 +448,11 @@ impl<'tree> Walker<'_, 'tree> {
             }
             let Some(parameter) = field
                 .child_by_field_name("value")
-                .filter(|n| n.kind() == "table_constructor")
+                .and_then(|value| DocumentationNode::from_expression(value, self.guard))
             else {
                 continue;
             };
-            let fields = LiteralFields::read(self.raw, parameter, PARAM_KEYS, self.guard)?;
+            let fields = LiteralFields::read(self.raw, parameter.table, PARAM_KEYS, self.guard)?;
             let name = fields.text(self.raw, 0);
             let kind = fields.text(self.raw, 1);
             if !first {

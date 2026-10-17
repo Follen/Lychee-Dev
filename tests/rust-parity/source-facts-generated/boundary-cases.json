@@ -1,0 +1,327 @@
+{
+  "schema": "lycheedev.source-facts-malformed-cases.v1",
+  "oracleCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+  "cases": [
+    {
+      "id": "root_multiline_parentheses",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/root_multiline_parentheses.lua",
+      "source": "local T = (\n  {Type=\"System\",Name=\"Root\"}\n)\n",
+      "expectedRustFacts": {
+        "declarations": [
+          {
+            "name": "Root",
+            "category": "api-system",
+            "line": 1,
+            "endLine": 2,
+            "signature": "Root"
+          }
+        ],
+        "relationships": [],
+        "loads": [],
+        "headers": [],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "entry_multiline_parentheses",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/entry_multiline_parentheses.lua",
+      "source": "local T={Type=\"System\",Name=\"Root\",Namespace=\"C_Root\",Functions={\n  (\n    {Type=\"Function\",Name=\"Run\",Arguments={\n      ({Name=\"x\",Type=\"number\"})\n    }}\n  )\n}}\n",
+      "expectedRustFacts": {
+        "declarations": [
+          {
+            "name": "Root",
+            "category": "api-system",
+            "line": 1,
+            "endLine": 7,
+            "signature": "Root"
+          },
+          {
+            "name": "C_Root.Run",
+            "category": "api-function",
+            "line": 2,
+            "endLine": 5,
+            "signature": "C_Root.Run(x: number)"
+          }
+        ],
+        "relationships": [
+          {
+            "from": "C_Root",
+            "to": "C_Root.Run",
+            "category": "contains",
+            "confidence": "exact",
+            "line": 2
+          }
+        ],
+        "loads": [],
+        "headers": [],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "nested_root_parentheses",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/nested_root_parentheses.lua",
+      "source": "local T = (\n  (\n    {Type=\"System\",Name=\"Root\"}\n  )\n)\n",
+      "expectedRustFacts": {
+        "declarations": [
+          {
+            "name": "Root",
+            "category": "api-system",
+            "line": 1,
+            "endLine": 3,
+            "signature": "Root"
+          }
+        ],
+        "relationships": [],
+        "loads": [],
+        "headers": [],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "same_line_neighbor_tables",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/same_line_neighbor_tables.lua",
+      "source": "local T={Type=\"System\",Name=\"Root\",Namespace=\"C_Root\",Functions={(\n{Type=\"Function\",Name=\"Wrapped\"}\n), {Type=\"Function\",Name=\"Next\",\nArguments={{Name=\"x\",Type=\"number\"}}\n}\n}}\n",
+      "expectedRustFacts": {
+        "declarations": [
+          {
+            "name": "Root",
+            "category": "api-system",
+            "line": 1,
+            "endLine": 6,
+            "signature": "Root"
+          },
+          {
+            "name": "C_Root.Wrapped",
+            "category": "api-function",
+            "line": 1,
+            "endLine": 2,
+            "signature": "C_Root.Wrapped()"
+          },
+          {
+            "name": "C_Root.Next",
+            "category": "api-function",
+            "line": 3,
+            "endLine": 5,
+            "signature": "C_Root.Next(x: number)"
+          }
+        ],
+        "relationships": [
+          {
+            "from": "C_Root",
+            "to": "C_Root.Wrapped",
+            "category": "contains",
+            "confidence": "exact",
+            "line": 1
+          },
+          {
+            "from": "C_Root",
+            "to": "C_Root.Next",
+            "category": "contains",
+            "confidence": "exact",
+            "line": 3
+          }
+        ],
+        "loads": [],
+        "headers": [],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "nested_system_parentheses_repeated",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/nested_system_parentheses_repeated.lua",
+      "source": "local T={Type=\"System\",Name=\"Outer\",Tables={\n(\n{Type=\"System\",Name=\"Inner\",Namespace=\"C_Inner\",Functions={\n({Type=\"Function\",Name=\"Run\"})\n}}\n)\n}}\n",
+      "expectedRustFacts": {
+        "declarations": [
+          {
+            "name": "Outer",
+            "category": "api-system",
+            "line": 1,
+            "endLine": 7,
+            "signature": "Outer"
+          },
+          {
+            "name": "Inner",
+            "category": "api-system",
+            "line": 2,
+            "endLine": 5,
+            "signature": "Inner"
+          },
+          {
+            "name": "C_Inner.Run",
+            "category": "api-function",
+            "line": 4,
+            "endLine": 4,
+            "signature": "C_Inner.Run()"
+          },
+          {
+            "name": "Inner",
+            "category": "api-system",
+            "line": 2,
+            "endLine": 5,
+            "signature": "Inner"
+          },
+          {
+            "name": "C_Inner.Run",
+            "category": "api-function",
+            "line": 4,
+            "endLine": 4,
+            "signature": "C_Inner.Run()"
+          }
+        ],
+        "relationships": [
+          {
+            "from": "C_Inner",
+            "to": "C_Inner.Run",
+            "category": "contains",
+            "confidence": "exact",
+            "line": 4
+          },
+          {
+            "from": "C_Inner",
+            "to": "C_Inner.Run",
+            "category": "contains",
+            "confidence": "exact",
+            "line": 4
+          }
+        ],
+        "loads": [],
+        "headers": [],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "event_parentheses_and_payload",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/event_parentheses_and_payload.lua",
+      "source": "local T={Type=\"System\",Name=\"Root\",Namespace=\"C_Root\",Events={\n(\n{Type=\"Event\",Name=\"Ready\",LiteralName=\"READY\",Payload={\n({Name=\"x\",Type=\"number\"})\n}}\n)\n}}\n",
+      "expectedRustFacts": {
+        "declarations": [
+          {
+            "name": "Root",
+            "category": "api-system",
+            "line": 1,
+            "endLine": 7,
+            "signature": "Root"
+          },
+          {
+            "name": "C_Root.Ready",
+            "category": "api-event",
+            "line": 2,
+            "endLine": 5,
+            "signature": "C_Root.Ready(x: number)"
+          },
+          {
+            "name": "READY",
+            "category": "api-event",
+            "line": 2,
+            "endLine": 5,
+            "signature": "READY(x: number)"
+          }
+        ],
+        "relationships": [
+          {
+            "from": "C_Root",
+            "to": "C_Root.Ready",
+            "category": "contains",
+            "confidence": "exact",
+            "line": 2
+          },
+          {
+            "from": "READY",
+            "to": "C_Root.Ready",
+            "category": "event-name",
+            "confidence": "exact",
+            "line": 2
+          }
+        ],
+        "loads": [],
+        "headers": [],
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "floor_division_chain",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/floor_division_chain.lua",
+      "source": "Before(); return 1 // 2 // 3",
+      "expectedRustFacts": {
+        "declarations": [],
+        "relationships": [],
+        "loads": [],
+        "headers": [],
+        "diagnostics": [
+          {
+            "message": "source line:1(column:21) near '/':   syntax error\n",
+            "line": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "earlier_bad_token_before_floor",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/earlier_bad_token_before_floor.lua",
+      "source": "Before(); local x = ; return 1 // 2",
+      "expectedRustFacts": {
+        "declarations": [],
+        "relationships": [],
+        "loads": [],
+        "headers": [],
+        "diagnostics": [
+          {
+            "message": "source line:1(column:21) near ';':   syntax error\n",
+            "line": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "floor_division_bom_crlf",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/floor_division_bom_crlf.lua",
+      "source": "﻿Before()\r\nreturn 1 // 2\r\n",
+      "expectedRustFacts": {
+        "declarations": [],
+        "relationships": [],
+        "loads": [],
+        "headers": [],
+        "diagnostics": [
+          {
+            "message": "source line:2(column:11) near '/':   syntax error\n",
+            "line": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "floor_division_after_string_comment",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/floor_division_after_string_comment.lua",
+      "source": "local text=\"//\"; -- //\nBefore(); return 1 // 2",
+      "expectedRustFacts": {
+        "declarations": [],
+        "relationships": [],
+        "loads": [],
+        "headers": [],
+        "diagnostics": [
+          {
+            "message": "source line:2(column:21) near '/':   syntax error\n",
+            "line": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "floor_division_before_later_bitwise",
+      "path": "Fixture/Blizzard_APIDocumentationGenerated/floor_division_before_later_bitwise.lua",
+      "source": "return (1 // 2) & 3",
+      "expectedRustFacts": {
+        "declarations": [],
+        "relationships": [],
+        "loads": [],
+        "headers": [],
+        "diagnostics": [
+          {
+            "message": "source line:1(column:12) near '/':   syntax error\n",
+            "line": 1
+          }
+        ]
+      }
+    }
+  ]
+}

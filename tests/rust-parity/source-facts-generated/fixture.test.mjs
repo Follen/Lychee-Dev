@@ -36,3 +36,30 @@ test('first-invalid, repeated roots and potential historical differences stay ex
   assert.ok(cases.get('parenthesized_field_and_entry').includes('({Type="Function",Name="Ignored"})'));
   assert.ok(cases.get('unsupported_clears_all').includes('return 1 // 2'));
 });
+
+
+test('independent boundary inputs pin complete current contracts without replacing original 20', () => {
+  const bytes = read('./boundary-cases.json');
+  assert.equal(sha(bytes), '8c557b8581fbfe8644b134fb98abef10aa1a27139314705b684fd1ac4e7abb9b');
+  const fixture = JSON.parse(bytes);
+  assert.equal(fixture.schema, 'lycheedev.source-facts-malformed-cases.v1');
+  assert.equal(fixture.oracleCommit, '3766f9cacb52e93a803a626187e2a1d54a445468');
+  assert.equal(fixture.cases.length, 11);
+  assert.equal(new Set(fixture.cases.map(row => row.id)).size, 11);
+  const originalIds = new Set(JSON.parse(read('./cases.json')).cases.map(row => row.id));
+  for (const row of fixture.cases) {
+    assert.ok(!originalIds.has(row.id));
+    assert.equal(row.path, `Fixture/Blizzard_APIDocumentationGenerated/${row.id}.lua`);
+    assert.ok(Buffer.byteLength(row.source) <= 64 * 1024);
+    assert.deepEqual(Object.keys(row.expectedRustFacts), ['declarations', 'relationships', 'loads', 'headers', 'diagnostics']);
+  }
+  assert.equal(fixture.cases.filter(row => row.expectedRustFacts.diagnostics.length === 0).length, 6);
+  assert.equal(fixture.cases.filter(row => row.expectedRustFacts.diagnostics.length === 1).length, 5);
+});
+
+test('historical generated reference function bodies remain byte-identical', () => {
+  const source = read('../../../crates/lycheedev-source/src/lua_tree/generated_tests.rs').toString('utf8');
+  const start = source.indexOf('impl SyntaxDocument {');
+  assert.ok(start >= 0);
+  assert.equal(sha(source.slice(start)), '01ced830a4fec6eadd4872133d4a4483bf743125ca5dedc6d7f39e987410056f');
+});

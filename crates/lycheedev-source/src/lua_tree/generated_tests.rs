@@ -37,7 +37,7 @@ fn reference(raw: &[u8]) -> Facts {
     }
 }
 #[test]
-fn generated_guard_and_linear_views_match_all_20_complete_reference_cases() {
+fn generated_guard_matches_19_reference_cases_and_corrected_parenthesized_go_case() {
     on_stack(|| {
         let fixture: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../tests/rust-parity/source-facts-generated/cases.json"
@@ -49,14 +49,41 @@ fn generated_guard_and_linear_views_match_all_20_complete_reference_cases() {
         );
         let cases = fixture["cases"].as_array().unwrap();
         assert_eq!(cases.len(), 20);
+        let mut unchanged = 0;
+        let mut corrected = 0;
         for case in cases {
             let raw = case["source"].as_str().unwrap().as_bytes();
             let id = case["id"].as_str().unwrap();
-            let expected = reference(raw);
+            let historical_generated = reference(raw);
             let reference_row = serde_json::json!({
-                "id": case["id"], "path": case["path"], "facts": &expected, "error": null
+                "id": case["id"], "path": case["path"], "facts": &historical_generated, "error": null
             });
             println!("SOURCE_FACT_RUST_REFERENCE_JSON {reference_row}");
+            let expected = if id == "parenthesized_field_and_entry" {
+                corrected += 1;
+                // The sealed 9a report proved this exact historical omission.
+                // Keep the reference body/row, then assert the complete fixed-Go
+                // contract: the transparent entry and its argument both exist.
+                let old = expected_fresh(serde_json::json!({
+                    "declarations": [
+                        {"name":"Root","category":"api-system","line":1,"endLine":1,"signature":"Root"},
+                        {"name":"Run","category":"api-function","line":1,"endLine":1,"signature":"Run(y: string)"}
+                    ],
+                    "relationships":[],"loads":[],"headers":[],"diagnostics":[]
+                }));
+                same_complete(&historical_generated, &old, "preserved historical omission");
+                expected_fresh(serde_json::json!({
+                    "declarations": [
+                        {"name":"Root","category":"api-system","line":1,"endLine":1,"signature":"Root"},
+                        {"name":"Ignored","category":"api-function","line":1,"endLine":1,"signature":"Ignored()"},
+                        {"name":"Run","category":"api-function","line":1,"endLine":1,"signature":"Run(x: number, y: string)"}
+                    ],
+                    "relationships":[],"loads":[],"headers":[],"diagnostics":[]
+                }))
+            } else {
+                unchanged += 1;
+                historical_generated
+            };
             let actual = crate::facts::lua(raw, true);
             same_complete(&actual, &expected, id);
             let worker = crate::facts::for_worker(
@@ -67,6 +94,135 @@ fn generated_guard_and_linear_views_match_all_20_complete_reference_cases() {
             )
             .expect("small full generated fixture must fit");
             same_complete(&worker, &expected, id);
+        }
+        assert_eq!((unchanged, corrected), (19, 1));
+    });
+}
+
+// These snapshots contain ordinary UTF-8 targets only. Fresh parser identity
+// still matters: a deserialized Facts value alone has no authenticated map.
+fn expected_fresh(value: serde_json::Value) -> Facts {
+    let mut facts: Facts = serde_json::from_value(value).unwrap();
+    facts.raw_relationship_targets = Some(std::collections::BTreeMap::new());
+    facts
+}
+
+#[test]
+fn generated_boundaries_preserve_outer_origins_table_ends_and_first_operator_failures() {
+    on_stack(|| {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/rust-parity/source-facts-generated/boundary-cases.json"
+        ))
+        .unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert_eq!(cases.len(), 11);
+        for case in cases {
+            let raw = case["source"].as_str().unwrap().as_bytes();
+            let id = case["id"].as_str().unwrap();
+            let expected = expected_fresh(case["expectedRustFacts"].clone());
+            let actual = crate::facts::lua(raw, true);
+            same_complete(&actual, &expected, id);
+            let worker = crate::facts::for_worker(
+                raw,
+                ParseMode::LuaGenerated,
+                &OperationControl::default(),
+                4 << 20,
+            )
+            .expect("complete small boundary input fits the unchanged guard");
+            same_complete(&worker, &expected, id);
+            let row = serde_json::json!({
+                "id":case["id"], "path":case["path"], "facts":&actual, "error":null
+            });
+            // Independent Go observations use the unchanged overlay with the
+            // boundary fixture. This marker is a candidate contract, not a
+            // claim that Go has accurate multiline table spans.
+            println!("SOURCE_FACT_BOUNDARY_CANDIDATE_JSON {row}");
+            if !expected.diagnostics.is_empty() {
+                let ordinary = crate::facts::lua(raw, false);
+                same_complete(&ordinary, &expected, id);
+                let worker = crate::facts::for_worker(
+                    raw,
+                    ParseMode::LuaOrdinary,
+                    &OperationControl::default(),
+                    4 << 20,
+                )
+                .unwrap();
+                same_complete(&worker, &expected, id);
+            }
+        }
+    });
+}
+
+#[test]
+fn floor_division_detection_uses_only_real_binary_operators() {
+    on_stack(|| {
+        for raw in [
+            b"local text='//'; -- //\nBefore(); return 1 / 2".as_slice(),
+            b"local text=[=[//]=]; --[=[//]=]\nBefore()".as_slice(),
+        ] {
+            let document = SyntaxDocument::new_public(raw).unwrap();
+            assert!(document.public_parse_note().is_none());
+            let facts = document.facts(true);
+            assert!(facts.diagnostics.is_empty());
+            assert!(facts.relationships.iter().any(|edge| edge.to == "Before"));
+            let worker = crate::facts::for_worker(
+                raw,
+                ParseMode::LuaGenerated,
+                &OperationControl::default(),
+                4 << 20,
+            )
+            .unwrap();
+            same_complete(
+                &worker,
+                &facts,
+                "quoted/comment slash text is not an operator",
+            );
+        }
+        // Moving the bitwise check to its operator must retain the old generic
+        // message and expression-start line (2), rather than operator line (3).
+        let raw = b"return\n(1\n& 2)\n// 3";
+        let expected = expected_fresh(serde_json::json!({
+            "declarations":[],"relationships":[],"loads":[],"headers":[],
+            "diagnostics":[{"message":"Syntax unavailable in fixed Go Lua parser","line":2}]
+        }));
+        same_complete(
+            &crate::facts::lua(raw, true),
+            &expected,
+            "earlier bitwise origin",
+        );
+        let worker = crate::facts::for_worker(
+            raw,
+            ParseMode::LuaGenerated,
+            &OperationControl::default(),
+            4 << 20,
+        )
+        .unwrap();
+        same_complete(&worker, &expected, "guarded earlier bitwise origin");
+        // A recovered ERROR does not gain the binary second-slash rule merely
+        // because its raw text contains '//'. Test the exact recognition gate.
+        let document = SyntaxDocument::new_public(b"return // 2").unwrap();
+        let mut cursor = document.root().walk();
+        loop {
+            let node = cursor.node();
+            if node.kind() == "ERROR" {
+                assert!(!fixed_floor_division_operator(node));
+            }
+            if node.kind() == "//" && fixed_floor_division_operator(node) {
+                let parent = node.parent().unwrap();
+                assert_eq!(parent.kind(), "binary_expression");
+                assert_eq!(parent.child_by_field_name("operator"), Some(node));
+            }
+            if cursor.goto_first_child() {
+                continue;
+            }
+            loop {
+                if cursor.goto_next_sibling() {
+                    break;
+                }
+                if !cursor.goto_parent() {
+                    return;
+                }
+            }
         }
     });
 }

@@ -1,10 +1,14 @@
 # Complete generated Lua Facts and bounded scan regression
 
-Status: implementation and regression inputs prepared; Rust execution, new Go
-observations, full-corpus comparison and performance are **NOT_RUN** for this
-batch. Node identity tests and rustfmt parsing are static checks only.
+Status: the 9a batch compiled and produced sealed observations: original 52 +
+XML 32 all matched; generated 20 had 18 matches and two differences. Its old
+reference matched the candidate on all 20, proving the two differences were
+historical gaps. This follow-up repairs those gaps and the three mixed-pipeline
+test assumptions. Follow-up Rust execution, the new boundary-11 Go observations,
+full-corpus comparison and performance are **NOT_RUN**. See `handover.md` for
+current evidence; Node identity tests and rustfmt parsing are static checks only.
 
-## Complete algorithm and unchanged contract
+## Complete algorithm and preserved limits
 
 Production files are `src/lua_tree/generated.rs`, `src/lua_tree.rs`,
 `src/facts/worker.rs`, `src/facts.rs` and `src/index/facts_pipeline.rs` in
@@ -25,9 +29,13 @@ lookups number ten for System, twelve for callable, eleven/twelve for event
 The actual AST denominator for the real corpus has not been measured.
 
 An explicit DFS continuation stack preserves the seven section order, root
-source order and repeated nested-System roots. Parenthesized field values are
-unwrapped; collection entries retain the original Rust behavior. Only Systems
-own namespaces; children borrow live ancestors by stack index. Signatures
+source order and repeated nested-System roots. Parenthesized field values,
+collection entries and parameters are transparent, matching fixed-Go semantics.
+Each documentation node retains its semantic table and outer opening-parenthesis
+origin separately. `line` is that outer origin, while `endLine` is the actual
+table body's closing brace, not a later closing parenthesis. The extra origin
+word is included in the existing continuation-vector scratch charge. Only
+Systems own namespaces; children borrow live ancestors by stack index. Signatures
 append directly into one buffer, preserving all punctuation and dynamic,
 Nilable, return and event-alias behavior. No input Lua is executed.
 
@@ -100,22 +108,46 @@ already exist. No scanner exit can turn cancellation into accepted partial data.
 
 ## Two independent comparison axes
 
-The 20 inputs remain unchanged, including `parenthesized_field_and_entry` and
-`unsupported_clears_all`. Possible old Rust/Go differences are unknown until
-executed; no case is removed, normalized or exempted to make a result pass.
+The original 20 inputs remain unchanged, including `parenthesized_field_and_entry`
+and `unsupported_clears_all`. Their sealed 9a raw reports and failures remain
+historical evidence; no fixture is removed, normalized or exempted.
 
 1. `lua_tree::generated_tests` retains the original generated field/documentation/
-   signature algorithms from Rust commit
-   `5766dccc1fec7d20f5d8120bca7dcd79eed726c4` as test-only reference. Both full
-   candidate and guarded worker compare every serialized Facts field, array
-   order and private raw-target byte/ordinal against it. Ordinary parsing is
-   shared; this reference isolates the generated algorithm, not an independent
-   full old binary. The 20-case test emits complete old-reference rows with
-   `SOURCE_FACT_RUST_REFERENCE_JSON`, preserved in the test log.
-2. `facts::tests::fixed_go_generated_observations` compares complete candidate
-   Facts/error rows against a separately sealed fixed-Go report. Any mismatch
-   fails honestly. Compare its row with the corresponding old-reference row
-   when classifying a historical difference; this batch does not repair it.
+   signature function bodies from Rust commit
+   `5766dccc1fec7d20f5d8120bca7dcd79eed726c4` as test-only reference. Nineteen cases
+   still compare every public Facts field/order and private raw-target byte/
+   ordinal with that reference. The remaining exact case separately asserts
+   its complete old two-declaration output and the complete sealed-Go corrected
+   three-declaration output (`Ignored()` and parameter `x: number` are restored).
+   All 20 reference rows are still printed as `SOURCE_FACT_RUST_REFERENCE_JSON`.
+   Ordinary parsing is shared: after the diagnostic fix, that reference uses
+   the new `//` message too. It is not the historical 9a whole-binary output.
+2. `facts::tests::fixed_go_generated_observations` retains strict complete Facts/
+   error equality against the original sealed 20-case Go report. Reuse that
+   report without rerunning Go. The production `//` rule uses the actual binary
+   operator in source-order leaf traversal and the existing diagnostic formatter
+   at its second slash; it does not match fixture strings or arbitrary ERROR
+   text. All unsupported binary operators defer to their source-order leaf,
+   so a later outer bitwise operator cannot hide an earlier inner `//`. Other
+   binary operators retain the generic message and original expression-start
+   line; unary/attribute/identifier/number handling is unchanged.
+
+### Independent multiline and operator boundaries
+
+`boundary-cases.json` adds eleven separate inputs, with explicit complete
+`expectedRustFacts` snapshots: six multiline root/entry/nested-parenthesis/
+neighbor/nested-System/event spans, then five operator/first-error boundaries.
+The current Rust contract is tested on the unchanged 2 MiB stack through both
+serial and guarded worker paths, including private raw targets. It emits
+`SOURCE_FACT_BOUNDARY_CANDIDATE_JSON` rows for independent comparison.
+
+The six location snapshots assert outer start plus actual table-body end. Fixed
+Go's `tableEnds[n.Line()]` FIFO uses the parenthesis-adjusted start, so it can
+lose or misassign a table end. That behavior is source-proven, but these eleven
+specific Go observations remain **NOT_RUN** until separately executed. Do not
+label them parity passes or empirically verified enhancements beforehand. Keep
+all raw Go/candidate rows and classify complete observed differences, including
+unaffected fields and order. No global FIFO/AST mirror is added to Rust.
 
 The source fixture has SHA256
 `f26bddac5eeb449da21f748e9dda2c1acee626223974098298cfc8994458aa36`.
@@ -139,12 +171,18 @@ candidate path `tests/rust-parity/source-facts-malformed/oracle_test.go`.
 This is the unchanged six-source-hash-authenticating test; it already accepts
 arbitrary fixture paths/counts through environment variables.
 
-With cwd at the Rust candidate, resolve and pass to the existing wrapper:
+The original generated-20 report is already sealed and must be reused, alongside
+its unchanged fixture. Only the independent boundary-11 input requires a new Go
+observation. With cwd at the Rust candidate, pass to the existing wrapper:
 
 ```powershell
-$env:LYCHEEDEV_SOURCE_FACTS_CASES = (Resolve-Path 'tests/rust-parity/source-facts-generated/cases.json').Path
-$env:LYCHEEDEV_SOURCE_FACTS_REPORT = '<absolute-nonexistent-owned-generated-20-report.json>'
+$env:LYCHEEDEV_SOURCE_FACTS_CASES = (Resolve-Path 'tests/rust-parity/source-facts-generated/boundary-cases.json').Path
+$env:LYCHEEDEV_SOURCE_FACTS_REPORT = '<absolute-nonexistent-owned-boundary-11-report.json>'
 ```
+
+The unchanged Go overlay ignores `expectedRustFacts` and derives observations
+only from each source/path. Boundary fixture SHA256 is
+`8c557b8581fbfe8644b134fb98abef10aa1a27139314705b684fd1ac4e7abb9b`.
 
 Use private GOCACHE/GOTMPDIR, GOTOOLCHAIN=local, GOPROXY=off, GOSUMDB=off and
 GOWORK=off. Through `ownedSpawnSync`, with cwd at the authenticated Go checkout
@@ -154,9 +192,12 @@ and a bounded timeout, run exactly:
 go test -overlay <owned-overlay.json> -count=1 -run ^TestFixedGoPublicFactsMalformedOracle$ -v ./internal/addoncheck
 ```
 
-Seal the complete report/logs, fixture/overlay/source hashes, process exit and
-reaping receipts. Go test success produces observations, not Rust parity.
-Set all three independently sealed reports and use the existing Cargo owner:
+Seal the complete new boundary report/logs, fixture/overlay/source hashes,
+process exit and reaping receipts. Go test success produces observations, not
+Rust parity. Compare every boundary Go row with its corresponding complete
+`SOURCE_FACT_BOUNDARY_CANDIDATE_JSON` row and preserve the raw differences; the
+boundary contract test does not silently exempt or normalize Go differences.
+Set the three existing sealed reports and use the existing Cargo owner:
 
 ```powershell
 $env:LYCHEEDEV_SOURCE_FACTS_GO_REPORT = '<absolute-old-52-report.json>'
@@ -174,7 +215,9 @@ Without its report, each Go observation test prints
 
 In particular retain these regressions in the consolidated batch:
 
-- `lua_tree::generated_tests::generated_guard_and_linear_views_match_all_20_complete_reference_cases`
+- `lua_tree::generated_tests::generated_guard_matches_19_reference_cases_and_corrected_parenthesized_go_case`
+- `lua_tree::generated_tests::generated_boundaries_preserve_outer_origins_table_ends_and_first_operator_failures`
+- `lua_tree::generated_tests::floor_division_detection_uses_only_real_binary_operators`
 - `lua_tree::generated_tests::generated_guard_keeps_original_29_lua_boundary_outputs`
 - `lua_tree::generated_tests::generated_fixed_views_scan_each_direct_field_once_and_keep_invalid_first_match`
 - `lua_tree::generated_tests::generated_nested_roots_are_repeated_after_ordinary_observations_in_exact_order`
@@ -196,6 +239,13 @@ In particular retain these regressions in the consolidated batch:
 - `facts::tests::fixed_go_generated_observations`
 - `facts::worker_tests::worker_refuses_oversized_non_utf8_and_exhausted_facts_inputs`
 - `index::facts_pipeline::tests::generated_lua_worker_preserves_complete_facts_and_order_among_lua_inputs`
+
+The mixed-pipeline regressions retain all 40 normal four-mode inputs and add four
+explicit non-UTF-8 sequential inputs with exact complete fallback diagnostics.
+They assert the original 8-slot maximum, Ready-slot ownership, original output
+order/bytes, 40 prepared versus 4 sequential documents and unchanged memory
+bounds. A >64 KiB input cannot cover this queue state because production drains
+before such an input. No production scheduler or capacity is changed.
 
 The deep test runs on a 2 MiB stack with 1800 nested documentation collections;
 ordinary guarded traversal may abandon and the complete fallback must remain
