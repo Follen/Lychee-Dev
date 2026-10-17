@@ -2,7 +2,9 @@ use super::*;
 use std::{
     fs,
     io::{Seek, SeekFrom},
+    os::windows::fs::OpenOptionsExt,
 };
+use windows::Win32::Foundation::ERROR_SHARING_VIOLATION;
 
 struct Fixture(PathBuf);
 impl Fixture {
@@ -65,21 +67,45 @@ fn relative_lock_owner_keeps_read_write_delete_sharing_and_original_handle() {
     fs::write(&path, b"original").unwrap();
     let directory = Directory::open(&f.selected()).unwrap();
     directory.verify().unwrap();
+    let mut original = original_open(&path).unwrap();
+    let renamed = f.selected().join("renamed.lock");
+    // Win32 path rename reopens the target parent for write access. The strict
+    // Directory denies that independently of the leaf's delete-sharing mode.
+    let original_error = fs::rename(&path, &renamed).unwrap_err();
+    assert_eq!(
+        original_error.raw_os_error(),
+        Some(ERROR_SHARING_VIOLATION.0 as i32)
+    );
+    directory.verify().unwrap();
     let mut relative = directory
         .open_lock_file_owner("entry.lock".as_ref())
         .unwrap();
-    let original = original_open(&path).unwrap();
-    let renamed = f.selected().join("renamed.lock");
+    let relative_error = fs::rename(&path, &renamed).unwrap_err();
+    assert_eq!(relative_error.kind(), original_error.kind());
+    assert_eq!(relative_error.raw_os_error(), original_error.raw_os_error());
+    // Check the leaf's FILE_SHARE_DELETE directly while all owners remain live,
+    // without introducing a rename's separate target-parent access request.
+    let delete_peer = fs::OpenOptions::new()
+        .access_mode(DELETE.0)
+        .open(&path)
+        .unwrap();
+    super::super::close_file(delete_peer).unwrap();
+    // Release only the parent constraint. Both original leaf handles must keep
+    // allowing rename and must remain attached to their original bytes.
+    directory.close().unwrap();
     fs::rename(&path, &renamed).unwrap();
     fs::write(&path, b"replacement").unwrap();
     relative.seek(SeekFrom::Start(0)).unwrap();
     let mut bytes = Vec::new();
     relative.read_to_end(&mut bytes).unwrap();
     assert_eq!(bytes, b"original");
+    original.seek(SeekFrom::Start(0)).unwrap();
+    bytes.clear();
+    original.read_to_end(&mut bytes).unwrap();
+    assert_eq!(bytes, b"original");
     assert_eq!(fs::read(path).unwrap(), b"replacement");
     super::super::close_file(original).unwrap();
     super::super::close_file(relative).unwrap();
-    directory.close().unwrap();
 }
 
 #[test]

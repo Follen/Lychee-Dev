@@ -78,7 +78,7 @@ fn finish_directory_with<T>(
 }
 /// One authenticated directory per Source invocation. No arbitrary destination,
 /// blob/evidence domain, schema knowledge or replacement deadline.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 enum Kind {
     Facts,
     Originals,
@@ -94,8 +94,8 @@ impl Kind {
 struct SourceCache {
     directory: Directory,
     locks: PathBuf,
-    // Lazy: reads retain their original no-lock-publication path. A successful
-    // first publication holds the real locks ancestry until checked finish.
+    // Originals only: reads and all Facts operations never acquire this owner.
+    // The first Original publication holds locks ancestry until checked finish.
     lock_directory: OnceLock<Directory>,
     kind: Kind,
 }
@@ -228,57 +228,67 @@ impl SourceCache {
                 Kind::Originals => ToolkitError::new("vault.blob_limit", "blob exceeds budget", 4),
             });
         }
-        // Same-key publishers serialize through the existing bounded,
-        // cancellation-aware lock primitive. Different files/directories do
-        // not contend; readers keep old complete bytes across replacement.
-        let lock_started = timings.is_some().then(Instant::now);
-        let lock_result = (|| {
-            let directory = self.lock_directory(control)?;
-            let resource = format!("source-cache:{}:{key}", self.kind.directory());
-            if let Some(observer) = timings.as_deref_mut() {
-                // The synchronous closures borrow one callback; no handle or
-                // error ownership is transferred to this observation adapter.
-                let observer = RefCell::new(observer);
-                storage::ExclusiveLock::resource_wait_in_directory(
-                    directory,
-                    &resource,
-                    control,
-                    Some(&|phase, elapsed| {
-                        use storage::LockPhase;
-                        observer.borrow_mut()(
-                            match phase {
-                                LockPhase::Verify => SourceCachePublicationPhase::LockVerify,
-                                LockPhase::Open => SourceCachePublicationPhase::LockOpen,
-                                LockPhase::KernelAttempt => {
-                                    SourceCachePublicationPhase::LockKernelAttempt
-                                }
-                                LockPhase::ContentionBackoff => {
-                                    SourceCachePublicationPhase::LockContentionBackoff
-                                }
-                                LockPhase::FailureClose => {
-                                    SourceCachePublicationPhase::LockFailureClose
-                                }
-                            },
-                            elapsed,
-                        );
-                    }),
-                )
-            } else {
-                storage::ExclusiveLock::resource_wait_in_directory(
-                    directory, &resource, control, None,
-                )
+        // Facts are rebuildable snapshots: private CREATE owns its slot and
+        // same-directory atomic replacement is the publication linearization
+        // point. Same-key/different-body callers intentionally use last-writer
+        // semantics, without a standalone lock. The normal Published path
+        // never reads a later winner; the original NotPublished fallback stays.
+        // Originals retain their existing cancellation-aware kernel lock.
+        let lock = if self.kind == Kind::Originals {
+            let lock_started = timings.is_some().then(Instant::now);
+            let lock_result = (|| {
+                let directory = self.lock_directory(control)?;
+                let resource = format!("source-cache:{}:{key}", self.kind.directory());
+                if let Some(observer) = timings.as_deref_mut() {
+                    // The synchronous closures borrow one callback; no handle or
+                    // error ownership is transferred to this observation adapter.
+                    let observer = RefCell::new(observer);
+                    storage::ExclusiveLock::resource_wait_in_directory(
+                        directory,
+                        &resource,
+                        control,
+                        Some(&|phase, elapsed| {
+                            use storage::LockPhase;
+                            observer.borrow_mut()(
+                                match phase {
+                                    LockPhase::Verify => SourceCachePublicationPhase::LockVerify,
+                                    LockPhase::Open => SourceCachePublicationPhase::LockOpen,
+                                    LockPhase::KernelAttempt => {
+                                        SourceCachePublicationPhase::LockKernelAttempt
+                                    }
+                                    LockPhase::ContentionBackoff => {
+                                        SourceCachePublicationPhase::LockContentionBackoff
+                                    }
+                                    LockPhase::FailureClose => {
+                                        SourceCachePublicationPhase::LockFailureClose
+                                    }
+                                },
+                                elapsed,
+                            );
+                        }),
+                    )
+                } else {
+                    storage::ExclusiveLock::resource_wait_in_directory(
+                        directory, &resource, control, None,
+                    )
+                }
+            })();
+            if let (Some(started), Some(observer)) = (lock_started, timings.as_deref_mut()) {
+                observer(SourceCachePublicationPhase::Lock, started.elapsed());
             }
-        })();
-        if let (Some(started), Some(observer)) = (lock_started, timings.as_deref_mut()) {
-            observer(SourceCachePublicationPhase::Lock, started.elapsed());
-        }
-        let lock = lock_result?;
+            Some(lock_result?)
+        } else {
+            None
+        };
         let mut publication = None;
         let result =
-            self.publish_locked(key, bytes, control, observe, &mut publication, &mut timings);
-        let closed = measured(SourceCachePublicationPhase::LockClose, &mut timings, || {
-            lock.close()
-        });
+            self.publish_staged(key, bytes, control, observe, &mut publication, &mut timings);
+        let closed = match lock {
+            Some(lock) => measured(SourceCachePublicationPhase::LockClose, &mut timings, || {
+                lock.close()
+            }),
+            None => Ok(()),
+        };
         finish_historical(finish_historical(result, closed), control.check()).map_err(|mut error| {
             if let Some((temporary, state)) = publication {
                 error.details = serde_json::json!({"schema":"lycheedev.source-cache-publication.v1","path":self.directory.path().join(name),"temporary":temporary,"state":format!("{state:?}"),"durable":false,"cause":error.clone()});
@@ -286,7 +296,7 @@ impl SourceCache {
             error
         })
     }
-    fn publish_locked(
+    fn publish_staged(
         &self,
         key: &str,
         bytes: &[u8],
@@ -298,8 +308,8 @@ impl SourceCache {
         let name = self.name(key)?;
         let mut stage = measured(SourceCachePublicationPhase::Stage, timings, ||
             StagedFile::create_rebuildable_cache(&self.directory, key, &mut Controlled(control)))?
-            .ok_or_else(|| ToolkitError::new("vault.temporary_collision", "all bounded temporary slots for this target are occupied; preserve and inspect uncertain residues", 6)
-                .with_details(serde_json::json!({"target":self.directory.path().join(&name),"maximumSlots":64,"namespace":format!(".lycheedev-cache-{key}-")})))?;
+            .ok_or_else(|| ToolkitError::new("vault.temporary_collision", "all bounded temporary slots for this target are occupied by active writers or retained entries; no ownership was acquired", 6)
+                .with_details(serde_json::json!({"target":self.directory.path().join(&name),"maximumSlots":64,"occupants":"active_or_retained","namespace":format!(".lycheedev-cache-{key}-")})))?;
         let temporary = stage.name().to_owned();
         let result = (|| {
             control.check()?;
@@ -358,6 +368,13 @@ impl SourceCache {
 }
 
 /// Rebuildable parser results. Source owns the envelope schema and full hash checks.
+/// Each publish atomically replaces one complete snapshot, without a standalone
+/// lock. Concurrent same-key/different-body publishes are valid: the last rename
+/// wins, while an already-open reader retains its original complete snapshot.
+/// Success means this candidate was published, or the existing NotPublished
+/// fallback validated equivalent bytes, with the owned stage closed. A later
+/// writer may replace it. Cancellation/close errors preserve Published/Unknown.
+/// This is synchronous per document and does not promise crash durability.
 pub struct SourceFactsCache(SourceCache);
 /// Rebuildable original bytes, deliberately outside the durable evidence domain.
 /// The source index authenticates reads and recovers misses from its fixed Git pin.
@@ -434,7 +451,7 @@ mod tests {
         for fail_after_write in [false, true] {
             let f = Fixture::new();
             let control = OperationControl::default();
-            let cache = SourceCache::open(&f.0, Kind::Facts, &control).unwrap();
+            let cache = SourceCache::open(&f.0, Kind::Originals, &control).unwrap();
             let key = storage::sha256(b"profile key");
             let mut phases = Vec::new();
             let result = cache.publish_profiled(
@@ -494,7 +511,7 @@ mod tests {
         let f = Fixture::new();
         let control = OperationControl::default();
         let cancel = control.cancel_handle();
-        let cache = SourceCache::open(&f.0, Kind::Facts, &control).unwrap();
+        let cache = SourceCache::open(&f.0, Kind::Originals, &control).unwrap();
         let key = storage::sha256(b"profile stop after kernel lock");
         let mut phases = Vec::new();
         let error = cache
@@ -534,7 +551,7 @@ mod tests {
     fn lock_directory_is_lazy_reused_and_pins_replacement_until_checked_finish() {
         let f = Fixture::new();
         let control = OperationControl::default();
-        let cache = SourceCache::open(&f.0, Kind::Facts, &control).unwrap();
+        let cache = SourceCache::open(&f.0, Kind::Originals, &control).unwrap();
         let key = storage::sha256(b"held lock directory");
         assert!(cache.lock_directory.get().is_none());
         assert!(cache.read(&key, &control).unwrap().is_none());
@@ -557,7 +574,7 @@ mod tests {
     fn concurrent_first_publications_share_one_held_lock_directory() {
         let f = Fixture::new();
         let control = OperationControl::default();
-        let cache = SourceCache::open(&f.0, Kind::Facts, &control).unwrap();
+        let cache = SourceCache::open(&f.0, Kind::Originals, &control).unwrap();
         let barrier = Barrier::new(4);
         std::thread::scope(|scope| {
             let mut handles = Vec::new();
@@ -585,7 +602,7 @@ mod tests {
     fn both_held_directory_closes_preserve_primary_and_late_control_causes() {
         let f = Fixture::new();
         let control = OperationControl::default();
-        let cache = SourceCache::open(&f.0, Kind::Facts, &control).unwrap();
+        let cache = SourceCache::open(&f.0, Kind::Originals, &control).unwrap();
         cache
             .publish(&storage::sha256(b"close"), b"complete", &control)
             .unwrap();
@@ -803,9 +820,9 @@ mod tests {
     fn same_key_wait_respects_deadline_and_never_releases_other_owner() {
         let f = Fixture::new();
         let control = OperationControl::default();
-        let cache = SourceCache::open(&f.0, Kind::Facts, &control).unwrap();
+        let cache = SourceCache::open(&f.0, Kind::Originals, &control).unwrap();
         let key = storage::sha256(b"busy key");
-        let resource = format!("source-cache:{}:{key}", Kind::Facts.directory());
+        let resource = format!("source-cache:{}:{key}", Kind::Originals.directory());
         let owner =
             storage::ExclusiveLock::resource_controlled(&cache.locks, &resource, &control).unwrap();
         let short = OperationControl::uncancelable(Instant::now() + Duration::from_millis(30));
@@ -842,6 +859,7 @@ mod tests {
         let error = cache.publish(&key, b"complete", &control).unwrap_err();
         assert_eq!(error.code, "vault.temporary_collision");
         assert_eq!(error.details["maximumSlots"], 64);
+        assert_eq!(error.details["occupants"], "active_or_retained");
         for slot in 0..64 {
             assert_eq!(
                 fs::read(
@@ -862,3 +880,6 @@ mod tests {
         cache.finish(Ok(()), &control).unwrap();
     }
 }
+
+#[cfg(test)]
+mod atomic_publication_tests;

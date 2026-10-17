@@ -37,11 +37,14 @@ impl<'a> StagedFile<'a> {
     pub fn name(&self) -> &str {
         &self.stage.name
     }
-    /// Disposable-cache targets retain at most 64 uncertain original stages.
-    /// Names are fixed by one lowercase SHA-256 key, never caller paths. None
-    /// means all slots are occupied; no existing or foreign entry is adopted.
-    /// The caller serializes same-key publication and owns the returned handle
-    /// before performing its next cancellation check.
+    /// A disposable-cache target has at most 64 private stage names, shared by
+    /// concurrent active writers and retained uncertain/foreign entries. Names
+    /// are fixed by one lowercase SHA-256 key, never caller paths. Exclusive
+    /// CREATE alone acquires ownership; callers need not serialize same-key
+    /// publication. An occupied slot is skipped, never opened or removed.
+    /// None means this bounded pass found no free slot, not that all occupants
+    /// are abandoned. No liveness, age or PID inference authorizes reclamation.
+    /// The caller owns the returned handle before its next cancellation check.
     pub fn create_rebuildable_cache<C: FileControl>(
         parent: &'a Directory,
         key: &str,
@@ -80,7 +83,16 @@ impl<'a> StagedFile<'a> {
                         sealed: false,
                     }));
                 }
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                // FILE_CREATE can report a sharing violation for a live stage
+                // whose original owner denies write/delete sharing. This is
+                // occupancy, just like a name collision; it grants no handle
+                // or cleanup authority. Do not swallow other access failures.
+                Err(error)
+                    if error.kind() == io::ErrorKind::AlreadyExists
+                        || error.raw_os_error() == Some(32) =>
+                {
+                    continue;
+                }
                 Err(error) => return Err(error.into()),
             }
         }
@@ -297,3 +309,6 @@ mod rebuildable_cache_tests {
         std::fs::remove_dir_all(path).unwrap();
     }
 }
+
+#[cfg(test)]
+mod cache_slot_tests;

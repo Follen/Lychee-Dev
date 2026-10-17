@@ -242,4 +242,73 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn real_facts_publication_keeps_all_thirty_one_fields_and_reports_zero_lock_work() {
+        use lycheedev_core::{
+            cache::SourceFactsCache, control::OperationControl, storage, workspace,
+        };
+        struct Home(std::path::PathBuf);
+        impl Drop for Home {
+            fn drop(&mut self) {
+                let result = std::fs::remove_dir_all(&self.0);
+                if !std::thread::panicking() {
+                    result.unwrap();
+                }
+            }
+        }
+        let home = Home(std::env::temp_dir().join(format!(
+            "lychee-facts-profile-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        )));
+        workspace::initialize(&home.0).unwrap();
+        let control = OperationControl::default();
+        let owner = SourceFactsCache::open(&home.0, &control).unwrap();
+        let p = Profile::enabled(true);
+        let raw = b"function CompleteFacts() return 1 end";
+        let digest = storage::sha256(raw);
+        let result = super::super::document_facts_profiled(
+            &home.0,
+            "Example.lua",
+            raw,
+            &digest,
+            &control,
+            Some(&p),
+            &owner,
+            None,
+        );
+        let (_, hit) = owner.finish(result, &control).unwrap();
+        assert!(!hit);
+        let value = p.value();
+        assert_eq!(value["schema"], "lycheedev.source-index-phases.v1");
+        let phases = value["phases"].as_array().unwrap();
+        assert_eq!(phases.len(), 31);
+        for (i, phase) in phases.iter().enumerate() {
+            assert_eq!(phase["phase"], NAMES[i]);
+            if NAMES[i].starts_with("facts_publish_lock") {
+                assert_eq!(phase["calls"], 0, "unexpected lock event: {}", NAMES[i]);
+                assert_eq!(
+                    phase["elapsedMicros"], 0,
+                    "invented lock timing: {}",
+                    NAMES[i]
+                );
+            }
+        }
+        for phase in [
+            Phase::FactsPublish,
+            Phase::FactsPublishStage,
+            Phase::FactsPublishWrite,
+            Phase::FactsPublishSeal,
+            Phase::FactsPublishRename,
+            Phase::FactsPublishStageClose,
+        ] {
+            assert_eq!(p.calls(phase), 1);
+        }
+        assert_eq!(std::fs::read_dir(home.0.join("locks")).unwrap().count(), 0);
+        // Publication is already readable as a complete authenticated envelope
+        // when the per-document caller returns; no worker/batch flush is needed.
+        let (_, hit) =
+            super::super::document_facts(&home.0, "Example.lua", raw, &digest, &control).unwrap();
+        assert!(hit);
+    }
 }

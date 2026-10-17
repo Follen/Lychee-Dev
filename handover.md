@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 05:37 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`d69f94ea133de9fea9034dd85b174f354a40542c`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 05:50 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`4c2ce8b46d2e13b39aceceb3a2e9712f56b59110`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -67,11 +67,11 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 正式中位比cold/warm：17MiB三BLTE块1.029283/0.798972；palette PNG1.134704/0.999569、WebP0.680457/0.555488；BGRA8 PNG1.077913/0.948885、WebP0.731375/0.576258；BC1 PNG1.067895/0.983206、WebP0.717355/0.578054；BC2 PNG1.081733/0.903294、WebP0.717622/0.594889；BC3 PNG1.104392/0.924568、WebP0.730342/0.582489。保持原CreateProcess→root/tree回收时钟与全部慢样本，无下载/外部等待扣减。暖Rust约112–125ms包含完整进程生命周期，不能直接归因为启动成本；本轮未启startupDiagnostics，旧数据无法事后恢复该细分。
 
-13条内存缺测（Rust12、Go1，均正式暖样本）原样null、未补样；其余915条仅有间隙的owned Job采样下界，CPU/I/O未测。产品EXE `cb5599490c23d27bbe48e43f4baa482680d67051a858a12b872bbce8cf2cf186` 未重建；Node55/55。report SHA256 `1d5c0f49a61228afea5f61e02f8c9221a48321250d0a7aa3f95d31ae29aa1f0b`；[97段完整证据索引](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6229628728)保全部原样本。30d原第4pair EPERM现场/receipt不变，d86剩8路径续跑和本次新acceptance不追认旧owner已清理。原单pair历史保留在[验证历史](docs/toolkit/rust-migration-evidence-2026-10-16.md#2026-10-17-data-observations-before-complete-acceptance)。完整97段已还原9748路径/7021blob并逐SHA认证，928样本/24组统计复算一致，9455封存日志引用全部核过。root退出被观察后到tree/drain中位Go0.463ms/Rust0.669ms，不是约100ms整体耗时的主因；启动与产品阶段尚待分清。现新增独占--startup-diagnostics沿原owner计时，12路径各1冷/1暖共48测量CLI＋15准备，完整等价/回收不变，不与acceptance/resume混用，缺proof单列诊断失败而保产品结果。Node29/29通过；[9de runner/30d产品Windows诊断](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6229910794)48测量CLI＋15准备、24冷暖行全部等价，48startup proof有效，outer和12pair全部回收。两产品和8个非conditions输入与旧样本相同，第九conditions为新诊断副本。Rust preResume20.2591–35.1257ms，Resume至reap66.1001–180.9937ms，后者含调度/loader/runtime/业务/清理，不是纯产品CPU；rootCPU为15.625ms量化。46内存sampled_successful、2有gap，无完全缺测，不能外推完整RSS。原23段666文件/498blob、635封存日志已独立SHA验证。下一共同Data业务phase观测仍待实现复验；保48单pair与旧928正式样本各自身份。既有20对总时钟/判据不改，不能事后减掉启动或把诊断当性能验收。
+13条内存缺测（Rust12、Go1，均正式暖样本）原样null、未补样；其余915条仅有间隙的owned Job采样下界，CPU/I/O未测。产品EXE `cb5599490c23d27bbe48e43f4baa482680d67051a858a12b872bbce8cf2cf186` 未重建；Node55/55。report SHA256 `1d5c0f49a61228afea5f61e02f8c9221a48321250d0a7aa3f95d31ae29aa1f0b`；[97段完整证据索引](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6229628728)保全部原样本。30d原第4pair EPERM现场/receipt不变，d86剩8路径续跑和本次新acceptance不追认旧owner已清理。原单pair历史保留在[验证历史](docs/toolkit/rust-migration-evidence-2026-10-16.md#2026-10-17-data-observations-before-complete-acceptance)。完整97段已还原9748路径/7021blob并逐SHA认证，928样本/24组统计复算一致，9455封存日志引用全部核过。root退出被观察后到tree/drain中位Go0.463ms/Rust0.669ms，不是约100ms整体耗时的主因；启动与产品阶段尚待分清。现新增独占--startup-diagnostics沿原owner计时，12路径各1冷/1暖共48测量CLI＋15准备，完整等价/回收不变，不与acceptance/resume混用，缺proof单列诊断失败而保产品结果。Node29/29通过；[9de runner/30d产品Windows诊断](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6229910794)48测量CLI＋15准备、24冷暖行全部等价，48startup proof有效，outer和12pair全部回收。两产品和8个非conditions输入与旧样本相同，第九conditions为新诊断副本。Rust preResume20.2591–35.1257ms，Resume至reap66.1001–180.9937ms，后者含调度/loader/runtime/业务/清理，不是纯产品CPU；rootCPU为15.625ms量化。46内存sampled_successful、2有gap，无完全缺测，不能外推完整RSS。原23段666文件/498blob、635封存日志已独立SHA验证。共同Data业务phase观测已实现、实际复验仍待；保48单pair与旧928正式样本各自身份。既有20对总时钟/判据不改，不能事后减掉启动或把诊断当性能验收。
 
 ### 当前 Source/Data 窄优化与真实所有权修复（首次编译失败，后继待复验）
 
-Source仅将受控Facts锁的open替换为held Directory相对OPEN_IF，精确保read/write、share read/write/delete、非截断和原leaf策略；File先转交Core再原取消检查/checked close。其它caller仍旧OpenOptions，逐文档缓存/恢复/错误合并与原等待不变，无新extern/unsafe。7新增Rust覆盖真实争用、取消关闭、失败/目录映射、非截断、共享rename及held-parent/decoy路径；静态23项、rustfmt/diff过，Windows尚未执行。改善范围只是原1.578秒open中的完整路径处理，不能承诺省去整段。
+Source仅将受控Facts锁的open替换为held Directory相对OPEN_IF，精确保read/write、share read/write/delete、非截断和原leaf策略；File先转交Core再原取消检查/checked close。其它caller仍旧OpenOptions，逐文档缓存/恢复/错误合并与原等待不变，无新extern/unsafe。7新增Rust覆盖真实争用、取消关闭、失败/目录映射、非截断、共享rename及held-parent/decoy路径；静态23项、rustfmt/diff过；d69实际Core storage55/Facts14通过，Windows destination28通过1失败。失败是held父目录下Win32全路径rename第73行error32，不能据此认定叶子share差异；本后继仅修fixture，增加旧OpenOptions同失败对照、DELETE-access peer及只关闭父目录后两叶子原句柄完整rename/readback，生产flags不变。修正Windows待复验。改善范围只是原1.578秒open中的完整路径处理，不能承诺省去整段。
 
 Data两个真实Root消费者接收同一已认证materialization owner返回的BlobRef，保原checkedclose后才交付，删除再次publish/hash/reopen。新增默认关闭且不读时钟的11段query-owned profile；capture/metadata为真实inclusive，不假分SQL连接内部，沿现Budget共享且不改变计量。另修三个真实VerifiedBlob退出缺口：部分批次/交付前stop按获取顺序关闭所有已持有blob；回调接管后晚期source/reader错误关闭已交付file；本地asset inspect capture成功或失败均checkedclose，保已提交身份与原主错/全部cleanup原因。故障注入发生在真实close之后，不声称模拟原生OS关句柄失败。
 
@@ -80,6 +80,14 @@ d69本机首次all-targets实际失败：两个新增测试文件共4处通过Pi
 Data新增16个唯一Rust测试（profile8、真实consumer8）尚未运行。原组过滤为phase_profile、local_query::regression_tests、local_query::adaptive_tests、assets::export::tests，需alltargets先真实编译；Source同时跑Core storage原锁/等待/checkedclose与cache::source_facts::、Windows filesystem::destination::原全组。Node34/34、14Rust解析、6Node语法及scoped diff已过，不替代业务实测。
 
 [现Data入口](tests/rust-performance-paired/data.README.md)新增独占--data-phase-profile，需本批匹配优化产品：12路径各1冷/1暖、48测量CLI＋15准备，原startup proof/完整结果等价/总时钟保留；只Rust测量进程开启env，严格接受单条完整profile，默认与Go仍空stderr，错误/未知stderr不吞。它不能与acceptance/resume/startup-only组合，不把子段相加或扣除后宣称达标。统一一次新构建后同时验证Source4036及Data阶段，本机已重连，父线程统一安排后继编译及当前独立组，不擅自重复运行。
+
+### Facts 无独立锁文件原子发布候选（未实测）
+
+用户要求核清只读输入与缓存锁的实际必要性。输入与cache.read原本无该锁；旧锁仅包已解析完整bytes的发布，不防重复解析。现Facts-only改为私有排他CREATE→完整写/seal→同目录atomic replace，Originals、整index、metadata锁保持。公开Core接口本就允许同key不同完整body，保last-writer及原NotPublished等价fallback，不新增首赢家/不同body拒绝或正常成功路径额外读取。
+
+64个stage槽共同容纳活跃writer与未知残留，仅已获owner可关闭/清理；占用跳过、不按PID/年龄回收。Win32真实sharing32与AlreadyExists作为未获owner的占用，其他权限错误仍返回。保32MiB、原deadline、完整错误/checkedclose与Published/Unknown事实，逐文档顺序checkpoint不改。旧读句柄可持旧完整快照。此为同步文件I/O的无独立锁文件发布，不称理论lock-free；不改缓存格式/GC/耐久合同，也不删除历史锁文件。
+
+新增16个Rust函数（15个断言测试＋1个真实子进程helper），覆盖同时sealed的两个进程、同/异body、旧reader、前writer已rename但原stage句柄未close时的后writer替换、坏缓存修复、64活跃/混合残留、取消/Unknown及31字段profile的Facts锁计数真实0；全部待Windows运行。Node事实读侧与unsafe检查22/22通过，静态读审/解析通过。与上段原rename fixture失败分别记账，后续先完整前置再一次匹配优化构建/4036差分和Data阶段观测。没有性能收益结论。
 
 ### 公开 Source project 选择修复（新增12项实测通过）
 
