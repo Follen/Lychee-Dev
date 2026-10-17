@@ -13,10 +13,12 @@ import {inspectEmmy} from '../../tools/rust-emmy-identity.mjs';
 import {elapsed} from './contract.mjs';
 import {cloneSeed, inventory, verifyGoMetadata, verifyGoPackage} from './inputs.mjs';
 import {GO_COMMIT, REPETITIONS, TARGET_RATIO, compareData, dataCases, orderFor, summarizeData} from './data-contract.mjs';
-import {decodedIdentity, digest, loadDataFixture, parse, seedDataHome, validateDataOutput} from './data-inputs.mjs';
+import {decodeDataImage, decodedIdentity, digest, loadDataFixture, parse, seedDataHome, validateDataOutput} from './data-inputs.mjs';
+import {verifyDataContinuation} from './data-resume.mjs';
 
 assert(process.argv.length === 3 && process.platform === 'win32');
-const config = parse(readFileSync(process.argv[2])), root = resolve(config.root), out = resolve(config.evidence), start = performance.now();
+const config = parse(readFileSync(process.argv[2])), root = resolve(config.root), runnerRoot = resolve(config.runnerRoot), out = resolve(config.evidence), start = performance.now();
+assert(!config.resumeFrom || !config.acceptance);
 let fatal = false;
 const report = {schema: 'lycheedev.paired-data.v1', state: 'running', startedAt: new Date().toISOString(), performanceAcceptanceEvaluated: config.acceptance,
   fullB04Acceptance: false, targetRatio: TARGET_RATIO, scope: ['tiny synthetic SQL correctness only', '17 MiB three-chunk BLTE inspect', 'five 1031x519 BLP2 storage modes, PNG/WebP default export'],
@@ -50,7 +52,7 @@ function identities() {
   const rust = verifyArtifact(root, config.rustArtifact); assert(['release', 'symbols'].includes(rust.profile)); assert.equal(rust.binarySHA256, config.rust.binarySHA256); assert.equal(sourceDigest(root), rust.inputHashes.sourceTree);
   const emmy = inspectEmmy(root); assert.equal(emmy.identity, 'public-upstream-unmodified-v1'); assert.equal(emmy.patchedTreeSHA256, rust.inputHashes.emmy.patchedTreeSHA256);
   const channel = parse(readFileSync(join(root, 'release/npm-channel.json'))); assert.equal(channel.version, '3.5.0'); assert.equal(channel.distTag, 'beta');
-  for (const [path, sha] of Object.entries(config.inputs)) assert.equal(hashFile(join(root, path)), sha, 'executing runner changed');
+  for (const [path, sha] of Object.entries(config.inputs)) assert.equal(hashFile(join(runnerRoot, path)), sha, 'executing runner changed');
 }
 
 let entries = [], fixtures = {}, sharp, decoderModules;
@@ -63,13 +65,21 @@ try {
   assert.match(report.machine.toolchains.rustc, /^rustc 1\.99\.0\b/);
   const require = createRequire(import.meta.url), entryPath = require.resolve(config.sharpModule);
   sharp = require(entryPath); assert(typeof sharp === 'function' && sharp.versions?.sharp && sharp.versions?.vips);
+  const decoderCache = sharp.cache(false);
+  for (const key of ['memory', 'files', 'items']) assert.equal(decoderCache[key].max, 0, 'independent decoder cache must be disabled');
   const seen = new Set(); function loaded(module) { if (!module || seen.has(module.filename)) return; seen.add(module.filename); for (const child of module.children) loaded(child); }
   loaded(require.cache[entryPath]); decoderModules = Object.fromEntries([...seen].sort().map(path => [path, hashFile(path)]));
-  report.decoder = {entryPath, versions: sharp.versions, loadedModuleSHA256: decoderModules, scope: 'existing supplied sharp; no installation; module and loaded native-addon files hashed; operating-system shared libraries not claimed fully inventoried'};
+  report.decoder = {entryPath, versions: sharp.versions, loadedModuleSHA256: decoderModules, cache: decoderCache,
+    inputPolicy: 'already authenticated bounded encoded Buffer, no scratch filename; pipeline destroyed after completed decode, operation/file cache disabled',
+    scope: 'existing supplied sharp; no installation; module and loaded native-addon files hashed; operating-system shared libraries not claimed fully inventoried'};
   const begun = performance.now();
   fixtures = Object.fromEntries(Object.entries(config.fixtures).map(([kind, path]) => [kind, loadDataFixture(path, kind)]));
   entries = dataCases(fixtures.images.images); report.inputs.fixtures = Object.fromEntries(Object.entries(fixtures).map(([kind, fixture]) => [kind, fixture.receipt]));
   report.preparation.push({label: 'independent fixture/CKey/EKey/BLTE/DBD/pixel audit', wallMillis: performance.now() - begun});
+  if (config.resumeFrom) {
+    const continuation = verifyDataContinuation(root, config.resumeFrom, {config, report, entries});
+    report.continuation = continuation.evidence; entries = continuation.selected; save();
+  }
   const seeds = {};
   for (const [kind, fixture] of Object.entries(fixtures)) for (const engine of ['go', 'rust']) {
     const home = join(config.scratch, `${kind}-${engine}-seed`), binary = engine === 'go' ? config.go.binary : config.rust.sourceBinary;
@@ -82,7 +92,7 @@ try {
   async function pair(entry, iteration, preflight) {
     const fixture = fixtures[entry.fixture], job = beginScratch(root, `paired-data-${entry.id}-${preflight ? 'preflight' : iteration}`, {command: entry.args,
       inputs: {go: config.go.binarySHA256, rust: config.rust.binarySHA256, fixture: fixture.receipt.inventory.sha256}, admissionOptions: {requiredBytes: 256 << 20, scratchReserveBytes: 256 << 20}});
-    report.pairOwners.push({caseId: entry.id, iteration, preflight, receipt: job.receipt});
+    const ownership = {caseId: entry.id, iteration, preflight, receipt: job.receipt}; report.pairOwners.push(ownership);
     const destination = preflight && config.acceptance && entry.performance ? report.preflightPairs : report.pairs;
     const rows = []; let valid = false;
     try {
@@ -102,7 +112,7 @@ try {
           try {
             assert(run.handlesReaped && !run.error && run.status === 0); assert.equal(run.stderr.toString(), ''); Object.assign(row[engine], elapsed(run.proof));
             const auditStarted = performance.now(), result = await validateDataOutput({entry, fixture, engine, cacheMode, envelope: parse(run.stdout), home, output,
-              decodeImage: path => sharp(path).ensureAlpha().raw().toBuffer({resolveWithObject: true}), evidence: job.evidence});
+              decodeImage: bytes => decodeDataImage(sharp, bytes), evidence: job.evidence});
             const after = decodedIdentity(home); assert.equal(after.length, 2); if (cacheMode === 'warm') assert.deepEqual(after, before, 'warm cache metadata/source identities changed');
             Object.assign(row[engine], {valid: true, reuse: result.observations.reuse, observations: result.observations, captures: result.proofs, auditMillis: performance.now() - auditStarted});
             values[engine] = result.value;
@@ -119,7 +129,11 @@ try {
     finally {
       writeFileSync(join(job.evidence, 'pair.json'), JSON.stringify({caseId: entry.id, iteration, preflight, valid, rows}, null, 2) + '\n');
       job.seal({state: fatal ? 'interrupted' : valid ? 'succeeded' : 'failed', handlesReaped: !fatal, logs: files(job.evidence)});
-      if (!fatal && valid) job.cleanup(); save();
+      if (!fatal && valid) {
+        try { job.cleanup(); ownership.cleanup = {state: 'retired'}; }
+        catch (error) { ownership.cleanup = {state: 'failed_retained', code: error.code, syscall: error.syscall, path: error.path, message: error.message}; save(); throw error; }
+      }
+      save();
     }
     return valid;
   }
@@ -130,10 +144,14 @@ try {
   }
   identities();
   for (const [path, hash] of Object.entries(decoderModules)) assert.equal(hashFile(path), hash, 'decoder module changed');
+  if (config.resumeFrom) {
+    const again = verifyDataContinuation(root, config.resumeFrom, {config, report, entries: dataCases(fixtures.images.images)});
+    assert.deepEqual(again.evidence, report.continuation, 'prior evidence changed during continuation'); report.continuation.priorEvidenceStable = true;
+  }
   report.machine.powerAfter = prepare('powercfg.exe', ['/getactivescheme'], 'power after').toString().trim(); assert.equal(report.machine.powerAfter, report.machine.powerBefore);
   report.groups = summarizeData(entries, report.pairs, config.acceptance);
   report.state = report.groups.length === entries.length * 2 && report.groups.every(group => ['passed_selected_path', 'equivalent_observation_only'].includes(group.state))
-    ? config.acceptance ? 'passed_selected_data_paths_full_acceptance_open' : 'equivalent_data_observation_only' : 'failed';
+    ? config.resumeFrom ? 'equivalent_data_continuation_only' : config.acceptance ? 'passed_selected_data_paths_full_acceptance_open' : 'equivalent_data_observation_only' : 'failed';
 } catch (error) { report.blocker = error.message.slice(0, 4096); report.groups = summarizeData(entries, report.pairs, config.acceptance); report.state = 'failed'; }
 finally { report.wallMillis = performance.now() - start; report.finishedAt = new Date().toISOString(); report.requiresOuterRetirement = fatal; save(); }
 console.log(JSON.stringify({state: report.state, report: join(out, 'report.json'), groups: report.groups}, null, 2));

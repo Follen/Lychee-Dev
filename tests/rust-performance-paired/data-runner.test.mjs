@@ -7,7 +7,7 @@ import {tmpdir} from 'node:os';
 import {deflateSync} from 'node:zlib';
 import {DatabaseSync} from 'node:sqlite';
 import {CONTENT_BYTES, GO_COMMIT, PROOF, REPETITIONS, SQL, SQL_ROWS, auditCache, compareData, dataCases, orderFor, semanticData, summarizeData, usage} from './data-contract.mjs';
-import {blob, decodeFixtureBLTE, decodedIdentity, digest, goJSON, parse, seedDataHome, validateDataOutput} from './data-inputs.mjs';
+import {blob, decodeDataImage, decodeFixtureBLTE, decodedIdentity, digest, goJSON, parse, seedDataHome, validateDataOutput} from './data-inputs.mjs';
 import {fixtureArgs, fixturePreparers} from './prepare-data.mjs';
 
 function images() { return {schema: 'lycheedev.large-image-paired-fixture.v1', encodings: ['png', 'webp'], channels: ['rgba'], cases: ['palette', 'bgra8', 'bc1', 'bc2', 'bc3'].map((storage, index) => ({fileDataID: 701 + index, mipmap: 0, pixelsPath: `pixels/${701 + index}.rgba`, pixelsBytes: 1031 * 519 * 4, pixelsSHA256: 'a'.repeat(64), texture: {format: 'BLP2', storage, width: 1031, height: 519, mipmap: 0, levels: 1, alphaBits: 8}}))}; }
@@ -177,9 +177,29 @@ test('image validation checks complete independently decoded RGBA bytes', async 
   const sample = materializedImage(t); sample.decodeImage = async () => ({info: {width: 1031, height: 519, channels: 4}, data: Buffer.alloc(1031 * 519 * 4, 1)});
   await assert.rejects(validateDataOutput(sample));
 });
+test('independent image decoder receives only authenticated bounded encoded bytes', async t => {
+  const sample = materializedImage(t), original = sample.decodeImage;
+  sample.decodeImage = async bytes => { assert(Buffer.isBuffer(bytes)); assert(bytes.equals(readFileSync(sample.output))); return original(bytes); };
+  await validateDataOutput(sample);
+});
+test('buffer decoder destroys its pipeline after success and failure, preserving both errors', async () => {
+  const bytes = Buffer.from('encoded');
+  for (const fail of [false, true]) {
+    const events = [], error = new Error('decode failed'), decoder = {ensureAlpha() { return this; }, raw() { return this; }, async toBuffer() { events.push('decode'); if (fail) throw error; return 'pixels'; }, destroy() { events.push('destroy'); }};
+    const work = decodeDataImage((input, options) => { assert.equal(input, bytes); assert.equal(options.limitInputPixels, 1031 * 519); return decoder; }, bytes);
+    if (fail) await assert.rejects(work, actual => actual === error); else assert.equal(await work, 'pixels');
+    assert.deepEqual(events, ['decode', 'destroy']);
+  }
+  const first = new Error('decode first'), second = new Error('destroy second');
+  const decoder = {ensureAlpha() { return this; }, raw() { return this; }, async toBuffer() { throw first; }, destroy() { throw second; }};
+  await assert.rejects(decodeDataImage(() => decoder, bytes), error => error instanceof AggregateError && error.cause === first && error.errors[1] === second);
+  await assert.rejects(decodeDataImage(() => { throw Error('should not run'); }, 'scratch.webp'), /Buffer required/);
+});
 test('runner preserves original owned clock and stops failed paths before warm/replacement', () => {
   const source = readFileSync(new URL('./data-run.mjs', import.meta.url), 'utf8');
   assert(source.includes('elapsed(run.proof)')); assert(source.includes('memoryObservation: measured')); assert(source.includes('if (!row.resultEquivalent) break'));
-  assert(source.includes('if (!verified || !config.acceptance || !entry.performance) continue')); assert(source.includes('if (!fatal && valid) job.cleanup()'));
+  assert(source.includes('if (!verified || !config.acceptance || !entry.performance) continue')); assert(source.includes('if (!fatal && valid) {'));
+  assert(source.includes("state: 'failed_retained'")); assert(source.includes('job.cleanup();')); assert(!source.includes('maxRetries'));
+  assert(source.includes('sharp.cache(false)')); assert(!source.includes('sharp(path)'));
   assert(!source.includes('rust-wdc-performance')); assert(!source.includes('target/release/lycheedev')); assert(!source.includes('spawnSync('));
 });

@@ -1,7 +1,11 @@
 # Narrow Data Go 3.2.3 / Rust paired entry
 
-This is candidate benchmark wiring, not a measured result. No product execution,
-speedup or B04 acceptance is established by the synthetic Node tests. Use the
+The [30d Windows observation](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6228602282)
+verified four paths (16 actual CLI invocations), then failed while removing the
+fourth pair's already-sealed scratch. Eight paths and all 20-pair acceptance
+were not run. This revision's decoder/continuation changes are candidate code
+until separately executed; synthetic Node tests establish no product speedup
+or B04 acceptance. Use the
 existing [paired ownership/identity/timing contract](README.md); do not use the
 historical Go 3.1.2 WDC driver. The Data sibling adds no build or fallback to its
 measured entry and does not change the Source runner.
@@ -91,7 +95,7 @@ First check the harness and real Windows owner. A Linux/cloud Node pass does
 not establish the native owned clock or memory observer:
 
 ```powershell
-node --test tests/rust-performance-paired/data-runner.test.mjs tools/rust-owned-process.test.mjs
+node --test tests/rust-performance-paired/data-runner.test.mjs tests/rust-performance-paired/data-resume.test.mjs tools/rust-owned-process.test.mjs
 if ($LASTEXITCODE -ne 0) { throw "Data harness or native owner check failed" }
 
 $prepared = node tests/rust-performance-paired/prepare-data.mjs | ConvertFrom-Json
@@ -215,3 +219,123 @@ Even `passed_selected_data_paths_full_acceptance_open` is only these eleven
 synthetic performance paths. Representative SQL, raw export, real-client data,
 Hotfix/effective/remote paths, full resource accounting, full B04/B01–B07,
 sessions and release qualification remain open.
+
+## Bounded continuation after the 30d cleanup failure
+
+The original outer owner `811dac59-a06f-4f11-b0b4-43b0c37bb7d6` remains failed.
+Its four completed paths and original timings are retained, never rerun by this
+mode or copied into a new sample set. Pair
+`ed2701b9-639e-4989-9e49-8626ae7a9db1` was sealed succeeded/reaped but not retired.
+`handlesReaped` proves its CLI descendants ended; at cleanup the controller and
+its in-process decoder were still alive. The archived evidence contains no
+actual open-file-holder, Windows attributes/ACL or decoder-cache observations.
+It therefore does not prove which component caused EPERM.
+
+The old controller passed scratch filenames into Sharp. Its documented
+[operation cache can keep files open](https://sharp.pixelplumbing.com/api-utility/#cache).
+The revised controller gives it only the already size-bounded, SHA-256-verified
+artifact Buffer, disables operation/file caching and destroys each completed
+pipeline in `finally`. Decode and destroy errors are both preserved. It checks
+the encoded Buffer hash again after decoding and writes that exact Buffer to
+evidence without a new unbounded copy. All RGBA checks remain. This removes a
+file-lifetime risk; it is not a claim to have proved the historical holder or
+fixed every possible Windows EPERM. Generic scratch removal is unchanged:
+another failure stops, retains evidence and records code/syscall/path/message.
+There is no retry, chmod, broad cleanup or acceptance override.
+
+`--resume-unattempted <original-owned-report.json>` is deliberately narrow:
+
+- Only the original full, single-root, non-acceptance observation is accepted;
+  no chained continuation and no `--acceptance` combination.
+- Every attempted path must form a completed prefix with both cold/warm pairs,
+  full equivalence, valid original native timing and reaped CLI ownership.
+  Partial, mismatched or failed samples cannot be replaced by this feature.
+- Earlier pair owners must be retired and the final owner sealed
+  succeeded/reaped with the original EPERM naming it. No old owner is cleaned,
+  edited, adopted or relabeled by the continuation.
+- Both before and after the new run, authenticate the original configuration,
+  reports, every outer/pair sealed raw log and hash index, the unchanged old
+  runner files, Rust artifact/source, Go package, complete fixture inventories,
+  supplied decoder modules, machine/toolchains and recorded conditions.
+  Missing or altered raw stdout/native receipt/image evidence is fatal.
+- Only whole unattempted paths get new homes, pairs and owners. In this 30d
+  case those are BGRA8, BC1, BC2, BC3 × PNG/WebP. No prior sample is imported.
+  Empty groups are explicitly `not_run`, not product correctness failures.
+- Successful completion is `equivalent_data_continuation_only`, with original
+  failed state and both runner identities retained. It is neither a repaired
+  original run, a combined performance result nor a 20-pair acceptance. Later
+  full acceptance still uses its own complete automatic preflight and 20 pairs.
+
+Run the reviewed new runner from a separate exported stage while the **current
+directory remains the unchanged product checkout matching the 30d artifact**.
+Do not overwrite that checkout's tools or rebuild the product merely to run the
+new comparator. In particular, generic ownership tools participate in its
+source digest. Stage/archive/conditions paths below must be fresh paths inside
+the coordinator's already registered test scratch. Preparing that stage is test
+coordination in the same single local queue, not an additional build channel.
+
+From a checkout containing the reviewed continuation commit, export this exact
+runtime and test dependency closure. Use a tar file, not a binary PowerShell 5.1
+pipeline; do not copy unrelated dirty files:
+
+```powershell
+$reviewedCheckout = "<checkout containing the reviewed new runner commit>"
+$runnerCommit = "<reviewed continuation commit>"
+$runner = "<fresh empty runner directory in coordinator-owned scratch>"
+$archive = "<fresh archive.tar in that same owner>"
+$files = @(
+  "tools/rust-data-performance-paired.mjs",
+  "tests/rust-performance-paired/data-run.mjs",
+  "tests/rust-performance-paired/data-contract.mjs",
+  "tests/rust-performance-paired/data-inputs.mjs",
+  "tests/rust-performance-paired/data-resume.mjs",
+  "tests/rust-performance-paired/data-runner.test.mjs",
+  "tests/rust-performance-paired/data-resume.test.mjs",
+  "tests/rust-performance-paired/data.README.md",
+  "tests/rust-performance-paired/prepare-data.mjs",
+  "tests/rust-performance-paired/contract.mjs",
+  "tests/rust-performance-paired/inputs.mjs",
+  "tests/rust-source-full-corpus/assertions.mjs",
+  "tests/rust-parity/describe-contract.mjs",
+  "tests/rust-parity/oracle.mjs",
+  "tools/rust-build.mjs",
+  "tools/rust-disk.mjs",
+  "tools/rust-emmy-identity.mjs",
+  "tools/rust-owned-process.mjs",
+  "tools/rust-owned-process.ps1",
+  "tools/rust-owned-process.test.mjs",
+  "tools/rust-owned-memory.mjs",
+  "tools/rust-build-auxiliary.json",
+  "tools/zip.mjs",
+  "release/rust-disk-policy.json"
+)
+git -C $reviewedCheckout archive --format=tar "--output=$archive" $runnerCommit -- $files
+if ($LASTEXITCODE -ne 0) { throw "Runner export failed" }
+tar -xf $archive -C $runner
+if ($LASTEXITCODE -ne 0) { throw "Runner extraction failed" }
+Get-FileHash -Algorithm SHA256 $archive
+```
+
+Retain the commit/archive hash and exported file hashes in the coordinator's
+stage receipt. Then run from the unchanged 30d product root. The original sealed
+configuration supplies all nine existing inputs; it is not rewritten. Its
+conditions are copied as original recorded conditions, while the new report
+separately identifies the current runner and rechecks power/toolchains. Use
+UTF-8 without BOM for the new conditions copy:
+
+```powershell
+Set-Location "<unchanged 30d product checkout>"
+$prior = Join-Path (Get-Location) ".tmp/rust-disk/evidence/811dac59-a06f-4f11-b0b4-43b0c37bb7d6/owned-report.json"
+$original = Get-Content -Raw (Join-Path (Split-Path $prior) "configuration.json") | ConvertFrom-Json
+$conditions = "<fresh conditions.json in coordinator-owned scratch>"
+[IO.File]::WriteAllText($conditions, ($original.conditions | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+node --test "$runner/tests/rust-performance-paired/data-runner.test.mjs" "$runner/tests/rust-performance-paired/data-resume.test.mjs" "$runner/tools/rust-owned-process.test.mjs"
+if ($LASTEXITCODE -ne 0) { throw "Staged Data/native owner checks failed" }
+node "$runner/tools/rust-data-performance-paired.mjs" $original.rustArtifact $original.goSource $original.go.root $original.luaLSArchive $conditions $original.fixtures.catalog $original.fixtures.content $original.fixtures.images $original.sharpModule --resume-unattempted $prior
+if ($LASTEXITCODE -ne 0) { throw "Data continuation failed; retain its new and original evidence" }
+```
+
+The new report includes `continuation.selectedCases`, `skippedCompletedCases`,
+`importedSamples=0`, original evidence/file digests and `priorEvidenceStable`.
+It does not mark the old EPERM owner retired or remove its residual files.
+Those remain a separate explicit ownership/recovery obligation.

@@ -122,6 +122,6 @@ export function summarizeData(entries, pairs, acceptance) {
     const evaluated = acceptance && entry.performance;
     return {caseId: entry.id, cacheMode, requiredPairs: needed, attemptedPairs: rows.length, correctAndComplete: correct, timings,
       performanceAcceptanceEvaluated: evaluated, medianRatio: evaluated ? ratio : null, targetRatio: evaluated ? TARGET_RATIO : null,
-      state: !correct ? 'failed_correctness_or_missing_samples' : !evaluated ? 'equivalent_observation_only' : ratio !== null && ratio <= TARGET_RATIO ? 'passed_selected_path' : 'failed_performance'};
+      state: !rows.length ? 'not_run' : !correct ? 'failed_correctness_or_missing_samples' : !evaluated ? 'equivalent_observation_only' : ratio !== null && ratio <= TARGET_RATIO ? 'passed_selected_path' : 'failed_performance'};
   }));
 }

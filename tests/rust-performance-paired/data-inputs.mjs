@@ -1,6 +1,6 @@
 // Bounded readers for these three existing synthetic fixture families only.
 import assert from 'node:assert/strict';
-import {copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync} from 'node:fs';
+import {existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync} from 'node:fs';
 import {dirname, isAbsolute, join, relative, resolve} from 'node:path';
 import {createHash} from 'node:crypto';
 import {inflateSync} from 'node:zlib';
@@ -141,6 +141,21 @@ function captureCanonical(capture) {
     ...(Object.hasOwn(capture, 'dependencies') ? {dependencies: capture.dependencies} : {})};
 }
 
+// Only authenticated, bounded encoded bytes reach libvips. Passing a scratch
+// filename can let its operation cache retain an open file after toBuffer().
+// The caller disables that cache; destroy always follows the completed decode.
+export async function decodeDataImage(sharp, bytes) {
+  assert(Buffer.isBuffer(bytes) && bytes.length <= 64 << 20, 'bounded encoded image Buffer required');
+  const decoder = sharp(bytes, {limitInputPixels: 1031 * 519});
+  let failure;
+  try { return await decoder.ensureAlpha().raw().toBuffer({resolveWithObject: true}); }
+  catch (error) { failure = error; throw error; }
+  finally {
+    try { decoder.destroy(); }
+    catch (error) { if (failure) throw new AggregateError([failure, error], failure.message, {cause: failure}); throw error; }
+  }
+}
+
 export async function validateDataOutput({entry, fixture, engine, cacheMode, envelope, home, output, decodeImage, evidence}) {
   const audited = semanticData(entry, envelope, engine, cacheMode), value = envelope.result;
   assert.equal(envelope.captures.length, entry.kind === 'image' ? 3 : 1);
@@ -188,10 +203,11 @@ export async function validateDataOutput({entry, fixture, engine, cacheMode, env
       assert.equal(envelope.captures[1].mediaType, 'application/json'); assert.deepEqual(parse(captured[1]), value);
       assert.equal(envelope.captures[2].mediaType, 'image/' + entry.encoding);
       for (const index of [1, 2]) { assert.equal(envelope.captures[index].provenance.kind, index === 1 ? 'asset-export-manifest' : 'asset-image'); assert.equal(envelope.captures[index].provenance.locator, envelope.captures[0].id); }
-      const image = await decodeImage(output);
+      const image = await decodeImage(captured[2]);
       assert.equal(image.info.width, 1031); assert.equal(image.info.height, 519); assert.equal(image.info.channels, 4);
       const expected = bounded(join(fixture.directory, entry.image.pixelsPath), 4 << 20); assert(Buffer.isBuffer(image.data) && image.data.equals(expected), 'complete RGBA bytes differ'); assert.equal(digest(image.data), value.image.pixelsSHA256);
-      copyFileSync(output, join(evidence, `${engine}-${cacheMode}.${entry.encoding}`));
+      assert.equal(digest(captured[2]), value.content.sha256, 'encoded buffer changed during independent decode');
+      writeFileSync(join(evidence, `${engine}-${cacheMode}.${entry.encoding}`), captured[2], {flag: 'wx'});
       audited.value.result.output = '<verified-output>'; audited.value.result.content = {sha256: '<verified-codec-artifact>', bytes: '<verified-codec-bytes>'};
     }
   }
