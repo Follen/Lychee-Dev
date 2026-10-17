@@ -91,8 +91,11 @@ fn compact_retained_maps_match_previous_exact_lookup_for_all_original_ranges() {
     assert_eq!(prepared.inputs.original("empty.lua").unwrap(), "");
     assert!(!prepared.inputs.ordered.iter().any(|file| file == "empty.lua"));
     let empty = prepared.analysis.semantic_model(prepared.files["empty.lua"]);
-    assert!(empty.parse_errors().unwrap().is_empty());
-    let chunk = LuaChunk::cast(empty.syntax_tree().unwrap().get_red_root()).unwrap();
+    let tree = empty.syntax_tree().unwrap();
+    assert!(tree.get_errors().is_empty());
+    // The pinned public API represents an existing tree with no errors as None.
+    assert!(empty.parse_errors().is_none());
+    let chunk = LuaChunk::cast(tree.get_red_root()).unwrap();
     assert!(chunk.get_block().is_none(), "empty input has no body to select for this graph fixture");
     assert_eq!(prepared.closures.len(), closures.len());
     assert_eq!(prepared.parameters.len(), parameters.len());

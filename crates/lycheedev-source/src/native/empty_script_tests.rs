@@ -35,8 +35,11 @@ fn pinned_empty_trivia_and_empty_statement_shapes_remain_distinct() {
     let prepared=fixture(&files,&[]);
     for (file,_) in files {
         let model=prepared.analysis.semantic_model(prepared.files[file]);
-        assert!(model.parse_errors().unwrap().is_empty(),"{file}");
-        let chunk=chunk(&prepared,file);
+        let tree=model.syntax_tree().expect("admitted fixture syntax tree");
+        assert!(tree.get_errors().is_empty(),"{file}");
+        // No errors is None in the pinned API; verify tree presence separately.
+        assert!(model.parse_errors().is_none(),"{file}");
+        let chunk=LuaChunk::cast(tree.get_red_root()).unwrap();
         let body=ScriptBody::from_chunk(&chunk,prepared.inputs.analysis_text(file).unwrap()).unwrap();
         if matches!(file,"zero.lua"|"bom.lua") {
             assert!(chunk.get_block().is_none());assert!(matches!(body,ScriptBody::Empty(range) if range.is_empty()));
