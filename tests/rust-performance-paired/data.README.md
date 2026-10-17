@@ -619,3 +619,15 @@ strict stderr parsing and preservation of simultaneous failures. They are not
 Windows execution, product phase measurements or a speedup claim. The source
 checkout also checks the parser's phase names against the Rust recorder; that
 source-only check is explicitly skipped in a runner export without Rust source.
+
+### Incremental-Z product detail records
+
+New matching products emit `lycheedev.data-query-phases.v2`: the original eleven
+`phases`, total elapsed and measurement boundaries remain, with a separate exact
+ten-entry `details` vector. The reader accepts historical v1 and v2 strictly by
+schema; it never invents absent v1 details. The detail spans identify encoded
+identity/read/MD5, Z inflation, whole CKey hashing, decoded-cache open/lookup/verify,
+stream publication and cache commit. They nest in existing business phases and
+may overlap; do not add them to the parent or deduct them from CLI time. Use the
+same `--data-phase-profile` command with a newly matched artifact. No change to
+the old 928 samples, acceptance thresholds, fixtures, deadlines or owner rules.

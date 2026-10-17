@@ -11,7 +11,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {CONTENT_BYTES, GO_COMMIT, PROOF, REPETITIONS, SQL, SQL_ROWS, auditCache, compareData, dataCases, orderFor, semanticData, summarizeData, usage} from './data-contract.mjs';
 import {blob, decodeDataImage, decodeFixtureBLTE, decodedIdentity, digest, goJSON, parse, seedDataHome, validateDataOutput} from './data-inputs.mjs';
 import {fixtureArgs, fixturePreparers} from './prepare-data.mjs';
-import {DATA_CAPTURE_TIMING, DATA_PHASE_NAMES, DATA_PHASE_TIMING, dataPhaseEnvironment, dataPhaseProfile} from './data-phase-profile.mjs';
+import {DATA_CAPTURE_TIMING, DATA_DETAIL_NAMES, DATA_PHASE_NAMES, DATA_PHASE_TIMING, dataPhaseEnvironment, dataPhaseProfile} from './data-phase-profile.mjs';
 
 function phaseProfile() {
   return {schema: 'lycheedev.data-query-phases.v1', elapsedMicros: 1000, timing: DATA_PHASE_TIMING, captureTiming: DATA_CAPTURE_TIMING,
@@ -20,7 +20,21 @@ function phaseProfile() {
 test('Data phase contract matches the actual recorder in the source checkout', {skip: !existsSync(new URL('../../crates/lycheedev-data/src/phase_profile.rs', import.meta.url))}, () => {
   const source = readFileSync(new URL('../../crates/lycheedev-data/src/phase_profile.rs', import.meta.url), 'utf8');
   assert.deepEqual([...source.match(/const NAMES:.*?= \[([\s\S]*?)\];/)[1].matchAll(/"([^"]+)"/g)].map(match => match[1]), DATA_PHASE_NAMES);
-  assert(source.includes(DATA_PHASE_TIMING)); assert(source.includes(DATA_CAPTURE_TIMING)); assert(source.includes('lycheedev.data-query-phases.v1'));
+  assert.deepEqual([...source.match(/const DETAIL_NAMES:.*?= \[([\s\S]*?)\];/)[1].matchAll(/"([^"]+)"/g)].map(match => match[1]), DATA_DETAIL_NAMES);
+  assert(source.includes(DATA_PHASE_TIMING)); assert(source.includes(DATA_CAPTURE_TIMING)); assert(source.includes('lycheedev.data-query-phases.v2'));
+});
+test('Data v2 keeps the original eleven phases and validates separate inclusive details without rewriting v1', () => {
+  const old = phaseProfile();
+  const value = {...old, schema: 'lycheedev.data-query-phases.v2', details: DATA_DETAIL_NAMES.map(phase => ({phase, calls: 1, elapsedMicros: 700}))};
+  assert.deepEqual(dataPhaseProfile(Buffer.from(JSON.stringify(old))), old);
+  assert.deepEqual(dataPhaseProfile(Buffer.from(JSON.stringify(value))), value);
+  assert.deepEqual(value.phases, old.phases);
+  for (const change of [x => delete x.details, x => x.details.reverse(), x => x.details.pop(), x => x.details.push(x.details[0]),
+    x => x.details[0].phase = 'unknown', x => x.details[0].extra = 0, x => x.details[0].calls = -1,
+    x => x.details[0].calls = 0, x => x.details[0].elapsedMicros = 0.5, x => x.schema = old.schema]) {
+    const invalid = structuredClone(value); change(invalid);
+    assert.throws(() => dataPhaseProfile(Buffer.from(JSON.stringify(invalid))));
+  }
 });
 test('Data profile retains overlapping durations without treating their sum as a total', () => {
   const value = phaseProfile();

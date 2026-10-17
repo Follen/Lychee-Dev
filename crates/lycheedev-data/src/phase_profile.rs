@@ -19,6 +19,16 @@ pub(crate) enum Phase {
     ManifestCapture,
     Output,
     SourceClose,
+    EncodedIdentityHash,
+    DecodedCacheOpen,
+    DecodedCacheLookup,
+    DecodedCacheVerify,
+    DecodedStreamPublish,
+    EncodedChunkRead,
+    EncodedChunkMd5,
+    ZlibInflate,
+    WholeContentKeyHash,
+    DecodedCacheCommit,
 }
 const NAMES: [&str; 11] = [
     "admission",
@@ -33,6 +43,23 @@ const NAMES: [&str; 11] = [
     "output",
     "source_close",
 ];
+// Inclusive details are intentionally separate from the original eleven
+// scopes. In particular publish contains chunk reads/inflate/CKey work, and
+// prepare and payload can both call the decoded cache. Never add these to the
+// original phases, or interpret their remainder as physical disk time.
+const DETAIL_NAMES: [&str; 10] = [
+    "encoded_identity_hash",
+    "decoded_cache_open",
+    "decoded_cache_lookup",
+    "decoded_cache_verify_inclusive",
+    "decoded_stream_publish_inclusive",
+    "encoded_chunk_read",
+    "encoded_chunk_md5",
+    "zlib_inflate",
+    "whole_content_key_hash",
+    "decoded_cache_commit",
+];
+const COUNTERS: usize = NAMES.len() + DETAIL_NAMES.len();
 const TIMING: &str = "wall-clock; phases may nest or overlap across workers; not additive; budget lifetime and phases are diagnostics, not accepted command total or CPU time";
 
 #[derive(Clone, Copy, Default)]
@@ -43,7 +70,7 @@ struct Counter {
 
 pub(crate) struct Profile {
     started: Instant,
-    counters: Mutex<[Counter; NAMES.len()]>,
+    counters: Mutex<[Counter; COUNTERS]>,
     #[cfg(test)]
     output: Option<TestOutput>,
 }
@@ -61,7 +88,7 @@ impl Profile {
         enabled.then(|| {
             Arc::new(Self {
                 started: now(),
-                counters: Mutex::new([Counter::default(); NAMES.len()]),
+                counters: Mutex::new([Counter::default(); COUNTERS]),
                 #[cfg(test)]
                 output: None,
             })
@@ -90,12 +117,24 @@ impl Profile {
                 })
             })
             .collect();
+        let details: Vec<_> = DETAIL_NAMES
+            .iter()
+            .zip(counters[NAMES.len()..].iter())
+            .map(|(name, counter)| {
+                serde_json::json!({
+                    "phase":name,
+                    "calls":counter.calls,
+                    "elapsedMicros":counter.elapsed.as_micros(),
+                })
+            })
+            .collect();
         serde_json::json!({
-            "schema":"lycheedev.data-query-phases.v1",
+            "schema":"lycheedev.data-query-phases.v2",
             "elapsedMicros":self.started.elapsed().as_micros(),
             "timing":TIMING,
             "captureTiming":"capture_metadata_inclusive includes capture and metadata work; metadata open/write/close are not separately observed",
             "phases":phases,
+            "details":details,
         })
     }
 
@@ -104,7 +143,7 @@ impl Profile {
         let output = Arc::new(Mutex::new(Vec::new()));
         let profile = Arc::new(Self {
             started: Instant::now(),
-            counters: Mutex::new([Counter::default(); NAMES.len()]),
+            counters: Mutex::new([Counter::default(); COUNTERS]),
             output: Some(output.clone()),
         });
         (profile, output)
@@ -215,6 +254,29 @@ mod tests {
         drop(span);
         assert_eq!(profile.value()["phases"][5]["calls"], 1);
         assert_eq!(profile.value()["phases"][5]["elapsedMicros"], 17);
+        drop(profile);
+        assert_eq!(output.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn detail_counters_are_separate_from_the_original_eleven_scopes() {
+        let (profile, output) = Profile::observed();
+        let mut span = Span::new(Some(&profile), Phase::ZlibInflate);
+        span.finish(|_| Duration::from_micros(23));
+        let value = profile.value();
+        assert_eq!(value["schema"], "lycheedev.data-query-phases.v2");
+        assert_eq!(value["phases"].as_array().unwrap().len(), 11);
+        assert!(
+            value["phases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|p| p["calls"] == 0)
+        );
+        assert_eq!(value["details"][7]["phase"], "zlib_inflate");
+        assert_eq!(value["details"][7]["calls"], 1);
+        assert_eq!(value["details"][7]["elapsedMicros"], 23);
+        drop(span);
         drop(profile);
         assert_eq!(output.lock().unwrap().len(), 1);
     }

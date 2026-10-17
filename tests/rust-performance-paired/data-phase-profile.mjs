@@ -9,6 +9,12 @@ export const DATA_PHASE_NAMES = Object.freeze([
   'artifact_capture_metadata_inclusive', 'manifest_capture_metadata_inclusive',
   'output', 'source_close',
 ]);
+export const DATA_DETAIL_NAMES = Object.freeze([
+  'encoded_identity_hash', 'decoded_cache_open', 'decoded_cache_lookup',
+  'decoded_cache_verify_inclusive', 'decoded_stream_publish_inclusive',
+  'encoded_chunk_read', 'encoded_chunk_md5', 'zlib_inflate',
+  'whole_content_key_hash', 'decoded_cache_commit',
+]);
 export const DATA_PHASE_TIMING = 'wall-clock; phases may nest or overlap across workers; not additive; budget lifetime and phases are diagnostics, not accepted command total or CPU time';
 export const DATA_CAPTURE_TIMING = 'capture_metadata_inclusive includes capture and metadata work; metadata open/write/close are not separately observed';
 const VARIABLE = 'LYCHEEDEV_DATA_PHASE_PROFILE';
@@ -31,19 +37,26 @@ export function dataPhaseProfile(stderr, {entry = null, successful = false} = {}
   // The recorder emits compact JSON. Round-trip identity also rejects duplicate
   // keys, lossy numbers, BOMs, and additional non-profile stderr bytes.
   assert.equal(JSON.stringify(value), line, 'Data phase record must be compact, exact JSON without duplicate keys');
-  assert.deepEqual(Object.keys(value).sort(), ['captureTiming', 'elapsedMicros', 'phases', 'schema', 'timing']);
-  assert.equal(value.schema, 'lycheedev.data-query-phases.v1');
+  const detailed = value.schema === 'lycheedev.data-query-phases.v2';
+  assert(detailed || value.schema === 'lycheedev.data-query-phases.v1', 'known Data profile schema required');
+  assert.deepEqual(Object.keys(value).sort(), detailed
+    ? ['captureTiming', 'details', 'elapsedMicros', 'phases', 'schema', 'timing']
+    : ['captureTiming', 'elapsedMicros', 'phases', 'schema', 'timing']);
   assert.equal(value.timing, DATA_PHASE_TIMING); assert.equal(value.captureTiming, DATA_CAPTURE_TIMING);
   const integer = (value, label) => assert(Number.isSafeInteger(value) && value >= 0, `${label}: nonnegative exact integer required`);
   integer(value.elapsedMicros, 'budget elapsedMicros');
-  assert(Array.isArray(value.phases)); assert.equal(value.phases.length, DATA_PHASE_NAMES.length);
-  for (const [index, phase] of value.phases.entries()) {
-    assert(phase && !Array.isArray(phase) && typeof phase === 'object');
-    assert.deepEqual(Object.keys(phase).sort(), ['calls', 'elapsedMicros', 'phase']);
-    assert.equal(phase.phase, DATA_PHASE_NAMES[index], 'exact fixed Data phase order required');
-    integer(phase.calls, `${phase.phase}.calls`); integer(phase.elapsedMicros, `${phase.phase}.elapsedMicros`);
-    if (phase.calls === 0) assert.equal(phase.elapsedMicros, 0, 'an unobserved phase cannot have elapsed time');
+  function counters(values, names) {
+    assert(Array.isArray(values)); assert.equal(values.length, names.length);
+    for (const [index, phase] of values.entries()) {
+      assert(phase && !Array.isArray(phase) && typeof phase === 'object');
+      assert.deepEqual(Object.keys(phase).sort(), ['calls', 'elapsedMicros', 'phase']);
+      assert.equal(phase.phase, names[index], 'exact fixed Data phase order required');
+      integer(phase.calls, `${phase.phase}.calls`); integer(phase.elapsedMicros, `${phase.phase}.elapsedMicros`);
+      if (phase.calls === 0) assert.equal(phase.elapsedMicros, 0, 'an unobserved phase cannot have elapsed time');
+    }
   }
+  counters(value.phases, DATA_PHASE_NAMES);
+  if (detailed) counters(value.details, DATA_DETAIL_NAMES);
   // Only these authenticated twelve fixture paths require these known scopes
   // on success. Early product failures legitimately finish before any phase.
   const image = entry?.kind === 'image' && /^B04-(palette|bgra8|bc1|bc2|bc3)-(png|webp)$/.test(entry.id);

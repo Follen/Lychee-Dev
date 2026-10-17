@@ -8,6 +8,11 @@ use lycheedev_core::{Result, ToolkitError};
 use std::borrow::Cow;
 use tree_sitter::{InputEdit, Node, ParseOptions, Parser, Tree};
 
+mod generated;
+#[cfg(test)]
+#[path = "lua_tree/generated_tests.rs"]
+mod generated_tests;
+
 pub struct SyntaxDocument {
     bytes: Vec<u8>,
     tree: Tree,
@@ -276,7 +281,7 @@ impl SyntaxDocument {
             }
         } else {
             for root in std::mem::take(&mut w.api_roots) {
-                w.documentation(root, "");
+                w.documentation(root);
             }
         }
         worker::check(guard).then_some(w.facts)
@@ -285,13 +290,20 @@ impl SyntaxDocument {
 /// Nested XML handlers share their document's owned/scratch admission. The
 /// caller keeps the original input <=64 KiB and the same observation-only guard.
 pub(crate) fn facts_with_worker_guard(raw: &[u8], guard: &WorkerGuard<'_>) -> Option<Facts> {
+    generated_facts_with_worker_guard(raw, false, guard)
+}
+pub(crate) fn generated_facts_with_worker_guard(
+    raw: &[u8],
+    generated: bool,
+    guard: &WorkerGuard<'_>,
+) -> Option<Facts> {
     if raw.len() > 64 << 10 || !guard.check() {
         guard.abandon();
         return None;
     }
     let result = SyntaxDocument::new_with_guard(raw, false, Some(guard))
         .ok()
-        .and_then(|document| document.facts_with_guard(false, Some(guard)));
+        .and_then(|document| document.facts_with_guard(generated, Some(guard)));
     if result.is_none() {
         guard.abandon();
     }
@@ -311,13 +323,16 @@ fn lua51_grammar_input_with_guard<'a>(
     mask_goto: bool,
     guard: Option<&WorkerGuard<'_>>,
 ) -> Cow<'a, [u8]> {
-    fn long_end(raw: &[u8], at: usize, guard: Option<&WorkerGuard<'_>>) -> Option<usize> {
+    fn long_end(raw: &[u8], at: usize, scan: &mut worker::ByteScan<'_>) -> Option<usize> {
         if raw.get(at) != Some(&b'[') {
+            return None;
+        }
+        if !scan.byte() {
             return None;
         }
         let mut second = at + 1;
         while raw.get(second) == Some(&b'=') {
-            if !worker::check(guard) {
+            if !scan.byte() {
                 return None;
             }
             second += 1;
@@ -325,18 +340,24 @@ fn lua51_grammar_input_with_guard<'a>(
         if raw.get(second) != Some(&b'[') {
             return None;
         }
+        if !scan.byte() {
+            return None;
+        }
         let width = second - at;
         let mut cursor = second + 1;
         while cursor < raw.len() {
-            if !worker::check(guard) {
+            if !scan.byte() {
                 return None;
             }
             if raw[cursor] == b']'
                 && raw.get(cursor + width) == Some(&b']')
                 && raw
                     .get(cursor + 1..cursor + width)
-                    .is_some_and(|v| v.iter().all(|b| *b == b'='))
+                    .is_some_and(|v| scan.all_eq(v, b'='))
             {
+                if !scan.byte() {
+                    return None;
+                }
                 return Some(cursor + width + 1);
             }
             cursor += 1;
@@ -346,26 +367,32 @@ fn lua51_grammar_input_with_guard<'a>(
     fn identifier(c: u8) -> bool {
         c.is_ascii_alphanumeric() || c == b'_' || c >= 128
     }
+    let mut scan = worker::ByteScan::new(guard);
     let mut changed: Option<Vec<u8>> = None;
     let mut at = 0;
     while at < raw.len() {
-        if !worker::check(guard) {
+        if !scan.byte() {
             break;
         }
         if raw.get(at..at + 2) == Some(b"--") {
-            if let Some(end) = long_end(raw, at + 2, guard) {
+            if !scan.byte() {
+                break;
+            }
+            if let Some(end) = long_end(raw, at + 2, &mut scan) {
                 if !mask_goto {
-                    mask_literal_nul(raw, at, end, &mut changed);
+                    mask_literal_nul(raw, at, end, &mut changed, &mut scan);
                 }
                 at = end;
             } else {
                 at += 2;
                 while at < raw.len() && raw[at] != b'\n' && (mask_goto || raw[at] != b'\r') {
-                    if !worker::check(guard) {
+                    if !scan.byte() {
                         break;
                     }
                     if !mask_goto && raw[at] == 0 {
-                        changed.get_or_insert_with(|| raw.to_vec())[at] = b' ';
+                        if !set_grammar_byte(raw, at, b' ', &mut changed, &mut scan) {
+                            break;
+                        }
                     }
                     at += 1;
                 }
@@ -376,15 +403,19 @@ fn lua51_grammar_input_with_guard<'a>(
             let quote = raw[at];
             at += 1;
             while at < raw.len() {
-                if !worker::check(guard) {
+                if !scan.byte() {
                     break;
                 }
                 if !mask_goto && raw[at] == 0 {
-                    changed.get_or_insert_with(|| raw.to_vec())[at] = b' ';
+                    if !set_grammar_byte(raw, at, b' ', &mut changed, &mut scan) {
+                        break;
+                    }
                 }
                 if raw[at] == b'\\' {
                     if !mask_goto && raw.get(at + 1) == Some(&0) {
-                        changed.get_or_insert_with(|| raw.to_vec())[at + 1] = b' ';
+                        if !set_grammar_byte(raw, at + 1, b' ', &mut changed, &mut scan) {
+                            break;
+                        }
                     }
                     if let Some(next) = raw.get(at + 1)
                         && !b"abfnrtv\\'\"0123456789\r\n".contains(next)
@@ -393,7 +424,12 @@ fn lua51_grammar_input_with_guard<'a>(
                         // The modern grammar rejects some and gives others
                         // newer meanings. Only the grammar view is masked;
                         // literal decoding always reads the original bytes.
-                        changed.get_or_insert_with(|| raw.to_vec())[at] = b' ';
+                        if !set_grammar_byte(raw, at, b' ', &mut changed, &mut scan) {
+                            break;
+                        }
+                    }
+                    if !scan.bytes(usize::from(at + 1 < raw.len())) {
+                        break;
                     }
                     at = (at + 2).min(raw.len());
                 } else if raw[at] == quote {
@@ -405,9 +441,9 @@ fn lua51_grammar_input_with_guard<'a>(
             }
             continue;
         }
-        if let Some(end) = long_end(raw, at, guard) {
+        if let Some(end) = long_end(raw, at, &mut scan) {
             if !mask_goto {
-                mask_literal_nul(raw, at, end, &mut changed);
+                mask_literal_nul(raw, at, end, &mut changed, &mut scan);
             }
             at = end;
             continue;
@@ -416,13 +452,15 @@ fn lua51_grammar_input_with_guard<'a>(
             let start = at;
             at += 1;
             while at < raw.len() && identifier(raw[at]) {
-                if !worker::check(guard) {
+                if !scan.byte() {
                     break;
                 }
                 at += 1;
             }
             if mask_goto && &raw[start..at] == b"goto" {
-                changed.get_or_insert_with(|| raw.to_vec())[start + 1] = b'0';
+                if !set_grammar_byte(raw, start + 1, b'0', &mut changed, &mut scan) {
+                    break;
+                }
             }
         } else {
             at += 1;
@@ -431,12 +469,34 @@ fn lua51_grammar_input_with_guard<'a>(
     changed.map(Cow::Owned).unwrap_or(Cow::Borrowed(raw))
 }
 // Same-width grammar adaptation only. Public literal bytes remain untouched.
-fn mask_literal_nul(raw: &[u8], start: usize, end: usize, changed: &mut Option<Vec<u8>>) {
+fn mask_literal_nul(
+    raw: &[u8],
+    start: usize,
+    end: usize,
+    changed: &mut Option<Vec<u8>>,
+    scan: &mut worker::ByteScan<'_>,
+) {
     for at in start..end {
-        if raw[at] == 0 {
-            changed.get_or_insert_with(|| raw.to_vec())[at] = b' ';
+        if !scan.byte() {
+            return;
+        }
+        if raw[at] == 0 && !set_grammar_byte(raw, at, b' ', changed, scan) {
+            return;
         }
     }
+}
+fn set_grammar_byte(
+    raw: &[u8],
+    at: usize,
+    value: u8,
+    changed: &mut Option<Vec<u8>>,
+    scan: &mut worker::ByteScan<'_>,
+) -> bool {
+    if changed.is_none() && !scan.check() {
+        return false;
+    }
+    changed.get_or_insert_with(|| raw.to_vec())[at] = value;
+    true
 }
 // Only the unfinished declaration header that tree-sitter recovers as an
 // ERROR rather than a missing `end`; other grammar errors retain their path.
@@ -550,22 +610,29 @@ fn public_lua_error(raw: &[u8], at: usize, token: &[u8], message: &str) -> Synta
 // Lua parser. Statement/expression structure remains tree-sitter's job. The
 // fixed scanProgram wrapper normalizes lexer EOF (-1) to public note line 0.
 fn public_lexical_note(raw: &[u8], guard: Option<&WorkerGuard<'_>>) -> Option<SyntaxNote> {
+    let mut scan = worker::ByteScan::new(guard);
     let mut at = if raw.starts_with(b"\xef\xbb\xbf") {
         3
     } else {
         0
     };
+    if !scan.bytes(at) {
+        return None;
+    }
     if raw[at..].starts_with(b"#!") {
-        if let Some(end) = raw[at..].iter().position(|byte| *byte == b'\n') {
+        if let Some(end) = scan.find(&raw[at..], b"\n") {
             at += end;
         }
     }
     while at < raw.len() {
-        if !worker::check(guard) {
+        if !scan.byte() {
             return None;
         }
         let comment = raw[at..].starts_with(b"--");
         if comment {
+            if !scan.byte() {
+                return None;
+            }
             at += 2;
         }
         if raw.get(at) == Some(&b'[')
@@ -574,8 +641,14 @@ fn public_lexical_note(raw: &[u8], guard: Option<&WorkerGuard<'_>>) -> Option<Sy
                 .is_some_and(|byte| matches!(*byte, b'[' | b'='))
         {
             let start = at;
+            if !scan.byte() {
+                return None;
+            }
             at += 1;
             while raw.get(at) == Some(&b'=') {
+                if !scan.byte() {
+                    return None;
+                }
                 at += 1;
             }
             if at == raw.len() {
@@ -598,9 +671,12 @@ fn public_lexical_note(raw: &[u8], guard: Option<&WorkerGuard<'_>>) -> Option<Sy
                 ));
             }
             let width = at - start;
+            if !scan.byte() {
+                return None;
+            }
             at += 1;
             loop {
-                if !worker::check(guard) {
+                if !scan.byte() {
                     return None;
                 }
                 if at == raw.len() {
@@ -614,8 +690,11 @@ fn public_lexical_note(raw: &[u8], guard: Option<&WorkerGuard<'_>>) -> Option<Sy
                     && raw.get(at + width) == Some(&b']')
                     && raw
                         .get(at + 1..at + width)
-                        .is_some_and(|bytes| bytes.iter().all(|byte| *byte == b'='))
+                        .is_some_and(|bytes| scan.all_eq(bytes, b'='))
                 {
+                    if !scan.byte() {
+                        return None;
+                    }
                     at += width + 1;
                     break;
                 }
@@ -625,6 +704,9 @@ fn public_lexical_note(raw: &[u8], guard: Option<&WorkerGuard<'_>>) -> Option<Sy
         }
         if comment {
             while at < raw.len() && !matches!(raw[at], b'\r' | b'\n') {
+                if !scan.byte() {
+                    return None;
+                }
                 at += 1;
             }
             continue;
@@ -632,9 +714,12 @@ fn public_lexical_note(raw: &[u8], guard: Option<&WorkerGuard<'_>>) -> Option<Sy
         if matches!(raw[at], b'\'' | b'"') {
             let quote = raw[at];
             let start = at;
+            if !scan.byte() {
+                return None;
+            }
             at += 1;
             loop {
-                if !worker::check(guard) {
+                if !scan.byte() {
                     return None;
                 }
                 let Some(&byte) = raw.get(at) else {
@@ -648,6 +733,9 @@ fn public_lexical_note(raw: &[u8], guard: Option<&WorkerGuard<'_>>) -> Option<Sy
                     let line = lua_line_starts(raw).partition_point(|start| *start <= at) + 1;
                     // Decode only the malformed token for its diagnostic.
                     // Ordinary strings do not allocate during this scan.
+                    if !scan.check() {
+                        return None;
+                    }
                     let mut literal = raw[start..at].to_vec();
                     literal.push(quote);
                     let token = string_value_bytes(&literal).unwrap_or_default();
@@ -664,12 +752,18 @@ fn public_lexical_note(raw: &[u8], guard: Option<&WorkerGuard<'_>>) -> Option<Sy
                     let Some(&escaped) = raw.get(at) else {
                         return Some(public_lua_eof("unterminated string"));
                     };
+                    if !scan.byte() {
+                        return None;
+                    }
                     at += 1;
                     if matches!(escaped, b'\r' | b'\n')
                         && raw
                             .get(at)
                             .is_some_and(|next| matches!(*next, b'\r' | b'\n') && *next != escaped)
                     {
+                        if !scan.byte() {
+                            return None;
+                        }
                         at += 1;
                     }
                 }
@@ -850,6 +944,9 @@ pub(crate) fn string_bytes(raw: &[u8], node: Node<'_>) -> Option<Vec<u8>> {
     string_value_bytes(&raw[node.byte_range()])
 }
 fn string_value_bytes(value: &[u8]) -> Option<Vec<u8>> {
+    string_value_bytes_into(value, Vec::new())
+}
+fn string_value_bytes_into(value: &[u8], mut out: Vec<u8>) -> Option<Vec<u8>> {
     fn newline(bytes: &[u8], at: &mut usize) -> u8 {
         let value = bytes[*at];
         *at += 1;
@@ -866,7 +963,6 @@ fn string_value_bytes(value: &[u8]) -> Option<Vec<u8>> {
         }
     }
     let first = *value.first()?;
-    let mut out = Vec::new();
     if first == b'[' {
         let second = value[1..].iter().position(|byte| *byte == b'[')? + 1;
         let width = second + 1;
@@ -923,19 +1019,28 @@ fn string_value_bytes(value: &[u8]) -> Option<Vec<u8>> {
     Some(out)
 }
 
-fn field<'a>(raw: &[u8], table: Node<'a>, key: &str) -> Option<Node<'a>> {
-    for f in children(table).into_iter().filter(|f| f.kind() == "field") {
+// A root probe needs only the first matching field. Do not allocate all of a
+// table's children before testing its usually early Type field.
+fn field<'a>(
+    raw: &[u8],
+    table: Node<'a>,
+    key: &str,
+    guard: Option<&WorkerGuard<'_>>,
+) -> Option<Node<'a>> {
+    let mut cursor = table.walk();
+    for f in table
+        .named_children(&mut cursor)
+        .filter(|f| f.kind() == "field")
+    {
+        if !worker::check(guard) {
+            return None;
+        }
         let n = f.child_by_field_name("name");
         if n.is_some_and(|n| text(raw, n) == key || string(raw, n).as_deref() == Some(key)) {
             return f.child_by_field_name("value").map(unparenthesized);
         }
     }
     None
-}
-fn table_text(raw: &[u8], table: Node<'_>, key: &str) -> String {
-    field(raw, table, key)
-        .and_then(|n| string(raw, n))
-        .unwrap_or_default()
 }
 struct Walker<'a, 'tree> {
     raw: &'a [u8],
@@ -1278,9 +1383,15 @@ impl<'tree> Walker<'_, 'tree> {
                 }
             }
             "table_constructor"
-                if self.generated && table_text(self.raw, n, "Type") == "System" =>
+                if self.generated
+                    && field(self.raw, n, "Type", self.guard)
+                        .and_then(|value| string(self.raw, value))
+                        .as_deref()
+                        == Some("System") =>
             {
-                self.api_roots.push(n)
+                if worker::prepare_scratch_push(self.guard, &mut self.api_roots) {
+                    self.api_roots.push(n);
+                }
             }
             "attribute" => self.note(
                 "Syntax unavailable in WoW Lua 5.1",
@@ -1360,113 +1471,6 @@ impl<'tree> Walker<'_, 'tree> {
                 }
                 self.walk(expression);
             }
-        }
-    }
-    fn documentation(&mut self, n: Node<'_>, namespace: &str) {
-        let kind = table_text(self.raw, n, "Type").to_ascii_lowercase();
-        let display = table_text(self.raw, n, "Name");
-        let mut namespace = namespace.to_owned();
-        if kind == "system" {
-            namespace = table_text(self.raw, n, "Namespace");
-            if namespace.is_empty() && display.starts_with("C_") {
-                namespace = display.clone();
-            }
-            self.declare(n, display.clone(), "api-system", false, Some(display));
-        } else if !display.is_empty()
-            && [
-                "function",
-                "event",
-                "structure",
-                "enumeration",
-                "scriptobject",
-                "callback",
-            ]
-            .contains(&kind.as_str())
-        {
-            let qualified = if namespace.is_empty() {
-                display
-            } else {
-                format!("{namespace}.{display}")
-            };
-            self.declare(
-                n,
-                qualified.clone(),
-                &format!("api-{kind}"),
-                false,
-                Some(self.signature(n, &qualified, &kind)),
-            );
-            if !namespace.is_empty() {
-                self.link(n, namespace.clone(), qualified.clone(), "contains", "exact");
-            }
-            let literal_name = table_text(self.raw, n, "LiteralName");
-            if kind == "event" && !literal_name.is_empty() && literal_name != qualified {
-                self.declare(
-                    n,
-                    literal_name.clone(),
-                    "api-event",
-                    false,
-                    Some(self.signature(n, &literal_name, &kind)),
-                );
-                self.link(n, literal_name, qualified, "event-name", "exact");
-            }
-        }
-        for key in [
-            "Functions",
-            "Events",
-            "Tables",
-            "Structures",
-            "Enumerations",
-            "ScriptObjects",
-            "Callbacks",
-        ] {
-            if let Some(list) = field(self.raw, n, key) {
-                for f in children(list) {
-                    if let Some(t) = f.child_by_field_name("value")
-                        && t.kind() == "table_constructor"
-                    {
-                        self.documentation(t, &namespace);
-                    }
-                }
-            }
-        }
-    }
-    fn signature(&self, n: Node<'_>, name: &str, kind: &str) -> String {
-        let params = |key: &str| -> String {
-            let Some(list) = field(self.raw, n, key) else {
-                return String::new();
-            };
-            children(list)
-                .into_iter()
-                .filter_map(|f| f.child_by_field_name("value"))
-                .filter(|n| n.kind() == "table_constructor")
-                .map(|p| {
-                    let mut name = table_text(self.raw, p, "Name");
-                    let mut kind = table_text(self.raw, p, "Type");
-                    if name.is_empty() {
-                        name = "<dynamic>".into();
-                    }
-                    if kind.is_empty() {
-                        kind = "<dynamic>".into();
-                    }
-                    if field(self.raw, p, "Nilable").is_some_and(|n| n.kind() == "true") {
-                        name.push('?');
-                    }
-                    format!("{name}: {kind}")
-                })
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        match kind {
-            "function" | "scriptobject" | "callback" => {
-                let mut s = format!("{name}({})", params("Arguments"));
-                let out = params("Returns");
-                if !out.is_empty() {
-                    s.push_str(&format!(" -> {out}"));
-                }
-                s
-            }
-            "event" => format!("{name}({})", params("Payload")),
-            _ => name.into(),
         }
     }
 }

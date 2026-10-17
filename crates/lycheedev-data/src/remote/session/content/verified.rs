@@ -1,6 +1,7 @@
 //! One held verified body for a scoped asset consumer. No decoded-sized Vec.
 //! The Core staged publisher dependency is pending its independent freeze.
 use super::*;
+use crate::phase_profile::Phase;
 use crate::remote::cache::Store;
 use md5::{Digest, Md5};
 
@@ -42,9 +43,14 @@ fn cached(
     stats: &mut Stats,
     budget: &Arc<Budget>,
 ) -> Result<Option<evidence::VerifiedBlob>> {
-    let Some(reference) = alias::reference(store, key, record, keys)? else {
+    let reference = {
+        let _span = budget.phase(Phase::DecodedCacheLookup);
+        alias::reference(store, key, record, keys)?
+    };
+    let Some(reference) = reference else {
         return Ok(None);
     };
+    let _span = budget.phase(Phase::DecodedCacheVerify);
     let size = usize::try_from(reference.bytes).map_err(|_| limit())?;
     // Go readVerifiedBlob admission survives a later missing/corrupt body. It
     // is logical usage, independent of this mode's bounded actual allocation.
@@ -167,8 +173,10 @@ pub(in crate::remote::session) fn read(
         let attempt = (|| {
             let mut source =
                 files.open(key, physical.encoded_bytes.try_into().map_err(|_| limit())?)?;
-            let identity =
-                alias::key(files, &mut source, &record.content_key, keys, stats, budget)?;
+            let identity = {
+                let _span = budget.phase(Phase::EncodedIdentityHash);
+                alias::key(files, &mut source, &record.content_key, keys, stats, budget)?
+            };
             if let Some(blob) = cached(
                 &files.store,
                 identity.as_deref(),
@@ -190,7 +198,7 @@ pub(in crate::remote::session) fn read(
                 files.store.check()?;
                 source.rewind()?;
                 let check = || files.store.check();
-                let mut reader = StreamingReader::new_with_check(
+                let mut reader = StreamingReader::new_incremental_with_check(
                     &mut source,
                     encoded,
                     decoded,
@@ -200,6 +208,7 @@ pub(in crate::remote::session) fn read(
                     Some(&check),
                 )?;
                 let owned_budget = budget.clone();
+                let _span = budget.phase(Phase::DecodedStreamPublish);
                 evidence::publish_blob_stream_bounded_with_check(
                     files.store.home,
                     &mut reader,
@@ -229,6 +238,7 @@ pub(in crate::remote::session) fn read(
             stats.extracted_bytes += record.decoded_bytes;
             let reference = blob.reference().clone();
             let result = (|| {
+                let _span = budget.phase(Phase::DecodedCacheCommit);
                 if alias::save_entry(&files.store, identity.as_deref(), record, &reference, keys)? {
                     if let Some(winner) = cached(
                         &files.store,

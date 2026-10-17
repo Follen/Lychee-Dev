@@ -75,7 +75,16 @@ fn pipeline(workers: Vec<Worker>, profile: &Profile) -> Pipeline<'_> {
 
 #[test]
 fn only_bounded_utf8_supported_modes_are_speculative() {
-    for path in ["A.lua", "A.LUA", "A.xml", "A.XmL", "A.toc", "A.TOC"] {
+    for path in [
+        "A.lua",
+        "A.LUA",
+        "A.xml",
+        "A.XmL",
+        "A.toc",
+        "A.TOC",
+        "Interface/Blizzard_APIDocumentationGenerated/A.lua",
+        "Interface/Blizzard_APIDocumentationGenerated/A.LUA",
+    ] {
         assert!(eligible(&file(path, 1), b"x"), "{path}");
         let mut asset = file(path, 1);
         asset.asset = true;
@@ -91,14 +100,7 @@ fn only_bounded_utf8_supported_modes_are_speculative() {
             &vec![b' '; MAX_SOURCE_BYTES]
         ));
     }
-    for path in [
-        "A.txt",
-        "A.luax",
-        "lua",
-        "",
-        "Interface/Blizzard_APIDocumentationGenerated/A.lua",
-        "Interface/Blizzard_APIDocumentationGenerated/A.LUA",
-    ] {
+    for path in ["A.txt", "A.luax", "lua", ""] {
         assert!(!eligible(&file(path, 1), b"x"), "{path}");
     }
 }
@@ -112,7 +114,7 @@ fn parse_modes_keep_exact_generated_marker_and_ascii_insensitive_extensions() {
         (
             "Interface/Blizzard_APIDocumentationGenerated/A.LUA",
             ParseMode::LuaGenerated,
-            false,
+            true,
         ),
         (
             "Blizzard_APIDocumentationGenerated/A.lua",
@@ -197,7 +199,6 @@ fn typed_worker_tasks_preserve_mode_and_the_original_allocation() {
         2,
         |_, input| {
             jobs.fetch_add(1, Ordering::SeqCst);
-            assert_ne!(input.mode, ParseMode::LuaGenerated);
             let original = input.data.as_ptr() as usize;
             let capacity = input.data.capacity();
             let mode = input.mode;
@@ -218,15 +219,10 @@ fn typed_worker_tasks_preserve_mode_and_the_original_allocation() {
                     assert_eq!(file.path, *path);
                     assert_eq!(data.as_ptr() as usize, *original);
                     assert_eq!(data.capacity(), *capacity);
-                    let facts = if *mode == ParseMode::LuaGenerated {
-                        assert!(prepared.is_none());
-                        original_facts(*mode, &data)
-                    } else {
-                        let prepared = prepared.expect("supported mode must return owned facts");
-                        assert_eq!(prepared.mode, *mode);
-                        assert_eq!(prepared.parse_elapsed, Duration::ZERO);
-                        prepared.facts
-                    };
+                    let prepared = prepared.expect("supported mode must return owned facts");
+                    assert_eq!(prepared.mode, *mode);
+                    assert_eq!(prepared.parse_elapsed, Duration::ZERO);
+                    let facts = prepared.facts;
                     assert_eq!(
                         serde_json::to_vec(&facts).unwrap(),
                         serde_json::to_vec(expected).unwrap()
@@ -246,7 +242,7 @@ fn typed_worker_tasks_preserve_mode_and_the_original_allocation() {
             assert_eq!(p.pending_bytes, 0);
         },
     );
-    assert_eq!(jobs.load(Ordering::SeqCst), 3);
+    assert_eq!(jobs.load(Ordering::SeqCst), 4);
 }
 
 #[test]
@@ -1125,8 +1121,9 @@ fn an_existing_public_error_is_not_replaced_during_worker_join() {
 }
 
 #[test]
-fn lua_workers_overlap_across_generated_lua_without_processing_it_ahead() {
+fn generated_lua_worker_preserves_complete_facts_and_order_among_lua_inputs() {
     let gate = (Mutex::new(0usize), Condvar::new());
+    let control = OperationControl::default();
     with_workers(
         2,
         |_, input| {
@@ -1137,8 +1134,9 @@ fn lua_workers_overlap_across_generated_lua_without_processing_it_ahead() {
                 .1
                 .wait_timeout_while(arrived, Duration::from_secs(5), |n| *n < 2)
                 .unwrap();
-            assert!(!timeout.timed_out() && *arrived == 2);
-            empty(input)
+            assert!(!timeout.timed_out() && *arrived >= 2);
+            drop(arrived);
+            prepare_input(input, &control, false)
         },
         |workers| {
             let profile = Profile::new();
@@ -1146,21 +1144,25 @@ fn lua_workers_overlap_across_generated_lua_without_processing_it_ahead() {
             let mut order = Vec::new();
             let mut consume =
                 |f: &git::TreeFile, data: Vec<u8>, prepared: Option<PreparedFacts>| {
-                    if ParseMode::for_path(&f.path) == ParseMode::LuaGenerated {
-                        assert!(prepared.is_none());
-                        let facts = crate::facts::lua(&data, true);
-                        assert!(!facts.declarations.is_empty());
-                    } else {
-                        assert!(prepared.is_some());
-                    }
+                    let prepared = prepared
+                        .expect("small generated documents now share the full guarded parser");
+                    assert_eq!(prepared.mode, ParseMode::for_path(&f.path));
+                    let expected = original_facts(prepared.mode, &data);
+                    assert_eq!(
+                        serde_json::to_vec(&prepared.facts).unwrap(),
+                        serde_json::to_vec(&expected).unwrap()
+                    );
+                    assert_eq!(
+                        prepared.facts.raw_relationship_targets,
+                        expected.raw_relationship_targets
+                    );
                     order.push(f.path.clone());
                     Ok(())
                 };
-            let generated =
-                b"local T={Name=\"Full\", Type=\"System\", Namespace=\"C_Full\"}".to_vec();
+            let generated = b"local T={Name=\"Full\", Type=\"System\", Namespace=\"C_Full\", Functions={{Name=\"Run\",Type=\"Function\"}}}\nCall()".to_vec();
             let generated_capacity = generated.capacity();
             let generated_path = "Interface/Blizzard_APIDocumentationGenerated/middle.lua";
-            p.push(&file("first.lua", 1), vec![b'a'], &mut consume)
+            p.push(&file("first.lua", 7), b"First()".to_vec(), &mut consume)
                 .unwrap();
             let previous = p.pending_bytes;
             p.push(
@@ -1171,13 +1173,13 @@ fn lua_workers_overlap_across_generated_lua_without_processing_it_ahead() {
             .unwrap();
             assert_eq!(
                 p.pending_bytes - previous,
-                generated_capacity + JOB_METADATA_BYTES
+                reservation_for_capacity(generated_capacity).unwrap()
             );
-            p.push(&file("last.lua", 1), vec![b'b'], &mut consume)
+            p.push(&file("last.lua", 6), b"Last()".to_vec(), &mut consume)
                 .unwrap();
-            assert_eq!(p.pending.len(), 3);
             p.finish(Ok(1), &mut consume).unwrap();
             assert_eq!(order, ["first.lua", generated_path, "last.lua"]);
+            assert_eq!(p.pending_bytes, 0);
         },
     );
 }
@@ -1269,7 +1271,10 @@ fn real_mixed_parser_run(cpu_limit: usize) -> (usize, Vec<Facts>) {
                 assert_eq!(f.path, inputs[ordinal].0);
                 assert_eq!(raw, inputs[ordinal].1);
                 let mode = ParseMode::for_path(&f.path);
-                assert_eq!(prepared.is_some(), mode != ParseMode::LuaGenerated);
+                assert!(
+                    prepared.is_some(),
+                    "all four bounded parse modes are guarded"
+                );
                 if let Some(prepared) = &prepared {
                     assert_eq!(prepared.mode, mode);
                 }
@@ -1306,7 +1311,7 @@ fn real_mixed_parser_run(cpu_limit: usize) -> (usize, Vec<Facts>) {
             }
             p.finish(Ok(1), &mut consume).unwrap();
             assert_eq!(ordinal, inputs.len());
-            assert_eq!(prepared_documents, inputs.len() - 8);
+            assert_eq!(prepared_documents, inputs.len());
             assert!(max_slots > 4 && max_slots <= MAX_PENDING_SLOTS);
             assert!(
                 max_owned_reservation
@@ -1661,7 +1666,6 @@ fn actual_git_pipeline_cpu_limits_preserve_full_facts_order_and_first_error() {
                 assert_eq!(raw, inputs[ordinal].1);
                 if let Some(prepared) = &prepared {
                     assert_eq!(prepared.mode, ParseMode::for_path(&file.path));
-                    assert_ne!(prepared.mode, ParseMode::LuaGenerated);
                 }
                 prepared_count += usize::from(prepared.is_some());
                 let facts = prepared.map_or_else(|| parse(&file.path, &raw), |value| value.facts);

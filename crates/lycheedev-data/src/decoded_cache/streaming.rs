@@ -1,6 +1,7 @@
 //! Selected local assets retain authenticated archive and verified-blob owners.
 //! Decode once into Core's bounded staged publisher, never a decoded-sized Vec.
 use super::*;
+use crate::phase_profile::Phase;
 use crate::remote::cache::Store;
 use lycheedev_core::{ToolkitError, control::OperationControl};
 use std::io::Read;
@@ -169,6 +170,7 @@ fn read_verified_content_source(
             Err(error) => return Err(error),
         };
         let result = (|| {
+            let identity_span = budget.phase(Phase::EncodedIdentityHash);
             let mut identity = Sha256::new();
             identity.update(
                 format!(
@@ -189,9 +191,13 @@ fn read_verified_content_source(
                 identity.update(&buffer[..n]);
             }
             let cache_key = format!("decoded-v1/{}", casc::hex(&identity.finalize()));
-            let mut metadata =
-                Metadata::open_controlled_with_check(home, true, control, || budget.check())?;
+            drop(identity_span);
+            let mut metadata = {
+                let _span = budget.phase(Phase::DecodedCacheOpen);
+                Metadata::open_controlled_with_check(home, true, control, || budget.check())?
+            };
             let result = (|| {
+                let lookup_span = budget.phase(Phase::DecodedCacheLookup);
                 let existing =
                     match metadata
                         .read_controlled_with_check::<Entry>(&cache_key, control, || budget.check())
@@ -200,7 +206,9 @@ fn read_verified_content_source(
                         Err(error) if pure(&error, "vault.record_missing") => None,
                         Err(error) => return Err(error),
                     };
+                drop(lookup_span);
                 if let Some(entry) = &existing {
+                    let _span = budget.phase(Phase::DecodedCacheVerify);
                     if entry.content_key != record.content_key
                         || entry.blob["bytes"].as_u64() != Some(record.decoded_bytes)
                         || entry.keys.kind != keys.source.kind
@@ -243,7 +251,7 @@ fn read_verified_content_source(
                 let mut publish = |keys: &keys::Context| -> Result<evidence::VerifiedBlob> {
                     object.rewind()?;
                     let check = || store.check();
-                    let mut reader = blte::StreamingReader::new_with_check(
+                    let mut reader = blte::StreamingReader::new_incremental_with_check(
                         &mut object,
                         encoded,
                         decoded,
@@ -253,6 +261,7 @@ fn read_verified_content_source(
                         Some(&check),
                     )?;
                     let owned_budget = budget.safety_only();
+                    let _span = budget.phase(Phase::DecodedStreamPublish);
                     evidence::publish_blob_stream_bounded_with_check(
                         home,
                         &mut reader,
@@ -282,6 +291,7 @@ fn read_verified_content_source(
                 stats.blob_reads += 1;
                 stats.blob_read_bytes += record.decoded_bytes;
                 let publish_alias = (|| {
+                    let _span = budget.phase(Phase::DecodedCacheCommit);
                     let entry = Entry {
                         content_key: record.content_key.clone(),
                         blob: serde_json::to_value(blob.reference())?,
@@ -348,9 +358,18 @@ pub(crate) fn read_content_controlled(
     control: &OperationControl,
 ) -> Result<(String, blte::Content)> {
     read_content_with_reference_controlled(
-        home, root, index, record, limits, keys, stats, budget,
-        selected_maximum, control,
-    ).map(|(key, content, _)| (key, content))
+        home,
+        root,
+        index,
+        record,
+        limits,
+        keys,
+        stats,
+        budget,
+        selected_maximum,
+        control,
+    )
+    .map(|(key, content, _)| (key, content))
 }
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn read_content_in_session(
@@ -366,9 +385,18 @@ pub(crate) fn read_content_in_session(
     control: &OperationControl,
 ) -> Result<(String, blte::Content)> {
     read_content_with_reference_in_session(
-        home, source, index, record, limits, keys, stats, budget,
-        selected_maximum, control,
-    ).map(|(key, content, _)| (key, content))
+        home,
+        source,
+        index,
+        record,
+        limits,
+        keys,
+        stats,
+        budget,
+        selected_maximum,
+        control,
+    )
+    .map(|(key, content, _)| (key, content))
 }
 
 /// Actual local DB2/root consumers need a bounded decoded owner, not the old

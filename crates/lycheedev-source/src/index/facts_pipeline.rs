@@ -91,7 +91,6 @@ fn eligible(file: &git::TreeFile, data: &[u8]) -> bool {
                     .iter()
                     .any(|extension| suffix.eq_ignore_ascii_case(*extension))
             })
-        && ParseMode::for_path(&file.path) != ParseMode::LuaGenerated
         && std::str::from_utf8(data).is_ok()
 }
 
@@ -481,7 +480,7 @@ impl Pipeline<'_> {
         }
         // A small non-worker document is only an owned ordered input slot.
         // Its original admission, parser and I/O still run on the coordinator.
-        // This lets bounded pure parsing overlap adjacent generated Lua or other
+        // This lets bounded pure parsing overlap adjacent unsupported formats or other
         // ineligible sources without admitting/publishing them ahead of turn.
         if !self.workers.is_empty()
             && !file.asset

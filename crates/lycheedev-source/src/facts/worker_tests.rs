@@ -5,6 +5,206 @@ use std::{collections::BTreeSet, thread, time::Instant};
 const FACT_LIMIT: usize = 4 << 20;
 const SOURCE_LIMIT: usize = 64 << 10;
 
+#[test]
+fn xml_linear_scans_keep_bytes_and_bound_mid_scan_cancellation() {
+    on_worker_stack(|| {
+        for source in [
+            "x".repeat(24000),
+            format!("<!--{}-->", "x".repeat(24000)),
+            format!("<![CDATA[{}]]>", "x".repeat(24000)),
+            format!("<?test {}?>", "x".repeat(24000)),
+            format!("<!test '{}'><!--tail-->", "x".repeat(24000)),
+            format!("<!test [<!--{}-->]>", "x".repeat(24000)),
+            format!("<Root name='{}'/>", "x".repeat(24000)),
+        ] {
+            let control = OperationControl::default();
+            let guard = WorkerGuard::new(&control, FACT_LIMIT);
+            assert_eq!(
+                public_xml_grammar(source.as_bytes(), Some(&guard)),
+                public_xml_grammar(source.as_bytes(), None)
+            );
+            let (steps, clocks) = guard.scan_counts_for_test();
+            assert!(steps >= source.len());
+            assert!(
+                clocks < steps / 100 + 10,
+                "no byte-by-byte wall clock: {clocks}/{steps}"
+            );
+            let control = OperationControl::default();
+            let cancel = control.tracked_cancel_handle().unwrap();
+            let observer = |at| {
+                if at == 101 {
+                    cancel.cancel();
+                }
+            };
+            let mut guard = WorkerGuard::new(&control, FACT_LIMIT);
+            guard.observe_scan_for_test(&observer);
+            let _ = public_xml_grammar(source.as_bytes(), Some(&guard));
+            assert!(!guard.check());
+            assert!(guard.scan_counts_for_test().0 <= 101 + 255);
+        }
+    });
+}
+
+#[test]
+fn xml_long_named_and_numeric_entities_share_the_text_scan_guard() {
+    on_worker_stack(|| {
+        for entity in [
+            "x".repeat(20000),
+            format!("#{}65", "0".repeat(20000)),
+            format!("#x{}41", "0".repeat(20000)),
+        ] {
+            let source = format!("{}&{entity};<", "a".repeat(300));
+            let control = OperationControl::default();
+            let guard = WorkerGuard::new(&control, FACT_LIMIT);
+            assert_eq!(
+                xml_text_failure(source.as_bytes(), Some(&guard)),
+                xml_text_failure(source.as_bytes(), None)
+            );
+            // Skip the first delimiter-finding scan and cancel inside the long
+            // entity's own scan, not at the parser entry.
+            let cancel_at = source.len() + 1000;
+            let control = OperationControl::default();
+            let cancel = control.tracked_cancel_handle().unwrap();
+            let observer = |at| {
+                if at == cancel_at {
+                    cancel.cancel();
+                }
+            };
+            let mut guard = WorkerGuard::new(&control, FACT_LIMIT);
+            guard.observe_scan_for_test(&observer);
+            assert!(xml_text_failure(source.as_bytes(), Some(&guard)).is_none());
+            assert!(!guard.check());
+            assert!(guard.scan_counts_for_test().0 <= cancel_at + 255);
+        }
+        for reference in [
+            format!("#{}65", "0".repeat(20000)),
+            format!("#x{}41", "0".repeat(20000)),
+        ] {
+            let control = OperationControl::default();
+            let cancel = control.tracked_cancel_handle().unwrap();
+            let observer = |at| {
+                if at == 101 {
+                    cancel.cancel();
+                }
+            };
+            let mut guard = WorkerGuard::new(&control, FACT_LIMIT);
+            guard.observe_scan_for_test(&observer);
+            assert_eq!(
+                xml_entity_value_guarded(&reference, Some(&guard)),
+                Err(String::new())
+            );
+            assert!(!guard.check());
+            assert!(guard.scan_counts_for_test().0 <= 101 + 255);
+        }
+        for reference in [
+            "#0",
+            "#00065",
+            "#x00041",
+            "#4294967296",
+            "#1114112",
+            "#xD800",
+            "#x10ffff",
+            "#+65",
+            "#１２",
+            "#x",
+            "unknown",
+        ] {
+            let control = OperationControl::default();
+            let guard = WorkerGuard::new(&control, FACT_LIMIT);
+            assert_eq!(
+                xml_entity_value_guarded(reference, Some(&guard)),
+                xml_entity_value(reference)
+            );
+        }
+    });
+}
+
+#[test]
+fn xml_numeric_entity_scan_retains_original_strict_radix_interpretation() {
+    fn previous(reference: &str) -> std::result::Result<String, String> {
+        let value = reference
+            .strip_prefix('#')
+            .and_then(|number| {
+                let (number, radix) = number
+                    .strip_prefix('x')
+                    .map_or((number, 10), |number| (number, 16));
+                if number.is_empty() || !number.chars().all(|ch| ch.is_digit(radix)) {
+                    return None;
+                }
+                u32::from_str_radix(number, radix)
+                    .ok()
+                    .filter(|n| *n <= 0x10ffff)
+                    .map(|n| char::from_u32(n).unwrap_or('\u{fffd}'))
+            })
+            .ok_or_else(|| format!("invalid character entity &{reference};"))?;
+        Ok(value.to_string())
+    }
+    for number in [
+        0,
+        9,
+        10,
+        13,
+        65,
+        0xd7ff,
+        0xd800,
+        0xdfff,
+        0xe000,
+        0x10ffff,
+        0x110000,
+        u32::MAX as u64,
+        u32::MAX as u64 + 1,
+    ] {
+        for reference in [
+            format!("#{number}"),
+            format!("#000{number}"),
+            format!("#x{number:x}"),
+            format!("#x000{number:X}"),
+        ] {
+            assert_eq!(
+                xml_entity_value(&reference),
+                previous(&reference),
+                "{reference}"
+            );
+        }
+    }
+    for reference in [
+        "#", "#x", "#+65", "#-1", "#x+41", "#xG", "#１２", "#xα", "#65 ", "#1_0",
+    ] {
+        assert_eq!(
+            xml_entity_value(reference),
+            previous(reference),
+            "{reference}"
+        );
+    }
+}
+
+#[test]
+fn xml_scanner_last_byte_cancellation_discards_already_observed_facts() {
+    on_worker_stack(|| {
+        let raw = b"<Root><Frame name='Before'/></Root>tail";
+        let control = OperationControl::default();
+        let probe = WorkerGuard::new(&control, FACT_LIMIT);
+        let mut lines = XmlLines::new(raw);
+        let complete = xml_guarded(raw, |at| lines.at(at), Some(&probe)).unwrap();
+        assert_eq!(complete.declarations[0].name, "Before");
+        let last = probe.scan_counts_for_test().0;
+        assert!(last > 0 && last < 255);
+        let control = OperationControl::default();
+        let cancel = control.tracked_cancel_handle().unwrap();
+        let observer = |at| {
+            if at == last {
+                cancel.cancel();
+            }
+        };
+        let mut guard = WorkerGuard::new(&control, FACT_LIMIT);
+        guard.observe_scan_for_test(&observer);
+        let mut lines = XmlLines::new(raw);
+        assert!(xml_guarded(raw, |at| lines.at(at), Some(&guard)).is_none());
+        assert!(!guard.check());
+        assert_eq!(guard.scan_counts_for_test().0, last);
+    });
+}
+
 fn on_worker_stack(test: impl FnOnce() + Send + 'static) {
     thread::Builder::new()
         .name("source-facts-regression".into())
@@ -303,10 +503,15 @@ fn xml_inline_handlers_share_one_document_owned_facts_allowance() {
 }
 
 #[test]
-fn worker_refuses_oversized_non_utf8_generated_and_exhausted_facts_inputs() {
+fn worker_refuses_oversized_non_utf8_and_exhausted_facts_inputs() {
     on_worker_stack(|| {
         let control = OperationControl::default();
-        for mode in [ParseMode::LuaOrdinary, ParseMode::Xml, ParseMode::Toc] {
+        for mode in [
+            ParseMode::LuaOrdinary,
+            ParseMode::LuaGenerated,
+            ParseMode::Xml,
+            ParseMode::Toc,
+        ] {
             let mut raw = vec![b' '; SOURCE_LIMIT];
             assert!(
                 for_worker(&raw, mode, &control, FACT_LIMIT).is_some(),
@@ -316,9 +521,12 @@ fn worker_refuses_oversized_non_utf8_generated_and_exhausted_facts_inputs() {
             assert!(for_worker(&raw, mode, &control, FACT_LIMIT).is_none());
             assert!(for_worker(b"\xff", mode, &control, FACT_LIMIT).is_none());
         }
-        assert!(for_worker(b"", ParseMode::LuaGenerated, &control, FACT_LIMIT).is_none());
         for (mode, raw) in [
             (ParseMode::LuaOrdinary, b"function Full() end".as_slice()),
+            (
+                ParseMode::LuaGenerated,
+                b"local T={Type='System',Name='Full'}".as_slice(),
+            ),
             (
                 ParseMode::Xml,
                 b"<Ui><Frame name=\"Full\"/></Ui>".as_slice(),
@@ -349,6 +557,10 @@ fn worker_observes_cancellation_and_deadline_without_selecting_new_public_errors
             for (mode, raw) in [
                 (ParseMode::LuaOrdinary, b"function Full() end".as_slice()),
                 (
+                    ParseMode::LuaGenerated,
+                    b"local T={Type='System',Name='Full'}".as_slice(),
+                ),
+                (
                     ParseMode::Xml,
                     b"<Ui><Frame name=\"Full\"><OnLoad>Run()</OnLoad></Frame></Ui>".as_slice(),
                 ),
@@ -369,4 +581,29 @@ fn worker_observes_cancellation_and_deadline_without_selecting_new_public_errors
             }
         }
     });
+}
+
+#[test]
+fn xml_text_expansion_copies_share_the_scan_counter_and_check_before_growth() {
+    let control = OperationControl::default();
+    let cancel = control.tracked_cancel_handle().unwrap();
+    let observer = |position| {
+        if position == 37 {
+            cancel.cancel();
+        }
+    };
+    let mut guard = WorkerGuard::new(&control, FACT_LIMIT);
+    guard.observe_scan_for_test(&observer);
+    let mut output = Vec::new();
+    {
+        let mut scan = worker::ByteScan::new(Some(&guard));
+        assert!(!append_scanned(&mut output, &[b'x'; 4096], &mut scan));
+    }
+    assert!(
+        output.is_empty(),
+        "cancelled admission must precede Vec growth"
+    );
+    assert_eq!(output.capacity(), 0);
+    assert!(guard.scan_counts_for_test().0 <= 37 + 255);
+    assert!(!guard.check());
 }

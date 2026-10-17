@@ -6,8 +6,8 @@ pub(crate) mod worker;
 use worker::{ScratchFrame, WorkerGuard};
 
 /// The public parser mode belongs to the immutable source path. Generated Lua
-/// retains its original complete sequential parser until its own guarded path
-/// exists; adding a format must not silently disable generated observations.
+/// shares the complete ordinary observations and appends its literal API facts;
+/// adding a worker format must not silently disable generated observations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ParseMode {
     LuaOrdinary,
@@ -51,23 +51,27 @@ pub(crate) fn for_worker(
     control: &lycheedev_core::control::OperationControl,
     max_owned_bytes: usize,
 ) -> Option<Facts> {
-    if raw.len() > 64 << 10 || std::str::from_utf8(raw).is_err() || mode == ParseMode::LuaGenerated
-    {
+    if raw.len() > 64 << 10 || std::str::from_utf8(raw).is_err() {
         return None;
     }
     let guard = WorkerGuard::new(control, max_owned_bytes);
     if !guard.check() {
         return None;
     }
-    match mode {
+    let facts = match mode {
         ParseMode::LuaOrdinary => crate::lua_tree::facts_with_worker_guard(raw, &guard),
         ParseMode::Toc => toc_with_guard(raw, Some(&guard)),
         ParseMode::Xml => {
             let mut lines = XmlLines::new(raw);
             xml_guarded(raw, |offset| lines.at(offset), Some(&guard))
         }
-        ParseMode::LuaGenerated => None,
-    }
+        ParseMode::LuaGenerated => {
+            crate::lua_tree::generated_facts_with_worker_guard(raw, true, &guard)
+        }
+    };
+    // Linear scanner Drop checks have completed before this final boundary.
+    // Never publish a precomputed Some after an exit check abandoned its guard.
+    guard.check().then_some(facts).flatten()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -288,7 +292,7 @@ fn xml_attribute_guarded(
                 &entity[..end]
             ));
         }
-        value.push_str(&xml_entity_value(&entity[1..end])?);
+        value.push_str(&xml_entity_value_guarded(&entity[1..end], guard)?);
         rest = &entity[end + 1..];
     }
     if rest.contains('<') {
@@ -304,6 +308,13 @@ pub(crate) fn xml_entity(reference: &str) -> std::result::Result<String, String>
     Ok(value)
 }
 fn xml_entity_value(reference: &str) -> std::result::Result<String, String> {
+    xml_entity_value_guarded(reference, None)
+}
+fn xml_entity_value_guarded(
+    reference: &str,
+    guard: Option<&WorkerGuard<'_>>,
+) -> std::result::Result<String, String> {
+    let mut scan = worker::ByteScan::new(guard);
     let value = match reference {
         "lt" => Some('<'),
         "gt" => Some('>'),
@@ -314,16 +325,26 @@ fn xml_entity_value(reference: &str) -> std::result::Result<String, String> {
             let (number, radix) = number
                 .strip_prefix('x')
                 .map_or((number, 10), |number| (number, 16));
-            if number.is_empty() || !number.chars().all(|ch| ch.is_digit(radix)) {
+            if number.is_empty() {
                 return None;
             }
-            u32::from_str_radix(number, radix)
-                .ok()
-                .filter(|number| *number <= 0x10ffff)
-                .map(|number| char::from_u32(number).unwrap_or('\u{fffd}'))
+            let mut value = 0u32;
+            for ch in number.chars() {
+                if !scan.bytes(ch.len_utf8()) {
+                    return None;
+                }
+                let digit = ch.to_digit(radix)?;
+                value = value.checked_mul(radix)?.checked_add(digit)?;
+            }
+            (value <= 0x10ffff).then(|| char::from_u32(value).unwrap_or('\u{fffd}'))
         }),
+    };
+    // Cancellation inside a long numeric reference must be observed before
+    // allocating its potentially source-sized diagnostic, as well as success.
+    if !scan.check() {
+        return Err(String::new());
     }
-    .ok_or_else(|| format!("invalid character entity &{reference};"))?;
+    let value = value.ok_or_else(|| format!("invalid character entity &{reference};"))?;
     Ok(value.to_string())
 }
 pub(crate) fn xml_characters(text: &str) -> std::result::Result<(), String> {
@@ -333,8 +354,9 @@ fn xml_characters_guarded(
     text: &str,
     guard: Option<&WorkerGuard<'_>>,
 ) -> std::result::Result<(), String> {
-    for (offset, ch) in text.chars().enumerate() {
-        if offset % 256 == 0 && !worker::check(guard) {
+    let mut scan = worker::ByteScan::new(guard);
+    for ch in text.chars() {
+        if !scan.bytes(ch.len_utf8()) {
             return Err(String::new());
         }
         if !matches!(ch,'\t'|'\n'|'\r'|' '..='\u{d7ff}'|'\u{e000}'..='\u{fffd}'|'\u{10000}'..='\u{10ffff}')
@@ -558,11 +580,23 @@ fn public_xml_token_failure(raw: &[u8]) -> Option<(String, usize)> {
     }
 }
 fn xml_reference_end(raw: &[u8]) -> usize {
+    xml_reference_end_scanned(raw, &mut worker::ByteScan::new(None))
+}
+fn xml_reference_end_scanned(raw: &[u8], scan: &mut worker::ByteScan<'_>) -> usize {
+    if !scan.byte() {
+        return 0;
+    }
     let mut at = 1; // The initial & belongs to the error token.
     if raw.get(at) == Some(&b'#') {
+        if !scan.byte() {
+            return at;
+        }
         at += 1;
         let hex = raw.get(at) == Some(&b'x');
         if hex {
+            if !scan.byte() {
+                return at;
+            }
             at += 1;
         }
         while raw.get(at).is_some_and(|byte| {
@@ -572,6 +606,9 @@ fn xml_reference_end(raw: &[u8]) -> usize {
                 byte.is_ascii_digit()
             }
         }) {
+            if !scan.byte() {
+                return at;
+            }
             at += 1;
         }
     } else {
@@ -580,6 +617,9 @@ fn xml_reference_end(raw: &[u8]) -> usize {
                 || matches!(*byte, b'_' | b':' | b'.' | b'-')
                 || *byte >= 128
         }) {
+            if !scan.byte() {
+                return at;
+            }
             at += 1;
         }
     }
@@ -589,24 +629,30 @@ fn xml_reference_end(raw: &[u8]) -> usize {
 // entire token once, preserving first-failure precedence and the scanner's
 // consumed-byte position (which can precede quick-xml's final event cursor).
 fn xml_text_failure(raw: &[u8], guard: Option<&WorkerGuard<'_>>) -> Option<(String, usize)> {
-    let end = raw
-        .iter()
-        .position(|byte| *byte == b'<')
-        .unwrap_or(raw.len());
+    let mut scan = worker::ByteScan::new(guard);
+    let end = scan.find(raw, b"<").unwrap_or(raw.len());
+    if !scan.check() {
+        return None;
+    }
     let text = &raw[..end];
     let mut expanded = Vec::new();
     let mut at = 0;
     let mut copied = 0;
     while at < text.len() {
-        if !worker::check(guard) {
+        if !scan.byte() {
             return None;
         }
         if text[at..].starts_with(b"]]>") {
             return Some(("unescaped ]]> not in CDATA section".into(), at + 3));
         }
         if text[at] == b'&' {
-            expanded.extend_from_slice(&text[copied..at]);
-            let finish = at + xml_reference_end(&text[at..]);
+            if !append_scanned(&mut expanded, &text[copied..at], &mut scan) {
+                return None;
+            }
+            let finish = at + xml_reference_end_scanned(&text[at..], &mut scan);
+            if !scan.check() {
+                return None;
+            }
             if text.get(finish) != Some(&b';') {
                 return Some((
                     if finish == raw.len() {
@@ -621,9 +667,16 @@ fn xml_text_failure(raw: &[u8], guard: Option<&WorkerGuard<'_>>) -> Option<(Stri
                 ));
             }
             let reference = std::str::from_utf8(&text[at + 1..finish]).ok()?;
-            match xml_entity_value(reference) {
-                Ok(value) => expanded.extend_from_slice(value.as_bytes()),
+            match xml_entity_value_guarded(reference, guard) {
+                Ok(value) => {
+                    if !append_scanned(&mut expanded, value.as_bytes(), &mut scan) {
+                        return None;
+                    }
+                }
                 Err(error) => return Some((error, finish + 1)),
+            }
+            if !scan.byte() {
+                return None;
             }
             at = finish + 1;
             copied = at;
@@ -634,13 +687,26 @@ fn xml_text_failure(raw: &[u8], guard: Option<&WorkerGuard<'_>>) -> Option<(Stri
     let value = if copied == 0 {
         std::borrow::Cow::Borrowed(text)
     } else {
-        expanded.extend_from_slice(&text[copied..]);
+        if !append_scanned(&mut expanded, &text[copied..], &mut scan) {
+            return None;
+        }
         std::borrow::Cow::Owned(expanded)
     };
     let value = std::str::from_utf8(&value).ok()?;
     xml_characters_guarded(value, guard)
         .err()
         .map(|error| (error, end))
+}
+fn append_scanned(output: &mut Vec<u8>, bytes: &[u8], scan: &mut worker::ByteScan<'_>) -> bool {
+    for chunk in bytes.chunks(255) {
+        // Expansion/copy work shares the parent scan's counter. Check again
+        // immediately before a possible Vec growth, regardless of block state.
+        if !scan.bytes(chunk.len()) || !scan.check() {
+            return false;
+        }
+        output.extend_from_slice(chunk);
+    }
+    true
 }
 fn xml_attribute_failure_offset(raw: &[u8]) -> usize {
     let mut at = 0;
@@ -705,10 +771,11 @@ fn public_xml_grammar<'a>(
     raw: &'a [u8],
     guard: Option<&WorkerGuard<'_>>,
 ) -> std::borrow::Cow<'a, [u8]> {
+    let mut scan = worker::ByteScan::new(guard);
     let mut changed: Option<Vec<u8>> = None;
     let mut at = 0;
     while at < raw.len() {
-        if !worker::check(guard) {
+        if !scan.byte() {
             return std::borrow::Cow::Borrowed(raw);
         }
         if raw[at..].starts_with(b"<!--")
@@ -722,20 +789,26 @@ fn public_xml_grammar<'a>(
             } else {
                 b"]]>"
             };
-            let Some(length) = raw[at..].windows(end.len()).position(|bytes| bytes == end) else {
+            let Some(length) = scan.find(&raw[at..], end) else {
                 break;
             };
+            if !scan.bytes(end.len() - 1) {
+                return std::borrow::Cow::Borrowed(raw);
+            }
             at += length + end.len();
             continue;
         }
         if raw[at..].starts_with(b"<!") && !matches!(raw.get(at + 2), Some(b'-' | b'[')) {
             let start = at;
+            if !scan.bytes(2) {
+                return std::borrow::Cow::Borrowed(raw);
+            }
             at += 3;
             let mut depth = 0usize;
             let mut quote = 0;
             let mut complete = false;
             while at < raw.len() {
-                if !worker::check(guard) {
+                if !scan.byte() {
                     return std::borrow::Cow::Borrowed(raw);
                 }
                 let byte = raw[at];
@@ -746,10 +819,12 @@ fn public_xml_grammar<'a>(
                 } else if matches!(byte, b'\'' | b'"') {
                     quote = byte;
                 } else if raw[at..].starts_with(b"<!--") {
-                    let Some(end) = raw[at + 4..].windows(3).position(|bytes| bytes == b"-->")
-                    else {
+                    let Some(end) = scan.find(&raw[at + 4..], b"-->") else {
                         break;
                     };
+                    if !scan.bytes(5) {
+                        return std::borrow::Cow::Borrowed(raw);
+                    }
                     at += end + 7;
                     continue;
                 } else if byte == b'<' {
@@ -767,8 +842,14 @@ fn public_xml_grammar<'a>(
             if !complete {
                 break;
             }
+            if !scan.check() {
+                return std::borrow::Cow::Borrowed(raw);
+            }
             let bytes = changed.get_or_insert_with(|| raw.to_vec());
             for byte in &mut bytes[start + 1..at - 1] {
+                if !scan.byte() {
+                    return std::borrow::Cow::Borrowed(raw);
+                }
                 if !matches!(*byte, b'\r' | b'\n') {
                     *byte = b' ';
                 }
@@ -781,7 +862,7 @@ fn public_xml_grammar<'a>(
             at += 1;
             let mut quote = 0;
             while at < raw.len() {
-                if !worker::check(guard) {
+                if !scan.byte() {
                     return std::borrow::Cow::Borrowed(raw);
                 }
                 let byte = raw[at];
@@ -1180,6 +1261,13 @@ mod tests {
             "LYCHEEDEV_SOURCE_FACTS_XML_GO_REPORT",
         );
     }
+    #[test]
+    fn fixed_go_generated_observations() {
+        fixed_go_facts_observations(
+            include_str!("../../../tests/rust-parity/source-facts-generated/cases.json"),
+            "LYCHEEDEV_SOURCE_FACTS_GENERATED_GO_REPORT",
+        );
+    }
     fn fixed_go_facts_observations(fixture: &str, report_variable: &str) {
         use sha2::{Digest, Sha256};
         let input: serde_json::Value = serde_json::from_str(fixture).unwrap();
@@ -1188,7 +1276,7 @@ mod tests {
             let path = case["path"].as_str().unwrap();
             let raw = case["source"].as_str().unwrap().as_bytes();
             let facts = if path.ends_with(".lua") {
-                lua(raw, false)
+                lua(raw, path.contains("/Blizzard_APIDocumentationGenerated/"))
             } else {
                 assert!(path.ends_with(".xml"));
                 xml(raw)

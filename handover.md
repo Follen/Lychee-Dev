@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 08:46 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`5766dccc1fec7d20f5d8120bca7dcd79eed726c4`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 09:03 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`b15079661bbf33a75633c545365f41a33f194a74`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -69,7 +69,15 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 ### 下一步：现有双Rust产物相邻诊断
 
-已新增[专用入口与操作说明](tests/rust-performance-paired/README.md)：固定bbfe/ab4两份原sealed优化产物、各自完整匹配源码见证，原artifact路径/记录不改；独立导出18个runner依赖。固定3对AB/BA/AB，每次独立application-cold home，原180秒产品/210秒调用/默认栈不变；两调用紧邻，完成后验证4036完整Facts所有字段/顺序及完整31phase，再封存/清理。失败不替样、未知回收停后继。外层固定60分钟，计入准备/身份/对照/收尾。Node定向47/47（0skip）已由作者及协调者各实际运行；Windows三对仍NOT_RUN，不等于20对验收，也不重建产品。另扩大既有runner测试时两项因云端固定Go对象缺文件失败，未更改原测试/未冒全套通过。generated完整guard/字段算法及Data私有流式解压在独立云端实现中，不混入这个runner-only批。
+已新增[专用入口与操作说明](tests/rust-performance-paired/README.md)：固定bbfe/ab4两份原sealed优化产物、各自完整匹配源码见证，原artifact路径/记录不改；独立导出18个runner依赖。固定3对AB/BA/AB，每次独立application-cold home，原180秒产品/210秒调用/默认栈不变；两调用紧邻，完成后验证4036完整Facts所有字段/顺序及完整31phase，再封存/清理。失败不替样、未知回收停后继。外层固定60分钟，计入准备/身份/对照/收尾。Node定向47/47（0skip）已由作者及协调者各实际运行；Windows实际前置在bbfe源码见证digest不匹配处停止，6次产品调用均NOT_RUN，3个owner已回收（[原阻塞报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6232021715)，[证据索引](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6232021948)）。bbfe EXE/artifact匹配，clean见证1061文件逐Git blob匹配，但计算digest为cc35ac5c386a45010f90f1f518720800c5a0c35f721b6e73f76616a281f2194e，原artifact要求76bea4b27798356c9f5194f56c97c3a1292b214166b84c875dfc0bb75dfc7b34；必须核原构建输入清单/算法，不重标产物。ab4身份通过。本机Node导出遗漏先46/1、补齐后47/47，原失败保留。三对仍不是20对验收，不重建产品。另扩大既有runner测试时两项因云端固定Go对象缺文件失败，未更改原测试/未冒全套通过。generated完整guard/字段算法及Data私有流式解压由后继生产批保存，不混入b150 runner-only身份。
+
+### 下一生产批：generated 借用解析与 Data 私有增量 Z
+
+Data 本地/CDN 的已认证 publisher 已接入增量 Z：保存已验证的 encoded chunk，以固定64KiB缓冲解压到未发布私有spool，删除 decoded-sized Vec。原 encoded MD5、最终decoded大小/Adler、整份CKey/source EOF在发布前校验；非Z/嵌套/加密及公开 eager Decode/unpack 保持原路径。原每块保守 retained 准入时点和持有期保持，因此不能声称账面峰值已下降；有效输入的完整bytes/hash/work计量须实际对照。
+
+私有spool明确采用首个已观察错误：sink失败立即停止，不继续inflate坏尾或下块来重建旧 eager 双故障顺序。故“未观察坏尾＋早期写失败”和紧work预算组合可与旧内部错误先后不同，公共坏块零输出合同不变；没有发布部分spool，原取消与checked cleanup仍保留真实错误。详见[设计边界](DESIGN.md#private-streaming-decode-and-observable-errors)。新增19 Rust覆盖正常buffer/chunk边界、真实publisher、完整认证、预算/取消、sink/cleanup及历史fallback，全部NOT_RUN；9个Rust文件rustfmt仅解析通过，独立静态复审无遗留确认问题，协调者重跑Node29/29通过，不能当编译或性能通过。
+
+Data opt-in profile v2保留原11段和总边界，另列10个嵌套detail，严格兼容原v1报告；默认关闭无额外clock。下一匹配产物沿原正式入口执行，旧928正式样本与48次诊断不改。Source generated借用字段视图、显式文档任务栈及256扫描工作步观察粒度已完成，完整guard允许原64KiB内的generated纯解析进入同一有界worker。新增19 Rust及2个原测试重命名/扩展均NOT_RUN；8个Rust文件仅rustfmt解析通过，新fixture Node3项加旧XML身份2项实际5/5通过。临时容量推导、默认栈深树、分配/取消出口及[22个正式测试全名与Go命令](tests/rust-parity/source-facts-generated/README.md)已记录；其20个新增固定Go输入保持原文，旧Rust参考与新算法等价、固定Go实测是两条独立证据，疑似旧差异不预先豁免或换fixture。
 
 ### 实际155条semantic gaps的范围
 

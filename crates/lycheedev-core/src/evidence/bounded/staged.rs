@@ -283,6 +283,10 @@ fn copy_stream(
             });
         let n = finish_checks(read, control, supplemental)?;
         digest.update(&buffer[..n]);
+        #[cfg(test)]
+        let written = test_hooks::before_stage_write()
+            .unwrap_or_else(|| stage.write_all(&buffer[..n]).map_err(ToolkitError::from));
+        #[cfg(not(test))]
         let written = stage.write_all(&buffer[..n]).map_err(ToolkitError::from);
         finish_checks(written, control, supplemental)?;
         remaining -= n as u64;
@@ -490,6 +494,8 @@ fn open_winner(
 }
 
 #[cfg(test)]
+mod failure_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod test_hooks {
@@ -498,6 +504,7 @@ mod test_hooks {
     thread_local! {
         static BEFORE_RENAME: RefCell<Option<Box<dyn FnOnce()>>> = RefCell::new(None);
         static AFTER_STAGE_CLOSE: RefCell<Option<Box<dyn FnOnce() -> Result<()>>>> = RefCell::new(None);
+        static BEFORE_STAGE_WRITE: RefCell<Option<Box<dyn FnOnce() -> Result<()>>>> = RefCell::new(None);
     }
     pub(super) fn set_before_rename(run: impl FnOnce() + 'static) {
         BEFORE_RENAME.with(|s| {
@@ -520,5 +527,16 @@ mod test_hooks {
         AFTER_STAGE_CLOSE
             .with(|s| s.borrow_mut().take())
             .map_or(Ok(()), |run| run())
+    }
+    pub(super) fn set_before_stage_write(run: impl FnOnce() -> Result<()> + 'static) {
+        BEFORE_STAGE_WRITE.with(|s| {
+            assert!(s.borrow().is_none());
+            *s.borrow_mut() = Some(Box::new(run));
+        });
+    }
+    pub(super) fn before_stage_write() -> Option<Result<()>> {
+        BEFORE_STAGE_WRITE
+            .with(|s| s.borrow_mut().take())
+            .map(|run| run())
     }
 }

@@ -1,8 +1,11 @@
 //! Complete sequential content with one live chunk. EOF is a verified terminal
 //! state, including exact framing, output length and the external whole CKey.
 use super::*;
+use crate::phase_profile::Phase;
 use crate::resource::RetainedReservation;
 use std::io;
+mod zlib;
+use zlib::ZlibChunk;
 
 pub(crate) fn stream_io_error(error: io::Error) -> lycheedev_core::ToolkitError {
     if let Some(inner) = error
@@ -27,8 +30,11 @@ pub(crate) struct Reader<'a> {
     hash: Md5,
     emitted: usize,
     current: Vec<u8>,
+    zlib: Option<ZlibChunk<'a>>,
     offset: usize,
     scratch: Option<RetainedReservation<'a>>,
+    incremental: bool,
+    failed: Option<lycheedev_core::ToolkitError>,
     finished: bool,
 }
 impl<'a> Reader<'a> {
@@ -159,13 +165,45 @@ impl<'a> Reader<'a> {
             hash: Md5::new(),
             emitted: 0,
             current: Vec::new(),
+            zlib: None,
             offset: 0,
             scratch: None,
+            incremental: false,
+            failed: None,
             finished: false,
         })
     }
+
+    /// Only private staged publishers opt in. A partial chunk may reach their
+    /// unpublished spool, never a public blob. On failure they stop immediately
+    /// and retain the first observed error, then perform their checked cleanup.
+    /// The public eager Decode/unpack and other Reader consumers stay unchanged.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_incremental_with_check(
+        source: &'a mut dyn Read,
+        encoded_bytes: usize,
+        decoded_bytes: usize,
+        expected_key: [u8; 16],
+        keys: &'a BTreeMap<u64, Vec<u8>>,
+        budget: &'a Budget,
+        source_check: Option<&'a dyn Fn() -> Result<()>>,
+    ) -> Result<Self> {
+        let mut reader = Self::new_with_check(
+            source,
+            encoded_bytes,
+            decoded_bytes,
+            expected_key,
+            keys,
+            budget,
+            source_check,
+        )?;
+        reader.incremental = true;
+        Ok(reader)
+    }
+
     fn advance(&mut self) -> Result<()> {
         self.current = Vec::new();
+        self.zlib = None;
         self.scratch = None;
         self.offset = 0;
         let budget = self.decoder.budget.expect("stream owns a budget");
@@ -188,20 +226,25 @@ impl<'a> Reader<'a> {
             return Ok(());
         }
         let part = &self.parts[self.next];
-        // Match conservative actual live raw/output capacity, not total content.
-        // The reservation survives output consumption and drops before the next
-        // chunk; nested frames and cipher state add their own live reservations.
+        // Keep the original conservative admission and its error order, even
+        // when Z no longer allocates a decoded-sized Vec. This guard survives
+        // consumption and drops before the next chunk. Lower actual buffer
+        // capacity does not imply a lower admitted/snapshot memory peak.
         let reserved = (part.encoded + part.decoded)
             .checked_mul(2)
             .and_then(|n| n.checked_add(65536))
             .ok_or_else(|| fault("container.resource_limit", 3, "Chunk allocation overflow"))?;
         let scratch = budget.reserve_retained(reserved)?;
         let mut encoded = vec![0; part.encoded];
-        for block in encoded.chunks_mut(65536) {
-            self.decoder.check()?;
-            self.source.read_exact(block).map_err(stream_io_error)?;
+        {
+            let _span = budget.phase(Phase::EncodedChunkRead);
+            for block in encoded.chunks_mut(65536) {
+                self.decoder.check()?;
+                self.source.read_exact(block).map_err(stream_io_error)?;
+            }
         }
         if part.digest != [0; 16] {
+            let _span = budget.phase(Phase::EncodedChunkMd5);
             let mut hash = Md5::new();
             for block in encoded.chunks(65536) {
                 self.decoder.check()?;
@@ -212,13 +255,19 @@ impl<'a> Reader<'a> {
                 return integrity();
             }
         }
-        let content =
-            self.decoder
-                .unpack(&encoded, 1, part.decoded, self.next, Some(part.decoded))?;
-        if content.bytes.len() != part.decoded {
-            return integrity();
+        if self.incremental && encoded[0] == b'Z' {
+            self.decoder.check()?;
+            self.zlib = Some(ZlibChunk::new(encoded, part.decoded, budget)?);
+        } else {
+            // Preserve every nested/encrypted/non-Z decoder and its admission.
+            let content =
+                self.decoder
+                    .unpack(&encoded, 1, part.decoded, self.next, Some(part.decoded))?;
+            if content.bytes.len() != part.decoded {
+                return integrity();
+            }
+            self.current = content.bytes;
         }
-        self.current = content.bytes;
         self.scratch = Some(scratch);
         self.next += 1;
         Ok(())
@@ -228,11 +277,26 @@ impl<'a> Reader<'a> {
         if out.is_empty() {
             return Ok(0);
         }
-        while self.offset == self.current.len() && !self.finished {
+        loop {
+            if let Some(zlib) = &mut self.zlib {
+                if !zlib.finished() {
+                    let n = zlib.read(out, &self.decoder)?;
+                    if n != 0 {
+                        let budget = self.decoder.budget.expect("stream owns a budget");
+                        budget.charge(Cost::work(1))?;
+                        let _span = budget.phase(Phase::WholeContentKeyHash);
+                        self.hash.update(&out[..n]);
+                        self.emitted += n;
+                        return Ok(n);
+                    }
+                }
+            } else if self.offset != self.current.len() {
+                break;
+            }
+            if self.finished {
+                return Ok(0);
+            }
             self.advance()?;
-        }
-        if self.finished {
-            return Ok(0);
         }
         let n = out.len().min(65536).min(self.current.len() - self.offset);
         let block = &self.current[self.offset..self.offset + n];
@@ -240,7 +304,14 @@ impl<'a> Reader<'a> {
             .budget
             .expect("stream owns a budget")
             .charge(Cost::work(1))?;
-        self.hash.update(block);
+        {
+            let _span = self
+                .decoder
+                .budget
+                .expect("stream owns a budget")
+                .phase(Phase::WholeContentKeyHash);
+            self.hash.update(block);
+        }
         out[..n].copy_from_slice(block);
         self.offset += n;
         self.emitted += n;
@@ -249,7 +320,17 @@ impl<'a> Reader<'a> {
 }
 impl Read for Reader<'_> {
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
-        self.read_content(out).map_err(io::Error::other)
+        if let Some(error) = &self.failed {
+            return Err(io::Error::other(error.clone()));
+        }
+        self.read_content(out).map_err(|error| {
+            // Incremental aggregation can consume buffered bytes before an
+            // error. No caller may retry and accidentally emit a shifted suffix.
+            if self.incremental {
+                self.failed = Some(error.clone());
+            }
+            io::Error::other(error)
+        })
     }
 }
 
@@ -299,3 +380,6 @@ mod tests {
 
 #[cfg(test)]
 mod controlled_tests;
+
+#[cfg(test)]
+mod zlib_tests;

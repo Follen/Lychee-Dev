@@ -23,6 +23,12 @@ pub(crate) struct WorkerGuard<'a> {
     abandoned: Cell<bool>,
     nodes: Cell<usize>,
     scratch: Cell<usize>,
+    #[cfg(test)]
+    clock_checks: Cell<usize>,
+    #[cfg(test)]
+    scanned_bytes: Cell<usize>,
+    #[cfg(test)]
+    scan_observer: Option<&'a dyn Fn(usize)>,
 }
 impl<'a> WorkerGuard<'a> {
     pub(crate) fn new(control: &'a OperationControl, limit: usize) -> Self {
@@ -33,21 +39,29 @@ impl<'a> WorkerGuard<'a> {
             abandoned: Cell::new(false),
             nodes: Cell::new(0),
             scratch: Cell::new(8 << 20),
+            #[cfg(test)]
+            clock_checks: Cell::new(0),
+            #[cfg(test)]
+            scanned_bytes: Cell::new(0),
+            #[cfg(test)]
+            scan_observer: None,
         }
     }
     pub(crate) fn abandon(&self) {
         self.abandoned.set(true);
     }
     pub(crate) fn check(&self) -> bool {
-        if self.abandoned.get()
-            || self.control.is_cancelled()
-            || Instant::now() >= self.control.deadline()
-        {
+        if self.abandoned.get() || self.control.is_cancelled() {
             self.abandoned.set(true);
-            false
-        } else {
-            true
+            return false;
         }
+        #[cfg(test)]
+        self.clock_checks.set(self.clock_checks.get() + 1);
+        if Instant::now() >= self.control.deadline() {
+            self.abandoned.set(true);
+            return false;
+        }
+        true
     }
     pub(crate) fn charge(&self, bytes: usize) -> bool {
         if !self.check() {
@@ -118,6 +132,84 @@ impl<'a> WorkerGuard<'a> {
         let levels = usize::BITS as usize - previous_len.leading_zeros() as usize + 2;
         self.charge(capacity.saturating_add(levels * 1024))
     }
+    #[cfg(test)]
+    pub(crate) fn observe_scan_for_test(&mut self, observer: &'a dyn Fn(usize)) {
+        self.scan_observer = Some(observer);
+    }
+    #[cfg(test)]
+    pub(crate) fn scan_counts_for_test(&self) -> (usize, usize) {
+        (self.scanned_bytes.get(), self.clock_checks.get())
+    }
+}
+
+/// Observation-only byte scanning. All nested linear loops in one scan share
+/// this counter. After entry, at most 255 further byte steps are admitted
+/// before checking the unchanged control/deadline again. This is a work bound,
+/// not a wall-clock cancellation promise. Allocation admission, AST nodes and
+/// XML events continue to use the unthrottled WorkerGuard::check.
+pub(crate) struct ByteScan<'a> {
+    guard: Option<&'a WorkerGuard<'a>>,
+    remaining: usize,
+}
+impl<'a> ByteScan<'a> {
+    pub(crate) fn new(guard: Option<&'a WorkerGuard<'a>>) -> Self {
+        check(guard);
+        Self {
+            guard,
+            remaining: 255,
+        }
+    }
+    pub(crate) fn byte(&mut self) -> bool {
+        let Some(guard) = self.guard else { return true };
+        if guard.abandoned.get() {
+            return false;
+        }
+        #[cfg(test)]
+        {
+            let count = guard.scanned_bytes.get() + 1;
+            guard.scanned_bytes.set(count);
+            if let Some(observer) = guard.scan_observer {
+                observer(count);
+            }
+        }
+        if self.remaining == 0 {
+            if !guard.check() {
+                return false;
+            }
+            self.remaining = 255;
+        }
+        self.remaining -= 1;
+        true
+    }
+    pub(crate) fn bytes(&mut self, count: usize) -> bool {
+        (0..count).all(|_| self.byte())
+    }
+    pub(crate) fn all_eq(&mut self, bytes: &[u8], value: u8) -> bool {
+        bytes.iter().all(|byte| self.byte() && *byte == value)
+    }
+    pub(crate) fn find(&mut self, raw: &[u8], needle: &[u8]) -> Option<usize> {
+        for (at, bytes) in raw.windows(needle.len()).enumerate() {
+            // Account for every compared delimiter byte, including overlap
+            // between candidates, rather than only the window's first byte.
+            if !self.bytes(bytes.len()) {
+                return None;
+            }
+            if bytes == needle {
+                return Some(at);
+            }
+        }
+        None
+    }
+    pub(crate) fn check(&self) -> bool {
+        check(self.guard)
+    }
+}
+impl Drop for ByteScan<'_> {
+    fn drop(&mut self) {
+        // Every return path, including empty/short inputs and syntax failures,
+        // observes control again. Sticky abandonment rejects partial output.
+        check(self.guard);
+    }
 }
 pub(crate) struct ScratchFrame<'a> {
     used: &'a Cell<usize>,
@@ -159,6 +251,78 @@ pub(crate) fn prepare_push<T>(guard: Option<&WorkerGuard<'_>>, values: &mut Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn linear_scan_uses_bounded_real_clock_observations_and_unthrottled_charges() {
+        let control = OperationControl::default();
+        let guard = WorkerGuard::new(&control, 4096);
+        {
+            let mut scan = ByteScan::new(Some(&guard));
+            for _ in 0..(64 << 10) {
+                assert!(scan.byte());
+            }
+            let (_, clocks) = guard.scan_counts_for_test();
+            assert!(clocks < 300, "clock reads must not scale one per byte");
+            for _ in 0..16 {
+                assert!(guard.charge(1));
+            }
+            assert_eq!(
+                guard.scan_counts_for_test().1,
+                clocks + 16,
+                "allocation admission is never throttled"
+            );
+        }
+        assert_eq!(
+            guard.scan_counts_for_test(),
+            (64 << 10, 2 + ((64 << 10) - 1) / 255 + 16)
+        );
+    }
+    #[test]
+    fn linear_scan_nested_loops_observe_callback_cancellation_within_255_steps() {
+        let control = OperationControl::default();
+        let cancel = control.tracked_cancel_handle().unwrap();
+        let observer = |position| {
+            if position == 37 {
+                cancel.cancel();
+            }
+        };
+        let mut guard = WorkerGuard::new(&control, 4096);
+        guard.observe_scan_for_test(&observer);
+        {
+            let mut scan = ByteScan::new(Some(&guard));
+            for _ in 0..20 {
+                assert!(scan.byte());
+            }
+            assert!(!scan.all_eq(&[b'='; 4096], b'='));
+        }
+        let (scanned, _) = guard.scan_counts_for_test();
+        assert!(scanned >= 37 && scanned <= 37 + 255);
+        assert!(!guard.check());
+        assert_eq!(control.check().unwrap_err().code, "command.cancelled");
+    }
+    #[test]
+    fn linear_scan_exit_checks_short_empty_and_error_paths() {
+        for bytes in [0, 1, 254] {
+            let control = OperationControl::default();
+            let cancel = control.tracked_cancel_handle().unwrap();
+            let guard = WorkerGuard::new(&control, 4096);
+            {
+                let mut scan = ByteScan::new(Some(&guard));
+                assert!(scan.bytes(bytes));
+                cancel.cancel();
+            }
+            assert!(
+                guard.abandoned.get(),
+                "Drop must check even before a full block"
+            );
+        }
+        let control = OperationControl::uncancelable(Instant::now());
+        let guard = WorkerGuard::new(&control, 4096);
+        {
+            let _scan = ByteScan::new(Some(&guard));
+        }
+        assert!(guard.abandoned.get());
+        assert_eq!(control.check().unwrap_err().code, "command.deadline");
+    }
     #[test]
     fn worker_vec_capacity_is_admitted_before_growth() {
         let control = OperationControl::default();
