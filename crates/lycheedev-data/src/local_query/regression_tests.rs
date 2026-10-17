@@ -243,7 +243,7 @@ fn sql_detects_new_index_generation_after_explain_before_capture() {
 
 fn root_read(fx: &Fixture, session: bool) -> Result<File> {
     let inv = fx.invocation("asset inspect", &[("--file-id", "201")]);
-    let pin = selection::resolve_pinned(&inv)?.data.unwrap();
+    let pin = selection::resolve_pinned(&inv)?.spec.data.unwrap();
     if session {
         let budget = Arc::new(Budget::controlled(
             Cost::defaults(),
@@ -377,7 +377,7 @@ fn actual_verified_delivery_closes_owned_blob_after_late_source_and_reader_close
     for source_change in [true, false] {
         let fx = Fixture::new(&[table("Sample", 201, &[("ID", "uint")], &[vec![U(7)]])]);
         let inv = fx.invocation("asset inspect", &[("--file-id", "201")]);
-        let pin = selection::resolve_pinned(&inv).unwrap().data.unwrap();
+        let pin = selection::resolve_pinned(&inv).unwrap().spec.data.unwrap();
         let (budget, profile) = Budget::controlled(
             Cost::defaults(),
             inv.control.deadline(),
@@ -472,7 +472,7 @@ fn actual_verified_batch_closes_every_constructed_owner_on_later_error_and_deliv
             table("Second", 202, &[("ID", "uint")], &[vec![U(8)]]),
         ]);
         let inv = fx.invocation("asset inspect", &[("--file-id", "201")]);
-        let pin = selection::resolve_pinned(&inv).unwrap().data.unwrap();
+        let pin = selection::resolve_pinned(&inv).unwrap().spec.data.unwrap();
         let (budget, profile) = Budget::controlled(
             Cost::defaults(),
             inv.control.deadline(),

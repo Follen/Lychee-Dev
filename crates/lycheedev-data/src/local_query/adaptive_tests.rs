@@ -656,7 +656,7 @@ fn actual_local_asset_blob_checked_close_failure_preserves_committed_capture_and
 fn actual_capture_failure_and_blob_close_diagnostic_keep_both_causes_and_profile_real_close() {
     let fx = fixture();
     let inv = fx.invocation("asset inspect", &[("--file-id", "201")]);
-    let pin = selection::resolve_pinned(&inv).unwrap().data.unwrap();
+    let pin = selection::resolve_pinned(&inv).unwrap().spec.data.unwrap();
     let (budget, profile) = Budget::controlled(
         Cost::defaults(),
         inv.control.deadline(),

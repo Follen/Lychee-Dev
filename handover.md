@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 05:26 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`b1b88040385423e9c082505452641cf8501c2dbd`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 05:37 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`d69f94ea133de9fea9034dd85b174f354a40542c`。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -69,15 +69,17 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 
 13条内存缺测（Rust12、Go1，均正式暖样本）原样null、未补样；其余915条仅有间隙的owned Job采样下界，CPU/I/O未测。产品EXE `cb5599490c23d27bbe48e43f4baa482680d67051a858a12b872bbce8cf2cf186` 未重建；Node55/55。report SHA256 `1d5c0f49a61228afea5f61e02f8c9221a48321250d0a7aa3f95d31ae29aa1f0b`；[97段完整证据索引](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6229628728)保全部原样本。30d原第4pair EPERM现场/receipt不变，d86剩8路径续跑和本次新acceptance不追认旧owner已清理。原单pair历史保留在[验证历史](docs/toolkit/rust-migration-evidence-2026-10-16.md#2026-10-17-data-observations-before-complete-acceptance)。完整97段已还原9748路径/7021blob并逐SHA认证，928样本/24组统计复算一致，9455封存日志引用全部核过。root退出被观察后到tree/drain中位Go0.463ms/Rust0.669ms，不是约100ms整体耗时的主因；启动与产品阶段尚待分清。现新增独占--startup-diagnostics沿原owner计时，12路径各1冷/1暖共48测量CLI＋15准备，完整等价/回收不变，不与acceptance/resume混用，缺proof单列诊断失败而保产品结果。Node29/29通过；[9de runner/30d产品Windows诊断](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6229910794)48测量CLI＋15准备、24冷暖行全部等价，48startup proof有效，outer和12pair全部回收。两产品和8个非conditions输入与旧样本相同，第九conditions为新诊断副本。Rust preResume20.2591–35.1257ms，Resume至reap66.1001–180.9937ms，后者含调度/loader/runtime/业务/清理，不是纯产品CPU；rootCPU为15.625ms量化。46内存sampled_successful、2有gap，无完全缺测，不能外推完整RSS。原23段666文件/498blob、635封存日志已独立SHA验证。下一共同Data业务phase观测仍待实现复验；保48单pair与旧928正式样本各自身份。既有20对总时钟/判据不改，不能事后减掉启动或把诊断当性能验收。
 
-### 当前 Source/Data 窄优化与真实所有权修复（Rust NOT_RUN）
+### 当前 Source/Data 窄优化与真实所有权修复（首次编译失败，后继待复验）
 
 Source仅将受控Facts锁的open替换为held Directory相对OPEN_IF，精确保read/write、share read/write/delete、非截断和原leaf策略；File先转交Core再原取消检查/checked close。其它caller仍旧OpenOptions，逐文档缓存/恢复/错误合并与原等待不变，无新extern/unsafe。7新增Rust覆盖真实争用、取消关闭、失败/目录映射、非截断、共享rename及held-parent/decoy路径；静态23项、rustfmt/diff过，Windows尚未执行。改善范围只是原1.578秒open中的完整路径处理，不能承诺省去整段。
 
 Data两个真实Root消费者接收同一已认证materialization owner返回的BlobRef，保原checkedclose后才交付，删除再次publish/hash/reopen。新增默认关闭且不读时钟的11段query-owned profile；capture/metadata为真实inclusive，不假分SQL连接内部，沿现Budget共享且不改变计量。另修三个真实VerifiedBlob退出缺口：部分批次/交付前stop按获取顺序关闭所有已持有blob；回调接管后晚期source/reader错误关闭已交付file；本地asset inspect capture成功或失败均checkedclose，保已提交身份与原主错/全部cleanup原因。故障注入发生在真实close之后，不声称模拟原生OS关句柄失败。
 
+d69本机首次all-targets实际失败：两个新增测试文件共4处通过PinnedSet的Deref移动`.data`触发E0507；本后继只改为移动真实owned字段`.spec.data`，不clone、不改生产或断言。原进程已安全回收，Source/Core独立组仍在测试，优化构建与产品测量未启动。后继Rust编译尚待复验。
+
 Data新增16个唯一Rust测试（profile8、真实consumer8）尚未运行。原组过滤为phase_profile、local_query::regression_tests、local_query::adaptive_tests、assets::export::tests，需alltargets先真实编译；Source同时跑Core storage原锁/等待/checkedclose与cache::source_facts::、Windows filesystem::destination::原全组。Node34/34、14Rust解析、6Node语法及scoped diff已过，不替代业务实测。
 
-[现Data入口](tests/rust-performance-paired/data.README.md)新增独占--data-phase-profile，需本批匹配优化产品：12路径各1冷/1暖、48测量CLI＋15准备，原startup proof/完整结果等价/总时钟保留；只Rust测量进程开启env，严格接受单条完整profile，默认与Go仍空stderr，错误/未知stderr不吞。它不能与acceptance/resume/startup-only组合，不把子段相加或扣除后宣称达标。统一一次新构建后同时验证Source4036及Data阶段，等待用户本机重连与唯一队列安排，不擅自重跑。
+[现Data入口](tests/rust-performance-paired/data.README.md)新增独占--data-phase-profile，需本批匹配优化产品：12路径各1冷/1暖、48测量CLI＋15准备，原startup proof/完整结果等价/总时钟保留；只Rust测量进程开启env，严格接受单条完整profile，默认与Go仍空stderr，错误/未知stderr不吞。它不能与acceptance/resume/startup-only组合，不把子段相加或扣除后宣称达标。统一一次新构建后同时验证Source4036及Data阶段，本机已重连，父线程统一安排后继编译及当前独立组，不擅自重复运行。
 
 ### 公开 Source project 选择修复（新增12项实测通过）
 
