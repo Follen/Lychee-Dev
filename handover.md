@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 16:52 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`7d8c5e984c97c055581798d64736db4a450033ee`（正式runner；00d产品前置/匹配构建通过，首次冷调用完成但完整对照被空WAL误拒挡住）。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 17:21 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`7d8c5e984c97c055581798d64736db4a450033ee`（正式runner；00d产品前置/匹配构建通过，首次冷调用完成但完整对照被空WAL误拒挡住）。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ## 1. 当前决定与不可漂移基线
 
@@ -127,6 +127,10 @@ Source 冷链同时实施有界 scoped 多线程纯解析，按序提交并共�
 - `legacy_ordinal_pack_and_v13_index_keep_identity_while_current_default_rebuilds`
 
 [7d8/00d首次正式运行](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6236649962)：455584347B冷准入成功，两真实CLI均exit0、valid/reaped、无forced/deadline。Go9658.291ms、Rust5579.8315ms；Rust parsed4036/cached0，stage/seal/rename/close各74。完整Facts/共同summary尚未完成，不能报等价或性能通过。runner的captureMetadata仅因Go主DB12288B旁有0B WAL与32768B SHM而拒绝；这是读取器过严，不证明DB损坏。原outer2f0bcd33-f0f4-46b6-9bc5-5539dbc5b422与healthy058035ab-29e8-43c7-bbeb-ee54472f8147均failed/sealed/reaped、scratch保留，未删除sidecar。warm与4变体NOT_RUN；后继应认证并复用这两cold调用，不重新init/sync/cold。Node首次缺测试依赖114/2与补齐后116/116分别保留，[前置报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6236603320)。
+
+[be168原cold完整补验](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6237188747)已实际通过：4036全部五数组/字段/顺序与共同summary一致，原Go9658.291ms/Rust5579.8315ms保留，freshColdCalls=0。新custody786d460f-cfd9-4a21-9322-6b79d5e5a08d succeeded/sealed/retired，8191日志/分片保留。随后[真实same-home warm](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6237209753)两侧warmReuse成立、全Facts/summary一致，Go638.8264ms/Rust434.5645ms，Rustcached4036/parsed0。Go内存gaps/Rust采样成功不当完整峰值。第一单改Goowner创建前used5005736596B+reserve380939478B超过原5GiB，缺17966954B；4变体0调用/NOT_RUN，旧rawrunning行不表示实际运行。新outerd1989b3b-573a-423e-9185-86b89fc6d2f4与continuationbff2649b-3f34-4e15-b14e-48855cff42fe failed/sealed/reaped，原claim保留不删除。
+
+用户已明确批准仅本任务测试scratch上限5→6GiB（Sentinel_a57db18d476081919e647f3195a645a1），一般默认5GiB与cache20GiB/free2GiB、全部产品预算不变。后继须认证上述已完成cold/warm/claim/健康inventory，只续4个未执行变体，不重跑cold/warm或改旧failed记录。 后继已实现README两步`--inspect-remaining NEW-reference`及`--resume-remaining reference --scratch-6gib`：固定认证be168完整sealed cold/warm/旧claim/健康base，只接现有四变体循环；新claim在首个变体owner实际准入后创建，纯准入拒绝不会耗掉执行机会。零cold/warm/init/sync，无base副本；每个beginScratch和后验准入显式同6GiB局部limits，其它入口不接受该override。Node六组178/178、25文件隔离导出/import通过；Windows剩余4变体仍NOT_RUN。
 
 空WAL/原cold续验后继只改测试runner：允许稳定空WAL/有界SHM，原主DB/sidecars前后身份与内容认证，只在新owner打开主DB复制件；非空WAL与journal仍拒。README新增`--inspect-cold`生成四摘要引用、`--resume-cold`固定认证上述两owner/两run，先新只读custody封存完整cold Facts，再新owner登记两home精确借用执行same-home warm与四变体。旧failed receipts/logs不改、旧scratch不cleanup、freshColdCalls=0；单次claim阻重复执行，原memory gaps/时钟保留。原5GiB/2GiB策略不变，实测大小准入可真实阻塞。该后继6组Node151/151、25文件隔离导出/import通过，Windows续验NOT_RUN。
 

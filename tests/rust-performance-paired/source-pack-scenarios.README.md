@@ -288,3 +288,57 @@ allocation caps. Actual usage is rechecked; changed engine reservations remain
 based on actual healthy inventories. A quota or integrity failure stops with
 completed cold evidence preserved. It does not raise the cap, delete another
 owner, rebuild the product, or silently take replacement samples.
+
+## Continue only the four unexecuted variants after be168
+
+The fixed [be168 continuation](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6237209753)
+completed the original cold revalidation and new warm comparison, then hit
+`scratch_quota` before the first variant owner existed. Its outer
+`d1989b3b-573a-423e-9185-86b89fc6d2f4` and continuation
+`bff2649b-3f34-4e15-b14e-48855cff42fe` stay failed/sealed/reaped. The complete
+[cold custody](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6237188747)
+`786d460f-cfd9-4a21-9322-6b79d5e5a08d` stays retired. The original cold claim
+(SHA `514fb250a2d885f9f154609e658f5969f621c71c08ad49d65f93f64580f77a10`)
+is retained unchanged. Do not rerun `--resume-cold` or delete that claim.
+
+The exact remaining-task entry is:
+
+```powershell
+node <reviewed-runner-stage>/tools/rust-source-pack-diagnostics.mjs <pack2-config.json> <machine-conditions.json> --inspect-remaining <NEW-remaining-reference.json>
+node <reviewed-runner-stage>/tools/rust-source-pack-diagnostics.mjs <pack2-config.json> <machine-conditions.json> --resume-remaining <remaining-reference.json> --scratch-6gib
+```
+
+Inspection writes only a new four-hash reference. Authentication checks the
+exact be168 runner, both original cold/warm native proofs and raw outputs,
+31-phase profiles, saved/reloaded warm reuse identities, complete comparisons
+and summaries, cold custody and all its bounded parts, every original failed
+owner's sealed evidence, unchanged claim, and exact healthy post-warm inventory.
+It accepts only the recorded first-variant admission stop with zero variant
+owners/calls. The old raw `running` row remains in its original evidence and is
+identified as an unstarted admission stop in the new lineage.
+
+A new owner references the two healthy homes read-only; no baseline home is
+copied or rewritten. The existing four-case loop alone executes, still making
+independent per-engine variant clones, sealing Go comparison custody before
+cleaning that own clone, and preserving the complete comparison and timing
+contract. New output explicitly records four reused original calls, zero new
+cold/warm calls, and the original conditions. The original two failed owners
+and all their evidence are never changed or cleaned.
+
+A new remaining-only claim is created only after the first variant owner passes
+admission, before any variant preparation or product call. Therefore a pure
+pre-admission rejection makes no invocation claim; once claimed, failure cannot
+automatically restart or substitute any variant. Reports explicitly list
+`notRunCases` and `notRunInvocations`; a launch attempt is not mislabeled as
+not-run merely because its terminal result is unavailable.
+
+`--scratch-6gib` is the user's specifically approved one-task allowance, bound to
+`Sentinel_a57db18d476081919e647f3195a645a1` and this fixed be168 remaining-task
+scope. It sets only the explicit `limits` arguments for this wrapper/controller's
+admissions and owners: scratch exactly 6 GiB, cache still 20 GiB, free reserve
+still 2 GiB. The flag is rejected on fresh/cold/inspection modes; omitting it
+retains 5 GiB. Arbitrary amounts, authorization references, scopes or environment
+overrides are rejected. No machine environment, policy file, product runtime
+budget or old evidence is changed. First Go admission previously needed
+380,939,478 B above 5,005,736,596 B already used, a 17,966,954 B gap at 5 GiB;
+actual reservations and usage checks remain unchanged under the approved cap.
