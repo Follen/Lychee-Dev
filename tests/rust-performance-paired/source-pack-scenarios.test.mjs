@@ -2,7 +2,7 @@ import test from 'node:test';
 import fs from 'node:fs';
 import {parseArguments} from '../../tools/rust-source-pack-diagnostics.mjs';
 import assert from 'node:assert/strict';
-import {copyFileSync, closeSync, openSync, ftruncateSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
+import {copyFileSync, closeSync, openSync, ftruncateSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
 import {basename, join, relative, resolve} from 'node:path';
 import {hostname, tmpdir} from 'node:os';
 import {DatabaseSync} from 'node:sqlite';
@@ -20,6 +20,28 @@ import {bindComparedCustody, FRESH_ALLOWANCE, candidateIdentity, assertHistorica
 const root = resolve(import.meta.dirname, '../..');
 const conditions = {machine: 'fixture', powerAndThermal: 'unknown', competingLoad: 'unknown', disk: 'fixture only', operator: 'Node test'};
 function temp(t) { const d = mkdtempSync(join(tmpdir(), 'pack2-runner-')); t.after(() => { if (t.passed) rmSync(d, {recursive: true}); else t.diagnostic(`retained fixture ${d}`); }); return d; }
+function fileSymlinkOrSkip(t, target, path, {platform = process.platform, create = symlinkSync} = {}) {
+  try { create(target, path, 'file'); }
+  catch (error) {
+    if (platform !== 'win32' || !['EPERM', 'EACCES'].includes(error.code)) throw error;
+    t.skip(`Windows file symlink creation unavailable (${error.code}); this file-symlink assertion was not executed`);
+    return false;
+  }
+  assert(lstatSync(path).isSymbolicLink());
+  return true;
+}
+test('file symlink environment skip only covers Windows creation EPERM and EACCES', t => {
+  const d = temp(t), target = join(d, 'target'), path = join(d, 'link');
+  for (const platform of ['win32', 'linux']) for (const code of ['EPERM', 'EACCES', 'ENOENT', 'EIO']) {
+    const error = Object.assign(new Error('creation denied'), {code}), skipped = [], context = {skip: reason => skipped.push(reason)};
+    const create = (_target, _path, type) => { assert.equal(type, 'file'); throw error; };
+    if (platform === 'win32' && ['EPERM', 'EACCES'].includes(code)) { assert.equal(fileSymlinkOrSkip(context, target, path, {platform, create}), false); assert.equal(skipped.length, 1); assert(skipped[0].includes(code)); }
+    else { assert.throws(() => fileSymlinkOrSkip(context, target, path, {platform, create}), actual => actual === error); assert.equal(skipped.length, 0); }
+  }
+  const skipped = [];
+  assert.throws(() => fileSymlinkOrSkip({skip: reason => skipped.push(reason)}, target, path, {platform: 'win32', create(_target, path) { writeFileSync(path, 'not a link'); }}), {code: 'ERR_ASSERTION'});
+  assert.equal(skipped.length, 0);
+});
 function proof(ms = 10) { return {schema: 'lycheedev.owned-process.v1', rootReaped: true, treeReaped: true, handlesClosed: true, toolIdentityLocksClosed: true, outputReadersComplete: true, activeProcesses: 0, forced: false, timing: {schema: 'lycheedev.owned-timing.v1', frequency: 1000000, startTicks: '1000000', rootExitTicks: String(1000000 + ms * 1000 - 100), treeReapedTicks: String(1000000 + ms * 1000)}}; }
 function requestAt(d) { const sourceRoot = join(d, 'product'), artifactRoot = join(d, 'artifacts'), goRoot = join(d, 'go'); for (const x of [sourceRoot, artifactRoot, goRoot]) mkdirSync(x); const artifact = join(artifactRoot, 'artifact.json'); writeFileSync(artifact, '{}'); return {schema: 'lycheedev.source-pack-scenarios-config.v1', ownerRoot: d, candidate: {sourceRoot, artifactRoot, artifact, commit: CANDIDATE_COMMIT, ...CANDIDATE_IDENTITY}, go: {sourceRoot: goRoot, packageRoot: goRoot, luaLSArchive: join(d, 'luals.zip'), packageSHA256: 'd'.repeat(64)}}; }
 async function fixture(t, fault = {}) {
@@ -524,9 +546,14 @@ for (const [name, mutate] of [
   ['missing loose', f => rmSync(f.loosePath)],
   ['corrupt pack', f => writeFileSync(f.packPath, 'bad')],
   ['corrupt loose', f => writeFileSync(f.loosePath, '{}')],
-  ['pack symlink', f => { rmSync(f.packPath); symlinkSync(f.unusedPath, f.packPath); }],
   ['oversized object', f => { const fd = openSync(f.packPath, 'r+'); ftruncateSync(fd, (32 << 20) + 1); closeSync(fd); }],
 ]) test(`Rust custody refuses ${name} before copying`, t => { const f = rustCustodyFixture(t); mutate(f); f.publish(); assert.throws(() => f.capture()); assert.equal(f.admissions.length, 0); assert(!existsSync(join(f.evidence, 'rust-fact-00000'))); });
+
+test('Rust custody refuses a pack file symlink before copying', t => {
+  const f = rustCustodyFixture(t); rmSync(f.packPath);
+  if (!fileSymlinkOrSkip(t, f.unusedPath, f.packPath)) return;
+  f.publish(); assert.throws(() => f.capture()); assert.equal(f.admissions.length, 0); assert(!existsSync(join(f.evidence, 'rust-fact-00000')));
+});
 
 for (const [name, mutate] of [
   ['missing referenced object', c => c.files.pop()],
@@ -584,11 +611,16 @@ test('Rust custody aggregate preflight refuses more than 512 MiB without hashing
   assert.throws(() => f.capture(), /total budget/); assert.equal(f.admissions.length, 0);
 });
 
-test('Rust custody refuses replay and preexisting dangling output links without altering sealed evidence', t => {
+test('Rust custody refuses replay without altering sealed evidence', t => {
   const f = rustCustodyFixture(t), reference = f.capture(), before = inventory(f.evidence).sha256, index = {path: JSON.parse(readFileSync(reference.catalog)).index.path, ...JSON.parse(readFileSync(reference.catalog)).index, manifest: JSON.parse(readFileSync(join(f.evidence, 'rust-index-manifest.json')))};
   assert.throws(() => captureRustCustody(f.home, index, f.evidence, f.d, {candidate: {commit: CANDIDATE_COMMIT, ...CANDIDATE_IDENTITY}, limits: {}, admit() { assert.fail('must reject before admission'); }}), /new Rust custody paths/); assert.equal(inventory(f.evidence).sha256, before);
-  const other = rustCustodyFixture(t), otherIndex = indexEvidence(other.home, 'rust', other.pin, other.evidence, other.d); symlinkSync(join(other.d, 'missing'), join(other.evidence, 'rust-custody-admission.json'));
-  assert.throws(() => captureRustCustody(other.home, otherIndex, other.evidence, other.d, {candidate: {commit: CANDIDATE_COMMIT, ...CANDIDATE_IDENTITY}, limits: {}, admit() { assert.fail('must reject before admission'); }}), /new Rust custody paths/); assert(!existsSync(join(other.d, 'missing')));
+});
+
+test('Rust custody refuses a preexisting dangling output file symlink before admission', t => {
+  const f = rustCustodyFixture(t), index = indexEvidence(f.home, 'rust', f.pin, f.evidence, f.d), target = join(f.d, 'missing'), path = join(f.evidence, 'rust-custody-admission.json');
+  if (!fileSymlinkOrSkip(t, target, path)) return;
+  assert(!existsSync(path));
+  assert.throws(() => captureRustCustody(f.home, index, f.evidence, f.d, {candidate: {commit: CANDIDATE_COMMIT, ...CANDIDATE_IDENTITY}, limits: {}, admit() { assert.fail('must reject before admission'); }}), /new Rust custody paths/); assert(!existsSync(target)); assert(lstatSync(path).isSymbolicLink());
 });
 
 test('changed admission includes both retained and new Rust Facts, while Go reserve is unchanged', () => {
@@ -697,12 +729,16 @@ for (const mutation of ['grow', 'shrink', 'same-size-replace', 'delete']) test(`
   assert(submitted.requiredBytes >= 32 << 20); assert(!existsSync(join(directory, 'go-fact-00000'))); assert(!existsSync(join(directory, 'go-original-manifest.json'))); assert(!existsSync(join(directory, 'go-custody.json'))); assert(existsSync(f.homes.go));
 });
 
-test('Go custody replay and dangling planned output directory reject before admission with evidence unchanged', async t => {
+test('Go custody replay rejects before admission with evidence unchanged', async t => {
   const f = retainedFixture(t), indexes = prepareDualBorrowHomes(f), directory = join(f.d, 'go-evidence'); mkdirSync(directory); splitIndexEvidence(f.d, {path: indexes.go.path, bytes: indexes.go.bytes, sha256: indexes.go.sha256}, join(directory, 'go-index-parts'));
   const options = {limits: {}, admit() { return {}; }}; await captureComparedGo(f.homes.go, indexes.go, directory, f.d, options); const before = inventory(directory).sha256;
   await assert.rejects(captureComparedGo(f.homes.go, indexes.go, directory, f.d, {limits: {}, admit() { assert.fail('no second admission'); }}), /new Go custody paths/); assert.equal(inventory(directory).sha256, before);
-  const other = join(f.d, 'go-other-evidence'); mkdirSync(other); splitIndexEvidence(f.d, {path: indexes.go.path, bytes: indexes.go.bytes, sha256: indexes.go.sha256}, join(other, 'go-index-parts')); symlinkSync(join(f.d, 'missing-go-output'), join(other, 'go-fact-00000'));
-  await assert.rejects(captureComparedGo(f.homes.go, indexes.go, other, f.d, {limits: {}, admit() { assert.fail('no admission with preexisting directory'); }}), /new Go custody paths/); assert(!existsSync(join(other, 'go-custody-admission.json')));
+});
+
+test(`Go custody rejects a dangling planned output directory ${process.platform === 'win32' ? 'junction' : 'symlink'} before admission`, async t => {
+  const f = retainedFixture(t), indexes = prepareDualBorrowHomes(f), directory = join(f.d, 'go-evidence'), target = join(f.d, 'missing-go-output'), path = join(directory, 'go-fact-00000'); mkdirSync(directory); splitIndexEvidence(f.d, {path: indexes.go.path, bytes: indexes.go.bytes, sha256: indexes.go.sha256}, join(directory, 'go-index-parts'));
+  symlinkSync(target, path, process.platform === 'win32' ? 'junction' : 'dir'); assert(lstatSync(path).isSymbolicLink()); assert(!existsSync(path));
+  await assert.rejects(captureComparedGo(f.homes.go, indexes.go, directory, f.d, {limits: {}, admit() { assert.fail('no admission with preexisting directory'); }}), /new Go custody paths/); assert(!existsSync(join(directory, 'go-custody-admission.json'))); assert(!existsSync(target)); assert(lstatSync(path).isSymbolicLink());
 });
 
 test('historical report verification independently rejects a new candidate paired with an old continuation', async t => {
@@ -754,8 +790,8 @@ test('direct historical cold configuration rejects the fresh allowance before an
   const request = requestAt(temp(t)); await assert.rejects(runController({request, resumeCold: {}, allowance: FRESH_ALLOWANCE}, {beginScratch() { assert.fail('no owner'); }}), /cold continuation keeps original/);
 });
 test('comparison refuses different bytes from the same Go key referenced twice', async t => {
-  const f = retainedFixture(t), indexes = prepareDualBorrowHomes(f), original = fs.readFileSync; let changed = false;
-  fs.readFileSync = function(path, ...args) { const raw = original(path, ...args); if (!changed && String(path).includes('source/v1/facts/files/')) { const value = JSON.parse(raw); value.facts.headers = [{value: 'changed after first read'}]; value.factsSHA256 = sha256(JSON.stringify(value.facts)); writeFileSync(path, JSON.stringify(value)); changed = true; } return raw; };
+  const f = retainedFixture(t), indexes = prepareDualBorrowHomes(f), original = fs.readFileSync, targets = new Set(inventory(f.homes.go).rows.filter(row => row.path.startsWith('source/v1/facts/files/')).map(row => join(f.homes.go, row.path))); let changed = false;
+  fs.readFileSync = function(path, ...args) { const raw = original(path, ...args); if (!changed && targets.delete(String(path))) { const value = JSON.parse(raw); value.facts.headers = [{value: 'changed after first read'}]; value.factsSHA256 = sha256(JSON.stringify(value.facts)); writeFileSync(path, JSON.stringify(value)); changed = true; } return raw; };
   try { await assert.rejects(readFactDelta(f.homes.go, f.homes.rust, indexes.go.path, 'v11-pack2', indexes.rust.path, indexes.rust.sha256, undefined, {captureSources: true}), /changed between duplicate references/); } finally { fs.readFileSync = original; }
   assert.equal(changed, true);
 });

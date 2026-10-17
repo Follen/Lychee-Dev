@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 18:48 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`e4751f83d8ca26e725e8fe29a43d1d3c612c5a0f`（正式runner，产品00d）；完整六场景运行时Facts/summary均通过，增量失效已局部化但四变体总wall仍慢于Go。新变体Rust pack原件归档缺口明确保留，不能凭附件完全重放。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
+更新：2026-10-17 19:24 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新已核远端批次：`fc00100d09aede8608d95f7825593690e388c155`（cache-aware源码与完整归档runner；Windows Rust前置通过，Node前置失败后最小测试修复待Windows复验）；历史e475 runner/00d产品完整六场景运行时Facts/summary均通过，增量失效已局部化但四变体总wall仍慢于Go。新变体Rust pack原件归档缺口明确保留，不能凭附件完全重放。正常4036事实与84个固定边界输入已有等价实证；retained冷refs与跨CLI暖context均已通过；2d7 runner/a338产品完整full14项已通过，身份变更与恢复、同owner均成立；partial155保持。公开project选择新增12项含真实packaged已通过。性能与全量验收未完成。
 
 ### 最新实测：稳定分组完整六场景
 
@@ -23,9 +23,9 @@
 
 ### 当前候选：跳过命中缓存的无用pureparse
 
-[完整同row互斥账与源码归因](docs/toolkit/source-pack2-incremental-attribution-2026-10-17.md)：四变体2.060–2.087s主线程等待近3984个最终丢弃的worker结果；Facts读解码577–605ms、整index序列化532–623ms/发布90–111ms。已实现metadata-only cache-aware调度，不派已认证命中pureparse，不排队/clone命中Facts；cold同组并行miss、组边界drain，后探测错误按绝对doc序号延迟返回，保原首错/控制/预算/EOF。pack2/v14不改。4生产/测试文件rustfmt解析与独审过，8新`cache_aware_` Rust回归NOT_RUN；需alltargets→完整index::/facts::/lua_tree::及原Go104+11→匹配release→完整六场景，测冷链重叠取舍和总wall，不能只计worker减少。
+[完整同row互斥账与源码归因](docs/toolkit/source-pack2-incremental-attribution-2026-10-17.md)：四变体2.060–2.087s主线程等待近3984个最终丢弃的worker结果；Facts读解码577–605ms、整index序列化532–623ms/发布90–111ms。已实现metadata-only cache-aware调度，不派已认证命中pureparse，不排队/clone命中Facts；cold同组并行miss、组边界drain，后探测错误按绝对doc序号延迟返回，保原首错/控制/预算/EOF。pack2/v14不改。4生产/测试文件rustfmt解析与独审过，[fc001 Windows实测](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6239109511) alltargets通过、完整index97/facts48/lua_tree31均0fail/0ignore，8新`cache_aware_`逐名各一次包含于index97；Go104完整严格等价，11边界保持5等价/6已证endLine增强。后续需修Node前置→匹配release→完整六场景，测冷链重叠取舍和总wall，不能只计worker减少。
 
-同批正式runner归档薄修已完成：按已认证index实际引用去重归档Rust pack/合法loose和fresh Go Facts，8MiB分片/catalog绑定实际候选/index/manifest/partSHA。reader实际读取的bytes/SHA tuple逐项对归档，防“比较旧字节、归档新字节”；准入后增大/缩小/替换/删均在有界复制中失败并保owner。完整归档核过后才cleanup，历史e475缺件不补造。fresh使用显式配置精确commit/EXE/artifact/source与原完整verifyArtifact/sourceDigest/recipe/Emmy/cleanHEAD认证，禁止latest；历史三续验仍固定00d。用户批准的本任务6GiB可fresh显式`--scratch-6gib`，默认5GiB/其它预算不变。六组Node303/303与25文件独立导出/import、独审通过；Windows新归档/产品优化仍NOT_RUN。
+同批正式runner归档薄修已完成：按已认证index实际引用去重归档Rust pack/合法loose和fresh Go Facts，8MiB分片/catalog绑定实际候选/index/manifest/partSHA。reader实际读取的bytes/SHA tuple逐项对归档，防“比较旧字节、归档新字节”；准入后增大/缩小/替换/删均在有界复制中失败并保owner。完整归档核过后才cleanup，历史e475缺件不补造。fresh使用显式配置精确commit/EXE/artifact/source与原完整verifyArtifact/sourceDigest/recipe/Emmy/cleanHEAD认证，禁止latest；历史三续验仍固定00d。用户批准的本任务6GiB可fresh显式`--scratch-6gib`，默认5GiB/其它预算不变。云端原六组Node303/303与25文件独立导出/import、独审通过；[fc001 Windows真实Node结果](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6239148684)为299pass/4fail/0skip。三项在symlink创建阶段EPERM；第四重复Go key变更注入使用POSIX斜杠匹配，Windows路径未命中，导致预期拒绝未发生。原失败日志保留，不能重标skip。本批仅修测试路径与平台输入准备：重复key改精确fixture目标，保原拒绝和确实变更断言；replay与file-symlink拆分，只有Windows创建阶段EPERM/EACCES可单项环境skip，目录junction另测。生产reader不变；云端修后六组Node306/306、0fail/0skip，Windows复验待跑，可能仅两项file-symlink因环境缺权限skip，不能冒充该负例通过。匹配release、assembly与新六场景仍NOT_RUN。
 
 新增Rust全名（均`index::facts_cache::tests::`）：
 - cache_aware_default_consumer_avoids_all_workers_on_complete_pack_hits
