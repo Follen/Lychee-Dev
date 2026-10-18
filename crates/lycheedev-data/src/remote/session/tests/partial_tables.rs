@@ -12,8 +12,13 @@ mod contract;
 #[path = "../../../../tests/support/catalog_fixture.rs"]
 mod fixture;
 fn prepare() -> (Fixture, Invocation) {
-    let table = fixture::encrypted_sections(7);
-    let source = Fixture::with_framing(false, None, table.raw.clone(), fixture::encrypted_frame);
+    prepare_table(fixture::encrypted_sections(7), fixture::encrypted_frame)
+}
+fn prepare_table(
+    table: fixture::Table,
+    frame: fn(&[u8]) -> (String, Vec<u8>),
+) -> (Fixture, Invocation) {
+    let source = Fixture::with_framing(false, None, table.raw.clone(), frame);
     let key = source.home.join("keys.txt");
     std::fs::write(&key, "0000000000000001 000102030405060708090a0b0c0d0e0f\n").unwrap();
     let pin = selection::pin_selection(
@@ -129,4 +134,37 @@ fn default_remote_missing_key_preserves_db2_sql_csv_stream_and_key_identity() {
         "changed key identity reused complete bytes"
     );
     std::fs::remove_dir_all(source.home).unwrap();
+}
+
+#[path = "../../../../tests/support/partial_string_contract.rs"]
+mod string_contract;
+#[path = "../../../../tests/support/partial_strings.rs"]
+mod strings_fixture;
+#[test]
+fn default_remote_partial_cross_partition_string_stops_at_nul_before_unknown_bytes() {
+    let scenarios: [(usize, fn(&[u8]) -> (String, Vec<u8>)); 3] = [
+        (16, strings_fixture::frame_near),
+        (512, strings_fixture::frame_far),
+        (4, strings_fixture::frame_before),
+    ];
+    for (gap, frame) in scenarios {
+        let table = strings_fixture::table(7, gap, b"visible\0");
+        let start = strings_fixture::pool(&table.raw);
+        let (source, inv) = prepare_table(table, frame);
+        string_contract::exercise(&inv, start + gap, gap != 4);
+        assert_eq!(
+            raw(&inv, &source.pin).unwrap_err().code,
+            "container.key_unavailable"
+        );
+        if gap != 4 {
+            std::fs::write(
+                inv.flag("--key-file").unwrap(),
+                "1234567890abcdef 000102030405060708090a0b0c0d0e0f\n",
+            )
+            .unwrap();
+            string_contract::complete(&inv);
+            raw(&inv, &source.pin).unwrap();
+        }
+        std::fs::remove_dir_all(source.home).unwrap();
+    }
 }

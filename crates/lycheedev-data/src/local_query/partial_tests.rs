@@ -198,3 +198,37 @@ fn local_table_policy_skips_full_public_alias_when_keys_are_unavailable_offline(
     );
     std::fs::remove_dir_all(fx.root).unwrap();
 }
+
+#[path = "../../tests/support/partial_string_contract.rs"]
+mod string_contract;
+#[path = "../../tests/support/partial_strings.rs"]
+mod strings_fixture;
+#[test]
+fn local_partial_cross_partition_string_stops_at_nul_before_unknown_bytes() {
+    for gap in [16, 512, 4] {
+        let table = strings_fixture::table(201, gap, b"visible\0");
+        let start = strings_fixture::pool(&table.raw);
+        let encoded = strings_fixture::frame_at(&table.raw, gap).1;
+        let fx = fixture::Fixture::with_encoded_table(table, encoded);
+        let inv = invocation(&fx);
+        string_contract::exercise(&inv, start + gap, gap != 4);
+        let pin = selection::load_pinned(&fx.home, &fx.pin)
+            .unwrap()
+            .spec
+            .data
+            .unwrap();
+        assert_eq!(
+            read_files(&inv, &pin, &[201], inv.control.deadline())
+                .err()
+                .unwrap()
+                .code,
+            "container.key_unavailable"
+        );
+        if gap != 4 {
+            std::fs::write(inv.flag("--key-file").unwrap(), CORRECT).unwrap();
+            string_contract::complete(&inv);
+            read_files(&inv, &pin, &[201], inv.control.deadline()).unwrap();
+        }
+        std::fs::remove_dir_all(fx.root).unwrap();
+    }
+}

@@ -1,26 +1,32 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 03:19 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 04:15 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
 
 ### 当前执行：正式五循环 Stage 1 已发现实际业务缺口
 
-2026-10-17 21:40 UTC 已以生产b4d/文档775启动三个独立读审。首轮确认18项，重建复审及实测另确认2项（capture提交后错误事实保留、init时间规范化），当前共20项：Delivery取消/缺席目标/原release恢复/receipt顺序，Probe分页/原子性与身份/有界读取，Core prune取消与字节账/init模式及归档全链control，Data准入/预算诊断/SQL位置/缺钥partial，Source inspect/flow有界性/Unicode路径。独立作者正分范围修复；代码候选仍需正式离线验证和独立复审，当前实现不能称全量完成，尚未进入Stage2。完整状态与验收入口见[Stage1记录](docs/toolkit/rust-audit-stage1-2026-10-17.md)。性能目标仍open，下一性能算法暂不抢已确认业务缺陷修复。
+2026-10-17 21:40 UTC 已以生产b4d/文档775启动三个独立读审。首轮确认18项，重建复审及实测另确认2项（capture提交后错误事实保留、init时间规范化），第二轮另确认可读字符串被后缀缺钥误拒，当前共21项：Delivery取消/缺席目标/原release恢复/receipt顺序，Probe分页/原子性与身份/有界读取，Core prune取消与字节账/init模式及归档全链control，Data准入/预算诊断/SQL位置/缺钥partial，Source inspect/flow有界性/Unicode路径。独立作者正分范围修复；代码候选仍需正式离线验证和独立复审，当前实现不能称全量完成，尚未进入Stage2。完整状态与验收入口见[Stage1记录](docs/toolkit/rust-audit-stage1-2026-10-17.md)。性能目标仍open，下一性能算法暂不抢已确认业务缺陷修复。
 
 ### Stage 1 当前保存、实测与后继候选
 
-首批 `6a93a859d80efd6d757fcaa8b9e85be6285a734d` 的 39 文件已逐字读回；Windows all-targets 通过，正式组共 **567 pass / 2 fail / 0 ignored**，64 新入口为 62 pass / 2 fail，全部实际执行。Delivery128、Core cache59、Live probes12、Data navigate16/resource41/relational302/syntax3、CLI syntax1、BLTE1 全过；CLI init4过2败。[失败原证据](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6244909468)。11 owners 全退役、build leases 空、无 deadline；CLI wrapper 的 forced/unknown auxiliary 事实保留，不能冒称所有收尾无强制。211文件证据本机CRC/SHA过，公开附件最终交付尚未在此确认。
+首批 `6a93a859d80efd6d757fcaa8b9e85be6285a734d` 的 39 文件已逐字读回；Windows all-targets 通过，正式组共 **567 pass / 2 fail / 0 ignored**，64 新入口为 62 pass / 2 fail，全部实际执行。Delivery128、Core cache59、Live probes12、Data navigate16/resource41/relational302/syntax3、CLI syntax1、BLTE1 全过；CLI init4过2败。[失败原证据](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6244909468)。11 owners 全退役、build leases 空、无 deadline；CLI wrapper 的 forced/unknown auxiliary 事实保留，不能冒称所有收尾无强制。[211文件证据最终公开交付](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6245133188)已确认：HTTP200、406651B、CRC和211/211 SHA全部通过。
 
 两项 init 失败分别是 mixed-slash fixture 与平台规范路径的字符串差异，以及新建 identity 的固定9位小数和 Go兼容重开后的去尾零表示差异。后者表示同一时刻，未证明 identity 重建或数据损坏。独立后继将新建时间规范化，保原clock/ID推导与历史文件字节；CLI测试保完整identity、文件bytes与重复恢复断言。3新增确定性/真实初始化/历史marker回归及修正的CLI测试均 NOT_RUN。
 
-第二批 `e9749e9d851cfefa9a02b4b8865aa5cbba3f80ef` 已保存批准的10文件，逐blob及完整字节读回一致：InstallationGuard取得失败和默认remove显式checked-close，以及init/archive原control全链。新增12+8项 Rust测试 NOT_RUN，其中1项Unix-only。唯一Windows队列已接收，本文不假定其结果。
+第二批 `e9749e9d851cfefa9a02b4b8865aa5cbba3f80ef` 已保存批准的10文件，逐blob及完整字节读回一致：InstallationGuard取得失败和默认remove显式checked-close，以及init/archive原control全链。[本批Windows终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6245217858)：all-targets通过，23 pass / 4 fail / 0 ignored；19个Windows新增入口15过4败，1个Unix-only未编译/未执行。初始化1过3败、archive3过1败、coordination4过、removal15过。四失败均为新建与重开createdAt尾零字符串差异，完整ID和时刻一致；cbff canonical静态覆盖但尚未复验。5 owners全退役回收、无lease；removal native/wrapper0、forced=true且knownAuxiliaryCleanup=true、deadline=false，原事实保留。91文件新证据仅本地封存，不称已公开交付。
 
-本次后继完整候选均经新独审，尚待提交后精确树验证：
+后继60个去重路径载荷（58个实际变更，2个与父提交相同）已保存为 `cbff043e8cfe54cf30909c61dde94ce287736fb0`，完整1578501B、60 Git blob和字节均与批准载荷一致，最终tree `7b8cec2a020553eb62be1fe94aa02f6d2d6b1519`。当前本机固定该树验证，尚无新运行结果：
 - Source 9生产/测试文件和3 reader文件：真实inspect、Unicode/asset metadata v15、flow显式有界栈。5文件原SHA恢复、4文件重建；37 Rust入口 NOT_RUN。配套reader新Node247/247过，不能替代实际v15产物验收。
 - Data partial 30文件：local/CDN缺钥部分表贯穿DB2/SQL/导航/stream/CSV/capture，原始assets/Root仍严格。基础lookup保missing-row语义，仅直接DB2 ID边界升级key_unavailable；公钥离线的完整alias回退真实partial decode。10新Rust测试 NOT_RUN。
 - 独立Data capture 8文件增量：DB2、导航、catalog/encounter在提交后cleanup/control失败保留准确capture ID及原错误；仅Rust bookkeeping用safety-only预算。6新测试 NOT_RUN；close测试是实际close后的诊断注入，encounter取消在第二次commit前检查，不夸大故障覆盖。
 - Skill 10独占文件使用partial批共享fixture工厂，真实npm安装launcher、HouseDecor IN/CSV及partial同pin恢复、16CAP完整验证/归档已接线。新独立Node62/62过（Data24+Source38）；实际Windows exporter/npm/Skill流程 NOT_RUN，压力与Live验收仍open，completeSkillAcceptance=false。
 
 云目录重置后，精确恢复部分须命中原SHA；重建部分重新独审/测试，不继承丢失版本旧结果。所有后继原文、前像和manifest均另存，已推生产及历史失败不重标。Stage1还需当前真实缺陷修复复验及下一轮独审；Stage2未开始，性能目标仍open。
+
+### Stage 1 第二轮：固定 cbff 的独立消费者复核
+
+三名未参与相应修复的新审者只读复核Source、Data和Skill跨模块链。Source/Skill未确认新阻断；真实v15产物和Windows Skill仍待运行，Unicode全表等价未证明，reader仅承诺fresh及明确历史续验链。Data确认 **DAT-6**：WDC可读行的字符串已在NUL处完整终止，但`terminated`一次读取整个后缀，遇NUL之后的缺钥span会误报partition_unavailable，丢失原本完整可读值。最窄后继按连续已认证区间有界扫描，NUL前未知仍必须错误；6路径最窄修复和6项新增回归已完成独审：真实local/CDN gap16/512/4、DB2/SQL/CSV/stream/capture、strict raw和同pin补钥完整恢复，以及UTF8/无NUL/边界/取消/精确分配记账；Rust均NOT_RUN。
+
+另两项保留非阻塞候选：partial空N块是否属于更宽合法支持；encounter第二次commit收尾失败时第二capture ID虽保留于原始嵌套错误、但未出现在外层completed列表。尚无数据丢失或公开合同违例证据，不为Go内部行为机械收紧，不计确认finding。
 
 ### 最新实测：b4d认证Facts所有权转移完整六场景
 

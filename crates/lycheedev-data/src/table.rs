@@ -1587,21 +1587,49 @@ impl<'a> Table<'a> {
             return invalid();
         }
         let length = (end - start).min(budget.saturating_add(1));
-        let data = self.source.read(start, length)?;
-        let Some(zero) = data.iter().position(|b| *b == 0) else {
-            return if length < end - start {
-                limit()
-            } else {
-                invalid()
-            };
-        };
-        if zero > budget {
-            return limit();
+        // Missing spans may start after a complete string in a shared pool.
+        // Authenticate only its contiguous available prefix; never infer a NUL
+        // from the decoder's zero-filled unavailable bytes. Public table callers
+        // may provide unsorted spans, so find the earliest boundary explicitly.
+        let mut available = length;
+        for range in &self.source.missing {
+            if let Some(budget) = &self.source.budget {
+                budget.check()?;
+            }
+            if range.end > start && range.start < start + available {
+                available = available.min(range.start.saturating_sub(start));
+            }
         }
-        allocation.retain(zero)?;
-        String::from_utf8(data[..zero].to_vec())
-            .map_err(|_| fault("table.invalid_format", 4, "WDC string is invalid UTF-8"))
+        // This is a borrowed authenticated slice, not an allocation or pool
+        // cache. Check the original control while scanning bounded blocks, and
+        // allocate only the bytes preceding the first terminator.
+        let data = self.source.read(start, available)?;
+        for (index, chunk) in data.chunks(256).enumerate() {
+            if let Some(budget) = &self.source.budget {
+                budget.check()?;
+            }
+            if let Some(zero) = chunk.iter().position(|b| *b == 0) {
+                let zero = index * 256 + zero;
+                allocation.retain(zero)?;
+                return String::from_utf8(data[..zero].to_vec())
+                    .map_err(|_| fault("table.invalid_format", 4, "WDC string is invalid UTF-8"));
+            }
+        }
+        if available < length {
+            // No available NUL proves the string before the first gap. Preserve
+            // the source's typed unavailable/control error without reading past it.
+            return self
+                .source
+                .read(start + available, 1)
+                .and_then(|_| invalid());
+        }
+        if length < end - start {
+            limit()
+        } else {
+            invalid()
+        }
     }
+
     fn strings(
         &self,
         location: Location,
@@ -1969,3 +1997,6 @@ fn typed(value: u64, field: &Field) -> Result<Value> {
 
 #[cfg(test)]
 mod compact_tests;
+
+#[cfg(test)]
+mod string_partial_tests;
