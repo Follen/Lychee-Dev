@@ -522,7 +522,7 @@ fn document_facts_profiled(
         if let Some(mut envelope) = envelope
             && envelope["schema"] == "lycheedev.source-facts.rust.v11"
             && envelope["inputSHA256"] == sha256
-            && envelope["factsSHA256"] == storage::sha256(&serde_json::to_vec(&envelope["facts"])?)
+            && envelope["factsSHA256"] == canonical_facts_sha256(&envelope["facts"])?
             && let Ok(parsed) = serde_json::from_value(
                 envelope.get_mut("facts").map(Value::take).unwrap_or(Value::Null),
             )
@@ -601,12 +601,43 @@ fn encode_facts(parsed: &Facts, sha256: &str, profile: Option<&Profile>) -> Resu
     drop(serialize_phase);
     Ok(envelope)
 }
+const FACTS_HASH_BUFFER_BYTES: usize = 8 << 10;
+
+struct FactsHashWriter<'a>(&'a mut sha2::Sha256);
+impl std::io::Write for FactsHashWriter<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        use sha2::Digest;
+        self.0.update(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn canonical_facts_sha256(value: &Value) -> serde_json::Result<String> {
+    use sha2::Digest;
+    use std::io::{BufWriter, Write};
+    let mut hash = sha2::Sha256::new();
+    {
+        // Use the same Value serializer as to_vec, including canonical object
+        // order, duplicate-key normalization and unknown fields. Batch its
+        // small writes without retaining a complete second Facts encoding.
+        // No new stop check: the caller keeps the original error ordering.
+        let mut writer =
+            BufWriter::with_capacity(FACTS_HASH_BUFFER_BYTES, FactsHashWriter(&mut hash));
+        serde_json::to_writer(&mut writer, value)?;
+        writer.flush().map_err(serde_json::Error::io)?;
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
+
 fn decode_facts(raw: &[u8], sha256: &str, control: &lycheedev_core::control::OperationControl) -> Result<Option<Facts>> {
     let envelope = serde_json::from_slice::<Value>(raw).ok();
     if let Some(mut envelope) = envelope
         && envelope["schema"] == "lycheedev.source-facts.rust.v11"
         && envelope["inputSHA256"] == sha256
-        && envelope["factsSHA256"] == storage::sha256(&serde_json::to_vec(&envelope["facts"])?)
+        && envelope["factsSHA256"] == canonical_facts_sha256(&envelope["facts"])?
         && let Ok(parsed) = serde_json::from_value(
             envelope.get_mut("facts").map(Value::take).unwrap_or(Value::Null),
         )

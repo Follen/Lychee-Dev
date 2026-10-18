@@ -34,6 +34,8 @@ pub use file_bytes::FileBytes;
 pub(crate) mod query_csv;
 #[cfg(test)]
 mod regression_tests;
+#[cfg(test)]
+mod sql_output_tests;
 mod request;
 
 pub struct File {
@@ -710,6 +712,8 @@ fn public_query_numbers(
     result: &relational::QueryResult,
     budget: &Budget,
 ) -> Result<lycheedev_core::public_json::NumberLayout> {
+    #[cfg(test)]
+    sql_output_tests::observe_number_layout();
     use lycheedev_core::public_json::NumberLayout;
     // QueryResult's typed plan branch publishes null columns/rows. Neither
     // EXPLAIN variant has a public row array to receive cell provenance.
@@ -922,7 +926,14 @@ pub(crate) fn sql_inner_budgeted(
                 let complete = result.complete;
                 let resources = budget.logical_snapshot()?;
                 let memory_budget = budget.memory_snapshot()?;
-                let public_numbers = public_query_numbers(&request, &result, &safety)?;
+                // CSV returns only its manifest; its query CAP is serialized
+                // independently below and never consumes public numeric layout.
+                // Keep ordinary SQL layout admission before the original capture.
+                let public_numbers = if csv {
+                    None
+                } else {
+                    Some(public_query_numbers(&request, &result, &safety)?)
+                };
                 budget.check()?;
                 let mut reading = json!({"resources":resources,"memoryBudget":memory_budget,"complete":complete,"partial":!complete,"query":request,"result":result.public(),"sources":provenance,"timings":{"definitionsMs":definitions_ms,"preparationMs":preparation_ms,"executionMs":execution_ms,"decodedSourceBytes":decoded_bytes},"resourceAccounting":{"scope":"admitted allocation and work across local CASC/Encoding/decoded cache/definitions/WDC/SQL","strategy":"conservative cumulative admission","wholeQueryAccountingComplete":false,"logicalProviderParityComplete":physical_empty,"used":budget.snapshot()?,"remainingGaps":["physical/effective provider logical counters not audited against Go 3.2","SQL plan/order-container transient allocations","uninterruptible single codec call"]}});
                 if !semantic_provenance.is_empty() {
@@ -1003,7 +1014,7 @@ pub(crate) fn sql_inner_budgeted(
                     return Ok(out);
                 }
                 let mut out = Outcome::new(reading);
-                out.public_numbers = public_numbers;
+                out.public_numbers = public_numbers.expect("ordinary SQL numeric layout");
                 out.complete = complete;
                 out.selection = serde_json::to_value(&pin)?;
                 out.provenance = vec![capture];

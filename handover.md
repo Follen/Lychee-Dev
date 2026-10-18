@@ -1,6 +1,14 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 15:44 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最近完整性能诊断产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 15:55 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最近完整性能诊断产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+
+### 当前Source诊断与下一最窄算法片（2026-10-18 15:55 UTC）
+
+唯一Windows协调线程报告：固定5859 runner与封存63d产品的新六场景12次测量全部完成，full Facts/字段顺序/summary及实际引用custody均认证，formal exit0；owner总账待其最终核实。Go/Rust native毫秒依次为：cold7912.9545/4345.4009，warm592.1216/438.2824，单改3363.6330/1209.7676，插入3073.8941/1198.1737，删除3021.6315/1180.2194，重命名2963.5203/1227.8438。六比值约0.5492/0.7402/0.3597/0.3898/0.3906/0.4143，全部未达0.30，均为单组诊断而非20pair验收；所有内存采样有缺口。只保存非敏感汇总，原始本机日志未另公开。旧高系统commit异常那轮不改标成功。
+
+按已证真实消费者，下一生产片仅去两处无用工作：Source认证Facts时用相同serde_json序列化器写入固定8KiB缓冲SHA writer，替换canonical Vec再hash，保全部字节/错误/control/损坏回退语义；仍保Value DOM与typed decode，不把整个FactsRead当收益。Data CSV分支不再构造从未消费的public number layout，非CSV仍在原capture前构造，CSV双CAP/manifest/精确数值输出及已提交事实保持。CSV实际safety资源used会降低，极紧预算下不再因该无用布局拒绝是预期改进；不宣称资源诊断字节或所有预算失败时点完全相同。
+
+Source新增6项独立旧to_vec oracle、分段/缓冲边界、深unknown/重复/数字、取消过期、loose损坏恢复与默认pack真实消费回归；Data新增5项真实CSV与普通SQL数值/CAP、冲突后已提交CAP、执行后取消与线程局部观察器隔离。新Rust测试仅语法解析，最终非作者静审通过；Windows/编译/吞吐尚待验证；较宽warm摘要Index读取和materialized blob生命周期方案未实施。Stage2有效性/覆盖率仍未结束，本片不代替最终审计。
 
 ### Stage2 Windows定向回归与首个coverage失败（2026-10-18 15:16 UTC）
 

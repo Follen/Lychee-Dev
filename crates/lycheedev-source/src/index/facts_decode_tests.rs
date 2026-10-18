@@ -67,6 +67,251 @@ fn same_bytes(raw: &[u8], input: &str) -> Option<Facts> {
     actual
 }
 
+fn buffered_facts() -> Value {
+    let mut facts = full_facts();
+    facts["unknown"] = json!({
+        "tail": "雪é\n\0\\\"".repeat(FACTS_HASH_BUFFER_BYTES),
+        "number": serde_json::from_str::<Value>("1.2300e+02").unwrap(),
+    });
+    facts
+}
+
+#[test]
+fn canonical_facts_hash_matches_value_oracle_at_buffer_boundaries_and_nested_values() {
+    let mut values = vec![Value::Null, json!(true), full_facts(), buffered_facts()];
+    for bytes in [
+        FACTS_HASH_BUFFER_BYTES - 1,
+        FACTS_HASH_BUFFER_BYTES,
+        FACTS_HASH_BUFFER_BYTES + 1,
+        2 * FACTS_HASH_BUFFER_BYTES - 1,
+        2 * FACTS_HASH_BUFFER_BYTES,
+        2 * FACTS_HASH_BUFFER_BYTES + 1,
+    ] {
+        let value = json!("x".repeat(bytes - 2));
+        assert_eq!(serde_json::to_vec(&value).unwrap().len(), bytes);
+        values.push(value);
+    }
+    values.push(serde_json::from_str(
+        r#"{"large":123456789012345678901234567890,"decimal":1.2300,"exponent":1E+02,"negativeZero":-0,"number":-7}"#,
+    ).unwrap());
+    let mut deep = json!({"$serde_json::private::RawValue": "[1,2]", "null": null});
+    for _ in 0..24 {
+        deep = json!({"unknown": [deep]});
+    }
+    values.push(deep);
+    for value in values {
+        let raw = serde_json::to_vec(&value).unwrap();
+        assert_eq!(
+            canonical_facts_sha256(&value).unwrap(),
+            storage::sha256(&raw)
+        );
+        assert_eq!(
+            serde_json::to_vec(&value).unwrap(),
+            raw,
+            "input is unchanged"
+        );
+    }
+}
+
+#[test]
+fn canonical_facts_hash_writer_keeps_all_segmented_bytes_and_flushes() {
+    use sha2::Digest;
+    use std::io::{BufWriter, Write};
+    let raw: Vec<_> = (0..(3 * FACTS_HASH_BUFFER_BYTES + 257))
+        .map(|at| (at % 251) as u8)
+        .collect();
+    let expected = storage::sha256(&raw);
+    for width in [
+        1,
+        7,
+        63,
+        64,
+        65,
+        1023,
+        FACTS_HASH_BUFFER_BYTES - 1,
+        FACTS_HASH_BUFFER_BYTES,
+        FACTS_HASH_BUFFER_BYTES + 1,
+    ] {
+        let mut hash = sha2::Sha256::new();
+        {
+            let mut writer =
+                BufWriter::with_capacity(FACTS_HASH_BUFFER_BYTES, FactsHashWriter(&mut hash));
+            assert_eq!(writer.write(&[]).unwrap(), 0);
+            for (ordinal, chunk) in raw.chunks(width).enumerate() {
+                writer.write_all(chunk).unwrap();
+                if ordinal % 17 == 0 {
+                    writer.flush().unwrap();
+                }
+            }
+            writer.flush().unwrap();
+            writer.flush().unwrap();
+        }
+        assert_eq!(format!("{:x}", hash.finalize()), expected, "width={width}");
+    }
+}
+
+#[test]
+fn canonical_facts_hash_large_duplicate_and_unknown_tail_match_old_decode() {
+    let input = storage::sha256(b"large canonical input");
+    let tail = serde_json::to_string(&"雪\\\n".repeat(FACTS_HASH_BUFFER_BYTES)).unwrap();
+    let facts_raw = format!(
+        r#"{{"declarations":null,"declarations":[{{"name":"before","name":"after雪","category":"function","line":-0,"endLine":2}}],"relationships":[],"loads":[],"headers":[],"diagnostics":[],"unknown":{{"n":1E02,"n":1.2300,"tail":{tail}}}}}"#
+    );
+    let facts: Value = serde_json::from_str(&facts_raw).unwrap();
+    let canonical = serde_json::to_vec(&facts).unwrap();
+    assert!(canonical.len() > 2 * FACTS_HASH_BUFFER_BYTES);
+    let digest = storage::sha256(&canonical);
+    let raw = format!(
+        r#"{{"schema":"wrong","schema":"lycheedev.source-facts.rust.v11","inputSHA256":"{input}","factsSHA256":"{digest}","facts":null,"facts":{facts_raw}}}"#
+    );
+    let actual = same_bytes(raw.as_bytes(), &input).unwrap();
+    assert_eq!(actual.declarations[0].name, "after雪");
+    assert_eq!(actual.declarations[0].line, 0);
+    let mut changed: Value = serde_json::from_str(&raw).unwrap();
+    let text = format!(
+        "{}changed",
+        changed["facts"]["unknown"]["tail"].as_str().unwrap()
+    );
+    changed["facts"]["unknown"]["tail"] = json!(text);
+    assert!(same_bytes(&serde_json::to_vec(&changed).unwrap(), &input).is_none());
+}
+
+#[test]
+fn canonical_facts_hash_large_hit_and_misses_keep_cancelled_and_expired_errors() {
+    let input = storage::sha256(b"large stopped input");
+    let good = envelope(buffered_facts(), &input);
+    let mut wrong_hash = good.clone();
+    wrong_hash["factsSHA256"] = json!("wrong");
+    let mut wrong_input = good.clone();
+    wrong_input["inputSHA256"] = json!("wrong");
+    let mut wrong_type = buffered_facts();
+    wrong_type["declarations"] = Value::Null;
+    for value in [good, wrong_hash, wrong_input, envelope(wrong_type, &input)] {
+        let raw = serde_json::to_vec(&value).unwrap();
+        assert!(raw.len() > 2 * FACTS_HASH_BUFFER_BYTES);
+        for expired in [false, true] {
+            let expected = cloned_reference(&raw, &input, &stopped(expired)).unwrap_err();
+            let actual = decode_facts(&raw, &input, &stopped(expired)).unwrap_err();
+            assert_eq!(
+                serde_json::to_vec(&actual).unwrap(),
+                serde_json::to_vec(&expected).unwrap()
+            );
+            assert_eq!(
+                actual.code,
+                if expired {
+                    "command.deadline"
+                } else {
+                    "command.cancelled"
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn canonical_facts_hash_large_loose_hit_and_tail_corruption_keep_exact_repair() {
+    let fixture = facts_cache_tests::Fixture::new();
+    let control = OperationControl::default();
+    let cache = SourceFactsCache::open(&fixture.home, &control).unwrap();
+    let path = "Buffered.xml";
+    let source = b"<Ui><Frame name=\"Original\"/></Ui>";
+    let input = storage::sha256(source);
+    let key = facts_cache_key(path, &input);
+    let valid = envelope(buffered_facts(), &input);
+    let raw = serde_json::to_vec(&valid).unwrap();
+    cache.publish(&key, &raw, &control).unwrap();
+    let (actual, hit) = document_facts_profiled(
+        &fixture.home,
+        path,
+        source,
+        &input,
+        &control,
+        None,
+        &cache,
+        None,
+    )
+    .unwrap();
+    assert!(hit);
+    assert_eq!(
+        serde_json::to_vec(&actual).unwrap(),
+        serde_json::to_vec(&cloned_reference(&raw, &input, &control).unwrap().unwrap()).unwrap()
+    );
+    assert_eq!(cache.read(&key, &control).unwrap().unwrap(), raw);
+    let mut changed = valid;
+    let text = format!(
+        "{}changed",
+        changed["facts"]["unknown"]["tail"].as_str().unwrap()
+    );
+    changed["facts"]["unknown"]["tail"] = json!(text);
+    fs::write(
+        facts_cache_path(&fixture.home, path, &input),
+        serde_json::to_vec(&changed).unwrap(),
+    )
+    .unwrap();
+    let (actual, hit) = document_facts_profiled(
+        &fixture.home,
+        path,
+        source,
+        &input,
+        &control,
+        None,
+        &cache,
+        None,
+    )
+    .unwrap();
+    assert!(!hit);
+    let expected = facts::xml(source);
+    assert_eq!(
+        serde_json::to_vec(&actual).unwrap(),
+        serde_json::to_vec(&expected).unwrap()
+    );
+    assert_eq!(
+        cache.read(&key, &control).unwrap().unwrap(),
+        encode_facts(&expected, &input, None).unwrap()
+    );
+    cache.finish(Ok(()), &control).unwrap();
+}
+
+#[test]
+fn canonical_facts_hash_large_default_pack_keeps_complete_facts_and_locators() {
+    let fixture = facts_cache_tests::Fixture::new();
+    let source: String = (0..256)
+        .map(|at| format!("function F{at}() Target() end\n"))
+        .collect();
+    let pin = fixture.pin(&BTreeMap::from([("Buffered.lua".into(), source)]));
+    let control = OperationControl::default();
+    let cold = build_uncached(&fixture.home, &pin, &control).unwrap();
+    let expected = &cold.documents[0];
+    assert!(
+        serde_json::to_vec(&serde_json::to_value(&expected.facts).unwrap())
+            .unwrap()
+            .len()
+            > 2 * FACTS_HASH_BUFFER_BYTES
+    );
+    let warm = build_uncached(&fixture.home, &pin, &control).unwrap();
+    assert_eq!(warm.summary["io"]["cachedFacts"], 1);
+    assert_eq!(warm.summary["io"]["parsedDocuments"], 0);
+    let actual = &warm.documents[0];
+    assert_eq!(actual.facts_locator, expected.facts_locator);
+    assert_eq!(
+        serde_json::to_vec(&actual.facts).unwrap(),
+        serde_json::to_vec(&expected.facts).unwrap()
+    );
+    let located = facts_cache::read_locator(
+        &fixture.home,
+        actual.facts_locator.as_ref().unwrap(),
+        &actual.path,
+        &actual.sha256,
+        &control,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        serde_json::to_vec(&located).unwrap(),
+        serde_json::to_vec(&expected.facts).unwrap()
+    );
+}
+
 fn malformed_envelopes(input: &str) -> Vec<(String, Vec<u8>)> {
     let good = envelope(full_facts(), input);
     let mut cases = Vec::new();
