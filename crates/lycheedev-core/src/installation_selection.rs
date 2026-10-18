@@ -719,17 +719,53 @@ mod tests {
         let fixture = Fixture::new();
         let foreign = Fixture::new();
         let client = foreign.client("client", "wow_classic_titan", "3.80.2.69874");
+        let expected = select(&client, "titan").unwrap();
+        let members = [".flavor.info", "version.txt"]
+            .map(|name| (name, fs::read(client.join(name)).unwrap()));
         let link = fixture.0.join("_classic_titan_");
-        if let Err(error) = std::os::windows::fs::symlink_dir(&client, &link) {
-            if error.raw_os_error() == Some(1314) {
-                return;
-            }
-            panic!("symlink fixture failed: {error}");
+        // A junction exercises the actual Windows directory-reparse boundary
+        // without requiring file/directory-symlink privilege or skipping it.
+        let junction = std::process::Command::new("node")
+            .args([
+                "-e",
+                "require('node:fs').symlinkSync(process.argv[1], process.argv[2], 'junction');",
+            ])
+            .arg(&client)
+            .arg(&link)
+            .output()
+            .expect("create Windows installation junction fixture with Node");
+        assert!(
+            junction.status.success(),
+            "junction fixture failed: {}",
+            String::from_utf8_lossy(&junction.stderr)
+        );
+        let attributes = fs::symlink_metadata(&link).unwrap().file_attributes();
+        assert_ne!(attributes & 0x400, 0, "fixture must be a reparse point");
+        assert_ne!(attributes & 0x10, 0, "fixture must redirect a directory");
+        assert!(fs::metadata(&link).unwrap().is_dir());
+        assert_eq!(
+            fs::canonicalize(&link).unwrap(),
+            fs::canonicalize(&client).unwrap()
+        );
+        for (name, bytes) in &members {
+            assert_eq!(fs::read(link.join(name)).unwrap(), *bytes);
         }
-        assert!(discover(&fixture.0).unwrap().candidates.is_empty());
+        let report = discover(&fixture.0).unwrap();
+        assert!(report.candidates.is_empty());
+        assert!(report.issues.is_empty());
         // An explicitly selected alias can resolve to the client, unlike a root traversal.
-        assert_eq!(select(&link, "titan").unwrap().product, "titan");
-        fs::remove_dir(&link).unwrap();
+        let selected = select(&link, "titan").unwrap();
+        assert_eq!(selected.product, "titan");
+        assert_eq!(selected, expected);
+        for (name, bytes) in &members {
+            assert_eq!(fs::read(client.join(name)).unwrap(), *bytes);
+        }
+        fs::remove_dir(&link).unwrap(); // Remove only the junction.
+        assert_eq!(fs::read_dir(&foreign.0).unwrap().count(), 1);
+        assert_eq!(fs::read_dir(&client).unwrap().count(), members.len());
+        for (name, bytes) in &members {
+            assert_eq!(fs::read(client.join(name)).unwrap(), *bytes);
+        }
     }
     #[test]
     fn issue_reasons_match_fixed_go_identity_errors_and_precedence() {

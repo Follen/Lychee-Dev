@@ -151,7 +151,7 @@ test('historical witness rejects staged untracked deleted renamed conflicted dup
   for (const status of ['not a buffer', Buffer.from([0xff, 0]), Buffer.alloc((1 << 20) + 1)]) assert.throws(() => verifyHistoricalWitnessState(witnessInput('baseline'), witnessState('baseline', status)));
 });
 
-test('historical witness collector hashes actual bounded files and rejects changed bytes sizes missing files and symlinks', t => {
+test('historical witness collector hashes actual bounded files and rejects changed bytes sizes missing files and directories', t => {
   const directory = temporary(t);
   for (const file of HISTORICAL_WITNESS_FILES) { const full = path.join(directory, file.path); fs.mkdirSync(path.dirname(full), {recursive: true}); fs.writeFileSync(full, Buffer.alloc(file.bytes, 120)); }
   const rows = readHistoricalWitnessFiles(directory);
@@ -173,7 +173,50 @@ test('historical witness collector hashes actual bounded files and rejects chang
   fs.rmSync(full); assert.throws(() => readHistoricalWitnessFiles(directory), /ENOENT/);
   // A directory replacement is rejected on Windows without symlink privilege.
   fs.mkdirSync(full); assert.throws(() => readHistoricalWitnessFiles(directory), /type\/size/); fs.rmdirSync(full);
-  if (process.platform !== 'win32') { fs.symlinkSync(path.join(directory, HISTORICAL_WITNESS_FILES[1].path), full); assert.throws(() => readHistoricalWitnessFiles(directory)); }
+});
+
+function witnessFileSymlinkOrSkip(t, target, file, {platform = process.platform, create = fs.symlinkSync} = {}) {
+  try { create(target, file, 'file'); }
+  catch (error) {
+    if (platform !== 'win32' || !['EPERM', 'EACCES'].includes(error.code)) throw error;
+    t.skip(`Windows file symlink creation unavailable (${error.code}); this historical-witness file-symlink assertion was not executed`);
+    return false;
+  }
+  assert(fs.lstatSync(file).isSymbolicLink());
+  return true;
+}
+
+test('historical witness file symlink skip only covers Windows creation EPERM and EACCES', t => {
+  const directory = temporary(t), target = path.join(directory, 'target'), file = path.join(directory, 'link');
+  for (const platform of ['win32', 'linux']) for (const code of ['EPERM', 'EACCES', 'ENOENT', 'EIO']) {
+    const error = Object.assign(new Error('creation denied'), {code}), skipped = [], context = {skip: reason => skipped.push(reason)};
+    const create = (_target, _file, type) => { assert.equal(type, 'file'); throw error; };
+    if (platform === 'win32' && ['EPERM', 'EACCES'].includes(code)) {
+      assert.equal(witnessFileSymlinkOrSkip(context, target, file, {platform, create}), false);
+      assert.equal(skipped.length, 1); assert(skipped[0].includes(code));
+    } else {
+      assert.throws(() => witnessFileSymlinkOrSkip(context, target, file, {platform, create}), actual => actual === error);
+      assert.equal(skipped.length, 0);
+    }
+  }
+  const skipped = [];
+  assert.throws(() => witnessFileSymlinkOrSkip({skip: reason => skipped.push(reason)}, target, file, {platform: 'win32', create(_target, file) { fs.writeFileSync(file, 'not a link'); }}), {code: 'ERR_ASSERTION'});
+  assert.equal(skipped.length, 0);
+});
+
+test('historical witness collector rejects an actual file symlink to the original valid-sized bytes', t => {
+  const directory = temporary(t);
+  for (const file of HISTORICAL_WITNESS_FILES) { const full = path.join(directory, file.path); fs.mkdirSync(path.dirname(full), {recursive: true}); fs.writeFileSync(full, Buffer.alloc(file.bytes, 120)); }
+  const rows = readHistoricalWitnessFiles(directory);
+  const full = path.join(directory, HISTORICAL_WITNESS_FILES[0].path), target = full + '.original', original = fs.readFileSync(full);
+  assert.equal(rows[0].bytes, original.length); assert.equal(rows[0].sha256, sha256(original));
+  fs.renameSync(full, target);
+  if (!witnessFileSymlinkOrSkip(t, target, full)) return;
+  assert(fs.statSync(full).isFile()); assert.equal(fs.realpathSync(full), fs.realpathSync(target));
+  assert.deepEqual(fs.readFileSync(full), original);
+  assert.throws(() => readHistoricalWitnessFiles(directory), {message: 'disk.reparse_boundary'});
+  assert.deepEqual(fs.readFileSync(target), original);
+  fs.unlinkSync(full); assert.deepEqual(fs.readFileSync(target), original);
 });
 
 test('historical witness validates real porcelain from an isolated Git fixture without changing its index or files', t => {

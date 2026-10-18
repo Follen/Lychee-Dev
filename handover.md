@@ -1,6 +1,12 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 07:18 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最近完整性能诊断产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 07:43 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最近完整性能诊断产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+
+### Stage2平台条件完整扫描与第二小批（2026-10-18 07:43 UTC）
+
+[平台清单](docs/toolkit/rust-audit-stage2-platform-tests-2026-10-18.md)按固定05649树检查1069个Rust、342个Node/TS文件的cfg/平台分支/skip/早return，列出74个自有显式ignored（含16宏展开）及1个vendor项。三个Windows覆盖缺口已独审修复：Delivery integration有效managed目录junction与独立需权限文件symlink；Core发现路径同时断言无候选且无issues、显式alias仍正确且外部bytes不变；Node候选收集器真实file-link单列精确拒绝，权限不足仅skip该项。另Data非Windowsfallback测试为支持平台不可达覆盖，明确列出，不当环境待验。Linux受影响Node34/0/0；三修复Rust/Windows NOT_RUN，不宣布Stage2结束或覆盖率。
+
+63d Source新诊断07:33开始，4prep过，cold完整核验Go9.668s/Rust5.465s（ratio0.5653）；warm未闭，后四场景未启。系统commit99%且旁路shell报页面文件不足，[现场报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6247196057)。controller在停止指令到达前07:36:08异常退出native3221226505、forced=false/deadline=false；[终态报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6247207139)。07:37:34原11条native记录PID均不存活、sampler退出，outer failed/handlesReaped=true；healthy-base854baae1…原receipt仍active且回收字段未完成，不能称所有owner封存。原scratch/custody保留，不当主动取消或产品根因。高commit影响现场，只是未完成诊断，不作性能验收或回归定因。新的本机队列暂停，不自动重跑；不是OS压力验收，既有b4d完整结果与性能未达仍保留。
 
 ### Stage2首轮测试有效性候选（2026-10-18 07:31 UTC）
 

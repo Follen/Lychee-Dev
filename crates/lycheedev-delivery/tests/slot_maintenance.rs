@@ -451,24 +451,118 @@ fn omitted_and_null_optional_ownership_fields_match_go_zero_values() {
     install(&temp.0, NEW).unwrap();
     assert_current(&temp.0, NEW);
 }
-#[cfg(unix)]
+#[cfg(windows)]
 #[test]
-fn linked_slot_directory_or_static_member_is_rejected_without_following_it() {
-    use std::os::unix::fs::symlink;
+fn linked_slot_directory_is_rejected_without_following_it() {
+    use std::os::windows::fs::MetadataExt;
+
     let temp = Temp::new();
     let outside = Temp::new();
-    symlink(&outside.0, slots::directory(&temp.0, 1)).unwrap();
-    assert!(install(&temp.0, NEW).is_err());
-    assert_eq!(fs::read_dir(&outside.0).unwrap().count(), 0);
-    fs::remove_file(slots::directory(&temp.0, 1)).unwrap();
+    fixture(&temp.0, "lycheedev.slots.v1", 64);
+    slots::preflight(&temp.0, NEW).unwrap();
+    let marker = raw(&temp.0);
+    let first = slots::directory(&temp.0, 1).join("Lychee Dev Slot 01.toc");
+    let first_bytes = fs::read(&first).unwrap();
+    let directory = slots::directory(&temp.0, 64);
+    let members = slots::files(64, OLD).map(|(name, _)| {
+        let bytes = fs::read(directory.join(&name)).unwrap();
+        (name, bytes)
+    });
+    let outside_directory = outside.0.join("original-slot");
+    fs::rename(&directory, &outside_directory).unwrap();
+
+    // Reuse the Windows junction fixture from tests/rust-parity/oracle.test.mjs.
+    // The target is the admitted slot's exact original directory, not a malformed
+    // substitute that could fail for an unrelated content or ownership reason.
+    let junction = std::process::Command::new("node")
+        .args([
+            "-e",
+            "require('node:fs').symlinkSync(process.argv[1], process.argv[2], 'junction');",
+        ])
+        .arg(&outside_directory)
+        .arg(&directory)
+        .output()
+        .expect("create Windows slot junction fixture with Node");
+    assert!(
+        junction.status.success(),
+        "junction fixture failed: {}",
+        String::from_utf8_lossy(&junction.stderr)
+    );
+    let attributes = fs::symlink_metadata(&directory).unwrap().file_attributes();
+    assert_ne!(attributes & 0x400, 0, "fixture must be a reparse point");
+    assert_ne!(attributes & 0x10, 0, "fixture must redirect a directory");
+    assert!(fs::metadata(&directory).unwrap().is_dir());
+    assert_eq!(
+        fs::canonicalize(&directory).unwrap(),
+        fs::canonicalize(&outside_directory).unwrap()
+    );
+    for (name, bytes) in &members {
+        assert_eq!(fs::read(directory.join(name)).unwrap(), *bytes);
+    }
+
+    for error in [
+        slots::preflight(&temp.0, NEW).unwrap_err(),
+        install(&temp.0, NEW).unwrap_err(),
+    ] {
+        assert_eq!(error.code, "input.invalid");
+        assert_eq!(error.exit_code, 4);
+        assert_eq!(error.message, "reparse point in managed path");
+    }
+    assert_eq!(raw(&temp.0), marker);
+    assert_eq!(fs::read(first).unwrap(), first_bytes);
+    assert!(!slots::directory(&temp.0, 65).exists());
+    assert_eq!(fs::read_dir(&outside.0).unwrap().count(), 1);
+    assert_eq!(fs::read_dir(&outside_directory).unwrap().count(), 3);
+    for (name, bytes) in &members {
+        assert_eq!(fs::read(outside_directory.join(name)).unwrap(), *bytes);
+    }
+    fs::remove_dir(&directory).unwrap(); // Remove only the junction.
+    for (name, bytes) in &members {
+        assert_eq!(fs::read(outside_directory.join(name)).unwrap(), *bytes);
+    }
+}
+#[cfg(windows)]
+#[test]
+#[ignore = "requires Windows file-symlink privilege or Developer Mode; run explicitly with --ignored"]
+fn linked_static_slot_member_is_rejected_without_following_it() {
+    use std::os::windows::fs::{MetadataExt, symlink_file};
+
+    let temp = Temp::new();
+    let outside = Temp::new();
     fixture(&temp.0, slots::SCHEMA, 500);
+    slots::inspect(&temp.0, OLD).unwrap();
+    let marker = raw(&temp.0);
     let member = slots::directory(&temp.0, 500).join("Loader.lua");
-    fs::remove_file(&member).unwrap();
+    let bytes = fs::read(&member).unwrap();
+    assert_eq!(bytes, slots::files(500, OLD)[1].1);
     let outside_file = outside.0.join("Loader.lua");
-    fs::write(&outside_file, &slots::files(500, OLD)[1].1).unwrap();
-    symlink(&outside_file, &member).unwrap();
-    assert!(slots::inspect(&temp.0, OLD).is_err());
-    assert_eq!(fs::read(outside_file).unwrap(), slots::files(500, OLD)[1].1);
+    fs::rename(&member, &outside_file).unwrap();
+    // A directory junction would change this into a non-file negative. Preserve
+    // a genuine file link to the exact valid static bytes; selected setup errors
+    // fail this test instead of silently passing without reaching the consumer.
+    symlink_file(&outside_file, &member).expect(
+        "create static-member file symlink (requires Developer Mode or file-symlink privilege)",
+    );
+    let metadata = fs::symlink_metadata(&member).unwrap();
+    assert!(metadata.file_type().is_symlink());
+    assert_ne!(metadata.file_attributes() & 0x400, 0);
+    assert_eq!(metadata.file_attributes() & 0x10, 0);
+    assert!(fs::metadata(&member).unwrap().is_file());
+    assert_eq!(
+        fs::canonicalize(&member).unwrap(),
+        fs::canonicalize(&outside_file).unwrap()
+    );
+    assert_eq!(fs::read(&member).unwrap(), bytes);
+
+    let error = slots::inspect(&temp.0, OLD).unwrap_err();
+    assert_eq!(error.code, "delivery.invalid_installation");
+    assert_eq!(error.exit_code, 4);
+    assert_eq!(error.message, "slot member is not a bounded regular file");
+    assert_eq!(raw(&temp.0), marker);
+    assert_eq!(fs::read(&outside_file).unwrap(), bytes);
+    assert_eq!(fs::read_dir(&outside.0).unwrap().count(), 1);
+    fs::remove_file(&member).unwrap(); // Remove only the file symlink.
+    assert_eq!(fs::read(outside_file).unwrap(), bytes);
 }
 #[test]
 fn go_json_sequence_casing_duplicates_and_null_never_erase_reservations() {
