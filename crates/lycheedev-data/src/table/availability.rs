@@ -145,8 +145,9 @@ mod tests {
     use lycheedev_core::control::OperationControl;
     #[test]
     fn direct_record_availability_distinguishes_complete_and_unknown_id_lists() {
+        // This leaf classification test has no workspace owner or adaptive probe.
         let control = OperationControl::default();
-        let budget = Budget::query_controlled(control.deadline(), control.clone());
+        let budget = Budget::controlled(Cost::defaults(), control.deadline(), control.clone());
         let mut availability = Availability {
             partitions: vec![UnavailablePartition {
                 index: 1,

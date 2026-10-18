@@ -2,6 +2,9 @@ use super::*;
 use lycheedev_core::control::OperationControl;
 use std::sync::atomic::Ordering;
 
+// Leaf decoder tests inject fixed limits; real workspace admission is exercised
+// by the local/CDN consumer fixtures, not this in-memory reader.
+
 fn framed(corrupt: bool) -> (Vec<u8>, Vec<u8>) {
     let mut logical = b"clear".to_vec();
     logical.extend(2u32.to_le_bytes());
@@ -34,7 +37,7 @@ fn table_policy_keeps_exact_missing_span_and_strict_reader_rejects_it() {
     let (encoded, logical) = framed(false);
     for policy in [DecodePolicy::Strict, DecodePolicy::TableAllowMissing] {
         let control = OperationControl::default();
-        let budget = Budget::query_controlled(control.deadline(), control);
+        let budget = Budget::controlled(Cost::defaults(), control.deadline(), control);
         let mut input = io::Cursor::new(&encoded);
         let keys = BTreeMap::new();
         let mut reader = Reader::new(
@@ -71,7 +74,7 @@ fn table_policy_still_checks_ciphertext_keys_whole_ckey_eof_and_original_stop() 
     let (valid, logical) = framed(false);
     for mode in ["checksum", "wrong-key", "wrong-ckey", "trailing", "cancel"] {
         let control = OperationControl::default();
-        let budget = Budget::query_controlled(control.deadline(), control.clone());
+        let budget = Budget::controlled(Cost::defaults(), control.deadline(), control.clone());
         let mut encoded = if mode == "checksum" {
             framed(true).0
         } else {
@@ -121,7 +124,7 @@ fn table_policy_requires_every_outer_digest_but_complete_content_keeps_ckey_proo
     for zero in [20..36, 44..60] {
         for complete in [false, true] {
             let control = OperationControl::default();
-            let budget = Budget::query_controlled(control.deadline(), control);
+            let budget = Budget::controlled(Cost::defaults(), control.deadline(), control);
             let mut encoded = valid.clone();
             encoded[zero.clone()].fill(0);
             let mut keys = BTreeMap::new();
@@ -158,7 +161,7 @@ fn table_policy_requires_every_outer_digest_but_complete_content_keeps_ckey_proo
     encoded[20..36].fill(0);
     encoded[61] ^= 1;
     let control = OperationControl::default();
-    let budget = Budget::query_controlled(control.deadline(), control);
+    let budget = Budget::controlled(Cost::defaults(), control.deadline(), control);
     let keys = BTreeMap::new();
     let mut input = io::Cursor::new(&encoded);
     let mut reader = Reader::new(
@@ -189,7 +192,7 @@ fn nested_missing_key_marks_whole_outer_chunk_unavailable() {
     encoded.extend(Md5::digest(&nested));
     encoded.extend(nested);
     let control = OperationControl::default();
-    let budget = Budget::query_controlled(control.deadline(), control);
+    let budget = Budget::controlled(Cost::defaults(), control.deadline(), control);
     let keys = BTreeMap::new();
     let mut input = io::Cursor::new(&encoded);
     let mut reader = Reader::new(

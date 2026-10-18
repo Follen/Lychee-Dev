@@ -28,9 +28,10 @@ pub fn exercise(base: &Invocation) {
     let search = db2::dispatch(&invocation(
         base,
         "data db2 search",
-        &[("--field", "Value"), ("--query", ""), ("--limit", "10")],
+        &[("--field", "Value"), ("--query", "42"), ("--limit", "10")],
     ))
     .unwrap();
+    assert_eq!(search.data["query"], "42");
     assert_eq!(search.data["rows"], json!([{"ID":1,"Value":42}]));
     assert_eq!(search.data["partial"], true);
     assert_eq!(search.data["tables"][0]["contentVerified"], false);
