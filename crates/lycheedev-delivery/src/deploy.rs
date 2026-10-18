@@ -122,6 +122,7 @@ pub fn outside(parent: &Path, archive: &Path) -> Result<()> {
 enum Step {
     Staged,
     Prepared,
+    ArchivePublished,
     OldMoved,
     Published,
     RemoveReady,
@@ -206,7 +207,7 @@ fn fresh_observed(
     observe: &mut impl FnMut(Step, &Path),
 ) -> Result<Receipt> {
     let lease = InstallationLease::acquire(target, control)?;
-    let result = fresh_locked_observed(root, &lease, component, version, control, observe);
+    let result = fresh_locked_observed(root, &lease, component, version, control, None, observe);
     lease.finish(result)
 }
 pub(crate) fn fresh_locked(
@@ -216,7 +217,33 @@ pub(crate) fn fresh_locked(
     version: &str,
     control: &OperationControl,
 ) -> Result<Receipt> {
-    fresh_locked_observed(root, lease, component, version, control, &mut |_, _| {})
+    fresh_locked_observed(
+        root,
+        lease,
+        component,
+        version,
+        control,
+        None,
+        &mut |_, _| {},
+    )
+}
+pub(crate) fn fresh_locked_bound(
+    root: &Path,
+    lease: &InstallationLease,
+    component: &str,
+    version: &str,
+    control: &OperationControl,
+    expected: &Value,
+) -> Result<Receipt> {
+    fresh_locked_observed(
+        root,
+        lease,
+        component,
+        version,
+        control,
+        Some(expected),
+        &mut |_, _| {},
+    )
 }
 fn fresh_locked_observed(
     root: &Path,
@@ -224,12 +251,23 @@ fn fresh_locked_observed(
     component: &str,
     version: &str,
     control: &OperationControl,
+    expected: Option<&Value>,
     observe: &mut impl FnMut(Step, &Path),
 ) -> Result<Receipt> {
     control.check()?;
     let target = lease.target();
     let release = release::inspect_with_control(root, version, control)?;
     let wanted = release::receipt(&release, component);
+    if let Some(expected) = expected {
+        if !installation::same_receipt_value(&serde_json::to_value(&wanted)?, expected)? {
+            return Err(ToolkitError::new(
+                "delivery.installation_conflict",
+                "fresh release differs from frozen combined receipt",
+                4,
+            )
+            .with_details(json!({"wanted": expected, "next": wanted})));
+        }
+    }
     let current = installation::inspect_main_controlled(&target, component, control)?;
     if current["state"] == "managed"
         && installation::same_receipt_value(&current["receipt"], &serde_json::to_value(&wanted)?)?
@@ -350,7 +388,7 @@ fn upgrade_observed(
 ) -> Result<Value> {
     let lease = InstallationLease::acquire(target, control)?;
     let result = upgrade_locked_observed(
-        root, &lease, archive, component, version, resume, control, observe,
+        root, &lease, archive, component, version, resume, control, None, observe,
     );
     lease.finish(result)
 }
@@ -371,6 +409,32 @@ pub(crate) fn upgrade_locked(
         version,
         resume,
         control,
+        None,
+        &mut |_, _| {},
+    )
+}
+/// Bind a combined addon transaction's frozen predecessor and wanted receipt
+/// at the existing replacement checks, before any archive or main publication.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn upgrade_locked_bound(
+    root: Option<&Path>,
+    lease: &InstallationLease,
+    archive: &Path,
+    component: &str,
+    version: &str,
+    resume: bool,
+    control: &OperationControl,
+    expected: (&Value, &Value),
+) -> Result<Value> {
+    upgrade_locked_observed(
+        root,
+        lease,
+        archive,
+        component,
+        version,
+        resume,
+        control,
+        Some(expected),
         &mut |_, _| {},
     )
 }
@@ -383,6 +447,7 @@ fn upgrade_locked_observed(
     version: &str,
     resume: bool,
     control: &OperationControl,
+    expected: Option<(&Value, &Value)>,
     observe: &mut impl FnMut(Step, &Path),
 ) -> Result<Value> {
     control.check()?;
@@ -398,6 +463,16 @@ fn upgrade_locked_observed(
                 "upgrade requires unchanged managed installation",
                 4,
             ));
+        }
+        if let Some((previous, _)) = expected {
+            if !installation::same_receipt_value(&current["receipt"], previous)? {
+                return Err(ToolkitError::new(
+                    "delivery.installation_conflict",
+                    "main addon changed after combined preparation",
+                    4,
+                )
+                .with_details(json!({"previous": previous, "installed": current})));
+            }
         }
         if archive.exists() {
             return Err(ToolkitError::new(
@@ -424,6 +499,16 @@ fn upgrade_locked_observed(
                 control,
                 observe,
             )?;
+            if let Some((_, wanted)) = expected {
+                if !installation::same_receipt_value(&serde_json::to_value(&next)?, wanted)? {
+                    return Err(ToolkitError::new(
+                        "delivery.installation_conflict",
+                        "prepared replacement differs from frozen combined receipt",
+                        4,
+                    )
+                    .with_details(json!({"wanted": wanted, "next": next})));
+                }
+            }
             storage::atomic_write_controlled(
                 &stage.join("replacement.json"),
                 &serde_json::to_vec_pretty(
@@ -435,6 +520,7 @@ fn upgrade_locked_observed(
             publish(&stage, &archive, control)
         })();
         finish_preparation(&stage, prepared)?;
+        observe(Step::ArchivePublished, &archive);
     }
     storage::guard_path(&archive, &record_path)?;
     let record: Value = serde_json::from_slice(&crate::slots::read_bounded_controlled(
@@ -452,6 +538,18 @@ fn upgrade_locked_observed(
             "replacement identity differs from explicit target",
             4,
         ));
+    }
+    if let Some((previous, wanted)) = expected {
+        if !installation::same_receipt_value(&record["previous"], previous)?
+            || !installation::same_receipt_value(&record["next"], wanted)?
+        {
+            return Err(ToolkitError::new(
+                "delivery.installation_conflict",
+                "replacement intent differs from frozen combined receipts",
+                4,
+            )
+            .with_details(json!({"previous": previous, "wanted": wanted, "replacement": record})));
+        }
     }
     let mut current = installation::inspect_main_controlled(&target, component, control)?;
     let previous =
@@ -494,6 +592,50 @@ fn upgrade_locked_observed(
     publish(&archive.join("next"), &target, control)?;
     observe(Step::Published, &target);
     Ok(json!({"target":target,"archive":archive,"receipt":record["next"]}))
+}
+#[cfg(test)]
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum UpgradeCheckpoint {
+    ArchivePublished,
+    OldMoved,
+    Published,
+}
+#[cfg(test)]
+pub(crate) fn interrupt_addon_upgrade_for_test(
+    root: &Path,
+    target: &Path,
+    archive: &Path,
+    version: &str,
+    checkpoint: UpgradeCheckpoint,
+) -> Result<Value> {
+    let control = OperationControl::default();
+    let cancel = control.tracked_cancel_handle()?;
+    let cut = match checkpoint {
+        UpgradeCheckpoint::ArchivePublished => Step::ArchivePublished,
+        UpgradeCheckpoint::OldMoved => Step::OldMoved,
+        UpgradeCheckpoint::Published => Step::Published,
+    };
+    let mut observed = false;
+    let result = upgrade_observed(
+        Some(root),
+        target,
+        archive,
+        "addon",
+        version,
+        false,
+        &control,
+        &mut |step, path| {
+            if step == cut && (step != Step::Published || path == target) {
+                observed = true;
+                cancel.cancel();
+            }
+        },
+    );
+    assert!(
+        observed,
+        "replacement checkpoint was not reached: {checkpoint:?}"
+    );
+    result
 }
 pub fn remove(target: &Path, archive: &Path, component: &str) -> Result<Value> {
     remove_controlled(target, archive, component, &OperationControl::default())

@@ -1346,14 +1346,17 @@ dependencies = [
 name = "lycheedev-cli"
 version = "3.5.0"
 dependencies = [
+ "flate2",
  "lycheedev-core",
  "lycheedev-data",
  "lycheedev-delivery",
  "lycheedev-live",
  "lycheedev-source",
  "lycheedev-windows",
+ "md-5",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

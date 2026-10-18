@@ -1,6 +1,14 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 05:30 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 05:52 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+
+### 本轮精确实测与再次状态机复核（2026-10-18 05:52 UTC）
+
+38a7 Delivery完整Windows 145/0/0，新10逐名通过；原aux forced标记保留。9c2 all-targets、Core cache65/0/0（新6）、Probe16/0/0（新4）、Source lib682/0/4（新13）实际通过，见[本机报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6246251776)。截至本记录Data仍运行，catalog/WDC未开始，不能把Data9新算过或跨SHA拼整仓全绿。
+
+三名新非作者在固定9c2按真实消费者再次复核：Data五条原source/checked-close/CAP/stream/scalar数组链，以及Source认证header条件、Core retention和Probe持久时间链未发现新可操作问题。Delivery全phase矩阵仍发现同一恢复身份范围的补漏：slots→complete只核版本；prepared归档无nested时未核冻结previous；已有nested previous/next未绑定combined；无archive fresh重新读取release所得receipt未在发布前绑定wanted。真实合法checkpoint/升级可触发，无需伪造journal。最窄后继在原读取点绑定身份，保合法prepared/old-moved/installed恢复及已有错误事实，不重放；本后继3文件14新入口覆盖真实durable checkpoint与same-version内容/commit变更、nested三合法恢复态及源重采样；新增回归仍NOT_RUN，Stage1继续。
+
+[99a runner/0002产品真实Skill](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6246189044)已通过候选Skill认证与Node70/0/0，19/42 children中15次公开CLI执行，4/16 CAP已verify；checks13pass/1fail/12NOT_RUN。catalog-analyze在成功业务结果进入public renderer时exit5：EXPLAIN/ANALYZE发rows:null，数字布局却声明Indexed数组。owner sealed failed/reaped，无forced/deadline；原失败与已提交CAP事实保留，原失败CAP字节未由云端独立读取。修复按typed plan选择严格布局，普通空/非空数组、参数词元及canonical浮点不变；3新增真实CLI测试复用原catalog fixture，覆盖21 query与21 evidence verify调用（均NOT_RUN）。四文件独审通过，新增dev edges仅引用原已锁定依赖，无版本/checksum改变。通用render错误stderr不显示已提交CAP身份的既有边界未在此有限修复中扩大处理。
 
 ### 本轮其余Source/Core/Probe有限候选（2026-10-18 05:30 UTC）
 

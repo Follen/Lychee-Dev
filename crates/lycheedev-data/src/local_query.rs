@@ -707,10 +707,17 @@ fn number_tree_bytes<K>(entries: usize) -> usize {
 
 fn public_query_numbers(
     request: &request::Request,
-    rows: &[Vec<relational::Scalar>],
+    result: &relational::QueryResult,
     budget: &Budget,
 ) -> Result<lycheedev_core::public_json::NumberLayout> {
     use lycheedev_core::public_json::NumberLayout;
+    // QueryResult's typed plan branch publishes null columns/rows. Neither
+    // EXPLAIN variant has a public row array to receive cell provenance.
+    let rows = if result.plan.is_none() {
+        result.rows.as_slice()
+    } else {
+        &[]
+    };
     let mut numbers = BTreeMap::new();
     for (row_index, row) in rows.iter().enumerate() {
         budget.check()?;
@@ -740,7 +747,11 @@ fn public_query_numbers(
         ("query".into(), request.public_numbers(budget)?),
         (
             "result".into(),
-            NumberLayout::field("rows", NumberLayout::Indexed(numbers)),
+            if result.plan.is_some() {
+                NumberLayout::Verbatim
+            } else {
+                NumberLayout::field("rows", NumberLayout::Indexed(numbers))
+            },
         ),
         (
             "timings".into(),
@@ -911,7 +922,7 @@ pub(crate) fn sql_inner_budgeted(
                 let complete = result.complete;
                 let resources = budget.logical_snapshot()?;
                 let memory_budget = budget.memory_snapshot()?;
-                let public_numbers = public_query_numbers(&request, &result.rows, &safety)?;
+                let public_numbers = public_query_numbers(&request, &result, &safety)?;
                 budget.check()?;
                 let mut reading = json!({"resources":resources,"memoryBudget":memory_budget,"complete":complete,"partial":!complete,"query":request,"result":result.public(),"sources":provenance,"timings":{"definitionsMs":definitions_ms,"preparationMs":preparation_ms,"executionMs":execution_ms,"decodedSourceBytes":decoded_bytes},"resourceAccounting":{"scope":"admitted allocation and work across local CASC/Encoding/decoded cache/definitions/WDC/SQL","strategy":"conservative cumulative admission","wholeQueryAccountingComplete":false,"logicalProviderParityComplete":physical_empty,"used":budget.snapshot()?,"remainingGaps":["physical/effective provider logical counters not audited against Go 3.2","SQL plan/order-container transient allocations","uninterruptible single codec call"]}});
                 if !semantic_provenance.is_empty() {
@@ -1154,7 +1165,12 @@ mod request_identity_tests {
             hotfix: vec![],
             parameters: BTreeMap::new(),
         };
-        let rows = vec![vec![relational::Scalar::Float(1.0)]];
+        let result = relational::QueryResult {
+            plan: None,
+            columns: vec!["value".into()],
+            rows: vec![vec![relational::Scalar::Float(1.0)]],
+            complete: true,
+        };
         let budget = Budget::new(
             Cost {
                 retained_bytes: (number_tree_bytes::<usize>(1) - 1) as u64,
@@ -1164,7 +1180,7 @@ mod request_identity_tests {
             None,
         );
         assert_eq!(
-            public_query_numbers(&request, &rows, &budget)
+            public_query_numbers(&request, &result, &budget)
                 .unwrap_err()
                 .code,
             "records.query_resource_budget"

@@ -17,6 +17,12 @@ pub struct Request<'a> {
     pub resume: bool,
     pub control: &'a OperationControl,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Step {
+    Prepared,
+    Main,
+    Slots,
+}
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Transaction {
@@ -182,6 +188,15 @@ pub(crate) fn apply_locked(
     request: Request<'_>,
     guard: &InstallationGuard,
     lease: &deploy::InstallationLease,
+) -> Result<Value> {
+    apply_locked_observed(target, request, guard, lease, &mut |_, _| {})
+}
+fn apply_locked_observed(
+    target: &Path,
+    request: Request<'_>,
+    guard: &InstallationGuard,
+    lease: &deploy::InstallationLease,
+    observe: &mut impl FnMut(Step, &Path),
 ) -> Result<Value> {
     guard.require_idle()?;
     request.control.check()?;
@@ -358,11 +373,12 @@ pub(crate) fn apply_locked(
             return Ok(());
         }
         if record.phase == "prepared" {
+            observe(Step::Prepared, &path);
             request.control.check()?;
             let current = installation::inspect_main_controlled(&target, "addon", request.control)?;
             record.result = if let Some(archive) = &archive {
                 let resume = archive.join("replacement.json").exists();
-                deploy::upgrade_locked(
+                deploy::upgrade_locked_bound(
                     request.release,
                     lease,
                     archive,
@@ -370,6 +386,7 @@ pub(crate) fn apply_locked(
                     request.version,
                     resume,
                     request.control,
+                    (&record.previous["receipt"], &wanted),
                 )?
             } else if current["state"] == "managed"
                 && installation::same_receipt_value(&current["receipt"], &wanted)?
@@ -389,7 +406,7 @@ pub(crate) fn apply_locked(
                         4,
                     ));
                 }
-                serde_json::to_value(deploy::fresh_locked(
+                serde_json::to_value(deploy::fresh_locked_bound(
                     request.release.ok_or_else(|| {
                         ToolkitError::arguments("unfinished fresh addon needs original --release")
                     })?,
@@ -397,6 +414,7 @@ pub(crate) fn apply_locked(
                     "addon",
                     request.version,
                     request.control,
+                    &wanted,
                 )?)?
             };
             let installed =
@@ -414,6 +432,7 @@ pub(crate) fn apply_locked(
                 &serde_json::to_vec_pretty(&record)?,
                 request.control,
             )?;
+            observe(Step::Main, &path);
         }
         if record.phase == "main" {
             request.control.check()?;
@@ -435,6 +454,7 @@ pub(crate) fn apply_locked(
                 &serde_json::to_vec_pretty(&record)?,
                 request.control,
             )?;
+            observe(Step::Slots, &path);
         }
         request.control.check()?;
         installation::verify_clean_controlled(
@@ -444,6 +464,19 @@ pub(crate) fn apply_locked(
             slots::COUNT,
             request.control,
         )?;
+        let installed =
+            installation::inspect_main_controlled(&target, "addon", request.control)?;
+        if installed["state"] != "managed"
+            || !installation::same_receipt_value(&installed["receipt"], &wanted)?
+        {
+            return Err(ToolkitError::new(
+                "delivery.installation_conflict",
+                "main addon differs from frozen combined receipt after slot installation",
+                4,
+            )
+            .with_details(json!({"wanted": wanted, "installed": installed})));
+        }
+        request.control.check()?;
         record.phase = "complete".into();
         storage::atomic_write_controlled(
             &path,

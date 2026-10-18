@@ -126,6 +126,706 @@ fn assert_installation_lock_released(target: &Path, control: &OperationControl) 
         .unwrap();
 }
 
+fn seed_main(f: &Fixture) {
+    let seed = f.root.join("seed");
+    candidate(&seed, VERSION, b"-- predecessor P\n");
+    deploy::fresh_controlled(
+        &seed,
+        &f.target,
+        "addon",
+        VERSION,
+        &OperationControl::default(),
+    )
+    .unwrap();
+}
+
+fn pause_combined(f: &Fixture, archive: Option<&Path>, cut: Step) -> (PathBuf, Value) {
+    let control = OperationControl::default();
+    let cancel = control.tracked_cancel_handle().unwrap();
+    let guard = InstallationGuard::acquire(&f.target).unwrap();
+    let lease = deploy::InstallationLease::acquire(&f.target, &control).unwrap();
+    let path = f.intent(&f.release, archive, VERSION);
+    let phase = match cut {
+        Step::Prepared => "prepared",
+        Step::Main => "main",
+        Step::Slots => "slots",
+    };
+    let mut observed = false;
+    let result = apply_locked_observed(
+        &f.target,
+        Request {
+            release: Some(&f.release),
+            archive,
+            version: VERSION,
+            resume: false,
+            control: &control,
+        },
+        &guard,
+        &lease,
+        &mut |step, checkpoint| {
+            if step == cut {
+                assert_eq!(checkpoint, path.as_path());
+                let durable: Value = storage::read_json(checkpoint).unwrap();
+                assert_eq!(durable["phase"], phase);
+                observed = true;
+                cancel.cancel();
+            }
+        },
+    );
+    let error = lease.finish(result).unwrap_err();
+    assert!(observed, "combined checkpoint was not reached: {cut:?}");
+    assert_eq!(error.code, "command.cancelled");
+    assert_eq!(error.exit_code, 7);
+    assert_eq!(error.details["result"]["complete"], false);
+    assert_eq!(error.details["result"]["phase"], phase);
+    assert_eq!(error.details["result"]["journal"], json!(path));
+    let record: Value = storage::read_json(&path).unwrap();
+    assert_eq!(record["phase"], phase);
+    assert_eq!(error.details["result"]["main"], record["result"]);
+    guard.close().unwrap();
+    assert_installation_lock_released(&f.target, &OperationControl::default());
+    (path, record)
+}
+
+fn replacement_release(f: &Fixture, commit_only: bool) -> PathBuf {
+    let root = f.root.join("release-b");
+    change_release(&root, commit_only);
+    root
+}
+
+fn change_release(root: &Path, commit_only: bool) {
+    candidate(
+        root,
+        VERSION,
+        if commit_only {
+            b"-- release A\n"
+        } else {
+            b"-- release B\n"
+        },
+    );
+    if commit_only {
+        let manifest = root.join("release.json");
+        let mut value: Value = storage::read_json(&manifest).unwrap();
+        value["commit"] = json!("c".repeat(40));
+        storage::atomic_json(&manifest, &value).unwrap();
+    }
+}
+
+fn source_change_during_prepared(
+    f: &Fixture,
+    archive: Option<&Path>,
+    commit_only: bool,
+) -> (ToolkitError, BTreeMap<PathBuf, Option<Vec<u8>>>, Value) {
+    let control = OperationControl::default();
+    let guard = InstallationGuard::acquire(&f.target).unwrap();
+    let lease = deploy::InstallationLease::acquire(&f.target, &control).unwrap();
+    let path = f.intent(&f.release, archive, VERSION);
+    let mut frozen = None;
+    let mut before = None;
+    let result = apply_locked_observed(
+        &f.target,
+        Request {
+            release: Some(&f.release),
+            archive,
+            version: VERSION,
+            resume: false,
+            control: &control,
+        },
+        &guard,
+        &lease,
+        &mut |step, checkpoint| {
+            if step == Step::Prepared {
+                assert_eq!(checkpoint, path.as_path());
+                let record: Value = storage::read_json(checkpoint).unwrap();
+                assert_eq!(record["phase"], "prepared");
+                change_release(&f.release, commit_only);
+                frozen = Some(record);
+                before = Some(f.snapshot());
+            }
+        },
+    );
+    let error = lease.finish(result).unwrap_err();
+    let record = frozen.expect("durable prepared checkpoint was not reached");
+    assert_eq!(error.code, "delivery.installation_conflict");
+    assert_eq!(error.exit_code, 4);
+    assert_eq!(error.details["result"]["complete"], false);
+    assert_eq!(error.details["result"]["phase"], "prepared");
+    assert_eq!(error.details["result"]["journal"], json!(path));
+    assert_eq!(error.details["result"]["main"], Value::Null);
+    assert_eq!(storage::read_json::<Value>(&path).unwrap(), record);
+    assert!(
+        !installation::same_receipt_value(
+            &serde_json::to_value(release::receipt(
+                &release::inspect(&f.release, VERSION).unwrap(),
+                "addon"
+            ))
+            .unwrap(),
+            &record["wanted"],
+        )
+        .unwrap()
+    );
+    guard.close().unwrap();
+    assert_installation_lock_released(&f.target, &control);
+    (error, before.unwrap(), record)
+}
+
+#[test]
+fn prepared_fresh_source_change_is_rejected_before_publication() {
+    for commit_only in [false, true] {
+        let f = Fixture::new();
+        let (error, before, record) = source_change_during_prepared(&f, None, commit_only);
+        assert_eq!(
+            error.message,
+            "fresh release differs from frozen combined receipt"
+        );
+        assert_eq!(error.details["cause"]["wanted"], record["wanted"]);
+        assert_eq!(error.details["cause"]["next"]["version"], VERSION);
+        assert!(!f.target.exists());
+        assert_eq!(f.snapshot(), before);
+    }
+}
+
+#[test]
+fn prepared_archive_source_change_is_rejected_before_publication() {
+    for commit_only in [false, true] {
+        let f = Fixture::new();
+        seed_main(&f);
+        let archive = f.root.join("archive-a");
+        let (error, before, record) =
+            source_change_during_prepared(&f, Some(&archive), commit_only);
+        assert_eq!(
+            error.message,
+            "prepared replacement differs from frozen combined receipt"
+        );
+        let cause = &error.details["cause"];
+        assert_eq!(cause["cause"]["details"]["wanted"], record["wanted"]);
+        let retained = PathBuf::from(cause["retainedPreparation"].as_str().unwrap());
+        assert_eq!(retained.parent().unwrap(), f.root);
+        assert!(
+            retained
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with(".lycheedev-prepare-")
+        );
+        assert!(!archive.exists());
+        assert!(!retained.join("replacement.json").exists());
+        let staged = installation::inspect_main_controlled(
+            &retained.join("next"),
+            "addon",
+            &OperationControl::default(),
+        )
+        .unwrap();
+        assert_eq!(staged["state"], "managed");
+        assert_eq!(staged["receipt"], cause["cause"]["details"]["next"]);
+        // Only the existing owned-preparation evidence is retained. No main,
+        // archive, slot or combined-journal bytes may change after the check.
+        let mut after = f.snapshot();
+        let relative = retained.strip_prefix(&f.root).unwrap();
+        after.retain(|path, _| !path.starts_with(relative));
+        assert_eq!(after, before);
+    }
+}
+
+fn assert_pending_conflict(
+    f: &Fixture,
+    archive: Option<&Path>,
+    path: &Path,
+    record: &Value,
+    message: &str,
+) -> ToolkitError {
+    let control = OperationControl::default();
+    let guard = InstallationGuard::acquire(&f.target).unwrap();
+    let before = f.snapshot();
+    let mut last = None;
+    for (release, resume) in [
+        (Some(f.release.as_path()), false),
+        (Some(f.release.as_path()), true),
+        (None, true),
+    ] {
+        let error = f
+            .apply(release, archive, VERSION, resume, &control, &guard)
+            .unwrap_err();
+        assert_eq!(error.code, "delivery.installation_conflict");
+        assert_eq!(error.exit_code, 4);
+        assert_eq!(error.message, message);
+        assert_eq!(error.details["result"]["complete"], false);
+        assert_eq!(error.details["result"]["phase"], record["phase"]);
+        assert_eq!(error.details["result"]["journal"], json!(path));
+        assert_eq!(error.details["result"]["main"], record["result"]);
+        assert_eq!(f.snapshot(), before);
+        assert_installation_lock_released(&f.target, &control);
+        last = Some(error);
+    }
+    guard.close().unwrap();
+    last.unwrap()
+}
+
+fn assert_slots_replacement_rejected(commit_only: bool) {
+    for archived_original in [false, true] {
+        let f = Fixture::new();
+        let archive = f.root.join("archive-a");
+        let original_archive = archived_original.then_some(archive.as_path());
+        if archived_original {
+            seed_main(&f);
+        }
+        let (path, record) = pause_combined(&f, original_archive, Step::Slots);
+        let replacement = replacement_release(&f, commit_only);
+        let control = OperationControl::default();
+        let result_b = deploy::upgrade_controlled(
+            Some(&replacement),
+            &f.target,
+            &f.root.join("archive-b"),
+            "addon",
+            VERSION,
+            false,
+            &control,
+        )
+        .unwrap();
+        installation::verify_clean(&f.target, VERSION, slots::TRANSPORT, slots::COUNT).unwrap();
+        let installed_b =
+            installation::inspect_main_controlled(&f.target, "addon", &control).unwrap();
+        assert_eq!(result_b["receipt"], installed_b["receipt"]);
+        assert!(
+            !installation::same_receipt_value(&installed_b["receipt"], &record["wanted"]).unwrap()
+        );
+        for reordered in [false, true] {
+            if reordered {
+                reverse_resources(&f.release.join("release.json"));
+                assert_ne!(f.intent(&f.release, original_archive, VERSION), path);
+            }
+            let error = assert_pending_conflict(
+                &f,
+                original_archive,
+                &path,
+                &record,
+                "main addon differs from frozen combined receipt after slot installation",
+            );
+            assert_eq!(error.details["cause"]["wanted"], record["wanted"]);
+            assert_eq!(error.details["cause"]["installed"], installed_b);
+        }
+    }
+}
+
+#[test]
+fn slots_checkpoint_rejects_same_version_content_replacement_without_mutation() {
+    assert_slots_replacement_rejected(false);
+}
+
+#[test]
+fn slots_checkpoint_rejects_same_version_commit_replacement_without_mutation() {
+    assert_slots_replacement_rejected(true);
+}
+
+#[test]
+fn slots_checkpoint_resumes_matching_and_reordered_receipts_without_replay() {
+    for archived_original in [false, true] {
+        for reordered in [false, true] {
+            for request_kind in 0..3 {
+                let f = Fixture::new();
+                let archive = f.root.join("archive-a");
+                let original_archive = archived_original.then_some(archive.as_path());
+                if archived_original {
+                    seed_main(&f);
+                }
+                let (path, record) = pause_combined(&f, original_archive, Step::Slots);
+                if reordered {
+                    reverse_resources(&f.target.join(installation::MARKER));
+                    reverse_resources(&f.release.join("release.json"));
+                    assert_ne!(f.intent(&f.release, original_archive, VERSION), path);
+                }
+                let mut expected = f.snapshot();
+                let mut completed = load(&path, &OperationControl::default()).unwrap();
+                completed.phase = "complete".into();
+                expected.insert(
+                    path.strip_prefix(&f.root).unwrap().to_path_buf(),
+                    Some(serde_json::to_vec_pretty(&completed).unwrap()),
+                );
+                let control = OperationControl::default();
+                let guard = InstallationGuard::acquire(&f.target).unwrap();
+                let release = (request_kind != 2).then_some(f.release.as_path());
+                let result = f
+                    .apply(
+                        release,
+                        original_archive,
+                        VERSION,
+                        request_kind != 0,
+                        &control,
+                        &guard,
+                    )
+                    .unwrap();
+                assert_eq!(result, record["result"]);
+                assert_eq!(f.snapshot(), expected);
+                assert_eq!(
+                    f.apply(None, original_archive, VERSION, true, &control, &guard)
+                        .unwrap(),
+                    result
+                );
+                assert_eq!(f.snapshot(), expected);
+                installation::verify_clean(&f.target, VERSION, slots::TRANSPORT, slots::COUNT)
+                    .unwrap();
+                guard.close().unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn prepared_archive_checkpoint_rejects_changed_predecessor_without_mutation() {
+    let f = Fixture::new();
+    seed_main(&f);
+    let archive = f.root.join("archive-a");
+    let (path, record) = pause_combined(&f, Some(&archive), Step::Prepared);
+    assert!(!archive.exists());
+    let replacement = replacement_release(&f, false);
+    let control = OperationControl::default();
+    deploy::upgrade_controlled(
+        Some(&replacement),
+        &f.target,
+        &f.root.join("archive-b"),
+        "addon",
+        VERSION,
+        false,
+        &control,
+    )
+    .unwrap();
+    let installed_b = installation::inspect_main_controlled(&f.target, "addon", &control).unwrap();
+    let error = assert_pending_conflict(
+        &f,
+        Some(&archive),
+        &path,
+        &record,
+        "main addon changed after combined preparation",
+    );
+    assert_eq!(
+        error.details["cause"]["previous"],
+        record["previous"]["receipt"]
+    );
+    assert_eq!(error.details["cause"]["installed"], installed_b);
+    assert!(!archive.exists());
+}
+
+fn nested_checkpoint(f: &Fixture, release: &Path, archive: &Path, cut: deploy::UpgradeCheckpoint) {
+    let result =
+        deploy::interrupt_addon_upgrade_for_test(release, &f.target, archive, VERSION, cut);
+    match cut {
+        deploy::UpgradeCheckpoint::Published => {
+            // The completed publication is retained even if the observer cancels
+            // afterward; the combined checkpoint has not advanced yet.
+            result.unwrap();
+            assert!(f.target.exists());
+            assert!(!archive.join("next").exists());
+        }
+        deploy::UpgradeCheckpoint::ArchivePublished => {
+            assert_eq!(result.unwrap_err().code, "command.cancelled");
+            assert!(f.target.exists());
+            assert!(!archive.join("previous").exists());
+            assert!(archive.join("next").exists());
+        }
+        deploy::UpgradeCheckpoint::OldMoved => {
+            assert_eq!(result.unwrap_err().code, "command.cancelled");
+            assert!(!f.target.exists());
+            assert!(archive.join("previous").exists());
+            assert!(archive.join("next").exists());
+        }
+    }
+    assert!(archive.join("replacement.json").is_file());
+    assert_installation_lock_released(&f.target, &OperationControl::default());
+}
+
+const NESTED_CHECKPOINTS: [deploy::UpgradeCheckpoint; 3] = [
+    deploy::UpgradeCheckpoint::ArchivePublished,
+    deploy::UpgradeCheckpoint::OldMoved,
+    deploy::UpgradeCheckpoint::Published,
+];
+
+#[test]
+fn prepared_archive_checkpoint_rejects_nested_changed_next_before_publication() {
+    for cut in NESTED_CHECKPOINTS {
+        for commit_only in [false, true] {
+            let f = Fixture::new();
+            seed_main(&f);
+            let archive = f.root.join("archive-a");
+            let (path, record) = pause_combined(&f, Some(&archive), Step::Prepared);
+            let replacement = replacement_release(&f, commit_only);
+            nested_checkpoint(&f, &replacement, &archive, cut);
+            let nested: Value = storage::read_json(&archive.join("replacement.json")).unwrap();
+            assert!(
+                installation::same_receipt_value(
+                    &nested["previous"],
+                    &record["previous"]["receipt"]
+                )
+                .unwrap()
+            );
+            assert!(!installation::same_receipt_value(&nested["next"], &record["wanted"]).unwrap());
+            let error = assert_pending_conflict(
+                &f,
+                Some(&archive),
+                &path,
+                &record,
+                "replacement intent differs from frozen combined receipts",
+            );
+            assert_eq!(
+                error.details["cause"]["previous"],
+                record["previous"]["receipt"]
+            );
+            assert_eq!(error.details["cause"]["wanted"], record["wanted"]);
+            assert_eq!(error.details["cause"]["replacement"], nested);
+        }
+    }
+}
+
+#[test]
+fn prepared_archive_checkpoint_rejects_nested_changed_previous_before_publication() {
+    for cut in NESTED_CHECKPOINTS {
+        let f = Fixture::new();
+        seed_main(&f);
+        let archive = f.root.join("archive-a");
+        let (path, record) = pause_combined(&f, Some(&archive), Step::Prepared);
+        let replacement = replacement_release(&f, false);
+        deploy::upgrade_controlled(
+            Some(&replacement),
+            &f.target,
+            &f.root.join("archive-b"),
+            "addon",
+            VERSION,
+            false,
+            &OperationControl::default(),
+        )
+        .unwrap();
+        nested_checkpoint(&f, &f.release, &archive, cut);
+        let nested: Value = storage::read_json(&archive.join("replacement.json")).unwrap();
+        assert!(
+            !installation::same_receipt_value(&nested["previous"], &record["previous"]["receipt"])
+                .unwrap()
+        );
+        assert!(installation::same_receipt_value(&nested["next"], &record["wanted"]).unwrap());
+        let error = assert_pending_conflict(
+            &f,
+            Some(&archive),
+            &path,
+            &record,
+            "replacement intent differs from frozen combined receipts",
+        );
+        assert_eq!(
+            error.details["cause"]["previous"],
+            record["previous"]["receipt"]
+        );
+        assert_eq!(error.details["cause"]["wanted"], record["wanted"]);
+        assert_eq!(error.details["cause"]["replacement"], nested);
+    }
+}
+
+#[test]
+fn prepared_archive_checkpoint_resumes_each_matching_nested_state() {
+    for cut in NESTED_CHECKPOINTS {
+        for reordered in [false, true] {
+            let f = Fixture::new();
+            seed_main(&f);
+            let archive = f.root.join("archive-a");
+            let (path, record) = pause_combined(&f, Some(&archive), Step::Prepared);
+            nested_checkpoint(&f, &f.release, &archive, cut);
+            if reordered {
+                let nested_path = archive.join("replacement.json");
+                let mut nested: Value = storage::read_json(&nested_path).unwrap();
+                nested["previous"]["resources"]
+                    .as_array_mut()
+                    .unwrap()
+                    .reverse();
+                nested["next"]["resources"]
+                    .as_array_mut()
+                    .unwrap()
+                    .reverse();
+                storage::atomic_json(&nested_path, &nested).unwrap();
+                reverse_resources(&f.release.join("release.json"));
+                for directory in [&f.target, &archive.join("previous"), &archive.join("next")] {
+                    if directory.exists() {
+                        reverse_resources(&directory.join(installation::MARKER));
+                    }
+                }
+            }
+            let nested_bytes = fs::read(archive.join("replacement.json")).unwrap();
+            let control = OperationControl::default();
+            let guard = InstallationGuard::acquire(&f.target).unwrap();
+            let result = f
+                .apply(None, Some(&archive), VERSION, true, &control, &guard)
+                .unwrap();
+            assert!(
+                installation::same_receipt_value(&result["receipt"], &record["wanted"]).unwrap()
+            );
+            let done: Value = storage::read_json(&path).unwrap();
+            assert_eq!(done["phase"], "complete");
+            assert_eq!(done["wanted"], record["wanted"]);
+            assert_eq!(done["previous"], record["previous"]);
+            assert_eq!(done["result"], result);
+            assert_eq!(
+                fs::read(archive.join("replacement.json")).unwrap(),
+                nested_bytes
+            );
+            assert_eq!(
+                fs::read(archive.join("previous/Bridge/SlotRuntime.lua")).unwrap(),
+                b"-- predecessor P\n"
+            );
+            assert_eq!(
+                fs::read(f.target.join("Bridge/SlotRuntime.lua")).unwrap(),
+                b"-- release A\n"
+            );
+            installation::verify_clean(&f.target, VERSION, slots::TRANSPORT, slots::COUNT).unwrap();
+            let before = f.snapshot();
+            assert_eq!(
+                f.apply(
+                    Some(&f.release),
+                    Some(&archive),
+                    VERSION,
+                    true,
+                    &control,
+                    &guard
+                )
+                .unwrap(),
+                result
+            );
+            assert_eq!(f.snapshot(), before);
+            guard.close().unwrap();
+        }
+    }
+}
+
+#[test]
+fn prepared_checkpoint_resumes_matching_fresh_and_upgrade_without_nested_record() {
+    for upgrade in [false, true] {
+        let f = Fixture::new();
+        let archive = f.root.join("archive-a");
+        let selected = upgrade.then_some(archive.as_path());
+        if upgrade {
+            seed_main(&f);
+        }
+        let (path, record) = pause_combined(&f, selected, Step::Prepared);
+        let control = OperationControl::default();
+        let guard = InstallationGuard::acquire(&f.target).unwrap();
+        let before = f.snapshot();
+        let error = f
+            .apply(None, selected, VERSION, true, &control, &guard)
+            .unwrap_err();
+        assert_eq!(error.code, "command.invalid_arguments");
+        assert_eq!(f.snapshot(), before);
+        reverse_resources(&f.release.join("release.json"));
+        if upgrade {
+            reverse_resources(&f.target.join(installation::MARKER));
+        }
+        let result = f
+            .apply(Some(&f.release), selected, VERSION, true, &control, &guard)
+            .unwrap();
+        let done: Value = storage::read_json(&path).unwrap();
+        assert_eq!(done["phase"], "complete");
+        assert_eq!(done["wanted"], record["wanted"]);
+        assert_eq!(done["previous"], record["previous"]);
+        assert_eq!(done["result"], result);
+        installation::verify_clean(&f.target, VERSION, slots::TRANSPORT, slots::COUNT).unwrap();
+        guard.close().unwrap();
+    }
+}
+
+#[test]
+fn prepared_no_archive_checkpoint_rejects_intervening_managed_install_without_mutation() {
+    let f = Fixture::new();
+    let (path, record) = pause_combined(&f, None, Step::Prepared);
+    let replacement = replacement_release(&f, false);
+    deploy::fresh_controlled(
+        &replacement,
+        &f.target,
+        "addon",
+        VERSION,
+        &OperationControl::default(),
+    )
+    .unwrap();
+    assert_pending_conflict(
+        &f,
+        None,
+        &path,
+        &record,
+        "main addon changed after combined preparation",
+    );
+}
+
+#[test]
+fn main_checkpoint_rejects_same_version_replacement_without_replay() {
+    for commit_only in [false, true] {
+        let f = Fixture::new();
+        let (path, record) = pause_combined(&f, None, Step::Main);
+        let replacement = replacement_release(&f, commit_only);
+        deploy::upgrade_controlled(
+            Some(&replacement),
+            &f.target,
+            &f.root.join("archive-b"),
+            "addon",
+            VERSION,
+            false,
+            &OperationControl::default(),
+        )
+        .unwrap();
+        assert_pending_conflict(
+            &f,
+            None,
+            &path,
+            &record,
+            "main addon was edited while slots were pending",
+        );
+    }
+}
+
+#[test]
+fn main_checkpoint_resumes_matching_and_reordered_receipts() {
+    for reordered in [false, true] {
+        let f = Fixture::new();
+        let (path, record) = pause_combined(&f, None, Step::Main);
+        if reordered {
+            reverse_resources(&f.target.join(installation::MARKER));
+            reverse_resources(&f.release.join("release.json"));
+        }
+        let control = OperationControl::default();
+        let guard = InstallationGuard::acquire(&f.target).unwrap();
+        assert_eq!(
+            f.apply(Some(&f.release), None, VERSION, true, &control, &guard)
+                .unwrap(),
+            record["result"]
+        );
+        let done: Value = storage::read_json(&path).unwrap();
+        assert_eq!(done["phase"], "complete");
+        assert_eq!(done["wanted"], record["wanted"]);
+        assert_eq!(done["previous"], record["previous"]);
+        installation::verify_clean(&f.target, VERSION, slots::TRANSPORT, slots::COUNT).unwrap();
+        guard.close().unwrap();
+    }
+}
+
+#[test]
+fn pending_checkpoints_preserve_cancellation_and_deadline_without_mutation() {
+    for cut in [Step::Prepared, Step::Main, Step::Slots] {
+        let f = Fixture::new();
+        let (path, record) = pause_combined(&f, None, cut);
+        let guard = InstallationGuard::acquire(&f.target).unwrap();
+        let before = f.snapshot();
+        let cancelled = OperationControl::default();
+        cancelled.tracked_cancel_handle().unwrap().cancel();
+        let expired = OperationControl::uncancelable(Instant::now());
+        for (stopped, code) in [
+            (&cancelled, "command.cancelled"),
+            (&expired, "command.deadline"),
+        ] {
+            let error = f
+                .apply(None, None, VERSION, true, stopped, &guard)
+                .unwrap_err();
+            assert_eq!(error.code, code);
+            assert_eq!(f.snapshot(), before);
+            let durable: Value = storage::read_json(&path).unwrap();
+            assert_eq!(durable, record);
+            assert_installation_lock_released(&f.target, &OperationControl::default());
+        }
+        guard.close().unwrap();
+    }
+}
+
 #[test]
 fn completed_intent_rejects_same_version_replacement_without_replay_or_mutation() {
     for archived_original in [false, true] {

@@ -4,7 +4,17 @@ Started 2026-10-17 21:40 UTC. Production baseline: `b4d8b22a666648ee0fe18a3f2656
 
 Three independent read-only reviews covered architecture/public consumers, Source/Data quality, and actual Skill workflows. Findings below distinguish source-confirmed defects from exact-tree Windows results. A code candidate is not a closed finding: each needs exact-tree offline verification, independent re-review, and another Stage 1 pass. Stage 2 has not started. Performance remains open and does not block this correctness audit.
 
-## Current closure mapping and third consumer review — 2026-10-18 05:14 UTC
+## Current fourth consumer review — 2026-10-18 05:52 UTC
+
+Fixed reviewed tree: `9c2aa103c64e8856e93b5b121ea1082689dda53d`. Three fresh non-author reviewers traced actual repaired consumers. Data source retention/verification, capture and stream failure boundaries, scalar array rejection; Source authenticated persisted headers/shared condition helpers; Core bounded same-handle marker; and Probe stored-zero versus synthetic fallback had no new actionable finding in this scope. This static conclusion is distinct from runtime verification and is not Stage1 completion.
+
+Delivery's full phase matrix found additional cases within the existing recovery-identity finding: persisted slots could complete against clean different same-version content; prepared/archive could adopt a changed predecessor before any nested journal existed; an existing nested replacement's previous/next receipts were not bound to the combined record before moves; fresh no-archive preparation could republish re-read release bytes differing from the frozen receipt. The successor binds receipts at existing reads before publication and checks exact wanted identity before completion, preserving supported partial recovery states. Fourteen new test entrypoints use actual persisted checkpoints, legitimate same-version replacements, matching/reordered receipts, nested partial-state recovery and source changes; all remain NOT_RUN pending the exact successor.
+
+38a7 Delivery actual145/0/0 includes10 new tests. 9c2 actual all-targets, Core cache65/0/0, Probe16/0/0, Source lib682/0/4 include their23 new tests; Data is still running and integration groups are pending as of this record. Original failures, auxiliary-cleanup facts and ignored tests remain unchanged.
+
+99a/0002 installed Skill has advanced past the previous candidate-authentication failure: Node70 passed;19/42 children,15 public CLI calls,4/16 verified CAPs,13 checks passed,1 failed,12 not run. Actual catalog-analyze exposed a typed numeric-layout mismatch: plan results publish null rows but the layout requires an array. The bounded successor selects the layout from QueryResult.plan and adds3 real CLI tests spanning21 query and21 evidence-verification calls. Tests are NOT_RUN; independent static review verified four final files, numeric fidelity and unchanged lockfile package identities. Stage1 remains open; Stage2 has not started.
+
+## Historical closure mapping and third consumer review — 2026-10-18 05:14 UTC
 
 0002 directed Windows verification passed29/0/2 plus all-targets: local4, remote2, catalog7/1ignored, WDC16/1ignored. All four previous CSV failures now pass by name. 1f Data lib1161/4/1 remains historical; no full0002 Data-lib aggregate is claimed. cbff canonical workspace33/archive4/CLI init6 and22da asset2/inspect15 close their respective old failures. The original21 repairs each have relevant executed regression evidence, not a final no-defect conclusion. Matching0002 release is running; actual installed Skill is pending.
 
