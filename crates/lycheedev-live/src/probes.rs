@@ -41,7 +41,7 @@ fn revision_valid(r: &Revision) -> Result<Vec<u8>> {
         || r.bytes != code.len()
         || code.is_empty()
         || code.len() > 262144
-        || chrono::DateTime::parse_from_rfc3339(&r.created_at).is_err()
+        || !stored_timestamp_valid(&r.created_at)
     {
         return Err(ToolkitError::new(
             "live.probe_revision_corrupt",
@@ -55,7 +55,7 @@ fn validate_name(n: &Name) -> Result<()> {
     if n.schema != "lycheedev.probe-name.v1"
         || !name_valid(&n.name)
         || !n.revision.starts_with("PRB-")
-        || chrono::DateTime::parse_from_rfc3339(&n.updated_at).is_err()
+        || !stored_timestamp_valid(&n.updated_at)
     {
         return Err(ToolkitError::new(
             "live.probe_name_corrupt",
@@ -64,6 +64,13 @@ fn validate_name(n: &Name) -> Result<()> {
         ));
     }
     Ok(())
+}
+fn stored_timestamp_valid(value: &str) -> bool {
+    // Go's zero is year 1 UTC, including fractional and offset spellings of
+    // that same instant. Keep the existing RFC3339 admission otherwise.
+    chrono::DateTime::parse_from_rfc3339(value).is_ok_and(|time| {
+        (time.timestamp(), time.timestamp_subsec_nanos()) != (-62_135_596_800, 0)
+    })
 }
 pub fn code(inv: &Invocation, selector: &str) -> Result<Vec<u8>> {
     let shown = show(inv, selector)?;

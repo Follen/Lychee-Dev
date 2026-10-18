@@ -36,6 +36,12 @@ pub struct LoadContext {
 pub(crate) enum LoadDecision { Include(String), Exclude, Unavailable(String) }
 impl LoadContext {
     pub(crate) fn for_manifest(manifest:&str,raw:&[u8],source:Option<&Value>)->Self {
+        let headers=crate::facts::toc(raw).headers;
+        Self::for_manifest_headers(manifest,headers.iter().map(|header|(header.key.as_str(),header.value.as_str())),source)
+    }
+    /// The authenticated index preserves these parser-observed fields, including
+    /// duplicates and order. Borrowing them does not require original-byte I/O.
+    pub(crate) fn for_manifest_headers<'a>(manifest:&str,headers:impl IntoIterator<Item=(&'a str,&'a str)>,source:Option<&Value>)->Self {
         let mut context=Self{family:None,game:None,mode:GameMode::Standard,phase:"game",assumption:"hypothetical_source_load_not_observed_runtime",basis:vec!["default_source_research_mode_is_standard_unless_manifest_selects_a_mode".into()],uncertainties:vec![]};
         if let Some(source)=source.filter(|source|source["repository"]=="wow-ui-source") {
             // Product/layout associations are from the pinned source baselines,
@@ -45,9 +51,9 @@ impl LoadContext {
         }
         let suffix=manifest.rsplit('/').next().unwrap_or(manifest).strip_suffix(".toc").unwrap_or(manifest).rsplit('_').next().unwrap_or("").to_ascii_lowercase();
         context.select_manifest_tags(&[suffix.as_str()],"manifest_suffix");
-        for header in crate::facts::toc(raw).headers {
-            if header.key.eq_ignore_ascii_case("AllowLoadGameType") {
-                let tags=condition_tags(&header.value);
+        for (key,value) in headers {
+            if key.eq_ignore_ascii_case("AllowLoadGameType") {
+                let tags=condition_tags(value);
                 context.select_manifest_tags(&tags,"manifest_AllowLoadGameType");
             }
         }
@@ -103,11 +109,16 @@ impl LoadContext {
     }
     pub(crate) fn manifest_admission(&self,raw:&[u8])->LoadDecision{
         if !self.uncertainties.is_empty(){return LoadDecision::Unavailable(self.uncertainties.join("; "));}
+        let headers=crate::facts::toc(raw).headers;
+        self.manifest_admission_headers(headers.iter().map(|header|(header.key.as_str(),header.value.as_str())))
+    }
+    pub(crate) fn manifest_admission_headers<'a>(&self,headers:impl IntoIterator<Item=(&'a str,&'a str)>)->LoadDecision{
+        if !self.uncertainties.is_empty(){return LoadDecision::Unavailable(self.uncertainties.join("; "));}
         let mut unknown=Vec::new();
-        for header in crate::facts::toc(raw).headers {
-            let key=header.key.to_ascii_lowercase();
-            if !key.starts_with("allowload")&&!key.starts_with("excludeload"){continue;}
-            match self.condition(&header.key,&header.value){Some(true)=>{},Some(false)=>return LoadDecision::Exclude,None=>unknown.push(format!("{}: {}",header.key,header.value))}
+        for (key,value) in headers {
+            let lower=key.to_ascii_lowercase();
+            if !lower.starts_with("allowload")&&!lower.starts_with("excludeload"){continue;}
+            match self.condition(key,value){Some(true)=>{},Some(false)=>return LoadDecision::Exclude,None=>unknown.push(format!("{key}: {value}"))}
         }
         if unknown.is_empty(){LoadDecision::Include(String::new())}else{LoadDecision::Unavailable(format!("unresolved manifest conditions: {}",unknown.join("; ")))}
     }

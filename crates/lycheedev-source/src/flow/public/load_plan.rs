@@ -1,6 +1,7 @@
 //! Bounded literal load traversal. Repeated loads remain occurrences; only
 //! active ancestors are cycles. Partial plans never prove a unique load order.
 use super::{gap, index};
+use crate::xml_load::{LoadContext, LoadDecision};
 use lycheedev_core::{Result, control::OperationControl};
 use serde_json::{Value, json};
 use std::{
@@ -39,6 +40,7 @@ impl Default for Limits {
 pub(super) struct Selection {
     pub ordered: Option<Vec<String>>,
     pub input_gaps: Vec<Value>,
+    pub input_bytes: usize,
     pub load_evidence: Value,
 }
 
@@ -48,6 +50,7 @@ struct Budget<'a, F> {
     limits: Limits,
     work: usize,
     paths: usize,
+    input_bytes: usize,
     issues: usize,
     issue_bytes: usize,
     exhausted: bool,
@@ -145,6 +148,7 @@ struct Frame {
 fn walk<F: FnMut(usize)>(
     plan: &mut Plan,
     loads: &BTreeMap<&str, Vec<&index::LoadFact>>,
+    context: &LoadContext,
     budget: &mut Budget<'_, F>,
 ) -> Result<()> {
     let mut active = BTreeSet::new();
@@ -168,7 +172,31 @@ fn walk<F: FnMut(usize)>(
             continue;
         };
         frame.next += 1;
-        let Some(target) = resolve(&frame.path, &edge.target) else {
+        // Bound the original line before conditional parsing can allocate.
+        // Facts remain unchanged; only the derived selection is decoded.
+        let decoded = if edge.target.len() > PATH_LIMIT {
+            None
+        } else {
+            match context.target(&edge.target) {
+                LoadDecision::Include(target) => Some(target),
+                LoadDecision::Exclude => continue,
+                LoadDecision::Unavailable(reason) => {
+                    let from = bounded(&frame.path);
+                    let target = bounded(&edge.target);
+                    let reason = bounded(&reason);
+                    let mut detail =
+                        String::with_capacity(from.len() + target.len() + reason.len() + 24);
+                    write!(&mut detail, "{from}:{} {target}: {reason}", edge.line)
+                        .expect("String writing is infallible");
+                    budget.issue(&mut plan.issues, "load_condition_unavailable", detail);
+                    continue;
+                }
+            }
+        };
+        let Some(target) = decoded
+            .as_deref()
+            .and_then(|target| resolve(&frame.path, target))
+        else {
             let from = bounded(&frame.path);
             let target = bounded(&edge.target);
             let mut detail = String::with_capacity(from.len() + target.len() + 22);
@@ -197,19 +225,41 @@ fn walk<F: FnMut(usize)>(
     Ok(())
 }
 
-pub(super) fn collect<'a>(
+/// context_flow receives the full index from the current fingerprinted v6
+/// cache/build gate. Header symbols are mandatory persisted parser observations;
+/// unlike Document.facts, an empty current projection really means no headers.
+pub(super) fn collect(
     selected: &str,
-    roots: impl IntoIterator<Item = &'a str>,
-    facts: &'a [index::LoadFact],
+    index: &index::Index,
+    facts: &[index::LoadFact],
+    source: &Value,
     control: &OperationControl,
 ) -> Result<Selection> {
-    collect_with(selected, roots, facts, control, Limits::default(), |_| {})
+    let complete_projection = index.summary["schema"] == "lycheedev.source-map.v2"
+        && index.summary["documents"].as_u64() == Some(index.documents.len() as u64)
+        && ["repository", "product", "commit"]
+            .iter()
+            .all(|key| source[*key].is_string() && index.summary[*key] == source[*key]);
+    collect_with(
+        selected,
+        index.documents.iter(),
+        facts,
+        &index.symbols,
+        complete_projection,
+        Some(source),
+        control,
+        Limits::default(),
+        |_| {},
+    )
 }
 
 fn collect_with<'a>(
     selected: &str,
-    roots: impl IntoIterator<Item = &'a str>,
-    facts: &'a [index::LoadFact],
+    roots: impl IntoIterator<Item = &'a index::Document>,
+    facts: &[index::LoadFact],
+    symbols: &[index::Symbol],
+    complete_projection: bool,
+    source: Option<&Value>,
     control: &OperationControl,
     limits: Limits,
     observer: impl FnMut(usize),
@@ -220,6 +270,7 @@ fn collect_with<'a>(
         limits,
         work: 0,
         paths: 0,
+        input_bytes: 0,
         issues: 0,
         issue_bytes: 0,
         exhausted: false,
@@ -241,9 +292,62 @@ fn collect_with<'a>(
         }
         loads.entry(&fact.path).or_default().push(fact);
     }
+    // The already authenticated index bounds the scan. Only header references
+    // are retained; each consumes the existing work budget before insertion.
+    let mut headers = BTreeMap::<&str, Vec<&index::Symbol>>::new();
+    if !complete_projection {
+        budget.issue(
+            &mut invalid_facts,
+            "load_header_evidence_unavailable",
+            "current complete indexed TOC header projection is unavailable".into(),
+        );
+    } else if !budget.exhausted {
+        for header in symbols {
+            control.check()?;
+            if header.kind != "header" {
+                if header.category == "toc-field" {
+                    budget.issue(
+                        &mut invalid_facts,
+                        "load_header_evidence_unavailable",
+                        bounded(&header.path).to_owned(),
+                    );
+                }
+                continue;
+            }
+            if !budget.step()? {
+                break;
+            }
+            if header.category != "toc-field"
+                || header.line == 0
+                || header.end_line != header.line
+                || !crate::git::source_path(&header.path)
+                || !header
+                    .path
+                    .get(header.path.len().saturating_sub(4)..)
+                    .is_some_and(|tail| tail.eq_ignore_ascii_case(".toc"))
+            {
+                budget.issue(
+                    &mut invalid_facts,
+                    "load_header_evidence_unavailable",
+                    bounded(&header.path).to_owned(),
+                );
+                continue;
+            }
+            let bytes = header.name.len().saturating_add(header.target.len());
+            if bytes > super::INPUT_BYTES.saturating_sub(budget.input_bytes) {
+                budget.exhausted = true;
+                break;
+            }
+            // Metadata and later Lua bytes share the one public input allowance.
+            // Borrowed metadata is not a second I/O or retained-original budget.
+            budget.input_bytes += bytes;
+            headers.entry(&header.path).or_default().push(header);
+        }
+    }
     let mut plans = Vec::new();
-    if !budget.exhausted {
-        for root in roots {
+    if !budget.exhausted && complete_projection {
+        for document in roots {
+            let root = document.path.as_str();
             if !budget.step()? {
                 break;
             }
@@ -284,12 +388,38 @@ fn collect_with<'a>(
                 order: vec![],
                 issues: vec![],
             };
-            walk(&mut plan, &loads, &mut budget)?;
+            let manifest_headers = headers.remove(document.path.as_str()).unwrap_or_default();
+            let fields = || {
+                manifest_headers
+                    .iter()
+                    .map(|header| (header.name.as_str(), header.target.as_str()))
+            };
+            control.check()?;
+            let context = LoadContext::for_manifest_headers(&document.path, fields(), source);
+            let admission = context.manifest_admission_headers(fields());
+            control.check()?;
+            match admission {
+                LoadDecision::Include(_) => walk(&mut plan, &loads, &context, &mut budget)?,
+                LoadDecision::Exclude => {}
+                LoadDecision::Unavailable(reason) => budget.issue(
+                    &mut plan.issues,
+                    "toc_manifest_condition_unavailable",
+                    format!("{}: {}", bounded(&document.path), bounded(&reason)),
+                ),
+            }
             plans.push(plan);
             if budget.exhausted {
                 break;
             }
         }
+    }
+    if !budget.exhausted && complete_projection && !headers.is_empty() {
+        let path = *headers.keys().next().expect("nonempty headers");
+        budget.issue(
+            &mut invalid_facts,
+            "load_header_evidence_unavailable",
+            bounded(path).to_owned(),
+        );
     }
     control.check()?;
     let incomplete = budget.exhausted
@@ -308,7 +438,7 @@ fn collect_with<'a>(
     if budget.exhausted {
         let terminal = gap(
             "load_budget",
-            "TOC/XML load traversal exceeded its work, occurrence, path, or issue budget; unseen loads remain unknown",
+            "TOC/XML load traversal exceeded its work, occurrence, path, input-byte, or issue budget; unseen loads remain unknown",
         );
         if let Some(last) = plans.last_mut() {
             last.issues.push(terminal.clone());
@@ -334,7 +464,7 @@ fn collect_with<'a>(
     }
     let mut load_evidence = json!({
         "basis":"pinned_toc_xml_literals", "runtimeExecution":false,
-        "budget":{"work":budget.work,"workLimit":limits.work,"pathBytes":budget.paths,"pathBytesLimit":limits.paths,"issues":budget.issues,"issueBytes":budget.issue_bytes,"exhausted":budget.exhausted}
+        "budget":{"work":budget.work,"workLimit":limits.work,"pathBytes":budget.paths,"pathBytesLimit":limits.paths,"metadataBytes":budget.input_bytes,"inputBytesLimit":super::INPUT_BYTES,"issues":budget.issues,"issueBytes":budget.issue_bytes,"exhausted":budget.exhausted}
     });
     let evidence = load_evidence.as_object_mut().expect("load evidence object");
     evidence.insert("candidates".into(), Value::Array(candidate_evidence));
@@ -344,6 +474,7 @@ fn collect_with<'a>(
     Ok(Selection {
         ordered,
         input_gaps,
+        input_bytes: budget.input_bytes,
         load_evidence,
     })
 }
@@ -358,6 +489,48 @@ mod tests {
         },
         time::{Duration, Instant},
     };
+    fn document(path: &str, raw: &[u8]) -> index::Document {
+        index::Document {
+            path: path.into(),
+            text: Some(raw.into()),
+            bytes: raw.len(),
+            sha256: lycheedev_core::storage::sha256(raw),
+            facts: Default::default(),
+            facts_locator: None,
+        }
+    }
+    fn test_collect<'a>(
+        selected: &str,
+        roots: impl IntoIterator<Item = &'a str>,
+        facts: &[index::LoadFact],
+        control: &OperationControl,
+    ) -> Result<Selection> {
+        test_collect_with(selected, roots, facts, control, Limits::default(), |_| {})
+    }
+    fn test_collect_with<'a>(
+        selected: &str,
+        roots: impl IntoIterator<Item = &'a str>,
+        facts: &[index::LoadFact],
+        control: &OperationControl,
+        limits: Limits,
+        observer: impl FnMut(usize),
+    ) -> Result<Selection> {
+        let roots = roots
+            .into_iter()
+            .map(|path| document(path, b""))
+            .collect::<Vec<_>>();
+        collect_with(
+            selected,
+            &roots,
+            facts,
+            &[],
+            true,
+            None,
+            control,
+            limits,
+            observer,
+        )
+    }
     fn fact(path: &str, target: &str) -> index::LoadFact {
         index::LoadFact {
             path: path.into(),
@@ -368,7 +541,7 @@ mod tests {
         }
     }
     fn run(selected: &str, roots: &[&str], facts: &[index::LoadFact]) -> Selection {
-        collect(
+        test_collect(
             selected,
             roots.iter().copied(),
             facts,
@@ -441,7 +614,7 @@ mod tests {
     #[test]
     fn flow_load_total_work_budget_is_shared_across_manifests() {
         let roots = (0..WORK).map(|n| format!("{n}.toc")).collect::<Vec<_>>();
-        let result = collect(
+        let result = test_collect(
             "never.lua",
             roots.iter().map(String::as_str),
             &[],
@@ -471,7 +644,7 @@ mod tests {
         let control =
             OperationControl::new(Instant::now() + Duration::from_secs(60), token.clone());
         let facts = dag(30);
-        let error = collect_with(
+        let error = test_collect_with(
             "never.lua",
             ["Main.toc"],
             &facts,
@@ -489,7 +662,7 @@ mod tests {
     }
     #[test]
     fn flow_load_expired_original_deadline_precedes_budget_or_partial_success() {
-        let error = collect(
+        let error = test_collect(
             "never.lua",
             ["Main.toc"],
             &dag(30),
@@ -525,7 +698,7 @@ mod tests {
             paths: 32,
             ..Limits::default()
         };
-        let result = collect_with(
+        let result = test_collect_with(
             "x.lua",
             ["One.toc", "Two.toc"],
             &[
@@ -608,3 +781,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "conditional_tests.rs"]
+mod conditional_tests;

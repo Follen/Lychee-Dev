@@ -386,3 +386,224 @@ fn compound_busy_and_checked_close_errors_are_not_swallowed_as_skipped_leases() 
             .unwrap();
     }
 }
+
+struct RetainReadHook;
+impl RetainReadHook {
+    fn install(hook: impl FnMut(usize) + 'static) -> Self {
+        RETAIN_READ_HOOK.with(|current| {
+            assert!(current.borrow().is_none());
+            *current.borrow_mut() = Some(Box::new(hook));
+        });
+        Self
+    }
+}
+impl Drop for RetainReadHook {
+    fn drop(&mut self) {
+        RETAIN_READ_HOOK.with(|current| *current.borrow_mut() = None);
+    }
+}
+fn padded_marker(digest: &str, protected: bool, length: usize) -> Vec<u8> {
+    let owners = if protected {
+        json!([{"kind":"pinned","owner":"fixture","retainedAt":"2026-10-17T00:00:00Z"}])
+    } else {
+        json!([])
+    };
+    let mut raw = serde_json::to_vec(&json!({"sha256":digest,"owners":owners})).unwrap();
+    assert!(raw.len() <= length);
+    raw.resize(length, b' ');
+    raw
+}
+fn marker_path(f: &Fixture, digest: &str) -> PathBuf {
+    let root = f.home.join("cache/retain");
+    fs::create_dir_all(&root).unwrap();
+    root.join(format!("{digest}.json"))
+}
+fn untouched_prune(error: &ToolkitError, code: &str) {
+    assert_eq!(error.code, code);
+    assert_eq!(error.details["primary"]["code"], code);
+    let result = &error.details["result"];
+    totals(result, 0, 0, 0);
+    assert_eq!(result["removedObjects"], 0);
+    assert_eq!(result["removedUncommitted"], 0);
+    assert_eq!(result["complete"], false);
+}
+#[test]
+fn retention_exact_limit_is_admitted_for_protected_and_unprotected_prune() {
+    for protected in [false, true] {
+        let f = Fixture::new();
+        let (digest, object) = f.object(b"object");
+        let marker = marker_path(&f, &digest);
+        let raw = padded_marker(&digest, protected, MAX_RETAIN_BYTES);
+        fs::write(&marker, &raw).unwrap();
+        let out = dispatch(&f.invocation(&[])).unwrap();
+        totals(&out.data, 6, if protected { 6 } else { 0 }, if protected { 0 } else { 6 });
+        assert_eq!(out.data["removedObjects"], usize::from(!protected));
+        assert_eq!(out.data["skippedProtected"], usize::from(protected));
+        assert_eq!(out.complete, !protected);
+        assert_eq!(object.exists(), protected);
+        assert_eq!(fs::read(marker).unwrap(), raw);
+    }
+}
+#[test]
+fn retention_limit_plus_one_and_malformed_markers_abort_before_deletion() {
+    for oversized in [false, true] {
+        let f = Fixture::new();
+        let (digest, object) = f.object(b"object");
+        let stage = f.stage(&"a".repeat(32), b"staging");
+        let marker = marker_path(&f, &digest);
+        let raw = if oversized {
+            padded_marker(&digest, false, MAX_RETAIN_BYTES + 1)
+        } else {
+            b"{not JSON}".to_vec()
+        };
+        fs::write(&marker, &raw).unwrap();
+        let error = dispatch(&f.invocation(&[("--uncommitted", "true")])).unwrap_err();
+        untouched_prune(&error, "vault.cache_protection");
+        assert_eq!(fs::read(object).unwrap(), b"object");
+        assert_eq!(fs::read(stage).unwrap(), b"staging");
+        assert_eq!(fs::read(marker).unwrap(), raw);
+        assert_eq!(fs::read_dir(f.home.join("locks")).unwrap().count(), 0);
+    }
+}
+#[test]
+fn retention_growth_after_stat_and_between_reads_is_bounded_on_real_prune() {
+    for after_bytes in [0, 8192] {
+        let f = Fixture::new();
+        let (digest, object) = f.object(b"object");
+        let stage = f.stage(&"b".repeat(32), b"staging");
+        let marker = marker_path(&f, &digest);
+        fs::write(&marker, padded_marker(&digest, false, 8192)).unwrap();
+        let grown = padded_marker(&digest, false, MAX_RETAIN_BYTES + 1);
+        let seen = std::rc::Rc::new(std::cell::Cell::new(false));
+        let hook_seen = seen.clone();
+        let hook_path = marker.clone();
+        let hook_grown = grown.clone();
+        let _hook = RetainReadHook::install(move |read| {
+            if read == after_bytes && !hook_seen.replace(true) {
+                fs::write(&hook_path, &hook_grown).unwrap();
+            }
+        });
+        let error = dispatch(&f.invocation(&[("--uncommitted", "true")])).unwrap_err();
+        assert!(seen.get());
+        untouched_prune(&error, "vault.cache_protection");
+        assert_eq!(fs::read(object).unwrap(), b"object");
+        assert_eq!(fs::read(stage).unwrap(), b"staging");
+        assert_eq!(fs::read(marker).unwrap(), grown);
+    }
+}
+#[test]
+fn retention_original_control_cancellation_during_read_preserves_all_bytes() {
+    for after_bytes in [0, 8192] {
+        let f = Fixture::new();
+        let (digest, object) = f.object(b"object");
+        let stage = f.stage(&"c".repeat(32), b"staging");
+        let marker = marker_path(&f, &digest);
+        let raw = padded_marker(&digest, false, MAX_RETAIN_BYTES);
+        fs::write(&marker, &raw).unwrap();
+        let parent = OperationControl::default();
+        let signal = parent.tracked_cancel_handle().unwrap();
+        let mut inv = f.invocation(&[("--uncommitted", "true")]);
+        inv.control = parent.ordered_child(parent.deadline()).unwrap();
+        let seen = std::rc::Rc::new(std::cell::Cell::new(false));
+        let hook_seen = seen.clone();
+        let _hook = RetainReadHook::install(move |read| {
+            if read == after_bytes {
+                hook_seen.set(true);
+                signal.cancel();
+            }
+        });
+        let error = dispatch(&inv).unwrap_err();
+        assert!(seen.get());
+        untouched_prune(&error, "command.cancelled");
+        assert_eq!(fs::read(object).unwrap(), b"object");
+        assert_eq!(fs::read(stage).unwrap(), b"staging");
+        assert_eq!(fs::read(marker).unwrap(), raw);
+    }
+}
+#[test]
+fn retention_read_error_after_prior_removal_preserves_partial_prune_facts() {
+    for cancelled in [false, true] {
+        let f = Fixture::new();
+        f.object(b"first object");
+        f.object(b"second object");
+        let (ordered, _) = objects(&f.home).unwrap();
+        let first = &ordered[0];
+        let second = &ordered[1];
+        let second_bytes = fs::read(&second.path).unwrap();
+        let stage = f.stage(&"d".repeat(32), b"staging");
+        let marker = marker_path(&f, &second.digest);
+        let raw = padded_marker(&second.digest, false, 8192);
+        fs::write(&marker, &raw).unwrap();
+        let grown = padded_marker(&second.digest, false, MAX_RETAIN_BYTES + 1);
+        let armed = std::rc::Rc::new(std::cell::Cell::new(false));
+        let seen = std::rc::Rc::new(std::cell::Cell::new(false));
+        let mut inv = f.invocation(&[("--uncommitted", "true")]);
+        let parent = OperationControl::default();
+        let signal = parent.tracked_cancel_handle().unwrap();
+        inv.control = parent.ordered_child(parent.deadline()).unwrap();
+        let hook_armed = armed.clone();
+        let hook_seen = seen.clone();
+        let hook_path = marker.clone();
+        let hook_grown = grown.clone();
+        let _hook = RetainReadHook::install(move |read| {
+            if hook_armed.get() && read == 8192 && !hook_seen.replace(true) {
+                if cancelled {
+                    signal.cancel();
+                } else {
+                    fs::write(&hook_path, &hook_grown).unwrap();
+                }
+            }
+        });
+        let error = prune_observed(&inv, |phase| {
+            if phase == Phase::ObjectRemoved {
+                armed.set(true);
+            }
+        }).unwrap_err();
+        let code = if cancelled { "command.cancelled" } else { "vault.cache_protection" };
+        assert!(seen.get());
+        assert_eq!(error.code, code);
+        assert_eq!(error.details["primary"]["code"], code);
+        let result = &error.details["result"];
+        totals(result, first.bytes + second.bytes + 7, second.bytes + 7, first.bytes);
+        assert_eq!(result["removedObjects"], 1);
+        assert_eq!(result["removedUncommitted"], 0);
+        assert_eq!(result["complete"], false);
+        assert!(!first.path.exists());
+        assert_eq!(fs::read(&second.path).unwrap(), second_bytes);
+        assert_eq!(fs::read(stage).unwrap(), b"staging");
+        assert_eq!(fs::read(marker).unwrap(), if cancelled { raw } else { grown });
+        for resource in ["cache:quota".to_owned(), format!("cache:obj:{}", first.digest), format!("cache:obj:{}", second.digest)] {
+            ExclusiveLock::resource(&f.home.join("locks"), &resource).unwrap().close().unwrap();
+        }
+    }
+}
+#[test]
+fn retention_read_uses_original_handle_when_marker_path_is_replaced() {
+    let f = Fixture::new();
+    let (digest, object) = f.object(b"object");
+    let marker = marker_path(&f, &digest);
+    let moved = f.base.join("original-retention.json");
+    let raw = padded_marker(&digest, false, 8192);
+    fs::write(&marker, &raw).unwrap();
+    let seen = std::rc::Rc::new(std::cell::Cell::new(false));
+    let hook_seen = seen.clone();
+    let hook_path = marker.clone();
+    let hook_moved = moved.clone();
+    let _hook = RetainReadHook::install(move |read| {
+        if read == 0 && !hook_seen.replace(true) {
+            fs::rename(&hook_path, &hook_moved).unwrap();
+            fs::write(&hook_path, b"{not JSON}").unwrap();
+        }
+    });
+    let error = dispatch(&f.invocation(&[])).unwrap_err();
+    assert!(seen.get());
+    assert_eq!(error.code, "vault.cache_protection");
+    // Initial scan consumed the original handle successfully. The object-lock
+    // recheck then rejected the replacement before unlinking the object.
+    totals(&error.details["result"], 6, 6, 0);
+    assert_eq!(error.details["result"]["removedObjects"], 0);
+    assert_eq!(error.details["result"]["complete"], false);
+    assert_eq!(fs::read(object).unwrap(), b"object");
+    assert_eq!(fs::read(marker).unwrap(), b"{not JSON}");
+    assert_eq!(fs::read(moved).unwrap(), raw);
+}

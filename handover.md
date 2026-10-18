@@ -1,6 +1,16 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 05:25 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 05:30 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+
+### 本轮其余Source/Core/Probe有限候选（2026-10-18 05:30 UTC）
+
+本轮8个源码确认边界已分别完成候选：Delivery3保存38a7，Data2保存557，现其余Source/Core/Probe三项收成有限批；实际Rust复验仍由本机固定队列执行，不能凭代码/独审把Stage1关闭。Skill runner另保存99a，9文件257473B逐blob读回，Node70/0/0，真实0002产品+99a runner尚待后继结果。0002上一Skill原统计应含assembly metadata子owner：8 retired加1 sealed failed，217文件证据保持原字节；不是先前简写的7个总owner。
+
+Source flow v2借用当前v15/v6完整认证index中持久TOC header symbols，重复/顺序/空值保留；原raw入口与新borrowed入口共用自有LoadContext helper，支持条件/Family/Game/嵌套XML并让未知明确partial。无需重新读取TOC原文；未提交v1的独立32MiB累计/每TOC1MiB限制全部取消。header计入原Lua输入total，共用单一32MiB，不宣称RSS上界；现有遍历/issue/取消边界保持。13新回归及12原遍历测试，新增均NOT_RUN，v2独审通过。完整公共worker/CLI仍需匹配树执行。
+
+Core retention marker改为同handle、原control有界读取，65536B接受、最多读取65537B后保护错误，增长/损坏不得删对应对象，所有取得handle路径checked-close并保已删除事实/主错误。6新正式回归含11子案例、其中5经public cache dispatch，1走真实observed prune；没有新增native close故障注入，RustNOT_RUN。
+
+Probe只拒持久Name.updatedAt/Revision.createdAt的Go零时刻，原chrono语法与合法near-zero/epoch保留，unnamed show合成零值不变。4新真实registry消费者回归覆盖等价零时刻表示、拒绝时无部分写入、正常值/合成fallback/原revision完整性；RustNOT_RUN。Core/Probe均经独立静态精确字节复核后保存，不能替代执行。当前仍有2 Windows symlink跳过、不可达Unix-only测试有效性问题、真实CASC/key fixture、Skill压力/最终分发重建/游戏/性能等独立未验范围。
 
 ### Skill runner精确候选身份修复（2026-10-18 05:25 UTC）
 

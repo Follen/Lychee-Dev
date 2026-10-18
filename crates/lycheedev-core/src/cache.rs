@@ -78,6 +78,12 @@ fn objects_checked(home: &Path, mut check: impl FnMut() -> Result<()>) -> Result
 fn retain(home: &Path, digest: &str) -> Result<Option<Value>> {
     retain_checked(home, digest, || Ok(()))
 }
+const MAX_RETAIN_BYTES: usize = 65536;
+#[cfg(test)]
+std::thread_local! {
+    static RETAIN_READ_HOOK: std::cell::RefCell<Option<Box<dyn FnMut(usize)>>> =
+        std::cell::RefCell::new(None);
+}
 fn retain_checked(home: &Path, digest: &str, mut check: impl FnMut() -> Result<()>) -> Result<Option<Value>> {
     check()?;
     let path = home.join("cache/retain").join(format!("{digest}.json"));
@@ -85,25 +91,59 @@ fn retain_checked(home: &Path, digest: &str, mut check: impl FnMut() -> Result<(
         return Ok(None);
     }
     storage::guard_path_with_check(home, &path, &mut check)?;
-    let value: Value = storage::read_json(&path)?;
-    check()?;
-    if value["sha256"] != digest
-        || value["owners"]
-            .as_array()
-            .is_none_or(|owners| owners.len() > 1024)
-    {
-        return Err(ToolkitError::new(
-            "vault.cache_protection",
-            "invalid retention marker",
-            4,
-        ));
-    }
-    for owner in value["owners"].as_array().unwrap() {
+    let mut file = fs::File::open(&path)?;
+    let result = (|| {
+        use std::io::Read;
+        let invalid = || ToolkitError::new("vault.cache_protection", "invalid retention marker", 4);
+        let stat = file.metadata()?;
+        if !stat.is_file() || stat.len() > MAX_RETAIN_BYTES as u64 {
+            return Err(invalid());
+        }
+        // Read at most limit + 1 through the same admitted handle. A marker
+        // growing after stat cannot turn into an unbounded allocation or an
+        // apparently unprotected object.
+        let mut raw = Vec::with_capacity(MAX_RETAIN_BYTES + 1);
+        let mut chunk = [0; 8192];
+        while raw.len() <= MAX_RETAIN_BYTES {
+            #[cfg(test)]
+            RETAIN_READ_HOOK.with(|hook| {
+                if let Some(hook) = hook.borrow_mut().as_mut() {
+                    hook(raw.len());
+                }
+            });
+            check()?;
+            let allowed = chunk.len().min(MAX_RETAIN_BYTES + 1 - raw.len());
+            let n = file.read(&mut chunk[..allowed])?;
+            raw.extend_from_slice(&chunk[..n]);
+            check()?;
+            if n == 0 {
+                break;
+            }
+        }
+        if raw.len() > MAX_RETAIN_BYTES {
+            return Err(invalid());
+        }
+        let value: Value = serde_json::from_slice(&raw).map_err(|_| invalid())?;
         check()?;
-        validate_owner(owner)?;
-    }
-    check()?;
-    Ok(Some(value))
+        if value["sha256"] != digest
+            || value["owners"]
+                .as_array()
+                .is_none_or(|owners| owners.len() > 1024)
+        {
+            return Err(invalid());
+        }
+        for owner in value["owners"].as_array().unwrap() {
+            check()?;
+            validate_owner(owner)?;
+        }
+        check()?;
+        Ok(Some(value))
+    })();
+    let result = crate::selection::selection_finish(
+        result,
+        storage::close_file(file).map_err(ToolkitError::io),
+    );
+    crate::selection::selection_finish(result, check())
 }
 fn validate_owner(owner: &Value) -> Result<()> {
     if !["pinned", "evidence", "operation"].contains(&owner["kind"].as_str().unwrap_or(""))

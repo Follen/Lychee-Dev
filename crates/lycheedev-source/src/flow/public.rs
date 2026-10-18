@@ -70,10 +70,12 @@ pub fn context_flow(
             "flow requires a Lua declaration; API metadata remains rule evidence",
         )]));
     }
-    let load_plan::Selection { mut ordered, mut input_gaps, load_evidence } = load_plan::collect(
+    let source_identity = json!({"snapshot":reading.pin.id,"repository":source.repository,"product":source.product,"commit":source.exact_commit});
+    let load_plan::Selection { mut ordered, mut input_gaps, input_bytes, load_evidence } = load_plan::collect(
         path,
-        reading.index.documents.iter().map(|doc| doc.path.as_str()),
+        &reading.index,
         facts,
+        &source_identity,
         &inv.control,
     )?;
     let mut names = ordered.clone().unwrap_or_else(|| vec![path.into()]);
@@ -88,7 +90,7 @@ pub fn context_flow(
         ordered = None;
     }
     let mut files = BTreeMap::new();
-    let mut total = 0usize;
+    let mut total = input_bytes;
     for name in names {
         inv.control.check()?;
         let (raw, _) = git::blob_with_control(
@@ -181,7 +183,7 @@ pub fn context_flow(
     let request = Request {
         files,
         ordered,
-        source: json!({"snapshot":reading.pin.id,"repository":source.repository,"product":source.product,"commit":source.exact_commit}),
+        source: source_identity,
         target_path: path.into(),
         target_line: reading.data["symbol"]["line"].as_u64().unwrap_or(1) as usize,
         luac: LuacIdentity {

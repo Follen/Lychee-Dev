@@ -313,3 +313,183 @@ fn exact_maximum_code_round_trips_and_one_extra_byte_is_not_published() {
     );
     meta.close().unwrap();
 }
+
+const ZERO_TIMESTAMPS: &[&str] = &[
+    "0001-01-01T00:00:00Z",
+    "0001-01-01T00:00:00.000000000Z",
+    "0001-01-01T00:00:00+00:00",
+    "0001-01-01T01:00:00+01:00",
+    "0000-12-31T23:00:00-01:00",
+];
+fn put_inv(f: &Fixture, name: &str) -> Invocation {
+    let mut inv = f.inv("live probe put");
+    inv.flags.insert("--name".into(), name.into());
+    inv.flags.insert(
+        "--file".into(),
+        f.root.join("code.lua").to_string_lossy().into_owned(),
+    );
+    inv
+}
+fn set_name_timestamp(f: &Fixture, stamp: &str) {
+    let mut meta = Metadata::open(&f.root.join("home"), true).unwrap();
+    let key = "probe/name/a";
+    let mut named: Name = meta.read(key).unwrap();
+    named.updated_at = stamp.into();
+    let generation = meta.generation(key).unwrap();
+    meta.put(key, &named, generation).unwrap();
+    meta.close().unwrap();
+}
+fn change_revision(f: &Fixture, id: &str, change: impl FnOnce(&mut Revision)) {
+    let mut meta = Metadata::open(&f.root.join("home"), true).unwrap();
+    let key = format!("probe/revision/{id}");
+    let mut revision: Revision = meta.read(&key).unwrap();
+    change(&mut revision);
+    let generation = meta.generation(&key).unwrap();
+    meta.put(&key, &revision, generation).unwrap();
+    meta.close().unwrap();
+}
+fn registry_snapshot(f: &Fixture) -> Vec<(String, i64, Vec<u8>)> {
+    let inv = f.inv("live probe list");
+    let meta = Metadata::open(&inv.home, false).unwrap();
+    let mut documents = Vec::new();
+    let (count, _) = meta.visit_raw_page_controlled_with_check(
+        "probe/", "", 100, &inv.control, || Ok(()),
+        |key, generation, bytes| {
+            documents.push((key.to_owned(), generation, bytes.to_vec()));
+            Ok(())
+        },
+    ).unwrap();
+    assert!(count < 100, "fixture snapshot must contain every probe document");
+    meta.close().unwrap();
+    documents
+}
+#[test]
+fn zero_selector_timestamps_reject_all_consumers_without_registry_mutation() {
+    for stamp in ZERO_TIMESTAMPS {
+        for removed in [false, true] {
+            let f = Fixture::new();
+            let original = f.put("a");
+            let id = original.data["revision"]["id"].as_str().unwrap();
+            if removed {
+                f.remove("a");
+            }
+            set_name_timestamp(&f, stamp);
+            let before = registry_snapshot(&f);
+            for include_removed in [false, true] {
+                let mut inv = f.inv("live probe list");
+                if include_removed {
+                    inv.flags.insert("--include-removed".into(), "true".into());
+                }
+                assert_eq!(dispatch(&inv).unwrap_err().code, "live.probe_name_corrupt", "{stamp}");
+                assert_eq!(registry_snapshot(&f), before);
+            }
+            for command in ["live probe show", "live probe remove"] {
+                let mut inv = f.inv(command);
+                inv.positional = Some("a".into());
+                assert_eq!(dispatch(&inv).unwrap_err().code, "live.probe_name_corrupt", "{stamp}");
+                assert_eq!(registry_snapshot(&f), before);
+            }
+            assert_eq!(code(&f.inv("live probe show"), "a").unwrap_err().code, "live.probe_name_corrupt");
+            // Both the otherwise-idempotent put and a fresh revision must fail
+            // before either stored document or its generation is changed.
+            assert_eq!(dispatch(&put_inv(&f, "a")).unwrap_err().code, "live.probe_name_corrupt");
+            assert_eq!(registry_snapshot(&f), before);
+            fs::write(f.root.join("code.lua"), b"return 43").unwrap();
+            assert_eq!(dispatch(&put_inv(&f, "a")).unwrap_err().code, "live.probe_name_corrupt");
+            assert_eq!(registry_snapshot(&f), before);
+            // Explicit immutable revision lookup does not consume a stored
+            // selector. Its synthetic unnamed zero timestamp remains legal.
+            let shown = show(&f.inv("live probe show"), id).unwrap();
+            assert_eq!(shown.data["name"]["name"], "");
+            assert_eq!(shown.data["name"]["updatedAt"], "0001-01-01T00:00:00Z");
+            assert_eq!(code(&f.inv("live probe show"), id).unwrap(), b"return 42");
+            assert_eq!(registry_snapshot(&f), before);
+        }
+    }
+}
+#[test]
+fn zero_revision_timestamps_reject_show_code_and_put_without_partial_names() {
+    for stamp in ZERO_TIMESTAMPS {
+        let f = Fixture::new();
+        let original = f.put("a");
+        let id = original.data["revision"]["id"].as_str().unwrap();
+        change_revision(&f, id, |revision| revision.created_at = (*stamp).into());
+        let before = registry_snapshot(&f);
+        for selector in ["a", id] {
+            let mut inv = f.inv("live probe show");
+            inv.positional = Some(selector.into());
+            assert_eq!(dispatch(&inv).unwrap_err().code, "live.probe_revision_corrupt", "{stamp}");
+            assert_eq!(code(&inv, selector).unwrap_err().code, "live.probe_revision_corrupt", "{stamp}");
+            assert_eq!(registry_snapshot(&f), before);
+        }
+        for name in ["a", "new_name"] {
+            assert_eq!(dispatch(&put_inv(&f, name)).unwrap_err().code, "live.probe_revision_corrupt", "{stamp}");
+            assert_eq!(registry_snapshot(&f), before);
+        }
+        // Go list/remove consume selectors alone; the timestamp check must not
+        // grow into an unrelated revision scan or stop retiring a valid name.
+        assert_eq!(dispatch(&f.inv("live probe list")).unwrap().data["items"][0]["name"], "a");
+        assert_eq!(registry_snapshot(&f), before);
+        f.remove("a");
+        let after = registry_snapshot(&f);
+        let key = format!("probe/revision/{id}");
+        assert_eq!(before.iter().find(|doc| doc.0 == key), after.iter().find(|doc| doc.0 == key));
+        assert_eq!(dispatch(&f.inv("live probe list")).unwrap().data["items"], json!([]));
+    }
+}
+#[test]
+fn nonzero_stored_times_and_unnamed_zero_fallback_keep_registry_behavior() {
+    for stamp in [
+        "0001-01-01T00:00:00.000000001Z",
+        "0001-01-01T00:00:00+01:00",
+        "1970-01-01T00:00:00Z",
+        "2026-10-18T01:02:03.123456789+01:00",
+    ] {
+        let f = Fixture::new();
+        let original = f.put("a");
+        let id = original.data["revision"]["id"].as_str().unwrap();
+        set_name_timestamp(&f, stamp);
+        change_revision(&f, id, |revision| revision.created_at = stamp.into());
+        let before = registry_snapshot(&f);
+        let shown = show(&f.inv("live probe show"), "a").unwrap();
+        assert_eq!(shown.data["name"]["updatedAt"], stamp);
+        assert_eq!(shown.data["revision"]["createdAt"], stamp);
+        assert_eq!(code(&f.inv("live probe show"), "a").unwrap(), b"return 42");
+        assert_eq!(f.put("a").data["changed"], false);
+        assert_eq!(registry_snapshot(&f), before);
+        assert_eq!(dispatch(&f.inv("live probe list")).unwrap().data["items"][0]["updatedAt"], stamp);
+        f.remove("a");
+        assert_eq!(show(&f.inv("live probe show"), "a").unwrap_err().code, "live.probe_removed");
+        let shown = show(&f.inv("live probe show"), id).unwrap();
+        assert_eq!(shown.data["name"]["updatedAt"], "0001-01-01T00:00:00Z");
+        assert_eq!(shown.data["revision"]["createdAt"], stamp);
+        assert_eq!(code(&f.inv("live probe show"), id).unwrap(), b"return 42");
+        assert_eq!(f.put("a").data["changed"], true);
+        assert_eq!(code(&f.inv("live probe show"), "a").unwrap(), b"return 42");
+    }
+}
+#[test]
+fn valid_stored_timestamps_do_not_weaken_revision_identity_or_code_integrity() {
+    for field in ["schema", "id", "sha256", "bytes", "code"] {
+        let f = Fixture::new();
+        let original = f.put("a");
+        let id = original.data["revision"]["id"].as_str().unwrap();
+        change_revision(&f, id, |revision| match field {
+            "schema" => revision.schema = "wrong".into(),
+            "id" => revision.id = format!("PRB-{}", "0".repeat(64)),
+            "sha256" => revision.sha256 = "0".repeat(64),
+            "bytes" => revision.bytes += 1,
+            "code" => revision.code = encode(b"return 43"),
+            _ => unreachable!(),
+        });
+        let before = registry_snapshot(&f);
+        for selector in ["a", id] {
+            let inv = f.inv("live probe show");
+            assert_eq!(show(&inv, selector).unwrap_err().code, "live.probe_revision_corrupt", "{field}");
+            assert_eq!(code(&inv, selector).unwrap_err().code, "live.probe_revision_corrupt", "{field}");
+        }
+        assert!(dispatch(&put_inv(&f, "a")).is_err());
+        assert!(dispatch(&put_inv(&f, "new_name")).is_err());
+        assert_eq!(registry_snapshot(&f), before);
+    }
+}
