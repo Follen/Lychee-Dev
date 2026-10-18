@@ -4,7 +4,29 @@ Started 2026-10-17 21:40 UTC. Production baseline: `b4d8b22a666648ee0fe18a3f2656
 
 Three independent read-only reviews covered architecture/public consumers, Source/Data quality, and actual Skill workflows. Findings below distinguish source-confirmed defects from exact-tree Windows results. A code candidate is not a closed finding: each needs exact-tree offline verification, independent re-review, and another Stage 1 pass. Stage 2 has not started. Performance remains open and does not block this correctness audit.
 
-## Confirmed findings and repair ownership
+## Current closure mapping and third consumer review — 2026-10-18 05:14 UTC
+
+0002 directed Windows verification passed29/0/2 plus all-targets: local4, remote2, catalog7/1ignored, WDC16/1ignored. All four previous CSV failures now pass by name. 1f Data lib1161/4/1 remains historical; no full0002 Data-lib aggregate is claimed. cbff canonical workspace33/archive4/CLI init6 and22da asset2/inspect15 close their respective old failures. The original21 repairs each have relevant executed regression evidence, not a final no-defect conclusion. Matching0002 release is running; actual installed Skill is pending.
+
+Three independent non-author reviewers traced the repaired0002 production consumer chains. Eight source-confirmed actionable boundaries remain; runtime reproduction and successor tests are pending. These include gaps within original finding scope, rather than an artificial29-item sum:
+
+| Review ID | Scope | Confirmed boundary | Current repair state |
+|---|---|---|---|
+| R3-DLV-control | DLV-1 | Three install/update callers use a fresh default control during claims acquisition | Limited Delivery candidate; five public-entry regressions NOT_RUN |
+| R3-DLV-complete | Recovery identity | Completed journal accepts different same-version current receipt and returns stale result | Limited Delivery candidate; exact wanted comparison, no replay |
+| R3-DLV-order | DLV-4 | Resource permutation changes journal filename and blocks equivalent pending retry | Limited Delivery candidate; exact-first unique bounded old-journal lookup, filenames unchanged |
+| R3-COR-retention | COR-1/protection | Unbounded retention read omits fixed Go65536-byte protection limit | Separate repair in progress |
+| R3-PRB-zero | Persistent registry integrity | Stored selector/revision accepts zero instant; synthetic unnamed result is separate | Separate repair in progress |
+| R3-SRC-conditions | SRC-2/load truthfulness | Raw conditional TOC target silently vanishes from Known flow order | Separate repair in progress; outer static-only partial is not falsely described as complete |
+| R3-DAT-freshness | Source identity | Local DB2/navigation closes original source observations before consumption/capture | Separate repair in progress; retain original generation/size/digest owner, no replay |
+| R3-DAT-array | Numeric field validation | Integer-array scalar relation filter yields false empty success rather than field_type_mismatch | Separate repair in progress; ordinary search unchanged |
+
+Delivery candidate has10 new regressions across acquisition_control_tests and addon_transaction::tests. Acquisition tests stop the original request at the true public acquisition entry; existing Core tests cover read-phase behavior. Journal tests cover completed A→different B→retry A, equivalent reorder, ambiguity, entry cancellation/deadline,1000-entry limit and real Windows held-slot recovery. They do not claim deterministic mid-scan interruption or runtime Windows success. Original stage results and test failures remain immutable.
+
+The cfg(unix) coordination redirect test is structurally unreachable in this Windows-only dependency graph (core unconditionally depends on Windows filesystem/process/watch). Record it for Stage2 test-effectiveness review, not as a permanently deferred machine-only test; no shim added. The two Windows symlink negative skips, real CASC/key ignored fixture, catalog exporter, WDC performance experiment, actual Skill/exporter, native Job pressure, final deployment/rebuild/game/performance boundaries remain separately unverified. Stage1 remains open, Stage2 not started.
+
+## Historical initial finding status and repair ownership
+
 
 | ID | Actual consumer and defect | Current status | Required closure evidence |
 |---|---|---|---|

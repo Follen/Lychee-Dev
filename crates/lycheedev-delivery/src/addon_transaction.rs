@@ -84,6 +84,58 @@ fn load(path: &Path, control: &OperationControl) -> Result<Transaction> {
         control,
     )?)?)
 }
+// The on-disk v1 digest retains the original receipt order. Locate an existing
+// equivalent intent before treating a reordered release as a new transaction;
+// keep its original filename and validate that digest against its stored receipt.
+fn equivalent_journal(
+    target: &Path,
+    archive: Option<&Path>,
+    wanted: &installation::Receipt,
+    control: &OperationControl,
+) -> Result<Option<PathBuf>> {
+    control.check()?;
+    let root = base(target)?;
+    if !root.exists() {
+        return Ok(None);
+    }
+    storage::guard_path_with_check(root.parent().unwrap(), &root, || control.check())?;
+    let mut found = None;
+    for (index, entry) in fs::read_dir(&root)?.enumerate() {
+        control.check()?;
+        if index >= 1000 {
+            return Err(ToolkitError::new(
+                "delivery.transaction_limit",
+                "addon intent scan exceeds 1000 records",
+                3,
+            ));
+        }
+        let entry = entry?;
+        if !entry.file_type()?.is_file() || entry.path().extension().is_none_or(|ext| ext != "json")
+        {
+            return Err(ToolkitError::invalid("unknown addon transaction entry"));
+        }
+        let path = entry.path();
+        let record = load(&path, control)?;
+        if record.schema != "lycheedev.addon-transaction.v1" {
+            return Err(ToolkitError::invalid("unknown addon transaction schema"));
+        }
+        if identity(&record.target) == identity(target)
+            && record.archive.as_deref().map(identity) == archive.map(identity)
+            && installation::same_receipt(&record.wanted, wanted)?
+        {
+            if found.is_some() {
+                return Err(ToolkitError::new(
+                    "delivery.installation_conflict",
+                    "ambiguous equivalent combined addon intent",
+                    4,
+                ));
+            }
+            found = Some(path);
+        }
+    }
+    control.check()?;
+    Ok(found)
+}
 fn other_pending(target: &Path, selected: Option<&Path>, control: &OperationControl) -> Result<()> {
     let root = base(target)?;
     if !root.exists() {
@@ -152,7 +204,13 @@ pub(crate) fn apply_locked(
         .transpose()?;
     let (path, mut record) = if let Some(candidate) = &candidate {
         let wanted = release::receipt(candidate, "addon");
-        let path = journal(&target, archive.as_deref(), &wanted)?;
+        let exact = journal(&target, archive.as_deref(), &wanted)?;
+        let path = if exact.exists() {
+            exact
+        } else {
+            equivalent_journal(&target, archive.as_deref(), &wanted, request.control)?
+                .unwrap_or(exact)
+        };
         other_pending(&target, Some(&path), request.control)?;
         if path.exists() {
             let record = load(&path, request.control)?;
@@ -284,6 +342,19 @@ pub(crate) fn apply_locked(
                 slots::COUNT,
                 request.control,
             )?;
+            let installed =
+                installation::inspect_main_controlled(&target, "addon", request.control)?;
+            if installed["state"] != "managed"
+                || !installation::same_receipt_value(&installed["receipt"], &wanted)?
+            {
+                return Err(ToolkitError::new(
+                    "delivery.installation_conflict",
+                    "main addon differs from completed combined receipt",
+                    4,
+                )
+                .with_details(json!({"wanted": wanted, "installed": installed})));
+            }
+            request.control.check()?;
             return Ok(());
         }
         if record.phase == "prepared" {
@@ -386,3 +457,6 @@ pub(crate) fn apply_locked(
     }
     Ok(record.result)
 }
+
+#[cfg(test)]
+mod tests;

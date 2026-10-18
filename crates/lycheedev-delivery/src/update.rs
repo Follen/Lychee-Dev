@@ -377,7 +377,12 @@ fn managed_with_close(
         let (client, path) = if target.component == "addon" {
             let client = lycheedev_core::client::inspect(&target.path)?;
             let path = lycheedev_core::client::addon_destination(&client)?;
-            let guard = InstallationGuard::acquire(&path)?;
+            #[cfg(test)]
+            crate::acquisition_control_tests::before_acquire(
+                crate::acquisition_control_tests::AcquirePoint::UpdatePreflight,
+                control,
+            );
+            let guard = InstallationGuard::acquire_controlled(&path, control)?;
             let checked = guard.require_idle().and_then(|()| {
                 slots::preflight_controlled(path.parent().unwrap(), version, control)
             });
@@ -502,7 +507,12 @@ fn managed_with_close(
                 // Always maintenance before the shared installation lock. Direct
                 // addon install uses the same order; skills only need the latter.
                 let maintenance = if component == "addon" {
-                    Some(InstallationGuard::acquire(path)?)
+                    #[cfg(test)]
+                    crate::acquisition_control_tests::before_acquire(
+                        crate::acquisition_control_tests::AcquirePoint::UpdateMutation,
+                        control,
+                    );
+                    Some(InstallationGuard::acquire_controlled(path, control)?)
                 } else {
                     None
                 };

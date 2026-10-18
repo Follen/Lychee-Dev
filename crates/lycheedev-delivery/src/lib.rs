@@ -13,6 +13,8 @@ pub mod slot_publication;
 mod slot_test_diagnostics;
 pub mod slots;
 pub mod update;
+#[cfg(test)]
+mod acquisition_control_tests;
 pub use installation::{VerifiedInstallation, verify_clean};
 pub fn commands() -> &'static [&'static str] {
     &[
@@ -40,7 +42,15 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
         "addon install" => {
             let client = selected_client(inv)?;
             let target = lycheedev_core::client::addon_destination(&client)?;
-            let guard = lycheedev_core::coordination::InstallationGuard::acquire(&target)?;
+            #[cfg(test)]
+            acquisition_control_tests::before_acquire(
+                acquisition_control_tests::AcquirePoint::Install,
+                &inv.control,
+            );
+            let guard = lycheedev_core::coordination::InstallationGuard::acquire_controlled(
+                &target,
+                &inv.control,
+            )?;
             let result = (|| {
                 guard.require_idle()?;
                 if inv.flag_bool("--resume") && inv.flag("--output").is_none() {

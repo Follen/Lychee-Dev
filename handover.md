@@ -1,6 +1,18 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 04:41 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 05:14 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+
+### 当前修后再巡检与真实验证（2026-10-18 05:14 UTC）
+
+`0002ce02bec5fb7c9c31ae40fd96eadf0da17dc6` 的[定向前置](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6245862158) all-targets通过，local partial4/0、remote partial2/0、catalog7/0/1、WDC16/0/1，合29/0/2；四项CSV失败逐名取得后继通过。`1f3454`原Data lib1161/4/1的四失败均为CSV，保持原历史，不把跨SHA组拼成全量0002通过。0002唯一匹配release正在本机原队列构建；assembly、fresh exporter和实际安装后的Skill尚未取得结果。
+
+既有21项已保存修复都有相关Windows离线回归映射：Delivery128、Core cache59、Probe12保持6a93身份；removal15/coordination4保持e974身份；workspace33/archive4/CLI init6保持cbff身份；Source recovery2/inspect15保持22da身份；Data四消费者及catalog/WDC保持0002身份。通过的是这些精确入口，不是整仓全绿或Stage1收敛。
+
+三名新独立审者在0002完整树按真实消费者再次静审，确认8个可操作边界（含原项补漏，不将旧21项测试结果撤销，也不简单相加为29独立问题）：Delivery三处acquire丢原control、已完成journal未核精确wanted、等价资源重排找不到旧journal；Core retention marker无65536B上限；Probe持久零时刻未拒；flow条件TOC静默漏文件而子LoadPlan为Known；Data本地source原索引观察未保至capture；scalar数值关系字段漏拒array。详见Stage1记录。本轮全为源码确认，新增回归尚未执行。
+
+本有限Delivery后继保存三项修复：三个公开入口传原control；completed journal必须核当前完整receipt；exact路径优先，缺失时有界guarded扫描唯一等价旧journal，保历史filename/hash/schema，歧义失败不重放。两个独立文件组共10个新正式回归，静态独审/格式检查完成后仍标NOT_RUN。其他五项由独立作者继续，不混入此有限批；本机固定0002不追新head。
+
+未测边界分开保留：两个Windows file-symlink EPERM负例；Data lib真实加密CASC/认证key fixture；catalog exporter与WDC same-work性能实验不是同一种ignored；Skill exporter与实际流程仍待运行。DLV-1 cfg(unix)重定向测试因Windows-only依赖图在Unix不可编译、Windows又不编译该测试，属于Stage2测试有效性缺口，不能永久冒称仅缺机器；未引入平台shim。真实OS Job压力恢复、最终安装/升级/卸载证据映射、独立fresh Cargo homes重建、H01–H09游戏项及性能/完整内存验收仍open。Stage2未开始。
 
 ### 当前执行：正式五循环 Stage 1 已发现实际业务缺口
 
