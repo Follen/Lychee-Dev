@@ -1152,23 +1152,62 @@ fn acquisition_success_transfers_ownership_without_early_close() {
 }
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
+fn independent_disk_root() -> PathBuf {
+    let root = std::env::temp_dir().join(format!(
+        "lychee-formal-publication-{}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
+        NEXT.fetch_add(1, Ordering::Relaxed),
+    ));
+    fs::create_dir(&root).unwrap();
+    let root = fs::canonicalize(root).unwrap();
+    root
+}
+struct LockRoot {
+    root: PathBuf,
+}
+impl LockRoot {
+    fn new() -> Self {
+        Self {
+            root: independent_disk_root(),
+        }
+    }
+}
+impl Drop for LockRoot {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
 struct DiskFixture {
     root: PathBuf,
     identity: VerifiedInstallation,
 }
 impl DiskFixture {
     fn new() -> Self {
-        let root = std::env::temp_dir().join(format!(
-            "lychee-formal-publication-{}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
-            NEXT.fetch_add(1, Ordering::Relaxed),
-        ));
-        fs::create_dir(&root).unwrap();
-        let root = fs::canonicalize(root).unwrap();
+        let fixture = Self::without_slot_pool();
+        let root = &fixture.root;
+        // Direct fixture setup is not a test of install or durable writes.
+        for index in 1..=slots::COUNT {
+            let path = slots::directory(root, index);
+            fs::create_dir(&path).unwrap();
+            for (name, bytes) in slots::files(index, "3.2.0") {
+                fs::write(path.join(name), bytes).unwrap();
+            }
+        }
+        fs::write(
+            root.join(slots::MARKER),
+            serde_json::to_vec(&empty_pool()).unwrap(),
+        )
+        .unwrap();
+        fixture
+    }
+    // Acquisition failures below occur before DiskStore::inspect. Keep their
+    // real canonical addon and receipt without constructing an unused pool.
+    fn without_slot_pool() -> Self {
+        let root = independent_disk_root();
         let addon = root.join("Lychee Dev");
         fs::create_dir(&addon).unwrap();
         fs::write(addon.join("Core.lua"), b"-- fixture\n").unwrap();
@@ -1185,19 +1224,6 @@ impl DiskFixture {
         };
         let raw = serde_json::to_vec(&receipt).unwrap();
         fs::write(addon.join(installation::MARKER), &raw).unwrap();
-        // Direct fixture setup is not a test of install or durable writes.
-        for index in 1..=slots::COUNT {
-            let path = slots::directory(&root, index);
-            fs::create_dir(&path).unwrap();
-            for (name, bytes) in slots::files(index, "3.2.0") {
-                fs::write(path.join(name), bytes).unwrap();
-            }
-        }
-        fs::write(
-            root.join(slots::MARKER),
-            serde_json::to_vec(&empty_pool()).unwrap(),
-        )
-        .unwrap();
         Self {
             identity: VerifiedInstallation {
                 canonical_path: addon,
@@ -1226,7 +1252,7 @@ fn assert_disk_locks_available(f: &DiskFixture) {
 
 #[test]
 fn lock_wait_post_acquire_cancel_checks_real_close_once_and_releases() {
-    let f = DiskFixture::new();
+    let f = LockRoot::new();
     let path = f.root.join("post-acquire.lock");
     for inject_close_failure in [false, true] {
         let control = OperationControl::default();
@@ -1265,7 +1291,7 @@ fn lock_wait_post_acquire_cancel_checks_real_close_once_and_releases() {
 
 #[test]
 fn disk_acquire_canonical_path_failure_releases_maintenance() {
-    let f = DiskFixture::new();
+    let f = DiskFixture::without_slot_pool();
     fs::create_dir(f.root.join("alias")).unwrap();
     // PathBuf::join normalizes `..` for Windows verbatim paths. Use an
     // ordinary path spelling so the OS can resolve it, and append raw path
@@ -1297,7 +1323,7 @@ fn disk_acquire_canonical_path_failure_releases_maintenance() {
 
 #[test]
 fn disk_acquire_second_lock_io_failure_releases_maintenance() {
-    let f = DiskFixture::new();
+    let f = DiskFixture::without_slot_pool();
     let scope = f.root.join(".lycheedev-slot-locks");
     fs::write(&scope, b"a file cannot be a lock directory").unwrap();
     let error = PublicationLease::acquire(&f.identity, "3.2.0", &OperationControl::default())
@@ -1318,7 +1344,7 @@ fn disk_acquire_second_lock_io_failure_releases_maintenance() {
 
 #[test]
 fn disk_acquire_second_lock_deadline_releases_only_owned_maintenance() {
-    let f = DiskFixture::new();
+    let f = DiskFixture::without_slot_pool();
     let scope = f.root.join(".lycheedev-slot-locks");
     let foreign_publication = ExclusiveLock::resource(&scope, "publication").unwrap();
     let control = OperationControl::uncancelable(Instant::now() + Duration::from_millis(25));

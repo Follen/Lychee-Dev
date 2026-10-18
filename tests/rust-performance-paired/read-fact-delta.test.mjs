@@ -307,12 +307,54 @@ test('shared Rust reader rejects invalid UTF8, nonarrays, missing and oversized 
   }, 'v10');
 });
 
-test('shared Rust reader rejects nonregular files and symbolic cache leaves', async t => {
+test('shared Rust reader rejects a directory in place of a cache file', async t => {
   await withFixture(t, async f => {
-    const file = f.files[0].rustFile, saved = file + '.original'; fs.renameSync(file, saved);
-    fs.mkdirSync(file); assert.throws(() => readRustFact(f.rustHome, f.documents[0], 'v10'), /Invalid Rust fact file/); fs.rmdirSync(file);
-    try { fs.symlinkSync(saved, file); } catch (error) { if (error.code === 'EPERM') { t.diagnostic('Windows symlink privilege unavailable; nonregular branch verified'); return; } throw error; }
-    assert.throws(() => readRustFact(f.rustHome, f.documents[0], 'v10'), /Invalid Rust fact file/);
+    const file = f.files[0].rustFile;
+    fs.unlinkSync(file); fs.mkdirSync(file);
+    assert.throws(() => readRustFact(f.rustHome, f.documents[0], 'v10'), {message: 'Invalid Rust fact file'});
+  }, 'v10');
+});
+
+function fileSymlinkOrSkip(t, target, file, {platform = process.platform, create = fs.symlinkSync} = {}) {
+  try { create(target, file, 'file'); }
+  catch (error) {
+    if (platform !== 'win32' || !['EPERM', 'EACCES'].includes(error.code)) throw error;
+    t.skip(`Windows file symlink creation unavailable (${error.code}); this file-symlink assertion was not executed`);
+    return false;
+  }
+  assert(fs.lstatSync(file).isSymbolicLink());
+  return true;
+}
+
+test('Rust reader file symlink skip only covers Windows creation EPERM and EACCES', async t => {
+  await withFixture(t, async f => {
+    const target = f.files[0].rustFile, file = target + '.link';
+    for (const platform of ['win32', 'linux']) for (const code of ['EPERM', 'EACCES', 'ENOENT', 'EIO']) {
+      const error = Object.assign(new Error('creation denied'), {code}), skipped = [], context = {skip: reason => skipped.push(reason)};
+      const create = (_target, _file, type) => { assert.equal(type, 'file'); throw error; };
+      if (platform === 'win32' && ['EPERM', 'EACCES'].includes(code)) {
+        assert.equal(fileSymlinkOrSkip(context, target, file, {platform, create}), false);
+        assert.equal(skipped.length, 1); assert(skipped[0].includes(code));
+      } else {
+        assert.throws(() => fileSymlinkOrSkip(context, target, file, {platform, create}), actual => actual === error);
+        assert.equal(skipped.length, 0);
+      }
+    }
+    const skipped = [];
+    assert.throws(() => fileSymlinkOrSkip({skip: reason => skipped.push(reason)}, target, file, {platform: 'win32', create(_target, file) { fs.writeFileSync(file, 'not a link'); }}), {code: 'ERR_ASSERTION'});
+    assert.equal(skipped.length, 0);
+  });
+});
+
+test('shared Rust reader rejects a file symlink to an authenticated cache file', async t => {
+  await withFixture(t, async f => {
+    const file = f.files[0].rustFile, saved = file + '.original', original = fs.readFileSync(file);
+    assert.equal(readRustFact(f.rustHome, f.documents[0], 'v10').fileSHA256, sha256(original));
+    fs.renameSync(file, saved);
+    if (!fileSymlinkOrSkip(t, saved, file)) return;
+    assert.deepEqual(fs.readFileSync(file), original);
+    assert.throws(() => readRustFact(f.rustHome, f.documents[0], 'v10'), {message: 'Invalid Rust fact file'});
+    assert.deepEqual(fs.readFileSync(saved), original);
   }, 'v10');
 });
 

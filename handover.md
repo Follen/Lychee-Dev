@@ -1,6 +1,14 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 07:18 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 07:18 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最近完整性能诊断产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+
+### Stage2首轮测试有效性候选（2026-10-18 07:31 UTC）
+
+全仓首轮范围矩阵与本有限修复见[Stage2记录](docs/toolkit/rust-audit-stage2-2026-10-18.md)。两名独立审者覆盖Source/Data/Live/CLI/Core存储/Delivery/package/Skill的真实消费者与fixture层次，确认不可达平台负例、错误原因可替代的弱反例、静默跳过和重复无用setup；不是新生产bug结论，也不是完整覆盖率审完。
+
+本批仅测试能力/成本修复：Core Windows junction保原维护锁拒绝/close；Live active junction与单列需权限file-symlink；Delivery159名称不变，4锁例去无用500槽构造，12组合/双public apply/42快照保留并用真实share句柄拒同字节重写，扫描中原control取消使用局部thread-local RAII cfg(test)观察点。Node valid-pack负例精确断因，Windows目录junction实际执行，file-link权限只skip该单项。独审通过；Rust/Windows NOT_RUN。Linux原三suite288/0/0，canonical期望修订后仅受影响runner39/0/0复跑；同字节其它两suite不重复累计。无产品预算/默认栈/期限变化，不凭静态少6000文件写宣称提速。
+
+63d原始附件[最终公开交付](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6247070485)已确认472文件、921394B、HTTP200/CRC/整包与逐文件SHA全过，11owner回收；前段待交付状态保持其原时间。当前Stage2先修有效性/冗余，再测覆盖；真实OS压力仅最小能力设计候选、coverage工具尚无正式接线。新测试由根唯一队列排，不改变已封存63d性能诊断产品身份。
 
 ### 当前阶段：Stage1离线范围结束，Stage2开始（2026-10-18 07:18 UTC）
 

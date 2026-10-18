@@ -1,5 +1,6 @@
 use super::*;
 use std::{
+    cell::RefCell,
     collections::BTreeMap,
     sync::atomic::{AtomicU64, Ordering},
     time::Instant,
@@ -7,6 +8,92 @@ use std::{
 
 const VERSION: &str = "3.5.0";
 static NEXT: AtomicU64 = AtomicU64::new(0);
+
+struct EquivalentScanCancellation {
+    control: OperationControl,
+    cancel_after: usize,
+    observed: Vec<PathBuf>,
+}
+thread_local! {
+    static EQUIVALENT_SCAN_CANCELLATION: RefCell<Option<EquivalentScanCancellation>> =
+        const { RefCell::new(None) };
+}
+
+// Called only by the cfg(test) seam after a real record read and schema check.
+// Thread-local state cannot cancel a concurrently running fixture's request.
+pub(super) fn observe_equivalent_journal_record(path: &Path, control: &OperationControl) {
+    EQUIVALENT_SCAN_CANCELLATION.with(|active| {
+        let mut active = active.borrow_mut();
+        let Some(active) = active.as_mut() else {
+            return;
+        };
+        assert!(control.same_scope(&active.control));
+        assert_eq!(control.deadline(), active.control.deadline());
+        control.check().unwrap();
+        active.observed.push(path.to_path_buf());
+        if active.observed.len() == active.cancel_after {
+            control.tracked_cancel_handle().unwrap().cancel();
+        }
+    });
+}
+
+fn with_equivalent_scan_cancellation<T>(
+    control: &OperationControl,
+    cancel_after: usize,
+    operation: impl FnOnce() -> T,
+) -> (T, Vec<PathBuf>) {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            EQUIVALENT_SCAN_CANCELLATION.with(|active| {
+                active.borrow_mut().take();
+            });
+        }
+    }
+    assert!(cancel_after > 0);
+    control.check().unwrap();
+    EQUIVALENT_SCAN_CANCELLATION.with(|active| {
+        let mut active = active.borrow_mut();
+        assert!(
+            active.is_none(),
+            "scan cancellation observer already installed"
+        );
+        *active = Some(EquivalentScanCancellation {
+            control: control.clone(),
+            cancel_after,
+            observed: Vec::new(),
+        });
+    });
+    let _reset = Reset;
+    let result = operation();
+    let observed =
+        EQUIVALENT_SCAN_CANCELLATION.with(|active| active.borrow_mut().take().unwrap().observed);
+    (result, observed)
+}
+
+// Byte snapshots cannot detect same-byte rewrites. On the shipped platform,
+// these retained read-only shares reject writes and replacement of the exact
+// pool/journal paths even if their resulting bytes would have been identical.
+#[cfg(windows)]
+fn hold_without_write_or_delete(path: &Path) -> fs::File {
+    use std::os::windows::fs::OpenOptionsExt;
+    let held = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(1)
+        .open(path)
+        .unwrap();
+    // Check the actual OS sharing restriction without writing or deleting.
+    // GENERIC_WRITE and DELETE cover in-place writes and atomic replacement.
+    for access in [0x40000000, 0x00010000] {
+        let error = fs::OpenOptions::new()
+            .access_mode(access)
+            .share_mode(7)
+            .open(path)
+            .expect_err("held read-only share must reject mutation access");
+        assert_eq!(error.raw_os_error(), Some(32));
+    }
+    held
+}
 
 struct Fixture {
     root: PathBuf,
@@ -482,6 +569,12 @@ fn slots_checkpoint_resumes_matching_and_reordered_receipts_without_replay() {
                 let control = OperationControl::default();
                 let guard = InstallationGuard::acquire(&f.target).unwrap();
                 let release = (request_kind != 2).then_some(f.release.as_path());
+                // Re-entering slot installation would rewrite even a ready
+                // pool. Deny that replay without blocking the legitimate
+                // combined-journal slots -> complete transition below.
+                #[cfg(windows)]
+                let held_pool =
+                    hold_without_write_or_delete(&f.target.parent().unwrap().join(slots::MARKER));
                 progress(
                     archived_original,
                     Some(reordered),
@@ -506,6 +599,10 @@ fn slots_checkpoint_resumes_matching_and_reordered_receipts_without_replay() {
                 );
                 assert_eq!(result, record["result"]);
                 assert_eq!(f.snapshot(), expected_complete);
+                // A completed retry must not rewrite the completed journal,
+                // including rewriting the same bytes, or reinstall the slots.
+                #[cfg(windows)]
+                let held_complete = hold_without_write_or_delete(&path);
                 assert_eq!(
                     f.apply(None, original_archive, VERSION, true, &control, &guard)
                         .unwrap(),
@@ -520,6 +617,11 @@ fn slots_checkpoint_resumes_matching_and_reordered_receipts_without_replay() {
                 );
                 installation::verify_clean(&f.target, VERSION, slots::TRANSPORT, slots::COUNT)
                     .unwrap();
+                #[cfg(windows)]
+                {
+                    storage::finish_file(held_complete, Ok(()), &control).unwrap();
+                    storage::finish_file(held_pool, Ok(()), &control).unwrap();
+                }
                 guard.close().unwrap();
                 progress(
                     archived_original,
@@ -1013,6 +1115,11 @@ fn completed_intent_is_read_only_for_matching_and_reordered_receipts() {
             assert_ne!(f.intent(&f.release, None, VERSION), original_path);
         }
         let before = f.snapshot();
+        #[cfg(windows)]
+        let held_pool =
+            hold_without_write_or_delete(&f.target.parent().unwrap().join(slots::MARKER));
+        #[cfg(windows)]
+        let held_complete = hold_without_write_or_delete(&original_path);
         for (release, resume) in [
             (Some(f.release.as_path()), false),
             (Some(f.release.as_path()), true),
@@ -1026,6 +1133,11 @@ fn completed_intent_is_read_only_for_matching_and_reordered_receipts() {
             assert_eq!(f.snapshot(), before);
         }
         assert_eq!(fs::read(&original_path).unwrap(), original_bytes);
+        #[cfg(windows)]
+        {
+            storage::finish_file(held_complete, Ok(()), &control).unwrap();
+            storage::finish_file(held_pool, Ok(()), &control).unwrap();
+        }
     }
     guard.close().unwrap();
 }
@@ -1071,7 +1183,12 @@ fn reordered_intent_lookup_preserves_control_and_scan_limit_without_mutation() {
         .unwrap();
     let original_path = f.intent(&f.release, None, VERSION);
     reverse_resources(&f.release.join("release.json"));
+    let reordered_path = f.intent(&f.release, None, VERSION);
+    assert_ne!(reordered_path, original_path);
+    assert!(!reordered_path.exists());
     let before = f.snapshot();
+    // Pre-stopped requests are rejected during public lease acquisition;
+    // the separate observation below proves cancellation inside the scan.
     let cancelled = OperationControl::default();
     cancelled.tracked_cancel_handle().unwrap().cancel();
     let expired = OperationControl::uncancelable(Instant::now());
@@ -1101,6 +1218,26 @@ fn reordered_intent_lookup_preserves_control_and_scan_limit_without_mutation() {
         .unwrap();
     }
     let before = f.snapshot();
+    let mid_scan = OperationControl::default();
+    let (result, observed) = with_equivalent_scan_cancellation(&mid_scan, 2, || {
+        f.apply(Some(&f.release), None, VERSION, true, &mid_scan, &guard)
+    });
+    let error = result.unwrap_err();
+    assert_eq!(error.code, "command.cancelled");
+    assert_eq!(error.exit_code, 7);
+    assert_eq!(observed.len(), 2);
+    assert_ne!(observed[0], observed[1]);
+    for path in &observed {
+        assert_eq!(path.parent(), original_path.parent());
+        assert!(path.is_file());
+    }
+    assert!(mid_scan.is_cancelled());
+    assert!(!reordered_path.exists());
+    assert_eq!(f.snapshot(), before);
+    assert_installation_lock_released(&f.target, &control);
+    EQUIVALENT_SCAN_CANCELLATION.with(|active| assert!(active.borrow().is_none()));
+    // The scoped observer is now gone. The original live control must still
+    // reach the real 1001-entry limit instead of inheriting the cancellation.
     let error = f
         .apply(Some(&f.release), None, VERSION, true, &control, &guard)
         .unwrap_err();

@@ -125,6 +125,8 @@ fn equivalent_journal(
         if record.schema != "lycheedev.addon-transaction.v1" {
             return Err(ToolkitError::invalid("unknown addon transaction schema"));
         }
+        #[cfg(test)]
+        tests::observe_equivalent_journal_record(&path, control);
         if identity(&record.target) == identity(target)
             && record.archive.as_deref().map(identity) == archive.map(identity)
             && installation::same_receipt(&record.wanted, wanted)?

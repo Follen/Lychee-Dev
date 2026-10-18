@@ -1,7 +1,7 @@
 // Linux-capable checker/fault tests. These are never real CLI/Skill acceptance.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
+import {lstatSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import os from 'node:os';
@@ -125,10 +125,16 @@ test('owned success cannot relabel Go320, omit current checks or turn static inc
     row => { row.checks.at(-1).runtimeVerified = true; }, row => { row.checks.at(-1).sha256 = '0'.repeat(64); },
   ]) { const changed = structuredClone(report); mutate(changed); assert.throws(() => assertCurrentSelectedReport(changed, workflow)); }
 });
-test('relative paths reject traversal, rooted paths and links', t => {
+test('relative paths reject traversal and rooted paths', t => {
   const f = fixture(t);
   for (const name of ['../escape', '/absolute', 'C:/absolute', 'safe/../escape', 'safe\\escape', './candidate', 'candidate//package']) assert.throws(() => within(f.root, name));
-  if (process.platform !== 'win32') { symlinkSync(join(f.root, 'candidate'), join(f.root, 'linked')); assert.throws(() => within(f.root, 'linked/package'), /linked/); }
+});
+test(`relative paths reject directory ${process.platform === 'win32' ? 'junctions' : 'symlinks'}`, t => {
+  const f = fixture(t), linked = join(f.root, 'linked');
+  assert.equal(within(f.root, 'candidate/package'), realpathSync(f.packageRoot));
+  symlinkSync(join(f.root, 'candidate'), linked, process.platform === 'win32' ? 'junction' : 'dir');
+  assert(lstatSync(linked).isSymbolicLink());
+  assert.throws(() => within(f.root, 'linked/package'), /no linked candidate path/);
 });
 test('inventory stable order and bounded bytes/files/depth', t => {
   const f = fixture(t), first = inventory(f.packageRoot);

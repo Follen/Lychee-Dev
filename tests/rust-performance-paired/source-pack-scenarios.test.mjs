@@ -550,9 +550,14 @@ for (const [name, mutate] of [
 ]) test(`Rust custody refuses ${name} before copying`, t => { const f = rustCustodyFixture(t); mutate(f); f.publish(); assert.throws(() => f.capture()); assert.equal(f.admissions.length, 0); assert(!existsSync(join(f.evidence, 'rust-fact-00000'))); });
 
 test('Rust custody refuses a pack file symlink before copying', t => {
-  const f = rustCustodyFixture(t); rmSync(f.packPath);
-  if (!fileSymlinkOrSkip(t, f.unusedPath, f.packPath)) return;
-  f.publish(); assert.throws(() => f.capture()); assert.equal(f.admissions.length, 0); assert(!existsSync(join(f.evidence, 'rust-fact-00000')));
+  const f = rustCustodyFixture(t), target = f.packPath + '.original', original = readFileSync(f.packPath);
+  for (const document of f.documents.slice(0, 2)) assert.deepEqual(readRustFact(f.home, document, 'v11-pack2').facts, f.facts);
+  copyFileSync(f.packPath, target); rmSync(f.packPath);
+  if (!fileSymlinkOrSkip(t, target, f.packPath)) return;
+  assert.deepEqual(readFileSync(f.packPath), original);
+  f.publish(); assert.throws(() => f.capture(), {message: 'disk.reparse_boundary'});
+  assert.equal(f.admissions.length, 0); assert(!existsSync(join(f.evidence, 'rust-fact-00000'))); assert(!existsSync(join(f.evidence, 'rust-custody.json')));
+  assert.deepEqual(readFileSync(target), original);
 });
 
 for (const [name, mutate] of [

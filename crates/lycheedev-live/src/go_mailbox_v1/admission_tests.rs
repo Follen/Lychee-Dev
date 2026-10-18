@@ -809,32 +809,112 @@ fn go_mailbox_v1_admission_orphan_is_evidence_not_authority_to_republish_or_rese
     assert_eq!(fs::read(paths.log_path()).unwrap(), bytes);
 }
 
-#[cfg(unix)]
+#[cfg(windows)]
+fn directory_junction(target: &Path, link: &Path) {
+    use std::os::windows::fs::MetadataExt;
+
+    // Reuse the Windows junction fixture from tests/rust-parity/oracle.test.mjs.
+    // Directory redirects do not require the file-symlink privilege below.
+    let junction = Command::new("node")
+        .args([
+            "-e",
+            "require('node:fs').symlinkSync(process.argv[1], process.argv[2], 'junction');",
+        ])
+        .arg(target)
+        .arg(link)
+        .output()
+        .expect("create Windows admission junction fixture with Node");
+    assert!(
+        junction.status.success(),
+        "junction fixture failed: {}",
+        String::from_utf8_lossy(&junction.stderr)
+    );
+    let attributes = fs::symlink_metadata(link).unwrap().file_attributes();
+    assert_ne!(attributes & 0x400, 0, "fixture must be a reparse point");
+    assert_ne!(attributes & 0x10, 0, "fixture must redirect a directory");
+    assert!(fs::metadata(link).unwrap().is_dir());
+    assert_eq!(
+        fs::canonicalize(link).unwrap(),
+        fs::canonicalize(target).unwrap()
+    );
+}
+
+#[cfg(windows)]
 #[test]
-fn go_mailbox_v1_admission_aliases_share_scope_but_redirected_scope_and_claim_fail() {
-    use std::os::unix::fs::symlink;
+fn go_mailbox_v1_admission_aliases_share_scope_but_redirected_scope_fails() {
     let f = Fixture::new();
     let mut book = f.book();
     let record = f.create(&mut book);
+    let claim_bytes = fs::read(f.marker()).unwrap();
     let alias = f.root.join("addon-alias");
-    symlink(f.target.addon_parent(), &alias).unwrap();
-    assert_eq!(
-        inspect_window_owner(&alias, &f.target.resource(), &OperationControl::default()).owner,
-        Some(record.metadata.owner)
-    );
-    let actual = f.root.join("claim-backup");
-    fs::rename(f.marker(), &actual).unwrap();
-    symlink(&actual, f.marker()).unwrap();
-    assert!(f.inspect().occupied);
-    assert!(f.inspect().error.is_some());
+    directory_junction(&f.target.addon_parent(), &alias);
+    let inspection =
+        inspect_window_owner(&alias, &f.target.resource(), &OperationControl::default());
+    assert_eq!(inspection.owner, Some(record.metadata.owner));
+    assert!(inspection.occupied);
+    assert!(inspection.error.is_none());
+    assert_eq!(fs::read(f.marker()).unwrap(), claim_bytes);
+
     let g = Fixture::new();
     let outside = g.root.join("outside");
     fs::create_dir(&outside).unwrap();
-    symlink(&outside, g.scope()).unwrap();
+    let sentinel = outside.join("foreign-evidence");
+    fs::write(&sentinel, b"preserve foreign evidence").unwrap();
+    directory_junction(&outside, &g.scope());
     assert_code(
         g.create_number(&mut g.book(), 1),
         "journal.redirected_window_owner",
     );
+    assert_eq!(fs::read(&sentinel).unwrap(), b"preserve foreign evidence");
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 1);
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "requires Windows file-symlink privilege or Developer Mode; run explicitly with --ignored"]
+fn go_mailbox_v1_admission_redirected_claim_file_fails() {
+    use std::os::windows::fs::{MetadataExt, symlink_file};
+
+    let f = Fixture::new();
+    let mut book = f.book();
+    let record = f.create(&mut book);
+    let claim_bytes = fs::read(f.marker()).unwrap();
+    let log_bytes = fs::read(record.paths.log_path()).unwrap();
+    let outside = f.root.join("outside");
+    fs::create_dir(&outside).unwrap();
+    let actual = outside.join("claim-backup.json");
+    fs::rename(f.marker(), &actual).unwrap();
+    // A junction would change this to a directory-leaf test. Keep a genuine
+    // redirect to a valid claim file, with an explicit ignored count by default.
+    if let Err(error) = symlink_file(&actual, f.marker()) {
+        if error.raw_os_error() == Some(1314) {
+            panic!(
+                "environment unavailable: ERROR_PRIVILEGE_NOT_HELD (1314); enable Developer Mode \
+                 or grant file-symlink privilege; claim redirection assertions were not executed"
+            );
+        }
+        panic!("claim file symlink fixture failed: {error}");
+    }
+    let metadata = fs::symlink_metadata(f.marker()).unwrap();
+    assert!(metadata.file_type().is_symlink());
+    assert_ne!(metadata.file_attributes() & 0x400, 0);
+    assert!(fs::metadata(f.marker()).unwrap().is_file());
+    assert_eq!(
+        fs::canonicalize(f.marker()).unwrap(),
+        fs::canonicalize(&actual).unwrap()
+    );
+    assert_eq!(fs::read(f.marker()).unwrap(), claim_bytes);
+
+    let inspection = f.inspect();
+    assert!(inspection.occupied);
+    assert!(inspection.owner.is_none());
+    assert_code::<()>(
+        Err(inspection.error.unwrap().into()),
+        "journal.redirected_window_owner",
+    );
+    assert_eq!(fs::read(&actual).unwrap(), claim_bytes);
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 1);
+    assert_eq!(fs::read(record.paths.log_path()).unwrap(), log_bytes);
 }
 
 #[test]

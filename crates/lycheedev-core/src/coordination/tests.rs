@@ -106,18 +106,57 @@ fn failed_registry_parse_schema_and_read_close_maintenance_once() {
     }
 }
 
-#[cfg(unix)]
+#[cfg(windows)]
 #[test]
 fn rejected_registry_redirect_explicitly_closes_acquired_maintenance() {
+    use std::os::windows::fs::MetadataExt;
+
+    let foreign_fixture = Fixture::new();
     let fixture = Fixture::new();
-    let foreign = fixture.0.join("foreign.json");
-    fs::write(&foreign, br#"{"schema":"lycheedev.claims.v1","claims":[]}"#).unwrap();
-    std::os::unix::fs::symlink(&foreign, fixture.registry()).unwrap();
+    let foreign = foreign_fixture.0.join("foreign.json");
+    let raw = br#"{"schema":"lycheedev.claims.v1","claims":[]}"#;
+    fs::write(&foreign, raw).unwrap();
+    // Match the existing Windows junction fixture in tests/rust-parity/oracle.test.mjs.
+    // A directory reparse point at the registry leaf must be rejected before any read;
+    // unlike a file symlink, creating this fixture does not require symlink privilege.
+    let junction = std::process::Command::new("node")
+        .args([
+            "-e",
+            "require('node:fs').symlinkSync(process.argv[1], process.argv[2], 'junction');",
+        ])
+        .arg(&foreign_fixture.0)
+        .arg(fixture.registry())
+        .output()
+        .expect("create Windows registry junction fixture with Node");
+    assert!(
+        junction.status.success(),
+        "junction fixture failed: {}",
+        String::from_utf8_lossy(&junction.stderr)
+    );
+    assert_ne!(
+        fs::symlink_metadata(fixture.registry())
+            .unwrap()
+            .file_attributes()
+            & 0x400,
+        0
+    );
+    assert_eq!(
+        fs::read(fixture.registry().join("foreign.json")).unwrap(),
+        raw
+    );
+    let mut acquisitions = 0;
     let mut closes = 0;
     let error = InstallationGuard::acquire_with(
         &fixture.target(),
         &OperationControl::default(),
-        |_| {},
+        |step| {
+            assert_eq!(step, AcquireStep::Maintenance);
+            acquisitions += 1;
+            let busy = InstallationMaintenanceLease::acquire(&fixture.target())
+                .err()
+                .unwrap();
+            assert_eq!(busy.code, "workspace.busy");
+        },
         |lease| {
             closes += 1;
             lease.close()
@@ -126,13 +165,15 @@ fn rejected_registry_redirect_explicitly_closes_acquired_maintenance() {
     .err()
     .unwrap();
     assert_eq!(error.code, "input.invalid");
+    assert_eq!(error.message, "reparse point in managed path");
+    assert_eq!(acquisitions, 1);
     assert_eq!(closes, 1);
     assert!(error.details.is_null());
     fixture.assert_released();
-    assert_eq!(
-        fs::read(&foreign).unwrap(),
-        br#"{"schema":"lycheedev.claims.v1","claims":[]}"#
-    );
+    assert_eq!(fs::read(&foreign).unwrap(), raw);
+    assert_eq!(fs::read_dir(&foreign_fixture.0).unwrap().count(), 1);
+    fs::remove_dir(fixture.registry()).unwrap(); // Remove only the junction.
+    assert_eq!(fs::read(&foreign).unwrap(), raw);
 }
 
 #[test]
