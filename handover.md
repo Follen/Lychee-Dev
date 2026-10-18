@@ -1,6 +1,16 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 05:14 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 05:23 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+
+### 当前有限Data修复与0002真实Skill失败（2026-10-18 05:23 UTC）
+
+Delivery三项后继已保存为`38a7a376ad5f74c1f63cd7c7a606827d3053859f`，7文件232005B完整读回、独审通过，10新增Rust入口NOT_RUN。随后Data10独占文件已完成独审：五个本地消费者保留原QuerySource/CASC观察owner至capture及checked-close，验证原选中idx generation/size/SHA和当前安装信息；DB2/stream、spell profiles、catalog、encounter不再仅验证workspace或重新采样source。stream已交付行不能撤回，失败保留原行事实、不发成功End、不新commit或重放；encounter第二次source变化保第一CAP。scalar外键/导航拒绝int-array字段并给原field_type_mismatch，普通search数组语义不变。
+
+Data新增9正式入口包含33个profile变更子案例、三个stream sink变更/恢复、数组类型与普通search/scalar正例及第一CAP保留；均NOT_RUN。保留两个真实CASC owner使callback失败+取消多两层现有close错误信封，原主错误/细节、close与workspace事实均保留，仅一个既有测试按真实owner链更新，不引入通用error聚合框架。静态格式/前像/10文件完整字节/固定Go3文件与独立代码审查通过，不能代替Windows执行。
+
+0002匹配release/assembly/exporter已完成，但[真实Skill结果](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6246011201)失败：4/42 children（两个exporter、npm pack、npm install均exit0），checks2pass/1fail/23NOT_RUN，CLI0、CAP0。installed SKILL.md与候选一致，却额外要求固定Go逐字节hash，阻于npm-installed-package；该批7owners退役回收，217文件证据公开HTTP200/CRC/SHA核过。原失败不改标。独立runner修复正在核既有Rust Skill差异、精确候选完整树和runner/product双身份，尚未实际重试；不得用38a7或后继sourceDigest冒0002EXE。
+
+Source v1额外TOC原文读取候选未提交，现改为已认证持久header symbol借用视图，与原raw条件入口共享解析，不新增独立32MiB或每TOC1MiB限制；v2仍待独审。Core retention和Probe持久零时刻独立修复继续。Stage1有本轮8个确认边界未取得新实测，仍未结束。
 
 ### 当前修后再巡检与真实验证（2026-10-18 05:14 UTC）
 

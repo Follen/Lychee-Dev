@@ -1,4 +1,6 @@
-//! Actual default CDN query owner. Numeric download width alone is never admission.
+//! Source-neutral query admission and lexical local/CDN file owners.
+//! Numeric download width alone is never admission.
+mod local;
 use super::{
     admission::{AdmittedWorkspace, OpenWorkspace},
     cache::Store,
@@ -158,6 +160,19 @@ impl<'a> Scope<'a> {
         }
         .finish(result, cleanup)
     }
+    /// Retain the original authenticated local observations through every
+    /// consumer callback and capture. This borrows the existing admission;
+    /// no fresh source snapshot or workspace lease is acquired at finalization.
+    pub fn with_local_session<T>(
+        &mut self,
+        pin: &DataPin,
+        work: impl FnOnce(&mut dyn FileScope) -> Result<T>,
+    ) -> Result<T> {
+        self.check_pin(pin)?;
+        let mut reader = local::Session::new(self, pin)?;
+        let result = work(&mut reader);
+        reader.close_after(result)
+    }
     pub fn read_batches(
         &mut self,
         pin: &DataPin,
@@ -209,6 +224,11 @@ impl<'a> Scope<'a> {
 /// It does not own or release workspace leases.
 pub(crate) trait FileScope {
     fn check(&self) -> Result<()>;
+    /// Reauthenticate the original source observations before publication.
+    /// CDN has no local mutable source; its existing session check suffices.
+    fn verify_source(&self) -> Result<()> {
+        self.check()
+    }
     fn check_consumer(&self, invocation: &Invocation, budget: &Arc<Budget>) -> Result<()>;
     fn check_pin(&self, pin: &DataPin) -> Result<()>;
     fn resolve_pin(&self) -> Result<lycheedev_core::selection::PinnedSet>;

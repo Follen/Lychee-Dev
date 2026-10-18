@@ -219,6 +219,55 @@ impl<'a> Reader<'a> {
             SelectedContent::Blob(_) => unreachable!("materialized query representation"),
         }
     }
+    /// All callbacks share the original Encoding/Root/index observations.
+    /// A callback is never replayed, including if a later batch or check fails.
+    pub fn read_batches(
+        &mut self,
+        ids: &[u32],
+        policy: blte::DecodePolicy,
+        callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
+    ) -> Result<()> {
+        self.inv.control.check()?;
+        self.budget.check()?;
+        validate_local_file_request(self.inv, ids)?;
+        let mut pending = ids.to_vec();
+        let mut requested = 0usize;
+        while !pending.is_empty() {
+            self.budget.check()?;
+            requested = requested
+                .checked_add(pending.len())
+                .filter(|count| *count <= 32)
+                .ok_or_else(|| {
+                    fault(
+                        "records.file_query",
+                        2,
+                        "Require at most 32 positive file IDs across all batches",
+                    )
+                })?;
+            if pending.contains(&0) {
+                return Err(fault(
+                    "records.file_query",
+                    2,
+                    "Require at most 32 positive file IDs across all batches",
+                ));
+            }
+            let mut files = Vec::with_capacity(pending.len());
+            for id in pending {
+                let file = self.read_selected(id, ReadMode::Materialized(policy))?;
+                let SelectedContent::Bytes(bytes) = file.content else {
+                    unreachable!("materialized batch representation");
+                };
+                files.push(File {
+                    bytes: bytes.into(),
+                    reading: file.reading,
+                });
+            }
+            self.check_source()?;
+            pending = callback(files)?;
+            self.check_source()?;
+        }
+        Ok(())
+    }
     pub fn read_verified(&mut self, id: u32) -> Result<VerifiedFile> {
         let file = self.read_selected(id, ReadMode::Verified)?;
         match file.content {
@@ -379,15 +428,17 @@ impl<'a> Reader<'a> {
         let Some(target) = &self.target else {
             return Ok(());
         };
-        let after = installed::resolve_local_budgeted(
-            &target.common_root,
-            &target.metadata.installed.product,
-            &self.pin.full_build,
+        // Recheck the selected client path too. Resolving only the common CASC
+        // root would skip client/version.txt and .flavor.info after preparation.
+        let after = installed::resolve_pinned_target_budgeted(
+            &target.installation,
+            self.pin,
             Some(self.budget),
         )?;
-        if after.catalog_sha256 != target.metadata.catalog_sha256
-            || after.build_document.sha256 != target.metadata.build_document.sha256
-            || after.cdn_document.sha256 != target.metadata.cdn_document.sha256
+        if after.common_root != target.common_root
+            || after.metadata.catalog_sha256 != target.metadata.catalog_sha256
+            || after.metadata.build_document.sha256 != target.metadata.build_document.sha256
+            || after.metadata.cdn_document.sha256 != target.metadata.cdn_document.sha256
         {
             return Err(fault(
                 "records.pinned_build_changed",
@@ -420,7 +471,7 @@ impl<'a> Reader<'a> {
                 Err(_) => Err(fault(
                     "records.internal",
                     8,
-                    "Local SQL source still has a live borrower",
+                    "Local query source still has a live borrower",
                 )),
             },
             None => result,

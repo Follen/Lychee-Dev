@@ -13,6 +13,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(test)]
+#[path = "db2/source_freshness_tests.rs"]
+mod source_freshness_tests;
+
 pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
     dispatch_after_read(inv, &mut || Ok(()))
 }
@@ -105,7 +109,7 @@ pub(crate) fn dispatch_finishing(
                 inv,
                 name,
                 &budget,
-                inv.flag_bool("--cdn").then_some(&mut *reader),
+                Some(&mut *reader),
                 Some(resolved.clone()),
             )?;
             let data = pin.data.as_ref().expect("prepare checked DataPin");
@@ -238,7 +242,7 @@ pub(crate) fn dispatch_finishing(
                         .iter()
                         .find(|f| f.name == field)
                         .ok_or_else(|| fault("records.field_unknown", 4, "Unknown DB2 field"))?;
-                    if !search && definition_field.kind != "int" {
+                    if !search && (definition_field.kind != "int" || definition_field.array) {
                         let mut error = fault(
                             "records.field_type_mismatch",
                             2,
@@ -350,6 +354,7 @@ pub(crate) fn dispatch_finishing(
             };
             after_read()?;
             reader.check_consumer(inv, &budget)?;
+            reader.verify_source()?;
             budget.check()?;
             if inv.command == "data db2" {
                 // Existing ordinary record/page diagnostics retain their shape.
@@ -407,7 +412,7 @@ pub(crate) fn dispatch_finishing(
         if inv.flag_bool("--cdn") {
             scope.with_session(data, |reader| execute(reader))
         } else {
-            execute(&mut scope)
+            scope.with_local_session(data, |reader| execute(reader))
         }
     })();
     finish(scope, result).map_err(|error| capture::query_committed_error(error, &committed, false))

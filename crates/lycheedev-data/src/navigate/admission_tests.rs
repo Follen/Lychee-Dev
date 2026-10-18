@@ -350,10 +350,25 @@ fn local_spell_profiles_callback_failure_stays_primary_over_cancelled_cleanup() 
             error.details["schema"],
             "lycheedev.admitted-workspace-errors.v1"
         );
-        assert_eq!(
-            error.details["causes"],
-            json!([primary, inv.control.check().unwrap_err()])
-        );
+        let stop = serde_json::to_value(inv.control.check().unwrap_err()).unwrap();
+        let causes = error.details["causes"].as_array().unwrap();
+        assert_eq!(causes.len(), 2);
+        assert_eq!(causes[1], stop);
+        // Both original CASC owners now survive this callback. Their real
+        // checked closes each retain the callback primary and observed stop;
+        // neither a close event nor the original error may be flattened away.
+        let mut original = &causes[0];
+        for _ in 0..2 {
+            assert_eq!(original["code"], primary.code);
+            assert_eq!(original["message"], primary.message);
+            assert_eq!(original["exit_code"], primary.exit_code);
+            let details = &original["details"];
+            assert_eq!(details["schema"], "lycheedev.casc-cleanup.v1");
+            assert_eq!(details["cleanup"], json!([]));
+            assert_eq!(details["stops"], json!([stop]));
+            original = &details["primary"];
+        }
+        assert_eq!(*original, serde_json::to_value(primary).unwrap());
         assert_eq!(captures(&fx), 0);
         released(&fx);
     }

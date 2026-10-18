@@ -324,7 +324,7 @@ fn dispatch_capturing(
                 inv,
                 &[SECTION],
                 &budget,
-                inv.flag_bool("--cdn").then_some(&mut *reader),
+                Some(&mut *reader),
                 Some(pin.clone()),
                 &mut |batch| {
                     // Go completes every table's schema/WDC open before asking for the
@@ -380,13 +380,7 @@ fn dispatch_capturing(
                 ),
             ] {
                 budget.check()?;
-                reader.check_consumer(inv, &budget)?;
-                check_source(
-                    inv,
-                    &prepared[0],
-                    &budget,
-                    inv.flag_bool("--cdn").then_some(&*reader),
-                )?;
+                check_source(inv, &budget, &*reader)?;
                 let raw = capture_bytes(value, &budget)?;
                 capture::admit_committed_identity(&budget)?;
                 let capture = evidence::commit_capture_budgeted(
@@ -426,7 +420,7 @@ fn dispatch_capturing(
         if inv.flag_bool("--cdn") {
             scope.with_session(data, |reader| execute(reader))
         } else {
-            execute(&mut scope)
+            scope.with_local_session(data, |reader| execute(reader))
         }
     })();
     finish(scope, result).map_err(|error| capture::query_committed_error(error, &committed, false))
@@ -435,6 +429,68 @@ fn dispatch_capturing(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn encounter_rehashes_original_index_before_each_capture_and_keeps_first_commit() {
+        use crate::capture::committed_tests::{fixture::Fixture, tables};
+        use lycheedev_core::metadata::Metadata;
+        use std::fs;
+
+        let fx = Fixture::new(&tables());
+        let inv = fx.invocation("data encounter get", &[("--journal-encounter-id", "132")]);
+        let path = fx.client.parent().unwrap().join("Data/data/0000000001.idx");
+        let original = fs::read(&path).unwrap();
+        let mut reads = 0;
+        let mut committed = Vec::new();
+        let result = dispatch_capturing(
+            &inv,
+            &mut || {
+                reads += 1;
+                Ok(())
+            },
+            |scope, result| scope.finish(result),
+            &mut |capture| {
+                committed.push(capture.clone());
+                assert_eq!(
+                    committed.len(),
+                    1,
+                    "must not commit or replay a second capture"
+                );
+                let mut changed = original.clone();
+                changed[40] ^= 1;
+                assert_eq!(changed.len(), original.len());
+                fs::write(&path, changed)?;
+                Ok(())
+            },
+        );
+        fs::write(&path, original).unwrap();
+        let error = result.unwrap_err();
+        assert_eq!(reads, 1);
+        assert_eq!(committed.len(), 1);
+        assert_eq!(error.code, "records.pinned_build_changed");
+        let saved = &committed[0];
+        let id = saved["id"].as_str().unwrap();
+        assert_eq!(saved["provenance"]["kind"], "encounter-get");
+        assert_eq!(error.details["completedCaptures"], json!([id]));
+        assert_eq!(error.details["outputPublished"], false);
+        assert_eq!(evidence::read_capture(&fx.home, id).unwrap(), *saved);
+        let metadata = Metadata::open(&fx.home, false).unwrap();
+        assert_eq!(metadata.list::<Value>("capture/", 100).unwrap(), committed);
+        metadata.close().unwrap();
+        let raw = evidence::read_blob(&fx.home, &saved["blob"], 16 << 20).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&raw).unwrap()["journalEncounterID"],
+            132
+        );
+        assert_eq!(
+            dispatch(&inv, &mut || Ok(()), |scope, result| scope.finish(result))
+                .unwrap()
+                .provenance
+                .len(),
+            2
+        );
+        fs::remove_dir_all(fx.root).unwrap();
+    }
 
     #[test]
     fn encounter_keeps_first_capture_when_second_is_cancelled_and_final_close_fails() {

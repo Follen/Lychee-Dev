@@ -9,7 +9,7 @@ mod spell;
 use super::{Row, identifier, integer, matches};
 use crate::{
     capture::{self, GoCaptureFormatter},
-    db2, fault, installed,
+    db2, fault,
     resource::{Budget, Cost, RetainedReservation},
     table,
 };
@@ -21,7 +21,6 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use std::{
     io::{self, Write},
-    path::Path,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -363,7 +362,7 @@ impl<'a> Navigator<'a> {
                         format!("records.field_unknown: {field}"),
                     )
                 })?;
-            if definition.kind != "int" {
+            if definition.kind != "int" || definition.array {
                 return Err(fault(
                     "records.field_type_mismatch",
                     2,
@@ -556,49 +555,17 @@ fn admit_row(budget: &Budget, row: &Row) -> Result<()> {
     budget.charge(Cost::retained(bytes))
 }
 
-// The file batch verifies the source before/after IO. Recheck after navigation
-// too, before publishing any result, so long scans cannot silently cross builds.
+// Reauthenticate the observations held by the original lexical source owner.
+// Preparing a new CASC source here would accept an index changed during scans.
 pub(super) fn check_source(
     inv: &Invocation,
-    prepared: &db2::Prepared,
     budget: &Arc<Budget>,
-    remote: Option<&dyn crate::remote::provider::FileScope>,
+    reader: &dyn crate::remote::provider::FileScope,
 ) -> Result<()> {
     inv.control.check()?;
     budget.check()?;
-    if let Some(scope) = remote {
-        // Fixed Go readSession.check returns after context checks for CDN, and
-        // fileSource has no local verify callback there. Content was already
-        // authenticated by the borrowed Session, not by this source selector.
-        return scope.check_consumer(inv, budget);
-    }
-    let pin = prepared.pin.data.as_ref().expect("prepare checked DataPin");
-    budget.charge(Cost::metadata(
-        inv.required("--installation")?.len()
-            + pin.product.len()
-            + pin.full_build.len()
-            + pin.region.len()
-            + pin.language.len()
-            + pin.definition_commit.len(),
-    ))?;
-    let current = installed::resolve_pinned_target_budgeted(
-        Path::new(inv.required("--installation")?),
-        pin,
-        Some(budget),
-    )?;
-    let proof = &prepared.file.reading;
-    if &current.data != pin
-        || proof["catalogSHA256"] != current.metadata.catalog_sha256
-        || proof["buildConfiguration"]["sha256"] != current.metadata.build_document.sha256
-        || proof["cdnConfiguration"]["sha256"] != current.metadata.cdn_document.sha256
-    {
-        return Err(fault(
-            "records.pinned_build_changed",
-            4,
-            "Local metadata changed during query",
-        ));
-    }
-    budget.check()
+    reader.check_consumer(inv, budget)?;
+    reader.verify_source()
 }
 
 pub(super) fn dispatch(
@@ -651,7 +618,7 @@ pub(super) fn dispatch(
                     inv,
                     &tables[..1],
                     &budget,
-                    inv.flag_bool("--cdn").then_some(&mut *reader),
+                    Some(&mut *reader),
                     Some(pin.clone()),
                     &mut |batch| {
                         // Go opens each table completely before resolving the next one.
@@ -667,7 +634,7 @@ pub(super) fn dispatch(
                     inv,
                     request.tables(),
                     &budget,
-                    inv.flag_bool("--cdn").then_some(&mut *reader),
+                    Some(&mut *reader),
                     Some(pin.clone()),
                     &mut |_| Ok(Vec::new()),
                 )?
@@ -680,13 +647,7 @@ pub(super) fn dispatch(
                 .extend(nav.context()?.as_object().expect("context object").clone());
             budget.check()?;
             after_read()?;
-            reader.check_consumer(inv, &budget)?;
-            check_source(
-                inv,
-                &prepared[0],
-                &budget,
-                inv.flag_bool("--cdn").then_some(&*reader),
-            )?;
+            check_source(inv, &budget, &*reader)?;
             let raw = capture_bytes(&result, &budget)?;
             let complete = result["complete"] == true;
             let truncated = result["truncated"] == true;
@@ -728,7 +689,7 @@ pub(super) fn dispatch(
         if inv.flag_bool("--cdn") {
             scope.with_session(data, |reader| execute(reader))
         } else {
-            execute(&mut scope)
+            scope.with_local_session(data, |reader| execute(reader))
         }
     })();
     finish(scope, result).map_err(|error| capture::query_committed_error(error, &committed, false))

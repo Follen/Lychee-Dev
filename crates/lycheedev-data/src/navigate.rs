@@ -206,7 +206,7 @@ pub(crate) fn dispatch_finishing(
                 inv,
                 "SpellEffect",
                 &budget,
-                inv.flag_bool("--cdn").then_some(&mut *reader),
+                Some(&mut *reader),
                 Some(pin.clone()),
             )?;
             let view = table::open_budgeted(
@@ -225,7 +225,7 @@ pub(crate) fn dispatch_finishing(
                 .ok_or_else(|| {
                     fault("records.field_unknown", 4, "records.field_unknown: SpellID")
                 })?;
-            if field.kind != "int" {
+            if field.kind != "int" || field.array {
                 return Err(fault(
                     "records.field_type_mismatch",
                     2,
@@ -263,13 +263,7 @@ pub(crate) fn dispatch_finishing(
             result["resourceAccounting"] = json!({"wholeQueryAccountingComplete":false,"strategy":"conservative cumulative admission","wdcMetadataAdmittedBytes":view.admitted_metadata_bytes(),"remainingGaps":["uninterruptible single codec call"]});
             budget.check()?;
             after_read()?;
-            reader.check_consumer(inv, &budget)?;
-            catalog::check_source(
-                inv,
-                &prepared,
-                &budget,
-                inv.flag_bool("--cdn").then_some(&*reader),
-            )?;
+            catalog::check_source(inv, &budget, &*reader)?;
             let raw = capture::json_bytes(&result, &budget, 16 << 20, || {
                 fault(
                     "records.query_resource_budget",
@@ -311,7 +305,7 @@ pub(crate) fn dispatch_finishing(
         if inv.flag_bool("--cdn") {
             scope.with_session(data, |reader| execute(reader))
         } else {
-            execute(&mut scope)
+            scope.with_local_session(data, |reader| execute(reader))
         }
     })();
     finish(scope, result).map_err(|error| capture::query_committed_error(error, &committed, false))

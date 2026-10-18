@@ -62,7 +62,7 @@ pub(super) fn run_after_finish(
                 inv,
                 request.name,
                 &budget,
-                request.cdn.then_some(&mut *reader),
+                Some(&mut *reader),
                 Some(pin.clone()),
             )?;
             let view = table::open_budgeted(
@@ -108,6 +108,7 @@ pub(super) fn run_after_finish(
             // manifest capture. Frames intentionally have no memoryBudget.
             inv.control.check()?;
             reader.check_consumer(inv, &budget)?;
+            reader.verify_source()?;
             let resources = budget.logical_snapshot()?;
             let memory_budget = budget.memory_snapshot()?;
             budget.check()?;
@@ -146,7 +147,7 @@ pub(super) fn run_after_finish(
         if request.cdn {
             scope.with_session(data, |reader| execute(reader))
         } else {
-            execute(&mut scope)
+            scope.with_local_session(data, |reader| execute(reader))
         }
     })();
     // A terminal success promises the whole owned operation. All consuming
