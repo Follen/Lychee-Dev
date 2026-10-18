@@ -333,3 +333,53 @@ fn prepare_catalog_public_fixture() {
         serde_json::from_slice(&fs::read(fx.root.join("input-identity.json")).unwrap()).unwrap();
     assert_eq!(identity["snapshot"], fx.pin);
 }
+
+// Optional paired-CSV diagnostic input only. Keep the small catalog and numeric
+// edge fixtures unchanged; this exporter constructs bounded real WDC3 bytes.
+#[test]
+#[ignore = "explicit retained 16384-row CSV diagnostic input; not product acceptance"]
+fn prepare_numeric_csv_public_fixture() {
+    assert!(
+        cfg!(all(windows, target_arch = "x86_64")),
+        "Windows x64 diagnostic fixture"
+    );
+    let root = std::path::PathBuf::from(
+        std::env::var_os("LYCHEEDEV_NUMERIC_CSV_FIXTURE").expect("fresh owned fixture root"),
+    );
+    let rows: Vec<_> = (1..=16_384u32)
+        .map(|i| {
+            vec![
+                Cell::U(i),
+                Cell::F(i as f32 + 0.5),
+                Cell::F(-(i as f32) - 0.5),
+                Cell::F(0.25),
+                Cell::F(-0.25),
+            ]
+        })
+        .collect();
+    let numeric = table(
+        "NumericSample",
+        404,
+        &[
+            ("ID", "uint"),
+            ("F0", "float"),
+            ("F1", "float"),
+            ("F2", "float"),
+            ("F3", "float"),
+        ],
+        &rows,
+    );
+    let fx = Fixture::at(root, &[numeric], "zhCN", 0x40);
+    let path = fx.root.join("input-identity.json");
+    let mut identity: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(identity["snapshot"], fx.pin);
+    assert_eq!(identity["tables"][0]["bytes"], 327_933);
+    // Compiler ABI facts only. The independent Node consumer derives the old
+    // admission delta; never call the production layout/accounting as oracle.
+    use lycheedev_core::public_json::NumberLayout;
+    identity["numericCsvABI"] = json!({
+        "usizeNumberLayoutBytes": std::mem::size_of::<(usize, NumberLayout)>(),
+        "stringNumberLayoutBytes": std::mem::size_of::<(String, NumberLayout)>(),
+    });
+    fs::write(path, serde_json::to_vec_pretty(&identity).unwrap()).unwrap();
+}

@@ -574,3 +574,57 @@ node --test tests/rust-performance-paired/read-fact-delta.test.mjs tests/rust-pe
 The current combined fixture run passes 66/66 (reader 29, historical-candidate
 runner 32, generated fixture structure 5). This verifies Node fixtures and
 historical-reader compatibility, not Rust execution or performance acceptance.
+
+## Optional bounded CSV old/new diagnostic
+
+`node tests/rust-performance-paired/prepare-data.mjs --csv-numeric` selects only
+one ignored NumericSample exporter through the existing owned offline Cargo
+path. The default preparer remains catalog/content/images. The new fixture has
+16,384 rows, IDs1..16384, and exact f32 columns F0..F3 containing
+`i+0.5,-i-0.5,0.25,-0.25`. WDC bytes327933 and expected CSV bytes523753 are
+independently checked. This is synthetic data, not a real-installation fixture.
+
+Fixture production has its own final source digest, sealed owner/Cargo receipts,
+report SHA and inventory. Preserve independent clean63d and a860 product source
+witnesses and their existing optimized artifacts. Do not relabel either product
+with the later fixture producer source digest or rebuild products for this runner.
+
+Run `node tools/rust-data-csv-diagnostics.mjs <old-new-config.json> <machine-conditions.json>`
+from the final runner checkout. Configuration schema is
+`lycheedev.data-csv-diagnostics-config.v1`, with `ownerRoot`, optional `pairs`
+(default1; only1 or3), `baseline`, `candidate`, and `fixturePreparation`.
+Each product object contains absolute `sourceRoot`, `artifactRoot`, `artifact`,
+exact `commit`, and trusted original `artifactSHA256`, `binarySHA256`,
+`sourceTreeSHA256`. The fixed product commits are63d47f29f6c9efe2511ada5969426a184eca1830
+and a8604d0dabf6b7ecefa8f15409bda2bf9fbaf8be. Expected candidate hashes come from
+its official build outcome, never invented defaults. `fixturePreparation` contains
+absolute retained `report`, exact `reportSHA256`, and producer `sourceTreeSHA256`.
+Machine conditions require nonempty `machine`, `powerAndThermal`, `competingLoad`,
+`disk`, and `operator` descriptions. Neither config permits implicit latest.
+
+One pair performs four measured CLI calls, old/new cold/warm, plus eight actual
+CAP evidence-verification calls outside measurement. Three pairs alternate engine
+order in fresh independent homes. Full CSV bytes, sidecar, query and CSV CAPs,
+source evidence, dependencies, and retained audit bytes are checked. Timing and
+identity observations are handled fieldwise; the removed safety accounting work
+and retained charge must match the independent exact formula, using two sealed
+compiler ABI facts from unchanged NumberLayout source. Unknown semantic changes
+remain failures. SQL executionMs precedes layout construction and cannot measure
+this optimization; native full CLI elapsed remains the comparison clock.
+
+The original Data scratch default5GiB remains. Fixture producer reserves256MiB
+scratch and requires1GiB free-space admission; diagnostic outer reserves1GiB.
+Existing quotas, original product budgets, default stack and owned deadlines
+remain authoritative. Low adaptive headroom is an honest failure/not-measured,
+never a reason to enlarge limits or automatically shrink this fixed input.
+Only successful byte verification, identity recheck, sealing and owner retirement
+allow completion. Neither this Rust-versus-Rust diagnostic nor its optional3pairs
+is Go performance acceptance or full B04 coverage.
+
+Cloud validation: the new CSV Node suite passed29/0/0 on final bytes, independently
+reviewed. Broad existing wildcard Node regression was not executed after an access
+review flagged possible lazy Git fetch in the partial clone; no subset workaround
+was attempted. Native exporter compilation, Windows ABI observations and actual
+CSV measurements remain pending. Before Windows execution, run normal all-targets
+and the new Node suite; the unique test coordinator must arrange unchanged broader
+regression in an environment with its required objects already present.

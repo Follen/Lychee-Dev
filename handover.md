@@ -1,6 +1,16 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 16:00 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最近完整性能诊断产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 16:25 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新完整性能诊断为5859 runner/封存63d产品，六场景完整Facts/顺序/summary及引用custody均等价；冷4.345s、暖0.438s、四变体1.180–1.228s，六比值约0.360–0.740仍未≤0.30，仅单组诊断，所有内存采样有缺口。a860正确性与最小coverage链已通过，匹配产物性能待验。完整性能与最终五阶段循环审计未完成。
+
+### a860正式定向与coverage最小链通过（2026-10-18 16:25 UTC）
+
+唯一Windows协调线程报告固定`a8604d0dabf6b7ecefa8f15409bda2bf9fbaf8be`全批终态：all-targets成功；Source index122、Data output5、sparse exact1、Data close15、CSV8、CLI3，共154项普通Rust全部通过，Source6/Data5新增逐名各执行一次。Node75通过、1项真实文件symlink创建EPERM跳过，未执行断言不算通过。
+
+正式coverage选定Core测试1通过，LLVM merge/export均成功，3.1.0 schema被接受；raw/binary/merged分别2/6/1片完整认证。该单测试报告只涵盖其instrumented对象内146个项目Rust文件，另外380文件被路径过滤排除，不能据此称全仓分母、全仓覆盖率或Stage2完成。10owner全部回收、18native成功退出，6次forced均为已认证辅助清理，无deadline，结束时lease/进程为空。仅保存非敏感结果汇总，不附受限本机原始日志。
+
+当前a860首次匹配release与正式assembly已由唯一队列实际成功完成并回收；同一产物Source六场景新性能及五个integration coverage报告尚待终态。两处生产优化已经过上述真实正确性回归，但没有新匹配产物性能结论；旧63d结果不能归入a860。Data CSV规模化诊断另准备最窄可选工具，仍须完整CSV与双CAP验证，既有小SQL样本不证明收益。历史coverage三次失败、平台跳过、性能未达0.30、完整Skill/实机压力未验保留。
+
+可选Data CSV诊断已完成独立静审及新增Node29/0/0：固定16,384行真实WDC fixture，独立producer身份与旧63d/新a860产物身份，完整CSV/sidecar/双CAP和精确计量差验证，默认1pair四次测量，不改B04。Rust exporter与实际Windows性能尚未运行；广泛Node wildcard因partial clone潜在懒拉远端被拒，未拆子集绕行。原Data5GiB及fixture256MiB/outer1GiB准入保持，实际空间不足须诚实停报。五个integration coverage目标准备就绪，仍分别报告object映射分母，CLI多object与Delivery分组选择缺口未伪报补齐。
 
 ### 当前Source诊断与下一最窄算法片（2026-10-18 15:55 UTC）
 

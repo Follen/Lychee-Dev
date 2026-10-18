@@ -103,6 +103,7 @@ export function loadDataFixture(directory, kind) {
       safeRelative(test.pixelsPath); const raw = bounded(join(directory, test.pixelsPath), 4 << 20);
       assert.equal(raw.length, test.pixelsBytes); assert.equal(digest(raw), test.pixelsSHA256);
     }
+  } else if (kind === 'csv-numeric') { auditNumericCSVFixture(identity, payloads, blobs);
   } else { assert.equal(kind, 'catalog'); assert.deepEqual(identity.tables.map(table => table.name), ['Item', 'ItemSparse', 'HouseDecor']); }
   assert.equal(inventory(directory, {maxFiles: 256, maxBytes: 64 << 20}).sha256, before.sha256);
   const objects = Object.fromEntries([...payloads].map(([sha256, body]) => [sha256, {decodedBytes: body.raw.length, encodedBytes: body.encodedBytes, ckey: digest(body.raw, 'md5'), ekey: body.ekey}]));
@@ -135,7 +136,7 @@ export function decodedIdentity(home) {
   } finally { database.close(); }
 }
 
-function captureCanonical(capture) {
+export function captureCanonical(capture) {
   return {schema: capture.schema, id: '', blob: ordered(capture.blob, ['sha256', 'bytes']), mediaType: capture.mediaType,
     provenance: ordered(capture.provenance, ['kind', 'locator', 'snapshot', 'operationId', 'sourceCommit', 'baseSnapshot', 'baseSourceCommit', 'dataBuild', 'session']), complete: capture.complete, truncated: capture.truncated, capturedAt: capture.capturedAt,
     ...(Object.hasOwn(capture, 'dependencies') ? {dependencies: capture.dependencies} : {})};
@@ -221,4 +222,51 @@ export async function validateDataOutput({entry, fixture, engine, cacheMode, env
   audited.value.captures = envelope.captures.map(capture => normalized.get(capture.id));
   if (entry.kind === 'image') { audited.value.result.sourceCapture = normalized.get(value.sourceCapture.id); audited.value.result.artifactCapture = normalized.get(value.artifactCapture.id); }
   return {...audited, proofs};
+}
+
+// Independent optional NumericSample CSV oracle; the existing Rust exporter
+// constructs the actual CASC/WDC fixture. Default B04 readers are unchanged.
+export const NUMERIC_LAYOUT_SOURCE_SHA256 = 'bfc67a8ac470bb89df3630d91b600c940453b296ca9c61f63bac69e2cdae1e35';
+export const CSV_CARGO_LOCK_SHA256 = '48a75745057d65173a19e63bbb434daae290ed979b0c9bfed76427d523dc4055';
+export const CSV_ROWS = 16384;
+export const CSV_COLUMNS = Object.freeze(['ID', 'F0', 'F1', 'F2', 'F3']);
+export const CSV_SQL = 'SELECT ID, F0, F1, F2, F3 FROM NumericSample ORDER BY ID';
+export const CSV_SHA256 = '83abe748a19c1f63626cc5702843ecd346a98c9b77d03ba6b3960125750d05ac';
+export const WDC_SHA256 = '3b914d5c1dbe818a91aae00bf37c32489c0c6f1ffeb5ee16c6e2b8cfbc45d68c';
+export const DBD_SHA256 = '3246db1f30be88aa590c0c2c5ec8c89d832764ab01fe8450f647bad9e4da6450';
+export const CSV_BYTES = 523753;
+export const WDC_BYTES = 327933;
+
+export function numericRow(i) { assert(Number.isInteger(i) && i >= 0 && i < CSV_ROWS); return [i + 1, i + 1.5, -i - 1.5, 0.25, -0.25]; }
+export function expectedNumericCSV() {
+  // Decimal strings are independent of product float formatting. Every chosen
+  // fraction is exactly representable in f32 and has this unique CSV spelling.
+  const rows = ['ID,F0,F1,F2,F3\n'];
+  for (let i = 0; i < CSV_ROWS; i++) rows.push(`${i + 1},${i + 1}.5,-${i + 1}.5,0.25,-0.25\n`);
+  const bytes = Buffer.from(rows.join(''));
+  assert.equal(bytes.length, CSV_BYTES); assert.equal(digest(bytes), CSV_SHA256); return bytes;
+}
+export function removedNumericLayoutCost(abi) {
+  assert.deepEqual(Object.keys(abi ?? {}).sort(), ['stringNumberLayoutBytes', 'usizeNumberLayoutBytes']);
+  for (const bytes of Object.values(abi)) assert(Number.isSafeInteger(bytes) && bytes >= 16 && bytes <= 256 && bytes % 8 === 0, 'bounded Windows x64 tuple ABI');
+  assert.equal(abi.stringNumberLayoutBytes - abi.usizeNumberLayoutBytes, 16, 'Windows x64 String versus usize tuple');
+  const nodes = (entries, tupleBytes) => (Math.ceil(entries / 5) + 2) * (16 * tupleBytes + 128);
+  const retainedBytes = CSV_ROWS * nodes(4, abi.usizeNumberLayoutBytes) + nodes(CSV_ROWS, abi.usizeNumberLayoutBytes)
+    + 2 * nodes(3, abi.stringNumberLayoutBytes) + nodes(1, abi.stringNumberLayoutBytes) + 128;
+  return {retainedBytes, decodeWork: CSV_ROWS * 5, abi: {...abi}};
+}
+export function auditNumericCSVFixture(identity, payloads, blobs) {
+  removedNumericLayoutCost(identity.numericCsvABI);
+  assert.deepEqual(identity.tables, [{name: 'NumericSample', fileDataID: 404, layout: 0xabcd0194, bytes: WDC_BYTES, sha256: WDC_SHA256, dbdSHA256: DBD_SHA256}]);
+  const body = payloads.get(WDC_SHA256); assert(body, 'numeric WDC object missing');
+  const raw = body.raw; assert.equal(raw.length, WDC_BYTES); assert.equal(digest(raw), WDC_SHA256);
+  assert.equal(raw.subarray(0, 4).toString(), 'WDC3');
+  for (const [at, value] of [[4, CSV_ROWS], [8, 5], [12, 20], [16, 1], [20, 0xf00d0194], [24, 0xabcd0194], [28, 1], [32, CSV_ROWS], [44, 5], [56, 120], [68, 1], [80, 252], [84, CSV_ROWS], [88, 1]]) assert.equal(raw.readUInt32LE(at), value);
+  for (let i = 0; i < CSV_ROWS; i++) {
+    const at = 252 + i * 20, expected = numericRow(i);
+    assert.equal(raw.readUInt32LE(at), expected[0]);
+    for (let column = 1; column < 5; column++) assert.equal(raw.readFloatLE(at + column * 4), expected[column], 'exact f32 fixture cell');
+  }
+  const definition = blobs.find(ref => ref.sha256 === DBD_SHA256); assert(definition);
+  assert.equal(definition.raw.toString(), 'COLUMNS\nint ID\nfloat F0\nfloat F1\nfloat F2\nfloat F3\n\nBUILD 12.1.0.69933\nLAYOUT ABCD0194\n$id$ID<u32>\nF0<32>\nF1<32>\nF2<32>\nF3<32>\n');
 }

@@ -378,3 +378,10 @@ Each stage repeats independent audit → actionable findings → fixes → verif
 - [ ] 集中执行listfile/search默认链17新回归：原120秒/五请求/gzip/停止、真实loopback取消、单Metadata raw/generation CAS/checked关闭及Go重复/null/time/depth；保持共享编码点URL拒绝差异可见并在完整合同验收中解决。
 
 - [ ] 集中验证Hotfix/共享CSV15新回归及CLI完整envelope：Wago同owner receipt/CAS、独立预算在途取消、Raidbots受控原文件/解码、query/CSV已提交1..2 ID、data→manifest发布/unknown与checked多因；raw URI和合法异常offset比较/晚期marshal差异仍需修复，不能作为永久豁免。
+
+
+### 2026-10-18 16:25 UTC：a860实际定向与coverage工具链
+
+- [x] 固定a860 all-targets、普通Rust154及11新增逐名通过；Node75/0/1真实EPERM，coverage exact Core1通过，LLVM merge/export与3.1.0严格schema接受。此前失败与跳过不改标。
+- [ ] 在测试有效性范围基础上建立有明确分母的实际覆盖率基线：当前146项目文件仅单测试对象范围，不能汇总依赖totals或直接平均各报告百分比；Stage2尚未结束。
+- [ ] a860匹配release/assembly已实际通过；按正式工具验证Source六场景总wall/FactsRead，新优化性能及五个integration coverage报告尚待终态。Data CSV最窄可选真实规模化诊断准备中，fixture生成身份与产品身份分别认证，保持原B04。
