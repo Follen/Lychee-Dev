@@ -1,6 +1,12 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 07:59 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最近完整性能诊断产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 09:50 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最近完整性能诊断产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+
+### Stage2第二轮有限断言审查（2026-10-18 09:50 UTC）
+
+独立审者继续核Source/Data/CLI/Skill11完整test/support文件及Core存储/evidence、Live协议/journal/recovery真实消费者，未重复已完成平台库存。确认并修四处测试有效性缺口：Skill EXE反例先恢复并验证launcher避免旧错误遮蔽；Core provider反例不再同时wrong snapshot；Source deadline无CAP检查改走真正batch发布入口并保原1s/索引复用；Live旧500capability的6项预期从生产helper自证改为固定Go合同独立矩阵。只改四个既有测试文件，无新产品bug结论、无删除边界；另省Skill7条纯路径语法反例的无用完整package构造。
+
+两个独审者按最终字节通过，Linux受影响Node两suite71/0/0；三Rust文件仅syntax parse，Rust/Windows NOT_RUN。完整范围、保留的分层义务和有限候选见[Stage2记录](docs/toolkit/rust-audit-stage2-2026-10-18.md)。本机资源暂停不阻云端工作；coverage正式入口另片实现中，固定toolchain/owned channel/有限target，尚无实际覆盖率。Stage2未结束，不进入Stage3。
 
 ### Source诊断控制器请求内投影候选（2026-10-18 07:59 UTC）
 

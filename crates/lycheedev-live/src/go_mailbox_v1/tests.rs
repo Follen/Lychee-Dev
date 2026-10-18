@@ -274,23 +274,33 @@ fn go_mailbox_v1_legacy_200_is_activation_only() {
 }
 #[test]
 fn go_mailbox_v1_old_500_capability_stays_labelled() {
-    for capability in [
-        LEGACY_INPUT_SCHEMA,
-        LEGACY_HYBRID_SCHEMA,
-        PREVIOUS_SCHEMA,
-        "future",
-        "",
-        SCHEMA,
+    // Fixed Go 3.2.3 input.go/protocol.go contract. Do not derive the oracle
+    // from upgrade_input_capability, which decode_identity itself consumes.
+    for (capability, accepted) in [
+        ("lycheedev.input.v3", true),
+        ("lycheedev.input.hybrid.v2", true),
+        ("lycheedev.mailbox.v1", true),
+        ("future", false),
+        ("", false),
+        ("Lycheedev mailbox protocol v1", false),
     ] {
         let mut i = identity();
         i.schema = LEGACY_IDENTITY_SCHEMA.into();
         i.input_state = capability.into();
         let wire = identity_wire(&i, identity_header());
         let result = decode_identity(&decode_record(&wire).unwrap(), "3.2.0");
-        assert_eq!(result.is_ok(), upgrade_input_capability(capability));
-        if let Ok(result) = result {
-            assert!(matches!(result, IdentityPublication::UpgradeCapability(_)));
-            assert_eq!(result.identity().schema, LEGACY_IDENTITY_SCHEMA);
+        if accepted {
+            assert_eq!(
+                result,
+                Ok(IdentityPublication::UpgradeCapability(i)),
+                "capability: {capability:?}"
+            );
+        } else {
+            assert_eq!(
+                result,
+                Err(ContractError("live.channel_identity_record_invalid")),
+                "capability: {capability:?}"
+            );
         }
     }
 }

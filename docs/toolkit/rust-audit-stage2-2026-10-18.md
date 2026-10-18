@@ -19,6 +19,25 @@ The next finite slice repairs the Delivery integration gap and two silent platfo
 
 No production bug is inferred solely from a test failing to prove its stated property. No broad suite deletion is justified by this pass. The core Windows-only target contract is documented in README/DESIGN and enforced by dependency/import structure; no platform shim was added.
 
+## Second finite assertion review (fixed f28 baseline)
+
+Two independent reviewers traced actual assertions and consumers rather than repeating the platform inventory. The Source/Data/CLI/Skill pass read11 complete test/support files: batch/public inspection, partial local/remote rows, stream/CAP/source freshness, actual public numeric/diagnostic output, and Skill checker/report boundaries. The Core/Live pass covered storage/stream publication/evidence dependency removal plus protocol/state/observations, journal/snapshot/durable/recovery and selected driver consumers. This is a finite review, not exhaustive test coverage or a new Stage1 production audit.
+
+Four confirmed weaknesses now have test-only repairs, independently reviewed:
+
+| Existing test | Prior alternative cause or missing consumer | Repair and retained obligations |
+|---|---|---|
+| Skill actual packaged native bytes and launcher | Corrupt launcher remained while EXE was corrupted; generic second throws could be satisfied by launcher | Restore and positively verify launcher, mutate same-length EXE bytes, assert exact binary SHA failure. Both identities remain covered |
+| Core unrelated_payloads_do_not_become_references_and_explicit_dependencies_are_authoritative | Provider negative also supplied wrong snapshot; either rejection made it pass | Provider uses matching PIN-fixture; wrong snapshot remains separate. Existing real dbcache positive/removal ownership and explicit dependencies retained |
+| Source deadline_inside_query_scan_has_no_capture_and_leaves_index_reusable | Direct Index search never enters batch capture publication | Existing observed public batch dispatcher now reaches the real line hook under the original1s deadline; assert no CAP and public recovery while preserving direct warmed-index reuse |
+| Live go_mailbox_v1_old_500_capability_stays_labelled | Expected acceptance reused the same production whitelist helper | Keep all6 cases with fixed-Go independent explicit expectations and complete UpgradeCapability identity or exact failure. Current identity's unknown capability discovery behavior is not redefined |
+
+Also remove one proven unnecessary Skill package setup for seven pure path-syntax rejections; each original exact case and neighboring real directory-junction fixture remain. No test names/behavioral cases were deleted. Linux affected Skill suites71/0/0 and Node syntax check passed. Three Rust files passed syntax parsing only; Rust/Windows NOT_RUN. No performance reduction or coverage percentage follows.
+
+Valid layered obligations retained: provider/model versus installed CLI, pure golden journal versus filesystem/crash recovery, checked-close combiners versus public consumers, and native session versus owned worker. Similar failures or repeated helper names are insufficient for deletion. Two small classification limits remain: aggregate batch mode strings in a mock-owner helper do not prove both real lifecycle routes; an unused PublicMap receipts/bodies loop label does not establish two consumers. Their genuine independent consumer tests remain; no broad deletion is justified.
+
+Formal coverage collection is being implemented separately using the original owned build channel, fixed compiler/LLVM identity and explicitly selected target. Until that entry is actually run, handler inventory, test counts and static review remain distinct from measured code coverage.
+
 ## Repository test scope matrix
 
 | Domain and representative suites | Contract and actual evidence layer | Independent value, limitations and next coverage work |

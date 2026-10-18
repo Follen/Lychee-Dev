@@ -386,7 +386,14 @@ fn unrelated_payloads_do_not_become_references_and_explicit_dependencies_are_aut
         let body = match mode {
             "field" => json!({"schema":schema,"notes":{"frames":[{"capture":id(&target)}]}}),
             "provider" | "snapshot" => {
-                json!({"snapshot":"wrong-snapshot","source":{"schema":"lycheedev.capture.v1","id":id(&target)}})
+                // The provider case isolates the locator guard; only the
+                // separate snapshot case may fail the snapshot comparison.
+                let snapshot = if mode == "snapshot" {
+                    "wrong-snapshot"
+                } else {
+                    "PIN-fixture"
+                };
+                json!({"snapshot":snapshot,"source":{"schema":"lycheedev.capture.v1","id":id(&target)}})
             }
             "dependencies" => {
                 json!({"schema":"lycheedev.asset-export.v1","artifactCapture":{"schema":"lycheedev.capture.v1","id":id(&target)}})

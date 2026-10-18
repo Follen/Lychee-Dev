@@ -638,35 +638,34 @@ fn cancellation_inside_batch_literal_scan_has_no_capture_and_can_recover() {
 }
 #[test]
 fn deadline_inside_query_scan_has_no_capture_and_leaves_index_reusable() {
-    let f = fixture();
+    let mut f = fixture();
     let pin = selection::resolve_pinned(&f.inv).unwrap();
     let source = pin.source.as_ref().unwrap();
     let index = index::build_with_control(&f.inv.home, source, &f.inv.control).unwrap();
-    let control = OperationControl::uncancelable(Instant::now() + Duration::from_secs(1));
-    let deadline = control.deadline();
+    let request =
+        parse(br#"{"requests":[{"query":{"text":"absent-literal","mode":"exploratory"}}]}"#)
+            .unwrap();
+    // Warm preparation is outside the deadline; the actual batch dispatcher
+    // must reach its query scan before the original one-second budget expires.
+    f.inv.control = OperationControl::uncancelable(Instant::now() + Duration::from_secs(1));
+    let deadline = f.inv.control.deadline();
     let mut reached = false;
-    let error = index
-        .search_observed(
-            source,
-            &pin.id,
-            "absent-literal",
-            "exploratory",
-            "",
-            10,
-            "",
-            Some(&control),
-            &mut |phase, number| {
-                if phase == "line" && number == 1 {
-                    reached = true;
-                    std::thread::sleep(
-                        deadline.saturating_duration_since(Instant::now())
-                            + Duration::from_millis(1),
-                    );
-                }
-            },
-        )
-        .unwrap_err();
-    assert!(reached);
+    let error = dispatch_observed(
+        &f.inv,
+        request.clone(),
+        SourceTools::default(),
+        None,
+        &mut |phase, number| {
+            if phase == "line" && number == 1 {
+                reached = true;
+                std::thread::sleep(
+                    deadline.saturating_duration_since(Instant::now()) + Duration::from_millis(1),
+                );
+            }
+        },
+    )
+    .unwrap_err();
+    assert!(reached, "batch query never reached literal scan");
     assert_eq!(error.code, "command.deadline");
     assert!(
         lycheedev_core::metadata::Metadata::open(&f.inv.home, false)
@@ -688,6 +687,15 @@ fn deadline_inside_query_scan_has_no_capture_and_leaves_index_reusable() {
         )
         .unwrap();
     assert!(!recovered["results"].as_array().unwrap().is_empty());
+    let mut recovered_inv = f.inv.clone();
+    recovered_inv.control = OperationControl::default();
+    assert_eq!(
+        dispatch_request(&recovered_inv, request, SourceTools::default())
+            .unwrap()
+            .provenance
+            .len(),
+        1
+    );
 }
 fn budget_queries(count: usize) -> Vec<NativeQuery> {
     (0..count)

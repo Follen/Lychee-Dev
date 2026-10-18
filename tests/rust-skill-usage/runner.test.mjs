@@ -126,8 +126,14 @@ test('owned success cannot relabel Go320, omit current checks or turn static inc
   ]) { const changed = structuredClone(report); mutate(changed); assert.throws(() => assertCurrentSelectedReport(changed, workflow)); }
 });
 test('relative paths reject traversal and rooted paths', t => {
-  const f = fixture(t);
-  for (const name of ['../escape', '/absolute', 'C:/absolute', 'safe/../escape', 'safe\\escape', './candidate', 'candidate//package']) assert.throws(() => within(f.root, name));
+  const root = mkdtempSync(join(os.tmpdir(), 'lycheedev-skill-paths-'));
+  t.after(() => rmSync(root, {recursive: true, force: true}));
+  for (const [name, message] of [
+    ['../escape', 'safe path components'], ['/absolute', 'safe relative file name'],
+    ['C:/absolute', 'safe relative file name'], ['safe/../escape', 'safe path components'],
+    ['safe\\escape', 'safe relative file name'], ['./candidate', 'safe path components'],
+    ['candidate//package', 'safe path components'],
+  ]) assert.throws(() => within(root, name), {code: 'ERR_ASSERTION', message});
 });
 test(`relative paths reject directory ${process.platform === 'win32' ? 'junctions' : 'symlinks'}`, t => {
   const f = fixture(t), linked = join(f.root, 'linked');
@@ -168,8 +174,18 @@ test('candidate cannot resolve a package outside its owned repository', t => {
   const f = fixture(t); f.report.packageRoot = dirname(f.root); f.rewrite(); assert.throws(f.verify);
 });
 test('actual packaged native bytes and launcher are both verified', t => {
-  const f = fixture(t); write(join(f.packageRoot, 'bin/lycheedev.mjs'), '// substituted'); assert.throws(f.verify, /launcher/);
-  write(join(f.packageRoot, 'native/windows-amd64/lycheedev.exe'), 'substituted'); assert.throws(f.verify);
+  const f = fixture(t), launcherPath = join(f.packageRoot, 'bin/lycheedev.mjs');
+  const launcher = readFileSync(launcherPath);
+  f.verify();
+  write(launcherPath, '// substituted'); assert.throws(f.verify, /launcher/);
+  // Restore and verify the complete fixture so the binary rejection cannot be
+  // satisfied by the preceding, independently checked launcher corruption.
+  write(launcherPath, launcher); f.verify();
+  const binary = Buffer.alloc(f.manifest.binaries['windows-amd64'].bytes, 'x');
+  write(join(f.packageRoot, 'native/windows-amd64/lycheedev.exe'), binary);
+  assert.throws(f.verify, {
+    code: 'ERR_ASSERTION', actual: sha256(binary), expected: f.artifact.binarySHA256, operator: 'strictEqual',
+  });
 });
 test('a self-consistent reduced manifest cannot drop a fixed Skill reference', t => {
   const f = fixture(t);
