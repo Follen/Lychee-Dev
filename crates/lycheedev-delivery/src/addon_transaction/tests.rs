@@ -420,31 +420,74 @@ fn slots_checkpoint_rejects_same_version_commit_replacement_without_mutation() {
 
 #[test]
 fn slots_checkpoint_resumes_matching_and_reordered_receipts_without_replay() {
+    let started = Instant::now();
+    let progress = |archive: bool, reordered: Option<bool>, request: Option<u8>, stage: &str| {
+        let mut stderr = std::io::stderr().lock();
+        std::io::Write::write_fmt(&mut stderr, format_args!(
+            "slots-recovery archive={archive} reordered={reordered:?} request={request:?} stage={stage} elapsed_ms={}\n",
+            started.elapsed().as_millis(),
+        )).unwrap();
+        std::io::Write::flush(&mut stderr).unwrap();
+    };
+    let mut completed_cases = 0;
     for archived_original in [false, true] {
+        progress(archived_original, None, None, "checkpoint-begin");
+        let f = Fixture::new();
+        let archive = f.root.join("archive-a");
+        let original_archive = archived_original.then_some(archive.as_path());
+        if archived_original {
+            seed_main(&f);
+        }
+        let (path, record) = pause_combined(&f, original_archive, Step::Slots);
+        // Each origin is produced by a real interrupted installation. Reuse
+        // that exact durable checkpoint, never manufacture a phase or slots.
+        let checkpoint_bytes = fs::read(&path).unwrap();
+        let baseline = f.snapshot();
+        let marker_path = f.target.join(installation::MARKER);
+        let manifest_path = f.release.join("release.json");
+        let marker_bytes = fs::read(&marker_path).unwrap();
+        let manifest_bytes = fs::read(&manifest_path).unwrap();
+        let mut completed = load(&path, &OperationControl::default()).unwrap();
+        completed.phase = "complete".into();
+        let completed_bytes = serde_json::to_vec_pretty(&completed).unwrap();
+        progress(archived_original, None, None, "checkpoint-end");
         for reordered in [false, true] {
+            let mut expected_start = baseline.clone();
+            if reordered {
+                for (file, bytes) in [
+                    (&marker_path, &marker_bytes),
+                    (&manifest_path, &manifest_bytes),
+                ] {
+                    let mut value: Value = serde_json::from_slice(bytes).unwrap();
+                    value["resources"].as_array_mut().unwrap().reverse();
+                    let bytes = serde_json::to_vec_pretty(&value).unwrap();
+                    storage::atomic_write(file, &bytes).unwrap();
+                    expected_start.insert(
+                        file.strip_prefix(&f.root).unwrap().to_path_buf(),
+                        Some(bytes),
+                    );
+                }
+                assert_ne!(f.intent(&f.release, original_archive, VERSION), path);
+            }
+            let mut expected_complete = expected_start.clone();
+            expected_complete.insert(
+                path.strip_prefix(&f.root).unwrap().to_path_buf(),
+                Some(completed_bytes.clone()),
+            );
             for request_kind in 0..3 {
-                let f = Fixture::new();
-                let archive = f.root.join("archive-a");
-                let original_archive = archived_original.then_some(archive.as_path());
-                if archived_original {
-                    seed_main(&f);
-                }
-                let (path, record) = pause_combined(&f, original_archive, Step::Slots);
-                if reordered {
-                    reverse_resources(&f.target.join(installation::MARKER));
-                    reverse_resources(&f.release.join("release.json"));
-                    assert_ne!(f.intent(&f.release, original_archive, VERSION), path);
-                }
-                let mut expected = f.snapshot();
-                let mut completed = load(&path, &OperationControl::default()).unwrap();
-                completed.phase = "complete".into();
-                expected.insert(
-                    path.strip_prefix(&f.root).unwrap().to_path_buf(),
-                    Some(serde_json::to_vec_pretty(&completed).unwrap()),
-                );
+                // The preceding case must have restored all original bytes;
+                // only the explicitly expected resource order may differ.
+                assert_eq!(fs::read(&path).unwrap(), checkpoint_bytes);
+                assert_eq!(f.snapshot(), expected_start);
                 let control = OperationControl::default();
                 let guard = InstallationGuard::acquire(&f.target).unwrap();
                 let release = (request_kind != 2).then_some(f.release.as_path());
+                progress(
+                    archived_original,
+                    Some(reordered),
+                    Some(request_kind),
+                    "resume-begin",
+                );
                 let result = f
                     .apply(
                         release,
@@ -455,20 +498,63 @@ fn slots_checkpoint_resumes_matching_and_reordered_receipts_without_replay() {
                         &guard,
                     )
                     .unwrap();
+                progress(
+                    archived_original,
+                    Some(reordered),
+                    Some(request_kind),
+                    "resume-end",
+                );
                 assert_eq!(result, record["result"]);
-                assert_eq!(f.snapshot(), expected);
+                assert_eq!(f.snapshot(), expected_complete);
                 assert_eq!(
                     f.apply(None, original_archive, VERSION, true, &control, &guard)
                         .unwrap(),
                     result
                 );
-                assert_eq!(f.snapshot(), expected);
+                assert_eq!(f.snapshot(), expected_complete);
+                progress(
+                    archived_original,
+                    Some(reordered),
+                    Some(request_kind),
+                    "verify-begin",
+                );
                 installation::verify_clean(&f.target, VERSION, slots::TRANSPORT, slots::COUNT)
                     .unwrap();
                 guard.close().unwrap();
+                progress(
+                    archived_original,
+                    Some(reordered),
+                    Some(request_kind),
+                    "verify-end",
+                );
+                // Public apply closed its installation lease, and the held
+                // maintenance guard is now closed, before fixture restoration.
+                progress(
+                    archived_original,
+                    Some(reordered),
+                    Some(request_kind),
+                    "restore-begin",
+                );
+                storage::atomic_write(&path, &checkpoint_bytes).unwrap();
+                progress(
+                    archived_original,
+                    Some(reordered),
+                    Some(request_kind),
+                    "restore-end",
+                );
+                completed_cases += 1;
             }
+            if reordered {
+                storage::atomic_write(&marker_path, &marker_bytes).unwrap();
+                storage::atomic_write(&manifest_path, &manifest_bytes).unwrap();
+            }
+            assert_eq!(f.snapshot(), baseline);
         }
+        progress(archived_original, None, None, "cleanup-begin");
+        drop(f);
+        progress(archived_original, None, None, "cleanup-end");
     }
+    assert_eq!(completed_cases, 12);
 }
 
 #[test]

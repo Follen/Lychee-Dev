@@ -1,6 +1,18 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 05:52 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 06:16 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+
+### 0caa真实Delivery期限失败与测试fixture复用（2026-10-18 06:16 UTC）
+
+9c2原正式队列已完整终态：[1960pass/0fail/7ignored](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6246301734)，新增32逐名各执行一次全部通过，7owner退役回收无deadline，132文件公开HTTP200/SHA/CRC验证。此成功绑定9c2，不覆盖后继新代码。
+
+0caa新Delivery[原600000ms正式调用](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6246412512)失败：159 selected仅24启动，23已ok、最后1未完成、135未启动，无最终test summary；14新增中13ok。未完成原名slots_checkpoint_resumes_matching_and_reordered_receipts_without_replay。wrapper1/native8，forced=true/knownAuxiliaryCleanup=false/deadlineHit=true，owner2bea6b6e-5919-44fc-a971-df773de261fa retired/reaped，原证据保留，release/实际Skill不得据此继续。
+
+云端作者与独立审者实读锁链：maintenance与installation资源不同，apply显式finish，verify不重取这些锁，底层try_lock冲突即时返回；该静态trace未发现重入等待，但原日志没有子case时间，不能宣布动态死锁已排除或IO原因已证。静态计数该函数12套真实500-slot fixture，18000次slot持久写、54000次完整slot读取，加36全tree快照中的54000次slot读取；600s同时覆盖编译与此前23个测试。
+
+本机原现场只读补证：原进程05:58:22.3529936Z开始，编译13.02s；唯一PID39972残留fixture尾号45，其journal仍main/archive=null、slot manifest为installing计划500，实际连续slot1–449、资源未重排。该现场把未完成阶段收窄到真实slot构造尚未结束，不证明具体阻塞调用、死锁或准确耗时归因；未修改现场。独立Data numeric unit2/0及CLI3/0已实际通过，21query+21verify/21CAP均过，相关4owner回收；0caa新增17为16过1未完成，release仍关闭。
+
+本后继只复用测试fixture：fresh/upgrade两种origin各真实生产一次durable slots checkpoint，保存原完整journal bytes；每个原request/reorder组合前核journal与全tree，全部guard实际close后才恢复原checkpoint，不手造phase。12组合、两次public apply、500slot及36次完整inspect全保留，构造12→2、slot持久写18000→3000，完整快照36→42。局部test-only elapsed进度直接stderr写出/flush，便于同限后继定位；生产、期限与预算不变，0新增测试函数。修后Rust NOT_RUN，不把工作量下降冒称动态原因或已通过。
 
 ### 本轮精确实测与再次状态机复核（2026-10-18 05:52 UTC）
 
