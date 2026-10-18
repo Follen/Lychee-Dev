@@ -489,7 +489,7 @@ test('complete format model accounts for offsets, full Facts/pack generation, ca
 });
 test('metadata sizing authenticates the actual SQLite page unit rather than assuming 4096', t => { for (const page of [512, 8192, 65536]) { const d = join(temp(t), 'home'); mkdirSync(join(d, 'state'), {recursive: true}); const path = join(d, 'state/toolkit.sqlite'), db = new DatabaseSync(path); db.exec(`PRAGMA page_size=${page}; CREATE TABLE documents(value TEXT);`); db.close(); const identity = inventory(d); assert.equal(metadataPageSize(d, identity), page); writeFileSync(path, 'changed'); assert.throws(() => metadataPageSize(d, identity)); } });
 
-function rustCustodyFixture(t, {large = false, version = 'rust-index-v14'} = {}) {
+function rustCustodyFixture(t, {large = false, version = 'rust-index-v14', indexExtras = {}, indexText = JSON.stringify} = {}) {
   const f = metadataFixture(t), facts = {declarations: [{name: large ? 'x'.repeat((8 << 20) + 50) : 'Example', kind: 'function', line: 1}], relationships: [], loads: [], headers: [], diagnostics: []};
   const stable = v => Array.isArray(v) ? v.map(stable) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k => [k, stable(v[k])])) : v;
   const documents = ['a.lua', 'b.lua', 'c.xml'].map((path, i) => ({path, bytes: 10 + i, sha256: sha256(`input-${i}`)}));
@@ -504,7 +504,7 @@ function rustCustodyFixture(t, {large = false, version = 'rust-index-v14'} = {})
   const summary = {schema: 'lycheedev.source-map.v2', storage: 'file-cache', parser: 'source-v1', repository: f.pin.source.repository, product: f.pin.source.product, commit: BASE_COMMIT, documents: 3, declarations: 3, relationships: 0, diagnostics: 0, assets: 0, complete: true};
   function publish() {
     summary.documents = documents.length;
-    const raw = Buffer.from(JSON.stringify({summary, documents})), hash = sha256(raw), path = join(f.home, 'cache/objects', hash.slice(0, 2), hash.slice(2)); mkdirSync(resolve(path, '..'), {recursive: true}); writeFileSync(path, raw);
+    const raw = Buffer.from(indexText({...indexExtras, summary, documents})), hash = sha256(raw), path = join(f.home, 'cache/objects', hash.slice(0, 2), hash.slice(2)); mkdirSync(resolve(path, '..'), {recursive: true}); writeFileSync(path, raw);
     const identity = sha256([version, ...(version === 'rust-index-v15' ? ['assets-v2-go323-metadata'] : []), 'facts-pack-v2-path-radix512', 'facts-layout-v11-go323-generated-origins', 'TS0.26.3', 'Lua0.5.0', 'XML0.38', 'generator-v6', summary.repository, summary.product, summary.commit, summary.parser].join('\0'));
     const db = new DatabaseSync(f.path); db.prepare('INSERT OR REPLACE INTO documents VALUES (?,1,?)').run(`source/rust-index/${identity}`, Buffer.from(JSON.stringify({schema: 'lycheedev.source-index.rust.v6', identity, blob: {sha256: hash, bytes: raw.length}}))); db.close();
   }
@@ -636,8 +636,8 @@ test('changed admission includes both retained and new Rust Facts, while Go rese
 
 test('a new observed report cannot omit Rust output custody', async t => { const f = await fixture(t); delete f.report.scenarios[2].facts.rustCustody; assert.throws(() => verifyObservedReport({status: 0, handlesReaped: true, proof: proof()}, f.report, f.request, f.inputs)); });
 
-function completeComparisonFixture(t) {
-  const f = rustCustodyFixture(t), go = join(f.d, 'go-home'); mkdirSync(join(go, 'state'), {recursive: true}); copyFileSync(f.path, join(go, 'state/toolkit.sqlite'));
+function completeComparisonFixture(t, options) {
+  const f = rustCustodyFixture(t, options), go = join(f.d, 'go-home'); mkdirSync(join(go, 'state'), {recursive: true}); copyFileSync(f.path, join(go, 'state/toolkit.sqlite'));
   const summary = {schema: 'lycheedev.source-map.v2', storage: 'file-cache', parser: 'source-v1', repository: f.pin.source.repository, product: f.pin.source.product, commit: BASE_COMMIT, documents: 3, declarations: 3, relationships: 0, diagnostics: 0, assets: 0, complete: true};
   const source = f.pin.source, key = sha256(['lycheedev.source-map.v2', source.repository, source.product, source.exactCommit, source.parserRevision].join('\0')), snapshot = join(go, 'source/v1/facts/snapshots', key); mkdirSync(snapshot, {recursive: true});
   const records = f.documents.map(doc => JSON.stringify({kind: 'document', path: doc.path, sha256: doc.sha256, bytes: doc.bytes})).join('\n') + '\n'; writeFileSync(join(snapshot, 'records.jsonl'), records); writeFileSync(join(snapshot, 'manifest.json'), JSON.stringify({recordsHash: sha256(records), recordBytes: Buffer.byteLength(records), summary}));
@@ -810,4 +810,129 @@ test('v15 pack custody preserves complete replay and rejects ambiguous v14 manif
   db.prepare('INSERT INTO documents VALUES (?,1,?)').run(`source/rust-index/${old}`, Buffer.from(JSON.stringify(manifest))); db.close();
   const second = join(f.d, 'ambiguous'); mkdirSync(second);
   assert.throws(() => indexEvidence(f.home, 'rust', f.pin, second, f.d), /one authenticated recipe/);
+});
+
+async function projectedCustodyFixture(t, fixtureOptions = {}, capture = true) {
+  const f = completeComparisonFixture(t, fixtureOptions), indexes = Object.fromEntries(['go', 'rust'].map(engine => [engine, indexEvidence(engine === 'go' ? f.go : f.home, engine, f.pin, f.evidence, f.d)]));
+  const comparison = await readFactDelta(f.go, f.home, indexes.go.path, 'v11-pack2', indexes.rust.path, indexes.rust.sha256, undefined, {captureSources: true, retainIndex: true});
+  const options = {candidate: {commit: CANDIDATE_COMMIT, ...CANDIDATE_IDENTITY}, limits: {}, admit: () => ({}), comparison};
+  const go = capture ? await captureComparedGo(f.go, indexes.go, f.evidence, f.d, options) : undefined;
+  const rust = capture ? captureRustCustody(f.home, indexes.rust, f.evidence, f.d, options) : undefined;
+  return {...f, indexes, comparison, options, goReference: go, rustReference: rust};
+}
+
+test('real comparison parses the entire Rust index once; standalone custody still fully parses and outputs are identical', async t => {
+  const f = completeComparisonFixture(t, {indexExtras: {symbols: [{unused: 'index-only payload '.repeat(1000)}], assets: []}}), parse = JSON.parse; let indexParses = 0;
+  JSON.parse = function(raw, ...args) { if (String(raw).includes('"symbols":')) indexParses++; return parse(raw, ...args); };
+  let result;
+  try {
+    result = await f.run(); assert.equal(indexParses, 1, 'same-run read/capture/verify/bind/verify shares one native parse');
+    assert.equal(verifyRustCustody(result.rustCustody).documents, 3); assert.equal(indexParses, 2, 'independent verification does not reuse a request view');
+  } finally { JSON.parse = parse; }
+  const actual = JSON.parse(readFileSync(result.evidence)), expected = await readFactDelta(f.go, f.home, result.indexes.go.path, 'v11-pack2', result.indexes.rust.path, result.indexes.rust.sha256, undefined, {captureSources: true});
+  assert.deepEqual(actual, expected); assert.equal(readFileSync(result.evidence, 'utf8'), JSON.stringify(expected, null, 2) + '\n');
+  assert.equal(result.fullFieldsAndOrderEqual, true); assert.deepEqual(result.totals, expected.totals); assert.deepEqual(result.summary, {...f.summary, skippedDocuments: 0, diagnosticSample: []});
+  bindComparedCustody(expected, result.goCustody, result.rustCustody);
+});
+
+test('full comparison and both custody paths preserve escaped duplicate-key last-wins behavior', async t => {
+  const indexText = value => `{"symbols":[],"documents":[],"docu\\u006dents":${JSON.stringify(value.documents)},"summary":null,"su\\u006dmary":${JSON.stringify(value.summary)}}`;
+  const f = await projectedCustodyFixture(t, {indexText});
+  assert.deepEqual(verifyRustCustody(f.rustReference, {comparison: f.comparison}), verifyRustCustody(f.rustReference));
+  bindComparedCustody(f.comparison, f.goReference, f.rustReference, {reuseIndex: true});
+});
+
+for (const mutation of ['same-size-in-place', 'same-size-replacement', 'grown', 'deleted']) test(`projected capture reauthenticates the complete original index after comparison: ${mutation}`, async t => {
+  const f = await projectedCustodyFixture(t, {indexExtras: {symbols: ['discarded-original']}}, false), path = f.indexes.rust.path, original = readFileSync(path); let admissions = 0;
+  if (mutation === 'deleted') rmSync(path);
+  else if (mutation === 'grown') writeFileSync(path, Buffer.concat([original, Buffer.from(' ')]));
+  else { const changed = Buffer.from(original.toString().replace('discarded-original', 'discarded-modified')); assert.equal(changed.length, original.length); if (mutation === 'same-size-replacement') { fs.renameSync(path, path + '.original'); writeFileSync(path, changed); } else writeFileSync(path, changed); }
+  assert.throws(() => captureRustCustody(f.home, f.indexes.rust, f.evidence, f.d, {...f.options, admit() { admissions++; return {}; }}));
+  assert.equal(admissions, 0); assert(!existsSync(join(f.evidence, 'rust-custody.json')));
+});
+
+test('projected capture rejects a self-consistently repinned replacement instead of reusing the old documents', async t => {
+  const f = await projectedCustodyFixture(t, {indexExtras: {symbols: ['original']}}, false), raw = Buffer.from(readFileSync(f.indexes.rust.path, 'utf8').replace('original', 'replaced')), index = {...f.indexes.rust, bytes: raw.length, sha256: sha256(raw)};
+  writeFileSync(index.path, raw);
+  assert.throws(() => captureRustCustody(f.home, index, f.evidence, f.d, f.options), /Comparison Rust index identity mismatch/);
+  assert(!existsSync(join(f.evidence, 'rust-custody-admission.json')));
+});
+
+for (const boundary of ['verify', 'bind']) for (const fault of ['index-part', 'index-parts-manifest', 'index-manifest', 'catalog', 'fact-part']) test(`projected ${boundary} authenticates current archive bytes before reuse: ${fault}`, async t => {
+  const f = await projectedCustodyFixture(t, {indexExtras: {symbols: ['unused-original']}}), reference = f.rustReference, catalog = JSON.parse(readFileSync(reference.catalog));
+  const path = fault === 'index-part' ? join(f.evidence, 'rust-index-parts/index.part000.bin') : fault === 'index-parts-manifest' ? join(f.evidence, catalog.index.manifest) : fault === 'index-manifest' ? join(f.evidence, catalog.indexManifest.path) : fault === 'catalog' ? reference.catalog : join(f.evidence, 'rust-fact-00000/index.part000.bin');
+  const bytes = readFileSync(path), changed = Buffer.from(bytes); changed[Math.floor(changed.length / 2)] ^= 1; writeFileSync(path, changed);
+  assert.throws(() => boundary === 'verify' ? verifyRustCustody(reference, {comparison: f.comparison}) : bindComparedCustody(f.comparison, f.goReference, reference, {reuseIndex: true}));
+});
+
+for (const boundary of ['verify', 'bind']) test(`projected ${boundary} rejects fully rehashed different archive index content`, async t => {
+  const f = await projectedCustodyFixture(t, {indexExtras: {symbols: ['unused-original']}}), reference = f.rustReference, catalog = JSON.parse(readFileSync(reference.catalog)), partPath = join(f.evidence, 'rust-index-parts/index.part000.bin');
+  const raw = Buffer.from(readFileSync(partPath, 'utf8').replace('unused-original', 'unused-modified')), hash = sha256(raw), path = join(f.home, 'cache/objects', hash.slice(0, 2), hash.slice(2));
+  writeFileSync(partPath, raw);
+  const manifestPath = join(f.evidence, catalog.index.manifest); editCustodyJSON(manifestPath, value => { Object.assign(value.source, {path, bytes: raw.length, sha256: hash}); Object.assign(value.parts[0], {bytes: raw.length, sha256: hash}); });
+  rewriteRustCatalog(reference, value => { Object.assign(value.index, {path, bytes: raw.length, sha256: hash, manifestSHA256: hashFile(manifestPath)}); });
+  if (boundary === 'bind') f.comparison.inputs.rustIndexSHA256 = hash; // A mutable public tuple cannot repin the private projection.
+  assert.throws(() => boundary === 'verify' ? verifyRustCustody(reference, {comparison: f.comparison}) : bindComparedCustody(f.comparison, f.goReference, reference, {reuseIndex: true}), /Comparison Rust index identity mismatch/);
+});
+
+test('projected custody rejects externally copied reports and still verifies after original source removal', async t => {
+  const f = await projectedCustodyFixture(t);
+  rmSync(f.home, {recursive: true});
+  assert.deepEqual(verifyRustCustody(f.rustReference, {comparison: f.comparison}), verifyRustCustody(f.rustReference));
+  bindComparedCustody(f.comparison, f.goReference, f.rustReference, {reuseIndex: true});
+  for (const comparison of [{}, structuredClone(f.comparison)]) {
+    assert.throws(() => verifyRustCustody(f.rustReference, {comparison}), /Authenticated comparison Rust index required/);
+    assert.throws(() => bindComparedCustody(comparison, f.goReference, f.rustReference, {reuseIndex: true}));
+  }
+});
+
+for (const [name, indexText, pattern] of [
+  ['missing document bytes', value => { delete value.documents[0].bytes; return JSON.stringify(value); }, /Number\.isSafeInteger\(document\.bytes\)/],
+  ['missing summary count', value => { delete value.summary.documents; return JSON.stringify(value); }, /undefined !== 3/],
+  ['unknown locator field', value => { value.documents[0].factsLocator.extra = true; return JSON.stringify(value); }, /exact configuration fields/],
+]) test(`projected capture preserves the later custody validation for ${name}`, async t => {
+  const f = await projectedCustodyFixture(t, {indexText}, false); let admissions = 0;
+  for (const comparison of [undefined, f.comparison]) assert.throws(() => captureRustCustody(f.home, f.indexes.rust, f.evidence, f.d, {...f.options, comparison, admit() { admissions++; return {}; }}), pattern);
+  assert.equal(admissions, 0); assert(!existsSync(join(f.evidence, 'rust-custody.json')));
+});
+
+test('projected capture keeps the final complete live-index hash after archive admission', async t => {
+  const f = await projectedCustodyFixture(t, {indexExtras: {symbols: ['unused-original']}}, false);
+  assert.throws(() => captureRustCustody(f.home, f.indexes.rust, f.evidence, f.d, {...f.options, admit() { const path = f.indexes.rust.path; writeFileSync(path, readFileSync(path, 'utf8').replace('unused-original', 'unused-modified')); return {}; }}), /Rust index changed during custody/);
+  assert(existsSync(join(f.evidence, 'rust-custody.json'))); assert(existsSync(f.home));
+});
+
+for (const fault of ['index-part', 'index-parts-manifest', 'index-manifest', 'catalog', 'fact-part']) test(`projected verifier keeps final archive reauthentication after fact reads: ${fault}`, async t => {
+  const f = await projectedCustodyFixture(t), reference = f.rustReference, catalog = JSON.parse(readFileSync(reference.catalog));
+  const path = fault === 'index-part' ? join(f.evidence, 'rust-index-parts/index.part000.bin') : fault === 'index-parts-manifest' ? join(f.evidence, catalog.index.manifest) : fault === 'index-manifest' ? join(f.evidence, catalog.indexManifest.path) : fault === 'catalog' ? reference.catalog : join(f.evidence, 'rust-fact-00000/index.part000.bin');
+  const parse = JSON.parse; let changed = false;
+  JSON.parse = function(raw, ...args) { const value = parse(raw, ...args); if (!changed && value?.schema === 'lycheedev.source-facts.rust.v11') { changed = true; const bytes = readFileSync(path); bytes[bytes.length - 1] ^= 1; writeFileSync(path, bytes); } return value; };
+  try { assert.throws(() => verifyRustCustody(reference, {comparison: f.comparison})); } finally { JSON.parse = parse; }
+  assert.equal(changed, true);
+});
+
+test('same authenticated index bytes at another valid home keep path checks and exact compared-source binding', async t => {
+  const f = await projectedCustodyFixture(t, {}, false), home = join(f.d, 'same-bytes-home'), evidence = join(f.d, 'same-bytes-evidence');
+  fs.cpSync(f.home, home, {recursive: true}); mkdirSync(evidence);
+  const index = indexEvidence(home, 'rust', f.pin, evidence, f.d);
+  assert.equal(index.sha256, f.indexes.rust.sha256); assert.notEqual(index.path, f.indexes.rust.path);
+  const reference = captureRustCustody(home, index, evidence, f.d, f.options);
+  assert.deepEqual(verifyRustCustody(reference, {comparison: f.comparison}), verifyRustCustody(reference));
+  const go = await captureComparedGo(f.go, f.indexes.go, f.evidence, f.d, f.options);
+  assert.throws(() => bindComparedCustody(f.comparison, go, reference, {reuseIndex: true}), /compared Rust bytes differ from custody/);
+});
+
+test('same-byte index outside the selected home is rejected before projection reuse or admission', async t => {
+  const f = await projectedCustodyFixture(t, {}, false), path = join(f.d, 'outside-index'); copyFileSync(f.indexes.rust.path, path); let admitted = false;
+  assert.equal(hashFile(path), f.indexes.rust.sha256);
+  assert.throws(() => captureRustCustody(f.home, {...f.indexes.rust, path}, f.evidence, f.d, {...f.options, admit() { admitted = true; }}), /disk.path_outside_owned_root/);
+  assert.equal(admitted, false); assert(!existsSync(join(f.evidence, 'rust-custody-admission.json')));
+});
+
+test('same-byte index file symlink is rejected before projection reuse or admission', async t => {
+  const f = await projectedCustodyFixture(t, {}, false), path = join(f.home, 'index-link');
+  if (!fileSymlinkOrSkip(t, f.indexes.rust.path, path)) return;
+  assert.deepEqual(readFileSync(path), readFileSync(f.indexes.rust.path)); let admitted = false;
+  assert.throws(() => captureRustCustody(f.home, {...f.indexes.rust, path}, f.evidence, f.d, {...f.options, admit() { admitted = true; }}), /disk.reparse_boundary/);
+  assert.equal(admitted, false); assert(!existsSync(join(f.evidence, 'rust-custody-admission.json')));
 });

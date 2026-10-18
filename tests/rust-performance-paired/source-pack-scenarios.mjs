@@ -21,7 +21,7 @@ import {GO_COMMIT, elapsed, semantic} from './contract.mjs';
 import {assertSeedCold, auditCorpus, cloneSeed, inventory, derivedIdentity, proveWarmReuse, verifyGoMetadata, verifyGoPackage, verifySeedMetadata} from './inputs.mjs';
 import {RUNNER_FILES as HISTORICAL_RUNNER_FILES, sourcePhaseEnvironment, validateConditions} from './source-candidates.mjs';
 import {verifyPackProfile} from './source-pack-resume.mjs';
-import {readFactDelta, readRustFact, rustFactPath} from './read-fact-delta.mjs';
+import {readFactDelta, readRustFact, rustFactPath, comparedRustIndex} from './read-fact-delta.mjs';
 import {captureGoCustody, openGoCustody, goFactRelative} from './source-pack-custody.mjs';
 
 export const CANDIDATE_COMMIT = '00d215a937513609e482c1ef65f3b43f0288beee';
@@ -329,7 +329,7 @@ function verifyCustodyFact(parts, document, home) {
   const stable = v => Array.isArray(v) ? v.map(stable) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k => [k, stable(v[k])])) : v;
   assert.equal(sha256(JSON.stringify(stable(value.facts))), value.factsSHA256, 'Rust custody Facts digest');
 }
-export function verifyRustCustody(reference) {
+export function verifyRustCustody(reference, {comparison} = {}) {
   exact(reference, ['directory', 'catalog', 'catalogSHA256', 'candidate']); candidateIdentity(reference.candidate); digest(reference.catalogSHA256);
   const directory = realpathSync(reference.directory), catalogPath = contained(directory, reference.catalog); assert.equal(catalogPath, join(directory, 'rust-custody.json')); const raw = custodyBytes(catalogPath, 16 << 20); assert.equal(sha256(raw), reference.catalogSHA256, 'Rust custody catalog changed');
   const catalog = JSON.parse(raw); exact(catalog, ['schema', 'candidate', 'layout', 'home', 'documents', 'factsBytes', 'index', 'indexManifest', 'files']);
@@ -337,7 +337,7 @@ export function verifyRustCustody(reference) {
   exact(catalog.index, ['path', 'bytes', 'sha256', 'manifest', 'manifestSHA256']); assert.equal(catalog.index.manifest, 'rust-index-parts/manifest.json');
   const records = custodyManifest(directory, catalog.index.manifest, catalog.index.manifestSHA256, INDEX_BYTES, {path: catalog.index.path, bytes: catalog.index.bytes, sha256: catalog.index.sha256});
   assert.equal(catalog.index.path, resolve(catalog.home, 'cache/objects', catalog.index.sha256.slice(0, 2), catalog.index.sha256.slice(2)), 'Rust custody original index path');
-  const index = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(custodyRange(records, 0, catalog.index.bytes))), references = rustReferences(index, catalog.home);
+  const index = comparison === undefined ? JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(custodyRange(records, 0, catalog.index.bytes))) : comparedRustIndex(comparison, catalog.index), references = rustReferences(index, catalog.home);
   exact(catalog.indexManifest, ['path', 'bytes', 'sha256']); assert.equal(catalog.indexManifest.path, 'rust-index-manifest.json');
   const manifestPath = contained(directory, join(directory, catalog.indexManifest.path)), manifestRaw = custodyBytes(manifestPath, 1 << 20); assert.equal(manifestRaw.length, catalog.indexManifest.bytes); assert.equal(sha256(manifestRaw), catalog.indexManifest.sha256);
   const manifest = JSON.parse(manifestRaw), s = index.summary; assert.equal(manifest.schema, 'lycheedev.source-index.rust.v6'); assert.equal(manifest.blob.sha256, catalog.index.sha256); assert.equal(manifest.blob.bytes, catalog.index.bytes);
@@ -354,11 +354,19 @@ export function verifyRustCustody(reference) {
   assert.equal(total, catalog.factsBytes); verifyParts(records.directory, records.manifest); assert.equal(hashFile(contained(directory, join(directory, catalog.index.manifest)), 65536), catalog.index.manifestSHA256); assert.equal(hashFile(manifestPath, 1 << 20), catalog.indexManifest.sha256); assert.equal(hashFile(catalogPath, 16 << 20), reference.catalogSHA256);
   return {documents: catalog.documents, files: catalog.files.length, factsBytes: total, indexSHA256: catalog.index.sha256};
 }
-export function captureRustCustody(home, index, directory, root, {admit = admission, limits = assertDiskPolicy(root), candidate} = {}) {
+export function captureRustCustody(home, index, directory, root, {admit = admission, limits = assertDiskPolicy(root), candidate, comparison} = {}) {
   const authenticatedCandidate = candidateIdentity(candidate);
   home = realpathSync(home); directory = contained(root, directory);
-  const raw = custodyBytes(contained(home, index.path), INDEX_BYTES); assert.equal(raw.length, index.bytes); assert.equal(sha256(raw), index.sha256);
-  const references = rustReferences(JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(raw)), home), files = []; let total = 0, partsBytes = 0;
+  const indexPath = contained(home, index.path); let parsed;
+  if (comparison === undefined) {
+    const raw = custodyBytes(indexPath, INDEX_BYTES); assert.equal(raw.length, index.bytes); assert.equal(sha256(raw), index.sha256);
+    parsed = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(raw));
+  } else {
+    const stat = lstatSync(indexPath); assert(stat.isFile() && !stat.isSymbolicLink() && stat.size <= INDEX_BYTES, 'bounded regular custody file'); assert.equal(stat.size, index.bytes);
+    assert.equal(hashFile(indexPath, INDEX_BYTES), index.sha256);
+    parsed = comparedRustIndex(comparison, index);
+  }
+  const references = rustReferences(parsed, home), files = []; let total = 0, partsBytes = 0;
   const manifestPath = contained(directory, join(directory, 'rust-index-manifest.json')), manifestRaw = custodyBytes(manifestPath, 1 << 20); assert.deepEqual(JSON.parse(manifestRaw), index.manifest);
   const sources = references.map(item => { const path = contained(home, join(home, item.relative)), stat = lstatSync(path); assert(stat.isFile() && !stat.isSymbolicLink() && stat.size > 0 && stat.size <= RUST_FACT_BYTES, 'bounded regular Rust Facts source'); total += stat.size; assert(total <= RUST_CUSTODY_BYTES, 'Rust custody total budget'); return {path, bytes: stat.size}; });
   for (const [i, item] of references.entries()) {
@@ -378,7 +386,7 @@ export function captureRustCustody(home, index, directory, root, {admit = admiss
   saveJSON(join(directory, 'rust-custody-admission.json'), {requiredBytes, factsBytes: total, partsManifestBytes: partsBytes, catalogBytes: jsonBytes(catalog).length, admission: admitted});
   for (const file of files) { const source = {path: contained(home, join(home, file.relative)), bytes: file.bytes, sha256: file.sha256}; splitIndexEvidence(root, source, resolve(directory, file.manifest, '..')); file.manifestSHA256 = hashFile(contained(directory, join(directory, file.manifest)), 65536); }
   const catalogPath = join(directory, 'rust-custody.json'), bytes = jsonBytes(catalog); writeFileSync(catalogPath, bytes, {flag: 'wx'});
-  const reference = {directory, catalog: catalogPath, catalogSHA256: sha256(bytes), candidate: authenticatedCandidate}; verifyRustCustody(reference);
+  const reference = {directory, catalog: catalogPath, catalogSHA256: sha256(bytes), candidate: authenticatedCandidate}; verifyRustCustody(reference, {comparison});
   assert.equal(hashFile(index.path, INDEX_BYTES), index.sha256, 'Rust index changed during custody'); for (const file of files) assert.equal(hashFile(contained(home, join(home, file.relative)), RUST_FACT_BYTES), file.sha256, 'Rust Facts changed during custody');
   return reference;
 }
@@ -407,7 +415,7 @@ export async function captureComparedGo(home, index, directory, root, {admit = a
 
 // Bind the exact bytes used by the semantic comparison, never a later rehash
 // of the input paths. Packed record tuples are also tied to the archived index.
-export function bindComparedCustody(delta, goReference, rustReference) {
+export function bindComparedCustody(delta, goReference, rustReference, {reuseIndex = false} = {}) {
   const readCatalog = reference => { const raw = custodyBytes(reference.catalog, 16 << 20); assert.equal(sha256(raw), reference.catalogSHA256); return JSON.parse(raw); };
   const go = readCatalog(goReference), rust = readCatalog(rustReference), sources = delta.factSources;
   assert(sources && Array.isArray(sources.go) && Array.isArray(sources.rust), 'comparison byte tuples required');
@@ -415,7 +423,7 @@ export function bindComparedCustody(delta, goReference, rustReference) {
   assert.deepEqual(sources.go, go.files.map(file => ({file: resolve(go.home, file.relative), bytes: file.bytes, sha256: file.sha256})), 'compared Go bytes differ from custody');
   assert.equal(delta.inputs.rustIndexSHA256, rust.index.sha256, 'compared Rust index differs from custody');
   const parts = custodyManifest(rustReference.directory, rust.index.manifest, rust.index.manifestSHA256, INDEX_BYTES, {path: rust.index.path, bytes: rust.index.bytes, sha256: rust.index.sha256});
-  const index = JSON.parse(custodyRange(parts, 0, rust.index.bytes)), files = new Map(rust.files.map(file => [resolve(rust.home, file.relative), file])), used = new Set();
+  const index = reuseIndex ? comparedRustIndex(delta, rust.index) : JSON.parse(custodyRange(parts, 0, rust.index.bytes)), files = new Map(rust.files.map(file => [resolve(rust.home, file.relative), file])), used = new Set();
   assert.equal(sources.rust.length, index.documents.length, 'complete compared Rust document tuples');
   for (const [i, document] of index.documents.entries()) {
     const file = rustFactPath(rust.home, document, 'v11-pack2'), archived = files.get(file); assert(archived, 'compared Rust file missing from custody'); used.add(file);
@@ -423,12 +431,12 @@ export function bindComparedCustody(delta, goReference, rustReference) {
     assert.deepEqual(sources.rust[i], expected, 'compared Rust bytes differ from custody');
   }
   assert.equal(used.size, files.size, 'complete compared Rust file set');
-  openGoCustody(goReference).verify(); verifyRustCustody(rustReference);
+  openGoCustody(goReference).verify(); verifyRustCustody(rustReference, {comparison: reuseIndex ? delta : undefined});
 }
 export async function compareFacts(homes, outputs, pin, oracle, directory, root, retained = undefined, custodyOptions = {}) {
   const indexes = retained ? {go: retained.index, rust: indexEvidence(homes.rust, 'rust', pin, directory, root)} : Object.fromEntries(['go', 'rust'].map(engine => [engine, indexEvidence(homes[engine], engine, pin, directory, root)]));
   const custody = retained && openGoCustody(retained.reference);
-  const delta = await readFactDelta(custody?.home ?? homes.go, homes.rust, indexes.go.path, 'v11-pack2', indexes.rust.path, indexes.rust.sha256, custody, {captureSources: true});
+  const delta = await readFactDelta(custody?.home ?? homes.go, homes.rust, indexes.go.path, 'v11-pack2', indexes.rust.path, indexes.rust.sha256, custody, {captureSources: true, retainIndex: true});
   custody?.verify();
   saveJSON(join(directory, 'facts-comparison.json'), delta); // Retain complete mismatch diagnostics before failing.
   assert.equal(delta.differentFiles.length, 0, 'complete five-array fields/order differ'); assert.equal(delta.documents, oracle.documents);
@@ -436,8 +444,8 @@ export async function compareFacts(homes, outputs, pin, oracle, directory, root,
   assert.deepEqual(values.go, values.rust, 'complete shared summary differs');
   for (const engine of ['go', 'rust']) for (const field of ['declarations', 'relationships', 'diagnostics']) assert.equal(delta.totals[engine][field], values[engine][field], `${engine} full Facts totals`);
   const goCustody = retained?.reference ?? await captureComparedGo(homes.go, indexes.go, directory, root, custodyOptions);
-  const rustCustody = captureRustCustody(homes.rust, indexes.rust, directory, root, custodyOptions);
-  bindComparedCustody(delta, goCustody, rustCustody);
+  const rustCustody = captureRustCustody(homes.rust, indexes.rust, directory, root, {...custodyOptions, comparison: delta});
+  bindComparedCustody(delta, goCustody, rustCustody, {reuseIndex: true});
   return {goCustody, rustCustody, documents: delta.documents, fullFieldsAndOrderEqual: true, totals: delta.totals, indexes: Object.fromEntries(Object.entries(indexes).map(([k, v]) => [k, {path: v.path, bytes: v.bytes, sha256: v.sha256}])), summary: values.go, evidence: join(directory, 'facts-comparison.json')};
 }
 

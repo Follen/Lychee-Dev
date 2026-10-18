@@ -33,6 +33,19 @@ function stable(value) {
 const signature = value => JSON.stringify(stable(value));
 const add = (object, key, amount = 1) => { object[key] = (object[key] || 0) + amount; };
 
+// Same comparison request only: no path/mtime or persisted cache. A report is
+// branded here only after its original full-byte hash, native JSON.parse and
+// comparison checks succeed. Serialized/copied reports cannot supply a view.
+const comparedIndexes = new WeakMap();
+export function comparedRustIndex(comparison, source) {
+  const index = comparedIndexes.get(comparison);
+  if (!index) throw new Error('Authenticated comparison Rust index required');
+  if (index.bytes !== source.bytes || index.sha256 !== source.sha256) throw new Error('Comparison Rust index identity mismatch');
+  // Callers must authenticate the complete live file or archived parts at the
+  // current custody boundary before borrowing these retained fields.
+  return index;
+}
+
 function compareRows(go, rust) {
   const remaining = new Map();
   for (const row of go) {
@@ -117,7 +130,7 @@ export function readRustFact(home, document, rustLayout = 'v6') {
   return {file, bytes: raw.length, fileSHA256: locator ? null : sha256(raw), ...(locator ? {record: locator, recordSHA256: sha256(raw)} : {}), factsSHA256: envelope.factsSHA256, facts: envelope.facts};
 }
 
-export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v6', rustIndexFile, expectedIndexSHA256, retainedGo = undefined, {captureSources = false} = {}) {
+export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v6', rustIndexFile, expectedIndexSHA256, retainedGo = undefined, {captureSources = false, retainIndex = false} = {}) {
   const layout = RUST_LAYOUTS[rustLayout];
   if (!layout) throw new Error(`Unsupported Rust facts layout: ${rustLayout}`);
   const manifestFile = path.join(path.dirname(goRecords), 'manifest.json');
@@ -140,6 +153,7 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
   }
   let rustDocuments;
   let indexIdentity;
+  let indexProjection;
   if (layout.packed) {
     if (!rustIndexFile || !/^[a-f0-9]{64}$/.test(expectedIndexSHA256 || '')) throw new Error('Packed Facts require the same-run Rust index blob and expected SHA-256');
     const stat = fs.lstatSync(rustIndexFile);
@@ -160,6 +174,15 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
       if (!indexed || indexed.sha256 !== document.sha256 || (Number.isSafeInteger(document.bytes) && indexed.bytes !== document.bytes)) throw new Error('Rust index input identity mismatch');
     }
     indexIdentity = {rustIndexFile, rustIndexSHA256: expectedIndexSHA256, rustIndexBytes: indexRaw.length};
+    if (retainIndex) {
+      // Keep only the existing consumers' document/summary subtrees. In
+      // particular, the full parsed symbols/assets tree is not retained.
+      // Locator copies cannot be changed through the report's source tuples.
+      indexProjection = Object.freeze({bytes: indexRaw.length, sha256: expectedIndexSHA256,
+        documents: Object.freeze(index.documents.map(doc => Object.freeze({...doc,
+          ...(Object.hasOwn(doc, 'factsLocator') ? {factsLocator: doc.factsLocator && typeof doc.factsLocator === 'object' ? Object.freeze({...doc.factsLocator}) : doc.factsLocator} : {}),
+        }))), summary: Object.freeze({...index.summary})});
+    }
   } else if (rustIndexFile !== undefined || expectedIndexSHA256 !== undefined) throw new Error('Historical per-file layout does not accept an index binding');
   const report = {
     diagnosticOnly: true,
@@ -259,6 +282,7 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
     throw new Error('Go document total differs from sealed summary');
   }
   if (captureSources) report.factSources = {go: [...goSources.values()], rust: rustSources};
+  if (indexProjection) comparedIndexes.set(report, indexProjection);
   return report;
 }
 

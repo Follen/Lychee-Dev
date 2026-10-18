@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readFactDelta, readRustFact, rustFactPath, sha256 } from './read-fact-delta.mjs';
+import { readFactDelta, readRustFact, rustFactPath, sha256, comparedRustIndex } from './read-fact-delta.mjs';
 
 const readerPath = fileURLToPath(new URL('./read-fact-delta.mjs', import.meta.url));
 const parser = 'fixture-parser';
@@ -546,4 +546,91 @@ test('pack2 keeps locator corruption, exact envelope identity and per-file fallb
   const envelope = JSON.parse(raw); envelope.inputSHA256 = '0'.repeat(64);
   fs.writeFileSync(fallback, JSON.stringify(envelope));
   await assert.rejects(readFactDelta(f.goHome, f.rustHome, f.records, 'v11-pack2', f.indexFile, digest), /input identity mismatch/);
+});
+
+async function projectedComparison(f, indexSHA = f.writeIndex(), retainIndex = true) {
+  return readFactDelta(f.goHome, f.rustHome, f.records, 'v11-pack2', f.indexFile, indexSHA, undefined, {captureSources: true, retainIndex});
+}
+function rewritePackedFacts(f, change) {
+  const original = fs.readFileSync(f.packFile), pieces = [Buffer.from('LYCFPK01')]; let offset = 8;
+  for (const [i, document] of f.index.documents.entries()) {
+    const locator = document.factsLocator, value = JSON.parse(original.subarray(locator.offset + 68, locator.offset + 68 + locator.bytes));
+    change(value.facts, i); value.factsSHA256 = sha256(JSON.stringify(sorted(value.facts)));
+    const raw = Buffer.from(JSON.stringify(value)), header = Buffer.from(original.subarray(locator.offset, locator.offset + 68));
+    header.writeUInt32LE(raw.length); Buffer.from(sha256(raw), 'hex').copy(header, 36);
+    Object.assign(locator, {offset, bytes: raw.length, sha256: sha256(raw)}); pieces.push(header, raw); offset += 68 + raw.length;
+  }
+  fs.writeFileSync(f.packFile, Buffer.concat(pieces));
+}
+
+test('request-local index projection preserves exact report bytes and rejects unminted or copied reports', async t => {
+  const f = packFixture(t); f.index.symbols = [{unused: 'large index-only payload'}]; f.index.assets = {unused: true};
+  const hash = f.writeIndex(), normal = await projectedComparison(f, hash, false), retained = await projectedComparison(f, hash), source = {bytes: fs.statSync(f.indexFile).size, sha256: hash};
+  assert.deepEqual(retained, normal); assert.equal(JSON.stringify(retained), JSON.stringify(normal));
+  const index = comparedRustIndex(retained, source);
+  assert.deepEqual(Object.keys(index).sort(), ['bytes', 'documents', 'sha256', 'summary']);
+  assert.deepEqual(index.documents, f.index.documents); assert.deepEqual(index.summary, f.index.summary);
+  for (const report of [undefined, null, {}, normal, {...retained}, structuredClone(retained)]) assert.throws(() => comparedRustIndex(report, source), /Authenticated comparison Rust index required/);
+  for (const identity of [{...source, bytes: source.bytes + 1}, {...source, sha256: '0'.repeat(64)}]) assert.throws(() => comparedRustIndex(retained, identity), /index identity mismatch/);
+  assert.throws(() => { index.documents.reverse(); }, TypeError);
+  assert.throws(() => { index.documents[0].path = 'other.lua'; }, TypeError);
+  assert.throws(() => { index.documents[0].factsLocator.offset++; }, TypeError);
+  assert.throws(() => { index.summary.parser = 'other'; }, TypeError);
+  retained.factSources.rust[0].record.offset++;
+  assert.equal(comparedRustIndex(retained, source).documents[0].factsLocator.offset, 8, 'mutable source report cannot change the retained authenticated locator');
+});
+
+test('projection uses full native JSON last-wins semantics for ordinary and escaped duplicate keys', async t => {
+  const f = packFixture(t), docs = JSON.stringify(f.index.documents), summary = JSON.stringify(f.index.summary);
+  const raw = Buffer.from(`{"symbols":[{"ignore":"documents } , \\\"summary\\\""}],"documents":[],"docu\\u006dents":${docs},"summary":{"parser":"wrong"},"su\\u006dmary":${summary}}`);
+  fs.writeFileSync(f.indexFile, raw); const hash = sha256(raw), retained = await projectedComparison(f, hash), normal = await projectedComparison(f, hash, false);
+  assert.deepEqual(retained, normal); assert.equal(retained.differentFiles.length, 0);
+  assert.deepEqual(comparedRustIndex(retained, {bytes: raw.length, sha256: hash}).documents, JSON.parse(raw).documents);
+});
+
+for (const [name, mutate, pattern] of [
+  ['missing documents', index => { delete index.documents; }, /document identity/],
+  ['missing summary', index => { delete index.summary; }, /document identity/],
+  ['duplicate document', index => { index.documents[1] = index.documents[0]; }, /document order/],
+  ['reordered documents', index => { index.documents.reverse(); }, /document order/],
+  ['changed input', index => { index.documents[0].sha256 = '0'.repeat(64); }, /input identity/],
+  ['missing locator group', index => { delete index.documents[0].factsLocator.group; }, /group identity/],
+]) test(`projection retains the original rejection for ${name}`, async t => {
+  const f = packFixture(t); mutate(f.index); const hash = f.writeIndex();
+  for (const retain of [false, true]) await assert.rejects(projectedComparison(f, hash, retain), pattern);
+});
+
+for (const [name, raw, pattern] of [
+  ['malformed full JSON suffix', Buffer.from('{"documents":[],"summary":{}} trailing'), /Unexpected|JSON/],
+  ['invalid UTF-8', Buffer.from([0x7b, 0x22, 0xff, 0x22, 0x3a, 0x30, 0x7d]), /encoded data/],
+]) test(`projection still parses and validates the entire authenticated input: ${name}`, async t => {
+  const f = packFixture(t); fs.writeFileSync(f.indexFile, raw);
+  for (const retain of [false, true]) await assert.rejects(projectedComparison(f, sha256(raw), retain), pattern);
+});
+
+test('retained projection preserves all five Facts arrays, duplicates, unknown values and canonical record hashes', async t => {
+  const f = packFixture(t), envelope = JSON.parse(fs.readFileSync(f.files[0].goFile));
+  const repeated = {name: 'Unicode\u2603<&>\u2028', line: 7, nested: {z: [null, -0, 1.25, {optional: false}], a: 'value'}};
+  const complete = Object.fromEntries(['declarations', 'relationships', 'loads', 'headers', 'diagnostics'].map(section => [section, [{...repeated, kind: section}, {...repeated, kind: section}, {kind: section, name: 'last', line: 9}]]));
+  const manifest = JSON.parse(fs.readFileSync(f.manifest));
+  for (const section of ['declarations', 'relationships', 'diagnostics']) manifest.summary[section] += complete[section].length - envelope.facts[section].length;
+  envelope.facts = complete; envelope.factsSHA256 = sha256(goJSON(complete)); fs.writeFileSync(f.files[0].goFile, goJSON(envelope)); fs.writeFileSync(f.manifest, JSON.stringify(manifest));
+  rewritePackedFacts(f, (facts, i) => { if (!i) Object.assign(facts, complete); });
+  let hash = f.writeIndex(), normal = await projectedComparison(f, hash, false), retained = await projectedComparison(f, hash);
+  assert.deepEqual(retained, normal); assert.equal(retained.differentFiles.length, 0);
+  for (const section of Object.keys(complete)) assert(retained.totals.rust[section] >= 3);
+  for (const [i, source] of retained.factSources.rust.entries()) assert.equal(source.sha256, readRustFact(f.rustHome, f.index.documents[i], 'v11-pack2').recordSHA256);
+  rewritePackedFacts(f, (facts, i) => { if (!i) { facts.headers.reverse(); facts.loads.pop(); facts.diagnostics[0].nested.a = 'changed'; } });
+  hash = f.writeIndex(); normal = await projectedComparison(f, hash, false); retained = await projectedComparison(f, hash);
+  assert.deepEqual(retained, normal); assert.deepEqual(retained.differentFiles[0].exactRowsDiffer.map(row => row.section), ['loads', 'headers', 'diagnostics']);
+  assert.equal(retained.differentFiles[0].exactRowsDiffer.find(row => row.section === 'headers').sameMultisetButDifferentOrder, true);
+  assert.equal(retained.firstDifferences.find(row => row.section === 'loads').goOnly.length, 1);
+});
+
+test('projection rejects duplicate document identities even when both input orders match', async t => {
+  const f = packFixture(t); f.documents[1] = {...f.documents[0]}; f.index.documents[1] = {...f.index.documents[0]};
+  const raw = f.documents.map(row => JSON.stringify(row)).join('\n') + '\n'; fs.writeFileSync(f.records, raw);
+  const manifest = JSON.parse(fs.readFileSync(f.manifest)); manifest.recordsHash = sha256(raw); manifest.recordBytes = Buffer.byteLength(raw); fs.writeFileSync(f.manifest, JSON.stringify(manifest));
+  const hash = f.writeIndex();
+  for (const retain of [false, true]) await assert.rejects(projectedComparison(f, hash, retain), /Duplicate Rust index document/);
 });

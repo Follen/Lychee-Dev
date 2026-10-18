@@ -1,6 +1,16 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 07:43 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最近完整性能诊断产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 07:59 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最近完整性能诊断产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+
+### Source诊断控制器请求内投影候选（2026-10-18 07:59 UTC）
+
+只读调用链核实：同次compareFacts先readFactDelta，再captureRustCustody→verify、bindComparedCustody→verify，共五次完整index JSON.parse；是顺序重复分配，不是已证五份同时驻留。保留的Facts逐文档处理，长期引用仅document/summary等；没有堆快照，不能据此确定63d异常退出根因。
+
+本片只改runner两个模块与Node测试：首个完整字节SHA/UTF-8/JSON和Facts验证后，用私有WeakMap以真实comparison对象登记请求内投影，仅保documents/summary/bytes/SHA，消费字段与locator副本冻结，不保原root/symbols/Buffer。后四个边界仍认证当前live完整SHA及所有archive parts/catalog/manifest、完整五数组/重复/顺序/record SHA，认证相同才复用；伪造/copy对象不能冒认证，跨home仍受路径和实际source tuple约束。独立verify无context仍完整parse。无新持久缓存/tokenizer/生产改动，产品计时与owner流程不变。
+
+独审通过；Linux Node v24.19.0最终六suite **355/0/0**，44新增（reader12/scenario32），真实compareFacts观察5→1完整parse且独立verify再parse。缺字段/重复last-wins/顺序、source tuple篡改、同路径换bytes、合法另home与越界路径、archive变更和末次复验均有反例。早期新增测试两处期望错误（summary默认字段、原断言文案）保留原失败日志，修期望未改生产逻辑，旧249/42/352等重叠运行不累计。Windows和完整63d场景NOT_RUN，未测峰值/提速，不宣称异常已解决。
+
+外层controller原runOwned未开启memoryObservation，产品子Job样本不覆盖后续比较/归档峰值。既有开关可用于后续独立观察，但当前未实施：须按原policy预留64MiB而非现16MiB，100ms/15000样本上限约25分钟，耗尽标gap；Node PID+FILETIME计数与包含后代的Job总量分开。当前本机仍暂停，OS压力/正式coverage能力待恢复后验证。
 
 ### Stage2平台条件完整扫描与第二小批（2026-10-18 07:43 UTC）
 
