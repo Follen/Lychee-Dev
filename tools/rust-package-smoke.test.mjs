@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync, mkdirSync, writeFileSync, rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {parsePackageOptions, assertArtifactSource, assertSourceSyntaxValidation} from './rust-package-smoke.mjs';
+import {parsePackageOptions, assertArtifactSource, assertSourceSyntaxValidation, assertInstalledNativeVersion} from './rust-package-smoke.mjs';
 import {sourceDigest} from './rust-build.mjs';
 
 test('artifact and assembly-only flags are never mistaken for home, pin, or LuaLS input', () => {
@@ -59,4 +59,18 @@ test('a different luac pin invalidates an otherwise unchanged sealed CLI', t => 
   assertArtifactSource(artifact, sourceDigest(root), 'debug');
   writeFileSync(pin, JSON.stringify({sha256: 'new'}));
   assert.throws(() => assertArtifactSource(artifact, sourceDigest(root), 'debug'), /artifact_source_mismatch/);
+});
+
+test('installed native version must match the authenticated package version', () => {
+  const expectedVersion = '3.5.0';
+  const valid = {ok: true, result: {platform: 'windows/amd64', rust: true, version: expectedVersion}};
+  assertInstalledNativeVersion(valid, expectedVersion);
+  for (const version of ['3.1.4', '3.5.1', '', undefined, 3.5]) {
+    assert.throws(() => assertInstalledNativeVersion({...valid, result: {...valid.result, version}}, expectedVersion), /candidate\.version_mismatch/);
+  }
+  assert.throws(() => assertInstalledNativeVersion({...valid, ok: false}, expectedVersion), /candidate\.version_mismatch/);
+  for (const expected of ['', undefined]) assert.throws(() => assertInstalledNativeVersion(valid, expected), /candidate\.version_mismatch/);
+  assert.throws(() => assertInstalledNativeVersion({...valid, result: {...valid.result, platform: 'linux/amd64'}}, expectedVersion), /candidate\.not_rust/);
+  assert.throws(() => assertInstalledNativeVersion({...valid, result: {...valid.result, rust: false}}, expectedVersion), /candidate\.not_rust/);
+  assertInstalledNativeVersion(valid, expectedVersion);
 });

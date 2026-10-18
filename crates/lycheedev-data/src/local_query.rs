@@ -1025,9 +1025,11 @@ pub(crate) fn sql_inner_budgeted(
         }
     });
     let _phase = budget.phase(Phase::SourceClose);
-    scope
-        .finish(result)
-        .map_err(|error| sql_committed_error(error, &committed, output_published))
+    #[cfg(test)]
+    let result = regression_tests::finish_sql(scope, result);
+    #[cfg(not(test))]
+    let result = scope.finish(result);
+    result.map_err(|error| sql_committed_error(error, &committed, output_published))
 }
 fn sql_committed_error(
     error: lycheedev_core::ToolkitError,

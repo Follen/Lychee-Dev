@@ -1371,6 +1371,10 @@ fn cache_aware_cancelled_pipeline_joins_and_recovers_without_losing_committed_gr
                 facts_locator,
             });
             if docs.len() == 65 {
+                assert!(
+                    profile.calls(Phase::FactsWorker) > 0,
+                    "cancellation fixture must consume a real worker result before stopping"
+                );
                 cancel.cancel();
             }
             Ok(())

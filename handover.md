@@ -1,6 +1,14 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 09:54 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最近完整性能诊断产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 10:09 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最近完整性能诊断产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+
+### Stage2第三轮有限消费者审查（2026-10-18 10:09 UTC）
+
+基于5ab8012，四位独立审者完成此前未深核的SQL六集成suite/真实事务CAP链、Source九test目标与历史native oracle、完整Data Skill42argv/16CAP消费者、十二打包支持文件。确认六处测试有效性缺口并修复：CSV参数首错、scalar列数首错、XML必需持久CAP/result配对、取消前真实worker触发、安装包native版本匹配，以及SQL最终真实close后的已提交事实保留。均为测试验证不足，未据此宣称产品bug；独立预期/原正常边界保留。
+
+最后一项仅在cfg(test)选择既有post-metadata-close seam，线程局部一次性RAII无跨测试污染；普通SQL/CSV各保close-only、cancel-only、二者共存三模式，真正读取CAP/blob/CSV/manifest、重取资源和同PIN新请求恢复。原手造CAP错误组合器保留并准确改名；生产非test路径仍原scope.finish。所有最终字节独审通过，Linux package Node7/0/0（1新增）；六个受影响Rust文件仅rustfmt语法解析，Rust类型检查/Windows/实际installed/native仍NOT_RUN。共4新增Rust入口、1原组合器改名，无删除正常场景。
+
+撤回一项truncated候选：Core本来禁止complete=true且truncated=true，不能造非法CAP追独立分支。历史npm handoff/console未找到当前调用者，其旧断言和fresh-build适用性留Stage3判断，本轮未重建旧测试系统。完整有限范围和未验边界见[Stage2记录](docs/toolkit/rust-audit-stage2-2026-10-18.md)。此轮修后静态复核无新增confirmed finding；仍需Windows有效性回归/真实instrumentation、特权链接和OS压力能力证据，不能据此结束Stage2或进入Stage3。资源暂停继续，未启动本机任务。
 
 ### Stage2正式有限target覆盖率入口（2026-10-18 09:54 UTC）
 

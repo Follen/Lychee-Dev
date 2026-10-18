@@ -446,16 +446,25 @@ fn local_default_scalar_cardinality_and_analyze_decode_failure_publish_no_captur
             vec![Cell::U(2), Cell::BadString],
         ],
     )]);
-    for sql in [
-        "SELECT (SELECT ID,Name FROM Sample WHERE ID=99) FROM Sample WHERE FALSE",
-        "EXPLAIN ANALYZE SELECT Name FROM Sample",
-        "SELECT EXISTS (SELECT ID FROM Sample) FROM Sample WHERE ID=1",
+    for (sql, code) in [
+        (
+            "SELECT (SELECT ID,Name FROM Sample WHERE ID=99) FROM Sample WHERE FALSE",
+            "query.invalid_cardinality",
+        ),
+        (
+            "EXPLAIN ANALYZE SELECT Name FROM Sample",
+            "table.invalid_format",
+        ),
+        (
+            "SELECT EXISTS (SELECT ID FROM Sample) FROM Sample WHERE ID=1",
+            "table.invalid_format",
+        ),
     ] {
         let before = captures(&f);
-        assert!(
-            lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).is_err(),
-            "{sql}"
-        );
+        let error =
+            lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap_err();
+        assert_eq!(error.code, code, "{sql}");
+        assert_eq!(error.exit_code, 4, "{sql}");
         assert_eq!(captures(&f), before);
     }
 }

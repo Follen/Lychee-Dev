@@ -129,14 +129,44 @@ fn sql_csv_rejects_workspace_and_directory_targets() {
 #[test]
 fn sql_csv_flag_errors_precede_query_selection() {
     let fx = fixture();
+    let invocation = |flags: &[(&str, &str)]| {
+        let mut inv = fx.invocation("data sql", flags);
+        inv.flags.insert("--sql".into(), "SELECT ID FROM Sample".into());
+        // An explicit missing pin cannot fall back to an ancestor project.
+        inv.flags.insert("--snapshot".into(), "PIN-missing".into());
+        inv
+    };
     for flags in [
         vec![("--encoding", "csv")],
         vec![("--output", "out.csv")],
         vec![("--overwrite", "true")],
     ] {
-        let mut inv = fx.invocation("data sql", &flags);
-        inv.flags.remove("--snapshot");
-        assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().exit_code, 2);
+        let error = lycheedev_data::dispatch(&invocation(&flags)).unwrap_err();
+        assert_eq!(error.code, "command.invalid_arguments", "{flags:?}");
+        assert_eq!(
+            error.message,
+            "data sql CSV export requires --encoding csv and --output; --overwrite is CSV-only",
+            "{flags:?}"
+        );
+        assert_eq!(error.exit_code, 2, "{flags:?}");
+    }
+    for flags in [
+        vec![],
+        vec![("--encoding", "csv"), ("--output", "out.csv")],
+        vec![
+            ("--encoding", "csv"),
+            ("--output", "out.csv"),
+            ("--overwrite", "true"),
+        ],
+    ] {
+        let error = lycheedev_data::dispatch(&invocation(&flags)).unwrap_err();
+        assert_eq!(error.code, "vault.record_missing", "{flags:?}");
+        assert_eq!(
+            error.message,
+            "document pin/PIN-missing does not exist",
+            "{flags:?}"
+        );
+        assert_eq!(error.exit_code, 3, "{flags:?}");
     }
 }
 

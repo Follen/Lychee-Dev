@@ -37,6 +37,11 @@ export function assertArtifactSource(artifact, currentSourceDigest, profile) {
   if ((profile === 'release' && !['release', 'symbols'].includes(artifact.profile)) || (profile === 'debug' && !['dev', 'debug'].includes(artifact.profile)) || !['debug', 'release'].includes(profile)) throw new Error('candidate.artifact_profile_mismatch');
 }
 
+export function assertInstalledNativeVersion(response, expectedVersion) {
+  if (response?.result?.platform !== 'windows/amd64' || !response.result.rust) throw new Error('candidate.not_rust');
+  if (response.ok !== true || typeof expectedVersion !== 'string' || expectedVersion.length === 0 || response.result.version !== expectedVersion) throw new Error('candidate.version_mismatch');
+}
+
 export function assertSourceSyntaxValidation(response, compilerSHA256) {
   if (!response.ok || !response.result?.staticValid || !response.result.syntaxCompilation?.passed || response.result.syntaxCompilation.compilerSHA256 !== compilerSHA256) throw new Error('candidate.source_syntax_validation_failed');
 }
@@ -121,7 +126,7 @@ export async function packageSmoke(argv, root = process.cwd()) {
       npm(['install', '--prefix', installation, '--ignore-scripts', '--no-audit', '--no-fund', '--offline', join(out, packed.filename)], out);
       const installed = join(installation, 'node_modules/lycheedev');
       const version = JSON.parse(run(process.execPath, [join(installed, 'bin/lycheedev.mjs'), 'version', '--format', 'json'], out));
-      if (version.result.platform !== 'windows/amd64' || !version.result.rust) throw new Error('candidate.not_rust');
+      assertInstalledNativeVersion(version, pkg.version);
       const payload = join(installed, 'payload/tool/luac'); run(join(payload, 'luac.exe'), ['-v'], out);
       writeFileSync(join(out, 'valid.lua'), 'local value = 1\nreturn value\n'); run(join(payload, 'luac.exe'), ['-p', join(out, 'valid.lua')], out);
       if (homeArg && pinArg) {

@@ -12,10 +12,113 @@ fn cli(home:&Path,args:&[&str])->Value{
     let output=Command::new(env!("CARGO_BIN_EXE_lycheedev")).args(args).args(["--home",home.to_str().unwrap(),"--format","json"]).output().unwrap();
     let value:Value=serde_json::from_slice(&output.stdout).unwrap_or_else(|error|panic!("{error}: {} / {}",String::from_utf8_lossy(&output.stdout),String::from_utf8_lossy(&output.stderr)));
     assert!(output.status.success(),"{value}");assert_eq!(value["ok"],true,"{value}");
-    if let Some(capture)=value["captures"].as_array().and_then(|rows|rows.first()){
-        let raw=evidence::read_blob(home,&capture["blob"],32<<20).unwrap();assert_eq!(serde_json::from_slice::<Value>(&raw).unwrap(),value["result"]);
-    }
+    assert_captured_result(home,&value);
     value
+}
+fn assert_captured_result(home: &Path, value: &Value) {
+    let captures = value["captures"]
+        .as_array()
+        .expect("captures must be an array");
+    assert_eq!(captures.len(), 1, "one capture per refs/context result");
+    let capture = &captures[0];
+    let id = capture["id"].as_str().expect("capture must have an id");
+    assert!(
+        id.strip_prefix("CAP-")
+            .is_some_and(|digest| selection::valid_digest(digest, 64)),
+        "capture must have a canonical CAP id"
+    );
+    assert_eq!(evidence::read_capture(home, id).unwrap(), *capture);
+    let raw = evidence::read_blob(home, &capture["blob"], 32 << 20).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&raw).unwrap(),
+        value["result"]
+    );
+}
+#[test]
+fn public_xml_capture_checker_requires_one_persisted_capture_matching_full_result() {
+    struct CaptureFixture(PathBuf);
+    impl Drop for CaptureFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    // This checker regression uses no CLI process, native session or release.
+    let fixture = CaptureFixture(std::env::temp_dir().join(format!(
+        "lycheedev-public-xml-capture-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    )));
+    let home = &fixture.0;
+    workspace::initialize(home).unwrap();
+    let result = json!({"symbol":{"name":"Fixture"},"relations":[{"path":"Frames.xml","line":3}],"complete":true});
+    let capture = evidence::commit_capture(
+        home,
+        &serde_json::to_vec(&result).unwrap(),
+        "application/json",
+        json!({"kind":"source-refs","locator":"Fixture"}),
+        true,
+        false,
+    )
+    .unwrap();
+    let valid = json!({"ok":true,"result":result,"captures":[capture]});
+    assert_captured_result(home, &valid);
+    let reject = |case: &str, value: Value| {
+        assert!(
+            std::panic::catch_unwind(|| assert_captured_result(home, &value)).is_err(),
+            "{case} must be rejected"
+        );
+    };
+
+    let mut invalid = valid.clone();
+    invalid.as_object_mut().unwrap().remove("captures");
+    reject("missing captures", invalid);
+    let mut invalid = valid.clone();
+    invalid["captures"] = json!({});
+    reject("non-array captures", invalid);
+    let mut invalid = valid.clone();
+    invalid["captures"] = json!([]);
+    reject("empty captures", invalid);
+    let mut invalid = valid.clone();
+    invalid["captures"] = json!([valid["captures"][0], valid["captures"][0]]);
+    reject("multiple captures", invalid);
+    let mut invalid = valid.clone();
+    invalid["captures"][0]["id"] = json!("CAP-invalid");
+    reject("malformed capture id", invalid);
+    let forged_id = format!("CAP-{}", "0".repeat(64));
+    assert_ne!(valid["captures"][0]["id"], forged_id);
+    assert_eq!(
+        evidence::read_capture(home, &forged_id).unwrap_err().code,
+        "vault.record_missing"
+    );
+    let mut invalid = valid.clone();
+    invalid["captures"][0]["id"] = json!(forged_id);
+    reject("forged capture id with the real blob", invalid);
+    let mut invalid = valid.clone();
+    invalid["captures"][0]["provenance"]["locator"] = json!("forged");
+    reject("changed descriptor with a real capture id", invalid);
+    let mut invalid = valid.clone();
+    invalid["result"]["relations"][0]["line"] = json!(4);
+    reject("result differs from the captured body", invalid);
+
+    let other_result = json!({"symbol":{"name":"Other"},"relations":[],"complete":true});
+    let other_capture = evidence::commit_capture(
+        home,
+        &serde_json::to_vec(&other_result).unwrap(),
+        "application/json",
+        json!({"kind":"source-refs","locator":"Other"}),
+        true,
+        false,
+    )
+    .unwrap();
+    let other = json!({"ok":true,"result":other_result,"captures":[other_capture]});
+    assert_captured_result(home, &other);
+    let mut invalid = valid.clone();
+    invalid["captures"] = other["captures"].clone();
+    reject("genuine other capture with the original result", invalid);
+    assert_captured_result(home, &valid);
 }
 fn pin(home:&Path,commit:String)->String{selection::pin_selection(home,SelectionSpec{source:Some(SourcePin{repository:"elvui".into(),product:"main".into(),requested_ref:"fixture".into(),exact_commit:commit,parser_revision:"source-v1".into()}),..Default::default()}).unwrap().id}
 struct Fixture{root:PathBuf,home:PathBuf}
