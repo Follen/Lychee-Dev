@@ -155,9 +155,13 @@ export function collectRustCoverage(root, options, {execute = ownedSpawnSync, no
     ...(selection.kind === 'lib' ? ['--lib'] : ['--test', selection.testName]), '--no-run', '--message-format=json'];
   try {
     build = runCargo(root, args, {owner:'rust-coverage-build', oneShot:true,
-      environment:{RUSTC:paths.rustc, RUSTC_WRAPPER:'', RUSTC_WORKSPACE_WRAPPER:'', CARGO_BUILD_BUILD_DIR:join(root, 'target'),
+      // Use the ordinary reviewed Cargo launcher while selecting only this
+      // existing toolchain. Absolute paths are supported by rustup:
+      // https://rust-lang.github.io/rustup/environment-variables.html
+      environment:{RUSTUP_TOOLCHAIN:toolchain, RUSTUP_AUTO_INSTALL:'0',
+        RUSTC:paths.rustc, RUSTC_WRAPPER:'', RUSTC_WORKSPACE_WRAPPER:'', CARGO_BUILD_BUILD_DIR:join(root, 'target'),
         CARGO_ENCODED_RUSTFLAGS:FLAGS.join('\x1f'), LLVM_PROFILE_FILE:profilePattern},
-      execute(_command, cargoArgs, ownerOptions) {
+      execute(cargoCommand, cargoArgs, ownerOptions) {
         const deadline = now() + ownerOptions.timeout;
         check(ownerOptions.env.CARGO_BUILD_BUILD_DIR === ownerOptions.env.CARGO_TARGET_DIR, 'build_directory');
         report.buildEvidence = join(ownerOptions.evidence, 'receipt.json');
@@ -194,14 +198,16 @@ export function collectRustCoverage(root, options, {execute = ownedSpawnSync, no
           check(realpathSync(sysroot) === toolchain, 'compiler_sysroot');
           const cargoVersion = text(run('cargo-version', paths.cargo, ['--version', '--verbose']).stdout);
           check(/^cargo 1\.99\.0 \(/m.test(cargoVersion), 'cargo_identity');
+          const cargoLaunchVersion = text(run('cargo-launch-version', cargoCommand, ['--version', '--verbose']).stdout);
+          check(cargoLaunchVersion === cargoVersion, 'cargo_launch_identity');
           const llvmTools = {};
           for (const key of ['profdata', 'cov']) {
             const version = text(run(`${key}-version`, paths[key], ['--version']).stdout);
             check(new RegExp(`^\\s*LLVM version ${llvm.replaceAll('.', '\\.')}(?:-rust-1\\.99\\.0-stable)?\\s*$`, 'm').test(version), 'llvm_version_mismatch');
             llvmTools[key] = version;
           }
-          report.compiler = {verbose:rustVersion, cargoVerbose:cargoVersion, llvm, llvmTools};
-          const compiled = run('cargo', paths.cargo, cargoArgs, {cargoBuild:true});
+          report.compiler = {verbose:rustVersion, cargoVerbose:cargoVersion, cargoLaunchVerbose:cargoLaunchVersion, llvm, llvmTools};
+          const compiled = run('cargo', cargoCommand, cargoArgs, {cargoBuild:true});
           cargoOutput = compiled.stdout; cargoError = compiled.stderr;
           const artifact = selectCoverageArtifact(cargoOutput, root, ownerOptions.env.CARGO_TARGET_DIR, selection);
           const binary = join(job.evidence, 'instrumented-test.exe'); copyFileSync(artifact.path, binary); unchanged(artifact);

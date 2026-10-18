@@ -31,17 +31,19 @@ function mock(f, hooks = {}) {
   function execute(command,args,owner) {
     const name = basename(command);
     const step = name === 'rustc.exe' ? (args.includes('sysroot') ? 'sysroot' : 'rustc')
-      : name === 'cargo.exe' ? (args.includes('--version') ? 'cargo-version' : 'cargo')
+      : name === 'cargo.exe' || name === 'cargo' ? (args.includes('--version') ? (command === 'cargo' ? 'cargo-launch-version' : 'cargo-version') : 'cargo')
       : name === 'llvm-profdata.exe' ? (args.includes('--version') ? 'profdata-version' : 'merge')
       : name === 'llvm-cov.exe' ? (args.includes('--version') ? 'cov-version' : 'export') : 'tests';
     calls.push({step,command,args,owner});
     assert(owner.timeout > 0 && owner.timeout <= 600000);
+    assert.equal(owner.env.RUSTUP_TOOLCHAIN,f.toolchain);
+    assert.equal(owner.env.RUSTUP_AUTO_INSTALL,'0');
     assert.equal(existsSync(join(f.root,'.tmp/rust-disk/channels/ordinary.lease')),true,`lease held at ${step}`);
     assert.equal(owner.cargoBuild,step === 'cargo');
     let stdout = Buffer.alloc(0);
     if (step === 'rustc') stdout = Buffer.from(`rustc 1.99.0 (aaaaaaa 2026-09-01)\ncommit-hash: ${'a'.repeat(40)}\nrelease: 1.99.0\nhost: ${TARGET}\nLLVM version: 22.1.0\n`.replaceAll('\n','\r\n'));
     if (step === 'sysroot') stdout = Buffer.from(f.toolchain+'\r\n');
-    if (step === 'cargo-version') stdout = Buffer.from('cargo 1.99.0 (bbbbbbb 2026-09-01)\r\n');
+    if (step === 'cargo-version' || step === 'cargo-launch-version') stdout = Buffer.from('cargo 1.99.0 (bbbbbbb 2026-09-01)\r\n');
     if (step === 'profdata-version' || step === 'cov-version') stdout = Buffer.from('LLVM (http://llvm.org/):\r\n  LLVM version 22.1.0-rust-1.99.0-stable\r\n  Optimized build.\r\n');
     if (step === 'cargo') {
       assert.deepEqual(args,['test','--locked','--offline','-j','1','--target',TARGET,'-p','lycheedev-core',
@@ -72,7 +74,7 @@ function mock(f, hooks = {}) {
       assert.equal(readFileSync(args.at(-1),'utf8'),'instrumented fixture'); stdout = exportBytes(f);
     }
     const result = {status:0,handlesReaped:true,stdout,stderr:Buffer.alloc(0)};
-    hooks[step]?.({result,owner,args,artifact,f,calls});
+    hooks[step]?.({result,owner,command,args,artifact,f,calls});
     return result;
   }
   return {execute,calls,options};
@@ -82,6 +84,20 @@ function failed(f, runner, expected, extra = {}) {
   try { collectRustCoverage(f.root,runner.options,{execute:runner.execute,...extra}); } catch (failure) { error = failure; }
   assert(error); assert.match(error.message,expected);
   return {error, report:JSON.parse(readFileSync(error.coverageReport)), receipt:JSON.parse(readFileSync(error.coverageEvidence))};
+}
+// Model only the existing owner's exact launcher-hash decision and native-zero
+// orphan failure. This does not execute PowerShell or verify a real signature.
+function cargoAdmissionModel(f) {
+  const launcher=join(f.root,'reviewed-launcher/cargo.exe'); mkdirSync(dirname(launcher)); writeFileSync(launcher,'reviewed rustup proxy');
+  const reviewedSHA256=hashFile(launcher), admissions=[];
+  function admit({command,result}) {
+    const path=command==='cargo' ? launcher : command, enabled=hashFile(path)===reviewedSHA256;
+    const proof={helperAdmission:enabled ? {state:'enabled',cargo:{path,sha256:hashFile(path)}}
+      : {state:'disabled',reason:'owned.unreviewed_cargo_identity'},forced:true,knownAuxiliaryCleanup:enabled};
+    admissions.push(proof); result.proof=proof;
+    if(!enabled) result.error=new Error('owned.forced_tree_termination');
+  }
+  return {launcher,reviewedSHA256,admissions,admit};
 }
 
 test('selection and CLI accept exactly one owned package target with an optional exact filter',()=>{
@@ -100,7 +116,7 @@ test('ambient flag, compiler, runner, test and output overrides are refused',()=
 test('selected pipeline holds ordinary lease, retains exact raw/report/artifact bytes and retires scratch',()=>{
   const f=fixture(); try {
     const runner=mock(f), result=collectRustCoverage(f.root,runner.options,{execute:runner.execute});
-    assert.deepEqual(runner.calls.map(row=>row.step),['rustc','sysroot','cargo-version','profdata-version','cov-version','cargo','tests','merge','export']);
+    assert.deepEqual(runner.calls.map(row=>row.step),['rustc','sysroot','cargo-version','cargo-launch-version','profdata-version','cov-version','cargo','tests','merge','export']);
     const report=JSON.parse(readFileSync(result.report)), owner=JSON.parse(readFileSync(result.coverageEvidence)), build=JSON.parse(readFileSync(result.buildEvidence));
     assert.equal(report.complete,true); assert.equal(report.tests.passed,2); assert.equal(report.tests.ignored,1);
     assert.equal(report.coverage.files[0].regions.uncovered,5); assert.match(report.coverage.denominator,/No workspace percentage/);
@@ -110,6 +126,45 @@ test('selected pipeline holds ordinary lease, retains exact raw/report/artifact 
     assert.equal(existsSync(join(f.root,'.tmp/rust-disk/channels/ordinary.lease')),false);
     for (const row of owner.sealedLogs) assert.equal(hashFile(row.path),row.sha256);
     assert.equal(report.build.inputHashes.sourceTree.length,64);
+  } finally {f.cleanup();}
+});
+test('coverage uses the reviewed Cargo launch contract with the exact selected toolchain despite an ambient override',()=>{
+  const f=fixture(), prior={RUSTUP_TOOLCHAIN:process.env.RUSTUP_TOOLCHAIN,RUSTUP_AUTO_INSTALL:process.env.RUSTUP_AUTO_INSTALL};
+  try {
+    process.env.RUSTUP_TOOLCHAIN='misleading-other-toolchain'; process.env.RUSTUP_AUTO_INSTALL='1';
+    const model=cargoAdmissionModel(f), selectedCargo=join(f.toolchain,'bin/cargo.exe');
+    assert.notEqual(hashFile(selectedCargo),model.reviewedSHA256);
+    const runner=mock(f,{cargo:model.admit}), result=collectRustCoverage(f.root,runner.options,{execute:runner.execute});
+    const report=JSON.parse(readFileSync(result.report));
+    assert.equal(report.complete,true); assert.equal(report.tools.cargo.path,selectedCargo);
+    assert.equal(report.tools.cargo.sha256,hashFile(selectedCargo));
+    assert.equal(report.compiler.cargoLaunchVerbose,report.compiler.cargoVerbose);
+    assert.equal(runner.calls.find(row=>row.step==='cargo-version').command,selectedCargo);
+    assert.equal(runner.calls.find(row=>row.step==='cargo-launch-version').command,'cargo');
+    assert.equal(runner.calls.find(row=>row.step==='cargo').command,'cargo');
+    assert.equal(model.admissions.length,1); assert.equal(model.admissions[0].helperAdmission.state,'enabled');
+    assert.equal(model.admissions[0].helperAdmission.cargo.sha256,model.reviewedSHA256);
+    for(const {owner} of runner.calls) {
+      assert.equal(owner.env.RUSTUP_TOOLCHAIN,f.toolchain); assert.equal(owner.env.RUSTUP_AUTO_INSTALL,'0');
+      assert.equal(owner.env.CARGO_ENCODED_RUSTFLAGS,'-C\x1ftarget-feature=+crt-static\x1f-C\x1finstrument-coverage');
+    }
+  } finally {
+    for(const [key,value] of Object.entries(prior)) { if(value===undefined) delete process.env[key]; else process.env[key]=value; }
+    f.cleanup();
+  }
+});
+for(const changedAfterPreflight of [false,true]) test(`${changedAfterPreflight ? 'changed' : 'wrong'} Cargo launcher retains the native-zero orphan failure`,()=>{
+  const f=fixture(); try {
+    const model=cargoAdmissionModel(f), replace=()=>writeFileSync(model.launcher,'unreviewed replacement proxy');
+    if(!changedAfterPreflight) replace();
+    const runner=mock(f,{...(changedAfterPreflight ? {'cargo-launch-version':replace} : {}),cargo:model.admit});
+    const {report,receipt}=failed(f,runner,/cargo_failed/);
+    assert.equal(report.complete,false); assert.equal(receipt.handlesReaped,true); assert.equal(receipt.state,'retired');
+    assert.equal(runner.calls.at(-1).step,'cargo'); assert.equal(report.steps.at(-1).status,0);
+    assert.equal(report.steps.at(-1).error,'owned.forced_tree_termination');
+    assert.equal(model.admissions[0].helperAdmission.reason,'owned.unreviewed_cargo_identity');
+    assert.equal(model.admissions[0].knownAuxiliaryCleanup,false);
+    assert.equal(existsSync(join(f.root,'.tmp/rust-disk/channels/ordinary.lease')),false);
   } finally {f.cleanup();}
 });
 test('integration selection and exact filter are explicit and successive runs never reuse profile output',()=>{
@@ -131,6 +186,13 @@ test('missing LLVM component fails before owner admission or any process and nev
     assert.equal(existsSync(join(f.root,'.tmp')),false);
   } finally {f.cleanup();}
 });
+test('missing selected Cargo fails before any launch and cannot use rustup Cargo fallback',()=>{
+  const f=fixture(); try {
+    rmSync(join(f.toolchain,'bin/cargo.exe'));
+    assert.throws(()=>collectRustCoverage(f.root,{packageName:'lycheedev-core',lib:true,toolchain:f.toolchain},{execute(){assert.fail('must not run');}}),/tool_missing/);
+    assert.equal(existsSync(join(f.root,'.tmp')),false);
+  } finally {f.cleanup();}
+});
 test('changed Cargo target configuration is refused rather than silently losing flags',()=>{
   const f=fixture(); try {
     writeFileSync(join(f.root,'.cargo/config.toml'),'[build]\nrustflags = ["-C", "new-required-flag"]');
@@ -140,10 +202,13 @@ test('changed Cargo target configuration is refused rather than silently losing 
 });
 for (const [name,step,alter,expected] of [
   ['wrong Rust release','rustc',x=>x.result.stdout=Buffer.from(x.result.stdout.toString().replace('release: 1.99.0','release: 1.98.0')),/compiler_identity/],
+  ['wrong Cargo release','cargo-version',x=>x.result.stdout=Buffer.from('cargo 1.98.0 (bbbbbbb 2026-09-01)\n'),/cargo_identity/],
+  ['wrong launch Cargo identity','cargo-launch-version',x=>x.result.stdout=Buffer.from('cargo 1.99.0 (ccccccc 2026-09-01)\n'),/cargo_launch_identity/],
   ['mismatched LLVM patch','cov-version',x=>x.result.stdout=Buffer.from('LLVM version 22.1.1\n'),/llvm_version_mismatch/],
   ['mismatched LLVM Rust suffix','cov-version',x=>x.result.stdout=Buffer.from('LLVM version 22.1.0-rust-1.98.0-stable\n'),/llvm_version_mismatch/],
   ['wrong sysroot','sysroot',x=>x.result.stdout=Buffer.from(x.f.root),/compiler_sysroot/],
   ['changed tool bytes','cargo-version',x=>writeFileSync(join(x.f.toolchain,'bin/rustc.exe'),'replaced'),/file_changed/],
+  ['changed selected Cargo bytes','cargo-launch-version',x=>writeFileSync(join(x.f.toolchain,'bin/cargo.exe'),'replaced'),/file_changed/],
   ['Cargo failed','cargo',x=>{x.result.status=101;},/cargo_failed/],
   ['test failed','tests',x=>{x.result.status=101;},/tests_failed/],
   ['empty test selection','tests',x=>{x.result.stdout=output([],[],20);},/no_tests_executed/],
