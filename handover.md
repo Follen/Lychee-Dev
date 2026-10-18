@@ -1,6 +1,12 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 09:50 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最近完整性能诊断产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 09:54 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最近完整性能诊断产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+
+### Stage2正式有限target覆盖率入口（2026-10-18 09:54 UTC）
+
+新增 `tools/rust-coverage.mjs` 与独立Node回归，沿原runCargo ordinary lease持有整个固定工具身份检查→Cargo JSON选定binary→真实测试→LLVM merge/export链；保Rust1.99.0、Windows x64、crt-static、原600s总期限、owner未知不释放、source/Emmy及工具前后身份、有限profile/证据。每次明确一个package与lib/integration target，可选一个exact函数；不安装工具、不自动切toolchain、不生成全仓覆盖率承诺。
+
+独审按最终字节通过；Linux Node三suite43/0/0（coverage30/build8/disk5）。这些是真实文件/owner状态的模拟执行器回归，实际Windows编译器、LLVM组件及instrumented tests仍NOT_RUN。报告只统计选定binary中映射的owned文件lines/functions/regions；映射的ignored测试代码仍在分母，未映射其他target/feature/doctest不代表覆盖；合并子进程profile可能贡献匹配计数，但未添加其他object映射。完整口径与使用方式见[Stage2记录](docs/toolkit/rust-audit-stage2-2026-10-18.md)。本机资源暂停继续，未启动采集，Stage2仍在测试有效性与冗余阶段。
 
 ### Stage2第二轮有限断言审查（2026-10-18 09:50 UTC）
 
