@@ -1,13 +1,14 @@
 //! Workspace settings, budgets, and retention.
 use crate::{
     Invocation, Outcome, Result, ToolkitError,
+    control::OperationControl,
     selection,
     storage::{self, ExclusiveLock},
 };
 use serde_json::{Value, json};
 use std::{fs, path::Path};
-pub mod data_resources;
 mod controlled;
+pub mod data_resources;
 pub(crate) use controlled::inspect_controlled;
 pub use controlled::{open_controlled, open_controlled_with_check};
 pub fn open(home: &Path) -> Result<Value> {
@@ -80,7 +81,76 @@ fn workspace_schema_newer(schema: &str) -> bool {
     }
     value > 1
 }
+/// Optional only for historical library callers. Controlled commands borrow the
+/// original invocation; no new deadline or cancellation lineage is introduced.
+#[derive(Clone, Copy)]
+pub(crate) struct InitControl<'a>(pub(crate) Option<&'a OperationControl>);
+impl InitControl<'_> {
+    pub(crate) fn check(self) -> Result<()> {
+        self.0.map_or(Ok(()), OperationControl::check)
+    }
+    pub(crate) fn finish<T>(self, result: Result<T>) -> Result<T> {
+        selection::selection_finish(result, self.check())
+    }
+    pub(crate) fn open(self, home: &Path) -> Result<Value> {
+        self.check()?;
+        self.finish(match self.0 {
+            Some(control) => open_controlled(home, control),
+            None => open(home),
+        })
+    }
+    pub(crate) fn lock(self, scope: &Path, resource: &str) -> Result<ExclusiveLock> {
+        match self.0 {
+            Some(control) => ExclusiveLock::resource_controlled(scope, resource, control),
+            None => ExclusiveLock::resource(scope, resource),
+        }
+    }
+    pub(crate) fn write(self, path: &Path, value: &Value) -> Result<()> {
+        self.check()?;
+        let bytes = serde_json::to_vec_pretty(value)?;
+        self.check()?;
+        // A successful durable replacement must be recorded by the caller
+        // before its next stop check. Do not turn that success into an unknown.
+        match self.0 {
+            Some(control) => storage::atomic_write_controlled(path, &bytes, control),
+            None => storage::atomic_write(path, &bytes),
+        }
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InitPhase {
+    ParentPrepared,
+    LeaseAcquired,
+    StageCreated,
+    DirectoryCreated,
+    ManifestWriting,
+    ManifestPublished,
+    RemoveEmptyRoot,
+    EmptyRootRemoved,
+    RootRename,
+    RootPublished,
+    LeaseClosed,
+}
+fn init_checkpoint(
+    phase: InitPhase,
+    path: &Path,
+    control: InitControl<'_>,
+    observe: &mut impl FnMut(InitPhase, &Path) -> Result<()>,
+) -> Result<()> {
+    control.finish(observe(phase, path))
+}
 pub fn initialize(home: &Path) -> Result<Value> {
+    initialize_observed(home, InitControl(None), &mut |_, _| Ok(()))
+}
+pub fn initialize_controlled(home: &Path, control: &OperationControl) -> Result<Value> {
+    initialize_observed(home, InitControl(Some(control)), &mut |_, _| Ok(()))
+}
+fn initialize_observed(
+    home: &Path,
+    control: InitControl<'_>,
+    observe: &mut impl FnMut(InitPhase, &Path) -> Result<()>,
+) -> Result<Value> {
+    control.check()?;
     let home = if home.is_absolute() {
         home.to_path_buf()
     } else {
@@ -89,59 +159,157 @@ pub fn initialize(home: &Path) -> Result<Value> {
     let parent = home
         .parent()
         .ok_or_else(|| ToolkitError::invalid("workspace cannot be a filesystem root"))?;
-    fs::create_dir_all(parent)?;
-    let _guard = ExclusiveLock::resource(
+    control.check()?;
+    control.finish(fs::create_dir_all(parent).map_err(ToolkitError::from))?;
+    init_checkpoint(InitPhase::ParentPrepared, parent, control, observe)?;
+    let guard = control.lock(
         &parent.join(".lycheedev-locks"),
         &format!(
             "initialize:{}",
             home.file_name().unwrap_or_default().to_string_lossy()
         ),
     )?;
-    initialize_unlocked(&home)
+    let result = (|| {
+        init_checkpoint(InitPhase::LeaseAcquired, &home, control, observe)?;
+        initialize_unlocked_observed(&home, control, observe, |stage| {
+            fs::remove_dir_all(stage).map_err(ToolkitError::from)
+        })
+    })();
+    let summary = initialization_result(&home, &result);
+    let progress = result
+        .as_ref()
+        .err()
+        .and_then(|error| error.details.get("initialization"))
+        .cloned();
+    // Once acquired, close is unconditional and checked, even after a stop.
+    let result = selection::selection_finish(result, guard.close());
+    let result = selection::selection_finish(
+        result,
+        init_checkpoint(InitPhase::LeaseClosed, &home, control, observe),
+    );
+    preserve_initialization_result(result, summary, progress)
 }
-pub(crate) fn initialize_unlocked(home: &Path) -> Result<Value> {
-    if home.join("workspace.json").exists() {
-        return open(home);
+pub(crate) fn initialization_result(home: &Path, result: &Result<Value>) -> Option<Value> {
+    match result {
+        Ok(identity) => Some(json!({"root":home,"identity":identity})),
+        Err(error) => error
+            .details
+            .get("result")
+            .filter(|value| !value.is_null())
+            .cloned(),
     }
-    if home.exists() && fs::read_dir(home)?.next().is_some() {
-        return Err(ToolkitError::new(
-            "vault.legacy_detected",
-            "existing data is never adopted or imported",
-            4,
-        ));
+}
+fn preserve_initialization_result(
+    result: Result<Value>,
+    summary: Option<Value>,
+    progress: Option<Value>,
+) -> Result<Value> {
+    result.map_err(|error| {
+        if summary.is_none() && progress.is_none() {
+            return error;
+        }
+        let mut combined = error.clone();
+        combined.details = json!({
+            "schema":"lycheedev.workspace-initialization-error.v1",
+            "primary":error,
+            "initialization":progress,
+            "result":summary,
+        });
+        combined
+    })
+}
+pub(crate) fn initialize_unlocked_observed(
+    home: &Path,
+    control: InitControl<'_>,
+    observe: &mut impl FnMut(InitPhase, &Path) -> Result<()>,
+    cleanup: impl FnOnce(&Path) -> Result<()>,
+) -> Result<Value> {
+    control.check()?;
+    if home.join("workspace.json").exists() {
+        return control.open(home);
+    }
+    control.check()?;
+    if home.exists() {
+        let mut entries = fs::read_dir(home)?;
+        control.check()?;
+        let occupied = entries.next().transpose()?.is_some();
+        control.check()?;
+        if occupied {
+            return Err(ToolkitError::new(
+                "vault.legacy_detected",
+                "existing data is never adopted or imported",
+                4,
+            ));
+        }
     }
     let parent = home
         .parent()
         .ok_or_else(|| ToolkitError::invalid("workspace cannot be filesystem root"))?;
-    fs::create_dir_all(parent)?;
+    control.check()?;
+    control.finish(fs::create_dir_all(parent).map_err(ToolkitError::from))?;
     if home.join("workspace.json").exists() {
-        return open(home);
+        return control.open(home);
     }
+    control.check()?;
     let now = chrono::Utc::now();
     let identity = json!({"schema":"lycheedev.workspace.v1","workspaceId":storage::sha256(format!("{now:?}:{}:{}",std::process::id(),home.display()).as_bytes())[..32],"createdAt":now.to_rfc3339_opts(chrono::SecondsFormat::Nanos,true)});
     let stage = parent.join(format!(
         ".lycheedev-init-{}",
         identity["workspaceId"].as_str().unwrap()
     ));
+    control.check()?;
     fs::create_dir(&stage)?;
+    let mut published = false;
+    let mut empty_target_removed = false;
+    let mut retain_stage = false;
     let result = (|| {
+        init_checkpoint(InitPhase::StageCreated, &stage, control, observe)?;
         for name in [
             "state", "pins", "mirrors", "blobs", "indexes", "cache", "runs", "captures", "locks",
             "tmp",
         ] {
+            control.check()?;
             fs::create_dir(stage.join(name))?;
+            init_checkpoint(InitPhase::DirectoryCreated, &stage, control, observe)?;
         }
-        storage::atomic_json(&stage.join("workspace.json"), &identity)?;
+        init_checkpoint(InitPhase::ManifestWriting, &stage, control, observe)?;
+        if let Err(error) = control.write(&stage.join("workspace.json"), &identity) {
+            // The atomic writer owns its uncertain temporary. Preserve the
+            // containing private stage if close/publication/cleanup is unknown.
+            retain_stage = !error.details.is_null();
+            return Err(error);
+        }
+        init_checkpoint(InitPhase::ManifestPublished, &stage, control, observe)?;
+        control.check()?;
         if home.exists() {
+            init_checkpoint(InitPhase::RemoveEmptyRoot, home, control, observe)?;
             fs::remove_dir(home)?;
+            empty_target_removed = true;
+            init_checkpoint(InitPhase::EmptyRootRemoved, home, control, observe)?;
         }
+        init_checkpoint(InitPhase::RootRename, &stage, control, observe)?;
         fs::rename(&stage, home)?;
-        Ok(identity)
+        published = true;
+        init_checkpoint(InitPhase::RootPublished, home, control, observe)?;
+        Ok(identity.clone())
     })();
-    if stage.exists() {
-        let _ = fs::remove_dir_all(stage);
-    }
-    result
+    let cleanup = if !published && !retain_stage {
+        let result = cleanup(&stage);
+        retain_stage = result.is_err();
+        result
+    } else {
+        Ok(())
+    };
+    let result = control.finish(selection::selection_finish(result, cleanup));
+    let progress = json!({
+        "root":home,"stage":stage,"published":published,
+        "emptyTargetRemoved":empty_target_removed,"stageRetained":retain_stage,
+    });
+    preserve_initialization_result(
+        result,
+        published.then(|| json!({"root":home,"identity":identity})),
+        Some(progress),
+    )
 }
 pub fn default_config() -> Value {
     json!({"schema":"lycheedev.config.v1","cache":{"maxBytes":20u64<<30},"download":{"workers":0}})
@@ -192,25 +360,49 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
     match inv.command.as_str() {
         "doctor" => crate::doctor::inspect(inv),
         "init" => {
-            if ["--plan", "--fresh", "--resume"].into_iter()
-                .filter(|flag| inv.flag_bool(flag)).count() > 1
+            if ["--plan", "--fresh", "--resume"]
+                .into_iter()
+                .filter(|flag| inv.flag_bool(flag))
+                .count()
+                > 1
             {
-                return Err(ToolkitError::arguments("init accepts at most one of --plan, --fresh, --resume"));
+                return Err(ToolkitError::arguments(
+                    "init accepts at most one of --plan, --fresh, --resume",
+                ));
             }
             inv.control.check()?;
             if inv.flag_bool("--plan") {
-                return Ok(Outcome::new(crate::archive::plan(&inv.home)?));
+                return Ok(Outcome::new(crate::archive::plan_controlled(
+                    &inv.home,
+                    &inv.control,
+                )?));
             }
             if inv.flag_bool("--fresh") {
-                return Ok(Outcome::new(crate::archive::fresh(&inv.home)?));
+                return Ok(Outcome::new(crate::archive::fresh_controlled(
+                    &inv.home,
+                    &inv.control,
+                )?));
             }
             if inv.flag_bool("--resume") {
-                return Ok(Outcome::new(crate::archive::resume(&inv.home)?));
+                return Ok(Outcome::new(crate::archive::resume_controlled(
+                    &inv.home,
+                    &inv.control,
+                )?));
             }
-            let identity = initialize(&inv.home)?;
-            Ok(Outcome::new(
-                json!({"root":fs::canonicalize(&inv.home)?,"identity":identity}),
-            ))
+            let identity = initialize_controlled(&inv.home, &inv.control)?;
+            let summary = json!({"root":inv.home,"identity":identity});
+            let result = (|| {
+                inv.control.check()?;
+                let root = fs::canonicalize(&inv.home)?;
+                inv.control.check()?;
+                Ok(json!({"root":root,"identity":identity}))
+            })();
+            preserve_initialization_result(
+                selection::selection_finish(result, inv.control.check()),
+                Some(summary),
+                None,
+            )
+            .map(Outcome::new)
         }
         "config show" => Ok(Outcome::new(config(&inv.home)?)),
         "config set" => {
@@ -236,7 +428,9 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
     }
 }
 fn target(inv: &Invocation) -> Result<Outcome> {
-    if inv.command != "target resolve" { return selection::target::dispatch(inv); }
+    if inv.command != "target resolve" {
+        return selection::target::dispatch(inv);
+    }
     if inv.command == "target resolve" {
         if let Some(file) = inv.flag("--file") {
             if inv.flag("--target").is_some()
@@ -247,7 +441,11 @@ fn target(inv: &Invocation) -> Result<Outcome> {
                     "target resolve --file cannot combine with target/provider selectors",
                 ));
             }
-            let pin = selection::resolve_selection_file_controlled(&inv.home, &inv.cwd.join(file), &inv.control)?;
+            let pin = selection::resolve_selection_file_controlled(
+                &inv.home,
+                &inv.cwd.join(file),
+                &inv.control,
+            )?;
             return Ok(Outcome::new(serde_json::to_value(pin)?));
         }
         return Err(ToolkitError::new(
@@ -262,3 +460,7 @@ fn target(inv: &Invocation) -> Result<Outcome> {
 #[cfg(test)]
 #[path = "workspace_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "workspace_initialization_tests.rs"]
+mod initialization_tests;

@@ -333,13 +333,13 @@ fn validate_slot(
     }
     for (name, want) in slots::static_files(index, &pool.version, &pool.schema) {
         control.check()?;
-        let actual = slots::read_bounded(&path.join(&name), 16 << 10)?;
+        let actual = slots::read_bounded_controlled(&path.join(&name), 16 << 10, control)?;
         if !slots::static_matches(&name, &actual, &want) {
             return conflict("slot static file differs from removal intent");
         }
     }
     control.check()?;
-    let payload = slots::read_bounded(&path.join("Payload.lua"), 2 << 20)?;
+    let payload = slots::read_bounded_controlled(&path.join("Payload.lua"), 2 << 20, control)?;
     if storage::sha256(&payload) != entry.payload_hash {
         return conflict("slot payload differs from removal intent");
     }
@@ -361,7 +361,31 @@ fn addon_with_move(
     target: &Path,
     archive: &Path,
     control: &OperationControl,
-    mut move_member: impl FnMut(&Path, &Path) -> Result<()>,
+    move_member: impl FnMut(&Path, &Path) -> Result<()>,
+) -> Result<Value> {
+    addon_with_cleanup(
+        target,
+        archive,
+        control,
+        move_member,
+        |_| {},
+        storage::ExclusiveLock::close,
+        InstallationGuard::close,
+    )
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RemovalStep {
+    Locked,
+    Validated,
+}
+fn addon_with_cleanup(
+    target: &Path,
+    archive: &Path,
+    control: &OperationControl,
+    move_member: impl FnMut(&Path, &Path) -> Result<()>,
+    mut observe: impl FnMut(RemovalStep),
+    close_installation: impl FnOnce(storage::ExclusiveLock) -> Result<()>,
+    close_maintenance: impl FnOnce(InstallationGuard) -> Result<()>,
 ) -> Result<Value> {
     control.check()?;
     let target = deploy::destination(target)?;
@@ -373,15 +397,37 @@ fn addon_with_move(
     }
     let archive = deploy::destination(archive)?;
     deploy::outside(parent, &archive)?;
-    let guard = InstallationGuard::acquire(&target)?;
-    guard.require_idle()?;
-    let _lock = deploy::installation_lock(&target)?;
+    let guard = InstallationGuard::acquire_controlled(&target, control)?;
+    let result = (|| {
+        control.check()?;
+        guard.require_idle()?;
+        let lock = deploy::installation_lock_controlled(&target, control)?;
+        let result = (|| {
+            observe(RemovalStep::Locked);
+            addon_locked(&target, &archive, control, move_member, &mut observe)
+        })();
+        deploy::finish_close(result, close_installation(lock))
+    })();
+    deploy::finish_close(result, close_maintenance(guard))
+}
+// Both owners stay held across inventory validation and every durable move.
+// Explicit finish never rechecks cancellation after a committed final move.
+fn addon_locked(
+    target: &Path,
+    archive: &Path,
+    control: &OperationControl,
+    mut move_member: impl FnMut(&Path, &Path) -> Result<()>,
+    observe: &mut impl FnMut(RemovalStep),
+) -> Result<Value> {
     control.check()?;
+    let parent = target
+        .parent()
+        .ok_or_else(|| invalid("addon has no parent"))?;
     let journal = companion(&archive, ".removal.json");
     let slot_archive = companion(&archive, ".slots");
     let marker = parent.join(slots::MARKER);
     if !exists(&journal)? && !exists(&marker)? {
-        let assessment = installation::inspect(&target, "addon")?;
+        let assessment = installation::inspect_main_controlled(target, "addon", control)?;
         control.check()?;
         if assessment["state"] == "absent" {
             return Ok(json!({"state":"absent"}));
@@ -392,22 +438,23 @@ fn addon_with_move(
         if exists(&archive)? {
             return conflict("explicit recovery destination already exists");
         }
+        observe(RemovalStep::Validated);
         control.check()?;
-        move_member(&target, &archive)?;
+        move_member(target, archive)?;
         return Ok(json!({"state":"archived","archive":archive,"receipt":assessment["receipt"]}));
     }
     let intent: Removal = if exists(&journal)? {
-        serde_json::from_slice(&slots::read_bounded(&journal, 1 << 20)?)
+        serde_json::from_slice(&slots::read_bounded_controlled(&journal, 1 << 20, control)?)
             .map_err(|error| invalid(&error.to_string()))?
     } else {
-        let pool = slots::read_pool(parent)?;
+        let pool = slots::read_pool_controlled(parent, control)?;
         // A new removal is business maintenance for the current 500-slot pool.
         // Historical schemas are accepted only by an already durable v1 intent.
         slots::inspect_controlled(parent, &pool.version, control)?;
         if pool.files.iter().any(slots::SlotFile::unresolved) {
             return conflict("slot reservation is unresolved");
         }
-        let assessment = installation::inspect(&target, "addon")?;
+        let assessment = installation::inspect_main_controlled(target, "addon", control)?;
         if assessment["state"] != "managed" {
             return conflict("only unchanged managed addon can be archived");
         }
@@ -419,7 +466,7 @@ fn addon_with_move(
         let intent = Removal {
             schema: "lycheedev.addon-removal.v1".into(),
             parent: parent.into(),
-            archive: archive.clone(),
+            archive: archive.into(),
             pool,
             receipt: Some(receipt),
         };
@@ -462,9 +509,10 @@ fn addon_with_move(
     control.check()?;
     let destination_marker = slot_archive.join(slots::MARKER);
     let (path, moved) = location(&marker, &destination_marker)?;
-    if slots::read_pool(
+    if slots::read_pool_controlled(
         path.parent()
             .ok_or_else(|| invalid("slot marker has no parent"))?,
+        control,
     )? != *pool
     {
         return conflict("slot manifest differs from removal intent");
@@ -472,13 +520,14 @@ fn addon_with_move(
     moves.push((marker, destination_marker, moved));
     control.check()?;
     let (path, moved) = location(&target, &archive)?;
-    let assessment = installation::inspect(&path, "addon")?;
+    let assessment = installation::inspect_main_controlled(&path, "addon", control)?;
     if assessment["state"] != "managed"
         || assessment["receipt"] != serde_json::to_value(&intent.receipt)?
     {
         return conflict("main addon differs from removal intent");
     }
-    moves.push((target, archive.clone(), moved));
+    moves.push((target.into(), archive.into(), moved));
+    observe(RemovalStep::Validated);
     for (source, destination, moved) in moves {
         control.check()?;
         if !moved {
@@ -801,3 +850,6 @@ mod tests {
         assert_eq!(fs::read(journal).unwrap(), raw.as_bytes());
     }
 }
+
+#[cfg(test)]
+mod cleanup_tests;

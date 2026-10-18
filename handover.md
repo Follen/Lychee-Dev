@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 22:07 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 02:37 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
 
 ### 当前执行：正式五循环 Stage 1 已发现实际业务缺口
 
@@ -8,9 +8,13 @@
 
 ### Stage 1 首个有限修复批：待实际验证
 
+首批已保存为 `6a93a859d80efd6d757fcaa8b9e85be6285a734d`，39 文件逐字读回与批准版本一致；64 个新增 Rust 测试尚未运行，唯一 Windows 队列已接收固定 SHA。等待批准期间云工作目录丢失，首批由完整参数存储与原 Probe 修正片段恢复，整体参数 SHA 精确匹配 `a659c61d4a2c78fa3e5f7a4272fe5f6493982efb9a7fb7b556892c267a84887a` 后才上传。
+
+后继 Source/partial/Core/Delivery 与 Skill 尚未提交；能按旧 SHA 认证的文件作为原件恢复，其余重新实现并重新独审/测试。原 Node 与静态审查结果只绑定原字节，不转给新重建版本。既有已推生产和历史测试证据没有改变。
+
 Delivery 23、Probe 11、Core/CLI init 15、Data 准入 7、诊断 8 个新增测试入口已写，诊断共享 21 条原始输入；Rust 全部 NOT_RUN。独立复审修正了安装锁内 recovery 重扫/显式关闭、compound busy 错误保留，以及 SQL quoted identifier 的空 AST span，当前用原 token 定位。Node 两个既有文件 10/10，静态检查通过。首批不混 Source 与缺钥 partial 的在写内容。
 
-后继仍须修 init/archive 全链 control、InstallationGuard 取得失败的 maintenance close、默认 addon remove 的两个隐式 Drop；不可将入口检查或 fresh/update 修复视为全部关闭。正式离线队列由主协调统一安排，先 alltargets 与受影响完整组，再实际 Skill 两项任务。Stage 1 还需修复复审及下一轮检查。
+Core/Delivery 后继代码已恢复：InstallationGuard 取得失败的 maintenance close 与默认 addon remove 两个显式关闭路径，四文件与原 SHA 完全相同；init/archive 全链 control 四文件为新重建 revision，重新独审。新增 12+8 个 Rust 测试全部 NOT_RUN（其中一个 Unix-only），不能以静态复核或入口检查视为执行闭合。正式离线队列由主协调统一安排，先 alltargets 与受影响完整组，再实际 Skill 两项任务。Stage 1 还需修复复审及下一轮检查。
 
 ### 最新实测：b4d认证Facts所有权转移完整六场景
 

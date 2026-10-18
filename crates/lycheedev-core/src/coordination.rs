@@ -1,11 +1,13 @@
 //! Shared installation occupancy. A pending claim requires explicit business retirement.
 use crate::{
     Result, ToolkitError,
+    control::OperationControl,
     storage::{self, ExclusiveLock},
 };
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
+    io::Read,
     path::{Path, PathBuf},
 };
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +45,10 @@ pub struct InstallationMaintenanceLease {
 }
 impl InstallationMaintenanceLease {
     pub fn acquire(target: &Path) -> Result<Self> {
+        Self::acquire_controlled(target, &OperationControl::default())
+    }
+    pub fn acquire_controlled(target: &Path, control: &OperationControl) -> Result<Self> {
+        control.check()?;
         let parent = fs::canonicalize(
             target
                 .parent()
@@ -53,7 +59,7 @@ impl InstallationMaintenanceLease {
                 .file_name()
                 .ok_or_else(|| ToolkitError::invalid("installation requires basename"))?,
         );
-        storage::guard_path(&parent, &target)?;
+        storage::guard_path_with_check(&parent, &target, || control.check())?;
         let target = if target.exists() {
             fs::canonicalize(&target)?
         } else {
@@ -63,9 +69,10 @@ impl InstallationMaintenanceLease {
             .to_string_lossy()
             .trim_start_matches("\\\\?\\")
             .to_ascii_lowercase();
-        let lock = ExclusiveLock::resource(
+        let lock = ExclusiveLock::resource_controlled(
             &parent.join(".lycheedev-locks"),
             &format!("installation-maintenance:{canonical}"),
+            control,
         )?;
         Ok(Self {
             target,
@@ -77,6 +84,11 @@ impl InstallationMaintenanceLease {
         self._lock.close()
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AcquireStep {
+    Maintenance,
+    RegistryRead,
+}
 impl InstallationGuard {
     /// Consume the installation owner and report its retained lock close once.
     pub fn close(self) -> Result<()> {
@@ -84,25 +96,58 @@ impl InstallationGuard {
     }
 
     pub fn acquire(target: &Path) -> Result<Self> {
-        let maintenance = InstallationMaintenanceLease::acquire(target)?;
-        let parent = &maintenance.parent;
-        let path = parent.join(".lycheedev-claims.json");
-        let registry: ClaimRegistry = if path.exists() {
-            storage::guard_path(&parent, &path)?;
-            storage::read_json(&path)?
-        } else {
-            ClaimRegistry {
-                schema: "lycheedev.claims.v1".into(),
-                claims: vec![],
+        Self::acquire_controlled(target, &OperationControl::default())
+    }
+    pub fn acquire_controlled(target: &Path, control: &OperationControl) -> Result<Self> {
+        Self::acquire_with(target, control, |_| {}, InstallationMaintenanceLease::close)
+    }
+    fn acquire_with(
+        target: &Path,
+        control: &OperationControl,
+        mut observe: impl FnMut(AcquireStep),
+        close: impl FnOnce(InstallationMaintenanceLease) -> Result<()>,
+    ) -> Result<Self> {
+        let maintenance = InstallationMaintenanceLease::acquire_controlled(target, control)?;
+        // From this point every failed acquisition explicitly consumes the
+        // original maintenance owner. Failure diagnostics never replace the
+        // first business error, including its existing cleanup details.
+        let loaded = (|| {
+            observe(AcquireStep::Maintenance);
+            control.check()?;
+            let path = maintenance.parent.join(".lycheedev-claims.json");
+            let registry: ClaimRegistry = if path.exists() {
+                storage::guard_path_with_check(&maintenance.parent, &path, || control.check())?;
+                read_registry(&path, control, || observe(AcquireStep::RegistryRead))?
+            } else {
+                ClaimRegistry {
+                    schema: "lycheedev.claims.v1".into(),
+                    claims: vec![],
+                }
+            };
+            if registry.schema != "lycheedev.claims.v1" || registry.claims.len() > 1024 {
+                return Err(ToolkitError::new(
+                    "coordination.claim_format",
+                    "unknown or unbounded claim registry",
+                    4,
+                ));
+            }
+            control.check()?;
+            Ok((path, registry))
+        })();
+        let (path, registry) = match loaded {
+            Ok(value) => value,
+            Err(mut primary) => {
+                if let Err(cleanup) = close(maintenance) {
+                    let original = primary.clone();
+                    primary.details = serde_json::json!({
+                        "schema":"lycheedev.coordination-cleanup.v1",
+                        "primary":original,
+                        "cleanup":cleanup,
+                    });
+                }
+                return Err(primary);
             }
         };
-        if registry.schema != "lycheedev.claims.v1" || registry.claims.len() > 1024 {
-            return Err(ToolkitError::new(
-                "coordination.claim_format",
-                "unknown or unbounded claim registry",
-                4,
-            ));
-        }
         Ok(Self {
             target: maintenance.target.clone(),
             registry,
@@ -216,3 +261,34 @@ impl InstallationGuard {
         Ok(())
     }
 }
+
+// Preserve the existing registry format and admission, but check the original
+// control between bounded reads and explicitly finish the opened file on every
+// read/parse/control outcome. No new registry size policy is introduced here.
+fn read_registry(
+    path: &Path,
+    control: &OperationControl,
+    mut after_read: impl FnMut(),
+) -> Result<ClaimRegistry> {
+    control.check()?;
+    let mut file = fs::File::open(path)?;
+    let result = (|| {
+        let mut bytes = Vec::new();
+        let mut block = [0u8; 65536];
+        loop {
+            control.check()?;
+            let count = file.read(&mut block)?;
+            if count == 0 {
+                break;
+            }
+            bytes.extend_from_slice(&block[..count]);
+            after_read();
+        }
+        control.check()?;
+        Ok(serde_json::from_slice(&bytes)?)
+    })();
+    storage::finish_file(file, result, control)
+}
+
+#[cfg(test)]
+mod tests;
