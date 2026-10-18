@@ -10,6 +10,7 @@ import {hashFile} from '../../tools/rust-build.mjs';
 import {CURRENT_GO_CONTRACT, inventory, inventoryHash, jsonFile, loadCurrentWorkflow, pendingIncrementTasks, within} from './assertions.mjs';
 import {archiveFixture, bounded, digest, loadFixture, npmOfflineFlags, seedDataHome, MISSING_KEYS, RESTORED_KEYS} from './data-inputs.mjs';
 import {CASES, CHECKS, archiveBytes, archiveCaptureProofs, assertDataReport, assertEnvelope, dataArgs, pendingDataTasks, requestFor, targetArgs} from './data-assertions.mjs';
+import {assertDataSkillDirectory, assertDataSkillInventory, dataSkillIdentity} from './data-skill-contract.mjs';
 
 assert.equal(process.platform, 'win32'); assert.equal(process.arch, 'x64');
 const [configPath, ...extra] = process.argv.slice(2); assert(configPath && !extra.length);
@@ -19,7 +20,9 @@ const owner = jsonFile(join(evidence, 'receipt.json'));
 assert.equal(owner.owner, 'skill-data-usage'); assert.equal(owner.state, 'active'); assert.equal(owner.directory, scratch);
 assert.equal(config.ownerId, owner.id); assert.equal(configPath, join(evidence, 'configuration.json'));
 assert.deepEqual(readdirSync(scratch), []); assert.equal(inventoryHash(inventory(config.sourcePackage)), config.packageSHA256);
-const workflow = loadCurrentWorkflow(root);
+assert.equal(config.runnerRoot, resolve(import.meta.dirname, '../..'));
+const workflow = loadCurrentWorkflow(config.runnerRoot);
+assert.deepEqual(config.skillIdentity, dataSkillIdentity());
 const report = {schema: 'lycheedev.skill-data-usage.v2', goContract: CURRENT_GO_CONTRACT, skillTree: 'b9e162ace7abe7ea4a2feecef822283767eb1210', state: 'running', completeSkillAcceptance: false, config, startedAt: new Date().toISOString(), checks: [], commands: [], fixtures: {}, seeded: {}, workspaces: {}, queries: {}, keys: {}, proofs: {}, completedTasks: [], pendingTasks: pendingIncrementTasks(workflow), boundaries: ['Synthetic authenticated local CASC inputs; no actual client observation.', 'Logical memoryBudget is actual product output, not RSS or OS Job pressure evidence.', 'Pressure recovery and all Live tasks remain NOT_RUN.', 'New revision: prior lost-file Node results are not inherited.']};
 const save = () => writeFileSync(join(evidence, 'report.json'), JSON.stringify(report, null, 2) + '\n');
 save();
@@ -89,9 +92,11 @@ try {
     report.installedInventory = archiveBytes(evidence, 'installed-inventory.json', Buffer.from(JSON.stringify(installed)));
     report.npmShim = archiveBytes(evidence, 'npm-lycheedev.cmd', bounded(join(config.prefix, 'lycheedev.cmd')));
     assert(!existsSync(join(config.prefix, 'lycheedev.exe')), 'npm prefix must choose installed package launcher');
-    const baseline = jsonFile(join(root, 'tests/rust-skill-usage/baselines/go3.2.3-skill.json'));
-    assert.equal(baseline.tree, report.skillTree);
-    for (const row of baseline.files) assert.equal(hashFile(within(join(config.prefix, 'node_modules/lycheedev/payload/skill'), row.path)), row.sha256);
+    const skillRoot = join(config.prefix, 'node_modules/lycheedev/payload/skill');
+    const contract = assertDataSkillDirectory(skillRoot);
+    assertDataSkillInventory(installed);
+    report.skillProof = {...dataSkillIdentity(contract), files: contract.files.map((row, index) => ({path: row.path,
+      archive: archiveBytes(evidence, `installed-skill-${index}.bin`, bounded(within(skillRoot, row.path)))}))};
   });
   for (const [id, args] of [['version', ['version']], ['describe', ['describe']], ['help', ['--help']], ['sql-help', ['data', 'sql', '--help']]]) check(id, () => { invoke(id, args); });
   for (const kind of ['catalog', 'partial']) {

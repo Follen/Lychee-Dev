@@ -7,7 +7,8 @@ import {dirname, join, resolve, win32} from 'node:path';
 import os from 'node:os';
 import {DatabaseSync} from 'node:sqlite';
 import {fileURLToPath} from 'node:url';
-import {inventory, inventoryHash, loadCurrentWorkflow} from './assertions.mjs';
+import {inventory, inventoryHash, loadCurrentWorkflow, skillTreeIdentity} from './assertions.mjs';
+import {assertDataSkillBytes, assertDataSkillDirectory, assertDataSkillInventory, dataSkillIdentity, loadDataSkillContract} from './data-skill-contract.mjs';
 import {archiveFixture, decodePartialFrame, digest, goJSON, loadArchivedFixture, loadExporters, loadFixture, npmOfflineFlags, pathStyle, ordinaryPath, FIXED_PIN, SAMPLE_KEY, SAMPLE_KEY_ID, ENCRYPTED_CHUNK, MISSING_KEYS, RESTORED_KEYS} from './data-inputs.mjs';
 import {CASES, CHECKS, CSV, CSV_SHA256, PARAMETERS, ROWS, COLUMNS, archiveBytes, assertCapture, assertCaptureProofs, assertDataReport, assertDataValue, assertMemory, captureCanonical, dataArgs, expectedDataCommands, pendingDataTasks, requestFor, sourceReferences} from './data-assertions.mjs';
 import {EXPORTER_ARGS} from './data-exporters.mjs';
@@ -92,9 +93,12 @@ const envelope = (result, captures = [], context = {}) => ({schema: 'lycheedev.r
 function makeReport(t, originalRoot = 'C:\\project') {
   const directory = temporary(t), evidence = join(directory, 'relocated-evidence'); mkdirSync(evidence);
   const scratch = win32.join(originalRoot, '.tmp/owner');
-  const config = {root: originalRoot, scratch, evidence: 'C:\\project\\evidence\\owner', platform: 'win32', arch: 'x64', node: 'C:\\node24\\node.exe', prefix: win32.join(scratch, 'npm-prefix'), sourcePackage: 'C:\\project\\candidate\\package', version: '3.5.0-rust-test', npm: {path: 'C:\\node24\\node_modules\\npm\\bin\\npm-cli.js'}, exporters: {executables: [{path: 'C:\\project\\target\\debug\\deps\\catalog.exe'}, {path: 'C:\\project\\target\\debug\\deps\\partial.exe'}]}, packageFiles: [{path: 'package.json', bytes: 2, sha256: digest('{}')}, ...JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines/go3.2.3-skill.json'))).files.map(row => ({path: 'payload/skill/' + row.path, bytes: row.bytes, sha256: row.sha256}))]};
+  const skill = loadDataSkillContract();
+  const config = {root: originalRoot, runnerRoot: 'C:\\runner-only', skillIdentity: dataSkillIdentity(skill), scratch, evidence: 'C:\\project\\evidence\\owner', platform: 'win32', arch: 'x64', node: 'C:\\node24\\node.exe', prefix: win32.join(scratch, 'npm-prefix'), sourcePackage: 'C:\\project\\candidate\\package', version: '3.5.0-rust-test', npm: {path: 'C:\\node24\\node_modules\\npm\\bin\\npm-cli.js'}, exporters: {executables: [{path: 'C:\\project\\target\\debug\\deps\\catalog.exe'}, {path: 'C:\\project\\target\\debug\\deps\\partial.exe'}]}, packageFiles: [{path: 'package.json', bytes: 2, sha256: digest('{}')}, ...skill.files.map(row => ({path: 'payload/skill/' + row.path, bytes: row.bytes, sha256: row.sha256}))]};
   config.launcher = win32.join(config.prefix, 'node_modules/lycheedev/payload/skill/scripts/lycheedev.mjs'); config.tgz = win32.join(scratch, `lycheedev-${config.version}.tgz`); config.packageSHA256 = inventoryHash(config.packageFiles);
   const report = {schema: 'lycheedev.skill-data-usage.v2', state: 'passed_selected_data_workflow', goContract: workflow.goContract, skillTree: 'b9e162ace7abe7ea4a2feecef822283767eb1210', completeSkillAcceptance: false, config, checks: CHECKS.map(caseId => ({caseId, state: 'passed'})), pendingTasks: pendingDataTasks(workflow), fixtures: {}, seeded: {}, workspaces: {}, queries: {}, keys: {}, proofs: {}, commands: [], completedTasks: [{taskId: 'g323-data-query', runtimeVerified: true, basis: 'actual_owned_npm_installed_skill_and_independent_full_capture_replay', captures: 16}]};
+  report.skillProof = {...dataSkillIdentity(skill), files: skill.files.map((row, index) => ({path: row.path,
+    archive: archiveBytes(evidence, `installed-skill-${index}.bin`, readFileSync(join(root, 'skills/lycheedev', row.path)))}))};
   const fixtures = {}, envelopes = {}; let serial = 0;
   function cap(raw, provenance, complete = true, dependencies) { const capture = {schema: 'lycheedev.capture.v1', id: '', blob: ref(raw), mediaType: provenance.kind === 'data-query-csv' ? 'text/csv; charset=utf-8' : 'application/json', provenance: {...provenance, operationId: ''}, complete, truncated: false, capturedAt: new Date(Date.UTC(2026, 9, 18, 0, 0, 0, serial++)).toISOString(), ...(dependencies ? {dependencies} : {})}; capture.id = 'CAP-' + digest(goJSON(captureCanonical(capture))); return capture; }
   function proof(id, result, captures, bodies, fixture, entry) {
@@ -144,6 +148,54 @@ function makeReport(t, originalRoot = 'C:\\project') {
 }
 
 test('Data fixed IN rows, unordered order and CSV bytes remain exact', () => { assert.equal(CSV.length, 76); assert.equal(digest(CSV), CSV_SHA256); assert.equal(CASES.length, 11); assert.equal(CHECKS.length, 26); assert.deepEqual(requestFor(CASES[1]).parameters, PARAMETERS); });
+test('candidate authenticates all25 source files separately from unchanged Go323 oracle', () => {
+  const contract = assertDataSkillDirectory(join(root, 'skills/lycheedev'));
+  assert.equal(contract.files.length, 25); assert.equal(skillTreeIdentity(contract.files), '5edd025cae923fb2235086f250862696db7a2483');
+  const original = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines/go3.2.3-skill.json')));
+  assert.equal(original.files.length, 23); assert.equal(skillTreeIdentity(original.files), 'b9e162ace7abe7ea4a2feecef822283767eb1210');
+  assert.equal(original.files.find(row => row.path === 'SKILL.md').sha256, 'cbde6b4bb2b598137cfe55c0556765b28890b036e406c1877700a05a33fb6957');
+  assert.equal(contract.files.find(row => row.path === 'SKILL.md').sha256, 'bc214e50a60897a4198fdbedf843e28aede60ef3937cbf9377b8187c81cbc1a8');
+  for (const row of original.files.filter(row => row.path.startsWith('references/data-') || row.path.startsWith('references/live-') || row.path === 'scripts/lycheedev.mjs')) assert.deepEqual(contract.files.find(current => current.path === row.path), row);
+});
+test('candidate rejects same-length tampering even with a forged matching SHA256', () => {
+  const row = loadDataSkillContract().files[0], raw = readFileSync(join(root, 'skills/lycheedev', row.path));
+  raw[0] ^= 1; assert.throws(() => assertDataSkillBytes(raw, row));
+  assert.throws(() => assertDataSkillBytes(raw, {...row, sha256: digest(raw)}), /Git blob/);
+});
+test('candidate inventory rejects missing extra duplicate and changed Skill files', () => {
+  const rows = loadDataSkillContract().files.map(({path, bytes, sha256}) => ({path: 'payload/skill/' + path, bytes, sha256}));
+  assertDataSkillInventory(rows);
+  for (const changed of [rows.slice(1), [...rows, {path: 'payload/skill/extra.md', bytes: 1, sha256: digest('x')}], [...rows, rows[0]], rows.map((row, index) => index ? row : {...row, sha256: '0'.repeat(64)})]) assert.throws(() => assertDataSkillInventory(changed));
+});
+test('candidate refuses unmodified Go Skill as the adapted packaged candidate', () => {
+  const go = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines/go3.2.3-skill.json')));
+  assert.throws(() => assertDataSkillInventory(go.files.map(({path, bytes, sha256}) => ({path: 'payload/skill/' + path, bytes, sha256}))));
+});
+test('replay authenticates archived Skill bytes independently of report-supplied hashes', t => {
+  const f = makeReport(t), row = f.report.skillProof.files[0], path = join(f.evidence, row.archive.file), raw = readFileSync(path);
+  raw[0] ^= 1; writeFileSync(path, raw); Object.assign(row.archive, ref(raw));
+  assert.throws(f.verify, /candidate Skill SHA256/);
+});
+test('replay cannot pass a self-consistent forged package inventory or omit Skill proof', t => {
+  const f = makeReport(t), config = f.report.config;
+  config.packageFiles.find(row => row.path === 'payload/skill/SKILL.md').sha256 = '0'.repeat(64);
+  const raw = Buffer.from(JSON.stringify(config.packageFiles)); writeFileSync(join(f.evidence, f.report.installedInventory.file), raw);
+  Object.assign(f.report.installedInventory, ref(raw)); config.packageSHA256 = inventoryHash(config.packageFiles);
+  assert.throws(f.verify, /independently fixed candidate/);
+  const other = makeReport(t); delete other.report.skillProof; assert.throws(other.verify);
+});
+test('replay binds full Skill archive ordering and distinct Go/candidate provenance', t => {
+  const f = makeReport(t); f.report.skillProof.files.pop(); assert.throws(f.verify, /full archived candidate Skill/);
+  const g = makeReport(t); g.report.config.skillIdentity.candidateTree = g.report.skillTree; assert.throws(g.verify);
+});
+test('separate runner uses sealed product cwd and retains unchanged sourceDigest checks', () => {
+  const owner = readFileSync(join(root, 'tests/rust-skill-usage/data-owned.mjs'), 'utf8');
+  assert.match(owner, /runnerRoot = resolve\(import\.meta\.dirname, '\.\.\/\.\.'\)/);
+  assert.match(owner, /sourceTree = sourceDigest\(root\)/); assert.match(owner, /artifact\.inputHashes\.sourceTree, sourceTree/);
+  assert.match(owner, /join\(runnerRoot, 'tests\/rust-skill-usage\/data-run\.mjs'\)/);
+  assert.match(owner, /\{cwd: root, env:/); assert.match(owner, /assert\.equal\(sourceDigest\(root\), sourceTree\)/);
+  assert.match(owner, /hashFile\(join\(runnerRoot, path\)\), expected/);
+});
 test('actual npm config parser accepts two independent empty scopes offline', t => {
   const scratch = temporary(t); writeFileSync(join(scratch, 'user.npmrc'), ''); writeFileSync(join(scratch, 'global.npmrc'), '');
   const cli = process.env.npm_execpath || '/usr/lib/node_modules/npm/bin/npm-cli.js';

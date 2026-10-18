@@ -185,3 +185,17 @@ original requirements. No pressure helper, general runner extension, new
 Windows FFI, mocked native pressure, game interaction or historical report
 promotion is included. Actual Windows packaged execution and Rust compilation
 must remain NOT_RUN until the single authorized queue runs these exact bytes.
+
+## Fixed runner with an unchanged sealed product
+
+The Data runner can execute from a different fixed runner checkout while its current working directory remains the clean product source witness. This is intended for runner-only repairs: never authenticate an older EXE against a newer product checkout.
+
+From the verified product checkout, use the absolute path of the selected runner entry:
+
+```text
+node <fixed-runner-root>/tools/rust-skill-usage.mjs --data <product-artifact.json> <product-candidate-report.json> <same-product-exporter-buildEvidence-receipt.json>
+```
+
+For the original0002 product, retain its already sealed artifact, candidate and exporter receipt. The runner still verifies their sourceDigest, complete package inventory, EXE, recipe and upstream identities. Shared build/identity/ownership tools must match the product witness byte-for-byte; runner inputs are separately hashed and recorded. Do not copy a later product's crate files into that witness. Each invocation gets a new owner and new fixtures; the original failed owner is unchanged.
+
+The installed Skill is authenticated against the complete reviewed Rust-candidate25-file tree in `baselines/rust-candidate-skill.json`, including Git-blob SHA and SHA256 for each file. The fixed Go23-file baseline remains independent:15 originals are unchanged,8 files contain documented engine/candidate adaptations,2 candidate references are added. Full installed and archived bytes, inventory and the unchanged command contract are checked; neither arbitrary candidate modifications nor merely self-consistent changed hashes are accepted. Node checker success does not substitute for actual installed CLI, OS-pressure or full Skill acceptance.

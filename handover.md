@@ -1,6 +1,12 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 05:23 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 05:25 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+
+### Skill runner精确候选身份修复（2026-10-18 05:25 UTC）
+
+Data后继`557553731d2d90802686aa4ef324c5632f021637`已保存，9新Rust测试NOT_RUN。独立Skill runner修复不改产品/Skill正文：完整25文件Rust candidate Git tree及每文件Git blob/SHA256独立钉住，固定Go23文件另保；完整差异确认15原文件未变（包含Data/Live/launcher）、8引擎/安装/候选验收文字适配、2候选边界reference。命令路径/变更性质/flags共84项合同与固定Go一致。安装和归档均核全bytes，拒缺件/增件/重复/修改及自洽伪造inventory，替代错误的第二层Go SKILL.md全字节要求。
+
+作者和独立审者各运行同两Node suites，均70/0/0，8新增反例包含身份与篡改边界；不累加为140个测试。六runner文件独审通过，Windows新实际流程仍NOT_RUN。正式runnerRoot与产品cwd分开，clean0002 witness仍须匹配原artifact/exporter/sourceDigest；六共享identity/owner工具逐字节相同，运行前后完整认证不放宽。可复用原0002已封存产物、在新owner/fresh fixture运行，不重建产品或修改原失败receipt。准确入口见tests/rust-skill-usage/data-README.md。
 
 ### 当前有限Data修复与0002真实Skill失败（2026-10-18 05:23 UTC）
 
