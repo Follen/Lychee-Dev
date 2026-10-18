@@ -1,6 +1,18 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 06:16 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 07:18 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+
+### 当前阶段：Stage1离线范围结束，Stage2开始（2026-10-18 07:18 UTC）
+
+固定产品 `63d47f29f6c9efe2511ada5969426a184eca1830`，sourceDigest `c3129a4b906142c92f4b048af363b501ff98fb3842b4bf80e10794bb4920da6e`。本轮已确认、可离线修复项均完成代码修复、非作者独立消费者复核和对应实际回归；以此有限范围结束Stage1，不声称所有环境/功能/性能验收完成。下方带时间的候选与失败段落为历史，不覆盖本当前结论。
+
+- [同SHA Delivery逐名覆盖](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6246851973)：互斥exact1+prepared8+slots反例2+其余journal8+非addon140，共159项，无重漏，全部成功回收；独立all-targets通过。原0caa及63d单次整lib的600000ms deadline失败保留，不能称单次完整159成功。测试期限/默认栈未变；release沿既有1800000ms。
+- [匹配产物](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6247021119)：首次一次release/assembly/fresh exporters成功；EXE45440000B，SHA256 `027baf4725da41b1a085eaf457050912a8f3a96972d334aef51d5a3bb5326e97`。三输入与原Emmy身份完整认证。
+- [真实已安装Data Skill](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6247021457)：42children全部exit0，26/26checks，38公开CLI含16次evidence verify，16CAP全验；真实npm pack/隔离安装、catalog ANALYZE/CSV、缺钥partial及同PIN换key恢复均过。42是调用数，不是42测试函数。含内部metadata共11新owner全部退役回收，无deadline；原aux标记照原报告保留。
+- `completeSkillAcceptance=false`：Live增量与真实OS Job压力拒绝/释放/恢复仍未验；logical headroom fixture不替代OS压力，压力不等于游戏验证。2个Windows file-symlink权限负例、不可达Unix-only测试有效性、真实CASC/key及原ignored等缺证分别保留。§11实机尾部原内容不变。性能至少70%改善目标仍未达到。
+- 原始日志/receipt/owner附件公开上传已获用户精确批准，根协调线程正在交付，尚无成功结果；本次只更新已公开结果摘要和链接，没有上传受阻附件，不能称最终附件交付完成。
+
+Stage2正式从测试价值和冗余开始，随后评估有意义覆盖：两名独立审者分别核Delivery真实159用例/重复durable fixture/互斥集合口径，以及不可达Unix-only、平台负例、Skill消费者和真实OS压力测试能力。先证明重复工作无独立价值才提出清理，保phase/恢复/unknown不重放/取消/预算边界；不凭名称相似删测试、不刷百分比、不扩大产品预算。当前为只读首轮，未产生新的测试通过结论；Stage3–5尚未开始。
 
 ### 0caa真实Delivery期限失败与测试fixture复用（2026-10-18 06:16 UTC）
 

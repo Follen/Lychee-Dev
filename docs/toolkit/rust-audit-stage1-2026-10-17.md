@@ -2,7 +2,15 @@
 
 Started 2026-10-17 21:40 UTC. Production baseline: `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3`; documentation baseline: `7753776964af6b84a0130e1afaf46bb65497dd8b`. Behavioral oracle: Go 3.2.3 `3766f9cacb52e93a803a626187e2a1d54a445468`.
 
-Three independent read-only reviews covered architecture/public consumers, Source/Data quality, and actual Skill workflows. Findings below distinguish source-confirmed defects from exact-tree Windows results. A code candidate is not a closed finding: each needs exact-tree offline verification, independent re-review, and another Stage 1 pass. Stage 2 has not started. Performance remains open and does not block this correctness audit.
+Three independent read-only reviews covered architecture/public consumers, Source/Data quality, and actual Skill workflows. Findings below distinguish source-confirmed defects from exact-tree Windows results. A code candidate is not a closed finding: each needs exact-tree offline verification, independent re-review, and another Stage 1 pass. At the initial review Stage 2 had not started; the current conclusion below supersedes that status. Performance remains open and does not block this correctness audit.
+
+## Current conclusion — 2026-10-18 07:18 UTC
+
+Stage1's confirmed offline-repairable scope is closed on production `63d47f29f6c9efe2511ada5969426a184eca1830`: repaired consumers were independently re-reviewed, corresponding regressions executed, and the matching installed Data Skill completed26/26 checks,42 successful children,38 public CLI calls including16 evidence verifications and16 verified captures. [Skill result](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6247021457). Delivery's same-SHA disjoint groups cover159 unique tests, not a successful single full-lib invocation; both old deadline failures remain. [Coverage](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6246851973).
+
+The matching release/assembly/exporters passed once;11 new owners including metadata retired/reaped. Historical candidate/NOT_RUN entries below retain their dates and are superseded only by their exact later evidence. No raw attachment is republished here; the user has approved final attachment delivery, but delivery success is still pending. `completeSkillAcceptance=false`: Live, real OS pressure/recovery, platform negatives, real external fixtures and manual checks remain explicitly unverified. Performance<=0.30 remains open. This is a scoped convergence conclusion, not a guarantee of no bugs or completion of all acceptance.
+
+Stage2 starts now: independently assess redundancy and test value before meaningful coverage, including repeated Delivery fixtures, unreachable Unix-only checks, actual platform negative coverage and safe real-pressure test capability. Preserve real semantic boundaries and all historical failures. No Stage2 code changes or runtime claims yet; Stage3–5 have not started.
 
 ## Runtime follow-up and test-only repair — 2026-10-18 06:16 UTC
 
