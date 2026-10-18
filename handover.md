@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 04:15 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 04:28 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
 
 ### 当前执行：正式五循环 Stage 1 已发现实际业务缺口
 
@@ -21,6 +21,14 @@
 - Skill 10独占文件使用partial批共享fixture工厂，真实npm安装launcher、HouseDecor IN/CSV及partial同pin恢复、16CAP完整验证/归档已接线。新独立Node62/62过（Data24+Source38）；实际Windows exporter/npm/Skill流程 NOT_RUN，压力与Live验收仍open，completeSkillAcceptance=false。
 
 云目录重置后，精确恢复部分须命中原SHA；重建部分重新独审/测试，不继承丢失版本旧结果。所有后继原文、前像和manifest均另存，已推生产及历史失败不重标。Stage1还需当前真实缺陷修复复验及下一轮独审；Stage2未开始，性能目标仍open。
+
+### cbff 实际前置进展与精确后继
+
+本机固定cbff：all-targets通过；[workspace33/0](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6245556704)含3个新canonical回归、[archive4/0](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6245553521)、[CLI init6/0](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6245562764)均已实际通过，对应旧时间格式/平台路径失败已取得后继实证，历史失败不重标。
+
+[Source真实结果](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6245595382)：lib667通过/4忽略，source_inspect集成13通过/2失败；另CLI inspect6/6已过。第一失败是小PNG缺原始缓存时，asset恢复把既有64MiB上限传入只准32MiB请求上限的source Git入口，在读取真实24字节前即报budget。后继新增asset专用入口，继续复用完整commit/tree/regular-file/SHA-1认证，保source32MiB与asset64MiB两原界限；新增2项真实帧/边界/取消回归及加强原恢复/腐坏测试，Rust NOT_RUN。第二失败是测试错误要求cold cachedIndex=false；既有Rust冷IO省略该键，暖才true。修测试核缺键、真实cold读/parse计数与warm零Git/parse计数，保完整coverage/capture；Go无这些Rust IO字段，不冒充Go协议要求。
+
+Source原owner已退役，native101/wrapper1、forced=true/knownAuxiliaryCleanup=false/deadline=false保留。Data/Node/Skill尚无该批终态，未构建新产物。DAT-6字符串独立小批已保存为`c9cd3e729c6b4b0b33eeac81a5adbcac1d8b9ccd`，8文件完整字节/blob核过；六新Rust待测，本机当前不追head。
 
 ### Stage 1 第二轮：固定 cbff 的独立消费者复核
 

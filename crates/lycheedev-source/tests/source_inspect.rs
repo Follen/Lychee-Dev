@@ -227,8 +227,24 @@ fn inspect_exact_document_symbol_routes_to_six_line_path_inspection_cold_and_war
         symbol.data["results"][0]["contentHash"],
         storage::sha256(raw)
     );
-    assert_eq!(symbol.coverage["io"]["cachedIndex"], false);
+    // Full-index cold IO has no cachedIndex field; its actual work counters
+    // prove the cold build instead of treating an absent field as false.
+    assert_eq!(symbol.coverage["io"].get("cachedIndex"), None);
+    assert_eq!(symbol.coverage["io"]["gitTreeProcesses"], 1);
+    assert_eq!(symbol.coverage["io"]["gitBlobProcesses"], 1);
+    assert_eq!(symbol.coverage["io"]["cachedFacts"], 0);
+    assert_eq!(symbol.coverage["io"]["parsedDocuments"], 1);
+    assert_eq!(symbol.coverage["io"]["readBytes"], raw.len());
     assert_eq!(path.coverage["io"]["cachedIndex"], true);
+    assert_eq!(path.coverage["io"]["gitTreeProcesses"], 0);
+    assert_eq!(path.coverage["io"]["gitBlobProcesses"], 0);
+    assert_eq!(path.coverage["io"]["cachedFacts"], 1);
+    assert_eq!(path.coverage["io"]["parsedDocuments"], 0);
+    assert!(path.coverage["io"]["indexBytesRead"].as_u64().unwrap() > 0);
+    for outcome in [&symbol, &path] {
+        assert_eq!(outcome.coverage["io"]["sourceDocumentsRead"], 1);
+        assert_eq!(outcome.coverage["io"]["sourceBytesRead"], raw.len());
+    }
     f.assert_capture(&symbol, "Main.lua");
     f.assert_capture(&path, "Main.lua");
 }
@@ -341,22 +357,26 @@ fn inspect_warm_document_authenticates_and_recovers_corrupt_or_missing_original_
 #[test]
 fn inspect_asset_missing_original_recovers_fixed_git_but_corruption_is_an_error() {
     let raw = png();
-    let f = Fixture::new(files(&[("Image.png", &raw)]));
-    let first = f.inspect("--symbol", "Image.png");
-    let original = evidence::blob_path(&f.home, &storage::sha256(&raw)).unwrap();
-    fs::remove_file(&original).unwrap();
-    assert_eq!(
-        f.inspect("--target-path", "Image.png").data["results"],
-        first.data["results"]
-    );
-    assert_eq!(fs::read(&original).unwrap(), raw);
-    fs::write(&original, vec![1; raw.len()]).unwrap();
-    assert_eq!(
-        dispatch(&f.invoke("source inspect", &[("--symbol", "Image.png")]))
-            .unwrap_err()
-            .code,
-        "vault.blob_integrity"
-    );
+    for name in ["Image.png", "Assets/quo\"te ÜBER.png"] {
+        let f = Fixture::new(files(&[(name, &raw)]));
+        let first = f.inspect("--symbol", name);
+        let original = evidence::blob_path(&f.home, &storage::sha256(&raw)).unwrap();
+        fs::remove_file(&original).unwrap();
+        let recovered = f.inspect("--target-path", name);
+        assert_eq!(recovered.data["results"], first.data["results"]);
+        assert_eq!(fs::read(&original).unwrap(), raw);
+        f.assert_capture(&first, name);
+        f.assert_capture(&recovered, name);
+        let corrupt = vec![1; raw.len()];
+        fs::write(&original, &corrupt).unwrap();
+        assert_eq!(
+            dispatch(&f.invoke("source inspect", &[("--symbol", name)]))
+                .unwrap_err()
+                .code,
+            "vault.blob_integrity"
+        );
+        assert_eq!(fs::read(&original).unwrap(), corrupt);
+    }
 }
 #[test]
 fn inspect_raw_selector_admission_precedes_pin_and_index_access() {

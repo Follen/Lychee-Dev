@@ -123,7 +123,8 @@ fn asset_local(
     )?;
     if cached.is_none() {
         let path = asset["path"].as_str().unwrap_or("");
-        let (raw, _) = git::blob_with_control(&index.home, pin, path, assets::MAX_BYTES, control)?;
+        let (raw, _) =
+            git::asset_blob_with_control(&index.home, pin, path, assets::MAX_BYTES, control)?;
         if asset["bytes"].as_u64() != Some(raw.len() as u64) || storage::sha256(&raw) != digest {
             return Err(ToolkitError::new(
                 "codebase.asset_content_mismatch",

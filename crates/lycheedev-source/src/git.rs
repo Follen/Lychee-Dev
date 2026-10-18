@@ -783,7 +783,7 @@ fn verify_file_controlled(
     Ok(())
 }
 pub fn blob(home: &Path, pin: &SourcePin, path: &str, max: usize) -> Result<(Vec<u8>, String)> {
-    blob_controlled(home, pin, path, max, None)
+    blob_controlled(home, pin, path, max, MAX_SOURCE_BYTES, None)
 }
 pub fn blob_with_control(
     home: &Path,
@@ -793,13 +793,27 @@ pub fn blob_with_control(
     control: &lycheedev_core::control::OperationControl,
 ) -> Result<(Vec<u8>, String)> {
     control.check()?;
-    blob_controlled(home, pin, path, max, Some(control))
+    blob_controlled(home, pin, path, max, MAX_SOURCE_BYTES, Some(control))
+}
+/// Asset originals have the existing 64 MiB archive bound, independently of
+/// the 32 MiB document-analysis bound. Both routes authenticate the same pinned
+/// commit/tree chain and regular-file leaf before exposing any bytes.
+pub(crate) fn asset_blob_with_control(
+    home: &Path,
+    pin: &SourcePin,
+    path: &str,
+    max: usize,
+    control: &OperationControl,
+) -> Result<(Vec<u8>, String)> {
+    control.check()?;
+    blob_controlled(home, pin, path, max, crate::assets::MAX_BYTES, Some(control))
 }
 fn blob_controlled(
     home: &Path,
     pin: &SourcePin,
     path: &str,
     max: usize,
+    maximum: usize,
     control: Option<&lycheedev_core::control::OperationControl>,
 ) -> Result<(Vec<u8>, String)> {
     validate_pin(pin)?;
@@ -815,7 +829,7 @@ fn blob_controlled(
     // framed Git SHA-1 AND each tree edge, retaining regular-file admission.
     // Resolving commit:path as a blob alone would accept a symlink's bytes.
     let components: Vec<_> = path.split('/').collect();
-    if components.len() > 64 || max > MAX_SOURCE_BYTES {
+    if components.len() > 64 || max > maximum {
         return Err(ToolkitError::new(
             "codebase.source_budget",
             "Source path/decode budget exceeded",
@@ -989,6 +1003,134 @@ fn take_batch_object(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn asset_recovery_budget_keeps_document_requests_paths_and_control_bounded() {
+        let home = Path::new("unused-asset-budget-home");
+        let pin = SourcePin {
+            repository: "elvui".into(),
+            product: "main".into(),
+            requested_ref: "fixture".into(),
+            exact_commit: "a".repeat(40),
+            parser_revision: PARSER.into(),
+        };
+        let control = OperationControl::default();
+        // These are request-limit checks before any Git access, independently
+        // of the size of the object that might exist at the pinned path.
+        for maximum in [MAX_SOURCE_BYTES + 1, crate::assets::MAX_BYTES] {
+            assert_eq!(
+                blob(home, &pin, "Image.png", maximum).unwrap_err().code,
+                "codebase.source_budget"
+            );
+            assert_eq!(
+                blob_with_control(home, &pin, "Image.png", maximum, &control)
+                    .unwrap_err()
+                    .code,
+                "codebase.source_budget"
+            );
+        }
+        assert_eq!(
+            asset_blob_with_control(
+                home,
+                &pin,
+                "Image.png",
+                crate::assets::MAX_BYTES + 1,
+                &control,
+            )
+            .unwrap_err()
+            .code,
+            "codebase.source_budget"
+        );
+        for path in ["../Image.png", "Assets\\Image.png", "Assets/Image.png\n"] {
+            assert_eq!(
+                asset_blob_with_control(home, &pin, path, crate::assets::MAX_BYTES, &control)
+                    .unwrap_err()
+                    .code,
+                "codebase.invalid_span"
+            );
+        }
+        let deep = format!("{}Image.png", "dir/".repeat(64));
+        assert_eq!(
+            asset_blob_with_control(home, &pin, &deep, crate::assets::MAX_BYTES, &control)
+                .unwrap_err()
+                .code,
+            "codebase.source_budget"
+        );
+        for (control, code) in [
+            (
+                OperationControl::uncancelable(std::time::Instant::now()),
+                "command.deadline",
+            ),
+            (
+                OperationControl::new(
+                    std::time::Instant::now() + Duration::from_secs(60),
+                    std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+                ),
+                "command.cancelled",
+            ),
+        ] {
+            assert_eq!(
+                asset_blob_with_control(home, &pin, "../Image.png", usize::MAX, &control)
+                    .unwrap_err()
+                    .code,
+                code
+            );
+        }
+    }
+
+    #[test]
+    fn asset_recovery_frame_authenticates_above_source_limit_and_rejects_oversize() {
+        // The production decoder sees actual bytes above 32 MiB. The same
+        // frame remains forbidden to document callers, while the existing
+        // asset bound admits it with the full Git SHA-1 and framing checks.
+        let size = MAX_SOURCE_BYTES + 1;
+        let raw = vec![0xa5; size];
+        let mut hash = Sha1::new();
+        hash.update(format!("blob {size}\0"));
+        hash.update(&raw);
+        let object = format!("{:x}", hash.finalize());
+        let mut frame = format!("{object} blob {size}\n").into_bytes();
+        let start = frame.len();
+        frame.extend_from_slice(&raw);
+        frame.push(b'\n');
+        drop(raw);
+        let mut at = 0;
+        assert_eq!(
+            take_batch_object(&frame, &mut at, &object, "blob", MAX_SOURCE_BYTES)
+                .unwrap_err()
+                .code,
+            "codebase.source_budget"
+        );
+        assert_eq!(at, 0);
+        let actual =
+            take_batch_object(&frame, &mut at, &object, "blob", crate::assets::MAX_BYTES)
+                .unwrap();
+        assert_eq!(actual, frame[start..start + size]);
+        assert_eq!(at, frame.len());
+        drop(actual);
+        frame[start + size - 1] ^= 1;
+        assert_eq!(
+            take_batch_object(&frame, &mut 0, &object, "blob", crate::assets::MAX_BYTES)
+                .unwrap_err()
+                .code,
+            "codebase.source_integrity"
+        );
+        drop(frame);
+        let oversized = format!("{object} blob {}\n", crate::assets::MAX_BYTES + 1);
+        // A declared oversized frame is refused before its body is needed.
+        assert_eq!(
+            take_batch_object(
+                oversized.as_bytes(),
+                &mut 0,
+                &object,
+                "blob",
+                crate::assets::MAX_BYTES,
+            )
+            .unwrap_err()
+            .code,
+            "codebase.source_budget"
+        );
+    }
+
     #[test]
     fn actual_batch_transport_matches_immutable_reader_and_rejects_identity_change() {
         let home = Path::new(env!("CARGO_MANIFEST_DIR"))
