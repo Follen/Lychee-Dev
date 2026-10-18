@@ -166,6 +166,14 @@ impl<'a> Scope<'a> {
     ) -> Result<()> {
         self.with_session(pin, |reader| reader.read_batches(pin, ids, callback))
     }
+    pub fn read_table_batches(
+        &mut self,
+        pin: &DataPin,
+        ids: &[u32],
+        callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
+    ) -> Result<()> {
+        self.with_session(pin, |reader| reader.read_table_batches(pin, ids, callback))
+    }
     /// The caller borrows the complete immutable body through capture/output.
     /// Session retains its descriptor and checks close before this method returns.
     pub fn with_verified_file<R>(
@@ -192,7 +200,8 @@ impl<'a> Scope<'a> {
         result: Result<T>,
         after_close: &mut dyn FnMut() -> Result<()>,
     ) -> Result<T> {
-        self.admitted.finish_after_metadata_close(result, after_close)
+        self.admitted
+            .finish_after_metadata_close(result, after_close)
     }
 }
 
@@ -204,6 +213,12 @@ pub(crate) trait FileScope {
     fn check_pin(&self, pin: &DataPin) -> Result<()>;
     fn resolve_pin(&self) -> Result<lycheedev_core::selection::PinnedSet>;
     fn read_batches(
+        &mut self,
+        pin: &DataPin,
+        ids: &[u32],
+        callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
+    ) -> Result<()>;
+    fn read_table_batches(
         &mut self,
         pin: &DataPin,
         ids: &[u32],
@@ -230,6 +245,14 @@ impl FileScope for Scope<'_> {
         callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
     ) -> Result<()> {
         Scope::read_batches(self, p, ids, callback)
+    }
+    fn read_table_batches(
+        &mut self,
+        p: &DataPin,
+        ids: &[u32],
+        callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
+    ) -> Result<()> {
+        Scope::read_table_batches(self, p, ids, callback)
     }
 }
 pub(crate) struct SessionScope<'a, 'scope> {
@@ -327,6 +350,33 @@ impl FileScope for SessionScope<'_, '_> {
                     .collect(),
             )
         })
+    }
+    fn read_table_batches(
+        &mut self,
+        pin: &DataPin,
+        ids: &[u32],
+        callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
+    ) -> Result<()> {
+        self.check_pin(pin)?;
+        let budget = self.budget;
+        self.prepare_reader()?
+            .read_table_batches(ids, &mut |files| {
+                budget
+                    .safety_only()
+                    .charge(Cost::metadata(files.len() * size_of::<File>() + 256))?;
+                callback(
+                    files
+                        .into_iter()
+                        .map(|file| {
+                            let (body, reading) = file.into_parts();
+                            File {
+                                bytes: FileBytes::remote(body),
+                                reading,
+                            }
+                        })
+                        .collect(),
+                )
+            })
     }
 }
 

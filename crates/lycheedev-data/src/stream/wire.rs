@@ -6,13 +6,19 @@ use lycheedev_core::{Outcome, ToolkitError, selection::PinnedSet};
 use serde_json::{Value, json};
 
 fn proof(value: &TableProof) -> Value {
-    json!({"contentVerified":true,"keySource":value.key_source,"name":value.requested_name,"identity":value.identity,"layoutHash":value.layout_hash,"definitionSHA256":value.definition_sha256,"fileDataID":value.identity.db2_file_data_id,"contentKey":value.content_key,"logicalRows":value.logical_rows})
+    let mut proof = json!({"contentVerified":value.content_verified,"keySource":value.key_source,"name":value.requested_name,"identity":value.identity,"layoutHash":value.layout_hash,"definitionSHA256":value.definition_sha256,"fileDataID":value.identity.db2_file_data_id,"contentKey":value.content_key,"logicalRows":value.logical_rows});
+    if !value.content_verified {
+        proof["partialContent"] = value.partial_content.clone();
+        proof["missing"] = value.missing.clone();
+        proof["unavailablePartitions"] = value.unavailable_partitions.clone();
+    }
+    proof
 }
 fn begin(value: &StreamBegin) -> Value {
     json!({"tables":[proof(&value.proof)],"snapshot":value.snapshot,"source":value.source,"table":value.proof.identity.name,"identity":value.proof.identity,"layoutHash":value.proof.layout_hash,"fields":value.projection.fields(),"filter":value.filter,"limit":value.limit.get()})
 }
 fn end(value: WalkSummary) -> Value {
-    json!({"partial":false,"partialReasons":null,"count":value.count,"complete":value.complete(),"truncated":value.truncated,"truncationReason":value.truncation_reason()})
+    json!({"partial":value.partial,"partialReasons":if value.partial { json!(["encrypted_sections_unavailable"]) } else { Value::Null },"count":value.count,"complete":value.complete(),"truncated":value.truncated,"truncationReason":value.truncation_reason()})
 }
 pub fn event(value: StreamEvent<'_>) -> Value {
     match value {
@@ -29,7 +35,7 @@ pub fn event(value: StreamEvent<'_>) -> Value {
 pub fn into_outcome(summary: StreamSummary) -> Outcome {
     let begin = summary.begin;
     let walk = summary.walk;
-    let data = json!({"resources":summary.resources,"memoryBudget":summary.memory_budget,"snapshot":begin.snapshot,"pin":summary.pin,"source":begin.source,"tables":[proof(&begin.proof)],"relations":[],"complete":walk.complete(),"truncated":walk.truncated,"truncationReason":walk.truncation_reason(),"partial":false,"partialReasons":null,"table":begin.proof.identity.name,"mode":"stream","limit":begin.limit.get(),"fields":begin.projection.fields(),"filter":begin.filter,"count":walk.count,"resourceAccounting":{"wholeQueryAccountingComplete":false,"used":summary.resource_usage}});
+    let data = json!({"resources":summary.resources,"memoryBudget":summary.memory_budget,"snapshot":begin.snapshot,"pin":summary.pin,"source":begin.source,"tables":[proof(&begin.proof)],"relations":[],"complete":walk.complete(),"truncated":walk.truncated,"truncationReason":walk.truncation_reason(),"partial":walk.partial,"partialReasons":if walk.partial { json!(["encrypted_sections_unavailable"]) } else { Value::Null },"table":begin.proof.identity.name,"mode":"stream","limit":begin.limit.get(),"fields":begin.projection.fields(),"filter":begin.filter,"count":walk.count,"resourceAccounting":{"wholeQueryAccountingComplete":false,"used":summary.resource_usage}});
     let mut outcome = Outcome::new(data);
     outcome.complete = walk.complete();
     outcome.provenance = summary.captures;

@@ -3244,7 +3244,7 @@ mod tests {
         let mut out = Output::default();
         let mut writer = StreamWriter { out: &mut out, yielded: false };
         writer.emit(StreamEvent::Record(StreamRecord { index: 0, record_id: 7, row: &row })).unwrap();
-        writer.emit(StreamEvent::End(WalkSummary { count: 1, truncated: false })).unwrap();
+        writer.emit(StreamEvent::End(WalkSummary { partial: false, count: 1, truncated: false })).unwrap();
         assert!(writer.yielded);
         assert_eq!(out.flushes, 2);
         let text = String::from_utf8(out.bytes).unwrap();
@@ -3270,7 +3270,7 @@ mod tests {
         }
         let mut out = FlushFailure { writes: 0 };
         let mut writer = StreamWriter { out: &mut out, yielded: false };
-        assert_eq!(writer.emit(StreamEvent::End(WalkSummary { count: 0, truncated: false })).unwrap_err().exit_code, 5);
+        assert_eq!(writer.emit(StreamEvent::End(WalkSummary { partial: false, count: 0, truncated: false })).unwrap_err().exit_code, 5);
         assert!(writer.yielded);
         assert!(out.writes > 0);
         let mut out = Closed;

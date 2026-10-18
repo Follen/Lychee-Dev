@@ -144,6 +144,14 @@ pub(crate) fn dispatch_after_read(
     inv: &Invocation,
     after_read: &mut impl FnMut() -> Result<()>,
 ) -> Result<Outcome> {
+    dispatch_finishing(inv, after_read, |scope, result| scope.finish(result))
+}
+// Tests may observe the real consuming finish without replacing IO or capture.
+pub(crate) fn dispatch_finishing(
+    inv: &Invocation,
+    after_read: &mut impl FnMut() -> Result<()>,
+    finish: impl for<'a> FnOnce(crate::remote::provider::Scope<'a>, Result<Outcome>) -> Result<Outcome>,
+) -> Result<Outcome> {
     if matches!(
         inv.command.as_str(),
         "data item get"
@@ -157,7 +165,7 @@ pub(crate) fn dispatch_after_read(
             | "data creature model"
             | "data encounter get"
     ) {
-        return catalog::dispatch(inv, after_read);
+        return catalog::dispatch(inv, after_read, finish);
     }
     inv.control.check()?;
     let summon = match inv.command.as_str() {
@@ -185,6 +193,7 @@ pub(crate) fn dispatch_after_read(
     // Navigation admits both sources before resolving the pin. Keep this owner
     // through decoding, source revalidation, capture, and checked teardown.
     let mut scope = crate::remote::provider::OpenedScope::open(inv, &budget)?.admit()?;
+    let mut committed = Vec::new();
     let result = (|| {
         let pin = scope.resolve_pin()?;
         let data = pin
@@ -204,8 +213,8 @@ pub(crate) fn dispatch_after_read(
                 &prepared.file.bytes,
                 &prepared.definition,
                 Default::default(),
-                &Default::default(),
-                &[],
+                &prepared.availability.skipped,
+                &prepared.availability.ranges,
                 budget.clone(),
             )?;
             let field = prepared
@@ -239,8 +248,13 @@ pub(crate) fn dispatch_after_read(
                 .data
                 .as_ref()
                 .expect("prepare checked fixed DataPin");
-            let proof = json!({"contentVerified":true,"keySource":prepared.file.reading["keySource"],"name":prepared.bundle.identity.name,"identity":prepared.bundle.identity,"layoutHash":format!("{:08X}",prepared.layout.layout_hash),"definitionSHA256":prepared.definition.sha256,"fileDataID":prepared.bundle.identity.db2_file_data_id,"contentKey":prepared.file.reading["entry"]["contentKey"],"logicalRows":view.logical_count()});
-            let context = json!({"resources":budget.logical_snapshot()?,"memoryBudget":budget.memory_snapshot()?,"snapshot":prepared.pin.id,"pin":data,"source":prepared.file.reading["source"],"tables":[proof],"relations":effects.relations,"complete":!partial&&!effects.truncated,"truncated":effects.truncated,"truncationReason":if effects.truncated{"row_budget"}else{"none"},"partial":partial,"partialReasons":if partial{json!(["table_unavailable"])}else{Value::Null}});
+            let mut proof = json!({"contentVerified":prepared.file.reading["contentVerified"],"keySource":prepared.file.reading["keySource"],"name":prepared.bundle.identity.name,"identity":prepared.bundle.identity,"layoutHash":format!("{:08X}",prepared.layout.layout_hash),"definitionSHA256":prepared.definition.sha256,"fileDataID":prepared.bundle.identity.db2_file_data_id,"contentKey":prepared.file.reading["entry"]["contentKey"],"logicalRows":view.logical_count()});
+            if partial {
+                proof["partialContent"] = prepared.file.reading["partialContent"].clone();
+                proof["missing"] = prepared.file.reading["missing"].clone();
+                proof["unavailablePartitions"] = json!(prepared.availability.partitions);
+            }
+            let context = json!({"resources":budget.logical_snapshot()?,"memoryBudget":budget.memory_snapshot()?,"snapshot":prepared.pin.id,"pin":data,"source":prepared.file.reading["source"],"tables":[proof],"relations":effects.relations,"complete":!partial&&!effects.truncated,"truncated":effects.truncated,"truncationReason":if effects.truncated{"row_budget"}else{"none"},"partial":partial,"partialReasons":if partial{json!(["encrypted_sections_unavailable"])}else{Value::Null}});
             result
                 .as_object_mut()
                 .unwrap()
@@ -264,6 +278,8 @@ pub(crate) fn dispatch_after_read(
                 )
             })?;
             let verb = if summon { "summons" } else { "auras" };
+            // Admit the small retained identity before publication.
+            capture::admit_committed_identity(&budget)?;
             let capture = evidence::commit_capture_budgeted(
                 &inv.home,
                 evidence::CaptureInput {
@@ -277,6 +293,12 @@ pub(crate) fn dispatch_after_read(
                 &inv.control,
                 budget.as_ref(),
             )?;
+            committed.push(
+                capture["id"]
+                    .as_str()
+                    .expect("committed query capture identity")
+                    .to_owned(),
+            );
             let mut outcome = Outcome::new(result);
             outcome.complete = !partial && !effects.truncated;
             outcome.selection = serde_json::to_value(prepared.pin)?;
@@ -292,7 +314,7 @@ pub(crate) fn dispatch_after_read(
             execute(&mut scope)
         }
     })();
-    scope.finish(result)
+    finish(scope, result).map_err(|error| capture::query_committed_error(error, &committed, false))
 }
 
 #[cfg(test)]
@@ -405,3 +427,6 @@ mod tests {
         assert!(effects.truncated);
     }
 }
+
+#[cfg(test)]
+mod partial_tests;

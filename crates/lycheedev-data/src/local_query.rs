@@ -1,4 +1,5 @@
-//! Local pinned CLI adapters. Every successful file is fully CKey checked;
+//! Local pinned CLI adapters. Raw files are fully CKey checked; tables may
+//! explicitly retain authenticated missing-key spans with partial provenance.
 //! Encoding claims cover authenticated framing and requested pages only.
 use crate::{
     blte::{self, ByteSource},
@@ -45,16 +46,34 @@ pub(crate) struct VerifiedFile {
 }
 #[derive(Clone, Copy, PartialEq)]
 enum ReadMode {
-    Materialized,
+    Materialized(blte::DecodePolicy),
     Verified,
 }
+impl ReadMode {
+    fn policy(self) -> blte::DecodePolicy {
+        match self {
+            Self::Materialized(policy) => policy,
+            Self::Verified => blte::DecodePolicy::Strict,
+        }
+    }
+}
 enum SelectedContent {
-    Bytes(Vec<u8>),
+    Bytes(blte::Content),
     Blob(evidence::VerifiedBlob),
 }
 struct ResolvedFile {
     content: SelectedContent,
     reading: Value,
+}
+pub(crate) fn report_partial(reading: &mut Value, missing: &[blte::Missing]) -> Result<()> {
+    if !missing.is_empty() {
+        reading["contentVerified"] = json!(false);
+        reading["verification"]["contentWholeDecodedCKey"] = json!(false);
+        reading["partialContent"] = reading["content"].take();
+        reading["content"] = json!({"sha256":"", "bytes":0});
+        reading["missing"] = serde_json::to_value(missing)?;
+    }
+    Ok(())
 }
 fn locale(language: &str) -> Result<u32> {
     match language {
@@ -149,12 +168,38 @@ pub(crate) fn read_file_batches_budgeted(
     budget: &Arc<Budget>,
     callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
 ) -> Result<()> {
+    read_materialized_batches(inv, pin, ids, budget, blte::DecodePolicy::Strict, callback)
+}
+pub(crate) fn read_table_batches_budgeted(
+    inv: &Invocation,
+    pin: &selection::DataPin,
+    ids: &[u32],
+    budget: &Arc<Budget>,
+    callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
+) -> Result<()> {
+    read_materialized_batches(
+        inv,
+        pin,
+        ids,
+        budget,
+        blte::DecodePolicy::TableAllowMissing,
+        callback,
+    )
+}
+fn read_materialized_batches(
+    inv: &Invocation,
+    pin: &selection::DataPin,
+    ids: &[u32],
+    budget: &Arc<Budget>,
+    policy: blte::DecodePolicy,
+    callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
+) -> Result<()> {
     read_batches(
         inv,
         pin,
         ids,
         budget,
-        ReadMode::Materialized,
+        ReadMode::Materialized(policy),
         &mut |files| {
             let files = files
                 .into_iter()
@@ -272,7 +317,7 @@ fn read_batches(
             // needs a fresh key set. The content decoder may already have
             // loaded public keys; a missing key after that or a failed provider
             // must retain its original error without replaying the whole chain.
-            keys.ensure_public()?;
+            mode.policy().load_public(&mut keys)?;
             read_files_with_keys(inv, pin, ids, deadline, &mut keys, budget, mode, callback)
         }
         result => result,
@@ -461,7 +506,7 @@ fn read_files_with_keys(
                     // keeps its independent allowance. Pass the selected bound separately
                     // so a 512 MiB allowance does not alter CASC allocation limits.
                     let (payload_key, content, content_blob) = match mode {
-                        ReadMode::Materialized => {
+                        ReadMode::Materialized(policy) => {
                             let (encoding_key, content) = decoded_cache::read_content_controlled(
                                 &inv.home,
                                 &target.common_root,
@@ -473,6 +518,7 @@ fn read_files_with_keys(
                                 budget,
                                 Some(max),
                                 &inv.control,
+                                policy,
                             )?;
                             let blob = evidence::publish_blob_bounded_with_check(
                                 &inv.home,
@@ -481,7 +527,7 @@ fn read_files_with_keys(
                                 &inv.control,
                                 || budget.check(),
                             )?;
-                            (encoding_key, SelectedContent::Bytes(content.bytes), blob)
+                            (encoding_key, SelectedContent::Bytes(content), blob)
                         }
                         ReadMode::Verified => {
                             let (encoding_key, blob) = decoded_cache::read_verified_content(
@@ -521,6 +567,9 @@ fn read_files_with_keys(
                         bytes => Some(bytes),
                     };
                     let mut reading = json!({"contentVerified":true,"source":"installation","pin":pin,"catalogSHA256":target.metadata.catalog_sha256,"buildConfiguration":build_blob,"cdnConfiguration":cdn_blob,"encodingKey":target.metadata.encoding_key,"root":root_blob,"entry":entry,"payloadEncodingKey":payload_key,"content":content_blob,"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"encodingIO":reader.io_stats()});
+                    if let Some(SelectedContent::Bytes(bytes)) = &content {
+                        report_partial(&mut reading, &bytes.missing)?;
+                    }
                     if !variant.is_empty() {
                         reading["contentVariant"] = json!(variant);
                     }
@@ -970,20 +1019,11 @@ pub(crate) fn sql_inner_budgeted(
         .map_err(|error| sql_committed_error(error, &committed, output_published))
 }
 fn sql_committed_error(
-    mut error: lycheedev_core::ToolkitError,
+    error: lycheedev_core::ToolkitError,
     committed: &[String],
     output_published: bool,
 ) -> lycheedev_core::ToolkitError {
-    if !committed.is_empty() {
-        let primary = error.clone();
-        error.details = json!({"schema":"lycheedev.query-committed-error.v1", "primary":primary,
-            "completedCaptures":committed, "outputPublished":output_published});
-        error
-            .message
-            .push_str("\nquery captures already committed: ");
-        error.message.push_str(&committed.join(", "));
-    }
-    error
+    capture::query_committed_error(error, committed, output_published)
 }
 pub fn asset(inv: &Invocation) -> Result<Outcome> {
     asset_after_finish(inv, &mut |result| result)
@@ -1271,3 +1311,6 @@ mod retry_tests {
         ).unwrap();
     }
 }
+
+#[cfg(test)]
+mod partial_tests;

@@ -61,6 +61,10 @@ fn budget(control: &OperationControl) -> Arc<Budget> {
 fn begin() -> StreamBegin {
     StreamBegin {
         proof: TableProof {
+            content_verified: true,
+            partial_content: Value::Null,
+            missing: Value::Null,
+            unavailable_partitions: Value::Null,
             key_source: json!("fixture"),
             requested_name: "Sample".into(),
             identity: TableIdentity {
@@ -272,6 +276,7 @@ fn native_row_executor_projects_one_row_and_filters_before_limit_probe() {
         assert_eq!(
             summary,
             WalkSummary {
+                partial: false,
                 count: 1,
                 truncated
             }
@@ -383,6 +388,7 @@ fn typed_wire_keeps_exact_record_bytes_numeric_types_empty_maps_and_escaping() {
 fn typed_wire_manifest_and_summary_share_exact_fixed_shapes() {
     let begin = begin();
     let walk = WalkSummary {
+        partial: false,
         count: 1,
         truncated: true,
     };

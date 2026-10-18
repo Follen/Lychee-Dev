@@ -1,4 +1,4 @@
-//! Complete materialized content for scoped metadata/DB2 consumers. This lower
+//! Policy-selected materialized content for scoped metadata/DB2 consumers. This lower
 //! boundary authenticates persistent decoded aliases and keeps allocation owners
 //! through the scoped consumer. It never labels partial bytes complete.
 use super::*;
@@ -40,6 +40,7 @@ pub(super) fn materialize<'a>(
     record: &EncodingRecord,
     maximum: usize,
     metadata: bool,
+    policy: blte::DecodePolicy,
     limits: casc::Limits,
     keys: &mut keys::Context,
     stats: &mut Stats,
@@ -104,7 +105,8 @@ pub(super) fn materialize<'a>(
                         expected,
                         keys.keys(),
                         &safety,
-                    )?;
+                    )?
+                    .with_policy(policy.with_keys(keys));
                     let mut buffer = [0; 65536];
                     loop {
                         files.store.check()?;
@@ -119,7 +121,8 @@ pub(super) fn materialize<'a>(
                         raw.extend_from_slice(&buffer[..n]);
                     }
                     // StreamingReader observes framing/chunk digests, exact EOF,
-                    // output length and the complete supplied CKey before zero.
+                    // output length, and whole CKey when no key span is missing.
+                    let missing = reader.take_missing();
                     drop(reader);
                     drop(scratch);
                     if raw.len() != decoded {
@@ -129,13 +132,13 @@ pub(super) fn materialize<'a>(
                     Ok((
                         blte::Content {
                             bytes: raw,
-                            missing: Vec::new(),
+                            missing,
                         },
                         allocation,
                     ))
                 };
             stats.content_decode_calls += 1;
-            let (content, allocation) = match decode(keys) {
+            let (content, mut allocation) = match decode(keys) {
                 Ok(value) => value,
                 Err(error)
                     if error.code == "container.key_unavailable"
@@ -143,13 +146,28 @@ pub(super) fn materialize<'a>(
                         && keys.source.kind == "public"
                         && keys.source.state != "loaded" =>
                 {
-                    keys.ensure_public()?;
+                    policy.load_public(keys)?;
                     decode(keys)?
                 }
                 Err(error) => return Err(error),
             };
             stats.extracted_bytes += content.bytes.len() as u64;
             let blob = files.store.publish_blob(&content.bytes, maximum.max(1))?;
+            if !content.complete() {
+                // These exact placeholders never establish a full-CKey alias.
+                budget.charge_split(Cost::retained(decoded), Cost::default())?;
+                allocation.grow(256)?;
+                let content = Arc::new(SharedContent {
+                    value: content,
+                    _allocation: allocation.into_owned(budget)?,
+                });
+                files.store.check()?;
+                return Ok(Materialized {
+                    content,
+                    blob,
+                    encoding_key: key.clone(),
+                });
+            }
             // The published complete body becomes the Go verified-byte owner.
             // Drop temporary decode storage before admitting the authenticated
             // readback; neither permanent work nor network charges are refunded.

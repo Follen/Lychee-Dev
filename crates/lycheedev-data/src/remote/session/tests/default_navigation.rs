@@ -402,3 +402,26 @@ fn default_remote_navigation_admits_before_pin_and_rejects_conflicting_installat
 }
 
 mod adaptive;
+
+#[test]
+fn default_remote_db2_navigation_and_encounter_keep_committed_captures_after_final_control_and_close()
+ {
+    use crate::capture::committed_tests;
+    let tables: Vec<_> = committed_tests::tables()
+        .into_iter()
+        .map(|table| Table {
+            name: table.name,
+            id: table.id,
+            hash: table.hash,
+            layout: table.layout,
+            raw: table.raw,
+            dbd: table.dbd,
+        })
+        .collect();
+    let fixture = NavFixture::new(&tables);
+    for (inv, count) in committed_tests::invocations(&fixture.invocation("", &[])) {
+        committed_tests::finalization_cases(&inv, count);
+    }
+    assert!(fixture.source.backend.calls.lock().unwrap().is_empty());
+    fixture.close();
+}

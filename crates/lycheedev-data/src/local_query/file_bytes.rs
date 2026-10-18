@@ -4,24 +4,39 @@ use crate::remote::session::SharedContent;
 use std::{ops::Deref, sync::Arc};
 pub struct FileBytes(Body);
 enum Body {
-    Local(Vec<u8>),
+    Local(crate::blte::Content),
     Remote(Arc<SharedContent>),
 }
 impl FileBytes {
     pub(crate) fn remote(content: Arc<SharedContent>) -> Self {
         Self(Body::Remote(content))
     }
+    pub(crate) fn missing(&self) -> &[crate::blte::Missing] {
+        match &self.0 {
+            Body::Local(content) => &content.missing,
+            Body::Remote(content) => &content.missing,
+        }
+    }
 }
 impl From<Vec<u8>> for FileBytes {
     fn from(bytes: Vec<u8>) -> Self {
-        Self(Body::Local(bytes))
+        crate::blte::Content {
+            bytes,
+            missing: Vec::new(),
+        }
+        .into()
+    }
+}
+impl From<crate::blte::Content> for FileBytes {
+    fn from(content: crate::blte::Content) -> Self {
+        Self(Body::Local(content))
     }
 }
 impl Deref for FileBytes {
     type Target = [u8];
     fn deref(&self) -> &[u8] {
         match &self.0 {
-            Body::Local(bytes) => bytes,
+            Body::Local(content) => &content.bytes,
             Body::Remote(content) => &content.bytes,
         }
     }

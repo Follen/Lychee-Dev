@@ -40,64 +40,7 @@ fn gap(code: &str, detail: impl Into<String>) -> Value {
 fn incomplete(gaps: Vec<Value>) -> Value {
     json!({"rules_version":FLOW_RULES,"findings":{"rows":[],"has_more":false},"guarded":[],"gaps":gaps,"complete":false,"input_complete":false,"analysis_complete":false,"output_complete":true,"truncated":false})
 }
-fn resolve(from: &str, target: &str) -> Option<String> {
-    let target = target.replace('\\', "/");
-    if target.starts_with('/') || target.contains(':') {
-        return None;
-    }
-    let mut parts = from
-        .rsplit_once('/')
-        .map(|(parent, _)| parent.split('/').map(str::to_owned).collect::<Vec<_>>())
-        .unwrap_or_default();
-    for part in target.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop()?;
-            }
-            _ => parts.push(part.into()),
-        }
-    }
-    Some(parts.join("/"))
-}
-fn walk_load(
-    path: &str,
-    loads: &BTreeMap<String, Vec<&index::LoadFact>>,
-    active: &mut BTreeSet<String>,
-    order: &mut Vec<String>,
-    issues: &mut Vec<Value>,
-) {
-    if order.len() >= 256 {
-        if !issues.iter().any(|issue| issue["code"] == "load_budget") {
-            issues.push(gap(
-                "load_budget",
-                "TOC/XML load occurrence budget exceeded",
-            ));
-        }
-        return;
-    }
-    if path.to_ascii_lowercase().ends_with(".lua") {
-        order.push(path.into());
-        return;
-    }
-    if !active.insert(path.into()) {
-        issues.push(gap("load_cycle", path));
-        return;
-    }
-    if let Some(edges) = loads.get(path) {
-        for edge in edges {
-            if let Some(target) = resolve(path, &edge.target) {
-                walk_load(&target, loads, active, order, issues)
-            } else {
-                issues.push(gap(
-                    "load_path_unavailable",
-                    format!("{path}:{} {}", edge.line, edge.target),
-                ));
-            }
-        }
-    }
-    active.remove(path);
-}
+mod load_plan;
 
 /// Collect immutable pin bytes and actual compiler results before worker admission.
 pub fn context_flow(
@@ -127,46 +70,12 @@ pub fn context_flow(
             "flow requires a Lua declaration; API metadata remains rule evidence",
         )]));
     }
-    let mut loads = BTreeMap::<String, Vec<&index::LoadFact>>::new();
-    for fact in facts {
-        loads.entry(fact.path.clone()).or_default().push(fact);
-    }
-    let mut candidates = Vec::new();
-    for doc in reading
-        .index
-        .documents
-        .iter()
-        .filter(|doc| doc.path.to_ascii_lowercase().ends_with(".toc"))
-    {
-        inv.control.check()?;
-        let mut order = Vec::new();
-        let mut issues = Vec::new();
-        walk_load(
-            &doc.path,
-            &loads,
-            &mut BTreeSet::new(),
-            &mut order,
-            &mut issues,
-        );
-        if order.iter().any(|loaded| loaded == path) {
-            candidates.push((doc.path.clone(), order, issues));
-        }
-    }
-    let mut input_gaps = Vec::new();
-    let mut ordered = if candidates.len() == 1 && candidates[0].2.is_empty() {
-        Some(candidates[0].1.clone())
-    } else {
-        input_gaps.push(gap(
-            "load_order_unknown",
-            if candidates.is_empty() {
-                "no complete TOC/XML load plan contains the selected file"
-            } else {
-                "multiple or incomplete TOC/XML plans contain the selected file"
-            },
-        ));
-        None
-    };
-    let load_evidence = json!({"basis":"pinned_toc_xml_literals","runtimeExecution":false,"candidates":candidates.iter().map(|(path,order,issues)|json!({"manifest":path,"ordered":order,"issues":issues})).collect::<Vec<_>>()});
+    let load_plan::Selection { mut ordered, mut input_gaps, load_evidence } = load_plan::collect(
+        path,
+        reading.index.documents.iter().map(|doc| doc.path.as_str()),
+        facts,
+        &inv.control,
+    )?;
     let mut names = ordered.clone().unwrap_or_else(|| vec![path.into()]);
     names.sort();
     names.dedup();

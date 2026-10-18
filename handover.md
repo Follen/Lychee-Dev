@@ -1,20 +1,26 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 02:37 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 03:19 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
 
 ### 当前执行：正式五循环 Stage 1 已发现实际业务缺口
 
-2026-10-17 21:40 UTC 已以生产b4d/文档775启动三个独立读审。首轮及修复复审确认18项：Delivery取消/缺席目标/原release恢复/receipt顺序，Probe分页/原子性与身份/有界读取，Core prune取消与字节账/init模式及归档全链control，Data准入/预算诊断/SQL位置/缺钥partial，Source inspect/flow有界性/Unicode路径。独立作者正分范围修复；代码候选仍需正式离线验证和独立复审，当前实现不能称全量完成，尚未进入Stage2。完整状态与验收入口见[Stage1记录](docs/toolkit/rust-audit-stage1-2026-10-17.md)。性能目标仍open，下一性能算法暂不抢已确认业务缺陷修复。
+2026-10-17 21:40 UTC 已以生产b4d/文档775启动三个独立读审。首轮确认18项，重建复审及实测另确认2项（capture提交后错误事实保留、init时间规范化），当前共20项：Delivery取消/缺席目标/原release恢复/receipt顺序，Probe分页/原子性与身份/有界读取，Core prune取消与字节账/init模式及归档全链control，Data准入/预算诊断/SQL位置/缺钥partial，Source inspect/flow有界性/Unicode路径。独立作者正分范围修复；代码候选仍需正式离线验证和独立复审，当前实现不能称全量完成，尚未进入Stage2。完整状态与验收入口见[Stage1记录](docs/toolkit/rust-audit-stage1-2026-10-17.md)。性能目标仍open，下一性能算法暂不抢已确认业务缺陷修复。
 
-### Stage 1 首个有限修复批：待实际验证
+### Stage 1 当前保存、实测与后继候选
 
-首批已保存为 `6a93a859d80efd6d757fcaa8b9e85be6285a734d`，39 文件逐字读回与批准版本一致；64 个新增 Rust 测试尚未运行，唯一 Windows 队列已接收固定 SHA。等待批准期间云工作目录丢失，首批由完整参数存储与原 Probe 修正片段恢复，整体参数 SHA 精确匹配 `a659c61d4a2c78fa3e5f7a4272fe5f6493982efb9a7fb7b556892c267a84887a` 后才上传。
+首批 `6a93a859d80efd6d757fcaa8b9e85be6285a734d` 的 39 文件已逐字读回；Windows all-targets 通过，正式组共 **567 pass / 2 fail / 0 ignored**，64 新入口为 62 pass / 2 fail，全部实际执行。Delivery128、Core cache59、Live probes12、Data navigate16/resource41/relational302/syntax3、CLI syntax1、BLTE1 全过；CLI init4过2败。[失败原证据](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6244909468)。11 owners 全退役、build leases 空、无 deadline；CLI wrapper 的 forced/unknown auxiliary 事实保留，不能冒称所有收尾无强制。211文件证据本机CRC/SHA过，公开附件最终交付尚未在此确认。
 
-后继 Source/partial/Core/Delivery 与 Skill 尚未提交；能按旧 SHA 认证的文件作为原件恢复，其余重新实现并重新独审/测试。原 Node 与静态审查结果只绑定原字节，不转给新重建版本。既有已推生产和历史测试证据没有改变。
+两项 init 失败分别是 mixed-slash fixture 与平台规范路径的字符串差异，以及新建 identity 的固定9位小数和 Go兼容重开后的去尾零表示差异。后者表示同一时刻，未证明 identity 重建或数据损坏。独立后继将新建时间规范化，保原clock/ID推导与历史文件字节；CLI测试保完整identity、文件bytes与重复恢复断言。3新增确定性/真实初始化/历史marker回归及修正的CLI测试均 NOT_RUN。
 
-Delivery 23、Probe 11、Core/CLI init 15、Data 准入 7、诊断 8 个新增测试入口已写，诊断共享 21 条原始输入；Rust 全部 NOT_RUN。独立复审修正了安装锁内 recovery 重扫/显式关闭、compound busy 错误保留，以及 SQL quoted identifier 的空 AST span，当前用原 token 定位。Node 两个既有文件 10/10，静态检查通过。首批不混 Source 与缺钥 partial 的在写内容。
+第二批 `e9749e9d851cfefa9a02b4b8865aa5cbba3f80ef` 已保存批准的10文件，逐blob及完整字节读回一致：InstallationGuard取得失败和默认remove显式checked-close，以及init/archive原control全链。新增12+8项 Rust测试 NOT_RUN，其中1项Unix-only。唯一Windows队列已接收，本文不假定其结果。
 
-Core/Delivery 后继代码已恢复：InstallationGuard 取得失败的 maintenance close 与默认 addon remove 两个显式关闭路径，四文件与原 SHA 完全相同；init/archive 全链 control 四文件为新重建 revision，重新独审。新增 12+8 个 Rust 测试全部 NOT_RUN（其中一个 Unix-only），不能以静态复核或入口检查视为执行闭合。正式离线队列由主协调统一安排，先 alltargets 与受影响完整组，再实际 Skill 两项任务。Stage 1 还需修复复审及下一轮检查。
+本次后继完整候选均经新独审，尚待提交后精确树验证：
+- Source 9生产/测试文件和3 reader文件：真实inspect、Unicode/asset metadata v15、flow显式有界栈。5文件原SHA恢复、4文件重建；37 Rust入口 NOT_RUN。配套reader新Node247/247过，不能替代实际v15产物验收。
+- Data partial 30文件：local/CDN缺钥部分表贯穿DB2/SQL/导航/stream/CSV/capture，原始assets/Root仍严格。基础lookup保missing-row语义，仅直接DB2 ID边界升级key_unavailable；公钥离线的完整alias回退真实partial decode。10新Rust测试 NOT_RUN。
+- 独立Data capture 8文件增量：DB2、导航、catalog/encounter在提交后cleanup/control失败保留准确capture ID及原错误；仅Rust bookkeeping用safety-only预算。6新测试 NOT_RUN；close测试是实际close后的诊断注入，encounter取消在第二次commit前检查，不夸大故障覆盖。
+- Skill 10独占文件使用partial批共享fixture工厂，真实npm安装launcher、HouseDecor IN/CSV及partial同pin恢复、16CAP完整验证/归档已接线。新独立Node62/62过（Data24+Source38）；实际Windows exporter/npm/Skill流程 NOT_RUN，压力与Live验收仍open，completeSkillAcceptance=false。
+
+云目录重置后，精确恢复部分须命中原SHA；重建部分重新独审/测试，不继承丢失版本旧结果。所有后继原文、前像和manifest均另存，已推生产及历史失败不重标。Stage1还需当前真实缺陷修复复验及下一轮独审；Stage2未开始，性能目标仍open。
 
 ### 最新实测：b4d认证Facts所有权转移完整六场景
 

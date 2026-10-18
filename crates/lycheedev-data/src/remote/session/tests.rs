@@ -737,3 +737,5 @@ mod verified;
 mod default_asset_export;
 
 mod prepared;
+
+mod partial_tables;

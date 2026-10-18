@@ -100,10 +100,18 @@ fn standalone_init_plan_is_read_only_for_absent_empty_and_opaque_legacy_roots() 
     fs::create_dir(&legacy).unwrap();
     fs::write(legacy.join("state"), [0xff, 0, 0x80]).unwrap();
     let before = snapshot(&f.0);
-    for root in [&absent, &empty, &legacy] {
+    let normalized_absent = f.0.join("missing-parent").join("home");
+    for (root, expected_root) in [
+        (&absent, &normalized_absent),
+        (&empty, &empty),
+        (&legacy, &legacy),
+    ] {
         let result = f.run(root, "--plan").unwrap();
         assert_eq!(result.data["state"], "planned");
-        assert_eq!(result.data["root"], serde_json::to_value(root).unwrap());
+        assert_eq!(
+            result.data["root"],
+            serde_json::to_value(expected_root).unwrap()
+        );
         assert!(!archive::journal_path(root).unwrap().exists());
         assert_eq!(snapshot(&f.0), before);
     }
@@ -149,7 +157,16 @@ fn init_resume_recovers_planned_moved_and_created_checkpoints_without_reimport()
             fs::rename(&root, &archive).unwrap();
         }
         let previous_identity = if already_created {
-            Some(workspace::initialize(&root).unwrap())
+            let mut identity = workspace::initialize(&root).unwrap();
+            // Go's time.Time JSON reader canonicalizes insignificant fractional
+            // zeros. Resume must preserve the persisted identity and its bytes,
+            // while returning the same complete decoded identity as a read.
+            identity["createdAt"] = json!("2026-10-18T02:51:12.135524800Z");
+            storage::atomic_json(&root.join("workspace.json"), &identity).unwrap();
+            let decoded = workspace::open(&root).unwrap();
+            assert_eq!(decoded["workspaceId"], identity["workspaceId"]);
+            assert_eq!(decoded["createdAt"], "2026-10-18T02:51:12.1355248Z");
+            Some((decoded, fs::read(root.join("workspace.json")).unwrap()))
         } else {
             None
         };
@@ -166,8 +183,12 @@ fn init_resume_recovers_planned_moved_and_created_checkpoints_without_reimport()
             storage::read_json::<Value>(&journal).unwrap(),
             result["plan"]
         );
-        if let Some(identity) = previous_identity {
+        if let Some((identity, original_bytes)) = previous_identity {
             assert_eq!(result["summary"]["identity"], identity);
+            assert_eq!(
+                fs::read(root.join("workspace.json")).unwrap(),
+                original_bytes
+            );
         }
         let before_repeat = snapshot(&f.0);
         assert_eq!(f.run(&root, "--resume").unwrap().data, result);

@@ -4,7 +4,7 @@ use super::{
     MAX_RELATIONS, Navigator, Row, admit_row, capture_bytes, check_source, integer, text, unsigned,
 };
 use crate::{
-    db2, fault,
+    capture, db2, fault,
     resource::{Budget, Cost},
 };
 use lycheedev_core::{
@@ -281,6 +281,15 @@ impl Navigator<'_> {
 pub(super) fn dispatch(
     inv: &Invocation,
     after_read: &mut impl FnMut() -> Result<()>,
+    finish: impl for<'a> FnOnce(crate::remote::provider::Scope<'a>, Result<Outcome>) -> Result<Outcome>,
+) -> Result<Outcome> {
+    dispatch_capturing(inv, after_read, finish, &mut |_| Ok(()))
+}
+fn dispatch_capturing(
+    inv: &Invocation,
+    after_read: &mut impl FnMut() -> Result<()>,
+    finish: impl for<'a> FnOnce(crate::remote::provider::Scope<'a>, Result<Outcome>) -> Result<Outcome>,
+    after_capture: &mut impl FnMut(&Value) -> Result<()>,
 ) -> Result<Outcome> {
     let encounter = super::identifier(inv, "--journal-encounter-id", false)?;
     let depth = inv
@@ -301,6 +310,7 @@ pub(super) fn dispatch(
         inv.control.clone(),
     ));
     let mut scope = crate::remote::provider::OpenedScope::open(inv, &budget)?.admit()?;
+    let mut committed = Vec::new();
     let result = (|| {
         let pin = scope.resolve_pin()?;
         let data = pin
@@ -378,7 +388,28 @@ pub(super) fn dispatch(
                     inv.flag_bool("--cdn").then_some(&*reader),
                 )?;
                 let raw = capture_bytes(value, &budget)?;
-                captures.push(evidence::commit_capture_budgeted(&inv.home, CaptureInput { bytes: &raw, maximum_bytes: 16 << 20, media_type: "application/json", provenance: json!({"kind":kind,"locator":locator,"snapshot":pin.id,"dataBuild":pin.data.as_ref().expect("DataPin").full_build}), complete, truncated }, &inv.control, budget.as_ref())?);
+                capture::admit_committed_identity(&budget)?;
+                let capture = evidence::commit_capture_budgeted(
+                    &inv.home,
+                    CaptureInput {
+                        bytes: &raw,
+                        maximum_bytes: 16 << 20,
+                        media_type: "application/json",
+                        provenance: json!({"kind":kind,"locator":locator,"snapshot":pin.id,"dataBuild":pin.data.as_ref().expect("DataPin").full_build}),
+                        complete,
+                        truncated,
+                    },
+                    &inv.control,
+                    budget.as_ref(),
+                )?;
+                committed.push(
+                    capture["id"]
+                        .as_str()
+                        .expect("committed encounter capture identity")
+                        .to_owned(),
+                );
+                after_capture(&capture)?;
+                captures.push(capture);
             }
             let mut outcome = Outcome::new(result);
             outcome.complete = complete;
@@ -398,12 +429,99 @@ pub(super) fn dispatch(
             execute(&mut scope)
         }
     })();
-    scope.finish(result)
+    finish(scope, result).map_err(|error| capture::query_committed_error(error, &committed, false))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn encounter_keeps_first_capture_when_second_is_cancelled_and_final_close_fails() {
+        use crate::capture::committed_tests::{fixture::Fixture, tables};
+        use lycheedev_core::{
+            control::{OperationControl, TrackedCancellation},
+            metadata::Metadata,
+            storage,
+        };
+        let fx = Fixture::new(&tables());
+        let mut inv = fx.invocation("data encounter get", &[("--journal-encounter-id", "132")]);
+        let cancel = TrackedCancellation::new();
+        inv.control =
+            OperationControl::tracked(Instant::now() + Duration::from_secs(60), cancel.clone());
+        let close_error = fault(
+            "vault.sqlite",
+            4,
+            "fixture close after first encounter capture",
+        );
+        let mut observed = None;
+        let mut owner_error = None;
+        let mut calls = 0;
+        let error = dispatch_capturing(
+            &inv,
+            &mut || Ok(()),
+            |scope, result| {
+                assert_eq!(result.as_ref().unwrap_err().code, "command.cancelled");
+                let result =
+                    scope.finish_after_metadata_close(result, &mut || Err(close_error.clone()));
+                owner_error = Some(result.as_ref().unwrap_err().clone());
+                result
+            },
+            &mut |capture| {
+                calls += 1;
+                assert_eq!(
+                    calls, 1,
+                    "the second commit must not execute after cancellation"
+                );
+                observed = Some(capture.clone());
+                cancel.cancel();
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert_eq!(calls, 1);
+        let saved = observed.unwrap();
+        assert_eq!(saved["provenance"]["kind"], "encounter-get");
+        let id = saved["id"].as_str().unwrap();
+        assert_eq!(error.details["completedCaptures"], json!([id]));
+        assert_eq!(error.details["outputPublished"], false);
+        assert_eq!(
+            error.details["primary"],
+            serde_json::to_value(owner_error.unwrap()).unwrap()
+        );
+        assert_eq!(error.code, "command.cancelled");
+        let primary = &error.details["primary"];
+        assert_eq!(
+            primary["details"]["schema"],
+            "lycheedev.admitted-workspace-errors.v1"
+        );
+        assert_eq!(
+            primary["details"]["causes"][0],
+            serde_json::to_value(inv.control.check().unwrap_err()).unwrap()
+        );
+        assert_eq!(
+            primary["details"]["causes"][1],
+            serde_json::to_value(close_error).unwrap()
+        );
+        assert_eq!(primary["details"]["causes"].as_array().unwrap().len(), 2);
+        assert_eq!(evidence::read_capture(&fx.home, id).unwrap(), saved);
+        let raw = evidence::read_blob(&fx.home, &saved["blob"], 16 << 20).unwrap();
+        assert_eq!(storage::sha256(&raw), saved["blob"]["sha256"]);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&raw).unwrap()["journalEncounterID"],
+            132
+        );
+        let metadata = Metadata::open(&fx.home, false).unwrap();
+        assert_eq!(
+            metadata.list::<Value>("capture/", 100).unwrap(),
+            vec![saved]
+        );
+        metadata.close().unwrap();
+        inv.control = OperationControl::default();
+        let recovered = crate::navigate::dispatch(&inv).unwrap();
+        assert_eq!(recovered.provenance.len(), 2);
+        std::fs::remove_dir_all(fx.root).unwrap();
+    }
 
     #[test]
     fn relation_limit_preserves_first_truncation_and_partial_is_independent() {

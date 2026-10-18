@@ -37,7 +37,10 @@ impl serde_json::ser::Formatter for GoCaptureFormatter {
 }
 
 impl CaptureAccounting for Budget {
-    fn blob_stream_phase(&self, phase: lycheedev_core::evidence::BlobStreamPhase) -> impl Drop + '_ {
+    fn blob_stream_phase(
+        &self,
+        phase: lycheedev_core::evidence::BlobStreamPhase,
+    ) -> impl Drop + '_ {
         use crate::phase_profile::Phase;
         use lycheedev_core::evidence::BlobStreamPhase;
         self.phase(match phase {
@@ -302,3 +305,30 @@ mod tests {
         assert_eq!(json_size(&escaped, &cancelled).unwrap_err().exit_code, 7);
     }
 }
+
+// Retained recovery IDs are Rust-only publication bookkeeping, not Go usage.
+// Admission must succeed before the caller commits the corresponding capture.
+pub(crate) fn admit_committed_identity(budget: &Budget) -> Result<()> {
+    budget.safety_only().charge(Cost::retained(512))
+}
+
+// A successful commit remains an observable fact after any later failure.
+pub(crate) fn query_committed_error(
+    mut error: lycheedev_core::ToolkitError,
+    committed: &[String],
+    output_published: bool,
+) -> lycheedev_core::ToolkitError {
+    if !committed.is_empty() {
+        let primary = error.clone();
+        error.details = serde_json::json!({"schema":"lycheedev.query-committed-error.v1", "primary":primary,
+            "completedCaptures":committed, "outputPublished":output_published});
+        error
+            .message
+            .push_str("\nquery captures already committed: ");
+        error.message.push_str(&committed.join(", "));
+    }
+    error
+}
+
+#[cfg(test)]
+pub(crate) mod committed_tests;

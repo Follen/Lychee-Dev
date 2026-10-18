@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 //! Immutable source research; never evaluates indexed repository programs.
+mod assets;
 pub mod batch;
 pub mod catalog;
 pub mod closure;
@@ -12,6 +13,7 @@ pub mod facts;
 pub mod flow;
 pub mod git;
 pub mod index;
+mod inspect;
 mod lsp_frame;
 pub mod lua_tree;
 pub mod luac;
@@ -206,157 +208,183 @@ pub fn dispatch_with_services(
         "source inspect" | "source index" | "source query" => {
             use lycheedev_core::{evidence, selection};
             use serde_json::json;
-            let pin = selection::resolve_pinned(inv)?;
-            let source = pin.source.as_ref().ok_or_else(|| {
-                ToolkitError::new(
-                    "selection.source_missing",
-                    "Pinned selection has no source",
-                    3,
-                )
-            })?;
-            let mut out;
-            if inv.command == "source inspect" && inv.flag("--path").is_some() {
-                if inv.flag("--symbol").is_some() || inv.flag("--target-path").is_some() {
-                    return Err(ToolkitError::arguments(
-                        "source inspect requires exactly one selector",
-                    ));
-                }
-                let path = inv.required("--path")?;
-                let first = inv.usize_flag("--line", 1, 1, usize::MAX)?;
-                let count = inv.usize_flag("--count", 80, 1, 2000)?;
-                let (raw, _) = git::blob_with_control(
-                    &inv.home,
-                    source,
-                    path,
-                    git::MAX_SOURCE_BYTES,
-                    &inv.control,
-                )?;
-                let text = std::str::from_utf8(&raw).map_err(|_| {
-                    ToolkitError::new("codebase.source_integrity", "Source is not UTF-8", 4)
-                })?;
-                if raw.contains(&0) {
-                    return Err(ToolkitError::new(
-                        "codebase.source_integrity",
-                        "Source contains NUL",
-                        4,
-                    ));
-                }
-                let mut starts = if raw.is_empty() { Vec::new() } else { vec![0] };
-                for (i, b) in raw.iter().enumerate() {
-                    if *b == b'\n' && i + 1 < raw.len() {
-                        starts.push(i + 1);
+            // Go resolves an optional nearest project before route admission.
+            // With an explicit snapshot, raw selector admission precedes pin
+            // access. Whitespace counts; trim/bounds follow index readiness.
+            let has_path = inv.flag("--path").is_some_and(|value| !value.is_empty());
+            let project_pin = if inv.command == "source inspect" {
+                selection::resolve_optional_project(inv).map_err(|mut error| {
+                    if ["selection.project_missing", "selection.project_unlocked",
+                        "selection.project_format", "selection.project_conflict"]
+                        .contains(&error.code.as_str())
+                    {
+                        if !error.details.is_object() {
+                            error.details = if error.details.is_null() {
+                                json!({})
+                            } else {
+                                json!({"primaryDetails":error.details})
+                            };
+                        }
+                        error.details["stage"] = json!("selection");
                     }
-                }
-                if first > starts.len() {
-                    return Err(ToolkitError::new(
-                        "codebase.line_out_of_range",
-                        "Requested line exceeds source",
-                        2,
+                    error
+                })?
+            } else {
+                None
+            };
+            let project_context = project_pin.as_ref()
+                .map(|(project, pin)| json!({"project":project,"snapshot":pin.id}));
+            let result = (|| {
+                if inv.command == "source inspect"
+                    && (inv.flag("--snapshot").is_none_or(str::is_empty) && project_pin.is_none()
+                        || ["--path", "--symbol", "--target-path"]
+                            .iter()
+                            .filter(|flag| inv.flag(flag).is_some_and(|value| !value.is_empty()))
+                            .count() != 1)
+                {
+                    return Err(ToolkitError::arguments(
+                        "source sync requires --source/--product; source inspect requires --snapshot and exactly one of --path, --symbol, --target-path",
                     ));
                 }
-                let last = starts.len().min(first.saturating_add(count - 1));
-                let end = starts.get(last).copied().unwrap_or(raw.len());
-                let blob = evidence::publish_blob(&inv.home, &raw, git::MAX_SOURCE_BYTES)?;
-                let data = json!({"repository":source.repository,"commit":source.exact_commit,"path":path,"firstLine":first,"lastLine":last,"totalLines":starts.len(),"text":&text[starts[first-1]..end],"blob":blob});
-                out = Outcome::new(data);
-            } else {
-                let index = if inv.command == "source query" {
-                    query_store::load_with_control(
-                        &inv.home,
-                        source,
-                        inv.argument()?,
-                        inv.flag("--mode").unwrap_or(""),
-                        inv.flag("--topic").unwrap_or(""),
-                        &inv.control,
-                    )?
-                } else if let Some(symbol) = inv.flag("--symbol") {
-                    query_store::load_with_control(
-                        &inv.home,
-                        source,
-                        symbol,
-                        "precise",
-                        "",
-                        &inv.control,
-                    )?
-                } else {
-                    index::build_with_control(&inv.home, source, &inv.control)?
+                let (project, pin) = match project_pin {
+                    Some((project, pin)) => (Some(project), pin),
+                    None => (None, selection::resolve_pinned(inv)?),
                 };
-                let coverage = index.coverage();
-                let data = match inv.command.as_str() {
-                    "source index" => index.summary.clone(),
-                    "source query" => index.search_with_control(
+                let source = pin.source.as_ref().ok_or_else(|| {
+                    ToolkitError::new(
+                        "selection.source_missing",
+                        "Pinned selection has no source",
+                        3,
+                    )
+                })?;
+                let mut out;
+                if inv.command == "source inspect" && has_path {
+                    let path = inv.required("--path")?;
+                    let first = inv.usize_flag("--line", 1, 1, usize::MAX)?;
+                    let count = inv.usize_flag("--count", 80, 1, 2000)?;
+                    let (raw, _) = git::blob_with_control(
+                        &inv.home,
                         source,
-                        &pin.id,
-                        inv.argument()?,
-                        inv.flag("--mode").unwrap_or(""),
-                        inv.flag("--topic").unwrap_or(""),
-                        query_limit(inv)?,
-                        inv.flag("--cursor").unwrap_or(""),
+                        path,
+                        git::MAX_SOURCE_BYTES,
                         &inv.control,
-                    )?,
-                    _ => {
-                        if let Some(symbol) = inv.flag("--symbol") {
-                            if inv.flag("--target-path").is_some() {
-                                return Err(ToolkitError::arguments(
-                                    "source inspect selector conflict",
-                                ));
-                            }
-                            index.search_with_control(
-                                source,
-                                &pin.id,
-                                symbol,
-                                "precise",
-                                "",
-                                25,
-                                "",
-                                &inv.control,
-                            )?
-                        } else if let Some(path) = inv.flag("--target-path") {
-                            index.search_with_control(
-                                source,
-                                &pin.id,
-                                path,
-                                "precise",
-                                "asset",
-                                25,
-                                "",
-                                &inv.control,
-                            )?
-                        } else {
-                            return Err(ToolkitError::arguments(
-                                "source inspect requires a selector",
-                            ));
+                    )?;
+                    let text = std::str::from_utf8(&raw).map_err(|_| {
+                        ToolkitError::new("codebase.source_integrity", "Source is not UTF-8", 4)
+                    })?;
+                    if raw.contains(&0) {
+                        return Err(ToolkitError::new(
+                            "codebase.source_integrity",
+                            "Source contains NUL",
+                            4,
+                        ));
+                    }
+                    let mut starts = if raw.is_empty() { Vec::new() } else { vec![0] };
+                    for (i, b) in raw.iter().enumerate() {
+                        if *b == b'\n' && i + 1 < raw.len() {
+                            starts.push(i + 1);
                         }
                     }
-                };
-                out = Outcome::new(data);
-                out.coverage = if out.data.get("coverage").is_some() {
-                    out.data["coverage"].clone()
+                    if first > starts.len() {
+                        return Err(ToolkitError::new(
+                            "codebase.line_out_of_range",
+                            "Requested line exceeds source",
+                            2,
+                        ));
+                    }
+                    let last = starts.len().min(first.saturating_add(count - 1));
+                    let end = starts.get(last).copied().unwrap_or(raw.len());
+                    let blob = evidence::publish_blob(&inv.home, &raw, git::MAX_SOURCE_BYTES)?;
+                    let data = json!({"repository":source.repository,"commit":source.exact_commit,"path":path,"firstLine":first,"lastLine":last,"totalLines":starts.len(),"text":&text[starts[first-1]..end],"blob":blob});
+                    out = Outcome::new(data);
+                } else if inv.command == "source inspect" {
+                    out = Outcome::new(inspect::target_with_control(
+                        &inv.home,
+                        source,
+                        &pin.id,
+                        inv.flag("--symbol"),
+                        inv.flag("--target-path"),
+                        &inv.control,
+                    )?);
+                    out.coverage = out.data["coverage"].clone();
+                    out.complete = out.data["complete"] == true;
                 } else {
-                    coverage
+                    let index = if inv.command == "source query" {
+                        query_store::load_with_control(
+                            &inv.home,
+                            source,
+                            inv.argument()?,
+                            inv.flag("--mode").unwrap_or(""),
+                            inv.flag("--topic").unwrap_or(""),
+                            &inv.control,
+                        )?
+                    } else {
+                        index::build_with_control(&inv.home, source, &inv.control)?
+                    };
+                    let coverage = index.coverage();
+                    let data = if inv.command == "source index" {
+                        index.summary.clone()
+                    } else {
+                        index.search_with_control(
+                            source,
+                            &pin.id,
+                            inv.argument()?,
+                            inv.flag("--mode").unwrap_or(""),
+                            inv.flag("--topic").unwrap_or(""),
+                            query_limit(inv)?,
+                            inv.flag("--cursor").unwrap_or(""),
+                            &inv.control,
+                        )?
+                    };
+                    out = Outcome::new(data);
+                    out.coverage = if out.data.get("coverage").is_some() {
+                        out.data["coverage"].clone()
+                    } else {
+                        coverage
+                    };
+                    out.complete = out.data["complete"] == true;
+                }
+                let kind = if inv.command == "source inspect" {
+                    if has_path { "source-excerpt" } else { "source-inspect" }
+                } else {
+                    "source-query"
                 };
-                out.complete = out.data["complete"] == true;
-            }
-            let kind = if inv.command == "source inspect" {
-                "source-excerpt"
-            } else {
-                "source-query"
-            };
-            let capture = evidence::commit_capture_bounded(
-                &inv.home,
-                lycheedev_core::evidence::CaptureInput {
-                    bytes: &serde_json::to_vec(&out.data)?,
-                    maximum_bytes: lycheedev_core::evidence::DEFAULT_CAPTURE_BYTES,
-                    media_type: "application/json",
-                    provenance: json!({"kind":kind,"locator":inv.flag("--path").or(inv.positional.as_deref()).unwrap_or(&source.repository),"snapshot":pin.id,"sourceCommit":source.exact_commit}),
-                    complete: out.complete,
-                    truncated: out.data["truncated"] == true,
-                },
-                &inv.control,
-            )?;
-            out.provenance.push(capture);
-            out.selection = serde_json::to_value(pin)?;
-            return Ok(out);
+                let locator = inv.flag("--path").filter(|value| !value.is_empty())
+                    .or_else(|| inv.flag("--symbol").filter(|value| !value.is_empty()))
+                    .or(inv.flag("--target-path"))
+                    .or(inv.positional.as_deref()).unwrap_or(&source.repository);
+                let capture = evidence::commit_capture_bounded(
+                    &inv.home,
+                    lycheedev_core::evidence::CaptureInput {
+                        bytes: &serde_json::to_vec(&out.data)?,
+                        maximum_bytes: lycheedev_core::evidence::DEFAULT_CAPTURE_BYTES,
+                        media_type: "application/json",
+                        provenance: json!({"kind":kind,"locator":locator,"snapshot":pin.id,"sourceCommit":source.exact_commit}),
+                        complete: out.complete,
+                        truncated: out.data["truncated"] == true,
+                    },
+                    &inv.control,
+                )?;
+                out.provenance.push(capture);
+                out.selection = match project {
+                    Some(project) => json!({"project":project,"snapshot":pin.id}),
+                    None => serde_json::to_value(pin)?,
+                };
+                Ok(out)
+            })();
+            return result.map_err(|mut error: ToolkitError| {
+                if let Some(context) = project_context {
+                    if !error.details.is_object() {
+                        error.details = if error.details.is_null() {
+                            json!({})
+                        } else {
+                            json!({"primaryDetails":error.details})
+                        };
+                    }
+                    error.details["__commandContext"] = context;
+                }
+                error
+            });
         }
         _ => {}
     }

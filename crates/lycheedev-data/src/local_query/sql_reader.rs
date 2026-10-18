@@ -195,12 +195,7 @@ impl<'a> Reader<'a> {
             &self.inv.control,
             || self.budget.check(),
         )?;
-        let root = RootIndex::open(
-            Root(root),
-            root_limits(limits),
-            self.budget.clone(),
-            check,
-        )?;
+        let root = RootIndex::open(Root(root), root_limits(limits), self.budget.clone(), check)?;
         self.ready = Some(Ready {
             index,
             root,
@@ -212,7 +207,10 @@ impl<'a> Reader<'a> {
         Ok(())
     }
     pub fn read(&mut self, id: u32) -> Result<File> {
-        let file = self.read_selected(id, ReadMode::Materialized)?;
+        let file = self.read_selected(
+            id,
+            ReadMode::Materialized(blte::DecodePolicy::TableAllowMissing),
+        )?;
         match file.content {
             SelectedContent::Bytes(bytes) => Ok(File {
                 bytes: bytes.into(),
@@ -250,7 +248,8 @@ impl<'a> Reader<'a> {
                     }) =>
             {
                 // No Source or row has escaped this failed resolver call.
-                self.keys.as_mut().expect("retry keys").ensure_public()?;
+                mode.policy()
+                    .load_public(self.keys.as_mut().expect("retry keys"))?;
                 self.read_once(id, maximum, mode)
             }
             result => result,
@@ -302,7 +301,7 @@ impl<'a> Reader<'a> {
             ));
         }
         let (encoding_key, content, content_blob) = match mode {
-            ReadMode::Materialized => {
+            ReadMode::Materialized(policy) => {
                 let (key, content) = decoded_cache::read_content_in_session(
                     &self.inv.home,
                     self.casc.as_ref().expect("prepared CASC index source"),
@@ -314,6 +313,7 @@ impl<'a> Reader<'a> {
                     self.budget,
                     Some(maximum),
                     &self.inv.control,
+                    policy,
                 )?;
                 let blob = evidence::publish_blob_bounded_with_check(
                     &self.inv.home,
@@ -322,7 +322,7 @@ impl<'a> Reader<'a> {
                     &self.inv.control,
                     || self.budget.check(),
                 )?;
-                (key, SelectedContent::Bytes(content.bytes), blob)
+                (key, SelectedContent::Bytes(content), blob)
             }
             ReadMode::Verified => {
                 let (key, blob) = decoded_cache::read_verified_content_in_session(
@@ -352,6 +352,9 @@ impl<'a> Reader<'a> {
             )?;
             safety.charge(Cost::retained(size.saturating_mul(4).saturating_add(4096)))?;
             let mut reading = json!({"contentVerified":true,"source":"installation","pin":self.pin,"catalogSHA256":target.metadata.catalog_sha256,"buildConfiguration":ready.build_blob,"cdnConfiguration":ready.cdn_blob,"encodingKey":target.metadata.encoding_key,"root":ready.root_blob,"entry":entry,"payloadEncodingKey":encoding_key,"content":content_blob,"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"encodingIO":source.io_stats()});
+            if let SelectedContent::Bytes(bytes) = &content {
+                report_partial(&mut reading, &bytes.missing)?;
+            }
             if !variant.is_empty() {
                 reading["contentVariant"] = json!(variant);
             }
@@ -445,7 +448,10 @@ mod tests {
             bytes.extend_from_slice(&[7; 16]);
             bytes.extend_from_slice(&0u64.to_le_bytes());
         }
-        Root(blte::Content { bytes, missing: Vec::new() })
+        Root(blte::Content {
+            bytes,
+            missing: Vec::new(),
+        })
     }
 
     #[test]
@@ -455,11 +461,14 @@ mod tests {
         for count in [4096, 4097] {
             let control = OperationControl::default();
             let budget = Arc::new(Budget::controlled(
-                Cost::defaults(), control.deadline(), control.clone(),
+                Cost::defaults(),
+                control.deadline(),
+                control.clone(),
             ));
             let index = RootIndex::open(root_groups(count), limits, budget.clone(), || {
                 control.check()
-            }).unwrap();
+            })
+            .unwrap();
             let before = budget.logical_snapshot().unwrap();
             let actual = index.lookup(7, || control.check());
             if count == 4096 {
@@ -468,11 +477,17 @@ mod tests {
                 assert!(actual.iter().all(|record| record.file_data_id == 7));
             } else {
                 let error = actual.err().unwrap();
-                assert_eq!((error.code.as_str(), error.exit_code), ("records.metadata_limit", 3));
+                assert_eq!(
+                    (error.code.as_str(), error.exit_code),
+                    ("records.metadata_limit", 3)
+                );
             }
             let after = budget.logical_snapshot().unwrap();
             assert_eq!(after.retained_bytes, before.retained_bytes);
-            assert_eq!(budget.memory_snapshot().unwrap().peak_scratch_bytes, 4096 * 256);
+            assert_eq!(
+                budget.memory_snapshot().unwrap().peak_scratch_bytes,
+                4096 * 256
+            );
             assert_eq!(
                 budget.remaining_retained().unwrap(),
                 Cost::defaults().retained_bytes - after.retained_bytes,

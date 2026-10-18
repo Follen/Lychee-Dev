@@ -630,3 +630,97 @@ impl Fixture {
         assert_eq!(verified.data["verified"], true);
     }
 }
+
+/// Two real WDC3 sections: readable ID 1/42 and encrypted ID 2/99.
+/// Ciphertext is the independent fixed Go323 Salsa20 fixture vector.
+pub fn encrypted_sections(id: u32) -> Table {
+    let mut spec = table(
+        "Sample",
+        id,
+        &[("ID", "uint"), ("Value", "uint")],
+        &[vec![Cell::U(1), Cell::U(42)]],
+    );
+    let mut one = spec.raw;
+    one.pop();
+    put(&mut one, 16, 0);
+    put(&mut one, 88, 0);
+    let start = u32::from_le_bytes(one[80..84].try_into().unwrap()) + 40;
+    let mut raw = one[..112].to_vec();
+    raw.extend([0; 40]);
+    raw.extend_from_slice(&one[112..]);
+    raw.extend(2u32.to_le_bytes());
+    raw.extend(99u32.to_le_bytes());
+    for (at, value) in [
+        (4, 2),
+        (32, 2),
+        (68, 2),
+        (80, start),
+        (120, start + 8),
+        (124, 1),
+    ] {
+        put(&mut raw, at, value);
+    }
+    raw[112..120].copy_from_slice(&0x1234567890abcdefu64.to_le_bytes());
+    spec.raw = raw;
+    spec
+}
+pub fn framed_chunks(chunks: &[(&[u8], usize)]) -> (String, Vec<u8>) {
+    let mut raw = b"BLTE".to_vec();
+    raw.extend(((12 + chunks.len() * 24) as u32).to_be_bytes());
+    raw.extend([15, 0, 0, chunks.len() as u8]);
+    for (chunk, decoded) in chunks {
+        raw.extend((chunk.len() as u32).to_be_bytes());
+        raw.extend((*decoded as u32).to_be_bytes());
+        raw.extend(md5(chunk));
+    }
+    let key = casc::hex(&md5(&raw));
+    for (chunk, _) in chunks {
+        raw.extend(*chunk);
+    }
+    (key, raw)
+}
+pub fn encrypted_frame(raw: &[u8]) -> (String, Vec<u8>) {
+    let end = raw.len() - 8;
+    let first = [b"N".as_slice(), &raw[..end]].concat();
+    let second = [
+        0x45, 8, 0xef, 0xcd, 0xab, 0x90, 0x78, 0x56, 0x34, 0x12, 4, 0x11, 0x22, 0x33, 0x44, b'S',
+        0xc6, 0xab, 0x63, 0xb7, 0xda, 0xa0, 0x5c, 0xd3, 0x83,
+    ];
+    framed_chunks(&[(&first, end), (&second, 8)])
+}
+impl Fixture {
+    pub fn with_encoded_table(table: Table, encoded: Vec<u8>) -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.tmp/rust-partial-table-fixtures")
+            .join(format!(
+                "{}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+        Self::with_encoded_table_at(root, table, encoded)
+    }
+    pub fn with_encoded_table_at(root: PathBuf, table: Table, encoded: Vec<u8>) -> Self {
+        match fs::symlink_metadata(&root) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Ok(_) => panic!("partial fixture root already exists: {}", root.display()),
+            Err(error) => panic!("partial fixture root cannot be checked: {error}"),
+        }
+        let header = u32::from_be_bytes(encoded[4..8].try_into().unwrap()) as usize;
+        let selected = Object {
+            ckey: md5(&table.raw),
+            ekey: md5(if header == 0 {
+                &encoded
+            } else {
+                &encoded[..header]
+            }),
+            decoded: table.raw.len(),
+            raw: encoded,
+        };
+        Self::at_objects(root, &[table], "zhCN", 0x40, Some(selected))
+    }
+}

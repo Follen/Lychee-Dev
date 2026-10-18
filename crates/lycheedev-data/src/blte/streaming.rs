@@ -36,6 +36,10 @@ pub(crate) struct Reader<'a> {
     incremental: bool,
     failed: Option<lycheedev_core::ToolkitError>,
     finished: bool,
+    framed: bool,
+    allow_missing: bool,
+    chunks_authenticated: bool,
+    missing: Vec<Missing>,
 }
 impl<'a> Reader<'a> {
     pub(crate) fn new(
@@ -147,6 +151,7 @@ impl<'a> Reader<'a> {
             }
         }
         let chunks = parts.len();
+        let chunks_authenticated = parts.iter().all(|part| part.digest != [0; 16]);
         Ok(Self {
             source,
             decoder: Decoder {
@@ -171,6 +176,10 @@ impl<'a> Reader<'a> {
             incremental: false,
             failed: None,
             finished: false,
+            framed: header != 0,
+            allow_missing: false,
+            chunks_authenticated,
+            missing: Vec::new(),
         })
     }
 
@@ -201,6 +210,15 @@ impl<'a> Reader<'a> {
         Ok(reader)
     }
 
+    /// Lazy public-key resolution precedes the table-only missing fallback.
+    pub(crate) fn with_policy(mut self, policy: DecodePolicy) -> Self {
+        self.allow_missing = policy == DecodePolicy::TableAllowMissing;
+        self
+    }
+    pub(crate) fn take_missing(&mut self) -> Vec<Missing> {
+        std::mem::take(&mut self.missing)
+    }
+
     fn advance(&mut self) -> Result<()> {
         self.current = Vec::new();
         self.zlib = None;
@@ -213,7 +231,8 @@ impl<'a> Reader<'a> {
                 return malformed();
             }
             if self.emitted != self.expected_bytes
-                || self.hash.clone().finalize().as_slice() != self.expected_key
+                || (self.missing.is_empty()
+                    && self.hash.clone().finalize().as_slice() != self.expected_key)
             {
                 return Err(fault(
                     "records.content_integrity",
@@ -259,10 +278,50 @@ impl<'a> Reader<'a> {
             self.decoder.check()?;
             self.zlib = Some(ZlibChunk::new(encoded, part.decoded, budget)?);
         } else {
-            // Preserve every nested/encrypted/non-Z decoder and its admission.
+            // Nested decoding stays strict: Go323 marks the entire outer chunk
+            // unavailable when any nested key is missing, including its metadata.
             let content =
-                self.decoder
-                    .unpack(&encoded, 1, part.decoded, self.next, Some(part.decoded))?;
+                match self
+                    .decoder
+                    .unpack(&encoded, 1, part.decoded, self.next, Some(part.decoded))
+                {
+                    Ok(content) => content,
+                    Err(error)
+                        if self.allow_missing
+                            && error.code == "container.key_unavailable"
+                            && error.details["missingKey"] == true
+                            && error.details.as_object().is_some_and(|details| {
+                                details
+                                    .keys()
+                                    .all(|key| matches!(key.as_str(), "missingKey" | "keyId"))
+                            }) =>
+                    {
+                        self.decoder.check()?;
+                        if !self.framed {
+                            return Err(fault(
+                                "container.unsupported_encoding",
+                                3,
+                                "Headerless BLTE cannot expose available ranges",
+                            ));
+                        }
+                        // Missing bytes remove the whole-CKey fallback proof.
+                        if !self.chunks_authenticated {
+                            return integrity();
+                        }
+                        budget.charge(Cost::metadata(size_of::<Missing>() * 3 + 64))?;
+                        self.missing.push(Missing {
+                            offset: self.emitted,
+                            bytes: part.decoded,
+                            key_id: error.details["keyId"].as_str().unwrap_or("").to_owned(),
+                            chunk: self.next,
+                        });
+                        Content {
+                            bytes: vec![0; part.decoded],
+                            missing: Vec::new(),
+                        }
+                    }
+                    Err(error) => return Err(error),
+                };
             if content.bytes.len() != part.decoded {
                 return integrity();
             }
@@ -383,3 +442,6 @@ mod controlled_tests;
 
 #[cfg(test)]
 mod zlib_tests;
+
+#[cfg(test)]
+mod partial_tests;

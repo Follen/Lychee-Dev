@@ -316,16 +316,12 @@ impl<'a> Image<'a> {
             .map(|id| self.symbol(id))
             .collect::<Result<Vec<_>>>()?;
         let assets = if topic == "asset" {
-            let normalized = text.replace('/', "\\").to_ascii_lowercase();
+            let normalized = crate::assets::normalize_path(text);
             self.meta
                 .assets
                 .into_iter()
                 .filter(|a| {
-                    a["path"]
-                        .as_str()
-                        .unwrap_or("")
-                        .replace('/', "\\")
-                        .to_ascii_lowercase()
+                    crate::assets::normalize_path(a["path"].as_str().unwrap_or(""))
                         .contains(&normalized)
                 })
                 .collect()

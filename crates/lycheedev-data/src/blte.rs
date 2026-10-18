@@ -529,11 +529,44 @@ impl Default for Limits {
         }
     }
 }
+/// Missing-key substitution is an explicit table-consumer policy. Raw assets
+/// and metadata retain whole-content verification.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DecodePolicy {
+    Strict,
+    TableAllowMissing,
+}
+impl DecodePolicy {
+    pub(crate) fn with_keys(self, keys: &crate::keys::Context) -> Self {
+        if self == Self::TableAllowMissing
+            && (keys.source.kind != "public"
+                || matches!(keys.source.state.as_str(), "loaded" | "unavailable_offline"))
+        {
+            self
+        } else {
+            Self::Strict
+        }
+    }
+    pub(crate) fn load_public(self, keys: &mut crate::keys::Context) -> Result<()> {
+        match keys.ensure_public() {
+            Err(error)
+                if self == Self::TableAllowMissing
+                    && keys.source.state == "unavailable_offline"
+                    && error.code == "container.key_unavailable"
+                    && error.details.is_null() =>
+            {
+                Ok(())
+            }
+            result => result,
+        }
+    }
+}
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Missing {
     pub offset: usize,
     pub bytes: usize,
+    #[serde(rename = "keyID", alias = "keyId")]
     pub key_id: String,
     pub chunk: usize,
 }

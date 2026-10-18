@@ -251,6 +251,9 @@ export function captureMetadata(home, pin, directory, engine, {afterCopy} = {}) 
   saveJSON(join(directory, `${engine}-metadata-source.json`), {schema: 'lycheedev.source-metadata-snapshot.v1', mode: 'main-database-with-absent-or-empty-WAL', originalOpened: false, originalModified: false, before, after: before, copySHA256: expected});
   return {path: copy, sha256: expected, original: before};
 }
+function packIndexIdentities(repository, product, commit, parser) {
+  return ['rust-index-v14', 'rust-index-v15'].map(version => sha256([version, ...(version === 'rust-index-v15' ? ['assets-v2-go323-metadata'] : []), 'facts-pack-v2-path-radix512', 'facts-layout-v11-go323-generated-origins', 'TS0.26.3', 'Lua0.5.0', 'XML0.38', 'generator-v6', repository, product, commit, parser].join('\0')));
+}
 export function indexEvidence(home, engine, pin, directory, root) {
   const source = pin.source; let path, manifest;
   const metadata = captureMetadata(home, pin, directory, engine);
@@ -260,10 +263,12 @@ export function indexEvidence(home, engine, pin, directory, root) {
     manifest = JSON.parse(readFileSync(join(base, 'manifest.json')));
     assert.equal(manifest.recordsHash, hashFile(path, INDEX_BYTES)); assert.equal(manifest.recordBytes, lstatSync(path).size);
   } else {
-    const identity = sha256(['rust-index-v14', 'facts-pack-v2-path-radix512', 'facts-layout-v11-go323-generated-origins', 'TS0.26.3', 'Lua0.5.0', 'XML0.38', 'generator-v6', source.repository, source.product, source.exactCommit, source.parserRevision].join('\0'));
+    const identities = packIndexIdentities(source.repository, source.product, source.exactCommit, source.parserRevision);
     const db = new DatabaseSync(metadata.path, {readOnly: true});
     try {
-      const row = db.prepare('SELECT value FROM documents WHERE key = ?').get(`source/rust-index/${identity}`); assert(row, 'exact pack2 index manifest required');
+      const matches = identities.map(identity => ({identity, row: db.prepare('SELECT value FROM documents WHERE key = ?').get(`source/rust-index/${identity}`)})).filter(match => match.row);
+      assert.equal(matches.length, 1, 'exact pack2 index manifest required: one authenticated recipe only');
+      const {identity, row} = matches[0];
       manifest = JSON.parse(Buffer.from(row.value)); assert.equal(manifest.identity, identity); assert.equal(manifest.schema, 'lycheedev.source-index.rust.v6');
     } finally { db.close(); }
     digest(manifest.blob.sha256); path = join(home, 'cache/objects', manifest.blob.sha256.slice(0, 2), manifest.blob.sha256.slice(2));
@@ -336,7 +341,7 @@ export function verifyRustCustody(reference) {
   exact(catalog.indexManifest, ['path', 'bytes', 'sha256']); assert.equal(catalog.indexManifest.path, 'rust-index-manifest.json');
   const manifestPath = contained(directory, join(directory, catalog.indexManifest.path)), manifestRaw = custodyBytes(manifestPath, 1 << 20); assert.equal(manifestRaw.length, catalog.indexManifest.bytes); assert.equal(sha256(manifestRaw), catalog.indexManifest.sha256);
   const manifest = JSON.parse(manifestRaw), s = index.summary; assert.equal(manifest.schema, 'lycheedev.source-index.rust.v6'); assert.equal(manifest.blob.sha256, catalog.index.sha256); assert.equal(manifest.blob.bytes, catalog.index.bytes);
-  assert.equal(manifest.identity, sha256(['rust-index-v14', 'facts-pack-v2-path-radix512', 'facts-layout-v11-go323-generated-origins', 'TS0.26.3', 'Lua0.5.0', 'XML0.38', 'generator-v6', s.repository, s.product, s.commit, s.parser].join('\0')));
+  assert(packIndexIdentities(s.repository, s.product, s.commit, s.parser).includes(manifest.identity), 'exact authenticated pack2 recipe required');
   assert.equal(catalog.documents, index.documents.length); assert(Number.isSafeInteger(catalog.factsBytes) && catalog.factsBytes > 0 && catalog.factsBytes <= RUST_CUSTODY_BYTES, 'Rust custody total budget'); assert(Array.isArray(catalog.files)); assert.equal(catalog.files.length, references.length, 'complete Rust custody files required');
   let total = 0;
   for (const [i, file] of catalog.files.entries()) {

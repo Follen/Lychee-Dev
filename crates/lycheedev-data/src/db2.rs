@@ -1,5 +1,5 @@
 //! Public table profiles share authenticated local or explicitly selected CDN
-//! file/DBD/WDC providers. Partial encrypted content remains a separate gap.
+//! file/DBD/WDC providers, retaining authenticated missing-section provenance.
 use crate::{
     capture, definitions, fault, local_query,
     resource::{Budget, Cost},
@@ -19,6 +19,14 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
 pub(crate) fn dispatch_after_read(
     inv: &Invocation,
     after_read: &mut impl FnMut() -> Result<()>,
+) -> Result<Outcome> {
+    dispatch_finishing(inv, after_read, |scope, result| scope.finish(result))
+}
+// Tests may observe the real consuming finish without replacing IO or capture.
+pub(crate) fn dispatch_finishing(
+    inv: &Invocation,
+    after_read: &mut impl FnMut() -> Result<()>,
+    finish: impl for<'a> FnOnce(crate::remote::provider::Scope<'a>, Result<Outcome>) -> Result<Outcome>,
 ) -> Result<Outcome> {
     inv.control.check()?;
     match inv.command.as_str() {
@@ -74,6 +82,7 @@ pub(crate) fn dispatch_after_read(
     } else {
         (opened.admit()?, None)
     };
+    let mut committed = Vec::new();
     let result = (|| {
         let resolved = match resolved {
             Some(pin) => pin,
@@ -91,6 +100,7 @@ pub(crate) fn dispatch_after_read(
                 file,
                 layout,
                 definition,
+                availability,
             } = prepare_scoped(
                 inv,
                 name,
@@ -103,24 +113,43 @@ pub(crate) fn dispatch_after_read(
                 &file.bytes,
                 &definition,
                 Default::default(),
-                &Default::default(),
-                &[],
+                &availability.skipped,
+                &availability.ranges,
                 budget.clone(),
             )?;
             budget.check()?;
             let logical = view.logical_count();
-            let proof = json!({"contentVerified":true,"keySource":file.reading["keySource"],"name":name,"identity":bundle.identity,"layoutHash":format!("{:08X}",layout.layout_hash),"definitionSHA256":definition.sha256,"fileDataID":bundle.identity.db2_file_data_id,"contentKey":file.reading["entry"]["contentKey"],"logicalRows":logical});
-            let context = || json!({"snapshot":pin.id,"pin":data,"source":file.reading["source"],"tables":[proof.clone()],"relations":[],"complete":true,"truncated":false,"truncationReason":"none","partial":false,"partialReasons":null});
+            let partial = !view.is_complete();
+            let mut proof = json!({"contentVerified":file.reading["contentVerified"],"keySource":file.reading["keySource"],"name":name,"identity":bundle.identity,"layoutHash":format!("{:08X}",layout.layout_hash),"definitionSHA256":definition.sha256,"fileDataID":bundle.identity.db2_file_data_id,"contentKey":file.reading["entry"]["contentKey"],"logicalRows":logical});
+            if partial {
+                proof["partialContent"] = file.reading["partialContent"].clone();
+                proof["missing"] = file.reading["missing"].clone();
+                proof["unavailablePartitions"] = json!(availability.partitions);
+            }
+            let context = || json!({"snapshot":pin.id,"pin":data,"source":file.reading["source"],"tables":[proof.clone()],"relations":[],"complete":!partial,"truncated":false,"truncationReason":"none","partial":partial,"partialReasons":if partial {json!(["encrypted_sections_unavailable"])} else {serde_json::Value::Null}});
             let (mut result, kind, locator) = match inv.command.as_str() {
                 "data db2" => {
-                    let mut reading = json!({"complete":true,"truncated":false,"file":file.reading,"sources":bundle,"layoutHash":format!("{:08X}",layout.layout_hash),"schema":definition});
+                    let mut reading = json!({"complete":!partial,"truncated":false,"file":file.reading,"sources":bundle,"layoutHash":format!("{:08X}",layout.layout_hash),"schema":definition});
+                    if partial {
+                        reading["unavailablePartitions"] = json!(availability.partitions);
+                    }
                     if let Some(id) = inv.flag("--id") {
                         let id = uint(id)?;
-                        let row = view.row(id, 1 << 20).map_err(|error| {
-                            if error.code == "table.record_not_found" {
-                                fault("command.failed", 5, "table.record_not_found")
+                        let row = view.row(id, 1 << 20).or_else(|error| {
+                            if error.code != "table.record_not_found" {
+                                return Err(error);
+                            }
+                            // Go upgrades absence only at the direct DB2 record
+                            // boundary. SQL/navigation keep missing lookup rows
+                            // and report partial coverage on their whole result.
+                            if availability.record_unavailable(id, &budget)? {
+                                Err(fault(
+                                    "container.key_unavailable",
+                                    3,
+                                    "Requested WDC record requires an unavailable encryption key",
+                                ))
                             } else {
-                                error
+                                Err(fault("command.failed", 5, "table.record_not_found"))
                             }
                         })?;
                         budget.charge(Cost::retained(row_cost(&row, &budget)?))?;
@@ -158,7 +187,7 @@ pub(crate) fn dispatch_after_read(
                             }
                             rows.push(row);
                         }
-                        reading["complete"] = json!(after.is_none() && !more);
+                        reading["complete"] = json!(!partial && after.is_none() && !more);
                         reading["truncated"] = json!(more);
                         reading["page"] = json!({"after":after,"next":if more{ids.last().copied()}else{None},"more":more,"ids":ids,"rows":rows});
                         (
@@ -293,7 +322,7 @@ pub(crate) fn dispatch_after_read(
                     result["limit"] = json!(limit);
                     result["count"] = json!(rows.len());
                     result["rows"] = serde_json::to_value(rows)?;
-                    result["complete"] = json!(!extra);
+                    result["complete"] = json!(!partial && !extra);
                     result["truncated"] = json!(extra);
                     if extra {
                         result["truncationReason"] = json!("limit_reached");
@@ -339,6 +368,8 @@ pub(crate) fn dispatch_after_read(
             })?;
             let complete = result["complete"] == true;
             let truncated = result["truncated"] == true;
+            // Admit the small retained identity before publication.
+            capture::admit_committed_identity(&budget)?;
             let capture = evidence::commit_capture_budgeted(
                 &inv.home,
                 evidence::CaptureInput {
@@ -352,6 +383,12 @@ pub(crate) fn dispatch_after_read(
                 &inv.control,
                 budget.as_ref(),
             )?;
+            committed.push(
+                capture["id"]
+                    .as_str()
+                    .expect("committed query capture identity")
+                    .to_owned(),
+            );
             let mut outcome = Outcome::new(result);
             outcome.complete = complete;
             outcome.selection = serde_json::to_value(pin)?;
@@ -373,7 +410,7 @@ pub(crate) fn dispatch_after_read(
             execute(&mut scope)
         }
     })();
-    scope.finish(result)
+    finish(scope, result).map_err(|error| capture::query_committed_error(error, &committed, false))
 }
 fn uint(text: &str) -> Result<u32> {
     if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
@@ -458,6 +495,7 @@ pub(crate) struct Prepared {
     pub file: local_query::File,
     pub layout: table::Layout,
     pub definition: schema::Definition,
+    pub availability: table::Availability,
 }
 pub(crate) fn prepare(inv: &Invocation, name: &str, budget: &Arc<Budget>) -> Result<Prepared> {
     Ok(prepare_many(inv, &[name], budget)?.remove(0))
@@ -551,7 +589,12 @@ pub(crate) fn prepare_following_scoped(
         let batch_start = prepared.len();
         for ((bundle, raw), file) in std::mem::take(&mut bundles).into_iter().zip(files) {
             budget.check()?;
-            let layout = table::inspect_budgeted(&file.bytes, Default::default(), budget.clone())?;
+            let (layout, availability) = table::inspect_available_budgeted(
+                &file.bytes,
+                file.bytes.missing(),
+                Default::default(),
+                budget.clone(),
+            )?;
             if layout.table_hash != bundle.identity.hash {
                 return Err(fault(
                     "schema.invalid_definition",
@@ -570,6 +613,7 @@ pub(crate) fn prepare_following_scoped(
                 file,
                 layout,
                 definition,
+                availability,
             });
         }
         let names = following(&prepared[batch_start..])?;
@@ -602,8 +646,8 @@ pub(crate) fn prepare_following_scoped(
             .collect())
     };
     match remote.as_mut() {
-        Some(scope) => scope.read_batches(data, &ids, &mut accept)?,
-        None => local_query::read_file_batches_budgeted(inv, data, &ids, budget, &mut accept)?,
+        Some(scope) => scope.read_table_batches(data, &ids, &mut accept)?,
+        None => local_query::read_table_batches_budgeted(inv, data, &ids, budget, &mut accept)?,
     }
     Ok(prepared)
 }

@@ -8,7 +8,7 @@ mod item_textures;
 mod spell;
 use super::{Row, identifier, integer, matches};
 use crate::{
-    capture::GoCaptureFormatter,
+    capture::{self, GoCaptureFormatter},
     db2, fault, installed,
     resource::{Budget, Cost, RetainedReservation},
     table,
@@ -304,12 +304,11 @@ impl<'a> Navigator<'a> {
                 &prepared.file.bytes,
                 &prepared.definition,
                 Default::default(),
-                &Default::default(),
-                &[],
+                &prepared.availability.skipped,
+                &prepared.availability.ranges,
                 nav.budget.clone(),
             )?;
-            // Unavailable rows must not become an absence claim. The current
-            // authenticated provider refuses encrypted partial files upstream.
+            // Unavailable rows must not become an absence claim.
             if view.coverage()["complete"] != true
                 || prepared.file.reading["contentVerified"] != true
             {
@@ -452,7 +451,13 @@ impl<'a> Navigator<'a> {
         let pin = &first.prepared.pin;
         let proofs: Vec<_> = self.tables.iter().map(|opened| {
             let t = opened.prepared;
-            json!({"contentVerified":t.file.reading["contentVerified"],"keySource":t.file.reading["keySource"],"name":t.bundle.identity.name,"identity":t.bundle.identity,"layoutHash":format!("{:08X}",t.layout.layout_hash),"definitionSHA256":t.definition.sha256,"fileDataID":t.bundle.identity.db2_file_data_id,"contentKey":t.file.reading["entry"]["contentKey"],"logicalRows":opened.view.logical_count()})
+            let mut proof = json!({"contentVerified":t.file.reading["contentVerified"],"keySource":t.file.reading["keySource"],"name":t.bundle.identity.name,"identity":t.bundle.identity,"layoutHash":format!("{:08X}",t.layout.layout_hash),"definitionSHA256":t.definition.sha256,"fileDataID":t.bundle.identity.db2_file_data_id,"contentKey":t.file.reading["entry"]["contentKey"],"logicalRows":opened.view.logical_count()});
+            if t.file.reading["contentVerified"] != true {
+                proof["partialContent"] = t.file.reading["partialContent"].clone();
+                proof["missing"] = t.file.reading["missing"].clone();
+                proof["unavailablePartitions"] = json!(t.availability.partitions);
+            }
+            proof
         }).collect();
         let verified: Vec<_> = self
             .tables
@@ -599,6 +604,7 @@ pub(super) fn check_source(
 pub(super) fn dispatch(
     inv: &Invocation,
     after_read: &mut impl FnMut() -> Result<()>,
+    finish: impl for<'a> FnOnce(crate::remote::provider::Scope<'a>, Result<Outcome>) -> Result<Outcome>,
 ) -> Result<Outcome> {
     inv.control.check()?;
     if !inv.flag_bool("--cdn") && inv.flag("--installation").is_none_or(str::is_empty) {
@@ -612,7 +618,7 @@ pub(super) fn dispatch(
         ));
     }
     if inv.command == "data encounter get" {
-        return encounter::dispatch(inv, after_read);
+        return encounter::dispatch(inv, after_read, finish);
     }
     let request = Request::parse(inv)?;
     let timeout = inv.usize_flag("--timeout-seconds", 300, 1, 3600)?;
@@ -621,6 +627,7 @@ pub(super) fn dispatch(
         inv.control.clone(),
     ));
     let mut scope = crate::remote::provider::OpenedScope::open(inv, &budget)?.admit()?;
+    let mut committed = Vec::new();
     let result = (|| {
         let pin = scope.resolve_pin()?;
         let data = pin
@@ -685,6 +692,8 @@ pub(super) fn dispatch(
             let truncated = result["truncated"] == true;
             let (kind, locator) = request.capture();
             let pin = &prepared[0].pin;
+            // Admit the small retained identity before publication.
+            capture::admit_committed_identity(&budget)?;
             let capture = evidence::commit_capture_budgeted(
                 &inv.home,
                 CaptureInput {
@@ -698,6 +707,12 @@ pub(super) fn dispatch(
                 &inv.control,
                 budget.as_ref(),
             )?;
+            committed.push(
+                capture["id"]
+                    .as_str()
+                    .expect("committed query capture identity")
+                    .to_owned(),
+            );
             let mut outcome = Outcome::new(result);
             outcome.complete = complete;
             outcome.selection = serde_json::to_value(pin)?;
@@ -716,7 +731,7 @@ pub(super) fn dispatch(
             execute(&mut scope)
         }
     })();
-    scope.finish(result)
+    finish(scope, result).map_err(|error| capture::query_committed_error(error, &committed, false))
 }
 
 #[cfg(test)]

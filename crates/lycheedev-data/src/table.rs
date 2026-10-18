@@ -16,6 +16,8 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
 };
+mod availability;
+pub(crate) use availability::{Availability, inspect_available_budgeted};
 fn invalid<T>() -> Result<T> {
     Err(fault(
         "table.invalid_format",

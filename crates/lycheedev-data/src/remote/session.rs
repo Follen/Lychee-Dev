@@ -51,7 +51,7 @@ impl File {
 /// to receive only materialized File; a verified handle cannot escape by Vec.
 #[derive(Clone, Copy)]
 enum ContentMode {
-    Materialized,
+    Materialized(blte::DecodePolicy),
     Verified,
 }
 enum SelectedBody {
@@ -231,8 +231,23 @@ impl<'a, 'scope> Session<'a, 'scope> {
         ids: &[u32],
         callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
     ) -> Result<()> {
+        self.read_batches_policy(ids, blte::DecodePolicy::Strict, callback)
+    }
+    pub fn read_table_batches(
+        &mut self,
+        ids: &[u32],
+        callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
+    ) -> Result<()> {
+        self.read_batches_policy(ids, blte::DecodePolicy::TableAllowMissing, callback)
+    }
+    fn read_batches_policy(
+        &mut self,
+        ids: &[u32],
+        policy: blte::DecodePolicy,
+        callback: &mut dyn FnMut(Vec<File>) -> Result<Vec<u32>>,
+    ) -> Result<()> {
         let budget = self.budget;
-        self.read_selected(ids, ContentMode::Materialized, &mut |selected| {
+        self.read_selected(ids, ContentMode::Materialized(policy), &mut |selected| {
             let _output = budget.reserve_retained(
                 selected
                     .len()
@@ -380,6 +395,7 @@ impl<'a, 'scope> Session<'a, 'scope> {
             &root_mapping,
             self.options.metadata_bytes,
             true,
+            blte::DecodePolicy::Strict,
             limits,
             keys,
             &mut stats,
@@ -487,18 +503,21 @@ impl<'a, 'scope> Session<'a, 'scope> {
                 let mapping =
                     index.find(keys.keys(), &entry.content_key, limits, || admitted.check())?;
                 let content = match mode {
-                    ContentMode::Materialized => SelectedBody::Materialized(content::materialize(
-                        files,
-                        index,
-                        &mapping,
-                        self.options.content_bytes,
-                        false,
-                        limits,
-                        keys,
-                        &mut stats,
-                        budget,
-                        &mut prepared.decoded,
-                    )?),
+                    ContentMode::Materialized(policy) => {
+                        SelectedBody::Materialized(content::materialize(
+                            files,
+                            index,
+                            &mapping,
+                            self.options.content_bytes,
+                            false,
+                            policy,
+                            limits,
+                            keys,
+                            &mut stats,
+                            budget,
+                            &mut prepared.decoded,
+                        )?)
+                    }
                     ContentMode::Verified => SelectedBody::Verified(content::read_verified(
                         files,
                         index,
@@ -537,9 +556,14 @@ impl<'a, 'scope> Session<'a, 'scope> {
                                 .ok_or_else(internal)?,
                         )
                         .ok_or_else(internal)?;
-                    Ok(
-                        serde_json::json!({"contentVerified":true,"source":"cdn","pin":self.pin,"buildConfiguration":build_blob,"cdnConfiguration":cdn_blob,"encodingKey":build.encoding_key,"root":root.blob,"entry":entry,"payloadEncodingKey":content.encoding_key(),"content":content.reference(),"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"keySource":keys.value(),"decodedCache":stats}),
-                    )
+                    let mut reading = serde_json::json!({"contentVerified":true,"source":"cdn","pin":self.pin,"buildConfiguration":build_blob,"cdnConfiguration":cdn_blob,"encodingKey":build.encoding_key,"root":root.blob,"entry":entry,"payloadEncodingKey":content.encoding_key(),"content":content.reference(),"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"keySource":keys.value(),"decodedCache":stats});
+                    if let SelectedBody::Materialized(materialized) = &content {
+                        crate::local_query::report_partial(
+                            &mut reading,
+                            &materialized.content.missing,
+                        )?;
+                    }
+                    Ok(reading)
                 })();
                 let reading = match after_content {
                     Ok(reading) => reading,

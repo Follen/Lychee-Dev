@@ -218,6 +218,19 @@ fn preserve_initialization_result(
         combined
     })
 }
+/// Use the same Go time.Time marshal form as the identity reader. Keep the
+/// original instant and ID input; only newly created identities are formatted.
+fn created_identity(home: &Path, now: &chrono::DateTime<chrono::Utc>) -> Result<Value> {
+    let raw = now.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
+    let created_at = crate::evidence::parse_go_timestamp(&raw)
+        .and_then(|timestamp| timestamp.canonical().map(str::to_owned))
+        .ok_or_else(|| ToolkitError::invalid("workspace creation timestamp cannot be encoded"))?;
+    Ok(json!({
+        "schema":"lycheedev.workspace.v1",
+        "workspaceId":storage::sha256(format!("{now:?}:{}:{}",std::process::id(),home.display()).as_bytes())[..32],
+        "createdAt":created_at,
+    }))
+}
 pub(crate) fn initialize_unlocked_observed(
     home: &Path,
     control: InitControl<'_>,
@@ -252,7 +265,7 @@ pub(crate) fn initialize_unlocked_observed(
     }
     control.check()?;
     let now = chrono::Utc::now();
-    let identity = json!({"schema":"lycheedev.workspace.v1","workspaceId":storage::sha256(format!("{now:?}:{}:{}",std::process::id(),home.display()).as_bytes())[..32],"createdAt":now.to_rfc3339_opts(chrono::SecondsFormat::Nanos,true)});
+    let identity = created_identity(home, &now)?;
     let stage = parent.join(format!(
         ".lycheedev-init-{}",
         identity["workspaceId"].as_str().unwrap()
@@ -464,3 +477,134 @@ mod tests;
 #[cfg(test)]
 #[path = "workspace_initialization_tests.rs"]
 mod initialization_tests;
+
+#[cfg(test)]
+mod identity_creation_tests {
+    use super::*;
+    use std::{
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    struct Fixture(PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            let base = std::env::temp_dir().join(format!(
+                "lychee-init-canonical-{}-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                NEXT.fetch_add(1, Ordering::Relaxed),
+            ));
+            fs::create_dir(&base).unwrap();
+            Self(base)
+        }
+        fn home(&self) -> PathBuf {
+            self.0.join("home")
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn created_identity_zero_seven_and_nine_digits_match_persisted_reopen() {
+        for (raw, expected) in [
+            ("2026-10-18T02:00:00.000000000Z", "2026-10-18T02:00:00Z"),
+            (
+                "2026-10-18T02:00:00.135524800Z",
+                "2026-10-18T02:00:00.1355248Z",
+            ),
+            (
+                "2026-10-18T02:00:00.135524801Z",
+                "2026-10-18T02:00:00.135524801Z",
+            ),
+        ] {
+            let f = Fixture::new();
+            let home = f.home();
+            let now = chrono::DateTime::parse_from_rfc3339(raw)
+                .unwrap()
+                .with_timezone(&chrono::Utc);
+            let initial = created_identity(&home, &now).unwrap();
+            assert_eq!(initial["createdAt"], expected);
+            // Formatting must not feed back into the existing ID derivation.
+            let expected_id = storage::sha256(
+                format!("{now:?}:{}:{}", std::process::id(), home.display()).as_bytes(),
+            );
+            assert_eq!(initial["workspaceId"].as_str().unwrap(), &expected_id[..32]);
+            let parsed = crate::evidence::parse_go_timestamp(expected).unwrap();
+            assert_eq!(
+                parsed.instant(),
+                (now.timestamp(), now.timestamp_subsec_nanos())
+            );
+
+            fs::create_dir(&home).unwrap();
+            let marker = home.join("workspace.json");
+            // This is the production manifest writer, using the deterministic
+            // identity helper. Persisted bytes are compared before/after reopen.
+            InitControl(None).write(&marker, &initial).unwrap();
+            fs::write(home.join("unchanged"), b"do not reconstruct this workspace").unwrap();
+            let before = fs::read(&marker).unwrap();
+            let persisted: Value = serde_json::from_slice(&before).unwrap();
+            assert_eq!(persisted, initial);
+            assert_eq!(open(&home).unwrap(), initial);
+            assert_eq!(
+                open_controlled(&home, &OperationControl::default()).unwrap(),
+                initial
+            );
+            assert_eq!(initialize(&home).unwrap(), initial);
+            assert_eq!(
+                initialize_controlled(&home, &OperationControl::default()).unwrap(),
+                initial
+            );
+            assert_eq!(fs::read(&marker).unwrap(), before);
+            assert_eq!(
+                fs::read(home.join("unchanged")).unwrap(),
+                b"do not reconstruct this workspace"
+            );
+            assert_eq!(fs::read_dir(&home).unwrap().count(), 2);
+        }
+    }
+
+    #[test]
+    fn actual_initializer_returns_the_persisted_canonical_identity() {
+        let f = Fixture::new();
+        let home = f.home();
+        let initial = initialize_controlled(&home, &OperationControl::default()).unwrap();
+        let marker = home.join("workspace.json");
+        let before = fs::read(&marker).unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&before).unwrap(), initial);
+        assert_eq!(open(&home).unwrap(), initial);
+        assert_eq!(initialize(&home).unwrap(), initial);
+        assert_eq!(fs::read(&marker).unwrap(), before);
+        assert!(home.join("state").is_dir());
+    }
+
+    #[test]
+    fn historical_fractional_spelling_is_canonicalized_without_rewriting_manifest() {
+        let f = Fixture::new();
+        let home = f.home();
+        fs::create_dir(&home).unwrap();
+        let marker = home.join("workspace.json");
+        let raw = b"{ \"schema\":\"lycheedev.workspace.v1\", \"workspaceId\":\"0123456789abcdef0123456789abcdef\", \"createdAt\":\"2026-10-18T02:00:00.135524800Z\" }\n";
+        fs::write(&marker, raw).unwrap();
+        let expected = json!({
+            "schema":"lycheedev.workspace.v1",
+            "workspaceId":"0123456789abcdef0123456789abcdef",
+            "createdAt":"2026-10-18T02:00:00.1355248Z",
+        });
+        assert_eq!(open(&home).unwrap(), expected);
+        assert_eq!(initialize(&home).unwrap(), expected);
+        assert_eq!(
+            initialize_controlled(&home, &OperationControl::default()).unwrap(),
+            expected
+        );
+        assert_eq!(fs::read(&marker).unwrap(), raw);
+        assert_eq!(fs::read_dir(&home).unwrap().count(), 1);
+    }
+}

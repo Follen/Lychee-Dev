@@ -489,7 +489,7 @@ test('complete format model accounts for offsets, full Facts/pack generation, ca
 });
 test('metadata sizing authenticates the actual SQLite page unit rather than assuming 4096', t => { for (const page of [512, 8192, 65536]) { const d = join(temp(t), 'home'); mkdirSync(join(d, 'state'), {recursive: true}); const path = join(d, 'state/toolkit.sqlite'), db = new DatabaseSync(path); db.exec(`PRAGMA page_size=${page}; CREATE TABLE documents(value TEXT);`); db.close(); const identity = inventory(d); assert.equal(metadataPageSize(d, identity), page); writeFileSync(path, 'changed'); assert.throws(() => metadataPageSize(d, identity)); } });
 
-function rustCustodyFixture(t, {large = false} = {}) {
+function rustCustodyFixture(t, {large = false, version = 'rust-index-v14'} = {}) {
   const f = metadataFixture(t), facts = {declarations: [{name: large ? 'x'.repeat((8 << 20) + 50) : 'Example', kind: 'function', line: 1}], relationships: [], loads: [], headers: [], diagnostics: []};
   const stable = v => Array.isArray(v) ? v.map(stable) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k => [k, stable(v[k])])) : v;
   const documents = ['a.lua', 'b.lua', 'c.xml'].map((path, i) => ({path, bytes: 10 + i, sha256: sha256(`input-${i}`)}));
@@ -505,7 +505,7 @@ function rustCustodyFixture(t, {large = false} = {}) {
   function publish() {
     summary.documents = documents.length;
     const raw = Buffer.from(JSON.stringify({summary, documents})), hash = sha256(raw), path = join(f.home, 'cache/objects', hash.slice(0, 2), hash.slice(2)); mkdirSync(resolve(path, '..'), {recursive: true}); writeFileSync(path, raw);
-    const identity = sha256(['rust-index-v14', 'facts-pack-v2-path-radix512', 'facts-layout-v11-go323-generated-origins', 'TS0.26.3', 'Lua0.5.0', 'XML0.38', 'generator-v6', summary.repository, summary.product, summary.commit, summary.parser].join('\0'));
+    const identity = sha256([version, ...(version === 'rust-index-v15' ? ['assets-v2-go323-metadata'] : []), 'facts-pack-v2-path-radix512', 'facts-layout-v11-go323-generated-origins', 'TS0.26.3', 'Lua0.5.0', 'XML0.38', 'generator-v6', summary.repository, summary.product, summary.commit, summary.parser].join('\0'));
     const db = new DatabaseSync(f.path); db.prepare('INSERT OR REPLACE INTO documents VALUES (?,1,?)').run(`source/rust-index/${identity}`, Buffer.from(JSON.stringify({schema: 'lycheedev.source-index.rust.v6', identity, blob: {sha256: hash, bytes: raw.length}}))); db.close();
   }
   publish(); const admissions = [];
@@ -794,4 +794,15 @@ test('comparison refuses different bytes from the same Go key referenced twice',
   fs.readFileSync = function(path, ...args) { const raw = original(path, ...args); if (!changed && targets.delete(String(path))) { const value = JSON.parse(raw); value.facts.headers = [{value: 'changed after first read'}]; value.factsSHA256 = sha256(JSON.stringify(value.facts)); writeFileSync(path, JSON.stringify(value)); changed = true; } return raw; };
   try { await assert.rejects(readFactDelta(f.homes.go, f.homes.rust, indexes.go.path, 'v11-pack2', indexes.rust.path, indexes.rust.sha256, undefined, {captureSources: true}), /changed between duplicate references/); } finally { fs.readFileSync = original; }
   assert.equal(changed, true);
+});
+
+test('v15 pack custody preserves complete replay and rejects ambiguous v14 manifest', t => {
+  const f = rustCustodyFixture(t, {version: 'rust-index-v15'}), reference = f.capture();
+  assert.equal(verifyRustCustody(reference).documents, 3);
+  const p = f.pin.source, old = sha256(['rust-index-v14', 'facts-pack-v2-path-radix512', 'facts-layout-v11-go323-generated-origins', 'TS0.26.3', 'Lua0.5.0', 'XML0.38', 'generator-v6', p.repository, p.product, p.exactCommit, p.parserRevision].join('\0'));
+  const db = new DatabaseSync(f.path); const current = db.prepare("SELECT value FROM documents WHERE key LIKE 'source/rust-index/%'").get();
+  const manifest = JSON.parse(Buffer.from(current.value)); manifest.identity = old;
+  db.prepare('INSERT INTO documents VALUES (?,1,?)').run(`source/rust-index/${old}`, Buffer.from(JSON.stringify(manifest))); db.close();
+  const second = join(f.d, 'ambiguous'); mkdirSync(second);
+  assert.throws(() => indexEvidence(f.home, 'rust', f.pin, second, f.d), /one authenticated recipe/);
 });

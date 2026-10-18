@@ -34,6 +34,7 @@ pub(super) fn execute_rows(
     sink: &mut dyn FnMut(StreamEvent<'_>) -> Result<()>,
 ) -> Result<WalkSummary> {
     let mut summary = WalkSummary {
+        partial: !view.is_complete(),
         count: 0,
         truncated: false,
     };

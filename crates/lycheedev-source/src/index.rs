@@ -292,7 +292,7 @@ pub fn penalty(role: &str) -> i32 {
     }
 }
 pub(crate) fn fingerprint(pin: &SourcePin) -> String {
-    storage::sha256(format!("rust-index-v14\0facts-pack-v2-path-radix512\0facts-layout-v11-go323-generated-origins\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}",pin.repository,pin.product,pin.exact_commit,pin.parser_revision).as_bytes())
+    storage::sha256(format!("rust-index-v15\0assets-v2-go323-metadata\0facts-pack-v2-path-radix512\0facts-layout-v11-go323-generated-origins\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}",pin.repository,pin.product,pin.exact_commit,pin.parser_revision).as_bytes())
 }
 pub fn build(home: &Path, pin: &SourcePin) -> Result<Index> {
     build_with_control(home, pin, &Default::default())
@@ -678,7 +678,7 @@ fn build_uncached_cached(
         if file.asset && file.bytes > 64 << 20 {
             index
                 .assets
-                .push(json!({"path":file.path,"contentHash":"","bytes":file.bytes,"local":null}));
+                .push(crate::assets::record(&file.path, file.bytes, &[], "", Value::Null));
         }
     }
     let mut grouped = facts_cache::Groups::new(cache_owner, files, control, profile);
@@ -705,12 +705,9 @@ fn build_uncached_cached(
                 let publish_phase = profile.span(Phase::OriginalPublish);
                 let local = evidence::publish_blob_bounded(home, &data, 64 << 20, control)?;
                 drop(publish_phase);
-                let ext = Path::new(&file.path)
-                    .extension()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("")
-                    .to_ascii_lowercase();
-                index.assets.push(json!({"path":file.path,"contentHash":hash,"bytes":file.bytes,"extension":format!(".{ext}"),"mime":"application/octet-stream","format":ext,"width":0,"height":0,"local":local}));
+                index.assets.push(crate::assets::record(
+                    &file.path, file.bytes, &data, &hash, local,
+                ));
                 return Ok(());
             }
             let sha256 = document_input_sha(file, &data, &mut retained)?;
@@ -1109,12 +1106,12 @@ impl Index {
         }
         if topic == "asset" {
             candidates.clear();
-            let normalized = text.replace('/', "\\").to_ascii_lowercase();
+            let normalized = crate::assets::normalize_path(text);
             for (number, a) in self.assets.iter().enumerate() {
                 observer("asset", number);
                 check_search(control)?;
                 let p = a["path"].as_str().unwrap_or("");
-                let n = p.replace('/', "\\").to_ascii_lowercase();
+                let n = crate::assets::normalize_path(p);
                 if n.contains(&normalized) {
                     candidates.push((
                         Symbol {

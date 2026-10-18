@@ -6,6 +6,14 @@ import {beginScratch, contained} from './rust-disk.mjs';
 import {ownedSpawnSync} from './rust-owned-process.mjs';
 import {assertCurrentSelectedReport, currentWorkflowInputs, inventory, inventoryHash, jsonFile, loadCurrentWorkflow, pendingIncrementTasks, verifyCandidate} from '../tests/rust-skill-usage/assertions.mjs';
 
+if (process.argv[2] === '--prepare-data-exporters') {
+  if (process.argv.length !== 3) throw new Error('usage: --prepare-data-exporters');
+  const {prepareDataExporters} = await import('../tests/rust-skill-usage/data-exporters.mjs');
+  console.log(JSON.stringify(prepareDataExporters(resolve('.')), null, 2));
+} else if (process.argv[2] === '--data') {
+  const {runOwnedData} = await import('../tests/rust-skill-usage/data-owned.mjs');
+  runOwnedData(resolve('.'), process.argv.slice(3));
+} else {
 const root = resolve('.');
 const [artifactArg, candidateArg, ...extra] = process.argv.slice(2);
 if (!artifactArg || !candidateArg || extra.length) throw new Error('usage: node tools/rust-skill-usage.mjs <artifact.json> <candidate-report.json>');
@@ -61,4 +69,5 @@ try {
   }
   job.seal({state: handlesReaped ? state : 'interrupted', handlesReaped, logs});
   if (handlesReaped) job.cleanup();
+}
 }

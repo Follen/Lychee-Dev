@@ -151,6 +151,10 @@ impl Projection {
 /// They are not consulted for application control or row execution.
 #[derive(Debug, Clone)]
 pub struct TableProof {
+    pub content_verified: bool,
+    pub partial_content: Value,
+    pub missing: Value,
+    pub unavailable_partitions: Value,
     pub key_source: Value,
     pub requested_name: String,
     pub identity: TableIdentity,
@@ -179,12 +183,13 @@ pub struct StreamRecord<'a> {
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WalkSummary {
+    pub partial: bool,
     pub count: usize,
     pub truncated: bool,
 }
 impl WalkSummary {
     pub fn complete(self) -> bool {
-        !self.truncated
+        !self.partial && !self.truncated
     }
     pub fn truncation_reason(self) -> &'static str {
         if self.truncated {

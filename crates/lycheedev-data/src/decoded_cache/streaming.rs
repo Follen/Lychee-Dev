@@ -35,12 +35,12 @@ fn completed(mut error: ToolkitError, reference: &evidence::BlobRef) -> ToolkitE
 }
 fn after_blob(
     store: &Store<'_>,
-    result: Result<evidence::VerifiedBlob>,
+    result: Result<(evidence::VerifiedBlob, Vec<blte::Missing>)>,
     cleanup: Result<()>,
-) -> Result<evidence::VerifiedBlob> {
+) -> Result<(evidence::VerifiedBlob, Vec<blte::Missing>)> {
     match result {
-        Ok(blob) => match store.finish(Ok(()), cleanup) {
-            Ok(()) => Ok(blob),
+        Ok((blob, missing)) => match store.finish(Ok(()), cleanup) {
+            Ok(()) => Ok((blob, missing)),
             Err(error) => {
                 let error = completed(error, blob.reference());
                 blob.close_after(Err(error))
@@ -64,8 +64,20 @@ pub(crate) fn read_verified_content(
     control: &OperationControl,
 ) -> Result<(String, evidence::VerifiedBlob)> {
     read_verified_content_source(
-        home, root, index, record, limits, maximum, keys, stats, budget, control, None,
+        home,
+        root,
+        index,
+        record,
+        limits,
+        maximum,
+        keys,
+        stats,
+        budget,
+        control,
+        None,
+        blte::DecodePolicy::Strict,
     )
+    .map(|(key, blob, _)| (key, blob))
 }
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn read_verified_content_in_session(
@@ -92,7 +104,9 @@ pub(crate) fn read_verified_content_in_session(
         budget,
         control,
         Some(source),
+        blte::DecodePolicy::Strict,
     )
+    .map(|(key, blob, _)| (key, blob))
 }
 #[allow(clippy::too_many_arguments)]
 fn read_verified_content_source(
@@ -107,7 +121,8 @@ fn read_verified_content_source(
     budget: &Budget,
     control: &OperationControl,
     source: Option<&casc::QuerySource<'_>>,
-) -> Result<(String, evidence::VerifiedBlob)> {
+    policy: blte::DecodePolicy,
+) -> Result<(String, evidence::VerifiedBlob, Vec<blte::Missing>)> {
     let store = Store {
         home,
         control,
@@ -216,63 +231,76 @@ fn read_verified_content_source(
                     {
                         return Err(integrity());
                     }
-                    if entry.keys.kind == "public" && entry.keys.state == "loaded" {
-                        keys.ensure_public()?;
-                    }
-                    let mut ckey = Md5::new();
-                    let owned_budget = budget.safety_only();
-                    let found = evidence::open_verified_blob_bounded_optional_with_check(
-                        home,
-                        &entry.blob,
-                        maximum as u64,
-                        control,
-                        |block| {
-                            store.check()?;
-                            budget.charge(Cost::work(2))?;
-                            ckey.update(block);
-                            Ok(())
-                        },
-                        move || owned_budget.check(),
-                    )?;
-                    if let Some(blob) = found {
-                        if ckey.finalize().as_slice() != expected_key {
-                            return blob.close_after(Err(integrity()));
+                    let accessible = if entry.keys.kind == "public" && entry.keys.state == "loaded"
+                    {
+                        // A table may rebuild available rows after its prior full
+                        // alias loses the pinned public-key document offline. Never
+                        // read that full body without the original key permission.
+                        policy.load_public(keys)?;
+                        keys.source.state == "loaded"
+                    } else {
+                        true
+                    };
+                    if accessible {
+                        let mut ckey = Md5::new();
+                        let owned_budget = budget.safety_only();
+                        let found = evidence::open_verified_blob_bounded_optional_with_check(
+                            home,
+                            &entry.blob,
+                            maximum as u64,
+                            control,
+                            |block| {
+                                store.check()?;
+                                budget.charge(Cost::work(2))?;
+                                ckey.update(block);
+                                Ok(())
+                            },
+                            move || owned_budget.check(),
+                        )?;
+                        if let Some(blob) = found {
+                            if ckey.finalize().as_slice() != expected_key {
+                                return blob.close_after(Err(integrity()));
+                            }
+                            stats.blob_reads += 1;
+                            stats.blob_read_bytes += record.decoded_bytes;
+                            stats.hits += 1;
+                            stats.reused_bytes += record.decoded_bytes;
+                            return Ok((blob, Vec::new()));
                         }
-                        stats.blob_reads += 1;
-                        stats.blob_read_bytes += record.decoded_bytes;
-                        stats.hits += 1;
-                        stats.reused_bytes += record.decoded_bytes;
-                        return Ok(blob);
                     }
                 }
                 // One logical extraction. A pre-publication missing public key
                 // can restart actual decode work, without a second logical call.
                 stats.content_decode_calls += 1;
-                let mut publish = |keys: &keys::Context| -> Result<evidence::VerifiedBlob> {
-                    object.rewind()?;
-                    let check = || store.check();
-                    let mut reader = blte::StreamingReader::new_incremental_with_check(
-                        &mut object,
-                        encoded,
-                        decoded,
-                        expected_key,
-                        keys.keys(),
-                        budget,
-                        Some(&check),
-                    )?;
-                    let owned_budget = budget.safety_only();
-                    let _span = budget.phase(Phase::DecodedStreamPublish);
-                    evidence::publish_blob_stream_bounded_with_check(
-                        home,
-                        &mut reader,
-                        record.decoded_bytes,
-                        maximum as u64,
-                        control,
-                        move || owned_budget.check(),
-                        &budget.safety_only(),
-                    )
-                };
-                let blob = match publish(keys) {
+                let mut publish =
+                    |keys: &keys::Context| -> Result<(evidence::VerifiedBlob, Vec<blte::Missing>)> {
+                        object.rewind()?;
+                        let check = || store.check();
+                        let mut reader = blte::StreamingReader::new_incremental_with_check(
+                            &mut object,
+                            encoded,
+                            decoded,
+                            expected_key,
+                            keys.keys(),
+                            budget,
+                            Some(&check),
+                        )?
+                        .with_policy(policy.with_keys(keys));
+                        let owned_budget = budget.safety_only();
+                        let _span = budget.phase(Phase::DecodedStreamPublish);
+                        let blob = evidence::publish_blob_stream_bounded_with_check(
+                            home,
+                            &mut reader,
+                            record.decoded_bytes,
+                            maximum as u64,
+                            control,
+                            move || owned_budget.check(),
+                            &budget.safety_only(),
+                        )?;
+                        let missing = reader.take_missing();
+                        Ok((blob, missing))
+                    };
+                let (blob, missing) = match publish(keys) {
                     Ok(blob) => blob,
                     Err(error)
                         if error.code == "container.key_unavailable"
@@ -282,7 +310,7 @@ fn read_verified_content_source(
                             && keys.source.state != "loaded" =>
                     {
                         store.check()?;
-                        keys.ensure_public()?;
+                        policy.load_public(keys)?;
                         publish(keys)?
                     }
                     Err(error) => return Err(error),
@@ -290,6 +318,11 @@ fn read_verified_content_source(
                 stats.extracted_bytes += record.decoded_bytes;
                 stats.blob_reads += 1;
                 stats.blob_read_bytes += record.decoded_bytes;
+                if !missing.is_empty() {
+                    // A partial blob is authenticated as these exact bytes only.
+                    // Do not publish it under the complete decoded-v1 alias.
+                    return Ok((blob, missing));
+                }
                 let publish_alias = (|| {
                     let _span = budget.phase(Phase::DecodedCacheCommit);
                     let entry = Entry {
@@ -323,7 +356,7 @@ fn read_verified_content_source(
                     store.check()
                 })();
                 match publish_alias {
-                    Ok(()) => Ok(blob),
+                    Ok(()) => Ok((blob, missing)),
                     Err(error) => {
                         let error = completed(error, blob.reference());
                         blob.close_after(Err(error))
@@ -332,8 +365,8 @@ fn read_verified_content_source(
             })();
             after_blob(&store, result, metadata.close())
         })();
-        let result = after_blob(&store, result, object.close_after(Ok(())))?;
-        return Ok((encoding_key.clone(), result));
+        let (blob, missing) = after_blob(&store, result, object.close_after(Ok(())))?;
+        return Ok((encoding_key.clone(), blob, missing));
     }
     Err(unavailable.unwrap_or_else(|| {
         fault(
@@ -356,8 +389,9 @@ pub(crate) fn read_content_controlled(
     budget: &Budget,
     selected_maximum: Option<usize>,
     control: &OperationControl,
+    policy: blte::DecodePolicy,
 ) -> Result<(String, blte::Content)> {
-    read_content_with_reference_controlled(
+    read_content_source(
         home,
         root,
         index,
@@ -368,6 +402,8 @@ pub(crate) fn read_content_controlled(
         budget,
         selected_maximum,
         control,
+        None,
+        policy,
     )
     .map(|(key, content, _)| (key, content))
 }
@@ -383,10 +419,11 @@ pub(crate) fn read_content_in_session(
     budget: &Budget,
     selected_maximum: Option<usize>,
     control: &OperationControl,
+    policy: blte::DecodePolicy,
 ) -> Result<(String, blte::Content)> {
-    read_content_with_reference_in_session(
+    read_content_source(
         home,
-        source,
+        source.root(),
         index,
         record,
         limits,
@@ -395,6 +432,8 @@ pub(crate) fn read_content_in_session(
         budget,
         selected_maximum,
         control,
+        Some(source),
+        policy,
     )
     .map(|(key, content, _)| (key, content))
 }
@@ -427,6 +466,7 @@ pub(crate) fn read_content_with_reference_controlled(
         selected_maximum,
         control,
         None,
+        blte::DecodePolicy::Strict,
     )
 }
 #[allow(clippy::too_many_arguments)]
@@ -454,6 +494,7 @@ pub(crate) fn read_content_with_reference_in_session(
         selected_maximum,
         control,
         Some(source),
+        blte::DecodePolicy::Strict,
     )
 }
 #[allow(clippy::too_many_arguments)]
@@ -469,12 +510,13 @@ fn read_content_source(
     selected_maximum: Option<usize>,
     control: &OperationControl,
     source: Option<&casc::QuerySource<'_>>,
+    policy: blte::DecodePolicy,
 ) -> Result<(String, blte::Content, evidence::BlobRef)> {
     control.check()?;
     budget.check()?;
     let (decoded, maximum) = materialized_extent(record.decoded_bytes, limits, selected_maximum)?;
-    let (key, mut blob) = read_verified_content_source(
-        home, root, index, record, limits, maximum, keys, stats, budget, control, source,
+    let (key, mut blob, missing) = read_verified_content_source(
+        home, root, index, record, limits, maximum, keys, stats, budget, control, source, policy,
     )?;
     let result = (|| {
         budget.charge_split(Cost::retained(decoded), Cost::default())?;
@@ -514,14 +556,7 @@ fn read_content_source(
     // Existing local FileBytes owns the Vec for the query lifetime. Its legacy
     // ledger retains this successful output until the query budget is dropped.
     allocation.commit();
-    Ok((
-        key,
-        blte::Content {
-            bytes,
-            missing: vec![],
-        },
-        reference,
-    ))
+    Ok((key, blte::Content { bytes, missing }, reference))
 }
 
 // The caller's selected allowance and the metadata allowance are independent.

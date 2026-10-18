@@ -57,6 +57,7 @@ pub(super) fn run_after_finish(
                 file,
                 layout,
                 definition,
+                availability,
             } = db2::prepare_scoped(
                 inv,
                 request.name,
@@ -68,13 +69,17 @@ pub(super) fn run_after_finish(
                 &file.bytes,
                 &definition,
                 Default::default(),
-                &Default::default(),
-                &[],
+                &availability.skipped,
+                &availability.ranges,
                 budget.clone(),
             )?;
             let projection = Projection::resolve(request.fields, request.filter, &definition)?;
             let begin = StreamBegin {
                 proof: TableProof {
+                    content_verified: file.reading["contentVerified"] == true,
+                    partial_content: file.reading["partialContent"].clone(),
+                    missing: file.reading["missing"].clone(),
+                    unavailable_partitions: serde_json::to_value(&availability.partitions)?,
                     key_source: file.reading["keySource"].clone(),
                     requested_name: request.name.to_owned(),
                     identity: bundle.identity,

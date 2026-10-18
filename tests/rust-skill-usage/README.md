@@ -27,9 +27,9 @@ current report. This Source controller has no authenticated DataPin/build/locale
 CASC-or-CDN/DBD/key fixture, expected ordered rows or controlled memory-pressure
 failure; it does not fabricate real Data query/CSV/partial/capture recovery.
 Live keyboard and slot tasks need an authorized selected process/actor and actual
-INPUT/CON evidence. It never operates the game. Supplying a future Data fixture
-requires a separately reviewed real execution path; the present entry has no
-Data-fixture option. Passing selected Source tasks or checking Skill bytes cannot
+INPUT/CON evidence. It never operates the game. The [opt-in Data workflow](data-README.md) provides the separately reviewed
+fresh-fixture execution path; the default Source mode still has no Data-fixture
+option. Passing selected Source tasks or checking Skill bytes cannot
 change those pending tasks to passed or `completeSkillAcceptance` to true.
 
 The selected candidate may add necessary Emmy migration notes outside these

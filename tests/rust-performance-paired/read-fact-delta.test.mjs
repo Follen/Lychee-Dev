@@ -322,7 +322,7 @@ test('reads explicit v11 using the exact current generated-origin production key
   const key = /fn facts_cache_key[\s\S]*?"([^"\n]+)"/.exec(production)?.[1];
   assert.equal(key, 'facts-layout-v11-go323-generated-origins\\0tree-sitter-0.26.3\\0lua-0.5.0\\0xml-0.38\\0generator-v6\\0{path}\\0{sha256}');
   assert.match(production, /envelope\["schema"\] == "lycheedev\.source-facts\.rust\.v11"/);
-  assert.match(production, /rust-index-v14\\0facts-pack-v2-path-radix512\\0facts-layout-v11-go323-generated-origins/);
+  assert.match(production, /rust-index-v15\\0assets-v2-go323-metadata\\0facts-pack-v2-path-radix512\\0facts-layout-v11-go323-generated-origins/);
   await withFixture(t, async f => {
     for (const [index, document] of f.documents.entries()) {
       const preimage = key.replaceAll('\\0', '\0').replace('{path}', document.path).replace('{sha256}', document.sha256);

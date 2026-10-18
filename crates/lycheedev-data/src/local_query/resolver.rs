@@ -20,6 +20,7 @@ enum Input {
     Physical {
         input: provider::PreparedInput<'static>,
         file: Value,
+        unavailable: Value,
         bytes: usize,
     },
 }
@@ -230,18 +231,22 @@ impl Factory<'_> {
         let (bundle, dbd) = result?;
         let started = Instant::now();
         let cached = slots.entries().find_map(|entry| match &entry.input {
-            Input::Physical { input, file, bytes }
-                if input.bundle.commit == bundle.commit
-                    && input.bundle.identity == bundle.identity
-                    && input.bundle.manifest == bundle.manifest
-                    && input.bundle.definition == bundle.definition =>
+            Input::Physical {
+                input,
+                file,
+                unavailable,
+                bytes,
+            } if input.bundle.commit == bundle.commit
+                && input.bundle.identity == bundle.identity
+                && input.bundle.manifest == bundle.manifest
+                && input.bundle.definition == bundle.definition =>
             {
-                Some((input, file, *bytes))
+                Some((input, file, unavailable, *bytes))
             }
             _ => None,
         });
-        let (base, definition, layout_hash, file, bytes) =
-            if let Some((input, file, bytes)) = cached {
+        let (base, definition, layout_hash, file, unavailable, bytes) =
+            if let Some((input, file, unavailable, bytes)) = cached {
                 if let Some(reader) = &self.local {
                     reader.check_source()?;
                 }
@@ -253,7 +258,7 @@ impl Factory<'_> {
                     ));
                 }
                 // Go's prepared-view cache returns the original immutable reading.
-                let size = capture::json_size(file, &self.budget.safety_only())?;
+                let size = capture::json_size(&(file, unavailable), &self.budget.safety_only())?;
                 self.budget
                     .safety_only()
                     .charge(Cost::retained(size.saturating_mul(4) + 512))?;
@@ -262,6 +267,7 @@ impl Factory<'_> {
                     input.definition.clone(),
                     input.layout_hash,
                     file.clone(),
+                    unavailable.clone(),
                     bytes,
                 )
             } else {
@@ -272,7 +278,7 @@ impl Factory<'_> {
                 })?;
                 let file = if self.inv.flag_bool("--cdn") {
                     let mut selected = None;
-                    self.scope.read_batches(
+                    self.scope.read_table_batches(
                         self.data,
                         &[bundle.identity.db2_file_data_id],
                         &mut |mut files| {
@@ -306,7 +312,12 @@ impl Factory<'_> {
                     partitions: 4096,
                     ..Default::default()
                 };
-                let layout = table::inspect_budgeted(&file.bytes, limits, self.budget.clone())?;
+                let (layout, availability) = table::inspect_available_budgeted(
+                    &file.bytes,
+                    file.bytes.missing(),
+                    limits,
+                    self.budget.clone(),
+                )?;
                 if layout.table_hash != bundle.identity.hash {
                     return Err(fault(
                         "schema.invalid_format",
@@ -322,8 +333,8 @@ impl Factory<'_> {
                     file.bytes,
                     &definition,
                     limits,
-                    &Default::default(),
-                    &[],
+                    &availability.skipped,
+                    &availability.ranges,
                     self.budget.clone(),
                 )?;
                 self.budget.safety_only().charge(Cost::retained(
@@ -334,6 +345,7 @@ impl Factory<'_> {
                     Arc::new(definition),
                     layout.layout_hash,
                     file.reading,
+                    serde_json::to_value(&availability.partitions)?,
                     bytes,
                 )
             };
@@ -363,14 +375,34 @@ impl Factory<'_> {
             layout_hash,
         };
         let safety = self.budget.safety_only();
-        let size = capture::json_size(&(&file, &input.bundle, input.definition.as_ref()), &safety)?;
+        let size = capture::json_size(
+            &(
+                &file,
+                &unavailable,
+                &input.bundle,
+                input.definition.as_ref(),
+            ),
+            &safety,
+        )?;
         safety.charge(Cost::retained(size.saturating_mul(4).saturating_add(1024)))?;
-        self.report.provenance.push(json!({"complete":input.schema().complete,"truncated":false,"file":file,"sources":input.bundle,"layoutHash":format!("{layout_hash:08X}"),"schema":input.definition.as_ref()}));
+        let mut reading = json!({"complete":input.schema().complete,"truncated":false,"file":file,"sources":input.bundle,"layoutHash":format!("{layout_hash:08X}"),"schema":input.definition.as_ref()});
+        if unavailable
+            .as_array()
+            .is_some_and(|parts| !parts.is_empty())
+        {
+            reading["unavailablePartitions"] = unavailable.clone();
+        }
+        self.report.provenance.push(reading);
         self.report.decoded_bytes = self
             .report
             .decoded_bytes
             .checked_add(bytes)
             .ok_or_else(limit)?;
-        Ok(Input::Physical { input, file, bytes })
+        Ok(Input::Physical {
+            input,
+            file,
+            unavailable,
+            bytes,
+        })
     }
 }
