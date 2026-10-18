@@ -26,6 +26,23 @@ function fixture() {
 function exportBytes(f, files = [{filename:f.source,summary}]) {
   return Buffer.from(JSON.stringify({type:'llvm.coverage.json.export',version:'2.0.1',data:[{files}]}));
 }
+// Synthetic summary-only output, constructed from LLVM 23.1.1's
+// renderRoot/renderFile/renderSummary. No user-machine export or raw profile
+// is copied here. Counts and filenames are deliberately test-only values.
+// https://github.com/llvm/llvm-project/blob/llvmorg-23.1.1/llvm/tools/llvm-cov/CoverageExporterJson.cpp
+function llvm23Export(f, externalCount = 0) {
+  const fullSummary = {
+    lines:{count:10,covered:8,percent:80}, functions:{count:5,covered:3,percent:60},
+    instantiations:{count:5,covered:3,percent:60}, regions:{count:12,covered:7,notcovered:5,percent:100*7/12},
+    branches:{count:0,covered:0,notcovered:0,percent:0}, mcdc:{count:0,covered:0,notcovered:0,percent:0},
+  };
+  const files = [f.source,...Array.from({length:externalCount},(_,i)=>join(f.root,`vendor/dependency-${i}.rs`))]
+    .sort().map(filename=>({filename,summary:structuredClone(fullSummary)}));
+  const totals = structuredClone(fullSummary);
+  for(const metric of Object.values(totals)) for(const key of ['count','covered','notcovered'])
+    if(Object.hasOwn(metric,key)) metric[key] *= files.length;
+  return {data:[{files,totals}],type:'llvm.coverage.json.export',version:'3.1.0'};
+}
 function mock(f, hooks = {}) {
   const calls = [], options = {packageName:'lycheedev-core',lib:true,toolchain:f.toolchain};
   let artifact;
@@ -512,5 +529,87 @@ test('summary scope excludes external files, rejects duplicate/impossible counts
     assert.equal(report.files.length,1); assert.deepEqual(report.excluded,[external]); assert.equal(Object.hasOwn(report,'percent'),false);
     for(const files of [[{filename:external,summary}],[{filename:f.source,summary},{filename:f.source,summary}],
       [{filename:f.source,summary:{...summary,lines:{count:1,covered:2}}}]]) assert.throws(()=>summarizeCoverage(exportBytes(f,files),f.root),/coverage\./);
+  } finally {f.cleanup();}
+});
+test('reviewed LLVM JSON 2.0.1 and synthetic 3.1.0 summaries have the same owned-file meaning',()=>{
+  const f=fixture(); try {
+    const exported=llvm23Export(f), report=summarizeCoverage(Buffer.from(JSON.stringify(exported)),f.root);
+    assert.deepEqual(report,summarizeCoverage(exportBytes(f),f.root));
+    assert.deepEqual(Object.keys(exported.data[0]).sort(),['files','totals']);
+    assert.deepEqual(Object.keys(exported.data[0].files[0]).sort(),['filename','summary']);
+    assert.deepEqual(Object.keys(exported.data[0].totals).sort(),['branches','functions','instantiations','lines','mcdc','regions']);
+    assert.deepEqual(report.files[0],{path:'crates/lycheedev-core/src/lib.rs',
+      functions:{count:5,covered:3,uncovered:2},lines:{count:10,covered:8,uncovered:2},regions:{count:12,covered:7,uncovered:5}});
+    assert.equal(Object.hasOwn(report,'totals'),false); assert.equal(Object.hasOwn(report.files[0],'branches'),false);
+  } finally {f.cleanup();}
+});
+test('LLVM 23.1.1 pipeline accepts a synthetic 526-file 3.1.0 export without including dependency totals',()=>{
+  const f=fixture(); try {
+    const exported=llvm23Export(f,525), bytes=Buffer.from(JSON.stringify(exported));
+    const version=({result})=>{result.stdout=Buffer.from(result.stdout.toString().replaceAll('22.1.0','23.1.1'));};
+    const runner=mock(f,{rustc:version,'profdata-version':version,'cov-version':version,export({result}){result.stdout=bytes;}});
+    const result=collectRustCoverage(f.root,runner.options,{execute:runner.execute});
+    const report=JSON.parse(readFileSync(result.report)), receipt=JSON.parse(readFileSync(result.coverageEvidence));
+    assert.equal(report.complete,true); assert.equal(report.compiler.llvm,'23.1.1');
+    assert.equal(report.steps.length,10); assert(report.steps.every(step=>step.status===0));
+    assert.equal(report.coverage.files.length,1); assert.equal(report.coverage.excluded.length,525);
+    assert.equal(report.coverage.files[0].lines.count,10); assert.equal(exported.data[0].totals.lines.count,5260);
+    assert.match(report.coverage.denominator,/No workspace percentage/); assert.equal(Object.hasOwn(report.coverage,'totals'),false);
+    const exportLog=receipt.sealedLogs.find(row=>row.original===report.steps.at(-1).stdout);
+    assert(exportLog); assert.deepEqual(readFileSync(exportLog.path),bytes);
+    assert.equal(receipt.state,'retired'); assert.equal(existsSync(receipt.directory),false);
+  } finally {f.cleanup();}
+});
+test('LLVM export rejects unknown or malformed versions and incorrect type identifiers',()=>{
+  const f=fixture(); try {
+    for(const version of [undefined,null,3,{},[],['3.1.0'],'','2','2.','2.not-a-version','2.0.0','2.0.2',
+      '3','3.0.1','3.1.0\n','3.1.0-extra','3.1.1','3.2.0','4.0.0']) {
+      const exported=llvm23Export(f); exported.version=version;
+      assert.throws(()=>summarizeCoverage(Buffer.from(JSON.stringify(exported)),f.root),/coverage\.export_schema/,`version ${JSON.stringify(version)}`);
+    }
+    for(const type of [undefined,null,1,{},[],['llvm.coverage.json.export'],'LLVM.coverage.json.export','llvm.coverage.json','']) {
+      const exported=llvm23Export(f); exported.type=type;
+      assert.throws(()=>summarizeCoverage(Buffer.from(JSON.stringify(exported)),f.root),/coverage\.export_schema/);
+    }
+  } finally {f.cleanup();}
+});
+test('LLVM export validates root, single data object, files and consumed summary shapes',()=>{
+  const f=fixture(); try {
+    const encode=value=>Buffer.from(JSON.stringify(value));
+    for(const root of [null,[],true,0,'export',{}])
+      assert.throws(()=>summarizeCoverage(encode(root),f.root),/coverage\.export_schema/);
+    for(const data of [undefined,null,{},[],[null],[[]],[{}],[{files:null}],[{files:{}}],[{files:[]},{files:[]}]]) {
+      const exported=llvm23Export(f); exported.data=data;
+      assert.throws(()=>summarizeCoverage(encode(exported),f.root),/coverage\.export_schema/);
+    }
+    for(const file of [null,[],false,3,'file']) {
+      const exported=llvm23Export(f); exported.data[0].files=[file];
+      assert.throws(()=>summarizeCoverage(encode(exported),f.root),/coverage\.export_schema/);
+    }
+    for(const filename of [undefined,null,1,{},[],['/file.rs'],'relative.rs','']) {
+      const exported=llvm23Export(f); exported.data[0].files[0].filename=filename;
+      assert.throws(()=>summarizeCoverage(encode(exported),f.root),/coverage\.export_filename/);
+    }
+    for(const badSummary of [undefined,null,[],false,5,'summary',{}]) {
+      const exported=llvm23Export(f); exported.data[0].files[0].summary=badSummary;
+      assert.throws(()=>summarizeCoverage(encode(exported),f.root),/coverage\.export_metric/);
+    }
+    for(const metric of ['functions','lines','regions']) for(const row of [undefined,null,[],false,3,'metric',{},
+      {count:'1',covered:0},{count:1,covered:'0'},{count:-1,covered:0},{count:1,covered:-1},
+      {count:1,covered:2},{count:0.5,covered:0},{count:2,covered:0.5},{count:2**53,covered:0},{count:1,covered:Infinity}]) {
+      const exported=llvm23Export(f); exported.data[0].files[0].summary[metric]=row;
+      assert.throws(()=>summarizeCoverage(encode(exported),f.root),/coverage\.export_metric/);
+    }
+  } finally {f.cleanup();}
+});
+test('unsupported LLVM export schema fails after native-zero export and preserves the exact failure output',()=>{
+  const f=fixture(); try {
+    const exported=llvm23Export(f); exported.version='3.1.1'; const bytes=Buffer.from(JSON.stringify(exported));
+    const runner=mock(f,{export({result}){result.stdout=bytes;}}), {report,receipt}=failed(f,runner,/coverage\.export_schema/);
+    assert.equal(report.complete,false); assert.equal(report.coverage,undefined);
+    assert.equal(runner.calls.at(-1).step,'export'); assert.equal(report.steps.at(-1).status,0);
+    const exportLog=receipt.sealedLogs.find(row=>row.original===report.steps.at(-1).stdout);
+    assert(exportLog); assert.deepEqual(readFileSync(exportLog.path),bytes);
+    assert.equal(receipt.state,'retired'); assert.equal(report.rawArchived,true);
   } finally {f.cleanup();}
 });

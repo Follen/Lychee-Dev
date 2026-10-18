@@ -148,20 +148,29 @@ export function verifyCoverageTests(bytes, selection) {
 
 export function summarizeCoverage(bytes, root) {
   const exported = JSON.parse(text(bytes));
-  check(exported.type === 'llvm.coverage.json.export' && /^2\./.test(exported.version)
-    && Array.isArray(exported.data) && exported.data.length === 1 && Array.isArray(exported.data[0].files), 'export_schema');
+  const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+  // Reviewed summary-only contracts, not a promise to accept future 2.x/3.x:
+  // llvmorg-20.1.0 (2.0.1) and llvmorg-23.1.1 (3.1.0), renderSummary/File/Root:
+  // https://github.com/llvm/llvm-project/blob/llvmorg-23.1.1/llvm/tools/llvm-cov/CoverageExporterJson.cpp
+  // The consumed count/covered fields are unchanged; detailed MC/DC records
+  // are omitted by --summary-only and do not expand this report's scope.
+  check(object(exported) && exported.type === 'llvm.coverage.json.export' && ['2.0.1', '3.1.0'].includes(exported.version)
+    && Array.isArray(exported.data) && exported.data.length === 1 && object(exported.data[0])
+    && Array.isArray(exported.data[0].files), 'export_schema');
   const ownedRoot = join(root, 'crates'), files = [], excluded = [], seen = new Set();
   check(exported.data[0].files.length <= 16384, 'export_file_budget');
   for (const file of exported.data[0].files) {
+    check(object(file), 'export_schema');
     check(typeof file.filename === 'string' && isAbsolute(file.filename), 'export_filename');
     const path = resolve(file.filename), rel = relative(ownedRoot, path);
     check(!seen.has(path), 'duplicate_export_file'); seen.add(path);
     if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel) || !path.endsWith('.rs')) { excluded.push(file.filename); continue; }
     contained(ownedRoot, path); regular(path);
+    check(object(file.summary), 'export_metric');
     const metrics = {};
     for (const metric of ['functions', 'lines', 'regions']) {
-      const row = file.summary?.[metric];
-      check(row && Number.isSafeInteger(row.count) && row.count >= 0 && Number.isSafeInteger(row.covered)
+      const row = file.summary[metric];
+      check(object(row) && Number.isSafeInteger(row.count) && row.count >= 0 && Number.isSafeInteger(row.covered)
         && row.covered >= 0 && row.covered <= row.count, 'export_metric');
       metrics[metric] = {count:row.count, covered:row.covered, uncovered:row.count-row.covered};
     }
