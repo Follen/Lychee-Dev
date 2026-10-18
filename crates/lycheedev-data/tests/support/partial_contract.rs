@@ -2,6 +2,7 @@
 use lycheedev_core::{Invocation, Outcome, evidence};
 use lycheedev_data::{db2, local_query, stream};
 use serde_json::{Value, json};
+use std::path::Path;
 fn invocation(base: &Invocation, command: &str, flags: &[(&str, &str)]) -> Invocation {
     let mut inv = base.clone();
     inv.command = command.into();
@@ -15,6 +16,10 @@ fn captured(base: &Invocation, out: &Outcome) {
     assert!(!out.provenance.is_empty());
     for capture in &out.provenance {
         assert_eq!(capture["complete"], false);
+        assert_eq!(
+            evidence::read_capture(&base.home, capture["id"].as_str().unwrap()).unwrap(),
+            *capture
+        );
         let raw = evidence::read_blob(&base.home, &capture["blob"], 16 << 20).unwrap();
         if capture["provenance"]["kind"] == "data-query-csv" {
             assert_eq!(raw, b"ID,Value\n1,42\n");
@@ -24,7 +29,7 @@ fn captured(base: &Invocation, out: &Outcome) {
         }
     }
 }
-pub fn exercise(base: &Invocation) {
+pub fn exercise(base: &Invocation, output: &Path) {
     let search = db2::dispatch(&invocation(
         base,
         "data db2 search",
@@ -106,7 +111,7 @@ pub fn exercise(base: &Invocation) {
     assert_eq!(sql_missing.data["result"]["rows"], json!([]));
     assert_eq!(sql_missing.data["partial"], true);
     captured(base, &sql_missing);
-    let output = base.home.join("partial.csv");
+    // The owning fixture supplies an external destination, never its managed home.
     let csv = local_query::sql(&invocation(
         base,
         "data sql",
@@ -123,10 +128,14 @@ pub fn exercise(base: &Invocation) {
         "ID,Value\n1,42\n"
     );
     let manifest: Value = serde_json::from_slice(
-        &std::fs::read(base.home.join("partial.csv.manifest.json")).unwrap(),
+        &std::fs::read(format!("{}.manifest.json", output.to_str().unwrap())).unwrap(),
     )
     .unwrap();
     assert_eq!(manifest["complete"], false);
+    assert_eq!(manifest, csv.data);
+    assert_eq!(csv.provenance.len(), 2);
+    assert_eq!(manifest["queryCapture"], csv.provenance[0]["id"]);
+    assert_eq!(manifest["csvCapture"], csv.provenance[1]["id"]);
     let mut frames = Vec::new();
     let streamed = stream::stream(
         &invocation(

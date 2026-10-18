@@ -11,14 +11,18 @@ mod contract;
 #[allow(dead_code)]
 #[path = "../../../../tests/support/catalog_fixture.rs"]
 mod fixture;
-fn prepare() -> (Fixture, Invocation) {
+fn prepare() -> (Fixture, Invocation, PathBuf) {
     prepare_table(fixture::encrypted_sections(7), fixture::encrypted_frame)
 }
 fn prepare_table(
     table: fixture::Table,
     frame: fn(&[u8]) -> (String, Vec<u8>),
-) -> (Fixture, Invocation) {
+) -> (Fixture, Invocation, PathBuf) {
     let source = Fixture::with_framing(false, None, table.raw.clone(), frame);
+    // Own a fresh sibling directory: CSV publication must stay outside home.
+    // Keep both directories on failure; only the successful test cleans them.
+    let exports = source.home.with_extension("exports");
+    std::fs::create_dir(&exports).unwrap();
     let key = source.home.join("keys.txt");
     std::fs::write(&key, "0000000000000001 000102030405060708090a0b0c0d0e0f\n").unwrap();
     let pin = selection::pin_selection(
@@ -90,7 +94,7 @@ fn prepare_table(
         cwd: source.home.clone(),
         control: Default::default(),
     };
-    (source, inv)
+    (source, inv, exports)
 }
 fn raw(inv: &Invocation, pin: &DataPin) -> Result<()> {
     let budget = Arc::new(Budget::query_controlled(
@@ -106,8 +110,8 @@ fn raw(inv: &Invocation, pin: &DataPin) -> Result<()> {
 }
 #[test]
 fn default_remote_missing_key_preserves_db2_sql_csv_stream_and_key_identity() {
-    let (source, inv) = prepare();
-    contract::exercise(&inv);
+    let (source, inv, exports) = prepare();
+    contract::exercise(&inv, &exports.join("partial.csv"));
     let mut public = inv.clone();
     public.flags.remove("--key-file");
     let partial = crate::db2::dispatch(&public).unwrap();
@@ -134,6 +138,7 @@ fn default_remote_missing_key_preserves_db2_sql_csv_stream_and_key_identity() {
         "changed key identity reused complete bytes"
     );
     std::fs::remove_dir_all(source.home).unwrap();
+    std::fs::remove_dir_all(exports).unwrap();
 }
 
 #[path = "../../../../tests/support/partial_string_contract.rs"]
@@ -150,8 +155,13 @@ fn default_remote_partial_cross_partition_string_stops_at_nul_before_unknown_byt
     for (gap, frame) in scenarios {
         let table = strings_fixture::table(7, gap, b"visible\0");
         let start = strings_fixture::pool(&table.raw);
-        let (source, inv) = prepare_table(table, frame);
-        string_contract::exercise(&inv, start + gap, gap != 4);
+        let (source, inv, exports) = prepare_table(table, frame);
+        string_contract::exercise(
+            &inv,
+            &exports.join("partial-string.csv"),
+            start + gap,
+            gap != 4,
+        );
         assert_eq!(
             raw(&inv, &source.pin).unwrap_err().code,
             "container.key_unavailable"
@@ -166,5 +176,6 @@ fn default_remote_partial_cross_partition_string_stops_at_nul_before_unknown_byt
             raw(&inv, &source.pin).unwrap();
         }
         std::fs::remove_dir_all(source.home).unwrap();
+        std::fs::remove_dir_all(exports).unwrap();
     }
 }

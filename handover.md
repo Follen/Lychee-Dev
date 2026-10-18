@@ -1,6 +1,6 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 04:34 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 04:41 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
 
 ### 当前执行：正式五循环 Stage 1 已发现实际业务缺口
 
@@ -12,7 +12,7 @@
 
 两项 init 失败分别是 mixed-slash fixture 与平台规范路径的字符串差异，以及新建 identity 的固定9位小数和 Go兼容重开后的去尾零表示差异。后者表示同一时刻，未证明 identity 重建或数据损坏。独立后继将新建时间规范化，保原clock/ID推导与历史文件字节；CLI测试保完整identity、文件bytes与重复恢复断言。3新增确定性/真实初始化/历史marker回归及修正的CLI测试已在cbff实际通过，见下方准确分组。
 
-第二批 `e9749e9d851cfefa9a02b4b8865aa5cbba3f80ef` 已保存批准的10文件，逐blob及完整字节读回一致：InstallationGuard取得失败和默认remove显式checked-close，以及init/archive原control全链。[本批Windows终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6245217858)：all-targets通过，23 pass / 4 fail / 0 ignored；19个Windows新增入口15过4败，1个Unix-only未编译/未执行。初始化1过3败、archive3过1败、coordination4过、removal15过。四失败均为新建与重开createdAt尾零字符串差异，完整ID和时刻一致；cbff canonical后继已实际复验通过，见下方分组；e974原四失败保留。5 owners全退役回收、无lease；removal native/wrapper0、forced=true且knownAuxiliaryCleanup=true、deadline=false，原事实保留。91文件新证据仅本地封存，不称已公开交付。
+第二批 `e9749e9d851cfefa9a02b4b8865aa5cbba3f80ef` 已保存批准的10文件，逐blob及完整字节读回一致：InstallationGuard取得失败和默认remove显式checked-close，以及init/archive原control全链。[本批Windows终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6245217858)：all-targets通过，23 pass / 4 fail / 0 ignored；19个Windows新增入口15过4败，1个Unix-only未编译/未执行。初始化1过3败、archive3过1败、coordination4过、removal15过。四失败均为新建与重开createdAt尾零字符串差异，完整ID和时刻一致；cbff canonical后继已实际复验通过，见下方分组；e974原四失败保留。5 owners全退役回收、无lease；removal native/wrapper0、forced=true且knownAuxiliaryCleanup=true、deadline=false，原事实保留。91文件原包后由本机完成公开GET/CRC/逐SHA交付，见[联合终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6245724068)，原失败保持。
 
 后继60个去重路径载荷（58个实际变更，2个与父提交相同）已保存为 `cbff043e8cfe54cf30909c61dde94ce287736fb0`，完整1578501B、60 Git blob和字节均与批准载荷一致，最终tree `7b8cec2a020553eb62be1fe94aa02f6d2d6b1519`。该批实际前置已结束（下方逐组记录），以下为保存时的范围与验证状态：
 - Source 9生产/测试文件和3 reader文件：真实inspect、Unicode/asset metadata v15、flow显式有界栈。5文件原SHA恢复、4文件重建；37 Rust入口 NOT_RUN。配套reader新Node247/247过，不能替代实际v15产物验收。
@@ -32,11 +32,17 @@ Source原owner已退役，native101/wrapper1、forced=true/knownAuxiliaryCleanup
 
 ### cbff 前置终态与 Data 测试设置修正
 
-[完整终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6245678877)：七个Rust调用主组 **1881 pass / 9 fail / 5 ignored**；56个正式新入口逐名执行一次，47过9败，另1个ignored exporter未启动。Source两失败见上；[Data lib](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6245645368)1152过7败1忽略，WDC/catalog集成因lib失败未启动。9个owner全sealed/retired/reaped、无lease；Source/Data原forced=true且knownAuxiliaryCleanup=false保留。164文件430778B证据包仅本地封存，SHA `68d7ed60ec072c0405c35618d8dc2fe8a26aba839b8373c7659c5799848a8afb`，未据此宣称附件公开交付。
+[完整终态](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6245678877)：七个Rust调用主组 **1881 pass / 9 fail / 5 ignored**；56个正式新入口逐名执行一次，47过9败，另1个ignored exporter未启动。Source两失败见上；[Data lib](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6245645368)1152过7败1忽略，WDC/catalog集成因lib失败未启动。9个owner全sealed/retired/reaped、无lease；Source/Data原forced=true且knownAuxiliaryCleanup=false保留。164文件430778B证据包已由本机完成公开GET/CRC/逐SHA交付（[报告](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6245724068)），SHA `68d7ed60ec072c0405c35618d8dc2fe8a26aba839b8373c7659c5799848a8afb`；云端未独立重下载该包。
 
 Node原253过54败2skip是协调wrapper将外层6GiB变量泄漏到禁止继承该变量的测试子环境；原失败保留。[同argv独立新owner环境纠正复验](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6245673180)为307过0败2skip，两项file-symlink创建EPERM负例未执行。两次不合并为一次，不改正式工具或预算。cbff release/assembly/exporter/真实Data Skill均未启动。
 
 Data七项实际失败正按真实合同最窄修复：四个BLTE partial leaf和一个table availability leaf直接创建等待workspace准入的预算即使用；另两个local/default-CDN消费者共用空`--query`而被合法search参数校验拒绝。三文件测试修正已完成独审：leaf使用现成fixed controlled默认预算并保原control，真实workspace消费者仍完整admit；search使用合法42并核回显。生产准入/预算和全部partial、capture、CSV、stream、补钥断言保持。0新增测试，原7失败入口后继均NOT_RUN；本机22da定向不追新head。
+
+### 22da 定向实测与 CSV fixture 后继
+
+22da all-targets通过，table字符串4/0、local2/2、remote0/2；[Source恢复边界2/0](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6245720466)及[完整source_inspect15/0](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6245729519)实际通过，cbff两项Source失败已取得准确后继实证。6个owner已回收；106文件包本地封存，未冒称公开交付。Data两个旧空query失败由`1f3454f253be5d1141517df76f027a5ecbff1c76`修测试设置，尚待其整组运行；另两个字符串消费者在CSV使用home内路径，触真实managed-root拒绝，1f未修该问题。
+
+[实际CSV参数/原CAP](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6245744162)确认：local与remote均在gap16的CSV步骤失败，gap512/4消费者尚未执行；原错误保留已提交query CAP、outputPublished=false及嵌套错误。此前静审漏掉该路径。后继4测试文件同时修普通与字符串共享fixture：helper显式接收外部Path，local使用fx.root，remote使用其唯一home的全新sibling exports目录；成功后原测试清理两目录，失败保现场。完整静态核后续manifest/stream/capture/补钥及Skill独立外部输出布局；新增manifest等于返回值及query/CSV两CAP ID绑定断言，保原字节/partial断言。生产禁止向managed workspace输出的合同不变，0新增测试，4个既有消费者入口后继均NOT_RUN。运行中的1f固定队列不追head。
 
 ### Stage 1 第二轮：固定 cbff 的独立消费者复核
 

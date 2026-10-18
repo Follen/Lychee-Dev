@@ -2,6 +2,7 @@
 use lycheedev_core::{Invocation, Outcome, evidence, metadata::Metadata};
 use lycheedev_data::{db2, local_query, stream};
 use serde_json::{Value, json};
+use std::path::Path;
 fn invocation(base: &Invocation, command: &str, flags: &[(&str, &str)]) -> Invocation {
     let mut inv = base.clone();
     inv.command = command.into();
@@ -28,7 +29,7 @@ fn captured(base: &Invocation, out: &Outcome) {
         }
     }
 }
-pub fn exercise(base: &Invocation, gap_offset: usize, readable: bool) {
+pub fn exercise(base: &Invocation, output: &Path, gap_offset: usize, readable: bool) {
     let mut attempts = vec![
         invocation(base, "data db2", &[("--table", "Sample"), ("--id", "1")]),
         invocation(
@@ -117,7 +118,7 @@ pub fn exercise(base: &Invocation, gap_offset: usize, readable: bool) {
     .unwrap();
     assert_eq!(count.data["result"]["rows"], json!([[1]]));
     captured(base, &count);
-    let output = base.home.join("partial-string.csv");
+    // The owning fixture supplies an external destination, never its managed home.
     let csv = local_query::sql(&invocation(
         base,
         "data sql",
@@ -130,6 +131,15 @@ pub fn exercise(base: &Invocation, gap_offset: usize, readable: bool) {
     .unwrap();
     assert_eq!(std::fs::read(&output).unwrap(), b"ID,Name\n1,visible\n");
     captured(base, &csv);
+    let manifest: Value = serde_json::from_slice(
+        &std::fs::read(format!("{}.manifest.json", output.to_str().unwrap())).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest["complete"], false);
+    assert_eq!(manifest, csv.data);
+    assert_eq!(csv.provenance.len(), 2);
+    assert_eq!(manifest["queryCapture"], csv.provenance[0]["id"]);
+    assert_eq!(manifest["csvCapture"], csv.provenance[1]["id"]);
     let mut frames = Vec::new();
     let stream = stream::stream(
         &invocation(

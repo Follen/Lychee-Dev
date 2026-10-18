@@ -23,7 +23,7 @@ fn local_missing_key_preserves_readable_db2_sql_csv_stream_and_strict_assets() {
     let encoded = fixture::encrypted_frame(&table.raw).1;
     let fx = fixture::Fixture::with_encoded_table(table, encoded);
     let inv = invocation(&fx);
-    contract::exercise(&inv);
+    contract::exercise(&inv, &fx.root.join("partial.csv"));
     let mut public = inv.clone();
     public.flags.remove("--key-file");
     let partial = crate::db2::dispatch(&public).unwrap();
@@ -211,7 +211,12 @@ fn local_partial_cross_partition_string_stops_at_nul_before_unknown_bytes() {
         let encoded = strings_fixture::frame_at(&table.raw, gap).1;
         let fx = fixture::Fixture::with_encoded_table(table, encoded);
         let inv = invocation(&fx);
-        string_contract::exercise(&inv, start + gap, gap != 4);
+        string_contract::exercise(
+            &inv,
+            &fx.root.join("partial-string.csv"),
+            start + gap,
+            gap != 4,
+        );
         let pin = selection::load_pinned(&fx.home, &fx.pin)
             .unwrap()
             .spec
