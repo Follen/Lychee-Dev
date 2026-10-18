@@ -5,15 +5,16 @@
 // https://llvm.org/docs/CommandGuide/llvm-cov.html
 // https://llvm.org/docs/CommandGuide/llvm-profdata.html
 import assert from 'node:assert/strict';
-import {copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync} from 'node:fs';
+import {closeSync, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, writeFileSync, writeSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 import {basename, dirname, isAbsolute, join, relative, resolve, sep} from 'node:path';
 import {performance} from 'node:perf_hooks';
-import {beginScratch, contained, sha256} from './rust-disk.mjs';
+import {beginScratch, contained, sha256, usage} from './rust-disk.mjs';
 import {hashFile, runCargo} from './rust-build.mjs';
 import {ownedSpawnSync} from './rust-owned-process.mjs';
 
 const TARGET = 'x86_64-pc-windows-msvc', RUST = '1.99.0';
-const FILE_LIMIT = 16 << 20, RAW_LIMIT = 128 << 20;
+const FILE_LIMIT = 16 << 20, RAW_LIMIT = 128 << 20, EVIDENCE_LIMIT = 256 << 20;
 const FLAGS = ['-C', 'target-feature=+crt-static', '-C', 'instrument-coverage'];
 const SUPPORT = ['rust-coverage.mjs', 'rust-build.mjs', 'rust-disk.mjs', 'rust-owned-process.mjs', 'rust-owned-process.ps1', 'rust-build-auxiliary.json'];
 const save = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2) + '\n', {flag:'wx'});
@@ -30,6 +31,69 @@ function regular(path, limit = FILE_LIMIT) {
   return {path, bytes:info.size, sha256:hashFile(path, limit)};
 }
 function unchanged(row) { check(regular(row.path, Math.max(FILE_LIMIT, row.bytes)).sha256 === row.sha256, 'file_changed'); }
+function sameFile(before, after) {
+  for (const key of ['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs']) check(before[key] === after[key], 'file_changed');
+}
+const partName = index => `part-${String(index).padStart(3, '0')}.bin`;
+
+// Same ordered, bounded-part custody as source-index evidence. Only the complete
+// source files are LLVM inputs; a byte fragment is never an independent profile.
+export function verifyCoverageArchive(archive) {
+  check(archive.schema === 'lycheedev.coverage-file-parts.v1' && archive.partBytes === FILE_LIMIT
+    && Number.isSafeInteger(archive.bytes) && archive.bytes > 0 && archive.bytes <= RAW_LIMIT
+    && /^[a-f0-9]{64}$/.test(archive.sha256) && Array.isArray(archive.parts)
+    && archive.parts.length === Math.ceil(archive.bytes / FILE_LIMIT), 'archive_schema');
+  const whole = createHash('sha256'), buffer = Buffer.alloc(65536); let total = 0;
+  for (const [index, part] of archive.parts.entries()) {
+    const path = contained(archive.directory, join(archive.directory, partName(index)));
+    check(part.path === path && part.offset === total && part.bytes === Math.min(FILE_LIMIT, archive.bytes - total), 'archive_parts');
+    const before = lstatSync(path); check(before.isFile() && !before.isSymbolicLink() && before.size === part.bytes, 'archive_part_size');
+    const input = openSync(path, 'r'), one = createHash('sha256'); let count = 0;
+    try {
+      sameFile(before, fstatSync(input));
+      for (;;) {
+        const n = readSync(input, buffer, 0, buffer.length, null); if (!n) break;
+        count += n; check(count <= part.bytes, 'archive_part_size'); one.update(buffer.subarray(0, n)); whole.update(buffer.subarray(0, n));
+      }
+      check(count === part.bytes, 'archive_part_size'); sameFile(before, fstatSync(input));
+    } finally { closeSync(input); }
+    sameFile(before, lstatSync(path)); check(one.digest('hex') === part.sha256, 'archive_part_hash'); total += count;
+  }
+  check(total === archive.bytes && whole.digest('hex') === archive.sha256, 'archive_whole_hash');
+  return {bytes:total, sha256:archive.sha256};
+}
+
+// read/write injection is confined to Node copy-fault tests, never CLI options.
+export function archiveCoverageFile(source, directory, logs, {read = readSync, write = writeSync} = {}) {
+  check(Number.isSafeInteger(source.bytes) && source.bytes > 0 && source.bytes <= RAW_LIMIT, 'file_budget');
+  unchanged(source); const before = lstatSync(source.path);
+  mkdirSync(directory);
+  const archive = {schema:'lycheedev.coverage-file-parts.v1', path:source.path, bytes:source.bytes, sha256:source.sha256,
+    directory, partBytes:FILE_LIMIT, parts:[]};
+  const whole = createHash('sha256'), buffer = Buffer.alloc(65536), input = openSync(source.path, 'r'); let total = 0;
+  try {
+    sameFile(before, fstatSync(input));
+    while (total < source.bytes) {
+      const path = contained(directory, join(directory, partName(archive.parts.length))), length = Math.min(FILE_LIMIT, source.bytes - total);
+      const output = openSync(path, 'wx'), one = createHash('sha256'); let count = 0;
+      logs.push(path); // Even a failed/partial copy remains bounded sealed evidence.
+      try {
+        while (count < length) {
+          const wanted = Math.min(buffer.length, length - count), n = read(input, buffer, 0, wanted, null);
+          check(n > 0 && n <= wanted, 'archive_source_truncated'); const chunk = buffer.subarray(0, n);
+          let written = 0;
+          while (written < n) { const m = write(output, chunk, written, n - written); check(m > 0 && m <= n - written, 'archive_short_write'); written += m; }
+          one.update(chunk); whole.update(chunk); count += n;
+        }
+        fsyncSync(output);
+      } finally { closeSync(output); }
+      archive.parts.push({path, offset:total, bytes:count, sha256:one.digest('hex')}); total += count;
+    }
+    check(read(input, buffer, 0, 1, null) === 0, 'archive_source_grew'); sameFile(before, fstatSync(input));
+  } finally { closeSync(input); }
+  sameFile(before, lstatSync(source.path)); check(whole.digest('hex') === source.sha256, 'archive_source_changed');
+  verifyCoverageArchive(archive); unchanged(source); return archive;
+}
 
 export function coverageSelection({packageName, testName, lib = false, exact} = {}) {
   check(typeof packageName === 'string' && /^lycheedev-[a-z0-9-]+$/.test(packageName), 'package_required');
@@ -110,7 +174,7 @@ export function summarizeCoverage(bytes, root) {
 
 // execute/now injection is for Node custody/fault tests only. The CLI has no
 // override for the process owner, time budget, profile directory or build flags.
-export function collectRustCoverage(root, options, {execute = ownedSpawnSync, now = () => performance.now()} = {}) {
+export function collectRustCoverage(root, options, {execute = ownedSpawnSync, now = () => performance.now(), archiveFile = archiveCoverageFile} = {}) {
   root = realpathSync(root);
   const selection = coverageSelection(options); coverageEnvironment(process.env);
   check(typeof options.toolchain === 'string' && isAbsolute(options.toolchain), 'toolchain_path_required');
@@ -131,25 +195,58 @@ export function collectRustCoverage(root, options, {execute = ownedSpawnSync, no
     admissionOptions:{requiredBytes:256 << 20, scratchReserveBytes:128 << 20}});
   const rawDirectory = join(job.directory, 'raw'); mkdirSync(rawDirectory);
   const profilePattern = join(rawDirectory, 'test-%m-%p.profraw');
-  const reportPath = join(job.evidence, 'coverage.json'), logs = [], steps = [];
-  const report = {schema:'lycheedev.rust-coverage.v1', complete:false, selection, target:TARGET, rust:RUST, flags:FLAGS,
-    toolchain, tools, support, steps, profilePattern, coverageEvidence:job.receipt, totalProcessBudgetMs:600000};
-  let handlesReaped = true, succeeded = false, failure, build, rawArchived = false;
+  const reportPath = join(job.evidence, 'coverage.json'), custodyPath = join(job.evidence, 'custody.json');
+  const mergedPath = join(job.directory, 'coverage.profdata'), logs = [], buildLogs = [], steps = [];
+  const report = {schema:'lycheedev.rust-coverage.v2', complete:false, selection, target:TARGET, rust:RUST, flags:FLAGS,
+    toolchain, tools, support, steps, profilePattern, coverageEvidence:job.receipt, totalProcessBudgetMs:600000,
+    budgets:{rawBytes:RAW_LIMIT, scratchBytes:RAW_LIMIT, evidenceBytes:EVIDENCE_LIMIT, evidenceMetadataReserveBytes:FILE_LIMIT,
+      scope:'Observed raw+merged scratch and both coverage/build evidence directories; not an OS write quota. Binary/raw/merged bytes are preserved once as ordered parts; the build owner seals their custody index, not duplicate payloads.'}};
+  let handlesReaped = true, succeeded = false, failure, build, rawArchived = false, rawAttempted = false, mergedArchived = false, mergedAttempted = false;
+  let pendingBuildOutputBytes = 0;
+  function evidenceBytes() {
+    return usage(job.evidence).bytes + (report.buildEvidence ? usage(dirname(report.buildEvidence)).bytes : 0);
+  }
+  function evidenceBudget(extra = 0) {
+    // Until runCargo seals, account for the runtime logs it will copy. Payload
+    // parts stay solely with this owner; a small index binds them to the build.
+    const copies = build ? 0 : pendingBuildOutputBytes + buildLogs.reduce((sum, path) => sum + lstatSync(path).size, 0);
+    check(evidenceBytes() + copies + extra + FILE_LIMIT <= EVIDENCE_LIMIT, 'evidence_total_budget');
+  }
+  function preserve(row, name) {
+    evidenceBudget(row.bytes);
+    return archiveFile(row, join(job.evidence, name), logs);
+  }
   function archiveRaw() {
+    rawAttempted = true;
     const names = readdirSync(rawDirectory).sort();
     check(names.length <= 128, 'profile_count_budget');
     let total = 0;
     const records = names.map(name => {
       check(/^test-[0-9_]+-[0-9]+\.profraw$/.test(name), 'profile_filename');
-      const row = regular(contained(rawDirectory, join(rawDirectory, name)));
+      const row = regular(contained(rawDirectory, join(rawDirectory, name)), RAW_LIMIT);
       total += row.bytes; check(total <= RAW_LIMIT, 'profile_total_budget'); return row;
     });
-    const output = join(job.evidence, 'raw'); mkdirSync(output);
-    report.profiles = records.map(row => {
-      const path = join(output, basename(row.path)); copyFileSync(row.path, path); unchanged(row);
-      const preserved = regular(path); check(preserved.sha256 === row.sha256, 'profile_copy'); logs.push(path); return preserved;
-    });
+    report.profiles = [];
+    for (const row of records) report.profiles.push(preserve(row, `${basename(row.path)}.parts`));
     rawArchived = true;
+  }
+  function archiveMerged() {
+    mergedAttempted = true;
+    check(usage(job.directory).bytes <= RAW_LIMIT, 'scratch_total_budget');
+    report.merged = preserve(regular(mergedPath, RAW_LIMIT), 'coverage.profdata.parts'); mergedArchived = true;
+  }
+  function finishArchives() {
+    if (!handlesReaped) return;
+    if (!rawAttempted) { try { archiveRaw(); } catch (error) { report.profileArchiveError = error.message; } }
+    if (existsSync(mergedPath) && !mergedAttempted) { try { archiveMerged(); } catch (error) { report.mergedArchiveError = error.message; } }
+    // A failed LLVM child can still change an input/output. Never discard its
+    // current scratch bytes just because an earlier copy was authenticated.
+    if (rawArchived) { try {
+      assert.deepEqual(readdirSync(rawDirectory).sort(), report.profiles.map(row => basename(row.path)).sort(), 'coverage.profile_set_changed');
+      for (const row of report.profiles) { unchanged(row); verifyCoverageArchive(row); } }
+      catch (error) { rawArchived = false; report.profileArchiveError = error.message; } }
+    if (mergedArchived) { try { unchanged(report.merged); verifyCoverageArchive(report.merged); }
+      catch (error) { mergedArchived = false; report.mergedArchiveError = error.message; } }
   }
   const args = ['test', '--locked', '--offline', '-j', '1', '--target', TARGET, '-p', selection.packageName,
     ...(selection.kind === 'lib' ? ['--lib'] : ['--test', selection.testName]), '--no-run', '--message-format=json'];
@@ -169,22 +266,29 @@ export function collectRustCoverage(root, options, {execute = ownedSpawnSync, no
         let cargoOutput = Buffer.alloc(0), cargoError = Buffer.alloc(0), cargoStatus = null, cargoSignal = null, processFailure;
         function run(name, command, argv, {cargoBuild = false, environment = ownerOptions.env, cwd = root} = {}) {
           for (const row of Object.values(tools)) unchanged(row);
+          evidenceBudget();
           const remaining = Math.floor(deadline - now()); check(remaining > 0, 'deadline');
           handlesReaped = false;
           const result = execute(command, argv, {...ownerOptions, cwd, env:environment, evidence:job.evidence, cargoBuild,
             timeout:Math.min(remaining, 600000), maxBuffer:FILE_LIMIT});
           handlesReaped = result.handlesReaped === true;
-          logs.push(...(result.logs || []));
+          const processLogs = (result.logs || []).map(path => contained(job.evidence, path));
+          logs.push(...processLogs); buildLogs.push(...processLogs);
           const stdout = Buffer.from(result.stdout || ''), stderr = Buffer.from(result.stderr || '');
-          if (name === 'cargo') { cargoOutput = stdout; cargoError = stderr; cargoStatus = result.status; cargoSignal = result.signal; }
+          if (name === 'cargo') {
+            cargoOutput = stdout; cargoError = stderr; cargoStatus = result.status; cargoSignal = result.signal;
+            pendingBuildOutputBytes = stdout.length + stderr.length;
+          }
           check(stdout.length <= FILE_LIMIT && stderr.length <= FILE_LIMIT, 'output_budget');
           const prefix = join(job.evidence, `${steps.length}-${name}`), out = `${prefix}.stdout.bin`, err = `${prefix}.stderr.bin`;
           writeFileSync(out, stdout, {flag:'wx'}); writeFileSync(err, stderr, {flag:'wx'}); logs.push(out, err);
+          buildLogs.push(out, err);
           steps.push({name, command, args:argv, cwd, timeoutMs:remaining, status:result.status, signal:result.signal,
             environmentSHA256:sha256(Buffer.from(JSON.stringify(Object.entries(environment).sort(([a],[b]) => a.localeCompare(b))))),
             handlesReaped, error:result.error?.message, stdout:out, stderr:err});
           check(handlesReaped, 'tree_reap_unverified');
           check(!result.error && result.status === 0 && !result.signal, `${name}_failed`);
+          evidenceBudget();
           check(now() <= deadline, 'deadline');
           for (const row of Object.values(tools)) unchanged(row);
           return {stdout, stderr};
@@ -210,43 +314,76 @@ export function collectRustCoverage(root, options, {execute = ownedSpawnSync, no
           const compiled = run('cargo', cargoCommand, cargoArgs, {cargoBuild:true});
           cargoOutput = compiled.stdout; cargoError = compiled.stderr;
           const artifact = selectCoverageArtifact(cargoOutput, root, ownerOptions.env.CARGO_TARGET_DIR, selection);
-          const binary = join(job.evidence, 'instrumented-test.exe'); copyFileSync(artifact.path, binary); unchanged(artifact);
-          check(regular(binary, 128 << 20).sha256 === artifact.sha256, 'artifact_copy');
-          report.artifact = {...artifact, preservedBinary:binary};
+          report.artifact = {path:artifact.path, bytes:artifact.bytes, sha256:artifact.sha256,
+            archive:preserve(artifact, 'instrumented-test.exe.parts')};
           check(readdirSync(rawDirectory).length === 0, 'profiles_before_tests');
           const tested = run('tests', artifact.path, ['--test-threads=1', '--format=pretty', '--color=never',
             ...(selection.exact ? [selection.exact, '--exact'] : [])], {cwd:dirname(manifest)});
           report.tests = verifyCoverageTests(tested.stdout, selection);
-          unchanged(artifact); unchanged({path:binary, bytes:artifact.bytes, sha256:artifact.sha256});
+          unchanged(artifact); verifyCoverageArchive(report.artifact.archive);
           archiveRaw(); check(report.profiles.length > 0, 'profiles_missing');
-          const merged = join(job.evidence, 'coverage.profdata');
+          check(usage(job.directory).bytes < RAW_LIMIT, 'scratch_total_budget');
+          for (const row of report.profiles) { unchanged(row); verifyCoverageArchive(row); }
           run('merge', paths.profdata, ['merge', '-sparse', '--failure-mode=any', '-j', '1',
-            ...report.profiles.map(row => row.path), '-o', merged]);
-          report.merged = regular(merged); logs.push(merged);
+            ...report.profiles.map(row => row.path), '-o', mergedPath]);
+          archiveMerged();
           const exported = run('export', paths.cov, ['export', '--format=text', '--summary-only', '-j', '1',
-            `--instr-profile=${merged}`, '--object', binary]);
+            `--instr-profile=${mergedPath}`, '--object', artifact.path]);
           check(exported.stderr.length === 0, 'export_diagnostics');
           report.coverage = summarizeCoverage(exported.stdout, root);
-          for (const row of report.profiles) unchanged(row); unchanged(report.merged); unchanged(artifact);
-          unchanged({path:binary, bytes:artifact.bytes, sha256:artifact.sha256});
+          for (const row of report.profiles) { unchanged(row); verifyCoverageArchive(row); }
+          unchanged(report.merged); verifyCoverageArchive(report.merged); unchanged(artifact); verifyCoverageArchive(report.artifact.archive);
           assert.deepEqual(supportIdentity(), support, 'coverage.support_changed');
           check(now() <= deadline, 'deadline');
         } catch (error) { processFailure = error; }
+        finishArchives();
+        if (!processFailure && (!rawArchived || !mergedArchived)) processFailure = new Error(report.profileArchiveError || report.mergedArchiveError || 'coverage.archive_incomplete');
+        // Bind archived payloads to this build without copying every large part
+        // into a second evidence directory. The coverage owner seals each part.
+        const custody = {schema:'lycheedev.coverage-custody.v1', artifact:report.artifact?.archive,
+          profiles:report.profiles, merged:report.merged, rawArchived, mergedArchived,
+          error:processFailure?.message, profileArchiveError:report.profileArchiveError, mergedArchiveError:report.mergedArchiveError};
+        try {
+          const bytes = Buffer.from(JSON.stringify(custody, null, 2) + '\n'); check(bytes.length <= FILE_LIMIT / 2, 'custody_budget');
+          evidenceBudget(bytes.length * 2); writeFileSync(custodyPath, bytes, {flag:'wx'}); logs.push(custodyPath); buildLogs.push(custodyPath);
+          check(now() <= deadline, 'deadline');
+        } catch (error) { processFailure ??= error; report.custodyError = error.message; }
         return {status:cargoStatus, signal:cargoSignal, error:processFailure, handlesReaped,
-          stdout:cargoOutput, stderr:cargoError, logs:[...logs]};
+          stdout:cargoOutput, stderr:cargoError, logs:[...new Set(buildLogs)]};
       },
     });
     report.build = {buildEvidence:build.buildEvidence, target:build.target, inputHashes:build.inputHashes,
       environmentSHA256:build.environmentSHA256}; report.complete = true; succeeded = true;
   } catch (error) { failure = error; report.error = error.message; report.buildEvidence ??= error.buildEvidence; }
   finally {
-    if (handlesReaped && !rawArchived) {
-      try { archiveRaw(); } catch (error) { report.profileArchiveError = error.message; }
+    finishArchives();
+    if (succeeded && (!rawArchived || !mergedArchived)) {
+      failure = new Error(report.profileArchiveError || report.mergedArchiveError || 'coverage.archive_incomplete');
+      succeeded = false; report.complete = false; report.error = failure.message;
     }
-    report.handlesReaped = handlesReaped; report.rawArchived = rawArchived;
+    report.handlesReaped = handlesReaped; report.rawArchived = rawArchived; report.mergedArchived = mergedArchived;
+    report.observedEvidenceBytesBeforeReport = evidenceBytes();
+    // seal repeats each path in its log map and rows. Bound that final receipt
+    // before allowing success, including JSON escaping/field/digest overhead.
+    const uniqueLogs = [...new Set([...logs, reportPath])];
+    report.reservedCoverageReceiptBytes = lstatSync(job.receipt).size
+      + 4 * Buffer.byteLength(JSON.stringify(uniqueLogs)) + 1024 * (uniqueLogs.length + 1);
+    // Keep the original failure even when a producer exceeded its observed
+    // budget. Failure metadata is retained; no oversize owner is cleaned up.
+    const reportBytes = Buffer.byteLength(JSON.stringify(report, null, 2) + '\n');
+    if (report.observedEvidenceBytesBeforeReport + reportBytes + report.reservedCoverageReceiptBytes > EVIDENCE_LIMIT || reportBytes > FILE_LIMIT / 2) {
+      const error = new Error('coverage.evidence_total_budget'); failure ??= error; succeeded = false; report.complete = false;
+      report.error = failure.message; report.evidenceBudgetError = error.message;
+      if (reportBytes > FILE_LIMIT / 2) {
+        // Exact process outputs/parts remain on disk. Keep a bounded failure
+        // record instead of masking the cause with disk.seal's per-log limit.
+        report.omittedFromOversizeFailureReport = ['compiler', 'coverage', 'artifact', 'profiles', 'merged', 'tests', 'steps'];
+        for (const key of report.omittedFromOversizeFailureReport) delete report[key];
+      }
+    }
     save(reportPath, report); logs.push(reportPath);
     job.seal({state:handlesReaped ? (succeeded ? 'succeeded' : 'failed') : 'interrupted', handlesReaped, logs:[...new Set(logs)]});
-    if (handlesReaped && rawArchived) job.cleanup();
+    if (handlesReaped && rawArchived && (!existsSync(mergedPath) || mergedArchived) && !report.evidenceBudgetError) job.cleanup();
   }
   if (failure) throw Object.assign(failure, {coverageEvidence:job.receipt, coverageReport:reportPath});
   return {report:reportPath, coverageEvidence:job.receipt, buildEvidence:build.buildEvidence, selection, coverage:report.coverage};

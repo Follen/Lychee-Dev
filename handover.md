@@ -1,14 +1,20 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 15:16 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最近完整性能诊断产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-18 15:44 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最近完整性能诊断产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
 
 ### Stage2 Windows定向回归与首个coverage失败（2026-10-18 15:16 UTC）
 
 固定`5859d3f89beaa9fbd2560aa8199e4ceaec7d8d36`已完成all-targets check及19个互斥Rust组134/0/2ignored、11个Node文件438/0/6skip，所有普通组wrapper/native成功。Core/Live/Delivery有效性、SQL真实CAP/CSV关闭后恢复、Source实际worker/取消和普通XML持久CAP checker均实跑；不是全workspace或原ignored native XML完整链/真实npm安装验收。六Node均实际file-symlink创建EPERM，两个Rust文件链接测试显式ignored，未执行的断言不计通过。完整分组/逐名跳过见[终态6251526895](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6251526895)。
 
-既有stable单独安装官方llvm-tools组件成功，Rust1.99.0/LLVM23.1.1匹配，rustc/cargo/default配置hash前后不变。但首次正式coverage失败：[6251518367](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6251518367)。直接toolchain Cargo编译exit0，既有owned层因该Cargo不是reviewed启动入口而helperAdmission=owned.unreviewed_cargo_identity，VCTIP留存后按原合同forced收尾；不是编译/断言/deadline失败。test/merge/export未执行，profiles=0/complete=false，不能解释为0%覆盖。本轮23新owner全退役/reaped，27native记录中12forced（11known auxiliary、1该真实失败），无deadline；旧63d healthy-base active receipt/claims继续保留，不补造历史终态。[488文件证据附件索引](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6251534728)已返回链接，但首次公开GET404，完整附件尚未验证交付；后续原始日志公开补发待精确批准，由根线程处理。本次源码文档仅结果摘要与既有PR链接，不包含该原始载荷。
+既有stable单独安装官方llvm-tools组件成功，Rust1.99.0/LLVM23.1.1匹配，rustc/cargo/default配置hash前后不变。但首次正式coverage失败：[6251518367](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6251518367)。直接toolchain Cargo编译exit0，既有owned层因该Cargo不是reviewed启动入口而helperAdmission=owned.unreviewed_cargo_identity，VCTIP留存后按原合同forced收尾；不是编译/断言/deadline失败。test/merge/export未执行，profiles=0/complete=false，不能解释为0%覆盖。本轮23新owner全退役/reaped，27native记录中12forced（11known auxiliary、1该真实失败），无deadline；旧63d healthy-base active receipt/claims继续保留，不补造历史终态。[488文件证据附件索引](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6251534728)首次公开GET404记录保留；[后续交付终态6251553910](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6251553910)确认同一链接随后HTTP200、完整包字节/SHA、ZIP CRC及488文件逐项校验全部通过，没有重新打包或上传。另行追加原始日志公开请求仍待精确批准，由根线程处理。本次源码文档仅结果摘要与既有PR链接，不包含该原始载荷。
 
 coverage后继只修collector入口与测试：沿原reviewed Cargo launcher，并将请求固定到已完整认证的绝对toolchain路径，保原安装工具hash/版本/sysroot、辅助工具字节/签名、原600s及失败回收语义。不改policy或忽略forced；RUSTUP_AUTO_INSTALL=0禁止自动安装，直接Cargo与launcher的verbose身份必须一致。新增7项回归，Linux coverage/build/disk三suite50/0/0，仍只是模拟owned故障/真实文件边界；新修复的实际Windowscoverage仍待验证，普通已通过组不重复；Stage2、性能≤0.30、完整Skill/实机压力仍未闭合。
+
+### Coverage第二次Windows复验：真实测试通过、raw归档受阻（2026-10-18 15:30 UTC）
+
+固定`4bc30967c3f01c778f5c40814592e0f68769abb8`的Node复验49/0/1实际文件symlink创建EPERM；正常reviewed Cargo入口与指定toolchain认证已通过，选定Rust测试实际1/0/0。随后collector把32,916,376B的LLVM原始profile套入16MiB单文件默认上限，报coverage.file_budget；merge/export均未执行，尚无覆盖率数值。两个相关owner已安全回收、build channel释放，原raw保留；这不是Rust测试失败。以上为唯一Windows协调线程结果摘要，未另公开原始路径/argv/身份载荷。
+
+后继collector将完整binary/raw/merged按16MiB以内有序分片流式认证、封存，LLVM仍读取前后校验的完整binary/raw/merged；不把碎片当LLVM输入。build owner仅绑定custody索引，coverage owner保唯一一份payload分片，避免重复大文件。raw总量128MiB与原600s保持，落实raw+merged实际scratch总量128MiB及两owner证据累计256MiB的检查，并为报告保留空间。此前256MiB只是空闲空间预留而非硬累计检查；新检查也只是执行前后观察与失败保留，不是OS写入硬限。超限或身份变化不清理未完整归档scratch，通用disk.seal的16MiB政策不变。最终Linux coverage/build/disk三suite71/0/0（coverage58/build8/disk5，21新增）并独立复审通过，实际32,916,376B raw、超过16MiB的binary/merged、总量边界、短写/截断/篡改、失败后raw变化/新增与receipt增长预算均覆盖；旧16MiB判定mutation在真实尺寸fixture明确失败。正式Windowsmerge/export仍待验证。原5859入口身份失败和本次归档失败分别保留。
 
 ### Stage2第三轮有限消费者审查（2026-10-18 10:09 UTC）
 

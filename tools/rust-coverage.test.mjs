@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, truncateSync, writeFileSync} from 'node:fs';
+import {existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readSync, rmSync, symlinkSync, truncateSync, writeFileSync, writeSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {basename, dirname, join} from 'node:path';
-import {collectRustCoverage, coverageArguments, coverageEnvironment, coverageSelection, selectCoverageArtifact, summarizeCoverage, verifyCoverageTests} from './rust-coverage.mjs';
+import {archiveCoverageFile, collectRustCoverage, coverageArguments, coverageEnvironment, coverageSelection, selectCoverageArtifact, summarizeCoverage, verifyCoverageArchive, verifyCoverageTests} from './rust-coverage.mjs';
 import {hashFile, runCargo} from './rust-build.mjs';
+import {usage} from './rust-disk.mjs';
 
 const TARGET = 'x86_64-pc-windows-msvc';
 const selection = coverageSelection({packageName:'lycheedev-core', lib:true});
@@ -66,12 +67,16 @@ function mock(f, hooks = {}) {
     }
     if (step === 'merge') {
       assert.deepEqual(args.slice(0,5),['merge','-sparse','--failure-mode=any','-j','1']);
-      const raw = args.slice(5,-2); assert.equal(raw.length,1); assert.equal(readFileSync(raw[0],'utf8'),'raw counts');
+      const raw = args.slice(5,-2); assert.equal(raw.length,1); assert.match(basename(raw[0]),/^test-.*\.profraw$/);
+      if(f.rawBytes) { assert.equal(lstatSync(raw[0]).size,f.rawBytes); assert.equal(hashFile(raw[0]),f.rawSHA256); }
+      else assert.equal(readFileSync(raw[0],'utf8'),'raw counts');
       writeFileSync(args.at(-1),'merged counts');
     }
     if (step === 'export') {
       assert(args.includes('--summary-only')); assert(args.includes('--format=text')); assert(args.includes('--object'));
-      assert.equal(readFileSync(args.at(-1),'utf8'),'instrumented fixture'); stdout = exportBytes(f);
+      assert.equal(args.at(-1),artifact.executable);
+      if(f.binaryBytes) assert.equal(lstatSync(args.at(-1)).size,f.binaryBytes);
+      else assert.equal(readFileSync(args.at(-1),'utf8'),'instrumented fixture'); stdout = exportBytes(f);
     }
     const result = {status:0,handlesReaped:true,stdout,stderr:Buffer.alloc(0)};
     hooks[step]?.({result,owner,command,args,artifact,f,calls});
@@ -120,8 +125,13 @@ test('selected pipeline holds ordinary lease, retains exact raw/report/artifact 
     const report=JSON.parse(readFileSync(result.report)), owner=JSON.parse(readFileSync(result.coverageEvidence)), build=JSON.parse(readFileSync(result.buildEvidence));
     assert.equal(report.complete,true); assert.equal(report.tests.passed,2); assert.equal(report.tests.ignored,1);
     assert.equal(report.coverage.files[0].regions.uncovered,5); assert.match(report.coverage.denominator,/No workspace percentage/);
-    assert.equal(hashFile(report.artifact.preservedBinary),report.artifact.sha256);
-    assert.equal(hashFile(report.profiles[0].path),report.profiles[0].sha256);
+    assert.equal(verifyCoverageArchive(report.artifact.archive).sha256,report.artifact.sha256);
+    assert.equal(verifyCoverageArchive(report.profiles[0]).sha256,report.profiles[0].sha256);
+    assert.equal(report.schema,'lycheedev.rust-coverage.v2');
+    assert.equal(existsSync(report.profiles[0].path),false);
+    assert.equal(build.sealedLogs.some(row=>row.original.endsWith('part-000.bin')),false);
+    const custody=JSON.parse(readFileSync(build.sealedLogs.find(row=>row.original.endsWith('custody.json')).path));
+    assert.deepEqual(custody.profiles,report.profiles); assert.deepEqual(custody.artifact,report.artifact.archive);
     assert.equal(owner.state,'retired'); assert.equal(build.state,'retired'); assert.equal(existsSync(owner.directory),false);
     assert.equal(existsSync(join(f.root,'.tmp/rust-disk/channels/ordinary.lease')),false);
     for (const row of owner.sealedLogs) assert.equal(hashFile(row.path),row.sha256);
@@ -260,12 +270,205 @@ test('an executor throw retains both ownership units instead of assuming no proc
     assert.equal(runner.calls.at(-1).step,'tests');
   } finally {f.cleanup();}
 });
-test('oversized profile retains its owned scratch instead of silently omitting or deleting bytes',()=>{
+test('raw profile beyond 128 MiB retains its owned scratch instead of omitting or deleting bytes',()=>{
   const f=fixture(); try {
-    const runner=mock(f,{tests({owner}){truncateSync(owner.env.LLVM_PROFILE_FILE.replace('%m','123_0').replace('%p','99'),(16<<20)+1);}});
+    const runner=mock(f,{tests({owner}){truncateSync(owner.env.LLVM_PROFILE_FILE.replace('%m','123_0').replace('%p','99'),(128<<20)+1);}});
     const {report,receipt}=failed(f,runner,/file_budget/);
     assert.equal(report.rawArchived,false); assert.equal(receipt.state,'failed'); assert.equal(existsSync(receipt.directory),true);
     assert.equal(existsSync(join(f.root,'.tmp/rust-disk/channels/ordinary.lease')),false);
+  } finally {f.cleanup();}
+});
+test('real-sized 32916376-byte profile and large binary/merged data seal as bounded parts and merge complete originals',()=>{
+  const f=fixture(); try {
+    f.rawBytes=32916376; f.binaryBytes=(16<<20)+1;
+    const runner=mock(f,{
+      cargo({artifact}) { truncateSync(artifact.executable,f.binaryBytes); },
+      tests({owner}) { const path=owner.env.LLVM_PROFILE_FILE.replace('%m','123_0').replace('%p','99'); truncateSync(path,f.rawBytes); f.rawSHA256=hashFile(path); },
+      merge({args}) { truncateSync(args.at(-1),(16<<20)+3); },
+    });
+    const result=collectRustCoverage(f.root,runner.options,{execute:runner.execute}), report=JSON.parse(readFileSync(result.report));
+    assert.equal(report.complete,true); assert.equal(report.rawArchived,true); assert.equal(report.mergedArchived,true);
+    for(const row of [report.artifact.archive,...report.profiles,report.merged]) {
+      assert.equal(row.parts.length,2); assert.deepEqual(verifyCoverageArchive(row),{bytes:row.bytes,sha256:row.sha256});
+      assert(row.parts.every(part=>part.bytes<=(16<<20)));
+    }
+    assert.equal(report.profiles[0].sha256,f.rawSHA256); assert.equal(report.profiles[0].bytes,32916376);
+    assert.equal(existsSync(report.profiles[0].path),false); assert.equal(existsSync(report.merged.path),false);
+    assert.equal(existsSync(report.artifact.path),true);
+    for(const path of [result.coverageEvidence,result.buildEvidence]) {
+      const owner=JSON.parse(readFileSync(path)); assert.equal(owner.state,'retired');
+      for(const log of owner.sealedLogs) { assert(lstatSync(log.path).size<=(16<<20)); assert.equal(hashFile(log.path),log.sha256); }
+    }
+    const build=JSON.parse(readFileSync(result.buildEvidence));
+    assert(build.sealedLogs.some(row=>row.original.endsWith('custody.json')));
+    assert(!build.sealedLogs.some(row=>row.original.endsWith('.bin')&&row.original.includes('.parts')));
+  } finally {f.cleanup();}
+});
+test('multiple individually bounded raw profiles still obey the original 128 MiB total',()=>{
+  const f=fixture(); try {
+    const runner=mock(f,{tests({owner}) {
+      const first=owner.env.LLVM_PROFILE_FILE.replace('%m','123_0').replace('%p','99'); truncateSync(first,64<<20);
+      const second=join(dirname(first),'test-124_0-100.profraw'); writeFileSync(second,'x'); truncateSync(second,(64<<20)+1);
+    }});
+    const {report,receipt}=failed(f,runner,/profile_total_budget/);
+    assert.equal(report.rawArchived,false); assert.equal(receipt.state,'failed'); assert(existsSync(receipt.directory));
+    assert.equal(runner.calls.at(-1).step,'tests');
+  } finally {f.cleanup();}
+});
+test('raw profile count remains capped at 128 independently of byte size',()=>{
+  const f=fixture(); try {
+    const runner=mock(f,{tests({owner}) { const directory=dirname(owner.env.LLVM_PROFILE_FILE);
+      for(let i=0;i<128;i++) writeFileSync(join(directory,`test-${i}-1.profraw`),'x');
+    }});
+    const {report,receipt}=failed(f,runner,/profile_count_budget/);
+    assert.equal(report.rawArchived,false); assert(existsSync(receipt.directory)); assert.equal(runner.calls.at(-1).step,'tests');
+  } finally {f.cleanup();}
+});
+test('merged output exceeding raw-plus-merged scratch allowance is rejected after production and retained',()=>{
+  const f=fixture(); try {
+    const runner=mock(f,{merge({args}) { truncateSync(args.at(-1),128<<20); }});
+    const {report,receipt}=failed(f,runner,/scratch_total_budget/);
+    assert.equal(report.rawArchived,true); assert.equal(report.mergedArchived,false); assert(existsSync(receipt.directory));
+    assert.equal(lstatSync(join(receipt.directory,'coverage.profdata')).size,128<<20); assert.equal(runner.calls.at(-1).step,'merge');
+  } finally {f.cleanup();}
+});
+test('archive reservation refuses cumulative binary and raw evidence before another large copy',()=>{
+  const f=fixture(); try {
+    f.binaryBytes=128<<20;
+    const runner=mock(f,{cargo({artifact}) { truncateSync(artifact.executable,f.binaryBytes); },
+      tests({owner}) { truncateSync(owner.env.LLVM_PROFILE_FILE.replace('%m','123_0').replace('%p','99'),120<<20); }});
+    const {report,receipt}=failed(f,runner,/evidence_total_budget/);
+    assert.equal(report.rawArchived,false); assert(existsSync(receipt.directory)); assert.equal(runner.calls.at(-1).step,'tests');
+    assert.equal(verifyCoverageArchive(report.artifact.archive).bytes,128<<20);
+    assert(report.observedEvidenceBytesBeforeReport<(256<<20));
+  } finally {f.cleanup();}
+});
+test('producer evidence overflow keeps the original test failure and a bounded failure report',()=>{
+  const f=fixture(); try {
+    const runner=mock(f,{tests({owner,result}) {
+      result.status=101; result.logs=[];
+      for(let i=0;i<9;i++) { const path=join(owner.evidence,`fixture-large-${i}.bin`); writeFileSync(path,'x'); truncateSync(path,15<<20); result.logs.push(path); }
+    }});
+    const {report,receipt}=failed(f,runner,/tests_failed/);
+    assert.match(report.error,/tests_failed/); assert.match(report.evidenceBudgetError,/evidence_total_budget/);
+    assert.equal(report.complete,false); assert(existsSync(receipt.directory)); assert.equal(receipt.state,'failed');
+  } finally {f.cleanup();}
+});
+test('Cargo output copies and final receipt growth cannot turn an over-budget archive into success',()=>{
+  const f=fixture(); try {
+    f.binaryBytes=128<<20; f.rawBytes=33498098;
+    const runner=mock(f,{cargo({artifact,result}) {
+      truncateSync(artifact.executable,f.binaryBytes);
+      const prefix='{"reason":"compiler-message","message":"', suffix='"}\n';
+      const padding=(16<<20)-result.stdout.length-Buffer.byteLength(prefix+suffix);
+      result.stdout=Buffer.concat([result.stdout,Buffer.from(prefix+'x'.repeat(padding)+suffix)]);
+      result.stderr=Buffer.alloc(16<<20,0x78);
+    },tests({owner}) {
+      const path=owner.env.LLVM_PROFILE_FILE.replace('%m','123_0').replace('%p','99');
+      truncateSync(path,f.rawBytes); f.rawSHA256=hashFile(path);
+    }});
+    const {error,report,receipt}=failed(f,runner,/evidence_total_budget/);
+    assert.equal(report.complete,false); assert.equal(report.rawArchived,false); assert(existsSync(receipt.directory));
+    assert(usage(join(f.root,'.tmp/rust-disk/evidence')).bytes<=(256<<20));
+    assert(report.reservedCoverageReceiptBytes>=lstatSync(error.coverageEvidence).size);
+  } finally {f.cleanup();}
+});
+test('large raw data is archived even when the test fails and merge never starts',()=>{
+  const f=fixture(); try {
+    const runner=mock(f,{tests({owner,result}) { truncateSync(owner.env.LLVM_PROFILE_FILE.replace('%m','123_0').replace('%p','99'),32916376); result.status=101; }});
+    const {report,receipt}=failed(f,runner,/tests_failed/);
+    assert.equal(report.rawArchived,true); assert.equal(verifyCoverageArchive(report.profiles[0]).bytes,32916376);
+    assert.equal(receipt.state,'retired'); assert.equal(runner.calls.at(-1).step,'tests');
+  } finally {f.cleanup();}
+});
+test('failed merge that changes a previously archived raw input retains the changed scratch bytes',()=>{
+  const f=fixture(); try {
+    const runner=mock(f,{merge({args,result}) { writeFileSync(args[5],'changed raw'); result.status=1; }});
+    const {report,receipt}=failed(f,runner,/merge_failed/);
+    assert.equal(report.rawArchived,false); assert.match(report.profileArchiveError,/file_changed/); assert(existsSync(receipt.directory));
+    assert.equal(readFileSync(report.profiles[0].path,'utf8'),'changed raw');
+  } finally {f.cleanup();}
+});
+test('a raw profile appearing after archival prevents cleanup of unarchived bytes',()=>{
+  const f=fixture(); try {
+    const runner=mock(f,{merge({args,result}) { writeFileSync(join(dirname(args[5]),'test-999-100.profraw'),'late raw'); result.status=1; }});
+    const {report,receipt}=failed(f,runner,/merge_failed/);
+    assert.equal(report.rawArchived,false); assert.match(report.profileArchiveError,/profile_set_changed/); assert(existsSync(receipt.directory));
+    assert.equal(readFileSync(join(dirname(report.profiles[0].path),'test-999-100.profraw'),'utf8'),'late raw');
+  } finally {f.cleanup();}
+});
+test('failed export cannot discard a changed previously archived merged profile',()=>{
+  const f=fixture(); try {
+    const runner=mock(f,{export({args,result}) { writeFileSync(args.find(arg=>arg.startsWith('--instr-profile=')).split('=').slice(1).join('='),'changed merged'); result.status=1; }});
+    const {report,receipt}=failed(f,runner,/export_failed/);
+    assert.equal(report.mergedArchived,false); assert.match(report.mergedArchiveError,/file_changed/); assert(existsSync(receipt.directory));
+    assert.equal(readFileSync(report.merged.path,'utf8'),'changed merged');
+  } finally {f.cleanup();}
+});
+test('oversize report metadata becomes a bounded failure without masking it with seal log limits',()=>{
+  const f=fixture(); try {
+    const runner=mock(f,{rustc({result}) { result.stdout=Buffer.concat([result.stdout,Buffer.alloc(9<<20,0x78)]); }});
+    const {error,report,receipt}=failed(f,runner,/evidence_total_budget/);
+    assert.equal(report.complete,false); assert(report.omittedFromOversizeFailureReport.includes('compiler'));
+    assert(lstatSync(error.coverageReport).size<(16<<20)); assert.equal(receipt.state,'failed'); assert(existsSync(receipt.directory));
+    assert(receipt.sealedLogs.some(row=>lstatSync(row.path).size>(9<<20)));
+  } finally {f.cleanup();}
+});
+test('archival finalization and custody index do not reset or escape the original deadline',()=>{
+  const f=fixture(); try {
+    let exported=false, tailChecks=0;
+    const runner=mock(f,{export() { exported=true; }});
+    const {report}=failed(f,runner,/deadline/,{now:()=>exported&&++tailChecks>=3 ? 600001 : 0});
+    assert.equal(runner.calls.at(-1).step,'export'); assert.equal(report.complete,false); assert.equal(report.totalProcessBudgetMs,600000);
+  } finally {f.cleanup();}
+});
+test('archive boundaries retain exact whole identity at 16 MiB minus one, exact and plus one',()=>{
+  const f=fixture(); try {
+    for(const bytes of [(16<<20)-1,16<<20,(16<<20)+1]) {
+      const path=join(f.root,`profile-${bytes}`); writeFileSync(path,'data'); truncateSync(path,bytes);
+      const source={path,bytes,sha256:hashFile(path)}, logs=[];
+      const archived=archiveCoverageFile(source,join(f.root,`parts-${bytes}`),logs);
+      assert.equal(archived.parts.length,Math.ceil(bytes/(16<<20))); assert.deepEqual(verifyCoverageArchive(archived),{bytes,sha256:source.sha256});
+      assert(logs.every(file=>lstatSync(file).size<=(16<<20)));
+    }
+  } finally {f.cleanup();}
+});
+for(const mode of ['truncate-source','change-source','corrupt-copy','truncate-copy','zero-write']) test(`${mode} during streaming archive cannot authenticate or clean source`,()=>{
+  const f=fixture(); try {
+    const path=join(f.root,'source.profraw'); writeFileSync(path,Buffer.alloc(70000,1));
+    const source={path,bytes:70000,sha256:hashFile(path)}, logs=[]; let once=false;
+    const io={read(fd,buffer,offset,length,position) {
+      const n=readSync(fd,buffer,offset,length,position);
+      if(!once&&n) { once=true; if(mode==='truncate-source') truncateSync(path,69999); if(mode==='change-source') writeFileSync(path,Buffer.alloc(70000,2)); }
+      if(!n&&mode==='truncate-copy') truncateSync(logs[0],1); return n;
+    },write(fd,buffer,offset,length) {
+      if(mode==='zero-write') return 0;
+      const n=writeSync(fd,buffer,offset,length); if(mode==='corrupt-copy') writeSync(fd,Buffer.from([99]),0,1,0); return n;
+    }};
+    assert.throws(()=>archiveCoverageFile(source,join(f.root,'parts'),logs,io),/coverage\.(?:archive_|file_changed)/);
+    assert(existsSync(path)); assert(logs.length>0); assert(logs.every(file=>lstatSync(file).size<=(16<<20)));
+  } finally {f.cleanup();}
+});
+test('streaming archive completes partial writes and validates ordered part metadata and bytes',()=>{
+  const f=fixture(); try {
+    const path=join(f.root,'source.profraw'); writeFileSync(path,'fixture profile');
+    const source={path,bytes:lstatSync(path).size,sha256:hashFile(path)}, logs=[];
+    const row=archiveCoverageFile(source,join(f.root,'parts'),logs,{write:(fd,buffer,offset,length)=>writeSync(fd,buffer,offset,Math.min(length,3))});
+    assert.deepEqual(verifyCoverageArchive(row),{bytes:source.bytes,sha256:source.sha256});
+    for(const change of [x=>x.parts[0].offset++,x=>x.parts.pop(),x=>x.parts[0].path=path,x=>x.sha256='0'.repeat(64),x=>x.parts[0].sha256='0'.repeat(64)]) {
+      const changed=structuredClone(row); change(changed); assert.throws(()=>verifyCoverageArchive(changed),/coverage\.archive_/);
+    }
+    writeFileSync(logs[0],'fixture Profile'); assert.throws(()=>verifyCoverageArchive(row),/archive_part_hash/);
+  } finally {f.cleanup();}
+});
+test('partial profile archive failure seals partial parts and retains the raw owner',()=>{
+  const f=fixture(); try {
+    const runner=mock(f), archiveFile=(row,directory,logs)=>archiveCoverageFile(row,directory,logs,
+      row.path.endsWith('.profraw') ? {write(){throw new Error('fixture write failure');}} : {});
+    const {report,receipt}=failed(f,runner,/fixture write failure/,{archiveFile});
+    assert.equal(report.rawArchived,false); assert.equal(receipt.state,'failed'); assert(existsSync(receipt.directory));
+    assert(receipt.sealedLogs.some(log=>log.path.includes('.profraw.parts')&&lstatSync(log.path).size===0));
+    assert.equal(runner.calls.at(-1).step,'tests');
   } finally {f.cleanup();}
 });
 test('Cargo artifact cardinality, completion, manifest, target and output boundaries are enforced',()=>{
