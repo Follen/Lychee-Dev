@@ -737,8 +737,9 @@ pub fn sql(inv: &Invocation) -> Result<Outcome> {
             _ => None,
         };
         if let Some((code, message, exit)) = mapped {
-            let diagnostic =
-                error.details.get("column").is_some() || error.details.get("location").is_some();
+            let diagnostic = error.code == "relational.invalid_syntax"
+                || error.details.get("column").is_some()
+                || error.details.get("location").is_some();
             if let Some(details) = error.details.as_object_mut() {
                 details.insert("stage".into(), json!("query"));
             } else {

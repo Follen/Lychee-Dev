@@ -78,6 +78,11 @@ impl InstallationMaintenanceLease {
     }
 }
 impl InstallationGuard {
+    /// Consume the installation owner and report its retained lock close once.
+    pub fn close(self) -> Result<()> {
+        self._maintenance.close()
+    }
+
     pub fn acquire(target: &Path) -> Result<Self> {
         let maintenance = InstallationMaintenanceLease::acquire(target)?;
         let parent = &maintenance.parent;

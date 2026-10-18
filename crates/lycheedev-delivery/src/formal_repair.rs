@@ -9,7 +9,7 @@
 #![forbid(unsafe_code)]
 use crate::{
     deploy,
-    installation::{self, Receipt},
+    installation::{self, Receipt, same_receipt},
     release, slots,
 };
 use lycheedev_core::{
@@ -212,31 +212,6 @@ fn require_receipt(value: &Value, receipt: &Receipt, detail: &str) -> Result<()>
         return Err(conflict(detail));
     }
     Ok(())
-}
-/// Fixed Go sameReceipt treats resource ordering as immaterial. Never collapse
-/// duplicate paths into a map first: both inputs must independently be unique.
-fn same_receipt(left: &Receipt, right: &Receipt) -> Result<bool> {
-    fn resources(
-        receipt: &Receipt,
-    ) -> Result<std::collections::BTreeMap<&str, &installation::Resource>> {
-        let mut paths = std::collections::BTreeMap::new();
-        let mut folded = std::collections::BTreeSet::new();
-        for resource in &receipt.resources {
-            if !folded.insert(resource.path.to_lowercase())
-                || paths.insert(resource.path.as_str(), resource).is_some()
-            {
-                return Err(invalid("duplicate resource path in receipt"));
-            }
-        }
-        Ok(paths)
-    }
-    let left_resources = resources(left)?;
-    let right_resources = resources(right)?;
-    Ok(left.schema == right.schema
-        && left.component == right.component
-        && left.version == right.version
-        && left.commit == right.commit
-        && left_resources == right_resources)
 }
 fn lock(scope: &Path, resource: &str, control: &OperationControl) -> Result<ExclusiveLock> {
     let path = scope.join(format!("{}.lock", storage::sha256(resource.as_bytes())));

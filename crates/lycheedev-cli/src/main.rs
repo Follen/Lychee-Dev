@@ -265,6 +265,12 @@ fn parse(args: &[String]) -> Result<Invocation> {
     if command == "target resolve" {
         target_remote::validate_flags(&flags)?;
     }
+    if command == "init" && !help
+        && ["--plan", "--fresh", "--resume"].into_iter()
+            .filter(|flag| flags.contains_key(*flag)).count() > 1
+    {
+        return Err(ToolkitError::arguments("init accepts at most one of --plan, --fresh, --resume"));
+    }
     if command == "target add" && flags.get("--help").map(String::as_str) != Some("true")
         && (flags.get("--remote").map(String::as_str) == Some("true"))
             == flags.get("--installation").is_some_and(|path| !path.is_empty())
@@ -3337,3 +3343,6 @@ mod tests {
 }
 #[cfg(test)]
 mod doctor_cache_tests;
+
+#[cfg(test)]
+mod init_tests;

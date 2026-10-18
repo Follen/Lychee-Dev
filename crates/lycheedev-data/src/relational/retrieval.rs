@@ -1,7 +1,10 @@
 //! Fixed Go retrieval order as continuations on the expression driver's heap
 //! stack. WITH, derived/scalar queries and UNION never recurse natively. The
 //! grammar, public tokens/AST and deferred schema/execution checks are unchanged.
-use super::{ast_owner, equal_fold, expression_parser, identifier_lower, syntax};
+use super::{
+    ast_owner, diagnostic::Parser as DiagnosticParser, equal_fold, expression_parser,
+    identifier_lower, syntax,
+};
 use expression_parser::{Expression, QueryOwner, Task as Next, take, take_query};
 use sqlparser::{
     ast::{helpers::attached_token::AttachedToken, *},
@@ -59,7 +62,7 @@ pub(super) fn parse(
 #[inline(never)]
 pub(super) fn step(
     dialect: &syntax::QueryDialect,
-    parser: &mut Parser,
+    parser: &mut DiagnosticParser<'_, '_, '_>,
     task: Task,
     tasks: &mut Vec<Next>,
     value: &mut Option<Expression>,
@@ -215,7 +218,7 @@ pub(super) fn step(
 }
 
 fn select_start(
-    parser: &mut Parser,
+    parser: &mut DiagnosticParser<'_, '_, '_>,
     with: Option<Box<WithState>>,
     tasks: &mut Vec<Next>,
 ) -> ParseResult<()> {
@@ -238,7 +241,7 @@ fn select_start(
     Ok(())
 }
 fn input_ready(
-    parser: &mut Parser,
+    parser: &mut DiagnosticParser<'_, '_, '_>,
     mut state: Box<SelectState>,
     kind: Option<u8>,
     relation: Relation,
@@ -264,7 +267,7 @@ fn input_ready(
     Ok(())
 }
 fn group_start(
-    parser: &mut Parser,
+    parser: &mut DiagnosticParser<'_, '_, '_>,
     state: Box<SelectState>,
     tasks: &mut Vec<Next>,
     query: &mut Option<QueryOwner>,
@@ -278,7 +281,7 @@ fn group_start(
     }
 }
 fn having_start(
-    parser: &mut Parser,
+    parser: &mut DiagnosticParser<'_, '_, '_>,
     state: Box<SelectState>,
     tasks: &mut Vec<Next>,
     query: &mut Option<QueryOwner>,
@@ -291,7 +294,7 @@ fn having_start(
     }
 }
 fn suffix_start(
-    parser: &mut Parser,
+    parser: &mut DiagnosticParser<'_, '_, '_>,
     branch: QueryOwner,
     tasks: &mut Vec<Next>,
     query: &mut Option<QueryOwner>,
@@ -308,7 +311,7 @@ fn suffix_start(
     }
 }
 fn tail(
-    parser: &mut Parser,
+    parser: &mut DiagnosticParser<'_, '_, '_>,
     mut branch: QueryOwner,
     tasks: &mut Vec<Next>,
     query: &mut Option<QueryOwner>,
@@ -476,7 +479,7 @@ fn empty_query(body: SetExpr) -> Query {
     }
 }
 
-fn take_word(parser: &mut Parser, expected: &str) -> Option<TokenWithSpan> {
+fn take_word(parser: &mut DiagnosticParser<'_, '_, '_>, expected: &str) -> Option<TokenWithSpan> {
     match &parser.peek_token().token {
         Token::Word(word) if word.quote_style.is_none() && equal_fold(&word.value, expected) => {
             Some(parser.next_token())
@@ -485,14 +488,17 @@ fn take_word(parser: &mut Parser, expected: &str) -> Option<TokenWithSpan> {
     }
 }
 
-fn require_word(parser: &mut Parser, expected: &str) -> ParseResult<TokenWithSpan> {
+fn require_word(
+    parser: &mut DiagnosticParser<'_, '_, '_>,
+    expected: &str,
+) -> ParseResult<TokenWithSpan> {
     match take_word(parser, expected) {
         Some(token) => Ok(token),
         None => parser.expected(expected, parser.peek_token()),
     }
 }
 
-fn identifier(parser: &mut Parser) -> ParseResult<Ident> {
+fn identifier(parser: &mut DiagnosticParser<'_, '_, '_>) -> ParseResult<Ident> {
     let token = parser.peek_token();
     // parse_identifier also accepts string literals; the fixed grammar does not.
     let Token::Word(word) = &token.token else {
@@ -515,7 +521,7 @@ fn table_alias(name: Ident, explicit: bool) -> TableAlias {
     }
 }
 
-fn optional_alias(parser: &mut Parser) -> ParseResult<Option<TableAlias>> {
+fn optional_alias(parser: &mut DiagnosticParser<'_, '_, '_>) -> ParseResult<Option<TableAlias>> {
     let explicit = take_word(parser, "AS").is_some();
     let implicit = matches!(&parser.peek_token().token, Token::Word(word)
         if word.quote_style.is_some() || !syntax::reserved(&word.value));
@@ -527,7 +533,7 @@ fn optional_alias(parser: &mut Parser) -> ParseResult<Option<TableAlias>> {
 }
 
 #[inline(never)]
-fn limit_clause(parser: &mut Parser, branch: &mut Query) -> ParseResult<()> {
+fn limit_clause(parser: &mut DiagnosticParser<'_, '_, '_>, branch: &mut Query) -> ParseResult<()> {
     let limit = if take_word(parser, "LIMIT").is_some() {
         Some(count(parser)?)
     } else {
@@ -551,7 +557,7 @@ fn limit_clause(parser: &mut Parser, branch: &mut Query) -> ParseResult<()> {
     Ok(())
 }
 
-fn count(parser: &mut Parser) -> ParseResult<Expr> {
+fn count(parser: &mut DiagnosticParser<'_, '_, '_>) -> ParseResult<Expr> {
     let token = parser.peek_token();
     let value = match &token.token {
         Token::Number(raw, _) => {

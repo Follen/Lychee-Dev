@@ -5,7 +5,7 @@
 //! does not make Go's legal 128 active frames fit an ordinary Windows stack.
 //! Query and expression continuations share one heap driver. AST construction
 //! is isolated in nonrecursive builders. No depth, deadline or thread is added.
-use super::{retrieval, syntax, *};
+use super::{diagnostic::Parser as DiagnosticParser, retrieval, syntax, *};
 use sqlparser::{
     ast::helpers::attached_token::AttachedToken, keywords::Keyword, parser::ParserError,
     tokenizer::Token,
@@ -99,6 +99,8 @@ fn run(
     parser: &mut Parser,
     mut tasks: Vec<Task>,
 ) -> ParseResult<(Option<Expression>, Option<QueryOwner>)> {
+    let mut parser = DiagnosticParser::new(parser, dialect);
+    let parser = &mut parser;
     let mut value = None;
     let mut query = None;
     while let Some(task) = tasks.pop() {
@@ -151,8 +153,12 @@ fn run(
             Task::Cast => {
                 let input = take(&mut value)?;
                 parser.expect_keyword(Keyword::AS)?;
+                // Some sqlparser identifier constructors omit the AST span.
+                // Preserve the actual token location before consuming it.
+                let name_start = parser.peek_token().span.start;
                 let name = parser.parse_identifier()?;
-                syntax::identifier(&name).map_err(|e| ParserError::ParserError(e.message))?;
+                syntax::identifier(&name)
+                    .map_err(|e| parser.invalid_at(name_start, e.message, "expected identifier"))?;
                 parser.expect_token(&Token::RParen)?;
                 value = Some(build(Node::Cast(input, name)));
             }
@@ -168,7 +174,11 @@ fn run(
             Task::CaseOperand(mut case) => {
                 case.operand = Some(take(&mut value)?);
                 if !parser.parse_keyword(Keyword::WHEN) {
-                    return Err(ParserError::ParserError("CASE requires WHEN".into()));
+                    return Err(parser.invalid_at(
+                        parser.peek_token().span.start,
+                        "CASE requires WHEN".into(),
+                        "CASE requires WHEN",
+                    ));
                 }
                 tasks.extend([Task::CaseCondition(case), Task::Expression(0)]);
             }
@@ -232,7 +242,7 @@ pub(super) fn take(value: &mut Option<Expression>) -> ParseResult<Expression> {
 }
 
 fn finish_case(
-    parser: &mut Parser,
+    parser: &mut DiagnosticParser<'_, '_, '_>,
     case: Box<Case>,
     value: &mut Option<Expression>,
 ) -> ParseResult<()> {
@@ -244,7 +254,7 @@ fn finish_case(
 #[inline(never)]
 fn primary(
     _dialect: &syntax::QueryDialect,
-    parser: &mut Parser,
+    parser: &mut DiagnosticParser<'_, '_, '_>,
     tasks: &mut Vec<Task>,
     value: &mut Option<Expression>,
 ) -> ParseResult<()> {
@@ -327,7 +337,7 @@ fn primary(
     Ok(())
 }
 
-fn operation(parser: &Parser) -> Option<(Operation, u8, bool)> {
+fn operation(parser: &DiagnosticParser<'_, '_, '_>) -> Option<(Operation, u8, bool)> {
     let negated = parser.peek_keyword(Keyword::NOT);
     let token = if negated {
         parser.peek_nth_token(1)
@@ -373,7 +383,7 @@ fn operation(parser: &Parser) -> Option<(Operation, u8, bool)> {
 #[inline(never)]
 fn infix(
     _dialect: &syntax::QueryDialect,
-    parser: &mut Parser,
+    parser: &mut DiagnosticParser<'_, '_, '_>,
     minimum: u8,
     tasks: &mut Vec<Task>,
     value: &mut Option<Expression>,
@@ -431,11 +441,15 @@ fn infix(
 // Neither function below enters another expression/query. Keep all unboxed
 // public Expr construction and moves here, out of the recursive query path.
 #[inline(never)]
-fn leaf(parser: &mut Parser) -> ParseResult<Box<Expr>> {
+fn leaf(parser: &mut DiagnosticParser<'_, '_, '_>) -> ParseResult<Box<Expr>> {
     if parser.peek_token().token == Token::Colon
         && !matches!(parser.peek_nth_token(1).token, Token::Word(ref word) if word.quote_style.is_none())
     {
-        return Err(ParserError::ParserError("Expected named parameter".into()));
+        return Err(parser.invalid_at(
+            parser.peek_token().span.start,
+            "Expected named parameter".into(),
+            "expected named parameter",
+        ));
     }
     if parser.peek_token().token == Token::Mul {
         return Ok(Box::new(Expr::Wildcard(AttachedToken(parser.next_token()))));
@@ -463,13 +477,18 @@ fn leaf(parser: &mut Parser) -> ParseResult<Box<Expr>> {
         return Ok(Box::new(Expr::Value(value.with_span(token.span))));
     }
     let Token::Word(word) = token.token else {
-        return parser.expected("scalar expression", parser.peek_token());
+        return parser.expected("identifier", parser.peek_token());
     };
     if word.quote_style.is_none() && syntax::reserved(&word.value) {
-        return Err(ParserError::ParserError("Expected identifier".into()));
+        return Err(parser.invalid_at(
+            token.span.start,
+            "Expected identifier".into(),
+            "expected identifier",
+        ));
     }
     let first = parser.parse_identifier()?;
-    syntax::identifier(&first).map_err(|e| ParserError::ParserError(e.message))?;
+    syntax::identifier(&first)
+        .map_err(|e| parser.invalid_at(first.span.start, e.message, "expected identifier"))?;
     if parser.consume_token(&Token::Period) {
         if parser.peek_token().token == Token::Mul {
             return Ok(Box::new(Expr::QualifiedWildcard(
@@ -477,8 +496,10 @@ fn leaf(parser: &mut Parser) -> ParseResult<Box<Expr>> {
                 AttachedToken(parser.next_token()),
             )));
         }
+        let second_start = parser.peek_token().span.start;
         let second = parser.parse_identifier()?;
-        syntax::identifier(&second).map_err(|e| ParserError::ParserError(e.message))?;
+        syntax::identifier(&second)
+            .map_err(|e| parser.invalid_at(second_start, e.message, "expected identifier"))?;
         Ok(Box::new(Expr::CompoundIdentifier(vec![first, second])))
     } else {
         Ok(Box::new(Expr::Identifier(first)))

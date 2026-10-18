@@ -230,7 +230,10 @@ impl Budget {
     /// The returned sink receives its single JSON record at final owner drop.
     #[cfg(test)]
     pub(crate) fn with_test_phase_profile(mut self) -> (Self, crate::phase_profile::TestOutput) {
-        assert!(self.phase_profile.is_none(), "test budget already has a recorder");
+        assert!(
+            self.phase_profile.is_none(),
+            "test budget already has a recorder"
+        );
         let (profile, output) = Profile::observed();
         self.phase_profile = Some(profile);
         (self, output)
@@ -283,9 +286,21 @@ impl Budget {
             .logical
             .retained_bytes
             .checked_add(state.logical_scratch)
-            .ok_or_else(|| adaptive::overflow("scratch_bytes"))?;
+            .ok_or_else(|| {
+                adaptive::overflow(
+                    "scratch_bytes",
+                    state.logical.retained_bytes,
+                    state.logical_scratch,
+                    state.maximum(state.limits).retained_bytes,
+                )
+            })?;
         if current > maximum.retained_bytes || bytes > maximum.retained_bytes - current {
-            return Err(adaptive::overflow("scratch_bytes"));
+            return Err(adaptive::overflow(
+                "scratch_bytes",
+                current,
+                bytes,
+                maximum.retained_bytes,
+            ));
         }
         let next = current + bytes;
         let growth = state.growth(
@@ -442,7 +457,14 @@ impl Budget {
         current_logical.retained_bytes = current_logical
             .retained_bytes
             .checked_add(state.logical_scratch)
-            .ok_or_else(|| adaptive::overflow("scratch_bytes"))?;
+            .ok_or_else(|| {
+                adaptive::overflow(
+                    "scratch_bytes",
+                    state.logical.retained_bytes,
+                    state.logical_scratch,
+                    state.maximum(state.limits).retained_bytes,
+                )
+            })?;
         let mut next_logical =
             Self::admitted(current_logical, logical, state.maximum(state.limits))?;
         let next_safety = Self::admitted(state.used, safety, state.maximum(state.safety_limits))?;
@@ -498,7 +520,7 @@ impl Budget {
             ),
         ] {
             if *used > limit || add > limit - *used {
-                return Err(adaptive::overflow(name));
+                return Err(adaptive::overflow(name, *used, add, limit));
             }
             *used += add;
         }
@@ -828,3 +850,6 @@ mod phase_profile_tests {
         assert_eq!(output[0]["phases"][10]["calls"], 1);
     }
 }
+
+#[cfg(test)]
+mod diagnostic_tests;

@@ -28,6 +28,38 @@ pub struct VerifiedInstallation {
     pub manifest_sha256: String,
     pub generation: u64,
 }
+/// Fixed Go sameReceipt ignores inventory order but never duplicate paths.
+pub(crate) fn same_receipt(left: &Receipt, right: &Receipt) -> Result<bool> {
+    fn resources(receipt: &Receipt) -> Result<std::collections::BTreeMap<&str, &Resource>> {
+        let mut paths = std::collections::BTreeMap::new();
+        let mut folded = std::collections::BTreeSet::new();
+        for resource in &receipt.resources {
+            if !folded.insert(resource.path.to_lowercase())
+                || paths.insert(resource.path.as_str(), resource).is_some()
+            {
+                return Err(ToolkitError::new(
+                    "delivery.invalid_installation",
+                    "duplicate resource path in receipt",
+                    4,
+                ));
+            }
+        }
+        Ok(paths)
+    }
+    let left_resources = resources(left)?;
+    let right_resources = resources(right)?;
+    Ok(left.schema == right.schema
+        && left.component == right.component
+        && left.version == right.version
+        && left.commit == right.commit
+        && left_resources == right_resources)
+}
+pub(crate) fn same_receipt_value(left: &Value, right: &Value) -> Result<bool> {
+    same_receipt(
+        &serde_json::from_value(left.clone())?,
+        &serde_json::from_value(right.clone())?,
+    )
+}
 pub fn inspect(path: &Path, component: &str) -> Result<Value> {
     if !path.exists() {
         return Ok(json!({"state":"absent"}));
@@ -105,7 +137,7 @@ pub fn verify_clean_controlled(
     control: &lycheedev_core::control::OperationControl,
 ) -> Result<VerifiedInstallation> {
     control.check()?;
-    let result = inspect(path, "addon")?;
+    let result = inspect_main_controlled(path, "addon", control)?;
     control.check()?;
     if result["state"] != "managed" || result["receipt"]["version"] != release {
         return Err(ToolkitError::new(
@@ -130,7 +162,11 @@ pub fn verify_clean_controlled(
     control.check()?;
     Ok(VerifiedInstallation {
         canonical_path: fs::canonicalize(path)?,
-        manifest_sha256: storage::sha256(&fs::read(path.join(MARKER))?),
+        manifest_sha256: storage::sha256(&crate::slots::read_bounded_controlled(
+            &path.join(MARKER),
+            1 << 20,
+            control,
+        )?),
         // Compatibility field for the disabled historical driver. Formal Go
         // slot metadata has no synthetic generation counter. New business
         // adapters must bind the exact receipt and runtime/consumer instead.

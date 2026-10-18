@@ -17,6 +17,7 @@ mod aggregate;
 mod ast_owner;
 mod binding;
 mod compound;
+mod diagnostic;
 mod evaluation;
 mod execution;
 mod execution_query;
@@ -909,22 +910,37 @@ impl Program {
         let mut query = match parsed {
             Ok(query) => query,
             Err(error) => {
-                compound::validate_all_keyword(
-                    sql,
-                    &tokens,
-                    parser.get_current_index().saturating_add(1),
-                )?;
+                let diagnostic = dialect.diagnostic.borrow_mut().take();
+                // A failing parse_identifier may have consumed its bad token.
+                // Only UNION tokens strictly before the typed error location
+                // can supersede it; a bad identifier spelled UNION cannot.
+                let consumed = diagnostic.as_ref().map_or_else(
+                    || parser.get_current_index().saturating_add(1),
+                    |diagnostic| {
+                        tokens.partition_point(|token| {
+                            (token.span.start.line, token.span.start.column)
+                                < (diagnostic.location.line, diagnostic.location.column)
+                        })
+                    },
+                );
+                compound::validate_all_keyword(sql, &tokens, consumed)?;
                 return Err(match error {
                     sqlparser::parser::ParserError::RecursionLimitExceeded => budget(),
-                    error => problem("relational.invalid_syntax", &error.to_string()),
+                    error => match diagnostic {
+                        Some(diagnostic) => {
+                            diagnostic::at(sql, diagnostic.location, &diagnostic.detail)
+                        }
+                        None => problem("relational.invalid_syntax", &error.to_string()),
+                    },
                 });
             }
         };
         parser.consume_token(&sqlparser::tokenizer::Token::SemiColon);
         if parser.peek_token().token != sqlparser::tokenizer::Token::EOF {
-            return Err(problem(
-                "relational.invalid_syntax",
-                "Expected end of retrieval",
+            return Err(diagnostic::at(
+                sql,
+                parser.peek_token().span.start,
+                "expected end of statement",
             ));
         }
         // Check UNION's retained token after normal left-to-right parsing, so

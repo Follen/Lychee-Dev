@@ -40,7 +40,7 @@ fn missing_from_wins_before_malformed_where_in_every_retrieval_position() {
     ] {
         let error = Program::compile(sql).unwrap_err();
         assert_eq!(error.code, "relational.invalid_syntax", "{sql}: {error:?}");
-        assert!(error.message.contains("Expected: FROM"), "{sql}: {error:?}");
+        assert!(error.message.contains("expected FROM"), "{sql}: {error:?}");
     }
 }
 #[test]
@@ -59,7 +59,7 @@ fn duplicate_cte_is_diagnosed_before_its_as_or_later_body() {
     );
     let first =
         Program::compile("WITH c AS (SELECT 1 WHERE (), c WHERE ( SELECT ID FROM t").unwrap_err();
-    assert!(first.message.contains("Expected: FROM"), "{first:?}");
+    assert!(first.message.contains("expected FROM"), "{first:?}");
 }
 #[test]
 fn integer_count_rejection_precedes_later_union_body_errors() {
@@ -68,7 +68,7 @@ fn integer_count_rejection_precedes_later_union_body_errors() {
         let error = Program::compile(&sql).unwrap_err();
         assert_eq!(error.code, "relational.invalid_syntax");
         assert!(error.message.contains("integer"), "{sql}: {error:?}");
-        assert!(!error.message.contains("Expected: FROM"));
+        assert!(!error.message.contains("expected FROM"));
     }
 }
 #[test]
@@ -181,7 +181,7 @@ fn owned_prefix_depth_is_checked_before_a_later_grammar_error() {
         Program::compile(&sql)
             .unwrap_err()
             .message
-            .contains("Expected: FROM")
+            .contains("expected FROM")
     );
 }
 #[test]

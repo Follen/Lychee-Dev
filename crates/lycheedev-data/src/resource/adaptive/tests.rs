@@ -145,21 +145,52 @@ fn pressure_hard_dimensions_and_overflow_are_atomic() {
         b.memory_snapshot().unwrap(),
     );
     f.probe.bytes.store(32 * MIB, Ordering::SeqCst);
-    for cost in [
-        memory_cost(32, 32),
-        memory_cost(0, 32),
-        Cost {
-            retained_bytes: u64::MAX,
-            ..Cost::default()
-        },
-        Cost {
-            metadata_bytes: u64::MAX,
-            ..Cost::default()
-        },
+    for (cost, dimension, used, requested, limit) in [
+        (
+            memory_cost(32, 32),
+            "retained_bytes",
+            496 * MIB,
+            32 * MIB,
+            504 * MIB,
+        ),
+        (
+            memory_cost(0, 32),
+            "metadata_bytes",
+            112 * MIB,
+            32 * MIB,
+            120 * MIB,
+        ),
+        (
+            Cost {
+                retained_bytes: u64::MAX,
+                ..Cost::default()
+            },
+            "retained_bytes",
+            496 * MIB,
+            u64::MAX,
+            1024 * MIB,
+        ),
+        (
+            Cost {
+                metadata_bytes: u64::MAX,
+                ..Cost::default()
+            },
+            "metadata_bytes",
+            112 * MIB,
+            u64::MAX,
+            1024 * MIB,
+        ),
     ] {
+        let error = b.charge(cost).unwrap_err();
         assert_eq!(
-            b.charge(cost).unwrap_err().code,
-            "records.query_resource_budget"
+            (error.code.as_str(), error.exit_code),
+            ("records.query_resource_budget", 3)
+        );
+        assert_eq!(
+            error.message,
+            format!(
+                "records.query_resource_budget: {dimension} (used={used} requested={requested} limit={limit})"
+            )
         );
         assert_eq!(
             (
@@ -170,7 +201,11 @@ fn pressure_hard_dimensions_and_overflow_are_atomic() {
             before
         );
     }
-    assert!(b.reserve_logical_scratch(32 * MIB).is_err());
+    let error = b.reserve_logical_scratch(32 * MIB).err().unwrap();
+    assert_eq!(
+        error.message,
+        "records.query_resource_budget: retained_bytes (used=520093696 requested=33554432 limit=528482304)"
+    );
     assert_eq!(b.memory_snapshot().unwrap(), before.2);
     f.probe.bytes.store(4 << 30, Ordering::SeqCst);
     for cost in [

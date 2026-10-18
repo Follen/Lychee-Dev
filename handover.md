@@ -1,6 +1,16 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-17 21:36 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-17 22:07 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新实测产品/runner `b4d8b22a666648ee0fe18a3f2656a84c586e5bd3` 六fresh场景完整Facts/字段/重复/顺序/共同summary全部等价，实际读取证据完整归档后cleanup。冷4.381s、暖0.369s、四变体1.168–1.201s；六比值0.414–0.653仍未≤0.30，仅单组诊断。完整性能与最终五阶段循环审计未完成。
+
+### 当前执行：正式五循环 Stage 1 已发现实际业务缺口
+
+2026-10-17 21:40 UTC 已以生产b4d/文档775启动三个独立读审。首轮及修复复审确认18项：Delivery取消/缺席目标/原release恢复/receipt顺序，Probe分页/原子性与身份/有界读取，Core prune取消与字节账/init模式及归档全链control，Data准入/预算诊断/SQL位置/缺钥partial，Source inspect/flow有界性/Unicode路径。独立作者正分范围修复；代码候选仍需正式离线验证和独立复审，当前实现不能称全量完成，尚未进入Stage2。完整状态与验收入口见[Stage1记录](docs/toolkit/rust-audit-stage1-2026-10-17.md)。性能目标仍open，下一性能算法暂不抢已确认业务缺陷修复。
+
+### Stage 1 首个有限修复批：待实际验证
+
+Delivery 23、Probe 11、Core/CLI init 15、Data 准入 7、诊断 8 个新增测试入口已写，诊断共享 21 条原始输入；Rust 全部 NOT_RUN。独立复审修正了安装锁内 recovery 重扫/显式关闭、compound busy 错误保留，以及 SQL quoted identifier 的空 AST span，当前用原 token 定位。Node 两个既有文件 10/10，静态检查通过。首批不混 Source 与缺钥 partial 的在写内容。
+
+后继仍须修 init/archive 全链 control、InstallationGuard 取得失败的 maintenance close、默认 addon remove 的两个隐式 Drop；不可将入口检查或 fresh/update 修复视为全部关闭。正式离线队列由主协调统一安排，先 alltargets 与受影响完整组，再实际 Skill 两项任务。Stage 1 还需修复复审及下一轮检查。
 
 ### 最新实测：b4d认证Facts所有权转移完整六场景
 
@@ -17,7 +27,7 @@
 | first-delete | 2785.9070 | 1199.6514 | 0.430614 | 400.388 | 93.848 |
 | cross-prefix-rename | 2744.3274 | 1200.7922 | 0.437554 | 393.979 | 91.764 |
 
-12新index+4准备调用，wrapper0/finalIntegrity=true/NOT_RUN空，17新owner sealed/reaped，16retired、工具stage保留。五数组/字段/重复/顺序及共同summary全等；完整实际GoFacts/Rustpack或loose/index/manifest读取tuple归档核过后cleanup。本机17GET/CRC/片与wholeSHA过，52,819files/158,185chunks，包136,680,709B SHA `98ec1942a2bd378220da7ac106646557374f7677582cedaadc3f15104d751de2`；云端唯一作者独立复核进行中。11内存样本有gap，Rustwarm1项sampled_successful仍非完整RSS峰；CPU/IO未测。12产品native无forced/deadline，编译knownAuxiliaryCleanup原事实保留。
+12新index+4准备调用，wrapper0/finalIntegrity=true/NOT_RUN空，17新owner sealed/reaped，16retired、工具stage保留。五数组/字段/重复/顺序及共同summary全等；完整实际GoFacts/Rustpack或loose/index/manifest读取tuple归档核过后cleanup。本机17GET/CRC/片与wholeSHA过，52,819files/158,185chunks，包136,680,709B SHA `98ec1942a2bd378220da7ac106646557374f7677582cedaadc3f15104d751de2`；云端唯一作者已独立核全部17附件、52,819文件、六场景Facts重放、12native receipts与17owner；六份完整index SHA也与31a对应场景相同。11内存样本有gap，Rustwarm1项sampled_successful仍非完整RSS峰；CPU/IO未测。12产品native无forced/deadline，编译knownAuxiliaryCleanup原事实保留。
 
 四变体派单仍9/1/8/9；FactsRead372–400ms仍含完整Value解析、canonical hash编码、typed转换与IO，去clone份额不等于整个桶。跨run观察增量总wall下降，但cold略慢、warm路径不经过此take，均不虚构因果或20对达标。下一先独立分析剩余真实成本，同时准备五轮第一阶段正式审计进入条件/剩功能差距，不无限以微优化代替审计。
 

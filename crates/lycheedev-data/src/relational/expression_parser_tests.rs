@@ -140,7 +140,7 @@ fn like_keeps_escape_as_an_alias_and_preserves_early_from_error() {
             let error = Program::compile(&format!("SELECT 'a' {operator} 'a' ESCAPE {suffix}"))
                 .unwrap_err();
             assert_eq!(error.code, "relational.invalid_syntax");
-            assert!(error.message.contains("Expected: FROM"), "{error:?}");
+            assert!(error.message.contains("expected FROM"), "{error:?}");
         }
     }
 }

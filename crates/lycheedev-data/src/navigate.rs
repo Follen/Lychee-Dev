@@ -178,28 +178,27 @@ pub(crate) fn dispatch_after_read(
         0
     };
     let timeout = inv.usize_flag("--timeout-seconds", 300, 1, 3600)?;
-    let budget = Arc::new(Budget::controlled(
-        Cost::defaults(),
+    let budget = Arc::new(Budget::query_controlled(
         Instant::now() + Duration::from_secs(timeout as u64),
         inv.control.clone(),
     ));
-    let mut remote = if inv.flag_bool("--cdn") {
-        Some(crate::remote::provider::OpenedScope::open(inv, &budget)?.admit()?)
-    } else {
-        None
-    };
-    let mut execute =
-        |mut remote: Option<&mut dyn crate::remote::provider::FileScope>,
-         resolved: Option<lycheedev_core::selection::PinnedSet>| {
+    // Navigation admits both sources before resolving the pin. Keep this owner
+    // through decoding, source revalidation, capture, and checked teardown.
+    let mut scope = crate::remote::provider::OpenedScope::open(inv, &budget)?.admit()?;
+    let result = (|| {
+        let pin = scope.resolve_pin()?;
+        let data = pin
+            .data
+            .as_ref()
+            .ok_or_else(|| fault("command.failed", 5, "records.data_pin_required"))?;
+        scope.check_pin(data)?;
+        let mut execute = |reader: &mut dyn crate::remote::provider::FileScope| {
             let prepared = db2::prepare_scoped(
                 inv,
                 "SpellEffect",
                 &budget,
-                match remote.as_mut() {
-                    Some(scope) => Some(&mut **scope),
-                    None => None,
-                },
-                resolved,
+                inv.flag_bool("--cdn").then_some(&mut *reader),
+                Some(pin.clone()),
             )?;
             let view = table::open_budgeted(
                 &prepared.file.bytes,
@@ -241,7 +240,7 @@ pub(crate) fn dispatch_after_read(
                 .as_ref()
                 .expect("prepare checked fixed DataPin");
             let proof = json!({"contentVerified":true,"keySource":prepared.file.reading["keySource"],"name":prepared.bundle.identity.name,"identity":prepared.bundle.identity,"layoutHash":format!("{:08X}",prepared.layout.layout_hash),"definitionSHA256":prepared.definition.sha256,"fileDataID":prepared.bundle.identity.db2_file_data_id,"contentKey":prepared.file.reading["entry"]["contentKey"],"logicalRows":view.logical_count()});
-            let context = json!({"resources":budget.snapshot()?,"snapshot":prepared.pin.id,"pin":data,"source":prepared.file.reading["source"],"tables":[proof],"relations":effects.relations,"complete":!partial&&!effects.truncated,"truncated":effects.truncated,"truncationReason":if effects.truncated{"row_budget"}else{"none"},"partial":partial,"partialReasons":if partial{json!(["table_unavailable"])}else{Value::Null}});
+            let context = json!({"resources":budget.logical_snapshot()?,"memoryBudget":budget.memory_snapshot()?,"snapshot":prepared.pin.id,"pin":data,"source":prepared.file.reading["source"],"tables":[proof],"relations":effects.relations,"complete":!partial&&!effects.truncated,"truncated":effects.truncated,"truncationReason":if effects.truncated{"row_budget"}else{"none"},"partial":partial,"partialReasons":if partial{json!(["table_unavailable"])}else{Value::Null}});
             result
                 .as_object_mut()
                 .unwrap()
@@ -250,7 +249,13 @@ pub(crate) fn dispatch_after_read(
             result["resourceAccounting"] = json!({"wholeQueryAccountingComplete":false,"strategy":"conservative cumulative admission","wdcMetadataAdmittedBytes":view.admitted_metadata_bytes(),"remainingGaps":["uninterruptible single codec call"]});
             budget.check()?;
             after_read()?;
-            catalog::check_source(inv, &prepared, &budget, remote.as_deref())?;
+            reader.check_consumer(inv, &budget)?;
+            catalog::check_source(
+                inv,
+                &prepared,
+                &budget,
+                inv.flag_bool("--cdn").then_some(&*reader),
+            )?;
             let raw = capture::json_bytes(&result, &budget, 16 << 20, || {
                 fault(
                     "records.query_resource_budget",
@@ -281,22 +286,17 @@ pub(crate) fn dispatch_after_read(
             }
             Ok(outcome)
         };
-    let result = match remote.as_mut() {
-        Some(scope) => (|| {
-            let pin = scope.resolve_pin()?;
-            let data = pin
-                .data
-                .as_ref()
-                .ok_or_else(|| fault("command.failed", 5, "records.data_pin_required"))?;
-            scope.with_session(data, |reader| execute(Some(reader), Some(pin.clone())))
-        })(),
-        None => execute(None, None),
-    };
-    match remote {
-        Some(scope) => scope.finish(result),
-        None => result,
-    }
+        if inv.flag_bool("--cdn") {
+            scope.with_session(data, |reader| execute(reader))
+        } else {
+            execute(&mut scope)
+        }
+    })();
+    scope.finish(result)
 }
+
+#[cfg(test)]
+mod admission_tests;
 
 #[cfg(test)]
 mod tests {

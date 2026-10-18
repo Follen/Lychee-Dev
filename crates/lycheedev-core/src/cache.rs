@@ -13,6 +13,7 @@ use std::{
 mod source_facts;
 pub use source_facts::{SourceCachePublicationPhase, SourceFactsCache, SourceFactsReader, SourceFactsWriter, SourceOriginalCache};
 mod publication;
+mod pruning;
 pub use publication::publish_derived_controlled;
 mod verification;
 pub(crate) use verification::{verify, walk_files};
@@ -24,29 +25,35 @@ struct Object {
     modified: std::time::SystemTime,
 }
 fn objects(home: &Path) -> Result<(Vec<Object>, usize)> {
+    objects_checked(home, || Ok(()))
+}
+fn objects_checked(home: &Path, mut check: impl FnMut() -> Result<()>) -> Result<(Vec<Object>, usize)> {
+    check()?;
     let root = home.join("cache/objects");
     let mut result = vec![];
     let mut foreign = 0;
     if !root.exists() {
         return Ok((result, foreign));
     }
-    storage::guard_path(home, &root)?;
+    storage::guard_path_with_check(home, &root, &mut check)?;
     for bucket in fs::read_dir(&root)? {
+        check()?;
         let bucket = bucket?;
         let prefix = bucket.file_name().to_string_lossy().into_owned();
         if prefix.len() != 2 || !bucket.file_type()?.is_dir() {
             foreign += 1;
             continue;
         }
-        storage::guard_path(home, &bucket.path())?;
+        storage::guard_path_with_check(home, &bucket.path(), &mut check)?;
         for file in fs::read_dir(bucket.path())? {
+            check()?;
             let file = file?;
             let digest = format!("{prefix}{}", file.file_name().to_string_lossy());
             if !valid_digest(&digest, 64) || !file.file_type()?.is_file() {
                 foreign += 1;
                 continue;
             }
-            storage::guard_path(home, &file.path())?;
+            storage::guard_path_with_check(home, &file.path(), &mut check)?;
             let info = file.metadata()?;
             result.push(Object {
                 digest,
@@ -63,16 +70,23 @@ fn objects(home: &Path) -> Result<(Vec<Object>, usize)> {
             }
         }
     }
+    check()?;
     result.sort_by_key(|o| (o.modified, o.digest.clone()));
+    check()?;
     Ok((result, foreign))
 }
 fn retain(home: &Path, digest: &str) -> Result<Option<Value>> {
+    retain_checked(home, digest, || Ok(()))
+}
+fn retain_checked(home: &Path, digest: &str, mut check: impl FnMut() -> Result<()>) -> Result<Option<Value>> {
+    check()?;
     let path = home.join("cache/retain").join(format!("{digest}.json"));
     if !path.exists() {
         return Ok(None);
     }
-    storage::guard_path(home, &path)?;
+    storage::guard_path_with_check(home, &path, &mut check)?;
     let value: Value = storage::read_json(&path)?;
+    check()?;
     if value["sha256"] != digest
         || value["owners"]
             .as_array()
@@ -85,8 +99,10 @@ fn retain(home: &Path, digest: &str) -> Result<Option<Value>> {
         ));
     }
     for owner in value["owners"].as_array().unwrap() {
+        check()?;
         validate_owner(owner)?;
     }
+    check()?;
     Ok(Some(value))
 }
 fn validate_owner(owner: &Value) -> Result<()> {
@@ -108,6 +124,10 @@ fn validate_owner(owner: &Value) -> Result<()> {
     Ok(())
 }
 fn markers(home: &Path) -> Result<(Vec<Value>, Vec<String>, usize)> {
+    markers_checked(home, || Ok(()))
+}
+fn markers_checked(home: &Path, mut check: impl FnMut() -> Result<()>) -> Result<(Vec<Value>, Vec<String>, usize)> {
+    check()?;
     let root = home.join("cache/retain");
     let mut values = vec![];
     let mut missing = vec![];
@@ -115,8 +135,9 @@ fn markers(home: &Path) -> Result<(Vec<Value>, Vec<String>, usize)> {
     if !root.exists() {
         return Ok((values, missing, foreign));
     }
-    storage::guard_path(home, &root)?;
+    storage::guard_path_with_check(home, &root, &mut check)?;
     for entry in fs::read_dir(&root)? {
+        check()?;
         let entry = entry?;
         if values.len() + foreign > 100000 {
             return Err(ToolkitError::new(
@@ -133,7 +154,7 @@ fn markers(home: &Path) -> Result<(Vec<Value>, Vec<String>, usize)> {
             foreign += 1;
             continue;
         };
-        let value = retain(home, digest)?
+        let value = retain_checked(home, digest, &mut check)?
             .ok_or_else(|| ToolkitError::invalid("retention marker disappeared"))?;
         if !home
             .join("cache/objects")
@@ -145,16 +166,22 @@ fn markers(home: &Path) -> Result<(Vec<Value>, Vec<String>, usize)> {
         }
         values.push(value);
     }
+    check()?;
     Ok((values, missing, foreign))
 }
 fn stages(home: &Path) -> Result<Vec<(PathBuf, u64, String)>> {
+    stages_checked(home, || Ok(()))
+}
+fn stages_checked(home: &Path, mut check: impl FnMut() -> Result<()>) -> Result<Vec<(PathBuf, u64, String)>> {
+    check()?;
     let root = home.join("cache/tmp");
     let mut values = vec![];
     if !root.exists() {
         return Ok(values);
     }
-    storage::guard_path(home, &root)?;
+    storage::guard_path_with_check(home, &root, &mut check)?;
     for entry in fs::read_dir(root)? {
+        check()?;
         let entry = entry?;
         if values.len() >= 100000 {
             return Err(ToolkitError::new(
@@ -163,7 +190,7 @@ fn stages(home: &Path) -> Result<Vec<(PathBuf, u64, String)>> {
                 4,
             ));
         }
-        storage::guard_path(home, &entry.path())?;
+        storage::guard_path_with_check(home, &entry.path(), &mut check)?;
         if entry.file_type()?.is_file() {
             values.push((
                 entry.path(),
@@ -172,6 +199,7 @@ fn stages(home: &Path) -> Result<Vec<(PathBuf, u64, String)>> {
             ));
         }
     }
+    check()?;
     Ok(values)
 }
 pub fn publish(home: &Path, bytes: &[u8], max_bytes: usize, owner: Option<Value>) -> Result<Value> {
@@ -292,6 +320,9 @@ pub fn commands() -> &'static [&'static str] {
     &["cache status", "cache verify", "cache prune"]
 }
 pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
+    if inv.command == "cache prune" {
+        return pruning::prune(inv);
+    }
     if inv.command == "cache verify" {
         workspace::open_controlled(&inv.home, &inv.control)?;
         let report = verify(&inv.home, &inv.control)?;
@@ -329,79 +360,6 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
             Ok(Outcome::new(
                 json!({"objectBytes":bytes,"objectCount":objs.len(),"uncommittedBytes":staging_bytes,"uncommittedCount":staging.len(),"protectedCount":protected.len(),"protectedByKind":kinds,"protected":protected,"orphanMarkers":missing.len(),"foreignCount":foreign+marker_foreign,"limitBytes":limit,"withinLimit":bytes<=limit}),
             ))
-        }
-        "cache prune" => {
-            let _quota = ExclusiveLock::resource(&inv.home.join("locks"), "cache:quota")?;
-            let target = inv.usize_flag("--target-bytes", 0, 0, usize::MAX)? as u64;
-            let bound = inv.usize_flag("--max-objects", 0, 0, 100000)?;
-            let dry = inv.flag_bool("--dry-run");
-            let mut after = bytes;
-            let (mut removed, mut protected, mut busy) = (0, 0, 0);
-            for object in &objs {
-                if after <= target || bound != 0 && removed >= bound {
-                    break;
-                }
-                let lock = ExclusiveLock::resource(
-                    &inv.home.join("locks"),
-                    &format!("cache:obj:{}", object.digest),
-                );
-                let _lock = match lock {
-                    Ok(lock) => lock,
-                    Err(e) if e.exit_code == 6 => {
-                        busy += 1;
-                        continue;
-                    }
-                    Err(e) => return Err(e),
-                };
-                if retain(&inv.home, &object.digest)?
-                    .is_some_and(|v| !v["owners"].as_array().unwrap().is_empty())
-                {
-                    protected += 1;
-                    continue;
-                }
-                if !dry {
-                    storage::guard_path(&inv.home, &object.path)?;
-                    fs::remove_file(&object.path)?;
-                }
-                after = after.saturating_sub(object.bytes);
-                removed += 1;
-            }
-            let (mut removed_staging, mut skipped_staging) = (0, 0);
-            for (path, _, name) in &staging {
-                if !inv.flag_bool("--uncommitted") {
-                    skipped_staging += 1;
-                    continue;
-                }
-                let Some(id) = name
-                    .strip_prefix("put-")
-                    .and_then(|name| name.strip_suffix(".part"))
-                    .filter(|id| valid_digest(id, 32))
-                else {
-                    skipped_staging += 1;
-                    continue;
-                };
-                let lease =
-                    ExclusiveLock::resource(&inv.home.join("locks"), &format!("cache:stage:{id}"));
-                let _guard = match lease {
-                    Ok(guard) => guard,
-                    Err(error) if error.exit_code == 6 => {
-                        busy += 1;
-                        continue;
-                    }
-                    Err(error) => return Err(error),
-                };
-                if !dry {
-                    storage::guard_path(&inv.home, path)?;
-                    fs::remove_file(path)?;
-                }
-                removed_staging += 1;
-            }
-            let complete = after <= target;
-            let mut out = Outcome::new(
-                json!({"targetBytes":target,"beforeBytes":bytes,"afterBytes":after,"reclaimedBytes":bytes-after,"removedObjects":removed,"removedUncommitted":removed_staging,"skippedProtected":protected,"skippedInUse":busy,"skippedUncommitted":skipped_staging,"skippedForeign":foreign+marker_foreign,"truncated":!complete,"complete":complete,"dryRun":dry}),
-            );
-            out.complete = complete;
-            Ok(out)
         }
         _ => Err(ToolkitError::arguments("unknown cache verb")),
     }

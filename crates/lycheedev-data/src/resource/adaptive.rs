@@ -63,11 +63,18 @@ pub(super) struct Growth {
     logical_growth: bool,
     pub(super) sampled_memory: bool,
 }
-pub(super) fn overflow(dimension: &str) -> lycheedev_core::ToolkitError {
+pub(super) fn overflow(
+    dimension: &str,
+    used: u64,
+    requested: u64,
+    limit: u64,
+) -> lycheedev_core::ToolkitError {
     fault(
         "records.query_resource_budget",
         3,
-        format!("Whole query {dimension} budget exceeded"),
+        format!(
+            "records.query_resource_budget: {dimension} (used={used} requested={requested} limit={limit})"
+        ),
     )
 }
 pub(super) fn not_admitted() -> lycheedev_core::ToolkitError {
@@ -89,7 +96,11 @@ fn observe(probe: &MemoryProbe) -> Result<u64> {
     // Go converts the native uint64 minimum to int64 before policy arithmetic.
     // Impossible signed-native availability must not become vast permission.
     if bytes > i64::MAX as u64 {
-        return Err(overflow("memory_status"));
+        return Err(fault(
+            "records.query_resource_budget",
+            3,
+            "memory_status: available memory exceeds signed native range",
+        ));
     }
     Ok(bytes)
 }
@@ -289,12 +300,16 @@ impl State {
             // All hard dimensions were checked before this function. The
             // incremental need, not existing accounted allocation, needs fresh
             // headroom. Calculate via subtraction to avoid overflow.
-            if used > memory.ceiling || needed < used || needed - used > headroom {
-                return Err(overflow(dimension));
-            }
-            let upper = used + headroom.min(memory.ceiling - used);
+            let requested = needed.checked_sub(used).ok_or_else(|| {
+                fault("records.internal", 8, "Query growth is below current usage")
+            })?;
+            let remaining = memory
+                .ceiling
+                .checked_sub(used)
+                .ok_or_else(|| overflow(dimension, used, requested, memory.ceiling))?;
+            let upper = used + headroom.min(remaining);
             if needed > upper {
-                return Err(overflow(dimension));
+                return Err(overflow(dimension, used, requested, upper));
             }
             let extra = (MEMORY_STEP - needed % MEMORY_STEP) % MEMORY_STEP;
             *limit = needed + extra.min(upper - needed);

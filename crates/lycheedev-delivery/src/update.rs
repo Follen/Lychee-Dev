@@ -2,6 +2,7 @@
 use crate::{deploy, installation, release, slots};
 use lycheedev_core::{
     Invocation, Outcome, Result, ToolkitError, VERSION,
+    control::OperationControl,
     coordination::InstallationGuard,
     storage::{self, ExclusiveLock},
 };
@@ -23,7 +24,7 @@ fn state_path(home: &Path) -> PathBuf {
     value.push(".delivery");
     PathBuf::from(value)
 }
-fn read_targets(state: &Path) -> Result<Vec<UpdateTarget>> {
+fn read_targets(state: &Path, control: &OperationControl) -> Result<Vec<UpdateTarget>> {
     let path = state.join("targets.json");
     if !path.exists() {
         return Ok(vec![]);
@@ -34,30 +35,180 @@ fn read_targets(state: &Path) -> Result<Vec<UpdateTarget>> {
             "update target inventory exceeds 64 KiB",
         ));
     }
-    let values: Vec<UpdateTarget> = storage::read_json(&path)?;
+    let values: Vec<UpdateTarget> =
+        serde_json::from_slice(&slots::read_bounded_controlled(&path, 64 << 10, control)?)?;
     if values.len() > 64 {
         return Err(ToolkitError::invalid("update supports at most 64 targets"));
     }
     Ok(values)
 }
+fn paths_are_implicit(inv: &Invocation) -> bool {
+    inv.flag("--file").is_none()
+        && inv.flag_values("--path").is_empty()
+        && inv.flag_values("--installation").is_empty()
+}
+fn path_identity(path: &Path) -> String {
+    path.to_string_lossy()
+        .trim_start_matches("\\\\?\\")
+        .replace('\\', "/")
+        .to_ascii_lowercase()
+}
+/// Remembered paths are discovery evidence, never a request to reinstall a
+/// deliberately removed tree. A moved-old transaction still owns its target.
+fn discover_targets(
+    targets: Vec<UpdateTarget>,
+    control: &OperationControl,
+) -> Result<Vec<UpdateTarget>> {
+    let mut selected = Vec::new();
+    for target in targets {
+        control.check()?;
+        let directory = if target.component == "addon" {
+            target.path.join("Interface/AddOns/Lychee Dev")
+        } else {
+            target.path.clone()
+        };
+        let current =
+            installation::inspect_main_controlled(&directory, &target.component, control)?;
+        if current["state"] != "absent"
+            || !pending_recoveries(&directory, &target.component, control)?.is_empty()
+        {
+            selected.push(target);
+        }
+    }
+    Ok(selected)
+}
+/// Scan the target's whole recovery namespace, including earlier release hashes
+/// and older selector hashes. Cleanup markers win when the archive is gone.
+fn pending_recoveries(
+    target: &Path,
+    component: &str,
+    control: &OperationControl,
+) -> Result<Vec<(PathBuf, Value)>> {
+    control.check()?;
+    let root = target
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| ToolkitError::invalid("update target needs discovery grandparent"))?
+        .join(".lycheedev-updates");
+    match fs::symlink_metadata(&root) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
+        Err(e) => return Err(e.into()),
+        Ok(info) if !info.is_dir() || info.file_type().is_symlink() => {
+            return Err(ToolkitError::invalid(
+                "redirected update recovery namespace",
+            ));
+        }
+        Ok(_) => (),
+    }
+    storage::guard_path(root.parent().unwrap(), &root)?;
+    let mut candidates = vec![];
+    for (count, entry) in fs::read_dir(&root)?.enumerate() {
+        control.check()?;
+        if count >= 1000 {
+            return Err(ToolkitError::invalid(
+                "update recovery scan exceeds 1000 entries",
+            ));
+        }
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.starts_with("replace-") {
+            continue;
+        }
+        let path = entry.path();
+        storage::guard_path(&root, &path)?;
+        if name.ends_with(".cleanup.json") {
+            candidates.push((
+                0,
+                path.clone(),
+                root.join(name.strip_suffix(".cleanup.json").unwrap()),
+            ));
+        } else if entry.file_type()?.is_dir() {
+            let record = path.join("replacement.json");
+            match fs::symlink_metadata(&record) {
+                Ok(_) => candidates.push((1, record, path)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+    candidates.sort_by(|left, right| (&left.0, &left.1).cmp(&(&right.0, &right.1)));
+    let mut seen = BTreeSet::new();
+    let mut found = vec![];
+    for (_, path, archive) in candidates {
+        control.check()?;
+        storage::guard_path(&root, &path)?;
+        let raw = slots::read_bounded_controlled(&path, 1 << 20, control)?;
+        let Ok(record) = serde_json::from_slice::<Value>(&raw) else {
+            continue;
+        };
+        if record["schema"] != "lycheedev.replacement.v1"
+            || record["target"]
+                .as_str()
+                .is_none_or(|path| path_identity(Path::new(path)) != path_identity(target))
+            || record["next"]["component"] != component
+        {
+            continue;
+        }
+        if seen.insert(path_identity(&archive)) {
+            found.push((archive, record));
+        }
+    }
+    Ok(found)
+}
+fn select_recovery(
+    target: &Path,
+    component: &str,
+    default: &Path,
+    wanted: &Value,
+    control: &OperationControl,
+) -> Result<PathBuf> {
+    let recoveries = pending_recoveries(target, component, control)?;
+    if recoveries.len() > 1 {
+        return Err(ToolkitError::new("delivery.installation_conflict", "multiple update recoveries for the selected target", 4)
+            .with_details(json!({"path":target,"recoveries":recoveries.iter().map(|(path, _)|path).collect::<Vec<_>>()})));
+    }
+    if let Some((archive, record)) = recoveries.into_iter().next() {
+        if !installation::same_receipt_value(&record["next"], wanted)? {
+            return Err(ToolkitError::new(
+                "delivery.installation_conflict",
+                "resume the original update before selecting another release",
+                4,
+            )
+            .with_details(json!({"path":target,"recovery":archive,"receipt":record["next"]})));
+        }
+        Ok(archive)
+    } else {
+        Ok(default.to_path_buf())
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UpdateStep {
+    BeforeTarget(usize),
+    LockedTarget(usize),
+}
 pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
+    inv.control.check()?;
     let state = state_path(&inv.home);
     let paths = inv.flag_values("--path");
     let installations = inv.flag_values("--installation");
-    let mut targets = if let Some(file) = inv.flag("--file") {
-        if !paths.is_empty() || !installations.is_empty() {
-            return Err(ToolkitError::arguments(
-                "update --file cannot be combined with target selectors",
-            ));
-        }
-        if fs::metadata(file)?.len() > 64 << 10 {
-            return Err(ToolkitError::arguments("update target file exceeds 64 KiB"));
-        }
-        let values: Vec<UpdateTarget> = storage::read_json(Path::new(file))?;
-        values
-    } else {
-        vec![]
-    };
+    let mut targets =
+        if let Some(file) = inv.flag("--file") {
+            if !paths.is_empty() || !installations.is_empty() {
+                return Err(ToolkitError::arguments(
+                    "update --file cannot be combined with target selectors",
+                ));
+            }
+            if fs::metadata(file)?.len() > 64 << 10 {
+                return Err(ToolkitError::arguments("update target file exceeds 64 KiB"));
+            }
+            let values: Vec<UpdateTarget> = serde_json::from_slice(
+                &slots::read_bounded_controlled(Path::new(file), 64 << 10, &inv.control)?,
+            )?;
+            values
+        } else {
+            vec![]
+        };
     targets.extend(paths.into_iter().map(|path| UpdateTarget {
         component: "skill".into(),
         path: path.into(),
@@ -67,7 +218,7 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
         path: path.into(),
     }));
     if targets.is_empty() && inv.flag("--file").is_none() {
-        targets = read_targets(&state)?;
+        targets = read_targets(&state, &inv.control)?;
         let user = std::env::var_os("USERPROFILE").map(PathBuf::from);
         if let Some(user) = user {
             let codex = std::env::var_os("CODEX_HOME")
@@ -99,6 +250,9 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
                 }
             }
         }
+    }
+    if paths_are_implicit(inv) {
+        targets = discover_targets(targets, &inv.control)?;
     }
     let root = inv
         .flag("--release")
@@ -171,8 +325,41 @@ pub fn managed_with_control(
     plan: bool,
     control: &lycheedev_core::control::OperationControl,
 ) -> Result<Outcome> {
+    managed_observed(root, version, state, targets, plan, control, &mut |_| {})
+}
+fn managed_observed(
+    root: &Path,
+    version: &str,
+    state: &Path,
+    targets: &[UpdateTarget],
+    plan: bool,
+    control: &OperationControl,
+    observe_target: &mut impl FnMut(UpdateStep),
+) -> Result<Outcome> {
+    managed_with_close(
+        root,
+        version,
+        state,
+        targets,
+        plan,
+        control,
+        observe_target,
+        ExclusiveLock::close,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn managed_with_close(
+    root: &Path,
+    version: &str,
+    state: &Path,
+    targets: &[UpdateTarget],
+    plan: bool,
+    control: &OperationControl,
+    observe_target: &mut impl FnMut(UpdateStep),
+    close_state: impl FnOnce(ExclusiveLock) -> Result<()>,
+) -> Result<Outcome> {
     control.check()?;
-    let release = release::inspect(root, version)?;
+    let release = release::inspect_with_control(root, version, control)?;
     if targets.len() > 64 {
         return Err(ToolkitError::invalid("update supports at most 64 targets"));
     }
@@ -191,8 +378,10 @@ pub fn managed_with_control(
             let client = lycheedev_core::client::inspect(&target.path)?;
             let path = lycheedev_core::client::addon_destination(&client)?;
             let guard = InstallationGuard::acquire(&path)?;
-            guard.require_idle()?;
-            slots::preflight_controlled(path.parent().unwrap(), version, control)?;
+            let checked = guard.require_idle().and_then(|()| {
+                slots::preflight_controlled(path.parent().unwrap(), version, control)
+            });
+            deploy::finish_close(checked, guard.close())?;
             (Some(client), path)
         } else {
             if target
@@ -217,7 +406,7 @@ pub fn managed_with_control(
         if !seen.insert(key.clone()) {
             continue;
         }
-        let current = installation::inspect(&path, &target.component)?;
+        let current = installation::inspect_main_controlled(&path, &target.component, control)?;
         if !["managed", "absent"].contains(&current["state"].as_str().unwrap_or("")) {
             return Err(ToolkitError::new(
                 "delivery.installation_conflict",
@@ -226,7 +415,7 @@ pub fn managed_with_control(
             )
             .with_details(json!({"path":path,"assessment":current})));
         }
-        let recovery = path
+        let mut recovery = path
             .parent()
             .unwrap()
             .parent()
@@ -238,6 +427,13 @@ pub fn managed_with_control(
                     format!("{key}:{}:{}", release.version, release.commit).as_bytes()
                 )[..32]
             ));
+        recovery = select_recovery(
+            &path,
+            &target.component,
+            &recovery,
+            &serde_json::to_value(release::receipt(&release, &target.component))?,
+            control,
+        )?;
         let mut item = json!({"component":target.component,"path":logical,"state":current["state"],"recovery":recovery});
         if let Some(previous) = current["receipt"]["version"].as_str() {
             item["previousVersion"] = json!(previous);
@@ -248,7 +444,12 @@ pub fn managed_with_control(
         .iter()
         .any(|(component, _, _, _)| component == "addon")
     {
-        let toc = fs::read_to_string(root.join("payload/addon/Lychee Dev.toc"))?;
+        let toc = String::from_utf8(slots::read_bounded_controlled(
+            &root.join("payload/addon/Lychee Dev.toc"),
+            256 << 20,
+            control,
+        )?)
+        .map_err(|e| ToolkitError::invalid(e.to_string()))?;
         if !toc
             .lines()
             .any(|line| line.trim().replace('\\', "/") == "Bridge/SlotRuntime.lua")
@@ -261,121 +462,180 @@ pub fn managed_with_control(
         }
     }
     let mut result = json!({"version":release.version,"commit":release.commit,"complete":!plan&&items.is_empty(),"plan":plan,"targets":items.iter().map(|(_,_,_,item)|item.clone()).collect::<Vec<_>>()});
-    if plan {
+    control.check()?;
+    if plan || items.is_empty() {
         return Ok(Outcome::new(result));
     }
     fs::create_dir_all(state)?;
     storage::guard_path(state, state)?;
-    let _lock = ExclusiveLock::resource(state, "managed-update")?;
-    let mut remembered = read_targets(state)?;
-    for (_, _, _, item) in &items {
-        let target: UpdateTarget =
-            serde_json::from_value(json!({"component":item["component"],"path":item["path"]}))?;
-        if !remembered.iter().any(|value| {
-            value.component == target.component
-                && value
-                    .path
-                    .to_string_lossy()
-                    .eq_ignore_ascii_case(&target.path.to_string_lossy())
-        }) {
-            remembered.push(target);
+    let lock = ExclusiveLock::resource_controlled(state, "managed-update", control)?;
+    let updated = (|| {
+        let mut remembered = read_targets(state, control)?;
+        for (_, _, _, item) in &items {
+            let target: UpdateTarget =
+                serde_json::from_value(json!({"component":item["component"],"path":item["path"]}))?;
+            if !remembered.iter().any(|value| {
+                value.component == target.component
+                    && value
+                        .path
+                        .to_string_lossy()
+                        .eq_ignore_ascii_case(&target.path.to_string_lossy())
+            }) {
+                remembered.push(target);
+            }
         }
-    }
-    if remembered.len() > 64 {
-        return Err(ToolkitError::invalid("remembered update targets exceed 64"));
-    }
-    storage::atomic_json(&state.join("targets.json"), &remembered)?;
-    for (index, (component, path, recovery, item)) in items.iter().enumerate() {
-        control.check()?;
-        let _maintenance = if component == "addon" {
-            let guard = InstallationGuard::acquire(path)?;
-            guard.require_idle()?;
-            Some(guard)
-        } else {
-            None
-        };
-        let current = installation::inspect(path, component)?;
-        let wanted = serde_json::to_value(release::receipt(&release, component))?;
-        let mutation = (|| -> Result<()> {
-            if component == "addon" {
-                if cleanup_marker(recovery).exists() {
-                    cleanup_replacement(path, recovery, &wanted)?;
-                }
-                let archive = if recovery.exists()
-                    || current["state"] == "managed" && current["receipt"] != wanted
-                {
-                    Some(recovery.as_path())
+        if remembered.len() > 64 {
+            return Err(ToolkitError::invalid("remembered update targets exceed 64"));
+        }
+        storage::atomic_write_controlled(
+            &state.join("targets.json"),
+            &serde_json::to_vec_pretty(&remembered)?,
+            control,
+        )?;
+        for (index, (component, path, planned_recovery, item)) in items.iter().enumerate() {
+            let mut recovery = planned_recovery.clone();
+            let mut installed = false;
+            let mut completed = false;
+            let mutation = (|| -> Result<()> {
+                observe_target(UpdateStep::BeforeTarget(index));
+                control.check()?;
+                // Always maintenance before the shared installation lock. Direct
+                // addon install uses the same order; skills only need the latter.
+                let maintenance = if component == "addon" {
+                    Some(InstallationGuard::acquire(path)?)
                 } else {
                     None
                 };
-                if let Some(archive) = archive {
-                    fs::create_dir_all(archive.parent().unwrap())?;
+                let changed = (|| {
+                    if let Some(guard) = &maintenance {
+                        guard.require_idle()?;
+                    }
+                    let lease = deploy::InstallationLease::acquire(path, control)?;
+                    let applied = (|| -> Result<()> {
+                        let wanted = serde_json::to_value(release::receipt(&release, component))?;
+                        // Preflight is informational. Re-scan under the exact lease
+                        // held through fresh/upgrade/cleanup, so an older intent
+                        // appearing after preflight cannot be bypassed by fresh.
+                        recovery = select_recovery(path, component, &recovery, &wanted, control)?;
+                        observe_target(UpdateStep::LockedTarget(index));
+                        let current =
+                            installation::inspect_main_controlled(path, component, control)?;
+                        installed = current["state"] == "managed"
+                            && installation::same_receipt_value(&current["receipt"], &wanted)?;
+                        if component == "addon" {
+                            if cleanup_marker(&recovery).exists() {
+                                cleanup_replacement(&lease, &recovery, &wanted, control)?;
+                            }
+                            let archive = if recovery.exists()
+                                || current["state"] == "managed" && !installed
+                            {
+                                Some(recovery.as_path())
+                            } else {
+                                None
+                            };
+                            if let Some(archive) = archive {
+                                control.check()?;
+                                fs::create_dir_all(archive.parent().unwrap())?;
+                            }
+                            crate::addon_transaction::apply_locked(
+                                path,
+                                crate::addon_transaction::Request {
+                                    release: Some(root),
+                                    archive,
+                                    version,
+                                    resume: false,
+                                    control,
+                                },
+                                maintenance.as_ref().expect("addon maintenance guard"),
+                                &lease,
+                            )?;
+                        } else if cleanup_marker(&recovery).exists() {
+                            cleanup_replacement(&lease, &recovery, &wanted, control)?;
+                        } else if recovery.exists() {
+                            deploy::upgrade_locked(
+                                None, &lease, &recovery, component, version, true, control,
+                            )?;
+                        } else if current["state"] == "absent" {
+                            deploy::fresh_locked(root, &lease, component, version, control)?;
+                        } else if !installed {
+                            control.check()?;
+                            fs::create_dir_all(recovery.parent().unwrap())?;
+                            deploy::upgrade_locked(
+                                Some(root),
+                                &lease,
+                                &recovery,
+                                component,
+                                version,
+                                false,
+                                control,
+                            )?;
+                        }
+                        installed = true;
+                        if recovery.exists() || cleanup_marker(&recovery).exists() {
+                            cleanup_replacement(&lease, &recovery, &wanted, control)?;
+                        }
+                        completed = true;
+                        Ok(())
+                    })();
+                    lease.finish(applied)
+                })();
+                match maintenance {
+                    Some(guard) => deploy::finish_close(changed, guard.close()),
+                    None => changed,
                 }
-                crate::addon_transaction::apply(
-                    path,
-                    crate::addon_transaction::Request {
-                        release: Some(root),
-                        archive,
-                        version,
-                        resume: false,
-                        control,
-                    },
-                    _maintenance.as_ref().expect("addon maintenance guard"),
-                )?;
-                if recovery.exists() || cleanup_marker(recovery).exists() {
-                    cleanup_replacement(path, recovery, &wanted)?;
-                }
-                return Ok(());
+            })();
+            result["targets"][index] = item.clone();
+            result["targets"][index]["recovery"] = json!(recovery);
+            if installed {
+                result["targets"][index]["activation"] = json!(if component == "addon" {
+                    "reload_required"
+                } else {
+                    "new_agent_context_required"
+                });
             }
-            if cleanup_marker(recovery).exists() {
-                cleanup_replacement(path, recovery, &wanted)?;
-            } else if recovery.exists() {
-                deploy::upgrade(None, path, recovery, component, version, true)?;
-            } else if current["state"] == "absent" {
-                deploy::fresh(root, path, component, version)?;
-            } else if current["state"] == "managed" && current["receipt"] == wanted {
+            if let Err(error) = mutation {
+                if let Some(original) = error.details["recovery"].as_str() {
+                    result["targets"][index]["recovery"] = json!(original);
+                }
+                result["targets"][index]["state"] = json!(if completed {
+                    "current"
+                } else if installed {
+                    "cleanup_pending"
+                } else {
+                    "pending"
+                });
+                return Err(
+                    ToolkitError::new(error.code, error.message, error.exit_code)
+                        .with_details(json!({"result":result,"cause":error.details})),
+                );
+            }
+            result["targets"][index]["state"] = json!("current");
+            if recovery.exists() {
+                result["targets"][index]["recoveryRetained"] = json!(true);
             } else {
-                fs::create_dir_all(recovery.parent().unwrap())?;
-                deploy::upgrade(Some(root), path, recovery, component, version, false)?;
+                result["targets"][index]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("recovery");
             }
-            if recovery.exists() || cleanup_marker(recovery).exists() {
-                cleanup_replacement(path, recovery, &wanted)?;
-            }
-            Ok(())
-        })();
-        if let Err(error) = mutation {
-            result["targets"][index]["state"] = json!("pending");
-            return Err(
-                ToolkitError::new(error.code, error.message, error.exit_code)
-                    .with_details(json!({"result":result})),
-            );
         }
-        result["targets"][index] = item.clone();
-        result["targets"][index]["state"] = json!("current");
-        if recovery.exists() {
-            result["targets"][index]["recoveryRetained"] = json!(true);
-        } else {
-            result["targets"][index]
-                .as_object_mut()
-                .unwrap()
-                .remove("recovery");
-        }
-        result["targets"][index]["activation"] = json!(if component == "addon" {
-            "reload_required"
-        } else {
-            "new_agent_context_required"
-        });
-    }
-    result["complete"] = json!(true);
-    Ok(Outcome::new(result))
+        result["complete"] = json!(true);
+        Ok(Outcome::new(result))
+    })();
+    deploy::finish_close(updated, close_state(lock))
 }
 fn cleanup_marker(archive: &Path) -> PathBuf {
     let mut name = archive.as_os_str().to_os_string();
     name.push(".cleanup.json");
     PathBuf::from(name)
 }
-fn cleanup_replacement(target: &Path, archive: &Path, wanted: &Value) -> Result<()> {
-    let _guard = deploy::installation_lock(target)?;
+fn cleanup_replacement(
+    lease: &deploy::InstallationLease,
+    archive: &Path,
+    wanted: &Value,
+    control: &OperationControl,
+) -> Result<()> {
+    let target = lease.target();
     deploy::outside(
         target
             .parent()
@@ -394,8 +654,14 @@ fn cleanup_replacement(target: &Path, archive: &Path, wanted: &Value) -> Result<
             "automatic cleanup archive is outside the owned update namespace",
         ));
     }
-    let assessment = installation::inspect(target, wanted["component"].as_str().unwrap_or(""))?;
-    if assessment["state"] != "managed" || assessment["receipt"] != *wanted {
+    let assessment = installation::inspect_main_controlled(
+        target,
+        wanted["component"].as_str().unwrap_or(""),
+        control,
+    )?;
+    if assessment["state"] != "managed"
+        || !installation::same_receipt_value(&assessment["receipt"], wanted)?
+    {
         return Err(ToolkitError::new(
             "delivery.installation_conflict",
             "installed bytes changed before old-tree cleanup",
@@ -404,34 +670,41 @@ fn cleanup_replacement(target: &Path, archive: &Path, wanted: &Value) -> Result<
     }
     let marker = cleanup_marker(archive);
     let record: Value = if marker.exists() {
-        storage::read_json(&marker)?
+        serde_json::from_slice(&slots::read_bounded_controlled(&marker, 1 << 20, control)?)?
     } else {
-        let record: Value = storage::read_json(&archive.join("replacement.json"))?;
+        let record: Value = serde_json::from_slice(&slots::read_bounded_controlled(
+            &archive.join("replacement.json"),
+            1 << 20,
+            control,
+        )?)?;
         if record["schema"] != "lycheedev.replacement.v1"
             || record["target"] != serde_json::to_value(target)?
-            || record["next"] != *wanted
+            || !installation::same_receipt_value(&record["next"], wanted)?
         {
             return Err(ToolkitError::invalid(
                 "cleanup replacement identity differs",
             ));
         }
-        let previous = installation::inspect(
+        let previous = installation::inspect_main_controlled(
             &archive.join("previous"),
             wanted["component"].as_str().unwrap_or(""),
+            control,
         )?;
-        if previous["state"] != "managed" || previous["receipt"] != record["previous"] {
+        if previous["state"] != "managed"
+            || !installation::same_receipt_value(&previous["receipt"], &record["previous"])?
+        {
             return Err(ToolkitError::new(
                 "delivery.installation_conflict",
                 "old owned bytes changed before cleanup intent",
                 4,
             ));
         }
-        storage::atomic_json(&marker, &record)?;
+        storage::atomic_write_controlled(&marker, &serde_json::to_vec_pretty(&record)?, control)?;
         record
     };
     if record["schema"] != "lycheedev.replacement.v1"
         || record["target"] != serde_json::to_value(target)?
-        || record["next"] != *wanted
+        || !installation::same_receipt_value(&record["next"], wanted)?
     {
         return Err(ToolkitError::invalid("cleanup journal identity differs"));
     }
@@ -444,6 +717,7 @@ fn cleanup_replacement(target: &Path, archive: &Path, wanted: &Value) -> Result<
             .as_array()
             .ok_or_else(|| ToolkitError::invalid("cleanup owned inventory missing"))?
         {
+            control.check()?;
             let relative = resource["path"]
                 .as_str()
                 .and_then(|name| {
@@ -454,7 +728,7 @@ fn cleanup_replacement(target: &Path, archive: &Path, wanted: &Value) -> Result<
             let existing = archive.join(&safe);
             if existing.exists() {
                 storage::guard_path(archive, &existing)?;
-                let bytes = fs::read(&existing)?;
+                let bytes = slots::read_bounded_controlled(&existing, 256 << 20, control)?;
                 if resource["bytes"].as_u64() != Some(bytes.len() as u64)
                     || resource["sha256"] != storage::sha256(&bytes)
                 {
@@ -471,6 +745,7 @@ fn cleanup_replacement(target: &Path, archive: &Path, wanted: &Value) -> Result<
         let mut count = 0usize;
         while let Some(directory) = stack.pop() {
             for entry in fs::read_dir(&directory)? {
+                control.check()?;
                 let entry = entry?;
                 storage::guard_path(archive, &entry.path())?;
                 count += 1;
@@ -494,8 +769,13 @@ fn cleanup_replacement(target: &Path, archive: &Path, wanted: &Value) -> Result<
             }
         }
         // The canonical archive was checked inside its exact owned namespace above.
+        control.check()?;
         fs::remove_dir_all(archive)?;
     }
+    control.check()?;
     fs::remove_file(marker)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

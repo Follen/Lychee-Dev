@@ -72,15 +72,19 @@ fn validate(
     }
     Ok(())
 }
-fn load(path: &Path) -> Result<Transaction> {
+fn load(path: &Path, control: &OperationControl) -> Result<Transaction> {
     let parent = path.parent().unwrap();
     storage::guard_path(parent, path)?;
     if fs::metadata(path)?.len() > 1 << 20 {
         return Err(ToolkitError::invalid("addon transaction exceeds 1 MiB"));
     }
-    storage::read_json(path)
+    Ok(serde_json::from_slice(&slots::read_bounded_controlled(
+        path,
+        1 << 20,
+        control,
+    )?)?)
 }
-fn other_pending(target: &Path, selected: Option<&Path>) -> Result<()> {
+fn other_pending(target: &Path, selected: Option<&Path>, control: &OperationControl) -> Result<()> {
     let root = base(target)?;
     if !root.exists() {
         return Ok(());
@@ -88,6 +92,7 @@ fn other_pending(target: &Path, selected: Option<&Path>) -> Result<()> {
     storage::guard_path(root.parent().unwrap(), &root)?;
     let mut count = 0;
     for entry in fs::read_dir(&root)? {
+        control.check()?;
         let entry = entry?;
         count += 1;
         if count > 1000 {
@@ -105,7 +110,7 @@ fn other_pending(target: &Path, selected: Option<&Path>) -> Result<()> {
         if selected.is_some_and(|selected| selected == path) {
             continue;
         }
-        let record = load(&path)?;
+        let record = load(&path, control)?;
         if record.schema != "lycheedev.addon-transaction.v1" {
             return Err(ToolkitError::invalid("unknown addon transaction schema"));
         }
@@ -116,10 +121,21 @@ fn other_pending(target: &Path, selected: Option<&Path>) -> Result<()> {
     Ok(())
 }
 pub fn apply(target: &Path, request: Request<'_>, guard: &InstallationGuard) -> Result<Value> {
+    let lease = deploy::InstallationLease::acquire(target, request.control)?;
+    let result = apply_locked(target, request, guard, &lease);
+    lease.finish(result)
+}
+pub(crate) fn apply_locked(
+    target: &Path,
+    request: Request<'_>,
+    guard: &InstallationGuard,
+    lease: &deploy::InstallationLease,
+) -> Result<Value> {
     guard.require_idle()?;
     request.control.check()?;
     let target = deploy::destination(target)?;
-    if identity(&guard.target) != identity(&target) {
+    if identity(&guard.target) != identity(&target) || identity(lease.target()) != identity(&target)
+    {
         return Err(ToolkitError::new(
             "delivery.invalid_installation",
             "combined transaction maintenance guard is for another target",
@@ -132,15 +148,15 @@ pub fn apply(target: &Path, request: Request<'_>, guard: &InstallationGuard) -> 
     }
     let candidate = request
         .release
-        .map(|root| release::inspect(root, request.version))
+        .map(|root| release::inspect_with_control(root, request.version, request.control))
         .transpose()?;
     let (path, mut record) = if let Some(candidate) = &candidate {
         let wanted = release::receipt(candidate, "addon");
         let path = journal(&target, archive.as_deref(), &wanted)?;
-        other_pending(&target, Some(&path))?;
+        other_pending(&target, Some(&path), request.control)?;
         if path.exists() {
-            let record = load(&path)?;
-            if record.wanted != wanted {
+            let record = load(&path, request.control)?;
+            if !installation::same_receipt(&record.wanted, &wanted)? {
                 return Err(ToolkitError::invalid("frozen addon release changed"));
             }
             (path, record)
@@ -153,7 +169,12 @@ pub fn apply(target: &Path, request: Request<'_>, guard: &InstallationGuard) -> 
                 ));
             }
             let root = request.release.unwrap();
-            let toc = fs::read_to_string(root.join("payload/addon/Lychee Dev.toc"))?;
+            let toc = String::from_utf8(slots::read_bounded_controlled(
+                &root.join("payload/addon/Lychee Dev.toc"),
+                256 << 20,
+                request.control,
+            )?)
+            .map_err(|e| ToolkitError::invalid(e.to_string()))?;
             if !toc
                 .lines()
                 .any(|line| line.trim().replace('\\', "/") == "Bridge/SlotRuntime.lua")
@@ -169,10 +190,14 @@ pub fn apply(target: &Path, request: Request<'_>, guard: &InstallationGuard) -> 
                 request.version,
                 request.control,
             )?;
-            let previous = installation::inspect(&target, "addon")?;
+            let previous =
+                installation::inspect_main_controlled(&target, "addon", request.control)?;
             if !["managed", "absent"].contains(&previous["state"].as_str().unwrap_or(""))
                 || previous["state"] == "managed"
-                    && previous["receipt"] != serde_json::to_value(&wanted)?
+                    && !installation::same_receipt_value(
+                        &previous["receipt"],
+                        &serde_json::to_value(&wanted)?,
+                    )?
                     && archive.is_none()
             {
                 return Err(ToolkitError::new(
@@ -190,6 +215,7 @@ pub fn apply(target: &Path, request: Request<'_>, guard: &InstallationGuard) -> 
                 phase: "prepared".into(),
                 result: Value::Null,
             };
+            request.control.check()?;
             fs::create_dir_all(path.parent().unwrap())?;
             storage::guard_path(path.parent().unwrap(), &path)?;
             storage::atomic_write_controlled(
@@ -215,8 +241,9 @@ pub fn apply(target: &Path, request: Request<'_>, guard: &InstallationGuard) -> 
         }
         let mut found = None;
         for entry in fs::read_dir(&root)? {
+            request.control.check()?;
             let path = entry?.path();
-            let record = load(&path)?;
+            let record = load(&path, request.control)?;
             if identity(&record.target) == identity(&target)
                 && record.archive.as_deref().map(identity) == archive.as_deref().map(identity)
                 && record.wanted.version == request.version
@@ -238,7 +265,7 @@ pub fn apply(target: &Path, request: Request<'_>, guard: &InstallationGuard) -> 
                 4,
             )
         })?;
-        other_pending(&target, Some(&path))?;
+        other_pending(&target, Some(&path), request.control)?;
         (path, record)
     };
     validate(&record, &target, archive.as_deref(), request.version)?;
@@ -261,38 +288,51 @@ pub fn apply(target: &Path, request: Request<'_>, guard: &InstallationGuard) -> 
         }
         if record.phase == "prepared" {
             request.control.check()?;
-            let current = installation::inspect(&target, "addon")?;
+            let current = installation::inspect_main_controlled(&target, "addon", request.control)?;
             record.result = if let Some(archive) = &archive {
                 let resume = archive.join("replacement.json").exists();
-                deploy::upgrade(
+                deploy::upgrade_locked(
                     request.release,
-                    &target,
+                    lease,
                     archive,
                     "addon",
                     request.version,
                     resume,
+                    request.control,
                 )?
-            } else if current["state"] == "managed" && current["receipt"] == wanted {
+            } else if current["state"] == "managed"
+                && installation::same_receipt_value(&current["receipt"], &wanted)?
+            {
                 wanted.clone()
             } else {
-                if current != record.previous {
+                if current["state"] != record.previous["state"]
+                    || current["state"] == "managed"
+                        && !installation::same_receipt_value(
+                            &current["receipt"],
+                            &record.previous["receipt"],
+                        )?
+                {
                     return Err(ToolkitError::new(
                         "delivery.installation_conflict",
                         "main addon changed after combined preparation",
                         4,
                     ));
                 }
-                serde_json::to_value(deploy::fresh(
+                serde_json::to_value(deploy::fresh_locked(
                     request.release.ok_or_else(|| {
                         ToolkitError::arguments("unfinished fresh addon needs original --release")
                     })?,
-                    &target,
+                    lease,
                     "addon",
                     request.version,
+                    request.control,
                 )?)?
             };
-            let installed = installation::inspect(&target, "addon")?;
-            if installed["state"] != "managed" || installed["receipt"] != wanted {
+            let installed =
+                installation::inspect_main_controlled(&target, "addon", request.control)?;
+            if installed["state"] != "managed"
+                || !installation::same_receipt_value(&installed["receipt"], &wanted)?
+            {
                 return Err(ToolkitError::invalid(
                     "main addon differs from frozen combined receipt",
                 ));
@@ -306,8 +346,11 @@ pub fn apply(target: &Path, request: Request<'_>, guard: &InstallationGuard) -> 
         }
         if record.phase == "main" {
             request.control.check()?;
-            let installed = installation::inspect(&target, "addon")?;
-            if installed["state"] != "managed" || installed["receipt"] != wanted {
+            let installed =
+                installation::inspect_main_controlled(&target, "addon", request.control)?;
+            if installed["state"] != "managed"
+                || !installation::same_receipt_value(&installed["receipt"], &wanted)?
+            {
                 return Err(ToolkitError::new(
                     "delivery.installation_conflict",
                     "main addon was edited while slots were pending",

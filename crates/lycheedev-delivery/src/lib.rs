@@ -41,22 +41,25 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
             let client = selected_client(inv)?;
             let target = lycheedev_core::client::addon_destination(&client)?;
             let guard = lycheedev_core::coordination::InstallationGuard::acquire(&target)?;
-            guard.require_idle()?;
-            if inv.flag_bool("--resume") && inv.flag("--output").is_none() {
-                return Err(ToolkitError::arguments("--resume requires --output"));
-            }
-            let result = addon_transaction::apply(
-                &target,
-                addon_transaction::Request {
-                    release: inv.flag("--release").map(std::path::Path::new),
-                    archive: inv.flag("--output").map(std::path::Path::new),
-                    version: lycheedev_core::VERSION,
-                    resume: inv.flag_bool("--resume"),
-                    control: &inv.control,
-                },
-                &guard,
-            )?;
-            Ok(Outcome::new(result))
+            let result = (|| {
+                guard.require_idle()?;
+                if inv.flag_bool("--resume") && inv.flag("--output").is_none() {
+                    return Err(ToolkitError::arguments("--resume requires --output"));
+                }
+                let result = addon_transaction::apply(
+                    &target,
+                    addon_transaction::Request {
+                        release: inv.flag("--release").map(std::path::Path::new),
+                        archive: inv.flag("--output").map(std::path::Path::new),
+                        version: lycheedev_core::VERSION,
+                        resume: inv.flag_bool("--resume"),
+                        control: &inv.control,
+                    },
+                    &guard,
+                )?;
+                Ok(Outcome::new(result))
+            })();
+            deploy::finish_close(result, guard.close())
         }
         "skill install" => {
             let target = std::path::Path::new(inv.required("--path")?);
@@ -68,24 +71,28 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
                 ));
             }
             if let Some(archive) = inv.flag("--output") {
-                Ok(Outcome::new(deploy::upgrade(
+                Ok(Outcome::new(deploy::upgrade_controlled(
                     inv.flag("--release").map(std::path::Path::new),
                     target,
                     std::path::Path::new(archive),
                     "skill",
                     lycheedev_core::VERSION,
                     inv.flag_bool("--resume"),
+                    &inv.control,
                 )?))
             } else {
                 if inv.flag_bool("--resume") {
                     return Err(ToolkitError::arguments("--resume requires --output"));
                 }
-                Ok(Outcome::new(serde_json::to_value(deploy::fresh(
-                    std::path::Path::new(inv.required("--release")?),
-                    target,
-                    "skill",
-                    lycheedev_core::VERSION,
-                )?)?))
+                Ok(Outcome::new(serde_json::to_value(
+                    deploy::fresh_controlled(
+                        std::path::Path::new(inv.required("--release")?),
+                        target,
+                        "skill",
+                        lycheedev_core::VERSION,
+                        &inv.control,
+                    )?,
+                )?))
             }
         }
         "skill remove" => {
@@ -97,10 +104,11 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
                     4,
                 ));
             }
-            Ok(Outcome::new(deploy::remove(
+            Ok(Outcome::new(deploy::remove_controlled(
                 target,
                 std::path::Path::new(inv.required("--output")?),
                 "skill",
+                &inv.control,
             )?))
         }
         "addon status" | "skill status" => {

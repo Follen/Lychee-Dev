@@ -169,13 +169,40 @@ pub fn plan(root: &Path) -> Result<Value> {
 }
 pub fn fresh(root: &Path) -> Result<Value> {
     let root = absolute(root)?;
+    run_archive(&root, false)
+}
+/// Resume only the recorded switch. Missing intent must never become a fresh
+/// initialization, including creation of its parent or lock directory.
+pub fn resume(root: &Path) -> Result<Value> {
+    let root = absolute(root)?;
+    read_resume_plan(&root)?;
+    run_archive(&root, true)
+}
+fn read_resume_plan(root: &Path) -> Result<Value> {
+    let journal = journal_path(&root)?;
+    match fs::symlink_metadata(&journal) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(ToolkitError::new(
+                "vault.archive_state",
+                format!("vault.archive_state: no archive journal for {}", root.display()),
+                3,
+            ));
+        }
+        Err(error) => return Err(error.into()),
+    }
+    read_plan(root)
+}
+fn run_archive(root: &Path, resume_only: bool) -> Result<Value> {
     fs::create_dir_all(root.parent().unwrap())?;
     let _guard = ExclusiveLock::resource(
         &root.parent().unwrap().join(".lycheedev-locks"),
         &format!("initialize:{}", root.file_name().unwrap().to_string_lossy()),
     )?;
-    let mut plan = plan(&root)?;
     let journal = journal_path(&root)?;
+    // Resolve fresh intent under the root lease. Resume rereads its mandatory
+    // journal here and cannot substitute new intent if that journal disappeared.
+    let mut plan = if resume_only { read_resume_plan(root)? } else { plan(root)? };
     if plan["state"] == "complete" {
         let identity = workspace::open(&root)?;
         return Ok(json!({"plan":plan,"summary":{"root":root,"identity":identity}}));

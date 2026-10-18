@@ -192,15 +192,20 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
     match inv.command.as_str() {
         "doctor" => crate::doctor::inspect(inv),
         "init" => {
-            if inv.flag_bool("--fresh") {
-                return Ok(Outcome::new(if inv.flag_bool("--plan") {
-                    crate::archive::plan(&inv.home)?
-                } else {
-                    crate::archive::fresh(&inv.home)?
-                }));
+            if ["--plan", "--fresh", "--resume"].into_iter()
+                .filter(|flag| inv.flag_bool(flag)).count() > 1
+            {
+                return Err(ToolkitError::arguments("init accepts at most one of --plan, --fresh, --resume"));
             }
+            inv.control.check()?;
             if inv.flag_bool("--plan") {
-                return Err(ToolkitError::arguments("init --plan requires --fresh"));
+                return Ok(Outcome::new(crate::archive::plan(&inv.home)?));
+            }
+            if inv.flag_bool("--fresh") {
+                return Ok(Outcome::new(crate::archive::fresh(&inv.home)?));
+            }
+            if inv.flag_bool("--resume") {
+                return Ok(Outcome::new(crate::archive::resume(&inv.home)?));
             }
             let identity = initialize(&inv.home)?;
             Ok(Outcome::new(

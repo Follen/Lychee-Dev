@@ -1137,6 +1137,9 @@ mod tests {
         .unwrap();
         let error = ranges.read_span(0, expected.len()).unwrap_err();
         assert_eq!(error.code, "records.query_resource_budget");
-        assert_eq!(error.message, "Whole query decode_work budget exceeded");
+        assert_eq!(
+            error.message,
+            "records.query_resource_budget: decode_work (used=3 requested=1 limit=3)"
+        );
     }
 }

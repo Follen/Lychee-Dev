@@ -79,6 +79,7 @@ pub(super) struct QueryDialect {
     )>,
     stop: std::cell::RefCell<Option<lycheedev_core::ToolkitError>>,
     depth: std::cell::Cell<usize>,
+    pub(super) diagnostic: std::cell::RefCell<Option<diagnostic::Diagnostic>>,
 }
 impl std::fmt::Debug for QueryDialect {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -96,6 +97,7 @@ impl QueryDialect {
             controls: Some((control.clone(), budget.safety_only())),
             stop: Default::default(),
             depth: Default::default(),
+            diagnostic: Default::default(),
         }
     }
     pub(super) fn check(&self) -> Result<()> {
