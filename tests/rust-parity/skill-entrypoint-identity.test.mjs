@@ -29,7 +29,7 @@ test('all three active Skill entrypoints name the exact current machine oracle',
   const source = commit => execFileSync('git', ['--no-replace-objects', 'cat-file', 'blob', `${commit}:internal/command/command_contract.go`], {cwd: root, timeout: 10000, maxBuffer: 2 * 1024 * 1024});
   assert.deepEqual(source(CURRENT_GO_COMMIT), source(COMMAND_GO_COMMIT));
   for (const [path, pattern] of entries) checkEntry(read(path), pattern);
-  assert.ok(read('skills/lycheedev/references/commands.md').includes(COMMAND_GO_COMMIT));
+  assert.ok(read('tests/rust-skill-usage/baselines/go3.2.2-commands.md').includes(COMMAND_GO_COMMIT));
 });
 test('every entrypoint rejects stale, mixed, missing or duplicate target identity', () => {
   for (const [path, pattern] of entries) {

@@ -8,7 +8,7 @@ import {ownedSpawnSync} from '../../tools/rust-owned-process.mjs';
 import {currentWorkflowInputs, inventory, inventoryHash, jsonFile, loadCurrentWorkflow, pendingIncrementTasks, verifyCandidate} from './assertions.mjs';
 import {loadExporters} from './data-inputs.mjs';
 import {assertDataReport, pendingDataTasks} from './data-assertions.mjs';
-import {DATA_SKILL_MANIFEST, assertDataSkillDirectory, assertDataSkillInventory, dataSkillIdentity} from './data-skill-contract.mjs';
+import {assertDataSkillDirectory, assertDataSkillInventory, dataSkillIdentity} from './data-skill-contract.mjs';
 
 export function findNpm(node = process.execPath, environment = process.env) {
   const paths = [environment.npm_execpath, join(dirname(node), 'node_modules/npm/bin/npm-cli.js')].filter(Boolean);
@@ -40,7 +40,7 @@ export function runOwnedData(root, argv) {
   assertDataSkillDirectory(join(candidate.packageRoot, 'payload/skill'));
   const skillIdentity = dataSkillIdentity(assertDataSkillInventory(candidate.files));
   const exporters = loadExporters(root, exportersPath, sourceTree), npm = findNpm();
-  const inputNames = ['tools/rust-skill-usage.mjs', ...['data-owned.mjs', 'data-run.mjs', 'data-inputs.mjs', 'data-exporters.mjs', 'data-assertions.mjs', 'data-skill-contract.mjs', 'data-runner.test.mjs', 'assertions.mjs'].map(name => `tests/rust-skill-usage/${name}`), DATA_SKILL_MANIFEST, ...currentWorkflowInputs(workflow), 'tests/rust-performance-paired/data-inputs.mjs', 'tests/rust-performance-paired/data-contract.mjs', 'tests/rust-performance-paired/inputs.mjs', 'tests/rust-performance-paired/contract.mjs', 'tests/rust-parity/describe-contract.mjs', 'tests/rust-source-full-corpus/assertions.mjs', 'tools/rust-build.mjs', 'tools/rust-disk.mjs', 'tools/rust-owned-process.mjs', 'tools/rust-owned-process.ps1', 'tools/rust-emmy-identity.mjs', 'tools/zip.mjs'];
+  const inputNames = ['tools/rust-skill-usage.mjs', ...['data-owned.mjs', 'data-run.mjs', 'data-inputs.mjs', 'data-exporters.mjs', 'data-assertions.mjs', 'data-skill-contract.mjs', 'data-runner.test.mjs', 'assertions.mjs'].map(name => `tests/rust-skill-usage/${name}`), ...currentWorkflowInputs(workflow), 'tests/rust-performance-paired/data-inputs.mjs', 'tests/rust-performance-paired/data-contract.mjs', 'tests/rust-performance-paired/inputs.mjs', 'tests/rust-performance-paired/contract.mjs', 'tests/rust-parity/describe-contract.mjs', 'tests/rust-source-full-corpus/assertions.mjs', 'tools/rust-build.mjs', 'tools/rust-disk.mjs', 'tools/rust-owned-process.mjs', 'tools/rust-owned-process.ps1', 'tools/rust-emmy-identity.mjs', 'tools/zip.mjs'];
   const testInputs = Object.fromEntries([...new Set([...inputNames, ...sharedTools])].map(path => [path, hashFile(join(runnerRoot, path))]));
   const nodeSHA256 = hashFile(process.execPath), job = beginScratch(root, 'skill-data-usage', {command: process.argv, inputs: {sourceTree, runnerRoot, skillIdentity, artifactSHA256, binarySHA256: artifact.binarySHA256, candidateSHA256: candidate.reportSHA256, packageSHA256: candidate.packageSHA256, exporterReceiptSHA256: exporters.receiptSHA256, testInputs, nodeSHA256, npm}, admissionOptions: {requiredBytes: 1 << 30, scratchReserveBytes: 1 << 30}});
   const prefix = join(job.directory, 'npm-prefix');

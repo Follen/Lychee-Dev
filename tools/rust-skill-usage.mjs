@@ -6,6 +6,8 @@ import {beginScratch, contained} from './rust-disk.mjs';
 import {ownedSpawnSync} from './rust-owned-process.mjs';
 import {assertCurrentSelectedReport, currentWorkflowInputs, inventory, inventoryHash, jsonFile, loadCurrentWorkflow, pendingIncrementTasks, verifyCandidate} from '../tests/rust-skill-usage/assertions.mjs';
 
+import {dataSkillIdentity} from '../tests/rust-skill-usage/data-skill-contract.mjs';
+
 if (process.argv[2] === '--prepare-data-exporters') {
   if (process.argv.length !== 3) throw new Error('usage: --prepare-data-exporters');
   const {prepareDataExporters} = await import('../tests/rust-skill-usage/data-exporters.mjs');
@@ -23,7 +25,7 @@ const artifact = verifyArtifact(root, artifactPath), artifactSHA256 = hashFile(a
 const workflow = loadCurrentWorkflow(root);
 const candidate = verifyCandidate(root, candidatePath, artifact, workflow);
 if (candidate.report.artifactRecordSHA256 !== artifactSHA256) throw new Error('skill-usage.sealed_artifact_record_mismatch');
-const inputs = ['tools/rust-skill-usage.mjs', 'tests/rust-skill-usage/run.mjs', 'tests/rust-skill-usage/assertions.mjs', ...currentWorkflowInputs(workflow), 'tests/rust-source-full-corpus/assertions.mjs', 'tests/rust-source-full-corpus/retail-oracle.json'];
+const inputs = ['tools/rust-skill-usage.mjs', 'tests/rust-skill-usage/run.mjs', 'tests/rust-skill-usage/assertions.mjs', 'tests/rust-skill-usage/data-skill-contract.mjs', ...currentWorkflowInputs(workflow), 'tests/rust-source-full-corpus/assertions.mjs', 'tests/rust-source-full-corpus/retail-oracle.json'];
 const testInputs = Object.fromEntries(inputs.map(path => [path, hashFile(join(root, path))]));
 const job = beginScratch(root, 'skill-real-usage', {
   command: process.argv,
@@ -49,12 +51,12 @@ try {
     && inventoryHash(inventory(candidate.packageRoot)) === candidate.packageSHA256
     && Object.entries(testInputs).every(([path, expected]) => hashFile(join(root, path)) === expected);
   let observationContractError;
-  try { assertCurrentSelectedReport(observation, workflow); } catch (error) { observationContractError = error.message; }
+  try { assertCurrentSelectedReport(observation, workflow, dataSkillIdentity()); } catch (error) { observationContractError = error.message; }
   const passed = stable && handlesReaped && !run.error && run.status === 0 && !observationContractError;
   save('owned-report.json', {schema: 'lycheedev.skill-usage-owned.v1', passed, goContract: workflow.goContract, goVersion: workflow.goVersion, completeSkillAcceptance: false, pendingTasks: pendingIncrementTasks(workflow), observationContractError, binarySHA256: artifact.binarySHA256, artifactRecordSHA256: artifactSHA256,
     candidateReportSHA256: candidate.reportSHA256, packageSHA256: candidate.packageSHA256, inputsStable: stable, testInputs,
     process: {exit: run.status, error: run.error?.message, handlesReaped, proof: run.proof}, observation: observationPath,
-    scope: 'Fixed Go323 packaged Skill bytes plus independent real CLI use for the three unchanged full-Retail Source tasks. Four cumulative Data/Live tasks remain not_run with fixture/authorization requirements; static Skill checks are not their runtime acceptance. Synthetic prefix layout is not npm install acceptance. Full source authenticity/corpus, lifecycle, full Go differential, performance and game acceptance remain separate.'});
+    scope: 'Reviewed candidate packaged Skill bytes, separate fixed Go323 historical fixtures and independent real CLI use for the three unchanged full-Retail Source tasks. Four cumulative Data/Live tasks remain not_run with fixture/authorization requirements; static Skill checks are not their runtime acceptance. Synthetic prefix layout is not npm install acceptance. Full source authenticity/corpus, lifecycle, full Go differential, performance and game acceptance remain separate.'});
   console.log(JSON.stringify({passed, goContract: workflow.goContract, completeSkillAcceptance: false, pendingTasks: pendingIncrementTasks(workflow), observationContractError,
     report: join(job.evidence, 'owned-report.json'), checks: observation?.checks?.map(({caseId, state, reason}) => ({caseId, state, reason}))}, null, 2));
   state = passed ? 'succeeded' : 'failed';

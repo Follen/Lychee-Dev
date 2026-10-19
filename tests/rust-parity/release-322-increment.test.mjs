@@ -56,6 +56,16 @@ test('all previous evidence keeps its original bytes and identity', () => {
   const delta = JSON.parse(deltaBytes);
   assert.equal(delta.path, 'tests/rust-parity/release-321-increment.test.mjs');
   for (const row of manifest.historicalFiles) {
+    if (row.path === 'tests/rust-parity/release-321-guidance.test.mjs') {
+      const original = read('tests/rust-parity/historical/release-321-guidance.test.mjs.txt');
+      assert.equal(hash(original), row.sha256, 'original guidance checker remains immutable');
+      const adapted = original.toString()
+        .replace('resolve(root, path)', "resolve(root, 'tests/rust-skill-usage/baselines/go3.2.3/references/live-recovery.md')")
+        .replace('Skill keyboard recovery paragraph is byte-for-byte fixed Go 3.2.1',
+          'historical Skill fixture keyboard recovery paragraph is byte-for-byte fixed Go 3.2.1');
+      assert.equal(read(row.path).toString(), adapted, 'only historical fixture routing and test label change');
+      continue;
+    }
     if (row.path !== delta.path) { assert.equal(hash(read(row.path)), row.sha256, row.path); continue; }
     assert.equal(delta.beforeSHA256, row.sha256);
     const historical = read(delta.historicalPath);
@@ -75,60 +85,62 @@ test('all previous evidence keeps its original bytes and identity', () => {
   assert.equal(JSON.parse(read('tests/rust-parity/go-3.2.0.manifest.json')).oracle.commit, '3057a9666ab078270b63c7f06de748069b0d1f4b');
 });
 
-test('current product retains the frozen increment with exact authenticated successors', () => {
-  assert.equal(hash(typedDeltaBytes), TYPED_DELTA_SHA256);
-  const typedDelta = JSON.parse(typedDeltaBytes);
-  assert.equal(typedDelta.baseCommit, '913112a6ce628812f824513aac853ccd088fd265');
-  assert.equal(typedDelta.candidateCommit, 'e7341e3902216de38654eaeefe8e0ce42ec62f83');
-  assert.deepEqual(typedDelta.sources.map(row => row.path), ['crates/lycheedev-live/src/go_mailbox_v1/activation_service.rs', 'crates/lycheedev-live/src/go_mailbox_v1/activation_tests.rs']);
+// The original candidate is an immutable historical fact. Later legitimate
+// refactors and reviewed Skill text are not required to retain its source bytes.
+const HISTORICAL_CANDIDATE = '351fcfdaceb4c064179bad3839b5dc1e01aa2043';
+const HISTORICAL_SUCCESSOR = '0002ce02bec5fb7c9c31ae40fd96eadf0da17dc6';
+test('historical 322 candidate retains all frozen increment bytes and predecessor identities', () => {
   assert.equal(manifest.productChanges.length, 20);
   for (const row of manifest.persistenceCompatibility.sources) {
     const bytes = blob(row.commit, row.path);
     assert.equal(bytes.length, row.bytes, row.path); assert.equal(hash(bytes), row.sha256, row.path);
   }
   for (const row of manifest.productChanges) {
-    let current = read(row.path);
-    const successor = typedDelta.sources.find(part => part.path === row.path);
-    if (successor) {
-      assert.equal(successor.originalSHA256, row.sha256);
-      assert.deepEqual(current, blob(typedDelta.candidateCommit, row.path));
-      current = restoreTypedOutcome(current, successor);
-      assert.deepEqual(current, blob(typedDelta.baseCommit, row.path));
-    }
-    // Legacy consumer retirement restored the complete fixed Go 3.2.3 test
-    // environment. Authenticate it separately and keep the original 322 record.
-    if (row.path === 'tests/addon/env.lua') {
-      const text = current.toString();
-      assert.equal(text.split('return "3.5.0"').length, 2);
-      assert.deepEqual(Buffer.from(text.replace('return "3.5.0"', 'return "3.2.3"')),
-        blob('3766f9cacb52e93a803a626187e2a1d54a445468', row.path));
-      current = blob('351fcfdaceb4c064179bad3839b5dc1e01aa2043', row.path);
-    }
-    if (row.path === 'crates/lycheedev-live/src/go_mailbox_v1/input.rs') {
-      const text = current.toString();
-      const anchor = "}\n\nimpl<'de> Deserialize<'de> for InputObservation {";
-      assert.equal((text.match(/fn is_false\(/g) ?? []).length, 1);
-      assert.equal(text.split(anchor).length, 2);
-      // 351's real E0428 came from this duplicate helper. Authenticate the
-      // exact one-line removal against the immutable failed candidate.
-      current = Buffer.from(text.replace(anchor,
-        "}\nfn is_false(value: &bool) -> bool { !*value }\n\nimpl<'de> Deserialize<'de> for InputObservation {"));
-    }
-    if (row.path === 'crates/lycheedev-live/src/go_mailbox_v1/driver_tests.rs') {
-      const correction = JSON.parse(read('tests/rust-parity/b16-mailbox-fixture-corrections.json'));
-      assert.equal(correction.path, row.path);
-      assert.equal(correction.originalSHA256, row.sha256);
-      assert.equal(hash(current), correction.candidateSHA256);
-      let restored = current.toString();
-      for (const part of correction.replacements) {
-        assert.equal(restored.split(part.replacement).length, 2);
-        restored = restored.replace(part.replacement, part.original);
-      }
-      current = Buffer.from(restored);
-    }
-    assert.equal(hash(current), row.sha256, row.path);
+    const original = blob(HISTORICAL_CANDIDATE, row.path);
+    assert.equal(original.length, row.bytes, row.path); assert.equal(hash(original), row.sha256, row.path);
     if (row.beforeSHA256 !== null) assert.equal(hash(blob(manifest.candidateBaseCommit, row.path)), row.beforeSHA256, row.path);
   }
+});
+
+test('fixed historical successors retain the independently authenticated correction evidence', () => {
+  assert.equal(hash(typedDeltaBytes), TYPED_DELTA_SHA256);
+  const typedDelta = JSON.parse(typedDeltaBytes);
+  assert.equal(typedDelta.baseCommit, '913112a6ce628812f824513aac853ccd088fd265');
+  assert.equal(typedDelta.candidateCommit, 'e7341e3902216de38654eaeefe8e0ce42ec62f83');
+  assert.deepEqual(typedDelta.sources.map(row => row.path), ['crates/lycheedev-live/src/go_mailbox_v1/activation_service.rs', 'crates/lycheedev-live/src/go_mailbox_v1/activation_tests.rs']);
+  for (const row of typedDelta.sources) {
+    assert.equal(row.originalSHA256, manifest.productChanges.find(part => part.path === row.path).sha256);
+    const restored = restoreTypedOutcome(blob(typedDelta.candidateCommit, row.path), row);
+    assert.deepEqual(restored, blob(typedDelta.baseCommit, row.path));
+    assert.deepEqual(restored, blob(HISTORICAL_CANDIDATE, row.path));
+  }
+  const input = 'crates/lycheedev-live/src/go_mailbox_v1/input.rs';
+  const text = blob(HISTORICAL_SUCCESSOR, input).toString();
+  const anchor = "}\n\nimpl<'de> Deserialize<'de> for InputObservation {";
+  assert.equal((text.match(/fn is_false\(/g) ?? []).length, 1);
+  assert.equal(text.split(anchor).length, 2);
+  // Preserve the real historical E0428 duplicate-helper failure and its exact
+  // correction. Neither frozen snapshot claims today's Rust execution passed.
+  assert.deepEqual(Buffer.from(text.replace(anchor,
+    "}\nfn is_false(value: &bool) -> bool { !*value }\n\nimpl<'de> Deserialize<'de> for InputObservation {")), blob(HISTORICAL_CANDIDATE, input));
+  const correction = JSON.parse(read('tests/rust-parity/b16-mailbox-fixture-corrections.json'));
+  assert.equal(correction.path, 'crates/lycheedev-live/src/go_mailbox_v1/driver_tests.rs');
+  assert.equal(correction.originalSHA256, manifest.productChanges.find(row => row.path === correction.path).sha256);
+  let restored = blob(HISTORICAL_SUCCESSOR, correction.path).toString();
+  assert.equal(hash(Buffer.from(restored)), correction.candidateSHA256);
+  for (const part of correction.replacements) {
+    assert.equal(restored.split(part.replacement).length, 2);
+    restored = restored.replace(part.replacement, part.original);
+  }
+  assert.equal(hash(Buffer.from(restored)), correction.originalSHA256);
+  assert.deepEqual(Buffer.from(restored), blob(HISTORICAL_CANDIDATE, correction.path));
+  const env = blob(HISTORICAL_SUCCESSOR, 'tests/addon/env.lua').toString();
+  assert.equal(env.split('return "3.5.0"').length, 2);
+  assert.deepEqual(Buffer.from(env.replace('return "3.5.0"', 'return "3.2.3"')),
+    blob('3766f9cacb52e93a803a626187e2a1d54a445468', 'tests/addon/env.lua'));
+});
+
+test('current candidate keeps only the approved release version and channel overlay', () => {
   for (const path of ['release/version.json','packages/npm/lycheedev/package.json','packages/npm/lycheedev/package-lock.json','release/npm-channel.json']) {
     const before = JSON.parse(blob(manifest.candidateBaseCommit, path));
     const actual = JSON.parse(read(path));
@@ -146,7 +158,12 @@ test('current product retains the frozen increment with exact authenticated succ
 });
 
 test('322 Lua and startup are upstream bytes, including failure and disabled-bridge coverage', () => {
-  for (const path of ['addon/Core/Compat.lua','addon/Bridge/SlotRuntime.lua','addon/Bridge/InputState.lua','tests/addon/t_slot_enable.lua','skills/lycheedev/references/live-startup.md']) assert.deepEqual(read(path), blob(pin, path), path);
+  for (const path of ['addon/Core/Compat.lua','addon/Bridge/SlotRuntime.lua','addon/Bridge/InputState.lua','tests/addon/t_slot_enable.lua']) assert.deepEqual(read(path), blob(pin, path), path);
+  assert.deepEqual(read('tests/rust-skill-usage/baselines/go3.2.3/references/live-startup.md'), blob(pin, 'skills/lycheedev/references/live-startup.md'), 'historical startup Skill fixture');
+  const env = read('tests/addon/env.lua').toString();
+  assert.equal(env.split('return "3.5.0"').length, 2);
+  assert.deepEqual(Buffer.from(env.replace('return "3.5.0"', 'return "3.2.3"')),
+    blob('3766f9cacb52e93a803a626187e2a1d54a445468', 'tests/addon/env.lua'), 'current Lua environment retains the fixed Go323 version overlay');
   const fixture = read('tests/addon/t_slot_enable.lua').toString();
   assert.equal(fixture.trimEnd().split('\n').length, 128);
   for (const text of ['queries==503 and saves==1 and loads==0','character==guid','queries==499','"read","enable","verify","save","unavailable"','saves==2 and #writes==1','enabled[1] and enabled[2]==false and saves==1','Env.framesCreated==frames and ns.Mailbox==nil']) assert(fixture.includes(text), text);
@@ -163,25 +180,53 @@ test('322 runtime tests are declared, wired and explicitly unexecuted here', () 
   for (const text of ['DurableChannelJournal','journal.load(&OperationControl::default())','original-reload','slot_enable_reload_intent','runtime_changed_during_recovery','live.channel_budget_clock_rollback']) assert(source.includes(text), text);
 });
 
-test('fresh pre-bind and invoke gates preserve ordering and never gate reload itself', () => {
-  const driver = read('crates/lycheedev-live/src/go_mailbox_v1/driver.rs').toString();
-  const connect = driver.slice(driver.indexOf('    pub fn connect('), driver.indexOf('    pub fn prepare_request('));
-  assert(connect.indexOf('self.observe_input(') < connect.indexOf('self.begin('));
-  const tx = read('crates/lycheedev-live/src/go_mailbox_v1/transactions.rs').toString();
-  const submit = tx.slice(tx.indexOf('    pub(crate) fn submit_input('), tx.indexOf('    pub(super) fn observe_input('));
-  assert(submit.indexOf('return Ok(())') < submit.indexOf('self.observe_input('));
+function sourceBlock(source, start, end) {
+  const first = source.indexOf(start), last = source.indexOf(end);
+  assert(first >= 0 && last > first, 'existing ordered function boundaries');
+  return source.slice(first, last);
+}
+function assertOrder(source, before, after) {
+  const first = source.indexOf(before), last = source.indexOf(after);
+  assert(first >= 0 && last >= 0, 'both ordering anchors must exist');
+  assert(first < last, 'required gate ordering');
+}
+function assertFreshInputGates(driver, tx) {
+  const connect = sourceBlock(driver, '    pub fn connect(', '    pub fn prepare_request(');
+  assertOrder(connect, 'self.observe_input(', 'self.begin(');
+  const submit = sourceBlock(tx, '    pub(crate) fn submit_input(', '    pub(super) fn observe_input(');
+  assertOrder(submit, 'return Ok(())', 'self.observe_input(');
   assert.match(submit, /kind == InputKind::Invoke && observation.slot_reload_required/);
-  assert(submit.indexOf('self.request_slot_reload(') < submit.indexOf('self.perform('));
+  assertOrder(submit, 'self.request_slot_reload(', 'self.perform(');
+}
+test('fresh pre-bind and invoke gates preserve ordering and never gate reload itself', () => {
+  assertFreshInputGates(read('crates/lycheedev-live/src/go_mailbox_v1/driver.rs').toString(),
+    read('crates/lycheedev-live/src/go_mailbox_v1/transactions.rs').toString());
   const native = read('crates/lycheedev-live/src/go_mailbox_v1/native_backend.rs').toString();
   assert.match(native, /!s.same_input_profile\(sample\)/);
   assert.match(native, /action.kind == InputKind::Invoke && s.slot_reload_required/);
   assert.match(read('crates/lycheedev-live/src/go_mailbox_v1/reload.rs').toString(), /if progress\(&err\) \{ continue; \}/);
 });
+test('current gate checker rejects missing boundaries and either ordering anchor', () => {
+  const driver = read('crates/lycheedev-live/src/go_mailbox_v1/driver.rs').toString();
+  const tx = read('crates/lycheedev-live/src/go_mailbox_v1/transactions.rs').toString();
+  assertFreshInputGates(driver, tx);
+  for (const marker of ['    pub fn connect(', '    pub fn prepare_request(', 'self.observe_input(', 'self.begin(']) {
+    assert.throws(() => assertFreshInputGates(driver.replace(marker, ''), tx));
+  }
+  const submit = sourceBlock(tx, '    pub(crate) fn submit_input(', '    pub(super) fn observe_input(');
+  for (const marker of ['return Ok(())', 'self.observe_input(', 'self.request_slot_reload(', 'self.perform(']) {
+    assert.throws(() => assertFreshInputGates(driver, tx.replace(submit, submit.replace(marker, ''))));
+  }
+  for (const marker of ['    pub(crate) fn submit_input(', '    pub(super) fn observe_input(']) {
+    assert.throws(() => assertFreshInputGates(driver, tx.replace(marker, '')));
+  }
+});
 
 test('typed outcome custody rejects changed bytes, offsets and replacement text', () => {
   assert.equal(hash(typedDeltaBytes), TYPED_DELTA_SHA256);
-  for (const row of JSON.parse(typedDeltaBytes).sources) {
-    const current = read(row.path);
+  const delta = JSON.parse(typedDeltaBytes);
+  for (const row of delta.sources) {
+    const current = blob(delta.candidateCommit, row.path);
     const changed = Buffer.from(current); changed[0] ^= 1;
     assert.throws(() => restoreTypedOutcome(changed, row));
     const altered = structuredClone(row); altered.edits[0].originalText += 'x';

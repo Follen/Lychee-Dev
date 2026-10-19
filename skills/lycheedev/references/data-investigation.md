@@ -1,88 +1,36 @@
 # Data investigation
 
-Use this branch for static game records, SQL, Hotfixes and their preparation
-failures. Follow the decisions below; open only the reference needed now.
-The CLI owns product routing, archive recovery and verification.
+Use static records for IDs, names and relationships; [Hotfix records](data-hotfix.md)
+for retained changes; an explicit [effective SQL overlay](data-query-recipes.md)
+for values after selected caches. None alone proves server behavior. Keep a
+static baseline for an authorized live measurement; do not open a game for a
+static-only task.
 
-## 1. Choose the evidence
+Reuse an explicit snapshot or the project's matching data pin. Inspect product,
+full build, region, locale and definitions; a conflicting default must not answer
+a different question or prompt a lock rewrite. For missing identity, read
+[data targets](data-targets.md). Keep local/CDN provenance fixed and label separate
+pins when delivery configurations differ.
 
-| Requested answer | Next step |
-| --- | --- |
-| Names, IDs, static coefficients or related records | Static lookup below; details in [data-tables.md](data-tables.md) |
-| Changed records or retained Hotfix pushes | [data-hotfix.md](data-hotfix.md) |
-| Values after applying a specified cache | Explicit `effective` query in [data-query-recipes.md](data-query-recipes.md) |
-| Actual server behavior or measured coefficients | Establish the static baseline, then [live-investigation.md](live-investigation.md) when live work is authorized |
+Choose the smallest query that can settle the claim:
+- Verified ID: use the domain relationship command when it owns that relationship,
+  otherwise inspect schema and query the ID/foreign key.
+- Business name: search the actual localized schema field, then resolve candidate
+  class/rank/relationships. Do not pick the first name or ask for a discoverable ID.
+- Multiple tables or calculations: use parameterized SQL; see
+  [tables](data-tables.md) and [query recipes](data-query-recipes.md).
 
-Static rows, client Hotfixes and server measurements are distinct evidence.
-Do not silently substitute one for another or open a game for a static-only task.
+Use installed describe/help for commands and flags. A negative claim needs
+complete readable coverage of its exact scope. Empty partial results, missing
+keys/partitions and truncated searches cannot establish absence. SQL LIMIT or
+one record does not establish whole-table coverage. JSONL completion requires a
+legal end frame and exit 0, followed by a separate coverage check.
 
-## 2. Fix the identity once
+Continue returned cursors with unchanged pin/source/filters and the correct
+cursor type. DB2 search/foreign-key have no cursor; narrow, use a supported bound,
+or use stable unique SQL keyset paging. Never invent an after-ID option for them.
+For Hotfix continuation, use the archived source/checkpoint rather than reread a
+mutable file. Healthy workspace/target resolution does not prove content exists.
 
-Use an explicit snapshot first, otherwise the invoking project's matching data
-pin. Inspect it with `target show <pin>`; use `project status` if project context
-is unclear. Check product, full build, region, locale and definitions against the
-request. A conflicting project pin must not silently answer a different product:
-use a matching explicit pin when the requested scope is clear; ask only for a
-remaining identity choice. Do not overwrite the project lock for an investigation.
-
-No matching pin? Read [data-targets.md](data-targets.md). `target list` lists saved
-names, not supported products. Use the exact product from `target available` or
-command help. Select `forever-asia-beta` and `forever-cn-beta` separately; equal
-build numbers do not make their configurations interchangeable. The legacy
-`forever` name is a family selector locally and retains the Asia publishing
-endpoint remotely. Folder names and conversation language do not establish identity.
-Choose the requested local installation or CDN source, then retain that source
-and pin throughout the query. Different delivery configurations require separate,
-labeled pins; they are not interchangeable evidence.
-For local resolution, constrain the game root/client path with the requested
-product; use returned candidates only when selection remains ambiguous.
-
-## 3. Query the smallest useful scope
-
-Decide what would settle the requested claim before expanding the query. One
-verified record or relationship can answer an ID-specific question; a negative
-claim needs complete readable coverage of its exact filters. Prepare only the
-tables needed for that claim, rather than exporting a whole build as a precaution.
-
-- Verified ID: prefer the domain command that owns the needed relationship;
-  otherwise inspect table schema and query the ID or foreign key.
-- Business name only: inspect the relevant name table schema, search its actual
-  localized field with an explicit limit, then resolve candidates by relationships
-  and class/rank/context. Do not pick the first matching name or ask the user to
-  supply a table/ID the toolkit can discover. If evidence leaves multiple valid
-  interpretations, present the remaining choices.
-- Multiple tables, filtering or calculation: inspect the schemas and use SQL
-  with named parameters. Read [data-tables.md](data-tables.md) for mechanics and
-  [data-query-recipes.md](data-query-recipes.md) for parameter/overlay examples.
-
-Use installed `describe --format json` or help for exact commands and flags.
-If the installed CLI lacks a documented capability, report that version mismatch;
-do not claim source-only changes are installed or invent a replacement flag.
-
-## 4. Decide whether the evidence answers the question
-
-Read structured errors and coverage, not just exit status. Retain the snapshot,
-source, record IDs, filters and capture IDs with the conclusion.
-
-| Result | Decision |
-| --- | --- |
-| Complete for the requested scope | Answer within that scope; SQL LIMIT and a single record do not prove whole-table coverage |
-| More pages/truncated | Use a returned cursor with unchanged pin/source/filters; search without a cursor needs the bounded alternative below |
-| Missing keys/partitions or partial result | Use readable evidence with the limitation; empty partial results cannot establish absence |
-| Failure/deadline | [data-recovery.md](data-recovery.md); correct the cause or stop the affected branch after bounded retry |
-
-For JSONL, require a legal end frame and exit 0, then inspect coverage separately.
-Keep query completion, source readability and output truncation separate: a
-complete bounded query can still use a partial table or intentionally return
-only its SQL LIMIT. Retain the captures needed to reproduce the finding, not
-just a successful exit code.
-`db2 search` and `foreign-key` have no cursor: narrow to the requested scope,
-increase the limit within documented bounds, or use ordered SQL pagination.
-Do not invent `--after-id` for those verbs. With SQL, retain a stable unique order
-and filters across pages; use the last ID as a parameter for keyset continuation.
-For Hotfix continuation, retain the archived source/checkpoint rather than reread
-a mutable cache. A healthy workspace or successful target resolution does not
-prove that the requested content is available.
-
-Finish with the finding, fixed provenance and unresolved scope. Static evidence
-can be a completed baseline while server-side fitting remains unverified.
+On failure, use [data recovery](data-recovery.md). Finish with the answer, pin,
+source, record/filter scope and captures; retain unresolved server/runtime claims.

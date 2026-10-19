@@ -1,7 +1,7 @@
-// Stage the complete Go-aligned Skill, retaining the fixed target contract and
-// a separate directory declared by the selected Rust candidate. Neither is
-// behavioral acceptance evidence. This tool does not install the Skill.
-import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+// Stage the exact Skill and an out-of-band machine declaration receipt.
+// CLI describe/help owns discovery; staging never adds a prose command manual.
+// Declaration and byte custody are not behavioral acceptance. This does not install.
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -23,27 +23,28 @@ export function stageSkill(destination, commands) {
     seen.add(command.path);
   }
   const source = join(repository, 'skills/lycheedev');
+  const target = JSON.parse(readFileSync(join(repository, 'tests/rust-parity/go-3.2.2.manifest.json'), 'utf8'));
+  if (target.oracle?.commit !== '0bec60e4406f5d5dc155ee25cef44f9a710e37e8') throw new Error('rust-skill.invalid_target');
+  const actual = new Map(commands.map(command => [command.path, command]));
+  const missingCommands = target.commands.filter(command => !actual.has(command.path)).map(command => command.path);
+  const missingFlags = target.commands.flatMap(command => {
+    const selected = actual.get(command.path);
+    if (!selected) return [];
+    const names = new Set(selected.flags.map(flag => flag.split(/\s+/)[0]));
+    return command.flags.filter(flag => !names.has(flag.split(/\s+/)[0]))
+      .map(flag => ({path: command.path, flag: flag.split(/\s+/)[0]}));
+  });
+  // The receipt is a sibling artifact, not instructions or part of the Skill.
+  const receipt = `${destination}.contract.json`;
+  if (existsSync(receipt)) throw new Error('rust-skill.receipt_exists');
   // Require a new directory. Never overwrite an installed or prior staged Skill.
   mkdirSync(destination);
   cpSync(source, destination, { recursive: true, force: false, errorOnExist: true });
-  const lines = [
-    '# Selected candidate command directory', '',
-    `${commands.length} commands declared by the selected candidate's describe output.`,
-    'Declaration is not implementation, behavioral parity or acceptance evidence.',
-    'The [fixed Go target](commands.md) remains the migration contract; missing',
-    'commands are gaps, not removed requirements. See [candidate boundaries](source-candidate.md).', '',
-  ];
-  for (const command of commands) {
-    const args = command.arguments?.length ? ` ${command.arguments.join(' ')}` : '';
-    lines.push(`- \`${command.path}${args}\` — ${command.mutates ? 'mutates' : 'read-only'}. ${command.summary}`);
-    if (command.flags.length) lines.push(`  Flags: ${command.flags.map(flag => `\`${flag}\``).join(', ')}.`);
-  }
-  writeFileSync(join(destination, 'references/candidate-commands.md'), `${lines.join('\n')}\n`);
-  writeFileSync(join(destination, 'references/candidate-contract.json'), `${JSON.stringify({
+  writeFileSync(receipt, `${JSON.stringify({
     schema: 'lycheedev.skill-declared-contract.v1', commands,
-  }, null, 2)}\n`);
-  const entry = join(destination, 'SKILL.md');
-  writeFileSync(entry, `${readFileSync(entry, 'utf8')}\nThe staged [candidate command directory](references/candidate-commands.md) records\nthe selected binary's declarations at staging time. Recheck describe/help if\nthe binary changes; the fixed target directory is not candidate availability.\n`);
+    targetCommit: target.oracle.commit, missingCommands, missingFlags,
+    scope: 'Declared command/flag availability only; not handler or behavior acceptance',
+  }, null, 2)}\n`, {flag: 'wx'});
   return destination;
 }
 

@@ -7,6 +7,8 @@ import {fileURLToPath} from 'node:url';
 import os from 'node:os';
 import {assertApiAnswer, assertBoundedCoverage, assertCurrentSelectedReport, assertNativeContext, assertNativeEvidence, assertPackagedIncrement, commandFlags, CURRENT_GO_CONTRACT, CURRENT_WORKFLOW, currentWorkflowInputs, evaluateWorkflowCheck, inventory, inventoryHash, jsonFile, loadCurrentWorkflow, nativeOperationDigest, nativePlanDigest, pendingIncrementTasks, POST_SEMANTIC_REQUIREMENTS, sha256, skillTreeIdentity, verifyCandidate, within} from './assertions.mjs';
 
+import {loadReviewedSkillContract, reviewedSkillIdentity} from './skill-identity.mjs';
+
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const historicalWorkflow = jsonFile(new URL('./workflow.json', import.meta.url));
 const workflow = loadCurrentWorkflow(repository);
@@ -20,9 +22,8 @@ function fixture(t) {
   const binary = Buffer.from('synthetic checker bytes; not an EXE'), launcher = '// synthetic checker launcher; never executed\n';
   write(join(root, 'packages/npm/lycheedev/bin/lycheedev-rust.mjs'), launcher);
   write(join(packageRoot, 'bin/lycheedev.mjs'), launcher);
-  for (const path of workflow.requiredSkillFiles) {
-    const increment = workflow.increments.find(row => row.file === path);
-    const bytes = increment ? readFileSync(new URL(increment.fixture, import.meta.url)) : `synthetic ${path}\n`;
+  for (const {path} of loadReviewedSkillContract().files) {
+    const bytes = readFileSync(join(repository, 'skills/lycheedev', path));
     write(join(root, 'skills/lycheedev', path), bytes);
     write(join(packageRoot, 'payload/skill', path), bytes);
   }
@@ -71,7 +72,7 @@ test('normal outer and owned controller entries both load current authenticated 
     assert.doesNotMatch(source, /const workflow = jsonFile\(/);
   }
   assert.equal(CURRENT_WORKFLOW, 'tests/rust-skill-usage/workflow-go323.json');
-  assert.equal(new Set(currentWorkflowInputs(workflow)).size, 8);
+  assert.equal(new Set(currentWorkflowInputs(workflow)).size, 11);
 });
 test('current workflow rejects historical relabeling, missing increments and weakened Source tasks', t => {
   const f = workflowFixture(t), original = f.read('workflow-go323.json');
@@ -101,9 +102,9 @@ test('fixed manifest and increment snapshots reject changed blobs, omitted files
   write(join(f.root, 'tests/rust-skill-usage', workflow.increments[2].fixture), 'old fixed 512/128 MiB budget guidance\n');
   assert.throws(f.verify, /fixed increment/);
 });
-test('all four current packaged increment contracts are byte-exact, never runtime evidence', () => {
+test('all four historical Go increment fixtures remain byte-exact, never runtime evidence', () => {
   for (const increment of workflow.increments) {
-    const result = assertPackagedIncrement(join(repository, 'skills/lycheedev'), workflow, increment);
+    const result = assertPackagedIncrement(join(repository, 'tests/rust-skill-usage/baselines/go3.2.3'), workflow, increment);
     assert.equal(result.basis, 'exact_fixed_go323_skill_bytes_only'); assert.equal(result.runtimeVerified, false);
   }
   const pending = pendingIncrementTasks(workflow);
@@ -112,10 +113,10 @@ test('all four current packaged increment contracts are byte-exact, never runtim
   assert(pending.find(row => row.taskId === 'g321-keyboard-recovery').reason.includes('no game'));
 });
 test('owned success cannot relabel Go320, omit current checks or turn static increments into runtime passes', () => {
-  const report = {goContract: CURRENT_GO_CONTRACT, goVersion: '3.2.3', state: 'passed_selected_skill_workflows', completeSkillAcceptance: false,
+  const report = {schema: 'lycheedev.skill-real-usage.v1', goContract: CURRENT_GO_CONTRACT, goVersion: '3.2.3', state: 'passed_selected_skill_workflows', completeSkillAcceptance: false,
     prompts: workflow.prompts, pendingTasks: pendingIncrementTasks(workflow), checks: [
       ...POST_SEMANTIC_REQUIREMENTS.map(caseId => ({caseId, state: 'passed'})),
-      ...workflow.increments.map(increment => ({...assertPackagedIncrement(join(repository, 'skills/lycheedev'), workflow, increment), caseId: `fixed-skill-contract-${increment.id}`, state: 'passed'})),
+      ...workflow.increments.map(increment => ({...assertPackagedIncrement(join(repository, 'tests/rust-skill-usage/baselines/go3.2.3'), workflow, increment), caseId: `fixed-skill-contract-${increment.id}`, state: 'passed'})),
     ]};
   assertCurrentSelectedReport(report, workflow);
   for (const mutate of [
@@ -162,7 +163,7 @@ test('a self-consistent package and source tree cannot replace current Data guid
   json(join(f.packageRoot, 'release.json'), f.manifest);
   f.report.releaseManifestSHA256 = sha256(readFileSync(join(f.packageRoot, 'release.json')));
   f.report.resourceInventorySHA256 = sha256(Buffer.from(JSON.stringify(f.manifest.resources))); f.rewrite();
-  assert.throws(f.verify, /packaged Go323 increment/);
+  assert.throws(f.verify, /independently reviewed candidate Skill inventory/);
 });
 test('different sealed binary, source or report manifest is rejected', t => {
   const f = fixture(t);
@@ -198,7 +199,7 @@ test('a self-consistent reduced manifest cannot drop a fixed Skill reference', t
 test('unmanifested payload file and stale packaged Skill are rejected', t => {
   const f = fixture(t); write(join(f.packageRoot, 'payload/unmanifested.txt'), 'extra'); assert.throws(f.verify, /unmanifested/);
   rmSync(join(f.packageRoot, 'payload/unmanifested.txt'));
-  write(join(f.root, 'skills/lycheedev/SKILL.md'), 'new Skill'); assert.throws(f.verify, /packaged Skill source/);
+  write(join(f.root, 'skills/lycheedev/SKILL.md'), 'new Skill'); assert.throws(f.verify, /packaged Skill equals sealed candidate source/);
 });
 test('duplicate or traversing resource records fail even with updated report digests', t => {
   const f = fixture(t); f.manifest.resources.push({...f.manifest.resources[0]});
@@ -465,4 +466,27 @@ test('fatal transport state prohibits all check callbacks and observed business 
   assert.equal(stopped.state, 'not_run'); assert.equal(invoked, false);
   const closed = evaluateWorkflowCheck({caseId: 'release-owned-session', work: () => ({state: 'closed'})});
   assert.equal(closed.state, 'passed'); assert.equal(closed.observedState, 'closed');
+});
+
+
+test('reviewed Source report binds current full Skill identity without relabeling historical checks', () => {
+  const identity = reviewedSkillIdentity(loadReviewedSkillContract());
+  const report = {schema: 'lycheedev.skill-real-usage.v2', skillIdentity: identity,
+    goContract: CURRENT_GO_CONTRACT, goVersion: '3.2.3', state: 'passed_selected_skill_workflows', completeSkillAcceptance: false,
+    prompts: workflow.prompts, pendingTasks: pendingIncrementTasks(workflow), checks: [
+      ...POST_SEMANTIC_REQUIREMENTS.map(caseId => ({caseId, state: 'passed'})),
+      ...workflow.increments.map(increment => ({...assertPackagedIncrement(join(repository, 'skills/lycheedev'), workflow, increment, identity), caseId: `fixed-skill-contract-${increment.id}`, state: 'passed'})),
+    ]};
+  assertCurrentSelectedReport(report, workflow, identity);
+  for (const mutate of [
+    row => { delete row.skillIdentity; }, row => { row.skillIdentity = null; },
+    row => { row.skillIdentity.candidateSourceCommit = '0'.repeat(40); },
+    row => { row.skillIdentity.candidateTree = '5edd025cae923fb2235086f250862696db7a2483'; },
+    row => { row.schema = 'lycheedev.skill-real-usage.v1'; },
+    row => { row.checks.at(-1).basis = 'exact_fixed_go323_skill_bytes_only'; },
+    row => { row.checks.at(-1).skillIdentity.candidateTree = '0'.repeat(40); },
+    row => { row.checks.at(-1).runtimeVerified = true; },
+  ]) { const changed = structuredClone(report); mutate(changed); assert.throws(() => assertCurrentSelectedReport(changed, workflow, identity)); }
+  const historical = { ...report, schema: 'lycheedev.skill-real-usage.v1' }; delete historical.skillIdentity;
+  assert.throws(() => assertCurrentSelectedReport(historical, workflow, identity), /cannot reuse historical report/);
 });

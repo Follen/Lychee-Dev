@@ -1,73 +1,37 @@
 # Data failure recovery
 
-Read only after a structured failure or incomplete coverage prevents the next
-useful query. Preserve the original pin, source, command, error and captures.
+Read after a failure or missing coverage blocks the next useful query. Keep pin,
+source, command, structured error and captures. Installation identity, archive
+location, integrity, decoding and query binding are separate failure layers.
 
-## Choose one corrective action
+- Identity conflict: resolve the intended selection. Compare separately labeled
+  [local/remote pins](data-targets.md) if needed; do not rewrite the project lock.
+- Missing content: inspect the failing request/stage. A missing localized table
+  can coexist with readable numeric tables. A healthy workspace or unavailable
+  loose copy does not prove selected content available/absent. Never guess CDN URLs.
+- Integrity failure: diagnose the named index/span/check. Do not bypass hashes or
+  assume products were mixed. Let the CLI own mirrors and route recovery.
+- Unknown field/invalid SQL: use schema and error location. Unsupported syntax
+  needs a supported alternative or an explicit capability limit.
+- Offline cache miss: retain the restriction and report the missing prerequisite.
+- Missing keys: keep readable evidence and partial coverage. Another CDN host
+  cannot supply a key; static/Hotfix values do not finish server-side fitting.
+- Shared resource limit: inspect dimension, used/requested amount and effective
+  limit/memoryBudget. Adaptive Windows growth still needs current headroom.
+  Wait for competing work when that changes the cause; never kill tasks, remove
+  leases or create another home to evade admission. Output LIMIT/ID/WHERE cannot
+  shrink a failure in shared metadata preparation before row selection.
+  Raising timeout or per-file bytes does not raise this shared ceiling.
+  SQL query.budget_exceeded is a separate executor limit; EXPLAIN/selectivity
+  can help only when the narrower query preserves the requested claim.
+- Deadline: one deliberate extension within supported bounds can be useful for
+  demonstrated preparation cost/progress. A second deadline stops the branch;
+  do not keep raising budgets. Hotfix has separate scan/request bounds.
+- Transient I/O/admission pressure: at most one unchanged retry within task
+  budget; further retries require a changed cause. Repeated integrity failure
+  is not a transient route-selection problem.
+- Interrupted Hotfix scan: resume its saved [checkpoint](data-hotfix.md) and
+  archived source, not the mutable original file.
 
-Separate installation identity, archive location, payload integrity, DB2 decoding and query binding;
-a failure in one layer does not establish failure in another.
-
-- A client subdirectory can legitimately share its parent's `.build.info` and
-  `Data/`. Their absence inside the client folder does not establish a damaged
-  or unofficial installation. Use the CLI's installation resolver.
-- `archive.index_integrity` requires identifying the failing index/span/check;
-  do not assume mixed products caused it or bypass checksum validation.
-- `records.local_object_unavailable` concerns the requested content. A missing
-  localized table can coexist with readable numeric tables. Inspect useful
-  tables under the same pin; report what remains unavailable.
-- `records.remote_http` needs the failing request/stage before interpretation.
-  Installation flavor and publishing slot can differ; the CLI owns that mapping.
-  A guessed config URL or unavailable loose copy does not prove the build is
-  absent from CDN archives. Do not substitute another build or region.
-- A healthy `doctor` checks workspace health, not selected-build readiness.
-  Its cache object count is not an inventory of all evidence blobs or prepared
-  source records. Test the requested table rather than infer availability.
-- Missing keys preserve partial coverage. Static values and client Hotfixes do
-  not prove server-side coefficients; retain them as inputs to the live fitting
-  task instead of treating a static query as completion of that task.
-
-## Retry and stop
-
-- Identity conflict: resolve the requested identity; never change a project lock
-  merely to make a read succeed. Compare separate pins as described in
-  [data-targets.md](data-targets.md) when delivery configurations differ.
-- Unknown field or invalid SQL: inspect schema/error location, correct the query,
-  then retry. Unsupported expressions/formats need a supported alternative or an
-  explicit capability limit, not repeated unchanged calls.
-- Missing cache under `--offline`: use available evidence and report the missing
-  prerequisite. Do not remove the restriction to make the command succeed.
-- Missing keys: continue useful readable records, retaining partial coverage;
-  changing CDN hosts cannot supply a missing key.
-- Deadline: static queries default to 300 seconds total. If progress or a known
-  preparation cost justifies it, make one deliberate budget extension with
-  `--timeout-seconds <1-3600>` within the task budget. A second deadline stops that
-  branch; do not keep raising budgets. Hotfix uses its own scan/request bounds.
-- Shared resource budget (`records.query_resource_budget`): inspect the failing
-  dimension, used/requested amount and effective limit. Windows memory budgets
-  grow automatically within a ceiling computed after admission from available
-  physical/commit memory and concurrent-query capacity; growth checks fresh
-  headroom. SQL and navigation results include `memoryBudget`. A memory-pressure failure
-  can justify a bounded retry after competing work finishes; do not kill other
-  tasks or repeat an unchanged query while pressure remains. Otherwise narrow
-  required tables, relationships or source work when that preserves the request.
-  Increasing `--timeout-seconds` or a per-file byte limit does not increase this
-  budget. If failure is in shared metadata preparation before row selection,
-  reducing `--limit`, using `--id` or narrowing WHERE cannot reduce that prerequisite.
-  Preserve the fixed pin and diagnose the charged structure; do not repeat those
-  variants or substitute another build. SQL `query.budget_exceeded` is a separate executor limit; use EXPLAIN
-  or a more selective query when it can preserve the requested claim.
-- Workspace admission: heavy data reads wait for CLI-owned slots, with a
-  30-second admission bound as well as the caller's deadline. Let competing
-  work finish and make one bounded retry when appropriate. Do not remove lease
-  files, kill another task or create another workspace to evade the bound.
-- Transient I/O: the CLI already owns mirrors and route refresh. Allow at most
-  one unchanged retry within the task budget; repeated failure stops that branch
-  until its cause changes. Never script a second CDN-routing layer or bypass
-  integrity checks. Diagnose corrupt bytes rather than trying hosts until accepted.
-- Interrupted Hotfix scan: recover the saved checkpoint under
-  [data-hotfix.md](data-hotfix.md), preserving its source and filters.
-
-Stopping one unavailable branch does not prevent independent useful queries.
-Report the unresolved part, exact failure, retained pin/capture/checkpoint and
-what must change to proceed. An empty success is not a substitute for failure.
+Continue independent useful queries. Report the blocked scope and what must
+change to proceed; never replace a failure with an empty-success conclusion.

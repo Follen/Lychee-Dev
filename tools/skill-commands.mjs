@@ -18,7 +18,7 @@ const binary = option('--bin');
 const outputArg = option('--output');
 if (binary && argv.includes('--target')) throw new Error('choose --target or --bin, not both');
 if (binary && !outputArg) throw new Error('--bin requires an explicit --output; the fixed target must not be replaced');
-const output = resolve(outputArg ?? join(repository, 'skills/lycheedev/references/commands.md'));
+const output = resolve(outputArg ?? join(repository, 'tests/rust-skill-usage/baselines/go3.2.2-commands.md'));
 let commands;
 const target = !binary;
 if (target) {

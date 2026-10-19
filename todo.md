@@ -1,5 +1,8 @@
 - [x] Fixed f811 Data projection: check and71 targeted Rust tests passed, including16 new tests once; no full-workspace or performance acceptance claim.
 
+- [x] 完成 Skill 精简与 CLI discovery 接线，保产品/Forever/固定来源/Unknown 恢复合同；新旧完整payload身份与历史custody分开。独立源码及57链接核验、六套Node101/101通过（原97/98历史失败保留）。
+- [ ] 执行固定前后Skill的六类独立Agent真实任务，记录正确性/误导/实际调用/恢复及输出质量；当前仅checker通过，真实CLI任务与完整Skill验收仍NOT_RUN，不能用行数或词数替代。
+
 - [x] 最小修复2b400实际Source测试E0282/E0283：finalize结果改is_empty，保持零余字节完整断言，生产未变；原check失败/13组NOT_RUN保留。
 - [ ] 固定该断言修复后check成功才跑原13组；云Windows-target编译能力单独准备，不将语法检查或cross-check当Windows运行。
 

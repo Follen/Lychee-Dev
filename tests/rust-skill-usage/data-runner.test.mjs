@@ -90,15 +90,26 @@ function dataValue(entry, fixture) {
   return {...common, query: requestFor(entry), sources: [{complete: !partial, truncated: false, file, ...(partial ? {unavailablePartitions: unavailable()} : {})}], result: entry.analyze ? {columns: null, rows: null, plan: {outputColumns: COLUMNS, measured: {outputRows: 3, workUnits: 20, chargedBytes: 800, scans: [{table: {catalog: 'static', name: 'housedecor'}, calls: 3, rows: 3, lookups: 3}]}}} : {columns: entry.fixture === 'catalog' ? COLUMNS : ['ID', 'Value'], rows: entry.fixture === 'catalog' ? entry.unordered ? [ROWS[2], ROWS[0], ROWS[1]] : ROWS : partial ? [[1, 42]] : [[1, 42], [2, 99]]}};
 }
 const envelope = (result, captures = [], context = {}) => ({schema: 'lycheedev.result.v1', ok: true, operationId: '', context, result, captures, warnings: [], error: null});
-function makeReport(t, originalRoot = 'C:\\project') {
+const historicalSkill = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines/rust-candidate-skill.json')));
+function historicalSkillBytes() {
+  const archive = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines/rust-candidate-0002ce-files.json')));
+  const contract = loadDataSkillContract(dataSkillIdentity(historicalSkill));
+  assert.equal(archive.sourceCommit, contract.sourceCommit); assert.equal(archive.tree, contract.tree);
+  assert.deepEqual(archive.files.map(row => row.path), contract.files.map(row => row.path));
+  return new Map(archive.files.map((row, index) => {
+    const bytes = Buffer.from(row.text, 'utf8'); assertDataSkillBytes(bytes, contract.files[index]);
+    return [row.path, bytes];
+  }));
+}
+function makeReport(t, originalRoot = 'C:\\project', selectedIdentity) {
   const directory = temporary(t), evidence = join(directory, 'relocated-evidence'); mkdirSync(evidence);
   const scratch = win32.join(originalRoot, '.tmp/owner');
-  const skill = loadDataSkillContract();
+  const skill = loadDataSkillContract(selectedIdentity), archived = selectedIdentity ? historicalSkillBytes() : null;
   const config = {root: originalRoot, runnerRoot: 'C:\\runner-only', skillIdentity: dataSkillIdentity(skill), scratch, evidence: 'C:\\project\\evidence\\owner', platform: 'win32', arch: 'x64', node: 'C:\\node24\\node.exe', prefix: win32.join(scratch, 'npm-prefix'), sourcePackage: 'C:\\project\\candidate\\package', version: '3.5.0-rust-test', npm: {path: 'C:\\node24\\node_modules\\npm\\bin\\npm-cli.js'}, exporters: {executables: [{path: 'C:\\project\\target\\debug\\deps\\catalog.exe'}, {path: 'C:\\project\\target\\debug\\deps\\partial.exe'}]}, packageFiles: [{path: 'package.json', bytes: 2, sha256: digest('{}')}, ...skill.files.map(row => ({path: 'payload/skill/' + row.path, bytes: row.bytes, sha256: row.sha256}))]};
   config.launcher = win32.join(config.prefix, 'node_modules/lycheedev/payload/skill/scripts/lycheedev.mjs'); config.tgz = win32.join(scratch, `lycheedev-${config.version}.tgz`); config.packageSHA256 = inventoryHash(config.packageFiles);
   const report = {schema: 'lycheedev.skill-data-usage.v2', state: 'passed_selected_data_workflow', goContract: workflow.goContract, skillTree: 'b9e162ace7abe7ea4a2feecef822283767eb1210', completeSkillAcceptance: false, config, checks: CHECKS.map(caseId => ({caseId, state: 'passed'})), pendingTasks: pendingDataTasks(workflow), fixtures: {}, seeded: {}, workspaces: {}, queries: {}, keys: {}, proofs: {}, commands: [], completedTasks: [{taskId: 'g323-data-query', runtimeVerified: true, basis: 'actual_owned_npm_installed_skill_and_independent_full_capture_replay', captures: 16}]};
   report.skillProof = {...dataSkillIdentity(skill), files: skill.files.map((row, index) => ({path: row.path,
-    archive: archiveBytes(evidence, `installed-skill-${index}.bin`, readFileSync(join(root, 'skills/lycheedev', row.path)))}))};
+    archive: archiveBytes(evidence, `installed-skill-${index}.bin`, archived ? archived.get(row.path) : readFileSync(join(root, 'skills/lycheedev', row.path)))}))};
   const fixtures = {}, envelopes = {}; let serial = 0;
   function cap(raw, provenance, complete = true, dependencies) { const capture = {schema: 'lycheedev.capture.v1', id: '', blob: ref(raw), mediaType: provenance.kind === 'data-query-csv' ? 'text/csv; charset=utf-8' : 'application/json', provenance: {...provenance, operationId: ''}, complete, truncated: false, capturedAt: new Date(Date.UTC(2026, 9, 18, 0, 0, 0, serial++)).toISOString(), ...(dependencies ? {dependencies} : {})}; capture.id = 'CAP-' + digest(goJSON(captureCanonical(capture))); return capture; }
   function proof(id, result, captures, bodies, fixture, entry) {
@@ -150,12 +161,12 @@ function makeReport(t, originalRoot = 'C:\\project') {
 test('Data fixed IN rows, unordered order and CSV bytes remain exact', () => { assert.equal(CSV.length, 76); assert.equal(digest(CSV), CSV_SHA256); assert.equal(CASES.length, 11); assert.equal(CHECKS.length, 26); assert.deepEqual(requestFor(CASES[1]).parameters, PARAMETERS); });
 test('candidate authenticates all25 source files separately from unchanged Go323 oracle', () => {
   const contract = assertDataSkillDirectory(join(root, 'skills/lycheedev'));
-  assert.equal(contract.files.length, 25); assert.equal(skillTreeIdentity(contract.files), '5edd025cae923fb2235086f250862696db7a2483');
+  assert.equal(contract.files.length, 25); assert.equal(skillTreeIdentity(contract.files), '231818eb48f81cf927542bb19d9a8964dfbe4baf');
   const original = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines/go3.2.3-skill.json')));
   assert.equal(original.files.length, 23); assert.equal(skillTreeIdentity(original.files), 'b9e162ace7abe7ea4a2feecef822283767eb1210');
   assert.equal(original.files.find(row => row.path === 'SKILL.md').sha256, 'cbde6b4bb2b598137cfe55c0556765b28890b036e406c1877700a05a33fb6957');
-  assert.equal(contract.files.find(row => row.path === 'SKILL.md').sha256, 'bc214e50a60897a4198fdbedf843e28aede60ef3937cbf9377b8187c81cbc1a8');
-  for (const row of original.files.filter(row => row.path.startsWith('references/data-') || row.path.startsWith('references/live-') || row.path === 'scripts/lycheedev.mjs')) assert.deepEqual(contract.files.find(current => current.path === row.path), row);
+  assert.equal(contract.files.find(row => row.path === 'SKILL.md').sha256, '7a172867af600dc4b275725d626c45feef66e450e8357a24973dd0c28bb05b68');
+  for (const row of original.files.filter(row => ['scripts/lycheedev.mjs', 'agents/openai.yaml'].includes(row.path))) assert.deepEqual(contract.files.find(current => current.path === row.path), row);
 });
 test('candidate rejects same-length tampering even with a forged matching SHA256', () => {
   const row = loadDataSkillContract().files[0], raw = readFileSync(join(root, 'skills/lycheedev', row.path));
@@ -266,4 +277,29 @@ test('UNC and extended Windows archived roots retain original identity during re
     assert.equal(pathStyle(root), win32); const f = makeReport(t, root); assert.equal(f.verify(), true);
   }
   assert.equal(pathStyle('/tmp/fixture').sep, '/');
+});
+
+
+test('historical candidate keeps all 25 authenticated original files and unchanged Go Data/Live bytes', () => {
+  const contract = loadDataSkillContract(dataSkillIdentity(historicalSkill));
+  assert.equal(contract.tree, '5edd025cae923fb2235086f250862696db7a2483');
+  assert.equal(contract.files.find(row => row.path === 'SKILL.md').sha256, 'bc214e50a60897a4198fdbedf843e28aede60ef3937cbf9377b8187c81cbc1a8');
+  assert.equal(historicalSkillBytes().size, 25);
+  const go = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines/go3.2.3-skill.json')));
+  for (const row of go.files.filter(row => row.path.startsWith('references/data-') || row.path.startsWith('references/live-') || row.path === 'scripts/lycheedev.mjs')) assert.deepEqual(contract.files.find(current => current.path === row.path), row);
+});
+test('historical archived Data report still replays all checks against its original fixed Skill identity', t => {
+  const f = makeReport(t, 'C:\\project', dataSkillIdentity(historicalSkill));
+  assert.equal(f.verify(), true); assert.equal(f.report.commands.length, 42); assert.equal(f.report.checks.length, 26);
+  assert.notEqual(f.report.config.skillIdentity.candidateTree, dataSkillIdentity().candidateTree);
+  f.report.config.skillIdentity = dataSkillIdentity();
+  assert.throws(f.verify, /independently fixed candidate/);
+});
+test('unknown missing null and mixed candidate identities cannot silently select a newer baseline', t => {
+  for (const identity of [null, {}, {...dataSkillIdentity(), candidateSourceCommit: 'f'.repeat(40)},
+    {...dataSkillIdentity(), candidateTree: historicalSkill.tree}]) assert.throws(() => loadDataSkillContract(identity), /unknown reviewed Skill identity/);
+  for (const identity of [undefined, null, {}, {...dataSkillIdentity(), candidateTree: historicalSkill.tree}]) {
+    const f = makeReport(t); f.report.config.skillIdentity = identity; assert.throws(f.verify);
+  }
+  const f = makeReport(t); f.report.config.skillIdentity = dataSkillIdentity(historicalSkill); assert.throws(f.verify, /independently fixed candidate/);
 });

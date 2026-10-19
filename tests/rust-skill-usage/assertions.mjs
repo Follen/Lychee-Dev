@@ -5,6 +5,8 @@ import {isAbsolute, join, relative, resolve, sep} from 'node:path';
 import {createHash} from 'node:crypto';
 import {performance} from 'node:perf_hooks';
 import {hashFile} from '../../tools/rust-build.mjs';
+import {CURRENT_SKILL_MANIFEST, HISTORICAL_SKILL_MANIFEST, loadReviewedSkillContract, reviewedSkillIdentity, skillTreeIdentity} from './skill-identity.mjs';
+export {skillTreeIdentity} from './skill-identity.mjs';
 
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 export const POST_SEMANTIC_REQUIREMENTS = Object.freeze(['ordinary-native-callers', 'ordinary-native-context', 'final-same-pin-api-query']);
@@ -18,30 +20,6 @@ const INCREMENT_FILES = Object.freeze({
   'g323-data-pressure-recovery': 'references/data-recovery.md',
 });
 const gitObject = (kind, bytes) => createHash('sha1').update(`${kind} ${bytes.length}\0`).update(bytes).digest('hex');
-
-// Reconstruct the original Git tree from all file identities. This authenticates
-// the full inventory without fetching Go or executing its launcher in acceptance.
-export function skillTreeIdentity(files) {
-  const tree = {};
-  for (const row of files) {
-    assert.equal(row.mode, '100644', 'fixed Skill regular-file mode');
-    assert.match(row.gitBlob, /^[a-f0-9]{40}$/); assert.match(row.sha256, /^[a-f0-9]{64}$/);
-    assert(Number.isSafeInteger(row.bytes) && row.bytes > 0 && row.bytes <= 1 << 20);
-    assert(typeof row.path === 'string' && row.path.split('/').every(part => /^[A-Za-z0-9_.-]+$/.test(part) && part !== '.' && part !== '..'), 'fixed Skill path');
-    const parts = row.path.split('/'); let parent = tree;
-    for (const part of parts.slice(0, -1)) {
-      assert(!Object.hasOwn(parent, part) || typeof parent[part] === 'object', 'unique file/directory path');
-      if (!Object.hasOwn(parent, part)) Object.defineProperty(parent, part, {value: {}, enumerable: true});
-      parent = parent[part];
-    }
-    const name = parts.at(-1); assert(!Object.hasOwn(parent, name), 'unique fixed Skill path');
-    Object.defineProperty(parent, name, {value: row.gitBlob, enumerable: true});
-  }
-  const digest = entries => gitObject('tree', Buffer.concat(Object.entries(entries)
-    .sort(([a, av], [b, bv]) => Buffer.compare(Buffer.from(a + (typeof av === 'object' ? '/' : '')), Buffer.from(b + (typeof bv === 'object' ? '/' : ''))))
-    .map(([name, value]) => Buffer.concat([Buffer.from(`${typeof value === 'object' ? '40000' : '100644'} ${name}\0`), Buffer.from(typeof value === 'object' ? digest(value) : value, 'hex')]))));
-  return digest(tree);
-}
 
 export function loadCurrentWorkflow(root) {
   const base = within(root, 'tests/rust-skill-usage');
@@ -87,26 +65,34 @@ export function loadCurrentWorkflow(root) {
 }
 
 export function currentWorkflowInputs(workflow) {
-  return [CURRENT_WORKFLOW, 'tests/rust-skill-usage/workflow.json', workflow.historical.manifest, workflow.baselineManifest, ...workflow.increments.map(row => row.fixture)]
+  return [CURRENT_WORKFLOW, CURRENT_SKILL_MANIFEST, HISTORICAL_SKILL_MANIFEST, 'tests/rust-skill-usage/skill-identity.mjs', 'tests/rust-skill-usage/workflow.json', workflow.historical.manifest, workflow.baselineManifest, ...workflow.increments.map(row => row.fixture)]
     .map(path => path.startsWith('tests/') ? path : `tests/rust-skill-usage/${path}`);
 }
 
-export function assertPackagedIncrement(skillRoot, workflow, increment) {
+export function assertPackagedIncrement(skillRoot, workflow, increment, selectedIdentity) {
   assert.equal(workflow.goContract, CURRENT_GO_CONTRACT);
   assert.equal(increment.file, INCREMENT_FILES[increment.id]);
-  const manifest = jsonFile(new URL('./baselines/go3.2.3-skill.json', import.meta.url));
+  const reviewed = selectedIdentity === undefined ? null : loadReviewedSkillContract(selectedIdentity);
+  const manifest = reviewed ?? jsonFile(new URL('./baselines/go3.2.3-skill.json', import.meta.url));
   const identity = manifest.files.find(row => row.path === increment.file), bytes = readFileSync(within(skillRoot, increment.file));
-  assert.equal(bytes.length, identity.bytes, `packaged Go323 increment byte length: ${increment.file}`);
-  assert.equal(sha256(bytes), identity.sha256, `packaged Go323 increment SHA256: ${increment.file}`);
-  assert.equal(gitObject('blob', bytes), identity.gitBlob, `packaged Go323 increment Git blob: ${increment.file}`);
-  return {taskId: increment.id, file: increment.file, gitBlob: identity.gitBlob, sha256: identity.sha256, basis: 'exact_fixed_go323_skill_bytes_only', runtimeVerified: false};
+  const label = reviewed ? 'packaged reviewed candidate Skill' : 'packaged Go323 increment';
+  assert.equal(bytes.length, identity.bytes, `${label} byte length: ${increment.file}`);
+  assert.equal(sha256(bytes), identity.sha256, `${label} SHA256: ${increment.file}`);
+  assert.equal(gitObject('blob', bytes), identity.gitBlob, `${label} Git blob: ${increment.file}`);
+  return {taskId: increment.id, file: increment.file, gitBlob: identity.gitBlob, sha256: identity.sha256,
+    basis: reviewed ? 'exact_reviewed_candidate_skill_bytes_only' : 'exact_fixed_go323_skill_bytes_only',
+    ...(reviewed ? {skillIdentity: reviewedSkillIdentity(reviewed)} : {}), runtimeVerified: false};
 }
 
 export function pendingIncrementTasks(workflow) {
   return workflow.increments.map(({id, prompt, requires, reason}) => ({taskId: id, prompt, state: 'not_run', reason, requires, runtimeVerified: false}));
 }
 
-export function assertCurrentSelectedReport(report, workflow) {
+export function assertCurrentSelectedReport(report, workflow, expectedIdentity) {
+  if (expectedIdentity !== undefined) {
+    assert.equal(report?.schema, 'lycheedev.skill-real-usage.v2', 'current owned Source run cannot reuse historical report');
+    assert.deepEqual(report.skillIdentity, expectedIdentity, 'same selected Source Skill identity');
+  }
   assert.equal(report?.goContract, CURRENT_GO_CONTRACT, 'owned result must identify the actual current workflow');
   assert.equal(report.goVersion, '3.2.3'); assert.equal(report.state, 'passed_selected_skill_workflows');
   assert.equal(report.completeSkillAcceptance, false, 'selected Source checks cannot complete all Skill acceptance');
@@ -114,14 +100,21 @@ export function assertCurrentSelectedReport(report, workflow) {
   assert.deepEqual(report.pendingTasks, pendingIncrementTasks(workflow), 'unexecuted increment tasks retain their explicit gaps');
   assert(Array.isArray(report.checks) && report.checks.every(row => row.state === 'passed'), 'every selected check passed');
   for (const caseId of POST_SEMANTIC_REQUIREMENTS) assert.equal(report.checks.filter(row => row.caseId === caseId).length, 1, 'actual native calls and final fixed query remain required');
-  const manifest = jsonFile(new URL('./baselines/go3.2.3-skill.json', import.meta.url));
+  assert(['lycheedev.skill-real-usage.v1', 'lycheedev.skill-real-usage.v2'].includes(report.schema), 'known Source report schema');
+  if (report.schema === 'lycheedev.skill-real-usage.v2') assert(report.skillIdentity, 'current Source report requires reviewed Skill identity');
+  else assert.equal(report.skillIdentity, undefined, 'historical Source schema cannot relabel candidate bytes');
+  const reviewed = report.skillIdentity === undefined ? null : loadReviewedSkillContract(report.skillIdentity);
+  const manifest = reviewed ?? jsonFile(new URL('./baselines/go3.2.3-skill.json', import.meta.url));
   for (const increment of workflow.increments) {
     const rows = report.checks.filter(row => row.caseId === `fixed-skill-contract-${increment.id}`);
     assert.equal(rows.length, 1, 'each current contract checked exactly once');
     const row = rows[0], identity = manifest.files.find(file => file.path === increment.file);
     assert.equal(row.taskId, increment.id); assert.equal(row.file, increment.file);
     assert.equal(row.gitBlob, identity.gitBlob); assert.equal(row.sha256, identity.sha256);
-    assert.equal(row.basis, 'exact_fixed_go323_skill_bytes_only'); assert.equal(row.runtimeVerified, false);
+    assert.equal(row.basis, reviewed ? 'exact_reviewed_candidate_skill_bytes_only' : 'exact_fixed_go323_skill_bytes_only');
+    if (reviewed) assert.deepEqual(row.skillIdentity, reviewedSkillIdentity(reviewed));
+    else assert.equal(row.skillIdentity, undefined);
+    assert.equal(row.runtimeVerified, false);
   }
   return true;
 }
@@ -219,7 +212,13 @@ export function verifyCandidate(root, reportPath, artifact, workflow) {
   }
   for (const name of workflow.requiredSkillFiles) assert(seen.has(`skill/${name}`), `fixed Go Skill resource missing: ${name}`);
   assert.equal(workflow.goContract, CURRENT_GO_CONTRACT, 'current acceptance cannot relabel a historical workflow');
-  for (const increment of workflow.increments) assertPackagedIncrement(within(packageRoot, 'payload/skill'), workflow, increment);
+  // Bind the full reviewed candidate and the sealed source independently.
+  // Historical Go prose remains authenticated in its own fixtures.
+  const skill = loadReviewedSkillContract(), skillRoot = within(packageRoot, 'payload/skill');
+  const packagedSkill = inventory(skillRoot, {maxBytes: 4 << 20, maxFiles: 100});
+  assert.deepEqual(packagedSkill, skill.files.map(({path, bytes, sha256}) => ({path, bytes, sha256})), 'independently reviewed candidate Skill inventory');
+  for (const row of skill.files) assert.equal(gitObject('blob', readFileSync(within(skillRoot, row.path))), row.gitBlob, `reviewed candidate Skill Git blob: ${row.path}`);
+  assert.deepEqual(packagedSkill, inventory(within(root, 'skills/lycheedev'), {maxBytes: 4 << 20, maxFiles: 100}), 'entire packaged Skill equals sealed candidate source');
   assert.equal(hashFile(within(packageRoot, 'payload/tool/luac/luac.exe')), report.compilerSHA256);
   assert.equal(hashFile(within(packageRoot, 'bin/lycheedev.mjs')), hashFile(within(root, 'packages/npm/lycheedev/bin/lycheedev-rust.mjs')), 'packaged launcher is selected candidate launcher');
   // Do not silently test a stale or reduced Skill while evaluating today's tree.

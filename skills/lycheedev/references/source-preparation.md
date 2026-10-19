@@ -1,13 +1,12 @@
 # Source selection and recovery
 
-Read when the requested source is not pinned or source preparation fails.
+Read when a source pin is missing or preparation fails.
 
 ## Select the repository revision
 
-Use `source list` to discover repository keys and their supported tracks. It does
-not list tags; missing version text there does not mean the release is absent.
-Read the repository's own track map: do not apply a game product to every addon
-repository. A source track is not proof of installation compatibility.
+`source list` discovers repository keys and supported tracks, not release tags.
+Use each repository's own track map; a game product is not every addon's track,
+and a source track does not establish installation compatibility.
 
 For `wow-ui-source`, the seven delivery products map to these Git branches:
 
@@ -26,57 +25,32 @@ pin; regional source pins retain their exact delivery identity. Data build
 configurations and client runtime verification remain separate even when the
 UI source commit is shared.
 
-Initialize a new Toolkit home with `lycheedev init` before syncing; an empty
-directory alone is not a workspace. Reuse an initialized `--home` when available.
-Use that same home for preparation and subsequent pin reads; a pin ID does not
-select a different workspace. Pass `--home <workspace>` when working outside its
-normal discovery context.
+Reuse an initialized Toolkit home for preparation and later reads; a pin ID does
+not select a different home. Initialize a new home only when needed. `source sync`
+returns a fixed PinnedSet. An exact ref is a 40-hex commit or full branch/tag ref;
+omission observes the track's current branch only when the request allows it.
+For a named release, resolve its actual ref from repository evidence. If the CLI
+lacks tag discovery, use verified repository metadata under the
+[source routing rules](source-research.md#route-source-evidence), then sync that
+resolved ref. Never guess a tag or replace an unavailable release with a branch.
 
-```text
-lycheedev source list --format json
-lycheedev source sync --source <catalog-key> --product <repository-track> --ref <commit-or-full-ref> --format json
-```
-
-`source sync` returns the immutable PinnedSet directly. `--ref` accepts a 40-hex
-commit or full `refs/heads/...` / `refs/tags/...` ref. Omission observes the selected
-track's current branch; use that only when the request allows current source.
-For a named release without an exact ref, establish its tag/commit from repository
-evidence already retained or available through the Toolkit. If the installed CLI
-lacks the needed tag/ref discovery capability, use verified external repository
-metadata under the [source routing rules](source-research.md#route-source-evidence),
-then return the resolved ref to `source sync`. Ask only if the mapping remains
-unavailable or ambiguous. Never guess a tag, silently use latest, or replace an
-unavailable exact revision with a branch.
-
-Carry the returned fixed pin and exact commit between calls. Preserve requested
-version/tag, repository identity and parser revision; a tag is a traceable label,
-not immutable evidence. Separate third-party addon pins from client API pins;
-`--environment <client-pin>` on refs/context supplies API context without changing
-the addon revision. Folder names and branch labels do not prove a client's build.
+Retain repository, exact commit, requested version/ref and parser identity. A tag
+is a traceable label, not immutable evidence. Keep third-party addon and client
+API pins separate; an environment adds API context without replacing addon source.
 
 ## Recover without changing the revision
 
-Keep the original command, pin/ref and structured error. The CLI prepares mappings
-when the operation needs them; raw file inspection reads fixed Git content directly.
-`source list --snapshot <pin>` reports readiness;
-`source index --snapshot <pin>` is optional, not a mandatory repair sequence.
+Keep the original selection, structured error and captures. Queries prepare
+needed mappings; raw inspection reads fixed Git content. Indexing is optional.
+Correct the named cause: catalog/ref selection, missing prerequisite, integrity
+failure, semantic environment or resource limit. Do not rewrite managed worktrees,
+delete caches blindly or treat unreadable/unparsed source as absent.
 
-| Condition | Next action |
-| --- | --- |
-| Unknown repository/track or invalid ref | Check catalog and exact ref syntax; correct the selection without substituting the requested version |
-| Missing Git, source objects or preparation failure | Address the named prerequisite and retry the same fixed source; do not manually rewrite managed worktrees |
-| Integrity failure | Preserve evidence and diagnose changed/corrupt bytes; do not bypass verification or delete caches blindly |
-| Syntax diagnostics / partial map | Inspect readable original files and retain the gaps; unparsed does not mean absent |
-| Missing Emmy engine or client environment | Continue original-source research with partial semantic coverage; see [source-relations.md](source-relations.md) |
-| Invalid cursor | Restore the originating command and scope to continue, or start without a cursor for the changed scope; do not merge those page sets |
-| Resource budget | Narrow to the part needed by the question; retain omitted scope, not a claim of complete investigation |
+Use readable original source when semantic coverage is partial, retaining its
+limits. A changed query scope needs a new cursor. Narrow only when that still
+answers the question. Allow at most one unchanged transient retry within budget;
+further retries require a changed cause. Stop the blocked branch with its exact
+revision and prerequisite, while independent useful research may continue.
 
-Allow at most one unchanged retry for a transient failure within the task budget.
-Further retries require a changed cause. If still blocked, stop that branch and
-report its exact revision, error, useful captures and missing prerequisite;
-independent useful source inspection may continue. Do not copy data-only timeout
-or offline flags onto source commands; consult installed help for their surface.
-
-Source disk reclamation is separate from research. Only when requested, use
-`source prune --target-bytes <n>`: it removes idle derived worktrees and preserves
-pins, cached facts and captures. It is not the ordinary `cache prune` command.
+Source reclamation is a separate requested task through `source prune`, not a
+repair prerequisite or the ordinary cache-prune operation.

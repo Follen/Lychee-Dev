@@ -1,78 +1,38 @@
 # Live probe design and implementation
 
-Read this when writing a probe or testing a source hypothesis. Use the
-[live workflow](live-investigation.md) for target selection, delivery and closure.
-
-## Register reusable source
-
-```text
-lycheedev live probe put --name <name> --file <probe.lua> --format json
-```
-
-Names are mutable selectors; retain the returned immutable PRB revision. Use it
-with native execute. The CLI owns slot publication, confirmation and cleanup.
-
-```text
-lycheedev live execute --project <project-directory> --session <CON-id> --probe <PRB-revision> --request <stable-key> --budget-seconds 35 --policy observation --wait-seconds 120 --format json
-```
-
-Choose `observation` only when the whole Lua chunk, including setup and cleanup,
-can safely run again after runtime loss. The CLI may start a new attempt on that
-same request after verified runtime recovery, up to three attempts; it does not
-resume the Lua stack. Reconstruct transient scene state in each attempt. A script
-that saves settings, performs a business action or changes persistent state is
-`opaque` (the default) unless its complete effects are demonstrably repeatable.
-Neither policy permits manually replaying uncertain input or extending the
-original durable deadline. Registering a probe stores source; it does not execute it.
+Read only when new Lua can answer missing evidence. Use the [live workflow](live-investigation.md)
+for target binding and closure. Reusable probe names are mutable; retain the
+immutable PRB revision. Registration stores source and does not execute it.
 
 ## Design a discriminating probe
 
-For a simple state query, choose the needed fields and verify the APIs it uses;
-do not invent competing hypotheses or research unrelated code. For diagnosis,
-state the plausible explanations and the observation that separates them.
-Reuse matching source pins; establish how the relevant client source commit and
-target addon revision correspond to the verified runtime. Inspect the relevant
-API definition, call sites, event order,
-preconditions and secret/protected boundaries in
-[source-research.md](source-research.md). A current branch or newest tag is not
-evidence for the running build. When exact source is unavailable, identify the
-gap and, within the live authorization, use a minimal capability observation
-before relying on the uncertain interface.
+For a simple state query, inspect only the required fields/APIs. For diagnosis,
+identify the remaining explanations and a small observation that separates them.
+Match fixed client source/addon revision to the verified runtime; latest source
+and installed files alone do not prove what loaded. If an interface is unknown,
+retain the gap and use a safe capability observation within live scope.
 
-Choose the smallest experiment that separates the hypotheses. The supported
-Lua probe can inspect state, collect event timing, exercise a target addon's own
-controller or callback where authorized, check object lifetime, sample bounded
-performance data, or verify a business invariant. Source and task determine the
-actions, fields, sample limit and assertions; the bridge does not impose a UI
-template. For an interactive behavior, distinguish calling a handler from real
-mouse or keyboard dispatch. A programmatic callback cannot prove hit testing,
-cursor routing or protected hardware input.
+A supported experiment can inspect state, events, lifetime, a target addon's own
+controller, bounded cost or business invariants. A programmatic callback is not
+proof of actual hardware dispatch, hit testing or protected input. State relevant
+preconditions and what remains untested. Finish observation and owned cleanup
+before reporting; assertions that fail must not be wrapped as success.
 
-Specify what must be true before each action, what output proves or refutes each
-hypothesis, and what remains untested. Rebuild scene state after load when needed.
-Finish observation and probe-owned cleanup before reporting. Results, logs and
-assertions use a bounded memory report; the CLI verifies and durably saves its
-exact bytes before releasing runtime storage. An expected assertion failure should use a clear
-failure state instead of wrapping an exception as success. A verified report
-proves retrieval and integrity, not that its assertions passed.
-
-If evidence calls for a different experiment, finish or recover the old
-operation first, then create a new revision and request key. An uncertain
-accepted input or missing receipt is not grounds to rerun the same Lua. Keep
-deadline, user cancellation, unresolved execution, probe error, assertion
-failure and pending display cleanup distinct in the finding.
+Choose observation policy only when the whole chunk, including setup/cleanup,
+is safely repeatable after verified runtime loss. It starts a new attempt, not
+an old Lua stack. Rebuild transient scene state each time. Persistent or business
+effects default to opaque. Neither policy allows manual uncertain-input replay
+or deadline renewal. Close/recover the old operation before a different experiment.
 
 ## Write bounded probes
 
-Use Lua 5.1 and inspect only what answers the question. Bound collection sizes,
-tree depth, samples and output. Synchronous Lua cannot be preempted by the host;
-never rely on a host timeout as the probe's only bound.
-
-For event- or callback-based work, the chunk receives one API as `...`:
+Use Lua 5.1. Bound synchronous work, collection size, depth, samples and output;
+a host timeout cannot preempt synchronous Lua. For callbacks the chunk receives
+one API as its vararg:
 
 ```lua
 local probe = ...
-assert(probe:Async(30)) -- integer seconds, 1..120
+assert(probe:Async(30))
 local frame = CreateFrame("Frame")
 assert(probe:OnCleanup(function()
   frame:UnregisterAllEvents()
@@ -84,103 +44,48 @@ frame:SetScript("OnEvent", assert(probe:Callback(function()
 end)))
 ```
 
-Use `probe:Fail("stable_reason")` for an expected failed result,
-`probe:Log(...)` for bounded diagnostic lines, and `probe:IsCancelled()` before
-expensive callback work. The example observes a future combat-exit event; it
-does not establish that the character was in combat beforehand. Add verified
-preconditions or choose the event that actually distinguishes the question.
-Async probes have a mandatory bounded timer, at most 16 wrapped callbacks,
-16 cleanup callbacks, 100 log entries and 32 KiB of logs. Completion is
-single-use. Wrap every asynchronous entry with `probe:Callback` so late callbacks
-cannot enter user code after termination and exceptions become failed reports.
-Register resource cleanup before activating each timer/frame. Cancel owned timers,
-unregister events and detach scripts; hiding a frame alone leaves its callbacks
-and captured values attached. Cleanup runs in reverse registration order on
-completion, failure or timeout. Native execution preserves any verified report
-when cleanup throws, then uses journaled reload/recovery to prove runtime
-destruction; pending recovery remains a separate obligation. Do
-not create permanent hooks or mutate Blizzard-owned APIs.
-Choose the execute budget to cover the probe's own async deadline and cleanup; a
-longer host wait cannot extend the declared execution budget.
+This observes a future event, not prior combat. Verify the relevant preconditions.
+Use Fail for an expected failure, Log for bounded diagnostics and IsCancelled
+before expensive callback work. Async accepts 1–120 integer seconds; maximums
+are 16 wrapped callbacks, 16 cleanup callbacks, 100 log entries and 32 KiB logs.
+Wrap every async entry with Callback; register cleanup before activating work.
+Cancel owned timers, unregister events and detach scripts; hiding is insufficient.
+Cleanup runs in reverse order and completion is single-use. A cleanup failure
+can preserve the report while requiring CLI recovery/runtime destruction.
+Set the execute budget to cover the async deadline and cleanup.
 
-### Scene prerequisites and optional input protection
+A scene-dependent Guard(check, events, reason) must return non-secret true.
+It is checked immediately, on listed events, before wrapped callbacks and before
+success. False/unavailable/secret/throwing checks fail the probe. Limits are eight
+guards/eight distinct events. Choose events that cover the actual scene changes;
+failed prerequisites do not authorize an effect replay.
 
-For scene-dependent probes, declare a small, side-effect-free predicate with
-`probe:Guard(check, events, reason)`. It must return the non-secret boolean `true`.
-The runtime checks it immediately, on the listed events, before each wrapped
-callback, and before successful completion. A false, unavailable, secret or
-throwing predicate fails the probe with the supplied reason. At most eight
-guards and eight distinct events are supported; no polling is added. Choose
-events that actually cover the target or UI changes relevant to the experiment.
-Preserve that failed report, then reconstruct the scene or propose a revised
-experiment according to the operation's observation/opaque policy. A scene
-failure is not permission to automatically replay an effect.
+Only an explicitly exclusive UI experiment needs ProtectInput(seconds); ordinary
+reads/listeners/waits do not. It allows one phase within the remaining budget;
+ReleaseInput promptly. It is an in-game shield, not OS control or hardware-action
+authority. Combat, leaving the world, cancellation/deadline release it and fail
+the probe. A synchronous stall can prevent timers from running. Keep scene checks
+and never hold the shield while waiting for reload or scanning memory.
 
-Do not acquire input protection for ordinary data reads, listeners or waiting.
-Only an explicitly exclusive UI experiment should call
-`assert(probe:ProtectInput(seconds))`. It permits one protection phase per probe,
-with an Agent-chosen duration no longer than the remaining probe budget; there
-is no separate five-second cap. Use
-`probe:ReleaseInput()` immediately after the exclusive actions; the remainder
-of an async probe runs normally. Completion and errors release before user
-cleanup. The hard deadline, combat, leaving the world or runtime cancellation release
-the shield and fail the active probe rather than silently continuing unprotected.
-There is no separate input-protection cancel binding.
-Use `probe:IsInputProtected()` to observe this probe's lease. Late callbacks and
-old lease timers cannot resume a finished probe or release a newer lease.
-
-This is an in-game input shield, not an OS-wide lock, protection from disconnects,
-or a source of secure hardware-action authority. Keep checking scene prerequisites
-even while protected. Use bounded Lua: a blocked synchronous Lua callback cannot
-be preempted by a Lua timer. Slot loading protects only its short dispatch burst
-(two-second safety deadline) and releases before business entry. Reload retains the host's serialized, bounded input transaction and requires
-compatible fresh INPUT with the actual reload binding. If no compatible runtime
-is loaded, follow [live startup](live-startup.md) and ask for one manual reload;
-do not send an unverified key. Never hold a game shield while scanning memory
-or awaiting reload.
-
-Combat lockdown and secret values are trust boundaries. Check them before
-comparison, formatting or branching. Record unavailable and truncated values
-explicitly instead of substituting defaults.
+Do not install permanent hooks or mutate Blizzard-owned APIs. Check combat and
+secret/protected boundaries before comparison, formatting or branching. Preserve
+unavailable/truncated values instead of substituting defaults.
 
 ## Test source hypotheses
 
-Use this when authorized runtime work can distinguish an unresolved source
-hypothesis. Carry the exact source locations, value flow and uncertainty from
-[source value-flow analysis](source-value-flow.md); bind observations to the
-verified client, build and loaded addon revision. Installed files alone do not
-prove the loaded revision. Consult existing reports and [retained errors](error-diagnosis.md)
-before another probe. The bridge cannot recover arbitrary locals or a complete
-historical taint chain.
+Carry [fixed source/value-flow evidence](source-value-flow.md), version identity,
+conditions and missing links into the check. Consult [retained errors](error-diagnosis.md)
+first when relevant. The bridge cannot recover arbitrary locals or a complete
+historical taint chain. For secrets, report the marker or unavailable state,
+never raw/coerced values. Do not repeat known forbidden operations or hook/
+replace protected Blizzard objects to observe them.
 
-Use only supported, safe observations for the verified client. For secret
-values, report the secrecy marker or an explicit unavailable state, not the raw
-value. Do not compare, format, serialize or coerce the value to extract it, or
-re-execute a known forbidden operation just to reproduce its error. Do not add
-hooks to protected/Blizzard objects or replace their functions to observe flow.
-If an internal boundary cannot be observed safely, retain the gap and identify
-the additional diagnostic capability or reproduction context needed.
-
-Give each check a bounded observation window, sample/output budget and cleanup.
-Prefer event-driven observation when the question depends on an event. Let native
-execute/resume persist the exact verified report and complete its runtime release
-before starting the next check; native CON work needs no legacy ACK or finish
-command. Interpret the business outcome as well as transport and cleanup:
-`reportState: verified` proves retrieval/integrity, `report.ok` states probe
-success, and `cleanup`/`cleanupMethod` states resource closure. Within the existing task
-authorization, continue these steps without separate confirmation for each one.
-
-Feed the observation back into the suspected source path: identify which
-explanation it supports, contradicts or leaves open. Run another check only if
-it can resolve a remaining material distinction; do not repeat an unchanged
-probe after a timeout or absent event. A normal observation outside the failing
-conditions does not establish that the failing path is safe. If a repair and
-deployment are in scope, repeat the relevant bounded check against the verified
-updated runtime and retain both results.
-
-Deliver the supported path, runtime conditions and capture IDs together with
-any unresolved links. Distinguish a verified probe result from a demonstrated
-root cause and from a verified repair. Stop when the question is answered or
-the next step requires unavailable evidence, capability or user action; finish
-or recover every outstanding operation under the lifecycle above. An unresolved
-cause and completed display cleanup are separate outcomes.
+Bound the observation window/output and cleanup, then read the verified report's
+business outcome separately from transport and closure. Reconcile it with the
+suspected path. A normal observation outside failing conditions cannot disprove
+the fault. Another experiment must resolve a material remaining distinction;
+a timeout or absent event alone is not a reason to repeat unchanged.
+If repair/deployment is authorized, verify the updated runtime and repeat the
+relevant check with both results retained. Root cause, successful probe and
+verified repair are separate claims. Stop when answered or blocked; recover any
+outstanding lifecycle even when the cause remains unknown.

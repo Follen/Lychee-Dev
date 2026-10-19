@@ -6,7 +6,7 @@ import {writeFileSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import {CURRENT_GO_CONTRACT, commandFlags, inventoryHash, pendingIncrementTasks, within} from './assertions.mjs';
 import {bounded, digest, goJSON, parse, pathStyle, ordinaryPath, npmOfflineFlags, loadArchivedFixture, MISSING_KEYS, RESTORED_KEYS, SAMPLE_KEY_ID} from './data-inputs.mjs';
-import {assertDataSkillBytes, assertDataSkillInventory, dataSkillIdentity} from './data-skill-contract.mjs';
+import {assertDataSkillBytes, assertDataSkillInventory, dataSkillIdentity, loadDataSkillContract} from './data-skill-contract.mjs';
 
 export const SQL = 'SELECT ID, Name_lang, ModelFileDataID FROM HouseDecor WHERE ID IN (:third,:first,:duplicate,:second) ORDER BY ID';
 export const PARAMETERS = {third: 30, first: 10, duplicate: 10, second: 20};
@@ -233,7 +233,7 @@ export function assertDataReport(report, workflow, {evidenceDirectory = report?.
   assert.deepEqual(report.checks.map(row => row.caseId), CHECKS); assert(report.checks.every(row => row.state === 'passed'));
   const config = report.config, p = pathStyle(config.scratch);
   assert(p.isAbsolute(config.runnerRoot), 'separate selected runner identity');
-  assert.deepEqual(config.skillIdentity, dataSkillIdentity());
+  assert.deepEqual(config.skillIdentity, dataSkillIdentity(loadDataSkillContract(config.skillIdentity)));
   assert.equal(config.platform, 'win32'); assert.equal(config.arch, 'x64'); assert(p.isAbsolute(config.node));
   assert.equal(config.prefix, p.join(config.scratch, 'npm-prefix')); assert.equal(config.launcher, p.join(config.prefix, 'node_modules/lycheedev/payload/skill/scripts/lycheedev.mjs'));
   assert.equal(config.tgz, p.join(config.scratch, `lycheedev-${config.version}.tgz`));
@@ -256,7 +256,7 @@ export function assertDataReport(report, workflow, {evidenceDirectory = report?.
   const pack = parse(readArchived(evidenceDirectory, report.commands.find(row => row.id === 'npm-pack').stdout));
   assert.equal(pack.length, 1); assert.equal(pack[0].filename, p.basename(config.tgz)); assert.equal(pack[0].name, 'lycheedev'); assert.equal(pack[0].version, config.version);
   const installed = parse(readArchived(evidenceDirectory, report.installedInventory)); assert.deepEqual(installed, config.packageFiles); assert.equal(inventoryHash(installed), config.packageSHA256);
-  const skill = assertDataSkillInventory(installed);
+  const skill = assertDataSkillInventory(installed, config.skillIdentity);
   const {files: skillFiles, ...identity} = report.skillProof;
   assert.deepEqual(identity, config.skillIdentity, 'fixed Go provenance and adapted candidate are separate');
   assert.deepEqual(skillFiles.map(row => row.path), skill.files.map(row => row.path), 'full archived candidate Skill');

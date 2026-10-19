@@ -7,6 +7,7 @@ import {dirname, delimiter, join, resolve} from 'node:path';
 import os from 'node:os';
 import {performance} from 'node:perf_hooks';
 import {assertApiAnswer, assertBoundedCoverage, assertNativeContext, assertNativeEvidence, assertPackagedIncrement, commandFlags, evaluateWorkflowCheck, inventory, inventoryHash, jsonFile, loadCurrentWorkflow, pendingIncrementTasks, POST_SEMANTIC_REQUIREMENTS, sha256, within} from './assertions.mjs';
+import {assertDataSkillDirectory, dataSkillIdentity} from './data-skill-contract.mjs';
 import {assertAnchor, assertEnvelope, assertPageContinuation, assertQuery, assertStaticCall} from '../rust-source-full-corpus/assertions.mjs';
 
 const [packageArg, scratchArg, evidenceArg, packageSHA256, ...extra] = process.argv.slice(2);
@@ -20,12 +21,12 @@ assert.equal(readdirSync(scratch).length, 0, 'fresh controlled scratch');
 const workflow = loadCurrentWorkflow(root);
 const oracle = jsonFile(new URL('../rust-source-full-corpus/retail-oracle.json', import.meta.url));
 const report = {
-  schema: 'lycheedev.skill-real-usage.v1', state: 'running', startedAt: new Date().toISOString(),
+  schema: 'lycheedev.skill-real-usage.v2', state: 'running', startedAt: new Date().toISOString(),
   goContract: workflow.goContract, goVersion: workflow.goVersion, historicalWorkflow: workflow.historical,
-  oracle, prompts: workflow.prompts, sourceTaskScope: workflow.sourceTaskScope, pendingTasks: pendingIncrementTasks(workflow), inputMode: 'full-fixed-retail-public-source-sync',
+  skillIdentity: dataSkillIdentity(), oracle, prompts: workflow.prompts, sourceTaskScope: workflow.sourceTaskScope, pendingTasks: pendingIncrementTasks(workflow), inputMode: 'full-fixed-retail-public-source-sync',
   packageSHA256, machine: {platform: process.platform, release: os.release(), arch: process.arch, node: process.version, cpu: os.cpus()[0]?.model, cores: os.cpus().length},
   checks: [], commands: [], answers: [],
-  boundaries: ['staged npm-prefix resolution fixture, not npm installation acceptance', 'selected full-Retail tasks; complete byte-authenticated corpus gate is separate', 'Go321 keyboard, Go322 slot startup and Go323 Data increments are checked as exact Skill bytes only; their runtime tasks remain not_run', 'ordinary semantic refs/context do not establish complete native lifecycle or flow coverage', 'no game, source/config execution, release publication or performance claim', 'capture IDs belong to retired isolated home; their actual returned envelopes and excerpts remain in sealed evidence'],
+  boundaries: ['staged npm-prefix resolution fixture, not npm installation acceptance', 'selected full-Retail tasks; complete byte-authenticated corpus gate is separate', 'Go321 keyboard, Go322 slot startup and Go323 Data requirements retain their historical fixtures; selected candidate Skill bytes are authenticated separately and runtime tasks remain not_run', 'ordinary semantic refs/context do not establish complete native lifecycle or flow coverage', 'no game, source/config execution, release publication or performance claim', 'capture IDs belong to retired isolated home; their actual returned envelopes and excerpts remain in sealed evidence'],
 };
 const save = () => writeFileSync(join(out, 'report.json'), JSON.stringify(report, null, 2) + '\n');
 save();
@@ -95,12 +96,13 @@ try {
     // shell or shim contents execute. This is explicitly not an npm install.
     writeFileSync(join(prefix, 'lycheedev.cmd'), '@echo off\r\nexit /b 99\r\n');
     for (const name of workflow.requiredSkillFiles) assert(existsSync(join(staged, 'payload', 'skill', name)), `complete fixed Skill resource ${name}`);
+    assertDataSkillDirectory(join(staged, 'payload', 'skill'));
     report.launch = {skill: launcher, packageLauncher: join(staged, 'bin', 'lycheedev.mjs'), prefix, explicitNativeOverride: false, mode: 'Skill npm-prefix discovery to packaged verified native handoff'};
     stagedReady = true;
     return {files: files.length, requiredSkillFiles: workflow.requiredSkillFiles.length};
   });
   assert(stagedReady, 'authenticated package staging failed; no launcher run');
-  for (const increment of workflow.increments) check(`fixed-skill-contract-${increment.id}`, () => assertPackagedIncrement(join(staged, 'payload', 'skill'), workflow, increment));
+  for (const increment of workflow.increments) check(`fixed-skill-contract-${increment.id}`, () => assertPackagedIncrement(join(staged, 'payload', 'skill'), workflow, increment, report.skillIdentity));
   check('packaged-version', () => { const {result} = invoke('version', ['version']); assert.equal(result.platform, 'windows/amd64'); assert.equal(typeof result.rust, 'string'); assert(result.rust.length > 0); return {version: result.version, rust: result.rust}; });
   check('installed-command-discovery', () => { const {result} = invoke('describe', ['describe']); assert(Array.isArray(result.commands)); directory = result.commands; return {commands: directory.length}; });
   check('installed-help', () => { const {result} = invoke('help', ['--help']); assert(Array.isArray(result.commands)); });
