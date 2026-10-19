@@ -10,9 +10,10 @@
 - [x] 19e data_disk13/13、remove_commands22/22通过，两个Core失败及两新增均通过；一次消费、重复close事件和CAP签名/认证保留。
 - [x] Source 25新增Index测试逐名一次通过；source_inspect15、flow4与正式认证luac真实ignored用例1通过。
 - [x] 19e all-targets及67项定向回归全通过，原23失败闭合；不是全仓/性能通过。
-- [ ] 19e release已通过，assembly缺flatbuffers官方许可证正文；补现有catalog/原文后以新sourceDigest匹配构建、装包和完整Source六场景，保留旧失败。
+- [x] 2d补官方flatbuffers许可证后新匹配release/assembly/exporter认证通过；19e旧装包失败保留。
+- [ ] 2d六场景逐项完整Facts/Index/custody通过，但末尾owner receipt读取预算失败；修验证器并对原封存结果只读复核，原finalIntegrity=false不改、不重跑产品。
 - [x] 10ed显式6GiB runner接线保存并完整readback；12套Node作者/独审各452/452；Windows实际447通过/0失败/5权限skip，原默认5GiB及其它限额保持。
-- [ ] Data45源码组合已独立静审；94新增（read-through/provider45、私有元库22、缺体修复27）及旧真实消费者回归待Windows编译/执行，不能以静态检查代替。
+- [ ] ea58347c已保存Data50并完成全字节回读；Data45源码组合已独立静审；94新增（read-through/provider45、私有元库22、缺体修复27）及旧真实消费者回归待Windows编译/执行，不能以静态检查代替。
 - [x] 最终组合Node检查记录sourceTree并区分git archive导出与export-ignore范围；原隔离361/361不能代替最终组合树结果。
 
 - [x] CLI旧Go320元数据oracle已按固定Go323及明确新增更新，独立10项与10个物理坏例通过；最终组合11套Node121/121，无skip，非实际CLI任务验收。
@@ -36,7 +37,7 @@
 - [ ] 完成当前Facts Postcard正确性和匹配性能；旧cache失效重建，新损坏不得fallback成健康。
 - [x] 整合已独审Index r2与正式v13-postcard-index18诊断；固定Go323来源已核；070f七Node为357通过/0失败/4权限skip。
 - [ ] 闭合旧validate fixture后完成Source库回归；070f的25新增active及真实luac1已通过，6个lib ignored仍单列。
-- [ ] 新Index格式正式诊断reader/exporter接线完整后，再同输入cold/warm/单改/插删/rename；认证和query成本不移到未测后续命令。
+- [ ] 2d新Index六场景已实际执行，末尾封存复核尚未闭合；六项耗时比均>0.30。后续改动保持完整认证与公共输出，首次导入/query成本不移到未测命令。
 
 ## D. Live内部资源归属
 - [x] 8bfe SessionOwner六新增逐名一次、connection61/durable36实际通过；真实客户端仍未验。

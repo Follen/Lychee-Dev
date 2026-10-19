@@ -38,7 +38,9 @@ Source新格式旧cache失效后重建，不维护生产旧格式迁移。新格
 
 ## 4. 性能与已知证据范围
 
-最新完整Source诊断为d427，同run Go/Rust毫秒：cold7730.4355/4036.1422；warm559.6647/345.8190；change2740.9258/1127.5592；insert2725.3417/1156.8068；delete2726.4203/1149.3939；rename2842.2565/1168.1344。六场景完整Facts/summary/custody通过；均未达到0.30，只一轮诊断，内存采样缺口不能证明RSS峰值改善。parse并行累计、visit/Facts/workerwait嵌套不可相加伪造独占。
+最新Source诊断固定2d23695：匹配release、91文件装包及exporter认证通过。同run Go/Rust毫秒：cold10687.5959/5095.8654；warm667.0608/267.0469；change3958.0999/1344.9300；insert3962.2321/1357.1795；delete3871.5698/1225.4815；rename3704.7494/1240.8674。六场景逐项完整Facts/Index、summary与custody比较通过；最终runner仍失败：读取owner receipt的1MiB上限拒绝合法约5.2MB封存记录，原finalIntegrityVerified=false保持，待修正验证器后只读复核，不重跑产品或改旧记录。六比率均大于0.30，只一轮诊断；内存采样缺口不证明RSS峰值改善，不能把异负载绝对耗时变化全归优化。
+
+同次冷路径visit为4587.845ms，内含工作与等待；串行解析76次累计1278.543ms，worker等待2202.707ms，23任务放弃。增量Facts读取/认证/解码321.305–363.620ms、Symbols构造114.992–138.115ms；warm完整缓存读/SHA/typed校验188.943ms。各阶段嵌套、worker解析并行累计，不相加或差减成伪独占。FactsRead次数包括组目录、probe、记录与close，不能称重复磁盘读取次数；摘要路径已借用typed字段，不再构造完整owned Symbols。下一优化需源码分配/生命周期证明及独立回归，尚无新性能收益结论。
 
 Data CSV9693工具对旧63d与a860的单pair：cold401.4790/389.9062ms，warm349.0380/324.7937ms；完整CSV/sidecar与8CAP核验。该对比是旧Rust/新Rust，不是Go性能门禁；retainedBytes减少46,988,672B与decodeWork减少81,920是逻辑计量，不是RSS。其余Data、Live正式性能与全产品矩阵仍未验收，不把历史结果归新产物。
 
@@ -54,7 +56,7 @@ Data CSV9693工具对旧63d与a860的单pair：cold401.4790/389.9062ms，warm349
 
 集成流程缺口已确认：原隔离Node工作目录的Rust源码仍是v17，不能以该361/361替代最终组合树验证。后续Node/合同检查须在精确待提交组合树执行并记录sourceTree，明确git archive导出范围与被export-ignore排除的历史文件，不能只合并文件hash。静态审查、rustfmt与patch适用性不等同Rust编译通过。
 
-19e匹配release实际成功；assembly因固定flatbuffers crate未携带许可证正文而失败，Source六场景尚未运行。采用既有release/licenses目录补入经官方固定版本认证的原文；该资源纳入sourceDigest，因此修复后须新匹配build，原19e成功构建及失败装包记录保留。10ed仅修正式runner显式--scratch-6gib贯穿，默认仍5GiB；作者与独审各12套Node452/452通过；Windows实际447通过/0失败/5个symlink权限skip，均未冒计通过。Data后继45个源码路径已组合独审：认证read-through、可选DataFusion真实TableProvider、私有SQLite元库和缺体精确重建，共94新增Rust测试均未编译/执行。私有元库沿成熟SQLite正常恢复，计逻辑文件长度，不自研journal/VFS；只读路径不冒写入准入，写入仍严格。缺体修复仅接受已认证原alias/pair对应的确切缺失body，从原来源重提取并完整认证；现存损坏仍拒绝，CAP/keep/alias不删改。精确repair记录保留额外stage峰值，未知/清理失败留事实；旧reader遇未完repair会拒绝而非漏账，成功后只由本次handle撤回。新路径与原session/asset缺体回归仍待Windows实跑，不把静审称作通过。当前固定2d许可证性能队列保持独立，此后继不替换其运行身份；全Data5GB归属和冷缓存淘汰尚未闭合。首轮匹配产品和完整Source/Data任务性能不等整个计划结束；首次导入成本计入实际生命周期。Skill继续同一封存CLI/fixture的独立真实任务，模型和脚本不替代。
+19e匹配release实际成功；assembly因固定flatbuffers crate未携带许可证正文而失败，该历史记录保留。2d已用官方原文补现有catalog并完成新匹配release/assembly及六场景；末尾receipt验证失败见上节。采用既有release/licenses目录补入经官方固定版本认证的原文；该资源纳入sourceDigest，因此修复后须新匹配build，原19e成功构建及失败装包记录保留。10ed仅修正式runner显式--scratch-6gib贯穿，默认仍5GiB；作者与独审各12套Node452/452通过；Windows实际447通过/0失败/5个symlink权限skip，均未冒计通过。Data后继45个源码路径已组合独审：认证read-through、可选DataFusion真实TableProvider、私有SQLite元库和缺体精确重建，共94新增Rust测试均未编译/执行。私有元库沿成熟SQLite正常恢复，计逻辑文件长度，不自研journal/VFS；只读路径不冒写入准入，写入仍严格。缺体修复仅接受已认证原alias/pair对应的确切缺失body，从原来源重提取并完整认证；现存损坏仍拒绝，CAP/keep/alias不删改。精确repair记录保留额外stage峰值，未知/清理失败留事实；旧reader遇未完repair会拒绝而非漏账，成功后只由本次handle撤回。新路径与原session/asset缺体回归仍待Windows实跑，不把静审称作通过。Data50已保存为ea58347c，50文件完整字节回读通过；其Windows质量队列待结果，不替换2d性能身份；全Data5GB归属和冷缓存淘汰尚未闭合。首轮匹配产品和完整Source/Data任务性能不等整个计划结束；首次导入成本计入实际生命周期。Skill继续同一封存CLI/fixture的独立真实任务，模型和脚本不替代。
 
 后继质量清单见[Data缓存测试映射](tests/rust-parity/data-cache-quality-test-map.json)：两条keep-going编译前置、15个互斥模块静态286项（94新、192旧），均须实际libtest名单确认后运行。最终组合11套Node121/121通过、无skip；旧CLI oracle的110/111及10ed基线5/6失败保留。修正预期来自固定Go323原文和明确批准的cache prepare/Emmy说明，旧fixture未改；七product、双Forever、命令顺序、参数与错误合同仍逐项比较。此为元数据/脚本验证，不能替代85条CLI真实任务。
 

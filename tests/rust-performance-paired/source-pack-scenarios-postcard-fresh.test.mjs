@@ -11,7 +11,7 @@ import {hashFile, sourceDigest, runCargo} from '../../tools/rust-build.mjs';
 import {CASES, BASE_COMMIT, FRESH_ALLOWANCE, assertDiskPolicy, captureComparedGo, candidateIdentity, runController, verifyObservedReport} from './source-pack-scenarios.mjs';
 import {POSTCARD_LAYOUT, POSTCARD_INDEX_LAYOUT, LIMITS, EXPORT_BUILD_ARGS, TOOLCHAIN_OWNER, postcardEnvironmentSHA, postcardCompilerEnvironment} from './read-fact-delta-postcard.mjs';
 import {fixture as binaryFixture, put, putJSON, compilerPolicy, compilerText} from './read-fact-delta-postcard.fixtures.mjs';
-import {parsePostcardFreshArguments, validateFreshPostcardOwner, validatePostcardFreshRequest, prepareFreshPostcardExporter, postcardComparisonFootprint, comparePostcardScenario, verifyFreshPostcardFacts, verifyFreshPostcardReport, runPostcardFreshController, freshPostcardIdentity, FRESH_POSTCARD_FILES} from './source-pack-scenarios-postcard-fresh.mjs';
+import {FRESH_OWNER_RECEIPT_BYTES, readFreshPostcardReceipt, freshPostcardReceiptSHA256, parsePostcardFreshArguments, validateFreshPostcardOwner, validatePostcardFreshRequest, prepareFreshPostcardExporter, postcardComparisonFootprint, comparePostcardScenario, verifyFreshPostcardFacts, verifyFreshPostcardReport, runPostcardFreshController, freshPostcardIdentity, FRESH_POSTCARD_FILES} from './source-pack-scenarios-postcard-fresh.mjs';
 
 const root = resolve(import.meta.dirname, '../..'), conditions = {machine: 'fixture', powerAndThermal: 'unknown', competingLoad: 'unknown', disk: 'fixture', operator: 'Node tests'};
 const proof = ms => ({schema: 'lycheedev.owned-process.v1', rootReaped: true, treeReaped: true, handlesClosed: true, toolIdentityLocksClosed: true, outputReadersComplete: true, activeProcesses: 0, forced: false,
@@ -325,4 +325,46 @@ test('final fresh report rejects a changed scenario-owner admission before accep
   const f = await controller(t, {config: {allowance: FRESH_ALLOWANCE}}), receipt = JSON.parse(fs.readFileSync(f.owners[0].receipt));
   receipt.admission.limits.scratchBytes = defaults.scratchBytes; putJSON(f.owners[0].receipt, receipt);
   await assert.rejects(async () => verifyFreshPostcardReport(f.report, f.request, FRESH_ALLOWANCE), /scenario owner admission differs/);
+});
+
+
+function actualReceiptOwners(directory, limits) {
+  return [{role: 'healthy-base'}, ...CASES.slice(2).flatMap(row => ['go', 'rust'].map(engine => ({role: row.id, engine})))].map((row, i) => {
+    const job = beginScratch(directory, i === 0 ? 'source-pack2-healthy-base' : `source-pack2-${row.role}-${row.engine}`, {command: ['source', 'index'], limits});
+    const logs = [];
+    // Actual rust-disk writer, unique real files and both generated log indexes.
+    // This matches the fan-out that made the Windows Go owner exceed 1 MiB.
+    for (let n = 0; n < (i === 1 ? 2200 : 1); n++) { const path = join(job.evidence, `${String(n).padStart(4, '0')}-${'e'.repeat(160)}.json`); putJSON(path, {ordinal: n}); logs.push(path); }
+    job.seal({state: 'succeeded', handlesReaped: true, logs}); job.cleanup();
+    return {...row, receipt: job.receipt};
+  });
+}
+test('real rust-disk receipt above 1 MiB passes the complete fresh final custody gate at the bounded 16 MiB ceiling', t => nativeBoundary(t, async f => {
+  const result = await f.run(), owners = actualReceiptOwners(f.root, f.limits), path = owners[1].receipt;
+  assert(fs.statSync(path).size > 1 << 20); assert(fs.statSync(path).size <= FRESH_OWNER_RECEIPT_BYTES);
+  const report = {layout: POSTCARD_LAYOUT, importedSamples: 0, diskPolicy: f.limits, owners,
+    invocationAttempts: CASES.flatMap((row, i) => (i === 1 ? ['rust', 'go'] : ['go', 'rust']).map(engine => ({caseId: row.id, engine}))),
+    scenarios: CASES.map(row => ({id: row.id, facts: result}))};
+  const request = {ownerRoot: f.root, candidate: f.build.candidate, exporter: {mode: 'existing', ...f.build.expected}, layout: POSTCARD_LAYOUT};
+  const digest = freshPostcardReceiptSHA256(f.root, path), original = fs.readFileSync(path);
+  assert.equal(readFreshPostcardReceipt(f.root, path, digest).state, 'retired');
+  assert.equal(verifyFreshPostcardReport(report, request), true);
+  for (const [mutate, error] of [
+    [v => v.owner = 'foreign', /scenario owner identity/],
+    [v => v.schema = 'unknown', /lycheedev.disk-owner/],
+    [v => v.admission.limits.scratchBytes++, /scenario owner admission/],
+  ]) { const value = JSON.parse(original); mutate(value); putJSON(path, value); assert.throws(() => verifyFreshPostcardReport(report, request), error); }
+  fs.writeFileSync(path, original); assert.throws(() => readFreshPostcardReceipt(f.root, path, '0'.repeat(64)), /receipt SHA changed/);
+  fs.writeFileSync(path, Buffer.concat([original, Buffer.alloc(FRESH_OWNER_RECEIPT_BYTES - original.length, 32)]));
+  assert.equal(readFreshPostcardReceipt(f.root, path).state, 'retired'); assert.equal(verifyFreshPostcardReport(report, request), true);
+  fs.truncateSync(path, FRESH_OWNER_RECEIPT_BYTES + 1);
+  assert.throws(() => verifyFreshPostcardReport(report, request), error => error.message.includes(path) && error.message.includes('16777216 byte ceiling'));
+  fs.writeFileSync(path, original); assert.equal(freshPostcardReceiptSHA256(f.root, path), digest);
+}, f => { f.limits = {...defaults}; }));
+test('fresh receipt reader rejects reparse leaves, reparse ancestors and nonregular files', t => {
+  const directory = temporary(t), actual = join(directory, 'actual'), receipt = join(actual, 'receipt.json'); fs.mkdirSync(actual); putJSON(receipt, {schema: 'lycheedev.disk-owner.v1'});
+  assert.throws(() => readFreshPostcardReceipt(directory, actual), /receipt.*ceiling/);
+  try { fs.symlinkSync(actual, join(directory, 'alias'), 'junction'); fs.symlinkSync(receipt, join(directory, 'linked.json'), 'file'); }
+  catch (error) { if (['EPERM', 'EACCES'].includes(error.code)) { t.skip('Windows symbolic-link privilege is unavailable'); return; } throw error; }
+  for (const path of [join(directory, 'alias/receipt.json'), join(directory, 'linked.json')]) assert.throws(() => readFreshPostcardReceipt(directory, path), /reparse_boundary/);
 });

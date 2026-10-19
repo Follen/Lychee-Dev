@@ -14,10 +14,24 @@ import {sourcePhaseEnvironment, validateConditions} from './source-candidates.mj
 import {openGoCustody} from './source-pack-custody.mjs';
 import {CASES, FRESH_ALLOWANCE, candidateIdentity, captureComparedGo, indexEvidence, evidenceFiles, assertDiskPolicy, validateRequest, verifyCandidateRecord, runController, verifyObservedReport} from './source-pack-scenarios.mjs';
 import {comparePostcardFacts, POSTCARD_RUNNER_FILES} from './source-pack-scenarios-postcard.mjs';
-import {POSTCARD_LAYOUT, POSTCARD_INDEX_LAYOUT, verifyPostcardIndexCustody, assertPostcardOutputBudget, INDEX_EXPORT_ARGS, EXPORT_ARGS, LIMITS, EXPORT_BUILD_ARGS, TOOLCHAIN_OWNER, postcardCompilerEnvironment, postcardEnvironmentSHA, postcardToolchainPolicy, postcardCompilerObservation, readPostcardBytes, sealPostcardExporter, verifyPostcardExporter, verifyPostcardCustody} from './read-fact-delta-postcard.mjs';
+import {POSTCARD_OWNER_RECEIPT_BYTES, POSTCARD_LAYOUT, POSTCARD_INDEX_LAYOUT, verifyPostcardIndexCustody, assertPostcardOutputBudget, INDEX_EXPORT_ARGS, EXPORT_ARGS, LIMITS, EXPORT_BUILD_ARGS, TOOLCHAIN_OWNER, postcardCompilerEnvironment, postcardEnvironmentSHA, postcardToolchainPolicy, postcardCompilerObservation, readPostcardBytes, sealPostcardExporter, verifyPostcardExporter, verifyPostcardCustody} from './read-fact-delta-postcard.mjs';
 
 const exact = (v, keys, label = 'exact fresh v13 fields required') => assert.deepEqual(Object.keys(v ?? {}).sort(), [...keys].sort(), label);
 const json = (file, maximum = 16 << 20) => JSON.parse(readPostcardBytes(file, maximum));
+// Verification ceiling shared with the established scenario owner readers.
+// rust-disk limits EACH sealed log to 16 MiB, not the whole owner receipt;
+// sealedLogs + logHashes grow with the evidence set. Larger receipts still fail.
+export const FRESH_OWNER_RECEIPT_BYTES = POSTCARD_OWNER_RECEIPT_BYTES;
+function receiptBytes(root, file) {
+  try { return readPostcardBytes(contained(root, file), FRESH_OWNER_RECEIPT_BYTES); }
+  catch (error) { throw new Error(`fresh disk-owner receipt (${FRESH_OWNER_RECEIPT_BYTES} byte ceiling): ${file}: ${error.message}`, {cause: error}); }
+}
+export const freshPostcardReceiptSHA256 = (root, file) => sha256(receiptBytes(root, file));
+export function readFreshPostcardReceipt(root, file, expectedSHA256) {
+  const raw = receiptBytes(root, file);
+  if (expectedSHA256 !== undefined) assert.equal(sha256(raw), expectedSHA256, `fresh disk-owner receipt SHA changed: ${file}`);
+  return JSON.parse(raw);
+}
 const save = (file, value) => { const raw = Buffer.from(JSON.stringify(value, null, 2) + '\n'); assert(raw.length <= 16 << 20); fs.writeFileSync(file, raw, {flag: 'wx'}); };
 export const FRESH_POSTCARD_FILES = Object.freeze([...POSTCARD_RUNNER_FILES, 'tests/rust-performance-paired/source-pack-scenarios-postcard-fresh.mjs']);
 export const freshPostcardIdentity = root => Object.fromEntries(FRESH_POSTCARD_FILES.map(file => [file, hashFile(join(root, file))]));
@@ -80,8 +94,8 @@ export function buildPostcardExporter(request, {build = runCargo, execute = owne
     return build(root, [...EXPORT_BUILD_ARGS], {sourceRoot: candidate.sourceRoot, owner: 'source-postcard-exporter-build', oneShot: true, environment: {...env}, limits,
       onSuccess(invocation) {
         handlesReaped = true; // runCargo calls this only after its owned process completes.
-        assert.deepEqual(json(invocation.buildEvidence, 1 << 20).admission.limits, limits, 'exporter Cargo admission differs');
-        assert.deepEqual(json(job.receipt, 1 << 20).admission.limits, limits, 'exporter compiler admission differs');
+        assert.deepEqual(readFreshPostcardReceipt(root, invocation.buildEvidence).admission.limits, limits, 'exporter Cargo admission differs');
+        assert.deepEqual(readFreshPostcardReceipt(root, job.receipt).admission.limits, limits, 'exporter compiler admission differs');
         // These are runCargo's existing additions, not compiler-selection
         // overrides. Bind its effective environment to this same snapshot.
         const cargoEnv = {...env, CARGO_TARGET_DIR: invocation.target, CARGO_INCREMENTAL: '0'};
@@ -93,11 +107,11 @@ export function buildPostcardExporter(request, {build = runCargo, execute = owne
         record.build = {receipt: invocation.buildEvidence, command: ['cargo', ...EXPORT_BUILD_ARGS], inputHashes: invocation.inputHashes, environmentSHA256: invocation.environmentSHA256, target: invocation.target};
         record.state = 'verified'; record.handlesReaped = true; save(path, record);
         job.seal({state: 'succeeded', handlesReaped: true, logs: evidenceFiles(job.evidence)}); job.cleanup(); terminal = true;
-        const toolchain = {record: path, recordSHA256: hashFile(path, 65536), receipt: job.receipt, receiptSHA256: hashFile(job.receipt, 1 << 20)};
+        const toolchain = {record: path, recordSHA256: hashFile(path, 65536), receipt: job.receipt, receiptSHA256: freshPostcardReceiptSHA256(root, job.receipt)};
         return seal(root, candidate.sourceRoot, request.exporter.artifactDirectory, invocation, toolchain);
       }});
   } catch (error) {
-    if (error.buildEvidence) { try { if (json(error.buildEvidence, 1 << 20).handlesReaped !== true) handlesReaped = false; } catch { handlesReaped = false; } }
+    if (error.buildEvidence) { try { if (readFreshPostcardReceipt(root, error.buildEvidence).handlesReaped !== true) handlesReaped = false; } catch { handlesReaped = false; } }
     record.error = error.message;
     throw Object.assign(error, {handlesReaped, toolchainEvidence: {record: path, receipt: job.receipt}});
   } finally {
@@ -181,12 +195,12 @@ export async function comparePostcardScenario(homes, outputs, pin, oracle, direc
     if (succeeded && handlesReaped) job.cleanup();
   } catch (error) { failure ??= error; succeeded = false; } }
   const owner = {receipt: job.receipt, report: join(job.evidence, 'postcard-scenario-report.json')};
-  try { owner.receiptSHA256 = hashFile(owner.receipt, 1 << 20); owner.reportSHA256 = hashFile(owner.report, 16 << 20); } catch (error) { failure ??= error; }
+  try { owner.receiptSHA256 = freshPostcardReceiptSHA256(root, owner.receipt); owner.reportSHA256 = hashFile(owner.report, 16 << 20); } catch (error) { failure ??= error; }
   if (failure) throw Object.assign(failure, {handlesReaped, postcardEvidence: owner});
   return {...result, postcardOwner: owner};
 }
 
-export function verifyFreshPostcardFacts(facts, candidate, exporter, layout = POSTCARD_LAYOUT, limits) {
+export function verifyFreshPostcardFacts(facts, candidate, exporter, layout = POSTCARD_LAYOUT, limits, ownerRoot) {
   assert.deepEqual(facts.rustCustody.candidate, candidateIdentity(candidate));
   const raw = readPostcardBytes(facts.rustCustody.catalog, 16 << 20); assert.equal(sha256(raw), facts.rustCustody.catalogSHA256); const custody = JSON.parse(raw); verifyPostcardCustody(custody);
   assert.equal(custody.exporter.artifactSHA256, exporter.artifactSHA256); assert.equal(custody.exporter.artifact.binarySHA256, exporter.binarySHA256); assert.equal(custody.exporter.artifact.inputHashes.sourceTree, candidate.sourceTreeSHA256);
@@ -210,8 +224,8 @@ export function verifyFreshPostcardFacts(facts, candidate, exporter, layout = PO
     assert.equal(exported.oracle.assets, facts.summary.assets); assert.equal(exported.oracle.diagnostics, facts.summary.diagnostics);
     assertPostcardOutputBudget(exported.summary.outputBytes, custody.summary.outputBytes);
   } else assert.equal(facts.indexExport, undefined, 'historical JSON Index has no binary Index export');
-  const owner = facts.postcardOwner; assert.equal(hashFile(owner.receipt, 1 << 20), owner.receiptSHA256); assert.equal(hashFile(owner.report, 16 << 20), owner.reportSHA256);
-  const report = json(owner.report), receipt = json(owner.receipt, 1 << 20); assert.equal(report.state, 'verified'); assert.equal(report.handlesReaped, true); assert.equal(report.exporterInvocations, layout === POSTCARD_INDEX_LAYOUT ? 2 : 1); assert.equal(report.productInvocations, 0);
+  const owner = facts.postcardOwner; assert.equal(hashFile(owner.report, 16 << 20), owner.reportSHA256);
+  const report = json(owner.report), receipt = readFreshPostcardReceipt(ownerRoot ?? dirname(owner.receipt), owner.receipt, owner.receiptSHA256); assert.equal(report.state, 'verified'); assert.equal(report.handlesReaped, true); assert.equal(report.exporterInvocations, layout === POSTCARD_INDEX_LAYOUT ? 2 : 1); assert.equal(report.productInvocations, 0);
   assert.equal(receipt.owner, 'source-postcard-facts'); assert(['succeeded', 'retired'].includes(receipt.state)); assert.equal(receipt.handlesReaped, true); assert.equal(receipt.activePid, null);
   if (limits) assert.deepEqual(receipt.admission.limits, limits, 'Postcard custody admission differs');
   const {postcardOwner, ...expected} = facts; assert.deepEqual(report.result, expected, 'archived scenario result differs'); return true;
@@ -222,8 +236,14 @@ export function verifyFreshPostcardReport(report, request, allowance) {
   assert.deepEqual(report.invocationAttempts, expected); assert.equal(report.continuation, undefined); assert.equal(report.importedSamples, 0);
   const limits = freshPostcardDiskPolicy(request.ownerRoot, process.env, allowance); assert.deepEqual(report.diskPolicy, limits, 'fresh controller disk policy differs');
   assert.equal(report.owners.length, 9, 'one healthy base and eight changed scenario owners required');
-  for (const owner of report.owners) assert.deepEqual(json(contained(request.ownerRoot, owner.receipt), 1 << 20).admission.limits, limits, 'scenario owner admission differs');
-  assert.equal(report.scenarios.length, 6); for (const row of report.scenarios) verifyFreshPostcardFacts(row.facts, request.candidate, expectedExporter(request.exporter), request.layout, limits);
+  const owners = [{role: 'healthy-base', name: 'source-pack2-healthy-base'}, ...CASES.slice(2).flatMap(row => ['go', 'rust'].map(engine => ({role: row.id, engine, name: `source-pack2-${row.id}-${engine}`})))];
+  for (const [i, owner] of report.owners.entries()) {
+    const expected = owners[i], receipt = readFreshPostcardReceipt(request.ownerRoot, owner.receipt);
+    assert.equal(owner.role, expected.role, 'scenario owner role differs'); assert.equal(owner.engine, expected.engine, 'scenario owner engine differs');
+    assert.equal(receipt.schema, 'lycheedev.disk-owner.v1'); assert.equal(receipt.owner, expected.name, 'scenario owner identity differs'); assert.equal(receipt.category, 'scratch');
+    assert.deepEqual(receipt.admission.limits, limits, 'scenario owner admission differs');
+  }
+  assert.equal(report.scenarios.length, 6); for (const row of report.scenarios) verifyFreshPostcardFacts(row.facts, request.candidate, expectedExporter(request.exporter), request.layout, limits, request.ownerRoot);
   return true;
 }
 
@@ -250,7 +270,7 @@ function freshPostcardDiskPolicy(root, environment, allowance) {
 }
 export function validateFreshPostcardOwner(config, environment = process.env) {
   const limits = freshPostcardDiskPolicy(config.request.ownerRoot, environment, config.allowance);
-  const owner = json(join(config.evidence, 'receipt.json'), 1 << 20);
+  const owner = readFreshPostcardReceipt(config.request.ownerRoot, join(config.evidence, 'receipt.json'));
   assert.equal(owner.schema, 'lycheedev.disk-owner.v1'); assert.equal(owner.owner, 'source-postcard-fresh-diagnostics'); assert.equal(owner.state, 'active');
   assert.equal(resolve(config.scratch), join(config.request.ownerRoot, '.tmp/rust-scratch', owner.id)); assert.equal(resolve(owner.directory), resolve(config.scratch)); assert.equal(resolve(config.evidence), join(config.request.ownerRoot, '.tmp/rust-disk/evidence', owner.id));
   assert.deepEqual(owner.inputHashes.runner, config.inputs, 'fresh runner receipt differs');
@@ -297,7 +317,7 @@ export async function runPostcardFreshOwned(configuration, conditionsPath, {scra
     failure = error; report.error = error.message;
     if (error.handlesReaped === false) handlesReaped = false;
     if (error.toolchainEvidence) report.toolchainEvidence = error.toolchainEvidence;
-    if (error.buildEvidence) { report.buildEvidence = error.buildEvidence; try { if (json(error.buildEvidence, 1 << 20).handlesReaped !== true) handlesReaped = false; } catch { handlesReaped = false; } }
+    if (error.buildEvidence) { report.buildEvidence = error.buildEvidence; try { if (readFreshPostcardReceipt(root, error.buildEvidence).handlesReaped !== true) handlesReaped = false; } catch { handlesReaped = false; } }
   } finally {
     report.request = request; report.handlesReaped = handlesReaped; save(join(job.evidence, 'postcard-owned-report.json'), report);
     job.seal({state: handlesReaped ? state : 'interrupted', handlesReaped, logs: evidenceFiles(job.evidence)}); if (state === 'succeeded' && handlesReaped) job.cleanup();

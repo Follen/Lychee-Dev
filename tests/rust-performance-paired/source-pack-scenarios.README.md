@@ -560,3 +560,66 @@ The footprint model remains the conservative 00d-derived pack2 writing-format
 estimate, measured against the current healthy base. A candidate that changes
 that format/write behavior needs a reviewed estimate; this is not a generic
 resource bound for arbitrary future products.
+
+## Read-only fresh Postcard receipt-budget reverification
+
+The fresh Postcard runner reads disk-owner receipts with a fixed 16 MiB
+verification ceiling, matching the existing scenario-owner reader ceiling.
+This is not a new `rust-disk` format guarantee: its writer limits each sealed
+log to 16 MiB, while the receipt contains both `sealedLogs` and `logHashes`
+and grows with the number and lengths of those paths. The former fresh-only
+1 MiB receipt read rejected an otherwise complete changed Go owner. Receipts
+above 16 MiB, nonregular/reparse files, changed hashes or admission policies
+still fail. Errors identify the receipt and reader ceiling. The Postcard
+compiler/build owner verifier also receives this ceiling explicitly; its
+historical 2 MiB default, 2,048 flat-log count, 64 MiB total-log cap and all
+other native/config/document readers are unchanged. Product cache,
+Facts, Index, scratch, evidence-output and process budgets do not change.
+
+A completed sealed run with that specific final failure can be verified without
+rerunning products, exporters, builds, preparation or cleanup:
+
+```text
+node tests/rust-performance-paired/source-pack-scenarios-postcard-reverify.mjs REVERIFY.json
+```
+
+The caller supplies this exact configuration, using the original retained
+paths and independently recorded SHA-256 values (never guessed or copied from
+an unrelated run):
+
+```json
+{
+  "schema": "lycheedev.source-postcard-reverify-config.v1",
+  "ownerRoot": "ABSOLUTE_ORIGINAL_OWNER_ROOT",
+  "configuration": {"path": "ABSOLUTE_OUTER_EVIDENCE/fresh-configuration.json", "sha256": "ORIGINAL_CONFIGURATION_SHA256"},
+  "observation": {"path": "ABSOLUTE_OUTER_EVIDENCE/report.json", "sha256": "ORIGINAL_REPORT_SHA256"},
+  "ownedReport": {"path": "ABSOLUTE_OUTER_EVIDENCE/postcard-owned-report.json", "sha256": "ORIGINAL_OWNED_REPORT_SHA256"},
+  "outerReceipt": {"path": "ABSOLUTE_OUTER_EVIDENCE/receipt.json", "sha256": "ORIGINAL_OUTER_RECEIPT_SHA256"},
+  "originalRunnerSHA256": "SHA256_OF_UTF8_JSON_STRINGIFY_ORIGINAL_CONFIG_INPUTS"
+}
+```
+
+The original runner checkout must remain byte-identical to its sealed
+`config.inputs`; invoke the new verifier from a separate checked-out runner.
+Its source identity is recorded separately. This entry only accepts the
+original failed outer/controller state, the exact `Postcard regular file
+budget` blocker, six complete verified scenarios, twelve measured calls, a
+fully reaped failed base and eight retired changed owners, and at least one
+already-retired changed receipt above the former 1 MiB ceiling. The base's
+terminal receipt was written after the failed check, so its eventual size
+cannot establish the original overflow.
+
+It authenticates the complete recursive sealed log sets, original native
+request/start/root/receipt/wrapper/stdout/stderr records, exact scenario order
+and selection, native timings and profiles, fixed candidate/Go/exporter
+identities, and complete archived Facts/Index custody through the existing
+verifiers. Retired changed homes are not needed. Original files are rehashed
+before return. This is a read-only verification of retained evidence, not a
+general failure-recovery or sample-continuation entrypoint.
+
+A successful command emits a new `lycheedev.source-postcard-reverification.v1`
+JSON result on stdout. Preserve it as a new, separately identified result;
+do not overwrite, patch, reseal or relabel any original report/receipt. It
+records the original failed state and `finalIntegrityVerified: false`, the
+current verification result, and zero new product/exporter invocations. It
+does not grant a performance acceptance pass or additional repetitions.

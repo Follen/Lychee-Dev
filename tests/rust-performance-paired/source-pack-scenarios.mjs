@@ -463,7 +463,7 @@ function authenticateSealedOwner(root, directory, id, owner, state, expected, ha
   assert.deepEqual(evidenceFiles(directory).sort(), [...known].sort(), 'all prior evidence must be sealed');
   assert.deepEqual(receipt.logHashes, Object.fromEntries(receipt.sealedLogs.map(log => [relative(root, log.path), log.sha256]))); return receipt;
 }
-function authenticateRecordedCall(row, home, stem, runId, pin, inputs, project = undefined) {
+export function authenticateRecordedCall(row, home, stem, runId, pin, inputs, project = undefined) {
   assert.match(runId, /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
   const req = boundedJSON(stem + '.request.json'), proof = boundedJSON(stem + '.receipt.json'), wrapper = boundedJSON(stem + '.request.json.wrapper.json');
     assert.equal(row.home, home); assert.equal(row.exit, 0); assert.equal(row.valid, true); assert.equal(row.handlesReaped, true); assert(!row.error); assert.equal(req.schema, 'lycheedev.owned-request.v2'); assert.equal(req.runId, runId); assert.equal(req.command, row.binary); assert.equal(req.cwd, row.cwd); assert.equal(req.timeoutMs, 210000); assert.equal(req.orphanMs, 30000); assert.equal(req.cargoBuild, false); assert.equal(req.msvcCompile, false); assert(!req.startupDiagnostics);
@@ -932,6 +932,11 @@ export function verifyObservedReport(run, report, request, inputs, resumeCold = 
   if (resumeGo) { validateGoReference(resumeGo); assert.deepEqual(report.continuation?.reference, resumeGo); assert.equal(report.continuation.originalCallsReused, 5); assert.equal(report.continuation.freshColdCalls, 0); assert.equal(report.continuation.freshWarmCalls, 0); assert.equal(report.continuation.freshSingleGoCalls, 0); assert.equal(report.continuation.priorOuter, RETAINED_GO.outer); assert.equal(report.scenarios[2].go.proof.runId, RETAINED_GO.run); assert.equal(report.invocationAttempts.length, 7); assert(!report.invocationAttempts.some(row => row.caseId === 'single-content-change' && row.engine === 'go')); }
   else if (resumeRemaining) { validateRemainingReference(resumeRemaining); assert.deepEqual(report.continuation?.reference, resumeRemaining); assert.equal(report.continuation.originalCallsReused, 4); assert.equal(report.continuation.freshColdCalls, 0); assert.equal(report.continuation.freshWarmCalls, 0); assert.equal(report.continuation.priorOuter, RETAINED_WARM.outer); for (const engine of ['go', 'rust']) assert.equal(report.scenarios[0][engine].proof.runId, RETAINED_COLD[engine]); }
   else if (resumeCold) { validateColdReference(resumeCold); assert.deepEqual(report.continuation?.reference, resumeCold); assert.equal(report.continuation.originalCallsReused, 2); assert.equal(report.continuation.freshColdCalls, 0); assert.equal(report.scenarios[0].lineage.resumedOriginalCalls, true); assert.deepEqual(report.scenarios[0].lineage.reference, resumeCold); for (const engine of ['go', 'rust']) assert.equal(report.scenarios[0][engine].proof.runId, RETAINED_COLD[engine]); } else assert.equal(report.continuation, undefined);
+  return verifyScenarioObservations(report, request, {layout, resumeCold, resumeRemaining, resumeGo});
+}
+// Shared read-only checks; the normal observed-report entry still requires its
+// original successful controller state and process above.
+export function verifyScenarioObservations(report, request, {layout = 'v11-pack2', resumeCold, resumeRemaining, resumeGo} = {}) {
   assert.deepEqual(report.scenarios.map(row => row.id), CASES.map(row => row.id));
   const variantHomes = new Set();
   report.scenarios.forEach((row, i) => {

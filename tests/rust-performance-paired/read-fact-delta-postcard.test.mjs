@@ -8,7 +8,8 @@ import {sourceDigest, hashFile} from '../../tools/rust-build.mjs';
 import {splitIndexEvidence, PART_BYTES} from '../../tools/rust-source-pack-evidence.mjs';
 import {captureGoCustody, openGoCustody} from './source-pack-custody.mjs';
 import {comparePostcardFacts, validatePostcardRequest} from './source-pack-scenarios-postcard.mjs';
-import {POSTCARD_LAYOUT, EXPORT_TEST, EXPORT_ARGS, EXPORT_BUILD_ARGS, LIMITS, postcardFactKey, postcardFactPath, postcardIndexIdentity, verifyPostcardFrame, verifyPostcardExporter, preparePostcardExport, verifyPreparedPostcard, runPostcardExport, capturePostcardExport, verifyPostcardCustody, postcardExportSummary} from './read-fact-delta-postcard.mjs';
+import {verifyOwnerEvidence} from '../rust-parity/formal-lua-3.2.3/assertions.mjs';
+import {POSTCARD_OWNER_RECEIPT_BYTES, POSTCARD_LAYOUT, EXPORT_TEST, EXPORT_ARGS, EXPORT_BUILD_ARGS, LIMITS, postcardFactKey, postcardFactPath, postcardIndexIdentity, verifyPostcardFrame, verifyPostcardExporter, preparePostcardExport, verifyPreparedPostcard, runPostcardExport, capturePostcardExport, verifyPostcardCustody, postcardExportSummary} from './read-fact-delta-postcard.mjs';
 
 import {fixture, proof, put, putJSON, emptyFrame} from './read-fact-delta-postcard.fixtures.mjs';
 
@@ -85,4 +86,19 @@ test('explicit configuration and historical reader defaults cannot select v13 ac
   await assert.rejects(readFactDelta(f.goHome, f.home, f.records), /ENOENT/);
   await assert.rejects(readFactDelta(f.goHome, f.home, f.records, 'v11-pack2', f.index.path, f.index.sha256, undefined, {postcardExport: {}}), /Historical Facts layout/);
   assert.equal(LIMITS.total, 128 << 20); assert.equal(LIMITS.manifest, 8 << 20); assert.equal(PART_BYTES, 8 << 20);
+}));
+
+
+test('Postcard compiler and build owner receipts use the explicit 16 MiB ceiling while historical defaults stay 2 MiB', t => fixture(t, f => {
+  for (const receipt of [f.build.artifact.toolchain.receipt, f.build.artifact.buildEvidence]) {
+    fs.appendFileSync(receipt, ' '.repeat(2 << 20));
+    assert(fs.statSync(receipt).size > 2 << 20);
+    assert.throws(() => verifyOwnerEvidence(f.root, receipt), /formal-lua.invalid_file/);
+  }
+  f.build.artifact.toolchain.receiptSHA256 = hashFile(f.build.artifact.toolchain.receipt);
+  putJSON(f.build.expected.artifact, f.build.artifact); f.build.expected.artifactSHA256 = hashFile(f.build.expected.artifact);
+  assert.equal(verifyPostcardExporter(f.root, f.build.expected, f.build.candidate).buildReceiptSHA256, hashFile(f.build.artifact.buildEvidence));
+  fs.truncateSync(f.build.artifact.buildEvidence, POSTCARD_OWNER_RECEIPT_BYTES + 1);
+  assert.throws(() => verifyPostcardExporter(f.root, f.build.expected, f.build.candidate), /formal-lua.invalid_file/);
+  for (const receiptMaximumBytes of [0, -1, NaN, Infinity, 0.5, POSTCARD_OWNER_RECEIPT_BYTES + 1]) assert.throws(() => verifyOwnerEvidence(f.root, f.build.artifact.toolchain.receipt, undefined, {receiptMaximumBytes}), /owner_receipt_budget/);
 }));

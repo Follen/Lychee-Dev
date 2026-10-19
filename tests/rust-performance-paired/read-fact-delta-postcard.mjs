@@ -22,6 +22,8 @@ export const EXPORT_TEST = 'facts::binary::export_tests::export_binary_facts_man
 export const EXPORT_ARGS = Object.freeze(['--exact', EXPORT_TEST, '--ignored', '--nocapture']);
 export const EXPORT_BUILD_ARGS = Object.freeze(['test', '--locked', '--offline', '-j', '1', '-p', 'lycheedev-source', '--lib', '--no-run', '--message-format=json-render-diagnostics']);
 export const TOOLCHAIN_OWNER = 'source-postcard-exporter-toolchain';
+// Reader ceiling only: rust-disk does not impose a whole-receipt writer cap.
+export const POSTCARD_OWNER_RECEIPT_BYTES = 16 << 20;
 export const TOOLCHAIN_SCOPE = 'Owned rustc -Vv output and observed invoked binary; binary may be a rustup shim, not authentication of every compiler library or a Cargo version observation';
 export const LIMITS = Object.freeze({container: 32 << 20, manifest: 8 << 20, total: 128 << 20, custody: 512 << 20, documents: 100000, row: (32 << 20) + (1 << 20)});
 const sha = raw => createHash('sha256').update(raw).digest('hex');
@@ -71,7 +73,7 @@ export function verifyPostcardToolchain(root, artifact) {
   const ref = artifact.toolchain; exact(ref, ['record', 'recordSHA256', 'receipt', 'receiptSHA256'], 'authenticated exporter compiler observation required');
   digest(ref.recordSHA256); digest(ref.receiptSHA256);
   assert.equal(hashFile(contained(root, ref.record), 65536), ref.recordSHA256, 'compiler observation record changed');
-  const owner = verifyOwnerEvidence(root, ref.receipt, TOOLCHAIN_OWNER); assert.equal(owner.receiptSHA256, ref.receiptSHA256, 'compiler observation owner changed');
+  const owner = verifyOwnerEvidence(root, ref.receipt, TOOLCHAIN_OWNER, {receiptMaximumBytes: POSTCARD_OWNER_RECEIPT_BYTES}); assert.equal(owner.receiptSHA256, ref.receiptSHA256, 'compiler observation owner changed');
   assert.equal(ref.record, join(dirname(ref.receipt), 'toolchain.json')); const record = owner.json('toolchain.json');
   assert.equal(record.schema, 'lycheedev.source-postcard-toolchain.v1'); assert.equal(record.state, 'verified'); assert.equal(record.handlesReaped, true);
   assert.equal(record.sourceRoot, artifact.sourceRoot); assert.equal(record.sourceTreeSHA256, artifact.inputHashes.sourceTree);
@@ -139,7 +141,7 @@ export function verifyPostcardExporter(root, expected, candidate) {
   assert.equal(expected.sourceTreeSHA256, candidate.sourceTreeSHA256, 'exporter expected source differs');
   assert.equal(sourceDigest(candidate.sourceRoot), candidate.sourceTreeSHA256, 'exporter source changed');
   assert.deepEqual(artifact.command, ['cargo', ...EXPORT_BUILD_ARGS]);
-  const evidence = verifyOwnerEvidence(root, artifact.buildEvidence, 'source-postcard-exporter-build'), command = evidence.json('command.json');
+  const evidence = verifyOwnerEvidence(root, artifact.buildEvidence, 'source-postcard-exporter-build', {receiptMaximumBytes: POSTCARD_OWNER_RECEIPT_BYTES}), command = evidence.json('command.json');
   assert.deepEqual(evidence.receipt.command, artifact.command); assert.equal(command.command, 'cargo'); assert.deepEqual(command.args, EXPORT_BUILD_ARGS);
   assert.equal(command.cwd, candidate.sourceRoot); assert.equal(command.exit, 0); assert(!command.error && !command.signal); assert.equal(command.oneShot, true);
   assert.deepEqual(command.inputHashes, artifact.inputHashes); assert.deepEqual(evidence.receipt.inputHashes, artifact.inputHashes); assert.equal(command.environmentSHA256, artifact.environmentSHA256);

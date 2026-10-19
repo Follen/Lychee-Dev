@@ -175,8 +175,9 @@ export function runCases(plan, { execute, checkIdentity, now = Date.now, evidenc
 // Verify the complete sealed owner directory before trusting any artifact that
 // cites it. These two builders seal local logs only: foreign paths, omissions,
 // duplicate entries and extra unsealed evidence are all failures.
-export function verifyOwnerEvidence(repository, receiptPath, expectedOwner) {
-  const path = resolve(receiptPath), bytes = regular(path), receipt = JSON.parse(bytes);
+export function verifyOwnerEvidence(repository, receiptPath, expectedOwner, {receiptMaximumBytes = LIMITS.file} = {}) {
+  assert(Number.isSafeInteger(receiptMaximumBytes) && receiptMaximumBytes > 0 && receiptMaximumBytes <= 16 << 20, 'formal-lua.owner_receipt_budget');
+  const path = resolve(receiptPath), bytes = regular(path, receiptMaximumBytes), receipt = JSON.parse(bytes);
   assert.equal(receipt.schema, 'lycheedev.disk-owner.v1');
   assert(/^[a-f0-9-]{36}$/.test(receipt.id ?? ''), 'formal-lua.owner_id');
   const directory = join(resolve(repository), '.tmp/rust-disk/evidence', receipt.id);
