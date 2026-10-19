@@ -1,0 +1,31 @@
+{
+  "repository": "https://github.com/wowdev/WoWDBDefs",
+  "commit": "b9a63096cdd99b26967f17f9515377ae62cadfd7",
+  "scope": "Exact official metadata bytes; integration tables and data pin are synthetic. No real-client claim.",
+  "files": [
+    {
+      "path": "meta/enums/ChrModelID.dbde",
+      "fixture": "ChrModelID.dbde",
+      "bytes": 2298,
+      "sha256": "9f888cfef00ad8fca05d784de14dbd33c9f8e09bb0f4903eb3a8f510fbe734b6"
+    },
+    {
+      "path": "meta/enums/GarrTalentSocketType.dbde",
+      "fixture": "GarrTalentSocketType.dbde",
+      "bytes": 34,
+      "sha256": "fee726e750ec1bbaa36c65d8ac5fe114abe71b1cfc9f2cd69338922e1a09054c"
+    },
+    {
+      "path": "meta/enums/WeatherType.dbde",
+      "fixture": "WeatherType.dbde",
+      "bytes": 612,
+      "sha256": "9360f43b8b71a86a7d1ac47e949af8c703a8a2d0d2196e69f6176e9230376b35"
+    },
+    {
+      "path": "meta/flags/RaceMask0.dbdf",
+      "fixture": "RaceMask0.dbdf",
+      "bytes": 616,
+      "sha256": "9217cb6e1677101cdfca646f53ed63acc24c5e42dcf3adb2678e2e28ecfaa0f5"
+    }
+  ]
+}
