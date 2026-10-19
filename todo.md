@@ -1,5 +1,7 @@
 - [x] Fixed f811 Data projection: check and71 targeted Rust tests passed, including16 new tests once; no full-workspace or performance acceptance claim.
 
+- [ ] 复验8c9真实E0425最小后继：SymbolHashWriter恢复原write/flush；先all-targets再原未运行Core/Data/Source/CLI队列及8个SYM身份oracle。8c9旧失败与unknown-aux forced保持，不能算已通过。
+
 - [x] 保存首批8c9 Core配置/真实Arrow prepare/Source Postcard及独立复审；37文件+1删除逐字节核验。Windows与性能仍待。
 - [x] 实现Live私有SessionOwner并独立复审六个真实service回归；测试模型prepare阻断已修，未运行。
 - [ ] 以固定后继SHA验证Live SessionOwner六新增及完整连接/恢复回归；保旧结果，不将模型/静态通过当游戏或性能验收。

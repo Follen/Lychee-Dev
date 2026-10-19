@@ -1,5 +1,9 @@
 # Rust 迁移交接：唯一当前事实来源
 
+### 首批编译阻断与最小修复（2026-10-19）
+
+固定8c9官方依赖fetch成功且lock未变；offline all-targets实际E0425：Postcard替换删除旧FactsHashWriter时遗漏SymbolIdentity真实复用，后续11测试组均NOT_RUN。两个owner已回收，无deadline；失败目标存在未认定正常辅助进程的forced收尾，原失败状态保留。本后继只恢复原同语义SHA Write适配器并命名SymbolHashWriter，公开SYM输入/输出、完整历史oracle与8个身份回归均不改。独立静态核验确认write/flush原字节逻辑相同；编译及运行修复尚未验证，不将首批改标通过。Live5c60已保存仍待独立队列；Skill工具接线继续，不夹本小修。
+
 ### Live SessionOwner 后继：已独审、待运行（2026-10-19）
 
 Core/Data/Source首批已保存为`8c9a1bccd543b8e7d605d1f791a34f7d3aa713f8`，37文件和1删除已逐字节核验，Windows正确性尚待根队列。当前独立Live五文件将同步Driver所需的journal-only/native-attached资源归属集中为私有SessionOwner，统一native先于journal的checked close、fallback drop和lease成功关闭后的claim退役。Mailbox v1、durable intent、线程边界、Unknown结果及原deadline/不重放合同均不变；未引入runtime、线程或依赖。

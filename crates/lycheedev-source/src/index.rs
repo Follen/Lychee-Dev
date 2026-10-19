@@ -261,6 +261,17 @@ pub fn stable_id(pin: &SourcePin, s: &Symbol) -> String {
 /// Reuse only SHA state, never a result or an unauthenticated source identity.
 /// The public helper above still derives the prefix from its own Symbol path.
 struct SymbolIdentity(sha2::Sha256);
+struct SymbolHashWriter<'a>(&'a mut sha2::Sha256);
+impl std::io::Write for SymbolHashWriter<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        use sha2::Digest;
+        self.0.update(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 impl SymbolIdentity {
     fn for_document(pin: &SourcePin, path: &str) -> Self {
         use sha2::Digest;
@@ -278,7 +289,7 @@ impl SymbolIdentity {
         // Same Display decimal coordinates and exact string bytes as the old
         // complete format! input, without allocating that intermediate String.
         write!(
-            FactsHashWriter(&mut hash),
+            SymbolHashWriter(&mut hash),
             "{}\0{}\0{}\0{}\0{}\0{}",
             symbol.line,
             symbol.end_line,
