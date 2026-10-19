@@ -34,11 +34,11 @@
 - [ ] Lookup/投影/过滤/batch与复杂SQL共享执行/证据，Agent调用和token收益以真实任务证明。
 
 ## C. Source认证、按需消费与binary cache
-- [x] 子树scratch与移除旧JSON缓存计数遍历两片在0bca实际check通过；Source730+inspect15+flow4+真实luac1=750通过/0失败/6忽略，13新增/调整名称及1细化各一次；原binary/owned/输出额度保留。86f匹配产品和性能重测仍待终态。
+- [x] 子树scratch与移除旧JSON缓存计数遍历两片在0bca实际check通过；Source730+inspect15+flow4+真实luac1=750通过/0失败/6忽略，13新增/调整名称及1细化各一次；原binary/owned/输出额度保留。86f匹配产品及六场景完整性全部实际通过；六项耗时比仍>0.30，继续定位剩余串行及增量聚合。
 - [ ] 完成当前Facts Postcard正确性和匹配性能；旧cache失效重建，新损坏不得fallback成健康。
 - [x] 整合已独审Index r2与正式v13-postcard-index18诊断；固定Go323来源已核；070f七Node为357通过/0失败/4权限skip。
 - [x] 旧validate fixture在19e闭合；0bca完整Source库730通过，6个lib ignored仍单列，真实luac精确用例实际通过。
-- [ ] 2d新Index六场景已实际执行，666新增只读复核已闭合封存完整性；原失败记录保留，六项耗时比仍均>0.30。后续改动保持完整认证与公共输出，首次导入/query成本不移到未测命令。
+- [ ] 86f六场景完整Facts/Index/summary/custody及finalIntegrity全部通过；六项耗时比仍>0.30，未达正式70%门禁。2d原最终失败、666新增只读复核保留；后续改动保持完整认证与公共输出，首次导入/query成本不移到未测命令。
 
 ## D. Live内部资源归属
 - [x] 8bfe SessionOwner六新增逐名一次、connection61/durable36实际通过；真实客户端仍未验。
