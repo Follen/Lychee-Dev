@@ -1,5 +1,14 @@
 # Rust 迁移交接：唯一当前事实来源
 
+### 当前授权实施计划与质量基线（2026-10-19 10:41 UTC）
+
+当前结果质量基线为 f811fc7f75fc206158cecb01dd0eb5d39e88b35f：check和71项针对性Rust回归全部通过，16新增各一次，8owner回收，无deadline；不是全仓或性能验收。旧“等待验证”段落为此前状态，以下最新事实优先。
+
+用户批准整仓低耦合架构实施、Data默认5GB（十进制5,000,000,000B）可配置、按需缓存与内容去重、冷数据淘汰保护活跃lease/证据；适合时引入DataFusion。分批计划见DESIGN.md的Authorized architecture implementation plan：先Core/home/config/disk ownership，再Data generation/统一执行、Source成熟binary缓存、Live会话owner及独立Skill/CLI发现精简。Core首片尚未全接旧Data磁盘路径，不能称总5GB硬限已完成。Source旧JSON-v12及兼容迁移候选未发布且暂停，保全字节，不夹入新批。
+
+Source/Data业务结果只能保持或更优，独立任务oracle覆盖准确、完整、顺序可读性、partial和证据；实现门禁及同工作量Rust<=Go30%性能门禁通过后才开始五项正式循环。必要开发独审/回归不计最终循环。所有新片当前实施中，未测试；本机仅根协调派发，不启动游戏/守护进程。Skill产品定义保留，实机尾部不改。
+
+
 更新：2026-10-19 10:20 UTC。最近已匹配性能测量的生产为 `d4271ae430ac2a80087af81c70eea960d547acbb`，分支 `rust-refactor`、草稿 PR #14。下列为非敏感结果摘要；本机原始日志未随文档发布。当前按业务等价、性能验收、五项正式循环审计的顺序推进；历史预审和完整性能验收仍不能冒称完成。
 
 ### Data 结构性投影已实现，等待固定版本正确性验证

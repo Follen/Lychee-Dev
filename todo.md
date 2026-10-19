@@ -1,4 +1,14 @@
-- [ ] Verify the isolated compiled Data projection: five source/test files,16 new Rust regressions, independent source review completed; compilation/runtime/performance NOT_RUN. Complete row decode and original resource/error contracts remain. Source binary-cache selection is assessment-only and is not part of this batch.
+- [x] Fixed f811 Data projection: check and71 targeted Rust tests passed, including16 new tests once; no full-workspace or performance acceptance claim.
+
+
+## 当前授权架构执行批（2026-10-19）
+- [x] 固定f811结果质量基线：check及71针对性测试全过，16新逐名一次；不是全仓/性能通过。
+- [ ] A：统一home/config与Data默认5,000,000,000B，完成所有权/峰值准入基础；逐项标明旧下载/共享blob/证据未接线缺口。
+- [ ] B：按需immutable generation、单一typed持久表示、ID索引；验证Arrow/DataFusion适配，合适后收敛同一执行内核。
+- [ ] C：成熟binary Source codec、认证和构造限额；旧格式失效重建，公共结果质量不退步，Emmy零补丁。
+- [ ] D：Live SessionOwner和验证状态/存储端口；Mailbox不变、持久intent和unknown恢复保留。
+- [ ] E：Skill大精简与真实CLI自描述，独立Agent任务前后质量比较，产品定义不变。
+- [ ] F：实现/质量门禁，再正式<=Go30%性能门禁，之后才启动五项正式循环；旧预审不冒完成。
 - [x] Fixed145 correctness: all-targets and265pass/0fail/2existing ignores,15new once; no standalone release or performance claim.
 - [x] Fixed145 correctness verified for the preceding narrow performance batch: exact Source symbol-ID bytes with document-local SHA prefix reuse, non-DISTINCT SQL outer-Vec ownership reuse and fixed image-channel plan. Preserve independent old-implementation oracles, logical charges, errors/cancellation and all business results. Targeted runtime verification passed as recorded above; performance acceptance remains open; no duplicated hashjoin/top-k or previous cache changes.
 - [ ] Current order (user clarification2026-10-19): close business equivalence while retaining approved evidence-backed enhancements, then optimize/accept performance, then conduct the five formal audit loops. Existing Stage1/Stage2 work is preliminary evidence, not final-loop completion. Pause further coverage-tool expansion; finish only the already-running f86 validation.
