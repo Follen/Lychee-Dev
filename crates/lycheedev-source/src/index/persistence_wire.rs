@@ -7,6 +7,7 @@ use super::{
     cache_projection::{CollectionLength, Counted},
     facts_cache::Locator,
     model::{DiagnosticSample, Samples},
+    symbol_projection::{BuiltSymbols, SymbolsWire},
 };
 use lycheedev_core::{
     Result, ToolkitError, control::OperationControl, evidence::BlobRef, selection::valid_digest,
@@ -780,8 +781,8 @@ pub(crate) fn own_symbols<'a>(
     converted.map_err(|_| invalid("Invalid selected Source symbol"))
 }
 
-struct IndexWire<'a>(&'a Index, bool);
-impl Serialize for IndexWire<'_> {
+struct IndexWire<'a, S>(&'a Index<Vec<Document>, Vec<AssetRecord>, S>, bool);
+impl<C: BuiltSymbols> Serialize for IndexWire<'_, C> {
     fn serialize<S: serde::Serializer>(
         &self,
         serializer: S,
@@ -799,7 +800,11 @@ impl Serialize for IndexWire<'_> {
         fields.serialize_element(&DocumentsWire(documents))?;
         fields.serialize_element(assets)?;
         if !self.1 {
-            fields.serialize_element(&SymbolsWire(symbols))?;
+            fields.serialize_element(&SymbolsWire {
+                rows: symbols,
+                documents,
+                summary,
+            })?;
         }
         fields.serialize_element(compatibility_gaps)?;
         fields.end()
@@ -867,17 +872,8 @@ impl Serialize for DigestWire<'_> {
         serializer.serialize_str(std::str::from_utf8(&encoded).expect("hex ASCII"))
     }
 }
-struct SymbolsWire<'a>(&'a [Symbol]);
-impl Serialize for SymbolsWire<'_> {
-    fn serialize<S: serde::Serializer>(
-        &self,
-        serializer: S,
-    ) -> std::result::Result<S::Ok, S::Error> {
-        serializer.collect_seq(self.0.iter().map(SymbolWire))
-    }
-}
-struct SymbolWire<'a>(&'a Symbol);
-impl Serialize for SymbolWire<'_> {
+pub(super) struct SymbolWire<'a, T = String>(pub &'a Symbol<T>);
+impl<T: AsRef<str>> Serialize for SymbolWire<'_, T> {
     fn serialize<S: serde::Serializer>(
         &self,
         serializer: S,
@@ -897,17 +893,17 @@ impl Serialize for SymbolWire<'_> {
             ordinal,
         } = self.0;
         (
-            id,
-            kind,
-            name,
-            target,
-            category,
-            confidence,
-            path,
+            id.as_ref(),
+            kind.as_ref(),
+            name.as_ref(),
+            target.as_ref(),
+            category.as_ref(),
+            confidence.as_ref(),
+            path.as_ref(),
             *line as u64,
             *end_line as u64,
-            signature,
-            scope,
+            signature.as_ref(),
+            scope.as_ref(),
             *ordinal as u64,
         )
             .serialize(serializer)
@@ -960,13 +956,19 @@ impl postcard::ser_flavors::Flavor for Output<'_> {
             self.raw.extend_from_slice(bytes);
             self.since_check += bytes.len();
         }
+        #[cfg(test)]
+        super::symbol_projection::observe_output_capacity(self.raw.capacity());
         Ok(())
     }
     fn finalize(self) -> postcard::Result<Vec<u8>> {
         Ok(self.raw)
     }
 }
-pub(super) fn encode(index: &Index, identity: &str, control: &OperationControl) -> Result<Vec<u8>> {
+pub(super) fn encode<S: BuiltSymbols>(
+    index: &Index<Vec<Document>, Vec<AssetRecord>, S>,
+    identity: &str,
+    control: &OperationControl,
+) -> Result<Vec<u8>> {
     encode_mode(index, identity, control, false)
 }
 pub(crate) fn encode_metadata(
@@ -976,8 +978,8 @@ pub(crate) fn encode_metadata(
 ) -> Result<Vec<u8>> {
     encode_mode(index, identity, control, true)
 }
-fn encode_mode(
-    index: &Index,
+fn encode_mode<S: BuiltSymbols>(
+    index: &Index<Vec<Document>, Vec<AssetRecord>, S>,
     identity: &str,
     control: &OperationControl,
     metadata: bool,

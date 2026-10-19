@@ -24,6 +24,8 @@
 
 已完成的DBCD四项修复保留：WDC5 palette物理顺序、多词metadata、官方BUILD预设、非SQL实际读取限制传播。c571与9004分批合计113 distinct通过、3原ignore；旧红例及四个admission测试失败保留，不能将小fixture称作真实>256MiB表验证。产品定义未改变，完整产品矩阵仍待。
 
+Source 后继借用 Symbol 投影片已实现并完成源码独审：summary 重建与完整查询复用同一四来源映射，完整 Index 字节、SYM 身份及查询 owned 结果保持；summary 不再保留全仓第二份 owned Symbol 字符串。10 项新增 Rust 回归尚未运行，精确完整组合树的云端九套 Node 382/382 通过；首轮因副本缺少历史 Git oracle 为380通过/2失败，补齐既有只读历史后完成复验。此片不改变 warm 读取；ID/hash工作移入 IndexSerialize，不能把 Symbols 桶下降算作全部收益，需固定产物后比较总 wall。128MiB输出容量与原owned预算保持，单个临时ID与输出buffer同时存活；没有RSS改善实测。
+
 ## 3. Home、容量和所有权边界
 
 Data默认容量为**5,000,000,000字节（十进制5GB）**，配置支持明确单位；与测试scratch 5/6GiB不同。最终统一核算Data下载/共享blob归属、物化/索引/目录、staging/spill/导出峰值和证据占用，按内容去重防双计。活跃lease和证据引用保护；旧已超额或配置缩小先拒新增并说明，不删除证据。

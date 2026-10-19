@@ -40,6 +40,8 @@
 - [x] 旧validate fixture在19e闭合；0bca完整Source库730通过，6个lib ignored仍单列，真实luac精确用例实际通过。
 - [ ] 86f六场景完整Facts/Index/summary/custody及finalIntegrity全部通过；六项耗时比仍>0.30，未达正式70%门禁。2d原最终失败、666新增只读复核保留；后续改动保持完整认证与公共输出，首次导入/query成本不移到未测命令。
 
+- [ ] 借用 Symbol 后继：共享四来源映射、完整旧wire字节oracle、取消无主manifest/CAP与坏record修复回归已备10项；Rust尚未运行。精确完整组合树九套Node382/382通过，0失败/skip。固定产物总wall待测，Symbols工作转入IndexSerialize不得当独占收益；warm无此片收益。
+
 ## D. Live内部资源归属
 - [x] 8bfe SessionOwner六新增逐名一次、connection61/durable36实际通过；真实客户端仍未验。
 - [ ] 后续仅有证据的会话/调度/重复工作优化，保Mailbox v1、切角色身份、durable intent和Unknown不重放；不合并fsync弱化恢复。

@@ -26,6 +26,12 @@ impl<T> Default for Counted<T> {
     }
 }
 impl<T> Counted<T> {
+    pub(super) fn from_count(count: usize) -> Self {
+        Self {
+            count,
+            element: PhantomData,
+        }
+    }
     pub(super) fn increment(&mut self) {
         self.count += 1;
     }

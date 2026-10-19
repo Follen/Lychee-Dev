@@ -14,6 +14,7 @@ pub use model::{AssetRecord, SourceSummary};
 #[cfg(test)]
 pub(crate) use original_cache::take_read_observations;
 mod profile;
+mod symbol_projection;
 use crate::{
     facts::{self, Facts},
     git,
@@ -32,6 +33,7 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
 };
+use symbol_projection::{BuiltSymbols, RebuildSymbols};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(
     rename_all = "camelCase",
@@ -295,15 +297,18 @@ impl std::io::Write for SymbolHashWriter<'_> {
 }
 impl SymbolIdentity {
     fn for_document(pin: &SourcePin, path: &str) -> Self {
+        Self::for_fields(&pin.repository, &pin.exact_commit, path)
+    }
+    fn for_fields(repository: &str, commit: &str, path: &str) -> Self {
         use sha2::Digest;
         let mut hash = sha2::Sha256::new();
-        for field in [pin.repository.as_str(), pin.exact_commit.as_str(), path] {
+        for field in [repository, commit, path] {
             hash.update(field.as_bytes());
             hash.update(b"\0");
         }
         Self(hash)
     }
-    fn stable_id(&self, symbol: &Symbol) -> String {
+    fn stable_id<T: AsRef<str>>(&self, symbol: &Symbol<T>) -> String {
         use sha2::Digest;
         use std::io::Write;
         let mut hash = self.0.clone();
@@ -314,9 +319,9 @@ impl SymbolIdentity {
             "{}\0{}\0{}\0{}\0{}\0{}",
             symbol.line,
             symbol.end_line,
-            symbol.name,
-            symbol.category,
-            symbol.scope,
+            symbol.name.as_ref(),
+            symbol.category.as_ref(),
+            symbol.scope.as_ref(),
             symbol.ordinal
         )
         .expect("SHA-256 writer accepts every formatted byte");
@@ -423,7 +428,7 @@ fn build_material_projected_with_control<D, A, S>(
 where
     D: persistence_wire::Collection<Document>,
     A: persistence_wire::Collection<AssetRecord>,
-    S: persistence_wire::Collection<Symbol>,
+    S: RebuildSymbols,
 {
     let profile = Profile::new();
     let metadata_phase = profile.span(Phase::Metadata);
@@ -507,7 +512,7 @@ where
     )?;
     drop(lock_phase);
     let result = (|| {
-        let map = build_uncached_profiled(home, pin, control, &profile)?;
+        let map = build_uncached_projected::<S::Built>(home, pin, control, &profile)?;
         let serialize_phase = profile.span(Phase::IndexSerialize);
         let raw = persistence_wire::encode(&map, &identity, control)?;
         drop(serialize_phase);
@@ -534,7 +539,7 @@ where
         Index {
             documents: map.documents.into(),
             assets: map.assets.into(),
-            symbols: map.symbols.into(),
+            symbols: S::finish_built(map.symbols),
             summary: map.summary,
             compatibility_gaps: map.compatibility_gaps,
             home: map.home,
@@ -715,12 +720,21 @@ fn build_uncached(
 ) -> Result<Index> {
     build_uncached_profiled(home, pin, control, &Profile::new())
 }
+#[cfg(test)]
 fn build_uncached_profiled(
     home: &Path,
     pin: &SourcePin,
     control: &lycheedev_core::control::OperationControl,
     profile: &Profile,
 ) -> Result<Index> {
+    build_uncached_projected(home, pin, control, profile)
+}
+fn build_uncached_projected<S: BuiltSymbols>(
+    home: &Path,
+    pin: &SourcePin,
+    control: &lycheedev_core::control::OperationControl,
+    profile: &Profile,
+) -> Result<Index<Vec<Document>, Vec<AssetRecord>, S>> {
     let started = std::time::Instant::now();
     let tree_phase = profile.span(Phase::GitTree);
     let files = git::tree_with_control(home, pin, control)?;
@@ -729,7 +743,7 @@ fn build_uncached_profiled(
     let result = build_uncached_cached(home, pin, control, profile, &files, started, &cache_owner);
     cache_owner.finish(result, control)
 }
-fn build_uncached_cached(
+fn build_uncached_cached<S: BuiltSymbols>(
     home: &Path,
     pin: &SourcePin,
     control: &lycheedev_core::control::OperationControl,
@@ -737,13 +751,13 @@ fn build_uncached_cached(
     files: &[git::TreeFile],
     started: std::time::Instant,
     cache_owner: &lycheedev_core::cache::SourceFactsCache,
-) -> Result<Index> {
+) -> Result<Index<Vec<Document>, Vec<AssetRecord>, S>> {
     let deadline = control.deadline();
     let (mut cached, mut parsed_documents, mut read_bytes) = (0usize, 0usize, 0usize);
     let mut index = Index {
         documents: vec![],
         assets: vec![],
-        symbols: vec![],
+        symbols: S::default(),
         summary: SourceSummary::empty(pin),
         compatibility_gaps: BTreeSet::new(),
         home: home.into(),
@@ -837,76 +851,8 @@ fn build_uncached_cached(
                 parsed_documents += 1;
             }
             let _symbols_phase = profile.span(Phase::Symbols);
-            if !facts.declarations.is_empty() {
-                let identity = SymbolIdentity::for_document(pin, &file.path);
-                for (ordinal, d) in facts.declarations.iter().enumerate() {
-                    let mut s = Symbol {
-                        id: String::new(),
-                        kind: "declaration".into(),
-                        name: d.name.clone(),
-                        target: String::new(),
-                        category: d.category.clone(),
-                        confidence: "exact".into(),
-                        path: file.path.clone(),
-                        line: d.line,
-                        end_line: d.end_line,
-                        signature: d.signature.clone(),
-                        scope: d.scope.clone(),
-                        ordinal,
-                    };
-                    s.id = identity.stable_id(&s);
-                    index.symbols.push(s);
-                }
-            }
-            for r in &facts.relationships {
-                relationships += 1;
-                index.symbols.push(Symbol {
-                    id: String::new(),
-                    kind: "relationship".into(),
-                    name: r.from.clone(),
-                    target: r.to.clone(),
-                    category: r.category.clone(),
-                    confidence: r.confidence.clone(),
-                    path: file.path.clone(),
-                    line: r.line,
-                    end_line: r.line,
-                    signature: String::new(),
-                    scope: String::new(),
-                    ordinal: 0,
-                });
-            }
-            for load in &facts.loads {
-                index.symbols.push(Symbol {
-                    id: String::new(),
-                    kind: "load".into(),
-                    name: file.path.clone(),
-                    target: load.path.clone(),
-                    category: load.kind.clone(),
-                    confidence: "exact".into(),
-                    path: file.path.clone(),
-                    line: load.line,
-                    end_line: load.line,
-                    signature: String::new(),
-                    scope: String::new(),
-                    ordinal: 0,
-                });
-            }
-            for h in &facts.headers {
-                index.symbols.push(Symbol {
-                    id: String::new(),
-                    kind: "header".into(),
-                    name: h.key.clone(),
-                    target: h.value.clone(),
-                    category: "toc-field".into(),
-                    confidence: "exact".into(),
-                    path: file.path.clone(),
-                    line: h.line,
-                    end_line: h.line,
-                    signature: String::new(),
-                    scope: String::new(),
-                    ordinal: 0,
-                });
-            }
+            index.symbols.document(pin, &file.path, &facts)?;
+            relationships += facts.relationships.len();
             for n in &facts.diagnostics {
                 diagnostics.push(model::DiagnosticSample {
                     path: file.path.clone(),
@@ -953,10 +899,10 @@ fn build_uncached_cached(
     index.summary.ast_files = ast_files;
     index.summary.skipped_documents = skipped;
     index.summary.declarations = index
-        .symbols
+        .documents
         .iter()
-        .filter(|s| s.kind == "declaration")
-        .count();
+        .map(|document| document.facts.declarations.len())
+        .sum();
     index.summary.relationships = relationships;
     index.summary.assets = index.assets.len();
     index.summary.diagnostics = diagnostics.len();
