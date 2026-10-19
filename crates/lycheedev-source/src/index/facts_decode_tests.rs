@@ -385,8 +385,8 @@ fn binary_identity_rebuilds_published_v11_facts_and_index_without_migration() {
             serde_json::to_vec(&historical_facts(&expected.facts, &expected.sha256)).unwrap()
         );
     }
-    let clean_summary = |value: &Value| {
-        let mut value = value.clone();
+    let clean_summary = |value: &SourceSummary| {
+        let mut value = serde_json::to_value(value).unwrap();
         value.as_object_mut().unwrap().remove("io");
         value
     };

@@ -123,7 +123,7 @@ fn exercise(correct_key: bool) {
         b"range"
     );
     let paths = workspace::data_disk::DataCachePaths::new(&f.0);
-    assert_eq!(fs::read_dir(paths.staging).unwrap().count(), 0);
+    assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 0);
     let completed = fs::read_dir(paths.shared_blobs())
         .unwrap()
         .filter(|entry| {

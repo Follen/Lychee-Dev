@@ -17,9 +17,9 @@ test('frozen Rust empty Postcard golden authenticates framing; no Node schema de
   for (const offset of [0, 8, 12, 44, 76]) { const bad = Buffer.from(raw); bad[offset] ^= 1; assert.throws(() => verifyPostcardFrame(bad, input)); }
   assert.throws(() => verifyPostcardFrame(Buffer.concat([raw, Buffer.from([0])]), input));
 });
-test('explicit v13 identity matches the current Rust key, pack domain and v17 index', () => {
+test('explicit v13 identity matches the current Rust key, pack domain and v18 index', () => {
   const source = fs.readFileSync(new URL('../../crates/lycheedev-source/src/index.rs', import.meta.url), 'utf8');
-  assert.match(source, /rust-index-v17\\0assets-v2-go323-metadata\\0facts-pack-v2-path-radix512\\0facts-layout-v13-postcard-1\.1\.3/);
+  assert.match(source, /rust-index-v18\\0assets-v2-go323-metadata\\0facts-pack-v2-path-radix512\\0facts-layout-v13-postcard-1\.1\.3/);
   const key = /fn facts_cache_key[\s\S]*?"([^"\n]+)"/.exec(source)?.[1], doc = {path: 'A.lua', sha256: sha256('source')};
   assert.equal(sha256(key.replaceAll('\\0', '\0').replace('{path}', doc.path).replace('{sha256}', doc.sha256)), postcardFactKey(doc));
   const pack = fs.readFileSync(new URL('../../crates/lycheedev-source/src/index/facts_cache.rs', import.meta.url), 'utf8'); assert.match(pack, /facts-pack-v2-path-radix512\\0facts-layout-v13-postcard-1\.1\.3/);

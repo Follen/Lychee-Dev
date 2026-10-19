@@ -719,12 +719,13 @@ fn decode_with_owned<D: Collection<Document>, A: Collection<AssetRecord>, S: Col
                 .unwrap_or_else(|| invalid("Invalid Source binary index payload")));
         }
     };
-    let remainder = decoder.finalize();
+    // Consume the borrowed remainder before extracting the recorded failure.
+    let remainder_is_empty = matches!(decoder.finalize(), Ok([]));
     let remaining = ctx.remaining;
     if let Some(error) = failure.into_inner() {
         return Err(error);
     }
-    if !matches!(remainder, Ok([])) {
+    if !remainder_is_empty {
         return Err(invalid("Source binary index has trailing bytes"));
     }
     check_control(control)?;

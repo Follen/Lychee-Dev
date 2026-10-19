@@ -10,7 +10,11 @@
 - [x] 740a已保存Source Postcard正式证据工具并10文件读回；七Node套件382/382已过。
 - [ ] Rust exporter与完整六场景实际验证。
 - [x] 保存并静态独审DataFusion54可选资格片14项；默认依赖图隔离已核。
-- [ ] 执行DataFusion资格片14项；获取官方锁定依赖，保持默认构建不引入DF。资格尚未过，不切生产执行器。
+- [x] 278官方fetch84包锁定不变，默认/DF feature check通过，14项资格实际全部通过；不等于真实provider、完整任务或性能通过。
+
+- [ ] 修复2808四处实际编译错误及一个Node当前源码版本断言，再固定复验；11 Rust组尚未执行，Node356通过/1失败/4权限skip保留。
+- [x] 最小修组合树七Node套件361/361实际通过；原隔离361/361仅旧v17 base证据，今后必须最终完整树重新跑并记录sourceTree。
+- [ ] validate_contract_real须显式跑已认证luac的ignored真实用例，不以零测试作通过。
 
 ## A. Home、配置与全Data容量
 - [x] 实现decimal5GB可配置基础、派生目录与至少真实cache prepare消费者；初批运行验证未闭。
