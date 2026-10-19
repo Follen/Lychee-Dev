@@ -2,6 +2,8 @@ mod cache_projection;
 mod facts_cache;
 #[cfg(test)]
 mod facts_decode_tests;
+#[cfg(test)]
+mod facts_encode_tests;
 mod facts_pipeline;
 mod original_cache;
 mod persistence_wire;
@@ -619,9 +621,11 @@ fn encode_facts(parsed: &Facts, sha256: &str, profile: Option<&Profile>) -> Resu
     const MAX_FACT_CACHE_BYTES: usize = 32 << 20;
     let serialize_phase = profile.map(|p| p.span(Phase::FactsSerialize));
     let f = serde_json::to_value(parsed)?;
-    let envelope = serde_json::to_vec(
-        &json!({"schema":"lycheedev.source-facts.rust.v11","inputSHA256":sha256,"factsSHA256":storage::sha256(&serde_json::to_vec(&f)?),"facts":f}),
-    )?;
+    let mut envelope = json!({"schema":"lycheedev.source-facts.rust.v11","inputSHA256":sha256,"factsSHA256":canonical_facts_sha256(&f)?,"facts":null});
+    // json!(f) would serialize the already-owned Value into another full DOM.
+    // Keep the same envelope and final byte serializer, moving that subtree.
+    envelope["facts"] = f;
+    let envelope = serde_json::to_vec(&envelope)?;
     if envelope.len() > MAX_FACT_CACHE_BYTES {
         return Err(ToolkitError::new(
             "codebase.fact_budget",
