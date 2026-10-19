@@ -1,5 +1,15 @@
 # Rust 迁移交接：唯一当前事实来源
 
+### 首个架构实现批：配置/真实 Data prepare/Source binary（2026-10-19）
+
+本批代码已完成独立静态复审，尚未编译、运行或性能测量。Core新增`dataCache.maxBytes`，默认十进制5,000,000,000B；保旧公开配置字段/错误行为。真实`data cache prepare <Table>`通过原workspace准入与相同Budget，逐批Arrow IPC写入、源身份复核、CAS对象和generation发布，再checked close；晚失败保留已发表事实。最终physical Arrow schema的原生IPC message摘要与representation/derivation版本一起进入generation身份。
+
+这只是全量计划的首个可执行片：新派生目录计量与同时存活副本准入已接真实消费者；旧下载/共享blob/数据库/证据归属未接齐，`totalDataCoverageComplete=false`。计量为文件逻辑长度，非簇分配或RSS。无自动淘汰/原数据迁移删除。重复prepare目前仍重新解码和编码后认证CAS去重，不能称读取命中已省计算；IPC硬上限和双副本峰值预留偏保守，紧配置可能在小表实际写入前拒绝。DataFusion、认证generation复用、全Data总额与保护性淘汰均列后继。
+
+Source私有Facts改为成熟Postcard1.1.3和共享字段定义，v13缓存/rust-index-v17使旧缓存失效重建，不维护旧格式迁移。public JSON和Index动态表示不改；完整长度/SHA/剩余字节/构造准入与取消继续验证。编码和解码均保原32MiB逻辑JSON上限的额外计数遍历，不宣称消除所有转换成本。私有test exporter复用相同codec；新格式性能比较工具另片接线，旧v11报告不重标。
+
+正式测试声明：Core37新增（focused40含原3），Data generation15，Source23受影响active和1显式ignored exporter，CLI新增命令准入回归及原完整清单断言。Source23包含移植/替换旧格式测试，不能全部算新增。独审发现并修复Postcard测试API、二进制展开逻辑上限、磁盘收尾/预算观察点及Arrow schema身份问题；静态复审不是Windows通过。CLI三处过期LuaLS引擎说明按实际native Source/Emmy路径纠正。所有产品定义、Mailbox协议与Emmy零补丁保持；此前f81171通过只属于原基线。
+
 ### 当前授权实施计划与质量基线（2026-10-19 10:41 UTC）
 
 当前结果质量基线为 f811fc7f75fc206158cecb01dd0eb5d39e88b35f：check和71项针对性Rust回归全部通过，16新增各一次，8owner回收，无deadline；不是全仓或性能验收。旧“等待验证”段落为此前状态，以下最新事实优先。

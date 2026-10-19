@@ -36,7 +36,7 @@ fn measured_lock_with_clock<T>(
 }
 
 impl ExclusiveLock {
-    /// Source-cache-only repeated publication. Keep the exact resource hash,
+    /// Anchored cache publication/admission. Keep the exact resource hash,
     /// kernel lock, original deadline and checked close, while a real held
     /// strict Directory replaces per-file path-based directory preparation.
     pub(crate) fn resource_wait_in_directory(
@@ -45,26 +45,42 @@ impl ExclusiveLock {
         control: &crate::control::OperationControl,
         observer: LockObserver<'_>,
     ) -> Result<Self> {
-        struct Controlled<'a>(&'a crate::control::OperationControl);
+        Self::resource_wait_in_directory_checked(
+            scope,
+            resource,
+            control.deadline(),
+            || control.check(),
+            observer,
+        )
+    }
+    /// Same anchored lock owner with composed independent invocation checks.
+    pub(crate) fn resource_wait_in_directory_checked(
+        scope: &Directory,
+        resource: &str,
+        deadline: Instant,
+        check: impl Fn() -> Result<()>,
+        observer: LockObserver<'_>,
+    ) -> Result<Self> {
+        struct Controlled<'a>(&'a dyn Fn() -> Result<()>);
         impl FileControl for Controlled<'_> {
             type Error = ToolkitError;
             fn charge(&mut self, _: FileCost) -> Result<()> {
                 self.check()
             }
             fn check(&mut self) -> Result<()> {
-                self.0.check()
+                (self.0)()
             }
         }
         let name = format!("{}.lock", sha256(resource.as_bytes()));
         Self::acquire_prepared_open_observed_with(
-            || control.check(),
-            || scope.verify_controlled(&mut Controlled(control)),
+            &check,
+            || scope.verify_controlled(&mut Controlled(&check)),
             || scope.open_lock_file_owner(std::ffi::OsStr::new(&name)),
             |file, check| {
                 Self::wait_on_file_observed(
                     file,
                     check,
-                    Some(control.deadline()),
+                    Some(deadline),
                     fs2::FileExt::try_lock_exclusive,
                     std::thread::sleep,
                     observer,

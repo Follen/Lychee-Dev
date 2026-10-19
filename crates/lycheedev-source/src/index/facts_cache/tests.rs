@@ -319,8 +319,6 @@ fn corrupt_record_keys_lengths_hashes_and_locator_ranges_are_misses() {
 }
 #[test]
 fn take_facts_packed_inner_validation_keeps_outer_integrity_and_exact_recovery() {
-    use serde_json::{Value, json};
-
     let fixture = Fixture::new();
     let raw = files(1);
     let pin = fixture.pin(&raw);
@@ -330,36 +328,8 @@ fn take_facts_packed_inner_validation_keeps_outer_integrity_and_exact_recovery()
     let location = doc.facts_locator.as_ref().unwrap();
     let path = pack(&fixture.home, location);
     let original_pack = fs::read(&path).unwrap();
-    let valid: Value =
-        serde_json::from_slice(&index::encode_facts(&doc.facts, &doc.sha256, None).unwrap())
-            .unwrap();
-    let mut cases = Vec::new();
-    for field in ["schema", "inputSHA256", "factsSHA256"] {
-        let mut bad = valid.clone();
-        bad[field] = json!("wrong");
-        cases.push((field, bad));
-    }
-    let mut missing = valid.clone();
-    missing.as_object_mut().unwrap().remove("facts");
-    missing["factsSHA256"] = json!(storage::sha256(b"null"));
-    cases.push(("absent facts", missing));
-    for (name, facts) in [
-        ("null facts", Value::Null),
-        ("scalar facts", json!(7)),
-        ("missing arrays", json!({"declarations":[]})),
-        ("wrong typed field", {
-            let mut facts = valid["facts"].clone();
-            facts["loads"][0]["line"] = json!(-1);
-            facts
-        }),
-    ] {
-        let mut bad = valid.clone();
-        bad["factsSHA256"] = json!(storage::sha256(&serde_json::to_vec(&facts).unwrap()));
-        bad["facts"] = facts;
-        cases.push((name, bad));
-    }
-    for (name, bad) in cases {
-        let body = serde_json::to_vec(&bad).unwrap();
+    let valid = index::encode_facts(&doc.facts, &doc.sha256, None).unwrap();
+    for (name, body) in index::facts_decode_tests::malformed_records(&valid) {
         let body_hash: [u8; 32] = Sha256::digest(&body).into();
         let mut header = [0; HEADER];
         header[..4].copy_from_slice(&(body.len() as u32).to_le_bytes());

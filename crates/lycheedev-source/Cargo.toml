@@ -55,6 +55,7 @@ path = "tests/native_quota_peer.rs"
 harness = false
 
 [dependencies]
+postcard = { version = "=1.1.3", default-features = false, features = ["alloc"] }
 lycheedev-core = { path = "../lycheedev-core" }
 lycheedev-emmy-adapter = { path = "../lycheedev-emmy-adapter", optional = true }
 serde = { version = "1", features = ["derive"] }

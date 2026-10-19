@@ -10,6 +10,7 @@ pub mod casc;
 pub mod db2;
 pub mod decoded_cache;
 pub mod definitions;
+pub(crate) mod generation;
 pub mod hotfix;
 pub mod installed;
 pub mod keys;
@@ -40,6 +41,7 @@ pub(crate) fn fault(code: &str, exit: i32, message: impl Into<String>) -> Toolki
 
 pub fn commands() -> &'static [&'static str] {
     &[
+        "data cache prepare",
         "data hotfix",
         "data sql",
         "data db2",
@@ -67,6 +69,7 @@ pub fn commands() -> &'static [&'static str] {
 }
 
 pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
+    if inv.command == "data cache prepare" { return generation::dispatch(inv); }
     if inv.command == "data hotfix"
         && inv.flag_bool("--scan")
         && inv.flag("--source") != Some("dbcache")
@@ -153,7 +156,9 @@ mod command_surface_tests {
             commands().len(),
             "no duplicate registration"
         );
-        assert_eq!(registered, expected);
+        let additions: BTreeSet<_> = registered.difference(&expected).copied().collect();
+        assert_eq!(additions, BTreeSet::from(["data cache prepare"]));
+        assert!(expected.is_subset(&registered), "all fixed Go commands remain registered");
     }
 
     #[test]

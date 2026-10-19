@@ -1,9 +1,10 @@
 use super::*;
 use crate::facts::{Declaration, HeaderValue, LoadReference, Relationship, SyntaxNote};
+const FACTS_HASH_BUFFER_BYTES: usize = 8 << 10;
 
 // Keep the complete previous producer independent of the move and buffered
 // hash. It intentionally retains the old temporary Vec and json!(f) cloning.
-fn historical_encode(parsed: &Facts, sha256: &str) -> Result<Vec<u8>> {
+pub(super) fn historical_encode(parsed: &Facts, sha256: &str) -> Result<Vec<u8>> {
     let f = serde_json::to_value(parsed)?;
     let envelope = serde_json::to_vec(
         &json!({"schema":"lycheedev.source-facts.rust.v11","inputSHA256":sha256,"factsSHA256":storage::sha256(&serde_json::to_vec(&f)?),"facts":f}),
@@ -18,18 +19,30 @@ fn historical_encode(parsed: &Facts, sha256: &str) -> Result<Vec<u8>> {
     Ok(envelope)
 }
 
-fn same_bytes(facts: &Facts, input: &str) -> Value {
+fn same_public_bytes(facts: &Facts, input: &str) -> Value {
     let before = serde_json::to_vec(facts).unwrap();
     let raw_targets = facts.raw_relationship_targets.clone();
     let expected = historical_encode(facts, input).unwrap();
     let actual = encode_facts(facts, input, None).unwrap();
+    let decoded = decode_facts(
+        &actual,
+        input,
+        &lycheedev_core::control::OperationControl::default(),
+    )
+    .unwrap()
+    .unwrap();
     assert_eq!(
-        actual, expected,
-        "complete envelope bytes, including field order and SHA"
+        serde_json::to_vec(&decoded).unwrap(),
+        before,
+        "complete public bytes and order"
     );
+    assert!(decoded.raw_relationship_targets.is_none());
     assert_eq!(serde_json::to_vec(facts).unwrap(), before);
     assert_eq!(facts.raw_relationship_targets, raw_targets);
-    let envelope: Value = serde_json::from_slice(&actual).unwrap();
+    // Full historical producer remains an independent canonical JSON oracle;
+    // cache bytes themselves deliberately use a new private version.
+    let envelope: Value = serde_json::from_slice(&expected).unwrap();
+    assert_eq!(serde_json::to_value(decoded).unwrap(), envelope["facts"]);
     assert_eq!(envelope["schema"], "lycheedev.source-facts.rust.v11");
     assert_eq!(envelope["inputSHA256"], input);
     assert_eq!(envelope["facts"], serde_json::to_value(facts).unwrap());
@@ -42,16 +55,16 @@ fn same_bytes(facts: &Facts, input: &str) -> Value {
 }
 
 #[test]
-fn encode_facts_moved_envelope_preserves_empty_arrays_and_skipped_raw_identity() {
+fn binary_facts_preserves_empty_arrays_and_skipped_raw_identity() {
     let input = storage::sha256(b"empty source");
-    let empty = same_bytes(&Facts::default(), &input);
+    let empty = same_public_bytes(&Facts::default(), &input);
     let mut fresh = Facts::fresh();
     fresh
         .raw_relationship_targets
         .as_mut()
         .unwrap()
         .insert(usize::MAX, vec![0xff, 0, b'"']);
-    assert_eq!(same_bytes(&fresh, &input), empty);
+    assert_eq!(same_public_bytes(&fresh, &input), empty);
     assert_eq!(
         empty["facts"],
         json!({
@@ -65,7 +78,7 @@ fn encode_facts_moved_envelope_preserves_empty_arrays_and_skipped_raw_identity()
 }
 
 #[test]
-fn encode_facts_moved_envelope_matches_all_typed_fields_unicode_order_and_duplicates() {
+fn binary_facts_matches_all_typed_fields_unicode_order_and_duplicates() {
     // These are actual producer types: strings, usize coordinates and five
     // arrays. Unknown Value fields, floats and nested JSON are not Facts input.
     let text = "雪é\n\r\t\0\\\"";
@@ -117,7 +130,7 @@ fn encode_facts_moved_envelope_matches_all_typed_fields_unicode_order_and_duplic
         .as_mut()
         .unwrap()
         .insert(0, vec![0xff, b'\n']);
-    let envelope = same_bytes(&facts, &storage::sha256(text.as_bytes()));
+    let envelope = same_public_bytes(&facts, &storage::sha256(text.as_bytes()));
     let rows = &envelope["facts"];
     assert_eq!(rows["declarations"].as_array().unwrap().len(), 5);
     for field in ["relationships", "loads", "headers", "diagnostics"] {
@@ -139,7 +152,7 @@ fn encode_facts_moved_envelope_matches_all_typed_fields_unicode_order_and_duplic
 }
 
 #[test]
-fn encode_facts_moved_envelope_matches_canonical_hash_across_buffer_boundaries() {
+fn binary_facts_matches_canonical_hash_across_buffer_boundaries() {
     let input = storage::sha256(b"buffered source");
     let mut facts = Facts {
         headers: vec![HeaderValue {
@@ -167,7 +180,7 @@ fn encode_facts_moved_envelope_matches_canonical_hash_across_buffer_boundaries()
                 .len(),
             length
         );
-        let envelope = same_bytes(&facts, &input);
+        let envelope = same_public_bytes(&facts, &input);
         assert_eq!(
             envelope["facts"]["headers"][0]["value"],
             facts.headers[0].value
@@ -176,7 +189,7 @@ fn encode_facts_moved_envelope_matches_canonical_hash_across_buffer_boundaries()
 }
 
 #[test]
-fn encode_facts_moved_envelope_keeps_exact_32_mib_gate_and_profile_on_both_exits() {
+fn binary_facts_keeps_exact_32_mib_gate_and_profile_on_both_exits() {
     const LIMIT: usize = 32 << 20;
     let input = storage::sha256(b"budget source");
     let mut facts = Facts {
@@ -203,10 +216,19 @@ fn encode_facts_moved_envelope_keeps_exact_32_mib_gate_and_profile_on_both_exits
             (Ok(expected), Ok(actual)) => {
                 assert!(length <= LIMIT);
                 assert_eq!(expected.len(), length);
-                assert_eq!(actual.len(), length);
+                assert!(actual.len() <= LIMIT);
+                let decoded = decode_facts(
+                    &actual,
+                    &input,
+                    &lycheedev_core::control::OperationControl::default(),
+                )
+                .unwrap()
+                .unwrap();
+                let oracle: Value = serde_json::from_slice(&expected).unwrap();
                 assert_eq!(
-                    actual, expected,
-                    "complete boundary bytes, not a size-only assertion"
+                    serde_json::to_value(decoded).unwrap(),
+                    oracle["facts"],
+                    "complete boundary facts"
                 );
             }
             (Err(expected), Err(actual)) => {

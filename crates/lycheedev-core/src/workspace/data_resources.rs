@@ -1,16 +1,17 @@
 //! Kernel-owned workspace Data admission. Metadata preparation remains lazy.
+use super::{configuration, data_disk};
 use crate::{
     Result, ToolkitError,
     control::OperationControl,
     storage::{self, ExclusiveLock},
 };
+use std::path::PathBuf;
 use std::{
     fs,
     path::Path,
     sync::{Arc, atomic::AtomicBool},
     time::{Duration, Instant},
 };
-mod config;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Policy {
@@ -50,6 +51,8 @@ pub struct DataResources {
     leases: Vec<Lease>,
     download_workers: usize,
     concurrent_queries: usize,
+    home: PathBuf,
+    data_cache_max_bytes: u64,
     control: OperationControl,
 }
 impl DataResources {
@@ -59,6 +62,45 @@ impl DataResources {
     }
     pub fn download_workers(&self) -> usize {
         self.download_workers
+    }
+    /// The configured target for total Data disk accounting. The first owner
+    /// below covers only the explicitly versioned Data-derived namespace.
+    pub fn data_cache_max_bytes(&self) -> u64 {
+        self.data_cache_max_bytes
+    }
+    pub fn data_cache_paths(&self) -> data_disk::DataCachePaths {
+        data_disk::DataCachePaths::new(&self.home)
+    }
+    /// Borrow admission through the reservation so query leases cannot close
+    /// before the Data disk owner. Legacy Data writes do not call this yet.
+    pub fn reserve_derived_cache(
+        &self,
+        peak: data_disk::AdditionalPeak,
+    ) -> Result<data_disk::DerivedReservation<'_>> {
+        data_disk::DerivedReservation::acquire(
+            self,
+            &self.home,
+            self.data_cache_max_bytes,
+            peak,
+            &self.control,
+            None,
+        )
+    }
+    /// Keep an independent query budget/deadline observable inside lock waits,
+    /// inventory, every bounded write/copy/hash and checked final cleanup.
+    pub fn reserve_derived_cache_with_check<'a>(
+        &'a self,
+        peak: data_disk::AdditionalPeak,
+        check: &'a dyn Fn() -> Result<()>,
+    ) -> Result<data_disk::DerivedReservation<'a>> {
+        data_disk::DerivedReservation::acquire(
+            self,
+            &self.home,
+            self.data_cache_max_bytes,
+            peak,
+            &self.control,
+            Some(check),
+        )
     }
     fn close_all(&mut self) -> Vec<ToolkitError> {
         let mut errors = Vec::new();
@@ -112,7 +154,7 @@ fn append_check(causes: &mut Vec<ToolkitError>, error: ToolkitError) {
         causes.push(error);
     }
 }
-fn finish<T>(
+pub(super) fn finish<T>(
     result: Result<T>,
     cleanup: impl IntoIterator<Item = ToolkitError>,
     control: Result<()>,
@@ -221,7 +263,8 @@ pub fn acquire_with_check(
     control: &OperationControl,
     mut check: impl FnMut() -> Result<()>,
 ) -> Result<DataResources> {
-    let workers = config::read(home, control, &mut check)?;
+    let config = configuration::read(home, control, &mut check)?;
+    let workers = config.download_workers;
     let bounded = bounded(control)?;
     check_scope(&bounded, &mut check)?;
     let scope = home.join("locks/data-resources-v1");
@@ -234,6 +277,8 @@ pub fn acquire_with_check(
     };
     let mut owner = DataResources {
         leases: vec![gate],
+        home: home.to_path_buf(),
+        data_cache_max_bytes: config.data_cache_max_bytes,
         download_workers: width,
         concurrent_queries: if policy == Policy::Measurement {
             1
@@ -307,6 +352,8 @@ mod cleanup_tests {
                 .collect(),
             download_workers: 1,
             concurrent_queries: 1,
+            home: PathBuf::new(),
+            data_cache_max_bytes: super::super::DEFAULT_DATA_CACHE_MAX_BYTES,
             control,
         };
         let errors = owner.close_cleanup();

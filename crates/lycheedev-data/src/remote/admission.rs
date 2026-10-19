@@ -223,6 +223,14 @@ impl<'a> AdmittedWorkspace<'a> {
         assert!(self.workspace.metadata.is_none(), "metadata owner must not be replaced");
         self.workspace.metadata = Some(metadata);
     }
+    pub fn reserve_derived_cache<'reservation>(
+        &'reservation self,
+        peak: lycheedev_core::workspace::data_disk::AdditionalPeak,
+        check: &'reservation dyn Fn() -> Result<()>,
+    ) -> Result<lycheedev_core::workspace::data_disk::DerivedReservation<'reservation>> {
+        self.check()?;
+        self.resources.as_ref().expect("live admission lease").reserve_derived_cache_with_check(peak, check)
+    }
     pub fn download_workers(&self) -> usize {
         self.resources
             .as_ref()

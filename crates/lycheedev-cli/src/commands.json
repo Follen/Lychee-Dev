@@ -249,6 +249,26 @@
     ]
   },
   {
+    "path": "data cache prepare",
+    "summary": "Materialize one requested static table as a bounded, authenticated Data generation; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
+    "mutates": true,
+    "arguments": [
+      "<Table>"
+    ],
+    "flags": [
+      "--home <root>",
+      "--format text|json|jsonl",
+      "--project <directory>",
+      "--snapshot <pin>",
+      "--installation <client-or-game-root>",
+      "--cdn",
+      "--offline",
+      "--max-bytes <n>",
+      "--key-file <WoW.txt|keys.json>",
+      "--timeout-seconds <1-3600> (default 300; entire query)"
+    ]
+  },
+  {
     "path": "data db2",
     "summary": "Read typed rows: --snapshot <pin> (--installation <client-or-game-root> | --cdn) --table <name> [--id <n> | --limit <n> --after-id <n>] [--max-bytes <n>] [--offline]; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
     "mutates": true,
@@ -1255,7 +1275,7 @@
   },
   {
     "path": "source session status",
-    "summary": "Inspect the opt-in LuaLS broker for this home without starting it",
+    "summary": "Inspect the opt-in native Source session for this home without starting it",
     "mutates": false,
     "arguments": [],
     "flags": [
@@ -1266,7 +1286,7 @@
   },
   {
     "path": "source session close",
-    "summary": "Retire the verified opt-in LuaLS broker and release its worktree lease",
+    "summary": "Retire the verified opt-in native Source session and release its worktree lease",
     "mutates": true,
     "arguments": [],
     "flags": [
@@ -1301,7 +1321,7 @@
   },
   {
     "path": "source validate",
-    "summary": "Validate one pinned addon closure with --path/--toc/--snapshot, or a fixed multi-client --matrix <config.json>; add --semantic for bundled LuaLS using fixed client API metadata; report unresolved coverage; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
+    "summary": "Validate one pinned addon closure with --path/--toc/--snapshot, or a fixed multi-client --matrix <config.json>; add --semantic for native Emmy analysis using fixed client API metadata; report unresolved coverage; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
     "mutates": true,
     "arguments": [],
     "flags": [

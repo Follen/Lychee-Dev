@@ -189,11 +189,28 @@ mod tests {
             if definition["path"] == "source batch" {
                 definition["summary"] = serde_json::json!(definition["summary"].as_str().unwrap().replace("LuaLS", "native Emmy"));
             }
+            if definition["path"] == "source session status" || definition["path"] == "source session close" {
+                definition["summary"] = serde_json::json!(definition["summary"].as_str().unwrap().replace("LuaLS broker", "native Source session"));
+            }
+            if definition["path"] == "source validate" {
+                definition["summary"] = serde_json::json!(definition["summary"].as_str().unwrap().replace("bundled LuaLS", "native Emmy analysis"));
+            }
             if definition["path"] == "doctor" {
                 assert_eq!(definition["summary"], "Aggregate read-only workspace, data, LuaLS and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check");
                 definition["summary"] = serde_json::json!("Aggregate read-only workspace, data, embedded Emmy worker smoke and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check");
             }
         }
+        // Preserve the original reference inventory and its order. The one
+        // explicitly authorized Rust addition has an independent exact contract.
+        let added = serde_json::json!({
+            "path":"data cache prepare",
+            "summary":"Materialize one requested static table as a bounded, authenticated Data generation; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
+            "mutates":true,
+            "arguments":["<Table>"],
+            "flags":["--home <root>","--format text|json|jsonl","--project <directory>","--snapshot <pin>","--installation <client-or-game-root>","--cdn","--offline","--max-bytes <n>","--key-file <WoW.txt|keys.json>","--timeout-seconds <1-3600> (default 300; entire query)"]
+        });
+        let position = expected.iter().position(|d| d["path"] == "data db2").unwrap();
+        expected.insert(position, added);
         assert_eq!(serde_json::to_value(all()).unwrap(), Value::Array(expected));
     }
 
@@ -220,7 +237,7 @@ mod tests {
         let selected = implemented();
         // Every current route has a concrete handler. Keep this exhaustive
         // contract rather than accepting a filtered subset after caching.
-        assert_eq!(current.len(), 84);
+        assert_eq!(current.len(), 85);
         assert_eq!(selected.len(), current.len());
         for (borrowed, original) in selected.iter().zip(current) {
             assert!(std::ptr::eq(*borrowed, original));

@@ -3,6 +3,9 @@
 
 ## 当前授权架构执行批（2026-10-19）
 - [x] 固定f811结果质量基线：check及71针对性测试全过，16新逐名一次；不是全仓/性能通过。
+- [x] 首个架构片已实现并静态独审：Core配置/派生磁盘owner、真实Data prepare IPC、Source v13 Postcard；此勾仅表示源码完成。
+- [ ] 首片固定SHA Windows check及Core40/Data15/Source受影响组/CLI正式回归；当前全部NOT_RUN，Node新binary工具单独核验。
+- [ ] Data后继：认证generation读取复用、所有旧Data路径归属/去重/引用保护/淘汰，Arrow/DataFusion实际适配与统一执行；derived-only不能关闭总5GB项。
 - [ ] A：统一home/config与Data默认5,000,000,000B，完成所有权/峰值准入基础；逐项标明旧下载/共享blob/证据未接线缺口。
 - [ ] B：按需immutable generation、单一typed持久表示、ID索引；验证Arrow/DataFusion适配，合适后收敛同一执行内核。
 - [ ] C：成熟binary Source codec、认证和构造限额；旧格式失效重建，公共结果质量不退步，Emmy零补丁。

@@ -223,6 +223,11 @@ impl<'a> Scope<'a> {
 /// Only these source-neutral operations are lent to DB2/navigation consumers.
 /// It does not own or release workspace leases.
 pub(crate) trait FileScope {
+    fn reserve_derived_cache<'reservation>(
+        &'reservation self,
+        peak: lycheedev_core::workspace::data_disk::AdditionalPeak,
+        check: &'reservation dyn Fn() -> Result<()>,
+    ) -> Result<lycheedev_core::workspace::data_disk::DerivedReservation<'reservation>>;
     fn check(&self) -> Result<()>;
     /// Reauthenticate the original source observations before publication.
     /// CDN has no local mutable source; its existing session check suffices.
@@ -246,6 +251,14 @@ pub(crate) trait FileScope {
     ) -> Result<()>;
 }
 impl FileScope for Scope<'_> {
+    fn reserve_derived_cache<'reservation>(
+        &'reservation self,
+        peak: lycheedev_core::workspace::data_disk::AdditionalPeak,
+        check: &'reservation dyn Fn() -> Result<()>,
+    ) -> Result<lycheedev_core::workspace::data_disk::DerivedReservation<'reservation>> {
+        self.check()?;
+        self.admitted.reserve_derived_cache(peak, check)
+    }
     fn check(&self) -> Result<()> {
         Scope::check(self)
     }
@@ -306,6 +319,19 @@ impl<'a, 'scope> SessionScope<'a, 'scope> {
     }
 }
 impl FileScope for SessionScope<'_, '_> {
+    fn reserve_derived_cache<'reservation>(
+        &'reservation self,
+        peak: lycheedev_core::workspace::data_disk::AdditionalPeak,
+        check: &'reservation dyn Fn() -> Result<()>,
+    ) -> Result<lycheedev_core::workspace::data_disk::DerivedReservation<'reservation>> {
+        self.check()?;
+        match &self.session {
+            Some(session) => session.reserve_derived_cache(peak, check),
+            None => self.admitted.as_ref().ok_or_else(|| crate::fault(
+                "records.file_query", 4, "Reader initialization previously failed",
+            ))?.reserve_derived_cache(peak, check),
+        }
+    }
     fn check(&self) -> Result<()> {
         match &self.session {
             Some(session) => session.check(),

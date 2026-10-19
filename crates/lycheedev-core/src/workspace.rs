@@ -7,7 +7,10 @@ use crate::{
 };
 use serde_json::{Value, json};
 use std::{fs, path::Path};
+mod configuration;
 mod controlled;
+pub use configuration::{DEFAULT_DATA_CACHE_MAX_BYTES, WorkspaceConfig};
+pub mod data_disk;
 pub mod data_resources;
 pub(crate) use controlled::inspect_controlled;
 pub use controlled::{open_controlled, open_controlled_with_check};
@@ -325,15 +328,28 @@ pub(crate) fn initialize_unlocked_observed(
     )
 }
 pub fn default_config() -> Value {
-    json!({"schema":"lycheedev.config.v1","cache":{"maxBytes":20u64<<30},"download":{"workers":0}})
+    WorkspaceConfig::default().to_value()
 }
 pub fn config(home: &Path) -> Result<Value> {
     open(home)?;
-    let value = if home.join("config.json").exists() {
-        storage::read_json(&home.join("config.json"))?
+    let bytes = if home.join("config.json").exists() {
+        Some(fs::read(home.join("config.json"))?)
     } else {
-        default_config()
+        None
     };
+    legacy_configuration_value(bytes.as_deref())
+}
+/// Historical config show/set/cache callers keep their exact old field/default,
+/// schema/error and unknown-field behavior. Only the new Data policy is shared
+/// with strict admission, normalized without dropping unrelated user fields.
+pub(crate) fn legacy_configuration_value(raw: Option<&[u8]>) -> Result<Value> {
+    let value: Value = match raw {
+        Some(raw) => serde_json::from_slice(raw)?,
+        None => default_config(),
+    };
+    legacy_configuration_parsed(value, raw)
+}
+pub(crate) fn legacy_configuration_parsed(mut value: Value, raw: Option<&[u8]>) -> Result<Value> {
     if value["schema"] != "lycheedev.config.v1" {
         return Err(ToolkitError::new(
             "vault.config_schema_newer",
@@ -354,7 +370,23 @@ pub fn config(home: &Path) -> Result<Value> {
             4,
         ));
     }
+    let data_max_bytes = raw
+        .map(configuration::data_policy_from_raw)
+        .transpose()?
+        .unwrap_or(DEFAULT_DATA_CACHE_MAX_BYTES);
+    let fields = value
+        .as_object_mut()
+        .expect("valid configuration is an object");
+    // Normalize only this new extension. Keeping differently cased duplicate
+    // Data keys would make a later sorted Value serialization change precedence.
+    fields.retain(|key, _| !configuration::is_data_policy_key(key));
+    fields.insert("dataCache".into(), json!({"maxBytes":data_max_bytes}));
     Ok(value)
+}
+/// Strict Data admission, retaining its existing Go decoder. Historical public
+/// Value APIs intentionally keep their pre-existing acceptance differences.
+pub fn config_controlled(home: &Path, control: &OperationControl) -> Result<WorkspaceConfig> {
+    configuration::read(home, control, &mut || Ok(()))
 }
 pub fn commands() -> &'static [&'static str] {
     &[

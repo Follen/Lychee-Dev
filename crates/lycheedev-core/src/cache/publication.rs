@@ -106,12 +106,10 @@ pub fn publish_derived_controlled(
 }
 
 fn config_limit(home: &Path, control: &OperationControl) -> Result<u64> {
-    // Preserve the existing config API's schema, ranges, JSON decoding and
-    // absent-file defaults; only I/O and close gain the invocation's scope.
     workspace::open_controlled(home, control)?;
     let path = home.join("config.json");
     control.check()?;
-    let value: Value = if path.exists() {
+    let parsed = if path.exists() {
         let mut file = fs::File::open(path)?;
         let result = (|| {
             let mut raw = Vec::new();
@@ -125,37 +123,22 @@ fn config_limit(home: &Path, control: &OperationControl) -> Result<u64> {
                 raw.extend_from_slice(&buffer[..n]);
             }
             control.check()?;
-            Ok(serde_json::from_slice(&raw)?)
+            Ok((serde_json::from_slice::<Value>(&raw)?, raw))
         })();
-        storage::finish_file(file, result, control)?
+        Some(storage::finish_file(file, result, control)?)
     } else {
-        workspace::default_config()
+        None
     };
-    if value["schema"] != "lycheedev.config.v1" {
-        return Err(ToolkitError::new(
-            "vault.config_schema_newer",
-            "unsupported configuration schema",
-            4,
-        ));
-    }
-    if value["cache"]["maxBytes"]
-        .as_u64()
-        .is_none_or(|n| n > 1u64 << 45)
-        || value["download"]["workers"]
-            .as_u64()
-            .is_none_or(|n| n > 256)
-    {
-        return Err(ToolkitError::new(
-            "vault.config_format",
-            "budget out of range",
-            4,
-        ));
-    }
+    let value = match parsed {
+        Some((value, raw)) => workspace::legacy_configuration_parsed(value, Some(&raw))?,
+        None => workspace::default_config(),
+    };
     control.check()?;
     Ok(value["cache"]["maxBytes"]
         .as_u64()
-        .expect("validated quota"))
+        .expect("validated historical quota"))
 }
+
 fn object_bytes(home: &Path, control: &OperationControl) -> Result<u64> {
     let root = home.join("cache/objects");
     control.check()?;

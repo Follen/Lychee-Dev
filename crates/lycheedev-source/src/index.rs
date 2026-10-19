@@ -323,7 +323,7 @@ pub fn penalty(role: &str) -> i32 {
     }
 }
 pub(crate) fn fingerprint(pin: &SourcePin) -> String {
-    storage::sha256(format!("rust-index-v15\0assets-v2-go323-metadata\0facts-pack-v2-path-radix512\0facts-layout-v11-go323-generated-origins\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}",pin.repository,pin.product,pin.exact_commit,pin.parser_revision).as_bytes())
+    storage::sha256(format!("rust-index-v17\0assets-v2-go323-metadata\0facts-pack-v2-path-radix512\0facts-layout-v13-postcard-1.1.3\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}",pin.repository,pin.product,pin.exact_commit,pin.parser_revision).as_bytes())
 }
 pub fn build(home: &Path, pin: &SourcePin) -> Result<Index> {
     build_with_control(home, pin, &Default::default())
@@ -535,7 +535,7 @@ pub fn is_ready_with_control(
 }
 fn facts_cache_key(path: &str, sha256: &str) -> String {
     storage::sha256(format!(
-        "facts-layout-v11-go323-generated-origins\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0{path}\0{sha256}"
+        "facts-layout-v13-postcard-1.1.3\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0{path}\0{sha256}"
     ).as_bytes())
 }
 fn facts_cache_path(home: &Path, path: &str, sha256: &str) -> PathBuf {
@@ -576,18 +576,9 @@ fn document_facts_profiled(
         .expect("hashed cache name");
     {
         let _phase = profile.map(|p| p.span(Phase::FactsRead));
-        let envelope = cache_owner
-            .read(key, control)?
-            .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok());
-        if let Some(mut envelope) = envelope
-            && envelope["schema"] == "lycheedev.source-facts.rust.v11"
-            && envelope["inputSHA256"] == sha256
-            && envelope["factsSHA256"] == canonical_facts_sha256(&envelope["facts"])?
-            && let Ok(parsed) = serde_json::from_value(
-                envelope.get_mut("facts").map(Value::take).unwrap_or(Value::Null),
-            )
+        if let Some(raw) = cache_owner.read(key, control)?
+            && let Some(parsed) = decode_facts(&raw, sha256, control)?
         {
-            control.check()?;
             return Ok((parsed, true));
         }
     }
@@ -645,71 +636,13 @@ fn parse_document_facts(
     Ok(parsed)
 }
 fn encode_facts(parsed: &Facts, sha256: &str, profile: Option<&Profile>) -> Result<Vec<u8>> {
-    const MAX_FACT_CACHE_BYTES: usize = 32 << 20;
-    let serialize_phase = profile.map(|p| p.span(Phase::FactsSerialize));
-    let f = serde_json::to_value(parsed)?;
-    let mut envelope = json!({"schema":"lycheedev.source-facts.rust.v11","inputSHA256":sha256,"factsSHA256":canonical_facts_sha256(&f)?,"facts":null});
-    // json!(f) would serialize the already-owned Value into another full DOM.
-    // Keep the same envelope and final byte serializer, moving that subtree.
-    envelope["facts"] = f;
-    let envelope = serde_json::to_vec(&envelope)?;
-    if envelope.len() > MAX_FACT_CACHE_BYTES {
-        return Err(ToolkitError::new(
-            "codebase.fact_budget",
-            "Source fact cache exceeds the 32 MiB limit",
-            3,
-        ));
-    }
-    drop(serialize_phase);
-    Ok(envelope)
+    let _phase = profile.map(|p| p.span(Phase::FactsSerialize));
+    facts::binary::encode(parsed, sha256)
 }
-const FACTS_HASH_BUFFER_BYTES: usize = 8 << 10;
-
-struct FactsHashWriter<'a>(&'a mut sha2::Sha256);
-impl std::io::Write for FactsHashWriter<'_> {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        use sha2::Digest;
-        self.0.update(bytes);
-        Ok(bytes.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-fn canonical_facts_sha256(value: &Value) -> serde_json::Result<String> {
-    use sha2::Digest;
-    use std::io::{BufWriter, Write};
-    let mut hash = sha2::Sha256::new();
-    {
-        // Use the same Value serializer as to_vec, including canonical object
-        // order, duplicate-key normalization and unknown fields. Batch its
-        // small writes without retaining a complete second Facts encoding.
-        // No new stop check: the caller keeps the original error ordering.
-        let mut writer =
-            BufWriter::with_capacity(FACTS_HASH_BUFFER_BYTES, FactsHashWriter(&mut hash));
-        serde_json::to_writer(&mut writer, value)?;
-        writer.flush().map_err(serde_json::Error::io)?;
-    }
-    Ok(format!("{:x}", hash.finalize()))
-}
-
 fn decode_facts(raw: &[u8], sha256: &str, control: &lycheedev_core::control::OperationControl) -> Result<Option<Facts>> {
-    let envelope = serde_json::from_slice::<Value>(raw).ok();
-    if let Some(mut envelope) = envelope
-        && envelope["schema"] == "lycheedev.source-facts.rust.v11"
-        && envelope["inputSHA256"] == sha256
-        && envelope["factsSHA256"] == canonical_facts_sha256(&envelope["facts"])?
-        && let Ok(parsed) = serde_json::from_value(
-            envelope.get_mut("facts").map(Value::take).unwrap_or(Value::Null),
-        )
-    {
-        control.check()?;
-        return Ok(Some(parsed));
-    }
-    control.check()?;
-    Ok(None)
+    facts::binary::decode(raw, sha256, control)
 }
+
 #[cfg(test)]
 fn build_uncached(
     home: &Path,
@@ -1642,8 +1575,8 @@ mod facts_cache_tests {
                 serde_json::to_value(&rebuilt).unwrap(),
                 serde_json::to_value(&expected).unwrap()
             );
-            let current: Value = storage::read_json(&current_path).unwrap();
-            assert_eq!(current["schema"], "lycheedev.source-facts.rust.v11");
+            let current = fs::read(&current_path).unwrap();
+            assert_eq!(&current[..8], facts::binary::MAGIC);
             assert_eq!(fs::read(&old_path).unwrap(), old_bytes);
             // Even valid old digests copied under the new key cannot bypass
             // the envelope schema gate. Rebuild, then prove a real warm hit.
@@ -1655,7 +1588,7 @@ mod facts_cache_tests {
                 serde_json::to_value(&rebuilt).unwrap(),
                 serde_json::to_value(&expected).unwrap()
             );
-            assert_eq!(storage::read_json::<Value>(&current_path).unwrap(), current);
+            assert_eq!(fs::read(&current_path).unwrap(), current);
             let (warm, hit) =
                 document_facts(&fixture.home, &path, &raw, &digest, &control).unwrap();
             assert!(hit);
@@ -1862,8 +1795,11 @@ mod facts_cache_tests {
             "XML syntax error on line 1: invalid characters between </Ui and >"
         );
         let path = facts_cache_path(&fixture.home, "Example.xml", &digest);
-        let original: Value = storage::read_json(&path).unwrap();
-        let mut obsolete = original.clone();
+        let original = fs::read(&path).unwrap();
+        let mut obsolete: Value = serde_json::from_slice(
+            &super::facts_encode_tests::historical_encode(&expected, &digest).unwrap(),
+        )
+        .unwrap();
         obsolete["schema"] = json!("lycheedev.source-facts.rust.v9");
         obsolete["facts"]["diagnostics"][0]["message"] =
             json!("XML syntax error on line 1: element <Ui> closed by </Ui junk>");
@@ -1877,7 +1813,7 @@ mod facts_cache_tests {
             serde_json::to_value(&rebuilt).unwrap(),
             serde_json::to_value(&expected).unwrap()
         );
-        assert_eq!(storage::read_json::<Value>(&path).unwrap(), original);
+        assert_eq!(fs::read(&path).unwrap(), original);
         let (warm, hit) =
             document_facts(&fixture.home, "Example.xml", raw, &digest, &control).unwrap();
         assert!(hit);
@@ -2055,7 +1991,12 @@ mod facts_cache_tests {
             serde_json::to_value(&loads).unwrap()
         );
         assert_eq!(
-            storage::read_json::<Value>(&cache).unwrap()["facts"],
+            serde_json::to_value(
+                decode_facts(&fs::read(&cache).unwrap(), &xml.sha256, &control)
+                    .unwrap()
+                    .unwrap()
+            )
+            .unwrap(),
             serde_json::to_value(&xml.facts).unwrap()
         );
 
@@ -2091,13 +2032,15 @@ mod facts_cache_tests {
         let path = facts_cache_path(&fixture.home, &doc.path, &doc.sha256);
         evict_document_facts(&fixture.home, doc);
         document_facts(&fixture.home, &doc.path, raw[&doc.path].as_bytes(), &doc.sha256, &control).unwrap();
-        let original: Value = storage::read_json(&path).unwrap();
-        for field in ["factsSHA256", "inputSHA256"] {
-            let mut corrupt = original.clone();
-            corrupt[field] = json!("0".repeat(64));
-            corrupt["facts"]["loads"][0]["path"] = json!("Untrusted.lua");
+        let original = fs::read(&path).unwrap();
+        let original_facts = serde_json::to_value(&doc.facts).unwrap();
+        for offset in [12, 44] {
+            let mut untrusted = doc.facts.clone();
+            untrusted.loads[0].path = "Untrusted.lua".into();
+            let mut corrupt = encode_facts(&untrusted, &doc.sha256, None).unwrap();
+            corrupt[offset..offset + 32].fill(0);
             for consumer in 0..3 {
-                storage::atomic_json(&path, &corrupt).unwrap();
+                fs::write(&path, &corrupt).unwrap();
                 match consumer {
                     0 => assert_eq!(
                         load_facts_with_control(&fixture.home, &pin, &index, &control).unwrap()[0]
@@ -2118,8 +2061,11 @@ mod facts_cache_tests {
                     _ => {
                         let rebuilt = build_uncached(&fixture.home, &pin, &control).unwrap();
                         assert_eq!(rebuilt.summary["io"]["parsedDocuments"], 1);
-                        assert_eq!(serde_json::to_value(&rebuilt.documents[0].facts).unwrap(), original["facts"]);
-                    },
+                        assert_eq!(
+                            serde_json::to_value(&rebuilt.documents[0].facts).unwrap(),
+                            original_facts
+                        );
+                    }
                 }
                 if consumer == 2 {
                     // A successful full rebuild now commits a cohort. Remove
@@ -2128,19 +2074,18 @@ mod facts_cache_tests {
                     evict_document_facts(&fixture.home, doc);
                     document_facts(&fixture.home, &doc.path, raw[&doc.path].as_bytes(), &doc.sha256, &control).unwrap();
                 }
-                assert_eq!(storage::read_json::<Value>(&path).unwrap(), original);
+                assert_eq!(fs::read(&path).unwrap(), original);
             }
         }
         // Unsupported cache schemas retain the existing parser-rebuild behavior.
         let mut obsolete = original.clone();
-        obsolete["schema"] = json!("obsolete");
-        obsolete["facts"] = Value::Null;
-        storage::atomic_json(&path, &obsolete).unwrap();
+        obsolete[..8].copy_from_slice(b"LYCFCT12");
+        fs::write(&path, &obsolete).unwrap();
         let loads =
             load_facts_from_documents_with_control(&fixture.home, &index, &raw, &control).unwrap();
         assert_eq!(loads.len(), 1);
         assert_eq!(loads[0].target, "Real.lua");
-        assert_eq!(storage::read_json::<Value>(&path).unwrap(), original);
+        assert_eq!(fs::read(&path).unwrap(), original);
         // Invalid JSON and oversized cache files also regenerate from the
         // verified original document instead of unbounded reads or empty facts.
         fs::write(&path, b"{").unwrap();
@@ -2150,16 +2095,19 @@ mod facts_cache_tests {
             .target,
             "Real.lua"
         );
-        assert_eq!(storage::read_json::<Value>(&path).unwrap(), original);
+        assert_eq!(fs::read(&path).unwrap(), original);
         let oversized = fs::File::create(&path).unwrap();
         oversized.set_len((32 << 20) + 1).unwrap();
         drop(oversized);
         let rebuilt = build_uncached(&fixture.home, &pin, &control).unwrap();
         assert_eq!(rebuilt.summary["io"]["parsedDocuments"], 1);
-        assert_eq!(serde_json::to_value(&rebuilt.documents[0].facts).unwrap(), original["facts"]);
+        assert_eq!(
+            serde_json::to_value(&rebuilt.documents[0].facts).unwrap(),
+            original_facts
+        );
         evict_document_facts(&fixture.home, doc);
         document_facts(&fixture.home, &doc.path, raw[&doc.path].as_bytes(), &doc.sha256, &control).unwrap();
-        assert_eq!(storage::read_json::<Value>(&path).unwrap(), original);
+        assert_eq!(fs::read(&path).unwrap(), original);
         let mut missing = raw.clone();
         missing.clear();
         assert_eq!(

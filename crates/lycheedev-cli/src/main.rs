@@ -2909,6 +2909,19 @@ mod tests {
         assert!(parse(&args(&["version", "--format", "json", "--format", "text"])).is_err());
     }
     #[test]
+    fn data_cache_prepare_admits_only_its_explicit_static_table_contract() {
+        let invocation = parse(&args(&["data", "cache", "prepare", "Spell", "--snapshot", "PIN-fixed", "--offline", "--max-bytes", "134217728"])).unwrap();
+        assert_eq!(invocation.command, "data cache prepare");
+        assert_eq!(invocation.positional.as_deref(), Some("Spell"));
+        assert_eq!(invocation.flag("--snapshot"), Some("PIN-fixed"));
+        assert!(invocation.flag_bool("--offline"));
+        assert!(parse(&args(&["data", "cache", "prepare"])).is_err());
+        assert!(parse(&args(&["data", "cache", "prepare", "Spell", "--effective"])).is_err());
+        assert!(parse(&args(&["data", "cache", "prepare", "Spell", "--query", "select *"])).is_err());
+        assert!(parse(&args(&["data", "cache", "prepare", "Spell", "--pin", "PIN-fixed"])).is_err());
+    }
+
+    #[test]
     fn longest_path_and_required_argument_admission_are_stable() {
         assert_eq!(
             parse(&args(&["data", "db2", "schema", "Spell"]))

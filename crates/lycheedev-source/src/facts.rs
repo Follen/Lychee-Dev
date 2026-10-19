@@ -74,6 +74,60 @@ pub(crate) fn for_worker(
     guard.check().then_some(facts).flatten()
 }
 
+pub(crate) mod binary;
+
+// The single field declaration defines the public JSON type and its private
+// positional wire view. Public serde attributes never apply to the wire: in
+// particular, empty optional strings must still occupy their binary position.
+macro_rules! fact_contract {
+    (
+        $(#[$attribute:meta])*
+        pub struct $name:ident {
+            $( $(#[$field_attribute:meta])* pub $field:ident: $kind:ty, )*
+        }
+        $(skipped { $( $(#[$skip_attribute:meta])* $visibility:vis $skip:ident: $skip_kind:ty, )* })?
+    ) => {
+        $(#[$attribute])*
+        pub struct $name {
+            $( $(#[$field_attribute])* pub $field: $kind, )*
+            $( $( $(#[$skip_attribute])* $visibility $skip: $skip_kind, )* )?
+        }
+        impl binary::Wire for $name {
+            const MIN_BYTES: usize = 0 $(+ <$kind as binary::Wire>::MIN_BYTES)*;
+            fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                use serde::ser::SerializeTuple;
+                let fields = [$(stringify!($field)),*];
+                let mut tuple = serializer.serialize_tuple(fields.len())?;
+                $(tuple.serialize_element(&binary::WireRef(&self.$field))?;)*
+                tuple.end()
+            }
+            fn decode<'de, D: serde::Deserializer<'de>>(
+                deserializer: D,
+                context: &mut binary::DecodeContext<'_>,
+            ) -> Result<Self, D::Error> {
+                struct Row<'a, 'b>(&'a mut binary::DecodeContext<'b>);
+                impl<'de> serde::de::Visitor<'de> for Row<'_, '_> {
+                    type Value = $name;
+                    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        f.write_str(concat!("complete binary ", stringify!($name)))
+                    }
+                    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut sequence: A) -> Result<$name, A::Error> {
+                        self.0.check::<A::Error>()?;
+                        Ok($name {
+                            $($field: sequence.next_element_seed(binary::Seed::<$kind>::new(self.0))?
+                                .ok_or_else(|| serde::de::Error::custom(concat!("missing ", stringify!($field))))?,)*
+                            $($( $skip: Default::default(), )*)?
+                        })
+                    }
+                }
+                let fields = [$(stringify!($field)),*];
+                deserializer.deserialize_tuple(fields.len(), Row(context))
+            }
+        }
+    };
+}
+
+fact_contract! {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Declaration {
@@ -86,6 +140,9 @@ pub struct Declaration {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub signature: String,
 }
+}
+
+fact_contract! {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Relationship {
     pub from: String,
@@ -94,23 +151,35 @@ pub struct Relationship {
     pub confidence: String,
     pub line: usize,
 }
+}
+
+fact_contract! {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoadReference {
     pub path: String,
     pub line: usize,
     pub kind: String,
 }
+}
+
+fact_contract! {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeaderValue {
     pub key: String,
     pub value: String,
     pub line: usize,
 }
+}
+
+fact_contract! {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyntaxNote {
     pub message: String,
     pub line: usize,
 }
+}
+
+fact_contract! {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Facts {
     pub declarations: Vec<Declaration>,
@@ -118,11 +187,15 @@ pub struct Facts {
     pub loads: Vec<LoadReference>,
     pub headers: Vec<HeaderValue>,
     pub diagnostics: Vec<SyntaxNote>,
+}
+    skipped {
     /// Only fresh parser observations retain pre-JSON target identity. None
     /// after deserialization means that raw identity cannot be authenticated.
     #[serde(skip)]
     pub(crate) raw_relationship_targets: Option<BTreeMap<usize, Vec<u8>>>,
 }
+}
+
 impl Facts {
     pub(crate) fn fresh() -> Self {
         Self {
