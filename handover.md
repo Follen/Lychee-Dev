@@ -1,8 +1,8 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-19 01:50 UTC。当前已验证生产为 `d4271ae430ac2a80087af81c70eea960d547acbb`，分支 `rust-refactor`、草稿 PR #14。下列为非敏感结果摘要；本机原始日志未随文档发布。Stage2与完整性能验收仍未完成。
+更新：2026-10-19 02:12 UTC。当前已验证生产为 `d4271ae430ac2a80087af81c70eea960d547acbb`，分支 `rust-refactor`、草稿 PR #14。下列为非敏感结果摘要；本机原始日志未随文档发布。Stage2与完整性能验收仍未完成。
 
-### DBCD 四项共享 Data 合同修复（2026-10-19，待实跑）
+### DBCD 四项缺陷已实际复现，修复待验证（2026-10-19）
 
 用户明确要求修复四项，并要求保留现有Skill product定义。独立审计固定DBCD `e732093f8864240fc5884bd1bba6b02f3dfc0d56`、WoWDBDefs `b9a63096cdd99b26967f17f9515377ae62cadfd7`；前三项固定Go323同样存在，不能以Go同错结果作为正确oracle。
 
@@ -11,7 +11,11 @@
 - F3：只metadata BUILD支持官方12个精确预置范围，采用官方preset分量匹配；未知值拒绝，原数字版本范围语义保留。TBC/WotLK等不成为产品alias；现Skill产品名称/对应关系、两条Forever路由完全保留。
 - F4：统一从请求实际max-bytes生成parser caps（metadata64MiB、rows1M、columns/partitions4096），Prepared保存同一limits贯穿prepare及所有二次open；SDK默认值不改，不引入product专用parser。小fixture的512MiB请求传递不等于已验真实>256MiB文件。
 
-独立测试-only版本 `51d430690d2799deb1a1159f4f7a9169e236a0d3` 保存8路径21702B、13测试入口，用官方原字节/独立palette输入和真实公开消费者准备失败复现；尚未运行，不能标成已复现。修复候选另提交，必须保留原失败后再验证同一入口。修复后正式入口为WDC7项、metadata公开SQL4项、请求限额公开6项，以及metadata7项与限额传播5项新增单元回归；三条作者范围均已由独立审者检查最终源码，尚未编译执行。所有新增生产仍待Windows编译/执行，静态独审不替代动态结果。本批无游戏、无新原始本机日志披露；Stage2与完整性能验收仍未结束。
+独立测试-only版本 `51d430690d2799deb1a1159f4f7a9169e236a0d3` 已实际通过all-targets；13项为5通过/8失败、无忽略。palette为2通过/1失败，实际数组[900,100]而正确期望[100,200]；metadata为1通过/3失败，enum/flags返回records.definition_identity，Weather返回schema.invalid_definition。请求限额为2通过/4失败：1000001行及4097物理列/总列/partition均在每个测试的首个data db2消费者返回table.invalid_format，期望table.limit_exceeded；后续消费者断言尚未执行，不能把这一轮描述成全消费者覆盖。
+
+四个owner均封存退役/回收，activeProcesses为0、无deadline；三个失败目标的辅助进程在drain后被强制回收且knownAuxiliaryCleanup/reviewedAuxiliary均false，原收尾异常保留，不能标成clean成功。以上仅非敏感结果汇总，未发布本机原始日志。
+
+修复版本 `c5718ffa43bf3df575ab808cb4b8aa584545af6b` 已保存并独立复核15/15文件、27份Skill/product定义字节不变；Windows编译与绿例仍NOT_RUN。正式核心清单共36项：WDC公开7、metadata公开4、请求限额公开6、metadata单元14（原7+新7）、限额传播单元5。本任务新增/扩展29项，原有7项。静态独审不替代动态结果；测试协调正在解决原线程继续执行的确认冲突，不在此推断用户取消。本批不改变Stage2和完整性能验收尚未结束的状态。
 
 ### Facts 编码所有权小修已通过定向回归（cb409）
 
