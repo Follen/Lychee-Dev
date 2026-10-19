@@ -2505,11 +2505,14 @@ name = "lycheedev-data"
 version = "3.5.0"
 dependencies = [
  "arrow-array",
+ "arrow-buffer",
  "arrow-ipc",
  "arrow-schema",
+ "async-trait",
  "base64 0.22.1",
  "chrono",
  "datafusion",
+ "flatbuffers",
  "flate2",
  "futures-util",
  "hyper",

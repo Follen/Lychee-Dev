@@ -89,30 +89,33 @@ impl Fixture {
             .unwrap();
     }
     fn raw(&self, key: &str, raw: &[u8]) {
-        Metadata::with_historical_write(&self.home, &self.control, |writer| {
-            writer.commit(&[HistoricalMutation {
-                key,
-                expected_generation: 0,
-                bytes: raw,
-            }])
-        })
-        .unwrap();
+        // Keep exact duplicate/case/null/deep wire bytes through the existing
+        // RawValue serialization seam, now in the private Store database.
+        let raw =
+            serde_json::value::RawValue::from_string(String::from_utf8(raw.to_vec()).unwrap())
+                .unwrap();
+        self.store().put(key, &raw, None).unwrap();
     }
 }
 #[test]
 fn go_alias_fields_merge_case_duplicates_and_null_with_signed_blob_size() {
     let f = Fixture::new();
-    f.raw("decoded-wire", br#"{"ContentKey":"first","contentKey":"last","CONTENTKEY":null,"blob":{"sha256":"first","bytes":-2},"Blob":{"sha256":"second"},"blob":null,"keys":{"kind":"public","state":"loaded"},"KEYS":{"sha256":"digest"},"keys":null,"ignored":[1,{"nested":true}]}"#);
-    let entry = read_entry(&f.store(), "decoded-wire").unwrap().unwrap();
+    f.raw("decoded-v1/decoded-wire", br#"{"ContentKey":"first","contentKey":"last","CONTENTKEY":null,"blob":{"sha256":"first","bytes":-2},"Blob":{"sha256":"second"},"blob":null,"keys":{"kind":"public","state":"loaded"},"KEYS":{"sha256":"digest"},"keys":null,"ignored":[1,{"nested":true}]}"#);
+    let entry = read_entry(&f.store(), "decoded-v1/decoded-wire")
+        .unwrap()
+        .unwrap();
     assert_eq!(entry.content_key, "last");
     assert_eq!(entry.blob.sha256, "second");
     assert_eq!(entry.blob.bytes, -2);
     assert_eq!(entry.keys.kind, "public");
     assert_eq!(entry.keys.state, "loaded");
     assert_eq!(entry.keys.sha256, "digest");
-    f.raw("bad-wire", br#"{"blob":{"bytes":1.0}}"#);
+    f.raw("decoded-v1/bad-wire", br#"{"blob":{"bytes":1.0}}"#);
     assert_eq!(
-        read_entry(&f.store(), "bad-wire").err().unwrap().code,
+        read_entry(&f.store(), "decoded-v1/bad-wire")
+            .err()
+            .unwrap()
+            .code,
         "vault.blob_integrity"
     );
     std::fs::remove_dir_all(f.home).unwrap();
@@ -126,7 +129,7 @@ fn actual_store_alias_unknown_depth_uses_original_go_limit() {
             "[".repeat(depth - 1),
             "]".repeat(depth - 1)
         );
-        let key = format!("depth-{depth}");
+        let key = format!("decoded-v1/depth-{depth}");
         if depth == 10000 {
             f.raw(&key, raw.as_bytes());
             assert!(read_entry(&f.store(), &key).unwrap().is_some());
@@ -160,14 +163,14 @@ fn verified_body_memo_shares_actual_owner_and_new_request_rechecks_missing_blob(
     let f = Fixture::new();
     let mut keys = f.keys();
     let (record, blob) = f.body(b"verified body");
-    f.entry("decoded-hit", &record, &blob, &keys);
+    f.entry("decoded-v1/decoded-hit", &record, &blob, &keys);
     let before = f.budget.snapshot().unwrap().retained_bytes;
     let mut stats = Stats::default();
     let mut memo = Memo::default();
     let (_, first) = memo
         .read(
             &f.store(),
-            Some("decoded-hit"),
+            Some("decoded-v1/decoded-hit"),
             &record,
             &mut keys,
             &mut stats,
@@ -181,7 +184,7 @@ fn verified_body_memo_shares_actual_owner_and_new_request_rechecks_missing_blob(
     let (_, second) = memo
         .read(
             &f.store(),
-            Some("decoded-hit"),
+            Some("decoded-v1/decoded-hit"),
             &record,
             &mut keys,
             &mut stats,
@@ -197,7 +200,7 @@ fn verified_body_memo_shares_actual_owner_and_new_request_rechecks_missing_blob(
         other
             .read(
                 &f.store(),
-                Some("decoded-hit"),
+                Some("decoded-v1/decoded-hit"),
                 &record,
                 &mut keys,
                 &mut stats,
@@ -230,14 +233,14 @@ fn decoded_blob_sha_and_whole_ckey_are_both_mandatory_without_fallback() {
         } else {
             record.content_key = casc::hex(&Md5::digest(b"other body"));
         }
-        f.entry("decoded-corrupt", &record, &blob, &keys);
+        f.entry("decoded-v1/decoded-corrupt", &record, &blob, &keys);
         let before = f.budget.snapshot().unwrap().retained_bytes;
         let mut memo = Memo::default();
         let mut stats = Stats::default();
         let error = memo
             .read(
                 &f.store(),
-                Some("decoded-corrupt"),
+                Some("decoded-v1/decoded-corrupt"),
                 &record,
                 &mut keys,
                 &mut stats,
@@ -263,7 +266,7 @@ fn loaded_public_alias_reestablishes_availability_before_blob_read() {
     source.state = "loaded".into();
     f.store()
         .put(
-            "decoded-loaded",
+            "decoded-v1/decoded-loaded",
             &Entry {
                 content_key: record.content_key.clone(),
                 blob: CachedBlob::try_from(blob).unwrap(),
@@ -277,7 +280,7 @@ fn loaded_public_alias_reestablishes_availability_before_blob_read() {
     assert!(
         memo.read(
             &f.store(),
-            Some("decoded-loaded"),
+            Some("decoded-v1/decoded-loaded"),
             &record,
             &mut keys,
             &mut stats,
@@ -297,12 +300,15 @@ fn save_existing_alias_checks_only_existence_and_conflict_revalidates_pure_error
     let f = Fixture::new();
     let mut keys = f.keys();
     let (record, blob) = f.body(b"cached body");
-    f.raw("already-present", br#"{"blob":{"bytes":"invalid shape"}}"#);
+    f.raw(
+        "decoded-v1/already-present",
+        br#"{"blob":{"bytes":"invalid shape"}}"#,
+    );
     let mut memo = Memo::default();
     let mut stats = Stats::default();
     memo.save(
         &f.store(),
-        Some("already-present"),
+        Some("decoded-v1/already-present"),
         &record,
         &blob,
         &mut keys,
@@ -311,13 +317,13 @@ fn save_existing_alias_checks_only_existence_and_conflict_revalidates_pure_error
     )
     .unwrap();
     assert_eq!(
-        read_entry(&f.store(), "already-present")
+        read_entry(&f.store(), "decoded-v1/already-present")
             .err()
             .unwrap()
             .code,
         "vault.blob_integrity"
     );
-    f.entry("raced", &record, &blob, &keys);
+    f.entry("decoded-v1/raced", &record, &blob, &keys);
     let conflict = fault(
         "vault.generation_conflict",
         4,
@@ -325,7 +331,7 @@ fn save_existing_alias_checks_only_existence_and_conflict_revalidates_pure_error
     );
     memo.after_create(
         &f.store(),
-        "raced",
+        "decoded-v1/raced",
         &record,
         &mut keys,
         &mut stats,
@@ -339,7 +345,7 @@ fn save_existing_alias_checks_only_existence_and_conflict_revalidates_pure_error
     let error = memo
         .after_create(
             &f.store(),
-            "raced",
+            "decoded-v1/raced",
             &record,
             &mut keys,
             &mut stats,
@@ -351,4 +357,85 @@ fn save_existing_alias_checks_only_existence_and_conflict_revalidates_pure_error
     drop(memo);
     drop(keys);
     std::fs::remove_dir_all(f.home).unwrap();
+}
+
+#[test]
+fn missing_alias_lookup_keeps_exact_original_reference_for_rebuild() {
+    let f = Fixture::new();
+    let mut keys = f.keys();
+    let (record, blob) = f.body(b"verified body");
+    f.entry("decoded-v1/decoded-rebuild", &record, &blob, &keys);
+    std::fs::remove_file(evidence::blob_path(&f.home, &blob.sha256).unwrap()).unwrap();
+    let found = Memo::default()
+        .lookup(
+            &f.store(),
+            Some("decoded-v1/decoded-rebuild"),
+            &record,
+            &mut keys,
+            &mut Stats::default(),
+            &f.budget,
+        )
+        .unwrap();
+    match found {
+        Lookup::Missing(original) => {
+            assert_eq!(original.sha256, blob.sha256);
+            assert_eq!(original.bytes, blob.bytes);
+        }
+        _ => panic!("exact missing alias was discarded"),
+    }
+    validate_rebuild(
+        &f.store(),
+        Some("decoded-v1/decoded-rebuild"),
+        &record,
+        &keys,
+        &blob,
+    )
+    .unwrap();
+    std::fs::remove_dir_all(f.home).unwrap();
+}
+#[test]
+fn rebuild_rechecks_alias_digest_length_ckey_and_key_source_before_publication() {
+    for changed in ["digest", "length", "ckey", "keys"] {
+        let f = Fixture::new();
+        let keys = f.keys();
+        let (record, blob) = f.body(b"verified body");
+        f.entry("decoded-v1/decoded-rebuild", &record, &blob, &keys);
+        let mut entry = Entry {
+            content_key: record.content_key.clone(),
+            blob: CachedBlob::try_from(blob.clone()).unwrap(),
+            keys: Source::from(&keys.source),
+        };
+        match changed {
+            "digest" => entry.blob.sha256 = "b".repeat(64),
+            "length" => entry.blob.bytes += 1,
+            "ckey" => entry.content_key = "c".repeat(32),
+            "keys" => entry.keys.sha256 = "d".repeat(64),
+            _ => unreachable!(),
+        }
+        let generation = f
+            .store()
+            .generation("decoded-v1/decoded-rebuild")
+            .unwrap()
+            .unwrap();
+        f.store()
+            .put("decoded-v1/decoded-rebuild", &entry, Some(generation))
+            .unwrap();
+        std::fs::remove_file(evidence::blob_path(&f.home, &blob.sha256).unwrap()).unwrap();
+
+        assert_eq!(
+            validate_rebuild(
+                &f.store(),
+                Some("decoded-v1/decoded-rebuild"),
+                &record,
+                &keys,
+                &blob
+            )
+            .unwrap_err()
+            .code,
+            "vault.blob_integrity",
+            "{changed}"
+        );
+        assert!(!evidence::blob_path(&f.home, &blob.sha256).unwrap().exists());
+        std::fs::remove_dir_all(f.home).unwrap();
+    }
 }

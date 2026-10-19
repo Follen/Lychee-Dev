@@ -302,3 +302,5 @@ fn actual_remote_captured_consumer_cancel_is_terminal_and_releases_admission() {
 }
 
 mod scoped_demux;
+
+mod cache_rebuild;

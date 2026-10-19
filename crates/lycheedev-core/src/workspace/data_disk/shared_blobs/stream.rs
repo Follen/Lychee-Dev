@@ -8,10 +8,11 @@ pub(crate) struct StreamQuota<'a> {
     home: &'a Path,
     control: &'a OperationControl,
     supplemental: &'a dyn Fn() -> Result<()>,
+    recovery: Option<&'a BlobRef>,
 }
 impl StreamQuota<'_> {
     pub(crate) fn reserve_spool(&self, expected: u64) -> Result<DerivedReservation<'_>> {
-        DerivedReservation::acquire_inner(
+        DerivedReservation::acquire_inner_recovering(
             None,
             self.home,
             crate::workspace::DEFAULT_DATA_CACHE_MAX_BYTES,
@@ -22,6 +23,7 @@ impl StreamQuota<'_> {
             self.control,
             Some(self.supplemental),
             false,
+            self.recovery,
         )
     }
 
@@ -34,7 +36,13 @@ impl StreamQuota<'_> {
         run: impl FnOnce(&mut StreamPublicationSettlement, bool) -> Result<()>,
     ) -> Result<()> {
         let raw = intent(reference)?;
-        let mut owner = DerivedReservation::acquire_inner(
+        if self
+            .recovery
+            .is_some_and(|expected| !same_blob(expected, reference))
+        {
+            return Err(integrity());
+        }
+        let mut owner = DerivedReservation::acquire_inner_recovering(
             None,
             self.home,
             crate::workspace::DEFAULT_DATA_CACHE_MAX_BYTES,
@@ -42,6 +50,7 @@ impl StreamQuota<'_> {
             self.control,
             Some(self.supplemental),
             true,
+            self.recovery,
         )?;
         let intent_name = format!("{}.intent", reference.sha256);
         let complete_name = format!("{}.complete", reference.sha256);
@@ -66,9 +75,27 @@ impl StreamQuota<'_> {
                 {
                     return Err(integrity());
                 }
+                let present = inspect_body(self.home, reference, &owner.control, false)?;
+                if self.recovery.is_some() && !present {
+                    // Completed B remains charged and the already-sized source
+                    // spool is in existing staging. Only shard B + record48 are new.
+                    owner.admit_shared(INTENT_BYTES as u64, reference.bytes)?;
+                    return repair::run_repair(&owner, reference, &raw, || {
+                        let mut settlement = StreamPublicationSettlement::new();
+                        let result = run(&mut settlement, false);
+                        // Record even a failed publication's Published/Unknown fact.
+                        let result = join(
+                            result,
+                            record_body(&owner, self.home, reference, &settlement).err(),
+                            &owner.control,
+                        );
+                        let clean = result.is_ok() || settlement.may_release_unpublished_intent();
+                        (result, clean)
+                    });
+                }
                 // Existing pending reservations may be reused only when their
                 // body already exists; never replay an unresolved publication.
-                if !inspect_body(self.home, reference, &owner.control, false)? {
+                if !present {
                     return Err(if complete.is_some() {
                         integrity()
                     } else {
@@ -151,6 +178,9 @@ impl StreamQuota<'_> {
             // The original intent handle has also closed before its record is read.
             owner.publish_shared_record(&complete_name, &completion(&raw))
         })();
+        if result.is_ok() {
+            owner.recovery = None; // Initial spool admission alone permits absence.
+        }
         owner.finish(result)
     }
 }
@@ -196,12 +226,59 @@ pub fn publish_shared_blob_stream_with_check(
     supplemental: impl Fn() -> Result<()> + Send + Sync + 'static,
     accounting: &impl CaptureAccounting,
 ) -> Result<VerifiedBlob> {
+    publish_shared_blob_stream_inner(
+        home,
+        reader,
+        expected_bytes,
+        maximum,
+        control,
+        supplemental,
+        accounting,
+        None,
+    )
+}
+
+/// Same producer/CKey/EOF contract as ordinary streaming, with one authenticated
+/// missing alias target. Rebuilt SHA/length must match before any shard write.
+#[allow(clippy::too_many_arguments)]
+pub fn rebuild_shared_blob_stream_with_check(
+    home: &Path,
+    reader: &mut impl Read,
+    expected: &BlobRef,
+    maximum: u64,
+    control: &OperationControl,
+    supplemental: impl Fn() -> Result<()> + Send + Sync + 'static,
+    accounting: &impl CaptureAccounting,
+) -> Result<VerifiedBlob> {
+    publish_shared_blob_stream_inner(
+        home,
+        reader,
+        expected.bytes,
+        maximum,
+        control,
+        supplemental,
+        accounting,
+        Some(expected),
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn publish_shared_blob_stream_inner(
+    home: &Path,
+    reader: &mut impl Read,
+    expected_bytes: u64,
+    maximum: u64,
+    control: &OperationControl,
+    supplemental: impl Fn() -> Result<()> + Send + Sync + 'static,
+    accounting: &impl CaptureAccounting,
+    recovery: Option<&BlobRef>,
+) -> Result<VerifiedBlob> {
     let supplemental = Arc::new(supplemental);
     let check = || supplemental();
     let quota = StreamQuota {
         home,
         control,
         supplemental: &check,
+        recovery,
     };
     let stream_check = supplemental.clone();
     evidence::publish_data_blob_stream_with_check(

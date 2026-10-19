@@ -3,14 +3,16 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { loadCliContractOracle, verifyGo323CommandInheritance } from '../../../tests/rust-parity/cli-contract-oracle-3.2.3.mjs';
 
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
-const fixture = JSON.parse(read('../../../tests/rust-parity/go-3.2.0.manifest.json'));
+const historicalBytes = read('../../../tests/rust-parity/go-3.2.0.manifest.json');
+const fixture = loadCliContractOracle(historicalBytes);
 const inventory = JSON.parse(read('../src/commands.json'));
 const source = read('../src/contract.rs');
 
-function explicitArities() {
-  const body = source.match(/pub fn takes_value\(&self\) -> bool \{[\s\S]*?match self\.name\(\) \{([\s\S]*?)\n        \}/)?.[1];
+function explicitArities(contract = source) {
+  const body = contract.match(/pub fn takes_value\(&self\) -> bool \{[\s\S]*?match self\.name\(\) \{([\s\S]*?)\n        \}/)?.[1];
   assert.ok(body, 'expected explicit name-based arity match');
   const armPattern = /((?:\s*"--[a-z-]+"\s*\|?)+)\s*=>\s*(?:\{\s*(false|true)\s*\}|(false|true)),?/g;
   const arms = [...body.matchAll(armPattern)];
@@ -28,20 +30,16 @@ function explicitArities() {
   return values;
 }
 
-test('shared definitions equal pinned Go metadata and ordering', () => {
-  assert.equal(fixture.oracle.commit, '3057a9666ab078270b63c7f06de748069b0d1f4b');
-  const expected = fixture.commands
-    .map(({ parserFlags, ...definition }) => definition);
-  assert.equal(expected.length, 84);
-  // Two approved Source-engine description exceptions; no wildcard summary
-  // skips, mutation of the fixed oracle, or relaxation of any other field.
-  const doctor = expected.find(({ path }) => path === 'doctor');
-  assert.equal(doctor.summary, 'Aggregate read-only workspace, data, LuaLS and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check');
-  doctor.summary = 'Aggregate read-only workspace, data, embedded Emmy worker smoke and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check';
-  const batch = expected.find(({ path }) => path === 'source batch');
-  assert.equal(batch.summary, 'Run 1-32 query/refs/context requests from a JSON file against one fixed snapshot, sharing preparation and a request-scoped LuaLS session; each item retains its own cursor and coverage; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins');
-  batch.summary = 'Run 1-32 query/refs/context requests from a JSON file against one fixed snapshot, sharing preparation and a request-scoped native Emmy session; each item retains its own cursor and coverage; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins';
-  assert.deepEqual(inventory, expected);
+function assertMetadata(actual) {
+  assert.deepEqual(actual, fixture.expected);
+}
+
+test('shared definitions equal fixed Go 3.2.3 plus exact approved differences and ordering', () => {
+  assert.equal(fixture.oracle.commit, '3766f9cacb52e93a803a626187e2a1d54a445468');
+  assert.equal(fixture.oracle.release, 'Go v3.2.3');
+  assert.equal(fixture.commands.length, 84);
+  assert.equal(fixture.expected.length, 85);
+  assertMetadata(inventory);
 });
 
 test('all 115 explicit arities match frozen parser flags', () => {
@@ -100,4 +98,90 @@ test('Source registry exposes the existing refs context and session handlers to 
   for (const name of ['source refs', 'source context', 'source session status', 'source session close']) {
     assert.ok(implementation.slice(implementation.indexOf('pub fn dispatch_with_services')).includes(`"${name}"`));
   }
+});
+
+
+test('oracle preserves historical bytes and rejects corrupt or relabeled fixtures', () => {
+  const original = JSON.parse(historicalBytes);
+  assert.deepEqual(fixture.commands, original.commands);
+  assert.equal(fixture.historicalReference.commit, '3057a9666ab078270b63c7f06de748069b0d1f4b');
+  assert.equal(read('../../../tests/rust-parity/go-3.2.0.manifest.json'), historicalBytes);
+  for (const corrupt of [
+    bytes => bytes + ' ',
+    bytes => bytes.replace('3057a9666ab078270b63c7f06de748069b0d1f4b', fixture.oracle.commit),
+    bytes => bytes.replace('"value": true', '"value": false'),
+    bytes => bytes.replace('"mutates": true', '"mutates": false'),
+  ]) assert.throws(() => loadCliContractOracle(corrupt(historicalBytes)), /historical CLI fixture identity/);
+  assert.throws(() => verifyGo323CommandInheritance({commands: 'not fixed Go source', products: '', historicalProducts: ''}, historicalBytes), /Go 3.2.3 commands source identity/);
+});
+
+test('every command rejects missing duplicate and corrupted metadata, including the approved addition', () => {
+  for (let index = 0; index < fixture.expected.length; index++) {
+    const path = fixture.expected[index].path;
+    const mutations = [
+      ['missing', rows => rows.splice(index, 1)],
+      ['duplicate', rows => rows.splice(index, 0, structuredClone(rows[index]))],
+      ['path', rows => { rows[index].path += ' unapproved'; }],
+      ['summary', rows => { rows[index].summary += ' '; }],
+      ['mutates', rows => { rows[index].mutates = !rows[index].mutates; }],
+      ['arguments', rows => { rows[index].arguments.push('<unapproved>'); }],
+      ['missing flag', rows => { rows[index].flags.pop(); }],
+      ['extra flag', rows => { rows[index].flags.push('--unapproved'); }],
+      ['unknown field', rows => { rows[index].unapproved = true; }],
+    ];
+    if (fixture.expected[index].flags.length > 1) {
+      mutations.push(['flag order', rows => { rows[index].flags.reverse(); }]);
+    }
+    for (const [field, mutate] of mutations) {
+      const rows = structuredClone(fixture.expected);
+      mutate(rows);
+      assert.throws(() => assertMetadata(rows), {code: 'ERR_ASSERTION'}, `${path}: ${field}`);
+    }
+  }
+});
+
+test('command order, positional arguments, exact approved wording and addition placement remain mandatory', () => {
+  const reversed = structuredClone(fixture.expected).reverse();
+  assert.throws(() => assertMetadata(reversed), {code: 'ERR_ASSERTION'});
+  const misplaced = structuredClone(fixture.expected);
+  misplaced.push(...misplaced.splice(misplaced.findIndex(command => command.path === 'data cache prepare'), 1));
+  assert.throws(() => assertMetadata(misplaced), {code: 'ERR_ASSERTION'});
+  const extra = structuredClone(fixture.expected);
+  extra.push({...structuredClone(extra[0]), path: 'data cache unapproved'});
+  assert.throws(() => assertMetadata(extra), {code: 'ERR_ASSERTION'});
+  for (const path of ['doctor', 'source batch', 'source session status', 'source session close', 'source validate']) {
+    const rows = structuredClone(fixture.expected);
+    rows.find(command => command.path === path).summary = fixture.commands.find(command => command.path === path).summary;
+    assert.throws(() => assertMetadata(rows), {code: 'ERR_ASSERTION'}, path);
+  }
+  for (let index = 0; index < fixture.expected.length; index++) {
+    if (!fixture.expected[index].arguments.length) continue;
+    const rows = structuredClone(fixture.expected);
+    rows[index].arguments = [];
+    assert.throws(() => assertMetadata(rows), {code: 'ERR_ASSERTION'}, rows[index].path);
+  }
+});
+
+test('arity corruption, unknown flags and removal of fail-closed fallback are rejected', () => {
+  const expected = explicitArities();
+  for (const [name, value] of expected) {
+    // Move this literal into the opposite Rust match arm, then parse the
+    // corrupted source through the same checker as the real implementation.
+    let corrupted = source.replace(new RegExp(`"${name}"\\s*\\|`), '');
+    if (corrupted === source) corrupted = source.replace(new RegExp(`\\|\\s*"${name}"`), '');
+    assert.notEqual(corrupted, source, `${name}: removed original literal`);
+    const anchor = value ? '--allow-partial' : '--after-id';
+    corrupted = corrupted.replace(`"${anchor}"`, `"${name}" | "${anchor}"`);
+    const actual = explicitArities(corrupted);
+    assert.equal(actual.size, 115);
+    assert.equal(actual.get(name), !value, `${name}: opposite source arm`);
+    assert.throws(() => assert.deepEqual(actual, expected), {code: 'ERR_ASSERTION'}, name);
+  }
+  const extra = source.replace('"--allow-partial"', '"--unreviewed" | "--allow-partial"');
+  assert.throws(() => assert.deepEqual(explicitArities(extra), expected), {code: 'ERR_ASSERTION'});
+  const missing = source.replace('"--allow-partial" | ', '');
+  assert.throws(() => assert.deepEqual(explicitArities(missing), expected), {code: 'ERR_ASSERTION'});
+  const duplicate = source.replace('"--allow-partial"', '"--allow-partial" | "--allow-partial"');
+  assert.throws(() => explicitArities(duplicate), /duplicate explicit arity/);
+  assert.throws(() => explicitArities(source.replace('name => panic!("flag missing explicit contract arity: {name}"),', '_ => false,')), {code: 'ERR_ASSERTION'});
 });

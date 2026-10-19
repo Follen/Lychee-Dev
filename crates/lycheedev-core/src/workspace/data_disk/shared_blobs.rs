@@ -163,10 +163,11 @@ fn inspect_body(
     join(result, close_directory(root), checks)
 }
 
-pub(super) fn inventory(
+pub(super) fn inventory_recovering(
     home: &Path,
     paths: &DataCachePaths,
     checks: &Checks<'_>,
+    recovery: Option<&BlobRef>,
 ) -> Result<(u64, u64)> {
     let directory = Directory::open_controlled(&paths.shared_blobs(), &mut Controlled(checks))?;
     let result = (|| {
@@ -182,6 +183,34 @@ pub(super) fn inventory(
             let Some(name) = name.to_str() else {
                 continue;
             };
+            if let Some(digest) = name.strip_suffix(".repair.intent") {
+                let repair =
+                    read_record(&directory, name, INTENT_BYTES, checks)?.ok_or_else(integrity)?;
+                let original = read_record(
+                    &directory,
+                    &format!("{digest}.intent"),
+                    INTENT_BYTES,
+                    checks,
+                )?
+                .ok_or_else(integrity)?;
+                let reference = decode(&format!("{digest}.intent"), &original)?;
+                let done = read_record(
+                    &directory,
+                    &format!("{digest}.complete"),
+                    COMPLETE_BYTES,
+                    checks,
+                )?
+                .ok_or_else(integrity)?;
+                if repair != original || done != completion(&original) {
+                    return Err(integrity());
+                }
+                // The original completed charge still covers the canonical B.
+                // This one extra B covers a possible surviving shard stage.
+                pending_bytes = sum([pending_bytes, reference.bytes])?;
+                // Deliberately fails the older strict `<digest>.intent` decoder.
+                // Only this exact new suffix has the narrow repair meaning.
+                continue;
+            }
             if let Some(digest) = name.strip_suffix(".complete") {
                 // A complete marker alone must never erase a retained intent.
                 if read_record(
@@ -210,7 +239,9 @@ pub(super) fn inventory(
                     if done != completion(&raw) {
                         return Err(integrity());
                     }
-                    if !inspect_body(home, &reference, checks, false)? {
+                    if !inspect_body(home, &reference, checks, false)?
+                        && !recovery.is_some_and(|target| same_blob(target, &reference))
+                    {
                         return Err(integrity());
                     }
                     complete_bytes = sum([complete_bytes, reference.bytes])?;
@@ -313,6 +344,30 @@ pub fn publish_shared_blob_with_check(
     control: &OperationControl,
     supplemental: &dyn Fn() -> Result<()>,
 ) -> Result<BlobRef> {
+    publish_shared_blob_inner(home, bytes, maximum, control, supplemental, None)
+}
+
+/// Rebuild only the body named by an already authenticated decoded alias. The
+/// original source must have passed its framing, CKey, exact length and EOF.
+/// Core separately checks final SHA/length and the immutable attribution pair.
+pub fn rebuild_shared_blob_with_check(
+    home: &Path,
+    bytes: &[u8],
+    maximum: usize,
+    expected: &BlobRef,
+    control: &OperationControl,
+    supplemental: &dyn Fn() -> Result<()>,
+) -> Result<BlobRef> {
+    publish_shared_blob_inner(home, bytes, maximum, control, supplemental, Some(expected))
+}
+fn publish_shared_blob_inner(
+    home: &Path,
+    bytes: &[u8],
+    maximum: usize,
+    control: &OperationControl,
+    supplemental: &dyn Fn() -> Result<()>,
+    recovery: Option<&BlobRef>,
+) -> Result<BlobRef> {
     control.check()?;
     supplemental()?;
     super::super::open_controlled_with_check(home, control, supplemental)?;
@@ -336,7 +391,10 @@ pub fn publish_shared_blob_with_check(
         bytes: bytes.len() as u64,
     };
     let raw = intent(&reference)?;
-    let mut owner = DerivedReservation::acquire_inner(
+    if recovery.is_some_and(|expected| !same_blob(expected, &reference)) {
+        return Err(integrity());
+    }
+    let mut owner = DerivedReservation::acquire_inner_recovering(
         None,
         home,
         super::super::DEFAULT_DATA_CACHE_MAX_BYTES,
@@ -344,6 +402,7 @@ pub fn publish_shared_blob_with_check(
         control,
         Some(supplemental),
         true,
+        recovery,
     )?;
     let intent_name = format!("{}.intent", reference.sha256);
     let complete_name = format!("{}.complete", reference.sha256);
@@ -366,9 +425,14 @@ pub fn publish_shared_blob_with_check(
             {
                 return Err(integrity());
             }
+            let present = inspect_body(home, &reference, &owner.control, true)?;
+            if recovery.is_some() && !present {
+                owner.admit_shared(INTENT_BYTES as u64, reference.bytes)?;
+                return repair_memory(&owner, home, bytes, maximum, &reference, &raw);
+            }
             owner.admit_shared(0, 0)?;
             // Pending reuse never releases a possibly surviving shard stage.
-            return if inspect_body(home, &reference, &owner.control, true)? {
+            return if present {
                 Ok(reference.clone())
             } else if complete.is_none() {
                 Err(pending(&reference, &directory_path.join(&intent_name)))
@@ -388,6 +452,9 @@ pub fn publish_shared_blob_with_check(
             &complete_name,
         )
     })();
+    if result.is_ok() {
+        owner.recovery = None; // Final success requires the completed body to exist.
+    }
     owner.finish(result).map_err(|mut error| {
         error.details = serde_json::json!({"schema":"lycheedev.data-shared-blob-owner-error.v1", "cause":error.clone(),"blob":reference,"intentPath":directory_path.join(intent_name),"completionPath":directory_path.join(complete_name),"totalDataCoverageComplete":false});
         error
@@ -495,6 +562,10 @@ fn publish_new_attribution(
     owner.publish_shared_record(complete_name, &completion(raw))?;
     Ok(result)
 }
+
+mod repair;
+pub(super) use repair::validate_recovery;
+use repair::{repair_memory, same_blob};
 
 #[cfg(test)]
 mod tests;

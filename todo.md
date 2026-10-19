@@ -12,14 +12,17 @@
 - [x] 19e all-targets及67项定向回归全通过，原23失败闭合；不是全仓/性能通过。
 - [ ] 19e release已通过，assembly缺flatbuffers官方许可证正文；补现有catalog/原文后以新sourceDigest匹配构建、装包和完整Source六场景，保留旧失败。
 - [x] 10ed显式6GiB runner接线保存并完整readback；12套Node作者/独审各452/452；Windows实际447通过/0失败/5权限skip，原默认5GiB及其它限额保持。
-- [ ] read-through/provider组合45新增与Windows编译未运行，私有元库另22新增、缺体修复27新增仍待最终组合独审/正式执行。
+- [ ] Data45源码组合已独立静审；94新增（read-through/provider45、私有元库22、缺体修复27）及旧真实消费者回归待Windows编译/执行，不能以静态检查代替。
 - [x] 最终组合Node检查记录sourceTree并区分git archive导出与export-ignore范围；原隔离361/361不能代替最终组合树结果。
+
+- [x] CLI旧Go320元数据oracle已按固定Go323及明确新增更新，独立10项与10个物理坏例通过；最终组合11套Node121/121，无skip，非实际CLI任务验收。
+- [ ] 按[Data缓存测试映射](tests/rust-parity/data-cache-quality-test-map.json)核真实286项名单并串行执行，94新增逐名一次，不将静态数当通过。
 
 ## A. Home、配置与全Data容量
 - [x] 实现decimal5GB可配置基础、派生目录与至少真实cache prepare消费者；初批运行验证未闭。
 - [x] 整合共享blob、decoded spool和CAP独立引用保护28代码路径，静态独审通过；保留发布后错误receipt与278测试修正。
 - [x] 56新增中uppercase历史CAP失败已在19e精确复验通过，070f原55/1不重标。
-- [ ] 修复静态证实的已登记decoded body缺失后重提取/重发布冲突，保f811既有session/asset缺体miss与损坏terminal合同；新增quota不得使缓存缺失不可恢复。
+- [x] 已实现并独审精确缺体认证重建与repair峰值计量，保留原pair/CAP/keep及旧reader fail-closed；27新增和原session/asset回归均待实际运行，尚未验收。
 - [ ] 完整接入Data归属：下载、共享blob去重、Arrow/索引、staging/导出峰值、CAP和SQLite/WAL/SHM/历史记录；明确共享跨域归属和去重，不把局部准入称总硬上限。
 - [ ] 可重建冷缓存淘汰必须保护活跃lease与证据引用；旧超额/缩配置拒新增并报告，不删证据。验证导入峰值，避免raw/IPC/Parquet长期三副本。
 

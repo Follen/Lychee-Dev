@@ -12,7 +12,7 @@ use arrow_ipc::writer::{DictionaryTracker, FileWriter, IpcDataGenerator, IpcWrit
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use lycheedev_core::{
     Invocation, Outcome, Result, ToolkitError, selection,
-    workspace::data_disk::{AdditionalPeak, DerivedObject, DerivedReservation},
+    workspace::data_disk::{AdditionalPeak, DerivedObject, DerivedReservation, ReservationReport},
 };
 use serde::Serialize;
 use serde_json::json;
@@ -23,6 +23,11 @@ use std::{
 };
 
 const MANIFEST_MAXIMUM: usize = 1 << 20;
+#[cfg(test)]
+thread_local! {
+    pub(super) static IMPORTED_BATCH_REQUESTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub(super) const REPRESENTATION: &str = "arrow-ipc-file-v5/arrow-58.3.0/uncompressed";
 pub(super) const DERIVATION_VERSION: &str = "lycheedev.table-arrow-import.v1";
 
@@ -63,7 +68,7 @@ impl PhysicalSchema {
     }
 }
 
-fn reserve_schema_encoding<'a>(
+pub(super) fn reserve_schema_encoding<'a>(
     schema: &Schema,
     budget: &'a Budget,
 ) -> Result<RetainedReservation<'a>> {
@@ -127,7 +132,7 @@ fn ipc_error(error: arrow_schema::ArrowError) -> ToolkitError {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Manifest<'a> {
+pub(super) struct Manifest<'a> {
     schema: &'static str,
     identity_sha256: &'a str,
     source_kind: &'static str,
@@ -153,6 +158,42 @@ struct Manifest<'a> {
     definition_manifest: &'a serde_json::Value,
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(super) fn manifest<'a>(
+    prepared: &'a db2::Prepared,
+    identity: &StaticIdentity<'_>,
+    identity_sha256: &'a str,
+    schema_sha256: &'a str,
+    object: &'a DerivedObject,
+    rows: usize,
+    batches: usize,
+    visible_columns: usize,
+) -> Manifest<'a> {
+    Manifest {
+        schema: "lycheedev.data-static-generation.v1",
+        identity_sha256,
+        source_kind: "static",
+        data: prepared.pin.data.as_ref().expect("validated data pin"),
+        table: &prepared.bundle.identity,
+        definition_sha256: &prepared.definition.sha256,
+        typed_schema_sha256: schema_sha256,
+        object,
+        representation: REPRESENTATION,
+        derivation_version: DERIVATION_VERSION,
+        available_rows: rows,
+        batch_count: batches,
+        complete: identity.complete(),
+        missing: prepared.file.bytes.missing(),
+        unavailable_partitions: &prepared.availability.skipped,
+        record_id_column: visible_columns,
+        record_id_order: "ascending",
+        source_content: &prepared.file.reading["content"],
+        partial_content: &prepared.file.reading["partialContent"],
+        definition_object: &prepared.bundle.definition,
+        definition_manifest: &prepared.bundle.manifest,
+    }
+}
+
 pub(crate) fn dispatch(inv: &Invocation) -> Result<Outcome> {
     dispatch_after_encode(inv, &mut || Ok(()))
 }
@@ -168,6 +209,15 @@ pub(super) fn dispatch_after_hooks(
     inv: &Invocation,
     after_encode: &mut dyn FnMut() -> Result<()>,
     after_finish: &mut dyn FnMut(Result<Outcome>) -> Result<Outcome>,
+) -> Result<Outcome> {
+    dispatch_with_read_hook(inv, after_encode, after_finish, &mut || Ok(()))
+}
+
+pub(super) fn dispatch_with_read_hook(
+    inv: &Invocation,
+    after_encode: &mut dyn FnMut() -> Result<()>,
+    after_finish: &mut dyn FnMut(Result<Outcome>) -> Result<Outcome>,
+    after_read: &mut dyn FnMut() -> Result<()>,
 ) -> Result<Outcome> {
     inv.control.check()?;
     let name = inv.argument()?;
@@ -224,6 +274,87 @@ pub(super) fn dispatch_after_hooks(
             // Keep a bounded recovery receipt until every provider/workspace
             // owner has completed checked teardown, even if teardown fails.
             budget.safety_only().charge(Cost::retained(1024))?;
+            // Source preparation completes before borrowing the quota owner:
+            // source/decoded-cache producers must never recursively take it.
+            let check = || budget.check();
+            let read_owner = reader.reserve_derived_read(&check)?;
+            let read_report = read_owner.report().clone();
+            let hit = super::reading::read(
+                &read_owner,
+                &prepared,
+                &identity,
+                &identity_sha256,
+                &schema_sha256,
+                &physical_schema.schema,
+                &view,
+                ipc_maximum,
+                &budget,
+            );
+            if let Ok(Some(hit)) = &hit {
+                // Keep the existing published fact even if read-owner cleanup
+                // fails; source verification has not yet authorized reuse.
+                published_generation = Some(json!({
+                    "generation":identity_sha256,"object":hit.object,
+                    "generationPublished":true,"generationReused":false,
+                    "publicationThisCommand":false,"reuseVerification":"pending",
+                }));
+            }
+            let hit = read_owner.finish(hit)?;
+            if let Some(hit) = hit {
+                // Original mutable source observations are still held, and are
+                // verified even though no WDC row was decoded or IPC re-written.
+                after_read()?;
+                reader.check_consumer(inv, &budget)?;
+                reader.verify_source()?;
+                let compatible_report = ReservationReport {
+                    configured_max_bytes: read_report.configured_max_bytes,
+                    existing: read_report.existing,
+                    additional_peak: AdditionalPeak::default(),
+                    shared_blob_additional_peak: 0,
+                    private_metadata_additional_peak: 0,
+                    admitted_peak_bytes: read_report.existing.total()?,
+                    coverage: read_report.coverage.clone(),
+                };
+                let mut disk_reservation = json!(compatible_report);
+                disk_reservation["readOnly"] = json!(true);
+                disk_reservation["overBudget"] = json!(read_report.over_budget);
+                let mut outcome = Outcome::new(json!({
+                    "generation":identity_sha256,
+                    "generationPublished":true,
+                    "generationReused":true,
+                    "publicationThisCommand":false,
+                    "sourceKind":"static",
+                    "snapshot":prepared.pin.id,
+                    "table":prepared.bundle.identity.name,
+                    "definitionSHA256":prepared.definition.sha256,
+                    "typedSchemaSHA256":schema_sha256,
+                    "object":hit.object,
+                    "representation":REPRESENTATION,
+                    "derivationVersion":DERIVATION_VERSION,
+                    "availableRows":hit.rows,
+                    "batchCount":hit.batches,
+                    "complete":identity.complete(),
+                    "missing":prepared.file.bytes.missing(),
+                    "unavailablePartitions":prepared.availability.skipped,
+                    "recordIdColumn":physical_schema.schema.fields().len() - 1,
+                    "recordIdOrder":"ascending",
+                    "resources":budget.logical_snapshot()?,
+                    "memoryBudget":budget.memory_snapshot()?,
+                    "diskReservation":disk_reservation,
+                    "diskRead":read_report,
+                }));
+                outcome.complete = identity.complete();
+                outcome.selection = json!({"snapshot":prepared.pin.id});
+                outcome.coverage = json!({"sourceKind":"static","complete":identity.complete(),"availableRows":hit.rows,"missing":prepared.file.bytes.missing()});
+                published_generation = Some(json!({
+                    "generation":identity_sha256,"object":hit.object,
+                    "generationPublished":true,"generationReused":true,
+                    "publicationThisCommand":false,
+                }));
+                return Ok(outcome);
+            }
+            // A miss has released its read owner. The normal write path below
+            // re-admits capacity and authenticates source before no-replace CAS.
             let check = || budget.check();
             let reservation = reader.reserve_derived_cache(
                 AdditionalPeak {
@@ -313,7 +444,12 @@ fn write_generation(
     let mut batches = 0usize;
     let written = (|| {
         let mut writer = FileWriter::try_new(&mut object_writer, schema).map_err(ipc_error)?;
-        while let Some(batch) = importer.next_batch()? {
+        loop {
+            #[cfg(test)]
+            IMPORTED_BATCH_REQUESTS.with(|count| count.set(count.get() + 1));
+            let Some(batch) = importer.next_batch()? else {
+                break;
+            };
             budget.check()?;
             if batch.ordinal() != batches {
                 return Err(fault(
@@ -356,29 +492,16 @@ fn write_generation(
     let published = json!({"object":object,"generationPublication":"not-confirmed"});
     let result: Result<Outcome> = (|| {
         budget.check()?;
-        let manifest = Manifest {
-            schema: "lycheedev.data-static-generation.v1",
+        let manifest = manifest(
+            prepared,
+            identity,
             identity_sha256,
-            source_kind: "static",
-            data: prepared.pin.data.as_ref().expect("validated data pin"),
-            table: &prepared.bundle.identity,
-            definition_sha256: &prepared.definition.sha256,
-            typed_schema_sha256: schema_sha256,
-            object: &object,
-            representation: REPRESENTATION,
-            derivation_version: DERIVATION_VERSION,
-            available_rows: rows,
-            batch_count: batches,
-            complete: identity.complete(),
-            missing: prepared.file.bytes.missing(),
-            unavailable_partitions: &prepared.availability.skipped,
-            record_id_column: visible_columns,
-            record_id_order: "ascending",
-            source_content: &prepared.file.reading["content"],
-            partial_content: &prepared.file.reading["partialContent"],
-            definition_object: &prepared.bundle.definition,
-            definition_manifest: &prepared.bundle.manifest,
-        };
+            schema_sha256,
+            &object,
+            rows,
+            batches,
+            visible_columns,
+        );
         let bytes = capture::json_bytes(&manifest, budget, MANIFEST_MAXIMUM, limit)?;
         let resources = budget.logical_snapshot()?;
         let memory_budget = budget.memory_snapshot()?;

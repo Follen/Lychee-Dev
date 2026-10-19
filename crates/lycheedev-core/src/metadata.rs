@@ -403,10 +403,7 @@ impl Metadata {
                     }
                     None if expected.is_none() => {
                         checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
-                            transaction.execute(
-                                INSERT_DOCUMENT,
-                                params![key, &raw],
-                            )
+                            transaction.execute(INSERT_DOCUMENT, params![key, &raw])
                         })?;
                     }
                     _ => {
@@ -498,10 +495,7 @@ impl Metadata {
                     4,
                 ));
             }
-            transaction.execute(
-                INSERT_DOCUMENT,
-                params![key, raw],
-            )?;
+            transaction.execute(INSERT_DOCUMENT, params![key, raw])?;
         }
         check()?;
         transaction.commit()?;
@@ -588,10 +582,7 @@ impl Metadata {
                 None => {
                     check()?;
                     checked_sql(control, until, &mut || {}, || {
-                        transaction.execute(
-                            INSERT_DOCUMENT,
-                            params![key, raw],
-                        )
+                        transaction.execute(INSERT_DOCUMENT, params![key, raw])
                     })?;
                 }
             }
@@ -782,10 +773,7 @@ impl Metadata {
                 if raw.len() > 1_048_576 {
                     return Err(ToolkitError::invalid("recovery document exceeds 1 MiB"));
                 }
-                transaction.execute(
-                    INSERT_DOCUMENT,
-                    params![key, raw],
-                )?;
+                transaction.execute(INSERT_DOCUMENT, params![key, raw])?;
             }
             for key in keys {
                 control.check()?;
@@ -1341,3 +1329,6 @@ mod listfile_controlled;
 
 #[cfg(test)]
 mod generation_tests;
+
+mod data_cache;
+pub use data_cache::DataCacheMetadata;

@@ -49,9 +49,37 @@ impl<'a> QuotaIntent<'a> {
             stage.rename(name, false)
         })
     }
+    /// One missing-body rebuild reservation. The original intent/completion and
+    /// all shared bodies remain untouched. Only this newly created handle can
+    /// later withdraw the fixed record after checked settlement. Its exact
+    /// `.repair.intent` suffix makes older strict intent readers fail closed;
+    /// it never invents a different blob digest or modifies the original pair.
+    pub fn publish_repair_record<C: FileControl>(
+        &mut self,
+        record: &[u8; 48],
+        control: &mut C,
+    ) -> Result<StagedPublication, C::Error> {
+        self.publish_record_named_using(
+            record,
+            ".repair.intent",
+            control,
+            File::sync_all,
+            |stage, name| stage.rename(name, false),
+        )
+    }
     fn publish_record_using<C: FileControl>(
         &mut self,
         record: &[u8; 48],
+        control: &mut C,
+        sync: impl FnOnce(&File) -> io::Result<()>,
+        rename: impl FnOnce(&mut Stage, &Path) -> io::Result<()>,
+    ) -> Result<StagedPublication, C::Error> {
+        self.publish_record_named_using(record, ".intent", control, sync, rename)
+    }
+    fn publish_record_named_using<C: FileControl>(
+        &mut self,
+        record: &[u8; 48],
+        suffix: &str,
         control: &mut C,
         sync: impl FnOnce(&File) -> io::Result<()>,
         rename: impl FnOnce(&mut Stage, &Path) -> io::Result<()>,
@@ -69,7 +97,7 @@ impl<'a> QuotaIntent<'a> {
         for byte in &record[16..] {
             write!(&mut name, "{byte:02x}").expect("String write");
         }
-        name.push_str(".intent");
+        name.push_str(suffix);
         control.check()?;
         self.stage.write_all(record).map_err(C::Error::from)?;
         control.check()?;
@@ -83,9 +111,12 @@ impl<'a> QuotaIntent<'a> {
     pub fn close(self) -> Vec<io::Error> {
         self.stage.close()
     }
-    /// Caller must first prove its body was NotPublished and all body stages
-    /// closed cleanly. This revokes only this newly created quota intent using
-    /// its original handle. Unknown never grants withdrawal authority.
+    /// Ordinary intents require a definitely unpublished body and clean body
+    /// stages. A repair reservation may also withdraw after fully authenticated
+    /// publication/reuse and all checked body closes, because its original
+    /// completed attribution remains. This revokes only this newly created fixed
+    /// record using its original handle, never a body or original completion.
+    /// Unknown marker/body publication never grants withdrawal authority.
     pub fn withdraw(self) -> Vec<io::Error> {
         self.withdraw_with(super::super::super::close_file)
     }

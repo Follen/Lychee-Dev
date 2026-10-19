@@ -15,7 +15,7 @@ use lycheedev_core::{
     Result, ToolkitError,
     control::OperationControl,
     evidence::{self, BlobRef},
-    metadata::Metadata,
+    metadata::DataCacheMetadata,
     storage::{self, ExclusiveLock},
 };
 use serde::{Serialize, de::DeserializeOwned};
@@ -158,19 +158,22 @@ impl Store<'_> {
     // Refresh CAS needs only document identity/generation. Go does not decode
     // or revalidate the old alias value here, unlike initial route preparation.
     pub(crate) fn generation(&self, key: &str) -> Result<Option<i64>> {
-        self.controlled(|control| {
-            match Metadata::read_document_raw_controlled_with_check(self.home, key, control, || {
-                self.check()
-            }) {
+        self.controlled(
+            |control| match DataCacheMetadata::read_document_raw_controlled_with_check(
+                self.home,
+                key,
+                control,
+                || self.check(),
+            ) {
                 Ok(document) => Ok(Some(document.generation)),
                 Err(error) if pure_expected(&error, "vault.record_missing") => Ok(None),
                 Err(error) => Err(error),
-            }
-        })
+            },
+        )
     }
     pub fn read<T: DeserializeOwned>(&self, key: &str) -> Result<Option<(T, i64)>> {
         self.controlled(|control| {
-            let raw = match Metadata::read_document_raw_controlled_with_check(
+            let raw = match DataCacheMetadata::read_document_raw_controlled_with_check(
                 self.home,
                 key,
                 control,
@@ -218,20 +221,14 @@ impl Store<'_> {
     /// None is a strict absent-document CAS, not an unconditional replace.
     pub fn put<T: Serialize>(&self, key: &str, value: &T, generation: Option<i64>) -> Result<()> {
         self.controlled(|control| {
-            let mut metadata =
-                Metadata::open_controlled_with_check(self.home, true, control, || self.check())?;
-            let result = if let Some(generation) = generation {
-                metadata
-                    .put_controlled_with_check(key, value, Some(generation), control, || {
-                        self.check()
-                    })
-                    .map(|_| ())
-            } else {
-                metadata
-                    .create_controlled_with_check(key, value, control, || self.check())
-                    .map(|_| ())
-            };
-            self.finish(result, metadata.close())
+            DataCacheMetadata::put_controlled_with_check(
+                self.home,
+                key,
+                value,
+                generation,
+                control,
+                || self.check(),
+            )
         })
     }
     pub fn read_blob<T: Serialize>(&self, reference: &T, maximum: usize) -> Result<Vec<u8>> {
@@ -270,6 +267,30 @@ impl Store<'_> {
                 &|| self.check(),
             )?;
             Ok(reference)
+        })
+    }
+    pub(crate) fn rebuild_blob(
+        &self,
+        bytes: &[u8],
+        maximum: usize,
+        expected: &BlobRef,
+    ) -> Result<BlobRef> {
+        self.check()?;
+        let result = lycheedev_core::workspace::data_disk::rebuild_shared_blob_with_check(
+            self.home,
+            bytes,
+            maximum,
+            expected,
+            self.control,
+            &|| self.check(),
+        );
+        let published = result.as_ref().ok().cloned();
+        self.finish(result, Ok(())).map_err(|mut error| {
+            if let Some(reference) = published {
+                error.details = serde_json::json!({"schema":"lycheedev.remote-rebuild-completed.v1",
+                    "cause":error.clone(), "publication":{"state":"published","reference":reference}});
+            }
+            error
         })
     }
     pub fn lease(&self, key: &str) -> Result<ExclusiveLock> {

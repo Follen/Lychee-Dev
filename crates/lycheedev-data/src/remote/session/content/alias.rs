@@ -204,6 +204,44 @@ fn create_conflict(result: Result<()>) -> Result<bool> {
     }
 }
 
+pub(super) enum Lookup<T> {
+    Unmapped,
+    Missing(evidence::BlobRef),
+    Hit(T),
+}
+impl<T> Lookup<T> {
+    fn into_option(self) -> Option<T> {
+        match self {
+            Self::Hit(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+/// Recheck the original association after source EOF and before CAS. Absence,
+/// changed source/key identity, or a different final digest is never repaired.
+pub(super) fn validate_rebuild(
+    store: &Store<'_>,
+    key: Option<&str>,
+    record: &EncodingRecord,
+    keys: &keys::Context,
+    expected: &evidence::BlobRef,
+) -> Result<()> {
+    let key = key.ok_or_else(integrity)?;
+    let entry = read_entry(store, key)?.ok_or_else(integrity)?;
+    if entry.content_key != record.content_key
+        || entry.blob.bytes < 0
+        || entry.blob.bytes as u64 != expected.bytes
+        || expected.bytes != record.decoded_bytes
+        || entry.blob.sha256 != expected.sha256
+        || entry.keys.kind != keys.source.kind
+        || entry.keys.sha256 != keys.source.sha256
+    {
+        return Err(integrity());
+    }
+    store.check()
+}
+
 #[derive(Default)]
 pub(in crate::remote::session) struct Memo {
     latest: Option<(evidence::BlobRef, Arc<SharedContent>)>,
@@ -262,11 +300,23 @@ impl Memo {
         stats: &mut Stats,
         budget: &Arc<Budget>,
     ) -> Result<Option<(evidence::BlobRef, Arc<SharedContent>)>> {
+        self.lookup(store, key, record, keys, stats, budget)
+            .map(Lookup::into_option)
+    }
+    pub(super) fn lookup(
+        &mut self,
+        store: &Store<'_>,
+        key: Option<&str>,
+        record: &EncodingRecord,
+        keys: &mut keys::Context,
+        stats: &mut Stats,
+        budget: &Arc<Budget>,
+    ) -> Result<Lookup<(evidence::BlobRef, Arc<SharedContent>)>> {
         let Some(reference) = reference(store, key, record, keys)? else {
-            return Ok(None);
+            return Ok(Lookup::Unmapped);
         };
         let Some(content) = self.verified(store, &reference, stats, budget, true)? else {
-            return Ok(None);
+            return Ok(Lookup::Missing(reference));
         };
         let mut digest = Md5::new();
         for block in content.bytes.chunks(65536) {
@@ -277,7 +327,7 @@ impl Memo {
         if casc::hex(&digest.finalize()) != record.content_key {
             return Err(integrity());
         }
-        Ok(Some((reference, content)))
+        Ok(Lookup::Hit((reference, content)))
     }
     pub(super) fn save(
         &mut self,

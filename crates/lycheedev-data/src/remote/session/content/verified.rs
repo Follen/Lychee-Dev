@@ -42,13 +42,13 @@ fn cached(
     keys: &mut keys::Context,
     stats: &mut Stats,
     budget: &Arc<Budget>,
-) -> Result<Option<evidence::VerifiedBlob>> {
+) -> Result<alias::Lookup<evidence::VerifiedBlob>> {
     let reference = {
         let _span = budget.phase(Phase::DecodedCacheLookup);
         alias::reference(store, key, record, keys)?
     };
     let Some(reference) = reference else {
-        return Ok(None);
+        return Ok(alias::Lookup::Unmapped);
     };
     let _span = budget.phase(Phase::DecodedCacheVerify);
     let size = usize::try_from(reference.bytes).map_err(|_| limit())?;
@@ -74,7 +74,7 @@ fn cached(
         move || owned_budget.check(),
     )?;
     let Some(blob) = found else {
-        return Ok(None);
+        return Ok(alias::Lookup::Missing(reference));
     };
     stats.blob_reads += 1;
     stats.blob_read_bytes += reference.bytes;
@@ -86,7 +86,7 @@ fn cached(
         }
     });
     match result {
-        Ok(()) => Ok(Some(blob)),
+        Ok(()) => Ok(alias::Lookup::Hit(blob)),
         Err(error) => blob.close_after(Err(error)),
     }
 }
@@ -177,7 +177,7 @@ pub(in crate::remote::session) fn read(
                 let _span = budget.phase(Phase::EncodedIdentityHash);
                 alias::key(files, &mut source, &record.content_key, keys, stats, budget)?
             };
-            if let Some(blob) = cached(
+            let missing = match cached(
                 &files.store,
                 identity.as_deref(),
                 record,
@@ -185,10 +185,14 @@ pub(in crate::remote::session) fn read(
                 stats,
                 budget,
             )? {
-                stats.hits += 1;
-                stats.reused_bytes += blob.reference().bytes;
-                return Verified::new(blob, key, budget);
-            }
+                alias::Lookup::Hit(blob) => {
+                    stats.hits += 1;
+                    stats.reused_bytes += blob.reference().bytes;
+                    return Verified::new(blob, key, budget);
+                }
+                alias::Lookup::Missing(reference) => Some(reference),
+                alias::Lookup::Unmapped => None,
+            };
             // Only the live codec chunks and fixed Core I/O buffer are actual
             // retained allocations. The separate asset consumer owns Go's
             // logical retained charge before capture; do not charge it twice.
@@ -209,15 +213,39 @@ pub(in crate::remote::session) fn read(
                 )?;
                 let owned_budget = budget.clone();
                 let _span = budget.phase(Phase::DecodedStreamPublish);
-                lycheedev_core::workspace::data_disk::publish_shared_blob_stream_with_check(
-                    files.store.home,
-                    &mut reader,
-                    record.decoded_bytes,
-                    maximum.max(1) as u64,
-                    files.store.control,
-                    move || owned_budget.check(),
-                    &safety,
-                )
+                if let Some(expected) = missing.as_ref() {
+                    let mut source = CheckedEof {
+                        reader: &mut reader,
+                        check: || {
+                            alias::validate_rebuild(
+                                &files.store,
+                                identity.as_deref(),
+                                record,
+                                keys,
+                                expected,
+                            )
+                        },
+                    };
+                    lycheedev_core::workspace::data_disk::rebuild_shared_blob_stream_with_check(
+                        files.store.home,
+                        &mut source,
+                        expected,
+                        maximum.max(1) as u64,
+                        files.store.control,
+                        move || owned_budget.check(),
+                        &safety,
+                    )
+                } else {
+                    lycheedev_core::workspace::data_disk::publish_shared_blob_stream_with_check(
+                        files.store.home,
+                        &mut reader,
+                        record.decoded_bytes,
+                        maximum.max(1) as u64,
+                        files.store.control,
+                        move || owned_budget.check(),
+                        &safety,
+                    )
+                }
             };
             stats.content_decode_calls += 1;
             let blob = match decode(keys) {
@@ -240,7 +268,7 @@ pub(in crate::remote::session) fn read(
             let result = (|| {
                 let _span = budget.phase(Phase::DecodedCacheCommit);
                 if alias::save_entry(&files.store, identity.as_deref(), record, &reference, keys)? {
-                    if let Some(winner) = cached(
+                    if let alias::Lookup::Hit(winner) = cached(
                         &files.store,
                         identity.as_deref(),
                         record,
@@ -275,6 +303,22 @@ pub(in crate::remote::session) fn read(
             "No available encoding for content",
         )
     }))
+}
+
+// Only a nonempty read returning real EOF authorizes the alias recheck. The
+// codec has already validated exact decoded size, CKey and encoded framing.
+struct CheckedEof<R, F> {
+    reader: R,
+    check: F,
+}
+impl<R: Read, F: FnMut() -> Result<()>> Read for CheckedEof<R, F> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.reader.read(buffer)?;
+        if n == 0 && !buffer.is_empty() {
+            (self.check)().map_err(std::io::Error::other)?;
+        }
+        Ok(n)
+    }
 }
 
 #[cfg(test)]

@@ -27,6 +27,13 @@ impl<'a, 'scope> Session<'a, 'scope> {
     }
 }
 impl FileScope for Session<'_, '_> {
+    fn reserve_derived_read<'reservation>(
+        &'reservation self,
+        check: &'reservation dyn Fn() -> Result<()>,
+    ) -> Result<lycheedev_core::workspace::data_disk::DerivedReadLease<'reservation>> {
+        self.check()?;
+        self.scope.admitted.reserve_derived_read(check)
+    }
     fn reserve_derived_cache<'reservation>(
         &'reservation self,
         peak: lycheedev_core::workspace::data_disk::AdditionalPeak,

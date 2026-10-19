@@ -81,11 +81,30 @@ pub(crate) struct ImportedBatch {
     _schema_owner: Arc<ImportedSchema>,
     _allocation: OwnedRetainedReservation,
 }
-struct ImportedSchema {
+/// Array-free reservation owner for consumers that attach its lifetime to
+/// Arrow's shared buffers. It must never own a RecordBatch or an ArrayRef.
+#[cfg(feature = "datafusion-qualification")]
+pub(crate) struct ImportedBatchAllocation {
+    _schema_owner: Arc<ImportedSchema>,
+    _allocation: OwnedRetainedReservation,
+}
+pub(crate) struct ImportedSchema {
     schema: SchemaRef,
     _allocation: OwnedRetainedReservation,
 }
 impl ImportedBatch {
+    #[cfg(feature = "datafusion-qualification")]
+    pub(crate) fn into_parts(self) -> (RecordBatch, UInt32Array, usize, ImportedBatchAllocation) {
+        (
+            self.records,
+            self.record_ids,
+            self.ordinal,
+            ImportedBatchAllocation {
+                _schema_owner: self._schema_owner,
+                _allocation: self._allocation,
+            },
+        )
+    }
     pub(crate) fn records(&self) -> &RecordBatch {
         &self.records
     }
@@ -362,6 +381,17 @@ impl<'table, 'body> TableImporter<'table, 'body> {
             pending: None,
             stopped: false,
         })
+    }
+    /// Conservative bound reserved before constructing each batch, including
+    /// Arrow builder growth overlap. A qualification snapshot can reject its
+    /// aggregate bound before asking the importer to allocate another batch.
+    #[cfg(feature = "datafusion-qualification")]
+    pub(crate) fn batch_reservation_bytes(&self) -> usize {
+        self.batch_reservation
+    }
+    #[cfg(feature = "datafusion-qualification")]
+    pub(crate) fn schema_owner(&self) -> Arc<ImportedSchema> {
+        self.schema.clone()
     }
     pub(crate) fn schema(&self) -> &SchemaRef {
         &self.schema.schema

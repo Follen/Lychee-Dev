@@ -180,3 +180,103 @@ fn evidence_or_arbitrary_namespace_cannot_create_quota_capability() {
     assert_eq!(fs::read_dir(f.0.join("blobs")).unwrap().count(), 0);
     directory.close().unwrap();
 }
+
+#[test]
+fn repair_reservation_uses_distinct_fixed_name_and_only_withdraws_original_handle() {
+    let f = Fixture::new();
+    let directory = Directory::open(&f.path()).unwrap();
+    let original = f.path().join(name());
+    fs::write(&original, record()).unwrap();
+    let completed = f.path().join(format!("{}.complete", "ab".repeat(32)));
+    fs::write(&completed, [7; 32]).unwrap();
+    let mut repair = QuotaIntent::create(&directory, &mut Uncontrolled).unwrap();
+    let handle = repair.stage.stage.file.as_ref().unwrap().as_raw_handle();
+    assert_eq!(
+        repair
+            .publish_repair_record(&record(), &mut Uncontrolled)
+            .unwrap(),
+        StagedPublication::Published
+    );
+    assert_eq!(
+        repair.stage.stage.file.as_ref().unwrap().as_raw_handle(),
+        handle
+    );
+    assert!(
+        f.path()
+            .join(format!("{}.repair.intent", "ab".repeat(32)))
+            .exists()
+    );
+    assert!(repair.withdraw().is_empty());
+    assert!(
+        !f.path()
+            .join(format!("{}.repair.intent", "ab".repeat(32)))
+            .exists()
+    );
+    assert_eq!(fs::read(original).unwrap(), record());
+    assert_eq!(fs::read(completed).unwrap(), [7; 32]);
+    directory.close().unwrap();
+}
+#[test]
+fn existing_repair_reservation_is_never_replaced_or_withdrawn_by_a_loser() {
+    let f = Fixture::new();
+    let directory = Directory::open(&f.path()).unwrap();
+    let path = f.path().join(format!("{}.repair.intent", "ab".repeat(32)));
+    fs::write(&path, record()).unwrap();
+    let mut repair = QuotaIntent::create(&directory, &mut Uncontrolled).unwrap();
+    assert_eq!(
+        repair
+            .publish_repair_record(&record(), &mut Uncontrolled)
+            .unwrap(),
+        StagedPublication::NotPublished
+    );
+    assert!(repair.withdraw().is_empty());
+    assert_eq!(fs::read(path).unwrap(), record());
+    directory.close().unwrap();
+}
+
+#[test]
+fn unknown_repair_marker_never_grants_withdrawal_or_retry() {
+    let f = Fixture::new();
+    let directory = Directory::open(&f.path()).unwrap();
+    let mut repair = QuotaIntent::create(&directory, &mut Uncontrolled).unwrap();
+    let private = f.path().join(repair.name());
+    let error = repair
+        .publish_record_named_using(
+            &record(),
+            ".repair.intent",
+            &mut Uncontrolled,
+            File::sync_all,
+            |_, _| Err(io::Error::other("unknown rename completion")),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("unknown rename completion"));
+    assert_eq!(repair.publication(), StagedPublication::Unknown);
+    assert!(!repair.withdraw().is_empty());
+    assert_eq!(fs::read(private).unwrap(), record());
+    directory.close().unwrap();
+}
+#[test]
+fn repair_withdraw_checked_close_failure_is_reported_after_original_disposition() {
+    let f = Fixture::new();
+    let directory = Directory::open(&f.path()).unwrap();
+    let mut repair = QuotaIntent::create(&directory, &mut Uncontrolled).unwrap();
+    repair
+        .publish_repair_record(&record(), &mut Uncontrolled)
+        .unwrap();
+    let errors = repair.withdraw_with(|file| {
+        drop(file);
+        Err(io::Error::other("repair checked close failed"))
+    });
+    assert_eq!(errors.len(), 1);
+    assert!(
+        errors[0]
+            .to_string()
+            .contains("repair checked close failed")
+    );
+    assert!(
+        !f.path()
+            .join(format!("{}.repair.intent", "ab".repeat(32)))
+            .exists()
+    );
+    directory.close().unwrap();
+}

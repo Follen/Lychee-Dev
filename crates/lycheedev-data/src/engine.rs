@@ -3,6 +3,7 @@
 //! This module is not a second SQL executor or an implicit default-route switch.
 mod aggregate;
 mod numeric;
+mod provider;
 mod values;
 
 use crate::{

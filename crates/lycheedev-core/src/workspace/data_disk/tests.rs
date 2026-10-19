@@ -303,6 +303,7 @@ fn checked_cleanup_preserves_repeated_close_events_and_consumes_owners_once() {
         "cache/data-derived-v1",
         "indexes/data-derived-v1",
         "tmp/data-derived-v1",
+        "state/data",
         "cache/data-derived-v1/objects",
         "indexes/data-derived-v1/generations",
         "tmp/data-derived-v1/staging",
@@ -346,7 +347,7 @@ fn checked_cleanup_preserves_repeated_close_events_and_consumes_owners_once() {
             Err(ToolkitError::new("test.close", "same close event", 5))
         },
     );
-    // One locks parent, three roots, and six children including Data attribution.
+    // One locks parent, four roots (including private metadata), and six children.
     assert_eq!(directory_calls, expected_directories.len());
     assert_eq!(
         closed_directories,

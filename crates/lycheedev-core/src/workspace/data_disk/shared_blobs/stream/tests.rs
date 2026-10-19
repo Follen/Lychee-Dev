@@ -422,3 +422,293 @@ fn registered_body_removed_before_digest_lock_is_not_republished_by_stream_reuse
             .exists()
     );
 }
+
+fn missing_stream(f: &Fixture) -> BlobRef {
+    let blob = f.publish(b"body").unwrap();
+    let reference = blob.reference().clone();
+    blob.close().unwrap();
+    fs::remove_file(evidence::blob_path(&f.0, &reference.sha256).unwrap()).unwrap();
+    reference
+}
+fn rebuild_stream(f: &Fixture, reader: &mut impl Read, expected: &BlobRef) -> Result<VerifiedBlob> {
+    rebuild_shared_blob_stream_with_check(
+        &f.0,
+        reader,
+        expected,
+        1000,
+        &OperationControl::default(),
+        || Ok(()),
+        &Meter,
+    )
+}
+#[test]
+fn missing_stream_rebuild_admits_presized_spool_and_exact_final_repair_peak() {
+    struct Observed<'a> {
+        f: &'a Fixture,
+        reference: &'a BlobRef,
+        input: Cursor<&'static [u8]>,
+        reads: usize,
+    }
+    impl Read for Observed<'_> {
+        fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+            self.reads += 1;
+            let control = OperationControl::default();
+            let owner = DerivedReservation::acquire_inner_recovering(
+                None,
+                &self.f.0,
+                0,
+                AdditionalPeak::default(),
+                &control,
+                None,
+                true,
+                Some(self.reference),
+            )
+            .unwrap();
+            assert_eq!(owner.report.existing.temporary_namespace_bytes, 4);
+            assert_eq!(owner.report.existing.shared_blob_bytes, 4);
+            assert_eq!(owner.report.existing.total().unwrap(), 88);
+            owner.finish(Ok(())).unwrap(); // The producer really holds no quota lock.
+            self.input.read(out)
+        }
+    }
+    let f = Fixture::new(1000);
+    let expected = missing_stream(&f);
+    f.limit(87);
+    let mut reader = Observed {
+        f: &f,
+        reference: &expected,
+        input: Cursor::new(b"body"),
+        reads: 0,
+    };
+    assert_eq!(
+        failed(rebuild_stream(&f, &mut reader, &expected)).code,
+        "vault.data_cache_budget_exceeded"
+    );
+    assert_eq!(reader.reads, 0);
+    f.limit(139); // completed4 + pair80 + spool4 + repair48 + stage4 = 140.
+    assert_eq!(
+        failed(rebuild_stream(&f, &mut reader, &expected)).code,
+        "vault.data_cache_budget_exceeded"
+    );
+    assert_eq!(reader.reads, 2);
+    f.assert_no_spool();
+    assert!(
+        !f.paths()
+            .shared_blobs()
+            .join(format!("{}.repair.intent", expected.sha256))
+            .exists()
+    );
+    f.limit(140);
+    rebuild_stream(&f, &mut Cursor::new(b"body"), &expected)
+        .unwrap()
+        .close()
+        .unwrap();
+    assert_eq!(f.usage().total().unwrap(), 84);
+    f.assert_no_spool();
+}
+#[test]
+fn missing_stream_source_eof_failure_wrong_sha_and_wrong_length_publish_nothing() {
+    struct BadEof(Cursor<&'static [u8]>);
+    impl Read for BadEof {
+        fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+            let n = self.0.read(out)?;
+            if n == 0 {
+                Err(io::Error::other("original EOF rejected"))
+            } else {
+                Ok(n)
+            }
+        }
+    }
+    let f = Fixture::new(1000);
+    let expected = missing_stream(&f);
+    for bytes in [b"fake".as_slice(), b"bod".as_slice(), b"body!".as_slice()] {
+        assert!(rebuild_stream(&f, &mut Cursor::new(bytes), &expected).is_err());
+        f.assert_no_spool();
+    }
+    let error = failed(rebuild_stream(
+        &f,
+        &mut BadEof(Cursor::new(b"body")),
+        &expected,
+    ));
+    assert!(error.message.contains("original EOF rejected"));
+    assert!(
+        !evidence::blob_path(&f.0, &expected.sha256)
+            .unwrap()
+            .exists()
+    );
+    assert!(
+        !f.paths()
+            .shared_blobs()
+            .join(format!("{}.repair.intent", expected.sha256))
+            .exists()
+    );
+    f.assert_no_spool();
+}
+#[test]
+fn missing_stream_revalidates_original_marker_and_unrelated_inventory_after_eof() {
+    struct Change<'a> {
+        f: &'a Fixture,
+        input: Cursor<&'static [u8]>,
+        path: PathBuf,
+        done: bool,
+    }
+    impl Read for Change<'_> {
+        fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+            let n = self.input.read(out)?;
+            if n == 0 && !self.done {
+                self.done = true;
+                fs::remove_file(&self.path)?;
+            }
+            let _ = self.f;
+            Ok(n)
+        }
+    }
+    for unrelated in [false, true] {
+        let f = Fixture::new(1000);
+        let other = publish_shared_blob_with_check(
+            &f.0,
+            b"other",
+            5,
+            &OperationControl::default(),
+            &|| Ok(()),
+        )
+        .unwrap();
+        let expected = missing_stream(&f);
+        let path = if unrelated {
+            evidence::blob_path(&f.0, &other.sha256).unwrap()
+        } else {
+            f.paths()
+                .shared_blobs()
+                .join(format!("{}.complete", expected.sha256))
+        };
+        let mut reader = Change {
+            f: &f,
+            input: Cursor::new(b"body"),
+            path,
+            done: false,
+        };
+        assert_eq!(
+            failed(rebuild_stream(&f, &mut reader, &expected)).code,
+            "vault.data_shared_blob_integrity"
+        );
+        assert!(reader.done);
+        assert!(
+            !evidence::blob_path(&f.0, &expected.sha256)
+                .unwrap()
+                .exists()
+        );
+        f.assert_no_spool();
+    }
+}
+#[test]
+fn missing_stream_concurrent_authenticated_winner_is_reused_after_eof() {
+    struct Winner<'a> {
+        f: &'a Fixture,
+        input: Cursor<&'static [u8]>,
+        done: bool,
+    }
+    impl Read for Winner<'_> {
+        fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+            let n = self.input.read(out)?;
+            if n == 0 && !self.done {
+                self.done = true;
+                evidence::publish_blob(&self.f.0, b"body", 4).map_err(io::Error::other)?;
+            }
+            Ok(n)
+        }
+    }
+    let f = Fixture::new(1000);
+    let expected = missing_stream(&f);
+    let mut reader = Winner {
+        f: &f,
+        input: Cursor::new(b"body"),
+        done: false,
+    };
+    rebuild_stream(&f, &mut reader, &expected)
+        .unwrap()
+        .close()
+        .unwrap();
+    assert!(reader.done);
+    assert_eq!(f.usage().total().unwrap(), 84);
+    f.assert_no_spool();
+    assert!(
+        !f.paths()
+            .shared_blobs()
+            .join(format!("{}.repair.intent", expected.sha256))
+            .exists()
+    );
+}
+
+#[test]
+fn published_stream_rebuild_late_stop_preserves_body_marker_and_original_pair() {
+    struct StopAtVerify(Arc<AtomicBool>);
+    impl CaptureAccounting for StopAtVerify {
+        fn check(&self) -> Result<()> {
+            Ok(())
+        }
+        fn admit_allocation(&self, _: usize) -> Result<()> {
+            Ok(())
+        }
+        fn admit_work(&self, _: usize) -> Result<()> {
+            Ok(())
+        }
+        fn blob_stream_phase(&self, phase: BlobStreamPhase) -> impl Drop + '_ {
+            if matches!(phase, BlobStreamPhase::FinalVerify) {
+                self.0.store(true, Ordering::Release);
+            }
+            struct Span;
+            impl Drop for Span {
+                fn drop(&mut self) {}
+            }
+            Span
+        }
+    }
+    let f = Fixture::new(1000);
+    let expected = missing_stream(&f);
+    let path = f.paths().shared_blobs();
+    let original = (
+        fs::read(path.join(format!("{}.intent", expected.sha256))).unwrap(),
+        fs::read(path.join(format!("{}.complete", expected.sha256))).unwrap(),
+    );
+    let stop = Arc::new(AtomicBool::new(false));
+    let checked = stop.clone();
+    let result = rebuild_shared_blob_stream_with_check(
+        &f.0,
+        &mut Cursor::new(b"body"),
+        &expected,
+        4,
+        &OperationControl::default(),
+        move || {
+            if checked.load(Ordering::Acquire) {
+                Err(ToolkitError::new(
+                    "fixture.repair_late_stop",
+                    "final verify stopped",
+                    7,
+                ))
+            } else {
+                Ok(())
+            }
+        },
+        &StopAtVerify(stop),
+    );
+    let error = failed(result);
+    assert_eq!(error.code, "fixture.repair_late_stop");
+    assert_eq!(error.details["publication"]["state"], "published");
+    assert_eq!(
+        fs::read(evidence::blob_path(&f.0, &expected.sha256).unwrap()).unwrap(),
+        b"body"
+    );
+    assert!(
+        path.join(format!("{}.repair.intent", expected.sha256))
+            .exists()
+    );
+    assert_eq!(
+        (
+            fs::read(path.join(format!("{}.intent", expected.sha256))).unwrap(),
+            fs::read(path.join(format!("{}.complete", expected.sha256))).unwrap()
+        ),
+        original
+    );
+    assert_eq!(f.usage().total().unwrap(), 136);
+    f.assert_no_spool();
+}

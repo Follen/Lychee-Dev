@@ -77,17 +77,20 @@ pub(super) fn materialize<'a>(
             let mut source =
                 files.open(key, physical.encoded_bytes.try_into().map_err(|_| limit())?)?;
             let alias = alias::key(files, &mut source, &record.content_key, keys, stats, budget)?;
-            if let Some((blob, content)) =
-                memo.read(&files.store, alias.as_deref(), record, keys, stats, budget)?
-            {
-                stats.hits += 1;
-                stats.reused_bytes += blob.bytes;
-                return Ok(Materialized {
-                    content,
-                    blob,
-                    encoding_key: key.clone(),
-                });
-            }
+            let missing =
+                match memo.lookup(&files.store, alias.as_deref(), record, keys, stats, budget)? {
+                    alias::Lookup::Hit((blob, content)) => {
+                        stats.hits += 1;
+                        stats.reused_bytes += blob.bytes;
+                        return Ok(Materialized {
+                            content,
+                            blob,
+                            encoding_key: key.clone(),
+                        });
+                    }
+                    alias::Lookup::Missing(reference) => Some(reference),
+                    alias::Lookup::Unmapped => None,
+                };
             let mut decode =
                 |keys: &keys::Context| -> Result<(blte::Content, RetainedReservation<'a>)> {
                     files.store.check()?;
@@ -152,7 +155,21 @@ pub(super) fn materialize<'a>(
                 Err(error) => return Err(error),
             };
             stats.extracted_bytes += content.bytes.len() as u64;
-            let blob = files.store.publish_blob(&content.bytes, maximum.max(1))?;
+            let blob = if let Some(expected) = missing.as_ref() {
+                if !content.complete() {
+                    return Err(fault(
+                        "vault.blob_integrity",
+                        4,
+                        "Incomplete content cannot rebuild a complete decoded alias",
+                    ));
+                }
+                alias::validate_rebuild(&files.store, alias.as_deref(), record, keys, expected)?;
+                files
+                    .store
+                    .rebuild_blob(&content.bytes, maximum.max(1), expected)?
+            } else {
+                files.store.publish_blob(&content.bytes, maximum.max(1))?
+            };
             if !content.complete() {
                 // These exact placeholders never establish a full-CKey alias.
                 budget.charge_split(Cost::retained(decoded), Cost::default())?;
@@ -173,6 +190,13 @@ pub(super) fn materialize<'a>(
             // readback; neither permanent work nor network charges are refunded.
             drop(content);
             drop(allocation);
+            let after_publish = |error| {
+                if missing.is_some() {
+                    completed_body(error, &blob)
+                } else {
+                    error
+                }
+            };
             memo.save(
                 &files.store,
                 alias.as_deref(),
@@ -181,9 +205,12 @@ pub(super) fn materialize<'a>(
                 keys,
                 stats,
                 budget,
-            )?;
-            let content = memo.published(&files.store, &blob, stats, budget)?;
-            files.store.check()?;
+            )
+            .map_err(after_publish)?;
+            let content = memo
+                .published(&files.store, &blob, stats, budget)
+                .map_err(after_publish)?;
+            files.store.check().map_err(after_publish)?;
             Ok(Materialized {
                 content,
                 blob,

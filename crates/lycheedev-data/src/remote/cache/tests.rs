@@ -348,9 +348,14 @@ fn cancelled_cache_publication_never_creates_the_document() {
     );
     let control = OperationControl::default();
     assert_eq!(
-        Metadata::read_document_raw_controlled(&fixture.home, "remote-config/cancelled", &control)
-            .unwrap_err()
-            .code,
+        DataCacheMetadata::read_document_raw_controlled_with_check(
+            &fixture.home,
+            "remote-config/cancelled",
+            &control,
+            || Ok(()),
+        )
+        .unwrap_err()
+        .code,
         "vault.record_missing"
     );
 }
@@ -510,9 +515,9 @@ fn raw_cached_observation_normalizes_strings_without_unescaping_time() {
 }
 
 #[test]
-fn cache_put_held_metadata_schema_is_bounded_by_independent_budget_deadline() {
+fn cache_put_held_data_quota_is_bounded_by_independent_budget_deadline() {
     let fixture = Fixture::new();
-    let guard = fixture.store().lease("metadata-schema").unwrap();
+    let guard = fixture.store().lease("data-derived-v1:quota").unwrap();
     let budget = Budget::new(
         crate::resource::Cost::defaults(),
         Instant::now() + Duration::from_millis(30),
@@ -524,7 +529,7 @@ fn cache_put_held_metadata_schema_is_bounded_by_independent_budget_deadline() {
         budget: Some(&budget),
     };
     let started = Instant::now();
-    let result = store.put("held/open", &true, None);
+    let result = store.put("remote-config/held/open", &true, None);
     let elapsed = started.elapsed();
     guard.close().unwrap();
     let error = result.unwrap_err();
@@ -534,13 +539,19 @@ fn cache_put_held_metadata_schema_is_bounded_by_independent_budget_deadline() {
     );
     fixture.control.check().unwrap();
     assert!(elapsed < Duration::from_millis(500), "{elapsed:?}");
-    assert!(fixture.store().read::<bool>("held/open").unwrap().is_none());
+    assert!(
+        fixture
+            .store()
+            .read::<bool>("remote-config/held/open")
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]
-fn cache_put_held_metadata_schema_observes_original_cancellation() {
+fn cache_put_held_data_quota_observes_original_cancellation() {
     let fixture = Fixture::new();
-    let guard = fixture.store().lease("metadata-schema").unwrap();
+    let guard = fixture.store().lease("data-derived-v1:quota").unwrap();
     let cancellation = fixture.control.tracked_cancel_handle().unwrap();
     let started = Instant::now();
     let result = std::thread::scope(|scope| {
@@ -548,7 +559,9 @@ fn cache_put_held_metadata_schema_observes_original_cancellation() {
             std::thread::sleep(Duration::from_millis(30));
             cancellation.cancel();
         });
-        let result = fixture.store().put("held/cancel", &true, None);
+        let result = fixture
+            .store()
+            .put("remote-config/held/cancel", &true, None);
         trigger.join().unwrap();
         result
     });
@@ -558,10 +571,10 @@ fn cache_put_held_metadata_schema_observes_original_cancellation() {
 }
 
 #[test]
-fn cache_put_held_metadata_schema_observes_independent_budget_cancellation() {
+fn cache_put_held_data_quota_observes_independent_budget_cancellation() {
     for tracked in [false, true] {
         let fixture = Fixture::new();
-        let guard = fixture.store().lease("metadata-schema").unwrap();
+        let guard = fixture.store().lease("data-derived-v1:quota").unwrap();
         let raw = Arc::new(AtomicBool::new(false));
         let other = OperationControl::default();
         let cancellation = other.tracked_cancel_handle().unwrap();
@@ -589,7 +602,7 @@ fn cache_put_held_metadata_schema_observes_independent_budget_cancellation() {
                     raw.store(true, Ordering::Release);
                 }
             });
-            let result = store.put("held/independent-cancel", &true, None);
+            let result = store.put("remote-config/held/independent-cancel", &true, None);
             trigger.join().unwrap();
             result
         });
@@ -607,10 +620,50 @@ fn cache_put_held_metadata_schema_observes_independent_budget_cancellation() {
         assert!(
             fixture
                 .store()
-                .read::<bool>("held/independent-cancel")
+                .read::<bool>("remote-config/held/independent-cancel")
                 .unwrap()
                 .is_none()
         );
+    }
+}
+
+#[test]
+fn cache_private_reads_wait_on_data_quota_with_the_independent_budget() {
+    let fixture = Fixture::new();
+    let key = "remote-config/held/read";
+    fixture.store().put(key, &true, None).unwrap();
+    let generation = fixture.store().generation(key).unwrap();
+    for read_value in [false, true] {
+        let holder = fixture.store().lease("data-derived-v1:quota").unwrap();
+        let budget = Budget::new(
+            crate::resource::Cost::defaults(),
+            Instant::now() + Duration::from_millis(30),
+            None,
+        );
+        let store = Store {
+            home: &fixture.home,
+            control: &fixture.control,
+            budget: Some(&budget),
+        };
+        let started = Instant::now();
+        let error = if read_value {
+            store.read::<bool>(key).map(|_| ())
+        } else {
+            store.generation(key).map(|_| ())
+        }
+        .unwrap_err();
+        assert_eq!(
+            (error.code.as_str(), error.exit_code),
+            ("records.query_resource_budget", 3)
+        );
+        assert!(started.elapsed() < Duration::from_millis(500));
+        fixture.control.check().unwrap();
+        assert!(
+            ExclusiveLock::resource(&fixture.home.join("locks"), "data-derived-v1:quota").is_err()
+        );
+        holder.close().unwrap();
+        assert_eq!(fixture.store().generation(key).unwrap(), generation);
+        assert!(fixture.store().read::<bool>(key).unwrap().unwrap().0);
     }
 }
 
@@ -757,121 +810,133 @@ fn bounded_blob_consumers_keep_independent_stop_and_do_not_rebill_cached_network
 }
 
 #[test]
-fn cache_sqlite_write_wait_keeps_independent_deadline_identity_and_metering() {
-    use std::cell::Cell;
-    struct ObservedValue<'a> {
-        serialized: &'a Cell<bool>,
-        budget: &'a Budget,
-    }
-    impl Serialize for ObservedValue<'_> {
-        fn serialize<S: serde::Serializer>(
-            &self,
-            serializer: S,
-        ) -> std::result::Result<S::Ok, S::Error> {
-            // Prove the actual Store consumer got past Metadata::open with a
-            // live Budget before trying its blocked BEGIN IMMEDIATE.
-            self.budget.check().unwrap();
-            self.serialized.set(true);
-            serializer.serialize_bool(true)
-        }
-    }
+fn cache_quota_wait_keeps_independent_deadline_identity_and_metering() {
     let fixture = Fixture::new();
+    fixture
+        .store()
+        .put("remote-config/held/owner", &true, None)
+        .unwrap();
     let original_deadline = fixture.control.deadline();
-    let mut holder = Metadata::open(&fixture.home, true).unwrap();
-    holder.create("held/owner", &true).unwrap();
-    let serialized = Cell::new(false);
-    let result = holder.consume::<bool, ()>("held/owner", |_| {
-        // Core's public callback holds an actual SQLite write transaction.
-        // This needs no test-only SQLite dependency or mocked Core wait.
-        let budget = Budget::new(
-            crate::resource::Cost::defaults(),
-            Instant::now() + Duration::from_millis(150),
-            None,
-        );
-        budget.charge_observed_network_bytes(17).unwrap();
-        let allocation = budget.reserve_retained(8).unwrap();
-        let store = Store {
-            home: &fixture.home,
-            control: &fixture.control,
-            budget: Some(&budget),
-        };
-        let started = Instant::now();
-        let error = store
-            .put(
-                "blocked/write",
-                &ObservedValue {
-                    serialized: &serialized,
-                    budget: &budget,
-                },
-                None,
-            )
-            .unwrap_err();
-        assert!(serialized.get());
-        assert!(Instant::now() >= budget.deadline);
-        assert!(started.elapsed() < Duration::from_secs(1));
-        assert_eq!(
-            (error.code.as_str(), error.exit_code),
-            ("records.query_resource_budget", 3)
-        );
-        fixture.control.check().unwrap();
-        assert_eq!(fixture.control.deadline(), original_deadline);
-        drop(allocation);
-        let used = budget.snapshot().unwrap();
-        assert_eq!((used.network_bytes, used.retained_bytes), (17, 0));
-        Err(error)
-    });
-    assert_eq!(result.unwrap_err().exit_code, 3);
-    // The holder rolls back its attempted consume; the blocked writer did not
-    // publish. Both real connections are explicitly closed before reopening.
-    assert!(holder.read::<bool>("held/owner").unwrap());
-    assert_eq!(holder.generation("blocked/write").unwrap(), None);
+    // The private backend shares the actual Data quota lease with publishers.
+    // Hold that public lock boundary without exposing its SQLite connection.
+    let holder = fixture.store().lease("data-derived-v1:quota").unwrap();
+    let budget = Budget::new(
+        crate::resource::Cost::defaults(),
+        Instant::now() + Duration::from_millis(150),
+        None,
+    );
+    budget.charge_observed_network_bytes(17).unwrap();
+    let allocation = budget.reserve_retained(8).unwrap();
+    let store = Store {
+        home: &fixture.home,
+        control: &fixture.control,
+        budget: Some(&budget),
+    };
+    let started = Instant::now();
+    let error = store
+        .put("remote-config/blocked/write", &true, None)
+        .unwrap_err();
+    assert!(Instant::now() >= budget.deadline);
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert_eq!(
+        (error.code.as_str(), error.exit_code),
+        ("records.query_resource_budget", 3)
+    );
+    fixture.control.check().unwrap();
+    assert_eq!(fixture.control.deadline(), original_deadline);
+    drop(allocation);
+    let used = budget.snapshot().unwrap();
+    assert_eq!((used.network_bytes, used.retained_bytes), (17, 0));
+    // A failed waiter cannot close another owner's quota lease.
+    assert!(ExclusiveLock::resource(&fixture.home.join("locks"), "data-derived-v1:quota").is_err());
     holder.close().unwrap();
-    fixture.store().put("blocked/write", &true, None).unwrap();
     assert!(
         fixture
             .store()
-            .read::<bool>("blocked/write")
+            .read::<bool>("remote-config/held/owner")
             .unwrap()
             .unwrap()
             .0
     );
+    assert_eq!(
+        fixture
+            .store()
+            .generation("remote-config/blocked/write")
+            .unwrap(),
+        None
+    );
+    fixture
+        .store()
+        .put("remote-config/blocked/write", &true, None)
+        .unwrap();
+    assert!(
+        fixture
+            .store()
+            .read::<bool>("remote-config/blocked/write")
+            .unwrap()
+            .unwrap()
+            .0
+    );
+    fixture
+        .store()
+        .lease("data-derived-v1:quota")
+        .unwrap()
+        .close()
+        .unwrap();
 }
 
 #[test]
-fn cache_sqlite_write_wait_keeps_original_deadline_before_longer_budget() {
+fn cache_quota_wait_keeps_original_deadline_before_longer_budget() {
     let fixture = Fixture::new();
-    let mut holder = Metadata::open(&fixture.home, true).unwrap();
-    holder.create("held/owner", &true).unwrap();
-    let error = holder
-        .consume::<bool, ()>("held/owner", |_| {
-            let control =
-                OperationControl::uncancelable(Instant::now() + Duration::from_millis(150));
-            let budget = Budget::new(
-                crate::resource::Cost::defaults(),
-                Instant::now() + Duration::from_secs(5),
-                None,
-            );
-            let store = Store {
-                home: &fixture.home,
-                control: &control,
-                budget: Some(&budget),
-            };
-            let error = store.put("blocked/deadline", &true, None).unwrap_err();
-            budget.check().unwrap();
-            assert_eq!(
-                (error.code.as_str(), error.exit_code),
-                ("command.deadline", 5)
-            );
-            Err(error)
-        })
+    fixture
+        .store()
+        .put("remote-config/held/owner", &true, None)
+        .unwrap();
+    let holder = fixture.store().lease("data-derived-v1:quota").unwrap();
+    let control = OperationControl::uncancelable(Instant::now() + Duration::from_millis(150));
+    let budget = Budget::new(
+        crate::resource::Cost::defaults(),
+        Instant::now() + Duration::from_secs(5),
+        None,
+    );
+    let store = Store {
+        home: &fixture.home,
+        control: &control,
+        budget: Some(&budget),
+    };
+    let started = Instant::now();
+    let error = store
+        .put("remote-config/blocked/deadline", &true, None)
         .unwrap_err();
+    budget.check().unwrap();
     assert_eq!(
         (error.code.as_str(), error.exit_code),
         ("command.deadline", 5)
     );
-    assert!(holder.read::<bool>("held/owner").unwrap());
-    assert_eq!(holder.generation("blocked/deadline").unwrap(), None);
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert!(ExclusiveLock::resource(&fixture.home.join("locks"), "data-derived-v1:quota").is_err());
     holder.close().unwrap();
+    assert!(
+        fixture
+            .store()
+            .read::<bool>("remote-config/held/owner")
+            .unwrap()
+            .unwrap()
+            .0
+    );
+    assert_eq!(
+        fixture
+            .store()
+            .generation("remote-config/blocked/deadline")
+            .unwrap(),
+        None
+    );
+    fixture
+        .store()
+        .lease("data-derived-v1:quota")
+        .unwrap()
+        .close()
+        .unwrap();
 }
 
 #[test]
@@ -915,7 +980,9 @@ fn original_stop_precedes_expired_independent_budget_and_cleanup_keeps_all_cause
         control: &fixture.control,
         budget: Some(&budget),
     };
-    let error = store.put("must-not-publish", &true, None).unwrap_err();
+    let error = store
+        .put("remote-config/must-not-publish", &true, None)
+        .unwrap_err();
     assert_eq!(
         (error.code.as_str(), error.exit_code),
         ("command.cancelled", 7)

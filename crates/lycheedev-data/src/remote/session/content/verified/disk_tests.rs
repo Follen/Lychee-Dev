@@ -145,3 +145,71 @@ fn real_blte_pull_can_publish_store_range_while_decoded_spool_is_capacity_owned(
 fn real_blte_ckey_failure_keeps_range_receipt_but_publishes_no_decoded_body() {
     exercise(false);
 }
+
+#[test]
+fn rebuild_business_eof_rechecks_alias_before_core_final_publication() {
+    let f = Fixture::new();
+    let control = OperationControl::default();
+    let expected = workspace::data_disk::publish_shared_blob_with_check(
+        &f.0,
+        b"body",
+        4,
+        &control,
+        &|| Ok(()),
+    )
+    .unwrap();
+    fs::remove_file(evidence::blob_path(&f.0, &expected.sha256).unwrap()).unwrap();
+    let budget = Arc::new(Budget::controlled(
+        Cost::defaults(),
+        control.deadline(),
+        control.clone(),
+    ));
+    let mut raw = Cursor::new(b"BLTE\0\0\0\0Nbody");
+    let keys = BTreeMap::new();
+    let ckey = Md5::digest(b"body").into();
+    let mut reader =
+        StreamingReader::new_incremental_with_check(&mut raw, 13, 4, ckey, &keys, &budget, None)
+            .unwrap();
+    let observed = std::cell::Cell::new(false);
+    let mut checked = CheckedEof {
+        reader: &mut reader,
+        check: || {
+            observed.set(true);
+            Err(ToolkitError::new(
+                "fixture.alias_changed",
+                "original alias changed",
+                4,
+            ))
+        },
+    };
+    let owned = budget.clone();
+    let result = workspace::data_disk::rebuild_shared_blob_stream_with_check(
+        &f.0,
+        &mut checked,
+        &expected,
+        4,
+        &control,
+        move || owned.check(),
+        &budget.safety_only(),
+    );
+    let error = match result {
+        Err(error) => error,
+        Ok(blob) => {
+            blob.close().unwrap();
+            panic!("changed alias published")
+        }
+    };
+    assert_eq!(error.code, "fixture.alias_changed");
+    assert!(observed.get());
+    assert!(
+        !evidence::blob_path(&f.0, &expected.sha256)
+            .unwrap()
+            .exists()
+    );
+    assert_eq!(
+        fs::read_dir(workspace::data_disk::DataCachePaths::new(&f.0).staging)
+            .unwrap()
+            .count(),
+        0
+    );
+}

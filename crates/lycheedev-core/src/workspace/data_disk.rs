@@ -18,13 +18,19 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
+mod metadata;
 mod publication;
+mod reading;
+pub(crate) use metadata::{MetadataQuota, MetadataReadQuota};
 mod shared_blobs;
 pub use publication::{DerivedObject, DerivedObjectWriter};
-pub use shared_blobs::publish_shared_blob_with_check;
+pub use reading::{DerivedObjectReader, DerivedReadLease, DerivedReadReport, MAX_GENERATION_BYTES};
 pub(crate) use shared_blobs::retention::protects_evidence_body;
 pub(crate) use shared_blobs::stream::StreamQuota;
-pub use shared_blobs::stream::publish_shared_blob_stream_with_check;
+pub use shared_blobs::stream::{
+    publish_shared_blob_stream_with_check, rebuild_shared_blob_stream_with_check,
+};
+pub use shared_blobs::{publish_shared_blob_with_check, rebuild_shared_blob_with_check};
 use storage::{Directory, ExclusiveLock, FileControl, FileCost};
 
 const QUOTA_RESOURCE: &str = "data-derived-v1:quota";
@@ -40,6 +46,8 @@ pub struct DataCachePaths {
     pub staging: PathBuf,
     pub spill: PathBuf,
     pub exports: PathBuf,
+    /// Private rebuildable Data SQLite main, journal and retained residuals.
+    pub metadata: PathBuf,
 }
 impl DataCachePaths {
     pub fn new(home: &Path) -> Self {
@@ -49,6 +57,7 @@ impl DataCachePaths {
             staging: home.join("tmp/data-derived-v1/staging"),
             spill: home.join("tmp/data-derived-v1/spill"),
             exports: home.join("tmp/data-derived-v1/exports"),
+            metadata: home.join("state/data"),
         }
     }
     pub fn object(&self, sha256: &str) -> Result<PathBuf> {
@@ -66,11 +75,12 @@ impl DataCachePaths {
             .expect("fixed generations parent")
             .join("shared-blobs-v1")
     }
-    fn roots(&self) -> [&Path; 3] {
+    fn roots(&self) -> [&Path; 4] {
         [
             self.objects.parent().expect("fixed objects parent"),
             self.generations.parent().expect("fixed generations parent"),
             self.staging.parent().expect("fixed staging parent"),
+            &self.metadata,
         ]
     }
 }
@@ -107,6 +117,7 @@ pub struct DerivedUsage {
     pub object_namespace_bytes: u64,
     pub generation_namespace_bytes: u64,
     pub temporary_namespace_bytes: u64,
+    pub private_metadata_namespace_bytes: u64,
     /// One logical shared body for each completed Data attribution.
     pub shared_blob_bytes: u64,
     /// Unfinished publication retains its entire body/stage upper bound.
@@ -119,6 +130,7 @@ impl DerivedUsage {
             self.object_namespace_bytes,
             self.generation_namespace_bytes,
             self.temporary_namespace_bytes,
+            self.private_metadata_namespace_bytes,
             self.shared_blob_bytes,
             self.retained_shared_peak_bytes,
         ])
@@ -137,10 +149,10 @@ impl Default for Coverage {
     fn default() -> Self {
         Self {
             total_data_coverage_complete: false,
-            accounted_scope: "versioned-derived-roots-plus-registered-shared-blobs-and-pending-peaks",
+            accounted_scope: "versioned-derived-roots-private-metadata-registered-shared-blobs-and-pending-peaks",
             not_yet_attributed: [
                 "historical/unregistered Data shared blobs and writers not using shared-blob admission",
-                "shared metadata database, sidecars and legacy raw-source references",
+                "historical shared metadata database, sidecars and legacy raw-source references",
                 "legacy Data staging/spill paths outside tmp/data-derived-v1",
                 "export temporaries outside tmp/data-derived-v1/exports",
             ],
@@ -157,6 +169,7 @@ pub struct ReservationReport {
     pub additional_peak: AdditionalPeak,
     /// Additional shared-body/stage peak, disjoint from the derived categories.
     pub shared_blob_additional_peak: u64,
+    pub private_metadata_additional_peak: u64,
     pub admitted_peak_bytes: u64,
     pub coverage: Coverage,
 }
@@ -243,6 +256,10 @@ pub struct DerivedReservation<'a> {
     directories: Vec<Directory>,
     charged: Cell<AdditionalPeak>,
     publication_receipts: RefCell<Vec<serde_json::Value>>,
+    metadata_read_only: bool,
+    // A single authenticated decoded alias may rebuild only this absent body.
+    // Its completed charge is retained; ordinary owners never carry this field.
+    recovery: Option<crate::evidence::BlobRef>,
 }
 impl<'a> DerivedReservation<'a> {
     pub(super) fn acquire(
@@ -274,6 +291,74 @@ impl<'a> DerivedReservation<'a> {
         supplemental: Option<&'a dyn Fn() -> Result<()>>,
         defer_admission: bool,
     ) -> Result<Self> {
+        Self::acquire_scoped(
+            resources,
+            home,
+            limit,
+            peak,
+            control,
+            supplemental,
+            defer_admission,
+            false,
+        )
+    }
+    fn acquire_scoped(
+        resources: Option<&'a DataResources>,
+        home: &Path,
+        limit: u64,
+        peak: AdditionalPeak,
+        control: &'a OperationControl,
+        supplemental: Option<&'a dyn Fn() -> Result<()>>,
+        defer_admission: bool,
+        metadata_read_only: bool,
+    ) -> Result<Self> {
+        Self::acquire_scoped_recovering(
+            resources,
+            home,
+            limit,
+            peak,
+            control,
+            supplemental,
+            defer_admission,
+            metadata_read_only,
+            None,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn acquire_inner_recovering(
+        resources: Option<&'a DataResources>,
+        home: &Path,
+        limit: u64,
+        peak: AdditionalPeak,
+        control: &'a OperationControl,
+        supplemental: Option<&'a dyn Fn() -> Result<()>>,
+        defer_admission: bool,
+        recovery: Option<&crate::evidence::BlobRef>,
+    ) -> Result<Self> {
+        Self::acquire_scoped_recovering(
+            resources,
+            home,
+            limit,
+            peak,
+            control,
+            supplemental,
+            defer_admission,
+            false,
+            recovery,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn acquire_scoped_recovering(
+        resources: Option<&'a DataResources>,
+        home: &Path,
+        limit: u64,
+        peak: AdditionalPeak,
+        control: &'a OperationControl,
+        supplemental: Option<&'a dyn Fn() -> Result<()>>,
+        defer_admission: bool,
+        metadata_read_only: bool,
+        recovery: Option<&crate::evidence::BlobRef>,
+    ) -> Result<Self> {
         let checks = Checks {
             control,
             supplemental,
@@ -294,6 +379,7 @@ impl<'a> DerivedReservation<'a> {
                 existing: DerivedUsage::default(),
                 additional_peak: peak,
                 shared_blob_additional_peak: 0,
+                private_metadata_additional_peak: 0,
                 admitted_peak_bytes: 0,
                 coverage: Coverage::default(),
             },
@@ -301,6 +387,8 @@ impl<'a> DerivedReservation<'a> {
             directories: Vec::new(),
             charged: Cell::new(AdditionalPeak::default()),
             publication_receipts: RefCell::new(Vec::new()),
+            metadata_read_only,
+            recovery: recovery.cloned(),
         };
         let result = (|| {
             // Existing directory-owner lock acquisition anchors the leaf to its
@@ -336,7 +424,15 @@ impl<'a> DerivedReservation<'a> {
             owner.report.configured_max_bytes =
                 super::configuration::read(home, control.control, &mut || control.extra())?
                     .data_cache_max_bytes;
-            owner.report.existing = inventory(&owner.home, &owner.paths, control)?;
+            owner.report.existing = if metadata_read_only {
+                owner.report.coverage.accounted_scope = "private-metadata-only-zero-growth-read";
+                metadata_inventory(&owner.paths, control)?
+            } else {
+                if let Some(reference) = recovery {
+                    shared_blobs::validate_recovery(&owner.home, &owner.paths, reference, control)?;
+                }
+                inventory_recovering(&owner.home, &owner.paths, control, recovery)?
+            };
             owner.report.admitted_peak_bytes = sum([owner.report.existing.total()?, additional])?;
             if !defer_admission
                 && owner.report.admitted_peak_bytes > owner.report.configured_max_bytes
@@ -363,7 +459,16 @@ impl<'a> DerivedReservation<'a> {
     /// not a replacement for reserving the caller's full peak BEFORE writing.
     /// Active bytes replace their reserved allowance: never actual + full peak.
     pub fn verify_usage(&self) -> Result<DerivedUsage> {
-        let current = inventory(&self.home, &self.paths, &self.control)?;
+        let current = if self.metadata_read_only {
+            metadata_inventory(&self.paths, &self.control)?
+        } else {
+            inventory_recovering(
+                &self.home,
+                &self.paths,
+                &self.control,
+                self.recovery.as_ref(),
+            )?
+        };
         if current.total()? > self.report.admitted_peak_bytes {
             return Err(ToolkitError::new(
                 "vault.data_cache_reservation_exceeded",
@@ -458,27 +563,63 @@ fn prepare_root(root: &Path, control: &Checks<'_>) -> Result<Directory> {
         ),
     }
 }
-fn inventory(home: &Path, paths: &DataCachePaths, control: &Checks<'_>) -> Result<DerivedUsage> {
+fn metadata_inventory(paths: &DataCachePaths, control: &Checks<'_>) -> Result<DerivedUsage> {
     let mut entries = 0;
     let mut files = 0;
-    let mut bytes = [0; 3];
+    let bytes = scan(
+        &paths.metadata,
+        &paths.staging,
+        &paths.metadata,
+        0,
+        &mut entries,
+        &mut files,
+        control,
+    )?;
+    Ok(DerivedUsage {
+        private_metadata_namespace_bytes: bytes,
+        files,
+        ..Default::default()
+    })
+}
+fn inventory(home: &Path, paths: &DataCachePaths, control: &Checks<'_>) -> Result<DerivedUsage> {
+    inventory_recovering(home, paths, control, None)
+}
+fn inventory_recovering(
+    home: &Path,
+    paths: &DataCachePaths,
+    control: &Checks<'_>,
+    recovery: Option<&crate::evidence::BlobRef>,
+) -> Result<DerivedUsage> {
+    let mut entries = 0;
+    let mut files = 0;
+    let mut bytes = [0; 4];
     for (index, root) in paths.roots().into_iter().enumerate() {
-        bytes[index] = scan(root, &paths.staging, 0, &mut entries, &mut files, control)?;
+        bytes[index] = scan(
+            root,
+            &paths.staging,
+            &paths.metadata,
+            0,
+            &mut entries,
+            &mut files,
+            control,
+        )?;
     }
     let (shared_blob_bytes, retained_shared_peak_bytes) =
-        shared_blobs::inventory(home, paths, control)?;
+        shared_blobs::inventory_recovering(home, paths, control, recovery)?;
     Ok(DerivedUsage {
         shared_blob_bytes,
         retained_shared_peak_bytes,
         object_namespace_bytes: bytes[0],
         generation_namespace_bytes: bytes[1],
         temporary_namespace_bytes: bytes[2],
+        private_metadata_namespace_bytes: bytes[3],
         files,
     })
 }
 fn scan(
     path: &Path,
     spool_root: &Path,
+    metadata_root: &Path,
     depth: usize,
     entries: &mut usize,
     files: &mut usize,
@@ -511,6 +652,7 @@ fn scan(
                 scan(
                     &entry.path(),
                     spool_root,
+                    metadata_root,
                     depth + 1,
                     entries,
                     files,
@@ -527,18 +669,24 @@ fn scan(
                                 token.len() == 32 && token.bytes().all(|b| b.is_ascii_hexdigit())
                             })
                     });
-                let file = if spool {
+                let file = if spool || path.starts_with(metadata_root) {
                     // A Data producer may hold this original WRITE/DELETE
                     // handle outside quota. Its pre-sized length cannot grow;
-                    // inspect attributes without weakening immutable readers.
+                    // private SQLite files use the same inspection rights so
+                    // SQLite contention is not misclassified as immutable CAS.
+                    // All owned metadata mutation is serialized by this quota.
+                    // Inspect attributes without weakening immutable readers.
                     let Some(file) = directory.open_optional_inspection_file_controlled(
                         &name,
                         &mut Controlled(control),
                     )?
                     else {
-                        // Only this exact temporary namespace permits a clean
-                        // concurrent owner close to make a listed entry absent.
-                        continue;
+                        if spool {
+                            continue;
+                        }
+                        return Err(ToolkitError::invalid(
+                            "private Data metadata entry disappeared during quota inventory",
+                        ));
                     };
                     file
                 } else {

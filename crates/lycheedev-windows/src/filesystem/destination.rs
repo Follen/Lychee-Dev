@@ -557,6 +557,28 @@ impl Directory {
             control,
         )
     }
+    /// Transfer this immutable Reader before a fallible post-open check. The
+    /// caller must immediately check its original scope and checked-close this
+    /// same File on every outcome. Existing reader APIs retain their historical
+    /// internal post-open check; this narrow ownership API adds no access rights.
+    pub fn open_optional_reader_owner_controlled<C: FileControl>(
+        &self,
+        name: &std::ffi::OsStr,
+        control: &mut C,
+    ) -> Result<Option<File>, C::Error> {
+        self.verify_controlled(control)?;
+        let file = relative_file_optional_owner(
+            self.parent_handle(),
+            name,
+            RelativeOpen::Reader,
+            true,
+            control,
+        )?;
+        if file.is_none() {
+            control.check()?;
+        }
+        Ok(file)
+    }
     /// Inspect size/kind without data-read permission or an allocation. This
     /// remains possible while another writer exists; opening admitted data for
     /// reading separately applies deny-write/delete ownership.

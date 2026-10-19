@@ -223,6 +223,10 @@ impl<'a> Scope<'a> {
 /// Only these source-neutral operations are lent to DB2/navigation consumers.
 /// It does not own or release workspace leases.
 pub(crate) trait FileScope {
+    fn reserve_derived_read<'reservation>(
+        &'reservation self,
+        check: &'reservation dyn Fn() -> Result<()>,
+    ) -> Result<lycheedev_core::workspace::data_disk::DerivedReadLease<'reservation>>;
     fn reserve_derived_cache<'reservation>(
         &'reservation self,
         peak: lycheedev_core::workspace::data_disk::AdditionalPeak,
@@ -251,6 +255,13 @@ pub(crate) trait FileScope {
     ) -> Result<()>;
 }
 impl FileScope for Scope<'_> {
+    fn reserve_derived_read<'reservation>(
+        &'reservation self,
+        check: &'reservation dyn Fn() -> Result<()>,
+    ) -> Result<lycheedev_core::workspace::data_disk::DerivedReadLease<'reservation>> {
+        self.check()?;
+        self.admitted.reserve_derived_read(check)
+    }
     fn reserve_derived_cache<'reservation>(
         &'reservation self,
         peak: lycheedev_core::workspace::data_disk::AdditionalPeak,
@@ -319,6 +330,26 @@ impl<'a, 'scope> SessionScope<'a, 'scope> {
     }
 }
 impl FileScope for SessionScope<'_, '_> {
+    fn reserve_derived_read<'reservation>(
+        &'reservation self,
+        check: &'reservation dyn Fn() -> Result<()>,
+    ) -> Result<lycheedev_core::workspace::data_disk::DerivedReadLease<'reservation>> {
+        self.check()?;
+        match &self.session {
+            Some(session) => session.reserve_derived_read(check),
+            None => self
+                .admitted
+                .as_ref()
+                .ok_or_else(|| {
+                    crate::fault(
+                        "records.file_query",
+                        4,
+                        "Reader initialization previously failed",
+                    )
+                })?
+                .reserve_derived_read(check),
+        }
+    }
     fn reserve_derived_cache<'reservation>(
         &'reservation self,
         peak: lycheedev_core::workspace::data_disk::AdditionalPeak,

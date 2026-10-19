@@ -102,6 +102,21 @@ impl DataResources {
             Some(check),
         )
     }
+    /// Borrow this same query owner for zero-growth derived reads. Existing
+    /// over-budget bytes remain visible; the returned capability exposes no
+    /// publication, staging or additional-write reservation methods.
+    pub fn read_derived_cache_with_check<'a>(
+        &'a self,
+        check: &'a dyn Fn() -> Result<()>,
+    ) -> Result<data_disk::DerivedReadLease<'a>> {
+        data_disk::DerivedReadLease::acquire(
+            self,
+            &self.home,
+            self.data_cache_max_bytes,
+            &self.control,
+            check,
+        )
+    }
     fn close_all(&mut self) -> Vec<ToolkitError> {
         let mut errors = Vec::new();
         while let Some(lease) = self.leases.pop() {

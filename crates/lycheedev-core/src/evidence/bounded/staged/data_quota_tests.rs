@@ -197,3 +197,78 @@ fn unauthenticated_existing_winner_does_not_turn_clean_not_published_into_retain
     assert!(!f.receipt("complete").exists());
     assert_eq!(fs::read_dir(f.paths().staging).unwrap().count(), 0);
 }
+
+fn missing_repair_target(f: &Fixture) -> BlobRef {
+    let reference = crate::workspace::data_disk::publish_shared_blob_with_check(
+        &f.0,
+        b"body",
+        4,
+        &OperationControl::default(),
+        &|| Ok(()),
+    )
+    .unwrap();
+    fs::remove_file(blob_path(&f.0, &reference.sha256).unwrap()).unwrap();
+    reference
+}
+#[test]
+fn missing_repair_real_shard_failure_withdraws_only_after_checked_cleanup() {
+    for fail_close in [false, true] {
+        let f = Fixture::new();
+        let expected = missing_repair_target(&f);
+        let original = (
+            fs::read(f.receipt("intent")).unwrap(),
+            fs::read(f.receipt("complete")).unwrap(),
+        );
+        let mut reader = FailShard {
+            input: Cursor::new(b"body"),
+            fail_close,
+        };
+        let result = crate::workspace::data_disk::rebuild_shared_blob_stream_with_check(
+            &f.0,
+            &mut reader,
+            &expected,
+            4,
+            &OperationControl::default(),
+            || Ok(()),
+            &Meter,
+        );
+        let error = match result {
+            Err(error) => error,
+            Ok(blob) => {
+                blob.close().unwrap();
+                panic!("fault did not execute")
+            }
+        };
+        assert_eq!(error.code, "fixture.final_write");
+        assert_eq!(f.receipt("repair.intent").exists(), fail_close);
+        assert_eq!(
+            (
+                fs::read(f.receipt("intent")).unwrap(),
+                fs::read(f.receipt("complete")).unwrap()
+            ),
+            original
+        );
+        assert_eq!(fs::read_dir(f.paths().staging).unwrap().count(), 0);
+        let retried = crate::workspace::data_disk::rebuild_shared_blob_stream_with_check(
+            &f.0,
+            &mut Cursor::new(b"body"),
+            &expected,
+            4,
+            &OperationControl::default(),
+            || Ok(()),
+            &Meter,
+        );
+        if fail_close {
+            assert!(error.details.to_string().contains("fixture.checked_close"));
+            match retried {
+                Err(error) => assert_eq!(error.code, "vault.data_shared_blob_recovery_required"),
+                Ok(blob) => {
+                    blob.close().unwrap();
+                    panic!("uncertain repair was replayed")
+                }
+            }
+        } else {
+            retried.unwrap().close().unwrap();
+        }
+    }
+}
