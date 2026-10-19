@@ -210,7 +210,12 @@ fn equal_close_failures_preserve_each_event_but_repeated_stops_are_deduplicated(
 fn config_file_is_bounded_and_missing_defaults_never_create_it() {
     let home = home();
     let control = OperationControl::default();
-    assert_eq!(config::read(&home, &control, &mut || Ok(())).unwrap(), 0);
+    assert_eq!(
+        configuration::read(&home, &control, &mut || Ok(()))
+            .unwrap()
+            .download_workers,
+        0
+    );
     assert!(!home.join("config.json").exists());
     fs::write(home.join("config.json"), vec![b' '; 65537]).unwrap();
     assert_eq!(
