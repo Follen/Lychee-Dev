@@ -12,6 +12,8 @@ use std::{
 thread_local! {
     // Witness actual digest progress, not an ordinal shared with later I/O.
     static MANIFEST_HASHED_BYTES: Cell<u64> = const { Cell::new(0) };
+    // Witness successful writes to the original final stage, before visibility.
+    static OBJECT_COPIED_BYTES: Cell<u64> = const { Cell::new(0) };
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -333,6 +335,8 @@ impl<'a> DerivedObjectWriter<'a> {
                 digest.update(&buffer[..count]);
                 final_stage.write_all(&buffer[..count])?;
                 remaining -= count as u64;
+                #[cfg(test)]
+                OBJECT_COPIED_BYTES.with(|progress| progress.set(object.bytes - remaining));
             }
             self.owner.control.check()?;
             let mut tail = [0];

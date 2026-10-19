@@ -273,9 +273,10 @@ fn uncommitted_stage_cleanup_error_keeps_path_and_exact_publication_state() {
     .unwrap_err();
     assert_eq!(error.code, "test.close");
     assert_eq!(error.details["path"], serde_json::json!(path));
+    let temporary: PathBuf = serde_json::from_value(error.details["temporary"].clone()).unwrap();
     assert_eq!(
-        error.details["temporary"],
-        serde_json::json!(PathBuf::from("managed/objects/shard/owned-private-stage"))
+        temporary,
+        PathBuf::from("managed/objects/shard/owned-private-stage")
     );
     assert_eq!(error.details["state"], "NotPublished");
     assert_eq!(error.details["cleanupComplete"], false);
@@ -335,25 +336,17 @@ fn independent_budget_stops_inside_final_object_copy_before_visibility() {
     let f = Fixture::new();
     let control = OperationControl::default();
     let resources = acquire(&f.0, Policy::Ordinary, &control).unwrap();
-    let paths = resources.data_cache_paths();
     let armed = Cell::new(false);
+    OBJECT_COPIED_BYTES.with(|progress| progress.set(0));
     let check = || {
-        if armed.get() {
-            for shard in fs::read_dir(&paths.objects)? {
-                let shard = shard?;
-                if shard.file_type()?.is_dir() {
-                    for file in fs::read_dir(shard.path())? {
-                        let file = file?;
-                        if file.metadata()?.len() >= 65536 {
-                            return Err(ToolkitError::new(
-                                "test.copy_budget",
-                                "stop within final copy",
-                                3,
-                            ));
-                        }
-                    }
-                }
-            }
+        // Directory-entry metadata can also observe an already-published final
+        // object. Only actual writes to this private final stage trigger here.
+        if armed.get() && OBJECT_COPIED_BYTES.with(Cell::get) >= 65536 {
+            return Err(ToolkitError::new(
+                "test.copy_budget",
+                "stop within final copy",
+                3,
+            ));
         }
         Ok(())
     };
@@ -365,9 +358,78 @@ fn independent_budget_stops_inside_final_object_copy_before_visibility() {
     writer.write_bytes(&raw).unwrap();
     armed.set(true);
     assert_eq!(writer.commit().unwrap_err().code, "test.copy_budget");
+    assert_eq!(OBJECT_COPIED_BYTES.with(Cell::get), 65536);
+    assert!(owner.publication_receipts.borrow().is_empty());
     assert!(!owner.paths.object(&storage::sha256(&raw)).unwrap().exists());
+    assert_eq!(owner.charged.get().objects, 0);
+    assert_eq!(owner.charged.get().staging, 0);
+    armed.set(false);
     assert_eq!(owner.verify_usage().unwrap().total().unwrap(), 0);
     owner.finish(Ok(())).unwrap();
+    resources.close().unwrap();
+}
+#[test]
+fn independent_budget_after_final_visibility_preserves_published_body_and_receipt() {
+    use std::cell::Cell;
+    let f = Fixture::new();
+    let control = OperationControl::default();
+    let resources = acquire(&f.0, Policy::Ordinary, &control).unwrap();
+    let raw = vec![7; 131073];
+    let digest = storage::sha256(&raw);
+    let path = resources.data_cache_paths().object(&digest).unwrap();
+    let armed = Cell::new(false);
+    let check = || {
+        if armed.get() && path.try_exists()? {
+            return Err(ToolkitError::new(
+                "test.after_visibility",
+                "stop after final object is visible",
+                3,
+            ));
+        }
+        Ok(())
+    };
+    let owner = resources
+        .reserve_derived_cache_with_check(peak(raw.len() as u64), &check)
+        .unwrap();
+    let mut writer = owner.begin_object(raw.len() as u64).unwrap();
+    writer.write_bytes(&raw).unwrap();
+    armed.set(true);
+    let error = writer.commit().unwrap_err();
+    assert_eq!(error.code, "test.after_visibility");
+    assert_eq!(error.details["cause"]["code"], "test.after_visibility");
+    assert_eq!(
+        error.details["publicationReceipts"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(error.details["publicationReceipts"][0]["kind"], "object");
+    assert_eq!(
+        error.details["publicationReceipts"][0]["path"],
+        serde_json::json!(path)
+    );
+    assert_eq!(
+        error.details["publicationReceipts"][0]["state"],
+        "Published"
+    );
+    assert_eq!(error.details["publicationReceipts"][0]["sha256"], digest);
+    assert_eq!(error.details["publicationReceipts"][0]["bytes"], raw.len());
+    assert_eq!(fs::read(&path).unwrap(), raw);
+    assert_eq!(owner.charged.get().objects, raw.len() as u64);
+    assert_eq!(owner.charged.get().staging, 0);
+    armed.set(false);
+    assert_eq!(
+        owner.verify_usage().unwrap().total().unwrap(),
+        raw.len() as u64
+    );
+    let error = owner.finish::<()>(Err(error)).unwrap_err();
+    assert_eq!(error.code, "test.after_visibility");
+    assert_eq!(
+        error.details["publicationReceipts"][0]["state"],
+        "Published"
+    );
+    assert_eq!(fs::read(&path).unwrap(), raw);
     resources.close().unwrap();
 }
 #[test]

@@ -13,10 +13,10 @@
 
 | 范围 | 已保存/已实现 | 当前证据和剩余门禁 |
 | --- | --- | --- |
-| Core/Data/Source基础 | 8c9：配置、Data派生目录/准入、真实Arrow cache prepare、Source Postcard Facts | 官方依赖fetch成功；新基础运行组仍受后续编译前置阻断，不能声称正确性通过 |
+| Core/Data/Source基础 | 8c9：配置、Data派生目录/准入、真实Arrow cache prepare、Source Postcard Facts | 官方依赖fetch成功；新基础运行验证未闭合：disk24通过2失败，其余组待终态，不能声称完整正确性通过 |
 | Live资源归属 | 5c60：私有 SessionOwner，native先于journal关闭与claim退役 | 六新增模型/真实service回归待跑；无新线程/daemon，真实客户端未验 |
-| 编译修复 | 6ea恢复原SYM SHA writer；2b400显式Data结果类型；66d空slice断言类型 | 8c9、6ea、2b400原编译失败保留；66d又在Core测试旧config调用报E0433，13组全部NOT_RUN。对应最小测试后继8bfe已发布并逐字节核验，未运行 |
-| Skill精简 | 308efa：22指南文件、工具与身份/历史fixture，43路径逐字节/ Git blob核验 | 六Node套件101/101通过；25文件/57链接独审通过。真实独立Agent前后任务待跑，文档缩短不是质量通过 |
+| 编译修复 | 6ea恢复原SYM SHA writer；2b400显式Data结果类型；66d空slice断言类型 | 8c9、6ea、2b400、66d原编译失败保留。8bfe实际check通过，config14通过；disk26为24通过2失败（copy注入阶段不确定、Windows路径文本）。其余独立组由原队列继续，尚无终态结果 |
+| Skill精简 | 308efa：22指南文件、工具与身份/历史fixture，43路径逐字节/ Git blob核验 | 六Node套件101/101通过；25文件/57链接独审通过。两类MODEL_ONLY独立前后任务均通过修正模型：恢复旧/新调用8/11次、身份核查旧/新6/7次，不能推断新版更优；原宽松模型接受非法wait=0的记录保留。四类真实CLI任务未跑，文档缩短不是质量通过 |
 | Source正式二进制证据 | 740a：已独审10文件工具片，完整Facts exporter与六场景适配 | 七Node套件382/382通过；新Rust exporter/Windows/性能待验证。历史v11读取与新v13显式分开 |
 | DataFusion适配资格 | 独立可选资格片已保存并静态独审，固定54.0.0/Arrow58.3.0 | 14数值/计划回归未编译未运行；默认依赖图不引入DF，生产执行器尚未切换；不能宣称适合或提速 |
 | Data磁盘后继 | shared blob准入15文件及stream spool14文件均有独立候选/复核 | 尚未完成全Data归属；实际运行、跨进程/错误路径与性能待验证，不宣称5GB已全闭合 |
@@ -42,7 +42,7 @@ Data CSV9693工具对旧63d与a860的单pair：cold401.4790/389.9062ms，warm349
 
 ## 5. 下一批及证据规则
 
-1. 最小Core测试编译修8bfe已发布并静态独审；正式运行尚待结果。固定SHA以正式wrapper执行 `check --workspace --all-targets --locked --offline --keep-going`，成功后原13组。保持原600秒/default stack，失败组的unknown辅助进程forced事实不改标。
+1. 优先闭合8bfe两项disk测试失败：实际copy进度注入须证明发布前中止，另保发布后失败的Published引用/状态与成品；路径断言按平台Path语义保完整目标。固定后继先正式check再受影响组，原8bfe其余独立组继续，各SHA证据分开。保持原600秒/default stack，历史unknown辅助进程forced事实不改标。
 2. 按已保存的固定SHA提供Source诊断工具和DF资格片的命令/依赖前置并执行验证；DF用显式非默认feature，先官方锁定依赖获取再资格测试，不能替代生产正确性/内存/性能门禁。
 3. Skill用固定前后指南、同一真实CLI/fixture做独立任务盲评；模型输入与真实CLI/客户端分别记证据。所有本机任务仍唯一串行队列。
 4. Data容量后继与Source Index候选完成独审后集中回归，再匹配唯一产品构建及同工作量性能。尚未完成的共享所有权/预算不能用文档承诺代替接线。

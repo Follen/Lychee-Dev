@@ -4,8 +4,9 @@
 
 ## 立即恢复编译与有限回归
 - [x] 保存8c9基础、5c60 Live SessionOwner和三次最小编译修；Skill308efa全部43路径读回一致。
-- [x] 固定Core data_resources旧config调用修复8bfe，独审和单文件读回通过；编译/运行待验证。
-- [ ] 正式all-targets --keep-going成功后执行原13组，含SYM和Live。8c9/6ea/2b400/66d原失败及未执行组不改标。
+- [x] 固定Core data_resources旧config调用修复8bfe，独审和单文件读回通过；check与config14已验证，其他组见下。
+- [x] 8bfe实际all-targets通过，config14通过；原8c9/6ea/2b400/66d编译失败保留。
+- [ ] 闭合8bfe disk24通过/2失败：实际copy注入点及发布后错误事实、Windows完整路径语义；其余11独立组原队列继续，待真实终态。
 - [x] 740a已保存Source Postcard正式证据工具并10文件读回；七Node套件382/382已过。
 - [ ] Rust exporter与完整六场景实际验证。
 - [x] 保存并静态独审DataFusion54可选资格片14项；默认依赖图隔离已核。
@@ -36,7 +37,8 @@
 ## E. CLI自描述与Skill
 - [x] 308efa Skill/CLI发现接线静态独审，六Node套件101/101通过；产品定义不变。
 - [ ] 同一封存CLI和fixture对固定前后Skill进行独立盲评：未知参数、版本/产品差异、空/partial、超能力任务；记录真实动作、结果、调用与误导。
-- [ ] 断连和Source/Live身份矛盾可先MODEL_ONLY决策验证，实际client仍另列；不以字数减少代替质量。
+- [x] 断连和Source/Live身份矛盾已做独立MODEL_ONLY前后评分；修正模型两版均过，原wait=0替身缺陷保留，不能证明新版收益。
+- [ ] 实际CLI/客户端仍另列验证；不以模型、字数或单次调用数代替质量。
 
 ## F. 实现与性能门禁，之后正式五循环
 - [ ] Source/Data结果质量≥f811及已认可增强；DBCD四修分批113 distinct pass/3旧ignore保持，完整产品矩阵仍需验。
