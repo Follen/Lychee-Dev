@@ -209,7 +209,7 @@ pub(in crate::remote::session) fn read(
                 )?;
                 let owned_budget = budget.clone();
                 let _span = budget.phase(Phase::DecodedStreamPublish);
-                evidence::publish_blob_stream_bounded_with_check(
+                lycheedev_core::workspace::data_disk::publish_shared_blob_stream_with_check(
                     files.store.home,
                     &mut reader,
                     record.decoded_bytes,
@@ -276,3 +276,6 @@ pub(in crate::remote::session) fn read(
         )
     }))
 }
+
+#[cfg(test)]
+mod disk_tests;

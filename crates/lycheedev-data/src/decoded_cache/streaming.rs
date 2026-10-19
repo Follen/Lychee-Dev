@@ -288,7 +288,7 @@ fn read_verified_content_source(
                         .with_policy(policy.with_keys(keys));
                         let owned_budget = budget.safety_only();
                         let _span = budget.phase(Phase::DecodedStreamPublish);
-                        let blob = evidence::publish_blob_stream_bounded_with_check(
+                        let blob = lycheedev_core::workspace::data_disk::publish_shared_blob_stream_with_check(
                             home,
                             &mut reader,
                             record.decoded_bytes,

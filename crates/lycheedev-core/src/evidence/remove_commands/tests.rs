@@ -7,6 +7,15 @@ use std::{
     time::{Duration, Instant},
 };
 thread_local! { static AFTER_CLOSE:RefCell<Option<Box<dyn FnOnce()->Result<()>>>>=RefCell::new(None); }
+thread_local! {
+    static BEFORE_BLOB_LEASE: RefCell<Option<Box<dyn FnOnce(&str, &OperationControl)>>> = RefCell::new(None);
+}
+pub(super) fn before_blob_lease(key: &str, control: &OperationControl) {
+    let hook = BEFORE_BLOB_LEASE.with(|slot| slot.borrow_mut().take());
+    if let Some(hook) = hook {
+        hook(key, control);
+    }
+}
 pub(super) fn after_blob_close() -> Result<()> {
     let hook = AFTER_CLOSE.with(|slot| slot.borrow_mut().take());
     hook.map_or(Ok(()), |hook| hook())
@@ -365,3 +374,5 @@ fn malformed_absent_selector_uses_manifest_lookup_after_workspace_admission() {
     assert_eq!(error.code, "vault.record_missing");
     f.cleanup();
 }
+
+mod data_shared;

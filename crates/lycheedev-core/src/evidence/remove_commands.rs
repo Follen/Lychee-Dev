@@ -145,7 +145,10 @@ pub(super) fn run(home: &Path, id: &str, control: &OperationControl) -> Result<V
             let (digest, _) = capture.signed_blob();
             // A blob lease precedes BEGIN IMMEDIATE, matching capture publishers'
             // order. The metadata-write lease is not mistaken for a SQLite fence.
-            let lease = historical_lease(home, &format!("blob:{digest}"), control)?;
+            let blob_key = format!("blob:{}", digest.to_ascii_lowercase());
+            #[cfg(test)]
+            tests::before_blob_lease(&blob_key, control);
+            let lease = historical_lease(home, &blob_key, control)?;
             let result = (|| {
                 if optional(writer.document(&key))?.is_none() {
                     prepare(home, writer, &key, id, &capture, control, &mut progress)?;
@@ -184,7 +187,7 @@ fn prepare(
             dependencies::retention::validate_removal_retention(&keep.bytes, &capture, control)?;
         }
         references(home, tx, key, &capture, control)?;
-        let shared = shared(tx, &capture, control)?;
+        let shared = shared(home, tx, &capture, control)?;
         // Preserve Rust's corruption-before-metadata-removal protection for a
         // blob which will be deleted. Shared blobs are not consumed by Go.
         let present = if shared {
@@ -257,7 +260,7 @@ fn complete(
         };
         let capture = authenticate_pending(&raw, id, control)?;
         references(home, tx, key, &capture, control)?;
-        let shared = shared(tx, &capture, control)?;
+        let shared = shared(home, tx, &capture, control)?;
         record.result.blob_shared = shared;
         if shared {
             progress.disposition = Some("shared");
@@ -332,6 +335,7 @@ fn references(
     ))
 }
 fn shared(
+    home: &Path,
     tx: &RemovalTransaction<'_>,
     target: &GoCaptureDecode,
     control: &OperationControl,
@@ -351,7 +355,11 @@ fn shared(
             return Ok(true);
         }
         if count < 1000 {
-            return Ok(false);
+            let (digest, bytes) = target.signed_blob();
+            // The same physical CAS body can have an independent Data owner.
+            // This read stays under our existing blob lease; it never takes
+            // quota (Data publishers use quota -> blob, not the reverse).
+            return workspace::data_disk::protects_evidence_body(home, digest, bytes, control);
         }
         after = last;
     }

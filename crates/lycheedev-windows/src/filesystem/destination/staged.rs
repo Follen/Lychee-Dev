@@ -368,3 +368,6 @@ mod rebuildable_cache_tests {
 
 #[cfg(test)]
 mod cache_slot_tests;
+
+mod quota_intent;
+pub use quota_intent::QuotaIntent;

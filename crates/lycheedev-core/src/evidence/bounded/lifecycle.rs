@@ -70,6 +70,7 @@ pub(super) fn publish_known(
         maximum,
         control,
         supplemental,
+        &mut BlobPublicationSettlement::new(),
         |stage, supplemental| {
             let mut remaining = reference.bytes;
             let mut buffer = [0u8; BLOCK];
@@ -114,6 +115,7 @@ pub(super) fn publish_bytes(
     maximum: u64,
     control: Option<&OperationControl>,
     supplemental: &mut impl FnMut() -> Result<()>,
+    settlement: &mut BlobPublicationSettlement,
 ) -> Result<()> {
     publish_stage(
         home,
@@ -122,6 +124,7 @@ pub(super) fn publish_bytes(
         maximum,
         control,
         supplemental,
+        settlement,
         |stage, supplemental| {
             for block in bytes.chunks(BLOCK) {
                 check_with(control, supplemental)?;
@@ -145,6 +148,7 @@ fn publish_stage<C: FnMut() -> Result<()>>(
     maximum: u64,
     control: Option<&OperationControl>,
     supplemental: &mut C,
+    settlement: &mut BlobPublicationSettlement,
     copy: impl FnOnce(&mut StagedFile<'_>, &mut C) -> Result<()>,
 ) -> Result<()> {
     check_with(control, supplemental)?;
@@ -169,6 +173,7 @@ fn publish_stage<C: FnMut() -> Result<()>>(
                 supplemental,
             },
         )?);
+        settlement.stage_acquired();
         publication.stage_name = Some(stage.as_ref().expect("owned stage").name().into());
         check_with(control, supplemental)?;
         copy(stage.as_mut().expect("owned stage"), supplemental)?;
@@ -197,9 +202,13 @@ fn publish_stage<C: FnMut() -> Result<()>>(
         }
         Ok(())
     })();
+    settlement.publication = publication.state;
+    settlement.reused = publication.reused;
     let mut result = result;
     if let Some(owned) = stage.take() {
-        for error in owned.close() {
+        let cleanup = owned.close();
+        settlement.stage_closed(cleanup.is_empty());
+        for error in cleanup {
             result =
                 crate::metadata::historical_write::finish_historical(result, Err(error.into()));
         }

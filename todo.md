@@ -14,7 +14,8 @@
 
 ## A. Home、配置与全Data容量
 - [x] 实现decimal5GB可配置基础、派生目录与至少真实cache prepare消费者；初批运行验证未闭。
-- [ ] 验证共享blob准入及decoded spool精确预留后继，故障/取消/跨进程/cleanup与实际成本均须实测。
+- [x] 整合共享blob、decoded spool和CAP独立引用保护28代码路径，静态独审通过；保留发布后错误receipt与278测试修正。
+- [ ] 实际验证56新增回归和既有受影响消费者；故障/取消/跨进程/cleanup与预留实际成本均待测。
 - [ ] 完整接入Data归属：下载、共享blob去重、Arrow/索引、staging/导出峰值、CAP和SQLite/WAL/SHM/历史记录；明确共享跨域归属和去重，不把局部准入称总硬上限。
 - [ ] 可重建冷缓存淘汰必须保护活跃lease与证据引用；旧超额/缩配置拒新增并报告，不删证据。验证导入峰值，避免raw/IPC/Parquet长期三副本。
 

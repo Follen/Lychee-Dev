@@ -146,6 +146,19 @@ fn relative_file_optional<C: FileControl>(
     optional: bool,
     control: &mut C,
 ) -> Result<Option<File>, C::Error> {
+    let file = relative_file_optional_owner(parent, name, kind, optional, control)?;
+    control.check()?;
+    Ok(file)
+}
+// Only narrow callers that immediately own checked cleanup may omit the
+// post-acquisition check. Existing APIs retain that check in the wrapper above.
+fn relative_file_optional_owner<C: FileControl>(
+    parent: &File,
+    name: &std::ffi::OsStr,
+    kind: RelativeOpen,
+    optional: bool,
+    control: &mut C,
+) -> Result<Option<File>, C::Error> {
     if name.len() > 32768 {
         return Err(invalid("relative name exceeds admission").into());
     }
@@ -256,7 +269,6 @@ fn relative_file_optional<C: FileControl>(
         // a file handle. A failed open has not transferred an owner to us.
         let error = io::Error::from_raw_os_error(unsafe { RtlNtStatusToDosError(status) } as i32);
         if optional && error.kind() == io::ErrorKind::NotFound {
-            control.check()?;
             return Ok(None);
         }
         return Err(error.into());
@@ -264,7 +276,6 @@ fn relative_file_optional<C: FileControl>(
     // SAFETY: NT_SUCCESS supplies one valid owned handle, transferred exactly
     // once into File. No second raw-handle owner is constructed or retained.
     let file = unsafe { File::from_raw_handle(raw.0) };
-    control.check()?;
     Ok(Some(file))
 }
 
@@ -551,6 +562,28 @@ impl Directory {
     /// reading separately applies deny-write/delete ownership.
     pub fn metadata(&self, name: &std::ffi::OsStr) -> io::Result<std::fs::Metadata> {
         self.metadata_controlled(name, &mut Uncontrolled)
+    }
+    /// Attribute-only owner for a caller that must inspect a live private file
+    /// and explicitly check its close. This grants no data-read, write or delete
+    /// access, follows no reparse leaf, and retains the established Inspect share
+    /// flags. The caller validates regular-file type and measured logical length.
+    pub fn open_optional_inspection_file_controlled<C: FileControl>(
+        &self,
+        name: &std::ffi::OsStr,
+        control: &mut C,
+    ) -> Result<Option<File>, C::Error> {
+        self.verify_controlled(control)?;
+        let file = relative_file_optional_owner(
+            self.parent_handle(),
+            name,
+            RelativeOpen::Inspect,
+            true,
+            control,
+        )?;
+        if file.is_none() {
+            control.check()?;
+        }
+        Ok(file)
     }
     pub fn metadata_controlled<C: FileControl>(
         &self,
@@ -1294,7 +1327,7 @@ mod tests {
 mod admission_tests;
 
 mod staged;
-pub use staged::{CacheReplaceAttempt, PrivateSpool, StagedFile, StagedPublication};
+pub use staged::{CacheReplaceAttempt, PrivateSpool, QuotaIntent, StagedFile, StagedPublication};
 
 #[cfg(test)]
 #[path = "destination/asset_publication_tests.rs"]

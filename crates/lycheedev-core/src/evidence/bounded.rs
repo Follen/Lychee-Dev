@@ -19,8 +19,11 @@ use std::{
 
 pub(super) mod lifecycle;
 use lifecycle::{PathControl, finish_controls, open_workspace};
+mod publication_attempt;
+pub(crate) use publication_attempt::{BlobPublicationSettlement, publish_blob_attempt_with_check};
 mod staged;
 pub use staged::publish_blob_stream_bounded_with_check;
+pub(crate) use staged::{StreamPublicationSettlement, publish_data_blob_stream_with_check};
 
 mod optional;
 pub(super) use optional::verify_historical_blob_optional;
@@ -812,6 +815,23 @@ fn publish_internal_with_check(
     control: Option<&OperationControl>,
     supplemental: &mut impl FnMut() -> Result<()>,
 ) -> Result<Value> {
+    publish_internal_observed(
+        home,
+        bytes,
+        maximum,
+        control,
+        supplemental,
+        &mut BlobPublicationSettlement::new(),
+    )
+}
+fn publish_internal_observed(
+    home: &Path,
+    bytes: &[u8],
+    maximum: usize,
+    control: Option<&OperationControl>,
+    supplemental: &mut impl FnMut() -> Result<()>,
+    settlement: &mut BlobPublicationSettlement,
+) -> Result<Value> {
     check_with(control, supplemental)?;
     open_workspace(home, control, supplemental)?;
     if bytes.len() > maximum || bytes.len() as u64 > MAX_CAPTURE_BYTES {
@@ -833,8 +853,16 @@ fn publish_internal_with_check(
             control.map(OperationControl::deadline),
             || check_with(control, supplemental),
         )?;
-        let result = publish_locked_with_check(home, bytes, maximum, digest, control, supplemental)
-            .and_then(|reference| serde_json::to_value(reference).map_err(Into::into));
+        let result = publish_locked_observed(
+            home,
+            bytes,
+            maximum,
+            digest,
+            control,
+            supplemental,
+            settlement,
+        )
+        .and_then(|reference| serde_json::to_value(reference).map_err(Into::into));
         crate::metadata::historical_write::finish_historical(result, guard.close())
     })();
     let result = optional::finish_directory(result, home_owner);
@@ -848,18 +876,39 @@ pub(super) fn publish_locked_with_check(
     control: Option<&OperationControl>,
     supplemental: &mut impl FnMut() -> Result<()>,
 ) -> Result<BlobRef> {
+    publish_locked_observed(
+        home,
+        bytes,
+        maximum,
+        digest,
+        control,
+        supplemental,
+        &mut BlobPublicationSettlement::new(),
+    )
+}
+fn publish_locked_observed(
+    home: &Path,
+    bytes: &[u8],
+    maximum: usize,
+    digest: String,
+    control: Option<&OperationControl>,
+    supplemental: &mut impl FnMut() -> Result<()>,
+    settlement: &mut BlobPublicationSettlement,
+) -> Result<BlobRef> {
     check_with(control, supplemental)?;
     let path = blob_path(home, &digest)?;
     let reference = BlobRef {
         sha256: digest,
         bytes: bytes.len() as u64,
     };
+    settlement.reference = Some(reference.clone());
     storage::guard_path_with_check(home, &path, || check_with(control, supplemental))?;
     if path.exists() {
         // This reference was just computed from the admitted body. Verify it
         // directly instead of allocating and re-parsing a temporary JSON Value.
         let opened = open_blob_with_check(home, reference.clone(), control, supplemental)?;
         scan_blob_with_check(opened, control, supplemental, |_| Ok(()))?;
+        settlement.reused = true;
     } else {
         let shard = path.parent().expect("blob shard");
         // Only create the single known shard; do not recursively follow an
@@ -878,6 +927,7 @@ pub(super) fn publish_locked_with_check(
             maximum as u64,
             control,
             supplemental,
+            settlement,
         )?;
     }
     check_with(control, supplemental)?;

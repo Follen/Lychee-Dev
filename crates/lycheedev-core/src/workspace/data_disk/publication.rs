@@ -37,7 +37,7 @@ impl Kind {
     }
 }
 impl DerivedReservation<'_> {
-    fn prepare_publication_receipt(&self) -> Result<()> {
+    pub(super) fn prepare_publication_receipt(&self) -> Result<()> {
         self.control.check()?;
         let mut receipts = self.publication_receipts.borrow_mut();
         if receipts.len() >= 1024 {
@@ -55,7 +55,7 @@ impl DerivedReservation<'_> {
             )
         })
     }
-    fn record_publication(
+    pub(super) fn record_publication(
         &self,
         state: StagedPublication,
         kind: &str,
@@ -447,7 +447,7 @@ impl Write for DerivedObjectWriter<'_> {
     }
 }
 
-fn verify_existing(
+pub(super) fn verify_existing(
     parent: &Directory,
     name: &OsStr,
     expected_bytes: u64,
@@ -492,7 +492,7 @@ fn verify_existing(
     })();
     finish_file(file, result, control)
 }
-fn publication_result<T>(
+pub(super) fn publication_result<T>(
     result: Result<T>,
     state: StagedPublication,
     destination: PathBuf,

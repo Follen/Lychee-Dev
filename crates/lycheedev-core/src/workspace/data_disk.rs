@@ -1,7 +1,7 @@
-//! First Data disk owner: admission for the explicitly versioned derived roots.
+//! Data disk admission for derived roots plus explicitly registered shared blobs.
 //!
 //! This is NOT yet a total-Data hard cap. Shared Data download/decoded/evidence
-//! blobs and metadata need authenticated domain/reference attribution before
+//! blobs outside registered publishers and metadata need domain attribution before
 //! they can join this budget without charging Source/Live or counting a blob
 //! twice. No existing Data path is moved, adopted, evicted, or deleted here.
 //!
@@ -19,7 +19,12 @@ use std::{
     path::{Path, PathBuf},
 };
 mod publication;
+mod shared_blobs;
 pub use publication::{DerivedObject, DerivedObjectWriter};
+pub use shared_blobs::publish_shared_blob_with_check;
+pub(crate) use shared_blobs::retention::protects_evidence_body;
+pub(crate) use shared_blobs::stream::StreamQuota;
+pub use shared_blobs::stream::publish_shared_blob_stream_with_check;
 use storage::{Directory, ExclusiveLock, FileControl, FileCost};
 
 const QUOTA_RESOURCE: &str = "data-derived-v1:quota";
@@ -53,6 +58,13 @@ impl DataCachePaths {
             ));
         }
         Ok(self.objects.join(&sha256[..2]).join(&sha256[2..]))
+    }
+    /// Monotonic Data attribution and crash-retained reservations for shared CAS bodies.
+    pub fn shared_blobs(&self) -> PathBuf {
+        self.generations
+            .parent()
+            .expect("fixed generations parent")
+            .join("shared-blobs-v1")
     }
     fn roots(&self) -> [&Path; 3] {
         [
@@ -95,6 +107,10 @@ pub struct DerivedUsage {
     pub object_namespace_bytes: u64,
     pub generation_namespace_bytes: u64,
     pub temporary_namespace_bytes: u64,
+    /// One logical shared body for each completed Data attribution.
+    pub shared_blob_bytes: u64,
+    /// Unfinished publication retains its entire body/stage upper bound.
+    pub retained_shared_peak_bytes: u64,
     pub files: usize,
 }
 impl DerivedUsage {
@@ -103,6 +119,8 @@ impl DerivedUsage {
             self.object_namespace_bytes,
             self.generation_namespace_bytes,
             self.temporary_namespace_bytes,
+            self.shared_blob_bytes,
+            self.retained_shared_peak_bytes,
         ])
     }
 }
@@ -119,9 +137,9 @@ impl Default for Coverage {
     fn default() -> Self {
         Self {
             total_data_coverage_complete: false,
-            accounted_scope: "versioned-derived-namespace-logical-bytes",
+            accounted_scope: "versioned-derived-roots-plus-registered-shared-blobs-and-pending-peaks",
             not_yet_attributed: [
-                "shared Data download/decoded/evidence blobs (deduplicated domain references required)",
+                "historical/unregistered Data shared blobs and writers not using shared-blob admission",
                 "shared metadata database, sidecars and legacy raw-source references",
                 "legacy Data staging/spill paths outside tmp/data-derived-v1",
                 "export temporaries outside tmp/data-derived-v1/exports",
@@ -137,6 +155,8 @@ pub struct ReservationReport {
     pub configured_max_bytes: u64,
     pub existing: DerivedUsage,
     pub additional_peak: AdditionalPeak,
+    /// Additional shared-body/stage peak, disjoint from the derived categories.
+    pub shared_blob_additional_peak: u64,
     pub admitted_peak_bytes: u64,
     pub coverage: Coverage,
 }
@@ -202,7 +222,7 @@ fn join<T>(
 fn budget_error(report: &ReservationReport) -> ToolkitError {
     ToolkitError::new(
         "vault.data_cache_budget_exceeded",
-        "Data derived admission exceeds configured disk budget; existing data is preserved",
+        "Data accounted-disk admission exceeds configured budget; existing data is preserved",
         3,
     )
     .with_details(
@@ -214,7 +234,8 @@ fn budget_error(report: &ReservationReport) -> ToolkitError {
 /// grant deletion rights or silently enroll legacy writers. Callers must stop
 /// writing before finish; dropping is fallback release, never filesystem cleanup.
 pub struct DerivedReservation<'a> {
-    _resources: &'a DataResources,
+    _resources: Option<&'a DataResources>,
+    home: PathBuf,
     control: Checks<'a>,
     paths: DataCachePaths,
     report: ReservationReport,
@@ -232,6 +253,27 @@ impl<'a> DerivedReservation<'a> {
         control: &'a OperationControl,
         supplemental: Option<&'a dyn Fn() -> Result<()>>,
     ) -> Result<Self> {
+        Self::acquire_inner(
+            Some(resources),
+            home,
+            limit,
+            peak,
+            control,
+            supplemental,
+            false,
+        )
+    }
+    // Shared-byte publication already runs in its caller's admitted session (or
+    // a target/config operation). Never reacquire query slots from inside it.
+    fn acquire_inner(
+        resources: Option<&'a DataResources>,
+        home: &Path,
+        limit: u64,
+        peak: AdditionalPeak,
+        control: &'a OperationControl,
+        supplemental: Option<&'a dyn Fn() -> Result<()>>,
+        defer_admission: bool,
+    ) -> Result<Self> {
         let checks = Checks {
             control,
             supplemental,
@@ -244,12 +286,14 @@ impl<'a> DerivedReservation<'a> {
         let paths = DataCachePaths::new(&absolute_home);
         let mut owner = Self {
             _resources: resources,
+            home: absolute_home,
             control: checks,
             paths,
             report: ReservationReport {
                 configured_max_bytes: limit,
                 existing: DerivedUsage::default(),
                 additional_peak: peak,
+                shared_blob_additional_peak: 0,
                 admitted_peak_bytes: 0,
                 coverage: Coverage::default(),
             },
@@ -284,14 +328,19 @@ impl<'a> DerivedReservation<'a> {
             ] {
                 owner.directories.push(prepare_root(child, control)?);
             }
+            owner
+                .directories
+                .push(prepare_root(&owner.paths.shared_blobs(), control)?);
             // Config may have changed since query admission. A new disk owner
             // always consults the same current strict parser while holding quota.
             owner.report.configured_max_bytes =
                 super::configuration::read(home, control.control, &mut || control.extra())?
                     .data_cache_max_bytes;
-            owner.report.existing = inventory(&owner.paths, control)?;
+            owner.report.existing = inventory(&owner.home, &owner.paths, control)?;
             owner.report.admitted_peak_bytes = sum([owner.report.existing.total()?, additional])?;
-            if owner.report.admitted_peak_bytes > owner.report.configured_max_bytes {
+            if !defer_admission
+                && owner.report.admitted_peak_bytes > owner.report.configured_max_bytes
+            {
                 return Err(budget_error(&owner.report));
             }
             control.check()
@@ -314,7 +363,7 @@ impl<'a> DerivedReservation<'a> {
     /// not a replacement for reserving the caller's full peak BEFORE writing.
     /// Active bytes replace their reserved allowance: never actual + full peak.
     pub fn verify_usage(&self) -> Result<DerivedUsage> {
-        let current = inventory(&self.paths, &self.control)?;
+        let current = inventory(&self.home, &self.paths, &self.control)?;
         if current.total()? > self.report.admitted_peak_bytes {
             return Err(ToolkitError::new(
                 "vault.data_cache_reservation_exceeded",
@@ -409,14 +458,18 @@ fn prepare_root(root: &Path, control: &Checks<'_>) -> Result<Directory> {
         ),
     }
 }
-fn inventory(paths: &DataCachePaths, control: &Checks<'_>) -> Result<DerivedUsage> {
+fn inventory(home: &Path, paths: &DataCachePaths, control: &Checks<'_>) -> Result<DerivedUsage> {
     let mut entries = 0;
     let mut files = 0;
     let mut bytes = [0; 3];
     for (index, root) in paths.roots().into_iter().enumerate() {
-        bytes[index] = scan(root, 0, &mut entries, &mut files, control)?;
+        bytes[index] = scan(root, &paths.staging, 0, &mut entries, &mut files, control)?;
     }
+    let (shared_blob_bytes, retained_shared_peak_bytes) =
+        shared_blobs::inventory(home, paths, control)?;
     Ok(DerivedUsage {
+        shared_blob_bytes,
+        retained_shared_peak_bytes,
         object_namespace_bytes: bytes[0],
         generation_namespace_bytes: bytes[1],
         temporary_namespace_bytes: bytes[2],
@@ -425,6 +478,7 @@ fn inventory(paths: &DataCachePaths, control: &Checks<'_>) -> Result<DerivedUsag
 }
 fn scan(
     path: &Path,
+    spool_root: &Path,
     depth: usize,
     entries: &mut usize,
     files: &mut usize,
@@ -454,18 +508,51 @@ fn scan(
             }
             let kind = entry.file_type()?;
             let amount = if kind.is_dir() {
-                scan(&entry.path(), depth + 1, entries, files, control)?
+                scan(
+                    &entry.path(),
+                    spool_root,
+                    depth + 1,
+                    entries,
+                    files,
+                    control,
+                )?
             } else if kind.is_file() {
                 // Open relative to the held directory, never follow symlinks or
                 // reparse leaves. Unknown files are charged and never reclaimed.
-                let file =
-                    directory.open_file_controlled(&entry.file_name(), &mut Controlled(control))?;
-                let measured = file.metadata().map_err(ToolkitError::io).and_then(|m| {
-                    if !m.is_file() {
-                        return Err(ToolkitError::invalid("Data inventory entry changed type"));
-                    }
-                    Ok(m.len())
-                });
+                let name = entry.file_name();
+                let spool = path == spool_root
+                    && name.to_str().is_some_and(|name| {
+                        name.strip_prefix(".lycheedev-export-")
+                            .is_some_and(|token| {
+                                token.len() == 32 && token.bytes().all(|b| b.is_ascii_hexdigit())
+                            })
+                    });
+                let file = if spool {
+                    // A Data producer may hold this original WRITE/DELETE
+                    // handle outside quota. Its pre-sized length cannot grow;
+                    // inspect attributes without weakening immutable readers.
+                    let Some(file) = directory.open_optional_inspection_file_controlled(
+                        &name,
+                        &mut Controlled(control),
+                    )?
+                    else {
+                        // Only this exact temporary namespace permits a clean
+                        // concurrent owner close to make a listed entry absent.
+                        continue;
+                    };
+                    file
+                } else {
+                    directory.open_file_controlled(&name, &mut Controlled(control))?
+                };
+                let measured = control
+                    .check()
+                    .and_then(|()| file.metadata().map_err(ToolkitError::io))
+                    .and_then(|m| {
+                        if !m.is_file() {
+                            return Err(ToolkitError::invalid("Data inventory entry changed type"));
+                        }
+                        Ok(m.len())
+                    });
                 let bytes = finish_file(file, measured, control)?;
                 *files += 1;
                 bytes

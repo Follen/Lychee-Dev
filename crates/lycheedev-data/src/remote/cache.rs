@@ -262,14 +262,14 @@ impl Store<'_> {
     }
     pub fn publish_blob(&self, bytes: &[u8], maximum: usize) -> Result<BlobRef> {
         self.controlled(|control| {
-            let reference = evidence::publish_blob_bounded_with_check(
+            let reference = lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
                 self.home,
                 bytes,
                 maximum,
                 control,
-                || self.check(),
+                &|| self.check(),
             )?;
-            serde_json::from_value(reference).map_err(Into::into)
+            Ok(reference)
         })
     }
     pub fn lease(&self, key: &str) -> Result<ExclusiveLock> {
@@ -537,3 +537,6 @@ pub(crate) fn catalog_url(region: &str, slot: &str, suffix: &str) -> Result<Stri
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod data_disk_tests;
