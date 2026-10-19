@@ -1,6 +1,15 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-19 08:38 UTC。当前已验证生产为 `d4271ae430ac2a80087af81c70eea960d547acbb`，分支 `rust-refactor`、草稿 PR #14。下列为非敏感结果摘要；本机原始日志未随文档发布。当前按业务等价、性能验收、五项正式循环审计的顺序推进；历史预审和完整性能验收仍不能冒称完成。
+更新：2026-10-19 10:20 UTC。最近已匹配性能测量的生产为 `d4271ae430ac2a80087af81c70eea960d547acbb`，分支 `rust-refactor`、草稿 PR #14。下列为非敏感结果摘要；本机原始日志未随文档发布。当前按业务等价、性能验收、五项正式循环审计的顺序推进；历史预审和完整性能验收仍不能冒称完成。
+
+### Data 结构性投影已实现，等待固定版本正确性验证
+
+本批仅Data五个源码/测试文件：扫描cursor将已选字段序号一次绑定到同一不可变Table，具名map与顺序consumer复用完整字段decoder，消除每行反复名称查找、map key克隆与map到SQL序列的转移。所有未选字段及稀疏尾部仍完整校验，之后才申请SQL向量并转换；真实source/schema所有权、首错、预算、取消与lease寿命保留。cursor结构按实际size_of收费，不能称RSS或全部安全计量数值完全不变。
+
+独立源码审查通过；新增16项Rust回归（Table3、provider13），覆盖完整旧Physical producer oracle、字段选择、copy/sparse/partial、双故障顺序、紧预算、取消及嵌套lease。旧Physical oracle与新路径共享Table decoder，不冒称独立旧decoder。Rust编译/动态与本批性能仍NOT_RUN。当前Source二进制缓存选型仅评估，旧JSON v12及迁移候选不包含在本提交；用户已取消旧缓存兼容需求，尚未据此改写生产Source。
+
+前置145已实际check通过，267 matched=265通过/0失败/2原fixture exporter忽略，15新增各一次；11owner回收、无deadline，未单独release/性能测试。完整性能目标仍未达到，五项正式审计在业务及性能验收之后；Skill产品定义原样保留。
+
 
 ### 当前执行顺序：业务等价 → 性能验收 → 五项循环审计（2026-10-19 用户澄清）
 

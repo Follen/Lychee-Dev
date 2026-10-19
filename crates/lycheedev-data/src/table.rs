@@ -16,6 +16,11 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
 };
+mod row_projection;
+pub(crate) use row_projection::ProjectedRows;
+#[cfg(test)]
+pub(crate) use row_projection::projected_row_bindings;
+use row_projection::{RowCollector, RowSelection};
 mod availability;
 pub(crate) use availability::{Availability, inspect_available_budgeted};
 fn invalid<T>() -> Result<T> {
@@ -1734,6 +1739,7 @@ impl<'a> Table<'a> {
     }
     /// Decode once and keep the temporary row lease live until the cursor has
     /// finished its consumer. Retained copies need their own admission.
+    #[cfg(test)]
     pub(crate) fn leased_row_projected(
         &self,
         id: u32,
@@ -1751,16 +1757,33 @@ impl<'a> Table<'a> {
         selected: Option<&BTreeSet<String>>,
         allocation: &mut RowAllocation<'_>,
     ) -> Result<BTreeMap<String, Value>> {
+        self.decode_row(id, text_bytes, RowSelection::Names(selected), allocation)
+    }
+    /// The selection Vec has already been admitted by its owning provider.
+    /// Moving it into this immutable bound plan adds no heap allocation.
+    pub(crate) fn projected_rows(&self, selected: Vec<usize>) -> Result<ProjectedRows<'_, 'a>> {
+        ProjectedRows::new(self, selected)
+    }
+    pub(crate) fn leased_row_values(
+        &self,
+        id: u32,
+        text_bytes: usize,
+    ) -> Result<LeasedRow<'_, Vec<Value>>> {
+        let mut allocation = RowAllocation::new(self.source.budget.as_deref(), true);
+        let value = self.decode_row(id, text_bytes, RowSelection::Names(None), &mut allocation)?;
+        Ok(LeasedRow { value, allocation })
+    }
+    fn decode_row<C: RowCollector>(
+        &self,
+        id: u32,
+        text_bytes: usize,
+        selected: RowSelection<'_>,
+        allocation: &mut RowAllocation<'_>,
+    ) -> Result<C> {
         if text_bytes == 0 || text_bytes > 1 << 20 {
             return limit();
         }
-        if selected.is_some_and(|names| {
-            names
-                .iter()
-                .any(|name| !self.definition.fields.iter().any(|f| &f.name == name))
-        }) {
-            return invalid();
-        }
+        selected.validate(&self.definition.fields)?;
         self.charge(
             1 + self
                 .definition
@@ -1776,7 +1799,7 @@ impl<'a> Table<'a> {
         let sparse = self.layout.flags & 1 != 0;
         let mut cursor = 0u64;
         let mut remaining = text_bytes;
-        let mut result = BTreeMap::new();
+        let mut result = C::default();
         let temporary = self
             .definition
             .fields
@@ -1794,12 +1817,14 @@ impl<'a> Table<'a> {
                     .ok_or_else(|| fault("table.limit_exceeded", 3, "Row allocation overflow"))
             })?;
         allocation.retain(temporary)?;
+        result.prepare(selected.count(self.definition.fields.len()))?;
+        let mut next_selected = 0;
         for (index, field) in self.definition.fields.iter().enumerate() {
-            let wanted = selected.is_none_or(|s| s.contains(&field.name));
+            let wanted = selected.wanted(index, field, &mut next_selected);
             let Some(column) = self.column_mapping[index] else {
                 if wanted {
-                    result.insert(
-                        field.name.clone(),
+                    result.field(
+                        field,
                         if field.identity {
                             Value::UInt(id as u64)
                         } else {
@@ -1820,12 +1845,12 @@ impl<'a> Table<'a> {
                         return invalid();
                     }
                     if wanted {
-                        result.insert(field.name.clone(), Value::UInt(id as u64));
+                        result.field(field, Value::UInt(id as u64));
                     }
                 } else {
                     let value = typed(value, field)?;
                     if wanted {
-                        result.insert(field.name.clone(), value);
+                        result.field(field, value);
                     }
                 }
                 continue;
@@ -1878,8 +1903,8 @@ impl<'a> Table<'a> {
                     )?
                 };
                 if wanted {
-                    result.insert(
-                        field.name.clone(),
+                    result.field(
+                        field,
                         if field.array {
                             Value::Array(strings.into_iter().map(Value::String).collect())
                         } else {
@@ -1921,7 +1946,7 @@ impl<'a> Table<'a> {
                     return invalid();
                 }
                 if wanted {
-                    result.insert(field.name.clone(), Value::UInt(id as u64));
+                    result.field(field, Value::UInt(id as u64));
                 }
                 continue;
             }
@@ -1933,8 +1958,8 @@ impl<'a> Table<'a> {
                 }
             }
             if wanted {
-                result.insert(
-                    field.name.clone(),
+                result.field(
+                    field,
                     if field.array {
                         Value::Array(converted)
                     } else {

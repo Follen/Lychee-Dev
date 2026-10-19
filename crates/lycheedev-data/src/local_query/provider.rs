@@ -47,22 +47,22 @@ pub(super) fn emit_rows(
     Ok(())
 }
 
-struct Projection {
+struct Projection<'query, 'body> {
     indices: BTreeSet<usize>,
-    names: BTreeSet<String>,
+    rows: table::ProjectedRows<'query, 'body>,
 }
 struct FlatRow<'query> {
     cells: Vec<Scalar>,
     _vector: RetainedReservation<'query>,
-    // Keep the emptied map alive for the same scope as the old callback.
-    _raw: BTreeMap<String, table::Value>,
+    // Keep the consumed row allocation alive through the current-row lease.
+    _raw: Vec<table::Value>,
 }
 type PhysicalRow<'query> = table::LeasedRow<'query, FlatRow<'query>>;
 
 struct ScanCursor<'query, 'body> {
     current: Option<PhysicalRow<'query>>,
     physical: &'query Physical<'body>,
-    projection: Option<Projection>,
+    projection: Option<Projection<'query, 'body>>,
     next: usize,
     done: bool,
     _allocation: RetainedReservation<'query>,
@@ -77,11 +77,11 @@ impl ScanCursor<'_, '_> {
         };
         self.physical.budget.check()?;
         self.next += 1;
-        let raw = self.physical.table.leased_row_projected(
-            id,
-            1 << 20,
-            self.projection.as_ref().map(|selected| &selected.names),
-        )?;
+        let raw = if let Some(projection) = &self.projection {
+            projection.rows.leased_row(id, 1 << 20)?
+        } else {
+            self.physical.table.leased_row_values(id, 1 << 20)?
+        };
         self.current = Some(raw.try_map(|raw| {
             self.physical.flatten(
                 raw,
@@ -120,7 +120,7 @@ impl RowCursor for EqualCursor<'_, '_> {
             // Physical equality has no trailing budget check.
             return Ok(false);
         };
-        let raw = match self.physical.table.leased_row_projected(id, 1 << 20, None) {
+        let raw = match self.physical.table.leased_row_values(id, 1 << 20) {
             Ok(raw) => raw,
             Err(error) if error.code == "table.record_not_found" => return Ok(false),
             Err(error) => return Err(error),
@@ -230,7 +230,7 @@ impl<'body> Physical<'body> {
 
     fn flatten<'query>(
         &'query self,
-        mut raw: BTreeMap<String, table::Value>,
+        mut raw: Vec<table::Value>,
         selected: Option<&BTreeSet<usize>>,
     ) -> Result<FlatRow<'query>> {
         let bytes = self
@@ -247,6 +247,7 @@ impl<'body> Physical<'body> {
         row.try_reserve_exact(self.schema.columns.len())
             .map_err(|_| limit())?;
         let mut offset = 0usize;
+        let mut next = 0usize;
         for field in self.table.columns() {
             self.budget.check()?;
             let width = if field.array {
@@ -260,7 +261,9 @@ impl<'body> Physical<'body> {
                 offset += width;
                 continue;
             }
-            let value = raw.remove(&field.name).ok_or_else(binding)?;
+            let value =
+                std::mem::replace(raw.get_mut(next).ok_or_else(binding)?, table::Value::Null);
+            next += 1;
             if field.array {
                 let table::Value::Array(values) = value else {
                     return Err(binding());
@@ -281,13 +284,16 @@ impl<'body> Physical<'body> {
                 offset += 1;
             }
         }
+        if next != raw.len() {
+            return Err(binding());
+        }
         Ok(FlatRow {
             cells: row,
             _vector: vector,
             _raw: raw,
         })
     }
-    fn projection(&self, columns: &[usize]) -> Result<Projection> {
+    fn projection<'query>(&'query self, columns: &[usize]) -> Result<Projection<'query, 'body>> {
         self.budget.check()?;
         if columns.iter().any(|i| *i >= self.schema.columns.len()) {
             return Err(binding());
@@ -304,20 +310,29 @@ impl<'body> Physical<'body> {
             Cost::metadata(bytes),
         )?;
         let indices: BTreeSet<_> = columns.iter().copied().collect();
-        let mut names = BTreeSet::new();
+        // One ordinal per selected field fits within the original conservative
+        // 192 bytes per requested scalar (including duplicate requests). The
+        // plan takes this already-admitted Vec without copying or re-admitting.
+        let mut fields = Vec::new();
+        fields
+            .try_reserve_exact(indices.len().min(self.table.columns().len()))
+            .map_err(|_| limit())?;
         let mut offset = 0usize;
-        for field in self.table.columns() {
+        for (index, field) in self.table.columns().iter().enumerate() {
             let width = if field.array {
                 field.elements as usize
             } else {
                 1
             };
             if (offset..offset + width).any(|i| indices.contains(&i)) {
-                names.insert(field.name.clone());
+                fields.push(index);
             }
             offset += width;
         }
-        Ok(Projection { indices, names })
+        Ok(Projection {
+            indices,
+            rows: self.table.projected_rows(fields)?,
+        })
     }
 }
 impl RowProvider for Physical<'_> {
@@ -486,3 +501,7 @@ impl RowProvider for PreparedInput<'_> {
 #[cfg(test)]
 #[path = "provider_tests.rs"]
 mod provider_tests;
+
+#[cfg(test)]
+#[path = "provider_projection_tests.rs"]
+mod projection_tests;
