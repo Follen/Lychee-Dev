@@ -194,7 +194,7 @@ fn default_cache_prepare_rebuilds_missing_decoded_source_and_preserves_exact_row
     let second = crate::dispatch(&inv).unwrap();
     assert_eq!(first.data["generation"], second.data["generation"]);
     assert_eq!(first.data["object"], second.data["object"]);
-    assert_eq!(std::fs::read_dir(paths.staging).unwrap().count(), 0);
+    assert_eq!(std::fs::read_dir(&paths.staging).unwrap().count(), 0);
     assert!(
         !paths
             .shared_blobs()
