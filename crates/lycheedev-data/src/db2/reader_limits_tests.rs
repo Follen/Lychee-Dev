@@ -1,7 +1,11 @@
 //! Exact request propagation and real secondary parsers on small authenticated
 //! fixtures. These do not claim acceptance of an actual >256 MiB table.
 use super::*;
-use crate::{capture::committed_tests, stream};
+use crate::{
+    capture::committed_tests,
+    remote::provider::{FileScope, OpenedScope},
+    stream,
+};
 use committed_tests::fixture::{self, Cell::U, Fixture, table};
 use serde_json::Value;
 use std::fs;
@@ -21,11 +25,34 @@ fn assert_limits(limits: table::TableLimits, maximum: usize) {
     assert_eq!(limits.decode_work, 100_000_000);
 }
 
-fn budget(inv: &Invocation) -> Arc<Budget> {
-    Arc::new(Budget::query_controlled(
+// Preserve the public reader's real admission and checked lifetime. A query
+// budget is deliberately unusable for accounting until this owner acquires its
+// workspace slots; the preparation/secondary-open assertions must run inside it.
+fn with_admitted_reader(
+    inv: &Invocation,
+    work: impl FnOnce(&Arc<Budget>, &mut dyn FileScope, &selection::PinnedSet) -> Result<()>,
+) {
+    let budget = Arc::new(Budget::query_controlled(
         inv.control.deadline(),
         inv.control.clone(),
-    ))
+    ));
+    let mut scope = OpenedScope::open(inv, &budget).unwrap().admit().unwrap();
+    let result = (|| {
+        let pin = scope.resolve_pin()?;
+        let data = pin.data.as_ref().expect("fixture DataPin");
+        scope.check_pin(data)?;
+        scope.with_local_session(data, |reader| {
+            reader.check_consumer(inv, &budget)?;
+            // This fails if admission did not initialize the original budget.
+            budget.memory_snapshot()?;
+            work(&budget, &mut *reader, &pin)?;
+            reader.verify_source()?;
+            budget.check()
+        })
+    })();
+    // The local reader close precedes workspace/resource/metadata close; later
+    // public requests and fixture cleanup happen only after both have succeeded.
+    scope.finish(result).unwrap();
 }
 
 // Exercise the real secondary parser with the state that each production
@@ -54,16 +81,15 @@ fn actual_preparation_retains_exact_request_limits_without_changing_sdk_defaults
         if let Some(maximum) = maximum {
             inv.flags.insert("--max-bytes".into(), maximum.to_string());
         }
-        let budget = budget(&inv);
-        let prepared = prepare(&inv, "Sample", &budget).unwrap();
-        assert_limits(prepared.limits, maximum.unwrap_or(128 << 20));
-        assert_eq!(prepared.file.bytes.len(), 177);
-        let view = reopen(&prepared, &budget).unwrap();
-        assert_eq!(view.logical_count(), 1);
-        assert_eq!(
-            view.row(1, 1 << 20).unwrap()["Value"],
-            table::Value::UInt(42)
-        );
+        with_admitted_reader(&inv, |budget, reader, pin| {
+            let prepared = prepare_scoped(&inv, "Sample", budget, Some(reader), Some(pin.clone()))?;
+            assert_limits(prepared.limits, maximum.unwrap_or(128 << 20));
+            assert_eq!(prepared.file.bytes.len(), 177);
+            let view = reopen(&prepared, budget)?;
+            assert_eq!(view.logical_count(), 1);
+            assert_eq!(view.row(1, 1 << 20)?["Value"], table::Value::UInt(42));
+            Ok(())
+        });
     }
     let sdk = table::TableLimits::default();
     assert_eq!(sdk.file_bytes, 256 << 20);
@@ -89,36 +115,38 @@ fn real_secondary_open_uses_retained_byte_and_logical_copy_caps() {
         "data db2",
         &[("--table", "Sample"), ("--max-bytes", "536870912")],
     );
-    let budget = budget(&inv);
-    let mut prepared = prepare(&inv, "Sample", &budget).unwrap();
-    assert_limits(prepared.limits, 512 << 20);
-    let original = prepared.limits;
-    prepared.limits.file_bytes = prepared.file.bytes.len() - 1;
-    assert_eq!(
-        reopen(&prepared, &budget).err().unwrap().code,
-        "table.limit_exceeded"
-    );
-    prepared.limits.file_bytes += 1;
-    assert_eq!(reopen(&prepared, &budget).unwrap().logical_count(), 3);
-    // Physical inspection accepts two rows; only the secondary open can reject
-    // the third logical row introduced by the tiny copy map.
-    prepared.limits.rows = 2;
-    table::inspect_budgeted(&prepared.file.bytes, prepared.limits, budget.clone()).unwrap();
-    assert_eq!(
-        reopen(&prepared, &budget).err().unwrap().code,
-        "table.limit_exceeded"
-    );
-    prepared.limits.rows = 3;
-    let view = reopen(&prepared, &budget).unwrap();
-    assert_eq!(view.logical_count(), 3);
-    assert_eq!(view.row(3, 1 << 20).unwrap()["ID"], table::Value::UInt(3));
-    assert_eq!(
-        view.row(3, 1 << 20).unwrap()["Value"],
-        table::Value::UInt(42)
-    );
-    drop(view);
-    prepared.limits = original;
-    assert_limits(prepared.limits, 512 << 20);
+    with_admitted_reader(&inv, |budget, reader, pin| {
+        let mut prepared = prepare_scoped(&inv, "Sample", budget, Some(reader), Some(pin.clone()))?;
+        assert_limits(prepared.limits, 512 << 20);
+        let original = prepared.limits;
+        prepared.limits.file_bytes = prepared.file.bytes.len() - 1;
+        assert_eq!(
+            reopen(&prepared, budget).err().unwrap().code,
+            "table.limit_exceeded"
+        );
+        prepared.limits.file_bytes += 1;
+        assert_eq!(reopen(&prepared, budget).unwrap().logical_count(), 3);
+        // Physical inspection accepts two rows; only the secondary open can reject
+        // the third logical row introduced by the tiny copy map.
+        prepared.limits.rows = 2;
+        table::inspect_budgeted(&prepared.file.bytes, prepared.limits, budget.clone()).unwrap();
+        assert_eq!(
+            reopen(&prepared, budget).err().unwrap().code,
+            "table.limit_exceeded"
+        );
+        prepared.limits.rows = 3;
+        let view = reopen(&prepared, budget).unwrap();
+        assert_eq!(view.logical_count(), 3);
+        assert_eq!(view.row(3, 1 << 20).unwrap()["ID"], table::Value::UInt(3));
+        assert_eq!(
+            view.row(3, 1 << 20).unwrap()["Value"],
+            table::Value::UInt(42)
+        );
+        drop(view);
+        prepared.limits = original;
+        assert_limits(prepared.limits, 512 << 20);
+        Ok(())
+    });
     fs::remove_dir_all(fx.root).unwrap();
 }
 
@@ -211,26 +239,34 @@ fn dynamic_encounter_batches_retain_identical_limits_and_real_related_spell_capt
             ("--max-bytes", "536870912"),
         ],
     );
-    let budget = budget(&inv);
-    let mut names = Vec::new();
-    let prepared = prepare_following(&inv, &["JournalEncounterSection"], &budget, &mut |batch| {
-        assert_eq!(batch.len(), 1);
-        assert_limits(batch[0].limits, 512 << 20);
-        assert_eq!(reopen(&batch[0], &budget)?.logical_count(), 1);
-        names.push(batch[0].bundle.identity.name.clone());
-        Ok(match batch[0].bundle.identity.name.as_str() {
-            "JournalEncounterSection" => vec!["SpellName"],
-            "SpellName" => vec!["SpellMisc"],
-            "SpellMisc" => Vec::new(),
-            other => panic!("unexpected follow-up table: {other}"),
-        })
-    })
-    .unwrap();
-    assert_eq!(names, ["JournalEncounterSection", "SpellName", "SpellMisc"]);
-    for prepared in &prepared {
-        assert_limits(prepared.limits, 512 << 20);
-        assert_eq!(reopen(prepared, &budget).unwrap().logical_count(), 1);
-    }
+    with_admitted_reader(&inv, |budget, reader, pin| {
+        let mut names = Vec::new();
+        let prepared = prepare_following_scoped(
+            &inv,
+            &["JournalEncounterSection"],
+            budget,
+            Some(reader),
+            Some(pin.clone()),
+            &mut |batch| {
+                assert_eq!(batch.len(), 1);
+                assert_limits(batch[0].limits, 512 << 20);
+                assert_eq!(reopen(&batch[0], budget)?.logical_count(), 1);
+                names.push(batch[0].bundle.identity.name.clone());
+                Ok(match batch[0].bundle.identity.name.as_str() {
+                    "JournalEncounterSection" => vec!["SpellName"],
+                    "SpellName" => vec!["SpellMisc"],
+                    "SpellMisc" => Vec::new(),
+                    other => panic!("unexpected follow-up table: {other}"),
+                })
+            },
+        )?;
+        assert_eq!(names, ["JournalEncounterSection", "SpellName", "SpellMisc"]);
+        for prepared in &prepared {
+            assert_limits(prepared.limits, 512 << 20);
+            assert_eq!(reopen(prepared, budget).unwrap().logical_count(), 1);
+        }
+        Ok(())
+    });
     let out = crate::dispatch(&inv).unwrap();
     assert!(out.complete);
     assert_eq!(out.provenance.len(), 2);
@@ -255,17 +291,19 @@ fn maximum_request_preserves_partial_coverage_rows_and_capture_contracts() {
     inv.flags
         .insert("--key-file".into(), key_file.to_string_lossy().into_owned());
     inv.positional = Some("Sample".into());
-    let budget = budget(&inv);
-    let prepared = prepare(&inv, "Sample", &budget).unwrap();
-    assert_limits(prepared.limits, 512 << 20);
-    let view = reopen(&prepared, &budget).unwrap();
-    assert!(!view.is_complete());
-    assert_eq!(
-        view.row(1, 1 << 20).unwrap()["Value"],
-        table::Value::UInt(42)
-    );
-    assert_eq!(prepared.availability.skipped.len(), 1);
-    drop(view);
+    with_admitted_reader(&inv, |budget, reader, pin| {
+        let prepared = prepare_scoped(&inv, "Sample", budget, Some(reader), Some(pin.clone()))?;
+        assert_limits(prepared.limits, 512 << 20);
+        let view = reopen(&prepared, budget).unwrap();
+        assert!(!view.is_complete());
+        assert_eq!(
+            view.row(1, 1 << 20).unwrap()["Value"],
+            table::Value::UInt(42)
+        );
+        assert_eq!(prepared.availability.skipped.len(), 1);
+        drop(view);
+        Ok(())
+    });
     partial_contract::exercise(&inv, &fx.root.join("partial.csv"));
     fs::remove_dir_all(fx.root).unwrap();
 }

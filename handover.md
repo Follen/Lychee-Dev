@@ -1,8 +1,8 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-19 02:12 UTC。当前已验证生产为 `d4271ae430ac2a80087af81c70eea960d547acbb`，分支 `rust-refactor`、草稿 PR #14。下列为非敏感结果摘要；本机原始日志未随文档发布。Stage2与完整性能验收仍未完成。
+更新：2026-10-19 03:41 UTC。当前已验证生产为 `d4271ae430ac2a80087af81c70eea960d547acbb`，分支 `rust-refactor`、草稿 PR #14。下列为非敏感结果摘要；本机原始日志未随文档发布。Stage2与完整性能验收仍未完成。
 
-### DBCD 四项缺陷已实际复现，修复待验证（2026-10-19）
+### DBCD 原缺陷复验已通过，新增限额测试准备仍有4项失败（2026-10-19）
 
 用户明确要求修复四项，并要求保留现有Skill product定义。独立审计固定DBCD `e732093f8864240fc5884bd1bba6b02f3dfc0d56`、WoWDBDefs `b9a63096cdd99b26967f17f9515377ae62cadfd7`；前三项固定Go323同样存在，不能以Go同错结果作为正确oracle。
 
@@ -15,7 +15,11 @@
 
 四个owner均封存退役/回收，activeProcesses为0、无deadline；三个失败目标的辅助进程在drain后被强制回收且knownAuxiliaryCleanup/reviewedAuxiliary均false，原收尾异常保留，不能标成clean成功。以上仅非敏感结果汇总，未发布本机原始日志。
 
-修复版本 `c5718ffa43bf3df575ab808cb4b8aa584545af6b` 已保存并独立复核15/15文件、27份Skill/product定义字节不变；Windows编译与绿例仍NOT_RUN。正式核心清单共36项：WDC公开7、metadata公开4、请求限额公开6、metadata单元14（原7+新7）、限额传播单元5。本任务新增/扩展29项，原有7项。静态独审不替代动态结果；测试协调正在解决原线程继续执行的确认冲突，不在此推断用户取消。本批不改变Stage2和完整性能验收尚未结束的状态。
+修复版本 `c5718ffa43bf3df575ab808cb4b8aa584545af6b` 已实际通过all-targets，116 matched为109通过/4失败/3忽略；核心36为32通过/4失败，旧13项复现测试全部通过。分组：metadata单元14通过；reader limits1通过/4失败；palette7、metadata公开4、limits公开6全部通过；旧semantic SQL11、WDC16通过/1忽略、catalog7通过/2忽略、stream23、SQL lazy20通过。三个既有fixture/benchmark忽略不算通过。
+
+四项失败均在reader_limits_tests直接prepare/prepare_following阶段返回records.internal（Query accounting used before workspace admission），后续限额/副本/dynamic/partial目标断言未到。根因是新增测试直接构造pending query budget后调用prepare，遗漏真实workspace admission。后继仅改reader_limits_tests：经OpenedScope.admit和同一budget/local session运行原prepare_scoped/二次parser断言，成功后原source校验，local reader及scope checked finish之后才执行独立公开请求或删fixture；不修改生产/手动激活预算/减少断言。该后继尚待实测，当前不能称整个修复验收全绿。11个owner退役回收、无deadline；九个forced均已审核辅助进程回收，无unknown。原51d失败与其异常收尾不被本轮覆盖。本次仅非敏感结果摘要。
+
+15/15修复文件及27份Skill/product定义字节已核；核心清单36项中本任务新增/扩展29、既有7。小fixture未证明真实>256MiB文件能力。Stage2和完整性能验收仍未结束。
 
 ### Facts 编码所有权小修已通过定向回归（cb409）
 
