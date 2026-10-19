@@ -22,6 +22,8 @@ Invoke on the selected Windows test environment:
 
 ```powershell
 node <reviewed-runner-stage>/tools/rust-source-pack-diagnostics.mjs <pack2-config.json> <machine-conditions.json> [--scratch-6gib]
+# Fresh v13 Postcard / v18 Index configuration:
+node <reviewed-runner-stage>/tests/rust-performance-paired/source-pack-scenarios-postcard-fresh.mjs <postcard-config.json> <machine-conditions.json> [--scratch-6gib]
 ```
 
 Exact runtime export list (25 files; this isolated closure has been imported in

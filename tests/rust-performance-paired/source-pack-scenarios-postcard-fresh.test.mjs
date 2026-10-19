@@ -1,15 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import {syncBuiltinESMExports} from 'node:module';
 import {join, dirname, resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 import {DatabaseSync} from 'node:sqlite';
-import {sha256} from '../../tools/rust-disk.mjs';
-import {hashFile} from '../../tools/rust-build.mjs';
-import {CASES, BASE_COMMIT, candidateIdentity, runController, verifyObservedReport} from './source-pack-scenarios.mjs';
+import {sha256, defaults, beginScratch} from '../../tools/rust-disk.mjs';
+import {splitIndexEvidence} from '../../tools/rust-source-pack-evidence.mjs';
+import {hashFile, sourceDigest, runCargo} from '../../tools/rust-build.mjs';
+import {CASES, BASE_COMMIT, FRESH_ALLOWANCE, assertDiskPolicy, captureComparedGo, candidateIdentity, runController, verifyObservedReport} from './source-pack-scenarios.mjs';
 import {POSTCARD_LAYOUT, POSTCARD_INDEX_LAYOUT, LIMITS, EXPORT_BUILD_ARGS, TOOLCHAIN_OWNER, postcardEnvironmentSHA, postcardCompilerEnvironment} from './read-fact-delta-postcard.mjs';
 import {fixture as binaryFixture, put, putJSON, compilerPolicy, compilerText} from './read-fact-delta-postcard.fixtures.mjs';
-import {validatePostcardFreshRequest, prepareFreshPostcardExporter, postcardComparisonFootprint, comparePostcardScenario, verifyFreshPostcardFacts, verifyFreshPostcardReport, runPostcardFreshController, freshPostcardIdentity, FRESH_POSTCARD_FILES} from './source-pack-scenarios-postcard-fresh.mjs';
+import {parsePostcardFreshArguments, validateFreshPostcardOwner, validatePostcardFreshRequest, prepareFreshPostcardExporter, postcardComparisonFootprint, comparePostcardScenario, verifyFreshPostcardFacts, verifyFreshPostcardReport, runPostcardFreshController, freshPostcardIdentity, FRESH_POSTCARD_FILES} from './source-pack-scenarios-postcard-fresh.mjs';
 
 const root = resolve(import.meta.dirname, '../..'), conditions = {machine: 'fixture', powerAndThermal: 'unknown', competingLoad: 'unknown', disk: 'fixture', operator: 'Node tests'};
 const proof = ms => ({schema: 'lycheedev.owned-process.v1', rootReaped: true, treeReaped: true, handlesClosed: true, toolIdentityLocksClosed: true, outputReadersComplete: true, activeProcesses: 0, forced: false,
@@ -27,7 +29,7 @@ function ownerFactory(directory, owners, events, fault = {}) {
   return (_root, name, options) => {
     if (fault.quota && name === 'source-postcard-facts') throw new Error('disk.scratch_quota');
     const id = owners.length, scratch = join(directory, `scratch-${id}`), evidence = join(directory, `evidence-${id}`); fs.mkdirSync(scratch); fs.mkdirSync(evidence);
-    const receipt = join(evidence, 'receipt.json'), record = {schema: 'lycheedev.disk-owner.v1', id: String(id), owner: name, category: 'scratch', directory: scratch, activePid: null, state: 'active'};
+    const receipt = join(evidence, 'receipt.json'), record = {schema: 'lycheedev.disk-owner.v1', id: String(id), owner: name, category: 'scratch', directory: scratch, activePid: null, state: 'active', admission: {limits: options.limits}};
     putJSON(receipt, record);
     const owner = {directory: scratch, evidence, receipt, name, options, cleaned: false, seal(value) { events.push(`seal:${name}:${value.state}`); Object.assign(record, value); putJSON(receipt, record); this.sealed = value; }, cleanup() { assert.equal(record.state, 'succeeded'); assert.equal(record.handlesReaped, true); events.push(`cleanup:${name}`); this.cleaned = true; fs.rmSync(scratch, {recursive: true}); record.state = 'retired'; putJSON(receipt, record); }};
     owners.push(owner); events.push(`begin:${name}`); return owner;
@@ -36,13 +38,13 @@ function ownerFactory(directory, owners, events, fault = {}) {
 async function controller(t, fault = {}) {
   const directory = temporary(t), request = requestAt(directory), evidence = join(directory, 'outer'), scratch = join(directory, 'outer-scratch'); fs.mkdirSync(evidence); fs.mkdirSync(scratch);
   request.layout = fault.layout ?? POSTCARD_LAYOUT;
-  const inputs = {runner: 'fixture'}, owners = [], events = [], samples = [], exportCalls = [];
+  const inputs = {runner: 'fixture'}, owners = [], events = [], samples = [], exportCalls = [], admissions = [];
   const oracle = JSON.parse(fs.readFileSync(join(root, 'tests/rust-source-full-corpus/retail-oracle.json'))), basePin = {id: 'PIN-base', source: {exactCommit: BASE_COMMIT}};
   let calls = 0, identities = 0;
   const services = {
     runnerIdentity: () => inputs, verifyCandidateRecord: () => ({sourceBinary: 'rust.exe'}), verifyGoPackage: () => ({binary: 'go.exe', packageSHA256: request.go.packageSHA256}),
     verifyAdditionalIdentity() { identities++; if (fault.identityAt === identities) throw new Error('same-source exporter changed'); },
-    beginScratch: ownerFactory(directory, owners, events), admission() {}, metadataPageSize: () => 4096,
+    beginScratch: ownerFactory(directory, owners, events), admission(_root, options) { admissions.push(options); }, metadataPageSize: () => 4096,
     prepareSeeds(homes) { for (const home of Object.values(homes)) fs.mkdirSync(home); return {pin: basePin, rows: []}; },
     inventory() { return {rows: [{path: 'fixture', bytes: 100, sha256: 'a'.repeat(64)}], bytes: 100, sha256: 'healthy'}; },
     cloneSeed(_source, dest) { fs.mkdirSync(dest); events.push('clone'); },
@@ -60,7 +62,7 @@ async function controller(t, fault = {}) {
     indexEvidence: () => ({path: 'records', bytes: 100, sha256: 'a'.repeat(64)}), captureGoCustody: (_home, _index, evidence) => ({directory: evidence, catalog: join(evidence, 'go-custody.json'), catalogSHA256: 'd'.repeat(64)}), openGoCustody() {},
     compareFacts(_homes, _outputs, pin, selected, evidence, _root, retained, custodyOptions) {
       assert.equal(custodyOptions.layout, request.layout);
-      const index = exportCalls.length; exportCalls.push({pin, retained}); events.push(`export:${index}`);
+      const index = exportCalls.length; exportCalls.push({pin, retained, custodyOptions}); events.push(`export:${index}`);
       if (fault.exportAt === index) throw Object.assign(new Error('exporter failure'), {handlesReaped: !fault.exportUnreaped, postcardEvidence: {receipt: 'retained-exporter-receipt'}});
       return {goCustody: {directory: evidence, catalog: join(evidence, 'go-custody.json'), catalogSHA256: 'd'.repeat(64)}, rustCustody: {directory: evidence, catalog: join(evidence, 'postcard-custody.json'), catalogSHA256: 'e'.repeat(64), candidate: candidateIdentity(request.candidate)},
         documents: selected.documents, fullFieldsAndOrderEqual: true, totals: {}, indexes: {go: {bytes: 100}, rust: {bytes: 100}}, exporterTiming: {exporterWrapperWallMillis: 9000}, validationWallMillis: 12000};
@@ -68,7 +70,7 @@ async function controller(t, fault = {}) {
     verifyAdditionalEvidence(report) { events.push('final-custody'); assert.equal(report.scenarios.length, 6); if (fault.finalCustody) throw new Error('late archived pack changed'); },
   };
   const config = {request, layout: request.layout, runnerRoot: root, inputs, conditions, scratch, evidence, ...fault.config};
-  const report = await runPostcardFreshController(config, services); return {report, request, inputs, samples, exportCalls, events, owners, config, services};
+  const report = await runPostcardFreshController(config, services); return {report, request, inputs, samples, exportCalls, events, owners, admissions, config, services};
 }
 
 test('explicit fresh v13 config rejects continuations, policy extras and wrong exporter source', t => {
@@ -93,6 +95,8 @@ function compilerBuildBoundary(t, fault = {}) {
     build(root, args, options) {
       builds++; events.push('cargo'); assert.equal(root, directory); assert.deepEqual(args, EXPORT_BUILD_ARGS); assert.equal(options.owner, 'source-postcard-exporter-build'); assert.equal(options.oneShot, true); assert.deepEqual(options.environment, environment);
       if (fault.buildThrows) throw new Error('unknown build retirement');
+      assert.deepEqual(options.limits, assertDiskPolicy(directory, {}, services.allowance));
+      putJSON(join(directory, 'build-receipt.json'), {admission: {limits: fault.buildLimits ? defaults : options.limits}});
       const target = join(directory, 'target'), effective = {...environment, CARGO_TARGET_DIR: target, CARGO_INCREMENTAL: '0'};
       return options.onSuccess({target, inputHashes: {sourceTree: request.candidate.sourceTreeSHA256}, environmentSHA256: fault.environment ? '0'.repeat(64) : postcardEnvironmentSHA(effective), buildEvidence: join(directory, 'build-receipt.json')});
     },
@@ -152,7 +156,7 @@ for (const [name, fault, products] of [
   if (fault.exportUnreaped) assert(f.owners.filter(o => !o.cleaned).every(o => o.sealed.state === 'interrupted'));
 });
 test('fresh v13 rejects all historical resume modes before launching work', async t => {
-  for (const config of [{resumeCold: {}}, {resumeRemaining: {}}, {resumeGo: {}}, {allowance: {}}]) await assert.rejects(controller(t, {config}), /fresh scenarios/);
+  for (const config of [{resumeCold: {}}, {resumeRemaining: {}}, {resumeGo: {}}]) await assert.rejects(controller(t, {config}), /fresh scenarios/);
 });
 test('historical controller cannot relabel itself v13 without every authenticated comparison hook', async t => {
   const f = await controller(t);
@@ -183,7 +187,7 @@ async function nativeBoundary(t, callback, configure = () => {}) {
     db.prepare('INSERT INTO documents VALUES (?,1,?)').run(`pin/${pin.id}`, Buffer.from(JSON.stringify(pin))); db.prepare('INSERT INTO documents VALUES (?,1,?)').run(`source/rust-index/${f.index.manifest.identity}`, Buffer.from(JSON.stringify(f.index.manifest))); db.close();
     const envelope = {schema: 'lycheedev.result.v1', ok: true, error: null, context: {snapshot: pin.id}, result: {schema: 'lycheedev.source-map.v2', storage: 'file-cache', ...summary, assets: 0, complete: true}};
     const owners = [], events = [], begin = ownerFactory(f.root, owners, events);
-    const run = () => comparePostcardScenario({go: f.goHome, rust: f.home}, {go: envelope, rust: envelope}, pin, summary, f.evidence, f.root, retained, {candidate: f.build.candidate, limits: {}}, f.build.expected, {beginScratch: begin, ownedSpawnSync: f.execute});
+    const run = () => comparePostcardScenario({go: f.goHome, rust: f.home}, {go: envelope, rust: envelope}, pin, summary, f.evidence, f.root, retained, {candidate: f.build.candidate, limits: f.limits ?? {}}, f.build.expected, {beginScratch: begin, ownedSpawnSync: f.execute});
     await callback(Object.assign(f, {owners, events, run}));
   });
 }
@@ -220,4 +224,105 @@ test('explicit binary Index18 route reaches all six fresh comparisons with twelv
   assert.equal(validatePostcardFreshRequest(f.request).layout, POSTCARD_INDEX_LAYOUT);
   assert.deepEqual(f.samples.map(s => [s.entry.id, s.engine]), CASES.flatMap((c, i) => (i === 1 ? ['rust', 'go'] : ['go', 'rust']).map(e => [c.id, e])));
   for (const row of f.report.scenarios) assert.equal(row.rustToGoRatio, 0.2);
+});
+
+
+test('fresh CLI accepts one trailing exact 6 GiB flag and rejects every other argument shape', () => {
+  assert.deepEqual(parsePostcardFreshArguments(['config', 'conditions']), {configuration: 'config', conditions: 'conditions', scratch6GiB: false});
+  assert.deepEqual(parsePostcardFreshArguments(['config', 'conditions', '--scratch-6gib']), {configuration: 'config', conditions: 'conditions', scratch6GiB: true});
+  for (const args of [[], ['config'], ['config', 'conditions', '--scratch-7gib'], ['config', 'conditions', '--scratch-6gib', '--scratch-6gib'], ['--scratch-6gib', 'config', 'conditions'], ['config', 'conditions', 'extra'], ['config', 'conditions', '--scratch-6gib', 'extra']]) assert.throws(() => parsePostcardFreshArguments(args), /usage/);
+});
+for (const layout of [POSTCARD_LAYOUT, POSTCARD_INDEX_LAYOUT]) for (const explicit of [false, true]) test(`${layout} ${explicit ? '6' : '5'} GiB propagates through every scenario owner, post-admission and custody`, async t => {
+  const f = await controller(t, {layout, config: explicit ? {allowance: FRESH_ALLOWANCE} : {}});
+  assert.equal(f.report.state, 'source_pack_scenarios_observed', f.report.blocker);
+  const expected = {...defaults, scratchBytes: (explicit ? 6 : 5) * 1024 ** 3}; assert.deepEqual(f.report.diskPolicy, expected);
+  assert.equal(f.owners.length, 9); assert.equal(f.admissions.length, 9); assert.equal(f.exportCalls.length, 6);
+  for (const owner of f.owners) { assert.deepEqual(owner.options.limits, expected); assert.deepEqual(JSON.parse(fs.readFileSync(owner.receipt)).admission.limits, expected); }
+  for (const options of f.admissions) assert.deepEqual(options.limits, expected);
+  for (const call of f.exportCalls) assert.deepEqual(call.custodyOptions.limits, expected);
+  assert.equal(f.config.runnerRoot, root); assert.notEqual(f.config.runnerRoot, f.request.candidate.sourceRoot);
+});
+test('fresh controller and exporter preparation reject altered or falsy allowance and disk environment overrides before ownership', async t => {
+  const variants = [null, false, 0, {}, {...FRESH_ALLOWANCE, scratchBytes: 7 * 1024 ** 3}, {...FRESH_ALLOWANCE, scope: 'other'}, {...FRESH_ALLOWANCE, authorizationReference: 'forged'}, {...FRESH_ALLOWANCE, freeReserveBytes: 0}];
+  for (const allowance of variants) {
+    await assert.rejects(controller(t, {config: {allowance}}), /authorized task-local/);
+    const f = compilerBuildBoundary(t); f.services.allowance = allowance; assert.throws(f.run, /authorized task-local/); assert.equal(f.owners.length, 0);
+  }
+  for (const key of ['LYCHEEDEV_DISK_SCRATCH_GIB', 'lycheedev_disk_free_gib', 'LYCHEEDEV_DISK_UNKNOWN']) {
+    const f = compilerBuildBoundary(t); f.services.environment[key] = '6'; f.services.allowance = FRESH_ALLOWANCE;
+    assert.throws(f.run, /disk policy overrides/); assert.equal(f.owners.length, 0);
+  }
+});
+test('fresh explicit allowance reaches compiler and Cargo owners; mismatched Cargo receipt cannot seal exporter', t => {
+  const f = compilerBuildBoundary(t); f.services.allowance = FRESH_ALLOWANCE; const prepared = f.run();
+  assert.equal(prepared.preparation.built, true); assert.deepEqual(f.owners[0].options.limits, {...defaults, scratchBytes: 6 * 1024 ** 3});
+  const broken = compilerBuildBoundary(t, {buildLimits: true}); broken.services.allowance = FRESH_ALLOWANCE;
+  assert.throws(broken.run, /Cargo admission differs/); assert.equal(broken.counts().artifacts, 0); assert.equal(broken.owners[0].cleaned, false);
+});
+test('inner receipt gate binds exact allowance, policy, runner and command without modifying the default policy', t => {
+  for (const explicit of [false, true]) {
+    const directory = temporary(t), inputs = {runner: 'fixture'}, allowance = explicit ? FRESH_ALLOWANCE : undefined, limits = assertDiskPolicy(directory, {}, allowance);
+    const command = ['source-postcard-fresh-diagnostics', join(directory, 'configuration'), join(directory, 'conditions'), ...(explicit ? ['--scratch-6gib'] : [])];
+    const job = beginScratch(directory, 'source-postcard-fresh-diagnostics', {command, inputs: {runner: inputs, ...(allowance ? {allowance} : {})}, limits});
+    const config = {request: {ownerRoot: directory}, inputs, scratch: job.directory, evidence: job.evidence, ...(allowance ? {allowance} : {})};
+    assert.deepEqual(validateFreshPostcardOwner(config, {}), limits);
+    const original = JSON.parse(fs.readFileSync(job.receipt));
+    for (const mutate of [r => r.inputHashes.allowance = {...FRESH_ALLOWANCE, scope: 'forged'}, r => r.admission.limits.scratchBytes = 7 * 1024 ** 3, r => r.admission.limits.freeReserveBytes = 0, r => r.inputHashes.runner = {}, r => r.command.push('--scratch-6gib')]) {
+      const changed = structuredClone(original); mutate(changed); putJSON(job.receipt, changed); assert.throws(() => validateFreshPostcardOwner(config, {}));
+    }
+    putJSON(job.receipt, original);
+    const mismatch = {...config, allowance: explicit ? undefined : FRESH_ALLOWANCE}; assert.throws(() => validateFreshPostcardOwner(mismatch, {}), /allowance receipt/);
+    assert.throws(() => validateFreshPostcardOwner(config, {LYCHEEDEV_DISK_SCRATCH_GIB: '6'}), /overrides/);
+    job.seal({state: 'succeeded', handlesReaped: true}); job.cleanup(); assert.deepEqual(assertDiskPolicy(directory, {}), {...defaults});
+  }
+});
+
+
+test('actual exporter preparation crosses compiler and Cargo admissions above 5 GiB and reuses same-source artifact without building', t => {
+  const directory = temporary(t), request = requestAt(directory), source = request.candidate.sourceRoot;
+  for (const name of ['crates', '.cargo']) fs.mkdirSync(join(source, name));
+  put(join(source, 'Cargo.toml'), '[workspace]'); put(join(source, 'Cargo.lock'), '# synthetic'); putJSON(join(source, 'release/tools/rust.json'), compilerPolicy);
+  request.candidate.sourceTreeSHA256 = sourceDigest(source); request.exporter = {mode: 'build', artifactDirectory: join(directory, 'new-exporter')};
+  const compiler = join(directory, 'rustc.exe'); put(compiler, 'synthetic compiler, never launched');
+  const protectedPath = join(directory, '.tmp/rust-scratch/protected/logical-size'); put(protectedPath, 'x');
+  // A one-byte file with a synthetic inventory size avoids Windows allocation.
+  const originalStat = fs.lstatSync, statMock = t.mock.method(fs, 'lstatSync', (...args) => { const stat = originalStat(...args); if (args[0] === protectedPath) stat.size = defaults.scratchBytes + 1; return stat; }); syncBuiltinESMExports();
+  try {
+  let compilerCalls = 0, cargoCalls = 0; const environment = {...process.env};
+  const services = {environment,
+    execute(command, args, options) { assert.equal(command, 'rustc'); assert.deepEqual(args, ['-Vv']); assert.equal(options.cwd, source); compilerCalls++;
+      return {status: 0, handlesReaped: true, stdout: Buffer.from(compilerText), stderr: Buffer.alloc(0), proof: {...proof(10), binary: compiler, runId: `${compilerCalls === 1 ? 'aaaaaaaa' : 'bbbbbbbb'}-bbbb-4ccc-8ddd-eeeeeeeeeeee`}}; },
+    build(root, args, options) { return runCargo(root, args, {...options, execute(command, cargoArgs, invocation) { cargoCalls++; assert.equal(command, 'cargo'); assert.deepEqual(cargoArgs, EXPORT_BUILD_ARGS); assert.equal(invocation.cwd, source); return {status: 0, handlesReaped: true, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0)}; }}); },
+    seal(_root, sourceRoot, destination, invocation, toolchain) { assert.equal(sourceRoot, source); const artifact = {binarySHA256: 'e'.repeat(64), inputHashes: invocation.inputHashes, buildEvidence: invocation.buildEvidence, toolchain}; fs.mkdirSync(destination); putJSON(join(destination, 'artifact.json'), artifact); return artifact; },
+    verify(_root, identity, candidate) { assert.equal(identity.sourceTreeSHA256, candidate.sourceTreeSHA256); return {}; },
+  };
+  assert.throws(() => prepareFreshPostcardExporter(request, services), /disk.scratch_quota/); assert.equal(compilerCalls + cargoCalls, 0);
+  const prepared = prepareFreshPostcardExporter(request, {...services, allowance: FRESH_ALLOWANCE}), artifact = JSON.parse(fs.readFileSync(prepared.request.exporter.artifact));
+  assert.equal(compilerCalls, 2); assert.equal(cargoCalls, 1);
+  for (const path of [artifact.buildEvidence, artifact.toolchain.receipt]) { const receipt = JSON.parse(fs.readFileSync(path)); assert.equal(receipt.state, 'retired'); assert.deepEqual(receipt.admission.limits, {...defaults, scratchBytes: 6 * 1024 ** 3}); assert.equal(receipt.inputHashes.sourceTree, request.candidate.sourceTreeSHA256); }
+  assert.equal(fs.statSync(protectedPath).size, 1); assert.equal(sourceDigest(source), request.candidate.sourceTreeSHA256);
+  assert.notEqual(source, root); assert(!fs.existsSync(join(directory, '.tmp/rust-disk/channels/ordinary.lease')));
+  prepareFreshPostcardExporter(prepared.request, {...services, allowance: FRESH_ALLOWANCE, build() { assert.fail('sealed exporter reuse must not compile'); }, execute() { assert.fail('sealed exporter reuse must not observe compiler'); }});
+  assert.equal(compilerCalls, 2); assert.equal(cargoCalls, 1);
+  } finally { statMock.mock.restore(); syncBuiltinESMExports(); }
+});
+test('actual Go custody admission records the unchanged exact 6 GiB policy', t => binaryFixture(t, async f => {
+  const directory = join(f.root, 'new-go-custody'); fs.mkdirSync(directory); const limits = {...defaults, scratchBytes: 6 * 1024 ** 3};
+  const index = {path: f.records, bytes: fs.statSync(f.records).size, sha256: hashFile(f.records), manifest: JSON.parse(fs.readFileSync(join(dirname(f.records), 'manifest.json')))};
+  splitIndexEvidence(f.root, {path: index.path, bytes: index.bytes, sha256: index.sha256}, join(directory, 'go-index-parts'));
+  const reference = await captureComparedGo(f.goHome, index, directory, f.root, {limits}); assert.equal(reference.directory, directory);
+  const receipt = JSON.parse(fs.readFileSync(join(directory, 'go-custody-admission.json'))); assert.deepEqual(receipt.admission.limits, limits); assert.equal(receipt.admission.scratchReserveBytes, 0);
+}));
+test('actual Postcard custody owner records 6 GiB and rejects a rebound mismatched policy receipt', t => nativeBoundary(t, async f => {
+  const result = await f.run(); assert.deepEqual(JSON.parse(fs.readFileSync(result.postcardOwner.receipt)).admission.limits, f.limits);
+  verifyFreshPostcardFacts(result, f.build.candidate, f.build.expected, POSTCARD_LAYOUT, f.limits);
+  const receipt = JSON.parse(fs.readFileSync(result.postcardOwner.receipt)); receipt.admission.limits.scratchBytes = defaults.scratchBytes; putJSON(result.postcardOwner.receipt, receipt); result.postcardOwner.receiptSHA256 = hashFile(result.postcardOwner.receipt);
+  assert.throws(() => verifyFreshPostcardFacts(result, f.build.candidate, f.build.expected, POSTCARD_LAYOUT, f.limits), /custody admission differs/);
+}, f => { f.limits = {...defaults, scratchBytes: 6 * 1024 ** 3}; }));
+
+
+test('final fresh report rejects a changed scenario-owner admission before accepting custody', async t => {
+  const f = await controller(t, {config: {allowance: FRESH_ALLOWANCE}}), receipt = JSON.parse(fs.readFileSync(f.owners[0].receipt));
+  receipt.admission.limits.scratchBytes = defaults.scratchBytes; putJSON(f.owners[0].receipt, receipt);
+  await assert.rejects(async () => verifyFreshPostcardReport(f.report, f.request, FRESH_ALLOWANCE), /scenario owner admission differs/);
 });

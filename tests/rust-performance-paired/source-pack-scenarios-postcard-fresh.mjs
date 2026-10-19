@@ -12,7 +12,7 @@ import {splitIndexEvidence, verifyParts} from '../../tools/rust-source-pack-evid
 import {semantic} from './contract.mjs';
 import {sourcePhaseEnvironment, validateConditions} from './source-candidates.mjs';
 import {openGoCustody} from './source-pack-custody.mjs';
-import {CASES, candidateIdentity, captureComparedGo, indexEvidence, evidenceFiles, assertDiskPolicy, validateRequest, verifyCandidateRecord, runController, verifyObservedReport} from './source-pack-scenarios.mjs';
+import {CASES, FRESH_ALLOWANCE, candidateIdentity, captureComparedGo, indexEvidence, evidenceFiles, assertDiskPolicy, validateRequest, verifyCandidateRecord, runController, verifyObservedReport} from './source-pack-scenarios.mjs';
 import {comparePostcardFacts, POSTCARD_RUNNER_FILES} from './source-pack-scenarios-postcard.mjs';
 import {POSTCARD_LAYOUT, POSTCARD_INDEX_LAYOUT, verifyPostcardIndexCustody, assertPostcardOutputBudget, INDEX_EXPORT_ARGS, EXPORT_ARGS, LIMITS, EXPORT_BUILD_ARGS, TOOLCHAIN_OWNER, postcardCompilerEnvironment, postcardEnvironmentSHA, postcardToolchainPolicy, postcardCompilerObservation, readPostcardBytes, sealPostcardExporter, verifyPostcardExporter, verifyPostcardCustody} from './read-fact-delta-postcard.mjs';
 
@@ -43,7 +43,8 @@ export function validatePostcardFreshRequest(value) {
 // Build once, before any measured product invocation, or authenticate an
 // existing same-source artifact. Only runCargo owns compilation and targets.
 export function prepareFreshPostcardExporter(request, overrides = {}) {
-  const {verify = verifyPostcardExporter} = overrides;
+  const {verify = verifyPostcardExporter, allowance, environment = process.env} = overrides;
+  freshPostcardDiskPolicy(request.ownerRoot, environment, allowance);
   const started = performance.now(); let identity, built = false;
   if (request.exporter.mode === 'build') {
     const directory = request.exporter.artifactDirectory;
@@ -57,11 +58,12 @@ export function prepareFreshPostcardExporter(request, overrides = {}) {
 }
 
 // New exporter route only. Compiler observations have their own sealed owner;
-// runCargo's ordinary build policy and environment construction stay unchanged.
-export function buildPostcardExporter(request, {build = runCargo, execute = ownedSpawnSync, owner = beginScratch, seal = sealPostcardExporter, environment = process.env} = {}) {
-  const {ownerRoot: root, candidate} = request, env = postcardCompilerEnvironment(environment), policy = postcardToolchainPolicy(candidate.sourceRoot);
+// The same explicit task-local limits reach both compiler and Cargo owners;
+// default policy, build identity and environment construction stay unchanged.
+export function buildPostcardExporter(request, {build = runCargo, execute = ownedSpawnSync, owner = beginScratch, seal = sealPostcardExporter, environment = process.env, allowance} = {}) {
+  const {ownerRoot: root, candidate} = request, limits = freshPostcardDiskPolicy(root, environment, allowance), env = postcardCompilerEnvironment(environment), policy = postcardToolchainPolicy(candidate.sourceRoot);
   const environmentSHA256 = postcardEnvironmentSHA(env), job = owner(root, TOOLCHAIN_OWNER, {command: ['rustc', '-Vv', 'before-and-after-source-exporter-build'],
-    inputs: {sourceTree: candidate.sourceTreeSHA256, toolchainPolicy: policy.sha256, environment: environmentSHA256},
+    inputs: {sourceTree: candidate.sourceTreeSHA256, toolchainPolicy: policy.sha256, environment: environmentSHA256}, limits,
     admissionOptions: {requiredBytes: 1 << 20, scratchReserveBytes: 1 << 20}});
   const record = {schema: 'lycheedev.source-postcard-toolchain.v1', state: 'running', sourceRoot: candidate.sourceRoot, sourceTreeSHA256: candidate.sourceTreeSHA256, policy, environmentSHA256, observations: []};
   const path = join(job.evidence, 'toolchain.json'); let handlesReaped = true, terminal = false;
@@ -75,9 +77,11 @@ export function buildPostcardExporter(request, {build = runCargo, execute = owne
   try {
     const before = observe('before-build');
     handlesReaped = false; // Unknown Cargo throws must not imply tree retirement.
-    return build(root, [...EXPORT_BUILD_ARGS], {sourceRoot: candidate.sourceRoot, owner: 'source-postcard-exporter-build', oneShot: true, environment: {...env},
+    return build(root, [...EXPORT_BUILD_ARGS], {sourceRoot: candidate.sourceRoot, owner: 'source-postcard-exporter-build', oneShot: true, environment: {...env}, limits,
       onSuccess(invocation) {
         handlesReaped = true; // runCargo calls this only after its owned process completes.
+        assert.deepEqual(json(invocation.buildEvidence, 1 << 20).admission.limits, limits, 'exporter Cargo admission differs');
+        assert.deepEqual(json(job.receipt, 1 << 20).admission.limits, limits, 'exporter compiler admission differs');
         // These are runCargo's existing additions, not compiler-selection
         // overrides. Bind its effective environment to this same snapshot.
         const cargoEnv = {...env, CARGO_TARGET_DIR: invocation.target, CARGO_INCREMENTAL: '0'};
@@ -182,7 +186,7 @@ export async function comparePostcardScenario(homes, outputs, pin, oracle, direc
   return {...result, postcardOwner: owner};
 }
 
-export function verifyFreshPostcardFacts(facts, candidate, exporter, layout = POSTCARD_LAYOUT) {
+export function verifyFreshPostcardFacts(facts, candidate, exporter, layout = POSTCARD_LAYOUT, limits) {
   assert.deepEqual(facts.rustCustody.candidate, candidateIdentity(candidate));
   const raw = readPostcardBytes(facts.rustCustody.catalog, 16 << 20); assert.equal(sha256(raw), facts.rustCustody.catalogSHA256); const custody = JSON.parse(raw); verifyPostcardCustody(custody);
   assert.equal(custody.exporter.artifactSHA256, exporter.artifactSHA256); assert.equal(custody.exporter.artifact.binarySHA256, exporter.binarySHA256); assert.equal(custody.exporter.artifact.inputHashes.sourceTree, candidate.sourceTreeSHA256);
@@ -209,13 +213,17 @@ export function verifyFreshPostcardFacts(facts, candidate, exporter, layout = PO
   const owner = facts.postcardOwner; assert.equal(hashFile(owner.receipt, 1 << 20), owner.receiptSHA256); assert.equal(hashFile(owner.report, 16 << 20), owner.reportSHA256);
   const report = json(owner.report), receipt = json(owner.receipt, 1 << 20); assert.equal(report.state, 'verified'); assert.equal(report.handlesReaped, true); assert.equal(report.exporterInvocations, layout === POSTCARD_INDEX_LAYOUT ? 2 : 1); assert.equal(report.productInvocations, 0);
   assert.equal(receipt.owner, 'source-postcard-facts'); assert(['succeeded', 'retired'].includes(receipt.state)); assert.equal(receipt.handlesReaped, true); assert.equal(receipt.activePid, null);
+  if (limits) assert.deepEqual(receipt.admission.limits, limits, 'Postcard custody admission differs');
   const {postcardOwner, ...expected} = facts; assert.deepEqual(report.result, expected, 'archived scenario result differs'); return true;
 }
-export function verifyFreshPostcardReport(report, request) {
+export function verifyFreshPostcardReport(report, request, allowance) {
   assert.equal(report.layout, request.layout ?? POSTCARD_LAYOUT); assert([POSTCARD_LAYOUT, POSTCARD_INDEX_LAYOUT].includes(report.layout)); assert.equal(report.invocationAttempts.length, 12, 'exactly twelve fresh measured index invocations');
   const expected = CASES.flatMap((entry, i) => (i === 1 ? ['rust', 'go'] : ['go', 'rust']).map(engine => ({caseId: entry.id, engine})));
   assert.deepEqual(report.invocationAttempts, expected); assert.equal(report.continuation, undefined); assert.equal(report.importedSamples, 0);
-  assert.equal(report.scenarios.length, 6); for (const row of report.scenarios) verifyFreshPostcardFacts(row.facts, request.candidate, expectedExporter(request.exporter), request.layout);
+  const limits = freshPostcardDiskPolicy(request.ownerRoot, process.env, allowance); assert.deepEqual(report.diskPolicy, limits, 'fresh controller disk policy differs');
+  assert.equal(report.owners.length, 9, 'one healthy base and eight changed scenario owners required');
+  for (const owner of report.owners) assert.deepEqual(json(contained(request.ownerRoot, owner.receipt), 1 << 20).admission.limits, limits, 'scenario owner admission differs');
+  assert.equal(report.scenarios.length, 6); for (const row of report.scenarios) verifyFreshPostcardFacts(row.facts, request.candidate, expectedExporter(request.exporter), request.layout, limits);
   return true;
 }
 
@@ -225,23 +233,51 @@ export async function runPostcardFreshController(config, overrides = {}) {
   const services = {runnerIdentity: freshPostcardIdentity,
     verifyAdditionalIdentity: request => verifyPostcardExporter(request.ownerRoot, exporter, request.candidate),
     compareFacts: (...args) => comparePostcardScenario(...args, exporter),
-    verifyAdditionalEvidence: report => verifyFreshPostcardReport(report, config.request), ...overrides};
+    verifyAdditionalEvidence: report => verifyFreshPostcardReport(report, config.request, config.allowance), ...overrides};
   return runController(config, services);
 }
 
-export async function runPostcardFreshOwned(configuration, conditionsPath) {
+export function parsePostcardFreshArguments(args) {
+  const [configuration, conditions, flag] = args;
+  assert((args.length === 2 || args.length === 3 && flag === '--scratch-6gib') &&
+    [configuration, conditions].every(value => typeof value === 'string' && value && !value.startsWith('--')),
+    'usage: node source-pack-scenarios-postcard-fresh.mjs CONFIG.json CONDITIONS.json [--scratch-6gib]');
+  return {configuration, conditions, scratch6GiB: flag === '--scratch-6gib'};
+}
+function freshPostcardDiskPolicy(root, environment, allowance) {
+  if (allowance !== undefined) assert.deepEqual(allowance, FRESH_ALLOWANCE, 'only explicitly authorized task-local 6 GiB allowance');
+  return assertDiskPolicy(root, environment, allowance);
+}
+export function validateFreshPostcardOwner(config, environment = process.env) {
+  const limits = freshPostcardDiskPolicy(config.request.ownerRoot, environment, config.allowance);
+  const owner = json(join(config.evidence, 'receipt.json'), 1 << 20);
+  assert.equal(owner.schema, 'lycheedev.disk-owner.v1'); assert.equal(owner.owner, 'source-postcard-fresh-diagnostics'); assert.equal(owner.state, 'active');
+  assert.equal(resolve(config.scratch), join(config.request.ownerRoot, '.tmp/rust-scratch', owner.id)); assert.equal(resolve(owner.directory), resolve(config.scratch)); assert.equal(resolve(config.evidence), join(config.request.ownerRoot, '.tmp/rust-disk/evidence', owner.id));
+  assert.deepEqual(owner.inputHashes.runner, config.inputs, 'fresh runner receipt differs');
+  assert.deepEqual(owner.inputHashes.allowance, config.allowance, 'fresh allowance receipt differs');
+  assert.deepEqual(owner.admission.limits, limits, 'fresh admission receipt differs');
+  assert.equal(owner.command[0], 'source-postcard-fresh-diagnostics');
+  assert.equal(owner.command.length, config.allowance ? 4 : 3);
+  if (config.allowance) assert.equal(owner.command[3], '--scratch-6gib');
+  assert.equal(owner.commandSHA256, sha256(Buffer.from(JSON.stringify(owner.command))));
+  return limits;
+}
+
+export async function runPostcardFreshOwned(configuration, conditionsPath, {scratch6GiB = false} = {}) {
   assert.equal(process.platform, 'win32', 'formal fresh v13 scenarios require Windows');
+  assert.equal(typeof scratch6GiB, 'boolean'); const allowance = scratch6GiB ? FRESH_ALLOWANCE : undefined;
   let request = validatePostcardFreshRequest(json(configuration, 65536)); const conditions = validateConditions(json(conditionsPath, 16384));
-  const root = request.ownerRoot, runnerRoot = resolve(import.meta.dirname, '../..'), inputs = freshPostcardIdentity(runnerRoot), limits = assertDiskPolicy(root), environment = sourcePhaseEnvironment(process.env);
+  const root = request.ownerRoot, runnerRoot = resolve(import.meta.dirname, '../..'), inputs = freshPostcardIdentity(runnerRoot), limits = freshPostcardDiskPolicy(root, process.env, allowance), environment = sourcePhaseEnvironment(process.env);
   verifyCandidateRecord(request.candidate);
-  const job = beginScratch(root, 'source-postcard-fresh-diagnostics', {command: ['source-postcard-fresh-diagnostics', resolve(configuration), resolve(conditionsPath)], inputs: {configuration: hashFile(configuration, 65536), conditions: hashFile(conditionsPath, 16384), runner: inputs}, limits,
+  const job = beginScratch(root, 'source-postcard-fresh-diagnostics', {command: ['source-postcard-fresh-diagnostics', resolve(configuration), resolve(conditionsPath), ...(scratch6GiB ? ['--scratch-6gib'] : [])], inputs: {configuration: hashFile(configuration, 65536), conditions: hashFile(conditionsPath, 16384), runner: inputs, ...(allowance ? {allowance} : {})}, limits,
     admissionOptions: {requiredBytes: 16 << 20, scratchReserveBytes: 1 << 20}});
   let state = 'failed', handlesReaped = true, failure, exporterPreparation;
-  const report = {schema: 'lycheedev.source-postcard-fresh-owned.v1', state, measuredIndexInvocations: 0, exporterInvocations: 0, performanceAcceptanceEvaluated: false, importedSamples: 0, inputs};
+  const report = {schema: 'lycheedev.source-postcard-fresh-owned.v1', state, measuredIndexInvocations: 0, exporterInvocations: 0, performanceAcceptanceEvaluated: false, importedSamples: 0, inputs, diskPolicy: limits, allowance: allowance ?? null};
   try {
-    const prepared = prepareFreshPostcardExporter(request); request = prepared.request; exporterPreparation = prepared.preparation; report.exporterPreparation = exporterPreparation;
+    const prepared = prepareFreshPostcardExporter(request, {allowance}); request = prepared.request; exporterPreparation = prepared.preparation; report.exporterPreparation = exporterPreparation;
     assert.deepEqual(freshPostcardIdentity(runnerRoot), inputs, 'fresh runner changed during preparation');
-    const config = {request, layout: request.layout, conditions, runnerRoot, inputs, scratch: job.directory, evidence: job.evidence};
+    const config = {request, layout: request.layout, conditions, runnerRoot, inputs, scratch: job.directory, evidence: job.evidence, ...(allowance ? {allowance} : {})};
+    validateFreshPostcardOwner(config);
     const configPath = join(job.evidence, 'fresh-configuration.json'); save(configPath, config);
     handlesReaped = false;
     const run = ownedSpawnSync(process.execPath, [join(runnerRoot, 'tests/rust-performance-paired/source-pack-scenarios-postcard-fresh.mjs'), '--inner', configPath], {cwd: root, env: environment, evidence: job.evidence, timeout: 3600000});
@@ -254,7 +290,7 @@ export async function runPostcardFreshOwned(configuration, conditionsPath) {
     }
     assert(processPassed(run), 'fresh Postcard controller incomplete');
     verifyObservedReport(run, observed, request, inputs, undefined, undefined, undefined, {layout: request.layout});
-    verifyFreshPostcardReport(observed, request); verifyCandidateRecord(request.candidate); verifyPostcardExporter(root, expectedExporter(request.exporter), request.candidate);
+    verifyFreshPostcardReport(observed, request, allowance); verifyCandidateRecord(request.candidate); verifyPostcardExporter(root, expectedExporter(request.exporter), request.candidate);
     assert.deepEqual(freshPostcardIdentity(runnerRoot), inputs); assert.deepEqual(observed.diskPolicy, limits);
     state = 'succeeded'; report.state = 'source_postcard_fresh_scenarios_observed';
   } catch (error) {
@@ -272,11 +308,10 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename
   if (process.argv[2] === '--inner') {
     assert.equal(process.platform, 'win32'); assert.equal(process.argv.length, 4);
     const config = json(process.argv[3], 1 << 20); config.request = validatePostcardFreshRequest(config.request); validateConditions(config.conditions);
-    const owner = json(join(config.evidence, 'receipt.json'), 1 << 20); assert.equal(owner.schema, 'lycheedev.disk-owner.v1'); assert.equal(owner.owner, 'source-postcard-fresh-diagnostics'); assert.equal(owner.state, 'active');
-    assert.equal(resolve(config.scratch), join(config.request.ownerRoot, '.tmp/rust-scratch', owner.id)); assert.equal(resolve(owner.directory), resolve(config.scratch)); assert.equal(resolve(config.evidence), join(config.request.ownerRoot, '.tmp/rust-disk/evidence', owner.id));
+    validateFreshPostcardOwner(config);
     const report = await runPostcardFreshController(config); console.log(JSON.stringify({state: report.state, report: join(config.evidence, 'report.json')})); if (report.state !== 'source_pack_scenarios_observed') process.exitCode = 1;
   } else {
-    assert.equal(process.argv.length, 4, 'usage: node source-pack-scenarios-postcard-fresh.mjs CONFIG.json CONDITIONS.json');
-    const result = await runPostcardFreshOwned(process.argv[2], process.argv[3]); console.log(JSON.stringify(result)); if (!result.success) process.exitCode = 1;
+    const {configuration, conditions, scratch6GiB} = parsePostcardFreshArguments(process.argv.slice(2));
+    const result = await runPostcardFreshOwned(configuration, conditions, {scratch6GiB}); console.log(JSON.stringify(result)); if (!result.success) process.exitCode = 1;
   }
 }

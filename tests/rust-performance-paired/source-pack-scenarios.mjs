@@ -668,7 +668,8 @@ export async function runController(config, overrides = {}) {
   const {request, runnerRoot, inputs, conditions, scratch, evidence: out} = config;
   const layout = config.layout ?? 'v11-pack2'; assert(['v11-pack2', 'v13-postcard', 'v13-postcard-index18'].includes(layout), 'explicit supported controller layout required');
   if (layout !== 'v11-pack2') {
-    assert(!config.resumeCold && !config.resumeRemaining && !config.resumeGo && !config.allowance, 'v13 uses fresh scenarios and the unchanged default disk policy');
+    assert(!config.resumeCold && !config.resumeRemaining && !config.resumeGo, 'v13 uses fresh scenarios without historical continuation');
+    if (config.allowance !== undefined) assert.deepEqual(config.allowance, FRESH_ALLOWANCE, 'only explicitly authorized task-local 6 GiB allowance');
     for (const hook of ['runnerIdentity', 'compareFacts', 'verifyAdditionalIdentity', 'verifyAdditionalEvidence']) assert.equal(typeof overrides[hook], 'function', 'v13 requires its authenticated exporter controller');
   }
   assert([config.resumeCold, config.resumeRemaining, config.resumeGo].filter(Boolean).length <= 1, 'one exact continuation mode required');

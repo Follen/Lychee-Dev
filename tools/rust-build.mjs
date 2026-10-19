@@ -1,8 +1,9 @@
+import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {closeSync,copyFileSync,existsSync,lstatSync,mkdirSync,openSync,readFileSync,readSync,readdirSync,writeFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {dirname,join,resolve} from 'node:path';
-import {acquireChannel,admission,beginFreshCache,beginScratch,contained,sha256} from './rust-disk.mjs';
+import {acquireChannel,admission,beginFreshCache,beginScratch,contained,sha256,defaults,policy} from './rust-disk.mjs';
 import {ownedSpawnSync} from './rust-owned-process.mjs';
 import {emmyRecipeFiles,emmyRecipePath,emmySupportFiles,inspectEmmy,verifyEmmyWiring} from './rust-emmy-identity.mjs';
 
@@ -33,7 +34,7 @@ export function runCargo(root,args,options={}){
 }
 // Optimized product preparation has a larger fixed build allowance. Keep this
 // private so test/check/fetch and arbitrary Cargo callers retain their limit.
-function runCargoWithDeadline(root,args,{sourceRoot=root,owner='rust-cargo',channelKind='ordinary',oneShot=false,environment={},freshOffline=false,execute=ownedSpawnSync,onSuccess}={},timeoutMs){
+function runCargoWithDeadline(root,args,{sourceRoot=root,owner='rust-cargo',channelKind='ordinary',oneShot=false,environment={},freshOffline=false,execute=ownedSpawnSync,onSuccess,limits}={},timeoutMs){
   root=resolve(root);sourceRoot=resolve(sourceRoot);
   if(sourceRoot!==root)contained(root,sourceRoot);
   if(!['build','test','check','clippy','fetch','metadata'].includes(args[0]))throw new Error('build.unsupported_cargo_command');
@@ -41,6 +42,18 @@ function runCargoWithDeadline(root,args,{sourceRoot=root,owner='rust-cargo',chan
   if(args.some(value=>/^--(?:target-dir|config|manifest-path)(?:=|$)/.test(value)))throw new Error('build.uncontrolled_cargo_option');
   if(process.env.CARGO_TARGET_DIR||environment.CARGO_TARGET_DIR)throw new Error('build.uncontrolled_target_override');
   if(freshOffline&&(channelKind!=='ordinary'||!onSuccess||environment.CARGO_HOME))throw new Error('build.invalid_fresh_gate');
+  // Only the fresh Source exporter may pass its already validated task-local
+  // policy. Never change the default Cargo path or use environment overrides.
+  if(limits!==undefined){
+    assert.equal(owner,'source-postcard-exporter-build','build.scoped_limits_owner');
+    assert.deepEqual(args,['test','--locked','--offline','-j','1','-p','lycheedev-source','--lib','--no-run','--message-format=json-render-diagnostics'],'build.scoped_cargo_args');
+    assert.equal(channelKind,'ordinary');assert.equal(oneShot,true);assert.equal(freshOffline,false);
+    assert(!Object.keys({...process.env,...environment}).some(key=>/^LYCHEEDEV_DISK_/i.test(key)),'build.scoped_disk_override');
+    assert.deepEqual(policy(root,{}),{...defaults},'build.scoped_default_policy');
+    assert.deepEqual(limits,{...defaults,scratchBytes:limits?.scratchBytes},'build.scoped_limits');
+    assert([defaults.scratchBytes,6*1024**3].includes(limits.scratchBytes),'build.scoped_scratch_limit');
+    limits=Object.freeze({...limits});
+  }
   const sourceManifest=join(sourceRoot,'crates/lycheedev-source/Cargo.toml');
   const adapterManifest=join(sourceRoot,'crates/lycheedev-emmy-adapter/Cargo.toml');
   let emmy;
@@ -61,7 +74,7 @@ function runCargoWithDeadline(root,args,{sourceRoot=root,owner='rust-cargo',chan
   }
   const inputs={...(!compiling?{manifests:manifestDigest(sourceRoot),priorCargoLock:hashFile(join(sourceRoot,'Cargo.lock'))}:{sourceTree:sourceDigest(sourceRoot)}),
     ...(emmy?{emmyPatch:patch,emmy:{schema:emmy.schema,identitySHA256:emmy.identitySHA256,recipeSHA256:emmy.recipeSHA256,patchedTreeSHA256:patch,historicalPrivatePatchRecovered:false}}:{})};
-  const job=beginScratch(root,owner,{command:['cargo',...args],inputs,admissionOptions:{requiredBytes:2*1024**3,cacheReserveBytes:2*1024**3}});
+  const job=beginScratch(root,owner,{command:['cargo',...args],inputs,limits,admissionOptions:{requiredBytes:2*1024**3,cacheReserveBytes:2*1024**3}});
   let channel;
   try{channel=acquireChannel(root,channelKind,owner);}catch(error){job.seal({state:'failed',handlesReaped:true});job.cleanup();throw error;}
   const metadata=join(job.evidence,'command.json'),stdout=join(job.evidence,'stdout.bin'),stderr=join(job.evidence,'stderr.bin');
