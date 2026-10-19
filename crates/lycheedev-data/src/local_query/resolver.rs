@@ -304,14 +304,7 @@ impl Factory<'_> {
                         .read(bundle.identity.db2_file_data_id)?
                 };
                 let bytes = file.bytes.len();
-                let limits = table::TableLimits {
-                    file_bytes: self.maximum,
-                    metadata_bytes: 64 << 20,
-                    rows: 1_000_000,
-                    columns: 4096,
-                    partitions: 4096,
-                    ..Default::default()
-                };
+                let limits = super::table_limits(self.maximum);
                 let (layout, availability) = table::inspect_available_budgeted(
                     &file.bytes,
                     file.bytes.missing(),

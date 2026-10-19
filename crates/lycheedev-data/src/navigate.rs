@@ -212,7 +212,7 @@ pub(crate) fn dispatch_finishing(
             let view = table::open_budgeted(
                 &prepared.file.bytes,
                 &prepared.definition,
-                Default::default(),
+                prepared.limits,
                 &prepared.availability.skipped,
                 &prepared.availability.ranges,
                 budget.clone(),

@@ -58,6 +58,7 @@ pub(super) fn run_after_finish(
                 layout,
                 definition,
                 availability,
+                limits,
             } = db2::prepare_scoped(
                 inv,
                 request.name,
@@ -68,7 +69,7 @@ pub(super) fn run_after_finish(
             let view = table::open_budgeted(
                 &file.bytes,
                 &definition,
-                Default::default(),
+                limits,
                 &availability.skipped,
                 &availability.ranges,
                 budget.clone(),

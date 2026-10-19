@@ -1,6 +1,17 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-19 01:06 UTC。当前已验证生产为 `d4271ae430ac2a80087af81c70eea960d547acbb`，分支 `rust-refactor`、草稿 PR #14。下列为非敏感结果摘要；本机原始日志未随文档发布。Stage2与完整性能验收仍未完成。
+更新：2026-10-19 01:50 UTC。当前已验证生产为 `d4271ae430ac2a80087af81c70eea960d547acbb`，分支 `rust-refactor`、草稿 PR #14。下列为非敏感结果摘要；本机原始日志未随文档发布。Stage2与完整性能验收仍未完成。
+
+### DBCD 四项共享 Data 合同修复（2026-10-19，待实跑）
+
+用户明确要求修复四项，并要求保留现有Skill product定义。独立审计固定DBCD `e732093f8864240fc5884bd1bba6b02f3dfc0d56`、WoWDBDefs `b9a63096cdd99b26967f17f9515377ae62cadfd7`；前三项固定Go323同样存在，不能以Go同错结果作为正确oracle。
+
+- F1：仅WDC5 palette物理区遵从所有scalar Pallet后所有PalletArray，各类字段顺序保留；WDC2/1SLC/3/4、common/bit offset与严格size/index拒绝不变。
+- F2：metadata值行数值后保完整多词Name，注释仍独立解析；mapping token/path规则不放宽。原每行logical160保留，安全计量另计实际owned Name/Comment UTF8字节并在分配前准入；这是旧已有字符串少计费的修正，极紧budget可更早拒绝，不声称所有错误时序不变。
+- F3：只metadata BUILD支持官方12个精确预置范围，采用官方preset分量匹配；未知值拒绝，原数字版本范围语义保留。TBC/WotLK等不成为产品alias；现Skill产品名称/对应关系、两条Forever路由完全保留。
+- F4：统一从请求实际max-bytes生成parser caps（metadata64MiB、rows1M、columns/partitions4096），Prepared保存同一limits贯穿prepare及所有二次open；SDK默认值不改，不引入product专用parser。小fixture的512MiB请求传递不等于已验真实>256MiB文件。
+
+独立测试-only版本 `51d430690d2799deb1a1159f4f7a9169e236a0d3` 保存8路径21702B、13测试入口，用官方原字节/独立palette输入和真实公开消费者准备失败复现；尚未运行，不能标成已复现。修复候选另提交，必须保留原失败后再验证同一入口。修复后正式入口为WDC7项、metadata公开SQL4项、请求限额公开6项，以及metadata7项与限额传播5项新增单元回归；三条作者范围均已由独立审者检查最终源码，尚未编译执行。所有新增生产仍待Windows编译/执行，静态独审不替代动态结果。本批无游戏、无新原始本机日志披露；Stage2与完整性能验收仍未结束。
 
 ### Facts 编码所有权小修已通过定向回归（cb409）
 

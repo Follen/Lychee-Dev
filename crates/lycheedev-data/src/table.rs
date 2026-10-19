@@ -834,6 +834,20 @@ fn open_source<'a>(
     )?;
     let mut programs = Vec::with_capacity(layout.fields.len());
     let (mut common_offset, mut palette_offset) = (layout.common_offset, layout.palette_offset);
+    // WDC5 stores all scalar palettes before all array palettes, preserving
+    // field order within each class. WDC2/3/4 keep the combined field order.
+    // inspect_source already checked that their total fits the palette block.
+    let mut array_palette_offset = layout.palette_offset
+        + if layout.version == 5 {
+            layout
+                .fields
+                .iter()
+                .filter(|storage| storage.codec == 3)
+                .map(|storage| storage.extra_bytes as usize)
+                .sum::<usize>()
+        } else {
+            0
+        };
     for storage in &layout.fields {
         let mut program = Program {
             storage: storage.clone(),
@@ -855,9 +869,14 @@ fn open_source<'a>(
                 }
             }
             3 | 4 => {
-                program.palette = palette_offset..palette_offset + storage.extra_bytes as usize;
+                let offset = if layout.version == 5 && storage.codec == 4 {
+                    &mut array_palette_offset
+                } else {
+                    &mut palette_offset
+                };
+                program.palette = *offset..*offset + storage.extra_bytes as usize;
                 source.read(program.palette.start, program.palette.len())?;
-                palette_offset = program.palette.end;
+                *offset = program.palette.end;
             }
             _ => {
                 if storage.extra_bytes != 0 {

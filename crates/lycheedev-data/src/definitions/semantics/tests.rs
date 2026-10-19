@@ -93,7 +93,7 @@ fn go_semantic_irrelevant_mapping_empty_catalog_and_strict_selected_syntax() {
         "(BOGUS 1) 2 UNKNOWN",
         "(BUILD 12.1.0.69933",
         "(BUILD 12.1.0.69933)",
-        "0 name extra",
+        "not-a-number name extra",
     ] {
         assert!(
             parse_values(raw.as_bytes(), "12.1.0.69933", &ledger).is_err(),
@@ -121,7 +121,7 @@ fn go_semantic_irrelevant_mapping_empty_catalog_and_strict_selected_syntax() {
     );
 }
 #[test]
-fn go_semantic_parser_reserves_before_rows_and_oversized_token_lists() {
+fn semantic_parser_reserves_before_rows_and_keeps_long_names() {
     let raw = "0\n".repeat(100_000);
     let ledger = budget(Cost {
         retained_bytes: raw.len() as u64 + 160,
@@ -149,11 +149,14 @@ fn go_semantic_parser_reserves_before_rows_and_oversized_token_lists() {
     );
     assert_eq!(ledger.snapshot().unwrap().decode_work, 1);
     let ledger = budget(Cost::defaults());
+    // Value is split once. The former oversized-token rejection was rejecting
+    // a valid long display name, not protecting the strict mapping grammar.
+    let values = parse_values("0 ".repeat(100_000).as_bytes(), "12.1.0.69933", &ledger).unwrap();
+    assert_eq!(values.len(), 1);
+    assert_eq!(values[0][0], Scalar::UInt(0));
     assert_eq!(
-        parse_values("0 ".repeat(100_000).as_bytes(), "12.1.0.69933", &ledger)
-            .unwrap_err()
-            .code,
-        "records.definition_identity"
+        values[0][1],
+        Scalar::String("0 ".repeat(99_999).trim_end().into())
     );
 }
 #[test]

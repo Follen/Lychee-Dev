@@ -380,3 +380,10 @@ number spellings, missing/null/malformed inputs, cancellation/expiry, real loose
 and pack/legacy consumers, and inner corruption with a valid outer checksum.
 Cache version/layout and original bytes do not change. Windows execution and
 matched end-to-end measurement of this slice are pending.
+
+
+### DBCD metadata and request limits compatibility (2026-10-19)
+
+Official metadata BUILD presets are data-file version-range syntax only. They do not redefine Skill product names, identities or routing. Preset matching follows the pinned DBDefsLib expansion/major/build component contract; existing numeric range semantics remain explicit. Metadata value names may contain spaces; mapping paths keep their independent strict grammar. Actual owned name/comment UTF-8 storage is admitted separately from unchanged logical row charges.
+
+WDC5 palette physical ordering is format-specific (all scalar palettes then array palettes), while field programs remain in schema order; older WDC versions retain field-order storage. Public Data requests derive one parser-limit value from the admitted request and carry it through preparation and subsequent table opens. This shares SQL/non-SQL policy without altering the standalone table library defaults or adding per-product parsers.

@@ -302,7 +302,7 @@ impl<'a> Navigator<'a> {
             let view = table::open_budgeted(
                 &prepared.file.bytes,
                 &prepared.definition,
-                Default::default(),
+                prepared.limits,
                 &prepared.availability.skipped,
                 &prepared.availability.ranges,
                 nav.budget.clone(),

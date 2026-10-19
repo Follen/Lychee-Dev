@@ -170,6 +170,42 @@ fn number(text: &str) -> Result<Scalar> {
             .map_err(|_| identity())
     }
 }
+// WoWDBDefs b9a63096cdd99b26967f17f9515377ae62cadfd7,
+// code/C#/DBDefsLib/BuildRange.cs: presetRanges and Contains. These are metadata
+// version selectors, never toolkit products or aliases. Presets use upstream's
+// independent expansion/major/build bounds (minor is ignored); ordinary numeric
+// selectors retain the existing schema::matches_build contract.
+fn matches_metadata_build(build: &str, constraints: &str) -> Result<bool> {
+    let version = schema::version(build)?;
+    let mut matched = false;
+    for constraint in constraints.split(',').map(str::trim) {
+        let preset = match constraint {
+            "Pre" => Some(([0, 3, 4, 2953], [0, 12, 0, 3988])),
+            "Vanilla" => Some(([1, 0, 0, 3980], [1, 12, 3, 6141])),
+            "TBC" => Some(([2, 0, 0, 5610], [2, 4, 3, 8606])),
+            "WotLK" => Some(([3, 0, 0, 8120], [3, 3, 5, 12340])),
+            "Cata" => Some(([4, 0, 0, 11927], [4, 3, 4, 15595])),
+            "MoP" => Some(([5, 0, 1, 15464], [5, 4, 8, 18414])),
+            "WoD" => Some(([6, 0, 1, 18125], [6, 2, 4, 21742])),
+            "Legion" => Some(([7, 0, 1, 20740], [7, 3, 5, 26972])),
+            "BfA" => Some(([8, 0, 1, 25703], [8, 3, 7, 35662])),
+            "SL" => Some(([9, 0, 1, 33411], [9, 2, 7, 45745])),
+            "DF" => Some(([10, 0, 0, 43342], [10, 2, 7, 55664])),
+            "TWW" => Some(([11, 0, 0, 54311], [11, 2, 7, 65299])),
+            _ => None,
+        };
+        // Validate every selector, even after a match, so malformed trailing
+        // constraints cannot disappear through short-circuit evaluation.
+        matched |= if let Some((low, high)) = preset {
+            [0, 1, 3]
+                .into_iter()
+                .all(|index| version[index] >= low[index] && version[index] <= high[index])
+        } else {
+            schema::matches_build(build, constraint)?
+        };
+    }
+    Ok(matched)
+}
 #[cfg(test)]
 fn parse_values(raw: &[u8], build: &str, budget: &Budget) -> Result<Vec<Vec<Scalar>>> {
     parse_values_with_check(raw, build, budget, || Ok(()))
@@ -195,31 +231,45 @@ fn parse_values_with_check(
         if code.starts_with('(') {
             let (annotation, rest) = code.split_once(')').ok_or_else(identity)?;
             let constraints = annotation.strip_prefix("(BUILD ").ok_or_else(identity)?;
-            if !schema::matches_build(build, constraints)? {
+            if !matches_metadata_build(build, constraints)? {
                 continue;
             }
             code = rest.trim();
         }
-        let parts = code.split_whitespace().take(3).collect::<Vec<_>>();
-        if !(1..=2).contains(&parts.len()) {
-            return Err(identity());
-        }
-        let value = number(parts[0])?;
+        // DBDE/DBDF Name is the whole remainder, including internal whitespace,
+        // punctuation and a possible trailing '?'. Mapping tokens stay strict.
+        let (value, name) = code
+            .split_once(char::is_whitespace)
+            .map_or((code, ""), |(value, name)| (value, name.trim_start()));
+        let value = number(value)?;
         if rows.len() >= 100_000 {
             return Err(limit());
         }
-        budget.charge(Cost {
-            retained_bytes: 160,
-            metadata_bytes: 160,
-            decode_work: 1,
-            ..Default::default()
-        })?;
+        let comment = comment.trim();
+        // Keep the fixed logical row estimate, but admit the actual owned text
+        // before allocating it. The raw input remains separately accounted.
+        budget.charge_split(
+            Cost {
+                retained_bytes: 160,
+                metadata_bytes: 160,
+                decode_work: 1,
+                ..Default::default()
+            },
+            Cost {
+                retained_bytes: 160 + name.len() as u64 + comment.len() as u64,
+                metadata_bytes: 160,
+                decode_work: 1,
+                ..Default::default()
+            },
+        )?;
         rows.push(vec![
             value,
-            parts
-                .get(1)
-                .map_or(Scalar::Null, |name| Scalar::String((*name).into())),
-            Scalar::String(comment.trim().into()),
+            if name.is_empty() {
+                Scalar::Null
+            } else {
+                Scalar::String(name.into())
+            },
+            Scalar::String(comment.into()),
         ]);
     }
     check()?;
@@ -373,3 +423,7 @@ pub(crate) fn source(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "semantics/metadata_compatibility_tests.rs"]
+mod metadata_compatibility_tests;

@@ -40,6 +40,19 @@ mod sql_output_tests;
 mod sql_result_projection_tests;
 mod request;
 
+/// Fixed Go query-reader limits. The request's selected-content maximum is
+/// distinct from the general-purpose WDC SDK defaults and shared query ledger.
+pub(crate) fn table_limits(maximum: usize) -> table::TableLimits {
+    table::TableLimits {
+        file_bytes: maximum,
+        metadata_bytes: 64 << 20,
+        rows: 1_000_000,
+        columns: 4096,
+        partitions: 4096,
+        ..Default::default()
+    }
+}
+
 pub struct File {
     pub bytes: FileBytes,
     pub reading: Value,

@@ -17,6 +17,10 @@ use std::{
 #[path = "db2/source_freshness_tests.rs"]
 mod source_freshness_tests;
 
+#[cfg(test)]
+#[path = "db2/reader_limits_tests.rs"]
+mod reader_limits_tests;
+
 pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
     dispatch_after_read(inv, &mut || Ok(()))
 }
@@ -105,6 +109,7 @@ pub(crate) fn dispatch_finishing(
                 layout,
                 definition,
                 availability,
+                limits,
             } = prepare_scoped(
                 inv,
                 name,
@@ -116,7 +121,7 @@ pub(crate) fn dispatch_finishing(
             let view = table::open_budgeted(
                 &file.bytes,
                 &definition,
-                Default::default(),
+                limits,
                 &availability.skipped,
                 &availability.ranges,
                 budget.clone(),
@@ -501,6 +506,9 @@ pub(crate) struct Prepared {
     pub layout: table::Layout,
     pub definition: schema::Definition,
     pub availability: table::Availability,
+    // Preserve the exact validated request through every secondary table open,
+    // including navigation batches that no longer carry an Invocation.
+    pub limits: table::TableLimits,
 }
 pub(crate) fn prepare(inv: &Invocation, name: &str, budget: &Arc<Budget>) -> Result<Prepared> {
     Ok(prepare_many(inv, &[name], budget)?.remove(0))
@@ -594,10 +602,18 @@ pub(crate) fn prepare_following_scoped(
         let batch_start = prepared.len();
         for ((bundle, raw), file) in std::mem::take(&mut bundles).into_iter().zip(files) {
             budget.check()?;
+            // The physical provider has already validated this flag. Resolve it
+            // here, not before source/definition preparation, to preserve errors.
+            let limits = local_query::table_limits(inv.usize_flag(
+                "--max-bytes",
+                128 << 20,
+                1,
+                512 << 20,
+            )?);
             let (layout, availability) = table::inspect_available_budgeted(
                 &file.bytes,
                 file.bytes.missing(),
-                Default::default(),
+                limits,
                 budget.clone(),
             )?;
             if layout.table_hash != bundle.identity.hash {
@@ -619,6 +635,7 @@ pub(crate) fn prepare_following_scoped(
                 layout,
                 definition,
                 availability,
+                limits,
             });
         }
         let names = following(&prepared[batch_start..])?;
