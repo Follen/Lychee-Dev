@@ -1,6 +1,16 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-19 03:54 UTC。当前已验证生产为 `d4271ae430ac2a80087af81c70eea960d547acbb`，分支 `rust-refactor`、草稿 PR #14。下列为非敏感结果摘要；本机原始日志未随文档发布。Stage2与完整性能验收仍未完成。
+更新：2026-10-19 07:24 UTC。当前已验证生产为 `d4271ae430ac2a80087af81c70eea960d547acbb`，分支 `rust-refactor`、草稿 PR #14。下列为非敏感结果摘要；本机原始日志未随文档发布。Stage2与完整性能验收仍未完成。
+
+### Stage2 既有覆盖率证据范围复核（2026-10-19）
+
+唯一测试协调线程只读核验a860既有12份integration报告：130通过/0失败/1忽略，逐名无重漏；2400个引用可读且hash一致，12个EXE及归档、各一份profraw/profdata的有序分片完整。scratch已按原合同清理，不需为恢复证据重跑。此处仅记录非敏感汇总。
+
+共同工具条件为Rust1.99.0/LLVM23.1.1、Windows MSVC、test opt0/debug1、crt-static与coverage、incremental0、locked/offline/j1/default stack和原600秒。Source含default/emmy-prototype feature，其余为空；12份环境摘要不同且无完整快照，不据此强行跨报告合并。所有export只映射各自integration EXE，CLI对象映射为0，已确认公开CLI子进程统计缺口。
+
+按原目标顺序，src/tests路径数：Core capture_dependencies、budgeted_capture、capture_query_references均93/1；Data sql_csv_parity、sql_lazy_provider_parity为236/2，relational_parity236/1，sql_explain_parity236/2；Source source_inspect、flow_parity均313/1；Live mailbox_lookup182/1；Delivery slot_maintenance109/1、release_control108/1。src也含内嵌测试/宏，不称纯生产分母；Source名为generated的模块是手写代码，不按名字排除。各映射集合不同，不相加/平均百分比。唯一ignore为linked_static_slot_member_is_rejected_without_following_it，权限边界尚未执行。
+
+下一最窄工具片为同一次成功Cargo调用认证的integration+声明CLI双对象，默认单对象保持；首验保留现有Source inspect raw-admission完整测试的四次CLI调用。工具实现已完成，最终cloud coverage/build/disk三个Node suite实际146通过/0失败/0跳过，其中coverage133（原63+新增70）、build8、disk5。回归包括同流对象选择、默认兼容、双对象累计准入、严格映射及故障保全；非作者审查发现对象变更与lookup污染双故障会短路终态检查，已拆开独立检查并补组合反例。Windows实际双对象采集仍NOT_RUN，Node模拟不证明本机LLVM产物规模适配。原600秒、raw+merged128MiB、累计evidence256MiB和16MiB分片不变，实际超限不删case或自动扩大预算。目标只补该invocation的两个对象映射，不能证明每个子进程profile均完整，也不是全仓覆盖率。Stage2、完整Skill/压力/实机及70%性能目标仍待。
 
 ### DBCD 四项确认修复已有红绿回归（2026-10-19）
 

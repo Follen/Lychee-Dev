@@ -95,12 +95,17 @@ export function archiveCoverageFile(source, directory, logs, {read = readSync, w
   verifyCoverageArchive(archive); unchanged(source); return archive;
 }
 
-export function coverageSelection({packageName, testName, lib = false, exact} = {}) {
+export function coverageSelection({packageName, testName, lib = false, exact, companionBin} = {}) {
   check(typeof packageName === 'string' && /^lycheedev-[a-z0-9-]+$/.test(packageName), 'package_required');
   check(typeof lib === 'boolean' && (lib !== (testName !== undefined)), 'one_target_required');
   if (testName !== undefined) check(typeof testName === 'string' && /^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$/.test(testName), 'invalid_test_target');
   if (exact !== undefined) check(typeof exact === 'string' && /^[A-Za-z0-9_][A-Za-z0-9_:]{0,511}$/.test(exact), 'invalid_exact_filter');
-  return {packageName, kind:lib ? 'lib' : 'test', ...(testName ? {testName} : {}), ...(exact ? {exact} : {})};
+  if (companionBin !== undefined) {
+    check(!lib && testName !== undefined, 'companion_integration_required');
+    check(typeof companionBin === 'string' && /^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$/.test(companionBin), 'invalid_companion_bin');
+  }
+  return {packageName, kind:lib ? 'lib' : 'test', ...(testName ? {testName} : {}), ...(exact ? {exact} : {}),
+    ...(companionBin ? {companionBin} : {})};
 }
 
 export function coverageEnvironment(environment) {
@@ -112,6 +117,12 @@ export function coverageEnvironment(environment) {
 }
 
 export function selectCoverageArtifact(bytes, root, target, selection) {
+  return selectCoverageArtifacts(bytes, root, target, selection).artifact;
+}
+
+export function selectCoverageArtifacts(bytes, root, target, selection) {
+  // One successful Cargo JSON stream authenticates both roles. In particular,
+  // fresh=true is valid here; an unreported neighbouring executable is not.
   const rows = text(bytes).split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
   check(rows.length <= 65536, 'cargo_message_budget');
   const finished = rows.filter(row => row.reason === 'build-finished');
@@ -127,7 +138,37 @@ export function selectCoverageArtifact(bytes, root, target, selection) {
   const path = contained(target, row.executable);
   check(path.endsWith('.exe') && row.filenames?.includes(row.executable), 'artifact_executable');
   contained(join(root, 'crates', selection.packageName), row.target.src_path);
-  return {row, ...regular(path, 128 << 20)};
+  const artifact = {row, ...regular(path, RAW_LIMIT)};
+  if (!selection.companionBin) return {artifact};
+  check(selection.kind === 'test', 'companion_integration_required');
+  check(typeof row.package_id === 'string' && row.package_id.length > 0, 'artifact_package_identity');
+  const companions = rows.filter(candidate => candidate.reason === 'compiler-artifact' && candidate.manifest_path === manifest
+    && candidate.target?.name === selection.companionBin && candidate.target?.kind?.length === 1
+    && candidate.target.kind[0] === 'bin' && candidate.profile?.test === false && candidate.executable);
+  check(companions.length === 1, 'companion_cardinality');
+  const companion = companions[0];
+  check(companion.package_id === row.package_id, 'companion_package_identity');
+  const source = contained(dirname(manifest), join(dirname(manifest), 'src/main.rs'));
+  check(companion.target.src_path === source, 'companion_source'); regular(source);
+  check(isAbsolute(companion.executable), 'companion_path');
+  const companionPath = contained(target, companion.executable);
+  check(companionPath.endsWith('.exe') && Array.isArray(companion.filenames)
+    && companion.filenames.includes(companion.executable), 'companion_executable');
+  check(companionPath !== path, 'companion_same_object');
+  const originalFile = lstatSync(path), companionFile = lstatSync(companionPath);
+  check(!(originalFile.ino !== 0 && originalFile.dev === companionFile.dev && originalFile.ino === companionFile.ino), 'companion_same_object');
+  return {artifact, companion:{row:companion, ...regular(companionPath, RAW_LIMIT)}};
+}
+
+export function verifyCompanionCoverage(testCoverage, companionCoverage, combinedCoverage, source, root) {
+  const path = relative(root, source).split(sep).join('/');
+  check(!testCoverage.files.some(file => file.path === path), 'companion_witness_in_test');
+  const witness = companionCoverage.files.find(file => file.path === path);
+  check(witness && witness.lines.covered > 0, 'companion_witness_missing');
+  const union = [...new Set([...testCoverage.files, ...companionCoverage.files].map(file => file.path))].sort();
+  assert.deepEqual(combinedCoverage.files.map(file => file.path).sort(), union, 'coverage.combined_file_union');
+  return {source:path, absentFromTestMap:true, companionCoveredLines:witness.lines.covered,
+    scope:'Proves observed execution of this companion source, not complete capture of every subprocess or its profile.'};
 }
 
 export function verifyCoverageTests(bytes, selection) {
@@ -203,13 +244,20 @@ export function collectRustCoverage(root, options, {execute = ownedSpawnSync, no
   const job = beginScratch(root, 'rust-coverage', {command:['rust-coverage', selection], inputs:{selection, tools, support},
     admissionOptions:{requiredBytes:256 << 20, scratchReserveBytes:128 << 20}});
   const rawDirectory = join(job.directory, 'raw'); mkdirSync(rawDirectory);
+  // An explicit empty lookup directory disables LLVM's default system build-ID
+  // search. Together with debuginfod=false, only the two supplied objects can
+  // contribute maps. This is opt-in; the historical single-object path stays.
+  const objectLookup = selection.companionBin ? join(job.directory, 'empty-object-lookup') : undefined;
+  if (objectLookup) mkdirSync(objectLookup);
   const profilePattern = join(rawDirectory, 'test-%m-%p.profraw');
   const reportPath = join(job.evidence, 'coverage.json'), custodyPath = join(job.evidence, 'custody.json');
   const mergedPath = join(job.directory, 'coverage.profdata'), logs = [], buildLogs = [], steps = [];
-  const report = {schema:'lycheedev.rust-coverage.v2', complete:false, selection, target:TARGET, rust:RUST, flags:FLAGS,
+  const report = {schema:selection.companionBin ? 'lycheedev.rust-coverage.v3' : 'lycheedev.rust-coverage.v2', complete:false, selection, target:TARGET, rust:RUST, flags:FLAGS,
     toolchain, tools, support, steps, profilePattern, coverageEvidence:job.receipt, totalProcessBudgetMs:600000,
     budgets:{rawBytes:RAW_LIMIT, scratchBytes:RAW_LIMIT, evidenceBytes:EVIDENCE_LIMIT, evidenceMetadataReserveBytes:FILE_LIMIT,
       scope:'Observed raw+merged scratch and both coverage/build evidence directories; not an OS write quota. Binary/raw/merged bytes are preserved once as ordered parts; the build owner seals their custody index, not duplicate payloads.'}};
+  if (objectLookup) report.externalObjectDiscovery = {debuginfod:false, debugFileDirectory:objectLookup,
+    scope:'Only explicitly selected local objects; the owned lookup directory must remain empty.'};
   let handlesReaped = true, succeeded = false, failure, build, rawArchived = false, rawAttempted = false, mergedArchived = false, mergedAttempted = false;
   let pendingBuildOutputBytes = 0;
   function evidenceBytes() {
@@ -224,6 +272,19 @@ export function collectRustCoverage(root, options, {execute = ownedSpawnSync, no
   function preserve(row, name) {
     evidenceBudget(row.bytes);
     return archiveFile(row, join(job.evidence, name), logs);
+  }
+  function verifyObjects() {
+    for (const object of [report.artifact, report.companionArtifact].filter(Boolean)) {
+      unchanged(object); verifyCoverageArchive(object.archive);
+    }
+  }
+  function verifyObjectLookup() {
+    if (objectLookup) {
+      try {
+        contained(job.directory, objectLookup);
+        check(lstatSync(objectLookup).isDirectory() && readdirSync(objectLookup).length === 0, 'external_object_lookup');
+      } catch (error) { report.objectLookupError = error.message; throw error; }
+    }
   }
   function archiveRaw() {
     rawAttempted = true;
@@ -322,34 +383,75 @@ export function collectRustCoverage(root, options, {execute = ownedSpawnSync, no
           report.compiler = {verbose:rustVersion, cargoVerbose:cargoVersion, cargoLaunchVerbose:cargoLaunchVersion, llvm, llvmTools};
           const compiled = run('cargo', cargoCommand, cargoArgs, {cargoBuild:true});
           cargoOutput = compiled.stdout; cargoError = compiled.stderr;
-          const artifact = selectCoverageArtifact(cargoOutput, root, ownerOptions.env.CARGO_TARGET_DIR, selection);
+          const {artifact, companion} = selectCoverageArtifacts(cargoOutput, root, ownerOptions.env.CARGO_TARGET_DIR, selection);
+          // Admission is cumulative before either large object is copied.
+          if (companion) evidenceBudget(artifact.bytes + companion.bytes);
           report.artifact = {path:artifact.path, bytes:artifact.bytes, sha256:artifact.sha256,
             archive:preserve(artifact, 'instrumented-test.exe.parts')};
+          if (companion) {
+            const cargoIdentity = row => ({packageId:row.package_id, manifestPath:row.manifest_path,
+              target:row.target, profile:row.profile, features:row.features, fresh:row.fresh});
+            Object.assign(report.artifact, {role:'test', cargo:cargoIdentity(artifact.row)});
+            report.companionArtifact = {role:'companion', path:companion.path, bytes:companion.bytes, sha256:companion.sha256,
+              cargo:cargoIdentity(companion.row), archive:preserve(companion, 'instrumented-companion.exe.parts')};
+            verifyObjects();
+          }
           check(readdirSync(rawDirectory).length === 0, 'profiles_before_tests');
           const tested = run('tests', artifact.path, ['--test-threads=1', '--format=pretty', '--color=never',
             ...(selection.exact ? [selection.exact, '--exact'] : [])], {cwd:dirname(manifest)});
           report.tests = verifyCoverageTests(tested.stdout, selection);
-          unchanged(artifact); verifyCoverageArchive(report.artifact.archive);
+          verifyObjects();
           archiveRaw(); check(report.profiles.length > 0, 'profiles_missing');
           check(usage(job.directory).bytes < RAW_LIMIT, 'scratch_total_budget');
           for (const row of report.profiles) { unchanged(row); verifyCoverageArchive(row); }
           run('merge', paths.profdata, ['merge', '-sparse', '--failure-mode=any', '-j', '1',
             ...report.profiles.map(row => row.path), '-o', mergedPath]);
           archiveMerged();
-          const exported = run('export', paths.cov, ['export', '--format=text', '--summary-only', '-j', '1',
-            `--instr-profile=${mergedPath}`, '--object', artifact.path]);
-          check(exported.stderr.length === 0, 'export_diagnostics');
-          report.coverage = summarizeCoverage(exported.stdout, root);
+          function exportObjects(name, objects) {
+            if (companion) {
+              verifyObjects(); verifyObjectLookup();
+              for (const row of report.profiles) { unchanged(row); verifyCoverageArchive(row); }
+              unchanged(report.merged); verifyCoverageArchive(report.merged);
+            }
+            const exported = run(name, paths.cov, ['export', '--format=text', '--summary-only', '-j', '1',
+              `--instr-profile=${mergedPath}`, ...(objectLookup ? ['--debuginfod=false', `--debug-file-directory=${objectLookup}`] : []),
+              ...objects.flatMap(object => ['--object', object.path])]);
+            if (companion) { verifyObjects(); verifyObjectLookup(); }
+            check(exported.stderr.length === 0, 'export_diagnostics');
+            return summarizeCoverage(exported.stdout, root);
+          }
+          const testCoverage = exportObjects('export', [artifact]);
+          if (companion) {
+            report.testCoverage = testCoverage;
+            report.companionCoverage = exportObjects('export-companion', [companion]);
+            report.companionCoverage.denominator = 'Only owned Rust files mapped by the explicitly selected companion object. Uses the same merged observed profiles; this per-object witness is not added to the test or combined summaries. No claim that every subprocess profile was captured.';
+            const combinedCoverage = exportObjects('export-combined', [artifact, companion]);
+            report.companionWitness = verifyCompanionCoverage(testCoverage, report.companionCoverage,
+              combinedCoverage, companion.row.target.src_path, root);
+            combinedCoverage.denominator = 'Union of owned Rust source files under crates/ mapped by exactly the selected integration-test and same-build companion objects, as combined by LLVM. Includes mapped tests and macro expansions; excludes registry, vendor, standard-library, unrepresented targets, doctests and unregistered descendant objects. Counts are LLVM combined summaries, never sums of per-object reports. Only the selected test/filter runs; ignored tests are not run. Observed profiles do not prove complete capture of every subprocess. File summaries only; no workspace percentage, cross-platform or branch-coverage claim.';
+            report.coverage = combinedCoverage;
+          } else report.coverage = testCoverage;
           for (const row of report.profiles) { unchanged(row); verifyCoverageArchive(row); }
-          unchanged(report.merged); verifyCoverageArchive(report.merged); unchanged(artifact); verifyCoverageArchive(report.artifact.archive);
+          unchanged(report.merged); verifyCoverageArchive(report.merged); verifyObjects();
           assert.deepEqual(supportIdentity(), support, 'coverage.support_changed');
           check(now() <= deadline, 'deadline');
         } catch (error) { processFailure = error; }
+        if (selection.companionBin && handlesReaped) {
+          try { verifyObjects(); }
+          catch (error) { processFailure ??= error; report.objectVerificationError = error.message; }
+          // An object fault must not hide foreign lookup bytes and permit their
+          // cleanup. Run both terminal checks even when preserving a prior error.
+          try { verifyObjectLookup(); }
+          catch (error) { processFailure ??= error; }
+        }
         finishArchives();
         if (!processFailure && (!rawArchived || !mergedArchived)) processFailure = new Error(report.profileArchiveError || report.mergedArchiveError || 'coverage.archive_incomplete');
         // Bind archived payloads to this build without copying every large part
         // into a second evidence directory. The coverage owner seals each part.
-        const custody = {schema:'lycheedev.coverage-custody.v1', artifact:report.artifact?.archive,
+        const custody = {schema:selection.companionBin ? 'lycheedev.coverage-custody.v2' : 'lycheedev.coverage-custody.v1',
+          ...(selection.companionBin ? {objects:[report.artifact, report.companionArtifact].filter(Boolean).map(object =>
+            ({role:object.role, cargo:object.cargo, archive:object.archive})), objectVerificationError:report.objectVerificationError}
+            : {artifact:report.artifact?.archive}),
           profiles:report.profiles, merged:report.merged, rawArchived, mergedArchived,
           error:processFailure?.message, profileArchiveError:report.profileArchiveError, mergedArchiveError:report.mergedArchiveError};
         try {
@@ -386,13 +488,14 @@ export function collectRustCoverage(root, options, {execute = ownedSpawnSync, no
       if (reportBytes > FILE_LIMIT / 2) {
         // Exact process outputs/parts remain on disk. Keep a bounded failure
         // record instead of masking the cause with disk.seal's per-log limit.
-        report.omittedFromOversizeFailureReport = ['compiler', 'coverage', 'artifact', 'profiles', 'merged', 'tests', 'steps'];
+        report.omittedFromOversizeFailureReport = ['compiler', 'coverage', 'artifact', 'profiles', 'merged', 'tests', 'steps',
+          ...(selection.companionBin ? ['companionArtifact', 'testCoverage', 'companionCoverage', 'companionWitness'] : [])];
         for (const key of report.omittedFromOversizeFailureReport) delete report[key];
       }
     }
     save(reportPath, report); logs.push(reportPath);
     job.seal({state:handlesReaped ? (succeeded ? 'succeeded' : 'failed') : 'interrupted', handlesReaped, logs:[...new Set(logs)]});
-    if (handlesReaped && rawArchived && (!existsSync(mergedPath) || mergedArchived) && !report.evidenceBudgetError) job.cleanup();
+    if (handlesReaped && rawArchived && (!existsSync(mergedPath) || mergedArchived) && !report.evidenceBudgetError && !report.objectLookupError) job.cleanup();
   }
   if (failure) throw Object.assign(failure, {coverageEvidence:job.receipt, coverageReport:reportPath});
   return {report:reportPath, coverageEvidence:job.receipt, buildEvidence:build.buildEvidence, selection, coverage:report.coverage};
@@ -401,7 +504,7 @@ export function collectRustCoverage(root, options, {execute = ownedSpawnSync, no
 export function coverageArguments(argv) {
   const options = {};
   for (let i = 0; i < argv.length; i++) {
-    const key = {'--toolchain':'toolchain', '--package':'packageName', '--test':'testName', '--exact':'exact'}[argv[i]];
+    const key = {'--toolchain':'toolchain', '--package':'packageName', '--test':'testName', '--exact':'exact', '--companion-bin':'companionBin'}[argv[i]];
     if (argv[i] === '--lib') { check(options.lib === undefined, 'duplicate_option'); options.lib = true; }
     else { check(key && options[key] === undefined && argv[i+1] && !argv[i+1].startsWith('--'), 'invalid_option'); options[key] = argv[++i]; }
   }

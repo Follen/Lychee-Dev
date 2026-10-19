@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readSync, rmSync, symlinkSync, truncateSync, writeFileSync, writeSync} from 'node:fs';
+import {existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readSync, readdirSync, rmSync, symlinkSync, truncateSync, writeFileSync, writeSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {basename, dirname, join} from 'node:path';
-import {archiveCoverageFile, collectRustCoverage, coverageArguments, coverageEnvironment, coverageSelection, selectCoverageArtifact, summarizeCoverage, verifyCoverageArchive, verifyCoverageTests} from './rust-coverage.mjs';
+import {archiveCoverageFile, collectRustCoverage, coverageArguments, coverageEnvironment, coverageSelection, selectCoverageArtifact, selectCoverageArtifacts, summarizeCoverage, verifyCoverageArchive, verifyCoverageTests} from './rust-coverage.mjs';
 import {hashFile, runCargo} from './rust-build.mjs';
 import {usage} from './rust-disk.mjs';
 
@@ -45,13 +45,15 @@ function llvm23Export(f, externalCount = 0) {
 }
 function mock(f, hooks = {}) {
   const calls = [], options = {packageName:'lycheedev-core',lib:true,toolchain:f.toolchain};
-  let artifact;
+  let artifact, companion;
   function execute(command,args,owner) {
     const name = basename(command);
     const step = name === 'rustc.exe' ? (args.includes('sysroot') ? 'sysroot' : 'rustc')
       : name === 'cargo.exe' || name === 'cargo' ? (args.includes('--version') ? (command === 'cargo' ? 'cargo-launch-version' : 'cargo-version') : 'cargo')
       : name === 'llvm-profdata.exe' ? (args.includes('--version') ? 'profdata-version' : 'merge')
-      : name === 'llvm-cov.exe' ? (args.includes('--version') ? 'cov-version' : 'export') : 'tests';
+      : name === 'llvm-cov.exe' ? (args.includes('--version') ? 'cov-version'
+        : args.filter(arg=>arg==='--object').length===2 ? 'export-combined'
+          : companion && args.at(-1)===companion.executable ? 'export-companion' : 'export') : 'tests';
     calls.push({step,command,args,owner});
     assert(owner.timeout > 0 && owner.timeout <= 600000);
     assert.equal(owner.env.RUSTUP_TOOLCHAIN,f.toolchain);
@@ -74,32 +76,58 @@ function mock(f, hooks = {}) {
       artifact = {reason:'compiler-artifact',manifest_path:join(f.root,'crates/lycheedev-core/Cargo.toml'),
         package_id:'path+file:///fixture#lycheedev-core@3.5.0',target:{kind:[options.lib ? 'lib' : 'test'],name:options.testName || 'lycheedev_core',src_path:f.source},
         profile:{test:true},filenames:[executable],executable};
-      stdout = jsonl([artifact,{reason:'build-finished',success:true}]);
+      if(options.companionBin) {
+        const executable=join(owner.env.CARGO_TARGET_DIR,TARGET,`debug/${options.companionBin}.exe`); writeFileSync(executable,'instrumented companion');
+        companion={reason:'compiler-artifact',manifest_path:artifact.manifest_path,package_id:artifact.package_id,
+          target:{kind:['bin'],crate_types:['bin'],name:options.companionBin,src_path:f.mainSource},
+          profile:{test:false,opt_level:'0',debuginfo:1,debug_assertions:true,overflow_checks:true},features:['fixture'],fresh:true,
+          filenames:[executable],executable};
+      }
+      stdout = jsonl([artifact,...(companion ? [companion] : []),{reason:'build-finished',success:true}]);
     }
     if (step === 'tests') {
       assert.equal(owner.cwd,join(f.root,'crates/lycheedev-core'));
       assert.equal(command,artifact.executable); assert.deepEqual(args.slice(0,3),['--test-threads=1','--format=pretty','--color=never']);
       const path = owner.env.LLVM_PROFILE_FILE.replace('%m','123_0').replace('%p','99'); writeFileSync(path,'raw counts');
+      if(companion) for(let i=0;i<4;i++) writeFileSync(owner.env.LLVM_PROFILE_FILE.replace('%m','456_0').replace('%p',String(100+i)),'companion counts');
       stdout = options.exact ? output([options.exact],[],5) : output(['tests::first','tests::second'],['tests::needs_fixture']);
     }
     if (step === 'merge') {
       assert.deepEqual(args.slice(0,5),['merge','-sparse','--failure-mode=any','-j','1']);
-      const raw = args.slice(5,-2); assert.equal(raw.length,1); assert.match(basename(raw[0]),/^test-.*\.profraw$/);
+      const raw = args.slice(5,-2); assert.equal(raw.length,companion ? 5 : 1); assert.match(basename(raw[0]),/^test-.*\.profraw$/);
       if(f.rawBytes) { assert.equal(lstatSync(raw[0]).size,f.rawBytes); assert.equal(hashFile(raw[0]),f.rawSHA256); }
       else assert.equal(readFileSync(raw[0],'utf8'),'raw counts');
       writeFileSync(args.at(-1),'merged counts');
     }
-    if (step === 'export') {
+    if (step.startsWith('export')) {
       assert(args.includes('--summary-only')); assert(args.includes('--format=text')); assert(args.includes('--object'));
-      assert.equal(args.at(-1),artifact.executable);
-      if(f.binaryBytes) assert.equal(lstatSync(args.at(-1)).size,f.binaryBytes);
-      else assert.equal(readFileSync(args.at(-1),'utf8'),'instrumented fixture'); stdout = exportBytes(f);
+      const objects=args.flatMap((arg,index)=>arg==='--object' ? [args[index+1]] : []);
+      assert.deepEqual(objects,step==='export-combined' ? [artifact.executable,companion.executable]
+        : [step==='export-companion' ? companion.executable : artifact.executable]);
+      if(step==='export') {
+        if(f.binaryBytes) assert.equal(lstatSync(args.at(-1)).size,f.binaryBytes);
+        else assert.equal(readFileSync(args.at(-1),'utf8'),'instrumented fixture');
+      }
+      if(companion) {
+        assert(args.includes('--debuginfod=false'));
+        const lookup=args.find(arg=>arg.startsWith('--debug-file-directory='))?.slice('--debug-file-directory='.length);
+        assert(lookup); assert.equal(existsSync(lookup),true);
+        const shared=step==='export-combined' ? {...summary,lines:{count:10,covered:9}} : summary;
+        stdout=exportBytes(f,[{filename:f.source,summary:shared},...(step==='export' ? [] : [{filename:f.mainSource,summary}])]);
+      } else stdout = exportBytes(f);
     }
     const result = {status:0,handlesReaped:true,stdout,stderr:Buffer.alloc(0)};
-    hooks[step]?.({result,owner,command,args,artifact,f,calls});
+    hooks[step]?.({result,owner,command,args,artifact,companion,f,calls});
     return result;
   }
   return {execute,calls,options};
+}
+function companionMock(f, hooks = {}) {
+  f.mainSource=join(f.root,'crates/lycheedev-core/src/main.rs'); writeFileSync(f.mainSource,'fn main() {}\n');
+  writeFileSync(join(f.root,'crates/lycheedev-core/Cargo.toml'),'[package]\nname = "lycheedev-core"\n[[bin]]\nname = "fixture_cli"\npath = "src/main.rs"\n');
+  const runner=mock(f,hooks);
+  Object.assign(runner.options,{lib:false,testName:'integration',exact:'case::one',companionBin:'fixture_cli'});
+  return runner;
 }
 function failed(f, runner, expected, extra = {}) {
   let error;
@@ -611,5 +639,282 @@ test('unsupported LLVM export schema fails after native-zero export and preserve
     const exportLog=receipt.sealedLogs.find(row=>row.original===report.steps.at(-1).stdout);
     assert(exportLog); assert.deepEqual(readFileSync(exportLog.path),bytes);
     assert.equal(receipt.state,'retired'); assert.equal(report.rawArchived,true);
+  } finally {f.cleanup();}
+});
+
+test('companion option is explicit, integration-only and keeps the original selection shape by default',()=>{
+  const args=['--package','lycheedev-cli','--test','source_inspect_public','--exact','case::one','--companion-bin','lycheedev'];
+  assert.deepEqual(coverageArguments(args),{packageName:'lycheedev-cli',testName:'source_inspect_public',exact:'case::one',companionBin:'lycheedev'});
+  assert.deepEqual(coverageSelection(coverageArguments(args)),{packageName:'lycheedev-cli',kind:'test',testName:'source_inspect_public',exact:'case::one',companionBin:'lycheedev'});
+  assert.equal(Object.hasOwn(selection,'companionBin'),false);
+  for(const value of ['',null,1,'../lycheedev','lycheedev.exe','--bin','a'.repeat(129)])
+    assert.throws(()=>coverageSelection({packageName:'lycheedev-cli',testName:'integration',companionBin:value}),/invalid_companion_bin/);
+  assert.throws(()=>coverageSelection({packageName:'lycheedev-cli',lib:true,companionBin:'lycheedev'}),/companion_integration_required/);
+  for(const suffix of [['--companion-bin'],['--companion-bin','a','--companion-bin','b']])
+    assert.throws(()=>coverageArguments(['--package','lycheedev-cli','--test','integration',...suffix]),/invalid_option/);
+});
+
+test('opt-in pipeline authenticates two same-build roles, witnesses the companion and uses LLVM union counts',()=>{
+  const f=fixture(); try {
+    const runner=companionMock(f), result=collectRustCoverage(f.root,runner.options,{execute:runner.execute});
+    const report=JSON.parse(readFileSync(result.report)), coverage=JSON.parse(readFileSync(result.coverageEvidence)), build=JSON.parse(readFileSync(result.buildEvidence));
+    assert.equal(report.schema,'lycheedev.rust-coverage.v3'); assert.equal(report.complete,true);
+    assert.deepEqual(runner.calls.map(row=>row.step),['rustc','sysroot','cargo-version','cargo-launch-version','profdata-version','cov-version','cargo','tests','merge','export','export-companion','export-combined']);
+    assert.equal(report.artifact.role,'test'); assert.equal(report.companionArtifact.role,'companion');
+    assert.notEqual(report.artifact.path,report.companionArtifact.path);
+    assert.equal(report.artifact.cargo.packageId,report.companionArtifact.cargo.packageId);
+    assert.equal(report.companionArtifact.cargo.fresh,true); assert.equal(report.companionArtifact.cargo.profile.test,false);
+    assert.equal(report.companionArtifact.cargo.profile.opt_level,'0'); assert.deepEqual(report.companionArtifact.cargo.features,['fixture']);
+    assert.equal(report.companionArtifact.cargo.target.src_path,f.mainSource);
+    assert.equal(report.profiles.length,5); assert.equal(report.tests.passed,1); assert.equal(report.tests.ignored,0); assert.equal(report.tests.filtered,5);
+    assert.equal(report.coverage.files.find(file=>file.path.endsWith('lib.rs')).lines.covered,9);
+    assert.equal(report.testCoverage.files[0].lines.covered,8); assert.equal(report.companionCoverage.files[0].lines.covered,8);
+    assert.equal(report.companionWitness.source,'crates/lycheedev-core/src/main.rs'); assert.equal(report.companionWitness.absentFromTestMap,true);
+    assert.equal(report.companionWitness.companionCoveredLines,8); assert.match(report.companionWitness.scope,/not complete capture/);
+    assert.match(report.coverage.denominator,/never sums/); assert.equal(Object.hasOwn(report.coverage,'totals'),false);
+    assert.equal(report.totalProcessBudgetMs,600000); assert.equal(report.budgets.rawBytes,128<<20); assert.equal(report.budgets.scratchBytes,128<<20);
+    assert.equal(report.budgets.evidenceBytes,256<<20); assert.equal(report.budgets.evidenceMetadataReserveBytes,16<<20);
+    assert.equal(basename(report.profilePattern),'test-%m-%p.profraw');
+    const custody=JSON.parse(readFileSync(build.sealedLogs.find(row=>row.original.endsWith('custody.json')).path));
+    assert.equal(custody.schema,'lycheedev.coverage-custody.v2'); assert.equal(Object.hasOwn(custody,'artifact'),false);
+    assert.deepEqual(custody.objects.map(row=>row.role),['test','companion']);
+    assert.deepEqual(custody.objects.map(row=>row.archive),[report.artifact.archive,report.companionArtifact.archive]);
+    for(const object of [report.artifact,report.companionArtifact]) {
+      assert.equal(verifyCoverageArchive(object.archive).sha256,object.sha256); assert.equal(hashFile(object.path),object.sha256);
+    }
+    for(const log of coverage.sealedLogs) assert.equal(hashFile(log.path),log.sha256);
+    assert.equal(build.sealedLogs.some(row=>row.original.endsWith('part-000.bin')),false);
+    assert.equal(coverage.state,'retired'); assert.equal(build.state,'retired'); assert.equal(existsSync(coverage.directory),false);
+    assert.equal(existsSync(join(f.root,'.tmp/rust-disk/channels/ordinary.lease')),false);
+  } finally {f.cleanup();}
+});
+
+for(const [name,change,expected] of [
+  ['absent',rows=>rows.splice(1,1),/companion_cardinality/],
+  ['duplicate',rows=>rows.splice(1,0,structuredClone(rows[1])),/companion_cardinality/],
+  ['foreign manifest',rows=>rows[1].manifest_path+='-other',/companion_cardinality/],
+  ['foreign package',rows=>rows[1].package_id+='-other',/companion_package_identity/],
+  ['missing test package',rows=>delete rows[0].package_id,/artifact_package_identity/],
+  ['missing companion package',rows=>delete rows[1].package_id,/companion_package_identity/],
+  ['wrong name',rows=>rows[1].target.name='other',/companion_cardinality/],
+  ['wrong kind',rows=>rows[1].target.kind=['test'],/companion_cardinality/],
+  ['mixed kind',rows=>rows[1].target.kind=['bin','test'],/companion_cardinality/],
+  ['harness profile',rows=>rows[1].profile.test=true,/companion_cardinality/],
+  ['missing profile',rows=>delete rows[1].profile.test,/companion_cardinality/],
+  ['null executable',rows=>rows[1].executable=null,/companion_cardinality/],
+  ['relative executable',rows=>rows[1].executable='other.exe',/companion_path/],
+  ['undeclared executable',rows=>rows[1].filenames=[],/companion_executable/],
+  ['string filenames',rows=>rows[1].filenames=rows[1].executable,/companion_executable/],
+  ['same object',rows=>{rows[1].executable=rows[0].executable;rows[1].filenames=[rows[0].executable];},/companion_same_object/],
+  ['wrong source',rows=>rows[1].target.src_path=rows[0].target.src_path,/companion_source/],
+  ['outside executable',rows=>{rows[1].executable=rows[1].target.src_path;rows[1].filenames=[rows[1].executable];},/path_outside_owned_root/],
+  ['Cargo failure message',rows=>rows.at(-1).success=false,/cargo_completion/],
+]) test(`companion selection rejects ${name} before execution without guessing a nearby binary`,()=>{
+  const f=fixture(); try {
+    const runner=companionMock(f,{cargo({result}) { const rows=result.stdout.toString().trim().split('\n').map(JSON.parse); change(rows); result.stdout=jsonl(rows); }});
+    const {report,receipt}=failed(f,runner,expected);
+    assert.equal(report.complete,false); assert.equal(runner.calls.at(-1).step,'cargo');
+    assert.equal(receipt.state,'retired'); assert.equal(existsSync(receipt.directory),false);
+    assert.equal(report.companionArtifact,undefined); assert.equal(report.coverage,undefined);
+  } finally {f.cleanup();}
+});
+
+test('same-stream selection retains Cargo fields and ignores an unrelated package binary',()=>{
+  const f=fixture(); try {
+    const runner=companionMock(f,{cargo({result,owner,companion}) {
+      const rows=result.stdout.toString().trim().split('\n').map(JSON.parse);
+      rows.unshift({...structuredClone(companion),manifest_path:join(f.root,'unrelated/Cargo.toml'),package_id:'unrelated'});
+      const selection=coverageSelection(runner.options), selected=selectCoverageArtifacts(jsonl(rows),f.root,owner.env.CARGO_TARGET_DIR,selection);
+      assert.deepEqual(selected.companion.row,companion); assert.equal(selected.companion.row.fresh,true);
+      result.stdout=jsonl(rows);
+    }});
+    const result=collectRustCoverage(f.root,runner.options,{execute:runner.execute}); assert.equal(JSON.parse(readFileSync(result.report)).complete,true);
+  } finally {f.cleanup();}
+});
+
+for(const objectRole of ['test','companion']) for(const step of ['tests','merge','export','export-companion','export-combined'])
+  test(`${objectRole} original mutation at ${step} cannot become companion coverage success`,()=>{
+    const f=fixture(); try {
+      const runner=companionMock(f,{[step]({artifact,companion}) {writeFileSync((objectRole==='test' ? artifact : companion).executable,'changed object');}});
+      const {report,receipt}=failed(f,runner,/file_changed/);
+      assert.equal(report.complete,false); assert.match(report.objectVerificationError,/file_changed/);
+      assert.equal(runner.calls.at(-1).step,step); assert.equal(receipt.state,'retired');
+      const object=objectRole==='test' ? report.artifact : report.companionArtifact;
+      assert.notEqual(hashFile(object.path),object.sha256); assert.equal(verifyCoverageArchive(object.archive).sha256,object.sha256);
+    } finally {f.cleanup();}
+  });
+
+for(const objectRole of ['test','companion']) for(const corruption of ['original','part','whole-hash'])
+  test(`${objectRole} ${corruption} corruption before execution is rejected`,()=>{
+    const f=fixture(); try {
+      const runner=companionMock(f), archived=[];
+      const archiveFile=(row,directory,logs)=>{
+        const archive=archiveCoverageFile(row,directory,logs); archived.push(archive);
+        if(archived.length===2) {
+          const victim=archived[objectRole==='test' ? 0 : 1];
+          if(corruption==='original') writeFileSync(victim.path,'changed');
+          else if(corruption==='part') writeFileSync(victim.parts[0].path,Buffer.alloc(victim.parts[0].bytes,0x78));
+          else victim.sha256='0'.repeat(64);
+        }
+        return archive;
+      };
+      const {report,receipt}=failed(f,runner,/file_changed|archive_part_hash|archive_whole_hash/,{archiveFile});
+      assert.equal(report.complete,false); assert.equal(runner.calls.at(-1).step,'cargo'); assert.equal(receipt.state,'retired');
+      assert(report.objectVerificationError);
+    } finally {f.cleanup();}
+  });
+
+for(const step of ['tests','export','export-companion','export-combined']) test(`companion archive corruption after ${step} is retained as failure`,()=>{
+  const f=fixture(); try {
+    const runner=companionMock(f,{[step]({owner}) {
+      const part=join(owner.evidence,'instrumented-companion.exe.parts/part-000.bin'); writeFileSync(part,Buffer.alloc(lstatSync(part).size,0x78));
+    }});
+    const {report,receipt}=failed(f,runner,/archive_part_hash/);
+    assert.equal(report.complete,false); assert.match(report.objectVerificationError,/archive_part_hash/);
+    assert.equal(runner.calls.at(-1).step,step); assert.equal(receipt.state,'retired');
+    assert(receipt.sealedLogs.some(row=>row.original.includes('instrumented-companion.exe.parts')));
+  } finally {f.cleanup();}
+});
+
+for(const [name,step,change,expected] of [
+  ['test unexpectedly maps companion','export',(x,f)=>x.data[0].files.push({filename:f.mainSource,summary}),/companion_witness_in_test/],
+  ['companion source absent','export-companion',x=>x.data[0].files.pop(),/companion_witness_missing/],
+  ['companion source zero','export-companion',x=>{x.data[0].files.at(-1).summary={functions:{count:5,covered:0},lines:{count:10,covered:0},regions:{count:12,covered:0}};},/companion_witness_missing/],
+  ['combined loses source','export-combined',x=>x.data[0].files.pop(),/combined_file_union/],
+  ['combined duplicate filename','export-combined',x=>x.data[0].files.push(x.data[0].files[0]),/duplicate_export_file/],
+  ['combined multiple data entries','export-combined',x=>x.data.push(x.data[0]),/export_schema/],
+  ['combined unknown schema','export-combined',x=>x.version='4.0.0',/export_schema/],
+  ['combined impossible counts','export-combined',x=>x.data[0].files[0].summary.lines.covered=11,/export_metric/],
+]) test(`${name} fails the explicit companion proof without a percentage`,()=>{
+  const f=fixture(); try {
+    const runner=companionMock(f,{[step]({result}) {const x=JSON.parse(result.stdout);change(x,f);result.stdout=Buffer.from(JSON.stringify(x));}});
+    const {report,receipt}=failed(f,runner,expected);
+    assert.equal(report.complete,false); assert.equal(report.coverage,undefined); assert.equal(receipt.state,'retired');
+    assert.equal(report.rawArchived,true); assert.equal(report.mergedArchived,true);
+  } finally {f.cleanup();}
+});
+
+for(const step of ['cargo','tests','merge','export','export-companion','export-combined']) test(`companion ${step} failure preserves raw custody and does not start a later child`,()=>{
+  const f=fixture(); try {
+    const runner=companionMock(f,{[step]({result}){result.status=1;}}), {report,receipt}=failed(f,runner,new RegExp(`${step}_failed`));
+    assert.equal(report.complete,false); assert.equal(runner.calls.at(-1).step,step); assert.equal(receipt.state,'retired');
+    assert.equal(report.rawArchived,true); assert.equal(report.profiles.length,step==='cargo' ? 0 : 5);
+    assert.equal(existsSync(receipt.directory),false); assert.equal(existsSync(join(f.root,'.tmp/rust-disk/channels/ordinary.lease')),false);
+  } finally {f.cleanup();}
+});
+
+test('unreaped companion test retains both owners and skips archive reauthentication',()=>{
+  const f=fixture(); try {
+    const runner=companionMock(f,{tests({result}){result.handlesReaped=false;}}), {report,receipt}=failed(f,runner,/tree_reap_unverified/);
+    assert.equal(report.rawArchived,false); assert.equal(receipt.state,'interrupted'); assert.equal(existsSync(receipt.directory),true);
+    assert.equal(existsSync(join(f.root,'.tmp/rust-disk/channels/ordinary.lease')),true); assert.equal(runner.calls.at(-1).step,'tests');
+    assert.equal(JSON.parse(readFileSync(report.buildEvidence)).state,'interrupted');
+  } finally {f.cleanup();}
+});
+
+for(const step of ['tests','export-companion']) test(`external object lookup contamination at ${step} prevents further export`,()=>{
+  const f=fixture(); try {
+    const runner=companionMock(f,{[step]({owner}) {writeFileSync(join(dirname(owner.env.LLVM_PROFILE_FILE),'../empty-object-lookup/foreign.exe'),'foreign');}});
+    const {report,receipt}=failed(f,runner,/external_object_lookup/);
+    assert.equal(report.complete,false); assert.equal(report.coverage,undefined); assert.equal(report.externalObjectDiscovery.debuginfod,false);
+    assert.equal(runner.calls.filter(row=>row.step.startsWith('export')).length,step==='tests' ? 0 : 2);
+    assert.equal(receipt.state,'failed'); assert.equal(existsSync(receipt.directory),true);
+    assert.equal(readFileSync(join(report.externalObjectDiscovery.debugFileDirectory,'foreign.exe'),'utf8'),'foreign');
+  } finally {f.cleanup();}
+});
+
+test('companion exports consume the original remaining process budget',()=>{
+  const f=fixture(); try {
+    let time=0;
+    const runner=companionMock(f,{'export-companion'(){time=600001;}}), {report}=failed(f,runner,/deadline/,{now:()=>time});
+    assert.equal(report.totalProcessBudgetMs,600000); assert.equal(runner.calls.at(-1).step,'export-companion'); assert.equal(report.coverage,undefined);
+  } finally {f.cleanup();}
+});
+
+test('two individually bounded objects must fit cumulative evidence admission before either archive',()=>{
+  const f=fixture(); try {
+    const runner=companionMock(f,{cargo({artifact,companion}) {truncateSync(artifact.executable,128<<20);truncateSync(companion.executable,128<<20);}});
+    let copies=0;
+    const {report,receipt}=failed(f,runner,/evidence_total_budget/,{archiveFile(...args){copies++;return archiveCoverageFile(...args);}});
+    assert.equal(copies,0); assert.equal(report.artifact,undefined); assert.equal(report.companionArtifact,undefined);
+    assert.equal(runner.calls.at(-1).step,'cargo'); assert.equal(report.complete,false); assert.equal(receipt.state,'retired');
+  } finally {f.cleanup();}
+});
+
+test('two object bytes plus exports and build copies remain subject to the original evidence reserve',()=>{
+  const f=fixture(); try {
+    f.binaryBytes=112<<20;
+    const runner=companionMock(f,{cargo({artifact,companion}) {truncateSync(artifact.executable,f.binaryBytes);truncateSync(companion.executable,112<<20);},
+      'export-companion'({result}) {result.stdout=Buffer.alloc(9<<20,0x78);}});
+    const {report}=failed(f,runner,/evidence_total_budget/);
+    assert.equal(report.complete,false); assert.equal(runner.calls.at(-1).step,'export-companion');
+    assert.equal(report.artifact.bytes,112<<20); assert.equal(report.companionArtifact.bytes,112<<20);
+    assert.equal(report.budgets.evidenceBytes,256<<20);
+  } finally {f.cleanup();}
+});
+
+test('distinct companion pathname cannot alias the selected executable through a hard link',()=>{
+  const f=fixture(); try {
+    const runner=companionMock(f,{cargo({artifact,companion}) {rmSync(companion.executable);linkSync(artifact.executable,companion.executable);}});
+    const {report}=failed(f,runner,/companion_same_object/); assert.equal(report.complete,false); assert.equal(runner.calls.at(-1).step,'cargo');
+  } finally {f.cleanup();}
+});
+
+for(const delta of [0,1]) test(`combined object admission at evidence reserve boundary ${delta ? 'plus one' : 'exact'} is byte-exact`,()=>{
+  const f=fixture(); try {
+    let archiveCalls=0;
+    const runner=companionMock(f,{cargo({artifact,companion,owner,result}) {
+      const previousCopies=readdirSync(owner.evidence).filter(name=>name.endsWith('.bin')).reduce((sum,name)=>sum+lstatSync(join(owner.evidence,name)).size,0);
+      const currentOutput=result.stdout.length+result.stderr.length;
+      const budget=(256<<20)-(16<<20)-usage(dirname(owner.evidence)).bytes-previousCopies-3*currentOutput;
+      f.binaryBytes=120<<20; truncateSync(artifact.executable,f.binaryBytes); truncateSync(companion.executable,budget-f.binaryBytes+delta);
+    }});
+    const {report}=failed(f,runner,delta ? /evidence_total_budget/ : /fixture exact object admission reached/,
+      {archiveFile() {archiveCalls++;throw new Error('fixture exact object admission reached');}});
+    assert.equal(archiveCalls,delta ? 0 : 1); assert.equal(runner.calls.at(-1).step,'cargo'); assert.equal(report.complete,false);
+  } finally {f.cleanup();}
+});
+
+for(const step of ['export-companion','export-combined']) test(`${step} diagnostics are retained and reject acceptance despite native zero`,()=>{
+  const f=fixture(); try {
+    const runner=companionMock(f,{[step]({result}) {result.stderr=Buffer.from('warning: incomplete coverage');}});
+    const {report,receipt}=failed(f,runner,/export_diagnostics/);
+    assert.equal(report.complete,false); assert.equal(report.steps.at(-1).status,0); assert.equal(runner.calls.at(-1).step,step);
+    const log=receipt.sealedLogs.find(row=>row.original===report.steps.at(-1).stderr); assert.equal(readFileSync(log.path,'utf8'),'warning: incomplete coverage');
+  } finally {f.cleanup();}
+});
+
+test('combined owned file absent from both authenticated object maps is rejected',()=>{
+  const f=fixture(); try {
+    const extra=join(f.root,'crates/lycheedev-core/src/unregistered.rs'); writeFileSync(extra,'fn unregistered() {}\n');
+    const runner=companionMock(f,{'export-combined'({result}) {
+      const data=JSON.parse(result.stdout);data.data[0].files.push({filename:extra,summary});result.stdout=Buffer.from(JSON.stringify(data));
+    }});
+    const {report}=failed(f,runner,/combined_file_union/);assert.equal(report.complete,false);assert.equal(report.coverage,undefined);
+  } finally {f.cleanup();}
+});
+
+test('late raw mutation in the combined export retains unarchived scratch without losing the primary native failure',()=>{
+  const f=fixture(); try {
+    const runner=companionMock(f,{'export-combined'({owner,result}) {
+      const path=owner.env.LLVM_PROFILE_FILE.replace('%m','456_0').replace('%p','100');writeFileSync(path,'changed child counts');result.status=1;
+    }});
+    const {report,receipt}=failed(f,runner,/export-combined_failed/);
+    assert.equal(report.rawArchived,false);assert.match(report.profileArchiveError,/file_changed/);assert.equal(existsSync(receipt.directory),true);
+    assert.equal(report.complete,false);assert.equal(receipt.state,'failed');
+  } finally {f.cleanup();}
+});
+
+test('compound object mutation and lookup contamination preserve the first error and all foreign scratch',()=>{
+  const f=fixture(); try {
+    const runner=companionMock(f,{tests({artifact,owner}) {
+      writeFileSync(artifact.executable,'changed object');
+      writeFileSync(join(dirname(owner.env.LLVM_PROFILE_FILE),'../empty-object-lookup/foreign.exe'),'foreign');
+    }});
+    const {report,receipt}=failed(f,runner,/file_changed/);
+    assert.equal(report.complete,false);assert.match(report.error,/file_changed/);assert.match(report.objectVerificationError,/file_changed/);
+    assert.match(report.objectLookupError,/external_object_lookup/);assert.equal(receipt.state,'failed');assert.equal(existsSync(receipt.directory),true);
+    assert.equal(readFileSync(join(report.externalObjectDiscovery.debugFileDirectory,'foreign.exe'),'utf8'),'foreign');
+    assert.equal(report.rawArchived,true);assert.equal(runner.calls.at(-1).step,'tests');
   } finally {f.cleanup();}
 });
