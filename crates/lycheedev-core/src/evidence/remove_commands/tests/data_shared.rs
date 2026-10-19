@@ -64,6 +64,30 @@ fn assert_shared(receipt: &Value, id: &str) {
             "blobRemoved":false,"blobShared":true,"blobMissing":false})
     );
 }
+fn store_historical_reference(
+    f: &Fixture,
+    template: &Value,
+    digest: &str,
+    signed_bytes: i64,
+) -> (String, Vec<u8>) {
+    let control = OperationControl::default();
+    let mut value = template.clone();
+    value["id"] = json!("");
+    value["blob"] = json!({"sha256":digest,"bytes":signed_bytes});
+    let unsigned =
+        dependencies::decode_capture_projection(&serde_json::to_vec(&value).unwrap(), &control)
+            .unwrap();
+    let id = format!(
+        "CAP-{}",
+        storage::sha256(&storage::identity_json(&unsigned).unwrap())
+    );
+    value["id"] = json!(id);
+    let raw = serde_json::to_vec(&value).unwrap();
+    let signed = dependencies::inspect_capture_projection(&raw, &id, &control).unwrap();
+    assert_eq!(signed.signed_blob(), (digest, signed_bytes));
+    f.raw(&format!("capture/{id}"), &raw);
+    (id, raw)
+}
 
 #[test]
 fn decoded_stream_capture_remove_retains_data_body_and_admission_with_or_without_active_reader() {
@@ -378,10 +402,14 @@ fn uppercase_historical_capture_uses_canonical_data_blob_lease_and_signed_identi
     let reference = publish(&f, b"body");
     capture.blob.sha256 = reference.sha256.to_ascii_uppercase();
     capture.id = capture_identity(&capture).unwrap();
-    f.raw(
-        &format!("capture/{}", capture.id),
-        &storage::identity_json(&capture).unwrap(),
-    );
+    let original = storage::identity_json(&capture).unwrap();
+    let mut normalized = capture.clone();
+    normalized.blob.sha256 = reference.sha256.clone();
+    assert_ne!(capture_identity(&normalized).unwrap(), capture.id);
+    f.raw(&format!("capture/{}", capture.id), &original);
+    let before = usage(&f);
+    let intent = fs::read(record(&f, &reference.sha256, "intent")).unwrap();
+    let complete = fs::read(record(&f, &reference.sha256, "complete")).unwrap();
     let control = OperationControl::default();
     let lease = historical_lease(&f.home, &format!("blob:{}", reference.sha256), &control).unwrap();
     let waiting = OperationControl::tracked(
@@ -410,14 +438,160 @@ fn uppercase_historical_capture_uses_canonical_data_blob_lease_and_signed_identi
         Some(StopCause::DeadlineExceeded)
     );
     assert!(read_capture(&f.home, &capture.id).is_ok());
+    assert_eq!(
+        Metadata::read_raw_controlled(&f.home, &format!("capture/{}", capture.id), &control)
+            .unwrap(),
+        original
+    );
     assert!(recovery(&f, &capture.id).is_none());
     lease.close().unwrap();
+    // Canonical Data ownership never relaxes the original blob-read contract.
+    assert_eq!(
+        fetch_capture_controlled(&f.home, &capture.id, 4, &control)
+            .unwrap_err()
+            .code,
+        "vault.blob_integrity"
+    );
     let receipt = run(&f.home, &capture.id, &f.inv(&capture.id).control).unwrap();
     assert_shared(&receipt, &capture.id);
+    assert!(read_capture(&f.home, &capture.id).is_err());
+    assert_eq!(
+        run(&f.home, &capture.id, &f.inv(&capture.id).control).unwrap(),
+        receipt
+    );
     assert_eq!(
         fs::read(blob_path(&f.home, &reference.sha256).unwrap()).unwrap(),
         b"body"
     );
     assert_eq!(usage(&f).shared_blob_bytes, 4);
+    assert_eq!(usage(&f), before);
+    assert_eq!(
+        fs::read(record(&f, &reference.sha256, "intent")).unwrap(),
+        intent
+    );
+    assert_eq!(
+        fs::read(record(&f, &reference.sha256, "complete")).unwrap(),
+        complete
+    );
+    assert_eq!(
+        read_blob_bounded(
+            &f.home,
+            &serde_json::to_value(&reference).unwrap(),
+            4,
+            &control
+        )
+        .unwrap(),
+        b"body"
+    );
     f.cleanup();
+}
+
+#[test]
+fn canonical_data_lookup_preserves_signed_length_and_rejects_invalid_or_unowned_keys() {
+    for fault in [
+        "mixed-case",
+        "negative-length",
+        "wrong-length",
+        "short-digest",
+        "non-hex",
+        "unowned",
+    ] {
+        let f = Fixture::new();
+        let template = f.capture(b"body", fault);
+        let reference: BlobRef = serde_json::from_value(template["blob"].clone()).unwrap();
+        if fault != "unowned" {
+            publish(&f, b"body");
+        }
+        let mut digest = reference.sha256.to_ascii_uppercase();
+        let mut signed_bytes = 4;
+        match fault {
+            "mixed-case" => digest.replace_range(..32, &reference.sha256[..32]),
+            "negative-length" => signed_bytes = -1,
+            "wrong-length" => signed_bytes = 5,
+            "short-digest" => {
+                digest.pop();
+            }
+            "non-hex" => digest.replace_range(..1, "G"),
+            _ => (),
+        }
+        let (id, original) = store_historical_reference(&f, &template, &digest, signed_bytes);
+        let control = f.inv(&id).control;
+        let result = run(&f.home, &id, &control);
+        if fault == "mixed-case" {
+            assert_shared(&result.unwrap(), &id);
+            assert!(read_capture(&f.home, &id).is_err());
+        } else {
+            let code = if matches!(fault, "negative-length" | "wrong-length") {
+                "vault.data_shared_blob_integrity"
+            } else {
+                "vault.blob_integrity"
+            };
+            assert_eq!(result.unwrap_err().code, code, "{fault}");
+            assert_eq!(
+                Metadata::read_raw_controlled(&f.home, &format!("capture/{id}"), &control).unwrap(),
+                original,
+                "{fault}"
+            );
+            assert!(recovery(&f, &id).is_none(), "{fault}");
+        }
+        // The original lowercase CAP is a distinct signed reference. It cannot
+        // substitute for independent Data attribution for an uppercase target.
+        assert!(read_capture(&f.home, super::id(&template)).is_ok());
+        assert_eq!(
+            fs::read(blob_path(&f.home, &reference.sha256).unwrap()).unwrap(),
+            b"body"
+        );
+        f.cleanup();
+    }
+}
+
+#[test]
+fn canonical_data_lookup_keeps_retention_metadata_exactly_signed() {
+    for fault in ["exact", "canonical-digest", "length"] {
+        let f = Fixture::new();
+        let template = f.capture(b"body", fault);
+        let reference = publish(&f, b"body");
+        let digest = reference.sha256.to_ascii_uppercase();
+        let (id, original) = store_historical_reference(&f, &template, &digest, 4);
+        let mut keep = json!({"captureId":id,"blob":{"sha256":digest,"bytes":4}});
+        match fault {
+            "canonical-digest" => keep["blob"]["sha256"] = json!(reference.sha256),
+            "length" => keep["blob"]["bytes"] = json!(-1),
+            _ => (),
+        }
+        let keep_key = format!("evidence/keep/{id}");
+        let keep_raw = serde_json::to_vec(&keep).unwrap();
+        f.raw(&keep_key, &keep_raw);
+        let control = f.inv(&id).control;
+        let result = run(&f.home, &id, &control);
+        if fault == "exact" {
+            let expected = json!({"captureId":id,"manifestRemoved":true,"retentionRemoved":true,
+                "blobRemoved":false,"blobShared":true,"blobMissing":false});
+            let receipt = result.unwrap();
+            assert_eq!(receipt, expected);
+            assert_eq!(run(&f.home, &id, &control).unwrap(), receipt);
+            assert!(Metadata::read_raw_controlled(&f.home, &keep_key, &control).is_err());
+        } else {
+            assert_eq!(
+                result.unwrap_err().code,
+                "evidence.invalid_retention",
+                "{fault}"
+            );
+            assert_eq!(
+                Metadata::read_raw_controlled(&f.home, &format!("capture/{id}"), &control).unwrap(),
+                original
+            );
+            assert_eq!(
+                Metadata::read_raw_controlled(&f.home, &keep_key, &control).unwrap(),
+                keep_raw
+            );
+            assert!(recovery(&f, &id).is_none());
+        }
+        assert_eq!(usage(&f).shared_blob_bytes, 4);
+        assert_eq!(
+            fs::read(blob_path(&f.home, &reference.sha256).unwrap()).unwrap(),
+            b"body"
+        );
+        f.cleanup();
+    }
 }

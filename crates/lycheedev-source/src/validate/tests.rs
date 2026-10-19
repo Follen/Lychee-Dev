@@ -27,7 +27,8 @@ fn symbol(kind: &str, name: &str, category: &str, path: &str, line: usize) -> Va
     json!({"kind":kind,"name":name,"category":category,"path":path,"line":line,"endLine":line,"confidence":"exact","signature":format!("{name} signature")})
 }
 fn map(symbols: Vec<Value>, gaps: &[&str]) -> Index {
-    serde_json::from_value(json!({"documents":[],"assets":[],"symbols":symbols,"summary":{"complete":gaps.is_empty()},"compatibilityGaps":gaps})).unwrap()
+    let summary = crate::index::model::test_summary(json!({"complete":gaps.is_empty()}));
+    serde_json::from_value(json!({"documents":[],"assets":[],"symbols":symbols,"summary":summary,"compatibilityGaps":gaps})).unwrap()
 }
 fn baseline(gaps: &[&str]) -> Index {
     let mut header = symbol("header", "Interface", "toc-field", "Game.toc", 1);

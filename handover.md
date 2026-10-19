@@ -13,14 +13,14 @@
 
 | 范围 | 已保存/已实现 | 当前证据和剩余门禁 |
 | --- | --- | --- |
-| Core/Data/Source基础 | 8c9：配置、Data派生目录/准入、真实Arrow cache prepare、Source Postcard Facts | 官方依赖fetch成功；8bfe分组实际434 matched：430通过/3失败/1 exporter ignore；278已闭合原disk两失败，后继发布状态测试有路径预期失败；generation取消预期已修，复验仍待，不能声称完整正确性通过 |
+| Core/Data/Source基础 | 8c9：配置、Data派生目录/准入、真实Arrow cache prepare、Source Postcard Facts | 070f实际check通过；原copy/发布receipt路径/generation取消四个修复目标均通过。当前两个Core新失败与Source旧fixture失败见第5节，完整实现门禁仍未闭 |
 | Live资源归属 | 5c60：私有 SessionOwner，native先于journal关闭与claim退役 | 8bfe connection61/durable36通过，六新增逐名一次；无新线程/daemon，真实客户端未验 |
 | 编译修复 | 6ea恢复原SYM SHA writer；2b400显式Data结果类型；66d空slice断言类型 | 8c9、6ea、2b400、66d原编译失败保留。8bfe实际check通过，config14通过；disk26为24通过2失败（copy注入阶段不确定、Windows路径文本）。其余11组续跑392通过/1失败/1 ignore；新增失败为generation取消测试期待operation.cancelled、实际command.cancelled，后续断言未执行，单独修正和复验 |
 | Skill精简 | 308efa：22指南文件、工具与身份/历史fixture，43路径逐字节/ Git blob核验 | 六Node套件101/101通过；25文件/57链接独审通过。两类MODEL_ONLY独立前后任务均通过修正模型：恢复旧/新调用8/11次、身份核查旧/新6/7次，不能推断新版更优；原宽松模型接受非法wait=0的记录保留。四类真实CLI任务未跑，文档缩短不是质量通过 |
 | Source正式二进制证据 | 740a：已独审10文件工具片，完整Facts exporter与六场景适配 | 七Node套件382/382通过；新Rust exporter/Windows/性能待验证。历史v11读取与新v13显式分开 |
 | DataFusion适配资格 | 独立可选资格片已保存并静态独审，固定54.0.0/Arrow58.3.0 | 278默认/feature check实际通过，14数值/计划回归全部通过；默认依赖图不引入DF，真实provider/任务资源适配仍待，生产执行器未切换，不能宣称性能通过 |
-| Data磁盘后继 | 共享blob准入、精确decoded spool与CAP独立引用保护已整合28代码路径 | 56新增正式回归均未跑；只覆盖已接入归属，历史blob/CAP/SQLite等全口径和冷缓存淘汰仍未闭，不宣称5GB已全闭合 |
-| Source主Index二进制 | 已整合24文件r2与8文件正式Node适配，采用共享typed模型/Postcard，公共JSON不变 | Rust静态复审通过，25 active/1 ignored未跑；原Node七套隔离361/361通过只对应仍含v17源码的隔离base；最终2808组合树实际356通过/1失败/4权限skip。固定Go323字段/资产顺序已核，完整组合验证、真实导出容量与性能仍待 |
+| Data磁盘后继 | 共享blob准入、精确decoded spool与CAP独立引用保护已整合28代码路径 | 070f的56新增为55通过、1个uppercase历史CAP删除失败；只覆盖已接入归属，历史blob/CAP/SQLite等全口径和冷缓存淘汰仍未闭，不宣称5GB已全闭合 |
+| Source主Index二进制 | 已整合24文件r2与8文件正式Node适配，采用共享typed模型/Postcard，公共JSON不变 | 070f的25 active新增逐名一次通过；Source全lib699通过/21旧fixture失败/6 ignored，inspect15与flow4通过，正式luac真实ignored用例另计1通过。七Node357通过/0失败/4权限skip；完整语料导出容量与性能仍待 |
 
 已完成的DBCD四项修复保留：WDC5 palette物理顺序、多词metadata、官方BUILD预设、非SQL实际读取限制传播。c571与9004分批合计113 distinct通过、3原ignore；旧红例及四个admission测试失败保留，不能将小fixture称作真实>256MiB表验证。产品定义未改变，完整产品矩阵仍待。
 
@@ -46,13 +46,15 @@ Data CSV9693工具对旧63d与a860的单pair：cold401.4790/389.9062ms，warm349
 
 ## 5. 当前阻断与下一批
 
-2808实际all-targets收齐四处编译错误：Source借用remainder时移动failure、Data测试部分移动staging后借用paths、两处typed SourceSummary传入旧Value测试闭包。11个Rust组均未执行。Node七套实际361项：356通过、1个当前源码版本断言失败、4个文件链接权限skip；原失败及辅助进程清理标志保留，不能称全绿。
+070f已实际完成：all-targets通过；Rust 986 matched为957通过、23失败、6 ignored；七Node套件361项为357通过、0失败、4文件链接权限skip。13个owner均已回收，无deadline；Source lib和disk的未知辅助进程强制回收标记保留。此为有限固定队列，不是全仓通过。
 
-当前最小修只提前消费remainder为空的布尔结果、借用staging路径、对typed summary完整序列化后沿旧oracle删io、将当前源码断言更新到v18。历史v17 fixture与所有后续断言保留。修正组合树Node七套实际361/361通过；Rust尚未编译，等待固定后继本机复验。278的默认/DF feature check和14项资格通过保持独立；disk26通过/1路径失败已在2808修正但受编译阻断未复验。
+23个失败分三处：Source validate共享fixture仍用旧summary字段，21项在缺失schema的构造阶段失败，未到业务断言；Data磁盘cleanup测试仍期待9个目录，而新增shared-blobs-v1后实际拥有10个；历史大写SHA的CAP在Data引用保护中先经过仅接受小写的校验，错过canonical归属查找，最终返回vault.blob_integrity。最小修复保持真实typed schema、每个owner恰关闭一次及全部重复错误事件、原CAP签名和完整认证，不放宽生产serde默认或删断言。后继尚未运行，原070f失败保留。
 
-集成流程缺口已确认：原隔离Node工作目录的Rust源码仍是v17，不能以该361/361替代最终组合树验证。后续Node/合同检查须在精确待提交完整树执行并记录sourceTree，不能只合并文件hash。静态审查、rustfmt与patch适用性不等同Rust编译通过。
+原2808四处编译错误和一个Node版本断言已在070f闭合；原copy/发布后receipt路径/generation取消四个回归目标均通过。25个Index新增逐项通过；56个CAP新增为55通过1失败。source_inspect15、flow4及显式执行的正式Lua真实用例1均通过。原2808、278和更早失败不改标。
 
-下一队列先恢复编译并跑原受影响组；validate_contract_real须显式执行已认证luac的真实ignored用例，不能把过滤后零测试当通过。后继read-through、全Data容量与provider候选保留隔离，当前失败闭合前不叠加发布。首轮匹配产品和完整Source/Data任务性能不等整个计划结束；首次导入成本计入实际生命周期。Skill继续同一封存CLI/fixture的独立真实任务，模型和脚本不替代。
+集成流程缺口已确认：原隔离Node工作目录的Rust源码仍是v17，不能以该361/361替代最终组合树验证。后续Node/合同检查须在精确待提交组合树执行并记录sourceTree，明确git archive导出范围与被export-ignore排除的历史文件，不能只合并文件hash。静态审查、rustfmt与patch适用性不等同Rust编译通过。
+
+下一队列只验证三处最小修复及受影响真实消费者。read-through与DataFusion provider的组合候选已独立静审和依赖元数据核对，但45新增测试与Windows编译仍未运行，当前失败闭合前不叠加发布。私有Data元库按成熟SQLite正常恢复及逻辑文件字节计量继续隔离实现；它仍不是全Data容量完成证据。首轮匹配产品和完整Source/Data任务性能不等整个计划结束；首次导入成本计入实际生命周期。Skill继续同一封存CLI/fixture的独立真实任务，模型和脚本不替代。
 
 当前摘要只列决策与开放项。完整历史测试、失败、旧SHA和各次报告留在[308efa历史handover](https://github.com/Follen/Lychee-Dev/blob/308efa2766d00273b13c9c7e24a0b956bb60e9e9/handover.md)及对应PR评论。所有用户本机测试仍由唯一父队列派发，受限原始记录不公开。
 

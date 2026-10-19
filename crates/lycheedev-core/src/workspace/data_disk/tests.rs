@@ -297,24 +297,71 @@ fn checked_cleanup_preserves_repeated_close_events_and_consumes_owners_once() {
     let control = OperationControl::default();
     let resources = f.resources(&control);
     let mut owner = resources.reserve_derived_cache(peak(1)).unwrap();
+    let home = std::path::absolute(&f.0).unwrap();
+    let expected_directories = [
+        "locks",
+        "cache/data-derived-v1",
+        "indexes/data-derived-v1",
+        "tmp/data-derived-v1",
+        "cache/data-derived-v1/objects",
+        "indexes/data-derived-v1/generations",
+        "tmp/data-derived-v1/staging",
+        "tmp/data-derived-v1/spill",
+        "tmp/data-derived-v1/exports",
+        "indexes/data-derived-v1/shared-blobs-v1",
+    ]
+    .map(|path| home.join(path));
+    assert_eq!(
+        owner
+            .directories
+            .iter()
+            .map(|d| d.path())
+            .collect::<Vec<_>>(),
+        expected_directories
+            .iter()
+            .map(PathBuf::as_path)
+            .collect::<Vec<_>>()
+    );
     control.cancel_handle().store(true, Ordering::Release);
     let mut directory_calls = 0;
     let mut lease_calls = 0;
+    let mut closed_directories = Vec::new();
+    let lease_closed = Cell::new(false);
     let cleanup = owner.cleanup_with(
         |directory| {
             directory_calls += 1;
+            // Quota outlives all managed roots, then closes before its parent.
+            assert_eq!(
+                lease_closed.get(),
+                directory.path() == expected_directories[0]
+            );
+            closed_directories.push(directory.path().to_owned());
             assert!(close_directory(directory).is_empty());
             vec![ToolkitError::new("test.close", "same close event", 5)]
         },
         |lease| {
             lease_calls += 1;
+            assert!(!lease_closed.replace(true));
             lease.close()?;
             Err(ToolkitError::new("test.close", "same close event", 5))
         },
     );
-    assert_eq!(directory_calls, 9); // lock parent + 3 roots + 5 child roots.
+    // One locks parent, three roots, and six children including Data attribution.
+    assert_eq!(directory_calls, expected_directories.len());
+    assert_eq!(
+        closed_directories,
+        expected_directories[1..]
+            .iter()
+            .rev()
+            .chain(&expected_directories[..1])
+            .cloned()
+            .collect::<Vec<_>>()
+    );
     assert_eq!(lease_calls, 1);
-    assert_eq!(cleanup.len(), 10);
+    assert!(lease_closed.get());
+    assert_eq!(cleanup.len(), expected_directories.len() + 1);
+    assert!(owner.directories.is_empty());
+    assert!(owner.lease.is_none());
     assert!(owner.cleanup().is_empty());
     let primary = ToolkitError::new("test.work", "operation failure", 4);
     let error = join::<()>(
@@ -327,7 +374,14 @@ fn checked_cleanup_preserves_repeated_close_events_and_consumes_owners_once() {
     )
     .unwrap_err();
     assert_eq!(error.code, "test.work");
-    assert_eq!(error.details["causes"].as_array().unwrap().len(), 12);
+    let causes = error.details["causes"].as_array().unwrap();
+    assert_eq!(causes.len(), expected_directories.len() + 3);
+    assert_eq!(causes[0]["code"], "test.work");
+    for cause in &causes[1..causes.len() - 1] {
+        assert_eq!(cause["code"], "test.close");
+        assert_eq!(cause["message"], "same close event");
+    }
+    assert_eq!(causes.last().unwrap()["code"], "command.cancelled");
     drop(owner);
     ExclusiveLock::resource(&f.0.join("locks"), QUOTA_RESOURCE)
         .unwrap()

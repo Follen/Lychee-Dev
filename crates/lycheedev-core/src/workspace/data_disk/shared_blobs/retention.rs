@@ -17,10 +17,16 @@ pub(crate) fn protects_evidence_body(
     // Preserve the historical missing/corrupt-blob diagnostics when this is not
     // a possible Data key. In particular, no production-size limit is applied
     // to an old capture before looking for an actual Data attribution record.
-    if !valid_digest(digest, 64) {
+    if digest.len() != 64 {
         return Ok(false);
     }
+    // Only this independent Data ownership key is canonicalized. The caller
+    // has authenticated the original signed CAP; its identity, other-CAP and
+    // retention comparisons, and actual blob consumers stay case-sensitive.
     let digest = digest.to_ascii_lowercase();
+    if !valid_digest(&digest, 64) {
+        return Ok(false);
+    }
     let root = Directory::open_shared_controlled(home, &mut Controlled(&checks))?;
     let result = descend(
         &root,

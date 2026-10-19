@@ -2,24 +2,20 @@
 
 以 [handover](handover.md) 为当前事实、[DESIGN](DESIGN.md#authorized-architecture-implementation-plan--2026-10-19) 为完整计划。质量基线f811；性能参考固定Go323。先业务质量/完整实现，再≤30%耗时门禁，之后正式五项循环。历史已完成项与原失败留在[308efa旧清单](https://github.com/Follen/Lychee-Dev/blob/308efa2766d00273b13c9c7e24a0b956bb60e9e9/todo.md)，不滚动复制到当前待办。
 
-## 立即恢复编译与有限回归
-- [x] 保存8c9基础、5c60 Live SessionOwner和三次最小编译修；Skill308efa全部43路径读回一致。
-- [x] 固定Core data_resources旧config调用修复8bfe，独审和单文件读回通过；check与config14已验证，其他组见下。
-- [x] 8bfe实际all-targets通过，config14通过；原8c9/6ea/2b400/66d编译失败保留。
-- [ ] 闭合8bfe disk24通过/2失败：实际copy注入点及发布后错误事实、Windows完整路径语义；其余11组已终态392通过/1失败/1 ignore；generation取消预期码失败单独修正并复验。
-- [x] 740a已保存Source Postcard正式证据工具并10文件读回；七Node套件382/382已过。
-- [ ] Rust exporter与完整六场景实际验证。
-- [x] 保存并静态独审DataFusion54可选资格片14项；默认依赖图隔离已核。
-- [x] 278官方fetch84包锁定不变，默认/DF feature check通过，14项资格实际全部通过；不等于真实provider、完整任务或性能通过。
-
-- [ ] 修复2808四处实际编译错误及一个Node当前源码版本断言，再固定复验；11 Rust组尚未执行，Node356通过/1失败/4权限skip保留。
-- [x] 最小修组合树七Node套件361/361实际通过；原隔离361/361仅旧v17 base证据，今后必须最终完整树重新跑并记录sourceTree。
-- [ ] validate_contract_real须显式跑已认证luac的ignored真实用例，不以零测试作通过。
+## 立即闭合固定基线
+- [x] 070f实际all-targets通过；2808四处编译错误和Node版本断言闭合，历史失败保留。
+- [x] 原copy/发布后receipt路径/generation取消四个修复目标均通过；278 DataFusion可选资格14项通过保持独立，不代表生产执行器或性能。
+- [x] 070f七Node为357通过/0失败/4权限skip；Rust为957通过/23失败/6 ignored，不称全仓通过。
+- [ ] 修复并复验Source validate旧summary共享fixture的21项前置失败，保真实typed schema及全部业务断言。
+- [ ] 修复并复验Data cleanup目录owner计数与历史uppercase CAP归属查找两个失败；每个owner只消费一次、重复close事件和CAP签名/认证必须保留。
+- [x] Source 25新增Index测试逐名一次通过；source_inspect15、flow4与正式认证luac真实ignored用例1通过。
+- [ ] 当前三处最小修闭合前暂停新功能发布；read-through/provider组合已静审，45新增与Windows编译尚未运行。
+- [x] 最终组合Node检查记录sourceTree并区分git archive导出与export-ignore范围；原隔离361/361不能代替最终组合树结果。
 
 ## A. Home、配置与全Data容量
 - [x] 实现decimal5GB可配置基础、派生目录与至少真实cache prepare消费者；初批运行验证未闭。
 - [x] 整合共享blob、decoded spool和CAP独立引用保护28代码路径，静态独审通过；保留发布后错误receipt与278测试修正。
-- [ ] 实际验证56新增回归和既有受影响消费者；故障/取消/跨进程/cleanup与预留实际成本均待测。
+- [ ] 闭合56新增中唯一uppercase历史CAP失败；070f已55通过，仍须修复后精确复验，不能重标原结果。
 - [ ] 完整接入Data归属：下载、共享blob去重、Arrow/索引、staging/导出峰值、CAP和SQLite/WAL/SHM/历史记录；明确共享跨域归属和去重，不把局部准入称总硬上限。
 - [ ] 可重建冷缓存淘汰必须保护活跃lease与证据引用；旧超额/缩配置拒新增并报告，不删证据。验证导入峰值，避免raw/IPC/Parquet长期三副本。
 
@@ -31,8 +27,8 @@
 
 ## C. Source认证、按需消费与binary cache
 - [ ] 完成当前Facts Postcard正确性和匹配性能；旧cache失效重建，新损坏不得fallback成健康。
-- [x] 整合已独审Index r2与正式v13-postcard-index18诊断；固定Go323来源已核，Node七套361/361通过。
-- [ ] 编译并实际运行25 active/1 ignored对应入口及既有完整消费者回归；独立旧Symbol/Document/Locator字节、取消首错/构造前预算均保。
+- [x] 整合已独审Index r2与正式v13-postcard-index18诊断；固定Go323来源已核；070f七Node为357通过/0失败/4权限skip。
+- [ ] 闭合旧validate fixture后完成Source库回归；070f的25新增active及真实luac1已通过，6个lib ignored仍单列。
 - [ ] 新Index格式正式诊断reader/exporter接线完整后，再同输入cold/warm/单改/插删/rename；认证和query成本不移到未测后续命令。
 
 ## D. Live内部资源归属
