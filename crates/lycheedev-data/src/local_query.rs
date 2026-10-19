@@ -27,6 +27,9 @@ use std::{
 mod adaptive_tests;
 mod effective;
 mod file_bytes;
+mod generation_provider;
+#[cfg(test)]
+mod generation_tests;
 mod provider;
 mod resolver;
 pub(crate) mod sql_reader;
@@ -34,11 +37,11 @@ pub use file_bytes::FileBytes;
 pub(crate) mod query_csv;
 #[cfg(test)]
 mod regression_tests;
+mod request;
 #[cfg(test)]
 mod sql_output_tests;
 #[cfg(test)]
 mod sql_result_projection_tests;
-mod request;
 
 /// Fixed Go query-reader limits. The request's selected-content maximum is
 /// distinct from the general-purpose WDC SDK defaults and shared query ledger.

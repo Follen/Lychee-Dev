@@ -24,7 +24,9 @@
 
 已完成的DBCD四项修复保留：WDC5 palette物理顺序、多词metadata、官方BUILD预设、非SQL实际读取限制传播。c571与9004分批合计113 distinct通过、3原ignore；旧红例及四个admission测试失败保留，不能将小fixture称作真实>256MiB表验证。产品定义未改变，完整产品矩阵仍待。
 
-Source 后继借用 Symbol 投影片已实现并完成源码独审：summary 重建与完整查询复用同一四来源映射，完整 Index 字节、SYM 身份及查询 owned 结果保持；summary 不再保留全仓第二份 owned Symbol 字符串。10 项新增 Rust 回归尚未运行，精确完整组合树的云端九套 Node 382/382 通过；首轮因副本缺少历史 Git oracle 为380通过/2失败，补齐既有只读历史后完成复验。此片不改变 warm 读取；ID/hash工作移入 IndexSerialize，不能把 Symbols 桶下降算作全部收益，需固定产物后比较总 wall。128MiB输出容量与原owned预算保持，单个临时ID与输出buffer同时存活；没有RSS改善实测。
+Source 后继借用 Symbol 投影片已实现并完成源码独审：summary 重建与完整查询复用同一四来源映射，完整 Index 字节、SYM 身份及查询 owned 结果保持；summary 不再保留全仓第二份 owned Symbol 字符串。44a 实际 all-targets check 通过，index 155通过/1 exporter忽略、inspect15与flow4通过，合174通过/0失败/1忽略，10项新增各执行一次；该片匹配产物性能尚待。精确完整组合树的云端九套 Node 382/382 通过；首轮因副本缺少历史 Git oracle 为380通过/2失败，补齐既有只读历史后完成复验。此片不改变 warm 读取；ID/hash工作移入 IndexSerialize，不能把 Symbols 桶下降算作全部收益，需固定产物后比较总 wall。128MiB输出容量与原owned预算保持，单个临时ID与输出buffer同时存活；没有RSS改善实测。
+
+普通 static SQL 的已存在精确 generation 消费片已实现并通过静态独审，Rust 编译与回归尚未运行：复用原 IPC 校验，保留行/数组/精确数字语义，认证后每 cursor 最多保留一批；短 quota 后转移同一受控文件和祖先句柄，所有 reader 显式关闭后才结束源与请求。producer 私有 schema 表示上限已知不适用时，明确走原 WDC；其余仅在完整认证 manifest 与当前来源匹配且对象原 open 确证 NotFound 时，明确记为未命中并走原 WDC，不重建 generation，常规 CAP 保持原流程；损坏、权限、预算、取消和关闭失败不回退。普通 SQL 不自动物化，Effective/meta 保原路径；这不是 DataFusion 默认切换或全 Data 5GB 闭合。
 
 ## 3. Home、容量和所有权边界
 
@@ -47,6 +49,8 @@ Source新格式旧cache失效后重建，不维护生产旧格式迁移。新格
 同次冷路径visit为4587.845ms，内含工作与等待；串行解析76次累计1278.543ms，worker等待2202.707ms，23任务放弃。增量Facts读取/认证/解码321.305–363.620ms、Symbols构造114.992–138.115ms；warm完整缓存读/SHA/typed校验188.943ms。各阶段嵌套、worker解析并行累计，不相加或差减成伪独占。FactsRead次数包括组目录、probe、记录与close，不能称重复磁盘读取次数；摘要路径已借用typed字段，不再构造完整owned Symbols。下一窄片已实现并静态独审：Lua递归临时预留使用当前子树跨度，保原共享额度和真实超限回退；Facts编解码移除仅复刻旧JSON私有缓存大小的全遍历，沿现有Wire编码同时核规范decoded ownership，实际binary32MiB和decode256MiB额度保持。完整输出/证据预算仍独立，0bca已实际check通过，Source lib730通过/6忽略、inspect15、flow4及正式luac5.1.5精确用例1通过，合750通过/0失败/6忽略；13个新增或调整名称及1个既有细化各执行一次。86f新性能结果见上；同次冷串行53份累计765.792ms、worker等待1921.308ms、abandoned=0，旧2d为76份/23弃用。现FactsRead增量243.809–265.784ms、Symbols88.793–110.011ms；warm cached172.061ms、Index读取54,464,537B。本轮abandoned=0，历史2d为23；该差异不独立证明因果，跨负载绝对秒数不能全部归因此片；解析并行累计和嵌套phase仍不可相加。下一步按真实准入原因分析剩余串行与聚合表示，不先假定全部大文档或线程数不足。
 
 Data CSV9693工具对旧63d与a860的单pair：cold401.4790/389.9062ms，warm349.0380/324.7937ms；完整CSV/sidecar与8CAP核验。该对比是旧Rust/新Rust，不是Go性能门禁；retainedBytes减少46,988,672B与decodeWork减少81,920是逻辑计量，不是RSS。其余Data、Live正式性能与全产品矩阵仍未验收，不把历史结果归新产物。
+
+86f 的现成 Data 诊断已完成：24对/48次 CLI 全部结果等价，40项完整图像像素与128个CAP核验通过，Node63通过；没有调用 cache prepare 或 DF。Go/Rust 毫秒：BLTE cold197.14/335.78、warm152.78/127.19；五种PNG cold Rust270.64–301.38 对 Go152.36–154.45，warm Rust122.16–130.90 对 Go121.40–130.36；五种WebP cold Rust269.39–303.87 对 Go225.74–245.49，warm Rust124.75–149.96 对 Go195.62–213.67。所有性能路径比率仍大于0.30，单轮诊断不作20对验收；tiny SQL只作正确性。48份内存采样中6份有缺口，其余亦不保证完整RSS峰值。同run阶段细分尚待归因，不能把冷慢猜作某一组件原因。
 
 历史coverage十二integration实际130通过/1权限ignore，报告是独立对象分母，不能平均成全项目覆盖率。f86 companion真实四CLI产生profile后超原raw128MiB总预算，merge/export/witness未执行；不加预算，覆盖工具扩展暂停，先完成业务与性能门禁。真正OS压力、游戏及尚未覆盖的Skill实际任务仍有缺证；本轮四类离线真实CLI盲评与SQL补验见第2节。
 

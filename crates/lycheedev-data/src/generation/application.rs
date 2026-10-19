@@ -33,13 +33,13 @@ pub(super) const DERIVATION_VERSION: &str = "lycheedev.table-arrow-import.v1";
 
 // The exact Schema lent to FileWriter owns its construction reservation until
 // every physical batch and writer has been dropped.
-struct PhysicalSchema {
-    schema: SchemaRef,
+pub(super) struct PhysicalSchema {
+    pub(super) schema: SchemaRef,
     scratch_bound: usize,
     _allocation: OwnedRetainedReservation,
 }
 impl PhysicalSchema {
-    fn new(visible: &SchemaRef, budget: &Arc<Budget>) -> Result<Self> {
+    pub(super) fn new(visible: &SchemaRef, budget: &Arc<Budget>) -> Result<Self> {
         let scratch_bound = visible
             .fields()
             .iter()
@@ -68,51 +68,102 @@ impl PhysicalSchema {
     }
 }
 
-pub(super) fn reserve_schema_encoding<'a>(
-    schema: &Schema,
-    budget: &'a Budget,
-) -> Result<RetainedReservation<'a>> {
+fn schema_input_bytes(schema: &Schema) -> Result<usize> {
+    schema
+        .metadata()
+        .iter()
+        .try_fold(schema.fields().size(), |size, (key, value)| {
+            size.checked_add(key.len())
+                .and_then(|n| n.checked_add(value.len()))
+                .and_then(|n| n.checked_add(128))
+                .ok_or_else(limit)
+        })
+}
+fn schema_size_supported(bytes: usize, budget: &Budget) -> Result<bool> {
     budget.check()?;
-    let input_bytes =
-        schema
-            .metadata()
-            .iter()
-            .try_fold(schema.fields().size(), |size, (key, value)| {
-                size.checked_add(key.len())
-                    .and_then(|n| n.checked_add(value.len()))
-                    .and_then(|n| n.checked_add(128))
-                    .ok_or_else(limit)
-            })?;
-    if input_bytes > MANIFEST_MAXIMUM {
-        return Err(limit());
-    }
+    Ok(bytes <= MANIFEST_MAXIMUM)
+}
+fn reserve_schema_input<'a>(bytes: usize, budget: &'a Budget) -> Result<RetainedReservation<'a>> {
     // FlatBuffer growth/old-new overlap, returned message bytes and metadata
     // ordering scratch are admitted before entering the synchronous encoder.
     budget.reserve_retained(
-        input_bytes
+        bytes
             .checked_mul(16)
             .and_then(|n| n.checked_add(65536))
             .ok_or_else(limit)?,
     )
 }
-
-/// Hash Arrow's canonical native IPC schema message: the same encoder and
-/// options FileWriter uses for this exact physical Schema. Arrow sorts metadata
-/// keys while preserving field order, nested types, lengths and nullability.
-pub(super) fn physical_schema_digest(schema: &Schema, budget: &Budget) -> Result<String> {
-    let _encoding = reserve_schema_encoding(schema, budget)?;
+pub(super) fn reserve_schema_encoding<'a>(
+    schema: &Schema,
+    budget: &'a Budget,
+) -> Result<RetainedReservation<'a>> {
+    budget.check()?;
+    let bytes = schema_input_bytes(schema)?;
+    if !schema_size_supported(bytes, budget)? {
+        return Err(limit());
+    }
+    reserve_schema_input(bytes, budget)
+}
+/// Field names alone are a no-allocation lower bound on native Schema.size().
+/// False proves this producer cannot publish a generation for the source; it
+/// is not a query-budget failure or permission to ignore malformed artifacts.
+pub(super) fn source_schema_may_fit(
+    fields: &[crate::schema::Field],
+    budget: &Budget,
+) -> Result<bool> {
+    let mut names = 0usize;
+    for field in fields {
+        budget.check()?;
+        names = names.checked_add(field.name.len()).ok_or_else(limit)?;
+        if !schema_size_supported(names, budget)? {
+            return Ok(false);
+        }
+    }
+    budget.check()?;
+    Ok(true)
+}
+fn encoded_schema_digest(
+    message: &[u8],
+    has_body: bool,
+    budget: &Budget,
+) -> Result<Option<String>> {
+    budget.check()?;
+    // Unexpected body bytes are an invariant error, not a size eligibility miss.
+    if has_body {
+        return Err(limit());
+    }
+    // The native encoder already performed this work, including an oversized
+    // result. Actual budget refusal must not be converted to ineligibility.
+    budget.charge(Cost::work(message.len()))?;
+    if !schema_size_supported(message.len(), budget)? {
+        return Ok(None);
+    }
+    let digest = lycheedev_core::storage::sha256(message);
+    budget.check()?;
+    Ok(Some(digest))
+}
+/// One native encoder and both representation bounds serve strict preparation
+/// and optional SQL lookup. None only denotes the producer's size eligibility.
+pub(super) fn physical_schema_digest_if_supported(
+    schema: &Schema,
+    budget: &Budget,
+) -> Result<Option<String>> {
+    budget.check()?;
+    let bytes = schema_input_bytes(schema)?;
+    if !schema_size_supported(bytes, budget)? {
+        return Ok(None);
+    }
+    let _encoding = reserve_schema_input(bytes, budget)?;
     let encoded = IpcDataGenerator::default().schema_to_bytes_with_dictionary_tracker(
         schema,
         &mut DictionaryTracker::new(true),
         &IpcWriteOptions::default(),
     );
-    if encoded.ipc_message.len() > MANIFEST_MAXIMUM || !encoded.arrow_data.is_empty() {
-        return Err(limit());
-    }
-    budget.charge(Cost::work(encoded.ipc_message.len()))?;
-    let digest = lycheedev_core::storage::sha256(&encoded.ipc_message);
-    budget.check()?;
-    Ok(digest)
+    encoded_schema_digest(&encoded.ipc_message, !encoded.arrow_data.is_empty(), budget)
+}
+/// Explicit cache preparation remains strict at the same representation limits.
+pub(super) fn physical_schema_digest(schema: &Schema, budget: &Budget) -> Result<String> {
+    physical_schema_digest_if_supported(schema, budget)?.ok_or_else(limit)
 }
 
 fn limit() -> ToolkitError {
@@ -169,13 +220,44 @@ pub(super) fn manifest<'a>(
     batches: usize,
     visible_columns: usize,
 ) -> Manifest<'a> {
+    manifest_source(
+        super::identity::StaticSource {
+            data: prepared.pin.data.as_ref().expect("validated data pin"),
+            bundle: &prepared.bundle,
+            definition: &prepared.definition,
+            layout: &prepared.layout,
+            reading: &prepared.file.reading,
+            missing: prepared.file.bytes.missing(),
+            unavailable_partitions: &prepared.availability.skipped,
+            bytes: prepared.file.bytes.len(),
+        },
+        identity,
+        identity_sha256,
+        schema_sha256,
+        object,
+        rows,
+        batches,
+        visible_columns,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+pub(super) fn manifest_source<'a>(
+    source: super::identity::StaticSource<'a>,
+    identity: &StaticIdentity<'_>,
+    identity_sha256: &'a str,
+    schema_sha256: &'a str,
+    object: &'a DerivedObject,
+    rows: usize,
+    batches: usize,
+    visible_columns: usize,
+) -> Manifest<'a> {
     Manifest {
         schema: "lycheedev.data-static-generation.v1",
         identity_sha256,
         source_kind: "static",
-        data: prepared.pin.data.as_ref().expect("validated data pin"),
-        table: &prepared.bundle.identity,
-        definition_sha256: &prepared.definition.sha256,
+        data: source.data,
+        table: &source.bundle.identity,
+        definition_sha256: &source.definition.sha256,
         typed_schema_sha256: schema_sha256,
         object,
         representation: REPRESENTATION,
@@ -183,14 +265,14 @@ pub(super) fn manifest<'a>(
         available_rows: rows,
         batch_count: batches,
         complete: identity.complete(),
-        missing: prepared.file.bytes.missing(),
-        unavailable_partitions: &prepared.availability.skipped,
+        missing: source.missing,
+        unavailable_partitions: source.unavailable_partitions,
         record_id_column: visible_columns,
         record_id_order: "ascending",
-        source_content: &prepared.file.reading["content"],
-        partial_content: &prepared.file.reading["partialContent"],
-        definition_object: &prepared.bundle.definition,
-        definition_manifest: &prepared.bundle.manifest,
+        source_content: &source.reading["content"],
+        partial_content: &source.reading["partialContent"],
+        definition_object: &source.bundle.definition,
+        definition_manifest: &source.bundle.manifest,
     }
 }
 
@@ -536,4 +618,101 @@ fn write_generation(
         error.details = json!({"schema":"lycheedev.data-generation-publication-error.v1","cause":error.details,"published":published});
         error
     })
+}
+
+#[cfg(test)]
+mod schema_eligibility_tests {
+    use super::*;
+    fn budget() -> Budget {
+        Budget::new(
+            Cost::defaults(),
+            Instant::now() + Duration::from_secs(60),
+            None,
+        )
+    }
+    fn small() -> Schema {
+        Schema::new(vec![Field::new("ID", DataType::UInt64, true)])
+    }
+    fn large() -> Schema {
+        Schema::new(vec![Field::new(
+            "x".repeat(MANIFEST_MAXIMUM + 1),
+            DataType::UInt64,
+            true,
+        )])
+    }
+    #[test]
+    fn optional_native_schema_representation_limit_keeps_explicit_prepare_strict() {
+        let schema = large();
+        let budget = budget();
+        assert!(schema_input_bytes(&schema).unwrap() > MANIFEST_MAXIMUM);
+        assert!(
+            physical_schema_digest_if_supported(&schema, &budget)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            physical_schema_digest(&schema, &budget).unwrap_err().code,
+            "records.query_resource_budget"
+        );
+        assert_eq!(budget.refundable_retained_bytes(), 0);
+    }
+    #[test]
+    fn optional_schema_never_converts_actual_budget_or_cancel_error_to_ineligible() {
+        let narrow = Budget::new(
+            Cost {
+                retained_bytes: 1,
+                ..Cost::defaults()
+            },
+            Instant::now() + Duration::from_secs(60),
+            None,
+        );
+        assert_eq!(
+            physical_schema_digest_if_supported(&small(), &narrow)
+                .unwrap_err()
+                .code,
+            "records.query_resource_budget"
+        );
+        assert_eq!(narrow.refundable_retained_bytes(), 0);
+        let control = lycheedev_core::control::OperationControl::default();
+        control
+            .cancel_handle()
+            .store(true, std::sync::atomic::Ordering::Release);
+        let stopped = Budget::controlled(Cost::defaults(), control.deadline(), control);
+        assert_eq!(
+            physical_schema_digest_if_supported(&large(), &stopped)
+                .unwrap_err()
+                .code,
+            "command.cancelled"
+        );
+        assert_eq!(stopped.refundable_retained_bytes(), 0);
+    }
+    #[test]
+    fn encoded_ipc_schema_bound_is_separate_and_unexpected_body_is_always_hard_error() {
+        // This unit tests the trusted encoder-result size boundary, not IPC
+        // validity. It covers a large encoded result even if input was eligible.
+        let at = vec![0u8; MANIFEST_MAXIMUM];
+        let over = vec![0u8; MANIFEST_MAXIMUM + 1];
+        let budget = budget();
+        assert!(
+            encoded_schema_digest(&at, false, &budget)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            encoded_schema_digest(&over, false, &budget)
+                .unwrap()
+                .is_none()
+        );
+        assert!(encoded_schema_digest(&over, true, &budget).is_err());
+        let limited = Budget::new(
+            Cost {
+                decode_work: 1,
+                ..Cost::defaults()
+            },
+            Instant::now() + Duration::from_secs(60),
+            None,
+        );
+        assert!(encoded_schema_digest(&[0; 8], false, &limited).is_err());
+        assert!(encoded_schema_digest(&over, false, &limited).is_err());
+    }
 }

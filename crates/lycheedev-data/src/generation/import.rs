@@ -92,6 +92,11 @@ pub(crate) struct ImportedSchema {
     schema: SchemaRef,
     _allocation: OwnedRetainedReservation,
 }
+impl ImportedSchema {
+    pub(super) fn schema(&self) -> &SchemaRef {
+        &self.schema
+    }
+}
 impl ImportedBatch {
     #[cfg(feature = "datafusion-qualification")]
     pub(crate) fn into_parts(self) -> (RecordBatch, UInt32Array, usize, ImportedBatchAllocation) {
@@ -325,6 +330,39 @@ pub(crate) struct TableImporter<'table, 'body> {
     pending: Option<(u32, LeasedRow<'table, Vec<table::Value>>, usize)>,
     stopped: bool,
 }
+// One canonical schema builder serves importer and existing-generation lookup.
+// Lookup must not inherit batch-size/import limits before it knows a cache hit.
+fn prepare_schema(
+    fields: &[schema::Field],
+    budget: &Arc<Budget>,
+) -> Result<(Arc<ImportedSchema>, Vec<Column>)> {
+    budget.check()?;
+    let schema_bytes = fields.iter().try_fold(512usize, |bytes, field| {
+        plus(bytes, plus(field.name.len(), 512)?)
+    })?;
+    let schema_allocation = budget.reserve_retained(schema_bytes)?;
+    let mut columns = Vec::with_capacity(fields.len());
+    let mut arrow_fields = Vec::with_capacity(fields.len());
+    for field in fields {
+        budget.check()?;
+        let column = Column::from_field(field)?;
+        arrow_fields.push(Field::new(&field.name, column.data_type(), true));
+        columns.push(column);
+    }
+    Ok((
+        Arc::new(ImportedSchema {
+            schema: Arc::new(Schema::new(arrow_fields)),
+            _allocation: schema_allocation.into_owned(budget)?,
+        }),
+        columns,
+    ))
+}
+pub(super) fn schema_for_table(
+    table: &Table<'_>,
+    budget: &Arc<Budget>,
+) -> Result<Arc<ImportedSchema>> {
+    Ok(prepare_schema(table.columns(), budget)?.0)
+}
 impl<'table, 'body> TableImporter<'table, 'body> {
     /// `budget` must be the same admitted query owner used to open `table`.
     pub(crate) fn new(
@@ -335,22 +373,14 @@ impl<'table, 'body> TableImporter<'table, 'body> {
         budget.check()?;
         let mut limits = limits.validate()?;
         let fields = table.columns();
-        let schema_bytes = fields.iter().try_fold(512usize, |bytes, field| {
-            plus(bytes, plus(field.name.len(), 512)?)
-        })?;
-        let schema_allocation = budget.reserve_retained(schema_bytes)?;
-        let mut columns = Vec::with_capacity(fields.len());
-        let mut arrow_fields = Vec::with_capacity(fields.len());
+        let (schema, columns) = prepare_schema(fields, &budget)?;
         let mut row_bytes = 4usize;
         let mut cells = 1usize;
-        for field in fields {
+        for column in &columns {
             budget.check()?;
-            let column = Column::from_field(field)?;
             let width = column.elements.unwrap_or(1);
             row_bytes = plus(row_bytes, times(width, column.kind.width())?)?;
             cells = plus(cells, width)?;
-            columns.push(column);
-            arrow_fields.push(Field::new(&field.name, column.data_type(), true));
         }
         if row_bytes > limits.value_bytes {
             return Err(limit());
@@ -365,10 +395,6 @@ impl<'table, 'body> TableImporter<'table, 'body> {
             plus(times(fixed, 2)?, times(limits.value_bytes, 3)?)?,
             overhead,
         )?;
-        let schema = Arc::new(ImportedSchema {
-            schema: Arc::new(Schema::new(arrow_fields)),
-            _allocation: schema_allocation.into_owned(&budget)?,
-        });
         Ok(Self {
             table,
             schema,

@@ -6,6 +6,10 @@ use relational::{
     EqualityCursor, EqualityOutcome, RowCursor, RowProvider, RowYield, Scalar, Source,
 };
 use std::collections::BTreeSet;
+#[cfg(test)]
+thread_local! {
+    pub(super) static WDC_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 fn binding() -> lycheedev_core::ToolkitError {
     fault(
@@ -77,6 +81,8 @@ impl ScanCursor<'_, '_> {
         };
         self.physical.budget.check()?;
         self.next += 1;
+        #[cfg(test)]
+        WDC_ROWS.with(|count| count.set(count.get() + 1));
         let raw = if let Some(projection) = &self.projection {
             projection.rows.leased_row(id, 1 << 20)?
         } else {
@@ -120,6 +126,8 @@ impl RowCursor for EqualCursor<'_, '_> {
             // Physical equality has no trailing budget check.
             return Ok(false);
         };
+        #[cfg(test)]
+        WDC_ROWS.with(|count| count.set(count.get() + 1));
         let raw = match self.physical.table.leased_row_values(id, 1 << 20) {
             Ok(raw) => raw,
             Err(error) if error.code == "table.record_not_found" => return Ok(false),
@@ -137,6 +145,7 @@ impl RowCursor for EqualCursor<'_, '_> {
 
 pub(super) struct Physical<'body> {
     pub table: Arc<table::Table<'body>>,
+    pub(super) generation: Option<Arc<crate::generation::Generation>>,
     schema: Source,
     identity: usize,
     budget: Arc<Budget>,
@@ -151,6 +160,7 @@ impl<'body> Physical<'body> {
         ))?;
         Ok(Self {
             table: Arc::new(table),
+            generation: None,
             schema,
             identity,
             budget,
@@ -160,10 +170,16 @@ impl<'body> Physical<'body> {
         let (schema, identity) = Self::prepare_schema(&self.table, &self.budget)?;
         Ok(Self {
             table: self.table.clone(),
+            generation: self.generation.clone(),
             schema,
             identity,
             budget: self.budget.clone(),
         })
+    }
+    pub(super) fn close_generation(&self) -> Result<()> {
+        self.generation
+            .as_ref()
+            .map_or(Ok(()), |generation| generation.close())
     }
     fn prepare_schema(table: &table::Table<'_>, budget: &Budget) -> Result<(Source, usize)> {
         budget.check()?;
@@ -350,6 +366,14 @@ impl RowProvider for Physical<'_> {
                 "SQL table scan index exceeds its bound",
             ));
         }
+        if let Some(generation) = &self.generation {
+            return super::generation_provider::Cursor::scan(
+                generation,
+                self.table.columns(),
+                &self.budget,
+                projection.map(|projection| projection.indices),
+            );
+        }
         let allocation = self
             .budget
             .reserve_retained(size_of::<ScanCursor<'_, '_>>())?;
@@ -407,6 +431,16 @@ impl RowProvider for Physical<'_> {
                 ));
             }
         };
+        if let Some(generation) = &self.generation {
+            return Ok(EqualityCursor::Rows(
+                super::generation_provider::Cursor::equal(
+                    generation,
+                    self.table.columns(),
+                    &self.budget,
+                    id,
+                )?,
+            ));
+        }
         let allocation = self
             .budget
             .reserve_retained(size_of::<EqualCursor<'_, '_>>())?;

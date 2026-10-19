@@ -3,7 +3,7 @@
 use super::{admit_bulk_work, invalid, plus, times};
 use crate::{
     generation::application::reserve_schema_encoding,
-    resource::{Budget, Cost, RetainedReservation},
+    resource::{Budget, Cost, OwnedRetainedReservation, RetainedReservation},
     table::Table,
 };
 use arrow_array::{Array, FixedSizeListArray, Float32Array, RecordBatch, UInt32Array};
@@ -17,13 +17,70 @@ use arrow_ipc::{
 use arrow_schema::{DataType, Field, SchemaRef};
 use flatbuffers::{FlatBufferBuilder, VerifierOptions};
 use lycheedev_core::{Result, workspace::data_disk::DerivedObjectReader};
-use std::io::SeekFrom;
+use std::{io::SeekFrom, sync::Arc};
 
 // This owner is private: no cloned array escapes its allocation guard.
 struct LeasedBatch<'a> {
     records: RecordBatch,
     _encoded: Buffer,
     _allocation: RetainedReservation<'a>,
+}
+/// This private owned value is lent to one cursor; bare arrays never escape it.
+pub(crate) struct OwnedBatch {
+    pub(crate) records: RecordBatch,
+    _encoded: Buffer,
+    _allocation: OwnedRetainedReservation,
+}
+#[derive(Clone, Copy)]
+pub(in crate::generation) struct BatchBlock {
+    pub(in crate::generation) block: Block,
+    pub(in crate::generation) first: u32,
+    pub(in crate::generation) last: u32,
+    pub(in crate::generation) rows: usize,
+}
+pub(in crate::generation) struct Directory {
+    pub(in crate::generation) blocks: Vec<BatchBlock>,
+    _allocation: OwnedRetainedReservation,
+}
+pub(in crate::generation) fn directory(
+    reader: &mut DerivedObjectReader<'_>,
+    schema: &SchemaRef,
+    table: &Table<'_>,
+    batch_count: usize,
+    budget: &Arc<Budget>,
+) -> Result<Directory> {
+    if batch_count > table.logical_count() {
+        return Err(invalid());
+    }
+    let allocation = budget.reserve_retained(plus(
+        times(batch_count, std::mem::size_of::<BatchBlock>())?,
+        256,
+    )?)?;
+    let mut blocks = Vec::new();
+    blocks
+        .try_reserve_exact(batch_count)
+        .map_err(|_| super::limit())?;
+    inspect(reader, schema, table, batch_count, budget, &mut |entry| {
+        blocks.push(entry);
+        Ok(())
+    })?;
+    Ok(Directory {
+        blocks,
+        _allocation: allocation.into_owned(budget)?,
+    })
+}
+pub(in crate::generation) fn read_owned_batch(
+    reader: &mut DerivedObjectReader<'_>,
+    schema: &SchemaRef,
+    block: &Block,
+    budget: &Arc<Budget>,
+) -> Result<OwnedBatch> {
+    let batch = decode_batch(reader, schema, block, budget)?;
+    Ok(OwnedBatch {
+        records: batch.records,
+        _encoded: batch._encoded,
+        _allocation: batch._allocation.into_owned(budget)?,
+    })
 }
 fn read_at(reader: &mut DerivedObjectReader<'_>, offset: u64, bytes: &mut [u8]) -> Result<()> {
     reader.seek_checked(SeekFrom::Start(offset))?;
@@ -47,6 +104,16 @@ pub(super) fn validate(
     table: &Table<'_>,
     batch_count: usize,
     budget: &Budget,
+) -> Result<()> {
+    inspect(reader, schema, table, batch_count, budget, &mut |_| Ok(()))
+}
+fn inspect(
+    reader: &mut DerivedObjectReader<'_>,
+    schema: &SchemaRef,
+    table: &Table<'_>,
+    batch_count: usize,
+    budget: &Budget,
+    record: &mut dyn FnMut(BatchBlock) -> Result<()>,
 ) -> Result<()> {
     budget.check()?;
     let length = usize::try_from(reader.len()).map_err(|_| invalid())?;
@@ -140,43 +207,9 @@ pub(super) fn validate(
     }
     drop(fbb);
 
-    let decoder =
-        FileDecoder::new(schema.clone(), MetadataVersion::V5).with_require_alignment(true);
     let mut ordinal = 0usize;
     for block in &copied_blocks {
-        budget.check()?;
-        let meta_len = usize::try_from(block.metaDataLength()).map_err(|_| invalid())?;
-        let body_len = nonnegative(block.bodyLength())?;
-        let total = plus(meta_len, body_len)?;
-        // One aligned allocation plus per-field ArrayData/ArrayRef/vector
-        // overhead. Supported types have at most one FixedSizeList nesting.
-        let nodes = schema.fields().iter().try_fold(0usize, |n, f| {
-            plus(
-                n,
-                if matches!(f.data_type(), DataType::FixedSizeList(_, _)) {
-                    2
-                } else {
-                    1
-                },
-            )
-        })?;
-        let allocation =
-            budget.reserve_retained(plus(plus(total, 64)?, plus(times(nodes, 4096)?, 4096)?)?)?;
-        std::alloc::Layout::from_size_align(total, 64).map_err(|_| invalid())?;
-        admit_bulk_work(budget, total)?;
-        let mut bytes = MutableBuffer::from_len_zeroed(total);
-        read_at(reader, block.offset() as u64, bytes.as_slice_mut())?;
-        validate_message(bytes.as_slice(), meta_len, body_len, schema)?;
-        let bytes: Buffer = bytes.into();
-        let records = decoder
-            .read_record_batch(block, &bytes)
-            .map_err(|_| invalid())?
-            .ok_or_else(invalid)?;
-        let batch = LeasedBatch {
-            records,
-            _encoded: bytes,
-            _allocation: allocation,
-        };
+        let batch = decode_batch(reader, schema, block, budget)?;
         for column in batch.records.columns() {
             validate_values(column.as_ref(), budget)?;
         }
@@ -196,6 +229,12 @@ pub(super) fn validate(
             }
             ordinal = plus(ordinal, 1)?;
         }
+        record(BatchBlock {
+            block: *block,
+            first: *ids.values().first().ok_or_else(invalid)?,
+            last: *ids.values().last().ok_or_else(invalid)?,
+            rows: ids.len(),
+        })?;
         // The Arrow buffer aliases retained by records leave before its lease.
         drop(batch);
     }
@@ -203,6 +242,46 @@ pub(super) fn validate(
         return Err(invalid());
     }
     budget.check()
+}
+
+fn decode_batch<'a>(
+    reader: &mut DerivedObjectReader<'_>,
+    schema: &SchemaRef,
+    block: &Block,
+    budget: &'a Budget,
+) -> Result<LeasedBatch<'a>> {
+    budget.check()?;
+    let meta_len = usize::try_from(block.metaDataLength()).map_err(|_| invalid())?;
+    let body_len = nonnegative(block.bodyLength())?;
+    let total = plus(meta_len, body_len)?;
+    let nodes = schema.fields().iter().try_fold(0usize, |n, f| {
+        plus(
+            n,
+            if matches!(f.data_type(), DataType::FixedSizeList(_, _)) {
+                2
+            } else {
+                1
+            },
+        )
+    })?;
+    let allocation =
+        budget.reserve_retained(plus(plus(total, 64)?, plus(times(nodes, 4096)?, 4096)?)?)?;
+    std::alloc::Layout::from_size_align(total, 64).map_err(|_| invalid())?;
+    admit_bulk_work(budget, total)?;
+    let mut bytes = MutableBuffer::from_len_zeroed(total);
+    read_at(reader, block.offset() as u64, bytes.as_slice_mut())?;
+    validate_message(bytes.as_slice(), meta_len, body_len, schema)?;
+    let bytes: Buffer = bytes.into();
+    let records = FileDecoder::new(schema.clone(), MetadataVersion::V5)
+        .with_require_alignment(true)
+        .read_record_batch(block, &bytes)
+        .map_err(|_| invalid())?
+        .ok_or_else(invalid)?;
+    Ok(LeasedBatch {
+        records,
+        _encoded: bytes,
+        _allocation: allocation,
+    })
 }
 
 fn validate_message(

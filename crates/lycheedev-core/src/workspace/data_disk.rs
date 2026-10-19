@@ -24,7 +24,10 @@ mod reading;
 pub(crate) use metadata::{MetadataQuota, MetadataReadQuota};
 mod shared_blobs;
 pub use publication::{DerivedObject, DerivedObjectWriter};
-pub use reading::{DerivedObjectReader, DerivedReadLease, DerivedReadReport, MAX_GENERATION_BYTES};
+pub use reading::{
+    DerivedObjectReader, DerivedReadCheck, DerivedReadLease, DerivedReadReport,
+    MAX_GENERATION_BYTES, OwnedDerivedObjectReader, OwnedDerivedReadLease,
+};
 pub(crate) use shared_blobs::retention::protects_evidence_body;
 pub(crate) use shared_blobs::stream::StreamQuota;
 pub use shared_blobs::stream::{

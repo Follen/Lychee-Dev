@@ -1,6 +1,6 @@
 //! Reuse only a complete, authenticated publication for the freshly prepared key.
 //! The original source owner remains alive; no SQL/effective/Hotfix route changes.
-mod ipc;
+pub(super) mod ipc;
 #[cfg(test)]
 mod tests;
 
@@ -44,7 +44,7 @@ fn times(a: usize, b: usize) -> Result<usize> {
 // bulk I/O/authentication block, admitted for the entire pass before work.
 // This does not replace byte bounds, allocation reservations, per-block
 // cancellation or semantic manifest/value/ID validation work.
-fn admit_bulk_work(budget: &Budget, bytes: usize) -> Result<()> {
+pub(super) fn admit_bulk_work(budget: &Budget, bytes: usize) -> Result<()> {
     budget.charge(Cost::work(bytes.div_ceil(65536)))
 }
 
@@ -53,7 +53,7 @@ fn admit_bulk_work(budget: &Budget, bytes: usize) -> Result<()> {
 #[allow(dead_code)]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Receipt<'a> {
+pub(super) struct Receipt<'a> {
     schema: &'a str,
     identity_sha256: &'a str,
     source_kind: &'a str,
@@ -64,11 +64,11 @@ struct Receipt<'a> {
     definition_sha256: &'a str,
     typed_schema_sha256: &'a str,
     #[serde(borrow)]
-    object: Object<'a>,
+    pub(super) object: Object<'a>,
     representation: &'a str,
     derivation_version: &'a str,
-    available_rows: usize,
-    batch_count: usize,
+    pub(super) available_rows: usize,
+    pub(super) batch_count: usize,
     complete: bool,
     #[serde(borrow)]
     missing: &'a RawValue,
@@ -87,9 +87,9 @@ struct Receipt<'a> {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Object<'a> {
-    sha256: &'a str,
-    bytes: u64,
+pub(super) struct Object<'a> {
+    pub(super) sha256: &'a str,
+    pub(super) bytes: u64,
 }
 
 struct Compare<'a> {
@@ -118,7 +118,11 @@ impl Write for Compare<'_> {
         Ok(())
     }
 }
-fn canonical_matches(expected: &impl Serialize, bytes: &[u8], budget: &Budget) -> Result<()> {
+pub(super) fn canonical_matches(
+    expected: &impl Serialize,
+    bytes: &[u8],
+    budget: &Budget,
+) -> Result<()> {
     let mut compare = Compare {
         input: bytes,
         offset: 0,

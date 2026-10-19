@@ -5,6 +5,19 @@ use lycheedev_core::{Result, selection::DataPin};
 use serde::Serialize;
 use serde_json::Value;
 
+/// Exact borrowed inputs shared by explicit preparation and ordinary SQL.
+#[derive(Clone, Copy)]
+pub(crate) struct StaticSource<'a> {
+    pub data: &'a DataPin,
+    pub bundle: &'a crate::definitions::Bundle,
+    pub definition: &'a crate::schema::Definition,
+    pub layout: &'a crate::table::Layout,
+    pub reading: &'a Value,
+    pub missing: &'a [crate::blte::Missing],
+    pub unavailable_partitions: &'a std::collections::BTreeSet<usize>,
+    pub bytes: usize,
+}
+
 /// Deliberately borrowed from the already authenticated Prepared owner. No key
 /// bytes or mutable runtime/cache counters are copied into an identity.
 #[derive(Serialize)]
@@ -42,21 +55,40 @@ impl<'a> StaticIdentity<'a> {
                 "A typed generation requires an exact data pin",
             )
         })?;
-        let reading = &prepared.file.reading;
+        Self::from_source(StaticSource {
+            data,
+            bundle: &prepared.bundle,
+            definition: &prepared.definition,
+            layout: &prepared.layout,
+            reading: &prepared.file.reading,
+            missing: prepared.file.bytes.missing(),
+            unavailable_partitions: &prepared.availability.skipped,
+            bytes: prepared.file.bytes.len(),
+        })
+    }
+    pub(crate) fn from_source(source: StaticSource<'a>) -> Result<Self> {
+        let StaticSource {
+            data,
+            bundle,
+            definition,
+            layout,
+            reading,
+            missing,
+            unavailable_partitions,
+            bytes,
+        } = source;
         let complete = reading["contentVerified"] == true
-            && prepared.file.bytes.missing().is_empty()
-            && prepared.availability.skipped.is_empty();
-        // A complete payload must keep the provider's authenticated content
-        // digest. Partial spans use their own digest and cannot impersonate it.
+            && missing.is_empty()
+            && unavailable_partitions.is_empty();
         let content = if complete {
             &reading["content"]
         } else {
             &reading["partialContent"]
         };
         if !lycheedev_core::selection::valid_digest(content["sha256"].as_str().unwrap_or(""), 64)
-            || content["bytes"].as_u64() != Some(prepared.file.bytes.len() as u64)
-            || prepared.bundle.commit != data.definition_commit
-            || prepared.layout.table_hash != prepared.bundle.identity.hash
+            || content["bytes"].as_u64() != Some(bytes as u64)
+            || bundle.commit != data.definition_commit
+            || layout.table_hash != bundle.identity.hash
         {
             return Err(fault(
                 "records.generation_identity",
@@ -68,11 +100,11 @@ impl<'a> StaticIdentity<'a> {
             schema: "lycheedev.data-static-generation-identity.v1",
             source_kind: "static",
             data,
-            table: &prepared.bundle.identity,
-            definition: &prepared.definition,
-            definition_manifest: &prepared.bundle.manifest,
-            definition_object: &prepared.bundle.definition,
-            layout: &prepared.layout,
+            table: &bundle.identity,
+            definition,
+            definition_manifest: &bundle.manifest,
+            definition_object: &bundle.definition,
+            layout,
             source: SourceIdentity {
                 origin: &reading["source"],
                 content_key: &reading["entry"]["contentKey"],
@@ -81,8 +113,8 @@ impl<'a> StaticIdentity<'a> {
                 partial_content: &reading["partialContent"],
                 key_source: &reading["keySource"],
             },
-            missing: prepared.file.bytes.missing(),
-            unavailable_partitions: &prepared.availability.skipped,
+            missing,
+            unavailable_partitions,
             complete,
         })
     }

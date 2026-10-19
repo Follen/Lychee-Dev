@@ -34,6 +34,13 @@ impl FileScope for Session<'_, '_> {
         self.check()?;
         self.scope.admitted.reserve_derived_read(check)
     }
+    fn reserve_derived_read_owned<'reservation>(
+        &'reservation self,
+        check: &'reservation lycheedev_core::workspace::data_disk::DerivedReadCheck,
+    ) -> Result<lycheedev_core::workspace::data_disk::OwnedDerivedReadLease<'reservation>> {
+        self.check()?;
+        self.scope.admitted.reserve_derived_read_owned(check)
+    }
     fn reserve_derived_cache<'reservation>(
         &'reservation self,
         peak: lycheedev_core::workspace::data_disk::AdditionalPeak,

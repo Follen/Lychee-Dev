@@ -1,5 +1,7 @@
 # Rust 架构实施清单
 
+当前批：44a Source定向174通过/1原exporter忽略，10新增各一次；匹配性能待回。86f Data现有48调用全等价、所有性能路径仍未达0.30，未覆盖prepare/DF。下一已实现候选为普通static SQL消费已认证generation与Core短quota受控reader；静态独审通过，Rust实测待完成，自动物化/DF默认执行/冷淘汰与全5GB归属仍未闭。
+
 以 [handover](handover.md) 为当前事实、[DESIGN](DESIGN.md#authorized-architecture-implementation-plan--2026-10-19) 为完整计划。质量基线f811；性能参考固定Go323。先业务质量/完整实现，再≤30%耗时门禁，之后正式五项循环。历史已完成项与原失败留在[308efa旧清单](https://github.com/Follen/Lychee-Dev/blob/308efa2766d00273b13c9c7e24a0b956bb60e9e9/todo.md)，不滚动复制到当前待办。
 
 ## 立即闭合固定基线
@@ -60,3 +62,4 @@
 - [ ] 内存采样gap、资源计量与RSS区分；受限原始本机证据不夹公开docs。
 - [ ] 两门禁通过后依次循环：架构/业务/Skill→覆盖有效性与冗余→死代码→联合全仓→Rust原生度。此前预审不追认为最终完成。
 - [ ] Coverage companion因raw总预算超限仍未完成；不增限、不继续扩工具抢实现/性能主线。真正OS压力/CLI真实使用/游戏缺证分别保留。
+

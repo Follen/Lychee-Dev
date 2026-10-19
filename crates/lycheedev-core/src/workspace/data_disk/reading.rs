@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 use std::{
     ffi::OsStr,
     io::{self, Read, Seek, SeekFrom},
+    sync::Arc,
 };
 
 pub const MAX_GENERATION_BYTES: usize = 1 << 20;
@@ -19,9 +20,9 @@ pub struct DerivedReadReport {
     pub coverage: Coverage,
 }
 
-/// Holds the existing quota lease for the complete read lifetime. The private
-/// reservation is never returned or exposed through Deref. No payload bytes are
-/// written. Acquisition retains the established empty-directory/lock setup.
+/// Holds quota for existing borrowed reads. The private reservation is never
+/// exposed through Deref and no payload bytes are written. Acquisition keeps the
+/// established directory setup. OwnedDerivedReadLease is the cursor capability.
 pub struct DerivedReadLease<'a> {
     owner: DerivedReservation<'a>,
 }
@@ -64,11 +65,136 @@ impl<'a> DerivedReadLease<'a> {
     }
 }
 
+/// The same independent query budget across short admission and owned reads.
+/// Cloning this Arc preserves its identity; no fresh budget is manufactured.
+pub type DerivedReadCheck = Arc<dyn Fn() -> Result<()> + Send + Sync>;
+
+/// A short quota lease that retains the exact owned check supplied at admission.
+/// Its borrow ends at object handoff; the containing query must checked-close
+/// all returned readers before closing its original DataResources admission.
+pub struct OwnedDerivedReadLease<'a> {
+    lease: DerivedReadLease<'a>,
+    supplemental: DerivedReadCheck,
+}
+impl<'a> OwnedDerivedReadLease<'a> {
+    pub(in crate::workspace) fn acquire(
+        resources: &'a DataResources,
+        home: &Path,
+        limit: u64,
+        control: &'a OperationControl,
+        supplemental: &'a DerivedReadCheck,
+    ) -> Result<Self> {
+        DerivedReadLease::acquire(resources, home, limit, control, supplemental.as_ref()).map(
+            |lease| Self {
+                lease,
+                supplemental: Arc::clone(supplemental),
+            },
+        )
+    }
+    pub fn report(&self) -> DerivedReadReport {
+        self.lease.report()
+    }
+    pub fn read_generation(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        self.lease.read_generation(key)
+    }
+    /// Charge caller-owned raw/parsing memory only after this exact generation
+    /// handle proves a bounded length. Absence never invokes admission. Keep
+    /// the callback's retained guard alive until the returned bytes are dropped.
+    pub fn read_generation_with_admission(
+        &self,
+        key: &str,
+        admit: impl FnOnce(usize) -> Result<()>,
+    ) -> Result<Option<Vec<u8>>> {
+        self.lease.owner.read_generation_with_admission(key, admit)
+    }
+    /// Authenticate manifest semantics before calling. This consumes quota and
+    /// returns the original immutable handle, fully SHA-authenticated and rewound.
+    /// Only an absent shard/body from its original controlled open is a miss;
+    /// redirected, changed, corrupt, stopped or failed-close reads remain errors.
+    ///
+    /// Windows Reader permits other readers but denies write/delete; its shard
+    /// Directory retains all ancestors. A cleanup candidate needing DELETE must
+    /// try once under quota and skip only its exact sharing violation. It must
+    /// separately establish all generation/evidence reference deletion rights.
+    pub fn open_pinned_object(
+        self,
+        sha256: &str,
+        bytes: u64,
+    ) -> Result<Option<OwnedDerivedObjectReader>> {
+        self.open_pinned_object_with(
+            sha256,
+            bytes,
+            |owner| owner.finish(Ok(())),
+            storage::close_file,
+            close_directory,
+        )
+    }
+    fn open_pinned_object_with(
+        self,
+        sha256: &str,
+        bytes: u64,
+        finish_owner: impl FnOnce(DerivedReservation<'a>) -> Result<()>,
+        close_file: impl FnOnce(fs::File) -> io::Result<()>,
+        close_dir: impl FnOnce(Directory) -> Vec<ToolkitError>,
+    ) -> Result<Option<OwnedDerivedObjectReader>> {
+        let opened = match self.lease.owner.open_object_handle(sha256, bytes, true) {
+            Ok(reader) => reader,
+            Err(error) => return self.lease.owner.finish(Err(error)),
+        };
+        let Some(reader) = opened else {
+            return finish_owner(self.lease.owner).map(|()| None);
+        };
+        let mut reader =
+            reader.into_owned(self.lease.owner.control.control.clone(), self.supplemental);
+        // Keep the original reader separate from finish's successful value:
+        // failed quota verification/close must explicitly report its cleanup.
+        // Full body hashing never holds quota; no reader escapes before it passes.
+        let result = finish_owner(self.lease.owner).and_then(|()| reader.authenticate(sha256));
+        match result {
+            Ok(()) => Ok(Some(reader)),
+            Err(error) => reader.close_after_with(Err(error), close_file, close_dir),
+        }
+    }
+    pub fn finish<T>(self, result: Result<T>) -> Result<T> {
+        self.lease.finish(result)
+    }
+}
+
+// Both capabilities share the same exact I/O, authentication and close code.
+// An owned reader does not itself guarantee query admission: its concrete Data
+// owner must retain that admission until every reader has checked-closed.
+pub type OwnedDerivedObjectReader = DerivedObjectReader<'static>;
+
+enum ReaderChecks<'a> {
+    Borrowed(Checks<'a>),
+    Owned {
+        control: OperationControl,
+        supplemental: DerivedReadCheck,
+    },
+}
+impl ReaderChecks<'_> {
+    fn borrowed(&self) -> Checks<'_> {
+        match self {
+            Self::Borrowed(checks) => *checks,
+            Self::Owned {
+                control,
+                supplemental,
+            } => Checks {
+                control,
+                supplemental: Some(supplemental.as_ref()),
+            },
+        }
+    }
+    fn check(&self) -> Result<()> {
+        self.borrowed().check()
+    }
+}
+
 fn integrity(message: &str) -> ToolkitError {
     ToolkitError::new("vault.data_cache_integrity", message, 4)
 }
 
-impl DerivedReservation<'_> {
+impl<'a> DerivedReservation<'a> {
     /// Only a valid absent generation is a miss. Read from one deny-write/delete
     /// handle, with a 1 MiB allocation bound and EOF verification. The key is a
     /// logical generation identity, not this JSON file's content digest: the
@@ -76,9 +202,27 @@ impl DerivedReservation<'_> {
     pub fn read_generation(&self, key: &str) -> Result<Option<Vec<u8>>> {
         self.read_generation_with_close(key, storage::close_file)
     }
+    /// The same handle supplies both the validated length and the returned
+    /// bytes. The caller retains any reservation created by admit through all
+    /// use of those bytes. This does not perform a separate existence probe.
+    pub fn read_generation_with_admission(
+        &self,
+        key: &str,
+        admit: impl FnOnce(usize) -> Result<()>,
+    ) -> Result<Option<Vec<u8>>> {
+        self.read_generation_admitted_with_close(key, admit, storage::close_file)
+    }
     fn read_generation_with_close(
         &self,
         key: &str,
+        close: impl FnOnce(fs::File) -> io::Result<()>,
+    ) -> Result<Option<Vec<u8>>> {
+        self.read_generation_admitted_with_close(key, |_| Ok(()), close)
+    }
+    fn read_generation_admitted_with_close(
+        &self,
+        key: &str,
+        admit: impl FnOnce(usize) -> Result<()>,
         close: impl FnOnce(fs::File) -> io::Result<()>,
     ) -> Result<Option<Vec<u8>>> {
         self.control.check()?;
@@ -103,6 +247,10 @@ impl DerivedReservation<'_> {
                 return Err(integrity("Data generation kind or bounded length differs"));
             }
             let length = metadata.len() as usize;
+            admit(length)?;
+            // Admission can cancel the original operation while succeeding.
+            // Observe that stop before reserving or initializing the buffer.
+            self.control.check()?;
             let mut bytes = Vec::new();
             bytes.try_reserve_exact(length).map_err(|_| {
                 ToolkitError::invalid("Cannot allocate bounded Data generation manifest")
@@ -131,6 +279,23 @@ impl DerivedReservation<'_> {
     /// immutable handle, rewound for its reader. A missing referenced object is
     /// corruption, never a cache miss. No quota or query owner is reacquired.
     pub fn open_object(&self, sha256: &str, bytes: u64) -> Result<DerivedObjectReader<'_>> {
+        let mut reader = self
+            .open_object_handle(sha256, bytes, false)?
+            .expect("required object open never returns absence");
+        match reader.authenticate(sha256) {
+            Ok(()) => Ok(reader),
+            Err(error) => reader.close_after(Err(error)),
+        }
+    }
+
+    // Public borrowed reads deliberately retain the quota borrow. The owned
+    // capability alone transfers these handles and their unchanged controls.
+    fn open_object_handle(
+        &self,
+        sha256: &str,
+        bytes: u64,
+        optional: bool,
+    ) -> Result<Option<DerivedObjectReader<'a>>> {
         self.control.check()?;
         let path = self.paths.object(sha256)?;
         let root = self.read_directory(&self.paths.objects);
@@ -140,7 +305,11 @@ impl DerivedReservation<'_> {
         )?
         else {
             self.control.check()?;
-            return Err(integrity("Referenced Data object shard is missing"));
+            return if optional {
+                Ok(None)
+            } else {
+                Err(integrity("Referenced Data object shard is missing"))
+            };
         };
         let opened = (|| {
             self.control.check()?;
@@ -160,27 +329,33 @@ impl DerivedReservation<'_> {
             },
             Err(error) => return join(Err(error), closed.err(), &self.control),
         };
-        let opened = (|| {
-            directory
-                .open_optional_reader_owner_controlled(
-                    OsStr::new(&sha256[2..]),
-                    &mut Controlled(&self.control),
-                )?
-                .ok_or_else(|| integrity("Referenced Data object is missing"))
-        })();
+        let opened = directory.open_optional_reader_owner_controlled(
+            OsStr::new(&sha256[2..]),
+            &mut Controlled(&self.control),
+        );
         let file = match opened {
-            Ok(file) => file,
+            Ok(Some(file)) => file,
+            Ok(None) => {
+                let absent = if optional {
+                    Ok(None)
+                } else {
+                    Err(integrity("Referenced Data object is missing"))
+                };
+                return join(absent, close_directory(directory), &self.control);
+            }
             Err(error) => return join(Err(error), close_directory(directory), &self.control),
         };
-        let mut reader = DerivedObjectReader {
-            owner: self,
+        let reader = DerivedObjectReader {
+            _resources: self._resources,
+            control: ReaderChecks::Borrowed(self.control),
             file: Some(file),
             directory: Some(directory),
             bytes,
             failure: None,
         };
-        match reader.authenticate(sha256) {
-            Ok(()) => Ok(reader),
+        // Transfer the original reader before any fallible post-open check.
+        match reader.validate_kind_length() {
+            Ok(()) => Ok(Some(reader)),
             Err(error) => reader.close_after(Err(error)),
         }
     }
@@ -193,17 +368,36 @@ impl DerivedReservation<'_> {
     }
 }
 
-/// The borrow prevents releasing quota/query admission before the original
-/// reader closes. Read and Seek preserve typed failures for codec adapters via
-/// error(); the raw File and Directory are never exposed.
+/// Owns one immutable physical read pin and its complete ancestry. Borrowed
+/// reads retain the original admission; owned cursor reads retain its exact
+/// controls and rely on the containing query to close them before admission.
+/// Read/Seek preserve typed failures through error(). Raw owners are private.
 pub struct DerivedObjectReader<'a> {
-    owner: &'a DerivedReservation<'a>,
+    _resources: Option<&'a DataResources>,
+    control: ReaderChecks<'a>,
     file: Option<fs::File>,
     directory: Option<Directory>,
     bytes: u64,
     failure: Option<ToolkitError>,
 }
 impl DerivedObjectReader<'_> {
+    fn into_owned(
+        mut self,
+        control: OperationControl,
+        supplemental: DerivedReadCheck,
+    ) -> OwnedDerivedObjectReader {
+        DerivedObjectReader {
+            _resources: None,
+            control: ReaderChecks::Owned {
+                control,
+                supplemental,
+            },
+            file: self.file.take(),
+            directory: self.directory.take(),
+            bytes: self.bytes,
+            failure: self.failure.take(),
+        }
+    }
     pub fn len(&self) -> u64 {
         self.bytes
     }
@@ -224,14 +418,14 @@ impl DerivedObjectReader<'_> {
             return Err(error.clone());
         }
         let result = (|| {
-            self.owner.control.check()?;
+            self.control.check()?;
             let length = out.len().min(65536);
             let count = self
                 .file
                 .as_mut()
                 .expect("owned reader")
                 .read(&mut out[..length])?;
-            self.owner.control.check()?;
+            self.control.check()?;
             Ok(count)
         })();
         self.remember(result)
@@ -250,7 +444,7 @@ impl DerivedObjectReader<'_> {
             }
             out = &mut out[count..];
         }
-        let result = self.owner.control.check();
+        let result = self.control.check();
         self.remember(result)
     }
     pub fn seek_checked(&mut self, from: SeekFrom) -> Result<u64> {
@@ -258,19 +452,23 @@ impl DerivedObjectReader<'_> {
             return Err(error.clone());
         }
         let result = (|| {
-            self.owner.control.check()?;
+            self.control.check()?;
             let position = self.file.as_mut().expect("owned reader").seek(from)?;
-            self.owner.control.check()?;
+            self.control.check()?;
             Ok(position)
         })();
         self.remember(result)
     }
-    fn authenticate(&mut self, sha256: &str) -> Result<()> {
-        self.owner.control.check()?;
+    fn validate_kind_length(&self) -> Result<()> {
+        self.control.check()?;
         let metadata = self.file.as_ref().expect("owned reader").metadata()?;
         if !metadata.is_file() || metadata.len() != self.bytes {
             return Err(integrity("Referenced Data object kind or length differs"));
         }
+        self.control.check()
+    }
+    fn authenticate(&mut self, sha256: &str) -> Result<()> {
+        self.validate_kind_length()?;
         let mut buffer = [0; 65536];
         let mut remaining = self.bytes;
         let mut digest = Sha256::new();
@@ -313,7 +511,7 @@ impl DerivedObjectReader<'_> {
         if let Some(directory) = self.directory.take() {
             cleanup.extend(close_dir(directory));
         }
-        join(result, cleanup, &self.owner.control)
+        join(result, cleanup, &self.control.borrowed())
     }
 }
 impl Read for DerivedObjectReader<'_> {
@@ -340,4 +538,9 @@ impl Drop for DerivedObjectReader<'_> {
 #[cfg(test)]
 thread_local! { static HASHED_BYTES: Cell<u64> = const { Cell::new(0) }; }
 #[cfg(test)]
+mod pinned_tests;
+#[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod admitted_tests;

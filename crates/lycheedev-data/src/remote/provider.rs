@@ -227,6 +227,10 @@ pub(crate) trait FileScope {
         &'reservation self,
         check: &'reservation dyn Fn() -> Result<()>,
     ) -> Result<lycheedev_core::workspace::data_disk::DerivedReadLease<'reservation>>;
+    fn reserve_derived_read_owned<'reservation>(
+        &'reservation self,
+        check: &'reservation lycheedev_core::workspace::data_disk::DerivedReadCheck,
+    ) -> Result<lycheedev_core::workspace::data_disk::OwnedDerivedReadLease<'reservation>>;
     fn reserve_derived_cache<'reservation>(
         &'reservation self,
         peak: lycheedev_core::workspace::data_disk::AdditionalPeak,
@@ -261,6 +265,13 @@ impl FileScope for Scope<'_> {
     ) -> Result<lycheedev_core::workspace::data_disk::DerivedReadLease<'reservation>> {
         self.check()?;
         self.admitted.reserve_derived_read(check)
+    }
+    fn reserve_derived_read_owned<'reservation>(
+        &'reservation self,
+        check: &'reservation lycheedev_core::workspace::data_disk::DerivedReadCheck,
+    ) -> Result<lycheedev_core::workspace::data_disk::OwnedDerivedReadLease<'reservation>> {
+        self.check()?;
+        self.admitted.reserve_derived_read_owned(check)
     }
     fn reserve_derived_cache<'reservation>(
         &'reservation self,
@@ -350,6 +361,26 @@ impl FileScope for SessionScope<'_, '_> {
                 .reserve_derived_read(check),
         }
     }
+    fn reserve_derived_read_owned<'reservation>(
+        &'reservation self,
+        check: &'reservation lycheedev_core::workspace::data_disk::DerivedReadCheck,
+    ) -> Result<lycheedev_core::workspace::data_disk::OwnedDerivedReadLease<'reservation>> {
+        self.check()?;
+        match &self.session {
+            Some(session) => session.reserve_derived_read_owned(check),
+            None => self
+                .admitted
+                .as_ref()
+                .ok_or_else(|| {
+                    crate::fault(
+                        "records.file_query",
+                        4,
+                        "Reader initialization previously failed",
+                    )
+                })?
+                .reserve_derived_read_owned(check),
+        }
+    }
     fn reserve_derived_cache<'reservation>(
         &'reservation self,
         peak: lycheedev_core::workspace::data_disk::AdditionalPeak,
@@ -358,9 +389,17 @@ impl FileScope for SessionScope<'_, '_> {
         self.check()?;
         match &self.session {
             Some(session) => session.reserve_derived_cache(peak, check),
-            None => self.admitted.as_ref().ok_or_else(|| crate::fault(
-                "records.file_query", 4, "Reader initialization previously failed",
-            ))?.reserve_derived_cache(peak, check),
+            None => self
+                .admitted
+                .as_ref()
+                .ok_or_else(|| {
+                    crate::fault(
+                        "records.file_query",
+                        4,
+                        "Reader initialization previously failed",
+                    )
+                })?
+                .reserve_derived_cache(peak, check),
         }
     }
     fn check(&self) -> Result<()> {

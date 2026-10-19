@@ -15,6 +15,11 @@ fn limit() -> lycheedev_core::ToolkitError {
     )
 }
 
+struct SourceCoverage {
+    missing: Vec<blte::Missing>,
+    skipped: std::collections::BTreeSet<usize>,
+}
+
 enum Input {
     Semantic(relational::Source),
     Physical {
@@ -22,9 +27,16 @@ enum Input {
         file: Value,
         unavailable: Value,
         bytes: usize,
+        coverage: Arc<SourceCoverage>,
     },
 }
 impl Input {
+    fn close(&self) -> Result<()> {
+        match self {
+            Self::Semantic(_) => Ok(()),
+            Self::Physical { input, .. } => input.base.close_generation(),
+        }
+    }
     fn schema(&self) -> &relational::Source {
         match self {
             Self::Semantic(source) => source,
@@ -51,19 +63,40 @@ impl Slot {
             .filter_map(|slot| slot.entry.get())
     }
     fn insert(&self, entry: Entry, budget: &Budget) -> Result<&Entry> {
-        let mut slot = self;
-        while slot.entry.get().is_some() {
-            if slot.next.get().is_none() {
-                budget
-                    .safety_only()
-                    .charge(Cost::retained(size_of::<Slot>()))?;
-                slot.next
-                    .set(Box::new(Self::default()))
-                    .map_err(|_| internal())?;
+        let position = (|| {
+            let mut slot = self;
+            while slot.entry.get().is_some() {
+                if slot.next.get().is_none() {
+                    budget
+                        .safety_only()
+                        .charge(Cost::retained(size_of::<Slot>()))?;
+                    slot.next
+                        .set(Box::new(Self::default()))
+                        .map_err(|_| internal())?;
+                }
+                slot = slot.next.get().ok_or_else(internal)?;
             }
-            slot = slot.next.get().ok_or_else(internal)?;
+            Ok(slot)
+        })();
+        let slot = match position {
+            Ok(slot) => slot,
+            Err(error) => {
+                return crate::remote::admission::finish(
+                    Err(error),
+                    entry.input.close().err(),
+                    Ok(()),
+                    Ok(()),
+                );
+            }
+        };
+        if let Err(entry) = slot.entry.set(entry) {
+            return crate::remote::admission::finish(
+                Err(internal()),
+                entry.input.close().err(),
+                Ok(()),
+                Ok(()),
+            );
         }
-        slot.entry.set(entry).map_err(|_| internal())?;
         slot.entry.get().ok_or_else(internal)
     }
 }
@@ -131,9 +164,21 @@ impl<'a> Resolver<'a> {
     }
     pub fn close_after<T>(self, result: Result<T>) -> Result<T> {
         let factory = self.factory.into_inner();
-        // All tables/views and cached shared bodies leave before their source
-        // owner is closed. CDN Session remains owned by the enclosing Scope.
-        drop(self.slots);
+        // Consume the linked cells iteratively, and checked-close every IPC
+        // owner even when an earlier owner failed. Shared aliases take a reader
+        // only once. All cursor borrows ended before Resolver can be consumed.
+        let mut slot = self.slots;
+        let mut cleanup = Vec::new();
+        loop {
+            if let Some(entry) = slot.entry.into_inner() {
+                cleanup.extend(entry.input.close().err());
+            }
+            match slot.next.into_inner() {
+                Some(next) => slot = *next,
+                None => break,
+            }
+        }
+        let result = crate::remote::admission::finish(result, cleanup, Ok(()), Ok(()));
         match factory.local {
             Some(reader) => reader.close_after(result),
             None => result,
@@ -236,17 +281,18 @@ impl Factory<'_> {
                 file,
                 unavailable,
                 bytes,
+                coverage,
             } if input.bundle.commit == bundle.commit
                 && input.bundle.identity == bundle.identity
                 && input.bundle.manifest == bundle.manifest
                 && input.bundle.definition == bundle.definition =>
             {
-                Some((input, file, unavailable, *bytes))
+                Some((input, file, unavailable, *bytes, coverage))
             }
             _ => None,
         });
-        let (base, definition, layout_hash, file, unavailable, bytes) =
-            if let Some((input, file, unavailable, bytes)) = cached {
+        let (mut base, definition, layout_hash, file, unavailable, bytes, coverage) =
+            if let Some((input, file, unavailable, bytes, coverage)) = cached {
                 if let Some(reader) = &self.local {
                     reader.check_source()?;
                 }
@@ -269,6 +315,7 @@ impl Factory<'_> {
                     file.clone(),
                     unavailable.clone(),
                     bytes,
+                    coverage.clone(),
                 )
             } else {
                 // Definition syntax is checked before physical file IO in Go.
@@ -322,6 +369,19 @@ impl Factory<'_> {
                     &self.data.full_build,
                     &format!("{:08X}", layout.layout_hash),
                 )?;
+                let coverage_bytes =
+                    file.bytes
+                        .missing()
+                        .iter()
+                        .try_fold(256usize, |bytes, gap| {
+                            bytes
+                                .checked_add(size_of::<blte::Missing>() + gap.key_id.len())
+                                .ok_or_else(limit)
+                        })?;
+                self.budget
+                    .safety_only()
+                    .charge(Cost::retained(coverage_bytes))?;
+                let missing = file.bytes.missing().to_vec();
                 let table = table::open_owned_budgeted(
                     file.bytes,
                     &definition,
@@ -340,8 +400,15 @@ impl Factory<'_> {
                     file.reading,
                     serde_json::to_value(&availability.partitions)?,
                     bytes,
+                    Arc::new(SourceCoverage {
+                        missing,
+                        skipped: availability.skipped,
+                    }),
                 )
             };
+        if is_effective {
+            base.generation = None;
+        }
         self.report.preparation_ms += started.elapsed().as_secs_f64() * 1000.0;
         let overlay = if is_effective {
             let (plan, report) = self.snapshots.prepare(
@@ -359,7 +426,7 @@ impl Factory<'_> {
         } else {
             None
         };
-        let input = provider::PreparedInput {
+        let mut input = provider::PreparedInput {
             name: use_.key.to_owned(),
             base,
             overlay,
@@ -385,17 +452,60 @@ impl Factory<'_> {
         {
             reading["unavailablePartitions"] = unavailable.clone();
         }
-        self.report.provenance.push(reading);
-        self.report.decoded_bytes = self
+        let decoded_bytes = self
             .report
             .decoded_bytes
             .checked_add(bytes)
             .ok_or_else(limit)?;
+        // Reserve diagnostic ownership before opening a long-lived reader, so
+        // no later admission failure can discard that reader without close.
+        if !is_effective {
+            safety.charge(Cost::retained(2048))?;
+            let reuse = if let Some(generation) = &input.base.generation {
+                crate::generation::Reuse::Hit(generation.clone())
+            } else {
+                crate::generation::open_existing(
+                    self.scope,
+                    crate::generation::StaticSource {
+                        data: self.data,
+                        bundle: &input.bundle,
+                        definition: input.definition.as_ref(),
+                        layout: input.base.table.layout(),
+                        reading: &file,
+                        missing: &coverage.missing,
+                        unavailable_partitions: &coverage.skipped,
+                        bytes,
+                    },
+                    &input.base.table,
+                    self.maximum,
+                    self.budget,
+                )?
+            };
+            match reuse {
+                crate::generation::Reuse::Absent => {}
+                crate::generation::Reuse::UnsupportedSchema => {
+                    reading["typedGenerationCache"] = json!({"status":"unavailable","reason":"schema_representation_limit",
+                        "reused":false,"source":"authenticated-wdc","publicationThisCommand":false});
+                }
+                crate::generation::Reuse::MissingBody { generation, object } => {
+                    reading["typedGenerationCache"] = json!({"status":"unavailable","reason":"materialized_body_missing",
+                        "generation":generation,"object":object,"reused":false,"source":"authenticated-wdc","publicationThisCommand":false});
+                }
+                crate::generation::Reuse::Hit(generation) => {
+                    reading["typedGenerationCache"] = json!({"status":"hit","generation":generation.key,
+                        "object":generation.object,"reused":true,"publicationThisCommand":false});
+                    input.base.generation = Some(generation);
+                }
+            }
+        }
+        self.report.provenance.push(reading);
+        self.report.decoded_bytes = decoded_bytes;
         Ok(Input::Physical {
             input,
             file,
             unavailable,
             bytes,
+            coverage,
         })
     }
 }

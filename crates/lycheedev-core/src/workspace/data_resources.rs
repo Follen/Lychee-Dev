@@ -117,6 +117,22 @@ impl DataResources {
             check,
         )
     }
+    /// Short zero-growth admission for an owned cursor reader. The check is
+    /// borrowed and cloned from the SAME Arc, so detach cannot replace it. The
+    /// containing query must close all readers before finishing this admission;
+    /// this API neither clones nor reacquires query capacity.
+    pub fn read_derived_cache_owned_with_check<'a>(
+        &'a self,
+        check: &'a data_disk::DerivedReadCheck,
+    ) -> Result<data_disk::OwnedDerivedReadLease<'a>> {
+        data_disk::OwnedDerivedReadLease::acquire(
+            self,
+            &self.home,
+            self.data_cache_max_bytes,
+            &self.control,
+            check,
+        )
+    }
     fn close_all(&mut self) -> Vec<ToolkitError> {
         let mut errors = Vec::new();
         while let Some(lease) = self.leases.pop() {

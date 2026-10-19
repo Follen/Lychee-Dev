@@ -35,7 +35,7 @@ fn same(a: &ToolkitError, b: &ToolkitError) -> bool {
         && a.exit_code == b.exit_code
         && a.details == b.details
 }
-fn finish<T>(
+pub(crate) fn finish<T>(
     result: Result<T>,
     cleanup: impl IntoIterator<Item = ToolkitError>,
     control: Result<()>,
@@ -173,7 +173,8 @@ impl<'a> OpenWorkspace<'a> {
     ) -> Result<T> {
         if let Some(metadata) = self.metadata.take() {
             if let Err(error) = lycheedev_core::metadata::historical_write::finish_historical(
-                metadata.close(), after_close(),
+                metadata.close(),
+                after_close(),
             ) {
                 cleanup.push(error);
             }
@@ -217,10 +218,16 @@ impl<'a> AdmittedWorkspace<'a> {
         self.workspace.budget
     }
     pub(super) fn take_capture_metadata(&mut self) -> Metadata {
-        self.workspace.metadata.take().expect("query owns one metadata writer")
+        self.workspace
+            .metadata
+            .take()
+            .expect("query owns one metadata writer")
     }
     pub(super) fn restore_capture_metadata(&mut self, metadata: Metadata) {
-        assert!(self.workspace.metadata.is_none(), "metadata owner must not be replaced");
+        assert!(
+            self.workspace.metadata.is_none(),
+            "metadata owner must not be replaced"
+        );
         self.workspace.metadata = Some(metadata);
     }
     pub fn reserve_derived_read<'reservation>(
@@ -233,13 +240,26 @@ impl<'a> AdmittedWorkspace<'a> {
             .expect("live admission lease")
             .read_derived_cache_with_check(check)
     }
+    pub fn reserve_derived_read_owned<'reservation>(
+        &'reservation self,
+        check: &'reservation lycheedev_core::workspace::data_disk::DerivedReadCheck,
+    ) -> Result<lycheedev_core::workspace::data_disk::OwnedDerivedReadLease<'reservation>> {
+        self.check()?;
+        self.resources
+            .as_ref()
+            .expect("live admission lease")
+            .read_derived_cache_owned_with_check(check)
+    }
     pub fn reserve_derived_cache<'reservation>(
         &'reservation self,
         peak: lycheedev_core::workspace::data_disk::AdditionalPeak,
         check: &'reservation dyn Fn() -> Result<()>,
     ) -> Result<lycheedev_core::workspace::data_disk::DerivedReservation<'reservation>> {
         self.check()?;
-        self.resources.as_ref().expect("live admission lease").reserve_derived_cache_with_check(peak, check)
+        self.resources
+            .as_ref()
+            .expect("live admission lease")
+            .reserve_derived_cache_with_check(peak, check)
     }
     pub fn download_workers(&self) -> usize {
         self.resources
@@ -267,7 +287,8 @@ impl<'a> AdmittedWorkspace<'a> {
         if let Some(resources) = self.resources.take() {
             cleanup.extend(resources.close_cleanup());
         }
-        self.workspace.finish_after_metadata_close(result, cleanup, after_close)
+        self.workspace
+            .finish_after_metadata_close(result, cleanup, after_close)
     }
 }
 

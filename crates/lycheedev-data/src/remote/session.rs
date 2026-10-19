@@ -166,6 +166,13 @@ impl<'a, 'scope> Session<'a, 'scope> {
         self.check()?;
         self.admitted.reserve_derived_read(check)
     }
+    pub fn reserve_derived_read_owned<'reservation>(
+        &'reservation self,
+        check: &'reservation lycheedev_core::workspace::data_disk::DerivedReadCheck,
+    ) -> Result<lycheedev_core::workspace::data_disk::OwnedDerivedReadLease<'reservation>> {
+        self.check()?;
+        self.admitted.reserve_derived_read_owned(check)
+    }
     pub fn reserve_derived_cache<'reservation>(
         &'reservation self,
         peak: lycheedev_core::workspace::data_disk::AdditionalPeak,
