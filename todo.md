@@ -6,7 +6,7 @@
 - [x] 保存8c9基础、5c60 Live SessionOwner和三次最小编译修；Skill308efa全部43路径读回一致。
 - [x] 固定Core data_resources旧config调用修复8bfe，独审和单文件读回通过；check与config14已验证，其他组见下。
 - [x] 8bfe实际all-targets通过，config14通过；原8c9/6ea/2b400/66d编译失败保留。
-- [ ] 闭合8bfe disk24通过/2失败：实际copy注入点及发布后错误事实、Windows完整路径语义；其余11独立组原队列继续，待真实终态。
+- [ ] 闭合8bfe disk24通过/2失败：实际copy注入点及发布后错误事实、Windows完整路径语义；其余11组已终态392通过/1失败/1 ignore；generation取消预期码失败单独修正并复验。
 - [x] 740a已保存Source Postcard正式证据工具并10文件读回；七Node套件382/382已过。
 - [ ] Rust exporter与完整六场景实际验证。
 - [x] 保存并静态独审DataFusion54可选资格片14项；默认依赖图隔离已核。
@@ -26,11 +26,12 @@
 
 ## C. Source认证、按需消费与binary cache
 - [ ] 完成当前Facts Postcard正确性和匹配性能；旧cache失效重建，新损坏不得fallback成健康。
-- [ ] 整合已独审Index r2后编译、25 active/1 ignored正式入口与完整公共输出oracle；独立旧Symbol/Document/Locator字节、取消首错/构造前预算均保。
+- [x] 整合已独审Index r2与正式v13-postcard-index18诊断；固定Go323来源已核，Node七套361/361通过。
+- [ ] 编译并实际运行25 active/1 ignored对应入口及既有完整消费者回归；独立旧Symbol/Document/Locator字节、取消首错/构造前预算均保。
 - [ ] 新Index格式正式诊断reader/exporter接线完整后，再同输入cold/warm/单改/插删/rename；认证和query成本不移到未测后续命令。
 
 ## D. Live内部资源归属
-- [ ] SessionOwner六新增及旧连接/journal恢复回归实际闭合。
+- [x] 8bfe SessionOwner六新增逐名一次、connection61/durable36实际通过；真实客户端仍未验。
 - [ ] 后续仅有证据的会话/调度/重复工作优化，保Mailbox v1、切角色身份、durable intent和Unknown不重放；不合并fsync弱化恢复。
 - [ ] 实际客户端/游戏验证仍按handover末节，模型与离线结果不能冒充。
 

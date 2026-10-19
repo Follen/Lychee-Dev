@@ -7,7 +7,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {sha256} from '../../tools/rust-disk.mjs';
 import {hashFile} from '../../tools/rust-build.mjs';
 import {CASES, BASE_COMMIT, candidateIdentity, runController, verifyObservedReport} from './source-pack-scenarios.mjs';
-import {POSTCARD_LAYOUT, LIMITS, EXPORT_BUILD_ARGS, TOOLCHAIN_OWNER, postcardEnvironmentSHA, postcardCompilerEnvironment} from './read-fact-delta-postcard.mjs';
+import {POSTCARD_LAYOUT, POSTCARD_INDEX_LAYOUT, LIMITS, EXPORT_BUILD_ARGS, TOOLCHAIN_OWNER, postcardEnvironmentSHA, postcardCompilerEnvironment} from './read-fact-delta-postcard.mjs';
 import {fixture as binaryFixture, put, putJSON, compilerPolicy, compilerText} from './read-fact-delta-postcard.fixtures.mjs';
 import {validatePostcardFreshRequest, prepareFreshPostcardExporter, postcardComparisonFootprint, comparePostcardScenario, verifyFreshPostcardFacts, verifyFreshPostcardReport, runPostcardFreshController, freshPostcardIdentity, FRESH_POSTCARD_FILES} from './source-pack-scenarios-postcard-fresh.mjs';
 
@@ -35,6 +35,7 @@ function ownerFactory(directory, owners, events, fault = {}) {
 }
 async function controller(t, fault = {}) {
   const directory = temporary(t), request = requestAt(directory), evidence = join(directory, 'outer'), scratch = join(directory, 'outer-scratch'); fs.mkdirSync(evidence); fs.mkdirSync(scratch);
+  request.layout = fault.layout ?? POSTCARD_LAYOUT;
   const inputs = {runner: 'fixture'}, owners = [], events = [], samples = [], exportCalls = [];
   const oracle = JSON.parse(fs.readFileSync(join(root, 'tests/rust-source-full-corpus/retail-oracle.json'))), basePin = {id: 'PIN-base', source: {exactCommit: BASE_COMMIT}};
   let calls = 0, identities = 0;
@@ -57,7 +58,8 @@ async function controller(t, fault = {}) {
     },
     collectOwnedMemory: () => ({state: 'sampled_lower_bound'}), verifyPackProfile: () => ({}), derivedIdentity: () => ({sha256: 'same'}), proveWarmReuse: () => ({verified: true}),
     indexEvidence: () => ({path: 'records', bytes: 100, sha256: 'a'.repeat(64)}), captureGoCustody: (_home, _index, evidence) => ({directory: evidence, catalog: join(evidence, 'go-custody.json'), catalogSHA256: 'd'.repeat(64)}), openGoCustody() {},
-    compareFacts(_homes, _outputs, pin, selected, evidence, _root, retained) {
+    compareFacts(_homes, _outputs, pin, selected, evidence, _root, retained, custodyOptions) {
+      assert.equal(custodyOptions.layout, request.layout);
       const index = exportCalls.length; exportCalls.push({pin, retained}); events.push(`export:${index}`);
       if (fault.exportAt === index) throw Object.assign(new Error('exporter failure'), {handlesReaped: !fault.exportUnreaped, postcardEvidence: {receipt: 'retained-exporter-receipt'}});
       return {goCustody: {directory: evidence, catalog: join(evidence, 'go-custody.json'), catalogSHA256: 'd'.repeat(64)}, rustCustody: {directory: evidence, catalog: join(evidence, 'postcard-custody.json'), catalogSHA256: 'e'.repeat(64), candidate: candidateIdentity(request.candidate)},
@@ -65,7 +67,7 @@ async function controller(t, fault = {}) {
     },
     verifyAdditionalEvidence(report) { events.push('final-custody'); assert.equal(report.scenarios.length, 6); if (fault.finalCustody) throw new Error('late archived pack changed'); },
   };
-  const config = {request, layout: POSTCARD_LAYOUT, runnerRoot: root, inputs, conditions, scratch, evidence, ...fault.config};
+  const config = {request, layout: request.layout, runnerRoot: root, inputs, conditions, scratch, evidence, ...fault.config};
   const report = await runPostcardFreshController(config, services); return {report, request, inputs, samples, exportCalls, events, owners, config, services};
 }
 
@@ -210,4 +212,12 @@ test('final archived Facts verifier rejects a changed pack, JSONL, original mani
     const path = change === 'comparison' ? result.evidence : change === 'owner' ? result.postcardOwner.receipt : change === 'manifest' ? catalog.manifestArchive.path : change === 'index' ? result.indexCustody.manifest : join(catalog.references[change === 'output' ? catalog.references.length - 1 : 0].directory, 'index.part000.bin');
     fs.appendFileSync(path, 'changed'); assert.throws(() => verifyFreshPostcardFacts(result, f.build.candidate, f.build.expected));
   });
+});
+
+test('explicit binary Index18 route reaches all six fresh comparisons with twelve unchanged measured product calls', async t => {
+  const f = await controller(t, {layout: POSTCARD_INDEX_LAYOUT}); assert.equal(f.report.state, 'source_pack_scenarios_observed');
+  assert.equal(f.samples.length, 12); assert.equal(f.exportCalls.length, 6); assert.equal(f.report.layout, POSTCARD_INDEX_LAYOUT);
+  assert.equal(validatePostcardFreshRequest(f.request).layout, POSTCARD_INDEX_LAYOUT);
+  assert.deepEqual(f.samples.map(s => [s.entry.id, s.engine]), CASES.flatMap((c, i) => (i === 1 ? ['rust', 'go'] : ['go', 'rust']).map(e => [c.id, e])));
+  for (const row of f.report.scenarios) assert.equal(row.rustToGoRatio, 0.2);
 });

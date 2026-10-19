@@ -386,3 +386,84 @@ holds the six pairs, product timings, full Facts custody and remaining/not-run
 calls on failure. This wiring is locally tested with synthetic process results,
 including an 18 MiB JSONL archive; real Rust exporter, full-corpus Windows
 execution and performance acceptance remain `not_run` until actually executed.
+
+## Explicit binary main Index v18 successor
+
+The fresh controller also accepts `layout: "v13-postcard-index18"` in the existing
+`lycheedev.source-postcard-fresh-config.v1` configuration. Invoke the same explicit
+`source-pack-scenarios-postcard-fresh.mjs CONFIG.json CONDITIONS.json` entry.
+`v13-postcard` still means JSON main Index v6 / rust-index-v17. The historical
+v11 default and continuation entries do not select the new layout.
+
+The new route requires private main Index schema `lycheedev.source-index.rust.v7`
+and the `rust-index-v18` recipe, alongside unchanged Facts v13. The original
+content-addressed binary Index is retained in the existing authenticated parts;
+SQLite metadata and the exact pin/identity/file SHA remain mandatory on every
+cold, warm and changed comparison. Warm does not substitute an exported JSON
+file for the actual cached binary identity.
+
+One authenticated same-source lib-test executable supplies both test-only ports:
+`index::persistence_wire::export_tests::export_binary_index_manifest` first,
+then the existing Facts manifest exporter. Node checks only the `LYCIDX01`
+44-byte envelope and the existing Facts/pack envelopes; mature Rust Postcard
+owns field decoding. Index manifest fields and the single complete JSONL row,
+full output SHA/length, ordinal, file SHA/length and recipe identity must match.
+The artifact retains the existing source digest, Cargo recipe/owner receipt,
+binary SHA and before/after compiler observation gate. Existing same-source
+artifacts can be reused; neither product CLI is rebuilt by this route.
+
+There are still twelve measured product index invocations across six scenarios,
+plus the existing four untimed init/sync preparations. There are now twelve
+separate exporter invocations, six Index and six Facts. Their individual wrapper
+walls are stored at `facts.indexExport.timing` and `facts.exporterTiming`; the
+entire comparison/custody wall remains `facts.validationWallMillis`. Build and
+compiler-observation overhead is recorded by exporter preparation. None is
+subtracted from product wall or silently presented as zero evidence cost.
+
+### Independent complete public Index oracle
+
+Before using exported document locators, the adapter independently streams the
+retained fixed Go 3.2.3 records. It compares every symbol (including optional
+fields/stable ID), every asset's public metadata, and every document's
+path/SHA/bytes, retaining array order and duplicate multiplicity. Complete summary
+identity, counts, completion and the ordered diagnostic sample are checked.
+Rust-only public fields use frozen historical mappings from f811: metadata-only
+assets are stably placed before ordinary assets (Go records append them after
+ordinary assets); each group's order and duplicate multiplicity remain exact.
+Asset `local`
+is the Go content hash/byte-count BlobRef or explicit null; `astFiles` counts
+documents without diagnostics; compatibility gaps derive from every diagnostic,
+including those beyond the twenty-row public sample. All five top-level public
+Index fields are required; extra fields and unsafe JSON integer coordinates
+reject rather than disappear. Each Rust `factsLocator` subsequently receives
+full original container/key/range/record/payload authentication and all five Facts
+arrays are compared to the independent Go Facts. Thus neither exporter is its
+own only semantic oracle.
+
+### Unchanged budgets and observable refusal
+
+The main binary Index remains at most 128 MiB and its input manifest at most
+8 MiB. Full Index JSONL and full Facts JSONL share the existing 128 MiB output
+archive allowance. Original Facts containers keep the 512 MiB cumulative cap,
+32 MiB individual container/record cap and existing 128 MiB record sum cap.
+The comparison owner still reserves 648 MiB scratch and 704 MiB evidence; global
+policy and 16 MiB sealed-file limits are unchanged. Full JSONL is archived using
+the existing 8 MiB streamed parts, never stdout. Index staging is released only
+after complete authentication/comparison/archive, before Facts staging begins.
+
+A valid binary Index may expand beyond the export cap. Combined JSONL above
+128 MiB also explicitly fails without dropping fields, samples or duplicates;
+reaped failed owners preserve the raw output when it cannot fit the shared
+archive allowance. Unreaped processes retain all scratch and prevent later
+product calls. The fixed corpus contains 4,036 documents / 32,269,051 input
+bytes; input size alone does not bound JSON expansion. No real v18 full-corpus
+export lengths are available in this cloud-only revision, so capacity for any
+of the six actual cases is unverified. A limit failure is not semantic or
+performance acceptance and must not trigger a larger implicit budget.
+
+Tests in `read-index-postcard.test.mjs` use explicitly synthetic opaque binary
+payloads and an injected exporter boundary, not native Postcard encoding or a
+Windows test result. The fresh test controller verifies all twelve product-call
+slots and both layout selectors; SQLite/parts/owner integration tests exercise
+the two real Node exporter consumers. Actual same-source Rust decoding, all six
+Windows executions and performance acceptance remain separate required evidence.

@@ -157,22 +157,41 @@ fn admit(
     }
     let env_limits = environment::Limits::default();
     let env_docs = &material.snapshot.environment_documents;
-    if env_docs.len() > env_limits.documents || env_docs.values().any(|text| text.len() > env_limits.file_bytes)
-        || env_docs.values().try_fold(0usize, |sum,text| sum.checked_add(text.len())).is_none_or(|bytes| bytes > env_limits.total_bytes)
-        || material.snapshot.environment_manifest.is_none() && !env_docs.is_empty() {
-        return Err(integrity("Cached independent environment originals exceed admission"));
+    if env_docs.len() > env_limits.documents
+        || env_docs
+            .values()
+            .any(|text| text.len() > env_limits.file_bytes)
+        || env_docs
+            .values()
+            .try_fold(0usize, |sum, text| sum.checked_add(text.len()))
+            .is_none_or(|bytes| bytes > env_limits.total_bytes)
+        || material.snapshot.environment_manifest.is_none() && !env_docs.is_empty()
+    {
+        return Err(integrity(
+            "Cached independent environment originals exceed admission",
+        ));
     }
     for path in env_docs.keys() {
         inv.control.check()?;
-        let path_lower=path.to_ascii_lowercase();
-        if !crate::git::source_path(path) || !path_lower.contains("/blizzard_apidocumentationgenerated/") || !path_lower.ends_with(".lua") {
-            return Err(integrity("Cached independent environment document path differs"));
+        let path_lower = path.to_ascii_lowercase();
+        if !crate::git::source_path(path)
+            || !path_lower.contains("/blizzard_apidocumentationgenerated/")
+            || !path_lower.ends_with(".lua")
+        {
+            return Err(integrity(
+                "Cached independent environment document path differs",
+            ));
         }
     }
     let limits = native::SourceLimits::research();
     let files = &material.snapshot.files;
-    if files.len()+material.snapshot.load_documents.len() > limits.files
-        || files.values().chain(material.snapshot.load_documents.values()).map(String::len).sum::<usize>() > limits.input_bytes
+    if files.len() + material.snapshot.load_documents.len() > limits.files
+        || files
+            .values()
+            .chain(material.snapshot.load_documents.values())
+            .map(String::len)
+            .sum::<usize>()
+            > limits.input_bytes
     {
         return Err(integrity(
             "Cached research material exceeds source admission",
@@ -180,7 +199,11 @@ fn admit(
     }
     for path in files.keys().chain(material.snapshot.load_documents.keys()) {
         inv.control.check()?;
-        if !crate::git::source_path(path) || ![".lua",".xml",".toc"].iter().any(|extension|path.to_ascii_lowercase().ends_with(extension)) {
+        if !crate::git::source_path(path)
+            || ![".lua", ".xml", ".toc"]
+                .iter()
+                .any(|extension| path.to_ascii_lowercase().ends_with(extension))
+        {
             return Err(integrity("Cached research source path differs"));
         }
     }
@@ -188,9 +211,13 @@ fn admit(
     // skipped source files and their explicit gaps retain the cold-path meaning.
     for document in &index.documents {
         inv.control.check()?;
-        if [".lua",".xml",".toc"].iter().any(|extension|document.path.to_ascii_lowercase().ends_with(extension)) {
+        if [".lua", ".xml", ".toc"]
+            .iter()
+            .any(|extension| document.path.to_ascii_lowercase().ends_with(extension))
+        {
             let raw = files
-                .get(&document.path).or_else(||material.snapshot.load_documents.get(&document.path))
+                .get(&document.path)
+                .or_else(|| material.snapshot.load_documents.get(&document.path))
                 .ok_or_else(|| integrity("Cached research source is missing"))?;
             if raw.len() != document.bytes || storage::sha256(raw.as_bytes()) != document.sha256 {
                 return Err(integrity("Cached research source differs from fixed index"));
@@ -353,7 +380,13 @@ mod tests {
         let identity = json!({"source":source,"luac":{"version":luac.version,"platform":luac.platform,"sha256":luac.executable_sha256,"bytes":luac.executable_bytes}});
         let snapshot = native_research::SnapshotRequest {
             environment_documents: BTreeMap::new(),
-                load_documents:BTreeMap::from([("Main.toc".into(),"Entry.lua\nOther.xml\n".into()),("Other.xml".into(),"<Ui><Script>local x = 1 &lt; 2</Script></Ui>".into())]),
+            load_documents: BTreeMap::from([
+                ("Main.toc".into(), "Entry.lua\nOther.xml\n".into()),
+                (
+                    "Other.xml".into(),
+                    "<Ui><Script>local x = 1 &lt; 2</Script></Ui>".into(),
+                ),
+            ]),
             files: BTreeMap::from([("Entry.lua".into(), text.into())]),
             source,
             luac,
@@ -377,11 +410,20 @@ mod tests {
             }],
             assets: vec![],
             symbols: vec![],
-            summary: Value::Null,
+            summary: crate::index::model::test_summary(serde_json::json!({})),
             compatibility_gaps: Default::default(),
             home: Default::default(),
         };
-        for(path,text)in &snapshot.load_documents{index.documents.push(index::Document{path:path.clone(),text:None,sha256:storage::sha256(text.as_bytes()),bytes:text.len(),facts:Default::default(),facts_locator:None});}
+        for (path, text) in &snapshot.load_documents {
+            index.documents.push(index::Document {
+                path: path.clone(),
+                text: None,
+                sha256: storage::sha256(text.as_bytes()),
+                bytes: text.len(),
+                facts: Default::default(),
+                facts_locator: None,
+            });
+        }
         (
             StoredMaterial {
                 schema: SCHEMA.into(),
@@ -454,9 +496,20 @@ mod tests {
         assert!(!restored.environment.as_ref().unwrap().coverage.complete);
         assert_eq!(restored.load_facts.len(), 2);
         assert_eq!(restored.load_facts[1].target, "Other.lua");
-        for path in ["Main.toc","Other.xml"]{
-            let mut changed:StoredMaterial=serde_json::from_slice(&raw).unwrap();changed.snapshot.load_documents.get_mut(path).unwrap().push(' ');
-            assert_eq!(admit(&mut changed,&material.identity,&index,&inv).unwrap_err().code,"codebase.source_integrity");
+        for path in ["Main.toc", "Other.xml"] {
+            let mut changed: StoredMaterial = serde_json::from_slice(&raw).unwrap();
+            changed
+                .snapshot
+                .load_documents
+                .get_mut(path)
+                .unwrap()
+                .push(' ');
+            assert_eq!(
+                admit(&mut changed, &material.identity, &index, &inv)
+                    .unwrap_err()
+                    .code,
+                "codebase.source_integrity"
+            );
         }
         restored
             .snapshot

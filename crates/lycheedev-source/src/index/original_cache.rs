@@ -44,10 +44,10 @@ impl<'a> OriginalReader<'a> {
         // The authenticated index fixes these fields. A moving requested ref
         // can never become a recovery source.
         let pin = SourcePin {
-            repository: summary["repository"].as_str().unwrap_or("").into(),
-            product: summary["product"].as_str().unwrap_or("").into(),
-            exact_commit: summary["commit"].as_str().unwrap_or("").into(),
-            parser_revision: summary["parser"].as_str().unwrap_or("").into(),
+            repository: summary.repository.clone(),
+            product: summary.product.clone(),
+            exact_commit: summary.commit.clone(),
+            parser_revision: summary.parser.clone(),
             requested_ref: String::new(),
         };
         // Reserve the entire existing source-text allowance, including later

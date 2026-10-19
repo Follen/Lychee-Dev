@@ -575,9 +575,9 @@ impl Runtime {
     ) -> Result<PreparedSourceWorkspace> {
         control.check()?;
         git::validate_pin(pin)?;
-        if index.summary["repository"] != pin.repository
-            || index.summary["product"] != pin.product
-            || index.summary["commit"] != pin.exact_commit
+        if index.summary.repository != pin.repository
+            || index.summary.product != pin.product
+            || index.summary.commit != pin.exact_commit
         {
             return Err(ToolkitError::new(
                 "codebase.source_integrity",

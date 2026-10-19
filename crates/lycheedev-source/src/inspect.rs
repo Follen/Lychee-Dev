@@ -54,7 +54,7 @@ pub(crate) fn target_with_control(
             }
             for asset in &index.assets {
                 control.check()?;
-                exact |= asset["path"] == symbol;
+                exact |= asset.path == symbol;
             }
         }
         if !exact {
@@ -104,14 +104,14 @@ fn excerpt(raw: &[u8]) -> String {
 fn asset_local(
     index: &index::Index,
     pin: &SourcePin,
-    asset: &Value,
+    asset: &index::AssetRecord,
     control: &OperationControl,
 ) -> Result<String> {
-    let digest = asset["contentHash"].as_str().unwrap_or("");
+    let digest = asset.content_hash.as_str();
     if digest.is_empty() {
         return Ok(String::new());
     }
-    let reference = json!({"sha256":digest,"bytes":asset["bytes"]});
+    let reference = json!({"sha256":digest,"bytes":asset.bytes});
     // Indexing already archives assets. Authenticate those original bytes on
     // every inspection; only native absence permits fixed-Git reconstruction.
     let cached = evidence::read_blob_bounded_optional_with_check(
@@ -122,10 +122,10 @@ fn asset_local(
         || Ok(()),
     )?;
     if cached.is_none() {
-        let path = asset["path"].as_str().unwrap_or("");
+        let path = asset.path.as_str();
         let (raw, _) =
             git::asset_blob_with_control(&index.home, pin, path, assets::MAX_BYTES, control)?;
-        if asset["bytes"].as_u64() != Some(raw.len() as u64) || storage::sha256(&raw) != digest {
+        if asset.bytes != raw.len() || storage::sha256(&raw) != digest {
             return Err(ToolkitError::new(
                 "codebase.asset_content_mismatch",
                 "Indexed asset differs from the fixed Git object",
@@ -157,18 +157,13 @@ fn inspect_path(
     }
     for asset in &index.assets {
         control.check()?;
-        if assets::lowercase(asset["path"].as_str().unwrap_or("")).contains(&probe) {
+        if assets::lowercase(asset.path.as_str()).contains(&probe) {
             assets.push(asset);
         }
     }
     let path_order = |a: &str, b: &str| (b == target).cmp(&(a == target)).then(a.cmp(b));
     files.sort_by(|a, b| path_order(&a.path, &b.path));
-    assets.sort_by(|a, b| {
-        path_order(
-            a["path"].as_str().unwrap_or(""),
-            b["path"].as_str().unwrap_or(""),
-        )
-    });
+    assets.sort_by(|a, b| path_order(a.path.as_str(), b.path.as_str()));
     control.check()?;
     let truncated = files.len() + assets.len() > TARGET_LIMIT;
     let mut originals = index.original_reader();
@@ -185,20 +180,20 @@ fn inspect_path(
         }
         for asset in assets.into_iter().take(TARGET_LIMIT - results.len()) {
             control.check()?;
-            let path = asset["path"].as_str().unwrap_or("");
+            let path = asset.path.as_str();
             let local = asset_local(index, pin, asset, control)?;
             let excerpt = format!(
                 "format={} mime={} bytes={} width={} height={} local={}",
-                asset["format"].as_str().unwrap_or(""),
-                asset["mime"].as_str().unwrap_or(""),
-                asset["bytes"].as_u64().unwrap_or(0),
-                asset["width"].as_u64().unwrap_or(0),
-                asset["height"].as_u64().unwrap_or(0),
+                asset.format.as_str(),
+                asset.mime.as_str(),
+                asset.bytes,
+                asset.width,
+                asset.height,
                 local
             );
-            results.push(json!({"kind":"asset","name":path.rsplit('/').next().unwrap_or(path),"path":path,"line":1,"matchedBy":"path","role":"project","score":100,"contentHash":asset["contentHash"],"excerpt":excerpt}));
+            results.push(json!({"kind":"asset","name":path.rsplit('/').next().unwrap_or(path),"path":path,"line":1,"matchedBy":"path","role":"project","score":100,"contentHash":asset.content_hash,"excerpt":excerpt}));
         }
-        let mut response = json!({"sourceId":pin.repository,"product":pin.product,"requestedRef":pin.requested_ref,"matchedTag":null,"resolvedCommit":pin.exact_commit,"snapshotId":snapshot,"results":results,"complete":index.summary["complete"]==true&&!truncated,"truncated":truncated,"coverage":index.coverage()});
+        let mut response = json!({"sourceId":pin.repository,"product":pin.product,"requestedRef":pin.requested_ref,"matchedTag":null,"resolvedCommit":pin.exact_commit,"snapshotId":snapshot,"results":results,"complete":index.summary.complete&&!truncated,"truncated":truncated,"coverage":index.coverage()});
         if pin.requested_ref.is_empty() {
             response
                 .as_object_mut()
@@ -253,9 +248,11 @@ mod tests {
                 assets::MAX_BYTES + 1,
                 &[],
                 "",
-                Value::Null,
+                None,
             )],
-            summary: json!({"repository":pin.repository,"product":pin.product,"commit":pin.exact_commit,"parser":pin.parser_revision,"complete":true,"skippedDocuments":0,"diagnostics":0}),
+            summary: crate::index::model::test_summary(
+                json!({"repository":pin.repository,"product":pin.product,"commit":pin.exact_commit,"parser":pin.parser_revision,"complete":true,"skippedDocuments":0,"diagnostics":0}),
+            ),
             compatibility_gaps: Default::default(),
             home: Default::default(),
         };

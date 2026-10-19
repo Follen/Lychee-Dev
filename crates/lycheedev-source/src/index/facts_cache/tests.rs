@@ -76,7 +76,7 @@ fn complete_cohorts_reduce_publications_and_preserve_all_five_fact_arrays() {
     assert_eq!(profile.calls(Phase::FactsPublishStageClose), 2);
     assert!(cold.documents.iter().all(|d| d.facts_locator.is_some()));
     let warm = index::build_uncached(&fixture.home, &pin, &control).unwrap();
-    assert_eq!(warm.summary["io"]["cachedFacts"], 65);
+    assert_eq!(warm.summary.io["cachedFacts"], 65);
     assert_eq!(all_facts(&cold), all_facts(&warm));
     for section in [
         "declarations",
@@ -123,8 +123,8 @@ fn unchanged_cohort_reuses_across_snapshots_and_changed_cohort_rebuild_is_bounde
     raw.get_mut("D000.xml").unwrap().push('\n');
     let second = fixture.pin(&raw);
     let changed = index::build_uncached(&fixture.home, &second, &control).unwrap();
-    assert_eq!(changed.summary["io"]["parsedDocuments"], 64);
-    assert_eq!(changed.summary["io"]["cachedFacts"], 1);
+    assert_eq!(changed.summary.io["parsedDocuments"], 64);
+    assert_eq!(changed.summary.io["cachedFacts"], 1);
     assert_ne!(
         changed.documents[0].facts_locator.as_ref().unwrap().group,
         cold.documents[0].facts_locator.as_ref().unwrap().group
@@ -134,7 +134,7 @@ fn unchanged_cohort_reuses_across_snapshots_and_changed_cohort_rebuild_is_bounde
         cold.documents[64].facts_locator
     );
     let old_again = index::build_uncached(&fixture.home, &first, &control).unwrap();
-    assert_eq!(old_again.summary["io"]["cachedFacts"], 65);
+    assert_eq!(old_again.summary.io["cachedFacts"], 65);
     assert_eq!(all_facts(&cold), all_facts(&old_again));
 }
 #[test]
@@ -152,8 +152,8 @@ fn insertion_and_deletion_can_rebuild_all_shifted_cohorts_but_old_snapshots_stil
     let pin = fixture.pin(&inserted);
     let profile = Profile::enabled(true);
     let changed = index::build_uncached_profiled(&fixture.home, &pin, &control, &profile).unwrap();
-    assert_eq!(changed.summary["io"]["parsedDocuments"], 129);
-    assert_eq!(changed.summary["io"]["cachedFacts"], 0);
+    assert_eq!(changed.summary.io["parsedDocuments"], 129);
+    assert_eq!(changed.summary.io["cachedFacts"], 0);
     assert_eq!(profile.calls(Phase::FactsPublishRename), 3);
     assert_eq!(
         all_facts(&cold),
@@ -169,8 +169,8 @@ fn insertion_and_deletion_can_rebuild_all_shifted_cohorts_but_old_snapshots_stil
     let pin = fixture.pin(&deleted);
     let profile = Profile::enabled(true);
     let changed = index::build_uncached_profiled(&fixture.home, &pin, &control, &profile).unwrap();
-    assert_eq!(changed.summary["io"]["parsedDocuments"], 127);
-    assert_eq!(changed.summary["io"]["cachedFacts"], 0);
+    assert_eq!(changed.summary.io["parsedDocuments"], 127);
+    assert_eq!(changed.summary.io["cachedFacts"], 0);
     assert_eq!(profile.calls(Phase::FactsPublishRename), 2);
     assert_eq!(
         all_facts(&changed),
@@ -182,8 +182,8 @@ fn insertion_and_deletion_can_rebuild_all_shifted_cohorts_but_old_snapshots_stil
         )
     );
     let old = index::build_uncached(&fixture.home, &first, &control).unwrap();
-    assert_eq!(old.summary["io"]["parsedDocuments"], 0);
-    assert_eq!(old.summary["io"]["cachedFacts"], 128);
+    assert_eq!(old.summary.io["parsedDocuments"], 0);
+    assert_eq!(old.summary.io["cachedFacts"], 128);
     assert_eq!(all_facts(&old), all_facts(&cold));
 }
 #[test]
@@ -200,8 +200,8 @@ fn one_corrupt_record_rebuilds_and_backfills_prior_hits_before_atomic_replacemen
     fs::write(path, bytes).unwrap();
     let profile = Profile::enabled(true);
     let repaired = index::build_uncached_profiled(&fixture.home, &pin, &control, &profile).unwrap();
-    assert_eq!(repaired.summary["io"]["parsedDocuments"], 1);
-    assert_eq!(repaired.summary["io"]["cachedFacts"], 2);
+    assert_eq!(repaired.summary.io["parsedDocuments"], 1);
+    assert_eq!(repaired.summary.io["cachedFacts"], 2);
     assert_eq!(profile.calls(Phase::FactsPublishRename), 1);
     assert_eq!(all_facts(&repaired), all_facts(&cold));
     for doc in &repaired.documents {
@@ -222,7 +222,7 @@ fn one_corrupt_record_rebuilds_and_backfills_prior_hits_before_atomic_replacemen
         );
     }
     let warm = index::build_uncached(&fixture.home, &pin, &control).unwrap();
-    assert_eq!(warm.summary["io"]["cachedFacts"], 3);
+    assert_eq!(warm.summary.io["cachedFacts"], 3);
     assert_eq!(all_facts(&warm), all_facts(&cold));
 }
 #[test]
@@ -233,7 +233,7 @@ fn persisted_query_locator_and_bad_pack_recover_from_the_exact_git_input() {
     let control = OperationControl::default();
     let cold = index::build_with_control(&fixture.home, &pin, &control).unwrap();
     let warm = index::build_with_control(&fixture.home, &pin, &control).unwrap();
-    assert_eq!(warm.summary["io"]["cachedIndex"], true);
+    assert_eq!(warm.summary.io["cachedIndex"], true);
     assert_eq!(
         warm.documents[0].facts_locator,
         cold.documents[0].facts_locator
@@ -372,8 +372,8 @@ fn take_facts_packed_inner_validation_keeps_outer_integrity_and_exact_recovery()
             "{name}"
         );
         let repaired = index::build_uncached(&fixture.home, &pin, &control).unwrap();
-        assert_eq!(repaired.summary["io"]["parsedDocuments"], 1, "{name}");
-        assert_eq!(repaired.summary["io"]["cachedFacts"], 0, "{name}");
+        assert_eq!(repaired.summary.io["parsedDocuments"], 1, "{name}");
+        assert_eq!(repaired.summary.io["cachedFacts"], 0, "{name}");
         assert_eq!(
             serde_json::to_vec(&repaired.documents[0].facts).unwrap(),
             serde_json::to_vec(&doc.facts).unwrap(),
@@ -830,22 +830,22 @@ fn stable_path_leaves_default_consumer_preserves_full_facts_across_snapshot_edit
     ] {
         let pin = fixture.pin(&raw);
         let changed = index::build_uncached(&fixture.home, &pin, &control).unwrap();
-        let parsed = changed.summary["io"]["parsedDocuments"].as_u64().unwrap() as usize;
+        let parsed = changed.summary.io["parsedDocuments"].as_u64().unwrap() as usize;
         if let Some(expected) = exact_parsed {
             assert_eq!(parsed, expected);
         }
         assert!(parsed <= maximum);
         assert_eq!(
-            parsed + changed.summary["io"]["cachedFacts"].as_u64().unwrap() as usize,
+            parsed + changed.summary.io["cachedFacts"].as_u64().unwrap() as usize,
             raw.len()
         );
         assert_original_fact_order(&cold, &changed, &except);
         let warm = index::build_uncached(&fixture.home, &pin, &control).unwrap();
-        assert_eq!(warm.summary["io"]["parsedDocuments"], 0);
+        assert_eq!(warm.summary.io["parsedDocuments"], 0);
         assert_eq!(all_facts(&warm), all_facts(&changed));
     }
     let restored = index::build_uncached(&fixture.home, &first, &control).unwrap();
-    assert_eq!(restored.summary["io"]["cachedFacts"], 1024);
+    assert_eq!(restored.summary.io["cachedFacts"], 1024);
     assert_eq!(all_facts(&restored), all_facts(&cold));
 }
 
@@ -863,10 +863,10 @@ fn stable_path_leaf_split_merge_corruption_and_concurrent_recovery_use_real_cach
     inserted.insert("A0000.extra.lua".into(), "function Inserted() end".into());
     let second = fixture.pin(&inserted);
     let split = index::build_uncached(&fixture.home, &second, &control).unwrap();
-    assert!(split.summary["io"]["parsedDocuments"].as_u64().unwrap() <= (LEAF + 1) as u64);
+    assert!(split.summary.io["parsedDocuments"].as_u64().unwrap() <= (LEAF + 1) as u64);
     assert_original_fact_order(&cold, &split, &["A0000.extra.lua"]);
     let old = index::build_uncached(&fixture.home, &first, &control).unwrap();
-    assert_eq!(old.summary["io"]["cachedFacts"], 512);
+    assert_eq!(old.summary.io["cachedFacts"], 512);
     assert_eq!(all_facts(&old), all_facts(&cold));
     // Also start from only the 513-input snapshot, so a deletion-triggered
     // ancestor merge cannot be satisfied by an older preexisting 512 cache.
@@ -876,7 +876,7 @@ fn stable_path_leaf_split_merge_corruption_and_concurrent_recovery_use_real_cach
     assert_eq!(all_facts(&split_only), all_facts(&split));
     let merge_pin = merge_fixture.pin(&original);
     let merged = index::build_uncached(&merge_fixture.home, &merge_pin, &control).unwrap();
-    let reparsed = merged.summary["io"]["parsedDocuments"].as_u64().unwrap();
+    let reparsed = merged.summary.io["parsedDocuments"].as_u64().unwrap();
     assert!(reparsed > 0 && reparsed <= LEAF as u64);
     assert_eq!(all_facts(&merged), all_facts(&cold));
     // Corrupt one complete pack. Two default builders race through authenticated
@@ -898,7 +898,7 @@ fn stable_path_leaf_split_merge_corruption_and_concurrent_recovery_use_real_cach
         assert_eq!(all_facts(result), all_facts(&split));
     }
     let warm = index::build_uncached(&fixture.home, &second, &control).unwrap();
-    assert_eq!(warm.summary["io"]["cachedFacts"], 513);
+    assert_eq!(warm.summary.io["cachedFacts"], 513);
     assert_eq!(all_facts(&warm), all_facts(&split));
 }
 
@@ -912,11 +912,11 @@ fn exact_pack_leaf_boundary_skips_real_asset_and_oversized_document_before_next_
     let control = OperationControl::default();
     let cold = index::build_uncached(&fixture.home, &pin, &control).unwrap();
     assert_eq!(cold.documents.len(), 1024);
-    assert_eq!(cold.summary["io"]["parsedDocuments"], 1024);
-    assert_eq!(cold.summary["skippedDocuments"], 1);
+    assert_eq!(cold.summary.io["parsedDocuments"], 1024);
+    assert_eq!(cold.summary.skipped_documents, 1);
     assert_eq!(cold.assets.len(), 1);
     let warm = index::build_uncached(&fixture.home, &pin, &control).unwrap();
-    assert_eq!(warm.summary["io"]["cachedFacts"], 1024);
+    assert_eq!(warm.summary.io["cachedFacts"], 1024);
     assert_eq!(all_facts(&warm), all_facts(&cold));
 }
 
@@ -1008,13 +1008,13 @@ fn legacy_ordinal_pack_and_v13_index_keep_identity_while_current_default_rebuild
     crate::persistence::put_manifest(&fixture.home, &old_key, &manifest, &control).unwrap();
     assert!(!index::is_ready_with_control(&fixture.home, &pin, &control).unwrap());
     let rebuilt = index::build_with_control(&fixture.home, &pin, &control).unwrap();
-    assert_eq!(rebuilt.summary["io"]["parsedDocuments"], 3);
-    assert_eq!(rebuilt.summary["io"]["cachedFacts"], 0);
+    assert_eq!(rebuilt.summary.io["parsedDocuments"], 3);
+    assert_eq!(rebuilt.summary.io["cachedFacts"], 0);
     assert_eq!(all_facts(&rebuilt), expected);
     assert_eq!(fs::read(old_pack).unwrap(), old_pack_bytes);
     let warm = index::build_with_control(&fixture.home, &pin, &control).unwrap();
-    assert_eq!(warm.summary["io"]["cachedIndex"], true);
-    assert_eq!(warm.summary["io"]["cachedFacts"], 3);
+    assert_eq!(warm.summary.io["cachedIndex"], true);
+    assert_eq!(warm.summary.io["cachedFacts"], 3);
 }
 
 #[test]
@@ -1026,14 +1026,14 @@ fn cache_aware_default_consumer_avoids_all_workers_on_complete_pack_hits() {
     let cold_profile = Profile::enabled(true);
     let cold =
         index::build_uncached_profiled(&fixture.home, &pin, &control, &cold_profile).unwrap();
-    assert_eq!(cold.summary["io"]["parsedDocuments"], 80);
+    assert_eq!(cold.summary.io["parsedDocuments"], 80);
     if std::thread::available_parallelism().is_ok_and(|n| n.get() >= 2) {
         assert_eq!(cold_profile.calls(Phase::FactsWorker), 80);
     }
     let profile = Profile::enabled(true);
     // This is the real index rebuild consumer, not the whole-index shortcut.
     let warm = index::build_uncached_profiled(&fixture.home, &pin, &control, &profile).unwrap();
-    assert_eq!(warm.summary["io"]["cachedFacts"], 80);
+    assert_eq!(warm.summary.io["cachedFacts"], 80);
     assert_eq!(profile.calls(Phase::FactsWorker), 0);
     assert_eq!(profile.calls(Phase::FactsWorkerWait), 0);
     assert_eq!(profile.calls(Phase::FactsParse), 0);
@@ -1079,7 +1079,7 @@ fn cache_aware_default_consumer_dispatches_only_missing_snapshot_groups() {
         let profile = Profile::enabled(true);
         let rebuilt =
             index::build_uncached_profiled(&fixture.home, &pin, &control, &profile).unwrap();
-        let parsed = rebuilt.summary["io"]["parsedDocuments"].as_u64().unwrap();
+        let parsed = rebuilt.summary.io["parsedDocuments"].as_u64().unwrap();
         if let Some(expected) = expected {
             assert_eq!(parsed, expected);
         }
@@ -1370,8 +1370,8 @@ fn cache_aware_cancelled_pipeline_joins_and_recovers_without_losing_committed_gr
     );
     let live = OperationControl::default();
     let recovered = index::build_uncached(&fixture.home, &pin, &live).unwrap();
-    assert_eq!(recovered.summary["io"]["cachedFacts"], 64);
-    assert_eq!(recovered.summary["io"]["parsedDocuments"], 16);
+    assert_eq!(recovered.summary.io["cachedFacts"], 64);
+    assert_eq!(recovered.summary.io["parsedDocuments"], 16);
     let profile = Profile::enabled(true);
     let warm = index::build_uncached_profiled(&fixture.home, &pin, &live, &profile).unwrap();
     assert_eq!(profile.calls(Phase::FactsWorker), 0);
@@ -1398,8 +1398,8 @@ fn cache_aware_non_worker_rows_and_corrupt_record_keep_original_order() {
     fs::write(&path, bytes).unwrap();
     let profile = Profile::enabled(true);
     let repaired = index::build_uncached_profiled(&fixture.home, &pin, &control, &profile).unwrap();
-    assert_eq!(repaired.summary["io"]["parsedDocuments"], 1);
-    assert_eq!(repaired.summary["io"]["cachedFacts"], 66);
+    assert_eq!(repaired.summary.io["parsedDocuments"], 1);
+    assert_eq!(repaired.summary.io["cachedFacts"], 66);
     assert_eq!(profile.calls(Phase::FactsWorker), 0);
     assert_eq!(profile.calls(Phase::FactsParseSequential), 1);
     assert_eq!(all_facts(&repaired), all_facts(&baseline));

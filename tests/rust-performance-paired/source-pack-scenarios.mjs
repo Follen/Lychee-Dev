@@ -255,7 +255,7 @@ function packIndexIdentities(repository, product, commit, parser) {
   return ['rust-index-v14', 'rust-index-v15'].map(version => sha256([version, ...(version === 'rust-index-v15' ? ['assets-v2-go323-metadata'] : []), 'facts-pack-v2-path-radix512', 'facts-layout-v11-go323-generated-origins', 'TS0.26.3', 'Lua0.5.0', 'XML0.38', 'generator-v6', repository, product, commit, parser].join('\0')));
 }
 export function indexEvidence(home, engine, pin, directory, root, {layout = 'v11-pack2'} = {}) {
-  assert(['v11-pack2', 'v13-postcard'].includes(layout), 'explicit supported index layout required');
+  assert(['v11-pack2', 'v13-postcard', 'v13-postcard-index18'].includes(layout), 'explicit supported index layout required');
   const source = pin.source; let path, manifest;
   const metadata = captureMetadata(home, pin, directory, engine);
   if (engine === 'go') {
@@ -264,13 +264,13 @@ export function indexEvidence(home, engine, pin, directory, root, {layout = 'v11
     manifest = JSON.parse(readFileSync(join(base, 'manifest.json')));
     assert.equal(manifest.recordsHash, hashFile(path, INDEX_BYTES)); assert.equal(manifest.recordBytes, lstatSync(path).size);
   } else {
-    const identities = layout === 'v13-postcard' ? [sha256(['rust-index-v17', 'assets-v2-go323-metadata', 'facts-pack-v2-path-radix512', 'facts-layout-v13-postcard-1.1.3', 'TS0.26.3', 'Lua0.5.0', 'XML0.38', 'generator-v6', source.repository, source.product, source.exactCommit, source.parserRevision].join('\0'))] : packIndexIdentities(source.repository, source.product, source.exactCommit, source.parserRevision);
+    const identities = layout !== 'v11-pack2' ? [sha256([layout === 'v13-postcard-index18' ? 'rust-index-v18' : 'rust-index-v17', 'assets-v2-go323-metadata', 'facts-pack-v2-path-radix512', 'facts-layout-v13-postcard-1.1.3', 'TS0.26.3', 'Lua0.5.0', 'XML0.38', 'generator-v6', source.repository, source.product, source.exactCommit, source.parserRevision].join('\0'))] : packIndexIdentities(source.repository, source.product, source.exactCommit, source.parserRevision);
     const db = new DatabaseSync(metadata.path, {readOnly: true});
     try {
       const matches = identities.map(identity => ({identity, row: db.prepare('SELECT value FROM documents WHERE key = ?').get(`source/rust-index/${identity}`)})).filter(match => match.row);
       assert.equal(matches.length, 1, 'exact pack2 index manifest required: one authenticated recipe only');
       const {identity, row} = matches[0];
-      manifest = JSON.parse(Buffer.from(row.value)); assert.equal(manifest.identity, identity); assert.equal(manifest.schema, 'lycheedev.source-index.rust.v6');
+      manifest = JSON.parse(Buffer.from(row.value)); assert.equal(manifest.identity, identity); assert.equal(manifest.schema, layout === 'v13-postcard-index18' ? 'lycheedev.source-index.rust.v7' : 'lycheedev.source-index.rust.v6');
     } finally { db.close(); }
     digest(manifest.blob.sha256); path = join(home, 'cache/objects', manifest.blob.sha256.slice(0, 2), manifest.blob.sha256.slice(2));
     assert.equal(lstatSync(path).size, manifest.blob.bytes); assert.equal(hashFile(path, INDEX_BYTES), manifest.blob.sha256);
@@ -666,8 +666,8 @@ export function claimSeven(root, reference, owner, retained) {
 export async function runController(config, overrides = {}) {
   const svc = {metadataPageSize, mutationFootprint, footprint, authenticateRetainedGo, claimSeven, authenticateRemaining, claimRemaining, assertCorpus, authenticateRetainedCold, claimColdBorrow, captureColdFactFiles, beginScratch, admission, ownedSpawnSync, collectOwnedMemory, runnerIdentity, verifyCandidateRecord, verifyGoPackage, cloneSeed, inventory, derivedIdentity, proveWarmReuse, prepareVariant, compareFacts, verifyPackProfile, indexEvidence, captureGoCustody, openGoCustody, ...overrides};
   const {request, runnerRoot, inputs, conditions, scratch, evidence: out} = config;
-  const layout = config.layout ?? 'v11-pack2'; assert(['v11-pack2', 'v13-postcard'].includes(layout), 'explicit supported controller layout required');
-  if (layout === 'v13-postcard') {
+  const layout = config.layout ?? 'v11-pack2'; assert(['v11-pack2', 'v13-postcard', 'v13-postcard-index18'].includes(layout), 'explicit supported controller layout required');
+  if (layout !== 'v11-pack2') {
     assert(!config.resumeCold && !config.resumeRemaining && !config.resumeGo && !config.allowance, 'v13 uses fresh scenarios and the unchanged default disk policy');
     for (const hook of ['runnerIdentity', 'compareFacts', 'verifyAdditionalIdentity', 'verifyAdditionalEvidence']) assert.equal(typeof overrides[hook], 'function', 'v13 requires its authenticated exporter controller');
   }
@@ -761,7 +761,7 @@ export async function runController(config, overrides = {}) {
         }
         row[engine].valid = true;
       }
-      row.facts = await svc.compareFacts(homes, envelopes, selection.pin, selection.oracle, evidence, request.ownerRoot, undefined, {admit: svc.admission, limits: diskPolicy, candidate: request.candidate});
+      row.facts = await svc.compareFacts(homes, envelopes, selection.pin, selection.oracle, evidence, request.ownerRoot, undefined, {admit: svc.admission, limits: diskPolicy, candidate: request.candidate, layout});
       row.factsEquivalent = true; identities(); row.rustToGoRatio = row.rust.controllableMillis / row.go.controllableMillis; row.state = 'verified'; return row;
     } catch (error) { if (error.handlesReaped === false) fatal = true; if (error.postcardEvidence) row.factsFailure = error.postcardEvidence; row.state = fatal ? 'interrupted' : 'failed'; row.failure = error.message.slice(0, 4096); throw error; }
     finally { saveJSON(join(evidence, `${entry.id}-scenario.json`), row); save(); }
@@ -804,7 +804,7 @@ export async function runController(config, overrides = {}) {
         }
         cold = structuredClone(retained.cold); delete cold.failure; cold.state = 'revalidating'; cold.lineage = {...cold.lineage, resumedOriginalCalls: true, originalState: 'failed', originalOuter: RETAINED_COLD.outer, originalBase: RETAINED_COLD.base, originalConditions: retained.oldReport.conditions, originalMachine: {hostname: retained.oldReport.machine.hostname, platform: retained.oldReport.machine.platform, node: retained.oldReport.machine.node}, reference: config.resumeCold};
         report.scenarios.push(cold); report.continuation = {schema: 'lycheedev.source-pack2-cold-continuation.v1', reference: config.resumeCold, originalCallsReused: 2, freshColdCalls: 0, originalState: 'failed', custodyReceipt: custody.receipt}; save();
-        cold.facts = await svc.compareFacts(homes, envelopes, prepared.pin, oracle, coldEvidence, request.ownerRoot, undefined, {admit: svc.admission, limits: diskPolicy, candidate: request.candidate}); cold.factsEquivalent = true;
+        cold.facts = await svc.compareFacts(homes, envelopes, prepared.pin, oracle, coldEvidence, request.ownerRoot, undefined, {admit: svc.admission, limits: diskPolicy, candidate: request.candidate, layout}); cold.factsEquivalent = true;
         saveJSON(join(coldEvidence, 'cold-facts-custody.json'), {schema: 'lycheedev.source-pack2-cold-facts.v2', go: cold.facts.goCustody, rust: cold.facts.rustCustody});
         retained.verifyHomes(); retained.verifyEvidence(); identities(); cold.state = 'verified'; cold.rustToGoRatio = cold.rust.controllableMillis / cold.go.controllableMillis;
         saveJSON(join(coldEvidence, 'cold-revalidated.json'), cold); complete = true;
@@ -884,7 +884,7 @@ export async function runController(config, overrides = {}) {
             const reference = await svc.captureGoCustody(home, index, job.evidence, request.ownerRoot); goRetained = {index, reference};
             row.go.custody = reference; row.go.comparisonState = 'awaiting-independent-rust';
           } else {
-            row.facts = await svc.compareFacts({go: row.go.home, rust: home}, outputs, variant.pin, variant.oracle, job.evidence, request.ownerRoot, goRetained, {admit: svc.admission, limits: diskPolicy, candidate: request.candidate});
+            row.facts = await svc.compareFacts({go: row.go.home, rust: home}, outputs, variant.pin, variant.oracle, job.evidence, request.ownerRoot, goRetained, {admit: svc.admission, limits: diskPolicy, candidate: request.candidate, layout});
             row.factsEquivalent = true; row.go.comparisonState = 'verified'; row.rustToGoRatio = row.rust.controllableMillis / row.go.controllableMillis;
           }
           identities(); for (const side of ['go', 'rust']) assert.equal(svc.inventory(homes[side]).sha256, baseIdentity[side].sha256, 'original healthy base changed');
@@ -921,7 +921,7 @@ export async function runController(config, overrides = {}) {
   return report;
 }
 export function verifyObservedReport(run, report, request, inputs, resumeCold = undefined, resumeRemaining = undefined, resumeGo = undefined, {layout = 'v11-pack2'} = {}) {
-  assert(['v11-pack2', 'v13-postcard'].includes(layout)); if (layout === 'v13-postcard') assert(!resumeCold && !resumeRemaining && !resumeGo, 'v13 has no historical continuation');
+  assert(['v11-pack2', 'v13-postcard', 'v13-postcard-index18'].includes(layout)); if (layout !== 'v11-pack2') assert(!resumeCold && !resumeRemaining && !resumeGo, 'v13 has no historical continuation');
   assert(run.status === 0 && !run.error && run.handlesReaped); elapsed(run.proof);
   assert.equal(report?.state, 'source_pack_scenarios_observed'); assert.equal(report.finalIntegrityVerified, true); assert.equal(report.requiresOuterRetirement, false);
   assert.equal(report.performanceAcceptanceEvaluated, false); assert.equal(report.fullB01B07Acceptance, false); assert.equal(report.importedSamples, 0);
@@ -936,7 +936,7 @@ export function verifyObservedReport(run, report, request, inputs, resumeCold = 
   report.scenarios.forEach((row, i) => {
     assert.equal(row.state, 'verified'); assert.equal(row.factsEquivalent, true); assert.deepEqual(row.order, orderFor(i)); assert.equal(row.mode, CASES[i].mode);
     assert.equal(row.facts.documents, CASES[i].documents); assert.equal(row.facts.fullFieldsAndOrderEqual, true);
-    if (i > 1 || !(resumeRemaining || resumeGo)) { exact(row.facts.rustCustody, ['directory', 'catalog', 'catalogSHA256', 'candidate']); assert.deepEqual(row.facts.rustCustody.candidate, candidateIdentity(request.candidate)); digest(row.facts.rustCustody.catalogSHA256); assert.equal(row.facts.rustCustody.catalog, join(row.facts.rustCustody.directory, layout === 'v13-postcard' ? 'postcard-custody.json' : 'rust-custody.json')); exact(row.facts.goCustody, ['directory', 'catalog', 'catalogSHA256']); digest(row.facts.goCustody.catalogSHA256); }
+    if (i > 1 || !(resumeRemaining || resumeGo)) { exact(row.facts.rustCustody, ['directory', 'catalog', 'catalogSHA256', 'candidate']); assert.deepEqual(row.facts.rustCustody.candidate, candidateIdentity(request.candidate)); digest(row.facts.rustCustody.catalogSHA256); assert.equal(row.facts.rustCustody.catalog, join(row.facts.rustCustody.directory, layout !== 'v11-pack2' ? 'postcard-custody.json' : 'rust-custody.json')); exact(row.facts.goCustody, ['directory', 'catalog', 'catalogSHA256']); digest(row.facts.goCustody.catalogSHA256); }
     for (const engine of ['go', 'rust']) { assert.equal(row[engine].valid, true); elapsed(row[engine].proof); if (i > 1) { assert(!variantHomes.has(row[engine].home)); variantHomes.add(row[engine].home); assert.notEqual(row[engine].home, report.scenarios[0][engine].home); } }
     if (i === 1) for (const engine of ['go', 'rust']) { assert.equal(row[engine].home, report.scenarios[0][engine].home); assert.equal(row[engine].warmReuse.verified, true); }
   });

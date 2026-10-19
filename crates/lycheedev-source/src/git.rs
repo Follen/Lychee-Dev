@@ -806,7 +806,14 @@ pub(crate) fn asset_blob_with_control(
     control: &OperationControl,
 ) -> Result<(Vec<u8>, String)> {
     control.check()?;
-    blob_controlled(home, pin, path, max, crate::assets::MAX_BYTES, Some(control))
+    blob_controlled(
+        home,
+        pin,
+        path,
+        max,
+        crate::assets::MAX_BYTES,
+        Some(control),
+    )
 }
 fn blob_controlled(
     home: &Path,
@@ -1102,8 +1109,7 @@ mod tests {
         );
         assert_eq!(at, 0);
         let actual =
-            take_batch_object(&frame, &mut at, &object, "blob", crate::assets::MAX_BYTES)
-                .unwrap();
+            take_batch_object(&frame, &mut at, &object, "blob", crate::assets::MAX_BYTES).unwrap();
         assert_eq!(actual, frame[start..start + size]);
         assert_eq!(at, frame.len());
         drop(actual);
@@ -1302,8 +1308,8 @@ mod tests {
         assert_eq!(status["snapshotFiles"], 1);
         assert_eq!(status["astFiles"], 1);
         assert_eq!(status["storage"], "file-cache");
-        assert_eq!(first_index.summary["io"]["gitBlobProcesses"], 1);
-        assert_eq!(first_index.summary["io"]["parsedDocuments"], 1);
+        assert_eq!(first_index.summary.io["gitBlobProcesses"], 1);
+        assert_eq!(first_index.summary.io["parsedDocuments"], 1);
         let first_query = first_index
             .search(&pin, "PIN-fixture", "Exact", "precise", "lua", 1, "")
             .unwrap();
@@ -1316,7 +1322,7 @@ mod tests {
         assert_eq!(first_query["analysis"]["semantic"], "not_requested");
         assert!(serde_json::to_vec(&first_query).unwrap().len() < 4096);
         let hot = crate::index::build(&home, &pin).unwrap();
-        assert_eq!(hot.summary["io"]["cachedFacts"], 1);
+        assert_eq!(hot.summary.io["cachedFacts"], 1);
         assert_eq!(hot.symbols[0].id, first_index.symbols[0].id);
         let hot_query = hot
             .search(&pin, "PIN-fixture", "Exact", "precise", "lua", 1, "")
@@ -1344,7 +1350,7 @@ mod tests {
         let generation = metadata.generation(&key).unwrap();
         metadata.put(&key, &old_index, generation).unwrap();
         let rebuilt = crate::index::build(&home, &pin).unwrap();
-        assert_eq!(rebuilt.summary["io"]["parsedDocuments"], 1);
+        assert_eq!(rebuilt.summary.io["parsedDocuments"], 1);
         assert_eq!(rebuilt.symbols[0].id, first_index.symbols[0].id);
         let mut tampered = files.clone();
         tampered[0].bytes += 1;

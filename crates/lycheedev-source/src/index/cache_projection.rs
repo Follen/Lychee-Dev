@@ -1,16 +1,9 @@
-//! A retaining choice for the existing Index schema, not another cache format.
-//! Each row is fully decoded as its ordinary business type, then discarded.
-//! Authentication, limits, identity and cleanup remain in the shared loader.
-//! The ordinary serde_json recursion limit remains in force; no custom deep
-//! traversal or parser budget changes the previous acceptance boundary.
-use super::{Document, Index, Symbol};
+//! Retaining and validation-only choices share the exact binary decoder.
+//! A summary hit validates borrowed rows without per-row String/Value owners.
+use super::{AssetRecord, Document, Index, Symbol, persistence_wire};
 use lycheedev_core::{Result, control::OperationControl, selection::SourcePin};
-use serde::{
-    Deserialize, Deserializer,
-    de::{SeqAccess, Visitor},
-};
 use serde_json::Value;
-use std::{fmt, marker::PhantomData, path::Path};
+use std::{marker::PhantomData, path::Path};
 
 pub(super) trait CollectionLength {
     fn len(&self) -> usize;
@@ -20,10 +13,22 @@ impl<T> CollectionLength for Vec<T> {
         Vec::len(self)
     }
 }
-
-struct Counted<T> {
+pub(super) struct Counted<T> {
     count: usize,
     element: PhantomData<T>,
+}
+impl<T> Default for Counted<T> {
+    fn default() -> Self {
+        Self {
+            count: 0,
+            element: PhantomData,
+        }
+    }
+}
+impl<T> Counted<T> {
+    pub(super) fn increment(&mut self) {
+        self.count += 1;
+    }
 }
 impl<T> CollectionLength for Counted<T> {
     fn len(&self) -> usize {
@@ -38,38 +43,7 @@ impl<T> From<Vec<T>> for Counted<T> {
         }
     }
 }
-impl<'de, T: Deserialize<'de>> Deserialize<'de> for Counted<T> {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
-        struct CountVisitor<T>(PhantomData<T>);
-        impl<'de, T: Deserialize<'de>> Visitor<'de> for CountVisitor<T> {
-            type Value = Counted<T>;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a sequence")
-            }
-
-            fn visit_seq<A: SeqAccess<'de>>(
-                self,
-                mut seq: A,
-            ) -> std::result::Result<Self::Value, A::Error> {
-                let mut count = 0;
-                while let Some(row) = seq.next_element::<T>()? {
-                    drop(row);
-                    count += 1;
-                }
-                Ok(Counted {
-                    count,
-                    element: PhantomData,
-                })
-            }
-        }
-        // No early count budget or control check: the complete old JSON decode
-        // must precede the shared post-decode control, identity and count gate.
-        deserializer.deserialize_seq(CountVisitor(PhantomData))
-    }
-}
-
-type SummaryIndex = Index<Counted<Document>, Counted<Value>, Counted<Symbol>>;
+type SummaryIndex = Index<Counted<Document>, Counted<AssetRecord>, Counted<Symbol>>;
 
 pub(crate) fn build_summary_with_control(
     home: &Path,
@@ -78,9 +52,18 @@ pub(crate) fn build_summary_with_control(
 ) -> Result<(Value, Value)> {
     let (index, _): (SummaryIndex, _) =
         super::build_material_projected_with_control(home, pin, control)?;
-    let coverage = super::coverage(&index.summary, index.documents.len());
-    Ok((index.summary, coverage))
+    let coverage = index.summary.coverage(index.documents.len());
+    Ok((serde_json::to_value(index.summary)?, coverage))
 }
-
+/// Read-only readiness consumes the same complete authenticated main index,
+/// including all symbols, without retaining row owners or rebuilding anything.
+pub(crate) fn decode_summary(
+    raw: &[u8],
+    identity: &str,
+    control: &OperationControl,
+) -> Result<(super::SourceSummary, usize)> {
+    let index: SummaryIndex = persistence_wire::decode(raw, identity, control)?;
+    Ok((index.summary, index.documents.len()))
+}
 #[cfg(test)]
 mod tests;

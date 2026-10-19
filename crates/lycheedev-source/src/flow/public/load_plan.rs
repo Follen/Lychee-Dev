@@ -235,11 +235,11 @@ pub(super) fn collect(
     source: &Value,
     control: &OperationControl,
 ) -> Result<Selection> {
-    let complete_projection = index.summary["schema"] == "lycheedev.source-map.v2"
-        && index.summary["documents"].as_u64() == Some(index.documents.len() as u64)
-        && ["repository", "product", "commit"]
-            .iter()
-            .all(|key| source[*key].is_string() && index.summary[*key] == source[*key]);
+    let complete_projection = index.summary.schema == "lycheedev.source-map.v2"
+        && index.summary.documents == index.documents.len()
+        && source["repository"].as_str() == Some(index.summary.repository.as_str())
+        && source["product"].as_str() == Some(index.summary.product.as_str())
+        && source["commit"].as_str() == Some(index.summary.commit.as_str());
     collect_with(
         selected,
         index.documents.iter(),

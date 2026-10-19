@@ -4,11 +4,13 @@ mod facts_cache;
 mod facts_decode_tests;
 #[cfg(test)]
 mod facts_encode_tests;
+mod facts_pipeline;
+pub(crate) mod model;
+mod original_cache;
+pub(crate) mod persistence_wire;
 #[cfg(test)]
 mod symbol_identity_tests;
-mod facts_pipeline;
-mod original_cache;
-mod persistence_wire;
+pub use model::{AssetRecord, SourceSummary};
 #[cfg(test)]
 pub(crate) use original_cache::take_read_observations;
 mod profile;
@@ -16,11 +18,11 @@ use crate::{
     facts::{self, Facts},
     git,
 };
+pub(crate) use cache_projection::{build_summary_with_control, decode_summary};
 use lycheedev_core::{
     Result, ToolkitError, evidence, metadata::historical_write::finish_historical,
     selection::SourcePin, storage,
 };
-pub(crate) use cache_projection::build_summary_with_control;
 use profile::{Phase, Profile};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -31,25 +33,37 @@ use std::{
     path::{Path, PathBuf},
 };
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Symbol {
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub id: String,
-    pub kind: String,
-    pub name: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub target: String,
-    pub category: String,
-    pub confidence: String,
-    pub path: String,
+#[serde(
+    rename_all = "camelCase",
+    bound(
+        serialize = "T: Serialize + AsRef<str>",
+        deserialize = "T: Deserialize<'de> + Default"
+    )
+)]
+pub struct Symbol<T = String> {
+    #[serde(default, skip_serializing_if = "empty_text")]
+    pub id: T,
+    pub kind: T,
+    pub name: T,
+    #[serde(default, skip_serializing_if = "empty_text")]
+    pub target: T,
+    pub category: T,
+    pub confidence: T,
+    pub path: T,
+    #[serde(with = "model::coordinate")]
     pub line: usize,
+    #[serde(with = "model::coordinate")]
     pub end_line: usize,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub signature: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub scope: String,
+    #[serde(default, skip_serializing_if = "empty_text")]
+    pub signature: T,
+    #[serde(default, skip_serializing_if = "empty_text")]
+    pub scope: T,
     #[serde(default, skip_serializing_if = "is_zero")]
+    #[serde(with = "model::coordinate")]
     pub ordinal: usize,
+}
+fn empty_text<T: AsRef<str>>(v: &T) -> bool {
+    v.as_ref().is_empty()
 }
 fn is_zero(v: &usize) -> bool {
     *v == 0
@@ -75,16 +89,21 @@ fn render_span(raw: &[u8], hash: &str, first: usize, last: usize) -> Value {
     json!({"firstLine":first,"lastLine":end_line,"startByte":starts.get(first.saturating_sub(1)),"endByte":starts.get(end_line).copied().unwrap_or(raw.len()),"coordinate":"utf8-byte","contentHash":hash})
 }
 #[derive(Clone, Serialize, Deserialize)]
-pub struct Document {
-    pub path: String,
+pub struct Document<T = String> {
+    pub path: T,
     #[serde(skip)]
     // Some(empty) is an authenticated empty document; None needs recovery.
     pub text: Option<Vec<u8>>,
-    pub sha256: String,
+    pub sha256: T,
+    #[serde(with = "model::coordinate")]
     pub bytes: usize,
     #[serde(skip)]
     pub facts: Facts,
-    #[serde(default, rename = "factsLocator", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "factsLocator",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub(crate) facts_locator: Option<facts_cache::Locator>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,7 +235,9 @@ fn append_load_facts(
     }
     let packed = if let Some(locator) = &document.facts_locator {
         facts_cache::read_locator(home, locator, &document.path, &document.sha256, control)?
-    } else { None };
+    } else {
+        None
+    };
     let parsed = match packed {
         Some(facts) => facts,
         None => document_facts(home, &document.path, raw, &document.sha256, control)?.0,
@@ -242,11 +263,11 @@ fn append_load_facts(
     Ok(())
 }
 #[derive(Serialize, Deserialize)]
-pub struct Index<D = Vec<Document>, A = Vec<Value>, S = Vec<Symbol>> {
+pub struct Index<D = Vec<Document>, A = Vec<AssetRecord>, S = Vec<Symbol>> {
     pub documents: D,
     pub assets: A,
     pub symbols: S,
-    pub summary: Value,
+    pub summary: SourceSummary,
     // At most six compatibility categories, derived from every diagnostic,
     // before the public sample is capped. Required when deserializing caches.
     #[serde(rename = "compatibilityGaps")]
@@ -334,8 +355,44 @@ pub fn penalty(role: &str) -> i32 {
     }
 }
 pub(crate) fn fingerprint(pin: &SourcePin) -> String {
-    storage::sha256(format!("rust-index-v17\0assets-v2-go323-metadata\0facts-pack-v2-path-radix512\0facts-layout-v13-postcard-1.1.3\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0{}\0{}\0{}\0{}",pin.repository,pin.product,pin.exact_commit,pin.parser_revision).as_bytes())
+    fingerprint_fields(
+        &pin.repository,
+        &pin.product,
+        &pin.exact_commit,
+        &pin.parser_revision,
+    )
 }
+fn fingerprint_fields(repository: &str, product: &str, commit: &str, parser: &str) -> String {
+    fingerprint_fields_checked(repository, product, commit, parser, || Ok(()))
+        .expect("uncontrolled fingerprint hashing cannot fail")
+}
+fn fingerprint_fields_checked(
+    repository: &str,
+    product: &str,
+    commit: &str,
+    parser: &str,
+    mut check: impl FnMut() -> Result<()>,
+) -> Result<String> {
+    use sha2::Digest;
+    let mut hash = sha2::Sha256::new();
+    check()?;
+    hash.update(b"rust-index-v18\0assets-v2-go323-metadata\0facts-pack-v2-path-radix512\0facts-layout-v13-postcard-1.1.3\0TS0.26.3\0Lua0.5.0\0XML0.38\0generator-v6\0");
+    for (ordinal, field) in [repository, product, commit, parser]
+        .into_iter()
+        .enumerate()
+    {
+        if ordinal != 0 {
+            hash.update(b"\0");
+        }
+        for chunk in field.as_bytes().chunks(65536) {
+            check()?;
+            hash.update(chunk);
+        }
+    }
+    check()?;
+    Ok(format!("{:x}", hash.finalize()))
+}
+
 pub fn build(home: &Path, pin: &SourcePin) -> Result<Index> {
     build_with_control(home, pin, &Default::default())
 }
@@ -364,9 +421,9 @@ fn build_material_projected_with_control<D, A, S>(
     control: &lycheedev_core::control::OperationControl,
 ) -> Result<(Index<D, A, S>, String)>
 where
-    D: serde::de::DeserializeOwned + cache_projection::CollectionLength + From<Vec<Document>>,
-    A: serde::de::DeserializeOwned + cache_projection::CollectionLength + From<Vec<Value>>,
-    S: serde::de::DeserializeOwned + cache_projection::CollectionLength + From<Vec<Symbol>>,
+    D: persistence_wire::Collection<Document>,
+    A: persistence_wire::Collection<AssetRecord>,
+    S: persistence_wire::Collection<Symbol>,
 {
     let profile = Profile::new();
     let metadata_phase = profile.span(Phase::Metadata);
@@ -384,9 +441,7 @@ where
     let manifest = finish_historical(manifest, metadata.close());
     drop(metadata_phase);
     if let Ok(manifest) = &manifest {
-        if manifest["schema"] == "lycheedev.source-index.rust.v6"
-            && manifest["identity"] == identity
-        {
+        if manifest["schema"] == persistence_wire::SCHEMA && manifest["identity"] == identity {
             let digest = manifest["blob"]["sha256"].as_str().unwrap_or("");
             if !lycheedev_core::selection::valid_digest(digest, 64) {
                 return Err(ToolkitError::new(
@@ -405,7 +460,9 @@ where
                 let started = std::time::Instant::now();
                 let mut raw = vec![];
                 let mut file = std::fs::File::open(&path)?.take((128 << 20) + 1);
-                let loaded = (|| {
+                let loaded: Result<(Index<D, A, S>, String)> = (|| {
+                    use sha2::Digest;
+                    let mut hash = sha2::Sha256::new();
                     let mut chunk = [0; 65536];
                     loop {
                         control.check()?;
@@ -413,11 +470,12 @@ where
                         if n == 0 {
                             break;
                         }
-                        raw.extend_from_slice(&chunk[..n]);
+                        persistence_wire::append_input(&mut raw, &chunk[..n])?;
+                        hash.update(&chunk[..n]);
                     }
                     if raw.len() > 128 << 20
                         || manifest["blob"]["bytes"] != raw.len()
-                        || storage::sha256(&raw) != digest
+                        || format!("{:x}", hash.finalize()) != digest
                     {
                         return Err(ToolkitError::new(
                             "codebase.source_integrity",
@@ -425,24 +483,11 @@ where
                             4,
                         ));
                     }
-                    let mut map: Index<D, A, S> = serde_json::from_slice(&raw)?;
+                    let mut map: Index<D, A, S> =
+                        persistence_wire::decode(&raw, &identity, control)?;
                     control.check()?;
-                    if map.documents.len() > 100000
-                        || map.symbols.len() > 2000000
-                        || map.assets.len() > 200000
-                        || map.summary["commit"] != pin.exact_commit
-                        || map.summary["repository"] != pin.repository
-                        || map.summary["product"] != pin.product
-                        || map.summary["parser"] != pin.parser_revision
-                    {
-                        return Err(ToolkitError::new(
-                            "codebase.source_integrity",
-                            "Cached index identity or budget differs",
-                            4,
-                        ));
-                    }
                     map.home = home.into();
-                    map.summary["io"] = json!({"gitTreeProcesses":0,"gitBlobProcesses":0,"cachedIndex":true,"indexBytesRead":raw.len(),"sourceBytesRead":0,"cachedFacts":map.documents.len(),"parsedDocuments":0,"elapsedMs":started.elapsed().as_millis(),"deadlineMs":180000});
+                    map.summary.io = json!({"gitTreeProcesses":0,"gitBlobProcesses":0,"cachedIndex":true,"indexBytesRead":raw.len(),"sourceBytesRead":0,"cachedFacts":map.documents.len(),"parsedDocuments":0,"elapsedMs":started.elapsed().as_millis(),"deadlineMs":180000});
                     Ok((map, digest.to_owned()))
                 })();
                 return storage::finish_file(file.into_inner(), loaded, control);
@@ -464,7 +509,7 @@ where
     let result = (|| {
         let map = build_uncached_profiled(home, pin, control, &profile)?;
         let serialize_phase = profile.span(Phase::IndexSerialize);
-        let raw = persistence_wire::encode(&map)?;
+        let raw = persistence_wire::encode(&map, &identity, control)?;
         drop(serialize_phase);
         let publish_phase = profile.span(Phase::IndexPublish);
         let blob =
@@ -474,13 +519,15 @@ where
         crate::persistence::put_manifest(
             home,
             &key,
-            &json!({"schema":"lycheedev.source-index.rust.v6","identity":identity,"blob":blob}),
+            &json!({"schema":persistence_wire::SCHEMA,"identity":identity,"blob":blob}),
             control,
         )?;
         Ok((map, blob["sha256"].as_str().unwrap().to_owned()))
     })();
-    let (map, digest) =
-        crate::persistence::finish_control(finish_historical(result, lock.close()), control.check())?;
+    let (map, digest) = crate::persistence::finish_control(
+        finish_historical(result, lock.close()),
+        control.check(),
+    )?;
     // The cold path still builds, serializes and publishes the complete index.
     // Move its fields only after the original lock close and final control.
     Ok((
@@ -516,9 +563,7 @@ pub fn is_ready_with_control(
             Err(e) if e.code == "vault.record_missing" && e.details.is_null() => return Ok(false),
             Err(e) => return Err(e),
         };
-        if manifest["schema"] != "lycheedev.source-index.rust.v6"
-            || manifest["identity"] != identity
-        {
+        if manifest["schema"] != persistence_wire::SCHEMA || manifest["identity"] != identity {
             return Ok(false);
         }
         let digest = manifest["blob"]["sha256"].as_str().unwrap_or("");
@@ -550,7 +595,8 @@ fn facts_cache_key(path: &str, sha256: &str) -> String {
     ).as_bytes())
 }
 fn facts_cache_path(home: &Path, path: &str, sha256: &str) -> PathBuf {
-    home.join("cache/source-facts-rust").join(format!("{}.json", facts_cache_key(path, sha256)))
+    home.join("cache/source-facts-rust")
+        .join(format!("{}.json", facts_cache_key(path, sha256)))
 }
 /// Return the complete observations and whether they came from the existing
 /// authenticated per-document cache. Both indexing and load evidence use this
@@ -627,8 +673,11 @@ fn document_facts_profiled(
     Ok((parsed, false))
 }
 fn parse_document_facts(
-    path: &str, data: &[u8], control: &lycheedev_core::control::OperationControl,
-    profile: Option<&Profile>, prepared: Option<facts_pipeline::PreparedFacts>,
+    path: &str,
+    data: &[u8],
+    control: &lycheedev_core::control::OperationControl,
+    profile: Option<&Profile>,
+    prepared: Option<facts_pipeline::PreparedFacts>,
 ) -> Result<Facts> {
     let mode = facts::ParseMode::for_path(path);
     let parsed = if let Some(prepared) = prepared.filter(|prepared| prepared.mode == mode) {
@@ -650,7 +699,11 @@ fn encode_facts(parsed: &Facts, sha256: &str, profile: Option<&Profile>) -> Resu
     let _phase = profile.map(|p| p.span(Phase::FactsSerialize));
     facts::binary::encode(parsed, sha256)
 }
-fn decode_facts(raw: &[u8], sha256: &str, control: &lycheedev_core::control::OperationControl) -> Result<Option<Facts>> {
+fn decode_facts(
+    raw: &[u8],
+    sha256: &str,
+    control: &lycheedev_core::control::OperationControl,
+) -> Result<Option<Facts>> {
     facts::binary::decode(raw, sha256, control)
 }
 
@@ -691,31 +744,55 @@ fn build_uncached_cached(
         documents: vec![],
         assets: vec![],
         symbols: vec![],
-        summary: Value::Null,
+        summary: SourceSummary::empty(pin),
         compatibility_gaps: BTreeSet::new(),
         home: home.into(),
     };
     let (mut skipped, mut diagnostics, mut relationships) = (0, Vec::new(), 0usize);
-    let document_count = files.iter().filter(|file| !file.asset && !file.oversized).count();
-    if document_count.checked_mul(facts_cache::LOCATOR_RETAINED_BYTES)
+    let document_count = files
+        .iter()
+        .filter(|file| !file.asset && !file.oversized)
+        .count();
+    if document_count
+        .checked_mul(facts_cache::LOCATOR_RETAINED_BYTES)
         .and_then(|n| n.checked_add(facts_cache::GROUP_RETAINED_BYTES))
-        .is_none_or(|n| n > 256 << 20) {
-        return Err(ToolkitError::new("codebase.source_budget", "Source document metadata exceeds budget", 3));
+        .is_none_or(|n| n > 256 << 20)
+    {
+        return Err(ToolkitError::new(
+            "codebase.source_budget",
+            "Source document metadata exceeds budget",
+            3,
+        ));
     }
-    index.documents.try_reserve_exact(document_count).map_err(|_| ToolkitError::new(
-        "codebase.source_budget", "Source document metadata was not admitted", 3,
-    ))?;
-    let metadata_retained = index.documents.capacity().checked_mul(facts_cache::LOCATOR_RETAINED_BYTES)
+    index
+        .documents
+        .try_reserve_exact(document_count)
+        .map_err(|_| {
+            ToolkitError::new(
+                "codebase.source_budget",
+                "Source document metadata was not admitted",
+                3,
+            )
+        })?;
+    let metadata_retained = index
+        .documents
+        .capacity()
+        .checked_mul(facts_cache::LOCATOR_RETAINED_BYTES)
         .and_then(|n| n.checked_add(facts_cache::GROUP_RETAINED_BYTES))
-        .filter(|n| *n <= 256 << 20).ok_or_else(|| ToolkitError::new(
-            "codebase.source_budget", "Source document metadata exceeds budget", 3,
-        ))?;
+        .filter(|n| *n <= 256 << 20)
+        .ok_or_else(|| {
+            ToolkitError::new(
+                "codebase.source_budget",
+                "Source document metadata exceeds budget",
+                3,
+            )
+        })?;
     let mut retained = metadata_retained;
     for file in files {
         if file.asset && file.bytes > 64 << 20 {
             index
                 .assets
-                .push(crate::assets::record(&file.path, file.bytes, &[], "", Value::Null));
+                .push(crate::assets::record(&file.path, file.bytes, &[], "", None));
         }
     }
     let mut grouped = facts_cache::Groups::new(cache_owner, files, control, profile);
@@ -743,14 +820,17 @@ fn build_uncached_cached(
                 let local = evidence::publish_blob_bounded(home, &data, 64 << 20, control)?;
                 drop(publish_phase);
                 index.assets.push(crate::assets::record(
-                    &file.path, file.bytes, &data, &hash, local,
+                    &file.path,
+                    file.bytes,
+                    &data,
+                    &hash,
+                    Some(serde_json::from_value(local)?),
                 ));
                 return Ok(());
             }
             let sha256 = document_input_sha(file, &data, &mut retained)?;
-            let (facts, cache_hit, facts_locator) = grouped.document(
-                file, &data, &sha256, prepared, &mut index.documents,
-            )?;
+            let (facts, cache_hit, facts_locator) =
+                grouped.document(file, &data, &sha256, prepared, &mut index.documents)?;
             if cache_hit {
                 cached += 1;
             } else {
@@ -828,7 +908,11 @@ fn build_uncached_cached(
                 });
             }
             for n in &facts.diagnostics {
-                diagnostics.push(json!({"path":file.path,"line":n.line,"message":n.message}));
+                diagnostics.push(model::DiagnosticSample {
+                    path: file.path.clone(),
+                    line: n.line,
+                    message: n.message.clone(),
+                });
             }
             index.documents.push(Document {
                 path: file.path.clone(),
@@ -846,27 +930,44 @@ fn build_uncached_cached(
     // Go emits skipped oversized documents after all analyzed documents.
     for file in files.iter().filter(|file| file.oversized) {
         skipped += 1;
-        diagnostics.push(json!({"path":file.path,"line":0,"message":format!("source file has {} bytes, exceeding the {}-byte analysis limit; skipped",file.bytes,git::MAX_SOURCE_BYTES)}));
+        diagnostics.push(model::DiagnosticSample {
+            path: file.path.clone(),
+            line: 0,
+            message: format!(
+                "source file has {} bytes, exceeding the {}-byte analysis limit; skipped",
+                file.bytes,
+                git::MAX_SOURCE_BYTES
+            ),
+        });
     }
     for diagnostic in &diagnostics {
-        if let Some(path) = diagnostic["path"].as_str() {
-            record_compatibility_gap(&mut index.compatibility_gaps, path);
-        }
+        record_compatibility_gap(&mut index.compatibility_gaps, &diagnostic.path);
     }
-    let failed_paths: BTreeSet<_> = diagnostics
-        .iter()
-        .filter_map(|d| d["path"].as_str())
-        .collect();
+    let failed_paths: BTreeSet<_> = diagnostics.iter().map(|d| d.path.as_str()).collect();
     let ast_files = index
         .documents
         .iter()
         .filter(|d| !failed_paths.contains(d.path.as_str()))
         .count();
-    index.summary = json!({"schema":"lycheedev.source-map.v2","storage":"file-cache","repository":pin.repository,"product":pin.product,"commit":pin.exact_commit,"parser":pin.parser_revision,"documents":index.documents.len(),"astFiles":ast_files,"skippedDocuments":skipped,"declarations":index.symbols.iter().filter(|s|s.kind=="declaration").count(),"relationships":relationships,"assets":index.assets.len(),"diagnostics":diagnostics.len(),"complete":skipped==0&&diagnostics.is_empty()});
-    index.summary["io"] = json!({"gitTreeProcesses":1,"gitBlobProcesses":batches,"cachedFacts":cached,"parsedDocuments":parsed_documents,"readBytes":read_bytes,"elapsedMs":started.elapsed().as_millis(),"deadlineMs":180000});
+    index.summary.documents = index.documents.len();
+    index.summary.ast_files = ast_files;
+    index.summary.skipped_documents = skipped;
+    index.summary.declarations = index
+        .symbols
+        .iter()
+        .filter(|s| s.kind == "declaration")
+        .count();
+    index.summary.relationships = relationships;
+    index.summary.assets = index.assets.len();
+    index.summary.diagnostics = diagnostics.len();
+    index.summary.complete = skipped == 0 && diagnostics.is_empty();
+    index.summary.io = json!({"gitTreeProcesses":1,"gitBlobProcesses":batches,"cachedFacts":cached,"parsedDocuments":parsed_documents,"readBytes":read_bytes,"elapsedMs":started.elapsed().as_millis(),"deadlineMs":180000});
     if !diagnostics.is_empty() {
-        index.summary["diagnosticSample"] =
-            json!(diagnostics.into_iter().take(20).collect::<Vec<_>>());
+        let mut sample = model::Samples::default();
+        for diagnostic in diagnostics.into_iter().take(20) {
+            sample.push(diagnostic);
+        }
+        index.summary.diagnostic_sample = Some(sample);
     }
     Ok(index)
 }
@@ -920,14 +1021,10 @@ fn record_compatibility_gap(gaps: &mut BTreeSet<String>, path: &str) {
 fn check_search(control: Option<&lycheedev_core::control::OperationControl>) -> Result<()> {
     control.map_or(Ok(()), lycheedev_core::control::OperationControl::check)
 }
-fn coverage(summary: &Value, documents: usize) -> Value {
-    let mut v = json!({"analyzedDocuments":documents,"skippedDocuments":summary["skippedDocuments"],"diagnostics":summary["diagnostics"],"complete":summary["complete"]});
-    if let Some(s) = summary.get("diagnosticSample") {
-        v["diagnosticSample"] = s.clone();
-    }
-    v["io"] = summary["io"].clone();
-    v
+fn coverage(summary: &SourceSummary, documents: usize) -> Value {
+    summary.coverage(documents)
 }
+
 impl Index {
     pub(crate) fn original_reader(&self) -> original_cache::OriginalReader<'_> {
         original_cache::OriginalReader::new(self)
@@ -1083,242 +1180,244 @@ impl Index {
         let original_control = control.unwrap_or(&standalone);
         let mut originals = self.original_reader();
         let result = (|| {
-        let mut loaded = BTreeMap::<&str, Cow<'_, [u8]>>::new();
-        let mut exact = Vec::<(Symbol, &str, i32)>::new();
-        let mut prefix = vec![];
-        let mut full = vec![];
-        let mut relations = Vec::new();
-        let mut cut = false;
-        for (number, s) in self.symbols.iter().enumerate() {
-            observer("symbol", number);
-            check_search(control)?;
-            if s.kind == "relationship" {
-                if s.name == text
-                    || s.target == text
-                    || (broad
-                        && (s
-                            .name
-                            .to_ascii_lowercase()
-                            .contains(&text.to_ascii_lowercase())
-                            || s.target
+            let mut loaded = BTreeMap::<&str, Cow<'_, [u8]>>::new();
+            let mut exact = Vec::<(Symbol, &str, i32)>::new();
+            let mut prefix = vec![];
+            let mut full = vec![];
+            let mut relations = Vec::new();
+            let mut cut = false;
+            for (number, s) in self.symbols.iter().enumerate() {
+                observer("symbol", number);
+                check_search(control)?;
+                if s.kind == "relationship" {
+                    if s.name == text
+                        || s.target == text
+                        || (broad
+                            && (s
+                                .name
                                 .to_ascii_lowercase()
-                                .contains(&text.to_ascii_lowercase())))
-                {
-                    relations.push(json!({"source":if s.name=="<file>"{&s.path}else{&s.name},"target":s.target,"kind":s.category,"confidence":s.confidence,"path":s.path,"line":s.line}));
+                                .contains(&text.to_ascii_lowercase())
+                                || s.target
+                                    .to_ascii_lowercase()
+                                    .contains(&text.to_ascii_lowercase())))
+                    {
+                        relations.push(json!({"source":if s.name=="<file>"{&s.path}else{&s.name},"target":s.target,"kind":s.category,"confidence":s.confidence,"path":s.path,"line":s.line}));
+                    }
+                    continue;
                 }
-                continue;
-            }
-            if topic == "asset"
-                || topic == "api" && !s.category.starts_with("api-")
-                || ["lua", "xml", "toc"].contains(&topic)
-                    && !s.path.to_ascii_lowercase().ends_with(&format!(".{topic}"))
-            {
-                continue;
-            }
-            if s.kind == "declaration"
-                && (s.name == text || s.target == text || s.name.ends_with(&format!(".{text}")))
-            {
-                exact.push((s.clone(), "exact_symbol", 100));
-            } else if s.kind == "header" && s.name == text {
-                exact.push((s.clone(), "exact_fact", 90));
-            }
-            if s.name.starts_with(text) || s.name.contains(&format!(".{text}")) {
-                prefix.push((
-                    s.clone(),
-                    if s.kind == "header" {
-                        "name_prefix"
-                    } else {
-                        "symbol_prefix"
-                    },
-                    80,
-                ));
-            }
-            let lower = format!("{} {} {}", s.name, s.target, s.signature).to_ascii_lowercase();
-            let count = tokens.iter().filter(|t| lower.contains(t.as_str())).count();
-            if count > 0 && (broad || count == tokens.len()) {
-                full.push((s.clone(), "indexed_text", 70 + count.min(9) as i32));
-            }
-        }
-        let mut candidates = exact;
-        let exact_matches = candidates.len();
-        if broad || candidates.is_empty() {
-            candidates.extend(prefix);
-        }
-        if broad || candidates.is_empty() {
-            candidates.extend(full);
-        }
-        if topic == "asset" {
-            candidates.clear();
-            let normalized = crate::assets::normalize_path(text);
-            for (number, a) in self.assets.iter().enumerate() {
-                observer("asset", number);
-                check_search(control)?;
-                let p = a["path"].as_str().unwrap_or("");
-                let n = crate::assets::normalize_path(p);
-                if n.contains(&normalized) {
-                    candidates.push((
-                        Symbol {
-                            id: String::new(),
-                            kind: "asset".into(),
-                            name: p.into(),
-                            target: String::new(),
-                            category: "asset".into(),
-                            confidence: "exact".into(),
-                            path: p.into(),
-                            line: 1,
-                            end_line: 1,
-                            signature: String::new(),
-                            scope: String::new(),
-                            ordinal: 0,
-                        },
-                        "asset_path",
-                        if n == normalized { 100 } else { 70 },
-                    ));
-                }
-            }
-        } else if broad || candidates.is_empty() {
-            for (number, doc) in self.documents.iter().enumerate() {
-                observer("document", number);
-                check_search(control)?;
-                let lower = doc.path.to_ascii_lowercase();
-                if topic == "api" && !lower.contains("/blizzard_apidocumentationgenerated/")
+                if topic == "asset"
+                    || topic == "api" && !s.category.starts_with("api-")
                     || ["lua", "xml", "toc"].contains(&topic)
-                        && !lower.ends_with(&format!(".{topic}"))
+                        && !s.path.to_ascii_lowercase().ends_with(&format!(".{topic}"))
                 {
                     continue;
                 }
-                let raw = originals.read(doc, original_control)?;
-                loaded.insert(&doc.path, raw);
-                for (i, l) in String::from_utf8_lossy(&loaded[doc.path.as_str()])
-                    .split('\n')
-                    .enumerate()
+                if s.kind == "declaration"
+                    && (s.name == text || s.target == text || s.name.ends_with(&format!(".{text}")))
                 {
-                    observer("line", i);
+                    exact.push((s.clone(), "exact_symbol", 100));
+                } else if s.kind == "header" && s.name == text {
+                    exact.push((s.clone(), "exact_fact", 90));
+                }
+                if s.name.starts_with(text) || s.name.contains(&format!(".{text}")) {
+                    prefix.push((
+                        s.clone(),
+                        if s.kind == "header" {
+                            "name_prefix"
+                        } else {
+                            "symbol_prefix"
+                        },
+                        80,
+                    ));
+                }
+                let lower = format!("{} {} {}", s.name, s.target, s.signature).to_ascii_lowercase();
+                let count = tokens.iter().filter(|t| lower.contains(t.as_str())).count();
+                if count > 0 && (broad || count == tokens.len()) {
+                    full.push((s.clone(), "indexed_text", 70 + count.min(9) as i32));
+                }
+            }
+            let mut candidates = exact;
+            let exact_matches = candidates.len();
+            if broad || candidates.is_empty() {
+                candidates.extend(prefix);
+            }
+            if broad || candidates.is_empty() {
+                candidates.extend(full);
+            }
+            if topic == "asset" {
+                candidates.clear();
+                let normalized = crate::assets::normalize_path(text);
+                for (number, a) in self.assets.iter().enumerate() {
+                    observer("asset", number);
                     check_search(control)?;
-                    if l.to_ascii_lowercase().contains(&text.to_ascii_lowercase()) {
+                    let p = a.path.as_str();
+                    let n = crate::assets::normalize_path(p);
+                    if n.contains(&normalized) {
                         candidates.push((
                             Symbol {
                                 id: String::new(),
-                                kind: "body".into(),
-                                name: text.into(),
+                                kind: "asset".into(),
+                                name: p.into(),
                                 target: String::new(),
-                                category: String::new(),
+                                category: "asset".into(),
                                 confidence: "exact".into(),
-                                path: doc.path.clone(),
-                                line: i + 1,
-                                end_line: i + 1,
-                                signature: l.into(),
+                                path: p.into(),
+                                line: 1,
+                                end_line: 1,
+                                signature: String::new(),
                                 scope: String::new(),
                                 ordinal: 0,
                             },
-                            "body_text",
-                            60,
+                            "asset_path",
+                            if n == normalized { 100 } else { 70 },
                         ));
                     }
                 }
+            } else if broad || candidates.is_empty() {
+                for (number, doc) in self.documents.iter().enumerate() {
+                    observer("document", number);
+                    check_search(control)?;
+                    let lower = doc.path.to_ascii_lowercase();
+                    if topic == "api" && !lower.contains("/blizzard_apidocumentationgenerated/")
+                        || ["lua", "xml", "toc"].contains(&topic)
+                            && !lower.ends_with(&format!(".{topic}"))
+                    {
+                        continue;
+                    }
+                    let raw = originals.read(doc, original_control)?;
+                    loaded.insert(&doc.path, raw);
+                    for (i, l) in String::from_utf8_lossy(&loaded[doc.path.as_str()])
+                        .split('\n')
+                        .enumerate()
+                    {
+                        observer("line", i);
+                        check_search(control)?;
+                        if l.to_ascii_lowercase().contains(&text.to_ascii_lowercase()) {
+                            candidates.push((
+                                Symbol {
+                                    id: String::new(),
+                                    kind: "body".into(),
+                                    name: text.into(),
+                                    target: String::new(),
+                                    category: String::new(),
+                                    confidence: "exact".into(),
+                                    path: doc.path.clone(),
+                                    line: i + 1,
+                                    end_line: i + 1,
+                                    signature: l.into(),
+                                    scope: String::new(),
+                                    ordinal: 0,
+                                },
+                                "body_text",
+                                60,
+                            ));
+                        }
+                    }
+                }
             }
-        }
-        if candidates.len() > 10000 {
-            candidates.truncate(10000);
-            cut = true;
-        }
-        check_search(control)?;
-        candidates.sort_by(|(a, _, ar), (b, _, br)| {
-            (br - penalty(role(&b.path)))
-                .cmp(&(ar - penalty(role(&a.path))))
-                .then(a.path.cmp(&b.path))
-                .then(a.line.cmp(&b.line))
-                .then(a.kind.cmp(&b.kind))
-                .then(a.name.cmp(&b.name))
-        });
-        check_search(control)?;
-        let mut seen = BTreeSet::new();
-        candidates.retain(|(s, _, _)| {
-            seen.insert(if s.id.is_empty() {
-                format!("{}:{}\0{}\0{}", s.path, s.line, s.name, s.kind)
-            } else {
-                s.id.clone()
-            })
-        });
-        check_search(control)?;
-        let more = candidates.len() > offset + limit;
-        let mut results = Vec::new();
-        for (s, by, rank) in candidates.iter().skip(offset).take(limit) {
-            observer("result", results.len());
+            if candidates.len() > 10000 {
+                candidates.truncate(10000);
+                cut = true;
+            }
             check_search(control)?;
-            if !loaded.contains_key(s.path.as_str())
-                && let Some(doc) = self.documents.iter().find(|d| d.path == s.path)
-            {
-                loaded.insert(&doc.path, originals.read(doc, original_control)?);
-            }
-            let raw = loaded.get(s.path.as_str()).map(|raw| raw.as_ref()).unwrap_or(&[]);
-            let penalty = penalty(role(&s.path));
-            let hash = self
-                .documents
-                .iter()
-                .find(|d| d.path == s.path)
-                .map(|d| d.sha256.clone())
-                .or_else(|| {
-                    self.assets
-                        .iter()
-                        .find(|a| a["path"] == s.path)
-                        .and_then(|a| a["contentHash"].as_str())
-                        .map(str::to_owned)
+            candidates.sort_by(|(a, _, ar), (b, _, br)| {
+                (br - penalty(role(&b.path)))
+                    .cmp(&(ar - penalty(role(&a.path))))
+                    .then(a.path.cmp(&b.path))
+                    .then(a.line.cmp(&b.line))
+                    .then(a.kind.cmp(&b.kind))
+                    .then(a.name.cmp(&b.name))
+            });
+            check_search(control)?;
+            let mut seen = BTreeSet::new();
+            candidates.retain(|(s, _, _)| {
+                seen.insert(if s.id.is_empty() {
+                    format!("{}:{}\0{}\0{}", s.path, s.line, s.name, s.kind)
+                } else {
+                    s.id.clone()
                 })
-                .unwrap_or_default();
-            let (start, end) = if *by == "exact_symbol" {
-                (s.line, s.end_line)
-            } else {
-                (s.line.saturating_sub(3).max(1), s.line + 3)
-            };
-            let mut row = json!({"kind":if s.kind=="header"{"toc"}else{&s.category},"name":s.name,"path":s.path,"matchedBy":by,"role":role(&s.path),"confidence":s.confidence,"excerpt":if s.kind=="asset"{s.path.clone()}else{render_excerpt(raw,start,end)},"contentHash":hash,"line":s.line,"score":rank-penalty,"scoreParts":{"match":rank,"rolePenalty":-penalty}});
-            row["whyMatch"] = json!({"query":text,"strategy":by,"exactDeclaration":*by=="exact_symbol","confidenceBasis":if s.kind=="body"{"literal source text"}else{"structural source fact"}});
-            row["sourceSpan"] = if s.kind == "asset" {
-                Value::Null
-            } else {
-                render_span(raw, &hash, s.line, s.end_line)
-            };
-            row["excerptSpan"] = if s.kind == "asset" {
-                Value::Null
-            } else {
-                render_span(raw, &hash, start, end.min(start + 79))
-            };
-            row["excerptTruncated"] = json!(end > start + 79);
-            row["endLine"] = json!(s.end_line);
-            if !s.scope.is_empty() {
-                row["scope"] = json!(s.scope);
+            });
+            check_search(control)?;
+            let more = candidates.len() > offset + limit;
+            let mut results = Vec::new();
+            for (s, by, rank) in candidates.iter().skip(offset).take(limit) {
+                observer("result", results.len());
+                check_search(control)?;
+                if !loaded.contains_key(s.path.as_str())
+                    && let Some(doc) = self.documents.iter().find(|d| d.path == s.path)
+                {
+                    loaded.insert(&doc.path, originals.read(doc, original_control)?);
+                }
+                let raw = loaded
+                    .get(s.path.as_str())
+                    .map(|raw| raw.as_ref())
+                    .unwrap_or(&[]);
+                let penalty = penalty(role(&s.path));
+                let hash = self
+                    .documents
+                    .iter()
+                    .find(|d| d.path == s.path)
+                    .map(|d| d.sha256.clone())
+                    .or_else(|| {
+                        self.assets
+                            .iter()
+                            .find(|a| a.path == s.path)
+                            .map(|a| a.content_hash.clone())
+                    })
+                    .unwrap_or_default();
+                let (start, end) = if *by == "exact_symbol" {
+                    (s.line, s.end_line)
+                } else {
+                    (s.line.saturating_sub(3).max(1), s.line + 3)
+                };
+                let mut row = json!({"kind":if s.kind=="header"{"toc"}else{&s.category},"name":s.name,"path":s.path,"matchedBy":by,"role":role(&s.path),"confidence":s.confidence,"excerpt":if s.kind=="asset"{s.path.clone()}else{render_excerpt(raw,start,end)},"contentHash":hash,"line":s.line,"score":rank-penalty,"scoreParts":{"match":rank,"rolePenalty":-penalty}});
+                row["whyMatch"] = json!({"query":text,"strategy":by,"exactDeclaration":*by=="exact_symbol","confidenceBasis":if s.kind=="body"{"literal source text"}else{"structural source fact"}});
+                row["sourceSpan"] = if s.kind == "asset" {
+                    Value::Null
+                } else {
+                    render_span(raw, &hash, s.line, s.end_line)
+                };
+                row["excerptSpan"] = if s.kind == "asset" {
+                    Value::Null
+                } else {
+                    render_span(raw, &hash, start, end.min(start + 79))
+                };
+                row["excerptTruncated"] = json!(end > start + 79);
+                row["endLine"] = json!(s.end_line);
+                if !s.scope.is_empty() {
+                    row["scope"] = json!(s.scope);
+                }
+                if !s.signature.is_empty() {
+                    row["signature"] = json!(s.signature);
+                }
+                if !s.id.is_empty() {
+                    row["symbolId"] = json!(s.id);
+                }
+                results.push(row);
             }
-            if !s.signature.is_empty() {
-                row["signature"] = json!(s.signature);
+            let relation_cut = offset == 0 && relations.len() > limit;
+            relations.truncate(limit);
+            let truncated = more || cut || relation_cut;
+            let mut response = json!({"sourceId":pin.repository,"product":pin.product,"requestedRef":pin.requested_ref,"matchedTag":null,"resolvedCommit":pin.exact_commit,"snapshotId":snapshot,"results":results,"complete":self.summary.complete&&!truncated,"truncated":truncated,"coverage":self.coverage()});
+            response["coverage"]["io"]["sourceBytesRead"] =
+                json!(loaded.values().map(|raw| raw.len()).sum::<usize>());
+            response["coverage"]["io"]["sourceDocumentsRead"] = json!(loaded.len());
+            response["matchCoverage"] = json!({"exactMatches":exact_matches,"candidateMatches":candidates.len(),"returned":results.len(),"offset":offset,"candidateBudget":10000,"candidateBudgetExceeded":cut,"relationPreviewTruncated":relation_cut,"strategy":if broad{"exploratory"}else{"exact-then-prefix-then-indexed-then-literal"},"fallbackReason":if exact_matches>0{Value::Null}else if results.is_empty(){json!("no_structural_or_literal_match")}else{json!("no_exact_declaration")}});
+            response["analysis"] = json!({"structure":"tree-sitter-lua-0.5.0","semantic":"not_requested","syntaxCompilation":"not_requested","aliases":"lexical static inference"});
+            if offset == 0 && !relations.is_empty() {
+                response["relations"] = json!(relations);
             }
-            if !s.id.is_empty() {
-                row["symbolId"] = json!(s.id);
+            if more && offset + limit <= 10000 {
+                response["nextCursor"] = json!(format!("{key}:{}", offset + limit));
             }
-            results.push(row);
-        }
-        let relation_cut = offset == 0 && relations.len() > limit;
-        relations.truncate(limit);
-        let truncated = more || cut || relation_cut;
-        let mut response = json!({"sourceId":pin.repository,"product":pin.product,"requestedRef":pin.requested_ref,"matchedTag":null,"resolvedCommit":pin.exact_commit,"snapshotId":snapshot,"results":results,"complete":self.summary["complete"]==true&&!truncated,"truncated":truncated,"coverage":self.coverage()});
-        response["coverage"]["io"]["sourceBytesRead"] =
-            json!(loaded.values().map(|raw| raw.len()).sum::<usize>());
-        response["coverage"]["io"]["sourceDocumentsRead"] = json!(loaded.len());
-        response["matchCoverage"] = json!({"exactMatches":exact_matches,"candidateMatches":candidates.len(),"returned":results.len(),"offset":offset,"candidateBudget":10000,"candidateBudgetExceeded":cut,"relationPreviewTruncated":relation_cut,"strategy":if broad{"exploratory"}else{"exact-then-prefix-then-indexed-then-literal"},"fallbackReason":if exact_matches>0{Value::Null}else if results.is_empty(){json!("no_structural_or_literal_match")}else{json!("no_exact_declaration")}});
-        response["analysis"] = json!({"structure":"tree-sitter-lua-0.5.0","semantic":"not_requested","syntaxCompilation":"not_requested","aliases":"lexical static inference"});
-        if offset == 0 && !relations.is_empty() {
-            response["relations"] = json!(relations);
-        }
-        if more && offset + limit <= 10000 {
-            response["nextCursor"] = json!(format!("{key}:{}", offset + limit));
-        }
-        if results.is_empty() {
-            response["suggestions"] = json!([
-                "use explore for broader text and symbol matches",
-                "check the topic, product and ref"
-            ]);
-        }
-        check_search(control)?;
-        Ok(response)
+            if results.is_empty() {
+                response["suggestions"] = json!([
+                    "use explore for broader text and symbol matches",
+                    "check the topic, product and ref"
+                ]);
+            }
+            check_search(control)?;
+            Ok(response)
         })();
         originals.finish(result, original_control)
     }
@@ -1336,12 +1435,22 @@ mod facts_cache_tests {
 
     fn evict_document_facts(home: &Path, document: &Document) {
         if let Some(locator) = &document.facts_locator {
-            let key = locator.group.iter().map(|b| format!("{b:02x}")).collect::<String>();
-            let pack = home.join("cache/source-facts-rust").join(format!("{key}.json"));
-            if pack.exists() { fs::remove_file(pack).unwrap(); }
+            let key = locator
+                .group
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>();
+            let pack = home
+                .join("cache/source-facts-rust")
+                .join(format!("{key}.json"));
+            if pack.exists() {
+                fs::remove_file(pack).unwrap();
+            }
         }
         let old = facts_cache_path(home, &document.path, &document.sha256);
-        if old.exists() { fs::remove_file(old).unwrap(); }
+        if old.exists() {
+            fs::remove_file(old).unwrap();
+        }
     }
 
     #[test]
@@ -1644,9 +1753,15 @@ mod facts_cache_tests {
             }
             symbol.id = stable_id(&pin, symbol);
         }
-        old.summary["declarations"] = json!(2);
-        old.summary["diagnosticSample"][0]["message"] =
-            json!("Syntax unavailable in fixed Go Lua parser");
+        old.summary.declarations = 2;
+        old.summary
+            .diagnostic_sample
+            .as_mut()
+            .unwrap()
+            .iter_mut()
+            .next()
+            .unwrap()
+            .message = "Syntax unavailable in fixed Go Lua parser".into();
         for (path, raw, facts) in &cases {
             old.documents
                 .iter_mut()
@@ -1680,8 +1795,8 @@ mod facts_cache_tests {
             false
         );
         let (rebuilt, _) = build_material_with_control(&fixture.home, &pin, &control).unwrap();
-        assert_eq!(rebuilt.summary["io"]["parsedDocuments"], 2);
-        assert_eq!(rebuilt.summary["io"]["cachedFacts"], 0);
+        assert_eq!(rebuilt.summary.io["parsedDocuments"], 2);
+        assert_eq!(rebuilt.summary.io["cachedFacts"], 0);
         assert_eq!(without_io(&rebuilt), expected);
         for doc in &rebuilt.documents {
             assert_corrected_generated_contract(&doc.path, &doc.facts);
@@ -1692,7 +1807,7 @@ mod facts_cache_tests {
             true
         );
         let (warm, _) = build_material_with_control(&fixture.home, &pin, &control).unwrap();
-        assert_eq!(warm.summary["io"]["cachedIndex"], true);
+        assert_eq!(warm.summary.io["cachedIndex"], true);
         assert_eq!(without_io(&warm), expected);
         let query = crate::query_store::load_with_control(
             &fixture.home,
@@ -1703,7 +1818,7 @@ mod facts_cache_tests {
             &control,
         )
         .unwrap();
-        assert_eq!(query.summary["io"]["cachedIndex"], false);
+        assert_eq!(query.summary.io["cachedIndex"], false);
         assert!(
             query
                 .symbols
@@ -1726,7 +1841,7 @@ mod facts_cache_tests {
             &control,
         )
         .unwrap();
-        assert_eq!(query.summary["io"]["cachedIndex"], true);
+        assert_eq!(query.summary.io["cachedIndex"], true);
         assert!(query.symbols.iter().any(|symbol| symbol.name == "Ignored"));
         assert_eq!(
             crate::persistence::read::<Value>(&fixture.home, &old_key, &control).unwrap(),
@@ -1814,8 +1929,9 @@ mod facts_cache_tests {
         obsolete["schema"] = json!("lycheedev.source-facts.rust.v9");
         obsolete["facts"]["diagnostics"][0]["message"] =
             json!("XML syntax error on line 1: element <Ui> closed by </Ui junk>");
-        obsolete["factsSHA256"] =
-            json!(storage::sha256(&serde_json::to_vec(&obsolete["facts"]).unwrap()));
+        obsolete["factsSHA256"] = json!(storage::sha256(
+            &serde_json::to_vec(&obsolete["facts"]).unwrap()
+        ));
         storage::atomic_json(&path, &obsolete).unwrap();
         let (rebuilt, hit) =
             document_facts(&fixture.home, "Example.xml", raw, &digest, &control).unwrap();
@@ -1919,9 +2035,10 @@ mod facts_cache_tests {
                 .map(|(path, raw)| {
                     (
                         path.clone(),
-                        objects.entry(raw.as_str()).or_insert_with(|| {
-                            self.git(raw, &["hash-object", "-w", "--stdin"])
-                        }).clone(),
+                        objects
+                            .entry(raw.as_str())
+                            .or_insert_with(|| self.git(raw, &["hash-object", "-w", "--stdin"]))
+                            .clone(),
                     )
                 })
                 .collect();
@@ -1953,11 +2070,11 @@ mod facts_cache_tests {
         ]);
         let pin = fixture.pin(&raw);
         let cold = build_uncached(&fixture.home, &pin, &control).unwrap();
-        assert_eq!(cold.summary["io"]["parsedDocuments"], 2);
-        assert_eq!(cold.summary["io"]["cachedFacts"], 0);
+        assert_eq!(cold.summary.io["parsedDocuments"], 2);
+        assert_eq!(cold.summary.io["cachedFacts"], 0);
         let hit = build_uncached(&fixture.home, &pin, &control).unwrap();
-        assert_eq!(hit.summary["io"]["parsedDocuments"], 0);
-        assert_eq!(hit.summary["io"]["cachedFacts"], 2);
+        assert_eq!(hit.summary.io["parsedDocuments"], 0);
+        assert_eq!(hit.summary.io["cachedFacts"], 2);
         for (before, after) in cold.documents.iter().zip(&hit.documents) {
             assert_eq!(
                 serde_json::to_value(&before.facts).unwrap(),
@@ -2021,8 +2138,8 @@ mod facts_cache_tests {
         );
         let changed_pin = fixture.pin(&raw);
         let changed = build_uncached(&fixture.home, &changed_pin, &control).unwrap();
-        assert_eq!(changed.summary["io"]["parsedDocuments"], 1);
-        assert_eq!(changed.summary["io"]["cachedFacts"], 1);
+        assert_eq!(changed.summary.io["parsedDocuments"], 1);
+        assert_eq!(changed.summary.io["cachedFacts"], 1);
         let loads = load_facts_from_documents_with_control(&fixture.home, &changed, &raw, &control)
             .unwrap();
         assert!(loads.iter().any(|f| f.target == "Other.lua"));
@@ -2042,7 +2159,14 @@ mod facts_cache_tests {
         let doc = &index.documents[0];
         let path = facts_cache_path(&fixture.home, &doc.path, &doc.sha256);
         evict_document_facts(&fixture.home, doc);
-        document_facts(&fixture.home, &doc.path, raw[&doc.path].as_bytes(), &doc.sha256, &control).unwrap();
+        document_facts(
+            &fixture.home,
+            &doc.path,
+            raw[&doc.path].as_bytes(),
+            &doc.sha256,
+            &control,
+        )
+        .unwrap();
         let original = fs::read(&path).unwrap();
         let original_facts = serde_json::to_value(&doc.facts).unwrap();
         for offset in [12, 44] {
@@ -2071,7 +2195,7 @@ mod facts_cache_tests {
                     ),
                     _ => {
                         let rebuilt = build_uncached(&fixture.home, &pin, &control).unwrap();
-                        assert_eq!(rebuilt.summary["io"]["parsedDocuments"], 1);
+                        assert_eq!(rebuilt.summary.io["parsedDocuments"], 1);
                         assert_eq!(
                             serde_json::to_value(&rebuilt.documents[0].facts).unwrap(),
                             original_facts
@@ -2083,7 +2207,14 @@ mod facts_cache_tests {
                     // that reconstructible cohort before testing the next
                     // specifically per-file corruption; do not bypass it.
                     evict_document_facts(&fixture.home, doc);
-                    document_facts(&fixture.home, &doc.path, raw[&doc.path].as_bytes(), &doc.sha256, &control).unwrap();
+                    document_facts(
+                        &fixture.home,
+                        &doc.path,
+                        raw[&doc.path].as_bytes(),
+                        &doc.sha256,
+                        &control,
+                    )
+                    .unwrap();
                 }
                 assert_eq!(fs::read(&path).unwrap(), original);
             }
@@ -2111,13 +2242,20 @@ mod facts_cache_tests {
         oversized.set_len((32 << 20) + 1).unwrap();
         drop(oversized);
         let rebuilt = build_uncached(&fixture.home, &pin, &control).unwrap();
-        assert_eq!(rebuilt.summary["io"]["parsedDocuments"], 1);
+        assert_eq!(rebuilt.summary.io["parsedDocuments"], 1);
         assert_eq!(
             serde_json::to_value(&rebuilt.documents[0].facts).unwrap(),
             original_facts
         );
         evict_document_facts(&fixture.home, doc);
-        document_facts(&fixture.home, &doc.path, raw[&doc.path].as_bytes(), &doc.sha256, &control).unwrap();
+        document_facts(
+            &fixture.home,
+            &doc.path,
+            raw[&doc.path].as_bytes(),
+            &doc.sha256,
+            &control,
+        )
+        .unwrap();
         assert_eq!(fs::read(&path).unwrap(), original);
         let mut missing = raw.clone();
         missing.clear();
@@ -2142,10 +2280,10 @@ mod facts_cache_tests {
         let before = crate::xml_program::catalog_verifications();
         let cold = build_uncached(&fixture.home, &pin, &control).unwrap();
         assert_eq!(crate::xml_program::catalog_verifications(), before);
-        assert_eq!(cold.summary["io"]["parsedDocuments"], 4);
+        assert_eq!(cold.summary.io["parsedDocuments"], 4);
         let hit = build_uncached(&fixture.home, &pin, &control).unwrap();
         assert_eq!(crate::xml_program::catalog_verifications(), before);
-        assert_eq!(hit.summary["io"]["cachedFacts"], 4);
+        assert_eq!(hit.summary.io["cachedFacts"], 4);
         for (expected, cached) in cold.documents.iter().zip(&hit.documents) {
             assert_eq!(
                 serde_json::to_value(&expected.facts).unwrap(),
@@ -2157,8 +2295,8 @@ mod facts_cache_tests {
         }
         let next = build_uncached(&fixture.home, &pin, &control).unwrap();
         assert_eq!(crate::xml_program::catalog_verifications(), before);
-        assert_eq!(next.summary["io"]["parsedDocuments"], 4);
-        assert_eq!(next.summary["io"]["cachedFacts"], 0);
+        assert_eq!(next.summary.io["parsedDocuments"], 4);
+        assert_eq!(next.summary.io["cachedFacts"], 0);
         for (expected, fresh) in cold.documents.iter().zip(&next.documents) {
             assert_eq!(
                 serde_json::to_value(&expected.facts).unwrap(),
@@ -2278,10 +2416,7 @@ mod facts_cache_tests {
         raw.insert("Late/Frames.xml".into(), "<Ui><Frame>".into());
         let pin = fixture.pin(&raw);
         let cold = build_uncached(&fixture.home, &pin, &control).unwrap();
-        assert_eq!(
-            cold.summary["diagnosticSample"].as_array().unwrap().len(),
-            20
-        );
+        assert_eq!(cold.summary.diagnostic_sample.as_ref().unwrap().len(), 20);
         assert_eq!(
             cold.compatibility_gaps,
             BTreeSet::from(["mixin", "api", "event", "template", "frame-type"].map(str::to_owned))
@@ -2319,7 +2454,7 @@ mod facts_cache_tests {
         ]);
         let pin = fixture.pin(&raw);
         let cold = build_uncached(&fixture.home, &pin, &control).unwrap();
-        assert_eq!(cold.summary["declarations"], 1);
+        assert_eq!(cold.summary.declarations, 1);
         assert_eq!(
             cold.symbols
                 .iter()
@@ -2329,7 +2464,7 @@ mod facts_cache_tests {
             [("Main.toc", "Api.lua", "toc")]
         );
         let warm = build_uncached(&fixture.home, &pin, &control).unwrap();
-        assert_eq!(warm.summary["io"]["cachedFacts"], 4);
+        assert_eq!(warm.summary.io["cachedFacts"], 4);
         assert_eq!(
             serde_json::to_value(&cold.symbols).unwrap(),
             serde_json::to_value(&warm.symbols).unwrap()
@@ -2470,7 +2605,9 @@ mod facts_cache_tests {
         let mut wrong = warm.documents[0].clone();
         wrong.bytes -= 1;
         assert_eq!(
-            warm.read_document_controlled(&wrong, Some(&control)).unwrap_err().code,
+            warm.read_document_controlled(&wrong, Some(&control))
+                .unwrap_err()
+                .code,
             "codebase.source_integrity",
             "indexed-length mismatch retains integrity error, not frame budget"
         );
@@ -2499,7 +2636,7 @@ mod facts_cache_tests {
             "codebase.source_integrity"
         );
         let mut tampered = build_with_control(&fixture.home, &pin, &control).unwrap();
-        tampered.summary["repository"] = json!("../uncontrolled");
+        tampered.summary.repository = "../uncontrolled".into();
         assert!(!original_path(&fixture.home, &warm.documents[0]).exists());
         assert!(
             tampered
@@ -2605,7 +2742,7 @@ mod facts_cache_tests {
         fs::remove_dir_all(fixture.home.join("cache")).unwrap();
         fs::create_dir(fixture.home.join("cache")).unwrap();
         let recovered = build_with_control(&fixture.home, &pin, &control).unwrap();
-        assert_eq!(recovered.summary["io"]["parsedDocuments"], 2);
+        assert_eq!(recovered.summary.io["parsedDocuments"], 2);
         let mut before = serde_json::to_value(&index).unwrap();
         let mut after = serde_json::to_value(&recovered).unwrap();
         before["summary"].as_object_mut().unwrap().remove("io");
@@ -2664,7 +2801,7 @@ mod facts_cache_tests {
         );
         for doc in cold.documents.iter().filter(|doc| doc.path != "Main.lua") {
             assert!(!original_path(&fixture.home, doc).exists());
-}
+        }
         let (held, _) = storage::locked_sha256(
             &original_path(&fixture.home, main),
             main.bytes as u64,
@@ -2759,9 +2896,19 @@ mod facts_cache_tests {
             let expected = cold
                 .search_with_control(&pin, "snapshot", "literal-你好", mode, "", 1, "", &control)
                 .unwrap();
-            assert_eq!(without_query_io(actual.clone()), without_query_io(expected), "mode={mode:?}");
-            assert_eq!(actual["results"][0]["matchedBy"], "body_text", "mode={mode:?}");
-            assert_eq!(actual["coverage"]["io"]["sourceDocumentsRead"], 4, "mode={mode:?}");
+            assert_eq!(
+                without_query_io(actual.clone()),
+                without_query_io(expected),
+                "mode={mode:?}"
+            );
+            assert_eq!(
+                actual["results"][0]["matchedBy"], "body_text",
+                "mode={mode:?}"
+            );
+            assert_eq!(
+                actual["coverage"]["io"]["sourceDocumentsRead"], 4,
+                "mode={mode:?}"
+            );
             let cursor = actual["nextCursor"].as_str().unwrap();
             let next = warm
                 .search_with_control(

@@ -183,10 +183,8 @@ pub(super) fn assess(
             valid = false;
         }
     }
-    let complete = load_valid
-        && index.summary["complete"] == true
-        && unresolved == 0
-        && interface_status == "matched";
+    let complete =
+        load_valid && index.summary.complete && unresolved == 0 && interface_status == "matched";
     let mut load = closure.value();
     load["loadValid"] = json!(load_valid);
     if let Some(issues) = load["issues"].as_array_mut() {

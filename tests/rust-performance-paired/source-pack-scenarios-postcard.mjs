@@ -12,7 +12,7 @@ import {verifyGoPackage} from './inputs.mjs';
 import {openGoCustody} from './source-pack-custody.mjs';
 import {candidateIdentity, verifyCandidateRecord, indexEvidence, evidenceFiles, assertDiskPolicy, RUNNER_FILES} from './source-pack-scenarios.mjs';
 import {readFactDelta, comparedRustIndex} from './read-fact-delta.mjs';
-import {POSTCARD_LAYOUT, LIMITS, preparePostcardExport, runPostcardExport, capturePostcardExport, verifyPostcardCustody, verifyPostcardExporter, readPostcardBytes} from './read-fact-delta-postcard.mjs';
+import {POSTCARD_LAYOUT, POSTCARD_INDEX_LAYOUT, preparePostcardIndexExport, runPostcardIndexExport, comparePostcardIndex, capturePostcardIndexExport, assertPostcardOutputBudget, LIMITS, preparePostcardExport, runPostcardExport, capturePostcardExport, verifyPostcardCustody, verifyPostcardExporter, readPostcardBytes} from './read-fact-delta-postcard.mjs';
 
 const exact = (value, keys) => assert.deepEqual(Object.keys(value ?? {}).sort(), [...keys].sort(), 'exact v13 configuration required');
 const save = (file, value) => { const raw = Buffer.from(JSON.stringify(value, null, 2) + '\n'); assert(raw.length <= 16 << 20); fs.writeFileSync(file, raw, {flag: 'wx'}); };
@@ -42,11 +42,20 @@ export function authenticatePostcardGo(input) {
 
 // This is a complete five-array comparison port, not a new codec or production
 // API. Inputs come from independently retained Go output and this Rust index.
-export async function comparePostcardFacts({root, candidate, exporter, rustHome, index, go, scratch, evidence}, {execute} = {}) {
-  const preparation = preparePostcardExport(root, rustHome, index, join(scratch, 'postcard-input'));
+export async function comparePostcardFacts({root, candidate, exporter, rustHome, index, go, scratch, evidence, layout = POSTCARD_LAYOUT}, {execute} = {}) {
+  assert([POSTCARD_LAYOUT, POSTCARD_INDEX_LAYOUT].includes(layout));
+  let indexToken, indexCustody;
+  if (layout === POSTCARD_INDEX_LAYOUT) {
+    const preparation = preparePostcardIndexExport(root, rustHome, index, join(scratch, 'postcard-index-input'));
+    indexToken = runPostcardIndexExport(root, exporter, candidate, preparation, join(scratch, 'postcard-index-output.jsonl'), evidence, execute ? {execute} : {});
+    await comparePostcardIndex(indexToken, go.reference);
+    indexCustody = capturePostcardIndexExport(indexToken, evidence);
+  }
+  const preparation = preparePostcardExport(root, rustHome, index, join(scratch, 'postcard-input'), {layout, indexExport: indexToken});
   const token = runPostcardExport(root, exporter, candidate, preparation, join(scratch, 'postcard-output.jsonl'), evidence, execute ? {execute} : {});
-  const delta = await readFactDelta(go.home, rustHome, go.recordsPath, POSTCARD_LAYOUT, index.path, index.sha256, go, {captureSources: true, retainIndex: true, postcardExport: token});
+  const delta = await readFactDelta(go.home, rustHome, go.recordsPath, layout, index.path, index.sha256, go, {captureSources: true, retainIndex: true, postcardExport: token, postcardIndexExport: indexToken});
   save(join(evidence, 'facts-comparison.json'), delta);
+  if (indexToken) assertPostcardOutputBudget(indexToken.summary.outputBytes, token.summary.outputBytes);
   const custody = capturePostcardExport(token, evidence), manifestPath = join(evidence, 'rust-index-manifest.json');
   if (fs.existsSync(manifestPath)) assert.deepEqual(JSON.parse(readPostcardBytes(manifestPath, 1 << 20)), index.manifest); else save(manifestPath, index.manifest);
   const parsed = comparedRustIndex(delta, index); assert.equal(parsed.summary.documents, delta.documents);
@@ -57,7 +66,7 @@ export async function comparePostcardFacts({root, candidate, exporter, rustHome,
   go.verify(); verifyPostcardCustody(custody);
   for (const field of ['declarations', 'relationships', 'diagnostics']) assert.equal(delta.totals.rust[field], parsed.summary[field], 'Rust full Facts totals differ from own index');
   assert.equal(delta.differentFiles.length, 0, 'complete five-array fields/order differ');
-  return {documents: delta.documents, fullFieldsAndOrderEqual: true, totals: delta.totals, custody: join(evidence, 'postcard-custody.json'), custodySHA256: hashFile(join(evidence, 'postcard-custody.json'), 16 << 20), comparison: join(evidence, 'facts-comparison.json'), exporter: token.exporter, exporterTiming: token.timing, summary: token.summary};
+  return {documents: delta.documents, fullFieldsAndOrderEqual: true, totals: delta.totals, custody: join(evidence, 'postcard-custody.json'), custodySHA256: hashFile(join(evidence, 'postcard-custody.json'), 16 << 20), comparison: join(evidence, 'facts-comparison.json'), exporter: token.exporter, exporterTiming: token.timing, summary: token.summary, ...(indexToken ? {indexExport: {custody: join(evidence, 'postcard-index-custody.json'), custodySHA256: hashFile(join(evidence, 'postcard-index-custody.json'), 16 << 20), summary: indexToken.summary, timing: indexToken.timing, oracle: indexCustody.oracle}} : {})};
 }
 
 export async function runPostcardComparison(configuration) {

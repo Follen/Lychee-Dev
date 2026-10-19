@@ -72,7 +72,9 @@ impl Fixture {
                 .collect(),
             compatibility_gaps: BTreeSet::new(),
             home: home.clone(),
-            summary: json!({"schema":"lycheedev.source-map.v2","documents":documents.len(),"repository":repository,"product":product,"commit":"a".repeat(40),"parser":"source-v1"}),
+            summary: crate::index::model::test_summary(
+                json!({"schema":"lycheedev.source-map.v2","documents":documents.len(),"repository":repository,"product":product,"commit":"a".repeat(40),"parser":"source-v1"}),
+            ),
         };
         let raw = documents
             .iter()
@@ -251,7 +253,7 @@ fn flow_conditional_production_collector_keeps_matching_defs_and_authenticated_w
         assert!(index::take_read_observations().is_empty());
         fixture.index =
             index::build_with_control(&fixture.home, &pin, &OperationControl::default()).unwrap();
-        assert_eq!(fixture.index.summary["io"]["cachedIndex"], true);
+        assert_eq!(fixture.index.summary.io["cachedIndex"], true);
         assert!(
             fixture
                 .index
@@ -549,8 +551,11 @@ fn flow_conditional_production_collector_keeps_missing_or_incomplete_projection_
         ],
     );
     let original_summary = fixture.index.summary.clone();
-    for replacement in [Value::Null, json!("legacy-map-v1")] {
-        fixture.index.summary["schema"] = replacement;
+    let mut invalid_summary = serde_json::to_value(&fixture.index.summary).unwrap();
+    invalid_summary["schema"] = Value::Null;
+    assert!(serde_json::from_value::<index::SourceSummary>(invalid_summary).is_err());
+    for replacement in ["", "legacy-map-v1"] {
+        fixture.index.summary.schema = replacement.into();
         let result = fixture.collect("Selected.lua");
         assert!(result.ordered.is_none());
         assert!(
@@ -562,12 +567,12 @@ fn flow_conditional_production_collector_keeps_missing_or_incomplete_projection_
         );
     }
     fixture.index.summary = original_summary;
-    fixture.index.summary["documents"] = json!(99);
+    fixture.index.summary.documents = 99;
     assert!(fixture.collect("Selected.lua").ordered.is_none());
     let mut missing_symbols = serde_json::to_value(&fixture.index).unwrap();
     missing_symbols.as_object_mut().unwrap().remove("symbols");
     assert!(serde_json::from_value::<index::Index>(missing_symbols).is_err());
-    fixture.index.summary["documents"] = json!(fixture.index.documents.len());
+    fixture.index.summary.documents = fixture.index.documents.len();
     fixture.index.symbols[0].category = "incomplete".into();
     let result = fixture.collect("Selected.lua");
     assert!(result.ordered.is_none());

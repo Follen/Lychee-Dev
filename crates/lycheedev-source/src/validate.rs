@@ -327,7 +327,7 @@ pub fn toc_with_environment(
             .any(|diagnostic| diagnostic["severity"] == "error");
     let complete = valid
         && unresolved.is_empty()
-        && prepared.map.summary["complete"] == true
+        && prepared.map.summary.complete
         && (!requested || semantic["complete"] == true);
     Ok(
         json!({"valid":valid,"path":prepared.closure.root,"sourceId":pin.repository,"product":pin.product,"ref":pin.requested_ref,"requestedRef":pin.requested_ref,"matchedTag":"","resolvedCommit":pin.exact_commit,

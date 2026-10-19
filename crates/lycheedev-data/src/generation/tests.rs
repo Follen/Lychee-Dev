@@ -528,8 +528,10 @@ fn cancellation_after_ipc_finish_aborts_before_object_or_generation_publication(
         reached,
         "the real Arrow encoder and provider ran before cancellation"
     );
-    assert_eq!(error.code, "operation.cancelled");
+    assert_eq!(error.code, "command.cancelled");
+    assert_eq!(error.exit_code, 7);
     let paths = DataCachePaths::new(&fx.home);
+    assert_eq!(fs::read_dir(&paths.objects).unwrap().count(), 0);
     assert_eq!(fs::read_dir(&paths.generations).unwrap().count(), 0);
     assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 0);
     // Quota/source owners have already completed checked teardown.

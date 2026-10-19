@@ -373,8 +373,8 @@ fn binary_identity_rebuilds_published_v11_facts_and_index_without_migration() {
         false
     );
     let rebuilt = build_with_control(&fixture.home, &pin, &control).unwrap();
-    assert_eq!(rebuilt.summary["io"]["parsedDocuments"], sources.len());
-    assert_eq!(rebuilt.summary["io"]["cachedFacts"], 0);
+    assert_eq!(rebuilt.summary.io["parsedDocuments"], sources.len());
+    assert_eq!(rebuilt.summary.io["cachedFacts"], 0);
     assert_eq!(
         serde_json::to_value(&rebuilt.symbols).unwrap(),
         serde_json::to_value(&expected.symbols).unwrap()
@@ -430,7 +430,7 @@ fn binary_facts_cohort_locator_and_loose_keep_complete_bytes() {
     let control = OperationControl::default();
     let cold = build_uncached(&fixture.home, &pin, &control).unwrap();
     let warm = build_uncached(&fixture.home, &pin, &control).unwrap();
-    assert_eq!(warm.summary["io"]["cachedFacts"], raw.len());
+    assert_eq!(warm.summary.io["cachedFacts"], raw.len());
     let mut packs = BTreeSet::new();
     for (fresh, hit) in cold.documents.iter().zip(&warm.documents) {
         let locator = hit.facts_locator.as_ref().unwrap();
@@ -462,8 +462,8 @@ fn binary_facts_cohort_locator_and_loose_keep_complete_bytes() {
         fs::remove_file(pack).unwrap();
     }
     let legacy = build_uncached(&fixture.home, &pin, &control).unwrap();
-    assert_eq!(legacy.summary["io"]["cachedFacts"], raw.len());
-    assert_eq!(legacy.summary["io"]["parsedDocuments"], 0);
+    assert_eq!(legacy.summary.io["cachedFacts"], raw.len());
+    assert_eq!(legacy.summary.io["parsedDocuments"], 0);
     for (expected, actual) in cold.documents.iter().zip(&legacy.documents) {
         assert_eq!(
             serde_json::to_vec(&actual.facts).unwrap(),

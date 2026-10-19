@@ -2,14 +2,14 @@
 //! strategies scan borrowed string slices and allocate only matched facts.
 //! Original document bytes use an authenticated rebuildable Source cache;
 //! missing or corrupt entries are recovered from the fixed Git identity.
-use crate::index::{self, Document, Index, Symbol};
+use crate::index::{self, Document, Index, Symbol, persistence_wire};
 use lycheedev_core::{
     Result, ToolkitError,
+    control::OperationControl,
     metadata::{Metadata, historical_write::finish_historical},
     selection::{SourcePin, valid_digest},
     storage,
 };
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -17,35 +17,11 @@ use std::{
     io::Read,
     path::Path,
 };
-const SCHEMA: &str = "lycheedev.source-query-file.rust.v3";
-const MAGIC: &[u8; 8] = b"LYSPIDX3";
+const SCHEMA: &str = "lycheedev.source-query-file.rust.v4";
+const MAGIC: &[u8; 8] = b"LYSPIDX4";
 const MAX_BYTES: usize = 128 << 20;
 const RECORD: usize = 92;
 const DICTIONARY: usize = 16;
-#[derive(Deserialize)]
-#[cfg_attr(test, derive(Serialize))]
-struct Meta {
-    schema: String,
-    identity: String,
-    summary: Value,
-    documents: Vec<Document>,
-    assets: Vec<Value>,
-    #[serde(rename = "compatibilityGaps")]
-    compatibility_gaps: BTreeSet<String>,
-}
-// Serialization borrows the authenticated index. In particular Document.text
-// and Facts are skipped, so cloning Documents here used to copy both complete
-// in-memory payloads only to discard those copies during serialization.
-#[derive(Serialize)]
-struct MetaRef<'a> {
-    schema: &'static str,
-    identity: &'a str,
-    summary: &'a Value,
-    documents: &'a [Document],
-    assets: &'a [Value],
-    #[serde(rename = "compatibilityGaps")]
-    compatibility_gaps: &'a BTreeSet<String>,
-}
 fn invalid(message: &str) -> ToolkitError {
     ToolkitError::new("codebase.source_integrity", message, 4)
 }
@@ -72,14 +48,16 @@ fn put(raw: &mut Vec<u8>, n: usize) -> Result<()> {
     Ok(())
 }
 struct Image<'a> {
-    meta: Meta,
+    meta: Index,
+    owned_remaining: usize,
+    control: OperationControl,
     records: &'a [u8],
     dictionary: &'a [u8],
     postings: &'a [u8],
     strings: &'a str,
 }
 impl<'a> Image<'a> {
-    fn decode(raw: &'a [u8], identity: &str) -> Result<Self> {
+    fn decode(raw: &'a [u8], identity: &str, control: &OperationControl) -> Result<Self> {
         if raw.len() > MAX_BYTES || raw.get(..8) != Some(MAGIC.as_slice()) {
             return Err(invalid("Invalid file query index header"));
         }
@@ -104,10 +82,8 @@ impl<'a> Image<'a> {
             offset = end;
             Ok(bytes)
         };
-        let meta: Meta = serde_json::from_slice(section(meta_len)?)?;
-        if meta.schema != SCHEMA || meta.identity != identity {
-            return Err(invalid("File query index identity differs"));
-        }
+        let (meta, owned_remaining) =
+            persistence_wire::decode_metadata(section(meta_len)?, identity, control)?;
         let records = section(record_count.checked_mul(RECORD).ok_or_else(budget)?)?;
         let dictionary = section(dict_count.checked_mul(DICTIONARY).ok_or_else(budget)?)?;
         let postings = section(post_count.checked_mul(4).ok_or_else(budget)?)?;
@@ -118,6 +94,8 @@ impl<'a> Image<'a> {
         }
         let image = Self {
             meta,
+            owned_remaining,
+            control: control.clone(),
             records,
             dictionary,
             postings,
@@ -125,13 +103,24 @@ impl<'a> Image<'a> {
         };
         // These are bounded derived data, but authenticated bytes still require
         // structural admission. Do not trust offsets just because SHA matches.
-        for r in image.records.as_chunks::<RECORD>().0 {
-            for field in 0..10 {
-                image.string(r, field * 8)?;
-            }
+        let mut declarations = 0;
+        let mut relationships = 0;
+        for id in 0..record_count {
+            control.check()?;
+            let symbol = image.borrowed_symbol(id)?;
+            persistence_wire::validate_symbol(&symbol)?;
+            image.string(image.row(id), 72)?; // indexed-search text, not a domain field
+            declarations += usize::from(symbol.kind == "declaration");
+            relationships += usize::from(symbol.kind == "relationship");
+        }
+        if declarations != image.meta.summary.declarations
+            || relationships != image.meta.summary.relationships
+        {
+            return Err(invalid("Query symbol counts differ from summary"));
         }
         let mut previous = None;
         for d in image.dictionary.as_chunks::<DICTIONARY>().0 {
+            control.check()?;
             let key = image.string(d, 0)?;
             if previous.is_some_and(|p: &str| p >= key) {
                 return Err(invalid("Unsorted query dictionary"));
@@ -144,6 +133,7 @@ impl<'a> Image<'a> {
             }
         }
         for p in image.postings.as_chunks::<4>().0 {
+            control.check()?;
             if number(p, 0)? >= record_count {
                 return Err(invalid("Posting refers to absent symbol"));
             }
@@ -186,18 +176,18 @@ impl<'a> Image<'a> {
         self.string(self.row(id), field * 8)
             .expect("admitted query strings")
     }
-    fn symbol(&self, id: usize) -> Result<Symbol> {
+    fn borrowed_symbol(&self, id: usize) -> Result<Symbol<&'a str>> {
         let r = self.row(id);
         Ok(Symbol {
-            id: self.field(id, 0).into(),
-            kind: self.field(id, 1).into(),
-            name: self.field(id, 2).into(),
-            target: self.field(id, 3).into(),
-            category: self.field(id, 4).into(),
-            confidence: self.field(id, 5).into(),
-            path: self.field(id, 6).into(),
-            signature: self.field(id, 7).into(),
-            scope: self.field(id, 8).into(),
+            id: self.string(r, 0 * 8)?,
+            kind: self.string(r, 1 * 8)?,
+            name: self.string(r, 2 * 8)?,
+            target: self.string(r, 3 * 8)?,
+            category: self.string(r, 4 * 8)?,
+            confidence: self.string(r, 5 * 8)?,
+            path: self.string(r, 6 * 8)?,
+            signature: self.string(r, 7 * 8)?,
+            scope: self.string(r, 8 * 8)?,
             line: number(r, 80)?,
             end_line: number(r, 84)?,
             ordinal: number(r, 88)?,
@@ -207,6 +197,7 @@ impl<'a> Image<'a> {
         let mut low = 0;
         let mut high = self.dictionary.len() / DICTIONARY;
         while low < high {
+            self.control.check()?;
             let mid = low + (high - low) / 2;
             let d = &self.dictionary[mid * DICTIONARY..(mid + 1) * DICTIONARY];
             match self.string(d, 0)?.cmp(text) {
@@ -235,11 +226,7 @@ impl<'a> Image<'a> {
         bytes: usize,
         started: std::time::Instant,
     ) -> Result<Index> {
-        if self.meta.summary["commit"] != pin.exact_commit
-            || self.meta.summary["repository"] != pin.repository
-            || self.meta.summary["product"] != pin.product
-            || self.meta.summary["parser"] != pin.parser_revision
-        {
+        if !self.meta.summary.matches(pin) {
             return Err(invalid("Query index source identity differs"));
         }
         let permitted = |id: usize| {
@@ -254,6 +241,7 @@ impl<'a> Image<'a> {
         let mut ids = BTreeSet::new();
         let mut relations = BTreeSet::new();
         for id in exact {
+            self.control.check()?;
             let kind = self.field(id, 1);
             if kind == "relationship" {
                 relations.insert(id);
@@ -269,6 +257,7 @@ impl<'a> Image<'a> {
         }
         if broad || ids.is_empty() {
             for id in 0..self.records.len() / RECORD {
+                self.control.check()?;
                 if self.field(id, 1) != "relationship"
                     && permitted(id)
                     && (self.field(id, 2).starts_with(text)
@@ -284,6 +273,7 @@ impl<'a> Image<'a> {
                 .map(str::to_ascii_lowercase)
                 .collect();
             for id in 0..self.records.len() / RECORD {
+                self.control.check()?;
                 if self.field(id, 1) == "relationship" || !permitted(id) {
                     continue;
                 }
@@ -300,6 +290,7 @@ impl<'a> Image<'a> {
         if broad {
             let lower = text.to_ascii_lowercase();
             for id in 0..self.records.len() / RECORD {
+                self.control.check()?;
                 if self.field(id, 1) == "relationship"
                     && (self.field(id, 2).to_ascii_lowercase().contains(&lower)
                         || self.field(id, 3).to_ascii_lowercase().contains(&lower))
@@ -311,24 +302,23 @@ impl<'a> Image<'a> {
         // Preserve canonical order BEFORE staged candidate truncation and ID
         // deduplication. Projecting only a top-N list would silently lose recall.
         ids.extend(relations);
-        let symbols = ids
-            .into_iter()
-            .map(|id| self.symbol(id))
-            .collect::<Result<Vec<_>>>()?;
+        let symbols = persistence_wire::own_symbols(
+            ids.iter().map(|&id| self.borrowed_symbol(id)),
+            ids.len(),
+            self.owned_remaining,
+            &self.control,
+        )?;
         let assets = if topic == "asset" {
             let normalized = crate::assets::normalize_path(text);
             self.meta
                 .assets
                 .into_iter()
-                .filter(|a| {
-                    crate::assets::normalize_path(a["path"].as_str().unwrap_or(""))
-                        .contains(&normalized)
-                })
+                .filter(|a| crate::assets::normalize_path(a.path.as_str()).contains(&normalized))
                 .collect()
         } else {
             vec![]
         };
-        self.meta.summary["io"] = json!({"cachedIndex":cached,"projection":"file-posting","gitTreeProcesses":0,"gitBlobProcesses":0,"indexBytesRead":bytes,"projectedSymbols":symbols.len(),"parsedDocuments":0,"elapsedMs":started.elapsed().as_millis(),"deadlineMs":180000});
+        self.meta.summary.io = json!({"cachedIndex":cached,"projection":"file-posting","gitTreeProcesses":0,"gitBlobProcesses":0,"indexBytesRead":bytes,"projectedSymbols":symbols.len(),"parsedDocuments":0,"elapsedMs":started.elapsed().as_millis(),"deadlineMs":180000});
         Ok(Index {
             documents: self.meta.documents,
             assets,
@@ -382,7 +372,7 @@ pub fn load_with_control(
         )?;
         let built = (|| {
             let full = index::build_with_control(home, pin, control)?;
-            let raw = write_image(&full, &identity)?;
+            let raw = write_image(&full, &identity, control)?;
             let blob =
                 lycheedev_core::cache::publish_derived_controlled(home, &raw, MAX_BYTES, control)?;
             crate::persistence::put_manifest(
@@ -396,7 +386,7 @@ pub fn load_with_control(
         crate::persistence::finish_control(finish_historical(built, lock.close()), control.check())?
     };
     control.check()?;
-    let mut image = Image::decode(&raw, &identity)?;
+    let mut image = Image::decode(&raw, &identity, control)?;
     if let Some(originals) = originals {
         image.adopt_originals(originals)?;
     }
@@ -427,7 +417,7 @@ pub fn status_with_control(
             (format!("source/rust-query-file/{identity}"), SCHEMA),
             (
                 format!("source/rust-index/{identity}"),
-                "lycheedev.source-index.rust.v6",
+                persistence_wire::SCHEMA,
             ),
         ] {
             let manifest = match metadata.read_controlled::<Value>(&key, control) {
@@ -442,44 +432,25 @@ pub fn status_with_control(
                 continue;
             };
             let (summary, documents) = if schema == SCHEMA {
-                let image = Image::decode(&raw, &identity)?;
+                let image = Image::decode(&raw, &identity, control)?;
                 (image.meta.summary, image.meta.documents.len())
             } else {
-                let full: Index = serde_json::from_slice(&raw)?;
-                (full.summary, full.documents.len())
+                index::decode_summary(&raw, &identity, control)?
             };
-            if summary["repository"] != pin.repository
-                || summary["commit"] != pin.exact_commit
-                || summary["product"] != pin.product
-                || summary["parser"] != pin.parser_revision
-            {
+            if !summary.matches(pin) {
                 return Err(invalid("Readiness cache source identity differs"));
             }
             status["ready"] = json!(true);
             status["readySnapshots"] = json!(1);
-            status["snapshotFiles"] =
-                json!(documents + summary["skippedDocuments"].as_u64().unwrap_or(0) as usize);
-            status["assets"] = summary["assets"].clone();
-            status["complete"] = summary["complete"].clone();
-            status["coverage"] = json!({"analyzedDocuments":documents,"skippedDocuments":summary["skippedDocuments"],"diagnostics":summary["diagnostics"],"complete":summary["complete"]});
-            status["astFiles"] = if let Some(count) = summary.get("astFiles") {
-                count.clone()
-            } else if summary["diagnostics"] == 0 {
-                json!(documents)
-            } else if summary["diagnostics"].as_u64().unwrap_or(u64::MAX) <= 25 {
-                let failed: BTreeSet<_> = summary["diagnosticSample"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|d| d["path"].as_str())
-                    .collect();
-                json!(documents.saturating_sub(failed.len()))
-            } else {
-                status["astFilesState"] = json!("unknown");
-                status["astFilesReason"] =
-                    json!("older derived cache retained only sampled diagnostic paths");
-                Value::Null
-            };
+            status["snapshotFiles"] = json!(
+                documents
+                    .checked_add(summary.skipped_documents)
+                    .ok_or_else(budget)?
+            );
+            status["assets"] = json!(summary.assets);
+            status["complete"] = json!(summary.complete);
+            status["coverage"] = json!({"analyzedDocuments":documents,"skippedDocuments":summary.skipped_documents,"diagnostics":summary.diagnostics,"complete":summary.complete});
+            status["astFiles"] = json!(summary.ast_files);
             return Ok(status);
         }
         Ok(status)
@@ -505,7 +476,9 @@ fn read_image(
     }
     storage::guard_path(home, &path)?;
     let mut file = fs::File::open(path)?.take((MAX_BYTES + 1) as u64);
-    let result = (|| {
+    let result: Result<Option<Vec<u8>>> = (|| {
+        use sha2::Digest;
+        let mut hash = sha2::Sha256::new();
         let mut raw = vec![];
         let mut buffer = [0; 65536];
         loop {
@@ -514,37 +487,30 @@ fn read_image(
             if n == 0 {
                 break;
             }
-            raw.extend_from_slice(&buffer[..n]);
+            persistence_wire::append_input(&mut raw, &buffer[..n])?;
+            hash.update(&buffer[..n]);
         }
-        if raw.len() > MAX_BYTES || blob["bytes"] != raw.len() || storage::sha256(&raw) != digest {
+        if raw.len() > MAX_BYTES
+            || blob["bytes"] != raw.len()
+            || format!("{:x}", hash.finalize()) != digest
+        {
             return Err(invalid("Query index content differs"));
         }
         Ok(Some(raw))
     })();
     storage::finish_file(file.into_inner(), result, control)
 }
-fn write_image(map: &Index, identity: &str) -> Result<Vec<u8>> {
-    let mut summary = map.summary.clone();
-    summary
-        .as_object_mut()
-        .ok_or_else(|| invalid("Invalid index summary"))?
-        .remove("io");
-    let meta = serde_json::to_vec(&MetaRef {
-        schema: SCHEMA,
-        identity,
-        summary: &summary,
-        documents: &map.documents,
-        assets: &map.assets,
-        compatibility_gaps: &map.compatibility_gaps,
-    })?;
-    write_image_sections(map, meta)
+fn write_image(map: &Index, identity: &str, control: &OperationControl) -> Result<Vec<u8>> {
+    let meta = persistence_wire::encode_metadata(map, identity, control)?;
+    write_image_sections(map, meta, control)
 }
-fn write_image_sections(map: &Index, meta: Vec<u8>) -> Result<Vec<u8>> {
+fn write_image_sections(map: &Index, meta: Vec<u8>, control: &OperationControl) -> Result<Vec<u8>> {
     let mut pool = vec![];
     let mut interned = BTreeMap::<String, (usize, usize)>::new();
     let mut records = vec![];
     let mut names = BTreeMap::<String, BTreeSet<usize>>::new();
     let mut intern = |value: &str, output: &mut Vec<u8>| -> Result<()> {
+        control.check()?;
         let &(start, len) = if let Some(pair) = interned.get(value) {
             pair
         } else {
@@ -556,13 +522,17 @@ fn write_image_sections(map: &Index, meta: Vec<u8>) -> Result<Vec<u8>> {
             {
                 return Err(budget());
             }
-            pool.extend_from_slice(value.as_bytes());
+            for chunk in value.as_bytes().chunks(65536) {
+                control.check()?;
+                pool.extend_from_slice(chunk);
+            }
             interned.entry(value.into()).or_insert(pair)
         };
         put(output, start)?;
         put(output, len)
     };
     for (id, s) in map.symbols.iter().enumerate() {
+        control.check()?;
         for field in [
             &s.id,
             &s.kind,
@@ -597,10 +567,12 @@ fn write_image_sections(map: &Index, meta: Vec<u8>) -> Result<Vec<u8>> {
     let mut dictionary = vec![];
     let mut postings = vec![];
     for (name, ids) in &names {
+        control.check()?;
         intern(name, &mut dictionary)?;
         put(&mut dictionary, postings.len() / 4)?;
         put(&mut dictionary, ids.len())?;
         for &id in ids {
+            control.check()?;
             put(&mut postings, id)?;
         }
     }
@@ -622,7 +594,10 @@ fn write_image_sections(map: &Index, meta: Vec<u8>) -> Result<Vec<u8>> {
         {
             return Err(budget());
         }
-        raw.extend_from_slice(section);
+        for chunk in section.chunks(65536) {
+            control.check()?;
+            raw.extend_from_slice(chunk);
+        }
     }
     Ok(raw)
 }
@@ -675,8 +650,12 @@ mod tests {
                     facts_locator: None,
                 }],
                 symbols,
-                assets: vec![json!({"path":"Assets/Timer.blp"})],
-                summary: json!({"repository":pin.repository,"product":pin.product,"commit":pin.exact_commit,"parser":pin.parser_revision,"complete":true,"skippedDocuments":0,"diagnostics":0}),
+                assets: vec![crate::index::model::test_asset(
+                    json!({"path":"Assets/Timer.blp","bytes":(64usize<<20)+1}),
+                )],
+                summary: crate::index::model::test_summary(
+                    json!({"repository":pin.repository,"product":pin.product,"commit":pin.exact_commit,"parser":pin.parser_revision,"complete":true,"skippedDocuments":0,"diagnostics":0,"documents":1,"astFiles":1,"assets":1,"declarations":3,"relationships":1}),
+                ),
                 compatibility_gaps: BTreeSet::from(["api".into(), "event".into()]),
                 home: Path::new(".").into(),
             },
@@ -689,7 +668,7 @@ mod tests {
         let (mut full, pin) = map();
         full.home = fixture.0.clone();
         let identity = index::fingerprint(&pin);
-        let raw = write_image(&full, &identity).unwrap();
+        let raw = write_image(&full, &identity, &OperationControl::default()).unwrap();
         assert_ne!(&raw[..8], b"SQLite f");
         for (text, mode, topic) in [
             ("Timer.After", "precise", "api"),
@@ -699,7 +678,7 @@ mod tests {
             ("After", "exploratory", "api"),
             ("Timer", "precise", "asset"),
         ] {
-            let mut projected = Image::decode(&raw, &identity)
+            let mut projected = Image::decode(&raw, &identity, &OperationControl::default())
                 .unwrap()
                 .project(
                     &fixture.0,
@@ -741,31 +720,28 @@ mod tests {
         }
     }
     #[test]
-    fn borrowed_metadata_preserves_complete_legacy_image_bytes_with_skipped_payloads() {
+    fn binary_metadata_preserves_public_fields_and_omits_source_payloads() {
         let (mut full, pin) = map();
         full.documents[0].facts =
             crate::facts::lua(b"function BorrowedFact() return Other() end", false);
-        assert!(!full.documents[0].facts.declarations.is_empty());
-        full.summary["io"] = json!({"cold":true});
+        full.summary.io = json!({"cold":true});
         let identity = index::fingerprint(&pin);
-        let mut summary = full.summary.clone();
-        summary.as_object_mut().unwrap().remove("io");
-        // This is the previous owned metadata serializer, retained only as a
-        // differential fixture. Production cannot serialize Meta or clone it.
-        let old = Meta {
-            schema: SCHEMA.into(),
-            identity: identity.clone(),
-            summary,
-            documents: full.documents.clone(),
-            assets: full.assets.clone(),
-            compatibility_gaps: full.compatibility_gaps.clone(),
-        };
-        let old = write_image_sections(&full, serde_json::to_vec(&old).unwrap()).unwrap();
-        let current = write_image(&full, &identity).unwrap();
-        assert_eq!(current, old);
-        let decoded = Image::decode(&current, &identity).unwrap();
+        let current = write_image(&full, &identity, &OperationControl::default()).unwrap();
+        let decoded = Image::decode(&current, &identity, &OperationControl::default()).unwrap();
         assert!(decoded.meta.documents[0].text.is_none());
         assert!(decoded.meta.documents[0].facts.declarations.is_empty());
+        assert!(decoded.meta.summary.io.is_null());
+        let mut expected = serde_json::to_value(&full.summary).unwrap();
+        expected.as_object_mut().unwrap().remove("io");
+        assert_eq!(
+            serde_json::to_value(&decoded.meta.summary).unwrap(),
+            expected
+        );
+        assert_eq!(
+            serde_json::to_value(&decoded.meta.assets).unwrap(),
+            serde_json::to_value(&full.assets).unwrap()
+        );
+        assert_eq!(decoded.meta.compatibility_gaps, full.compatibility_gaps);
     }
     #[test]
     fn cold_projection_moves_all_original_allocations_including_empty_documents() {
@@ -778,10 +754,12 @@ mod tests {
             facts: Facts::default(),
             facts_locator: None,
         });
+        full.summary.documents = full.documents.len();
+        full.summary.ast_files = full.documents.len();
         let pointer = full.documents[0].text.as_ref().unwrap().as_ptr();
         let identity = index::fingerprint(&pin);
-        let raw = write_image(&full, &identity).unwrap();
-        let mut image = Image::decode(&raw, &identity).unwrap();
+        let raw = write_image(&full, &identity, &OperationControl::default()).unwrap();
+        let mut image = Image::decode(&raw, &identity, &OperationControl::default()).unwrap();
         image.adopt_originals(full.documents).unwrap();
         assert_eq!(
             image.meta.documents[0].text.as_ref().unwrap().as_ptr(),
@@ -791,7 +769,7 @@ mod tests {
         assert!(image.meta.documents[0].facts.declarations.is_empty());
         let mut mismatched = image.meta.documents;
         mismatched[0].path = "Wrong.lua".into();
-        let mut image = Image::decode(&raw, &identity).unwrap();
+        let mut image = Image::decode(&raw, &identity, &OperationControl::default()).unwrap();
         assert_eq!(
             image.adopt_originals(mismatched).unwrap_err().code,
             "codebase.source_integrity"
@@ -801,18 +779,18 @@ mod tests {
     fn file_projection_rejects_truncated_offsets_identity_and_invalid_strings() {
         let (full, pin) = map();
         let identity = index::fingerprint(&pin);
-        let raw = write_image(&full, &identity).unwrap();
+        let raw = write_image(&full, &identity, &OperationControl::default()).unwrap();
         for len in [0, 7, 27, raw.len() - 1] {
-            assert!(Image::decode(&raw[..len], &identity).is_err());
+            assert!(Image::decode(&raw[..len], &identity, &OperationControl::default()).is_err());
         }
-        assert!(Image::decode(&raw, "other-identity").is_err());
+        assert!(Image::decode(&raw, "other-identity", &OperationControl::default()).is_err());
         let mut altered = raw.clone();
         let record_start = 28 + number(&raw, 8).unwrap();
         altered[record_start..record_start + 4].copy_from_slice(&u32::MAX.to_le_bytes());
-        assert!(Image::decode(&altered, &identity).is_err());
+        assert!(Image::decode(&altered, &identity, &OperationControl::default()).is_err());
         let mut altered = raw;
         *altered.last_mut().unwrap() = 0xff;
-        assert!(Image::decode(&altered, &identity).is_err());
+        assert!(Image::decode(&altered, &identity, &OperationControl::default()).is_err());
     }
     struct CacheFixture(std::path::PathBuf);
     impl CacheFixture {
@@ -853,7 +831,7 @@ mod tests {
         let (full, pin) = map();
         let control = lycheedev_core::control::OperationControl::default();
         let identity = index::fingerprint(&pin);
-        let raw = write_image(&full, &identity).unwrap();
+        let raw = write_image(&full, &identity, &OperationControl::default()).unwrap();
         let blob =
             lycheedev_core::cache::publish_derived_controlled(&f.0, &raw, MAX_BYTES, &control)
                 .unwrap();
@@ -866,8 +844,8 @@ mod tests {
         .unwrap();
         let loaded =
             load_with_control(&f.0, &pin, "Timer.After", "precise", "api", &control).unwrap();
-        assert_eq!(loaded.summary["io"]["cachedIndex"], true);
-        assert_eq!(loaded.summary["commit"], pin.exact_commit);
+        assert_eq!(loaded.summary.io["cachedIndex"], true);
+        assert_eq!(loaded.summary.commit, pin.exact_commit);
         let status = status_with_control(&f.0, &pin, &control).unwrap();
         assert_eq!(status["ready"], true);
         assert_eq!(status["activeSnapshot"], pin.exact_commit);
@@ -878,7 +856,7 @@ mod tests {
         let (full, pin) = map();
         let control = lycheedev_core::control::OperationControl::default();
         let identity = index::fingerprint(&pin);
-        let raw = write_image(&full, &identity).unwrap();
+        let raw = write_image(&full, &identity, &OperationControl::default()).unwrap();
         let blob =
             lycheedev_core::cache::publish_derived_controlled(&f.0, &raw, MAX_BYTES, &control)
                 .unwrap();

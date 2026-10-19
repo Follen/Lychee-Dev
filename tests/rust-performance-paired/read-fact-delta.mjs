@@ -6,6 +6,7 @@ import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 const RUST_LAYOUTS = Object.freeze({
+  'v13-postcard-index18': {key: 'facts-layout-v13-postcard-1.1.3', generator: 'generator-v6', packed: true, postcard: true, binaryIndex: true},
   'v13-postcard': {key: 'facts-layout-v13-postcard-1.1.3', generator: 'generator-v6', packed: true, postcard: true},
   // Same authenticated wire format as pack1; the caller must bind this new
   // grouping domain to the exact candidate source/artifact and index SHA.
@@ -132,10 +133,11 @@ export function readRustFact(home, document, rustLayout = 'v6') {
   return {file, bytes: raw.length, fileSHA256: locator ? null : sha256(raw), ...(locator ? {record: locator, recordSHA256: sha256(raw)} : {}), factsSHA256: envelope.factsSHA256, facts: envelope.facts};
 }
 
-export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v6', rustIndexFile, expectedIndexSHA256, retainedGo = undefined, {captureSources = false, retainIndex = false, postcardExport} = {}) {
+export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v6', rustIndexFile, expectedIndexSHA256, retainedGo = undefined, {captureSources = false, retainIndex = false, postcardExport, postcardIndexExport} = {}) {
   const layout = RUST_LAYOUTS[rustLayout];
   if (!layout) throw new Error(`Unsupported Rust facts layout: ${rustLayout}`);
   if (!layout.postcard && postcardExport !== undefined) throw new Error('Historical Facts layout does not accept a Postcard exporter');
+  if (!layout.binaryIndex && postcardIndexExport !== undefined) throw new Error('Historical JSON Index rejects binary exporter');
   const manifestFile = path.join(path.dirname(goRecords), 'manifest.json');
   // The formal sequential runner supplies authenticated immutable custody streams.
   // CLI calls use the original on-disk inputs; no configuration injects readers.
@@ -163,7 +165,7 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 128 << 20) throw new Error('Invalid Rust index file');
     const indexRaw = fs.readFileSync(rustIndexFile);
     if (sha256(indexRaw) !== expectedIndexSHA256) throw new Error('Rust index authentication mismatch');
-    const index = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(indexRaw));
+    const index = layout.binaryIndex ? (await import('./read-fact-delta-postcard.mjs')).postcardIndexView(postcardIndexExport, {path: rustIndexFile, bytes: indexRaw.length, sha256: expectedIndexSHA256}) : JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(indexRaw));
     if (!Array.isArray(index.documents) || index.documents.length !== documents.length
       || index.summary?.parser !== manifest.summary.parser) throw new Error('Rust index document identity mismatch');
     for (const field of ['repository', 'product', 'commit']) {

@@ -364,17 +364,16 @@ fn single_and_matrix_keep_distinct_go_contracts_and_warm_index_gaps() {
         warm_gap.data["targets"][0]["unresolved"]
     );
     let cached = index::build(&home, &gap_source).unwrap();
-    assert_eq!(cached.summary["io"]["cachedIndex"], true);
-    assert_eq!(cached.summary["diagnostics"], 26);
+    assert_eq!(cached.summary.io["cachedIndex"], true);
+    assert_eq!(cached.summary.diagnostics, 26);
     assert!(
-        cached.summary["diagnosticSample"]
-            .as_array()
+        cached
+            .summary
+            .diagnostic_sample
+            .as_ref()
             .unwrap()
             .iter()
-            .all(|row| !row["path"]
-                .as_str()
-                .unwrap()
-                .contains("Blizzard_APIDocumentationGenerated"))
+            .all(|row| !row.path.contains("Blizzard_APIDocumentationGenerated"))
     );
     // Missing Git source and invalid addon are independent failures. The index
     // error wins without publishing any new syntax/addon capture or file blob.

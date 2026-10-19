@@ -13,14 +13,14 @@
 
 | 范围 | 已保存/已实现 | 当前证据和剩余门禁 |
 | --- | --- | --- |
-| Core/Data/Source基础 | 8c9：配置、Data派生目录/准入、真实Arrow cache prepare、Source Postcard Facts | 官方依赖fetch成功；新基础运行验证未闭合：disk24通过2失败，其余组待终态，不能声称完整正确性通过 |
-| Live资源归属 | 5c60：私有 SessionOwner，native先于journal关闭与claim退役 | 六新增模型/真实service回归待跑；无新线程/daemon，真实客户端未验 |
-| 编译修复 | 6ea恢复原SYM SHA writer；2b400显式Data结果类型；66d空slice断言类型 | 8c9、6ea、2b400、66d原编译失败保留。8bfe实际check通过，config14通过；disk26为24通过2失败（copy注入阶段不确定、Windows路径文本）。其余独立组由原队列继续，尚无终态结果 |
+| Core/Data/Source基础 | 8c9：配置、Data派生目录/准入、真实Arrow cache prepare、Source Postcard Facts | 官方依赖fetch成功；8bfe分组实际434 matched：430通过/3失败/1 exporter ignore；disk两失败待278复验，generation取消预期码一失败待修，不能声称完整正确性通过 |
+| Live资源归属 | 5c60：私有 SessionOwner，native先于journal关闭与claim退役 | 8bfe connection61/durable36通过，六新增逐名一次；无新线程/daemon，真实客户端未验 |
+| 编译修复 | 6ea恢复原SYM SHA writer；2b400显式Data结果类型；66d空slice断言类型 | 8c9、6ea、2b400、66d原编译失败保留。8bfe实际check通过，config14通过；disk26为24通过2失败（copy注入阶段不确定、Windows路径文本）。其余11组续跑392通过/1失败/1 ignore；新增失败为generation取消测试期待operation.cancelled、实际command.cancelled，后续断言未执行，单独修正和复验 |
 | Skill精简 | 308efa：22指南文件、工具与身份/历史fixture，43路径逐字节/ Git blob核验 | 六Node套件101/101通过；25文件/57链接独审通过。两类MODEL_ONLY独立前后任务均通过修正模型：恢复旧/新调用8/11次、身份核查旧/新6/7次，不能推断新版更优；原宽松模型接受非法wait=0的记录保留。四类真实CLI任务未跑，文档缩短不是质量通过 |
 | Source正式二进制证据 | 740a：已独审10文件工具片，完整Facts exporter与六场景适配 | 七Node套件382/382通过；新Rust exporter/Windows/性能待验证。历史v11读取与新v13显式分开 |
 | DataFusion适配资格 | 独立可选资格片已保存并静态独审，固定54.0.0/Arrow58.3.0 | 14数值/计划回归未编译未运行；默认依赖图不引入DF，生产执行器尚未切换；不能宣称适合或提速 |
 | Data磁盘后继 | shared blob准入15文件及stream spool14文件均有独立候选/复核 | 尚未完成全Data归属；实际运行、跨进程/错误路径与性能待验证，不宣称5GB已全闭合 |
-| Source主Index二进制 | 隔离候选，以共享typed模型按需消费 | 独审已发现并在r2闭合构造前分配、独立公共JSON oracle和首错覆盖；24文件静态复审通过，25 active/1 ignored均未跑，尚未整合 |
+| Source主Index二进制 | 已整合24文件r2与8文件正式Node适配，采用共享typed模型/Postcard，公共JSON不变 | Rust静态复审通过，25 active/1 ignored未跑；Node七套独立361/361通过。固定Go323字段/资产顺序来源已核，新格式真实Windows、导出容量与性能仍待 |
 
 已完成的DBCD四项修复保留：WDC5 palette物理顺序、多词metadata、官方BUILD预设、非SQL实际读取限制传播。c571与9004分批合计113 distinct通过、3原ignore；旧红例及四个admission测试失败保留，不能将小fixture称作真实>256MiB表验证。产品定义未改变，完整产品矩阵仍待。
 
@@ -29,6 +29,8 @@
 Data默认容量为**5,000,000,000字节（十进制5GB）**，配置支持明确单位；与测试scratch 5/6GiB不同。最终统一核算Data下载/共享blob归属、物化/索引/目录、staging/spill/导出峰值和证据占用，按内容去重防双计。活跃lease和证据引用保护；旧已超额或配置缩小先拒新增并说明，不删除证据。
 
 当前基础只覆盖已接入的Data派生写入。共享blob、decoded spool后继未全部运行，历史未登记blob、CAP、SQLite/WAL/SHM等尚未闭合归属。不能把派生对象helper当全Data硬上限。只缓存实际查询过的表，临时查询可不落盘；不默认长期保留raw、IPC、Parquet三份。尚未实现并验收的淘汰策略不称已生效。
+
+Source主Index采用明确v18身份与LYCIDX01帧，query metadata同步版本化。完整文件SHA认证后，共享typed字段校验供完整与摘要消费；摘要不构造全量owned Symbol。128MiB限制新缓存实际文件字节，构造分配另行有界准入，不再为旧JSON内部表示额外全量计数。因新版本及时取消可先于尚未读取的损坏尾返回；已经确认的语义/预算错误保持，不把坏缓存作为健康结果。正式诊断保完整公共Index与Facts，两个exporter输出共用原128MiB证据额度，超过明确失败，不能截断比较。资产比较保f811已认可的大资产前置稳定分区和组内完整顺序/重复。
 
 Source新格式旧cache失效后重建，不维护生产旧格式迁移。新格式完整认证、边界/预算/取消和损坏拒绝仍必须保留；坏新缓存不能通过旧格式fallback隐藏。公共JSON和query/inspect业务输出保留，私有wire变化单独版本化。
 
@@ -42,7 +44,7 @@ Data CSV9693工具对旧63d与a860的单pair：cold401.4790/389.9062ms，warm349
 
 ## 5. 下一批及证据规则
 
-1. 优先闭合8bfe两项disk测试失败：实际copy进度注入须证明发布前中止，另保发布后失败的Published引用/状态与成品；路径断言按平台Path语义保完整目标。固定后继先正式check再受影响组，原8bfe其余独立组继续，各SHA证据分开。保持原600秒/default stack，历史unknown辅助进程forced事实不改标。
+1. 27827已保存disk两项测试修正及新增发布后失败事实回归，固定check/disk27/DF资格队列待结果。8bfe其余11组已结束，generation取消测试另修command.cancelled公开期待，并补exit7与无可见object断言；未复验不标绿。保持原600秒/default stack，各SHA和历史unknown辅助进程forced事实分开。
 2. 按已保存的固定SHA提供Source诊断工具和DF资格片的命令/依赖前置并执行验证；DF用显式非默认feature，先官方锁定依赖获取再资格测试，不能替代生产正确性/内存/性能门禁。
 3. Skill用固定前后指南、同一真实CLI/fixture做独立任务盲评；模型输入与真实CLI/客户端分别记证据。所有本机任务仍唯一串行队列。
 4. Data容量后继与Source Index候选完成独审后集中回归，再匹配唯一产品构建及同工作量性能。尚未完成的共享所有权/预算不能用文档承诺代替接线。

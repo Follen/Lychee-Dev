@@ -1,4 +1,7 @@
 //! Fixed Go 3.2.3 asset headers and shared asset-search normalization.
+use super::index::AssetRecord;
+use lycheedev_core::evidence::BlobRef;
+#[cfg(test)]
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -18,7 +21,13 @@ pub(crate) fn normalize_path(value: &str) -> String {
     lowercase(&value.replace('/', "\\"))
 }
 
-pub(crate) fn record(path: &str, bytes: usize, raw: &[u8], hash: &str, local: Value) -> Value {
+pub(crate) fn record(
+    path: &str,
+    bytes: usize,
+    raw: &[u8],
+    hash: &str,
+    local: Option<BlobRef>,
+) -> AssetRecord {
     let extension = format!(
         ".{}",
         Path::new(path)
@@ -61,7 +70,17 @@ pub(crate) fn record(path: &str, bytes: usize, raw: &[u8], hash: &str, local: Va
     } else {
         (0, 0, extension.strip_prefix('.').unwrap_or(&extension))
     };
-    json!({"path":path,"contentHash":hash,"bytes":bytes,"extension":extension,"mime":mime,"format":format,"width":width,"height":height,"local":local})
+    AssetRecord {
+        path: path.into(),
+        content_hash: hash.into(),
+        bytes,
+        mime: mime.into(),
+        format: format.into(),
+        extension,
+        width,
+        height,
+        local,
+    }
 }
 
 #[cfg(test)]
@@ -85,21 +104,25 @@ mod tests {
         png[..8].copy_from_slice(&[137, 80, 78, 71, 13, 10, 26, 10]);
         png[16..20].copy_from_slice(&123u32.to_be_bytes());
         png[20..24].copy_from_slice(&456u32.to_be_bytes());
-        let row = record(
+        let row = serde_json::to_value(record(
             "Image.PNG",
             png.len(),
             &png,
             "hash",
-            json!({"sha256":"hash"}),
-        );
+            Some(BlobRef {
+                sha256: "hash".into(),
+                bytes: png.len() as u64,
+            }),
+        ))
+        .unwrap();
         assert_eq!(
             row,
-            json!({"path":"Image.PNG","contentHash":"hash","bytes":24,"extension":".png","mime":"image/png","format":"png","width":123,"height":456,"local":{"sha256":"hash"}})
+            json!({"path":"Image.PNG","contentHash":"hash","bytes":24,"extension":".png","mime":"image/png","format":"png","width":123,"height":456,"local":{"sha256":"hash","bytes":24}})
         );
         let mut blp = vec![0; 20];
         blp[12..16].copy_from_slice(&64u32.to_le_bytes());
         blp[16..20].copy_from_slice(&32u32.to_le_bytes());
-        let row = record("a.blp", 20, &blp, "h", Value::Null);
+        let row = serde_json::to_value(record("a.blp", 20, &blp, "h", None)).unwrap();
         assert_eq!(row["width"], 64);
         assert_eq!(row["height"], 32);
         assert_eq!(row["mime"], "image/x-blp");
@@ -110,7 +133,7 @@ mod tests {
             ("a.png", vec![0; 24], "png"),
             ("a.blp", vec![0; 19], "blp"),
         ] {
-            let row = record(path, raw.len(), &raw, "", Value::Null);
+            let row = serde_json::to_value(record(path, raw.len(), &raw, "", None)).unwrap();
             assert_eq!(row["format"], format);
             assert_eq!(row["width"], 0);
             assert_eq!(row["height"], 0);
@@ -126,7 +149,14 @@ mod tests {
             ("m2", "application/octet-stream"),
             ("wmo", "application/octet-stream"),
         ] {
-            let row = record(&format!("asset.{ext}"), MAX_BYTES + 1, &[], "", Value::Null);
+            let row = serde_json::to_value(record(
+                &format!("asset.{ext}"),
+                MAX_BYTES + 1,
+                &[],
+                "",
+                None,
+            ))
+            .unwrap();
             assert_eq!(row["mime"], mime);
             assert_eq!(row["format"], ext);
             assert_eq!(row["contentHash"], "");

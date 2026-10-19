@@ -161,7 +161,7 @@ pub fn compare_with_control(
     control.check()?;
     let right = index::build_with_control(home, to, control)?;
     control.check()?;
-    if left.summary["complete"] != true || right.summary["complete"] != true {
+    if !left.summary.complete || !right.summary.complete {
         return Err(ToolkitError::new("codebase.incomplete_index", "codebase.incomplete_index: inspect source index diagnostics before comparing declarations", 5)
             .with_details(json!({"from":left.summary,"to":right.summary,"coverage":{"from":left.coverage(),"to":right.coverage()}})));
     }

@@ -412,14 +412,14 @@ fn assert_aggregate(index: &Index, pin: &SourcePin, sources: &BTreeMap<String, S
             .collect::<Vec<_>>(),
         sources.keys().collect::<Vec<_>>()
     );
-    assert_eq!(index.summary["complete"], true);
+    assert_eq!(index.summary.complete, true);
     assert!(!expected.is_empty());
     let declarations = expected
         .iter()
         .filter(|symbol| symbol.kind == "declaration")
         .count();
     assert!(declarations > 0);
-    assert_eq!(index.summary["declarations"], declarations);
+    assert_eq!(index.summary.declarations, declarations);
     for document in &index.documents {
         let rows = index
             .symbols
@@ -452,8 +452,8 @@ fn build_uncached_cold_and_facts_hit_match_historical_symbol_aggregation() {
     ]);
     let pin = fixture.pin(&sources);
     let cold = build_uncached(&fixture.home, &pin, &control).unwrap();
-    assert_eq!(cold.summary["io"]["parsedDocuments"], sources.len());
-    assert_eq!(cold.summary["io"]["cachedFacts"], 0);
+    assert_eq!(cold.summary.io["parsedDocuments"], sources.len());
+    assert_eq!(cold.summary.io["cachedFacts"], 0);
     assert_aggregate(&cold, &pin, &sources);
     for kind in ["declaration", "relationship", "load", "header"] {
         assert!(
@@ -474,8 +474,8 @@ fn build_uncached_cold_and_facts_hit_match_historical_symbol_aggregation() {
     assert_ne!(repeated[0].ordinal, repeated[1].ordinal);
     assert_ne!(repeated[0].id, repeated[1].id);
     let hit = build_uncached(&fixture.home, &pin, &control).unwrap();
-    assert_eq!(hit.summary["io"]["parsedDocuments"], 0);
-    assert_eq!(hit.summary["io"]["cachedFacts"], sources.len());
+    assert_eq!(hit.summary.io["parsedDocuments"], 0);
+    assert_eq!(hit.summary.io["cachedFacts"], sources.len());
     assert_aggregate(&hit, &pin, &sources);
     assert_eq!(
         serde_json::to_value(&cold.symbols).unwrap(),
@@ -501,8 +501,8 @@ fn build_uncached_incremental_mutations_rekey_cached_and_fresh_symbols() {
     sources.insert("ZMutable.lua".into(), "function Before() end\n".into());
     let mut pin = fixture.pin(&sources);
     let mut previous = build_uncached(&fixture.home, &pin, &control).unwrap();
-    assert_eq!(previous.summary["io"]["parsedDocuments"], 65);
-    assert_eq!(previous.summary["io"]["cachedFacts"], 0);
+    assert_eq!(previous.summary.io["parsedDocuments"], 65);
+    assert_eq!(previous.summary.io["cachedFacts"], 0);
     assert_aggregate(&previous, &pin, &sources);
     for change in ["modify", "insert", "delete", "rename"] {
         match change {
@@ -530,9 +530,9 @@ fn build_uncached_incremental_mutations_rekey_cached_and_fresh_symbols() {
         let next_pin = fixture.pin(&sources);
         assert_ne!(next_pin.exact_commit, pin.exact_commit, "{change}");
         let next = build_uncached(&fixture.home, &next_pin, &control).unwrap();
-        assert_eq!(next.summary["io"]["cachedFacts"], 64, "{change}");
+        assert_eq!(next.summary.io["cachedFacts"], 64, "{change}");
         assert_eq!(
-            next.summary["io"]["parsedDocuments"],
+            next.summary.io["parsedDocuments"],
             sources.len() - 64,
             "{change}"
         );

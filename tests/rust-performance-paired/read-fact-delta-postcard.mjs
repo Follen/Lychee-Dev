@@ -5,6 +5,8 @@ import fs from 'node:fs';
 import {basename, dirname, isAbsolute, join, relative, resolve, sep} from 'node:path';
 import {createHash} from 'node:crypto';
 import {performance} from 'node:perf_hooks';
+import readline from 'node:readline';
+import {openGoCustody} from './source-pack-custody.mjs';
 import {hashFile, sourceDigest, verifyArtifact} from '../../tools/rust-build.mjs';
 import {contained} from '../../tools/rust-disk.mjs';
 import {ownedSpawnSync} from '../../tools/rust-owned-process.mjs';
@@ -12,6 +14,9 @@ import {processPassed, processReaped, verifyOwnerEvidence} from '../rust-parity/
 import {splitIndexEvidence, verifyParts, INDEX_BYTES} from '../../tools/rust-source-pack-evidence.mjs';
 
 export const POSTCARD_LAYOUT = 'v13-postcard';
+export const POSTCARD_INDEX_LAYOUT = 'v13-postcard-index18';
+export const INDEX_EXPORT_TEST = 'index::persistence_wire::export_tests::export_binary_index_manifest';
+export const INDEX_EXPORT_ARGS = Object.freeze(['--exact', INDEX_EXPORT_TEST, '--ignored', '--nocapture']);
 export const POSTCARD_KEY = 'facts-layout-v13-postcard-1.1.3';
 export const EXPORT_TEST = 'facts::binary::export_tests::export_binary_facts_manifest';
 export const EXPORT_ARGS = Object.freeze(['--exact', EXPORT_TEST, '--ignored', '--nocapture']);
@@ -37,7 +42,7 @@ export function readPostcardBytes(file, maximum, expected) {
 function safePath(value) { assert(typeof value === 'string' && value && !isAbsolute(value) && !value.includes('\\') && !value.includes(':') && value.split('/').every(p => p && p !== '.' && p !== '..'), 'Postcard relative path required'); }
 export function postcardFactKey(document) { safePath(document.path); digest(document.sha256); return sha(`${POSTCARD_KEY}\0tree-sitter-0.26.3\0lua-0.5.0\0xml-0.38\0generator-v6\0${document.path}\0${document.sha256}`); }
 export function postcardFactPath(home, document) { const group = document.factsLocator?.group; if (group !== undefined) digest(group); return join(home, 'cache/source-facts-rust', `${group ?? postcardFactKey(document)}.json`); }
-export function postcardIndexIdentity(summary) { return sha(['rust-index-v17', 'assets-v2-go323-metadata', 'facts-pack-v2-path-radix512', POSTCARD_KEY, 'TS0.26.3', 'Lua0.5.0', 'XML0.38', 'generator-v6', ...['repository', 'product', 'commit', 'parser'].map(k => { assert(typeof summary[k] === 'string' && summary[k]); return summary[k]; })].join('\0')); }
+export function postcardIndexIdentity(summary, layout = POSTCARD_LAYOUT) { assert([POSTCARD_LAYOUT, POSTCARD_INDEX_LAYOUT].includes(layout)); return sha([layout === POSTCARD_INDEX_LAYOUT ? 'rust-index-v18' : 'rust-index-v17', 'assets-v2-go323-metadata', 'facts-pack-v2-path-radix512', POSTCARD_KEY, 'TS0.26.3', 'Lua0.5.0', 'XML0.38', 'generator-v6', ...['repository', 'product', 'commit', 'parser'].map(k => { assert(typeof summary[k] === 'string' && summary[k]); return summary[k]; })].join('\0')); }
 
 export const postcardEnvironmentSHA = environment => sha(JSON.stringify(Object.entries(environment).sort(([a], [b]) => a.localeCompare(b))));
 export function postcardCompilerEnvironment(environment) {
@@ -146,11 +151,14 @@ export function verifyPostcardExporter(root, expected, candidate) {
 }
 
 const prepared = new WeakMap(), exported = new WeakMap();
-export function preparePostcardExport(root, home, index, directory) {
+export function preparePostcardExport(root, home, index, directory, {layout = POSTCARD_LAYOUT, indexExport} = {}) {
   directory = contained(root, directory); home = resolve(home);
   assert.equal(resolve(index.path), join(home, 'cache/objects', index.sha256.slice(0, 2), index.sha256.slice(2)), 'Postcard content-addressed index path');
-  const indexRaw = readPostcardBytes(contained(home, index.path), INDEX_BYTES, index), parsed = json(indexRaw);
-  assert.equal(index.manifest?.schema, 'lycheedev.source-index.rust.v6'); assert.equal(index.manifest.identity, postcardIndexIdentity(parsed.summary), 'v17 index recipe required');
+  assert([POSTCARD_LAYOUT, POSTCARD_INDEX_LAYOUT].includes(layout));
+  const binary = layout === POSTCARD_INDEX_LAYOUT;
+  if (!binary) assert.equal(indexExport, undefined, 'historical JSON Index rejects binary exporter');
+  const parsed = binary ? postcardIndexView(indexExport, index) : json(readPostcardBytes(contained(home, index.path), INDEX_BYTES, index));
+  assert.equal(index.manifest?.schema, binary ? 'lycheedev.source-index.rust.v7' : 'lycheedev.source-index.rust.v6'); assert.equal(index.manifest.identity, postcardIndexIdentity(parsed.summary, layout), binary ? 'v18 index recipe required' : 'v17 index recipe required');
   assert.equal(index.manifest.blob.sha256, index.sha256); assert.equal(index.manifest.blob.bytes, index.bytes);
   assert(Array.isArray(parsed.documents)); integer(parsed.documents.length, 1, LIMITS.documents, 'Postcard document budget'); assert.equal(parsed.summary.documents, parsed.documents.length);
   const seen = new Set(), files = new Map(), records = [], sources = []; let total = 0, containerBytes = 0, cachedFile, cachedRaw;
@@ -186,12 +194,13 @@ export function preparePostcardExport(root, home, index, directory) {
   const manifest = {schema: 'lycheedev.source-facts-export-input.v1', records}, raw = Buffer.from(JSON.stringify(manifest)); assert(raw.length <= LIMITS.manifest, 'Postcard manifest budget');
   const manifestPath = join(directory, 'manifest.json'); fs.writeFileSync(manifestPath, raw, {flag: 'wx'});
   const value = Object.freeze({manifest: manifestPath, manifestBytes: raw.length, manifestSHA256: sha(raw), records: records.length, recordBytes: total, containerBytes});
-  prepared.set(value, {root, home, index: structuredClone(index), directory, manifest, files: [...files.values()], sources, documents: parsed.documents}); return value;
+  prepared.set(value, {root, home, layout, indexExport, index: structuredClone(index), directory, manifest, files: [...files.values()], sources, documents: parsed.documents}); return value;
 }
 export function verifyPreparedPostcard(value) {
   const state = prepared.get(value); assert(state, 'authenticated Postcard preparation required');
   assert.equal(hashFile(value.manifest, LIMITS.manifest), value.manifestSHA256, 'Postcard manifest changed'); assert.equal(regular(value.manifest, LIMITS.manifest).size, value.manifestBytes);
   assert.equal(hashFile(state.index.path, INDEX_BYTES), state.index.sha256, 'Postcard index changed');
+  if (state.indexExport) postcardIndexView(state.indexExport, state.index);
   for (const file of state.files) for (const path of [file.original, file.path]) { assert.equal(regular(path, LIMITS.container).size, file.bytes); assert.equal(hashFile(path, LIMITS.container), file.sha256, 'Postcard pack changed'); }
   return state;
 }
@@ -275,12 +284,12 @@ export function capturePostcardExport(token, directory) {
   const manifestArchive = {path: join(directory, 'postcard-input-manifest.json'), bytes: state.preparation.manifestBytes, sha256: state.preparation.manifestSHA256};
   fs.copyFileSync(state.preparation.manifest, manifestArchive.path, fs.constants.COPYFILE_EXCL);
   assert.equal(hashFile(manifestArchive.path, LIMITS.manifest), manifestArchive.sha256, 'archived exporter input manifest differs');
-  const report = {schema: 'lycheedev.source-postcard-custody.v1', layout: POSTCARD_LAYOUT, index: p.index, manifest: state.preparation, manifestArchive, exporter: token.exporter, summary: state.summary, sources: p.sources, references};
+  const report = {schema: 'lycheedev.source-postcard-custody.v1', layout: p.layout, index: p.index, manifest: state.preparation, manifestArchive, exporter: token.exporter, summary: state.summary, sources: p.sources, references};
   save(join(directory, 'postcard-custody.json'), report);
   verifyPreparedPostcard(state.preparation); verifyPostcardCustody(report); return report;
 }
 export function verifyPostcardCustody(report) {
-  assert.equal(report.schema, 'lycheedev.source-postcard-custody.v1'); assert.equal(report.layout, POSTCARD_LAYOUT); let total = 0;
+  assert.equal(report.schema, 'lycheedev.source-postcard-custody.v1'); assert([POSTCARD_LAYOUT, POSTCARD_INDEX_LAYOUT].includes(report.layout)); let total = 0;
   const manifest = json(readPostcardBytes(report.manifestArchive.path, LIMITS.manifest, report.manifestArchive));
   assert.equal(report.manifestArchive.sha256, report.summary.manifestSHA256); assert.equal(report.manifestArchive.bytes, report.summary.manifestBytes);
   assert.equal(manifest.schema, 'lycheedev.source-facts-export-input.v1'); assert.equal(manifest.records.length, report.summary.records);
@@ -290,4 +299,161 @@ export function verifyPostcardCustody(report) {
   for (const ref of report.references) { assert.equal(hashFile(join(ref.directory, 'manifest.json'), 65536), ref.manifestSHA256); assert.deepEqual(ref.manifest.source, ref.source); verifyParts(ref.directory, ref.manifest); total += ref.source.bytes; }
   assert(total <= LIMITS.custody + LIMITS.total, 'Postcard archived total budget');
   const output = report.references.at(-1).source; assert.equal(output.sha256, report.summary.outputSHA256); assert.equal(output.bytes, report.summary.outputBytes); return {files: report.references.length, bytes: total};
+}
+
+// Main Index v18: only the 44-byte envelope is interpreted in Node. The
+// authenticated same-source test executable owns every Postcard field.
+const indexPrepared = new WeakMap(), indexExported = new WeakMap();
+export function verifyPostcardIndexFrame(raw, identity) {
+  integer(raw.length, 44, INDEX_BYTES, 'binary Index frame budget'); digest(identity);
+  assert.equal(raw.subarray(0, 8).toString(), 'LYCIDX01', 'binary Index magic');
+  assert.equal(raw.readUInt32LE(8), raw.length - 44, 'binary Index payload length');
+  assert.equal(raw.subarray(12, 44).toString('hex'), identity, 'binary Index identity');
+}
+export function preparePostcardIndexExport(root, home, index, directory) {
+  directory = contained(root, directory); home = resolve(home);
+  assert.equal(resolve(index.path), join(home, 'cache/objects', index.sha256.slice(0, 2), index.sha256.slice(2)), 'binary Index content-addressed path');
+  assert.equal(index.manifest?.schema, 'lycheedev.source-index.rust.v7');
+  assert.deepEqual(index.manifest.blob, {sha256: index.sha256, bytes: index.bytes});
+  const raw = readPostcardBytes(contained(home, index.path), INDEX_BYTES, index); verifyPostcardIndexFrame(raw, index.manifest.identity);
+  fs.mkdirSync(directory); const file = join(directory, 'index.bin'); fs.writeFileSync(file, raw, {flag: 'wx'});
+  const manifest = {schema: 'lycheedev.source-index-export-input.v1', records: [{file: 'index.bin', fileSHA256: index.sha256, fileBytes: index.bytes, identity: index.manifest.identity}]};
+  const record = save(join(directory, 'manifest.json'), manifest); assert(record.bytes <= LIMITS.manifest);
+  const token = Object.freeze({manifest: record.path, manifestSHA256: record.sha256, manifestBytes: record.bytes, records: 1, recordBytes: index.bytes});
+  indexPrepared.set(token, {root, home, index: structuredClone(index), file, directory, manifest}); return token;
+}
+function verifyPreparedIndex(token) {
+  const state = indexPrepared.get(token); assert(state, 'authenticated binary Index preparation required');
+  assert.equal(hashFile(token.manifest, LIMITS.manifest), token.manifestSHA256); assert.equal(regular(token.manifest, LIMITS.manifest).size, token.manifestBytes);
+  for (const file of [state.file, state.index.path]) { assert.equal(regular(file, INDEX_BYTES).size, state.index.bytes); assert.equal(hashFile(file, INDEX_BYTES), state.index.sha256, 'binary Index changed'); }
+  return state;
+}
+export function postcardIndexExportSummary(run, manifest) {
+  assert(processPassed(run), 'Index exporter incomplete, cancelled, limited or unreaped');
+  assert(Buffer.isBuffer(run.stdout) && run.stdout.length <= 65536 && Buffer.isBuffer(run.stderr) && run.stderr.length === 0, 'Index exporter bounded stdout and empty stderr required');
+  const text = new TextDecoder('utf-8', {fatal: true}).decode(run.stdout);
+  assert(text.includes(INDEX_EXPORT_TEST) && /test result: ok\. 1 passed; 0 failed; 0 ignored;/.test(text), 'exact Index exporter completion required');
+  const lines = text.split(/\r?\n/).filter(line => line.includes('{')); assert.equal(lines.length, 1, 'one Index exporter summary required');
+  const value = JSON.parse(lines[0].slice(lines[0].indexOf('{')));
+  exact(value, ['schema', 'codec', 'layout', 'manifestSHA256', 'manifestBytes', 'records', 'recordBytes', 'outputBytes', 'outputSHA256']);
+  assert.equal(value.schema, 'lycheedev.source-index-export-summary.v1'); assert.equal(value.codec, 'postcard-1.1.3'); assert.equal(value.layout, 'LYCIDX01');
+  for (const field of ['manifestSHA256', 'manifestBytes', 'records', 'recordBytes']) assert.equal(value[field], manifest[field], `Index exporter summary ${field}`);
+  integer(value.outputBytes, 1, LIMITS.total, 'Index output budget'); digest(value.outputSHA256); return value;
+}
+export function runPostcardIndexExport(root, expected, candidate, preparation, output, evidence, {execute = ownedSpawnSync} = {}) {
+  const prepared = verifyPreparedIndex(preparation), identity = verifyPostcardExporter(root, expected, candidate);
+  output = contained(root, output); assert(!fs.existsSync(output), 'fresh Index output required');
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^LYCHEEDEV_SOURCE_(?:INDEX|FACTS)_EXPORT_/i.test(key)));
+  Object.assign(env, {LYCHEEDEV_SOURCE_INDEX_EXPORT_INPUT: preparation.manifest, LYCHEEDEV_SOURCE_INDEX_EXPORT_BYTES: String(preparation.manifestBytes), LYCHEEDEV_SOURCE_INDEX_EXPORT_SHA256: preparation.manifestSHA256, LYCHEEDEV_SOURCE_INDEX_EXPORT_OUTPUT: output});
+  const started = performance.now(), run = execute(identity.artifact.sourceBinary, [...INDEX_EXPORT_ARGS], {cwd: candidate.sourceRoot, env, evidence, timeout: 600000, cargoBuild: false});
+  const timing = Object.freeze({exporterWrapperWallMillis: performance.now() - started, scope: 'Separate Index test-exporter invocation; outside product elapsed, never subtracted'});
+  save(join(evidence, 'index-export-invocation.json'), {binary: identity.artifact.sourceBinary, args: INDEX_EXPORT_ARGS, exporter: identity, preparation, output, timing, exit: run.status, error: run.error?.message ?? null, signal: run.signal ?? null, handlesReaped: processReaped(run) === true, proof: run.proof ?? null});
+  try {
+    const summary = Object.freeze(postcardIndexExportSummary(run, preparation));
+    assert(isAbsolute(run.proof.binary)); assert.equal(resolve(run.proof.binary).toLowerCase(), resolve(identity.artifact.sourceBinary).toLowerCase(), 'observed Index exporter executable differs');
+    assert.equal(hashFile(run.proof.binary, INDEX_BYTES), expected.binarySHA256, 'observed Index exporter SHA differs');
+    const raw = readPostcardBytes(output, LIMITS.total, {bytes: summary.outputBytes, sha256: summary.outputSHA256});
+    assert.equal(raw.at(-1), 10, 'incomplete Index output final line'); assert.equal(raw.indexOf(10), raw.length - 1, 'exactly one Index output row required');
+    const row = json(raw); exact(row, ['schema', 'ordinal', 'file', 'fileSHA256', 'fileBytes', 'identity', 'index']);
+    assert.equal(row.schema, 'lycheedev.source-index-export-record.v1'); assert.equal(row.ordinal, 0);
+    for (const key of ['file', 'fileSHA256', 'fileBytes', 'identity']) assert.equal(row[key], prepared.manifest.records[0][key], `Index row ${key}`);
+    const safeNumbers = v => { if (typeof v === 'number') assert(Number.isSafeInteger(v), 'Index JSON coordinate exceeds exact Node integer range'); else if (v && typeof v === 'object') { for (const x of Object.values(v)) safeNumbers(x); Object.freeze(v); } }; safeNumbers(row.index);
+    exact(row.index, ['documents', 'assets', 'symbols', 'summary', 'compatibilityGaps']); for (const key of ['documents', 'assets', 'symbols', 'compatibilityGaps']) assert(Array.isArray(row.index[key]));
+    assert.equal(postcardIndexIdentity(row.index.summary, POSTCARD_INDEX_LAYOUT), prepared.index.manifest.identity, 'exported Index snapshot identity differs');
+    verifyPreparedIndex(preparation); assert.deepEqual(verifyPostcardExporter(root, expected, candidate), identity, 'Index exporter changed');
+    save(join(evidence, 'index-export-summary.json'), summary);
+    const token = Object.freeze({summary, output, exporter: identity, timing}); indexExported.set(token, {preparation, prepared, index: row.index, output, summary}); return token;
+  } catch (error) { error.handlesReaped = processReaped(run) === true; throw error; }
+}
+
+// Frozen f811/Go 3.2.3 public-shape oracle, independent of the new Rust codec.
+// Go owns symbols, asset metadata and diagnostics. Only Rust-only historical
+// fields are mapped here; Facts locators receive separate byte authentication.
+export async function comparePostcardIndex(token, reference) {
+  const state = indexExported.get(token); assert(state && !state.custody, 'fresh authenticated Index export required');
+  verifyPreparedIndex(state.preparation); const index = state.index, go = openGoCustody(reference), summary = json(go.manifestRaw).summary;
+  let documents = 0, symbols = 0, assets = 0, metadataAssets = 0, ordinaryAssets = 0, diagnostics = 0, declarations = 0, relationships = 0, bytes = 0;
+  // f811 Rust pre-emits metadata-only assets; fixed Go appends them after
+  // the normal visit. Preserve each group's original order and duplicates.
+  const firstOrdinaryAsset = index.assets.findIndex(asset => asset.local !== null);
+  const metadataPrefix = firstOrdinaryAsset < 0 ? index.assets.length : firstOrdinaryAsset;
+  const failedPaths = new Set(), gaps = new Set(), sample = [], hash = createHash('sha256');
+  const input = go.recordsStream; input.on('data', chunk => { bytes += chunk.length; assert(bytes <= INDEX_BYTES, 'Go Index oracle budget'); hash.update(chunk); });
+  try {
+    for await (const line of readline.createInterface({input, crlfDelay: Infinity})) {
+      assert(line && Buffer.byteLength(line) <= 1 << 20, 'bounded complete Go oracle row required'); const row = JSON.parse(line);
+      if (row.kind === 'document') {
+        const actual = index.documents[documents++]; assert(actual, 'missing Index document');
+        exact(actual, Object.hasOwn(actual, 'factsLocator') ? ['path', 'sha256', 'bytes', 'factsLocator'] : ['path', 'sha256', 'bytes']);
+        const {factsLocator, ...value} = actual; assert.deepEqual(value, {path: row.path, sha256: row.sha256, bytes: row.bytes ?? 0}, 'full Index document/order differs from Go');
+      } else if (row.kind === 'symbol') {
+        assert.equal(row.path, row.symbol.path); assert.deepEqual(index.symbols[symbols++], row.symbol, 'full Index symbol/order/duplicates differ from Go');
+        declarations += row.symbol.kind === 'declaration'; relationships += row.symbol.kind === 'relationship';
+      } else if (row.kind === 'asset') {
+        const source = row.asset; exact(source, ['path', 'contentHash', 'bytes', 'extension', 'mime', 'format', 'width', 'height']);
+        assert.equal(row.path, source.path); assert.equal(row.bytes ?? 0, source.bytes);
+        const metadataOnly = source.bytes > (64 << 20); assert.equal(source.contentHash === '', metadataOnly, 'Go metadata-only asset identity');
+        const ordinal = metadataOnly ? metadataAssets++ : metadataPrefix + ordinaryAssets++; assets++;
+        assert.deepEqual(index.assets[ordinal], {...source, local: source.contentHash ? {sha256: source.contentHash, bytes: source.bytes} : null}, 'full Index asset/historical stable order differs from Go and BlobRef');
+      } else if (row.kind === 'diagnostic') {
+        const d = row.diagnostic; assert.equal(row.path, d.path); diagnostics++; failedPaths.add(d.path); if (sample.length < 20) sample.push(d);
+        const p = d.path.replace(/[A-Z]/g, c => c.toLowerCase());
+        for (const category of p.endsWith('.lua') ? p.includes('/blizzard_apidocumentationgenerated/') ? ['mixin', 'api', 'event'] : ['mixin'] : p.endsWith('.xml') ? ['template', 'frame-type'] : p.endsWith('.toc') ? ['interface'] : []) gaps.add(category);
+      } else assert.fail(`unsupported fixed Go Index row: ${row.kind}`);
+    }
+    const manifest = json(go.manifestRaw); assert.equal(bytes, manifest.recordBytes); assert.equal(hash.digest('hex'), manifest.recordsHash); go.verify();
+    assert.equal(documents, index.documents.length); assert.equal(symbols, index.symbols.length); assert.equal(assets, index.assets.length); assert.equal(metadataAssets, metadataPrefix); assert.equal(ordinaryAssets + metadataPrefix, index.assets.length);
+    assert.equal(summary.documents, documents); assert.equal(summary.declarations, declarations); assert.equal(summary.relationships, relationships); assert.equal(summary.assets, assets); assert.equal(summary.diagnostics, diagnostics);
+    const expectedSummary = {schema: summary.schema, storage: summary.storage, repository: summary.repository, product: summary.product, commit: summary.commit, parser: summary.parser,
+      documents, astFiles: index.documents.filter(d => !failedPaths.has(d.path)).length, skippedDocuments: summary.skippedDocuments ?? 0, declarations, relationships, assets, diagnostics, complete: summary.complete,
+      ...(diagnostics ? {diagnosticSample: sample} : {})};
+    assert.deepEqual(summary.diagnosticSample ?? [], sample, 'Go summary diagnostic sample differs from full records');
+    assert.deepEqual(index.summary, expectedSummary, 'complete Index summary differs from Go/historical fields');
+    assert.deepEqual(index.compatibilityGaps, [...gaps].sort(), 'all-diagnostic historical compatibility gaps/order differ');
+    state.oracle = {schema: 'lycheedev.source-index-public-comparison.v1', complete: true, go: reference, goRecordsSHA256: manifest.recordsHash, goRecordsBytes: manifest.recordBytes,
+      goManifestSHA256: sha(go.manifestRaw), source: {repository: summary.repository, product: summary.product, commit: summary.commit, parser: summary.parser}, documents, assets, symbols, diagnostics,
+      fields: ['documents', 'assets', 'symbols', 'summary', 'compatibilityGaps'], arraysOrderedWithDuplicates: true, assetOrder: 'historical-f811-metadata-only-first-stable-partition',
+      rustOnlyFields: 'f811 public mappings for local BlobRef, astFiles and compatibilityGaps; factsLocator authenticated against full Facts containers before success'};
+    return structuredClone(state.oracle);
+  } finally { input.destroy(); }
+}
+export function postcardIndexView(token, expected) {
+  const state = indexExported.get(token); assert(state?.oracle, 'independently compared authenticated binary Index required');
+  for (const key of ['path', 'bytes', 'sha256']) assert.equal(expected[key], state.prepared.index[key], `binary Index binding ${key}`);
+  assert.equal(hashFile(expected.path, INDEX_BYTES), expected.sha256, 'current binary Index SHA changed');
+  if (state.custody) verifyPostcardIndexCustody(state.custody); else { verifyPreparedIndex(state.preparation); assert.equal(hashFile(state.output, LIMITS.total), state.summary.outputSHA256); }
+  return state.index;
+}
+export function capturePostcardIndexExport(token, directory) {
+  const state = indexExported.get(token); assert(state?.oracle && !state.custody, 'independently compared Index export required');
+  postcardIndexView(token, state.prepared.index);
+  const manifestArchive = {path: join(directory, 'postcard-index-input-manifest.json'), bytes: state.preparation.manifestBytes, sha256: state.preparation.manifestSHA256};
+  fs.copyFileSync(state.preparation.manifest, manifestArchive.path, fs.constants.COPYFILE_EXCL);
+  const source = {path: state.output, bytes: state.summary.outputBytes, sha256: state.summary.outputSHA256}, outputDirectory = join(directory, 'postcard-index-output-parts');
+  const manifest = splitIndexEvidence(state.prepared.root, source, outputDirectory);
+  const report = {schema: 'lycheedev.source-postcard-index-custody.v1', layout: POSTCARD_INDEX_LAYOUT, index: state.prepared.index, exporter: token.exporter, summary: state.summary, manifestArchive,
+    output: {directory: outputDirectory, manifest, manifestSHA256: hashFile(join(outputDirectory, 'manifest.json'), 65536)}, oracle: state.oracle};
+  save(join(directory, 'postcard-index-custody.json'), report); verifyPostcardIndexCustody(report); state.custody = report;
+  // Release this owner's completed Index staging only after every byte is
+  // archived; Facts staging then uses the same unchanged scratch reservation.
+  fs.unlinkSync(state.output); fs.unlinkSync(state.prepared.file); fs.unlinkSync(state.preparation.manifest); fs.rmdirSync(state.prepared.directory);
+  state.index = Object.freeze({documents: Object.freeze(state.index.documents.map(d => Object.freeze({...d, ...(d.factsLocator ? {factsLocator: Object.freeze({...d.factsLocator})} : {})}))), summary: Object.freeze({...state.index.summary})});
+  return report;
+}
+export function verifyPostcardIndexCustody(report) {
+  assert.equal(report.schema, 'lycheedev.source-postcard-index-custody.v1'); assert.equal(report.layout, POSTCARD_INDEX_LAYOUT);
+  const manifest = json(readPostcardBytes(report.manifestArchive.path, LIMITS.manifest, report.manifestArchive));
+  assert.equal(report.manifestArchive.sha256, report.summary.manifestSHA256); assert.equal(report.manifestArchive.bytes, report.summary.manifestBytes);
+  assert.deepEqual(manifest, {schema: 'lycheedev.source-index-export-input.v1', records: [{file: 'index.bin', fileSHA256: report.index.sha256, fileBytes: report.index.bytes, identity: report.index.manifest.identity}]});
+  assert.equal(report.index.manifest.schema, 'lycheedev.source-index.rust.v7'); assert.deepEqual(report.index.manifest.blob, {sha256: report.index.sha256, bytes: report.index.bytes});
+  assert.equal(report.summary.schema, 'lycheedev.source-index-export-summary.v1');
+  assert.equal(report.summary.records, 1); assert.equal(report.summary.recordBytes, report.index.bytes); assert.equal(report.summary.layout, 'LYCIDX01'); assert.equal(report.summary.codec, 'postcard-1.1.3');
+  const ref = report.output; assert.equal(hashFile(join(ref.directory, 'manifest.json'), 65536), ref.manifestSHA256); assert.deepEqual(json(readPostcardBytes(join(ref.directory, 'manifest.json'), 65536)), ref.manifest); verifyParts(ref.directory, ref.manifest);
+  assert.equal(ref.manifest.source.bytes, report.summary.outputBytes); assert.equal(ref.manifest.source.sha256, report.summary.outputSHA256);
+  assert.equal(report.oracle?.complete, true); assert.equal(postcardIndexIdentity(report.oracle.source, POSTCARD_INDEX_LAYOUT), report.index.manifest.identity, 'archived Index source identity differs'); assert.equal(report.oracle.arraysOrderedWithDuplicates, true); assert.equal(report.oracle.assetOrder, 'historical-f811-metadata-only-first-stable-partition'); assert.deepEqual(report.oracle.fields, ['documents', 'assets', 'symbols', 'summary', 'compatibilityGaps']);
+  return {bytes: report.summary.outputBytes};
+}
+export function assertPostcardOutputBudget(indexBytes, factsBytes) {
+  integer(indexBytes, 1, LIMITS.total, 'Index output budget'); integer(factsBytes, 1, LIMITS.total, 'Facts output budget');
+  assert(indexBytes + factsBytes <= LIMITS.total, 'Index plus Facts JSONL exceed unchanged 128 MiB evidence output budget; raw output retained, no fields omitted');
 }
