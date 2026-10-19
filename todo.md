@@ -10,7 +10,9 @@
 - [x] 19e data_disk13/13、remove_commands22/22通过，两个Core失败及两新增均通过；一次消费、重复close事件和CAP签名/认证保留。
 - [x] Source 25新增Index测试逐名一次通过；source_inspect15、flow4与正式认证luac真实ignored用例1通过。
 - [x] 19e all-targets及67项定向回归全通过，原23失败闭合；不是全仓/性能通过。
-- [ ] 固定19e一次matchedrelease及完整Source六场景性能；read-through/provider组合45新增与Windows编译未运行，私有元库另22新增未运行。
+- [ ] 19e release已通过，assembly缺flatbuffers官方许可证正文；补现有catalog/原文后以新sourceDigest匹配构建、装包和完整Source六场景，保留旧失败。
+- [x] 10ed显式6GiB runner接线保存并完整readback；12套Node作者/独审各452/452；Windows实际447通过/0失败/5权限skip，原默认5GiB及其它限额保持。
+- [ ] read-through/provider组合45新增与Windows编译未运行，私有元库另22新增、缺体修复27新增仍待最终组合独审/正式执行。
 - [x] 最终组合Node检查记录sourceTree并区分git archive导出与export-ignore范围；原隔离361/361不能代替最终组合树结果。
 
 ## A. Home、配置与全Data容量
