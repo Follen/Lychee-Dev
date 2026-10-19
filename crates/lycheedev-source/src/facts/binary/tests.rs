@@ -165,7 +165,10 @@ fn coordinate_width_is_u64_with_checked_host_conversion() {
                     usize::decode(&mut deserializer, &mut context).unwrap(),
                     expected
                 );
-                assert_eq!(postcard::to_allocvec(&WireRef(&expected)).unwrap(), payload);
+                assert_eq!(
+                    postcard::to_allocvec(&WireRef(&expected, &EncodeOwnership::new())).unwrap(),
+                    payload
+                );
             }
             Err(_) => assert!(usize::decode(&mut deserializer, &mut context).is_err()),
         }
@@ -186,94 +189,145 @@ fn bounded_output_refuses_growth_before_copy_and_keeps_complete_prefix() {
 }
 
 #[test]
-fn authenticated_compact_wire_keeps_exact_old_json_limit_for_nul_and_unicode_expansion() {
-    let input = lycheedev_core::storage::sha256(b"forged compact Facts");
-    let prefix = "雪é\t";
-    let mut facts = Facts {
+fn compact_facts_beyond_retired_json_cache_limit_keep_complete_public_bytes() {
+    let input = lycheedev_core::storage::sha256(b"compact Facts");
+    let facts = Facts {
         diagnostics: vec![SyntaxNote {
-            message: prefix.into(),
+            message: format!("雪é\t{}", "\0".repeat(MAXIMUM / 6)),
             line: usize::MAX,
         }],
         ..Facts::default()
     };
-    let original_length = |facts: &Facts| {
-        // Independent old-style full Value envelope: JSON escaping and all
-        // envelope fields determine admission, not binary encoded byte length.
-        serde_json::to_vec(&serde_json::json!({
-            "schema":"lycheedev.source-facts.rust.v11", "inputSHA256":input,
-            "factsSHA256":"0".repeat(64), "facts":facts,
-        }))
+    // JSON is a result oracle, not the private cache admission representation.
+    let public = serde_json::to_vec(&facts).unwrap();
+    assert!(public.len() > MAXIMUM);
+    let raw = encode(&facts, &input).unwrap();
+    assert!(raw.len() < MAXIMUM / 2);
+    let decoded = decode(&raw, &input, &OperationControl::default())
         .unwrap()
-        .len()
-    };
-    let fixed = original_length(&facts);
-    for limit in [MAXIMUM - 1, MAXIMUM, MAXIMUM + 1] {
-        let content = limit - fixed;
-        facts.diagnostics[0].message = format!(
-            "{prefix}{}{}",
-            "\0".repeat(content / 6),
-            "x".repeat(content % 6)
-        );
-        assert_eq!(original_length(&facts), limit);
-        // Bypass only the producer's logical JSON admission in this adversarial
-        // test. The record has a valid current schema/input/length/payload SHA.
-        let payload = postcard::to_allocvec(&WireRef(&facts)).unwrap();
-        let mut raw = vec![0; HEADER];
-        raw[..8].copy_from_slice(MAGIC);
-        raw[8..12].copy_from_slice(&(payload.len() as u32).to_le_bytes());
-        raw[12..44].copy_from_slice(&digest(&input).unwrap());
-        raw[44..HEADER].copy_from_slice(&Sha256::digest(&payload));
-        raw.extend_from_slice(&payload);
-        assert!(raw.len() < MAXIMUM / 2);
-        let decoded = decode(&raw, &input, &OperationControl::default()).unwrap();
-        assert_eq!(decoded.is_some(), limit <= MAXIMUM);
-        if let Some(decoded) = decoded {
-            assert_eq!(
-                serde_json::to_value(decoded).unwrap(),
-                serde_json::to_value(&facts).unwrap()
-            );
-            assert_eq!(encode(&facts, &input).unwrap(), raw);
-        } else {
-            assert_eq!(
-                encode(&facts, &input).unwrap_err().code,
-                "codebase.fact_budget"
-            );
-        }
-    }
+        .unwrap();
+    assert_eq!(serde_json::to_vec(&decoded).unwrap(), public);
+    assert_eq!(encode(&decoded, &input).unwrap(), raw);
+    assert_eq!(decoded.diagnostics[0].line, usize::MAX);
+    assert!(decoded.declarations.is_empty());
+    assert!(decoded.relationships.is_empty());
+    assert!(decoded.loads.is_empty());
+    assert!(decoded.headers.is_empty());
 }
 
 #[test]
-fn controlled_json_admission_preserves_cancelled_and_expired_errors() {
-    use std::io::Write;
-    for expired in [false, true] {
-        let control = if expired {
-            OperationControl::uncancelable(std::time::Instant::now())
-        } else {
-            let control = OperationControl::default();
-            control.tracked_cancel_handle().unwrap().cancel();
-            control
-        };
-        let error = admit_public_facts(&Facts::default(), Some(&control)).unwrap_err();
-        assert_eq!(
-            error.code,
-            if expired {
-                "command.deadline"
-            } else {
-                "command.cancelled"
-            }
-        );
-    }
-    let control = OperationControl::default();
-    let mut counter = JsonLength {
-        bytes: 0,
-        next_check: 0,
-        control: Some(&control),
-        stopped: None,
+fn wire_ownership_admission_matches_decoded_shape_and_preserves_field_bytes() {
+    let facts = Facts {
+        declarations: vec![
+            Declaration {
+                name: "雪".into(),
+                category: "function".into(),
+                scope: String::new(),
+                line: 127,
+                end_line: 128,
+                signature: "F()".into(),
+            };
+            3
+        ],
+        headers: vec![HeaderValue {
+            key: "Title".into(),
+            value: "\0\n\\\"".repeat(100),
+            line: 1,
+        }],
+        ..Facts::default()
     };
-    counter.write_all(b"first").unwrap();
-    control.tracked_cancel_handle().unwrap().cancel();
-    assert!(counter.write_all(&[0; 64 << 10]).is_err());
-    assert_eq!(counter.stopped.unwrap().code, "command.cancelled");
-    // Original producer counting has no new operation check or error order.
-    assert!(admit_public_facts(&Facts::default(), None).is_ok());
+    let needed = 3 * size_of::<Declaration>()
+        + 3 * ("雪".len() + "function".len() + "F()".len())
+        + size_of::<HeaderValue>()
+        + "Title".len()
+        + facts.headers[0].value.len();
+    let baseline = postcard::to_allocvec(&V13 {
+        declarations: vec![("雪", "function", "", 127, 128, "F()"); 3],
+        relationships: vec![],
+        loads: vec![],
+        headers: vec![("Title", facts.headers[0].value.as_str(), 1)],
+        diagnostics: vec![],
+    })
+    .unwrap();
+    for limit in [needed - 1, needed, needed + 1] {
+        let ownership = EncodeOwnership(Cell::new(limit));
+        let actual = postcard::to_allocvec(&WireRef(&facts, &ownership));
+        assert_eq!(actual.is_ok(), limit >= needed);
+        if let Ok(actual) = actual {
+            assert_eq!(actual, baseline);
+            assert_eq!(ownership.0.get(), limit - needed);
+        }
+    }
+    assert_eq!(EncodeOwnership::new().0.get(), 256 << 20);
+}
+
+#[test]
+fn compact_row_and_string_ownership_reject_before_emitting_their_wire_bytes() {
+    let rows = vec![
+        Declaration {
+            name: String::new(),
+            category: String::new(),
+            scope: String::new(),
+            line: 0,
+            end_line: 0,
+            signature: String::new(),
+        };
+        3
+    ];
+    let ownership = EncodeOwnership(Cell::new(3 * size_of::<Declaration>() - 1));
+    let mut output = [0xa5; 100];
+    assert!(postcard::to_slice(&WireRef(&rows, &ownership), &mut output).is_err());
+    assert_eq!(output, [0xa5; 100], "row admission precedes even the count");
+    let value = "雪\0".repeat(1024);
+    let ownership = EncodeOwnership(Cell::new(value.len() - 1));
+    assert!(postcard::to_slice(&WireRef(&value, &ownership), &mut output).is_err());
+    assert_eq!(output, [0xa5; 100], "string admission precedes its length");
+    let ownership = EncodeOwnership(Cell::new(7));
+    assert!(ownership.admit::<postcard::Error>(usize::MAX).is_err());
+    assert!(
+        ownership
+            .rows::<Declaration, postcard::Error>(usize::MAX)
+            .is_err()
+    );
+    assert_eq!(ownership.0.get(), 7, "overflow cannot wrap the allowance");
+}
+
+#[test]
+fn authenticated_compact_rows_over_real_decoded_budget_reject_without_row_allocation() {
+    // Construct only the compact wire, never millions of owned declarations.
+    // Every field is zero/empty, so all six field encodings occupy one byte.
+    let count = MAX_OWNED / size_of::<Declaration>() + 1;
+    let mut payload = postcard::to_allocvec(&(count as u64)).unwrap();
+    payload.resize(payload.len() + count * 6, 0);
+    payload.extend_from_slice(&[0; 4]);
+    let input = lycheedev_core::storage::sha256(b"compact row ownership");
+    let mut raw = vec![0; HEADER];
+    raw[..8].copy_from_slice(MAGIC);
+    raw[8..12].copy_from_slice(&(payload.len() as u32).to_le_bytes());
+    raw[12..44].copy_from_slice(&digest(&input).unwrap());
+    raw[44..HEADER].copy_from_slice(&Sha256::digest(&payload));
+    raw.extend_from_slice(&payload);
+    assert!(raw.len() < MAXIMUM);
+    assert!(
+        decode(&raw, &input, &OperationControl::default())
+            .unwrap()
+            .is_none()
+    );
+    let control = OperationControl::default();
+    let mut context = DecodeContext {
+        control: &control,
+        payload_bytes: payload.len(),
+        remaining: MAX_OWNED,
+        failure: None,
+    };
+    let mut deserializer = postcard::Deserializer::from_bytes(&payload);
+    assert!(Facts::decode(&mut deserializer, &mut context).is_err());
+    assert_eq!(
+        context.remaining, MAX_OWNED,
+        "rejected before reserving the row vector"
+    );
+    assert!(
+        context.failure.is_none(),
+        "bad ownership requests a complete rebuild"
+    );
 }

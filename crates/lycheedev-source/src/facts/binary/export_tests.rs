@@ -449,3 +449,66 @@ fn exporter_observes_cancellation_and_exact_output_budget_without_overwriting() 
         }
     }
 }
+
+#[test]
+fn compact_escaped_facts_still_obey_the_independent_export_output_budget() {
+    let fixture = Fixture::new();
+    let input_sha = storage::sha256(b"escaped source");
+    let facts = Facts {
+        diagnostics: vec![crate::facts::SyntaxNote {
+            message: "\0".repeat(MAXIMUM / 6 + 1),
+            line: 0,
+        }],
+        ..Facts::default()
+    };
+    assert!(facts.diagnostics[0].message.len() * 6 > MAXIMUM);
+    let raw = encode(&facts, &input_sha).unwrap();
+    assert!(raw.len() < MAXIMUM);
+    assert!(
+        decode(&raw, &input_sha, &OperationControl::default())
+            .unwrap()
+            .is_some()
+    );
+    fs::write(fixture.0.join("compact.bin"), &raw).unwrap();
+    let manifest = Manifest {
+        schema: INPUT_SCHEMA.into(),
+        records: vec![Record {
+            path: "Escaped.lua".into(),
+            file: "compact.bin".into(),
+            file_bytes: raw.len() as u64,
+            file_sha256: storage::sha256(&raw),
+            record_offset: 0,
+            record_bytes: raw.len() as u64,
+            record_sha256: storage::sha256(&raw),
+            input_sha256: input_sha,
+        }],
+    };
+    let (input, bytes, sha) = fixture.manifest(&manifest);
+    let output = fixture.0.join("limited.jsonl");
+    let limit = 64 << 10;
+    let error = export(
+        &input,
+        bytes,
+        &sha,
+        &output,
+        &OperationControl::default(),
+        limit,
+    )
+    .unwrap_err();
+    assert!(error.message.contains("export output exceeds total limit"));
+    assert!(fs::metadata(&output).unwrap().len() <= limit as u64);
+    assert_eq!(TOTAL_LIMIT, 128 << 20);
+    let denied = fixture.0.join("over-allowance.jsonl");
+    assert!(
+        export(
+            &input,
+            bytes,
+            &sha,
+            &denied,
+            &OperationControl::default(),
+            TOTAL_LIMIT + 1
+        )
+        .is_err()
+    );
+    assert!(!denied.exists());
+}

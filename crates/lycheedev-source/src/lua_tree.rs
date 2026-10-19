@@ -1299,7 +1299,13 @@ impl<'tree> Walker<'_, 'tree> {
             return;
         }
         let _scratch = if let Some(guard) = self.guard {
-            let Some(frame) = guard.frame(self.raw.len()) else {
+            // Temporary names/literals belong to this subtree, not to unrelated
+            // source elsewhere in the document. Parent frames remain live while
+            // assignment/function children are visited. Source-line signatures
+            // and inherited scope strings can extend beyond this span, but their
+            // allocations are separately admitted by declare_at/function/scope.
+            // Generated descriptors retain their own document-wide reservation.
+            let Some(frame) = guard.frame(n.byte_range().len()) else {
                 return;
             };
             Some(frame)
@@ -1674,13 +1680,14 @@ mod tests {
                     .is_none()
             );
             assert!(crate::facts::lua_for_worker(b"\xff", &control, 4 << 20).is_none());
-            // The original walk still reaches its depth-256 diagnostic. Optional
-            // scratch admission may abandon earlier and must never publish it.
+            // The large literal is inside every enclosing subtree. Real live
+            // frame pressure still abandons before the depth-256 diagnostic;
+            // the complete original parser keeps that public depth contract.
             let raw = format!(
-                "{}call(){}{}",
+                "{}local padding = '{}'; call(){}",
                 "do ".repeat(260),
-                " end".repeat(260),
-                " ".repeat(32 << 10)
+                "x".repeat(32 << 10),
+                " end".repeat(260)
             );
             assert!(raw.len() < 64 << 10);
             assert!(crate::facts::lua_for_worker(raw.as_bytes(), &control, 4 << 20).is_none());

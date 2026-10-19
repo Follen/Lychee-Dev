@@ -40,7 +40,7 @@ Source新格式旧cache失效后重建，不维护生产旧格式迁移。新格
 
 最新Source诊断固定2d23695：匹配release、91文件装包及exporter认证通过。同run Go/Rust毫秒：cold10687.5959/5095.8654；warm667.0608/267.0469；change3958.0999/1344.9300；insert3962.2321/1357.1795；delete3871.5698/1225.4815；rename3704.7494/1240.8674。六场景逐项完整Facts/Index、summary与custody比较通过；最终runner仍失败：读取owner receipt的1MiB上限拒绝合法约5.2MB封存记录，原finalIntegrityVerified=false保持，待修正验证器后只读复核，不重跑产品或改旧记录。六比率均大于0.30，只一轮诊断；内存采样缺口不证明RSS峰值改善，不能把异负载绝对耗时变化全归优化。
 
-同次冷路径visit为4587.845ms，内含工作与等待；串行解析76次累计1278.543ms，worker等待2202.707ms，23任务放弃。增量Facts读取/认证/解码321.305–363.620ms、Symbols构造114.992–138.115ms；warm完整缓存读/SHA/typed校验188.943ms。各阶段嵌套、worker解析并行累计，不相加或差减成伪独占。FactsRead次数包括组目录、probe、记录与close，不能称重复磁盘读取次数；摘要路径已借用typed字段，不再构造完整owned Symbols。下一优化需源码分配/生命周期证明及独立回归，尚无新性能收益结论。
+同次冷路径visit为4587.845ms，内含工作与等待；串行解析76次累计1278.543ms，worker等待2202.707ms，23任务放弃。增量Facts读取/认证/解码321.305–363.620ms、Symbols构造114.992–138.115ms；warm完整缓存读/SHA/typed校验188.943ms。各阶段嵌套、worker解析并行累计，不相加或差减成伪独占。FactsRead次数包括组目录、probe、记录与close，不能称重复磁盘读取次数；摘要路径已借用typed字段，不再构造完整owned Symbols。下一窄片已实现并静态独审：Lua递归临时预留使用当前子树跨度，保原共享额度和真实超限回退；Facts编解码移除仅复刻旧JSON私有缓存大小的全遍历，沿现有Wire编码同时核规范decoded ownership，实际binary32MiB和decode256MiB额度保持。完整输出/证据预算仍独立，13个新增或调整名称的回归及1个既有负例细化待实际Rust执行；尚无新性能收益结论。
 
 Data CSV9693工具对旧63d与a860的单pair：cold401.4790/389.9062ms，warm349.0380/324.7937ms；完整CSV/sidecar与8CAP核验。该对比是旧Rust/新Rust，不是Go性能门禁；retainedBytes减少46,988,672B与decodeWork减少81,920是逻辑计量，不是RSS。其余Data、Live正式性能与全产品矩阵仍未验收，不把历史结果归新产物。
 

@@ -189,7 +189,9 @@ fn binary_facts_matches_canonical_hash_across_buffer_boundaries() {
 }
 
 #[test]
-fn binary_facts_keeps_exact_32_mib_gate_and_profile_on_both_exits() {
+fn binary_facts_keeps_exact_binary_32_mib_gate_and_profile_on_both_exits() {
+    use crate::facts::binary::{HEADER, MAGIC};
+    use sha2::{Digest, Sha256};
     const LIMIT: usize = 32 << 20;
     let input = storage::sha256(b"budget source");
     let mut facts = Facts {
@@ -199,12 +201,27 @@ fn binary_facts_keeps_exact_32_mib_gate_and_profile_on_both_exits() {
         }],
         ..Facts::default()
     };
-    // The only varying bytes are unescaped ASCII. The two hashes always have
-    // 64 characters, so this small old envelope gives the exact final overhead.
-    let fixed = historical_encode(&facts, &input).unwrap().len();
+    // Frozen v13 positional DTO, independent of the production Wire adapter.
+    // Five one-byte array lengths, a four-byte string length and a zero line.
+    let overhead = HEADER + 5 + 4 + 1;
     for length in [LIMIT - 1, LIMIT, LIMIT + 1] {
-        facts.diagnostics[0].message = "x".repeat(length - fixed);
-        let expected = historical_encode(&facts, &input);
+        facts.diagnostics[0].message = "x".repeat(length - overhead);
+        let payload = postcard::to_allocvec(&(
+            Vec::<()>::new(),
+            Vec::<()>::new(),
+            Vec::<()>::new(),
+            Vec::<()>::new(),
+            vec![(facts.diagnostics[0].message.as_str(), 0u64)],
+        ))
+        .unwrap();
+        let mut expected = vec![0; HEADER];
+        expected[..8].copy_from_slice(MAGIC);
+        expected[8..12].copy_from_slice(&(payload.len() as u32).to_le_bytes());
+        expected[12..44].copy_from_slice(&Sha256::digest(b"budget source"));
+        expected[44..HEADER].copy_from_slice(&Sha256::digest(&payload));
+        expected.extend_from_slice(&payload);
+        assert_eq!(expected.len(), length);
+        drop(payload);
         let profile = Profile::enabled(true);
         let actual = encode_facts(&facts, &input, Some(&profile));
         assert_eq!(
@@ -212,39 +229,23 @@ fn binary_facts_keeps_exact_32_mib_gate_and_profile_on_both_exits() {
             1,
             "both exits close the original phase"
         );
-        match (expected, actual) {
-            (Ok(expected), Ok(actual)) => {
-                assert!(length <= LIMIT);
-                assert_eq!(expected.len(), length);
-                assert!(actual.len() <= LIMIT);
-                let decoded = decode_facts(
-                    &actual,
-                    &input,
-                    &lycheedev_core::control::OperationControl::default(),
-                )
-                .unwrap()
-                .unwrap();
-                let oracle: Value = serde_json::from_slice(&expected).unwrap();
-                assert_eq!(
-                    serde_json::to_value(decoded).unwrap(),
-                    oracle["facts"],
-                    "complete boundary facts"
-                );
-            }
-            (Err(expected), Err(actual)) => {
-                assert_eq!(length, LIMIT + 1);
-                assert_eq!(
-                    serde_json::to_value(&actual).unwrap(),
-                    serde_json::to_value(expected).unwrap()
-                );
-                assert_eq!(actual.code, "codebase.fact_budget");
-                assert_eq!(actual.message, "Source fact cache exceeds the 32 MiB limit");
-                assert_eq!(actual.exit_code, 3);
-                assert!(actual.details.is_null());
-            }
-            _ => panic!("32 MiB boundary acceptance differs at {length}"),
+        let control = lycheedev_core::control::OperationControl::default();
+        if length <= LIMIT {
+            assert_eq!(actual.unwrap(), expected, "complete frozen binary frame");
+            let decoded = decode_facts(&expected, &input, &control).unwrap().unwrap();
+            assert_eq!(
+                serde_json::to_vec(&decoded).unwrap(),
+                serde_json::to_vec(&facts).unwrap()
+            );
+        } else {
+            let error = actual.unwrap_err();
+            assert_eq!(error.code, "codebase.fact_budget");
+            assert_eq!(error.message, "Source fact cache exceeds the 32 MiB limit");
+            assert_eq!(error.exit_code, 3);
+            assert!(error.details.is_null());
+            assert!(decode_facts(&expected, &input, &control).unwrap().is_none());
         }
-        assert_eq!(facts.diagnostics[0].message.len(), length - fixed);
+        assert_eq!(facts.diagnostics[0].message.len(), length - overhead);
         assert!(
             facts.diagnostics[0]
                 .message

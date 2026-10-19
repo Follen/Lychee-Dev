@@ -245,6 +245,140 @@ fn worker_matches_original(raw: &[u8], mode: ParseMode, context: &str) -> Facts 
 }
 
 #[test]
+fn lua_worker_local_subtrees_do_not_recharge_unrelated_document_bytes() {
+    on_worker_stack(|| {
+        let source = format!(
+            "--{}\n{}local function Inner(arg)\nlocal named = function() T[\"\\255\"](); frame:RegisterEvent(\"\\255\\254\") end\nnamed(); return arg\nend\nMixed = CreateFromMixins(Base, Other)\nInner(1)\n{}",
+            "padding".repeat(7000),
+            "do\n".repeat(48),
+            "end\n".repeat(48),
+        );
+        assert!(source.len() < SOURCE_LIMIT);
+        // Even just the 48 do statements exceeded the former whole-document
+        // temporary reservation. Every current local subtree is much smaller.
+        assert!((source.len() * 8 + 1024) * 48 > 8 << 20);
+        let facts = worker_matches_original(
+            source.as_bytes(),
+            ParseMode::LuaOrdinary,
+            "deep local nodes beside a large unrelated comment",
+        );
+        assert!(facts.diagnostics.is_empty());
+        for name in ["Inner", "named", "Mixed"] {
+            assert!(facts.declarations.iter().any(|d| d.name == name));
+        }
+        assert!(facts.relationships.iter().any(|r| r.category == "inherits"));
+        assert!(!facts.raw_relationship_targets.as_ref().unwrap().is_empty());
+    });
+}
+
+#[test]
+fn lua_worker_subtree_frames_keep_full_source_line_signature_admission() {
+    on_worker_stack(|| {
+        // The function node excludes the long earlier literal on the same
+        // physical line. declare_at must still reserve that complete signature
+        // in the owned Facts allowance before allocating it.
+        let source = format!(
+            "local padding = '{}'; {}function Narrow() T[\"\\255\"]() end{}\n",
+            "p".repeat(48 << 10),
+            "do ".repeat(40),
+            " end".repeat(40),
+        );
+        assert!(source.len() < SOURCE_LIMIT);
+        let facts = worker_matches_original(
+            source.as_bytes(),
+            ParseMode::LuaOrdinary,
+            "signature extends beyond the current subtree",
+        );
+        assert!(facts.diagnostics.is_empty());
+        assert_eq!(facts.declarations.len(), 1);
+        assert_eq!(facts.declarations[0].name, "Narrow");
+        assert_eq!(facts.declarations[0].signature, source.trim());
+        let control = OperationControl::default();
+        assert!(
+            for_worker(
+                source.as_bytes(),
+                ParseMode::LuaOrdinary,
+                &control,
+                source.trim().len() - 1,
+            )
+            .is_none()
+        );
+        assert!(control.check().is_ok());
+    });
+}
+
+#[test]
+fn generated_worker_local_subtrees_preserve_ordinary_and_literal_facts() {
+    on_worker_stack(|| {
+        let source = format!(
+            "--{}\n{}local T = {{Type='System',Name='C_Local',Functions={{{{Type='Function',Name='Run',Arguments={{{{Name='value',Type='string'}}}}}}}}}}\nCall()\n{}",
+            "p".repeat(48 << 10),
+            "do\n".repeat(40),
+            "end\n".repeat(40),
+        );
+        assert!(source.len() < SOURCE_LIMIT);
+        let facts = worker_matches_original(
+            source.as_bytes(),
+            ParseMode::LuaGenerated,
+            "generated descriptor after bounded ordinary traversal",
+        );
+        assert!(facts.diagnostics.is_empty());
+        assert!(facts.relationships.iter().any(|r| r.to == "Call"));
+        assert!(
+            facts.declarations.iter().any(|d| {
+                d.name == "C_Local.Run" && d.signature == "C_Local.Run(value: string)"
+            })
+        );
+    });
+}
+
+#[test]
+fn xml_worker_local_lua_subtrees_share_the_original_document_guard() {
+    on_worker_stack(|| {
+        let source = format!(
+            "<Ui><Frame name='Owner'><Scripts><OnLoad><![CDATA[--{}\n{}T[\"\\255\"](); frame:RegisterEvent(\"\\255\\254\")\n{}]]></OnLoad></Scripts></Frame></Ui>",
+            "p".repeat(48 << 10),
+            "do\n".repeat(40),
+            "end\n".repeat(40),
+        );
+        assert!(source.len() < SOURCE_LIMIT);
+        let facts = worker_matches_original(
+            source.as_bytes(),
+            ParseMode::Xml,
+            "inline Lua shares XML scratch and preserves raw targets",
+        );
+        assert!(facts.diagnostics.is_empty());
+        assert_eq!(facts.declarations[0].name, "Owner");
+        assert_eq!(facts.relationships.len(), 3);
+        assert!(!facts.raw_relationship_targets.as_ref().unwrap().is_empty());
+    });
+}
+
+#[test]
+fn lua_worker_local_subtrees_reach_the_original_public_depth_diagnostic() {
+    on_worker_stack(|| {
+        let source = format!(
+            "--{}\n{}Call(){}",
+            "p".repeat(32 << 10),
+            "do ".repeat(260),
+            " end".repeat(260),
+        );
+        assert!(source.len() < SOURCE_LIMIT);
+        let facts = worker_matches_original(
+            source.as_bytes(),
+            ParseMode::LuaOrdinary,
+            "unchanged depth-256 result when true scratch usage fits",
+        );
+        assert!(
+            facts
+                .diagnostics
+                .iter()
+                .any(|note| note.message == "source_ast_depth_limit")
+        );
+    });
+}
+
+#[test]
 fn xml_worker_preserves_all_fields_across_tokens_bom_and_newlines() {
     on_worker_stack(|| {
         let documents = [

@@ -9,18 +9,15 @@ use serde::{
     ser::SerializeSeq,
 };
 use sha2::{Digest, Sha256};
-use std::{fmt, marker::PhantomData};
+use std::{cell::Cell, fmt, marker::PhantomData};
 
 pub(crate) const MAGIC: &[u8; 8] = b"LYCFCT13";
 pub(crate) const HEADER: usize = 76;
 pub(crate) const MAXIMUM: usize = 32 << 20;
 // Per-record decoded ownership admission, not a whole-query or RSS bound.
+// Encoding admits the same normative row/string sizes in its existing wire
+// traversal. Decoding also charges any extra capacity returned by the allocator.
 const MAX_OWNED: usize = 256 << 20;
-// Preserve the previous producer's exact logical limit without a JSON DOM.
-const JSON_ENVELOPE_BYTES: usize =
-    br#"{"facts":,"factsSHA256":"","inputSHA256":"","schema":"lycheedev.source-facts.rust.v11"}"#
-        .len()
-        + 128;
 
 fn budget() -> ToolkitError {
     ToolkitError::new(
@@ -32,20 +29,46 @@ fn budget() -> ToolkitError {
 
 pub(super) trait Wire: Sized {
     const MIN_BYTES: usize;
-    fn encode<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>;
+    fn encode<S: serde::Serializer>(
+        &self,
+        serializer: S,
+        ownership: &EncodeOwnership,
+    ) -> std::result::Result<S::Ok, S::Error>;
     fn decode<'de, D: serde::Deserializer<'de>>(
         deserializer: D,
         context: &mut DecodeContext<'_>,
     ) -> std::result::Result<Self, D::Error>;
 }
 
-pub(super) struct WireRef<'a, T>(pub &'a T);
+pub(super) struct EncodeOwnership(Cell<usize>);
+impl EncodeOwnership {
+    fn new() -> Self {
+        Self(Cell::new(MAX_OWNED))
+    }
+    fn admit<E: serde::ser::Error>(&self, bytes: usize) -> std::result::Result<(), E> {
+        let remaining = self
+            .0
+            .get()
+            .checked_sub(bytes)
+            .ok_or_else(|| E::custom("source Facts ownership limit"))?;
+        self.0.set(remaining);
+        Ok(())
+    }
+    fn rows<T, E: serde::ser::Error>(&self, count: usize) -> std::result::Result<(), E> {
+        let bytes = count
+            .checked_mul(size_of::<T>())
+            .ok_or_else(|| E::custom("Facts count overflow"))?;
+        self.admit::<E>(bytes)
+    }
+}
+
+pub(super) struct WireRef<'a, T>(pub &'a T, pub &'a EncodeOwnership);
 impl<T: Wire> Serialize for WireRef<'_, T> {
     fn serialize<S: serde::Serializer>(
         &self,
         serializer: S,
     ) -> std::result::Result<S::Ok, S::Error> {
-        self.0.encode(serializer)
+        self.0.encode(serializer, self.1)
     }
 }
 
@@ -100,7 +123,12 @@ impl DecodeContext<'_> {
 
 impl Wire for String {
     const MIN_BYTES: usize = 1;
-    fn encode<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+    fn encode<S: serde::Serializer>(
+        &self,
+        serializer: S,
+        ownership: &EncodeOwnership,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        ownership.admit::<S::Error>(self.len())?;
         serializer.serialize_str(self)
     }
     fn decode<'de, D: serde::Deserializer<'de>>(
@@ -123,7 +151,11 @@ impl Wire for String {
 }
 impl Wire for usize {
     const MIN_BYTES: usize = 1;
-    fn encode<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+    fn encode<S: serde::Serializer>(
+        &self,
+        serializer: S,
+        _: &EncodeOwnership,
+    ) -> std::result::Result<S::Ok, S::Error> {
         // The wire coordinate is always u64, independent of host pointer width.
         serializer.serialize_u64(
             u64::try_from(*self)
@@ -140,10 +172,15 @@ impl Wire for usize {
 }
 impl<T: Wire> Wire for Vec<T> {
     const MIN_BYTES: usize = 1;
-    fn encode<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+    fn encode<S: serde::Serializer>(
+        &self,
+        serializer: S,
+        ownership: &EncodeOwnership,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        ownership.rows::<T, S::Error>(self.len())?;
         let mut sequence = serializer.serialize_seq(Some(self.len()))?;
         for row in self {
-            sequence.serialize_element(&WireRef(row))?;
+            sequence.serialize_element(&WireRef(row, ownership))?;
         }
         sequence.end()
     }
@@ -230,51 +267,6 @@ impl postcard::ser_flavors::Flavor for Output {
     }
 }
 
-struct JsonLength<'a> {
-    bytes: usize,
-    next_check: usize,
-    control: Option<&'a OperationControl>,
-    stopped: Option<ToolkitError>,
-}
-impl std::io::Write for JsonLength<'_> {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.bytes = self
-            .bytes
-            .checked_add(bytes.len())
-            .filter(|n| *n <= MAXIMUM)
-            .ok_or_else(|| std::io::Error::other("Facts JSON admission limit"))?;
-        // Escaped NULs cause many tiny serializer writes. Check at bounded byte
-        // intervals rather than adding a clock read for every scalar fragment.
-        if self.bytes >= self.next_check {
-            if let Some(control) = self.control
-                && let Err(error) = control.check()
-            {
-                self.stopped = Some(error);
-                return Err(std::io::Error::other("Facts JSON admission stopped"));
-            }
-            self.next_check = self.bytes.saturating_add(64 << 10);
-        }
-        Ok(bytes.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-fn admit_public_facts(facts: &Facts, control: Option<&OperationControl>) -> Result<()> {
-    let mut counter = JsonLength {
-        bytes: JSON_ENVELOPE_BYTES,
-        next_check: 0,
-        control,
-        stopped: None,
-    };
-    let result = serde_json::to_writer(&mut counter, facts);
-    if let Some(error) = counter.stopped {
-        return Err(error);
-    }
-    result.map_err(|_| budget())
-}
-
 fn digest(value: &str) -> Option<[u8; 32]> {
     if value.len() != 64 {
         return None;
@@ -294,15 +286,15 @@ fn digest(value: &str) -> Option<[u8; 32]> {
 pub(crate) fn encode(facts: &Facts, input: &str) -> Result<Vec<u8>> {
     let input =
         digest(input).ok_or_else(|| ToolkitError::invalid("Invalid Facts source digest"))?;
-    // Compact public JSON field ordering cannot change its byte length. This
-    // preserves the old complete-JSON budget, including escaped Unicode/control
-    // characters and skipped fields, while retaining no JSON bytes or DOM.
-    admit_public_facts(facts, None)?;
+    // The private cache limit counts its actual binary bytes, including HEADER.
+    // Public JSON/evidence writers enforce their own output budgets; simulating
+    // the retired JSON cache here would traverse every complete Facts twice.
+    let ownership = EncodeOwnership::new();
     let mut record = Vec::new();
     record.try_reserve_exact(HEADER).map_err(|_| budget())?;
     record.resize(HEADER, 0);
-    let mut record =
-        postcard::serialize_with_flavor(&WireRef(facts), Output(record)).map_err(|_| budget())?;
+    let mut record = postcard::serialize_with_flavor(&WireRef(facts, &ownership), Output(record))
+        .map_err(|_| budget())?;
     let length = u32::try_from(record.len() - HEADER).map_err(|_| budget())?;
     let hash: [u8; 32] = Sha256::digest(&record[HEADER..]).into();
     record[..8].copy_from_slice(MAGIC);
@@ -344,15 +336,7 @@ pub(crate) fn decode(raw: &[u8], input: &str, control: &OperationControl) -> Res
             return Err(error);
         }
         Ok(match (decoded, decoder.finalize()) {
-            // A compact forged binary could otherwise expand beyond the old
-            // accepted complete JSON limit (for example many NUL characters).
-            // This extra warm traversal retains no JSON bytes/DOM. It is a
-            // compatibility cost to measure, not a zero-conversion claim.
-            (Ok(facts), Ok([])) => match admit_public_facts(&facts, Some(control)) {
-                Ok(()) => Some(facts),
-                Err(error) if error.code == "codebase.fact_budget" => None,
-                Err(error) => return Err(error),
-            },
+            (Ok(facts), Ok([])) => Some(facts),
             _ => None,
         })
     })();

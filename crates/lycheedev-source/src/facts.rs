@@ -94,11 +94,15 @@ macro_rules! fact_contract {
         }
         impl binary::Wire for $name {
             const MIN_BYTES: usize = 0 $(+ <$kind as binary::Wire>::MIN_BYTES)*;
-            fn encode<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            fn encode<S: serde::Serializer>(
+                &self,
+                serializer: S,
+                ownership: &binary::EncodeOwnership,
+            ) -> Result<S::Ok, S::Error> {
                 use serde::ser::SerializeTuple;
                 let fields = [$(stringify!($field)),*];
                 let mut tuple = serializer.serialize_tuple(fields.len())?;
-                $(tuple.serialize_element(&binary::WireRef(&self.$field))?;)*
+                $(tuple.serialize_element(&binary::WireRef(&self.$field, ownership))?;)*
                 tuple.end()
             }
             fn decode<'de, D: serde::Deserializer<'de>>(

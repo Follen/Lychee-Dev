@@ -34,6 +34,7 @@
 - [ ] Lookup/投影/过滤/batch与复杂SQL共享执行/证据，Agent调用和token收益以真实任务证明。
 
 ## C. Source认证、按需消费与binary cache
+- [ ] 已实现并独审子树scratch预留与移除旧JSON缓存计数遍历两片；原binary/owned/输出额度保留。执行完整受影响Source回归后再一次匹配性能，13个新增/调整名称与1个细化负例不得以静审冒通过。
 - [ ] 完成当前Facts Postcard正确性和匹配性能；旧cache失效重建，新损坏不得fallback成健康。
 - [x] 整合已独审Index r2与正式v13-postcard-index18诊断；固定Go323来源已核；070f七Node为357通过/0失败/4权限skip。
 - [ ] 闭合旧validate fixture后完成Source库回归；070f的25新增active及真实luac1已通过，6个lib ignored仍单列。

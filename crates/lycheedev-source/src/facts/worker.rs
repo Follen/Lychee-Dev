@@ -88,11 +88,13 @@ impl<'a> WorkerGuard<'a> {
         }
         self.check()
     }
-    pub(crate) fn frame(&self, raw_len: usize) -> Option<ScratchFrame<'_>> {
+    pub(crate) fn frame(&self, subtree_bytes: usize) -> Option<ScratchFrame<'_>> {
         // A frame can hold converted/decoded target names, a temporary UTF-8
         // replacement, and pending assignment names while descending. Each is
-        // bounded by source bytes; growth/UTF-8 replacement fits this factor.
-        let Some(bytes) = raw_len
+        // bounded by the current subtree's bytes; growth/UTF-8 replacement fits
+        // this factor. Ancestors retain their frames while children run. Owned
+        // scopes, source-line signatures and retained Facts are charged apart.
+        let Some(bytes) = subtree_bytes
             .checked_mul(8)
             .and_then(|bytes| bytes.checked_add(1024))
         else {

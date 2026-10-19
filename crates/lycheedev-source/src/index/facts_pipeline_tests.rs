@@ -663,6 +663,145 @@ fn abandoned_results_keep_the_complete_path_and_do_not_trigger_refill() {
 }
 
 #[test]
+fn local_subtree_preparation_reaches_ordered_consumer_without_duplicate_parse() {
+    let control = OperationControl::default();
+    let raw = format!(
+        "--{}\n{}function Local() T[\"\\255\"]() end\nLocal()\n{}",
+        "p".repeat(48 << 10),
+        "do\n".repeat(40),
+        "end\n".repeat(40),
+    )
+    .into_bytes();
+    assert!(raw.len() < MAX_SOURCE_BYTES);
+    let expected = ParseMode::LuaOrdinary.parse(&raw);
+    assert!(expected.diagnostics.is_empty());
+    with_workers(
+        2,
+        |_, input| prepare_input(input, &control, true),
+        |workers| {
+            let profile = Profile::enabled(true);
+            let mut p = pipeline(workers, &profile);
+            let mut consumed = Vec::new();
+            let mut consume =
+                |f: &git::TreeFile, data: Vec<u8>, prepared: Option<PreparedFacts>| {
+                    assert_eq!(data, raw);
+                    assert!(prepared.is_some(), "local subtree must not be reparsed");
+                    let actual = super::super::parse_document_facts(
+                        &f.path,
+                        &data,
+                        &control,
+                        Some(&profile),
+                        prepared,
+                    )?;
+                    assert_eq!(
+                        serde_json::to_vec(&actual).unwrap(),
+                        serde_json::to_vec(&expected).unwrap(),
+                    );
+                    assert_eq!(
+                        actual.raw_relationship_targets,
+                        expected.raw_relationship_targets
+                    );
+                    consumed.push(f.path.clone());
+                    Ok(())
+                };
+            for ordinal in 0..3 {
+                p.push(
+                    &file(&format!("{ordinal}.lua"), raw.len()),
+                    raw.clone(),
+                    &mut consume,
+                )
+                .unwrap();
+            }
+            p.finish(Ok(3), &mut consume).unwrap();
+            assert_eq!(consumed, ["0.lua", "1.lua", "2.lua"]);
+            assert_eq!(profile.calls(Phase::FactsWorker), 3);
+            assert_eq!(profile.calls(Phase::FactsParse), 3);
+            assert_eq!(profile.calls(Phase::FactsParseSequential), 0);
+            assert_eq!(profile.calls(Phase::FactsWorkerAbandoned), 0);
+            assert_eq!(profile.calls(Phase::FactsRefill), 1);
+            assert_eq!(p.pending_bytes, 0);
+            assert!(p.pending.is_empty());
+            assert_eq!(p.free_workers.len(), 2);
+        },
+    );
+}
+
+#[test]
+fn real_subtree_scratch_pressure_keeps_ordered_complete_fallback_without_refill() {
+    let control = OperationControl::default();
+    let raw = format!(
+        "{}local padding = '{}'; Call(){}",
+        "do ".repeat(260),
+        "p".repeat(32 << 10),
+        " end".repeat(260),
+    )
+    .into_bytes();
+    assert!(raw.len() < MAX_SOURCE_BYTES);
+    let sources = [raw, b"Second()".to_vec(), b"Third()".to_vec()];
+    let expected: Vec<_> = sources
+        .iter()
+        .map(|raw| ParseMode::LuaOrdinary.parse(raw))
+        .collect();
+    assert!(
+        expected[0]
+            .diagnostics
+            .iter()
+            .any(|note| note.message == "source_ast_depth_limit")
+    );
+    with_workers(
+        2,
+        |_, input| prepare_input(input, &control, true),
+        |workers| {
+            let profile = Profile::enabled(true);
+            let mut p = pipeline(workers, &profile);
+            let mut consumed = 0;
+            let mut consume =
+                |f: &git::TreeFile, data: Vec<u8>, prepared: Option<PreparedFacts>| {
+                    assert_eq!(f.path, format!("{consumed}.lua"));
+                    assert_eq!(data, sources[consumed]);
+                    assert_eq!(prepared.is_none(), consumed == 0);
+                    let actual = super::super::parse_document_facts(
+                        &f.path,
+                        &data,
+                        &control,
+                        Some(&profile),
+                        prepared,
+                    )?;
+                    assert_eq!(
+                        serde_json::to_vec(&actual).unwrap(),
+                        serde_json::to_vec(&expected[consumed]).unwrap(),
+                    );
+                    assert_eq!(
+                        actual.raw_relationship_targets,
+                        expected[consumed].raw_relationship_targets,
+                    );
+                    consumed += 1;
+                    Ok(())
+                };
+            for (ordinal, raw) in sources.iter().enumerate() {
+                p.push(
+                    &file(&format!("{ordinal}.lua"), raw.len()),
+                    raw.clone(),
+                    &mut consume,
+                )
+                .unwrap();
+            }
+            p.finish(Ok(3), &mut consume).unwrap();
+            assert_eq!(consumed, 3);
+            assert_eq!(profile.calls(Phase::FactsWorker), 3);
+            assert_eq!(profile.calls(Phase::FactsParse), 3);
+            assert_eq!(profile.calls(Phase::FactsParseSequential), 1);
+            assert_eq!(profile.calls(Phase::FactsWorkerAbandoned), 1);
+            assert_eq!(profile.calls(Phase::FactsRefill), 0);
+            assert_eq!(p.pending_bytes, 0);
+            assert!(p.pending.is_empty());
+            assert_eq!(p.free_workers.len(), 2);
+            assert!(control.check().is_ok());
+        },
+    );
+}
+
+#[test]
 fn early_refill_never_consumes_after_the_first_error_and_all_jobs_finish() {
     let completed = AtomicUsize::new(0);
     with_workers(
