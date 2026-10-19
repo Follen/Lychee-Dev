@@ -680,7 +680,7 @@ test('opt-in pipeline authenticates two same-build roles, witnesses the companio
     assert.deepEqual(custody.objects.map(row=>row.role),['test','companion']);
     assert.deepEqual(custody.objects.map(row=>row.archive),[report.artifact.archive,report.companionArtifact.archive]);
     for(const object of [report.artifact,report.companionArtifact]) {
-      assert.equal(verifyCoverageArchive(object.archive).sha256,object.sha256); assert.equal(hashFile(object.path),object.sha256);
+      assert.equal(verifyCoverageArchive(object.archive,{expectedKind:'object'}).sha256,object.sha256); assert.equal(hashFile(object.path),object.sha256);
     }
     for(const log of coverage.sealedLogs) assert.equal(hashFile(log.path),log.sha256);
     assert.equal(build.sealedLogs.some(row=>row.original.endsWith('part-000.bin')),false);
@@ -740,7 +740,7 @@ for(const objectRole of ['test','companion']) for(const step of ['tests','merge'
       assert.equal(report.complete,false); assert.match(report.objectVerificationError,/file_changed/);
       assert.equal(runner.calls.at(-1).step,step); assert.equal(receipt.state,'retired');
       const object=objectRole==='test' ? report.artifact : report.companionArtifact;
-      assert.notEqual(hashFile(object.path),object.sha256); assert.equal(verifyCoverageArchive(object.archive).sha256,object.sha256);
+      assert.notEqual(hashFile(object.path),object.sha256); assert.equal(verifyCoverageArchive(object.archive,{expectedKind:'object'}).sha256,object.sha256);
     } finally {f.cleanup();}
   });
 
@@ -748,8 +748,8 @@ for(const objectRole of ['test','companion']) for(const corruption of ['original
   test(`${objectRole} ${corruption} corruption before execution is rejected`,()=>{
     const f=fixture(); try {
       const runner=companionMock(f), archived=[];
-      const archiveFile=(row,directory,logs)=>{
-        const archive=archiveCoverageFile(row,directory,logs); archived.push(archive);
+      const archiveFile=(row,directory,logs,options)=>{
+        const archive=archiveCoverageFile(row,directory,logs,options); archived.push(archive);
         if(archived.length===2) {
           const victim=archived[objectRole==='test' ? 0 : 1];
           if(corruption==='original') writeFileSync(victim.path,'changed');
@@ -916,5 +916,118 @@ test('compound object mutation and lookup contamination preserve the first error
     assert.match(report.objectLookupError,/external_object_lookup/);assert.equal(receipt.state,'failed');assert.equal(existsSync(receipt.directory),true);
     assert.equal(readFileSync(join(report.externalObjectDiscovery.debugFileDirectory,'foreign.exe'),'utf8'),'foreign');
     assert.equal(report.rawArchived,true);assert.equal(runner.calls.at(-1).step,'tests');
+  } finally {f.cleanup();}
+});
+
+for(const role of ['test','companion']) test(`actual-sized 149678592-byte ${role} object streams under typed remaining-evidence custody`,()=>{
+  const f=fixture(); try {
+    const bytes=149678592;
+    f.binaryBytes=role==='test' ? bytes : 42493440;
+    const runner=companionMock(f,{cargo({artifact,companion}) {
+      truncateSync(artifact.executable,f.binaryBytes);
+      if(role==='companion') truncateSync(companion.executable,bytes);
+    }});
+    let maxRead=0;
+    const archiveFile=(row,directory,logs,options)=>archiveCoverageFile(row,directory,logs,{...options,
+      read(fd,buffer,offset,length,position) {maxRead=Math.max(maxRead,length);assert(length<=65536);return readSync(fd,buffer,offset,length,position);}});
+    const result=collectRustCoverage(f.root,runner.options,{execute:runner.execute,archiveFile}), report=JSON.parse(readFileSync(result.report));
+    const large=role==='test' ? report.artifact : report.companionArtifact;
+    assert.equal(report.complete,true);assert.equal(large.bytes,bytes);assert.equal(large.archive.parts.length,9);assert.equal(maxRead,65536);
+    assert.equal(large.archive.parts.at(-1).bytes,bytes-(128<<20));
+    for(const object of [report.artifact,report.companionArtifact]) {
+      assert.equal(object.archive.schema,'lycheedev.coverage-file-parts.v2');assert.equal(object.archive.kind,'object');
+      assert(object.archive.byteLimit<(240<<20));assert(object.archive.byteLimit>=object.bytes);
+      assert.deepEqual(verifyCoverageArchive(object.archive,{expectedKind:'object'}),{bytes:object.bytes,sha256:object.sha256});
+      assert.throws(()=>verifyCoverageArchive(object.archive),/archive_schema/);
+    }
+    assert.equal(report.companionArtifact.archive.byteLimit,report.artifact.archive.byteLimit-report.artifact.bytes);
+    if(role==='companion') assert.equal(report.artifact.bytes+report.companionArtifact.bytes,192172032);
+    assert.equal(report.budgets.evidenceBytes,256<<20);assert.equal(report.budgets.scratchBytes,128<<20);assert.equal(report.budgets.rawBytes,128<<20);
+    assert.equal(report.budgets.objectCeilingBytes,240<<20);assert.match(report.budgets.objectScope,/not an additional allowance/);
+    assert.equal(report.profiles.length,5);assert(report.profiles.every(profile=>profile.schema==='lycheedev.coverage-file-parts.v1'));
+    assert.equal(report.merged.schema,'lycheedev.coverage-file-parts.v1');assert.equal(report.totalProcessBudgetMs,600000);
+    const owner=JSON.parse(readFileSync(result.coverageEvidence));assert.equal(owner.state,'retired');assert.equal(existsSync(owner.directory),false);
+    assert(usage(dirname(dirname(result.coverageEvidence))).bytes<(256<<20));
+  } finally {f.cleanup();}
+});
+
+test('typed object archives require caller kind and a bounded explicit byte limit; legacy archives do not widen',()=>{
+  const f=fixture(); try {
+    const path=join(f.root,'object.exe');writeFileSync(path,'instrumented object');
+    const source={path,bytes:lstatSync(path).size,sha256:hashFile(path)};
+    const object=archiveCoverageFile(source,join(f.root,'object.parts'),[],{kind:'object',byteLimit:source.bytes});
+    assert.equal(object.byteLimit,source.bytes);assert.deepEqual(verifyCoverageArchive(object,{expectedKind:'object'}),{bytes:source.bytes,sha256:source.sha256});
+    assert.throws(()=>verifyCoverageArchive(object),/archive_schema/);assert.throws(()=>verifyCoverageArchive(object,{expectedKind:'unknown'}),/archive_kind/);
+    for(const limit of [undefined,null,-1,0,source.bytes-1,1.5,(240<<20)+1,2**53,'240']) {
+      const changed={...object,byteLimit:limit};assert.throws(()=>verifyCoverageArchive(changed,{expectedKind:'object'}),/archive_schema/);
+      assert.throws(()=>archiveCoverageFile(source,join(f.root,'invalid.parts'),[],{kind:'object',byteLimit:limit}),/archive_kind|file_budget/);
+      assert.equal(existsSync(join(f.root,'invalid.parts')),false);
+    }
+    for(const kind of [undefined,'profile','raw','merged','unknown']) {
+      const changed={...object,kind};assert.throws(()=>verifyCoverageArchive(changed,{expectedKind:'object'}),/archive_schema/);
+    }
+    assert.throws(()=>archiveCoverageFile(source,join(f.root,'profile.parts'),[],{kind:'profile',byteLimit:240<<20}),/archive_kind/);
+    const oversizedLegacy={...object,schema:'lycheedev.coverage-file-parts.v1',bytes:(128<<20)+1,byteLimit:240<<20};
+    assert.throws(()=>verifyCoverageArchive(oversizedLegacy),/archive_schema/);
+    assert.throws(()=>verifyCoverageArchive(oversizedLegacy,{expectedKind:'object'}),/archive_schema/);
+  } finally {f.cleanup();}
+});
+
+test('typed object copy refuses one byte over its explicit remaining limit before creating any parts',()=>{
+  const f=fixture(); try {
+    const path=join(f.root,'object.exe');writeFileSync(path,'instrumented object');
+    const source={path,bytes:lstatSync(path).size,sha256:hashFile(path)}, logs=[];
+    assert.throws(()=>archiveCoverageFile(source,join(f.root,'object.parts'),logs,{kind:'object',byteLimit:source.bytes-1}),/file_budget/);
+    assert.equal(logs.length,0);assert.equal(existsSync(join(f.root,'object.parts')),false);assert.equal(hashFile(path),source.sha256);
+  } finally {f.cleanup();}
+});
+
+for(const delta of [0,1]) test(`large companion cumulative admission is exact at remaining evidence ${delta ? 'plus one' : 'boundary'}`,()=>{
+  const f=fixture(); try {
+    let archiveCalls=0;
+    const runner=companionMock(f,{cargo({artifact,companion,owner,result}) {
+      const previousCopies=readdirSync(owner.evidence).filter(name=>name.endsWith('.bin')).reduce((sum,name)=>sum+lstatSync(join(owner.evidence,name)).size,0);
+      const remaining=(256<<20)-(16<<20)-usage(dirname(owner.evidence)).bytes-previousCopies-3*(result.stdout.length+result.stderr.length);
+      const companionBytes=149678592;truncateSync(companion.executable,companionBytes);f.binaryBytes=remaining-companionBytes+delta;
+      truncateSync(artifact.executable,f.binaryBytes);
+    }});
+    const {report}=failed(f,runner,delta ? /evidence_total_budget/ : /fixture large exact admission reached/,
+      {archiveFile(row,directory,logs,options) {archiveCalls++;assert.equal(options.kind,'object');assert(row.bytes<=options.byteLimit);throw new Error('fixture large exact admission reached');}});
+    assert.equal(archiveCalls,delta ? 0 : 1);assert.equal(report.complete,false);assert.equal(runner.calls.at(-1).step,'cargo');
+  } finally {f.cleanup();}
+});
+
+for(const stage of ['raw','merged']) test(`${stage} remains capped at 128 MiB plus one in opt-in object mode`,()=>{
+  const f=fixture(); try {
+    const runner=companionMock(f,{[stage==='raw' ? 'tests' : 'merge']({owner,args}) {
+      const path=stage==='raw' ? owner.env.LLVM_PROFILE_FILE.replace('%m','123_0').replace('%p','99') : args.at(-1);
+      truncateSync(path,(128<<20)+1);
+    }});
+    const {report,receipt}=failed(f,runner,stage==='raw' ? /file_budget/ : /scratch_total_budget/);
+    assert.equal(report.complete,false);assert.equal(report.budgets.rawBytes,128<<20);assert.equal(existsSync(receipt.directory),true);
+    assert.equal(runner.calls.at(-1).step,stage==='raw' ? 'tests' : 'merge');
+    assert.equal(stage==='raw' ? report.rawArchived : report.mergedArchived,false);
+  } finally {f.cleanup();}
+});
+
+test('legacy default executable remains bounded at 128 MiB with no object opt-in',()=>{
+  const f=fixture(); try {
+    const runner=mock(f,{cargo({artifact}) {truncateSync(artifact.executable,149678592);}}), {report}=failed(f,runner,/file_budget/);
+    assert.equal(report.schema,'lycheedev.rust-coverage.v2');assert.equal(report.artifact,undefined);assert.equal(runner.calls.at(-1).step,'cargo');
+    assert.equal(Object.hasOwn(report.budgets,'objectCeilingBytes'),false);assert.equal(Object.hasOwn(report.budgets,'objectScope'),false);
+  } finally {f.cleanup();}
+});
+
+test('actual object pair can still exhaust cumulative evidence on a raw profile smaller than 128 MiB',()=>{
+  const f=fixture(); try {
+    f.binaryBytes=42493440;
+    const runner=companionMock(f,{cargo({artifact,companion}) {truncateSync(artifact.executable,f.binaryBytes);truncateSync(companion.executable,149678592);},
+      tests({owner}) {truncateSync(owner.env.LLVM_PROFILE_FILE.replace('%m','123_0').replace('%p','99'),60<<20);}});
+    const {report,receipt}=failed(f,runner,/evidence_total_budget/);
+    assert.equal(report.complete,false);assert.equal(report.rawArchived,false);assert.equal(runner.calls.at(-1).step,'tests');
+    assert.equal(report.artifact.bytes+report.companionArtifact.bytes,192172032);assert.equal(receipt.state,'failed');assert.equal(existsSync(receipt.directory),true);
+    assert.equal(lstatSync(join(receipt.directory,'raw/test-123_0-99.profraw')).size,60<<20);
+    for(const object of [report.artifact,report.companionArtifact]) assert.equal(verifyCoverageArchive(object.archive,{expectedKind:'object'}).sha256,object.sha256);
+    assert(report.observedEvidenceBytesBeforeReport<(256<<20));assert.equal(report.budgets.evidenceBytes,256<<20);
   } finally {f.cleanup();}
 });

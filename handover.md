@@ -1,6 +1,14 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-19 07:24 UTC。当前已验证生产为 `d4271ae430ac2a80087af81c70eea960d547acbb`，分支 `rust-refactor`、草稿 PR #14。下列为非敏感结果摘要；本机原始日志未随文档发布。Stage2与完整性能验收仍未完成。
+更新：2026-10-19 07:50 UTC。当前已验证生产为 `d4271ae430ac2a80087af81c70eea960d547acbb`，分支 `rust-refactor`、草稿 PR #14。下列为非敏感结果摘要；本机原始日志未随文档发布。Stage2与完整性能验收仍未完成。
+
+### CLI companion 首次Windows采集：对象文件限额误用（77df）
+
+固定77df正式Node为146项：145通过/0失败/1个真实file-symlink EPERM跳过；Rust/LLVM预检与Cargo均成功。collector在选择companion时返回coverage.file_budget：实际instrumented CLI为149678592B，超过单对象沿用的134217728B上限。此时raw/merged均0、evidence3160726B；不是raw总额或累计证据耗尽。原exact四次CLI、merge、三次export与main witness均未执行，不能报告覆盖率成功。
+
+三个owner回收、八native均0；一个forced为已审核辅助进程，deadline/lease/活动进程均0。源码定位为artifact选择及通用archive validation沿用了RAW_LIMIT作为对象大小限制；hash/copy本身已是64KiB流式。后继只分离对象证据准入与raw/merged限制，累计evidence256MiB及其metadata保留、raw+merged128MiB与16MiB分片保持；双对象和后续profiles是否装得下仍需实际验证。原失败保留，不改优化级别或裁剪符号。 新companion模式使用显式object类v2分片：单件理论上限由原256MiB总额扣16MiB保留得到，复制前仍按双对象及全部已有/待复制日志累计准入；旧默认单对象与raw/merged的v1≤128MiB不变。真实同次test对象42493440B，两对象合计192172032B，扣已有证据和保留空间后的56325482B仅是当时余额，不保证未来profiles/merged/exports都能容纳。
+
+最终cloud coverage/build/disk Node156通过/0失败/0跳过（143+8+5，本批新增10），包含真实双对象尺寸、超过128MiB的两个对象角色、kind伪装、actual remaining恰好/越界与真实pair加60MiB raw仍拒绝保全的反例。语法/diff检查通过；Windows后继采集尚未运行，原77df失败不改标。
 
 ### Stage2 既有覆盖率证据范围复核（2026-10-19）
 

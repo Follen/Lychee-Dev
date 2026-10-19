@@ -15,6 +15,9 @@ import {ownedSpawnSync} from './rust-owned-process.mjs';
 
 const TARGET = 'x86_64-pc-windows-msvc', RUST = '1.99.0';
 const FILE_LIMIT = 16 << 20, RAW_LIMIT = 128 << 20, EVIDENCE_LIMIT = 256 << 20;
+// A theoretical object ceiling, never an allowance on top of evidence. The
+// opt-in object's actual archive limit is its remaining cumulative evidence.
+const OBJECT_LIMIT = EVIDENCE_LIMIT - FILE_LIMIT;
 const FLAGS = ['-C', 'target-feature=+crt-static', '-C', 'instrument-coverage'];
 const SUPPORT = ['rust-coverage.mjs', 'rust-build.mjs', 'rust-disk.mjs', 'rust-owned-process.mjs', 'rust-owned-process.ps1', 'rust-build-auxiliary.json'];
 const save = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2) + '\n', {flag:'wx'});
@@ -38,9 +41,13 @@ const partName = index => `part-${String(index).padStart(3, '0')}.bin`;
 
 // Same ordered, bounded-part custody as source-index evidence. Only the complete
 // source files are LLVM inputs; a byte fragment is never an independent profile.
-export function verifyCoverageArchive(archive) {
-  check(archive.schema === 'lycheedev.coverage-file-parts.v1' && archive.partBytes === FILE_LIMIT
-    && Number.isSafeInteger(archive.bytes) && archive.bytes > 0 && archive.bytes <= RAW_LIMIT
+export function verifyCoverageArchive(archive, {expectedKind = 'profile'} = {}) {
+  check(['profile', 'object'].includes(expectedKind), 'archive_kind');
+  const object = archive.schema === 'lycheedev.coverage-file-parts.v2';
+  check((archive.schema === 'lycheedev.coverage-file-parts.v1' || (object && expectedKind === 'object'
+      && archive.kind === 'object' && Number.isSafeInteger(archive.byteLimit) && archive.byteLimit > 0 && archive.byteLimit <= OBJECT_LIMIT))
+    && archive.partBytes === FILE_LIMIT
+    && Number.isSafeInteger(archive.bytes) && archive.bytes > 0 && archive.bytes <= (object ? archive.byteLimit : RAW_LIMIT)
     && /^[a-f0-9]{64}$/.test(archive.sha256) && Array.isArray(archive.parts)
     && archive.parts.length === Math.ceil(archive.bytes / FILE_LIMIT), 'archive_schema');
   const whole = createHash('sha256'), buffer = Buffer.alloc(65536); let total = 0;
@@ -64,11 +71,14 @@ export function verifyCoverageArchive(archive) {
 }
 
 // read/write injection is confined to Node copy-fault tests, never CLI options.
-export function archiveCoverageFile(source, directory, logs, {read = readSync, write = writeSync} = {}) {
-  check(Number.isSafeInteger(source.bytes) && source.bytes > 0 && source.bytes <= RAW_LIMIT, 'file_budget');
+export function archiveCoverageFile(source, directory, logs, {kind = 'profile', byteLimit, read = readSync, write = writeSync} = {}) {
+  check(kind === 'profile' ? byteLimit === undefined
+    : kind === 'object' && Number.isSafeInteger(byteLimit) && byteLimit > 0 && byteLimit <= OBJECT_LIMIT, 'archive_kind');
+  check(Number.isSafeInteger(source.bytes) && source.bytes > 0 && source.bytes <= (kind === 'object' ? byteLimit : RAW_LIMIT), 'file_budget');
   unchanged(source); const before = lstatSync(source.path);
   mkdirSync(directory);
-  const archive = {schema:'lycheedev.coverage-file-parts.v1', path:source.path, bytes:source.bytes, sha256:source.sha256,
+  const archive = {schema:kind === 'object' ? 'lycheedev.coverage-file-parts.v2' : 'lycheedev.coverage-file-parts.v1',
+    ...(kind === 'object' ? {kind, byteLimit} : {}), path:source.path, bytes:source.bytes, sha256:source.sha256,
     directory, partBytes:FILE_LIMIT, parts:[]};
   const whole = createHash('sha256'), buffer = Buffer.alloc(65536), input = openSync(source.path, 'r'); let total = 0;
   try {
@@ -92,7 +102,7 @@ export function archiveCoverageFile(source, directory, logs, {read = readSync, w
     check(read(input, buffer, 0, 1, null) === 0, 'archive_source_grew'); sameFile(before, fstatSync(input));
   } finally { closeSync(input); }
   sameFile(before, lstatSync(source.path)); check(whole.digest('hex') === source.sha256, 'archive_source_changed');
-  verifyCoverageArchive(archive); unchanged(source); return archive;
+  verifyCoverageArchive(archive, {expectedKind:kind}); unchanged(source); return archive;
 }
 
 export function coverageSelection({packageName, testName, lib = false, exact, companionBin} = {}) {
@@ -138,7 +148,7 @@ export function selectCoverageArtifacts(bytes, root, target, selection) {
   const path = contained(target, row.executable);
   check(path.endsWith('.exe') && row.filenames?.includes(row.executable), 'artifact_executable');
   contained(join(root, 'crates', selection.packageName), row.target.src_path);
-  const artifact = {row, ...regular(path, RAW_LIMIT)};
+  const artifact = {row, ...regular(path, selection.companionBin ? OBJECT_LIMIT : RAW_LIMIT)};
   if (!selection.companionBin) return {artifact};
   check(selection.kind === 'test', 'companion_integration_required');
   check(typeof row.package_id === 'string' && row.package_id.length > 0, 'artifact_package_identity');
@@ -157,7 +167,7 @@ export function selectCoverageArtifacts(bytes, root, target, selection) {
   check(companionPath !== path, 'companion_same_object');
   const originalFile = lstatSync(path), companionFile = lstatSync(companionPath);
   check(!(originalFile.ino !== 0 && originalFile.dev === companionFile.dev && originalFile.ino === companionFile.ino), 'companion_same_object');
-  return {artifact, companion:{row:companion, ...regular(companionPath, RAW_LIMIT)}};
+  return {artifact, companion:{row:companion, ...regular(companionPath, OBJECT_LIMIT)}};
 }
 
 export function verifyCompanionCoverage(testCoverage, companionCoverage, combinedCoverage, source, root) {
@@ -258,6 +268,8 @@ export function collectRustCoverage(root, options, {execute = ownedSpawnSync, no
       scope:'Observed raw+merged scratch and both coverage/build evidence directories; not an OS write quota. Binary/raw/merged bytes are preserved once as ordered parts; the build owner seals their custody index, not duplicate payloads.'}};
   if (objectLookup) report.externalObjectDiscovery = {debuginfod:false, debugFileDirectory:objectLookup,
     scope:'Only explicitly selected local objects; the owned lookup directory must remain empty.'};
+  if (selection.companionBin) Object.assign(report.budgets, {objectCeilingBytes:OBJECT_LIMIT,
+    objectScope:'Theoretical single-object ceiling within existing evidence minus metadata reserve, not an additional allowance. Object archive v2 records actual remaining evidence and requires the object caller kind; raw/merged remain v1 and 128 MiB.'});
   let handlesReaped = true, succeeded = false, failure, build, rawArchived = false, rawAttempted = false, mergedArchived = false, mergedAttempted = false;
   let pendingBuildOutputBytes = 0;
   function evidenceBytes() {
@@ -267,15 +279,16 @@ export function collectRustCoverage(root, options, {execute = ownedSpawnSync, no
     // Until runCargo seals, account for the runtime logs it will copy. Payload
     // parts stay solely with this owner; a small index binds them to the build.
     const copies = build ? 0 : pendingBuildOutputBytes + buildLogs.reduce((sum, path) => sum + lstatSync(path).size, 0);
-    check(evidenceBytes() + copies + extra + FILE_LIMIT <= EVIDENCE_LIMIT, 'evidence_total_budget');
+    const remaining = EVIDENCE_LIMIT - FILE_LIMIT - evidenceBytes() - copies;
+    check(extra <= remaining, 'evidence_total_budget'); return remaining;
   }
-  function preserve(row, name) {
-    evidenceBudget(row.bytes);
-    return archiveFile(row, join(job.evidence, name), logs);
+  function preserve(row, name, {object = false} = {}) {
+    const remaining = evidenceBudget(row.bytes);
+    return archiveFile(row, join(job.evidence, name), logs, object ? {kind:'object', byteLimit:remaining} : {});
   }
   function verifyObjects() {
     for (const object of [report.artifact, report.companionArtifact].filter(Boolean)) {
-      unchanged(object); verifyCoverageArchive(object.archive);
+      unchanged(object); verifyCoverageArchive(object.archive, {expectedKind:selection.companionBin ? 'object' : 'profile'});
     }
   }
   function verifyObjectLookup() {
@@ -387,13 +400,13 @@ export function collectRustCoverage(root, options, {execute = ownedSpawnSync, no
           // Admission is cumulative before either large object is copied.
           if (companion) evidenceBudget(artifact.bytes + companion.bytes);
           report.artifact = {path:artifact.path, bytes:artifact.bytes, sha256:artifact.sha256,
-            archive:preserve(artifact, 'instrumented-test.exe.parts')};
+            archive:preserve(artifact, 'instrumented-test.exe.parts', {object:!!companion})};
           if (companion) {
             const cargoIdentity = row => ({packageId:row.package_id, manifestPath:row.manifest_path,
               target:row.target, profile:row.profile, features:row.features, fresh:row.fresh});
             Object.assign(report.artifact, {role:'test', cargo:cargoIdentity(artifact.row)});
             report.companionArtifact = {role:'companion', path:companion.path, bytes:companion.bytes, sha256:companion.sha256,
-              cargo:cargoIdentity(companion.row), archive:preserve(companion, 'instrumented-companion.exe.parts')};
+              cargo:cargoIdentity(companion.row), archive:preserve(companion, 'instrumented-companion.exe.parts', {object:true})};
             verifyObjects();
           }
           check(readdirSync(rawDirectory).length === 0, 'profiles_before_tests');
