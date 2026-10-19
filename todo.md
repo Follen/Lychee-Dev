@@ -1,5 +1,8 @@
 - [x] Fixed f811 Data projection: check and71 targeted Rust tests passed, including16 new tests once; no full-workspace or performance acceptance claim.
 
+- [x] 定位并最小修复6ea实际E0282：Data generation发布后闭包显式Core Result<Outcome>，仅类型标注、不改变业务/错误/close。原6ea失败及13组NOT_RUN保留。
+- [ ] 固定类型修复后再次all-targets，成功才执行原Core/Data/Source/CLI及Live定向队列；不得把HashWriter错误消失算完整编译通过。
+
 - [ ] 复验8c9真实E0425最小后继：SymbolHashWriter恢复原write/flush；先all-targets再原未运行Core/Data/Source/CLI队列及8个SYM身份oracle。8c9旧失败与unknown-aux forced保持，不能算已通过。
 
 - [x] 保存首批8c9 Core配置/真实Arrow prepare/Source Postcard及独立复审；37文件+1删除逐字节核验。Windows与性能仍待。

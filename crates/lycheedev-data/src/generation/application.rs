@@ -354,7 +354,7 @@ fn write_generation(
     }
     let object = object_writer.commit()?;
     let published = json!({"object":object,"generationPublication":"not-confirmed"});
-    let result = (|| {
+    let result: Result<Outcome> = (|| {
         budget.check()?;
         let manifest = Manifest {
             schema: "lycheedev.data-static-generation.v1",
