@@ -6,16 +6,18 @@
 - [x] 070f实际all-targets通过；2808四处编译错误和Node版本断言闭合，历史失败保留。
 - [x] 原copy/发布后receipt路径/generation取消四个修复目标均通过；278 DataFusion可选资格14项通过保持独立，不代表生产执行器或性能。
 - [x] 070f七Node为357通过/0失败/4权限skip；Rust为957通过/23失败/6 ignored，不称全仓通过。
-- [ ] 修复并复验Source validate旧summary共享fixture的21项前置失败，保真实typed schema及全部业务断言。
-- [ ] 修复并复验Data cleanup目录owner计数与历史uppercase CAP归属查找两个失败；每个owner只消费一次、重复close事件和CAP签名/认证必须保留。
+- [x] 19e validate32/32通过，070f共享fixture的21失败逐项闭合，真实typed schema及全部业务断言保留。
+- [x] 19e data_disk13/13、remove_commands22/22通过，两个Core失败及两新增均通过；一次消费、重复close事件和CAP签名/认证保留。
 - [x] Source 25新增Index测试逐名一次通过；source_inspect15、flow4与正式认证luac真实ignored用例1通过。
-- [ ] 当前三处最小修闭合前暂停新功能发布；read-through/provider组合已静审，45新增与Windows编译尚未运行。
+- [x] 19e all-targets及67项定向回归全通过，原23失败闭合；不是全仓/性能通过。
+- [ ] 固定19e一次matchedrelease及完整Source六场景性能；read-through/provider组合45新增与Windows编译未运行，私有元库另22新增未运行。
 - [x] 最终组合Node检查记录sourceTree并区分git archive导出与export-ignore范围；原隔离361/361不能代替最终组合树结果。
 
 ## A. Home、配置与全Data容量
 - [x] 实现decimal5GB可配置基础、派生目录与至少真实cache prepare消费者；初批运行验证未闭。
 - [x] 整合共享blob、decoded spool和CAP独立引用保护28代码路径，静态独审通过；保留发布后错误receipt与278测试修正。
-- [ ] 闭合56新增中唯一uppercase历史CAP失败；070f已55通过，仍须修复后精确复验，不能重标原结果。
+- [x] 56新增中uppercase历史CAP失败已在19e精确复验通过，070f原55/1不重标。
+- [ ] 修复静态证实的已登记decoded body缺失后重提取/重发布冲突，保f811既有session/asset缺体miss与损坏terminal合同；新增quota不得使缓存缺失不可恢复。
 - [ ] 完整接入Data归属：下载、共享blob去重、Arrow/索引、staging/导出峰值、CAP和SQLite/WAL/SHM/历史记录；明确共享跨域归属和去重，不把局部准入称总硬上限。
 - [ ] 可重建冷缓存淘汰必须保护活跃lease与证据引用；旧超额/缩配置拒新增并报告，不删证据。验证导入峰值，避免raw/IPC/Parquet长期三副本。
 
