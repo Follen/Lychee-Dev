@@ -36,6 +36,8 @@ pub(crate) mod query_csv;
 mod regression_tests;
 #[cfg(test)]
 mod sql_output_tests;
+#[cfg(test)]
+mod sql_result_projection_tests;
 mod request;
 
 pub struct File {
@@ -935,7 +937,9 @@ pub(crate) fn sql_inner_budgeted(
                     Some(public_query_numbers(&request, &result, &safety)?)
                 };
                 budget.check()?;
-                let mut reading = json!({"resources":resources,"memoryBudget":memory_budget,"complete":complete,"partial":!complete,"query":request,"result":result.public(),"sources":provenance,"timings":{"definitionsMs":definitions_ms,"preparationMs":preparation_ms,"executionMs":execution_ms,"decodedSourceBytes":decoded_bytes},"resourceAccounting":{"scope":"admitted allocation and work across local CASC/Encoding/decoded cache/definitions/WDC/SQL","strategy":"conservative cumulative admission","wholeQueryAccountingComplete":false,"logicalProviderParityComplete":physical_empty,"used":budget.snapshot()?,"remainingGaps":["physical/effective provider logical counters not audited against Go 3.2","SQL plan/order-container transient allocations","uninterruptible single codec call"]}});
+                // Borrow the typed result directly into the one reading DOM.
+                // Keep the original rows available for CSV after query capture.
+                let mut reading = json!({"resources":resources,"memoryBudget":memory_budget,"complete":complete,"partial":!complete,"query":request,"result":&result,"sources":provenance,"timings":{"definitionsMs":definitions_ms,"preparationMs":preparation_ms,"executionMs":execution_ms,"decodedSourceBytes":decoded_bytes},"resourceAccounting":{"scope":"admitted allocation and work across local CASC/Encoding/decoded cache/definitions/WDC/SQL","strategy":"conservative cumulative admission","wholeQueryAccountingComplete":false,"logicalProviderParityComplete":physical_empty,"used":budget.snapshot()?,"remainingGaps":["physical/effective provider logical counters not audited against Go 3.2","SQL plan/order-container transient allocations","uninterruptible single codec call"]}});
                 if !semantic_provenance.is_empty() {
                     let size = capture::json_size(&semantic_provenance, &safety)?;
                     safety.charge(Cost::metadata(size.saturating_mul(4).saturating_add(4096)))?;

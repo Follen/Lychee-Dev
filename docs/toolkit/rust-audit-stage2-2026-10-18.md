@@ -4,6 +4,12 @@ Started 2026-10-18 07:18 UTC. Fixed reviewed production: `63d47f29f6c9efe2511ada
 
 Two independent reviewers first traced actual assertions, consumers and fixture costs across the domains below. This is a first-pass scope matrix, not measured coverage, exhaustive branch review or Stage2 convergence. Review redundancy and effectiveness first; retain independent boundaries, repair weaknesses, actually verify, then establish meaningful coverage. Similar names and shared fixtures do not prove redundancy.
 
+## Actual bounded collection status — 2026-10-19
+
+Fixed a860 completed12 independent integration objects,130 passed and1 permission-ignored test. Each test/merge/export completed under its original deadline and ownership. These are individual linked-object denominators, including other owned crates and test code; they are neither a whole-repository union nor additive percentages. Existing coverage summaries cannot be unioned by adding counts. A future authenticated multi-object collection needs compatible mappings/configuration, original profile/object custody, bounded merging and separate treatment of conflicts, CLI child objects and test groups. No new collection framework or unmeasured uncovered-business claim is inferred here.
+
+The latest9693 CSV diagnostic passed actual Windows preparation, full CSV/capture/sidecar equivalence and one old/new cold/warm pair; Node28passed/1EPERMskip. Source a860 six single diagnostics also passed full comparison. These performance diagnostics and the pending architectural projection improvements do not close Stage2, the remaining real OS-pressure capability, privileged file-link assertions, full Skill acceptance or the70% performance target. Earlier failed collector versions and runtime observations below remain historical.
+
 ## First finite test-effectiveness repairs
 
 | Item | Source-confirmed weakness | Narrow repair and retained value | Current evidence |

@@ -308,34 +308,36 @@ pub fn dispatch_with_services(
                     )?);
                     out.coverage = out.data["coverage"].clone();
                     out.complete = out.data["complete"] == true;
+                } else if inv.command == "source index" {
+                    let (summary, coverage) =
+                        index::build_summary_with_control(&inv.home, source, &inv.control)?;
+                    out = Outcome::new(summary);
+                    out.coverage = if out.data.get("coverage").is_some() {
+                        out.data["coverage"].clone()
+                    } else {
+                        coverage
+                    };
+                    out.complete = out.data["complete"] == true;
                 } else {
-                    let index = if inv.command == "source query" {
-                        query_store::load_with_control(
-                            &inv.home,
-                            source,
-                            inv.argument()?,
-                            inv.flag("--mode").unwrap_or(""),
-                            inv.flag("--topic").unwrap_or(""),
-                            &inv.control,
-                        )?
-                    } else {
-                        index::build_with_control(&inv.home, source, &inv.control)?
-                    };
+                    let index = query_store::load_with_control(
+                        &inv.home,
+                        source,
+                        inv.argument()?,
+                        inv.flag("--mode").unwrap_or(""),
+                        inv.flag("--topic").unwrap_or(""),
+                        &inv.control,
+                    )?;
                     let coverage = index.coverage();
-                    let data = if inv.command == "source index" {
-                        index.summary.clone()
-                    } else {
-                        index.search_with_control(
-                            source,
-                            &pin.id,
-                            inv.argument()?,
-                            inv.flag("--mode").unwrap_or(""),
-                            inv.flag("--topic").unwrap_or(""),
-                            query_limit(inv)?,
-                            inv.flag("--cursor").unwrap_or(""),
-                            &inv.control,
-                        )?
-                    };
+                    let data = index.search_with_control(
+                        source,
+                        &pin.id,
+                        inv.argument()?,
+                        inv.flag("--mode").unwrap_or(""),
+                        inv.flag("--topic").unwrap_or(""),
+                        query_limit(inv)?,
+                        inv.flag("--cursor").unwrap_or(""),
+                        &inv.control,
+                    )?;
                     out = Outcome::new(data);
                     out.coverage = if out.data.get("coverage").is_some() {
                         out.data["coverage"].clone()

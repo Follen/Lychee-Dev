@@ -845,15 +845,6 @@ impl Serialize for QueryResult {
         output.end()
     }
 }
-impl QueryResult {
-    pub(crate) fn public(&self) -> serde_json::Value {
-        if let Some(plan) = &self.plan {
-            serde_json::json!({"columns":null,"rows":null,"plan":plan})
-        } else {
-            serde_json::json!({"columns":self.columns,"rows":self.rows})
-        }
-    }
-}
 // Borrow the boxed SELECT without moving the public SetExpr enum's large
 // unboxed Statement storage into the query continuation driver.
 #[inline(never)]

@@ -1,3 +1,4 @@
+mod cache_projection;
 mod facts_cache;
 #[cfg(test)]
 mod facts_decode_tests;
@@ -15,6 +16,7 @@ use lycheedev_core::{
     Result, ToolkitError, evidence, metadata::historical_write::finish_historical,
     selection::SourcePin, storage,
 };
+pub(crate) use cache_projection::build_summary_with_control;
 use profile::{Phase, Profile};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -236,10 +238,10 @@ fn append_load_facts(
     Ok(())
 }
 #[derive(Serialize, Deserialize)]
-pub struct Index {
-    pub documents: Vec<Document>,
-    pub assets: Vec<Value>,
-    pub symbols: Vec<Symbol>,
+pub struct Index<D = Vec<Document>, A = Vec<Value>, S = Vec<Symbol>> {
+    pub documents: D,
+    pub assets: A,
+    pub symbols: S,
     pub summary: Value,
     // At most six compatibility categories, derived from every diagnostic,
     // before the public sample is capped. Required when deserializing caches.
@@ -311,6 +313,21 @@ pub(crate) fn build_material_with_control(
     pin: &SourcePin,
     control: &lycheedev_core::control::OperationControl,
 ) -> Result<(Index, String)> {
+    build_material_projected_with_control(home, pin, control)
+}
+// Both consumers authenticate the same complete bytes and use the same serde
+// schema, limits, error order and checked-close boundary. Only collection
+// retention differs; the ordinary public Index keeps all three Vecs.
+fn build_material_projected_with_control<D, A, S>(
+    home: &Path,
+    pin: &SourcePin,
+    control: &lycheedev_core::control::OperationControl,
+) -> Result<(Index<D, A, S>, String)>
+where
+    D: serde::de::DeserializeOwned + cache_projection::CollectionLength + From<Vec<Document>>,
+    A: serde::de::DeserializeOwned + cache_projection::CollectionLength + From<Vec<Value>>,
+    S: serde::de::DeserializeOwned + cache_projection::CollectionLength + From<Vec<Symbol>>,
+{
     let profile = Profile::new();
     let metadata_phase = profile.span(Phase::Metadata);
     control.check()?;
@@ -368,7 +385,7 @@ pub(crate) fn build_material_with_control(
                             4,
                         ));
                     }
-                    let mut map: Index = serde_json::from_slice(&raw)?;
+                    let mut map: Index<D, A, S> = serde_json::from_slice(&raw)?;
                     control.check()?;
                     if map.documents.len() > 100000
                         || map.symbols.len() > 2000000
@@ -422,7 +439,21 @@ pub(crate) fn build_material_with_control(
         )?;
         Ok((map, blob["sha256"].as_str().unwrap().to_owned()))
     })();
-    crate::persistence::finish_control(finish_historical(result, lock.close()), control.check())
+    let (map, digest) =
+        crate::persistence::finish_control(finish_historical(result, lock.close()), control.check())?;
+    // The cold path still builds, serializes and publishes the complete index.
+    // Move its fields only after the original lock close and final control.
+    Ok((
+        Index {
+            documents: map.documents.into(),
+            assets: map.assets.into(),
+            symbols: map.symbols.into(),
+            summary: map.summary,
+            compatibility_gaps: map.compatibility_gaps,
+            home: map.home,
+        },
+        digest,
+    ))
 }
 /// Existing authenticated-index registration gate. Readiness never builds or
 /// hashes a replacement: build() authenticates the cached content separately.
@@ -911,6 +942,14 @@ fn record_compatibility_gap(gaps: &mut BTreeSet<String>, path: &str) {
 fn check_search(control: Option<&lycheedev_core::control::OperationControl>) -> Result<()> {
     control.map_or(Ok(()), lycheedev_core::control::OperationControl::check)
 }
+fn coverage(summary: &Value, documents: usize) -> Value {
+    let mut v = json!({"analyzedDocuments":documents,"skippedDocuments":summary["skippedDocuments"],"diagnostics":summary["diagnostics"],"complete":summary["complete"]});
+    if let Some(s) = summary.get("diagnosticSample") {
+        v["diagnosticSample"] = s.clone();
+    }
+    v["io"] = summary["io"].clone();
+    v
+}
 impl Index {
     pub(crate) fn original_reader(&self) -> original_cache::OriginalReader<'_> {
         original_cache::OriginalReader::new(self)
@@ -928,12 +967,7 @@ impl Index {
         originals.finish(result, control)
     }
     pub fn coverage(&self) -> Value {
-        let mut v = json!({"analyzedDocuments":self.documents.len(),"skippedDocuments":self.summary["skippedDocuments"],"diagnostics":self.summary["diagnostics"],"complete":self.summary["complete"]});
-        if let Some(s) = self.summary.get("diagnosticSample") {
-            v["diagnosticSample"] = s.clone();
-        }
-        v["io"] = self.summary["io"].clone();
-        v
+        coverage(&self.summary, self.documents.len())
     }
     pub fn excerpt(&self, path: &str, start: usize, end: usize) -> Result<String> {
         let Some(doc) = self.documents.iter().find(|d| d.path == path) else {

@@ -1,6 +1,16 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-18 16:25 UTC。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新完整性能诊断为5859 runner/封存63d产品，六场景完整Facts/顺序/summary及引用custody均等价；冷4.345s、暖0.438s、四变体1.180–1.228s，六比值约0.360–0.740仍未≤0.30，仅单组诊断，所有内存采样有缺口。a860正确性与最小coverage链已通过，匹配产物性能待验。完整性能与最终五阶段循环审计未完成。
+更新：2026-10-19 00:06 UTC（当前摘要见下，历史截面保留）。分支 `rust-refactor`，持续交付到[草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。最新完整性能诊断为5859 runner/封存63d产品，六场景完整Facts/顺序/summary及引用custody均等价；冷4.345s、暖0.438s、四变体1.180–1.228s，六比值约0.360–0.740仍未≤0.30，仅单组诊断，所有内存采样有缺口。a860正确性与最小coverage链已通过，匹配产物性能待验。完整性能与最终五阶段循环审计未完成。
+
+### 最新已验证结果与低耦合优化方向（2026-10-19）
+
+最新已推工具/fixture批为`9693ba0af6ebb8ef5eaff1e3136753680dd2630d`；最新已验证生产仍为`a8604d0dabf6b7ecefa8f15409bda2bf9fbaf8be`。以下为唯一Windows协调线程的非敏感结果汇总，旧失败/时间截面的记录原样保留，不另公开原始本机日志。
+
+- a860匹配Source六场景全部完整Facts/顺序/summary/custody通过。Go/Rust毫秒：冷7167.8766/3944.7180，暖533.6527/351.4062，单改2701.0428/1130.8321，插入2609.6107/1168.7120，删除2617.4956/1130.6978，重命名2592.3705/1155.7738。六比值约0.419–0.659均未≤0.30，仅单组诊断；Go也随运行条件变快，跨run变化不能全部归因优化。10owner/20native成功回收，无deadline。
+- a860正式coverage共12个独立integration对象：130测试通过、1项真实权限ignore，全部test/merge/export成功。前五组为Core capture_dependencies、Data sql_csv_parity、Source source_inspect、Live mailbox_lookup、Delivery slot_maintenance；后七为Core budgeted_capture/capture_query_references、Data sql_lazy_provider_parity/relational_parity/sql_explain_parity、Source flow_parity、Delivery release_control。每份分母为该EXE映射的自有crate文件，含关联模块和测试代码，不相加/平均百分比，不称全仓覆盖率。后七47/0/0、14owner/70native回收；前五83通过/1ignore、10owner/50native回收。Stage2尚未结束。
+- 9693真实CSV准备与诊断：Node28通过/1文件链接EPERM skip，all-targets通过，ignored numeric exporter明确执行1次通过。独立producer提供同一16,384行输入，旧63d/新a860各冷暖共4次测量及8次CAP验证，CSV/sidecar/双CAP/最终身份均通过。冷401.4790/389.9062ms（新/旧0.9712），暖349.0380/324.7937ms（0.9305）。两组实际retainedBytes减少46,988,672B、decodeWork减少81,920，均为精确准入计量差而非RSS；单pair不是20pair或Go目标验收。6owner全部回收进程，其中5retired、1成功fixture保留；44native成功，无deadline。
+
+用户进一步明确低耦合、高通用性与性能共同衡量。当前新候选复用同一typed Index schema及认证入口，按消费者保留完整集合或逐项完整解码后仅计数；Data直接借用已有QueryResult Serialize，删除同业务重复Value投影。Source新增15项、Data新增3项正式回归；Source/Data最终7文件非作者静态复核与语法解析通过，全部新Rust编译/执行/性能仍未运行，不把上述旧产物结果当候选验证。Source有序投机队列与Data纹理不相交借用分片的调度/退款语义不同，已有OperationControl复用保留，不为统一而制造线程池或泛预算框架。逐项释放会进入暖decode/elapsedMs，而旧集合在调用方释放，因此phase口径发生相应移动，只有完整native wall及有效内存观测才能验证收益。仍保完整raw/SHA/逐Symbol真实分配；完整Skill仍false，OS压力/实机与≥70%目标仍未闭合。
 
 ### a860正式定向与coverage最小链通过（2026-10-18 16:25 UTC）
 
