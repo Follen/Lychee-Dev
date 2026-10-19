@@ -101,6 +101,52 @@ fn webp(output: &mut Output<'_>, pixels: &[u8], width: u32, height: u32) -> Resu
         })
 }
 
+/// Channels are fixed for the entire image. Resolve the projection once,
+/// leaving the original per-block admission and digest order unchanged.
+enum Channels {
+    Identity,
+    Single(usize),
+    Keep([bool; 4]),
+}
+impl Channels {
+    fn new(channels: &str) -> Self {
+        if channels.len() == 1 {
+            return Self::Single(b"rgba".iter().position(|&name| name == channels.as_bytes()[0])
+                .expect("normalized channels"));
+        }
+        let keep = b"rgba".map(|name| channels.as_bytes().contains(&name));
+        if keep.iter().all(|&keep| keep) { Self::Identity } else { Self::Keep(keep) }
+    }
+    fn apply(&self, block: &mut [u8]) {
+        match self {
+            Self::Identity => {}
+            Self::Single(selected) => {
+                for pixel in block.as_chunks_mut::<4>().0 {
+                    let value = pixel[*selected];
+                    pixel.copy_from_slice(&[value, value, value, 255]);
+                }
+            }
+            Self::Keep(keep) => {
+                for pixel in block.as_chunks_mut::<4>().0 {
+                    for (component, keep) in keep.iter().enumerate() {
+                        if !keep { pixel[component] = if component == 3 { 255 } else { 0 }; }
+                    }
+                }
+            }
+        }
+    }
+}
+fn transform_and_hash(pixels: &mut [u8], channels: &str, budget: &Budget) -> Result<String> {
+    let projection = Channels::new(channels);
+    let mut digest = Sha256::new();
+    for block in pixels.chunks_mut(16384) {
+        budget.charge(Cost::work(1))?;
+        projection.apply(block);
+        digest.update(block);
+    }
+    Ok(crate::casc::hex(&digest.finalize()))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn encode<'a>(
     blob: &mut VerifiedBlob,
@@ -122,26 +168,8 @@ pub(crate) fn encode<'a>(
         return Err(fault("texture.pixel_limit", 3));
     }
     let pixels_phase = budget.phase(Phase::PixelTransformAndHash);
-    let mut digest = Sha256::new();
-    for block in image.pixels.chunks_mut(16384) {
-        budget.charge(Cost::work(1))?;
-        for pixel in block.as_chunks_mut::<4>().0 {
-            if channels.len() == 1 {
-                let selected = b"rgba".iter().position(|&name| name == channels.as_bytes()[0]).expect("normalized channels");
-                let value = pixel[selected];
-                pixel.copy_from_slice(&[value, value, value, 255]);
-            } else {
-                for (component, name) in b"rgba".iter().enumerate() {
-                    if !channels.as_bytes().contains(name) {
-                        pixel[component] = if component == 3 { 255 } else { 0 };
-                    }
-                }
-            }
-        }
-        digest.update(block);
-    }
-    let info = Info { texture: image.description, channels: channels.into(),
-        pixels_sha256: crate::casc::hex(&digest.finalize()) };
+    let pixels_sha256 = transform_and_hash(&mut image.pixels, channels, budget)?;
+    let info = Info { texture: image.description, channels: channels.into(), pixels_sha256 };
     drop(pixels_phase);
     let mut output = Output { bytes: Vec::new(), maximum, budget, allocation: None, error: None };
     let encode_phase = budget.phase(Phase::Encode);
@@ -183,3 +211,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "image_projection_tests.rs"]
+mod projection_tests;

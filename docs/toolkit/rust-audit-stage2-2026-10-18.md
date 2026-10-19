@@ -1,5 +1,8 @@
 # Stage 2 — test value, redundancy and meaningful coverage
 
+Current scheduling correction (2026-10-19): this document records preliminary test-effectiveness work. The user clarified business equivalence first, preserving approved enhancements, then performance optimization/acceptance, then all five formal audit loops. Further Stage2/coverage expansion is paused; the already-running f86 regression may finish. Historical findings and actual results below are preserved, but do not establish final Stage2 completion.
+
+
 Started 2026-10-18 07:18 UTC. Fixed reviewed production: `63d47f29f6c9efe2511ada5969426a184eca1830`; initial status documentation: `d9e7f3a16bda965314bb7919c2de6a74b209d8ab`. Fixed Go323 remains `3766f9cacb52e93a803a626187e2a1d54a445468`.
 
 Two independent reviewers first traced actual assertions, consumers and fixture costs across the domains below. This is a first-pass scope matrix, not measured coverage, exhaustive branch review or Stage2 convergence. Review redundancy and effectiveness first; retain independent boundaries, repair weaknesses, actually verify, then establish meaningful coverage. Similar names and shared fixtures do not prove redundancy.
@@ -213,3 +216,8 @@ Source references: [Rust1.99 exit](https://github.com/rust-lang/rust/blob/1.99.0
 
 
 The follow-up changes only the ordinary main tail after the existing Result consumption and explicit console-handler release. Portable statuses0..255 return through stable ExitCode; other i32 values retain the original process::exit fallback without truncation. The other eleven exits remain unchanged because some retain formal responses or unconsumed output-error results. The remaining ordinary locals are containers/control state and the stdout lock; both paths retain the same runtime cleanup. This does not assert that ExitProcess skips every Rust TLS callback or that natural return joins all threads. Two unit tests cover every portable status and representative full-width fallback boundaries; three actual CLI regressions preserve success output, argument failure and workspace failure/unchanged storage. These five Rust tests remain NOT_RUN until the coordinator executes the fixed candidate; the original four-call witness test is unchanged.
+
+
+## f86 necessary terminal verification; further expansion paused
+
+Actual Windows all-targets and all five new Rust regressions passed (two unit, three public cases with six CLI invocations). The unchanged coverage exact passed its four CLI assertions. Four CLI child raw profiles were observed alongside the root-test profile. Their cumulative208933280bytes exceeded the unchanged134217728-byte raw total; the collector correctly failed at coverage.profile_total_budget. Merge, all three exports and the main witness were NOT_RUN. Object custody had passed; failed raw data remained under the original preservation policy. Executed native commands all returned0, authenticated auxiliary cleanup flags were retained, no deadline or residual lease/process remained. Prior failures remain historical. This closes neither full companion coverage nor Stage2. Per the user's acceptance-order clarification, no further coverage expansion or budget increase follows this result; business equivalence and performance take priority.

@@ -48,47 +48,52 @@ pub(super) fn finish(
     work: &mut Work<'_>,
 ) -> Result<Vec<Vec<Scalar>>> {
     work.retain(input.len().checked_mul(96).ok_or_else(budget)?)?;
-    let mut rows = Vec::with_capacity(input.len());
+    let mut rows;
     let mut seen = BTreeSet::new();
-    for row in input {
-        work.spend()?;
-        if row.1.len() != order.len() {
-            return Err(binding());
-        }
-        if distinct {
-            let shared = work.shared;
-            let mut allocation = shared.map(|b| b.reserve_retained(0)).transpose()?;
-            let mut key = String::new();
-            for value in &row.0 {
-                work.spend()?;
-                // A finite binary64 rational fits within this conservative
-                // temporary buffer; text payloads retain their exact bound.
-                let payload = if let Scalar::String(s) = value {
-                    s.len()
-                } else {
-                    0
-                };
-                let _part = shared
-                    .map(|b| b.reserve_retained(payload + 8192))
-                    .transpose()?;
-                let part = equal_key(value)?;
-                work.consume(part.len())?;
-                let grow = part.len().checked_add(32).ok_or_else(budget)?;
-                if key.len().checked_add(grow).is_none_or(|n| n > work.bytes) {
-                    return Err(budget());
-                }
-                if let Some(a) = &mut allocation {
-                    a.grow(grow.checked_mul(2).ok_or_else(budget)?)?;
-                }
-                write!(&mut key, "{}:{part}", part.len()).map_err(|_| budget())?;
+    if distinct {
+        rows = Vec::with_capacity(input.len());
+        for row in input {
+            work.spend()?;
+            if row.1.len() != order.len() {
+                return Err(binding());
             }
-            if seen.contains(&key) {
-                continue;
+            {
+                let shared = work.shared;
+                let mut allocation = shared.map(|b| b.reserve_retained(0)).transpose()?;
+                let mut key = String::new();
+                for value in &row.0 {
+                    work.spend()?;
+                    // A finite binary64 rational fits within this conservative
+                    // temporary buffer; text payloads retain their exact bound.
+                    let payload = if let Scalar::String(s) = value {
+                        s.len()
+                    } else {
+                        0
+                    };
+                    let _part = shared
+                        .map(|b| b.reserve_retained(payload + 8192))
+                        .transpose()?;
+                    let part = equal_key(value)?;
+                    work.consume(part.len())?;
+                    let grow = part.len().checked_add(32).ok_or_else(budget)?;
+                    if key.len().checked_add(grow).is_none_or(|n| n > work.bytes) {
+                        return Err(budget());
+                    }
+                    if let Some(a) = &mut allocation {
+                        a.grow(grow.checked_mul(2).ok_or_else(budget)?)?;
+                    }
+                    write!(&mut key, "{}:{part}", part.len()).map_err(|_| budget())?;
+                }
+                if seen.contains(&key) {
+                    continue;
+                }
+                work.retain(key.len().checked_add(64).ok_or_else(budget)?)?;
+                seen.insert(key);
             }
-            work.retain(key.len().checked_add(64).ok_or_else(budget)?)?;
-            seen.insert(key);
+            rows.push(row);
         }
-        rows.push(row);
+    } else {
+        rows = validate_rows(input, order.len(), work)?;
     }
     if !order.is_empty() {
         let mut buffer = Vec::with_capacity(rows.len());
@@ -130,3 +135,25 @@ pub(super) fn finish(
         .map(|row| row.0)
         .collect())
 }
+
+/// Non-DISTINCT output already owns every retained row. Validate in the same
+/// order, then transfer that allocation instead of making a second outer Vec.
+/// Keep the original logical allowance in finish; retained capacity is the
+/// producer's existing capacity, not a new memory/RSS bound.
+fn validate_rows(
+    rows: Vec<Output>,
+    order_width: usize,
+    work: &mut Work<'_>,
+) -> Result<Vec<Output>> {
+    for row in &rows {
+        work.spend()?;
+        if row.1.len() != order_width {
+            return Err(binding());
+        }
+    }
+    Ok(rows)
+}
+
+#[cfg(test)]
+#[path = "results_tests.rs"]
+mod tests;

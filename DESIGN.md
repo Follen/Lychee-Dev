@@ -8,6 +8,10 @@ Go tagged baseline `3766f9cacb52e93a803a626187e2a1d54a445468` (v3.2.3) defines c
 
 The allowed implementation differences are Rust host code and EmmyLua direct-library analysis replacing LuaLS. Preserve equivalent Source business semantics and honest engine/coverage provenance; engine-specific implementation metadata must accurately name EmmyLua, never impersonate LuaLS. No other compatibility exception is silently grandfathered from old plans. Any unavoidable business difference requires a separately approved decision before acceptance.
 
+### Current acceptance sequence (2026-10-19 clarification)
+
+Close business equivalence first, preserving approved evidence-backed optimization and accuracy differences. Then optimize and accept same-work performance; conduct the five formal audit/fix/verify/review loops afterwards. Earlier Stage1 repairs and Stage2 effectiveness/coverage collection remain useful preliminary evidence, not completion of these final loops. Necessary correctness regressions continue with each implementation batch. Coverage infrastructure must not displace business and performance work or demand reverting accepted improvements merely to reproduce reference limitations.
+
 ### Evidence-backed Rust enhancements
 
 The user explicitly confirmed on 2026-10-17 that demonstrably better Rust results should remain. Fixed Go323 remains the compatibility reference, but a source-proven improvement in accuracy or completeness is retained with an explicit compatibility record and focused regression coverage rather than mechanically restoring a reference limitation. Preserve the original raw comparison and separately check the exact enhanced contract, including all unaffected fields, provider order and coverage. The two necessary successful object call-result receipts are the existing example. Unknown differences, speculative extra evaluation, changed error order and incomplete coverage are not improvements merely because Rust emits more output. Classify and establish each difference before acceptance; this does not relax business safety, budgets or the zero-patch Emmy requirement.

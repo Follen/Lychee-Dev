@@ -1,6 +1,26 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-19 08:12 UTC。当前已验证生产为 `d4271ae430ac2a80087af81c70eea960d547acbb`，分支 `rust-refactor`、草稿 PR #14。下列为非敏感结果摘要；本机原始日志未随文档发布。Stage2与完整性能验收仍未完成。
+更新：2026-10-19 08:38 UTC。当前已验证生产为 `d4271ae430ac2a80087af81c70eea960d547acbb`，分支 `rust-refactor`、草稿 PR #14。下列为非敏感结果摘要；本机原始日志未随文档发布。当前按业务等价、性能验收、五项正式循环审计的顺序推进；历史预审和完整性能验收仍不能冒称完成。
+
+### 当前执行顺序：业务等价 → 性能验收 → 五项循环审计（2026-10-19 用户澄清）
+
+先收口业务合同等价，保留经证据确认且用户认可的优化/准确性增强，不为逐字对齐Go而退回已知错误。随后进行性能优化与同工作量验收，再执行五项正式循环审计（含Rust原生架构）。此前Stage1修复/Stage2测试有效性与coverage工作均保留为前置预审证据，不能代替后续正式五轮完成。当前停止扩展coverage工具；已在运行的f86必要回归只收尾。Source/Data性能云端实现可继续，但结果正确性是每批必要前提。
+
+当前没有在本清单中新确认的未修产品缺陷；已知业务验收缺证仍需区分：Data Skill已实跑26项检查/16CAP，但completeSkillAcceptance=false；Live实机/恢复与真实OS压力、全product数据矩阵/实际大表、权限file-link及部分native XML/安装smoke前置未齐。第11节实机清单原样保留，不把权限/前置缺证计为通过。Source已报告semantic partial及其155gaps不代表155独立bug；没有新公共合同的parentArray候选不自动扩大为必做功能。
+
+已认可差异继续显式保留：两处正确call_result关系、六处generated真实endLine位置，以及已声明的引擎/候选包身份和私有流式首个可观察错误边界。它们不能为未知差异提供泛化豁免。DBCD四项已有固定红绿与113distinct pass/3原ignore，完整产品矩阵和实际>256MiB表仍不能由小fixture推定完成。性能目标仍为同工作量Rust耗时≤Go的30%，现有单次诊断不代替20对验收。
+
+### 当前性能窄批：减少确定的中间分配，等待固定版本实测
+
+Source聚合每份文档的declaration时，stable_id原本反复分配完整repository/commit/path等九字段串，再生成64位SHA十六进制并截取32位。候选仅复用同文档的SHA前缀状态、逐声明追加原字段字节并直接生成原SYM-32hex。保每symbol的SHA状态clone及后缀哈希、所有缓存认证/顺序/预算/取消；不是消除Facts磁盘读取。没有声明的文档不计算前缀，不更改ID布局或已有增强。
+
+Data候选针对非DISTINCT SQL输出的第二个同类型外层Vec及图像每像素重复解析固定channels；分别以原顺序校验/计费后复用既有所有权、循环外固定通道计划减少重复工作。DISTINCT原语义和收费保持；不把逻辑计量差称RSS，也不以几毫秒codec子段宣称整条PNG性能达标。新增Source8与Data7个正式回归，包含完整旧实现oracle、真实cache-hit/增量聚合及输出/预算/取消边界。云端仅静态/语法与diff检查，不运行Cargo；新Rust及性能均NOT_RUN，不由不同run墙钟推断收益。
+
+### f86必要收尾：CLI子profile已实际写出，累计预算拒绝保留
+
+f86真实all-targets通过；返回码unit2通过、公开CLI3通过（6次CLI）、原coverage exact1通过（4次CLI）。本轮实际观察到四份CLI子profile及一份测试根profile，说明普通退出路径改造已越过此前“只见根profile”的现象；没有将未运行的main witness补标通过。
+
+五份raw合计208933280B，超过原134217728B累计上限，collector正确返回coverage.profile_total_budget。merge、三次export和main witness均NOT_RUN；对象证据准入成功。所有已执行native为0，已审核辅助清理标记保留，无deadline，最终lease/进程为0；失败采集scratch按原合同保留。原e81/77df失败不覆盖。按用户当前顺序，这项覆盖统计工作暂停，不追加改造或扩大预算；继续业务等价及性能主线。新5项Rust回归均各一次通过，但完整coverage验收仍未完成。
 
 ### CLI companion 第二次Windows采集：子进程执行证据尚未写出（e81）
 

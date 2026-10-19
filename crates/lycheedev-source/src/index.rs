@@ -4,6 +4,8 @@ mod facts_cache;
 mod facts_decode_tests;
 #[cfg(test)]
 mod facts_encode_tests;
+#[cfg(test)]
+mod symbol_identity_tests;
 mod facts_pipeline;
 mod original_cache;
 mod persistence_wire;
@@ -253,24 +255,49 @@ pub struct Index<D = Vec<Document>, A = Vec<Value>, S = Vec<Symbol>> {
     pub(crate) home: PathBuf,
 }
 pub fn stable_id(pin: &SourcePin, s: &Symbol) -> String {
-    format!(
-        "SYM-{}",
-        &storage::sha256(
-            format!(
-                "{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}",
-                pin.repository,
-                pin.exact_commit,
-                s.path,
-                s.line,
-                s.end_line,
-                s.name,
-                s.category,
-                s.scope,
-                s.ordinal
-            )
-            .as_bytes()
-        )[..32]
-    )
+    SymbolIdentity::for_document(pin, &s.path).stable_id(s)
+}
+/// The identity prefix is identical for every declaration in one document.
+/// Reuse only SHA state, never a result or an unauthenticated source identity.
+/// The public helper above still derives the prefix from its own Symbol path.
+struct SymbolIdentity(sha2::Sha256);
+impl SymbolIdentity {
+    fn for_document(pin: &SourcePin, path: &str) -> Self {
+        use sha2::Digest;
+        let mut hash = sha2::Sha256::new();
+        for field in [pin.repository.as_str(), pin.exact_commit.as_str(), path] {
+            hash.update(field.as_bytes());
+            hash.update(b"\0");
+        }
+        Self(hash)
+    }
+    fn stable_id(&self, symbol: &Symbol) -> String {
+        use sha2::Digest;
+        use std::io::Write;
+        let mut hash = self.0.clone();
+        // Same Display decimal coordinates and exact string bytes as the old
+        // complete format! input, without allocating that intermediate String.
+        write!(
+            FactsHashWriter(&mut hash),
+            "{}\0{}\0{}\0{}\0{}\0{}",
+            symbol.line,
+            symbol.end_line,
+            symbol.name,
+            symbol.category,
+            symbol.scope,
+            symbol.ordinal
+        )
+        .expect("SHA-256 writer accepts every formatted byte");
+        let digest = hash.finalize();
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut result = String::with_capacity(36);
+        result.push_str("SYM-");
+        for byte in &digest[..16] {
+            result.push(HEX[(byte >> 4) as usize] as char);
+            result.push(HEX[(byte & 15) as usize] as char);
+        }
+        result
+    }
 }
 pub fn role(path: &str) -> &'static str {
     let p = path.replace('\\', "/").to_ascii_lowercase();
@@ -786,23 +813,26 @@ fn build_uncached_cached(
                 parsed_documents += 1;
             }
             let _symbols_phase = profile.span(Phase::Symbols);
-            for (ordinal, d) in facts.declarations.iter().enumerate() {
-                let mut s = Symbol {
-                    id: String::new(),
-                    kind: "declaration".into(),
-                    name: d.name.clone(),
-                    target: String::new(),
-                    category: d.category.clone(),
-                    confidence: "exact".into(),
-                    path: file.path.clone(),
-                    line: d.line,
-                    end_line: d.end_line,
-                    signature: d.signature.clone(),
-                    scope: d.scope.clone(),
-                    ordinal,
-                };
-                s.id = stable_id(pin, &s);
-                index.symbols.push(s);
+            if !facts.declarations.is_empty() {
+                let identity = SymbolIdentity::for_document(pin, &file.path);
+                for (ordinal, d) in facts.declarations.iter().enumerate() {
+                    let mut s = Symbol {
+                        id: String::new(),
+                        kind: "declaration".into(),
+                        name: d.name.clone(),
+                        target: String::new(),
+                        category: d.category.clone(),
+                        confidence: "exact".into(),
+                        path: file.path.clone(),
+                        line: d.line,
+                        end_line: d.end_line,
+                        signature: d.signature.clone(),
+                        scope: d.scope.clone(),
+                        ordinal,
+                    };
+                    s.id = identity.stable_id(&s);
+                    index.symbols.push(s);
+                }
             }
             for r in &facts.relationships {
                 relationships += 1;
