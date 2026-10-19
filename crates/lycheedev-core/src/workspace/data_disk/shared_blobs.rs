@@ -168,9 +168,9 @@ pub(super) fn inventory_recovering(
     paths: &DataCachePaths,
     checks: &Checks<'_>,
     recovery: Option<&BlobRef>,
+    held: &[Directory],
 ) -> Result<(u64, u64)> {
-    let directory = Directory::open_controlled(&paths.shared_blobs(), &mut Controlled(checks))?;
-    let result = (|| {
+    with_inventory_directory(&paths.shared_blobs(), held, checks, |directory| {
         let mut complete_bytes = 0;
         let mut pending_bytes = 0;
         for (index, entry) in fs::read_dir(directory.path())?.enumerate() {
@@ -185,9 +185,9 @@ pub(super) fn inventory_recovering(
             };
             if let Some(digest) = name.strip_suffix(".repair.intent") {
                 let repair =
-                    read_record(&directory, name, INTENT_BYTES, checks)?.ok_or_else(integrity)?;
+                    read_record(directory, name, INTENT_BYTES, checks)?.ok_or_else(integrity)?;
                 let original = read_record(
-                    &directory,
+                    directory,
                     &format!("{digest}.intent"),
                     INTENT_BYTES,
                     checks,
@@ -195,7 +195,7 @@ pub(super) fn inventory_recovering(
                 .ok_or_else(integrity)?;
                 let reference = decode(&format!("{digest}.intent"), &original)?;
                 let done = read_record(
-                    &directory,
+                    directory,
                     &format!("{digest}.complete"),
                     COMPLETE_BYTES,
                     checks,
@@ -214,7 +214,7 @@ pub(super) fn inventory_recovering(
             if let Some(digest) = name.strip_suffix(".complete") {
                 // A complete marker alone must never erase a retained intent.
                 if read_record(
-                    &directory,
+                    directory,
                     &format!("{digest}.intent"),
                     INTENT_BYTES,
                     checks,
@@ -227,10 +227,10 @@ pub(super) fn inventory_recovering(
             if !name.ends_with(".intent") {
                 continue;
             }
-            let raw = read_record(&directory, name, INTENT_BYTES, checks)?.ok_or_else(integrity)?;
+            let raw = read_record(directory, name, INTENT_BYTES, checks)?.ok_or_else(integrity)?;
             let reference = decode(name, &raw)?;
             match read_record(
-                &directory,
+                directory,
                 &format!("{}.complete", reference.sha256),
                 COMPLETE_BYTES,
                 checks,
@@ -253,8 +253,7 @@ pub(super) fn inventory_recovering(
             }
         }
         Ok((complete_bytes, pending_bytes))
-    })();
-    join(result, close_directory(directory), checks)
+    })
 }
 
 impl DerivedReservation<'_> {

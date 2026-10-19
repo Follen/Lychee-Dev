@@ -28,6 +28,8 @@ Source 后继借用 Symbol 投影片已实现并完成源码独审：summary 重
 
 普通 static SQL 的已存在精确 generation 消费片已实现并通过静态独审，Rust 编译与回归尚未运行：复用原 IPC 校验，保留行/数组/精确数字语义，认证后每 cursor 最多保留一批；短 quota 后转移同一受控文件和祖先句柄，所有 reader 显式关闭后才结束源与请求。producer 私有 schema 表示上限已知不适用时，明确走原 WDC；其余仅在完整认证 manifest 与当前来源匹配且对象原 open 确证 NotFound 时，明确记为未命中并走原 WDC，不重建 generation，常规 CAP 保持原流程；损坏、权限、预算、取消和关闭失败不回退。普通 SQL 不自动物化，Effective/meta 保原路径；这不是 DataFusion 默认切换或全 Data 5GB 闭合。
 
+Core 库存目录复用与本地 decoded 缺体重建后继已完成独立源码审查，Rust 编译/运行仍待：前者只复用本次 quota 已持有的精确 Directory，保留每次成功的普通新 body 流式发布的四次全库存扫描和四处 sync、逐文件认证与所有实际 owner 的 checked close；13项新回归覆盖真实构造/关闭观察点、未知子目录、嵌套发布后新库存和错误聚合。少建目录 owner 的数目目前是待执行断言，不是已测系统调用或 wall 收益。后者仅在已认证本地 alias 指向原生缺体时使用既有精确重建，EOF 再核 alias 身份，保留原 pair/CAP/keep；同长坏体等仍硬拒。9项回归包含公开 asset 的 Root/selected 重建与损坏拒绝，以及 EOF 身份、预算、取消和上游错误；注入错误不等于真实 OS 故障实测。两片不改变产品定义或 SQL 的缺 generation 回退合同。六源码文件的最终组合树已重跑既有三套 Node：52通过、0失败、11非Windows平台skip；这是验证工具检查，不是22项Rust回归执行。
+
 ## 3. Home、容量和所有权边界
 
 Data默认容量为**5,000,000,000字节（十进制5GB）**，配置支持明确单位；与测试scratch 5/6GiB不同。最终统一核算Data下载/共享blob归属、物化/索引/目录、staging/spill/导出峰值和证据占用，按内容去重防双计。活跃lease和证据引用保护；旧已超额或配置缩小先拒新增并说明，不删除证据。
@@ -50,7 +52,7 @@ Source新格式旧cache失效后重建，不维护生产旧格式迁移。新格
 
 Data CSV9693工具对旧63d与a860的单pair：cold401.4790/389.9062ms，warm349.0380/324.7937ms；完整CSV/sidecar与8CAP核验。该对比是旧Rust/新Rust，不是Go性能门禁；retainedBytes减少46,988,672B与decodeWork减少81,920是逻辑计量，不是RSS。其余Data、Live正式性能与全产品矩阵仍未验收，不把历史结果归新产物。
 
-86f 的现成 Data 诊断已完成：24对/48次 CLI 全部结果等价，40项完整图像像素与128个CAP核验通过，Node63通过；没有调用 cache prepare 或 DF。Go/Rust 毫秒：BLTE cold197.14/335.78、warm152.78/127.19；五种PNG cold Rust270.64–301.38 对 Go152.36–154.45，warm Rust122.16–130.90 对 Go121.40–130.36；五种WebP cold Rust269.39–303.87 对 Go225.74–245.49，warm Rust124.75–149.96 对 Go195.62–213.67。所有性能路径比率仍大于0.30，单轮诊断不作20对验收；tiny SQL只作正确性。48份内存采样中6份有缺口，其余亦不保证完整RSS峰值。同run阶段细分尚待归因，不能把冷慢猜作某一组件原因。
+86f 的现成 Data 诊断已完成：24对/48次 CLI 全部结果等价，40项完整图像像素与128个CAP核验通过，Node63通过；没有调用 cache prepare 或 DF。Go/Rust 毫秒：BLTE cold197.14/335.78、warm152.78/127.19；五种PNG cold Rust270.64–301.38 对 Go152.36–154.45，warm Rust122.16–130.90 对 Go121.40–130.36；五种WebP cold Rust269.39–303.87 对 Go225.74–245.49，warm Rust124.75–149.96 对 Go195.62–213.67。所有性能路径比率仍大于0.30，单轮诊断不作20对验收；tiny SQL只作正确性。48份内存采样中6份有缺口，其余亦不保证完整RSS峰值。同次冷图像 prepare 约91–109ms、payload约66–86ms，decoded发布包含两个不同body约117–144ms；纹理解码约0.8–1.8ms、编码约1.5–6.8ms。源码确认每次成功的普通新 body 流式发布包含两个quota生命周期、各在前后盘点，共四次库存；每次重开本次已经持有的固定目录，是后继复用片的依据。各计时嵌套，未计量部分不能直接称磁盘耗时；4处durable sync全部保留，实际收益需同任务匹配产物复测。
 
 历史coverage十二integration实际130通过/1权限ignore，报告是独立对象分母，不能平均成全项目覆盖率。f86 companion真实四CLI产生profile后超原raw128MiB总预算，merge/export/witness未执行；不加预算，覆盖工具扩展暂停，先完成业务与性能门禁。真正OS压力、游戏及尚未覆盖的Skill实际任务仍有缺证；本轮四类离线真实CLI盲评与SQL补验见第2节。
 

@@ -47,6 +47,191 @@ fn maximum_content_allowance_small_file_cold_and_warm() {
     );
 }
 
+// This is the actual public local dispatch, including Root materialization,
+// selected streaming, alias persistence and CAP/keep. Faults affect only this
+// fresh fixture's reconstructible canonical body after all readers are closed.
+fn local_alias_key(bytes: &[u8], key_source: &serde_json::Value) -> String {
+    use md5::{Digest, Md5};
+    let content_key = lycheedev_data::casc::hex(&Md5::digest(bytes));
+    let mut identity = format!(
+        "decoded-v1\0{content_key}\0{}\0{}\0",
+        key_source["kind"].as_str().unwrap(),
+        key_source["sha256"].as_str().unwrap(),
+    )
+    .into_bytes();
+    identity.extend_from_slice(b"BLTE\0\0\0\0N");
+    identity.extend_from_slice(bytes);
+    format!("decoded-v1/{}", lycheedev_core::storage::sha256(&identity))
+}
+fn local_document(fx: &Fixture, key: &str) -> (i64, Vec<u8>) {
+    let document = lycheedev_core::metadata::Metadata::read_document_raw_controlled(
+        &fx.home,
+        key,
+        &Default::default(),
+    )
+    .unwrap();
+    (document.generation, document.bytes)
+}
+fn local_captures(fx: &Fixture) -> Vec<serde_json::Value> {
+    let metadata = lycheedev_core::metadata::Metadata::open(&fx.home, false).unwrap();
+    let captures = metadata.list("capture/", 100).unwrap();
+    metadata.close().unwrap();
+    captures
+}
+fn local_blob(fx: &Fixture, reference: &serde_json::Value) -> Vec<u8> {
+    let mut blob = lycheedev_core::evidence::open_verified_blob_bounded(
+        &fx.home,
+        reference,
+        1 << 20,
+        &Default::default(),
+        |_| Ok(()),
+    )
+    .unwrap();
+    let mut bytes = Vec::new();
+    let result = blob.read_to_end(&mut bytes).map(|_| ()).map_err(Into::into);
+    blob.close_after(result).unwrap();
+    bytes
+}
+fn local_pair(fx: &Fixture, digest: &str) -> (Vec<u8>, Vec<u8>) {
+    let owner = lycheedev_core::workspace::data_disk::DataCachePaths::new(&fx.home).shared_blobs();
+    (
+        std::fs::read(owner.join(format!("{digest}.intent"))).unwrap(),
+        std::fs::read(owner.join(format!("{digest}.complete"))).unwrap(),
+    )
+}
+fn local_stream_rebuild(removed: &str) {
+    use lycheedev_core::{evidence, storage, workspace::data_disk::DataCachePaths};
+    let (fx, expected) = input();
+    let inv = fx.invocation(
+        "asset inspect",
+        &[("--file-id", "501"), ("--max-bytes", "1048576")],
+    );
+    let cold = lycheedev_data::dispatch(&inv).unwrap();
+    assert!(cold.complete);
+    assert_eq!(cold.data["source"], "installation");
+    assert_eq!(cold.data["content"]["sha256"], storage::sha256(&expected));
+    assert_eq!(cold.data["content"]["bytes"], expected.len());
+    assert_eq!(cold.data["decodedCache"]["contentDecodeCalls"], 2);
+    assert_eq!(cold.data["decodedCache"]["hits"], 0);
+    assert_eq!(cold.provenance.len(), 1);
+    assert_eq!(cold.provenance[0]["blob"], cold.data["content"]);
+    let root = local_blob(&fx, &cold.data["root"]);
+    assert_ne!(cold.data["root"]["sha256"], cold.data["content"]["sha256"]);
+    let selected_alias = local_alias_key(&expected, &cold.data["keySource"]);
+    let root_alias = local_alias_key(&root, &cold.data["keySource"]);
+    let aliases = [
+        (selected_alias, cold.data["content"].clone()),
+        (root_alias, cold.data["root"].clone()),
+    ]
+    .map(|(key, reference)| {
+        let original = local_document(&fx, &key);
+        let value: serde_json::Value = serde_json::from_slice(&original.1).unwrap();
+        assert_eq!(
+            value["blob"], reference,
+            "must snapshot the actual local alias"
+        );
+        (key, original)
+    });
+    let capture = &cold.provenance[0];
+    let id = capture["id"].as_str().unwrap();
+    let mut keep = fx.invocation("evidence keep", &[]);
+    keep.positional = Some(id.to_owned());
+    keep.flags.clear();
+    evidence::dispatch(&keep).unwrap();
+    let documents = [format!("capture/{id}"), format!("evidence/keep/{id}")].map(|key| {
+        let original = local_document(&fx, &key);
+        (key, original)
+    });
+    let reference = &cold.data[removed];
+    let digest = reference["sha256"].as_str().unwrap();
+    let target = evidence::blob_path(&fx.home, digest).unwrap();
+    let original = local_blob(&fx, reference);
+    let pair = local_pair(&fx, digest);
+    assert_eq!(pair.0.len(), 48);
+    assert_eq!(pair.1.len(), 32);
+    let paths = DataCachePaths::new(&fx.home);
+    let repair = paths.shared_blobs().join(format!("{digest}.repair.intent"));
+    assert!(!repair.exists());
+    std::fs::remove_file(&target).unwrap();
+    let sibling = if removed == "content" {
+        "root"
+    } else {
+        "content"
+    };
+    assert!(
+        evidence::blob_path(&fx.home, cold.data[sibling]["sha256"].as_str().unwrap())
+            .unwrap()
+            .is_file()
+    );
+
+    let rebuilt = lycheedev_data::dispatch(&inv).unwrap();
+    assert!(rebuilt.complete);
+    assert_eq!(rebuilt.data["source"], "installation");
+    assert_eq!(rebuilt.data["content"], cold.data["content"]);
+    assert_eq!(rebuilt.data["root"], cold.data["root"]);
+    assert_eq!(rebuilt.data["decodedCache"]["contentDecodeCalls"], 1);
+    assert_eq!(rebuilt.data["decodedCache"]["hits"], 1);
+    assert_eq!(std::fs::read(&target).unwrap(), original);
+    assert_eq!(local_blob(&fx, reference), original);
+    assert_eq!(local_blob(&fx, &rebuilt.data["content"]), expected);
+    assert_eq!(local_pair(&fx, digest), pair);
+    for (key, original) in aliases.iter().chain(documents.iter()) {
+        assert_eq!(local_document(&fx, key), *original);
+    }
+    assert_eq!(evidence::read_capture(&fx.home, id).unwrap(), *capture);
+    assert_eq!(local_blob(&fx, &capture["blob"]), expected);
+    assert!(!repair.exists());
+    assert_eq!(std::fs::read_dir(&paths.staging).unwrap().count(), 0);
+    let warm = lycheedev_data::dispatch(&inv).unwrap();
+    assert!(warm.complete);
+    assert_eq!(warm.data["content"], cold.data["content"]);
+    assert_eq!(warm.data["root"], cold.data["root"]);
+    assert_eq!(warm.data["decodedCache"]["contentDecodeCalls"], 0);
+    assert_eq!(warm.data["decodedCache"]["hits"], 2);
+}
+
+#[test]
+fn local_stream_missing_selected_body_rebuilds_exact_alias_and_kept_capture() {
+    local_stream_rebuild("content");
+}
+#[test]
+fn local_stream_missing_root_body_rebuilds_exact_alias_and_kept_capture() {
+    local_stream_rebuild("root");
+}
+#[test]
+fn local_stream_same_length_corrupt_body_is_terminal_without_repair_or_capture() {
+    use lycheedev_core::{evidence, workspace::data_disk::DataCachePaths};
+    let (fx, expected) = input();
+    let inv = fx.invocation(
+        "asset inspect",
+        &[("--file-id", "501"), ("--max-bytes", "1048576")],
+    );
+    let cold = lycheedev_data::dispatch(&inv).unwrap();
+    let digest = cold.data["content"]["sha256"].as_str().unwrap();
+    let body = evidence::blob_path(&fx.home, digest).unwrap();
+    let pair = local_pair(&fx, digest);
+    let alias = local_alias_key(&expected, &cold.data["keySource"]);
+    let original = local_document(&fx, &alias);
+    let captures = local_captures(&fx);
+    let mut corrupt = expected;
+    corrupt[0] ^= 1;
+    std::fs::write(&body, &corrupt).unwrap();
+    let error = lycheedev_data::dispatch(&inv).unwrap_err();
+    assert_eq!(error.code, "vault.blob_integrity");
+    assert_eq!(std::fs::read(&body).unwrap(), corrupt);
+    assert_eq!(local_document(&fx, &alias), original);
+    assert_eq!(local_pair(&fx, digest), pair);
+    assert_eq!(local_captures(&fx), captures);
+    let paths = DataCachePaths::new(&fx.home);
+    assert!(
+        !paths
+            .shared_blobs()
+            .join(format!("{digest}.repair.intent"))
+            .exists()
+    );
+    assert_eq!(std::fs::read_dir(paths.staging).unwrap().count(), 0);
+}
+
 #[test]
 fn sql_and_db2_capture_exact_fixture_rows_and_original_request_identity() {
     use lycheedev_core::{evidence, storage};

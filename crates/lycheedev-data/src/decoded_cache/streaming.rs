@@ -222,6 +222,7 @@ fn read_verified_content_source(
                         Err(error) => return Err(error),
                     };
                 drop(lookup_span);
+                let mut missing_body = None;
                 if let Some(entry) = &existing {
                     let _span = budget.phase(Phase::DecodedCacheVerify);
                     if entry.content_key != record.content_key
@@ -267,6 +268,13 @@ fn read_verified_content_source(
                             stats.reused_bytes += record.decoded_bytes;
                             return Ok((blob, Vec::new()));
                         }
+                        // Only authenticated native absence grants exact rebuild.
+                        // Inaccessible, corrupt or otherwise failed bodies never
+                        // become a missing target or relax the ordinary publisher.
+                        missing_body = Some(
+                            serde_json::from_value::<evidence::BlobRef>(entry.blob.clone())
+                                .map_err(|_| integrity())?,
+                        );
                     }
                 }
                 // One logical extraction. A pre-publication missing public key
@@ -288,15 +296,35 @@ fn read_verified_content_source(
                         .with_policy(policy.with_keys(keys));
                         let owned_budget = budget.safety_only();
                         let _span = budget.phase(Phase::DecodedStreamPublish);
-                        let blob = lycheedev_core::workspace::data_disk::publish_shared_blob_stream_with_check(
-                            home,
-                            &mut reader,
-                            record.decoded_bytes,
-                            maximum as u64,
-                            control,
-                            move || owned_budget.check(),
-                            &budget.safety_only(),
-                        )?;
+                        let blob = if let Some(expected) = missing_body.as_ref() {
+                            let mut checked = CheckedEof {
+                                reader: &mut reader,
+                                check: || {
+                                    validate_rebuild(
+                                        &metadata, &cache_key, record, keys, expected, &store,
+                                    )
+                                },
+                            };
+                            lycheedev_core::workspace::data_disk::rebuild_shared_blob_stream_with_check(
+                                home,
+                                &mut checked,
+                                expected,
+                                maximum as u64,
+                                control,
+                                move || owned_budget.check(),
+                                &budget.safety_only(),
+                            )?
+                        } else {
+                            lycheedev_core::workspace::data_disk::publish_shared_blob_stream_with_check(
+                                home,
+                                &mut reader,
+                                record.decoded_bytes,
+                                maximum as u64,
+                                control,
+                                move || owned_budget.check(),
+                                &budget.safety_only(),
+                            )?
+                        };
                         let missing = reader.take_missing();
                         Ok((blob, missing))
                     };
@@ -375,6 +403,52 @@ fn read_verified_content_source(
             "No physical encoding alternative is available",
         )
     }))
+}
+
+// Recheck the original local association after full BLTE/CKey authentication,
+// outside Core's quota lock and before its final exact-reference publication.
+fn validate_rebuild(
+    metadata: &Metadata,
+    cache_key: &str,
+    record: &EncodingRecord,
+    keys: &keys::Context,
+    expected: &evidence::BlobRef,
+    store: &Store<'_>,
+) -> Result<()> {
+    let entry: Entry =
+        match metadata.read_controlled_with_check(cache_key, store.control, || store.check()) {
+            Ok(entry) => entry,
+            Err(error) if pure(&error, "vault.record_missing") => return Err(integrity()),
+            Err(error) => return Err(error),
+        };
+    let reference: evidence::BlobRef =
+        serde_json::from_value(entry.blob).map_err(|_| integrity())?;
+    if entry.content_key != record.content_key
+        || reference.bytes != record.decoded_bytes
+        || reference.bytes != expected.bytes
+        || reference.sha256 != expected.sha256
+        || entry.keys.kind != keys.source.kind
+        || entry.keys.sha256 != keys.source.sha256
+    {
+        return Err(integrity());
+    }
+    store.check()
+}
+
+// Empty reads are not EOF. Only the codec's real nonempty EOF probe authorizes
+// the alias recheck; producer, CKey, cancellation and close errors stay errors.
+struct CheckedEof<R, F> {
+    reader: R,
+    check: F,
+}
+impl<R: Read, F: FnMut() -> Result<()>> Read for CheckedEof<R, F> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.reader.read(buffer)?;
+        if n == 0 && !buffer.is_empty() {
+            (self.check)().map_err(std::io::Error::other)?;
+        }
+        Ok(n)
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -587,3 +661,6 @@ fn materialized_extent(
 
 #[cfg(test)]
 mod capacity_tests;
+
+#[cfg(test)]
+mod rebuild_tests;

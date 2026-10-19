@@ -202,11 +202,10 @@ impl FileControl for Controlled<'_, '_> {
     }
 }
 fn finish_file<T>(file: fs::File, result: Result<T>, checks: &Checks<'_>) -> Result<T> {
-    join(
-        result,
-        storage::close_file(file).err().map(ToolkitError::io),
-        checks,
-    )
+    let cleanup = storage::close_file(file).err().map(ToolkitError::io);
+    #[cfg(test)]
+    inventory_tests::file_closed();
+    join(result, cleanup, checks)
 }
 fn sum(values: impl IntoIterator<Item = u64>) -> Result<u64> {
     values.into_iter().try_fold(0u64, |total, value| {
@@ -220,13 +219,18 @@ fn sum(values: impl IntoIterator<Item = u64>) -> Result<u64> {
     })
 }
 fn close_directory(directory: Directory) -> Vec<ToolkitError> {
-    directory
+    #[cfg(test)]
+    let path = directory.path().to_owned();
+    let errors = directory
         .close()
         .err()
         .into_iter()
         .flatten()
         .map(ToolkitError::io)
-        .collect()
+        .collect();
+    #[cfg(test)]
+    let errors = inventory_tests::directory_closed(path, errors);
+    errors
 }
 fn join<T>(
     result: Result<T>,
@@ -405,6 +409,8 @@ impl<'a> DerivedReservation<'a> {
                 || control.check(),
                 None,
             )?);
+            #[cfg(test)]
+            inventory_tests::quota_acquired();
             // Keep every managed root's identity through the reservation. Only
             // these new namespaces are prepared; no migration or reclamation.
             for root in owner.paths.roots() {
@@ -434,7 +440,13 @@ impl<'a> DerivedReservation<'a> {
                 if let Some(reference) = recovery {
                     shared_blobs::validate_recovery(&owner.home, &owner.paths, reference, control)?;
                 }
-                inventory_recovering(&owner.home, &owner.paths, control, recovery)?
+                inventory_recovering(
+                    &owner.home,
+                    &owner.paths,
+                    control,
+                    recovery,
+                    &owner.directories,
+                )?
             };
             owner.report.admitted_peak_bytes = sum([owner.report.existing.total()?, additional])?;
             if !defer_admission
@@ -470,6 +482,7 @@ impl<'a> DerivedReservation<'a> {
                 &self.paths,
                 &self.control,
                 self.recovery.as_ref(),
+                &self.directories,
             )?
         };
         if current.total()? > self.report.admitted_peak_bytes {
@@ -577,6 +590,7 @@ fn metadata_inventory(paths: &DataCachePaths, control: &Checks<'_>) -> Result<De
         &mut entries,
         &mut files,
         control,
+        &[],
     )?;
     Ok(DerivedUsage {
         private_metadata_namespace_bytes: bytes,
@@ -585,14 +599,17 @@ fn metadata_inventory(paths: &DataCachePaths, control: &Checks<'_>) -> Result<De
     })
 }
 fn inventory(home: &Path, paths: &DataCachePaths, control: &Checks<'_>) -> Result<DerivedUsage> {
-    inventory_recovering(home, paths, control, None)
+    inventory_recovering(home, paths, control, None, &[])
 }
 fn inventory_recovering(
     home: &Path,
     paths: &DataCachePaths,
     control: &Checks<'_>,
     recovery: Option<&crate::evidence::BlobRef>,
+    held: &[Directory],
 ) -> Result<DerivedUsage> {
+    #[cfg(test)]
+    inventory_tests::inventory_entered();
     let mut entries = 0;
     let mut files = 0;
     let mut bytes = [0; 4];
@@ -605,10 +622,11 @@ fn inventory_recovering(
             &mut entries,
             &mut files,
             control,
+            held,
         )?;
     }
     let (shared_blob_bytes, retained_shared_peak_bytes) =
-        shared_blobs::inventory_recovering(home, paths, control, recovery)?;
+        shared_blobs::inventory_recovering(home, paths, control, recovery, held)?;
     Ok(DerivedUsage {
         shared_blob_bytes,
         retained_shared_peak_bytes,
@@ -619,6 +637,31 @@ fn inventory_recovering(
         files,
     })
 }
+// The quota owner already pins these exact absolute managed paths and their
+// ancestors. Borrow only that live owner, never a prior inventory or lease.
+// Unknown descendants retain the original owned-open/checked-close path.
+fn with_inventory_directory<T>(
+    path: &Path,
+    held: &[Directory],
+    control: &Checks<'_>,
+    run: impl FnOnce(&Directory) -> Result<T>,
+) -> Result<T> {
+    if let Some(directory) = held.iter().find(|directory| directory.path() == path) {
+        directory.verify_controlled(&mut Controlled(control))?;
+        #[cfg(test)]
+        inventory_tests::directory_borrowed(directory.path());
+        // Preserve the terminal primary/stop aggregation without closing the
+        // borrowed owner. Its reservation alone owns checked cleanup.
+        return join(run(directory), std::iter::empty(), control);
+    }
+    let directory = Directory::open_controlled(path, &mut Controlled(control))?;
+    #[cfg(test)]
+    inventory_tests::directory_opened(directory.path());
+    let result = run(&directory);
+    join(result, close_directory(directory), control)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn scan(
     path: &Path,
     spool_root: &Path,
@@ -627,6 +670,7 @@ fn scan(
     entries: &mut usize,
     files: &mut usize,
     control: &Checks<'_>,
+    held: &[Directory],
 ) -> Result<u64> {
     control.check()?;
     if depth > MAX_DEPTH {
@@ -636,8 +680,7 @@ fn scan(
             4,
         ));
     }
-    let directory = Directory::open_controlled(path, &mut Controlled(control))?;
-    let result = (|| {
+    with_inventory_directory(path, held, control, |directory| {
         let mut total = 0;
         for entry in fs::read_dir(directory.path())? {
             control.check()?;
@@ -660,6 +703,7 @@ fn scan(
                     entries,
                     files,
                     control,
+                    held,
                 )?
             } else if kind.is_file() {
                 // Open relative to the held directory, never follow symlinks or
@@ -716,9 +760,10 @@ fn scan(
         }
         control.check()?;
         Ok(total)
-    })();
-    join(result, close_directory(directory), control)
+    })
 }
 
+#[cfg(test)]
+mod inventory_tests;
 #[cfg(test)]
 mod tests;
