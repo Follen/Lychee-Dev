@@ -13,7 +13,7 @@
 - [x] 2d补官方flatbuffers许可证后新匹配release/assembly/exporter认证通过；19e旧装包失败保留。
 - [x] 666对2d原六场景封存结果只读复核exit0，sealed_complete_scenarios_reverified，52,494文件认证；产品/build/exporter新增0。原runner失败/finalIntegrity=false及六组wall保留；Node498通过/0失败/7权限skip，非全性能门禁。
 - [x] 10ed显式6GiB runner接线保存并完整readback；12套Node作者/独审各452/452；Windows实际447通过/0失败/5权限skip，原默认5GiB及其它限额保持。
-- [ ] ea58347c Data50的Core/Windows五组131项和Node11套121项实际全过、无skip；ea两check的E0382失败保留；e486借用修后两check通过，Data155实际152通过3失败0忽略（45新43通过2失败、110旧109通过1失败）。闭合Root缺体重用、cold导入工作计量和DF Wildcard三项真实失败；94新增按实际所属组逐名计，不称全部通过。
+- [x] ea Core/Windows131项及Node121项通过；e486两check通过但Data155为152通过3失败。86f两check、client23/prepared7/generation33/engine33共96项实际全过，原Root缺体重用、cold导入计量、DF Wildcard三失败闭合，8新增逐名一次。历史失败保留，不称全仓绿。
 - [x] 最终组合Node检查记录sourceTree并区分git archive导出与export-ignore范围；原隔离361/361不能代替最终组合树结果。
 
 - [x] CLI旧Go320元数据oracle已按固定Go323及明确新增更新，独立10项与10个物理坏例通过；最终组合11套Node121/121，无skip，非实际CLI任务验收。
@@ -34,10 +34,10 @@
 - [ ] Lookup/投影/过滤/batch与复杂SQL共享执行/证据，Agent调用和token收益以真实任务证明。
 
 ## C. Source认证、按需消费与binary cache
-- [ ] 已实现并独审子树scratch预留与移除旧JSON缓存计数遍历两片；原binary/owned/输出额度保留。执行完整受影响Source回归后再一次匹配性能，13个新增/调整名称与1个细化负例不得以静审冒通过。
+- [x] 子树scratch与移除旧JSON缓存计数遍历两片在0bca实际check通过；Source730+inspect15+flow4+真实luac1=750通过/0失败/6忽略，13新增/调整名称及1细化各一次；原binary/owned/输出额度保留。86f匹配产品和性能重测仍待终态。
 - [ ] 完成当前Facts Postcard正确性和匹配性能；旧cache失效重建，新损坏不得fallback成健康。
 - [x] 整合已独审Index r2与正式v13-postcard-index18诊断；固定Go323来源已核；070f七Node为357通过/0失败/4权限skip。
-- [ ] 闭合旧validate fixture后完成Source库回归；070f的25新增active及真实luac1已通过，6个lib ignored仍单列。
+- [x] 旧validate fixture在19e闭合；0bca完整Source库730通过，6个lib ignored仍单列，真实luac精确用例实际通过。
 - [ ] 2d新Index六场景已实际执行，666新增只读复核已闭合封存完整性；原失败记录保留，六项耗时比仍均>0.30。后续改动保持完整认证与公共输出，首次导入/query成本不移到未测命令。
 
 ## D. Live内部资源归属
@@ -47,6 +47,7 @@
 
 ## E. CLI自描述与Skill
 - [x] 308efa Skill/CLI发现接线静态独审，六Node套件101/101通过；产品定义不变。
+- [x] 新增runner-only逐调用试用入口，源码独审及最终组合三套Node108/108通过；固定产物身份独立于runner，无产品重编；Windows入口仍待首验。
 - [ ] 同一封存CLI和fixture对固定前后Skill进行独立盲评：未知参数、版本/产品差异、空/partial、超能力任务；记录真实动作、结果、调用与误导。
 - [x] 断连和Source/Live身份矛盾已做独立MODEL_ONLY前后评分；修正模型两版均过，原wait=0替身缺陷保留，不能证明新版收益。
 - [ ] 实际CLI/客户端仍另列验证；不以模型、字数或单次调用数代替质量。
