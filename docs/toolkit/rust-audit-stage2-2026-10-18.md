@@ -4,6 +4,10 @@ Started 2026-10-18 07:18 UTC. Fixed reviewed production: `63d47f29f6c9efe2511ada
 
 Two independent reviewers first traced actual assertions, consumers and fixture costs across the domains below. This is a first-pass scope matrix, not measured coverage, exhaustive branch review or Stage2 convergence. Review redundancy and effectiveness first; retain independent boundaries, repair weaknesses, actually verify, then establish meaningful coverage. Similar names and shared fixtures do not prove redundancy.
 
+## Later architectural regression evidence — d427
+
+The shared typed cache-retention and SQL result projection changes passed all-target compilation and200 disjoint targeted Rust tests, including all18 new regressions once. Matched six-scenario Source diagnostics retained complete output/custody equivalence. This is regression evidence, not new instrumented coverage: the twelve a860 integration mappings below retain their original identities and denominators. Six single performance ratios remain above0.30; memory samples mostly have gaps. Stage2 is still open. DBCD findings are separate unimplemented audit candidates.
+
 ## Actual bounded collection status — 2026-10-19
 
 Fixed a860 completed12 independent integration objects,130 passed and1 permission-ignored test. Each test/merge/export completed under its original deadline and ownership. These are individual linked-object denominators, including other owned crates and test code; they are neither a whole-repository union nor additive percentages. Existing coverage summaries cannot be unioned by adding counts. A future authenticated multi-object collection needs compatible mappings/configuration, original profile/object custody, bounded merging and separate treatment of conflicts, CLI child objects and test groups. No new collection framework or unmeasured uncovered-business claim is inferred here.
