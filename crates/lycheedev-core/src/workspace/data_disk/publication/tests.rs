@@ -405,10 +405,9 @@ fn independent_budget_after_final_visibility_preserves_published_body_and_receip
         1
     );
     assert_eq!(error.details["publicationReceipts"][0]["kind"], "object");
-    assert_eq!(
-        error.details["publicationReceipts"][0]["path"],
-        serde_json::json!(path)
-    );
+    let published_path: PathBuf =
+        serde_json::from_value(error.details["publicationReceipts"][0]["path"].clone()).unwrap();
+    assert_eq!(published_path, path);
     assert_eq!(
         error.details["publicationReceipts"][0]["state"],
         "Published"
