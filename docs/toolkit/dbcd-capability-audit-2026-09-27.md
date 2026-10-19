@@ -155,3 +155,17 @@ The recent six-table Hotfix investigation covered 4,232 physical cache records:
 3,933 decoded records and 299 records without payload, over 25 pages. That
 resolved the first-page coverage gap for that capture. It did not create an
 effective static-plus-Hotfix table or eliminate the missing-key DB2 sections.
+
+
+## Confirmed compatibility repairs — 2026-10-19 addendum
+
+A later fixed-source review of DBCD `e732093f8864240fc5884bd1bba6b02f3dfc0d56` and WoWDBDefs `b9a63096cdd99b26967f17f9515377ae62cadfd7` confirmed four defects. The historical capability/optimization proposals above are not all implemented by this repair.
+
+- F1: WDC5 palette bytes place all scalar palettes before all array palettes, preserving field order within each class. Other supported WDC versions keep their prior wire ordering.
+- F2: official metadata values may contain multiword names. Value-name parsing now preserves that text without weakening mapping paths/tokens; owned UTF8 strings are admitted before allocation.
+- F3: metadata BUILD supports12 official named historical ranges with their exact component matching. These are version selectors only; existing Skill product names, profiles and routes remain unchanged.
+- F4: SQL and non-SQL consumers share request-derived parser caps, retained through preparation and all secondary opens. SDK defaults are unchanged.
+
+Tests-only `51d430690d2799deb1a1159f4f7a9169e236a0d3` passed compilation and reproduced8 failures/5 passes. Fixed `c5718ffa43bf3df575ab808cb4b8aa584545af6b` passed the original13 cases, but four new internal tests failed at missing admission before their assertions. Test-only follow-up `9004f3cc700bf479b0388b10f6ce85cb218699fe` acquired the real workspace/local session and passed all5 reader tests plus all-target compilation. The combined unchanged108 non-reader passes and5 reader passes give113 distinct passes with3 original ignored, across those exact versions. Independent reviews checked both fixes and final scope. Original failed results and auxiliary-cleanup anomalies remain recorded in handover.
+
+This closes the four confirmed defects for the tested cases. It is not a full product/format matrix, real >256MiB-file test, whole-repository pass or performance acceptance. Fixed Go323 shares the first three bugs, so official bytes and independently derived wire expectations, rather than Go's incorrect outputs, were used as the oracle. No raw local test logs are included here.

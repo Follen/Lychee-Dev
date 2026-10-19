@@ -1,8 +1,8 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-19 03:41 UTC。当前已验证生产为 `d4271ae430ac2a80087af81c70eea960d547acbb`，分支 `rust-refactor`、草稿 PR #14。下列为非敏感结果摘要；本机原始日志未随文档发布。Stage2与完整性能验收仍未完成。
+更新：2026-10-19 03:54 UTC。当前已验证生产为 `d4271ae430ac2a80087af81c70eea960d547acbb`，分支 `rust-refactor`、草稿 PR #14。下列为非敏感结果摘要；本机原始日志未随文档发布。Stage2与完整性能验收仍未完成。
 
-### DBCD 原缺陷复验已通过，新增限额测试准备仍有4项失败（2026-10-19）
+### DBCD 四项确认修复已有红绿回归（2026-10-19）
 
 用户明确要求修复四项，并要求保留现有Skill product定义。独立审计固定DBCD `e732093f8864240fc5884bd1bba6b02f3dfc0d56`、WoWDBDefs `b9a63096cdd99b26967f17f9515377ae62cadfd7`；前三项固定Go323同样存在，不能以Go同错结果作为正确oracle。
 
@@ -15,9 +15,13 @@
 
 四个owner均封存退役/回收，activeProcesses为0、无deadline；三个失败目标的辅助进程在drain后被强制回收且knownAuxiliaryCleanup/reviewedAuxiliary均false，原收尾异常保留，不能标成clean成功。以上仅非敏感结果汇总，未发布本机原始日志。
 
+最终测试修正版本 `9004f3cc700bf479b0388b10f6ce85cb218699fe` 已实际通过all-targets与完整reader limits5项（0失败/0忽略，1193 filtered），四个原失败均已越过真实准入，执行原限额/副本/动态批次/partial/capture/stream断言。两owner退役回收、native均0，两个forced均为已审核辅助进程、无deadline。与c571中已过且未改的108个非reader测试合并，实际去重为113通过/3个原忽略；这是两个准确版本的定向回归，不是单次全库通过。四项确认缺陷现具源码修复、独立审查和真实红绿证据，完整product矩阵与真实>256MiB文件验收仍待。Skill/product定义保持不变。
+
+以下保留修正前的实际失败截面，不重标为成功：
+
 修复版本 `c5718ffa43bf3df575ab808cb4b8aa584545af6b` 已实际通过all-targets，116 matched为109通过/4失败/3忽略；核心36为32通过/4失败，旧13项复现测试全部通过。分组：metadata单元14通过；reader limits1通过/4失败；palette7、metadata公开4、limits公开6全部通过；旧semantic SQL11、WDC16通过/1忽略、catalog7通过/2忽略、stream23、SQL lazy20通过。三个既有fixture/benchmark忽略不算通过。
 
-四项失败均在reader_limits_tests直接prepare/prepare_following阶段返回records.internal（Query accounting used before workspace admission），后续限额/副本/dynamic/partial目标断言未到。根因是新增测试直接构造pending query budget后调用prepare，遗漏真实workspace admission。后继仅改reader_limits_tests：经OpenedScope.admit和同一budget/local session运行原prepare_scoped/二次parser断言，成功后原source校验，local reader及scope checked finish之后才执行独立公开请求或删fixture；不修改生产/手动激活预算/减少断言。该后继尚待实测，当前不能称整个修复验收全绿。11个owner退役回收、无deadline；九个forced均已审核辅助进程回收，无unknown。原51d失败与其异常收尾不被本轮覆盖。本次仅非敏感结果摘要。
+四项失败均在reader_limits_tests直接prepare/prepare_following阶段返回records.internal（Query accounting used before workspace admission），后续限额/副本/dynamic/partial目标断言未到。根因是新增测试直接构造pending query budget后调用prepare，遗漏真实workspace admission。后继仅改reader_limits_tests：经OpenedScope.admit和同一budget/local session运行原prepare_scoped/二次parser断言，成功后原source校验，local reader及scope checked finish之后才执行独立公开请求或删fixture；不修改生产/手动激活预算/减少断言。该截面后继当时尚待实测；其最终结果见上文9004，不覆盖本次失败历史。11个owner退役回收、无deadline；九个forced均已审核辅助进程回收，无unknown。原51d失败与其异常收尾不被本轮覆盖。本次仅非敏感结果摘要。
 
 15/15修复文件及27份Skill/product定义字节已核；核心清单36项中本任务新增/扩展29、既有7。小fixture未证明真实>256MiB文件能力。Stage2和完整性能验收仍未结束。
 

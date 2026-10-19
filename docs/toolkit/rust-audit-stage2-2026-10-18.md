@@ -6,7 +6,11 @@ Two independent reviewers first traced actual assertions, consumers and fixture 
 
 ## Later architectural regression evidence — d427
 
-The shared typed cache-retention and SQL result projection changes passed all-target compilation and200 disjoint targeted Rust tests, including all18 new regressions once. Matched six-scenario Source diagnostics retained complete output/custody equivalence. This is regression evidence, not new instrumented coverage: the twelve a860 integration mappings below retain their original identities and denominators. Six single performance ratios remain above0.30; memory samples mostly have gaps. Stage2 is still open. DBCD findings are separate unimplemented audit candidates.
+The shared typed cache-retention and SQL result projection changes passed all-target compilation and200 disjoint targeted Rust tests, including all18 new regressions once. Matched six-scenario Source diagnostics retained complete output/custody equivalence. This is regression evidence, not new instrumented coverage: the twelve a860 integration mappings below retain their original identities and denominators. Six single performance ratios remain above0.30; memory samples mostly have gaps. Stage2 is still open. The later DBCD findings have now received separate fixes and targeted red/green evidence; see the following exact-version addendum. This does not close Stage2.
+
+## DBCD regression effectiveness follow-up — 2026-10-19
+
+Tests-only51d430 reproduced eight failures among13 tests. c5718 repaired all13 original cases but four additional direct-preparation tests stopped before their intended assertions: their query budgets had not acquired workspace admission. That was a test setup defect, not evidence of passing boundary coverage.9004 retains the query-controlled budget and all assertions inside a real admitted scope/local session, with source verification and checked cleanup. Its all-targets and all five reader tests actually passed. Together with108 unchanged non-reader passes on c5718, the finite inventory is113 distinct passed and3 original ignored across exact versions. No whole-project coverage percentage or large-table acceptance is inferred. This is an example of repairing a test's real reachability rather than weakening admission or deleting assertions.
 
 ## Actual bounded collection status — 2026-10-19
 
