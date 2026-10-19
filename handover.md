@@ -1,5 +1,11 @@
 # Rust 迁移交接：唯一当前事实来源
 
+### Live SessionOwner 后继：已独审、待运行（2026-10-19）
+
+Core/Data/Source首批已保存为`8c9a1bccd543b8e7d605d1f791a34f7d3aa713f8`，37文件和1删除已逐字节核验，Windows正确性尚待根队列。当前独立Live五文件将同步Driver所需的journal-only/native-attached资源归属集中为私有SessionOwner，统一native先于journal的checked close、fallback drop和lease成功关闭后的claim退役。Mailbox v1、durable intent、线程边界、Unknown结果及原deadline/不重放合同均不变；未引入runtime、线程或依赖。
+
+六项新增公开service入口回归覆盖同线程关闭、部分打开双失败、Unknown错误保留、lease关闭失败、已提交输入取消恢复、Observation/Opaque恢复。独审发现Observation测试模型原本拒绝prepare而会提前panic，已以仅该分支显式prepare-pending修正，原状态/次数/恢复断言保留。独立复审和语法解析通过；Cargo、Windows、性能均NOT_RUN，不将模型证据当游戏验证。DataFusion/全Data5GB归属、Source v13 fresh证据编排与Skill任务质量仍独立推进。
+
 ### 首个架构实现批：配置/真实 Data prepare/Source binary（2026-10-19）
 
 本批代码已完成独立静态复审，尚未编译、运行或性能测量。Core新增`dataCache.maxBytes`，默认十进制5,000,000,000B；保旧公开配置字段/错误行为。真实`data cache prepare <Table>`通过原workspace准入与相同Budget，逐批Arrow IPC写入、源身份复核、CAS对象和generation发布，再checked close；晚失败保留已发表事实。最终physical Arrow schema的原生IPC message摘要与representation/derivation版本一起进入generation身份。

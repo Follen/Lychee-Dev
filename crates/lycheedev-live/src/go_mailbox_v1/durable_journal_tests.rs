@@ -181,6 +181,12 @@ fn inject(journal: &mut DurableChannelJournal, point: FaultPoint, action: Action
     journal.fault = Some(Fault { point, action });
 }
 
+/// Service-entry regressions use the same real lease-release fault boundary as
+/// journal tests. This helper and fault machinery are absent from production.
+pub(crate) fn fail_lease_close(journal: &mut DurableChannelJournal) {
+    inject(journal, FaultPoint::LeaseClosed, Action::Fail);
+}
+
 #[test]
 fn go_mailbox_v1_durable_paths_and_readonly_missing_do_not_create_state() {
     let f = Fixture::new();

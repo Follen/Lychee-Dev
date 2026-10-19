@@ -29,14 +29,16 @@ mod errors;
 mod native;
 mod outcome;
 mod projection;
+mod session;
 pub use errors::{PublicFailure, classify_error};
 pub use native::{
     NativeEnvironment, ProcessLifetimeObserver, SystemClock, SystemScheduler, SystemTokens,
     WindowsProcessLifetime,
 };
 pub use outcome::ServiceOutcome;
-pub use projection::{ProjectResult, RawReport, present};
 use projection::present_owned;
+pub use projection::{ProjectResult, RawReport, present};
+use session::{LeaseOnly, SessionOwner};
 
 /// Existing public target selectors; no new command or protocol is introduced.
 #[derive(Debug, Clone, Default)]
@@ -122,6 +124,8 @@ pub struct ConnectionService<E, C, T, S> {
     clock: C,
     tokens: T,
     scheduler: S,
+    #[cfg(test)]
+    journal_fault: Option<fn(&mut durable_journal::DurableChannelJournal)>,
 }
 impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationScheduler>
     ConnectionService<E, C, T, S>
@@ -139,6 +143,8 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
             clock,
             tokens,
             scheduler,
+            #[cfg(test)]
+            journal_fault: None,
         })
     }
     pub fn project_root(&self) -> &Path {
@@ -414,13 +420,14 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
                 Err(contract("live.channel_closed")),
             );
         }
-        let (mut record, mut journal) = match self.book.acquire(id, control) {
+        let (record, journal) = match self.book.acquire(id, control) {
             Ok(owned) => owned,
             Err(e) => return self.acquired(&before, e),
         };
         // Only the under-lease replay can drive this turn. Release the earlier
         // read-only projection rather than retaining another code/report owner.
         drop(before);
+        let session = self.own_session(journal);
         // All predicates are rechecked on the under-lease replay before native
         // open, including a concurrent CLI's just-completed request.
         let check = (|| -> Result<Option<State>, AdmissionError> {
@@ -444,7 +451,7 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
         match check {
             Ok(None) => (),
             other => {
-                let mut outcome = match other {
+                let outcome = match other {
                     Ok(Some(state)) => ServiceOutcome::Completed(present_owned(
                         state,
                         record.paths.log_path(),
@@ -455,108 +462,85 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
                     Err(e) => ServiceOutcome::with_result(self.project(&record, "", ""), Err(e)),
                     Ok(None) => unreachable!(),
                 };
-                outcome = outcome.join(channel(journal.close()));
-                return outcome;
+                return session.finish(outcome, false).into_outcome();
             }
         }
-        let mut backend = match self.environment.open(
+        let backend = match self.environment.open(
             &record.metadata.target,
             Some(&record.metadata.owner),
             control,
         ) {
             Ok(backend) => backend,
             Err(e) => {
-                let mut outcome =
+                let outcome =
                     ServiceOutcome::with_result(self.project(&record, "", ""), Err(e.into()));
-                outcome = outcome.join(channel(journal.close()));
-                return outcome;
+                return session.finish(outcome, false).into_outcome();
             }
         };
-        // Validate/synchronize before transferring resources to Driver, whose
-        // constructor can otherwise drop them on an invalid recovered budget.
-        // Budget synchronization validates every candidate before committing
-        // either field: its error leaves the original projection unchanged.
-        // Native open already succeeded, so no intervening open failure needs
-        // the old budget view after a successful synchronization.
-        if let Err(e) = record.state
-            .validate()
-            .map_err(ChannelError::from)
-            .and_then(|_| super::recovery::synchronize_automatic_budget(&mut record.state).map(|_| ()))
-        {
-            let mut outcome = ServiceOutcome::with_result(
-                self.project(&record, "", backend.scans()),
-                Err(e.into()),
-            );
-            outcome = outcome.join(channel(backend.checked_close()));
-            outcome = outcome.join(channel(journal.close()));
-            return outcome;
-        }
-        let mut driver = Driver::from_state(
-            record.state,
-            backend,
-            journal,
-            BorrowClock(&self.clock),
-            BorrowTokens(&mut self.tokens),
-        )
-        .expect("state and automatic budgets validated before resource transfer");
         let target = RetirementTarget {
             process_id: record.metadata.target.window.process_id,
             process_started_at: record.metadata.target.window.process_started_at,
         };
-        let result = (|| -> ChannelResult<()> {
-            match action {
-                Action::Resume => (),
-                Action::Disconnect => driver.request_close(control)?,
-                Action::Execute(request) => {
-                    let prior = driver.historical_request(
-                        control,
-                        request.request,
-                        request.code,
-                        request.budget_seconds,
-                        request.policy,
-                    )?;
-                    if prior.is_none() {
-                        driver.prepare_request(
-                            control,
-                            request.request,
-                            request.code,
-                            request.budget_seconds,
-                            request.policy,
-                        )?;
+        session
+            .attach(backend)
+            .run(
+                record.state,
+                record.paths.log_path(),
+                BorrowClock(&self.clock),
+                BorrowTokens(&mut self.tokens),
+                |driver| {
+                    match action {
+                        Action::Resume => (),
+                        Action::Disconnect => driver.request_close(control)?,
+                        Action::Execute(request) => {
+                            let prior = driver.historical_request(
+                                control,
+                                request.request,
+                                request.code,
+                                request.budget_seconds,
+                                request.policy,
+                            )?;
+                            if prior.is_none() {
+                                driver.prepare_request(
+                                    control,
+                                    request.request,
+                                    request.code,
+                                    request.budget_seconds,
+                                    request.policy,
+                                )?;
+                            }
+                            // Existing unknown/cancelled work is continued exactly;
+                            // Driver refuses replay and preserves its original ticket.
+                        }
                     }
-                    // Existing unknown/cancelled work is continued exactly;
-                    // Driver refuses replay and preserves its original ticket.
-                }
+                    if matches!(action, Action::Execute(_)) {
+                        driver.continue_until(control, target, &mut self.scheduler)
+                    } else {
+                        driver.continue_or_retire(
+                            control,
+                            target,
+                            matches!(action, Action::Disconnect),
+                            &mut self.scheduler,
+                        )
+                    }
+                },
+            )
+            .retire(&mut self.book, id, control)
+    }
+
+    fn own_session(
+        &mut self,
+        journal: durable_journal::DurableChannelJournal,
+    ) -> SessionOwner<LeaseOnly> {
+        #[cfg(test)]
+        let journal = {
+            let mut journal = journal;
+            if let Some(fault) = self.journal_fault.take() {
+                fault(&mut journal);
             }
-            if matches!(action, Action::Execute(_)) {
-                driver.continue_until(control, target, &mut self.scheduler)
-            } else {
-                driver.continue_or_retire(
-                    control,
-                    target,
-                    matches!(action, Action::Disconnect),
-                    &mut self.scheduler,
-                )
-            }
-        })();
-        let should_retire = result.is_ok() && driver.state.closed;
-        let projected = present_owned(
-            driver.state,
-            record.paths.log_path(),
-            driver.clock.unix_millis(),
-            &driver.waiting,
-            driver.backend.scans(),
-        );
-        let mut outcome = ServiceOutcome::with_result(projected, channel(result));
-        // Native close first stops process ownership; both closes always run.
-        outcome = outcome.join(channel(driver.backend.checked_close()));
-        let released = driver.journal.close();
-        let lease_closed = released.is_ok();
-        outcome = outcome.join(channel(released));
-        if should_retire && lease_closed {
-            outcome = outcome.join(self.book.retire_closed(id, control).map(|_| ()));
-        }
-        outcome
+            journal
+        };
+        SessionOwner::leased(journal)
     }
     fn disconnect_ended(&mut self, id: &str, control: &OperationControl) -> ServiceOutcome {
         let before = match self.book.status(id, control) {
@@ -569,10 +553,11 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
                 Err(contract("desktop.identity_changed")),
             );
         }
-        let (mut record, mut journal) = match self.book.acquire(id, control) {
+        let (mut record, journal) = match self.book.acquire(id, control) {
             Ok(value) => value,
             Err(e) => return self.acquired(&before, e),
         };
+        let mut session = self.own_session(journal);
         let result = (|| -> ChannelResult<()> {
             let ended = self
                 .environment
@@ -582,7 +567,7 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
             }
             record.state.process_end = ended;
             save_state(
-                &mut journal,
+                session.journal_mut(),
                 control,
                 &mut record.state,
                 "process_end_observed",
@@ -609,22 +594,17 @@ impl<E: ConnectionEnvironment, C: Clock, T: TokenSource, S: ContinuationSchedule
             }
             close_ended_state(&mut record.state);
             save_state(
-                &mut journal,
+                session.journal_mut(),
                 control,
                 &mut record.state,
                 "process_end_closed",
             )
         })();
         let completed = result.is_ok();
-        let mut outcome =
-            ServiceOutcome::with_result(self.project(&record, "", ""), channel(result));
-        let closed = journal.close();
-        let lease_closed = closed.is_ok();
-        outcome = outcome.join(channel(closed));
-        if completed && lease_closed {
-            outcome = outcome.join(self.book.retire_closed(id, control).map(|_| ()));
-        }
-        outcome
+        let outcome = ServiceOutcome::with_result(self.project(&record, "", ""), channel(result));
+        session
+            .finish(outcome, completed)
+            .retire(&mut self.book, id, control)
     }
 }
 #[derive(Clone, Copy)]

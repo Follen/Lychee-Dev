@@ -1,5 +1,9 @@
 - [x] Fixed f811 Data projection: check and71 targeted Rust tests passed, including16 new tests once; no full-workspace or performance acceptance claim.
 
+- [x] 保存首批8c9 Core配置/真实Arrow prepare/Source Postcard及独立复审；37文件+1删除逐字节核验。Windows与性能仍待。
+- [x] 实现Live私有SessionOwner并独立复审六个真实service回归；测试模型prepare阻断已修，未运行。
+- [ ] 以固定后继SHA验证Live SessionOwner六新增及完整连接/恢复回归；保旧结果，不将模型/静态通过当游戏或性能验收。
+
 
 ## 当前授权架构执行批（2026-10-19）
 - [x] 固定f811结果质量基线：check及71针对性测试全过，16新逐名一次；不是全仓/性能通过。

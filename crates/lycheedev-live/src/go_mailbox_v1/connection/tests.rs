@@ -5,7 +5,7 @@ use super::super::journal::StateJournal;
 use super::super::{
     InputObservation,
     admission::{ClientRecord, WindowRecord, inspect_window_owner},
-    observations::{Backend, InputAction, InputDispatch, ObservationDispatch, ObservationQuery},
+    observations::{Backend, InputAction, InputDispatch, Observation, ObservationDispatch, ObservationQuery},
     recovery::test_support::{FakeClock, Peer, Schedule, Tokens, identity},
     state::{Operation, ResultBytes, RuntimeReplacementProof, Transaction, TransactionPhase},
 };
@@ -20,6 +20,8 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 static NEXT: AtomicU64 = AtomicU64::new(0);
+
+mod session;
 struct Fixture {
     root: PathBuf,
     target: ConnectionTarget,
@@ -130,20 +132,29 @@ struct Counts {
     input: usize,
     ended: usize,
     retired: Vec<SlotEnvelope>,
+    closes_under_lease: usize,
+    published: Vec<SlotEnvelope>,
+    superseded: Vec<SlotEnvelope>,
 }
 struct Env {
     target: ConnectionTarget,
     counts: Rc<RefCell<Counts>>,
     open_error: Option<ChannelError>,
+    partial_open_error: Option<ChannelError>,
     close_error: Option<ChannelError>,
+    close_lease_probe: Option<(PathBuf, String)>,
     end: ProcessEnd,
     retire_error: Option<ChannelError>,
     cancel_input: bool,
+    prepare_pending: bool,
 }
 struct Model {
     peer: Peer,
     counts: Rc<RefCell<Counts>>,
     close_error: Option<ChannelError>,
+    close_lease_probe: Option<(PathBuf, String)>,
+    acquiring_thread: std::thread::ThreadId,
+    prepare_pending: bool,
 }
 impl ConnectionEnvironment for Env {
     type Backend = Model;
@@ -166,14 +177,24 @@ impl ConnectionEnvironment for Env {
         if let Some(e) = self.open_error.clone() {
             return Err(e);
         }
-        Ok(Model {
+        let mut backend = Model {
             peer: Peer {
                 cancel_after_input: self.cancel_input,
                 ..Default::default()
             },
             counts: self.counts.clone(),
             close_error: self.close_error.take(),
-        })
+            close_lease_probe: self.close_lease_probe.clone(),
+            acquiring_thread: std::thread::current().id(),
+            prepare_pending: self.prepare_pending,
+        };
+        if let Some(error) = self.partial_open_error.take() {
+            // Model the environment's existing obligation to check-close any
+            // native resources acquired before open can return a backend.
+            return durable_journal::joined([Err(error), backend.checked_close()])
+                .map(|_| unreachable!());
+        }
+        Ok(backend)
     }
     fn process_end(
         &mut self,
@@ -204,6 +225,17 @@ impl ConnectionBackend for Model {
         Ok(vec![identity('2')])
     }
     fn checked_close(&mut self) -> ChannelResult<()> {
+        assert_eq!(self.acquiring_thread, std::thread::current().id());
+        if let Some((root, id)) = &self.close_lease_probe {
+            match ConnectionBook::open(root).unwrap().acquire(id, &control()) {
+                Err(error) if error.is_busy() => self.counts.borrow_mut().closes_under_lease += 1,
+                Err(error) => panic!("unexpected lease probe failure: {error}"),
+                Ok((_, mut journal)) => {
+                    journal.close().unwrap();
+                    panic!("native close must precede execution lease release");
+                }
+            }
+        }
         self.counts.borrow_mut().closes += 1;
         self.close_error.take().map_or(Ok(()), Err)
     }
@@ -213,9 +245,22 @@ impl ConnectionBackend for Model {
 }
 impl Backend for Model {
     fn observe(&mut self, c: &OperationControl, q: &ObservationQuery) -> ObservationDispatch {
+        if self.prepare_pending && q.envelope.action == "prepare" {
+            return check_control(c)
+                .map(|()| Observation::Pending { diagnostic: None })
+                .into();
+        }
         self.peer.observe(c, q)
     }
     fn publish(&mut self, c: &OperationControl, e: &SlotEnvelope) -> ChannelResult<()> {
+        self.counts.borrow_mut().published.push(e.clone());
+        if self.prepare_pending && e.action == "prepare" {
+            // This service fixture deliberately permits a new Observation
+            // attempt without synthesizing business acceptance or execution.
+            check_control(c)?;
+            self.peer.actions.push(e.action.clone());
+            return Ok(());
+        }
         self.peer.publish(c, e)
     }
     fn observe_input(
@@ -244,6 +289,7 @@ impl Backend for Model {
         e: &SlotEnvelope,
         i: &Identity,
     ) -> ChannelResult<()> {
+        self.counts.borrow_mut().superseded.push(e.clone());
         self.peer.supersede(c, e, i)
     }
     fn consumed(&mut self, c: &OperationControl, e: &SlotEnvelope) -> ChannelResult<()> {
@@ -275,10 +321,13 @@ fn service(root: &Path, target: ConnectionTarget) -> Service {
             target,
             counts: Default::default(),
             open_error: None,
+            partial_open_error: None,
             close_error: None,
+            close_lease_probe: None,
             end: ProcessEnd::None,
             retire_error: None,
             cancel_input: false,
+            prepare_pending: false,
         },
         FakeClock(Rc::new(Cell::new(1000))),
         Tokens(100),
