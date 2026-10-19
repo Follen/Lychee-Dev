@@ -2,11 +2,11 @@
 
 更新：2026-10-19 01:06 UTC。当前已验证生产为 `d4271ae430ac2a80087af81c70eea960d547acbb`，分支 `rust-refactor`、草稿 PR #14。下列为非敏感结果摘要；本机原始日志未随文档发布。Stage2与完整性能验收仍未完成。
 
-### 后继 Facts 编码所有权小修（待运行）
+### Facts 编码所有权小修已通过定向回归（cb409）
 
 源码确认 `encode_facts` 原先把已经构造的 Facts Value 再经 `json!` 复制成第二棵DOM，且为 canonical SHA额外生成整片Vec。后继候选沿同一Value/canonical writer，把信封先构造为facts:null，再移动原Value填入；原最终完整编码、32MiB判断与错误、profile及发布边界不变。适用冷解析、cache miss与repair/backfill的FactsSerialize，不是增量FactsRead主桶优化；不会把数千Read次数误称重复body读取。现每cohort目录与每record的外SHA/内部canonicalSHA各有独立认证职责，保留。
 
-四项新回归以完整旧producer为byte/error oracle，核五数组、顺序/重复、Unicode/optional/usize/skip字段、8KiB边界和32MiB−1/恰好/+1。当前仅syntax/static review，编译/Rust执行及性能NOT_RUN；没有新收益结论。
+四项新回归以完整旧producer为byte/error oracle，核五数组、顺序/重复、Unicode/optional/usize/skip字段、8KiB边界和32MiB−1/恰好/+1。非作者独审与syntax检查后，固定 `cb409837eda576b70c42b6b48e841e43df018c2f` 已实际通过all-targets和完整index::141项（0失败/0忽略，570 filtered），四项新增各执行一次。原600秒/default stack不变；两个owner退役回收，native均0，已审核辅助进程回收标志保留，无deadline。本批未release或性能复测，没有新收益结论。
 
 ### d427 低耦合投影实际验证与匹配性能（2026-10-19 01:06 UTC）
 
