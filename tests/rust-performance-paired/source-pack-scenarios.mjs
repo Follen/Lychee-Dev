@@ -254,7 +254,8 @@ export function captureMetadata(home, pin, directory, engine, {afterCopy} = {}) 
 function packIndexIdentities(repository, product, commit, parser) {
   return ['rust-index-v14', 'rust-index-v15'].map(version => sha256([version, ...(version === 'rust-index-v15' ? ['assets-v2-go323-metadata'] : []), 'facts-pack-v2-path-radix512', 'facts-layout-v11-go323-generated-origins', 'TS0.26.3', 'Lua0.5.0', 'XML0.38', 'generator-v6', repository, product, commit, parser].join('\0')));
 }
-export function indexEvidence(home, engine, pin, directory, root) {
+export function indexEvidence(home, engine, pin, directory, root, {layout = 'v11-pack2'} = {}) {
+  assert(['v11-pack2', 'v13-postcard'].includes(layout), 'explicit supported index layout required');
   const source = pin.source; let path, manifest;
   const metadata = captureMetadata(home, pin, directory, engine);
   if (engine === 'go') {
@@ -263,7 +264,7 @@ export function indexEvidence(home, engine, pin, directory, root) {
     manifest = JSON.parse(readFileSync(join(base, 'manifest.json')));
     assert.equal(manifest.recordsHash, hashFile(path, INDEX_BYTES)); assert.equal(manifest.recordBytes, lstatSync(path).size);
   } else {
-    const identities = packIndexIdentities(source.repository, source.product, source.exactCommit, source.parserRevision);
+    const identities = layout === 'v13-postcard' ? [sha256(['rust-index-v17', 'assets-v2-go323-metadata', 'facts-pack-v2-path-radix512', 'facts-layout-v13-postcard-1.1.3', 'TS0.26.3', 'Lua0.5.0', 'XML0.38', 'generator-v6', source.repository, source.product, source.exactCommit, source.parserRevision].join('\0'))] : packIndexIdentities(source.repository, source.product, source.exactCommit, source.parserRevision);
     const db = new DatabaseSync(metadata.path, {readOnly: true});
     try {
       const matches = identities.map(identity => ({identity, row: db.prepare('SELECT value FROM documents WHERE key = ?').get(`source/rust-index/${identity}`)})).filter(match => match.row);
@@ -663,8 +664,13 @@ export function claimSeven(root, reference, owner, retained) {
 }
 
 export async function runController(config, overrides = {}) {
-  const svc = {metadataPageSize, mutationFootprint, authenticateRetainedGo, claimSeven, authenticateRemaining, claimRemaining, assertCorpus, authenticateRetainedCold, claimColdBorrow, captureColdFactFiles, beginScratch, admission, ownedSpawnSync, collectOwnedMemory, runnerIdentity, verifyCandidateRecord, verifyGoPackage, cloneSeed, inventory, derivedIdentity, proveWarmReuse, prepareVariant, compareFacts, verifyPackProfile, indexEvidence, captureGoCustody, openGoCustody, ...overrides};
+  const svc = {metadataPageSize, mutationFootprint, footprint, authenticateRetainedGo, claimSeven, authenticateRemaining, claimRemaining, assertCorpus, authenticateRetainedCold, claimColdBorrow, captureColdFactFiles, beginScratch, admission, ownedSpawnSync, collectOwnedMemory, runnerIdentity, verifyCandidateRecord, verifyGoPackage, cloneSeed, inventory, derivedIdentity, proveWarmReuse, prepareVariant, compareFacts, verifyPackProfile, indexEvidence, captureGoCustody, openGoCustody, ...overrides};
   const {request, runnerRoot, inputs, conditions, scratch, evidence: out} = config;
+  const layout = config.layout ?? 'v11-pack2'; assert(['v11-pack2', 'v13-postcard'].includes(layout), 'explicit supported controller layout required');
+  if (layout === 'v13-postcard') {
+    assert(!config.resumeCold && !config.resumeRemaining && !config.resumeGo && !config.allowance, 'v13 uses fresh scenarios and the unchanged default disk policy');
+    for (const hook of ['runnerIdentity', 'compareFacts', 'verifyAdditionalIdentity', 'verifyAdditionalEvidence']) assert.equal(typeof overrides[hook], 'function', 'v13 requires its authenticated exporter controller');
+  }
   assert([config.resumeCold, config.resumeRemaining, config.resumeGo].filter(Boolean).length <= 1, 'one exact continuation mode required');
   if (config.resumeCold || config.resumeRemaining || config.resumeGo) assertHistoricalCandidate(request);
   assert(!config.resumeCold || !config.allowance, 'cold continuation keeps original disk policy');
@@ -673,7 +679,7 @@ export async function runController(config, overrides = {}) {
   assert.equal(oracle.commit, BASE_COMMIT); assert.equal(oracle.documents, 4036);
   let fatal = false, sequence = 0, baseOwner, baseSuccess = false, retained, borrowClaim, remaining, remainingClaim;
   const start = performance.now();
-  const report = {schema: 'lycheedev.source-pack-scenarios.v1', diskPolicy, state: 'running', request, inputs, runnerRoot, conditions, productCommit: request.candidate.commit, layout: 'v11-pack2', importedSamples: 0, performanceAcceptanceEvaluated: false, fullB01B07Acceptance: false, preparation: [], scenarios: [], invocationAttempts: [], owners: [], finalIntegrityVerified: false,
+  const report = {schema: 'lycheedev.source-pack-scenarios.v1', diskPolicy, state: 'running', request, inputs, runnerRoot, conditions, productCommit: request.candidate.commit, layout, importedSamples: 0, performanceAcceptanceEvaluated: false, fullB01B07Acceptance: false, preparation: [], scenarios: [], invocationAttempts: [], owners: [], finalIntegrityVerified: false,
     machine: {hostname: os.hostname(), platform: process.platform, node: process.version, cpus: os.cpus(), totalMemory: os.totalmem()},
     timing: 'Native total CreateProcessW through descendant reaping/output drain; 31 overlapping phases are attribution, never subtracted or added. Wrapper wall separate.', cacheDefinition: config.resumeGo ? 'Five original calls retained; authenticate/capture the completed Go mutation read-only, then only seven unexecuted calls on independent healthy-base clones.' : config.resumeRemaining ? 'Four original cold/warm calls retained; only the four unexecuted variants run, each on a fresh independent clone of the sealed healthy base. No base copies or baseline product calls.' : config.resumeCold ? 'Original fixed 7d8 init/sync/cold calls reauthenticated read-only; exact two retained homes borrowed for same-home warm; each changed engine copies this healthy base independently. No fresh cold calls or OS cache flush.' : 'Fresh own init/sync-only homes for cold; same successful base homes for warm; each changed pair copies the original healthy base independently. No OS cache flush.', metrics: {cpu: 'not_measured', io: 'not_measured', rss: 'not_measured; owned-Job sampled aggregate and gaps retained, not unique physical RSS'}};
   const save = () => saveJSON(join(out, 'report.json'), report);
@@ -703,6 +709,7 @@ export async function runController(config, overrides = {}) {
   function identities() {
     assert.deepEqual(svc.runnerIdentity(runnerRoot), inputs, 'runner changed');
     const candidate = svc.verifyCandidateRecord(request.candidate);
+    svc.verifyAdditionalIdentity?.(request);
     if (!overrides.verifyCandidateRecord) {
       for (const [root, commit] of [[request.candidate.sourceRoot, request.candidate.commit], [request.go.sourceRoot, GO_COMMIT]]) verifyCleanCheckout(root, commit, (args, cwd) => git(args, undefined, {}, cwd));
     }
@@ -756,7 +763,7 @@ export async function runController(config, overrides = {}) {
       }
       row.facts = await svc.compareFacts(homes, envelopes, selection.pin, selection.oracle, evidence, request.ownerRoot, undefined, {admit: svc.admission, limits: diskPolicy, candidate: request.candidate});
       row.factsEquivalent = true; identities(); row.rustToGoRatio = row.rust.controllableMillis / row.go.controllableMillis; row.state = 'verified'; return row;
-    } catch (error) { row.state = fatal ? 'interrupted' : 'failed'; row.failure = error.message.slice(0, 4096); throw error; }
+    } catch (error) { if (error.handlesReaped === false) fatal = true; if (error.postcardEvidence) row.factsFailure = error.postcardEvidence; row.state = fatal ? 'interrupted' : 'failed'; row.failure = error.message.slice(0, 4096); throw error; }
     finally { saveJSON(join(evidence, `${entry.id}-scenario.json`), row); save(); }
   }
   save();
@@ -809,7 +816,7 @@ export async function runController(config, overrides = {}) {
       report.owners.push({role: 'borrowed-healthy-base', receipt: baseOwner.receipt, estimate: warmEstimate});
       retained.verifyHomes(); retained.verifyEvidence(); borrowClaim = svc.claimColdBorrow(request.ownerRoot, config.resumeCold, baseOwner, retained.inventories, custody.receipt); report.continuation.borrow = borrowClaim; save();
     } else {
-      const coldEstimate = footprint({cold: true}); report.coldAdmissionEstimate = coldEstimate;
+      const coldEstimate = svc.footprint({cold: true}); report.coldAdmissionEstimate = coldEstimate;
       baseOwner = svc.beginScratch(request.ownerRoot, 'source-pack2-healthy-base', {command: ['source', 'index'], inputs, limits: diskPolicy, admissionOptions: coldEstimate}); report.owners.push({role: 'healthy-base', receipt: baseOwner.receipt}); save();
       homes = Object.fromEntries(['go', 'rust'].map(engine => [engine, join(baseOwner.directory, `${engine}-home`)]));
       prepared = (overrides.prepareSeeds ?? prepareSeeds)(homes, binaries, baseOwner.evidence);
@@ -882,7 +889,7 @@ export async function runController(config, overrides = {}) {
           }
           identities(); for (const side of ['go', 'rust']) assert.equal(svc.inventory(homes[side]).sha256, baseIdentity[side].sha256, 'original healthy base changed');
           success = true;
-        } catch (error) { row.state = fatal ? 'interrupted' : 'failed'; row.failure = error.message.slice(0, 4096); throw error; }
+        } catch (error) { if (error.handlesReaped === false) fatal = true; if (error.postcardEvidence) row.factsFailure = error.postcardEvidence; row.state = fatal ? 'interrupted' : 'failed'; row.failure = error.message.slice(0, 4096); throw error; }
         finally {
           saveJSON(join(job.evidence, `${entry.id}-${engine}.json`), row); save();
           job.seal({state: fatal ? 'interrupted' : success ? 'succeeded' : 'failed', handlesReaped: !fatal, logs: evidenceFiles(job.evidence)});
@@ -893,6 +900,7 @@ export async function runController(config, overrides = {}) {
     }
     identities(); report.machine.powerAfter = prepare('powercfg.exe', ['/getactivescheme'], 'power-after').toString(); assert.equal(report.machine.powerAfter, report.machine.powerBefore);
     assert.equal(report.scenarios.length, 6); assert(report.scenarios.every(row => row.state === 'verified'));
+    await svc.verifyAdditionalEvidence?.(report);
     if (retained) { retained.verifyEvidence(); assert.equal(hashFile(borrowClaim.path), borrowClaim.sha256); }
     if (remaining) { remaining.verifyEvidence(); remaining.verifyHomes(); assert.equal(hashFile(remainingClaim.path), remainingClaim.sha256); }
     report.finalIntegrityVerified = true; report.state = 'source_pack_scenarios_observed'; baseSuccess = true;
@@ -912,11 +920,12 @@ export async function runController(config, overrides = {}) {
   }
   return report;
 }
-export function verifyObservedReport(run, report, request, inputs, resumeCold = undefined, resumeRemaining = undefined, resumeGo = undefined) {
+export function verifyObservedReport(run, report, request, inputs, resumeCold = undefined, resumeRemaining = undefined, resumeGo = undefined, {layout = 'v11-pack2'} = {}) {
+  assert(['v11-pack2', 'v13-postcard'].includes(layout)); if (layout === 'v13-postcard') assert(!resumeCold && !resumeRemaining && !resumeGo, 'v13 has no historical continuation');
   assert(run.status === 0 && !run.error && run.handlesReaped); elapsed(run.proof);
   assert.equal(report?.state, 'source_pack_scenarios_observed'); assert.equal(report.finalIntegrityVerified, true); assert.equal(report.requiresOuterRetirement, false);
   assert.equal(report.performanceAcceptanceEvaluated, false); assert.equal(report.fullB01B07Acceptance, false); assert.equal(report.importedSamples, 0);
-  assert.deepEqual(report.request, request); assert.deepEqual(report.inputs, inputs); assert.equal(report.layout, 'v11-pack2'); assert.equal(report.productCommit, request.candidate.commit);
+  assert.deepEqual(report.request, request); assert.deepEqual(report.inputs, inputs); assert.equal(report.layout, layout); assert.equal(report.productCommit, request.candidate.commit);
   assert([resumeCold, resumeRemaining, resumeGo].filter(Boolean).length <= 1);
   if (resumeCold || resumeRemaining || resumeGo) assertHistoricalCandidate(request);
   if (resumeGo) { validateGoReference(resumeGo); assert.deepEqual(report.continuation?.reference, resumeGo); assert.equal(report.continuation.originalCallsReused, 5); assert.equal(report.continuation.freshColdCalls, 0); assert.equal(report.continuation.freshWarmCalls, 0); assert.equal(report.continuation.freshSingleGoCalls, 0); assert.equal(report.continuation.priorOuter, RETAINED_GO.outer); assert.equal(report.scenarios[2].go.proof.runId, RETAINED_GO.run); assert.equal(report.invocationAttempts.length, 7); assert(!report.invocationAttempts.some(row => row.caseId === 'single-content-change' && row.engine === 'go')); }
@@ -927,7 +936,7 @@ export function verifyObservedReport(run, report, request, inputs, resumeCold = 
   report.scenarios.forEach((row, i) => {
     assert.equal(row.state, 'verified'); assert.equal(row.factsEquivalent, true); assert.deepEqual(row.order, orderFor(i)); assert.equal(row.mode, CASES[i].mode);
     assert.equal(row.facts.documents, CASES[i].documents); assert.equal(row.facts.fullFieldsAndOrderEqual, true);
-    if (i > 1 || !(resumeRemaining || resumeGo)) { exact(row.facts.rustCustody, ['directory', 'catalog', 'catalogSHA256', 'candidate']); assert.deepEqual(row.facts.rustCustody.candidate, candidateIdentity(request.candidate)); digest(row.facts.rustCustody.catalogSHA256); assert.equal(row.facts.rustCustody.catalog, join(row.facts.rustCustody.directory, 'rust-custody.json')); exact(row.facts.goCustody, ['directory', 'catalog', 'catalogSHA256']); digest(row.facts.goCustody.catalogSHA256); }
+    if (i > 1 || !(resumeRemaining || resumeGo)) { exact(row.facts.rustCustody, ['directory', 'catalog', 'catalogSHA256', 'candidate']); assert.deepEqual(row.facts.rustCustody.candidate, candidateIdentity(request.candidate)); digest(row.facts.rustCustody.catalogSHA256); assert.equal(row.facts.rustCustody.catalog, join(row.facts.rustCustody.directory, layout === 'v13-postcard' ? 'postcard-custody.json' : 'rust-custody.json')); exact(row.facts.goCustody, ['directory', 'catalog', 'catalogSHA256']); digest(row.facts.goCustody.catalogSHA256); }
     for (const engine of ['go', 'rust']) { assert.equal(row[engine].valid, true); elapsed(row[engine].proof); if (i > 1) { assert(!variantHomes.has(row[engine].home)); variantHomes.add(row[engine].home); assert.notEqual(row[engine].home, report.scenarios[0][engine].home); } }
     if (i === 1) for (const engine of ['go', 'rust']) { assert.equal(row[engine].home, report.scenarios[0][engine].home); assert.equal(row[engine].warmReuse.verified, true); }
   });

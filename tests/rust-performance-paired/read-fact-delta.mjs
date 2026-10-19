@@ -6,6 +6,7 @@ import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 const RUST_LAYOUTS = Object.freeze({
+  'v13-postcard': {key: 'facts-layout-v13-postcard-1.1.3', generator: 'generator-v6', packed: true, postcard: true},
   // Same authenticated wire format as pack1; the caller must bind this new
   // grouping domain to the exact candidate source/artifact and index SHA.
   'v11-pack2': { key: 'facts-layout-v11-go323-generated-origins', generator: 'generator-v6', schema: 'lycheedev.source-facts.rust.v11', packed: true },
@@ -85,6 +86,7 @@ export function rustFactPath(home, document, rustLayout = 'v6') {
   return path.join(home, 'cache/source-facts-rust', `${key}.json`);
 }
 export function readRustFact(home, document, rustLayout = 'v6') {
+  if (RUST_LAYOUTS[rustLayout]?.postcard) throw new Error('Postcard requires the authenticated same-source batch exporter');
   const file = rustFactPath(home, document, rustLayout);
   const stat = fs.lstatSync(file);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 32 << 20) throw new Error('Invalid Rust fact file');
@@ -130,9 +132,10 @@ export function readRustFact(home, document, rustLayout = 'v6') {
   return {file, bytes: raw.length, fileSHA256: locator ? null : sha256(raw), ...(locator ? {record: locator, recordSHA256: sha256(raw)} : {}), factsSHA256: envelope.factsSHA256, facts: envelope.facts};
 }
 
-export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v6', rustIndexFile, expectedIndexSHA256, retainedGo = undefined, {captureSources = false, retainIndex = false} = {}) {
+export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v6', rustIndexFile, expectedIndexSHA256, retainedGo = undefined, {captureSources = false, retainIndex = false, postcardExport} = {}) {
   const layout = RUST_LAYOUTS[rustLayout];
   if (!layout) throw new Error(`Unsupported Rust facts layout: ${rustLayout}`);
+  if (!layout.postcard && postcardExport !== undefined) throw new Error('Historical Facts layout does not accept a Postcard exporter');
   const manifestFile = path.join(path.dirname(goRecords), 'manifest.json');
   // The formal sequential runner supplies authenticated immutable custody streams.
   // CLI calls use the original on-disk inputs; no configuration injects readers.
@@ -197,6 +200,9 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
     firstDifferences: [],
   };
   const goSources = new Map(), rustSources = [];
+  // Historical callers do not load the new test-exporter/owner dependencies.
+  const postcard = layout.postcard ? (await import('./read-fact-delta-postcard.mjs')).openPostcardFacts(postcardExport, {bytes: indexIdentity.rustIndexBytes, sha256: indexIdentity.rustIndexSHA256}, [...rustDocuments.values()]) : undefined;
+  try {
   for (const document of documents) {
     const extension = path.extname(document.path).toLowerCase();
     const generated = extension === '.lua'
@@ -205,7 +211,7 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
     const parser = manifest.summary.parser;
     const goKey = sha256(`${parser}\0${mode}\0${document.sha256}`);
     const goFile = path.join(goHome, 'source/v1/facts/files', parser, `${goKey}.json`);
-    const rust = readRustFact(rustHome, rustDocuments?.get(document.path) ?? document, rustLayout), rustFile = rust.file;
+    const rust = postcard ? await postcard.next(rustDocuments.get(document.path)) : readRustFact(rustHome, rustDocuments?.get(document.path) ?? document, rustLayout), rustFile = rust.file;
     const goRaw = retainedGo ? retainedGo.readFact(goFile) : fs.readFileSync(goFile);
     if (captureSources) {
       const source = {file: goFile, bytes: goRaw.length, sha256: sha256(goRaw)}, previous = goSources.get(goFile);
@@ -273,6 +279,8 @@ export async function readFactDelta(goHome, rustHome, goRecords, rustLayout = 'v
     }
     if (difference.exactRowsDiffer.length) report.differentFiles.push(difference);
   }
+  if (postcard) await postcard.finish();
+  } finally { if (postcard) await postcard.close(); }
   for (const field of ['declarations', 'relationships', 'diagnostics']) {
     if (report.totals.go[field] !== manifest.summary[field]) {
       throw new Error(`Go facts total differs from sealed summary: ${field}`);
