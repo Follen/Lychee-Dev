@@ -1,5 +1,9 @@
 # Rust 迁移交接：唯一当前事实来源
 
+### Source 二进制测试空余字节断言类型修复（2026-10-19）
+
+2b400实际all-targets继续失败：facts/binary/tests.rs的空slice相等断言触发E0282/E0283（u8与serde_json::Value的PartialEq使空数组元素类型歧义）。此前generation结果闭包错误未再出现，但整check仍未通过；后13组全部NOT_RUN。owner已回收，无deadline，未认定正常辅助进程forced收尾保留。本后继仅将同一finalize().unwrap()返回的&[u8]断言改为is_empty()，仍严格要求零余字节，不改生产代码、解码/认证或测试覆盖目的。已扫描新增相关测试的同类空slice断言；静态复核/语法检查不等于实际编译，本后继仍待Windows验证。
+
 ### Data generation 类型推断编译修复（2026-10-19）
 
 6ea实际offline all-targets已越过此前SymbolHashWriter错误，但在generation/application.rs发布后结果闭包报E0282；后13组仍全部NOT_RUN，包含SYM与Live回归。owner已回收，无deadline，未认定正常辅助进程的forced收尾保留。本后继仅为该闭包显式标注现有Core Result<Outcome>，固定ToolkitError类型供map_err保留已发布对象事实，不改任何分支、错误内容、资源准入或发布/close顺序。邻近同类闭包已静态检查；独立复核与语法检查不能替代编译，本后继check及全部运行回归仍NOT_RUN。

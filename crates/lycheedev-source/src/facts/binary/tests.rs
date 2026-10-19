@@ -140,7 +140,7 @@ fn valid_wire_charges_owned_capacities_and_stops_inside_the_seed() {
         MAX_OWNED - context.remaining,
         rows.capacity() * size_of::<String>() + rows.iter().map(String::capacity).sum::<usize>()
     );
-    assert_eq!(deserializer.finalize().unwrap(), &[]);
+    assert!(deserializer.finalize().unwrap().is_empty());
     control.tracked_cancel_handle().unwrap().cancel();
     let mut deserializer = postcard::Deserializer::from_bytes(&payload);
     assert!(Vec::<String>::decode(&mut deserializer, &mut context).is_err());

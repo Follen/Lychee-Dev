@@ -1,5 +1,8 @@
 - [x] Fixed f811 Data projection: check and71 targeted Rust tests passed, including16 new tests once; no full-workspace or performance acceptance claim.
 
+- [x] 最小修复2b400实际Source测试E0282/E0283：finalize结果改is_empty，保持零余字节完整断言，生产未变；原check失败/13组NOT_RUN保留。
+- [ ] 固定该断言修复后check成功才跑原13组；云Windows-target编译能力单独准备，不将语法检查或cross-check当Windows运行。
+
 - [x] 定位并最小修复6ea实际E0282：Data generation发布后闭包显式Core Result<Outcome>，仅类型标注、不改变业务/错误/close。原6ea失败及13组NOT_RUN保留。
 - [ ] 固定类型修复后再次all-targets，成功才执行原Core/Data/Source/CLI及Live定向队列；不得把HashWriter错误消失算完整编译通过。
 
