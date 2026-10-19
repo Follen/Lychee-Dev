@@ -1554,7 +1554,12 @@ fn dispatch_formal_entry_with(
         Err(error) => formal_live::Response::failure(command_fault(inv, error)),
     })
 }
-fn main() {
+// Stable ExitCode represents u8 statuses. Keep wider statuses intact for the
+// existing process::exit fallback rather than silently truncating them.
+fn normal_exit_code(code: i32) -> std::result::Result<std::process::ExitCode, i32> {
+    u8::try_from(code).map(std::process::ExitCode::from).map_err(|_| code)
+}
+fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args
         .first()
@@ -1702,7 +1707,10 @@ fn main() {
     }
     let exit = result.err().map(|e| e.exit_code).unwrap_or(0);
     drop(console);
-    std::process::exit(exit);
+    // The ordinary result and console registration are already retired. Return
+    // through the CRT so its atexit callbacks (including LLVM profile writing)
+    // run on Windows; do not change the early exits' local-drop behavior.
+    normal_exit_code(exit).unwrap_or_else(|code| std::process::exit(code))
 }
 
 #[cfg(test)]
@@ -1710,6 +1718,23 @@ mod project_tests;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn normal_exit_code_returns_every_portable_status_unchanged() {
+        for code in 0..=u8::MAX {
+            assert_eq!(
+                super::normal_exit_code(i32::from(code)),
+                Ok(std::process::ExitCode::from(code)),
+            );
+        }
+    }
+
+    #[test]
+    fn normal_exit_code_preserves_full_width_fallback_status() {
+        for code in [i32::MIN, -256, -1, 256, 257, i32::MAX] {
+            assert_eq!(super::normal_exit_code(code), Err(code));
+        }
+    }
+
     #[test]
     fn target_dispatch_preserves_invocation_cancellation_and_deadline() {
         use std::{sync::{Arc, atomic::AtomicBool}, time::{Duration, Instant}};

@@ -1,6 +1,14 @@
 # Rust 迁移交接：唯一当前事实来源
 
-更新：2026-10-19 07:50 UTC。当前已验证生产为 `d4271ae430ac2a80087af81c70eea960d547acbb`，分支 `rust-refactor`、草稿 PR #14。下列为非敏感结果摘要；本机原始日志未随文档发布。Stage2与完整性能验收仍未完成。
+更新：2026-10-19 08:12 UTC。当前已验证生产为 `d4271ae430ac2a80087af81c70eea960d547acbb`，分支 `rust-refactor`、草稿 PR #14。下列为非敏感结果摘要；本机原始日志未随文档发布。Stage2与完整性能验收仍未完成。
+
+### CLI companion 第二次Windows采集：子进程执行证据尚未写出（e81）
+
+固定e81的Node为155通过/0失败/1个真实file-symlink EPERM跳过；原Source inspect exact为1通过/0失败/0忽略，其四次公开CLI断言全部执行。Cargo、merge和三次export均成功；对象证据准入修复已越过原77df阻断。test-only映射315文件且无main，companion-only552文件，combined553文件并集核对正确，但companion与combined的main均为0/1563。仅观察到测试根进程的一份profraw，collector正确拒绝缺失执行witness；不能称完整采集成功。
+
+原预算内两个对象、raw、merged和最终证据均完成准入。三个owner回收、十三native均0，一个forced为已审核辅助进程，deadline及最终lease/活动进程均0。旧77df失败保留；本轮未观察到CLI子profile的原因尚待修后实际验证。
+
+固定Rust1.99.0的Windows退出实现直接调用ExitProcess，而LLVM23.1.1的静态profile runtime通过CRT atexit注册写出；精确fixture没有清理继承环境，普通CLI终点调用process::exit。这构成退出刷新缺失的源码解释，不是本机运行时根因的独立证明。最窄后继已实现普通终点自然返回：保原Result消费、console显式释放，0..255无损返回ExitCode，其余i32原样走既有exit；其他11个早退出口不变。独审核普通局部仅容器/控制状态，stdout锁释放后两路径使用同一runtime cleanup；不声称原ExitProcess完全不执行TLS或新路径保证所有线程析构。新增2个完整返回码边界单测及3个真实公开CLI回归（默认help/version/大describe成功、参数错误2、workspace错误4与磁盘不变）。新Rust测试尚未执行；原四CLI断言与非零main witness仍须实际验证。Stage2仍未结束。
 
 ### CLI companion 首次Windows采集：对象文件限额误用（77df）
 
@@ -8,7 +16,7 @@
 
 三个owner回收、八native均0；一个forced为已审核辅助进程，deadline/lease/活动进程均0。源码定位为artifact选择及通用archive validation沿用了RAW_LIMIT作为对象大小限制；hash/copy本身已是64KiB流式。后继只分离对象证据准入与raw/merged限制，累计evidence256MiB及其metadata保留、raw+merged128MiB与16MiB分片保持；双对象和后续profiles是否装得下仍需实际验证。原失败保留，不改优化级别或裁剪符号。 新companion模式使用显式object类v2分片：单件理论上限由原256MiB总额扣16MiB保留得到，复制前仍按双对象及全部已有/待复制日志累计准入；旧默认单对象与raw/merged的v1≤128MiB不变。真实同次test对象42493440B，两对象合计192172032B，扣已有证据和保留空间后的56325482B仅是当时余额，不保证未来profiles/merged/exports都能容纳。
 
-最终cloud coverage/build/disk Node156通过/0失败/0跳过（143+8+5，本批新增10），包含真实双对象尺寸、超过128MiB的两个对象角色、kind伪装、actual remaining恰好/越界与真实pair加60MiB raw仍拒绝保全的反例。语法/diff检查通过；Windows后继采集尚未运行，原77df失败不改标。
+最终cloud coverage/build/disk Node156通过/0失败/0跳过（143+8+5，本批新增10），包含真实双对象尺寸、超过128MiB的两个对象角色、kind伪装、actual remaining恰好/越界与真实pair加60MiB raw仍拒绝保全的反例。语法/diff检查通过；该后继e81已实际越过对象准入，随后因main执行witness为零失败，见上节；原77df失败不改标。
 
 ### Stage2 既有覆盖率证据范围复核（2026-10-19）
 
@@ -18,7 +26,7 @@
 
 按原目标顺序，src/tests路径数：Core capture_dependencies、budgeted_capture、capture_query_references均93/1；Data sql_csv_parity、sql_lazy_provider_parity为236/2，relational_parity236/1，sql_explain_parity236/2；Source source_inspect、flow_parity均313/1；Live mailbox_lookup182/1；Delivery slot_maintenance109/1、release_control108/1。src也含内嵌测试/宏，不称纯生产分母；Source名为generated的模块是手写代码，不按名字排除。各映射集合不同，不相加/平均百分比。唯一ignore为linked_static_slot_member_is_rejected_without_following_it，权限边界尚未执行。
 
-下一最窄工具片为同一次成功Cargo调用认证的integration+声明CLI双对象，默认单对象保持；首验保留现有Source inspect raw-admission完整测试的四次CLI调用。工具实现已完成，最终cloud coverage/build/disk三个Node suite实际146通过/0失败/0跳过，其中coverage133（原63+新增70）、build8、disk5。回归包括同流对象选择、默认兼容、双对象累计准入、严格映射及故障保全；非作者审查发现对象变更与lookup污染双故障会短路终态检查，已拆开独立检查并补组合反例。Windows实际双对象采集仍NOT_RUN，Node模拟不证明本机LLVM产物规模适配。原600秒、raw+merged128MiB、累计evidence256MiB和16MiB分片不变，实际超限不删case或自动扩大预算。目标只补该invocation的两个对象映射，不能证明每个子进程profile均完整，也不是全仓覆盖率。Stage2、完整Skill/压力/实机及70%性能目标仍待。
+下一最窄工具片为同一次成功Cargo调用认证的integration+声明CLI双对象，默认单对象保持；首验保留现有Source inspect raw-admission完整测试的四次CLI调用。工具实现已完成，最终cloud coverage/build/disk三个Node suite实际146通过/0失败/0跳过，其中coverage133（原63+新增70）、build8、disk5。回归包括同流对象选择、默认兼容、双对象累计准入、严格映射及故障保全；非作者审查发现对象变更与lookup污染双故障会短路终态检查，已拆开独立检查并补组合反例。后续77df/e81实际结果见首节；双对象完整采集仍未成功，Node模拟不代替Windows证据。原600秒、raw+merged128MiB、累计evidence256MiB和16MiB分片不变，实际超限不删case或自动扩大预算。目标只补该invocation的两个对象映射，不能证明每个子进程profile均完整，也不是全仓覆盖率。Stage2、完整Skill/压力/实机及70%性能目标仍待。
 
 ### DBCD 四项确认修复已有红绿回归（2026-10-19）
 
