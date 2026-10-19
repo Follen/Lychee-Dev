@@ -326,36 +326,7 @@ fn text(
             "identity text exceeds byte bound",
         ));
     }
-    control.charge(MetadataCost {
-        allocation_bytes: (maximum as u64 + 1) * 3,
-        work_units: (maximum as u64 + 1) * 4,
-        ..MetadataCost::default()
-    })?;
-    let mut raw = vec![0; maximum + 1];
-    let mut used = 0;
-    while used < raw.len() {
-        let end = (used + 65536).min(raw.len());
-        control.charge(MetadataCost {
-            io_operations: 1,
-            read_calls: 1,
-            requested_bytes: (end - used) as u64,
-            ..MetadataCost::default()
-        })?;
-        let count = file.read(&mut raw[used..end])?;
-        control.check()?;
-        if count == 0 {
-            break;
-        }
-        used += count;
-    }
-    raw.truncate(used);
-    if raw.len() > maximum {
-        return Err(metadata_text_error(
-            name,
-            true,
-            "identity text exceeds byte bound",
-        ));
-    }
+    let raw = read_text_bytes(&mut file, name, maximum, control)?;
     if info.len() != raw.len() as u64 {
         return Err(bare_identity_error());
     }
@@ -375,6 +346,55 @@ fn text(
     }
     .into())
 }
+// Keep one authenticated file handle. The separate helper only makes bounded
+// read/admission ordering testable without changing identity or freshness checks.
+fn read_text_bytes(
+    file: &mut impl Read,
+    name: &str,
+    maximum: usize,
+    control: &mut impl MetadataControl,
+) -> Result<Vec<u8>> {
+    control.charge(MetadataCost {
+        allocation_bytes: (maximum as u64 + 1) * 3,
+        // The entire buffer is actually zero-initialized below. Only this
+        // pass visits unused capacity; text validation/conversion visits the
+        // bounded bytes read, admitted separately before each read.
+        work_units: maximum as u64 + 1,
+        ..MetadataCost::default()
+    })?;
+    let mut raw = vec![0; maximum + 1];
+    let mut used = 0;
+    while used < raw.len() {
+        let end = (used + 65536).min(raw.len());
+        control.charge(MetadataCost {
+            io_operations: 1,
+            read_calls: 1,
+            requested_bytes: (end - used) as u64,
+            // At most three byte passes after reading: catalog NUL + UTF-8
+            // validation + output copy, or UTF-8 + trim + output copy for
+            // identity text. Charge the requested extent before IO, including
+            // short reads and the EOF probe. No work is refunded on failure.
+            work_units: (end - used) as u64 * 3,
+            ..MetadataCost::default()
+        })?;
+        let count = file.read(&mut raw[used..end])?;
+        control.check()?;
+        if count == 0 {
+            break;
+        }
+        used += count;
+    }
+    raw.truncate(used);
+    if raw.len() > maximum {
+        return Err(metadata_text_error(
+            name,
+            true,
+            "identity text exceeds byte bound",
+        ));
+    }
+    Ok(raw)
+}
+
 fn flavor(
     root: &Directory,
     control: &mut impl MetadataControl,
@@ -952,6 +972,8 @@ mod tests {
     struct Meter {
         cost: MetadataCost,
         reads: Vec<u64>,
+        read_work: Vec<u64>,
+        allocations: Vec<(u64, u64)>,
         deny_read: bool,
         cancel: bool,
     }
@@ -968,6 +990,10 @@ mod tests {
             self.cost.work_units += c.work_units;
             if c.read_calls > 0 {
                 self.reads.push(c.requested_bytes);
+                self.read_work.push(c.work_units);
+            }
+            if c.allocation_bytes != 0 {
+                self.allocations.push((c.allocation_bytes, c.work_units));
             }
             Ok(())
         }
@@ -979,6 +1005,120 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn text_read_work_is_admitted_before_io_and_preserves_primary_failure() {
+        struct Reads(usize);
+        impl Read for Reads {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                self.0 += 1;
+                Err(std::io::Error::other("fixture.read_failed"))
+            }
+        }
+        let mut reader = Reads(0);
+        let mut meter = Meter {
+            deny_read: true,
+            ..Meter::default()
+        };
+        assert_eq!(
+            read_text_bytes(&mut reader, ".build.info", 1 << 20, &mut meter)
+                .unwrap_err()
+                .message,
+            "fixture.read_budget"
+        );
+        assert_eq!(reader.0, 0);
+        assert_eq!(meter.cost.read_calls, 0);
+        meter.deny_read = false;
+        let error = read_text_bytes(&mut reader, ".build.info", 1 << 20, &mut meter).unwrap_err();
+        assert!(error.to_string().contains("fixture.read_failed"));
+        assert_eq!(reader.0, 1);
+        assert_eq!(meter.read_work, vec![3 * 65536]);
+        meter.cancel = true;
+        assert_eq!(
+            read_text_bytes(&mut reader, ".build.info", 1 << 20, &mut meter)
+                .unwrap_err()
+                .message,
+            "fixture.cancelled"
+        );
+        assert_eq!(reader.0, 1);
+    }
+
+    #[test]
+    fn text_read_sentinel_rejects_growth_and_cancellation_stops_after_current_read() {
+        const MAXIMUM: usize = 140_000;
+        let mut grown = std::io::Cursor::new(vec![b'x'; MAXIMUM + 1]);
+        let mut meter = Meter::default();
+        let error = read_text_bytes(&mut grown, ".build.info", MAXIMUM, &mut meter).unwrap_err();
+        assert_eq!(error.code, "records.metadata_limit");
+        assert_eq!(grown.position(), (MAXIMUM + 1) as u64);
+        assert_eq!(
+            meter.read_work.iter().sum::<u64>(),
+            (MAXIMUM as u64 + 1) * 3
+        );
+        struct CancelAfterRead {
+            read_started: bool,
+        }
+        impl MetadataControl for CancelAfterRead {
+            fn charge(&mut self, cost: MetadataCost) -> Result<()> {
+                self.check()?;
+                if cost.read_calls > 0 {
+                    assert_eq!(cost.work_units, cost.requested_bytes * 3);
+                    self.read_started = true;
+                }
+                Ok(())
+            }
+            fn check(&mut self) -> Result<()> {
+                if self.read_started {
+                    Err(identity_error("fixture.cancelled"))
+                } else {
+                    Ok(())
+                }
+            }
+        }
+        let mut reader = std::io::Cursor::new(vec![b'x'; MAXIMUM]);
+        let error = read_text_bytes(
+            &mut reader,
+            ".build.info",
+            MAXIMUM,
+            &mut CancelAfterRead {
+                read_started: false,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.message, "fixture.cancelled");
+        assert_eq!(reader.position(), 65536);
+    }
+
+    #[test]
+    fn text_work_admits_initialization_and_actual_read_extents_separately() {
+        const MAXIMUM: usize = 1 << 20;
+        let fixture = Fixture::new();
+        // Small, exact-limit, and multi-chunk bodies all use the same public
+        // cap. Test text directly so catalog parsing does not obscure costs.
+        for length in [0, 257, 140_000, MAXIMUM] {
+            let bytes = vec![b'x'; length];
+            fs::write(fixture.0.join(".build.info"), &bytes).unwrap();
+            let root = Directory::open(&fixture.0).unwrap();
+            let mut meter = Meter::default();
+            let actual = text(&root, ".build.info", MAXIMUM, &mut meter).unwrap();
+            assert_eq!(actual.as_bytes(), bytes);
+            assert!(
+                meter
+                    .allocations
+                    .contains(&((MAXIMUM as u64 + 1) * 3, MAXIMUM as u64 + 1,))
+            );
+            let expected_reads = length.div_ceil(65536) + 1;
+            assert_eq!(meter.reads.len(), expected_reads);
+            for (request, work) in meter.reads.iter().zip(&meter.read_work) {
+                assert!(*request > 0 && *request <= 65536);
+                assert_eq!(*work, *request * 3);
+            }
+            if length > 0 && length < 65536 {
+                // No phantom 3 MiB scan over unused initialized capacity.
+                assert_eq!(meter.read_work.iter().sum::<u64>(), 6 * 65536);
+            }
+        }
+    }
+
     #[test]
     fn controlled_parent_catalog_inspection_is_metered_and_fresh() {
         let fixture = Fixture::new();

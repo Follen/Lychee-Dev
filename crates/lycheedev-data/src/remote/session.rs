@@ -368,8 +368,31 @@ impl<'a, 'scope> Session<'a, 'scope> {
     }
     fn prepare_ready(&mut self) -> Result<()> {
         self.check()?;
-        if self.prepared.is_some() {
-            return Ok(());
+        if let Some(prepared) = &self.prepared {
+            // Prepared Root owns authenticated immutable bytes, independently
+            // of its rebuildable disk copy. Later payload/config publications
+            // inventory all attributed bodies, so restore this exact missing
+            // Root before they run. The stat is only a missing-body hint: Core
+            // revalidates SHA/length, attribution, quota peak and the canonical
+            // blob lease, and rejects an existing corrupt concurrent winner.
+            // The ordinary warm path never rereads/hashes the Root body.
+            let path = evidence::blob_path(self.admitted.home(), &prepared.root.blob.sha256)?;
+            match std::fs::symlink_metadata(path) {
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    self.files
+                        .as_ref()
+                        .expect("prepared files")
+                        .store
+                        .rebuild_blob(
+                            &prepared.root.content.bytes,
+                            self.options.metadata_bytes,
+                            &prepared.root.blob,
+                        )?;
+                }
+                Err(error) => return Err(ToolkitError::io(error)),
+            }
+            return self.check();
         }
         let admitted = self.admitted;
         let budget = self.budget;

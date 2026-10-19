@@ -203,3 +203,147 @@ fn files_counter_deltas_sum_real_preparation_and_selected_reads_once() {
     admission.finish(Ok(())).unwrap();
     std::fs::remove_dir_all(f.home).unwrap();
 }
+
+#[test]
+fn missing_prepared_root_is_exactly_rebuilt_without_replacing_owner_or_attribution() {
+    let f = Fixture::new();
+    let mut admission = f.admission();
+    let mut session = Session::borrowed_with(
+        &mut admission,
+        &f.pin,
+        f.options(),
+        &f.budget,
+        &f.backend,
+        &f.backend,
+    )
+    .unwrap();
+    session.read_batches(&[7], &mut |_| Ok(vec![])).unwrap();
+    let prepared = session.prepared.as_ref().unwrap();
+    let root_pointer = Arc::as_ptr(&prepared.root.content);
+    let reference = prepared.root.blob.clone();
+    let path = evidence::blob_path(&f.home, &reference.sha256).unwrap();
+    let original = std::fs::read(&path).unwrap();
+    let ownership =
+        lycheedev_core::workspace::data_disk::DataCachePaths::new(&f.home).shared_blobs();
+    let intent_path = ownership.join(format!("{}.intent", reference.sha256));
+    let complete_path = ownership.join(format!("{}.complete", reference.sha256));
+    let intent = std::fs::read(&intent_path).unwrap();
+    let complete = std::fs::read(&complete_path).unwrap();
+    let requests = f.budget.snapshot().unwrap().network_requests;
+    let metadata = f.budget.logical_snapshot().unwrap().metadata_bytes;
+    std::fs::remove_file(&path).unwrap();
+    // Direct selection works even before disk repair, proving immutable ownership.
+    let entries = prepared.root_index.lookup(7, || session.check()).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].content_key, hash(&f.payload));
+    session
+        .read_batches(&[7], &mut |files| {
+            assert_eq!(files[0].bytes(), f.payload);
+            assert_eq!(files[0].reading["root"]["sha256"], reference.sha256);
+            assert_eq!(files[0].reading["decodedCache"]["contentDecodeCalls"], 0);
+            assert_eq!(files[0].reading["decodedCache"]["blobReads"], 0);
+            Ok(vec![])
+        })
+        .unwrap();
+    assert_eq!(
+        Arc::as_ptr(&session.prepared.as_ref().unwrap().root.content),
+        root_pointer
+    );
+    assert_eq!(std::fs::read(path).unwrap(), original);
+    assert_eq!(std::fs::read(intent_path).unwrap(), intent);
+    assert_eq!(std::fs::read(complete_path).unwrap(), complete);
+    assert!(
+        !ownership
+            .join(format!("{}.repair.intent", reference.sha256))
+            .exists()
+    );
+    assert_eq!(f.budget.snapshot().unwrap().network_requests, requests);
+    assert_eq!(
+        f.budget.logical_snapshot().unwrap().metadata_bytes,
+        metadata
+    );
+    session.close().unwrap();
+    admission.finish(Ok(())).unwrap();
+    std::fs::remove_dir_all(f.home).unwrap();
+}
+
+#[test]
+fn prepared_root_repair_rejects_wrong_pair_budget_cancel_and_existing_wrong_length() {
+    for case in ["wrong-pair", "budget", "cancel", "wrong-length"] {
+        let f = Fixture::new();
+        let mut admission = f.admission();
+        let mut session = Session::borrowed_with(
+            &mut admission,
+            &f.pin,
+            f.options(),
+            &f.budget,
+            &f.backend,
+            &f.backend,
+        )
+        .unwrap();
+        session.read_batches(&[7], &mut |_| Ok(vec![])).unwrap();
+        let reference = session.prepared.as_ref().unwrap().root.blob.clone();
+        let path = evidence::blob_path(&f.home, &reference.sha256).unwrap();
+        let ownership =
+            lycheedev_core::workspace::data_disk::DataCachePaths::new(&f.home).shared_blobs();
+        let intent_path = ownership.join(format!("{}.intent", reference.sha256));
+        let complete_path = ownership.join(format!("{}.complete", reference.sha256));
+        if case == "wrong-length" {
+            std::fs::write(&path, b"bad").unwrap();
+        } else {
+            std::fs::remove_file(&path).unwrap();
+        }
+        let expected = match case {
+            "wrong-pair" => {
+                std::fs::write(&complete_path, [0; 32]).unwrap();
+                "vault.data_shared_blob_integrity"
+            }
+            "budget" => {
+                let mut config = lycheedev_core::workspace::default_config();
+                config["dataCache"]["maxBytes"] = serde_json::json!(1);
+                storage::atomic_json(&f.home.join("config.json"), &config).unwrap();
+                "vault.data_cache_budget_exceeded"
+            }
+            "cancel" => {
+                f.control.tracked_cancel_handle().unwrap().cancel();
+                "command.cancelled"
+            }
+            "wrong-length" => "vault.data_shared_blob_integrity",
+            _ => unreachable!(),
+        };
+        let intent = std::fs::read(&intent_path).unwrap();
+        let complete = std::fs::read(&complete_path).unwrap();
+        let requests = f.budget.snapshot().unwrap().network_requests;
+        let error = session
+            .read_batches(&[7], &mut |_| {
+                panic!("failed Root recovery must not deliver")
+            })
+            .unwrap_err();
+        assert_eq!(error.code, expected, "{case}");
+        assert_eq!(std::fs::read(intent_path).unwrap(), intent, "{case}");
+        assert_eq!(std::fs::read(complete_path).unwrap(), complete, "{case}");
+        assert!(
+            !ownership
+                .join(format!("{}.repair.intent", reference.sha256))
+                .exists(),
+            "{case}"
+        );
+        if case == "wrong-length" {
+            assert_eq!(std::fs::read(path).unwrap(), b"bad");
+        } else {
+            assert!(!path.exists(), "{case}");
+        }
+        if case == "cancel" {
+            assert_eq!(session.close().unwrap_err().code, "command.cancelled");
+            assert_eq!(
+                admission.finish(Ok(())).unwrap_err().code,
+                "command.cancelled"
+            );
+        } else {
+            assert_eq!(f.budget.snapshot().unwrap().network_requests, requests);
+            session.close().unwrap();
+            admission.finish(Ok(())).unwrap();
+        }
+        std::fs::remove_dir_all(f.home).unwrap();
+    }
+}

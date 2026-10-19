@@ -56,9 +56,15 @@ pub(super) fn context(
                 .with_target_partitions(1)
                 .with_batch_size(batch_rows),
         )
-        .with_expr_planners(vec![Arc::new(numeric::NumericPlanner {
-            owner: owner.clone(),
-        })])
+        // Registering COUNT's UDAF alone does not lower SQL COUNT(*) in
+        // DataFusion 54. Keep its upstream aggregate planner without enabling
+        // unrelated default functions, file formats, or table factories.
+        .with_expr_planners(vec![
+            Arc::new(numeric::NumericPlanner {
+                owner: owner.clone(),
+            }),
+            Arc::new(datafusion::functions_aggregate::planner::AggregateFunctionPlanner),
+        ])
         .with_aggregate_functions(functions)
         .build();
     Ok((SessionContext::new_with_state(state), owner))

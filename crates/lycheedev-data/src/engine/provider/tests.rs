@@ -106,10 +106,10 @@ async fn sql(
                 .with_allow_statements(false),
         )
         .await
-        .unwrap()
+        .unwrap_or_else(|error| panic!("SQL planning failed for {query:?}: {error}"))
         .execute_stream()
         .await
-        .unwrap();
+        .unwrap_or_else(|error| panic!("SQL execute_stream failed for {query:?}: {error}"));
     snapshot
         .collect_result(
             stream,
@@ -121,7 +121,7 @@ async fn sql(
             },
         )
         .await
-        .unwrap()
+        .unwrap_or_else(|error| panic!("SQL collect_result failed for {query:?}: {error}"))
 }
 fn scalar_rows(output: &QualifiedResult) -> Vec<Vec<Scalar>> {
     output
@@ -343,6 +343,21 @@ async fn partial_source_empty_lookup_and_count_never_establish_absence_or_comple
     let count = sql(&context, &snapshot, &owner, "SELECT count(*) FROM t").await;
     assert_eq!(scalar_rows(&count), vec![vec![Scalar::Int(1)]]);
     assert!(!count.complete());
+    let column_count = sql(&context, &snapshot, &owner, "SELECT count(\"ID\") FROM t").await;
+    assert_eq!(scalar_rows(&column_count), vec![vec![Scalar::Int(1)]]);
+    assert!(!column_count.complete());
+    let empty_count = sql(
+        &context,
+        &snapshot,
+        &owner,
+        "SELECT count(*), count(\"ID\") FROM t WHERE \"ID\" = 2",
+    )
+    .await;
+    assert_eq!(
+        scalar_rows(&empty_count),
+        vec![vec![Scalar::Int(0), Scalar::Int(0)]]
+    );
+    assert!(!empty_count.complete());
     let identity = serde_json::to_value(snapshot.identity().unwrap()).unwrap();
     assert_eq!(identity["complete"], false);
     assert_eq!(identity["missing"][0]["keyID"], "1234567890abcdef");
@@ -356,7 +371,97 @@ async fn partial_source_empty_lookup_and_count_never_establish_absence_or_comple
         64
     );
     assert_eq!(snapshot.batches[0].ids.values().as_ref(), &[1]);
-    drop((absent, count, context, owner, snapshot));
+    drop((
+        absent,
+        count,
+        column_count,
+        empty_count,
+        context,
+        owner,
+        snapshot,
+    ));
+    fs::remove_dir_all(fx.root).unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn authenticated_provider_sql_count_preserves_null_empty_and_owner_contracts() {
+    let mut spec = spec();
+    spec.dbd = spec.dbd.replace("\n\nBUILD", "\nint Parent\n\nBUILD");
+    spec.dbd.push_str("$noninline,relation$Parent\n");
+    let fx = Fixture::new(&[spec]);
+    let budget = budget();
+    let snapshot = prepare(&fx, &budget);
+    let (context, owner) = register(&snapshot, budget.clone(), 1);
+    let counts = sql(
+        &context,
+        &snapshot,
+        &owner,
+        "SELECT count(*), count(value), count(\"Parent\") FROM t",
+    )
+    .await;
+    assert_eq!(
+        scalar_rows(&counts),
+        vec![vec![Scalar::Int(3), Scalar::Int(3), Scalar::Int(0)]]
+    );
+    assert!(counts.complete());
+    assert_eq!(counts.records()[0].schema().field(0).name(), "count(*)");
+    let empty = sql(
+        &context,
+        &snapshot,
+        &owner,
+        "SELECT count(*), count(value), count(\"Parent\") FROM t WHERE \"ID\" = 99",
+    )
+    .await;
+    assert_eq!(
+        scalar_rows(&empty),
+        vec![vec![Scalar::Int(0), Scalar::Int(0), Scalar::Int(0)]]
+    );
+    assert!(empty.complete());
+    drop((empty, context, owner, snapshot));
+    assert!(budget.refundable_retained_bytes() > 0);
+    assert_eq!(scalar_rows(&counts)[0][0], Scalar::Int(3));
+    drop(counts);
+    assert_eq!(budget.refundable_retained_bytes(), 0);
+    fs::remove_dir_all(fx.root).unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn authenticated_provider_sql_count_still_enforces_output_byte_bound() {
+    let fx = Fixture::new(&[spec()]);
+    let budget = budget();
+    let snapshot = prepare(&fx, &budget);
+    let (context, owner) = register(&snapshot, budget.clone(), 1);
+    let stream = context
+        .sql_with_options(
+            "SELECT count(*) FROM t",
+            SQLOptions::new()
+                .with_allow_ddl(false)
+                .with_allow_dml(false)
+                .with_allow_statements(false),
+        )
+        .await
+        .unwrap()
+        .execute_stream()
+        .await
+        .unwrap();
+    let result = snapshot
+        .collect_result(
+            stream,
+            owner.clone(),
+            OutputLimits {
+                rows: 1,
+                batches: 1,
+                bytes: 1,
+            },
+        )
+        .await;
+    let failure = match result {
+        Ok(_) => panic!("COUNT output must not bypass the admitted byte bound"),
+        Err(failure) => failure,
+    };
+    assert_eq!(error(failure).code, "records.query_resource_budget");
+    drop((context, owner, snapshot));
+    assert_eq!(budget.refundable_retained_bytes(), 0);
     fs::remove_dir_all(fx.root).unwrap();
 }
 

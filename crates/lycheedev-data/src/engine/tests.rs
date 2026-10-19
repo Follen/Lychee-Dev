@@ -36,16 +36,24 @@ fn configured_partitions(partitions: usize) -> (SessionContext, Arc<QueryOwner>)
     let owner = QueryOwner::new(budget());
     // Empty state has no file formats, external-table factories, table
     // functions, or ordinary SUM/AVG implementations to fall back to.
+    let mut functions = aggregate::functions(&owner);
+    functions.push(datafusion::functions_aggregate::count::count_udaf());
     let state = SessionStateBuilder::new()
         .with_config(
             SessionConfig::new()
                 .with_target_partitions(partitions)
                 .with_batch_size(64),
         )
-        .with_expr_planners(vec![Arc::new(numeric::NumericPlanner {
-            owner: owner.clone(),
-        })])
-        .with_aggregate_functions(aggregate::functions(&owner))
+        // Registering COUNT's UDAF alone does not lower SQL COUNT(*) in
+        // DataFusion 54. Keep its upstream aggregate planner without enabling
+        // unrelated default functions, file formats, or table factories.
+        .with_expr_planners(vec![
+            Arc::new(numeric::NumericPlanner {
+                owner: owner.clone(),
+            }),
+            Arc::new(datafusion::functions_aggregate::planner::AggregateFunctionPlanner),
+        ])
+        .with_aggregate_functions(functions)
         .build();
     (SessionContext::new_with_state(state), owner)
 }
@@ -491,5 +499,46 @@ async fn exact_mixed_integer_equality_retains_native_hash_join_plan() {
     assert_eq!(
         scalar_rows(&batches),
         vec![vec![Scalar::UInt(i64::MAX as u64)]]
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn upstream_sql_count_preserves_wildcard_nullable_and_empty_inputs() {
+    let (context, _owner) = configured();
+    register(
+        &context,
+        "t",
+        vec![(
+            "value",
+            Arc::new(Int64Array::from(vec![Some(i64::MIN), None, Some(i64::MAX)])),
+        )],
+    );
+    assert_eq!(
+        rows(
+            &context,
+            "SELECT count(*), count(value), count(DISTINCT value) FROM t"
+        )
+        .await,
+        vec![vec![Scalar::Int(3), Scalar::Int(2), Scalar::Int(2)]]
+    );
+    register(
+        &context,
+        "empty",
+        vec![(
+            "value",
+            Arc::new(Int64Array::from(Vec::<Option<i64>>::new())),
+        )],
+    );
+    assert_eq!(
+        rows(&context, "SELECT count(*), count(value) FROM empty").await,
+        vec![vec![Scalar::Int(0), Scalar::Int(0)]]
+    );
+    assert_eq!(
+        rows(
+            &context,
+            "SELECT count(*), count(value) FROM t WHERE value IS NULL"
+        )
+        .await,
+        vec![vec![Scalar::Int(1), Scalar::Int(0)]]
     );
 }

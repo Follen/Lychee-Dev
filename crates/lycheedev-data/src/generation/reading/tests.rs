@@ -757,6 +757,13 @@ fn cold_import_and_large_typed_rehit_fit_the_same_original_work_budget() {
     assert!(object_bytes.checked_mul(2).unwrap() > original_work_limit);
     let cold_work = first.data["resources"]["decodeWork"].as_u64().unwrap();
     assert!(cold_work >= u64::from(ROWS) * (WIDTH as u64 * 8 + 12));
+    // Admission must still include every decoded WDC element and every Arrow
+    // output byte. Fixing client metadata's unused-capacity scans must not
+    // exempt either real row pass or increase the original command allowance.
+    let wdc_row_work = u64::from(ROWS) * (WIDTH as u64 + 2);
+    let arrow_row_work = u64::from(ROWS) * (WIDTH as u64 * 8 + 12);
+    assert_eq!(wdc_row_work + arrow_row_work, 72_280_000);
+    assert!(cold_work >= wdc_row_work + arrow_row_work);
     assert!(cold_work <= original_work_limit);
     let object = object_path(&fx, &first);
     let manifest = manifest_path(&fx, &first);

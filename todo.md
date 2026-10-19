@@ -13,7 +13,7 @@
 - [x] 2d补官方flatbuffers许可证后新匹配release/assembly/exporter认证通过；19e旧装包失败保留。
 - [x] 666对2d原六场景封存结果只读复核exit0，sealed_complete_scenarios_reverified，52,494文件认证；产品/build/exporter新增0。原runner失败/finalIntegrity=false及六组wall保留；Node498通过/0失败/7权限skip，非全性能门禁。
 - [x] 10ed显式6GiB runner接线保存并完整readback；12套Node作者/独审各452/452；Windows实际447通过/0失败/5权限skip，原默认5GiB及其它限额保持。
-- [ ] ea58347c Data50的Core/Windows五组131项和Node11套121项实际全过、无skip；两check因测试部分移动paths的E0382失败，10组Data155尚未执行。e486单文件借用修已保存，正在复验两check及缺失Data组；94新增按实际所属组逐名计，不称全部通过。
+- [ ] ea58347c Data50的Core/Windows五组131项和Node11套121项实际全过、无skip；ea两check的E0382失败保留；e486借用修后两check通过，Data155实际152通过3失败0忽略（45新43通过2失败、110旧109通过1失败）。闭合Root缺体重用、cold导入工作计量和DF Wildcard三项真实失败；94新增按实际所属组逐名计，不称全部通过。
 - [x] 最终组合Node检查记录sourceTree并区分git archive导出与export-ignore范围；原隔离361/361不能代替最终组合树结果。
 
 - [x] CLI旧Go320元数据oracle已按固定Go323及明确新增更新，独立10项与10个物理坏例通过；最终组合11套Node121/121，无skip，非实际CLI任务验收。
