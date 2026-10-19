@@ -11,9 +11,9 @@
 - [x] Source 25新增Index测试逐名一次通过；source_inspect15、flow4与正式认证luac真实ignored用例1通过。
 - [x] 19e all-targets及67项定向回归全通过，原23失败闭合；不是全仓/性能通过。
 - [x] 2d补官方flatbuffers许可证后新匹配release/assembly/exporter认证通过；19e旧装包失败保留。
-- [ ] 2d六场景逐项完整Facts/Index/custody通过，但末尾owner receipt读取预算失败；修验证器并对原封存结果只读复核，原finalIntegrity=false不改、不重跑产品。
+- [x] 666对2d原六场景封存结果只读复核exit0，sealed_complete_scenarios_reverified，52,494文件认证；产品/build/exporter新增0。原runner失败/finalIntegrity=false及六组wall保留；Node498通过/0失败/7权限skip，非全性能门禁。
 - [x] 10ed显式6GiB runner接线保存并完整readback；12套Node作者/独审各452/452；Windows实际447通过/0失败/5权限skip，原默认5GiB及其它限额保持。
-- [ ] ea58347c已保存Data50并完成全字节回读；Data45源码组合已独立静审；94新增（read-through/provider45、私有元库22、缺体修复27）及旧真实消费者回归待Windows编译/执行，不能以静态检查代替。
+- [ ] ea58347c Data50的Core/Windows五组131项和Node11套121项实际全过、无skip；两check因测试部分移动paths的E0382失败，10组Data155尚未执行。e486单文件借用修已保存，正在复验两check及缺失Data组；94新增按实际所属组逐名计，不称全部通过。
 - [x] 最终组合Node检查记录sourceTree并区分git archive导出与export-ignore范围；原隔离361/361不能代替最终组合树结果。
 
 - [x] CLI旧Go320元数据oracle已按固定Go323及明确新增更新，独立10项与10个物理坏例通过；最终组合11套Node121/121，无skip，非实际CLI任务验收。
@@ -23,7 +23,7 @@
 - [x] 实现decimal5GB可配置基础、派生目录与至少真实cache prepare消费者；初批运行验证未闭。
 - [x] 整合共享blob、decoded spool和CAP独立引用保护28代码路径，静态独审通过；保留发布后错误receipt与278测试修正。
 - [x] 56新增中uppercase历史CAP失败已在19e精确复验通过，070f原55/1不重标。
-- [x] 已实现并独审精确缺体认证重建与repair峰值计量，保留原pair/CAP/keep及旧reader fail-closed；27新增和原session/asset回归均待实际运行，尚未验收。
+- [x] 已实现并独审精确缺体认证重建与repair峰值计量，保留原pair/CAP/keep及旧reader fail-closed；27新增按实际Core/Data分组核验；未执行Data及原session/asset回归仍待实际运行，完整路径尚未验收。
 - [ ] 完整接入Data归属：下载、共享blob去重、Arrow/索引、staging/导出峰值、CAP和SQLite/WAL/SHM/历史记录；明确共享跨域归属和去重，不把局部准入称总硬上限。
 - [ ] 可重建冷缓存淘汰必须保护活跃lease与证据引用；旧超额/缩配置拒新增并报告，不删证据。验证导入峰值，避免raw/IPC/Parquet长期三副本。
 
@@ -38,7 +38,7 @@
 - [ ] 完成当前Facts Postcard正确性和匹配性能；旧cache失效重建，新损坏不得fallback成健康。
 - [x] 整合已独审Index r2与正式v13-postcard-index18诊断；固定Go323来源已核；070f七Node为357通过/0失败/4权限skip。
 - [ ] 闭合旧validate fixture后完成Source库回归；070f的25新增active及真实luac1已通过，6个lib ignored仍单列。
-- [ ] 2d新Index六场景已实际执行，末尾封存复核尚未闭合；六项耗时比均>0.30。后续改动保持完整认证与公共输出，首次导入/query成本不移到未测命令。
+- [ ] 2d新Index六场景已实际执行，666新增只读复核已闭合封存完整性；原失败记录保留，六项耗时比仍均>0.30。后续改动保持完整认证与公共输出，首次导入/query成本不移到未测命令。
 
 ## D. Live内部资源归属
 - [x] 8bfe SessionOwner六新增逐名一次、connection61/durable36实际通过；真实客户端仍未验。
