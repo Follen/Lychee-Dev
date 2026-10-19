@@ -49,10 +49,10 @@
 
 ## E. CLI自描述与Skill
 - [x] 308efa Skill/CLI发现接线静态独审，六Node套件101/101通过；产品定义不变。
-- [x] 新增runner-only逐调用试用入口，源码独审及最终组合三套Node108/108通过；固定产物身份独立于runner，无产品重编；Windows入口仍待首验。
-- [ ] 同一封存CLI和fixture对固定前后Skill进行独立盲评：未知参数、版本/产品差异、空/partial、超能力任务；记录真实动作、结果、调用与误导。
+- [x] 新增runner-only逐调用试用入口，源码独审及最终组合三套Node108/108通过；固定产物身份独立于runner，无产品重编；Windows入口Node107通过/1权限skip，受控真实help/describe、未知参数纠错与version首验完成。
+- [x] 固定86f CLI与独立fresh home的旧/新8臂真实盲评：6通过、2 partial，旧新同评分；原点查缺key未覆盖SQL空partial，原评分保留。另2个全新SQL臂均通过，明确空结果不能证明不存在，CAP保留、fixture不变。不宣称新版整体更优，也不把脚本首验或MODEL_ONLY合计为盲评。
 - [x] 断连和Source/Live身份矛盾已做独立MODEL_ONLY前后评分；修正模型两版均过，原wait=0替身缺陷保留，不能证明新版收益。
-- [ ] 实际CLI/客户端仍另列验证；不以模型、字数或单次调用数代替质量。
+- [ ] 扩展到尚未覆盖的实际任务及Live/客户端仍需证据；本轮离线范围通过不等于全部Skill验收，不以模型、字数或单次调用数代替质量。
 
 ## F. 实现与性能门禁，之后正式五循环
 - [ ] Source/Data结果质量≥f811及已认可增强；DBCD四修分批113 distinct pass/3旧ignore保持，完整产品矩阵仍需验。
