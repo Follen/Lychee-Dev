@@ -1381,3 +1381,5 @@ mod expression_parser_tests;
 
 #[cfg(test)]
 mod stack_safety_tests;
+#[cfg(all(test, feature = "datafusion-qualification"))]
+pub(crate) mod engine_compat;

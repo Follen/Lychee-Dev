@@ -180,3 +180,5 @@ mod command_surface_tests {
         }
     }
 }
+#[cfg(all(test, feature = "datafusion-qualification"))]
+mod engine;
