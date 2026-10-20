@@ -571,3 +571,58 @@ fn sql_generation_oversize_typed_schema_keeps_legal_wdc_projection_and_prepare_s
         );
     }
 }
+
+#[test]
+fn sql_generation_profile_measures_actual_hit_and_absent_without_changing_capture() {
+    for hit in [false, true] {
+        let fx = sample();
+        if hit { prepare(&fx, "Sample"); }
+        let _observe = Observe::new();
+        let inv = fx.invocation("data sql", &[("--sql", "SELECT ID,Value FROM Sample ORDER BY ID")]);
+        let (budget, profile) = Budget::controlled(Cost::defaults(), inv.control.deadline(), inv.control.clone()).with_test_phase_profile();
+        let budget = Arc::new(budget);
+        let out = sql_inner_budgeted(&inv, &budget, &mut || Ok(())).unwrap();
+        assert_eq!(out.data["result"]["rows"], json!([[1,42],[2,99]]));
+        assert!(out.data.get("sql").is_none());
+        verify_capture(&fx, &out);
+        assert!(profile.lock().unwrap().is_empty(), "single query owner emits only at retirement");
+        drop(budget);
+        let records = profile.lock().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["schema"], "lycheedev.data-query-phases.v5");
+        let phases = records[0]["sql"].as_array().unwrap();
+        let calls = |name: &str| phases.iter().find(|p| p["phase"] == name).unwrap()["calls"].as_u64().unwrap();
+        for name in ["request_compile_admit", "execute_resolved_inclusive", "source_prepare_inclusive", "source_verify_inclusive", "result_projection", "capture_serialize", "capture_publish_metadata_inclusive", "generation_open_inclusive", "generation_read_admission", "generation_manifest_authenticate"] {
+            assert!(calls(name) > 0, "{name}");
+        }
+        for name in ["generation_object_open_authenticate_inclusive", "generation_directory_validate_inclusive", "generation_cursor_batch_decode", "generation_cursor_advance_inclusive"] {
+            assert_eq!(calls(name) > 0, hit, "{name}");
+        }
+        for name in ["generation_prepare_inclusive", "generation_import_encode_inclusive", "generation_object_commit", "generation_manifest_publish"] {
+            assert_eq!(calls(name), 0, "ordinary SQL must not publish a generation: {name}");
+        }
+        assert_eq!(counts().1, usize::from(hit));
+        assert_eq!(counts().2, if hit {0} else {2});
+    }
+}
+
+#[test]
+fn sql_generation_profile_failure_closes_reader_and_does_not_invent_capture() {
+    let fx = sample(); prepare(&fx, "Sample");
+    let _observe = Observe::new();
+    let inv = fx.invocation("data sql", &[("--sql", "SELECT ID FROM Sample")]);
+    let (budget, profile) = Budget::controlled(Cost::defaults(), inv.control.deadline(), inv.control.clone()).with_test_phase_profile();
+    let budget = Arc::new(budget);
+    let before = captures(&fx);
+    let error = sql_inner_budgeted(&inv, &budget, &mut || Err(fault("test.original", 4, "original"))).err().unwrap();
+    assert_eq!(error.code, "test.original"); assert_eq!(captures(&fx), before);
+    assert_eq!(counts().1, 1); assert_eq!(counts().2, 0);
+    drop(budget);
+    let records = profile.lock().unwrap(); assert_eq!(records.len(), 1);
+    let phases = records[0]["sql"].as_array().unwrap();
+    let calls = |name: &str| phases.iter().find(|p| p["phase"] == name).unwrap()["calls"].as_u64().unwrap();
+    assert_eq!(calls("execute_resolved_inclusive"), 1);
+    assert!(calls("generation_cursor_batch_decode") > 0);
+    assert_eq!(calls("capture_serialize"), 0);
+    assert_eq!(calls("capture_publish_metadata_inclusive"), 0);
+}

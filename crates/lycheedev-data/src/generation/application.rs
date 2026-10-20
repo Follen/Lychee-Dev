@@ -1,5 +1,6 @@
 //! Explicit one-table preparation through the real admitted provider. This
 //! command does not alter existing JSONL callbacks or prefetch other tables.
+use crate::phase_profile::Phase;
 use super::{ImportLimits, StaticIdentity, TableImporter};
 use crate::{
     capture, db2, fault,
@@ -314,6 +315,7 @@ pub(super) fn dispatch_with_read_hook(
         Instant::now() + Duration::from_secs(timeout as u64),
         inv.control.clone(),
     ));
+    let _prepare_phase = budget.phase(Phase::GenerationPrepare);
     let (mut scope, pin) = OpenedScope::open(inv, &budget)?.admit_pinned(fault(
         "command.failed",
         5,
@@ -540,6 +542,7 @@ fn write_generation(
     let mut rows = 0usize;
     let mut batches = 0usize;
     let written = (|| {
+        let encode_phase = budget.phase(Phase::GenerationImportEncode);
         let mut writer = FileWriter::try_new(&mut object_writer, schema).map_err(ipc_error)?;
         loop {
             #[cfg(test)]
@@ -575,6 +578,7 @@ fn write_generation(
             batches = batches.checked_add(1).ok_or_else(limit)?;
         }
         writer.finish().map_err(ipc_error)?;
+        drop(encode_phase);
         after_encode()?;
         budget.check()?;
         reader.check_consumer(inv, budget)?;
@@ -585,7 +589,10 @@ fn write_generation(
         let error = object_writer.error().cloned().unwrap_or(error);
         return object_writer.abort(Err(error));
     }
-    let object = object_writer.commit()?;
+    let object = {
+        let _phase = budget.phase(Phase::GenerationObjectCommit);
+        object_writer.commit()?
+    };
     let published = json!({"object":object,"generationPublication":"not-confirmed"});
     let result: Result<Outcome> = (|| {
         budget.check()?;
@@ -626,7 +633,10 @@ fn write_generation(
         outcome.complete = identity.complete();
         outcome.selection = json!({"snapshot":prepared.pin.id});
         outcome.coverage = json!({"sourceKind":"static","complete":identity.complete(),"availableRows":rows,"missing":prepared.file.bytes.missing()});
-        reservation.publish_generation(identity_sha256, &bytes)?;
+        {
+            let _phase = budget.phase(Phase::GenerationManifestPublish);
+            reservation.publish_generation(identity_sha256, &bytes)?;
+        }
         Ok(outcome)
     })();
     result.map_err(|mut error| {

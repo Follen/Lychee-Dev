@@ -128,6 +128,8 @@ impl<'a> Cursor<'a> {
 }
 impl RowCursor for Cursor<'_> {
     fn advance(&mut self) -> Result<bool> {
+        let budget = self.budget;
+        let _phase = budget.phase(Phase::GenerationRow);
         self.current = None;
         if self.done {
             self.batch = None;

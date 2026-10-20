@@ -39,7 +39,7 @@ export const csvRunnerIdentity = root => Object.fromEntries(CSV_RUNNER_FILES.map
 export function csvEnvironment(environment) {
   assert(!Object.keys(environment).some(key => /^LYCHEEDEV_DISK_/i.test(key)), 'diagnostic disk policy overrides are forbidden');
   for (const [key, value] of Object.entries(environment)) if (['RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'CARGO_TARGET_DIR', 'RUST_MIN_STACK'].includes(key.toUpperCase())) assert(!value, 'unchanged compiler, target and default stack required');
-  return Object.fromEntries(Object.entries(environment).filter(([key]) => !['LYCHEEDEV_SOURCE_PHASE_PROFILE', 'LYCHEEDEV_DATA_PHASE_PROFILE'].includes(key.toUpperCase())));
+  return Object.fromEntries(Object.entries(environment).filter(([key]) => !['LYCHEEDEV_SOURCE_PHASE_PROFILE', 'LYCHEEDEV_DATA_PHASE_PROFILE', 'LYCHEEDEV_DATA_CLI_PROFILE'].includes(key.toUpperCase())));
 }
 export function assertCSVPolicy(root) { assert.deepEqual(policy(root, {}), {...defaults}, 'unchanged original disk policy required'); }
 export function validateCSVRequest(value) {

@@ -216,7 +216,7 @@ export function semanticGeneration(entry, envelope, engine, cacheMode) {
 
 // Fresh explicit prepare receipt, not reuse. Publication/body custody and disk
 // reservation inventory remain independently authenticated by the runner.
-export function auditPrepareEnvelope(envelope, {snapshot, table, rows, definitionSHA256, recordIdColumn = 5}) {
+export function auditPrepareEnvelope(envelope, {snapshot, table, rows, definitionSHA256, recordIdColumn = 5, automaticEvictionEnabled = false}) {
   assert.equal(envelope.schema, 'lycheedev.result.v1'); assert.equal(envelope.ok,true); assert.equal(envelope.error,null);
   assert.deepEqual(envelope.captures,[]); assert.deepEqual(envelope.warnings,[]);
   // Public CLI render_with_context adds the declared default timeout; library
@@ -238,7 +238,7 @@ export function auditPrepareEnvelope(envelope, {snapshot, table, rows, definitio
   assert.equal(m.mode,'windows_adaptive'); for(const [key,value] of Object.entries(m))if(key!=='mode')unsigned(value);
   assert(m.concurrentQueries>=1); assert(m.ceilingBytes>=512<<20); assert.equal(m.retainedBytes,512<<20); assert.equal(m.metadataBytes,128<<20); assert.equal(m.growths,0);
   assert(p.resources.retainedBytes+m.peakScratchBytes<=m.retainedBytes); assert(p.resources.metadataBytes<=m.metadataBytes);
-  auditDiskReservation(p.diskReservation);
+  auditDiskReservation(p.diskReservation,{automaticEvictionEnabled});
   return {receiptVerified:true,generation:p.generation,object:structuredClone(p.object),resources:structuredClone(p.resources),memoryBudget:structuredClone(m),diskReservation:structuredClone(p.diskReservation)};
 }
 
@@ -271,13 +271,14 @@ export const DISK_COVERAGE = Object.freeze({totalDataCoverageComplete:false,acco
   'legacy Data staging/spill paths outside tmp/data-derived-v1',
   'export temporaries outside tmp/data-derived-v1/exports',
 ],automaticEvictionEnabled:false});
-export function auditDiskReservation(r) {
+export function auditDiskReservation(r,{automaticEvictionEnabled=false}={}) {
+  assert.equal(typeof automaticEvictionEnabled,'boolean','explicit disk policy boolean');
   assert.deepEqual(Object.keys(r).sort(),['configuredMaxBytes','existing','additionalPeak','sharedBlobAdditionalPeak','privateMetadataAdditionalPeak','admittedPeakBytes','coverage'].sort());
   assert.equal(r.configuredMaxBytes,5000000000,'unchanged decimal 5GB Data quota');
   assert.deepEqual(Object.keys(r.existing).sort(),['objectNamespaceBytes','generationNamespaceBytes','temporaryNamespaceBytes','privateMetadataNamespaceBytes','sharedBlobBytes','retainedSharedPeakBytes','files'].sort());
   assert.deepEqual(Object.keys(r.additionalPeak).sort(),['objects','generations','staging','spill','exportTemporary'].sort());
   for(const value of [...Object.values(r.existing),...Object.values(r.additionalPeak),r.sharedBlobAdditionalPeak,r.privateMetadataAdditionalPeak,r.admittedPeakBytes])unsigned(value);
-  assert.deepEqual(r.coverage,DISK_COVERAGE,'honest partial disk accounting');
+  assert.deepEqual(r.coverage,{...DISK_COVERAGE,automaticEvictionEnabled},'honest explicitly selected disk accounting');
   const total = Object.entries(r.existing).filter(([key])=>key!=='files').reduce((n,[,v])=>n+BigInt(v),0n)+Object.values(r.additionalPeak).reduce((n,v)=>n+BigInt(v),0n)+BigInt(r.sharedBlobAdditionalPeak)+BigInt(r.privateMetadataAdditionalPeak);
   assert.equal(BigInt(r.admittedPeakBytes),total,'all existing and simultaneous new peak bytes included');
   assert(r.admittedPeakBytes<=r.configuredMaxBytes,'admitted peak exceeds fixed quota');

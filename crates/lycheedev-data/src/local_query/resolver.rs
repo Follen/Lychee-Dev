@@ -151,6 +151,7 @@ impl<'a> Resolver<'a> {
         }
     }
     pub fn check_source(&self) -> Result<()> {
+        let _phase = self.budget.phase(Phase::SqlSourceVerify);
         let factory = self.factory.try_borrow().map_err(|_| internal())?;
         factory.scope.check_consumer(factory.inv, factory.budget)?;
         if let Some(reader) = &factory.local {
@@ -230,6 +231,8 @@ impl relational::RootResolver for Resolver<'_> {
 }
 impl Factory<'_> {
     fn prepare(&mut self, use_: relational::SourceTableUse<'_>, slots: &Slot) -> Result<Input> {
+        let budget = self.budget;
+        let _phase = budget.phase(Phase::SqlSourcePrepare);
         self.inv.control.check()?;
         self.budget.check()?;
         self.scope.check_consumer(self.inv, self.budget)?;

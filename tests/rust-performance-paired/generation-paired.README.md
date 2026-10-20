@@ -5,19 +5,6 @@ This is a separate opt-in lane, not a change to historical B04 reports or to
 `data cache prepare NumericSample` and ordinary `data sql`. It never invents a
 DataFusion CLI route. Optional DataFusion qualification is not measured here.
 
-## Current admitted product identity
-
-Initial native/performance use is limited to product commit
-`7bd4216c28b45761f27239e1d74536af71b11a9b`, sourceTree
-`cbad32ff06cac1fbcd01cbba5dd6dc5a8028a70e4a8741cf2a44a1266cdeeadd`.
-Freeze the runner commit separately and point ownerRoot/artifact at that matching
-product checkout/artifact. Do not switch or redispatch the active parent queue.
-The strict prepare disk contract requires automaticEvictionEnabled=false. The
-new automatic-retirement product published alongside this runner intentionally
-does not satisfy that contract. Supporting it requires a separately reviewed,
-explicit contract mode and regressions, not weakening this assertion. Neither
-these Node tests nor a 7bd measurement qualifies the newer product's performance.
-
 ## Scope and clocks
 
 The input is the existing formally produced, authenticated 16,384-row
@@ -148,3 +135,61 @@ Cloud Node contracts and static syntax are developer verification only. Native
 harness execution, actual quality gates and performance remain NOT_RUN until the
 coordinator records exact fixed-SHA Windows evidence. No runtime/performance
 claim follows from these files or the synthetic input alone.
+
+## Explicit new-product profiled observation (v2)
+
+Historical v1 configuration and its observation/acceptance modes retain the
+original `automaticEvictionEnabled: false` prepare contract. Historical product
+7bd4216c28b45761f27239e1d74536af71b11a9b, its complete/failed runs and their timings
+are never relabeled, merged, or changed to satisfy a later product policy.
+
+The new diagnostic lane is deliberately separate:
+
+`node tools/rust-data-generation-paired.mjs <new-product-config.json> <conditions.json> --profile-observation`
+
+Use all v1 path/fixture fields, change schema to
+`lycheedev.data-generation-config.v2`, and add exactly:
+
+```json
+"product": {
+  "commit": "<exact frozen new product commit, 40 lowercase hex>",
+  "sourceTreeSHA256": "<matching artifact inputHashes.sourceTree>",
+  "binarySHA256": "<matching optimized artifact binarySHA256>",
+  "automaticEvictionEnabled": true
+}
+```
+
+This mode verifies the actual clean product checkout HEAD and source/EXE identities
+before work and at final integrity checks. It rejects the historical 7bd commit
+and source bytes. The new true flag is required, not optional: the original 5GB,
+all remaining accounting gaps, complete prepare context including timeoutSeconds
+300, resources/memory, exact rows/CAP/IPC and owner lifecycle remain checked.
+V2 cannot use `--acceptance` or ordinary `--observation`; v1 cannot enable this
+profile mode. This initial new-product diagnostic runs exactly one seven-command
+pair and never grants performance acceptance, even when its raw ratio is small.
+
+Only the four measured Rust invocations receive both
+`LYCHEEDEV_DATA_PHASE_PROFILE=1` and `LYCHEEDEV_DATA_CLI_PROFILE=1`. Both variables
+are stripped case-insensitively for Go, init/preparation helpers and ordinary
+measurements. Each profiled Rust stderr must contain exactly two compact records:
+Data v5 first, CLI v1 second. Unknown stderr, missing records, failed rendering,
+wrong commands, missing successful SQL/import scopes or a claimed fresh-WDC hit
+reject the observation. Subsequent generation samples must have actual nonzero
+open/authenticate/directory/batch/cursor scopes as well as public hit evidence.
+
+Complete stderr bytes are preserved and hash-bound; the outer completion reader
+reparses both records rather than trusting their summary. Output schemas/state
+names identify a profiled observation separately from historical runs. All
+existing native elapsed clocks and explicit prepare-inclusive cost remain intact.
+Nested Data scopes overlap and are not additive. CLI timing begins at main entry,
+excludes pre-main loader/OS work and its own emission, and dispatch includes Data
+profile emission. The external elapsed remainder is unattributed, not precisely
+startup or CPU time. Instrumented ratios are diagnostics, not an uninstrumented
+performance pass. No diagnostic phase is subtracted from accepted elapsed time.
+
+After the reviewed instrumentation product is frozen, use its actual artifact
+hashes in this new configuration, reuse the immutable authenticated numeric
+fixture, then dispatch only this one-pair mode through the parent's existing
+native test queue. Do not substitute the currently running/historical product or
+change its receipts. Native execution remains NOT_RUN until its new evidence is
+recorded; cloud parser tests are not execution of the Rust timers.

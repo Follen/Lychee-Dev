@@ -22,7 +22,7 @@ test('Data phase contract matches the actual recorder in the source checkout', {
   assert.deepEqual([...source.match(/const NAMES:.*?= \[([\s\S]*?)\];/)[1].matchAll(/"([^"]+)"/g)].map(match => match[1]), DATA_PHASE_NAMES);
   assert.deepEqual([...source.match(/const DETAIL_NAMES:.*?= \[([\s\S]*?)\];/)[1].matchAll(/"([^"]+)"/g)].map(match => match[1]), DATA_DETAIL_NAMES);
   assert.deepEqual([...source.match(/const PUBLISHER_NAMES:.*?= \[([\s\S]*?)\];/)[1].matchAll(/"([^"]+)"/g)].map(match => match[1]), DATA_PUBLISHER_NAMES);
-  assert(source.includes(DATA_PHASE_TIMING)); assert(source.includes(DATA_CAPTURE_TIMING)); assert(source.includes('lycheedev.data-query-phases.v4'));
+  assert(source.includes(DATA_PHASE_TIMING)); assert(source.includes(DATA_CAPTURE_TIMING)); assert(source.includes('lycheedev.data-query-phases.v5'));
 });
 test('Data v3 preserves v1 and v2 bytes and validates fixed nested publisher counters', () => {
   assert.deepEqual(DATA_PUBLISHER_NAMES_V3, [

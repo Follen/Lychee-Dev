@@ -26,6 +26,9 @@ export const DATA_PUBLISHER_NAMES = Object.freeze([
   'stage_create', 'private_spool_read_ready', 'final_stage_seal', 'digest_lock',
   'shard_open', 'rename', 'winner_open', 'checked_close',
 ]);
+export const DATA_SQL_NAMES = Object.freeze(['request_compile_admit', 'execute_resolved_inclusive', 'source_prepare_inclusive', 'source_verify_inclusive', 'result_projection', 'capture_serialize', 'capture_publish_metadata_inclusive', 'generation_open_inclusive', 'generation_read_admission', 'generation_manifest_authenticate', 'generation_object_open_authenticate_inclusive', 'generation_directory_validate_inclusive', 'generation_cursor_batch_decode', 'generation_cursor_advance_inclusive', 'generation_prepare_inclusive', 'generation_import_encode_inclusive', 'generation_object_commit', 'generation_manifest_publish']);
+export const DATA_CLI_PROFILE_VARIABLE = 'LYCHEEDEV_DATA_CLI_PROFILE';
+export const DATA_CLI_TIMING = 'wall-clock from instrumented main entry; excludes pre-main startup and this CLI profile emission; dispatch includes nested Data phases and Data profile emission; external elapsed remainder is unattributed, not startup or CPU time';
 export const DATA_PHASE_TIMING = 'wall-clock; phases may nest or overlap across workers; not additive; budget lifetime and phases are diagnostics, not accepted command total or CPU time';
 export const DATA_CAPTURE_TIMING = 'capture_metadata_inclusive includes capture and metadata work; metadata open/write/close are not separately observed';
 const VARIABLE = 'LYCHEEDEV_DATA_PHASE_PROFILE';
@@ -33,7 +36,7 @@ const VARIABLE = 'LYCHEEDEV_DATA_PHASE_PROFILE';
 export function dataPhaseEnvironment(environment, {enabled = false, measured = false, engine = null} = {}) {
   // Windows environment names are case-insensitive. An inherited opt-in must
   // not leak into Go, preparation, ordinary measurement or startup-only mode.
-  const result = Object.fromEntries(Object.entries(environment).filter(([key]) => key.toUpperCase() !== VARIABLE));
+  const result = Object.fromEntries(Object.entries(environment).filter(([key]) => ![VARIABLE, DATA_CLI_PROFILE_VARIABLE].includes(key.toUpperCase())));
   if (enabled && measured && engine === 'rust') result[VARIABLE] = '1';
   return result;
 }
@@ -48,13 +51,15 @@ export function dataPhaseProfile(stderr, {entry = null, successful = false} = {}
   // The recorder emits compact JSON. Round-trip identity also rejects duplicate
   // keys, lossy numbers, BOMs, and additional non-profile stderr bytes.
   assert.equal(JSON.stringify(value), line, 'Data phase record must be compact, exact JSON without duplicate keys');
-  const publisherNames = value.schema === 'lycheedev.data-query-phases.v4' ? DATA_PUBLISHER_NAMES
+  const sql = value.schema === 'lycheedev.data-query-phases.v5';
+  const publisherNames = sql || value.schema === 'lycheedev.data-query-phases.v4' ? DATA_PUBLISHER_NAMES
     : value.schema === 'lycheedev.data-query-phases.v3' ? DATA_PUBLISHER_NAMES_V3 : null;
   const publisher = publisherNames !== null;
   const detailed = publisher || value.schema === 'lycheedev.data-query-phases.v2';
   assert(detailed || value.schema === 'lycheedev.data-query-phases.v1', 'known Data profile schema required');
-  assert.deepEqual(Object.keys(value).sort(), publisher
-    ? ['captureTiming', 'details', 'elapsedMicros', 'phases', 'publisher', 'schema', 'timing']
+  assert.deepEqual(Object.keys(value).sort(), sql
+    ? ['captureTiming', 'details', 'elapsedMicros', 'phases', 'publisher', 'schema', 'sql', 'timing']
+    : publisher ? ['captureTiming', 'details', 'elapsedMicros', 'phases', 'publisher', 'schema', 'timing']
     : detailed ? ['captureTiming', 'details', 'elapsedMicros', 'phases', 'schema', 'timing']
       : ['captureTiming', 'elapsedMicros', 'phases', 'schema', 'timing']);
   assert.equal(value.timing, DATA_PHASE_TIMING); assert.equal(value.captureTiming, DATA_CAPTURE_TIMING);
@@ -73,6 +78,7 @@ export function dataPhaseProfile(stderr, {entry = null, successful = false} = {}
   counters(value.phases, DATA_PHASE_NAMES);
   if (detailed) counters(value.details, DATA_DETAIL_NAMES);
   if (publisher) counters(value.publisher, publisherNames);
+  if (sql) counters(value.sql, DATA_SQL_NAMES);
   // Only these authenticated twelve fixture paths require these known scopes
   // on success. Early product failures legitimately finish before any phase.
   const image = entry?.kind === 'image' && /^B04-(palette|bgra8|bc1|bc2|bc3)-(png|webp)$/.test(entry.id);
@@ -82,5 +88,28 @@ export function dataPhaseProfile(stderr, {entry = null, successful = false} = {}
     const required = image ? DATA_PHASE_NAMES : ['admission', 'prepare_inclusive', 'payload_inclusive', 'source_capture_metadata_inclusive', 'source_close'];
     for (const name of required) assert(value.phases.find(phase => phase.phase === name).calls > 0, `${name}: required successful fixture scope was not observed`);
   }
+  return value;
+}
+
+// CLI record is deliberately independent of the query budget recorder. The
+// generation runner alone opts into both and validates their two-line framing.
+export function dataCliProfile(stderr) {
+  assert(Buffer.isBuffer(stderr) && stderr.length > 0 && stderr.length <= 4096);
+  const text = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true}).decode(stderr);
+  const line = text.endsWith('\r\n') ? text.slice(0, -2) : text.endsWith('\n') ? text.slice(0, -1) : text;
+  assert(line.startsWith('{') && line.endsWith('}') && !/[\r\n]/.test(line));
+  const value = JSON.parse(line);
+  assert.equal(JSON.stringify(value), line, 'exact compact CLI profile required');
+  assert.deepEqual(Object.keys(value).sort(), ['command', 'dispatchMicros', 'mainElapsedMicros', 'mainEntryToDispatchMicros', 'renderMicros', 'renderSucceeded', 'schema', 'timing']);
+  assert.equal(value.schema, 'lycheedev.data-cli-phases.v1');
+  assert.equal(value.timing, DATA_CLI_TIMING);
+  assert(['data sql', 'data cache prepare'].includes(value.command));
+  assert.equal(typeof value.renderSucceeded, 'boolean');
+  for (const key of ['dispatchMicros', 'mainElapsedMicros', 'mainEntryToDispatchMicros', 'renderMicros']) {
+    assert(Number.isSafeInteger(value[key]) && value[key] >= 0, `${key}: nonnegative exact integer required`);
+  }
+  // Individual truncation to micros loses at most two micros across 3 segments.
+  const total = BigInt(value.dispatchMicros) + BigInt(value.mainEntryToDispatchMicros) + BigInt(value.renderMicros);
+  assert(BigInt(value.mainElapsedMicros) >= total && BigInt(value.mainElapsedMicros) - total <= 2n);
   return value;
 }

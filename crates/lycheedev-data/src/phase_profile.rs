@@ -40,6 +40,24 @@ pub(crate) enum Phase {
     PublisherRename,
     PublisherWinnerOpen,
     PublisherCheckedClose,
+    SqlRequest,
+    SqlExecute,
+    SqlSourcePrepare,
+    SqlSourceVerify,
+    SqlResult,
+    SqlSerialize,
+    SqlCapture,
+    GenerationOpen,
+    GenerationQuota,
+    GenerationManifest,
+    GenerationObject,
+    GenerationDirectory,
+    GenerationBatch,
+    GenerationRow,
+    GenerationPrepare,
+    GenerationImportEncode,
+    GenerationObjectCommit,
+    GenerationManifestPublish,
 }
 const NAMES: [&str; 11] = [
     "admission",
@@ -87,7 +105,29 @@ const PUBLISHER_NAMES: [&str; 11] = [
     "winner_open",
     "checked_close",
 ];
-const COUNTERS: usize = NAMES.len() + DETAIL_NAMES.len() + PUBLISHER_NAMES.len();
+// SQL scopes nest within execution/source preparation. Cursor advance includes
+// batch decode; each call, including EOF/error, is observed only when enabled.
+const SQL_NAMES: [&str; 18] = [
+    "request_compile_admit",
+    "execute_resolved_inclusive",
+    "source_prepare_inclusive",
+    "source_verify_inclusive",
+    "result_projection",
+    "capture_serialize",
+    "capture_publish_metadata_inclusive",
+    "generation_open_inclusive",
+    "generation_read_admission",
+    "generation_manifest_authenticate",
+    "generation_object_open_authenticate_inclusive",
+    "generation_directory_validate_inclusive",
+    "generation_cursor_batch_decode",
+    "generation_cursor_advance_inclusive",
+    "generation_prepare_inclusive",
+    "generation_import_encode_inclusive",
+    "generation_object_commit",
+    "generation_manifest_publish",
+];
+const COUNTERS: usize = NAMES.len() + DETAIL_NAMES.len() + PUBLISHER_NAMES.len() + SQL_NAMES.len();
 const TIMING: &str = "wall-clock; phases may nest or overlap across workers; not additive; budget lifetime and phases are diagnostics, not accepted command total or CPU time";
 
 #[derive(Clone, Copy, Default)]
@@ -167,14 +207,21 @@ impl Profile {
                 })
             })
             .collect();
+        let sql: Vec<_> = SQL_NAMES.iter()
+            .zip(counters[NAMES.len() + DETAIL_NAMES.len() + PUBLISHER_NAMES.len()..].iter())
+            .map(|(name, counter)| serde_json::json!({
+                "phase":name, "calls":counter.calls,
+                "elapsedMicros":counter.elapsed.as_micros(),
+            })).collect();
         serde_json::json!({
-            "schema":"lycheedev.data-query-phases.v4",
+            "schema":"lycheedev.data-query-phases.v5",
             "elapsedMicros":self.started.elapsed().as_micros(),
             "timing":TIMING,
             "captureTiming":"capture_metadata_inclusive includes capture and metadata work; metadata open/write/close are not separately observed",
             "phases":phases,
             "details":details,
             "publisher":publisher,
+            "sql":sql,
         })
     }
 
@@ -252,6 +299,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sql_counter_indices_are_separate_and_exact() {
+        let (profile, output) = Profile::observed();
+        for (index, phase) in [
+            Phase::SqlRequest, Phase::SqlExecute, Phase::SqlSourcePrepare,
+            Phase::SqlSourceVerify, Phase::SqlResult, Phase::SqlSerialize,
+            Phase::SqlCapture, Phase::GenerationOpen, Phase::GenerationQuota,
+            Phase::GenerationManifest, Phase::GenerationObject, Phase::GenerationDirectory,
+            Phase::GenerationBatch, Phase::GenerationRow, Phase::GenerationPrepare,
+            Phase::GenerationImportEncode, Phase::GenerationObjectCommit, Phase::GenerationManifestPublish,
+        ].into_iter().enumerate() {
+            let mut span = Span::new(Some(&profile), phase);
+            span.finish(|_| Duration::from_micros(index as u64 + 1));
+        }
+        let value = profile.value();
+        assert_eq!(value["sql"].as_array().unwrap().len(), SQL_NAMES.len());
+        for (index, phase) in value["sql"].as_array().unwrap().iter().enumerate() {
+            assert_eq!(phase["phase"], SQL_NAMES[index]);
+            assert_eq!(phase["calls"], 1);
+            assert_eq!(phase["elapsedMicros"], index + 1);
+        }
+        for field in ["phases", "details", "publisher"] {
+            assert!(value[field].as_array().unwrap().iter().all(|p| p["calls"] == 0));
+        }
+        drop(profile); assert_eq!(output.lock().unwrap().len(), 1);
+    }
+
+    #[test]
     fn disabled_observation_has_no_clock_recorder_or_counts() {
         let profile = Profile::enabled(false, || panic!("disabled creation read a clock"));
         assert!(profile.is_none());
@@ -304,7 +378,7 @@ mod tests {
         let mut span = Span::new(Some(&profile), Phase::ZlibInflate);
         span.finish(|_| Duration::from_micros(23));
         let value = profile.value();
-        assert_eq!(value["schema"], "lycheedev.data-query-phases.v4");
+        assert_eq!(value["schema"], "lycheedev.data-query-phases.v5");
         assert_eq!(value["phases"].as_array().unwrap().len(), 11);
         assert!(
             value["phases"]
@@ -377,7 +451,7 @@ mod tests {
             span.finish(|_| panic!("finished seal span read another clock"));
         }
         let value = profile.value();
-        assert_eq!(value["schema"], "lycheedev.data-query-phases.v4");
+        assert_eq!(value["schema"], "lycheedev.data-query-phases.v5");
         assert_eq!(value["timing"], TIMING);
         assert_eq!(value["phases"].as_array().unwrap().len(), 11);
         assert_eq!(value["details"].as_array().unwrap().len(), 10);

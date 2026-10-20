@@ -1,15 +1,18 @@
 // Final revalidation is independent of success strings/booleans in the child.
 import assert from 'node:assert/strict';
+import {verifyGenerationPhaseEvidence, verifyGenerationProfileProduct} from './generation-profile.mjs';
 import {elapsed} from './contract.mjs';
 import {parseLossless, summarizeGeneration} from './generation-contract.mjs';
-export function verifyGenerationCompletion(run, observed, acceptance) {
+export function verifyGenerationCompletion(run, observed, acceptance, {profiled=false,product=null}={}) {
+  if(profiled){assert.equal(acceptance,false,'profiled lane cannot grant acceptance');assert.deepEqual(observed.product,product);assert.equal(observed.profiled,true);const e=observed.productEvidence;assert.deepEqual(Object.keys(e).sort(),['commit','sourceTreeSHA256','binarySHA256','status'].sort());verifyGenerationProfileProduct(product,{inputHashes:{sourceTree:e.sourceTreeSHA256},binarySHA256:e.binarySHA256},e.commit,e.status);}else{assert(observed.profiled===undefined||observed.profiled===false);assert(observed.product===undefined||observed.product===null);}
   assert(run.handlesReaped===true&&!run.error&&run.status===0,'successful outer owner required');
   elapsed(run.proof);
-  assert.equal(observed?.schema,'lycheedev.paired-generation.v1');assert.equal(observed.handlesReaped,true);assert.equal(observed.acceptance,acceptance);assert.equal(observed.fullB04Acceptance,false);
-  assert.equal(observed.state,acceptance?'passed_selected_generation_paths':'equivalent_generation_observation_only');
+  assert.equal(observed?.schema,profiled?'lycheedev.paired-generation-profile.v1':'lycheedev.paired-generation.v1');assert.equal(observed.handlesReaped,true);assert.equal(observed.acceptance,acceptance);assert.equal(observed.fullB04Acceptance,false);
+  assert.equal(observed.state,profiled?'equivalent_profiled_generation_observation_only':acceptance?'passed_selected_generation_paths':'equivalent_generation_observation_only');
   assert.equal(observed.preflight.length,acceptance?1:0,'formal preflight is separate from measured20; observation exactly one pair');
   for(const pair of [...observed.preflight,...observed.pairs])for(const engine of ['go','rust'])for(const phase of ['fresh',...(engine==='rust'?['prepare']:[]),'first','subsequent']){
     const s=pair[engine][phase];assert.equal(s.exit,0);assert(!s.error);assert.equal(s.handlesReaped,true);assert.equal(s.valid,true);
+    if(profiled&&engine==='rust')verifyGenerationPhaseEvidence(s,phase);else assert.equal(s.phaseDiagnostics,undefined,'ordinary/Go samples cannot inherit profile evidence');
     const measured=elapsed(s.proof);for(const [key,value]of Object.entries(measured))assert.equal(s[key],value,'native sample timing must not be replaced/subtracted');
     assert.match(s.stdoutSHA256,/^[0-9a-f]{64}$/);assert.match(s.stderrSHA256,/^[0-9a-f]{64}$/);
   }

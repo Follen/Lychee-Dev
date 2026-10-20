@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod contract;
+mod data_phase_profile;
 mod formal_live;
 mod target_remote;
 #[cfg(test)]
@@ -1561,6 +1562,7 @@ fn normal_exit_code(code: i32) -> std::result::Result<std::process::ExitCode, i3
     u8::try_from(code).map(std::process::ExitCode::from).map_err(|_| code)
 }
 fn main() -> std::process::ExitCode {
+    let mut data_profile = data_phase_profile::Profile::from_env();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args
         .first()
@@ -1667,6 +1669,7 @@ fn main() -> std::process::ExitCode {
         drop(console);
         std::process::exit(exit);
     }
+    data_profile.dispatch(parsed.as_ref().ok().map(|inv| inv.command.as_str()));
     let mut yielded = false;
     let result = parsed.as_ref().map_err(Clone::clone).and_then(|inv| {
         inv.control
@@ -1700,12 +1703,15 @@ fn main() -> std::process::ExitCode {
             })
             .map_err(|error| command_fault(inv, error))
     });
+    data_profile.render();
     if !yielded
         && let Err(error) = render_with_context(&mut stdout, format, &result, parsed.as_ref().ok())
     {
         let _ = writeln!(std::io::stderr(), "output: {error}");
+        data_profile.finish(false);
         std::process::exit(5);
     }
+    data_profile.finish(true);
     let exit = result.err().map(|e| e.exit_code).unwrap_or(0);
     drop(console);
     // The ordinary result and console registration are already retired. Return

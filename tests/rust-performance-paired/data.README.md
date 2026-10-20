@@ -703,3 +703,70 @@ consumers, so do not add all group counts as independent coverage. Cloud Node31/
 Windows staged28, Core staged24, Data phase10/resource37, doc1 and Node31 on
 the real Windows test host; all twelve new tests were observed once. Group
 coverage overlaps and is not summed as independent tests. The matching v4 single-pair measurement subsequently completed. Cold BLTE total was 201.3286ms, private readiness 0.002ms across two calls and final durable sealing 11.711ms across two calls. Preserve full native timing and all historical results; these single-run figures do not establish causal savings or repeated acceptance.
+
+### SQL/generation phase diagnostics v5 (measurement, not an optimization)
+
+The opt-in Data recorder now emits `lycheedev.data-query-phases.v5`. Historical
+v1-v4 records retain their original exact contracts. The original `phases`,
+`details`, and `publisher` vectors are unchanged; `sql` adds 18 fixed counters.
+`calls` counts entered scopes, including early errors and cursor EOF calls,
+not completed rows or successful publications. Zero calls means unobserved.
+The recorder remains query-owned and emits only to stderr; public results,
+CAP payload contracts, hashes, budgets, cancellation and checked close remain.
+
+- `request_compile_admit`: flags, request read/compile/parameter checks and
+  encoded request admission, before workspace admission.
+- `execute_resolved_inclusive`: the real relational executor, including lazy
+  resolver and cursor work. It is not pure SQL operator time.
+- `source_prepare_inclusive`: one actual resolver source preparation, including
+  definitions, WDC/source validation, and optional generation open.
+- `source_verify_inclusive`: the post-execution resolver verification, including
+  consumer validation and any retained local reader verification.
+- `result_projection`: public exact-number layout, snapshots and reading DOM.
+- `capture_serialize`: the complete bounded CAP JSON serialization.
+- `capture_publish_metadata_inclusive`: the existing CAP commit with metadata;
+  it overlaps `source_capture_metadata_inclusive` and is not extra time.
+- `generation_open_inclusive`: schema/identity preparation, short read quota,
+  manifest authentication, object authentication and IPC directory validation.
+- `generation_read_admission`: actual read-quota reservation/inventory admission.
+- `generation_manifest_authenticate`: read plus full canonical manifest checks.
+- `generation_object_open_authenticate_inclusive`: original pinned object open,
+  SHA/length/EOF authentication, quota-owner transfer and related checks.
+- `generation_directory_validate_inclusive`: full IPC metadata/value/ID
+  validation and retained directory preparation, including its batch decodes.
+- `generation_cursor_batch_decode`: actual cursor batch reads/decodes and checks,
+  not the directory-validation pass above.
+- `generation_cursor_advance_inclusive`: one cursor advance, including row
+  conversion and any cursor batch decode. Per-row clock/lock overhead exists
+  when enabled; subtracting this counter from a parent is not pure operator time.
+- `generation_prepare_inclusive`: explicit cache preparation after budget
+  construction, including admission, source preparation, reuse or import,
+  publication and checked close.
+- `generation_import_encode_inclusive`: FileWriter construction, actual importer
+  loop, IPC writes and footer finish. It ends before source revalidation.
+- `generation_object_commit`: actual typed object commit.
+- `generation_manifest_publish`: actual no-replace generation manifest publish.
+
+Scopes nest; never sum all counters or treat remainders as disk/CPU time.
+Existing mutable source authentication still runs even for generation hits.
+No instrumentation result is yet proof of which phase dominates real wall time.
+
+A separate opt-in `LYCHEEDEV_DATA_CLI_PROFILE=1` emits one
+`lycheedev.data-cli-phases.v1` record for parsed ordinary `data sql` and
+`data cache prepare`. Its main-entry-to-dispatch, dispatch and render intervals
+are sequential; microsecond truncation can leave 0-2 microseconds between their
+sum and `mainElapsedMicros`. Main observation begins after the opt-in environment
+check and excludes pre-main loader/OS startup and this CLI record's emission.
+Dispatch includes Data-recorder emission, and render includes stdout writes.
+After-render result/console teardown is outside this CLI record. External
+process elapsed minus main time is unattributed, not exactly startup. Closed
+diagnostic stderr never replaces the business result. The existing Data phase
+mode deliberately does not enable this second record; its environment filters
+strip inherited CLI flags, including mixed-case Windows names.
+
+Generation harness profile observation must explicitly bind the new product
+commit/source-tree/binary and automatic-retirement contract. The historical
+7bd/false fixture binding and earlier observation numbers are not relabeled.
+Use matching native artifact and full rows/CAP/IPC/finalIntegrity checks before
+interpreting these diagnostics. This instrumentation does not establish a
+speedup or the <=0.30 acceptance threshold, nor general Data/DataFusion results.

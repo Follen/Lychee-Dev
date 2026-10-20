@@ -68,6 +68,18 @@ CLI 静态 oracle 修复（2026-10-20）：历史适配器单测固定读取并�
 
 该工具修复的native重试和性能仍NOT_RUN。保持正在运行的05660固定native组合回归，不切换、不重派；后续仅由既有父队列准入新runner配原7bd产品、原认证fixture和全新owner/evidence的一对--observation。先完成七次样本和全部完整性核验，再讨论独立20对正式门禁，本次不运行20对。05660 Source优化、7786容量实现与各自待验证事实完整保留。
 
+## 2d. 2026-10-20 当前实测收口与 generation 阶段诊断
+
+本节更新2a–2c的待验时间点，原失败和原版结果不改写。05660固定组合default/DF两项check已通过，定向native合计948通过、6原ignored；容量15项与Source4项新增共19项逐名执行一次。不是全仓或性能验收。原05660匹配release/Source完整六场景仍在既有唯一父队列中，不切换、不重复派发。历史7bd Source四增量单pair低于0.30、cold/warm失败和20对未验收保持。
+
+精确timeout修复后的7bd Data generation一对观察已完整通过七次CLI及完整性核验，完整结果/CAP/IPC验证有效；任务总耗时仍约为Go的3–4倍，远未达到≤0.30。原7786五样本后失败保留，不以重试重标。该历史模式继续固定7bd与automaticEvictionEnabled=false；没有20对正式验收。
+
+本批15份opt-in插桩文件与7份显式新产品观察工具文件共同整合：Data v5增加18个SQL/generation scope，CLI独立记录main entry、dispatch、render。关闭时不读clock、不锁stderr，普通性能环境大小写无关剥离两profile opt-in。scope有包含与重叠关系，不可相加、相减推出独占成本；CLI之外残差不是精确startup。这里只增加诊断，不是优化或性能收益。
+
+新v2 --profile-observation仅允许一对诊断，明确automaticEvictionEnabled=true，绑定本次最终发布产品commit、干净sourceTreeSHA256与匹配optimized binarySHA256；候选tree或旧7bd binary不能代替。完整16,384×5有序精确数值、七CLI样本、四双profile、全部CAP/IPC、timeoutSeconds=300、原预算/取消/错误/owner退役/finalIntegrity不减。instrumented模式不能作为20对验收，旧false历史合同不变。
+
+两个源码片均独审通过；最终整合全部19份paired Node测试855/855通过、0失败/0跳过；20份修改源码语法检查通过（10 Rust语法解析、10 Node --check），diff检查通过。6项新增Rust实际编译/执行仍NOT_RUN：云端官方入口因缺固定Emmy upstream在Cargo之前停止，不以Node或语法通过代替。后续先由既有父队列完成本次固定发布SHA的all-targets、Data phase/generation/local_query回归及CLI三个profile测试，逐名确认六新增和resource v5断言，再构建匹配产物执行新v2一对完整诊断；不得抢占原05660 Source队列。无本机原始日志入库，无merge/release或性能门禁完成声明。
+
 ## 3. Home、容量和所有权边界
 
 Data默认容量为**5,000,000,000字节（十进制5GB）**，配置支持明确单位；与测试scratch 5/6GiB不同。最终统一核算Data下载/共享blob归属、物化/索引/目录、staging/spill/导出峰值和证据占用，按内容去重防双计。活跃lease和证据引用保护；旧已超额或配置缩小先拒新增并说明，不删除证据。

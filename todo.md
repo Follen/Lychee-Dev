@@ -1,16 +1,17 @@
 # Rust 架构实施清单
 
-当前批：05660固定native组合回归进行中，不切换。原7786 runner / 7bd generation观察5/7后因prepare公共timeout期望遗漏失败；两文件精确300合同修复已独审，六套Node265/265，native重试NOT_RUN；所有任务性能未验收。
+当前批：05660两check与定向native948通过/6原ignored，19新增逐名一次；其匹配Source release/性能仍按唯一父队列继续。7bd Data完整一对观察有效但慢约3–4倍，未验收。本批Data/CLI插桩及新v2观察合同已整合，6新增Rust与新产品运行NOT_RUN。
 
 以 [handover](handover.md) 为当前事实、[DESIGN](DESIGN.md#authorized-architecture-implementation-plan--2026-10-19) 为完整计划。质量基线f811；性能参考固定Go323。先业务质量/完整实现，再≤30%耗时门禁，之后正式五项循环。历史已完成项与原失败留在[308efa旧清单](https://github.com/Follen/Lychee-Dev/blob/308efa2766d00273b13c9c7e24a0b956bb60e9e9/todo.md)，不滚动复制到当前待办。
 
 ## 立即闭合固定基线
 - [x] 7bd Source六场景完整Facts/Index/summary/custody及finalIntegrity通过；四增量单pair低于0.30，cold/warm未达，20对未验收。实际warm typed decode 121642µs属于cached_index 168301µs父桶。
-- [ ] 本次Source相邻精确路径借用复用与共享kind分类候选已独审；四新Rust回归及编译NOT_RUN（owned.windows_required），最终组合九套Node422/422不是native证明。固定发布SHA后由唯一父队列完成all-targets/Source lib、四项逐名确认及原ignored库存，再以匹配产物复验完整六场景与低重复语料；新性能未测。
-- [ ] 保留原7786 runner / 7bd产品5/7观察失败；新runner精确timeoutSeconds=300修复后，由既有父队列另准入7bd原artifact/fixture、全新owner的一对观察，完整七样本及finalIntegrity必须通过，不作20对或性能验收。automaticEvictionEnabled=false保持；不切换正在执行的05660 native队列。
+- [x] 05660组合default/DF两check和定向native948通过/6原ignored，Source4与容量15新增逐名各一次；不借用于本批新插桩。
+- [ ] 原05660匹配release及完整六场景/低重复语料性能继续唯一父队列，不切换、不重派；新性能尚未测。
+- [x] 7bd Data新runner精确timeoutSeconds=300后完整七CLI及全部完整性通过；原7786五样本后失败保留。单pair约慢Go3–4倍，不是20对验收。
 - [x] 7bd uppercase source BlobRef修复：default/DF all-targets及generation42实际通过，原失败保留。
-- [ ] 本批自动容量退役固定发布SHA后由既有父队列验证default/DF all-targets、Core data_disk、Data generation与remote::admission、CLI data_cache_prune_public；逐名确认12 Core+3 Data新增，不借用7bd结果。云端缺lib.exe，编译/运行未证明。
-- [ ] generation性能初测固定7bd产品与独立新runner；先质量与一对诊断，再另行准入20对正式验收。当前严格automaticEvictionEnabled=false合同不支持新自动退役产品，需显式后继合同后另测，不放松断言。严格identity/derived与definition耦合不变，原f0d失败保留。
+- [ ] 本批固定最终发布SHA跑all-targets与Data phase_profile、local_query generation/regression、generation及CLI profile回归，6新增逐名一次，resource v5断言与原ignored库存独立保留。当前Rust NOT_RUN，Node/语法不是native证明。
+- [ ] 新v2 --profile-observation绑定本批最终产品commit/clean sourceTreeSHA256/optimized binarySHA256，automaticEvictionEnabled=true，仅一对诊断，七CLI/四双profile/完整rows/CAP/IPC/finalIntegrity及owner退役全部验证。旧7bd false合同保持，原预算与timeout300不变；不把嵌套计时相加或诊断当性能收益/20对验收。
 
 - [x] 070f实际all-targets通过；2808四处编译错误和Node版本断言闭合，历史失败保留。
 - [x] 原copy/发布后receipt路径/generation取消四个修复目标均通过；278 DataFusion可选资格14项通过保持独立，不代表生产执行器或性能。

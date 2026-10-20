@@ -7,6 +7,7 @@ use super::{
     reading,
 };
 use crate::{
+    phase_profile::Phase,
     remote::provider::FileScope,
     resource::{Budget, Cost, OwnedRetainedReservation},
     table,
@@ -54,6 +55,7 @@ impl Generation {
             .map(|_| index)
     }
     pub(crate) fn read_batch(&self, index: usize) -> Result<reading::ipc::OwnedBatch> {
+        let _phase = self.budget.phase(Phase::GenerationBatch);
         self.budget.check()?;
         let entry = self
             .directory
@@ -109,6 +111,7 @@ pub(crate) fn open_existing(
     maximum: usize,
     budget: &Arc<Budget>,
 ) -> Result<Reuse> {
+    let _phase = budget.phase(Phase::GenerationOpen);
     budget.check()?;
     #[cfg(test)]
     if observations::ORIGINAL_WDC.with(|flag| flag.get()) {
@@ -138,8 +141,12 @@ pub(crate) fn open_existing(
     let check_budget = budget.clone();
     let check: DerivedReadCheck = Arc::new(move || check_budget.check());
     let mut receipt_allocation = None;
-    let lease = scope.reserve_derived_read_owned(&check)?;
+    let lease = {
+        let _phase = budget.phase(Phase::GenerationQuota);
+        scope.reserve_derived_read_owned(&check)?
+    };
     let receipt = (|| {
+        let _phase = budget.phase(Phase::GenerationManifest);
         let Some(bytes) = lease.read_generation_with_admission(&key, |length| {
             #[cfg(test)]
             observations::MANIFEST_ADMISSIONS.with(|n| n.set(n.get() + 1));
@@ -201,7 +208,11 @@ pub(crate) fn open_existing(
     if let Err(error) = admitted {
         return lease.finish(Err(error));
     }
-    let Some(mut reader) = lease.open_pinned_object(&object.sha256, object.bytes)? else {
+    let opened = {
+        let _phase = budget.phase(Phase::GenerationObject);
+        lease.open_pinned_object(&object.sha256, object.bytes)?
+    };
+    let Some(mut reader) = opened else {
         // SQL may use its already authenticated WDC source without persistence.
         // A valid manifest with only a missing body is explicitly degraded, not
         // a hit, a repair, or permission to hide other authentication failures.
@@ -212,8 +223,10 @@ pub(crate) fn open_existing(
     };
     let prepared = (|| {
         let allocation = budget.reserve_retained(2048)?.into_owned(budget)?;
-        let directory =
-            reading::ipc::directory(&mut reader, &schema.schema, table, batches, budget)?;
+        let directory = {
+            let _phase = budget.phase(Phase::GenerationDirectory);
+            reading::ipc::directory(&mut reader, &schema.schema, table, batches, budget)?
+        };
         budget.check()?;
         Ok((allocation, directory))
     })();

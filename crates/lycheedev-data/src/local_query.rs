@@ -858,6 +858,7 @@ pub(crate) fn sql_inner_budgeted(
     budget: &Arc<Budget>,
     after_execute: &mut impl FnMut() -> Result<()>,
 ) -> Result<Outcome> {
+    let request_phase = budget.phase(Phase::SqlRequest);
     let deadline = budget.deadline;
     budget.check()?;
     let csv = inv.flag("--encoding") == Some("csv");
@@ -885,6 +886,7 @@ pub(crate) fn sql_inner_budgeted(
     }
     program.validate_parameters(&request.parameters)?;
     request.admit_encoded(&safety)?;
+    drop(request_phase);
     // Ordinary SQL keeps Go's Metadata -> pin -> admission ordering for
     // both physical sources. Only file IO branches on --cdn.
     let (mut scope, pin) = {
@@ -915,6 +917,7 @@ pub(crate) fn sql_inner_budgeted(
             let resolver = resolver::Resolver::new(inv, data, budget, scope, maximum, &request.hotfix);
             let resolved = (|| {
                 let execution = Instant::now();
+                let execute_phase = budget.phase(Phase::SqlExecute);
                 let result = program.execute_resolved_budgeted(
                     &resolver,
                     &parameters,
@@ -927,6 +930,7 @@ pub(crate) fn sql_inner_budgeted(
                     None,
                     Some(&safety),
                 )?;
+                drop(execute_phase);
                 after_execute()?;
                 resolver.check_source()?;
                 let resolver::Report {
@@ -940,6 +944,7 @@ pub(crate) fn sql_inner_budgeted(
                 let execution_ms =
                     (execution.elapsed().as_secs_f64() * 1000.0 - definitions_ms - preparation_ms)
                         .max(0.0);
+                let result_phase = budget.phase(Phase::SqlResult);
                 let physical_empty = provenance.is_empty();
                 let complete = result.complete;
                 let resources = budget.logical_snapshot()?;
@@ -965,6 +970,8 @@ pub(crate) fn sql_inner_budgeted(
                     reading["effectiveSources"] =
                         effective::reports_value(&effective_sources, &safety)?;
                 }
+                drop(result_phase);
+                let serialize_phase = budget.phase(Phase::SqlSerialize);
                 let raw = capture::json_bytes(
                     &request::CaptureBody {
                         reading: &reading,
@@ -980,6 +987,7 @@ pub(crate) fn sql_inner_budgeted(
                         )
                     },
                 )?;
+                drop(serialize_phase);
                 let request_digest = request.digest(&safety)?;
                 let required_sources = if effective_sources.is_empty() {
                     vec![]
@@ -995,6 +1003,7 @@ pub(crate) fn sql_inner_budgeted(
                 // checked close cannot erase an already-published capture.
                 safety.charge(Cost::retained(512))?;
                 let capture_phase = budget.phase(Phase::SourceCapture);
+                let sql_capture_phase = budget.phase(Phase::SqlCapture);
                 let capture = evidence::commit_capture_budgeted_referencing_with_metadata(
                     &inv.home,
                     metadata,
@@ -1010,6 +1019,7 @@ pub(crate) fn sql_inner_budgeted(
                     &inv.control,
                     &reference_accounting,
                 )?;
+                drop(sql_capture_phase);
                 drop(capture_phase);
                 committed.push(
                     capture["id"]

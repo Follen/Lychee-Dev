@@ -11,15 +11,18 @@ import {hashFile, sourceDigest, verifyArtifact} from '../../tools/rust-build.mjs
 import {inspectEmmy} from '../../tools/rust-emmy-identity.mjs';
 import {cloneSeed, inventory, verifyGoMetadata, verifyGoPackage} from './inputs.mjs';
 import {GO_COMMIT, REPETITIONS, orderFor, elapsed} from './contract.mjs';
+import {generationMode, generationProfileEnvironment, generationPhaseProfiles, verifyGenerationProfileProduct} from './generation-profile.mjs';
 import {auditGenerationManifest} from './generation-evidence.mjs';
 import {auditCache} from './data-contract.mjs';
 import {blob, bounded, captureCanonical, decodedIdentity, digest, goJSON, parse, seedDataHome, CSV_COLUMNS, CSV_ROWS, CSV_SQL, numericRow} from './data-inputs.mjs';
 import {csvEnvironment, evidenceFiles, loadCSVPreparation} from './data-csv-diagnostics.mjs';
 import {parseLossless, auditSqlSemantics, compareSqlSemantics, auditGenerationProof, auditSqlCapture, auditPrepareEnvelope, verifyGenerationArtifact, semanticGeneration, summarizeGeneration} from './generation-contract.mjs';
 assert.equal(process.platform,'win32'); assert.equal(process.argv.length,3);
-const c=parse(bounded(process.argv[2],1<<20)), out=c.evidence, root=c.root, env=csvEnvironment(process.env);
+const c=parse(bounded(process.argv[2],1<<20)), out=c.evidence, root=c.root, env=generationProfileEnvironment(csvEnvironment(process.env));
+const mode=c.profiled?'--profile-observation':c.acceptance?'--acceptance':'--observation';
+const selected=generationMode(c.request,mode);assert.equal(c.profiled===true,selected.profiled);assert.deepEqual(c.product??null,selected.product);
 let fatal=false;
-const report={schema:'lycheedev.paired-generation.v1',state:'running',acceptance:c.acceptance,fullB04Acceptance:false,
+const report={schema:c.profiled?'lycheedev.paired-generation-profile.v1':'lycheedev.paired-generation.v1',profiled:c.profiled===true,product:selected.product,state:'running',acceptance:c.acceptance,fullB04Acceptance:false,
   scope:'16,384 authenticated synthetic NumericSample rows; production static SQL only, not DataFusion or real-client acceptance',
   cacheDefinition:'Four independently initialized/cloned engine homes per pair: fresh WDC and prepare workflow. OS cache not flushed. Go first workflow query is cold; Rust prepare plus first query is its cold task equivalent. Subsequent query retains own verified state.',
   timingDefinition:'Native CreateProcess through tree reap/output drain. Every explicit Rust prepare is timed and included in prepare-inclusive-first. First-after-prepare is conditional diagnostic, not cold acceptance. No product cost is subtracted.',
@@ -43,6 +46,7 @@ function identities(){
   assert.equal(verifyGoPackage(c.request.goPackage,c.request.luaLSArchive).packageSHA256,c.go.packageSHA256);
   assert.equal(hashFile(c.request.artifact,65536),c.artifactSHA256);const artifact=verifyArtifact(root,c.request.artifact);assert.deepEqual(artifact,c.rust);assert.equal(sourceDigest(root),c.rust.inputHashes.sourceTree);
   const emmy=inspectEmmy(root);verifyGenerationArtifact(artifact,{sourceRoot:root,sourceTree:sourceDigest(root),binarySHA256:c.rust.binarySHA256,emmy,channel:parse(bounded(join(root,'release/npm-channel.json')))});
+  if(c.profiled){const commit=preparation('git',['--no-optional-locks','-c','core.fsmonitor=false','-C',root,'rev-parse','HEAD'],'profile product commit',gitEnv).toString().trim();const status=preparation('git',['--no-optional-locks','-c','core.fsmonitor=false','-C',root,'status','--porcelain','--untracked-files=all'],'profile product clean',gitEnv).toString().trim();verifyGenerationProfileProduct(c.product,artifact,commit,status);report.productEvidence={commit,status,sourceTreeSHA256:artifact.inputHashes.sourceTree,binarySHA256:artifact.binarySHA256};}
   for(const [path,sha] of Object.entries(c.inputs))assert.equal(hashFile(join(c.runnerRoot,path)),sha);
   assert.deepEqual(loadCSVPreparation(c.request.fixturePreparation).provenance,c.producer);
 }
@@ -94,11 +98,11 @@ try {
           const key=({'fresh-wdc':'fresh',prepare:'prepare','first-after-prepare':'first','subsequent-hit':'subsequent'})[phase],home=homes[engine+'-'+(phase==='fresh-wdc'?'fresh':'workflow')];
           const before=decodedIdentity(home),generationBefore=prepared&&engine==='rust'&&phase!=='fresh-wdc'?generationBytes(home,prepared):null;
           const args=[...(phase==='prepare'?['data','cache','prepare','NumericSample']:['data','sql','--sql',CSV_SQL]),'--snapshot',fixture.identity.snapshot,'--installation',fixture.identity.installation,'--home',home,'--format','json','--offline'];
-          const {run,sample}=call(binary,args,job.evidence,true);row[engine][key]={...sample,home,snapshot:fixture.identity.snapshot};save();
-          assert(run.handlesReaped&&!run.error&&run.status===0,`${engine} ${phase}`);assert.equal(run.stderr.length,0);Object.assign(row[engine][key],elapsed(run.proof),{terminalVerified:true});
+          const {run,sample}=call(binary,args,job.evidence,true,generationProfileEnvironment(env,{enabled:c.profiled===true,measured:true,engine}));row[engine][key]={...sample,home,snapshot:fixture.identity.snapshot};save();
+          assert(run.handlesReaped&&!run.error&&run.status===0,`${engine} ${phase}`);if(c.profiled&&engine==='rust')row[engine][key].phaseDiagnostics=generationPhaseProfiles(run.stderr,{phase:key,successful:true});else assert.equal(run.stderr.length,0);Object.assign(row[engine][key],elapsed(run.proof),{terminalVerified:true});
           const envelope=parseLossless(run.stdout);
           if(phase==='prepare'){
-            row[engine][key].prepareAudit=auditPrepareEnvelope(envelope,{snapshot:fixture.identity.snapshot,table:'NumericSample',rows:CSV_ROWS,definitionSHA256:fixture.identity.tables[0].dbdSHA256});
+            row[engine][key].prepareAudit=auditPrepareEnvelope(envelope,{snapshot:fixture.identity.snapshot,table:'NumericSample',rows:CSV_ROWS,definitionSHA256:fixture.identity.tables[0].dbdSHA256,automaticEvictionEnabled:c.profiled===true});
             assert.equal(envelope.ok,true);assert.equal(envelope.error,null);const p=envelope.result;assert.equal(p.generationPublished,true);assert.equal(p.sourceKind,'static');assert.equal(p.snapshot,fixture.identity.snapshot);assert.equal(p.table,'NumericSample');assert.equal(p.availableRows,CSV_ROWS);assert.equal(p.complete,true);assert.deepEqual(p.missing,[]);assert.deepEqual(p.unavailablePartitions,[]);assert.equal(p.recordIdOrder,'ascending');assert.equal(p.definitionSHA256,fixture.identity.tables[0].dbdSHA256);assert.equal(p.representation,'arrow-ipc-file-v5/arrow-58.3.0/uncompressed');assert.equal(p.derivationVersion,'lycheedev.table-arrow-import.v1');assert.equal(p.generationReused,undefined);prepared=envelope;
             row[engine][key].generation=generationBytes(home,prepared);row[engine][key].receiptVerified=true;
             writeFileSync(join(job.evidence,'generation-manifest.json'),bounded(join(generationDirectory(home),p.generation+'.json'),1<<20),{flag:'wx'});
@@ -129,6 +133,6 @@ try {
   assert.equal(report.machine.powerAfter,report.machine.powerBefore,'active power scheme changed');
   report.groups=summarizeGeneration(report.pairs,{acceptance:c.acceptance});
   const valid=report.groups.every(g=>!g.state.startsWith('failed')&&g.state!=='not_run');
-  report.state=valid?(c.acceptance?'passed_selected_generation_paths':'equivalent_generation_observation_only'):'failed';
+  report.state=valid?(c.profiled?'equivalent_profiled_generation_observation_only':c.acceptance?'passed_selected_generation_paths':'equivalent_generation_observation_only'):'failed';
 }catch(error){report.state='failed';report.failure=error.message.slice(0,4096);}finally{report.handlesReaped=!fatal;save();}
 if(report.state==='failed')process.exitCode=1;
