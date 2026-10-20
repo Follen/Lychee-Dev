@@ -60,6 +60,14 @@ CLI 静态 oracle 修复（2026-10-20）：历史适配器单测固定读取并�
 
 后续由既有唯一父队列固定最终SHA执行Source all-targets及lib，逐名确认上述四项与原ignored库存；再以匹配产物完整六场景核Facts/Index/summary/custody/finalIntegrity及warm总wall/typed decode，补低重复/唯一路径语料后才可声称一般收益。新候选性能NOT_MEASURED；不增加嵌套计时。7786容量15新增仍NOT_RUN；当前Data性能观察仍固定7786 runner / 7bd产品，严格automaticEvictionEnabled=false，不切换或重派进行中的队列。无原始本机日志入库，PR保持draft。
 
+## 2c. 2026-10-20 generation prepare 公共timeout合同修复
+
+实际固定7786 runner / 7bd产品的一对观察在5/7次CLI后失败：prepare产品exit0，但公共render_with_context额外输出timeoutSeconds，旧工具期望遗漏该字段并拒绝。其余两次Rust SQL和finalIntegrity未执行，没有完整有效任务比率，所有任务性能均未验收；不得将已退出/回收owner或已完成样本算通过。原失败及封存证据保留，7bd产品和既有artifact不变。
+
+本次仅两份工具/测试源码把完整context合同改为精确numeric timeoutSeconds=300；snapshot/coverage及未知字段拒绝保持，未忽略字段或放宽超时。该值来自固定7bd CLI renderer与默认prepare超时，当前harness没有覆盖参数。11项新增覆盖真实公共形状及缺失、错误类型/数值、未知字段和缺snapshot/coverage。独审通过；在05660完整Source后继树上重跑六套Node265/265、0失败/0跳过（含focused160），只证明工具合同测试。源码复查未发现其他具体形状不匹配，但未取得本机raw stdout，因此不是原始输出重放。
+
+该工具修复的native重试和性能仍NOT_RUN。保持正在运行的05660固定native组合回归，不切换、不重派；后续仅由既有父队列准入新runner配原7bd产品、原认证fixture和全新owner/evidence的一对--observation。先完成七次样本和全部完整性核验，再讨论独立20对正式门禁，本次不运行20对。05660 Source优化、7786容量实现与各自待验证事实完整保留。
+
 ## 3. Home、容量和所有权边界
 
 Data默认容量为**5,000,000,000字节（十进制5GB）**，配置支持明确单位；与测试scratch 5/6GiB不同。最终统一核算Data下载/共享blob归属、物化/索引/目录、staging/spill/导出峰值和证据占用，按内容去重防双计。活跃lease和证据引用保护；旧已超额或配置缩小先拒新增并说明，不删除证据。

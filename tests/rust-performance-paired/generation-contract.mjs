@@ -219,7 +219,10 @@ export function semanticGeneration(entry, envelope, engine, cacheMode) {
 export function auditPrepareEnvelope(envelope, {snapshot, table, rows, definitionSHA256, recordIdColumn = 5}) {
   assert.equal(envelope.schema, 'lycheedev.result.v1'); assert.equal(envelope.ok,true); assert.equal(envelope.error,null);
   assert.deepEqual(envelope.captures,[]); assert.deepEqual(envelope.warnings,[]);
-  assert.deepEqual(envelope.context,{snapshot,coverage:{sourceKind:'static',complete:true,availableRows:rows,missing:[]}});
+  // Public CLI render_with_context adds the declared default timeout; library
+  // Outcome/dispatch fixtures alone do not represent the emitted envelope. The
+  // harness supplies no --timeout-seconds override, so require exactly 300.
+  assert.deepEqual(envelope.context,{snapshot,coverage:{sourceKind:'static',complete:true,availableRows:rows,missing:[]},timeoutSeconds:300});
   const p=envelope.result;
   assert.deepEqual(Object.keys(p).sort(), ['generation','generationPublished','sourceKind','snapshot','table','definitionSHA256','typedSchemaSHA256','object','representation','derivationVersion','availableRows','batchCount','complete','missing','unavailablePartitions','recordIdColumn','recordIdOrder','resources','memoryBudget','diskReservation'].sort(), 'exact fresh prepare receipt fields');
   assert.equal(p.generationPublished,true); assert.equal(p.sourceKind,'static'); assert.equal(p.snapshot,snapshot); assert.equal(p.table,table);
