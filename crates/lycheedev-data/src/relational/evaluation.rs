@@ -64,7 +64,7 @@ fn eval_sync(
     _legacy_queries: bool,
 ) -> Result<Scalar> {
     let mut tasks = task_stack::Stack::new(work.shared)?;
-    let mut values = task_stack::Stack::new(work.shared)?;
+    let mut values = task_stack::ScalarStack::new(work.shared)?;
     let mut root = Some(Task::Eval(term));
     while let Some(task) = root.take().or_else(|| tasks.pop()) {
         if let Some(request) = step(
@@ -128,7 +128,7 @@ struct Request {
 fn step<'a>(
     task: Task<'a>,
     tasks: &mut task_stack::Stack<'_, Task<'a>>,
-    values: &mut task_stack::Stack<'_, Scalar>,
+    values: &mut task_stack::ScalarStack<'_>,
     row: &[Scalar],
     columns: &[String],
     alias: ColumnOwners<'_>,
@@ -431,7 +431,7 @@ fn finish_query(kind: QueryKind, result: QueryResult, work: &mut Work<'_>) -> Re
     }
 }
 
-fn pop(values: &mut task_stack::Stack<'_, Scalar>) -> Result<Scalar> {
+fn pop(values: &mut task_stack::ScalarStack<'_>) -> Result<Scalar> {
     values.pop().ok_or_else(unsupported)
 }
 fn in_result(negated: bool, null: bool, matched: bool) -> Scalar {
@@ -558,7 +558,7 @@ pub(super) async fn eval_async<'a, 'w: 'a>(
     control: &execution::Control<'a, 'w>,
 ) -> Result<Scalar> {
     let mut tasks = task_stack::Stack::new(control.shared_budget())?;
-    let mut values = task_stack::Stack::new(control.shared_budget())?;
+    let mut values = task_stack::ScalarStack::new(control.shared_budget())?;
     let mut root = Some(Task::Eval(term));
     while let Some(task) = root.take().or_else(|| tasks.pop()) {
         let request = control.work(|work| {
@@ -682,5 +682,64 @@ mod constant_entry_tests {
             .execute(&data, &parameters, Limits::default(), None)
             .unwrap();
         assert_eq!(result.rows, vec![vec![Scalar::Int(7)]]);
+    }
+    #[test]
+    fn inline_scalar_admission_keeps_numeric_binding_and_control_error_precedence() {
+        use crate::resource::{Budget, Cost};
+        for (term, expected) in [
+            (
+                Term::Value(Scalar::Float(f64::NAN)),
+                "relational.numeric_range",
+            ),
+            (Term::Ordinal(0), "relational.invalid_binding"),
+            (
+                Term::Parameter("missing".into()),
+                "relational.invalid_binding",
+            ),
+            (
+                Term::Value(Scalar::UInt(u64::MAX)),
+                "records.query_resource_budget",
+            ),
+        ] {
+            let budget = Budget::new(
+                Cost {
+                    retained_bytes: (4 * size_of::<Scalar>() - 1) as u64,
+                    ..Cost::defaults()
+                },
+                Instant::now() + Duration::from_secs(30),
+                None,
+            );
+            let sources = BTreeMap::new();
+            let context = subquery::Context::new(&sources, None);
+            let mut work = Work {
+                left: 1000,
+                bytes: 1 << 20,
+                deadline: budget.deadline,
+                cancel: None,
+                shared: Some(&budget),
+                planning: false,
+                temporaries: Vec::new(),
+                selection_sources: Vec::new(),
+                providers: &[],
+                resolver: None,
+                roots: BTreeMap::new(),
+                measure: false,
+                scans: Vec::new(),
+            };
+            let error = constant(
+                &term,
+                &[],
+                &[],
+                ColumnOwners::Single(""),
+                &BTreeMap::new(),
+                &context,
+                &mut work,
+            )
+            .unwrap_err();
+            assert_eq!(error.code, expected);
+            assert_eq!(work.left, 999);
+            assert_eq!(budget.snapshot().unwrap().retained_bytes, 0);
+            assert_eq!(budget.refundable_retained_bytes(), 0);
+        }
     }
 }

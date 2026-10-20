@@ -1,10 +1,13 @@
 # Rust 架构实施清单
 
-当前批：05660两check与定向native948通过/6原ignored，19新增逐名一次；其匹配Source六场景完整性已通过，仅三个增量单pair达0.30，正式20对仍未验收。7bd Data完整一对观察有效但慢约3–4倍，未验收。本批Data/CLI插桩及新v2观察合同已整合，6新增Rust与新产品运行NOT_RUN。
+当前批：fca完整generation诊断质量通过但未达性能目标；8e Source诊断继续唯一父队列。本批两文件Scalar inline及五文件startup归因已独审并整合，Node890通过/11平台skip，六新增Rust与新产品性能仍NOT_RUN。
 
 以 [handover](handover.md) 为当前事实、[DESIGN](DESIGN.md#authorized-architecture-implementation-plan--2026-10-19) 为完整计划。质量基线f811；性能参考固定Go323。先业务质量/完整实现，再≤30%耗时门禁，之后正式五项循环。历史已完成项与原失败留在[308efa旧清单](https://github.com/Follen/Lychee-Dev/blob/308efa2766d00273b13c9c7e24a0b956bb60e9e9/todo.md)，不滚动复制到当前待办。
 
 ## 立即闭合固定基线
+- [x] fca完整generation一对诊断通过所有结果/CAP/IPC/复用/finalIntegrity；fresh/first/hit Rust仍慢于Go，不是正式性能验收，历史收据不补造startup归因。
+- [ ] 本批最终SHA：all-targets、完整relational（原execution/default-stack/depth/真实future-size门禁不放宽）、generation与local_query输出/投影回归，六新增逐名一次；保原ignored。Node890/0/11及语法通过不是native证明，当前8e Source诊断不抢占。
+- [ ] 匹配新优化产物及固定Go/fixture运行新profile-observation，七份实测receipt全部startup归因、完整16,384×5有序结果/CAP/manifest/IPC/复用及finalIntegrity，helper关闭诊断，保全部完整时钟。98,304分配减少仅源码推导，收益尚未测；20对正式验收单独无profile执行。
 - [x] 7bd Source六场景完整Facts/Index/summary/custody及finalIntegrity通过；四增量单pair低于0.30，cold/warm未达，20对未验收。实际warm typed decode 121642µs属于cached_index 168301µs父桶。
 - [x] 05660组合default/DF两check和定向native948通过/6原ignored，Source4与容量15新增逐名各一次；不借用于本批新插桩。
 - [x] 05660匹配Source六场景完整Facts/Index/summary/custody及finalIntegrity通过；仅insert/delete/rename单pair低于0.30，cold0.41458/warm0.40232/change0.31859未达，非20对验收。typed decode 106632µs与7bd121642µs跨run差异不可作因果结论。

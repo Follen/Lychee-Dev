@@ -1,7 +1,7 @@
 // Final revalidation is independent of success strings/booleans in the child.
 import assert from 'node:assert/strict';
 import {verifyGenerationPhaseEvidence, verifyGenerationProfileProduct} from './generation-profile.mjs';
-import {elapsed} from './contract.mjs';
+import {elapsed,startupBreakdown} from './contract.mjs';
 import {parseLossless, summarizeGeneration} from './generation-contract.mjs';
 export function verifyGenerationCompletion(run, observed, acceptance, {profiled=false,product=null}={}) {
   if(profiled){assert.equal(acceptance,false,'profiled lane cannot grant acceptance');assert.deepEqual(observed.product,product);assert.equal(observed.profiled,true);const e=observed.productEvidence;assert.deepEqual(Object.keys(e).sort(),['commit','sourceTreeSHA256','binarySHA256','status'].sort());verifyGenerationProfileProduct(product,{inputHashes:{sourceTree:e.sourceTreeSHA256},binarySHA256:e.binarySHA256},e.commit,e.status);}else{assert(observed.profiled===undefined||observed.profiled===false);assert(observed.product===undefined||observed.product===null);}
@@ -13,6 +13,7 @@ export function verifyGenerationCompletion(run, observed, acceptance, {profiled=
   for(const pair of [...observed.preflight,...observed.pairs])for(const engine of ['go','rust'])for(const phase of ['fresh',...(engine==='rust'?['prepare']:[]),'first','subsequent']){
     const s=pair[engine][phase];assert.equal(s.exit,0);assert(!s.error);assert.equal(s.handlesReaped,true);assert.equal(s.valid,true);
     if(profiled&&engine==='rust')verifyGenerationPhaseEvidence(s,phase);else assert.equal(s.phaseDiagnostics,undefined,'ordinary/Go samples cannot inherit profile evidence');
+    if(profiled)assert.deepEqual(s.startup,startupBreakdown(s.proof,{required:true}),'complete startup attribution must match original native receipt');else assert.equal(s.startup,undefined,'ordinary modes cannot inherit startup attribution');
     const measured=elapsed(s.proof);for(const [key,value]of Object.entries(measured))assert.equal(s[key],value,'native sample timing must not be replaced/subtracted');
     assert.match(s.stdoutSHA256,/^[0-9a-f]{64}$/);assert.match(s.stderrSHA256,/^[0-9a-f]{64}$/);
   }

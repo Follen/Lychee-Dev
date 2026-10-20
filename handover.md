@@ -90,6 +90,16 @@ CLI 静态 oracle 修复（2026-10-20）：历史适配器单测固定读取并�
 
 独立最终源码审查通过，最终组合九套Node422/422通过、0失败/skip；官方云端入口owned.windows_required在编译前阻断，新三个active回归和ignored诊断均NOT_RUN，不是优化或性能验收。当前fca9固定native质量队列保持，不切换或重派；本批后续由唯一父队列固定新SHA进行Source all-targets/lib和独立优化诊断。Data插桩及v2产品观察合同保持原样，不借用旧版本结果，无本机原始日志入库。
 
+## 2f. 2026-10-20 Scalar inline 与 generation 启动归因后继
+
+固定 fca9 匹配产品的一对完整诊断已通过完整有序16,384×5结果、CAP/manifest/IPC、generation复用和finalIntegrity。Go/Rust完整毫秒为fresh 144.0619/425.7497、first 141.7286/339.5167、hit 119.5951/334.484，Rust prepare 271.7316；不是性能验收，均不能称达到≤0.30。一次hit诊断的IPC约0.422ms、source prepare 51.33ms、projection 26.97ms、CAP serialize 31.482ms、render 18.361ms；嵌套桶重叠不可相加或相减归因，不能把完整外部时钟余量直接当启动耗时。
+
+本次以8e817e为精确基线，整合已独审的两份Data Rust与五份generation工具文件。Scalar值栈首个值inline，第二个同时存活值才分配原四槽Vec；generic Task栈、四槽预算及退栈refund、原控制检查和解释步骤不变。五投影加一ORDER叶子、16,384行推导减少98,304次小Vec backing分配，这是源码推导而非实测wall/RSS。首次allocator失败点随分配消失，spill先分配再取原owner；真实boxed future可能变大，原size_of_val准入、默认栈/深度和所有原限额必须原样通过，不得放宽或宣称全查询计数逐字相同。
+
+新profile-observation要求七份实际native measured receipt（三Go、四Rust）均有startupDiagnostics及独立复核的startupBreakdown；helper、历史数据和普通/acceptance模式不启用。原CreateProcess至reap/drain的完整时钟不改、不扣除。rootExitTicks是owner延迟观察而非精确OS退出；CPU取原已回收root handle，不代表后代或observer CPU。旧fca收据不补造归因，新结果必须绑定本批最终SHA和匹配优化产物。
+
+最终组合19份paired Node加owner套件共901项：890通过、0失败、11个Windows native平台skip；四份Node语法与两份Rust语法解析及diff检查通过。六个新增Rust仍NOT_RUN，前期官方入口在Cargo前因固定upstream缺失阻断；语法/Node不代表编译、native或收益。保留正在运行的8e Source诊断，不切换、不重派。随后唯一父队列固定本批SHA依序all-targets、完整relational（含原execution边界/default-stack/depth/future测量）、generation/local_query输出投影回归，六新增逐名一次、原ignored单列；通过后才以新匹配优化产物做完整七样本profile观察。全仓/业务/性能门禁和正式五循环仍未闭，无原始本机日志入库、merge或release。
+
 ## 3. Home、容量和所有权边界
 
 Data默认容量为**5,000,000,000字节（十进制5GB）**，配置支持明确单位；与测试scratch 5/6GiB不同。最终统一核算Data下载/共享blob归属、物化/索引/目录、staging/spill/导出峰值和证据占用，按内容去重防双计。活跃lease和证据引用保护；旧已超额或配置缩小先拒新增并说明，不删除证据。

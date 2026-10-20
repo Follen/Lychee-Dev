@@ -193,3 +193,22 @@ fixture, then dispatch only this one-pair mode through the parent's existing
 native test queue. Do not substitute the currently running/historical product or
 change its receipts. Native execution remains NOT_RUN until its new evidence is
 recorded; cloud parser tests are not execution of the Rust timers.
+
+### Native owner startup attribution in the profiled lane
+
+The same existing owner startup diagnostics are now enabled for all seven measured
+invocations (three Go and four Rust) in `--profile-observation` only. Initialization
+and other unmeasured helpers remain unchanged. No public flag or environment
+variable is added; ordinary observation and acceptance do not enable this feature.
+Each successful sample retains the original native diagnostics and a
+`startupBreakdown` summary, which final completion independently recomputes and
+compares. A missing, malformed, or changed receipt/summary rejects completion.
+
+`rootExitTicks` is the owner's observed root-exit time, not the exact OS exit
+instant. Resume-to-observed-exit includes scheduling, loader/runtime, product work
+and observer latency; it is neither pure product CPU nor evidence of a fixed
+50ms floor. Root CPU comes from the original process handle only. All original
+CreateProcess-through-reap/drain elapsed time remains included, with no subtraction.
+Earlier profile receipts without startup diagnostics remain historical evidence,
+not complete evidence for this upgraded observation. Rerun one full seven-sample
+pair after freezing the combined product/tooling artifact; do not merge runs.

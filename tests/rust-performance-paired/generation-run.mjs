@@ -10,8 +10,8 @@ import {collectOwnedMemory} from '../../tools/rust-owned-memory.mjs';
 import {hashFile, sourceDigest, verifyArtifact} from '../../tools/rust-build.mjs';
 import {inspectEmmy} from '../../tools/rust-emmy-identity.mjs';
 import {cloneSeed, inventory, verifyGoMetadata, verifyGoPackage} from './inputs.mjs';
-import {GO_COMMIT, REPETITIONS, orderFor, elapsed} from './contract.mjs';
-import {generationMode, generationProfileEnvironment, generationPhaseProfiles, verifyGenerationProfileProduct} from './generation-profile.mjs';
+import {GO_COMMIT, REPETITIONS, orderFor, elapsed, startupBreakdown} from './contract.mjs';
+import {generationMode, generationOwnerOptions, generationProfileEnvironment, generationPhaseProfiles, verifyGenerationProfileProduct} from './generation-profile.mjs';
 import {auditGenerationManifest} from './generation-evidence.mjs';
 import {auditCache} from './data-contract.mjs';
 import {blob, bounded, captureCanonical, decodedIdentity, digest, goJSON, parse, seedDataHome, CSV_COLUMNS, CSV_ROWS, CSV_SQL, numericRow} from './data-inputs.mjs';
@@ -26,12 +26,12 @@ const report={schema:c.profiled?'lycheedev.paired-generation-profile.v1':'lychee
   scope:'16,384 authenticated synthetic NumericSample rows; production static SQL only, not DataFusion or real-client acceptance',
   cacheDefinition:'Four independently initialized/cloned engine homes per pair: fresh WDC and prepare workflow. OS cache not flushed. Go first workflow query is cold; Rust prepare plus first query is its cold task equivalent. Subsequent query retains own verified state.',
   timingDefinition:'Native CreateProcess through tree reap/output drain. Every explicit Rust prepare is timed and included in prepare-inclusive-first. First-after-prepare is conditional diagnostic, not cold acceptance. No product cost is subtracted.',
-  metrics:{memory:'sampled owned Job working set/private bytes, not unique physical RSS',cpu:'not_measured',io:'not_measured'},
+  metrics:{memory:'sampled owned Job working set/private bytes, not unique physical RSS',cpu:c.profiled?'Original root process handle GetProcessTimes; not descendants or owner/observer CPU':'not_measured',io:'not_measured'},
   machine:{hostname:os.hostname(),platform:process.platform,arch:process.arch,node:process.version,release:os.release(),cpus:os.cpus(),totalMemory:os.totalmem(),conditions:c.conditions},inputs:c.inputs,producer:c.producer,preparation:[],preflight:[],pairs:[],groups:[]};
 const save=()=>writeFileSync(join(out,'report.json'),JSON.stringify(report,null,2)+'\n');
 function call(binary,args,evidence,measured=false,environment=env) {
   assert(!fatal,'prior owned handles unresolved'); fatal=true;
-  const run=ownedSpawnSync(binary,args,{cwd:root,env:environment,evidence,timeout:330000,orphanMs:30000,memoryObservation:measured});
+  const run=ownedSpawnSync(binary,args,{cwd:root,env:environment,evidence,timeout:330000,orphanMs:30000,...generationOwnerOptions({profiled:c.profiled===true,measured})});
   fatal=run.handlesReaped!==true;
   const sample={binary,args,exit:run.status,error:run.error?.message,handlesReaped:run.handlesReaped,proof:run.proof,logs:run.logs,stdoutSHA256:digest(run.stdout),stderrSHA256:digest(run.stderr),valid:false};
   if(measured)sample.memory=collectOwnedMemory(run,{evidence,sourceBinary:binary,runState:run.status===0&&!run.error?'passed_invocation':'failed_invocation'});
@@ -99,7 +99,7 @@ try {
           const before=decodedIdentity(home),generationBefore=prepared&&engine==='rust'&&phase!=='fresh-wdc'?generationBytes(home,prepared):null;
           const args=[...(phase==='prepare'?['data','cache','prepare','NumericSample']:['data','sql','--sql',CSV_SQL]),'--snapshot',fixture.identity.snapshot,'--installation',fixture.identity.installation,'--home',home,'--format','json','--offline'];
           const {run,sample}=call(binary,args,job.evidence,true,generationProfileEnvironment(env,{enabled:c.profiled===true,measured:true,engine}));row[engine][key]={...sample,home,snapshot:fixture.identity.snapshot};save();
-          assert(run.handlesReaped&&!run.error&&run.status===0,`${engine} ${phase}`);if(c.profiled&&engine==='rust')row[engine][key].phaseDiagnostics=generationPhaseProfiles(run.stderr,{phase:key,successful:true});else assert.equal(run.stderr.length,0);Object.assign(row[engine][key],elapsed(run.proof),{terminalVerified:true});
+          assert(run.handlesReaped&&!run.error&&run.status===0,`${engine} ${phase}`);if(c.profiled&&engine==='rust')row[engine][key].phaseDiagnostics=generationPhaseProfiles(run.stderr,{phase:key,successful:true});else assert.equal(run.stderr.length,0);Object.assign(row[engine][key],elapsed(run.proof),{terminalVerified:true});if(c.profiled)row[engine][key].startup=startupBreakdown(run.proof,{required:true});
           const envelope=parseLossless(run.stdout);
           if(phase==='prepare'){
             row[engine][key].prepareAudit=auditPrepareEnvelope(envelope,{snapshot:fixture.identity.snapshot,table:'NumericSample',rows:CSV_ROWS,definitionSHA256:fixture.identity.tables[0].dbdSHA256,automaticEvictionEnabled:c.profiled===true});

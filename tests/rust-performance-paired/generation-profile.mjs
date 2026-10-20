@@ -61,3 +61,9 @@ export function verifyGenerationPhaseEvidence(sample,phase) {
   assert.deepEqual(generationPhaseProfiles(raw,{phase,successful:true}),value,'complete independently parsed diagnostic observations');
   return true;
 }
+
+// Owner diagnostics are symmetric across engines, never enabled for helpers.
+export function generationOwnerOptions({profiled=false,measured=false}={}) {
+  assert.equal(typeof profiled,'boolean');assert.equal(typeof measured,'boolean');
+  return {memoryObservation:measured,...(profiled&&measured?{startupDiagnostics:true}:{})};
+}
