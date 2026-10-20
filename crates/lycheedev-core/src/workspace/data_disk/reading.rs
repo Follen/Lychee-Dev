@@ -148,8 +148,14 @@ impl<'a> OwnedDerivedReadLease<'a> {
             reader.into_owned(self.lease.owner.control.control.clone(), self.supplemental);
         // Keep the original reader separate from finish's successful value:
         // failed quota verification/close must explicitly report its cleanup.
-        // Full body hashing never holds quota; no reader escapes before it passes.
-        let result = finish_owner(self.lease.owner).and_then(|()| reader.authenticate(sha256));
+        // Mark a native length-validated acquisition under the short quota
+        // owner. Recency is advisory: a later hash failure may leave a recent
+        // marker, but can never authorize eviction or hide corruption. Preserve
+        // checked quota-close before full hashing and the original pin lifetime.
+        let marked = self.lease.owner.touch_object(sha256);
+        let result = crate::metadata::historical_write::finish_historical(
+            marked, finish_owner(self.lease.owner))
+            .and_then(|()| reader.authenticate(sha256));
         match result {
             Ok(()) => Ok(Some(reader)),
             Err(error) => reader.close_after_with(Err(error), close_file, close_dir),
@@ -283,7 +289,10 @@ impl<'a> DerivedReservation<'a> {
             .open_object_handle(sha256, bytes, false)?
             .expect("required object open never returns absence");
         match reader.authenticate(sha256) {
-            Ok(()) => Ok(reader),
+            Ok(()) => match self.touch_object(sha256) {
+                Ok(()) => Ok(reader),
+                Err(error) => reader.close_after(Err(error)),
+            },
             Err(error) => reader.close_after(Err(error)),
         }
     }

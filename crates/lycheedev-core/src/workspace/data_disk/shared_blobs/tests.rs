@@ -366,7 +366,7 @@ fn unregistered_evidence_is_reported_outside_coverage_and_never_pruned() {
 }
 
 #[test]
-fn completion_stage_failure_keeps_published_body_and_pending_claim() {
+fn completion_stage_failure_keeps_pending_claim_then_clean_retry_recovers() {
     let f = Fixture::new(88);
     let body = evidence::blob_path(&f.0, &storage::sha256(b"body")).unwrap();
     let observed = Cell::new(false);
@@ -399,7 +399,8 @@ fn completion_stage_failure_keeps_published_body_and_pending_claim() {
     assert_eq!(fs::read_dir(f.paths().shared_blobs()).unwrap().count(), 1);
     assert_eq!(f.usage().retained_shared_peak_bytes, 8);
     f.publish(b"body").unwrap();
-    assert!(!f.receipt(b"body", "complete").exists());
+    assert!(f.receipt(b"body", "complete").exists());
+    assert_eq!(f.usage().retained_shared_peak_bytes, 0);
 }
 #[test]
 fn waiting_shared_writer_observes_independent_budget_and_does_not_release_active_derived_lease() {
@@ -424,4 +425,60 @@ fn waiting_shared_writer_observes_independent_budget_and_does_not_release_active
     held.finish(Ok(())).unwrap();
     resources.close().unwrap();
     f.publish(b"body").unwrap();
+}
+
+fn closed_body_pending(f: &Fixture, body: &[u8]) -> BlobRef {
+    f.usage();
+    let reference = BlobRef { sha256: storage::sha256(body), bytes: body.len() as u64 };
+    let published = evidence::publish_blob(&f.0, body, body.len()).unwrap();
+    assert_eq!(published["sha256"], reference.sha256);
+    fs::write(f.receipt(body, "intent"), intent(&reference).unwrap()).unwrap();
+    reference
+}
+
+#[test]
+fn pending_closed_publication_recovers_only_after_full_body_and_clean_shard_proof() {
+    let f = Fixture::new(10000);
+    let body = b"durable body before completion";
+    let reference = closed_body_pending(&f, body);
+    assert_eq!(f.usage().retained_shared_peak_bytes, 2 * reference.bytes);
+    let reused = f.publish(body).unwrap();
+    assert_eq!(reused.sha256, reference.sha256);
+    assert_eq!(reused.bytes, reference.bytes);
+    let usage = f.usage();
+    assert_eq!(usage.retained_shared_peak_bytes, 0);
+    assert_eq!(usage.shared_blob_bytes, reference.bytes);
+    assert_eq!(fs::read(f.receipt(body, "complete")).unwrap(), completion(&intent(&reference).unwrap()));
+    assert_eq!(fs::read(evidence::blob_path(&f.0, &reference.sha256).unwrap()).unwrap(), body);
+}
+
+#[test]
+fn pending_recovery_never_removes_or_discounts_unknown_shared_stage() {
+    let f = Fixture::new(10000);
+    let body = b"retain stage";
+    let reference = closed_body_pending(&f, body);
+    let path = evidence::blob_path(&f.0, &reference.sha256).unwrap();
+    let unknown = path.parent().unwrap().join(".lycheedev-unknown-stage");
+    fs::write(&unknown, b"other domain or interrupted writer").unwrap();
+    f.publish(body).unwrap();
+    assert!(!f.receipt(body, "complete").exists());
+    assert_eq!(f.usage().retained_shared_peak_bytes, 2 * reference.bytes);
+    assert_eq!(fs::read(unknown).unwrap(), b"other domain or interrupted writer");
+}
+
+#[test]
+fn pending_recovery_reserves_completion_before_growth_and_preserves_zero_growth_reuse() {
+    let f = Fixture::new(10000);
+    let body = b"protected pending";
+    let reference = closed_body_pending(&f, body);
+    let before = f.usage();
+    f.limit(before.total().unwrap());
+    let reused = f.publish(body).unwrap();
+    assert_eq!(reused.sha256, reference.sha256);
+    assert_eq!(reused.bytes, reference.bytes);
+    assert!(!f.receipt(body, "complete").exists());
+    assert_eq!(f.usage(), before);
+    f.limit(before.total().unwrap() + COMPLETE_BYTES as u64);
+    f.publish(body).unwrap();
+    assert_eq!(f.usage().retained_shared_peak_bytes, 0);
 }

@@ -107,6 +107,9 @@ impl StreamQuota<'_> {
                 let mut settlement = StreamPublicationSettlement::new();
                 let result = run(&mut settlement, true);
                 record_body(&owner, self.home, reference, &settlement)?;
+                if result.is_ok() && complete.is_none() {
+                    recovery::complete_closed_publication(&mut owner, reference, &raw)?;
+                }
                 return result;
             }
             // The pre-sized spool is already counted in existing staging. The

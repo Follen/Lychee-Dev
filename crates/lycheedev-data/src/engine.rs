@@ -1,6 +1,16 @@
-//! DataFusion integration candidate. The mature engine owns relational planning
-//! and execution; owned extensions retain the established numeric contract.
-//! This module is not a second SQL executor or an implicit default-route switch.
+pub mod api;
+mod lifetime;
+mod plan;
+mod result;
+mod session_engine;
+mod source;
+pub use api::*;
+pub use result::{OwnedProvenance, ResultOwner};
+pub use session_engine::Engine;
+// Task-native DataFusion core. The mature kernel owns relational execution.
+// Existing data sql entrypoints are not migrated by this slice. Production
+// safety combines logical admissions with an externally supervised worker;
+// neither this module nor the DF pool claims a whole-process allocator ledger.
 mod aggregate;
 mod numeric;
 mod provider;
@@ -14,10 +24,10 @@ use datafusion::common::{DataFusionError, Result as DfResult};
 use lycheedev_core::ToolkitError;
 use std::sync::{Arc, Mutex};
 
-/// Candidate-owned function/state allocations remain charged while the query
-/// owner lives. Tests retain it through conversion of all results. A production
-/// stream must attach this owner to its output lifetime before using this seam;
-/// native DataFusion plan/stream allocation accounting is not implemented here.
+/// Owned function/state allocations remain charged during request execution.
+/// Result/source guards retain escaped buffers and session admissions separately.
+/// Native DataFusion internal allocations are not fully represented by this
+/// ledger; the supervised worker must enforce process time/memory boundaries.
 struct QueryOwner {
     budget: Arc<Budget>,
     allocations: Mutex<Vec<OwnedRetainedReservation>>,

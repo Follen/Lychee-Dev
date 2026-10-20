@@ -2,6 +2,8 @@
 //! Authenticated synthetic local fixtures; no native/client/network-run claim.
 #[path = "support/catalog_fixture.rs"]
 mod catalog_fixture;
+#[path = "support/data_cache.rs"]
+mod data_cache;
 use catalog_fixture::{BUILD, Cell::U, DEFS, Fixture, table};
 use lycheedev_core::{
     Outcome,
@@ -28,7 +30,7 @@ fn cache(fx: &Fixture, suffix: &str, raw: &[u8]) -> Value {
     let url = format!("https://raw.githubusercontent.com/wowdev/WoWDBDefs/{DEFS}/{suffix}");
     let key = format!("definition/{}", storage::sha256(url.as_bytes()));
     let blob = evidence::publish_blob(&fx.home, raw, 4 << 20).unwrap();
-    let mut metadata = Metadata::open(&fx.home, true).unwrap();
+    let metadata = data_cache::Cache::new(&fx.home);
     let generation = metadata.generation(&key).unwrap();
     metadata
         .put(&key, &json!({"url":url,"blob":blob}), generation)

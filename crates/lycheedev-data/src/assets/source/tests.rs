@@ -54,24 +54,36 @@ fn seed(f: &Fixture) -> serde_json::Value {
         &fetch,
     )
     .unwrap();
-    let m = Metadata::open_controlled(&f.0, false, &Default::default()).unwrap();
-    let doc = m
-        .read_controlled("listfile/community-csv", &Default::default())
-        .unwrap();
-    m.close().unwrap();
-    doc
+    DataCacheMetadata::read_controlled_with_check(
+        &f.0,
+        "listfile/community-csv",
+        &OperationControl::default(),
+        || Ok(()),
+    )
+    .unwrap()
 }
 fn write(f: &Fixture, raw: &str) {
     let control = OperationControl::default();
-    let mut m = Metadata::open_controlled(&f.0, true, &control).unwrap();
-    let generation = m
-        .generation_controlled("listfile/community-csv", &control)
-        .unwrap();
+    let generation = DataCacheMetadata::read_document_raw_controlled_with_check(
+        &f.0,
+        "listfile/community-csv",
+        &control,
+        || Ok(()),
+    )
+    .unwrap()
+    .generation;
     let raw = serde_json::value::RawValue::from_string(raw.into()).unwrap();
-    m.put_controlled("listfile/community-csv", &raw, generation, &control)
-        .unwrap();
-    m.close().unwrap();
+    DataCacheMetadata::put_controlled_with_check(
+        &f.0,
+        "listfile/community-csv",
+        &raw,
+        Some(generation),
+        &control,
+        || Ok(()),
+    )
+    .unwrap();
 }
+
 fn offline(f: &Fixture) -> Result<Prepared> {
     prepare(
         &f.0,
@@ -86,7 +98,7 @@ fn offline(f: &Fixture) -> Result<Prepared> {
     )
 }
 #[test]
-fn listfile_validation_precedes_workspace_and_offline_opens_real_metadata_owner() {
+fn listfile_validation_precedes_workspace_and_offline_does_not_create_private_database() {
     let path = Path::new("nonexistent-listfile-invalid-request");
     assert_eq!(
         prepare(
@@ -110,8 +122,7 @@ fn listfile_validation_precedes_workspace_and_offline_opens_real_metadata_owner(
         offline(&f).err().unwrap().code,
         "records.listfile_unavailable"
     );
-    let m = Metadata::open_controlled(&f.0, false, &Default::default()).unwrap();
-    m.close().unwrap();
+    assert!(!f.0.join("state/data/cache-v1.sqlite").exists());
 }
 #[test]
 fn listfile_refresh_samples_generation_after_fetch_and_keeps_original_control() {
@@ -229,4 +240,44 @@ fn listfile_unknown_timezone_is_accepted_on_read_and_fails_only_public_serializa
     write(&f, &doc.to_string());
     let prepared = offline(&f).unwrap();
     assert!(serde_json::to_value(&prepared.provenance).is_err());
+}
+
+#[test]
+fn listfile_private_metadata_corruption_never_authorizes_network_or_shared_fallback() {
+    let f = Fixture::new();
+    let doc = seed(&f);
+    let mut shared = lycheedev_core::metadata::Metadata::open(&f.0, true).unwrap();
+    shared.put("listfile/community-csv", &doc, None).unwrap();
+    shared.put("capture/fixture", &true, None).unwrap();
+    shared.close().unwrap();
+    std::fs::write(
+        f.0.join("state/data/cache-v1.sqlite"),
+        b"invalid private database",
+    )
+    .unwrap();
+    let fetch = Fetch {
+        calls: Cell::new(0),
+    };
+    assert!(
+        prepare(
+            &f.0,
+            "community-csv",
+            false,
+            false,
+            Default::default(),
+            &Default::default(),
+            &fetch
+        )
+        .is_err()
+    );
+    assert_eq!(fetch.calls.get(), 0);
+    let shared = lycheedev_core::metadata::Metadata::open(&f.0, false).unwrap();
+    assert_eq!(
+        shared
+            .read::<serde_json::Value>("listfile/community-csv")
+            .unwrap(),
+        doc
+    );
+    assert!(shared.read::<bool>("capture/fixture").unwrap());
+    shared.close().unwrap();
 }

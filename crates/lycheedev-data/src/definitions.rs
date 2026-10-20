@@ -1,7 +1,9 @@
 //! Exact-revision definition resources. Cached bytes are rehashed and parsed;
 //! corruption never causes a silent replacement download.
 use crate::{fault, schema};
-use lycheedev_core::{Result, control::OperationControl, evidence, metadata::Metadata, storage};
+use lycheedev_core::{
+    Result, control::OperationControl, evidence, metadata::DataCacheMetadata, storage,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 mod loading;
@@ -11,9 +13,10 @@ mod remote_revision;
 pub(crate) use remote_revision::normalized_reference;
 pub use remote_revision::resolve_revision_controlled;
 
+#[cfg(test)]
+use std::io::Read;
 use std::{
     collections::{BTreeMap, BTreeSet},
-    io::Read,
     path::Path,
     time::{Duration, Instant},
 };
@@ -149,12 +152,6 @@ struct Object {
     url: String,
     blob: Value,
 }
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Revision {
-    reference: String,
-    commit: String,
-}
 fn reference(value: &str) -> Option<&str> {
     if value.is_empty() {
         return Some("refs/heads/master");
@@ -184,116 +181,10 @@ fn reference(value: &str) -> Option<&str> {
 /// Online symbolic resolutions refresh each call. Offline aliases are the last
 /// validated observation for that exact full ref, never an invented latest pin.
 pub fn resolve_revision(home: &Path, value: &str, offline: bool) -> Result<String> {
-    if lycheedev_core::selection::valid_digest(value, 40) {
-        return Ok(value.to_owned());
-    }
-    let value = reference(value).ok_or_else(|| {
-        fault(
-            "records.definition_identity",
-            4,
-            "Definition reference requires exact commit or valid full ref",
-        )
-    })?;
-    let key = format!("definition-ref/{}", storage::sha256(value.as_bytes()));
-    let mut metadata = Metadata::open(home, true)?;
-    let cached = match metadata.read::<Revision>(&key) {
-        Ok(document) => {
-            if document.reference != value
-                || !lycheedev_core::selection::valid_digest(&document.commit, 40)
-            {
-                return Err(fault(
-                    "records.definition_identity",
-                    4,
-                    "Cached revision identity differs",
-                ));
-            }
-            Some(document)
-        }
-        Err(error) if error.code == "vault.record_missing" => None,
-        Err(error) => return Err(error),
-    };
-    if offline {
-        return cached.map(|document| document.commit).ok_or_else(|| {
-            fault(
-                "records.definition_unavailable_offline",
-                3,
-                "No validated observation for definition reference",
-            )
-        });
-    }
-    let generation = metadata.generation(&key)?;
-    let mut escaped = String::new();
-    for b in value.bytes() {
-        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
-            escaped.push(b as char);
-        } else {
-            escaped.push_str(&format!("%{b:02X}"));
-        }
-    }
-    let agent = http_agent(Duration::from_secs(30));
-    let mut response = agent
-        .get(format!(
-            "https://api.github.com/repos/wowdev/WoWDBDefs/commits/{escaped}"
-        ))
-        .header("Accept", "application/vnd.github.sha")
-        .call()
-        .map_err(|error| fault("records.definition_http", 5, error.to_string()))?;
-    if response.status().as_u16() != 200 {
-        return Err(fault(
-            "records.definition_http",
-            5,
-            format!("Definition HTTP status {}", response.status()),
-        ));
-    }
-    let mut raw = Vec::new();
-    response
-        .body_mut()
-        .as_reader()
-        .take(129)
-        .read_to_end(&mut raw)?;
-    if raw.len() > 128 {
-        return Err(fault(
-            "records.metadata_limit",
-            3,
-            "Revision response byte budget exceeded",
-        ));
-    }
-    let commit = std::str::from_utf8(&raw)
-        .map_err(|_| {
-            fault(
-                "records.definition_identity",
-                4,
-                "Revision response must be exact commit",
-            )
-        })?
-        .trim_end_matches(['\r', '\n'])
-        .to_owned();
-    if !lycheedev_core::selection::valid_digest(&commit, 40) {
-        return Err(fault(
-            "records.definition_identity",
-            4,
-            "Revision response must be exact commit",
-        ));
-    }
-    let revision = Revision {
-        reference: value.to_owned(),
-        commit: commit.clone(),
-    };
-    if let Err(error) = metadata.put(&key, &revision, generation) {
-        if error.code != "vault.generation_conflict" {
-            return Err(error);
-        }
-        let other: Revision = metadata.read(&key)?;
-        if other.reference != value || !lycheedev_core::selection::valid_digest(&other.commit, 40) {
-            return Err(fault(
-                "records.definition_identity",
-                4,
-                "Concurrent revision cache is invalid",
-            ));
-        }
-    }
-    Ok(commit)
+    let control = OperationControl::uncancelable(Instant::now() + Duration::from_secs(30));
+    resolve_revision_controlled(home, value, offline, &control, None)
 }
+
 pub(crate) fn http_agent(timeout: Duration) -> ureq::Agent {
     ureq::Agent::config_builder()
         .max_redirects(0)
@@ -484,7 +375,7 @@ mod batch_tests {
         let definition =
             b"COLUMNS\nint ID\n\nBUILD 12.1.0.69933\nLAYOUT 00000001\n$id$ID<u32>\n".to_vec();
         let expected_metadata = (manifest.len() + definition.len() * 2) as u64 * 4;
-        let mut metadata = Metadata::open(&home, true).unwrap();
+
         for (suffix, raw) in [
             ("manifest.json", manifest),
             ("definitions/Item.dbd", definition.clone()),
@@ -492,15 +383,16 @@ mod batch_tests {
         ] {
             let url = format!("{base}{suffix}");
             let blob = evidence::publish_blob(&home, &raw, 4 << 20).unwrap();
-            metadata
-                .put(
-                    &format!("definition/{}", storage::sha256(url.as_bytes())),
-                    &json!({"url":url,"blob":blob}),
-                    None,
-                )
-                .unwrap();
+            DataCacheMetadata::put_controlled_with_check(
+                &home,
+                &format!("definition/{}", storage::sha256(url.as_bytes())),
+                &json!({"url":url,"blob":blob}),
+                None,
+                &OperationControl::default(),
+                || Ok(()),
+            )
+            .unwrap();
         }
-        drop(metadata);
         let deadline = Instant::now() + Duration::from_secs(30);
         let cancel = Arc::new(AtomicBool::new(false));
         let budget = Budget::controlled(
@@ -661,13 +553,16 @@ mod publication_conflict_tests {
                 if validations == 1 {
                     assert_eq!(raw, b"//x\n");
                     let blob = evidence::publish_blob(&home, winner, 4 << 20)?;
-                    Metadata::open(&home, true)?.put(
+                    DataCacheMetadata::put_controlled_with_check(
+                        &home,
                         &format!("definition/{}", storage::sha256(url.as_bytes())),
                         &Object {
                             url: url.clone(),
                             blob,
                         },
                         None,
+                        &control,
+                        || budget.check(),
                     )?;
                 } else {
                     assert_eq!(raw, winner);

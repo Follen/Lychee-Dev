@@ -333,7 +333,7 @@ fn admitted_source_and_encoding_fail_in_argv_order_without_io() {
 
 #[test]
 fn admitted_wago_cli_default_and_explicit_byte_budgets_reach_coverage() {
-    use lycheedev_core::{evidence, metadata::Metadata, storage};
+    use lycheedev_core::{evidence, metadata::DataCacheMetadata, storage};
     let f = Fixture::new();
     let base = words(&[
         "data",
@@ -372,22 +372,30 @@ fn admitted_wago_cli_default_and_explicit_byte_budgets_reach_coverage() {
     let mut unscoped_receipt = receipt.clone();
     unscoped_receipt["identity"] = serde_json::from_slice(unscoped_bytes).unwrap();
     unscoped_receipt["requestUrl"] = json!("https://wago.tools/hotfixes?page=1");
-    let mut metadata = Metadata::open(&f.home, true).unwrap();
-    let generation = metadata.generation(&unscoped_key).unwrap();
-    metadata
-        .put(&unscoped_key, &unscoped_receipt, generation)
-        .unwrap();
-    drop(metadata);
+    DataCacheMetadata::put_controlled_with_check(
+        &f.home,
+        &unscoped_key,
+        &unscoped_receipt,
+        None,
+        &Default::default(),
+        || Ok(()),
+    )
+    .unwrap();
     let mut bytes = Vec::new();
     let error = lycheedev_data::hotfix::remote::render(&inv, None, &mut bytes).unwrap_err();
     assert_eq!(error.code, "records.hotfix_offline");
     assert_eq!(error.exit_code, 3);
     assert!(bytes.is_empty());
 
-    let mut metadata = Metadata::open(&f.home, true).unwrap();
-    let generation = metadata.generation(&key).unwrap();
-    metadata.put(&key, &receipt, generation).unwrap();
-    drop(metadata);
+    DataCacheMetadata::put_controlled_with_check(
+        &f.home,
+        &key,
+        &receipt,
+        None,
+        &Default::default(),
+        || Ok(()),
+    )
+    .unwrap();
     for max_bytes in [None, Some("268435456")] {
         let mut a = base.clone();
         if let Some(value) = max_bytes {
@@ -412,10 +420,15 @@ fn admitted_wago_cli_default_and_explicit_byte_budgets_reach_coverage() {
     }
 
     // A hit is still required to verify the receipt's embedded identity.
-    let mut metadata = Metadata::open(&f.home, true).unwrap();
-    let generation = metadata.generation(&key).unwrap();
-    metadata.put(&key, &unscoped_receipt, generation).unwrap();
-    drop(metadata);
+    DataCacheMetadata::put_controlled_with_check(
+        &f.home,
+        &key,
+        &unscoped_receipt,
+        Some(1),
+        &Default::default(),
+        || Ok(()),
+    )
+    .unwrap();
     let mut bytes = Vec::new();
     let error = lycheedev_data::hotfix::remote::render(&inv, None, &mut bytes).unwrap_err();
     assert_eq!(error.code, "records.hotfix_cache_corrupt");

@@ -1,6 +1,8 @@
 //! Selected encoded/decoded allowance is independent from metadata caps.
 //! Synthetic authenticated inputs. Large-content preparation is explicit so the
 //! frozen Go and Rust public commands can observe the same authenticated body.
+#[path = "support/data_cache.rs"]
+mod data_cache;
 #[path = "support/catalog_fixture.rs"]
 #[allow(dead_code)]
 mod fixture;
@@ -64,10 +66,10 @@ fn local_alias_key(bytes: &[u8], key_source: &serde_json::Value) -> String {
     format!("decoded-v1/{}", lycheedev_core::storage::sha256(&identity))
 }
 fn local_document(fx: &Fixture, key: &str) -> (i64, Vec<u8>) {
-    let document = lycheedev_core::metadata::Metadata::read_document_raw_controlled(
+    let document = lycheedev_core::metadata::DataCacheMetadata::read_document_raw_controlled_with_check(
         &fx.home,
         key,
-        &Default::default(),
+        &Default::default(), || Ok(()),
     )
     .unwrap();
     (document.generation, document.bytes)
@@ -535,7 +537,7 @@ fn streaming_whole_ckey_failure_publishes_no_selected_blob_cache_or_capture() {
     assert!(!output.exists());
     let metadata = Metadata::open(&fx.home, false).unwrap();
     assert!(metadata.list::<serde_json::Value>("capture/", 100).unwrap().is_empty());
-    let decoded = metadata.list::<serde_json::Value>("decoded-v1/", 100).unwrap();
+    let decoded = data_cache::Cache::new(&fx.home).list::<serde_json::Value>("decoded-v1/", 100).unwrap();
     assert!(decoded.iter().all(|entry| entry["contentKey"] != identity["content"]["contentKey"]));
     assert!(!evidence::blob_path(&fx.home, identity["content"]["sha256"].as_str().unwrap()).unwrap().exists());
 }

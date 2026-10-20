@@ -109,7 +109,7 @@ fn registered_search_uses_exact_authenticated_cache_for_all_sources_and_modes() 
         inv.flags.insert("--file-id".into(), "99".into()); let absent = lycheedev_data::dispatch(&inv).unwrap();
         assert_eq!(absent.data["entries"], json!([{"fileDataID":99,"fileName":"unknown"}]));
         assert_eq!(provider.calls.load(Ordering::Relaxed), calls);
-        let document: Value = Metadata::open(&fixture.home, false).unwrap().read(&format!("listfile/{kind}")).unwrap();
+        let document: Value = lycheedev_core::metadata::DataCacheMetadata::read_controlled_with_check(&fixture.home, &format!("listfile/{kind}"), &Default::default(), || Ok(())).unwrap();
         let digest = document["provenance"]["files"][0]["blob"]["sha256"].as_str().unwrap();
         let path = fixture.home.join("blobs").join(&digest[..2]).join(&digest[2..]);
         let original = fs::read(&path).unwrap(); let mut altered = original.clone(); altered[0] ^= 1; fs::write(&path, &altered).unwrap();

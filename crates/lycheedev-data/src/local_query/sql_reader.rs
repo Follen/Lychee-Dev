@@ -181,20 +181,16 @@ impl<'a> Reader<'a> {
         // Reuse the reference authenticated by the same materialization owner;
         // its checked close still precedes all following publication work.
         let root_blob = serde_json::to_value(root_reference)?;
-        let build_blob = evidence::publish_blob_bounded_with_check(
+        let build_blob = lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
             &self.inv.home,
             &target.metadata.build_document.raw,
             4 << 20,
-            &self.inv.control,
-            || self.budget.check(),
-        )?;
-        let cdn_blob = evidence::publish_blob_bounded_with_check(
+            &self.inv.control, &|| self.budget.check()).and_then(|blob| serde_json::to_value(blob).map_err(Into::into))?;
+        let cdn_blob = lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
             &self.inv.home,
             &target.metadata.cdn_document.raw,
             4 << 20,
-            &self.inv.control,
-            || self.budget.check(),
-        )?;
+            &self.inv.control, &|| self.budget.check()).and_then(|blob| serde_json::to_value(blob).map_err(Into::into))?;
         let root = RootIndex::open(Root(root), root_limits(limits), self.budget.clone(), check)?;
         self.ready = Some(Ready {
             index,
@@ -364,13 +360,11 @@ impl<'a> Reader<'a> {
                     &self.inv.control,
                     policy,
                 )?;
-                let blob = evidence::publish_blob_bounded_with_check(
+                let blob = lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
                     &self.inv.home,
                     &content.bytes,
                     maximum,
-                    &self.inv.control,
-                    || self.budget.check(),
-                )?;
+                    &self.inv.control, &|| self.budget.check()).and_then(|blob| serde_json::to_value(blob).map_err(Into::into))?;
                 (key, SelectedContent::Bytes(content), blob)
             }
             ReadMode::Verified => {

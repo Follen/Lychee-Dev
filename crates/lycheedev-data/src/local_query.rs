@@ -25,12 +25,12 @@ use std::{
 
 #[cfg(test)]
 mod adaptive_tests;
-mod effective;
+pub(crate) mod effective;
 mod file_bytes;
 mod generation_provider;
 #[cfg(test)]
 mod generation_tests;
-mod provider;
+pub(crate) mod provider;
 mod resolver;
 pub(crate) mod sql_reader;
 pub use file_bytes::FileBytes;
@@ -438,20 +438,16 @@ fn read_files_with_keys(
         // verified owner only after its original checked close succeeded.
         // Republishing these same Root bytes would re-lock/reopen/re-hash them.
         let root_blob = serde_json::to_value(root_reference)?;
-        let build_blob = evidence::publish_blob_bounded_with_check(
+        let build_blob = lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
             &inv.home,
             &target.metadata.build_document.raw,
             4 << 20,
-            &inv.control,
-            || budget.check(),
-        )?;
-        let cdn_blob = evidence::publish_blob_bounded_with_check(
+            &inv.control, &|| budget.check()).and_then(|blob| serde_json::to_value(blob).map_err(Into::into))?;
+        let cdn_blob = lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
             &inv.home,
             &target.metadata.cdn_document.raw,
             4 << 20,
-            &inv.control,
-            || budget.check(),
-        )?;
+            &inv.control, &|| budget.check()).and_then(|blob| serde_json::to_value(blob).map_err(Into::into))?;
         let mask = locale(&pin.language)?;
         let mut pending = ids.to_vec();
         let mut requested = 0usize;
@@ -540,13 +536,11 @@ fn read_files_with_keys(
                                 &inv.control,
                                 policy,
                             )?;
-                            let blob = evidence::publish_blob_bounded_with_check(
+                            let blob = lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
                                 &inv.home,
                                 &content.bytes,
                                 max,
-                                &inv.control,
-                                || budget.check(),
-                            )?;
+                                &inv.control, &|| budget.check()).and_then(|blob| serde_json::to_value(blob).map_err(Into::into))?;
                             (encoding_key, SelectedContent::Bytes(content), blob)
                         }
                         ReadMode::Verified => {

@@ -26,6 +26,9 @@ pub mod stream;
 pub mod table;
 #[cfg(test)]
 mod unicode_checks;
+#[cfg(test)]
+#[path = "../tests/support/data_cache.rs"]
+mod cache_fixture;
 mod unicode_simple;
 
 use lycheedev_core::{Invocation, Outcome, Result, ToolkitError};

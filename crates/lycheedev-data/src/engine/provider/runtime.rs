@@ -1,7 +1,8 @@
 //! Use DataFusion's original bounded pool policy, with a preadmitted lifetime
 //! allowance and disabled spilling. This is deliberately NOT a whole-query
-//! allocator guarantee: DF's infallible grow() and unregistered output buffers
-//! need operator-by-operator proof before any production engine migration.
+//! allocator guarantee: DF's infallible grow() and unregistered transient
+//! buffers require the formal worker process memory/time boundary. Result and
+//! source lifetimes have separate conservative session admissions.
 use super::super::{QueryOwner, aggregate, external, numeric, unsupported};
 use crate::resource::{Budget, OwnedRetainedReservation};
 use datafusion::{
@@ -17,15 +18,13 @@ use datafusion::{
 };
 use std::{fmt, sync::Arc};
 
-pub(super) fn context(
+pub(crate) fn context(
     budget: Arc<Budget>,
     operator_bytes: usize,
     batch_rows: usize,
 ) -> Result<(SessionContext, Arc<QueryOwner>)> {
     if operator_bytes == 0 || operator_bytes > 128 << 20 || batch_rows == 0 || batch_rows > 65_536 {
-        return Err(unsupported(
-            "Invalid DataFusion qualification runtime bound",
-        ));
+        return Err(unsupported("Invalid DataFusion runtime bound"));
     }
     // The allowance is charged before constructing the runtime and is owned
     // by the actual pool, so surviving TaskContexts/reservations keep it live.
@@ -49,6 +48,8 @@ pub(super) fn context(
         .build_arc()?;
     let mut functions = aggregate::functions(&owner);
     functions.push(datafusion::functions_aggregate::count::count_udaf());
+    functions.push(datafusion::functions_aggregate::min_max::min_udaf());
+    functions.push(datafusion::functions_aggregate::min_max::max_udaf());
     let state = SessionStateBuilder::new()
         .with_runtime_env(runtime)
         .with_config(
@@ -86,7 +87,7 @@ impl fmt::Display for OperatorPool {
 }
 impl MemoryPool for OperatorPool {
     fn name(&self) -> &str {
-        "PreadmittedGreedyQualificationPool"
+        "PreadmittedGreedyPool"
     }
     fn grow(&self, reservation: &MemoryReservation, additional: usize) {
         // The upstream trait requires this to succeed. Do not pretend a

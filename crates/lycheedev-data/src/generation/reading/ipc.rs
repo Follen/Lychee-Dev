@@ -31,6 +31,15 @@ pub(crate) struct OwnedBatch {
     _encoded: Buffer,
     _allocation: OwnedRetainedReservation,
 }
+impl OwnedBatch {
+    /// Transfer the original admission into an array-free lifetime owner.
+    /// Decoded arrays already hold shared references to their encoded buffers.
+    /// Keeping `_encoded` in that owner would create a buffer/owner cycle after
+    /// Arrow's claim hook is installed, so its redundant reference is dropped.
+    pub(crate) fn into_parts(self) -> (RecordBatch, OwnedRetainedReservation) {
+        (self.records, self._allocation)
+    }
+}
 #[derive(Clone, Copy)]
 pub(in crate::generation) struct BatchBlock {
     pub(in crate::generation) block: Block,

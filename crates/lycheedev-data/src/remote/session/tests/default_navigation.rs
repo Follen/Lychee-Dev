@@ -99,7 +99,7 @@ impl NavFixture {
                     .into_bytes(),
             )
         }));
-        let mut metadata = Metadata::open(&source.home, true).unwrap();
+        let metadata = crate::cache_fixture::Cache::new(&source.home);
         for (suffix, bytes) in definitions {
             let url = format!("{base}{suffix}");
             let blob = evidence::publish_blob(&source.home, &bytes, 4 << 20).unwrap();
@@ -111,7 +111,7 @@ impl NavFixture {
                 )
                 .unwrap();
         }
-        metadata.close().unwrap();
+
         // Prime through the real authenticated Session, then invoke the default
         // provider offline. No test backend is injected into command dispatch.
         let mut admitted = source.admission();

@@ -6,7 +6,7 @@
 //! buffer lifetime hook. DataFusion operator/output allocations are a separate
 //! qualification responsibility, not covered by attaching input reservations.
 mod ownership;
-mod runtime;
+pub(super) mod runtime;
 #[cfg(test)]
 mod tests;
 

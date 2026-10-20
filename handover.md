@@ -9,6 +9,29 @@
 - 产品仍为3.5.0 beta配置；无发布、合并或游戏操作授权。Skill 七产品定义和双 Forever 分离、Mailbox v1、未知结果不重放、精确数字/partial/证据合同不变。Emmy使用固定未修改上游；自有业务Rust不新增unsafe，必要Windows边界独立审查。
 - 当前仓库只在 `rust-refactor` / [草稿PR #14](https://github.com/Follen/Lychee-Dev/pull/14) 分批保存。用户本机只负责固定SHA测试及必要协调，由唯一父队列派发；运行中的身份不会随新head改变。
 
+## Agent 组合修正 r2：仍待实际编译与验收
+
+首片发现DF单次native poll可长时间不yield，query内协作取消及Job内存限额不足以保证deadline。修正采用caller-owned supervisor与单个可复用Engine子进程：已有suspended guarded spawn先关联Job；私有入口核实际父进程PID/creation/同binary并建立自身Job；专用loopback channel以临时BCrypt token及held child PID认证完成receipt，只在公共输出flush后发送。父进程独立监测排队与输出背压期限，必要时终止原Job并检查reap/job-empty/pipe回收；不新增unsafe或游戏通信。输入EOF是半关闭，先排空已提交任务；显式close同样排空；取消outstanding请求会终止整个session，全部旧句柄失效，不自动重启或重放。此处仍须Windows嵌套Job、硬取消/非yield执行、背压和异常清理实际验证，不能因代码存在称漏洞已验收关闭。
+
+当前首slice仅公开typed plan任务；原`data sql`尚未迁移，统一消费者主线仍未完成。Query provenance改为持有原预算guard的OwnedProvenance；DatasetInfo/ResultPage也直接拥有guard到serialization/flush，禁止to_value克隆后提前退款。核心共享lifetime释放由独立作者修正。历史Skill/CLI custody与新增身份分开，旧证据不重标。
+
+当前组合还包含quota-backed共享blob publisher、显式recency冷淘汰和严格closed-body恢复，以及definition/listfile/Wago/decoded等Data可重建metadata迁入独立cache-v1数据库。它们只证明已接代码，未证明全Data 5GB业务闭合；durable stage/spool、CAP完整归属与全部旧消费者退役仍在后继主线。Cargo.lock仅新增Data与CLI测试fixture到既有固定rusqlite的两条依赖边，不漂移包版本；正式DataFusion/Arrow pool已默认开启。
+
+新增agent_native_parity以生产DataCacheMetadata播种同一认证CASC/DBD/WDC，比较typed排序/宽整数/数组与迁移oracle并测试release。其库级协作取消与正式transport的整session硬取消明确不同。旧Node/Skill/performance归档保持原schema；新性能/盲试前必须另封新metadata exporter/loader/seed适配，不可将旧toolkit.sqlite定义种子误用于新产品。首次Windows队列先编译及真实业务定向验证，性能后置；尚无本组合Rust/Release/Windows运行通过结论。
+
+## 1a. 全架构恢复核对（2026-10-20；非完成声明）
+
+依据原 `c44c8d735ebb03a0ec76381578a59db52b9b557f:DESIGN.md` 六项主线，对照真实 `eeeb0a14c6c91cfc5cc135a6a2fc6b45d6669908` blob，而非本地陈旧 HEAD：
+
+- Home/配置：`core/workspace/data_resources.rs`、`data_disk/**` 已有正式配置和准入；旧writer全口径、去重/冷淘汰/保护闭环仍须完成，不能称全Data 5GB已完成。
+- Data：`generation/**` 已提供不可变Arrow派生与实际SQL消费；`local_query.rs` 仍走旧Program，`engine.rs`及`relational/engine_compat.rs`仍仅test+feature资格。正式统一执行核、任务API、跨调用同进程session、owner-backed结果句柄在此基线未实现；CAP与CASC query session不能冒充它们。
+- Source：`index/persistence_wire.rs` 与二进制Facts/Index消费者已实装；已有多场景完整证据保留，不无谓重写或重新标为未做。新增完整质量/性能验收与已执行历史场景分开。
+- Live：`connection`的私有SessionOwner与原journal/platform归属已实装；Mailbox v1与未知输入不重放不变。本轮Data worker不改变Live协议、不增加Live线程或操作游戏。
+- CLI/Skill：已有真实describe/help与精简指南及分批试用证据；新的Agent任务/handle发现和正确调用路径仍需正式接线，不能只新增library类型或文档示例。
+- 集成：Source/Data完整业务质量、全实现、性能及最终五循环均未闭。当前先完成新架构与业务结果对齐或更优，暂停旧SQL零碎优化优先级；历史失败/测量全部保留。
+
+当前云端实施文件边界：统一内核作者负责engine及数值桥；磁盘作者负责quota/generation retirement与既有writer；Agent集成作者负责session/CLI/Data导出及依赖、Skill和权威文档。Agent结果页在序列化结束前必须持有原结果与预算guard。Windows Job能力与逻辑账本分开报告，不将Node静态或源码审阅当作Rust/Windows运行通过。
+
 ## 2. 当前实现批次与验证状态
 
 | 范围 | 已保存/已实现 | 当前证据和剩余门禁 |

@@ -309,6 +309,7 @@ impl<'a> DerivedObjectWriter<'a> {
             &object.sha256,
             &self.owner.control,
         )? {
+            self.owner.touch_object(&object.sha256)?;
             return Ok(object.clone());
         }
         self.owner.prepare_publication_receipt()?;
@@ -396,7 +397,10 @@ impl<'a> DerivedObjectWriter<'a> {
             parent.path().join(name),
             temporary,
             cleanup_failed,
-        )
+        ).and_then(|object| {
+            self.owner.touch_object(&object.sha256)?;
+            Ok(object)
+        })
     }
     pub fn abort<T>(self, result: Result<T>) -> Result<T> {
         self.abort_with(result, |stage| stage.close())

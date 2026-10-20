@@ -1,6 +1,6 @@
 //! Bounded Wago page walk with immutable response identities and explicit offline cache.
 use super::*;
-use lycheedev_core::metadata::Metadata;
+use lycheedev_core::metadata::DataCacheMetadata;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 const PAGE_BYTES: usize = 16 << 20;
@@ -301,23 +301,17 @@ fn load(
 ) -> Result<Option<(Receipt, Vec<u8>)>> {
     check_scope(inv, budget)?;
     let key = format!("hotfix-wago-page/{}", identity.key(budget)?);
-    let metadata =
-        match Metadata::open_controlled_with_check(&inv.home, false, &inv.control, || {
-            budget.check()
-        }) {
-            Ok(owner) => owner,
+    let result = (|| {
+        let raw = match DataCacheMetadata::read_document_raw_controlled_with_check(
+            &inv.home,
+            &key,
+            &inv.control,
+            || budget.check(),
+        ) {
+            Ok(v) => v.bytes,
             Err(e) if pure(&e, "vault.record_missing") => return Ok(None),
             Err(e) => return Err(e),
         };
-    let result = (|| {
-        let raw =
-            match metadata
-                .read_document_on_owner_controlled_with_check(&key, &inv.control, || budget.check())
-            {
-                Ok(v) => v.bytes,
-                Err(e) if pure(&e, "vault.record_missing") => return Ok(None),
-                Err(e) => return Err(e),
-            };
         let receipt = receipt_wire::decode(&raw, inv, budget).map_err(|e| {
             if terminal(&e) {
                 e
@@ -344,7 +338,12 @@ fn load(
         .map_err(corrupted)?;
         Ok(Some((receipt, raw)))
     })();
-    close_metadata(metadata, result, inv, budget)
+    crate::remote::cache::Store {
+        home: &inv.home,
+        control: &inv.control,
+        budget: Some(budget),
+    }
+    .finish(result, Ok(()))
 }
 fn same_receipt(
     document: &[u8],
@@ -370,17 +369,17 @@ fn store(
     budget: &Budget,
 ) -> Result<Receipt> {
     check_scope(inv, budget)?;
-    // Fixed Go WriteMetadata opens the owner before attempting blob publication.
-    let mut metadata =
-        Metadata::open_controlled_with_check(&inv.home, true, &inv.control, || budget.check())?;
+    // Private metadata operations own and close their quota independently of
+    // blob publication. Historical shared evidence remains untouched.
     let result = (|| {
-        let blob = evidence::publish_blob_bounded_with_check(
+        let blob = lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
             &inv.home,
             raw,
             PAGE_BYTES,
             &inv.control,
-            || budget.check(),
+            &|| budget.check(),
         )
+        .and_then(|blob| serde_json::to_value(blob).map_err(Into::into))
         .map_err(|e| mapped_cause("cache_write", 5, e))?;
         let key = format!("hotfix-wago-page/{}", identity.key(budget)?);
         let receipt = Receipt {
@@ -395,21 +394,24 @@ fn store(
             total: page.total,
             next_page_url: page.next_page_url.clone(),
         };
-        let observed =
-            match metadata
-                .read_document_on_owner_controlled_with_check(&key, &inv.control, || budget.check())
-            {
-                Ok(v) => Some(v),
-                Err(e) if pure(&e, "vault.record_missing") => None,
-                Err(e) => return Err(e),
-            };
+        let observed = match DataCacheMetadata::read_document_raw_controlled_with_check(
+            &inv.home,
+            &key,
+            &inv.control,
+            || budget.check(),
+        ) {
+            Ok(v) => Some(v),
+            Err(e) if pure(&e, "vault.record_missing") => None,
+            Err(e) => return Err(e),
+        };
         if let Some(document) = &observed {
             if same_receipt(&document.bytes, &receipt, inv, budget)? {
                 return Ok(receipt);
             }
         }
         let published = if let Some(document) = observed {
-            metadata.put_controlled_with_check(
+            DataCacheMetadata::put_controlled_with_check(
+                &inv.home,
                 &key,
                 &receipt,
                 Some(document.generation),
@@ -417,12 +419,20 @@ fn store(
                 || budget.check(),
             )
         } else {
-            metadata.create_controlled_with_check(&key, &receipt, &inv.control, || budget.check())
+            DataCacheMetadata::put_controlled_with_check(
+                &inv.home,
+                &key,
+                &receipt,
+                None,
+                &inv.control,
+                || budget.check(),
+            )
         };
         match published {
             Ok(()) => {}
             Err(e) if pure(&e, "vault.generation_conflict") => {
-                let winner = metadata.read_document_on_owner_controlled_with_check(
+                let winner = DataCacheMetadata::read_document_raw_controlled_with_check(
+                    &inv.home,
                     &key,
                     &inv.control,
                     || budget.check(),
@@ -456,7 +466,12 @@ fn store(
         }
         Ok(receipt)
     })();
-    close_metadata(metadata, result, inv, budget)
+    crate::remote::cache::Store {
+        home: &inv.home,
+        control: &inv.control,
+        budget: Some(budget),
+    }
+    .finish(result, Ok(()))
 }
 mod receipt_wire;
 fn read_page<'a>(

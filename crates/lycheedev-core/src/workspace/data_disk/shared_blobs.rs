@@ -430,7 +430,11 @@ fn publish_shared_blob_inner(
                 return repair_memory(&owner, home, bytes, maximum, &reference, &raw);
             }
             owner.admit_shared(0, 0)?;
-            // Pending reuse never releases a possibly surviving shard stage.
+            // A clean canonical shard plus fully verified winner closes the
+            // crash window. Unknown stages keep the conservative pending peak.
+            if present && complete.is_none() {
+                recovery::complete_closed_publication(&mut owner, &reference, &raw)?;
+            }
             return if present {
                 Ok(reference.clone())
             } else if complete.is_none() {
@@ -562,6 +566,7 @@ fn publish_new_attribution(
     Ok(result)
 }
 
+mod recovery;
 mod repair;
 pub(super) use repair::validate_recovery;
 use repair::{repair_memory, same_blob};

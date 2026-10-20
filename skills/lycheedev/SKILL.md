@@ -60,8 +60,11 @@ journals. Never bypass a blocker with raw input, memory tools or claim-file edit
 ## Finish with evidence
 
 Separate source/data coverage, transport completion, `report.ok` and cleanup.
-Empty partial results do not establish absence. JSONL needs a legal end frame
-and exit 0; coverage still needs inspection. A verified failed probe is evidence,
+Empty partial results do not establish absence. Ordinary command JSONL needs a
+legal end frame and exit 0. Agent JSONL uses complete response frames with matching
+request IDs, not that wrapper; normal session exit or close is separate from
+coverage. Abnormal exit invalidates its handles even if best-effort stderr
+diagnostics cannot be delivered. Coverage still needs inspection. A verified failed probe is evidence,
 and pending cleanup remains unfinished. Finish authorized recovery/disconnect
 unless continued use is needed. Keep the whole `.lycheedev/live` recovery unit.
 Evidence retention/removal and cache reclamation are separate tasks.

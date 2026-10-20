@@ -243,7 +243,7 @@ fn semantic_cached_load_honors_cancellation_after_validation_without_replay() {
     let raw = b"1 ONE\n";
     let blob = evidence::publish_blob(&home, raw, 4 << 20).unwrap();
     let key = format!("definition/{}", storage::sha256(url.as_bytes()));
-    let mut metadata = Metadata::open(&home, true).unwrap();
+    let metadata = crate::cache_fixture::Cache::new(&home);
     metadata
         .put(&key, &json!({"url":url,"blob":blob}), None)
         .unwrap();
@@ -272,8 +272,7 @@ fn semantic_cached_load_honors_cancellation_after_validation_without_replay() {
     assert_eq!(error.code, "command.cancelled");
     assert_eq!(validations, 1);
     assert_eq!(
-        Metadata::open(&home, false)
-            .unwrap()
+        crate::cache_fixture::Cache::new(&home)
             .generation(&key)
             .unwrap(),
         generation

@@ -2,6 +2,7 @@
 
 mod contract;
 mod data_phase_profile;
+mod data_agent;
 mod formal_live;
 mod target_remote;
 #[cfg(test)]
@@ -1566,6 +1567,16 @@ fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args
         .first()
+        .is_some_and(|value| value == "--data-agent-worker")
+    {
+        let result = data_agent::worker(&args);
+        if let Err(error) = &result {
+            let _ = writeln!(std::io::stderr(), "{error}");
+        }
+        std::process::exit(result.err().map_or(0, |error| error.exit_code));
+    }
+    if args
+        .first()
         .is_some_and(|value| value == "--source-native-session-server")
     {
         let result = lycheedev_source::native_session::server(&args);
@@ -1657,6 +1668,17 @@ fn main() -> std::process::ExitCode {
     });
     let requested = requested_format(&args);
     let format = if valid_format(requested) { requested } else { "json" };
+    if let Ok(inv) = &parsed
+        && inv.command == "data agent serve"
+        && !inv.flag_bool("--help")
+    {
+        let result = data_agent::serve(inv.clone());
+        if let Err(error) = &result {
+            data_agent::report_error(error);
+        }
+        drop(console);
+        std::process::exit(result.err().map_or(0, |error| error.exit_code));
+    }
     let mut stdout = std::io::stdout().lock();
     if let Some(response) = parsed.as_ref().ok().and_then(|inv| {
         dispatch_formal_entry_with(inv, formal_live::dispatch)
@@ -3124,14 +3146,15 @@ mod tests {
             "records.definition_unavailable_offline"
         );
         let commit = "a".repeat(40);
-        Metadata::open(&home, true)
-            .unwrap()
-            .put(
-                &format!("definition-ref/{}", storage::sha256(b"refs/heads/master")),
-                &json!({"reference":"refs/heads/master","commit":commit}),
-                None,
-            )
-            .unwrap();
+        lycheedev_core::metadata::DataCacheMetadata::put_controlled_with_check(
+            &home,
+            &format!("definition-ref/{}", storage::sha256(b"refs/heads/master")),
+            &json!({"reference":"refs/heads/master","commit":commit}),
+            None,
+            &Default::default(),
+            || Ok(()),
+        )
+        .unwrap();
         let outcome = dispatch(&direct).unwrap();
         assert_eq!(outcome.data["data"]["product"], "retail");
         assert_eq!(outcome.data["data"]["region"], "cn");

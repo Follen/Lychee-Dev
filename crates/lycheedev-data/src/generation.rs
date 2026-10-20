@@ -2,6 +2,7 @@
 //! their public execution and error boundaries until explicitly migrated.
 mod application;
 mod consumer;
+pub(crate) mod engine_adapter;
 mod identity;
 mod import;
 mod reading;
@@ -12,7 +13,6 @@ pub(crate) use application::dispatch;
 pub(crate) use consumer::{Generation, Reuse, open_existing};
 pub(crate) use identity::{StaticIdentity, StaticSource};
 pub(crate) use import::{ImportLimits, TableImporter};
-#[cfg(feature = "datafusion-qualification")]
 pub(crate) use import::{ImportedBatch, ImportedBatchAllocation, ImportedSchema};
 pub(crate) use reading::ipc::OwnedBatch as GenerationBatch;
 

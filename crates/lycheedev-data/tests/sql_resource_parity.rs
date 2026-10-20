@@ -1,6 +1,8 @@
 //! Go 3.2 logical accounting slice: metadata-only SQL. Execution NOT_RUN.
 #[path = "support/catalog_fixture.rs"]
 mod catalog_fixture;
+#[path = "support/data_cache.rs"]
+mod data_cache;
 use catalog_fixture::{Cell::U, DEFS, Fixture, table};
 use lycheedev_core::{evidence, metadata::Metadata, storage};
 use serde_json::{Value, json};
@@ -16,7 +18,7 @@ fn cache(fx: &Fixture, suffix: &str, raw: &[u8]) {
     let url = format!("https://raw.githubusercontent.com/wowdev/WoWDBDefs/{DEFS}/{suffix}");
     let key = format!("definition/{}", storage::sha256(url.as_bytes()));
     let blob = evidence::publish_blob(&fx.home, raw, 4 << 20).unwrap();
-    let mut metadata = Metadata::open(&fx.home, true).unwrap();
+    let metadata = data_cache::Cache::new(&fx.home);
     let generation = metadata.generation(&key).unwrap();
     metadata
         .put(&key, &json!({"url":url,"blob":blob}), generation)
@@ -49,7 +51,7 @@ fn sixteen_mebibyte_comment_definitions_admit_with_exact_go_resources() {
     {
         let url = format!("https://raw.githubusercontent.com/wowdev/WoWDBDefs/{DEFS}/{suffix}");
         let key = format!("definition/{}", storage::sha256(url.as_bytes()));
-        let entry: Value = Metadata::open(&fx.home, false).unwrap().read(&key).unwrap();
+        let entry: Value = data_cache::Cache::new(&fx.home).read(&key).unwrap();
         let bytes = entry["blob"]["bytes"].as_u64().unwrap();
         loaded += bytes;
         decode += bytes.div_ceil(65536);

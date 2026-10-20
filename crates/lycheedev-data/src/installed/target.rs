@@ -194,14 +194,11 @@ pub fn prepare_target(
         )?;
         let mut configs = Vec::<evidence::BlobRef>::with_capacity(2);
         for document in [&after.build_document, &after.cdn_document] {
-            let reference = evidence::publish_blob_bounded_with_check(
+            let reference = lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
                 home,
                 &document.raw,
                 4 << 20,
-                control,
-                || budget.check(),
-            )?;
-            let reference: evidence::BlobRef = serde_json::from_value(reference)?;
+                control, &|| budget.check())?;
             if reference.sha256 != document.sha256 {
                 return Err(fault(
                     "records.configuration_integrity",

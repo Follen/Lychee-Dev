@@ -94,6 +94,40 @@ pub(crate) struct OwnedRetainedReservation {
     budget: Arc<Budget>,
     bytes: u64,
 }
+impl OwnedRetainedReservation {
+    /// Refund only this owner's unused admission, atomically. This never grows
+    /// an allowance, changes limits, or checks an expired request deadline.
+    pub(crate) fn shrink_to(&mut self, bytes: usize) -> Result<()> {
+        let bytes = u64::try_from(bytes)
+            .map_err(|_| fault("records.internal", 8, "Reservation size overflow"))?;
+        let refund = self
+            .bytes
+            .checked_sub(bytes)
+            .ok_or_else(|| fault("records.internal", 8, "Reservation shrink cannot grow"))?;
+        let mut state = self
+            .budget
+            .state
+            .lock()
+            .map_err(|_| fault("records.internal", 8, "Query resource lock poisoned"))?;
+        let remaining = state
+            .used
+            .retained_bytes
+            .checked_sub(refund)
+            .ok_or_else(|| fault("records.internal", 8, "Reservation refund underflow"))?;
+        #[cfg(test)]
+        let refundable = state
+            .refundable_retained_bytes
+            .checked_sub(refund)
+            .ok_or_else(|| fault("records.internal", 8, "Refund obligation underflow"))?;
+        state.used.retained_bytes = remaining;
+        #[cfg(test)]
+        {
+            state.refundable_retained_bytes = refundable;
+        }
+        self.bytes = bytes;
+        Ok(())
+    }
+}
 impl Drop for OwnedRetainedReservation {
     fn drop(&mut self) {
         if let Ok(mut state) = self.budget.state.lock()
@@ -853,3 +887,52 @@ mod phase_profile_tests {
 
 #[cfg(test)]
 mod diagnostic_tests;
+
+#[cfg(test)]
+mod owned_shrink_tests {
+    use super::*;
+    use std::time::Duration;
+    #[test]
+    fn shrink_refunds_exactly_once_even_after_deadline() {
+        let budget = Arc::new(Budget::new(
+            Cost::defaults(),
+            Instant::now() + Duration::from_secs(60),
+            None,
+        ));
+        let mut guard = budget
+            .reserve_retained(100)
+            .unwrap()
+            .into_owned(&budget)
+            .unwrap();
+        guard.shrink_to(40).unwrap();
+        assert_eq!(budget.snapshot().unwrap().retained_bytes, 40);
+        assert_eq!(budget.refundable_retained_bytes(), 40);
+        assert!(guard.shrink_to(41).is_err());
+        assert_eq!(budget.snapshot().unwrap().retained_bytes, 40);
+        guard.shrink_to(40).unwrap();
+        guard.shrink_to(0).unwrap();
+        drop(guard);
+        assert_eq!(budget.snapshot().unwrap().retained_bytes, 0);
+        assert_eq!(budget.refundable_retained_bytes(), 0);
+    }
+    #[test]
+    fn shrink_shared_owner_refunds_on_final_drop() {
+        let budget = Arc::new(Budget::new(
+            Cost::defaults(),
+            Instant::now() + Duration::from_secs(60),
+            None,
+        ));
+        let mut guard = budget
+            .reserve_retained(100)
+            .unwrap()
+            .into_owned(&budget)
+            .unwrap();
+        guard.shrink_to(75).unwrap();
+        let first = Arc::new(guard);
+        let second = first.clone();
+        drop(first);
+        assert_eq!(budget.snapshot().unwrap().retained_bytes, 75);
+        drop(second);
+        assert_eq!(budget.snapshot().unwrap().retained_bytes, 0);
+    }
+}

@@ -1,9 +1,10 @@
 //! Genuine bounded local CASC/Encoding/Root/WDC/DBD input. No business provider
 //! is replaced: the same installation and cached definitions can be used by
 //! the frozen Go CLI for independent public differential tests.
+#[path = "support/data_cache.rs"]
+mod data_cache;
 use lycheedev_core::{
     Invocation, evidence,
-    metadata::Metadata,
     selection::{self, SelectionSpec},
     storage, workspace,
 };
@@ -286,7 +287,7 @@ impl Fixture {
         .unwrap();
         let base = format!("https://raw.githubusercontent.com/wowdev/WoWDBDefs/{DEFS}/");
         let manifest = json!([{"tableName":"SpellEffect","tableHash":format!("{TABLE_HASH:08X}"),"db2FileDataID":FDID}]);
-        let mut meta = Metadata::open(&home, true).unwrap();
+        let meta = data_cache::Cache::new(&home);
         for (suffix, raw) in [
             ("manifest.json", serde_json::to_vec(&manifest).unwrap()),
             ("definitions/SpellEffect.dbd", dbd.into_bytes()),

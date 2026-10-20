@@ -38,7 +38,7 @@ test('shared definitions equal fixed Go 3.2.3 plus exact approved differences an
   assert.equal(fixture.oracle.commit, '3766f9cacb52e93a803a626187e2a1d54a445468');
   assert.equal(fixture.oracle.release, 'Go v3.2.3');
   assert.equal(fixture.commands.length, 84);
-  assert.equal(fixture.expected.length, 85);
+  assert.equal(fixture.expected.length, 87);
   assertMetadata(inventory);
 });
 
@@ -53,6 +53,7 @@ test('all 115 frozen arities plus one explicit Data prune boolean match parser f
   assert.equal(expected.size, 115);
   assert.ok(!expected.has('--data-derived'));
   expected.set('--data-derived', false);
+  expected.set('--result-ttl-seconds', true);
   assert.deepEqual(explicitArities(), expected);
 });
 
@@ -194,7 +195,7 @@ test('arity corruption, unknown flags and removal of fail-closed fallback are re
     const anchor = value ? '--allow-partial' : '--after-id';
     corrupted = corrupted.replace(`"${anchor}"`, `"${name}" | "${anchor}"`);
     const actual = explicitArities(corrupted);
-    assert.equal(actual.size, 116);
+    assert.equal(actual.size, 117);
     assert.equal(actual.get(name), !value, `${name}: opposite source arm`);
     assert.throws(() => assert.deepEqual(actual, expected), {code: 'ERR_ASSERTION'}, name);
   }

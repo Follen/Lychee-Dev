@@ -87,21 +87,24 @@ fn reject_at_eof(failure: Fault) {
         .join(format!("{}.complete", reference.sha256));
     let original_pair = (fs::read(&intent).unwrap(), fs::read(&complete).unwrap());
     let alias = "decoded-v1/local-eof-fixture";
-    let mut metadata = Metadata::open(&f.0, true).unwrap();
-    metadata
-        .put(
-            alias,
-            &Entry {
-                content_key: record.content_key.clone(),
-                blob: serde_json::to_value(&reference).unwrap(),
-                keys: keys.source.clone(),
-            },
-            None,
-        )
-        .unwrap();
+    DataCacheMetadata::put_controlled_with_check(
+        &f.0,
+        alias,
+        &Entry {
+            content_key: record.content_key.clone(),
+            blob: serde_json::to_value(&reference).unwrap(),
+            keys: keys.source.clone(),
+        },
+        None,
+        &control,
+        || budget.check(),
+    )
+    .unwrap();
     // Authenticate the same original alias and exact native-missing reference
     // required by production before granting Core the narrow rebuild target.
-    let entry: Entry = metadata.read(alias).unwrap();
+    let entry: Entry =
+        DataCacheMetadata::read_controlled_with_check(&f.0, alias, &control, || budget.check())
+            .unwrap();
     fs::remove_file(&body).unwrap();
     let absent = evidence::open_verified_blob_bounded_optional_with_check(
         &f.0,
@@ -139,7 +142,8 @@ fn reject_at_eof(failure: Fault) {
             assert!(!eof_seen.replace(true), "one publication EOF check");
             match failure {
                 Fault::MissingAlias => {
-                    assert!(metadata.delete(alias)?);
+                    // Fixture-only loss, never a production deletion API.
+                    fs::remove_file(f.0.join("state/data/cache-v1.sqlite"))?;
                 }
                 Fault::Cancel => {
                     control.cancel_handle().store(true, Ordering::Release);
@@ -149,7 +153,12 @@ fn reject_at_eof(failure: Fault) {
                 }
                 Fault::SourceClose => panic!("failed source EOF cannot revalidate an alias"),
                 _ => {
-                    let mut changed: Entry = metadata.read(alias)?;
+                    let mut changed: Entry = DataCacheMetadata::read_controlled_with_check(
+                        &f.0,
+                        alias,
+                        &control,
+                        || budget.check(),
+                    )?;
                     match failure {
                         Fault::ContentKey => changed.content_key = "00".repeat(16),
                         Fault::Digest => {
@@ -160,11 +169,24 @@ fn reject_at_eof(failure: Fault) {
                         Fault::KeyDigest => changed.keys.sha256 = "00".repeat(32),
                         _ => unreachable!(),
                     }
-                    let generation = metadata.generation(alias)?;
-                    metadata.put(alias, &changed, generation)?;
+                    let generation = DataCacheMetadata::read_document_raw_controlled_with_check(
+                        &f.0,
+                        alias,
+                        &control,
+                        || budget.check(),
+                    )?
+                    .generation;
+                    DataCacheMetadata::put_controlled_with_check(
+                        &f.0,
+                        alias,
+                        &changed,
+                        Some(generation),
+                        &control,
+                        || budget.check(),
+                    )?;
                 }
             }
-            validate_rebuild(&metadata, alias, &record, &keys, &reference, &store)
+            validate_rebuild(&f.0, alias, &record, &keys, &reference, &store)
         },
     };
     let owned = budget.safety_only();
@@ -206,7 +228,6 @@ fn reject_at_eof(failure: Fault) {
     );
     drop(checked);
     drop(reader);
-    metadata.close().unwrap();
 }
 
 #[test]

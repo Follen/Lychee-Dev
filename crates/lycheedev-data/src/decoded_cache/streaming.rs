@@ -207,20 +207,21 @@ fn read_verified_content_source(
             }
             let cache_key = format!("decoded-v1/{}", casc::hex(&identity.finalize()));
             drop(identity_span);
-            let mut metadata = {
-                let _span = budget.phase(Phase::DecodedCacheOpen);
-                Metadata::open_controlled_with_check(home, true, control, || budget.check())?
-            };
             let result = (|| {
+                // Private-cache ownership is per operation. This scope now
+                // includes open/read/checked-close; the historical separate
+                // DecodedCacheOpen counter stays zero, not an empty fake span.
                 let lookup_span = budget.phase(Phase::DecodedCacheLookup);
-                let existing =
-                    match metadata
-                        .read_controlled_with_check::<Entry>(&cache_key, control, || budget.check())
-                    {
-                        Ok(entry) => Some(entry),
-                        Err(error) if pure(&error, "vault.record_missing") => None,
-                        Err(error) => return Err(error),
-                    };
+                let existing = match DataCacheMetadata::read_controlled_with_check::<Entry>(
+                    home,
+                    &cache_key,
+                    control,
+                    || budget.check(),
+                ) {
+                    Ok(entry) => Some(entry),
+                    Err(error) if pure(&error, "vault.record_missing") => None,
+                    Err(error) => return Err(error),
+                };
                 drop(lookup_span);
                 let mut missing_body = None;
                 if let Some(entry) = &existing {
@@ -301,7 +302,7 @@ fn read_verified_content_source(
                                 reader: &mut reader,
                                 check: || {
                                     validate_rebuild(
-                                        &metadata, &cache_key, record, keys, expected, &store,
+                                        home, &cache_key, record, keys, expected, &store,
                                     )
                                 },
                             };
@@ -358,7 +359,8 @@ fn read_verified_content_source(
                         blob: serde_json::to_value(blob.reference())?,
                         keys: keys.source.clone(),
                     };
-                    match metadata.put_controlled_with_check(
+                    match DataCacheMetadata::put_controlled_with_check(
+                        home,
                         &cache_key,
                         &entry,
                         None,
@@ -367,10 +369,12 @@ fn read_verified_content_source(
                     ) {
                         Ok(_) => {}
                         Err(error) if pure(&error, "vault.generation_conflict") => {
-                            let other: Entry =
-                                metadata.read_controlled_with_check(&cache_key, control, || {
-                                    budget.check()
-                                })?;
+                            let other: Entry = DataCacheMetadata::read_controlled_with_check(
+                                home,
+                                &cache_key,
+                                control,
+                                || budget.check(),
+                            )?;
                             if other.content_key != entry.content_key
                                 || other.blob != entry.blob
                                 || other.keys.kind != entry.keys.kind
@@ -391,7 +395,7 @@ fn read_verified_content_source(
                     }
                 }
             })();
-            after_blob(&store, result, metadata.close())
+            after_blob(&store, result, Ok(()))
         })();
         let (blob, missing) = after_blob(&store, result, object.close_after(Ok(())))?;
         return Ok((encoding_key.clone(), blob, missing));
@@ -408,7 +412,7 @@ fn read_verified_content_source(
 // Recheck the original local association after full BLTE/CKey authentication,
 // outside Core's quota lock and before its final exact-reference publication.
 fn validate_rebuild(
-    metadata: &Metadata,
+    home: &Path,
     cache_key: &str,
     record: &EncodingRecord,
     keys: &keys::Context,
@@ -416,7 +420,9 @@ fn validate_rebuild(
     store: &Store<'_>,
 ) -> Result<()> {
     let entry: Entry =
-        match metadata.read_controlled_with_check(cache_key, store.control, || store.check()) {
+        match DataCacheMetadata::read_controlled_with_check(home, cache_key, store.control, || {
+            store.check()
+        }) {
             Ok(entry) => entry,
             Err(error) if pure(&error, "vault.record_missing") => return Err(integrity()),
             Err(error) => return Err(error),

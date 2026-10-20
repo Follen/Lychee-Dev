@@ -121,7 +121,7 @@ fn all_shared_manifest_references_retire_before_one_physical_object() {
     assert_eq!(report.removed_generations, 3);
     assert_eq!(
         report.deletions.iter().map(|d| d.kind).collect::<Vec<_>>(),
-        ["generation", "generation", "generation", "object"]
+        ["generation", "generation", "generation", "object", "recency"]
     );
     for key in keys {
         assert!(!manifest_path(&f, &key).exists());
@@ -522,3 +522,102 @@ fn referenced_missing_body_remains_an_explicit_integrity_stop_without_manifest_d
 
 #[path = "admission_tests.rs"]
 mod admission_tests;
+
+fn marker_time(f: &Fixture, object: &DerivedObject, seconds: u64) {
+    let file = fs::OpenOptions::new().write(true)
+        .open(f.paths().recency().join(&object.sha256)).unwrap();
+    file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds)).unwrap();
+    storage::close_file(file).unwrap();
+}
+
+#[test]
+fn explicit_recency_orders_cold_before_hash_and_cleans_markers() {
+    let f = Fixture::new();
+    let (a, _) = f.publish(b"first", &["first"]);
+    let (b, _) = f.publish(b"second", &["second"]);
+    // Force the lexically later hash to be older: SHA ordering would fail.
+    let (hot, cold) = if a.sha256 < b.sha256 { (&a, &b) } else { (&b, &a) };
+    marker_time(&f, hot, 200);
+    marker_time(&f, cold, 100);
+    let report = f.prune(DerivedRetirementOptions { max_objects: 1, ..Default::default() }).unwrap();
+    assert_eq!(report.removed_objects, 1);
+    assert!(f.paths().object(&hot.sha256).unwrap().exists());
+    assert!(!f.paths().object(&cold.sha256).unwrap().exists());
+    assert!(!f.paths().recency().join(&cold.sha256).exists());
+    assert!(f.paths().recency().join(&hot.sha256).exists());
+}
+
+#[test]
+fn recency_ties_are_deterministic_and_clock_rollback_only_changes_priority() {
+    let f = Fixture::new();
+    let (a, _) = f.publish(b"a", &["a"]);
+    let (b, _) = f.publish(b"b", &["b"]);
+    marker_time(&f, &a, 100);
+    marker_time(&f, &b, 100);
+    let report = f.prune(DerivedRetirementOptions { max_objects: 1, dry_run: true, ..Default::default() }).unwrap();
+    let selected = report.deletions.iter().find(|d| d.kind == "object").unwrap();
+    assert_eq!(selected.identity, a.sha256.as_str().min(b.sha256.as_str()));
+    assert_eq!(report.removed_objects, 1);
+    // Simulate a later acquisition stamped by a rolled-back wall clock. It
+    // changes priority only: dry run still preserves both authenticated bodies.
+    marker_time(&f, &b, 1);
+    let rolled = f.prune(DerivedRetirementOptions { max_objects: 1, dry_run: true, ..Default::default() }).unwrap();
+    assert_eq!(rolled.deletions.iter().find(|d| d.kind == "object").unwrap().identity, b.sha256);
+    assert!(f.paths().object(&a.sha256).unwrap().exists());
+    assert!(f.paths().object(&b.sha256).unwrap().exists());
+}
+
+#[test]
+fn successful_read_touches_once_and_does_not_change_immutable_body() {
+    let f = Fixture::new();
+    let (object, _) = f.publish(b"read recency", &["read recency"]);
+    marker_time(&f, &object, 1);
+    let control = OperationControl::default();
+    let resources = f.resources(&control);
+    let owner = resources.reserve_derived_cache(AdditionalPeak::default()).unwrap();
+    let before = owner.object_recency(&object.sha256).unwrap();
+    let reader = owner.open_object(&object.sha256, object.bytes).unwrap();
+    reader.close().unwrap();
+    assert!(owner.object_recency(&object.sha256).unwrap() > before);
+    owner.finish(Ok(())).unwrap();
+    resources.close().unwrap();
+    assert_eq!(fs::read(f.paths().object(&object.sha256).unwrap()).unwrap(), b"read recency");
+    assert_eq!(fs::read_dir(f.paths().recency()).unwrap().count(), 1);
+}
+
+#[test]
+fn recency_orphan_after_interrupted_retirement_is_recovered_and_foreign_marker_retained() {
+    let f = Fixture::new();
+    let (object, _) = f.publish(b"interrupted", &[]);
+    fs::remove_file(f.paths().object(&object.sha256).unwrap()).unwrap();
+    fs::write(f.paths().recency().join("unknown"), b"foreign").unwrap();
+    let report = f.prune(DerivedRetirementOptions::default()).unwrap();
+    assert_eq!(report.removed_objects, 0);
+    assert!(!f.paths().recency().join(&object.sha256).exists());
+    assert_eq!(fs::read(f.paths().recency().join("unknown")).unwrap(), b"foreign");
+}
+
+#[test]
+fn corrupt_recency_fails_before_any_body_retirement() {
+    let f = Fixture::new();
+    let (object, keys) = f.publish(b"protected", &["protected"]);
+    fs::write(f.paths().recency().join(&object.sha256), b"not our marker").unwrap();
+    assert!(f.prune(DerivedRetirementOptions::default()).is_err());
+    assert!(f.paths().object(&object.sha256).unwrap().exists());
+    assert!(manifest_path(&f, &keys[0]).exists());
+}
+
+#[test]
+fn saturated_recency_history_skips_growth_without_blocking_content_reads() {
+    let f = Fixture::new();
+    let (object, _) = f.publish(b"history cap", &[]);
+    let resources = f.resources(&OperationControl::default());
+    let owner = resources.reserve_derived_cache(AdditionalPeak::default()).unwrap();
+    let unknown = storage::sha256(b"not tracked");
+    owner.touch_object_bounded(&unknown, 1).unwrap();
+    assert!(!f.paths().recency().join(unknown).exists());
+    assert_eq!(fs::read_dir(f.paths().recency()).unwrap().count(), 1);
+    owner.open_object(&object.sha256, object.bytes).unwrap().close().unwrap();
+    owner.finish(Ok(())).unwrap();
+    resources.close().unwrap();
+}

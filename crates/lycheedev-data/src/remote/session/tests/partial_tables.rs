@@ -42,7 +42,7 @@ fn prepare_table(
         .dbd
         .replace(fixture::BUILD, &source.pin.full_build)
         .into_bytes();
-    let mut metadata = Metadata::open(&source.home, true).unwrap();
+    let metadata = crate::cache_fixture::Cache::new(&source.home);
     for (suffix, bytes) in [
         ("manifest.json", manifest),
         ("definitions/Sample.dbd", dbd),
@@ -58,7 +58,7 @@ fn prepare_table(
             )
             .unwrap();
     }
-    metadata.close().unwrap();
+
     let mut admitted = source.admission();
     let mut options = source.options();
     options.key_file = Some(key.to_string_lossy().into_owned());

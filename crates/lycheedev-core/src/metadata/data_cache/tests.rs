@@ -648,3 +648,141 @@ fn torn_journal_follows_sqlite_normal_handling_and_keeps_original_row() {
         fs::metadata(f.path()).unwrap().len() + remaining
     );
 }
+
+#[test]
+fn migrated_purposes_are_private_and_never_import_or_remove_shared_evidence() {
+    let f = Fixture::new();
+    let mut shared = Metadata::open(&f.home, true).unwrap();
+    shared.put("capture/retained", &"evidence", None).unwrap();
+    shared.put("pin/retained", &"selection", None).unwrap();
+    let keys = [
+        "definition/object",
+        "definition-ref/revision",
+        "decoded-v1/object",
+        "hotfix-wago-page/page",
+        "listfile/community-csv",
+    ];
+    for key in keys {
+        shared.put(key, &"historical", None).unwrap();
+        assert_eq!(
+            DataCacheMetadata::read_document_raw_controlled_with_check(
+                &f.home,
+                key,
+                &f.control,
+                || Ok(())
+            )
+            .unwrap_err()
+            .code,
+            "vault.record_missing"
+        );
+        DataCacheMetadata::put_controlled_with_check(
+            &f.home,
+            key,
+            &"private",
+            None,
+            &f.control,
+            || Ok(()),
+        )
+        .unwrap();
+        assert_eq!(
+            DataCacheMetadata::read_controlled_with_check::<String>(
+                &f.home,
+                key,
+                &f.control,
+                || Ok(())
+            )
+            .unwrap(),
+            "private"
+        );
+        assert_eq!(shared.read::<String>(key).unwrap(), "historical");
+    }
+    assert_eq!(
+        shared.read::<String>("capture/retained").unwrap(),
+        "evidence"
+    );
+    assert_eq!(shared.read::<String>("pin/retained").unwrap(), "selection");
+    shared.close().unwrap();
+    assert!(f.inventory().private_metadata_namespace_bytes > 0);
+}
+
+#[test]
+fn migrated_cache_quota_rejection_never_falls_back_to_shared_database() {
+    let f = Fixture::new();
+    let mut shared = Metadata::open(&f.home, true).unwrap();
+    shared
+        .put("definition/fixture", &"historical", None)
+        .unwrap();
+    f.limit(1);
+    assert!(
+        DataCacheMetadata::put_controlled_with_check(
+            &f.home,
+            "definition/fixture",
+            &"new",
+            None,
+            &f.control,
+            || Ok(())
+        )
+        .is_err()
+    );
+    assert_eq!(
+        shared.read::<String>("definition/fixture").unwrap(),
+        "historical"
+    );
+    assert_eq!(
+        DataCacheMetadata::read_document_raw_controlled_with_check(
+            &f.home,
+            "definition/fixture",
+            &f.control,
+            || Ok(())
+        )
+        .unwrap_err()
+        .code,
+        "vault.record_missing"
+    );
+    shared.close().unwrap();
+}
+
+#[test]
+fn migrated_cache_supplemental_stop_checks_close_and_cannot_become_absence() {
+    let f = Fixture::new();
+    DataCacheMetadata::put_controlled_with_check(
+        &f.home,
+        "listfile/fixture",
+        &true,
+        None,
+        &f.control,
+        || Ok(()),
+    )
+    .unwrap();
+    reset();
+    let error = DataCacheMetadata::read_controlled_with_check::<bool>(
+        &f.home,
+        "listfile/fixture",
+        &f.control,
+        || {
+            if seen(Point::Opened) {
+                Err(ToolkitError::new(
+                    "records.query_resource_budget",
+                    "fixture budget",
+                    3,
+                ))
+            } else {
+                Ok(())
+            }
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "records.query_resource_budget");
+    assert!(seen(Point::Closed));
+    f.control.check().unwrap();
+    reset();
+    assert!(
+        DataCacheMetadata::read_controlled_with_check::<bool>(
+            &f.home,
+            "listfile/fixture",
+            &f.control,
+            || Ok(())
+        )
+        .unwrap()
+    );
+}

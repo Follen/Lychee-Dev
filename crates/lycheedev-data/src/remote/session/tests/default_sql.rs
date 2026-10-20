@@ -58,7 +58,7 @@ impl SqlFixture {
             .dbd
             .replace(catalog_fixture::BUILD, &source.pin.full_build)
             .into_bytes();
-        let mut metadata = Metadata::open(&source.home, true).unwrap();
+        let metadata = crate::cache_fixture::Cache::new(&source.home);
         for (suffix, bytes) in [
             ("manifest.json", manifest),
             ("definitions/RemoteSample.dbd", dbd),
@@ -74,7 +74,7 @@ impl SqlFixture {
                 )
                 .unwrap();
         }
-        metadata.close().unwrap();
+
         if prime {
             let mut admitted = source.admission();
             let mut reader = Session::borrowed_with(

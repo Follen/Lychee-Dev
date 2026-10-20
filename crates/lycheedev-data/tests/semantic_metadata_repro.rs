@@ -1,11 +1,13 @@
 //! Reproductions for official WoWDBDefs metadata syntax rejected by Go323/Rust.
 //! Official bytes are fixed at b9a63096cdd99b26967f17f9515377ae62cadfd7;
 //! tables/pins below are authenticated synthetic fixtures, not client evidence.
+#[path = "support/data_cache.rs"]
+mod data_cache;
 #[path = "support/catalog_fixture.rs"]
 mod catalog_fixture;
 
 use catalog_fixture::{BUILD, Cell::U, DEFS, Fixture, table};
-use lycheedev_core::{Outcome, evidence, metadata::Metadata, storage};
+use lycheedev_core::{Outcome, evidence, storage};
 use serde_json::{Value, json};
 
 const CHR_MODEL: &[u8] = include_bytes!("fixtures/metadata-official-b9a6309/ChrModelID.dbde");
@@ -27,8 +29,7 @@ fn cache(fx: &Fixture, suffix: &str, raw: &[u8]) -> Value {
     let url = format!("https://raw.githubusercontent.com/wowdev/WoWDBDefs/{DEFS}/meta/{suffix}");
     let key = format!("definition/{}", storage::sha256(url.as_bytes()));
     let blob = evidence::publish_blob(&fx.home, raw, 4 << 20).unwrap();
-    Metadata::open(&fx.home, true)
-        .unwrap()
+    data_cache::Cache::new(&fx.home)
         .put(&key, &json!({"url":url,"blob":blob}), None)
         .unwrap();
     blob

@@ -128,9 +128,8 @@ fn local_missing_key_never_downgrades_checksum_metadata_section_key_or_cancellat
         if matches!(mode, "metadata" | "nested-metadata" | "section-key") {
             assert_eq!(error.code, "container.key_unavailable");
         }
-        let metadata = lycheedev_core::metadata::Metadata::open(&fx.home, false).unwrap();
+        let metadata = crate::cache_fixture::Cache::new(&fx.home);
         assert!(metadata.list::<Value>("capture/", 100).unwrap().is_empty());
-        metadata.close().unwrap();
         std::fs::remove_dir_all(fx.root).unwrap();
     }
 }
@@ -154,9 +153,8 @@ fn local_table_policy_skips_full_public_alias_when_keys_are_unavailable_offline(
     // cached. The full alias and blob use the real fixture's authenticated CKey.
     let full_blob = evidence::publish_blob(&fx.home, &complete_bytes, 4 << 20).unwrap();
     let entry = json!({"contentKey":content_key, "blob":full_blob, "keys":{"kind":"public","state":"loaded","commit":keys::PUBLIC_COMMIT,"sha256":keys::PUBLIC_SHA256}});
-    let mut metadata = lycheedev_core::metadata::Metadata::open(&fx.home, true).unwrap();
+    let mut metadata = crate::cache_fixture::Cache::new(&fx.home);
     metadata.put(&cache_key, &entry, None).unwrap();
-    metadata.close().unwrap();
     assert!(
         !evidence::blob_path(&fx.home, keys::PUBLIC_SHA256)
             .unwrap()
@@ -174,9 +172,8 @@ fn local_table_policy_skips_full_public_alias_when_keys_are_unavailable_offline(
     assert_eq!(page.data["file"]["contentVerified"], false);
     assert_eq!(page.data["file"]["content"], json!({"sha256":"","bytes":0}));
     assert_ne!(page.data["file"]["partialContent"], full_blob);
-    let metadata = lycheedev_core::metadata::Metadata::open(&fx.home, false).unwrap();
+    let metadata = crate::cache_fixture::Cache::new(&fx.home);
     assert_eq!(metadata.read::<Value>(&cache_key).unwrap(), entry);
-    metadata.close().unwrap();
     let pin = selection::load_pinned(&fx.home, &fx.pin)
         .unwrap()
         .spec

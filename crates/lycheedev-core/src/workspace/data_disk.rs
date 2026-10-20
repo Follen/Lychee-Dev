@@ -22,6 +22,7 @@ use std::{
 mod metadata;
 mod publication;
 mod reading;
+mod recency;
 pub(super) mod retirement;
 pub use retirement::{DerivedRetirementOptions, DerivedRetirementReport};
 pub(crate) use metadata::{MetadataQuota, MetadataReadQuota};
@@ -80,6 +81,9 @@ impl DataCachePaths {
             .parent()
             .expect("fixed generations parent")
             .join("shared-blobs-v1")
+    }
+    pub fn recency(&self) -> PathBuf {
+        self.generations.parent().expect("fixed generations parent").join("recency-v1")
     }
     fn roots(&self) -> [&Path; 4] {
         [
@@ -431,6 +435,7 @@ impl<'a> DerivedReservation<'a> {
             owner
                 .directories
                 .push(prepare_root(&owner.paths.shared_blobs(), control)?);
+            owner.directories.push(prepare_root(&owner.paths.recency(), control)?);
             // Config may have changed since query admission. A new disk owner
             // always consults the same current strict parser while holding quota.
             owner.report.configured_max_bytes =

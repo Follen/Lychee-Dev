@@ -145,7 +145,8 @@ fn read_cached_definition(
     validate: &mut dyn FnMut(&[u8]) -> Result<()>,
 ) -> Result<(Value, Vec<u8>)> {
     let check = || check_definition(deadline, budget, control);
-    let document = Metadata::read_document_raw_controlled_with_check(home, key, control, check)?;
+    let document =
+        DataCacheMetadata::read_document_raw_controlled_with_check(home, key, control, check)?;
     check()?;
     let object = decode_cached_object(&document.bytes, control, budget, check)?;
     if object.url != url {
@@ -290,15 +291,18 @@ pub(super) fn load(
         check()?;
         let parsed = validate(&raw);
         finish(parsed, Ok(()), deadline, budget, control)?;
-        let blob = evidence::publish_blob_bounded_with_check(home, &raw, MAXIMUM, control, check)?;
+        let blob = lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
+            home, &raw, MAXIMUM, control, &check,
+        )
+        .and_then(|blob| serde_json::to_value(blob).map_err(Into::into))?;
         check()?;
         let object = Object {
             url: url.to_owned(),
             blob: blob.clone(),
         };
-        let mut metadata = Metadata::open_controlled_with_check(home, true, control, check)?;
-        let published = metadata.create_controlled_with_check(&key, &object, control, check);
-        let published = finish(published, metadata.close(), deadline, budget, control);
+        let published =
+            DataCacheMetadata::put_controlled_with_check(home, &key, &object, None, control, check);
+        let published = finish(published, Ok(()), deadline, budget, control);
         match published {
             Ok(()) => {}
             Err(error) if pure_expected(&error, "vault.generation_conflict") => {

@@ -287,8 +287,8 @@ impl Context {
             if raw.len() != PUBLIC_BYTES || storage::sha256(&raw) != PUBLIC_SHA256 {
                 return Err(fault("container.integrity", 4, "Pinned public key bytes differ"));
             }
-            evidence::publish_blob_bounded_with_check(&self.home, &raw, 4 << 20,
-                &self.control, || self.check())?;
+            lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(&self.home, &raw, 4 << 20,
+                &self.control, &|| self.check())?;
             raw
         };
         self.check()?;

@@ -624,8 +624,7 @@ fn wago_corrupt_blob_fails_without_refetch() {
     let f = Fixture::new("wago");
     let pages = two();
     run_wago(&f, q(), &pages).unwrap();
-    let docs = lycheedev_core::metadata::Metadata::open(&f.inv.home, false)
-        .unwrap()
+    let docs = crate::cache_fixture::Cache::new(&f.inv.home)
         .list::<Value>("hotfix-wago-page/", 10)
         .unwrap();
     let blob = &docs[0]["response"];
@@ -645,7 +644,7 @@ fn wago_resumed_self_page_refuses_different_bytes() {
     query.limit = 1;
     let first = run_wago(&f, query.clone(), &pages).unwrap();
     let cursor = Cursor::decode(&first.next_cursor, &query, "wago").unwrap();
-    let mut metadata = lycheedev_core::metadata::Metadata::open(&f.inv.home, true).unwrap();
+    let metadata = crate::cache_fixture::Cache::new(&f.inv.home);
     metadata
         .delete(&format!("hotfix-wago-page/{}", cursor.current.unwrap().key))
         .unwrap();

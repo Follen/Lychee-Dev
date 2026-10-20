@@ -47,6 +47,9 @@ fn validate_key(key: &str) -> Result<()> {
             "cdn-location/",
             "decoded-v1/",
             "definition-ref/",
+            "definition/",
+            "hotfix-wago-page/",
+            "listfile/",
         ]
         .iter()
         .any(|prefix| key.starts_with(prefix) && key.len() > prefix.len())
@@ -113,6 +116,21 @@ fn journal_bound(main: u64) -> Result<u64> {
 }
 
 impl DataCacheMetadata {
+    /// Typed private-cache read. The quota/database owners have been checked and
+    /// closed before decoding; no connection can escape into blob publication.
+    pub fn read_controlled_with_check<T: DeserializeOwned>(
+        home: &Path,
+        key: &str,
+        control: &OperationControl,
+        supplemental: impl Fn() -> Result<()>,
+    ) -> Result<T> {
+        let raw = Self::read_document_raw_controlled_with_check(home, key, control, &supplemental)?;
+        check(control, &supplemental)?;
+        let value = serde_json::from_slice(&raw.bytes)?;
+        check(control, &supplemental)?;
+        Ok(value)
+    }
+
     pub fn read_document_raw_controlled_with_check(
         home: &Path,
         key: &str,

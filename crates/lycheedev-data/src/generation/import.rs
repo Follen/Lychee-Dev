@@ -83,7 +83,6 @@ pub(crate) struct ImportedBatch {
 }
 /// Array-free reservation owner for consumers that attach its lifetime to
 /// Arrow's shared buffers. It must never own a RecordBatch or an ArrayRef.
-#[cfg(feature = "datafusion-qualification")]
 pub(crate) struct ImportedBatchAllocation {
     _schema_owner: Arc<ImportedSchema>,
     _allocation: OwnedRetainedReservation,
@@ -98,7 +97,6 @@ impl ImportedSchema {
     }
 }
 impl ImportedBatch {
-    #[cfg(feature = "datafusion-qualification")]
     pub(crate) fn into_parts(self) -> (RecordBatch, UInt32Array, usize, ImportedBatchAllocation) {
         (
             self.records,
@@ -411,11 +409,9 @@ impl<'table, 'body> TableImporter<'table, 'body> {
     /// Conservative bound reserved before constructing each batch, including
     /// Arrow builder growth overlap. A qualification snapshot can reject its
     /// aggregate bound before asking the importer to allocate another batch.
-    #[cfg(feature = "datafusion-qualification")]
     pub(crate) fn batch_reservation_bytes(&self) -> usize {
         self.batch_reservation
     }
-    #[cfg(feature = "datafusion-qualification")]
     pub(crate) fn schema_owner(&self) -> Arc<ImportedSchema> {
         self.schema.clone()
     }

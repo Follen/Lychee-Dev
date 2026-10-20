@@ -1,5 +1,14 @@
 # Rust 架构实施清单
 
+## 当前唯一优先主线：完整新架构先完成
+- [ ] 统一正式DataFusion执行核：typed发现/批量ID/筛选/汇总/关联/排序/分页/导出同核；旧SQL语法兼容不作必达目标，但业务能力必须typed等价或更优；保精确数字、数组、Hotfix、partial与证据，不长期双执行器。
+- [ ] Agent同进程session与owner结果句柄：真实CLI入口、版本/身份、独立取消、请求去重、上限/过期/断连、异常退出和预算guard回收；结果页不是CAP别名。
+- [ ] 默认可配置5GB全Data口径、共享物理内容去重、冷淘汰、active/evidence保护与写入峰值；不长期保留三份派生。
+- [ ] 新CLI自描述和Skill任务路径一致；固定Go历史oracle不动，新架构扩展独立验证。
+- [ ] 保留Source已验证二进制底座与Live现有私有SessionOwner/Mailbox v1；完整集成质量先行，随后性能，最终五循环。
+
+以下旧优化/诊断清单保留为历史与待验证事实，不再挤占上述主线，也不表示统一新架构已经实现。
+
 当前批：ea7原生585通过/1原ignored，完整七调用通过但性能未达标。四文件共享数字Indexed内层已独审及隔离差分验证；新Windows产品质量/收益待测。
 
 以 [handover](handover.md) 为当前事实、[DESIGN](DESIGN.md#authorized-architecture-implementation-plan--2026-10-19) 为完整计划。质量基线f811；性能参考固定Go323。先业务质量/完整实现，再≤30%耗时门禁，之后正式五项循环。历史已完成项与原失败留在[308efa旧清单](https://github.com/Follen/Lychee-Dev/blob/308efa2766d00273b13c9c7e24a0b956bb60e9e9/todo.md)，不滚动复制到当前待办。

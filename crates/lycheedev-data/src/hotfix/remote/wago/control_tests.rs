@@ -1,5 +1,6 @@
 use super::super::control_tests::Fixture;
 use super::*;
+use lycheedev_core::metadata::Metadata;
 fn raw() -> Vec<u8> {
     br#"<div id="app" data-page='{"component":"Hotfixes","props":{"hotfixes":{"current_page":1,"last_page":1,"per_page":25,"total":0,"data":[]}}}'></div>"#.to_vec()
 }
@@ -22,11 +23,13 @@ fn receipt_owner_roundtrip_preserves_cas_generation_and_typed_wire_rules() {
     )
     .unwrap();
     let key = format!("hotfix-wago-page/{}", identity.key(&budget).unwrap());
-    let owner = Metadata::open(&f.inv.home, false).unwrap();
-    let first = owner
-        .read_document_on_owner_controlled(&key, &f.inv.control)
-        .unwrap();
-    owner.close().unwrap();
+    let first = DataCacheMetadata::read_document_raw_controlled_with_check(
+        &f.inv.home,
+        &key,
+        &f.inv.control,
+        || Ok(()),
+    )
+    .unwrap();
     store(
         &f.inv,
         identity.clone(),
@@ -37,15 +40,17 @@ fn receipt_owner_roundtrip_preserves_cas_generation_and_typed_wire_rules() {
         &budget,
     )
     .unwrap();
-    let owner = Metadata::open(&f.inv.home, false).unwrap();
     assert_eq!(
-        owner
-            .read_document_on_owner_controlled(&key, &f.inv.control)
-            .unwrap()
-            .generation,
+        DataCacheMetadata::read_document_raw_controlled_with_check(
+            &f.inv.home,
+            &key,
+            &f.inv.control,
+            || Ok(())
+        )
+        .unwrap()
+        .generation,
         first.generation
     );
-    owner.close().unwrap();
     let (loaded, body) = load(&f.inv, &identity, &budget).unwrap().unwrap();
     assert_eq!(body, bytes);
     assert_eq!(loaded.response, receipt.response);
@@ -121,24 +126,24 @@ fn seed_historical_time(f: &Fixture, budget: &Budget, number: i64, last: i64, st
     let mut value = serde_json::to_value(receipt).unwrap();
     value["capturedAt"] = json!(stamp);
     let key = format!("hotfix-wago-page/{}", identity.key(budget).unwrap());
-    let mut owner =
-        Metadata::open_controlled_with_check(&f.inv.home, true, &f.inv.control, || budget.check())
-            .unwrap();
-    let current = owner
-        .read_document_on_owner_controlled_with_check(&key, &f.inv.control, || budget.check())
-        .unwrap();
+    let current = DataCacheMetadata::read_document_raw_controlled_with_check(
+        &f.inv.home,
+        &key,
+        &f.inv.control,
+        || budget.check(),
+    )
+    .unwrap();
     // store() already published this key. The intentional historical rewrite
     // must compare that generation; None means create, not unconditional update.
-    owner
-        .put_controlled_with_check(
-            &key,
-            &value,
-            Some(current.generation),
-            &f.inv.control,
-            || budget.check(),
-        )
-        .unwrap();
-    owner.close().unwrap();
+    DataCacheMetadata::put_controlled_with_check(
+        &f.inv.home,
+        &key,
+        &value,
+        Some(current.generation),
+        &f.inv.control,
+        || budget.check(),
+    )
+    .unwrap();
 }
 #[test]
 fn historical_noncanonical_offset_compares_without_early_cache_error() {
@@ -283,4 +288,38 @@ fn query_offset_uses_exact_instant_and_retains_late_marshal_failure_after_pin() 
     }
     assert!(model::parse_time("2026-10-15\t01:02:03").is_err());
     assert!(model::parse_time("2026-10-15 01:02:03Z").is_err());
+}
+
+#[test]
+fn wago_page_missing_private_alias_never_reads_historical_shared_page() {
+    let f = Fixture::new("wago");
+    let budget = f.budget();
+    let query = Query::from_invocation(&f.inv).unwrap();
+    let identity = Identity::new(&query, 1);
+    let bytes = raw();
+    let page = parse::parse(&bytes, &budget, &f.inv.control).unwrap();
+    let receipt = store(
+        &f.inv,
+        identity.clone(),
+        url("https://wago.tools", "", 1),
+        &bytes,
+        &page,
+        "2026-10-16T00:00:00Z".into(),
+        &budget,
+    )
+    .unwrap();
+    let key = format!("hotfix-wago-page/{}", identity.key(&budget).unwrap());
+    let mut shared = Metadata::open(&f.inv.home, true).unwrap();
+    shared.put(&key, &receipt, None).unwrap();
+    shared.close().unwrap();
+    assert!(
+        crate::cache_fixture::Cache::new(&f.inv.home)
+            .delete(&key)
+            .unwrap()
+    );
+    assert!(load(&f.inv, &identity, &budget).unwrap().is_none());
+    let shared = Metadata::open(&f.inv.home, false).unwrap();
+    let historical: Value = shared.read(&key).unwrap();
+    assert_eq!(historical["response"], receipt.response);
+    shared.close().unwrap();
 }

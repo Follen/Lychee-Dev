@@ -623,9 +623,9 @@ fn actual_root_reference_handoff_matches_cold_warm_cache_and_complete_body_in_bo
             let bytes = evidence::read_blob(&fx.home, root, 256 << 20).unwrap();
             assert_eq!(root["bytes"], bytes.len());
             assert_eq!(root["sha256"], lycheedev_core::storage::sha256(&bytes));
-            let metadata = Metadata::open(&fx.home, false).unwrap();
-            let aliases = metadata.list::<Value>("decoded-v1/", 100).unwrap();
-            metadata.close().unwrap();
+            let aliases = crate::cache_fixture::Cache::new(&fx.home)
+                .list::<Value>("decoded-v1/", 100)
+                .unwrap();
             assert_eq!(
                 aliases
                     .iter()
@@ -786,9 +786,9 @@ fn actual_verified_delivery_closes_owned_blob_after_late_source_and_reader_close
         );
         // The destination rename is a real Windows deny-delete-owner probe.
         // It happens only after the batch has failed and closed the delivered blob.
-        let metadata = Metadata::open(&fx.home, false).unwrap();
-        let aliases = metadata.list::<Value>("decoded-v1/", 100).unwrap();
-        metadata.close().unwrap();
+        let aliases = crate::cache_fixture::Cache::new(&fx.home)
+            .list::<Value>("decoded-v1/", 100)
+            .unwrap();
         for entry in aliases {
             let path =
                 evidence::blob_path(&fx.home, entry["blob"]["sha256"].as_str().unwrap()).unwrap();
@@ -861,9 +861,9 @@ fn actual_verified_batch_closes_every_constructed_owner_on_later_error_and_deliv
                 "records.content_missing"
             }
         );
-        let metadata = Metadata::open(&fx.home, false).unwrap();
-        let aliases = metadata.list::<Value>("decoded-v1/", 100).unwrap();
-        metadata.close().unwrap();
+        let aliases = crate::cache_fixture::Cache::new(&fx.home)
+            .list::<Value>("decoded-v1/", 100)
+            .unwrap();
         assert_eq!(
             aliases.len(),
             3,

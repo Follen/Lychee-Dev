@@ -37,7 +37,7 @@ fn definition_error() -> lycheedev_core::ToolkitError {
     )
 }
 #[derive(Clone)]
-pub(super) struct SharedCapture {
+pub(crate) struct SharedCapture {
     value: Arc<Value>,
     value_bytes: usize,
 }
@@ -164,7 +164,7 @@ struct Snapshot {
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct Report {
+pub(crate) struct Report {
     pub table: String,
     pub policy: &'static str,
     pub captures: Vec<SharedCapture>,
@@ -179,14 +179,14 @@ struct Patch {
 
 /// Prepared independently of the base provider and the mutable capture cache.
 /// All selected patches are validated here, including for schema-only queries.
-pub(super) struct OverlayPlan {
+pub(crate) struct OverlayPlan {
     schema: relational::Source,
     patches: BTreeMap<u32, Patch>,
     capture_ids: Vec<String>,
     identity_index: usize,
 }
 
-pub(super) struct Snapshots<'a> {
+pub(crate) struct Snapshots<'a> {
     inv: &'a Invocation,
     pin: &'a selection::DataPin,
     budget: &'a Budget,
@@ -366,7 +366,7 @@ impl<'a> Snapshots<'a> {
         Ok((source, report))
     }
 
-    pub(super) fn prepare(
+    pub(crate) fn prepare(
         &mut self,
         columns: &[String],
         complete: bool,
@@ -697,11 +697,11 @@ impl RowCursor for OverlayEqualCursor<'_> {
 }
 
 impl OverlayPlan {
-    pub(super) fn schema(&self) -> &relational::Source {
+    pub(crate) fn schema(&self) -> &relational::Source {
         &self.schema
     }
 
-    pub(super) fn cursor<'query>(
+    pub(crate) fn cursor<'query>(
         &'query self,
         base: &'query dyn relational::RowProvider,
         budget: &'query Budget,

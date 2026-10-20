@@ -186,7 +186,7 @@ fn full_inventory_reuses_ten_owners_and_second_attribution_walk_with_identical_f
         .iter()
         .map(|directory| directory.path().to_owned())
         .collect();
-    assert_eq!(managed.len(), 10);
+    assert_eq!(managed.len(), 11);
     let fallback = Monitor::new();
     let before = run_inventory(&owner, false).unwrap();
     let fallback_events = fallback.events();
@@ -203,12 +203,12 @@ fn full_inventory_reuses_ten_owners_and_second_attribution_walk_with_identical_f
     assert_eq!(reused_events.inventories, 1);
     assert_eq!(fallback_events.file_closes, 9);
     assert_eq!(reused_events.file_closes, fallback_events.file_closes);
-    assert_eq!(fallback_events.opened.len(), 13); // 11 managed traversals + 2 unknown.
+    assert_eq!(fallback_events.opened.len(), 14); // 12 managed traversals + 2 unknown.
     assert_eq!(reused_events.opened.len(), 2);
-    assert_eq!(fallback_events.closed.len(), 15);
+    assert_eq!(fallback_events.closed.len(), 16);
     assert_eq!(
         fallback_events.closed.len() - reused_events.closed.len(),
-        11
+        12
     );
     assert!(fallback_events.borrowed.is_empty());
     let mut expected_managed = frequencies(managed.clone());
@@ -248,7 +248,7 @@ fn full_inventory_reuses_ten_owners_and_second_attribution_walk_with_identical_f
     );
     // Semantic body checks still own and close blobs root + shard in both cases.
     assert_eq!(reused_events.closed.len(), 4);
-    assert_eq!(owner.directories.len(), 11);
+    assert_eq!(owner.directories.len(), 12);
     owner.finish(Ok(())).unwrap();
 }
 
@@ -478,7 +478,7 @@ fn cancellation_after_real_unknown_open_checks_close_and_original_owner_cleanup(
             .count(),
         1
     );
-    assert_eq!(events.closed.len(), 12); // One fallback plus all eleven owner directories.
+    assert_eq!(events.closed.len(), 13); // One fallback plus all twelve owner directories.
     drop(monitor);
     ExclusiveLock::resource(&f.0.join("locks"), QUOTA_RESOURCE)
         .unwrap()

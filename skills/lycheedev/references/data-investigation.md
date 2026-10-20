@@ -17,14 +17,34 @@ Choose the smallest query that can settle the claim:
   otherwise inspect schema and query the ID/foreign key.
 - Business name: search the actual localized schema field, then resolve candidate
   class/rank/relationships. Do not pick the first name or ask for a discoverable ID.
-- Multiple tables or calculations: use parameterized SQL; see
-  [tables](data-tables.md) and [query recipes](data-query-recipes.md).
+- Repeated or multi-table tasks: inspect `data agent schema` and use a single
+  supported `data agent serve` worker with typed lookup/filter/aggregate/join
+  plans. Keep the same snapshot and result handle across pages; release handles
+  when finished. This worker accepts typed plans only. The older SQL command
+  remains a separate migration path, not evidence that all consumers are unified.
+- If the installed version does not advertise the Agent worker, use its existing
+  supported commands and parameterized SQL; never invent flags or claim session
+  reuse. See [tables](data-tables.md) and [query recipes](data-query-recipes.md).
+
+The worker is a bounded, caller-owned process, not an installed daemon. Request
+IDs increase strictly. Cancelling outstanding work or exceeding a deadline
+terminates the isolated worker and invalidates every session handle, including
+results from earlier requests. Never automatically replay an uncertain request.
+Close or stdin EOF drains submitted requests and then releases the session;
+retain the needed pages/evidence first. Incomplete output frames are not results,
+and an abnormal process exit invalidates the session even when a blocked stderr
+pipe prevents delivery of the best-effort supervisor diagnostic. Never infer
+completion of pending work from missing error output. Check the installed schema for platform memory
+protection and configurable limits before opening a worker.
 
 Use installed describe/help for commands and flags. A negative claim needs
 complete readable coverage of its exact scope. Empty partial results, missing
 keys/partitions and truncated searches cannot establish absence. SQL LIMIT or
-one record does not establish whole-table coverage. JSONL completion requires a
-legal end frame and exit 0, followed by a separate coverage check.
+one record does not establish whole-table coverage. Ordinary command JSONL
+requires a legal end frame and exit 0. Agent JSONL instead requires a complete
+response frame with the matching request ID; it has no ordinary begin/end wrapper.
+Normal session exit or a close response is separate from each result's coverage.
+Inspect coverage independently in both protocols.
 
 Continue returned cursors with unchanged pin/source/filters and the correct
 cursor type. DB2 search/foreign-key have no cursor; narrow, use a supported bound,

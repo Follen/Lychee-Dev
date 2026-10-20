@@ -1,8 +1,9 @@
 //! Small real CASC/Encoding/Root/DBD/WDC inputs for item/decor navigation.
 //! They are synthetic authenticated sources, never actual-client acceptance.
+#[path = "data_cache.rs"]
+mod data_cache;
 use lycheedev_core::{
     Invocation, evidence,
-    metadata::Metadata,
     selection::{self, SelectionSpec},
     storage, workspace,
 };
@@ -567,7 +568,7 @@ impl Fixture {
                 t.dbd.as_bytes().to_vec(),
             )
         }));
-        let mut metadata = Metadata::open(&home, true).unwrap();
+        let metadata = data_cache::Cache::new(&home);
         for (suffix, bytes) in resources {
             let url = format!("{base}{suffix}");
             let blob = evidence::publish_blob(&home, &bytes, 4 << 20).unwrap();

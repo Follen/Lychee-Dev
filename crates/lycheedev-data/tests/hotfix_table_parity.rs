@@ -1,5 +1,7 @@
 //! Go 3.2.0 3057a966 cache_fields_test.go / cache_scan_test.go and
 //! records.hotfix.go named-table state transitions. Synthetic offline inputs.
+#[path = "support/data_cache.rs"]
+mod data_cache;
 use lycheedev_core::{
     Invocation,
     control::OperationControl,
@@ -372,7 +374,7 @@ impl Fixture {
             let url = format!("https://raw.githubusercontent.com/wowdev/WoWDBDefs/{commit}/{path}");
             let blob = evidence::publish_blob(&self.home, raw, 4 << 20).unwrap();
             let key = format!("definition/{}", storage::sha256(url.as_bytes()));
-            let mut metadata = Metadata::open(&self.home, true).unwrap();
+            let metadata = data_cache::Cache::new(&self.home);
             let generation = metadata.generation(&key).unwrap();
             metadata
                 .put(&key, &json!({"url":url,"blob":blob}), generation)

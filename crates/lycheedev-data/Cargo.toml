@@ -6,12 +6,12 @@ license.workspace = true
 rust-version.workspace = true
 
 [features]
-datafusion-qualification = ["dep:datafusion", "dep:async-trait", "arrow-array/pool"]
+datafusion-qualification = []
 
 [dependencies]
-async-trait = { version = "=0.1.92", optional = true }
-datafusion = { version = "=54.0.0", optional = true, default-features = false, features = ["sql", "recursive_protection"] }
-arrow-array = "=58.3.0"
+async-trait = "=0.1.92"
+datafusion = { version = "=54.0.0", default-features = false, features = ["sql", "recursive_protection"] }
+arrow-array = { version = "=58.3.0", features = ["pool"] }
 arrow-buffer = "=58.3.0"
 flatbuffers = "=25.12.19"
 arrow-schema = "=58.3.0"
@@ -47,3 +47,7 @@ hyper-tls = "=0.6.0"
 native-tls = "=0.2.18"
 tokio-native-tls = "=0.3.1"
 tower-service = "=0.3.3"
+
+[dev-dependencies]
+# Fixture-only access to the existing pinned SQLite cache metadata backend.
+rusqlite.workspace = true

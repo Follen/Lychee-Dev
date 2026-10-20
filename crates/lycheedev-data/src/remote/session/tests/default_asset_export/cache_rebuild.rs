@@ -138,7 +138,7 @@ fn default_cache_prepare_rebuilds_missing_decoded_source_and_preserves_exact_row
         .dbd
         .replace(tables::BUILD, &f.source.pin.full_build)
         .into_bytes();
-    let mut metadata = Metadata::open(&f.source.home, true).unwrap();
+    let metadata = crate::cache_fixture::Cache::new(&f.source.home);
     for (suffix, bytes) in [
         ("manifest.json", manifest),
         ("definitions/Sample.dbd", dbd),
@@ -154,7 +154,7 @@ fn default_cache_prepare_rebuilds_missing_decoded_source_and_preserves_exact_row
             )
             .unwrap();
     }
-    metadata.close().unwrap();
+
     let digest = storage::sha256(&f.source.payload);
     let body = evidence::blob_path(&f.source.home, &digest).unwrap();
     std::fs::remove_file(&body).unwrap();

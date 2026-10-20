@@ -77,15 +77,15 @@ fn reply(raw: Vec<u8>) -> (String, thread::JoinHandle<()>) {
 }
 fn cached(home: &Path, url: &str, raw: &[u8]) -> Value {
     let blob = evidence::publish_blob(home, raw, MAXIMUM).unwrap();
-    let mut metadata = Metadata::open(home, true).unwrap();
-    metadata
-        .put(
-            &format!("definition/{}", storage::sha256(url.as_bytes())),
-            &json!({"url":url,"blob":blob}),
-            None,
-        )
-        .unwrap();
-    metadata.close().unwrap();
+    DataCacheMetadata::put_controlled_with_check(
+        &home,
+        &format!("definition/{}", storage::sha256(url.as_bytes())),
+        &json!({"url":url,"blob":blob}),
+        None,
+        &OperationControl::default(),
+        || Ok(()),
+    )
+    .unwrap();
     blob
 }
 fn assert_absent(home: &Path, url: &str) {
@@ -316,35 +316,48 @@ fn validated_bytes_are_not_published_after_independent_stop() {
     assert_absent(&home, &url);
 }
 #[test]
-fn schema_lease_wait_observes_original_independent_budget() {
+fn private_quota_wait_observes_original_independent_budget() {
     let home = home();
-    let guard = storage::ExclusiveLock::resource(&home.join("locks"), "metadata-schema").unwrap();
+    let url = "https://example.invalid/definition";
+    cached(&home, url, b"//x\n");
+    let guard =
+        storage::ExclusiveLock::resource(&home.join("locks"), "data-derived-v1:quota").unwrap();
     let ledger = Budget::new(
         Cost::defaults(),
-        Instant::now() + Duration::from_secs(2),
+        Instant::now() + Duration::from_millis(100),
         None,
     );
     let control = OperationControl::default();
-    let (url, server) = reply(b"//x\n".to_vec());
     let start = Instant::now();
     let error = load(
         &home,
-        &url,
-        false,
+        url,
+        true,
         control.deadline(),
         Some(&ledger),
         Some(&control),
         |_| Ok(()),
     )
     .unwrap_err();
-    server.join().unwrap();
     guard.close().unwrap();
     assert_eq!(error.code, "records.query_resource_budget");
     assert!(start.elapsed() < Duration::from_secs(5));
     assert!(control.check().is_ok());
-    assert_eq!(ledger.snapshot().unwrap().network_bytes, 4);
-    assert_absent(&home, &url);
+    assert_eq!(ledger.snapshot().unwrap().network_bytes, 0);
+    assert!(
+        load(
+            &home,
+            url,
+            true,
+            control.deadline(),
+            None,
+            Some(&control),
+            |_| Ok(())
+        )
+        .is_ok()
+    );
 }
+
 #[test]
 fn corrupt_cache_is_rehashed_without_authorizing_network_replacement() {
     let home = home();
@@ -383,15 +396,15 @@ fn go_cached_object_merges_casefolded_fields_and_validates_size_without_a_budget
     assert_eq!(object.url, url);
     assert_eq!(object.blob.bytes, 4);
     let key = format!("definition/{}", storage::sha256(url.as_bytes()));
-    let mut metadata = Metadata::open(&home, true).unwrap();
-    metadata
-        .put(
-            &key,
-            &json!({"URL":url,"BLOB":{"SHA256":blob["sha256"],"BYTES":4},"ignored":true}),
-            None,
-        )
-        .unwrap();
-    metadata.close().unwrap();
+    DataCacheMetadata::put_controlled_with_check(
+        &home,
+        &key,
+        &json!({"URL":url,"BLOB":{"SHA256":blob["sha256"],"BYTES":4},"ignored":true}),
+        None,
+        &OperationControl::default(),
+        || Ok(()),
+    )
+    .unwrap();
     let result = load(
         &home,
         url,
@@ -403,15 +416,15 @@ fn go_cached_object_merges_casefolded_fields_and_validates_size_without_a_budget
     )
     .unwrap();
     assert_eq!(result.1, b"//x\n");
-    let mut metadata = Metadata::open(&home, true).unwrap();
-    metadata
-        .put(
-            &key,
-            &json!({"url":url,"blob":{"sha256":blob["sha256"],"bytes":-1}}),
-            Some(1),
-        )
-        .unwrap();
-    metadata.close().unwrap();
+    DataCacheMetadata::put_controlled_with_check(
+        &home,
+        &key,
+        &json!({"url":url,"blob":{"sha256":blob["sha256"],"bytes":-1}}),
+        Some(1),
+        &OperationControl::default(),
+        || Ok(()),
+    )
+    .unwrap();
     let error = load(
         &home,
         url,
@@ -745,4 +758,52 @@ fn malformed_cached_json_keeps_syntax_primary_and_actual_invocation_stop() {
     assert_eq!(error.details["control"]["code"], "command.cancelled");
     assert_eq!(ledger.snapshot().unwrap(), Cost::default());
     assert!(ledger.check().is_ok());
+}
+
+#[test]
+fn definition_ignores_historical_shared_alias_and_preserves_evidence() {
+    let home = home();
+    let url = "https://example.invalid/historical-definition";
+    let key = format!("definition/{}", storage::sha256(url.as_bytes()));
+    let blob = evidence::publish_blob(&home, b"//x\n", MAXIMUM).unwrap();
+    let old = json!({"url":url,"blob":blob});
+    let mut shared = lycheedev_core::metadata::Metadata::open(&home, true).unwrap();
+    shared.put(&key, &old, None).unwrap();
+    shared
+        .put("capture/fixture", &json!({"retained":true}), None)
+        .unwrap();
+    shared.close().unwrap();
+    let error = load(
+        &home,
+        url,
+        true,
+        Instant::now() + Duration::from_secs(5),
+        None,
+        None,
+        |_| Ok(()),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "records.definition_unavailable_offline");
+    let shared = lycheedev_core::metadata::Metadata::open(&home, false).unwrap();
+    assert_eq!(shared.read::<Value>(&key).unwrap(), old);
+    assert_eq!(
+        shared.read::<Value>("capture/fixture").unwrap(),
+        json!({"retained":true})
+    );
+    shared.close().unwrap();
+    cached(&home, url, b"//private\n");
+    assert_eq!(
+        load(
+            &home,
+            url,
+            true,
+            Instant::now() + Duration::from_secs(5),
+            None,
+            None,
+            |_| Ok(())
+        )
+        .unwrap()
+        .1,
+        b"//private\n"
+    );
 }

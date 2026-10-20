@@ -1,4 +1,6 @@
-use lycheedev_core::{Invocation, evidence, metadata::Metadata, storage, workspace};
+#[path = "support/data_cache.rs"]
+mod data_cache;
+use lycheedev_core::{Invocation, evidence, storage, workspace};
 use lycheedev_data::{
     casc,
     decoded_cache::{self, Stats},
@@ -319,7 +321,7 @@ fn decoded_reuse_rehashes_selected_encoded_and_cached_content() {
     .into_bytes();
     material.extend_from_slice(&object.encoded);
     let key = format!("decoded-v1/{}", storage::sha256(&material));
-    let mut metadata = Metadata::open(&home, true).unwrap();
+    let metadata = data_cache::Cache::new(&home);
     let mut value: serde_json::Value = metadata.read(&key).unwrap();
     value["contentKey"] = json!("a".repeat(32));
     let generation = metadata.generation(&key).unwrap();

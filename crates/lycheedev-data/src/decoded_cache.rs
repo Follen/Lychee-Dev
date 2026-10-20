@@ -5,7 +5,7 @@ use crate::{
     metadata_format::{Encoding, EncodingRecord},
     resource::{Budget, Cost},
 };
-use lycheedev_core::{Result, evidence, metadata::Metadata, storage};
+use lycheedev_core::{Result, evidence, metadata::DataCacheMetadata, storage};
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -115,12 +115,17 @@ pub fn decode_budgeted(
         stats,
         budget,
     )?;
-    let mut metadata = Metadata::open(home, true)?;
-    let existing = match metadata.read::<Entry>(&key) {
-        Ok(entry) => Some(entry),
-        Err(error) if error.code == "vault.record_missing" => None,
-        Err(error) => return Err(error),
-    };
+    let control = lycheedev_core::control::OperationControl::uncancelable(limits.deadline);
+    let check = || budget.map_or(Ok(()), Budget::check);
+    let existing =
+        match DataCacheMetadata::read_controlled_with_check::<Entry>(home, &key, &control, check) {
+            Ok(entry) => Some(entry),
+            Err(error) if crate::remote::cache::pure_expected(&error, "vault.record_missing") => {
+                None
+            }
+            Err(error) => return Err(error),
+        };
+    let mut missing_body = None;
     if let Some(entry) = &existing {
         if entry.content_key != record.content_key
             || entry.blob["bytes"].as_u64() != Some(record.decoded_bytes)
@@ -155,6 +160,10 @@ pub fn decode_budgeted(
                 missing: vec![],
             });
         }
+        missing_body = Some(
+            serde_json::from_value::<evidence::BlobRef>(entry.blob.clone())
+                .map_err(|_| integrity())?,
+        );
     }
     let decode = |keys: &keys::Context| {
         let reservation = budget
@@ -213,7 +222,37 @@ pub fn decode_budgeted(
         budget.check()?;
     }
     stats.extracted_bytes += content.bytes.len() as u64;
-    let blob = evidence::publish_blob(home, &content.bytes, max)?;
+    let blob = if let Some(expected) = missing_body.as_ref() {
+        let current: Entry =
+            DataCacheMetadata::read_controlled_with_check(home, &key, &control, check)?;
+        let original = existing
+            .as_ref()
+            .expect("authenticated missing body has alias");
+        if current.content_key != original.content_key
+            || current.blob != original.blob
+            || current.keys.kind != original.keys.kind
+            || current.keys.sha256 != original.keys.sha256
+        {
+            return Err(integrity());
+        }
+        lycheedev_core::workspace::data_disk::rebuild_shared_blob_with_check(
+            home,
+            &content.bytes,
+            max,
+            expected,
+            &control,
+            &check,
+        )?
+    } else {
+        lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
+            home,
+            &content.bytes,
+            max,
+            &control,
+            &check,
+        )?
+    };
+    let blob = serde_json::to_value(blob)?;
     let entry = Entry {
         content_key: record.content_key.clone(),
         blob,
@@ -221,10 +260,11 @@ pub fn decode_budgeted(
     };
     // A missing original blob is restored under its original hash. A different
     // persisted association is an error, never a silent cache overwrite.
-    match metadata.put(&key, &entry, None) {
+    match DataCacheMetadata::put_controlled_with_check(home, &key, &entry, None, &control, check) {
         Ok(()) => {}
-        Err(error) if error.code == "vault.generation_conflict" => {
-            let other: Entry = metadata.read(&key)?;
+        Err(error) if crate::remote::cache::pure_expected(&error, "vault.generation_conflict") => {
+            let other: Entry =
+                DataCacheMetadata::read_controlled_with_check(home, &key, &control, check)?;
             if other.content_key != entry.content_key
                 || other.blob != entry.blob
                 || other.keys.kind != entry.keys.kind

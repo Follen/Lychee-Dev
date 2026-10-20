@@ -97,6 +97,7 @@ impl Flag {
             | "--ref"
             | "--region"
             | "--region-id"
+            | "--result-ttl-seconds"
             | "--release"
             | "--request"
             | "--search"
@@ -215,6 +216,9 @@ mod tests {
         });
         let position = expected.iter().position(|d| d["path"] == "data db2").unwrap();
         expected.insert(position, added);
+        let agent_additions = serde_json::json!([{"path": "data agent schema", "summary": "Describe the versioned Agent task protocol and session/result ownership limits; no data pin or worker is opened", "mutates": false, "arguments": [], "flags": ["--home <root>", "--format text|json|jsonl"]}, {"path": "data agent serve", "summary": "Run a caller-owned supervised Data Agent worker over stdin/stdout JSONL; typed discovery, queries, result pages, export and release share a pinned session; close or EOF drains submitted work; cancellation or deadline terminates outstanding work and invalidates all handles; no daemon is installed", "mutates": true, "arguments": [], "flags": ["--home <root>", "--format jsonl", "--project <directory>", "--snapshot <pin>", "--installation <client-or-game-root>", "--cdn", "--offline", "--key-file <WoW.txt|keys.json>", "--timeout-seconds <1-3600> (default 300; entire worker lifetime)", "--max-objects <1-1024> (default 32; retained result handles)", "--max-bytes <n> (default 536870912; shared session memory admission)", "--result-ttl-seconds <1-3600> (default 300; result handle lifetime)"]}]);
+        let position = expected.iter().position(|d| d["path"] == "data cache prepare").unwrap();
+        expected.splice(position..position, agent_additions.as_array().unwrap().iter().cloned());
         assert_eq!(serde_json::to_value(all()).unwrap(), Value::Array(expected));
     }
 
@@ -241,7 +245,7 @@ mod tests {
         let selected = implemented();
         // Every current route has a concrete handler. Keep this exhaustive
         // contract rather than accepting a filtered subset after caching.
-        assert_eq!(current.len(), 85);
+        assert_eq!(current.len(), 87);
         assert_eq!(selected.len(), current.len());
         for (borrowed, original) in selected.iter().zip(current) {
             assert!(std::ptr::eq(*borrowed, original));

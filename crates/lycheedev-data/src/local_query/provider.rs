@@ -143,9 +143,9 @@ impl RowCursor for EqualCursor<'_, '_> {
     }
 }
 
-pub(super) struct Physical<'body> {
+pub(crate) struct Physical<'body> {
     pub table: Arc<table::Table<'body>>,
-    pub(super) generation: Option<Arc<crate::generation::Generation>>,
+    pub(crate) generation: Option<Arc<crate::generation::Generation>>,
     schema: Source,
     identity: usize,
     budget: Arc<Budget>,

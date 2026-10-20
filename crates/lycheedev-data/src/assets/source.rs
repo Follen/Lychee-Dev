@@ -2,7 +2,7 @@
 //! parsing. No provider substitution, merged origins or implicit online fallback.
 use super::{fault, listfile};
 use lycheedev_core::{
-    Result, ToolkitError, control::OperationControl, evidence, metadata::Metadata, storage,
+    Result, ToolkitError, control::OperationControl, evidence, metadata::DataCacheMetadata, storage,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::Path};
@@ -70,13 +70,17 @@ mod wire;
 
 fn load(
     home: &Path,
-    metadata: &Metadata,
     kind: &str,
     limits: listfile::Limits,
     control: &OperationControl,
 ) -> Result<Prepared> {
     control.check()?;
-    let raw = metadata.read_document_on_owner_controlled(&format!("listfile/{kind}"), control)?;
+    let raw = DataCacheMetadata::read_document_raw_controlled_with_check(
+        home,
+        &format!("listfile/{kind}"),
+        control,
+        || Ok(()),
+    )?;
     let document = wire::decode(&raw.bytes, control)?;
     if document.schema != SCHEMA || document.provenance.kind != kind {
         return Err(fault("records.listfile_format", 4));
@@ -187,21 +191,8 @@ pub fn prepare(
     {
         return Err(fault("records.listfile_limit", 3));
     }
-    let mut metadata = Metadata::open_controlled(home, true, control)?;
-    let result = prepare_owned(
-        home,
-        kind,
-        offline,
-        refresh,
-        limits,
-        control,
-        fetcher,
-        &mut metadata,
-    );
-    finish_stop(
-        lycheedev_core::metadata::historical_write::finish_historical(result, metadata.close()),
-        control.check(),
-    )
+    let result = prepare_owned(home, kind, offline, refresh, limits, control, fetcher);
+    finish_stop(result, control.check())
 }
 fn finish_stop<T>(result: Result<T>, cleanup: Result<()>) -> Result<T> {
     if let (Err(primary), Err(later)) = (&result, &cleanup) {
@@ -223,10 +214,9 @@ fn prepare_owned(
     limits: listfile::Limits,
     control: &OperationControl,
     fetcher: &impl Fetcher,
-    metadata: &mut Metadata,
 ) -> Result<Prepared> {
     if offline || !refresh {
-        match load(home, metadata, kind, limits, control) {
+        match load(home, kind, limits, control) {
             Ok(mut prepared) => {
                 prepared.provenance.cache = if offline {
                     "offline-cache"
@@ -245,7 +235,16 @@ fn prepare_owned(
             // Cache validation may fall through, but a failed checked close or
             // timeout restoration is a real resource failure, not a cache miss.
             Err(error) if !error.details.is_null() => return Err(error),
-            Err(_) => {}
+            Err(error)
+                if [
+                    "vault.record_missing",
+                    "vault.blob_integrity",
+                    "records.listfile_format",
+                    "records.listfile_unavailable",
+                    "records.listfile_limit",
+                ]
+                .contains(&error.code.as_str()) => {}
+            Err(error) => return Err(error),
         }
     }
     let key = format!("listfile/{kind}");
@@ -298,12 +297,13 @@ fn prepare_owned(
         if body.len() > limits.bytes - total {
             return Err(fault("records.listfile_limit", 3));
         }
-        let blob: evidence::BlobRef = serde_json::from_value(evidence::publish_blob_bounded(
+        let blob = lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
             home,
             &body,
             limits.bytes,
             control,
-        )?)?;
+            &|| control.check(),
+        )?;
         let sha256 = blob.sha256.clone();
         files.push(SourceFile {
             component: component.into(),
@@ -328,7 +328,12 @@ fn prepare_owned(
     control.check()?;
     // Go reads the current generation only after the exact bytes are fetched,
     // authenticated and parsed. An intervening earlier cache write is replaceable.
-    let expected_generation = match metadata.read_document_on_owner_controlled(&key, control) {
+    let expected_generation = match DataCacheMetadata::read_document_raw_controlled_with_check(
+        home,
+        &key,
+        control,
+        || Ok(()),
+    ) {
         Ok(document) => Some(document.generation),
         Err(error) if error.code == "vault.record_missing" && error.details.is_null() => None,
         Err(error) => return Err(error),
@@ -338,10 +343,13 @@ fn prepare_owned(
         provenance: provenance.clone(),
     };
     // Absent means strict create; equal bytes cannot hide a lost create CAS.
-    if expected_generation.is_none() {
-        metadata.create_controlled(&key, &document, control)?;
-    } else {
-        metadata.put_controlled(&key, &document, expected_generation, control)?;
-    }
+    DataCacheMetadata::put_controlled_with_check(
+        home,
+        &key,
+        &document,
+        expected_generation,
+        control,
+        || Ok(()),
+    )?;
     Ok(Prepared { index, provenance })
 }

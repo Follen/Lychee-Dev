@@ -72,6 +72,7 @@ struct Manifest {
     bytes: u64,
 }
 struct Object {
+    last_used: Option<std::time::SystemTime>,
     bytes: u64,
     manifests: Vec<Manifest>,
 }
@@ -176,6 +177,7 @@ fn snapshot<A>(
                     objects.insert(
                         format!("{prefix}{suffix}"),
                         Object {
+                            last_used: owner.object_recency(&format!("{prefix}{suffix}"))?,
                             bytes: info.len(),
                             manifests: Vec::new(),
                         },
@@ -243,6 +245,38 @@ fn snapshot<A>(
     }
     checks.check()?;
     Ok(objects)
+}
+fn orphan_recency<A>(
+    owner: &DerivedReservation<'_>,
+    objects: &BTreeMap<String, Object>,
+    reserve: &mut impl FnMut(usize) -> Result<A>,
+    allocations: &mut Vec<A>,
+) -> Result<Vec<String>> {
+    let root = directory(owner, &owner.paths.recency());
+    let mut orphans = Vec::new();
+    for (index, entry) in fs::read_dir(root.path())?.enumerate() {
+        owner.control.check()?;
+        if index >= MAX_ENTRIES { return Err(invalid("Recency inventory exceeds its bound")); }
+        let entry = entry?;
+        let name = entry.file_name();
+        // Unknown names and failed stages remain charged/bounded, not adopted.
+        let Some(sha) = name.to_str().filter(|s| lowercase_digest(s, 64)) else { continue };
+        owner.object_recency(sha)?;
+        if !objects.contains_key(sha) {
+            retain_allocation(allocations, reserve, 256)?;
+            orphans.try_reserve(1).map_err(|_| invalid("Cannot allocate recency cleanup"))?;
+            orphans.push(sha.to_owned());
+        }
+    }
+    Ok(orphans)
+}
+fn discard_recency<A>(owner: &DerivedReservation<'_>, sha: &str, report: &mut DerivedRetirementReport<A>) -> Result<()> {
+    let checks = &owner.control;
+    let recency = directory(owner, &owner.paths.recency());
+    let marker = authenticate(recency, OsStr::new(sha),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", 0, checks)?
+        .ok_or_else(|| invalid("Recency marker is unexpectedly in use"))?;
+    discard(marker, "recency", sha, 0, report, checks)
 }
 fn authenticate(
     directory: &Directory,
@@ -352,7 +386,7 @@ fn account<A>(kind: &str, bytes: u64, report: &mut DerivedRetirementReport<A>) {
     report.reclaimed_bytes += bytes;
     if kind == "generation" {
         report.removed_generations += 1;
-    } else {
+    } else if kind != "recency" {
         report.removed_objects += 1;
         if kind == "orphan-object" {
             report.removed_orphan_objects += 1;
@@ -425,7 +459,13 @@ fn retire_object<A>(
                 object.bytes,
                 report,
                 checks,
-            )
+            )?;
+            // The body is gone and quota excludes a concurrent touch. Remove
+            // only our validated empty advisory marker, never a foreign file.
+            if object.last_used.is_some() {
+                discard_recency(owner, sha, report)?;
+            }
+            Ok(())
         })();
         match body {
             Some(body) => finish_file(body.into_file(), result, checks),
@@ -444,9 +484,11 @@ fn hold_enumeration_ancestors(
 ) -> Result<()> {
     let checks = &owner.control;
     let mut seen = BTreeSet::new();
+    let recency = owner.paths.recency();
     for root in owner.paths.roots().into_iter().chain([
         owner.paths.objects.as_path(),
         owner.paths.generations.as_path(),
+        recency.as_path(),
     ]) {
         if root.components().count() > 1024 {
             return Err(invalid("Retirement ancestry exceeds its bound"));
@@ -530,7 +572,7 @@ fn retire_held<A>(
         truncated: false,
         complete: false,
         dry_run: options.dry_run,
-        ordering: "object-sha256-then-generation-key; no-last-used-policy",
+        ordering: "explicit-last-use-oldest-first; missing-first; sha256-tie-break; wall-clock-approximate",
         coverage: Coverage {
             automatic_eviction_enabled: require_possible_target,
             ..Default::default()
@@ -552,8 +594,10 @@ fn retire_held<A>(
             .checked_sub(report.before_bytes)
             .ok_or_else(|| invalid("Retirement scope exceeds Data inventory"))?;
         let objects = snapshot(&owner, &mut reference, &mut reserve, &mut allocations)?;
+        let orphans = orphan_recency(owner, &objects, &mut reserve, &mut allocations)?;
         let mut known = 0;
-        let mut count = objects.len();
+        let mut count = objects.len().checked_mul(2).and_then(|n| n.checked_add(orphans.len()))
+            .ok_or_else(|| invalid("Retirement receipt bound overflow"))?;
         for object in objects.values() {
             known = sum([known, object.bytes])?;
             count = count
@@ -579,7 +623,21 @@ fn retire_held<A>(
             .deletions
             .try_reserve_exact(count)
             .map_err(|_| invalid("Cannot allocate retirement receipts"))?;
-        for (sha, object) in objects {
+        for sha in orphans {
+            discard_recency(owner, &sha, &mut report)?;
+        }
+        // All candidates and references have passed validation before sorting.
+        // Clock rollback changes priority only, never deletion authority. Equal
+        // timestamps retain deterministic SHA order; untracked historical bodies
+        // are coldest. In-use readers are still skipped by native handle proof.
+        let _ordering = reserve(objects.len().checked_mul(std::mem::size_of::<(String, Object)>())
+            .ok_or_else(|| invalid("Retirement ordering allocation overflow"))?)?;
+        let mut ordered = Vec::new();
+        ordered.try_reserve_exact(objects.len())
+            .map_err(|_| invalid("Cannot allocate retirement ordering"))?;
+        ordered.extend(objects);
+        ordered.sort_unstable_by(|a, b| a.1.last_used.cmp(&b.1.last_used).then_with(|| a.0.cmp(&b.0)));
+        for (sha, object) in ordered {
             owner.control.check()?;
             if report.after_bytes <= options.target_bytes {
                 break;

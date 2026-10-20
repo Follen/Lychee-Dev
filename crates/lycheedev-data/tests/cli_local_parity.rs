@@ -1,6 +1,7 @@
+#[path = "support/data_cache.rs"]
+mod data_cache;
 use lycheedev_core::{
     Invocation, evidence,
-    metadata::Metadata,
     selection::{self, SelectionSpec},
     storage, workspace,
 };
@@ -50,7 +51,7 @@ fn definition_revision_exact_and_offline_observation_contract() {
             .code,
         "records.definition_unavailable_offline"
     );
-    let mut metadata = Metadata::open(&home, true).unwrap();
+    let metadata = data_cache::Cache::new(&home);
     let key = format!("definition-ref/{}", storage::sha256(b"refs/heads/master"));
     metadata
         .put(
@@ -132,7 +133,7 @@ fn offline_definition_bytes_are_rehashed_and_not_replaced() {
             .code,
         "records.definition_unavailable_offline"
     );
-    let mut metadata = Metadata::open(&home, true).unwrap();
+    let metadata = data_cache::Cache::new(&home);
     for (path, bytes) in [
         (
             "manifest.json",
@@ -206,7 +207,7 @@ fn real_pinned_public_sql_and_asset_dispatch() {
         },
     )
     .unwrap();
-    let mut metadata = Metadata::open(&home, true).unwrap();
+    let metadata = data_cache::Cache::new(&home);
     for (path, file) in [
         ("manifest.json", "manifest.json"),
         ("definitions/Map.dbd", "Map.dbd"),
@@ -302,7 +303,7 @@ fn real_db2_record_page_schema_search_foreign_key_profiles() {
         },
     )
     .unwrap();
-    let mut metadata = Metadata::open(&home, true).unwrap();
+    let metadata = data_cache::Cache::new(&home);
     for (path, file) in [
         ("manifest.json", "manifest.json"),
         ("definitions/Map.dbd", "Map.dbd"),

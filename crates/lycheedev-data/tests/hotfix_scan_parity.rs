@@ -1,5 +1,7 @@
 //! Fixed Go 3.2.0 hotfix_scan_test.go / hotfix_scan_retention_test.go.
 //! Offline synthetic XFTH inputs; no game or mutable network input.
+#[path = "support/data_cache.rs"]
+mod data_cache;
 use lycheedev_core::{
     Invocation, Outcome, evidence,
     metadata::Metadata,
@@ -120,7 +122,7 @@ impl Fixture {
         for (path, raw) in [("manifest.json", manifest.as_slice()), ("definitions/Example.dbd", b"COLUMNS\nint ID\nstring Name\n\nBUILD 12.1.0.69875\n$noninline,id$ID<u32>\nName\n".as_slice())] {
             let url = format!("https://raw.githubusercontent.com/wowdev/WoWDBDefs/{commit}/{path}");
             let blob = evidence::publish_blob(&self.home, raw, 4 << 20).unwrap();
-            Metadata::open(&self.home, true).unwrap().put(&format!("definition/{}", storage::sha256(url.as_bytes())), &json!({"url":url,"blob":blob}), None).unwrap();
+            data_cache::Cache::new(&self.home).put(&format!("definition/{}", storage::sha256(url.as_bytes())), &json!({"url":url,"blob":blob}), None).unwrap();
         }
     }
     fn legacy(&self, original: &Outcome, missing_page: bool) -> Value {
