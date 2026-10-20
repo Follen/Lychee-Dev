@@ -1,10 +1,13 @@
 # Rust 架构实施清单
 
-当前批：fca完整generation诊断质量通过但未达性能目标；8e Source诊断继续唯一父队列。本批两文件Scalar inline及五文件startup归因已独审并整合，Node890通过/11平台skip，六新增Rust与新产品性能仍NOT_RUN。
+当前批：d952首批335与补61 Rust通过、完整七调用正确性通过，inline无明确实际提速且性能未达标。本批单文件ASCII快路独审及提取4tests通过，完整新Windows质量/性能待验。
 
 以 [handover](handover.md) 为当前事实、[DESIGN](DESIGN.md#authorized-architecture-implementation-plan--2026-10-19) 为完整计划。质量基线f811；性能参考固定Go323。先业务质量/完整实现，再≤30%耗时门禁，之后正式五项循环。历史已完成项与原失败留在[308efa旧清单](https://github.com/Follen/Lychee-Dev/blob/308efa2766d00273b13c9c7e24a0b956bb60e9e9/todo.md)，不滚动复制到当前待办。
 
 ## 立即闭合固定基线
+- [x] d952首批335+补61 Rust通过，Node307通过/1 symlink权限skip；七调用完整正确性通过，hit Rust339.3229/Go113.6338ms，inline无明确实际收益，未达性能门禁。
+- [ ] ASCII快路最终SHA：先列libtest名单并排除交叉重复，按完整relational、hotfix::remote、local_query、generation、unicode_checks调用方集合验收；四新增各一次、原ignored保留。统一locked/offline/-j1、test-threads=1、600s原默认栈，禁one-shot，不仅测helper。
+- [ ] 新匹配优化产物完整七调用及startup归因、原全量SQL/CAP/IPC/manifest/最终完整性；孤立查找20.452→2.558ms不是SQL收益，原性能目标不变。
 - [x] fca完整generation一对诊断通过所有结果/CAP/IPC/复用/finalIntegrity；fresh/first/hit Rust仍慢于Go，不是正式性能验收，历史收据不补造startup归因。
 - [ ] 本批最终SHA：all-targets、完整relational（原execution/default-stack/depth/真实future-size门禁不放宽）、generation与local_query输出/投影回归，六新增逐名一次；保原ignored。Node890/0/11及语法通过不是native证明，当前8e Source诊断不抢占。
 - [ ] 匹配新优化产物及固定Go/fixture运行新profile-observation，七份实测receipt全部startup归因、完整16,384×5有序结果/CAP/manifest/IPC/复用及finalIntegrity，helper关闭诊断，保全部完整时钟。98,304分配减少仅源码推导，收益尚未测；20对正式验收单独无profile执行。

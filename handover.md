@@ -100,6 +100,16 @@ CLI 静态 oracle 修复（2026-10-20）：历史适配器单测固定读取并�
 
 最终组合19份paired Node加owner套件共901项：890通过、0失败、11个Windows native平台skip；四份Node语法与两份Rust语法解析及diff检查通过。六个新增Rust仍NOT_RUN，前期官方入口在Cargo前因固定upstream缺失阻断；语法/Node不代表编译、native或收益。保留正在运行的8e Source诊断，不切换、不重派。随后唯一父队列固定本批SHA依序all-targets、完整relational（含原execution边界/default-stack/depth/future测量）、generation/local_query输出投影回归，六新增逐名一次、原ignored单列；通过后才以新匹配优化产物做完整七样本profile观察。全仓/业务/性能门禁和正式五循环仍未闭，无原始本机日志入库、merge或release。
 
+## 2g. 2026-10-20 d952 实测与有界 ASCII identifier 快路
+
+更新前节待验状态但不改写历史：固定d952原生首批335项与补充61项Rust通过；Node307通过/1项symlink权限skip。七次CLI调用完整正确性及最终完整性通过，仍未达到性能目标：Rust hit339.3229ms、Go113.6338ms，startup preResume分别24.0017ms与17.7223ms。inline未显示明确实际提速，不能以源码分配推导替代端到端收益。
+
+本批仅一个产品源码文件hotfix/remote/model.rs：双方长度均≤64字节且均ASCII时用eq_ignore_ascii_case；其他输入走原Unicode17逐字符映射。64只是快路资格，不限制标识符长度；长串保原短路遍历，Kelvin/long-s跨ASCII、Turkish-I排除、非扩张语义原样保留。不改绑定/scope、work/control/准入、认证、输出或所有权。独审通过，最终源码SHA256为613b56133294db097ef3ffbbdbca33d081830dc7cf34920339fd894b993c7f6c；精确d952基线逆变换逐字相同。
+
+四个新增Rust测试覆盖全部ASCII对、63/64/65边界与长串、跨ASCII Unicode及全部有效scalar映射。云端提取精确生产函数/测试和真实Unicode表独立重编译4/4通过，不是全crate或Windows原生测试。候选Node330/330通过；最终发布组合19份paired加owner套件890通过/0失败/11平台skip，源码语法及diff通过。全Cargo仍因缺固定Emmy源码在编译前blocked。15交替对孤立ID/F0/F1/F2/F3查找微基准中位20.451711→2.558425ms，仅纯函数查找，不是SQL实际收益或≤0.30验收；不将重叠profile桶相加/相减归因。
+
+后续唯一父队列固定本批SHA，先列实际libtest名单，按互不重复的完整relational、hotfix::remote、local_query、generation、unicode_checks调用方集合执行，四新增各一次、原ignored单列。统一--locked --offline -j 1与--test-threads=1，原600s/default-stack与所有预算不变，禁止one-shot模式。通过后构建匹配优化产品做同fixture完整七调用及startup观察，全部SQL/CAP/IPC/manifest/authentication/复用/最终完整性检查保持；原d952结果不改标，新Windows质量及性能待测。无原始本机日志入库，无merge/release。
+
 ## 3. Home、容量和所有权边界
 
 Data默认容量为**5,000,000,000字节（十进制5GB）**，配置支持明确单位；与测试scratch 5/6GiB不同。最终统一核算Data下载/共享blob归属、物化/索引/目录、staging/spill/导出峰值和证据占用，按内容去重防双计。活跃lease和证据引用保护；旧已超额或配置缩小先拒新增并说明，不删除证据。

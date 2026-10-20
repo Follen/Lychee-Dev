@@ -448,6 +448,14 @@ pub(crate) fn lower(s: &str) -> String {
         .collect()
 }
 pub(crate) fn equal_fold(a: &str, b: &str) -> bool {
+    // ASCII identifiers need no Unicode table lookups. Both operands must be
+    // ASCII: non-ASCII characters such as Kelvin sign and long s can fold to
+    // ASCII, so a one-sided shortcut would change identifier resolution.
+    // Bound the preliminary scans: long early-mismatch strings retain the
+    // original short-circuit traversal. This is not an identifier length limit.
+    if a.len() <= 64 && b.len() <= 64 && a.is_ascii() && b.is_ascii() {
+        return a.eq_ignore_ascii_case(b);
+    }
     {
         let fold = |c| {
             if matches!(c, '\u{0130}' | '\u{0131}') {
@@ -738,5 +746,139 @@ impl Cursor {
             ));
         }
         Ok(cursor)
+    }
+}
+
+#[cfg(test)]
+mod equal_fold_tests {
+    use super::equal_fold;
+
+    // Frozen pre-fast-path implementation, independent of the ASCII branch.
+    fn reference(a: &str, b: &str) -> bool {
+        let fold = |c| {
+            if matches!(c, '\u{0130}' | '\u{0131}') {
+                c
+            } else {
+                crate::unicode_simple::map(crate::unicode_simple::map(c, true), false)
+            }
+        };
+        a.chars().map(fold).eq(b.chars().map(fold))
+    }
+
+    #[test]
+    fn ascii_fold_matches_reference_for_every_ascii_pair() {
+        for a in 0u8..=127 {
+            for b in 0u8..=127 {
+                let a = String::from(a as char);
+                let b = String::from(b as char);
+                assert_eq!(equal_fold(&a, &b), reference(&a, &b), "{a:?} {b:?}");
+                let (a, b) = (format!("ID_{a}_z"), format!("id_{b}_Z"));
+                assert_eq!(equal_fold(&a, &b), reference(&a, &b));
+            }
+        }
+    }
+
+    #[test]
+    fn ascii_fold_preserves_lengths_controls_and_long_identifiers() {
+        let samples = [
+            "",
+            "ID",
+            "id",
+            "iD",
+            "NumericSample",
+            "numericsample",
+            "ID\0",
+            "ID\n",
+            "ID ",
+            "_01",
+            "[",
+            "{",
+            "@",
+            "`",
+            "\\",
+            "|",
+            "\u{7f}",
+        ];
+        for a in samples {
+            for b in samples {
+                assert_eq!(equal_fold(a, b), reference(a, b));
+            }
+        }
+        for len in [0, 1, 63, 64, 65, 4096] {
+            let a = "I".repeat(len);
+            let b = "i".repeat(len);
+            assert_eq!(equal_fold(&a, &b), reference(&a, &b));
+            if len > 0 {
+                let early = format!("X{}", &b[1..]);
+                assert_eq!(equal_fold(&a, &early), reference(&a, &early));
+                assert_eq!(equal_fold(&early, &a), reference(&early, &a));
+            }
+            let early_mismatch = format!("X{b}");
+            assert_eq!(
+                equal_fold(&a, &early_mismatch),
+                reference(&a, &early_mismatch)
+            );
+            assert_eq!(
+                equal_fold(&early_mismatch, &a),
+                reference(&early_mismatch, &a)
+            );
+        }
+        for prefix_len in [0, 60, 61, 62, 63, 64, 65] {
+            let prefix = "i".repeat(prefix_len);
+            let a = format!("{prefix}K");
+            let b = format!("{prefix}K");
+            assert!(reference(&a, &b));
+            assert!(equal_fold(&a, &b));
+            assert!(equal_fold(&b, &a));
+        }
+        let a = "Wide_ID_0123".repeat(4096);
+        let mut b = a.to_ascii_lowercase();
+        assert!(equal_fold(&a, &b));
+        b.push('x');
+        assert!(!equal_fold(&a, &b));
+        assert!(!equal_fold(&b, &a));
+    }
+
+    #[test]
+    fn ascii_fold_preserves_unicode_cross_ascii_and_nonexpansion() {
+        for (a, b, expected) in [
+            ("K", "K", true),
+            ("s", "ſ", true),
+            ("I", "ı", false),
+            ("i", "İ", false),
+            ("ß", "SS", false),
+            ("ß", "ẞ", true),
+            ("Σ", "ς", true),
+            ("σ", "Σ", true),
+            ("é", "É", true),
+            ("é", "e\u{301}", false),
+            ("𐐀", "𐐨", true),
+            ("ID_K_ſ", "id_k_s", true),
+            ("中文🙂", "中文🙂", true),
+        ] {
+            assert_eq!(reference(a, b), expected, "reference {a:?} {b:?}");
+            assert_eq!(equal_fold(a, b), expected, "{a:?} {b:?}");
+            assert_eq!(equal_fold(b, a), expected, "reverse {a:?} {b:?}");
+        }
+    }
+
+    #[test]
+    fn ascii_fold_unicode_scalar_sweep_matches_original_mapping() {
+        let mut encoded = [0; 4];
+        let mut upper = [0; 4];
+        let mut lower = [0; 4];
+        for code in 0..=0x10ffff {
+            let Some(c) = char::from_u32(code) else {
+                continue;
+            };
+            let a = c.encode_utf8(&mut encoded);
+            for b in [
+                crate::unicode_simple::map(c, true).encode_utf8(&mut upper),
+                crate::unicode_simple::map(c, false).encode_utf8(&mut lower),
+            ] {
+                assert_eq!(equal_fold(a, b), reference(a, b), "U+{code:04X}");
+                assert_eq!(equal_fold(b, a), reference(b, a), "reverse U+{code:04X}");
+            }
+        }
     }
 }
