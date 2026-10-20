@@ -37,6 +37,10 @@ impl serde_json::ser::Formatter for GoCaptureFormatter {
 }
 
 impl CaptureAccounting for Budget {
+    fn evidence_domain(&self) -> lycheedev_core::metadata::EvidenceDomain {
+        lycheedev_core::metadata::EvidenceDomain::Data
+    }
+
     fn blob_stream_phase(
         &self,
         phase: lycheedev_core::evidence::BlobStreamPhase,
@@ -162,6 +166,33 @@ pub(crate) fn json_bytes_with_formatter(
         allocation.commit();
     }
     Ok(writer.bytes)
+}
+
+/// Same bounded serializer, with a refundable owner for a session task body.
+pub(crate) fn json_bytes_owned(
+    value: &impl Serialize,
+    budget: &std::sync::Arc<Budget>,
+    maximum: usize,
+    limit: fn() -> ToolkitError,
+) -> Result<(Vec<u8>, Option<crate::resource::OwnedRetainedReservation>)> {
+    let mut writer = Buffer {
+        bytes: Vec::new(),
+        allocation: None,
+        maximum,
+        limit,
+        budget,
+        error: None,
+    };
+    if let Err(error) = value.serialize(&mut serde_json::Serializer::new(&mut writer)) {
+        return Err(writer.error.unwrap_or_else(|| error.into()));
+    }
+    budget.check()?;
+    let allocation = writer
+        .allocation
+        .take()
+        .map(|value| value.into_owned(budget))
+        .transpose()?;
+    Ok((writer.bytes, allocation))
 }
 
 // Counting and hashing do not need a temporary JSON body. Row counting uses
@@ -332,3 +363,38 @@ pub(crate) fn query_committed_error(
 
 #[cfg(test)]
 pub(crate) mod committed_tests;
+
+#[cfg(test)]
+mod session_body_tests {
+    use super::*;
+    #[test]
+    fn owned_bounded_body_refunds_after_bytes_and_rejects_over_limit() {
+        let budget = std::sync::Arc::new(Budget::new(
+            Cost::defaults(),
+            std::time::Instant::now() + std::time::Duration::from_secs(30),
+            None,
+        ));
+        let before = budget.snapshot().unwrap().retained_bytes;
+        let (bytes, owner) = json_bytes_owned(&vec![1u64, u64::MAX], &budget, 128, || {
+            fault("records.query_resource_budget", 3, "limit")
+        })
+        .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Vec<u64>>(&bytes).unwrap(),
+            vec![1, u64::MAX]
+        );
+        assert!(budget.snapshot().unwrap().retained_bytes > before);
+        drop(bytes);
+        drop(owner);
+        assert_eq!(budget.snapshot().unwrap().retained_bytes, before);
+        assert!(
+            json_bytes_owned(&"too long", &budget, 2, || fault(
+                "records.query_resource_budget",
+                3,
+                "limit"
+            ))
+            .is_err()
+        );
+        assert_eq!(budget.snapshot().unwrap().retained_bytes, before);
+    }
+}

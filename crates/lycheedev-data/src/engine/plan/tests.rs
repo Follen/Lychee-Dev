@@ -535,6 +535,260 @@ async fn mixed_domain_null_still_short_circuits_to_null() {
     assert_eq!(run(&context, owner, &plan).await, vec![vec![Scalar::Null]]);
 }
 
+fn old_scalar_oracle(sql: &str) -> lycheedev_core::Result<Scalar> {
+    let source = crate::relational::Source {
+        columns: vec!["ID".into()],
+        rows: vec![vec![Scalar::Int(1)]],
+        complete: true,
+    };
+    let result = crate::relational::Program::compile(&format!("SELECT {sql} FROM t"))?.execute(
+        &std::collections::BTreeMap::from([("t".into(), source)]),
+        &std::collections::BTreeMap::new(),
+        crate::relational::Limits::default(),
+        None,
+    )?;
+    Ok(result.rows[0][0].clone())
+}
+async fn new_scalar(expression: Value) -> lycheedev_core::Result<Scalar> {
+    let (context, owner) = setup();
+    register(
+        &context,
+        &request("T"),
+        vec![("ID", Arc::new(UInt64Array::from(vec![1])))],
+    );
+    let plan = decode(
+        json!({"op":"project","input":{"op":"scan","table":{"name":"T","mode":"static"}},"columns":[{"name":"result","expression":expression}]}),
+    );
+    let frame = lower(&context, &plan, owner)
+        .await
+        .map_err(super::super::error)?;
+    let batches = frame.collect().await.map_err(super::super::error)?;
+    super::super::values::read(
+        ScalarValue::try_from_array(batches[0].column(0), 0).map_err(super::super::error)?,
+    )
+    .map_err(super::super::error)
+}
+fn lit(value: Value) -> Value {
+    json!({"kind":"literal","value":value})
+}
+#[tokio::test(flavor = "current_thread")]
+async fn casts_match_legacy_rust_oracle_with_fixed_go_cases() {
+    for (sql, input, target) in [
+        (
+            "CAST(18446744073709551615 AS TEXT)",
+            json!(u64::MAX),
+            "string",
+        ),
+        ("CAST('-2.75' AS INTEGER)", json!("-2.75"), "integer"),
+        (
+            "CAST('9223372036854775807' AS BIGINT)",
+            json!("9223372036854775807"),
+            "integer",
+        ),
+        (
+            "CAST('-9223372036854775808' AS BIGINT)",
+            json!("-9223372036854775808"),
+            "integer",
+        ),
+        ("CAST(1e-5 AS TEXT)", json!(0.00001), "string"),
+        ("CAST(-0.0 AS TEXT)", json!(-0.0), "string"),
+        ("CAST(NULL AS INTEGER)", Value::Null, "integer"),
+        ("CAST('true' AS BOOLEAN)", json!("true"), "boolean"),
+        ("CAST(2 AS BOOL)", json!(2), "boolean"),
+        ("CAST(TRUE AS INTEGER)", json!(true), "integer"),
+        ("CAST(' 1' AS FLOAT)", json!(" 1"), "float"),
+        ("CAST('1e999' AS FLOAT)", json!("1e999"), "float"),
+        (
+            "CAST(18446744073709551615 AS BIGINT)",
+            json!(u64::MAX),
+            "integer",
+        ),
+    ] {
+        let actual = new_scalar(json!({"kind":"cast","value":lit(input),"target":target})).await;
+        match old_scalar_oracle(sql) {
+            Ok(expected) => assert_eq!(actual.unwrap(), expected, "{sql}"),
+            Err(expected) => assert_eq!(actual.unwrap_err().code, expected.code, "{sql}"),
+        }
+    }
+}
+#[tokio::test(flavor = "current_thread")]
+async fn unicode_like_case_mapping_length_concat_match_fixed_oracle() {
+    for (sql, expression) in [
+        (
+            "'猫犬' LIKE '_犬'",
+            json!({"kind":"like","value":lit(json!("猫犬")),"pattern":lit(json!("_犬")),"negated":false}),
+        ),
+        (
+            "'abc' LIKE 'a\\%'",
+            json!({"kind":"like","value":lit(json!("abc")),"pattern":lit(json!("a\\%")),"negated":false}),
+        ),
+        (
+            "NULL LIKE 1",
+            json!({"kind":"like","value":lit(Value::Null),"pattern":lit(json!(1)),"negated":false}),
+        ),
+        (
+            "1 LIKE '%'",
+            json!({"kind":"like","value":lit(json!(1)),"pattern":lit(json!("%")),"negated":false}),
+        ),
+        (
+            "UPPER('ßσ猫')",
+            json!({"kind":"call","function":"upper","arguments":[lit(json!("ßσ猫"))]}),
+        ),
+        (
+            "LOWER('İΣ犬')",
+            json!({"kind":"call","function":"lower","arguments":[lit(json!("İΣ犬"))]}),
+        ),
+        (
+            "LENGTH('猫é')",
+            json!({"kind":"call","function":"length","arguments":[lit(json!("猫é"))]}),
+        ),
+        (
+            "'猫' || '犬'",
+            json!({"kind":"call","function":"concat","arguments":[lit(json!("猫")),lit(json!("犬"))]}),
+        ),
+    ] {
+        let actual = new_scalar(expression).await;
+        match old_scalar_oracle(sql) {
+            Ok(expected) => assert_eq!(actual.unwrap(), expected, "{sql}"),
+            Err(expected) => assert_eq!(actual.unwrap_err().code, expected.code, "{sql}"),
+        }
+    }
+}
+#[tokio::test(flavor = "current_thread")]
+async fn conditional_selection_is_lazy_and_does_not_round_wide_integers() {
+    let failing = json!({"kind":"cast","target":"integer","value":lit(json!("bad"))});
+    let case = json!({"kind":"case","branches":[{"when":lit(json!(false)),"then":failing}],"otherwise":lit(json!(u64::MAX))});
+    assert_eq!(new_scalar(case).await.unwrap(), Scalar::UInt(u64::MAX));
+    let coalesce = json!({"kind":"coalesce","values":[lit(json!(42)),json!({"kind":"cast","target":"integer","value":lit(json!("bad"))})]});
+    assert_eq!(new_scalar(coalesce).await.unwrap(), Scalar::Int(42));
+    let null_if = json!({"kind":"null_if","left":lit(json!(9007199254740993u64)),"right":lit(json!(9007199254740992.0))});
+    assert_eq!(
+        new_scalar(null_if).await.unwrap(),
+        Scalar::Int(9007199254740993)
+    );
+    let between = json!({"kind":"between","value":lit(json!(9007199254740993u64)),"low":lit(json!(9007199254740992.0)),"high":lit(json!(9007199254740994u64)),"negated":false});
+    assert_eq!(new_scalar(between).await.unwrap(), Scalar::Bool(true));
+}
+#[tokio::test(flavor = "current_thread")]
+async fn unsafe_heterogeneous_conditional_type_is_rejected_not_rounded() {
+    let expression = json!({"kind":"case","branches":[{"when":lit(json!(true)),"then":lit(json!(9007199254740993u64))}],"otherwise":lit(json!(1.0))});
+    assert_eq!(
+        new_scalar(expression).await.unwrap_err().code,
+        "relational.unsupported"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn nested_array_index_preserves_wide_integer_and_null_and_checks_bounds() {
+    use arrow_array::{FixedSizeListArray, types::UInt64Type};
+    let (context, owner) = setup();
+    let list = FixedSizeListArray::from_iter_primitive::<UInt64Type, _, _>(
+        vec![Some(vec![Some(7), Some(u64::MAX)]), None],
+        2,
+    );
+    register(&context, &request("T"), vec![("A", Arc::new(list))]);
+    let plan = decode(
+        json!({"op":"project","input":{"op":"scan","table":{"name":"T","mode":"static"}},"columns":[{"name":"value","expression":{"kind":"index","value":{"kind":"column","name":"A"},"index":1}}]}),
+    );
+    assert_eq!(
+        run(&context, owner.clone(), &plan).await,
+        vec![vec![Scalar::UInt(u64::MAX)], vec![Scalar::Null]]
+    );
+    let invalid = decode(
+        json!({"op":"project","input":{"op":"scan","table":{"name":"T","mode":"static"}},"columns":[{"name":"value","expression":{"kind":"index","value":{"kind":"column","name":"A"},"index":2}}]}),
+    );
+    assert!(
+        lower(&context, &invalid, owner)
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .is_err()
+    );
+}
+#[test]
+fn extended_expression_wire_and_schema_agree() {
+    let example = json!({"op":"project","input":{"op":"scan","table":{"name":"T","mode":"static"}},"columns":[{"name":"n","expression":{"kind":"call","function":"length","arguments":[{"kind":"literal","value":"猫"}]}}]});
+    let plan: QueryPlan = serde_json::from_value(example.clone()).unwrap();
+    assert_eq!(serde_json::to_value(plan).unwrap(), example);
+    let schema = super::super::api::query_schema();
+    let kinds = schema["$defs"]["Expression"]["oneOf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["properties"]["kind"]["const"].as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    for name in [
+        "cast", "like", "between", "case", "coalesce", "null_if", "call", "index",
+    ] {
+        assert!(kinds.contains(name));
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn upper_rejects_expanded_utf8_output_above_original_limit() {
+    // U+023F maps to U+2C7E: the input fits, but the mapped output does not.
+    let expression =
+        json!({"kind":"call","function":"upper","arguments":[lit(json!("ȿ".repeat(400_000)))]});
+    assert!(new_scalar(expression).await.is_err());
+    let expression =
+        json!({"kind":"call","function":"upper","arguments":[lit(json!("ȿ".repeat(100)))]});
+    assert_eq!(
+        new_scalar(expression).await.unwrap(),
+        Scalar::String("Ȿ".repeat(100))
+    );
+}
+
+#[test]
+fn nested_bit_left_subtrees_are_charged_for_actual_lowering_expansion() {
+    let mut expression = lit(json!(1));
+    for _ in 0..20 {
+        expression =
+            json!({"kind":"call","function":"bit_and","arguments":[expression,lit(json!(1))]});
+    }
+    let expression: Expression = serde_json::from_value(expression).unwrap();
+    assert!(expression_expansion(&expression).is_err());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn between_evaluates_high_error_even_when_low_comparison_is_false() {
+    let expression = json!({"kind":"between","value":lit(json!(0)),"low":lit(json!(1)),"high":{"kind":"cast","target":"integer","value":lit(json!("bad"))},"negated":false});
+    assert_eq!(
+        new_scalar(expression).await.unwrap_err().code,
+        old_scalar_oracle("0 BETWEEN 1 AND CAST('bad' AS INTEGER)")
+            .unwrap_err()
+            .code
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn bit_functions_preserve_left_null_error_order_and_exact_signed_bits() {
+    for (sql, expression) in [
+        (
+            "BIT_AND(-1, 7)",
+            json!({"kind":"call","function":"bit_and","arguments":[lit(json!(-1)),lit(json!(7))]}),
+        ),
+        (
+            "HAS_FLAG(-1, 7)",
+            json!({"kind":"call","function":"has_flag","arguments":[lit(json!(-1)),lit(json!(7))]}),
+        ),
+        (
+            "BIT_AND(NULL, CAST('bad' AS INTEGER))",
+            json!({"kind":"call","function":"bit_and","arguments":[lit(Value::Null),{"kind":"cast","target":"integer","value":lit(json!("bad"))}]}),
+        ),
+        (
+            "BIT_AND('bad', NULL)",
+            json!({"kind":"call","function":"bit_and","arguments":[lit(json!("bad")),lit(Value::Null)]}),
+        ),
+    ] {
+        let actual = new_scalar(expression).await;
+        match old_scalar_oracle(sql) {
+            Ok(expected) => assert_eq!(actual.unwrap(), expected, "{sql}"),
+            Err(expected) => assert_eq!(actual.unwrap_err().code, expected.code, "{sql}"),
+        }
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn eager_boolean_operators_keep_right_errors_after_false_or_true_left() {
     for (operator, left) in [("and", false), ("or", true)] {
@@ -582,4 +836,138 @@ async fn eager_boolean_three_valued_truth_table_matches_oracle() {
             }
         }
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn out_of_bounds_fixed_index_is_null_for_null_array_and_lazy_when_unselected() {
+    use arrow_array::{FixedSizeListArray, types::UInt64Type};
+    let (context, owner) = setup();
+    let list = FixedSizeListArray::from_iter_primitive::<UInt64Type, _, _>(
+        vec![None::<Vec<Option<u64>>>],
+        2,
+    );
+    register(&context, &request("T"), vec![("A", Arc::new(list))]);
+    let expression = json!({"kind":"index","value":{"kind":"column","name":"A"},"index":2});
+    let plan = decode(
+        json!({"op":"project","input":{"op":"scan","table":{"name":"T","mode":"static"}},"columns":[{"name":"value","expression":expression}]}),
+    );
+    assert_eq!(run(&context, owner, &plan).await, vec![vec![Scalar::Null]]);
+
+    let (context, owner) = setup();
+    let list = FixedSizeListArray::from_iter_primitive::<UInt64Type, _, _>(
+        vec![Some(vec![Some(1), Some(2)])],
+        2,
+    );
+    register(&context, &request("T"), vec![("A", Arc::new(list))]);
+    let plan = decode(
+        json!({"op":"project","input":{"op":"scan","table":{"name":"T","mode":"static"}},"columns":[{"name":"value","expression":{"kind":"case","branches":[{"when":lit(json!(false)),"then":expression}],"otherwise":lit(json!(7))}}]}),
+    );
+    assert_eq!(
+        run(&context, owner, &plan).await,
+        vec![vec![Scalar::Int(7)]]
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn between_finishes_argument_expressions_before_comparison_type_errors() {
+    let high = json!({"kind":"binary","left":lit(json!(1e308)),"operator":"multiply","right":lit(json!(1e308))});
+    let expression = json!({"kind":"between","value":lit(json!("bad")),"low":lit(json!(1)),"high":high,"negated":false});
+    assert_eq!(
+        new_scalar(expression).await.unwrap_err().code,
+        old_scalar_oracle("'bad' BETWEEN 1 AND (1e308 * 1e308)")
+            .unwrap_err()
+            .code
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn typed_in_does_not_hide_later_incompatible_value_after_match() {
+    let (context, owner) = setup();
+    register(
+        &context,
+        &request("T"),
+        vec![("ID", Arc::new(UInt64Array::from(vec![1])))],
+    );
+    let plan = decode(
+        json!({"op":"project","input":{"op":"scan","table":{"name":"T","mode":"static"}},"columns":[{"name":"result","expression":{"kind":"in","value":{"kind":"column","name":"ID"},"values":[1,"bad"]}}]}),
+    );
+    let error = lower(&context, &plan, owner)
+        .await
+        .unwrap()
+        .collect()
+        .await
+        .unwrap_err();
+    assert_eq!(super::super::error(error).code, "relational.type_mismatch");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn empty_typed_in_still_evaluates_failing_input() {
+    let (context, owner) = setup();
+    register(
+        &context,
+        &request("T"),
+        vec![("ID", Arc::new(UInt64Array::from(vec![1])))],
+    );
+    let plan = decode(
+        json!({"op":"project","input":{"op":"scan","table":{"name":"T","mode":"static"}},"columns":[{"name":"result","expression":{"kind":"in","value":{"kind":"binary","left":{"kind":"column","name":"ID"},"operator":"add","right":{"kind":"literal","value":"bad"}},"values":[]}}]}),
+    );
+    let error = lower(&context, &plan, owner)
+        .await
+        .unwrap()
+        .collect()
+        .await
+        .unwrap_err();
+    assert_eq!(super::super::error(error).code, "relational.type_mismatch");
+}
+
+#[test]
+fn lookup_requirements_union_ids_and_full_scan_dominates_without_alias_confusion() {
+    let (_, owner) = setup();
+    let lookup = |ids: Vec<u32>| QueryPlan::Lookup {
+        table: request("T"),
+        ids,
+    };
+    let join = |left, right| QueryPlan::Join {
+        left: Box::new(left),
+        right: Box::new(right),
+        kind: JoinKind::Inner,
+        on: vec![super::super::api::JoinKey {
+            left: "ID".into(),
+            right: "ID".into(),
+        }],
+    };
+    let plan = join(lookup(vec![3, 1, 3]), lookup(vec![4, 2]));
+    let required = requirements(&plan, &owner).unwrap();
+    assert_eq!(required.len(), 1);
+    assert_eq!(required[0].ids.as_deref(), Some([1, 2, 3, 4].as_slice()));
+    let plan = join(plan, scan("T"));
+    let required = requirements(&plan, &owner).unwrap();
+    assert_eq!(required.len(), 1);
+    assert!(required[0].ids.is_none());
+}
+
+#[test]
+fn conflicting_effective_histories_are_rejected_before_source_preparation() {
+    let (_, owner) = setup();
+    let table = |id: &str| TableRequest {
+        name: "T".into(),
+        mode: SourceMode::Effective,
+        hotfix_captures: vec![id.into()],
+    };
+    let plan = QueryPlan::Join {
+        left: Box::new(QueryPlan::Lookup {
+            table: table("CAP-one"),
+            ids: vec![1],
+        }),
+        right: Box::new(QueryPlan::Lookup {
+            table: table("CAP-two"),
+            ids: vec![1],
+        }),
+        kind: JoinKind::Inner,
+        on: vec![super::super::api::JoinKey {
+            left: "ID".into(),
+            right: "ID".into(),
+        }],
+    };
+    assert!(requirements(&plan, &owner).is_err());
 }

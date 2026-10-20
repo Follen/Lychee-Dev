@@ -19,23 +19,28 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
+mod evidence;
 mod metadata;
+pub(crate) use evidence::EvidenceQuota;
 mod publication;
 mod reading;
 mod recency;
 pub(super) mod retirement;
-pub use retirement::{DerivedRetirementOptions, DerivedRetirementReport};
 pub(crate) use metadata::{MetadataQuota, MetadataReadQuota};
+pub use retirement::{DerivedRetirementOptions, DerivedRetirementReport};
 mod shared_blobs;
 pub use publication::{DerivedObject, DerivedObjectWriter};
 pub use reading::{
     DerivedObjectReader, DerivedReadCheck, DerivedReadLease, DerivedReadReport,
     MAX_GENERATION_BYTES, OwnedDerivedObjectReader, OwnedDerivedReadLease,
 };
+pub use shared_blobs::durable::SourceIdentity;
+pub(crate) use shared_blobs::durable::{StageSlot, recover_shards};
 pub(crate) use shared_blobs::retention::protects_evidence_body;
 pub(crate) use shared_blobs::stream::StreamQuota;
 pub use shared_blobs::stream::{
-    publish_shared_blob_stream_with_check, rebuild_shared_blob_stream_with_check,
+    publish_shared_blob_stream_identified_with_check, publish_shared_blob_stream_with_check,
+    rebuild_shared_blob_stream_identified_with_check, rebuild_shared_blob_stream_with_check,
 };
 pub use shared_blobs::{publish_shared_blob_with_check, rebuild_shared_blob_with_check};
 use storage::{Directory, ExclusiveLock, FileControl, FileCost};
@@ -83,7 +88,10 @@ impl DataCachePaths {
             .join("shared-blobs-v1")
     }
     pub fn recency(&self) -> PathBuf {
-        self.generations.parent().expect("fixed generations parent").join("recency-v1")
+        self.generations
+            .parent()
+            .expect("fixed generations parent")
+            .join("recency-v1")
     }
     fn roots(&self) -> [&Path; 4] {
         [
@@ -435,7 +443,9 @@ impl<'a> DerivedReservation<'a> {
             owner
                 .directories
                 .push(prepare_root(&owner.paths.shared_blobs(), control)?);
-            owner.directories.push(prepare_root(&owner.paths.recency(), control)?);
+            owner
+                .directories
+                .push(prepare_root(&owner.paths.recency(), control)?);
             // Config may have changed since query admission. A new disk owner
             // always consults the same current strict parser while holding quota.
             owner.report.configured_max_bytes =
@@ -599,6 +609,7 @@ fn metadata_inventory(paths: &DataCachePaths, control: &Checks<'_>) -> Result<De
         &mut files,
         control,
         &[],
+        &mut std::collections::BTreeMap::new(),
     )?;
     Ok(DerivedUsage {
         private_metadata_namespace_bytes: bytes,
@@ -621,6 +632,7 @@ fn inventory_recovering(
     let mut entries = 0;
     let mut files = 0;
     let mut bytes = [0; 4];
+    let mut spools = shared_blobs::durable::spool_reservations(paths, control, held)?;
     for (index, root) in paths.roots().into_iter().enumerate() {
         bytes[index] = scan(
             root,
@@ -631,8 +643,12 @@ fn inventory_recovering(
             &mut files,
             control,
             held,
+            &mut spools,
         )?;
     }
+    // Missing payloads retain their full declaration. Existing ones replaced
+    // their SAME measured sample with max(expected, actual) inside scan.
+    bytes[2] = sum(std::iter::once(bytes[2]).chain(spools.into_values()))?;
     let (shared_blob_bytes, retained_shared_peak_bytes) =
         shared_blobs::inventory_recovering(home, paths, control, recovery, held)?;
     Ok(DerivedUsage {
@@ -679,6 +695,7 @@ fn scan(
     files: &mut usize,
     control: &Checks<'_>,
     held: &[Directory],
+    managed_spools: &mut std::collections::BTreeMap<String, u64>,
 ) -> Result<u64> {
     control.check()?;
     if depth > MAX_DEPTH {
@@ -712,18 +729,28 @@ fn scan(
                     files,
                     control,
                     held,
+                    managed_spools,
                 )?
             } else if kind.is_file() {
                 // Open relative to the held directory, never follow symlinks or
                 // reparse leaves. Unknown files are charged and never reclaimed.
                 let name = entry.file_name();
-                let spool = path == spool_root
-                    && name.to_str().is_some_and(|name| {
-                        name.strip_prefix(".lycheedev-export-")
-                            .is_some_and(|token| {
-                                token.len() == 32 && token.bytes().all(|b| b.is_ascii_hexdigit())
-                            })
-                    });
+                let managed = if path == spool_root {
+                    name.to_str()
+                        .and_then(|name| managed_spools.get(name))
+                        .copied()
+                } else {
+                    None
+                };
+                let spool = managed.is_some()
+                    || (path == spool_root
+                        && name.to_str().is_some_and(|name| {
+                            name.strip_prefix(".lycheedev-export-")
+                                .is_some_and(|token| {
+                                    token.len() == 32
+                                        && token.bytes().all(|b| b.is_ascii_hexdigit())
+                                })
+                        }));
                 let file = if spool || path.starts_with(metadata_root) {
                     // A Data producer may hold this original WRITE/DELETE
                     // handle outside quota. Its pre-sized length cannot grow;
@@ -758,7 +785,12 @@ fn scan(
                     });
                 let bytes = finish_file(file, measured, control)?;
                 *files += 1;
-                bytes
+                if let Some(expected) = managed {
+                    managed_spools.remove(name.to_str().expect("managed ASCII name"));
+                    bytes.max(expected)
+                } else {
+                    bytes
+                }
             } else {
                 return Err(ToolkitError::invalid(
                     "Data inventory contains a redirected or unsupported entry",

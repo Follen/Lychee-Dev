@@ -51,6 +51,10 @@ struct Meter<'a> {
     budget: Option<crate::resource::Budget>,
 }
 impl lycheedev_core::evidence::CaptureAccounting for Meter<'_> {
+    fn evidence_domain(&self) -> lycheedev_core::metadata::EvidenceDomain {
+        lycheedev_core::metadata::EvidenceDomain::Data
+    }
+
     fn check(&self) -> Result<()> {
         self.inv.control.check()?;
         self.budget

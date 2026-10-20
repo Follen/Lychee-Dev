@@ -23,6 +23,7 @@ impl std::fmt::Debug for OwnedProvenance {
     }
 }
 pub struct ResultOwner {
+    pub(super) dependencies: Vec<String>,
     pub(super) batches: Vec<RecordBatch>,
     pub(super) columns: Vec<String>,
     pub(super) provenance: Value,
@@ -41,6 +42,7 @@ impl Drop for ResultOwner {
         // admission. A cached source can keep this request lifetime alive.
         drop(std::mem::take(&mut self.batches));
         drop(std::mem::take(&mut self.columns));
+        drop(std::mem::take(&mut self.dependencies));
         drop(std::mem::replace(&mut self.provenance, Value::Null));
         self._output.take();
         for lifetime in &self._lifetimes {
@@ -130,7 +132,12 @@ fn take(remaining: &mut usize, bytes: usize) -> Result<()> {
     *remaining = remaining.checked_sub(bytes).ok_or_else(bound)?;
     Ok(())
 }
-fn value(array: &dyn Array, row: usize, remaining: &mut usize, depth: usize) -> Result<Value> {
+pub(super) fn value(
+    array: &dyn Array,
+    row: usize,
+    remaining: &mut usize,
+    depth: usize,
+) -> Result<Value> {
     if row >= array.len() || depth > 64 {
         return Err(bound());
     }
@@ -236,6 +243,7 @@ mod tests {
             .unwrap();
         lifetime.settle().unwrap();
         let result = ResultOwner {
+            dependencies: vec![],
             batches: vec![],
             columns: vec![],
             provenance: serde_json::json!({"complete":true}),

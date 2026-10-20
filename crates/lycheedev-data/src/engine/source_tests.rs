@@ -399,3 +399,580 @@ async fn production_effective_rejects_duplicate_capture_and_ipc_close_failure() 
     crate::generation::observations::FAIL_CLOSES.with(|n| n.set(0));
     assert_eq!(result.unwrap_err().code, "storage.close_failed");
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn authenticated_locator_materializes_selected_batches_after_full_validation() {
+    let rows = (0..4096)
+        .map(|i| vec![Cell::U(i * 2 + 1), Cell::I64(7)])
+        .collect::<Vec<_>>();
+    let fx = Fixture::new(&[fixture::table(
+        "Sample",
+        921,
+        &[("ID", "uint"), ("Value", "signed64")],
+        &rows,
+    )]);
+    cache(&fx);
+    let inv = fx.invocation("data sql", &[]);
+    let budget = budget(&inv);
+    let snapshot = prepare_selected(
+        &inv,
+        &request(SourceMode::Static, vec![]),
+        Some(&[2, 3, 50_000]),
+        budget.clone(),
+        inv.control.clone(),
+    )
+    .await
+    .unwrap();
+    let report = &snapshot.provenance()["sourceSelection"];
+    assert_eq!(report["kind"], "authenticated_id_locator_batches");
+    assert_eq!(report["materializationDecodedBatches"], 1);
+    assert_eq!(report["missingIds"], json!([2, 50_000]));
+    assert_eq!(report["unresolvedIds"], json!([]));
+    assert!(snapshot.covers(Some(&[3]), &budget).unwrap());
+    assert!(!snapshot.covers(None, &budget).unwrap());
+    assert!(snapshot.covers(Some(&[5]), &budget).unwrap());
+    assert!(!snapshot.covers(Some(&[4095]), &budget).unwrap());
+    assert!(snapshot.rows() < 4096);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn distinct_lookups_share_union_and_later_full_scan_never_reuses_partial_source() {
+    let rows = (0..4096)
+        .map(|i| vec![Cell::U(i * 2 + 1), Cell::I64(7)])
+        .collect::<Vec<_>>();
+    let fx = Fixture::new(&[fixture::table(
+        "Sample",
+        921,
+        &[("ID", "uint"), ("Value", "signed64")],
+        &rows,
+    )]);
+    cache(&fx);
+    let inv = fx.invocation("data sql", &[]);
+    let mut engine =
+        crate::engine::Engine::new(inv.clone(), crate::engine::EngineLimits::default()).unwrap();
+    let query = serde_json::from_value(json!({"kind":"plan","plan":{"op":"join","left":{"op":"lookup","table":{"name":"Sample","mode":"static"},"ids":[1]},"right":{"op":"lookup","table":{"name":"Sample","mode":"static"},"ids":[3]},"kind":"inner","on":[{"left":"Value","right":"Value"}]}})).unwrap();
+    let result = engine.execute(query, inv.control.clone()).await.unwrap();
+    assert_eq!(result.row_count(), 1);
+    drop(result);
+    let query = serde_json::from_value(
+        json!({"kind":"plan","plan":{"op":"scan","table":{"name":"Sample","mode":"static"}}}),
+    )
+    .unwrap();
+    let result = engine.execute(query, inv.control.clone()).await.unwrap();
+    assert_eq!(result.row_count(), 4096);
+    drop(result);
+    engine.close().unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn selected_effective_ids_resolve_patch_add_delete_before_base_lookup() {
+    for cached in [false, true] {
+        let (fx, capture) = effective_fixture();
+        if cached {
+            cache(&fx);
+        }
+        let inv = fx.invocation("data sql", &[]);
+        let snapshot = prepare_selected(
+            &inv,
+            &request(SourceMode::Effective, vec![capture]),
+            Some(&[1, 2, 4, 99]),
+            budget(&inv),
+            inv.control.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(snapshot.rows(), 2);
+        let ids = snapshot
+            .batches()
+            .iter()
+            .flat_map(|batch| {
+                batch
+                    .column(0)
+                    .as_any()
+                    .downcast_ref::<UInt64Array>()
+                    .unwrap()
+                    .values()
+                    .to_vec()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec![1, 4]);
+        let report = &snapshot.provenance()["sourceSelection"];
+        assert_eq!(report["kind"], "authenticated_effective_id_lookup");
+        assert_eq!(report["missingIds"], json!([2, 99]));
+        assert_eq!(report["unresolvedIds"], json!([]));
+        assert!(report["materializationDecodedBatches"].is_null());
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn uncached_selected_source_imports_only_existing_requested_rows() {
+    let fx = Fixture::new(&[basic()]);
+    let inv = fx.invocation("data sql", &[]);
+    let snapshot = prepare_selected(
+        &inv,
+        &request(SourceMode::Static, vec![]),
+        Some(&[1, 99]),
+        budget(&inv),
+        inv.control.clone(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(snapshot.rows(), 1);
+    assert_eq!(
+        snapshot.provenance()["sourceSelection"]["kind"],
+        "authenticated_wdc_id_lookup"
+    );
+    assert_eq!(
+        snapshot.provenance()["sourceSelection"]["missingIds"],
+        json!([99])
+    );
+    let empty = prepare_selected(
+        &inv,
+        &request(SourceMode::Static, vec![]),
+        Some(&[]),
+        budget(&inv),
+        inv.control.clone(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(empty.rows(), 0);
+    assert!(empty.batches().is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn same_generation_batch_is_reused_for_later_distinct_id_with_source_scope_label() {
+    let rows = (0..4096)
+        .map(|i| vec![Cell::U(i * 2 + 1), Cell::I64(7)])
+        .collect::<Vec<_>>();
+    let fx = Fixture::new(&[fixture::table(
+        "Sample",
+        921,
+        &[("ID", "uint"), ("Value", "signed64")],
+        &rows,
+    )]);
+    cache(&fx);
+    let inv = fx.invocation("data sql", &[]);
+    let mut engine =
+        crate::engine::Engine::new(inv.clone(), crate::engine::EngineLimits::default()).unwrap();
+    for id in [1, 3] {
+        let query = serde_json::from_value(json!({"kind":"plan","plan":{"op":"lookup","table":{"name":"Sample","mode":"static"},"ids":[id]}})).unwrap();
+        let result = engine.execute(query, inv.control.clone()).await.unwrap();
+        assert_eq!(result.row_count(), 1);
+        let preparation = &result.provenance()["sources"][0]["sourceSelection"];
+        assert_eq!(preparation["scope"], "source_preparation_not_current_task");
+        // A fresh second preparation would replace this with [3]. Reusing [1]
+        // proves the already materialized batch and its original owner survive.
+        assert_eq!(preparation["requestedIds"], json!([1]));
+    }
+    engine.close().unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn current_lookup_explanation_does_not_repeat_cached_superset_missing_ids() {
+    let fx = Fixture::new(&[basic()]);
+    cache(&fx);
+    let inv = fx.invocation("data sql", &[]);
+    let mut engine =
+        crate::engine::Engine::new(inv.clone(), crate::engine::EngineLimits::default()).unwrap();
+    for ids in [vec![1, 99], vec![1]] {
+        let query = serde_json::from_value(json!({"kind":"plan","plan":{"op":"lookup","table":{"name":"Sample","mode":"static"},"ids":ids}})).unwrap();
+        let result = engine.execute(query, inv.control.clone()).await.unwrap();
+        let current = &result.provenance()["lookupRequirements"][0];
+        assert_eq!(current["requestedIds"], json!(ids));
+        assert_eq!(
+            current["missingIds"],
+            if ids.len() == 2 {
+                json!([99])
+            } else {
+                json!([])
+            }
+        );
+        let preparation = &result.provenance()["sources"][0]["sourceSelection"];
+        assert_eq!(preparation["scope"], "source_preparation_not_current_task");
+        assert_eq!(preparation["requestedIds"], json!([1, 99]));
+    }
+    engine.close().unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn partial_lookup_distinguishes_explicit_hotfix_deletion_from_unresolved_base_id() {
+    for effective in [false, true] {
+        let spec = fixture::encrypted_sections(201);
+        let hash = spec.hash;
+        let (_, encoded) = fixture::encrypted_frame(&spec.raw);
+        let fx = Fixture::with_encoded_table(spec, encoded);
+        let mut table = json!({"name":"Sample","mode":"static"});
+        if effective {
+            let mut raw = b"XFTH".to_vec();
+            raw.extend(9u32.to_le_bytes());
+            raw.extend(69933u32.to_le_bytes());
+            raw.resize(44, 0);
+            let mut header = vec![0; 32];
+            header[..4].copy_from_slice(b"XFTH");
+            for (at, value) in [(8, 1u32), (16, hash), (20, 2), (24, 0)] {
+                header[at..at + 4].copy_from_slice(&value.to_le_bytes());
+            }
+            header[28] = 2;
+            raw.extend(header);
+            let capture = evidence::commit_capture(&fx.home,&raw,"application/octet-stream",json!({"kind":"hotfix-cache","locator":"fixture:partial-lookup","snapshot":fx.pin,"dataBuild":fixture::BUILD}),true,false).unwrap();
+            table = json!({"name":"Sample","mode":"effective","hotfix_captures":[capture["id"]]});
+        }
+        let inv = fx.invocation("data sql", &[]);
+        let mut engine =
+            crate::engine::Engine::new(inv.clone(), crate::engine::EngineLimits::default())
+                .unwrap();
+        let query = serde_json::from_value(
+            json!({"kind":"plan","plan":{"op":"lookup","table":table,"ids":[1,2,99]}}),
+        )
+        .unwrap();
+        let result = engine.execute(query, inv.control.clone()).await.unwrap();
+        assert!(!result.complete());
+        assert_eq!(result.row_count(), 1);
+        let report = &result.provenance()["lookupRequirements"][0];
+        assert_eq!(
+            report["missingIds"],
+            if effective { json!([2]) } else { json!([]) }
+        );
+        assert_eq!(
+            report["unresolvedIds"],
+            if effective {
+                json!([99])
+            } else {
+                json!([2, 99])
+            }
+        );
+        drop(result);
+        engine.close().unwrap();
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn selected_source_preserves_cancellation_and_checked_generation_close() {
+    let fx = Fixture::new(&[basic()]);
+    cache(&fx);
+    let inv = fx.invocation("data sql", &[]);
+    crate::generation::observations::FAIL_CLOSES.with(|n| n.set(1));
+    let result = prepare_selected(
+        &inv,
+        &request(SourceMode::Static, vec![]),
+        Some(&[]),
+        budget(&inv),
+        inv.control.clone(),
+    )
+    .await;
+    crate::generation::observations::FAIL_CLOSES.with(|n| n.set(0));
+    assert_eq!(result.unwrap_err().code, "storage.close_failed");
+    inv.control
+        .cancel_handle()
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    assert!(
+        prepare_selected(
+            &inv,
+            &request(SourceMode::Static, vec![]),
+            Some(&[1]),
+            budget(&inv),
+            inv.control.clone()
+        )
+        .await
+        .is_err()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn sparse_duplicate_lookup_preserves_membership_and_materializes_distinct_batches_once() {
+    let rows = (0..4096)
+        .map(|i| vec![Cell::U(i * 2 + 1), Cell::I64(7)])
+        .collect::<Vec<_>>();
+    let fx = Fixture::new(&[fixture::table(
+        "Sample",
+        921,
+        &[("ID", "uint"), ("Value", "signed64")],
+        &rows,
+    )]);
+    cache(&fx);
+    let inv = fx.invocation("data sql", &[]);
+    let mut engine =
+        crate::engine::Engine::new(inv.clone(), crate::engine::EngineLimits::default()).unwrap();
+    let query = serde_json::from_value(json!({"kind":"plan","plan":{"op":"lookup","table":{"name":"Sample","mode":"static"},"ids":[4097,1,4097,50_000]}})).unwrap();
+    let result = engine.execute(query, inv.control.clone()).await.unwrap();
+    assert_eq!(result.row_count(), 2);
+    assert_eq!(
+        result.provenance()["sources"][0]["sourceSelection"]["materializationDecodedBatches"],
+        2
+    );
+    assert_eq!(
+        result.provenance()["lookupRequirements"][0]["requestedIds"],
+        json!([1, 4097, 50_000])
+    );
+    assert_eq!(
+        result.provenance()["lookupRequirements"][0]["missingIds"],
+        json!([50_000])
+    );
+    drop(result);
+    engine.close().unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn physical_tombstone_never_proves_absence_of_nonidentity_public_id() {
+    let mut spec = fixture::encrypted_sections(201);
+    spec.dbd = spec
+        .dbd
+        .replace("int ID\n", "int RecordID\n")
+        .replace("int Value\n", "int ID\n")
+        .replace("$id$ID<u32>", "$id$RecordID<u32>")
+        .replace("Value<u32>", "ID<u32>");
+    let hash = spec.hash;
+    let (_, encoded) = fixture::encrypted_frame(&spec.raw);
+    let fx = Fixture::with_encoded_table(spec, encoded);
+    let mut raw = b"XFTH".to_vec();
+    raw.extend(9u32.to_le_bytes());
+    raw.extend(69933u32.to_le_bytes());
+    raw.resize(44, 0);
+    let mut header = vec![0; 32];
+    header[..4].copy_from_slice(b"XFTH");
+    for (at, value) in [(8, 1u32), (16, hash), (20, 2), (24, 0)] {
+        header[at..at + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    header[28] = 2;
+    raw.extend(header);
+    let capture = evidence::commit_capture(&fx.home,&raw,"application/octet-stream",json!({"kind":"hotfix-cache","locator":"fixture:identity-domains","snapshot":fx.pin,"dataBuild":fixture::BUILD}),true,false).unwrap();
+    let inv = fx.invocation("data sql", &[]);
+    let mut engine =
+        crate::engine::Engine::new(inv.clone(), crate::engine::EngineLimits::default()).unwrap();
+    let query = serde_json::from_value(json!({"kind":"plan","plan":{"op":"lookup","table":{"name":"Sample","mode":"effective","hotfix_captures":[capture["id"]]},"ids":[2,42]}})).unwrap();
+    let result = engine.execute(query, inv.control.clone()).await.unwrap();
+    assert_eq!(result.row_count(), 1);
+    assert!(!result.complete());
+    assert_eq!(
+        result.provenance()["sources"][0]["sourceSelection"]["kind"],
+        "full_source"
+    );
+    assert_eq!(
+        result.provenance()["lookupRequirements"][0]["missingIds"],
+        json!([])
+    );
+    assert_eq!(
+        result.provenance()["lookupRequirements"][0]["unresolvedIds"],
+        json!([2])
+    );
+    drop(result);
+    engine.close().unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn nonidentity_float_id_lookup_keeps_plan_execution_without_fabricated_missing_report() {
+    let mut spec = fixture::table(
+        "Sample",
+        921,
+        &[("RecordID", "uint"), ("ID", "float")],
+        &[vec![Cell::U(1), Cell::F(42.0)]],
+    );
+    spec.dbd = spec
+        .dbd
+        .replace("RecordID<u32>", "$id$RecordID<u32>")
+        .replace("$id$ID<32>", "ID<32>");
+    let fx = Fixture::new(&[spec]);
+    let inv = fx.invocation("data sql", &[]);
+    let mut engine =
+        crate::engine::Engine::new(inv.clone(), crate::engine::EngineLimits::default()).unwrap();
+    let query = serde_json::from_value(json!({"kind":"plan","plan":{"op":"lookup","table":{"name":"Sample","mode":"static"},"ids":[42]}})).unwrap();
+    let result = engine.execute(query, inv.control.clone()).await.unwrap();
+    assert_eq!(result.row_count(), 1);
+    let report = &result.provenance()["lookupRequirements"][0];
+    assert_eq!(report["classification"], "unavailable_non_integer_id");
+    assert!(report["missingIds"].is_null());
+    assert!(report["unresolvedIds"].is_null());
+    drop(result);
+    let full = serde_json::from_value(
+        json!({"kind":"plan","plan":{"op":"scan","table":{"name":"Sample","mode":"static"}}}),
+    )
+    .unwrap();
+    let result = engine.execute(full, inv.control.clone()).await.unwrap();
+    assert_eq!(result.row_count(), 1);
+    assert_eq!(
+        result.provenance()["sources"][0]["sourceSelection"]["selectionAppliedByPlan"],
+        true,
+        "the later full scan reuses the actual full materialization prepared for lookup"
+    );
+    drop(result);
+    engine.close().unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn replacing_partial_cache_keeps_live_result_owner_and_does_not_accumulate_entries() {
+    let rows = (0..4096)
+        .map(|i| vec![Cell::U(i * 2 + 1), Cell::I64(7)])
+        .collect::<Vec<_>>();
+    let fx = Fixture::new(&[fixture::table(
+        "Sample",
+        921,
+        &[("ID", "uint"), ("Value", "signed64")],
+        &rows,
+    )]);
+    cache(&fx);
+    let inv = fx.invocation("data sql", &[]);
+    let mut engine =
+        crate::engine::Engine::new(inv.clone(), crate::engine::EngineLimits::default()).unwrap();
+    let query = |ids: Vec<u32>| {
+        serde_json::from_value(json!({"kind":"plan","plan":{"op":"lookup","table":{"name":"Sample","mode":"static"},"ids":ids}})).unwrap()
+    };
+    let first = engine
+        .execute(query(vec![1]), inv.control.clone())
+        .await
+        .unwrap();
+    for ids in [vec![1, 4097], vec![2049, 4097], vec![1]] {
+        let result = engine
+            .execute(query(ids.clone()), inv.control.clone())
+            .await
+            .unwrap();
+        assert_eq!(result.row_count(), ids.len());
+        assert_eq!(engine.cached_source_count(), 1);
+        drop(result);
+        let page = first.page(0, 1).unwrap();
+        assert_eq!(page.rows[0][0], json!(1));
+    }
+    drop(first);
+    engine.close().unwrap();
+    assert_eq!(engine.cached_source_count(), 0);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn explicit_capture_contains_complete_rows_and_original_typed_request() {
+    use crate::engine::{Engine, EngineLimits, QueryPlan, QueryRequest};
+    let rows = (0..1201)
+        .map(|id| vec![Cell::U(id), Cell::I64(9_007_199_254_740_993)])
+        .collect::<Vec<_>>();
+    let table = fixture::table(
+        "Sample",
+        921,
+        &[("ID", "uint"), ("Exact", "signed64")],
+        &rows,
+    );
+    let fx = Fixture::new(&[table]);
+    let inv = fx.invocation("data agent serve", &[]);
+    let control = inv.control.clone();
+    let mut engine = Engine::new(inv, EngineLimits::default()).unwrap();
+    let query = QueryRequest::Plan {
+        plan: QueryPlan::Scan {
+            table: request(SourceMode::Static, vec![]),
+        },
+    };
+    let result = engine
+        .execute(query.clone(), control.clone())
+        .await
+        .unwrap();
+    assert_eq!(result.row_count(), 1201);
+    let captured = engine.capture(&result, control).unwrap();
+    let receipt = serde_json::to_value(&captured).unwrap();
+    let stored = evidence::read_capture(&fx.home, receipt["id"].as_str().unwrap()).unwrap();
+    assert_eq!(receipt, stored);
+    let body: serde_json::Value =
+        serde_json::from_slice(&evidence::read_blob(&fx.home, &receipt["blob"], 16 << 20).unwrap())
+            .unwrap();
+    assert_eq!(body["rows"].as_array().unwrap().len(), 1201);
+    assert_eq!(body["rows"][1200][1].as_i64(), Some(9_007_199_254_740_993));
+    assert_eq!(
+        body["provenance"]["request"],
+        serde_json::to_value(query).unwrap()
+    );
+    assert_eq!(body["complete"], true);
+    assert_eq!(receipt["truncated"], false);
+    drop(captured);
+    assert_eq!(result.page(1200, 1).unwrap().rows.len(), 1);
+    drop(result);
+    engine.close().unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn capture_cancel_and_foreign_session_reject_without_consuming_handle() {
+    use crate::engine::{Engine, EngineLimits, QueryPlan, QueryRequest};
+    let fx = Fixture::new(&[basic()]);
+    let inv = fx.invocation("data agent serve", &[]);
+    let control = inv.control.clone();
+    let mut engine = Engine::new(inv.clone(), EngineLimits::default()).unwrap();
+    let mut other = Engine::new(inv, EngineLimits::default()).unwrap();
+    let result = engine
+        .execute(
+            QueryRequest::Plan {
+                plan: QueryPlan::Scan {
+                    table: request(SourceMode::Static, vec![]),
+                },
+            },
+            control.clone(),
+        )
+        .await
+        .unwrap();
+    let cancelled = lycheedev_core::control::OperationControl::new(
+        control.deadline(),
+        Arc::new(std::sync::atomic::AtomicBool::new(true)),
+    );
+    assert!(engine.capture(&result, cancelled).is_err());
+    assert_eq!(
+        other.capture(&result, control.clone()).unwrap_err().code,
+        "records.source_identity"
+    );
+    let captured = engine.capture(&result, control).unwrap();
+    drop(captured);
+    assert_eq!(result.page(0, 2).unwrap().rows.len(), 2);
+    drop(result);
+    engine.close().unwrap();
+    other.close().unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn retained_result_capture_uses_new_control_after_original_cancel() {
+    use crate::engine::{Engine, EngineLimits, QueryPlan, QueryRequest};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let fx = Fixture::new(&[basic()]);
+    let inv = fx.invocation("data agent serve", &[]);
+    let flag = Arc::new(AtomicBool::new(false));
+    let original =
+        lycheedev_core::control::OperationControl::new(inv.control.deadline(), flag.clone());
+    let mut engine = Engine::new(inv, EngineLimits::default()).unwrap();
+    let result = engine
+        .execute(
+            QueryRequest::Plan {
+                plan: QueryPlan::Scan {
+                    table: request(SourceMode::Static, vec![]),
+                },
+            },
+            original,
+        )
+        .await
+        .unwrap();
+    flag.store(true, Ordering::Relaxed);
+    let captured = engine
+        .capture(
+            &result,
+            lycheedev_core::control::OperationControl::default(),
+        )
+        .unwrap();
+    drop(captured);
+    drop(result);
+    engine.close().unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn capture_reauthenticates_effective_dependencies_before_publication() {
+    use crate::engine::{Engine, EngineLimits, QueryPlan, QueryRequest};
+    let (fx, hotfix) = effective_fixture();
+    let inv = fx.invocation("data agent serve", &[]);
+    let control = inv.control.clone();
+    let mut engine = Engine::new(inv, EngineLimits::default()).unwrap();
+    let result = engine
+        .execute(
+            QueryRequest::Plan {
+                plan: QueryPlan::Scan {
+                    table: request(SourceMode::Effective, vec![hotfix.clone()]),
+                },
+            },
+            control.clone(),
+        )
+        .await
+        .unwrap();
+    evidence::remove_capture(&fx.home, &hotfix).unwrap();
+    assert!(engine.capture(&result, control).is_err());
+    assert!(!result.page(0, 10).unwrap().rows.is_empty());
+    drop(result);
+    engine.close().unwrap();
+}

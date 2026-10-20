@@ -6,8 +6,17 @@ use std::time::Duration;
 
 impl Metadata {
     pub(crate) fn schema_version_controlled(&self, control: &OperationControl) -> Result<i32> {
-        let result=checked_sql_with_check(control,control.deadline(),&mut || Ok(()),&mut || {},||self.connection.pragma_query_value(None,"user_version",|row|row.get(0)));
-        crate::selection::selection_finish(result,control.check())
+        let result = checked_sql_with_check(
+            control,
+            control.deadline(),
+            &mut || Ok(()),
+            &mut || {},
+            || {
+                self.connection
+                    .pragma_query_value(None, "user_version", |row| row.get(0))
+            },
+        );
+        crate::selection::selection_finish(result, control.check())
     }
 
     /// Open the existing metadata API under the caller's original stop scope.
@@ -81,17 +90,24 @@ impl Metadata {
                 metadata_check(control, &mut check)?;
             }
             if !path.exists() && !write {
+                if super::evidence_catalog::present(home)? {
+                    let checks = std::cell::RefCell::new(&mut check);
+                    return super::evidence_catalog::read_carrier(home, control, &|| {
+                        (*checks.borrow_mut())()
+                    });
+                }
                 return Err(ToolkitError::new(
                     "vault.record_missing",
                     "workspace metadata does not exist",
                     3,
                 ));
             }
-            let flags = if write {
-                OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE
-            } else {
-                OpenFlags::SQLITE_OPEN_READ_ONLY
-            };
+            let flags = OpenFlags::SQLITE_OPEN_NOFOLLOW
+                | if write {
+                    OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE
+                } else {
+                    OpenFlags::SQLITE_OPEN_READ_ONLY
+                };
             // One absolute deadline spans open, schema reads, BEGIN and COMMIT.
             let until = control.deadline();
             let bound_home = std::path::absolute(home)?;
@@ -100,13 +116,14 @@ impl Metadata {
                     Connection::open_with_flags(&path, flags)
                 })?;
             on_open();
-            let initialized = initialize_connection(
-                &connection, write, control, &mut check, &mut on_busy,
-            );
+            let initialized =
+                initialize_connection(&connection, write, control, &mut check, &mut on_busy);
             let metadata = Self {
                 connection,
                 home: bound_home,
                 writable: write,
+                evidence_gate_held: false,
+                catalog_only: false,
             };
             match initialized {
                 Ok(()) => Ok(metadata),
@@ -184,6 +201,18 @@ impl Metadata {
         mut on_busy: impl FnMut(),
         decode: impl FnOnce(Vec<u8>) -> Result<T>,
     ) -> Result<T> {
+        if (self.catalog_only || super::evidence_catalog::EvidenceKey::parse(key).is_some())
+            && super::evidence_catalog::present(&self.home)?
+        {
+            let checks = std::cell::RefCell::new(&mut check);
+            let row = super::evidence_catalog::required(super::evidence_catalog::read(
+                &self.home,
+                key,
+                control,
+                &|| (*checks.borrow_mut())(),
+            )?)?;
+            return decode(row.bytes);
+        }
         metadata_check(control, &mut check)?;
         self.connection.busy_timeout(Duration::ZERO)?;
         let result = (|| {
@@ -253,10 +282,9 @@ fn initialize_connection(
     let until = control.deadline();
     metadata_check(control, check)?;
     connection.busy_timeout(Duration::ZERO)?;
-    let version: i32 =
-        checked_sql_with_check(control, until, check, on_busy, || {
-            connection.pragma_query_value(None, "user_version", |row| row.get(0))
-        })?;
+    let version: i32 = checked_sql_with_check(control, until, check, on_busy, || {
+        connection.pragma_query_value(None, "user_version", |row| row.get(0))
+    })?;
     metadata_check(control, check)?;
     // Deliberately retain open's existing schema/version diagnostics.
     // Historical Go migration has its separate, stricter boundary.
@@ -278,13 +306,12 @@ fn initialize_connection(
         checked_sql_with_check(control, until, check, on_busy, || {
             connection.pragma_update(None, "synchronous", "FULL")
         })?;
-        let mut transaction =
-            checked_sql_with_check(control, until, check, on_busy, || {
-                rusqlite::Transaction::new_unchecked(
-                    connection,
-                    rusqlite::TransactionBehavior::Immediate,
-                )
-            })?;
+        let mut transaction = checked_sql_with_check(control, until, check, on_busy, || {
+            rusqlite::Transaction::new_unchecked(
+                connection,
+                rusqlite::TransactionBehavior::Immediate,
+            )
+        })?;
         let created = (|| {
             checked_sql_with_check(control, until, check, on_busy, || {
                 transaction.execute_batch("CREATE TABLE IF NOT EXISTS documents (key TEXT PRIMARY KEY NOT NULL, generation INTEGER NOT NULL CHECK(generation>0), value BLOB NOT NULL CHECK(length(value)<=1048576)) WITHOUT ROWID")
@@ -324,11 +351,17 @@ fn initialize_connection(
 
 impl Metadata {
     pub(crate) fn check_capture_binding(&self, home: &Path) -> Result<()> {
-        if !self.writable || (home != self.home.as_path() && std::path::absolute(home)? != self.home) {
-            return Err(ToolkitError::invalid("capture metadata belongs to a different workspace or is read-only"));
+        if !self.writable
+            || (home != self.home.as_path() && std::path::absolute(home)? != self.home)
+        {
+            return Err(ToolkitError::invalid(
+                "capture metadata belongs to a different workspace or is read-only",
+            ));
         }
         if !self.connection.is_autocommit() {
-            return Err(ToolkitError::invalid("capture metadata already has an active transaction"));
+            return Err(ToolkitError::invalid(
+                "capture metadata already has an active transaction",
+            ));
         }
         Ok(())
     }
@@ -342,11 +375,16 @@ impl Metadata {
         self.check_capture_binding(home)?;
         crate::workspace::open_controlled_with_check(home, control, &mut check)?;
         let schema = historical_write::historical_lease_observed_with_check(
-            home, "metadata-schema", control, &mut check, &mut || {},
+            home,
+            "metadata-schema",
+            control,
+            &mut check,
+            &mut || {},
         )?;
         // Do not memoize user_version or dependency authentication. No writer
         // transaction is kept alive between source, codec, artifact and manifest.
-        let checked = initialize_connection(&self.connection, true, control, &mut check, &mut || {});
+        let checked =
+            initialize_connection(&self.connection, true, control, &mut check, &mut || {});
         let checked = finish_historical(checked, schema.close());
         let checked = crate::selection::selection_finish(checked, control.check());
         crate::selection::selection_finish(checked, check())

@@ -125,6 +125,10 @@ impl<'a> ReferenceAccounting<'a> {
     }
 }
 impl evidence::CaptureAccounting for ReferenceAccounting<'_> {
+    fn evidence_domain(&self) -> lycheedev_core::metadata::EvidenceDomain {
+        lycheedev_core::metadata::EvidenceDomain::Data
+    }
+
     fn check(&self) -> Result<()> {
         self.budget.check()?;
         self.verification.check()
@@ -697,6 +701,14 @@ impl RowCursor for OverlayEqualCursor<'_> {
 }
 
 impl OverlayPlan {
+    pub(crate) fn patch_count(&self) -> usize {
+        self.patches.len()
+    }
+    pub(crate) fn deleted_ids(&self) -> impl Iterator<Item = u32> + '_ {
+        self.patches
+            .iter()
+            .filter_map(|(id, patch)| patch.values.is_none().then_some(*id))
+    }
     pub(crate) fn schema(&self) -> &relational::Source {
         &self.schema
     }
@@ -733,7 +745,7 @@ impl OverlayPlan {
         provider::emit_rows(self.cursor(base, budget)?, emit)
     }
 
-    pub(super) fn equal_cursor<'query>(
+    pub(crate) fn equal_cursor<'query>(
         &'query self,
         base: &'query dyn relational::RowProvider,
         budget: &'query Budget,

@@ -97,13 +97,13 @@ fn stages(home: &Path) -> usize {
 }
 #[test]
 fn exact_peak_counts_body_stage_and_records_then_releases_only_finished_peak() {
-    let f = Fixture::new(87);
+    let f = Fixture::new(215);
     assert_eq!(
         f.publish(b"body").unwrap_err().code,
         "vault.data_cache_budget_exceeded"
     );
     assert!(!f.receipt(b"body", "intent").exists());
-    f.limit(88);
+    f.limit(216);
     let blob = f.publish(b"body").unwrap();
     assert_eq!(blob.bytes, 4);
     let usage = f.usage();
@@ -116,7 +116,7 @@ fn exact_peak_counts_body_stage_and_records_then_releases_only_finished_peak() {
 }
 #[test]
 fn preexisting_source_and_evidence_body_requires_new_attribution_capacity_and_is_never_deleted() {
-    let f = Fixture::new(87);
+    let f = Fixture::new(215);
     let control = OperationControl::default();
     let original = evidence::publish_blob_bounded(&f.0, b"body", 4, &control).unwrap();
     let capture = evidence::commit_capture(
@@ -134,7 +134,7 @@ fn preexisting_source_and_evidence_body_requires_new_attribution_capacity_and_is
     );
     let path = evidence::blob_path(&f.0, original["sha256"].as_str().unwrap()).unwrap();
     assert_eq!(fs::read(&path).unwrap(), b"body");
-    f.limit(88);
+    f.limit(216);
     f.publish(b"body").unwrap();
     assert_eq!(f.usage().shared_blob_bytes, 4);
     assert_eq!(
@@ -145,7 +145,7 @@ fn preexisting_source_and_evidence_body_requires_new_attribution_capacity_and_is
 }
 #[test]
 fn derived_and_registered_shared_bytes_use_the_same_admission_limit() {
-    let f = Fixture::new(92);
+    let f = Fixture::new(220);
     let control = OperationControl::default();
     let resources = data_resources::acquire(&f.0, Policy::Ordinary, &control).unwrap();
     let owner = resources
@@ -162,6 +162,8 @@ fn derived_and_registered_shared_bytes_use_the_same_admission_limit() {
     resources.close().unwrap();
     f.publish(b"body").unwrap();
     assert_eq!(f.usage().total().unwrap(), 88);
+    // Settled usage is unchanged; the declaration is transient peak only.
+    f.limit(92);
     let resources = data_resources::acquire(&f.0, Policy::Ordinary, &control).unwrap();
     assert_eq!(
         resources
@@ -185,7 +187,7 @@ fn derived_and_registered_shared_bytes_use_the_same_admission_limit() {
 }
 #[test]
 fn configuration_shrink_allows_only_verified_zero_growth_reuse() {
-    let f = Fixture::new(88);
+    let f = Fixture::new(216);
     let blob = f.publish(b"body").unwrap();
     f.limit(1);
     assert_eq!(f.publish(b"body").unwrap().sha256, blob.sha256);
@@ -200,7 +202,7 @@ fn configuration_shrink_allows_only_verified_zero_growth_reuse() {
 }
 #[test]
 fn cancellation_after_intent_before_body_withdraws_original_intent_and_permits_retry() {
-    let f = Fixture::new(88);
+    let f = Fixture::new(216);
     let observed = Cell::new(false);
     let error =
         publish_shared_blob_with_check(&f.0, b"body", 4, &OperationControl::default(), &|| {
@@ -220,7 +222,7 @@ fn cancellation_after_intent_before_body_withdraws_original_intent_and_permits_r
 }
 #[test]
 fn cancelled_real_body_stage_cleanup_releases_intent_without_error_code_inference() {
-    let f = Fixture::new(88);
+    let f = Fixture::new(216);
     let observed = Cell::new(false);
     let error =
         publish_shared_blob_with_check(&f.0, b"body", 4, &OperationControl::default(), &|| {
@@ -241,7 +243,7 @@ fn cancelled_real_body_stage_cleanup_releases_intent_without_error_code_inferenc
 }
 #[test]
 fn published_body_late_failure_retains_intent_and_allows_read_only_pending_reuse() {
-    let f = Fixture::new(88);
+    let f = Fixture::new(216);
     let path = evidence::blob_path(&f.0, &storage::sha256(b"body")).unwrap();
     let error =
         publish_shared_blob_with_check(&f.0, b"body", 4, &OperationControl::default(), &|| {
@@ -254,12 +256,12 @@ fn published_body_late_failure_retains_intent_and_allows_read_only_pending_reuse
     assert!(!f.receipt(b"body", "complete").exists());
     let usage = f.usage();
     assert_eq!(usage.retained_shared_peak_bytes, 8);
-    assert_eq!(usage.total().unwrap(), 56);
+    assert_eq!(usage.total().unwrap(), 56 + 128);
     f.limit(1);
     f.publish(b"body").unwrap();
     assert!(!f.receipt(b"body", "complete").exists());
-    f.limit(88);
-    assert_eq!(f.usage(), usage);
+    f.limit(216);
+    assert_eq!(f.usage().total().unwrap(), 56); // Empty v2 declaration is authenticated and retired.
     assert_eq!(fs::read(path).unwrap(), b"body");
 }
 #[test]
@@ -321,7 +323,7 @@ fn mismatched_marker_or_same_length_corruption_cannot_authorize_reuse() {
 }
 #[test]
 fn simultaneous_same_sha_publishers_charge_one_body_and_one_record_pair() {
-    let f = Fixture::new(88);
+    let f = Fixture::new(216);
     let barrier = Arc::new(Barrier::new(3));
     let handles: Vec<_> = (0..2)
         .map(|_| {
@@ -349,7 +351,7 @@ fn simultaneous_same_sha_publishers_charge_one_body_and_one_record_pair() {
 }
 #[test]
 fn unregistered_evidence_is_reported_outside_coverage_and_never_pruned() {
-    let f = Fixture::new(88);
+    let f = Fixture::new(216);
     let blob = evidence::publish_blob_bounded(
         &f.0,
         b"unregistered evidence",
@@ -367,7 +369,7 @@ fn unregistered_evidence_is_reported_outside_coverage_and_never_pruned() {
 
 #[test]
 fn completion_stage_failure_keeps_pending_claim_then_clean_retry_recovers() {
-    let f = Fixture::new(88);
+    let f = Fixture::new(216);
     let body = evidence::blob_path(&f.0, &storage::sha256(b"body")).unwrap();
     let observed = Cell::new(false);
     let error =
@@ -378,7 +380,7 @@ fn completion_stage_failure_keeps_pending_claim_then_clean_retry_recovers() {
                         entry
                             .file_name()
                             .to_string_lossy()
-                            .starts_with(".lycheedev-")
+                            .starts_with(".lycheedev-cache-")
                     })
                 })
             {
@@ -396,7 +398,7 @@ fn completion_stage_failure_keeps_pending_claim_then_clean_retry_recovers() {
     assert_eq!(error.code, "fixture.budget_cancelled");
     assert_eq!(fs::read(body).unwrap(), b"body");
     assert!(!f.receipt(b"body", "complete").exists());
-    assert_eq!(fs::read_dir(f.paths().shared_blobs()).unwrap().count(), 1);
+    assert_eq!(fs::read_dir(f.paths().shared_blobs()).unwrap().count(), 2);
     assert_eq!(f.usage().retained_shared_peak_bytes, 8);
     f.publish(b"body").unwrap();
     assert!(f.receipt(b"body", "complete").exists());
@@ -404,7 +406,7 @@ fn completion_stage_failure_keeps_pending_claim_then_clean_retry_recovers() {
 }
 #[test]
 fn waiting_shared_writer_observes_independent_budget_and_does_not_release_active_derived_lease() {
-    let f = Fixture::new(88);
+    let f = Fixture::new(216);
     let control = OperationControl::default();
     let resources = data_resources::acquire(&f.0, Policy::Ordinary, &control).unwrap();
     let held = resources
@@ -429,7 +431,10 @@ fn waiting_shared_writer_observes_independent_budget_and_does_not_release_active
 
 fn closed_body_pending(f: &Fixture, body: &[u8]) -> BlobRef {
     f.usage();
-    let reference = BlobRef { sha256: storage::sha256(body), bytes: body.len() as u64 };
+    let reference = BlobRef {
+        sha256: storage::sha256(body),
+        bytes: body.len() as u64,
+    };
     let published = evidence::publish_blob(&f.0, body, body.len()).unwrap();
     assert_eq!(published["sha256"], reference.sha256);
     fs::write(f.receipt(body, "intent"), intent(&reference).unwrap()).unwrap();
@@ -448,8 +453,14 @@ fn pending_closed_publication_recovers_only_after_full_body_and_clean_shard_proo
     let usage = f.usage();
     assert_eq!(usage.retained_shared_peak_bytes, 0);
     assert_eq!(usage.shared_blob_bytes, reference.bytes);
-    assert_eq!(fs::read(f.receipt(body, "complete")).unwrap(), completion(&intent(&reference).unwrap()));
-    assert_eq!(fs::read(evidence::blob_path(&f.0, &reference.sha256).unwrap()).unwrap(), body);
+    assert_eq!(
+        fs::read(f.receipt(body, "complete")).unwrap(),
+        completion(&intent(&reference).unwrap())
+    );
+    assert_eq!(
+        fs::read(evidence::blob_path(&f.0, &reference.sha256).unwrap()).unwrap(),
+        body
+    );
 }
 
 #[test]
@@ -463,7 +474,10 @@ fn pending_recovery_never_removes_or_discounts_unknown_shared_stage() {
     f.publish(body).unwrap();
     assert!(!f.receipt(body, "complete").exists());
     assert_eq!(f.usage().retained_shared_peak_bytes, 2 * reference.bytes);
-    assert_eq!(fs::read(unknown).unwrap(), b"other domain or interrupted writer");
+    assert_eq!(
+        fs::read(unknown).unwrap(),
+        b"other domain or interrupted writer"
+    );
 }
 
 #[test]

@@ -47,6 +47,26 @@ impl Metadata {
         control: &OperationControl,
     ) -> Result<Vec<RawDocument>> {
         let mut documents = Vec::new();
+        if (self.catalog_only || super::evidence_catalog::intersects(prefix))
+            && super::evidence_catalog::present(&self.home)?
+        {
+            super::evidence_catalog::visit(
+                &self.home,
+                prefix,
+                after,
+                limit,
+                control,
+                &|| Ok(()),
+                |_, generation, bytes| {
+                    documents.push(RawDocument {
+                        generation,
+                        bytes: bytes.to_vec(),
+                    });
+                    Ok(())
+                },
+            )?;
+            return Ok(documents);
+        }
         visit_owned_raw_page(
             &self.connection,
             prefix,
@@ -74,6 +94,20 @@ impl Metadata {
         mut check: impl FnMut() -> Result<()>,
         mut visit: impl FnMut(&str, i64, &[u8]) -> Result<()>,
     ) -> Result<(usize, String)> {
+        if (self.catalog_only || super::evidence_catalog::intersects(prefix))
+            && super::evidence_catalog::present(&self.home)?
+        {
+            let checks = RefCell::new(&mut check);
+            return super::evidence_catalog::visit(
+                &self.home,
+                prefix,
+                after,
+                limit,
+                control,
+                &|| (*checks.borrow_mut())(),
+                &mut visit,
+            );
+        }
         visit_raw_page(
             &self.connection,
             prefix,

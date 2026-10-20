@@ -12,6 +12,7 @@ pub(crate) struct BlobPublicationSettlement {
     pub publication: StagedPublication,
     pub reused: bool,
     pub reference: Option<BlobRef>,
+    pub(super) managed_stage: Option<lycheedev_windows::filesystem::destination::ManagedStageName>,
     stage_created: bool,
     stage_cleanup_complete: bool,
 }
@@ -21,6 +22,7 @@ impl BlobPublicationSettlement {
             publication: StagedPublication::NotPublished,
             reused: false,
             reference: None,
+            managed_stage: None,
             stage_created: false,
             // StagedFile::create has no fallible work after native acquisition;
             // it returns ownership before a post-open check. Covered by tests.
@@ -65,3 +67,26 @@ pub(crate) fn publish_blob_attempt_with_check(
 
 #[cfg(test)]
 mod tests;
+
+/// Data quota has durably predeclared this finite name before entering the
+/// ordinary canonical blob lock. No quota acquisition occurs in this helper.
+pub(crate) fn publish_blob_attempt_predeclared_with_check(
+    home: &Path,
+    bytes: &[u8],
+    maximum: usize,
+    control: &OperationControl,
+    mut supplemental: impl FnMut() -> Result<()>,
+    name: &lycheedev_windows::filesystem::destination::ManagedStageName,
+) -> BlobPublishAttempt {
+    let mut settlement = BlobPublicationSettlement::new();
+    settlement.managed_stage = Some(name.clone());
+    let result = publish_internal_observed(
+        home,
+        bytes,
+        maximum,
+        Some(control),
+        &mut supplemental,
+        &mut settlement,
+    );
+    BlobPublishAttempt { result, settlement }
+}

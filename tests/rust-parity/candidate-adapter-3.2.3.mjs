@@ -9,9 +9,13 @@ export const HISTORICAL_CONTRACT_SHA256 = '66240b8ebb9d2920d7308e5bce38ff859c58f
 export const HISTORICAL_CONTRACT_BLOB = '1060a12cbd68e3913deb52c3d5610ee336751c99';
 // Agent successor: implemented() is unchanged; the only new parser arm is
 // --result-ttl-seconds=true. Full approved tests/metadata are separately pinned.
-export const CANDIDATE_CONTRACT_SHA256 = 'da8ed5418cf1de015e9f24c8012bd2eae3eb7ce0356cb4fb0f51d2dde744274f';
-export const CANDIDATE_CONTRACT_BLOB = 'f3f72aa6290c6f15298508ea0bbc9af80c6bf561';
-const reviewedContract = source => [HISTORICAL_CONTRACT_SHA256, CANDIDATE_CONTRACT_SHA256].includes(sha256(source));
+export const AGENT_CONTRACT_SHA256 = 'da8ed5418cf1de015e9f24c8012bd2eae3eb7ce0356cb4fb0f51d2dde744274f';
+export const AGENT_CONTRACT_BLOB = 'f3f72aa6290c6f15298508ea0bbc9af80c6bf561';
+// Protected Data inventory adds only --data=false to the production parser.
+// The independently pinned Agent predecessor remains historical evidence.
+export const CANDIDATE_CONTRACT_SHA256 = 'a783204b5b9aabfd0a4de82be36e825f0e59b3af8da457d6f0ad8503e9a3e403';
+export const CANDIDATE_CONTRACT_BLOB = 'bbca7908fa1f3fe347b862b00e5839a9c0f547b1';
+const reviewedContract = source => [HISTORICAL_CONTRACT_SHA256, AGENT_CONTRACT_SHA256, CANDIDATE_CONTRACT_SHA256].includes(sha256(source));
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 export function extractCandidateAdvertised(inventory, texts) {
   if (!reviewedContract(texts.filter)) return { state: 'unverified', reason: 'contract.rs changed; review the static advertised-filter adapter', commands: null };

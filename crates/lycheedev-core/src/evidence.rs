@@ -16,8 +16,8 @@ use std::{
 mod archive_commands;
 mod bounded;
 pub(crate) use bounded::{
-    StreamPublicationSettlement, publish_blob_attempt_with_check,
-    publish_data_blob_stream_with_check,
+    StreamPublicationSettlement, publish_blob_attempt_predeclared_with_check,
+    publish_blob_attempt_with_check, publish_data_blob_stream_with_check,
 };
 mod budgeted;
 mod dependencies;
@@ -38,8 +38,8 @@ pub use budgeted::{
     commit_capture_budgeted_referencing, commit_capture_budgeted_referencing_with_metadata,
     commit_capture_budgeted_with_dependencies,
     commit_capture_budgeted_with_dependencies_and_metadata,
-    commit_capture_budgeted_with_references, commit_verified_capture_budgeted,
-    commit_verified_capture_budgeted_with_metadata,
+    commit_capture_budgeted_with_references, commit_data_capture_bounded_with_check,
+    commit_verified_capture_budgeted, commit_verified_capture_budgeted_with_metadata,
 };
 pub use dependencies::{
     GoCaptureDecode, GoSignedInteger, GoTimestamp, normalize_go_json_strings,
@@ -211,3 +211,8 @@ pub fn remove_capture_controlled(
 ) -> Result<Value> {
     remove_commands::run(home, id, control)
 }
+
+pub(crate) use bounded::io_error as stream_source_error;
+
+mod storage_inventory;
+pub(crate) use storage_inventory::report as data_storage_report;

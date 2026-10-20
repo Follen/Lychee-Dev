@@ -46,6 +46,10 @@ export function loadCliContractOracle(historicalBytes) {
     assert.equal(command.summary, before, `${path}: exact historical summary`);
     command.summary = after;
   }
+  // Read-only protected Data inventory is an explicit opt-in, not a cleanup route.
+  const status = expected.find(command => command.path === 'cache status');
+  assert.deepEqual(status.flags, ['--home <root>', '--format text|json|jsonl']);
+  status.flags.unshift('--data');
   // One explicit opt-in on the existing prune command. Keep the frozen Go
   // surface intact and assert its exact prefix before applying this delta.
   const prune = expected.find(command => command.path === 'cache prune');

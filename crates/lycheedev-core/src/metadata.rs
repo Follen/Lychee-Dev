@@ -29,6 +29,9 @@ pub struct Metadata {
     // Bound at open, never supplied by a later capture caller.
     home: std::path::PathBuf,
     writable: bool,
+    // Set only by the catalog scope which owns the actual interprocess gate.
+    evidence_gate_held: bool,
+    catalog_only: bool,
 }
 #[derive(Debug, Clone)]
 pub struct Document {
@@ -42,10 +45,15 @@ pub struct Document {
 pub(crate) struct TransactionReader<'a> {
     connection: &'a Connection,
     control: &'a crate::control::OperationControl,
+    catalog: Option<&'a evidence_catalog::Catalog>,
 }
 impl TransactionReader<'_> {
     pub(crate) fn read_raw(&self, key: &str) -> Result<Vec<u8>> {
         self.control.check()?;
+        if let Some(catalog) = self.catalog {
+            return evidence_catalog::required(catalog.document(key, self.control, &|| Ok(()))?)
+                .map(|row| row.bytes);
+        }
         let raw: Option<Vec<u8>> = self
             .connection
             .query_row("SELECT value FROM documents WHERE key=?1", [key], |row| {
@@ -63,6 +71,13 @@ impl TransactionReader<'_> {
     }
 }
 impl Metadata {
+    fn require_write_capability(&self) -> Result<()> {
+        if !self.writable {
+            return Err(ToolkitError::invalid("metadata handle is read-only"));
+        }
+        Ok(())
+    }
+
     pub fn open(home: &Path, write: bool) -> Result<Self> {
         crate::workspace::open(home)?;
         let path = home.join("state/toolkit.sqlite");
@@ -70,6 +85,13 @@ impl Metadata {
             std::fs::create_dir_all(path.parent().expect("metadata parent"))?;
         }
         if !path.exists() && !write {
+            if evidence_catalog::present(home)? {
+                return evidence_catalog::read_carrier(
+                    home,
+                    &crate::control::OperationControl::default(),
+                    &|| Ok(()),
+                );
+            }
             return Err(ToolkitError::new(
                 "vault.record_missing",
                 "workspace metadata does not exist",
@@ -109,6 +131,8 @@ impl Metadata {
             connection,
             home: std::path::absolute(home)?,
             writable: write,
+            evidence_gate_held: false,
+            catalog_only: false,
         })
     }
     /// Read one historical Go document as original bytes. Unlike `read`, this
@@ -157,6 +181,15 @@ impl Metadata {
         mut on_busy: impl FnMut(),
     ) -> Result<RawDocument> {
         metadata_check(control, &mut check)?;
+        if evidence_catalog::EvidenceKey::parse(key).is_some() && evidence_catalog::present(home)? {
+            let checks = std::cell::RefCell::new(&mut check);
+            return evidence_catalog::required(evidence_catalog::read(
+                home,
+                key,
+                control,
+                &|| (*checks.borrow_mut())(),
+            )?);
+        }
         crate::workspace::open(home)?;
         metadata_check(control, &mut check)?;
         let path = home.join("state/toolkit.sqlite");
@@ -244,6 +277,18 @@ impl Metadata {
         }
     }
     pub fn read<T: DeserializeOwned>(&self, key: &str) -> Result<T> {
+        if (self.catalog_only || evidence_catalog::EvidenceKey::parse(key).is_some())
+            && evidence_catalog::present(&self.home)?
+        {
+            let control = crate::control::OperationControl::default();
+            let row = evidence_catalog::required(evidence_catalog::read(
+                &self.home,
+                key,
+                &control,
+                &|| Ok(()),
+            )?)?;
+            return serde_json::from_slice(&row.bytes).map_err(Into::into);
+        }
         let bytes: Option<Vec<u8>> = self
             .connection
             .query_row("SELECT value FROM documents WHERE key=?1", [key], |row| {
@@ -260,6 +305,17 @@ impl Metadata {
         }
     }
     pub fn generation(&self, key: &str) -> Result<Option<i64>> {
+        if (self.catalog_only || evidence_catalog::EvidenceKey::parse(key).is_some())
+            && evidence_catalog::present(&self.home)?
+        {
+            return evidence_catalog::read(
+                &self.home,
+                key,
+                &crate::control::OperationControl::default(),
+                &|| Ok(()),
+            )
+            .map(|row| row.map(|row| row.generation));
+        }
         Ok(self
             .connection
             .query_row(
@@ -362,81 +418,128 @@ impl Metadata {
         mut check: impl FnMut() -> Result<()>,
         mut on_busy: impl FnMut(),
     ) -> Result<()> {
-        metadata_check(control, &mut check)?;
-        let raw = serde_json::to_vec(value)?;
-        if raw.len() > 1_048_576 {
-            return Err(ToolkitError::invalid("metadata document exceeds 1 MiB"));
-        }
-        metadata_check(control, &mut check)?;
-        self.connection.busy_timeout(std::time::Duration::ZERO)?;
-        let result = (|| {
-            let until = control.deadline();
-            let mut transaction =
-                checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
-                    rusqlite::Transaction::new_unchecked(
-                        &self.connection,
-                        rusqlite::TransactionBehavior::Immediate,
+        self.require_write_capability()?;
+        if !self.evidence_gate_held && evidence_catalog::EvidenceKey::parse(key).is_some() {
+            let home = self.home.clone();
+            let checks = std::cell::RefCell::new(&mut check);
+            return evidence_catalog::mutate(
+                &home,
+                key,
+                control,
+                &|| (*checks.borrow_mut())(),
+                |metadata| {
+                    metadata.put_controlled_policy_with_check(
+                        key,
+                        value,
+                        expected,
+                        control,
+                        strict_create,
+                        || (*checks.borrow_mut())(),
+                        &mut on_busy,
                     )
-                })?;
-            let written = (|| {
-                let existing: Option<(i64, bool)> =
+                },
+            );
+        }
+        let evidence_gate = if self.evidence_gate_held {
+            None
+        } else {
+            Some(crate::metadata::evidence_catalog::acquire_gate(
+                &self.home,
+                control,
+                || check(),
+            )?)
+        };
+        let result = (|| {
+            metadata_check(control, &mut check)?;
+            let raw = serde_json::to_vec(value)?;
+            if raw.len() > 1_048_576 {
+                return Err(ToolkitError::invalid("metadata document exceeds 1 MiB"));
+            }
+            metadata_check(control, &mut check)?;
+            self.connection.busy_timeout(std::time::Duration::ZERO)?;
+            let result = (|| {
+                let until = control.deadline();
+                let mut transaction =
                     checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
-                        transaction
-                            .query_row(
-                                "SELECT generation,value=?2 FROM documents WHERE key=?1",
-                                params![key, &raw],
-                                |row| Ok((row.get(0)?, row.get(1)?)),
-                            )
-                            .optional()
+                        rusqlite::Transaction::new_unchecked(
+                            &self.connection,
+                            rusqlite::TransactionBehavior::Immediate,
+                        )
                     })?;
-                match existing {
-                    Some((generation, _)) if expected == Some(generation) => {
+                let written = (|| {
+                    let existing: Option<(i64, bool)> =
                         checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
-                            transaction.execute(
+                            transaction
+                                .query_row(
+                                    "SELECT generation,value=?2 FROM documents WHERE key=?1",
+                                    params![key, &raw],
+                                    |row| Ok((row.get(0)?, row.get(1)?)),
+                                )
+                                .optional()
+                        })?;
+                    match existing {
+                        Some((generation, _)) if expected == Some(generation) => {
+                            checked_sql_with_check(
+                                control,
+                                until,
+                                &mut check,
+                                &mut on_busy,
+                                || {
+                                    transaction.execute(
                                 "UPDATE documents SET generation=generation+1,value=?2 WHERE key=?1",
                                 params![key, &raw],
                             )
-                        })?;
+                                },
+                            )?;
+                        }
+                        Some((_, true)) if expected.is_none() && !strict_create => {
+                            return metadata_check(control, &mut check);
+                        }
+                        None if expected.is_none() => {
+                            checked_sql_with_check(
+                                control,
+                                until,
+                                &mut check,
+                                &mut on_busy,
+                                || transaction.execute(INSERT_DOCUMENT, params![key, &raw]),
+                            )?;
+                        }
+                        _ => {
+                            return Err(ToolkitError::new(
+                                "vault.generation_conflict",
+                                "document changed or disappeared",
+                                4,
+                            ));
+                        }
                     }
-                    Some((_, true)) if expected.is_none() && !strict_create => {
-                        return metadata_check(control, &mut check);
-                    }
-                    None if expected.is_none() => {
-                        checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
-                            transaction.execute(INSERT_DOCUMENT, params![key, &raw])
-                        })?;
-                    }
-                    _ => {
-                        return Err(ToolkitError::new(
-                            "vault.generation_conflict",
-                            "document changed or disappeared",
-                            4,
-                        ));
-                    }
-                }
-                // Transaction::commit consumes the guard on SQLITE_BUSY. Keep it
-                // alive for checked retries; rollback below handles other exits.
-                checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
-                    transaction.execute_batch("COMMIT")
-                })?;
-                Ok(())
+                    // Transaction::commit consumes the guard on SQLITE_BUSY. Keep it
+                    // alive for checked retries; rollback below handles other exits.
+                    checked_sql_with_check(control, until, &mut check, &mut on_busy, || {
+                        transaction.execute_batch("COMMIT")
+                    })?;
+                    Ok(())
+                })();
+                // Successful byte-idempotence also exits an active transaction.
+                // Explicitly roll back every uncommitted exit, even after stop.
+                let rollback = if !transaction.is_autocommit() {
+                    transaction
+                        .execute_batch("ROLLBACK")
+                        .map_err(ToolkitError::from)
+                } else {
+                    Ok(())
+                };
+                transaction.set_drop_behavior(rusqlite::DropBehavior::Ignore);
+                historical_write::finish_historical(written, rollback)
             })();
-            // Successful byte-idempotence also exits an active transaction.
-            // Explicitly roll back every uncommitted exit, even after stop.
-            let rollback = if !transaction.is_autocommit() {
-                transaction
-                    .execute_batch("ROLLBACK")
-                    .map_err(ToolkitError::from)
-            } else {
-                Ok(())
-            };
-            transaction.set_drop_behavior(rusqlite::DropBehavior::Ignore);
-            historical_write::finish_historical(written, rollback)
+            let restore = self
+                .connection
+                .busy_timeout(std::time::Duration::from_secs(5));
+            historical_write::finish_historical(result, restore.map_err(ToolkitError::from))
         })();
-        let restore = self
-            .connection
-            .busy_timeout(std::time::Duration::from_secs(5));
-        historical_write::finish_historical(result, restore.map_err(ToolkitError::from))
+        crate::metadata::historical_write::finish_historical(
+            result,
+            evidence_gate.map_or(Ok(()), crate::storage::ExclusiveLock::close),
+        )
     }
     /// The caller owns already serialized JSON. Keep insertion, replacement and
     /// byte-identical idempotence in the same transaction as `put`.
@@ -457,54 +560,88 @@ impl Metadata {
         strict_create: bool,
         mut check: impl FnMut() -> Result<()>,
     ) -> Result<()> {
-        if raw.len() > 1_048_576 {
-            return Err(ToolkitError::invalid("metadata document exceeds 1 MiB"));
+        self.require_write_capability()?;
+        if !self.evidence_gate_held && evidence_catalog::EvidenceKey::parse(key).is_some() {
+            let home = self.home.clone();
+            let control = crate::control::OperationControl::default();
+            let checks = std::cell::RefCell::new(&mut check);
+            return evidence_catalog::mutate(
+                &home,
+                key,
+                &control,
+                &|| (*checks.borrow_mut())(),
+                |metadata| {
+                    metadata.put_serialized_policy(key, raw, expected, strict_create, || {
+                        (*checks.borrow_mut())()
+                    })
+                },
+            );
         }
-        check()?;
-        let transaction = self
-            .connection
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let existing: Option<(i64, bool)> = transaction
-            .query_row(
-                "SELECT generation,value=?2 FROM documents WHERE key=?1",
-                params![key, raw],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-        check()?;
-        if let Some((generation, same_bytes)) = existing {
-            if expected == Some(generation) {
-                transaction.execute(
-                    "UPDATE documents SET generation=generation+1,value=?2 WHERE key=?1",
-                    params![key, raw],
-                )?;
-            } else if expected.is_none() && same_bytes && !strict_create {
-                return Ok(());
-            } else {
-                return Err(ToolkitError::new(
-                    "vault.generation_conflict",
-                    "document changed or already exists",
-                    4,
-                ));
-            }
+        let gate_control = crate::control::OperationControl::default();
+        let evidence_gate = if self.evidence_gate_held {
+            None
         } else {
-            if expected.is_some() {
-                return Err(ToolkitError::new(
-                    "vault.generation_conflict",
-                    "document disappeared",
-                    4,
-                ));
+            Some(crate::metadata::evidence_catalog::acquire_gate(
+                &self.home,
+                &gate_control,
+                || check(),
+            )?)
+        };
+        let result = (|| {
+            if raw.len() > 1_048_576 {
+                return Err(ToolkitError::invalid("metadata document exceeds 1 MiB"));
             }
-            transaction.execute(INSERT_DOCUMENT, params![key, raw])?;
-        }
-        check()?;
-        transaction.commit()?;
-        Ok(())
+            check()?;
+            let transaction = self
+                .connection
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let existing: Option<(i64, bool)> = transaction
+                .query_row(
+                    "SELECT generation,value=?2 FROM documents WHERE key=?1",
+                    params![key, raw],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            check()?;
+            if let Some((generation, same_bytes)) = existing {
+                if expected == Some(generation) {
+                    transaction.execute(
+                        "UPDATE documents SET generation=generation+1,value=?2 WHERE key=?1",
+                        params![key, raw],
+                    )?;
+                } else if expected.is_none() && same_bytes && !strict_create {
+                    return Ok(());
+                } else {
+                    return Err(ToolkitError::new(
+                        "vault.generation_conflict",
+                        "document changed or already exists",
+                        4,
+                    ));
+                }
+            } else {
+                if expected.is_some() {
+                    return Err(ToolkitError::new(
+                        "vault.generation_conflict",
+                        "document disappeared",
+                        4,
+                    ));
+                }
+                transaction.execute(INSERT_DOCUMENT, params![key, raw])?;
+            }
+            check()?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        crate::metadata::historical_write::finish_historical(
+            result,
+            evidence_gate.map_or(Ok(()), crate::storage::ExclusiveLock::close),
+        )
     }
     /// Validate immutable references and publish their owner under the same
     /// SQLite write transaction used by checked removal. Admission precedes
     /// each reference allocation; publication cannot run on a missing or
     /// invalid reference. The original control bounds BEGIN and COMMIT waits.
+    #[cfg(test)]
     pub(crate) fn put_serialized_referencing(
         &mut self,
         key: &str,
@@ -516,91 +653,153 @@ impl Metadata {
         mut validate_reference: impl FnMut(&str, &[u8]) -> Result<()>,
         publish: impl FnOnce() -> Result<()>,
     ) -> Result<()> {
-        check()?;
-        if raw.len() > 1_048_576 {
-            return Err(ToolkitError::invalid("metadata document exceeds 1 MiB"));
-        }
-        self.connection.busy_timeout(std::time::Duration::ZERO)?;
+        let evidence_gate = if self.evidence_gate_held {
+            None
+        } else {
+            Some(crate::metadata::evidence_catalog::acquire_gate(
+                &self.home,
+                control,
+                || check(),
+            )?)
+        };
         let result = (|| {
-            let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            let mut transaction = checked_sql(control, until, &mut || {}, || {
-                rusqlite::Transaction::new_unchecked(
-                    &self.connection,
-                    rusqlite::TransactionBehavior::Immediate,
-                )
-            })?;
-            for reference in references {
+            if !self.evidence_gate_held && evidence_catalog::present(&self.home)? {
+                return Err(ToolkitError::invalid(
+                    "legacy reference mutation requires the authoritative catalog",
+                ));
+            }
+
+            check()?;
+            if raw.len() > 1_048_576 {
+                return Err(ToolkitError::invalid("metadata document exceeds 1 MiB"));
+            }
+            self.connection.busy_timeout(std::time::Duration::ZERO)?;
+            let result = (|| {
+                let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                let mut transaction = checked_sql(control, until, &mut || {}, || {
+                    rusqlite::Transaction::new_unchecked(
+                        &self.connection,
+                        rusqlite::TransactionBehavior::Immediate,
+                    )
+                })?;
+                for reference in references {
+                    check()?;
+                    let length: Option<usize> = checked_sql(control, until, &mut || {}, || {
+                        transaction
+                            .query_row(
+                                "SELECT length(value) FROM documents WHERE key=?1",
+                                [reference],
+                                |row| row.get(0),
+                            )
+                            .optional()
+                    })?;
+                    let length = length.ok_or_else(|| {
+                        ToolkitError::new(
+                            "vault.record_missing",
+                            format!("document {reference} does not exist"),
+                            3,
+                        )
+                    })?;
+                    admit_reference(length)?;
+                    check()?;
+                    let document: Vec<u8> = checked_sql(control, until, &mut || {}, || {
+                        transaction.query_row(
+                            "SELECT value FROM documents WHERE key=?1",
+                            [reference],
+                            |row| row.get(0),
+                        )
+                    })?;
+                    validate_reference(reference, &document)?;
+                }
                 check()?;
-                let length: Option<usize> = checked_sql(control, until, &mut || {}, || {
+                publish()?;
+                check()?;
+                let existing: Option<bool> = checked_sql(control, until, &mut || {}, || {
                     transaction
                         .query_row(
-                            "SELECT length(value) FROM documents WHERE key=?1",
-                            [reference],
+                            "SELECT value=?2 FROM documents WHERE key=?1",
+                            params![key, raw],
                             |row| row.get(0),
                         )
                         .optional()
                 })?;
-                let length = length.ok_or_else(|| {
-                    ToolkitError::new(
-                        "vault.record_missing",
-                        format!("document {reference} does not exist"),
-                        3,
-                    )
-                })?;
-                admit_reference(length)?;
+                match existing {
+                    Some(true) => return check(),
+                    Some(false) => {
+                        return Err(ToolkitError::new(
+                            "vault.generation_conflict",
+                            "immutable document already differs",
+                            4,
+                        ));
+                    }
+                    None => {
+                        check()?;
+                        checked_sql(control, until, &mut || {}, || {
+                            transaction.execute(INSERT_DOCUMENT, params![key, raw])
+                        })?;
+                    }
+                }
                 check()?;
-                let document: Vec<u8> = checked_sql(control, until, &mut || {}, || {
-                    transaction.query_row(
-                        "SELECT value FROM documents WHERE key=?1",
-                        [reference],
-                        |row| row.get(0),
-                    )
+                checked_sql(control, until, &mut || {}, || {
+                    transaction.execute_batch("COMMIT")
                 })?;
-                validate_reference(reference, &document)?;
-            }
-            check()?;
-            publish()?;
-            check()?;
-            let existing: Option<bool> = checked_sql(control, until, &mut || {}, || {
-                transaction
-                    .query_row(
-                        "SELECT value=?2 FROM documents WHERE key=?1",
-                        params![key, raw],
-                        |row| row.get(0),
-                    )
-                    .optional()
-            })?;
-            match existing {
-                Some(true) => return check(),
-                Some(false) => {
-                    return Err(ToolkitError::new(
-                        "vault.generation_conflict",
-                        "immutable document already differs",
-                        4,
-                    ));
-                }
-                None => {
-                    check()?;
-                    checked_sql(control, until, &mut || {}, || {
-                        transaction.execute(INSERT_DOCUMENT, params![key, raw])
-                    })?;
-                }
-            }
-            check()?;
-            checked_sql(control, until, &mut || {}, || {
-                transaction.execute_batch("COMMIT")
-            })?;
-            transaction.set_drop_behavior(rusqlite::DropBehavior::Ignore);
+                transaction.set_drop_behavior(rusqlite::DropBehavior::Ignore);
+                Ok(())
+            })();
+            let restore = self
+                .connection
+                .busy_timeout(std::time::Duration::from_secs(5));
+            result?;
+            restore?;
             Ok(())
         })();
-        let restore = self
-            .connection
-            .busy_timeout(std::time::Duration::from_secs(5));
-        result?;
-        restore?;
-        Ok(())
+        crate::metadata::historical_write::finish_historical(
+            result,
+            evidence_gate.map_or(Ok(()), crate::storage::ExclusiveLock::close),
+        )
     }
     pub fn list<T: DeserializeOwned>(&self, prefix: &str, limit: usize) -> Result<Vec<T>> {
+        if (self.catalog_only || evidence_catalog::intersects(prefix))
+            && evidence_catalog::present(&self.home)?
+        {
+            let control = crate::control::OperationControl::default();
+            return evidence_catalog::with_catalog(
+                &self.home,
+                None,
+                &control,
+                &|| Ok(()),
+                |catalog, _| {
+                    let mut rows = Vec::new();
+                    // list has an inclusive prefix, unlike the public page
+                    // API's exclusive continuation cursor.
+                    if limit != 0 {
+                        if let Some(row) = catalog.document(prefix, &control, &|| Ok(()))? {
+                            rows.push(serde_json::from_slice(&row.bytes)?);
+                        }
+                    }
+                    let mut after = prefix.to_owned();
+                    while rows.len() < limit {
+                        let remaining = (limit - rows.len()).min(1000);
+                        let (count, last) = catalog.visit(
+                            prefix,
+                            &after,
+                            remaining,
+                            &control,
+                            &|| Ok(()),
+                            &mut |_, _, bytes| {
+                                rows.push(serde_json::from_slice(bytes)?);
+                                Ok(())
+                            },
+                        )?;
+                        if count < remaining {
+                            break;
+                        }
+                        after = last;
+                    }
+                    Ok(rows)
+                },
+            );
+        }
         let mut statement = self.connection.prepare(
             "SELECT value FROM documents WHERE key>=?1 AND key<?2 ORDER BY key LIMIT ?3",
         )?;
@@ -611,13 +810,37 @@ impl Metadata {
         rows.map(|row| Ok(serde_json::from_slice(&row?)?)).collect()
     }
     pub fn delete(&mut self, key: &str) -> Result<bool> {
-        let transaction = self
-            .connection
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        remember_deleted_generation(&transaction, key)?;
-        let deleted = transaction.execute("DELETE FROM documents WHERE key=?1", [key])? != 0;
-        transaction.commit()?;
-        Ok(deleted)
+        self.require_write_capability()?;
+        if !self.evidence_gate_held && evidence_catalog::EvidenceKey::parse(key).is_some() {
+            let home = self.home.clone();
+            let control = crate::control::OperationControl::default();
+            return evidence_catalog::mutate(&home, key, &control, &|| Ok(()), |metadata| {
+                metadata.delete(key)
+            });
+        }
+        let gate_control = crate::control::OperationControl::default();
+        let evidence_gate = if self.evidence_gate_held {
+            None
+        } else {
+            Some(crate::metadata::evidence_catalog::acquire_gate(
+                &self.home,
+                &gate_control,
+                || Ok(()),
+            )?)
+        };
+        let result = (|| {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            remember_deleted_generation(&transaction, key)?;
+            let deleted = transaction.execute("DELETE FROM documents WHERE key=?1", [key])? != 0;
+            transaction.commit()?;
+            Ok(deleted)
+        })();
+        crate::metadata::historical_write::finish_historical(
+            result,
+            evidence_gate.map_or(Ok(()), crate::storage::ExclusiveLock::close),
+        )
     }
     /// Validate and consume one document in the same write transaction.
     /// Unrelated workspace documents are not loaded for a single-use intent.
@@ -626,26 +849,7 @@ impl Metadata {
         key: &str,
         validate: impl FnOnce(T) -> Result<U>,
     ) -> Result<U> {
-        let transaction = self
-            .connection
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let raw: Option<Vec<u8>> = transaction
-            .query_row("SELECT value FROM documents WHERE key=?1", [key], |row| {
-                row.get(0)
-            })
-            .optional()?;
-        let raw = raw.ok_or_else(|| {
-            ToolkitError::new(
-                "vault.record_missing",
-                format!("document {key} does not exist"),
-                3,
-            )
-        })?;
-        let result = validate(serde_json::from_slice(&raw)?)?;
-        remember_deleted_generation(&transaction, key)?;
-        transaction.execute("DELETE FROM documents WHERE key=?1", [key])?;
-        transaction.commit()?;
-        Ok(result)
+        self.consume_controlled(key, &crate::control::OperationControl::default(), validate)
     }
     /// Hold a single SQLite write transaction through bounded reference validation and precise deletions.
     pub fn delete_checked<T>(
@@ -705,95 +909,8 @@ impl Metadata {
             &TransactionReader<'_>,
         ) -> Result<(T, Option<(String, serde_json::Value)>)>,
     ) -> Result<T> {
-        control.check()?;
-        self.connection.busy_timeout(std::time::Duration::ZERO)?;
-        let result = (|| {
-            let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            let mut transaction = checked_sql(control, until, &mut || {}, || {
-                rusqlite::Transaction::new_unchecked(
-                    &self.connection,
-                    rusqlite::TransactionBehavior::Immediate,
-                )
-            })?;
-            let (count, bytes): (i64, i64) = transaction.query_row(
-                "SELECT count(*),coalesce(sum(length(value)),0) FROM documents",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )?;
-            if count > 100000 || bytes > 64 << 20 {
-                return Err(ToolkitError::new(
-                    "evidence.reference_scan_limit",
-                    "reference scan exceeds 100000 documents or 64 MiB",
-                    4,
-                ));
-            }
-            let mut documents = vec![];
-            {
-                let mut statement = transaction
-                    .prepare("SELECT key,generation,value FROM documents ORDER BY key")?;
-                let rows = statement.query_map([], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, Vec<u8>>(2)?,
-                    ))
-                })?;
-                for row in rows {
-                    control.check()?;
-                    let (key, generation, raw) = row?;
-                    documents.push(Document {
-                        key,
-                        generation,
-                        value: serde_json::from_slice(&raw)?,
-                    });
-                }
-            }
-            for (key, generation) in expected {
-                if documents
-                    .iter()
-                    .find(|doc| &doc.key == key)
-                    .is_none_or(|doc| doc.generation != *generation)
-                {
-                    return Err(ToolkitError::new(
-                        "vault.generation_conflict",
-                        "document changed before checked deletion",
-                        4,
-                    ));
-                }
-            }
-            control.check()?;
-            let reader = TransactionReader {
-                connection: &transaction,
-                control,
-            };
-            let (value, recovery) = validate(&documents, &reader)?;
-            control.check()?;
-            if let Some((key, record)) = recovery {
-                let raw = serde_json::to_vec(&record)?;
-                if raw.len() > 1_048_576 {
-                    return Err(ToolkitError::invalid("recovery document exceeds 1 MiB"));
-                }
-                transaction.execute(INSERT_DOCUMENT, params![key, raw])?;
-            }
-            for key in keys {
-                control.check()?;
-                checked_sql(control, until, &mut || {}, || {
-                    remember_deleted_generation(&transaction, key)
-                })?;
-                transaction.execute("DELETE FROM documents WHERE key=?1", [key])?;
-            }
-            checked_sql(control, until, &mut || {}, || {
-                transaction.execute_batch("COMMIT")
-            })?;
-            transaction.set_drop_behavior(rusqlite::DropBehavior::Ignore);
-            Ok(value)
-        })();
-        let restore = self
-            .connection
-            .busy_timeout(std::time::Duration::from_secs(5));
-        let value = result?;
-        restore?;
-        Ok(value)
+        self.require_write_capability()?;
+        evidence_catalog::checked_delete(&self.home, keys, expected, control, validate)
     }
 }
 
@@ -1332,3 +1449,8 @@ mod generation_tests;
 
 mod data_cache;
 pub use data_cache::DataCacheMetadata;
+
+pub(crate) mod evidence_catalog;
+pub use evidence_catalog::EvidenceDomain;
+
+pub(crate) use evidence_catalog::with_existing_writer as with_evidence_writer;

@@ -42,7 +42,7 @@ test('shared definitions equal fixed Go 3.2.3 plus exact approved differences an
   assertMetadata(inventory);
 });
 
-test('all 115 frozen arities plus one explicit Data prune boolean match parser flags', () => {
+test('all 115 frozen arities plus Data prune, Agent TTL and protected inventory match parser flags', () => {
   const expected = new Map();
   for (const command of fixture.commands) {
     for (const flag of command.parserFlags) {
@@ -54,6 +54,7 @@ test('all 115 frozen arities plus one explicit Data prune boolean match parser f
   assert.ok(!expected.has('--data-derived'));
   expected.set('--data-derived', false);
   expected.set('--result-ttl-seconds', true);
+  expected.set('--data', false);
   assert.deepEqual(explicitArities(), expected);
 });
 
@@ -195,7 +196,7 @@ test('arity corruption, unknown flags and removal of fail-closed fallback are re
     const anchor = value ? '--allow-partial' : '--after-id';
     corrupted = corrupted.replace(`"${anchor}"`, `"${name}" | "${anchor}"`);
     const actual = explicitArities(corrupted);
-    assert.equal(actual.size, 117);
+    assert.equal(actual.size, 118);
     assert.equal(actual.get(name), !value, `${name}: opposite source arm`);
     assert.throws(() => assert.deepEqual(actual, expected), {code: 'ERR_ASSERTION'}, name);
   }
@@ -206,4 +207,13 @@ test('arity corruption, unknown flags and removal of fail-closed fallback are re
   const duplicate = source.replace('"--allow-partial"', '"--allow-partial" | "--allow-partial"');
   assert.throws(() => explicitArities(duplicate), /duplicate explicit arity/);
   assert.throws(() => explicitArities(source.replace('name => panic!("flag missing explicit contract arity: {name}"),', '_ => false,')), {code: 'ERR_ASSERTION'});
+});
+
+test('protected Data inventory is only a boolean cache status flag', () => {
+  const frozen = fixture.commands.find(command => command.path === 'cache status');
+  const actual = inventory.find(command => command.path === 'cache status');
+  assert.deepEqual(actual.flags, ['--data', ...frozen.flags]);
+  assert.equal(actual.summary, frozen.summary);
+  assert.deepEqual(inventory.filter(command => command.flags.includes('--data')).map(command => command.path), ['cache status']);
+  assert.equal(explicitArities().get('--data'), false);
 });

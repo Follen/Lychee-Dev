@@ -20,12 +20,11 @@ impl Flag {
         // In particular, `--encoding raw|png|webp` takes a value, whereas
         // `--scan (dbcache: ...)` does not. Fixture tests cover every entry.
         match self.name() {
-            "--allow-partial" | "--cdn" | "--data-derived" | "--dry-run" | "--fix" | "--flow" | "--fresh"
-            | "--include-removed" | "--latest" | "--no-cache" | "--offline" | "--overwrite"
-            | "--passive" | "--plan" | "--remote" | "--replace" | "--resume" | "--scan"
-            | "--semantic" | "--session-reuse" | "--static-only" | "--stdin" | "--uncommitted" => {
-                false
-            }
+            "--allow-partial" | "--cdn" | "--data" | "--data-derived" | "--dry-run" | "--fix"
+            | "--flow" | "--fresh" | "--include-removed" | "--latest" | "--no-cache"
+            | "--offline" | "--overwrite" | "--passive" | "--plan" | "--remote" | "--replace"
+            | "--resume" | "--scan" | "--semantic" | "--session-reuse" | "--static-only"
+            | "--stdin" | "--uncommitted" => false,
             "--after-id"
             | "--after-index"
             | "--budget-seconds"
@@ -188,21 +187,55 @@ mod tests {
             // The only allowed doctor metadata delta is the selected Source
             // engine; keep the fixed Go fixture and all other fields exact.
             if definition["path"] == "source batch" {
-                definition["summary"] = serde_json::json!(definition["summary"].as_str().unwrap().replace("LuaLS", "native Emmy"));
+                definition["summary"] = serde_json::json!(
+                    definition["summary"]
+                        .as_str()
+                        .unwrap()
+                        .replace("LuaLS", "native Emmy")
+                );
             }
-            if definition["path"] == "source session status" || definition["path"] == "source session close" {
-                definition["summary"] = serde_json::json!(definition["summary"].as_str().unwrap().replace("LuaLS broker", "native Source session"));
+            if definition["path"] == "source session status"
+                || definition["path"] == "source session close"
+            {
+                definition["summary"] = serde_json::json!(
+                    definition["summary"]
+                        .as_str()
+                        .unwrap()
+                        .replace("LuaLS broker", "native Source session")
+                );
             }
             if definition["path"] == "source validate" {
-                definition["summary"] = serde_json::json!(definition["summary"].as_str().unwrap().replace("bundled LuaLS", "native Emmy analysis"));
+                definition["summary"] = serde_json::json!(
+                    definition["summary"]
+                        .as_str()
+                        .unwrap()
+                        .replace("bundled LuaLS", "native Emmy analysis")
+                );
+            }
+            if definition["path"] == "cache status" {
+                definition["flags"]
+                    .as_array_mut()
+                    .unwrap()
+                    .insert(0, serde_json::json!("--data"));
             }
             if definition["path"] == "cache prune" {
-                definition["flags"].as_array_mut().unwrap().push(serde_json::json!("--data-derived"));
-                definition["summary"] = serde_json::json!(format!("{}; --data-derived selects rebuildable Data objects and generations only (not downloads, shared blobs or CAP), with a remaining-byte target and distinct object-group attempt cap; staging cannot be combined", definition["summary"].as_str().unwrap()));
+                definition["flags"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(serde_json::json!("--data-derived"));
+                definition["summary"] = serde_json::json!(format!(
+                    "{}; --data-derived selects rebuildable Data objects and generations only (not downloads, shared blobs or CAP), with a remaining-byte target and distinct object-group attempt cap; staging cannot be combined",
+                    definition["summary"].as_str().unwrap()
+                ));
             }
             if definition["path"] == "doctor" {
-                assert_eq!(definition["summary"], "Aggregate read-only workspace, data, LuaLS and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check");
-                definition["summary"] = serde_json::json!("Aggregate read-only workspace, data, embedded Emmy worker smoke and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check");
+                assert_eq!(
+                    definition["summary"],
+                    "Aggregate read-only workspace, data, LuaLS and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check"
+                );
+                definition["summary"] = serde_json::json!(
+                    "Aggregate read-only workspace, data, embedded Emmy worker smoke and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check"
+                );
             }
         }
         // Preserve the original reference inventory and its order. The one
@@ -214,11 +247,20 @@ mod tests {
             "arguments":["<Table>"],
             "flags":["--home <root>","--format text|json|jsonl","--project <directory>","--snapshot <pin>","--installation <client-or-game-root>","--cdn","--offline","--max-bytes <n>","--key-file <WoW.txt|keys.json>","--timeout-seconds <1-3600> (default 300; entire query)"]
         });
-        let position = expected.iter().position(|d| d["path"] == "data db2").unwrap();
+        let position = expected
+            .iter()
+            .position(|d| d["path"] == "data db2")
+            .unwrap();
         expected.insert(position, added);
         let agent_additions = serde_json::json!([{"path": "data agent schema", "summary": "Describe the versioned Agent task protocol and session/result ownership limits; no data pin or worker is opened", "mutates": false, "arguments": [], "flags": ["--home <root>", "--format text|json|jsonl"]}, {"path": "data agent serve", "summary": "Run a caller-owned supervised Data Agent worker over stdin/stdout JSONL; typed discovery, queries, result pages, export and release share a pinned session; close or EOF drains submitted work; cancellation or deadline terminates outstanding work and invalidates all handles; no daemon is installed", "mutates": true, "arguments": [], "flags": ["--home <root>", "--format jsonl", "--project <directory>", "--snapshot <pin>", "--installation <client-or-game-root>", "--cdn", "--offline", "--key-file <WoW.txt|keys.json>", "--timeout-seconds <1-3600> (default 300; entire worker lifetime)", "--max-objects <1-1024> (default 32; retained result handles)", "--max-bytes <n> (default 536870912; shared session memory admission)", "--result-ttl-seconds <1-3600> (default 300; result handle lifetime)"]}]);
-        let position = expected.iter().position(|d| d["path"] == "data cache prepare").unwrap();
-        expected.splice(position..position, agent_additions.as_array().unwrap().iter().cloned());
+        let position = expected
+            .iter()
+            .position(|d| d["path"] == "data cache prepare")
+            .unwrap();
+        expected.splice(
+            position..position,
+            agent_additions.as_array().unwrap().iter().cloned(),
+        );
         assert_eq!(serde_json::to_value(all()).unwrap(), Value::Array(expected));
     }
 
@@ -269,28 +311,45 @@ mod tests {
         let describe = ["describe", "--format", "json"].map(str::to_owned);
         for _ in 0..2 {
             let result = crate::dispatch(&crate::parse(&describe).unwrap()).unwrap();
-            assert_eq!(result.data, serde_json::json!({
-                "commands":expected,
-                "formats":["text", "json", "jsonl"],
-                "development":crate::VERSION.contains('-')
-            }));
+            assert_eq!(
+                result.data,
+                serde_json::json!({
+                    "commands":expected,
+                    "formats":["text", "json", "jsonl"],
+                    "development":crate::VERSION.contains('-')
+                })
+            );
             let input = ["--help".to_owned()];
             let result = crate::dispatch(&crate::parse(&input).unwrap()).unwrap();
-            assert_eq!(result.data, serde_json::json!({
-                "commands":expected,
-                "flags":["--home <root>", "--format text|json|jsonl", "--help"]
-            }));
+            assert_eq!(
+                result.data,
+                serde_json::json!({
+                    "commands":expected,
+                    "flags":["--home <root>", "--format text|json|jsonl", "--help"]
+                })
+            );
             for definition in all() {
-                let mut input: Vec<String> =
-                    definition.path.split_whitespace().map(str::to_owned).collect();
+                let mut input: Vec<String> = definition
+                    .path
+                    .split_whitespace()
+                    .map(str::to_owned)
+                    .collect();
                 input.push("--help".into());
-                let mut flags: Vec<&str> =
-                    definition.flags.iter().map(|flag| flag.0.as_str()).collect();
+                let mut flags: Vec<&str> = definition
+                    .flags
+                    .iter()
+                    .map(|flag| flag.0.as_str())
+                    .collect();
                 flags.push("--help");
                 let result = crate::dispatch(&crate::parse(&input).unwrap()).unwrap();
-                assert_eq!(result.data, serde_json::json!({
-                    "commands":[definition], "flags":flags
-                }), "{}", definition.path);
+                assert_eq!(
+                    result.data,
+                    serde_json::json!({
+                        "commands":[definition], "flags":flags
+                    }),
+                    "{}",
+                    definition.path
+                );
             }
         }
     }
@@ -365,5 +424,13 @@ mod tests {
                 error.message
             );
         }
+    }
+    #[test]
+    fn data_protection_inventory_is_an_explicit_boolean_status_option() {
+        let arguments = ["cache", "status", "--data"].map(str::to_owned);
+        let parsed = crate::parse(&arguments).unwrap();
+        assert_eq!(parsed.command, "cache status");
+        assert_eq!(parsed.flags.get("--data").map(String::as_str), Some("true"));
+        assert!(crate::parse(&["cache", "prune", "--data"].map(str::to_owned)).is_err());
     }
 }

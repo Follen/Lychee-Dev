@@ -295,6 +295,30 @@ fn read_verified_content_source(
                             Some(&check),
                         )?
                         .with_policy(policy.with_keys(keys));
+                        let mut key_context = sha2::Sha256::new();
+                        key_context.update(b"lycheedev.keys-context.v1");
+                        for (id, key_bytes) in keys.keys() {
+                            budget.safety_only().charge(Cost::work(1))?;
+                            key_context.update(id.to_le_bytes());
+                            key_context.update((key_bytes.len() as u64).to_le_bytes());
+                            key_context.update(key_bytes);
+                        }
+                        let key_context = key_context.finalize();
+                        let source_identity =
+                            lycheedev_core::workspace::data_disk::SourceIdentity::from_parts(&[
+                                b"local-decoded-stream-v2",
+                                cache_key.as_bytes(),
+                                key_context.as_slice(),
+                                record.content_key.as_bytes(),
+                                keys.source.kind.as_bytes(),
+                                keys.source.sha256.as_bytes(),
+                                keys.source.state.as_bytes(),
+                                if policy.with_keys(keys) == blte::DecodePolicy::Strict {
+                                    b"strict"
+                                } else {
+                                    b"table-allow-missing"
+                                },
+                            ]);
                         let owned_budget = budget.safety_only();
                         let _span = budget.phase(Phase::DecodedStreamPublish);
                         let blob = if let Some(expected) = missing_body.as_ref() {
@@ -306,7 +330,7 @@ fn read_verified_content_source(
                                     )
                                 },
                             };
-                            lycheedev_core::workspace::data_disk::rebuild_shared_blob_stream_with_check(
+                            lycheedev_core::workspace::data_disk::rebuild_shared_blob_stream_identified_with_check(
                                 home,
                                 &mut checked,
                                 expected,
@@ -314,9 +338,10 @@ fn read_verified_content_source(
                                 control,
                                 move || owned_budget.check(),
                                 &budget.safety_only(),
+                                &source_identity,
                             )?
                         } else {
-                            lycheedev_core::workspace::data_disk::publish_shared_blob_stream_with_check(
+                            lycheedev_core::workspace::data_disk::publish_shared_blob_stream_identified_with_check(
                                 home,
                                 &mut reader,
                                 record.decoded_bytes,
@@ -324,6 +349,7 @@ fn read_verified_content_source(
                                 control,
                                 move || owned_budget.check(),
                                 &budget.safety_only(),
+                                &source_identity,
                             )?
                         };
                         let missing = reader.take_missing();

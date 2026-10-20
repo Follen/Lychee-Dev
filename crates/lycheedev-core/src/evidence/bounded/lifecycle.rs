@@ -166,13 +166,23 @@ fn publish_stage<C: FnMut() -> Result<()>>(
     let mut publication = staged::Publication::new();
     publication.reference = Some(reference.clone());
     let result = (|| {
-        stage = Some(StagedFile::create(
-            &parent,
-            &mut PathControl {
-                control,
-                supplemental,
-            },
-        )?);
+        stage = Some(match &settlement.managed_stage {
+            Some(name) => StagedFile::create_predeclared(
+                &parent,
+                name,
+                &mut PathControl {
+                    control,
+                    supplemental,
+                },
+            )?,
+            None => StagedFile::create(
+                &parent,
+                &mut PathControl {
+                    control,
+                    supplemental,
+                },
+            )?,
+        });
         settlement.stage_acquired();
         publication.stage_name = Some(stage.as_ref().expect("owned stage").name().into());
         check_with(control, supplemental)?;
@@ -268,34 +278,22 @@ pub(super) fn persist_capture(
     supplemental: &mut impl FnMut() -> Result<()>,
     state: &std::cell::Cell<crate::metadata::CaptureWriteState>,
 ) -> Result<()> {
-    let mut metadata = match control {
-        Some(control) => {
-            Metadata::open_controlled_with_check(home, true, control, &mut *supplemental)?
-        }
-        None => Metadata::open(home, true)?,
-    };
-    let written = match control {
-        Some(control) => metadata.put_capture_serialized(
-            key,
-            raw,
-            &[],
-            control,
-            &mut *supplemental,
-            |_| Ok(()),
-            |_, _| Ok(()),
-            || Ok(()),
-            state,
-        ),
-        None => {
-            let result = metadata.put_serialized(key, raw, None, &mut *supplemental);
-            if result.is_ok() {
-                state.set(crate::metadata::CaptureWriteState::Committed);
-            }
-            result
-        }
-    };
-    let result = crate::metadata::historical_write::finish_historical(written, metadata.close());
-    finish_controls(result, control, supplemental)
+    let default_control = OperationControl::default();
+    let effective = control.unwrap_or(&default_control);
+    let checks = std::cell::RefCell::new(supplemental);
+    crate::metadata::evidence_catalog::put_capture(
+        home,
+        crate::metadata::EvidenceDomain::Historical,
+        key,
+        raw,
+        &[],
+        effective,
+        &|| (*checks.borrow_mut())(),
+        |_| Ok(()),
+        |_, _| Ok(()),
+        |_| Ok(()),
+        state,
+    )
 }
 
 #[cfg(test)]

@@ -17,7 +17,7 @@ pub(super) fn dispatch(inv: &Invocation) -> Result<Outcome> {
     }
 }
 fn keep(home: &Path, id: &str, control: &OperationControl) -> Result<Value> {
-    Metadata::with_historical_write(home, control, |writer| {
+    crate::metadata::with_evidence_writer(home, id, control, |writer| {
         writer.with_write_lease(|writer| {
             let raw = writer.document(&format!("capture/{id}"))?;
             let capture = dependencies::inspect_capture_projection(&raw.bytes, id, control)?;

@@ -38,6 +38,8 @@ export function expectedArities(commands) {
   result['--data-derived'] = false;
   assert.ok(!Object.hasOwn(result, '--result-ttl-seconds'));
   result['--result-ttl-seconds'] = true;
+  assert.ok(!Object.hasOwn(result, '--data'));
+  result['--data'] = false;
   return result;
 }
 export function buildRelease323Fixture(root) {

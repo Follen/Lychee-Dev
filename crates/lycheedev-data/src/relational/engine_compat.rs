@@ -96,3 +96,10 @@ pub(crate) fn checked_integer(value: i128) -> Result<Scalar> {
 pub(crate) fn numeric_error() -> lycheedev_core::ToolkitError {
     numeric()
 }
+
+pub(crate) fn type_error() -> lycheedev_core::ToolkitError {
+    super::type_error()
+}
+pub(crate) fn text(value: &Scalar) -> Result<std::borrow::Cow<'_, str>> {
+    super::scalar::text(value)
+}

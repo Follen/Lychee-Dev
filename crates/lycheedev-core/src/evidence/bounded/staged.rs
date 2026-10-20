@@ -241,17 +241,32 @@ fn publish_stream(
         }
     };
     let mut staged = None;
+    let mut spool_slot = None;
+    let mut spool_cleanup_complete = true;
     let mut guard = None;
     let result = (|| {
+        if let (Some(quota), Some(owner)) = (quota, initial.as_ref()) {
+            spool_slot = quota.declare_spool(owner, expected_bytes)?;
+        }
         staged = Some({
             let _phase = accounting.blob_stream_phase(BlobStreamPhase::StageCreate);
-            PrivateSpool::create(
-                &parent,
-                &mut Checks {
-                    control,
-                    supplemental,
-                },
-            )?
+            match &spool_slot {
+                Some(slot) => PrivateSpool::create_predeclared(
+                    &parent,
+                    &slot.name,
+                    &mut Checks {
+                        control,
+                        supplemental,
+                    },
+                )?,
+                None => PrivateSpool::create(
+                    &parent,
+                    &mut Checks {
+                        control,
+                        supplemental,
+                    },
+                )?,
+            }
         });
         publication.stage_name = Some(staged.as_ref().expect("owned stage").name().to_owned());
         publication.source_stage_name = publication.stage_name.clone();
@@ -262,10 +277,17 @@ fn publish_stream(
         if let Some(owner) = initial.take() {
             let reserved = (|| {
                 stream_check(control, supplemental)?;
-                staged
-                    .as_mut()
-                    .expect("owned stage")
-                    .reserve_exact_len(expected_bytes)?;
+                if spool_slot.is_some() {
+                    staged
+                        .as_mut()
+                        .expect("owned stage")
+                        .limit_exact_len(expected_bytes)?;
+                } else {
+                    staged
+                        .as_mut()
+                        .expect("owned stage")
+                        .reserve_exact_len(expected_bytes)?;
+                }
                 stream_check(control, supplemental)
             })();
             owner.finish(reserved)?;
@@ -299,70 +321,82 @@ fn publish_stream(
         finish_checks(readable, control, supplemental)?;
         if let Some(quota) = quota {
             let mut opened = None;
-            let result = quota.publish(&reference, |settlement, reuse_only| {
-                let mut blob_parent = None;
-                let result = (|| {
-                    blob_parent = Some(Directory::open_controlled(
-                        &home.join("blobs"),
-                        &mut Checks {
+            let result =
+                quota.publish(&reference, |owner, settlement, reuse_only, managed_name| {
+                    let mut blob_parent = None;
+                    let result = (|| {
+                        blob_parent = Some(Directory::open_controlled(
+                            &home.join("blobs"),
+                            &mut Checks {
+                                control,
+                                supplemental,
+                            },
+                        )?);
+                        guard = Some({
+                            let _phase = accounting.blob_stream_phase(BlobStreamPhase::DigestLock);
+                            ExclusiveLock::resource_wait_checked(
+                                &home.join("locks"),
+                                &format!("blob:{}", reference.sha256),
+                                Some(control.deadline()),
+                                || stream_check(control, supplemental),
+                            )?
+                        });
+                        if let Some(source) = quota.source {
+                            crate::workspace::data_disk::recover_shards(
+                                owner,
+                                source,
+                                &reference,
+                                staged.as_mut().expect("verified spool"),
+                                managed_name,
+                            )?;
+                        }
+                        publish_in_shard(
+                            home,
+                            blob_parent.as_ref().expect("held blob parent"),
+                            &mut staged,
+                            reference.clone(),
                             control,
                             supplemental,
-                        },
-                    )?);
-                    guard = Some({
-                        let _phase = accounting.blob_stream_phase(BlobStreamPhase::DigestLock);
-                        ExclusiveLock::resource_wait_checked(
-                            &home.join("locks"),
-                            &format!("blob:{}", reference.sha256),
-                            Some(control.deadline()),
-                            || stream_check(control, supplemental),
-                        )?
-                    });
-                    publish_in_shard(
-                        home,
-                        blob_parent.as_ref().expect("held blob parent"),
-                        &mut staged,
-                        reference.clone(),
-                        control,
-                        supplemental,
-                        publication,
-                        accounting,
-                        Some(&mut *settlement),
-                        reuse_only,
-                    )
-                })();
-                settlement.publication = publication.state;
-                let cleanup = close_spool(&mut staged, accounting);
-                settlement.spool_cleanup_complete = cleanup.is_ok();
-                let result = finish_opened(result, cleanup, control, supplemental);
-                let result = match guard.take() {
-                    Some(guard) => {
-                        let cleanup = {
-                            let _phase =
-                                accounting.blob_stream_phase(BlobStreamPhase::CheckedClose);
-                            guard.close()
-                        };
-                        finish_opened(result, cleanup, control, supplemental)
+                            publication,
+                            accounting,
+                            Some(&mut *settlement),
+                            reuse_only,
+                            managed_name,
+                        )
+                    })();
+                    settlement.publication = publication.state;
+                    let cleanup = close_spool(&mut staged, accounting);
+                    settlement.spool_cleanup_complete = cleanup.is_ok();
+                    spool_cleanup_complete = cleanup.is_ok();
+                    let result = finish_opened(result, cleanup, control, supplemental);
+                    let result = match guard.take() {
+                        Some(guard) => {
+                            let cleanup = {
+                                let _phase =
+                                    accounting.blob_stream_phase(BlobStreamPhase::CheckedClose);
+                                guard.close()
+                            };
+                            finish_opened(result, cleanup, control, supplemental)
+                        }
+                        None => result,
+                    };
+                    let result = match blob_parent {
+                        Some(parent) => finish_opened(
+                            result,
+                            optional::finish_directory(Ok(()), parent),
+                            control,
+                            supplemental,
+                        ),
+                        None => result,
+                    };
+                    match result {
+                        Ok(blob) => {
+                            opened = Some(blob);
+                            Ok(())
+                        }
+                        Err(error) => Err(error),
                     }
-                    None => result,
-                };
-                let result = match blob_parent {
-                    Some(parent) => finish_opened(
-                        result,
-                        optional::finish_directory(Ok(()), parent),
-                        control,
-                        supplemental,
-                    ),
-                    None => result,
-                };
-                match result {
-                    Ok(blob) => {
-                        opened = Some(blob);
-                        Ok(())
-                    }
-                    Err(error) => Err(error),
-                }
-            });
+                });
             return match opened {
                 Some(blob) => finish_opened(Ok(blob), result, control, supplemental),
                 None => match result {
@@ -391,14 +425,12 @@ fn publish_stream(
             accounting,
             None,
             false,
+            None,
         )
     })();
-    let result = finish_opened(
-        result,
-        close_spool(&mut staged, accounting),
-        control,
-        supplemental,
-    );
+    let cleanup = close_spool(&mut staged, accounting);
+    spool_cleanup_complete &= cleanup.is_ok();
+    let result = finish_opened(result, cleanup, control, supplemental);
     let result = if let Some(owner) = initial.take() {
         // No body can be opened before the initial reservation is released.
         match result {
@@ -424,6 +456,26 @@ fn publish_stream(
         optional::finish_directory(Ok(()), parent)
     };
     let result = finish_opened(result, cleanup, control, supplemental);
+    let source_closed = spool_cleanup_complete && result.is_ok();
+    let result = if let (Some(quota), Some(slot)) = (quota, spool_slot.take()) {
+        finish_opened(
+            result,
+            quota.close_spool_slot(slot, source_closed),
+            control,
+            supplemental,
+        )
+    } else {
+        result
+    };
+    let finalization = if result.is_ok() {
+        match (quota, publication.reference.as_ref()) {
+            (Some(quota), Some(reference)) => quota.complete_identified(reference),
+            _ => Ok(()),
+        }
+    } else {
+        Ok(())
+    };
+    let result = finish_opened(result, finalization, control, supplemental);
     let checked = finish_checks(Ok(()), control, supplemental);
     finish_opened(result, checked, control, supplemental)
 }
@@ -554,6 +606,7 @@ fn publish_in_shard(
     accounting: &impl CaptureAccounting,
     mut settlement: Option<&mut StreamPublicationSettlement>,
     reuse_only: bool,
+    managed_name: Option<&lycheedev_windows::filesystem::destination::ManagedStageName>,
 ) -> Result<OpenBlob> {
     let shard_phase = accounting.blob_stream_phase(BlobStreamPhase::ShardOpen);
     let path = blob_path(home, &reference.sha256)?;
@@ -600,13 +653,23 @@ fn publish_in_shard(
         }
         destination = Some({
             let _phase = accounting.blob_stream_phase(BlobStreamPhase::StageCreate);
-            StagedFile::create(
-                &directory,
-                &mut Checks {
-                    control,
-                    supplemental,
-                },
-            )?
+            match managed_name {
+                Some(name) => StagedFile::create_predeclared(
+                    &directory,
+                    name,
+                    &mut Checks {
+                        control,
+                        supplemental,
+                    },
+                )?,
+                None => StagedFile::create(
+                    &directory,
+                    &mut Checks {
+                        control,
+                        supplemental,
+                    },
+                )?,
+            }
         });
         if let Some(settlement) = settlement.as_deref_mut() {
             settlement.shard_cleanup_complete = false;

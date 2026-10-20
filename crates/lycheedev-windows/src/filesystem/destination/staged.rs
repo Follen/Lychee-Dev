@@ -371,3 +371,9 @@ mod cache_slot_tests;
 
 mod quota_intent;
 pub use quota_intent::QuotaIntent;
+
+mod managed;
+pub use managed::{
+    MANAGED_DECLARATION_BYTES, MANAGED_STAGE_SLOTS, ManagedStageDeclaration, ManagedStageKind,
+    ManagedStageName,
+};

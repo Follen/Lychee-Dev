@@ -120,6 +120,10 @@ impl<'a> ScanCaptureAccounting<'a> {
     }
 }
 impl evidence::CaptureAccounting for ScanCaptureAccounting<'_> {
+    fn evidence_domain(&self) -> lycheedev_core::metadata::EvidenceDomain {
+        lycheedev_core::metadata::EvidenceDomain::Data
+    }
+
     fn check(&self) -> Result<()> {
         self.budget.check()
     }

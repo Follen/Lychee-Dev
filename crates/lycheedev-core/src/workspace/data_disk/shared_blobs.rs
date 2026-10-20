@@ -186,13 +186,9 @@ pub(super) fn inventory_recovering(
             if let Some(digest) = name.strip_suffix(".repair.intent") {
                 let repair =
                     read_record(directory, name, INTENT_BYTES, checks)?.ok_or_else(integrity)?;
-                let original = read_record(
-                    directory,
-                    &format!("{digest}.intent"),
-                    INTENT_BYTES,
-                    checks,
-                )?
-                .ok_or_else(integrity)?;
+                let original =
+                    read_record(directory, &format!("{digest}.intent"), INTENT_BYTES, checks)?
+                        .ok_or_else(integrity)?;
                 let reference = decode(&format!("{digest}.intent"), &original)?;
                 let done = read_record(
                     directory,
@@ -213,13 +209,8 @@ pub(super) fn inventory_recovering(
             }
             if let Some(digest) = name.strip_suffix(".complete") {
                 // A complete marker alone must never erase a retained intent.
-                if read_record(
-                    directory,
-                    &format!("{digest}.intent"),
-                    INTENT_BYTES,
-                    checks,
-                )?
-                .is_none()
+                if read_record(directory, &format!("{digest}.intent"), INTENT_BYTES, checks)?
+                    .is_none()
                 {
                     return Err(integrity());
                 }
@@ -252,6 +243,10 @@ pub(super) fn inventory_recovering(
                 }
             }
         }
+        pending_bytes = sum([
+            pending_bytes,
+            durable::shard_reservations(directory, checks)?,
+        ])?;
         Ok((complete_bytes, pending_bytes))
     })
 }
@@ -290,7 +285,15 @@ impl DerivedReservation<'_> {
             return Ok(());
         }
         self.prepare_publication_receipt()?;
-        let mut stage = StagedFile::create(parent, &mut Controlled(&self.control))?;
+        let mut stage =
+            StagedFile::create_rebuildable_cache(parent, &digest, &mut Controlled(&self.control))?
+                .ok_or_else(|| {
+                    ToolkitError::new(
+                        "vault.data_stage_slots_exhausted",
+                        "All bounded bookkeeping slots are occupied",
+                        6,
+                    )
+                })?;
         let result = (|| {
             self.control.check()?;
             stage.write_all(bytes)?; // Fixed 48/32-byte records, admitted together.
@@ -389,7 +392,7 @@ fn publish_shared_blob_inner(
         sha256: hex::encode(digest.finalize()),
         bytes: bytes.len() as u64,
     };
-    let raw = intent(&reference)?;
+    intent(&reference)?;
     if recovery.is_some_and(|expected| !same_blob(expected, &reference)) {
         return Err(integrity());
     }
@@ -403,6 +406,28 @@ fn publish_shared_blob_inner(
         true,
         recovery,
     )?;
+    let result =
+        publish_prehashed_with_owner(&mut owner, home, bytes, maximum, &reference, recovery);
+    owner.finish(result)
+}
+
+/// Internal CAP publication borrows its one existing Data quota owner. The
+/// caller derived `reference` from these exact immutable bytes and retains the
+/// evidence gate through metadata commit; this helper never reacquires quota.
+pub(super) fn publish_prehashed_with_owner(
+    owner: &mut DerivedReservation<'_>,
+    home: &Path,
+    bytes: &[u8],
+    maximum: usize,
+    reference: &BlobRef,
+    recovery: Option<&BlobRef>,
+) -> Result<BlobRef> {
+    if bytes.len() > maximum || bytes.len() as u64 != reference.bytes {
+        return Err(integrity());
+    }
+    let raw = intent(reference)?;
+    let source = durable::SourceIdentity::memory(reference);
+    let recovered = durable::recover_memory(owner, &source, reference, bytes)?;
     let intent_name = format!("{}.intent", reference.sha256);
     let complete_name = format!("{}.complete", reference.sha256);
     let directory_path = owner.paths.shared_blobs();
@@ -425,15 +450,26 @@ fn publish_shared_blob_inner(
                 return Err(integrity());
             }
             let present = inspect_body(home, &reference, &owner.control, true)?;
+            if recovered && !present {
+                owner.admit_shared(
+                    if complete.is_none() {
+                        COMPLETE_BYTES as u64
+                    } else {
+                        0
+                    },
+                    0,
+                )?;
+                return publish_recovered_memory(owner, home, bytes, maximum, reference, &raw);
+            }
             if recovery.is_some() && !present {
-                owner.admit_shared(INTENT_BYTES as u64, reference.bytes)?;
+                owner.admit_shared(INTENT_BYTES as u64 + 128, reference.bytes)?;
                 return repair_memory(&owner, home, bytes, maximum, &reference, &raw);
             }
             owner.admit_shared(0, 0)?;
             // A clean canonical shard plus fully verified winner closes the
             // crash window. Unknown stages keep the conservative pending peak.
             if present && complete.is_none() {
-                recovery::complete_closed_publication(&mut owner, &reference, &raw)?;
+                recovery::complete_closed_publication(owner, &reference, &raw)?;
             }
             return if present {
                 Ok(reference.clone())
@@ -443,7 +479,17 @@ fn publish_shared_blob_inner(
                 Err(integrity())
             };
         }
-        owner.admit_shared(RECORD_PEAK, sum([reference.bytes, reference.bytes])?)?;
+        // A declaration-only interrupted attempt already charges its fixed
+        // record and one possible shard body. Reusing it adds only the future
+        // canonical body and attribution records, not that retained peak twice.
+        owner.admit_shared(
+            RECORD_PEAK + if recovered { 0 } else { 128 },
+            if recovered {
+                reference.bytes
+            } else {
+                sum([reference.bytes, reference.bytes])?
+            },
+        )?;
         publish_new_attribution(
             &owner,
             home,
@@ -455,10 +501,17 @@ fn publish_shared_blob_inner(
             &complete_name,
         )
     })();
+    let result = result.and_then(|value| {
+        durable::finish_memory_recovery(owner, &source, reference, bytes)?;
+        if recovered {
+            durable::finish_repair(owner, reference)?;
+        }
+        Ok(value)
+    });
     if result.is_ok() {
         owner.recovery = None; // Final success requires the completed body to exist.
     }
-    owner.finish(result).map_err(|mut error| {
+    result.map_err(|mut error| {
         error.details = serde_json::json!({"schema":"lycheedev.data-shared-blob-owner-error.v1", "cause":error.clone(),"blob":reference,"intentPath":directory_path.join(intent_name),"completionPath":directory_path.join(complete_name),"totalDataCoverageComplete":false});
         error
     })
@@ -496,21 +549,32 @@ fn publish_new_attribution(
                 3,
             )
         })?;
-    let mut intent = QuotaIntent::create(directory, &mut Controlled(&owner.control))?;
+    let mut intent = QuotaIntent::create_bounded(
+        directory,
+        &reference.sha256,
+        &mut Controlled(&owner.control),
+    )?;
     let temporary = intent.name().to_owned();
+    let mut slot = None;
     let mut withdraw = true;
     let result = (|| {
+        slot = Some(durable::StageSlot::create_shard(
+            owner,
+            &durable::SourceIdentity::memory(reference),
+            reference,
+        )?);
         let state = intent.publish_record(raw, &mut Controlled(&owner.control))?;
         if state != StagedPublication::Published {
             return Err(integrity());
         }
         owner.prepare_publication_receipt()?;
-        let attempt = evidence::publish_blob_attempt_with_check(
+        let attempt = evidence::publish_blob_attempt_predeclared_with_check(
             home,
             bytes,
             maximum,
             owner.control.control,
             || owner.control.extra(),
+            &slot.as_ref().expect("durable shard slot").name,
         );
         withdraw = attempt.settlement.may_release_unpublished_intent();
         let body_state = if attempt.settlement.reused {
@@ -560,10 +624,15 @@ fn publish_new_attribution(
                 "intentWithdrawalRequested":requested_withdraw,"intentWithdrawalComplete":requested_withdraw && !cleanup_failed,
                 "intentPublication":format!("{state:?}")});
             error
-        })?;
+        });
     // Evidence AND intent checked closes completed before reducing the charge.
-    owner.publish_shared_record(complete_name, &completion(raw))?;
-    Ok(result)
+    let result = result.and_then(|value| {
+        owner.publish_shared_record(complete_name, &completion(raw))?;
+        Ok(value)
+    });
+    let clean = result.is_ok() || requested_withdraw && !cleanup_failed;
+    let cleanup = slot.map(|slot| slot.finish(owner, clean)).transpose();
+    join(result, cleanup.err(), &owner.control)
 }
 
 mod recovery;
@@ -577,3 +646,111 @@ mod tests;
 pub(super) mod stream;
 
 pub(super) mod retention;
+
+pub(super) mod durable;
+
+fn publish_recovered_memory(
+    owner: &DerivedReservation<'_>,
+    home: &Path,
+    bytes: &[u8],
+    maximum: usize,
+    reference: &BlobRef,
+    raw: &[u8; INTENT_BYTES],
+) -> Result<BlobRef> {
+    let slot = durable::StageSlot::create_shard(
+        owner,
+        &durable::SourceIdentity::memory(reference),
+        reference,
+    )?;
+    let attempt = evidence::publish_blob_attempt_predeclared_with_check(
+        home,
+        bytes,
+        maximum,
+        owner.control.control,
+        || owner.control.extra(),
+        &slot.name,
+    );
+    let state = if attempt.settlement.reused {
+        StagedPublication::Published
+    } else {
+        attempt.settlement.publication
+    };
+    owner.record_publication(
+        state,
+        "shared-blob-recovered",
+        &evidence::blob_path(home, &reference.sha256)?,
+        &reference.sha256,
+        reference.bytes,
+    );
+    let result = attempt.result.and_then(|value| {
+        let actual: BlobRef = serde_json::from_value(value)?;
+        if !same_blob(&actual, reference) {
+            return Err(integrity());
+        }
+        owner.publish_shared_record(&format!("{}.complete", reference.sha256), &completion(raw))?;
+        Ok(actual)
+    });
+    let cleanup = slot.finish(owner, result.is_ok());
+    join(result, cleanup.err(), &owner.control)
+}
+/// Enroll an already fully verified, reader-pinned body without another copy.
+/// The CAP owner holds quota and its evidence gate until its final DB close.
+pub(super) fn enroll_verified_with_owner(
+    owner: &mut DerivedReservation<'_>,
+    blob: &evidence::VerifiedBlob,
+) -> Result<()> {
+    let reference = blob.reference();
+    let source = durable::SourceIdentity::memory(reference);
+    let raw = intent(reference)?;
+    let name = format!("{}.intent", reference.sha256);
+    let done = format!("{}.complete", reference.sha256);
+    let directory = owner
+        .directories
+        .iter()
+        .find(|d| d.path() == owner.paths.shared_blobs())
+        .expect("held attribution directory");
+    if let Some(existing) = read_record(directory, &name, INTENT_BYTES, &owner.control)? {
+        if existing != raw {
+            return Err(integrity());
+        }
+        let completed = read_record(directory, &done, COMPLETE_BYTES, &owner.control)?;
+        if let Some(completed) = completed {
+            if completed != completion(&raw) {
+                return Err(integrity());
+            }
+            // Existing declarations still reserve their own possible payload.
+            // Enrollment never deletes a candidate without its full source.
+            return Ok(());
+        }
+        if durable::has_shard(owner, &source, reference)? {
+            // Only absent payloads may be settled using the verified body's
+            // retained reader pin; finish_shards refuses any surviving stage.
+            // Keep declarations until the completion marker is durable.
+            durable::require_shards_absent(owner, &source, reference)?;
+            owner.admit_shared(COMPLETE_BYTES as u64, 0)?;
+            owner.publish_shared_record(&done, &completion(&raw))?;
+            return durable::finish_shards(owner, &source, reference);
+        }
+        return Err(pending(reference, &directory.path().join(name)));
+    }
+    let declared = durable::has_shard(owner, &source, reference)?;
+    if declared {
+        // A verified reader is sufficient for enrollment, not for deleting an
+        // interrupted payload. Reuse only an exactly absent payload slot.
+        durable::require_shards_absent(owner, &source, reference)?;
+    }
+    owner.admit_shared(
+        RECORD_PEAK + if declared { 0 } else { 128 },
+        if declared {
+            reference.bytes
+        } else {
+            sum([reference.bytes, reference.bytes])?
+        },
+    )?;
+    let slot = durable::StageSlot::create_shard(owner, &source, reference)?;
+    let result = owner
+        .publish_shared_record(&name, &raw)
+        .and_then(|()| owner.publish_shared_record(&done, &completion(&raw)));
+    let cleanup = slot.finish(owner, result.is_ok());
+    join(result, cleanup.err(), &owner.control)
+}

@@ -37,6 +37,9 @@ pub(crate) struct Materialized {
     pub(crate) provenance: Value,
     pub(crate) complete: bool,
     pub(crate) rows: usize,
+    pub(crate) selective: bool,
+    pub(crate) covered_id_ranges: Vec<(u32, u32)>,
+    pub(crate) confirmed_missing_ids: Vec<u32>,
     _schema_owner: Arc<SchemaOwner>,
     _vector: OwnedRetainedReservation,
     _metadata: OwnedRetainedReservation,
@@ -162,6 +165,7 @@ pub(crate) fn prepare(
     scope: &mut dyn FileScope,
     is_effective: bool,
     capture_ids: &[String],
+    selected_ids: Option<&[u32]>,
     budget: Arc<Budget>,
 ) -> Result<Materialized> {
     invocation.control.check()?;
@@ -179,6 +183,12 @@ pub(crate) fn prepare(
         &source.availability.ranges,
         budget.clone(),
     )?;
+    // Lookup currently names the public ID column. A locator is safe only
+    // when this column is the authenticated physical record identity.
+    let locator_safe = view
+        .columns()
+        .iter()
+        .any(|field| field.identity && !field.array && field.name == "ID");
     let visible = import::schema_for_table(&view, &budget)?;
     let original_schema = visible.schema().clone();
     let (schema, extra) = if is_effective {
@@ -245,6 +255,14 @@ pub(crate) fn prepare(
     };
     let result = (|| {
         let mut batches = Batches::new(&budget)?;
+        let selective = selected_ids.filter(|_| locator_safe);
+        let _selection =
+            budget.reserve_retained(add(256, mul(selective.map_or(0, |ids| ids.len()), 256)?)?)?;
+        let mut found = selective.map(|ids| vec![false; ids.len()]);
+        let mut confirmed_missing_ids = Vec::new();
+        let mut deletion_admission = budget.reserve_retained(0)?;
+        let mut covered_id_ranges = Vec::with_capacity(selective.map_or(0, |ids| ids.len()));
+        let mut decoded_batches = 0usize;
         let overlay_report = if is_effective {
             let mut base = Physical::new(view, budget.clone())?;
             base.generation = generation.clone();
@@ -256,20 +274,81 @@ pub(crate) fn prepare(
                 &source.bundle,
                 capture_ids,
             )?;
-            let mut cursor = plan.cursor(&base, &budget)?;
+            // Tombstones name physical record identity, not an arbitrary
+            // visible field called ID. Never transfer proofs across domains.
+            if locator_safe {
+                deletion_admission.grow(mul(plan.patch_count(), std::mem::size_of::<u32>())?)?;
+                confirmed_missing_ids = Vec::with_capacity(plan.patch_count());
+                for id in plan.deleted_ids() {
+                    budget.charge(Cost::work(1))?;
+                    confirmed_missing_ids.push(id);
+                }
+            }
+            let mut cursor: Box<dyn crate::relational::RowCursor + '_> =
+                if let Some(ids) = selective {
+                    Box::new(SelectedEffective {
+                        plan: &plan,
+                        base: &base,
+                        budget: &budget,
+                        ids,
+                        found: found.as_mut().ok_or_else(shape)?,
+                        next: 0,
+                        current_slot: 0,
+                        current: None,
+                        done: false,
+                    })
+                } else {
+                    plan.cursor(&base, &budget)?
+                };
             import_effective(cursor.as_mut(), &schema_owner, &budget, &mut batches)?;
             // The cursor is gone before IPC close and before the source closes.
             drop(cursor);
             Some(report)
         } else {
             if let Some(generation) = &generation {
-                for index in 0..generation.batch_count() {
+                let _indices = budget.reserve_retained(mul(
+                    selective.map_or(generation.batch_count(), |ids| ids.len()),
+                    std::mem::size_of::<usize>(),
+                )?)?;
+                let indices = if let Some(ids) = selective {
+                    let mut indices = Vec::with_capacity(ids.len());
+                    for id in ids {
+                        budget.charge(Cost::work(1))?;
+                        if let Some(index) = generation.locate_batch(*id) {
+                            if indices.last() != Some(&index) {
+                                indices.push(index);
+                            }
+                        }
+                    }
+                    indices
+                } else {
+                    (0..generation.batch_count()).collect()
+                };
+                for index in indices {
                     invocation.control.check()?;
                     budget.check()?;
                     let batch = generation.read_batch(index)?;
                     let (physical, allocation) = batch.into_parts();
+                    decoded_batches += 1;
                     if physical.num_columns() != schema.fields().len() + 1 {
                         return Err(shape());
+                    }
+                    if let (Some(ids), Some(found)) = (selective, found.as_mut()) {
+                        let record_ids = physical
+                            .column(schema.fields().len())
+                            .as_any()
+                            .downcast_ref::<arrow_array::UInt32Array>()
+                            .ok_or_else(shape)?;
+                        let first = *record_ids.values().first().ok_or_else(shape)?;
+                        let last = *record_ids.values().last().ok_or_else(shape)?;
+                        covered_id_ranges.push((first, last));
+                        budget.charge(Cost::work(ids.len()))?;
+                        for (slot, id) in ids.iter().enumerate() {
+                            if slot % 1024 == 0 {
+                                budget.check()?;
+                            }
+                            found[slot] |= record_ids.values().binary_search(id).is_ok();
+                        }
                     }
                     // Exclude the authenticated private record-ID locator.
                     let _projection =
@@ -294,12 +373,25 @@ pub(crate) fn prepare(
                         text_bytes: 1 << 20,
                     },
                 )?;
+                if let Some(ids) = selective {
+                    importer = importer.select_ids(ids)?;
+                }
                 while let Some(batch) = importer.next_batch()? {
                     invocation.control.check()?;
                     if batch.ordinal() != batches.records.len() {
                         return Err(shape());
                     }
                     let (records, ids, _, allocation) = batch.into_parts();
+                    decoded_batches += 1;
+                    if let (Some(requested), Some(found)) = (selective, found.as_mut()) {
+                        budget.charge(Cost::work(requested.len()))?;
+                        for (slot, id) in requested.iter().enumerate() {
+                            if slot % 1024 == 0 {
+                                budget.check()?;
+                            }
+                            found[slot] |= ids.values().binary_search(id).is_ok();
+                        }
+                    }
                     drop(ids);
                     batches.push(keep(
                         records,
@@ -309,14 +401,42 @@ pub(crate) fn prepare(
                     )?)?;
                 }
             }
-            if batches.rows != view.logical_count() {
+            if selective.is_none() && batches.rows != view.logical_count() {
                 return Err(shape());
             }
             None
         };
-        let metadata_size = capture::json_size(&(&identity, &cache, &overlay_report), &budget)?;
+        let selection_report = if let Some(ids) = selective {
+            let found = found.as_ref().ok_or_else(shape)?;
+            let absent = ids
+                .iter()
+                .zip(found)
+                .filter_map(|(id, found)| (!found).then_some(*id))
+                .collect::<Vec<_>>();
+            json!({"kind":if is_effective { "authenticated_effective_id_lookup" } else if generation.is_some() { "authenticated_id_locator_batches" } else { "authenticated_wdc_id_lookup" }, "requestedIds":ids,
+                "materializationDecodedBatches":if is_effective { None } else { Some(decoded_batches) }, "candidateRows":batches.rows,
+                "scope":"source_preparation_not_current_task", "directoryAuthentication":"full_existing_validation_unchanged",
+                "missingIds":absent.iter().filter(|id| complete || confirmed_missing_ids.binary_search(id).is_ok()).copied().collect::<Vec<_>>(),
+                "unresolvedIds":absent.iter().filter(|id| !complete && confirmed_missing_ids.binary_search(id).is_err()).copied().collect::<Vec<_>>(),
+                "coverageComplete":complete})
+        } else {
+            json!({"kind":"full_source", "selectionAppliedByPlan": selected_ids.is_some()})
+        };
+        let metadata_size = capture::json_size(
+            &(&identity, &cache, &overlay_report, &selection_report),
+            &budget,
+        )?;
         let metadata = budget
-            .reserve_retained(add(mul(metadata_size, 8)?, 8192)?)?
+            .reserve_retained(add(
+                add(mul(metadata_size, 8)?, 8192)?,
+                add(
+                    mul(
+                        covered_id_ranges.capacity(),
+                        std::mem::size_of::<(u32, u32)>(),
+                    )?,
+                    mul(confirmed_missing_ids.capacity(), std::mem::size_of::<u32>())?,
+                )?,
+            )?)?
             .into_owned(&budget)?;
         let provenance = json!({
             "sourceMode": if is_effective { "effective" } else { "static" },
@@ -324,6 +444,7 @@ pub(crate) fn prepare(
             "sourceSha256": source_sha256,
             "typedGenerationCache": cache,
             "effective": overlay_report,
+            "sourceSelection": selection_report,
             "complete": complete,
             "truncated": false,
             "availableRows": batches.rows,
@@ -340,6 +461,9 @@ pub(crate) fn prepare(
             schema,
             batches: batches.records,
             rows: batches.rows,
+            selective: selective.is_some(),
+            covered_id_ranges,
+            confirmed_missing_ids,
             provenance,
             complete,
             _schema_owner: schema_owner,
@@ -617,4 +741,65 @@ fn import_effective(
         )?)?;
     }
     budget.check()
+}
+
+/// Overlay equality resolves replacement/deletion/addition before touching the
+/// base. Each producer and its row leases remain owned until advance/drop.
+struct SelectedEffective<'a> {
+    plan: &'a effective::OverlayPlan,
+    base: &'a dyn crate::relational::RowProvider,
+    budget: &'a Budget,
+    ids: &'a [u32],
+    found: &'a mut [bool],
+    next: usize,
+    current_slot: usize,
+    current: Option<Box<dyn crate::relational::RowCursor + 'a>>,
+    done: bool,
+}
+impl SelectedEffective<'_> {
+    fn advance_inner(&mut self) -> Result<bool> {
+        loop {
+            self.budget.check()?;
+            if let Some(cursor) = &mut self.current {
+                if cursor.advance()? {
+                    self.found[self.current_slot] = true;
+                    return Ok(true);
+                }
+            }
+            self.current = None;
+            let Some(id) = self.ids.get(self.next) else {
+                self.done = true;
+                return Ok(false);
+            };
+            self.current_slot = self.next;
+            self.next += 1;
+            self.budget.charge(Cost::work(1))?;
+            match self.plan.equal_cursor(
+                self.base,
+                self.budget,
+                "ID",
+                &Scalar::UInt(u64::from(*id)),
+            )? {
+                crate::relational::EqualityCursor::Empty => {}
+                crate::relational::EqualityCursor::Rows(cursor) => self.current = Some(cursor),
+                crate::relational::EqualityCursor::Declined => return Err(shape()),
+            }
+        }
+    }
+}
+impl crate::relational::RowCursor for SelectedEffective<'_> {
+    fn advance(&mut self) -> Result<bool> {
+        if self.done {
+            return Ok(false);
+        }
+        let result = self.advance_inner();
+        if result.is_err() {
+            self.current = None;
+            self.done = true;
+        }
+        result
+    }
+    fn row(&self) -> &[Scalar] {
+        self.current.as_ref().map_or(&[], |cursor| cursor.row())
+    }
 }

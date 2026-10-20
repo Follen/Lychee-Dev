@@ -2,12 +2,14 @@
 //! handles across processes, snapshots or restarts. Query execution is owned by
 //! `engine`, not by this transport/retention layer.
 mod handles;
+#[path = "agent_tasks.rs"]
+pub mod tasks;
 mod transport;
 
 use crate::{
     engine::{
-        DatasetInfo, Engine, EngineLimits, OwnedProvenance, QueryRequest, ResultOwner, ResultPage,
-        TableRequest,
+        DatasetCatalog, DatasetInfo, Engine, EngineLimits, OwnedProvenance, QueryRequest,
+        ResultOwner, ResultPage, TableRequest,
     },
     fault,
 };
@@ -45,6 +47,16 @@ fn default_timeout() -> u64 {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "task", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Task {
+    Capture {
+        handle: String,
+    },
+    Catalog,
+    Fields {
+        table: TableRequest,
+    },
+    Business {
+        request: tasks::BusinessTask,
+    },
     Discover {
         table: TableRequest,
     },
@@ -81,9 +93,12 @@ pub enum ExportFormat {
 
 pub fn schema() -> Value {
     json!({"protocol":PROTOCOL,"transport":"stdin/stdout JSONL", "worker":"caller-owned supervisor plus one isolated reusable engine worker; no installed daemon", "processMemory":{"windows":"Job aggregate commit ceiling: --max-bytes plus 268435456 runtime/ingress bytes; not RSS", "otherTargets":"production worker unavailable: no equivalent OS allocation ceiling; schema discovery remains available"},
-        "request":{"protocol":PROTOCOL,"id":"strictly increasing positive u64; never replayed","timeout_ms":"1..3600000, includes queue wait; default 30000","task":["discover","query","page","export","release","cancel","close"]},
+        "request":{"protocol":PROTOCOL,"id":"strictly increasing positive u64; never replayed","timeout_ms":"1..3600000, includes queue wait; default 30000","task":["capture","catalog","discover","fields","business","query","page","export","release","cancel","close"]},
         "identity":"one immutable invocation snapshot/product/build/locale; explicit ordered Hotfix capture history is bound per table; handles do not survive worker restart",
         "query":crate::engine::query_schema(),
+        "business":tasks::schema(),
+        "capture":{"handle":"existing session result handle","semantics":"query success and result handle do not imply CAP commit; capture persists complete result plus typed request/source provenance","maximumBytes":16777216,"onLimit":"fail without emitting a truncated CAP","failure":"capture does not consume the handle while the worker survives and TTL remains valid; wire cancellation or worker termination invalidates every handle. Inspect returned capturePublication/completedCaptures and the evidence catalog after uncertain or post-commit failures. A missing receipt does not prove no commit; never automatically replay"},
+        "catalog":"fixed snapshot definition manifest directory only; complete means manifest enumeration complete, not installed availability or build readability; availability is not_checked; fields resolves actual table schema",
         "configuration":{"--max-objects":"1..1024 retained handles; default 32", "--max-bytes":"1MiB..2GiB shared session memory admission; default 512MiB", "--result-ttl-seconds":"1..3600, default 300; expiry refuses later pages rather than rerunning queries"},
         "limits":{"requestBytes":1048576,"queuedRequests":16,"resultHandles":MAX_HANDLES,"retainedResultBytes":MAX_HANDLE_BYTES,"resultTtlMs":300000,"pageRows":MAX_PAGE_ROWS},
         "lifecycle":"deadlines include queue wait and stdout backpressure; cancel of outstanding work terminates the isolated worker and invalidates every handle, without replay; release drops a result; close or stdin EOF drains submitted work before releasing the session; incomplete output frames are not results",
@@ -95,6 +110,11 @@ pub fn schema() -> Value {
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum Response {
+    Capture(crate::engine::OwnedCapture),
+    Catalog(DatasetCatalog),
+    Business {
+        components: Vec<BusinessComponent>,
+    },
     Value(Value),
     Query {
         result: handles::HandleReceipt,
@@ -108,6 +128,13 @@ pub enum Response {
         page: ResultPage,
     },
     CsvExport(CsvExport),
+}
+#[derive(Serialize)]
+pub struct BusinessComponent {
+    name: &'static str,
+    result: handles::HandleReceipt,
+    complete: bool,
+    provenance: OwnedProvenance,
 }
 pub struct CsvExport {
     page: ResultPage,
@@ -226,7 +253,54 @@ impl Session {
         control.check()?;
         self.expire();
         match task {
-            Task::Discover { table } => Ok(Response::Discovery(
+            Task::Capture { handle } => {
+                let owner = self.handles.get(&handle, Instant::now())?;
+                Ok(Response::Capture(self.engine.capture(owner, control)?))
+            }
+            Task::Catalog => Ok(Response::Catalog(self.engine.catalog(control).await?)),
+            Task::Business { request } => {
+                let plans = tasks::compile(request)?;
+                // All source/result owners survive until every component is ready.
+                // Start handle TTL at publication, never during an earlier query.
+                let mut pending = Vec::with_capacity(plans.len());
+                for component in plans {
+                    let owner = self
+                        .engine
+                        .execute(
+                            QueryRequest::Plan {
+                                plan: component.plan,
+                            },
+                            control.clone(),
+                        )
+                        .await?;
+                    let provenance = owner.owned_provenance()?;
+                    pending.push((component.name, owner, provenance));
+                }
+                control.check()?;
+                let now = Instant::now();
+                let mut components: Vec<BusinessComponent> = Vec::with_capacity(pending.len());
+                for (name, owner, provenance) in pending {
+                    let complete = owner.complete();
+                    let rows = owner.row_count();
+                    let bytes = owner.retained_bytes();
+                    match self.handles.insert(owner, rows, bytes, now) {
+                        Ok(result) => components.push(BusinessComponent {
+                            name,
+                            result,
+                            complete,
+                            provenance,
+                        }),
+                        Err(error) => {
+                            for component in &components {
+                                let _ = self.handles.release(&component.result.handle, now);
+                            }
+                            return Err(error);
+                        }
+                    }
+                }
+                Ok(Response::Business { components })
+            }
+            Task::Discover { table } | Task::Fields { table } => Ok(Response::Discovery(
                 self.engine.discover(table, control).await?,
             )),
             Task::Query { query } => {

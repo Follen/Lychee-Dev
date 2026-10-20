@@ -198,7 +198,9 @@ pub fn prepare_target(
                 home,
                 &document.raw,
                 4 << 20,
-                control, &|| budget.check())?;
+                control,
+                &|| budget.check(),
+            )?;
             if reference.sha256 != document.sha256 {
                 return Err(fault(
                     "records.configuration_integrity",
@@ -226,7 +228,7 @@ pub fn prepare_target(
             catalog_sha256: &after.catalog_sha256,
             configurations: &configs,
         })?;
-        let capture = evidence::commit_capture_bounded_with_check(
+        let capture = evidence::commit_data_capture_bounded_with_check(
             home,
             evidence::CaptureInput {
                 bytes: &raw,

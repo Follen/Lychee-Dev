@@ -37,6 +37,17 @@ impl Metadata {
         on_busy: &mut impl FnMut(),
     ) -> Result<RawDocument> {
         metadata_check(control, check)?;
+        if !self.evidence_gate_held
+            && (self.catalog_only || super::evidence_catalog::EvidenceKey::parse(key).is_some())
+        {
+            let checks = std::cell::RefCell::new(check);
+            return super::evidence_catalog::required(super::evidence_catalog::read(
+                &self.home,
+                key,
+                control,
+                &|| (*checks.borrow_mut())(),
+            )?);
+        }
         self.connection.busy_timeout(Duration::ZERO)?;
         let result = (|| {
             let row: Option<(i64, i64, Option<Vec<u8>>)> = checked_sql_with_check(

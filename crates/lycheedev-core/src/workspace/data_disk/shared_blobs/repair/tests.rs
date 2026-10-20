@@ -122,13 +122,13 @@ fn missing_body_rebuild_preserves_retained_capture_original_pair_and_exact_peak(
     .unwrap();
     let before = f.pair();
     fs::remove_file(f.body()).unwrap();
-    f.limit(135); // original80 + completed4 + repair48 + stage4 = 136.
+    f.limit(263); // original80 + completed4 + repair48 + declaration128 + stage4 = 264.
     assert_eq!(
         f.rebuild().unwrap_err().code,
         "vault.data_cache_budget_exceeded"
     );
     assert!(!f.record("repair.intent").exists());
-    f.limit(136);
+    f.limit(264);
     f.rebuild().unwrap();
     assert_eq!(f.pair(), before);
     assert_eq!(fs::read(f.body()).unwrap(), b"body");
@@ -264,7 +264,7 @@ fn historical_missing_alias_without_attribution_uses_existing_cold_enrollment() 
     let f = Fixture::new();
     evidence::publish_blob(&f.0, b"body", 4).unwrap();
     fs::remove_file(f.body()).unwrap();
-    f.limit(88);
+    f.limit(216);
     f.rebuild().unwrap();
     assert_eq!(f.usage().total().unwrap(), 84);
     assert!(!f.record("repair.intent").exists());
@@ -323,11 +323,10 @@ fn published_repair_late_stop_keeps_marker_body_and_publication_receipt() {
     assert_eq!(fs::read(f.body()).unwrap(), b"body");
     assert!(f.record("repair.intent").exists());
     assert!(error.details.to_string().contains("shared-blob-rebuild"));
-    assert_eq!(f.usage().total().unwrap(), 136);
-    assert_eq!(
-        f.rebuild().unwrap_err().code,
-        "vault.data_shared_blob_recovery_required"
-    );
+    assert_eq!(f.usage().total().unwrap(), 264);
+    f.rebuild().unwrap();
+    assert_eq!(f.usage().total().unwrap(), 84);
+    assert!(!f.record("repair.intent").exists());
 }
 #[test]
 fn concurrent_winner_after_repair_marker_is_verified_without_overwrite() {

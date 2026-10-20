@@ -19,6 +19,8 @@ pub struct HistoricalWriter<'a> {
     home: &'a Path,
     control: &'a OperationControl,
     write_lease_held: bool,
+    catalog: Option<&'a super::evidence_catalog::Catalog>,
+    admission: Option<&'a dyn Fn() -> Result<()>>,
 }
 /// Preserve the first typed cause and retain every later cleanup failure.
 pub fn finish_historical<T>(result: Result<T>, cleanup: Result<()>) -> Result<T> {
@@ -165,6 +167,8 @@ impl Metadata {
             home,
             control,
             write_lease_held: false,
+            catalog: None,
+            admission: None,
         });
         crate::selection::selection_finish(
             finish_historical(result, close(connection)),
@@ -188,21 +192,52 @@ impl HistoricalWriter<'_> {
         if self.write_lease_held {
             return run(self);
         }
-        let lease = historical_lease(self.home, "metadata-write", self.control)?;
-        let writer = HistoricalWriter {
-            connection: self.connection,
-            home: self.home,
-            control: self.control,
-            write_lease_held: true,
+        let gate = if self.catalog.is_some() {
+            None
+        } else {
+            Some(super::evidence_catalog::acquire_gate(
+                self.home,
+                self.control,
+                || Ok(()),
+            )?)
         };
-        let result = run(&writer);
+        let result = (|| {
+            let lease = historical_lease(self.home, "metadata-write", self.control)?;
+            let writer = HistoricalWriter {
+                connection: self.connection,
+                home: self.home,
+                control: self.control,
+                write_lease_held: true,
+                catalog: self.catalog,
+                admission: self.admission,
+            };
+            finish_historical(run(&writer), lease.close())
+        })();
         crate::selection::selection_finish(
-            finish_historical(result, lease.close()),
+            finish_historical(result, gate.map_or(Ok(()), ExclusiveLock::close)),
             self.control.check(),
         )
     }
 
     pub fn document(&self, key: &str) -> Result<RawDocument> {
+        if let Some(catalog) = self.catalog {
+            return super::evidence_catalog::required(catalog.document(
+                key,
+                self.control,
+                &|| Ok(()),
+            )?);
+        }
+        if !self.write_lease_held
+            && super::evidence_catalog::EvidenceKey::parse(key).is_some()
+            && super::evidence_catalog::present(self.home)?
+        {
+            return super::evidence_catalog::required(super::evidence_catalog::read(
+                self.home,
+                key,
+                self.control,
+                &|| Ok(()),
+            )?);
+        }
         let row: Option<(i64, i64, Option<Vec<u8>>)> = checked_sql(
             self.control,
             self.control.deadline(),
@@ -234,6 +269,25 @@ impl HistoricalWriter<'_> {
         after: &str,
         visit: impl FnMut(&str, i64, &[u8]) -> Result<()>,
     ) -> Result<(usize, String)> {
+        if let Some(catalog) = self.catalog {
+            return catalog.visit(prefix, after, 1000, self.control, &|| Ok(()), &mut {
+                visit
+            });
+        }
+        if !self.write_lease_held
+            && super::evidence_catalog::intersects(prefix)
+            && super::evidence_catalog::present(self.home)?
+        {
+            return super::evidence_catalog::visit(
+                self.home,
+                prefix,
+                after,
+                1000,
+                self.control,
+                &|| Ok(()),
+                visit,
+            );
+        }
         super::raw_page::visit_raw_page(
             self.connection,
             prefix,
@@ -248,6 +302,27 @@ impl HistoricalWriter<'_> {
     /// Fixed-Go DeleteDocuments: one <=64-key CAS transaction and persistent
     /// tombstones. An unrelated document is never decoded or scanned.
     pub(crate) fn delete(&self, removals: &[(String, i64)]) -> Result<()> {
+        if self.catalog.is_none()
+            && removals
+                .iter()
+                .any(|(key, _)| super::evidence_catalog::EvidenceKey::parse(key).is_some())
+        {
+            if self.write_lease_held {
+                return Err(ToolkitError::invalid(
+                    "reserved evidence mutation requires a catalog scope before acquiring its write lease",
+                ));
+            }
+            let keys: Vec<_> = removals.iter().map(|(key, _)| key.as_str()).collect();
+            return super::evidence_catalog::with_batch_writer(
+                self.home,
+                &keys,
+                self.control,
+                |writer| writer.delete(removals),
+            );
+        }
+        if !self.write_lease_held {
+            return self.with_write_lease(|writer| writer.delete(removals));
+        }
         self.control.check()?;
         if removals.is_empty() || removals.len() > 64 {
             return Err(ToolkitError::new(
@@ -266,6 +341,9 @@ impl HistoricalWriter<'_> {
                     5,
                 ));
             }
+        }
+        if let Some(admit) = self.admission {
+            admit()?;
         }
         let lease = if self.write_lease_held {
             None
@@ -319,6 +397,27 @@ impl HistoricalWriter<'_> {
         changes: &[HistoricalMutation<'_>],
         on_busy: &mut impl FnMut(),
     ) -> Result<()> {
+        if self.catalog.is_none()
+            && changes
+                .iter()
+                .any(|change| super::evidence_catalog::EvidenceKey::parse(change.key).is_some())
+        {
+            if self.write_lease_held {
+                return Err(ToolkitError::invalid(
+                    "reserved evidence mutation requires a catalog scope before acquiring its write lease",
+                ));
+            }
+            let keys: Vec<_> = changes.iter().map(|change| change.key).collect();
+            return super::evidence_catalog::with_batch_writer(
+                self.home,
+                &keys,
+                self.control,
+                |writer| writer.commit_observed(changes, on_busy),
+            );
+        }
+        if !self.write_lease_held {
+            return self.with_write_lease(|writer| writer.commit_observed(changes, on_busy));
+        }
         self.control.check()?;
         if changes.is_empty() || changes.len() > 64 {
             return Err(ToolkitError::new(
@@ -344,6 +443,9 @@ impl HistoricalWriter<'_> {
                     5,
                 ));
             }
+        }
+        if let Some(admit) = self.admission {
+            admit()?;
         }
         let lease = if self.write_lease_held {
             None
@@ -468,5 +570,24 @@ mod target_lifecycle_tests {
         assert_eq!(result.unwrap_err().code, "command.cancelled");
         assert!(control.stop_cause().is_ok());
         std::fs::remove_dir_all(path).unwrap();
+    }
+}
+
+impl<'a> HistoricalWriter<'a> {
+    pub(super) fn for_catalog(
+        connection: &'a Connection,
+        home: &'a Path,
+        control: &'a OperationControl,
+        catalog: &'a super::evidence_catalog::Catalog,
+        admission: Option<&'a dyn Fn() -> Result<()>>,
+    ) -> Self {
+        Self {
+            connection,
+            home,
+            control,
+            write_lease_held: false,
+            catalog: Some(catalog),
+            admission,
+        }
     }
 }

@@ -11,9 +11,12 @@ use std::{
     path::{Path, PathBuf},
 };
 mod source_facts;
-pub use source_facts::{SourceCachePublicationPhase, SourceFactsCache, SourceFactsReader, SourceFactsWriter, SourceOriginalCache};
-mod publication;
+pub use source_facts::{
+    SourceCachePublicationPhase, SourceFactsCache, SourceFactsReader, SourceFactsWriter,
+    SourceOriginalCache,
+};
 mod pruning;
+mod publication;
 pub use publication::publish_derived_controlled;
 mod verification;
 pub(crate) use verification::{verify, walk_files};
@@ -27,7 +30,10 @@ struct Object {
 fn objects(home: &Path) -> Result<(Vec<Object>, usize)> {
     objects_checked(home, || Ok(()))
 }
-fn objects_checked(home: &Path, mut check: impl FnMut() -> Result<()>) -> Result<(Vec<Object>, usize)> {
+fn objects_checked(
+    home: &Path,
+    mut check: impl FnMut() -> Result<()>,
+) -> Result<(Vec<Object>, usize)> {
     check()?;
     let root = home.join("cache/objects");
     let mut result = vec![];
@@ -84,7 +90,11 @@ std::thread_local! {
     static RETAIN_READ_HOOK: std::cell::RefCell<Option<Box<dyn FnMut(usize)>>> =
         std::cell::RefCell::new(None);
 }
-fn retain_checked(home: &Path, digest: &str, mut check: impl FnMut() -> Result<()>) -> Result<Option<Value>> {
+fn retain_checked(
+    home: &Path,
+    digest: &str,
+    mut check: impl FnMut() -> Result<()>,
+) -> Result<Option<Value>> {
     check()?;
     let path = home.join("cache/retain").join(format!("{digest}.json"));
     if !path.exists() {
@@ -166,7 +176,10 @@ fn validate_owner(owner: &Value) -> Result<()> {
 fn markers(home: &Path) -> Result<(Vec<Value>, Vec<String>, usize)> {
     markers_checked(home, || Ok(()))
 }
-fn markers_checked(home: &Path, mut check: impl FnMut() -> Result<()>) -> Result<(Vec<Value>, Vec<String>, usize)> {
+fn markers_checked(
+    home: &Path,
+    mut check: impl FnMut() -> Result<()>,
+) -> Result<(Vec<Value>, Vec<String>, usize)> {
     check()?;
     let root = home.join("cache/retain");
     let mut values = vec![];
@@ -212,7 +225,10 @@ fn markers_checked(home: &Path, mut check: impl FnMut() -> Result<()>) -> Result
 fn stages(home: &Path) -> Result<Vec<(PathBuf, u64, String)>> {
     stages_checked(home, || Ok(()))
 }
-fn stages_checked(home: &Path, mut check: impl FnMut() -> Result<()>) -> Result<Vec<(PathBuf, u64, String)>> {
+fn stages_checked(
+    home: &Path,
+    mut check: impl FnMut() -> Result<()>,
+) -> Result<Vec<(PathBuf, u64, String)>> {
     check()?;
     let root = home.join("cache/tmp");
     let mut values = vec![];
@@ -360,6 +376,10 @@ pub fn commands() -> &'static [&'static str] {
     &["cache status", "cache verify", "cache prune"]
 }
 pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
+    if inv.command == "cache status" && inv.flags.contains_key("--data") {
+        return crate::evidence::data_storage_report(&inv.home, &inv.control).map(Outcome::new);
+    }
+
     if inv.command == "cache prune" {
         return pruning::prune(inv);
     }

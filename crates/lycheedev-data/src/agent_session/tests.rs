@@ -167,3 +167,377 @@ fn pre_admission_cancelled_library_call_does_not_execute_or_poison_engine() {
     assert_eq!(complete["result"]["rows"], 2);
     session.close().unwrap();
 }
+
+#[test]
+fn fields_and_batch_tasks_use_real_pinned_source() {
+    let fx = fixture();
+    let mut session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+    let runtime = runtime();
+    let table = TableRequest {
+        name: "AgentSample".into(),
+        mode: SourceMode::Static,
+        hotfix_captures: vec![],
+    };
+    let fields = response(
+        runtime
+            .block_on(session.execute(
+                Task::Fields {
+                    table: table.clone(),
+                },
+                control(),
+            ))
+            .unwrap(),
+    );
+    assert!(
+        fields["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field["name"] == "label")
+    );
+    let batch = response(
+        runtime
+            .block_on(session.execute(
+                Task::Business {
+                    request: tasks::BusinessTask::BatchIds {
+                        table,
+                        ids: vec![9, 9, 404],
+                    },
+                },
+                control(),
+            ))
+            .unwrap(),
+    );
+    assert_eq!(batch["components"][0]["result"]["rows"], 1);
+    assert!(batch["components"][0]["provenance"].is_object());
+    session.close().unwrap();
+}
+
+#[test]
+fn item_navigation_publishes_separate_guarded_components_without_invented_rows() {
+    let fx = Fixture::new(&[
+        fixture::table(
+            "Item",
+            931,
+            &[("ID", "uint"), ("ClassID", "uint")],
+            &[vec![Cell::U(7), Cell::U(2)]],
+        ),
+        fixture::table(
+            "ItemSparse",
+            932,
+            &[("ID", "uint"), ("Display_lang", "text")],
+            &[vec![Cell::U(7), Cell::Text("Exact item".into())]],
+        ),
+    ]);
+    let mut session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+    let runtime = runtime();
+    let value = response(
+        runtime
+            .block_on(session.execute(
+                Task::Business {
+                    request: tasks::BusinessTask::Navigate {
+                        template: tasks::NavigationTemplate::ItemRecords,
+                        ids: vec![7, 404],
+                        mode: SourceMode::Static,
+                        hotfix_captures: vec![],
+                    },
+                },
+                control(),
+            ))
+            .unwrap(),
+    );
+    assert_eq!(value["components"].as_array().unwrap().len(), 2);
+    for component in value["components"].as_array().unwrap() {
+        assert_eq!(component["result"]["rows"], 1);
+        let page = response(
+            runtime
+                .block_on(session.execute(
+                    Task::Page {
+                        handle: component["result"]["handle"].as_str().unwrap().into(),
+                        offset: 0,
+                        limit: 10,
+                    },
+                    control(),
+                ))
+                .unwrap(),
+        );
+        assert_eq!(page["rows"].as_array().unwrap().len(), 1);
+    }
+    session.close().unwrap();
+}
+
+#[test]
+fn related_task_filters_exact_foreign_ids_and_rejects_missing_field() {
+    let fx = Fixture::new(&[fixture::table(
+        "SpellEffect",
+        933,
+        &[("ID", "uint"), ("SpellID", "uint")],
+        &[
+            vec![Cell::U(1), Cell::U(7)],
+            vec![Cell::U(2), Cell::U(8)],
+            vec![Cell::U(3), Cell::U(7)],
+        ],
+    )]);
+    let mut session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+    let runtime = runtime();
+    let table = TableRequest {
+        name: "SpellEffect".into(),
+        mode: SourceMode::Static,
+        hotfix_captures: vec![],
+    };
+    let value = response(
+        runtime
+            .block_on(session.execute(
+                Task::Business {
+                    request: tasks::BusinessTask::Related {
+                        table: table.clone(),
+                        field: "SpellID".into(),
+                        ids: vec![7],
+                    },
+                },
+                control(),
+            ))
+            .unwrap(),
+    );
+    assert_eq!(value["components"][0]["result"]["rows"], 2);
+    assert!(
+        runtime
+            .block_on(session.execute(
+                Task::Business {
+                    request: tasks::BusinessTask::Related {
+                        table,
+                        field: "Invented".into(),
+                        ids: vec![7]
+                    }
+                },
+                control()
+            ))
+            .is_err()
+    );
+    session.close().unwrap();
+}
+
+#[test]
+fn multi_component_capacity_failure_rolls_back_unpublished_handles() {
+    let fx = Fixture::new(&[
+        fixture::table("Item", 934, &[("ID", "uint")], &[vec![Cell::U(7)]]),
+        fixture::table("ItemSparse", 935, &[("ID", "uint")], &[vec![Cell::U(7)]]),
+    ]);
+    let mut invocation = fx.invocation("data agent serve", &[]);
+    invocation.flags.insert("--max-objects".into(), "1".into());
+    let mut session = Session::new(invocation).unwrap();
+    let runtime = runtime();
+    assert!(
+        runtime
+            .block_on(session.execute(
+                Task::Business {
+                    request: tasks::BusinessTask::Navigate {
+                        template: tasks::NavigationTemplate::ItemRecords,
+                        ids: vec![7],
+                        mode: SourceMode::Static,
+                        hotfix_captures: vec![]
+                    }
+                },
+                control()
+            ))
+            .is_err()
+    );
+    let value = response(
+        runtime
+            .block_on(session.execute(
+                Task::Business {
+                    request: tasks::BusinessTask::BatchIds {
+                        table: TableRequest {
+                            name: "Item".into(),
+                            mode: SourceMode::Static,
+                            hotfix_captures: vec![],
+                        },
+                        ids: vec![7],
+                    },
+                },
+                control(),
+            ))
+            .unwrap(),
+    );
+    assert_eq!(value["components"][0]["result"]["rows"], 1);
+    session.close().unwrap();
+}
+
+#[test]
+fn catalog_is_pinned_manifest_inventory_not_table_readability() {
+    let fx = fixture();
+    let mut session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+    let runtime = runtime();
+    let catalog = response(
+        runtime
+            .block_on(session.execute(Task::Catalog, control()))
+            .unwrap(),
+    );
+    assert_eq!(catalog["complete"], true);
+    let tables = catalog["tables"].as_array().unwrap();
+    let table = tables
+        .iter()
+        .find(|table| table["name"] == "AgentSample")
+        .unwrap();
+    assert_eq!(table["availability"], "not_checked");
+    assert!(
+        catalog["snapshotId"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty())
+    );
+    assert!(
+        catalog["definitionCommit"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty())
+    );
+    session.close().unwrap();
+}
+
+#[test]
+fn second_component_source_failure_preserves_preexisting_handle() {
+    let fx = Fixture::new(&[fixture::table(
+        "Item",
+        936,
+        &[("ID", "uint")],
+        &[vec![Cell::U(7)]],
+    )]);
+    let mut session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+    let runtime = runtime();
+    let first = response(
+        runtime
+            .block_on(session.execute(
+                Task::Business {
+                    request: tasks::BusinessTask::BatchIds {
+                        table: TableRequest {
+                            name: "Item".into(),
+                            mode: SourceMode::Static,
+                            hotfix_captures: vec![],
+                        },
+                        ids: vec![7],
+                    },
+                },
+                control(),
+            ))
+            .unwrap(),
+    );
+    let handle = first["components"][0]["result"]["handle"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let error = runtime
+        .block_on(session.execute(
+            Task::Business {
+                request: tasks::BusinessTask::Navigate {
+                    template: tasks::NavigationTemplate::ItemRecords,
+                    ids: vec![7],
+                    mode: SourceMode::Static,
+                    hotfix_captures: vec![],
+                },
+            },
+            control(),
+        ))
+        .err()
+        .expect("the second ItemSparse component must fail");
+    assert_eq!(error.code, "schema.definition_not_found");
+    let page = response(
+        runtime
+            .block_on(session.execute(
+                Task::Page {
+                    handle,
+                    offset: 0,
+                    limit: 10,
+                },
+                control(),
+            ))
+            .unwrap(),
+    );
+    assert_eq!(page["rows"].as_array().unwrap().len(), 1);
+    session.close().unwrap();
+}
+
+#[test]
+fn explicit_capture_persists_result_without_consuming_handle() {
+    let fx = fixture();
+    let mut session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+    let runtime = runtime();
+    let result = response(
+        runtime
+            .block_on(session.execute(Task::Query { query: request() }, control()))
+            .unwrap(),
+    );
+    let handle = result["result"]["handle"].as_str().unwrap().to_owned();
+    let cancelled = control();
+    cancelled.tracked_cancel_handle().unwrap().cancel();
+    let cancelled_error = runtime
+        .block_on(session.execute(
+            Task::Capture {
+                handle: handle.clone(),
+            },
+            cancelled,
+        ))
+        .err()
+        .expect("pre-admission capture cancellation");
+    assert_eq!(cancelled_error.code, "command.cancelled");
+    let capture = response(
+        runtime
+            .block_on(session.execute(
+                Task::Capture {
+                    handle: handle.clone(),
+                },
+                control(),
+            ))
+            .unwrap(),
+    );
+    assert!(
+        capture["id"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("CAP-"))
+    );
+    let capture_id = capture["id"].as_str().unwrap();
+    assert_eq!(
+        lycheedev_core::evidence::read_capture(&fx.home, capture_id).unwrap(),
+        capture
+    );
+    let bytes = lycheedev_core::evidence::read_blob(&fx.home, &capture["blob"], 16 << 20).unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["schema"], "lycheedev.data-agent-result.v1");
+    assert_eq!(body["rowCount"], 2);
+    assert_eq!(body["rows"].as_array().unwrap().len(), 2);
+    assert!(
+        body["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row[1].to_string() == "9007199254740993")
+    );
+    assert!(
+        body["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row[1].to_string() == "-9223372036854775808")
+    );
+    assert_eq!(capture["complete"], body["complete"]);
+    assert_eq!(capture["truncated"], false);
+    let mut verify = fx.invocation("evidence verify", &[]);
+    verify.flags.clear();
+    verify.positional = Some(capture_id.into());
+    assert_eq!(
+        lycheedev_core::evidence::dispatch(&verify).unwrap().data["verified"],
+        true
+    );
+    let page = response(
+        runtime
+            .block_on(session.execute(
+                Task::Page {
+                    handle,
+                    offset: 0,
+                    limit: 10,
+                },
+                control(),
+            ))
+            .unwrap(),
+    );
+    assert_eq!(page["rows"].as_array().unwrap().len(), 2);
+    session.close().unwrap();
+}

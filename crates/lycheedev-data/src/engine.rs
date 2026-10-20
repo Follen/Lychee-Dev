@@ -1,7 +1,11 @@
 pub mod api;
 mod lifetime;
+mod catalog;
+mod evidence;
+pub use evidence::OwnedCapture;
 mod plan;
 mod result;
+mod scalar_functions;
 mod session_engine;
 mod source;
 pub use api::*;

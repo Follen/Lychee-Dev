@@ -79,9 +79,6 @@ fn needs_exact(op: Binary, kinds: &[DataType]) -> bool {
     {
         return false;
     }
-    // Native mixed-domain coercion can turn a required type error into a
-    // successful comparison/arithmetic result. Keep that decision in the
-    // exact scalar seam, while preserving row-level NULL short-circuiting.
     true
 }
 
@@ -132,7 +129,7 @@ fn exact_binary(
         &format!("__lychee_numeric_{op:?}"),
         kinds,
         result_kind,
-        Volatility::Immutable,
+        Volatility::Volatile,
         Arc::new(move |arguments| {
             owner.check()?;
             let [left, right] = arguments else {
@@ -145,9 +142,12 @@ fn exact_binary(
                     _ => None,
                 })
                 .next();
+            owner.work(rows.unwrap_or(1))?;
+            let _scratch = owner.budget.reserve_retained(8192).map_err(external)?;
             let calculate = |row| {
-                owner.work(1)?;
-                let _scratch = owner.budget.reserve_retained(8192).map_err(external)?;
+                if row % 64 == 0 {
+                    owner.check()?;
+                }
                 let is_null = |value: &ColumnarValue| match value {
                     ColumnarValue::Scalar(value) => value.is_null(),
                     ColumnarValue::Array(array) => array.is_null(row),
@@ -156,11 +156,7 @@ fn exact_binary(
                     return ScalarValue::try_new_null(&return_kind);
                 }
                 if !numeric_inputs {
-                    return Err(external(crate::fault(
-                        "relational.type_mismatch",
-                        4,
-                        "SQL scalar types are incompatible",
-                    )));
+                    return Err(external(engine_compat::type_error()));
                 }
                 let left = values::read(scalar_at(left, row)?)?;
                 let right = values::read(scalar_at(right, row)?)?;

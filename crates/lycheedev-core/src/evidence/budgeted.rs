@@ -54,6 +54,11 @@ impl Drop for NoopBlobStreamSpan {
 /// uses emitted/input bytes; each binary body pass uses one unit per 64 KiB.
 /// Errors are returned unchanged, including cancellation and limits.
 pub trait CaptureAccounting {
+    /// Explicit producer capability. User-controlled provenance never selects a
+    /// disk domain; Data adapters must preserve this method when wrapping Budget.
+    fn evidence_domain(&self) -> crate::metadata::EvidenceDomain {
+        crate::metadata::EvidenceDomain::Historical
+    }
     fn check(&self) -> Result<()>;
     fn admit_allocation(&self, bytes: usize) -> Result<()>;
     fn admit_work(&self, units: usize) -> Result<()>;
@@ -337,64 +342,6 @@ fn prepare(
     })
 }
 
-fn persist(
-    home: &Path,
-    metadata: Option<&mut Metadata>,
-    prepared: &PreparedCapture,
-    references: &[String],
-    control: &OperationControl,
-    meter: &impl CaptureAccounting,
-    publish: impl FnOnce() -> Result<()>,
-    state: &Cell<CaptureWriteState>,
-) -> Result<()> {
-    check(control, meter)?;
-    if let Some(metadata) = metadata {
-        metadata.check_capture_owner_controlled(home, control, || meter.check())?;
-        let written = persist_to(metadata, prepared, references, control, meter, publish, state);
-        // The request owner performs the only physical close after all consumers
-        // finish. Each call below still owns one complete durable transaction.
-        return finish_controls(written, Some(control), &mut || meter.check());
-    }
-    let mut metadata = Metadata::open_controlled_with_check(home, true, control, || meter.check())?;
-    let written = persist_to(&mut metadata, prepared, references, control, meter, publish, state);
-    let result = crate::metadata::historical_write::finish_historical(written, metadata.close());
-    finish_controls(result, Some(control), &mut || meter.check())
-}
-
-fn persist_to(
-    metadata: &mut Metadata,
-    prepared: &PreparedCapture,
-    references: &[String],
-    control: &OperationControl,
-    meter: &impl CaptureAccounting,
-    publish: impl FnOnce() -> Result<()>,
-    state: &Cell<CaptureWriteState>,
-) -> Result<()> {
-    metadata.put_capture_serialized(
-        &prepared.key,
-        &prepared.document,
-        references,
-        control,
-        || meter.check(),
-        |length| {
-            check(control, meter)?;
-            meter.admit_dependency(length)
-        },
-        |key, raw| {
-            check(control, meter)?;
-            let parsed =
-                serde_json::from_slice::<super::CaptureRef>(raw).map_err(ToolkitError::from);
-            let capture = finish_controls(parsed, Some(control), &mut || meter.check())?;
-            super::validate_capture(
-                &capture,
-                key.strip_prefix("capture/").expect("capture reference"),
-            )
-        },
-        publish,
-        state,
-    )
-}
-
 /// The body belongs to the producer's existing allocation budget. All capture
 /// metadata admission completes before body publication; later cancellation
 /// can leave a published blob, just as on the bounded capture path.
@@ -418,7 +365,15 @@ pub fn commit_capture_budgeted_with_dependencies(
     control: &OperationControl,
     meter: &impl CaptureAccounting,
 ) -> Result<Value> {
-    commit_capture_referencing(home, None, input, dependencies, dependencies, control, meter)
+    commit_capture_referencing(
+        home,
+        None,
+        input,
+        dependencies,
+        dependencies,
+        control,
+        meter,
+    )
 }
 
 /// Verify immutable inputs at publication under the same writer boundary as
@@ -451,7 +406,15 @@ pub fn commit_capture_budgeted_with_references(
     // Declared dependencies are always authenticated, even if an additional
     // references caller omitted one. Preserve additional-reference order first.
     if dependencies.iter().all(|id| references.contains(id)) {
-        return commit_capture_referencing(home, None, input, dependencies, references, control, meter);
+        return commit_capture_referencing(
+            home,
+            None,
+            input,
+            dependencies,
+            references,
+            control,
+            meter,
+        );
     }
     check(control, meter)?;
     let capacity = references
@@ -480,7 +443,15 @@ pub fn commit_capture_budgeted_with_dependencies_and_metadata(
     control: &OperationControl,
     meter: &impl CaptureAccounting,
 ) -> Result<Value> {
-    commit_capture_referencing(home, Some(metadata), input, dependencies, dependencies, control, meter)
+    commit_capture_referencing(
+        home,
+        Some(metadata),
+        input,
+        dependencies,
+        dependencies,
+        control,
+        meter,
+    )
 }
 
 pub fn commit_capture_budgeted_referencing_with_metadata(
@@ -543,50 +514,56 @@ fn commit_capture_referencing(
         },
     )?;
     let result = (|| {
-        workspace::open_controlled_with_check(home, control, || meter.check())?;
-        let guard = storage::ExclusiveLock::resource_wait_checked(
-            &home.join("locks"),
-            &format!("blob:{}", reference.sha256),
-            Some(control.deadline()),
-            || check(control, meter),
-        )?;
-        let written = (|| {
-            let publish = || {
+        meter.admit_allocation(required.len().saturating_mul(std::mem::size_of::<String>()))?;
+        let mut references = Vec::with_capacity(required.len());
+        for id in required {
+            check(control, meter)?;
+            meter.admit_allocation("capture/".len() + id.len())?;
+            references.push(format!("capture/{id}"));
+        }
+        crate::metadata::evidence_catalog::put_capture(
+            home,
+            meter.evidence_domain(),
+            &prepared.key,
+            &prepared.document,
+            &references,
+            control,
+            &|| meter.check(),
+            |length| meter.admit_dependency(length),
+            |key, raw| {
+                let capture: super::CaptureRef = serde_json::from_slice(raw)?;
+                super::validate_capture(
+                    &capture,
+                    key.strip_prefix("capture/").expect("capture reference"),
+                )
+            },
+            |owner| {
                 check(control, meter)?;
                 meter.admit_work(body_work)?;
-                bounded::publish_locked_with_check(
-                    home,
-                    input.bytes,
-                    input.maximum_bytes,
-                    reference.sha256,
-                    Some(control),
-                    &mut || meter.check(),
-                )?;
-                Ok(())
-            };
-            if required.is_empty() {
-                publish()?;
-                return persist(home, metadata, &prepared, &[], control, meter, || Ok(()), &state);
-            }
-            meter.admit_allocation(required.len().saturating_mul(std::mem::size_of::<String>()))?;
-            let mut references = Vec::with_capacity(required.len());
-            for id in required {
-                check(control, meter)?;
-                meter.admit_allocation("capture/".len() + id.len())?;
-                references.push(format!("capture/{id}"));
-            }
-            persist(
-                home,
-                metadata,
-                &prepared,
-                &references,
-                control,
-                meter,
-                publish,
-                &state,
-            )
-        })();
-        crate::metadata::historical_write::finish_historical(written, guard.close())
+                if meter.evidence_domain() == crate::metadata::EvidenceDomain::Data {
+                    owner.publish_memory(input.bytes, input.maximum_bytes, &reference)?;
+                    Ok(())
+                } else {
+                    let guard = storage::ExclusiveLock::resource_wait_checked(
+                        &home.join("locks"),
+                        &format!("blob:{}", reference.sha256),
+                        Some(control.deadline()),
+                        || check(control, meter),
+                    )?;
+                    let published = bounded::publish_locked_with_check(
+                        home,
+                        input.bytes,
+                        input.maximum_bytes,
+                        reference.sha256.clone(),
+                        Some(control),
+                        &mut || meter.check(),
+                    )
+                    .map(|_| ());
+                    crate::metadata::historical_write::finish_historical(published, guard.close())
+                }
+            },
+            &state,
+        )
     })();
     let result = close_directory(result, home_owner);
     let result = finish_controls(result, Some(control), &mut || meter.check());
@@ -625,23 +602,27 @@ fn commit_verified_capture_in(
 ) -> Result<Value> {
     let prepared = prepare(blob.reference(), header, &[], control, meter)?;
     let state = Cell::new(CaptureWriteState::NotCommitted);
-    let guard = storage::ExclusiveLock::resource_wait_checked(
-        &blob.home.join("locks"),
-        &format!("blob:{}", blob.reference().sha256),
-        Some(control.deadline()),
-        || check(control, meter),
-    )?;
-    let result = persist(
+    if let Some(metadata) = metadata.as_deref() {
+        metadata.check_capture_binding(&blob.home)?;
+    }
+    let result = crate::metadata::evidence_catalog::put_capture(
         &blob.home,
-        metadata,
-        &prepared,
+        meter.evidence_domain(),
+        &prepared.key,
+        &prepared.document,
         &[],
         control,
-        meter,
-        || Ok(()),
+        &|| meter.check(),
+        |_| Ok(()),
+        |_, _| Ok(()),
+        |owner| {
+            if meter.evidence_domain() == crate::metadata::EvidenceDomain::Data {
+                owner.enroll_verified(blob)?;
+            }
+            Ok(())
+        },
         &state,
     );
-    let result = crate::metadata::historical_write::finish_historical(result, guard.close());
     let result = finish_controls(result, Some(control), &mut || meter.check());
     capture_result(result, prepared.value, state.get())
 }
@@ -778,3 +759,34 @@ mod manifest_reference_tests;
 #[cfg(test)]
 #[path = "budgeted/borrowed_tests.rs"]
 mod borrowed_tests;
+
+/// Data's legacy bounded producers retain their original supplemental check,
+/// while explicitly selecting the measured authoritative evidence store.
+pub fn commit_data_capture_bounded_with_check(
+    home: &Path,
+    input: CaptureInput<'_>,
+    control: &OperationControl,
+    supplemental: impl FnMut() -> Result<()>,
+) -> Result<Value> {
+    struct DataBounded<C>(std::cell::RefCell<C>);
+    impl<C: FnMut() -> Result<()>> CaptureAccounting for DataBounded<C> {
+        fn evidence_domain(&self) -> crate::metadata::EvidenceDomain {
+            crate::metadata::EvidenceDomain::Data
+        }
+        fn check(&self) -> Result<()> {
+            (*self.0.borrow_mut())()
+        }
+        fn admit_allocation(&self, _: usize) -> Result<()> {
+            self.check()
+        }
+        fn admit_work(&self, _: usize) -> Result<()> {
+            self.check()
+        }
+    }
+    commit_capture_budgeted(
+        home,
+        input,
+        control,
+        &DataBounded(std::cell::RefCell::new(supplemental)),
+    )
+}

@@ -177,6 +177,27 @@ pub(in crate::remote::session) fn read(
                 let _span = budget.phase(Phase::EncodedIdentityHash);
                 alias::key(files, &mut source, &record.content_key, keys, stats, budget)?
             };
+            // Provided keys intentionally disable the public decoded alias.
+            // Durable staging still needs the full encoded identity, without
+            // changing Go-visible logical content-hash counters.
+            let durable_encoded = if let Some(identity) = identity.as_ref() {
+                identity.clone()
+            } else {
+                let _scratch = budget.reserve_retained(65536)?;
+                let mut hash = sha2::Sha256::new();
+                let mut buffer = [0; 65536];
+                source.rewind()?;
+                loop {
+                    files.store.check()?;
+                    budget.safety_only().charge(Cost::work(1))?;
+                    let size = source.read(&mut buffer).map_err(blte::stream_io_error)?;
+                    if size == 0 {
+                        break;
+                    }
+                    hash.update(&buffer[..size]);
+                }
+                casc::hex(&hash.finalize())
+            };
             let missing = match cached(
                 &files.store,
                 identity.as_deref(),
@@ -211,6 +232,26 @@ pub(in crate::remote::session) fn read(
                     &safety,
                     Some(&check),
                 )?;
+                let mut key_context = sha2::Sha256::new();
+                key_context.update(b"lycheedev.keys-context.v1");
+                for (id, key_bytes) in keys.keys() {
+                    budget.safety_only().charge(Cost::work(1))?;
+                    key_context.update(id.to_le_bytes());
+                    key_context.update((key_bytes.len() as u64).to_le_bytes());
+                    key_context.update(key_bytes);
+                }
+                let key_context = key_context.finalize();
+                let source_identity =
+                    lycheedev_core::workspace::data_disk::SourceIdentity::from_parts(&[
+                        b"remote-decoded-stream-v2",
+                        durable_encoded.as_bytes(),
+                        key_context.as_slice(),
+                        record.content_key.as_bytes(),
+                        keys.source.kind.as_bytes(),
+                        keys.source.sha256.as_bytes(),
+                        keys.source.state.as_bytes(),
+                        b"strict",
+                    ]);
                 let owned_budget = budget.clone();
                 let _span = budget.phase(Phase::DecodedStreamPublish);
                 if let Some(expected) = missing.as_ref() {
@@ -226,7 +267,7 @@ pub(in crate::remote::session) fn read(
                             )
                         },
                     };
-                    lycheedev_core::workspace::data_disk::rebuild_shared_blob_stream_with_check(
+                    lycheedev_core::workspace::data_disk::rebuild_shared_blob_stream_identified_with_check(
                         files.store.home,
                         &mut source,
                         expected,
@@ -234,9 +275,10 @@ pub(in crate::remote::session) fn read(
                         files.store.control,
                         move || owned_budget.check(),
                         &safety,
+                        &source_identity,
                     )
                 } else {
-                    lycheedev_core::workspace::data_disk::publish_shared_blob_stream_with_check(
+                    lycheedev_core::workspace::data_disk::publish_shared_blob_stream_identified_with_check(
                         files.store.home,
                         &mut reader,
                         record.decoded_bytes,
@@ -244,6 +286,7 @@ pub(in crate::remote::session) fn read(
                         files.store.control,
                         move || owned_budget.check(),
                         &safety,
+                        &source_identity,
                     )
                 }
             };

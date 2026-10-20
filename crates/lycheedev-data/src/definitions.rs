@@ -272,6 +272,48 @@ fn definition_cost(bytes: u64) -> crate::resource::Cost {
     }
 }
 
+/// Authenticated complete inventory from the exact definition revision. This
+/// does not assert that every listed table exists in the selected game build.
+pub(crate) fn catalog_controlled(
+    home: &Path,
+    commit: &str,
+    offline: bool,
+    budget: &crate::resource::Budget,
+    control: &OperationControl,
+) -> Result<(Vec<TableIdentity>, Value)> {
+    let check = || check_definition(budget.deadline, Some(budget), control);
+    check()?;
+    if !lycheedev_core::selection::valid_digest(commit, 40) {
+        return Err(fault(
+            "records.definition_identity",
+            4,
+            "Catalog requires an exact definition commit",
+        ));
+    }
+    let mut catalog = None;
+    let (receipt, _) = load(
+        home,
+        &format!("https://raw.githubusercontent.com/wowdev/WoWDBDefs/{commit}/manifest.json"),
+        offline,
+        budget.deadline,
+        Some(budget),
+        Some(control),
+        |raw| {
+            catalog = Some(Manifest::parse_with_check(raw, check)?);
+            Ok(())
+        },
+    )?;
+    check()?;
+    Ok((
+        catalog
+            .expect("validated manifest")
+            .tables
+            .into_values()
+            .collect(),
+        receipt,
+    ))
+}
+
 pub(crate) fn prepare_many_controlled(
     home: &Path,
     commit: &str,

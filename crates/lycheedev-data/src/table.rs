@@ -972,6 +972,9 @@ impl<'a> Table<'a> {
     pub fn ids(&self) -> impl Iterator<Item = u32> + '_ {
         self.ids.iter().copied()
     }
+    pub(crate) fn contains_id(&self, id: u32) -> bool {
+        self.ids.binary_search(&id).is_ok()
+    }
     pub(crate) fn id_at(&self, index: usize) -> Option<u32> {
         self.ids.get(index).copied()
     }

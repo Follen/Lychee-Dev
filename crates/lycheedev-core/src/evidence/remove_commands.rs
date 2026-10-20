@@ -117,7 +117,7 @@ fn annotate(mut error: ToolkitError, progress: &Progress, id: &str) -> ToolkitEr
 }
 pub(super) fn run(home: &Path, id: &str, control: &OperationControl) -> Result<Value> {
     let mut progress = Progress::default();
-    let result = Metadata::with_historical_write(home, control, |writer| {
+    let result = crate::metadata::with_evidence_writer(home, id, control, |writer| {
         writer.with_write_lease(|writer| {
             // Go resolves the manifest first; a malformed/missing selector is
             // not rejected by an unrelated digest preflight.

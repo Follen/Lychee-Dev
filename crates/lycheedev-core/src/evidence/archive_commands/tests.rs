@@ -382,3 +382,31 @@ fn bundle_per_object_limit_precedes_missing_blob_and_duplicate_digest_is_revalid
     );
     f.cleanup();
 }
+
+#[test]
+fn existing_data_keep_is_readable_after_quota_reduction() {
+    let f = Fixture::new();
+    let capture = commit_data_capture_bounded_with_check(
+        &f.home,
+        CaptureInput {
+            bytes: b"Data keep",
+            maximum_bytes: 64,
+            media_type: "text/plain",
+            provenance: json!({"kind":"fixture","locator":"Data keep"}),
+            complete: true,
+            truncated: false,
+        },
+        &OperationControl::default(),
+        || Ok(()),
+    )
+    .unwrap();
+    let id = capture["id"].as_str().unwrap();
+    let first = keep(&f.home, id, &OperationControl::default()).unwrap();
+    assert_eq!(first["created"], true);
+    let mut config = workspace::default_config();
+    config["dataCache"]["maxBytes"] = json!(1);
+    storage::atomic_json(&f.home.join("config.json"), &config).unwrap();
+    let second = keep(&f.home, id, &OperationControl::default()).unwrap();
+    assert_eq!(second["created"], false);
+    assert_eq!(first["retention"], second["retention"]);
+}

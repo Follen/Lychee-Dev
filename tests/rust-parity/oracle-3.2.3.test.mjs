@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RUST_FILES, LIMITS, sha256, readBounded, extractArities, extractAdvertised } from './oracle.mjs';
-import { CANDIDATE_CONTRACT_BLOB, CANDIDATE_CONTRACT_SHA256, HISTORICAL_CONTRACT_BLOB, HISTORICAL_CONTRACT_SHA256, extractCandidateArities,
+import { AGENT_CONTRACT_BLOB, AGENT_CONTRACT_SHA256, CANDIDATE_CONTRACT_BLOB, CANDIDATE_CONTRACT_SHA256, HISTORICAL_CONTRACT_BLOB, HISTORICAL_CONTRACT_SHA256, extractCandidateArities,
   extractCandidateAdvertised, loadRelease323Candidate } from './candidate-adapter-3.2.3.mjs';
 import { GO_323, RELEASE_323_FIELDS, buildRelease323Fixture, compareRelease323 } from './oracle-3.2.3.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -41,10 +41,10 @@ test('fixed 3.2.3 source provenance retains 84 original commands and exact indep
   assert.equal(report.behavioralParity, 'unverified'); assert.equal(report.execution, 'NOT_RUN');
   assert.deepEqual(c, before);
 });
-test('reviewed current parser contains exactly frozen 115 arities plus Data prune and Agent TTL', () => {
+test('reviewed current parser contains exactly frozen 115 arities plus Data prune, Agent TTL and protected inventory', () => {
   assert.equal(sha256(contract), CANDIDATE_CONTRACT_SHA256);
   const arities = extractCandidateArities(contract);
-  assert.equal(Object.keys(arities).length, 117); assert.equal(arities['--data-derived'], false);
+  assert.equal(Object.keys(arities).length, 118); assert.equal(arities['--data-derived'], false);
   assert.deepEqual(arities, oracle.expectedArities);
   assert.equal(extractArities(contract), null, 'historical adapter must not accept later candidate');
   assert.equal(extractAdvertised([], {filter: contract}).state, 'unverified');
@@ -90,7 +90,7 @@ test('all complete-source changes invalidate both current adapters, including te
     assert.equal(extractCandidateAdvertised([], {filter}).state, 'unverified');
   }
 });
-test('all 117 parser flags, advertised omissions, profile fields and addon bytes remain gates', () => {
+test('all 118 parser flags, advertised omissions, profile fields and addon bytes remain gates', () => {
   for (const [flag, value] of Object.entries(oracle.expectedArities)) fails(c => { c.arities[flag] = !value; });
   fails(c => { c.arities['--unreviewed'] = false; });
   fails(c => { c.arities = null; c.advertised = {state: 'unverified', commands: null}; });
@@ -143,4 +143,15 @@ test('historical parser custody remains distinct from the Agent successor', () =
   assert.equal(Object.hasOwn(arities, '--result-ttl-seconds'), false);
   assert.notDeepEqual(arities, oracle.expectedArities);
   assert.equal(extractCandidateArities(Buffer.concat([bytes, Buffer.from('\n// tampered') ])), null);
+});
+
+test('Agent predecessor keeps 117 arities and cannot stand in for protected inventory', () => {
+  const bytes = execFileSync('git', ['--no-replace-objects', 'cat-file', 'blob', AGENT_CONTRACT_BLOB], {cwd: root});
+  assert.equal(sha256(bytes), AGENT_CONTRACT_SHA256);
+  const arities = extractCandidateArities(bytes);
+  assert.equal(Object.keys(arities).length, 117);
+  assert.equal(arities['--result-ttl-seconds'], true);
+  assert.equal(Object.hasOwn(arities, '--data'), false);
+  assert.notDeepEqual(arities, oracle.expectedArities);
+  assert.equal(extractCandidateArities(Buffer.concat([bytes, Buffer.from('\n// tampered')])), null);
 });

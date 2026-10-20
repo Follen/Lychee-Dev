@@ -29,9 +29,11 @@ pub(in crate::workspace::data_disk) fn validate_recovery(
         )?;
         // Historical decoded aliases may predate Data attribution. Both
         // records absent is an ordinary cold enrollment, never a partial pair.
+        let managed_pending =
+            complete.is_none() && durable::has_any_shard(&directory, reference, checks)?;
         if !(original.is_none() && complete.is_none())
             && (original.as_deref() != Some(raw.as_slice())
-                || complete.as_deref() != Some(completion(&raw).as_slice()))
+                || !managed_pending && complete.as_deref() != Some(completion(&raw).as_slice()))
         {
             return Err(integrity());
         }
@@ -44,12 +46,14 @@ pub(in crate::workspace::data_disk) fn validate_recovery(
             if original.is_none() || complete.is_none() || repair != raw {
                 return Err(integrity());
             }
-            return Err(pending(
-                reference,
-                &directory
-                    .path()
-                    .join(format!("{}.repair.intent", reference.sha256)),
-            ));
+            if !durable::has_any_shard(&directory, reference, checks)? {
+                return Err(pending(
+                    reference,
+                    &directory
+                        .path()
+                        .join(format!("{}.repair.intent", reference.sha256)),
+                ));
+            }
         }
         // Inventory keeps native type/length checks. The original publisher
         // fully authenticates any concurrent winner under its canonical lease.
@@ -81,7 +85,11 @@ pub(super) fn run_repair<T>(
         .borrow_mut()
         .try_reserve(3)
         .map_err(|_| ToolkitError::invalid("cannot reserve repair settlement receipts"))?;
-    let mut marker = QuotaIntent::create(directory, &mut Controlled(&owner.control))?;
+    let mut marker = QuotaIntent::create_bounded(
+        directory,
+        &reference.sha256,
+        &mut Controlled(&owner.control),
+    )?;
     let temporary = marker.name().to_owned();
     let mut clean = true; // No body publisher has been entered yet.
     let result = (|| {
@@ -144,13 +152,19 @@ pub(super) fn repair_memory(
     reference: &BlobRef,
     raw: &[u8; INTENT_BYTES],
 ) -> Result<BlobRef> {
-    run_repair(owner, reference, raw, || {
-        let attempt = evidence::publish_blob_attempt_with_check(
+    let slot = durable::StageSlot::create_shard(
+        owner,
+        &durable::SourceIdentity::memory(reference),
+        reference,
+    )?;
+    let result = run_repair(owner, reference, raw, || {
+        let attempt = evidence::publish_blob_attempt_predeclared_with_check(
             home,
             bytes,
             maximum,
             owner.control.control,
             || owner.control.extra(),
+            &slot.name,
         );
         let state = if attempt.settlement.reused {
             StagedPublication::Published
@@ -174,7 +188,9 @@ pub(super) fn repair_memory(
         });
         let clean = result.is_ok() || attempt.settlement.may_release_unpublished_intent();
         (result, clean)
-    })
+    });
+    let cleanup = slot.finish(owner, result.is_ok());
+    join(result, cleanup.err(), &owner.control)
 }
 
 #[cfg(test)]

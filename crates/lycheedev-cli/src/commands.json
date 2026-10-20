@@ -827,6 +827,7 @@
     "mutates": false,
     "arguments": [],
     "flags": [
+      "--data",
       "--home <root>",
       "--format text|json|jsonl"
     ]

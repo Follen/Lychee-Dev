@@ -32,6 +32,23 @@ impl<'a> QuotaIntent<'a> {
             attempted: false,
         })
     }
+    /// Bookkeeping stages occupy a finite digest-bound namespace, including
+    /// torn pre-rename records. Occupants are skipped, never adopted.
+    pub fn create_bounded<C: FileControl>(
+        parent: &'a Directory,
+        digest: &str,
+        control: &mut C,
+    ) -> Result<Self, C::Error> {
+        if parent.path().file_name() != Some(std::ffi::OsStr::new("shared-blobs-v1")) {
+            return Err(invalid("quota intent requires bookkeeping directory").into());
+        }
+        let stage = StagedFile::create_rebuildable_cache(parent, digest, control)?
+            .ok_or_else(|| C::Error::from(invalid("bounded quota-intent slots exhausted")))?;
+        Ok(Self {
+            stage,
+            attempted: false,
+        })
+    }
     pub fn name(&self) -> &str {
         self.stage.name()
     }

@@ -29,6 +29,27 @@ impl<'a> PrivateSpool<'a> {
     ) -> Result<Self, C::Error> {
         StagedFile::create(parent, control).map(|stage| Self { stage, exact: None })
     }
+    pub(super) fn from_managed_stage(stage: StagedFile<'a>) -> Self {
+        Self { stage, exact: None }
+    }
+    /// Logical bound only. The durable quota declaration, not a zero-filled
+    /// file suffix, reserves unwritten bytes. Crash contents remain a prefix.
+    pub fn limit_exact_len(&mut self, expected: u64) -> io::Result<()> {
+        self.stage.require_private()?;
+        if self.stage.sealed
+            || self.exact.is_some()
+            || self.stage.stage.file_mut().stream_position()? != 0
+            || self.stage.stage.file_mut().metadata()?.len() != 0
+        {
+            return Err(invalid("logical-length limit requires a fresh spool"));
+        }
+        self.exact = Some(ExactLength {
+            expected,
+            written: 0,
+            poisoned: false,
+        });
+        Ok(())
+    }
     pub fn name(&self) -> &str {
         self.stage.name()
     }
@@ -118,6 +139,19 @@ impl<'a> PrivateSpool<'a> {
         rewind(self.stage.stage.file_mut())?;
         self.stage.sealed = true;
         Ok(())
+    }
+    /// Rewind only the sealed read-ready original object for authenticated
+    /// prefix recovery. It cannot restore write authority.
+    pub fn rewind_read_ready(&mut self) -> io::Result<()> {
+        self.stage.require_private()?;
+        if !self.stage.sealed {
+            return Err(invalid("spool is not read-ready"));
+        }
+        self.stage
+            .stage
+            .file_mut()
+            .seek(SeekFrom::Start(0))
+            .map(|_| ())
     }
     /// All real discard/close errors survive; no destructor retries a failed
     /// checked discard, and no pathname is used to reclaim somebody else's file.

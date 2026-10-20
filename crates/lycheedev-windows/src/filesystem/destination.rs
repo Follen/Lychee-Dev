@@ -89,6 +89,7 @@ enum RelativeOpen {
     Directory { deny_write: bool },
     Stage,
     Inspect,
+    InspectPinned { create: bool },
     Reader,
     ProjectReader,
     Cleanup,
@@ -206,6 +207,14 @@ fn relative_file_optional_owner<C: FileControl>(
             1,
             2,
             0x00200000 | 0x20 | 0x40, // CREATE, REPARSE | SYNCHRONOUS | NON_DIRECTORY
+        ),
+        // Attribute-only SQLite main-file identity: allow live writes, deny
+        // rename/delete replacement, and inspect rather than follow reparse.
+        RelativeOpen::InspectPinned { create } => (
+            FILE_READ_ATTRIBUTES.0 | 0x100000,
+            1 | 2,
+            if create { 3 } else { 1 }, // OPEN_IF or OPEN
+            0x00200000 | 0x20,
         ),
         RelativeOpen::Inspect => (
             FILE_READ_ATTRIBUTES.0 | 0x100000,
@@ -641,6 +650,40 @@ impl Directory {
             control.check()?;
         }
         Ok(file)
+    }
+    /// Pin an existing main-file identity without blocking its data writer.
+    /// Caller must reject reparse/special entries using this original handle.
+    /// Not for SQLite journal sidecars, which must remain deletable.
+    pub fn open_optional_pinned_inspection_file_controlled<C: FileControl>(
+        &self,
+        name: &std::ffi::OsStr,
+        control: &mut C,
+    ) -> Result<Option<File>, C::Error> {
+        self.verify_controlled(control)?;
+        relative_file_optional_owner(
+            self.parent_handle(),
+            name,
+            RelativeOpen::InspectPinned { create: false },
+            true,
+            control,
+        )
+    }
+    /// Open or create an empty main file while retaining its native identity.
+    /// Existing leaves are never truncated; caller validates the original handle.
+    pub fn open_or_create_pinned_inspection_file_controlled<C: FileControl>(
+        &self,
+        name: &std::ffi::OsStr,
+        control: &mut C,
+    ) -> Result<File, C::Error> {
+        self.verify_controlled(control)?;
+        relative_file_optional_owner(
+            self.parent_handle(),
+            name,
+            RelativeOpen::InspectPinned { create: true },
+            false,
+            control,
+        )
+        .map(|owner| owner.expect("required native main-file open"))
     }
     pub fn metadata_controlled<C: FileControl>(
         &self,
@@ -1129,6 +1172,33 @@ impl Drop for Stage {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pinned_inspection_allows_data_writes_but_blocks_main_replacement() {
+        let root = std::env::temp_dir().join(format!(
+            "lychee-inspect-pin-{}",
+            crate::random::token().unwrap()
+        ));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("main.sqlite");
+        fs::write(&path, b"old").unwrap();
+        let directory = Directory::open_shared(&root).unwrap();
+        let pin = directory
+            .open_optional_pinned_inspection_file_controlled(
+                "main.sqlite".as_ref(),
+                &mut Uncontrolled,
+            )
+            .unwrap()
+            .unwrap();
+        fs::write(&path, b"new").unwrap();
+        assert!(fs::rename(&path, root.join("replaced")).is_err());
+        assert!(fs::remove_file(&path).is_err());
+        assert_eq!(pin.metadata().unwrap().len(), 3);
+        super::super::close_file(pin).unwrap();
+        fs::remove_file(&path).unwrap();
+        directory.close().unwrap();
+        fs::remove_dir(root).unwrap();
+    }
+
     use super::*;
     use std::fs;
     mod reparse {
@@ -1483,7 +1553,10 @@ mod tests {
 mod admission_tests;
 
 mod staged;
-pub use staged::{CacheReplaceAttempt, PrivateSpool, QuotaIntent, StagedFile, StagedPublication};
+pub use staged::{
+    CacheReplaceAttempt, MANAGED_DECLARATION_BYTES, MANAGED_STAGE_SLOTS, ManagedStageDeclaration,
+    ManagedStageKind, ManagedStageName, PrivateSpool, QuotaIntent, StagedFile, StagedPublication,
+};
 
 #[cfg(test)]
 #[path = "destination/asset_publication_tests.rs"]

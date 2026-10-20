@@ -20,7 +20,10 @@ use std::{
 pub(super) mod lifecycle;
 use lifecycle::{PathControl, finish_controls, open_workspace};
 mod publication_attempt;
-pub(crate) use publication_attempt::{BlobPublicationSettlement, publish_blob_attempt_with_check};
+pub(crate) use publication_attempt::{
+    BlobPublicationSettlement, publish_blob_attempt_predeclared_with_check,
+    publish_blob_attempt_with_check,
+};
 mod staged;
 pub use staged::publish_blob_stream_bounded_with_check;
 pub(crate) use staged::{StreamPublicationSettlement, publish_data_blob_stream_with_check};
@@ -79,7 +82,7 @@ fn limit(message: &str) -> ToolkitError {
 fn integrity(message: &str) -> ToolkitError {
     ToolkitError::new("vault.blob_integrity", message, 4)
 }
-fn io_error(error: io::Error) -> ToolkitError {
+pub(crate) fn io_error(error: io::Error) -> ToolkitError {
     if let Some(control) = error
         .get_ref()
         .and_then(|inner| inner.downcast_ref::<ToolkitError>())
@@ -146,6 +149,9 @@ pub struct VerifiedBlob {
     supplemental: Option<BlobCheck>,
 }
 impl VerifiedBlob {
+    pub(crate) fn workspace(&self) -> &Path {
+        &self.home
+    }
     pub fn reference(&self) -> &BlobRef {
         &self.opened.reference
     }
@@ -641,44 +647,29 @@ pub fn commit_verified_capture(
             4,
         ));
     }
-    let guard = ExclusiveLock::resource_wait_checked(
-        &blob.home.join("locks"),
-        &format!("blob:{}", blob.reference().sha256),
-        Some(control.deadline()),
-        || control.check(),
-    )?;
-    let state = std::cell::Cell::new(crate::metadata::CaptureWriteState::NotCommitted);
-    let mut value = None;
-    let result = (|| {
-        let mut capture = CaptureRef {
-            schema: "lycheedev.capture.v1".into(),
-            id: String::new(),
-            blob: blob.reference().clone(),
-            media_type: media_type.into(),
-            provenance: serde_json::from_value(provenance)?,
+    super::budgeted::commit_verified_capture_budgeted(
+        blob,
+        super::budgeted::CaptureHeader {
+            media_type,
+            provenance,
             complete,
             truncated,
-            captured_at: storage::utc_now(),
-            dependencies: Vec::new(),
-        };
-        capture.id = capture_identity(&capture)?;
-        control.check()?;
-        let raw = serde_json::to_vec(&capture)?;
-        value = Some(serde_json::to_value(&capture)?);
-        lifecycle::persist_capture(
-            &blob.home,
-            &format!("capture/{}", capture.id),
-            &raw,
-            Some(control),
-            &mut || Ok(()),
-            &state,
-        )
-    })();
-    let result = crate::metadata::historical_write::finish_historical(result, guard.close());
-    let result = finish_controls(result, Some(control), &mut || Ok(()));
-    match value {
-        Some(value) => lifecycle::capture_result(result, value, state.get()),
-        None => result.map(|()| unreachable!("capture preparation did not complete")),
+        },
+        control,
+        &LegacyCaptureAccounting,
+    )
+}
+
+struct LegacyCaptureAccounting;
+impl super::budgeted::CaptureAccounting for LegacyCaptureAccounting {
+    fn check(&self) -> Result<()> {
+        Ok(())
+    }
+    fn admit_allocation(&self, _: usize) -> Result<()> {
+        Ok(())
+    }
+    fn admit_work(&self, _: usize) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -1006,55 +997,69 @@ fn commit_internal_observed_with_check(
     let state = std::cell::Cell::new(crate::metadata::CaptureWriteState::NotCommitted);
     let mut value = None;
     let result = (|| {
-        open_workspace(home, control, &mut supplemental)?;
         let digest = digest_bytes_with_check(input.bytes, control, &mut supplemental)?;
-        let guard = ExclusiveLock::resource_wait_checked(
-            &home.join("locks"),
-            &format!("blob:{digest}"),
-            control.map(OperationControl::deadline),
-            || check_with(control, &mut supplemental),
-        )?;
-        let result = (|| {
-            publication(CapturePublication::BeforeBlob);
-            let blob = publish_locked_with_check(
-                home,
-                input.bytes,
-                input.maximum_bytes,
-                digest,
-                control,
-                &mut supplemental,
-            )?;
-            publication(CapturePublication::BlobPublished);
-            check_with(control, &mut supplemental)?;
-            let mut capture = CaptureRef {
-                schema: "lycheedev.capture.v1".into(),
-                id: String::new(),
-                blob,
-                media_type: input.media_type.into(),
-                provenance,
-                complete: input.complete,
-                truncated: input.truncated,
-                captured_at: storage::utc_now(),
-                dependencies: Vec::new(),
-            };
-            capture.id = capture_identity(&capture)?;
-            check_with(control, &mut supplemental)?;
-            let raw = serde_json::to_vec(&capture)?;
-            value = Some(serde_json::to_value(&capture)?);
-            let written = lifecycle::persist_capture(
-                home,
-                &format!("capture/{}", capture.id),
-                &raw,
-                control,
-                &mut supplemental,
-                &state,
-            );
-            if state.get() == crate::metadata::CaptureWriteState::Committed {
-                publication(CapturePublication::ManifestPublished);
-            }
-            written
-        })();
-        crate::metadata::historical_write::finish_historical(result, guard.close())
+        let blob = BlobRef {
+            sha256: digest,
+            bytes: input.bytes.len() as u64,
+        };
+        let mut capture = CaptureRef {
+            schema: "lycheedev.capture.v1".into(),
+            id: String::new(),
+            blob,
+            media_type: input.media_type.into(),
+            provenance,
+            complete: input.complete,
+            truncated: input.truncated,
+            captured_at: storage::utc_now(),
+            dependencies: Vec::new(),
+        };
+        capture.id = capture_identity(&capture)?;
+        check_with(control, &mut supplemental)?;
+        let raw = serde_json::to_vec(&capture)?;
+        value = Some(serde_json::to_value(&capture)?);
+        let default_control = OperationControl::default();
+        let effective = control.unwrap_or(&default_control);
+        let checks = std::cell::RefCell::new(&mut supplemental);
+        let written = crate::metadata::evidence_catalog::put_capture(
+            home,
+            crate::metadata::EvidenceDomain::Historical,
+            &format!("capture/{}", capture.id),
+            &raw,
+            &[],
+            effective,
+            &|| (*checks.borrow_mut())(),
+            |_| Ok(()),
+            |_, _| Ok(()),
+            |_| {
+                let guard = ExclusiveLock::resource_wait_checked(
+                    &home.join("locks"),
+                    &format!("blob:{}", capture.blob.sha256),
+                    control.map(OperationControl::deadline),
+                    || check_with(control, &mut || (*checks.borrow_mut())()),
+                )?;
+                publication(CapturePublication::BeforeBlob);
+                let written = publish_locked_with_check(
+                    home,
+                    input.bytes,
+                    input.maximum_bytes,
+                    capture.blob.sha256.clone(),
+                    control,
+                    &mut || (*checks.borrow_mut())(),
+                );
+                if written.is_ok() {
+                    publication(CapturePublication::BlobPublished);
+                }
+                crate::metadata::historical_write::finish_historical(
+                    written.map(|_| ()),
+                    guard.close(),
+                )
+            },
+            &state,
+        );
+        if state.get() == crate::metadata::CaptureWriteState::Committed {
+            publication(CapturePublication::ManifestPublished);
+        }
+        written
     })();
     let result = optional::finish_directory(result, home_owner);
     let result = finish_controls(result, control, &mut supplemental);

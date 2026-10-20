@@ -279,7 +279,7 @@ fn resolve_with(
         offline: request.offline,
     })?;
     store.check()?;
-    let capture = evidence::commit_capture_bounded_with_check(
+    let capture = evidence::commit_data_capture_bounded_with_check(
         home,
         evidence::CaptureInput {
             bytes: &raw,

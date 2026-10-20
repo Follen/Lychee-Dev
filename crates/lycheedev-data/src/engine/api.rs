@@ -84,6 +84,64 @@ pub enum Expression {
         value: Box<Expression>,
         values: Vec<serde_json::Value>,
     },
+    Cast {
+        value: Box<Expression>,
+        target: CastKind,
+    },
+    Like {
+        value: Box<Expression>,
+        pattern: Box<Expression>,
+        negated: bool,
+    },
+    Between {
+        value: Box<Expression>,
+        low: Box<Expression>,
+        high: Box<Expression>,
+        negated: bool,
+    },
+    Case {
+        branches: Vec<WhenThen>,
+        otherwise: Option<Box<Expression>>,
+    },
+    Coalesce {
+        values: Vec<Expression>,
+    },
+    NullIf {
+        left: Box<Expression>,
+        right: Box<Expression>,
+    },
+    Call {
+        function: ScalarFunction,
+        arguments: Vec<Expression>,
+    },
+    Index {
+        value: Box<Expression>,
+        index: usize,
+    },
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CastKind {
+    String,
+    Integer,
+    Float,
+    Boolean,
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScalarFunction {
+    Lower,
+    Upper,
+    Length,
+    Concat,
+    HasFlag,
+    BitAnd,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WhenThen {
+    pub when: Expression,
+    pub then: Expression,
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -279,7 +337,7 @@ pub fn query_schema() -> serde_json::Value {
             &["input", "offset", "count"],
         ),
     ];
-    let expressions = vec![
+    let mut expressions = vec![
         variant("kind", "column", json!({"name":column_name}), &["name"]),
         variant("kind", "literal", json!({"value":scalar}), &["value"]),
         variant(
@@ -297,6 +355,16 @@ pub fn query_schema() -> serde_json::Value {
             &["value", "values"],
         ),
     ];
+    expressions.extend([
+        variant("kind","cast",json!({"value":expr,"target":{"enum":["string","integer","float","boolean"]}}), &["value","target"]),
+        variant("kind","like",json!({"value":expr,"pattern":expr,"negated":{"type":"boolean"}}), &["value","pattern","negated"]),
+        variant("kind","between",json!({"value":expr,"low":expr,"high":expr,"negated":{"type":"boolean"}}), &["value","low","high","negated"]),
+        variant("kind","case",json!({"branches":{"type":"array","minItems":1,"maxItems":64,"items":object(json!({"when":expr,"then":expr}), &["when","then"])},"otherwise":{"anyOf":[expr,{"type":"null"}]}}), &["branches"]),
+        variant("kind","coalesce",json!({"values":{"type":"array","minItems":1,"maxItems":64,"items":expr}}), &["values"]),
+        variant("kind","null_if",json!({"left":expr,"right":expr}), &["left","right"]),
+        variant("kind","call",json!({"function":{"enum":["lower","upper","length","concat","has_flag","bit_and"]},"arguments":{"type":"array","minItems":1,"maxItems":2,"items":expr}}), &["function","arguments"]),
+        variant("kind","index",json!({"value":expr,"index":{"type":"integer","minimum":0,"description":"Zero-based nested array element. Out-of-bounds is an error; null array produces null."}}), &["value","index"]),
+    ]);
     json!({
         "$schema":"https://json-schema.org/draft/2020-12/schema",
         "title":"Lychee task-native Data query request",
@@ -308,7 +376,7 @@ pub fn query_schema() -> serde_json::Value {
             "Scalar":{"type":["null","boolean","string","number"],"description":"Integer lexemes must fit signed i64 or unsigned u64 exactly; floating-point lexemes must convert to finite f64. Arrays/objects are unsupported. Integer arithmetic and mixed-float comparisons preserve the exact numeric contract."},
             "TableRequest":object(json!({"name":{"type":"string","pattern":"^[A-Za-z_][A-Za-z0-9_]*$","maxLength":128},"mode":{"enum":["static","effective"]},"hotfix_captures":{"type":"array","maxItems":16,"uniqueItems":true,"items":{"type":"string","minLength":1},"default":[],"description":"Ordered explicit capture IDs, at most 256 UTF-8 bytes each, without controls. Static mode requires an empty list; effective mode requires 1 to 16 IDs; authenticity is checked by the source adapter."}}), &["name","mode"]),
             "QueryPlan":{"oneOf":plans},
-            "Expression":{"oneOf":expressions},
+            "Expression":{"oneOf":expressions,"description":"CASE/COALESCE preserve lazy selection. Branches currently require a common exact type (integer domains promote to decimal integer, float32/64 to float64); mixed integer/float or heterogeneous result variants are rejected rather than rounded. LIKE uses Unicode scalar % and _ without an implicit escape convention; case mapping is Unicode simple, length counts Unicode scalars."},
             "NamedExpression":object(json!({"name":name,"expression":expr}), &["name","expression"]),
             "JoinKey":object(json!({"left":column_name,"right":column_name}), &["left","right"]),
             "AggregateExpression":object(json!({"name":name,"function":{"enum":["count","sum","average","minimum","maximum"]},"expression":{"anyOf":[expr,{"type":"null"}],"description":"Only count may omit expression or use null; this counts all rows. count(expression) counts nonnull values."}}), &["name","function"]),
@@ -337,6 +405,54 @@ impl Drop for DatasetInfo {
         drop(std::mem::take(&mut self.table.name));
         drop(std::mem::take(&mut self.table.hotfix_captures));
         drop(std::mem::take(&mut self.columns));
+        drop(std::mem::replace(
+            &mut self.provenance,
+            serde_json::Value::Null,
+        ));
+        self._allocation.take();
+        if let Some(lifetime) = &self._lifetime {
+            let _ = lifetime.settle();
+        }
+    }
+}
+
+/// Complete definition-manifest inventory, not a claim of installed availability.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatasetCatalog {
+    pub provenance: serde_json::Value,
+    pub snapshot_id: String,
+    pub definition_commit: String,
+    pub scope: &'static str,
+    pub complete: bool,
+    pub tables: Vec<CatalogTable>,
+    #[serde(skip)]
+    pub(super) _allocation: Option<crate::resource::OwnedRetainedReservation>,
+    #[serde(skip)]
+    pub(super) _lifetime: Option<std::sync::Arc<super::lifetime::RequestLifetime>>,
+}
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogTable {
+    pub name: String,
+    pub table_hash: u32,
+    pub db2_file_data_id: u32,
+    pub dbc_file_data_id: u32,
+    pub availability: &'static str,
+}
+impl std::fmt::Debug for DatasetCatalog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DatasetCatalog")
+            .field("snapshot_id", &self.snapshot_id)
+            .field("tables", &self.tables.len())
+            .finish_non_exhaustive()
+    }
+}
+impl Drop for DatasetCatalog {
+    fn drop(&mut self) {
+        drop(std::mem::take(&mut self.snapshot_id));
+        drop(std::mem::take(&mut self.definition_commit));
+        drop(std::mem::take(&mut self.tables));
         drop(std::mem::replace(
             &mut self.provenance,
             serde_json::Value::Null,

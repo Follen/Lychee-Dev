@@ -30,6 +30,9 @@ impl HistoricalWriter<'_> {
             "removal requires its metadata write lease"
         );
         *state = RemovalCommit::NotCommitted;
+        if let Some(admit) = self.admission {
+            admit()?;
+        }
         let mut transaction = checked_sql(self.control, self.control.deadline(), on_busy, || {
             rusqlite::Transaction::new_unchecked(
                 self.connection,
@@ -42,6 +45,8 @@ impl HistoricalWriter<'_> {
                 home: self.home,
                 control: self.control,
                 write_lease_held: true,
+                catalog: self.catalog,
+                admission: self.admission,
             },
         })
         .and_then(|value| {

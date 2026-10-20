@@ -6,13 +6,13 @@ use super::{
         AggregateFunction, BinaryOperator, Expression, JoinKind, QueryPlan, SourceMode,
         TableRequest,
     },
-    external, numeric, unsupported,
+    external, numeric, scalar_functions, unsupported,
 };
 use datafusion::{
     common::{Column, DFSchema, Result as DfResult, ScalarValue, TableReference},
     dataframe::DataFrame,
     functions_aggregate::expr_fn::{count, max, min},
-    logical_expr::{Expr, JoinType, Operator},
+    logical_expr::{Expr, ExprSchemable, JoinType, Operator},
     prelude::SessionContext,
 };
 use futures_util::future::BoxFuture;
@@ -308,36 +308,82 @@ fn validate(plan: &QueryPlan, owner: Option<&Arc<QueryOwner>>) -> DfResult<Admis
                     push(Node::Plan(input))?;
                 }
             },
-            Node::Expression(expression) => match expression {
-                Expression::Column { name } => admitted.column(name)?,
-                Expression::Literal { value } => admitted.literal(value)?,
-                Expression::Binary { left, right, .. } => {
-                    push(Node::Expression(left))?;
-                    push(Node::Expression(right))?;
+            Node::Expression(expression) => {
+                admitted.expanded = admitted
+                    .expanded
+                    .checked_add(expression_expansion(expression)?)
+                    .ok_or_else(|| external(super::limit()))?;
+                if admitted.expanded > 64 << 20 {
+                    return Err(external(super::limit()));
                 }
-                Expression::Not { value } | Expression::IsNull { value } => {
-                    push(Node::Expression(value))?
+                match expression {
+                    Expression::Column { name } => admitted.column(name)?,
+                    Expression::Literal { value } => admitted.literal(value)?,
+                    Expression::Binary { left, right, .. } => {
+                        push(Node::Expression(left))?;
+                        push(Node::Expression(right))?;
+                    }
+                    Expression::Not { value }
+                    | Expression::IsNull { value }
+                    | Expression::Cast { value, .. }
+                    | Expression::Index { value, .. } => push(Node::Expression(value))?,
+                    Expression::Like { value, pattern, .. } => {
+                        push(Node::Expression(value))?;
+                        push(Node::Expression(pattern))?;
+                    }
+                    Expression::Between {
+                        value, low, high, ..
+                    } => {
+                        push(Node::Expression(value))?;
+                        push(Node::Expression(low))?;
+                        push(Node::Expression(high))?;
+                    }
+                    Expression::NullIf { left, right } => {
+                        push(Node::Expression(left))?;
+                        push(Node::Expression(right))?;
+                    }
+                    Expression::Case {
+                        branches,
+                        otherwise,
+                    } => {
+                        if branches.is_empty() || branches.len() > 64 {
+                            return Err(unsupported("CASE requires 1..64 branches"));
+                        }
+                        for branch in branches {
+                            push(Node::Expression(&branch.when))?;
+                            push(Node::Expression(&branch.then))?;
+                        }
+                        if let Some(value) = otherwise {
+                            push(Node::Expression(value))?;
+                        }
+                    }
+                    Expression::Coalesce { values } => {
+                        if values.is_empty() || values.len() > 64 {
+                            return Err(unsupported("COALESCE requires 1..64 inputs"));
+                        }
+                        for value in values {
+                            push(Node::Expression(value))?;
+                        }
+                    }
+                    Expression::Call { arguments, .. } => {
+                        if arguments.len() > 2 {
+                            return Err(unsupported("Scalar function arity exceeds bound"));
+                        }
+                        for value in arguments {
+                            push(Node::Expression(value))?;
+                        }
+                    }
+                    Expression::In { value, values } => {
+                        push(Node::Expression(value))?;
+                        if values.len() > MAX_VALUES {
+                            return Err(external(super::limit()));
+                        }
+                        for value in values {
+                            admitted.literal(value)?;
+                        }
+                    }
                 }
-                Expression::In { value, values } => {
-                    push(Node::Expression(value))?;
-                    if values.len() > MAX_VALUES {
-                        return Err(external(super::limit()));
-                    }
-                    for value in values {
-                        admitted.literal(value)?;
-                    }
-                    let expansion = expression_expansion(value)?
-                        .checked_mul(values.len())
-                        .ok_or_else(|| external(super::limit()))?;
-                    admitted.expanded = admitted
-                        .expanded
-                        .checked_add(expansion)
-                        .ok_or_else(|| external(super::limit()))?;
-                    if admitted.expanded > 64 << 20 {
-                        return Err(external(super::limit()));
-                    }
-                }
-            },
+            }
         }
     }
     Ok(admitted)
@@ -379,8 +425,72 @@ fn expression_expansion(value: &Expression) -> DfResult<usize> {
                 pending.push((left, copies, depth + 1));
                 pending.push((right, copies, depth + 1));
             }
-            Expression::Not { value } | Expression::IsNull { value } => {
-                pending.push((value, copies, depth + 1))
+            Expression::Not { value }
+            | Expression::IsNull { value }
+            | Expression::Cast { value, .. }
+            | Expression::Index { value, .. } => {
+                pending.push((value, copies, depth + 1));
+            }
+            Expression::Like { value, pattern, .. } => {
+                pending.push((value, copies, depth + 1));
+                pending.push((pattern, copies, depth + 1));
+            }
+            Expression::Between {
+                value, low, high, ..
+            } => {
+                pending.push((value, copies, depth + 1));
+                pending.push((low, copies, depth + 1));
+                pending.push((high, copies, depth + 1));
+            }
+            Expression::NullIf { left, right } => {
+                pending.push((
+                    left,
+                    copies
+                        .checked_mul(2)
+                        .ok_or_else(|| external(super::limit()))?,
+                    depth + 1,
+                ));
+                pending.push((right, copies, depth + 1));
+            }
+            Expression::Case {
+                branches,
+                otherwise,
+            } => {
+                for branch in branches {
+                    pending.push((&branch.when, copies, depth + 1));
+                    pending.push((&branch.then, copies, depth + 1));
+                }
+                if let Some(value) = otherwise {
+                    pending.push((value, copies, depth + 1));
+                }
+            }
+            Expression::Coalesce { values } => {
+                let copies = copies
+                    .checked_mul(2)
+                    .ok_or_else(|| external(super::limit()))?;
+                for value in values {
+                    pending.push((value, copies, depth + 1));
+                }
+            }
+            Expression::Call {
+                function,
+                arguments,
+            } => {
+                for (index, value) in arguments.iter().enumerate() {
+                    let copies = if index == 0
+                        && matches!(
+                            function,
+                            super::api::ScalarFunction::HasFlag
+                                | super::api::ScalarFunction::BitAnd
+                        ) {
+                        copies
+                            .checked_mul(2)
+                            .ok_or_else(|| external(super::limit()))?
+                    } else {
+                        copies
+                    };
+                    pending.push((value, copies, depth + 1));
+                }
             }
             Expression::In { value, values } => {
                 let copies = copies
@@ -624,6 +734,92 @@ fn expression(value: &Expression, schema: &DFSchema, owner: &Arc<QueryOwner>) ->
         )?,
         Expression::Not { value } => Expr::Not(Box::new(expression(value, schema, owner)?)),
         Expression::IsNull { value } => expression(value, schema, owner)?.is_null(),
+        Expression::Cast { value, target } => {
+            scalar_functions::cast(expression(value, schema, owner)?, *target, schema, owner)?
+        }
+        Expression::Call {
+            function,
+            arguments,
+        } => scalar_functions::call(
+            *function,
+            arguments
+                .iter()
+                .map(|v| expression(v, schema, owner))
+                .collect::<DfResult<Vec<_>>>()?,
+            schema,
+            owner,
+        )?,
+        Expression::Index { value, index } => {
+            scalar_functions::index(expression(value, schema, owner)?, *index, schema, owner)?
+        }
+        Expression::Like {
+            value,
+            pattern,
+            negated,
+        } => scalar_functions::like(
+            expression(value, schema, owner)?,
+            expression(pattern, schema, owner)?,
+            *negated,
+            schema,
+            owner,
+        )?,
+        Expression::Between {
+            value,
+            low,
+            high,
+            negated,
+        } => scalar_functions::between(
+            expression(value, schema, owner)?,
+            expression(low, schema, owner)?,
+            expression(high, schema, owner)?,
+            *negated,
+            schema,
+            owner,
+        )?,
+        Expression::Case {
+            branches,
+            otherwise,
+        } => {
+            let branches = branches
+                .iter()
+                .map(|b| {
+                    Ok((
+                        expression(&b.when, schema, owner)?,
+                        expression(&b.then, schema, owner)?,
+                    ))
+                })
+                .collect::<DfResult<Vec<_>>>()?;
+            let otherwise = otherwise
+                .as_deref()
+                .map(|v| expression(v, schema, owner))
+                .transpose()?;
+            exact_case(branches, otherwise, schema)?
+        }
+        Expression::Coalesce { values } => {
+            let branches = values
+                .iter()
+                .map(|v| {
+                    let value = expression(v, schema, owner)?;
+                    Ok((value.clone().is_not_null(), value))
+                })
+                .collect::<DfResult<Vec<_>>>()?;
+            exact_case(branches, None, schema)?
+        }
+        Expression::NullIf { left, right } => {
+            let left = expression(left, schema, owner)?;
+            let condition = numeric::binary(
+                left.clone(),
+                Operator::Eq,
+                expression(right, schema, owner)?,
+                schema,
+                owner,
+            )?;
+            exact_case(
+                vec![(condition, Expr::Literal(ScalarValue::Null, None))],
+                Some(left),
+                schema,
+            )?
+        }
         Expression::In { value, values } => {
             let value = expression(value, schema, owner)?;
             // Native IN coerces the whole list to one type, losing UInt64 bits
@@ -642,14 +838,20 @@ fn expression(value: &Expression, schema: &DFSchema, owner: &Arc<QueryOwner>) ->
                 })
                 .collect::<DfResult<Vec<_>>>()?;
             if comparisons.is_empty() {
-                Expr::Literal(ScalarValue::Boolean(Some(false)), None)
+                numeric::binary(
+                    value.is_null(),
+                    Operator::And,
+                    Expr::Literal(ScalarValue::Boolean(Some(false)), None),
+                    schema,
+                    owner,
+                )?
             } else {
                 while comparisons.len() > 1 {
                     let mut next = Vec::with_capacity(comparisons.len().div_ceil(2));
                     let mut iter = comparisons.into_iter();
                     while let Some(left) = iter.next() {
                         next.push(if let Some(right) = iter.next() {
-                            left.or(right)
+                            numeric::binary(left, Operator::Or, right, schema, owner)?
                         } else {
                             left
                         });
@@ -683,3 +885,144 @@ fn operator_value(value: BinaryOperator) -> Operator {
 
 #[cfg(test)]
 mod tests;
+
+/// Select a representation that cannot silently round a branch. Heterogeneous
+/// integer/float or scalar-kind outputs need an explicit variant representation
+/// before they can be exposed; the native coercion fallback is forbidden.
+fn exact_case(
+    mut branches: Vec<(Expr, Expr)>,
+    mut otherwise: Option<Expr>,
+    schema: &DFSchema,
+) -> DfResult<Expr> {
+    use arrow_schema::DataType;
+    use datafusion::logical_expr::expr::{Case, Cast};
+    let mut kinds = Vec::new();
+    for (condition, value) in &branches {
+        if !matches!(
+            condition.get_type(schema)?,
+            DataType::Boolean | DataType::Null
+        ) {
+            return Err(external(crate::relational::engine_compat::type_error()));
+        }
+        let kind = value.get_type(schema)?;
+        if kind != DataType::Null {
+            kinds.push(kind);
+        }
+    }
+    if let Some(value) = &otherwise {
+        let kind = value.get_type(schema)?;
+        if kind != DataType::Null {
+            kinds.push(kind);
+        }
+    }
+    let kind = if kinds.is_empty() {
+        DataType::Null
+    } else if kinds.iter().all(|v| v == &kinds[0]) {
+        kinds[0].clone()
+    } else if kinds.iter().all(super::values::integer) {
+        DataType::Decimal128(20, 0)
+    } else if kinds
+        .iter()
+        .all(|v| matches!(v, DataType::Float32 | DataType::Float64))
+    {
+        DataType::Float64
+    } else {
+        return Err(unsupported(
+            "Conditional branches currently require one exact common type; mixed integer/float or heterogeneous variants are not admitted",
+        ));
+    };
+    let normalize = |value: Expr| -> DfResult<Expr> {
+        if value.get_type(schema)? == kind {
+            Ok(value)
+        } else {
+            Ok(Expr::Cast(Cast::new(Box::new(value), kind.clone())))
+        }
+    };
+    for (_, value) in &mut branches {
+        *value = normalize(value.clone())?;
+    }
+    if let Some(value) = otherwise.take() {
+        otherwise = Some(normalize(value)?);
+    }
+    Ok(Expr::Case(Case::new(
+        None,
+        branches
+            .into_iter()
+            .map(|(a, b)| (Box::new(a), Box::new(b)))
+            .collect(),
+        otherwise.map(Box::new),
+    )))
+}
+
+/// One provider per exact table identity. Multiple lookups share the union of
+/// their requested IDs, while each plan leaf retains its own membership filter.
+/// Any full scan dominates selective requirements for that table.
+pub(super) struct SourceRequirement {
+    pub(super) table: TableRequest,
+    pub(super) ids: Option<Vec<u32>>,
+}
+pub(super) fn requirements(
+    plan: &QueryPlan,
+    owner: &Arc<QueryOwner>,
+) -> DfResult<Vec<SourceRequirement>> {
+    let admission = validate(plan, Some(owner))?;
+    let bytes = admission
+        .nodes
+        .checked_mul(1024)
+        .and_then(|n| n.checked_add(admission.values.checked_mul(16)?))
+        .and_then(|n| n.checked_add(admission.text.checked_mul(4)?))
+        .and_then(|n| n.checked_add(4096))
+        .ok_or_else(|| external(super::limit()))?;
+    owner.retain(bytes)?;
+    let mut output: Vec<SourceRequirement> = Vec::new();
+    let mut pending = vec![plan];
+    while let Some(plan) = pending.pop() {
+        owner.work(output.len().saturating_add(1))?;
+        match plan {
+            QueryPlan::Scan { table } | QueryPlan::Lookup { table, .. } => {
+                if output.iter().any(|entry| {
+                    entry.table.name == table.name
+                        && entry.table.mode == table.mode
+                        && entry.table != *table
+                }) {
+                    return Err(unsupported(
+                        "One query cannot bind different capture histories to the same table and mode",
+                    ));
+                }
+                let ids = match plan {
+                    QueryPlan::Lookup { ids, .. } => Some(ids.as_slice()),
+                    _ => None,
+                };
+                if let Some(existing) = output.iter_mut().find(|entry| entry.table == *table) {
+                    match (&mut existing.ids, ids) {
+                        (_, None) => existing.ids = None,
+                        (Some(current), Some(ids)) => current.extend_from_slice(ids),
+                        (None, Some(_)) => {}
+                    }
+                } else {
+                    output.push(SourceRequirement {
+                        table: table.clone(),
+                        ids: ids.map(<[u32]>::to_vec),
+                    });
+                }
+            }
+            QueryPlan::Filter { input, .. }
+            | QueryPlan::Project { input, .. }
+            | QueryPlan::Aggregate { input, .. }
+            | QueryPlan::Sort { input, .. }
+            | QueryPlan::Limit { input, .. } => pending.push(input),
+            QueryPlan::Join { left, right, .. } => {
+                pending.push(right);
+                pending.push(left);
+            }
+        }
+    }
+    for entry in &mut output {
+        if let Some(ids) = &mut entry.ids {
+            owner.work(ids.len().saturating_mul(16).saturating_add(1))?;
+            ids.sort_unstable();
+            ids.dedup();
+        }
+    }
+    Ok(output)
+}

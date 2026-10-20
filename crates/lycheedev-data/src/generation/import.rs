@@ -318,6 +318,7 @@ impl Builder {
 
 pub(crate) struct TableImporter<'table, 'body> {
     table: &'table Table<'body>,
+    selected_ids: Option<&'table [u32]>,
     schema: Arc<ImportedSchema>,
     columns: Vec<Column>,
     budget: Arc<Budget>,
@@ -395,6 +396,7 @@ impl<'table, 'body> TableImporter<'table, 'body> {
         )?;
         Ok(Self {
             table,
+            selected_ids: None,
             schema,
             columns,
             budget,
@@ -405,6 +407,16 @@ impl<'table, 'body> TableImporter<'table, 'body> {
             pending: None,
             stopped: false,
         })
+    }
+    pub(crate) fn select_ids(mut self, ids: &'table [u32]) -> Result<Self> {
+        if self.next != 0
+            || self.batch_ordinal != 0
+            || ids.windows(2).any(|pair| pair[0] >= pair[1])
+        {
+            return Err(shape());
+        }
+        self.selected_ids = Some(ids);
+        Ok(self)
     }
     /// Conservative bound reserved before constructing each batch, including
     /// Arrow builder growth overlap. A qualification snapshot can reject its
@@ -435,7 +447,12 @@ impl<'table, 'body> TableImporter<'table, 'body> {
     }
     fn next_batch_inner(&mut self) -> Result<Option<ImportedBatch>> {
         self.budget.check()?;
-        if self.pending.is_none() && self.next == self.table.logical_count() {
+        if self.pending.is_none()
+            && self.next
+                == self
+                    .selected_ids
+                    .map_or(self.table.logical_count(), <[u32]>::len)
+        {
             return Ok(None);
         }
         let allocation = self.budget.reserve_retained(self.batch_reservation)?;
@@ -452,8 +469,26 @@ impl<'table, 'body> TableImporter<'table, 'body> {
             let (id, row, row_bytes) = match self.pending.take() {
                 Some(row) => row,
                 None => {
-                    let Some(id) = self.table.id_at(self.next) else {
-                        break;
+                    let id = if let Some(ids) = self.selected_ids {
+                        let mut found = None;
+                        while let Some(id) = ids.get(self.next) {
+                            self.budget.charge(Cost::work(32))?;
+                            self.next += 1;
+                            if self.table.contains_id(*id) {
+                                found = Some(*id);
+                                break;
+                            }
+                        }
+                        let Some(id) = found else {
+                            break;
+                        };
+                        id
+                    } else {
+                        let Some(id) = self.table.id_at(self.next) else {
+                            break;
+                        };
+                        self.next += 1;
+                        id
                     };
                     let row = self.table.leased_row_values(id, self.limits.text_bytes)?;
                     if row.value().len() != self.columns.len() {
@@ -469,7 +504,6 @@ impl<'table, 'body> TableImporter<'table, 'body> {
                     if row_bytes > self.limits.value_bytes {
                         return Err(limit());
                     }
-                    self.next += 1;
                     (id, row, row_bytes)
                 }
             };
@@ -486,6 +520,9 @@ impl<'table, 'body> TableImporter<'table, 'body> {
             ids.append_value(id);
             bytes += row_bytes;
             rows += 1;
+        }
+        if rows == 0 {
+            return Ok(None);
         }
         let arrays = builders.into_iter().map(Builder::finish).collect();
         let records =
