@@ -621,3 +621,31 @@ fn saturated_recency_history_skips_growth_without_blocking_content_reads() {
     owner.finish(Ok(())).unwrap();
     resources.close().unwrap();
 }
+
+#[test]
+fn scoped_retirement_usage_excludes_staging_but_full_quota_keeps_it() {
+    let f = Fixture::new();
+    let control = OperationControl::default();
+    let resources = f.resources(&control);
+    let owner = resources
+        .reserve_derived_cache(AdditionalPeak::default())
+        .unwrap();
+    fs::write(owner.paths.objects.join("unknown-object"), b"123").unwrap();
+    fs::write(owner.paths.generations.join("unknown-generation"), b"12345").unwrap();
+    fs::write(owner.paths.staging.join("unknown-staging"), b"1234567").unwrap();
+    assert_eq!(scoped_usage(&owner).unwrap(), 8);
+    let whole = inventory_recovering(
+        &owner.home,
+        &owner.paths,
+        &owner.control,
+        None,
+        &owner.directories,
+    )
+    .unwrap();
+    assert_eq!(whole.object_namespace_bytes, 3);
+    assert_eq!(whole.generation_namespace_bytes, 5);
+    assert_eq!(whole.temporary_namespace_bytes, 7);
+    assert_eq!(scoped_usage(&owner).unwrap(), 8);
+    owner.finish(Ok(())).unwrap();
+    resources.close().unwrap();
+}

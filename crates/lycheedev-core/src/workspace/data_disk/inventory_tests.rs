@@ -586,6 +586,7 @@ fn unknown_directory_depth_and_entry_limits_preserve_owned_cleanup() {
     let monitor = Monitor::new();
     let mut entries = MAX_ENTRIES;
     let mut files = 0;
+    let mut managed_spools = BTreeMap::from([("unvisited-spool".to_owned(), 123)]);
     let error = scan(
         &unknown,
         &owner.paths.staging,
@@ -595,6 +596,7 @@ fn unknown_directory_depth_and_entry_limits_preserve_owned_cleanup() {
         &mut files,
         &owner.control,
         &owner.directories,
+        &mut managed_spools,
     )
     .unwrap_err();
     assert_eq!(error.code, "vault.data_cache_scan_limit");
@@ -609,10 +611,15 @@ fn unknown_directory_depth_and_entry_limits_preserve_owned_cleanup() {
         &mut 0,
         &owner.control,
         &owner.directories,
+        &mut managed_spools,
     )
     .unwrap_err();
     assert_eq!(error.code, "vault.data_cache_scan_limit");
     assert_eq!(monitor.events().opened.len(), 1); // Depth refusal precedes open.
+    assert_eq!(
+        managed_spools,
+        BTreeMap::from([("unvisited-spool".to_owned(), 123)])
+    );
     drop(monitor);
     owner.finish(Ok(())).unwrap();
 }

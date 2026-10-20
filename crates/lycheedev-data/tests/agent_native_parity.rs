@@ -69,7 +69,10 @@ async fn private_metadata_fixture_drives_typed_session_with_oracle_exact_rows() 
     drop(metadata);
     let oracle = lycheedev_data::dispatch(&fx.invocation(
         "data sql",
-        &[("--sql", "SELECT ID, Value, A FROM NativeSample ORDER BY ID")],
+        &[(
+            "--sql",
+            r#"SELECT ID, Value, "A[0]", "A[1]", "A[2]" FROM NativeSample ORDER BY ID"#,
+        )],
     ))
     .unwrap();
     assert_eq!(oracle.data["complete"], true);
@@ -84,11 +87,29 @@ async fn private_metadata_fixture_drives_typed_session_with_oracle_exact_rows() 
     )
     .await
     .unwrap();
-    assert_eq!(page["columns"], oracle.data["result"]["columns"]);
-    assert_eq!(page["rows"], oracle.data["result"]["rows"]);
+    // The migration SQL interface exposes physical array slots as columns;
+    // the typed interface preserves the array. Authenticate the exact legacy
+    // shape before rebuilding only that declared fixed-width array for parity.
+    assert_eq!(
+        oracle.data["result"]["columns"],
+        json!(["ID", "Value", "A[0]", "A[1]", "A[2]"])
+    );
+    assert_eq!(page["columns"], json!(["ID", "Value", "A"]));
+    let canonical_oracle_rows: Vec<Value> = oracle.data["result"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            let cells = row.as_array().unwrap();
+            assert_eq!(cells.len(), 5);
+            json!([cells[0], cells[1], [cells[2], cells[3], cells[4]]])
+        })
+        .collect();
+    assert_eq!(page["rows"], json!(canonical_oracle_rows));
     assert_eq!(page["rows"][0][1].to_string(), "9007199254740993");
     assert_eq!(page["rows"][1][1].to_string(), "-9223372036854775808");
     assert_eq!(page["rows"][0][2], json!([1, 2, 3]));
+    assert_eq!(page["rows"][1][2], json!([4, 5, 6]));
     execute(
         &mut session,
         json!({"task":"release","handle":handle}),

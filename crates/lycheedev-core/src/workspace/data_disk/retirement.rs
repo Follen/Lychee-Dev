@@ -93,6 +93,10 @@ fn scoped_usage(owner: &DerivedReservation<'_>) -> Result<u64> {
     let mut entries = 0;
     let mut files = 0;
     let mut bytes = 0;
+    // This target is only objects + generations, never the staging namespace.
+    // Share one scan context across both roots, but do not load or append spool
+    // reservations here: whole-quota inventory owns that separate accounting.
+    let mut managed_spools = BTreeMap::new();
     for root in [&owner.paths.objects, &owner.paths.generations] {
         bytes = sum([
             bytes,
@@ -105,6 +109,7 @@ fn scoped_usage(owner: &DerivedReservation<'_>) -> Result<u64> {
                 &mut files,
                 &owner.control,
                 &owner.directories,
+                &mut managed_spools,
             )?,
         ])?;
     }
