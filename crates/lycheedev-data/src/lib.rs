@@ -2,14 +2,19 @@
 //! Authenticated game data formats and bounded queries.
 #[cfg(test)]
 extern crate self as lycheedev_data;
+pub mod agent_session;
 pub mod assets;
 pub mod availability;
 pub mod blte;
+#[cfg(test)]
+#[path = "../tests/support/data_cache.rs"]
+mod cache_fixture;
 mod capture;
 pub mod casc;
 pub mod db2;
 pub mod decoded_cache;
 pub mod definitions;
+pub mod engine;
 pub(crate) mod generation;
 pub mod hotfix;
 pub mod installed;
@@ -26,9 +31,6 @@ pub mod stream;
 pub mod table;
 #[cfg(test)]
 mod unicode_checks;
-#[cfg(test)]
-#[path = "../tests/support/data_cache.rs"]
-mod cache_fixture;
 mod unicode_simple;
 
 use lycheedev_core::{Invocation, Outcome, Result, ToolkitError};
@@ -44,6 +46,8 @@ pub(crate) fn fault(code: &str, exit: i32, message: impl Into<String>) -> Toolki
 
 pub fn commands() -> &'static [&'static str] {
     &[
+        "data agent schema",
+        "data agent serve",
         "data cache prepare",
         "data hotfix",
         "data sql",
@@ -78,7 +82,20 @@ pub fn prune_derived_cache(inv: &Invocation) -> Result<Outcome> {
 }
 
 pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
-    if inv.command == "data cache prepare" { return generation::dispatch(inv); }
+    if inv.command == "data agent schema" {
+        inv.control.check()?;
+        return Ok(Outcome::new(agent_session::schema()));
+    }
+    if inv.command == "data agent serve" {
+        return Err(fault(
+            "data.session.supervisor_required",
+            3,
+            "Data Agent serve requires the CLI-owned supervised process entry",
+        ));
+    }
+    if inv.command == "data cache prepare" {
+        return generation::dispatch(inv);
+    }
     if inv.command == "data hotfix"
         && inv.flag_bool("--scan")
         && inv.flag("--source") != Some("dbcache")
@@ -124,7 +141,9 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
         return match inv.required("--source")? {
             "dbcache" => hotfix::dispatch(inv),
             "wago" | "raidbots" => hotfix::remote::dispatch(inv),
-            _ => Err(ToolkitError::arguments("--source must be wago, dbcache, or raidbots")),
+            _ => Err(ToolkitError::arguments(
+                "--source must be wago, dbcache, or raidbots",
+            )),
         };
     }
     Err(fault(
@@ -166,8 +185,38 @@ mod command_surface_tests {
             "no duplicate registration"
         );
         let additions: BTreeSet<_> = registered.difference(&expected).copied().collect();
-        assert_eq!(additions, BTreeSet::from(["data cache prepare"]));
-        assert!(expected.is_subset(&registered), "all fixed Go commands remain registered");
+        assert_eq!(
+            additions,
+            BTreeSet::from([
+                "data agent schema",
+                "data agent serve",
+                "data cache prepare"
+            ])
+        );
+        assert!(
+            expected.is_subset(&registered),
+            "all fixed Go commands remain registered"
+        );
+    }
+
+    #[test]
+    fn agent_discovery_is_available_without_opening_a_session() {
+        let mut inv = Invocation {
+            command: "data agent schema".into(),
+            positional: None,
+            flags: BTreeMap::new(),
+            home: std::path::PathBuf::new(),
+            cwd: std::path::PathBuf::new(),
+            control: Default::default(),
+        };
+        let outcome = dispatch(&inv).unwrap();
+        assert!(outcome.complete);
+        assert_eq!(outcome.data, agent_session::schema());
+        inv.command = "data agent serve".into();
+        assert_eq!(
+            dispatch(&inv).unwrap_err().code,
+            "data.session.supervisor_required"
+        );
     }
 
     #[test]
@@ -189,5 +238,3 @@ mod command_surface_tests {
         }
     }
 }
-#[cfg(all(test, feature = "datafusion-qualification"))]
-mod engine;

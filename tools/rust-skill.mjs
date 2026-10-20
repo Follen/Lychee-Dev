@@ -1,7 +1,7 @@
 // Stage the exact Skill and an out-of-band machine declaration receipt.
 // CLI describe/help owns discovery; staging never adds a prose command manual.
 // Declaration and byte custody are not behavioral acceptance. This does not install.
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -39,7 +39,14 @@ export function stageSkill(destination, commands) {
   if (existsSync(receipt)) throw new Error('rust-skill.receipt_exists');
   // Require a new directory. Never overwrite an installed or prior staged Skill.
   mkdirSync(destination);
-  cpSync(source, destination, { recursive: true, force: false, errorOnExist: true });
+  // The exclusively created root is already ours. Copy each child into it;
+  // Node on Windows rejects cpSync(source, existingRoot, errorOnExist: true).
+  // Keep no-overwrite checks on every child rather than relaxing that policy.
+  for (const name of readdirSync(source)) {
+    cpSync(join(source, name), join(destination, name), {
+      recursive: true, force: false, errorOnExist: true,
+    });
+  }
   writeFileSync(receipt, `${JSON.stringify({
     schema: 'lycheedev.skill-declared-contract.v1', commands,
     targetCommit: target.oracle.commit, missingCommands, missingFlags,

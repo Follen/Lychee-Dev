@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync, cpSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync, cpSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -220,4 +220,31 @@ test('CI approved Rust static mode is independent and cannot combine contract so
   assert.equal(JSON.parse(result.stdout).checkKind, 'static-reference-consistency');
   assert.notEqual(run(['--contract-file', contractFile]).status, 0);
   assert.notEqual(run(['--bin', process.execPath]).status, 0);
+});
+
+
+test('staging refuses pre-existing roots without altering their files', t => {
+  const root = mkdtempSync(join(tmpdir(), 'lycheedev-stage-existing-'));
+  t.after(() => rmSync(root, {recursive: true, force: true}));
+  const destination = join(root, 'skill');
+  mkdirSync(destination);
+  assert.throws(() => stageSkill(destination, oracle.commands), {code: 'EEXIST'});
+  writeFileSync(join(destination, 'sentinel'), 'preserve');
+  assert.throws(() => stageSkill(destination, oracle.commands), {code: 'EEXIST'});
+  assert.equal(readFileSync(join(destination, 'sentinel'), 'utf8'), 'preserve');
+  assert.deepEqual(readdirSync(destination), ['sentinel']);
+  assert.equal(existsSync(`${destination}.contract.json`), false);
+});
+
+
+test('staging refuses an existing directory link without following it', t => {
+  const root = mkdtempSync(join(tmpdir(), 'lycheedev-stage-link-'));
+  t.after(() => rmSync(root, {recursive: true, force: true}));
+  const target = join(root, 'protected'), destination = join(root, 'skill');
+  mkdirSync(target); writeFileSync(join(target, 'sentinel'), 'preserve');
+  symlinkSync(target, destination, 'junction');
+  assert.throws(() => stageSkill(destination, oracle.commands), {code: 'EEXIST'});
+  assert.deepEqual(readdirSync(target), ['sentinel']);
+  assert.equal(readFileSync(join(target, 'sentinel'), 'utf8'), 'preserve');
+  assert.equal(existsSync(`${destination}.contract.json`), false);
 });
