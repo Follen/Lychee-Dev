@@ -5,6 +5,8 @@
 以 [handover](handover.md) 为当前事实、[DESIGN](DESIGN.md#authorized-architecture-implementation-plan--2026-10-19) 为完整计划。质量基线f811；性能参考固定Go323。先业务质量/完整实现，再≤30%耗时门禁，之后正式五项循环。历史已完成项与原失败留在[308efa旧清单](https://github.com/Follen/Lychee-Dev/blob/308efa2766d00273b13c9c7e24a0b956bb60e9e9/todo.md)，不滚动复制到当前待办。
 
 ## 立即闭合固定基线
+- [ ] 2026-10-20 uppercase source BlobRef最小产品修复已独审，Rust NOT_RUN；固定新SHA先default/DF all-targets，再实际列出并跑generation全组（静态42，其中retirement6），逐名核原uppercase失败及新增严格边界例；继续原队列剩余项。严格identity/derived与definition耦合不变，原f0d失败保留。
+
 - [x] 070f实际all-targets通过；2808四处编译错误和Node版本断言闭合，历史失败保留。
 - [x] 原copy/发布后receipt路径/generation取消四个修复目标均通过；278 DataFusion可选资格14项通过保持独立，不代表生产执行器或性能。
 - [x] 070f七Node为357通过/0失败/4权限skip；Rust为957通过/23失败/6 ignored，不称全仓通过。

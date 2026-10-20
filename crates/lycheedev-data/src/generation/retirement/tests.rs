@@ -171,8 +171,86 @@ fn retirement_projection_accepts_historical_uppercase_source_blobrefs_only() {
     );
     assert_ne!(invalid, changed);
     assert!(reference(key, invalid.as_bytes(), &budget).is_err());
+    for (field, value) in [
+        ("identitySha256", receipt.identity_sha256),
+        ("definitionSha256", receipt.definition_sha256),
+        ("typedSchemaSha256", receipt.typed_schema_sha256),
+    ] {
+        let invalid = changed.replacen(
+            &format!("\"{field}\":\"{value}\""),
+            &format!("\"{field}\":\"{}\"", value.to_ascii_uppercase()),
+            1,
+        );
+        assert_ne!(invalid, changed);
+        assert_eq!(
+            reference(key, invalid.as_bytes(), &budget)
+                .unwrap_err()
+                .code,
+            "records.generation_invalid"
+        );
+    }
+    let wrong_definition = format!(r#"{{"sha256":"{}","bytes":1}}"#, "A".repeat(64));
+    assert!(
+        !"A".repeat(64)
+            .eq_ignore_ascii_case(receipt.definition_sha256)
+    );
+    let definition: BlobRef = serde_json::from_str(receipt.definition_object.get()).unwrap();
+    let uppercase_definition = receipt
+        .definition_object
+        .get()
+        .replace(&definition.sha256, &definition.sha256.to_ascii_uppercase());
+    let invalid = changed.replacen(
+        &format!("\"definitionObject\":{uppercase_definition}"),
+        &format!("\"definitionObject\":{wrong_definition}"),
+        1,
+    );
+    assert_ne!(invalid, changed);
+    assert_eq!(
+        reference(key, invalid.as_bytes(), &budget)
+            .unwrap_err()
+            .code,
+        "records.generation_invalid"
+    );
     assert_eq!(fs::read(path(&f, &result)).unwrap(), raw);
     fs::remove_dir_all(f.root).unwrap();
+}
+#[test]
+fn retirement_source_blobrefs_keep_strict_shape_length_and_optional_contract() {
+    for hash in ["ab".repeat(32), "AB".repeat(32), "aB".repeat(32)] {
+        let raw = RawValue::from_string(format!(r#"{{"sha256":"{hash}","bytes":1}}"#)).unwrap();
+        for required in [false, true] {
+            let value = blob(&raw, required).unwrap().unwrap();
+            assert_eq!(value.sha256, hash);
+            assert_eq!(value.bytes, 1);
+        }
+    }
+    let hash = "AB".repeat(32);
+    for malformed in [
+        format!(r#"{{"sha256":"{}","bytes":1}}"#, "A".repeat(63)),
+        format!(r#"{{"sha256":"{}","bytes":1}}"#, "A".repeat(65)),
+        format!(r#"{{"sha256":"{}G","bytes":1}}"#, "A".repeat(63)),
+        format!(r#"{{"sha256":"{}é","bytes":1}}"#, "A".repeat(62)),
+        format!(r#"{{"sha256":"{hash}","bytes":0}}"#),
+        format!(r#"{{"sha256":"{hash}","bytes":-1}}"#),
+        format!(r#"{{"sha256":"{hash}","bytes":1,"unknown":true}}"#),
+        format!(r#"{{"sha256":"{hash}","sha256":"{hash}","bytes":1}}"#),
+    ] {
+        let raw = RawValue::from_string(malformed).unwrap();
+        for required in [false, true] {
+            assert_eq!(
+                blob(&raw, required).unwrap_err().code,
+                "records.generation_invalid"
+            );
+        }
+    }
+    for empty in ["null", r#"{"sha256":"","bytes":0}"#] {
+        let raw = RawValue::from_string(empty.into()).unwrap();
+        assert!(blob(&raw, false).unwrap().is_none());
+        assert_eq!(
+            blob(&raw, true).unwrap_err().code,
+            "records.generation_invalid"
+        );
+    }
 }
 #[test]
 fn typed_dry_run_preserves_exact_files_and_incompatible_staging_flag_is_rejected() {

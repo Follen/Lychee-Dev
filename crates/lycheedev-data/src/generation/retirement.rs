@@ -33,7 +33,11 @@ fn blob(raw: &RawValue, required: bool) -> Result<Option<BlobRef>> {
     match value {
         // Historical source BlobRefs accept uppercase digests. This projection
         // does not use their text as a managed deletion path or object key.
-        Some(value) if selection::valid_digest(&value.sha256, 64) && value.bytes > 0 => {
+        Some(value)
+            if value.sha256.len() == 64
+                && value.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+                && value.bytes > 0 =>
+        {
             Ok(Some(value))
         }
         Some(value) if !required && value.sha256.is_empty() && value.bytes == 0 => Ok(None),

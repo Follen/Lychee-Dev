@@ -36,6 +36,8 @@ Source warm诊断仅增加profile v2的4个互斥子段：实际read、SHA、typ
 
 CLI 静态 oracle 修复（2026-10-20）：历史适配器单测固定读取并认证 c508b10 的原始 contract.rs，不再把当前产品变化误判为单测自身损坏；实际历史 3.2.2 runner 仍退出1，原始差异和未验证提取保留。新的独立固定 Go3.2.3 门禁认证85项完整命令、116项参数arity、7个完整产品profile和55份addon，仅接受已独立规定的精确CLI扩展/措辞及两个完整release字段文件差异；raw exact仍FAIL，approved static为PASS。最终f0d产品字节输入不变，云端八套Node为106通过/0失败/1非Windows跳过（107项），四代fixture认证通过；这不是Rust/Windows/runtime或性能验收。CI保留旧报告并阻断旧提取错误，新3.2.3步骤作为独立阻断门禁；当前固定f0d本机测试队列不变。说明及复验命令见[3.2.3静态门禁](tests/rust-parity/README-3.2.3.md)。
 
+退役 uppercase 最小产品修复（2026-10-20）：固定 f0d 的实际 native 队列出现历史 uppercase source BlobRef 被拒；根因是 retirement::blob 误用 lowercase-only selection::valid_digest。本批仅该路径改为精确64字节 ASCII hex（大小写均可），保正bytes、严格serde形状、optional合同；identity/derived hash与definition耦合不放宽。两份产品/测试文件已经独立源码审查、rustfmt解析及patch检查；云端缺少固定Emmy源码，编译/测试NOT_RUN，不能称失败已闭合。新增1项严格边界测试并扩展原uppercase测试，静态generation 41→42、retirement 5→6；须以固定新SHA实际libtest名单为准，顺序复验default/DF all-targets、generation全组，再完成原固定队列剩余项；旧失败和原已通过结果保留，不合并冒充新版本全过。此前CLI oracle-only提交5fbbb7e完整保留。
+
 ## 3. Home、容量和所有权边界
 
 Data默认容量为**5,000,000,000字节（十进制5GB）**，配置支持明确单位；与测试scratch 5/6GiB不同。最终统一核算Data下载/共享blob归属、物化/索引/目录、staging/spill/导出峰值和证据占用，按内容去重防双计。活跃lease和证据引用保护；旧已超额或配置缩小先拒新增并说明，不删除证据。
