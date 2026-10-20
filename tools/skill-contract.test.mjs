@@ -5,11 +5,25 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { stageSkill } from './rust-skill.mjs';
+import { loadCliContractOracle } from '../tests/rust-parity/cli-contract-oracle-3.2.3.mjs';
 
 const contractFile = resolve('tests/rust-parity/go-3.2.0.manifest.json');
 const oracle = JSON.parse(readFileSync(contractFile, 'utf8'));
 const historicalDirectory = resolve('tests/rust-skill-usage/baselines/go3.2.2-commands.md');
 const staticCheck = root => spawnSync(process.execPath, [resolve('tools/skill-contract.mjs'), '--skill-root', root, '--contract-file', contractFile], { encoding: 'utf8', shell: false, timeout: 120000 });
+// Current docs use independently enumerated approved extensions, never the
+// candidate commands.json as its own oracle. Historical fixtures stay frozen.
+function currentStaticCheck(root, mutate = () => {}) {
+  const temporary = mkdtempSync(join(tmpdir(), 'lycheedev-current-contract-'));
+  try {
+    const commands = loadCliContractOracle(readFileSync(contractFile)).expected;
+    mutate(commands);
+    const contract = join(temporary, 'approved.json');
+    writeFileSync(contract, JSON.stringify({commands}));
+    return spawnSync(process.execPath, [resolve('tools/skill-contract.mjs'), '--skill-root', root, '--contract-file', contract], {encoding: 'utf8', shell: false, timeout: 120000});
+  } finally { rmSync(temporary, {recursive: true, force: true}); }
+}
+
 
 test('skill contract rejects unsupported workflow commands and missing packaged references', t => {
   const root = mkdtempSync(join(tmpdir(), 'lycheedev-skill-contract-'));
@@ -52,7 +66,7 @@ test('historical test fixture retains every fixed target command, argument and f
     mutates: command.mutates, flags: command.flags,
   })).sort((a, b) => a.invocation.localeCompare(b.invocation));
   assert.deepEqual(actual, expected);
-  const result = staticCheck(resolve('skills/lycheedev'));
+  const result = currentStaticCheck(resolve('skills/lycheedev'));
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(JSON.parse(result.stdout).checkKind, 'static-reference-consistency');
 });
@@ -74,7 +88,7 @@ test('Rust staging retains the full workflow even when the candidate lacks targe
   assert.equal(existsSync(join(destination, 'references/candidate-contract.json')), false);
   const saved = JSON.parse(readFileSync(`${destination}.contract.json`, 'utf8'));
   assert.deepEqual(saved.commands, declared);
-  const result = staticCheck(destination);
+  const result = currentStaticCheck(destination);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   // Missing capabilities remain explicit without turning help into instructions.
   assert.deepEqual(saved.missingCommands, ['live doctor', 'source batch']);
@@ -187,4 +201,23 @@ test('default target generation checks the historical fixture without rewriting 
   assert.equal(result.stdout.trim(), historicalDirectory);
   assert.deepEqual(readFileSync(path), before);
   assert(!before.toString().includes('Flags:'));
+});
+
+test('current Agent references require exact approved commands while historical fixture stays frozen', () => {
+  const root = resolve('skills/lycheedev');
+  assert.equal(currentStaticCheck(root).status, 0);
+  const absent = currentStaticCheck(root, commands => commands.splice(commands.findIndex(row => row.path === 'data agent serve'), 1));
+  assert.notEqual(absent.status, 0, 'an advertised new command cannot be omitted');
+  assert.notEqual(staticCheck(root).status, 0, 'historical Go contract cannot certify new Agent docs');
+  assert.equal(JSON.parse(readFileSync(contractFile)).commands.length, 84);
+});
+
+test('CI approved Rust static mode is independent and cannot combine contract sources', () => {
+  const run = extra => spawnSync(process.execPath, [resolve('tools/skill-contract.mjs'), '--approved-rust', ...extra], {encoding:'utf8',shell:false,timeout:120000});
+  const result = run([]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(JSON.parse(result.stdout).contracts, 87);
+  assert.equal(JSON.parse(result.stdout).checkKind, 'static-reference-consistency');
+  assert.notEqual(run(['--contract-file', contractFile]).status, 0);
+  assert.notEqual(run(['--bin', process.execPath]).status, 0);
 });

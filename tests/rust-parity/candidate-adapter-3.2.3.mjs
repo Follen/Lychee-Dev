@@ -5,11 +5,16 @@ import { RUST_FILES, readBounded, sha256, parseRegistrations, validateCommands,
 // Reviewed against c508b10's 640f49… contract: implemented() is byte-identical;
 // takes_value adds only --data-derived=false. Remaining changes are Rust tests.
 // A later source edit, including tests/comments, requires a fresh review.
-export const CANDIDATE_CONTRACT_SHA256 = '66240b8ebb9d2920d7308e5bce38ff859c58fcb9192b57ee7ee1b015b9e836c8';
-export const CANDIDATE_CONTRACT_BLOB = '1060a12cbd68e3913deb52c3d5610ee336751c99';
+export const HISTORICAL_CONTRACT_SHA256 = '66240b8ebb9d2920d7308e5bce38ff859c58fcb9192b57ee7ee1b015b9e836c8';
+export const HISTORICAL_CONTRACT_BLOB = '1060a12cbd68e3913deb52c3d5610ee336751c99';
+// Agent successor: implemented() is unchanged; the only new parser arm is
+// --result-ttl-seconds=true. Full approved tests/metadata are separately pinned.
+export const CANDIDATE_CONTRACT_SHA256 = 'da8ed5418cf1de015e9f24c8012bd2eae3eb7ce0356cb4fb0f51d2dde744274f';
+export const CANDIDATE_CONTRACT_BLOB = 'f3f72aa6290c6f15298508ea0bbc9af80c6bf561';
+const reviewedContract = source => [HISTORICAL_CONTRACT_SHA256, CANDIDATE_CONTRACT_SHA256].includes(sha256(source));
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 export function extractCandidateAdvertised(inventory, texts) {
-  if (sha256(texts.filter) !== CANDIDATE_CONTRACT_SHA256) return { state: 'unverified', reason: 'contract.rs changed; review the static advertised-filter adapter', commands: null };
+  if (!reviewedContract(texts.filter)) return { state: 'unverified', reason: 'contract.rs changed; review the static advertised-filter adapter', commands: null };
   const registrations = Object.fromEntries(['source', 'data', 'live', 'delivery', 'workspace', 'evidence', 'cache'].map(key => [key, parseRegistrations(texts[key].toString('utf8'))]));
   const commands = inventory.filter(d => {
     if (['version', 'describe', 'project init', 'project status', 'project lock', 'target available'].includes(d.path)) return true;
@@ -20,7 +25,7 @@ export function extractCandidateAdvertised(inventory, texts) {
 }
 // The whole containing source is authenticated before this narrow match adapter.
 export function extractCandidateArities(source) {
-  if (sha256(source) !== CANDIDATE_CONTRACT_SHA256) return null;
+  if (!reviewedContract(source)) return null;
   const text = source.toString('utf8');
   const body = text.match(/pub fn takes_value\(&self\) -> bool \{[\s\S]*?match self\.name\(\) \{([\s\S]*?)\n        \}/)?.[1];
   assert(body, 'explicit arity implementation missing');

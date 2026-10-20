@@ -1,7 +1,7 @@
 // Checker/fault tests only. No synthetic envelope is native Skill acceptance.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
+import {spawnSync, execFileSync} from 'node:child_process';
 import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {dirname, join, resolve, win32} from 'node:path';
 import os from 'node:os';
@@ -91,9 +91,12 @@ function dataValue(entry, fixture) {
 }
 const envelope = (result, captures = [], context = {}) => ({schema: 'lycheedev.result.v1', ok: true, operationId: '', context, result, captures, warnings: [], error: null});
 const historicalSkill = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines/rust-candidate-skill.json')));
-function historicalSkillBytes() {
-  const archive = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines/rust-candidate-0002ce-files.json')));
-  const contract = loadDataSkillContract(dataSkillIdentity(historicalSkill));
+const simplifiedSkill = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines/rust-simplified-skill.json')));
+function historicalSkillBytes(selected = historicalSkill) {
+  const archives = new Map([[historicalSkill.sourceCommit, 'rust-candidate-0002ce-files.json'], [simplifiedSkill.sourceCommit, 'rust-simplified-6187-files.json']]);
+  assert(archives.has(selected.sourceCommit), 'no arbitrary historical source lookup');
+  const archive = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines', archives.get(selected.sourceCommit))));
+  const contract = loadDataSkillContract(dataSkillIdentity(selected));
   assert.equal(archive.sourceCommit, contract.sourceCommit); assert.equal(archive.tree, contract.tree);
   assert.deepEqual(archive.files.map(row => row.path), contract.files.map(row => row.path));
   return new Map(archive.files.map((row, index) => {
@@ -104,7 +107,7 @@ function historicalSkillBytes() {
 function makeReport(t, originalRoot = 'C:\\project', selectedIdentity) {
   const directory = temporary(t), evidence = join(directory, 'relocated-evidence'); mkdirSync(evidence);
   const scratch = win32.join(originalRoot, '.tmp/owner');
-  const skill = loadDataSkillContract(selectedIdentity), archived = selectedIdentity ? historicalSkillBytes() : null;
+  const skill = loadDataSkillContract(selectedIdentity), archived = selectedIdentity ? historicalSkillBytes(skill) : null;
   const config = {root: originalRoot, runnerRoot: 'C:\\runner-only', skillIdentity: dataSkillIdentity(skill), scratch, evidence: 'C:\\project\\evidence\\owner', platform: 'win32', arch: 'x64', node: 'C:\\node24\\node.exe', prefix: win32.join(scratch, 'npm-prefix'), sourcePackage: 'C:\\project\\candidate\\package', version: '3.5.0-rust-test', npm: {path: 'C:\\node24\\node_modules\\npm\\bin\\npm-cli.js'}, exporters: {executables: [{path: 'C:\\project\\target\\debug\\deps\\catalog.exe'}, {path: 'C:\\project\\target\\debug\\deps\\partial.exe'}]}, packageFiles: [{path: 'package.json', bytes: 2, sha256: digest('{}')}, ...skill.files.map(row => ({path: 'payload/skill/' + row.path, bytes: row.bytes, sha256: row.sha256}))]};
   config.launcher = win32.join(config.prefix, 'node_modules/lycheedev/payload/skill/scripts/lycheedev.mjs'); config.tgz = win32.join(scratch, `lycheedev-${config.version}.tgz`); config.packageSHA256 = inventoryHash(config.packageFiles);
   const report = {schema: 'lycheedev.skill-data-usage.v2', state: 'passed_selected_data_workflow', goContract: workflow.goContract, skillTree: 'b9e162ace7abe7ea4a2feecef822283767eb1210', completeSkillAcceptance: false, config, checks: CHECKS.map(caseId => ({caseId, state: 'passed'})), pendingTasks: pendingDataTasks(workflow), fixtures: {}, seeded: {}, workspaces: {}, queries: {}, keys: {}, proofs: {}, commands: [], completedTasks: [{taskId: 'g323-data-query', runtimeVerified: true, basis: 'actual_owned_npm_installed_skill_and_independent_full_capture_replay', captures: 16}]};
@@ -161,11 +164,11 @@ function makeReport(t, originalRoot = 'C:\\project', selectedIdentity) {
 test('Data fixed IN rows, unordered order and CSV bytes remain exact', () => { assert.equal(CSV.length, 76); assert.equal(digest(CSV), CSV_SHA256); assert.equal(CASES.length, 11); assert.equal(CHECKS.length, 26); assert.deepEqual(requestFor(CASES[1]).parameters, PARAMETERS); });
 test('candidate authenticates all25 source files separately from unchanged Go323 oracle', () => {
   const contract = assertDataSkillDirectory(join(root, 'skills/lycheedev'));
-  assert.equal(contract.files.length, 25); assert.equal(skillTreeIdentity(contract.files), '231818eb48f81cf927542bb19d9a8964dfbe4baf');
+  assert.equal(contract.files.length, 25); assert.equal(skillTreeIdentity(contract.files), dataSkillIdentity().candidateTree);
   const original = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines/go3.2.3-skill.json')));
   assert.equal(original.files.length, 23); assert.equal(skillTreeIdentity(original.files), 'b9e162ace7abe7ea4a2feecef822283767eb1210');
   assert.equal(original.files.find(row => row.path === 'SKILL.md').sha256, 'cbde6b4bb2b598137cfe55c0556765b28890b036e406c1877700a05a33fb6957');
-  assert.equal(contract.files.find(row => row.path === 'SKILL.md').sha256, '7a172867af600dc4b275725d626c45feef66e450e8357a24973dd0c28bb05b68');
+  assert.equal(contract.files.find(row => row.path === 'SKILL.md').sha256, '8b6ba6a956bb06790852a01ea39eb8188b4a991b480287c6d838c6d7d2d7fd8f');
   for (const row of original.files.filter(row => ['scripts/lycheedev.mjs', 'agents/openai.yaml'].includes(row.path))) assert.deepEqual(contract.files.find(current => current.path === row.path), row);
 });
 test('candidate rejects same-length tampering even with a forged matching SHA256', () => {
@@ -302,4 +305,32 @@ test('unknown missing null and mixed candidate identities cannot silently select
     const f = makeReport(t); f.report.config.skillIdentity = identity; assert.throws(f.verify);
   }
   const f = makeReport(t); f.report.config.skillIdentity = dataSkillIdentity(historicalSkill); assert.throws(f.verify, /independently fixed candidate/);
+});
+
+test('simplified 6187 Skill keeps its original full bytes and archived report identity', t => {
+  const original = loadDataSkillContract(dataSkillIdentity(simplifiedSkill));
+  assert.equal(original.tree, '231818eb48f81cf927542bb19d9a8964dfbe4baf');
+  assert.equal(historicalSkillBytes(simplifiedSkill).size, 25);
+  const f = makeReport(t, 'C:\\project', dataSkillIdentity(simplifiedSkill));
+  assert.equal(f.verify(), true);
+  assert.equal(f.report.commands.length, 42);
+  assert.equal(f.report.checks.length, 26);
+  assert.deepEqual(f.report.config.skillIdentity, dataSkillIdentity(simplifiedSkill));
+});
+
+test('current Skill identity is a fixed Git source, not learned from candidate bytes', () => {
+  const current = loadDataSkillContract();
+  const changed = current.files.filter((row, i) => row.gitBlob !== simplifiedSkill.files[i].gitBlob).map(row => row.path);
+  assert.deepEqual(changed, ['SKILL.md', 'references/commands.md', 'references/data-investigation.md']);
+  assert.equal(execFileSync('git', ['--no-replace-objects', 'rev-parse', `${current.sourceCommit}:skills/lycheedev`], {cwd:root, encoding:'utf8'}).trim(), current.tree);
+  for (const row of current.files) {
+    const bytes = execFileSync('git', ['--no-replace-objects', 'cat-file', 'blob', `${current.sourceCommit}:skills/lycheedev/${row.path}`], {cwd:root, maxBuffer:1<<20});
+    assertDataSkillBytes(bytes, row);
+  }
+  for (const path of changed) {
+    const row = current.files.find(row => row.path === path), bytes = readFileSync(join(root, 'skills/lycheedev', path));
+    bytes[0] ^= 1;
+    assert.throws(() => assertDataSkillBytes(bytes, row), /SHA256/);
+    assert.throws(() => assertDataSkillBytes(bytes, {...row, sha256:digest(bytes)}), /Git blob/);
+  }
 });

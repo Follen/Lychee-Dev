@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RUST_FILES, LIMITS, sha256, readBounded, extractArities, extractAdvertised } from './oracle.mjs';
-import { CANDIDATE_CONTRACT_BLOB, CANDIDATE_CONTRACT_SHA256, extractCandidateArities,
+import { CANDIDATE_CONTRACT_BLOB, CANDIDATE_CONTRACT_SHA256, HISTORICAL_CONTRACT_BLOB, HISTORICAL_CONTRACT_SHA256, extractCandidateArities,
   extractCandidateAdvertised, loadRelease323Candidate } from './candidate-adapter-3.2.3.mjs';
 import { GO_323, RELEASE_323_FIELDS, buildRelease323Fixture, compareRelease323 } from './oracle-3.2.3.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -31,20 +31,20 @@ function fails(mutate) {
 }
 test('fixed 3.2.3 source provenance retains 84 original commands and exact independent deltas', () => {
   assert.equal(oracle.oracle.commit, GO_323.commit);
-  assert.equal(oracle.commands.length, 84); assert.equal(oracle.acceptedCommands.length, 85);
+  assert.equal(oracle.commands.length, 84); assert.equal(oracle.acceptedCommands.length, 87);
   assert.equal(oracle.products.length, 7); assert.equal(oracle.addon.length, 55);
   assert.equal(oracle.provenance.commandCount, 84);
   assert.equal(oracle.provenance.historicalFixtureSHA256, sha256(readBounded(root, 'tests/rust-parity/go-3.2.0.manifest.json')));
   const c = candidate(), before = clone(c), report = compareRelease323(oracle, c);
   assert.equal(report.acceptedStaticStatus, 'pass'); assert.equal(report.rawExactStatus, 'fail');
-  assert.deepEqual(report.rawExact.commands.extra, ['data cache prepare']);
+  assert.deepEqual(report.rawExact.commands.extra, ['data agent schema', 'data agent serve', 'data cache prepare']);
   assert.equal(report.behavioralParity, 'unverified'); assert.equal(report.execution, 'NOT_RUN');
   assert.deepEqual(c, before);
 });
-test('reviewed current parser contains exactly frozen 115 arities plus one false Data flag', () => {
+test('reviewed current parser contains exactly frozen 115 arities plus Data prune and Agent TTL', () => {
   assert.equal(sha256(contract), CANDIDATE_CONTRACT_SHA256);
   const arities = extractCandidateArities(contract);
-  assert.equal(Object.keys(arities).length, 116); assert.equal(arities['--data-derived'], false);
+  assert.equal(Object.keys(arities).length, 117); assert.equal(arities['--data-derived'], false);
   assert.deepEqual(arities, oracle.expectedArities);
   assert.equal(extractArities(contract), null, 'historical adapter must not accept later candidate');
   assert.equal(extractAdvertised([], {filter: contract}).state, 'unverified');
@@ -80,7 +80,7 @@ test('all complete-source changes invalidate both current adapters, including te
     source.replace('"target available" => true,', '"target available" => false,'),
     source.replace('"--allow-partial"', '"--unreviewed" | "--allow-partial"'),
     source.replace('name => panic!("flag missing explicit contract arity: {name}"),', '_ => false,'),
-    source.replace('assert_eq!(current.len(), 85);', 'assert_eq!(current.len(), 84);'),
+    source.replace('assert_eq!(current.len(), 87);', 'assert_eq!(current.len(), 84);'),
     source + '\n// unreviewed trailing edit\n',
   ];
   for (const mutated of mutations) {
@@ -90,7 +90,7 @@ test('all complete-source changes invalidate both current adapters, including te
     assert.equal(extractCandidateAdvertised([], {filter}).state, 'unverified');
   }
 });
-test('all 116 parser flags, advertised omissions, profile fields and addon bytes remain gates', () => {
+test('all 117 parser flags, advertised omissions, profile fields and addon bytes remain gates', () => {
   for (const [flag, value] of Object.entries(oracle.expectedArities)) fails(c => { c.arities[flag] = !value; });
   fails(c => { c.arities['--unreviewed'] = false; });
   fails(c => { c.arities = null; c.advertised = {state: 'unverified', commands: null}; });
@@ -133,4 +133,14 @@ test('candidate loader authenticates its own worktree, never substituting review
 test('current CLI rejects invalid invocation without relaxing historical runners', () => {
   const result = spawnSync(process.execPath, ['tests/rust-parity/run-3.2.3.mjs', '--accept-gaps'], {cwd: root, encoding: 'utf8', timeout: 20000});
   assert.equal(result.status, 2); assert.match(result.stderr, /Usage:/);
+});
+
+test('historical parser custody remains distinct from the Agent successor', () => {
+  const bytes = execFileSync('git', ['--no-replace-objects', 'cat-file', 'blob', HISTORICAL_CONTRACT_BLOB], {cwd:root});
+  assert.equal(sha256(bytes), HISTORICAL_CONTRACT_SHA256);
+  const arities = extractCandidateArities(bytes);
+  assert.equal(Object.keys(arities).length, 116);
+  assert.equal(Object.hasOwn(arities, '--result-ttl-seconds'), false);
+  assert.notDeepEqual(arities, oracle.expectedArities);
+  assert.equal(extractCandidateArities(Buffer.concat([bytes, Buffer.from('\n// tampered') ])), null);
 });

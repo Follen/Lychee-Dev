@@ -9,6 +9,12 @@
 - 产品仍为3.5.0 beta配置；无发布、合并或游戏操作授权。Skill 七产品定义和双 Forever 分离、Mailbox v1、未知结果不重放、精确数字/partial/证据合同不变。Emmy使用固定未修改上游；自有业务Rust不新增unsafe，必要Windows边界独立审查。
 - 当前仓库只在 `rust-refactor` / [草稿PR #14](https://github.com/Follen/Lychee-Dev/pull/14) 分批保存。用户本机只负责固定SHA测试及必要协调，由唯一父队列派发；运行中的身份不会随新head改变。
 
+## 首组合静态与身份检查（native 尚未执行）
+
+本次新 Skill 固定身份引用实际产品 commit `3ae03c6bd7f13260629e2f92218f8d9e262b1ebb` 的25文件 tree `e1c9f992da62a048d24c62843636230783ff6928`，仅 SKILL.md、commands.md、data-investigation.md 相对6187改变；6187及0002历史身份和已封报告保留，不能重标为当前产品。新增固定清单验证、原始6187回放、同长篡改及伪SHA负例。
+
+Node：Skill全套110通过；CLI八组107通过、1非Windows跳过；Data四组69通过；Agent合同及静态Skill组合33通过（与前组有重叠，不累加）。rustfmt仅80个变更Rust文件语法解析通过；没有运行Cargo或原生测试。这些只说明静态合同/证据工具回归，不代表新Agent业务、硬超时或资源验收通过。首Windows队列必须固定最终发布SHA，先all-targets及Release编译，再真实private Data metadata fixture、Session/Engine、supervisor进程和迁移回归；不开始性能或盲评。
+
 ## Agent 组合修正 r2：仍待实际编译与验收
 
 首片发现DF单次native poll可长时间不yield，query内协作取消及Job内存限额不足以保证deadline。修正采用caller-owned supervisor与单个可复用Engine子进程：已有suspended guarded spawn先关联Job；私有入口核实际父进程PID/creation/同binary并建立自身Job；专用loopback channel以临时BCrypt token及held child PID认证完成receipt，只在公共输出flush后发送。父进程独立监测排队与输出背压期限，必要时终止原Job并检查reap/job-empty/pipe回收；不新增unsafe或游戏通信。输入EOF是半关闭，先排空已提交任务；显式close同样排空；取消outstanding请求会终止整个session，全部旧句柄失效，不自动重启或重放。此处仍须Windows嵌套Job、硬取消/非yield执行、背压和异常清理实际验证，不能因代码存在称漏洞已验收关闭。

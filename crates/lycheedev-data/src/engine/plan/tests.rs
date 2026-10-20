@@ -534,3 +534,52 @@ async fn mixed_domain_null_still_short_circuits_to_null() {
     );
     assert_eq!(run(&context, owner, &plan).await, vec![vec![Scalar::Null]]);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn eager_boolean_operators_keep_right_errors_after_false_or_true_left() {
+    for (operator, left) in [("and", false), ("or", true)] {
+        let (context, owner) = setup();
+        register(
+            &context,
+            &request("T"),
+            vec![("ID", Arc::new(UInt64Array::from(vec![1])))],
+        );
+        let right = json!({"kind":"binary","operator":"equal","left":{"kind":"literal","value":"1"},"right":{"kind":"literal","value":1}});
+        let plan = decode(
+            json!({"op":"project","input":{"op":"scan","table":{"name":"T","mode":"static"}},"columns":[{"name":"result","expression":{"kind":"binary","operator":operator,"left":{"kind":"literal","value":left},"right":right}}]}),
+        );
+        let result = match lower(&context, &plan, owner).await {
+            Ok(frame) => frame.collect().await.map(|_| ()),
+            Err(error) => Err(error),
+        };
+        assert_eq!(
+            super::super::error(result.unwrap_err()).code,
+            "relational.type_mismatch"
+        );
+    }
+}
+#[tokio::test(flavor = "current_thread")]
+async fn eager_boolean_three_valued_truth_table_matches_oracle() {
+    for and in [true, false] {
+        for left in [Some(false), Some(true), None] {
+            for right in [Some(false), Some(true), None] {
+                let (context, owner) = setup();
+                register(
+                    &context,
+                    &request("T"),
+                    vec![("ID", Arc::new(UInt64Array::from(vec![1])))],
+                );
+                let expected = match (and, left, right) {
+                    (true, Some(false), _) | (true, _, Some(false)) => Scalar::Bool(false),
+                    (false, Some(true), _) | (false, _, Some(true)) => Scalar::Bool(true),
+                    (_, Some(a), Some(b)) => Scalar::Bool(if and { a && b } else { a || b }),
+                    _ => Scalar::Null,
+                };
+                let plan = decode(
+                    json!({"op":"project","input":{"op":"scan","table":{"name":"T","mode":"static"}},"columns":[{"name":"result","expression":{"kind":"binary","operator":if and{"and"}else{"or"},"left":{"kind":"literal","value":left},"right":{"kind":"literal","value":right}}}]}),
+                );
+                assert_eq!(run(&context, owner, &plan).await, vec![vec![expected]]);
+            }
+        }
+    }
+}

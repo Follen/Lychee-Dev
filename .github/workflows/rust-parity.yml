@@ -57,7 +57,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node tools/skill-commands.mjs --target --check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node tools/skill-contract.mjs --contract-file tests/rust-parity/go-3.2.2.manifest.json
+          node tools/skill-contract.mjs --approved-rust
           exit $LASTEXITCODE
       - name: Test fixed full-corpus acceptance runner
         run: node --test tests/rust-source-full-corpus/runner.test.mjs

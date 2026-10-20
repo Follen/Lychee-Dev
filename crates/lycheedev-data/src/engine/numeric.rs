@@ -95,6 +95,9 @@ pub(super) fn binary(
     owner: &Arc<QueryOwner>,
 ) -> Result<Expr> {
     owner.check()?;
+    if matches!(operator, Operator::And | Operator::Or) {
+        return boolean_binary(left, operator, right, schema, owner);
+    }
     if let Some(op) = operation(&operator.to_string()) {
         let kinds = vec![left.get_type(schema)?, right.get_type(schema)?];
         if needs_exact(op, &kinds) {
@@ -188,6 +191,100 @@ fn exact_binary(
                     Ok(ColumnarValue::Array(ScalarValue::iter_to_array(results)?))
                 }
             }
+        }),
+    );
+    Ok(udf.call(vec![left, right]))
+}
+
+/// Eager argument evaluation preserves the established scalar error/NULL
+/// contract. Native DF AND/OR may skip the right side on a false/true batch.
+fn boolean_binary(
+    left: Expr,
+    operator: Operator,
+    right: Expr,
+    schema: &DFSchema,
+    owner: &Arc<QueryOwner>,
+) -> Result<Expr> {
+    let kinds = vec![left.get_type(schema)?, right.get_type(schema)?];
+    let owner = owner.clone();
+    let and = operator == Operator::And;
+    let udf = create_udf(
+        if and {
+            "__lychee_bool_and"
+        } else {
+            "__lychee_bool_or"
+        },
+        kinds,
+        DataType::Boolean,
+        Volatility::Volatile,
+        Arc::new(move |args| {
+            owner.check()?;
+            let [left, right] = args else {
+                return Err(unsupported("Boolean function arity changed"));
+            };
+            let rows = args.iter().find_map(|v| match v {
+                ColumnarValue::Array(a) => Some(a.len()),
+                _ => None,
+            });
+            let count = rows.unwrap_or(1);
+            if args
+                .iter()
+                .any(|v| matches!(v,ColumnarValue::Array(a) if a.len()!=count))
+            {
+                return Err(unsupported("Boolean batch lengths differ"));
+            }
+            owner.work(count)?;
+            owner.retain(
+                count
+                    .checked_mul(4)
+                    .and_then(|n| n.checked_add(256))
+                    .ok_or_else(|| external(super::limit()))?,
+            )?;
+            let truth = |value: &ColumnarValue, row: usize| -> Result<Option<bool>> {
+                match value {
+                    ColumnarValue::Scalar(ScalarValue::Boolean(value)) => Ok(*value),
+                    ColumnarValue::Scalar(value) if value.is_null() => Ok(None),
+                    ColumnarValue::Array(array) if array.is_null(row) => Ok(None),
+                    ColumnarValue::Array(array) => array
+                        .as_any()
+                        .downcast_ref::<arrow_array::BooleanArray>()
+                        .map(|a| Some(a.value(row)))
+                        .ok_or_else(|| {
+                            external(crate::fault(
+                                "relational.type_mismatch",
+                                4,
+                                "SQL scalar types are incompatible",
+                            ))
+                        }),
+                    _ => Err(external(crate::fault(
+                        "relational.type_mismatch",
+                        4,
+                        "SQL scalar types are incompatible",
+                    ))),
+                }
+            };
+            let evaluate = |row| -> Result<Option<bool>> {
+                if row % 64 == 0 {
+                    owner.check()?;
+                }
+                let left = truth(left, row)?;
+                let right = truth(right, row)?;
+                Ok(match (and, left, right) {
+                    (true, Some(false), _) | (true, _, Some(false)) => Some(false),
+                    (false, Some(true), _) | (false, _, Some(true)) => Some(true),
+                    (_, Some(left), Some(right)) => {
+                        Some(if and { left && right } else { left || right })
+                    }
+                    _ => None,
+                })
+            };
+            if rows.is_none() {
+                return Ok(ColumnarValue::Scalar(ScalarValue::Boolean(evaluate(0)?)));
+            }
+            let values = (0..count).map(evaluate).collect::<Result<Vec<_>>>()?;
+            Ok(ColumnarValue::Array(Arc::new(
+                arrow_array::BooleanArray::from(values),
+            )))
         }),
     );
     Ok(udf.call(vec![left, right]))

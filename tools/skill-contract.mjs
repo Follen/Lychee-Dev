@@ -7,6 +7,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { loadCliContractOracle } from '../tests/rust-parity/cli-contract-oracle-3.2.3.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -17,9 +18,11 @@ function option(name) {
 const skillRoot = option('--skill-root') ?? join(repository, 'skills', 'lycheedev');
 const binary = option('--bin');
 const contractFile = option('--contract-file');
-if (binary && contractFile) throw new Error('choose --bin or --contract-file, not both');
+const approvedRust = argv.includes('--approved-rust');
+if ([binary, contractFile, approvedRust].filter(Boolean).length > 1) throw new Error('choose exactly one of --bin, --contract-file or --approved-rust');
 
 function describe() {
+  if (approvedRust) return loadCliContractOracle(readFileSync(join(repository, 'tests/rust-parity/go-3.2.0.manifest.json'))).expected;
   // Static reference checking only. A supplied contract cannot prove that a
   // candidate implements it; --bin remains the actual advertised-surface gate.
   if (contractFile) {
@@ -143,7 +146,7 @@ for (const file of markdownFiles(skillRoot)) {
 
 process.stdout.write(`${JSON.stringify({
   skillRoot,
-  contractSource: contractFile ? resolve(contractFile) : binary ?? 'current Go CLI',
+  contractSource: approvedRust ? 'independent fixed Go323 plus exact approved Rust extensions' : contractFile ? resolve(contractFile) : binary ?? 'current Go CLI',
   checkKind: 'static-reference-consistency',
   files: markdownFiles(skillRoot).length,
   contracts: contracts.size,

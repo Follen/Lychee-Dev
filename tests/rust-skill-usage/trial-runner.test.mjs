@@ -11,6 +11,7 @@ import {checkedArgv,observeResult,SOURCE,LIMITS,PRODUCT_COMMIT} from './trial-po
 import {atomicNew,childOutcome,decodeRequest,makeBudget,publishRequest,publishResponse,takeRequest,readBounded} from './trial-protocol.mjs';
 import {guideContract,retireTrial,checkProduct,verifyTrialArchive} from './trial-owned.mjs';
 import {seedDataHome,digest,MISSING_KEYS,RESTORED_KEYS} from './data-inputs.mjs';
+import {dataSkillIdentity} from './data-skill-contract.mjs';
 import {beginScratch} from '../../tools/rust-disk.mjs';
 import {activeSession,relay} from '../../tools/rust-skill-trial.mjs';
 const root=resolve(import.meta.dirname,'../..');
@@ -23,7 +24,7 @@ test('fixed product commit and runner identity remain separate; unchanged gate r
   const text=readFileSync(join(root,'tests/rust-skill-usage/trial-owned.mjs'),'utf8');assert.match(text,/artifact\.inputHashes\.sourceTree, sourceTree/);assert.match(text,/verifyCandidate\(root, candidatePath, artifact, workflow\)/);
 });
 test('exact current and historical guides are package-external inputs; arbitrary guide cannot pass',t=>{
-  assert.equal(guideContract(join(root,'skills/lycheedev')).candidateTree,'231818eb48f81cf927542bb19d9a8964dfbe4baf');
+  assert.equal(guideContract(join(root,'skills/lycheedev')).candidateTree,dataSkillIdentity().candidateTree);
   const dir=temporary(t),guide=join(dir,'guide');cpSync(join(root,'skills/lycheedev'),guide,{recursive:true});writeFileSync(join(guide,'SKILL.md'),'fake');assert.throws(()=>guideContract(guide),/known_readonly_guide/);
   const old=JSON.parse(readFileSync(join(root,'tests/rust-skill-usage/baselines/rust-candidate-0002ce-files.json')));const historical=join(dir,'historical');mkdirSync(historical);
   for(const row of old.files){const path=join(historical,row.path);mkdirSync(resolve(path,'..'),{recursive:true});writeFileSync(path,row.text);}

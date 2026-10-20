@@ -72,7 +72,7 @@ test('normal outer and owned controller entries both load current authenticated 
     assert.doesNotMatch(source, /const workflow = jsonFile\(/);
   }
   assert.equal(CURRENT_WORKFLOW, 'tests/rust-skill-usage/workflow-go323.json');
-  assert.equal(new Set(currentWorkflowInputs(workflow)).size, 11);
+  assert.equal(new Set(currentWorkflowInputs(workflow)).size, 12);
 });
 test('current workflow rejects historical relabeling, missing increments and weakened Source tasks', t => {
   const f = workflowFixture(t), original = f.read('workflow-go323.json');

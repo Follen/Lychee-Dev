@@ -68,6 +68,42 @@ export function loadCliContractOracle(historicalBytes) {
       '--max-bytes <n>', '--key-file <WoW.txt|keys.json>',
       '--timeout-seconds <1-3600> (default 300; entire query)'],
   });
+  // Whole-architecture Agent additions: exact metadata, not a wildcard waiver.
+  // Historical Go bytes and inheritance verification remain unchanged.
+  const agentCommands = [
+  {
+    "path": "data agent schema",
+    "summary": "Describe the versioned Agent task protocol and session/result ownership limits; no data pin or worker is opened",
+    "mutates": false,
+    "arguments": [],
+    "flags": [
+      "--home <root>",
+      "--format text|json|jsonl"
+    ]
+  },
+  {
+    "path": "data agent serve",
+    "summary": "Run a caller-owned supervised Data Agent worker over stdin/stdout JSONL; typed discovery, queries, result pages, export and release share a pinned session; close or EOF drains submitted work; cancellation or deadline terminates outstanding work and invalidates all handles; no daemon is installed",
+    "mutates": true,
+    "arguments": [],
+    "flags": [
+      "--home <root>",
+      "--format jsonl",
+      "--project <directory>",
+      "--snapshot <pin>",
+      "--installation <client-or-game-root>",
+      "--cdn",
+      "--offline",
+      "--key-file <WoW.txt|keys.json>",
+      "--timeout-seconds <1-3600> (default 300; entire worker lifetime)",
+      "--max-objects <1-1024> (default 32; retained result handles)",
+      "--max-bytes <n> (default 536870912; shared session memory admission)",
+      "--result-ttl-seconds <1-3600> (default 300; result handle lifetime)"
+    ]
+  }
+];
+  const agentPosition = expected.findIndex(command => command.path === 'data cache prepare');
+  expected.splice(agentPosition, 0, ...agentCommands);
   return {oracle: GO_323, historicalReference: historical.oracle,
     commands: historical.commands, expected};
 }

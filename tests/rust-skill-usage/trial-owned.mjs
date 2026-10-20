@@ -22,7 +22,7 @@ export function checkProduct(root, runnerRoot, artifactPath, candidatePath) {
   return {artifact, sourceTree, workflow, candidate};
 }
 export function guideContract(directory) {
-  const identities = [dataSkillIdentity(), {goContract:'3766f9cacb52e93a803a626187e2a1d54a445468',goTree:'b9e162ace7abe7ea4a2feecef822283767eb1210',candidateSourceCommit:'0002ce02bec5fb7c9c31ae40fd96eadf0da17dc6',candidateTree:'5edd025cae923fb2235086f250862696db7a2483'}];
+  const identities = [dataSkillIdentity(), {goContract:'3766f9cacb52e93a803a626187e2a1d54a445468',goTree:'b9e162ace7abe7ea4a2feecef822283767eb1210',candidateSourceCommit:'6187ec6581ac9dc9301a26d79fa62a520214fe6d',candidateTree:'231818eb48f81cf927542bb19d9a8964dfbe4baf'}, {goContract:'3766f9cacb52e93a803a626187e2a1d54a445468',goTree:'b9e162ace7abe7ea4a2feecef822283767eb1210',candidateSourceCommit:'0002ce02bec5fb7c9c31ae40fd96eadf0da17dc6',candidateTree:'5edd025cae923fb2235086f250862696db7a2483'}];
   const actual = inventory(directory, {maxBytes:4<<20,maxFiles:100});
   const identity = identities.find(identity => JSON.stringify(loadDataSkillContract(identity).files.map(({path,bytes,sha256}) => ({path,bytes,sha256}))) === JSON.stringify(actual));
   assert(identity, 'trial.known_readonly_guide_required'); assertDataSkillDirectory(directory, identity); return identity;

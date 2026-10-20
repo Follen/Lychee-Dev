@@ -36,6 +36,8 @@ export function expectedArities(commands) {
   assert.equal(Object.keys(result).length, 115, 'exact frozen arity inventory');
   assert.ok(!Object.hasOwn(result, '--data-derived'));
   result['--data-derived'] = false;
+  assert.ok(!Object.hasOwn(result, '--result-ttl-seconds'));
+  result['--result-ttl-seconds'] = true;
   return result;
 }
 export function buildRelease323Fixture(root) {
