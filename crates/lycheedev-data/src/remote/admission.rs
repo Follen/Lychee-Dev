@@ -254,12 +254,19 @@ impl<'a> AdmittedWorkspace<'a> {
         &'reservation self,
         peak: lycheedev_core::workspace::data_disk::AdditionalPeak,
         check: &'reservation dyn Fn() -> Result<()>,
-    ) -> Result<lycheedev_core::workspace::data_disk::DerivedReservation<'reservation>> {
+        budget: &'reservation crate::resource::Budget,
+    ) -> Result<crate::generation::retirement::Admission<'reservation>> {
         self.check()?;
         self.resources
             .as_ref()
             .expect("live admission lease")
-            .reserve_derived_cache_with_check(peak, check)
+            .reserve_derived_cache_with_retirement(
+                peak,
+                check,
+                |bytes| budget.reserve_retained(bytes),
+                |key, bytes| crate::generation::retirement::reference(key, bytes, budget),
+                |allocation| allocation.commit(),
+            )
     }
     pub fn download_workers(&self) -> usize {
         self.resources

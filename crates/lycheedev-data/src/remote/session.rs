@@ -177,9 +177,10 @@ impl<'a, 'scope> Session<'a, 'scope> {
         &'reservation self,
         peak: lycheedev_core::workspace::data_disk::AdditionalPeak,
         check: &'reservation dyn Fn() -> Result<()>,
-    ) -> Result<lycheedev_core::workspace::data_disk::DerivedReservation<'reservation>> {
+        budget: &'reservation crate::resource::Budget,
+    ) -> Result<crate::generation::retirement::Admission<'reservation>> {
         self.check()?;
-        self.admitted.reserve_derived_cache(peak, check)
+        self.admitted.reserve_derived_cache(peak, check, budget)
     }
     pub fn check(&self) -> Result<()> {
         self.admitted.check()?;

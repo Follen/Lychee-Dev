@@ -1,11 +1,13 @@
 # Rust 架构实施清单
 
-当前批：44a六场景完整性全过，四增量单轮达到0.30线、cold/warm未达0.30，20对正式验收未完成。b47两check通过；270 matched为265通过/2失败/3原忽略，63新增61/2。两处测试前提修正待复验；新显式Data退役与Source warm子段计时已静态独审、Rust未跑。
+当前批：7bd两check及generation42已通过；384f CI绿（CLI107/addon32，native/performance跳过）。本批typed容量自动退役已独审，15新增Rust NOT_RUN；generation性能工具仅先绑定7bd，runner身份独立，真实性能未跑。原7bd release/性能队列保持。
 
 以 [handover](handover.md) 为当前事实、[DESIGN](DESIGN.md#authorized-architecture-implementation-plan--2026-10-19) 为完整计划。质量基线f811；性能参考固定Go323。先业务质量/完整实现，再≤30%耗时门禁，之后正式五项循环。历史已完成项与原失败留在[308efa旧清单](https://github.com/Follen/Lychee-Dev/blob/308efa2766d00273b13c9c7e24a0b956bb60e9e9/todo.md)，不滚动复制到当前待办。
 
 ## 立即闭合固定基线
-- [ ] 2026-10-20 uppercase source BlobRef最小产品修复已独审，Rust NOT_RUN；固定新SHA先default/DF all-targets，再实际列出并跑generation全组（静态42，其中retirement6），逐名核原uppercase失败及新增严格边界例；继续原队列剩余项。严格identity/derived与definition耦合不变，原f0d失败保留。
+- [x] 7bd uppercase source BlobRef修复：default/DF all-targets及generation42实际通过，原失败保留。
+- [ ] 本批自动容量退役固定发布SHA后由既有父队列验证default/DF all-targets、Core data_disk、Data generation与remote::admission、CLI data_cache_prune_public；逐名确认12 Core+3 Data新增，不借用7bd结果。云端缺lib.exe，编译/运行未证明。
+- [ ] generation性能初测固定7bd产品与独立新runner；先质量与一对诊断，再另行准入20对正式验收。当前严格automaticEvictionEnabled=false合同不支持新自动退役产品，需显式后继合同后另测，不放松断言。严格identity/derived与definition耦合不变，原f0d失败保留。
 
 - [x] 070f实际all-targets通过；2808四处编译错误和Node版本断言闭合，历史失败保留。
 - [x] 原copy/发布后receipt路径/generation取消四个修复目标均通过；278 DataFusion可选资格14项通过保持独立，不代表生产执行器或性能。

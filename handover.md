@@ -40,13 +40,25 @@ CLI 静态 oracle 修复（2026-10-20）：历史适配器单测固定读取并�
 
 键盘历史源码custody后继（2026-10-20）：5fbbb7e的正式Windows CLI八套107/107通过、当前Go3.2.3静态门禁通过；同run整体失败仅为键盘retainedProduction仍把后续所有权优化当作未变的历史文件（addon组28通过/1失败），原失败保留。本批仅修复两份Node验证源码：原始map与increment字节不改，分别认证原历史Git对象和固定三路径后继版本；observations以完整字节逆变换证明仅move替代clone，durable/journal保精确固定源码hash，并独立检查控制、checksum、sync/close、限额、回放及借用边界与负向mutation。五套addon相关云端32/32通过，CLI回归106通过/0失败/1平台skip；不是Rust执行、Windows hook或游戏验收。产品源码未变，7bd的Data大小写修复与固定本机验证队列保持，新提交CI待实际结果。
 
+## 2a. 2026-10-20 容量准入与 generation 性能工具后继
+
+先区分已经实测的身份：`7bd4216c28b45761f27239e1d74536af71b11a9b` 的 default/DF 两项 all-targets check 和 generation 42项已实际通过，原 uppercase 失败按该版本闭合；`384f130383cff29b86fcb26cfcf426e8c3d3ce90` 的[CI](https://github.com/Follen/Lychee-Dev/actions/runs/39349042670)通过，CLI107/107、addon32/32，native/performance步骤跳过。这些结果不属于本次新产品；原失败保留，当前7bd release/性能队列不切换、不重派。
+
+本批12份Core/Data源码/测试加入typed cache-prepare miss的容量触发派生退役：同一quota owner贯穿盘点、严格manifest投影、精确退役、重盘点、最终峰值准入及发布。保留active pins、原handle SHA/EOF与祖先保护、共享引用组、checked close、CAP/keep和源数据；未知manifest首删前拒绝，未知文件保留计量。已超额、单次峰值或受保护占用使目标不可能时不删；部分回收后拒绝/取消及后续producer或清理失败保留实际完成事实与一次转移的输出预算。不声称LRU，普通显式prune合同不变。
+
+12项新Core admission与3项真实Data prepare/error-path测试均为NOT_RUN；独立源码审查、12文件rustfmt与patch字节验证通过。最终云端Windows-target check因libsqlite3-sys找不到MSVC `lib.exe` 在Core/Data类型检查前阻断，不能称编译通过。新版本须由既有父队列后续固定SHA执行default/DF all-targets、data_disk全组、generation全组、remote::admission与CLI data_cache_prune_public，并逐名确认15新增及原忽略；本批不自行派发。
+
+独立7文件generation SQL性能工具调用真实prepare/普通SQL，以完整16,384行、原CAP/manifest/IPC、精确数值及进程证据核验；一次诊断严格一对七次CLI，正式门禁为另一次preflight加20对，不能混用。最终组合树重跑generation-contract、generation-evidence、data-runner、data-csv-diagnostics、data-resume与runner六套Node：254通过、0失败、0跳过，包含最终wrapper parse-under-catch字节，wrapper语法检查亦通过；这些不代替真实Windows wrapper执行，native及性能均NOT_RUN。初次测试产品必须固定7bd（sourceTree `cbad32ff06cac1fbcd01cbba5dd6dc5a8028a70e4a8741cf2a44a1266cdeeadd`），runner另固定本次提交。该验证器明确要求prepare的automaticEvictionEnabled=false，因此不适用于本批新增自动退役产品；不得放松断言或冒称最新产品性能已验。以后支持新策略须显式合同、独审及回归后另行准入。
+
+自动策略仅覆盖typed写入准入。私有state/data SQLite主库/journal/residual已有计量，不能误称全部SQLite未接入；历史未登记/共享Data blob、历史共享toolkit数据库、shared decoded归属释放、legacy staging/spill/export、typed准入前共享发布的自动回收及完整全Data5GB验收仍开放。固定Go323、≤0.30门禁、原资源限制和最终五循环顺序不变。
+
 ## 3. Home、容量和所有权边界
 
 Data默认容量为**5,000,000,000字节（十进制5GB）**，配置支持明确单位；与测试scratch 5/6GiB不同。最终统一核算Data下载/共享blob归属、物化/索引/目录、staging/spill/导出峰值和证据占用，按内容去重防双计。活跃lease和证据引用保护；旧已超额或配置缩小先拒新增并说明，不删除证据。
 
 CAP删除会识别同body的独立Data保留权：仅删除CAP引用并返回仍共享，不承诺物理释放。判定在原blob lease内认证固定Data记录和body类型/长度，不倒序获取quota或重复全读hash；这是保留权判断，同长度坏内容仍留存，真实消费继续完整认证。损坏记录、孤立完成记录或已登记body缺失/类型长度不符均硬拒，不静默减账。Data引用的冷缓存释放与完整淘汰生命周期仍须后继闭合。
 
-当前基础只覆盖已接入的Data派生写入。共享blob、decoded spool后继未全部运行，历史未登记blob、CAP、SQLite/WAL/SHM等尚未闭合归属。不能把派生对象helper当全Data硬上限。只缓存实际查询过的表，临时查询可不落盘；不默认长期保留raw、IPC、Parquet三份。尚未实现并验收的淘汰策略不称已生效。
+当前基础只覆盖已接入的Data写入；私有state/data SQLite主库、journal/residual和已登记共享body已计量。历史未登记blob、历史共享toolkit SQLite/sidecar、归属释放及剩余临时/导出路径尚未闭合。不能把派生对象helper当全Data硬上限。只缓存实际查询过的表，临时查询可不落盘；不默认长期保留raw、IPC、Parquet三份。尚未实现并验收的淘汰策略不称已生效。
 
 Source主Index采用明确v18身份与LYCIDX01帧，query metadata同步版本化。完整文件SHA认证后，共享typed字段校验供完整与摘要消费；摘要不构造全量owned Symbol。128MiB限制新缓存实际文件字节，构造分配另行有界准入，不再为旧JSON内部表示额外全量计数。因新版本及时取消可先于尚未读取的损坏尾返回；已经确认的语义/预算错误保持，不把坏缓存作为健康结果。正式诊断保完整公共Index与Facts，两个exporter输出共用原128MiB证据额度，超过明确失败，不能截断比较。资产比较保f811已认可的大资产前置稳定分区和组内完整顺序/重复。
 
@@ -69,6 +81,8 @@ Data CSV9693工具对旧63d与a860的单pair：cold401.4790/389.9062ms，warm349
 历史coverage十二integration实际130通过/1权限ignore，报告是独立对象分母，不能平均成全项目覆盖率。f86 companion真实四CLI产生profile后超原raw128MiB总预算，merge/export/witness未执行；不加预算，覆盖工具扩展暂停，先完成业务与性能门禁。真正OS压力、游戏及尚未覆盖的Skill实际任务仍有缺证；本轮四类离线真实CLI盲评与SQL补验见第2节。
 
 ## 5. 当前阻断与下一批
+
+当前后继以第2a节为准：7bd的42项及两check、384f的CI均已通过；本批自动容量退役的新产品仍待固定SHA原生验证，generation性能先测独立固定7bd产品。下面保留前批未复验时的历史队列记录，不重派或重标。
 
 b47两个check通过，270 matched为265通过、2失败、3原ignore；实际执行267项，63新增为61通过、2失败，正式名单无缺漏/重复。Core目录替换fixture及SQL保留词fixture的最小测试修正已独立源码复核，尚待固定版本实际复验。未到达的后续断言不以静态推理当通过；本地decoded9项及其余实际通过组保持有效。
 

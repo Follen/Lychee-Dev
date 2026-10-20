@@ -271,3 +271,117 @@ fn typed_dry_run_preserves_exact_files_and_incompatible_staging_flag_is_rejected
     assert_eq!(fs::read(path).unwrap(), bytes);
     fs::remove_dir_all(f.root).unwrap();
 }
+
+// Force a real prepare miss with owned fixture orphans. Source/decoded cache and
+// CAP records remain intact; production source preparation still precedes quota.
+fn pressure_fixture(f: &Fixture) -> (lycheedev_core::Outcome, Invocation) {
+    use workspace::{
+        data_disk::AdditionalPeak,
+        data_resources::{self, Policy},
+    };
+    let first = prepare(f);
+    fs::remove_file(path(f, &first)).unwrap();
+    let control = lycheedev_core::control::OperationControl::default();
+    let resources = data_resources::acquire(&f.home, Policy::Ordinary, &control).unwrap();
+    let owner = resources
+        .reserve_derived_cache(AdditionalPeak {
+            objects: 256 << 10,
+            staging: 256 << 10,
+            ..Default::default()
+        })
+        .unwrap();
+    let mut writer = owner.begin_object(256 << 10).unwrap();
+    writer.write_bytes(&vec![31; 256 << 10]).unwrap();
+    writer.commit().unwrap();
+    owner.finish(Ok(())).unwrap();
+    let owner = resources.reserve_derived_cache(Default::default()).unwrap();
+    let existing = owner.report().existing.total().unwrap();
+    owner.finish(Ok(())).unwrap();
+    resources.close().unwrap();
+    let peak = 2 * ((128u64 << 20) * 4 + (16 << 20)) + (1 << 20);
+    let mut config = workspace::config(&f.home).unwrap();
+    config["dataCache"]["maxBytes"] = serde_json::json!(existing + peak - 1);
+    storage::atomic_json(&f.home.join("config.json"), &config).unwrap();
+    let mut inv = f.invocation("data cache prepare", &[]);
+    inv.positional = Some("Sample".into());
+    (first, inv)
+}
+#[test]
+fn prepare_capacity_trigger_reclaims_cold_orphans_and_rebuilds_exact_generation() {
+    let f = sample();
+    let (first, inv) = pressure_fixture(&f);
+    let second = crate::dispatch(&inv).unwrap();
+    assert_eq!(second.data["generation"], first.data["generation"]);
+    assert_eq!(second.data["object"], first.data["object"]);
+    assert!(
+        second.data["automaticRetirement"]["removedOrphanObjects"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(
+        second.data["automaticRetirement"]["complete"]
+            .as_bool()
+            .unwrap()
+    );
+    assert_eq!(
+        second.data["diskReservation"]["coverage"]["automaticEvictionEnabled"],
+        true
+    );
+    assert_eq!(
+        second.data["diskReservation"]["coverage"]["totalDataCoverageComplete"],
+        false
+    );
+    let third = crate::dispatch(&inv).unwrap();
+    assert!(third.data.get("automaticRetirement").is_none());
+    assert_eq!(third.data["generation"], first.data["generation"]);
+    fs::remove_dir_all(f.root).unwrap();
+}
+#[test]
+fn prepare_capacity_retirement_facts_survive_later_encoder_error() {
+    let f = sample();
+    let (_, inv) = pressure_fixture(&f);
+    let error = application::dispatch_after_encode(&inv, &mut || {
+        Err(ToolkitError::new(
+            "test.after_auto_retirement",
+            "injected encoder failure",
+            4,
+        ))
+    })
+    .unwrap_err();
+    assert_eq!(error.code, "test.after_auto_retirement");
+    assert!(
+        error.details["automaticRetirement"]["reclaimedBytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    fs::remove_dir_all(f.root).unwrap();
+}
+#[test]
+fn prepare_capacity_retirement_facts_survive_final_teardown_error() {
+    let f = sample();
+    let (_, inv) = pressure_fixture(&f);
+    let error = application::dispatch_after_hooks(&inv, &mut || Ok(()), &mut |result| {
+        result?;
+        Err(ToolkitError::new(
+            "test.after_auto_close",
+            "injected final close failure",
+            4,
+        ))
+    })
+    .unwrap_err();
+    assert_eq!(error.code, "test.after_auto_close");
+    // Published-generation wrapping retains the earlier retirement error facts.
+    assert!(
+        error.details["primary"]["details"]["automaticRetirement"]["reclaimedBytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert_eq!(
+        error.details["publishedGeneration"]["generationPublished"],
+        true
+    );
+    fs::remove_dir_all(f.root).unwrap();
+}

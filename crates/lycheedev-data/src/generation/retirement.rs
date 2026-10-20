@@ -45,7 +45,7 @@ fn blob(raw: &RawValue, required: bool) -> Result<Option<BlobRef>> {
         _ => Err(invalid()),
     }
 }
-pub(super) fn reference(key: &str, raw: &[u8], budget: &Budget) -> Result<DerivedObject> {
+pub(crate) fn reference(key: &str, raw: &[u8], budget: &Budget) -> Result<DerivedObject> {
     budget.check()?;
     let _scratch = budget.reserve_retained(
         raw.len()
@@ -177,3 +177,9 @@ pub(crate) fn prune(inv: &Invocation) -> Result<Outcome> {
 }
 #[cfg(test)]
 mod tests;
+
+/// Admission commits the receipt allocation through final success/error serialization.
+pub(crate) type Admission<'a> = (
+    workspace::data_disk::DerivedReservation<'a>,
+    Option<workspace::data_disk::DerivedRetirementReport<crate::resource::RetainedReservation<'a>>>,
+);

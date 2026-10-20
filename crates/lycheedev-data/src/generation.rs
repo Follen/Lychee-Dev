@@ -5,7 +5,7 @@ mod consumer;
 mod identity;
 mod import;
 mod reading;
-mod retirement;
+pub(crate) mod retirement;
 pub(crate) use retirement::prune;
 
 pub(crate) use application::dispatch;

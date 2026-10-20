@@ -477,8 +477,8 @@ pub(in crate::workspace) fn retire<A>(
     control: &OperationControl,
     options: DerivedRetirementOptions,
     check: &dyn Fn() -> Result<()>,
-    mut reserve: impl FnMut(usize) -> Result<A>,
-    mut reference: impl FnMut(&str, &[u8]) -> Result<DerivedObject>,
+    reserve: impl FnMut(usize) -> Result<A>,
+    reference: impl FnMut(&str, &[u8]) -> Result<DerivedObject>,
 ) -> Result<DerivedRetirementReport<A>> {
     let mut owner = DerivedReservation::acquire_inner(
         Some(resources),
@@ -489,6 +489,28 @@ pub(in crate::workspace) fn retire<A>(
         Some(check),
         true,
     )?;
+    let (mut report, result) = retire_held(&owner, options, reserve, reference, false);
+    let cleanup = owner.cleanup();
+    match join(result, cleanup, &owner.control) {
+        Ok(()) => Ok(report),
+        Err(mut error) => {
+            report.complete = false;
+            error.details = serde_json::json!({"schema":"lycheedev.data-derived-prune-error.v1",
+                "primary":error.clone(), "result":report});
+            Err(error)
+        }
+    }
+}
+
+// Runs inside the caller's SAME quota lease. No read/publication can acquire
+// references between retirement and reservation of the new generation's peak.
+fn retire_held<A>(
+    owner: &DerivedReservation<'_>,
+    options: DerivedRetirementOptions,
+    mut reserve: impl FnMut(usize) -> Result<A>,
+    mut reference: impl FnMut(&str, &[u8]) -> Result<DerivedObject>,
+    require_possible_target: bool,
+) -> (DerivedRetirementReport<A>, Result<()>) {
     let data_before = owner.report.admitted_peak_bytes;
     let mut report = DerivedRetirementReport {
         scope: "data-derived-v1-objects-and-generations",
@@ -509,7 +531,10 @@ pub(in crate::workspace) fn retire<A>(
         complete: false,
         dry_run: options.dry_run,
         ordering: "object-sha256-then-generation-key; no-last-used-policy",
-        coverage: Coverage::default(),
+        coverage: Coverage {
+            automatic_eviction_enabled: require_possible_target,
+            ..Default::default()
+        },
         deletions: Vec::new(),
         receipt_allocation: None,
     };
@@ -542,6 +567,9 @@ pub(in crate::workspace) fn retire<A>(
             .before_bytes
             .checked_sub(known)
             .ok_or_else(|| invalid("Retirement inventory changed during scan"))?;
+        if require_possible_target && report.unattributed_scope_bytes > options.target_bytes {
+            return Err(budget_error(&owner.report));
+        }
         report.receipt_allocation = Some(reserve(
             count
                 .checked_mul(std::mem::size_of::<Deletion>() + 1024)
@@ -587,14 +615,97 @@ pub(in crate::workspace) fn retire<A>(
     while let Some(file) = ancestors.pop() {
         cleanup.extend(storage::close_file(file).err().map(ToolkitError::io));
     }
-    cleanup.extend(owner.cleanup());
     let result = join(result, cleanup, &owner.control);
+    if result.is_err() {
+        report.complete = false;
+    }
+    (report, result)
+}
+/// Admit growth with quota-triggered retirement of canonical typed cold caches.
+/// Never delete for a pre-existing over-limit home or an impossible peak. Other
+/// retained Data bytes (including evidence and unknown files) remain charged.
+pub(in crate::workspace) fn admit<'a, A>(
+    resources: &'a DataResources,
+    home: &Path,
+    limit: u64,
+    control: &'a OperationControl,
+    peak: AdditionalPeak,
+    check: &'a dyn Fn() -> Result<()>,
+    reserve: impl FnMut(usize) -> Result<A>,
+    reference: impl FnMut(&str, &[u8]) -> Result<DerivedObject>,
+    mut retain_receipt: impl FnMut(A),
+) -> Result<(DerivedReservation<'a>, Option<DerivedRetirementReport<A>>)> {
+    let mut owner = DerivedReservation::acquire_inner(
+        Some(resources),
+        home,
+        limit,
+        peak,
+        control,
+        Some(check),
+        true,
+    )?;
+    let mut retirement = None;
+    let result = (|| {
+        let existing = owner.report.existing.total()?;
+        let maximum = owner.report.configured_max_bytes;
+        let additional = peak.total()?;
+        if owner.report.admitted_peak_bytes > maximum {
+            if existing > maximum || additional > maximum {
+                return Err(budget_error(&owner.report));
+            }
+            let scope = scoped_usage(&owner)?;
+            let retained = existing
+                .checked_sub(scope)
+                .ok_or_else(|| invalid("Retirement scope exceeds Data inventory"))?;
+            // If protected/non-typed bytes alone make admission impossible,
+            // do not delete even one otherwise reclaimable typed generation.
+            let Some(target) = maximum.checked_sub(sum([retained, additional])?) else {
+                return Err(budget_error(&owner.report));
+            };
+            let (report, result) = retire_held(
+                &owner,
+                DerivedRetirementOptions {
+                    target_bytes: target,
+                    max_objects: 0,
+                    dry_run: false,
+                },
+                reserve,
+                reference,
+                true,
+            );
+            retirement = Some(report);
+            // The serialized receipt may outlive this quota owner, including
+            // producer/outer cleanup failures. Transfer its charge now, even
+            // when retirement stopped after only some completed deletions.
+            if let Some(allocation) = retirement
+                .as_mut()
+                .and_then(|r| r.receipt_allocation.take())
+            {
+                retain_receipt(allocation);
+            }
+            result?;
+            owner.report.existing = owner.verify_usage()?;
+            owner.report.admitted_peak_bytes = sum([owner.report.existing.total()?, additional])?;
+            if owner.report.admitted_peak_bytes > maximum {
+                let mut error = budget_error(&owner.report);
+                error.message = "Data capacity remains insufficient after typed cache retirement; see completed retirement facts".into();
+                return Err(error);
+            }
+        }
+        // This is a per-admission policy, not a claim of automatic shared-blob
+        // reclamation or complete whole-Data accounting.
+        owner.report.coverage.automatic_eviction_enabled = true;
+        owner.control.check()
+    })();
     match result {
-        Ok(()) => Ok(report),
-        Err(mut error) => {
-            report.complete = false;
-            error.details = serde_json::json!({"schema":"lycheedev.data-derived-prune-error.v1",
-                "primary":error.clone(), "result":report});
+        Ok(()) => Ok((owner, retirement)),
+        Err(error) => {
+            let cleanup = owner.cleanup();
+            let mut error = join::<()>(Err(error), cleanup, &owner.control).unwrap_err();
+            if let Some(report) = retirement {
+                error.details = serde_json::json!({"schema":"lycheedev.data-derived-auto-admission-error.v1",
+                    "primary":error.clone(), "retirement":report});
+            }
             Err(error)
         }
     }

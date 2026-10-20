@@ -1,0 +1,150 @@
+# Production static SQL over authenticated generations
+
+This is a separate opt-in lane, not a change to historical B04 reports or to
+`rust-data-performance-paired.mjs`. It invokes the real default CLI's
+`data cache prepare NumericSample` and ordinary `data sql`. It never invents a
+DataFusion CLI route. Optional DataFusion qualification is not measured here.
+
+## Current admitted product identity
+
+Initial native/performance use is limited to product commit
+`7bd4216c28b45761f27239e1d74536af71b11a9b`, sourceTree
+`cbad32ff06cac1fbcd01cbba5dd6dc5a8028a70e4a8741cf2a44a1266cdeeadd`.
+Freeze the runner commit separately and point ownerRoot/artifact at that matching
+product checkout/artifact. Do not switch or redispatch the active parent queue.
+The strict prepare disk contract requires automaticEvictionEnabled=false. The
+new automatic-retirement product published alongside this runner intentionally
+does not satisfy that contract. Supporting it requires a separately reviewed,
+explicit contract mode and regressions, not weakening this assertion. Neither
+these Node tests nor a 7bd measurement qualifies the newer product's performance.
+
+## Scope and clocks
+
+The input is the existing formally produced, authenticated 16,384-row
+NumericSample CASC/WDC fixture (`prepare-data.mjs --csv-numeric`). The producer
+report, original owner/sealed logs, Cargo receipt, numeric ABI source/lockfile,
+pin, definitions, CASC identities, full WDC cells and inventory are checked
+before use and again after samples. No new toy loop substitutes for the CLI.
+All 16,384 ordered rows and five columns are checked against independent expected
+values, not only count/hash. All stable public fields remain compared.
+
+Four distinct homes per pair are independently cloned from each engine's own
+successful `init` plus identical authenticated fixture documents. Application
+cache state is defined below; OS caches are not flushed.
+
+| Task | Rust | Fixed Go 3.2.3 | Interpretation |
+| --- | --- | --- | --- |
+| fresh-wdc | first SQL, no generation | first SQL in independent cold home | cold WDC task |
+| prepare-inclusive-first | explicit prepare + first SQL in another fresh home | first SQL in another fresh home | complete first-result task, includes conversion/authentication/publication |
+| first-after-prepare | first SQL after timed prepare | same Go first SQL | conditional diagnostic only, never cold acceptance |
+| subsequent-hit | next SQL on own prepared home | next SQL on own successful query home | repeated task with actual own cache state |
+
+The explicit prepare time is also reported on each pair. No prep/import cost is
+moved out of the prepare-inclusive cold claim. Every CLI sample uses the existing
+native monotonic CreateProcess-to-tree-reap/output-drain clock, with original
+process safety, output, cancellation and memory observation limits. There is no
+time subtraction. Decoder/CAP/fixture audits are outside product elapsed but
+never remove product authentication or output work from it. Sampled owned Job
+working set/private bytes are not unique physical RSS; CPU/IO are not measured.
+
+`--observation` runs exactly one alternating-order pair (seven CLI samples),
+without evaluating the performance target. `--acceptance` runs one separate
+correctness preflight then twenty fresh alternating-order pairs. All three
+accepted task ratios must meet Rust median / Go median <= 0.30. The conditional
+first-after-prepare ratio never grants acceptance. Neither mode grants full B04,
+all Data quality, real-client, whole-disk-accounting or five-loop audit acceptance.
+
+## Exactness and evidence
+
+The reader retains integers beyond 2^53 as bigint, including signed/u64 and
+nested arrays. Decimal/exponent tokens cannot silently round: decimal identity
+must match the finite Number's canonical decimal identity or the reader rejects
+it. Wide integral exponent forms retain exact decimal bigint values. No JSON
+numbers are converted into strings. Negative tests include adjacent wide values,
+u64 max, arrays, rounded decimal tokens and nonfinite/underflow forms.
+
+The measured NumericSample task contains exactly representable f32 fractions;
+it does NOT itself demonstrate actual CLI u64/array/partial behavior. Those are
+separate required native quality tests below. This distinction is intentional.
+
+Each SQL result requires complete source coverage, no truncation, full source
+CKey/EKey/hash checks and original resource/memory budgets. Exact signed CAP
+identity, metadata database entry and full result blob are verified and archived;
+CAPs are rechecked after later commands. Prepared reads require the exact public
+`typedGenerationCache` hit, same generation/object identity, no publication, and
+unchanged fully hashed IPC bytes/manifest before and after queries. The manifest
+is independently bound to fixture source/definitions/pin and prepare fields.
+Full manifest and IPC bytes survive successful scratch cleanup in evidence.
+
+The fresh prepare envelope validates source/coverage, batch/row/order identity,
+original memory/work budgets and decimal 5,000,000,000-byte Data disk quota.
+Incomplete legacy disk attribution remains explicitly false, not upgraded by the
+harness. Every native sample proof is revalidated by the outer reader; hand-edited
+elapsed values or unclosed owners/readers cannot pass. Failed/unresolved work
+retains its owned scratch and logs. Only succeeded, reaped owners are reclaimed.
+
+## Inputs
+
+Create a fresh JSON configuration using verified absolute paths and hashes:
+
+```json
+{
+  "schema": "lycheedev.data-generation-config.v1",
+  "ownerRoot": "<matching product checkout / owner root>",
+  "artifact": "<existing matching optimized artifact.json>",
+  "goSource": "<clean fixed Go 3.2.3 checkout>",
+  "goPackage": "<authenticated Go 3.2.3 npm stage>",
+  "luaLSArchive": "<already retained pinned LuaLS archive>",
+  "fixturePreparation": {
+    "report": "<sealed numeric fixture-preparation.json>",
+    "reportSHA256": "<actual SHA256 of report>",
+    "sourceTreeSHA256": "<producer report inputs.sourceTree>"
+  }
+}
+```
+
+The Go checkout, executable metadata and package must identify exactly
+`3766f9cacb52e93a803a626187e2a1d54a445468`. The optimized Rust artifact must match
+current product bytes and the default offline build recipe, same invocation,
+full unmodified upstream Emmy identity and beta 3.5.0 configuration. Runner and
+product roots may differ: all executing helper bytes are bound separately.
+Machine conditions JSON requires nonempty `machine`, `powerAndThermal`,
+`competingLoad`, `disk`, `operator`. Changed power scheme rejects completion.
+No downloads, build, fixture creation, package installation or game operations
+are hidden in the performance entry.
+
+## Exact native queue, coordinator only
+
+Freeze the final reviewed harness commit; keep product/source/artifact identities
+separate. Use the existing single parent-owned Windows queue. Do not operate the
+user's PC except through its authorized test task. No commands here have been
+executed merely because they are listed.
+
+1. `node --test tests/rust-performance-paired/generation-contract.test.mjs tests/rust-performance-paired/generation-evidence.test.mjs tests/rust-performance-paired/data-runner.test.mjs tests/rust-performance-paired/data-csv-diagnostics.test.mjs`
+2. Run the existing implementation-quality queue before performance. Required
+   generation subset (exact current libtest names/counts must be retained):
+   `node tools/rust-cargo.mjs --owner generation-quality -- test --locked --offline -j 1 -p lycheedev-data --lib local_query::generation_tests:: -- --test-threads=1`
+   This includes point/u64+CSV/arrays, scan/filter/aggregate/self-join, partial CAP,
+   absent/missing/corrupt generation, cancellation/close/failure and budgets.
+   Generation producer/retirement full group:
+   `node tools/rust-cargo.mjs --owner generation-lifecycle -- test --locked --offline -j 1 -p lycheedev-data --lib generation:: -- --test-threads=1`
+   The parent's full default/qualification all-targets and remaining quality
+   queue remains authoritative; this subset does not replace it.
+3. Reuse an already matching optimized artifact where available. Otherwise, only
+   through the approved queue: `node tools/rust-build.mjs <new-owned-artifact-dir> release --one-shot`.
+   Preserve EXE/record and same-invocation PDB when using symbols.
+4. Reuse the original immutable numeric fixture preparation report. Only when
+   genuinely absent, explicitly produce a new separately identified fixture:
+   `node tests/rust-performance-paired/prepare-data.mjs --csv-numeric`.
+   Never overwrite/relabel a historical fixture or report.
+5. First diagnostic: `node tools/rust-data-generation-paired.mjs <config.json> <conditions.json> --observation`.
+   Read the full report, all seven proofs/results, final original owner receipt
+   and outer exit. A printout alone is not retirement or acceptance.
+6. Only after complete quality/observation gates and parent authorization:
+   `node tools/rust-data-generation-paired.mjs <config.json> <conditions.json> --acceptance`.
+   Retain failures and all pair results. Missing/incomplete groups are not passes.
+
+Cloud Node contracts and static syntax are developer verification only. Native
+harness execution, actual quality gates and performance remain NOT_RUN until the
+coordinator records exact fixed-SHA Windows evidence. No runtime/performance
+claim follows from these files or the synthetic input alone.

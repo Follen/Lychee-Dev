@@ -102,6 +102,35 @@ impl DataResources {
             Some(check),
         )
     }
+    /// Capacity-triggered typed retirement and write admission under one quota
+    /// owner. The caller must retain/serialize returned deletion facts even if
+    /// later generation production fails. Unknown manifests fail closed.
+    /// `retain_receipt` transfers only the receipt allocation into the caller's
+    /// cumulative output budget, on success or partial-retirement error; temporary
+    /// snapshot allocations remain refundable.
+    pub fn reserve_derived_cache_with_retirement<'a, A>(
+        &'a self,
+        peak: data_disk::AdditionalPeak,
+        check: &'a dyn Fn() -> Result<()>,
+        reserve: impl FnMut(usize) -> Result<A>,
+        reference: impl FnMut(&str, &[u8]) -> Result<data_disk::DerivedObject>,
+        retain_receipt: impl FnMut(A),
+    ) -> Result<(
+        data_disk::DerivedReservation<'a>,
+        Option<data_disk::DerivedRetirementReport<A>>,
+    )> {
+        data_disk::retirement::admit(
+            self,
+            &self.home,
+            self.data_cache_max_bytes,
+            &self.control,
+            peak,
+            check,
+            reserve,
+            reference,
+            retain_receipt,
+        )
+    }
     /// Borrow this same query owner for zero-growth derived reads. Existing
     /// over-budget bytes remain visible; the returned capability exposes no
     /// publication, staging or additional-write reservation methods.

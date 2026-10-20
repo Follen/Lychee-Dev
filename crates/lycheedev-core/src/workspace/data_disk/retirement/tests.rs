@@ -519,3 +519,6 @@ fn referenced_missing_body_remains_an_explicit_integrity_stop_without_manifest_d
     assert_eq!(error.details["result"]["reclaimedBytes"], 0);
     assert!(manifest_path(&f, &keys[0]).exists());
 }
+
+#[path = "admission_tests.rs"]
+mod admission_tests;

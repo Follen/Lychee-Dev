@@ -235,7 +235,8 @@ pub(crate) trait FileScope {
         &'reservation self,
         peak: lycheedev_core::workspace::data_disk::AdditionalPeak,
         check: &'reservation dyn Fn() -> Result<()>,
-    ) -> Result<lycheedev_core::workspace::data_disk::DerivedReservation<'reservation>>;
+        budget: &'reservation crate::resource::Budget,
+    ) -> Result<crate::generation::retirement::Admission<'reservation>>;
     fn check(&self) -> Result<()>;
     /// Reauthenticate the original source observations before publication.
     /// CDN has no local mutable source; its existing session check suffices.
@@ -277,9 +278,10 @@ impl FileScope for Scope<'_> {
         &'reservation self,
         peak: lycheedev_core::workspace::data_disk::AdditionalPeak,
         check: &'reservation dyn Fn() -> Result<()>,
-    ) -> Result<lycheedev_core::workspace::data_disk::DerivedReservation<'reservation>> {
+        budget: &'reservation crate::resource::Budget,
+    ) -> Result<crate::generation::retirement::Admission<'reservation>> {
         self.check()?;
-        self.admitted.reserve_derived_cache(peak, check)
+        self.admitted.reserve_derived_cache(peak, check, budget)
     }
     fn check(&self) -> Result<()> {
         Scope::check(self)
@@ -385,10 +387,11 @@ impl FileScope for SessionScope<'_, '_> {
         &'reservation self,
         peak: lycheedev_core::workspace::data_disk::AdditionalPeak,
         check: &'reservation dyn Fn() -> Result<()>,
-    ) -> Result<lycheedev_core::workspace::data_disk::DerivedReservation<'reservation>> {
+        budget: &'reservation crate::resource::Budget,
+    ) -> Result<crate::generation::retirement::Admission<'reservation>> {
         self.check()?;
         match &self.session {
-            Some(session) => session.reserve_derived_cache(peak, check),
+            Some(session) => session.reserve_derived_cache(peak, check, budget),
             None => self
                 .admitted
                 .as_ref()
@@ -399,7 +402,7 @@ impl FileScope for SessionScope<'_, '_> {
                         "Reader initialization previously failed",
                     )
                 })?
-                .reserve_derived_cache(peak, check),
+                .reserve_derived_cache(peak, check, budget),
         }
     }
     fn check(&self) -> Result<()> {

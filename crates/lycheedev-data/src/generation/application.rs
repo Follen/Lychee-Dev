@@ -319,6 +319,7 @@ pub(super) fn dispatch_with_read_hook(
         5,
         "records.data_pin_required",
     ))?;
+    let mut automatic_retirement = None;
     let mut published_generation = None;
     let result = (|| {
         let data = pin
@@ -438,7 +439,7 @@ pub(super) fn dispatch_with_read_hook(
             // A miss has released its read owner. The normal write path below
             // re-admits capacity and authenticates source before no-replace CAS.
             let check = || budget.check();
-            let reservation = reader.reserve_derived_cache(
+            let (reservation, retirement) = reader.reserve_derived_cache(
                 AdditionalPeak {
                     objects: ipc_maximum,
                     staging: ipc_maximum,
@@ -446,7 +447,12 @@ pub(super) fn dispatch_with_read_hook(
                     ..Default::default()
                 },
                 &check,
+                &budget,
             )?;
+            // Save deletion facts before any later fallible producer/cleanup.
+            // Admission has committed the receipt's cumulative budget charge,
+            // so it survives producer and outer teardown error wrapping.
+            automatic_retirement = retirement.as_ref().map(|report| json!(report));
             let report = reservation.report().clone();
             let result = write_generation(
                 inv,
@@ -469,6 +475,9 @@ pub(super) fn dispatch_with_read_hook(
                     "generationPublished": true,
                 }));
                 outcome.data["diskReservation"] = json!(report);
+                if let Some(retirement) = &automatic_retirement {
+                    outcome.data["automaticRetirement"] = retirement.clone();
+                }
                 outcome
             });
             reservation.finish(result)
@@ -481,6 +490,12 @@ pub(super) fn dispatch_with_read_hook(
     })();
     let result = scope.finish(result);
     after_finish(result).map_err(|mut error| {
+        if let Some(retirement) = automatic_retirement {
+            error.details = json!({
+                "schema":"lycheedev.data-generation-retirement-error.v1",
+                "primary":error.clone(), "automaticRetirement":retirement,
+            });
+        }
         if let Some(published) = published_generation {
             let primary = error.clone();
             error

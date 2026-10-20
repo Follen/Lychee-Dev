@@ -45,9 +45,12 @@ impl FileScope for Session<'_, '_> {
         &'reservation self,
         peak: lycheedev_core::workspace::data_disk::AdditionalPeak,
         check: &'reservation dyn Fn() -> Result<()>,
-    ) -> Result<lycheedev_core::workspace::data_disk::DerivedReservation<'reservation>> {
+        budget: &'reservation crate::resource::Budget,
+    ) -> Result<crate::generation::retirement::Admission<'reservation>> {
         self.check()?;
-        self.scope.admitted.reserve_derived_cache(peak, check)
+        self.scope
+            .admitted
+            .reserve_derived_cache(peak, check, budget)
     }
     fn check(&self) -> Result<()> {
         self.scope.check()?;
