@@ -45,7 +45,7 @@ fn children(prefix: &str) -> Vec<String> {
 fn node(name: &str, path: &str) -> Command {
     let mut command = Command::new(name.to_owned()).disable_help_flag(true)
         .disable_help_subcommand(true).disable_version_flag(true)
-        .color(clap::ColorChoice::Never).arg_required_else_help(false);
+        .arg_required_else_help(false);
     if let Some(definition) = contract::all().iter().find(|d| d.path == path) {
         command = command.about(definition.summary.clone());
         for flag in &definition.flags {

@@ -72,7 +72,20 @@ test('normal outer and owned controller entries both load current authenticated 
     assert.doesNotMatch(source, /const workflow = jsonFile\(/);
   }
   assert.equal(CURRENT_WORKFLOW, 'tests/rust-skill-usage/workflow-go323.json');
-  assert.equal(new Set(currentWorkflowInputs(workflow)).size, 12);
+  const inputs = currentWorkflowInputs(workflow);
+  assert.equal(inputs.length, 13);
+  assert.equal(new Set(inputs).size, 13);
+  assert.deepEqual([...inputs].sort(), [
+    'workflow-go323.json', 'workflow.json', 'skill-identity.mjs',
+    'baselines/rust-agent-cutover-recovered-skill.json',
+    'baselines/rust-agent-native-skill.json',
+    'baselines/rust-simplified-skill.json', 'baselines/rust-candidate-skill.json',
+    'baselines/go3.2.0-skill.json', 'baselines/go3.2.3-skill.json',
+    'baselines/go3.2.3/references/live-recovery.md',
+    'baselines/go3.2.3/references/live-startup.md',
+    'baselines/go3.2.3/references/data-tables.md',
+    'baselines/go3.2.3/references/data-recovery.md',
+  ].map(path => `tests/rust-skill-usage/${path}`).sort());
 });
 test('current workflow rejects historical relabeling, missing increments and weakened Source tasks', t => {
   const f = workflowFixture(t), original = f.read('workflow-go323.json');
