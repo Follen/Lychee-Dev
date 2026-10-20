@@ -130,7 +130,11 @@ pub(super) trait Row: Sized {
     type Borrowed<'de>: Deserialize<'de>;
     const MAX: usize;
     const MIN: usize;
-    fn validate<'de>(row: &Self::Borrowed<'de>, context: &mut Context<'_>) -> Result<()>;
+    fn validate<'de>(
+        row: &Self::Borrowed<'de>,
+        previous_path: &mut Option<&'de str>,
+        context: &mut Context<'_>,
+    ) -> Result<()>;
     fn own<'de, E: Error>(
         row: Self::Borrowed<'de>,
         context: &mut Context<'_>,
@@ -147,7 +151,11 @@ impl Row for Document {
     type Borrowed<'de> = Document<&'de str>;
     const MAX: usize = DOCUMENTS;
     const MIN: usize = 4;
-    fn validate(row: &Document<&str>, _: &mut Context<'_>) -> Result<()> {
+    fn validate<'de>(
+        row: &Document<&'de str>,
+        _: &mut Option<&'de str>,
+        _: &mut Context<'_>,
+    ) -> Result<()> {
         valid_path(row.path)?;
         if !valid_digest(row.sha256, 64) || row.bytes > crate::git::MAX_SOURCE_BYTES {
             return Err(invalid("Invalid cached document identity or byte limit"));
@@ -191,7 +199,11 @@ impl Row for AssetRecord {
     type Borrowed<'de> = AssetRecord<&'de str, (&'de str, u64)>;
     const MAX: usize = ASSETS;
     const MIN: usize = 9;
-    fn validate(row: &Self::Borrowed<'_>, _: &mut Context<'_>) -> Result<()> {
+    fn validate<'de>(
+        row: &Self::Borrowed<'de>,
+        _: &mut Option<&'de str>,
+        _: &mut Context<'_>,
+    ) -> Result<()> {
         valid_path(row.path)?;
         match &row.local {
             Some((hash, bytes))
@@ -244,13 +256,23 @@ impl Row for Symbol {
     type Borrowed<'de> = Symbol<&'de str>;
     const MAX: usize = SYMBOLS;
     const MIN: usize = 12;
-    fn validate(row: &Symbol<&str>, ctx: &mut Context<'_>) -> Result<()> {
-        validate_symbol(row)?;
-        match row.kind {
-            "declaration" => ctx.declarations += 1,
-            "relationship" => ctx.relationships += 1,
-            "load" | "header" => (),
-            _ => return Err(invalid("Unknown cached source symbol kind")),
+    fn validate<'de>(
+        row: &Symbol<&'de str>,
+        previous_path: &mut Option<&'de str>,
+        ctx: &mut Context<'_>,
+    ) -> Result<()> {
+        // Adjacent symbols commonly refer to the same source document. Reuse
+        // only successful validation of exactly equal immutable UTF-8 bytes.
+        // This is local to this sequence, retains one borrowed slice, and does
+        // not bypass decoding, row controls, kind validation or count checks.
+        if *previous_path != Some(row.path) {
+            valid_path(row.path)?;
+            *previous_path = Some(row.path);
+        }
+        match symbol_class(row.kind)? {
+            SymbolClass::Declaration => ctx.declarations += 1,
+            SymbolClass::Relationship => ctx.relationships += 1,
+            SymbolClass::Metadata => (),
         }
         Ok(())
     }
@@ -358,12 +380,14 @@ impl<'de, C: Collection<T>, T: Row> DeserializeSeed<'de> for RowsSeed<'_, '_, C,
                     return Err(ctx.stop(invalid("Invalid cached Source row count")));
                 }
                 let mut result = C::reserve::<A::Error>(count, ctx)?;
+                let mut previous_path = None;
                 for _ in 0..count {
                     ctx.check()?;
                     let row = seq
                         .next_element::<T::Borrowed<'de>>()?
                         .ok_or_else(|| A::Error::custom("missing cached Source row"))?;
-                    T::validate(&row, ctx).map_err(|error| ctx.stop::<A::Error>(error))?;
+                    T::validate(&row, &mut previous_path, ctx)
+                        .map_err(|error| ctx.stop::<A::Error>(error))?;
                     result.push::<A::Error>(row, ctx)?;
                 }
                 Ok(result)
@@ -734,10 +758,21 @@ fn decode_with_owned<D: Collection<Document>, A: Collection<AssetRecord>, S: Col
 }
 pub(crate) fn validate_symbol(row: &Symbol<&str>) -> Result<()> {
     valid_path(row.path)?;
-    if ["declaration", "relationship", "load", "header"].contains(&row.kind) {
-        Ok(())
-    } else {
-        Err(invalid("Unknown cached source symbol kind"))
+    symbol_class(row.kind).map(|_| ())
+}
+// Query admission and full/summary index admission share the same accepted
+// kinds. The decoder also uses this classification for its summary counts.
+enum SymbolClass {
+    Declaration,
+    Relationship,
+    Metadata,
+}
+fn symbol_class(kind: &str) -> Result<SymbolClass> {
+    match kind {
+        "declaration" => Ok(SymbolClass::Declaration),
+        "relationship" => Ok(SymbolClass::Relationship),
+        "load" | "header" => Ok(SymbolClass::Metadata),
+        _ => Err(invalid("Unknown cached source symbol kind")),
     }
 }
 

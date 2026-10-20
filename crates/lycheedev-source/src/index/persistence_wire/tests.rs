@@ -728,3 +728,126 @@ fn binary_index_consumed_integrity_and_owned_errors_precede_later_finalize_cance
         );
     }
 }
+
+#[test]
+fn binary_index_repeated_symbol_paths_preserve_mixed_kinds_order_and_all_fields() {
+    let (mut index, pin) = fixture();
+    let template = index.symbols[0].clone();
+    index.symbols.clear();
+    for (ordinal, (path, kind)) in [
+        ("目录/雪.lua", "declaration"),
+        ("目录/雪.lua", "relationship"),
+        ("目录/雪.lua", "load"),
+        ("Other.lua", "header"),
+        ("Other.lua", "declaration"),
+        ("目录/雪.lua", "relationship"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut row = template.clone();
+        row.path = path.into();
+        row.kind = kind.into();
+        row.ordinal = ordinal;
+        row.id = index::stable_id(&pin, &row);
+        index.symbols.push(row);
+    }
+    index.summary.declarations = 2;
+    index.summary.relationships = 2;
+    let id = index::fingerprint(&pin);
+    let control = OperationControl::default();
+    let raw = encode(&index, &id, &control).unwrap();
+    let full: Index = decode(&raw, &id, &control).unwrap();
+    assert_eq!(
+        public(serde_json::to_value(&full).unwrap()),
+        public(serde_json::to_value(&index).unwrap())
+    );
+    assert_eq!(encode(&full, &id, &control).unwrap(), raw);
+    let projected: Index<Counted<Document>, Counted<AssetRecord>, Counted<Symbol>> =
+        decode(&raw, &id, &control).unwrap();
+    assert_eq!(projected.symbols.len(), 6);
+    assert_eq!(
+        serde_json::to_value(projected.summary).unwrap(),
+        serde_json::to_value(full.summary).unwrap()
+    );
+}
+
+#[test]
+fn binary_index_repeated_symbol_paths_do_not_admit_changed_or_initial_invalid_paths() {
+    for bad in [
+        "",
+        "/absolute.lua",
+        "../outside.lua",
+        "目录/雪.lua/..",
+        "目录/雪.lua//tail",
+        "目录/雪.lua\\tail",
+        "目录/雪.lua:tail",
+        "目录/雪.lua\0tail",
+        "目录/雪.lua\r",
+        "目录/雪.lua\n",
+        ".",
+        "..",
+    ] {
+        for first in [false, true] {
+            let (mut index, pin) = fixture();
+            // Three equal paths in the ordinary fixture exercise the hit case;
+            // a changed suffix must revalidate, not use a prefix/hash identity.
+            if first {
+                for row in &mut index.symbols {
+                    row.path = bad.into();
+                }
+            } else {
+                index.symbols[1].path = bad.into();
+            }
+            let raw = unchecked(&index, &pin);
+            reject_both(&raw, &index::fingerprint(&pin));
+        }
+    }
+    let (mut index, pin) = fixture();
+    index.symbols[1].path = "a".repeat(4097);
+    reject_both(&unchecked(&index, &pin), &index::fingerprint(&pin));
+}
+
+#[test]
+fn binary_index_repeated_symbol_paths_still_validate_kind_and_summary_counts() {
+    for mutation in 0..4 {
+        let (mut index, pin) = fixture();
+        match mutation {
+            0 => index.symbols[1].kind = "unknown".into(),
+            1 => index.symbols[1].kind = "header".into(),
+            2 => index.summary.declarations += 1,
+            _ => index.summary.relationships += 1,
+        }
+        reject_both(&unchecked(&index, &pin), &index::fingerprint(&pin));
+    }
+}
+
+#[test]
+fn binary_index_repeated_symbol_paths_keep_cancellation_in_full_and_summary_rows() {
+    let (mut index, pin) = fixture();
+    for _ in 0..1024 {
+        index.symbols.push(index.symbols[0].clone());
+    }
+    index.summary.declarations += 1024;
+    let id = index::fingerprint(&pin);
+    let raw = encode(&index, &id, &OperationControl::default()).unwrap();
+    // These checkpoints are deep into repeated rows in both consumers, not
+    // merely in header/summary decoding. No path reuse may suppress controls.
+    for step in [1000, 2000] {
+        for summary in [false, true] {
+            let control = OperationControl::default();
+            let _stop = CancelAtStep::new(step, &control);
+            let error = if summary {
+                decode::<Counted<Document>, Counted<AssetRecord>, Counted<Symbol>>(
+                    &raw, &id, &control,
+                )
+                .err()
+            } else {
+                decode::<Vec<Document>, Vec<AssetRecord>, Vec<Symbol>>(&raw, &id, &control).err()
+            }
+            .unwrap();
+            assert_eq!(error.code, "command.cancelled");
+            assert!(error.details.is_null());
+        }
+    }
+}

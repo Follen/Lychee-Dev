@@ -52,6 +52,14 @@ CLI 静态 oracle 修复（2026-10-20）：历史适配器单测固定读取并�
 
 自动策略仅覆盖typed写入准入。私有state/data SQLite主库/journal/residual已有计量，不能误称全部SQLite未接入；历史未登记/共享Data blob、历史共享toolkit数据库、shared decoded归属释放、legacy staging/spill/export、typed准入前共享发布的自动回收及完整全Data5GB验收仍开放。固定Go323、≤0.30门禁、原资源限制和最终五循环顺序不变。
 
+## 2b. 2026-10-20 Source warm decode 窄优化候选
+
+固定7bd匹配产物的六场景完整Facts、Index、summary、custody及finalIntegrity全部通过。Go/Rust毫秒分别为cold 8395.3783/3507.9365、warm 577.8278/288.8792、change 2798.1872/823.718、insert 2784.275/800.2367、delete 2738.0123/814.2435、rename 2738.8422/811.0872。四增量单pair比率低于0.30，cold/warm仍未达线；不是20对正式验收。该次warm profile v2实际typed decode为121642µs、read 12065µs、SHA 20687µs，父cached_index为168301µs；子段属于父桶，不能相加为额外成本，计时开销亦不能当收益。
+
+本次基于7786只修改Source decoder及其测试：每个序列保留一个上次成功验证路径的借用slice，仅完整不可变UTF-8字节相等时复用路径验证；symbol kind接受集合与计数复用同一分类。原完整SHA、逐行解码、控制检查、所有字段/顺序、错误和分配预算保持。无全局缓存或新增owned路径。四项新回归覆盖完整字段/顺序与混合kind、首个及变化坏路径、重复路径下kind/count拒绝、full/summary深层取消。独立源码审查通过；官方云端入口返回owned.windows_required，Rust编译和这四项执行均NOT_RUN。最终组合树九套Node422/422通过、0失败/skip；这不能替代Rust执行或证明优化收益。
+
+后续由既有唯一父队列固定最终SHA执行Source all-targets及lib，逐名确认上述四项与原ignored库存；再以匹配产物完整六场景核Facts/Index/summary/custody/finalIntegrity及warm总wall/typed decode，补低重复/唯一路径语料后才可声称一般收益。新候选性能NOT_MEASURED；不增加嵌套计时。7786容量15新增仍NOT_RUN；当前Data性能观察仍固定7786 runner / 7bd产品，严格automaticEvictionEnabled=false，不切换或重派进行中的队列。无原始本机日志入库，PR保持draft。
+
 ## 3. Home、容量和所有权边界
 
 Data默认容量为**5,000,000,000字节（十进制5GB）**，配置支持明确单位；与测试scratch 5/6GiB不同。最终统一核算Data下载/共享blob归属、物化/索引/目录、staging/spill/导出峰值和证据占用，按内容去重防双计。活跃lease和证据引用保护；旧已超额或配置缩小先拒新增并说明，不删除证据。
