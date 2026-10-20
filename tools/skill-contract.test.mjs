@@ -216,7 +216,25 @@ test('CI approved Rust static mode is independent and cannot combine contract so
   const run = extra => spawnSync(process.execPath, [resolve('tools/skill-contract.mjs'), '--approved-rust', ...extra], {encoding:'utf8',shell:false,timeout:120000});
   const result = run([]);
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.equal(JSON.parse(result.stdout).contracts, 87);
+  assert.equal(JSON.parse(result.stdout).contracts, 71);
+  const current = loadCliContractOracle(readFileSync(contractFile)).expected;
+  const currentPaths = current.map(command => command.path);
+  assert.equal(currentPaths.length, 71);
+  for (const path of ['cli search', 'schema']) {
+    assert.equal(currentPaths.filter(value => value === path).length, 1);
+  }
+  // Keep the retired inventory independently explicit, not derived from the
+  // same production filtering implementation this regression guards.
+  const retired = [
+    'data sql', 'data db2', 'data db2 schema', 'data db2 search',
+    'data db2 foreign-key', 'data db2 stream', 'data spell info',
+    'data spell auras', 'data spell summons', 'data item get',
+    'data item models', 'data item geosets', 'data item textures',
+    'data decor list', 'data decor get', 'data creature display',
+    'data creature model', 'data encounter get',
+  ];
+  assert.equal(retired.length, 18);
+  for (const path of retired) assert(!currentPaths.includes(path), `${path} is not a production command`);
   assert.equal(JSON.parse(result.stdout).checkKind, 'static-reference-consistency');
   assert.notEqual(run(['--contract-file', contractFile]).status, 0);
   assert.notEqual(run(['--bin', process.execPath]).status, 0);

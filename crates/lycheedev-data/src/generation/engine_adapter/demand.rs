@@ -5,7 +5,7 @@ mod arrow_snapshot;
 use arrow_snapshot::{ArrowSnapshot, ArrowCursor};
 use crate::local_query::provider::{OwnedEquality, OwnedPhysicalCursor};
 use crate::relational::RowCursor;
-use arrow_array::UInt32Array;
+use arrow_array::{Array, UInt32Array};
 
 pub(crate) enum DemandKind {
     Arrow(Arc<ArrowSnapshot>),

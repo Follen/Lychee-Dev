@@ -166,7 +166,7 @@ impl Engine {
             self.invocation
                 .flags
                 .insert("--snapshot".into(), pin.id.clone());
-            self.pinned = Some((pin.id, pin.data));
+            self.pinned = Some((pin.id, pin.spec.data));
         }
         catalog._lifetime = Some(lifetime.clone());
         lifetime.settle()?;
@@ -405,7 +405,7 @@ impl Engine {
         let mut invocation=self.invocation.clone();invocation.control=control;
         let(result,pin)=super::semantics::read(&invocation,table,lifetime.clone(),self.limits.result_bytes)?;
         if let Some((id,data))=&self.pinned {if id!=&pin.id||data!=&pin.data{return Err(fault("records.source_identity",3,"Semantic metadata differs from the session pin"));}}
-        else {self.invocation.flags.insert("--snapshot".into(),pin.id.clone());self.pinned=Some((pin.id,pin.data));}
+        else {self.invocation.flags.insert("--snapshot".into(),pin.id.clone());self.pinned=Some((pin.id,pin.spec.data));}
         lifetime.settle()?;Ok(result)
     }
 }

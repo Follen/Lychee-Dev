@@ -7,7 +7,7 @@ use crate::{
     table::{self, OwnedLeasedRow, Table},
 };
 use arrow_array::{
-    ArrayRef, RecordBatch, UInt32Array,
+    Array, ArrayRef, RecordBatch, UInt32Array,
     builder::{
         ArrayBuilder, FixedSizeListBuilder, Float32Builder, Int64Builder, StringBuilder,
         UInt32Builder, UInt64Builder,

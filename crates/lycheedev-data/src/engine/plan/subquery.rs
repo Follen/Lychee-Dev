@@ -186,7 +186,7 @@ pub(super) fn membership(left: DataFrame, right: DataFrame, needle: Expr, negate
     let present = Expr::Column(Column::new(Some(TableReference::bare(alias)), "__sq_present")).is_not_null();
     let hit = format!("{alias}_hit");
     let unknown = format!("{alias}_unknown");
-    let mut metrics = original.iter().enumerate().map(|(index, column)| first_value(Expr::Column(column.clone())).alias(format!("{alias}_left_{index}"))).collect::<Vec<_>>();
+    let mut metrics = original.iter().enumerate().map(|(index, column)| first_value(Expr::Column(column.clone()), vec![]).alias(format!("{alias}_left_{index}"))).collect::<Vec<_>>();
     metrics.push(bool_or(present.clone().and(comparison.clone().is_true())).alias(&hit));
     metrics.push(bool_or(present.and(comparison.is_null())).alias(&unknown));
     let aggregate = joined.aggregate(vec![Expr::Column(Column::from_name(&row_id))], metrics)?;
@@ -307,7 +307,7 @@ pub(super) fn scalar(right: DataFrame, owner: &Arc<QueryOwner>) -> DfResult<Expr
     let plan = right.into_parts().1;
     let correlated = !plan.all_out_ref_exprs().is_empty();
     if !correlated {
-        let aggregate = native_aggregate(plan, vec![count(lit(1i64)).alias("__sq_count"), first_value(Expr::Column(value)).alias("__sq_first")])?;
+        let aggregate = native_aggregate(plan, vec![count(lit(1i64)).alias("__sq_count"), first_value(Expr::Column(value), vec![]).alias("__sq_first")])?;
         let guarded = guard_scalar(Expr::Column(Column::from_name("__sq_count")), Expr::Column(Column::from_name("__sq_first")), kind, owner).alias("__sq_scalar");
         let plan = LogicalPlanBuilder::from(aggregate).project_with_validation(vec![(guarded, false)])?.build()?;
         return Ok(scalar_subquery(Arc::new(plan)));
@@ -321,7 +321,7 @@ pub(super) fn scalar(right: DataFrame, owner: &Arc<QueryOwner>) -> DfResult<Expr
     }
     reserve_clone(&plan, owner)?;
     let count = native_aggregate(plan.clone(), vec![count(lit(1i64)).alias("__sq_count")])?;
-    let first = native_aggregate(plan, vec![first_value(Expr::Column(value)).alias("__sq_first")])?;
+    let first = native_aggregate(plan, vec![first_value(Expr::Column(value), vec![]).alias("__sq_first")])?;
     pullable_scalar(&count, owner)?;
     pullable_scalar(&first, owner)?;
     Ok(guard_scalar(scalar_subquery(Arc::new(count)), scalar_subquery(Arc::new(first)), kind, owner))
