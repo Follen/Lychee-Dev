@@ -1,13 +1,15 @@
 # Rust 架构实施清单
 
-当前批：05660两check与定向native948通过/6原ignored，19新增逐名一次；其匹配Source release/性能仍按唯一父队列继续。7bd Data完整一对观察有效但慢约3–4倍，未验收。本批Data/CLI插桩及新v2观察合同已整合，6新增Rust与新产品运行NOT_RUN。
+当前批：05660两check与定向native948通过/6原ignored，19新增逐名一次；其匹配Source六场景完整性已通过，仅三个增量单pair达0.30，正式20对仍未验收。7bd Data完整一对观察有效但慢约3–4倍，未验收。本批Data/CLI插桩及新v2观察合同已整合，6新增Rust与新产品运行NOT_RUN。
 
 以 [handover](handover.md) 为当前事实、[DESIGN](DESIGN.md#authorized-architecture-implementation-plan--2026-10-19) 为完整计划。质量基线f811；性能参考固定Go323。先业务质量/完整实现，再≤30%耗时门禁，之后正式五项循环。历史已完成项与原失败留在[308efa旧清单](https://github.com/Follen/Lychee-Dev/blob/308efa2766d00273b13c9c7e24a0b956bb60e9e9/todo.md)，不滚动复制到当前待办。
 
 ## 立即闭合固定基线
 - [x] 7bd Source六场景完整Facts/Index/summary/custody及finalIntegrity通过；四增量单pair低于0.30，cold/warm未达，20对未验收。实际warm typed decode 121642µs属于cached_index 168301µs父桶。
 - [x] 05660组合default/DF两check和定向native948通过/6原ignored，Source4与容量15新增逐名各一次；不借用于本批新插桩。
-- [ ] 原05660匹配release及完整六场景/低重复语料性能继续唯一父队列，不切换、不重派；新性能尚未测。
+- [x] 05660匹配Source六场景完整Facts/Index/summary/custody及finalIntegrity通过；仅insert/delete/rename单pair低于0.30，cold0.41458/warm0.40232/change0.31859未达，非20对验收。typed decode 106632µs与7bd121642µs跨run差异不可作因果结论。
+- [ ] 本批test-only decode/control诊断已独审，三active回归及一个默认ignored优化诊断NOT_RUN（owned.windows_required）；最终组合九套Node422/422不是native证明。保持当前fca9质量队列；之后唯一父队列固定新SHA完成Source all-targets/lib，逐名确认三新增和原ignored，再用现有认证单Index fixture及封存优化test artifact独立exact运行三轮诊断。禁用计时内计数但保真实checks，不做相减归因/收益声明。
+- [ ] Source低重复/唯一路径语料及独立20对正式性能验收仍待；不能用测试诊断替代生产端到端门禁。
 - [x] 7bd Data新runner精确timeoutSeconds=300后完整七CLI及全部完整性通过；原7786五样本后失败保留。单pair约慢Go3–4倍，不是20对验收。
 - [x] 7bd uppercase source BlobRef修复：default/DF all-targets及generation42实际通过，原失败保留。
 - [ ] 本批固定最终发布SHA跑all-targets与Data phase_profile、local_query generation/regression、generation及CLI profile回归，6新增逐名一次，resource v5断言与原ignored库存独立保留。当前Rust NOT_RUN，Node/语法不是native证明。

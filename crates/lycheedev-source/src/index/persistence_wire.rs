@@ -1049,6 +1049,8 @@ fn encode_mode<S: BuiltSymbols>(
 
 fn check_control(control: &OperationControl) -> Result<()> {
     #[cfg(test)]
+    decode_diagnostic::observe_check();
+    #[cfg(test)]
     CANCEL_AT_STEP.with(|slot| {
         if let Some((left, token)) = slot.borrow_mut().as_mut() {
             *left = left.saturating_sub(1);
@@ -1090,3 +1092,6 @@ pub(super) mod tests;
 
 #[cfg(test)]
 mod export_tests;
+
+#[cfg(test)]
+mod decode_diagnostic;

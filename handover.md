@@ -80,6 +80,16 @@ CLI 静态 oracle 修复（2026-10-20）：历史适配器单测固定读取并�
 
 两个源码片均独审通过；最终整合全部19份paired Node测试855/855通过、0失败/0跳过；20份修改源码语法检查通过（10 Rust语法解析、10 Node --check），diff检查通过。6项新增Rust实际编译/执行仍NOT_RUN：云端官方入口因缺固定Emmy upstream在Cargo之前停止，不以Node或语法通过代替。后续先由既有父队列完成本次固定发布SHA的all-targets、Data phase/generation/local_query回归及CLI三个profile测试，逐名确认六新增和resource v5断言，再构建匹配产物执行新v2一对完整诊断；不得抢占原05660 Source队列。无本机原始日志入库，无merge/release或性能门禁完成声明。
 
+## 2e. 2026-10-20 Source 实际结果与 test-only decode/control 诊断
+
+本节更新前面05660 Source待验时间点，不改写历史结果。固定05660匹配产物六场景完整Facts、Index、summary、custody和finalIntegrity全部通过。Go/Rust毫秒：cold 8519.7729/3532.1597（0.41458）、warm 565.9414/227.6897（0.40232）、change 2770.111/882.5193（0.31859）；仅insert/delete/rename三个增量单pair低于0.30，cold/warm/change未达，20对正式验收仍未完成。warm typed decode 106632µs，对比7bd的121642µs只是不同run的诊断，环境/缓存未受控，不能据此归因相邻路径优化或宣布性能验收。
+
+本次三个Source文件只增加cfg(test)诊断接线、已有exporter fixture认证复用及测试模块，不改变非test产品语义。先用真实完整Counted decoder做一次不计时控制调用计数；关闭计数后交替顺序测三轮相同完整decoder、真实OperationControl::check循环及有deadline维护检查的空循环。保全部字段/控制/认证，不设no-op decoder；固定总180s合作deadline、每pass/loop最多6400万检查，仍需外部owner超时/回收。读取/认证、完整summary/gaps的有界hash证明及析构不计入decode桶；测试TLS与关闭计数分支仍存在，隔离循环的代码/缓存环境不同，禁止相减当codec归因或外推cold/生产收益。
+
+诊断只接受已有Source benchmark认证的一记录source-index-export-input.v1 manifest及固定index.bin；保128MiB输入和独立128MiB证明上限，不开放任意文件入口。前后复核原custody、manifest/body完整身份，最终复核前先释放首份完整buffer。三个active回归覆盖计数作用域/真实取消与deadline、完整decoder及错误退栈、固定fixture/身份/坏体拒绝；唯一benchmark默认ignored，仅由父队列在认证优化release或symbols测试产物、精确源码/工具链/flags/EXE记录下运行。debugAssertions=false本身不是优化证明；要求exact一次pass、三轮、countingEnabledDuringTiming=false及finalIntegrityVerified=true，其他原ignored单列。
+
+独立最终源码审查通过，最终组合九套Node422/422通过、0失败/skip；官方云端入口owned.windows_required在编译前阻断，新三个active回归和ignored诊断均NOT_RUN，不是优化或性能验收。当前fca9固定native质量队列保持，不切换或重派；本批后续由唯一父队列固定新SHA进行Source all-targets/lib和独立优化诊断。Data插桩及v2产品观察合同保持原样，不借用旧版本结果，无本机原始日志入库。
+
 ## 3. Home、容量和所有权边界
 
 Data默认容量为**5,000,000,000字节（十进制5GB）**，配置支持明确单位；与测试scratch 5/6GiB不同。最终统一核算Data下载/共享blob归属、物化/索引/目录、staging/spill/导出峰值和证据占用，按内容去重防双计。活跃lease和证据引用保护；旧已超额或配置缩小先拒新增并说明，不删除证据。

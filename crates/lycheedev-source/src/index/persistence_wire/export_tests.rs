@@ -343,3 +343,85 @@ fn index_exporter_full_rows_duplicates_manifest_custody_and_output_bounds() {
     );
     assert!(!bad.exists());
 }
+
+// This uses only the existing owner-prepared, authenticated one-record Index
+// export fixture, not a new arbitrary binary-file input route.
+pub(super) fn diagnostic_input(
+    input: &Path,
+    bytes: u64,
+    sha: &str,
+    control: &OperationControl,
+) -> Result<(Vec<u8>, String)> {
+    let root = input
+        .parent()
+        .ok_or_else(|| invalid("Missing fixture parent"))?;
+    storage::guard_path(root, input)?;
+    let raw = read_authenticated(input, bytes, sha, MANIFEST_LIMIT, control)?;
+    let manifest: Manifest = serde_json::from_slice(&raw)?;
+    if manifest.schema != "lycheedev.source-index-export-input.v1" || manifest.records.len() != 1 {
+        return Err(invalid(
+            "Diagnostic requires one authenticated Index fixture",
+        ));
+    }
+    let record = manifest.records.into_iter().next().expect("one record");
+    if record.file != "index.bin"
+        || record.file_bytes < HEADER as u64
+        || !valid_digest(&record.identity, 64)
+    {
+        return Err(invalid("Invalid diagnostic Index fixture"));
+    }
+    drop(raw);
+    let path = root.join(&record.file);
+    storage::guard_path(root, &path)?;
+    let raw = read_authenticated(
+        &path,
+        record.file_bytes,
+        &record.file_sha256,
+        MAXIMUM,
+        control,
+    )?;
+    Ok((raw, record.identity))
+}
+
+#[test]
+fn index_decode_diagnostic_requires_single_authenticated_fixed_name_fixture() {
+    let fixture = crate::index::facts_cache_tests::Fixture::new();
+    let (index, pin) = super::tests::fixture();
+    let identity = crate::index::fingerprint(&pin);
+    let control = OperationControl::default();
+    let raw = encode(&index, &identity, &control).unwrap();
+    let body = fixture.home.join("index.bin");
+    std::fs::write(&body, &raw).unwrap();
+    let record = || json!({"file":"index.bin","fileSHA256":storage::sha256(&raw),"fileBytes":raw.len(),"identity":identity});
+    let input = fixture.home.join("manifest.json");
+    let good = json!({"schema":"lycheedev.source-index-export-input.v1","records":[record()]});
+    let write = |value: &Value| {
+        let bytes = serde_json::to_vec(value).unwrap();
+        std::fs::write(&input, &bytes).unwrap();
+        (bytes.len() as u64, storage::sha256(&bytes))
+    };
+    let (bytes, sha) = write(&good);
+    let (loaded, id) = diagnostic_input(&input, bytes, &sha, &control).unwrap();
+    assert_eq!(loaded, raw);
+    assert_eq!(id, identity);
+    drop(loaded);
+    assert!(diagnostic_input(&input, bytes, &"a".repeat(64), &control).is_err());
+    for mutation in 0..6 {
+        let mut bad = good.clone();
+        match mutation {
+            0 => bad["records"] = json!([]),
+            1 => bad["records"] = json!([record(), record()]),
+            2 => bad["records"][0]["file"] = json!("../index.bin"),
+            3 => bad["records"][0]["fileBytes"] = json!(MAXIMUM + 1),
+            4 => bad["records"][0]["identity"] = json!("not-an-identity"),
+            _ => bad["records"][0]["fileSHA256"] = json!("a".repeat(64)),
+        }
+        let (bytes, sha) = write(&bad);
+        assert!(diagnostic_input(&input, bytes, &sha, &control).is_err());
+    }
+    let (bytes, sha) = write(&good);
+    let mut changed = raw;
+    changed[HEADER] ^= 1;
+    std::fs::write(&body, &changed).unwrap();
+    assert!(diagnostic_input(&input, bytes, &sha, &control).is_err());
+}
