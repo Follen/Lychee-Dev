@@ -1,12 +1,5 @@
-// Public typed stream deadline after begin, under real pipe backpressure.
-import {spawn} from 'node:child_process';import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';import {resolve,join} from 'node:path';import {createHash} from 'node:crypto';
-const [binArg,homeArg,pin,installation,outArg]=process.argv.slice(2);if(!binArg||!homeArg||!pin||!installation||!outArg)throw Error('Explicit immutable artifact, task-home, pin, read-only installation and new report required');
-const binary=resolve(binArg),home=resolve(homeArg),out=resolve(outArg);mkdirSync(out);const sha=bytes=>createHash('sha256').update(bytes).digest('hex'),binarySHA256=sha(readFileSync(binary));
-const args=['data','db2','stream','Map','--snapshot',pin,'--installation',installation,'--limit','1184','--timeout-seconds','1','--offline','--format','jsonl','--home',home];
-const child=spawn(binary,args,{shell:false,windowsHide:true,stdio:['ignore','pipe','pipe']});let stdout='',stderr='',paused=false,forced=false;const started=performance.now();
-const timeout=setTimeout(()=>{forced=true;child.kill();},15000);
-child.stdout.on('data',chunk=>{stdout+=chunk.toString('utf8');if(!paused&&stdout.includes('\n')){const first=JSON.parse(stdout.split('\n')[0]);if(first.frame==='begin'){paused=true;child.stdout.pause();setTimeout(()=>child.stdout.resume(),1800);}}if(stdout.length>32<<20){forced=true;child.kill();}});
-child.stderr.on('data',chunk=>stderr+=chunk.toString('utf8'));const result=await new Promise((ok,bad)=>{child.once('error',bad);child.once('close',(code,signal)=>ok({code,signal}));});clearTimeout(timeout);
-const frames=stdout.split('\n').filter(Boolean).map(line=>JSON.parse(line));
-const report={schema:'lycheedev.public-typed-stream-deadline.v1',binary:{path:binary,sha256:binarySHA256,sha256After:sha(readFileSync(binary))},args,home,pin,timeoutSeconds:1,pauseAfterBeginMs:1800,elapsedMs:performance.now()-started,pid:child.pid,...result,forcedFixtureCleanup:forced,pausedAfterTypedBegin:paused,frames:frames.length,lastFrame:frames.at(-1),stderr,externalChildProof:'not_applicable_internal_decode_and_pipe_sink',state:paused&&!forced&&result.code===7&&frames[0].frame==='begin'&&frames.at(-1).frame==='error'&&!frames.some(frame=>frame.frame==='end'||frame.type==='end')?'passed':'failed_or_not_triggered'};
-writeFileSync(join(out,'stdout.jsonl'),stdout);writeFileSync(join(out,'report.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify({state:report.state,exit:result.code,frames:frames.length,elapsedMs:report.elapsedMs,report:join(out,'report.json')}));if(report.state!=='passed')process.exitCode=1;
+// Reconstructed Agent stdout-backpressure probe. A pause alone is not a pass.
+// A small real export which fits the pipe is reported as not triggered.
+import {runOwnedAgentStream} from './rust-agent-stream-probe.mjs';
+
+runOwnedAgentStream('backpressure-deadline', process.argv.slice(2));

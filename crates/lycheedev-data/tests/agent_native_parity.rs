@@ -67,7 +67,7 @@ async fn private_metadata_fixture_drives_typed_session_with_oracle_exact_rows() 
             .is_empty()
     );
     drop(metadata);
-    let oracle = lycheedev_data::dispatch(&fx.invocation(
+    let oracle = lycheedev_data::migration_oracle::dispatch(&fx.invocation(
         "data sql",
         &[(
             "--sql",

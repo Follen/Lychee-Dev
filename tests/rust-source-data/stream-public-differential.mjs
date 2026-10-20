@@ -1,3 +1,6 @@
+// Historical old-CLI oracle only. Never a current Agent acceptance entry.
+if (process.argv[2] !== '--historical-oracle-only') throw new Error('historical.oracle_explicit_mode_required: use current Agent/typed native queue');
+process.argv.splice(2, 1);
 import {spawnSync} from 'node:child_process';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {isDeepStrictEqual} from 'node:util';

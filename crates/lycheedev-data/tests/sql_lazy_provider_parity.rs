@@ -42,7 +42,7 @@ fn local_default_numeric_in_preserves_candidate_order_and_exact_capture() {
         ("SELECT ID FROM Sample WHERE 2=ID", json!([[2]])),
         ("SELECT ID FROM Sample WHERE ID NOT IN (3,NULL)", json!([])),
     ] {
-        let out = lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
+        let out = lycheedev_data::migration_oracle::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
         assert_eq!(out.data["result"]["rows"], expected, "{sql}");
         verify(&f, &out);
     }
@@ -59,7 +59,7 @@ fn local_default_missing_id_equal_and_in_skip_unread_corrupt_rows() {
         "SELECT ID FROM Sample WHERE ID=99",
         "SELECT ID FROM Sample WHERE ID IN (99,98)",
     ] {
-        let out = lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
+        let out = lycheedev_data::migration_oracle::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
         assert_eq!(out.data["result"]["rows"], json!([]));
         verify(&f, &out);
     }
@@ -70,7 +70,7 @@ fn local_default_missing_id_equal_and_in_skip_unread_corrupt_rows() {
     ] {
         let before = captures(&f);
         let error =
-            lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap_err();
+            lycheedev_data::migration_oracle::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap_err();
         assert_eq!(error.code, "table.invalid_format", "{sql}");
         assert_eq!(captures(&f), before);
     }
@@ -89,7 +89,7 @@ fn local_default_global_binding_precedes_corrupt_row_decode() {
     ] {
         let before = captures(&f);
         let error =
-            lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap_err();
+            lycheedev_data::migration_oracle::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap_err();
         assert_eq!(error.code, "query.unresolved_binding", "{sql}");
         assert_eq!(captures(&f), before);
     }
@@ -121,7 +121,7 @@ fn local_default_effective_equal_replaces_corrupt_base_without_decoding_it() {
     let capture=evidence::commit_capture(&f.home,&raw,"application/octet-stream",json!({"kind":"hotfix-cache","locator":"fixture:lazy-effective","snapshot":f.pin,"dataBuild":catalog_fixture::BUILD}),true,false).unwrap();
     let request = f.root.join("lazy-effective-query.json");
     std::fs::write(&request,serde_json::to_vec(&json!({"sql":"SELECT ID,Name FROM effective.Sample WHERE ID IN (1,1.0)","hotfix":[capture["id"]]})).unwrap()).unwrap();
-    let out = lycheedev_data::dispatch(
+    let out = lycheedev_data::migration_oracle::dispatch(
         &f.invocation("data sql", &[("--file", request.to_str().unwrap())]),
     )
     .unwrap();
@@ -143,11 +143,11 @@ fn local_default_correlated_in_subquery_and_cardinality_use_public_command_mappi
         ],
     )]);
     let sql = "SELECT s.ID FROM Sample s WHERE s.ID IN (SELECT t.ID FROM Sample t WHERE t.Value >= s.Value) ORDER BY s.ID";
-    let out = lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
+    let out = lycheedev_data::migration_oracle::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
     assert_eq!(out.data["result"]["rows"], json!([[1], [2], [3]]));
     verify(&f, &out);
     let before = captures(&f);
-    let error = lycheedev_data::dispatch(&f.invocation(
+    let error = lycheedev_data::migration_oracle::dispatch(&f.invocation(
         "data sql",
         &[(
             "--sql",
@@ -173,7 +173,7 @@ fn local_default_lazy_sql_preserves_ordered_invocation_control_after_capture() {
         &[("--sql", "SELECT ID FROM Sample WHERE ID IN (1,99)")],
     );
     inv.control.ordered_child(inv.control.deadline()).unwrap();
-    let out = lycheedev_data::dispatch(&inv).unwrap();
+    let out = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(out.data["result"]["rows"], json!([[1]]));
     assert!(inv.control.stop_cause().unwrap().is_none());
     inv.control
@@ -202,7 +202,7 @@ fn local_default_bare_and_static_names_share_root_and_explicit_catalog_bypasses_
             json!([[2, 2]]),
         ),
     ] {
-        let out = lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
+        let out = lycheedev_data::migration_oracle::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
         assert_eq!(out.data["result"]["rows"], expected);
         assert_eq!(
             out.data["sources"].as_array().unwrap().len(),
@@ -224,7 +224,7 @@ fn local_default_nested_union_tail_uses_enclosing_callback_lexical_scope() {
     // Fixed Go compound.go executes the UNION suffix with the enclosing
     // executeSelect callback, whose CTE environment is the outer `allowed`.
     let sql = "WITH allowed AS (SELECT ID FROM Sample WHERE ID=1) SELECT s.ID FROM Sample s WHERE s.ID IN (WITH allowed AS (SELECT ID FROM Sample WHERE ID=2) SELECT ID FROM Sample WHERE ID=1 UNION ALL SELECT ID FROM Sample WHERE ID=2 ORDER BY ID IN (SELECT ID FROM allowed) DESC LIMIT 1)";
-    let out = lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
+    let out = lycheedev_data::migration_oracle::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
     assert_eq!(out.data["result"]["rows"], json!([[1]]));
     verify(&f, &out);
 }
@@ -241,7 +241,7 @@ fn local_default_nested_union_tail_preserves_runtime_qualifier_error_without_cap
     // restored compound row resolver uses ordinal qualifiers at execution.
     let sql = "SELECT s.ID FROM Sample s WHERE s.ID IN (SELECT ID FROM Sample WHERE ID=1 UNION ALL SELECT ID FROM Sample WHERE ID=2 ORDER BY ID IN (SELECT ID FROM Sample x WHERE x.ID=s.ID))";
     let before = captures(&f);
-    let error = lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap_err();
+    let error = lycheedev_data::migration_oracle::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap_err();
     assert_eq!(error.code, "query.unresolved_binding");
     assert_eq!(captures(&f), before);
 }
@@ -259,7 +259,7 @@ fn local_default_quoted_physical_names_and_dotted_alias_keep_indexed_selection()
         r#"SELECT "Sample"."ID","Sample"."Value" FROM "static"."Sample" WHERE "Sample"."ID" IN (2,1,2.0)"#,
         r#"SELECT "ID","Value" FROM "ſtatic"."Sample" WHERE "ID" IN (2,1,2.0)"#,
     ] {
-        let out = lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
+        let out = lycheedev_data::migration_oracle::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
         assert_eq!(
             out.data["result"]["rows"],
             json!([[2, 20], [1, 10]]),
@@ -279,7 +279,7 @@ fn local_default_quoted_cte_and_projection_alias_preserve_identifier_boundaries(
         &[vec![Cell::U(1), Cell::U(10)], vec![Cell::U(2), Cell::U(20)]],
     )]);
     let sql = r#"WITH "cte.part" AS (SELECT "ID" AS "x.y","Value" FROM "Sample") SELECT "row.alias"."x.y","row.alias"."Value" FROM "cte.part" AS "row.alias" WHERE "row.alias"."x.y" IN (2,1,2.0) ORDER BY "row.alias"."x.y""#;
-    let out = lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
+    let out = lycheedev_data::migration_oracle::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
     assert_eq!(out.data["result"]["columns"], json!(["x.y", "Value"]));
     assert_eq!(out.data["result"]["rows"], json!([[1, 10], [2, 20]]));
     assert_eq!(out.data["sources"].as_array().unwrap().len(), 1);
@@ -301,7 +301,7 @@ fn local_default_schema_preflight_stops_before_later_physical_resolver() {
     ] {
         let before = captures(&f);
         let error =
-            lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap_err();
+            lycheedev_data::migration_oracle::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap_err();
         assert_eq!(error.code, "query.unresolved_binding", "{sql}");
         assert_eq!(captures(&f), before);
     }
@@ -320,7 +320,7 @@ fn local_default_binding_only_cte_never_opens_unrequested_installation() {
     );
     let before = captures(&f);
     assert_eq!(
-        lycheedev_data::dispatch(&inv).unwrap_err().code,
+        lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code,
         "query.unresolved_binding"
     );
     assert!(!missing.exists());
@@ -334,7 +334,7 @@ fn local_default_root_cache_is_component_canonical_and_preserves_first_use_order
         table("Alpha", 202, &[("ID", "uint")], &[vec![Cell::U(2)]]),
     ]);
     let sql = "SELECT z.ID FROM Zed z UNION ALL SELECT a.ID FROM Alpha a UNION ALL SELECT q.ID FROM STATIC.zEd q";
-    let out = lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
+    let out = lycheedev_data::migration_oracle::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
     assert_eq!(out.data["result"]["rows"], json!([[1], [2], [1]]));
     let sources = out.data["sources"].as_array().unwrap();
     assert_eq!(sources.len(), 2);
@@ -359,7 +359,7 @@ fn local_default_nested_union_callback_resolves_physical_name_hidden_by_inner_ct
             .source_tables(),
         ["Sample"]
     );
-    let out = lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
+    let out = lycheedev_data::migration_oracle::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
     assert!(out.data["result"]["plan"].is_object());
     let sources = out.data["sources"].as_array().unwrap();
     assert_eq!(sources.len(), 2);
@@ -375,7 +375,7 @@ fn local_default_preparer_uses_go_table_limits_before_later_format_errors() {
         source.raw[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
         let f = Fixture::new(&[source]);
         let before = captures(&f);
-        let error = lycheedev_data::dispatch(
+        let error = lycheedev_data::migration_oracle::dispatch(
             &f.invocation("data sql", &[("--sql", "SELECT ID FROM Sample")]),
         )
         .unwrap_err();
@@ -393,7 +393,7 @@ fn local_default_scalar_and_exists_share_lazy_physical_source_and_capture() {
         &[vec![Cell::U(1), Cell::U(10)], vec![Cell::U(2), Cell::U(20)]],
     )]);
     let sql = "SELECT s.ID,(SELECT x.Value FROM Sample x WHERE x.ID=s.ID),EXISTS (SELECT x.ID,x.Value FROM Sample x WHERE x.ID=s.ID),NOT EXISTS (SELECT ID FROM Sample x WHERE x.ID=99) FROM Sample s ORDER BY s.ID";
-    let out = lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
+    let out = lycheedev_data::migration_oracle::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
     assert_eq!(
         out.data["result"]["rows"],
         json!([[1, 10, true, true], [2, 20, true, true]])
@@ -416,7 +416,7 @@ fn local_default_analyze_reports_real_numeric_in_lookup_and_commits_plan_only() 
             "EXPLAIN ANALYZE SELECT ID FROM Sample WHERE ID IN (3,1,3.0,NULL,2)",
         )],
     );
-    let out = lycheedev_data::dispatch(&inv).unwrap();
+    let out = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(out.data["result"]["columns"], Value::Null);
     assert_eq!(out.data["result"]["rows"], Value::Null);
     let measured = &out.data["result"]["plan"]["measured"];
@@ -462,7 +462,7 @@ fn local_default_scalar_cardinality_and_analyze_decode_failure_publish_no_captur
     ] {
         let before = captures(&f);
         let error =
-            lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap_err();
+            lycheedev_data::migration_oracle::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap_err();
         assert_eq!(error.code, code, "{sql}");
         assert_eq!(error.exit_code, 4, "{sql}");
         assert_eq!(captures(&f), before);
@@ -494,7 +494,7 @@ fn local_default_cast_and_unicode_like_use_real_projected_rows_and_capture() {
             json!([["2"]]),
         ),
     ] {
-        let out = lycheedev_data::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
+        let out = lycheedev_data::migration_oracle::dispatch(&f.invocation("data sql", &[("--sql", sql)])).unwrap();
         assert_eq!(out.data["result"]["rows"], want, "{sql}");
         verify(&f, &out);
     }

@@ -451,14 +451,14 @@ fn task_schema_has_exact_wire_tags_and_unknown_fields_are_rejected() {
             .as_array()
             .unwrap()
             .len(),
-        8
+        11
     );
     assert_eq!(
         schema["$defs"]["Expression"]["oneOf"]
             .as_array()
             .unwrap()
             .len(),
-        6
+        18
     );
     assert_eq!(
         schema["$defs"]["SortKey"]["required"],
@@ -671,7 +671,7 @@ async fn conditional_selection_is_lazy_and_does_not_round_wide_integers() {
 }
 #[tokio::test(flavor = "current_thread")]
 async fn unsafe_heterogeneous_conditional_type_is_rejected_not_rounded() {
-    let expression = json!({"kind":"case","branches":[{"when":lit(json!(true)),"then":lit(json!(9007199254740993u64))}],"otherwise":lit(json!(1.0))});
+    let expression = json!({"kind":"case","branches":[{"when":{"kind":"binary","operator":"equal","left":{"kind":"column","name":"ID"},"right":lit(json!(1))},"then":lit(json!(9007199254740993u64))}],"otherwise":lit(json!(1.0))});
     assert_eq!(
         new_scalar(expression).await.unwrap_err().code,
         "relational.unsupported"
@@ -970,4 +970,139 @@ fn conflicting_effective_histories_are_rejected_before_source_preparation() {
         }],
     };
     assert!(requirements(&plan, &owner).is_err());
+}
+
+// Recovery-authored witnesses; none has been executed or compiler-qualified.
+#[tokio::test(flavor = "current_thread")]
+async fn recovered_union_preserves_branch_bags_labels_and_exact_u64() {
+    let (context, owner) = setup();
+    register(&context, &request("U"), vec![("high", Arc::new(UInt64Array::from(vec![u64::MAX, u64::MAX - 1])))]);
+    register(&context, &request("I"), vec![("low", Arc::new(Int64Array::from(vec![-1, 2])))]);
+    let plan = decode(json!({"op":"union_all","inputs":[{"op":"scan","table":{"name":"U","mode":"static"}},{"op":"scan","table":{"name":"I","mode":"static"}},{"op":"scan","table":{"name":"U","mode":"static"}}]}));
+    let prepared = prepare(&context, &plan, owner.clone()).await.unwrap();
+    assert_eq!(prepared.explain_frame(&context).unwrap().schema().field(0).name(), "high");
+    assert_eq!(run(&context, owner, &plan).await, vec![vec![Scalar::UInt(u64::MAX)],vec![Scalar::UInt(u64::MAX-1)],vec![Scalar::Int(-1)],vec![Scalar::Int(2)],vec![Scalar::UInt(u64::MAX)],vec![Scalar::UInt(u64::MAX-1)]]);
+}
+#[tokio::test(flavor = "current_thread")]
+async fn recovered_membership_keeps_null_empty_and_duplicate_truth_tables() {
+    let (context, owner) = setup();
+    register(&context, &request("A"), vec![("ID", Arc::new(Int64Array::from(vec![Some(1),Some(2),None,Some(1)])))]);
+    register(&context, &request("B"), vec![("ID", Arc::new(Int64Array::from(vec![Some(1),None,Some(1)])))]);
+    for (empty, negated, expected) in [
+        (false,false,vec![Scalar::Bool(true),Scalar::Null,Scalar::Null,Scalar::Bool(true)]),
+        (false,true,vec![Scalar::Bool(false),Scalar::Null,Scalar::Null,Scalar::Bool(false)]),
+        (true,false,vec![Scalar::Bool(false);4]),(true,true,vec![Scalar::Bool(true);4]),
+    ] {
+        let rhs = if empty { json!({"op":"filter","input":{"op":"scan","table":{"name":"B","mode":"static"}},"predicate":lit(json!(false))}) } else { json!({"op":"scan","table":{"name":"B","mode":"static"}}) };
+        let plan = decode(json!({"op":"project","input":{"op":"scan","table":{"name":"A","mode":"static"}},"columns":[{"name":"hit","expression":{"kind":"in_query","value":{"kind":"column","name":"ID"},"input":rhs,"negated":negated}}]}));
+        assert_eq!(run(&context, owner.clone(), &plan).await, expected.into_iter().map(|v|vec![v]).collect::<Vec<_>>());
+    }
+}
+#[tokio::test(flavor = "current_thread")]
+async fn recovered_membership_does_not_round_u64_into_float_matches() {
+    let (context, owner) = setup();
+    register(&context, &request("A"), vec![("ID", Arc::new(UInt64Array::from(vec![u64::MAX,9_007_199_254_740_993])))]);
+    register(&context, &request("B"), vec![("ID", Arc::new(Float64Array::from(vec![18_446_744_073_709_551_616.0,9_007_199_254_740_992.0])))]);
+    let plan = decode(json!({"op":"project","input":{"op":"scan","table":{"name":"A","mode":"static"}},"columns":[{"name":"hit","expression":{"kind":"in_query","value":{"kind":"column","name":"ID"},"input":{"op":"scan","table":{"name":"B","mode":"static"}}}}]}));
+    assert_eq!(run(&context, owner, &plan).await, vec![vec![Scalar::Bool(false)],vec![Scalar::Bool(false)]]);
+}
+#[tokio::test(flavor = "current_thread")]
+async fn recovered_scalar_zero_one_many_and_unreachable_width() {
+    let (context, owner) = setup();
+    register(&context,&request("A"),vec![("ID",Arc::new(Int64Array::from(vec![1])))]);
+    register(&context,&request("B"),vec![("ID",Arc::new(Int64Array::from(vec![7,8])))]);
+    let project = |rhs: Value| decode(json!({"op":"project","input":{"op":"scan","table":{"name":"A","mode":"static"}},"columns":[{"name":"v","expression":{"kind":"scalar_query","input":rhs}}]}));
+    for (count, expected) in [(0,Scalar::Null),(1,Scalar::Int(7))] {
+        let plan=project(json!({"op":"limit","input":{"op":"scan","table":{"name":"B","mode":"static"}},"offset":0,"count":count}));
+        assert_eq!(run(&context,owner.clone(),&plan).await,vec![vec![expected]]);
+    }
+    let many=project(json!({"op":"scan","table":{"name":"B","mode":"static"}}));
+    let err=lower(&context,&many,owner.clone()).await.unwrap().collect().await.unwrap_err();
+    assert_eq!(super::super::error(err).code,"relational.invalid_cardinality");
+    let invalid=project(json!({"op":"project","input":{"op":"scan","table":{"name":"B","mode":"static"}},"columns":[{"name":"a","expression":{"kind":"column","name":"ID"}},{"name":"b","expression":{"kind":"column","name":"ID"}}]}));
+    assert!(prepare(&context,&QueryPlan::Limit{input:Box::new(invalid),offset:0,count:0},owner).await.is_err());
+}
+#[tokio::test(flavor = "current_thread")]
+async fn recovered_correlated_global_max_membership_keeps_empty_null() {
+    let (context,owner)=setup();
+    register(&context,&request("A"),vec![("ID",Arc::new(Int64Array::from(vec![Some(1),Some(2),None])))]);
+    register(&context,&request("B"),vec![("ID",Arc::new(Int64Array::from(vec![Some(1),None])))]);
+    let plan=decode(json!({"op":"project","input":{"op":"scan","table":{"name":"A","mode":"static"}},"columns":[{"name":"hit","expression":{"kind":"in_query","value":{"kind":"column","name":"ID"},"input":{"op":"aggregate","groups":[],"metrics":[{"name":"max","function":"maximum","expression":{"kind":"column","name":"B.ID"}}],"input":{"op":"filter","input":{"op":"scan","table":{"name":"B","mode":"static"}},"predicate":{"kind":"binary","operator":"equal","left":{"kind":"column","name":"B.ID"},"right":{"kind":"outer_column","name":"A.ID"}}}}}}]}));
+    assert_eq!(run(&context,owner,&plan).await,vec![vec![Scalar::Bool(true)],vec![Scalar::Null],vec![Scalar::Null]]);
+}
+#[tokio::test(flavor = "current_thread")]
+async fn recovered_nested_membership_keeps_grandparent_and_immediate_scopes() {
+    let (context,owner)=setup();
+    register(&context,&request("A"),vec![("ID",Arc::new(Int64Array::from(vec![Some(1),Some(2),Some(3),None])))]);
+    register(&context,&request("B"),vec![("ID",Arc::new(Int64Array::from(vec![Some(1),Some(3),None])))]);
+    let inner=json!({"kind":"in_query","value":{"kind":"column","name":"B.ID"},"input":{"op":"filter","input":{"op":"scan","table":{"name":"B","mode":"static"}},"predicate":{"kind":"binary","operator":"and","left":{"kind":"binary","operator":"equal","left":{"kind":"column","name":"B.ID"},"right":{"kind":"outer_column","name":"A.ID","depth":2}},"right":{"kind":"binary","operator":"equal","left":{"kind":"column","name":"B.ID"},"right":{"kind":"outer_column","name":"B.ID","depth":1}}}}});
+    let plan=decode(json!({"op":"filter","input":{"op":"scan","table":{"name":"A","mode":"static"}},"predicate":{"kind":"in_query","value":{"kind":"column","name":"A.ID"},"input":{"op":"filter","input":{"op":"scan","table":{"name":"B","mode":"static"}},"predicate":inner}}}));
+    assert_eq!(run(&context,owner,&plan).await,vec![vec![Scalar::Int(1)],vec![Scalar::Int(3)]]);
+}
+#[tokio::test(flavor = "current_thread")]
+async fn recovered_recursive_membership_uses_one_previous_delta() {
+    let (context,owner)=setup();
+    register(&context,&request("A"),vec![("ID",Arc::new(Int64Array::from(vec![1,2,3,4])))]);
+    let plan=decode(json!({"op":"iterate","binding":"r","seed":{"op":"lookup","table":{"name":"A","mode":"static"},"ids":[1]},"step":{"op":"filter","input":{"op":"scan","table":{"name":"A","mode":"static"}},"predicate":{"kind":"in_query","value":{"kind":"binary","operator":"subtract","left":{"kind":"column","name":"A.ID"},"right":lit(json!(1))},"input":{"op":"delta","binding":"r"}}}}));
+    assert_eq!(run(&context,owner,&plan).await,vec![vec![Scalar::Int(1)],vec![Scalar::Int(2)],vec![Scalar::Int(3)],vec![Scalar::Int(4)]]);
+}
+#[tokio::test(flavor = "current_thread")]
+async fn recovered_cycle_cannot_be_masked_by_outer_zero_limit() {
+    let (context,_)=setup();
+    register(&context,&request("A"),vec![("ID",Arc::new(Int64Array::from(vec![1])))]);
+    let owner=QueryOwner::new(Arc::new(Budget::new(Cost{decode_work:10_000,..Cost::defaults()},Instant::now()+Duration::from_secs(30),None)));
+    let plan=decode(json!({"op":"limit","offset":0,"count":0,"input":{"op":"iterate","binding":"r","seed":{"op":"scan","table":{"name":"A","mode":"static"}},"step":{"op":"delta","binding":"r"}}}));
+    let prepared=prepare(&context,&plan,owner.clone()).await.unwrap();
+    assert!(prepared.explain_frame(&context).unwrap().logical_plan().display_indent().to_string().contains("RecursiveQuery"));
+    assert!(prepared.complete(&context,owner,1<<20).await.is_err());
+}
+#[test]
+fn recovered_requirements_include_all_query_branches_and_reject_unbound_delta() {
+    let plan=decode(json!({"op":"project","input":{"op":"scan","table":{"name":"A","mode":"static"}},"columns":[{"name":"n","expression":{"kind":"scalar_query","input":{"op":"union_all","inputs":[{"op":"lookup","table":{"name":"B","mode":"static"},"ids":[1]},{"op":"scan","table":{"name":"C","mode":"static"}}]}}}]}));
+    assert_eq!(tables(&plan).unwrap().iter().map(|v|v.name.as_str()).collect::<Vec<_>>(),vec!["A","B","C"]);
+    assert!(tables(&QueryPlan::Delta{binding:"missing".into()}).is_err());
+}
+#[tokio::test(flavor = "current_thread")]
+async fn recovered_static_conditionals_bind_but_do_not_execute_dead_queries() {
+    let (context,owner)=setup();
+    register(&context,&request("A"),vec![("ID",Arc::new(Int64Array::from(vec![1,2])))]);
+    register(&context,&request("B"),vec![("ID",Arc::new(Int64Array::from(vec![7,8])))]);
+    let project=|expression: Value|decode(json!({"op":"project","input":{"op":"scan","table":{"name":"A","mode":"static"}},"columns":[{"name":"value","expression":expression}]}));
+    let cycle=json!({"kind":"scalar_query","input":{"op":"iterate","binding":"dead","seed":{"op":"scan","table":{"name":"B","mode":"static"}},"step":{"op":"delta","binding":"dead"}}});
+    let plan=project(json!({"kind":"case","branches":[{"when":lit(json!(true)),"then":{"kind":"column","name":"ID"}}],"otherwise":cycle}));
+    assert!(!prepare(&context,&plan,owner.clone()).await.unwrap().has_prerequisites());
+    assert_eq!(tables(&plan).unwrap().len(),2);
+    assert_eq!(run(&context,owner.clone(),&plan).await,vec![vec![Scalar::Int(1)],vec![Scalar::Int(2)]]);
+    let many=json!({"kind":"scalar_query","input":{"op":"scan","table":{"name":"B","mode":"static"}}});
+    let plan=project(json!({"kind":"coalesce","values":[lit(json!(null)),lit(json!(9)),many]}));
+    assert_eq!(run(&context,owner.clone(),&plan).await,vec![vec![Scalar::Int(9)],vec![Scalar::Int(9)]]);
+    let plan=project(json!({"kind":"case","branches":[{"when":lit(json!(true)),"then":{"kind":"column","name":"ID"}}],"otherwise":{"kind":"in_query","value":lit(json!(1)),"input":{"op":"scan","table":{"name":"B","mode":"static"}}}}));
+    assert_eq!(run(&context,owner.clone(),&plan).await,vec![vec![Scalar::Int(1)],vec![Scalar::Int(2)]]);
+    let invalid=project(json!({"kind":"case","branches":[{"when":lit(json!(true)),"then":lit(json!(1))}],"otherwise":{"kind":"scalar_query","input":{"op":"project","input":{"op":"scan","table":{"name":"B","mode":"static"}},"columns":[{"name":"bad","expression":{"kind":"column","name":"missing"}}]}}}));
+    assert!(prepare(&context,&invalid,owner).await.is_err());
+}
+#[tokio::test(flavor = "current_thread")]
+async fn recovered_first_case_query_condition_and_dynamic_result_boundary() {
+    let (context,owner)=setup();
+    register(&context,&request("A"),vec![("ID",Arc::new(Int64Array::from(vec![1,2])))]);
+    register(&context,&request("B"),vec![("ID",Arc::new(Int64Array::from(vec![1])))]);
+    let query=json!({"kind":"in_query","value":{"kind":"column","name":"ID"},"input":{"op":"scan","table":{"name":"B","mode":"static"}}});
+    let plan=decode(json!({"op":"project","input":{"op":"scan","table":{"name":"A","mode":"static"}},"columns":[{"name":"value","expression":{"kind":"case","branches":[{"when":query,"then":{"kind":"column","name":"ID"}}],"otherwise":lit(json!(null))}}]}));
+    assert_eq!(run(&context,owner,&plan).await,vec![vec![Scalar::Int(1)],vec![Scalar::Null]]);
+    let invalid=decode(json!({"op":"project","input":{"op":"scan","table":{"name":"A","mode":"static"}},"columns":[{"name":"value","expression":{"kind":"case","branches":[{"when":{"kind":"is_null","value":{"kind":"column","name":"ID"}},"then":query}],"otherwise":lit(json!(false))}}]}));
+    assert!(tables(&invalid).is_err());
+}
+#[tokio::test(flavor = "current_thread")]
+async fn recovered_projected_away_correlation_key_survives_native_pullup() {
+    let (context,owner)=setup();
+    register(&context,&request("A"),vec![("key",Arc::new(Int64Array::from(vec![1,2,3])))]);
+    register(&context,&request("B"),vec![("ID",Arc::new(Int64Array::from(vec![10,11,20]))),("key",Arc::new(Int64Array::from(vec![1,1,2])))]);
+    let plan=decode(json!({"op":"project","input":{"op":"scan","table":{"name":"A","mode":"static"}},"columns":[{"name":"value","expression":{"kind":"scalar_query","input":{"op":"aggregate","groups":[],"metrics":[{"name":"maximum","function":"maximum","expression":{"kind":"column","name":"ID"}}],"input":{"op":"project","columns":[{"name":"ID","expression":{"kind":"column","name":"B.ID"}}],"input":{"op":"filter","input":{"op":"scan","table":{"name":"B","mode":"static"}},"predicate":{"kind":"binary","operator":"equal","left":{"kind":"column","name":"B.key"},"right":{"kind":"outer_column","name":"A.key"}}}}}}}]}));
+    assert_eq!(run(&context,owner,&plan).await,vec![vec![Scalar::Int(11)],vec![Scalar::Int(20)],vec![Scalar::Null]]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn recovered_static_wide_integer_branch_does_not_coerce_to_dead_float() {
+    let expression = json!({"kind":"case","branches":[{"when":lit(json!(true)),"then":lit(json!(u64::MAX))}],"otherwise":lit(json!(1.0))});
+    assert_eq!(new_scalar(expression).await.unwrap(), Scalar::UInt(u64::MAX));
 }

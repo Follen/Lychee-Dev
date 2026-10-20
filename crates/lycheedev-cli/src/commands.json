@@ -224,31 +224,6 @@
     ]
   },
   {
-    "path": "data sql",
-    "summary": "Read-only SQL over pinned static tables, meta.Table enum/flags metadata, or explicit effective.Table overlays (query JSON hotfix array): exactly one of --sql <text>, --file <query.sql|query.json>, or --stdin; repeated --param <name=scalar> binds named values; --encoding csv --output <file> writes a captured CSV and manifest; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-    "mutates": true,
-    "arguments": [],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--project <directory>",
-      "--key-file <WoW.txt|keys.json>",
-      "--snapshot <pin>",
-      "--installation <client-or-game-root>",
-      "--cdn",
-      "--sql <text>",
-      "--file <query.sql|query.json>",
-      "--stdin",
-      "--param <name=scalar>",
-      "--encoding csv",
-      "--output <file>",
-      "--overwrite",
-      "--max-bytes <n>",
-      "--offline",
-      "--timeout-seconds <1-3600> (default 300; entire query)"
-    ]
-  },
-  {
     "path": "data agent schema",
     "summary": "Describe the versioned Agent task protocol and session/result ownership limits; no data pin or worker is opened",
     "mutates": false,
@@ -295,353 +270,6 @@
       "--offline",
       "--max-bytes <n>",
       "--key-file <WoW.txt|keys.json>",
-      "--timeout-seconds <1-3600> (default 300; entire query)"
-    ]
-  },
-  {
-    "path": "data db2",
-    "summary": "Read typed rows: --snapshot <pin> (--installation <client-or-game-root> | --cdn) --table <name> [--id <n> | --limit <n> --after-id <n>] [--max-bytes <n>] [--offline]; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-    "mutates": true,
-    "arguments": [],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--project <directory>",
-      "--key-file <WoW.txt|keys.json>",
-      "--snapshot <pin>",
-      "--installation <client-or-game-root>",
-      "--cdn",
-      "--table <name>",
-      "--id <n>",
-      "--limit <n>",
-      "--after-id <n>",
-      "--max-bytes <n>",
-      "--offline",
-      "--timeout-seconds <1-3600> (default 300; entire query)"
-    ]
-  },
-  {
-    "path": "data db2 schema",
-    "summary": "Read parsed table schema fields, keys and relationship columns: data db2 schema <Table>; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-    "mutates": true,
-    "arguments": [
-      "<Table>"
-    ],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--project <directory>",
-      "--snapshot <pin>",
-      "--installation <client-or-game-root>",
-      "--cdn",
-      "--offline",
-      "--max-bytes <n>",
-      "--key-file <WoW.txt|keys.json>",
-      "--timeout-seconds <1-3600> (default 300; entire query)"
-    ]
-  },
-  {
-    "path": "data db2 search",
-    "summary": "Case-insensitive substring search over one field: data db2 search <Table> --field <name> --query <text> --limit <n>; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-    "mutates": true,
-    "arguments": [
-      "<Table>"
-    ],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--project <directory>",
-      "--snapshot <pin>",
-      "--installation <client-or-game-root>",
-      "--cdn",
-      "--offline",
-      "--max-bytes <n>",
-      "--key-file <WoW.txt|keys.json>",
-      "--field <name>",
-      "--query <text>",
-      "--limit <n>",
-      "--timeout-seconds <1-3600> (default 300; entire query)"
-    ]
-  },
-  {
-    "path": "data db2 foreign-key",
-    "summary": "Select rows by one foreign-key field and value with a mandatory bound: data db2 foreign-key <Table> --field <name> --value <n> --limit <1-5000>; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-    "mutates": true,
-    "arguments": [
-      "<Table>"
-    ],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--project <directory>",
-      "--snapshot <pin>",
-      "--installation <client-or-game-root>",
-      "--cdn",
-      "--offline",
-      "--max-bytes <n>",
-      "--key-file <WoW.txt|keys.json>",
-      "--field <name>",
-      "--value <n>",
-      "--limit <n>",
-      "--timeout-seconds <1-3600> (default 300; entire query)"
-    ]
-  },
-  {
-    "path": "data db2 stream",
-    "summary": "Stream bounded table rows as typed JSONL begin/record/end frames (requires --format jsonl): data db2 stream <Table> [--fields <a,b>] [--filter <field=value>] --limit <n>; only a legal end frame plus exit 0 is a complete success; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-    "mutates": true,
-    "arguments": [
-      "<Table>"
-    ],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--project <directory>",
-      "--snapshot <pin>",
-      "--installation <client-or-game-root>",
-      "--cdn",
-      "--offline",
-      "--max-bytes <n>",
-      "--key-file <WoW.txt|keys.json>",
-      "--fields <a,b>",
-      "--filter <field=value>",
-      "--limit <n>",
-      "--timeout-seconds <1-3600> (default 300; entire query)"
-    ]
-  },
-  {
-    "path": "data spell info",
-    "summary": "Resolve the bounded trigger and description-reference closure around one spell: --spell-id <n> [--max-depth <n>]; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-    "mutates": true,
-    "arguments": [],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--project <directory>",
-      "--snapshot <pin>",
-      "--installation <client-or-game-root>",
-      "--cdn",
-      "--offline",
-      "--max-bytes <n>",
-      "--key-file <WoW.txt|keys.json>",
-      "--spell-id <n>",
-      "--max-depth <n>",
-      "--timeout-seconds <1-3600> (default 300; entire query)"
-    ]
-  },
-  {
-    "path": "data spell auras",
-    "summary": "Report aura-effect presence for one spell: --spell-id <n>; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-    "mutates": true,
-    "arguments": [],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--project <directory>",
-      "--snapshot <pin>",
-      "--installation <client-or-game-root>",
-      "--cdn",
-      "--offline",
-      "--max-bytes <n>",
-      "--key-file <WoW.txt|keys.json>",
-      "--spell-id <n>",
-      "--timeout-seconds <1-3600> (default 300; entire query)"
-    ]
-  },
-  {
-    "path": "data spell summons",
-    "summary": "List summon effects of one spell, optionally filtered to one NPC: --spell-id <n> [--npc-id <n>]; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-    "mutates": true,
-    "arguments": [],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--project <directory>",
-      "--snapshot <pin>",
-      "--installation <client-or-game-root>",
-      "--cdn",
-      "--offline",
-      "--max-bytes <n>",
-      "--key-file <WoW.txt|keys.json>",
-      "--spell-id <n>",
-      "--npc-id <n>",
-      "--timeout-seconds <1-3600> (default 300; entire query)"
-    ]
-  },
-  {
-    "path": "data item get",
-    "summary": "Read one item summary and slot name: --item-id <n>; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-    "mutates": true,
-    "arguments": [],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--project <directory>",
-      "--snapshot <pin>",
-      "--installation <client-or-game-root>",
-      "--cdn",
-      "--offline",
-      "--max-bytes <n>",
-      "--key-file <WoW.txt|keys.json>",
-      "--item-id <n>",
-      "--timeout-seconds <1-3600> (default 300; entire query)"
-    ]
-  },
-  {
-    "path": "data item models",
-    "summary": "Resolve model and texture file IDs for one item: --item-id <n> [--race-id <n> --gender <n>]; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-    "mutates": true,
-    "arguments": [],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--project <directory>",
-      "--snapshot <pin>",
-      "--installation <client-or-game-root>",
-      "--cdn",
-      "--offline",
-      "--max-bytes <n>",
-      "--key-file <WoW.txt|keys.json>",
-      "--item-id <n>",
-      "--race-id <n>",
-      "--gender <n>",
-      "--timeout-seconds <1-3600> (default 300; entire query)"
-    ]
-  },
-  {
-    "path": "data item geosets",
-    "summary": "Read geoset and helmet-hide data for one item: --item-id <n>; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-    "mutates": true,
-    "arguments": [],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--project <directory>",
-      "--snapshot <pin>",
-      "--installation <client-or-game-root>",
-      "--cdn",
-      "--offline",
-      "--max-bytes <n>",
-      "--key-file <WoW.txt|keys.json>",
-      "--item-id <n>",
-      "--timeout-seconds <1-3600> (default 300; entire query)"
-    ]
-  },
-  {
-    "path": "data item textures",
-    "summary": "Read character texture sections for one item: --item-id <n>; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-    "mutates": true,
-    "arguments": [],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--project <directory>",
-      "--snapshot <pin>",
-      "--installation <client-or-game-root>",
-      "--cdn",
-      "--offline",
-      "--max-bytes <n>",
-      "--key-file <WoW.txt|keys.json>",
-      "--item-id <n>",
-      "--timeout-seconds <1-3600> (default 300; entire query)"
-    ]
-  },
-  {
-    "path": "data creature display",
-    "summary": "Resolve one creature display by exactly one key: (--display-id <n> | --file-data-id <n>); omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-    "mutates": true,
-    "arguments": [],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--project <directory>",
-      "--snapshot <pin>",
-      "--installation <client-or-game-root>",
-      "--cdn",
-      "--offline",
-      "--max-bytes <n>",
-      "--key-file <WoW.txt|keys.json>",
-      "--display-id <n>",
-      "--file-data-id <n>",
-      "--timeout-seconds <1-3600> (default 300; entire query)"
-    ]
-  },
-  {
-    "path": "data creature model",
-    "summary": "List every display of one model file with variants: --file-data-id <n>; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-    "mutates": true,
-    "arguments": [],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--project <directory>",
-      "--snapshot <pin>",
-      "--installation <client-or-game-root>",
-      "--cdn",
-      "--offline",
-      "--max-bytes <n>",
-      "--key-file <WoW.txt|keys.json>",
-      "--file-data-id <n>",
-      "--timeout-seconds <1-3600> (default 300; entire query)"
-    ]
-  },
-  {
-    "path": "data encounter get",
-    "summary": "Build the bounded journal encounter section tree with related spells and the relation manifest: --journal-encounter-id <n> [--max-depth <n>]; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-    "mutates": true,
-    "arguments": [],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--project <directory>",
-      "--snapshot <pin>",
-      "--installation <client-or-game-root>",
-      "--cdn",
-      "--offline",
-      "--max-bytes <n>",
-      "--key-file <WoW.txt|keys.json>",
-      "--journal-encounter-id <n>",
-      "--max-depth <n>",
-      "--timeout-seconds <1-3600> (default 300; entire query)"
-    ]
-  },
-  {
-    "path": "data decor list",
-    "summary": "List house decor rows in ascending ID order with a mandatory bound: --limit <1-5000>; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-    "mutates": true,
-    "arguments": [],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--project <directory>",
-      "--snapshot <pin>",
-      "--installation <client-or-game-root>",
-      "--cdn",
-      "--offline",
-      "--max-bytes <n>",
-      "--key-file <WoW.txt|keys.json>",
-      "--limit <n>",
-      "--timeout-seconds <1-3600> (default 300; entire query)"
-    ]
-  },
-  {
-    "path": "data decor get",
-    "summary": "Resolve one decor by exactly one key: (--id <decor-id> | --item-id <n> | --model-file-data-id <n>); omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins",
-    "mutates": true,
-    "arguments": [],
-    "flags": [
-      "--home <root>",
-      "--format text|json|jsonl",
-      "--project <directory>",
-      "--snapshot <pin>",
-      "--installation <client-or-game-root>",
-      "--cdn",
-      "--offline",
-      "--max-bytes <n>",
-      "--key-file <WoW.txt|keys.json>",
-      "--id <n>",
-      "--item-id <n>",
-      "--model-file-data-id <n>",
       "--timeout-seconds <1-3600> (default 300; entire query)"
     ]
   },
@@ -1367,6 +995,28 @@
       "--toc <relative-manifest>",
       "--snapshot <pin-id>",
       "--matrix <config.json>"
+    ]
+  },
+  {
+    "path": "cli search",
+    "summary": "Search local command capabilities by task; returns at most five ranked commands without opening a workspace, cache, worker or network.",
+    "mutates": false,
+    "arguments": [
+      "<task>"
+    ],
+    "flags": [
+      "--format text|json|jsonl"
+    ]
+  },
+  {
+    "path": "schema",
+    "summary": "Inspect the exact CLI input contract for a command path. Data Agent commands include the authoritative typed session protocol; no worker or engine is started.",
+    "mutates": false,
+    "arguments": [
+      "<command...>"
+    ],
+    "flags": [
+      "--format text|json|jsonl"
     ]
   }
 ]

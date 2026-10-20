@@ -44,7 +44,7 @@ fn data_sql_dispatch_preserves_syntax_message_location_exit_and_stage() {
             cwd: root.clone(),
             control: Default::default(),
         };
-        let error = lycheedev_data::dispatch(&inv).err().unwrap();
+        let error = lycheedev_data::migration_oracle::dispatch(&inv).err().unwrap();
         assert_eq!(
             (error.code.as_str(), error.exit_code),
             ("query.invalid_syntax", 2),
@@ -76,7 +76,7 @@ fn syntax_without_location_keeps_the_original_message_at_dispatch() {
         cwd: PathBuf::new(),
         control: Default::default(),
     };
-    let error = lycheedev_data::dispatch(&inv).err().unwrap();
+    let error = lycheedev_data::migration_oracle::dispatch(&inv).err().unwrap();
     assert_eq!(
         (error.code.as_str(), error.exit_code),
         ("query.invalid_syntax", 2)

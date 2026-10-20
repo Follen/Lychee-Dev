@@ -93,27 +93,27 @@ fn registered_search_uses_exact_authenticated_cache_for_all_sources_and_modes() 
         assert_eq!(prepared.index.entries.len(), 5);
         assert_eq!(calls, if kind == "wowexport-binary" { 8 } else { 1 });
         let mut inv = fixture.invocation("asset search", &[("--snapshot", &pin), ("--listfile", kind), ("--offline", "true"), ("--query", "BLP"), ("--limit", "1")]);
-        let found = lycheedev_data::dispatch(&inv).unwrap();
+        let found = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
         assert_eq!(found.data["total"], 4); assert_eq!(found.data["returned"], 1); assert_eq!(found.data["truncated"], true);
         assert_eq!(found.data["files"][0]["fileDataID"], 2); assert_eq!(found.data["context"]["listfile"]["cache"], "offline-cache");
         assert_eq!(found.warnings, vec![json!("File-name search was truncated by --limit.")]);
         inv.flags.remove("--query"); inv.flags.insert("--extension".into(), " .BLP ".into()); inv.flags.insert("--limit".into(), "2".into());
-        let extension = lycheedev_data::dispatch(&inv).unwrap();
+        let extension = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
         assert_eq!(extension.data["files"].as_array().unwrap().iter().map(|row| row["fileDataID"].as_u64().unwrap()).collect::<Vec<_>>(), [2, 3]);
         inv.flags.remove("--extension"); inv.flags.insert("--name".into(), "CREATURE/wolf.mdx".into());
-        let name = lycheedev_data::dispatch(&inv).unwrap(); assert_eq!(name.data["matches"][0]["matchedVia"], "m2-alias");
-        inv.flags.insert("--name".into(), "unknown.blp".into()); let absent = lycheedev_data::dispatch(&inv).unwrap();
+        let name = lycheedev_data::migration_oracle::dispatch(&inv).unwrap(); assert_eq!(name.data["matches"][0]["matchedVia"], "m2-alias");
+        inv.flags.insert("--name".into(), "unknown.blp".into()); let absent = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
         assert_eq!(absent.data["resolved"], false); assert_eq!(absent.data["matches"], Value::Null);
-        inv.flags.remove("--name"); inv.flags.insert("--file-id".into(), "1".into()); let lookup = lycheedev_data::dispatch(&inv).unwrap();
+        inv.flags.remove("--name"); inv.flags.insert("--file-id".into(), "1".into()); let lookup = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
         assert_eq!(lookup.data["entries"][0]["names"].as_array().unwrap().len(), 2);
-        inv.flags.insert("--file-id".into(), "99".into()); let absent = lycheedev_data::dispatch(&inv).unwrap();
+        inv.flags.insert("--file-id".into(), "99".into()); let absent = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
         assert_eq!(absent.data["entries"], json!([{"fileDataID":99,"fileName":"unknown"}]));
         assert_eq!(provider.calls.load(Ordering::Relaxed), calls);
         let document: Value = lycheedev_core::metadata::DataCacheMetadata::read_controlled_with_check(&fixture.home, &format!("listfile/{kind}"), &Default::default(), || Ok(())).unwrap();
         let digest = document["provenance"]["files"][0]["blob"]["sha256"].as_str().unwrap();
         let path = fixture.home.join("blobs").join(&digest[..2]).join(&digest[2..]);
         let original = fs::read(&path).unwrap(); let mut altered = original.clone(); altered[0] ^= 1; fs::write(&path, &altered).unwrap();
-        assert!(lycheedev_data::dispatch(&inv).is_err()); assert_eq!(fs::read(&path).unwrap(), altered);
+        assert!(lycheedev_data::migration_oracle::dispatch(&inv).is_err()); assert_eq!(fs::read(&path).unwrap(), altered);
         fs::write(path, original).unwrap();
     }
 }
@@ -123,19 +123,19 @@ fn registered_demux_publishes_exact_frames_and_manifest_last_with_verified_captu
     let fixture = Fixture::new(); let input = fixture.root.join("input.avi"); fs::write(&input, avi()).unwrap();
     let output = fixture.root.join("output"); fs::create_dir(&output).unwrap();
     let mut inv = fixture.invocation("asset demux", &[("--path", input.to_str().unwrap()), ("--output", output.to_str().unwrap())]);
-    let result = lycheedev_data::dispatch(&inv).unwrap(); fixture.verify_captures(&result.provenance);
+    let result = lycheedev_data::migration_oracle::dispatch(&inv).unwrap(); fixture.verify_captures(&result.provenance);
     assert_eq!(result.provenance.len(), 4); assert_eq!(result.data["frameCount"], 2); assert_eq!(result.data["frames"][0]["subFrames"], json!([2, 3]));
     assert_eq!(result.data["frames"][1]["timestamp"], 40000.0);
     assert_eq!(fs::read(output.join("frame-000001.00dc")).unwrap(), [1, 2, 3, 4, 5, 0xc1, 2, 3, 0xc1]);
     assert_eq!(fs::read(output.join("frame-000002.00db")).unwrap(), [4, 5]);
     let manifest = fs::read(output.join("demux-manifest.json")).unwrap(); scoped_consumers::assert_manifest_value(&manifest, &result.data);
     fs::write(&input, b"broken input").unwrap();
-    let conflict = lycheedev_data::dispatch(&inv).unwrap_err(); assert_eq!(conflict.code, "records.export_conflict");
+    let conflict = lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err(); assert_eq!(conflict.code, "records.export_conflict");
     assert_eq!(fs::read(output.join("demux-manifest.json")).unwrap(), manifest);
     fs::write(&input, avi()).unwrap(); inv.flags.insert("--overwrite".into(), "true".into()); inv.flags.insert("--max-frames".into(), "1".into());
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().code, "records.frame_limit_exceeded");
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code, "records.frame_limit_exceeded");
     let partial = fixture.root.join("partial"); fs::create_dir(&partial).unwrap(); inv.flags.insert("--output".into(), partial.to_str().unwrap().into()); inv.flags.insert("--allow-partial".into(), "true".into());
-    let result = lycheedev_data::dispatch(&inv).unwrap(); fixture.verify_captures(&result.provenance);
+    let result = lycheedev_data::migration_oracle::dispatch(&inv).unwrap(); fixture.verify_captures(&result.provenance);
     assert_eq!(result.data["frameCount"], 1); assert_eq!(result.data["enumeratedFrames"], 2); assert_eq!(result.data["complete"], false); assert_eq!(result.data["truncationReason"], "frame_limit");
     assert!(!partial.join("frame-000002.00db").exists());
 }
@@ -145,13 +145,13 @@ fn demux_all_name_conflicts_precede_any_external_frame_write_and_preserve_hardli
     let fixture = Fixture::new(); let input = fixture.root.join("input.avi"); fs::write(&input, avi()).unwrap();
     let output = fixture.root.join("output"); fs::create_dir(&output).unwrap(); fs::write(output.join("frame-000002.00db"), b"previous").unwrap();
     let mut inv = fixture.invocation("asset demux", &[("--path", input.to_str().unwrap()), ("--output", output.to_str().unwrap())]);
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().code, "records.export_conflict");
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code, "records.export_conflict");
     assert!(!output.join("frame-000001.00dc").exists()); assert!(!output.join("demux-manifest.json").exists());
     let alias = fixture.root.join("alias"); fs::hard_link(output.join("frame-000002.00db"), &alias).unwrap();
     let reader = OpenOptions::new().read(true).share_mode(1 | 2 | 4).open(&alias).unwrap();
-    inv.flags.insert("--overwrite".into(), "true".into()); lycheedev_data::dispatch(&inv).unwrap();
+    inv.flags.insert("--overwrite".into(), "true".into()); lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(fs::read(&alias).unwrap(), b"previous"); assert_eq!(fs::read(output.join("frame-000002.00db")).unwrap(), [4, 5]); drop(reader);
-    inv.control.cancel_handle().store(true, Ordering::Release); assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().exit_code, 7);
+    inv.control.cancel_handle().store(true, Ordering::Release); assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().exit_code, 7);
 }
 
 // A real Windows junction writer, without a fixture child or a new dependency.
@@ -209,7 +209,7 @@ fn authenticated_local_casc_raw_export_captures_exact_bytes_and_preserves_confli
     let external = fixture.root.join("original.bin");
     let installation = identity["installation"].as_str().unwrap();
     let mut inv = fixture.invocation("asset export", &[("--snapshot", &pin.id), ("--installation", installation), ("--file-id", "303"), ("--output", external.to_str().unwrap()), ("--offline", "true")]);
-    let result = lycheedev_data::dispatch(&inv).unwrap();
+    let result = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     fixture.verify_captures(&result.provenance);
     let raw = fs::read(&external).unwrap();
     assert_eq!(storage::sha256(&raw), identity["wdc"]["sha256"]);
@@ -220,18 +220,18 @@ fn authenticated_local_casc_raw_export_captures_exact_bytes_and_preserves_confli
     let captured = evidence::read_blob(&fixture.home, &result.provenance[1]["blob"], 1 << 20).unwrap();
     assert_eq!(serde_json::from_slice::<Value>(&captured).unwrap(), result.data);
     inv.flags.insert("--installation".into(), fixture.root.join("missing-client").to_string_lossy().into_owned());
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().code, "records.export_conflict");
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code, "records.export_conflict");
     assert_eq!(fs::read(&external).unwrap(), raw);
     inv.flags.insert("--installation".into(), installation.into());
     let alias = fixture.root.join("original-alias.bin");
     fs::hard_link(&external, &alias).unwrap();
     inv.flags.insert("--overwrite".into(), "true".into());
-    let repeated = lycheedev_data::dispatch(&inv).unwrap();
+    let repeated = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     fixture.verify_captures(&repeated.provenance);
     assert_eq!(fs::read(&alias).unwrap(), raw);
     assert_eq!(fs::read(&external).unwrap(), raw);
     inv.control.cancel_handle().store(true, Ordering::Release);
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().exit_code, 7);
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().exit_code, 7);
     assert_eq!(fs::read(&external).unwrap(), raw);
 }
 

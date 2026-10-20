@@ -324,7 +324,7 @@ fn real_prepare_publishes_authenticated_ipc_once_and_never_prefetches_other_tabl
         ),
     ]);
     let inv = command(&fx, "Sample");
-    let first = crate::dispatch(&inv).unwrap();
+    let first = crate::migration_oracle::dispatch(&inv).unwrap();
     assert!(first.complete);
     assert_eq!(first.data["sourceKind"], "static");
     assert_eq!(first.data["availableRows"], 1);
@@ -417,7 +417,7 @@ fn real_prepare_publishes_authenticated_ipc_once_and_never_prefetches_other_tabl
         "logical-record-id"
     );
     assert!(reader.next().is_none());
-    let second = crate::dispatch(&inv).unwrap();
+    let second = crate::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(first.data["generation"], second.data["generation"]);
     assert_eq!(first.data["object"], second.data["object"]);
     assert_eq!(fs::read_dir(&paths.generations).unwrap().count(), 1);
@@ -431,7 +431,7 @@ fn prepare_preserves_partial_key_coverage_and_never_promotes_it_to_complete() {
     let spec = fixture::encrypted_sections(201);
     let (_, encoded) = fixture::encrypted_frame(&spec.raw);
     let fx = Fixture::with_encoded_table(spec, encoded);
-    let result = crate::dispatch(&command(&fx, "Sample")).unwrap();
+    let result = crate::migration_oracle::dispatch(&command(&fx, "Sample")).unwrap();
     assert!(!result.complete);
     assert_eq!(result.data["complete"], false);
     assert_eq!(result.data["availableRows"], 1);
@@ -460,7 +460,7 @@ fn bad_row_preparation_never_publishes_a_generation_and_cleans_private_staging()
         &[("ID", "uint"), ("Text", "text")],
         &[vec![Cell::U(1), Cell::BadString]],
     )]);
-    let error = crate::dispatch(&command(&fx, "Broken")).unwrap_err();
+    let error = crate::migration_oracle::dispatch(&command(&fx, "Broken")).unwrap_err();
     assert_eq!(error.code, "table.invalid_format");
     let paths = DataCachePaths::new(&fx.home);
     assert_eq!(fs::read_dir(&paths.generations).unwrap().count(), 0);
@@ -487,7 +487,7 @@ fn low_derived_quota_preserves_existing_evidence_and_publishes_nothing() {
     .unwrap();
     let original = lycheedev_core::evidence::read_blob(&fx.home, &capture["blob"], 1024).unwrap();
     fs::write(fx.home.join("config.json"), br#"{"schema":"lycheedev.config.v1","cache":{"maxBytes":21474836480},"dataCache":{"maxBytes":1}}"#).unwrap();
-    let error = crate::dispatch(&command(&fx, "Sample")).unwrap_err();
+    let error = crate::migration_oracle::dispatch(&command(&fx, "Sample")).unwrap_err();
     assert_eq!(error.code, "vault.data_cache_budget_exceeded");
     assert_eq!(
         lycheedev_core::evidence::read_blob(&fx.home, &capture["blob"], 1024).unwrap(),
@@ -656,7 +656,7 @@ fn changed_original_source_after_ipc_finish_never_acquires_a_generation() {
     let paths = DataCachePaths::new(&fx.home);
     assert_eq!(fs::read_dir(&paths.generations).unwrap().count(), 0);
     assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 0);
-    assert!(crate::dispatch(&inv).unwrap().complete);
+    assert!(crate::migration_oracle::dispatch(&inv).unwrap().complete);
     fs::remove_dir_all(fx.root).unwrap();
 }
 

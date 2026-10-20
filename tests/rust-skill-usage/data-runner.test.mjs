@@ -168,7 +168,7 @@ test('candidate authenticates all25 source files separately from unchanged Go323
   const original = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines/go3.2.3-skill.json')));
   assert.equal(original.files.length, 23); assert.equal(skillTreeIdentity(original.files), 'b9e162ace7abe7ea4a2feecef822283767eb1210');
   assert.equal(original.files.find(row => row.path === 'SKILL.md').sha256, 'cbde6b4bb2b598137cfe55c0556765b28890b036e406c1877700a05a33fb6957');
-  assert.equal(contract.files.find(row => row.path === 'SKILL.md').sha256, '8b6ba6a956bb06790852a01ea39eb8188b4a991b480287c6d838c6d7d2d7fd8f');
+  assert.equal(contract.files.find(row => row.path === 'SKILL.md').sha256, 'c15a601c0cc7c69a94bb57c03554cb448677a7540706f73bbe65f3fe9a267188');
   for (const row of original.files.filter(row => ['scripts/lycheedev.mjs', 'agents/openai.yaml'].includes(row.path))) assert.deepEqual(contract.files.find(current => current.path === row.path), row);
 });
 test('candidate rejects same-length tampering even with a forged matching SHA256', () => {

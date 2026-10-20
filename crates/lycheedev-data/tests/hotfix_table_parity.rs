@@ -424,7 +424,7 @@ fn named_hotfix_dispatch_archives_validated_fields_and_paginates_same_changes_pi
     let fixture = Fixture::new(&raw);
     let mut inv = fixture.inv();
     inv.flags.insert("--limit".into(), "2".into());
-    let first = lycheedev_data::dispatch(&inv).unwrap();
+    let first = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     assert!(!first.complete);
     assert_eq!(
         first.data["page"]["entries"][0]["fields"],
@@ -443,7 +443,7 @@ fn named_hotfix_dispatch_archives_validated_fields_and_paginates_same_changes_pi
     inv.flags.insert("--from".into(), source);
     inv.flags.insert("--snapshot".into(), snapshot.clone());
     inv.flags.insert("--after-index".into(), "1".into());
-    let second = lycheedev_data::dispatch(&inv).unwrap();
+    let second = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(second.data["snapshot"], snapshot);
     assert_eq!(
         second.data["page"]["entries"][0]["decodeState"],
@@ -469,7 +469,7 @@ fn named_hotfix_dispatch_archives_validated_fields_and_paginates_same_changes_pi
 fn named_hotfix_failures_never_publish_cache_or_changes_and_recover() {
     let fixture = Fixture::new(&cache(9, &[(42, 1, 1, b"missing terminator")]));
     assert_eq!(
-        lycheedev_data::dispatch(&fixture.inv()).unwrap_err().code,
+        lycheedev_data::migration_oracle::dispatch(&fixture.inv()).unwrap_err().code,
         "records.hotfix_fields"
     );
     assert_eq!(fixture.count("capture/"), 0);
@@ -477,18 +477,18 @@ fn named_hotfix_failures_never_publish_cache_or_changes_and_recover() {
     fs::write(&fixture.file, cache(9, &[(42, 1, 1, b"ok\0")])).unwrap();
     fixture.definition(SIMPLE, true);
     assert_eq!(
-        lycheedev_data::dispatch(&fixture.inv()).unwrap_err().code,
+        lycheedev_data::migration_oracle::dispatch(&fixture.inv()).unwrap_err().code,
         "schema.ambiguous_definition"
     );
     fixture.definition(&SIMPLE.replace(BUILD, "12.1.0.69999"), false);
     assert_eq!(
-        lycheedev_data::dispatch(&fixture.inv()).unwrap_err().code,
+        lycheedev_data::migration_oracle::dispatch(&fixture.inv()).unwrap_err().code,
         "schema.definition_not_found"
     );
     assert_eq!(fixture.count("capture/"), 0);
     assert_eq!(fixture.count("pin/"), 1);
     fixture.definition(SIMPLE, false);
-    assert!(lycheedev_data::dispatch(&fixture.inv()).unwrap().complete);
+    assert!(lycheedev_data::migration_oracle::dispatch(&fixture.inv()).unwrap().complete);
     assert_eq!(fixture.count("capture/"), 2);
     assert_eq!(fixture.count("pin/"), 2);
 }
@@ -505,7 +505,7 @@ fn named_hotfix_admission_cancellation_and_legal_unsupported_are_explicit() {
         let mut inv = fixture.inv();
         inv.flags.insert(flag.into(), value.into());
         assert_eq!(
-            lycheedev_data::dispatch(&inv).unwrap_err().code,
+            lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code,
             code,
             "{flag}"
         );
@@ -516,7 +516,7 @@ fn named_hotfix_admission_cancellation_and_legal_unsupported_are_explicit() {
     // dispatch here; its checkpoint/recovery boundaries have their own suite.
     let mut scan = fixture.inv();
     scan.flags.insert("--scan".into(), "true".into());
-    let scanned = lycheedev_data::dispatch(&scan).unwrap();
+    let scanned = lycheedev_data::migration_oracle::dispatch(&scan).unwrap();
     assert!(scanned.complete);
     assert_eq!(scanned.data["result"]["returned"], 1);
     assert_eq!(scanned.data["capture"]["provenance"]["kind"], "hotfix-scan");
@@ -542,7 +542,7 @@ fn named_hotfix_admission_cancellation_and_legal_unsupported_are_explicit() {
             Arc::new(AtomicBool::new(!expired)),
         );
         assert_eq!(
-            lycheedev_data::dispatch(&inv).unwrap_err().code,
+            lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code,
             if expired {
                 "command.deadline"
             } else {
@@ -555,7 +555,7 @@ fn named_hotfix_admission_cancellation_and_legal_unsupported_are_explicit() {
     let mut raw = fixture.inv();
     raw.flags.remove("--table");
     raw.flags.insert("--table-hash".into(), "0000002A".into());
-    let result = lycheedev_data::dispatch(&raw).unwrap();
+    let result = lycheedev_data::migration_oracle::dispatch(&raw).unwrap();
     assert!(result.data["page"]["entries"][0].get("fields").is_none());
     assert!(
         result.data["page"]["entries"][0]
@@ -568,7 +568,7 @@ fn named_hotfix_admission_cancellation_and_legal_unsupported_are_explicit() {
 fn named_hotfix_fixed_changes_and_archived_context_cannot_be_retargeted() {
     let raw = cache(9, &[(42, 1, 1, b"original\0")]);
     let fixture = Fixture::new(&raw);
-    let result = lycheedev_data::dispatch(&fixture.inv()).unwrap();
+    let result = lycheedev_data::migration_oracle::dispatch(&fixture.inv()).unwrap();
     let mut fixed = fixture.inv();
     fixed.flags.insert(
         "--snapshot".into(),
@@ -576,7 +576,7 @@ fn named_hotfix_fixed_changes_and_archived_context_cannot_be_retargeted() {
     );
     fs::write(&fixture.file, cache(9, &[(42, 1, 1, b"different\0")])).unwrap();
     assert_eq!(
-        lycheedev_data::dispatch(&fixed).unwrap_err().code,
+        lycheedev_data::migration_oracle::dispatch(&fixed).unwrap_err().code,
         "records.hotfix_identity"
     );
     assert_eq!(fixture.count("capture/"), 2);
@@ -601,7 +601,7 @@ fn named_hotfix_fixed_changes_and_archived_context_cannot_be_retargeted() {
     );
     fixed.flags.insert("--snapshot".into(), other.id);
     assert_eq!(
-        lycheedev_data::dispatch(&fixed).unwrap_err().code,
+        lycheedev_data::migration_oracle::dispatch(&fixed).unwrap_err().code,
         "records.hotfix_identity"
     );
     assert_eq!(fixture.count("capture/"), 2);
@@ -611,13 +611,13 @@ fn named_hotfix_fixed_changes_and_archived_context_cannot_be_retargeted() {
         fixture.root.to_string_lossy().into_owned(),
     );
     assert_eq!(
-        lycheedev_data::dispatch(&directory).unwrap_err().code,
+        lycheedev_data::migration_oracle::dispatch(&directory).unwrap_err().code,
         "records.hotfix_format"
     );
     for (flag, value) in [("--limit", "0"), ("--limit", "201"), ("--max-bytes", "0")] {
         let mut invalid = fixture.inv();
         invalid.flags.insert(flag.into(), value.into());
-        let error = lycheedev_data::dispatch(&invalid).unwrap_err();
+        let error = lycheedev_data::migration_oracle::dispatch(&invalid).unwrap_err();
         assert_eq!(
             (error.code.as_str(), error.exit_code),
             ("records.hotfix_limit", 2)
@@ -628,7 +628,7 @@ fn named_hotfix_fixed_changes_and_archived_context_cannot_be_retargeted() {
         "--snapshot".into(),
         result.data["snapshot"].as_str().unwrap().into(),
     );
-    assert!(lycheedev_data::dispatch(&fixed).unwrap().complete);
+    assert!(lycheedev_data::migration_oracle::dispatch(&fixed).unwrap().complete);
 }
 
 #[test]
@@ -736,7 +736,7 @@ fn named_hotfix_capture_keeps_go_bytes_and_public_numbers_keep_precision() {
         "COLUMNS\nint Wide\nfloat Zero\nfloat Values\nstring Label\n\nBUILD 12.1.0.69875\nWide<u64>\nZero\nValues[10]\nLabel\n",
         false,
     );
-    let result = lycheedev_data::dispatch(&fixture.inv()).unwrap();
+    let result = lycheedev_data::migration_oracle::dispatch(&fixture.inv()).unwrap();
     let expected_values = "[1,0,-0,0.10000000149011612,9.999999974752427e-7,1.0000000116860974e-7,100000002004087730000,1.0000000200408773e+21,1.401298464324817e-45,3.4028234663852886e+38]";
     let fields = &result.data["page"]["entries"][0]["fields"];
     // Generic Value must retain the sign. Its public constructor spells this
@@ -831,7 +831,7 @@ fn named_hotfix_above_default_metadata_capacity_remains_valid() {
     let mut inv = fixture.inv();
     inv.flags
         .insert("--max-bytes".into(), (130usize << 20).to_string());
-    let result = lycheedev_data::dispatch(&inv).unwrap();
+    let result = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(result.data["page"]["entries"].as_array().unwrap().len(), 1);
     assert_eq!(fixture.count("capture/"), 2);
     let mut bounded = fixture.inv();
@@ -839,7 +839,7 @@ fn named_hotfix_above_default_metadata_capacity_remains_valid() {
         .flags
         .insert("--max-bytes".into(), (128usize << 20).to_string());
     assert_eq!(
-        lycheedev_data::dispatch(&bounded).unwrap_err().code,
+        lycheedev_data::migration_oracle::dispatch(&bounded).unwrap_err().code,
         "records.hotfix_limit"
     );
     assert_eq!(fixture.count("capture/"), 2);
@@ -867,7 +867,7 @@ fn named_hotfix_maximum_scalar_schema_page_releases_temporary_allocations() {
     inv.flags
         .insert("--max-bytes".into(), (1usize << 20).to_string());
     inv.flags.insert("--limit".into(), "200".into());
-    let result = lycheedev_data::dispatch(&inv).unwrap();
+    let result = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     let entries = result.data["page"]["entries"].as_array().unwrap();
     assert_eq!(entries.len(), 200);
     assert_eq!(entries[199]["fields"]["F4095"], 0);
@@ -887,7 +887,7 @@ fn named_hotfix_current_and_legacy_pages_retain_cache_through_archived_continuat
         ));
         let mut inv = fixture.inv();
         inv.flags.insert("--limit".into(), "1".into());
-        let first = lycheedev_data::dispatch(&inv).unwrap();
+        let first = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
         let source_id = first.data["source"]["id"].as_str().unwrap().to_owned();
         let current = first.provenance[1].clone();
         assert_eq!(current["dependencies"], json!([source_id]));
@@ -922,7 +922,7 @@ fn named_hotfix_current_and_legacy_pages_retain_cache_through_archived_continuat
             "--after-index".into(),
             first.data["page"]["nextIndex"].to_string(),
         );
-        let second = lycheedev_data::dispatch(&inv).unwrap();
+        let second = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
         assert_eq!(second.data["source"]["id"], source_id);
         assert_eq!(second.provenance[1]["dependencies"], json!([source_id]));
         assert_eq!(

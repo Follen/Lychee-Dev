@@ -35,6 +35,26 @@ const summaries = [
     'Validate one pinned addon closure with --path/--toc/--snapshot, or a fixed multi-client --matrix <config.json>; add --semantic for native Emmy analysis using fixed client API metadata; report unresolved coverage; omitted --snapshot uses --project or the nearest parent project lock; explicit snapshot wins'],
 ];
 
+export const RETIRED_DATA_COMMANDS = Object.freeze([
+  "data sql",
+  "data db2",
+  "data db2 schema",
+  "data db2 search",
+  "data db2 foreign-key",
+  "data db2 stream",
+  "data spell info",
+  "data spell auras",
+  "data spell summons",
+  "data item get",
+  "data item models",
+  "data item geosets",
+  "data item textures",
+  "data decor list",
+  "data decor get",
+  "data creature display",
+  "data creature model",
+  "data encounter get"
+]);
 export function loadCliContractOracle(historicalBytes) {
   assert.equal(sha256(historicalBytes), HISTORICAL_FIXTURE_SHA256, 'historical CLI fixture identity');
   const historical = JSON.parse(historicalBytes);
@@ -108,8 +128,14 @@ export function loadCliContractOracle(historicalBytes) {
 ];
   const agentPosition = expected.findIndex(command => command.path === 'data cache prepare');
   expected.splice(agentPosition, 0, ...agentCommands);
+  const preCutoverExpected = structuredClone(expected);
+  for (const path of RETIRED_DATA_COMMANDS) assert.equal(expected.filter(row=>row.path===path).length,1);
+  const production = expected.filter(row=>!RETIRED_DATA_COMMANDS.includes(row.path));
+  assert.equal(production.length,69);
+  production.push({path:'cli search',summary:'Search local command capabilities by task; returns at most five ranked commands without opening a workspace, cache, worker or network.',mutates:false,arguments:['<task>'],flags:['--format text|json|jsonl']},
+    {path:'schema',summary:'Inspect the exact CLI input contract for a command path. Data Agent commands include the authoritative typed session protocol; no worker or engine is started.',mutates:false,arguments:['<command...>'],flags:['--format text|json|jsonl']});
   return {oracle: GO_323, historicalReference: historical.oracle,
-    commands: historical.commands, expected};
+    commands: historical.commands, preCutoverExpected, retired: RETIRED_DATA_COMMANDS, expected:production};
 }
 
 // Independent provenance check for the frozen Git blobs. Callers supply bytes

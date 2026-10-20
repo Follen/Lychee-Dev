@@ -31,13 +31,13 @@ function fails(mutate) {
 }
 test('fixed 3.2.3 source provenance retains 84 original commands and exact independent deltas', () => {
   assert.equal(oracle.oracle.commit, GO_323.commit);
-  assert.equal(oracle.commands.length, 84); assert.equal(oracle.acceptedCommands.length, 87);
+  assert.equal(oracle.commands.length, 84); assert.equal(oracle.acceptedCommands.length, 71);
   assert.equal(oracle.products.length, 7); assert.equal(oracle.addon.length, 55);
   assert.equal(oracle.provenance.commandCount, 84);
   assert.equal(oracle.provenance.historicalFixtureSHA256, sha256(readBounded(root, 'tests/rust-parity/go-3.2.0.manifest.json')));
   const c = candidate(), before = clone(c), report = compareRelease323(oracle, c);
   assert.equal(report.acceptedStaticStatus, 'pass'); assert.equal(report.rawExactStatus, 'fail');
-  assert.deepEqual(report.rawExact.commands.extra, ['data agent schema', 'data agent serve', 'data cache prepare']);
+  assert.deepEqual(report.rawExact.commands.extra, ['cli search', 'data agent schema', 'data agent serve', 'data cache prepare', 'schema']);
   assert.equal(report.behavioralParity, 'unverified'); assert.equal(report.execution, 'NOT_RUN');
   assert.deepEqual(c, before);
 });
@@ -80,7 +80,7 @@ test('all complete-source changes invalidate both current adapters, including te
     source.replace('"target available" => true,', '"target available" => false,'),
     source.replace('"--allow-partial"', '"--unreviewed" | "--allow-partial"'),
     source.replace('name => panic!("flag missing explicit contract arity: {name}"),', '_ => false,'),
-    source.replace('assert_eq!(current.len(), 87);', 'assert_eq!(current.len(), 84);'),
+    source.replace('assert_eq!(current.len(), 71);', 'assert_eq!(current.len(), 84);'),
     source + '\n// unreviewed trailing edit\n',
   ];
   for (const mutated of mutations) {

@@ -16,7 +16,7 @@ use arrow_ipc::{
 };
 use arrow_schema::{DataType, Field, SchemaRef};
 use flatbuffers::{FlatBufferBuilder, VerifierOptions};
-use lycheedev_core::{Result, workspace::data_disk::DerivedObjectReader};
+use lycheedev_core::{Result, workspace::data_disk::{ObjectReader, ReaderCheck}};
 use std::{io::SeekFrom, sync::Arc};
 
 // This owner is private: no cloned array escapes its allocation guard.
@@ -51,8 +51,8 @@ pub(in crate::generation) struct Directory {
     pub(in crate::generation) blocks: Vec<BatchBlock>,
     _allocation: OwnedRetainedReservation,
 }
-pub(in crate::generation) fn directory(
-    reader: &mut DerivedObjectReader<'_>,
+pub(in crate::generation) fn directory<C: ReaderCheck>(
+    reader: &mut ObjectReader<C>,
     schema: &SchemaRef,
     table: &Table<'_>,
     batch_count: usize,
@@ -78,8 +78,8 @@ pub(in crate::generation) fn directory(
         _allocation: allocation.into_owned(budget)?,
     })
 }
-pub(in crate::generation) fn read_owned_batch(
-    reader: &mut DerivedObjectReader<'_>,
+pub(in crate::generation) fn read_owned_batch<C: ReaderCheck>(
+    reader: &mut ObjectReader<C>,
     schema: &SchemaRef,
     block: &Block,
     budget: &Arc<Budget>,
@@ -91,7 +91,7 @@ pub(in crate::generation) fn read_owned_batch(
         _allocation: batch._allocation.into_owned(budget)?,
     })
 }
-fn read_at(reader: &mut DerivedObjectReader<'_>, offset: u64, bytes: &mut [u8]) -> Result<()> {
+fn read_at<C: ReaderCheck>(reader: &mut ObjectReader<C>, offset: u64, bytes: &mut [u8]) -> Result<()> {
     reader.seek_checked(SeekFrom::Start(offset))?;
     reader.read_exact_checked(bytes)
 }
@@ -107,8 +107,8 @@ fn verify_options(bytes: usize) -> VerifierOptions {
     }
 }
 
-pub(super) fn validate(
-    reader: &mut DerivedObjectReader<'_>,
+pub(super) fn validate<C: ReaderCheck>(
+    reader: &mut ObjectReader<C>,
     schema: &SchemaRef,
     table: &Table<'_>,
     batch_count: usize,
@@ -116,8 +116,8 @@ pub(super) fn validate(
 ) -> Result<()> {
     inspect(reader, schema, table, batch_count, budget, &mut |_| Ok(()))
 }
-fn inspect(
-    reader: &mut DerivedObjectReader<'_>,
+fn inspect<C: ReaderCheck>(
+    reader: &mut ObjectReader<C>,
     schema: &SchemaRef,
     table: &Table<'_>,
     batch_count: usize,
@@ -253,8 +253,8 @@ fn inspect(
     budget.check()
 }
 
-fn decode_batch<'a>(
-    reader: &mut DerivedObjectReader<'_>,
+fn decode_batch<'a, C: ReaderCheck>(
+    reader: &mut ObjectReader<C>,
     schema: &SchemaRef,
     block: &Block,
     budget: &'a Budget,

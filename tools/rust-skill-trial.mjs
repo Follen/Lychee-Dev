@@ -53,4 +53,7 @@ export async function main(argv) {
   assert(['finish','cancel'].includes(mode)&&args.length===2,'usage: start | call | finish | cancel | restore-key | relay');
   console.log(JSON.stringify(await submit(args[0],{seq:Number(args[1]),op:mode})));
 }
-if(process.argv[1]&&resolve(process.argv[1])===resolve(import.meta.filename))await main(process.argv.slice(2));
+if(process.argv[1]&&resolve(process.argv[1])===resolve(import.meta.filename)){
+ assert.equal(process.argv[2],'--historical-oracle-only','fixed 86f trial is historical only; it cannot qualify the current Agent product');
+ await main(process.argv.slice(3));
+}

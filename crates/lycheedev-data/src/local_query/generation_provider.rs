@@ -4,7 +4,7 @@
 use super::*;
 use crate::{
     generation::{Generation, GenerationBatch},
-    resource::RetainedReservation,
+    resource::{OwnedRetainedReservation, RetainedReservation},
 };
 use arrow_array::{
     Array, FixedSizeListArray, Float32Array, Int64Array, StringArray, UInt32Array, UInt64Array,
@@ -17,6 +17,79 @@ struct Row<'a> {
     cells: Vec<Scalar>,
     _allocation: RetainedReservation<'a>,
 }
+
+/// The converted cells and their original reservation move together; no batch
+/// reference or newly admitted replacement guard crosses the pull boundary.
+pub(super) struct OwnedRow {
+    cells: Vec<Scalar>,
+    _allocation: OwnedRetainedReservation,
+}
+impl OwnedRow {
+    pub(super) fn cells(&self) -> &[Scalar] {
+        &self.cells
+    }
+}
+impl Row<'_> {
+    fn into_owned(self, budget: &Arc<Budget>) -> Result<OwnedRow> {
+        Ok(OwnedRow {
+            cells: self.cells,
+            _allocation: self._allocation.into_owned(budget)?,
+        })
+    }
+}
+/// Reads only a requested ID. One authenticated batch is retained for reuse;
+/// choosing the next ID remains a metadata-only operation in Physical.
+pub(super) struct OwnedRows {
+    generation: Arc<Generation>,
+    batch: Option<(usize, GenerationBatch)>,
+    _allocation: OwnedRetainedReservation,
+}
+impl OwnedRows {
+    pub(super) fn new(generation: Arc<Generation>, budget: &Arc<Budget>) -> Result<Self> {
+        Ok(Self {
+            generation,
+            batch: None,
+            _allocation: budget
+                .reserve_retained(size_of::<Self>())?
+                .into_owned(budget)?,
+        })
+    }
+    pub(super) fn read(
+        &mut self,
+        id: u32,
+        fields: &[schema::Field],
+        budget: &Arc<Budget>,
+    ) -> Result<Option<OwnedRow>> {
+        let _phase = budget.phase(Phase::GenerationRow);
+        budget.check()?;
+        let Some(block) = self.generation.locate_batch(id) else {
+            return Ok(None);
+        };
+        if self
+            .batch
+            .as_ref()
+            .is_none_or(|(current, _)| *current != block)
+        {
+            self.batch = None;
+            self.batch = Some((block, self.generation.read_batch(block)?));
+        }
+        let (_, batch) = self.batch.as_ref().expect("requested batch");
+        let ids = batch
+            .records
+            .columns()
+            .last()
+            .and_then(|array| array.as_any().downcast_ref::<UInt32Array>())
+            .ok_or_else(invalid)?;
+        let Ok(row) = ids.values().binary_search(&id) else {
+            return Ok(None);
+        };
+        // Always check the entire visited row; DataFusion projects afterwards.
+        flatten(&batch.records, row, fields, None, budget)?
+            .into_owned(budget)
+            .map(Some)
+    }
+}
+
 pub(super) struct Cursor<'a> {
     generation: &'a Generation,
     columns: &'a [schema::Field],
@@ -436,5 +509,52 @@ mod tests {
         );
         assert!(flatten(&batch, 0, &fields, None, &narrow).is_err());
         assert_eq!(narrow.refundable_retained_bytes(), 0);
+    }
+    #[test]
+    fn owned_typed_row_transfers_the_same_budget_guard_without_reading_bad_tail() {
+        let budget = Arc::new(Budget::new(
+            Cost::defaults(),
+            Instant::now() + Duration::from_secs(60),
+            None,
+        ));
+        let fields = vec![fields().remove(0)];
+        let arrays: Vec<ArrayRef> = vec![
+            Arc::new(Float32Array::from(vec![1.5, f32::NAN])),
+            Arc::new(UInt32Array::from(vec![10, 20])),
+        ];
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("Value", DataType::Float32, false),
+            Field::new("locator", DataType::UInt32, false),
+        ]));
+        let batch = RecordBatch::try_new(schema, arrays).unwrap();
+        let row = flatten(&batch, 0, &fields, None, &budget).unwrap();
+        let admitted = budget.refundable_retained_bytes();
+        let row = row.into_owned(&budget).unwrap();
+        assert_eq!(budget.refundable_retained_bytes(), admitted);
+        assert_eq!(row.cells(), &[Scalar::Float(1.5)]);
+        drop(row);
+        assert_eq!(budget.refundable_retained_bytes(), 0);
+        // The unprojected float is still validated once that row is requested.
+        assert!(flatten(&batch, 1, &fields, None, &budget).is_err());
+        assert_eq!(budget.refundable_retained_bytes(), 0);
+    }
+    #[test]
+    fn owned_typed_row_cannot_transfer_its_refund_to_another_budget() {
+        let budget = Arc::new(Budget::new(
+            Cost::defaults(),
+            Instant::now() + Duration::from_secs(60),
+            None,
+        ));
+        let other = Arc::new(Budget::new(
+            Cost::defaults(),
+            Instant::now() + Duration::from_secs(60),
+            None,
+        ));
+        let batch = batch();
+        let fields = fields();
+        let row = flatten(&batch, 0, &fields, None, &budget).unwrap();
+        assert!(row.into_owned(&other).is_err());
+        assert_eq!(budget.refundable_retained_bytes(), 0);
+        assert_eq!(other.refundable_retained_bytes(), 0);
     }
 }

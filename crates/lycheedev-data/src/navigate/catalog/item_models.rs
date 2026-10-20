@@ -1,4 +1,5 @@
-//! Frozen Go item appearance, model variant and material resolution.
+use super::async_access::{DomainAccess, immediately};
+// Frozen Go item appearance, model variant and material resolution.
 use super::{MAX_RELATIONS, Navigator, Row, integer, not_found, unsigned};
 use crate::{resource::Cost, table};
 use lycheedev_core::Result;
@@ -26,45 +27,42 @@ pub(super) fn int_list(row: &Row, field: &str) -> Vec<i64> {
         _ => vec![],
     }
 }
-impl Navigator<'_> {
-    fn item_link(&mut self, from: &str, field: &str, id: u32, kind: &str, target: u32, depth: u32) -> Result<()> {
-        if self.relations.len() == MAX_RELATIONS {
-            self.truncate("relation_budget");
-            return Ok(());
-        }
-        self.budget.charge(Cost::retained(512))?;
-        self.relations.push(json!({"fromTable":from,"fromField":field,"fromID":id,"toKind":kind,"toID":target,"depth":depth}));
-        Ok(())
+// One algorithm for synchronous legacy reads and asynchronous typed Engine reads.
+// Row providers retain responsibility for physical IDs, ordering, early-stop,
+// field validation, source evidence and admitted ownership.
+pub(crate) trait ItemModelAccess: DomainAccess {
+    fn item_link(&mut self,from:&str,field:&str,id:u32,kind:&str,target:u32,depth:u32)->Result<()> {
+        self.link(from,field,id,kind,u64::from(target),depth)
     }
-    pub(super) fn item_rows(&mut self, name: &str, field: &str, wanted: u32) -> Result<Vec<(u32, Row)>> {
-        let (rows, extra) = self.rows(name, Some((field, wanted)), MAX_RELATED)?;
-        if extra { self.truncate("row_budget"); }
+    async fn item_rows(&mut self, name: &str, field: &str, wanted: u32) -> Result<Vec<(u32, Row)>> {
+        let (rows, extra) = self.scan(name, Some((field, wanted)), MAX_RELATED).await?;
+        if extra { self.mark_truncated("row_budget"); }
         Ok(rows)
     }
-    pub(super) fn item_appearance(&mut self, item: u32) -> Result<Option<(u32, Row)>> {
-        let appearances = self.item_rows("ItemModifiedAppearance", "ItemID", item)?;
+    async fn item_appearance(&mut self, item: u32) -> Result<Option<(u32, Row)>> {
+        let appearances = self.item_rows("ItemModifiedAppearance", "ItemID", item).await?;
         let Some((selected, row)) = appearances.first() else { return Ok(None); };
-        if appearances.len() > 1 { self.partial("relation_ambiguous"); }
+        if appearances.len() > 1 { self.mark_partial("relation_ambiguous"); }
         // Go emits the nonselected candidates first, then the selected lowest ID.
         for (id, candidate) in &appearances[1..] {
             self.item_link("ItemModifiedAppearance", "ItemAppearanceID", *id, "item_appearance", unsigned(candidate.get("ItemAppearanceID")), 0)?;
         }
         let appearance = unsigned(row.get("ItemAppearanceID"));
         self.item_link("ItemModifiedAppearance", "ItemAppearanceID", *selected, "item_appearance", appearance, 0)?;
-        let Some(row) = self.row("ItemAppearance", appearance)? else {
-            self.partial("relation_unresolved");
+        let Some(row) = self.lookup("ItemAppearance", appearance).await? else {
+            self.mark_partial("relation_unresolved");
             return Ok(None);
         };
         let display = unsigned(row.get("ItemDisplayInfoID"));
         self.item_link("ItemAppearance", "ItemDisplayInfoID", appearance, "item_display", display, 1)?;
-        let Some(row) = self.row("ItemDisplayInfo", display)? else {
-            self.partial("relation_unresolved");
+        let Some(row) = self.lookup("ItemDisplayInfo", display).await? else {
+            self.mark_partial("relation_unresolved");
             return Ok(None);
         };
         Ok(Some((display, row)))
     }
-    fn item_model_file(&mut self, display: u32, resource: u32, race: i64, gender: i64) -> Result<u32> {
-        let candidates = self.item_rows("ModelFileData", "ModelResourcesID", resource)?;
+    async fn item_model_file(&mut self, display: u32, resource: u32, race: i64, gender: i64) -> Result<u32> {
+        let candidates = self.item_rows("ModelFileData", "ModelResourcesID", resource).await?;
         self.item_link("ItemDisplayInfo", "ModelResourcesID", display, "model_resource", resource, 2)?;
         let mut files = Vec::new();
         for (id, row) in candidates {
@@ -72,23 +70,23 @@ impl Navigator<'_> {
             if file == 0 { file = unsigned(row.get("ID")); }
             if file != 0 {
                 self.item_link("ModelFileData", "FileDataID", id, "model_file", file, 3)?;
-                self.budget.charge(Cost::retained(8))?;
+                self.budget().charge(Cost::retained(8))?;
                 files.push(file);
             }
         }
         let Some(first) = files.first().copied() else { return Ok(0); };
         if race == 0 && gender == 0 { return Ok(first); }
         for file in files {
-            if let Some(component) = self.row("ComponentModelFileData", file)?
+            if let Some(component) = self.lookup("ComponentModelFileData", file).await?
                 && integer(component.get("RaceID")) == race && integer(component.get("GenderIndex")) == gender {
                 return Ok(file);
             }
         }
-        self.partial("variant_unavailable");
+        self.mark_partial("variant_unavailable");
         Ok(first)
     }
-    pub(super) fn item_texture_file(&mut self, material: u32) -> Result<u32> {
-        let candidates = self.item_rows("TextureFileData", "MaterialResourcesID", material)?;
+    async fn item_texture_file(&mut self, material: u32) -> Result<u32> {
+        let candidates = self.item_rows("TextureFileData", "MaterialResourcesID", material).await?;
         for (id, row) in candidates {
             if unsigned(row.get("UsageType")) != 0 { continue; }
             let mut file = unsigned(row.get("FileDataID"));
@@ -100,26 +98,42 @@ impl Navigator<'_> {
         }
         Ok(0)
     }
-    pub(super) fn item_models(&mut self, item: u32, race: i64, gender: i64) -> Result<Value> {
-        self.row("ItemSparse", item)?.ok_or_else(not_found)?;
+    async fn item_models(&mut self, item: u32, race: i64, gender: i64) -> Result<Value> {
+        self.lookup("ItemSparse", item).await?.ok_or_else(not_found)?;
         let mut result = json!({"itemID":item,"raceID":race,"gender":gender,"displayID":0,"models":[],"textures":[],"geosetGroup":[]});
-        let Some((display, row)) = self.item_appearance(item)? else { return Ok(result); };
+        let Some((display, row)) = self.item_appearance(item).await? else { return Ok(result); };
         let mut models = Vec::new();
         let mut textures = Vec::new();
         for resource in resources(&row, "ModelResourcesID") {
-            let file = self.item_model_file(display, resource, race, gender)?;
+            let file = self.item_model_file(display, resource, race, gender).await?;
             if file != 0 { models.push(file); }
         }
         for material in resources(&row, "ModelMaterialResourcesID") {
-            let file = self.item_texture_file(material)?;
+            let file = self.item_texture_file(material).await?;
             if file != 0 { textures.push(file); }
         }
         let geosets = int_list(&row, "GeosetGroup");
-        self.budget.charge(Cost::retained(1024 + (models.len() + textures.len() + geosets.len()) * 32))?;
+        self.budget().charge(Cost::retained(1024 + (models.len() + textures.len() + geosets.len()) * 32))?;
         result["displayID"] = json!(display);
         result["models"] = json!(models);
         result["textures"] = json!(textures);
         result["geosetGroup"] = json!(geosets);
         Ok(result)
+    }
+}
+
+impl<T:DomainAccess> ItemModelAccess for T {}
+impl Navigator<'_> {
+    pub(super) fn item_rows(&mut self, name: &str, field: &str, wanted: u32) -> Result<Vec<(u32, Row)>> {
+        immediately(ItemModelAccess::item_rows(self, name, field, wanted))
+    }
+    pub(super) fn item_appearance(&mut self, item: u32) -> Result<Option<(u32, Row)>> {
+        immediately(ItemModelAccess::item_appearance(self, item))
+    }
+    pub(super) fn item_texture_file(&mut self, material: u32) -> Result<u32> {
+        immediately(ItemModelAccess::item_texture_file(self, material))
+    }
+    pub(super) fn item_models(&mut self, item: u32, race: i64, gender: i64) -> Result<Value> {
+        immediately(ItemModelAccess::item_models(self, item, race, gender))
     }
 }

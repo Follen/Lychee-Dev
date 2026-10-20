@@ -13,7 +13,7 @@ fn local_raw_export_uses_admitted_verified_stream_and_keeps_ordered_control() {
         "asset export",
         &[("--file-id", "201"), ("--output", output.to_str().unwrap())],
     );
-    let outcome = lycheedev_data::dispatch(&inv).unwrap();
+    let outcome = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(fs::read(&output).unwrap(), expected);
     assert_eq!(outcome.data["source"]["source"], "installation");
     assert_eq!(outcome.data["source"]["contentVerified"], true);
@@ -43,7 +43,7 @@ fn local_casc_demux_reuses_same_query_and_records_only_source_identity_dependenc
         "asset demux",
         &[("--file-id", "201"), ("--output", output.to_str().unwrap())],
     );
-    let result = lycheedev_data::dispatch(&inv).unwrap();
+    let result = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(result.data["source"]["kind"], "casc");
     assert_eq!(result.data["source"]["snapshot"], f.pin);
     assert_eq!(result.data["frames"].as_array().unwrap().len(), 2);
@@ -82,7 +82,7 @@ fn demux_path_manifest_has_go_typed_float_bytes_and_required_frames_block_remova
             ("--output", output.to_str().unwrap()),
         ],
     );
-    let result = lycheedev_data::dispatch(&inv).unwrap();
+    let result = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     let raw = fs::read(output.join("demux-manifest.json")).unwrap();
     let text = String::from_utf8(raw).unwrap();
     assert!(text.contains("\"frameRate\": 25,"));

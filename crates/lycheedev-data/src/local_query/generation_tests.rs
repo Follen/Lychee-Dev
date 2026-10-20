@@ -37,7 +37,7 @@ fn counts() -> (usize, usize, usize) {
 fn prepare(fx: &Fixture, name: &str) -> Outcome {
     let mut inv = fx.invocation("data cache prepare", &[]);
     inv.positional = Some(name.into());
-    crate::dispatch(&inv).unwrap()
+    crate::migration_oracle::dispatch(&inv).unwrap()
 }
 fn object(fx: &Fixture, out: &Outcome) -> PathBuf {
     DataCachePaths::new(&fx.home)
@@ -98,7 +98,7 @@ fn sql_generation_point_uses_typed_batch_and_exact_arrays_in_public_capture() {
     let prepared = prepare(&fx, "Sample");
     assert_eq!(prepared.data["batchCount"], 2);
     let _observe = Observe::new();
-    let out = crate::dispatch(&fx.invocation(
+    let out = crate::migration_oracle::dispatch(&fx.invocation(
         "data sql",
         &[(
             "--sql",
@@ -139,7 +139,7 @@ fn sql_generation_u64_max_preserves_integer_tokens_and_csv() {
     let fx = Fixture::new(&[spec]);
     prepare(&fx, "Sample");
     let _observe = Observe::new();
-    let out = crate::dispatch(&fx.invocation(
+    let out = crate::migration_oracle::dispatch(&fx.invocation(
         "data sql",
         &[("--sql", "SELECT Exact FROM Sample WHERE ID=7")],
     ))
@@ -147,7 +147,7 @@ fn sql_generation_u64_max_preserves_integer_tokens_and_csv() {
     assert_eq!(out.data["result"]["rows"][0][0].as_u64(), Some(u64::MAX));
     verify_capture(&fx, &out);
     let path = fx.root.join("exact.csv");
-    let out = crate::dispatch(&fx.invocation(
+    let out = crate::migration_oracle::dispatch(&fx.invocation(
         "data sql",
         &[
             ("--sql", "SELECT Exact FROM Sample WHERE ID=7"),
@@ -184,7 +184,7 @@ fn sql_generation_scan_projection_filter_aggregate_and_self_join_have_independen
             json!([[1, 42], [2, 99]]),
         ),
     ] {
-        let out = crate::dispatch(&fx.invocation("data sql", &[("--sql", sql)])).unwrap();
+        let out = crate::migration_oracle::dispatch(&fx.invocation("data sql", &[("--sql", sql)])).unwrap();
         assert_eq!(out.data["result"]["rows"], expected, "{sql}");
     }
     assert!(counts().0 >= 4);
@@ -194,7 +194,7 @@ fn sql_generation_scan_projection_filter_aggregate_and_self_join_have_independen
 fn sql_generation_absent_does_not_create_a_generation_and_uses_original_rows() {
     let fx = sample();
     let _observe = Observe::new();
-    let out = crate::dispatch(&fx.invocation(
+    let out = crate::migration_oracle::dispatch(&fx.invocation(
         "data sql",
         &[("--sql", "SELECT Value FROM Sample WHERE ID=1")],
     ))
@@ -223,7 +223,7 @@ fn sql_generation_missing_body_under_reduced_quota_is_explicit_zero_write_wdc_fa
     let before = fs::read(&manifest).unwrap();
     fs::write(fx.home.join("config.json"),br#"{"schema":"lycheedev.config.v1","cache":{"maxBytes":21474836480},"dataCache":{"maxBytes":1}}"#).unwrap();
     let _observe = Observe::new();
-    let out = crate::dispatch(&fx.invocation(
+    let out = crate::migration_oracle::dispatch(&fx.invocation(
         "data sql",
         &[("--sql", "SELECT Value FROM Sample WHERE ID=1")],
     ))
@@ -251,7 +251,7 @@ fn sql_generation_corrupt_body_is_hard_error_without_wdc_fallback_or_capture() {
     let before = captures(&fx).len();
     let _observe = Observe::new();
     assert!(
-        crate::dispatch(&fx.invocation("data sql", &[("--sql", "SELECT * FROM Sample")])).is_err()
+        crate::migration_oracle::dispatch(&fx.invocation("data sql", &[("--sql", "SELECT * FROM Sample")])).is_err()
     );
     assert_eq!(counts(), (0, 0, 0));
     assert_eq!(captures(&fx).len(), before);
@@ -265,7 +265,7 @@ fn sql_generation_partial_source_retains_coverage_and_incomplete_capture() {
     assert!(!prepared.complete);
     let _observe = Observe::new();
     let out =
-        crate::dispatch(&fx.invocation("data sql", &[("--sql", "SELECT ID,Value FROM Sample")]))
+        crate::migration_oracle::dispatch(&fx.invocation("data sql", &[("--sql", "SELECT ID,Value FROM Sample")]))
             .unwrap();
     assert_eq!(out.data["result"]["rows"], json!([[1, 42]]));
     assert!(!out.complete);
@@ -326,7 +326,7 @@ fn sql_generation_two_tables_close_all_after_first_close_error_and_preserve_comm
         let _observe = Observe::new();
         observations::FAIL_CLOSES.with(|n| n.set(2));
         let before = captures(&fx).len();
-        let error = crate::dispatch(&fx.invocation("data sql", &[("--sql", sql)])).unwrap_err();
+        let error = crate::migration_oracle::dispatch(&fx.invocation("data sql", &[("--sql", sql)])).unwrap_err();
         assert_eq!(error.code, "storage.close_failed", "{sql}: {error:?}");
         assert_eq!(
             counts(),
@@ -501,7 +501,7 @@ fn sql_generation_static_and_effective_share_source_but_preserve_overlay_in_both
         )
         .unwrap();
         let out =
-            crate::dispatch(&fx.invocation("data sql", &[("--file", file.to_str().unwrap())]))
+            crate::migration_oracle::dispatch(&fx.invocation("data sql", &[("--file", file.to_str().unwrap())]))
                 .unwrap();
         assert_eq!(out.data["result"]["rows"], expected);
         assert_eq!(counts().1, 1);
@@ -560,7 +560,7 @@ fn sql_generation_oversize_typed_schema_keeps_legal_wdc_projection_and_prepare_s
         let mut inv = fx.invocation("data cache prepare", &[]);
         inv.positional = Some("Sample".into());
         assert_eq!(
-            crate::dispatch(&inv).unwrap_err().code,
+            crate::migration_oracle::dispatch(&inv).unwrap_err().code,
             "records.query_resource_budget"
         );
         assert_eq!(

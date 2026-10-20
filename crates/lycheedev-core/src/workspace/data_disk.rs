@@ -32,7 +32,7 @@ mod shared_blobs;
 pub use publication::{DerivedObject, DerivedObjectWriter};
 pub use reading::{
     DerivedObjectReader, DerivedReadCheck, DerivedReadLease, DerivedReadReport,
-    MAX_GENERATION_BYTES, OwnedDerivedObjectReader, OwnedDerivedReadLease,
+    MAX_GENERATION_BYTES, OwnedDerivedObjectReader, OwnedDerivedReadLease, ObjectReader, ReaderCheck,
 };
 pub use shared_blobs::durable::SourceIdentity;
 pub(crate) use shared_blobs::durable::{StageSlot, recover_shards};
@@ -193,7 +193,8 @@ pub struct ReservationReport {
 }
 
 #[derive(Clone, Copy)]
-struct Checks<'a> {
+#[doc(hidden)]
+pub struct Checks<'a> {
     control: &'a OperationControl,
     supplemental: Option<&'a dyn Fn() -> Result<()>>,
 }

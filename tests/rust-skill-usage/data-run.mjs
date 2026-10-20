@@ -12,6 +12,8 @@ import {archiveFixture, bounded, digest, loadFixture, npmOfflineFlags, seedDataH
 import {CASES, CHECKS, archiveBytes, archiveCaptureProofs, assertDataReport, assertEnvelope, dataArgs, pendingDataTasks, requestFor, targetArgs} from './data-assertions.mjs';
 import {assertDataSkillDirectory, assertDataSkillInventory, dataSkillIdentity} from './data-skill-contract.mjs';
 
+assert.equal(process.argv[2], '--historical-oracle-only', 'retired SQL controller cannot qualify current Agent');
+process.argv.splice(2, 1);
 assert.equal(process.platform, 'win32'); assert.equal(process.arch, 'x64');
 const [configPath, ...extra] = process.argv.slice(2); assert(configPath && !extra.length);
 const config = jsonFile(configPath), {scratch, evidence, root} = config;

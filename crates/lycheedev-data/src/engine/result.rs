@@ -15,6 +15,10 @@ use std::sync::Arc;
 pub struct OwnedProvenance {
     value: Value,
     #[serde(skip)]
+    pub(super) session: Arc<Budget>,
+    #[serde(skip)]
+    pub(super) dependencies: Vec<String>,
+    #[serde(skip)]
     _allocation: OwnedRetainedReservation,
 }
 impl std::fmt::Debug for OwnedProvenance {
@@ -23,6 +27,7 @@ impl std::fmt::Debug for OwnedProvenance {
     }
 }
 pub struct ResultOwner {
+    pub(super) schema: Option<arrow_schema::SchemaRef>,
     pub(super) dependencies: Vec<String>,
     pub(super) batches: Vec<RecordBatch>,
     pub(super) columns: Vec<String>,
@@ -44,6 +49,7 @@ impl Drop for ResultOwner {
         drop(std::mem::take(&mut self.columns));
         drop(std::mem::take(&mut self.dependencies));
         drop(std::mem::replace(&mut self.provenance, Value::Null));
+        self.schema.take();
         self._output.take();
         for lifetime in &self._lifetimes {
             // Poisoned accounting stays conservatively reserved. Drop cannot
@@ -52,7 +58,19 @@ impl Drop for ResultOwner {
         }
     }
 }
+impl OwnedProvenance {
+    pub(crate) fn value(&self) -> &Value { &self.value }
+}
 impl ResultOwner {
+    pub(crate) fn visit_batches<T>(&self, control: &lycheedev_core::control::OperationControl,
+        visitor: impl FnOnce(&arrow_schema::SchemaRef, &[RecordBatch]) -> Result<T>) -> Result<T> {
+        control.check()?;
+        let schema = self.schema.clone().or_else(||self.batches.first().map(RecordBatch::schema))
+            .ok_or_else(|| fault("records.internal", 8, "Typed result schema is missing"))?;
+        let result = visitor(&schema, &self.batches)?;
+        control.check()?;
+        Ok(result)
+    }
     pub fn row_count(&self) -> usize {
         self.rows
     }
@@ -66,13 +84,17 @@ impl ResultOwner {
         &self.provenance
     }
     pub fn owned_provenance(&self) -> Result<OwnedProvenance> {
-        let bytes = self.provenance_bytes;
+        let bytes = self.dependencies.iter().try_fold(self.provenance_bytes, |n, item| {
+            n.checked_add(item.len()).and_then(|n| n.checked_add(128)).ok_or_else(bound)
+        })?;
         let allocation = self
             .session
             .reserve_retained(bytes)?
             .into_owned(&self.session)?;
         Ok(OwnedProvenance {
             value: self.provenance.clone(),
+            session: self.session.clone(),
+            dependencies: self.dependencies.clone(),
             _allocation: allocation,
         })
     }
@@ -243,6 +265,7 @@ mod tests {
             .unwrap();
         lifetime.settle().unwrap();
         let result = ResultOwner {
+            schema: None,
             dependencies: vec![],
             batches: vec![],
             columns: vec![],
@@ -314,5 +337,16 @@ mod tests {
     #[test]
     fn non_finite_is_not_silently_null() {
         assert!(value(&Float32Array::from(vec![f32::INFINITY]), 0, &mut 100, 0).is_err());
+    }
+}
+
+// Integrate into engine/result.rs. Do not duplicate its already-present value().
+// Same-session identity and dependencies remain privately Engine-constructed.
+impl OwnedProvenance {
+    pub(crate) fn belongs_to(&self, session: &std::sync::Arc<crate::resource::Budget>) -> bool {
+        std::sync::Arc::ptr_eq(&self.session, session)
+    }
+    pub(crate) fn dependencies(&self) -> &[String] {
+        &self.dependencies
     }
 }

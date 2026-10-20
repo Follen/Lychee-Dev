@@ -83,7 +83,7 @@ fn invocation(fx: &Fixture, sql: &str, ids: &[String]) -> Invocation {
     fx.invocation("data sql", &[("--file", file.to_str().unwrap())])
 }
 fn query(fx: &Fixture, sql: &str, ids: &[String]) -> Outcome {
-    lycheedev_data::dispatch(&invocation(fx, sql, ids)).unwrap()
+    lycheedev_data::migration_oracle::dispatch(&invocation(fx, sql, ids)).unwrap()
 }
 fn rows(out: &Outcome) -> &Value {
     &out.data["result"]["rows"]
@@ -325,13 +325,13 @@ fn go_effective_rejects_missing_duplicate_incomplete_wrong_kind_and_pin() {
     ];
     for ids in ids {
         let error =
-            lycheedev_data::dispatch(&invocation(&fx, "SELECT ID FROM effective.Sample", &ids))
+            lycheedev_data::migration_oracle::dispatch(&invocation(&fx, "SELECT ID FROM effective.Sample", &ids))
                 .err()
                 .unwrap();
         assert_eq!(error.code, "records.hotfix_identity", "{ids:?}: {error:?}");
     }
     assert!(
-        lycheedev_data::dispatch(&invocation(
+        lycheedev_data::migration_oracle::dispatch(&invocation(
             &fx,
             "SELECT ID FROM effective.Sample",
             &["CAP-absent".into()]
@@ -364,7 +364,7 @@ fn go_effective_rejects_bad_status_payload_build_framing_and_blob_integrity() {
     ] {
         let id = source(&fx, &raw);
         let error =
-            lycheedev_data::dispatch(&invocation(&fx, "SELECT ID FROM effective.Sample", &[id]))
+            lycheedev_data::migration_oracle::dispatch(&invocation(&fx, "SELECT ID FROM effective.Sample", &[id]))
                 .err()
                 .unwrap();
         assert_eq!(error.code, code);
@@ -379,7 +379,7 @@ fn go_effective_rejects_bad_status_payload_build_framing_and_blob_integrity() {
     )
     .unwrap();
     assert!(
-        lycheedev_data::dispatch(&invocation(&fx, "SELECT ID FROM effective.Sample", &[id]))
+        lycheedev_data::migration_oracle::dispatch(&invocation(&fx, "SELECT ID FROM effective.Sample", &[id]))
             .is_err()
     );
 }
@@ -428,7 +428,7 @@ fn go_sql_request_admission_and_cancel_precede_workspace_io() {
             inv.flags.insert("--param".into(), param.into());
         }
         assert_eq!(
-            lycheedev_data::dispatch(&inv).err().unwrap().code,
+            lycheedev_data::migration_oracle::dispatch(&inv).err().unwrap().code,
             "query.unresolved_binding"
         );
         assert!(!inv.home.exists());
@@ -443,12 +443,12 @@ fn go_sql_request_admission_and_cancel_precede_workspace_io() {
         Arc::new(AtomicBool::new(true)),
     );
     assert_eq!(
-        lycheedev_data::dispatch(&inv).err().unwrap().code,
+        lycheedev_data::migration_oracle::dispatch(&inv).err().unwrap().code,
         "command.cancelled"
     );
     inv.control = OperationControl::uncancelable(Instant::now() - Duration::from_millis(1));
     assert_eq!(
-        lycheedev_data::dispatch(&inv).err().unwrap().code,
+        lycheedev_data::migration_oracle::dispatch(&inv).err().unwrap().code,
         "command.deadline"
     );
 }
@@ -458,7 +458,7 @@ fn go_sql_json_document_parameter_tokens_and_param_conflict() {
     let file = fx.root.join("parameters.JSON");
     fs::write(&file,br#"{"sql":"SELECT :big,:max,:exponent,ID FROM Sample WHERE ID=:id","parameters":{"id":1,"big":9007199254740993,"max":18446744073709551615,"exponent":1e2}}"#).unwrap();
     let mut inv = fx.invocation("data sql", &[("--file", file.to_str().unwrap())]);
-    let out = lycheedev_data::dispatch(&inv).unwrap();
+    let out = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(
         *rows(&out),
         json!([[9007199254740993u64, u64::MAX, 100.0, 1]])
@@ -479,7 +479,7 @@ fn go_sql_json_document_parameter_tokens_and_param_conflict() {
     verify_capture(&fx, &out);
     inv.flags.insert("--param".into(), "id=1".into());
     assert_eq!(
-        lycheedev_data::dispatch(&inv).err().unwrap().code,
+        lycheedev_data::migration_oracle::dispatch(&inv).err().unwrap().code,
         "command.invalid_arguments"
     );
 }
@@ -490,7 +490,7 @@ fn go_sql_public_numbers_keep_original_parameters_and_typed_result_floats() {
     let file = fx.root.join("original-numbers.json");
     fs::write(&file, br#"{"sql":"SELECT :zero,:small,Value/Value FROM Sample WHERE ID=1","parameters":{"zero":-0,"small":1E-07}}"#).unwrap();
     let out =
-        lycheedev_data::dispatch(&fx.invocation("data sql", &[("--file", file.to_str().unwrap())]))
+        lycheedev_data::migration_oracle::dispatch(&fx.invocation("data sql", &[("--file", file.to_str().unwrap())]))
             .unwrap();
     let mut encoded = Vec::new();
     lycheedev_core::public_json::write_line(&mut encoded, &out.data, &out.public_numbers).unwrap();
@@ -521,7 +521,7 @@ fn go_effective_failure_publishes_no_query_capture_and_next_query_recovers() {
         .unwrap()
         .len();
     assert_eq!(
-        lycheedev_data::dispatch(&invocation(&fx, "SELECT ID FROM effective.Sample", &[bad]))
+        lycheedev_data::migration_oracle::dispatch(&invocation(&fx, "SELECT ID FROM effective.Sample", &[bad]))
             .err()
             .unwrap()
             .code,
@@ -588,7 +588,7 @@ fn go_effective_large_capture_metadata_admits_shared_sources_before_projection()
         &ids,
     );
     assert_eq!(
-        lycheedev_data::dispatch(&inv).unwrap_err().code,
+        lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code,
         "query.budget_exceeded"
     );
     assert_eq!(

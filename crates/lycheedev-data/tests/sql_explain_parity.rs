@@ -29,7 +29,7 @@ fn count(fx: &Fixture) -> usize {
         .len()
 }
 fn run(fx: &Fixture, sql: &str) -> lycheedev_core::Result<Outcome> {
-    lycheedev_data::dispatch(&fx.invocation("data sql", &[("--sql", sql)]))
+    lycheedev_data::migration_oracle::dispatch(&fx.invocation("data sql", &[("--sql", sql)]))
 }
 fn verify(fx: &Fixture, out: &Outcome) {
     assert_eq!(out.provenance.len(), 1);
@@ -102,7 +102,7 @@ fn explain_failure_is_no_capture_and_analyze_commits_real_measurements() {
 fn explain_csv_publishes_one_newline_null_columns_and_two_captures() {
     let fx = fixture(true);
     let path = fx.root.join("explain.csv");
-    let out = lycheedev_data::dispatch(&fx.invocation(
+    let out = lycheedev_data::migration_oracle::dispatch(&fx.invocation(
         "data sql",
         &[
             ("--sql", "EXPLAIN SELECT ID,Name FROM Sample"),
@@ -148,7 +148,7 @@ fn explain_csv_conflict_preserves_pair_but_retains_successful_query_capture() {
     fs::write(&path, b"old").unwrap();
     fs::write(&sidecar, b"manifest").unwrap();
     let before = count(&fx);
-    let error = lycheedev_data::dispatch(&fx.invocation(
+    let error = lycheedev_data::migration_oracle::dispatch(&fx.invocation(
         "data sql",
         &[
             ("--sql", "EXPLAIN SELECT ID FROM Sample"),

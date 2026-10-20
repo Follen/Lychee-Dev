@@ -21,9 +21,11 @@ mod source_freshness_tests;
 #[path = "db2/reader_limits_tests.rs"]
 mod reader_limits_tests;
 
+#[cfg(any(test, feature = "migration-oracle"))]
 pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
     dispatch_after_read(inv, &mut || Ok(()))
 }
+#[cfg(any(test, feature = "migration-oracle"))]
 pub(crate) fn dispatch_after_read(
     inv: &Invocation,
     after_read: &mut impl FnMut() -> Result<()>,
@@ -31,6 +33,7 @@ pub(crate) fn dispatch_after_read(
     dispatch_finishing(inv, after_read, |scope, result| scope.finish(result))
 }
 // Tests may observe the real consuming finish without replacing IO or capture.
+#[cfg(any(test, feature = "migration-oracle"))]
 pub(crate) fn dispatch_finishing(
     inv: &Invocation,
     after_read: &mut impl FnMut() -> Result<()>,

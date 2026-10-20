@@ -2,7 +2,7 @@
 //! authenticated immutable snapshots; an overlay never changes a static table.
 use super::*;
 use crate::hotfix::{self, CacheEntry};
-use crate::resource::RetainedReservation;
+use crate::resource::{OwnedRetainedReservation, RetainedReservation};
 use relational::{EqualityCursor, RowCursor};
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -575,6 +575,182 @@ struct AugmentedRow<'query> {
     _allocation: RetainedReservation<'query>,
 }
 
+struct OwnedAugmentedRow {
+    cells: Vec<relational::Scalar>,
+    _allocation: OwnedRetainedReservation,
+}
+impl AugmentedRow<'_> {
+    fn into_owned(self, budget: &Arc<Budget>) -> Result<OwnedAugmentedRow> {
+        Ok(OwnedAugmentedRow {
+            cells: self.cells,
+            _allocation: self._allocation.into_owned(budget)?,
+        })
+    }
+}
+enum OwnedOverlayMode {
+    Merge { last_patch_id: Option<u32> },
+    EqualPatch { pending: Option<u32> },
+    EqualBase,
+}
+/// Globally ascending physical IDs, merged without retaining visited-ID sets
+/// or decoding a base lookahead. The plan was fully authenticated/prepared
+/// before this cursor exists and never borrows Snapshots or Invocation.
+pub(crate) struct OwnedOverlayCursor {
+    current: Option<OwnedAugmentedRow>,
+    current_id: Option<u32>,
+    // Keep a visited base row's original lease through its augmented consumer.
+    base: Option<provider::OwnedPhysicalCursor>,
+    plan: Arc<OverlayPlan>,
+    budget: Arc<Budget>,
+    mode: OwnedOverlayMode,
+    done: bool,
+    _allocation: OwnedRetainedReservation,
+}
+impl OwnedOverlayCursor {
+    /// Original base locator or selected patch key, never a public SQL scalar.
+    pub(crate) fn current_id(&self) -> Option<u32> {
+        self.current_id
+    }
+    fn next_patch_id(&self) -> Option<u32> {
+        use std::ops::Bound::{Excluded, Unbounded};
+        let OwnedOverlayMode::Merge { last_patch_id } = self.mode else {
+            return None;
+        };
+        self.plan
+            .patches
+            .range((last_patch_id.map_or(Unbounded, Excluded), Unbounded))
+            .next()
+            .map(|(&id, _)| id)
+    }
+    fn patch_row(&mut self, id: u32) -> Result<bool> {
+        let patch = self.plan.patches.get(&id).ok_or_else(fields)?;
+        let Some(values) = &patch.values else {
+            return Ok(false);
+        };
+        self.current = Some(
+            self.plan
+                .augment(values, Some(patch), &self.budget)?
+                .into_owned(&self.budget)?,
+        );
+        self.current_id = Some(id);
+        Ok(true)
+    }
+    fn advance_inner(&mut self) -> Result<bool> {
+        match &mut self.mode {
+            OwnedOverlayMode::EqualPatch { pending } => {
+                let id = pending.take();
+                self.done = true;
+                return id.map_or(Ok(false), |id| self.patch_row(id));
+            }
+            OwnedOverlayMode::EqualBase => {
+                self.done = true;
+                let Some(base) = &mut self.base else {
+                    return Ok(false);
+                };
+                if !base.advance()? {
+                    return Ok(false);
+                }
+                let id = base.current_id().ok_or_else(fields)?;
+                self.current = Some(
+                    self.plan
+                        .augment(base.row(), None, &self.budget)?
+                        .into_owned(&self.budget)?,
+                );
+                self.current_id = Some(id);
+                return Ok(true);
+            }
+            OwnedOverlayMode::Merge { .. } => {}
+        }
+        loop {
+            self.budget.check()?;
+            let base_id = self
+                .base
+                .as_ref()
+                .and_then(provider::OwnedPhysicalCursor::peek_id);
+            // Finish the base's terminal check without decoding any further row.
+            if base_id.is_none()
+                && let Some(base) = &mut self.base
+            {
+                if base.advance()? {
+                    return Err(fields());
+                }
+                self.base = None;
+            }
+            let patch_id = self.next_patch_id();
+            match (base_id, patch_id) {
+                (None, None) => {
+                    self.done = true;
+                    return Ok(false);
+                }
+                (None, Some(id)) | (Some(_), Some(id))
+                    if base_id.is_none_or(|base_id| id < base_id) =>
+                {
+                    self.mode = OwnedOverlayMode::Merge {
+                        last_patch_id: Some(id),
+                    };
+                    if self.patch_row(id)? {
+                        return Ok(true);
+                    }
+                }
+                (Some(id), patch_id) => {
+                    let base = self.base.as_mut().ok_or_else(fields)?;
+                    if !base.advance()? {
+                        return Err(fields());
+                    }
+                    // Replacement/deletion never suppresses malformed visited
+                    // base fields. This is intentionally unlike point equality.
+                    let row = base.row();
+                    if base.current_id() != Some(id) {
+                        return Err(fields());
+                    }
+                    if patch_id == Some(id) {
+                        self.mode = OwnedOverlayMode::Merge {
+                            last_patch_id: Some(id),
+                        };
+                        if self.patch_row(id)? {
+                            return Ok(true);
+                        }
+                        self.base.as_mut().ok_or_else(fields)?.clear_row();
+                    } else {
+                        self.current = Some(
+                            self.plan
+                                .augment(row, None, &self.budget)?
+                                .into_owned(&self.budget)?,
+                        );
+                        self.current_id = Some(id);
+                        return Ok(true);
+                    }
+                }
+                (None, Some(_)) => unreachable!("patch-only branch handled above"),
+            }
+        }
+    }
+}
+impl RowCursor for OwnedOverlayCursor {
+    fn advance(&mut self) -> Result<bool> {
+        self.current = None;
+        self.current_id = None;
+        if let Some(base) = &mut self.base {
+            base.clear_row();
+        }
+        if self.done {
+            self.base = None;
+            return Ok(false);
+        }
+        let result = self.advance_inner();
+        if result.is_err() {
+            self.done = true;
+            self.base = None;
+        }
+        result
+    }
+    fn row(&self) -> &[relational::Scalar] {
+        self.current
+            .as_ref()
+            .map_or(&[], |row| row.cells.as_slice())
+    }
+}
+
 struct OverlayScanCursor<'query> {
     current: Option<AugmentedRow<'query>>,
     // The base remains on its current row while the augmented row is consumed.
@@ -701,6 +877,122 @@ impl RowCursor for OverlayEqualCursor<'_> {
 }
 
 impl OverlayPlan {
+    fn owned_with_mode(
+        self: &Arc<Self>,
+        base: Option<provider::OwnedPhysicalCursor>,
+        budget: Arc<Budget>,
+        mode: OwnedOverlayMode,
+    ) -> Result<OwnedOverlayCursor> {
+        let allocation = budget
+            .reserve_retained(size_of::<OwnedOverlayCursor>())?
+            .into_owned(&budget)?;
+        Ok(OwnedOverlayCursor {
+            current: None,
+            current_id: None,
+            base,
+            plan: self.clone(),
+            budget,
+            mode,
+            done: false,
+            _allocation: allocation,
+        })
+    }
+    pub(crate) fn owned_cursor(
+        self: &Arc<Self>,
+        base: Arc<provider::Physical<'static>>,
+        budget: Arc<Budget>,
+    ) -> Result<OwnedOverlayCursor> {
+        if !base.uses_budget(&budget) {
+            return Err(fault(
+                "records.internal",
+                8,
+                "Overlay budget differs from its source",
+            ));
+        }
+        self.owned_with_mode(
+            Some(base.owned_cursor()?),
+            budget,
+            OwnedOverlayMode::Merge {
+                last_patch_id: None,
+            },
+        )
+    }
+    /// Physical-ID lookup preserves patch-first semantics without consulting
+    /// the SQL-visible identity column or synthesizing a Scalar from the key.
+    pub(crate) fn owned_id_cursor(
+        self: &Arc<Self>,
+        base: Arc<provider::Physical<'static>>,
+        budget: Arc<Budget>,
+        id: u32,
+    ) -> Result<provider::OwnedEquality<OwnedOverlayCursor>> {
+        use provider::OwnedEquality;
+        if !base.uses_budget(&budget) {
+            return Err(fault(
+                "records.internal",
+                8,
+                "Overlay budget differs from its source",
+            ));
+        }
+        if let Some(patch) = self.patches.get(&id) {
+            if patch.values.is_none() {
+                return Ok(OwnedEquality::Empty);
+            }
+            return self
+                .owned_with_mode(
+                    None,
+                    budget,
+                    OwnedOverlayMode::EqualPatch { pending: Some(id) },
+                )
+                .map(OwnedEquality::Rows);
+        }
+        self.owned_with_mode(
+            Some(base.owned_id_cursor(id)?),
+            budget,
+            OwnedOverlayMode::EqualBase,
+        )
+        .map(OwnedEquality::Rows)
+    }
+    pub(crate) fn owned_equal_cursor(
+        self: &Arc<Self>,
+        base: Arc<provider::Physical<'static>>,
+        budget: Arc<Budget>,
+        column: &str,
+        value: &relational::Scalar,
+    ) -> Result<provider::OwnedEquality<OwnedOverlayCursor>> {
+        use provider::OwnedEquality;
+        if !crate::hotfix::remote::equal_fold(column, &self.schema.columns[self.identity_index]) {
+            return Ok(OwnedEquality::Declined);
+        }
+        if !base.uses_budget(&budget) {
+            return Err(fault(
+                "records.internal",
+                8,
+                "Overlay budget differs from its source",
+            ));
+        }
+        if let Ok(id) = row_id(value)
+            && let Some(patch) = self.patches.get(&id)
+        {
+            if patch.values.is_none() {
+                return Ok(OwnedEquality::Empty);
+            }
+            return self
+                .owned_with_mode(
+                    None,
+                    budget,
+                    OwnedOverlayMode::EqualPatch { pending: Some(id) },
+                )
+                .map(OwnedEquality::Rows);
+        }
+        match base.owned_equal_cursor(column, value)? {
+            OwnedEquality::Declined => Ok(OwnedEquality::Declined),
+            OwnedEquality::Empty => Ok(OwnedEquality::Empty),
+            OwnedEquality::Rows(base) => self
+                .owned_with_mode(Some(base), budget, OwnedOverlayMode::EqualBase)
+                .map(OwnedEquality::Rows),
+        }
+    }
+
     pub(crate) fn patch_count(&self) -> usize {
         self.patches.len()
     }
@@ -1497,3 +1789,17 @@ mod tests {
 #[cfg(test)]
 #[path = "effective_provider_tests.rs"]
 mod provider_tests;
+
+#[cfg(test)]
+#[path = "owned_overlay_tests.rs"]
+mod owned_overlay_tests;
+
+impl OverlayPlan {
+    pub(crate) fn update_physical_ids(&self, ids: &mut BTreeSet<u32>, budget: &Budget) -> Result<()> {
+        for (&id, patch) in &self.patches {
+            budget.charge(crate::resource::Cost::work(1))?;
+            if patch.values.is_some() { ids.insert(id); } else { ids.remove(&id); }
+        }
+        Ok(())
+    }
+}

@@ -50,7 +50,7 @@ fn tables() -> Vec<Table> {
     ]
 }
 fn run(fx: &Fixture, command: &str, flags: &[(&str, &str)]) -> lycheedev_core::Outcome {
-    let outcome = lycheedev_data::dispatch(&fx.invocation(command, flags)).unwrap();
+    let outcome = lycheedev_data::migration_oracle::dispatch(&fx.invocation(command, flags)).unwrap();
     fx.verify(&outcome);
     outcome
 }
@@ -152,7 +152,7 @@ fn missing_relation_is_partial_but_missing_display_is_an_error() {
         vec![("--file-data-id", "999")],
     ] {
         let e =
-            lycheedev_data::dispatch(&fx.invocation("data creature display", &flags)).unwrap_err();
+            lycheedev_data::migration_oracle::dispatch(&fx.invocation("data creature display", &flags)).unwrap_err();
         assert_eq!(
             (e.code.as_str(), e.exit_code),
             ("records.record_not_found", 3)
@@ -168,13 +168,13 @@ fn conflicting_empty_keys_and_cancellation_do_not_create_results() {
         vec![("--display-id", "10"), ("--file-data-id", "500")],
     ] {
         let e =
-            lycheedev_data::dispatch(&fx.invocation("data creature display", &flags)).unwrap_err();
+            lycheedev_data::migration_oracle::dispatch(&fx.invocation("data creature display", &flags)).unwrap_err();
         assert_eq!(
             (e.code.as_str(), e.exit_code),
             ("records.request_conflict", 2)
         );
     }
-    let e = lycheedev_data::dispatch(&fx.invocation("data creature model", &[])).unwrap_err();
+    let e = lycheedev_data::migration_oracle::dispatch(&fx.invocation("data creature model", &[])).unwrap_err();
     assert_eq!(
         (e.code.as_str(), e.exit_code, e.message.as_str()),
         (
@@ -184,7 +184,7 @@ fn conflicting_empty_keys_and_cancellation_do_not_create_results() {
         )
     );
     let e =
-        lycheedev_data::dispatch(&fx.invocation("data creature model", &[("--file-data-id", "0")]))
+        lycheedev_data::migration_oracle::dispatch(&fx.invocation("data creature model", &[("--file-data-id", "0")]))
             .unwrap_err();
     assert_eq!(
         (e.code.as_str(), e.exit_code),
@@ -195,7 +195,7 @@ fn conflicting_empty_keys_and_cancellation_do_not_create_results() {
         std::time::Instant::now() + std::time::Duration::from_secs(5),
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
     );
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().exit_code, 7);
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().exit_code, 7);
     assert_eq!(
         lycheedev_core::metadata::Metadata::open(&fx.home, false)
             .unwrap()
@@ -246,7 +246,7 @@ fn large_model_capture_limit_reports_frozen_go_budget_error_without_commit() {
             &[],
         ),
     ]);
-    let e = lycheedev_data::dispatch(
+    let e = lycheedev_data::migration_oracle::dispatch(
         &fx.invocation("data creature model", &[("--file-data-id", "3444444444")]),
     )
     .unwrap_err();
@@ -679,7 +679,7 @@ fn captures(fx: &Fixture) -> usize {
 fn first_model_without_displays_does_not_fall_back_but_model_lists_later_candidates() {
     let fx = Fixture::new(&variant("firstModelNoDisplays"));
     assert_eq!(
-        lycheedev_data::dispatch(
+        lycheedev_data::migration_oracle::dispatch(
             &fx.invocation("data creature display", &[("--file-data-id", "500")])
         )
         .unwrap_err()
@@ -744,7 +744,7 @@ fn exact_match_fields_reject_missing_or_float_types_without_capture() {
             } else {
                 "500"
             };
-            let error = lycheedev_data::dispatch(
+            let error = lycheedev_data::migration_oracle::dispatch(
                 &fx.invocation("data creature display", &[(selector, value)]),
             )
             .unwrap_err();
@@ -760,7 +760,7 @@ fn full_scans_decode_corrupt_nonmatching_rows_but_unreached_scans_do_not() {
         let fx = Fixture::new(&variant(name));
         for command in ["data creature display", "data creature model"] {
             assert_eq!(
-                lycheedev_data::dispatch(&fx.invocation(command, &[("--file-data-id", "500")]))
+                lycheedev_data::migration_oracle::dispatch(&fx.invocation(command, &[("--file-data-id", "500")]))
                     .unwrap_err()
                     .code,
                 "table.invalid_format"
@@ -771,7 +771,7 @@ fn full_scans_decode_corrupt_nonmatching_rows_but_unreached_scans_do_not() {
     }
     let fx = Fixture::new(&variant("invalidNonmatchingGeoset"));
     assert_eq!(
-        lycheedev_data::dispatch(
+        lycheedev_data::migration_oracle::dispatch(
             &fx.invocation("data creature display", &[("--display-id", "10")])
         )
         .unwrap_err()
@@ -779,7 +779,7 @@ fn full_scans_decode_corrupt_nonmatching_rows_but_unreached_scans_do_not() {
         "table.invalid_format"
     );
     assert_eq!(
-        lycheedev_data::dispatch(
+        lycheedev_data::migration_oracle::dispatch(
             &fx.invocation("data creature model", &[("--file-data-id", "500")])
         )
         .unwrap_err()
@@ -798,7 +798,7 @@ fn three_tables_remain_required_before_empty_or_missing_selection() {
             ("data creature display", "--file-data-id", "999"),
             ("data creature model", "--file-data-id", "999"),
         ] {
-            assert!(lycheedev_data::dispatch(&fx.invocation(command, &[(flag, value)])).is_err());
+            assert!(lycheedev_data::migration_oracle::dispatch(&fx.invocation(command, &[(flag, value)])).is_err());
         }
         assert_eq!(captures(&fx), 0);
     }
@@ -815,7 +815,7 @@ fn first_invalid_table_precedes_a_later_missing_required_table() {
         ("data creature model", "--file-data-id", "500"),
     ] {
         assert_eq!(
-            lycheedev_data::dispatch(&fx.invocation(command, &[(flag, value)]))
+            lycheedev_data::migration_oracle::dispatch(&fx.invocation(command, &[(flag, value)]))
                 .unwrap_err()
                 .code,
             "table.invalid_format"
@@ -907,13 +907,13 @@ fn cold_and_warm_three_table_requests_share_authentication_and_preserve_control(
     inv.control
         .cancel_handle()
         .store(true, std::sync::atomic::Ordering::Release);
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().exit_code, 7);
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().exit_code, 7);
     inv.control = lycheedev_core::control::OperationControl::new(
         std::time::Instant::now(),
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     );
     assert_eq!(
-        lycheedev_data::dispatch(&inv).unwrap_err().code,
+        lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code,
         "command.deadline"
     );
     assert_eq!(captures(&fx), before);

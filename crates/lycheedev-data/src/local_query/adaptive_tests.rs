@@ -278,7 +278,7 @@ fn default_local_db2_memory_is_only_on_data_context_profiles() {
             vec![("--field", "ID"), ("--value", "7"), ("--limit", "1")],
         ),
     ] {
-        let out = crate::dispatch(&db2_inv(&fx, command, &flags)).unwrap();
+        let out = crate::migration_oracle::dispatch(&db2_inv(&fx, command, &flags)).unwrap();
         if command == "data db2" {
             assert!(out.data.get("memoryBudget").is_none());
         } else {
@@ -300,7 +300,7 @@ fn default_local_record_and_navigator_preserve_opposite_pin_admission_order() {
         .flags
         .insert("--snapshot".into(), format!("PIN-{}", "0".repeat(64)));
     assert_eq!(
-        crate::dispatch(&record).unwrap_err().code,
+        crate::migration_oracle::dispatch(&record).unwrap_err().code,
         "vault.record_missing"
     );
     let mut schema = db2_inv(&fx, "data db2 schema", &[]);
@@ -309,13 +309,13 @@ fn default_local_record_and_navigator_preserve_opposite_pin_admission_order() {
         .insert("--snapshot".into(), format!("PIN-{}", "0".repeat(64)));
     schema.control = OperationControl::uncancelable(Instant::now() + Duration::from_millis(50));
     assert_eq!(
-        crate::dispatch(&schema).unwrap_err().code,
+        crate::migration_oracle::dispatch(&schema).unwrap_err().code,
         "command.deadline"
     );
     holder.close().unwrap();
     schema.control = OperationControl::default();
     assert_eq!(
-        crate::dispatch(&schema).unwrap_err().code,
+        crate::migration_oracle::dispatch(&schema).unwrap_err().code,
         "vault.record_missing"
     );
     assert_eq!(captures(&fx), 0);

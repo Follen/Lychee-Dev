@@ -95,7 +95,7 @@ fn image_export_preserves_all_formats_channels_pixels_and_three_capture_chain() 
                 let id = item.id.to_string(); let mip = mip.to_string();
                 let inv = fixture.invocation("asset export", &[("--file-id", &id), ("--encoding", encoding),
                     ("--mipmap", &mip), ("--channels", channels), ("--output", output.to_str().unwrap())]);
-                let found = lycheedev_data::dispatch(&inv).unwrap();
+                let found = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
                 let raw = fs::read(&output).unwrap();
                 let (width, height, pixels) = decoded(encoding, &raw);
                 assert_eq!((width, height), (expected.description.width, expected.description.height));
@@ -133,7 +133,7 @@ fn image_export_faults_and_overwrite_keep_existing_destinations_intact() {
         let output = fixture.root.join(format!("failed-{file}-{value}.png"));
         let inv = fixture.invocation("asset export", &[("--file-id", file), ("--encoding", "png"),
             (flag, value), ("--output", output.to_str().unwrap())]);
-        assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().code, expected);
+        assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code, expected);
         assert!(!output.exists());
     }
     let captures = Metadata::open(&fixture.home, false).unwrap().list::<Value>("capture/", 100).unwrap();
@@ -143,14 +143,14 @@ fn image_export_faults_and_overwrite_keep_existing_destinations_intact() {
     fs::write(&output, b"old bytes").unwrap(); fs::hard_link(&output, &alias).unwrap();
     let mut inv = fixture.invocation("asset export", &[("--file-id", "501"), ("--encoding", "webp"),
         ("--output", output.to_str().unwrap())]);
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().code, "records.export_conflict");
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code, "records.export_conflict");
     inv.flags.insert("--overwrite".into(), "true".into());
-    lycheedev_data::dispatch(&inv).unwrap();
+    lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(fs::read(&alias).unwrap(), b"old bytes");
     let current = fs::read(&output).unwrap();
     assert_eq!(decoded("webp", &current).0, 2);
     inv.control.cancel_handle().store(true, Ordering::Release);
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().exit_code, 7);
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().exit_code, 7);
     assert_eq!(fs::read(output).unwrap(), current);
 }
 
@@ -243,7 +243,7 @@ fn large_image_export_uses_default_verified_decode_and_preserves_every_pixel() {
             let output = fixture.root.join(format!("large-{}.{encoding}", item.id));
             let id = item.id.to_string();
             let inv = fixture.invocation("asset export", &[("--file-id", &id), ("--encoding", encoding), ("--output", output.to_str().unwrap())]);
-            let result = lycheedev_data::dispatch(&inv).unwrap();
+            let result = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
             let raw = fs::read(&output).unwrap();
             let (actual_width, actual_height, pixels) = decoded(encoding, &raw);
             assert_eq!((actual_width, actual_height), (width, height));

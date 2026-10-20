@@ -23,7 +23,7 @@ fn report(value: &Value) {
 fn default_remote_navigation_shares_one_context_across_real_tables() {
     let f = NavFixture::new(&catalog_fixture::items());
     let inv = f.invocation("data item get", &[("--item-id", "7")]);
-    let out = crate::dispatch(&inv).unwrap();
+    let out = crate::migration_oracle::dispatch(&inv).unwrap();
     report(&out.data);
     assert_eq!(out.data["tables"].as_array().unwrap().len(), 2);
     for table in out.data["tables"].as_array().unwrap() {
@@ -70,7 +70,7 @@ fn default_remote_encounter_memory_belongs_to_context_not_relation_manifest() {
         ]],
     )]);
     let out =
-        crate::dispatch(&f.invocation("data encounter get", &[("--journal-encounter-id", "132")]))
+        crate::migration_oracle::dispatch(&f.invocation("data encounter get", &[("--journal-encounter-id", "132")]))
             .unwrap();
     assert_eq!(out.provenance.len(), 2);
     report(&out.data);

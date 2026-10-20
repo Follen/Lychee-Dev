@@ -4,7 +4,7 @@ use crate::{
     fault,
     resource::{Budget, Cost, OwnedRetainedReservation},
     schema,
-    table::{self, LeasedRow, Table},
+    table::{self, OwnedLeasedRow, Table},
 };
 use arrow_array::{
     ArrayRef, RecordBatch, UInt32Array,
@@ -316,9 +316,19 @@ impl Builder {
     }
 }
 
+enum ImportTable<'table, 'body> {
+    Borrowed(&'table Table<'body>),
+    Owned(Arc<Table<'body>>),
+}
+impl<'body> std::ops::Deref for ImportTable<'_, 'body> {
+    type Target = Table<'body>;
+    fn deref(&self) -> &Self::Target {
+        match self { Self::Borrowed(table) => table, Self::Owned(table) => table }
+    }
+}
 pub(crate) struct TableImporter<'table, 'body> {
-    table: &'table Table<'body>,
-    selected_ids: Option<&'table [u32]>,
+    table: ImportTable<'table, 'body>,
+    selected_ids: Option<std::borrow::Cow<'table, [u32]>>,
     schema: Arc<ImportedSchema>,
     columns: Vec<Column>,
     budget: Arc<Budget>,
@@ -326,7 +336,7 @@ pub(crate) struct TableImporter<'table, 'body> {
     batch_reservation: usize,
     next: usize,
     batch_ordinal: usize,
-    pending: Option<(u32, LeasedRow<'table, Vec<table::Value>>, usize)>,
+    pending: Option<(u32, OwnedLeasedRow<Vec<table::Value>>, usize)>,
     stopped: bool,
 }
 // One canonical schema builder serves importer and existing-generation lookup.
@@ -369,6 +379,9 @@ impl<'table, 'body> TableImporter<'table, 'body> {
         budget: Arc<Budget>,
         limits: ImportLimits,
     ) -> Result<Self> {
+        Self::new_inner(ImportTable::Borrowed(table), budget, limits)
+    }
+    fn new_inner(table: ImportTable<'table, 'body>, budget: Arc<Budget>, limits: ImportLimits) -> Result<Self> {
         budget.check()?;
         let mut limits = limits.validate()?;
         let fields = table.columns();
@@ -415,7 +428,7 @@ impl<'table, 'body> TableImporter<'table, 'body> {
         {
             return Err(shape());
         }
-        self.selected_ids = Some(ids);
+        self.selected_ids = Some(std::borrow::Cow::Borrowed(ids));
         Ok(self)
     }
     /// Conservative bound reserved before constructing each batch, including
@@ -450,7 +463,7 @@ impl<'table, 'body> TableImporter<'table, 'body> {
         if self.pending.is_none()
             && self.next
                 == self
-                    .selected_ids
+                    .selected_ids.as_deref()
                     .map_or(self.table.logical_count(), <[u32]>::len)
         {
             return Ok(None);
@@ -469,7 +482,7 @@ impl<'table, 'body> TableImporter<'table, 'body> {
             let (id, row, row_bytes) = match self.pending.take() {
                 Some(row) => row,
                 None => {
-                    let id = if let Some(ids) = self.selected_ids {
+                    let id = if let Some(ids) = self.selected_ids.as_deref() {
                         let mut found = None;
                         while let Some(id) = ids.get(self.next) {
                             self.budget.charge(Cost::work(32))?;
@@ -490,7 +503,7 @@ impl<'table, 'body> TableImporter<'table, 'body> {
                         self.next += 1;
                         id
                     };
-                    let row = self.table.leased_row_values(id, self.limits.text_bytes)?;
+                    let row = self.table.leased_row_values(id, self.limits.text_bytes)?.into_owned(&self.budget)?;
                     if row.value().len() != self.columns.len() {
                         return Err(shape());
                     }
@@ -538,5 +551,23 @@ impl<'table, 'body> TableImporter<'table, 'body> {
             _schema_owner: self.schema.clone(),
             _allocation: allocation,
         }))
+    }
+}
+
+impl TableImporter<'static, 'static> {
+    pub(crate) fn new_owned(table: Arc<Table<'static>>, budget: Arc<Budget>, limits: ImportLimits) -> Result<Self> {
+        Self::new_inner(ImportTable::Owned(table), budget, limits)
+    }
+    pub(crate) fn select_ids_owned(mut self, ids: Vec<u32>) -> Result<Self> {
+        if self.next != 0 || self.batch_ordinal != 0 || ids.windows(2).any(|pair| pair[0] >= pair[1]) { return Err(shape()); }
+        self.selected_ids = Some(std::borrow::Cow::Owned(ids));
+        Ok(self)
+    }
+}
+impl ImportedBatch {
+    pub(crate) fn settle_retained(&mut self) -> Result<()> {
+        let bytes = plus(plus(self.records.get_array_memory_size(), self.record_ids.get_array_memory_size())?,
+            plus(4096, times(self.records.num_columns(), 2048)?)?)?;
+        self._allocation.shrink_to(bytes)
     }
 }

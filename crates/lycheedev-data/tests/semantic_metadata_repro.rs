@@ -36,7 +36,7 @@ fn cache(fx: &Fixture, suffix: &str, raw: &[u8]) -> Value {
 }
 
 fn query(fx: &Fixture, sql: &str) -> Outcome {
-    lycheedev_data::dispatch(&fx.invocation("data sql", &[("--sql", sql)])).unwrap()
+    lycheedev_data::migration_oracle::dispatch(&fx.invocation("data sql", &[("--sql", sql)])).unwrap()
 }
 
 fn verify(fx: &Fixture, out: &Outcome, name: &str, mapping: Value, definitions: Value) {

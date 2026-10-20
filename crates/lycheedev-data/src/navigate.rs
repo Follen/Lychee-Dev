@@ -1,6 +1,6 @@
 //! Domain navigation consumes the authenticated typed table provider. Matching
 //! is exact integer equality; presentation coercions preserve the Go contracts.
-mod catalog;
+pub(crate) mod catalog;
 use crate::{
     capture, db2, fault,
     resource::{Budget, Cost},
@@ -15,7 +15,7 @@ use std::{
 };
 
 const MAX_RELATED: usize = 65536;
-type Row = BTreeMap<String, table::Value>;
+pub(crate) type Row = BTreeMap<String, table::Value>;
 
 fn identifier(inv: &Invocation, flag: &str, optional: bool) -> Result<u32> {
     let Some(text) = inv.flag(flag) else {
@@ -137,9 +137,11 @@ impl SpellEffects {
     }
 }
 
+#[cfg(any(test, feature="migration-oracle"))]
 pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
     dispatch_after_read(inv, &mut || Ok(()))
 }
+#[cfg(any(test, feature="migration-oracle"))]
 pub(crate) fn dispatch_after_read(
     inv: &Invocation,
     after_read: &mut impl FnMut() -> Result<()>,
@@ -147,6 +149,7 @@ pub(crate) fn dispatch_after_read(
     dispatch_finishing(inv, after_read, |scope, result| scope.finish(result))
 }
 // Tests may observe the real consuming finish without replacing IO or capture.
+#[cfg(any(test, feature="migration-oracle"))]
 pub(crate) fn dispatch_finishing(
     inv: &Invocation,
     after_read: &mut impl FnMut() -> Result<()>,
@@ -424,3 +427,13 @@ mod tests {
 
 #[cfg(test)]
 mod partial_tests;
+
+/// Shared aura/summon presentation; reads are exclusively supplied by the caller.
+pub(crate) async fn effects_domain(access:&mut impl catalog::async_access::DomainAccess,spell:u32,npc:u32,summon:bool)->Result<Value> {
+    let (rows,extra)=access.scan("SpellEffect",Some(("SpellID",spell)),MAX_RELATED).await?;
+    let mut effects=SpellEffects::new(spell,npc,summon);
+    for (id,row) in rows { if !effects.accept(id,row,access.budget())? {break;} }
+    if extra||effects.truncated {access.mark_truncated("row_budget");}
+    for relation in &effects.relations { access.link("SpellEffect",relation["fromField"].as_str().unwrap_or(""),relation["fromID"].as_u64().unwrap_or(0) as u32,relation["toKind"].as_str().unwrap_or(""),relation["toID"].as_u64().unwrap_or(0),0)?; }
+    Ok(effects.result())
+}

@@ -1,3 +1,13 @@
+# Current and historical Source / Data evidence
+
+The `*-public.mjs` old Data SQL/DB2 differential tools and stream SDK differential
+are historical migration-oracle tools, not current Agent acceptance. They require
+`--historical-oracle-only`; selecting that mode does not qualify a current artifact
+or silently restore retired commands. Historical fixture/report bytes remain
+unchanged. The current paths are the owned Agent paired collectors, installed
+Skill Agent workflow, supervised pipe/deadline tools, and typed Engine/domain
+native declarations. All reconstructed-candidate execution remains NOT_RUN.
+
 # Source / Data migration fixtures
 
 `addon-closure` is an independently readable Lua 5.1 fixture for ordered TOC/XML

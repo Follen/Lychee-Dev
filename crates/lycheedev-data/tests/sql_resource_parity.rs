@@ -56,7 +56,7 @@ fn sixteen_mebibyte_comment_definitions_admit_with_exact_go_resources() {
         loaded += bytes;
         decode += bytes.div_ceil(65536);
     }
-    let out = lycheedev_data::dispatch(
+    let out = lycheedev_data::migration_oracle::dispatch(
         &fx.invocation("data sql", &[("--sql", "SELECT * FROM meta.Sample")]),
     )
     .unwrap();
@@ -101,7 +101,7 @@ fn projection_and_publication_do_not_change_same_source_logical_usage() {
         ),
     ] {
         let fx = fixture();
-        let out = lycheedev_data::dispatch(&fx.invocation("data sql", &[("--sql", sql)]))
+        let out = lycheedev_data::migration_oracle::dispatch(&fx.invocation("data sql", &[("--sql", sql)]))
             .unwrap_or_else(|error| panic!("{sql}: {error:?}"));
         assert_eq!(out.data["result"]["rows"], json!([expected_row]), "{sql}");
         let cache = out.data["sources"]
@@ -140,7 +140,7 @@ fn source_free_select_is_go_syntax_error_and_creates_no_capture() {
     };
     let before = captures();
     for sql in ["SELECT 1", "SELECT 1 + 2", "SELECT 'longer output string'"] {
-        let error = match lycheedev_data::dispatch(&fx.invocation("data sql", &[("--sql", sql)])) {
+        let error = match lycheedev_data::migration_oracle::dispatch(&fx.invocation("data sql", &[("--sql", sql)])) {
             Ok(_) => panic!("{sql}: Go requires FROM"),
             Err(error) => error,
         };
@@ -169,7 +169,7 @@ fn failed_sql_never_publishes_a_capture() {
         "SELECT missing FROM meta.Sample",
         "SELECT * FROM",
     ] {
-        assert!(lycheedev_data::dispatch(&fx.invocation("data sql", &[("--sql", sql)])).is_err());
+        assert!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data sql", &[("--sql", sql)])).is_err());
         assert_eq!(captures(), before);
     }
 }

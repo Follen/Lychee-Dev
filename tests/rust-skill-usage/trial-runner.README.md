@@ -1,3 +1,11 @@
+# Historical blind-trial protocol
+
+This fixed-product experiment is retained for its original commit only. It is
+not a current Agent trial, and its old SQL/DB2 allowlist must not be widened or
+its results relabeled. Current execution uses the new owned Agent consumer
+contracts; a new blind trial, if scheduled after unified validation, needs its
+own exact product/schema/identity and scoring plan.
+
 # One-shot independent-agent Skill trial
 
 This runner is test-only. It neither builds a product/exporter nor publishes,
@@ -43,7 +51,7 @@ identical for both conditions. Guide bytes are verified before and after use.
 
 From the fixed product root, start the newer runner by absolute path:
 
-    node <runner>/tools/rust-skill-trial.mjs start <artifact.json> <candidate-report.json> <sealed-exporter-receipt.json|-> <guide-directory> <catalog|partial|source>
+    node <runner>/tools/rust-skill-trial.mjs --historical-oracle-only start <artifact.json> <candidate-report.json> <sealed-exporter-receipt.json|-> <guide-directory> <catalog|partial|source>
 
 The command remains running under the existing outer owned Job. Its first line
 identifies `session` and `inputs` paths. Wait for session.json to appear before
@@ -57,9 +65,9 @@ Never reuse a home, session, or retired owner for another task/guide condition.
 
 Use a second coordinator process to submit exactly one outstanding request:
 
-    node <runner>/tools/rust-skill-trial.mjs call <session.json> 1 '["describe"]'
-    node <runner>/tools/rust-skill-trial.mjs call <session.json> 2 '<JSON argv array chosen by the independent agent>'
-    node <runner>/tools/rust-skill-trial.mjs finish <session.json> 3
+    node <runner>/tools/rust-skill-trial.mjs --historical-oracle-only call <session.json> 1 '["describe"]'
+    node <runner>/tools/rust-skill-trial.mjs --historical-oracle-only call <session.json> 2 '<JSON argv array chosen by the independent agent>'
+    node <runner>/tools/rust-skill-trial.mjs --historical-oracle-only finish <session.json> 3
 
 These are illustrative POSIX quoting examples; on Windows pass the JSON string
 as one argument using the invoking tool's argv support. No shell command is
@@ -75,7 +83,7 @@ rejection says `rejected`; it is never presented as actual CLI output.
 
 A bounded JSONL relay is also available:
 
-    node <runner>/tools/rust-skill-trial.mjs relay <session.json>
+    node <runner>/tools/rust-skill-trial.mjs --historical-oracle-only relay <session.json>
 
 Feed objects such as `{"op":"call","argv":["version"]}` or
 `{"op":"finish"}`. The relay assigns sequences and prints one response per line.
@@ -89,7 +97,7 @@ retains process custody and orphan handling. No heartbeat or daemon is added.
 For a partial task, supply the synthetic recovery key only after the independent
 agent asks for it. The coordinator records that request using:
 
-    node <runner>/tools/rust-skill-trial.mjs restore-key <session.json> <next-sequence> '<the agent request>'
+    node <runner>/tools/rust-skill-trial.mjs --historical-oracle-only restore-key <session.json> <next-sequence> '<the agent request>'
 
 This changes only that owner's sample.keys, once. It does not run a recovery
 query, remove previous captures, or imply recovery succeeded. No key is restored

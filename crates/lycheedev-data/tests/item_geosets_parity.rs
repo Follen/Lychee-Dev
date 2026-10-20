@@ -33,7 +33,7 @@ fn tables() -> Vec<Table> {
     ]
 }
 fn run(fx: &Fixture, item: &str) -> Outcome {
-    let out=lycheedev_data::dispatch(&fx.invocation("data item geosets",&[("--item-id",item)])).unwrap();
+    let out=lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item geosets",&[("--item-id",item)])).unwrap();
     fx.verify(&out);
     assert_eq!(out.provenance[0]["provenance"]["kind"],"item-geosets");
     assert_eq!(out.provenance[0]["provenance"]["locator"],format!("item:geosets:{item}"));
@@ -86,7 +86,7 @@ fn shared_appearance_choice_retains_ambiguity_missing_chain_and_empty_helmet_sem
     let absent=run(&fx,"6");assert!(absent.complete);assert_eq!(absent.data["displayID"],6000);
     assert_eq!(absent.data["helmetGeosetVis"],json!([99,0,99]));assert_eq!(absent.data["helmetHide"],json!([]));
     assert_eq!(absent.data["relations"].as_array().unwrap().len(),2);
-    let before=captures(&fx);let error=lycheedev_data::dispatch(&fx.invocation("data item geosets",&[("--item-id","999")])).unwrap_err();
+    let before=captures(&fx);let error=lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item geosets",&[("--item-id","999")])).unwrap_err();
     assert_eq!((error.code.as_str(),error.exit_code),("records.record_not_found",3));assert_eq!(captures(&fx),before);
 }
 
@@ -140,17 +140,17 @@ fn invalid_helmet_tables() -> Vec<Table> {
 #[test]
 fn required_fifth_table_and_full_scan_errors_preserve_order_and_no_capture() {
     let mut all=tables();all.truncate(1);all[0].raw.pop();let fx=Fixture::new(&all);
-    assert_eq!(lycheedev_data::dispatch(&fx.invocation("data item geosets",&[("--item-id","1")])).unwrap_err().code,"table.invalid_format");
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item geosets",&[("--item-id","1")])).unwrap_err().code,"table.invalid_format");
     assert_eq!(captures(&fx),0);
     let fx=Fixture::new(&tables()[..4]);
-    for item in ["1","4","999"] {assert!(lycheedev_data::dispatch(&fx.invocation("data item geosets",&[("--item-id",item)])).is_err());}
+    for item in ["1","4","999"] {assert!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item geosets",&[("--item-id",item)])).is_err());}
     assert_eq!(captures(&fx),0);
     let fx=Fixture::new(&invalid_helmet_tables());
-    assert_eq!(lycheedev_data::dispatch(&fx.invocation("data item geosets",&[("--item-id","1")])).unwrap_err().code,"table.invalid_format");
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item geosets",&[("--item-id","1")])).unwrap_err().code,"table.invalid_format");
     assert_eq!(captures(&fx),0);assert!(run(&fx,"4").complete,"no appearance does not scan helmet rows");
     let mut all=tables();all[4]=table("HelmetGeosetData",605,&[("ID","uint"),("HelmetGeosetVisDataID","text")],&[vec![U(1),Cell::Text("10".into())]]);
     let fx=Fixture::new(&all);
-    assert_eq!(lycheedev_data::dispatch(&fx.invocation("data item geosets",&[("--item-id","1")])).unwrap_err().code,"records.field_type_mismatch");
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item geosets",&[("--item-id","1")])).unwrap_err().code,"records.field_type_mismatch");
     assert_eq!(captures(&fx),0);
 }
 
@@ -164,17 +164,17 @@ fn five_table_authenticated_session_and_warm_read_keep_argument_and_control_fail
     let mut independent=0;
     for name in TABLES {
         let mut inv=fx.invocation("data db2 schema",&[]);inv.positional=Some((*name).into());
-        independent+=lycheedev_data::dispatch(&inv).unwrap().data["resources"]["metadataBytes"].as_u64().unwrap();
+        independent+=lycheedev_data::migration_oracle::dispatch(&inv).unwrap().data["resources"]["metadataBytes"].as_u64().unwrap();
     }
     assert!(warm.data["resources"]["metadataBytes"].as_u64().unwrap()<independent);
     let before=captures(&fx);
     for flags in [vec![],vec![("--item-id","0")],vec![("--item-id","-1")],vec![("--item-id","4294967296")]] {
-        assert_eq!(lycheedev_data::dispatch(&fx.invocation("data item geosets",&flags)).unwrap_err().exit_code,2);
+        assert_eq!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item geosets",&flags)).unwrap_err().exit_code,2);
     }
     let mut inv=fx.invocation("data item geosets",&[("--item-id","1")]);inv.control.cancel_handle().store(true,Ordering::Release);
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().exit_code,7);
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().exit_code,7);
     inv.control=OperationControl::new(Instant::now(),Arc::new(AtomicBool::new(false)));
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().code,"command.deadline");assert_eq!(captures(&fx),before);
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code,"command.deadline");assert_eq!(captures(&fx),before);
 }
 
 #[test]

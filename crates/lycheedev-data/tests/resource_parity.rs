@@ -97,7 +97,7 @@ fn public_handlers_observe_the_caller_token_before_any_input_access() {
             cwd: PathBuf::from("unopened-cwd"),
             control: control.clone(),
         };
-        let error = lycheedev_data::dispatch(&invocation).unwrap_err();
+        let error = lycheedev_data::migration_oracle::dispatch(&invocation).unwrap_err();
         assert_eq!(error.exit_code, 7);
         assert_eq!(error.code, "command.cancelled");
     }

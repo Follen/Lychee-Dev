@@ -22,6 +22,18 @@ pub(super) struct RequestLifetime {
     session: Mutex<OwnedRetainedReservation>,
 }
 impl SessionMemory {
+pub fn begin_bounded(&self, work:u64, control:OperationControl, max_bytes:usize)->Result<Arc<RequestLifetime>> {
+    control.check()?;
+    let used=usize::try_from(self.budget.snapshot()?.retained_bytes).map_err(|_|bound())?;
+    let available=self.limit.checked_sub(used).ok_or_else(bound)?;
+    let allowance=available.min(max_bytes);
+    if allowance==0 {return Err(bound());}
+    let reservation=self.budget.reserve_retained(allowance)?.into_owned(&self.budget)?;
+    let mut costs=Cost::defaults();costs.retained_bytes=allowance as u64;costs.decode_work=work;
+    let budget=Arc::new(Budget::controlled(costs,control.deadline(),control));
+    Ok(Arc::new(RequestLifetime{budget,session:Mutex::new(reservation)}))
+}
+
     pub fn new(limit: usize) -> Result<Self> {
         if limit == 0 || limit > 8usize << 30 {
             return Err(bound());
@@ -153,4 +165,11 @@ impl std::fmt::Debug for RequestLifetime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RequestLifetime").finish_non_exhaustive()
     }
+}
+
+/// Reconcile on every request exit, including errors with an already-installed
+/// source cache. It never runs an expired request's work/control again.
+pub(super) struct RequestExecution(pub Arc<RequestLifetime>);
+impl Drop for RequestExecution {
+    fn drop(&mut self) { let _ = self.0.settle(); }
 }

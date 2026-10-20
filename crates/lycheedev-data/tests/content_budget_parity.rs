@@ -108,7 +108,7 @@ fn local_stream_rebuild(removed: &str) {
         "asset inspect",
         &[("--file-id", "501"), ("--max-bytes", "1048576")],
     );
-    let cold = lycheedev_data::dispatch(&inv).unwrap();
+    let cold = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     assert!(cold.complete);
     assert_eq!(cold.data["source"], "installation");
     assert_eq!(cold.data["content"]["sha256"], storage::sha256(&expected));
@@ -166,7 +166,7 @@ fn local_stream_rebuild(removed: &str) {
             .is_file()
     );
 
-    let rebuilt = lycheedev_data::dispatch(&inv).unwrap();
+    let rebuilt = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     assert!(rebuilt.complete);
     assert_eq!(rebuilt.data["source"], "installation");
     assert_eq!(rebuilt.data["content"], cold.data["content"]);
@@ -184,7 +184,7 @@ fn local_stream_rebuild(removed: &str) {
     assert_eq!(local_blob(&fx, &capture["blob"]), expected);
     assert!(!repair.exists());
     assert_eq!(std::fs::read_dir(&paths.staging).unwrap().count(), 0);
-    let warm = lycheedev_data::dispatch(&inv).unwrap();
+    let warm = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     assert!(warm.complete);
     assert_eq!(warm.data["content"], cold.data["content"]);
     assert_eq!(warm.data["root"], cold.data["root"]);
@@ -208,7 +208,7 @@ fn local_stream_same_length_corrupt_body_is_terminal_without_repair_or_capture()
         "asset inspect",
         &[("--file-id", "501"), ("--max-bytes", "1048576")],
     );
-    let cold = lycheedev_data::dispatch(&inv).unwrap();
+    let cold = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     let digest = cold.data["content"]["sha256"].as_str().unwrap();
     let body = evidence::blob_path(&fx.home, digest).unwrap();
     let pair = local_pair(&fx, digest);
@@ -218,7 +218,7 @@ fn local_stream_same_length_corrupt_body_is_terminal_without_repair_or_capture()
     let mut corrupt = expected;
     corrupt[0] ^= 1;
     std::fs::write(&body, &corrupt).unwrap();
-    let error = lycheedev_data::dispatch(&inv).unwrap_err();
+    let error = lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err();
     assert_eq!(error.code, "vault.blob_integrity");
     assert_eq!(std::fs::read(&body).unwrap(), corrupt);
     assert_eq!(local_document(&fx, &alias), original);
@@ -239,7 +239,7 @@ fn sql_and_db2_capture_exact_fixture_rows_and_original_request_identity() {
     use lycheedev_core::{evidence, storage};
     use serde_json::{Value, json};
     let (fx, _) = input();
-    let sql = lycheedev_data::dispatch(&fx.invocation(
+    let sql = lycheedev_data::migration_oracle::dispatch(&fx.invocation(
         "data sql", &[("--sql", "SELECT ID FROM ContentBudget")],
     )).unwrap();
     assert_eq!(sql.data["result"]["rows"], json!([[7]]));
@@ -250,7 +250,7 @@ fn sql_and_db2_capture_exact_fixture_rows_and_original_request_identity() {
     assert_eq!(storage::sha256(request), digest);
     assert_eq!(sql.provenance[0]["provenance"]["locator"], format!("sql:sha256:{digest}"));
 
-    let parameterized = lycheedev_data::dispatch(&fx.invocation(
+    let parameterized = lycheedev_data::migration_oracle::dispatch(&fx.invocation(
         "data sql", &[("--sql", "SELECT ID FROM ContentBudget WHERE ID=:id"), ("--param", "id=7")],
     )).unwrap();
     assert_eq!(parameterized.data["result"]["rows"], json!([[7]]));
@@ -258,13 +258,13 @@ fn sql_and_db2_capture_exact_fixture_rows_and_original_request_identity() {
     assert_eq!(parameterized.provenance[0]["provenance"]["locator"],
         "sql:sha256:a8e82349a8b7e4c5ef5e07154b4c06df66b8e35f5c9dc38d2da769a1a30284b8");
 
-    let record = lycheedev_data::dispatch(&fx.invocation(
+    let record = lycheedev_data::migration_oracle::dispatch(&fx.invocation(
         "data db2", &[("--table", "ContentBudget"), ("--id", "7")],
     )).unwrap();
     assert_eq!(record.data["recordID"], 7);
     assert_eq!(record.data["row"], json!({"ID":7}));
     assert_eq!(record.provenance[0]["provenance"]["locator"], "db2:ContentBudget:7");
-    let page = lycheedev_data::dispatch(&fx.invocation(
+    let page = lycheedev_data::migration_oracle::dispatch(&fx.invocation(
         "data db2", &[("--table", "ContentBudget"), ("--limit", "1")],
     )).unwrap();
     assert_eq!(page.data["page"]["ids"], json!([7]));
@@ -395,7 +395,7 @@ fn maximum_allowance_preserves_cancellation_and_rechecks_warm_encoded_source() {
     let before = captures();
     inv.control.cancel_handle().store(true, Ordering::Release);
     assert_eq!(read(&inv).err().unwrap().exit_code, 7);
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().exit_code, 7);
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().exit_code, 7);
     assert_eq!(captures(), before, "cancelled content must not publish a capture");
     inv.control = Default::default();
     // First object is the content: corrupt its payload without altering extent.
@@ -440,7 +440,7 @@ fn check_compressed_inspect_and_export(fx: &Fixture) {
     let maximum = content["decodedBytes"].as_u64().unwrap().to_string();
     let inv = fx.invocation("asset inspect", &[("--file-id", "501"), ("--max-bytes", &maximum)]);
     for pass in 0..2 {
-        let found = lycheedev_data::dispatch(&inv).unwrap();
+        let found = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
         assert_eq!(found.provenance.len(), 1);
         assert_eq!(found.data["content"]["bytes"], content["decodedBytes"]);
         assert_eq!(found.data["content"]["sha256"], content["sha256"]);
@@ -465,7 +465,7 @@ fn check_compressed_inspect_and_export(fx: &Fixture) {
     let output = fx.root.join("compressed-raw.bin");
     let inv = fx.invocation("asset export", &[("--file-id", "501"), ("--max-bytes", &maximum),
         ("--output", output.to_str().unwrap())]);
-    let exported = lycheedev_data::dispatch(&inv).unwrap();
+    let exported = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(exported.data["content"]["sha256"], content["sha256"]);
     assert_eq!(exported.data["sourceCapture"]["blob"], exported.data["content"]);
     let mut raw = std::fs::File::open(&output).unwrap();
@@ -502,7 +502,7 @@ fn streaming_rejects_changed_warm_source_and_bad_ekey_without_new_captures() {
     use lycheedev_core::metadata::Metadata;
     let fx = Fixture::compressed_at(stream_fixture_root(), 1 << 20);
     let inv = fx.invocation("asset inspect", &[("--file-id", "501"), ("--max-bytes", "1048576")]);
-    lycheedev_data::dispatch(&inv).unwrap();
+    lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     let documents = || Metadata::open(&fx.home, false).unwrap()
         .list::<serde_json::Value>("", 100).unwrap();
     let before = documents();
@@ -513,13 +513,13 @@ fn streaming_rejects_changed_warm_source_and_bad_ekey_without_new_captures() {
     let mut changed = original.clone();
     changed[30 + 36 + 8] ^= 1;
     std::fs::write(&archive, &changed).unwrap();
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().code, "container.integrity_mismatch");
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code, "container.integrity_mismatch");
     assert_eq!(documents(), before);
     // A header digest change is rejected at the selected archive boundary.
     changed = original;
     changed[30 + 20] ^= 1;
     std::fs::write(&archive, &changed).unwrap();
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().code, "archive.index_integrity");
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code, "archive.index_integrity");
     assert_eq!(documents(), before);
 }
 
@@ -533,7 +533,7 @@ fn streaming_whole_ckey_failure_publishes_no_selected_blob_cache_or_capture() {
     let output = fx.root.join("failed-raw.bin");
     let inv = fx.invocation("asset export", &[("--file-id", "501"), ("--max-bytes", "1048576"),
         ("--output", output.to_str().unwrap())]);
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().code, "records.content_integrity");
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code, "records.content_integrity");
     assert!(!output.exists());
     let metadata = Metadata::open(&fx.home, false).unwrap();
     assert!(metadata.list::<serde_json::Value>("capture/", 100).unwrap().is_empty());
@@ -551,17 +551,17 @@ fn streamed_raw_export_conflict_overwrite_and_cancel_preserve_existing_output() 
     std::fs::hard_link(&output, &alias).unwrap();
     let mut inv = fx.invocation("asset export", &[("--file-id", "501"), ("--max-bytes", "1048576"),
         ("--output", output.to_str().unwrap())]);
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().code, "records.export_conflict");
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code, "records.export_conflict");
     assert_eq!(std::fs::read(&output).unwrap(), b"previous output");
     inv.flags.insert("--overwrite".into(), "true".into());
-    let found = lycheedev_data::dispatch(&inv).unwrap();
+    let found = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(std::fs::read(&alias).unwrap(), b"previous output");
     let raw = std::fs::read(&output).unwrap();
     assert_eq!(raw.len(), 1 << 20);
     assert!(raw.iter().all(|byte| *byte == b'x'));
     assert_eq!(found.data["content"]["sha256"], lycheedev_core::storage::sha256(&raw));
     inv.control.cancel_handle().store(true, Ordering::Release);
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().exit_code, 7);
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().exit_code, 7);
     assert_eq!(std::fs::read(&output).unwrap(), raw);
 }
 

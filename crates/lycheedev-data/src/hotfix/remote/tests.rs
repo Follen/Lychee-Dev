@@ -228,7 +228,7 @@ fn source_flags_and_unknown_source_fail_before_io() {
     let mut inv = f.inv.clone();
     inv.flags.insert("--source".into(), "other".into());
     assert_eq!(
-        crate::dispatch(&inv).unwrap_err().message,
+        crate::migration_oracle::dispatch(&inv).unwrap_err().message,
         "--source must be wago, dbcache, or raidbots"
     );
     inv.flags.insert("--source".into(), "wago".into());

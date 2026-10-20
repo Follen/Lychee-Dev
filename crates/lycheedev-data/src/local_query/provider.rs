@@ -1,7 +1,7 @@
 //! Query-local physical owners. Tables borrow the callback's external FileBytes;
 //! schemas, patch plans and definitions never borrow sibling owner fields.
 use super::*;
-use crate::resource::RetainedReservation;
+use crate::resource::{OwnedRetainedReservation, RetainedReservation};
 use relational::{
     EqualityCursor, EqualityOutcome, RowCursor, RowProvider, RowYield, Scalar, Source,
 };
@@ -62,6 +62,148 @@ struct FlatRow<'query> {
     _raw: Vec<table::Value>,
 }
 type PhysicalRow<'query> = table::LeasedRow<'query, FlatRow<'query>>;
+
+/// A row keeps both original refund obligations until its values are dropped.
+struct OwnedFlatRow {
+    cells: Vec<Scalar>,
+    _raw: Vec<table::Value>,
+    _vector: OwnedRetainedReservation,
+}
+impl FlatRow<'_> {
+    fn into_owned(self, budget: &Arc<Budget>) -> Result<OwnedFlatRow> {
+        Ok(OwnedFlatRow {
+            cells: self.cells,
+            _raw: self._raw,
+            _vector: self._vector.into_owned(budget)?,
+        })
+    }
+}
+enum OwnedPhysicalRow {
+    Wdc(table::OwnedLeasedRow<OwnedFlatRow>),
+    Generation(super::generation_provider::OwnedRow),
+}
+impl OwnedPhysicalRow {
+    fn cells(&self) -> &[Scalar] {
+        match self {
+            Self::Wdc(row) => &row.value().cells,
+            Self::Generation(row) => row.cells(),
+        }
+    }
+}
+
+pub(crate) enum OwnedEquality<C> {
+    Declined,
+    Empty,
+    Rows(C),
+}
+enum OwnedPhysicalMode {
+    Scan { next: usize },
+    Equal { pending: Option<u32> },
+}
+/// The production pull boundary owns its table, budget and at most one row.
+/// Peeking uses the authenticated physical index, never decoding the next row.
+/// Projection is deliberately left to DataFusion after full visited-row checks.
+pub(crate) struct OwnedPhysicalCursor {
+    current: Option<OwnedPhysicalRow>,
+    current_id: Option<u32>,
+    generation: Option<super::generation_provider::OwnedRows>,
+    physical: Arc<Physical<'static>>,
+    mode: OwnedPhysicalMode,
+    done: bool,
+    _allocation: OwnedRetainedReservation,
+}
+impl OwnedPhysicalCursor {
+    /// The exact physical locator of the live row, independent of SQL columns.
+    pub(crate) fn current_id(&self) -> Option<u32> {
+        self.current_id
+    }
+    pub(crate) fn peek_id(&self) -> Option<u32> {
+        if self.done {
+            return None;
+        }
+        match self.mode {
+            OwnedPhysicalMode::Scan { next } => self.physical.table.id_at(next),
+            OwnedPhysicalMode::Equal { pending } => pending,
+        }
+    }
+    pub(crate) fn clear_row(&mut self) {
+        self.current = None;
+        self.current_id = None;
+    }
+    fn advance_inner(&mut self) -> Result<bool> {
+        let (id, equality) = match &mut self.mode {
+            OwnedPhysicalMode::Scan { next } => {
+                self.physical.budget.check()?;
+                let Some(id) = self.physical.table.id_at(*next) else {
+                    self.done = true;
+                    self.generation = None;
+                    return Ok(false);
+                };
+                *next += 1;
+                (id, false)
+            }
+            OwnedPhysicalMode::Equal { pending } => {
+                self.done = true;
+                let Some(id) = pending.take() else {
+                    return Ok(false);
+                };
+                (id, true)
+            }
+        };
+        if let Some(generation) = &mut self.generation {
+            let row = generation.read(id, self.physical.table.columns(), &self.physical.budget)?;
+            let Some(row) = row else {
+                if equality {
+                    return Ok(false);
+                }
+                return Err(fault(
+                    "records.generation_invalid",
+                    4,
+                    "Typed SQL batch is missing an authenticated physical row",
+                ));
+            };
+            self.current = Some(OwnedPhysicalRow::Generation(row));
+        } else {
+            #[cfg(test)]
+            WDC_ROWS.with(|count| count.set(count.get() + 1));
+            let raw = match self.physical.table.leased_row_values(id, 1 << 20) {
+                Ok(raw) => raw,
+                Err(error) if equality && error.code == "table.record_not_found" => {
+                    return Ok(false);
+                }
+                Err(error) => return Err(error),
+            };
+            let row = raw
+                .try_map(|raw| {
+                    self.physical
+                        .flatten(raw, None)?
+                        .into_owned(&self.physical.budget)
+                })?
+                .into_owned(&self.physical.budget)?;
+            self.current = Some(OwnedPhysicalRow::Wdc(row));
+        }
+        self.current_id = Some(id);
+        Ok(true)
+    }
+}
+impl RowCursor for OwnedPhysicalCursor {
+    fn advance(&mut self) -> Result<bool> {
+        self.clear_row();
+        if self.done {
+            self.generation = None;
+            return Ok(false);
+        }
+        let result = self.advance_inner();
+        if result.is_err() {
+            self.done = true;
+            self.generation = None;
+        }
+        result
+    }
+    fn row(&self) -> &[Scalar] {
+        self.current.as_ref().map_or(&[], OwnedPhysicalRow::cells)
+    }
+}
 
 struct ScanCursor<'query, 'body> {
     current: Option<PhysicalRow<'query>>,
@@ -351,6 +493,91 @@ impl<'body> Physical<'body> {
         })
     }
 }
+
+impl Physical<'static> {
+    pub(super) fn uses_budget(&self, budget: &Arc<Budget>) -> bool {
+        Arc::ptr_eq(&self.budget, budget)
+    }
+
+    fn owned_with_mode(self: &Arc<Self>, mode: OwnedPhysicalMode) -> Result<OwnedPhysicalCursor> {
+        let allocation = self
+            .budget
+            .reserve_retained(size_of::<OwnedPhysicalCursor>())?
+            .into_owned(&self.budget)?;
+        let generation = self
+            .generation
+            .as_ref()
+            .map(|generation| {
+                super::generation_provider::OwnedRows::new(generation.clone(), &self.budget)
+            })
+            .transpose()?;
+        Ok(OwnedPhysicalCursor {
+            current: None,
+            current_id: None,
+            generation,
+            physical: self.clone(),
+            mode,
+            done: false,
+            _allocation: allocation,
+        })
+    }
+    pub(crate) fn owned_cursor(self: &Arc<Self>) -> Result<OwnedPhysicalCursor> {
+        self.budget.check()?;
+        if self.table.logical_count() > (4 << 20) / 4 {
+            return Err(fault(
+                "table.limit_exceeded",
+                3,
+                "SQL table scan index exceeds its bound",
+            ));
+        }
+        self.owned_with_mode(OwnedPhysicalMode::Scan { next: 0 })
+    }
+    /// Internal lookup addresses the authenticated physical index directly.
+    /// It does not interpret a visible column name or convert a SQL scalar.
+    pub(crate) fn owned_id_cursor(self: &Arc<Self>, id: u32) -> Result<OwnedPhysicalCursor> {
+        self.owned_with_mode(OwnedPhysicalMode::Equal { pending: Some(id) })
+    }
+    pub(crate) fn owned_equal_cursor(
+        self: &Arc<Self>,
+        column: &str,
+        value: &Scalar,
+    ) -> Result<OwnedEquality<OwnedPhysicalCursor>> {
+        if !crate::hotfix::remote::equal_fold(column, &self.schema.columns[self.identity]) {
+            return Ok(OwnedEquality::Declined);
+        }
+        let id = match equality_id(value)? {
+            Some(id) => id,
+            None => return Ok(OwnedEquality::Empty),
+        };
+        self.owned_id_cursor(id).map(OwnedEquality::Rows)
+    }
+}
+
+// Both borrowed and owned equality paths keep the same finite/type/range rules.
+fn equality_id(value: &Scalar) -> Result<Option<u32>> {
+    Ok(match value {
+        Scalar::Null => None,
+        Scalar::Int(n) => u32::try_from(*n).ok(),
+        Scalar::UInt(n) => u32::try_from(*n).ok(),
+        Scalar::Float(n) if !n.is_finite() => {
+            return Err(fault(
+                "relational.numeric_range",
+                4,
+                "SQL number exceeds supported finite 64-bit range",
+            ));
+        }
+        Scalar::Float(n) if *n < 0.0 || *n > u32::MAX as f64 || n.trunc() != *n => None,
+        Scalar::Float(n) => Some(*n as u32),
+        _ => {
+            return Err(fault(
+                "relational.type_mismatch",
+                4,
+                "SQL scalar types are incompatible",
+            ));
+        }
+    })
+}
+
 impl RowProvider for Physical<'_> {
     fn cursor(&self, selected: Option<&[usize]>) -> Result<Box<dyn RowCursor + '_>> {
         let projection = selected
@@ -402,34 +629,8 @@ impl RowProvider for Physical<'_> {
         if !crate::hotfix::remote::equal_fold(column, &self.schema.columns[self.identity]) {
             return Ok(EqualityCursor::Declined);
         }
-        let id = match value {
-            Scalar::Null => return Ok(EqualityCursor::Empty),
-            Scalar::Int(n) => match u32::try_from(*n) {
-                Ok(n) => n,
-                Err(_) => return Ok(EqualityCursor::Empty),
-            },
-            Scalar::UInt(n) => match u32::try_from(*n) {
-                Ok(n) => n,
-                Err(_) => return Ok(EqualityCursor::Empty),
-            },
-            Scalar::Float(n) if !n.is_finite() => {
-                return Err(fault(
-                    "relational.numeric_range",
-                    4,
-                    "SQL number exceeds supported finite 64-bit range",
-                ));
-            }
-            Scalar::Float(n) if *n < 0.0 || *n > u32::MAX as f64 || n.trunc() != *n => {
-                return Ok(EqualityCursor::Empty);
-            }
-            Scalar::Float(n) => *n as u32,
-            _ => {
-                return Err(fault(
-                    "relational.type_mismatch",
-                    4,
-                    "SQL scalar types are incompatible",
-                ));
-            }
+        let Some(id) = equality_id(value)? else {
+            return Ok(EqualityCursor::Empty);
         };
         if let Some(generation) = &self.generation {
             return Ok(EqualityCursor::Rows(

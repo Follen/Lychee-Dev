@@ -204,7 +204,7 @@ fn default_remote_sql_static_and_effective_use_cached_authenticated_files_and_ca
         } else {
             f.invocation(sql)
         };
-        let out = crate::dispatch(&inv).unwrap();
+        let out = crate::migration_oracle::dispatch(&inv).unwrap();
         if effective {
             assert_eq!(out.data["effectiveSources"][0]["captures"][0]["id"], cache);
             assert_eq!(out.data["effectiveSources"][0]["replacedOrAdded"], 0);
@@ -244,7 +244,7 @@ fn default_remote_sql_meta_is_admitted_but_does_not_prepare_cdn_or_keys() {
         .insert("--key-file".into(), "missing-private-keys".into());
     inv.flags
         .insert("--content-variant".into(), "invalid-unread-variant".into());
-    let out = crate::dispatch(&inv).unwrap();
+    let out = crate::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(out.data["result"]["rows"], json!([[0]]));
     assert_eq!(out.data["sources"], json!([]));
     assert_eq!(out.data["resourceAccounting"]["used"]["networkRequests"], 0);
@@ -266,13 +266,13 @@ fn default_remote_sql_explain_does_not_scan_invalid_base_or_effective_string_cel
                 f.invocation(sql)
             }
         };
-        let out = crate::dispatch(&invocation(&format!(
+        let out = crate::migration_oracle::dispatch(&invocation(&format!(
             "EXPLAIN SELECT Name FROM {catalog}.RemoteSample"
         )))
         .unwrap();
         f.verify(&out);
         let before = f.captures().len();
-        let error = crate::dispatch(&invocation(&format!(
+        let error = crate::migration_oracle::dispatch(&invocation(&format!(
             "SELECT Name FROM {catalog}.RemoteSample"
         )))
         .unwrap_err();
@@ -311,7 +311,7 @@ fn default_remote_sql_holds_workspace_admission_through_execution_and_stops_befo
         .unwrap()
         .close()
         .unwrap();
-    let out = crate::dispatch(&f.invocation("SELECT ID FROM RemoteSample")).unwrap();
+    let out = crate::migration_oracle::dispatch(&f.invocation("SELECT ID FROM RemoteSample")).unwrap();
     assert_eq!(out.data["result"]["rows"], json!([[7]]));
     f.verify(&out);
     f.close();
@@ -323,13 +323,13 @@ fn default_remote_sql_missing_cache_and_conflicting_physical_source_never_fallba
     let before = f.captures().len();
     let mut inv = f.invocation("SELECT ID FROM RemoteSample");
     assert_eq!(
-        crate::dispatch(&inv).unwrap_err().code,
+        crate::migration_oracle::dispatch(&inv).unwrap_err().code,
         "records.remote_unavailable_offline"
     );
     inv.flags
         .insert("--installation".into(), "missing-client".into());
     assert_eq!(
-        crate::dispatch(&inv).unwrap_err().code,
+        crate::migration_oracle::dispatch(&inv).unwrap_err().code,
         "records.metadata_limit"
     );
     assert_eq!(f.captures().len(), before);
@@ -407,7 +407,7 @@ fn default_remote_effective_requires_distinct_complete_exact_pin_cache_captures(
             "SELECT ID FROM effective.RemoteSample",
             "EXPLAIN SELECT ID FROM effective.RemoteSample",
         ] {
-            let error = crate::dispatch(&f.effective_invocation(sql, &ids)).unwrap_err();
+            let error = crate::migration_oracle::dispatch(&f.effective_invocation(sql, &ids)).unwrap_err();
             assert_eq!(
                 error.code, "records.hotfix_identity",
                 "{sql}: {ids:?}: {error:?}"

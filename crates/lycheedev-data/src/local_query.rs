@@ -839,6 +839,7 @@ fn public_query_numbers(
     ])))
 }
 
+#[cfg(any(test, feature = "migration-oracle"))]
 pub fn sql(inv: &Invocation) -> Result<Outcome> {
     sql_inner(inv).map_err(|mut error| {
         let mapped = match error.code.as_str() {
@@ -889,9 +890,11 @@ pub fn sql(inv: &Invocation) -> Result<Outcome> {
         error
     })
 }
+#[cfg(any(test, feature = "migration-oracle"))]
 fn sql_inner(inv: &Invocation) -> Result<Outcome> {
     sql_inner_after_execute(inv, &mut || Ok(()))
 }
+#[cfg(any(test, feature = "migration-oracle"))]
 pub(crate) fn sql_inner_after_execute(
     inv: &Invocation,
     after_execute: &mut impl FnMut() -> Result<()>,
@@ -906,6 +909,7 @@ pub(crate) fn sql_inner_after_execute(
 }
 /// Keep explicit fixture budgets fixed while exercising the same consumer,
 /// admission, source checks, execution and capture as the default constructor.
+#[cfg(any(test, feature = "migration-oracle"))]
 pub(crate) fn sql_inner_budgeted(
     inv: &Invocation,
     budget: &Arc<Budget>,
@@ -1125,6 +1129,7 @@ pub(crate) fn sql_inner_budgeted(
     let result = scope.finish(result);
     result.map_err(|error| sql_committed_error(error, &committed, output_published))
 }
+#[cfg(any(test, feature = "migration-oracle"))]
 fn sql_committed_error(
     error: lycheedev_core::ToolkitError,
     committed: &[String],

@@ -130,7 +130,7 @@ fn default_cdn_raw_export_cold_then_warm_streams_authenticated_cache_and_depende
         evidence::blob_path(&f.source.home, &storage::sha256(&f.source.payload)).unwrap(),
     )
     .unwrap();
-    let cold = crate::dispatch(&f.invocation("cold.bin")).unwrap();
+    let cold = crate::migration_oracle::dispatch(&f.invocation("cold.bin")).unwrap();
     f.verify(&cold, "cold.bin");
     assert_eq!(
         std::fs::read(f.output.join("cold.bin")).unwrap(),
@@ -142,7 +142,7 @@ fn default_cdn_raw_export_cold_then_warm_streams_authenticated_cache_and_depende
         json!([cold.provenance[0]["id"]])
     );
     assert_eq!(cold.data["source"]["decodedCache"]["contentDecodeCalls"], 1);
-    let warm = crate::dispatch(&f.invocation("warm.bin")).unwrap();
+    let warm = crate::migration_oracle::dispatch(&f.invocation("warm.bin")).unwrap();
     f.verify(&warm, "warm.bin");
     assert_eq!(warm.data["source"]["decodedCache"]["contentDecodeCalls"], 0);
     assert_eq!(warm.data["source"]["decodedCache"]["hits"], 2);
@@ -158,7 +158,7 @@ fn default_cdn_png_and_webp_export_keep_ordered_source_artifact_manifest_depende
     for encoding in ["png", "webp"] {
         let mut inv = f.invocation(encoding);
         inv.flags.insert("--encoding".into(), encoding.into());
-        let result = crate::dispatch(&inv).unwrap();
+        let result = crate::migration_oracle::dispatch(&inv).unwrap();
         f.verify(&result, encoding);
         assert_eq!(result.provenance.len(), 3);
         let source = &result.provenance[0];
@@ -209,13 +209,13 @@ fn default_cdn_export_conflict_precedes_snapshot_lookup_and_overwrite_preserves_
     inv.flags
         .insert("--snapshot".into(), "invalid-snapshot".into());
     assert_eq!(
-        crate::dispatch(&inv).unwrap_err().code,
+        crate::migration_oracle::dispatch(&inv).unwrap_err().code,
         "records.export_conflict"
     );
     assert!(f.captures().is_empty());
     inv.flags.insert("--snapshot".into(), f.snapshot.clone());
     inv.flags.insert("--overwrite".into(), "true".into());
-    let result = crate::dispatch(&inv).unwrap();
+    let result = crate::migration_oracle::dispatch(&inv).unwrap();
     f.verify(&result, "body");
     assert_eq!(std::fs::read(output).unwrap(), f.source.payload);
     assert_eq!(
@@ -229,7 +229,7 @@ fn default_cdn_export_corrupt_selected_cache_never_publishes_output_or_capture()
     let f = AssetFixture::new(b"authenticated cache bytes".to_vec());
     let path = evidence::blob_path(&f.source.home, &storage::sha256(&f.source.payload)).unwrap();
     std::fs::write(path, b"corrupt cache bytes").unwrap();
-    let error = crate::dispatch(&f.invocation("body")).unwrap_err();
+    let error = crate::migration_oracle::dispatch(&f.invocation("body")).unwrap_err();
     assert_eq!(error.code, "vault.blob_integrity");
     assert!(!f.output.join("body").exists());
     assert!(f.captures().is_empty());
@@ -240,7 +240,7 @@ fn default_cdn_export_image_failure_keeps_one_committed_source_identity_without_
     let f = AssetFixture::new(b"not a BLP image".to_vec());
     let mut inv = f.invocation("image");
     inv.flags.insert("--encoding".into(), "png".into());
-    let error = crate::dispatch(&inv).unwrap_err();
+    let error = crate::migration_oracle::dispatch(&inv).unwrap_err();
     assert_eq!(error.code, "texture.unsupported_format");
     let captures = f.captures();
     assert_eq!(captures.len(), 1);
@@ -257,7 +257,7 @@ fn default_cdn_export_original_cancel_before_source_has_no_capture_or_output() {
     let inv = f.invocation("body");
     inv.control.tracked_cancel_handle().unwrap().cancel();
     let expected = inv.control.check().unwrap_err();
-    let actual = crate::dispatch(&inv).unwrap_err();
+    let actual = crate::migration_oracle::dispatch(&inv).unwrap_err();
     assert_eq!(actual.code, expected.code);
     assert_eq!(actual.exit_code, expected.exit_code);
     assert!(f.captures().is_empty());

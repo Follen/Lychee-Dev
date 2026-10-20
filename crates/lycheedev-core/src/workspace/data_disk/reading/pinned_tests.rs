@@ -126,17 +126,11 @@ fn owned_reader_releases_quota_before_full_sha_and_keeps_original_check_and_hand
         .unwrap()
         .unwrap();
     assert!(observed.load(Ordering::SeqCst));
-    assert!(reader._resources.is_none());
-    match &reader.control {
-        ReaderChecks::Owned {
-            control: held,
-            supplemental,
-        } => {
-            assert_eq!(held.deadline(), control.deadline());
-            assert!(Arc::ptr_eq(supplemental, &check));
-        }
-        ReaderChecks::Borrowed(_) => panic!("reader still borrows consumed quota"),
-    }
+    // Owned handoff has a distinct Send + Sync type and retains the exact checks.
+    fn assert_owned<T: Send + Sync>(_: &T) {}
+    assert_owned(&reader);
+    assert_eq!(reader.control.control.deadline(), control.deadline());
+    assert!(Arc::ptr_eq(&reader.control.supplemental, &check));
     let handle = reader.file.as_ref().unwrap().as_raw_handle();
     assert_eq!(reader.seek_checked(SeekFrom::Current(0)).unwrap(), 0);
     let mut bytes = vec![0; raw.len()];

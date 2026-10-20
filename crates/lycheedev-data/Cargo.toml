@@ -7,6 +7,8 @@ rust-version.workspace = true
 
 [features]
 datafusion-qualification = []
+# Explicit historical comparison only; never enables production fallback.
+migration-oracle = []
 
 [dependencies]
 async-trait = "=0.1.92"
@@ -51,3 +53,149 @@ tower-service = "=0.3.3"
 [dev-dependencies]
 # Fixture-only access to the existing pinned SQLite cache metadata backend.
 rusqlite.workspace = true
+
+# Historical comparison is explicit; default feature skips are not passes.
+
+[[test]]
+name = "agent_native_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "aggregates_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "assets_business"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "catalog_navigation_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "cli_local_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "compound_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "content_budget_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "creature_navigation_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "cte_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "db2_reader_limits_repro"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "derived_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "effective_sql_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "encounter_navigation_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "explain_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "hotfix_scan_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "hotfix_table_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "image_export_business"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "installed_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "item_geosets_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "item_models_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "item_textures_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "joins_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "local_domain_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "recursive_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "relational_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "resource_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "semantic_metadata_repro"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "semantic_sql_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "spell_info_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "sql_csv_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "sql_explain_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "sql_lazy_provider_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "sql_resource_parity"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "stream_real"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "syntax_diagnostics"
+required-features = ["migration-oracle"]
+
+[[test]]
+name = "topk_parity"
+required-features = ["migration-oracle"]

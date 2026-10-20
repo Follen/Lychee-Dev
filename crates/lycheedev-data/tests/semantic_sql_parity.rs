@@ -38,7 +38,7 @@ fn cache(fx: &Fixture, suffix: &str, raw: &[u8]) -> Value {
     blob
 }
 fn query(fx: &Fixture, sql: &str) -> Outcome {
-    lycheedev_data::dispatch(&fx.invocation("data sql", &[("--sql", sql)])).unwrap()
+    lycheedev_data::migration_oracle::dispatch(&fx.invocation("data sql", &[("--sql", sql)])).unwrap()
 }
 fn count(fx: &Fixture) -> usize {
     Metadata::open(&fx.home, false)
@@ -210,14 +210,14 @@ fn semantic_sql_missing_and_invalid_sources_publish_no_capture_then_recover() {
     let sql = "SELECT Value,Name FROM meta.Sample";
     let before = count(&fx);
     assert_eq!(
-        lycheedev_data::dispatch(&fx.invocation("data sql", &[("--sql", sql)]))
+        lycheedev_data::migration_oracle::dispatch(&fx.invocation("data sql", &[("--sql", sql)]))
             .unwrap_err()
             .code,
         "records.definition_unavailable_offline"
     );
     cache(&fx, "meta/mapping.dbdm", b"ENUM Sample::Value State\n");
     assert_eq!(
-        lycheedev_data::dispatch(&fx.invocation("data sql", &[("--sql", sql)]))
+        lycheedev_data::migration_oracle::dispatch(&fx.invocation("data sql", &[("--sql", sql)]))
             .unwrap_err()
             .code,
         "records.definition_unavailable_offline"
@@ -228,14 +228,14 @@ fn semantic_sql_missing_and_invalid_sources_publish_no_capture_then_recover() {
         b"18446744073709551616 TOO_BIG\n",
     );
     assert_eq!(
-        lycheedev_data::dispatch(&fx.invocation("data sql", &[("--sql", sql)]))
+        lycheedev_data::migration_oracle::dispatch(&fx.invocation("data sql", &[("--sql", sql)]))
             .unwrap_err()
             .code,
         "records.definition_identity"
     );
     cache(&fx, "meta/enums/State.dbde", b"(BOGUS 1) 2 BAD\n");
     assert_eq!(
-        lycheedev_data::dispatch(&fx.invocation("data sql", &[("--sql", sql)]))
+        lycheedev_data::migration_oracle::dispatch(&fx.invocation("data sql", &[("--sql", sql)]))
             .unwrap_err()
             .code,
         "records.definition_identity"
@@ -257,7 +257,7 @@ fn semantic_sql_cached_blob_corruption_never_refetches_or_publishes() {
     fs::write(&path, b"2 BROKEN\n").unwrap();
     let before = count(&fx);
     assert_eq!(
-        lycheedev_data::dispatch(
+        lycheedev_data::migration_oracle::dispatch(
             &fx.invocation("data sql", &[("--sql", "SELECT Name FROM meta.Sample")])
         )
         .unwrap_err()
@@ -282,13 +282,13 @@ fn semantic_sql_pin_parameter_source_precedence_and_query_lexemes_survive() {
     .unwrap();
     let mut inv = fx.invocation("data sql", &[("--file", file.to_str().unwrap())]);
     assert_eq!(
-        lycheedev_data::dispatch(&inv).unwrap_err().code,
+        lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code,
         "query.numeric_range"
     );
     inv.flags
         .insert("--snapshot".into(), "PIN-does-not-exist".into());
     assert_ne!(
-        lycheedev_data::dispatch(&inv).unwrap_err().code,
+        lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code,
         "query.numeric_range"
     );
     cache(&fx, "meta/mapping.dbdm", b"ENUM Sample::Value State\n");
@@ -299,7 +299,7 @@ fn semantic_sql_pin_parameter_source_precedence_and_query_lexemes_survive() {
     )
     .unwrap();
     let out =
-        lycheedev_data::dispatch(&fx.invocation("data sql", &[("--file", file.to_str().unwrap())]))
+        lycheedev_data::migration_oracle::dispatch(&fx.invocation("data sql", &[("--file", file.to_str().unwrap())]))
             .unwrap();
     let mut public = Vec::new();
     lycheedev_core::public_json::write_line(&mut public, &out.data, &out.public_numbers).unwrap();
@@ -324,12 +324,12 @@ fn semantic_sql_cancelled_or_expired_query_has_no_capture_and_fresh_retry_works(
     );
     cancellation.cancel();
     assert_eq!(
-        lycheedev_data::dispatch(&inv).unwrap_err().code,
+        lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code,
         "command.cancelled"
     );
     inv.control = OperationControl::uncancelable(Instant::now() - Duration::from_secs(1));
     assert_eq!(
-        lycheedev_data::dispatch(&inv).unwrap_err().code,
+        lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code,
         "command.deadline"
     );
     assert_eq!(count(&fx), before);
@@ -362,7 +362,7 @@ fn semantic_sql_memoizes_definitions_and_keeps_the_128_document_limit() {
         (mapping + "ENUM Sample::Value D128\n").as_bytes(),
     );
     assert_eq!(
-        lycheedev_data::dispatch(
+        lycheedev_data::migration_oracle::dispatch(
             &fx.invocation("data sql", &[("--sql", "SELECT * FROM meta.Sample")])
         )
         .unwrap_err()
@@ -405,7 +405,7 @@ fn semantic_sql_combined_rows_are_bounded_before_query_capture() {
     );
     let before = count(&fx);
     assert_eq!(
-        lycheedev_data::dispatch(
+        lycheedev_data::migration_oracle::dispatch(
             &fx.invocation("data sql", &[("--sql", "SELECT COUNT(*) FROM meta.Sample")])
         )
         .unwrap_err()
@@ -441,7 +441,7 @@ fn semantic_sql_effective_join_keeps_both_explicit_provenance_chains() {
     let file = fx.root.join("semantic-effective.json");
     fs::write(&file,serde_json::to_vec(&json!({"sql":"SELECT e.ID,m.Name FROM effective.Sample e JOIN meta.Sample m ON e.Value=m.Value ORDER BY e.ID", "hotfix":[capture["id"]]})).unwrap()).unwrap();
     let out =
-        lycheedev_data::dispatch(&fx.invocation("data sql", &[("--file", file.to_str().unwrap())]))
+        lycheedev_data::migration_oracle::dispatch(&fx.invocation("data sql", &[("--file", file.to_str().unwrap())]))
             .unwrap();
     assert_eq!(out.data["result"]["rows"], json!([[1, "TWO"], [2, "TWO"]]));
     assert_eq!(
@@ -458,7 +458,7 @@ fn semantic_sql_max_bytes_admission_precedes_missing_definitions() {
     let fx = fixture();
     let before = count(&fx);
     for value in ["0", "536870913", "not-a-number"] {
-        let error = lycheedev_data::dispatch(&fx.invocation(
+        let error = lycheedev_data::migration_oracle::dispatch(&fx.invocation(
             "data sql",
             &[
                 ("--sql", "SELECT Value FROM meta.Missing"),

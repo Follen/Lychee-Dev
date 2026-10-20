@@ -22,6 +22,8 @@ export function findNpm(node = process.execPath, environment = process.env) {
   throw new Error('skill-data.installed_npm_cli_required');
 }
 export function runOwnedData(root, argv) {
+  assert.equal(argv[0], '--historical-oracle-only', 'retired SQL Skill controller is historical, never current Agent acceptance');
+  argv = argv.slice(1);
   assert.equal(process.platform, 'win32'); assert.equal(process.arch, 'x64');
   assert.equal(argv.length, 3, 'usage: --data <artifact.json> <candidate-report.json> <fresh-exporter-buildEvidence-receipt.json>');
   root = resolve(root);
@@ -50,7 +52,7 @@ export function runOwnedData(root, argv) {
   try {
     save('configuration.json', config); save('candidate-identity.json', {artifact, candidateReport: candidate.report, candidateManifest: candidate.manifest});
     handlesReaped = false;
-    const run = ownedSpawnSync(process.execPath, [join(runnerRoot, 'tests/rust-skill-usage/data-run.mjs'), join(job.evidence, 'configuration.json')], {cwd: root, env: {...process.env}, evidence: job.evidence, timeout: 1200000});
+    const run = ownedSpawnSync(process.execPath, [join(runnerRoot, 'tests/rust-skill-usage/data-run.mjs'), '--historical-oracle-only', join(job.evidence, 'configuration.json')], {cwd: root, env: {...process.env}, evidence: job.evidence, timeout: 1200000});
     handlesReaped = run.handlesReaped === true; logs.push(...run.logs);
     const report = existsSync(join(job.evidence, 'report.json')) ? jsonFile(join(job.evidence, 'report.json'), 12 << 20) : null;
     let contractError;

@@ -1,5 +1,5 @@
-//! Versioned, task-native query contracts. SQL is optional, never required to
-//! express a typed task. Source binding comes from the enclosing session.
+//! Versioned task-native query contracts. No SQL parser is exposed here.
+//! Source binding comes from the enclosing session.
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -24,6 +24,17 @@ pub enum QueryRequest {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum QueryPlan {
+    /// Ordered bag concatenation; names are taken positionally from input zero.
+    /// All inputs complete under one owner before an enclosing tail is applied.
+    UnionAll { inputs: Vec<QueryPlan> },
+    /// Previous-delta ALL recursion. Exactly one matching Delta occurs in step.
+    /// Completion is mandatory even beneath an outer zero-row Limit.
+    Iterate {
+        binding: String,
+        seed: Box<QueryPlan>,
+        step: Box<QueryPlan>,
+    },
+    Delta { binding: String },
     Scan {
         table: TableRequest,
     },
@@ -63,6 +74,25 @@ pub enum QueryPlan {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Expression {
+    /// Lexical depth 1 is the nearest enclosing query input row.
+    /// Ancestor references must admit safe relational lifting.
+    OuterColumn {
+        name: String,
+        #[serde(default = "outer_depth")]
+        depth: usize,
+    },
+    InQuery {
+        value: Box<Expression>,
+        input: Box<QueryPlan>,
+        #[serde(default)]
+        negated: bool,
+    },
+    ExistsQuery {
+        input: Box<QueryPlan>,
+        #[serde(default)]
+        negated: bool,
+    },
+    ScalarQuery { input: Box<QueryPlan> },
     Column {
         name: String,
     },
@@ -119,6 +149,8 @@ pub enum Expression {
         index: usize,
     },
 }
+fn outer_depth() -> usize { 1 }
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CastKind {
@@ -293,6 +325,9 @@ pub fn query_schema() -> serde_json::Value {
     let named =
         json!({"type":"array", "items":{"$ref":"#/$defs/NamedExpression"}, "maxItems":4096});
     let plans = vec![
+        variant("op", "union_all", json!({"inputs":{"type":"array","minItems":2,"maxItems":256,"items":plan,"description":"Ordered bag concatenation with exact positional common types. Mixed integer/float or heterogeneous columns reject."}}), &["inputs"]),
+        variant("op", "iterate", json!({"binding":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z_][A-Za-z0-9_]*$"},"seed":plan,"step":plan}), &["binding","seed","step"]),
+        variant("op", "delta", json!({"binding":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z_][A-Za-z0-9_]*$"}}), &["binding"]),
         variant("op", "scan", json!({"table":table}), &["table"]),
         variant(
             "op",
@@ -338,6 +373,10 @@ pub fn query_schema() -> serde_json::Value {
         ),
     ];
     let mut expressions = vec![
+        variant("kind", "outer_column", json!({"name":column_name,"depth":{"type":"integer","minimum":1,"maximum":64,"default":1,"description":"Lexical query-input depth. Ancestors require documented safe equality lifting."}}), &["name"]),
+        variant("kind", "in_query", json!({"value":expr,"input":plan,"negated":{"type":"boolean","default":false}}), &["value","input"]),
+        variant("kind", "exists_query", json!({"input":plan,"negated":{"type":"boolean","default":false}}), &["input"]),
+        variant("kind", "scalar_query", json!({"input":plan}), &["input"]),
         variant("kind", "column", json!({"name":column_name}), &["name"]),
         variant("kind", "literal", json!({"value":scalar}), &["value"]),
         variant(
@@ -376,7 +415,7 @@ pub fn query_schema() -> serde_json::Value {
             "Scalar":{"type":["null","boolean","string","number"],"description":"Integer lexemes must fit signed i64 or unsigned u64 exactly; floating-point lexemes must convert to finite f64. Arrays/objects are unsupported. Integer arithmetic and mixed-float comparisons preserve the exact numeric contract."},
             "TableRequest":object(json!({"name":{"type":"string","pattern":"^[A-Za-z_][A-Za-z0-9_]*$","maxLength":128},"mode":{"enum":["static","effective"]},"hotfix_captures":{"type":"array","maxItems":16,"uniqueItems":true,"items":{"type":"string","minLength":1},"default":[],"description":"Ordered explicit capture IDs, at most 256 UTF-8 bytes each, without controls. Static mode requires an empty list; effective mode requires 1 to 16 IDs; authenticity is checked by the source adapter."}}), &["name","mode"]),
             "QueryPlan":{"oneOf":plans},
-            "Expression":{"oneOf":expressions,"description":"CASE/COALESCE preserve lazy selection. Branches currently require a common exact type (integer domains promote to decimal integer, float32/64 to float64); mixed integer/float or heterogeneous result variants are rejected rather than rounded. LIKE uses Unicode scalar % and _ without an implicit escape convention; case mapping is Unicode simple, length counts Unicode scalars."},
+            "Expression":{"oneOf":expressions,"description":"Literal-decidable CASE/COALESCE bind all branches but execute only the selected branch. Query-valued dynamic THEN/ELSE, later potentially skipped WHEN, and COALESCE successors reject; first active CASE conditions may contain queries. Active dynamic scalar branches require a common exact type; integer/float or heterogeneous variants reject rather than round. LIKE uses Unicode scalar % and _ without implicit escape; case mapping is Unicode simple and length counts Unicode scalars."},
             "NamedExpression":object(json!({"name":name,"expression":expr}), &["name","expression"]),
             "JoinKey":object(json!({"left":column_name,"right":column_name}), &["left","right"]),
             "AggregateExpression":object(json!({"name":name,"function":{"enum":["count","sum","average","minimum","maximum"]},"expression":{"anyOf":[expr,{"type":"null"}],"description":"Only count may omit expression or use null; this counts all rows. count(expression) counts nonnull values."}}), &["name","function"]),
@@ -387,7 +426,10 @@ pub fn query_schema() -> serde_json::Value {
             "Scan columns are qualified by the requested table name. A join requalifies its immediate inputs as left and right; downstream duplicate columns must use left.Column or right.Column. Project to unique names before nesting joins with duplicate names.",
             "Projection and aggregate output names must be unique. An aggregate requires at least one group or metric. Limit offset + count must fit both platform usize and signed i64. Sort direction and NULL placement are explicit.",
             "Static/effective bindings are distinct. A single request cannot bind differing capture histories to the same table name and mode. Capture order is significant.",
-            "IN uses SQL NULL semantics and exact numeric equality; an empty value list returns false. Without sort, row order is unspecified."
+            "IN uses SQL NULL semantics and exact numeric equality; empty RHS returns false even for NULL; NOT IN empty returns true. Scalar query requires one column, yields NULL for zero rows and errors above one row. EXISTS values never NULL.",
+            "UnionAll preserves branch bag order with exact positional common types and input-zero labels. Nested/correlated ordered unions are not admitted. Other unsorted operators do not generally promise order.",
+            "Iterate is native previous-delta ALL recursion with exactly one matching Delta in its step. Nested/correlated Iterate is rejected. Native completion is mandatory under outer Limit and consumes the original query_work ceiling; exhausting work is an error, never truncated success.",
+            "Every nested query and conditional branch contributes source/evidence requirements before provider acquisition, including statically dead branches. Ancestor references require safe equality lifting; unsupported native correlation shapes are rejected."
         ]
     })
 }
@@ -480,3 +522,24 @@ mod schema_integer_tests {
         assert_eq!(serde_json::to_string(maximum).unwrap(), "4294967295");
     }
 }
+
+/// Typed navigation identity is bound to its presentation owner before I/O.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DomainRequest {
+    ItemGet { item_id: u32, mode: SourceMode, #[serde(default)] hotfix_captures: Vec<String> },
+    ItemModels { item_id: u32, race_id: i64, gender: i64, mode: SourceMode, #[serde(default)] hotfix_captures: Vec<String> },
+    ItemTextures { item_id: u32, mode: SourceMode, #[serde(default)] hotfix_captures: Vec<String> },
+    ItemGeosets { item_id: u32, mode: SourceMode, #[serde(default)] hotfix_captures: Vec<String> },
+    SpellInfo { spell_id: u32, max_depth: u32, mode: SourceMode, #[serde(default)] hotfix_captures: Vec<String> },
+    SpellAuras { spell_id: u32, mode: SourceMode, #[serde(default)] hotfix_captures: Vec<String> },
+    SpellSummons { spell_id: u32, npc_id: u32, mode: SourceMode, #[serde(default)] hotfix_captures: Vec<String> },
+    EncounterGet { encounter_id: u32, max_depth: u32, mode: SourceMode, #[serde(default)] hotfix_captures: Vec<String> },
+    DecorList { limit: u32, mode: SourceMode, #[serde(default)] hotfix_captures: Vec<String> },
+    DecorGet { field: DecorSelector, wanted: u32, mode: SourceMode, #[serde(default)] hotfix_captures: Vec<String> },
+    CreatureDisplay { display_id: u32, file_data_id: u32, mode: SourceMode, #[serde(default)] hotfix_captures: Vec<String> },
+    CreatureModel { file_data_id: u32, mode: SourceMode, #[serde(default)] hotfix_captures: Vec<String> },
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DecorSelector { Id, ItemId, ModelFileDataId }

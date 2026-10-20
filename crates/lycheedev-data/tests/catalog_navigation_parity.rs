@@ -15,7 +15,7 @@ use std::{
 };
 
 fn run(fx: &Fixture, command: &str, flags: &[(&str, &str)]) -> lycheedev_core::Outcome {
-    let result = lycheedev_data::dispatch(&fx.invocation(command, flags)).unwrap();
+    let result = lycheedev_data::migration_oracle::dispatch(&fx.invocation(command, flags)).unwrap();
     fx.verify(&result);
     result
 }
@@ -58,7 +58,7 @@ fn item_identity_class_partial_names_slots_and_captures_match_frozen_go() {
     assert_eq!(partial.data["item"]["subclassID"], 0);
     assert_eq!(partial.warnings,json!(["This result is only partially covered; inspect partialReasons for the unavailable tables and unresolved relations."]).as_array().unwrap().clone());
     let before = captures(&fx);
-    let absent = lycheedev_data::dispatch(&fx.invocation("data item get", &[("--item-id", "99")]))
+    let absent = lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item get", &[("--item-id", "99")]))
         .unwrap_err();
     assert_eq!(
         (
@@ -77,7 +77,7 @@ fn multi_table_item_query_reuses_metadata_instead_of_replaying_each_table_sessio
     let schema = |name: &str| {
         let mut inv = fx.invocation("data db2 schema", &[]);
         inv.positional = Some(name.into());
-        let outcome = lycheedev_data::dispatch(&inv).unwrap();
+        let outcome = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
         fx.verify(&outcome);
         outcome.data["resources"]["metadataBytes"].as_u64().unwrap()
     };
@@ -130,7 +130,7 @@ fn decor_list_keeps_zero_models_sorts_exactly_and_probes_one_extra_row() {
     let fx = Fixture::new(&[decors(&malformed)]);
     // Row20 is the extra row after ID10. A corrupt unused name still fails;
     // truncation cannot skip decoding the next matched row's full contents.
-    let error = lycheedev_data::dispatch(&fx.invocation("data decor list", &[("--limit", "1")]))
+    let error = lycheedev_data::migration_oracle::dispatch(&fx.invocation("data decor list", &[("--limit", "1")]))
         .unwrap_err();
     assert_eq!(error.code, "table.invalid_format");
     assert_eq!(captures(&fx), 0);
@@ -182,14 +182,14 @@ fn decor_get_all_selectors_preserve_ordered_ambiguity_and_original_relations() {
         &[("--id", "10"), ("--item-id", "42")][..],
     ] {
         let error =
-            lycheedev_data::dispatch(&fx.invocation("data decor get", selectors)).unwrap_err();
+            lycheedev_data::migration_oracle::dispatch(&fx.invocation("data decor get", selectors)).unwrap_err();
         assert_eq!(
             (error.code.as_str(), error.exit_code),
             ("records.request_conflict", 2)
         );
     }
     let absent =
-        lycheedev_data::dispatch(&fx.invocation("data decor get", &[("--id", "99")])).unwrap_err();
+        lycheedev_data::migration_oracle::dispatch(&fx.invocation("data decor get", &[("--id", "99")])).unwrap_err();
     assert_eq!(
         (absent.code.as_str(), absent.exit_code),
         ("records.record_not_found", 3)
@@ -251,25 +251,25 @@ fn catalog_navigation_errors_cancellation_locale_and_corrupt_sources_fail_closed
             3,
         ),
     ] {
-        let error = lycheedev_data::dispatch(&fx.invocation(command, &flags)).unwrap_err();
+        let error = lycheedev_data::migration_oracle::dispatch(&fx.invocation(command, &flags)).unwrap_err();
         assert_eq!((error.code.as_str(), error.exit_code), (code, exit));
     }
     let mut cancelled = fx.invocation("data decor list", &[("--limit", "1")]);
     let cancel = cancelled.control.cancel_handle();
     cancel.store(true, Ordering::Release);
     assert_eq!(
-        lycheedev_data::dispatch(&cancelled).unwrap_err().exit_code,
+        lycheedev_data::migration_oracle::dispatch(&cancelled).unwrap_err().exit_code,
         7
     );
     cancelled.control = OperationControl::new(Instant::now(), Arc::new(AtomicBool::new(false)));
     assert_eq!(
-        lycheedev_data::dispatch(&cancelled).unwrap_err().code,
+        lycheedev_data::migration_oracle::dispatch(&cancelled).unwrap_err().code,
         "command.deadline"
     );
     assert_eq!(captures(&fx), 0);
     let wrong_locale = Fixture::locale(&[decors(&decor_rows())], "enUS", 0x40);
     let error =
-        lycheedev_data::dispatch(&wrong_locale.invocation("data decor list", &[("--limit", "1")]))
+        lycheedev_data::migration_oracle::dispatch(&wrong_locale.invocation("data decor list", &[("--limit", "1")]))
             .unwrap_err();
     assert_eq!(error.code, "records.content_missing");
     assert_eq!(captures(&wrong_locale), 0);
@@ -283,7 +283,7 @@ fn catalog_navigation_errors_cancellation_locale_and_corrupt_sources_fail_closed
     let mut damaged = original.clone();
     damaged[39] ^= 1;
     fs::write(&archive, damaged).unwrap();
-    let result = lycheedev_data::dispatch(&fx.invocation("data decor list", &[("--limit", "3")]));
+    let result = lycheedev_data::migration_oracle::dispatch(&fx.invocation("data decor list", &[("--limit", "3")]));
     fs::write(&archive, original).unwrap();
     assert_eq!(result.unwrap_err().code, "archive.index_integrity");
     assert_eq!(captures(&fx), before);
@@ -299,7 +299,7 @@ fn decor_filter_uses_schema_and_exact_scalar_values_not_coercion() {
         &[vec![U(1), Text("保留原名".into()), Text("42".into())]],
     );
     let fx = Fixture::new(&[wrong]);
-    let error = lycheedev_data::dispatch(&fx.invocation("data decor get", &[("--item-id", "42")]))
+    let error = lycheedev_data::migration_oracle::dispatch(&fx.invocation("data decor get", &[("--item-id", "42")]))
         .unwrap_err();
     assert_eq!(
         (error.code.as_str(), error.exit_code, error.message.as_str()),
@@ -309,7 +309,7 @@ fn decor_filter_uses_schema_and_exact_scalar_values_not_coercion() {
             "records.field_type_mismatch: ItemID is locstring"
         )
     );
-    let error = lycheedev_data::dispatch(
+    let error = lycheedev_data::migration_oracle::dispatch(
         &fx.invocation("data decor get", &[("--model-file-data-id", "5")]),
     )
     .unwrap_err();

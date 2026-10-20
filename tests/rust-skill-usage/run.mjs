@@ -1,6 +1,7 @@
 // Controller for tools/rust-skill-usage.mjs only. Its complete process tree is
 // held in one Windows Job; never run this file as an unowned acceptance process.
 import assert from 'node:assert/strict';
+import {assertHelp, assertCommandSchema, assertSearch} from './agent-discovery.mjs';
 import {spawnSync} from 'node:child_process';
 import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync} from 'node:fs';
 import {dirname, delimiter, join, resolve} from 'node:path';
@@ -25,13 +26,13 @@ const report = {
   goContract: workflow.goContract, goVersion: workflow.goVersion, historicalWorkflow: workflow.historical,
   skillIdentity: dataSkillIdentity(), oracle, prompts: workflow.prompts, sourceTaskScope: workflow.sourceTaskScope, pendingTasks: pendingIncrementTasks(workflow), inputMode: 'full-fixed-retail-public-source-sync',
   packageSHA256, machine: {platform: process.platform, release: os.release(), arch: process.arch, node: process.version, cpu: os.cpus()[0]?.model, cores: os.cpus().length},
-  checks: [], commands: [], answers: [],
+  checks: [], commands: [], answers: [], discovery: [],
   boundaries: ['staged npm-prefix resolution fixture, not npm installation acceptance', 'selected full-Retail tasks; complete byte-authenticated corpus gate is separate', 'Go321 keyboard, Go322 slot startup and Go323 Data requirements retain their historical fixtures; selected candidate Skill bytes are authenticated separately and runtime tasks remain not_run', 'ordinary semantic refs/context do not establish complete native lifecycle or flow coverage', 'no game, source/config execution, release publication or performance claim', 'capture IDs belong to retired isolated home; their actual returned envelopes and excerpts remain in sealed evidence'],
 };
 const save = () => writeFileSync(join(out, 'report.json'), JSON.stringify(report, null, 2) + '\n');
 save();
 let fatalProcessFailure = false, sequence = 0, outputBytes = 0, stagedReady = false, directory, pin, api, action;
-const started = performance.now(), deadline = started + 1140000;
+const started = performance.now(), deadline = started + 570000;
 const prefix = join(scratch, '空间 prefix'), staged = join(prefix, 'node_modules', 'lycheedev'), home = join(scratch, '研究 home');
 const launcher = join(staged, 'payload', 'skill', 'scripts', 'lycheedev.mjs');
 const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !['PATH', 'LYCHEEDEV_BIN', 'LYCHEEDEV_HOME', 'HOME', 'USERPROFILE', 'TEMP', 'TMP'].includes(name.toUpperCase())));
@@ -40,9 +41,12 @@ for (const path of [env.HOME, env.TEMP]) mkdirSync(path, {recursive: true});
 
 function invoke(caseId, args, {expectedExit = 0, timeout = 210000, phase = 'local-fixed-source'} = {}) {
   assert(!fatalProcessFailure, 'prior process failure requires outer Job retirement');
+  const metadataOnly=['version','describe','help','query-help','query-schema','query-search'].includes(caseId);
+  const paths=[home,join(env.USERPROFILE,'.lycheedev')],before=metadataOnly?paths.map(path=>existsSync(path)):null;
+  if(metadataOnly)assert.deepEqual(before,[false,false]);
   const remaining = Math.floor(deadline - performance.now());
   if (remaining < 1000 || sequence >= 60 || outputBytes >= 192 << 20) { fatalProcessFailure = true; throw new Error('skill-usage.total_controller_budget'); }
-  const index = String(sequence++).padStart(3, '0'), fullArgs = [launcher, ...args, '--home', home, '--format', 'json'];
+  const index = String(sequence++).padStart(3, '0'), fullArgs = [launcher, ...args, ...(['cli','schema'].includes(args[0]) ? [] : ['--home',home]), '--format', 'json'];
   const time = performance.now(), startedAt = new Date().toISOString();
   const run = spawnSync(process.execPath, fullArgs, {cwd: scratch, env, windowsHide: true, shell: false, timeout: Math.min(timeout, remaining), maxBuffer: 12 << 20});
   const stdout = run.stdout ?? Buffer.alloc(0), stderr = run.stderr ?? Buffer.alloc(0);
@@ -57,6 +61,7 @@ function invoke(caseId, args, {expectedExit = 0, timeout = 210000, phase = 'loca
   save();
   const result = assertEnvelope({...observation, envelope}, expectedExit);
   assert.equal(run.signal, null, 'no process signal');
+  if(metadataOnly){const after=paths.map(path=>existsSync(path));assert.deepEqual(after,[false,false]);report.discovery.push({id:caseId,paths,before,after});save();}
   return {result, envelope, observation};
 }
 function check(caseId, work, {requires = []} = {}) {
@@ -105,8 +110,8 @@ try {
   for (const increment of workflow.increments) check(`fixed-skill-contract-${increment.id}`, () => assertPackagedIncrement(join(staged, 'payload', 'skill'), workflow, increment, report.skillIdentity));
   check('packaged-version', () => { const {result} = invoke('version', ['version']); assert.equal(result.platform, 'windows/amd64'); assert.equal(typeof result.rust, 'string'); assert(result.rust.length > 0); return {version: result.version, rust: result.rust}; });
   check('installed-command-discovery', () => { const {result} = invoke('describe', ['describe']); assert(Array.isArray(result.commands)); directory = result.commands; return {commands: directory.length}; });
-  check('installed-help', () => { const {result} = invoke('help', ['--help']); assert(Array.isArray(result.commands)); });
-  check('source-query-help', () => { supported('source query'); const {result} = invoke('query-help', ['source', 'query', '--help']); assert(result && typeof result === 'object'); });
+  check('installed-help', () => { const {result} = invoke('help', ['--help']); assertHelp(result); });
+  check('source-query-help', () => { supported('source query'); const {result} = invoke('query-help', ['source', 'query', '--help']); assertHelp(result,'source query'); assertCommandSchema(invoke('query-schema',['schema','source','query']).result,'source query'); assertSearch(invoke('query-search',['cli','search','source query']).result,'source query','source query'); });
   check('new-home-initialization', () => { supported('init'); invoke('init', ['init']); });
   check('discover-repository-and-track', () => {
     supported('source list'); const {result} = invoke('catalog', ['source', 'list']);

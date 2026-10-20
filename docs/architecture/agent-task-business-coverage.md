@@ -1,63 +1,66 @@
-# Typed Agent business coverage, 2026-10-20
+# Reconstructed typed Agent business coverage
 
-This is an implementation/validation matrix, not a completion declaration. All
-new Rust witnesses below are NOT_RUN until the official Windows queue runs the
-exact integrated candidate. Old routes remain available pending proven business
-coverage; none is called as a hidden fallback by these tasks.
+New source candidate based on b42, not the unavailable earlier candidate or its
+hash. This is a source mapping, not a native or result-quality pass. The restored
+core and session are integrated; the final migration gate additionally binds
+all current consumers and their independently reviewed source identities. No test, build or CI was dispatched during this
+reconstruction.
 
-| Existing business use | New interface | Actual coverage / remaining work |
+| Retained business capability | Formal new path | Evidence / boundary |
 | --- | --- | --- |
-| Known table schema / fields | `fields` (or `discover`) with explicit TableRequest | Owned DatasetInfo from the same Engine; exact schema and provenance, not a second decoder. Fixture declared. |
-| Table directory before knowing a name | `catalog` | Engine-owned fixed definition-manifest directory; complete applies only to manifest enumeration. Availability is not_checked, not a promise every table is installed/readable. Requires the core catalog delta. |
-| DB2 records by ID | `business` / `batch_ids` | Typed Lookup; exact u32 IDs, duplicate inputs do not duplicate source rows; missing IDs yield no invented rows. Source coverage still governs absence. Fixture declared. |
-| DB2 foreign-key matches | `business` / `related` | Typed Filter/In over explicit field and IDs, no coercive string matching. Unknown fields fail rather than return an empty success. Fixture declared. |
-| Filtering / projection / aggregation / joins | `query` with typed plan | Existing common Engine, no SQL prerequisite. Business-specific derived presentation not automatically equivalent. |
-| Item base and localized records | `business` / navigate `item_records` | Separate named Item and ItemSparse evidence components. No invented fallback row, slot-name presentation or legacy `item get` report parity claim. Fixture declared. |
-| Spell effects and aura/summon source evidence | navigate `spell_effects` | Full exact SpellID relation rows; legacy aura classification, summon array interpretation, recursive trigger/name reference closure and `spell info` report remain to migrate and verify. |
-| Decor record evidence | navigate `decor_records` | HouseDecor ID records. Legacy list order/limit/extra-row coverage and all get selectors remain separate migration requirements. |
-| Creature display and geoset evidence | navigate `creature_displays` | Named display lookup and exact CreatureDisplayInfoID relation. Model traversal, texture arrays and wrapped geoset presentation remain to migrate. |
-| Item models / geosets / textures | typed query primitives only | Domain joins, selector rules, array handling and report parity not yet implemented as a dedicated task. |
-| Encounter graph | typed query primitives only | Journal/encounter traversal, source selection and partial-relation behavior not yet implemented as a dedicated task. |
-| Existing SQL entry | no task SQL variant | Existing route is not unified yet. Do not describe typed-only Agent as a completed migration of every old consumer. |
-| CAP evidence catalog | separate owned CAP workstream | Result handles are not CAP IDs. This module does not invent persistence or replace CAP retention. |
+| Table directory | catalog | Exact pinned definition manifest, availability not_checked. |
+| DBD fields, foreign-key metadata and layout | fields/discover | Authenticated sourceDefinition/sourceLayout, not Arrow-name inference. |
+| Named flags, enums, applicability conditions | semantics | Original static DBD metadata, no row scan or implicit Hotfix state. |
+| Exact IDs | query Lookup / business batch_ids | Physical locator proofs, no guessed unsigned identity. |
+| Related records and search | Filter/In/Like with explicit fields | Exact types; partial coverage never establishes absence. |
+| Projection, arrays, arithmetic, null logic | typed expressions | Nested arrays and exact integers; unsupported coercions fail. |
+| Join, aggregate, order, bound | typed plans | Unified DataFusion and owned input/output, no old executor fallback. |
+| Union and former nonrecursive CTE/derived queries | UnionAll and nested plans | SQL syntax not required. Known business shapes have typed equivalents. |
+| Query-valued membership, existence, scalar result | advertised subquery expressions | Scoped outer references and cardinality rules; dynamic query-valued lazy branches and unsupported correlated combinations remain explicit. |
+| Bounded recursive relation | Iterate/Delta | Previous-delta semantics with explicit bounds, not arbitrary SQL recursion. |
+| Explain / Analyze | Explain task | Native plan and single execution; request totals and prerequisite/root metric scope disclosed. |
+| Streaming/export | retained result Page / JSON or CSV Export | Does not rerun query, page-bound owner retained; CSV protocol may differ while values stay exact. |
+| Full query evidence | Capture | Complete result, typed request/source proof and Data CAP catalog. 16 MiB refusal, never silent truncation. |
+| Item get/models/textures/geosets | Navigate four Item kinds | Mature selectors and asset algorithms through shared Engine physical rows. |
+| Spell info/auras/summons | Navigate three Spell kinds | Mature relations, recursion and coverage; not arbitrary recursion equivalence. |
+| Encounter get | Navigate encounter_get | Mature tree/selector behavior; empty encounter avoids unrelated spell reads. |
+| Decor list/get | Navigate two Decor kinds | Mature ordering/selectors/extra-row completeness. |
+| Creature display/model | Navigate two Creature kinds | requestedFileDataID remains separate from computed fileDataID. |
+| Domain evidence | automatic Domain CAP | Same-engine private request binding, complete report/relations/source dependencies. |
+| Raw Hotfix / assets / generation preparation | Existing authenticated handlers | Still production; these are shared source/IO capabilities, not a second query executor. |
 
-## Publication and evidence semantics
+The former eighteen SQL/DB2/navigation CLI paths are retired from the formal
+catalog and dispatch. Migration-oracle features retain explicit comparison entry
+points. Shared scalar values, row traits, source decoders, authenticators and
+mature domain algorithms remain valid reusable code; retaining a module name is
+not proof of a legacy production fallback.
 
-A business bundle executes all component typed plans against the same Engine and
-its immutable source binding. It retains each ResultOwner and guarded provenance
-until publication. Each component gets a separate result handle, complete flag
-and provenance; there is deliberately no synthetic bundle-wide `complete: true`.
+Source and Live are not replaced by Data tasks. Source's binary Facts/Index and
+unmodified Emmy contract, and Live's private SessionOwner/Mailbox Protocol v1,
+remain part of the whole-product implementation and final unified queue.
 
-A source, field, query or handle-admission failure returns an error without
-publishing a partial set of handles. Already inserted, unpublished handles are
-rolled back. Handle TTL starts after all component queries are ready. Results
-are not silently sliced to fit limits; budget exhaustion is an error. No automatic
-replay or old-executor fallback occurs.
+Current consumers are owned Agent paired collectors, installed Skill Agent
+harness and supervised Agent pipe/deadline tools. Historical Go reports, old
+SQL/DB2 differential scripts and the fixed old blind trial are explicitly
+historical; they cannot establish the reconstructed product's success. All new
+Rust/Node declarations are NOT_RUN. Performance and the final audit loops remain
+after business quality, not implied by implementation or source review.
 
-Missing rows in incomplete source coverage cannot establish absence. Navigation
-components are raw evidence records, not promises that a recursive business graph
-has been traversed. Clients must inspect each component's coverage/provenance and
-retain the needed pages before releasing handles or closing the session.
+## Explicit relational boundaries of this candidate
 
-## Native regression queue
+The typed entry is not a compatibility SQL parser. Dynamic query-valued lazy
+CASE/COALESCE branches, unsupported correlated LIMIT/order/union shapes, and
+correlated Iterate are refused rather than sent to the old executor. Native
+subquery decorrelation must preserve lexical scope, equality/cardinality and
+empty-aggregate compensation; shapes that cannot satisfy those proofs are not
+silently approximated. Ordered UnionAll in recursive/correlated steps is not
+advertised as a general ordered-apply implementation. Compound inputs require
+an exact common type and cannot round mixed wide integers/floats. Recursive
+seed columns require a non-null exact type and Delta belongs to its matching
+bounded Iterate step. These boundaries remain visible in schema/errors and
+must be included when selecting the actual business acceptance matrix.
 
-Run the exact candidate's Data library tests including:
-- fields_and_batch_tasks_use_real_pinned_source
-- item_navigation_publishes_separate_guarded_components_without_invented_rows
-- related_task_filters_exact_foreign_ids_and_rejects_missing_field
-- multi_component_capacity_failure_rolls_back_unpublished_handles
-- catalog_is_pinned_manifest_inventory_not_table_readability
-- second_component_source_failure_preserves_preexisting_handle
-- task-template wire rejection and 16384-ID boundary unit tests
-
-Also rerun existing Agent session/transport and CLI supervisor tests. Syntax
-formatting is not a substitute for type checking, business parity or runtime
-ownership/cancellation evidence.
-
-Still pending dedicated evidence: effective multi-component histories, partial-empty source absence handling, TTL under delayed execution, shared-budget refund/peak accounting, and old presentation/recursive closure parity. Existing guards and exact pin use do not by themselves prove those runtime behaviors.
-
-All components share the request OperationControl deadline and the Engine session
-retained-memory admission. Engine query_work is currently admitted per component,
-not one combined work counter for a business bundle. The present templates have
-at most two components. This is an explicit bound, not a claim of whole-request
-work accounting or a reason to raise the session memory limit.
+Analyze records real whole-request elapsed/work ledger and completed
+prerequisite ranges once, plus native root plan metrics. It does not pretend
+those root node metrics include separately completed prerequisites, count the
+logical ledger as CPU/RSS, or re-execute prerequisites to fabricate metrics.

@@ -41,7 +41,7 @@ fn tables() -> Vec<Table> {
     ]
 }
 fn run(fx: &Fixture, item: &str) -> Outcome {
-    let out=lycheedev_data::dispatch(&fx.invocation("data item textures",&[("--item-id",item)])).unwrap();
+    let out=lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item textures",&[("--item-id",item)])).unwrap();
     fx.verify(&out);
     assert_eq!(out.provenance[0]["provenance"]["kind"],"item-textures");
     assert_eq!(out.provenance[0]["provenance"]["locator"],format!("item:textures:{item}"));
@@ -93,7 +93,7 @@ fn shared_appearance_missing_sections_and_existing_zero_display_keep_exact_empty
         relation("ItemModifiedAppearance","ItemAppearanceID",80,"item_appearance",700,0),
         relation("ItemAppearance","ItemDisplayInfoID",700,"item_display",0,1),
     ]));
-    let before=captures(&fx);let error=lycheedev_data::dispatch(&fx.invocation("data item textures",&[("--item-id","999")])).unwrap_err();
+    let before=captures(&fx);let error=lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item textures",&[("--item-id","999")])).unwrap_err();
     assert_eq!((error.code.as_str(),error.exit_code),("records.record_not_found",3));assert_eq!(captures(&fx),before);
 }
 
@@ -149,23 +149,23 @@ fn invalid_texture_tables() -> Vec<Table> {
 #[test]
 fn six_required_tables_and_full_nonmatching_row_decode_fail_without_captures() {
     let mut all=tables();all.truncate(1);all[0].raw.pop();let fx=Fixture::new(&all);
-    assert_eq!(lycheedev_data::dispatch(&fx.invocation("data item textures",&[("--item-id","1")])).unwrap_err().code,"table.invalid_format");
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item textures",&[("--item-id","1")])).unwrap_err().code,"table.invalid_format");
     assert_eq!(captures(&fx),0);
     for count in [4,5] {
         let fx=Fixture::new(&tables()[..count]);
-        for item in ["1","4","7","999"] {assert!(lycheedev_data::dispatch(&fx.invocation("data item textures",&[("--item-id",item)])).is_err());}
+        for item in ["1","4","7","999"] {assert!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item textures",&[("--item-id",item)])).is_err());}
         assert_eq!(captures(&fx),0);
     }
     for all in [invalid_section_tables(),invalid_texture_tables()] {
         let fx=Fixture::new(&all);
-        assert_eq!(lycheedev_data::dispatch(&fx.invocation("data item textures",&[("--item-id","1")])).unwrap_err().code,"table.invalid_format");
+        assert_eq!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item textures",&[("--item-id","1")])).unwrap_err().code,"table.invalid_format");
         assert_eq!(captures(&fx),0);
         assert!(run(&fx,"4").complete);assert!(run(&fx,"7").complete,"zero display stops before scanning even when its row exists");
     }
     let fx=Fixture::new(&invalid_texture_tables());assert!(run(&fx,"6").complete,"no section does not scan texture rows");
     let mut all=tables();all[4]=table("ItemDisplayInfoMaterialRes",705,&[("ID","uint"),("ItemDisplayInfoID","text")],&[vec![U(1),Cell::Text("1000".into())]]);
     let fx=Fixture::new(&all);
-    assert_eq!(lycheedev_data::dispatch(&fx.invocation("data item textures",&[("--item-id","1")])).unwrap_err().code,"records.field_type_mismatch");assert_eq!(captures(&fx),0);
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item textures",&[("--item-id","1")])).unwrap_err().code,"records.field_type_mismatch");assert_eq!(captures(&fx),0);
 }
 
 #[test]
@@ -178,17 +178,17 @@ fn six_table_authentication_warm_reuse_and_argument_control_errors_stay_bounded(
     let mut independent=0;
     for name in TABLES {
         let mut inv=fx.invocation("data db2 schema",&[]);inv.positional=Some((*name).into());
-        independent+=lycheedev_data::dispatch(&inv).unwrap().data["resources"]["metadataBytes"].as_u64().unwrap();
+        independent+=lycheedev_data::migration_oracle::dispatch(&inv).unwrap().data["resources"]["metadataBytes"].as_u64().unwrap();
     }
     assert!(warm.data["resources"]["metadataBytes"].as_u64().unwrap()<independent);
     let before=captures(&fx);
     for flags in [vec![],vec![("--item-id","0")],vec![("--item-id","-1")],vec![("--item-id","4294967296")]] {
-        assert_eq!(lycheedev_data::dispatch(&fx.invocation("data item textures",&flags)).unwrap_err().exit_code,2);
+        assert_eq!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item textures",&flags)).unwrap_err().exit_code,2);
     }
     let mut inv=fx.invocation("data item textures",&[("--item-id","1")]);inv.control.cancel_handle().store(true,Ordering::Release);
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().exit_code,7);
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().exit_code,7);
     inv.control=OperationControl::new(Instant::now(),Arc::new(AtomicBool::new(false)));
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().code,"command.deadline");assert_eq!(captures(&fx),before);
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code,"command.deadline");assert_eq!(captures(&fx),before);
 }
 
 #[test]

@@ -153,7 +153,7 @@ fn csv_numeric_consumer_skips_layout_and_preserves_exact_output_and_both_capture
     let fx = fixture();
     let inv = invocation(&fx, true);
     let before = captures(&fx).len();
-    let (out, calls) = with_layout_count(|| crate::dispatch(&inv));
+    let (out, calls) = with_layout_count(|| crate::migration_oracle::dispatch(&inv));
     let out = out.unwrap();
     assert_eq!(calls, 0);
     assert!(matches!(
@@ -187,7 +187,7 @@ fn ordinary_numeric_consumer_keeps_layout_and_full_public_and_archive_tokens() {
     let fx = fixture();
     let inv = invocation(&fx, false);
     let before = captures(&fx).len();
-    let (out, calls) = with_layout_count(|| crate::dispatch(&inv));
+    let (out, calls) = with_layout_count(|| crate::migration_oracle::dispatch(&inv));
     let out = out.unwrap();
     assert_eq!(calls, 1);
     assert!(matches!(
@@ -233,7 +233,7 @@ fn csv_conflict_still_follows_query_capture_without_constructing_layout() {
     fs::write(&path, b"original data").unwrap();
     fs::write(&sidecar, b"original manifest").unwrap();
     let before = captures(&fx);
-    let (error, calls) = with_layout_count(|| crate::dispatch(&inv));
+    let (error, calls) = with_layout_count(|| crate::migration_oracle::dispatch(&inv));
     let error = error.unwrap_err();
     assert_eq!(calls, 0);
     assert_eq!(error.code, "records.export_conflict");

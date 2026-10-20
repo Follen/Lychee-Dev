@@ -245,7 +245,7 @@ fn real_pinned_public_sql_and_asset_dispatch() {
         home: home.clone(),
         cwd: home.clone(),
     };
-    let sql = lycheedev_data::dispatch(&inv).unwrap();
+    let sql = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(
         sql.data["result"]["rows"][0],
         json!([0, "Azeroth", "东部王国"])
@@ -256,7 +256,7 @@ fn real_pinned_public_sql_and_asset_dispatch() {
     asset_inv.flags.remove("--sql");
     asset_inv.flags.remove("--param");
     asset_inv.flags.insert("--file-id".into(), "1349477".into());
-    let asset = lycheedev_data::dispatch(&asset_inv).unwrap();
+    let asset = lycheedev_data::migration_oracle::dispatch(&asset_inv).unwrap();
     assert_eq!(
         asset.data["content"]["sha256"],
         "f4914e00483fec93f634cff52682518eefaf1921226f6e679929551a49a49a40"

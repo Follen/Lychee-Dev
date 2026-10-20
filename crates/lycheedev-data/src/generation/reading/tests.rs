@@ -72,7 +72,7 @@ fn replace_object(fx: &Fixture, outcome: &Outcome, bytes: &[u8]) {
 fn second_public_prepare_reuses_exact_typed_object_without_import_or_encoding() {
     let fx = sample();
     let inv = command(&fx);
-    let first = crate::dispatch(&inv).unwrap();
+    let first = crate::migration_oracle::dispatch(&inv).unwrap();
     let before = importer_calls();
     let object = object_path(&fx, &first);
     let bytes = fs::read(&object).unwrap();
@@ -172,9 +172,9 @@ fn repeated_partial_generation_keeps_exact_missing_key_coverage() {
     let (_, encoded) = fixture::encrypted_frame(&spec.raw);
     let fx = Fixture::with_encoded_table(spec, encoded);
     let inv = command(&fx);
-    let first = crate::dispatch(&inv).unwrap();
+    let first = crate::migration_oracle::dispatch(&inv).unwrap();
     let before = importer_calls();
-    let second = crate::dispatch(&inv).unwrap();
+    let second = crate::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(importer_calls(), before);
     assert!(!first.complete && !second.complete);
     assert_eq!(second.data["generationReused"], true);
@@ -191,10 +191,10 @@ fn repeated_partial_generation_keeps_exact_missing_key_coverage() {
 fn existing_hit_remains_readable_after_quota_is_lowered_without_write_permission() {
     let fx = sample();
     let inv = command(&fx);
-    let first = crate::dispatch(&inv).unwrap();
+    let first = crate::migration_oracle::dispatch(&inv).unwrap();
     let original = fs::read(manifest_path(&fx, &first)).unwrap();
     fs::write(fx.home.join("config.json"), br#"{"schema":"lycheedev.config.v1","cache":{"maxBytes":21474836480},"dataCache":{"maxBytes":1}}"#).unwrap();
-    let second = crate::dispatch(&inv).unwrap();
+    let second = crate::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(second.data["generationReused"], true);
     assert_eq!(second.data["diskRead"]["overBudget"], true);
     assert_eq!(fs::read(manifest_path(&fx, &first)).unwrap(), original);
@@ -207,7 +207,7 @@ fn invalid_manifest_coverage_is_not_a_silent_miss_or_rewrite() {
     let (_, encoded) = fixture::encrypted_frame(&spec.raw);
     let fx = Fixture::with_encoded_table(spec, encoded);
     let inv = command(&fx);
-    let first = crate::dispatch(&inv).unwrap();
+    let first = crate::migration_oracle::dispatch(&inv).unwrap();
     let path = manifest_path(&fx, &first);
     let bytes = fs::read_to_string(&path).unwrap();
     assert!(bytes.contains("\"complete\":false"));
@@ -215,7 +215,7 @@ fn invalid_manifest_coverage_is_not_a_silent_miss_or_rewrite() {
     fs::write(&path, &bad).unwrap();
     let before = importer_calls();
     assert_eq!(
-        crate::dispatch(&inv).unwrap_err().code,
+        crate::migration_oracle::dispatch(&inv).unwrap_err().code,
         "records.generation_invalid"
     );
     assert_eq!(importer_calls(), before);
@@ -227,13 +227,13 @@ fn invalid_manifest_coverage_is_not_a_silent_miss_or_rewrite() {
 fn corrupt_object_hash_is_hard_error_and_preserves_receipt() {
     let fx = sample();
     let inv = command(&fx);
-    let first = crate::dispatch(&inv).unwrap();
+    let first = crate::migration_oracle::dispatch(&inv).unwrap();
     let path = object_path(&fx, &first);
     let mut bytes = fs::read(&path).unwrap();
     bytes[0] ^= 1;
     fs::write(&path, &bytes).unwrap();
     let before = importer_calls();
-    assert!(crate::dispatch(&inv).is_err());
+    assert!(crate::migration_oracle::dispatch(&inv).is_err());
     assert_eq!(importer_calls(), before);
     assert_eq!(fs::read(path).unwrap(), bytes);
     assert!(manifest_path(&fx, &first).exists());
@@ -244,14 +244,14 @@ fn corrupt_object_hash_is_hard_error_and_preserves_receipt() {
 fn authenticated_invalid_footer_length_is_rejected_before_arrow_allocation() {
     let fx = sample();
     let inv = command(&fx);
-    let first = crate::dispatch(&inv).unwrap();
+    let first = crate::migration_oracle::dispatch(&inv).unwrap();
     let mut bytes = fs::read(object_path(&fx, &first)).unwrap();
     let at = bytes.len() - 10;
     bytes[at..at + 4].copy_from_slice(&i32::MAX.to_le_bytes());
     replace_object(&fx, &first, &bytes);
     let before = importer_calls();
     assert_eq!(
-        crate::dispatch(&inv).unwrap_err().code,
+        crate::migration_oracle::dispatch(&inv).unwrap_err().code,
         "records.generation_invalid"
     );
     assert_eq!(importer_calls(), before);
@@ -262,7 +262,7 @@ fn authenticated_invalid_footer_length_is_rejected_before_arrow_allocation() {
 fn authenticated_wrong_private_record_id_is_rejected_without_reimport() {
     let fx = sample();
     let inv = command(&fx);
-    let first = crate::dispatch(&inv).unwrap();
+    let first = crate::migration_oracle::dispatch(&inv).unwrap();
     let old = fs::read(object_path(&fx, &first)).unwrap();
     let mut reader = FileReader::try_new(std::io::Cursor::new(old), None).unwrap();
     let batch = reader.next().unwrap().unwrap();
@@ -278,7 +278,7 @@ fn authenticated_wrong_private_record_id_is_rejected_without_reimport() {
     replace_object(&fx, &first, &bytes);
     let before = importer_calls();
     assert_eq!(
-        crate::dispatch(&inv).unwrap_err().code,
+        crate::migration_oracle::dispatch(&inv).unwrap_err().code,
         "records.generation_invalid"
     );
     assert_eq!(importer_calls(), before);
@@ -289,7 +289,7 @@ fn authenticated_wrong_private_record_id_is_rejected_without_reimport() {
 fn cancellation_after_authenticated_hit_keeps_existing_object_and_generation() {
     let fx = sample();
     let inv = command(&fx);
-    let first = crate::dispatch(&inv).unwrap();
+    let first = crate::migration_oracle::dispatch(&inv).unwrap();
     let manifest = fs::read(manifest_path(&fx, &first)).unwrap();
     let object = fs::read(object_path(&fx, &first)).unwrap();
     let cancel = inv.control.cancel_handle();
@@ -323,7 +323,7 @@ fn cancellation_after_authenticated_hit_keeps_existing_object_and_generation() {
 fn hit_still_reauthenticates_original_source_before_returning_success() {
     let fx = sample();
     let inv = command(&fx);
-    let first = crate::dispatch(&inv).unwrap();
+    let first = crate::migration_oracle::dispatch(&inv).unwrap();
     let version = fx.client.join("version.txt");
     let original = fs::read(&version).unwrap();
     let mut reached = false;
@@ -342,7 +342,7 @@ fn hit_still_reauthenticates_original_source_before_returning_success() {
     assert!(reached);
     assert_eq!(error.code, "records.pinned_build_changed");
     assert!(manifest_path(&fx, &first).exists());
-    assert!(crate::dispatch(&inv).unwrap().complete);
+    assert!(crate::migration_oracle::dispatch(&inv).unwrap().complete);
     fs::remove_dir_all(fx.root).unwrap();
 }
 
@@ -350,7 +350,7 @@ fn hit_still_reauthenticates_original_source_before_returning_success() {
 fn checked_close_failure_retains_existing_reuse_fact_without_new_publication() {
     let fx = sample();
     let inv = command(&fx);
-    let first = crate::dispatch(&inv).unwrap();
+    let first = crate::migration_oracle::dispatch(&inv).unwrap();
     let error =
         application::dispatch_after_hooks(&inv, &mut || panic!("hit encoded"), &mut |result| {
             assert_eq!(result.as_ref().unwrap().data["generationReused"], true);
@@ -405,10 +405,10 @@ fn cached_fixed_lists_and_u64_max_span_multiple_real_ipc_batches() {
     spec.dbd = spec.dbd.replace("Exact<64>", "Exact<u64>");
     let fx = Fixture::new(&[spec]);
     let inv = command(&fx);
-    let first = crate::dispatch(&inv).unwrap();
+    let first = crate::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(first.data["batchCount"], 2);
     let before = importer_calls();
-    let second = crate::dispatch(&inv).unwrap();
+    let second = crate::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(importer_calls(), before);
     assert_eq!(second.data["generationReused"], true);
     let reader = FileReader::try_new(
@@ -463,7 +463,7 @@ fn cached_fixed_lists_and_u64_max_span_multiple_real_ipc_batches() {
 fn matching_object_with_nonfinite_float_is_not_adopted_as_valid_generation() {
     let fx = sample();
     let inv = command(&fx);
-    let first = crate::dispatch(&inv).unwrap();
+    let first = crate::migration_oracle::dispatch(&inv).unwrap();
     let old = fs::read(object_path(&fx, &first)).unwrap();
     let mut reader = FileReader::try_new(std::io::Cursor::new(old), None).unwrap();
     let batch = reader.next().unwrap().unwrap();
@@ -478,7 +478,7 @@ fn matching_object_with_nonfinite_float_is_not_adopted_as_valid_generation() {
     drop(writer);
     replace_object(&fx, &first, &bytes);
     assert_eq!(
-        crate::dispatch(&inv).unwrap_err().code,
+        crate::migration_oracle::dispatch(&inv).unwrap_err().code,
         "records.generation_invalid"
     );
     fs::remove_dir_all(fx.root).unwrap();
@@ -610,7 +610,7 @@ fn malformed_ipc(original: &[u8], case: usize) -> Vec<u8> {
 fn authenticated_malformed_ipc_cases_are_typed_errors_without_panic_or_fallback() {
     let fx = sample();
     let inv = command(&fx);
-    let first = crate::dispatch(&inv).unwrap();
+    let first = crate::migration_oracle::dispatch(&inv).unwrap();
     let original = fs::read(object_path(&fx, &first)).unwrap();
     let path = manifest_path(&fx, &first);
     let original_manifest = fs::read(&path).unwrap();
@@ -621,7 +621,7 @@ fn authenticated_malformed_ipc_cases_are_typed_errors_without_panic_or_fallback(
         replace_object(&fx, &first, &bad);
         let bad_manifest = fs::read(&path).unwrap();
         let result =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::dispatch(&inv)))
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::migration_oracle::dispatch(&inv)))
                 .unwrap_or_else(|_| panic!("IPC case {case} panicked"));
         assert_eq!(
             result.unwrap_err().code,
@@ -638,7 +638,7 @@ fn authenticated_malformed_ipc_cases_are_typed_errors_without_panic_or_fallback(
     }
     fs::write(&path, original_manifest).unwrap();
     assert_eq!(
-        crate::dispatch(&inv).unwrap().data["generationReused"],
+        crate::migration_oracle::dispatch(&inv).unwrap().data["generationReused"],
         true
     );
     assert_eq!(importer_calls(), before);
@@ -654,11 +654,11 @@ fn empty_static_generation_reuses_zero_batch_ipc_without_claiming_rows() {
         &[],
     )]);
     let inv = command(&fx);
-    let first = crate::dispatch(&inv).unwrap();
+    let first = crate::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(first.data["availableRows"], 0);
     assert_eq!(first.data["batchCount"], 0);
     let before = importer_calls();
-    let second = crate::dispatch(&inv).unwrap();
+    let second = crate::migration_oracle::dispatch(&inv).unwrap();
     assert!(second.complete);
     assert_eq!(second.data["generationReused"], true);
     assert_eq!(importer_calls(), before);
@@ -747,7 +747,7 @@ fn cold_import_and_large_typed_rehit_fit_the_same_original_work_budget() {
     let before_cold = importer_calls();
     // First invocation starts with no decoded/derived table cache. Do not warm
     // the source or relax the public query's original 100M work allowance.
-    let first = crate::dispatch(&inv).unwrap();
+    let first = crate::migration_oracle::dispatch(&inv).unwrap();
     assert!(importer_calls() > before_cold);
     assert_eq!(first.data["availableRows"], ROWS);
     assert_eq!(first.data["complete"], true);

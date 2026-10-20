@@ -22,6 +22,12 @@ pub struct OwnedCapture {
     #[serde(skip)]
     lifetime: Arc<RequestLifetime>,
 }
+impl OwnedCapture {
+    /// Transport retains committed identity if serialization/flush fails later.
+    pub(crate) fn committed_error(&self, error: ToolkitError) -> ToolkitError {
+        committed_error(error, &self.value)
+    }
+}
 impl std::fmt::Debug for OwnedCapture {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OwnedCapture")
@@ -107,65 +113,149 @@ impl Serialize for Body<'_> {
         object.end()
     }
 }
+
 pub(super) fn capture(
     invocation: &Invocation,
     result: &ResultOwner,
     lifetime: Arc<RequestLifetime>,
     control: OperationControl,
 ) -> Result<OwnedCapture> {
-    control.check()?;
-    let budget = &lifetime.budget;
-    // One row's conversion scratch is reused, separate from the bounded body.
-    let scratch = budget.reserve_retained(MAXIMUM)?;
-    // Core capture documents have a fixed 1 MiB bound; retain the parsed receipt.
-    let receipt = budget.reserve_retained(32 << 20)?.into_owned(budget)?;
     let error = RefCell::new(None);
     let body = Body {
         result,
-        budget,
+        budget: &lifetime.budget,
         error: &error,
     };
-    let encoded = capture::json_bytes_owned(&body, budget, MAXIMUM, limit);
-    let (raw, allocation) = match encoded {
-        Ok(value) => value,
-        Err(failure) => return Err(error.into_inner().unwrap_or(failure)),
-    };
-    drop(scratch);
-    let request_digest = capture::json_sha256(
-        &result.provenance["request"],
-        budget,
-        serde_json::ser::CompactFormatter,
-    )?;
     let references = result
         .dependencies
         .iter()
         .map(String::as_str)
         .collect::<Vec<_>>();
+    commit_body(
+        invocation,
+        &body,
+        &result.provenance["request"],
+        &references,
+        result.complete,
+        false,
+        "data-agent-query",
+        MAXIMUM,
+        &error,
+        lifetime.clone(),
+        control,
+    )
+}
+#[derive(Serialize)]
+struct DomainBody<'a> {
+    schema: &'static str,
+    request: &'a super::api::DomainRequest,
+    result: &'a super::domain::DomainResult,
+    complete: bool,
+}
+pub(super) fn capture_domain(
+    invocation: &Invocation,
+    result: &super::domain::DomainResult,
+    request: &super::api::DomainRequest,
+    lifetime: Arc<RequestLifetime>,
+    control: OperationControl,
+) -> Result<OwnedCapture> {
+    control.check()?;
+    let complete = result.complete()?;
+    let truncated = result.truncated()?;
+    let count = result.sources().iter().try_fold(0usize, |n, source| {
+        n.checked_add(source.dependencies().len()).ok_or_else(limit)
+    })?;
+    let reference_allocation = lifetime.budget.reserve_retained(
+        count
+            .checked_mul(std::mem::size_of::<&str>())
+            .ok_or_else(limit)?,
+    )?;
+    let mut references = result
+        .sources()
+        .iter()
+        .flat_map(|source| source.dependencies().iter().map(String::as_str))
+        .collect::<Vec<_>>();
+    references.sort_unstable();
+    references.dedup();
+    let body = DomainBody {
+        schema: "lycheedev.data-agent-domain-result.v1",
+        request,
+        result,
+        complete,
+    };
+    let error = RefCell::new(None);
+    let outcome = commit_body(
+        invocation,
+        &body,
+        request,
+        &references,
+        complete,
+        truncated,
+        "data-agent-domain",
+        0,
+        &error,
+        lifetime.clone(),
+        control,
+    );
+    drop(references);
+    drop(reference_allocation);
+    // The common commit may have settled while this short-lived index existed.
+    // Reconcile after its real release; retain committed identity on failure.
+    if let Ok(ref receipt) = outcome {
+        if let Err(error) = lifetime.settle() {
+            return Err(committed_error(error, &receipt.value));
+        }
+    }
+    outcome
+}
+fn committed_error(mut error: ToolkitError, value: &Value) -> ToolkitError {
+    let primary = error.clone();
+    error.details = serde_json::json!({"schema":"lycheedev.capture-commit-error.v1", "primary":primary,
+        "capturePublication":{"state":"committed","id":value["id"]}, "completedCaptures":[value["id"]]});
+    error
+}
+fn commit_body(
+    invocation: &Invocation,
+    body: &impl Serialize,
+    request: &impl Serialize,
+    references: &[&str],
+    complete: bool,
+    truncated: bool,
+    kind: &'static str,
+    scratch_bytes: usize,
+    error: &RefCell<Option<ToolkitError>>,
+    lifetime: Arc<RequestLifetime>,
+    control: OperationControl,
+) -> Result<OwnedCapture> {
+    control.check()?;
+    let budget = &lifetime.budget;
+    let scratch = budget.reserve_retained(scratch_bytes)?;
+    let receipt = budget.reserve_retained(32 << 20)?.into_owned(budget)?;
+    let (raw, allocation) = capture::json_bytes_owned(body, budget, MAXIMUM, limit)
+        .map_err(|failure| error.borrow_mut().take().unwrap_or(failure))?;
+    drop(scratch);
+    let request_digest = capture::json_sha256(request, budget, serde_json::ser::CompactFormatter)?;
     let committed = evidence::commit_capture_budgeted_with_dependencies(
         &invocation.home,
         evidence::CaptureInput {
             bytes: &raw,
             maximum_bytes: MAXIMUM,
             media_type: "application/json",
-            provenance: serde_json::json!({"kind":"data-agent-query", "locator":format!("typed:sha256:{request_digest}"),
+            provenance: serde_json::json!({"kind":kind, "locator":format!("typed:sha256:{request_digest}"),
                 "snapshot":invocation.flags.get("--snapshot")}),
-            complete: result.complete,
-            truncated: false,
+            complete,
+            truncated,
         },
-        &references,
+        references,
         &control,
         budget.as_ref(),
     );
-    // Never release the body admission before its backing bytes.
     drop(raw);
     drop(allocation);
     let value = committed?;
-    if let Err(mut error) = lifetime.settle() {
-        let primary = error.clone();
-        error.details = serde_json::json!({"schema":"lycheedev.capture-commit-error.v1", "primary":primary,
-            "capturePublication":{"state":"committed","id":value["id"]}, "completedCaptures":[value["id"]]});
-        return Err(error);
-    }
+    lifetime
+        .settle()
+        .map_err(|error| committed_error(error, &value))?;
     Ok(OwnedCapture {
         value,
         allocation: Some(receipt),

@@ -22,14 +22,14 @@ fn invocation(f: &SqlFixture, command: &str, flags: &[(&str, &str)]) -> Invocati
 #[test]
 fn default_remote_db2_record_page_schema_search_and_foreign_key_capture_exact_bytes() {
     let f = SqlFixture::new(false, true);
-    let record = crate::dispatch(&invocation(&f, "data db2", &[("--id", "7")])).unwrap();
+    let record = crate::migration_oracle::dispatch(&invocation(&f, "data db2", &[("--id", "7")])).unwrap();
     assert_eq!(
         record.data["row"],
         json!({"ID":7,"Name":"verified remote row"})
     );
     assert_eq!(record.data["file"]["source"], "cdn");
     f.verify(&record);
-    let page = crate::dispatch(&invocation(&f, "data db2", &[("--limit", "1")])).unwrap();
+    let page = crate::migration_oracle::dispatch(&invocation(&f, "data db2", &[("--limit", "1")])).unwrap();
     assert_eq!(page.data["page"]["ids"], json!([7]));
     assert_eq!(page.data["page"]["more"], false);
     assert_eq!(page.data["file"]["source"], "cdn");
@@ -49,7 +49,7 @@ fn default_remote_db2_record_page_schema_search_and_foreign_key_capture_exact_by
             vec![("--field", "ID"), ("--value", "7"), ("--limit", "1")],
         ),
     ] {
-        let out = crate::dispatch(&invocation(&f, command, &flags)).unwrap();
+        let out = crate::migration_oracle::dispatch(&invocation(&f, command, &flags)).unwrap();
         assert_eq!(out.data["source"], "cdn");
         assert_eq!(out.data["tables"][0]["contentVerified"], true);
         if command != "data db2 schema" {
@@ -66,12 +66,12 @@ fn default_remote_db2_record_page_schema_search_and_foreign_key_capture_exact_by
 #[test]
 fn default_remote_db2_schema_does_not_decode_invalid_string_cells() {
     let f = SqlFixture::new(true, true);
-    let schema = crate::dispatch(&invocation(&f, "data db2 schema", &[])).unwrap();
+    let schema = crate::migration_oracle::dispatch(&invocation(&f, "data db2 schema", &[])).unwrap();
     assert_eq!(schema.data["source"], "cdn");
     f.verify(&schema);
     let before = f.captures().len();
     assert_eq!(
-        crate::dispatch(&invocation(&f, "data db2", &[("--id", "7")]))
+        crate::migration_oracle::dispatch(&invocation(&f, "data db2", &[("--id", "7")]))
             .unwrap_err()
             .code,
         "table.invalid_format"
@@ -127,7 +127,7 @@ fn default_remote_db2_pin_and_admission_error_order_follows_each_fixed_go_wrappe
         .flags
         .insert("--snapshot".into(), format!("PIN-{}", "0".repeat(64)));
     assert_eq!(
-        crate::dispatch(&record).unwrap_err().code,
+        crate::migration_oracle::dispatch(&record).unwrap_err().code,
         "vault.record_missing",
         "inspectData loads the pin before attempting admission"
     );
@@ -136,7 +136,7 @@ fn default_remote_db2_pin_and_admission_error_order_follows_each_fixed_go_wrappe
         .flags
         .insert("--snapshot".into(), format!("PIN-{}", "0".repeat(64)));
     schema.control = OperationControl::uncancelable(Instant::now() + Duration::from_millis(50));
-    let error = crate::dispatch(&schema).unwrap_err();
+    let error = crate::migration_oracle::dispatch(&schema).unwrap_err();
     assert_eq!(
         error.code,
         schema.control.check().unwrap_err().code,
@@ -145,7 +145,7 @@ fn default_remote_db2_pin_and_admission_error_order_follows_each_fixed_go_wrappe
     held.close().unwrap();
     schema.control = OperationControl::default();
     assert_eq!(
-        crate::dispatch(&schema).unwrap_err().code,
+        crate::migration_oracle::dispatch(&schema).unwrap_err().code,
         "vault.record_missing"
     );
     assert!(f.captures().is_empty());
@@ -204,7 +204,7 @@ fn default_remote_sql_and_db2_open_corrupt_metadata_before_pin_or_busy_lease() {
             .insert("--snapshot".into(), format!("PIN-{}", "0".repeat(64)));
         // A regression that incorrectly waits on admission remains bounded.
         inv.control = OperationControl::uncancelable(Instant::now() + Duration::from_secs(5));
-        let error = crate::dispatch(&inv).unwrap_err();
+        let error = crate::migration_oracle::dispatch(&inv).unwrap_err();
         assert_eq!(error.code, expected.code);
         inv.control
             .check()
@@ -222,7 +222,7 @@ fn default_remote_db2_original_stop_precedes_corrupt_metadata_and_missing_pin() 
     inv.flags
         .insert("--snapshot".into(), format!("PIN-{}", "0".repeat(64)));
     inv.control.cancel_handle().store(true, Ordering::Release);
-    assert_eq!(crate::dispatch(&inv).unwrap_err().code, "command.cancelled");
+    assert_eq!(crate::migration_oracle::dispatch(&inv).unwrap_err().code, "command.cancelled");
     f.close();
 }
 
@@ -251,7 +251,7 @@ fn default_remote_db2_typed_project_selection_matches_snapshot_result_and_captur
     // The default CDN provider must ignore a bad project when a snapshot wins.
     let mut snapshot = invocation(&f, "data db2", &[("--id", "7"), ("--project", "absent")]);
     snapshot.cwd = project.join("nested");
-    let expected = crate::dispatch(&snapshot).unwrap();
+    let expected = crate::migration_oracle::dispatch(&snapshot).unwrap();
     f.verify(&expected);
     for explicit in [false, true] {
         let mut project_inv = snapshot.clone();
@@ -263,7 +263,7 @@ fn default_remote_db2_typed_project_selection_matches_snapshot_result_and_captur
         } else {
             project_inv.flags.insert("--project".into(), String::new());
         }
-        let actual = crate::dispatch(&project_inv).unwrap();
+        let actual = crate::migration_oracle::dispatch(&project_inv).unwrap();
         assert_eq!(actual.data, expected.data);
         assert_eq!(actual.selection, expected.selection);
         assert_eq!(actual.complete, expected.complete);

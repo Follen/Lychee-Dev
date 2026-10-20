@@ -1,0 +1,5 @@
+// New recovery identity; historical parsers are untouched.
+import assert from 'node:assert/strict';
+function decimal(text){const m=/^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(text);assert(m);let d=(m[2]+(m[3]??'')).replace(/^0+/,''),e=Number(m[4]??0)-(m[3]?.length??0);assert(Number.isSafeInteger(e));if(!d)return '0';while(d.endsWith('0')){d=d.slice(0,-1);e++;}return `${m[1]}${d}e${e}`;}
+export function safeNumericToken(value,context){if(typeof value!=='number')return value;assert.equal(typeof context?.source,'string','numeric source context required');assert(Number.isFinite(value));if(/^-?\d+$/.test(context.source)){assert(Number.isSafeInteger(value));assert.equal(BigInt(context.source),BigInt(value));}else{assert.equal(decimal(context.source),decimal(String(value)),'numeric narrowing');if(Number.isInteger(value))assert(Number.isSafeInteger(value));}return value;}
+export function parse(bytes){return JSON.parse(typeof bytes==='string'?bytes:new TextDecoder('utf-8',{fatal:true}).decode(bytes),(_k,v,c)=>safeNumericToken(v,c));}

@@ -13,14 +13,18 @@ export const AGENT_CONTRACT_SHA256 = 'da8ed5418cf1de015e9f24c8012bd2eae3eb7ce035
 export const AGENT_CONTRACT_BLOB = 'f3f72aa6290c6f15298508ea0bbc9af80c6bf561';
 // Protected Data inventory adds only --data=false to the production parser.
 // The independently pinned Agent predecessor remains historical evidence.
-export const CANDIDATE_CONTRACT_SHA256 = 'a783204b5b9aabfd0a4de82be36e825f0e59b3af8da457d6f0ad8503e9a3e403';
-export const CANDIDATE_CONTRACT_BLOB = 'bbca7908fa1f3fe347b862b00e5839a9c0f547b1';
-const reviewedContract = source => [HISTORICAL_CONTRACT_SHA256, AGENT_CONTRACT_SHA256, CANDIDATE_CONTRACT_SHA256].includes(sha256(source));
+export const INVENTORY_CONTRACT_SHA256 = 'a783204b5b9aabfd0a4de82be36e825f0e59b3af8da457d6f0ad8503e9a3e403';
+export const INVENTORY_CONTRACT_BLOB = 'bbca7908fa1f3fe347b862b00e5839a9c0f547b1';
+// Reconstructed Agent-only clap contract; full source requires independent review.
+export const CANDIDATE_CONTRACT_SHA256 = '0b17cb207532c72e3c968584c63289645875b846d791cd3d992dd436f3c98f3f';
+export const CANDIDATE_CONTRACT_BLOB = 'b279772481f7e9ec3d58be03530447345dca5569';
+const reviewedContract = source => [HISTORICAL_CONTRACT_SHA256, AGENT_CONTRACT_SHA256, INVENTORY_CONTRACT_SHA256, CANDIDATE_CONTRACT_SHA256].includes(sha256(source));
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 export function extractCandidateAdvertised(inventory, texts) {
   if (!reviewedContract(texts.filter)) return { state: 'unverified', reason: 'contract.rs changed; review the static advertised-filter adapter', commands: null };
   const registrations = Object.fromEntries(['source', 'data', 'live', 'delivery', 'workspace', 'evidence', 'cache'].map(key => [key, parseRegistrations(texts[key].toString('utf8'))]));
   const commands = inventory.filter(d => {
+    if (sha256(texts.filter) === CANDIDATE_CONTRACT_SHA256 && ['cli search','schema'].includes(d.path)) return true;
     if (['version', 'describe', 'project init', 'project status', 'project lock', 'target available'].includes(d.path)) return true;
     const family = d.path.startsWith('source ') ? 'source' : /^(data|asset) /.test(d.path) ? 'data' : d.path.startsWith('live ') ? 'live' : /^(addon|skill) /.test(d.path) || d.path === 'update' ? 'delivery' : null;
     return family ? registrations[family].includes(d.path) : ['workspace', 'evidence', 'cache'].some(key => registrations[key].includes(d.path));

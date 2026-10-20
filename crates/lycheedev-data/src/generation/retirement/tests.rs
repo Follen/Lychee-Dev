@@ -16,7 +16,7 @@ fn sample() -> Fixture {
 fn prepare(f: &Fixture) -> lycheedev_core::Outcome {
     let mut inv = f.invocation("data cache prepare", &[]);
     inv.positional = Some("Sample".into());
-    crate::dispatch(&inv).unwrap()
+    crate::migration_oracle::dispatch(&inv).unwrap()
 }
 fn command(f: &Fixture) -> Invocation {
     let mut inv = f.invocation("cache prune", &[]);
@@ -310,7 +310,7 @@ fn pressure_fixture(f: &Fixture) -> (lycheedev_core::Outcome, Invocation) {
 fn prepare_capacity_trigger_reclaims_cold_orphans_and_rebuilds_exact_generation() {
     let f = sample();
     let (first, inv) = pressure_fixture(&f);
-    let second = crate::dispatch(&inv).unwrap();
+    let second = crate::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(second.data["generation"], first.data["generation"]);
     assert_eq!(second.data["object"], first.data["object"]);
     assert!(
@@ -332,7 +332,7 @@ fn prepare_capacity_trigger_reclaims_cold_orphans_and_rebuilds_exact_generation(
         second.data["diskReservation"]["coverage"]["totalDataCoverageComplete"],
         false
     );
-    let third = crate::dispatch(&inv).unwrap();
+    let third = crate::migration_oracle::dispatch(&inv).unwrap();
     assert!(third.data.get("automaticRetirement").is_none());
     assert_eq!(third.data["generation"], first.data["generation"]);
     fs::remove_dir_all(f.root).unwrap();

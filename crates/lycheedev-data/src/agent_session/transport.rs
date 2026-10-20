@@ -72,15 +72,24 @@ fn send(output: &Output, id: Option<u64>, result: Result<Response>) -> Result<()
             error: Some(error),
         },
     };
-    let mut writer = lock(&output.writer);
-    serde_json::to_writer(&mut *writer, &frame)?;
-    writer.write_all(b"\n")?;
-    writer.flush()?;
-    drop(writer);
-    if let (Some(id), Some(observer)) = (id, &output.observer) {
-        observer(ReceiptEvent::Completed(id))?;
-    }
-    Ok(())
+    let outcome: Result<()> = (|| {
+        let mut writer = lock(&output.writer);
+        serde_json::to_writer(&mut *writer, &frame)?;
+        writer.write_all(b"\n")?;
+        writer.flush()?;
+        drop(writer);
+        if let (Some(id), Some(observer)) = (id, &output.observer) {
+            observer(ReceiptEvent::Completed(id))?;
+        }
+        Ok(())
+    })();
+    outcome.map_err(|error| match &result {
+        Ok(Response::Capture(capture) | Response::Domain { capture, .. }) => capture.committed_error(error),
+        Err(primary) if primary.details.get("capturePublication").is_some() => {
+            let mut primary=primary.clone(); primary.details["transportFailure"]=json!(error);primary
+        }
+        _ => error,
+    })
 }
 /// Bounded line reader checks size before extending the retained request.
 fn read_line(reader: &mut impl BufRead) -> Result<Option<Vec<u8>>> {
@@ -326,7 +335,7 @@ fn run(invocation: Invocation, observer: Option<ReceiptObserver>) -> Result<()> 
         (Ok(()), result) => result,
         (Err(error), Ok(())) => Err(error),
         (Err(mut error), Err(cleanup)) => {
-            error.details = json!({"primary":error.clone(), "cleanup":cleanup});
+            if let Some(details)=error.details.as_object_mut(){details.insert("cleanupFailure".into(),json!(cleanup));}else{error.details=json!({"primary":error.clone(),"cleanup":cleanup});}
             Err(error)
         }
     };

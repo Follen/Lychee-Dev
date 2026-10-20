@@ -209,6 +209,24 @@ impl<'table, T> LeasedRow<'table, T> {
         Ok(LeasedRow { value, allocation })
     }
 }
+/// A suspended owned cursor retains the original row reservation unchanged.
+pub(crate) struct OwnedLeasedRow<T> {
+    value: T,
+    _allocation: Option<crate::resource::OwnedRetainedReservation>,
+}
+impl<T> OwnedLeasedRow<T> {
+    pub(crate) fn value(&self) -> &T { &self.value }
+}
+impl<T> LeasedRow<'_, T> {
+    pub(crate) fn into_owned(self, budget: &Arc<Budget>) -> Result<OwnedLeasedRow<T>> {
+        let Self { value, allocation } = self;
+        if !allocation.scoped || allocation.budget.is_some_and(|original| !std::ptr::eq(original, budget.as_ref())) {
+            return Err(fault("records.internal", 8, "Owned row requires its original scoped budget"));
+        }
+        let allocation = allocation.reservation.map(|lease| lease.into_owned(budget)).transpose()?;
+        Ok(OwnedLeasedRow { value, _allocation: allocation })
+    }
+}
 // An owned query body retains its exact allocation/verification owner. The
 // index stores offsets, so no field borrows this enum or another sibling.
 enum TableBytes<'a> {

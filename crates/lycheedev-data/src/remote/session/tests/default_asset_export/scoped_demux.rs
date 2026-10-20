@@ -23,7 +23,7 @@ fn default_cdn_demux_uses_offline_authenticated_session_through_manifest_publica
     inv.command = "asset demux".into();
     inv.flags
         .insert("--output".into(), f.output.to_str().unwrap().into());
-    let outcome = crate::dispatch(&inv).unwrap();
+    let outcome = crate::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(outcome.data["source"]["kind"], "casc");
     assert_eq!(outcome.data["source"]["fileDataID"], 7);
     assert_eq!(outcome.provenance.len(), 4);
@@ -56,7 +56,7 @@ fn default_cdn_demux_existing_manifest_precedes_all_source_and_capture_work() {
     inv.command = "asset demux".into();
     inv.flags
         .insert("--output".into(), f.output.to_str().unwrap().into());
-    let error = crate::dispatch(&inv).unwrap_err();
+    let error = crate::migration_oracle::dispatch(&inv).unwrap_err();
     assert_eq!(error.code, "records.export_conflict");
     assert!(f.captures().is_empty());
     assert!(f.source.backend.calls.lock().unwrap().is_empty());

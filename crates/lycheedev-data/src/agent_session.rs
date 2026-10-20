@@ -2,6 +2,8 @@
 //! handles across processes, snapshots or restarts. Query execution is owned by
 //! `engine`, not by this transport/retention layer.
 mod handles;
+mod domain;
+mod navigation;
 #[path = "agent_tasks.rs"]
 pub mod tasks;
 mod transport;
@@ -47,6 +49,10 @@ fn default_timeout() -> u64 {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "task", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Task {
+    Navigate { request: crate::engine::DomainRequest },
+    ItemGet { item_id:u32, mode:crate::engine::SourceMode, #[serde(default)] hotfix_captures:Vec<String> },
+    Semantics { table:TableRequest },
+    Explain { query:QueryRequest, #[serde(default)] verbose:bool, #[serde(default)] analyze:bool },
     Capture {
         handle: String,
     },
@@ -93,10 +99,14 @@ pub enum ExportFormat {
 
 pub fn schema() -> Value {
     json!({"protocol":PROTOCOL,"transport":"stdin/stdout JSONL", "worker":"caller-owned supervisor plus one isolated reusable engine worker; no installed daemon", "processMemory":{"windows":"Job aggregate commit ceiling: --max-bytes plus 268435456 runtime/ingress bytes; not RSS", "otherTargets":"production worker unavailable: no equivalent OS allocation ceiling; schema discovery remains available"},
-        "request":{"protocol":PROTOCOL,"id":"strictly increasing positive u64; never replayed","timeout_ms":"1..3600000, includes queue wait; default 30000","task":["capture","catalog","discover","fields","business","query","page","export","release","cancel","close"]},
+        "request":{"protocol":PROTOCOL,"id":"strictly increasing positive u64; never replayed","timeout_ms":"1..3600000, includes queue wait; default 30000","task":["navigate","item_get","semantics","explain","capture","catalog","discover","fields","business","query","page","export","release","cancel","close"]},
         "identity":"one immutable invocation snapshot/product/build/locale; explicit ordered Hotfix capture history is bound per table; handles do not survive worker restart",
         "query":crate::engine::query_schema(),
         "business":tasks::schema(),
+        "navigate":navigation::schema(),
+        "semantics":{"required":["table"],"source":"static with no captures only","output":"owned pin-bound DBD flags and conditions, not Hotfix row coverage"},
+        "explain":{"required":["query"],"verbose":{"type":"boolean","default":false},"analyze":{"type":"boolean","default":false},"output":"normal owned result handle; page/export/capture apply","execution":"analyze=true executes under the same Engine pool and supervised deadline; provenance labels explain/analyze"},
+        "item_get":{"alias":"navigate item_get","output":"owned domain report and automatic CAP"},
         "capture":{"handle":"existing session result handle","semantics":"query success and result handle do not imply CAP commit; capture persists complete result plus typed request/source provenance","maximumBytes":16777216,"onLimit":"fail without emitting a truncated CAP","failure":"capture does not consume the handle while the worker survives and TTL remains valid; wire cancellation or worker termination invalidates every handle. Inspect returned capturePublication/completedCaptures and the evidence catalog after uncertain or post-commit failures. A missing receipt does not prove no commit; never automatically replay"},
         "catalog":"fixed snapshot definition manifest directory only; complete means manifest enumeration complete, not installed availability or build readability; availability is not_checked; fields resolves actual table schema",
         "configuration":{"--max-objects":"1..1024 retained handles; default 32", "--max-bytes":"1MiB..2GiB shared session memory admission; default 512MiB", "--result-ttl-seconds":"1..3600, default 300; expiry refuses later pages rather than rerunning queries"},
@@ -110,6 +120,8 @@ pub fn schema() -> Value {
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum Response {
+    Semantics(crate::engine::OwnedSemantics),
+    Domain { #[serde(flatten)] result:crate::engine::DomainResult, capture:crate::engine::OwnedCapture },
     Capture(crate::engine::OwnedCapture),
     Catalog(DatasetCatalog),
     Business {
@@ -249,10 +261,18 @@ impl Session {
         self.handles.clear();
         self.engine.close()
     }
+    fn publish_query(&mut self,owner:ResultOwner)->Result<Response>{
+        let rows=owner.row_count();let bytes=owner.retained_bytes();let complete=owner.complete();let provenance=owner.owned_provenance()?;
+        let result=self.handles.insert(owner,rows,bytes,Instant::now())?;Ok(Response::Query{result,complete,provenance})
+    }
     pub async fn execute(&mut self, task: Task, control: OperationControl) -> Result<Response> {
         control.check()?;
         self.expire();
         match task {
+            Task::Navigate{request}=>{let(result,capture)=navigation::execute(&mut self.engine,request,control).await?;Ok(Response::Domain{result,capture})},
+            Task::ItemGet{item_id,mode,hotfix_captures}=>{let(result,capture)=navigation::execute(&mut self.engine,crate::engine::DomainRequest::ItemGet{item_id,mode,hotfix_captures},control).await?;Ok(Response::Domain{result,capture})},
+            Task::Semantics{table}=>Ok(Response::Semantics(self.engine.semantics(table,control).await?)),
+            Task::Explain{query,verbose,analyze}=>{let owner=self.engine.explain(query,verbose,analyze,control).await?;self.publish_query(owner)},
             Task::Capture { handle } => {
                 let owner = self.handles.get(&handle, Instant::now())?;
                 Ok(Response::Capture(self.engine.capture(owner, control)?))
@@ -305,16 +325,7 @@ impl Session {
             )),
             Task::Query { query } => {
                 let owner = self.engine.execute(query, control).await?;
-                let rows = owner.row_count();
-                let bytes = owner.retained_bytes();
-                let complete = owner.complete();
-                let provenance = owner.owned_provenance()?;
-                let receipt = self.handles.insert(owner, rows, bytes, Instant::now())?;
-                Ok(Response::Query {
-                    result: receipt,
-                    complete,
-                    provenance,
-                })
+                self.publish_query(owner)
             }
             Task::Page {
                 handle,
@@ -367,3 +378,7 @@ fn validate_page(offset: usize, limit: usize) -> Result<()> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path="agent_session/navigation_tests.rs"]
+mod navigation_tests;

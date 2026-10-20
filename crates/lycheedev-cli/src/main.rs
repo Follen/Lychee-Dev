@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod contract;
+mod agent_cli;
 mod data_phase_profile;
 mod data_agent;
 mod formal_live;
@@ -38,6 +39,7 @@ fn requested_format(args: &[String]) -> &str {
 fn valid_format(format: &str) -> bool {
     ["text", "json", "jsonl"].contains(&format)
 }
+#[cfg(test)]
 fn unsupported_route_flag(command: &str, flag: &str) -> ToolkitError {
     let route = if command.is_empty() { "the command" } else { command };
     ToolkitError::arguments(format!(
@@ -45,12 +47,15 @@ fn unsupported_route_flag(command: &str, flag: &str) -> ToolkitError {
     ))
 }
 fn parse(args: &[String]) -> Result<Invocation> {
+    agent_cli::parse(args)
+}
+#[cfg(test)]
+fn parse_with_catalog(args: &[String], all: &[contract::Definition]) -> Result<Invocation> {
     if !valid_format(requested_format(args)) {
         return Err(ToolkitError::arguments(
             "format must be text, json, or jsonl",
         ));
     }
-    let all = contract::all();
     // Collect words before checking values, as the fixed Go parser does. This
     // preserves unknown-token priority and lets route admission precede values.
     let mut words = vec![];
@@ -197,6 +202,10 @@ fn parse(args: &[String]) -> Result<Invocation> {
     if words.is_empty() {
         flags.insert("--help".into(), "true".into());
     }
+    finish_parse(command, positional, flags, flag_order, help)
+}
+fn finish_parse(command: String, positional: Option<String>, flags: BTreeMap<String, String>,
+    flag_order: Vec<(String, String)>, help: bool) -> Result<Invocation> {
     // Existing typed-value validation stays in parse, with empty error context.
     // Full typed-option precedence is a separate parity audit from token admission.
     for (key, value) in &flag_order {
@@ -375,21 +384,7 @@ fn validate_delivery_arguments(inv: &Invocation) -> Result<()> {
     Ok(())
 }
 fn dispatch(inv: &Invocation) -> Result<Outcome> {
-    if inv.flag_bool("--help") {
-        let commands: Vec<_> = contract::implemented()
-            .into_iter()
-            .filter(|d| inv.command.is_empty() || d.path == inv.command)
-            .collect();
-        let mut flags = if inv.command.is_empty() {
-            vec!["--home <root>".to_owned(), "--format text|json|jsonl".to_owned()]
-        } else {
-            commands.first().map(|definition| {
-                definition.flags.iter().map(|flag| flag.0.clone()).collect()
-            }).unwrap_or_default()
-        };
-        flags.push("--help".to_owned());
-        return Ok(Outcome::new(json!({"commands":commands,"flags":flags})));
-    }
+    if let Some(result) = agent_cli::discover(inv) { return result; }
     if catalog_command(&inv.command) {
         return dispatch_catalog(inv);
     }
@@ -1172,7 +1167,7 @@ fn install_invocation_control<G>(
     let Ok(inv) = parsed else {
         return None;
     };
-    if ["", "version", "describe"].contains(&inv.command.as_str()) || inv.flag_bool("--help") {
+    if ["", "version", "describe", "cli search", "schema", "data agent schema"].contains(&inv.command.as_str()) || inv.flag_bool("--help") {
         return None;
     }
     let cancellation = lycheedev_core::control::TrackedCancellation::new();
@@ -1522,10 +1517,12 @@ fn command_fault(inv: &Invocation, mut error: ToolkitError) -> ToolkitError {
     }
     error
 }
+#[cfg(test)]
 struct StreamWriter<'a, W: Write> {
     out: &'a mut W,
     yielded: bool,
 }
+#[cfg(test)]
 impl<W: Write> StreamWriter<'_, W> {
     fn emit(&mut self, event: lycheedev_data::stream::StreamEvent<'_>) -> Result<()> {
         self.emit_value(&lycheedev_data::stream::wire::event(event))
@@ -1539,6 +1536,7 @@ impl<W: Write> StreamWriter<'_, W> {
         Ok(())
     }
 }
+#[cfg(test)]
 fn stream_fault(mut error: ToolkitError, yielded: bool) -> ToolkitError {
     if yielded && error.code == "command.deadline" {
         error.exit_code = 7;
@@ -1697,17 +1695,7 @@ fn main() -> std::process::ExitCode {
         inv.control
             .check()
             .and_then(|_| {
-                if inv.command == "data db2 stream" && !inv.flag_bool("--help") {
-                    let mut stream = StreamWriter {
-                        out: &mut stdout,
-                        yielded: false,
-                    };
-                    let result = lycheedev_data::stream::StreamRequest::from_invocation(inv)
-                        .and_then(|request| lycheedev_data::stream::run(request, &mut |event| stream.emit(event)))
-                        .map(lycheedev_data::stream::wire::into_outcome);
-                    yielded = stream.yielded;
-                    result.map_err(|error| stream_fault(error, yielded))
-                } else if inv.command == "data hotfix"
+                if inv.command == "data hotfix"
                     && matches!(inv.flag("--source"), Some("wago" | "raidbots"))
                     && inv.flag("--encoding") != Some("csv")
                     && !inv.flag_bool("--help")
@@ -1747,6 +1735,14 @@ mod project_tests;
 
 #[cfg(test)]
 mod tests {
+    // Historical fixtures are explicit: never restore old routes in production.
+    fn parse_migration_oracle(args: &[String]) -> lycheedev_core::Result<lycheedev_core::Invocation> {
+        let catalog: Vec<crate::contract::Definition> = serde_json::from_str(include_str!(
+            "../../../tests/rust-parity/agent-pre-cutover.commands.json"
+        )).unwrap();
+        super::parse_with_catalog(args, &catalog)
+    }
+
     #[test]
     fn normal_exit_code_returns_every_portable_status_unchanged() {
         for code in 0..=u8::MAX {
@@ -1827,7 +1823,7 @@ mod tests {
     fn normal_invocation_control_preserves_ordered_ancestry_and_guard_lifetime() {
         use lycheedev_core::control::StopCause;
         use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, time::{Duration, Instant}};
-        let mut parsed = parse(&args(&["live", "execute", "--wait-seconds", "600"]));
+        let mut parsed = parse_migration_oracle(&args(&["live", "execute", "--wait-seconds", "600"]));
         let original = parsed.as_ref().unwrap().control.clone();
         let alive = Arc::new(AtomicBool::new(true));
         let before = Instant::now();
@@ -1861,7 +1857,7 @@ mod tests {
     #[test]
     fn normal_invocation_control_keeps_signal_received_during_install() {
         use lycheedev_core::control::StopCause;
-        let mut parsed = parse(&args(&["doctor"]));
+        let mut parsed = parse_migration_oracle(&args(&["doctor"]));
         let guard = install_invocation_control(&mut parsed, |signal| {
             signal.cancel();
             Ok(signal)
@@ -1877,7 +1873,7 @@ mod tests {
         // The public parser rejects an invalid wait value before registration.
         // Exercise the installer's defensive post-parse budget failure directly.
         let invalid_budget = || -> Result<Invocation> {
-            let mut inv = parse(&args(&["live", "execute", "--wait-seconds", "1"])).unwrap();
+            let mut inv = parse_migration_oracle(&args(&["live", "execute", "--wait-seconds", "1"])).unwrap();
             inv.flags.insert("--wait-seconds".into(), "-1".into());
             Ok(inv)
         };
@@ -1908,7 +1904,7 @@ mod tests {
     #[test]
     fn normal_invocation_control_skips_information_help_and_parse_errors() {
         for words in [vec![], vec!["version"], vec!["describe"], vec!["doctor", "--help"], vec!["not-a-command"], vec!["live", "execute", "--wait-seconds", "-1"]] {
-            let mut parsed = parse(&args(&words));
+            let mut parsed = parse_migration_oracle(&args(&words));
             let before = parsed.as_ref().ok().map(|inv| inv.control.clone());
             assert!(install_invocation_control::<()>(&mut parsed, |_| {
                 panic!("information/help/parse failure must not install a handler")
@@ -1931,7 +1927,7 @@ mod tests {
             (vec!["addon", "status"], "installation status requires --path"),
             (vec!["skill", "status"], "installation status requires --path"),
         ] {
-            let inv = parse(&args(&words)).unwrap();
+            let inv = parse_migration_oracle(&args(&words)).unwrap();
             let error = dispatch(&inv).unwrap_err();
             assert_eq!((error.code.as_str(), error.exit_code, error.message.as_str()), ("command.invalid_arguments", 2, message));
             assert!(error.details.get("__commandContext").is_none());
@@ -1958,7 +1954,7 @@ mod tests {
                 let mut arguments = args(&["addon", verb, "--installation", root.to_str().unwrap(), "--format", "json"]);
                 if verb == "install" { arguments.extend(args(&["--release", fixture.0.join("release").to_str().unwrap()])); }
                 if verb == "remove" { arguments.extend(args(&["--output", fixture.0.join("archive").to_str().unwrap()])); }
-                let inv = parse(&arguments).unwrap();
+                let inv = parse_migration_oracle(&arguments).unwrap();
                 let error = command_fault(&inv, dispatch(&inv).unwrap_err());
                 assert_eq!((error.code.as_str(), error.exit_code), (code, exit));
                 let value = envelope(&Err(error));
@@ -1974,7 +1970,7 @@ mod tests {
     }
     #[test]
     fn doctor_release_failure_keeps_worker_and_workspace_diagnostics() {
-        let mut inv = parse(&args(&["doctor"])).unwrap();
+        let mut inv = parse_migration_oracle(&args(&["doctor"])).unwrap();
         inv.home = std::env::temp_dir().join(format!(
             "lycheedev-doctor-absent-{}-{}",
             std::process::id(),
@@ -2042,7 +2038,7 @@ mod tests {
                 .as_nanos()
         ));
         let _cleanup = Cleanup(root.clone());
-        let inv = parse(&args(&["doctor"])).unwrap();
+        let inv = parse_migration_oracle(&args(&["doctor"])).unwrap();
         let inspect =
             || lycheedev_delivery::release::inspect_with_control(&root, VERSION, &inv.control);
         assert_eq!(
@@ -2084,7 +2080,7 @@ mod tests {
     }
     #[test]
     fn doctor_release_does_not_downgrade_cancel_or_original_deadline() {
-        let inv = parse(&args(&["doctor"])).unwrap();
+        let inv = parse_migration_oracle(&args(&["doctor"])).unwrap();
         for error in [
             ToolkitError::new("command.deadline", "expired", 5),
             ToolkitError::new("process.cancelled", "cancelled", 7),
@@ -2113,7 +2109,7 @@ mod tests {
         })
         .unwrap_err();
         assert_eq!(error.code, "command.cancelled");
-        let mut expired = parse(&args(&["doctor"])).unwrap();
+        let mut expired = parse_migration_oracle(&args(&["doctor"])).unwrap();
         expired.control = lycheedev_core::control::OperationControl::new(
             std::time::Instant::now(),
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -2176,7 +2172,7 @@ mod tests {
     }
     #[test]
     fn emmy_doctor_probe_is_bounded_and_distinguishes_unchecked_tools() {
-        let mut inv = parse(&args(&["doctor"])).unwrap();
+        let mut inv = parse_migration_oracle(&args(&["doctor"])).unwrap();
         inv.control = lycheedev_core::control::OperationControl::uncancelable(
             std::time::Instant::now() + std::time::Duration::from_secs(1),
         );
@@ -2216,7 +2212,7 @@ mod tests {
                 .unwrap()
                 .contains("built-in call fixture")
         );
-        let long = parse(&args(&["doctor"])).unwrap();
+        let long = parse_migration_oracle(&args(&["doctor"])).unwrap();
         emmy_doctor_check_with(&long, |probe, _| {
             assert!(probe.control.deadline() < long.control.deadline());
             assert!(probe.control.remaining().unwrap() <= std::time::Duration::from_secs(5));
@@ -2226,7 +2222,7 @@ mod tests {
     }
     #[test]
     fn emmy_doctor_failed_probe_warns_without_claiming_retirement() {
-        let inv = parse(&args(&["doctor"])).unwrap();
+        let inv = parse_migration_oracle(&args(&["doctor"])).unwrap();
         let check = emmy_doctor_check_with(&inv, |_, _| {
             Err(
                 ToolkitError::new("source.native_worker_failed", "fixture worker failed", 5)
@@ -2257,7 +2253,7 @@ mod tests {
     #[test]
     fn emmy_doctor_preserves_caller_cancel_and_deadline() {
         use lycheedev_core::control::StopCause;
-        let inv = parse(&args(&["doctor"])).unwrap();
+        let inv = parse_migration_oracle(&args(&["doctor"])).unwrap();
         let signal = inv.control.tracked_cancel_handle().unwrap();
         let error = emmy_doctor_check_with(&inv, |probe, _| {
             signal.cancel();
@@ -2268,7 +2264,7 @@ mod tests {
         })
         .unwrap_err();
         assert_eq!(error.code, "command.cancelled");
-        let inv = parse(&args(&["doctor"])).unwrap();
+        let inv = parse_migration_oracle(&args(&["doctor"])).unwrap();
         let error = emmy_doctor_check_with(&inv, |_, _| {
             Err(ToolkitError::new("process.cancelled", "cancelled", 7))
         })
@@ -2290,7 +2286,7 @@ mod tests {
     fn emmy_doctor_rejects_an_unordered_internal_control_before_worker_start() {
         // The normal CLI constructs a tracked control. This deliberately
         // violates the internal helper's invariant, not a public CLI mode.
-        let inv = parse(&args(&["doctor"])).unwrap();
+        let inv = parse_migration_oracle(&args(&["doctor"])).unwrap();
         let _raw = inv.control.cancel_handle();
         let error = emmy_doctor_check_with(&inv, |_, _| {
             panic!("an unordered internal control must not start the doctor worker")
@@ -2299,7 +2295,7 @@ mod tests {
     }
     #[test]
     fn describe_includes_frozen_format_and_development_metadata() {
-        let inv = parse(&args(&["describe", "--format", "json"])).unwrap();
+        let inv = parse_migration_oracle(&args(&["describe", "--format", "json"])).unwrap();
         let outcome = dispatch(&inv).unwrap();
         assert_eq!(outcome.data["formats"], json!(["text", "json", "jsonl"]));
         assert_eq!(outcome.data["development"], VERSION.contains('-'));
@@ -2313,13 +2309,13 @@ mod tests {
         for definition in contract::implemented() {
             let mut input: Vec<String> = definition.path.split_whitespace().map(str::to_owned).collect();
             input.push("--help".to_owned());
-            let outcome = dispatch(&parse(&input).unwrap()).unwrap();
+            let outcome = dispatch(&crate::parse(&input).unwrap()).unwrap();
             let mut flags: Vec<String> = definition.flags.iter().map(|flag| flag.0.clone()).collect();
             flags.push("--help".to_owned());
             assert_eq!(outcome.data["flags"], json!(flags), "{}", definition.path);
             assert_eq!(outcome.data["commands"], json!([definition]));
         }
-        let outcome = dispatch(&parse(&args(&["--help"])).unwrap()).unwrap();
+        let outcome = dispatch(&crate::parse(&args(&["--help"])).unwrap()).unwrap();
         assert_eq!(
             outcome.data["flags"],
             json!(["--home <root>", "--format text|json|jsonl", "--help"])
@@ -2350,12 +2346,12 @@ mod tests {
             (vec!["version", "--format=invalid", "--format=json"], "repeated flag --format"),
             (vec!["evidence", "show", "--home="], "missing required argument <capture-id>"),
         ] {
-            let error = parse(&args(&input)).unwrap_err();
+            let error = parse_migration_oracle(&args(&input)).unwrap_err();
             assert_eq!(error.message, expected, "{input:?}");
             assert_eq!(error.exit_code, 2, "{input:?}");
         }
         // Help aliases are intentionally repeatable in the fixed Go parser.
-        assert!(parse(&args(&["version", "--help", "-h", "--help"])).is_ok());
+        assert!(parse_migration_oracle(&args(&["version", "--help", "-h", "--help"])).is_ok());
     }
     #[test]
     fn output_encoding_prescan_uses_last_occurrence_even_for_errors() {
@@ -2383,7 +2379,7 @@ mod tests {
             fn managed(&self) -> &dyn ManagedInstallation { panic!("passive request opened installation") }
         }
         for command in [args(&["live", "instances"]), args(&["--passive", "live", "instances"])] {
-            let inv = parse(&command).unwrap();
+            let inv = parse_migration_oracle(&command).unwrap();
             let outcome = lycheedev_live::host::dispatch_with(&inv, &PassiveOnly);
             assert_eq!(envelope(&outcome), json!({"schema":"lycheedev.result.v1","ok":true,"operationId":"","context":{},"result":{"installations":[],"candidates":null},"captures":[],"warnings":[],"error":null}));
             let error = command_fault(&inv, ToolkitError::new("command.deadline", "expired", 5));
@@ -2396,13 +2392,13 @@ mod tests {
             args(&["live", "instances", "--project", "P-123"]),
             args(&["live", "connect", "--passive"]),
         ] {
-            assert_eq!(parse(&command).unwrap_err().exit_code, 2);
+            assert_eq!(parse_migration_oracle(&command).unwrap_err().exit_code, 2);
         }
     }
     #[test]
     fn asset_capture_commit_context_preserves_committed_and_unknown_facts() {
         for command in ["inspect", "export"] {
-            let inv = parse(&args(&["asset", command])).unwrap();
+            let inv = parse_migration_oracle(&args(&["asset", command])).unwrap();
             for state in ["committed", "unknown"] {
                 let id = format!("CAP-{}", "b".repeat(64));
                 let completed = if state == "committed" { json!([id]) } else { json!([]) };
@@ -2448,7 +2444,7 @@ mod tests {
         for error in [joined, admitted] {
             assert!(capture_commit_context(&error));
             for command in ["inspect", "export"] {
-                let inv = parse(&args(&["asset", command])).unwrap();
+                let inv = parse_migration_oracle(&args(&["asset", command])).unwrap();
                 let before = error.details.clone();
                 let actual = command_fault(&inv, error.clone());
                 assert_eq!(envelope(&Err(actual))["error"]["details"], before);
@@ -2463,7 +2459,7 @@ mod tests {
     #[test]
     fn asset_publication_csv_committed_errors_preserve_all_public_details_for_sql_and_hotfix() {
         for command in ["sql", "hotfix"] {
-            let inv = parse(&args(&["data", command])).unwrap();
+            let inv = parse_migration_oracle(&args(&["data", command])).unwrap();
             for count in 1..=2 {
                 for state in ["not_published", "published", "unknown"] {
                     let primary = ToolkitError::new("records.metadata_limit", "stopped before checked close", 3);
@@ -2506,7 +2502,7 @@ mod tests {
             for error in [publication, joined, demux] {
                 assert!(capture_commit_context(&error));
                 for command in ["inspect", "export", "demux"] {
-                    let inv = parse(&args(&["asset", command])).unwrap();
+                    let inv = parse_migration_oracle(&args(&["asset", command])).unwrap();
                     let details = error.details.clone();
                     let message = error.message.clone();
                     let actual = command_fault(&inv, error.clone());
@@ -2522,7 +2518,7 @@ mod tests {
     #[test]
     fn asset_output_publication_rejects_malformed_facts() {
         let primary = ToolkitError::new("records.metadata_limit", "limit", 3);
-        let inv = parse(&args(&["asset", "export"])).unwrap();
+        let inv = parse_migration_oracle(&args(&["asset", "export"])).unwrap();
         let valid = json!({"schema":"lycheedev.asset-publication-error.v1", "primary":primary,
             "publication":{"state":"unknown","path":"out.webp"}});
         for (pointer, replacement) in [
@@ -2551,7 +2547,7 @@ mod tests {
     }
     #[test]
     fn asset_capture_commit_context_rejects_inconsistent_typed_facts() {
-        let inv = parse(&args(&["asset", "export"])).unwrap();
+        let inv = parse_migration_oracle(&args(&["asset", "export"])).unwrap();
         let id = format!("CAP-{}", "b".repeat(64));
         let primary = ToolkitError::new("records.metadata_limit", "limit", 3);
         let valid = json!({"schema":"lycheedev.capture-commit-error.v1", "primary":primary,
@@ -2576,7 +2572,7 @@ mod tests {
     }
     #[test]
     fn late_asset_limit_preserves_committed_ids_and_typed_cleanup_in_public_message() {
-        let inv = parse(&args(&["asset", "export"])).unwrap();
+        let inv = parse_migration_oracle(&args(&["asset", "export"])).unwrap();
         for count in 1..=3 {
             let ids: Vec<_> = (0..count).map(|i| format!("CAP-{}", char::from(b'a' + i).to_string().repeat(64))).collect();
             let primary = ToolkitError::new("records.metadata_limit", "limit after source capture", 3)
@@ -2607,7 +2603,7 @@ mod tests {
     }
     #[test]
     fn malformed_asset_marker_does_not_replace_the_pure_go_projection() {
-        let inv = parse(&args(&["asset", "export"])).unwrap();
+        let inv = parse_migration_oracle(&args(&["asset", "export"])).unwrap();
         let primary = ToolkitError::new("records.metadata_limit", "limit", 3);
         let valid = json!({"schema":"lycheedev.asset-committed-error.v1","primary":primary,
             "completedCaptures":[format!("CAP-{}", "a".repeat(64))],"outputPublished":false});
@@ -2626,7 +2622,7 @@ mod tests {
     #[test]
     fn asset_content_limit_keeps_the_observed_go_error_envelope() {
         for command in ["inspect", "export"] {
-            let inv = parse(&args(&["asset", command])).unwrap();
+            let inv = parse_migration_oracle(&args(&["asset", command])).unwrap();
             let error = command_fault(
                 &inv,
                 ToolkitError::new(
@@ -2665,11 +2661,11 @@ mod tests {
         ] {
             let mut input = args(&["data", "encounter", "get"]);
             input.extend(args(&tail));
-            let error = parse(&input).unwrap_err();
+            let error = parse_migration_oracle(&input).unwrap_err();
             assert_eq!(error.message, expected);
             assert_eq!(envelope(&Err(error))["context"], json!({}));
         }
-        let inv = parse(&args(&["data", "encounter", "get", "--max-depth", "+1"])).unwrap();
+        let inv = parse_migration_oracle(&args(&["data", "encounter", "get", "--max-depth", "+1"])).unwrap();
         for (internal, message, exit, public, stage) in [
             (
                 "records.relation_cycle",
@@ -2752,7 +2748,7 @@ mod tests {
             false,
         )
         .unwrap();
-        let inv = parse(&args(&[
+        let inv = parse_migration_oracle(&args(&[
             "evidence",
             "verify",
             capture["id"].as_str().unwrap(),
@@ -2800,11 +2796,11 @@ mod tests {
     #[test]
     fn public_parser_flag_value_messages_match_the_frozen_contract() {
         for flag in ["--format", "--home"] {
-            let error = parse(&args(&["version", flag])).unwrap_err();
+            let error = parse_migration_oracle(&args(&["version", flag])).unwrap_err();
             assert_eq!(error.message, format!("missing value for {flag}"));
             assert_eq!(error.exit_code, 2);
         }
-        let error = parse(&args(&["version", "--format", "not-a-format"])).unwrap_err();
+        let error = parse_migration_oracle(&args(&["version", "--format", "not-a-format"])).unwrap_err();
         assert_eq!(error.message, "format must be text, json, or jsonl");
         assert_eq!(error.exit_code, 2);
     }
@@ -2819,7 +2815,7 @@ mod tests {
         ] {
             let mut input: Vec<String> = path.split_whitespace().map(str::to_owned).collect();
             input.extend([format!("{flag}="), "--__rust_parity_unknown_flag".into()]);
-            let error = parse(&input).unwrap_err();
+            let error = parse_migration_oracle(&input).unwrap_err();
             assert_eq!(error.message, "unknown flag --__rust_parity_unknown_flag");
             assert_eq!(error.exit_code, 2);
             let mut raw = Vec::new();
@@ -2829,19 +2825,19 @@ mod tests {
             assert_eq!(envelope["error"]["stage"], "dispatch");
             input.pop();
             assert_eq!(
-                parse(&input).unwrap_err().message,
+                parse_migration_oracle(&input).unwrap_err().message,
                 format!("empty value for {flag}")
             );
             input.extend(["--output".into(), "unused".into()]);
             assert_eq!(
-                parse(&input).unwrap_err().message,
+                parse_migration_oracle(&input).unwrap_err().message,
                 format!("empty value for {flag}")
             );
         }
     }
     #[test]
     fn bounded_data_envelopes_preserve_timeout_after_parse_on_success_and_failure() {
-        let inv = parse(&args(&["data", "spell", "auras", "--spell-id", "100"])).unwrap();
+        let inv = parse_migration_oracle(&args(&["data", "spell", "auras", "--spell-id", "100"])).unwrap();
         let mut outcome = Outcome::new(json!({"spellID":100}));
         outcome.selection = json!({"schema":"lycheedev.selection.v1","id":"PIN-kept"});
         let mut raw = vec![];
@@ -2852,9 +2848,9 @@ mod tests {
             json!({"snapshot":"PIN-kept","timeoutSeconds":300})
         );
 
-        let missing = parse(&args(&["data", "spell", "auras"])).unwrap();
+        let missing = parse_migration_oracle(&args(&["data", "spell", "auras"])).unwrap();
         raw.clear();
-        render_with_context(&mut raw, "json", &dispatch(&missing), Some(&missing)).unwrap();
+        render_with_context(&mut raw, "json", &lycheedev_data::migration_oracle::dispatch(&missing), Some(&missing)).unwrap();
         let value: Value = serde_json::from_slice(&raw).unwrap();
         assert_eq!(value["context"], json!({"timeoutSeconds":300}));
         assert_eq!(
@@ -2862,7 +2858,7 @@ mod tests {
             "data spell auras requires --spell-id"
         );
 
-        let explicit = parse(&args(&["data", "sql", "--timeout-seconds", "1"])).unwrap();
+        let explicit = parse_migration_oracle(&args(&["data", "sql", "--timeout-seconds", "1"])).unwrap();
         raw.clear();
         render_with_context(
             &mut raw,
@@ -2886,16 +2882,16 @@ mod tests {
     #[test]
     fn parse_failures_help_and_nonquery_commands_do_not_gain_data_timeout_context() {
         for value in ["0", "-1", "+1", "4294967296", "bad"] {
-            let parsed = parse(&args(&["data", "spell", "auras", "--spell-id", value]));
+            let parsed = parse_migration_oracle(&args(&["data", "spell", "auras", "--spell-id", value]));
             assert!(parsed.is_err());
             let mut raw = vec![];
             render_with_context(&mut raw, "json", &Err(parsed.unwrap_err()), None).unwrap();
             let value: Value = serde_json::from_slice(&raw).unwrap();
             assert_eq!(value["context"], json!({}));
         }
-        assert!(parse(&args(&["data", "spell", "summons", "--npc-id", "0"])).is_ok());
+        assert!(parse_migration_oracle(&args(&["data", "spell", "summons", "--npc-id", "0"])).is_ok());
         assert!(
-            parse(&args(&[
+            parse_migration_oracle(&args(&[
                 "data",
                 "spell",
                 "summons",
@@ -2910,7 +2906,7 @@ mod tests {
             vec!["asset", "inspect"],
             vec!["source", "list"],
         ] {
-            let inv = parse(&args(&command)).unwrap();
+            let inv = parse_migration_oracle(&args(&command)).unwrap();
             let mut raw = vec![];
             render_with_context(&mut raw, "json", &Ok(Outcome::new(json!({}))), Some(&inv))
                 .unwrap();
@@ -2920,7 +2916,7 @@ mod tests {
     }
     #[test]
     fn repeated_scopes_are_retained_only_on_their_contract() {
-        let inv = parse(&args(&[
+        let inv = parse_migration_oracle(&args(&[
             "update",
             "--path",
             "a",
@@ -2934,36 +2930,36 @@ mod tests {
         .unwrap();
         assert_eq!(inv.flag_values("--path"), ["a", "b"]);
         assert_eq!(inv.flag_values("--installation"), ["c", "d"]);
-        assert!(parse(&args(&["source", "inspect", "--path", "a", "--path", "b"])).is_err());
-        assert!(parse(&args(&["version", "--format", "json", "--format", "text"])).is_err());
+        assert!(parse_migration_oracle(&args(&["source", "inspect", "--path", "a", "--path", "b"])).is_err());
+        assert!(parse_migration_oracle(&args(&["version", "--format", "json", "--format", "text"])).is_err());
     }
     #[test]
     fn data_cache_prepare_admits_only_its_explicit_static_table_contract() {
-        let invocation = parse(&args(&["data", "cache", "prepare", "Spell", "--snapshot", "PIN-fixed", "--offline", "--max-bytes", "134217728"])).unwrap();
+        let invocation = parse_migration_oracle(&args(&["data", "cache", "prepare", "Spell", "--snapshot", "PIN-fixed", "--offline", "--max-bytes", "134217728"])).unwrap();
         assert_eq!(invocation.command, "data cache prepare");
         assert_eq!(invocation.positional.as_deref(), Some("Spell"));
         assert_eq!(invocation.flag("--snapshot"), Some("PIN-fixed"));
         assert!(invocation.flag_bool("--offline"));
-        assert!(parse(&args(&["data", "cache", "prepare"])).is_err());
-        assert!(parse(&args(&["data", "cache", "prepare", "Spell", "--effective"])).is_err());
-        assert!(parse(&args(&["data", "cache", "prepare", "Spell", "--query", "select *"])).is_err());
-        assert!(parse(&args(&["data", "cache", "prepare", "Spell", "--pin", "PIN-fixed"])).is_err());
+        assert!(parse_migration_oracle(&args(&["data", "cache", "prepare"])).is_err());
+        assert!(parse_migration_oracle(&args(&["data", "cache", "prepare", "Spell", "--effective"])).is_err());
+        assert!(parse_migration_oracle(&args(&["data", "cache", "prepare", "Spell", "--query", "select *"])).is_err());
+        assert!(parse_migration_oracle(&args(&["data", "cache", "prepare", "Spell", "--pin", "PIN-fixed"])).is_err());
     }
 
     #[test]
     fn longest_path_and_required_argument_admission_are_stable() {
         assert_eq!(
-            parse(&args(&["data", "db2", "schema", "Spell"]))
+            parse_migration_oracle(&args(&["data", "db2", "schema", "Spell"]))
                 .unwrap()
                 .command,
             "data db2 schema"
         );
         assert_eq!(
-            parse(&args(&["evidence", "show"])).err().unwrap().exit_code,
+            parse_migration_oracle(&args(&["evidence", "show"])).err().unwrap().exit_code,
             2
         );
-        assert!(parse(&args(&["evidence", "show", "--help"])).is_ok());
-        assert!(parse(&args(&["version", "extra"])).is_err());
+        assert!(parse_migration_oracle(&args(&["evidence", "show", "--help"])).is_ok());
+        assert!(parse_migration_oracle(&args(&["version", "extra"])).is_err());
     }
     #[test]
     fn jsonl_errors_never_claim_end_and_preserve_usable_result() {
@@ -3127,7 +3123,7 @@ mod tests {
         std::fs::write(config_path.join(key), b"root = 01234567890123456789012345678901\nencoding = 01234567890123456789012345678901 abcdef01234567890123456789012345\nencoding-size = 20 30\n").unwrap();
         std::fs::write(root.join(".build.info"), format!("Product!STRING:0|Version!STRING:0|Build Key!HEX:16|CDN Key!HEX:16|Active!DEC:1\nwow|12.1.0.69933|{key}|{key}|1\n")).unwrap();
         workspace::initialize(&home).unwrap();
-        let mut direct = parse(&args(&[
+        let mut direct = parse_migration_oracle(&args(&[
             "target",
             "resolve",
             "--installation",
@@ -3168,7 +3164,7 @@ mod tests {
             dispatch(&direct).unwrap_err().code,
             "records.client_identity"
         );
-        let add = parse(&args(&[
+        let add = parse_migration_oracle(&args(&[
             "target",
             "add",
             "fixture",
@@ -3185,7 +3181,7 @@ mod tests {
         ]))
         .unwrap();
         dispatch(&add).unwrap();
-        let named = parse(&args(&[
+        let named = parse_migration_oracle(&args(&[
             "target",
             "resolve",
             "--target",
@@ -3209,7 +3205,7 @@ mod tests {
     #[test]
     fn normal_invocation_control_public_operation_budget_honors_entire_query_and_explicit_live_wait_limits() {
         use std::time::{Duration, Instant};
-        let query = parse(&args(&[
+        let query = parse_migration_oracle(&args(&[
             "data",
             "sql",
             "--sql",
@@ -3227,7 +3223,7 @@ mod tests {
             vec!["source", "refs", "--snapshot", "fixture", "--symbol", "Target", "--static-only"],
             vec!["source", "batch", "--snapshot", "fixture", "--file", "fixture.json"],
         ] {
-            let source = parse(&args(&words)).unwrap();
+            let source = parse_migration_oracle(&args(&words)).unwrap();
             assert_eq!(operation_seconds(&source).unwrap(), 90, "{:?}", words);
             let mut parsed = Ok(source);
             let before = Instant::now();
@@ -3236,9 +3232,9 @@ mod tests {
             assert!(deadline >= before + Duration::from_secs(90));
             assert!(deadline <= Instant::now() + Duration::from_secs(90));
         }
-        let live = parse(&args(&["live", "execute", "--wait-seconds", "600"])).unwrap();
+        let live = parse_migration_oracle(&args(&["live", "execute", "--wait-seconds", "600"])).unwrap();
         assert_eq!(operation_seconds(&live).unwrap(), 660);
-        let invalid = parse(&args(&["live", "execute", "--wait-seconds", "-1"])).unwrap_err();
+        let invalid = parse_migration_oracle(&args(&["live", "execute", "--wait-seconds", "-1"])).unwrap_err();
         assert_eq!(invalid.exit_code, 2);
         assert_eq!(invalid.code, "command.invalid_arguments");
         assert_eq!(invalid.message, "--wait-seconds must be between 1 and 600");

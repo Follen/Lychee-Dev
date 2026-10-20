@@ -1,3 +1,14 @@
+mod domain;
+pub use domain::DomainResult;
+pub(crate) use domain::DomainOwner;
+mod semantics;
+pub use semantics::OwnedSemantics;
+mod pull_provider;
+mod output_batches;
+mod source_demand;
+mod domain_rows;
+pub(crate) use domain_rows::OwnedDomainRows;
+mod snapshot_cache;
 pub mod api;
 mod lifetime;
 mod catalog;
@@ -12,7 +23,7 @@ pub use api::*;
 pub use result::{OwnedProvenance, ResultOwner};
 pub use session_engine::Engine;
 // Task-native DataFusion core. The mature kernel owns relational execution.
-// Existing data sql entrypoints are not migrated by this slice. Production
+// Formal entrypoints are switched by the accompanying CLI/router slice. Production
 // safety combines logical admissions with an externally supervised worker;
 // neither this module nor the DF pool claims a whole-process allocator ledger.
 mod aggregate;
@@ -63,6 +74,16 @@ impl QueryOwner {
             .lock()
             .map_err(|_| external(limit()))?
             .push(allocation);
+        Ok(())
+    }
+    /// Transfer an already admitted view guard from this query's demand source.
+    /// Caller has proved source.uses_budget(&self.budget) before polling it.
+    /// Do not re-claim shared Arrow buffers or refund while native operators live.
+    fn adopt_view(&self, allocation: &mut Option<OwnedRetainedReservation>) -> DfResult<()> {
+        if allocation.is_none() {return Ok(());}
+        self.retain(128)?;
+        let mut held=self.allocations.lock().map_err(|_|external(limit()))?;
+        if let Some(allocation)=allocation.take(){held.push(allocation);}
         Ok(())
     }
     fn check(&self) -> DfResult<()> {

@@ -169,7 +169,7 @@ fn string(value: &Value) -> String {
     value.as_str().unwrap().to_owned()
 }
 fn run(inv: &Invocation) -> Outcome {
-    lycheedev_data::dispatch(inv).unwrap()
+    lycheedev_data::migration_oracle::dispatch(inv).unwrap()
 }
 
 #[test]
@@ -290,7 +290,7 @@ fn scan_query_identity_freezes_every_filter_and_the_derived_snapshot() {
         let mut changed = original.clone();
         changed.flags.insert(flag.into(), value.into());
         let before = fixture.count();
-        let error = lycheedev_data::dispatch(&changed).unwrap_err();
+        let error = lycheedev_data::migration_oracle::dispatch(&changed).unwrap_err();
         assert_eq!(error.code, "records.hotfix_identity", "{flag}");
         assert!(error.details.get("result").is_none());
         assert_eq!(fixture.count(), before);
@@ -300,7 +300,7 @@ fn scan_query_identity_freezes_every_filter_and_the_derived_snapshot() {
         .flags
         .insert("--snapshot".into(), fixture.pin.clone());
     assert_eq!(
-        lycheedev_data::dispatch(&wrong_pin).unwrap_err().code,
+        lycheedev_data::migration_oracle::dispatch(&wrong_pin).unwrap_err().code,
         "records.hotfix_identity"
     );
     let mut file_resume = fixture.inv();
@@ -308,7 +308,7 @@ fn scan_query_identity_freezes_every_filter_and_the_derived_snapshot() {
         .flags
         .insert("--cursor".into(), string(&first.data["capture"]["id"]));
     assert_eq!(
-        lycheedev_data::dispatch(&file_resume).unwrap_err().code,
+        lycheedev_data::migration_oracle::dispatch(&file_resume).unwrap_err().code,
         "records.hotfix_identity"
     );
 }
@@ -390,7 +390,7 @@ fn scan_argument_limits_keep_query_errors_and_scan_errors_distinct() {
         let mut inv = fixture.inv();
         inv.flags.insert(flag.into(), value.into());
         assert_eq!(
-            lycheedev_data::dispatch(&inv).unwrap_err().exit_code,
+            lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().exit_code,
             exit,
             "{flag}={value}"
         );
@@ -398,7 +398,7 @@ fn scan_argument_limits_keep_query_errors_and_scan_errors_distinct() {
     let first = run(&fixture.inv());
     let mut inv = fixture.resume(&first);
     inv.flags.insert("--after-index".into(), "0".into());
-    let error = lycheedev_data::dispatch(&inv).unwrap_err();
+    let error = lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err();
     assert_eq!(error.code, "records.hotfix_limit");
     assert_eq!(error.exit_code, 3);
     for flag in [
@@ -415,7 +415,7 @@ fn scan_argument_limits_keep_query_errors_and_scan_errors_distinct() {
         let mut inv = fixture.inv();
         inv.flags.insert(flag.into(), "1".into());
         assert_eq!(
-            lycheedev_data::dispatch(&inv).unwrap_err().exit_code,
+            lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().exit_code,
             2,
             "{flag}"
         );
@@ -479,7 +479,7 @@ fn legacy_missing_page_never_reports_complete_or_loses_original_resume_identity(
             .flags
             .insert("--cursor".into(), string(&legacy["id"]));
         let before = fixture.count();
-        let error = lycheedev_data::dispatch(&resume).unwrap_err();
+        let error = lycheedev_data::migration_oracle::dispatch(&resume).unwrap_err();
         assert_eq!(error.code, "vault.record_missing");
         assert_eq!(error.details["result"]["resume"], legacy["id"]);
         assert_eq!(error.details["result"]["capture"], legacy);
@@ -524,7 +524,7 @@ fn scan_rejects_other_or_missing_sources_before_unsupported_dispatch() {
         if let Some(source) = source {
             inv.flags.insert("--source".into(), source.into());
         }
-        let error = lycheedev_data::dispatch(&inv).unwrap_err();
+        let error = lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err();
         assert_eq!(error.code, "command.invalid_arguments");
         assert_eq!(error.message, "--scan requires --source dbcache");
         assert_eq!(error.exit_code, 2);

@@ -18,6 +18,14 @@ use datafusion::{
 use futures_util::future::BoxFuture;
 use serde_json::Value;
 use std::{collections::BTreeSet, sync::Arc};
+#[path = "plan/compound.rs"]
+mod compound;
+#[path = "plan/subquery.rs"]
+mod subquery;
+#[path = "plan/scope_normalize.rs"]
+mod scope_normalize;
+use compound::{Lowering, Scope};
+pub(super) use compound::PreparedPlan;
 
 pub(super) const MAX_DEPTH: usize = 64;
 pub(super) const MAX_NODES: usize = 4096;
@@ -174,6 +182,7 @@ impl Admission {
         self.text(name.len())
     }
 }
+#[derive(Clone, Copy)]
 enum Node<'a> {
     Plan(&'a QueryPlan),
     Expression(&'a Expression),
@@ -208,6 +217,22 @@ fn validate(plan: &QueryPlan, owner: Option<&Arc<QueryOwner>>) -> DfResult<Admis
         };
         match node {
             Node::Plan(plan) => match plan {
+                QueryPlan::UnionAll { inputs } => {
+                    if inputs.len() < 2 || inputs.len() > 256 {
+                        return Err(unsupported("UnionAll requires 2..256 inputs"));
+                    }
+                    for input in inputs { push(Node::Plan(input))?; }
+                }
+                QueryPlan::Iterate { binding, seed, step } => {
+                    identifier(binding)?;
+                    admitted.text(binding.len())?;
+                    push(Node::Plan(seed))?;
+                    push(Node::Plan(step))?;
+                }
+                QueryPlan::Delta { binding } => {
+                    identifier(binding)?;
+                    admitted.text(binding.len())?;
+                }
                 QueryPlan::Scan { table } | QueryPlan::Lookup { table, .. } => {
                     table_name(table)?;
                     admitted.text(table.name.len())?;
@@ -317,7 +342,21 @@ fn validate(plan: &QueryPlan, owner: Option<&Arc<QueryOwner>>) -> DfResult<Admis
                     return Err(external(super::limit()));
                 }
                 match expression {
-                    Expression::Column { name } => admitted.column(name)?,
+                    Expression::Column { name } | Expression::OuterColumn { name, .. } => admitted.column(name)?,
+                    Expression::InQuery { value, input, .. } => {
+                        if declared_width(input).is_some_and(|width| width != 1) {
+                            return Err(external(crate::fault("relational.invalid_cardinality", 4, "Membership subquery requires exactly one column")));
+                        }
+                        push(Node::Expression(value))?;
+                        push(Node::Plan(input))?;
+                    }
+                    Expression::ExistsQuery { input, .. } => push(Node::Plan(input))?,
+                    Expression::ScalarQuery { input } => {
+                        if declared_width(input).is_some_and(|width| width != 1) {
+                            return Err(external(crate::fault("relational.invalid_cardinality", 4, "Scalar subquery requires exactly one column")));
+                        }
+                        push(Node::Plan(input))?;
+                    }
                     Expression::Literal { value } => admitted.literal(value)?,
                     Expression::Binary { left, right, .. } => {
                         push(Node::Expression(left))?;
@@ -386,6 +425,9 @@ fn validate(plan: &QueryPlan, owner: Option<&Arc<QueryOwner>>) -> DfResult<Admis
             }
         }
     }
+    compound::validate_scopes(plan)?;
+    admitted.expanded = admitted.expanded.checked_add(native_expansion(plan)?).ok_or_else(|| external(super::limit()))?;
+    if admitted.expanded > 64 << 20 { return Err(external(super::limit())); }
     Ok(admitted)
 }
 
@@ -401,7 +443,7 @@ fn expression_expansion(value: &Expression) -> DfResult<usize> {
             return Err(external(super::limit()));
         }
         let extra = match value {
-            Expression::Column { name } => name.len(),
+            Expression::Column { name } | Expression::OuterColumn { name, .. } => name.len(),
             Expression::Literal {
                 value: Value::String(value),
             } => value.len(),
@@ -492,6 +534,7 @@ fn expression_expansion(value: &Expression) -> DfResult<usize> {
                     pending.push((value, copies, depth + 1));
                 }
             }
+            Expression::InQuery { value, .. } => pending.push((value, copies, depth + 1)),
             Expression::In { value, values } => {
                 let copies = copies
                     .checked_mul(values.len().max(1))
@@ -504,11 +547,11 @@ fn expression_expansion(value: &Expression) -> DfResult<usize> {
     Ok(bytes)
 }
 
-pub(super) async fn lower(
+pub(super) async fn prepare(
     context: &SessionContext,
     plan: &QueryPlan,
     owner: Arc<QueryOwner>,
-) -> DfResult<DataFrame> {
+) -> DfResult<PreparedPlan> {
     let admitted = validate(plan, Some(&owner))?;
     tables(plan)?;
     // Retain conservative logical-plan, expression, identifier and literal
@@ -526,216 +569,477 @@ pub(super) async fn lower(
         .and_then(|n| n.checked_add(admitted.expanded))
         .ok_or_else(|| external(super::limit()))?;
     owner.retain(bytes)?;
-    lower_validated(context, plan, &owner).await
+    let normalized = scope_normalize::normalize(plan);
+    let normalized_admission = validate(&normalized, Some(&owner))?;
+    let normalized_bytes = normalized_admission.nodes.checked_mul(2048)
+        .and_then(|bytes| bytes.checked_add(normalized_admission.expanded))
+        .and_then(|bytes| normalized_admission.text.checked_mul(4).and_then(|extra| bytes.checked_add(extra)))
+        .and_then(|bytes| normalized_admission.values.checked_mul(256).and_then(|extra| bytes.checked_add(extra)))
+        .ok_or_else(|| external(super::limit()))?;
+    owner.retain(normalized_bytes)?;
+    let mut lowering = Lowering::new(context, owner.clone());
+    let root = lower_validated(&mut lowering, &normalized, None).await?;
+    lowering.finish(root)
 }
+
+#[cfg(test)]
+pub(super) async fn lower(
+    context: &SessionContext,
+    plan: &QueryPlan,
+    owner: Arc<QueryOwner>,
+) -> DfResult<TestCompletedFrame> {
+    let frame = prepare(context, plan, owner.clone()).await?.complete(context, owner.clone(), 128 << 20).await?;
+    Ok(TestCompletedFrame { frame, owner })
+}
+#[cfg(test)]
+pub(super) struct TestCompletedFrame { frame: DataFrame, owner: Arc<QueryOwner> }
+#[cfg(test)]
+impl std::fmt::Debug for TestCompletedFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str("TestCompletedFrame") }
+}
+#[cfg(test)]
+pub(super) struct TestOutputBatches {
+    batches: Vec<arrow_array::RecordBatch>,
+    _admission: crate::resource::OwnedRetainedReservation,
+    _owner: Arc<QueryOwner>,
+}
+#[cfg(test)]
+impl std::fmt::Debug for TestOutputBatches {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { std::fmt::Debug::fmt(&self.batches, f) }
+}
+#[cfg(test)]
+impl std::ops::Deref for TestOutputBatches {
+    type Target = [arrow_array::RecordBatch];
+    fn deref(&self) -> &Self::Target { &self.batches }
+}
+#[cfg(test)]
+impl TestCompletedFrame {
+    pub(super) async fn collect(self) -> DfResult<TestOutputBatches> {
+        use futures_util::StreamExt;
+        let Self { frame, owner } = self;
+        let maximum = 128 << 20;
+        let mut admission = owner.budget.reserve_retained(maximum).map_err(external)?.into_owned(&owner.budget).map_err(external)?;
+        subquery::reserve_clone(frame.logical_plan(), &owner)?;
+        let keepalive = frame.logical_plan().clone();
+        let schema = Arc::new(frame.schema().as_arrow().clone());
+        let mut stream = frame.execute_stream().await?;
+        let mut output = super::output_batches::OutputBatches::new(schema, maximum);
+        while let Some(batch) = stream.next().await {
+            owner.check()?;
+            let batch = batch?;
+            owner.work(batch.num_rows().checked_add(1).ok_or_else(|| external(super::limit()))?)?;
+            output.push(batch, &owner.budget).map_err(external)?;
+        }
+        let (batches, bytes, _) = output.finish(&owner.budget).map_err(external)?;
+        drop(stream);
+        drop(keepalive);
+        admission.shrink_to(bytes).map_err(external)?;
+        Ok(TestOutputBatches { batches, _admission: admission, _owner: owner })
+    }
+}
+
 /// Returns source requests only after validating the entire typed task, before
 /// callers acquire providers or perform source I/O. Capture order is meaningful.
 pub(super) fn tables(plan: &QueryPlan) -> DfResult<Vec<TableRequest>> {
     validate(plan, None)?;
-    let mut tables: Vec<TableRequest> = Vec::new();
-    let mut pending = vec![plan];
-    while let Some(plan) = pending.pop() {
-        match plan {
-            QueryPlan::Scan { table } | QueryPlan::Lookup { table, .. } => {
-                if let Some(previous) = tables
-                    .iter()
-                    .find(|previous| previous.name == table.name && previous.mode == table.mode)
-                {
-                    if previous != table {
-                        return Err(unsupported(
-                            "One query cannot bind different capture histories to the same table and mode",
-                        ));
-                    }
-                } else {
-                    tables.push(table.clone());
-                }
+    validate_conditional_queries(plan)?;
+    let mut output: Vec<TableRequest> = Vec::new();
+    let mut pending = vec![Node::Plan(plan)];
+    while let Some(node) = pending.pop() {
+        if let Node::Plan(QueryPlan::Scan { table } | QueryPlan::Lookup { table, .. }) = node {
+            if let Some(previous) = output.iter().find(|v| v.name == table.name && v.mode == table.mode) {
+                if previous != table { return Err(unsupported("One query cannot bind different capture histories to the same table and mode")); }
+            } else { output.push(table.clone()); }
+        }
+        children(node, &mut pending);
+    }
+    Ok(output)
+}
+
+/// Every plan/expression edge, including query-valued expressions, has one
+/// shared source/lifecycle traversal. Delta is not a physical source.
+fn children<'a>(node: Node<'a>, pending: &mut Vec<Node<'a>>) {
+    match node {
+        Node::Plan(plan) => match plan {
+            QueryPlan::UnionAll { inputs } => for input in inputs.iter().rev() { pending.push(Node::Plan(input)); },
+            QueryPlan::Iterate { seed, step, .. } => { pending.push(Node::Plan(step)); pending.push(Node::Plan(seed)); }
+            QueryPlan::Filter { input, predicate } => { pending.push(Node::Expression(predicate)); pending.push(Node::Plan(input)); }
+            QueryPlan::Project { input, columns } => { for v in columns.iter().rev() { pending.push(Node::Expression(&v.expression)); } pending.push(Node::Plan(input)); }
+            QueryPlan::Join { left, right, .. } => { pending.push(Node::Plan(right)); pending.push(Node::Plan(left)); }
+            QueryPlan::Aggregate { input, groups, metrics } => {
+                for v in metrics.iter().rev() { if let Some(e) = &v.expression { pending.push(Node::Expression(e)); } }
+                for v in groups.iter().rev() { pending.push(Node::Expression(&v.expression)); }
+                pending.push(Node::Plan(input));
             }
-            QueryPlan::Filter { input, .. }
-            | QueryPlan::Project { input, .. }
-            | QueryPlan::Aggregate { input, .. }
-            | QueryPlan::Sort { input, .. }
-            | QueryPlan::Limit { input, .. } => pending.push(input),
-            QueryPlan::Join { left, right, .. } => {
-                pending.push(right);
-                pending.push(left);
-            }
+            QueryPlan::Sort { input, keys } => { for v in keys.iter().rev() { pending.push(Node::Expression(&v.expression)); } pending.push(Node::Plan(input)); }
+            QueryPlan::Limit { input, .. } => pending.push(Node::Plan(input)),
+            QueryPlan::Scan { .. } | QueryPlan::Lookup { .. } | QueryPlan::Delta { .. } => {}
+        },
+        Node::Expression(value) => match value {
+            Expression::Binary { left, right, .. } | Expression::NullIf { left, right } => { pending.push(Node::Expression(right)); pending.push(Node::Expression(left)); }
+            Expression::Not { value } | Expression::IsNull { value } | Expression::Cast { value, .. } | Expression::Index { value, .. } | Expression::In { value, .. } => pending.push(Node::Expression(value)),
+            Expression::Like { value, pattern, .. } => { pending.push(Node::Expression(pattern)); pending.push(Node::Expression(value)); }
+            Expression::Between { value, low, high, .. } => { pending.push(Node::Expression(high)); pending.push(Node::Expression(low)); pending.push(Node::Expression(value)); }
+            Expression::Case { branches, otherwise } => { if let Some(v) = otherwise { pending.push(Node::Expression(v)); } for v in branches.iter().rev() { pending.push(Node::Expression(&v.then)); pending.push(Node::Expression(&v.when)); } }
+            Expression::Coalesce { values } | Expression::Call { arguments: values, .. } => for v in values.iter().rev() { pending.push(Node::Expression(v)); },
+            Expression::InQuery { value, input, .. } => { pending.push(Node::Plan(input)); pending.push(Node::Expression(value)); }
+            Expression::ExistsQuery { input, .. } | Expression::ScalarQuery { input } => pending.push(Node::Plan(input)),
+            Expression::Column { .. } | Expression::OuterColumn { .. } | Expression::Literal { .. } => {}
         }
     }
-    Ok(tables)
 }
 
 fn lower_validated<'a>(
-    context: &'a SessionContext,
+    lowering: &'a mut Lowering<'_>,
     plan: &'a QueryPlan,
-    owner: &'a Arc<QueryOwner>,
+    outer: Option<&'a Scope>,
 ) -> BoxFuture<'a, DfResult<DataFrame>> {
     Box::pin(async move {
-        owner.work(1)?;
+        lowering.owner.work(1)?;
         match plan {
+            QueryPlan::UnionAll { inputs } => {
+                let mut frames = Vec::with_capacity(inputs.len());
+                for input in inputs { frames.push(lower_validated(lowering, input, outer).await?); }
+                lowering.union(frames)
+            }
+            QueryPlan::Iterate { binding, seed, step } => {
+                if lowering.delta.is_some() {
+                    return Err(unsupported("Nested Iterate inside a recursive step is not supported by the native worktable kernel"));
+                }
+                let seed = lower_validated(lowering, seed, outer).await?;
+                let seed = compound::recursive_seed(seed)?;
+                let delta = lowering.begin_delta(binding, seed.schema())?;
+                lowering.delta = Some(delta);
+                let step_result = lower_validated(lowering, step, outer).await;
+                lowering.delta = None;
+                let step = step_result?;
+                lowering.iterate(binding, seed, step)
+            }
+            QueryPlan::Delta { binding } => lowering.delta_frame(binding),
             QueryPlan::Scan { table } | QueryPlan::Lookup { table, .. } => {
-                let frame = context
-                    .table(TableReference::bare(table_name(table)?))
-                    .await?
+                let frame = lowering.context
+                    .table(TableReference::bare(table_name(table)?)).await?
                     .alias(&format!("\"{}\"", table.name))?;
                 if let QueryPlan::Lookup { ids, .. } = plan {
                     let id = Expr::Column(Column::from_name("ID"));
-                    // Lookup is membership, so repeated IDs do not duplicate rows.
-                    frame.filter(
-                        id.in_list(
-                            ids.iter()
-                                .map(|id| {
-                                    Expr::Literal(ScalarValue::UInt64(Some(u64::from(*id))), None)
-                                })
-                                .collect(),
-                            false,
-                        ),
-                    )
-                } else {
-                    Ok(frame)
-                }
+                    frame.filter(id.in_list(ids.iter().map(|id| {
+                        Expr::Literal(ScalarValue::UInt64(Some(u64::from(*id))), None)
+                    }).collect(), false))
+                } else { Ok(frame) }
             }
             QueryPlan::Filter { input, predicate } => {
-                let frame = lower_validated(context, input, owner).await?;
-                let predicate = expression(predicate, frame.schema(), owner)?;
-                frame.filter(predicate)
+                let input = lower_validated(lowering, input, outer).await?;
+                let (mut frame, scope) = lowering.scope(input, outer)?;
+                let predicate = lower_expression(lowering, &mut frame, &scope, outer, predicate).await?;
+                compound::restore(frame.filter(predicate)?, &scope)
             }
             QueryPlan::Project { input, columns } => {
-                let frame = lower_validated(context, input, owner).await?;
-                let columns = columns
-                    .iter()
-                    .map(|item| {
-                        Ok(expression(&item.expression, frame.schema(), owner)?.alias(&item.name))
-                    })
-                    .collect::<DfResult<Vec<_>>>()?;
-                frame.select(columns)
+                let input = lower_validated(lowering, input, outer).await?;
+                let (mut frame, scope) = lowering.scope(input, outer)?;
+                let mut output = Vec::with_capacity(columns.len());
+                for item in columns {
+                    output.push(lower_expression(lowering, &mut frame, &scope, outer, &item.expression).await?.alias(&item.name));
+                }
+                frame.select(output)
             }
-            QueryPlan::Join {
-                left,
-                right,
-                kind,
-                on,
-            } => {
-                let left = lower_validated(context, left, owner).await?;
-                let right = lower_validated(context, right, owner).await?;
-                // Resolve each key on its own side before rebinding. Fixed side
-                // aliases permit self-joins and make duplicate names explicit.
-                let names = on
-                    .iter()
-                    .map(|key| {
-                        let l = left.schema().index_of_column(&column(&key.left)?)?;
-                        let r = right.schema().index_of_column(&column(&key.right)?)?;
-                        Ok((
-                            left.schema().field(l).name().clone(),
-                            right.schema().field(r).name().clone(),
-                        ))
-                    })
-                    .collect::<DfResult<Vec<_>>>()?;
+            QueryPlan::Join { left, right, kind, on } => {
+                let left = lower_validated(lowering, left, outer).await?;
+                let right = lower_validated(lowering, right, outer).await?;
+                let names = on.iter().map(|key| {
+                    let l = left.schema().index_of_column(&column(&key.left)?)?;
+                    let r = right.schema().index_of_column(&column(&key.right)?)?;
+                    Ok((left.schema().field(l).name().clone(), right.schema().field(r).name().clone()))
+                }).collect::<DfResult<Vec<_>>>()?;
                 let left = left.alias("left")?;
                 let right = right.alias("right")?;
                 let schema = left.schema().join(right.schema())?;
-                let predicates = names
-                    .into_iter()
-                    .map(|(l, r)| {
-                        numeric::binary(
-                            Expr::Column(Column::new(Some(TableReference::bare("left")), l)),
-                            Operator::Eq,
-                            Expr::Column(Column::new(Some(TableReference::bare("right")), r)),
-                            &schema,
-                            owner,
-                        )
-                    })
-                    .collect::<DfResult<Vec<_>>>()?;
+                let predicates = names.into_iter().map(|(l, r)| {
+                    numeric::binary(
+                        Expr::Column(Column::new(Some(TableReference::bare("left")), l)),
+                        Operator::Eq,
+                        Expr::Column(Column::new(Some(TableReference::bare("right")), r)),
+                        &schema, &lowering.owner,
+                    )
+                }).collect::<DfResult<Vec<_>>>()?;
                 let kind = match kind {
-                    JoinKind::Inner => JoinType::Inner,
-                    JoinKind::Left => JoinType::Left,
-                    JoinKind::Full => JoinType::Full,
-                    JoinKind::Semi => JoinType::LeftSemi,
+                    JoinKind::Inner => JoinType::Inner, JoinKind::Left => JoinType::Left,
+                    JoinKind::Full => JoinType::Full, JoinKind::Semi => JoinType::LeftSemi,
                     JoinKind::Anti => JoinType::LeftAnti,
                 };
                 left.join_on(right, kind, predicates)
             }
-            QueryPlan::Aggregate {
-                input,
-                groups,
-                metrics,
-            } => {
-                let frame = lower_validated(context, input, owner).await?;
-                let groups = groups
-                    .iter()
-                    .map(|item| {
-                        Ok(expression(&item.expression, frame.schema(), owner)?.alias(&item.name))
-                    })
-                    .collect::<DfResult<Vec<_>>>()?;
-                let exact = aggregate::functions(owner);
-                let metrics = metrics
-                    .iter()
-                    .map(|item| {
-                        let argument = item
-                            .expression
-                            .as_ref()
-                            .map(|expr| expression(expr, frame.schema(), owner))
-                            .transpose()?;
-                        let result = match (item.function, argument) {
-                            (AggregateFunction::Count, Some(argument)) => count(argument),
-                            (AggregateFunction::Count, None) => {
-                                count(Expr::Literal(ScalarValue::Int64(Some(1)), None))
-                            }
-                            (AggregateFunction::Sum, Some(argument)) => {
-                                exact[0].call(vec![argument])
-                            }
-                            (AggregateFunction::Average, Some(argument)) => {
-                                exact[1].call(vec![argument])
-                            }
-                            (AggregateFunction::Minimum, Some(argument)) => min(argument),
-                            (AggregateFunction::Maximum, Some(argument)) => max(argument),
-                            _ => return Err(unsupported("Missing aggregate expression")),
-                        };
-                        Ok(result.alias(&item.name))
-                    })
-                    .collect::<DfResult<Vec<_>>>()?;
-                frame.aggregate(groups, metrics)
+            QueryPlan::Aggregate { input, groups, metrics } => {
+                let input = lower_validated(lowering, input, outer).await?;
+                let (mut frame, scope) = lowering.scope(input, outer)?;
+                let mut lowered_groups = Vec::with_capacity(groups.len());
+                for item in groups {
+                    lowered_groups.push(lower_expression(lowering, &mut frame, &scope, outer, &item.expression).await?.alias(&item.name));
+                }
+                let exact = aggregate::functions(&lowering.owner);
+                let mut lowered_metrics = Vec::with_capacity(metrics.len());
+                for item in metrics {
+                    let argument = match &item.expression {
+                        Some(expr) => Some(lower_expression(lowering, &mut frame, &scope, outer, expr).await?),
+                        None => None,
+                    };
+                    let result = match (item.function, argument) {
+                        (AggregateFunction::Count, Some(argument)) => count(argument),
+                        (AggregateFunction::Count, None) => count(Expr::Literal(ScalarValue::Int64(Some(1)), None)),
+                        (AggregateFunction::Sum, Some(argument)) => exact[0].call(vec![argument]),
+                        (AggregateFunction::Average, Some(argument)) => exact[1].call(vec![argument]),
+                        (AggregateFunction::Minimum, Some(argument)) => min(argument),
+                        (AggregateFunction::Maximum, Some(argument)) => max(argument),
+                        _ => return Err(unsupported("Missing aggregate expression")),
+                    };
+                    lowered_metrics.push(result.alias(&item.name));
+                }
+                frame.aggregate(lowered_groups, lowered_metrics)
             }
             QueryPlan::Sort { input, keys } => {
-                let frame = lower_validated(context, input, owner).await?;
-                let keys = keys
-                    .iter()
-                    .map(|key| {
-                        Ok(expression(&key.expression, frame.schema(), owner)?
-                            .sort(!key.descending, key.nulls_first))
-                    })
-                    .collect::<DfResult<Vec<_>>>()?;
-                frame.sort(keys)
+                let input = lower_validated(lowering, input, outer).await?;
+                let (mut frame, scope) = lowering.scope(input, outer)?;
+                let mut output = Vec::with_capacity(keys.len());
+                for key in keys {
+                    output.push(lower_expression(lowering, &mut frame, &scope, outer, &key.expression).await?.sort(!key.descending, key.nulls_first));
+                }
+                compound::restore(frame.sort(output)?, &scope)
             }
-            QueryPlan::Limit {
-                input,
-                offset,
-                count,
-            } => lower_validated(context, input, owner)
-                .await?
-                .limit(*offset, Some(*count)),
+            QueryPlan::Limit { input, offset, count } => {
+                lower_validated(lowering, input, outer).await?.limit(*offset, Some(*count))
+            }
         }
     })
 }
-fn expression(value: &Expression, schema: &DFSchema, owner: &Arc<QueryOwner>) -> DfResult<Expr> {
+
+// Reconstructed admission equivalent; no assertion of original byte identity.
+fn declared_width(plan: &QueryPlan) -> Option<usize> {
+    match plan {
+        QueryPlan::Project { columns, .. } => Some(columns.len()),
+        QueryPlan::Aggregate { groups, metrics, .. } => groups.len().checked_add(metrics.len()),
+        QueryPlan::Filter { input, .. } | QueryPlan::Sort { input, .. } | QueryPlan::Limit { input, .. } => declared_width(input),
+        QueryPlan::UnionAll { inputs } => inputs.first().and_then(declared_width),
+        QueryPlan::Iterate { seed, .. } => declared_width(seed),
+        QueryPlan::Join { left, right, kind, .. } => match kind {
+            JoinKind::Semi | JoinKind::Anti => declared_width(left),
+            _ => declared_width(left)?.checked_add(declared_width(right)?),
+        },
+        _ => None,
+    }
+}
+fn native_expansion(plan: &QueryPlan) -> DfResult<usize> {
+    let mut pending = vec![(Node::Plan(plan), 1usize)];
+    let mut bytes = 0usize;
+    while let Some((node, copies)) = pending.pop() {
+        bytes = bytes.checked_add(copies.checked_mul(2048).ok_or_else(|| external(super::limit()))?).ok_or_else(|| external(super::limit()))?;
+        if bytes > 64 << 20 { return Err(external(super::limit())); }
+        let mut nested = Vec::new();
+        children(node, &mut nested);
+        let correlated_scalar = if let Node::Expression(Expression::ScalarQuery { input }) = node {
+            let mut references = vec![Node::Plan(input)];
+            let mut found = false;
+            while let Some(reference) = references.pop() {
+                if matches!(reference, Node::Expression(Expression::OuterColumn { .. })) { found = true; break; }
+                children(reference, &mut references);
+            }
+            found
+        } else { false };
+        let copies = if correlated_scalar { copies.checked_mul(2).ok_or_else(|| external(super::limit()))? } else { copies };
+        for child in nested { pending.push((child, copies)); }
+    }
+    Ok(bytes)
+}
+fn static_conditional_choice(value: &Expression) -> Option<Option<&Expression>> {
+    match value {
+        Expression::Case { branches, otherwise } => {
+            for branch in branches {
+                match &branch.when {
+                    Expression::Literal { value: Value::Bool(true) } => return Some(Some(&branch.then)),
+                    Expression::Literal { value: Value::Bool(false) | Value::Null } => {},
+                    _ => return None,
+                }
+            }
+            Some(otherwise.as_deref())
+        }
+        Expression::Coalesce { values } => {
+            for value in values {
+                match value {
+                    Expression::Literal { value: Value::Null } => {},
+                    Expression::Literal { .. } => return Some(Some(value)),
+                    _ => return None,
+                }
+            }
+            Some(None)
+        }
+        _ => None,
+    }
+}
+fn contains_query(value: &Expression) -> bool {
+    let mut pending = vec![Node::Expression(value)];
+    while let Some(node) = pending.pop() {
+        if matches!(node, Node::Expression(Expression::InQuery { .. } | Expression::ExistsQuery { .. } | Expression::ScalarQuery { .. })) { return true; }
+        children(node, &mut pending);
+    }
+    false
+}
+/// Checked against the submitted AST before source acquisition. Normalizer
+/// equality gates encode membership truth, not public lazy-apply support.
+fn validate_conditional_queries(plan: &QueryPlan) -> DfResult<()> {
+    let mut pending = vec![Node::Plan(plan)];
+    while let Some(node) = pending.pop() {
+        if let Node::Expression(value) = node {
+            if static_conditional_choice(value).is_none() {
+                match value {
+                    Expression::Case { branches, otherwise } => {
+                        let mut earlier_dynamic = false;
+                        for branch in branches {
+                            if contains_query(&branch.then) || earlier_dynamic && contains_query(&branch.when) {
+                                return Err(unsupported("Query-valued dynamic CASE result/later condition requires a native lazy-apply kernel"));
+                            }
+                            if !matches!(&branch.when, Expression::Literal { value: Value::Bool(false) | Value::Null }) { earlier_dynamic = true; }
+                        }
+                        if otherwise.as_deref().is_some_and(contains_query) {
+                            return Err(unsupported("Query-valued dynamic CASE fallback requires a native lazy-apply kernel"));
+                        }
+                    }
+                    Expression::Coalesce { values } => {
+                        let mut earlier_dynamic = false;
+                        for value in values {
+                            if earlier_dynamic && contains_query(value) { return Err(unsupported("Query-valued COALESCE successor requires a native lazy-apply kernel")); }
+                            if !matches!(value, Expression::Literal { value: Value::Null }) { earlier_dynamic = true; }
+                        }
+                    }
+                    _ => {},
+                }
+            }
+        }
+        children(node, &mut pending);
+    }
+    Ok(())
+}
+
+type ExpressionBindings = std::collections::BTreeMap<usize, Expr>;
+fn expression_key(value: &Expression) -> usize { value as *const Expression as usize }
+
+/// Query expressions are hoisted into projections/mark joins before the host
+/// operator. This also covers CASE, aggregate arguments, and ORDER BY, rather
+/// than relying on an optimizer that only visits Filter/Projection subqueries.
+fn lower_expression<'a>(
+    lowering: &'a mut Lowering<'_>,
+    frame: &'a mut DataFrame,
+    scope: &'a Scope,
+    outer: Option<&'a Scope>,
+    value: &'a Expression,
+) -> BoxFuture<'a, DfResult<Expr>> {
+    Box::pin(async move {
+        let mut bindings = ExpressionBindings::new();
+        resolve_expression(lowering, frame, scope, outer, value, &mut bindings).await
+    })
+}
+fn resolve_expression<'a>(
+    lowering: &'a mut Lowering<'_>,
+    frame: &'a mut DataFrame,
+    scope: &'a Scope,
+    outer: Option<&'a Scope>,
+    value: &'a Expression,
+    bindings: &'a mut ExpressionBindings,
+) -> BoxFuture<'a, DfResult<Expr>> {
+    Box::pin(async move {
+        lowering.owner.work(1)?;
+        // Bind and shape-check dead branches independently, without retaining
+        // their joins/materialization prerequisites in the executing frame.
+        if let Some(selected) = static_conditional_choice(value) {
+            let mut children_to_validate = Vec::new();
+            children(Node::Expression(value), &mut children_to_validate);
+            for child in children_to_validate {
+                if let Node::Expression(child) = child {
+                    if selected.is_some_and(|selected| std::ptr::eq(selected, child)) { continue; }
+                    let checkpoint = lowering.pending_checkpoint();
+                    subquery::reserve_clone(frame.logical_plan(), &lowering.owner)?;
+                    let mut detached = frame.clone();
+                    let mut detached_bindings = ExpressionBindings::new();
+                    let result = resolve_expression(lowering, &mut detached, scope, outer, child, &mut detached_bindings).await;
+                    lowering.discard_since(checkpoint);
+                    result?;
+                }
+            }
+            let result = match selected {
+                Some(selected) => resolve_expression(lowering, frame, scope, outer, selected, bindings).await?,
+                None => Expr::Literal(ScalarValue::Null, None),
+            };
+            bindings.insert(expression_key(value), result.clone());
+            return Ok(result);
+        }
+        let mut nested = Vec::new();
+        children(Node::Expression(value), &mut nested);
+        for child in nested.into_iter().rev() {
+            if let Node::Expression(child) = child {
+                resolve_expression(lowering, frame, scope, outer, child, bindings).await?;
+            }
+        }
+        let result = match value {
+            Expression::Column { name } => scope.local(name)?,
+            Expression::OuterColumn { name, depth } => outer.ok_or_else(|| unsupported("OuterColumn requires an enclosing query-valued expression"))?.outer(name, *depth)?,
+            Expression::InQuery { value, input, negated } => {
+                let needle = bindings.get(&expression_key(value)).cloned().ok_or_else(|| unsupported("Missing membership input"))?;
+                let right = lower_validated(lowering, input, Some(scope)).await?;
+                let alias = lowering.name("membership");
+                let (next, result) = subquery::membership(frame.clone(), right, needle, *negated, &alias, &lowering.owner)?;
+                *frame = next;
+                hoist_query_value(lowering, frame, result)?
+            }
+            Expression::ExistsQuery { input, negated } => {
+                let right = lower_validated(lowering, input, Some(scope)).await?;
+                let alias = lowering.name("existence");
+                let (next, result) = subquery::existence(frame.clone(), right, *negated, &alias, &lowering.owner)?;
+                *frame = next;
+                hoist_query_value(lowering, frame, result)?
+            }
+            Expression::ScalarQuery { input } => {
+                let right = lower_validated(lowering, input, Some(scope)).await?;
+                subquery::immediate_references(right.logical_plan(), frame.schema(), &lowering.owner)?;
+                let result = subquery::scalar(right, &lowering.owner)?;
+                hoist_query_value(lowering, frame, result)?
+            }
+            _ => expression(value, frame.schema(), &lowering.owner, bindings)?,
+        };
+        bindings.insert(expression_key(value), result.clone());
+        Ok(result)
+    })
+}
+
+fn hoist_query_value(lowering: &mut Lowering<'_>, frame: &mut DataFrame, result: Expr) -> DfResult<Expr> {
+    let name = lowering.name("query_value");
+    let mut projection = frame.schema().columns().into_iter().map(Expr::Column).collect::<Vec<_>>();
+    projection.push(result.alias(&name));
+    *frame = frame.clone().select(projection)?;
+    Ok(Expr::Column(Column::from_name(name)))
+}
+
+fn expression(value: &Expression, schema: &DFSchema, owner: &Arc<QueryOwner>, bindings: &ExpressionBindings) -> DfResult<Expr> {
+    if let Some(value) = bindings.get(&expression_key(value)) { return Ok(value.clone()); }
     owner.work(1)?;
     Ok(match value {
         Expression::Column { name } => Expr::Column(column(name)?),
+        Expression::OuterColumn { .. } | Expression::InQuery { .. } | Expression::ExistsQuery { .. } | Expression::ScalarQuery { .. } => {
+            return Err(unsupported("Query expression was not scoped and lowered"));
+        }
         Expression::Literal { value } => Expr::Literal(scalar(value)?, None),
-        Expression::Binary {
-            left,
-            operator,
-            right,
-        } => numeric::binary(
-            expression(left, schema, owner)?,
-            operator_value(*operator),
-            expression(right, schema, owner)?,
-            schema,
-            owner,
-        )?,
-        Expression::Not { value } => Expr::Not(Box::new(expression(value, schema, owner)?)),
-        Expression::IsNull { value } => expression(value, schema, owner)?.is_null(),
+        Expression::Binary { left, operator, right } => {
+            let left = expression(left, schema, owner, bindings)?;
+            let right = expression(right, schema, owner, bindings)?;
+            if matches!(operator, BinaryOperator::And | BinaryOperator::Or) {
+                for value in [&left, &right] {
+                    if !matches!(value.get_type(schema)?, arrow_schema::DataType::Boolean | arrow_schema::DataType::Null) {
+                        return Err(external(crate::relational::engine_compat::type_error()));
+                    }
+                }
+                Expr::BinaryExpr(datafusion::logical_expr::expr::BinaryExpr::new(Box::new(left), operator_value(*operator), Box::new(right)))
+            } else { numeric::binary(left, operator_value(*operator), right, schema, owner)? }
+        },
+        Expression::Not { value } => Expr::Not(Box::new(expression(value, schema, owner, bindings)?)),
+        Expression::IsNull { value } => expression(value, schema, owner, bindings)?.is_null(),
         Expression::Cast { value, target } => {
-            scalar_functions::cast(expression(value, schema, owner)?, *target, schema, owner)?
+            scalar_functions::cast(expression(value, schema, owner, bindings)?, *target, schema, owner)?
         }
         Expression::Call {
             function,
@@ -744,21 +1048,21 @@ fn expression(value: &Expression, schema: &DFSchema, owner: &Arc<QueryOwner>) ->
             *function,
             arguments
                 .iter()
-                .map(|v| expression(v, schema, owner))
+                .map(|v| expression(v, schema, owner, bindings))
                 .collect::<DfResult<Vec<_>>>()?,
             schema,
             owner,
         )?,
         Expression::Index { value, index } => {
-            scalar_functions::index(expression(value, schema, owner)?, *index, schema, owner)?
+            scalar_functions::index(expression(value, schema, owner, bindings)?, *index, schema, owner)?
         }
         Expression::Like {
             value,
             pattern,
             negated,
         } => scalar_functions::like(
-            expression(value, schema, owner)?,
-            expression(pattern, schema, owner)?,
+            expression(value, schema, owner, bindings)?,
+            expression(pattern, schema, owner, bindings)?,
             *negated,
             schema,
             owner,
@@ -769,9 +1073,9 @@ fn expression(value: &Expression, schema: &DFSchema, owner: &Arc<QueryOwner>) ->
             high,
             negated,
         } => scalar_functions::between(
-            expression(value, schema, owner)?,
-            expression(low, schema, owner)?,
-            expression(high, schema, owner)?,
+            expression(value, schema, owner, bindings)?,
+            expression(low, schema, owner, bindings)?,
+            expression(high, schema, owner, bindings)?,
             *negated,
             schema,
             owner,
@@ -784,14 +1088,14 @@ fn expression(value: &Expression, schema: &DFSchema, owner: &Arc<QueryOwner>) ->
                 .iter()
                 .map(|b| {
                     Ok((
-                        expression(&b.when, schema, owner)?,
-                        expression(&b.then, schema, owner)?,
+                        expression(&b.when, schema, owner, bindings)?,
+                        expression(&b.then, schema, owner, bindings)?,
                     ))
                 })
                 .collect::<DfResult<Vec<_>>>()?;
             let otherwise = otherwise
                 .as_deref()
-                .map(|v| expression(v, schema, owner))
+                .map(|v| expression(v, schema, owner, bindings))
                 .transpose()?;
             exact_case(branches, otherwise, schema)?
         }
@@ -799,18 +1103,18 @@ fn expression(value: &Expression, schema: &DFSchema, owner: &Arc<QueryOwner>) ->
             let branches = values
                 .iter()
                 .map(|v| {
-                    let value = expression(v, schema, owner)?;
+                    let value = expression(v, schema, owner, bindings)?;
                     Ok((value.clone().is_not_null(), value))
                 })
                 .collect::<DfResult<Vec<_>>>()?;
             exact_case(branches, None, schema)?
         }
         Expression::NullIf { left, right } => {
-            let left = expression(left, schema, owner)?;
+            let left = expression(left, schema, owner, bindings)?;
             let condition = numeric::binary(
                 left.clone(),
                 Operator::Eq,
-                expression(right, schema, owner)?,
+                expression(right, schema, owner, bindings)?,
                 schema,
                 owner,
             )?;
@@ -821,7 +1125,7 @@ fn expression(value: &Expression, schema: &DFSchema, owner: &Arc<QueryOwner>) ->
             )?
         }
         Expression::In { value, values } => {
-            let value = expression(value, schema, owner)?;
+            let value = expression(value, schema, owner, bindings)?;
             // Native IN coerces the whole list to one type, losing UInt64 bits
             // for mixed floats. A balanced OR preserves exact pair comparisons
             // and bounds optimizer recursion even for large membership lists.
@@ -966,6 +1270,7 @@ pub(super) fn requirements(
     owner: &Arc<QueryOwner>,
 ) -> DfResult<Vec<SourceRequirement>> {
     let admission = validate(plan, Some(owner))?;
+    validate_conditional_queries(plan)?;
     let bytes = admission
         .nodes
         .checked_mul(1024)
@@ -975,10 +1280,10 @@ pub(super) fn requirements(
         .ok_or_else(|| external(super::limit()))?;
     owner.retain(bytes)?;
     let mut output: Vec<SourceRequirement> = Vec::new();
-    let mut pending = vec![plan];
-    while let Some(plan) = pending.pop() {
+    let mut pending = vec![Node::Plan(plan)];
+    while let Some(node) = pending.pop() {
         owner.work(output.len().saturating_add(1))?;
-        match plan {
+        if let Node::Plan(plan) = node { match plan {
             QueryPlan::Scan { table } | QueryPlan::Lookup { table, .. } => {
                 if output.iter().any(|entry| {
                     entry.table.name == table.name
@@ -1006,16 +1311,9 @@ pub(super) fn requirements(
                     });
                 }
             }
-            QueryPlan::Filter { input, .. }
-            | QueryPlan::Project { input, .. }
-            | QueryPlan::Aggregate { input, .. }
-            | QueryPlan::Sort { input, .. }
-            | QueryPlan::Limit { input, .. } => pending.push(input),
-            QueryPlan::Join { left, right, .. } => {
-                pending.push(right);
-                pending.push(left);
-            }
-        }
+            _ => {}
+        } }
+        children(node, &mut pending);
     }
     for entry in &mut output {
         if let Some(ids) = &mut entry.ids {

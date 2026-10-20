@@ -101,7 +101,7 @@ fn captures(fx: &Fixture) -> usize {
 fn run(fx: &Fixture, extra: &[(&str, &str)]) -> Outcome {
     let mut flags = vec![("--journal-encounter-id", "132")];
     flags.extend_from_slice(extra);
-    let out = lycheedev_data::dispatch(&fx.invocation("data encounter get", &flags)).unwrap();
+    let out = lycheedev_data::migration_oracle::dispatch(&fx.invocation("data encounter get", &flags)).unwrap();
     assert_eq!(out.provenance.len(), 2);
     for capture in &out.provenance {
         let id = capture["id"].as_str().unwrap();
@@ -294,7 +294,7 @@ fn reachable_ancestor_and_sibling_cycles_fail_without_captures() {
         vec![section(1, 0, 0, 2, 0, 0), section(2, 0, 1, 0, 2, 0)],
     ] {
         let fx = fixture(&rows, false);
-        let error = lycheedev_data::dispatch(
+        let error = lycheedev_data::migration_oracle::dispatch(
             &fx.invocation("data encounter get", &[("--journal-encounter-id", "132")]),
         )
         .unwrap_err();
@@ -336,7 +336,7 @@ fn dynamic_spell_tables_share_authenticated_source_and_resource_budget() {
     let schema = |name: &str| {
         let mut inv = fx.invocation("data db2 schema", &[]);
         inv.positional = Some(name.into());
-        lycheedev_data::dispatch(&inv).unwrap().data["resources"]["metadataBytes"]
+        lycheedev_data::migration_oracle::dispatch(&inv).unwrap().data["resources"]["metadataBytes"]
             .as_u64()
             .unwrap()
     };
@@ -376,7 +376,7 @@ fn arguments_cancellation_deadline_and_corrupt_or_missing_spell_content_fail_clo
         vec![("--journal-encounter-id", "132"), ("--max-depth", "bad")],
     ] {
         assert_eq!(
-            lycheedev_data::dispatch(&fx.invocation("data encounter get", &flags))
+            lycheedev_data::migration_oracle::dispatch(&fx.invocation("data encounter get", &flags))
                 .unwrap_err()
                 .exit_code,
             2
@@ -384,16 +384,16 @@ fn arguments_cancellation_deadline_and_corrupt_or_missing_spell_content_fail_clo
     }
     let mut inv = fx.invocation("data encounter get", &[("--journal-encounter-id", "132")]);
     inv.control.cancel_handle().store(true, Ordering::Release);
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().exit_code, 7);
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().exit_code, 7);
     inv.control = OperationControl::new(Instant::now(), Arc::new(AtomicBool::new(false)));
     assert_eq!(
-        lycheedev_data::dispatch(&inv).unwrap_err().code,
+        lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code,
         "command.deadline"
     );
     assert_eq!(captures(&fx), 0);
     let fx = fixture(&[section(1, 0, 0, 0, 0, 123)], false);
     assert!(
-        lycheedev_data::dispatch(
+        lycheedev_data::migration_oracle::dispatch(
             &fx.invocation("data encounter get", &[("--journal-encounter-id", "132")])
         )
         .is_err()
@@ -403,7 +403,7 @@ fn arguments_cancellation_deadline_and_corrupt_or_missing_spell_content_fail_clo
     row[3] = Cell::BadString;
     let fx = fixture(&[row], false);
     assert_eq!(
-        lycheedev_data::dispatch(
+        lycheedev_data::migration_oracle::dispatch(
             &fx.invocation("data encounter get", &[("--journal-encounter-id", "132")])
         )
         .unwrap_err()
@@ -418,7 +418,7 @@ fn spell_name_open_failure_precedes_missing_spell_misc_definition() {
     let mut names = spell_tables().remove(0);
     names.raw.pop();
     let fx = Fixture::new(&[sections(&[section(1, 0, 0, 0, 0, 123)]), names]);
-    let error = lycheedev_data::dispatch(
+    let error = lycheedev_data::migration_oracle::dispatch(
         &fx.invocation("data encounter get", &[("--journal-encounter-id", "132")]),
     )
     .unwrap_err();

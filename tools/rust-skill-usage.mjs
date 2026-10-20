@@ -6,14 +6,15 @@ import {beginScratch, contained} from './rust-disk.mjs';
 import {ownedSpawnSync} from './rust-owned-process.mjs';
 import {assertCurrentSelectedReport, currentWorkflowInputs, inventory, inventoryHash, jsonFile, loadCurrentWorkflow, pendingIncrementTasks, verifyCandidate} from '../tests/rust-skill-usage/assertions.mjs';
 
+import {assertDiscoveryNoHome} from '../tests/rust-skill-usage/agent-discovery.mjs';
 import {dataSkillIdentity} from '../tests/rust-skill-usage/data-skill-contract.mjs';
 
 if (process.argv[2] === '--prepare-data-exporters') {
   if (process.argv.length !== 3) throw new Error('usage: --prepare-data-exporters');
-  const {prepareDataExporters} = await import('../tests/rust-skill-usage/data-exporters.mjs');
+  const {prepareDataExporters} = await import('../tests/rust-skill-usage/agent-data-exporters.mjs');
   console.log(JSON.stringify(prepareDataExporters(resolve('.')), null, 2));
 } else if (process.argv[2] === '--data') {
-  const {runOwnedData} = await import('../tests/rust-skill-usage/data-owned.mjs');
+  const {runOwnedData} = await import('../tests/rust-skill-usage/agent-data-owned.mjs');
   runOwnedData(resolve('.'), process.argv.slice(3));
 } else {
 const root = resolve('.');
@@ -25,7 +26,7 @@ const artifact = verifyArtifact(root, artifactPath), artifactSHA256 = hashFile(a
 const workflow = loadCurrentWorkflow(root);
 const candidate = verifyCandidate(root, candidatePath, artifact, workflow);
 if (candidate.report.artifactRecordSHA256 !== artifactSHA256) throw new Error('skill-usage.sealed_artifact_record_mismatch');
-const inputs = ['tools/rust-skill-usage.mjs', 'tests/rust-skill-usage/run.mjs', 'tests/rust-skill-usage/assertions.mjs', 'tests/rust-skill-usage/data-skill-contract.mjs', ...currentWorkflowInputs(workflow), 'tests/rust-source-full-corpus/assertions.mjs', 'tests/rust-source-full-corpus/retail-oracle.json'];
+const inputs = ['tools/rust-skill-usage.mjs', 'tests/rust-skill-usage/run.mjs', 'tests/rust-skill-usage/agent-discovery.mjs', 'tests/rust-skill-usage/assertions.mjs', 'tests/rust-skill-usage/data-skill-contract.mjs', ...currentWorkflowInputs(workflow), 'tests/rust-source-full-corpus/assertions.mjs', 'tests/rust-source-full-corpus/retail-oracle.json'];
 const testInputs = Object.fromEntries(inputs.map(path => [path, hashFile(join(root, path))]));
 const job = beginScratch(root, 'skill-real-usage', {
   command: process.argv,
@@ -41,7 +42,7 @@ try {
   // native worker/session descendant. No per-command orphan exemptions.
   handlesReaped = false;
   const run = ownedSpawnSync(process.execPath, [join(root, 'tests/rust-skill-usage/run.mjs'), candidate.packageRoot, job.directory, job.evidence, candidate.packageSHA256], {
-    cwd: root, env: {...process.env}, evidence: job.evidence, timeout: 1200000,
+    cwd: root, env: {...process.env}, evidence: job.evidence, timeout: 600000,
   });
   handlesReaped = run.handlesReaped === true; logs.push(...run.logs);
   const observationPath = join(job.evidence, 'report.json');
@@ -51,7 +52,7 @@ try {
     && inventoryHash(inventory(candidate.packageRoot)) === candidate.packageSHA256
     && Object.entries(testInputs).every(([path, expected]) => hashFile(join(root, path)) === expected);
   let observationContractError;
-  try { assertCurrentSelectedReport(observation, workflow, dataSkillIdentity()); } catch (error) { observationContractError = error.message; }
+  try { assertCurrentSelectedReport(observation, workflow, dataSkillIdentity()); assertDiscoveryNoHome(observation.discovery,['version','describe','help','query-help','query-schema','query-search'],[join(job.directory,'研究 home'),join(job.directory,'user','.lycheedev')]); } catch (error) { observationContractError = error.message; }
   const passed = stable && handlesReaped && !run.error && run.status === 0 && !observationContractError;
   save('owned-report.json', {schema: 'lycheedev.skill-usage-owned.v1', passed, goContract: workflow.goContract, goVersion: workflow.goVersion, completeSkillAcceptance: false, pendingTasks: pendingIncrementTasks(workflow), observationContractError, binarySHA256: artifact.binarySHA256, artifactRecordSHA256: artifactSHA256,
     candidateReportSHA256: candidate.reportSHA256, packageSHA256: candidate.packageSHA256, inputsStable: stable, testInputs,

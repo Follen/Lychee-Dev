@@ -16,7 +16,7 @@ use lycheedev_core::{
     Result, ToolkitError,
     workspace::data_disk::{DerivedObject, DerivedReadCheck, OwnedDerivedObjectReader},
 };
-use std::{cell::RefCell, sync::Arc};
+use std::sync::{Arc, Mutex};
 
 pub(crate) enum Reuse {
     Absent,
@@ -32,7 +32,7 @@ pub(crate) enum Reuse {
 pub(crate) struct Generation {
     pub(crate) key: String,
     pub(crate) object: DerivedObject,
-    reader: RefCell<Option<OwnedDerivedObjectReader>>,
+    reader: Mutex<Option<OwnedDerivedObjectReader>>,
     directory: reading::ipc::Directory,
     schema: application::PhysicalSchema,
     _visible_schema: Arc<ImportedSchema>,
@@ -62,7 +62,7 @@ impl Generation {
             .blocks
             .get(index)
             .ok_or_else(reading::invalid)?;
-        let mut owner = self.reader.try_borrow_mut().map_err(|_| reentered())?;
+        let mut owner = self.reader.try_lock().map_err(|_| reentered())?;
         let reader = owner.as_mut().ok_or_else(reentered)?;
         let batch = reading::ipc::read_owned_batch(
             reader,
@@ -82,7 +82,7 @@ impl Generation {
     pub(crate) fn close(&self) -> Result<()> {
         let reader = self
             .reader
-            .try_borrow_mut()
+            .try_lock()
             .map_err(|_| reentered())?
             .take();
         match reader {
@@ -237,7 +237,7 @@ pub(crate) fn open_existing(
     Ok(Reuse::Hit(Arc::new(Generation {
         key,
         object,
-        reader: RefCell::new(Some(reader)),
+        reader: Mutex::new(Some(reader)),
         directory,
         schema,
         _visible_schema: visible_schema,

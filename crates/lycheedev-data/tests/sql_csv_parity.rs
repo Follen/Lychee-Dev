@@ -29,7 +29,7 @@ fn run(
     if overwrite {
         inv.flags.insert("--overwrite".into(), "true".into());
     }
-    lycheedev_data::dispatch(&inv)
+    lycheedev_data::migration_oracle::dispatch(&inv)
 }
 fn sidecar(path: &Path) -> PathBuf {
     PathBuf::from(format!("{}.manifest.json", path.display()))
@@ -141,7 +141,7 @@ fn sql_csv_flag_errors_precede_query_selection() {
         vec![("--output", "out.csv")],
         vec![("--overwrite", "true")],
     ] {
-        let error = lycheedev_data::dispatch(&invocation(&flags)).unwrap_err();
+        let error = lycheedev_data::migration_oracle::dispatch(&invocation(&flags)).unwrap_err();
         assert_eq!(error.code, "command.invalid_arguments", "{flags:?}");
         assert_eq!(
             error.message,
@@ -159,7 +159,7 @@ fn sql_csv_flag_errors_precede_query_selection() {
             ("--overwrite", "true"),
         ],
     ] {
-        let error = lycheedev_data::dispatch(&invocation(&flags)).unwrap_err();
+        let error = lycheedev_data::migration_oracle::dispatch(&invocation(&flags)).unwrap_err();
         assert_eq!(error.code, "vault.record_missing", "{flags:?}");
         assert_eq!(
             error.message,
@@ -189,7 +189,7 @@ fn sql_csv_empty_output_without_csv_keeps_normal_query() {
         "data sql",
         &[("--sql", "SELECT ID FROM Sample"), ("--output", "")],
     );
-    let out = lycheedev_data::dispatch(&inv).unwrap();
+    let out = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
     assert!(out.data.get("result").is_some());
     assert_eq!(out.provenance.len(), 1);
 }

@@ -137,7 +137,7 @@ pub fn implemented() -> Vec<&'static Definition> {
     all()
         .iter()
         .filter(|d| match d.path.as_str() {
-            "version" | "describe" | "project init" | "project status" | "project lock"
+            "version" | "describe" | "cli search" | "schema" | "project init" | "project status" | "project lock"
             | "target available" => true,
             // Each business crate publishes only completed handlers; inventory remains exhaustive separately.
             value if value.starts_with("source ") => lycheedev_source::commands().contains(&value),
@@ -261,6 +261,9 @@ mod tests {
             position..position,
             agent_additions.as_array().unwrap().iter().cloned(),
         );
+        let retired = ["data sql", "data db2", "data db2 schema", "data db2 search", "data db2 foreign-key", "data db2 stream", "data spell info", "data spell auras", "data spell summons", "data item get", "data item models", "data item geosets", "data item textures", "data decor list", "data decor get", "data creature display", "data creature model", "data encounter get"];
+        expected.retain(|d| !retired.contains(&d["path"].as_str().unwrap()));
+        expected.extend(serde_json::from_str::<Vec<Value>>(r#"[{"path":"cli search","summary":"Search local command capabilities by task; returns at most five ranked commands without opening a workspace, cache, worker or network.","mutates":false,"arguments":["<task>"],"flags":["--format text|json|jsonl"]},{"path":"schema","summary":"Inspect the exact CLI input contract for a command path. Data Agent commands include the authoritative typed session protocol; no worker or engine is started.","mutates":false,"arguments":["<command...>"],"flags":["--format text|json|jsonl"]}]"#).unwrap());
         assert_eq!(serde_json::to_value(all()).unwrap(), Value::Array(expected));
     }
 
@@ -287,7 +290,7 @@ mod tests {
         let selected = implemented();
         // Every current route has a concrete handler. Keep this exhaustive
         // contract rather than accepting a filtered subset after caching.
-        assert_eq!(current.len(), 87);
+        assert_eq!(current.len(), 71);
         assert_eq!(selected.len(), current.len());
         for (borrowed, original) in selected.iter().zip(current) {
             assert!(std::ptr::eq(*borrowed, original));
@@ -321,13 +324,11 @@ mod tests {
             );
             let input = ["--help".to_owned()];
             let result = crate::dispatch(&crate::parse(&input).unwrap()).unwrap();
-            assert_eq!(
-                result.data,
-                serde_json::json!({
-                    "commands":expected,
-                    "flags":["--home <root>", "--format text|json|jsonl", "--help"]
-                })
-            );
+            assert_eq!(result.data["schema"], "lycheedev.cli-help.v1");
+            assert_eq!(result.data["kind"], "group");
+            assert!(result.data["commands"].is_null());
+            assert_eq!(result.data["truncated"], false);
+            assert!(result.data["children"].as_array().unwrap().len() <= 32);
             for definition in all() {
                 let mut input: Vec<String> = definition
                     .path
@@ -342,14 +343,10 @@ mod tests {
                     .collect();
                 flags.push("--help");
                 let result = crate::dispatch(&crate::parse(&input).unwrap()).unwrap();
-                assert_eq!(
-                    result.data,
-                    serde_json::json!({
-                        "commands":[definition], "flags":flags
-                    }),
-                    "{}",
-                    definition.path
-                );
+                assert_eq!(result.data["schema"], "lycheedev.cli-help.v1");
+                assert_eq!(result.data["kind"], "command");
+                assert_eq!(result.data["commands"], serde_json::json!([definition]));
+                assert_eq!(result.data["flags"], serde_json::json!(flags));
             }
         }
     }
@@ -419,7 +416,7 @@ mod tests {
             let error = crate::parse(&input).unwrap_err();
             assert_eq!(error.exit_code, 2, "{path}");
             assert!(
-                error.message.starts_with("unknown command"),
+                error.code == "command.invalid_arguments" && error.details["parser"] == "clap",
                 "{path}: {}",
                 error.message
             );

@@ -44,7 +44,7 @@ fn tables() -> Vec<Table> {
 }
 fn run(fx: &Fixture, item: &str, flags: &[(&str,&str)]) -> Outcome {
     let mut flags=flags.to_vec();flags.push(("--item-id",item));
-    let out=lycheedev_data::dispatch(&fx.invocation("data item models",&flags)).unwrap();
+    let out=lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item models",&flags)).unwrap();
     fx.verify(&out);
     assert_eq!(out.provenance[0]["provenance"]["kind"],"item-models");
     assert_eq!(out.provenance[0]["provenance"]["locator"],format!("item:models:{item}"));
@@ -111,7 +111,7 @@ fn appearance_ambiguity_keeps_all_links_and_missing_chain_differs_from_no_appear
     assert_eq!(no_resource.data["models"],json!([]));assert_eq!(no_resource.data["textures"],json!([]));
     assert_eq!(no_resource.data["relations"][2],relation("ItemDisplayInfo","ModelResourcesID",6000,"model_resource",99,2));
     let before=captures(&fx);
-    let error=lycheedev_data::dispatch(&fx.invocation("data item models",&[("--item-id","999")])).unwrap_err();
+    let error=lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item models",&[("--item-id","999")])).unwrap_err();
     assert_eq!((error.code.as_str(),error.exit_code),("records.record_not_found",3));assert_eq!(captures(&fx),before);
 }
 
@@ -126,7 +126,7 @@ fn scalar_resource_fields_are_not_arrays_and_unused_component_rows_are_not_decod
     let mut all=tables();all[6]=table("ComponentModelFileData",507,&[("ID","uint"),("RaceID","signed"),("GenderIndex","signed"),("Unused","text")],&[vec![U(502),I(1),I(0),Cell::BadString]]);
     let fx=Fixture::new(&all);assert!(run(&fx,"1",&[]).complete);
     let before=captures(&fx);
-    assert_eq!(lycheedev_data::dispatch(&fx.invocation("data item models",&[("--item-id","1"),("--race-id","1")])).unwrap_err().code,"table.invalid_format");
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item models",&[("--item-id","1"),("--race-id","1")])).unwrap_err().code,"table.invalid_format");
     assert_eq!(captures(&fx),before);
 }
 
@@ -152,19 +152,19 @@ fn invalid_model_tables() -> Vec<Table> {
 #[test]
 fn required_tables_open_in_order_and_nonmatching_rows_are_fully_decoded() {
     let mut all=tables();all.truncate(1);all[0].raw.pop();let fx=Fixture::new(&all);
-    assert_eq!(lycheedev_data::dispatch(&fx.invocation("data item models",&[("--item-id","1")])).unwrap_err().code,"table.invalid_format");
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item models",&[("--item-id","1")])).unwrap_err().code,"table.invalid_format");
     assert_eq!(captures(&fx),0);
     let fx=Fixture::new(&tables()[..6]);
     for item in ["1","4","999"] {
-        assert!(lycheedev_data::dispatch(&fx.invocation("data item models",&[("--item-id",item)])).is_err());
+        assert!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item models",&[("--item-id",item)])).is_err());
     }
     assert_eq!(captures(&fx),0,"the required component table opens even without a requested variant or appearance");
     let fx=Fixture::new(&invalid_model_tables());
-    assert_eq!(lycheedev_data::dispatch(&fx.invocation("data item models",&[("--item-id","1")])).unwrap_err().code,"table.invalid_format");
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item models",&[("--item-id","1")])).unwrap_err().code,"table.invalid_format");
     assert_eq!(captures(&fx),0);
     let mut all=tables();all[4]=table("ModelFileData",505,&[("ID","uint"),("ModelResourcesID","text")],&[vec![U(1),Cell::Text("50".into())]]);
     let fx=Fixture::new(&all);
-    assert_eq!(lycheedev_data::dispatch(&fx.invocation("data item models",&[("--item-id","1")])).unwrap_err().code,"records.field_type_mismatch");
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item models",&[("--item-id","1")])).unwrap_err().code,"records.field_type_mismatch");
     assert_eq!(captures(&fx),0);
 }
 
@@ -178,18 +178,18 @@ fn shared_authenticated_reads_warm_query_and_argument_control_failures() {
     let mut independent=0;
     for name in TABLES {
         let mut inv=fx.invocation("data db2 schema",&[]);inv.positional=Some((*name).into());
-        independent+=lycheedev_data::dispatch(&inv).unwrap().data["resources"]["metadataBytes"].as_u64().unwrap();
+        independent+=lycheedev_data::migration_oracle::dispatch(&inv).unwrap().data["resources"]["metadataBytes"].as_u64().unwrap();
     }
     assert!(warm.data["resources"]["metadataBytes"].as_u64().unwrap()<independent);
     let before=captures(&fx);
     for flags in [vec![],vec![("--item-id","0")],vec![("--item-id","-1")],vec![("--item-id","4294967296")],
         vec![("--item-id","1"),("--race-id","9223372036854775808")],vec![("--item-id","1"),("--gender","bad")]] {
-        assert_eq!(lycheedev_data::dispatch(&fx.invocation("data item models",&flags)).unwrap_err().exit_code,2);
+        assert_eq!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data item models",&flags)).unwrap_err().exit_code,2);
     }
     let mut inv=fx.invocation("data item models",&[("--item-id","1")]);inv.control.cancel_handle().store(true,Ordering::Release);
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().exit_code,7);
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().exit_code,7);
     inv.control=OperationControl::new(Instant::now(),Arc::new(AtomicBool::new(false)));
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().code,"command.deadline");assert_eq!(captures(&fx),before);
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code,"command.deadline");assert_eq!(captures(&fx),before);
 }
 
 #[test]

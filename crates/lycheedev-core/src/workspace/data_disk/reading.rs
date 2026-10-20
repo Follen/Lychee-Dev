@@ -169,30 +169,28 @@ impl<'a> OwnedDerivedReadLease<'a> {
 // Both capabilities share the same exact I/O, authentication and close code.
 // An owned reader does not itself guarantee query admission: its concrete Data
 // owner must retain that admission until every reader has checked-closed.
-pub type OwnedDerivedObjectReader = DerivedObjectReader<'static>;
+pub type DerivedObjectReader<'a> = ObjectReader<BorrowedReaderChecks<'a>>;
+pub type OwnedDerivedObjectReader = ObjectReader<OwnedReaderChecks>;
 
-enum ReaderChecks<'a> {
-    Borrowed(Checks<'a>),
-    Owned {
-        control: OperationControl,
-        supplemental: DerivedReadCheck,
-    },
+/// Type-level separation preserves borrowed callback compatibility without
+/// making the independently owned production reader inherit a non-Send borrow.
+pub struct BorrowedReaderChecks<'a> {
+    _resources: Option<&'a DataResources>,
+    checks: Checks<'a>,
 }
-impl ReaderChecks<'_> {
-    fn borrowed(&self) -> Checks<'_> {
-        match self {
-            Self::Borrowed(checks) => *checks,
-            Self::Owned {
-                control,
-                supplemental,
-            } => Checks {
-                control,
-                supplemental: Some(supplemental.as_ref()),
-            },
-        }
-    }
-    fn check(&self) -> Result<()> {
-        self.borrowed().check()
+pub struct OwnedReaderChecks {
+    control: OperationControl,
+    supplemental: DerivedReadCheck,
+}
+pub trait ReaderCheck {
+    fn checks(&self) -> Checks<'_>;
+}
+impl ReaderCheck for BorrowedReaderChecks<'_> {
+    fn checks(&self) -> Checks<'_> { self.checks }
+}
+impl ReaderCheck for OwnedReaderChecks {
+    fn checks(&self) -> Checks<'_> {
+        Checks { control: &self.control, supplemental: Some(self.supplemental.as_ref()) }
     }
 }
 
@@ -354,9 +352,8 @@ impl<'a> DerivedReservation<'a> {
             }
             Err(error) => return join(Err(error), close_directory(directory), &self.control),
         };
-        let reader = DerivedObjectReader {
-            _resources: self._resources,
-            control: ReaderChecks::Borrowed(self.control),
+        let reader = ObjectReader {
+            control: BorrowedReaderChecks { _resources: self._resources, checks: self.control },
             file: Some(file),
             directory: Some(directory),
             bytes,
@@ -381,23 +378,21 @@ impl<'a> DerivedReservation<'a> {
 /// reads retain the original admission; owned cursor reads retain its exact
 /// controls and rely on the containing query to close them before admission.
 /// Read/Seek preserve typed failures through error(). Raw owners are private.
-pub struct DerivedObjectReader<'a> {
-    _resources: Option<&'a DataResources>,
-    control: ReaderChecks<'a>,
+pub struct ObjectReader<C: ReaderCheck> {
+    control: C,
     file: Option<fs::File>,
     directory: Option<Directory>,
     bytes: u64,
     failure: Option<ToolkitError>,
 }
-impl DerivedObjectReader<'_> {
+impl ObjectReader<BorrowedReaderChecks<'_>> {
     fn into_owned(
         mut self,
         control: OperationControl,
         supplemental: DerivedReadCheck,
     ) -> OwnedDerivedObjectReader {
-        DerivedObjectReader {
-            _resources: None,
-            control: ReaderChecks::Owned {
+        ObjectReader {
+            control: OwnedReaderChecks {
                 control,
                 supplemental,
             },
@@ -407,6 +402,8 @@ impl DerivedObjectReader<'_> {
             failure: self.failure.take(),
         }
     }
+}
+impl<C: ReaderCheck> ObjectReader<C> {
     pub fn len(&self) -> u64 {
         self.bytes
     }
@@ -427,14 +424,14 @@ impl DerivedObjectReader<'_> {
             return Err(error.clone());
         }
         let result = (|| {
-            self.control.check()?;
+            self.control.checks().check()?;
             let length = out.len().min(65536);
             let count = self
                 .file
                 .as_mut()
                 .expect("owned reader")
                 .read(&mut out[..length])?;
-            self.control.check()?;
+            self.control.checks().check()?;
             Ok(count)
         })();
         self.remember(result)
@@ -453,7 +450,7 @@ impl DerivedObjectReader<'_> {
             }
             out = &mut out[count..];
         }
-        let result = self.control.check();
+        let result = self.control.checks().check();
         self.remember(result)
     }
     pub fn seek_checked(&mut self, from: SeekFrom) -> Result<u64> {
@@ -461,20 +458,20 @@ impl DerivedObjectReader<'_> {
             return Err(error.clone());
         }
         let result = (|| {
-            self.control.check()?;
+            self.control.checks().check()?;
             let position = self.file.as_mut().expect("owned reader").seek(from)?;
-            self.control.check()?;
+            self.control.checks().check()?;
             Ok(position)
         })();
         self.remember(result)
     }
     fn validate_kind_length(&self) -> Result<()> {
-        self.control.check()?;
+        self.control.checks().check()?;
         let metadata = self.file.as_ref().expect("owned reader").metadata()?;
         if !metadata.is_file() || metadata.len() != self.bytes {
             return Err(integrity("Referenced Data object kind or length differs"));
         }
-        self.control.check()
+        self.control.checks().check()
     }
     fn authenticate(&mut self, sha256: &str) -> Result<()> {
         self.validate_kind_length()?;
@@ -520,20 +517,20 @@ impl DerivedObjectReader<'_> {
         if let Some(directory) = self.directory.take() {
             cleanup.extend(close_dir(directory));
         }
-        join(result, cleanup, &self.control.borrowed())
+        join(result, cleanup, &self.control.checks())
     }
 }
-impl Read for DerivedObjectReader<'_> {
+impl<C: ReaderCheck> Read for ObjectReader<C> {
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
         self.read_checked(out).map_err(io::Error::other)
     }
 }
-impl Seek for DerivedObjectReader<'_> {
+impl<C: ReaderCheck> Seek for ObjectReader<C> {
     fn seek(&mut self, from: SeekFrom) -> io::Result<u64> {
         self.seek_checked(from).map_err(io::Error::other)
     }
 }
-impl Drop for DerivedObjectReader<'_> {
+impl<C: ReaderCheck> Drop for ObjectReader<C> {
     fn drop(&mut self) {
         if let Some(file) = self.file.take() {
             let _ = storage::close_file(file);

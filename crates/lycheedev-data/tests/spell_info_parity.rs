@@ -43,7 +43,7 @@ fn tables() -> Vec<Table> {
 }
 fn run(fx: &Fixture, seed: &str, flags: &[(&str,&str)]) -> Outcome {
     let mut flags=flags.to_vec();flags.push(("--spell-id",seed));
-    let out=lycheedev_data::dispatch(&fx.invocation("data spell info",&flags)).unwrap();
+    let out=lycheedev_data::migration_oracle::dispatch(&fx.invocation("data spell info",&flags)).unwrap();
     fx.verify(&out);
     assert_eq!(out.provenance[0]["provenance"]["kind"],"spell-info");
     assert_eq!(out.provenance[0]["provenance"]["locator"],format!("spell:info:{seed}"));
@@ -136,22 +136,22 @@ fn arguments_cancellation_deadline_and_ordered_table_failures_publish_no_capture
     let fx=Fixture::new(&tables());
     for flags in [vec![],vec![("--spell-id","0")],vec![("--spell-id","-1")],vec![("--spell-id","4294967296")],
         vec![("--spell-id","100"),("--max-depth","-1")],vec![("--spell-id","100"),("--max-depth","33")],vec![("--spell-id","100"),("--max-depth","bad")]] {
-        assert_eq!(lycheedev_data::dispatch(&fx.invocation("data spell info",&flags)).unwrap_err().exit_code,2);
+        assert_eq!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data spell info",&flags)).unwrap_err().exit_code,2);
     }
     let mut inv=fx.invocation("data spell info",&[("--spell-id","100")]);inv.control.cancel_handle().store(true,Ordering::Release);
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().exit_code,7);
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().exit_code,7);
     inv.control=OperationControl::new(Instant::now(),Arc::new(AtomicBool::new(false)));
-    assert_eq!(lycheedev_data::dispatch(&inv).unwrap_err().code,"command.deadline");assert_eq!(captures(&fx),0);
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&inv).unwrap_err().code,"command.deadline");assert_eq!(captures(&fx),0);
     let mut first=names(&[vec![U(100),Text("A".into())]]);first.raw.pop();
     let fx=Fixture::new(&[first]);
-    assert_eq!(lycheedev_data::dispatch(&fx.invocation("data spell info",&[("--spell-id","100")])).unwrap_err().code,"table.invalid_format");
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data spell info",&[("--spell-id","100")])).unwrap_err().code,"table.invalid_format");
     assert_eq!(captures(&fx),0);
     let fx=Fixture::new(&tables()[..6]);
-    assert!(lycheedev_data::dispatch(&fx.invocation("data spell info",&[("--spell-id","999")])).is_err());
+    assert!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data spell info",&[("--spell-id","999")])).is_err());
     assert_eq!(captures(&fx),0,"all seven required tables must open even for an absent seed");
     let mut all=tables();all[2]=table("SpellEffect",303,&[("ID","uint"),("SpellID","uint"),("Unused","text")],&[vec![U(1),U(777),Cell::BadString]]);
     let fx=Fixture::new(&all);
-    assert_eq!(lycheedev_data::dispatch(&fx.invocation("data spell info",&[("--spell-id","100")])).unwrap_err().code,"table.invalid_format");
+    assert_eq!(lycheedev_data::migration_oracle::dispatch(&fx.invocation("data spell info",&[("--spell-id","100")])).unwrap_err().code,"table.invalid_format");
     assert_eq!(captures(&fx),0,"nonmatching effect rows are still fully decoded");
 }
 
@@ -165,7 +165,7 @@ fn seven_tables_share_authenticated_source_metadata_and_warm_query() {
     let mut independent=0;
     for name in ["SpellName","Spell","SpellEffect","SpellMisc","SpellCastTimes","SpellDuration","SpellRange"] {
         let mut inv=fx.invocation("data db2 schema",&[]);inv.positional=Some(name.into());
-        independent+=lycheedev_data::dispatch(&inv).unwrap().data["resources"]["metadataBytes"].as_u64().unwrap();
+        independent+=lycheedev_data::migration_oracle::dispatch(&inv).unwrap().data["resources"]["metadataBytes"].as_u64().unwrap();
     }
     assert!(warm.data["resources"]["metadataBytes"].as_u64().unwrap()<independent);
 }

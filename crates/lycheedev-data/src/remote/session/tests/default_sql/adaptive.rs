@@ -58,7 +58,7 @@ fn db2(f: &SqlFixture, command: &str, flags: &[(&str, &str)]) -> Invocation {
 fn default_remote_sql_and_db2_report_go_memory_boundaries_and_capture_exact_bytes() {
     let f = SqlFixture::new(false, true);
     f.source.backend.calls.lock().unwrap().clear();
-    let sql = crate::dispatch(&f.invocation("SELECT ID FROM RemoteSample")).unwrap();
+    let sql = crate::migration_oracle::dispatch(&f.invocation("SELECT ID FROM RemoteSample")).unwrap();
     report(&sql.data);
     assert!(sql.data["sources"][0].get("memoryBudget").is_none());
     f.verify(&sql);
@@ -75,7 +75,7 @@ fn default_remote_sql_and_db2_report_go_memory_boundaries_and_capture_exact_byte
             vec![("--field", "ID"), ("--value", "7"), ("--limit", "1")],
         ),
     ] {
-        let out = crate::dispatch(&db2(&f, command, &flags)).unwrap();
+        let out = crate::migration_oracle::dispatch(&db2(&f, command, &flags)).unwrap();
         if command == "data db2" {
             assert!(out.data.get("memoryBudget").is_none());
         } else {
@@ -222,7 +222,7 @@ fn default_remote_asset_inspect_uses_verified_owner_without_new_memory_field() {
     inv.command = "asset inspect".into();
     inv.flags.remove("--sql");
     inv.flags.insert("--file-id".into(), "7".into());
-    let out = crate::dispatch(&inv).unwrap();
+    let out = crate::migration_oracle::dispatch(&inv).unwrap();
     assert_eq!(out.data["source"], "cdn");
     assert_eq!(out.data["contentVerified"], true);
     assert!(out.data.get("memoryBudget").is_none());

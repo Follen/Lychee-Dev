@@ -1,11 +1,13 @@
-//! Item, decor and creature navigation share one pinned multi-table request.
-//! These frozen Go navigation contracts have no cursor.
-mod creature;
-mod encounter;
-mod item_geosets;
-mod item_models;
-mod item_textures;
-mod spell;
+pub(crate) mod async_access;
+pub(crate) mod basic;
+// Item, decor and creature navigation share one pinned multi-table request.
+// These frozen Go navigation contracts have no cursor.
+pub(crate) mod creature;
+pub(crate) mod encounter;
+pub(crate) mod item_geosets;
+pub(crate) mod item_models;
+pub(crate) mod item_textures;
+pub(crate) mod spell;
 use super::{Row, identifier, integer, matches};
 use crate::{
     capture::{self, GoCaptureFormatter},
@@ -407,39 +409,9 @@ impl<'a> Navigator<'a> {
             Request::ItemModels { item, race, gender } => self.item_models(item, race, gender),
             Request::ItemGeosets(item) => self.item_geosets(item),
             Request::ItemTextures(item) => self.item_textures(item),
-            Request::Item(id) => {
-                let sparse = self.row("ItemSparse", id)?.ok_or_else(not_found)?;
-                let mut item = json!({"id":id,"name":text(&sparse,"Display_lang"),"inventoryType":integer(sparse.get("InventoryType")),"quality":integer(sparse.get("OverallQualityID")),"slotName":slot_name(integer(sparse.get("InventoryType"))),"classID":0,"subclassID":0});
-                if let Some(class) = self.row("Item", id)? {
-                    item["classID"] = json!(integer(class.get("ClassID")));
-                    item["subclassID"] = json!(integer(class.get("SubclassID")));
-                } else {
-                    self.partial("row_missing");
-                }
-                Ok(json!({"item":item}))
-            }
-            Request::DecorList(limit) => {
-                let (rows, extra) = self.rows("HouseDecor", None, limit)?;
-                if extra {
-                    self.truncate("limit_reached");
-                }
-                let items: Vec<_> = rows.iter().map(|(_, row)| decor(row)).collect();
-                Ok(json!({"count":items.len(),"items":items}))
-            }
-            Request::DecorGet { field, wanted } => {
-                let (rows, extra) = self.rows("HouseDecor", Some((field, wanted)), MAX_DECOR)?;
-                if extra {
-                    self.truncate("row_budget");
-                }
-                let (_, first) = rows.first().ok_or_else(not_found)?;
-                if rows.len() > 1 {
-                    self.partial("relation_ambiguous");
-                }
-                for (id, row) in &rows {
-                    self.link(field, *id, unsigned(row.get("ID")))?;
-                }
-                Ok(json!({"item":decor(first)}))
-            }
+            Request::Item(id) => async_access::immediately(basic::BasicAccess::item_get(self,id)),
+            Request::DecorList(limit) => async_access::immediately(basic::BasicAccess::decor_list(self,limit)),
+            Request::DecorGet { field, wanted } => async_access::immediately(basic::BasicAccess::decor_get(self,field,wanted)),
         }
     }
     fn context(&self) -> Result<Value> {

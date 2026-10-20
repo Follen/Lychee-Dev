@@ -166,7 +166,7 @@ fn public_secondary_owners_keep_rows_captures_and_stream_terminal_at_maximum_req
     let fx = Fixture::new(&committed_tests::tables());
     let base = fx.invocation("", &[("--max-bytes", "536870912")]);
     for (inv, count) in committed_tests::invocations(&base) {
-        let out = crate::dispatch(&inv).unwrap();
+        let out = crate::migration_oracle::dispatch(&inv).unwrap();
         assert!(out.complete, "{}", inv.command);
         assert_eq!(out.provenance.len(), count, "{}", inv.command);
         verify_captures(&inv, &out);
@@ -267,7 +267,7 @@ fn dynamic_encounter_batches_retain_identical_limits_and_real_related_spell_capt
         }
         Ok(())
     });
-    let out = crate::dispatch(&inv).unwrap();
+    let out = crate::migration_oracle::dispatch(&inv).unwrap();
     assert!(out.complete);
     assert_eq!(out.provenance.len(), 2);
     assert_eq!(out.data["tables"].as_array().unwrap().len(), 3);

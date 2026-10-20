@@ -434,7 +434,7 @@ fn sql_public_late_close_cases(csv: bool) {
                     })
                 }
             },
-            || crate::dispatch(&inv),
+            || crate::migration_oracle::dispatch(&inv),
         )
         .unwrap_err();
         let seen = observed.borrow();
@@ -509,7 +509,7 @@ fn sql_public_late_close_cases(csv: bool) {
         if csv {
             fresh.flags.insert("--overwrite".into(), "true".into());
         }
-        let recovered = crate::dispatch(&fresh).unwrap();
+        let recovered = crate::migration_oracle::dispatch(&fresh).unwrap();
         assert_sql_published(&fx.home, &fx.pin, &recovered, path.as_deref());
         assert_eq!(recovered.selection, out.selection);
         let recovered_ids: Vec<_> = recovered

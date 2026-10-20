@@ -936,3 +936,14 @@ mod owned_shrink_tests {
         assert_eq!(budget.snapshot().unwrap().retained_bytes, 0);
     }
 }
+
+impl Budget {
+    /// Observe remaining original retained admission, without spending it or
+    /// weakening its limit. Used only to decline optional eager representation.
+    pub(crate) fn remaining_retained_bytes(&self) -> Result<u64> {
+        self.check()?;
+        let state=self.state.lock().map_err(|_|fault("records.internal",8,"Query resource lock poisoned"))?;
+        state.maximum(state.safety_limits).retained_bytes.checked_sub(state.used.retained_bytes)
+            .ok_or_else(||fault("records.internal",8,"Retained ledger exceeds limit"))
+    }
+}

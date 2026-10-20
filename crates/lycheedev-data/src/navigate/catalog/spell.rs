@@ -1,5 +1,6 @@
+use super::async_access::{DomainAccess, immediately};
 // SPDX-License-Identifier: MIT
-//! Frozen Go spell-info closure, including detail on depth-limited leaves.
+// Frozen Go spell-info closure, including detail on depth-limited leaves.
 use super::{MAX_RELATIONS, Navigator, Row, integer, text, unsigned};
 use crate::{resource::{Budget, Cost}, table};
 use lycheedev_core::Result;
@@ -79,64 +80,57 @@ struct Closure {
     effects: BTreeMap<u32, Vec<(u32, Row)>>,
 }
 impl Closure {
-    fn add(&mut self, nav: &mut Navigator<'_>, parent: u32, child: u32, description: bool, next: &mut Vec<u32>) -> Result<()> {
+    fn add(&mut self, nav: &mut impl DomainAccess, parent: u32, child: u32, description: bool, next: &mut Vec<u32>) -> Result<()> {
         let edges = if description { &mut self.descriptions } else { &mut self.triggers };
         let previous = edges.get(&parent);
-        nav.budget.charge(Cost::work(previous.map_or(1, |ids| ids.len() + 1)))?;
+        nav.budget().charge(Cost::work(previous.map_or(1, |ids| ids.len() + 1)))?;
         if previous.is_none_or(|ids| !ids.contains(&child)) {
-            nav.budget.charge(Cost::retained(128))?;
+            nav.budget().charge(Cost::retained(128))?;
             edges.entry(parent).or_default().push(child);
         }
         if !self.ids.contains(&child) {
-            nav.budget.charge(Cost::retained(128))?;
+            nav.budget().charge(Cost::retained(128))?;
             self.ids.insert(child);
             next.push(child);
         }
         Ok(())
     }
 }
-impl Navigator<'_> {
-    fn spell_link(&mut self, table: &str, field: &str, id: u32, kind: &str, target: u64, depth: u32) -> Result<()> {
-        self.budget.check()?;
-        if self.relations.len() == MAX_RELATIONS {
-            self.truncate("relation_budget");
-            return Ok(());
-        }
-        self.budget.charge(Cost::retained(512))?;
-        self.relations.push(json!({"fromTable":table,"fromField":field,"fromID":id,"toKind":kind,"toID":target,"depth":depth}));
-        Ok(())
+pub(crate) trait SpellAccess: DomainAccess + Sized {
+    fn spell_link(&mut self, table:&str,field:&str,id:u32,kind:&str,target:u64,depth:u32)->Result<()> {
+        self.link(table,field,id,kind,target,depth)
     }
-    fn spell_effects(&mut self, spell: u32) -> Result<Vec<(u32, Row)>> {
-        let (rows, extra) = self.rows("SpellEffect", Some(("SpellID", spell)), MAX_EFFECTS)?;
-        if extra { self.truncate("row_budget"); }
+    async fn spell_effects(&mut self, spell: u32) -> Result<Vec<(u32, Row)>> {
+        let (rows, extra) = self.scan("SpellEffect", Some(("SpellID", spell)), MAX_EFFECTS).await?;
+        if extra { self.mark_truncated("row_budget"); }
         Ok(rows)
     }
-    fn spell_misc(&mut self, spell: u32) -> Result<Value> {
+    async fn spell_misc(&mut self, spell: u32) -> Result<Value> {
         // The first ascending record wins. Extra matches do not mean partial
         // or truncated in this Go domain contract.
-        let (rows, _) = self.rows("SpellMisc", Some(("SpellID", spell)), 1)?;
+        let (rows, _) = self.scan("SpellMisc", Some(("SpellID", spell)), 1).await?;
         let Some((id, row)) = rows.first() else { return Ok(Value::Null); };
         let icon = integer(row.get("SpellIconFileDataID"));
         if icon > 0 { self.spell_link("SpellMisc", "SpellIconFileDataID", *id, "icon_file", icon as u64, 1)?; }
-        let cast = self.row("SpellCastTimes", unsigned(row.get("CastingTimeIndex")))?
+        let cast = self.lookup("SpellCastTimes", unsigned(row.get("CastingTimeIndex"))).await?
             .map(|row| json!({"base":integer(row.get("Base")),"minimum":integer(row.get("Minimum"))}));
-        let duration = self.row("SpellDuration", unsigned(row.get("DurationIndex")))?
+        let duration = self.lookup("SpellDuration", unsigned(row.get("DurationIndex"))).await?
             .map(|row| json!({"duration":integer(row.get("Duration")),"maxDuration":integer(row.get("MaxDuration"))}));
-        let range = self.row("SpellRange", unsigned(row.get("RangeIndex")))?
+        let range = self.lookup("SpellRange", unsigned(row.get("RangeIndex"))).await?
             .map(|row| json!({"displayName":text(&row,"DisplayName_lang"),"rangeMin":int_list(&row,"RangeMin"),"rangeMax":int_list(&row,"RangeMax")}));
         Ok(json!({"attributes":int_list(row,"Attributes"),"schoolMask":integer(row.get("SchoolMask")),
             "speed":integer(row.get("Speed")),"spellIconFileDataID":icon,"castTime":cast,"duration":duration,"range":range}))
     }
-    pub(super) fn spell_info(&mut self, seed: u32, max_depth: u32) -> Result<Value> {
-        self.budget.charge(Cost::retained(256))?;
+    async fn spell_info(&mut self, seed: u32, max_depth: u32) -> Result<Value> {
+        self.budget().charge(Cost::retained(256))?;
         let mut closure = Closure { ids:BTreeSet::from([seed]), triggers:BTreeMap::new(), descriptions:BTreeMap::new(), effects:BTreeMap::new() };
         let mut frontier = vec![seed];
         let mut depth = 0;
         while !frontier.is_empty() && depth < max_depth {
             let mut next = Vec::new();
             for sid in frontier {
-                self.budget.check()?;
-                let effects = self.spell_effects(sid)?;
+                self.budget().check()?;
+                let effects = self.spell_effects(sid).await?;
                 for (id, row) in &effects {
                     let trigger = unsigned(row.get("EffectTriggerSpell"));
                     let misc = if integer(row.get("Effect")) == 64 { first_id(row,"EffectMiscValue") } else { 0 };
@@ -146,11 +140,11 @@ impl Navigator<'_> {
                         closure.add(self,sid,child,false,&mut next)?;
                     }
                 }
-                self.budget.charge(Cost::retained(128))?;
+                self.budget().charge(Cost::retained(128))?;
                 closure.effects.insert(sid,effects);
-                if let Some(row) = self.row("Spell",sid)? {
+                if let Some(row) = self.lookup("Spell",sid).await? {
                     for field in ["Description_lang","AuraDescription_lang"] {
-                        let budget = self.budget.clone();
+                        let budget = self.budget_owner();
                         references(text(&row,field), &budget, |child| {
                             if child != sid {
                                 self.spell_link("Spell",field,sid,"spell",u64::from(child),depth)?;
@@ -164,34 +158,34 @@ impl Navigator<'_> {
             frontier = next;
             depth += 1;
         }
-        if !frontier.is_empty() { self.truncate("max_depth"); }
+        if !frontier.is_empty() { self.mark_truncated("max_depth"); }
         let mut parents: BTreeMap<u32,BTreeSet<u32>> = BTreeMap::new();
         for edges in [&closure.triggers,&closure.descriptions] {
             for (parent,children) in edges {
                 for child in children {
-                    self.budget.charge(Cost::work(1))?;
-                    self.budget.charge(Cost::retained(128))?;
+                    self.budget().charge(Cost::work(1))?;
+                    self.budget().charge(Cost::retained(128))?;
                     parents.entry(*child).or_default().insert(*parent);
                 }
             }
         }
         let mut spells = serde_json::Map::new();
         for sid in &closure.ids {
-            self.budget.check()?;
+            self.budget().check()?;
             let effects = match closure.effects.remove(sid) {
                 Some(rows) => rows,
-                None => self.spell_effects(*sid)?,
+                None => self.spell_effects(*sid).await?,
             };
-            self.budget.charge(Cost::retained(effects.len() * 1024))?;
+            self.budget().charge(Cost::retained(effects.len() * 1024))?;
             let mut payloads = Vec::with_capacity(effects.len());
             for (_,row) in &effects {
-                self.budget.charge(Cost::work(1))?;
+                self.budget().charge(Cost::work(1))?;
                 payloads.push(effect(row));
             }
-            let name = self.row("SpellName",*sid)?;
-            let description = self.row("Spell",*sid)?;
-            let misc = self.spell_misc(*sid)?;
-            self.budget.charge(Cost::retained(1024))?;
+            let name = self.lookup("SpellName",*sid).await?;
+            let description = self.lookup("Spell",*sid).await?;
+            let misc = self.spell_misc(*sid).await?;
+            self.budget().charge(Cost::retained(1024))?;
             let triggered_by: Vec<_> = parents.remove(sid).unwrap_or_default().into_iter().collect();
             spells.insert(sid.to_string(),json!({"spellID":sid,"name":nullable_text(&name,"Name_lang"),
                 "description":nullable_text(&description,"Description_lang"),"auraDescription":nullable_text(&description,"AuraDescription_lang"),
@@ -202,6 +196,10 @@ impl Navigator<'_> {
     }
 }
 
+impl<T: DomainAccess> SpellAccess for T {}
+impl Navigator<'_> {
+    pub(super) fn spell_info(&mut self, seed:u32,max_depth:u32)->Result<Value> { immediately(SpellAccess::spell_info(self,seed,max_depth)) }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

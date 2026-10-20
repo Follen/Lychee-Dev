@@ -238,7 +238,7 @@ pub(crate) fn finalization_cases(base: &Invocation, expected_captures: usize) {
         }
         released(&inv.home);
         inv.control = OperationControl::default();
-        let recovered = crate::dispatch(&inv).unwrap();
+        let recovered = crate::migration_oracle::dispatch(&inv).unwrap();
         assert_eq!(recovered.provenance.len(), expected_captures);
         released(&inv.home);
     }

@@ -38,7 +38,7 @@ test('shared definitions equal fixed Go 3.2.3 plus exact approved differences an
   assert.equal(fixture.oracle.commit, '3766f9cacb52e93a803a626187e2a1d54a445468');
   assert.equal(fixture.oracle.release, 'Go v3.2.3');
   assert.equal(fixture.commands.length, 84);
-  assert.equal(fixture.expected.length, 87);
+  assert.equal(fixture.expected.length, 71);
   assertMetadata(inventory);
 });
 

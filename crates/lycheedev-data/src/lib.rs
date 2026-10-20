@@ -11,7 +11,10 @@ pub mod blte;
 mod cache_fixture;
 mod capture;
 pub mod casc;
+#[cfg(any(test, feature = "migration-oracle"))]
 pub mod db2;
+#[cfg(not(any(test, feature = "migration-oracle")))]
+pub(crate) mod db2;
 pub mod decoded_cache;
 pub mod definitions;
 pub mod engine;
@@ -19,15 +22,28 @@ pub(crate) mod generation;
 pub mod hotfix;
 pub mod installed;
 pub mod keys;
+#[cfg(any(test, feature = "migration-oracle"))]
 pub mod local_query;
+#[cfg(not(any(test, feature = "migration-oracle")))]
+pub(crate) mod local_query;
 pub mod metadata_format;
+#[cfg(any(test, feature = "migration-oracle"))]
+pub mod migration_oracle;
+#[cfg(any(test, feature = "migration-oracle"))]
 pub mod navigate;
+#[cfg(not(any(test, feature = "migration-oracle")))]
+pub(crate) mod navigate;
 pub(crate) mod phase_profile;
+#[cfg(any(test, feature = "migration-oracle"))]
 pub mod relational;
+#[cfg(not(any(test, feature = "migration-oracle")))]
+pub(crate) mod relational;
 pub mod remote;
 pub mod resource;
 pub mod schema;
+#[cfg(any(test, feature = "migration-oracle"))]
 pub mod stream;
+
 pub mod table;
 #[cfg(test)]
 mod unicode_checks;
@@ -50,24 +66,6 @@ pub fn commands() -> &'static [&'static str] {
         "data agent serve",
         "data cache prepare",
         "data hotfix",
-        "data sql",
-        "data db2",
-        "data db2 schema",
-        "data db2 search",
-        "data db2 foreign-key",
-        "data db2 stream",
-        "data spell info",
-        "data spell auras",
-        "data spell summons",
-        "data item get",
-        "data item models",
-        "data item geosets",
-        "data item textures",
-        "data decor list",
-        "data decor get",
-        "data creature display",
-        "data creature model",
-        "data encounter get",
         "asset inspect",
         "asset search",
         "asset export",
@@ -107,32 +105,6 @@ pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
         "asset search" | "asset export" | "asset demux"
     ) {
         return assets::dispatch(inv);
-    }
-    if matches!(
-        inv.command.as_str(),
-        "data spell info"
-            | "data spell auras"
-            | "data spell summons"
-            | "data item get"
-            | "data item models"
-            | "data item geosets"
-            | "data item textures"
-            | "data decor list"
-            | "data decor get"
-            | "data creature display"
-            | "data creature model"
-            | "data encounter get"
-    ) {
-        return navigate::dispatch(inv);
-    }
-    if matches!(
-        inv.command.as_str(),
-        "data db2" | "data db2 schema" | "data db2 search" | "data db2 foreign-key"
-    ) {
-        return db2::dispatch(inv);
-    }
-    if inv.command == "data sql" {
-        return local_query::sql(inv);
     }
     if inv.command == "asset inspect" {
         return local_query::asset(inv);
@@ -194,8 +166,9 @@ mod command_surface_tests {
             ])
         );
         assert!(
-            expected.is_subset(&registered),
-            "all fixed Go commands remain registered"
+            expected.difference(&registered).copied().collect::<BTreeSet<_>>()
+                == BTreeSet::from(["data sql", "data db2", "data db2 schema", "data db2 search", "data db2 foreign-key", "data db2 stream", "data spell info", "data spell auras", "data spell summons", "data item get", "data item models", "data item geosets", "data item textures", "data decor list", "data decor get", "data creature display", "data creature model", "data encounter get"]),
+            "retired commands are available only through explicit migration oracle; production uses typed tasks"
         );
     }
 
@@ -222,7 +195,7 @@ mod command_surface_tests {
     #[test]
     fn registered_aura_and_summon_paths_reach_the_existing_handler() {
         for command in ["data spell auras", "data spell summons"] {
-            assert!(commands().contains(&command));
+            assert!(!commands().contains(&command));
             let inv = Invocation {
                 command: command.into(),
                 positional: None,
@@ -231,7 +204,7 @@ mod command_surface_tests {
                 cwd: std::path::PathBuf::new(),
                 control: Default::default(),
             };
-            let error = dispatch(&inv).unwrap_err();
+            let error = migration_oracle::dispatch(&inv).unwrap_err();
             assert_eq!(error.code, "command.invalid_arguments");
             assert_eq!(error.message, format!("{command} requires --spell-id"));
             assert_eq!(error.exit_code, 2);

@@ -192,7 +192,7 @@ impl NavFixture {
 #[test]
 fn default_remote_navigation_item_joins_two_authenticated_tables_and_captures() {
     let f = NavFixture::new(&catalog_fixture::items());
-    let out = crate::dispatch(&f.invocation("data item get", &[("--item-id", "7")])).unwrap();
+    let out = crate::migration_oracle::dispatch(&f.invocation("data item get", &[("--item-id", "7")])).unwrap();
     assert_eq!(out.data["item"]["id"], 7);
     assert_eq!(out.data["item"]["slotName"], "Waist");
     assert_eq!(
@@ -227,10 +227,10 @@ fn default_remote_navigation_aura_and_summon_profiles_use_real_spell_effect_rows
             vec![U(2), U(7), I(28), I(1), Array(vec![U(321), U(0), U(0)])],
         ],
     )]);
-    let aura = crate::dispatch(&f.invocation("data spell auras", &[("--spell-id", "7")])).unwrap();
+    let aura = crate::migration_oracle::dispatch(&f.invocation("data spell auras", &[("--spell-id", "7")])).unwrap();
     assert_eq!(aura.data["hasAura"], json!([7]));
     f.verify(&aura);
-    let summon = crate::dispatch(&f.invocation(
+    let summon = crate::migration_oracle::dispatch(&f.invocation(
         "data spell summons",
         &[("--spell-id", "7"), ("--npc-id", "321")],
     ))
@@ -244,12 +244,12 @@ fn default_remote_navigation_aura_and_summon_profiles_use_real_spell_effect_rows
 #[test]
 fn default_remote_navigation_decor_preserves_limit_and_zero_model() {
     let f = NavFixture::new(&[catalog_fixture::decors(&catalog_fixture::decor_rows())]);
-    let out = crate::dispatch(&f.invocation("data decor list", &[("--limit", "2")])).unwrap();
+    let out = crate::migration_oracle::dispatch(&f.invocation("data decor list", &[("--limit", "2")])).unwrap();
     assert_eq!(out.data["count"], 2);
     assert_eq!(out.data["truncated"], true);
     assert_eq!(out.data["truncationReason"], "limit_reached");
     f.verify(&out);
-    let out = crate::dispatch(&f.invocation("data decor get", &[("--id", "10")])).unwrap();
+    let out = crate::migration_oracle::dispatch(&f.invocation("data decor get", &[("--id", "10")])).unwrap();
     assert_eq!(out.data["item"]["modelFileDataID"], 0);
     f.verify(&out);
     f.close();
@@ -311,7 +311,7 @@ fn default_remote_navigation_encounter_follows_dynamic_tables_and_two_captures()
         ),
     ]);
     let out =
-        crate::dispatch(&f.invocation("data encounter get", &[("--journal-encounter-id", "132")]))
+        crate::migration_oracle::dispatch(&f.invocation("data encounter get", &[("--journal-encounter-id", "132")]))
             .unwrap();
     assert_eq!(out.provenance.len(), 2);
     assert_eq!(out.data["spellCount"], 1);
@@ -381,20 +381,20 @@ fn default_remote_navigation_admits_before_pin_and_rejects_conflicting_installat
         .insert("--snapshot".into(), format!("PIN-{}", "0".repeat(64)));
     inv.control = OperationControl::uncancelable(Instant::now() + Duration::from_millis(100));
     assert_eq!(
-        crate::dispatch(&inv).unwrap_err().code,
+        crate::migration_oracle::dispatch(&inv).unwrap_err().code,
         inv.control.check().unwrap_err().code
     );
     held.close().unwrap();
     inv.control = OperationControl::default();
     assert_eq!(
-        crate::dispatch(&inv).unwrap_err().code,
+        crate::migration_oracle::dispatch(&inv).unwrap_err().code,
         "vault.record_missing"
     );
     inv.flags.insert("--snapshot".into(), f.snapshot.clone());
     inv.flags
         .insert("--installation".into(), "missing-client".into());
     assert_eq!(
-        crate::dispatch(&inv).unwrap_err().code,
+        crate::migration_oracle::dispatch(&inv).unwrap_err().code,
         "records.metadata_limit"
     );
     assert!(f.captures().is_empty());

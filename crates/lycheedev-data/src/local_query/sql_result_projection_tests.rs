@@ -198,7 +198,7 @@ fn actual_sql_projection_keeps_plain_explain_analyze_and_csv_captures() {
             inv.flags
                 .insert("--output".into(), path.to_string_lossy().into_owned());
         }
-        let out = crate::dispatch(&inv).unwrap();
+        let out = crate::migration_oracle::dispatch(&inv).unwrap();
         assert!(out.complete);
         assert_eq!(out.selection["id"], fx.pin);
         assert_eq!(out.provenance.len(), if csv { 2 } else { 1 });

@@ -1,6 +1,7 @@
 //! Authenticated static/effective sources for the production Arrow engine.
 //! Generation reuse is an explicit representation choice, never a source or
 //! Hotfix fallback. Each retained buffer keeps its original admission owner.
+pub(crate) mod demand;
 use super::{
     ImportLimits, ImportedBatchAllocation, ImportedSchema, Reuse, StaticIdentity, StaticSource,
     TableImporter, import,
