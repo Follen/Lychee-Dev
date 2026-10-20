@@ -239,7 +239,7 @@ pub fn query_schema() -> serde_json::Value {
         variant(
             "op",
             "lookup",
-            json!({"table":table, "ids":{"type":"array", "items":{"type":"integer", "minimum":0, "maximum":4294967295}, "maxItems":16384, "description":"ID membership; duplicate IDs do not duplicate rows; empty IDs returns no rows."}}),
+            json!({"table":table, "ids":{"type":"array", "items":{"type":"integer", "minimum":0, "maximum":4294967295u64}, "maxItems":16384, "description":"ID membership; duplicate IDs do not duplicate rows; empty IDs returns no rows."}}),
             &["table", "ids"],
         ),
         variant(
@@ -345,5 +345,22 @@ impl Drop for DatasetInfo {
         if let Some(lifetime) = &self._lifetime {
             let _ = lifetime.settle();
         }
+    }
+}
+
+#[cfg(test)]
+mod schema_integer_tests {
+    #[test]
+    fn lookup_schema_preserves_exact_unsigned_id_maximum() {
+        let schema = super::query_schema();
+        let lookup = schema["$defs"]["QueryPlan"]["oneOf"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|plan| plan["properties"]["op"]["const"] == "lookup")
+            .unwrap();
+        let maximum = &lookup["properties"]["ids"]["items"]["maximum"];
+        assert_eq!(maximum.as_u64(), Some(u64::from(u32::MAX)));
+        assert_eq!(serde_json::to_string(maximum).unwrap(), "4294967295");
     }
 }
