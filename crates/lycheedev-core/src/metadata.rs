@@ -418,6 +418,23 @@ impl Metadata {
         mut check: impl FnMut() -> Result<()>,
         mut on_busy: impl FnMut(),
     ) -> Result<()> {
+        self.put_controlled_policy_with_check_dyn(
+            key, value, expected, control, strict_create, &mut check, &mut on_busy,
+        )
+    }
+    // Catalog redirection re-enters once with a held capability. Erase only
+    // callback types at that boundary so closure/reference types cannot grow
+    // during monomorphization; callbacks remain borrowed and are never boxed.
+    fn put_controlled_policy_with_check_dyn<T: Serialize>(
+        &mut self,
+        key: &str,
+        value: &T,
+        expected: Option<i64>,
+        control: &crate::control::OperationControl,
+        strict_create: bool,
+        mut check: &mut dyn FnMut() -> Result<()>,
+        mut on_busy: &mut dyn FnMut(),
+    ) -> Result<()> {
         self.require_write_capability()?;
         if !self.evidence_gate_held && evidence_catalog::EvidenceKey::parse(key).is_some() {
             let home = self.home.clone();
@@ -428,13 +445,13 @@ impl Metadata {
                 control,
                 &|| (*checks.borrow_mut())(),
                 |metadata| {
-                    metadata.put_controlled_policy_with_check(
+                    metadata.put_controlled_policy_with_check_dyn(
                         key,
                         value,
                         expected,
                         control,
                         strict_create,
-                        || (*checks.borrow_mut())(),
+                        &mut || (*checks.borrow_mut())(),
                         &mut on_busy,
                     )
                 },
@@ -560,6 +577,16 @@ impl Metadata {
         strict_create: bool,
         mut check: impl FnMut() -> Result<()>,
     ) -> Result<()> {
+        self.put_serialized_policy_dyn(key, raw, expected, strict_create, &mut check)
+    }
+    fn put_serialized_policy_dyn(
+        &mut self,
+        key: &str,
+        raw: &[u8],
+        expected: Option<i64>,
+        strict_create: bool,
+        mut check: &mut dyn FnMut() -> Result<()>,
+    ) -> Result<()> {
         self.require_write_capability()?;
         if !self.evidence_gate_held && evidence_catalog::EvidenceKey::parse(key).is_some() {
             let home = self.home.clone();
@@ -571,7 +598,7 @@ impl Metadata {
                 &control,
                 &|| (*checks.borrow_mut())(),
                 |metadata| {
-                    metadata.put_serialized_policy(key, raw, expected, strict_create, || {
+                    metadata.put_serialized_policy_dyn(key, raw, expected, strict_create, &mut || {
                         (*checks.borrow_mut())()
                     })
                 },
