@@ -110,6 +110,18 @@ CLI 静态 oracle 修复（2026-10-20）：历史适配器单测固定读取并�
 
 后续唯一父队列固定本批SHA，先列实际libtest名单，按互不重复的完整relational、hotfix::remote、local_query、generation、unicode_checks调用方集合执行，四新增各一次、原ignored单列。统一--locked --offline -j 1与--test-threads=1，原600s/default-stack与所有预算不变，禁止one-shot模式。通过后构建匹配优化产品做同fixture完整七调用及startup观察，全部SQL/CAP/IPC/manifest/authentication/复用/最终完整性检查保持；原d952结果不改标，新Windows质量及性能待测。无原始本机日志入库，无merge/release。
 
+## 2h. 2026-10-20 ea7 实测与共享数字 provenance 内层
+
+固定ea7上一批原生585通过/0失败/1原ignored；完整七调用及全部正确性通过。hit Rust301.2569ms、Go112.4970ms，比d952的339.3229ms低，但两次单轮不能归因为ASCII快路，也未达≤0.30门禁。原始分批身份与profile时钟保留。
+
+本次四文件Core/Data优化保留外层Indexed，首个非空float行模板至多8个位置时才共享不可变内层SharedIndexed；若首个模板更宽，则整次调用保持原owned路径。宽度/行数无新限制，差异前缀重建最多8项。两种内层共用原最大索引检查、遍历、shape错误及两遍serializer；外层错误顺序不改。所有逐行check、逐cell work、逐float retained（含0 charge）与外层准入位置不变；实际NumberLayout size/alignment与原spare-node覆盖Arc owner为阻断门禁，失败不得改阈值/计费。
+
+精确ea7树的四文件已独审。候选Node330通过；最终组合19份paired加owner套件890通过/0失败/11平台skip，四源码rustfmt与diff通过。隔离提取实际producer/serializer与7项原新增测试，加3项独立差分，debug/release各10通过（同10项不是20distinct）；9,374故障ordinal、178个零retained点、4,096 float-mask对及4,096混合宽度案例一致。Budget/ToolkitError是明确披露的scaffold，不是产品原生计费/取消并发验证；完整Cargo仍缺固定Emmy源码而编译前blocked，新Windows待测。
+
+60交替对孤立构造微基准为12.648→9.101ms、析构2.284→0.257ms；输入16,384×5且4 float，采用实际BTreeMap/Arc但synthetic Budget。仅孤立构造/析构，不是SQL、序列化、全进程wall、Windows、RSS或≤0.30证明，不能把历史inclusive projection桶当可回收收益。
+
+后续唯一父队列固定本批SHA，先实际名单核对互不重叠Core public_json、Data完整local_query/relational/generation/phase_profile及CLI data_phase_profile集合，7新增各一次、旧ignored单列。全部locked/offline/-j1与test-threads=1，原600s/default-stack及size/allowance/深度/所有预算门禁不变，禁止one-shot。质量通过后才构建匹配优化产物，完整七调用、精确数值/CAP/IPC/manifest/认证/不重发布/最终完整性及owner退役全部保持；对照ea7计数，不相加/相减嵌套桶，不外推RSS。无原始本机日志入库、merge/release。
+
 ## 3. Home、容量和所有权边界
 
 Data默认容量为**5,000,000,000字节（十进制5GB）**，配置支持明确单位；与测试scratch 5/6GiB不同。最终统一核算Data下载/共享blob归属、物化/索引/目录、staging/spill/导出峰值和证据占用，按内容去重防双计。活跃lease和证据引用保护；旧已超额或配置缩小先拒新增并说明，不删除证据。

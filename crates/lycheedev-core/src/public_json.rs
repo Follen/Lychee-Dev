@@ -39,6 +39,9 @@ pub enum NumberLayout {
     Array(Box<NumberLayout>),
     /// Sparse per-position provenance for heterogeneous tuples and rows.
     Indexed(BTreeMap<usize, NumberLayout>),
+    /// Same sparse indexed contract, with immutable producer-owned sharing.
+    /// Unlike Array, this retains the maximum marked index validation.
+    SharedIndexed(std::sync::Arc<BTreeMap<usize, NumberLayout>>),
 }
 /// An explicitly supplied original JSON-number token. This cannot hold an
 /// object, string, raw document or non-JSON NaN/Infinity spelling. The parsed
@@ -241,24 +244,10 @@ impl Serialize for PublicValue<'_> {
                 map.end()
             }
             (NumberLayout::Indexed(elements), Value::Array(values)) => {
-                if elements
-                    .keys()
-                    .next_back()
-                    .is_some_and(|index| *index >= values.len())
-                {
-                    return Err(S::Error::custom(
-                        "public number layout index exceeds result length",
-                    ));
-                }
-                let mut seq = serializer.serialize_seq(Some(values.len()))?;
-                for (index, value) in values.iter().enumerate() {
-                    seq.serialize_element(&PublicValue {
-                        value,
-                        prefix: &[],
-                        numbers: elements.get(&index).unwrap_or(&NumberLayout::Verbatim),
-                    })?;
-                }
-                seq.end()
+                serialize_indexed(elements, values, serializer)
+            }
+            (NumberLayout::SharedIndexed(elements), Value::Array(values)) => {
+                serialize_indexed(elements, values, serializer)
             }
             (NumberLayout::Array(element), Value::Array(values)) => {
                 let mut seq = serializer.serialize_seq(Some(values.len()))?;
@@ -276,6 +265,32 @@ impl Serialize for PublicValue<'_> {
             )),
         }
     }
+}
+
+// Both ownership forms intentionally share every bound check and traversal.
+fn serialize_indexed<S: serde::Serializer>(
+    elements: &BTreeMap<usize, NumberLayout>,
+    values: &[Value],
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    if elements
+        .keys()
+        .next_back()
+        .is_some_and(|index| *index >= values.len())
+    {
+        return Err(S::Error::custom(
+            "public number layout index exceeds result length",
+        ));
+    }
+    let mut seq = serializer.serialize_seq(Some(values.len()))?;
+    for (index, value) in values.iter().enumerate() {
+        seq.serialize_element(&PublicValue {
+            value,
+            prefix: &[],
+            numbers: elements.get(&index).unwrap_or(&NumberLayout::Verbatim),
+        })?;
+    }
+    seq.end()
 }
 
 // Keep serde's already-reviewed JSON structure/standard control escapes and
@@ -675,3 +690,7 @@ mod tests {
         assert!(matches!(restored.public_numbers, NumberLayout::Verbatim));
     }
 }
+
+#[cfg(test)]
+#[path = "public_json/shared_indexed_tests.rs"]
+mod shared_indexed_tests;

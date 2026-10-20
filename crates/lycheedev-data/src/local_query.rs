@@ -725,6 +725,86 @@ fn number_tree_bytes<K>(entries: usize) -> usize {
         .saturating_mul(16 * size_of::<(K, lycheedev_core::public_json::NumberLayout)>() + 128)
 }
 
+// Sharing is an optimization for small repeated float-position patterns, not
+// a row-width limit. Replay on a mismatch is bounded to eight admitted entries.
+fn public_row_numbers(
+    rows: &[Vec<relational::Scalar>],
+    budget: &Budget,
+) -> Result<lycheedev_core::public_json::NumberLayout> {
+    use lycheedev_core::public_json::NumberLayout;
+    use std::sync::Arc;
+    let mut numbers = BTreeMap::new();
+    let mut template: Option<Arc<BTreeMap<usize, NumberLayout>>> = None;
+    let mut considered_template = false;
+    for (row_index, row) in rows.iter().enumerate() {
+        budget.check()?;
+        let mut expected = template.as_ref().map(|map| map.keys());
+        let mut cells = template.is_none().then(BTreeMap::new);
+        let mut float_count = 0;
+        for (column, value) in row.iter().enumerate() {
+            budget.charge(Cost::work(1))?;
+            if matches!(value, relational::Scalar::Float(_)) {
+                budget.charge(Cost::retained(
+                    number_tree_bytes::<usize>(float_count + 1)
+                        - number_tree_bytes::<usize>(float_count),
+                ))?;
+                if let Some(cells) = &mut cells {
+                    cells.insert(column, NumberLayout::Binary64);
+                } else if expected.as_mut().and_then(Iterator::next) != Some(&column) {
+                    // Every reconstructed entry passed its original admission
+                    // already; the immutable template has at most eight keys.
+                    let mut different = BTreeMap::new();
+                    for &index in template.as_ref().unwrap().keys().take(float_count) {
+                        different.insert(index, NumberLayout::Binary64);
+                    }
+                    different.insert(column, NumberLayout::Binary64);
+                    cells = Some(different);
+                }
+                float_count += 1;
+            }
+        }
+        if float_count != 0 {
+            budget.charge(Cost::retained(
+                number_tree_bytes::<usize>(numbers.len() + 1)
+                    - number_tree_bytes::<usize>(numbers.len()),
+            ))?;
+            let layout = if let Some(cells) = cells {
+                if !considered_template {
+                    considered_template = true;
+                    if cells.len() <= 8 {
+                        // The original first-map allowance reserves at least
+                        // three conservative nodes for this one-leaf map. Its
+                        // spare nodes cover this Arc header and moved owner;
+                        // no admission is reduced or deferred for sharing.
+                        let shared = Arc::new(cells);
+                        template = Some(shared.clone());
+                        NumberLayout::SharedIndexed(shared)
+                    } else {
+                        NumberLayout::Indexed(cells)
+                    }
+                } else {
+                    NumberLayout::Indexed(cells)
+                }
+            } else {
+                let template = template.as_ref().unwrap();
+                if float_count == template.len() {
+                    NumberLayout::SharedIndexed(template.clone())
+                } else {
+                    // The row omitted only a trailing suffix of float keys.
+                    let cells = template
+                        .keys()
+                        .take(float_count)
+                        .map(|&index| (index, NumberLayout::Binary64))
+                        .collect();
+                    NumberLayout::Indexed(cells)
+                }
+            };
+            numbers.insert(row_index, layout);
+        }
+    }
+    Ok(NumberLayout::Indexed(numbers))
+}
+
 fn public_query_numbers(
     request: &request::Request,
     result: &relational::QueryResult,
@@ -740,28 +820,7 @@ fn public_query_numbers(
     } else {
         &[]
     };
-    let mut numbers = BTreeMap::new();
-    for (row_index, row) in rows.iter().enumerate() {
-        budget.check()?;
-        let mut cells = BTreeMap::new();
-        for (column, value) in row.iter().enumerate() {
-            budget.charge(Cost::work(1))?;
-            if matches!(value, relational::Scalar::Float(_)) {
-                budget.charge(Cost::retained(
-                    number_tree_bytes::<usize>(cells.len() + 1)
-                        - number_tree_bytes::<usize>(cells.len()),
-                ))?;
-                cells.insert(column, NumberLayout::Binary64);
-            }
-        }
-        if !cells.is_empty() {
-            budget.charge(Cost::retained(
-                number_tree_bytes::<usize>(numbers.len() + 1)
-                    - number_tree_bytes::<usize>(numbers.len()),
-            ))?;
-            numbers.insert(row_index, NumberLayout::Indexed(cells));
-        }
-    }
+    let numbers = public_row_numbers(rows, budget)?;
     budget.charge(Cost::retained(
         2 * number_tree_bytes::<String>(3) + number_tree_bytes::<String>(1) + 128,
     ))?;
@@ -772,7 +831,7 @@ fn public_query_numbers(
             if result.plan.is_some() {
                 NumberLayout::Verbatim
             } else {
-                NumberLayout::field("rows", NumberLayout::Indexed(numbers))
+                NumberLayout::field("rows", numbers)
             },
         ),
         (
@@ -1373,3 +1432,7 @@ mod retry_tests {
 
 #[cfg(test)]
 mod partial_tests;
+
+#[cfg(test)]
+#[path = "local_query/shared_number_layout_tests.rs"]
+mod shared_number_layout_tests;
