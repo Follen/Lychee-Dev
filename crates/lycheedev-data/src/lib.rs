@@ -68,6 +68,12 @@ pub fn commands() -> &'static [&'static str] {
     ]
 }
 
+/// Explicit Data scope of the existing cache prune command. CLI composes this
+/// domain handler without introducing a Core-to-Data dependency.
+pub fn prune_derived_cache(inv: &Invocation) -> Result<Outcome> {
+    generation::prune(inv)
+}
+
 pub fn dispatch(inv: &Invocation) -> Result<Outcome> {
     if inv.command == "data cache prepare" { return generation::dispatch(inv); }
     if inv.command == "data hotfix"

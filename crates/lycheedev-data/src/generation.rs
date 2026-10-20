@@ -5,6 +5,8 @@ mod consumer;
 mod identity;
 mod import;
 mod reading;
+mod retirement;
+pub(crate) use retirement::prune;
 
 pub(crate) use application::dispatch;
 pub(crate) use consumer::{Generation, Reuse, open_existing};

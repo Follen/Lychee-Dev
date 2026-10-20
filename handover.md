@@ -24,11 +24,15 @@
 
 已完成的DBCD四项修复保留：WDC5 palette物理顺序、多词metadata、官方BUILD预设、非SQL实际读取限制传播。c571与9004分批合计113 distinct通过、3原ignore；旧红例及四个admission测试失败保留，不能将小fixture称作真实>256MiB表验证。产品定义未改变，完整产品矩阵仍待。
 
-Source 后继借用 Symbol 投影片已实现并完成源码独审：summary 重建与完整查询复用同一四来源映射，完整 Index 字节、SYM 身份及查询 owned 结果保持；summary 不再保留全仓第二份 owned Symbol 字符串。44a 实际 all-targets check 通过，index 155通过/1 exporter忽略、inspect15与flow4通过，合174通过/0失败/1忽略，10项新增各执行一次；该片匹配产物性能尚待。精确完整组合树的云端九套 Node 382/382 通过；首轮因副本缺少历史 Git oracle 为380通过/2失败，补齐既有只读历史后完成复验。此片不改变 warm 读取；ID/hash工作移入 IndexSerialize，不能把 Symbols 桶下降算作全部收益，需固定产物后比较总 wall。128MiB输出容量与原owned预算保持，单个临时ID与输出buffer同时存活；没有RSS改善实测。
+Source 后继借用 Symbol 投影片已实现并完成源码独审：summary 重建与完整查询复用同一四来源映射，完整 Index 字节、SYM 身份及查询 owned 结果保持；summary 不再保留全仓第二份 owned Symbol 字符串。44a 实际 all-targets check 通过，index 155通过/1 exporter忽略、inspect15与flow4通过，合174通过/0失败/1忽略，10项新增各执行一次；44a匹配产物六场景完整Facts/summary/custody及finalIntegrity均通过；性能见第4节。精确完整组合树的云端九套 Node 382/382 通过；首轮因副本缺少历史 Git oracle 为380通过/2失败，补齐既有只读历史后完成复验。此片不改变 warm 读取；ID/hash工作移入 IndexSerialize，不能把 Symbols 桶下降算作全部收益，44a已比较匹配产物总wall，正式20对仍待。128MiB输出容量与原owned预算保持，单个临时ID与输出buffer同时存活；没有RSS改善实测。
 
-普通 static SQL 的已存在精确 generation 消费片已实现并通过静态独审，Rust 编译与回归尚未运行：复用原 IPC 校验，保留行/数组/精确数字语义，认证后每 cursor 最多保留一批；短 quota 后转移同一受控文件和祖先句柄，所有 reader 显式关闭后才结束源与请求。producer 私有 schema 表示上限已知不适用时，明确走原 WDC；其余仅在完整认证 manifest 与当前来源匹配且对象原 open 确证 NotFound 时，明确记为未命中并走原 WDC，不重建 generation，常规 CAP 保持原流程；损坏、权限、预算、取消和关闭失败不回退。普通 SQL 不自动物化，Effective/meta 保原路径；这不是 DataFusion 默认切换或全 Data 5GB 闭合。
+普通 static SQL 的已存在精确 generation 消费片已保存于 e964，并与 b47 一起完成两项实际 check；完整固定队列270 matched为265通过、2失败、3原忽略，63新增为61通过、2失败。两个失败在测试目标断言前：inventory用例在持有objects保护句柄时重命名直接子目录被Windows共享冲突拒绝；SQL关闭故障用例未引用保留词 First，先被语法拒绝。最小测试修正保留原所有生命周期/CAP断言，当前修后尚未实跑，原失败不重标。消费片复用原 IPC 校验，保留行/数组/精确数字语义，认证后每 cursor 最多保留一批；短 quota 后转移同一受控文件和祖先句柄，所有 reader 显式关闭后才结束源与请求。producer 私有 schema 表示上限已知不适用时，明确走原 WDC；其余仅在完整认证 manifest 与当前来源匹配且对象原 open 确证 NotFound 时，明确记为未命中并走原 WDC，不重建 generation，常规 CAP 保持原流程；损坏、权限、预算、取消和关闭失败不回退。普通 SQL 不自动物化，Effective/meta 保原路径；这不是 DataFusion 默认切换或全 Data 5GB 闭合。
 
-Core 库存目录复用与本地 decoded 缺体重建后继已完成独立源码审查，Rust 编译/运行仍待：前者只复用本次 quota 已持有的精确 Directory，保留每次成功的普通新 body 流式发布的四次全库存扫描和四处 sync、逐文件认证与所有实际 owner 的 checked close；13项新回归覆盖真实构造/关闭观察点、未知子目录、嵌套发布后新库存和错误聚合。少建目录 owner 的数目目前是待执行断言，不是已测系统调用或 wall 收益。后者仅在已认证本地 alias 指向原生缺体时使用既有精确重建，EOF 再核 alias 身份，保留原 pair/CAP/keep；同长坏体等仍硬拒。9项回归包含公开 asset 的 Root/selected 重建与损坏拒绝，以及 EOF 身份、预算、取消和上游错误；注入错误不等于真实 OS 故障实测。两片不改变产品定义或 SQL 的缺 generation 回退合同。六源码文件的最终组合树已重跑既有三套 Node：52通过、0失败、11非Windows平台skip；这是验证工具检查，不是22项Rust回归执行。
+Core 库存目录复用与本地 decoded 缺体重建已保存于 b47；实际两check通过，相关固定队列结果及两个待复验测试修正见上：前者只复用本次 quota 已持有的精确 Directory，保留每次成功的普通新 body 流式发布的四次全库存扫描和四处 sync、逐文件认证与所有实际 owner 的 checked close；13项新回归覆盖真实构造/关闭观察点、未知子目录、嵌套发布后新库存和错误聚合。目录计数回归已实际执行，其中上述目录rename用例失败；其余通过不能替代该后续断言，仍无此片匹配wall收益。后者仅在已认证本地 alias 指向原生缺体时使用既有精确重建，EOF 再核 alias 身份，保留原 pair/CAP/keep；同长坏体等仍硬拒。本地9项回归已实际通过，包含公开 asset 的 Root/selected 重建与损坏拒绝，以及 EOF 身份、预算、取消和上游错误；注入错误不等于真实 OS 故障实测。两片不改变产品定义或 SQL 的缺 generation 回退合同。六源码文件的最终组合树已重跑既有三套 Node：52通过、0失败、11非Windows平台skip；这是验证工具检查；Rust以之后b47实际逐名队列为准。
+
+新显式 `cache prune --data-derived` 片已静态独审，Rust尚未编译/运行：仅退役当前typed generation与无剩余引用的受管IPC，默认普通prune保持；未知/损坏manifest在首删前拒绝，原handle完整认证和祖先保护、active pin、共享引用及CAP/keep独立保留。每组仅同时持body和当前manifest删除句柄；部分删除/取消/close失败返回实际完成事实，规范orphan保留计量并可重试回收。target是该范围剩余逻辑字节，max-objects是进入退役尝试的独特对象组（纯busy不计），确认删除body数另报；无last-used/LRU，按SHA稳定选择。23项新Rust回归未跑。自动容量触发、共享decoded归属释放及全Data5GB仍开放。
+
+Source warm诊断仅增加profile v2的4个互斥子段：实际read、SHA、typed decode、finish_file；都包含在cached_index父桶，open/扩容等仍属父残余，finish_file含终止检查与错误合并，不能称纯OS close。原业务与错误顺序不改，历史v1/31项继续严格读取；每块计时有自身开销。作者与独审各九套Node422通过，Rust两新增/两适配及真实v2计数尚未执行。
 
 ## 3. Home、容量和所有权边界
 
@@ -44,7 +48,9 @@ Source新格式旧cache失效后重建，不维护生产旧格式迁移。新格
 
 ## 4. 性能与已知证据范围
 
-最新Source诊断固定86f2bbb：一次匹配release/装包后六场景完整Facts/Index、summary、custody与最终完整性校验全部通过（finalIntegrityVerified=true）。同run Go/Rust毫秒：cold7801.86/3885.1199；warm587.1695/255.1399；change2965.3629/982.6756；insert2910.4461/984.6361；delete2848.9826/997.6467；rename2849.0348/1158.9573。六项比率仍均大于0.30，仅一轮诊断，不是20对正式门禁。21个owner、40个native调用均正常退出并回收；2次forced均已认证辅助进程，无未知辅助或超时，进程/lease归零。当前仅非敏感汇总，原始本机记录不公开。
+最新44a六场景Go/Rust毫秒：cold8761.3351/3835.3861；warm574.6557/249.7914；change3024.2660/877.4871；insert2991.4838/850.2395；delete3012.4679/849.8195；rename2926.3632/860.6207。质量与最终完整性全部通过；四个增量单pair比率0.2821–0.2941达到0.30线，cold0.4378/warm0.4347未达，20对正式验收仍未完成。同次warm cached174.316ms；cold visit3470.405ms、串行53份777.555ms、worker等待1959.438ms。增量FactsRead250.545–257.277ms；Symbols缩小伴随ID计算转入序列化，不能只按单桶宣称收益。内嵌/并行phase不相加作独占成本。
+
+上一轮Source诊断固定86f2bbb：一次匹配release/装包后六场景完整Facts/Index、summary、custody与最终完整性校验全部通过（finalIntegrityVerified=true）。同run Go/Rust毫秒：cold7801.86/3885.1199；warm587.1695/255.1399；change2965.3629/982.6756；insert2910.4461/984.6361；delete2848.9826/997.6467；rename2849.0348/1158.9573。六项比率仍均大于0.30，仅一轮诊断，不是20对正式门禁。21个owner、40个native调用均正常退出并回收；2次forced均已认证辅助进程，无未知辅助或超时，进程/lease归零。当前仅非敏感汇总，原始本机记录不公开。
 
 历史2d23695：匹配release、91文件装包及exporter认证通过。同run Go/Rust毫秒：cold10687.5959/5095.8654；warm667.0608/267.0469；change3958.0999/1344.9300；insert3962.2321/1357.1795；delete3871.5698/1225.4815；rename3704.7494/1240.8674。六场景逐项完整Facts/Index、summary与custody比较通过；原最终runner因owner receipt的1MiB上限拒绝合法约5.2MB封存记录而失败，原finalIntegrityVerified=false保持。666修正验证器后的独立只读复核已exit0，结果为sealed_complete_scenarios_reverified，认证52,494文件；没有新增产品、build或exporter调用，也未改旧记录或六组wall。666 Windows Node505项为498通过、0失败、7个symlink权限skip；两个owner均回收，无forced或timeout。该新复核闭合封存证据完整性，不把原失败改成功。六比率均大于0.30，只一轮诊断；内存采样缺口不证明RSS峰值改善，不能把异负载绝对耗时变化全归优化。
 
@@ -58,19 +64,13 @@ Data CSV9693工具对旧63d与a860的单pair：cold401.4790/389.9062ms，warm349
 
 ## 5. 当前阻断与下一批
 
-070f已实际完成：all-targets通过；Rust 986 matched为957通过、23失败、6 ignored；七Node套件361项为357通过、0失败、4文件链接权限skip。13个owner均已回收，无deadline；Source lib和disk的未知辅助进程强制回收标记保留。此为有限固定队列，不是全仓通过。
+b47两个check通过，270 matched为265通过、2失败、3原ignore；实际执行267项，63新增为61通过、2失败，正式名单无缺漏/重复。Core目录替换fixture及SQL保留词fixture的最小测试修正已独立源码复核，尚待固定版本实际复验。未到达的后续断言不以静态推理当通过；本地decoded9项及其余实际通过组保持有效。
 
-23个失败分三处：Source validate共享fixture仍用旧summary字段，21项在缺失schema的构造阶段失败，未到业务断言；Data磁盘cleanup测试仍期待9个目录，而新增shared-blobs-v1后实际拥有10个；历史大写SHA的CAP在Data引用保护中先经过仅接受小写的校验，错过canonical归属查找，最终返回vault.blob_integrity。最小修复保持真实typed schema、每个owner恰关闭一次及全部重复错误事件、原CAP签名和完整认证，不放宽生产serde默认或删断言。19e实际all-targets通过；validate32、data_disk13和remove_commands22合计67通过、0失败/忽略，原23失败全部逐项执行通过，两新增也各一次；原070f失败保留。这是分批针对性闭合，不冒称完整新SHA全仓通过。
+下一候选包含这两处测试修正、显式Data derived退役与Source warm子段计时。新功能Rust尚未编译/运行；源代码检查和Node工具测试均不能代替Windows验证。当前无自动5GB全闭合、默认DF切换或全部性能验收结论。
 
-原2808四处编译错误和一个Node版本断言已在070f闭合；原copy/发布后receipt路径/generation取消四个回归目标均通过。25个Index新增逐项通过；56个CAP新增为55通过1失败。source_inspect15、flow4及显式执行的正式Lua真实用例1均通过。原2808、278和更早失败不改标。
+最终25源码组合的15套Node共538项：527通过、0失败、11平台skip；额外历史source-project-selection封存映射失败在base与独立退役候选均复现，未计入这15套、最终组合未重跑，仍单列失败，不称全仓通过或Rust验证通过。
 
-集成流程缺口已确认：原隔离Node工作目录的Rust源码仍是v17，不能以该361/361替代最终组合树验证。后续Node/合同检查须在精确待提交组合树执行并记录sourceTree，明确git archive导出范围与被export-ignore排除的历史文件，不能只合并文件hash。静态审查、rustfmt与patch适用性不等同Rust编译通过。
-
-19e匹配release实际成功；assembly因固定flatbuffers crate未携带许可证正文而失败，该历史记录保留。2d已用官方原文补现有catalog并完成新匹配release/assembly及六场景；原末尾receipt验证失败及666独立只读复核通过分别见上节。采用既有release/licenses目录补入经官方固定版本认证的原文；该资源纳入sourceDigest，因此修复后须新匹配build，原19e成功构建及失败装包记录保留。10ed仅修正式runner显式--scratch-6gib贯穿，默认仍5GiB；作者与独审各12套Node452/452通过；Windows实际447通过/0失败/5个symlink权限skip，均未冒计通过。Data后继45个源码路径已组合独审：认证read-through、可选DataFusion真实TableProvider、私有SQLite元库和缺体精确重建，共94新增Rust测试按实际所属组逐名核验，不能将部分组通过称为全部通过。私有元库沿成熟SQLite正常恢复，计逻辑文件长度，不自研journal/VFS；只读路径不冒写入准入，写入仍严格。缺体修复仅接受已认证原alias/pair对应的确切缺失body，从原来源重提取并完整认证；现存损坏仍拒绝，CAP/keep/alias不删改。精确repair记录保留额外stage峰值，未知/清理失败留事实；旧reader遇未完repair会拒绝而非漏账，成功后只由本次handle撤回。未执行的Data组及原session/asset缺体回归仍待Windows实跑，不把静审称作通过。Data50已保存为ea58347c，50文件完整字节回读通过；Windows五组Core/Windows131项及11套Node121项均通过，真实名单无缺漏或重复。ea两条编译前置因测试中部分移动paths的E0382失败，该历史保留。e486仅修该测试借用后两check通过；10组Data155项实际152通过、3失败、0忽略且逐名无缺漏（45新增为43通过2失败，110既有为109通过1失败）。失败分别为prepared Root缺体后的配置发布归属、首次cold Arrow导入工作预算、可选DF查询physical Wildcard；后续未到达的业务断言不能算通过。对应最小修复保留原Root缺体复用正例，以已认证内存字节通过既有精确repair恢复；Core文本读取仍预留最大真实分配和初始化工作，仅将后续扫描收费限定实际有界读取请求，保留所有来源复核及原100M预算；DF复用官方AggregateFunctionPlanner，并在测试错误中记录查询及阶段。旧DF日志没有具体查询文本，源码定位不冒称已证明旧失败调用。86f两条check及四组回归已实际通过：Core client23、prepared7、generation33、engine33，共96通过/0失败/0忽略，8新增与88既有各一次，原3失败均进入原目标断言并通过；历史e486失败保留。这些结果不替换2d性能身份；全Data5GB归属和冷缓存淘汰尚未闭合。首轮匹配产品和完整Source/Data任务性能不等整个计划结束；首次导入成本计入实际生命周期。Skill已完成同一86f封存CLI/fixture的四类独立真实任务及SQL补验；模型和脚本仍分别列示，不替代真实结果。
-
-后继质量清单见[Data缓存测试映射](tests/rust-parity/data-cache-quality-test-map.json)：两条keep-going编译前置、15个互斥模块静态286项（94新、192旧），均须实际libtest名单确认后运行。最终组合11套Node121/121通过、无skip；旧CLI oracle的110/111及10ed基线5/6失败保留。修正预期来自固定Go323原文和明确批准的cache prepare/Emmy说明，旧fixture未改；七product、双Forever、命令顺序、参数与错误合同仍逐项比较。此为元数据/脚本验证，不能替代85条CLI真实任务。
-
-当前摘要只列决策与开放项。完整历史测试、失败、旧SHA和各次报告留在[308efa历史handover](https://github.com/Follen/Lychee-Dev/blob/308efa2766d00273b13c9c7e24a0b956bb60e9e9/handover.md)及对应PR评论。所有用户本机测试仍由唯一父队列派发，受限原始记录不公开。
+历史编译、测试和runner失败保留于[前一固定交接](https://github.com/Follen/Lychee-Dev/blob/b47ede61f0530fc954d754f49a1f16452f297603/handover.md)及对应Git历史，不重复列成当前待跑队列。组合验证必须使用精确待提交完整字节树；旧隔离base的通过不替代最终组合结果。Windows正式新测试名单以实际libtest inventory为准，忽略与权限skip单列。
 
 ## 11. 最后执行：需要实际配合的测试清单
 

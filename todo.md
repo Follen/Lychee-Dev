@@ -1,6 +1,6 @@
 # Rust 架构实施清单
 
-当前批：44a Source定向174通过/1原exporter忽略，10新增各一次；匹配性能待回。86f Data现有48调用全等价、所有性能路径仍未达0.30，未覆盖prepare/DF。e964已保存普通static SQL消费已认证generation与Core短quota受控reader，Rust实测待完成；后继库存目录复用13项、本地decoded缺体重建9项已静态独审，Rust尚未运行，自动物化/DF默认执行/冷淘汰与全5GB归属仍未闭。
+当前批：44a六场景完整性全过，四增量单轮达到0.30线、cold/warm未达0.30，20对正式验收未完成。b47两check通过；270 matched为265通过/2失败/3原忽略，63新增61/2。两处测试前提修正待复验；新显式Data退役与Source warm子段计时已静态独审、Rust未跑。
 
 以 [handover](handover.md) 为当前事实、[DESIGN](DESIGN.md#authorized-architecture-implementation-plan--2026-10-19) 为完整计划。质量基线f811；性能参考固定Go323。先业务质量/完整实现，再≤30%耗时门禁，之后正式五项循环。历史已完成项与原失败留在[308efa旧清单](https://github.com/Follen/Lychee-Dev/blob/308efa2766d00273b13c9c7e24a0b956bb60e9e9/todo.md)，不滚动复制到当前待办。
 
@@ -19,18 +19,18 @@
 - [x] 最终组合Node检查记录sourceTree并区分git archive导出与export-ignore范围；原隔离361/361不能代替最终组合树结果。
 
 - [x] CLI旧Go320元数据oracle已按固定Go323及明确新增更新，独立10项与10个物理坏例通过；最终组合11套Node121/121，无skip，非实际CLI任务验收。
-- [ ] 按[Data缓存测试映射](tests/rust-parity/data-cache-quality-test-map.json)核真实286项名单并串行执行，94新增逐名一次，不将静态数当通过。
+- [ ] [Data缓存测试映射](tests/rust-parity/data-cache-quality-test-map.json)保留历史静态范围；已执行各组以当前逐名记录为准，剩余缺证单列，不将整个旧映射重列待跑或冒全过。
 
 ## A. Home、配置与全Data容量
 - [x] 实现decimal5GB可配置基础、派生目录与至少真实cache prepare消费者；初批运行验证未闭。
 - [x] 整合共享blob、decoded spool和CAP独立引用保护28代码路径，静态独审通过；保留发布后错误receipt与278测试修正。
 - [x] 56新增中uppercase历史CAP失败已在19e精确复验通过，070f原55/1不重标。
-- [x] 已实现并独审精确缺体认证重建与repair峰值计量，保留原pair/CAP/keep及旧reader fail-closed；27新增按实际Core/Data分组核验；未执行Data及原session/asset回归仍待实际运行，完整路径尚未验收。
+- [x] 已实现并独审精确缺体认证重建与repair峰值计量，保留原pair/CAP/keep及旧reader fail-closed；27新增保原分批实测记录；b47本地decoded9已通过，当前两个失败待修后复验，完整产品与全容量路径仍未验收。
 - [ ] 完整接入Data归属：下载、共享blob去重、Arrow/索引、staging/导出峰值、CAP和SQLite/WAL/SHM/历史记录；明确共享跨域归属和去重，不把局部准入称总硬上限。
 - [ ] 可重建冷缓存淘汰必须保护活跃lease与证据引用；旧超额/缩配置拒新增并报告，不删证据。验证导入峰值，避免raw/IPC/Parquet长期三副本。
 
-- [ ] 验证库存目录复用13项：精确持有owner复用、未知child原路径、并发/嵌套新库存、预算取消和全部关闭错误；保每次成功的普通新body流式发布四次扫描/四处sync，实际构造计数与wall尚未测。
-- [ ] 验证本地decoded合法缺体精确重建9项：Root/selected公开入口、旧alias/pair/CAP/keep保持，坏体硬拒与EOF身份/取消/预算；尚未运行，不能以远程旧回归代替。
+- [ ] b47库存目录13新增中12通过、1个目录rename测试前提失败；最小fixture修正保真实open/close与fresh计量，修后待实际复验。没有此Core片匹配wall收益。
+- [x] b47本地decoded合法缺体精确重建9项实际通过：Root/selected公开入口、alias/pair/CAP/keep保持，坏体硬拒及EOF身份/取消/预算。
 
 ## B. Data统一typed执行与按需缓存
 - [x] f811 check及71项针对性回归实际通过；不等于全仓/性能。
@@ -39,13 +39,13 @@
 - [ ] Lookup/投影/过滤/batch与复杂SQL共享执行/证据，Agent调用和token收益以真实任务证明。
 
 ## C. Source认证、按需消费与binary cache
-- [x] 子树scratch与移除旧JSON缓存计数遍历两片在0bca实际check通过；Source730+inspect15+flow4+真实luac1=750通过/0失败/6忽略，13新增/调整名称及1细化各一次；原binary/owned/输出额度保留。86f匹配产品及六场景完整性全部实际通过；六项耗时比仍>0.30，继续定位剩余串行及增量聚合。
+- [x] 子树scratch与移除旧JSON缓存计数遍历两片在0bca实际check通过；Source730+inspect15+flow4+真实luac1=750通过/0失败/6忽略，13新增/调整名称及1细化各一次；原binary/owned/输出额度保留。86f匹配产品及六场景完整性全部实际通过；该轮86f六项耗时比仍>0.30，继续定位剩余串行及增量聚合。
 - [ ] 完成当前Facts Postcard正确性和匹配性能；旧cache失效重建，新损坏不得fallback成健康。
 - [x] 整合已独审Index r2与正式v13-postcard-index18诊断；固定Go323来源已核；070f七Node为357通过/0失败/4权限skip。
 - [x] 旧validate fixture在19e闭合；0bca完整Source库730通过，6个lib ignored仍单列，真实luac精确用例实际通过。
-- [ ] 86f六场景完整Facts/Index/summary/custody及finalIntegrity全部通过；六项耗时比仍>0.30，未达正式70%门禁。2d原最终失败、666新增只读复核保留；后续改动保持完整认证与公共输出，首次导入/query成本不移到未测命令。
+- [ ] 86f六场景完整Facts/Index/summary/custody及finalIntegrity全部通过；该轮86f六项耗时比仍>0.30，未达正式70%门禁。2d原最终失败、666新增只读复核保留；后续改动保持完整认证与公共输出，首次导入/query成本不移到未测命令。
 
-- [x] 借用 Symbol 后继：44a实际check通过，index155通过/1原exporter忽略、inspect15与flow4通过，合174通过/0失败/1忽略，10新增逐项一次；共享四来源映射、完整wire字节与取消/损坏回归已执行。精确完整组合树九套Node382/382通过，0失败/skip。固定产物总wall待测，Symbols工作转入IndexSerialize不得当独占收益；warm无此片收益。
+- [x] 借用 Symbol 后继：44a实际check通过，index155通过/1原exporter忽略、inspect15与flow4通过，合174通过/0失败/1忽略，10新增逐项一次；共享四来源映射、完整wire字节与取消/损坏回归已执行。精确完整组合树九套Node382/382通过，0失败/skip。44a匹配产物六场景总wall已测，四增量单pair达线、cold/warm和20对仍待，Symbols工作转入IndexSerialize不得当独占收益；warm无此片收益。
 
 ## D. Live内部资源归属
 - [x] 8bfe SessionOwner六新增逐名一次、connection61/durable36实际通过；真实客户端仍未验。
@@ -61,8 +61,14 @@
 
 ## F. 实现与性能门禁，之后正式五循环
 - [ ] Source/Data结果质量≥f811及已认可增强；DBCD四修分批113 distinct pass/3旧ignore保持，完整产品矩阵仍需验。
-- [ ] 同机同数据/结果完整等价，cold/warm和增量分开正式性能验收，Rust≤Go30%。当前全部最新Source六场景未达；Data CSV旧新Rust诊断不是Go验收。
+- [ ] 同机同数据/结果完整等价，cold/warm和增量分开正式性能验收，Rust≤Go30%。44a四增量单pair达线，cold/warm未达0.30、20对正式验收未完成；Data CSV旧新Rust诊断不是Go验收。
 - [ ] 内存采样gap、资源计量与RSS区分；受限原始本机证据不夹公开docs。
 - [ ] 两门禁通过后依次循环：架构/业务/Skill→覆盖有效性与冗余→死代码→联合全仓→Rust原生度。此前预审不追认为最终完成。
 - [ ] Coverage companion因raw总预算超限仍未完成；不增限、不继续扩工具抢实现/性能主线。真正OS压力/CLI真实使用/游戏缺证分别保留。
 
+
+## 当前窄后继（不是门禁完成）
+- [ ] 复验b47两原失败：Core保持held目录拒替换并核unknown真实open/close和同名leaf新身份；SQL引用合法表名First后实际到达双表关闭失败、资源释放与已提交CAP断言。
+- [ ] 显式cache prune --data-derived：23新增Rust实际编译执行；多manifest/active pin/CAP、canonical orphan、容量缩小、取消和部分完成真实报告。默认普通prune保持。
+- [ ] 自动准入退役与全5GB尚未闭；先复用同quota内退役能力、完整峰值重盘点，不递归取quota、不把receipt当已释放空间；下载/sharedblob/CAP等归属缺口仍保留。
+- [ ] Source profile v2四子段：历史v1兼容已Node验证，Rust及真实warm计时待；不将嵌套桶相加、不把计时增强当性能收益。

@@ -813,7 +813,7 @@
   },
   {
     "path": "cache prune",
-    "summary": "Reclaim ordinary cache toward --target-bytes <n> (zero reclaims all ordinary cache), capped by --max-objects <n>; --uncommitted also reclaims staging files; --dry-run reports without deleting; protected and in-use objects are always skipped",
+    "summary": "Reclaim ordinary cache toward --target-bytes <n> (zero reclaims all ordinary cache), capped by --max-objects <n>; --uncommitted also reclaims staging files; --dry-run reports without deleting; protected and in-use objects are always skipped; --data-derived selects rebuildable Data objects and generations only (not downloads, shared blobs or CAP), with a remaining-byte target and distinct object-group attempt cap; staging cannot be combined",
     "mutates": true,
     "arguments": [],
     "flags": [
@@ -822,7 +822,8 @@
       "--target-bytes <n>",
       "--max-objects <n>",
       "--uncommitted",
-      "--dry-run"
+      "--dry-run",
+      "--data-derived"
     ]
   },
   {

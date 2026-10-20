@@ -471,16 +471,25 @@ where
                     let mut chunk = [0; 65536];
                     loop {
                         control.check()?;
-                        let n = file.read(&mut chunk)?;
+                        let n = {
+                            let _read = profile.span(Phase::CachedIndexRead);
+                            file.read(&mut chunk)?
+                        };
                         if n == 0 {
                             break;
                         }
                         persistence_wire::append_input(&mut raw, &chunk[..n])?;
-                        hash.update(&chunk[..n]);
+                        {
+                            let _sha = profile.span(Phase::CachedIndexSha256);
+                            hash.update(&chunk[..n]);
+                        }
                     }
                     if raw.len() > 128 << 20
                         || manifest["blob"]["bytes"] != raw.len()
-                        || format!("{:x}", hash.finalize()) != digest
+                        || {
+                            let _sha = profile.span(Phase::CachedIndexSha256);
+                            format!("{:x}", hash.finalize()) != digest
+                        }
                     {
                         return Err(ToolkitError::new(
                             "codebase.source_integrity",
@@ -488,13 +497,16 @@ where
                             4,
                         ));
                     }
-                    let mut map: Index<D, A, S> =
-                        persistence_wire::decode(&raw, &identity, control)?;
+                    let mut map: Index<D, A, S> = {
+                        let _decode = profile.span(Phase::CachedIndexTypedDecode);
+                        persistence_wire::decode(&raw, &identity, control)?
+                    };
                     control.check()?;
                     map.home = home.into();
                     map.summary.io = json!({"gitTreeProcesses":0,"gitBlobProcesses":0,"cachedIndex":true,"indexBytesRead":raw.len(),"sourceBytesRead":0,"cachedFacts":map.documents.len(),"parsedDocuments":0,"elapsedMs":started.elapsed().as_millis(),"deadlineMs":180000});
                     Ok((map, digest.to_owned()))
                 })();
+                let _close = profile.span(Phase::CachedIndexCheckedClose);
                 return storage::finish_file(file.into_inner(), loaded, control);
             }
         }

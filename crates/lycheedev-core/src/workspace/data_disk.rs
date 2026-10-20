@@ -3,7 +3,8 @@
 //! This is NOT yet a total-Data hard cap. Shared Data download/decoded/evidence
 //! blobs outside registered publishers and metadata need domain attribution before
 //! they can join this budget without charging Source/Live or counting a blob
-//! twice. No existing Data path is moved, adopted, evicted, or deleted here.
+//! twice. Legacy roots are never adopted. Explicit typed retirement covers only
+//! the existing canonical derived CAS and strictly projected generation records.
 //!
 //! Writers borrow DataResources, then hold one quota lease through their final
 //! checked close. This first version serializes participating writers. Peak is
@@ -21,6 +22,8 @@ use std::{
 mod metadata;
 mod publication;
 mod reading;
+pub(super) mod retirement;
+pub use retirement::{DerivedRetirementOptions, DerivedRetirementReport};
 pub(crate) use metadata::{MetadataQuota, MetadataReadQuota};
 mod shared_blobs;
 pub use publication::{DerivedObject, DerivedObjectWriter};

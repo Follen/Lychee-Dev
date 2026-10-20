@@ -84,12 +84,14 @@ unsafe extern "system" {
     fn RtlNtStatusToDosError(status: i32) -> u32;
 }
 
+#[derive(Clone, Copy)]
 enum RelativeOpen {
     Directory { deny_write: bool },
     Stage,
     Inspect,
     Reader,
     ProjectReader,
+    Cleanup,
     Lock,
 }
 #[derive(Clone, Copy, Debug, Default)]
@@ -211,6 +213,12 @@ fn relative_file_optional_owner<C: FileControl>(
             1,
             0x00200000 | 0x20,
         ),
+        RelativeOpen::Cleanup => (
+            1 | FILE_READ_ATTRIBUTES.0 | DELETE.0 | 0x100000,
+            1,
+            1,
+            0x00200000 | 0x20, // OPEN original reparse leaf, synchronous
+        ),
         RelativeOpen::Reader => (
             1 | FILE_READ_ATTRIBUTES.0 | 0x100000,
             1,
@@ -268,6 +276,11 @@ fn relative_file_optional_owner<C: FileControl>(
         // SAFETY: translating the returned status neither borrows nor consumes
         // a file handle. A failed open has not transferred an owner to us.
         let error = io::Error::from_raw_os_error(unsafe { RtlNtStatusToDosError(status) } as i32);
+        // Cleanup alone treats the ORIGINAL native sharing violation as busy.
+        // Missing, permission and all later authentication/close errors survive.
+        if matches!(kind, RelativeOpen::Cleanup) && error.raw_os_error() == Some(32) {
+            return Ok(None);
+        }
         if optional && error.kind() == io::ErrorKind::NotFound {
             return Ok(None);
         }
@@ -578,6 +591,28 @@ impl Directory {
             control.check()?;
         }
         Ok(file)
+    }
+    /// Try a DELETE-capable original leaf relative to this held directory.
+    /// None means only the native open's sharing violation. The caller receives
+    /// ownership before any fallible post-open check and must checked-close it.
+    /// Authentication, not this factory, grants permission to discard.
+    pub fn open_cleanup_candidate_owner_controlled<C: FileControl>(
+        &self,
+        name: &std::ffi::OsStr,
+        control: &mut C,
+    ) -> Result<Option<super::owned_cleanup::CleanupCandidate>, C::Error> {
+        self.verify_controlled(control)?;
+        let file = relative_file_optional_owner(
+            self.parent_handle(),
+            name,
+            RelativeOpen::Cleanup,
+            false,
+            control,
+        )?;
+        if file.is_none() {
+            control.check()?;
+        }
+        Ok(file.map(super::owned_cleanup::CleanupCandidate::from_relative_file))
     }
     /// Inspect size/kind without data-read permission or an allocation. This
     /// remains possible while another writer exists; opening admitted data for
@@ -1304,6 +1339,105 @@ mod tests {
         assert_eq!(fs::read_dir(&outside).unwrap().count(), 2);
         drop(held);
         fs::remove_dir(&ancestor).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn relative_cleanup_open_preserves_external_same_content_after_ancestor_junction() {
+        let root = std::env::temp_dir().join(format!(
+            "lychee-relative-cleanup-{}",
+            crate::random::token().unwrap()
+        ));
+        let ancestor = root.join("ancestor");
+        let outside = root.join("outside");
+        fs::create_dir_all(&ancestor).unwrap();
+        fs::create_dir(&outside).unwrap();
+        let body = b"same authenticated bytes cannot authorize an external deletion";
+        fs::write(outside.join("body"), body).unwrap();
+        let held = Directory::open_shared(&ancestor).unwrap();
+        struct Redirect {
+            ancestor: PathBuf,
+            outside: PathBuf,
+            changed: bool,
+        }
+        impl FileControl for Redirect {
+            type Error = io::Error;
+            fn charge(&mut self, cost: FileCost) -> io::Result<()> {
+                if cost.io_operations == 3 && !self.changed {
+                    reparse::set_junction(
+                        &reparse::reparse_writer(&self.ancestor)?,
+                        &self.outside,
+                    )?;
+                    self.changed = true;
+                }
+                Ok(())
+            }
+            fn check(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut redirect = Redirect {
+            ancestor: ancestor.clone(),
+            outside: outside.clone(),
+            changed: false,
+        };
+        let result = held.open_cleanup_candidate_owner_controlled("body".as_ref(), &mut redirect);
+        let error = match result {
+            Err(error) => error,
+            Ok(Some(candidate)) => {
+                super::super::close_file(candidate.into_file()).unwrap();
+                panic!("redirected cleanup acquired external identity");
+            }
+            Ok(None) => panic!("reparse is not an in-use skip"),
+        };
+        assert!(redirect.changed);
+        assert_eq!(error.raw_os_error(), Some(1921));
+        assert_eq!(fs::read(outside.join("body")).unwrap(), body);
+        held.close().unwrap();
+        fs::remove_dir(&ancestor).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn relative_cleanup_open_skips_only_pinned_native_sharing_and_owns_checked_close() {
+        let root = std::env::temp_dir().join(format!(
+            "lychee-relative-cleanup-pin-{}",
+            crate::random::token().unwrap()
+        ));
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("body"), b"owned").unwrap();
+        let held = Directory::open(&root).unwrap();
+        let reader = held.open_file("body".as_ref()).unwrap();
+        assert!(
+            held.open_cleanup_candidate_owner_controlled("body".as_ref(), &mut Uncontrolled)
+                .unwrap()
+                .is_none()
+        );
+        super::super::close_file(reader).unwrap();
+        let missing =
+            held.open_cleanup_candidate_owner_controlled("missing".as_ref(), &mut Uncontrolled);
+        assert!(matches!(missing, Err(error) if error.kind() == io::ErrorKind::NotFound));
+        let candidate = held
+            .open_cleanup_candidate_owner_controlled("body".as_ref(), &mut Uncontrolled)
+            .unwrap()
+            .unwrap();
+        let owner = match candidate.authenticate::<io::Error>(|file| {
+            let mut body = Vec::new();
+            file.read_to_end(&mut body)?;
+            if body != b"owned" {
+                return Err(io::Error::other("wrong identity"));
+            }
+            Ok(())
+        }) {
+            Ok(owner) => owner,
+            Err((error, candidate)) => {
+                super::super::close_file(candidate.into_file()).unwrap();
+                panic!("{error}");
+            }
+        };
+        let (file, disposition) = owner.discard();
+        disposition.unwrap();
+        super::super::close_file(file).unwrap();
+        assert!(!root.join("body").exists());
+        held.close().unwrap();
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

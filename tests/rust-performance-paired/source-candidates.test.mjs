@@ -6,7 +6,7 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {sha256, rustFactPath} from './read-fact-delta.mjs';
-import {PAIRS, OUTER_TIMEOUT_MS, verifyObservedReport, COMMITS, CANDIDATE_IDENTITIES, HISTORICAL_WITNESS_FILES, verifyHistoricalWitnessState, readHistoricalWitnessFiles, PROFILE_SOURCE_SHA256, PHASE_NAMES, PHASE_TIMING, LOCK_TIMING, RUNNER_FILES, orderForCandidatePair, validateRequest, validateConditions, sourcePhaseEnvironment, sourcePhaseProfile, verifyColdProfile, verifyCandidateRecord, compareCandidateFacts, compareCandidateSummaries, runCandidateController, runnerIdentity} from './source-candidates.mjs';
+import {PAIRS, OUTER_TIMEOUT_MS, verifyObservedReport, COMMITS, CANDIDATE_IDENTITIES, HISTORICAL_WITNESS_FILES, verifyHistoricalWitnessState, readHistoricalWitnessFiles, PROFILE_SOURCE_SHA256, PHASE_NAMES, PHASE_NAMES_V2, CACHED_INDEX_PHASE_NAMES, CACHED_INDEX_TIMING, PHASE_TIMING, LOCK_TIMING, RUNNER_FILES, orderForCandidatePair, validateRequest, validateConditions, sourcePhaseEnvironment, sourcePhaseProfile, verifyColdProfile, verifyCandidateRecord, compareCandidateFacts, compareCandidateSummaries, runCandidateController, runnerIdentity} from './source-candidates.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const oracle = JSON.parse(fs.readFileSync(path.join(root, 'tests/rust-source-full-corpus/retail-oracle.json')));
@@ -262,6 +262,47 @@ test('strict 31-phase parser accepts exact compact LF/CRLF profiles and no norma
   for (const raw of ['', '\ufeff' + base, base + '\nextra', base + '\n\n', ' ' + base, base.replace('"elapsedMicros":100000', '"elapsedMicros":1e5'), base.replace('"elapsedMicros":100000', '"elapsedMicros":100000,"elapsedMicros":100000')]) assert.throws(() => sourcePhaseProfile(Buffer.from(raw)));
   assert.throws(() => sourcePhaseProfile(Buffer.from([0xff]))); assert.throws(() => sourcePhaseProfile(Buffer.alloc(16385)));
   for (const mutate of [v => v.extra = 1, v => v.timing = 'different', v => v.lockTiming = 'different', v => v.phases.pop(), v => v.phases.reverse(), v => v.phases[0].phase = 'unknown', v => v.phases[0].calls = -1, v => v.phases[0].elapsedMicros = 1.5, v => v.phases[0].extra = 1, v => v.phases[1].elapsedMicros = 1, v => v.phases[0].calls = Number.MAX_SAFE_INTEGER + 1]) { const bad = profile(); mutate(bad); assert.throws(() => sourcePhaseProfile(bytes(bad))); }
+});
+
+function profileV2() {
+  const value = profile();
+  value.schema = 'lycheedev.source-index-phases.v2';
+  value.cachedIndexTiming = CACHED_INDEX_TIMING;
+  value.phases.push(
+    {phase: 'cached_index_read', calls: 0, elapsedMicros: 0},
+    {phase: 'cached_index_sha256', calls: 0, elapsedMicros: 0},
+    {phase: 'cached_index_typed_decode', calls: 0, elapsedMicros: 0},
+    {phase: 'cached_index_checked_close', calls: 0, elapsedMicros: 0},
+  );
+  return value;
+}
+
+test('current Rust v2 profile matches appended contract while historical source identity stays fixed', () => {
+  const source = fs.readFileSync(path.join(root, 'crates/lycheedev-source/src/index/profile.rs'), 'utf8');
+  const names = [...source.match(/const NAMES: \[&str; 35\] = \[([\s\S]*?)\];/)[1].matchAll(/"([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(names, PHASE_NAMES_V2);
+  assert.deepEqual(names.slice(0, 31), PHASE_NAMES);
+  assert.deepEqual(CACHED_INDEX_PHASE_NAMES, ['cached_index_read', 'cached_index_sha256', 'cached_index_typed_decode', 'cached_index_checked_close']);
+  assert(source.includes('"lycheedev.source-index-phases.v2"'));
+  assert(source.includes(`const CACHED_INDEX_TIMING: &str = ${JSON.stringify(CACHED_INDEX_TIMING)};`));
+  assert.notEqual(sha256(source), PROFILE_SOURCE_SHA256, 'current v2 must not masquerade as the sealed historical v1 file');
+  assert.equal(PROFILE_SOURCE_SHA256, 'a47cd78ffc979b20ce4a9d94974dac5ee0022b2ce9302eb910066da781062989');
+});
+
+test('cold parser accepts v2 without upgrading historical v1 or inventing cached work', () => {
+  const old = profile(), current = profileV2();
+  for (const ending of ['', '\n', '\r\n']) assert.deepEqual(sourcePhaseProfile(Buffer.from(JSON.stringify(current) + ending)), current);
+  assert.deepEqual(sourcePhaseProfile(bytes(old)), old);
+  verifyColdProfile(sourcePhaseProfile(bytes(current)), envelope(), oracle);
+  for (const mutate of [
+    v => v.schema = 'lycheedev.source-index-phases.v3',
+    v => v.schema = 'lycheedev.source-index-phases.v1',
+    v => delete v.cachedIndexTiming,
+    v => v.cachedIndexTiming = 'additive',
+    v => v.phases.pop(),
+    v => v.phases[31].phase = 'cached_index_sha256',
+    v => v.phases[31].calls = 1,
+  ]) { const bad = profileV2(); mutate(bad); assert.throws(() => sourcePhaseProfile(bytes(bad))); }
 });
 
 test('cold profiles bind 4036 public parsed documents to read/parse/serialize/publish and worker accounting', () => {

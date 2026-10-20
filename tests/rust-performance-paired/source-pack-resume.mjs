@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {lstatSync, readFileSync} from 'node:fs';
 import {basename, dirname, join, resolve} from 'node:path';
-import {PHASE_NAMES, PHASE_TIMING, LOCK_TIMING} from './source-candidates.mjs';
+import {PHASE_NAMES, CACHED_INDEX_PHASE_NAMES, validateSourcePhaseValue} from './source-candidates.mjs';
 import {contained, sha256} from '../../tools/rust-disk.mjs';
 import {hashFile, verifyArtifact} from '../../tools/rust-build.mjs';
 import {elapsed} from './contract.mjs';
@@ -15,10 +15,7 @@ export function parsePackProfile(raw) {
   const line = text.endsWith('\r\n') ? text.slice(0, -2) : text.endsWith('\n') ? text.slice(0, -1) : text;
   assert(line.startsWith('{') && line.endsWith('}') && !/[\r\n]/.test(line), 'exactly one compact Source record required');
   const value = JSON.parse(line); assert.equal(JSON.stringify(value), line, 'duplicate keys and noncanonical JSON rejected');
-  exact(value, ['schema', 'timing', 'lockTiming', 'elapsedMicros', 'phases']);
-  assert.equal(value.schema, 'lycheedev.source-index-phases.v1'); assert.equal(value.timing, PHASE_TIMING); assert.equal(value.lockTiming, LOCK_TIMING); integer(value.elapsedMicros);
-  assert(Array.isArray(value.phases)); assert.equal(value.phases.length, PHASE_NAMES.length);
-  value.phases.forEach((phase, i) => { exact(phase, ['phase', 'calls', 'elapsedMicros']); assert.equal(phase.phase, PHASE_NAMES[i]); integer(phase.calls); integer(phase.elapsedMicros); if (!phase.calls) assert.equal(phase.elapsedMicros, 0); });
+  validateSourcePhaseValue(value);
   return value;
 }
 
@@ -39,8 +36,15 @@ export function verifyPackProfile(raw, envelope, {mode, documents}) {
     integer(io.indexBytesRead); assert(io.indexBytesRead > 0 && io.indexBytesRead <= (128 << 20));
     assert.equal(calls.cached_index, 1);
     for (const name of PHASE_NAMES) if (!['metadata', 'cached_index'].includes(name)) assert.equal(calls[name], 0, `warm cache hit cannot run ${name}`);
+    if (profile.schema === 'lycheedev.source-index-phases.v2') {
+      assert(calls.cached_index_read >= 2, 'successful nonempty cached index needs data and EOF reads');
+      assert.equal(calls.cached_index_sha256, calls.cached_index_read, 'successful cached SHA updates plus final comparison match reads including EOF');
+      assert.equal(calls.cached_index_typed_decode, 1, 'successful cached index typed decode');
+      assert.equal(calls.cached_index_checked_close, 1, 'successful cached index checked close');
+    }
   } else {
     assert(io.cachedIndex === undefined || io.cachedIndex === false); assert.equal(calls.cached_index, 0);
+    if (profile.schema === 'lycheedev.source-index-phases.v2') for (const name of CACHED_INDEX_PHASE_NAMES) assert.equal(calls[name], 0, `uncached index cannot run ${name}`);
     assert.equal(io.gitTreeProcesses, 1); assert(io.gitBlobProcesses > 0); integer(io.readBytes);
     for (const name of ['index_lock', 'git_tree', 'git_blobs_inclusive', 'index_serialize', 'index_publish', 'manifest']) assert.equal(calls[name], 1, `successful uncached index ${name}`);
     // Packs observe one group-open plus one per-document read, and may also

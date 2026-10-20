@@ -356,18 +356,30 @@ fn held_directories_deny_replacement_and_unknown_child_files_are_freshly_authent
     let unknown = owner.paths.objects.join("unknown");
     fs::create_dir(&unknown).unwrap();
     fs::write(unknown.join("body"), b"a").unwrap();
+    let monitor = Monitor::new();
     assert_eq!(
         run_inventory(&owner, true).unwrap().object_namespace_bytes,
         1
     );
-    // No unknown-child owner escapes the inventory. A later replacement is new work.
-    fs::rename(&unknown, owner.paths.objects.join("old")).unwrap();
-    fs::create_dir(&unknown).unwrap();
+    assert_eq!(frequencies(monitor.events().opened).get(&unknown), Some(&1));
+    assert_eq!(frequencies(monitor.events().closed).get(&unknown), Some(&1));
+    assert_eq!(monitor.events().file_closes, 1);
+    drop(monitor);
+    // The quota still pins objects itself. Do not assume MoveFileExW can rename
+    // a direct child directory under that deny-write/delete parent. Instead,
+    // replace a file inside the unknown directory whose scan owner just closed.
+    // The same quota's next scan must open that directory and the new file again.
+    fs::rename(unknown.join("body"), unknown.join("old")).unwrap();
     fs::write(unknown.join("body"), b"changed").unwrap();
+    let monitor = Monitor::new();
     assert_eq!(
         run_inventory(&owner, true).unwrap().object_namespace_bytes,
         8
     );
+    assert_eq!(frequencies(monitor.events().opened).get(&unknown), Some(&1));
+    assert_eq!(frequencies(monitor.events().closed).get(&unknown), Some(&1));
+    assert_eq!(monitor.events().file_closes, 2);
+    drop(monitor);
     assert_eq!(
         run_inventory(&owner, false).unwrap(),
         run_inventory(&owner, true).unwrap()

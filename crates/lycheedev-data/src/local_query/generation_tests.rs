@@ -316,33 +316,61 @@ fn sql_generation_two_tables_close_all_after_first_close_error_and_preserve_comm
     ]);
     let one = prepare(&fx, "First");
     let two = prepare(&fx, "Second");
+    // FIRST is reserved by the fixed Go grammar; quote the real fixture name.
     for sql in [
-        "SELECT a.ID FROM First a JOIN Second b ON a.ID=b.ID",
-        "SELECT b.ID FROM Second b JOIN First a ON a.ID=b.ID",
+        "SELECT a.ID FROM \"First\" a JOIN Second b ON a.ID=b.ID",
+        "SELECT b.ID FROM Second b JOIN \"First\" a ON a.ID=b.ID",
     ] {
+        relational::Program::compile(sql)
+            .unwrap_or_else(|error| panic!("close fixture must compile: {sql}: {error:?}"));
         let _observe = Observe::new();
         observations::FAIL_CLOSES.with(|n| n.set(2));
         let before = captures(&fx).len();
         let error = crate::dispatch(&fx.invocation("data sql", &[("--sql", sql)])).unwrap_err();
-        assert_eq!(error.code, "storage.close_failed");
-        assert_eq!(counts().1, 2);
-        assert_eq!(counts().2, 0);
+        assert_eq!(error.code, "storage.close_failed", "{sql}: {error:?}");
+        assert_eq!(
+            counts(),
+            (2, 2, 0),
+            "both generation readers consumed and closed: {sql}"
+        );
+        assert_eq!(observations::FAIL_CLOSES.with(|n| n.get()), 0, "{sql}");
         assert_eq!(
             error.details["schema"],
             "lycheedev.query-committed-error.v1"
         );
-        assert_eq!(
-            error.details["completedCaptures"].as_array().unwrap().len(),
-            1
-        );
-        assert_eq!(captures(&fx).len(), before + 1);
-        assert_eq!(
-            error.details["primary"]["details"]["causes"]
-                .as_array()
-                .unwrap()
-                .len(),
-            2
-        );
+        let committed = error.details["completedCaptures"].as_array().unwrap();
+        assert_eq!(committed.len(), 1, "{sql}");
+        assert_eq!(captures(&fx).len(), before + 1, "{sql}");
+        let causes = error.details["primary"]["details"]["causes"]
+            .as_array()
+            .unwrap();
+        assert_eq!(causes.len(), 2, "{sql}");
+        for cause in causes {
+            assert_eq!(cause["code"], "storage.close_failed", "{sql}");
+            assert_eq!(
+                cause["message"], "Injected after real typed reader close",
+                "{sql}"
+            );
+        }
+        let cap = evidence::read_capture(&fx.home, committed[0].as_str().unwrap()).unwrap();
+        assert_eq!(cap["id"], committed[0], "{sql}");
+        assert_eq!(cap["complete"], true, "{sql}");
+        let bytes = evidence::read_blob(&fx.home, &cap["blob"], 16 << 20).unwrap();
+        assert_eq!(storage::sha256(&bytes), cap["blob"]["sha256"], "{sql}");
+        let reading: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(reading["query"]["sql"], sql);
+        assert_eq!(reading["result"]["rows"], json!([[1]]), "{sql}");
+        let sources = reading["sources"].as_array().unwrap();
+        assert_eq!(sources.len(), 2, "{sql}");
+        for prepared in [&one, &two] {
+            assert!(
+                sources.iter().any(|source| {
+                    let cache = &source["typedGenerationCache"];
+                    cache["status"] == "hit" && cache["generation"] == prepared.data["generation"]
+                }),
+                "committed capture must retain each generation: {sql}"
+            );
+        }
         // Existing Windows deny-delete ownership must have ended for both files.
         for prepared in [&one, &two] {
             let path = object(&fx, prepared);

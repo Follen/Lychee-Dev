@@ -54,36 +54,36 @@ pub(super) fn admit_bulk_work(budget: &Budget, bytes: usize) -> Result<()> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct Receipt<'a> {
-    schema: &'a str,
-    identity_sha256: &'a str,
-    source_kind: &'a str,
+    pub(super) schema: &'a str,
+    pub(super) identity_sha256: &'a str,
+    pub(super) source_kind: &'a str,
     #[serde(borrow)]
-    data: &'a RawValue,
+    pub(super) data: &'a RawValue,
     #[serde(borrow)]
-    table: &'a RawValue,
-    definition_sha256: &'a str,
-    typed_schema_sha256: &'a str,
+    pub(super) table: &'a RawValue,
+    pub(super) definition_sha256: &'a str,
+    pub(super) typed_schema_sha256: &'a str,
     #[serde(borrow)]
     pub(super) object: Object<'a>,
-    representation: &'a str,
-    derivation_version: &'a str,
+    pub(super) representation: &'a str,
+    pub(super) derivation_version: &'a str,
     pub(super) available_rows: usize,
     pub(super) batch_count: usize,
-    complete: bool,
+    pub(super) complete: bool,
     #[serde(borrow)]
-    missing: &'a RawValue,
+    pub(super) missing: &'a RawValue,
     #[serde(borrow)]
-    unavailable_partitions: &'a RawValue,
-    record_id_column: usize,
-    record_id_order: &'a str,
+    pub(super) unavailable_partitions: &'a RawValue,
+    pub(super) record_id_column: usize,
+    pub(super) record_id_order: &'a str,
     #[serde(borrow)]
-    source_content: &'a RawValue,
+    pub(super) source_content: &'a RawValue,
     #[serde(borrow)]
-    partial_content: &'a RawValue,
+    pub(super) partial_content: &'a RawValue,
     #[serde(borrow)]
-    definition_object: &'a RawValue,
+    pub(super) definition_object: &'a RawValue,
     #[serde(borrow)]
-    definition_manifest: &'a RawValue,
+    pub(super) definition_manifest: &'a RawValue,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

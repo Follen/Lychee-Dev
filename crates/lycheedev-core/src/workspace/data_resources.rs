@@ -133,6 +133,29 @@ impl DataResources {
             check,
         )
     }
+    /// Explicit typed-cache retirement, also usable by a future admission policy.
+    /// The domain validates EVERY generation before any deletion; this owner
+    /// supplies the unchanged query lifetime and original operation controls.
+    /// `reserve` returns the caller's temporary allocation guard; the receipt's
+    /// guard travels with the report through its final serialization.
+    pub fn retire_derived_cache_with_check<A>(
+        &self,
+        options: data_disk::DerivedRetirementOptions,
+        check: &dyn Fn() -> Result<()>,
+        reserve: impl FnMut(usize) -> Result<A>,
+        reference: impl FnMut(&str, &[u8]) -> Result<data_disk::DerivedObject>,
+    ) -> Result<data_disk::DerivedRetirementReport<A>> {
+        data_disk::retirement::retire(
+            self,
+            &self.home,
+            self.data_cache_max_bytes,
+            &self.control,
+            options,
+            check,
+            reserve,
+            reference,
+        )
+    }
     fn close_all(&mut self) -> Vec<ToolkitError> {
         let mut errors = Vec::new();
         while let Some(lease) = self.leases.pop() {

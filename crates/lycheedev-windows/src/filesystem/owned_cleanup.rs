@@ -74,6 +74,13 @@ pub struct AuthenticatedCleanup {
     file: File,
 }
 impl CleanupCandidate {
+    // Only the sibling relative DELETE opener may transfer this capability.
+    pub(super) fn from_relative_file(file: File) -> Self {
+        Self {
+            file,
+            directory: false,
+        }
+    }
     pub fn open(path: &Path, directory: bool) -> io::Result<Self> {
         let file = OpenOptions::new()
             .read(true)

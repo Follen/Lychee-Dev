@@ -37,6 +37,9 @@ export const HISTORICAL_WITNESS_FILES = Object.freeze([
 ].map(([path, bytes, sha256]) => Object.freeze({path, bytes, sha256})));
 export const PROFILE_SOURCE_SHA256 = 'a47cd78ffc979b20ce4a9d94974dac5ee0022b2ce9302eb910066da781062989';
 export const PHASE_NAMES = Object.freeze(['metadata', 'cached_index', 'index_lock', 'git_tree', 'git_blobs_inclusive', 'facts_read', 'facts_parse', 'facts_serialize', 'facts_publish', 'original_publish', 'symbols', 'index_serialize', 'index_publish', 'manifest', 'facts_worker_consumed', 'facts_worker_wait', 'facts_refill_dispatched', 'facts_publish_lock', 'facts_publish_stage', 'facts_publish_write', 'facts_publish_seal', 'facts_publish_rename', 'facts_publish_stage_close', 'facts_publish_lock_close', 'facts_parse_sequential', 'facts_worker_abandoned', 'facts_publish_lock_verify', 'facts_publish_lock_open', 'facts_publish_lock_kernel_attempt', 'facts_publish_lock_contention_backoff', 'facts_publish_lock_failure_close']);
+export const CACHED_INDEX_PHASE_NAMES = Object.freeze(['cached_index_read', 'cached_index_sha256', 'cached_index_typed_decode', 'cached_index_checked_close']);
+export const PHASE_NAMES_V2 = Object.freeze([...PHASE_NAMES, ...CACHED_INDEX_PHASE_NAMES]);
+export const CACHED_INDEX_TIMING = "cached_index_read/sha256/typed_decode/checked_close are mutually exclusive scopes nested in cached_index; do not add them to their parent. read counts each actual read attempt, including EOF and failure, not native syscalls. sha256 counts each nonempty-block update and the final digest formatting/comparison only when reached. typed_decode includes all original typed validation. checked_close includes finish_file's consuming close, final control check and error aggregation, not only OS close. Path guards/open, input buffer growth/copies and other checks remain in the parent residual; residual is not disk time. Per-chunk clock/counter overhead with profiling enabled is not assumed negligible. Failed operations report only scopes actually entered, not successful-path counts.";
 export const PHASE_TIMING = 'wall-clock; worker phase sums consumed job durations; phases overlap; not additive';
 export const LOCK_TIMING = 'verify/open/kernel_attempt/contention_backoff/failure_close are nested in facts_publish_lock; not additive with their parent. kernel_attempt counts every kernel try, including immediate success; contention_backoff measures actual sleep calls only after real contention, including scheduler delay. failure_close measures only failed-acquisition handle close; successful close remains facts_publish_lock_close. Verification includes the unchanged controlled ancestry checks; lock preparation and other checks remain in the parent.';
 export const RUNNER_FILES = Object.freeze([
@@ -91,19 +94,38 @@ export function sourcePhaseProfile(stderr) {
   assert(line.startsWith('{') && line.endsWith('}') && !/[\r\n]/.test(line), 'exactly one Source JSON record required; unknown stderr rejected');
   const value = JSON.parse(line);
   assert.equal(JSON.stringify(value), line, 'exact compact Source JSON without duplicate keys required');
-  keys(value, ['schema', 'timing', 'lockTiming', 'elapsedMicros', 'phases'], 'Source profile');
-  assert.equal(value.schema, 'lycheedev.source-index-phases.v1');
+  validateSourcePhaseValue(value);
+  for (const name of ['metadata', 'git_tree', 'git_blobs_inclusive', 'facts_read', 'facts_parse', 'facts_serialize', 'facts_publish', 'original_publish', 'symbols', 'index_serialize', 'index_publish', 'manifest']) {
+    assert(value.phases.find(phase => phase.phase === name).calls > 0, `missing successful cold-index phase ${name}`);
+  }
+  if (value.schema === 'lycheedev.source-index-phases.v2') {
+    assert.equal(value.phases.find(phase => phase.phase === 'cached_index').calls, 0, 'cold profile cannot contain cached-index parent work');
+    for (const phase of value.phases.slice(PHASE_NAMES.length)) assert.equal(phase.calls, 0, 'cold profile cannot contain cached-index child work');
+  }
+  return value;
+}
+// Shared shape admission only. Success/mode denominators belong to callers;
+// partial failure profiles must not be forced to claim successful work.
+export function validateSourcePhaseValue(value) {
+  const v2 = value.schema === 'lycheedev.source-index-phases.v2';
+  assert(v2 || value.schema === 'lycheedev.source-index-phases.v1', 'known Source profile schema required');
+  keys(value, ['schema', 'timing', 'lockTiming', 'elapsedMicros', 'phases', ...(v2 ? ['cachedIndexTiming'] : [])], 'Source profile');
+  if (v2) assert.equal(value.cachedIndexTiming, CACHED_INDEX_TIMING);
   assert.equal(value.timing, PHASE_TIMING); assert.equal(value.lockTiming, LOCK_TIMING);
   const integer = value => assert(Number.isSafeInteger(value) && value >= 0, 'nonnegative exact integer required');
   integer(value.elapsedMicros);
-  assert(Array.isArray(value.phases)); assert.equal(value.phases.length, PHASE_NAMES.length);
+  const names = v2 ? PHASE_NAMES_V2 : PHASE_NAMES;
+  assert(Array.isArray(value.phases)); assert.equal(value.phases.length, names.length);
   value.phases.forEach((phase, index) => {
     keys(phase, ['phase', 'calls', 'elapsedMicros'], 'Source phase');
-    assert.equal(phase.phase, PHASE_NAMES[index]); integer(phase.calls); integer(phase.elapsedMicros);
+    assert.equal(phase.phase, names[index]); integer(phase.calls); integer(phase.elapsedMicros);
     if (phase.calls === 0) assert.equal(phase.elapsedMicros, 0);
   });
-  for (const name of ['metadata', 'git_tree', 'git_blobs_inclusive', 'facts_read', 'facts_parse', 'facts_serialize', 'facts_publish', 'original_publish', 'symbols', 'index_serialize', 'index_publish', 'manifest']) {
-    assert(value.phases.find(phase => phase.phase === name).calls > 0, `missing successful cold-index phase ${name}`);
+  if (v2) {
+    const parent = value.phases.find(phase => phase.phase === 'cached_index');
+    const children = value.phases.slice(PHASE_NAMES.length);
+    if (parent.calls === 0) for (const phase of children) assert.equal(phase.calls, 0, 'cached-index child requires parent');
+    assert(children.reduce((sum, phase) => sum + BigInt(phase.elapsedMicros), 0n) <= BigInt(parent.elapsedMicros), 'exclusive cached-index child durations exceed parent');
   }
   return value;
 }

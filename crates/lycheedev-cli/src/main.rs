@@ -425,6 +425,7 @@ fn dispatch(inv: &Invocation) -> Result<Outcome> {
             Ok(outcome)
         }
         value if value.starts_with("evidence ") => lycheedev_core::evidence::dispatch(inv),
+        "cache prune" if inv.flag_bool("--data-derived") => lycheedev_data::prune_derived_cache(inv),
         value if value.starts_with("cache ") => lycheedev_core::cache::dispatch(inv),
         _ => lycheedev_core::workspace::dispatch(inv),
     }

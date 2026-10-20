@@ -4,7 +4,7 @@ import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {sha256} from '../../tools/rust-disk.mjs';
-import {PHASE_NAMES, PHASE_TIMING, LOCK_TIMING, sourcePhaseProfile} from './source-candidates.mjs';
+import {PHASE_NAMES, PHASE_TIMING, LOCK_TIMING, CACHED_INDEX_TIMING, sourcePhaseProfile} from './source-candidates.mjs';
 import {parsePackProfile, verifyPackProfile, verifyRetainedPackObservation} from './source-pack-resume.mjs';
 const runId = '43ceb1ad-4e62-49cf-8058-505343a07f4f';
 function observation(mode = 'warm', documents = 4036) {
@@ -22,6 +22,68 @@ function observation(mode = 'warm', documents = 4036) {
   return {profile, envelope, raw: () => Buffer.from(JSON.stringify(profile) + '\n')};
 }
 const set = (value, name, calls) => Object.assign(value.profile.phases.find(row => row.phase === name), {calls, elapsedMicros: calls});
+
+function observationV2(mode = 'warm') {
+  const value = observation(mode), warm = mode === 'warm';
+  value.profile.schema = 'lycheedev.source-index-phases.v2';
+  value.profile.cachedIndexTiming = CACHED_INDEX_TIMING;
+  value.profile.phases.push(
+    {phase: 'cached_index_read', calls: warm ? 3 : 0, elapsedMicros: warm ? 10 : 0},
+    {phase: 'cached_index_sha256', calls: warm ? 3 : 0, elapsedMicros: warm ? 20 : 0},
+    {phase: 'cached_index_typed_decode', calls: warm ? 1 : 0, elapsedMicros: warm ? 30 : 0},
+    {phase: 'cached_index_checked_close', calls: warm ? 1 : 0, elapsedMicros: warm ? 5 : 0},
+  );
+  if (warm) value.profile.phases.find(row => row.phase === 'cached_index').elapsedMicros = 80;
+  return value;
+}
+
+test('v2 warm child observations are exclusive inside cached parent and preserve all legacy fields', () => {
+  for (const mode of ['warm', 'cold', 'changed']) {
+    const value = observationV2(mode), before = value.raw();
+    const report = verifyPackProfile(before, value.envelope, {mode, documents: 4036});
+    assert.equal(report.profile.phases.length, 35);
+    assert.equal(report.profile.schema, 'lycheedev.source-index-phases.v2');
+    assert.deepEqual(value.raw(), before);
+  }
+  const old = observation();
+  assert.deepEqual(parsePackProfile(old.raw()), old.profile);
+  assert.equal(old.profile.phases.length, 31);
+});
+
+test('v2 rejects missing duplicate reordered children invalid timing parent overflow and success count lies', () => {
+  for (const change of [
+    v => delete v.profile.cachedIndexTiming,
+    v => v.profile.cachedIndexTiming = 'pure OS close',
+    v => v.profile.schema = 'lycheedev.source-index-phases.v1',
+    v => v.profile.phases.pop(),
+    v => v.profile.phases.push({...v.profile.phases[31]}),
+    v => [v.profile.phases[31], v.profile.phases[32]] = [v.profile.phases[32], v.profile.phases[31]],
+    v => v.profile.phases[31].elapsedMicros = 81,
+    v => v.profile.phases[31].calls = 0.5,
+    v => v.profile.phases[31].calls = 0,
+    v => set(v, 'cached_index', 0),
+  ]) { const value = observationV2(); change(value); assert.throws(() => parsePackProfile(value.raw())); }
+  for (const [name, count] of [['cached_index_read', 1], ['cached_index_sha256', 2], ['cached_index_typed_decode', 0], ['cached_index_checked_close', 2]]) {
+    const value = observationV2(); set(value, name, count);
+    assert.throws(() => verifyPackProfile(value.raw(), value.envelope, {mode: 'warm', documents: 4036}));
+  }
+  const cold = observationV2('cold'); set(cold, 'cached_index_read', 1);
+  assert.throws(() => verifyPackProfile(cold.raw(), cold.envelope, {mode: 'cold', documents: 4036}));
+});
+
+test('v2 partial failures retain only entered spans without success denominators', () => {
+  // Independent examples: failed first read; length/limit rejection before
+  // digest finalize; digest mismatch; typed failure; failure before file open.
+  for (const counts of [[1, 0, 0, 1], [2, 1, 0, 1], [2, 2, 0, 1], [2, 2, 1, 1], [0, 0, 0, 0]]) {
+    const value = observationV2();
+    for (let i = 0; i < 4; i++) Object.assign(value.profile.phases[31 + i], {calls: counts[i], elapsedMicros: counts[i]});
+    assert.deepEqual(parsePackProfile(value.raw()), value.profile);
+  }
+  const empty = observationV2();
+  for (const [name, calls] of [['cached_index_read', 1], ['cached_index_sha256', 1], ['cached_index_typed_decode', 1], ['cached_index_checked_close', 1]]) set(empty, name, calls);
+  assert.deepEqual(parsePackProfile(empty.raw()), empty.profile);
+  assert.throws(() => verifyPackProfile(empty.raw(), empty.envelope, {mode: 'warm', documents: 4036}));
+});
 
 test('pack profile accepts the warm metadata/cache-only path while historical cold validator remains strict', () => {
   const value = observation(), before = value.raw();

@@ -20,7 +20,7 @@ impl Flag {
         // In particular, `--encoding raw|png|webp` takes a value, whereas
         // `--scan (dbcache: ...)` does not. Fixture tests cover every entry.
         match self.name() {
-            "--allow-partial" | "--cdn" | "--dry-run" | "--fix" | "--flow" | "--fresh"
+            "--allow-partial" | "--cdn" | "--data-derived" | "--dry-run" | "--fix" | "--flow" | "--fresh"
             | "--include-removed" | "--latest" | "--no-cache" | "--offline" | "--overwrite"
             | "--passive" | "--plan" | "--remote" | "--replace" | "--resume" | "--scan"
             | "--semantic" | "--session-reuse" | "--static-only" | "--stdin" | "--uncommitted" => {
@@ -194,6 +194,10 @@ mod tests {
             }
             if definition["path"] == "source validate" {
                 definition["summary"] = serde_json::json!(definition["summary"].as_str().unwrap().replace("bundled LuaLS", "native Emmy analysis"));
+            }
+            if definition["path"] == "cache prune" {
+                definition["flags"].as_array_mut().unwrap().push(serde_json::json!("--data-derived"));
+                definition["summary"] = serde_json::json!(format!("{}; --data-derived selects rebuildable Data objects and generations only (not downloads, shared blobs or CAP), with a remaining-byte target and distinct object-group attempt cap; staging cannot be combined", definition["summary"].as_str().unwrap()));
             }
             if definition["path"] == "doctor" {
                 assert_eq!(definition["summary"], "Aggregate read-only workspace, data, LuaLS and source checks; when a live target or CON is selected, include the same checks as live doctor; exit 3 means an unhealthy check");

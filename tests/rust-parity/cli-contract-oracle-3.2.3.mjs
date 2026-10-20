@@ -46,6 +46,13 @@ export function loadCliContractOracle(historicalBytes) {
     assert.equal(command.summary, before, `${path}: exact historical summary`);
     command.summary = after;
   }
+  // One explicit opt-in on the existing prune command. Keep the frozen Go
+  // surface intact and assert its exact prefix before applying this delta.
+  const prune = expected.find(command => command.path === 'cache prune');
+  assert.equal(prune.summary, 'Reclaim ordinary cache toward --target-bytes <n> (zero reclaims all ordinary cache), capped by --max-objects <n>; --uncommitted also reclaims staging files; --dry-run reports without deleting; protected and in-use objects are always skipped');
+  assert.deepEqual(prune.flags, ['--home <root>', '--format text|json|jsonl', '--target-bytes <n>', '--max-objects <n>', '--uncommitted', '--dry-run']);
+  prune.flags.push('--data-derived');
+  prune.summary += '; --data-derived selects rebuildable Data objects and generations only (not downloads, shared blobs or CAP), with a remaining-byte target and distinct object-group attempt cap; staging cannot be combined';
   // The one approved Rust addition is independent of the candidate inventory.
   // Full metadata and its insertion point are fixed, not a path-wide exemption.
   const before = expected.findIndex(command => command.path === 'data db2');

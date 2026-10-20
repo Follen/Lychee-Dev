@@ -42,7 +42,7 @@ test('shared definitions equal fixed Go 3.2.3 plus exact approved differences an
   assertMetadata(inventory);
 });
 
-test('all 115 explicit arities match frozen parser flags', () => {
+test('all 115 frozen arities plus one explicit Data prune boolean match parser flags', () => {
   const expected = new Map();
   for (const command of fixture.commands) {
     for (const flag of command.parserFlags) {
@@ -51,7 +51,28 @@ test('all 115 explicit arities match frozen parser flags', () => {
     }
   }
   assert.equal(expected.size, 115);
+  assert.ok(!expected.has('--data-derived'));
+  expected.set('--data-derived', false);
   assert.deepEqual(explicitArities(), expected);
+});
+
+test('Data retirement is one opt-in prune flag with an exact bounded-scope description', () => {
+  const frozen = fixture.commands.find(command => command.path === 'cache prune');
+  const actual = inventory.find(command => command.path === 'cache prune');
+  assert.deepEqual(actual.flags, [...frozen.flags, '--data-derived']);
+  assert.equal(actual.summary, frozen.summary + '; --data-derived selects rebuildable Data objects and generations only (not downloads, shared blobs or CAP), with a remaining-byte target and distinct object-group attempt cap; staging cannot be combined');
+  assert.deepEqual(inventory.filter(command => command.flags.includes('--data-derived')).map(command => command.path), ['cache prune']);
+  assert.equal(explicitArities().get('--data-derived'), false);
+  for (const mutate of [
+    rows => rows.find(command => command.path === 'cache prune').flags.pop(),
+    rows => rows.find(command => command.path === 'cache prune').flags.splice(-1, 1, '--data-derived <scope>'),
+    rows => rows.find(command => command.path === 'cache status').flags.push('--data-derived'),
+    rows => { rows.find(command => command.path === 'cache prune').summary = frozen.summary; },
+  ]) {
+    const rows = structuredClone(inventory);
+    mutate(rows);
+    assert.throws(() => assertMetadata(rows), {code: 'ERR_ASSERTION'});
+  }
 });
 
 test('every current flag has a reviewed arity; enum and prose regressions', () => {
@@ -149,7 +170,7 @@ test('command order, positional arguments, exact approved wording and addition p
   const extra = structuredClone(fixture.expected);
   extra.push({...structuredClone(extra[0]), path: 'data cache unapproved'});
   assert.throws(() => assertMetadata(extra), {code: 'ERR_ASSERTION'});
-  for (const path of ['doctor', 'source batch', 'source session status', 'source session close', 'source validate']) {
+  for (const path of ['doctor', 'cache prune', 'source batch', 'source session status', 'source session close', 'source validate']) {
     const rows = structuredClone(fixture.expected);
     rows.find(command => command.path === path).summary = fixture.commands.find(command => command.path === path).summary;
     assert.throws(() => assertMetadata(rows), {code: 'ERR_ASSERTION'}, path);
@@ -173,7 +194,7 @@ test('arity corruption, unknown flags and removal of fail-closed fallback are re
     const anchor = value ? '--allow-partial' : '--after-id';
     corrupted = corrupted.replace(`"${anchor}"`, `"${name}" | "${anchor}"`);
     const actual = explicitArities(corrupted);
-    assert.equal(actual.size, 115);
+    assert.equal(actual.size, 116);
     assert.equal(actual.get(name), !value, `${name}: opposite source arm`);
     assert.throws(() => assert.deepEqual(actual, expected), {code: 'ERR_ASSERTION'}, name);
   }
