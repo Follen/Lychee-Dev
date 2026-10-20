@@ -8,6 +8,7 @@ import {readFileSync, statSync} from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {inspectSource} from '../../tools/rust-unsafe-boundaries.mjs';
+import {RETAINED_SUCCESSORS, assertSuccessorCustody, assertSuccessorSafety} from './keyboard-retained-custody.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const read = p => { assert(statSync(join(root, p)).size < 2 << 20); return readFileSync(join(root, p), 'utf8'); };
 const sha256 = s => createHash('sha256').update(s).digest('hex');
@@ -99,8 +100,10 @@ test('native adapter starts once before leases and closes independently of proce
   assert.match(adapter, /send_mailbox_action\(&self\.target, bindings, action, control, keyboard, guard\)/);
 });
 
-test('new behavioral regression names and unchanged receipt/recovery production are recorded honestly', () => {
-  const map = JSON.parse(read('tests/rust-parity/release-321-keyboard-test-map.json'));
+test('historical receipt/recovery custody and explicit current ownership successors remain separate', () => {
+  const mapBytes = read('tests/rust-parity/release-321-keyboard-test-map.json');
+  assert.equal(sha256(mapBytes), 'f2599c7cde4546d8eb43b38738467d9341f8d7d17ad573ba86a00185b70b2dc9');
+  const map = JSON.parse(mapBytes);
   assert.equal(map.oracle, oracle.current.commit);
   for (const row of map.rustTests) {
     assert.equal(row.state, 'NOT_RUN');
@@ -110,18 +113,95 @@ test('new behavioral regression names and unchanged receipt/recovery production 
   for (const row of map.retainedProduction) {
     const current = read(row.path);
     const delta = increment.productChanges.find(change => change.path === row.path);
+    const successor = RETAINED_SUCCESSORS.find(change => change.path === row.path);
+    let retained = current;
+    if (successor) {
+      assert.equal(delta, undefined, 'successors do not override a frozen 3.2.2 delta');
+      const fixed = commit => execFileSync('git', ['--no-replace-objects', '-C', root, 'cat-file', 'blob', `${commit}:${row.path}`], {maxBuffer: 2 << 20, timeout: 10000});
+      retained = fixed(increment.candidateBaseCommit).toString('utf8');
+      assertSuccessorCustody(successor, current, retained, row.sha256, fixed(successor.commit));
+    }
     if (delta) {
       assert.equal(delta.beforeSHA256, row.sha256, row.path);
       const original = execFileSync('git', ['--no-replace-objects', '-C', root, 'cat-file', 'blob', `${increment.candidateBaseCommit}:${row.path}`]);
       assert.equal(sha256(original), row.sha256, row.path);
       assert.equal(sha256(current), delta.sha256, row.path);
-    } else assert.equal(sha256(current), row.sha256, row.path);
+    } else assert.equal(sha256(retained), row.sha256, row.path);
     if (row.testOnlyIntegration) {
       const delta = row.testOnlyIntegration;
       assert.equal(delta.commit, '5152cc90a69e2108f159b009bc38df6e7cd2c09c');
-      assert.equal(current.split(delta.replacementText).length, 2);
-      assert.equal(sha256(current.replace(delta.replacementText, delta.originalText)), delta.originalSHA256);
+      assert.equal(retained.split(delta.replacementText).length, 2);
+      assert.equal(sha256(retained.replace(delta.replacementText, delta.originalText)), delta.originalSHA256);
     }
   }
   assert.deepEqual(map.execution, {rustCompilation: 'NOT_RUN', rustTests: 'NOT_RUN', windowsHook: 'NOT_RUN', windowsFixture: 'NOT_RUN', actualGame: 'NOT_RUN'});
+});
+
+// These checks exercise the current worktree and reject both custody corruption
+// and specific safety guard removal. They do not execute the mapped Rust tests.
+test('successor custody rejects candidate edits, wrong reference bytes and unlisted paths', () => {
+  const map = JSON.parse(read('tests/rust-parity/release-321-keyboard-test-map.json'));
+  for (const revision of RETAINED_SUCCESSORS) {
+    const row = map.retainedProduction.find(row => row.path === revision.path);
+    const git = commit => execFileSync('git', ['--no-replace-objects', '-C', root, 'cat-file', 'blob', `${commit}:${revision.path}`], {maxBuffer: 2 << 20, timeout: 10000});
+    const historical = git(increment.candidateBaseCommit), fixed = git(revision.commit), current = read(revision.path);
+    assertSuccessorCustody(revision, current, historical, row.sha256, fixed);
+    assert.throws(() => assertSuccessorCustody(revision, `${current}\n// unreviewed\n`, historical, row.sha256, fixed), /candidate successor/);
+    assert.throws(() => assertSuccessorCustody(revision, current, `${historical}\n`, row.sha256, fixed), /original retained/);
+    assert.throws(() => assertSuccessorCustody(revision, current, historical, row.sha256, `${fixed}\n`), /fixed successor/);
+    assert.throws(() => assertSuccessorCustody({...revision, path: 'unreviewed/journal.rs'}, current, historical, row.sha256, fixed), /exact reviewed/);
+    assert.throws(() => assertSuccessorSafety('unreviewed/journal.rs', current), /exact reviewed/);
+  }
+});
+test('successor safety assertions independently reject control, checksum, durability and ownership regressions', () => {
+  const mutations = {
+    'observations.rs': [
+      ['check_control(control)?;\n    let Some(record) = body.into_iter().next()', 'let Some(record) = body.into_iter().next()'],
+      ['checksum(&record.payload) != receipt.report_checksum', 'false'],
+      ['!lycheedev_core::raw_json::is_valid(&record.payload)', 'false'],
+    ],
+    'durable_journal.rs': [
+      ['if bytes == prior.bytes {', 'if bytes.len() == prior.bytes.len() {'],
+      ['const CHAIN_CACHE_BYTES: usize = CHECKPOINT_BYTES;', 'const CHAIN_CACHE_BYTES: usize = MAX_LOG_BYTES;'],
+      ['drop(self.take_cache());\n        let result = self.lease', 'let result = self.lease'],
+      ['            let sync = file.sync_all().map_err(io_error);', '            let sync = file.flush().map_err(io_error);'],
+      ['if !quiet && !(allow_pending_known_zero && known_zero)', 'if !quiet && !allow_pending_known_zero'],
+      ['for chunk in bytes.chunks(65536) {\n                    check_control(control)?;', 'for chunk in bytes.chunks(65536) {'],
+    ],
+    'journal.rs': [
+      ['rest = &rest[valid + 1..];', 'rest = &rest[valid + 2..];'],
+      ['artifacts.entry(digest).or_insert(bytes);', 'artifacts.insert(digest, bytes);'],
+      ['Cow::Borrowed(&o.result_bytes.0)', 'Cow::Owned(o.result_bytes.0.clone())'],
+      ['if hash(&bytes) != digest {', 'if false {'],
+    ],
+  };
+  for (const [file, changes] of Object.entries(mutations)) {
+    const path = `${live}/${file}`, original = read(path);
+    assertSuccessorSafety(path, original);
+    for (const [before, after] of changes) {
+      assert.equal(original.split(before).length, 2, `${file}: unique mutation`);
+      assert.throws(() => assertSuccessorSafety(path, original.replace(before, after)), {code: 'ERR_ASSERTION'}, `${file}: ${before}`);
+    }
+  }
+});
+test('successor resource and borrowed-payload regression names remain present without claiming execution', () => {
+  const tests = {
+    'durable_journal_tests.rs': [
+      'go_mailbox_v1_durable_verified_cache_reuses_only_equal_complete_bytes',
+      'go_mailbox_v1_durable_verified_cache_preserves_external_change_errors',
+      'go_mailbox_v1_durable_verified_cache_changed_equivalent_json_still_replays',
+      'go_mailbox_v1_durable_verified_cache_checkpoint_boundary_and_close_release',
+      'go_mailbox_v1_durable_verified_cache_capacity_and_real_read_growth_evict',
+      'go_mailbox_v1_durable_verified_cache_never_certifies_writer_only_line_boundary',
+      'go_mailbox_v1_durable_borrowed_snapshot_rechecks_artifacts_and_retains_no_state_borrow',
+      'go_mailbox_v1_durable_artifact_failure_and_cancel_leave_log_unchanged',
+    ],
+    'journal_snapshot_tests.rs': [
+      'go_mailbox_v1_snapshot_borrowed_payloads_preserve_pointer_capacity_and_call_lifetime',
+      'go_mailbox_v1_snapshot_borrowed_normalization_keeps_each_bad_byte_and_first_digest_owner',
+    ],
+  };
+  for (const [file, names] of Object.entries(tests)) for (const name of names) {
+    assert.match(read(`${live}/${file}`), new RegExp(`fn ${name}\\(`));
+  }
 });

@@ -38,6 +38,8 @@ CLI 静态 oracle 修复（2026-10-20）：历史适配器单测固定读取并�
 
 退役 uppercase 最小产品修复（2026-10-20）：固定 f0d 的实际 native 队列出现历史 uppercase source BlobRef 被拒；根因是 retirement::blob 误用 lowercase-only selection::valid_digest。本批仅该路径改为精确64字节 ASCII hex（大小写均可），保正bytes、严格serde形状、optional合同；identity/derived hash与definition耦合不放宽。两份产品/测试文件已经独立源码审查、rustfmt解析及patch检查；云端缺少固定Emmy源码，编译/测试NOT_RUN，不能称失败已闭合。新增1项严格边界测试并扩展原uppercase测试，静态generation 41→42、retirement 5→6；须以固定新SHA实际libtest名单为准，顺序复验default/DF all-targets、generation全组，再完成原固定队列剩余项；旧失败和原已通过结果保留，不合并冒充新版本全过。此前CLI oracle-only提交5fbbb7e完整保留。
 
+键盘历史源码custody后继（2026-10-20）：5fbbb7e的正式Windows CLI八套107/107通过、当前Go3.2.3静态门禁通过；同run整体失败仅为键盘retainedProduction仍把后续所有权优化当作未变的历史文件（addon组28通过/1失败），原失败保留。本批仅修复两份Node验证源码：原始map与increment字节不改，分别认证原历史Git对象和固定三路径后继版本；observations以完整字节逆变换证明仅move替代clone，durable/journal保精确固定源码hash，并独立检查控制、checksum、sync/close、限额、回放及借用边界与负向mutation。五套addon相关云端32/32通过，CLI回归106通过/0失败/1平台skip；不是Rust执行、Windows hook或游戏验收。产品源码未变，7bd的Data大小写修复与固定本机验证队列保持，新提交CI待实际结果。
+
 ## 3. Home、容量和所有权边界
 
 Data默认容量为**5,000,000,000字节（十进制5GB）**，配置支持明确单位；与测试scratch 5/6GiB不同。最终统一核算Data下载/共享blob归属、物化/索引/目录、staging/spill/导出峰值和证据占用，按内容去重防双计。活跃lease和证据引用保护；旧已超额或配置缩小先拒新增并说明，不删除证据。
