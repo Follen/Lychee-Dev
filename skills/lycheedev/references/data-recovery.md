@@ -11,18 +11,21 @@ location, integrity, decoding and query binding are separate failure layers.
   loose copy does not prove selected content available/absent. Never guess CDN URLs.
 - Integrity failure: diagnose the named index/span/check. Do not bypass hashes or
   assume products were mixed. Let the CLI own mirrors and route recovery.
-- Unknown field/invalid SQL: use schema and error location. Unsupported syntax
-  needs a supported alternative or an explicit capability limit.
+- Unknown field/invalid typed plan: use schema and error location. Unsupported plan combinations
+  need a supported alternative or an explicit capability limit.
 - Offline cache miss: retain the restriction and report the missing prerequisite.
 - Missing keys: keep readable evidence and partial coverage. Another CDN host
   cannot supply a key; static/Hotfix values do not finish server-side fitting.
 - Shared resource limit: inspect dimension, used/requested amount and effective
-  limit/memoryBudget. Adaptive Windows growth still needs current headroom.
+  limits and provenance.resources. Logical admission is not measured RSS or OS
+  peak; the formal Windows supervisor separately bounds the worker process.
   Wait for competing work when that changes the cause; never kill tasks, remove
-  leases or create another home to evade admission. Output LIMIT/ID/WHERE cannot
+  leases or create another home to evade admission. A bounded limit/ID/filter cannot
   shrink a failure in shared metadata preparation before row selection.
   Raising timeout or per-file bytes does not raise this shared ceiling.
-  SQL query.budget_exceeded is a separate executor limit; EXPLAIN/selectivity
+  A canceled/deadline-terminated worker invalidates all handles; do not replay
+  an uncertain request or infer a missing CAP was never committed.
+  Typed request work exhaustion is a separate limit; explain/selectivity
   can help only when the narrower query preserves the requested claim.
 - Deadline: one deliberate extension within supported bounds can be useful for
   demonstrated preparation cost/progress. A second deadline stops the branch;

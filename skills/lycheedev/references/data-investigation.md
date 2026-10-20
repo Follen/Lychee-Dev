@@ -1,56 +1,37 @@
 # Data investigation
 
-Use static records for IDs, names and relationships; [Hotfix records](data-hotfix.md)
-for retained changes; an explicit [effective SQL overlay](data-query-recipes.md)
-for values after selected caches. None alone proves server behavior. Keep a
-static baseline for an authorized live measurement; do not open a game for a
-static-only task.
+Use static records for IDs, names and relationships, [Hotfix records](data-hotfix.md)
+for retained changes, and explicitly selected effective overlays for changed
+values. None proves server behavior. Do not open a game for a static-only task.
 
-Reuse an explicit snapshot or the project's matching data pin. Inspect product,
-full build, region, locale and definitions; a conflicting default must not answer
-a different question or prompt a lock rewrite. For missing identity, read
-[data targets](data-targets.md). Keep local/CDN provenance fixed and label separate
-pins when delivery configurations differ.
+Reuse the requested snapshot or matching project pin. Preserve product, full
+build, region, locale, definitions and local/CDN provenance. Do not silently
+rewrite a conflicting pin. See [targets](data-targets.md) for missing identity.
 
-Choose the smallest query that can settle the claim:
-- Verified ID: use the domain relationship command when it owns that relationship,
-  otherwise inspect schema and query the ID/foreign key.
-- Business name: search the actual localized schema field, then resolve candidate
-  class/rank/relationships. Do not pick the first name or ask for a discoverable ID.
-- Repeated or multi-table tasks: inspect `data agent schema` and use a single
-  supported `data agent serve` worker with typed lookup/filter/aggregate/join
-  plans. Keep the same snapshot and result handle across pages; release handles
-  when finished. This worker accepts typed plans only. The older SQL command
-  remains a separate migration path, not evidence that all consumers are unified.
-- If the installed version does not advertise the Agent worker, use its existing
-  supported commands and parameterized SQL; never invent flags or claim session
-  reuse. See [tables](data-tables.md) and [query recipes](data-query-recipes.md).
+Start with local task search, exact command schema and leaf help. Open one
+caller-owned `data agent serve` process and use its typed tasks. Catalog, fields,
+semantics, query and the twelve navigate kinds are the formal Data entry path.
+Business names require discovery in the actual localized field and disambiguation
+by class/rank/relationships, not the first match. Inspect [tables](data-tables.md)
+and [recipes](data-query-recipes.md). Older SQL/DB2/navigation CLI entry points are
+migration-oracle tests only, not a production fallback.
 
-The worker is a bounded, caller-owned process, not an installed daemon. Request
-IDs increase strictly. Cancelling outstanding work or exceeding a deadline
+Request IDs increase strictly. Cancellation of outstanding work or a deadline
 terminates the isolated worker and invalidates every session handle, including
-results from earlier requests. Never automatically replay an uncertain request.
-Close or stdin EOF drains submitted requests and then releases the session;
-retain the needed pages/evidence first. Incomplete output frames are not results,
-and an abnormal process exit invalidates the session even when a blocked stderr
-pipe prevents delivery of the best-effort supervisor diagnostic. Never infer
-completion of pending work from missing error output. Check the installed schema for platform memory
-protection and configurable limits before opening a worker.
+earlier results. Never automatically replay uncertain work. Close or EOF drains
+submitted requests before release. Incomplete frames are not results. Abnormal
+exit invalidates the session even if stderr backpressure prevents the best-effort
+diagnostic. Non-Windows serve is explicitly unsupported when equivalent external
+memory protection is unavailable; schema/help remain pure metadata.
 
-Use installed describe/help for commands and flags. A negative claim needs
-complete readable coverage of its exact scope. Empty partial results, missing
-keys/partitions and truncated searches cannot establish absence. SQL LIMIT or
-one record does not establish whole-table coverage. Ordinary command JSONL
-requires a legal end frame and exit 0. Agent JSONL instead requires a complete
-response frame with the matching request ID; it has no ordinary begin/end wrapper.
-Normal session exit or a close response is separate from each result's coverage.
-Inspect coverage independently in both protocols.
+Ordinary command JSONL has its own end frame and successful exit. Agent JSONL
+requires a complete matching-ID response and has no ordinary begin/end wrapper.
+Normal close and process exit are distinct from result coverage. Empty partial
+results, missing keys, truncated searches and bounded queries cannot establish
+unrestricted absence. Page offsets belong to one retained result; Hotfix cursors
+belong to archived source/checkpoint, not a reread mutable file.
 
-Continue returned cursors with unchanged pin/source/filters and the correct
-cursor type. DB2 search/foreign-key have no cursor; narrow, use a supported bound,
-or use stable unique SQL keyset paging. Never invent an after-ID option for them.
-For Hotfix continuation, use the archived source/checkpoint rather than reread a
-mutable file. Healthy workspace/target resolution does not prove content exists.
-
-On failure, use [data recovery](data-recovery.md). Finish with the answer, pin,
-source, record/filter scope and captures; retain unresolved server/runtime claims.
+Finish with the answer, pin, source, record/filter scope and committed captures.
+Retain unresolved runtime/server questions and explicit unsupported combinations.
+Use [recovery](data-recovery.md) on failure rather than changing pins or raising
+limits to hide the original fault.

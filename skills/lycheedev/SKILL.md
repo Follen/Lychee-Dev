@@ -1,6 +1,6 @@
 ---
 name: lycheedev
-description: Investigate World of Warcraft (WoW/魔兽世界) addon source/APIs, DB2/SQL/Hotfix data, assets, compatibility and live behavior with Lychee Dev Toolkit. Use for 插件报错、数据查询、实机验证、连接恢复 and requested toolkit installation/update, even without the CLI name. General gameplay and raw process address/offset discovery are separate workflows.
+description: Investigate World of Warcraft (WoW/魔兽世界) addon source/APIs, typed DB2/Hotfix data, assets, compatibility and live behavior with Lychee Dev Toolkit. Use for 插件报错、数据查询、实机验证、连接恢复 and requested toolkit installation/update, even without the CLI name. General gameplay and raw process address/offset discovery are separate workflows.
 ---
 
 # Lychee Dev
@@ -26,7 +26,7 @@ loaded addon or existing agent context.
 Read only the branch that can answer the next question:
 
 - Source/API, callers or version differences: [source research](references/source-research.md)
-- Records, SQL or Hotfixes: [data investigation](references/data-investigation.md)
+- Records, typed queries or Hotfixes: [data investigation](references/data-investigation.md)
 - Images, models or media: [asset export](references/asset-export.md)
 - TOC/XML/Lua closure or compatibility: [addon validation](references/addon-validation.md)
 - Running-client behavior: [live investigation](references/live-investigation.md)

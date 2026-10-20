@@ -1,7 +1,7 @@
 # Hotfix records and continuation
 
 Read for local caches or remote Hotfix records. Effective table overlays are
-explicit [SQL requests](data-query-recipes.md), never an implicit consequence of
+explicit [typed requests](data-query-recipes.md), never an implicit consequence of
 reading Hotfixes. Use installed help for each source's selectors and bounds.
 
 ## Preserve the source

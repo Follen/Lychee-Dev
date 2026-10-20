@@ -1,53 +1,36 @@
-# SQL investigation recipes
+# Typed investigation recipes
 
-Use these only with actual pinned schemas and the selected local/CDN source.
-They are query documents for `data sql`, not another execution engine.
+Use the installed `data agent schema` for exact fields and bounds. Send one JSONL
+request at a time or follow its bounded queue rules, with protocol
+`lycheedev.data-agent.v1`, a strictly increasing positive id and task. The enclosing
+worker binds the immutable snapshot and source. No production legacy SQL fallback.
 
-## Parameters and paging
+A static ID query is task=query, query kind=plan, plan op=lookup, with table
+{name:"SpellMisc",mode:"static"} and ids:[1]. A project can select named typed
+column expressions; sort keys specify expression, descending and nulls_first.
+Filters, aggregates and joins are plans, not string-interpolated SQL.
 
-```json
-{"sql":"SELECT ID FROM SpellMisc WHERE ID=:id","parameters":{"id":1}}
-```
+For named flags, first use task=semantics with the static table. Preserve the
+returned Field, Kind, Definition, Value, Name, Comment, ConditionField and
+ConditionValue columns. They describe original metadata, not a filtered claim
+that every flag applies to the selected record.
 
-Parameters must exactly match named values and preserve scalar JSON types and
-integer precision. For a bounded listing, order by a stable unique key; continue
-using the last key with unchanged source/filters. A join with repeated IDs needs
-a unique tuple, otherwise ties can be skipped. Aggregates over missing-key tables
-describe the readable subset. Direct DB2 lookup distinguishes unavailable IDs
-from absence where SQL cannot.
+For effective values, explicitly choose table mode=effective and ordered
+hotfix_captures from retained raw cache CAPs. Compare with a static baseline at
+the same pin. Merely collecting a cache does not alter static queries.
 
-## Pinned flags
+For domain relationships, task=navigate carries a request with the advertised
+kind: item_get, item_models, item_textures, item_geosets, spell_info, spell_auras,
+spell_summons, encounter_get, decor_list, decor_get, creature_display or
+creature_model. Consult each exact schema rather than guessing selectors.
+These use the same engine's authenticated physical rows and mature domain
+algorithms, with owned result evidence. They are not substitutes for all generic
+relational expressions.
 
-```json
-{"sql":"SELECT Field,Name,Value,ConditionField,ConditionValue FROM meta.SpellMisc WHERE Name=:name","parameters":{"name":"NEGATIVE_1"}}
-```
-
-Use the returned field/mask and row conditions, not remembered constants.
-HAS_FLAG tests all mask bits; BIT_AND returns the integer intersection. NULL
-remains unknown. Missing metadata, blank names and unknown bits do not prove a
-flag unset. Conditional mappings require their condition to match the row.
-Metadata does not establish process-memory offsets.
-
-## Explicit Hotfix overlay
-
-```json
-{"sql":"SELECT ID FROM effective.SpellMisc WHERE ID=:id","parameters":{"id":1},"hotfix":["<raw-cache-capture>"]}
-```
-
-Archive the selected DBCache first. The ordered hotfix array contains raw cache
-captures, not page/scan manifests or provider summaries. Up to 16 captures and
-128 MiB combined raw bytes share the pinned data context. Merge order is signed
-push ascending, then array order, then physical index; keep that order with the
-result. Valid payloads replace/add, invalid records delete subject to the
-cached-key exception, and unknown statuses fail. Inspect effectiveSources and
-__hotfix_source/__hotfix_push/__hotfix_index for actual provenance.
-
-Static queries remain unchanged. Base missing-key coverage stays partial even
-if an overlay supplies one row. Query effective membership directly for additions;
-a left join starting from static membership cannot find added-only IDs. Include
-the joined ID when distinguishing a deletion from a surviving NULL value.
-This is reproducible local-cache evidence, not complete server state.
-
-Use EXPLAIN for shape and EXPLAIN ANALYZE for measured execution. Retain timings
-and source coverage; logical charges are not peak memory. Correct unknown fields
-from schema/error candidates rather than repeat an unchanged query.
+Keep the returned handle for page/export. Task=capture explicitly persists the
+complete result and typed request/source proof, not only the current page. Domain
+navigation creates its own result CAP. A query handle is not evidence of CAP
+commit. A 16 MiB capture limit fails rather than silently emitting a truncated CAP.
+After uncertain publication or transport failure inspect capturePublication,
+completedCaptures and the catalog. Missing output does not prove no commit;
+never automatically repeat a request that may already have committed evidence.

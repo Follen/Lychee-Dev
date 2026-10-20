@@ -1,47 +1,48 @@
-# Static tables and SQL
+# Typed tables and metadata
 
-Read for schema, names, relationships, paging and SQL. Installed help owns syntax,
-input modes and flags; inspect actual schema before choosing fields.
+Use `lycheedev cli search "data"`, exact `schema data agent serve`, then
+`data agent schema`. Metadata discovery does not open a workspace or worker.
+Installed schemas are authoritative; do not invent an old SQL/DB2 CLI fallback.
 
-A name search may match NPC abilities, ranks or translated aliases. Resolve it
-with the requested class/rank and relationships. Prefer a domain command for the
-relationship it owns; use DB2/SQL for other supported tables. Field names and DBD
-annotations are evidence, not proof of every inferred meaning.
+Within one pinned `data agent serve` session, catalog lists the exact definition
+manifest, not installed availability. Fields/discover resolve authenticated DBD
+schema and physical layout. Preserve sourceDefinition relationships and types,
+sourceLayout, sourceReading and sourceVerification. Arrow field names alone do
+not prove a foreign-key relationship. Semantics returns the original DBD flags,
+enums and condition metadata for static tables with no Hotfix captures; it does
+not execute a DB2 row query or imply that every condition applies to every row.
 
-Direct pages use ascending logical IDs, including copies and zero. Keep the
-returned cursor, pin and table; the final suffix is not the whole table. Search
-and foreign-key do not share that paging interface. A missing single record is
-an error, not a successful empty table. Do not build an agent-side decoded cache
-or bypass source verification to accelerate paging.
+Query accepts typed plans. Scan/lookup/filter/project/join/aggregate/sort/limit,
+union_all, explicit bounded iterate/delta, and advertised query-valued expressions
+run in the unified engine. Nonrecursive CTEs can be represented by nested plans.
+This is not SQL syntax compatibility or an unrestricted recursive interpreter.
+Use only schema-supported combinations; dynamic query-valued CASE/COALESCE and
+correlated limits/order/union have explicit unsupported boundaries. Do not use a
+specific Spell/Encounter navigator as proof of arbitrary recursive-query support.
 
-Missing encryption keys can leave readable partitions. Preserve complete/partial,
-unavailablePartitions and source partialContent/missing ranges. Placeholder bytes
-are not decoded fields; rowCount can describe only readable logical rows.
-Changing local/CDN source does not supply a missing key. A partial aggregate,
-CSV or zero-row query is not a full-build answer. Raw asset export requires a
-complete verified file.
+Keep ordered columns, positional rows, nested arrays and exact 64-bit integers.
+An array is a typed nested value; indexing is an explicit expression, not an old
+quoted `Field[0]` SQL identifier. Use a suitable exact-number decoder, never
+round IDs or masks through JavaScript Number. Filter user values as typed literals.
 
-## SQL interpretation
+Query returns an owner-backed handle. Page and JSON/CSV export use that handle,
+not a rerun or a mutable source cursor. Export returns bounded text/rows, not an
+arbitrary filesystem write. Release unused handles. Expiry, close, worker exit,
+cancellation and deadline invalidate the appropriate session ownership; never
+reuse a handle in another process. Repeated source access may reuse authenticated
+Arrow/ID/session caches; cache reports are observations, not permission to skip
+verification. Finite-demand paths must not force a full-table cache build.
 
-Use named parameters for user values. SQL LIMIT controls rows; the command has
-no CLI limit flag. Array fields are quoted scalar columns such as `"Field[0]"`.
-Keep returned ordered columns/positional rows and exact integers; do not round
-64-bit IDs/masks through an imprecise representation.
+Missing keys preserve readable partitions, missing ranges and incomplete
+coverage. Placeholder bytes are not fields. Empty results, partial aggregates,
+CSV and a limited result cannot establish full-build absence. Raw asset export
+requires complete verified bytes. Complete means the requested scope, not every
+possible row in the build.
 
-Unqualified and static tables keep pinned base values. Metadata names/flags live
-in meta.Table; an effective.Table overlay requires explicitly selected raw cache
-captures. See [query recipes](data-query-recipes.md) for those request shapes.
-Query completion covers its requested filters/LIMIT, not unrestricted table
-coverage. Source partial state also applies to CSV and JSONL exports.
-
-EXPLAIN binds without scanning rows but can still prepare metadata/table bytes;
-EXPLAIN ANALYZE executes. Decoded/downloaded bytes, logical charges and peak RSS
-are different measures. LIMIT/projection need not reduce shared preparation or
-unused-field validation. Prefer one bounded relationship query over simultaneous
-queries intended to force more downloads; the CLI owns workspace admission.
-
-Read returned memoryBudget and structured limits. Adaptive Windows memory limits
-use available headroom and concurrent-query capacity after admission; they are
-not allocated eagerly. Per-file byte limits and timeout do not raise the shared
-resource ceiling. For missing content, pressure, budget or SQL faults, use
-[data recovery](data-recovery.md) without changing the pin.
+Explain without analyze expands the native plan without running its rows, though
+metadata/source preparation may still be required. Analyze executes once. Read
+analysisScope: prerequisite materialization may precede root native metrics.
+Request elapsed time and admitted-work ledgers cover the stated request stages;
+root metrics are not automatically all-node metrics. Ledger bytes are not RSS,
+OS peak or complete native allocator accounting. Formal Windows worker protection
+is external to the Engine's logical limits. See [recovery](data-recovery.md).
