@@ -23,6 +23,14 @@ candidates. Passing unit tests do not make the real candidate pass. The normal
 runner checks the frozen manifest against Git objects before comparing the
 current worktree, including untracked addon files.
 
+The historical advertised/arity adapter unit tests read `contract.rs` from fixed
+Rust commit `c508b10ef0e651fc8721d251feef5d25e41a0454` and authenticate its original
+whole-file SHA-256. That Git object must also be present (CI uses full history).
+They never substitute this input into `loadCandidate`: the real candidate still
+comes from the worktree and a changed contract remains unverified until a
+separate candidate adapter review. Passing these tests does not clear the actual
+parity-report job or approve later command/flag additions.
+
 Exit codes:
 
 - `0`: static equality only, or an explicitly requested fixture operation passed

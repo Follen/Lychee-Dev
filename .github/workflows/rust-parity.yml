@@ -35,7 +35,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
-      - name: Verify immutable Go oracle object
+      - name: Verify immutable Go and reviewed Rust oracle objects
         run: |
           git cat-file -e '3057a9666ab078270b63c7f06de748069b0d1f4b^{commit}'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -43,8 +43,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           git cat-file -e '0bec60e4406f5d5dc155ee25cef44f9a710e37e8^{commit}'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git cat-file -e '3766f9cacb52e93a803a626187e2a1d54a445468^{commit}'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git cat-file -e 'c508b10ef0e651fc8721d251feef5d25e41a0454:crates/lycheedev-cli/src/contract.rs'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git cat-file -e '1060a12cbd68e3913deb52c3d5610ee336751c99^{blob}'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test the differential runner (not product parity)
-        run: node --test tests/rust-parity/oracle.test.mjs tests/rust-parity/oracle-3.2.2.test.mjs tests/rust-parity/skill-entrypoint-identity.test.mjs crates/lycheedev-cli/tests/contract_metadata.test.mjs tests/rust-parity/describe-contract.test.mjs tools/rust-early-evidence.test.mjs tests/rust-parity/tls-name-oracle/run.test.mjs
+        run: node --test tests/rust-parity/oracle.test.mjs tests/rust-parity/oracle-3.2.2.test.mjs tests/rust-parity/oracle-3.2.3.test.mjs tests/rust-parity/skill-entrypoint-identity.test.mjs crates/lycheedev-cli/tests/contract_metadata.test.mjs tests/rust-parity/describe-contract.test.mjs tools/rust-early-evidence.test.mjs tests/rust-parity/tls-name-oracle/run.test.mjs
       - name: Test full Skill packaging and Windows launcher fixtures
         run: |
           node --test tools/skill-contract.test.mjs tools/skill-launcher.test.mjs
@@ -76,20 +82,30 @@ jobs:
       - name: Authenticate historical 3.2.1 source-derived fixture
         if: ${{ !cancelled() }}
         run: node tests/rust-parity/run-3.2.1.mjs --verify-fixture
-      - name: Authenticate current 3.2.2 source-derived fixture
+      - name: Authenticate historical 3.2.2 source-derived fixture
         if: ${{ !cancelled() }}
         run: node tests/rust-parity/run-3.2.2.mjs --verify-fixture
-      - name: Report actual parity gaps without allowlisting them
+      - name: Preserve historical 3.2.2 differences without relabeling them
         if: ${{ !cancelled() }}
         run: |
           node tests/rust-parity/run-3.2.2.mjs --json | Out-File -Encoding utf8 rust-parity-report.json
+          $historicalExit = $LASTEXITCODE
+          if ($historicalExit -notin @(0, 1)) { exit $historicalExit }
+          Write-Host "Historical 3.2.2 comparison exit: $historicalExit (raw report retained; not the current acceptance gate)"
+          exit 0
+      - name: Gate current candidate against fixed Go 3.2.3 and exact approved deltas
+        if: ${{ !cancelled() }}
+        run: |
+          node tests/rust-parity/run-3.2.3.mjs --json | Out-File -Encoding utf8 rust-parity-3.2.3-report.json
           exit $LASTEXITCODE
       - name: Preserve parity report even when the candidate differs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: rust-static-parity-${{ github.sha }}
-          path: rust-parity-report.json
+          path: |
+            rust-parity-report.json
+            rust-parity-3.2.3-report.json
           if-no-files-found: warn
           retention-days: 14
 

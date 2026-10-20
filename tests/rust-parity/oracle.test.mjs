@@ -4,13 +4,23 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   GO_COMMIT, LIMITS, RUST_FILTER_HASH, RUST_FILES, sha256, lex, parseLiteral, parseRegistrations, extractRustProducts,
   extractSourceTracks, extractPinnedGo, extractAdvertised, extractArities, buildFixture, compare,
-  validateCommands, diffByKey, readBounded, addonInventory,
+  validateCommands, diffByKey, readBounded, addonInventory, loadCandidate,
 } from './oracle.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+// Adapter unit tests exercise the exact reviewed input, not the evolving
+// candidate. Production loadCandidate still reads and authenticates the worktree.
+const reviewedRustCommit = 'c508b10ef0e651fc8721d251feef5d25e41a0454';
+function reviewedRustContract() {
+  const source = execFileSync('git', ['--no-replace-objects', '--no-pager', '--no-optional-locks',
+    '-c', 'core.fsmonitor=false', 'cat-file', 'blob', `${reviewedRustCommit}:${RUST_FILES.filter}`],
+  { cwd: root, maxBuffer: LIMITS.fileBytes, timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'] });
+  assert.equal(sha256(source), RUST_FILTER_HASH, 'historical adapter input identity');
+  return source;
+}
 const clone = value => structuredClone(value);
 const definition = (path = 'inspect') => ({ path, summary: 'Inspect only', mutates: false, arguments: [], flags: ['--format text|json|jsonl', '--read-only'], parserFlags: [{ name: '--format', display: '--format text|json|jsonl', value: true }, { name: '--read-only', display: '--read-only', value: false }] });
 function fixture() {
@@ -164,8 +174,8 @@ test('explicit arity differences fail independently of help prose', () => {
   assert.equal(extractArities(Buffer.from('changed source')), null);
 });
 
-test('reviewed containing source is exact and every frozen Go flag has matching explicit arity', () => {
-  const source = readBounded(root, RUST_FILES.filter);
+test('reviewed historical source is exact and every frozen Go flag has matching explicit arity', () => {
+  const source = reviewedRustContract();
   assert.equal(sha256(source), RUST_FILTER_HASH, 'contract.rs changed; review both semantic adapters');
   const arities = extractArities(source);
   const expected = Object.create(null);
@@ -189,7 +199,7 @@ test('reviewed advertised adapter preserves builtins, ordered family routing and
     evidence: ['evidence approved'],
     cache: ['cache approved'],
   };
-  const texts = { filter: readBounded(root, RUST_FILES.filter) };
+  const texts = { filter: reviewedRustContract() };
   for (const [key, names] of Object.entries(registrations)) {
     texts[key] = Buffer.from(`pub fn commands() -> &'static [&'static str] { &[${names.map(JSON.stringify).join(',')}] }`);
   }
@@ -209,7 +219,7 @@ test('reviewed advertised adapter preserves builtins, ordered family routing and
 });
 
 test('arity, advertised, and test-only source mutations all invalidate both hash-locked adapters', () => {
-  const source = readBounded(root, RUST_FILES.filter).toString('utf8');
+  const source = reviewedRustContract().toString('utf8');
   const mutations = [
     source.replace('"--wait-seconds" => true,', '"--wait-seconds" => false,'),
     source.replace('"target available" => true,', '"target available" => false,'),
@@ -224,6 +234,25 @@ test('arity, advertised, and test-only source mutations all invalidate both hash
     assert.equal(result.state, 'unverified');
     assert.equal(result.commands, null);
   }
+});
+
+test('candidate loading never substitutes reviewed historical bytes for a changed worktree', () => {
+  const temp = mkdtempSync(join(tmpdir(), 'lycheedev-candidate-contract-'));
+  try {
+    for (const path of Object.values(RUST_FILES)) {
+      mkdirSync(dirname(join(temp, path)), { recursive: true });
+      writeFileSync(join(temp, path), readBounded(root, path));
+    }
+    const changed = Buffer.concat([reviewedRustContract(), Buffer.from('\n// unreviewed candidate edit\n')]);
+    writeFileSync(join(temp, RUST_FILES.filter), changed);
+    mkdirSync(join(temp, 'addon'));
+    writeFileSync(join(temp, 'addon/fixture.lua'), 'return "not executed"');
+    const candidate = loadCandidate(temp);
+    assert.equal(candidate.sources.find(row => row.path === RUST_FILES.filter).sha256, sha256(changed));
+    assert.equal(candidate.advertised.state, 'unverified');
+    assert.equal(candidate.advertised.commands, null);
+    assert.equal(candidate.arities, null);
+  } finally { rmSync(temp, { recursive: true, force: true }); }
 });
 
 test('Rust Unicode scalar literals decode without reinterpreting escaped backslashes', () => {
