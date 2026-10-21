@@ -1,0 +1,835 @@
+{
+  "method": "TOML and source paths only; not cargo metadata or test discovery",
+  "execution": "NOT_RUN",
+  "crates": [
+    {
+      "crate": "lycheedev-windows",
+      "integrationTargets": [
+        {
+          "name": "destination",
+          "path": "crates/lycheedev-windows/tests/destination.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "detached",
+          "path": "crates/lycheedev-windows/tests/detached.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "guarded_spawn_fixture",
+          "path": "crates/lycheedev-windows/tests/guarded_spawn_fixture.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "input_fixture",
+          "path": "crates/lycheedev-windows/tests/input_fixture.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "mailbox_input_fixture",
+          "path": "crates/lycheedev-windows/tests/mailbox_input_fixture.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "multiinstance",
+          "path": "crates/lycheedev-windows/tests/multiinstance.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "native",
+          "path": "crates/lycheedev-windows/tests/native.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "native_source_retirement",
+          "path": "crates/lycheedev-windows/tests/native_source_retirement.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "private_runtime",
+          "path": "crates/lycheedev-windows/tests/private_runtime.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "process_lifetime",
+          "path": "crates/lycheedev-windows/tests/process_lifetime.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "runtime_module",
+          "path": "crates/lycheedev-windows/tests/runtime_module.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        }
+      ],
+      "features": [],
+      "count": 11
+    },
+    {
+      "crate": "lycheedev-core",
+      "integrationTargets": [
+        {
+          "name": "bounded_evidence",
+          "path": "crates/lycheedev-core/tests/bounded_evidence.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "budgeted_capture",
+          "path": "crates/lycheedev-core/tests/budgeted_capture.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "capture_dependencies",
+          "path": "crates/lycheedev-core/tests/capture_dependencies.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "capture_query_references",
+          "path": "crates/lycheedev-core/tests/capture_query_references.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "durability",
+          "path": "crates/lycheedev-core/tests/durability.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "mailbox_contract",
+          "path": "crates/lycheedev-core/tests/mailbox_contract.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        }
+      ],
+      "features": [],
+      "count": 6
+    },
+    {
+      "crate": "lycheedev-data",
+      "integrationTargets": [
+        {
+          "name": "agent_fixture_import",
+          "path": "crates/lycheedev-data/tests/agent_fixture_import.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "agent_native_parity",
+          "path": "crates/lycheedev-data/tests/agent_native_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "aggregates_parity",
+          "path": "crates/lycheedev-data/tests/aggregates_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "assets_business",
+          "path": "crates/lycheedev-data/tests/assets_business.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "cache_keys_parity",
+          "path": "crates/lycheedev-data/tests/cache_keys_parity.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "casc_parity",
+          "path": "crates/lycheedev-data/tests/casc_parity.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "catalog_navigation_parity",
+          "path": "crates/lycheedev-data/tests/catalog_navigation_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "cli_local_parity",
+          "path": "crates/lycheedev-data/tests/cli_local_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "compound_parity",
+          "path": "crates/lycheedev-data/tests/compound_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "content_budget_parity",
+          "path": "crates/lycheedev-data/tests/content_budget_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "creature_navigation_parity",
+          "path": "crates/lycheedev-data/tests/creature_navigation_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "cte_parity",
+          "path": "crates/lycheedev-data/tests/cte_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "db2_reader_limits_repro",
+          "path": "crates/lycheedev-data/tests/db2_reader_limits_repro.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "derived_parity",
+          "path": "crates/lycheedev-data/tests/derived_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "effective_sql_parity",
+          "path": "crates/lycheedev-data/tests/effective_sql_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "encounter_navigation_parity",
+          "path": "crates/lycheedev-data/tests/encounter_navigation_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "explain_parity",
+          "path": "crates/lycheedev-data/tests/explain_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "hotfix_scan_parity",
+          "path": "crates/lycheedev-data/tests/hotfix_scan_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "hotfix_table_parity",
+          "path": "crates/lycheedev-data/tests/hotfix_table_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "image_export_business",
+          "path": "crates/lycheedev-data/tests/image_export_business.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "installed_parity",
+          "path": "crates/lycheedev-data/tests/installed_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "item_geosets_parity",
+          "path": "crates/lycheedev-data/tests/item_geosets_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "item_models_parity",
+          "path": "crates/lycheedev-data/tests/item_models_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "item_textures_parity",
+          "path": "crates/lycheedev-data/tests/item_textures_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "joins_parity",
+          "path": "crates/lycheedev-data/tests/joins_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "local_domain_parity",
+          "path": "crates/lycheedev-data/tests/local_domain_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "range_parity",
+          "path": "crates/lycheedev-data/tests/range_parity.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "recursive_parity",
+          "path": "crates/lycheedev-data/tests/recursive_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "relational_parity",
+          "path": "crates/lycheedev-data/tests/relational_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "resource_parity",
+          "path": "crates/lycheedev-data/tests/resource_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "semantic_metadata_repro",
+          "path": "crates/lycheedev-data/tests/semantic_metadata_repro.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "semantic_sql_parity",
+          "path": "crates/lycheedev-data/tests/semantic_sql_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "skill_data_fixture",
+          "path": "crates/lycheedev-data/tests/skill_data_fixture.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "spell_info_parity",
+          "path": "crates/lycheedev-data/tests/spell_info_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "sql_csv_parity",
+          "path": "crates/lycheedev-data/tests/sql_csv_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "sql_explain_parity",
+          "path": "crates/lycheedev-data/tests/sql_explain_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "sql_lazy_provider_parity",
+          "path": "crates/lycheedev-data/tests/sql_lazy_provider_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "sql_resource_parity",
+          "path": "crates/lycheedev-data/tests/sql_resource_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "stream_real",
+          "path": "crates/lycheedev-data/tests/stream_real.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "syntax_diagnostics",
+          "path": "crates/lycheedev-data/tests/syntax_diagnostics.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "topk_parity",
+          "path": "crates/lycheedev-data/tests/topk_parity.rs",
+          "requiredFeatures": [
+            "migration-oracle"
+          ],
+          "declarationsOnly": true
+        },
+        {
+          "name": "wdc_palette_order_repro",
+          "path": "crates/lycheedev-data/tests/wdc_palette_order_repro.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "wdc_parity",
+          "path": "crates/lycheedev-data/tests/wdc_parity.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        }
+      ],
+      "features": [
+        "datafusion-qualification",
+        "migration-oracle"
+      ],
+      "count": 43
+    },
+    {
+      "crate": "lycheedev-cli",
+      "integrationTargets": [
+        {
+          "name": "data_agent_supervisor",
+          "path": "crates/lycheedev-cli/tests/data_agent_supervisor.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "data_cache_prune_public",
+          "path": "crates/lycheedev-cli/tests/data_cache_prune_public.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "data_diagnostics_public",
+          "path": "crates/lycheedev-cli/tests/data_diagnostics_public.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "data_sql_public_numbers",
+          "path": "crates/lycheedev-cli/tests/data_sql_public_numbers.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "normal_exit_public",
+          "path": "crates/lycheedev-cli/tests/normal_exit_public.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "source_flow_public",
+          "path": "crates/lycheedev-cli/tests/source_flow_public.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "source_inspect_public",
+          "path": "crates/lycheedev-cli/tests/source_inspect_public.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "source_native_session_public",
+          "path": "crates/lycheedev-cli/tests/source_native_session_public.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "source_native_xml_public",
+          "path": "crates/lycheedev-cli/tests/source_native_xml_public.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        }
+      ],
+      "features": [],
+      "count": 9
+    },
+    {
+      "crate": "lycheedev-source",
+      "integrationTargets": [
+        {
+          "name": "binary_core_native_oracle",
+          "path": "crates/lycheedev-source/tests/binary_core_native_oracle.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "catalog_native_real",
+          "path": "crates/lycheedev-source/tests/catalog_native_real.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "dense_tuple_native_oracle",
+          "path": "crates/lycheedev-source/tests/dense_tuple_native_oracle.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "diff_prune",
+          "path": "crates/lycheedev-source/tests/diff_prune.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "environment_owners",
+          "path": "crates/lycheedev-source/tests/environment_owners.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "environment_parity",
+          "path": "crates/lycheedev-source/tests/environment_parity.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "environment_real",
+          "path": "crates/lycheedev-source/tests/environment_real.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "expression_execution_native_oracle",
+          "path": "crates/lycheedev-source/tests/expression_execution_native_oracle.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "expression_plan_native_oracle",
+          "path": "crates/lycheedev-source/tests/expression_plan_native_oracle.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "fixed_oracle_trace_storage",
+          "path": "crates/lycheedev-source/tests/fixed_oracle_trace_storage.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "flow_parity",
+          "path": "crates/lycheedev-source/tests/flow_parity.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "function_call_native_oracle",
+          "path": "crates/lycheedev-source/tests/function_call_native_oracle.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "loads_real",
+          "path": "crates/lycheedev-source/tests/loads_real.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "luac_inline_real",
+          "path": "crates/lycheedev-source/tests/luac_inline_real.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "luac_ordered_real",
+          "path": "crates/lycheedev-source/tests/luac_ordered_real.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "luac_real",
+          "path": "crates/lycheedev-source/tests/luac_real.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "luals_real",
+          "path": "crates/lycheedev-source/tests/luals_real.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "matrix_four_real",
+          "path": "crates/lycheedev-source/tests/matrix_four_real.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "matrix_parity",
+          "path": "crates/lycheedev-source/tests/matrix_parity.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "matrix_real",
+          "path": "crates/lycheedev-source/tests/matrix_real.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "native_checker_families_real",
+          "path": "crates/lycheedev-source/tests/native_checker_families_real.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "native_nominal_real",
+          "path": "crates/lycheedev-source/tests/native_nominal_real.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "native_quota_peer",
+          "path": "crates/lycheedev-source/tests/native_quota_peer.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "native_return_count_real",
+          "path": "crates/lycheedev-source/tests/native_return_count_real.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "native_xml_real",
+          "path": "crates/lycheedev-source/tests/native_xml_real.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "object_carrier_native_oracle",
+          "path": "crates/lycheedev-source/tests/object_carrier_native_oracle.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "object_member_native_oracle",
+          "path": "crates/lycheedev-source/tests/object_member_native_oracle.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "query_backend_native_oracle",
+          "path": "crates/lycheedev-source/tests/query_backend_native_oracle.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "refs_context",
+          "path": "crates/lycheedev-source/tests/refs_context.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "selected_projector_native_oracle",
+          "path": "crates/lycheedev-source/tests/selected_projector_native_oracle.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "selected_query_native_oracle",
+          "path": "crates/lycheedev-source/tests/selected_query_native_oracle.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "semantic_validate_real",
+          "path": "crates/lycheedev-source/tests/semantic_validate_real.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "session_real",
+          "path": "crates/lycheedev-source/tests/session_real.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "source_inspect",
+          "path": "crates/lycheedev-source/tests/source_inspect.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "source_session_real",
+          "path": "crates/lycheedev-source/tests/source_session_real.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "source_session_repeated_real",
+          "path": "crates/lycheedev-source/tests/source_session_repeated_real.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "validate_contract_real",
+          "path": "crates/lycheedev-source/tests/validate_contract_real.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        }
+      ],
+      "features": [
+        "default",
+        "emmy-prototype"
+      ],
+      "count": 37
+    },
+    {
+      "crate": "lycheedev-live",
+      "integrationTargets": [
+        {
+          "name": "formal_lua_bridge",
+          "path": "crates/lycheedev-live/tests/formal_lua_bridge.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "mailbox_lookup",
+          "path": "crates/lycheedev-live/tests/mailbox_lookup.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "native_exact_commit_prototype",
+          "path": "crates/lycheedev-live/tests/native_exact_commit_prototype.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "native_p3_original_negative",
+          "path": "crates/lycheedev-live/tests/native_p3_original_negative.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "native_revised_lifecycle",
+          "path": "crates/lycheedev-live/tests/native_revised_lifecycle.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "native_shared_lifecycle_prototype",
+          "path": "crates/lycheedev-live/tests/native_shared_lifecycle_prototype.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "native_termination",
+          "path": "crates/lycheedev-live/tests/native_termination.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "native_v1_prototype",
+          "path": "crates/lycheedev-live/tests/native_v1_prototype.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "passive_windows",
+          "path": "crates/lycheedev-live/tests/passive_windows.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "runtime_discovery",
+          "path": "crates/lycheedev-live/tests/runtime_discovery.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "runtime_windows",
+          "path": "crates/lycheedev-live/tests/runtime_windows.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        },
+        {
+          "name": "sealed_memory",
+          "path": "crates/lycheedev-live/tests/sealed_memory.rs",
+          "requiredFeatures": [],
+          "declarationsOnly": true
+        }
+      ],
+      "features": [],
+      "count": 12
+    }
+  ],
+  "handoffQualification": "Source declaration inventory only; not native list or test success. See HANDOFF.md for actual cfdef status."
+}
