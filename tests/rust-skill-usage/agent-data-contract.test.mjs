@@ -2,8 +2,37 @@
 // represent a product observation or replace the owned installed workflow.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync} from 'node:fs';
+import {join,dirname} from 'node:path';
+import {tmpdir} from 'node:os';
+import {prepareDataExporters,EXPORTER_ARGS,EXPORTER_TARGETS} from './agent-data-exporters.mjs';
 import {queryFor,assertPage,assertCSV,assertAnalyzePage,assertAgentDataReport} from './agent-data-assertions.mjs';
 import {assertHelp,assertDiscoveryNoHome} from './agent-discovery.mjs';
+
+test('explicit three-target preparation enables owned user isolation and seals its fresh manifest',t=>{
+ const root=mkdtempSync(join(tmpdir(),'agent-exporter-config-'));
+ t.after(()=>rmSync(root,{recursive:true,force:true}));
+ const platform=Object.getOwnPropertyDescriptor(process,'platform'),arch=Object.getOwnPropertyDescriptor(process,'arch');
+ t.after(()=>{Object.defineProperty(process,'platform',platform);Object.defineProperty(process,'arch',arch);});
+ Object.defineProperty(process,'platform',{...platform,value:'win32'});Object.defineProperty(process,'arch',{...arch,value:'x64'});
+ let calls=0;
+ const prepared=prepareDataExporters(root,{build(directory,args,options){
+  calls++;assert.equal(directory,root);assert.deepEqual(args,EXPORTER_ARGS);
+  assert.equal(options.owner,'skill-data-exporters');assert.equal(options.oneShot,false);assert.equal(options.isolateUser,true);
+  assert.deepEqual(EXPORTER_TARGETS,['catalog_navigation_parity','skill_data_fixture','agent_fixture_import']);
+  const target=join(root,'target'),buildEvidence=join(root,'evidence/receipt.json');mkdirSync(target);mkdirSync(dirname(buildEvidence));
+  writeFileSync(join(dirname(buildEvidence),'command.json'),JSON.stringify({command:'cargo',args,oneShot:false,isolatedUserRoot:join(root,'owned/user')}));
+  const artifacts=EXPORTER_TARGETS.map(name=>{
+   const executable=join(target,name+'.exe');writeFileSync(executable,'mock exporter, never executed');
+   return{reason:'compiler-artifact',target:{name,kind:['test'],src_path:join(root,'crates/lycheedev-data/tests',name+'.rs')},profile:{test:true},executable};
+  });
+  return options.onSuccess({target,buildEvidence,inputHashes:{sourceTree:'a'.repeat(64)},stdout:artifacts.map(row=>JSON.stringify(row)).join('\n')});
+ }});
+ assert.equal(calls,1);assert.deepEqual(prepared.executables.map(row=>row.name),EXPORTER_TARGETS);
+ const manifest=JSON.parse(readFileSync(prepared.manifest)),command=JSON.parse(readFileSync(join(dirname(prepared.buildEvidence),'command.json')));
+ assert.equal(manifest.buildEvidence,prepared.buildEvidence);assert.equal(command.skillDataExporters.path,prepared.manifest);
+ assert.equal(command.skillDataExporters.sha256,prepared.manifestSHA256);assert.equal(command.isolatedUserRoot,join(root,'owned/user'));
+});
 test('typed task preserves exact catalog rows and rejects missing coverage',()=>{
  const page={columns:['ID','Name_lang','ModelFileDataID'],rows:[[10,'无模型🙂',0],[20,'第二',501],[30,'第三',501]],offset:0,totalRows:3,complete:true};
  assertPage(page,'catalog');assertCSV({format:'csv',page,text:'"ID","Name_lang","ModelFileDataID"\r\n"10","无模型🙂","0"\r\n"20","第二","501"\r\n"30","第三","501"\r\n'},'catalog');

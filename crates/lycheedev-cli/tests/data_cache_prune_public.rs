@@ -32,7 +32,7 @@ fn actual_cache_prune_cli_selects_only_explicit_data_scope_and_preserves_default
     )]);
     let describe = invoke(&f, &["describe"], 0);
     let definitions = describe["result"]["commands"].as_array().unwrap();
-    assert_eq!(definitions.len(), 85);
+    assert_eq!(definitions.len(), 71);
     let command = definitions
         .iter()
         .find(|d| d["path"] == "cache prune")

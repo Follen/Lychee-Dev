@@ -44,6 +44,32 @@ test('isolated native tests keep user and Agent writes in the owned scratch and 
     assert.equal(command.isolatedUserRoot,join(receipt.directory,'user'));assert.equal(receipt.state,'retired');assert.equal(existsSync(receipt.directory),false);
   }finally{rmSync(root,{recursive:true,force:true});}
 });
+test('buildRust forwards requested user isolation while preserving its default environment',()=>{
+  for(const isolateUser of [undefined,true]){
+    const root=sourceFixture();
+    try{
+      const record=buildRust(root,join(root,'artifact'),{profile:'release',...(isolateUser===undefined?{}:{isolateUser}),
+        environment:{HOME:'foreign-home',USERPROFILE:'foreign-user',CODEX_HOME:'foreign-agent',CARGO_HOME:'compiler-cache',RUSTUP_HOME:'compiler-tools'},
+        execute(command,args,options){
+          assert.equal(command,'cargo');assert.equal(options.timeout,600000);
+          const owner=JSON.parse(readFileSync(join(options.evidence,'receipt.json')));
+          if(isolateUser){
+            for(const key of ['HOME','USERPROFILE','CODEX_HOME','APPDATA','LOCALAPPDATA','TEMP','TMP','LYCHEEDEV_HOME'])assert(options.env[key].startsWith(owner.directory));
+            assert(existsSync(options.env.HOME));assert(existsSync(options.env.TEMP));
+          }else{
+            assert.equal(options.env.HOME,'foreign-home');assert.equal(options.env.USERPROFILE,'foreign-user');assert.equal(options.env.CODEX_HOME,'foreign-agent');
+          }
+          assert.equal(options.env.CARGO_HOME,'compiler-cache');assert.equal(options.env.RUSTUP_HOME,'compiler-tools');
+          const directory=join(options.env.CARGO_TARGET_DIR,'release');mkdirSync(directory,{recursive:true});writeFileSync(join(directory,'lycheedev.exe'),'fixture binary');
+          return{status:0,handlesReaped:true,stdout:Buffer.alloc(0),stderr:Buffer.alloc(0)};
+        }});
+      const receipt=JSON.parse(readFileSync(record.buildEvidence)),command=JSON.parse(readFileSync(join(dirname(record.buildEvidence),'command.json')));
+      assert.equal(command.isolatedUserRoot,isolateUser?join(receipt.directory,'user'):undefined);
+      assert.equal(command.oneShot,false);assert.equal(receipt.state,'retired');
+    }finally{rmSync(root,{recursive:true,force:true});}
+  }
+});
+
 test('owned fetch records the resolved lockfile without treating source edits as compilation',()=>{
   const root=sourceFixture();
   try{

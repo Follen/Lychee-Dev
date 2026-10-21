@@ -118,11 +118,11 @@ function runCargoWithDeadline(root,args,{sourceRoot=root,owner='rust-cargo',chan
   }
 }
 
-export function buildRust(root,artifactDirectory,{profile='dev',oneShot=false,owner='rust-build',packageName='lycheedev-cli',sourceRoot=root,environment={},execute=ownedSpawnSync}={}){
+export function buildRust(root,artifactDirectory,{profile='dev',oneShot=false,isolateUser=false,owner='rust-build',packageName='lycheedev-cli',sourceRoot=root,environment={},execute=ownedSpawnSync}={}){
   root=resolve(root);sourceRoot=resolve(sourceRoot);
   if(!['dev','release','symbols'].includes(profile))throw new Error('build.invalid_profile');
   const args=['build','--locked','--offline','-j','1','--profile',profile,'-p',packageName];
-  return runCargo(root,args,{sourceRoot,owner,execute,channelKind:profile==='symbols'?'symbols':'ordinary',oneShot,environment,onSuccess(invocation){
+  return runCargo(root,args,{sourceRoot,owner,execute,channelKind:profile==='symbols'?'symbols':'ordinary',oneShot,isolateUser,environment,onSuccess(invocation){
     const output=profile==='dev'?'debug':profile;
     artifactDirectory=contained(root,resolve(artifactDirectory));mkdirSync(artifactDirectory);
     const source=join(invocation.target,output,'lycheedev.exe'),binary=join(artifactDirectory,'lycheedev.exe');
@@ -139,5 +139,5 @@ export function buildRust(root,artifactDirectory,{profile='dev',oneShot=false,ow
 }
 if(process.argv[1]&&resolve(process.argv[1])===resolve(import.meta.filename)){
   const [directory,profile='dev']=process.argv.slice(2);if(!directory)throw new Error('usage: node tools/rust-build.mjs <new-artifact-directory> [dev|release|symbols] [--one-shot]');
-  console.log(JSON.stringify(buildRust(process.cwd(),directory,{profile,oneShot:process.argv.includes('--one-shot')}),null,2));
+  console.log(JSON.stringify(buildRust(process.cwd(),directory,{profile,oneShot:process.argv.includes('--one-shot'),isolateUser:profile==='release'}),null,2));
 }

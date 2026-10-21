@@ -438,16 +438,7 @@ fn read_files_with_keys(
         // verified owner only after its original checked close succeeded.
         // Republishing these same Root bytes would re-lock/reopen/re-hash them.
         let root_blob = serde_json::to_value(root_reference)?;
-        let build_blob = lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
-            &inv.home,
-            &target.metadata.build_document.raw,
-            4 << 20,
-            &inv.control, &|| budget.check()).and_then(|blob| serde_json::to_value(blob).map_err(Into::into))?;
-        let cdn_blob = lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
-            &inv.home,
-            &target.metadata.cdn_document.raw,
-            4 << 20,
-            &inv.control, &|| budget.check()).and_then(|blob| serde_json::to_value(blob).map_err(Into::into))?;
+        let mut configuration_blobs: Option<(Value, Value)> = None;
         let mask = locale(&pin.language)?;
         let mut pending = ids.to_vec();
         let mut requested = 0usize;
@@ -580,7 +571,7 @@ fn read_files_with_keys(
                         }
                         bytes => Some(bytes),
                     };
-                    let mut reading = json!({"contentVerified":true,"source":"installation","pin":pin,"catalogSHA256":target.metadata.catalog_sha256,"buildConfiguration":build_blob,"cdnConfiguration":cdn_blob,"encodingKey":target.metadata.encoding_key,"root":root_blob,"entry":entry,"payloadEncodingKey":payload_key,"content":content_blob,"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"encodingIO":reader.io_stats()});
+                    let mut reading = json!({"contentVerified":true,"source":"installation","pin":pin,"catalogSHA256":target.metadata.catalog_sha256,"encodingKey":target.metadata.encoding_key,"root":root_blob,"entry":entry,"payloadEncodingKey":payload_key,"content":content_blob,"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"encodingIO":reader.io_stats()});
                     if let Some(SelectedContent::Bytes(bytes)) = &content {
                         report_partial(&mut reading, &bytes.missing)?;
                     }
@@ -595,6 +586,29 @@ fn read_files_with_keys(
                         result.last_mut().expect("owned selected file").reading = reading;
                     }
                     stats = decoded_cache::Stats::default();
+                }
+                // Exact selected-body recovery must finish before ordinary
+                // provenance publication inventories every attributed body.
+                // Both modes finish their selected source reads before returning;
+                // verified streams have consumed authenticated source EOF, while
+                // materialized table reads retain their explicit partial coverage.
+                if configuration_blobs.is_none() {
+                    let build_blob = lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
+                        &inv.home,
+                        &target.metadata.build_document.raw,
+                        4 << 20,
+                        &inv.control, &|| budget.check()).and_then(|blob| serde_json::to_value(blob).map_err(Into::into))?;
+                    let cdn_blob = lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
+                        &inv.home,
+                        &target.metadata.cdn_document.raw,
+                        4 << 20,
+                        &inv.control, &|| budget.check()).and_then(|blob| serde_json::to_value(blob).map_err(Into::into))?;
+                    configuration_blobs = Some((build_blob, cdn_blob));
+                }
+                let (build_blob, cdn_blob) = configuration_blobs.as_ref().expect("published configuration provenance");
+                for file in &mut result {
+                    file.reading["buildConfiguration"] = build_blob.clone();
+                    file.reading["cdnConfiguration"] = cdn_blob.clone();
                 }
                 Ok(())
             })();

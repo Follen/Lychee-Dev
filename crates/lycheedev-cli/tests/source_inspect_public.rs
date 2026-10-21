@@ -245,9 +245,9 @@ fn actual_source_inspect_raw_admission_precedes_workspace_and_pin() {
 }
 
 #[test]
-fn actual_source_inspect_empty_argv_values_keep_go_parser_rejection() {
+fn actual_source_inspect_empty_argv_values_keep_parser_rejection() {
     let fixture = Fixture::unused();
-    // Go parseOptions rejects empty values before its raw-selector route gate.
+    // The public parser rejects empty values before the raw-selector route gate.
     // Injected library Invocation flags have a different admission boundary.
     for flag in ["--snapshot", "--path", "--symbol", "--target-path"] {
         for args in [
@@ -262,13 +262,13 @@ fn actual_source_inspect_empty_argv_values_keep_go_parser_rejection() {
             let borrowed: Vec<_> = args.iter().map(String::as_str).collect();
             let (exit, value) = invoke(&fixture.home, &borrowed);
             assert_eq!(exit, 2);
-            assert_eq!(
-                value,
-                failure(
-                    "command.invalid_arguments",
-                    &format!("empty value for {flag}")
-                )
-            );
+            let details = &value["error"]["details"];
+            assert_eq!(details["parser"], "clap");
+            assert_eq!(details["kind"], "InvalidValue");
+            assert!(details["diagnostic"].as_str().unwrap().contains(flag));
+            let mut expected = failure("command.invalid_arguments", "invalid command arguments");
+            expected["error"]["details"] = details.clone();
+            assert_eq!(value, expected);
             assert!(!fixture.home.exists());
         }
     }

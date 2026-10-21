@@ -7,10 +7,10 @@ import {contained} from '../../tools/rust-disk.mjs';
 
 export const EXPORTER_ARGS = ['test', '--locked', '--offline', '-j', '1', '-p', 'lycheedev-data', '--test', 'catalog_navigation_parity', '--test', 'skill_data_fixture', '--features', 'migration-oracle', '--test', 'agent_fixture_import', '--no-run', '--message-format=json'];
 export const EXPORTER_TARGETS = ['catalog_navigation_parity', 'skill_data_fixture', 'agent_fixture_import'];
-export function prepareDataExporters(root) {
+export function prepareDataExporters(root, {build = runCargo} = {}) {
   assert.equal(process.platform, 'win32'); assert.equal(process.arch, 'x64');
   root = resolve(root);
-  return runCargo(root, EXPORTER_ARGS, {owner: 'skill-data-exporters', oneShot: false, onSuccess(invocation) {
+  return build(root, EXPORTER_ARGS, {owner: 'skill-data-exporters', oneShot: false, isolateUser: true, onSuccess(invocation) {
     const artifacts = invocation.stdout.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
     const executables = EXPORTER_TARGETS.map(name => {
       const rows = artifacts.filter(row => row.reason === 'compiler-artifact' && row.target?.name === name && row.profile?.test === true && row.executable);

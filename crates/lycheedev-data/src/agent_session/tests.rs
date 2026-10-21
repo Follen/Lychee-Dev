@@ -541,3 +541,108 @@ fn explicit_capture_persists_result_without_consuming_handle() {
     assert_eq!(page["rows"].as_array().unwrap().len(), 2);
     session.close().unwrap();
 }
+
+#[test]
+fn local_session_rebuilds_missing_selected_body_without_changing_alias_owner_or_capture() {
+    use lycheedev_core::{evidence, metadata::{DataCacheMetadata, Metadata}, storage,
+        workspace::data_disk::DataCachePaths};
+
+    let table = fixture::table("AgentRebuild", 942,
+        &[("ID", "uint"), ("value", "signed64")],
+        &[vec![Cell::U(7), Cell::I64(9_007_199_254_740_993)]]);
+    let expected = table.raw.clone();
+    let fx = Fixture::new(&[table]);
+    let query = || Task::Query { query: QueryRequest::Plan { plan: QueryPlan::Lookup {
+        table: TableRequest { name: "AgentRebuild".into(), mode: SourceMode::Static, hotfix_captures: vec![] },
+        ids: vec![7],
+    } } };
+    let runtime = runtime();
+    let mut session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+    let cold = response(runtime.block_on(session.execute(query(), control())).unwrap());
+    assert_eq!(cold["complete"], true);
+    let source = cold["provenance"]["sources"][0]["sourceIdentity"]["source"].clone();
+    assert_eq!(source["origin"], "installation");
+    assert_eq!(source["content"]["sha256"], storage::sha256(&expected));
+    assert_eq!(source["content"]["bytes"], expected.len());
+    let page = |session: &mut Session, handle: &Value| response(runtime.block_on(session.execute(
+        Task::Page { handle: handle.as_str().unwrap().into(), offset: 0, limit: 10 }, control(),
+    )).unwrap());
+    let cold_page = page(&mut session, &cold["result"]["handle"]);
+    assert_eq!(cold_page["rows"], json!([[7, 9_007_199_254_740_993_u64]]));
+    let capture = response(runtime.block_on(session.execute(Task::Capture {
+        handle: cold["result"]["handle"].as_str().unwrap().into(),
+    }, control())).unwrap());
+    let capture_id = capture["id"].as_str().unwrap();
+    let capture_key = format!("capture/{capture_id}");
+    let capture_document = || {
+        let document = Metadata::read_document_raw_controlled(&fx.home, &capture_key, &Default::default()).unwrap();
+        (document.generation, document.bytes)
+    };
+    let capture_before = capture_document();
+    let capture_body = evidence::read_blob(&fx.home, &capture["blob"], 16 << 20).unwrap();
+    let captured: Value = serde_json::from_slice(&capture_body).unwrap();
+    assert_eq!(captured["rows"], cold_page["rows"]);
+    // The local alias binds the decoded CKey, key context and encoded object.
+    let mut identity = format!("decoded-v1\0{}\0{}\0{}\0", source["contentKey"].as_str().unwrap(),
+        source["keySource"]["kind"].as_str().unwrap(), source["keySource"]["sha256"].as_str().unwrap()).into_bytes();
+    identity.extend_from_slice(b"BLTE\0\0\0\0N");
+    identity.extend_from_slice(&expected);
+    let alias_key = format!("decoded-v1/{}", storage::sha256(&identity));
+    let alias_document = || {
+        let document = DataCacheMetadata::read_document_raw_controlled_with_check(
+            &fx.home, &alias_key, &Default::default(), || Ok(()),
+        ).unwrap();
+        (document.generation, document.bytes)
+    };
+    let alias_before = alias_document();
+    let alias: Value = serde_json::from_slice(&alias_before.1).unwrap();
+    assert_eq!(alias["blob"], source["content"]);
+    let digest = source["content"]["sha256"].as_str().unwrap();
+    let paths = DataCachePaths::new(&fx.home);
+    let pair = || (
+        std::fs::read(paths.shared_blobs().join(format!("{digest}.intent"))).unwrap(),
+        std::fs::read(paths.shared_blobs().join(format!("{digest}.complete"))).unwrap(),
+    );
+    let owner_before = pair();
+    let repair = paths.shared_blobs().join(format!("{digest}.repair.intent"));
+    let body = evidence::blob_path(&fx.home, digest).unwrap();
+    assert_eq!(std::fs::read(&body).unwrap(), expected);
+    session.close().unwrap();
+    // Only the reconstructible canonical selected body is removed, after all
+    // cold-session readers are closed. Its alias and Data attribution remain.
+    std::fs::remove_file(&body).unwrap();
+    let mut rebuilt_session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+    let rebuilt = response(runtime.block_on(rebuilt_session.execute(query(), control())).unwrap());
+    assert_eq!(rebuilt["complete"], true);
+    assert_eq!(rebuilt["provenance"]["sources"][0]["sourceIdentity"]["source"], source);
+    assert_eq!(page(&mut rebuilt_session, &rebuilt["result"]["handle"]), cold_page);
+    assert_eq!(std::fs::read(&body).unwrap(), expected);
+    assert_eq!(evidence::read_blob(&fx.home, &source["content"], 1 << 20).unwrap(), expected);
+    assert_eq!(alias_document(), alias_before);
+    assert_eq!(pair(), owner_before);
+    assert_eq!(capture_document(), capture_before);
+    assert_eq!(evidence::read_capture(&fx.home, capture_id).unwrap(), capture);
+    assert_eq!(evidence::read_blob(&fx.home, &capture["blob"], 16 << 20).unwrap(), capture_body);
+    assert!(!repair.exists());
+    rebuilt_session.close().unwrap();
+
+    // Existing bytes with a wrong digest remain corruption, never a cache miss
+    // that could be repaired or cause an automatic replacement capture.
+    let mut corrupt = expected;
+    corrupt[0] ^= 1;
+    std::fs::write(&body, &corrupt).unwrap();
+    let mut corrupt_session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+    let error = runtime.block_on(corrupt_session.execute(query(), control())).err().unwrap();
+    assert_eq!(error.code, "vault.blob_integrity");
+    corrupt_session.close().unwrap();
+    assert_eq!(std::fs::read(&body).unwrap(), corrupt);
+    assert_eq!(alias_document(), alias_before);
+    assert_eq!(pair(), owner_before);
+    assert_eq!(capture_document(), capture_before);
+    assert_eq!(evidence::read_blob(&fx.home, &capture["blob"], 16 << 20).unwrap(), capture_body);
+    assert!(!repair.exists());
+    let metadata = Metadata::open(&fx.home, false).unwrap();
+    assert_eq!(metadata.list::<Value>("capture/", 100).unwrap().len(), 1);
+    metadata.close().unwrap();
+    assert_eq!(std::fs::read_dir(paths.staging).unwrap().count(), 0);
+}

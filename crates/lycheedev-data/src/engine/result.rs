@@ -200,6 +200,7 @@ pub(super) fn value(
     text!(arrow_array::StringViewArray);
     let scalar = ScalarValue::try_from_array(array, row).map_err(super::error)?;
     Ok(match scalar {
+        ScalarValue::Null => Value::Null,
         ScalarValue::Boolean(Some(v)) => Value::Bool(v),
         ScalarValue::Int8(Some(v)) => Value::from(v),
         ScalarValue::Int16(Some(v)) => Value::from(v),
@@ -244,7 +245,7 @@ fn bound() -> lycheedev_core::ToolkitError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow_array::{Float32Array, Int64Array, StringArray, UInt64Array};
+    use arrow_array::{Float32Array, Int64Array, NullArray, StringArray, UInt64Array};
     #[test]
     fn releasing_result_refunds_session_output_while_source_cache_survives() {
         let memory = super::super::lifetime::SessionMemory::new(10000).unwrap();
@@ -326,6 +327,12 @@ mod tests {
         assert_eq!(
             value(&UInt64Array::from(vec![None]), 0, &mut bytes, 0).unwrap(),
             Value::Null
+        );
+        let nulls = NullArray::new(1);
+        assert_eq!(value(&nulls, 0, &mut bytes, 0).unwrap(), Value::Null);
+        assert_eq!(
+            value(&nulls, 1, &mut bytes, 0).unwrap_err().code,
+            "records.query_resource_budget"
         );
     }
     #[test]

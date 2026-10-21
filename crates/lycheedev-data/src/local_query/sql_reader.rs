@@ -37,8 +37,7 @@ struct Ready<'a> {
     index: PreparedEncoding<SharedReader<'a>>,
     root: RootIndex<Root>,
     root_blob: Value,
-    build_blob: Value,
-    cdn_blob: Value,
+    configuration_blobs: Option<(Value, Value)>,
     stats: decoded_cache::Stats,
 }
 pub(crate) struct Reader<'a> {
@@ -181,23 +180,12 @@ impl<'a> Reader<'a> {
         // Reuse the reference authenticated by the same materialization owner;
         // its checked close still precedes all following publication work.
         let root_blob = serde_json::to_value(root_reference)?;
-        let build_blob = lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
-            &self.inv.home,
-            &target.metadata.build_document.raw,
-            4 << 20,
-            &self.inv.control, &|| self.budget.check()).and_then(|blob| serde_json::to_value(blob).map_err(Into::into))?;
-        let cdn_blob = lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
-            &self.inv.home,
-            &target.metadata.cdn_document.raw,
-            4 << 20,
-            &self.inv.control, &|| self.budget.check()).and_then(|blob| serde_json::to_value(blob).map_err(Into::into))?;
         let root = RootIndex::open(Root(root), root_limits(limits), self.budget.clone(), check)?;
         self.ready = Some(Ready {
             index,
             root,
             root_blob,
-            build_blob,
-            cdn_blob,
+            configuration_blobs: None,
             stats,
         });
         Ok(())
@@ -388,13 +376,30 @@ impl<'a> Reader<'a> {
             }
         };
         let reported = (|| {
+            // Selected content has completed authentication (and any exact
+            // missing-body repair) before ordinary publication inventories
+            // all Data-owned shared bodies. Reuse these references across reads.
+            if ready.configuration_blobs.is_none() {
+                let build = lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
+                    &self.inv.home,
+                    &target.metadata.build_document.raw,
+                    4 << 20,
+                    &self.inv.control, &|| self.budget.check()).and_then(|blob| serde_json::to_value(blob).map_err(Into::into))?;
+                let cdn = lycheedev_core::workspace::data_disk::publish_shared_blob_with_check(
+                    &self.inv.home,
+                    &target.metadata.cdn_document.raw,
+                    4 << 20,
+                    &self.inv.control, &|| self.budget.check()).and_then(|blob| serde_json::to_value(blob).map_err(Into::into))?;
+                ready.configuration_blobs = Some((build, cdn));
+            }
+            let (build_blob, cdn_blob) = ready.configuration_blobs.as_ref().expect("published local configurations");
             let safety = self.budget.safety_only();
             let size = capture::json_size(
-                &(&ready.root_blob, &ready.build_blob, &ready.cdn_blob),
+                &(&ready.root_blob, build_blob, cdn_blob),
                 &safety,
             )?;
             safety.charge(Cost::retained(size.saturating_mul(4).saturating_add(4096)))?;
-            let mut reading = json!({"contentVerified":true,"source":"installation","pin":self.pin,"catalogSHA256":target.metadata.catalog_sha256,"buildConfiguration":ready.build_blob,"cdnConfiguration":ready.cdn_blob,"encodingKey":target.metadata.encoding_key,"root":ready.root_blob,"entry":entry,"payloadEncodingKey":encoding_key,"content":content_blob,"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"encodingIO":source.io_stats()});
+            let mut reading = json!({"contentVerified":true,"source":"installation","pin":self.pin,"catalogSHA256":target.metadata.catalog_sha256,"buildConfiguration":build_blob,"cdnConfiguration":cdn_blob,"encodingKey":target.metadata.encoding_key,"root":ready.root_blob,"entry":entry,"payloadEncodingKey":encoding_key,"content":content_blob,"verification":{"encodingFramingEKey":true,"encodingRequestedPagesMD5":true,"encodingWholeDecodedCKey":false,"rootWholeDecodedCKey":true,"contentWholeDecodedCKey":true},"encodingIO":source.io_stats()});
             if let SelectedContent::Bytes(bytes) = &content {
                 report_partial(&mut reading, &bytes.missing)?;
             }
