@@ -6,6 +6,14 @@ import {assertAnchor, assertCorpus, assertEnvelope, assertInspect, assertPageCon
 const oracle = JSON.parse(readFileSync(new URL('./retail-oracle.json', import.meta.url)));
 const anchor = oracle.anchors[0], pin = 'PIN-test';
 function query() { return {sourceId: oracle.repository, product: oracle.product, resolvedCommit: oracle.commit, snapshotId: pin, results: [{name: anchor.symbol, path: anchor.path, line: anchor.line, matchedBy: 'exact_symbol', contentHash: anchor.sha256, symbolId: 'SYM-test', excerpt: anchor.declarationLine}], complete: true, truncated: false, coverage: {analyzedDocuments: oracle.documents, skippedDocuments: 0, complete: true}}; }
+test('outer controller gives inherited CLI and Git user paths to its existing owner', () => {
+  const outer = readFileSync(new URL('../../tools/rust-source-full-corpus.mjs', import.meta.url), 'utf8');
+  assert.match(outer, /import \{[^}]*ownedUserEnvironment[^}]*\} from '\.\/rust-build\.mjs'/);
+  assert(outer.includes('env: ownedUserEnvironment(job.directory), evidence: job.evidence, timeout: 600000'));
+  assert(outer.includes("[runner, artifact.sourceBinary, join(job.directory, 'home'), job.evidence]"));
+  assert(!outer.includes('env: {...process.env}'));
+});
+
 test('pinned independent oracle preserves exact full-corpus identity', () => {
   assert.equal(oracle.commit, '31c7f7b9cc79e56c986b365c06a6afbcf3c9177b');
   assert.equal(oracle.archiveSHA256, 'd4d6e468636d6205d94b912fd96ac469b66ae606e6422d7e3849afbff7a376df');

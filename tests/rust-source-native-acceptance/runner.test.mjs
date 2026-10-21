@@ -80,6 +80,9 @@ test('fixture pin uses exact Rust/Go serialization order and escapes', () => {
 test('wrapper binds source digest and never changes frozen ownership support', () => {
   const text = readFileSync(new URL('../../tools/rust-source-native-acceptance.mjs', import.meta.url), 'utf8');
   assert(text.includes('sourceDigest(root)')); assert(text.includes('verifyCandidate(')); assert(text.includes('ownedSpawnSync(')); assert(text.includes('handlesReaped')); assert(text.includes('job.seal(')); assert(text.includes('job.cleanup()'));
+  assert.match(text, /import \{[^}]*ownedUserEnvironment[^}]*\} from '\.\/rust-build\.mjs'/);
+  assert(text.includes('env: ownedUserEnvironment(job.directory), evidence: job.evidence, timeout,'));
+  assert(!text.includes('env: {...process.env}'));
 });
 
 function apiType() {

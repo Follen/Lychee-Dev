@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {existsSync, lstatSync, readFileSync, readdirSync, writeFileSync} from 'node:fs';
 import {join, resolve} from 'node:path';
-import {verifyArtifact, sourceDigest, hashFile} from './rust-build.mjs';
+import {verifyArtifact, sourceDigest, hashFile, ownedUserEnvironment} from './rust-build.mjs';
 import {beginScratch, contained} from './rust-disk.mjs';
 import {collectOwnedMemory} from './rust-owned-memory.mjs';
 import {ownedSpawnSync} from './rust-owned-process.mjs';
@@ -28,7 +28,7 @@ const save = (name, value) => writeFileSync(join(job.evidence, name), JSON.strin
 try {
   save('candidate-identity.json', {runnerRoot, goContract: workflow.goContract, artifact, artifactSHA256, candidate: candidate.report, candidateReportSHA256: candidate.reportSHA256, packageSHA256: candidate.packageSHA256, files: candidate.files, testInputs});
   handlesReaped = false;
-  const run = ownedSpawnSync(process.execPath, [join(runnerRoot, 'tests/rust-source-native-acceptance/run.mjs'), artifact.sourceBinary, candidate.packageRoot, job.directory, job.evidence, group], {cwd: root, env: {...process.env}, evidence: job.evidence, timeout, memoryObservation: group === 'full'});
+  const run = ownedSpawnSync(process.execPath, [join(runnerRoot, 'tests/rust-source-native-acceptance/run.mjs'), artifact.sourceBinary, candidate.packageRoot, job.directory, job.evidence, group], {cwd: root, env: ownedUserEnvironment(job.directory), evidence: job.evidence, timeout, memoryObservation: group === 'full'});
   handlesReaped = run.handlesReaped === true; logs.push(...run.logs);
   const observationPath = join(job.evidence, 'report.json');
   const observation = existsSync(observationPath) ? jsonFile(observationPath) : null;

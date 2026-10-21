@@ -2,7 +2,7 @@
 // Retail corpus. No build, game interaction, source execution or release action.
 import {existsSync, lstatSync, readdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join, resolve} from 'node:path';
-import {verifyArtifact, hashFile} from './rust-build.mjs';
+import {verifyArtifact, hashFile, ownedUserEnvironment} from './rust-build.mjs';
 import {beginScratch} from './rust-disk.mjs';
 import {collectOwnedMemory} from './rust-owned-memory.mjs';
 import {ownedSpawnSync} from './rust-owned-process.mjs';
@@ -27,7 +27,7 @@ try {
   // Keeping the Job across invocations also permits later session-reuse checks.
   handlesReaped = false;
   const run = ownedSpawnSync(process.execPath, [runner, artifact.sourceBinary, join(job.directory, 'home'), job.evidence], {
-    cwd: root, env: {...process.env}, evidence: job.evidence, timeout: 600000, memoryObservation: true,
+    cwd: root, env: ownedUserEnvironment(job.directory), evidence: job.evidence, timeout: 600000, memoryObservation: true,
   });
   handlesReaped = run.handlesReaped === true; logs.push(...run.logs);
   const observationPath = join(job.evidence, 'report.json');
