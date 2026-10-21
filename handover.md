@@ -2,7 +2,7 @@
 
 ## 当前接手与验证恢复（2026-10-21）
 
-- 后续开发与统一验证已由本机主代理接手；沿用 `rust-refactor` / [草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。[GitHub 交接入口](docs/handoff/2026-10-21/HANDOFF.md)来自 `0dfcebd25238239887f4dfb5c209a5bf4c07c392`，9 个文件及清单中的 8 项内容哈希已核验。产品实现基线为 `cfdefd46a11ec8dce470d296b424a3eaa1372b8b`；当前测试副本固定 Data 修复提交 `bc77ffec18ccdc3dc74223d03063595f74bd4c86`（tree `d9f8d69d76fb8589e13b0124769afb7c117794f7`）。保留其他任务的 main 改动和原测试证据。
+- 后续开发与统一验证已由本机主代理接手；沿用 `rust-refactor` / [草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。[GitHub 交接入口](docs/handoff/2026-10-21/HANDOFF.md)来自 `0dfcebd25238239887f4dfb5c209a5bf4c07c392`，9 个文件及清单中的 8 项内容哈希已核验。产品实现基线为 `cfdefd46a11ec8dce470d296b424a3eaa1372b8b`；当前测试副本固定关联聚合修复 `88196080544ff1f8a4e1eb4b798605e6e6d1bafd`（tree `eef87faf8ec56ba7898ea7367ee6875570d43e0d`）。保留其他任务的 main 改动和原测试证据。
 - 当前由主代理整合与统一 Windows 验证；三个 worker 的 Data 修改已交回，metadata worker 正只读核对超时组和 Node 导入名单。MAINT-ENCODING-01 已修并推送 `40c2e66a042b11d59fa143915469ee74f1b16010`：仅在内存解码 PowerShell 的 UTF-8/UTF-16LE BOM，保留原始字节、全部身份/大小/哈希检查和清理范围；实际封存与清理已通过。
 - 已验证并封存 112 manifest / 2135 引用及原六份配额拒绝文件；只清理获批的 `target/debug/incremental`，移除 6,819,246,069 字节。2534 项受保护文件和 8663 个其他缓存文件前后哈希一致，最终 receipt 为 `retired`、双 lease 已释放；独立检查无相关进程/lease，缓存为 12,899,139,776 字节，20 GiB 上限未改。原 wrapper exit 1、Cargo 未启动且无实际 owner/receipt 的历史事实保持。
 - 原 `cfdefd46` 已实际执行 Agent native parity 2 项全部通过，以及 Core library 853 项（839 通过、14 失败、0 ignored）；两组 source identity、原生退出与资源回收均完整。Core ignored-list 另已完成，仅为名单证据。原失败和配额拒绝记录保留，不重标为当前通过。
@@ -10,9 +10,10 @@
 - 当前 Agent client/Data checker/paired consumer 的 24 项 Node 合同测试逐名全过，无 skip；其余 Node 合同实际 375 项为 369 通过、3 失败、3 权限 skip。三失败为旧 Skill 差异清单和 metadata 文件布局断言，本批局部修复并实际验证对应两文件 43 项全部通过。组1额外7项来自显式导入的 TLS adaptation 测试，已补来源，不重跑或改写原结果。Skill commands 与 approved-rust 静态检查通过；这些均不是产品业务或性能通过。
 - DATA-RUNTIME-01：固定 `1764e19c8c` 的 Data library 整组在600秒被受控终止，资源完整回收；原输出分层核定 root 为694通过、11失败、816未观测（含1个原ignored）、1个已开始无终态，nested CGI child单列。终止时最后一项 `actual_verified_batch_closes_every_constructed_owner_on_later_error_and_delivery_stop` 随后单独3.05秒通过，不能把整组超时归因于它卡死。独立 reconciliation 保留原结果和哈希，原600秒失败不重标；后续按未执行名单拆组，不延长上限。
 - DATA-RUNTIME-01 已推送 `bc77ffec18`：collector 采用实际执行流 schema，严格 batch 校验保留；typed AND/OR 使用已有 eager UDF；非物理 public ID 在原行流内记录匹配，只有完整来源实际 EOF 才确认 missing，提前停止保留 unresolved，非整数 ID 不伪造精确缺失结论。两个 fixture 和 Node 合同修正同批保存。两种配置的 native check 已通过；Data 原生名单1526项（1525 active、1 ignored）；15项 focused 实跑14通过、1失败，原11失败对应用例均通过，资源回收和source identity完整。
-- DATA-CORRELATION-01：新增多等值关联 MAX 回归实际失败，eager AND 把原生等值键藏入 UDF，导致 decorrelation 拒绝。本批只让两端均为列/outer列且已证明原生精确比较安全的等值 AND 树保持原生可见；其他 AND/OR 继续 eager。新增等式内 CAST 错误不可被短路隐藏的回归；这次窄修尚待 Windows运行。
-- 主代理在 `bc77ffec18` 执行现有 CLI supervisor 四项；该组尚未终态。完整目标核对发现原124目标遗漏 emmy-adapter、binding-contracts、delivery 共26个离线目标，现已确认9 crate共150个lib/bin/test声明；补充78 stages只是源码清单，未冒充运行。两个 harness=false helper 不计业务测试。
-- 下一步固定关联聚合窄修并验证相关 Engine组，同时按名单完成 Data library 未运行部分，再继续 Data/CLI/Core/Windows/Source/Live与补充三crate correctness。性能、安装试用及游戏验收仍后置且未执行；CAP提交后错误、非yield/排队deadline等覆盖缺口仍须核实，未冒充已验收。
+- DATA-CORRELATION-01：新增多等值关联 MAX 回归实际失败，eager AND 把原生等值键藏入 UDF，导致 decorrelation 拒绝。已推送 `8819608054`：只让两端均为列/outer列且已证明原生精确比较安全的等值 AND 树保持原生可见；其他 AND/OR 继续 eager。新增等式内 CAST 错误不可被短路隐藏的回归。两配置 native check 已通过，Data重新枚举1527项（1526 active、1 ignored）；165项 Engine组正在执行，结果未定。
+- CLI-SOCKET-01：`bc77ffec18` 的 CLI supervisor 实跑4项为1通过、3失败，均在正常receipt等待中遭遇Windows10035；测试2.71秒结束，不是组超时。root101后MSVC辅助进程仍驻留，outer runner强制回收后资源完整，此额外forced事实保留。本批按Winsock accept继承listener属性的合同，将accepted socket在克隆/启动阻塞reader前明确恢复blocking；主监督线程、认证、所有deadline、EOF drain/cancel/backpressure保持。未改测试预期，待固定提交重跑原4项。
+- 完整目标核对发现原124目标遗漏 emmy-adapter、binding-contracts、delivery 共26个离线目标，现已确认9 crate共150个lib/bin/test声明；补充78 stages只是源码清单，未冒充运行。两个 harness=false helper 不计业务测试。Data原未观测active815项已按精确名单拆为14组，每组不超过60项，仍用600秒上限；尚未开始。
+- 下一步完成正在运行的 Engine组，固定 CLI socket 修复并验证原4项，然后按名单完成 Data library 未运行部分，再继续 Data/CLI/Core/Windows/Source/Live与补充三crate correctness。性能、安装试用及游戏验收仍后置且未执行；CAP提交后错误、非yield/排队deadline等覆盖缺口仍须核实，未冒充已验收。
 
 ## 1. 当前目标和执行顺序
 

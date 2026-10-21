@@ -387,6 +387,10 @@ pub(super) fn serve(inv: Invocation) -> Result<()> {
             }
         };
         drop(listener);
+        // Winsock inherits the listener's nonblocking mode on accept. Receipt
+        // reads run in their own blocking thread; the supervisor independently
+        // owns deadlines and shuts this socket down during retirement.
+        stream.set_nonblocking(false)?;
         owned.receipt_socket = Some(stream.try_clone()?);
         let (receipt_sender, receipts) = mpsc::sync_channel(32);
         owned.receipts = Some(
