@@ -7,7 +7,7 @@
 - [main CI](https://github.com/Follen/Lychee-Dev/actions/runs/39589863771)及[正式发布流水线](https://github.com/Follen/Lychee-Dev/actions/runs/39589869187)全部成功，包含源码重建、真实LuaLS/Source、Windows隔离安装、OIDC发布及registry重新安装验收。[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.5)已发布，六项产物齐全；registry独立回读确认latest=3.2.5、next=3.1.2，integrity和provenance元数据存在，不声称完成其密码学验证。
 - 本机受管update已返回complete=true：CLI、1份Skill及7个客户端addon全部current=3.2.5；PATH实际执行提交`c3450d9a32`、workspaceDirty=false，原npm更新事务已结束。此次Skill通过正常受管更新完成，未重启Codex或操作游戏；addon等待后续reload，Skill供新Agent上下文使用。
 - 正式CLI按原Forever PIN复验query和397–403行inspect成功：4481文档、0语法诊断、1编码告警、coverage.complete=true；18128原字节及SHA-256不变。query capture为`CAP-0c07d22691698456bf52c47df4344e0f1f348fcfdefa09c62d2244362420743d`，inspect为`CAP-c2ff74d5dab50f2cf1a06e107ad11d0b9bf9374fc304f05e1e79255c5aa0a355`。
-- 发布、本机更新及正式包复验已完成。仅临时清理受阻：上一轮`.tmp/source-forever-encoding`的11个文件和本轮`.tmp/release-3.2.5`的7个文件仍保留；本轮也已核对绝对路径、无目录链接及更新事务结束，工具仍以`blocked by policy`拒绝删除。未改用脚本绕过；原PIN、镜像、captures和其他项目不在清理范围。
+- 发布、本机更新、正式包复验及临时清理全部完成。按用户要求编写固定文件清单的PowerShell脚本，逐个删除`.tmp/source-forever-encoding`和`.tmp/release-3.2.5`中的18个临时文件，再移除空目录；已核实两目录及一次性清理脚本均不存在。原PIN、镜像、captures和其他项目保留。
 
 ## 当前修复：SOURCE-FOREVER-ENCODING
 
@@ -16,8 +16,7 @@
 - 已按用户补充要求将编码告警与语法诊断分离：告警不降低coverage、AST文件数或addon加载有效性；query和inspect共用U+FFFD显示，原始归档与哈希保留，非UTF-8归档不声称UTF-8编码。真实语法错误和跳过的超限文件仍影响完整性，单文件超限单独报告路径/实际字节数/上限。索引与文件facts使用v3缓存格式自动重建，固定提交、PIN和parserRevision不变。
 - 回归先复现错误分类、inspect拒绝和加载失败，再确认修复。build/vet及Lua5.1必需环境下addoncheck、codebase/...、command整包通过；覆盖告警位置、query/inspect显示及原字节归档、AST统计、同提交diff、非法token和超限。提交前完整检查和发行状态以上方3.2.5交付为准。
 - 开发CLI在原PIN `PIN-4156b40776bf2bb2caa2c8517ea26b93b61a1c211241607c30db82297cf727f9` 完成precise/exploratory×api/lua×issecretvalue/SecretReturns八组查询，以及异常正文query和397–403行inspect；全部ok=true、exit0。4481文档/4481 AST、0跳过、0诊断、1编码告警，coverage.complete=true；limit/关系预览的真实截断仍保留。异常行显示一致，query/inspect SHA-256相同；inspect保留18128原字节。原命令capture为`CAP-60d8d999097090f67de1a26f01d03cdcc093c2637fac9b9ef432a381a2813015`，inspect为`CAP-c360177a7682bb2bb4e68e07f6895ce6cc5fb901bcf2ba935dd34ab805d7d547`。
-- 实现与验证完成，纳入3.2.5；提交、发布与本机安装状态以上方交付为准。原PIN、镜像和查询captures保留，没有游戏操作；除下述临时文件清理外，无未完成的本轮实现项。
-- 清理受阻：工具自动策略拒绝删除`.tmp/source-forever-encoding`，缩小为明确列出的11个文件、非递归删除仍返回`blocked by policy`，未执行删除。临时开发CLI、字节检查脚本及9份查询输出暂留该忽略目录；可复用回归已放入internal测试。后续仅需清除此目录，不触碰原PIN、镜像、captures或其他项目。
+- 实现、验证及临时清理完成，纳入3.2.5；提交、发布与本机安装状态以上方交付为准。可复用回归保留在internal测试；原PIN、镜像和查询captures保留，没有游戏操作，无未完成的本轮实现项。
 
 ## 当前交付：3.2.4 发行
 
