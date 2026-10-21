@@ -514,12 +514,19 @@ pub(super) fn serve(inv: Invocation) -> Result<()> {
     })();
     write_sender.take();
     let cleanup = retire(&mut owned, Instant::now() + RETIRE, result.is_err());
-    match (result, cleanup) {
+    let outcome = match (result, cleanup) {
         (Ok(()), result) => result,
         (Err(error), Ok(())) => Err(error),
         (Err(mut error), Err(cleanup)) => {
             error.details = serde_json::json!({"primary":error.clone(),"cleanup":cleanup});
             Err(error)
         }
-    }
+    };
+    outcome.map_err(|mut error| {
+        // Native pipe/socket errors can precede observation of the worker exit.
+        // Every terminal failure retires this session without replaying work.
+        error.details["sessionInvalidated"] = true.into();
+        error.details["replayed"] = false.into();
+        error
+    })
 }

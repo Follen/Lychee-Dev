@@ -2,17 +2,17 @@
 
 ## 当前接手与验证恢复（2026-10-21）
 
-- 当前任务沿用 `rust-refactor` / [草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)，本机主代理整合并独占 native 队列。GitHub [交接入口](docs/handoff/2026-10-21/HANDOFF.md)及8项内容哈希已核验；实现基线 `cfdefd46`。最近已推送 `f29c8f880a096c4118e8b3a494bc9745952749d4`（tree `1e3cf79415df1ed4b899c79d511b8e6923cc782d`）；本批新增测试尚待固定提交实跑。其他任务的 main 和所有原失败证据保留。
+- 当前任务沿用 `rust-refactor` / [草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)，本机主代理整合并独占 native 队列。GitHub [交接入口](docs/handoff/2026-10-21/HANDOFF.md)及8项内容哈希已核验；实现基线 `cfdefd46`。最近已推送 `e0c6170e9c0849c58500bf5a8d2508bacbf3d7f7`（tree `a1d7cb7c83bc5b2c0e972b1ecb83f1332b9920df`）；该版本全部9 crate两配置native check已通过，当前测试副本仍固定该提交。其他任务的 main 和所有原失败证据保留。
 - 维护已完成：`40c2e66a04` 修复 PowerShell BOM 内存解码；112 manifest/2135引用与配额拒绝原件已封存。仅清理获批 incremental 6,819,246,069字节，受保护文件前后哈希一致，双lease释放。默认20GiB cache/5GiB scratch、默认stack、600秒测试组限、locked/offline/j1、no one-shot均未改变。
 - CORE-FIXTURE-01 已闭合：原853项为839通过/14失败；迁移后的catalog锁序、CAS、recency/durable peak等14项旧夹具已修，`1764e19c8c` 受影响130项逐名全过，产品未改。Agent native parity原2项通过，后续Engine改动后的集成复验待执行。
 - DATA-RUNTIME-01 / DATA-CORRELATION-01 已修并推送 `bc77ffec18` / `8819608054`：使用执行流schema、保留eager布尔错误、公有ID流内缺失证明、保留安全等值关联键；原11失败对应项均实际通过，新增多键MAX和CAST短路回归已通过。`8819608054` 两配置native check通过，Engine165项全部通过。
 - Data原整组600秒超时保持失败事实，资源完整回收；只读核定694通过/11失败/816未观测（含1 ignored）/1无终态，nested child单列。最后无终态用例单独3.05秒通过。原未观测815 active在`f29c8f880a`拆14组全部执行，811通过/4失败；TLS输出造成的一项解析遗漏已用独立reconciliation逐名核定，不重跑或改写原件。
-- DATA-REMOTE-FIXTURE-01：4个剩余失败位于remote cache的durable peak、Core CAP共享catalog序列化，以及target取消后只读打开从未创建的历史DB。四项夹具均已修：按实际durable peak准入、共享catalog锁序、取消后两库不存在且readonly返回record_missing。取消错误身份、未发布pin/CAP、Data私有容量边界保持，产品未改。Data当前原生名单1527项（1526 active、1 ignored），新增两项后须重新枚举。
+- DATA-REMOTE-FIXTURE-01：4个剩余失败位于remote cache的durable peak、Core CAP共享catalog序列化，以及target取消后只读打开从未创建的历史DB。四项夹具均已修：按实际durable peak准入、共享catalog锁序、取消后两库不存在且readonly返回record_missing。取消错误身份、未发布pin/CAP、Data私有容量边界保持，产品未改。`e0c6170e9c` 原生名单1529项（1528 active、1 ignored）；包含这4修正、2新CAP回归和全部Agent Session消费者的26项实际全部通过，资源回收完整。
 - CLI-SOCKET-01 已闭合：原supervisor4项为1通过/3个Windows10035失败；`f29c8f880a` 将accepted socket恢复blocking，两配置native check和原4项真实进程测试全部通过。EOF半关闭、stdout背压、整epoch取消和私有入口拒绝均已实跑；不能冒充CPU负载或排队请求deadline覆盖。
-- CAP-TRANSPORT-01：Data transport新增2项真实Session query/capture及Navigate自动CAP在stdout flush后observer失败的回归，核唯一CAP、原manifest/body和查询handle；待运行。只读追踪发现CLI private worker只打印Display而丢committed details，CLI三文件修复已交回：复用有界stderr诊断，worker独立protocol，超限诊断保留既有typed CAP身份；新增真实BrokenPipe和排队deadline回归，均待执行，receipt协议和无重放合同未改。精确non-yield CPU poll及真实private receipt断线仍未实测。
+- CAP-TRANSPORT-01：Data transport新增2项真实Session query/capture及Navigate自动CAP在stdout flush后observer失败的回归，核唯一CAP、原manifest/body和查询handle；两项均实际通过，12条Navigate业务路径同组通过。只读追踪发现CLI private worker只打印Display而丢committed details，CLI三文件修复已交回：复用有界stderr诊断，worker独立protocol，超限诊断保留既有typed CAP身份；新增真实BrokenPipe和排队deadline回归；`e0c6170e9c` supervisor6项为5通过/1失败，队列deadline已通过，BrokenPipe已观测worker保留committed CAP，但父进程先收到external.io而非测试期待的worker_exited。CLI-TERMINAL-01本批在统一终态补sessionInvalidated/replayed标记，保留原生原因与cleanup；回归接受这两种已确认终态顺序并核相同失效/无重放事实，待实跑。receipt协议未改。精确non-yield CPU poll及真实private receipt断线仍未实测。
 - Node合同原399项合计393通过/3失败/3权限skip；三失败为旧Skill差异清单和metadata布局断言，修后对应43项实际全部通过。额外7个TLS import测试和输出混排用例已单独核定。Skill commands/approved-rust静态检查通过；这些不替代产品业务或性能。
 - 剩余correctness目标：Data其余integration、CLI其余target、Core integration、Windows/Source/Live，以及补漏的emmy-adapter/binding-contracts/delivery。共9 crate、150个lib/bin/test声明；binding library合法0-case、两个harness=false helper只作支持，均不记业务通过。Lua5.1可用；需要外部oracle/真实数据或symlink权限的ignored另列，不冒充执行。
-- 下一步固定本批Data夹具和CAP测试，运行两配置全workspace native check、Data6个定向用例、CLI supervisor全6项及CLI diagnostic组，然后继续未执行目标。Release安装试用、配对性能与最终五循环审计均未完成；游戏、合并和发布未获授权。
+- 下一步完成正在执行的CLI184项及Data integration队列；固定CLI-TERMINAL-01后运行两配置native check和supervisor6项。随后继续其余未执行目标。Release安装试用、配对性能与最终五循环审计均未完成；游戏、合并和发布未获授权。
 
 ## 1. 当前目标和执行顺序
 

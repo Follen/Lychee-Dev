@@ -239,8 +239,12 @@ fn supervisor_preserves_committed_capture_on_real_stdout_broken_pipe() {
     let id = details["capturePublication"]["id"].as_str().unwrap();
     assert_eq!(details["completedCaptures"], json!([id]));
     let supervisor = diagnostics.iter().find(|value| value["protocol"] == "lycheedev.data-agent-supervisor.v1").unwrap();
-    assert_eq!(supervisor["error"]["code"], "data.session.worker_exited");
-    assert_eq!(supervisor["error"]["details"]["sessionInvalidated"], true);
+    // The private channel may report native IO failure before the parent
+    // observes process exit. Both terminal paths invalidate the same session.
+    assert!(matches!(supervisor["error"]["code"].as_str(),
+        Some("data.session.worker_exited" | "external.io")), "{err}");
+    assert_eq!(supervisor["error"]["details"]["sessionInvalidated"], true, "{err}");
+    assert_eq!(supervisor["error"]["details"]["replayed"], false, "{err}");
 
     let metadata = lycheedev_core::metadata::Metadata::open(&fx.home, false).unwrap();
     let captures = metadata.list::<Value>("capture/", 10).unwrap();
