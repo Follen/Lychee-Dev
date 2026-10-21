@@ -2,10 +2,12 @@
 
 ## 当前交付：3.2.5 发行
 
-- 用户要求推送GitHub并生成新Release；本次为3.2.5，沿用main及latest渠道，按正式标签触发流水线完成npm和GitHub发布。沿用此前发布后直接更新本机的要求；无新分支、worktree或PR。
+- 用户要求推送GitHub并生成新Release；本次为3.2.5，沿用main及latest渠道。实现提交`c3450d9a32`及对应`v3.2.5`标签已推送；沿用此前发布后直接更新本机的要求，无新分支、worktree或PR。
 - 主代理负责Source编码修复、版本同步、发布验收及本机受管更新。实现已完成，同一Forever PIN的8组query和异常行inspect通过，详见下方；版本源和渠道清单已同步为3.2.5。提交前build/vet、版本/Skill/发行输入检查、93项Node测试全部通过；Lua5.1必需完整Go套件通过（2962项pass事件、42项既有可选skip、0fail，32个测试包通过；包并发2、测试并发4、包时限20分钟）。
-- 发布使用`.github/workflows/toolkit-release.yml`，目标为本次干净提交及对应`v3.2.5`标签；下一步推送并跟进正式流程。本机update预检已确认1份Skill及7个客户端addon为受管3.2.4，无占用冲突；发布后通过受管update同步，不操作游戏。
-- 用户要求用脚本清理上一轮临时目录，但同一删除目标此前已被自动审批拒绝，未以另一执行方式绕过；11个临时文件保留。该阻力不影响Git推送或发行，原PIN、镜像、captures和其他项目保留。
+- [main CI](https://github.com/Follen/Lychee-Dev/actions/runs/39589863771)及[正式发布流水线](https://github.com/Follen/Lychee-Dev/actions/runs/39589869187)全部成功，包含源码重建、真实LuaLS/Source、Windows隔离安装、OIDC发布及registry重新安装验收。[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.5)已发布，六项产物齐全；registry独立回读确认latest=3.2.5、next=3.1.2，integrity和provenance元数据存在，不声称完成其密码学验证。
+- 本机受管update已返回complete=true：CLI、1份Skill及7个客户端addon全部current=3.2.5；PATH实际执行提交`c3450d9a32`、workspaceDirty=false，原npm更新事务已结束。此次Skill通过正常受管更新完成，未重启Codex或操作游戏；addon等待后续reload，Skill供新Agent上下文使用。
+- 正式CLI按原Forever PIN复验query和397–403行inspect成功：4481文档、0语法诊断、1编码告警、coverage.complete=true；18128原字节及SHA-256不变。query capture为`CAP-0c07d22691698456bf52c47df4344e0f1f348fcfdefa09c62d2244362420743d`，inspect为`CAP-c2ff74d5dab50f2cf1a06e107ad11d0b9bf9374fc304f05e1e79255c5aa0a355`。
+- 发布、本机更新及正式包复验已完成。仅临时清理受阻：上一轮`.tmp/source-forever-encoding`的11个文件和本轮`.tmp/release-3.2.5`的7个文件仍保留；本轮也已核对绝对路径、无目录链接及更新事务结束，工具仍以`blocked by policy`拒绝删除。未改用脚本绕过；原PIN、镜像、captures和其他项目不在清理范围。
 
 ## 当前修复：SOURCE-FOREVER-ENCODING
 
