@@ -12,7 +12,7 @@ export const IMPORTER_TARGETS = ['agent_fixture_import'];
 export function prepareAgentImporter(root) {
   assert.equal(process.platform, 'win32'); assert.equal(process.arch, 'x64');
   root = resolve(root);agentEnvironment(root,process.env);
-  return runCargo(root, IMPORTER_ARGS, {owner: 'paired-agent-importer', oneShot: false, onSuccess(invocation) {
+  return runCargo(root, IMPORTER_ARGS, {owner: 'paired-agent-importer', oneShot: false, isolateUser: true, onSuccess(invocation) {
     const artifacts = invocation.stdout.split(/\r?\n/).filter(Boolean).map(line => parse(line));
     const executables = IMPORTER_TARGETS.map(name => {
       const rows = artifacts.filter(row => row.reason === 'compiler-artifact' && row.target?.name === name && row.profile?.test === true && row.executable);

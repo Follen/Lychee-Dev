@@ -1,10 +1,10 @@
-import {preparationTimeout} from './agent-environment.mjs';
+import {agentEnvironment,preparationTimeout} from './agent-environment.mjs';
 import {freezeDecoder,verifyDecoder} from './agent-decoder.mjs';
 import {fileIdentity,verifyTool,cargoAdmission} from './agent-tool-identity.mjs';
 // Declarations only until the full-migration test gate is opened.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from 'node:fs';
+import {existsSync,mkdtempSync,mkdirSync,readFileSync,writeFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {parse,safeNumericToken} from './agent-json.mjs';
@@ -28,6 +28,27 @@ test('cold/warm cannot borrow another pair or opposite engine home',()=>{const o
 test('bare request and resolved native identity remain distinct and byte-bound',()=>{const f=custody();try{assert.notEqual(f.sample.binary,f.sample.proof.binary);authenticate(f.sample,f.options);assert.throws(()=>authenticate(f.sample,{...f.options,ids:new Set(),resolvedIdentity:undefined}));writeFileSync(f.options.resolvedIdentity.path,'changed');assert.throws(()=>verifyTool(f.options.resolvedIdentity));}finally{rmSync(f.root,{recursive:true,force:true});}});
 
 test('fixture execute timeout consumes one shared group allowance',()=>{assert.equal(preparationTimeout(1000,301000,600000),300000);assert.equal(preparationTimeout(1000,500001,600000),100999);assert.throws(()=>preparationTimeout(1000,600001,600000));});
+test('paired child environments isolate users while keeping explicit business homes and fixtures independent',t=>{
+ const root=mkdtempSync(join(tmpdir(),'paired-environment-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+ const scratch=join(root,'controller'),businessHome=join(root,'pair/rust-workflow'),fixtureHome=join(root,'fixture/home');
+ const parent={PATH:'unchanged-tools',HOME:'real-user',userprofile:'real-user',Codex_Home:'real-agent',APPDATA:'real-apps',LOCALAPPDATA:'real-local',TEMP:'real-temp',TMP:'real-temp',LYCHEEDEV_BIN:'real-tool',lycheedev_home:'real-product',CARGO_HOME:join(root,'compiler-cache'),RUSTUP_HOME:join(root,'toolchains'),LYCHEEDEV_AGENT_IMPORT:join(root,'import.json')};
+ const before={...parent},env=agentEnvironment(root,parent,scratch);
+ for(const key of ['HOME','USERPROFILE','CODEX_HOME','APPDATA','LOCALAPPDATA','TEMP','TMP','LYCHEEDEV_HOME'])assert(env[key].startsWith(scratch),key);
+ for(const key of ['HOME','APPDATA','LOCALAPPDATA','TEMP'])assert(existsSync(env[key]));
+ assert.equal(env.userprofile,undefined);assert.equal(env.Codex_Home,undefined);assert.equal(env.lycheedev_home,undefined);assert.equal(env.LYCHEEDEV_BIN,undefined);
+ for(const key of ['PATH','CARGO_HOME','RUSTUP_HOME','LYCHEEDEV_AGENT_IMPORT'])assert.equal(env[key],parent[key]);
+ assert.notEqual(env.LYCHEEDEV_HOME,businessHome);assert.notEqual(env.LYCHEEDEV_HOME,fixtureHome);
+ assert(!existsSync(businessHome));assert(!existsSync(fixtureHome));assert.deepEqual(parent,before);
+ assert.throws(()=>agentEnvironment(root,{...parent,LYCHEEDEV_DISK_SCRATCH_GIB:'6'},scratch),/disk overrides forbidden/);
+ assert.throws(()=>agentEnvironment(root,{...parent,RUST_MIN_STACK:'9999999'},scratch),/default compiler\/target\/stack required/);
+});
+test('current paired preparation and controller use the existing isolated owners',()=>{
+ const source=name=>readFileSync(new URL(name,import.meta.url),'utf8');
+ assert(/oneShot: false, isolateUser: true, environment/.test(source('./agent-prepare-fixtures.mjs')));
+ assert(/oneShot: false, isolateUser: true, onSuccess/.test(source('./agent-importer.mjs')));
+ assert(/const env=agentEnvironment\(root,environment,job\.directory\)/.test(source('./agent-paired-owned.mjs')));
+ assert(/const env=agentEnvironment\(root,process\.env,c\.scratch\)/.test(source('./agent-paired-run.mjs')));
+});
 test('decoder package and native byte mutations invalidate the complete closure',()=>{const root=mkdtempSync(join(tmpdir(),'paired-decoder-declaration-'));try{const dir=join(root,'node_modules','sharp');mkdirSync(dir,{recursive:true});const entry=join(dir,'index.js'),native=join(dir,'vendor.node');writeFileSync(join(dir,'package.json'),JSON.stringify({name:'sharp',version:'fixture',main:'index.js'}));writeFileSync(entry,'module.exports = null; // never imported by this declaration');writeFileSync(native,'synthetic native bytes');const identity=freezeDecoder(entry);verifyDecoder(identity);writeFileSync(native,'mutated');assert.throws(()=>verifyDecoder(identity));}finally{rmSync(root,{recursive:true,force:true});}});
 
 test('known Cargo auxiliary cleanup requires policy, held identities and reviewed descendants',()=>{const root=mkdtempSync(join(tmpdir(),'paired-cargo-declaration-')),envKey=Object.keys(process.env).find(k=>k.toLowerCase()==='programfiles')??'ProgramFiles',previous=process.env[envKey];try{process.env[envKey]=root;mkdirSync(join(root,'tools'));const cargo=join(root,'cargo.exe'),helper=join(root,'vctip.exe');writeFileSync(cargo,'synthetic cargo identity');writeFileSync(helper,'synthetic helper identity');const identity=fileIdentity(cargo),h=fileIdentity(helper),entry={programFilesPath:'vctip.exe',bytes:h.bytes,sha256:h.sha256,kind:'msvc-vctip',fileVersion:'fixture',signerSubject:'fixture',signerThumbprint:'fixture'},policy={schema:'lycheedev.build-auxiliary-policy.v1',cargoSHA256:identity.sha256,helpers:[entry]},raw=JSON.stringify(policy);writeFileSync(join(root,'tools/rust-build-auxiliary.json'),raw);const admitted={...h,kind:entry.kind,fileVersion:entry.fileVersion,signerSubject:entry.signerSubject,signerThumbprint:entry.signerThumbprint,signatureStatus:'WinVerifyTrust:0'},proof={forced:true,knownAuxiliaryCleanup:true,creationFileTime:'100',helperAdmission:{state:'enabled',cargo:identity,helpers:[admitted]},auxiliaryProcesses:[{pid:42,creationFileTime:'101',image:helper,jobMember:true,reviewedAuxiliary:true}]},options={root,policySHA256:digest(raw),identity,allowCleanup:true};assert.doesNotThrow(()=>cargoAdmission(proof,options));assert.throws(()=>cargoAdmission(proof,{...options,allowCleanup:false}));assert.throws(()=>cargoAdmission({...proof,auxiliaryProcesses:[{...proof.auxiliaryProcesses[0],reviewedAuxiliary:false}]},options));writeFileSync(helper,'changed');assert.throws(()=>cargoAdmission(proof,options));}finally{if(previous===undefined)delete process.env[envKey];else process.env[envKey]=previous;rmSync(root,{recursive:true,force:true});}});

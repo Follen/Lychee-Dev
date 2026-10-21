@@ -25,7 +25,7 @@ import {auditPrepareEnvelope} from './generation-contract.mjs';
 assert.equal(process.platform,'win32');assert.equal(process.argv.length,3);
 const c=parse(bounded(process.argv[2],2<<20)),started=performance.now(),deadline=started+570000,root=c.root,out=c.evidence;
 const fixtures=Object.fromEntries(Object.entries(c.fixtures).map(([k,v])=>[k,loadOwnedAgentFixture(v,k==='numeric'?'csv-numeric':k)])),entry=selection(c,fixtures),fixture=fixtures[entry.fixture],importer=loadAgentImporter(root,c.importerReceipt,c.rust.inputHashes.sourceTree);
-const env=agentEnvironment(root,process.env);
+const env=agentEnvironment(root,process.env,c.scratch);
 const decoder=loadDecoder(c.decoder),sharp=decoder.sharp;for(const identity of Object.values(c.toolIdentities))verifyTool(identity);
 const report={schema:'lycheedev.paired-agent-observation.recovered.v1',mode:c.mode,comparison:comparison(c,entry),caseId:entry.id,acceptance:c.acceptance,performanceAcceptanceEvaluated:false,state:'running',fullB04Acceptance:false,inputs:c.inputs,preparation:[],preflight:[],pairs:[],groups:[]};let fatal=false;
 const files=dir=>readdirSync(dir).filter(n=>n!=='receipt.json'&&lstatSync(join(dir,n)).isFile()).map(n=>join(dir,n));

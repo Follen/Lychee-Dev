@@ -52,7 +52,7 @@ function main() {
       const began = performance.now();
       try {
         const remainingMs=Math.floor(600000-(performance.now()-started));assert(remainingMs>=1000,'fixture preparation group deadline');
-        const invocation = runCargo(root, row.args, {owner: `paired-data-fixture-${entry.kind}`, oneShot: false, environment,
+        const invocation = runCargo(root, row.args, {owner: `paired-data-fixture-${entry.kind}`, oneShot: false, isolateUser: true, environment,
           execute(binary, args, options) {
             agentEnvironment(root,process.env);verifyTool(cargoIdentity);options={...options,timeout:preparationTimeout(started,performance.now(),options.timeout)};row.actualTimeoutMs=options.timeout;
             row.launched = true; handlesReaped = false; row.buildEvidence = join(options.evidence, 'receipt.json'); save();

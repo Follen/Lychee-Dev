@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {existsSync, lstatSync, readFileSync, readdirSync, writeFileSync} from 'node:fs';
 import {join, resolve} from 'node:path';
 import {performance} from 'node:perf_hooks';
-import {verifyArtifact, hashFile} from './rust-build.mjs';
+import {verifyArtifact, hashFile, ownedUserEnvironment} from './rust-build.mjs';
 import {beginScratch} from './rust-disk.mjs';
 import {ownedSpawnSync} from './rust-owned-process.mjs';
 import {verifyGoPackage} from '../tests/rust-performance-paired/inputs.mjs';
@@ -36,7 +36,7 @@ try {
   handlesReaped = false;
   // Outer Job owns the controller, every nested sample Job/wrapper, Git audit
   // and descendants. No unrelated process discovery or taskkill is used.
-  const run = ownedSpawnSync(process.execPath, [join(runnerRoot, 'tests/rust-performance-paired/run.mjs'), configPath], {cwd: root, env: {...process.env}, evidence: job.evidence, timeout: 18000000});
+  const run = ownedSpawnSync(process.execPath, [join(runnerRoot, 'tests/rust-performance-paired/run.mjs'), configPath], {cwd: root, env: ownedUserEnvironment(job.directory), evidence: job.evidence, timeout: 18000000});
   handlesReaped = run.handlesReaped === true;
   const path = join(job.evidence, 'report.json');
   const observation = existsSync(path) ? JSON.parse(readFileSync(path)) : null;

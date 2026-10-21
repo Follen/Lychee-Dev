@@ -4,12 +4,13 @@ import {execFileSync} from 'node:child_process';
 import assert from 'node:assert/strict';
 import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {dirname, join} from 'node:path';
 import {runInNewContext} from 'node:vm';
 import {CASES, GO_COMMIT, REPETITIONS, compareSamples, elapsed, orderFor, semantic, startupBreakdown, statistics, summarize} from './contract.mjs';
 import {LUALS, assertSeedCold, cloneSeed, derivedIdentity, inventory, proveWarmReuse, safeRelative, verifyGoMetadata, verifySeedMetadata} from './inputs.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {APPROVED_ENGINE_SUMMARIES} from '../rust-parity/describe-contract.mjs';
+import {ownedUserEnvironment} from '../../tools/rust-build.mjs';
 const oracle = JSON.parse(readFileSync(new URL('../rust-source-full-corpus/retail-oracle.json', import.meta.url)));
 const pin = 'PIN-paired', anchor = oracle.anchors[0];
 const envelope = result => ({schema: 'lycheedev.result.v1', ok: true, error: null, result});
@@ -107,6 +108,59 @@ test('Go preparer owns caches and temp, ignores user Go config, and preserves de
   }
   assert(preparer.includes('for (const directory of [env.GOCACHE, env.GOMODCACHE, env.GOTMPDIR]) mkdirSync(directory);'));
   assert(preparer.includes('ownedSpawnSync(command, args, {cwd: source, env, evidence: job.evidence, timeout})'));
+});
+test('Source paired outer controller, preparation and Git inherit only their existing owner user paths', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'paired-user-owner-')); t.after(() => rmSync(directory, {recursive: true, force: true}));
+  const inherited = {Path: 'installed-tools', HOME: 'real-home', UserProfile: 'real-profile', CodeX_Home: 'real-codex',
+    APPDATA: 'real-appdata', LOCALAPPDATA: 'real-localappdata', TEMP: 'real-temp', TMP: 'real-tmp',
+    CARGO_HOME: 'installed-cargo-cache', RUSTUP_HOME: 'installed-rustup-cache', GIT_CONFIG_COUNT: '1', GCM_INTERACTIVE: 'always'};
+  const envFor = owner => ownedUserEnvironment(owner, inherited);
+  const check = env => {
+    assert.equal(env.HOME, join(directory, 'user')); assert.equal(env.USERPROFILE, env.HOME);
+    assert.equal(env.CODEX_HOME, join(env.HOME, '.codex'));
+    assert.equal(env.APPDATA, join(env.HOME, 'AppData/Roaming')); assert.equal(env.LOCALAPPDATA, join(env.HOME, 'AppData/Local'));
+    assert.equal(env.TEMP, join(directory, 'temp')); assert.equal(env.TMP, env.TEMP);
+    assert.equal(env.CARGO_HOME, inherited.CARGO_HOME); assert.equal(env.RUSTUP_HOME, inherited.RUSTUP_HOME);
+    assert.equal(env.Path, inherited.Path); assert(!Object.hasOwn(env, 'UserProfile') && !Object.hasOwn(env, 'CodeX_Home'));
+  };
+  const outer = readFileSync(new URL('../../tools/rust-performance-paired.mjs', import.meta.url), 'utf8');
+  const begin = outer.indexOf('  const run = ownedSpawnSync('), end = outer.indexOf('\n  handlesReaped =', begin);
+  const calls = [];
+  runInNewContext(outer.slice(begin, end), {process: {execPath: 'node'}, runnerRoot: 'runner', configPath: 'configuration', root: 'root',
+    job: {directory, evidence: 'outer-evidence'}, join, ownedUserEnvironment: envFor,
+    ownedSpawnSync: (binary, args, options) => calls.push({binary, args, options})});
+  check(calls[0].options.env); assert.equal(calls[0].options.timeout, 18000000);
+  const inner = readFileSync(new URL('./run.mjs', import.meta.url), 'utf8');
+  runInNewContext(inner.slice(inner.indexOf('function controlled('), inner.indexOf('\nfunction prepare(')) + '\ncontrolled("tool", ["argument"], "evidence");', {
+    config: {scratch: directory}, ownedUserEnvironment: envFor, root: 'root', fatal: false, assert, performance: {now: () => 1}, sha256: () => 'hash',
+    ownedSpawnSync: (binary, args, options) => { calls.push({binary, args, options}); return {handlesReaped: true, status: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0)}; },
+  });
+  check(calls[1].options.env); assert.equal(calls[1].options.timeout, 210000);
+  const gitEnv = runInNewContext(inner.slice(inner.indexOf('const gitEnv ='), inner.indexOf('function git(')) + '\ngitEnv;',
+    {config: {scratch: directory}, ownedUserEnvironment: envFor});
+  check(gitEnv); assert(!Object.hasOwn(gitEnv, 'GIT_CONFIG_COUNT'));
+  assert.equal(gitEnv.GIT_CONFIG_GLOBAL, 'NUL'); assert.equal(gitEnv.GIT_TERMINAL_PROMPT, '0'); assert.equal(gitEnv.GCM_INTERACTIVE, 'never');
+});
+test('Source measured invocations keep business homes and fixed pins while user paths use the existing pair owner', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'paired-sample-owner-')); t.after(() => rmSync(directory, {recursive: true, force: true}));
+  const source = readFileSync(new URL('./run.mjs', import.meta.url), 'utf8'), calls = [];
+  const block = source.slice(source.indexOf('function invoke('), source.indexOf('\n\nsave();'));
+  const context = {config: {go: {binary: 'go.exe'}, rust: {sourceBinary: 'rust.exe'}}, dirname, startupDiagnostics: false, oracle, assert,
+    ownedUserEnvironment: owner => ownedUserEnvironment(owner, {HOME: 'real-home', CODEX_HOME: 'real-codex', TEMP: 'real-temp'}),
+    elapsed: () => ({controllableMillis: 12}), semantic: () => {},
+    controlled: (binary, args, evidence, options) => { calls.push({binary, args, evidence, options}); return {row: {}, run: {status: 0, handlesReaped: true, stdout: JSON.stringify(envelope({}))}}; },
+  };
+  runInNewContext(block + '\nthis.invoke = invoke;', context);
+  for (const engine of ['go', 'rust']) {
+    const home = join(directory, `${engine}-home`);
+    const result = context.invoke(CASES[1], engine, home, pin, 'pair-evidence', 3, 'cold');
+    const call = calls.at(-1);
+    assert.deepEqual(Array.from(call.args), ['source', 'index', '--snapshot', pin, '--home', home, '--format', 'json']);
+    assert.equal(call.options.env.HOME, join(directory, 'user')); assert.equal(call.options.env.CODEX_HOME, join(directory, 'user/.codex'));
+    assert.equal(call.options.env.TEMP, join(directory, 'temp')); assert.equal(call.options.measure, true);
+    assert.equal(call.evidence, 'pair-evidence'); assert.equal(result.row.home, home); assert.equal(result.row.snapshot, pin);
+    assert.equal(result.row.controllableMillis, 12); assert.equal(result.row.valid, true);
+  }
 });
 test('package/corpus relative paths reject traversal and absolute inputs', () => { for (const name of ['../x', '/x', 'C:/x', 'x\\y', 'a//b', 'a/./b']) assert.throws(() => safeRelative(name)); assert.equal(safeRelative('a/b.lua'), 'a/b.lua'); });
 test('fresh seed clone proves independent equal bytes and detects prewarmed state', t => {

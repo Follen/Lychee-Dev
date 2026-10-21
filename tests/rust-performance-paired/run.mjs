@@ -2,13 +2,13 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync} from 'node:fs';
-import {join, resolve} from 'node:path';
+import {dirname, join, resolve} from 'node:path';
 import {performance} from 'node:perf_hooks';
 import os from 'node:os';
 import {beginScratch} from '../../tools/rust-disk.mjs';
 import {ownedSpawnSync} from '../../tools/rust-owned-process.mjs';
 import {collectOwnedMemory} from '../../tools/rust-owned-memory.mjs';
-import {hashFile, sourceDigest, verifyArtifact} from '../../tools/rust-build.mjs';
+import {hashFile, ownedUserEnvironment, sourceDigest, verifyArtifact} from '../../tools/rust-build.mjs';
 import {inspectEmmy} from '../../tools/rust-emmy-identity.mjs';
 import {assertEnvelope, sha256} from '../rust-source-full-corpus/assertions.mjs';
 import {CASES, GO_COMMIT, REPETITIONS, TARGET_RATIO, compareSamples, elapsed, orderFor, semantic, startupBreakdown, summarize} from './contract.mjs';
@@ -42,7 +42,7 @@ const report = {
 };
 const save = () => writeFileSync(join(out, 'report.json'), JSON.stringify(report, null, 2) + '\n');
 const files = directory => readdirSync(directory).filter(name => name !== 'receipt.json' && lstatSync(join(directory, name)).isFile()).map(name => join(directory, name));
-function controlled(binary, args, evidence, {timeout = 210000, env = process.env, measure = false, diagnoseStartup = false} = {}) {
+function controlled(binary, args, evidence, {timeout = 210000, env = ownedUserEnvironment(config.scratch), measure = false, diagnoseStartup = false} = {}) {
   assert(!fatal, 'previous unverified process failure requires outer retirement');
   const startedAt = new Date().toISOString(), begin = performance.now();
   fatal = true; // An exception before a verified receipt must retain ownership.
@@ -58,7 +58,7 @@ function prepare(binary, args, label, options) {
   assert(run.handlesReaped && !run.error && run.status === 0, `${label}: ${run.error?.message ?? run.stderr.toString()}`);
   return run.stdout;
 }
-const gitEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith('GIT_') && key.toUpperCase() !== 'GCM_INTERACTIVE'));
+const gitEnv = Object.fromEntries(Object.entries(ownedUserEnvironment(config.scratch)).filter(([key]) => !key.toUpperCase().startsWith('GIT_') && key.toUpperCase() !== 'GCM_INTERACTIVE'));
 Object.assign(gitEnv, {GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: 'NUL', GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_NO_REPLACE_OBJECTS: '1'});
 function git(args, input) {
   assert(!fatal); const id = sequence++, begin = performance.now();
@@ -89,7 +89,7 @@ function identity() {
 function invoke(entry, engine, home, pin, evidence, iteration, cacheMode) {
   const binary = engine === 'go' ? config.go.binary : config.rust.sourceBinary;
   const args = [...entry.args, ...(pin ? ['--snapshot', pin] : []), '--home', home, '--format', 'json'];
-  const {run, row} = controlled(binary, args, evidence, {measure: true, diagnoseStartup: startupDiagnostics});
+  const {run, row} = controlled(binary, args, evidence, {env: ownedUserEnvironment(dirname(home)), measure: true, diagnoseStartup: startupDiagnostics});
   Object.assign(row, {caseId: entry.id, engine, iteration, cacheMode, home, snapshot: pin, excludedDownloadMillis: 0, excludedExternalWaitMillis: 0, valid: false});
   let envelope;
   try {
