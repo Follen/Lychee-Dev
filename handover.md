@@ -26,7 +26,7 @@
 - Source完整38目标库存为836 active、45 ignored、1 helper。library749 active在284a按完整名单分组全部通过；integration原47 active已通过，eb9受影响refs_context 14 active通过，3个Release ignored仍待。diff_prune仅缩短fixture临时basename后，532实际六例全部通过；原Git路径失败及强制收尾记录保留。45 ignored中9已实际通过、1 parent helper、2 exporter、1 benchmark，另32个业务用例需当前Release或固定Source输入，按对应现有流程补齐，不把准备helper计业务pass。
 - Source两项native quota ignored已实际通过并回收子进程；临时汇总器误把Windows OsString当string导致外层报告失败，独立只读派生报告已核原结果且未改原报告。观察到接近预算的分配拒绝，不据此声称瞬时硬上限或唯一拒绝原因。外部Lua工具原九例六过三败：goto已改用native Lua5.1结构并在eb9实际通过；两个refs已迁至真实Release CLI，待匹配产物复跑。原有passed六例不重复。
 - Emmy adapter全部19目标197 active在284a实际通过，0 ignored；binding-contracts integration五项实际通过，library合法0-case。Source专用参考端36项通过、完整4,137行；清理后仅续候选，实际35通过/1失败，双方完整输出和资源回收已核。仅两行coverage多出当前合同必需的call_result/native_projected记录，其余4,135行、类型和provider序列一致；adapter已有完整五条receipt回归实际通过。主代理已核源码、精确两行和已有专门合同模板；保留raw失败，不把历史参考缺记录归一化成通过。
-- Live library在532按完整名册635 active全部实际通过，2 ignored单列；mailbox_lookup 24项实际通过。formal bridge九例及五个protocol目标留专用入口；后续prototype列表编译后再次遇cache准入拒绝，未进入下一次Cargo。Delivery五目标仍待。
+- Live library在532按完整名册635 active全部实际通过，2 ignored单列；mailbox_lookup 24项通过。4cd另有native_termination5、passive_windows2、runtime_discovery33、runtime_windows10全部实际通过。sealed_memory一例因fixture写死3.1.2而被当前release检查拒绝，已改用产品版本常量，待复跑。formal bridge九例及五个protocol目标留专用入口。Delivery仅完成159项列表，后续被cache准入拒绝，未执行业务。
 - Node原399项393通过/3失败/3权限skip；旧Skill差异清单和metadata布局3失败修后对应43项全部通过。后继Source exporter/corpus工具5套84通过/1权限skip；本批真实Skill入口及用户环境隔离的4套Node68项全部通过。重叠套件不累加为独立覆盖，mock/静态检查不代替Windows业务。
 
 ## 当前修正与负责人
@@ -48,12 +48,13 @@
 | SOURCE-HISTORY-01 | historical checker的原ac8 runner/inputs/完整harness统一从contractRoot认证，测试从原Git blobs取冻结输入并验证篡改拒绝。55项Node通过、1 symlink权限skip；原pin/owner/失败/4137行/两差异不变 | data_engine已交回，主代理已核diff；这是历史checker修复，不是fresh Source通过 |
 | PAIRED-ISOLATION-01 | Agent paired的准备Cargo、controller及调用环境使用已有owner目录；Source paired的outer/准备/Git和样本分别使用已有outer/pair目录。业务home、20对、固定输入、测量及限额不变；Agent15与Source41项Node通过 | data_engine/core_evidence已交回，主代理已核九文件；真实paired仍未执行 |
 | SOURCE-OUTER-ISOLATION-01 | full-corpus和native-acceptance两个outer改用现有ownedUserEnvironment，使下游CLI/Git的用户目录和temp归当前owner；业务home、预算、测量逻辑不变。直接Node49项通过 | core_evidence交回，主代理已核4文件；实际Source运行随当前Release执行 |
+| LIVE-MEMORY-FIXTURE-01 | self-process OS模块/堆读取fixture的release改为lycheedev_core::VERSION，与正式Reader保持一致；保留全部RIP、模块哈希、错误layout和secret namespace断言 | 主代理已改、格式检查通过；实际复跑待缓存准入 |
 | COVERAGE-01 | 9 crate共150个lib/bin/test声明；原漏26目标中adapter19和binding2已完成，delivery5目标待执行。binding lib合法0-case、两个harness=false helper不计业务pass；ignored单列 | 主代理 |
 
 ## 下一步
 
-1. 当前Skill身份、历史322输入和diff_prune修正已推送532，静态CI通过；保存两个Source outer隔离修正。native空闲，按已授权精确scope清理本轮incremental后续跑。Source raw35/36与两条新增合同记录分别保留。
-2. 继续尚未完成的Live专用目标、Delivery补漏及Go324 formal Lua；635 Live library、mailbox24、diff_prune6、goto1和refs_context14已通过，无新影响不重复。
+1. Source outer隔离已推送4cd，sealed_memory单行fixture修正待复跑。本轮两批incremental共568,075,818字节已经按持续授权清理，后续再次准入拒绝。已向用户请求单独批准精确95组/190个普通测试EXE/PDB（7,009,046,528字节）；仅六个已结束测试模块，保留全部Source/Live/Delivery测试、依赖、源码、报告和独立封存产物，不变20GiB。尚未批准或删除此新范围。
+2. 确认清理后复跑sealed_memory一例，继续Live五个专用protocol、Delivery五目标及Go324 formal Lua。当前Go324正式Lua5.1解释器已用固定官方源码隔离构建并通过自身探测，220例Lua/九例桥仍待匹配Release。所有无新影响的已通过组不重复。
 3. 完成Source、Live和补漏26目标；Source十个native_oracle目标仅通过专用参考生成器，五个protocol目标用各自wrapper。为其余refs和formal bridge准备当前生产Release及Lua admission，再补这些依赖Release的实际用例。真实数据/权限ignored单列。自有窗口/子进程测试不等于真实游戏测试。
 4. 实际npm安装匹配23文件第一方Skill，执行no-home发现、installed Source及Agent Data。三项exporter/importer显式准备，不在测量内隐式构建；旧SQL私有metadata fixture不能拿来测新Agent。
 5. 再执行现有owned paired协议：完整任务、20对、不扣helper成本，CSV仅correctness；历史单pair、诊断profile和旧产物均不是当前性能验收。当前无≤0.30或全产品矩阵通过结论。
