@@ -1,6 +1,8 @@
 use super::*;
 use lycheedev_core::{
-    control::OperationControl, evidence, metadata::Metadata, selection, storage, workspace,
+    control::OperationControl, evidence,
+    metadata::{DataCacheMetadata, Metadata},
+    selection, storage, workspace,
 };
 use std::{
     path::{Path, PathBuf},
@@ -57,19 +59,46 @@ fn seed(home: &Path) {
         "Region!STRING:0|BuildConfig!HEX:16|CDNConfig!HEX:16|BuildId!DEC:4|VersionsName!STRING:0\ncn|{BUILD_KEY}|{CDN_KEY}|70000|12.1.5.70000\n"
     );
     let distribution = b"Name!STRING:0|Path!STRING:0|Hosts!STRING:0\ncn|tpr/wow|cdn.example.test\n";
-    let b = evidence::publish_blob(home, build.as_bytes(), 4096).unwrap();
-    let c = evidence::publish_blob(home, cdn, 4096).unwrap();
-    let v = evidence::publish_blob(home, versions.as_bytes(), 4096).unwrap();
-    let d = evidence::publish_blob(home, distribution, 4096).unwrap();
-    let mut metadata = Metadata::open(home, true).unwrap();
-    metadata
-        .put(&format!("remote-config/{BUILD_KEY}"), &b, None)
-        .unwrap();
-    metadata
-        .put(&format!("remote-config/{CDN_KEY}"), &c, None)
-        .unwrap();
-    metadata.put("remote-catalog/wow/cn", &json!({"productCode":"wow", "region":"cn", "observedAt":OBSERVED, "versions":v, "distribution":d}), None).unwrap();
-    metadata.close().unwrap();
+    let control = OperationControl::default();
+    let publish = |bytes: &[u8]| {
+        workspace::data_disk::publish_shared_blob_with_check(home, bytes, 4096, &control, &|| Ok(()))
+            .unwrap()
+    };
+    let b = publish(build.as_bytes());
+    let c = publish(cdn);
+    let v = publish(versions.as_bytes());
+    let d = publish(distribution);
+    // Remote consumers read their private Data cache. Keep target configs and
+    // pinned identities in historical metadata, and publish bodies through the
+    // same shared-blob admission as the production remote store.
+    for (key, value) in [
+        (
+            format!("remote-config/{BUILD_KEY}"),
+            serde_json::to_value(b).unwrap(),
+        ),
+        (
+            format!("remote-config/{CDN_KEY}"),
+            serde_json::to_value(c).unwrap(),
+        ),
+        ("remote-catalog/wow/cn".into(), json!({"productCode":"wow", "region":"cn", "observedAt":OBSERVED, "versions":v, "distribution":d})),
+    ] {
+        DataCacheMetadata::put_controlled_with_check(home, &key, &value, None, &control, || Ok(()))
+            .unwrap();
+    }
+}
+
+fn selector_value(flag: &str) -> &'static str {
+    match flag {
+        "--product" => "retail",
+        "--region" => "cn",
+        "--locale" => "zhCN",
+        "--build" => "12.1.5.70000",
+        "--definitions" => "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "--from" => "PIN-parent",
+        "--target" => "named",
+        "--installation" => "fixture-client",
+        _ => unreachable!("selector fixture flag"),
+    }
 }
 
 #[test]
@@ -87,7 +116,7 @@ fn real_argv_preserves_fixed_target_selector_exclusions() {
     ] {
         let mut args = words(&["target", "resolve", "--file", "selection.json", flag]);
         if flag != "--offline" {
-            args.push("value".into());
+            args.push(selector_value(flag).into());
         }
         let error = super::super::parse(&args).err().unwrap();
         assert_eq!(error.exit_code, 2);
@@ -104,10 +133,16 @@ fn real_argv_preserves_fixed_target_selector_exclusions() {
         "--locale",
     ] {
         let error = super::super::parse(&words(&[
-            "target", "resolve", "--target", "named", flag, "value",
+            "target",
+            "resolve",
+            "--target",
+            "named",
+            flag,
+            selector_value(flag),
         ]))
         .err()
         .unwrap();
+        assert_eq!(error.exit_code, 2);
         assert_eq!(
             error.message,
             format!("target resolve --target cannot be combined with {flag}")
@@ -117,6 +152,7 @@ fn real_argv_preserves_fixed_target_selector_exclusions() {
         .err()
         .unwrap();
     assert_eq!(error.message, "target resolve --build requires --product");
+    assert_eq!(error.exit_code, 2);
 }
 
 #[test]

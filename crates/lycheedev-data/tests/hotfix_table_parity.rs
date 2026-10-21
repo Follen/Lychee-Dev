@@ -889,6 +889,15 @@ fn named_hotfix_current_and_legacy_pages_retain_cache_through_archived_continuat
         inv.flags.insert("--limit".into(), "1".into());
         let first = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
         let source_id = first.data["source"]["id"].as_str().unwrap().to_owned();
+        let source_blob = &first.data["source"]["blob"];
+        let source_body = evidence::read_blob(&fixture.home, source_blob, 32 << 20).unwrap();
+        let digest = source_blob["sha256"].as_str().unwrap();
+        let data_owner = workspace::data_disk::DataCachePaths::new(&fixture.home).shared_blobs();
+        let owner_records = ["intent", "complete"].map(|extension| {
+            let path = data_owner.join(format!("{digest}.{extension}"));
+            let bytes = fs::read(&path).unwrap();
+            (path, bytes)
+        });
         let current = first.provenance[1].clone();
         assert_eq!(current["dependencies"], json!([source_id]));
         let mut owner = current.clone();
@@ -946,9 +955,16 @@ fn named_hotfix_current_and_legacy_pages_retain_cache_through_archived_continuat
         );
         evidence::remove_capture(&fixture.home, second.provenance[1]["id"].as_str().unwrap())
             .unwrap();
-        assert_eq!(
-            evidence::remove_capture(&fixture.home, &source_id).unwrap()["blobRemoved"],
-            true
-        );
+        // Removing the last CAP releases its manifest. Data's independent body
+        // ownership survives, including when the page manifest was historical.
+        assert_eq!(evidence::remove_capture(&fixture.home, &source_id).unwrap(), json!({
+            "captureId":source_id, "manifestRemoved":true, "retentionRemoved":false,
+            "blobRemoved":false, "blobShared":true, "blobMissing":false
+        }));
+        assert_eq!(fixture.count("capture/"), 0);
+        assert_eq!(fs::read(evidence::blob_path(&fixture.home, digest).unwrap()).unwrap(), source_body);
+        for (path, bytes) in owner_records {
+            assert_eq!(fs::read(path).unwrap(), bytes);
+        }
     }
 }

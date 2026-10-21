@@ -2837,8 +2837,8 @@ mod tests {
     }
     #[test]
     fn bounded_data_envelopes_preserve_timeout_after_parse_on_success_and_failure() {
-        let inv = parse_migration_oracle(&args(&["data", "spell", "auras", "--spell-id", "100"])).unwrap();
-        let mut outcome = Outcome::new(json!({"spellID":100}));
+        let inv = parse(&args(&["data", "cache", "prepare", "Sample"])).unwrap();
+        let mut outcome = Outcome::new(json!({"table":"Sample"}));
         outcome.selection = json!({"schema":"lycheedev.selection.v1","id":"PIN-kept"});
         let mut raw = vec![];
         render_with_context(&mut raw, "json", &Ok(outcome), Some(&inv)).unwrap();
@@ -2848,17 +2848,16 @@ mod tests {
             json!({"snapshot":"PIN-kept","timeoutSeconds":300})
         );
 
-        let missing = parse_migration_oracle(&args(&["data", "spell", "auras"])).unwrap();
         raw.clear();
-        render_with_context(&mut raw, "json", &lycheedev_data::migration_oracle::dispatch(&missing), Some(&missing)).unwrap();
+        render_with_context(&mut raw, "json", &Err(ToolkitError::new("records.fixture_failure", "bounded fixture failure", 5)), Some(&inv)).unwrap();
         let value: Value = serde_json::from_slice(&raw).unwrap();
         assert_eq!(value["context"], json!({"timeoutSeconds":300}));
         assert_eq!(
             value["error"]["message"],
-            "data spell auras requires --spell-id"
+            "bounded fixture failure"
         );
 
-        let explicit = parse_migration_oracle(&args(&["data", "sql", "--timeout-seconds", "1"])).unwrap();
+        let explicit = parse(&args(&["data", "cache", "prepare", "Sample", "--timeout-seconds", "1"])).unwrap();
         raw.clear();
         render_with_context(
             &mut raw,
@@ -3160,10 +3159,8 @@ mod tests {
         let id = outcome.data["id"].as_str().unwrap();
         assert!(selection::load_pinned(&home, id).is_ok());
         direct.flags.insert("--product".into(), "classic".into());
-        assert_eq!(
-            dispatch(&direct).unwrap_err().code,
-            "records.client_identity"
-        );
+        let mismatch = dispatch(&direct).unwrap_err();
+        assert_eq!((mismatch.code.as_str(), mismatch.exit_code), ("selection.installation_product_mismatch", 2));
         let add = parse_migration_oracle(&args(&[
             "target",
             "add",
@@ -3205,11 +3202,11 @@ mod tests {
     #[test]
     fn normal_invocation_control_public_operation_budget_honors_entire_query_and_explicit_live_wait_limits() {
         use std::time::{Duration, Instant};
-        let query = parse_migration_oracle(&args(&[
+        let query = parse(&args(&[
             "data",
-            "sql",
-            "--sql",
-            "select 1",
+            "cache",
+            "prepare",
+            "Sample",
             "--timeout-seconds",
             "3600",
         ]))
@@ -3223,7 +3220,7 @@ mod tests {
             vec!["source", "refs", "--snapshot", "fixture", "--symbol", "Target", "--static-only"],
             vec!["source", "batch", "--snapshot", "fixture", "--file", "fixture.json"],
         ] {
-            let source = parse_migration_oracle(&args(&words)).unwrap();
+            let source = parse(&args(&words)).unwrap();
             assert_eq!(operation_seconds(&source).unwrap(), 90, "{:?}", words);
             let mut parsed = Ok(source);
             let before = Instant::now();
@@ -3232,9 +3229,9 @@ mod tests {
             assert!(deadline >= before + Duration::from_secs(90));
             assert!(deadline <= Instant::now() + Duration::from_secs(90));
         }
-        let live = parse_migration_oracle(&args(&["live", "execute", "--wait-seconds", "600"])).unwrap();
+        let live = parse(&args(&["live", "execute", "--wait-seconds", "600"])).unwrap();
         assert_eq!(operation_seconds(&live).unwrap(), 660);
-        let invalid = parse_migration_oracle(&args(&["live", "execute", "--wait-seconds", "-1"])).unwrap_err();
+        let invalid = parse(&args(&["live", "execute", "--wait-seconds=-1"])).unwrap_err();
         assert_eq!(invalid.exit_code, 2);
         assert_eq!(invalid.code, "command.invalid_arguments");
         assert_eq!(invalid.message, "--wait-seconds must be between 1 and 600");

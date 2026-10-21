@@ -1,13 +1,15 @@
 //! F4 reproductions through authenticated local providers, not SDK-only limits.
 //! Header-only inputs isolate count admission before intentionally absent bodies.
 //! Small compressed content isolates the actual request's decoded-byte boundary.
+//! This migration-oracle target intentionally exercises frozen Data routes;
+//! production dispatch keeps those routes retired in favor of typed Agent tasks.
 #[allow(dead_code)]
 #[path = "support/catalog_fixture.rs"]
 mod fixture;
 
 use fixture::{Cell::U, Fixture, Table, table};
 use lycheedev_core::{Invocation, Outcome, Result, evidence, metadata::Metadata};
-use lycheedev_data::{dispatch, stream};
+use lycheedev_data::{migration_oracle::dispatch, stream};
 use serde_json::Value;
 use std::{fs, io::Write, sync::atomic::Ordering};
 

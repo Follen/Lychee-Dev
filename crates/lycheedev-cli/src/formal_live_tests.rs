@@ -124,6 +124,13 @@ fn invocation(words: &[&str], root: &Path) -> Invocation {
     inv.home = root.join("home");
     inv
 }
+fn assert_clap_error(error: &ToolkitError, kind: &str, token: &str) {
+    assert_eq!(error.code, "command.invalid_arguments");
+    assert_eq!(error.exit_code, 2);
+    assert_eq!(error.details["parser"], "clap");
+    assert_eq!(error.details["kind"], kind);
+    assert!(error.details["diagnostic"].as_str().unwrap().contains(token), "{error:?}");
+}
 fn run(inv: &Invocation, fake: Fake) -> Response {
     // Exactly the production main boundary, followed by its injectable formal
     // service factory. A generic Outcome/old host cannot answer this test.
@@ -259,10 +266,10 @@ fn route_and_argument_priority_matches_frozen_go() {
     }
 }
 #[test]
-fn parser_live_typed_options_keep_argv_order_and_exact_errors() {
+fn parser_live_typed_options_keep_admitted_value_order_and_exact_errors() {
     for (args, message) in [
         (
-            vec!["live", "execute", "--budget-seconds", "0", "--pid", "0"],
+            vec!["live", "execute", "--budget-seconds", "0"],
             "--budget-seconds must be between 1 and 120",
         ),
         (
@@ -273,15 +280,14 @@ fn parser_live_typed_options_keep_argv_order_and_exact_errors() {
             vec!["live", "connect", "--wait-seconds", "0", "--pid", "0"],
             "--wait-seconds must be between 1 and 600",
         ),
-        (
-            vec!["live", "execute", "--policy", "retry"],
-            "--policy must be observation or opaque",
-        ),
         (vec!["live", "bugs", "--count", "2001"], "invalid --count"),
     ] {
         let e = crate::parse(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap_err();
         assert_eq!(e.message, message);
     }
+    let error = crate::parse(&["live", "execute", "--policy", "retry"].map(str::to_owned)).unwrap_err();
+    assert_clap_error(&error, "InvalidValue", "--policy");
+    assert!(error.details["diagnostic"].as_str().unwrap().contains("retry"));
 }
 #[test]
 fn connect_and_activation_preserve_explicit_target() {
@@ -896,7 +902,7 @@ fn no_cache_compatibility_does_not_change_formal_resume_action() {
     let calls = Rc::new(RefCell::new(vec![]));
     for words in [
         vec!["live", "connect", "--session", "CON-original"],
-        vec!["--no-cache", "live", "connect", "--session", "CON-original"],
+        vec!["live", "connect", "--no-cache", "--session", "CON-original"],
     ] {
         let inv = invocation(&words, &f.0);
         run(&inv, fake(&f.0, calls.clone()));
@@ -909,6 +915,7 @@ fn no_cache_compatibility_does_not_change_formal_resume_action() {
         ]
     );
     for words in [
+        vec!["--no-cache", "live", "connect", "--session", "CON-original"],
         vec!["live", "status", "CON-original", "--no-cache"],
         vec!["live", "connect", "--no-cache=false"],
     ] {
@@ -944,45 +951,47 @@ fn file_admission_failures_keep_empty_context_and_do_not_invoke_backend() {
     }
 }
 #[test]
-fn live_parser_mixed_errors_follow_second_pass_value_order() {
-    for (words, expected) in [
+fn live_parser_structural_errors_precede_admitted_value_checks() {
+    for (words, kind, token) in [
         (
             vec!["live", "execute", "--budget-seconds", "0", "--pid", "0"],
-            "--budget-seconds must be between 1 and 120",
+            "UnknownArgument", "--pid",
         ),
         (
             vec!["live", "connect", "--pid", "0", "--pid", "1"],
-            "invalid --pid",
+            "ArgumentConflict", "--pid",
         ),
         (
             vec!["live", "connect", "--pid", "1", "--pid", "0"],
-            "repeated flag --pid",
+            "ArgumentConflict", "--pid",
         ),
         (
             vec!["live", "execute", "--budget-seconds", "1", "--pid", "0"],
-            "--pid is not supported by live execute; use live execute --help",
+            "UnknownArgument", "--pid",
         ),
         (
             vec!["live", "execute", "--budget-seconds", "0", "--unknown"],
-            "unknown flag --unknown",
-        ),
-        (
-            vec!["live", "connect", "--wait-seconds", "0", "--pid", "+1"],
-            "--wait-seconds must be between 1 and 600",
+            "UnknownArgument", "--unknown",
         ),
     ] {
         let error =
             crate::parse(&words.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap_err();
-        assert_eq!(error.message, expected, "{words:?}");
+        assert_clap_error(&error, kind, token);
     }
+    let error = crate::parse(&["live", "connect", "--wait-seconds", "0", "--pid", "+1"].map(str::to_owned)).unwrap_err();
+    assert_eq!(error.message, "--wait-seconds must be between 1 and 600");
 }
 #[test]
 fn pid_uses_go_parse_uint_lexical_boundary() {
-    for pid in ["+1", "-1", "0", "4294967296", "1_0", "１"] {
+    for pid in ["+1", "0", "4294967296", "1_0", "１"] {
         let error =
             crate::parse(&["live", "connect", "--pid", pid].map(str::to_owned)).unwrap_err();
         assert_eq!(error.message, "invalid --pid", "{pid}");
     }
+    // An inline negative is a value; a separate negative is a clap option token.
+    assert_eq!(crate::parse(&["live", "connect", "--pid=-1"].map(str::to_owned)).unwrap_err().message, "invalid --pid");
+    let error = crate::parse(&["live", "connect", "--pid", "-1"].map(str::to_owned)).unwrap_err();
+    assert_clap_error(&error, "UnknownArgument", "-1");
     for pid in ["1", "0001", "4294967295"] {
         assert!(crate::parse(&["live", "connect", "--pid", pid].map(str::to_owned)).is_ok());
     }

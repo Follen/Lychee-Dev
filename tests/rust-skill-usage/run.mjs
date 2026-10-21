@@ -4,15 +4,46 @@ import assert from 'node:assert/strict';
 import {assertHelp, assertCommandSchema, assertSearch} from './agent-discovery.mjs';
 import {spawnSync} from 'node:child_process';
 import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync} from 'node:fs';
-import {dirname, delimiter, join, resolve} from 'node:path';
+import {dirname, delimiter, isAbsolute, join, relative, resolve, sep} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import os from 'node:os';
 import {performance} from 'node:perf_hooks';
-import {assertApiAnswer, assertBoundedCoverage, assertNativeContext, assertNativeEvidence, assertPackagedIncrement, commandFlags, evaluateWorkflowCheck, inventory, inventoryHash, jsonFile, loadCurrentWorkflow, pendingIncrementTasks, POST_SEMANTIC_REQUIREMENTS, sha256, within} from './assertions.mjs';
+import {assertApiAnswer, assertBoundedCoverage, assertNativeContext, assertNativeEvidence, assertPackagedIncrement, commandFlags, evaluateWorkflowCheck, inventory, inventoryHash, jsonFile, loadCurrentWorkflow, pendingIncrementTasks, POST_SEMANTIC_REQUIREMENTS, sha256, verifyCandidate, within} from './assertions.mjs';
 import {assertDataSkillDirectory, dataSkillIdentity} from './data-skill-contract.mjs';
 import {assertAnchor, assertEnvelope, assertPageContinuation, assertQuery, assertStaticCall} from '../rust-source-full-corpus/assertions.mjs';
 
-const [packageArg, scratchArg, evidenceArg, packageSHA256, ...extra] = process.argv.slice(2);
-assert(packageArg && scratchArg && evidenceArg && /^[a-f0-9]{64}$/.test(packageSHA256) && !extra.length, 'owned controller needs package, scratch, evidence, package digest');
+export function sourceUsageArguments(argv) {
+  const installed = argv[0] === '--installed';
+  const [artifactArg, candidateArg, ...extra] = installed ? argv.slice(1) : argv;
+  assert(artifactArg && candidateArg && !artifactArg.startsWith('--') && !candidateArg.startsWith('--') && !extra.length,
+    'usage: node tools/rust-skill-usage.mjs [--installed] <artifact.json> <candidate-report.json>');
+  return {installed, artifactArg, candidateArg};
+}
+
+// The caller first authenticates the candidate with verifyCandidate. npmSmoke
+// supplies the installation provenance; actual bytes must still equal that
+// independently authenticated package, including its EXE and complete Skill.
+export function installedSourcePackage(root, candidate) {
+  assert.equal(candidate.report.npmSmoke, 'passed', 'installed Source requires passed npm smoke');
+  assert.equal(typeof candidate.report.installedRoot, 'string', 'npm smoke installedRoot required');
+  assert(isAbsolute(candidate.report.installedRoot), 'absolute npm installedRoot required');
+  const installedRoot = within(root, relative(root, resolve(candidate.report.installedRoot)).split(sep).join('/'));
+  assert.notEqual(installedRoot, candidate.packageRoot, 'npm installation must be distinct from staged candidate');
+  assert.deepEqual(inventory(installedRoot), candidate.files, 'npm installation equals authenticated candidate package');
+  const skill = join(installedRoot, 'payload/skill');
+  const contract = assertDataSkillDirectory(skill), skillIdentity = dataSkillIdentity(contract);
+  return {mode: 'installed', installedRoot, packageRoot: candidate.packageRoot,
+    candidateReportSHA256: candidate.reportSHA256, packageSHA256: candidate.packageSHA256,
+    binarySHA256: candidate.report.binarySHA256, skillIdentity, skillFiles: contract.files.length, npmSmoke: 'passed',
+    launcher: join(installedRoot, 'bin/lycheedev.mjs'), skill: join(skill, 'scripts/lycheedev.mjs'),
+    entryKind: 'installed-npm-package-launcher', skillPrefixDiscovery: 'not_run'};
+}
+
+export function runSourceUsage(argv = process.argv.slice(2), {spawn = spawnSync} = {}) {
+const [packageArg, scratchArg, evidenceArg, packageSHA256, ...extra] = argv;
+const installed = extra[0] === '--installed';
+assert(packageArg && scratchArg && evidenceArg && /^[a-f0-9]{64}$/.test(packageSHA256)
+  && (!extra.length || (installed && extra.length === 2)), 'owned controller needs package, scratch, evidence, package digest, optional --installed candidate report');
 assert.equal(process.platform, 'win32', 'Windows acceptance only');
 const root = resolve('.'), sourcePackage = resolve(packageArg), scratch = resolve(scratchArg), out = resolve(evidenceArg);
 const owner = jsonFile(join(out, 'receipt.json'));
@@ -20,6 +51,16 @@ assert.equal(owner.owner, 'skill-real-usage'); assert.equal(owner.state, 'active
 assert.equal(resolve(owner.directory), scratch, 'controlled scratch owner');
 assert.equal(readdirSync(scratch).length, 0, 'fresh controlled scratch');
 const workflow = loadCurrentWorkflow(root);
+const installedPackage = installed ? (() => {
+  const identity = jsonFile(join(out, 'candidate-identity.json'));
+  const candidate = verifyCandidate(root, resolve(extra[1]), identity.artifact, workflow);
+  assert.equal(candidate.reportSHA256, identity.candidateReportSHA256);
+  assert.equal(candidate.packageRoot, sourcePackage);
+  assert.equal(candidate.packageSHA256, packageSHA256);
+  const launch = installedSourcePackage(root, candidate);
+  assert.deepEqual(launch, identity.installation, 'same admitted npm installation');
+  return launch;
+})() : null;
 const oracle = jsonFile(new URL('../rust-source-full-corpus/retail-oracle.json', import.meta.url));
 const report = {
   schema: 'lycheedev.skill-real-usage.v2', state: 'running', startedAt: new Date().toISOString(),
@@ -30,11 +71,17 @@ const report = {
   boundaries: ['staged npm-prefix resolution fixture, not npm installation acceptance', 'selected full-Retail tasks; complete byte-authenticated corpus gate is separate', 'Go321 keyboard, Go322 slot startup and Go323 Data requirements retain their historical fixtures; selected candidate Skill bytes are authenticated separately and runtime tasks remain not_run', 'ordinary semantic refs/context do not establish complete native lifecycle or flow coverage', 'no game, source/config execution, release publication or performance claim', 'capture IDs belong to retired isolated home; their actual returned envelopes and excerpts remain in sealed evidence'],
 };
 const save = () => writeFileSync(join(out, 'report.json'), JSON.stringify(report, null, 2) + '\n');
+report.executionMode = installed ? 'installed' : 'staged';
+if (installed) {
+  report.installation = installedPackage;
+  report.boundaries[0] = 'real npm installation from authenticated passed npm-smoke report; package launcher entry; 25-file Skill authenticated, Skill prefix discovery not run in this mode';
+}
 save();
 let fatalProcessFailure = false, sequence = 0, outputBytes = 0, stagedReady = false, directory, pin, api, action;
 const started = performance.now(), deadline = started + 570000;
-const prefix = join(scratch, '空间 prefix'), staged = join(prefix, 'node_modules', 'lycheedev'), home = join(scratch, '研究 home');
-const launcher = join(staged, 'payload', 'skill', 'scripts', 'lycheedev.mjs');
+const prefix = installed ? dirname(dirname(installedPackage.installedRoot)) : join(scratch, '空间 prefix');
+const staged = installedPackage?.installedRoot ?? join(prefix, 'node_modules', 'lycheedev'), home = join(scratch, '研究 home');
+const launcher = installedPackage?.launcher ?? join(staged, 'payload', 'skill', 'scripts', 'lycheedev.mjs');
 const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !['PATH', 'LYCHEEDEV_BIN', 'LYCHEEDEV_HOME', 'HOME', 'USERPROFILE', 'TEMP', 'TMP'].includes(name.toUpperCase())));
 Object.assign(env, {PATH: `${prefix}${delimiter}${process.env.PATH ?? process.env.Path ?? ''}`, LYCHEEDEV_HOME: home, HOME: join(scratch, 'user'), USERPROFILE: join(scratch, 'user'), TEMP: join(scratch, 'temp'), TMP: join(scratch, 'temp')});
 for (const path of [env.HOME, env.TEMP]) mkdirSync(path, {recursive: true});
@@ -48,7 +95,7 @@ function invoke(caseId, args, {expectedExit = 0, timeout = 210000, phase = 'loca
   if (remaining < 1000 || sequence >= 60 || outputBytes >= 192 << 20) { fatalProcessFailure = true; throw new Error('skill-usage.total_controller_budget'); }
   const index = String(sequence++).padStart(3, '0'), fullArgs = [launcher, ...args, ...(['cli','schema'].includes(args[0]) ? [] : ['--home',home]), '--format', 'json'];
   const time = performance.now(), startedAt = new Date().toISOString();
-  const run = spawnSync(process.execPath, fullArgs, {cwd: scratch, env, windowsHide: true, shell: false, timeout: Math.min(timeout, remaining), maxBuffer: 12 << 20});
+  const run = spawn(process.execPath, fullArgs, {cwd: scratch, env, windowsHide: true, shell: false, timeout: Math.min(timeout, remaining), maxBuffer: 12 << 20});
   const stdout = run.stdout ?? Buffer.alloc(0), stderr = run.stderr ?? Buffer.alloc(0);
   outputBytes += stdout.length + stderr.length;
   const stdoutName = `${index}-${caseId}.stdout.json`, stderrName = `${index}-${caseId}.stderr.bin`;
@@ -92,21 +139,23 @@ function nativeSummary(native) {
 }
 
 try {
-  check('stage-authenticated-packaged-skill', () => {
+  check(installed ? 'authenticate-installed-package' : 'stage-authenticated-packaged-skill', () => {
     const files = inventory(sourcePackage); assert.equal(inventoryHash(files), packageSHA256);
-    for (const row of files) { const target = join(staged, row.path); mkdirSync(dirname(target), {recursive: true}); copyFileSync(within(sourcePackage, row.path), target); }
-    assert.equal(inventoryHash(inventory(staged)), packageSHA256, 'exact staged package bytes');
-    // Only an npm-prefix resolution marker. The Skill detects this file and
-    // directly invokes node_modules/lycheedev/bin/lycheedev.mjs with Node; no
-    // shell or shim contents execute. This is explicitly not an npm install.
-    writeFileSync(join(prefix, 'lycheedev.cmd'), '@echo off\r\nexit /b 99\r\n');
+    if (!installed) {
+      for (const row of files) { const target = join(staged, row.path); mkdirSync(dirname(target), {recursive: true}); copyFileSync(within(sourcePackage, row.path), target); }
+      // Only an npm-prefix resolution marker. The Skill directly invokes the
+      // package launcher with Node; no shell or shim contents execute.
+      writeFileSync(join(prefix, 'lycheedev.cmd'), '@echo off\r\nexit /b 99\r\n');
+    }
+    assert.equal(inventoryHash(inventory(staged)), packageSHA256, installed ? 'exact installed package bytes' : 'exact staged package bytes');
     for (const name of workflow.requiredSkillFiles) assert(existsSync(join(staged, 'payload', 'skill', name)), `complete fixed Skill resource ${name}`);
     assertDataSkillDirectory(join(staged, 'payload', 'skill'));
-    report.launch = {skill: launcher, packageLauncher: join(staged, 'bin', 'lycheedev.mjs'), prefix, explicitNativeOverride: false, mode: 'Skill npm-prefix discovery to packaged verified native handoff'};
+    report.launch = installed ? {...installedPackage, packageLauncher: launcher, explicitNativeOverride: false}
+      : {skill: launcher, packageLauncher: join(staged, 'bin', 'lycheedev.mjs'), prefix, explicitNativeOverride: false, mode: 'Skill npm-prefix discovery to packaged verified native handoff', entryKind: 'staged-skill-launcher', skillPrefixDiscovery: 'executed'};
     stagedReady = true;
     return {files: files.length, requiredSkillFiles: workflow.requiredSkillFiles.length};
   });
-  assert(stagedReady, 'authenticated package staging failed; no launcher run');
+  assert(stagedReady, 'authenticated package preparation failed; no launcher run');
   for (const increment of workflow.increments) check(`fixed-skill-contract-${increment.id}`, () => assertPackagedIncrement(join(staged, 'payload', 'skill'), workflow, increment, report.skillIdentity));
   check('packaged-version', () => { const {result} = invoke('version', ['version']); assert.equal(result.platform, 'windows/amd64'); assert.equal(typeof result.rust, 'string'); assert(result.rust.length > 0); return {version: result.version, rust: result.rust}; });
   check('installed-command-discovery', () => { const {result} = invoke('describe', ['describe']); assert(Array.isArray(result.commands)); directory = result.commands; return {commands: directory.length}; });
@@ -211,9 +260,10 @@ try {
   if (!fatalProcessFailure && directory?.some(row => row.path === 'source session close') && existsSync(home)) {
     check('release-owned-session', () => { const {result} = invoke('session-close', ['source', 'session', 'close'], {timeout: 30000}); assert.equal(result.state, 'closed'); return {state: result.state}; });
   }
-  try { report.stagedPackageStable = inventoryHash(inventory(staged)) === packageSHA256; } catch (error) { report.stagedPackageStable = false; report.stagedPackageError = error.message; }
+  const stableField = installed ? 'installedPackageStable' : 'stagedPackageStable';
+  try { report[stableField] = inventoryHash(inventory(staged)) === packageSHA256; } catch (error) { report[stableField] = false; report[installed ? 'installedPackageError' : 'stagedPackageError'] = error.message; }
   report.finishedAt = new Date().toISOString(); report.wallMillis = performance.now() - started; report.outputBytes = outputBytes;
-  report.state = !report.blocker && report.stagedPackageStable && report.checks.every(row => row.state === 'passed') ? 'passed_selected_skill_workflows' : 'failed';
+  report.state = !report.blocker && report[stableField] && report.checks.every(row => row.state === 'passed') ? 'passed_selected_skill_workflows' : 'failed';
   report.completeSkillAcceptance = false;
   report.remaining = ['independent review of this real output trail', ...report.pendingTasks.map(row => `${row.taskId}: ${row.reason}`), 'full Data/addon/Live Skill branches', 'complete fixed-Go differential', 'native lifecycle/corpus/performance gates'];
   save();
@@ -221,3 +271,6 @@ try {
 console.log(JSON.stringify({state: report.state, goContract: report.goContract, completeSkillAcceptance: false, pendingTasks: report.pendingTasks,
   report: join(out, 'report.json'), passed: report.checks.filter(row => row.state === 'passed').length, failed: report.checks.filter(row => row.state === 'failed').length}));
 if (report.state !== 'passed_selected_skill_workflows') process.exitCode = 1;
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) runSourceUsage();

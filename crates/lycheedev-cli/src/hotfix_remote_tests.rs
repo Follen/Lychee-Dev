@@ -189,7 +189,17 @@ fn admitted_hotfix_values_fail_before_any_workspace_io_for_every_source() {
     }
 }
 #[test]
-fn admitted_hotfix_value_error_precedes_later_duplicate_or_source_error() {
+fn hotfix_clap_duplicates_precede_admitted_value_checks() {
+    // Once the command shape is admitted, numeric validation still follows
+    // argv order and retains its specific business diagnostic.
+    for (tail, message) in [
+        (vec!["--max-pages", "0", "--table-hash", "bad"], "--max-pages must be between 1 and 2048"),
+        (vec!["--table-hash", "bad", "--max-pages", "0"], "--table-hash requires eight hexadecimal digits"),
+    ] {
+        let mut argv = words(&["data", "hotfix", "--source", "dbcache"]);
+        argv.extend(words(&tail));
+        assert_eq!(parse(&argv).unwrap_err().message, message);
+    }
     for source in ["dbcache", "wago", "raidbots"] {
         for scan in [false, true] {
             let mut a = words(&["data", "hotfix", "--source", source]);
@@ -197,10 +207,10 @@ fn admitted_hotfix_value_error_precedes_later_duplicate_or_source_error() {
                 a.push("--scan".into());
             }
             a.extend(words(&["--table-hash", "bad", "--table-hash", "0000002A"]));
-            assert_eq!(
-                parse(&a).unwrap_err().message,
-                "--table-hash requires eight hexadecimal digits"
-            );
+            let error = parse(&a).unwrap_err();
+            assert_hotfix_clap_error(&error, "ArgumentConflict", "--table-hash");
+            a.truncate(a.len() - 2);
+            assert_eq!(parse(&a).unwrap_err().message, "--table-hash requires eight hexadecimal digits");
             let mut a = words(&[
                 "data",
                 "hotfix",
@@ -211,12 +221,12 @@ fn admitted_hotfix_value_error_precedes_later_duplicate_or_source_error() {
                 "--max-pages",
                 "1",
             ]);
-            assert_eq!(
-                parse(&a).unwrap_err().message,
-                "--max-pages must be between 1 and 2048"
-            );
+            assert_hotfix_clap_error(&parse(&a).unwrap_err(), "ArgumentConflict", "--max-pages");
             a[5] = "1".into();
-            assert_eq!(parse(&a).unwrap_err().message, "repeated flag --max-pages");
+            assert_hotfix_clap_error(&parse(&a).unwrap_err(), "ArgumentConflict", "--max-pages");
+            a[5] = "0".into();
+            a.truncate(a.len() - 2);
+            assert_eq!(parse(&a).unwrap_err().message, "--max-pages must be between 1 and 2048");
         }
     }
 }
@@ -261,7 +271,7 @@ fn admitted_decimal_looking_hash_is_hex_and_maximum_budgets_are_accepted() {
 }
 
 #[test]
-fn admitted_source_and_encoding_fail_in_argv_order_without_io() {
+fn clap_source_and_encoding_fail_in_argv_order_without_io() {
     let home = std::env::temp_dir().join(format!(
         "lychee-hotfix-enum-no-io-{}-{}",
         std::process::id(),
@@ -270,65 +280,72 @@ fn admitted_source_and_encoding_fail_in_argv_order_without_io() {
             .unwrap()
             .as_nanos()
     ));
-    for (tail, expected) in [
+    for (tail, flag) in [
         (
             vec!["--source", "bogus", "--max-pages", "0"],
-            "--source must be wago, dbcache, or raidbots",
+            "--source",
         ),
         (
             vec!["--source", "bogus", "--source", "wago"],
-            "--source must be wago, dbcache, or raidbots",
+            "--source",
         ),
         (
             vec!["--encoding", "bogus", "--source", "bogus"],
-            "--encoding must be raw, png, or webp",
+            "--encoding",
         ),
         (
             vec!["--source", "bogus", "--encoding", "bogus"],
-            "--source must be wago, dbcache, or raidbots",
+            "--source",
         ),
         (
             vec!["--encoding", "bogus", "--encoding", "csv"],
-            "--encoding must be raw, png, or webp",
+            "--encoding",
         ),
     ] {
         let mut a = words(&["data", "hotfix", "--home", home.to_str().unwrap()]);
         a.extend(words(&tail));
         let error = parse(&a).unwrap_err();
-        assert_eq!(error.message, expected);
-        assert_eq!(error.exit_code, 2);
+        assert_hotfix_clap_error(&error, "InvalidValue", flag);
+        assert!(error.details["diagnostic"].as_str().unwrap().contains("bogus"));
         assert!(!home.exists());
     }
     for source in ["dbcache", "wago", "raidbots"] {
-        for encoding in ["csv", "raw", "png", "webp"] {
-            assert!(
-                parse(&words(&[
+        // The formal Hotfix command advertises CSV; raw/png/webp belong to
+        // asset export and are not accepted by this command's clap enum.
+        assert!(parse(&words(&["data", "hotfix", "--source", source, "--encoding", "csv"])).is_ok());
+        for encoding in ["raw", "png", "webp"] {
+            let error = parse(&words(&[
                     "data",
                     "hotfix",
                     "--source",
                     source,
                     "--encoding",
                     encoding
-                ]))
-                .is_ok()
-            );
+                ])).unwrap_err();
+            assert_hotfix_clap_error(&error, "InvalidValue", "--encoding");
+            assert!(error.details["diagnostic"].as_str().unwrap().contains(encoding));
         }
         for encoding in ["json", "CSV", "bogus"] {
-            assert_eq!(
-                parse(&words(&[
+            let error = parse(&words(&[
                     "data",
                     "hotfix",
                     "--source",
                     source,
                     "--encoding",
                     encoding
-                ]))
-                .unwrap_err()
-                .message,
-                "--encoding must be raw, png, or webp"
-            );
+                ])).unwrap_err();
+            assert_hotfix_clap_error(&error, "InvalidValue", "--encoding");
+            assert!(error.details["diagnostic"].as_str().unwrap().contains(encoding));
         }
     }
+}
+
+fn assert_hotfix_clap_error(error: &ToolkitError, kind: &str, flag: &str) {
+    assert_eq!(error.code, "command.invalid_arguments");
+    assert_eq!(error.exit_code, 2);
+    assert_eq!(error.details["parser"], "clap");
+    assert_eq!(error.details["kind"], kind);
+    assert!(error.details["diagnostic"].as_str().unwrap().contains(flag), "{error:?}");
 }
 
 #[test]

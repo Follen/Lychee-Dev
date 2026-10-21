@@ -128,7 +128,10 @@ fn project_cli_required_and_empty_values_preserve_parser_then_dispatch_priority(
         let args = ["project", verb, flag, ""].map(str::to_owned);
         let error = parse(&args).unwrap_err();
         assert_eq!(error.exit_code, 2);
-        assert_eq!(error.message, format!("empty value for {flag}"));
+        assert_eq!(error.code, "command.invalid_arguments");
+        assert_eq!(error.details["parser"], "clap");
+        assert_eq!(error.details["kind"], "InvalidValue");
+        assert!(error.details["diagnostic"].as_str().unwrap().contains(flag));
         let inv = f.inv(&["project", verb]);
         let error = dispatch(&inv).unwrap_err();
         assert_eq!(error.exit_code, 2);
@@ -145,7 +148,8 @@ fn project_init_and_status_reject_home_before_dispatch() {
         assert_eq!(error.exit_code, 2);
         assert_eq!(
             error.message,
-            format!("--home is not supported by project {verb}; use project {verb} --help")
+            format!("--home is not supported by project {verb}")
         );
+        assert_eq!(error.details, json!({"parser":"clap","kind":"UnknownArgument","flag":"--home"}));
     }
 }

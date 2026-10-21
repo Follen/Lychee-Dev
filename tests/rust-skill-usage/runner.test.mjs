@@ -1,13 +1,14 @@
 // Linux-capable checker/fault tests. These are never real CLI/Skill acceptance.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {lstatSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
+import {existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync} from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import os from 'node:os';
 import {assertApiAnswer, assertBoundedCoverage, assertCurrentSelectedReport, assertNativeContext, assertNativeEvidence, assertPackagedIncrement, commandFlags, CURRENT_GO_CONTRACT, CURRENT_WORKFLOW, currentWorkflowInputs, evaluateWorkflowCheck, inventory, inventoryHash, jsonFile, loadCurrentWorkflow, nativeOperationDigest, nativePlanDigest, pendingIncrementTasks, POST_SEMANTIC_REQUIREMENTS, sha256, skillTreeIdentity, verifyCandidate, within} from './assertions.mjs';
 
 import {loadReviewedSkillContract, reviewedSkillIdentity} from './skill-identity.mjs';
+import {installedSourcePackage, runSourceUsage, sourceUsageArguments} from './run.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const historicalWorkflow = jsonFile(new URL('./workflow.json', import.meta.url));
@@ -168,6 +169,94 @@ test('complete manifest-bound candidate checker accepts only synthetic fixture i
   const f = fixture(t), verified = f.verify();
   assert.equal(verified.reportSHA256, sha256(readFileSync(f.reportPath)));
   assert.equal(verified.packageSHA256, inventoryHash(inventory(f.packageRoot)));
+});
+
+function installedFixture(t) {
+  const f = fixture(t), installedRoot = join(f.root, 'real npm prefix/node_modules/lycheedev');
+  for (const row of inventory(f.packageRoot)) write(join(installedRoot, row.path), readFileSync(join(f.packageRoot, row.path)));
+  Object.assign(f.report, {state: 'partial_passed', npmSmoke: 'passed', installedRoot}); f.rewrite();
+  return {...f, installedRoot, installed: () => installedSourcePackage(f.root, f.verify())};
+}
+
+test('Source installed mode is explicit and leaves the default staged arguments intact', () => {
+  assert.deepEqual(sourceUsageArguments(['artifact', 'candidate']), {installed: false, artifactArg: 'artifact', candidateArg: 'candidate'});
+  assert.deepEqual(sourceUsageArguments(['--installed', 'artifact', 'candidate']), {installed: true, artifactArg: 'artifact', candidateArg: 'candidate'});
+  for (const args of [[], ['--installed', 'artifact'], ['artifact', 'candidate', '--installed'], ['--unknown', 'candidate']]) assert.throws(() => sourceUsageArguments(args), /usage:/);
+});
+
+test('installed Source binds passed npm provenance, full package, native bytes and all 25 fixed Skill files', t => {
+  const f = installedFixture(t), launch = f.installed();
+  assert.equal(launch.installedRoot, f.installedRoot);
+  assert.equal(launch.launcher, join(f.installedRoot, 'bin/lycheedev.mjs'));
+  assert.equal(launch.entryKind, 'installed-npm-package-launcher');
+  assert.equal(launch.skillPrefixDiscovery, 'not_run');
+  assert.equal(launch.candidateReportSHA256, f.verify().reportSHA256);
+  assert.equal(launch.skillFiles, 25);
+  const original = structuredClone(f.report);
+  for (const change of [{npmSmoke: 'not_run'}, {installedRoot: undefined}, {installedRoot: 'relative'}, {installedRoot: f.packageRoot}, {installedRoot: dirname(f.root)}]) {
+    Object.assign(f.report, original, change); f.rewrite(); assert.throws(f.installed);
+  }
+  Object.assign(f.report, original); f.rewrite();
+  for (const path of ['bin/lycheedev.mjs', 'native/windows-amd64/lycheedev.exe', 'payload/skill/SKILL.md']) {
+    const fullPath = join(f.installedRoot, path), originalBytes = readFileSync(fullPath);
+    write(fullPath, Buffer.alloc(originalBytes.length, 'x'));
+    assert.throws(f.installed, /npm installation equals authenticated candidate package/);
+    write(fullPath, originalBytes);
+  }
+  write(join(f.installedRoot, 'unmanifested'), 'extra'); assert.throws(f.installed, /authenticated candidate package/);
+});
+
+test('mocked Source controller runs the installed package directly and preserves staged Skill discovery separately', t => {
+  t.mock.method(console, 'log', () => {});
+  const f = installedFixture(t);
+  for (const path of currentWorkflowInputs(workflow)) write(join(f.root, path), readFileSync(join(repository, path)));
+  const previousCwd = process.cwd(), previousExit = process.exitCode, platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  try {
+    process.chdir(f.root); Object.defineProperty(process, 'platform', {...platform, value: 'win32'});
+    for (const installed of [true, false]) {
+      const scratch = join(f.root, installed ? 'installed-work' : 'staged-work'), out = join(f.root, installed ? 'installed-evidence' : 'staged-evidence');
+      mkdirSync(scratch); json(join(out, 'receipt.json'), {owner: 'skill-real-usage', state: 'active', directory: scratch});
+      const candidate = f.verify();
+      json(join(out, 'candidate-identity.json'), {artifact: f.artifact, candidateReportSHA256: candidate.reportSHA256, installation: f.installed()});
+      const commands = [];
+      runSourceUsage([f.packageRoot, scratch, out, candidate.packageSHA256, ...(installed ? ['--installed', f.reportPath] : [])], {spawn: (executable, args, options) => {
+        commands.push({executable, args, options});
+        let result;
+        if (args[1] === 'version') result = {platform: 'windows/amd64', rust: 'mock-only', version: '0.0.0-test'};
+        else if (args[1] === 'describe') result = {commands: [{path: 'source query', flags: []}]};
+        else if (args[1] === '--help') result = {schema: 'lycheedev.cli-help.v1', command: '', kind: 'group', children: [], limits: {children: 32}};
+        else if (args[1] === 'schema') result = {schema: 'lycheedev.cli-command.v1', command: 'source query', input: {arguments: [], flags: []}};
+        else if (args[1] === 'cli') result = {schema: 'lycheedev.cli-search.v1', query: 'source query', limit: 5, matches: [{command: 'source query'}]};
+        else {
+          assert.deepEqual(args.slice(1, 4), ['source', 'query', '--help'], 'mock permits discovery only, no business process');
+          result = {schema: 'lycheedev.cli-help.v1', command: 'source query', kind: 'command', commands: [{path: 'source query'}]};
+        }
+        return {status: 0, signal: null, stdout: Buffer.from(JSON.stringify({schema: 'lycheedev.result.v1', ok: true, result})), stderr: Buffer.alloc(0)};
+      }});
+      const report = jsonFile(join(out, 'report.json'));
+      assert.equal(report.state, 'failed', 'mock discovery is deliberately incomplete, never business acceptance');
+      assert.equal(commands.length, 6); assert(commands.every(command => command.executable === process.execPath && command.options.shell === false));
+      assert.deepEqual(report.discovery.map(row => row.id), ['version', 'describe', 'help', 'query-help', 'query-schema', 'query-search']);
+      assert(report.discovery.every(row => row.before.every(value => !value) && row.after.every(value => !value)));
+      assert(commands.every(command => !command.options.env.LYCHEEDEV_BIN));
+      if (installed) {
+        assert(commands.every(command => command.args[0] === join(f.installedRoot, 'bin/lycheedev.mjs')));
+        assert.equal(report.launch.entryKind, 'installed-npm-package-launcher');
+        assert.equal(report.installation.candidateReportSHA256, candidate.reportSHA256);
+        assert.equal(report.installedPackageStable, true); assert.equal(report.stagedPackageStable, undefined);
+        assert.equal(existsSync(join(scratch, '空间 prefix')), false);
+        assert.equal(existsSync(join(f.root, 'real npm prefix/lycheedev.cmd')), false);
+      } else {
+        assert(commands.every(command => command.args[0] === join(scratch, '空间 prefix/node_modules/lycheedev/payload/skill/scripts/lycheedev.mjs')));
+        assert.equal(report.launch.entryKind, 'staged-skill-launcher');
+        assert.equal(report.installation, undefined); assert.equal(report.stagedPackageStable, true);
+        assert(existsSync(join(scratch, '空间 prefix/lycheedev.cmd')));
+      }
+      assert.deepEqual(inventory(f.installedRoot), candidate.files, 'both modes leave real npm package unchanged');
+    }
+  } finally {
+    process.chdir(previousCwd); process.exitCode = previousExit; Object.defineProperty(process, 'platform', platform);
+  }
 });
 test('a self-consistent package and source tree cannot replace current Data guidance with old bytes', t => {
   const f = fixture(t), path = 'references/data-tables.md', bytes = Buffer.from('historical fixed memory limits; not Go323\n');

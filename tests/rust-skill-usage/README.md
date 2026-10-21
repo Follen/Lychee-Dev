@@ -9,10 +9,24 @@ Rust guide. See `skill-identity.mjs` and `baselines/` for explicit identity lane
 
 ## Current entry points
 
-- `tools/rust-skill-usage.mjs <artifact> <candidate>` runs the three existing
-  full-Retail Source tasks through the actual installed package. Original
-  windows, native-callsite proofs and semantic assertions remain. Pure clap
-  help/search/schema discovery now matches the current command contract.
+- `tools/rust-skill-usage.mjs <artifact> <candidate>` retains the historical
+  staged package mode: it copies authenticated candidate bytes to an isolated
+  synthetic npm prefix and runs the Skill launcher discovery path. This is
+  not an npm installation acceptance result.
+- `tools/rust-skill-usage.mjs --installed <artifact> <candidate>` reads
+  `npmSmoke: passed` and `installedRoot` from the authenticated candidate
+  report produced by `tools/rust-package-smoke.mjs`. It verifies the existing
+  installation equals the candidate package, EXE and independently fixed
+  25-file Skill, then runs the same three full-Retail Source tasks directly
+  through `installedRoot/bin/lycheedev.mjs`. It does not copy, install, download
+  or build a package. The Source workflows retain their existing fixed-source
+  sync and all original window, native-callsite and semantic assertions.
+  Reports identify the installation path, candidate-report digest and
+  `entryKind: installed-npm-package-launcher`; the Skill prefix discovery path
+  is explicitly `not_run` in this mode. Its static Skill identity check and the
+  separate staged discovery result do not become one complete Skill launch
+  acceptance. Both modes retain the six no-home discovery checks. Old reports
+  remain historical and are not relabeled as installed runs.
 - `tools/rust-skill-usage.mjs --data ...` is the actual supervised typed Agent
   Data workflow. See [the current Data protocol](data-README.md) for its explicit
   three-target fixture preparation, production importer, exact values/CAP and

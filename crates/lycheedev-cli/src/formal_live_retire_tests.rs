@@ -43,9 +43,9 @@ fn json_envelope(response: &Response) -> Value {
     serde_json::from_str(&rendered(response, "json")).unwrap()
 }
 #[test]
-fn describe_restores_exact_84_registered_commands_without_empty_handlers() {
+fn describe_exposes_exact_71_agent_era_commands_without_empty_handlers() {
     let all = crate::contract::implemented();
-    assert_eq!(all.len(), 84);
+    assert_eq!(all.len(), 71);
     for route in ["live cancel", "live abandon"] {
         let d = all.iter().find(|d| d.path == route).unwrap();
         assert!(d.mutates);
@@ -145,7 +145,7 @@ fn cancel_and_abandon_con_or_missing_id_reject_before_workspace_or_native_factor
                 assert_eq!(err.code, "command.invalid_arguments");
                 assert_eq!(err.exit_code, 2);
                 let argument = if route == "cancel" { "<operation-id>" } else { "<operation-or-bootstrap-id>" };
-                assert_eq!(err.message, format!("missing required argument {argument}"));
+                assert_clap_error(&err, "MissingRequiredArgument", argument);
                 assert!(!f.0.join("home").exists());
                 continue;
             }

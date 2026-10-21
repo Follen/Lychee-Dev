@@ -74,6 +74,14 @@ fn local_document(fx: &Fixture, key: &str) -> (i64, Vec<u8>) {
     .unwrap();
     (document.generation, document.bytes)
 }
+fn local_evidence_document(fx: &Fixture, key: &str) -> (i64, Vec<u8>) {
+    // CAP and keep records belong to the shared evidence catalog, while the
+    // reconstructible decoded-v1 aliases above belong to private Data metadata.
+    let document = lycheedev_core::metadata::Metadata::read_document_raw_controlled(
+        &fx.home, key, &Default::default(),
+    ).unwrap();
+    (document.generation, document.bytes)
+}
 fn local_captures(fx: &Fixture) -> Vec<serde_json::Value> {
     let metadata = lycheedev_core::metadata::Metadata::open(&fx.home, false).unwrap();
     let captures = metadata.list("capture/", 100).unwrap();
@@ -141,7 +149,7 @@ fn local_stream_rebuild(removed: &str) {
     keep.flags.clear();
     evidence::dispatch(&keep).unwrap();
     let documents = [format!("capture/{id}"), format!("evidence/keep/{id}")].map(|key| {
-        let original = local_document(&fx, &key);
+        let original = local_evidence_document(&fx, &key);
         (key, original)
     });
     let reference = &cold.data[removed];
@@ -177,8 +185,11 @@ fn local_stream_rebuild(removed: &str) {
     assert_eq!(local_blob(&fx, reference), original);
     assert_eq!(local_blob(&fx, &rebuilt.data["content"]), expected);
     assert_eq!(local_pair(&fx, digest), pair);
-    for (key, original) in aliases.iter().chain(documents.iter()) {
+    for (key, original) in &aliases {
         assert_eq!(local_document(&fx, key), *original);
+    }
+    for (key, original) in &documents {
+        assert_eq!(local_evidence_document(&fx, key), *original);
     }
     assert_eq!(evidence::read_capture(&fx.home, id).unwrap(), *capture);
     assert_eq!(local_blob(&fx, &capture["blob"]), expected);

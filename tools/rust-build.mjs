@@ -32,8 +32,6 @@ export function verifyArtifact(root,path){
 export function runCargo(root,args,options={}){
   return runCargoWithDeadline(root,args,options,600000);
 }
-// Optimized product preparation has a larger fixed build allowance. Keep this
-// private so test/check/fetch and arbitrary Cargo callers retain their limit.
 function runCargoWithDeadline(root,args,{sourceRoot=root,owner='rust-cargo',channelKind='ordinary',oneShot=false,environment={},freshOffline=false,execute=ownedSpawnSync,onSuccess,limits}={},timeoutMs){
   root=resolve(root);sourceRoot=resolve(sourceRoot);
   if(sourceRoot!==root)contained(root,sourceRoot);
@@ -117,7 +115,7 @@ export function buildRust(root,artifactDirectory,{profile='dev',oneShot=false,ow
   root=resolve(root);sourceRoot=resolve(sourceRoot);
   if(!['dev','release','symbols'].includes(profile))throw new Error('build.invalid_profile');
   const args=['build','--locked','--offline','-j','1','--profile',profile,'-p',packageName];
-  return runCargoWithDeadline(root,args,{sourceRoot,owner,execute,channelKind:profile==='symbols'?'symbols':'ordinary',oneShot:oneShot||profile!=='dev',environment,onSuccess(invocation){
+  return runCargo(root,args,{sourceRoot,owner,execute,channelKind:profile==='symbols'?'symbols':'ordinary',oneShot,environment,onSuccess(invocation){
     const output=profile==='dev'?'debug':profile;
     artifactDirectory=contained(root,resolve(artifactDirectory));mkdirSync(artifactDirectory);
     const source=join(invocation.target,output,'lycheedev.exe'),binary=join(artifactDirectory,'lycheedev.exe');
@@ -130,7 +128,7 @@ export function buildRust(root,artifactDirectory,{profile='dev',oneShot=false,ow
       if(hashFile(original)!==record.pdbSHA256||hashFile(record.pdb)!==record.pdbSHA256)throw new Error('build.symbols_changed');
     }
     writeFileSync(join(artifactDirectory,'artifact.json'),JSON.stringify(record,null,2)+'\n');return record;
-  }},profile==='dev'?600000:1800000);
+  }});
 }
 if(process.argv[1]&&resolve(process.argv[1])===resolve(import.meta.filename)){
   const [directory,profile='dev']=process.argv.slice(2);if(!directory)throw new Error('usage: node tools/rust-build.mjs <new-artifact-directory> [dev|release|symbols] [--one-shot]');

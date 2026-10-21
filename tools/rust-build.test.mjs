@@ -102,13 +102,16 @@ test('fresh offline gate refuses a leftover cache without executing or deleting 
 });
 
 
-test('only optimized product builds receive the fixed 30 minute preparation allowance',()=>{
+test('all product profiles keep the fixed ten minute deadline and only explicit one-shot disables incremental',()=>{
   for(const profile of ['dev','release','symbols']){
+    for(const oneShot of [undefined,false,true]){
     const root=sourceFixture();
     try{
-      const expected=profile==='dev'?600000:1800000;
-      const record=buildRust(root,join(root,'artifact'),{profile,execute(command,args,options){
-        assert.equal(options.timeout,expected);assert.deepEqual(args.slice(0,4),['build','--locked','--offline','-j']);
+      const record=buildRust(root,join(root,'artifact'),{profile,...(oneShot===undefined?{}:{oneShot}),environment:{CARGO_INCREMENTAL:'1'},execute(command,args,options){
+        assert.equal(options.timeout,600000);
+        assert.deepEqual(args,['build','--locked','--offline','-j','1','--profile',profile,'-p','lycheedev-cli']);
+        assert.equal(options.env.CARGO_INCREMENTAL,oneShot===true?'0':'1');
+        assert.equal(options.env.CARGO_TARGET_DIR,join(root,profile==='symbols'?'target-symbols':'target'));
         const directory=join(options.env.CARGO_TARGET_DIR,profile==='dev'?'debug':profile);mkdirSync(directory,{recursive:true});
         writeFileSync(join(directory,'lycheedev.exe'),'fixture binary');
         if(profile==='symbols')writeFileSync(join(directory,'lycheedev.pdb'),'fixture matching symbols');
@@ -116,8 +119,11 @@ test('only optimized product builds receive the fixed 30 minute preparation allo
       }});
       const receipt=JSON.parse(readFileSync(record.buildEvidence));
       const command=JSON.parse(readFileSync(receipt.sealedLogs.find(row=>row.path.endsWith('command.json')).path));
-      assert.equal(command.timeoutMs,expected);assert.equal(record.profile,profile);
+      assert.equal(command.timeoutMs,600000);assert.equal(command.oneShot,oneShot===true);assert.equal(record.profile,profile);
+      assert.equal(record.sameInvocation,true);assert.equal(receipt.state,'retired');
+      assert.deepEqual(verifyArtifact(root,join(root,'artifact/artifact.json')),record);
     }finally{rmSync(root,{recursive:true,force:true});}
+    }
   }
   for(const args of [['test','--release'],['check','--profile','release'],['fetch'],['build','--profile','release']]){
     const root=sourceFixture();
