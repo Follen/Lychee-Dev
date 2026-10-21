@@ -242,6 +242,10 @@ fn checkout(f: &Fixture, pin: &SourcePin) -> PathBuf {
     f.run(
         "",
         &[
+            // Owned TEMP plus the immutable commit makes Git's admin path long.
+            // Keep this invocation-local: prune rejects extra repository config.
+            "-c",
+            "core.longpaths=true",
             "-c",
             "core.autocrlf=false",
             "-c",

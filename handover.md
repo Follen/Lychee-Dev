@@ -22,7 +22,8 @@
 - CLI-SOCKET-01：accepted socket恢复blocking后，原4项Windows真实supervisor测试全部通过。EOF半关闭、stdout背压、整epoch取消、私有入口拒绝已实跑。
 - CAP-TRANSPORT-01：Data实际Session query/capture和Navigate自动CAP在stdout flush后observer失败的2项新回归通过，核唯一CAP、原body/manifest和query handle；全部Agent Session消费者22项及12条Navigate业务路径同组通过。b6cf CLI bin184项、supervisor6项全部通过，含真实BrokenPipe保留committed CAP、父进程终态统一失效标记及排队deadline。精确non-yield CPU poll及真实private receipt断线仍无实测。
 - Data integration当前284 active均有实际通过记录：e0原275通过/9失败；b6cf通过DB2六项及hotfix一项，f5dc通过content全13项及Agent native parity2项。selected缺失body重建在正式Agent和migration-oracle两条路径均修复并实跑；坏body仍明确拒绝，alias/CAP/归属不变。Data全部ignored合计25，不计业务pass。
-- Windows library188 active跨f5dc/284a均有通过记录；唯一主文件pin失败修后，284a全部destination八项通过。11个integration目标中10个非空目标52项全部通过，另一个harness=false helper无业务case。library2个及integration2个ignored单列。主文件pin的Core四个实际调用回归正在执行。
+- Windows library188 active跨f5dc/284a均有通过记录；唯一主文件pin失败修后，284a destination八项及Core四个实际调用回归全部通过。11个integration目标中10个非空目标52项全部通过，另一个harness=false helper无业务case。library2个及integration2个ignored单列。
+- Source library749 active在284a按完整名单分组全部通过，7 ignored单列。integration继续执行；diff_prune六项原2通过/4失败，四例均在fixture Git worktree add因隔离TEMP长路径失败，未进入prune断言。已为单次fixture Git add启用core.longpaths，保留实际长路径、全部断言及隔离；原生复跑待做。
 - Node原399项393通过/3失败/3权限skip；旧Skill差异清单和metadata布局3失败修后对应43项全部通过。后继Source exporter/corpus工具5套84通过/1权限skip；本批真实Skill入口及用户环境隔离的4套Node68项全部通过。重叠套件不累加为独立覆盖，mock/静态检查不代替Windows业务。
 
 ## 当前修正与负责人
@@ -34,7 +35,8 @@
 | DATA-LOCAL-ORDER-01 | local_query及正式Agent sql_reader延后一次配置provenance发布；f5dc受影响196 library、content13及Agent parity2全通过，含真实Session缺体恢复/等长坏体拒绝 | 已保存、推送、验证 |
 | CLI-PUBLIC-FIXTURE-01 | prune当前71目录、normal exit分组help/clap结构、source inspect空值文案夹具已更新；对应10项在f5dc全通过，原退出码/无home副作用/完整输出保留 | 已保存、推送、验证 |
 | DATA-NUMERIC-01 | Arrow NullArray结果补ScalarValue::Null，原scalar边界及CLI numeric3在f5dc通过，涵盖public page/JSON/CSV/CAP；精确整数和负零保留 | 已保存、推送、验证 |
-| WINDOWS-PIN-01 | InspectPinned增加FILE_READ_DATA并保留共享读写；284a destination八项全通过，涵盖已有/创建、写入、持有期间拒绝rename/delete和关闭后允许 | 已保存、推送，Core四个主库pin调用回归正在执行 |
+| WINDOWS-PIN-01 | InspectPinned增加FILE_READ_DATA并保留共享读写；284a destination八项全通过，涵盖已有/创建、写入、持有期间拒绝rename/delete和关闭后允许；Core四个主库pin实际调用回归也全部通过 | 已保存、推送、验证 |
+| SOURCE-PRUNE-FIXTURE-01 | diff_prune四例因fixture Git worktree add长管理路径失败；仅该调用加core.longpaths=true，不写仓库配置、不修改生产Git或prune逻辑 | core_evidence已交回，主代理已核四行diff；六例实际复跑待做 |
 | BUILD-RUNNER-01 | Release、Source full-corpus/fresh场景统一600秒，fresh exporter默认no-oneShot和原20/5GiB；isolateUser令用户目录归owner scratch，本批补齐buildRust透传、Release CLI及三exporter准备显式启用。原prepare身份规则保留；19项对应Node/mock通过。实际Release/exporter未跑 | core_metadata/core_evidence已交回，主代理已核 |
 | SOURCE-INSTALLED-01 | npm smoke在隔离prefix执行真实global布局安装；--installed运行固定25文件Skill launcher，使用npm生成的prefix入口。旧local安装报告仍直接进包并标not_run，staged模式保留；未造shim/改Skill。Node及隔离回归通过，实际npm/Source业务未跑 | 主代理整合完成 |
 | ACCEPTANCE-ISOLATION-01 | formal Lua/bridge、五个协议prototype及Source fixed oracle入口补齐owner用户环境；Source外层600秒、Cargo no-oneShot。Live工具Node77通过；Source runner/wrapper27通过，历史checker4失败另列 | core_evidence/data_engine已交回，主代理已核15文件；实际专用入口待跑 |
@@ -44,8 +46,8 @@
 
 ## 下一步
 
-1. 保存本批paired工具隔离，保持唯一native队列，不在运行中切换副本或并发Cargo。
-2. 284a两配置check及Windows pin八项已通过，继续Core四个相关调用回归；无新影响的CLI/Data已通过组不重复运行。
+1. paired工具隔离已在e99e4e4938a43af87a67491015bea4e8503dbeac保存、推送。固定副本284a的Source队列在source_session_repeated_real ignored-list前因cache准入停止：cache19,352,724,370字节加2GiB预留超过20GiB，Cargo未启动。新一批incremental清单2,433,793,455字节/6,397文件已准备，等待用户选择本批或后续同范围清理授权；未删除。
+2. 保存fixture长路径修正后复跑diff_prune六例；284a两配置check、Windows pin八项及Core四项均已通过，无新影响的CLI/Data/Core/Source库已通过组不重复运行。
 3. 完成Source、Live和补漏26目标；Source十个native_oracle目标仅通过专用参考生成器，Live formal bridge需当前Release+Lua admission，五个protocol目标用各自wrapper，Windows两个suspended-child ignored需封存自有helper后执行。真实数据/权限ignored单列。自有窗口/子进程测试不等于真实游戏测试。
 4. correctness和资源回收通过后构建生产Release，实际npm安装匹配25文件Skill，执行no-home发现、installed Source及Agent Data。三项exporter/importer显式准备，不在测量内隐式构建；旧SQL私有metadata fixture不能拿来测新Agent。
 5. 再执行现有owned paired协议：完整任务、20对、不扣helper成本，CSV仅correctness；历史单pair、诊断profile和旧产物均不是当前性能验收。当前无≤0.30或全产品矩阵通过结论。
