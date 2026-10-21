@@ -812,6 +812,33 @@ async fn eager_boolean_operators_keep_right_errors_after_false_or_true_left() {
         );
     }
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn eager_boolean_keeps_errors_inside_otherwise_native_column_equalities() {
+    for (operator, left_column) in [("and", "R"), ("or", "L")] {
+        let (context, owner) = setup();
+        register(&context, &request("T"), vec![
+            ("L", Arc::new(Int64Array::from(vec![1]))),
+            ("R", Arc::new(Int64Array::from(vec![2]))),
+        ]);
+        let plan = decode(json!({
+            "op":"project", "input":{"op":"scan","table":{"name":"T","mode":"static"}},
+            "columns":[{"name":"result","expression":{"kind":"binary","operator":operator,
+                "left":{"kind":"binary","operator":"equal",
+                    "left":{"kind":"column","name":"L"},
+                    "right":{"kind":"column","name":left_column}},
+                "right":{"kind":"binary","operator":"equal",
+                    "left":{"kind":"column","name":"L"},
+                    "right":{"kind":"cast","target":"integer","value":lit(json!("bad"))}}}}]
+        }));
+        let result = match lower(&context, &plan, owner).await {
+            Ok(frame) => frame.collect().await.map(|_| ()),
+            Err(error) => Err(error),
+        };
+        assert_eq!(super::super::error(result.unwrap_err()).code, "relational.type_mismatch");
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn eager_boolean_three_valued_truth_table_matches_oracle() {
     for and in [true, false] {

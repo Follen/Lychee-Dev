@@ -192,6 +192,27 @@ fn exact_binary(
     Ok(udf.call(vec![left, right]))
 }
 
+/// Only total column equalities may use native conjunction. Keeping those
+/// predicates visible lets DF pull correlated equality keys over aggregates;
+/// neither side can raise an evaluation error that short-circuiting would hide.
+fn native_equality_conjunction(value: &Expr, schema: &DFSchema) -> Result<bool> {
+    let Expr::BinaryExpr(expression) = value else {
+        return Ok(false);
+    };
+    match expression.op {
+        Operator::And => Ok(native_equality_conjunction(&expression.left, schema)?
+            && native_equality_conjunction(&expression.right, schema)?),
+        Operator::Eq
+            if matches!(expression.left.as_ref(), Expr::Column(_) | Expr::OuterReferenceColumn(_, _))
+                && matches!(expression.right.as_ref(), Expr::Column(_) | Expr::OuterReferenceColumn(_, _)) =>
+        {
+            let kinds = [expression.left.get_type(schema)?, expression.right.get_type(schema)?];
+            Ok(!needs_exact(Binary::Equal, &kinds))
+        }
+        _ => Ok(false),
+    }
+}
+
 /// Eager argument evaluation preserves the established scalar error/NULL
 /// contract. Native DF AND/OR may skip the right side on a false/true batch.
 fn boolean_binary(
@@ -201,6 +222,14 @@ fn boolean_binary(
     schema: &DFSchema,
     owner: &Arc<QueryOwner>,
 ) -> Result<Expr> {
+    if operator == Operator::And
+        && native_equality_conjunction(&left, schema)?
+        && native_equality_conjunction(&right, schema)?
+    {
+        return Ok(Expr::BinaryExpr(BinaryExpr::new(
+            Box::new(left), operator, Box::new(right),
+        )));
+    }
     let kinds = vec![left.get_type(schema)?, right.get_type(schema)?];
     let owner = owner.clone();
     let and = operator == Operator::And;
