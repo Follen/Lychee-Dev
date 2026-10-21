@@ -18,12 +18,17 @@ let references=0;for(const p of manifests){const m=JSON.parse(readFileSync(safe(
 check(references===2135,'Reference count changed');
 const failedStageFiles=['launch.json','queue-before.json','queue-after.json','terminal.json','wrapper.stdout.log','wrapper.stderr.log'].map(s=>relative(root,join(inv,'core-lib-lycheedev_core-ignored-list.'+s)));for(const p of failedStageFiles)protect(join(root,p));
 const stagePrefix=join(inv,'core-lib-lycheedev_core-ignored-list.');
-const terminal=JSON.parse(readFileSync(stagePrefix+'terminal.json')),launch=JSON.parse(readFileSync(stagePrefix+'launch.json'));
+// Windows PowerShell writes UTF-8 JSON and UTF-16LE redirected logs, both with BOMs.
+// Decode only for inspection; hashes and protected inventories retain the original bytes.
+function powerShellText(bytes){return bytes.toString(bytes[0]===0xFF&&bytes[1]===0xFE?'utf16le':'utf8').replace(/^\uFEFF/,'');}
+function readPowerShellJson(path){return JSON.parse(powerShellText(readFileSync(path)));}
+const terminal=readPowerShellJson(stagePrefix+'terminal.json'),launch=readPowerShellJson(stagePrefix+'launch.json');
 check(terminal.id==='core-lib-lycheedev_core-ignored-list'&&terminal.wrapperExit===1&&terminal.endedAtUtc==='2026-10-20T23:55:03.9064499Z'&&terminal.collection==='direct invocation and LASTEXITCODE','Wrong quota terminal');
 check(launch.id===terminal.id&&launch.owner==='ucfdef-core-lib-lycheedev_core-ignored-list'&&launch.startedAtUtc==='2026-10-20T23:55:02.5006081Z'&&launch.timeoutMs===600000&&launch.stack==='default'&&launch.oneShot===false,'Wrong quota invocation');
 for(const obj of [terminal,launch])for(const key of ['cargoStarted','cargoExit','buildEvidence','receipt'])check(!(key in obj),'Unexpected Cargo lifecycle evidence');
 const stdout=readFileSync(stagePrefix+'wrapper.stdout.log'),stderr=readFileSync(stagePrefix+'wrapper.stderr.log');
-check(stdout.length===0&&stderr.length===2598&&stderr.toString('utf8').includes('disk.cache_quota')&&!/buildEvidence|receipt/i.test(stderr.toString('utf8')),'Not the verified pre-Cargo quota failure');
+const stderrText=powerShellText(stderr);
+check(stdout.length===0&&stderr.length===2598&&stderrText.includes('disk.cache_quota')&&!/buildEvidence|receipt/i.test(stderrText),'Not the verified pre-Cargo quota failure');
 const runner=join(root,'tools/rust-build.mjs'),disk=join(root,'tools/rust-disk.mjs');
 check(hash(disk)==='54122b03b7b474f1f2119a31caa85d2217aeb5ea97e65f28a7e0161bebc203e5','Admission implementation changed');
 check(hash(runner)==='8dc9f54f295bbf586e78098a01127ef461723235a78b4c2c21070fedd4b4a46c','Runner ordering changed');protect(disk);protect(runner);

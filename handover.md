@@ -1,5 +1,12 @@
 # Rust 迁移交接：唯一当前事实来源
 
+## 当前接手与验证恢复（2026-10-21）
+
+- 后续开发与统一验证已由本机主代理接手；沿用 `rust-refactor` / [草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。[GitHub 交接入口](docs/handoff/2026-10-21/HANDOFF.md)来自 `0dfcebd25238239887f4dfb5c209a5bf4c07c392`，9 个文件及清单中的 8 项内容哈希已核验。产品及原测试副本继续固定 `cfdefd46a11ec8dce470d296b424a3eaa1372b8b`；保留其他任务的 main 改动和原测试证据。
+- 当前文件负责人为主代理，范围为交接维护脚本、配套哈希/说明和本交接。MAINT-ENCODING-01 已修：PowerShell 的 JSON 为 UTF-8 BOM、重定向 stderr 为 UTF-16LE BOM；仅在内存解码，保留原始字节、全部身份/大小/哈希检查和清理范围。两次原生失败均发生在创建 blocked 记录与删除之前；修复后实际封存通过。
+- 已验证并封存 112 manifest / 2135 引用及原六份配额拒绝文件；只清理获批的 `target/debug/incremental`，移除 6,819,246,069 字节。2534 项受保护文件和 8663 个其他缓存文件前后哈希一致，最终 receipt 为 `retired`、双 lease 已释放；独立检查无相关进程/lease，缓存为 12,899,139,776 字节，20 GiB 上限未改。原 wrapper exit 1、Cargo 未启动且无实际 owner/receipt 的历史事实保持。
+- 本批产品业务用例实际执行仍为 0；既有两种 check、CI、Data/CLI 名单及 Core all-list 不等于业务通过。下一步在同一固定测试副本新建续跑记录，补 Core ignored-list，再按已列出的目标逐组执行 correctness；不覆盖原拒绝记录、不派发旧队列、不提前运行性能或游戏验收。
+
 ## 1. 当前目标和执行顺序
 
 当前执行已批准的 [完整架构计划](DESIGN.md#authorized-architecture-implementation-plan--2026-10-19)，不是开始新一轮正式审计。顺序是：**Source/Data 业务质量不低于固定 f811 → 全部实现门禁 → 同任务 Rust 可控耗时 ≤ Go 的 30% → 五项循环审计**。必要开发独审、差分和回归不是最终五循环完成证据。

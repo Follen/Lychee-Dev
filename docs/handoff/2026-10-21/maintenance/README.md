@@ -14,6 +14,8 @@ The maintenance checkout must be exactly cfdefd46a11ec8dce470d296b424a3eaa1372b8
 
 This verifies existing manifest and seal hashes, resolves only a unique existing root-relative or manifest-relative file, validates the actual failed terminal/launch/log facts, and saves NEW blocked-stage/batch documents and `retirement-input.json` outside all caches. It preserves all originals and does not create fake final artifacts in the historical inventory root. Unsupported layout or ambiguity stops execution; do not guess paths. The input root is the selected realpath.
 
+Windows PowerShell writes the terminal and launch JSON as UTF-8 with a BOM, and redirected stderr as UTF-16LE with a BOM. The reader decodes these known outputs in memory; hashes and protected inventories continue to cover every original byte. The initial Windows attempts rejected these encodings before creating any blocked receipt or attempting cache retirement.
+
 ## Retire only after authorization
 
 `node <handoff-directory>/maintenance/retire-authorized-incremental.mjs --worktree <same-confirmed-absolute-worktree> --execute-authorized <returned-input-path>`
@@ -26,4 +28,4 @@ Both lease releases are attempted. Success is reported only after release and a 
 
 Preserve all receipts locally. Run the existing read-only `node <same-worktree>/tools/rust-disk.mjs inspect <same-worktree>` and independently verify no processes/leases. Its zero-reservation inspection is not the next Cargo admission: the unchanged runner still reserves 2 GiB. Resume correctness groups only after reviewing the maintenance result. Do not increase limits, remove deps or symbols, or enable one-shot.
 
-These are cooperative quiescent-worktree safeguards, not a native handle-based defense against hostile concurrent reparse replacement. Windows execution remains NOT_RUN at publication; only cloud syntax checking and source review are claimed.
+These are cooperative quiescent-worktree safeguards, not a native handle-based defense against hostile concurrent reparse replacement. Windows execution was NOT_RUN when the original tools were published. After the PowerShell decoding correction, the fixed cfdef worktree completed blocked-evidence sealing (112 manifests / 2135 references) and retirement of exactly 6,819,246,069 incremental bytes. All 2534 protected file entries and 8663 retained cache files matched before and after; both leases were released and the final receipt reported `retired`. Post-maintenance inspection found 12,899,139,776 cache bytes, no related processes or leases, and the original 20 GiB policy. These maintenance results do not claim any product test execution.
