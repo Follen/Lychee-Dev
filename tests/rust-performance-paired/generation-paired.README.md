@@ -1,4 +1,35 @@
-# Production static SQL over authenticated generations
+# Current Go 3.2.4 / Rust Agent generation pairs
+
+The current Go reference is `29bdbdaff5f064ec212ff2064380b1ccac652eda`.
+Current generation measurements use typed Agent query/Page/Capture with explicit
+`data cache prepare`; the current entry accepts a request JSON:
+
+```text
+node tests/rust-performance-paired/agent-prepare-fixtures.mjs --csv-numeric
+node tools/rust-data-generation-paired.mjs --prepare-importer
+node tools/rust-data-generation-paired.mjs <request.json>
+node tools/rust-data-generation-paired.mjs <request.json> --acceptance
+```
+
+Use schema `lycheedev.paired-agent-request-inputs.recovered.v1`, `mode: "generation"`,
+absolute `artifact`, `goSource`, `goPackage`, `luaLSArchive`, `importerReceipt` paths,
+and the same five machine-condition strings as the [Data entry](data.README.md).
+`fixtures` has exactly `numeric`, whose fields are `directory`, `preparation`,
+`preparationSHA256` from the fresh `csv-numeric` preparation. `$goPackage` denotes
+the authenticated Go 3.2.4 `dev-npm-stage`; old Go 3.2.3 packages cannot substitute.
+See [the current owner](agent-paired-owned.mjs) for the exact request contract.
+
+Preparation uses the ordinary existing target, default stack, locked/offline
+`-j 1`, fixed 600 seconds, no one-shot and isolated user state. Reuse a matching
+optimized artifact; otherwise prepare it explicitly with
+`node tools/rust-build.mjs <new-artifact-directory> release` before measurement.
+The current acceptance mode preserves twenty pairs and full result/CAP replay.
+
+## Historical static SQL generation contract
+
+The following Go 3.2.3 product/configuration descriptions and reports retain
+their original identity. Their old multi-argument commands belong to that
+historical collector, not the current Agent entry above.
 
 This is a separate opt-in lane, not a change to historical B04 reports or to
 `rust-data-performance-paired.mjs`. It invokes the real default CLI's
@@ -118,7 +149,7 @@ executed merely because they are listed.
    The parent's full default/qualification all-targets and remaining quality
    queue remains authoritative; this subset does not replace it.
 3. Reuse an already matching optimized artifact where available. Otherwise, only
-   through the approved queue: `node tools/rust-build.mjs <new-owned-artifact-dir> release --one-shot`.
+   through the approved queue: `node tools/rust-build.mjs <new-owned-artifact-dir> release`.
    Preserve EXE/record and same-invocation PDB when using symbols.
 4. Reuse the original immutable numeric fixture preparation report. Only when
    genuinely absent, explicitly produce a new separately identified fixture:

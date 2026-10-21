@@ -157,14 +157,16 @@ test('current candidate keeps only the approved release version and channel over
   }
 });
 
-test('322 Lua and startup are upstream bytes, including failure and disabled-bridge coverage', () => {
-  for (const path of ['addon/Core/Compat.lua','addon/Bridge/SlotRuntime.lua','addon/Bridge/InputState.lua','tests/addon/t_slot_enable.lua']) assert.deepEqual(read(path), blob(pin, path), path);
+test('historical 322 Lua and startup are upstream bytes, including failure and disabled-bridge coverage', () => {
+  // This increment's candidate bytes are authenticated above. Later addon
+  // baselines have their own oracles and must not replace this historical input.
+  for (const path of ['addon/Core/Compat.lua','addon/Bridge/SlotRuntime.lua','addon/Bridge/InputState.lua','tests/addon/t_slot_enable.lua']) assert.deepEqual(blob(HISTORICAL_CANDIDATE, path), blob(pin, path), path);
   assert.deepEqual(read('tests/rust-skill-usage/baselines/go3.2.3/references/live-startup.md'), blob(pin, 'skills/lycheedev/references/live-startup.md'), 'historical startup Skill fixture');
-  const env = read('tests/addon/env.lua').toString();
+  const env = blob(HISTORICAL_SUCCESSOR, 'tests/addon/env.lua').toString();
   assert.equal(env.split('return "3.5.0"').length, 2);
   assert.deepEqual(Buffer.from(env.replace('return "3.5.0"', 'return "3.2.3"')),
-    blob('3766f9cacb52e93a803a626187e2a1d54a445468', 'tests/addon/env.lua'), 'current Lua environment retains the fixed Go323 version overlay');
-  const fixture = read('tests/addon/t_slot_enable.lua').toString();
+    blob('3766f9cacb52e93a803a626187e2a1d54a445468', 'tests/addon/env.lua'), 'historical Lua environment retains the fixed Go323 version overlay');
+  const fixture = blob(HISTORICAL_CANDIDATE, 'tests/addon/t_slot_enable.lua').toString();
   assert.equal(fixture.trimEnd().split('\n').length, 128);
   for (const text of ['queries==503 and saves==1 and loads==0','character==guid','queries==499','"read","enable","verify","save","unavailable"','saves==2 and #writes==1','enabled[1] and enabled[2]==false and saves==1','Env.framesCreated==frames and ns.Mailbox==nil']) assert(fixture.includes(text), text);
 });

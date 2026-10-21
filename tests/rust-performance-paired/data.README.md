@@ -1,4 +1,39 @@
-# Narrow Data Go 3.2.3 / Rust paired entry
+# Current Go 3.2.4 / Rust Agent Data paired entry
+
+The current fixed Go reference is `29bdbdaff5f064ec212ff2064380b1ccac652eda`.
+Current Rust SQL-shaped tasks use the typed Agent protocol. The current entry
+accepts one request JSON, not the historical positional arguments below:
+
+```text
+node tests/rust-performance-paired/agent-prepare-fixtures.mjs
+node tools/rust-data-performance-paired.mjs --prepare-importer
+node tools/rust-data-performance-paired.mjs <request.json>
+node tools/rust-data-performance-paired.mjs <request.json> --acceptance
+```
+
+Preparation is explicit, isolated, serial, locked/offline `-j 1`, fixed 600
+seconds and no one-shot on the existing target. Reuse a matching sealed optimized
+artifact, or prepare it separately with `node tools/rust-build.mjs <new-artifact-directory> release`.
+The importer receipt must come from that current preparation; the earlier SQL
+fixture/database images are not current Agent inputs.
+
+The request schema is `lycheedev.paired-agent-request-inputs.recovered.v1`, with
+`mode: "data"`, absolute `artifact`, `goSource`, `goPackage`, `luaLSArchive` and
+`importerReceipt` paths, `conditions`, one exact `caseId`, and an existing
+`sharpModule`. `$goPackage` denotes the authenticated Go 3.2.4 `dev-npm-stage`.
+`fixtures` has exactly `catalog`, `content`, `images`; each entry has
+`directory`, `preparation`, `preparationSHA256` from the new sealed preparation.
+Conditions require `machine`, `powerAndThermal`, `competingLoad`, `disk`, `operator`.
+Each acceptance invocation selects one case and retains its complete twenty
+cold/warm pairs. Catalog SQL is correctness-only. See
+[the current owner](agent-paired-owned.mjs) and [fixture reader](agent-fixture-inputs.mjs)
+for the exact input contract.
+
+## Historical SQL collector and observations
+
+The following reports, Go 3.2.3 inputs and SQL collector descriptions retain
+their original identities. Their old positional examples describe that collector;
+they are not invocations of the current Agent entry above.
 
 The [30d Windows observation](https://github.com/Follen/Lychee-Dev/pull/14#issuecomment-6228602282)
 verified four paths (16 actual CLI invocations), then failed while removing the
@@ -145,7 +180,7 @@ After all candidate source bytes are frozen, build once if a matching optimized
 artifact is not already present. This remains a separate controlled preparation:
 
 ```powershell
-node tools/rust-build.mjs .tmp/data-paired-rust-artifact release --one-shot
+node tools/rust-build.mjs .tmp/data-paired-rust-artifact release
 if ($LASTEXITCODE -ne 0) { throw "Controlled optimized build failed" }
 
 $rustArtifact = ".tmp/data-paired-rust-artifact/artifact.json"

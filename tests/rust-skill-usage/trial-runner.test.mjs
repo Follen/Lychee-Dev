@@ -1,7 +1,7 @@
 // Formal Node safety/coordination tests. Never native CLI or blind-agent evidence.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
+import {execFileSync,spawnSync} from 'node:child_process';
 import {mkdtempSync,mkdirSync,readFileSync,writeFileSync,rmSync,symlinkSync,linkSync,existsSync,cpSync} from 'node:fs';
 import {join,resolve} from 'node:path';
 import {tmpdir} from 'node:os';
@@ -99,3 +99,14 @@ test('outer never turns an unverified archiveComplete boolean into permission to
 test('packaged launcher cannot be shadowed by a prefix EXE or missing npm shim',()=>{const run=readFileSync(join(root,'tests/rust-skill-usage/trial-run.mjs'),'utf8');assert.equal((run.match(/trial\.no_prefix_exe_override/g)||[]).length,2);assert.match(run,/hashFile\(join\(config\.prefix,'lycheedev\.cmd'\)\),report\.npmShim\.sha256/);});
 test('successful source sync help does not impersonate sync or stop later discovery',()=>{const c={...context(),kind:'source',pins:[]},help=checkedArgv(['source','sync','--help'],c);assert.equal(help.help,true);observeResult(c,help.path,JSON.stringify({result:{commands:[{path:'source sync'}]}}),0,help);assert.deepEqual(c.pins,[]);checkedArgv(['describe'],c);
   const invocation=checkedArgv(['source','sync','--source',SOURCE.repository,'--product',SOURCE.product,'--ref',SOURCE.commit],c),pin='PIN-'+'4'.repeat(64);observeResult(c,invocation.path,JSON.stringify({result:{id:pin,source:{repository:SOURCE.repository,product:SOURCE.product,exactCommit:SOURCE.commit,requestedRef:SOURCE.commit}}}),0,invocation);assert.deepEqual(c.pins,[pin]);});
+
+test('the old Go324 guide remains readable with its original identity after current product instructions change', t => {
+  const old = JSON.parse(readFileSync(join(root,'tests/rust-skill-usage/baselines/rust-go324-skill.json')));
+  const guide = join(temporary(t),'guide'); mkdirSync(guide);
+  for (const row of old.files) {
+    const target = join(guide,row.path); mkdirSync(resolve(target,'..'),{recursive:true});
+    writeFileSync(target,execFileSync('git',['--no-replace-objects','cat-file','blob',old.sourceCommit + ':skills/lycheedev/' + row.path],{cwd:root,maxBuffer:1<<20}));
+  }
+  assert.deepEqual(guideContract(guide),dataSkillIdentity(old));
+  assert.notDeepEqual(guideContract(guide),dataSkillIdentity());
+});

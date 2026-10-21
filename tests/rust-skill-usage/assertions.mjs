@@ -5,7 +5,7 @@ import {isAbsolute, join, relative, resolve, sep} from 'node:path';
 import {createHash} from 'node:crypto';
 import {performance} from 'node:perf_hooks';
 import {hashFile} from '../../tools/rust-build.mjs';
-import {CURRENT_SKILL_MANIFEST, AGENT_CUTOVER_SKILL_MANIFEST, AGENT_NATIVE_SKILL_MANIFEST, SIMPLIFIED_SKILL_MANIFEST, HISTORICAL_SKILL_MANIFEST, loadReviewedSkillContract, reviewedSkillIdentity, skillTreeIdentity} from './skill-identity.mjs';
+import {CURRENT_SKILL_MANIFEST, GO324_MIGRATION_SKILL_MANIFEST, AGENT_CUTOVER_SKILL_MANIFEST, AGENT_NATIVE_SKILL_MANIFEST, SIMPLIFIED_SKILL_MANIFEST, HISTORICAL_SKILL_MANIFEST, loadReviewedSkillContract, reviewedSkillIdentity, skillTreeIdentity} from './skill-identity.mjs';
 export {skillTreeIdentity} from './skill-identity.mjs';
 
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -66,7 +66,7 @@ export function loadCurrentWorkflow(root) {
 }
 
 export function currentWorkflowInputs(workflow) {
-  return [CURRENT_WORKFLOW, CURRENT_SKILL_MANIFEST, AGENT_CUTOVER_SKILL_MANIFEST, AGENT_NATIVE_SKILL_MANIFEST, SIMPLIFIED_SKILL_MANIFEST, HISTORICAL_SKILL_MANIFEST, 'tests/rust-skill-usage/baselines/go3.2.3-skill.json', 'tests/rust-skill-usage/skill-identity.mjs', 'tests/rust-skill-usage/workflow.json', workflow.historical.manifest, workflow.baselineManifest, ...workflow.increments.map(row => row.fixture)]
+  return [CURRENT_WORKFLOW, CURRENT_SKILL_MANIFEST, GO324_MIGRATION_SKILL_MANIFEST, AGENT_CUTOVER_SKILL_MANIFEST, AGENT_NATIVE_SKILL_MANIFEST, SIMPLIFIED_SKILL_MANIFEST, HISTORICAL_SKILL_MANIFEST, 'tests/rust-skill-usage/baselines/go3.2.3-skill.json', 'tests/rust-skill-usage/skill-identity.mjs', 'tests/rust-skill-usage/workflow.json', workflow.historical.manifest, workflow.baselineManifest, ...workflow.increments.map(row => row.fixture)]
     .map(path => path.startsWith('tests/') ? path : `tests/rust-skill-usage/${path}`);
 }
 

@@ -94,9 +94,12 @@ const historicalSkill = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usa
 const simplifiedSkill = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines/rust-simplified-skill.json')));
 function historicalSkillBytes(selected = historicalSkill) {
   const archives = new Map([[historicalSkill.sourceCommit, 'rust-candidate-0002ce-files.json'], [simplifiedSkill.sourceCommit, 'rust-simplified-6187-files.json']]);
-  assert(archives.has(selected.sourceCommit), 'no arbitrary historical source lookup');
-  const archive = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines', archives.get(selected.sourceCommit))));
   const contract = loadDataSkillContract(dataSkillIdentity(selected));
+  if (!archives.has(selected.sourceCommit)) return new Map(contract.files.map(row => {
+    const bytes = execFileSync('git', ['--no-replace-objects', 'cat-file', 'blob', contract.sourceCommit + ':skills/lycheedev/' + row.path], {cwd:root, maxBuffer:1<<20});
+    assertDataSkillBytes(bytes, row); return [row.path, bytes];
+  }));
+  const archive = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines', archives.get(selected.sourceCommit))));
   assert.equal(archive.sourceCommit, contract.sourceCommit); assert.equal(archive.tree, contract.tree);
   assert.deepEqual(archive.files.map(row => row.path), contract.files.map(row => row.path));
   return new Map(archive.files.map((row, index) => {
@@ -162,13 +165,13 @@ function makeReport(t, originalRoot = 'C:\\project', selectedIdentity) {
 }
 
 test('Data fixed IN rows, unordered order and CSV bytes remain exact', () => { assert.equal(CSV.length, 76); assert.equal(digest(CSV), CSV_SHA256); assert.equal(CASES.length, 11); assert.equal(CHECKS.length, 26); assert.deepEqual(requestFor(CASES[1]).parameters, PARAMETERS); });
-test('candidate authenticates all25 source files separately from unchanged Go324 oracle', () => {
+test('candidate authenticates all23 source files separately from unchanged Go324 oracle', () => {
   const contract = assertDataSkillDirectory(join(root, 'skills/lycheedev'));
-  assert.equal(contract.files.length, 25); assert.equal(skillTreeIdentity(contract.files), dataSkillIdentity().candidateTree);
+  assert.equal(contract.files.length, 23); assert.equal(skillTreeIdentity(contract.files), dataSkillIdentity().candidateTree);
   const original = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines/go3.2.4-skill.json')));
   assert.equal(original.files.length, 23); assert.equal(skillTreeIdentity(original.files), 'b9e162ace7abe7ea4a2feecef822283767eb1210');
   assert.equal(original.files.find(row => row.path === 'SKILL.md').sha256, 'cbde6b4bb2b598137cfe55c0556765b28890b036e406c1877700a05a33fb6957');
-  assert.equal(contract.files.find(row => row.path === 'SKILL.md').sha256, 'ec1f36a3b69e59b2247ef4513716fdd9fd49fccca73fb0fb9519715a73400b1c');
+  assert.equal(contract.files.find(row => row.path === 'SKILL.md').sha256, '214df9eec8157317b2a47a4d937e6c993f807b12810e1a7cf15d5db09237178e');
   for (const row of original.files.filter(row => ['scripts/lycheedev.mjs', 'agents/openai.yaml'].includes(row.path))) assert.deepEqual(contract.files.find(current => current.path === row.path), row);
 });
 test('candidate rejects same-length tampering even with a forged matching SHA256', () => {
@@ -322,13 +325,17 @@ test('simplified 6187 Skill keeps its original full bytes and archived report id
 
 test('current Skill identity is a fixed Git source, not learned from candidate bytes', () => {
   const current = loadDataSkillContract();
-  assert.equal(current.sourceCommit, 'bd8196aa68ba1570652bb9540a01bbcdb4628638');
-  assert.equal(current.tree, '4eace74fd90ebc4cc12b4628bb58c6f74262ccb5');
+  assert.equal(current.sourceCommit, 'eb9db30f3423cdeacb13da067b523e12f9c80cf6');
+  assert.equal(current.tree, '3e0d0d48173ba24b2e51ea3975289fe8216b0a76');
   const cutover = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines/rust-agent-cutover-recovered-skill.json')));
   assert.equal(loadDataSkillContract(dataSkillIdentity(cutover)).tree, 'c1768f92d55b454cafb202eb6c2835af1ecc2811');
   assert.throws(() => assertDataSkillInventory(cutover.files.map(({path, bytes, sha256}) => ({path: 'payload/skill/' + path, bytes, sha256}))), /independently fixed candidate/);
-  const changed = current.files.filter((row, i) => row.gitBlob !== cutover.files[i].gitBlob).map(row => row.path);
-  assert.deepEqual(changed, ['SKILL.md', 'references/rust-candidate-entry.md', 'references/source-candidate.md']);
+  const previous = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines/rust-go324-skill.json')));
+  assert.equal(loadDataSkillContract(dataSkillIdentity(previous)).tree, '4eace74fd90ebc4cc12b4628bb58c6f74262ccb5');
+  assert.throws(() => assertDataSkillInventory(previous.files.map(({path, bytes, sha256}) => ({path: 'payload/skill/' + path, bytes, sha256}))), /independently fixed candidate/);
+  const changed = current.files.filter(row => row.gitBlob !== previous.files.find(old => old.path === row.path).gitBlob).map(row => row.path);
+  assert.deepEqual(changed, ['SKILL.md', 'references/commands.md', 'references/data-investigation.md', 'references/installation.md', 'references/source-research.md']);
+  assert.deepEqual(previous.files.filter(row => !current.files.some(now => now.path === row.path)).map(row => row.path), ['references/rust-candidate-entry.md', 'references/source-candidate.md']);
   assert.equal(execFileSync('git', ['--no-replace-objects', 'rev-parse', `${current.sourceCommit}:skills/lycheedev`], {cwd:root, encoding:'utf8'}).trim(), current.tree);
   for (const row of current.files) {
     const bytes = execFileSync('git', ['--no-replace-objects', 'cat-file', 'blob', `${current.sourceCommit}:skills/lycheedev/${row.path}`], {cwd:root, maxBuffer:1<<20});
@@ -340,4 +347,12 @@ test('current Skill identity is a fixed Git source, not learned from candidate b
     assert.throws(() => assertDataSkillBytes(bytes, row), /SHA256/);
     assert.throws(() => assertDataSkillBytes(bytes, {...row, sha256:digest(bytes)}), /Git blob/);
   }
+});
+
+test('the original Go324 Data report retains its full historical25 file Skill identity', t => {
+  const old = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines/rust-go324-skill.json')));
+  const f = makeReport(t, 'C:\\project', dataSkillIdentity(old));
+  assert.equal(old.files.length, 25); assert.equal(f.verify(), true);
+  f.report.config.skillIdentity = dataSkillIdentity();
+  assert.throws(f.verify, /independently fixed candidate/);
 });

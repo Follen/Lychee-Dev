@@ -1,9 +1,9 @@
 # Independent installed Skill workflow qualification
 
-The current workflow uses the fixed Go 3.2.3 semantic contract at
-`3766f9cacb52e93a803a626187e2a1d54a445468`. Earlier Go320/321/322 fixtures,
+The current workflow uses the fixed Go 3.2.4 semantic contract at
+`29bdbdaff5f064ec212ff2064380b1ccac652eda`. Earlier Go320/321/322/323 fixtures,
 reports and source manifests remain immutable historical evidence. New Rust
-Skill documentation has its own independently fixed 25-file manifest and real
+Skill documentation has its own independently fixed manifest and real
 Git source anchor; it is not byte-identical Go documentation or a relabeled old
 Rust guide. See `skill-identity.mjs` and `baselines/` for explicit identity lanes.
 
@@ -17,7 +17,7 @@ Rust guide. See `skill-identity.mjs` and `baselines/` for explicit identity lane
   `npmSmoke: passed` and `installedRoot` from the authenticated candidate
   report produced by `tools/rust-package-smoke.mjs`. It verifies the existing
   installation equals the candidate package, EXE and independently fixed
-  25-file Skill. New package smoke runs install into an isolated npm global
+  Skill inventory. New package smoke runs install into an isolated npm global
   prefix and execute the actual Skill launcher using npm's generated prefix
   marker; the user's global prefix is unchanged. This mode runs the same
   three full-Retail Source tasks through that installed Skill. It does not

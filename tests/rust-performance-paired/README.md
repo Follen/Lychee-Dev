@@ -88,7 +88,7 @@ failed owned fixtures. Hosted physical load/thermal/storage limits are recorded
 as unknown, not claimed controlled. No user computer or game is required.
 
 The fixed Go checkout is a real clean git checkout at
-`3766f9cacb52e93a803a626187e2a1d54a445468`. The existing fixed release's own
+`29bdbdaff5f064ec212ff2064380b1ccac652eda` (Go 3.2.4). The existing fixed release's own
 `tools/release.mjs dev-package` is run under the owner with Go 1.27.1, CGO=0,
 trimpath and VCS stamps. The resulting complete private package is required:
 a bare executable is rejected. Both checkout identity and `go version -m`
@@ -107,15 +107,18 @@ After dependencies and official toolchains are available, the same executable
 entries can be used directly from the candidate root on Windows:
 
 ```text
-node tools/rust-build.mjs .tmp/paired-rust-artifact release --one-shot
+node tools/rust-build.mjs .tmp/paired-rust-artifact release
 node tools/rust-performance-prepare-go.mjs <clean-fixed-Go-checkout> <official-LuaLS.zip> <installed-npm-cli.js> .tmp/paired-go-artifact
-node tools/rust-performance-paired.mjs .tmp/paired-rust-artifact/artifact.json <clean-fixed-Go-checkout> .tmp/paired-go-artifact/dev-npm-stage <official-LuaLS.zip> <machine-conditions.json>
+node tools/rust-performance-paired.mjs .tmp/paired-rust-artifact/artifact.json <clean-fixed-Go-checkout> $goPackage <official-LuaLS.zip> <machine-conditions.json>
 ```
 
 Existing `buildRust` release or symbols records are accepted; dev artifacts are
 rejected. Current source digest, binary hash, 3.5.0 beta configuration and
 unmodified public Emmy identity must match. Never compare the dev correctness
 build to optimized Go. Clear compiler override flags before the optimized build.
+`$goPackage` is the authenticated `dev-npm-stage` returned by the separate Go
+preparer. Rust preparation uses the ordinary existing target, fixed 600-second
+`runCargo`, default stack and no one-shot; Release preparation isolates user state.
 The workflow writes machine conditions automatically; direct invocation accepts
 an explicit JSON object with `machine`, `powerAndThermal`, `competingLoad`,
 `disk`, `operator` strings. Unknown conditions should be stated honestly.

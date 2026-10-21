@@ -19,13 +19,12 @@ struct Fixture {
 static NEXT_FIXTURE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 impl Fixture {
     fn new() -> Self {
+        // Owner-isolated TEMP plus PID/counter keeps each fixture independent.
+        // Git's worktree GIT_DIR check still has a PATH_MAX - 40 bound even
+        // with core.longpaths, so keep only this non-business basename short.
         let home = std::env::temp_dir().join(format!(
-            "lycheedev-diff-prune-{}-{}-{}",
+            "dp-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
             NEXT_FIXTURE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         workspace::initialize(&home).unwrap();

@@ -78,11 +78,11 @@ test('normal outer and owned controller entries both load current authenticated 
   }
   assert.equal(CURRENT_WORKFLOW, 'tests/rust-skill-usage/workflow-go324.json');
   const inputs = currentWorkflowInputs(workflow);
-  assert.equal(inputs.length, 15);
-  assert.equal(new Set(inputs).size, 15);
+  assert.equal(inputs.length, 16);
+  assert.equal(new Set(inputs).size, 16);
   assert.deepEqual([...inputs].sort(), [
     'workflow-go324.json', 'workflow.json', 'skill-identity.mjs',
-    'baselines/rust-go324-skill.json', 'baselines/rust-agent-cutover-recovered-skill.json',
+    'baselines/rust-product-skill.json', 'baselines/rust-go324-skill.json', 'baselines/rust-agent-cutover-recovered-skill.json',
     'baselines/rust-agent-native-skill.json',
     'baselines/rust-simplified-skill.json', 'baselines/rust-candidate-skill.json',
     'baselines/go3.2.0-skill.json', 'baselines/go3.2.3-skill.json', 'baselines/go3.2.4-skill.json',
@@ -188,14 +188,14 @@ test('Source installed mode is explicit and leaves the default staged arguments 
   for (const args of [[], ['--installed', 'artifact'], ['artifact', 'candidate', '--installed'], ['--unknown', 'candidate']]) assert.throws(() => sourceUsageArguments(args), /usage:/);
 });
 
-test('installed Source binds passed npm provenance, full package, native bytes and all 25 fixed Skill files', t => {
+test('installed Source binds passed npm provenance, full package, native bytes and all 23 fixed Skill files', t => {
   const f = installedFixture(t), launch = f.installed();
   assert.equal(launch.installedRoot, f.installedRoot);
   assert.equal(launch.launcher, join(f.installedRoot, 'bin/lycheedev.mjs'));
   assert.equal(launch.entryKind, 'installed-npm-package-launcher');
   assert.equal(launch.skillPrefixDiscovery, 'not_run');
   assert.equal(launch.candidateReportSHA256, f.verify().reportSHA256);
-  assert.equal(launch.skillFiles, 25);
+  assert.equal(launch.skillFiles, 23);
   const original = structuredClone(f.report);
   for (const change of [{npmSmoke: 'not_run'}, {installedRoot: undefined}, {installedRoot: 'relative'}, {installedRoot: f.packageRoot}, {installedRoot: dirname(f.root)}]) {
     Object.assign(f.report, original, change); f.rewrite(); assert.throws(f.installed);
@@ -626,4 +626,20 @@ test('old reviewed Source reports retain Go323 identity and cannot count as the 
   assert.throws(() => assertCurrentSelectedReport(report, workflow, reviewedSkillIdentity(loadReviewedSkillContract())), /same selected Source Skill identity/);
   const relabeled = structuredClone(report); relabeled.goContract = CURRENT_GO_CONTRACT; relabeled.goVersion = '3.2.4';
   assert.throws(() => assertCurrentSelectedReport(relabeled, workflow), /authenticated Skill baseline/);
+});
+
+test('the original Go324 Source identity remains historical and cannot count as the current owned run', () => {
+  const old = jsonFile(new URL('./baselines/rust-go324-skill.json', import.meta.url));
+  const identity = reviewedSkillIdentity(loadReviewedSkillContract(reviewedSkillIdentity(old)));
+  const report = {schema: 'lycheedev.skill-real-usage.v2', skillIdentity: identity,
+    goContract: old.goContract, goVersion: '3.2.4', state: 'passed_selected_skill_workflows', completeSkillAcceptance: false,
+    prompts: workflow.prompts, pendingTasks: pendingIncrementTasks(workflow), checks: [
+      ...POST_SEMANTIC_REQUIREMENTS.map(caseId => ({caseId, state: 'passed'})),
+      ...workflow.increments.map(increment => { const row = old.files.find(row => row.path === increment.file); return {
+        caseId: 'fixed-skill-contract-' + increment.id, state: 'passed', taskId: increment.id, file: increment.file,
+        gitBlob: row.gitBlob, sha256: row.sha256, basis: 'exact_reviewed_candidate_skill_bytes_only', skillIdentity: identity, runtimeVerified: false}; }),
+    ]};
+  assert.equal(old.files.length, 25);
+  assertCurrentSelectedReport(report, workflow);
+  assert.throws(() => assertCurrentSelectedReport(report, workflow, reviewedSkillIdentity(loadReviewedSkillContract())), /same selected Source Skill identity/);
 });
