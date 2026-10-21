@@ -137,7 +137,8 @@ fn real_configuration_download_obeys_quota_and_closes_publisher_before_private_a
 }
 #[test]
 fn existing_store_body_is_deduplicated_and_still_readable_after_budget_shrink() {
-    let f = Fixture::new(88);
+    // Intent + completion + durable shard declaration + two possible bodies.
+    let f = Fixture::new(48 + 32 + 128 + 2 * 4);
     let original = f.store().publish_blob(b"body", 4).unwrap();
     f.limit(1);
     let duplicate = f.store().publish_blob(b"body", 4).unwrap();
@@ -207,26 +208,42 @@ fn private_store_does_not_import_core_aliases_or_wait_on_core_metadata_owners() 
 }
 
 #[test]
-fn core_capture_is_not_admitted_by_private_data_capacity_or_quota() {
+fn core_capture_shares_catalog_serialization_but_not_private_data_capacity() {
     use lycheedev_core::metadata::Metadata;
     let f = Fixture::new(1);
     let quota = f.store().lease("data-derived-v1:quota").unwrap();
     let bytes = b"core capture remains independent";
-    let control = OperationControl::uncancelable(Instant::now() + Duration::from_secs(5));
-    let capture = evidence::commit_capture_bounded(
-        &f.home,
-        evidence::CaptureInput {
-            bytes,
-            maximum_bytes: bytes.len(),
-            media_type: "text/plain",
-            provenance: serde_json::json!({"kind":"fixture", "locator":"core-cap-isolation"}),
-            complete: true,
-            truncated: false,
-        },
-        &control,
-    )
-    .unwrap();
+    let home = f.home.clone();
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let control = OperationControl::uncancelable(Instant::now() + Duration::from_secs(5));
+        ready_tx.send(()).unwrap();
+        let result = evidence::commit_capture_bounded(
+            &home,
+            evidence::CaptureInput {
+                bytes,
+                maximum_bytes: bytes.len(),
+                media_type: "text/plain",
+                provenance: serde_json::json!({"kind":"fixture", "locator":"core-cap-isolation"}),
+                complete: true,
+                truncated: false,
+            },
+            &control,
+        );
+        done_tx.send(result).unwrap();
+    });
+    ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    // All evidence domains acquire quota before the common catalog gate, even
+    // when their own body and metadata are not charged to Data capacity.
+    assert!(done_rx.recv_timeout(Duration::from_millis(100)).is_err());
+    assert!(!f.home.join("state/toolkit.sqlite").exists());
     quota.close().unwrap();
+    let capture = done_rx
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap()
+        .unwrap();
+    worker.join().unwrap();
     let id = capture["id"].as_str().unwrap();
     let core = Metadata::open(&f.home, false).unwrap();
     let persisted: Value = core.read(&format!("capture/{id}")).unwrap();
@@ -234,6 +251,7 @@ fn core_capture_is_not_admitted_by_private_data_capacity_or_quota() {
     assert!(core.list::<Value>("remote-config/", 10).unwrap().is_empty());
     core.close().unwrap();
     assert!(!f.home.join("state/data/cache-v1.sqlite").exists());
+    assert!(!f.home.join("state/data/evidence-v2.sqlite").exists());
     assert_eq!(
         f.store()
             .put("remote-config/no-room", &true, None)

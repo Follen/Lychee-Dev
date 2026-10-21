@@ -62,6 +62,10 @@ struct Receipt {
 /// forever by an unread stderr pipe. The exit code remains authoritative when
 /// this bounded best-effort diagnostic cannot be fully delivered.
 fn diagnostic_bytes(error: &ToolkitError) -> Vec<u8> {
+    diagnostic_bytes_for(error, "lycheedev.data-agent-supervisor.v1")
+}
+
+fn diagnostic_bytes_for(error: &ToolkitError, protocol: &'static str) -> Vec<u8> {
     use std::io::Write;
     struct Limited(Vec<u8>);
     impl Write for Limited {
@@ -89,15 +93,22 @@ fn diagnostic_bytes(error: &ToolkitError) -> Vec<u8> {
         error: &'a ToolkitError,
     }
     let full = Diagnostic {
-        protocol: "lycheedev.data-agent-supervisor.v1",
+        protocol,
         ok: false,
         error,
     };
     if serde_json::to_writer(&mut buffer, &full).is_err() {
         buffer.0.clear();
-        let compact = serde_json::json!({"protocol":"lycheedev.data-agent-supervisor.v1","ok":false,
+        let mut details = serde_json::json!({"diagnosticTruncated":true,"sessionInvalidated":true,"replayed":false});
+        // Reuse the CLI's capture-commit contract before carrying publication
+        // facts into a truncated diagnostic; never infer commitment from prose.
+        if crate::capture_commit_leaf(error) {
+            details["capturePublication"] = error.details["capturePublication"].clone();
+            details["completedCaptures"] = error.details["completedCaptures"].clone();
+        }
+        let compact = serde_json::json!({"protocol":protocol,"ok":false,
             "error":{"code":error.code.chars().take(128).collect::<String>(),"message":error.message.chars().take(512).collect::<String>(),"exit_code":error.exit_code,
-                "details":{"diagnosticTruncated":true,"sessionInvalidated":true,"replayed":false}}});
+                "details":details}});
         if serde_json::to_writer(&mut buffer, &compact).is_err() {
             return Vec::new();
         }
@@ -107,8 +118,15 @@ fn diagnostic_bytes(error: &ToolkitError) -> Vec<u8> {
 }
 
 pub fn report_error(error: &ToolkitError) {
+    report_diagnostic(diagnostic_bytes(error));
+}
+
+pub fn report_worker_error(error: &ToolkitError) {
+    report_diagnostic(diagnostic_bytes_for(error, "lycheedev.data-agent-worker.v1"));
+}
+
+fn report_diagnostic(buffer: Vec<u8>) {
     use std::io::Write;
-    let buffer = diagnostic_bytes(error);
     let Ok(writer) = std::thread::Builder::new()
         .name("data-agent-terminal-diagnostic".into())
         .spawn(move || {
@@ -149,5 +167,28 @@ mod diagnostic_tests {
         let value: serde_json::Value = serde_json::from_slice(&diagnostic_bytes(&error)).unwrap();
         assert_eq!(value["error"]["code"], "small");
         assert_eq!(value["error"]["message"], "detail");
+    }
+
+    #[test]
+    fn truncated_worker_diagnostic_preserves_typed_capture_publication() {
+        let id = format!("CAP-{}", "a".repeat(64));
+        let primary = ToolkitError::new("external.io", "x".repeat(32 << 10), 5);
+        for (state, completed) in [
+            ("committed", serde_json::json!([id])),
+            ("unknown", serde_json::json!([])),
+        ] {
+            let error = primary.clone().with_details(serde_json::json!({
+                "schema":"lycheedev.capture-commit-error.v1", "primary":primary,
+                "capturePublication":{"state":state,"id":id}, "completedCaptures":completed
+            }));
+            let bytes = diagnostic_bytes_for(&error, "lycheedev.data-agent-worker.v1");
+            assert!(bytes.len() <= 16385);
+            let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(value["protocol"], "lycheedev.data-agent-worker.v1");
+            assert_eq!(value["error"]["details"]["diagnosticTruncated"], true);
+            assert_eq!(value["error"]["details"]["capturePublication"], error.details["capturePublication"]);
+            assert_eq!(value["error"]["details"]["completedCaptures"], completed);
+            assert_eq!(value["error"]["details"]["replayed"], false);
+        }
     }
 }

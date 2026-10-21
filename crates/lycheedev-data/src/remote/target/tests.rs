@@ -564,17 +564,14 @@ fn independent_budget_stop_after_definitions_prevents_pin_and_capture_publicatio
     assert_eq!(error.code, "command.cancelled");
     fixture.control.check().unwrap();
     assert_eq!(fetch.calls.borrow().len(), 4);
-    let metadata =
-        lycheedev_core::metadata::Metadata::open_controlled(&fixture.home, false, &fixture.control)
-            .unwrap();
-    assert!(metadata.list::<PinnedSet>("pin/", 10).unwrap().is_empty());
-    assert!(
-        metadata
-            .list::<serde_json::Value>("capture/", 10)
-            .unwrap()
-            .is_empty()
-    );
-    metadata.close().unwrap();
+    // Cancellation precedes both durable stores. A readonly open correctly
+    // reports missing metadata here instead of creating an empty database.
+    assert!(!fixture.home.join("state/toolkit.sqlite").exists());
+    assert!(!fixture.home.join("state/data/evidence-v2.sqlite").exists());
+    let absent = lycheedev_core::metadata::Metadata::open_controlled(
+        &fixture.home, false, &fixture.control,
+    ).err().unwrap();
+    assert_eq!(absent.code, "vault.record_missing");
 }
 
 #[test]
@@ -655,17 +652,14 @@ fn target_pin_schema_wait_keeps_short_budget_identity_before_publication() {
         .expect("definitions reached before budget stopped")
         .close()
         .unwrap();
-    let metadata =
-        lycheedev_core::metadata::Metadata::open_controlled(&fixture.home, false, &fixture.control)
-            .unwrap();
-    assert!(metadata.list::<PinnedSet>("pin/", 10).unwrap().is_empty());
-    assert!(
-        metadata
-            .list::<serde_json::Value>("capture/", 10)
-            .unwrap()
-            .is_empty()
-    );
-    metadata.close().unwrap();
+    // Cancellation precedes both durable stores. A readonly open correctly
+    // reports missing metadata here instead of creating an empty database.
+    assert!(!fixture.home.join("state/toolkit.sqlite").exists());
+    assert!(!fixture.home.join("state/data/evidence-v2.sqlite").exists());
+    let absent = lycheedev_core::metadata::Metadata::open_controlled(
+        &fixture.home, false, &fixture.control,
+    ).err().unwrap();
+    assert_eq!(absent.code, "vault.record_missing");
     fixture
         .store()
         .lease("metadata-schema")

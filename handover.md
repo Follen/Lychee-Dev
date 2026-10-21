@@ -2,18 +2,17 @@
 
 ## 当前接手与验证恢复（2026-10-21）
 
-- 后续开发与统一验证已由本机主代理接手；沿用 `rust-refactor` / [草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。[GitHub 交接入口](docs/handoff/2026-10-21/HANDOFF.md)来自 `0dfcebd25238239887f4dfb5c209a5bf4c07c392`，9 个文件及清单中的 8 项内容哈希已核验。产品实现基线为 `cfdefd46a11ec8dce470d296b424a3eaa1372b8b`；当前测试副本固定关联聚合修复 `88196080544ff1f8a4e1eb4b798605e6e6d1bafd`（tree `eef87faf8ec56ba7898ea7367ee6875570d43e0d`）。保留其他任务的 main 改动和原测试证据。
-- 当前由主代理整合与统一 Windows 验证；三个 worker 的 Data 修改已交回，metadata worker 正只读核对超时组和 Node 导入名单。MAINT-ENCODING-01 已修并推送 `40c2e66a042b11d59fa143915469ee74f1b16010`：仅在内存解码 PowerShell 的 UTF-8/UTF-16LE BOM，保留原始字节、全部身份/大小/哈希检查和清理范围；实际封存与清理已通过。
-- 已验证并封存 112 manifest / 2135 引用及原六份配额拒绝文件；只清理获批的 `target/debug/incremental`，移除 6,819,246,069 字节。2534 项受保护文件和 8663 个其他缓存文件前后哈希一致，最终 receipt 为 `retired`、双 lease 已释放；独立检查无相关进程/lease，缓存为 12,899,139,776 字节，20 GiB 上限未改。原 wrapper exit 1、Cargo 未启动且无实际 owner/receipt 的历史事实保持。
-- 原 `cfdefd46` 已实际执行 Agent native parity 2 项全部通过，以及 Core library 853 项（839 通过、14 失败、0 ignored）；两组 source identity、原生退出与资源回收均完整。Core ignored-list 另已完成，仅为名单证据。原失败和配额拒绝记录保留，不重标为当前通过。
-- CORE-FIXTURE-01：14 项失败均定位到迁移后的旧 fixture 假设，包括 catalog-before-blob 锁序、readonly 能力错误、reserved-key CAS、历史行播种、recency/暂存声明遍历与 durable peak。已推送 9 个测试文件修正，产品实现未改。固定 `1764e19c8c` 实际枚举 130 项受影响测试、0 ignored，并全部通过；14 个原失败对应的用例均实际执行，保留 SQLite busy/事务回滚、原字节、无 CAP、共享保护和配额拒绝验证。默认 stack、600 秒组限、locked/offline/j1 与 owner 回收完整。
-- 当前 Agent client/Data checker/paired consumer 的 24 项 Node 合同测试逐名全过，无 skip；其余 Node 合同实际 375 项为 369 通过、3 失败、3 权限 skip。三失败为旧 Skill 差异清单和 metadata 文件布局断言，本批局部修复并实际验证对应两文件 43 项全部通过。组1额外7项来自显式导入的 TLS adaptation 测试，已补来源，不重跑或改写原结果。Skill commands 与 approved-rust 静态检查通过；这些均不是产品业务或性能通过。
-- DATA-RUNTIME-01：固定 `1764e19c8c` 的 Data library 整组在600秒被受控终止，资源完整回收；原输出分层核定 root 为694通过、11失败、816未观测（含1个原ignored）、1个已开始无终态，nested CGI child单列。终止时最后一项 `actual_verified_batch_closes_every_constructed_owner_on_later_error_and_delivery_stop` 随后单独3.05秒通过，不能把整组超时归因于它卡死。独立 reconciliation 保留原结果和哈希，原600秒失败不重标；后续按未执行名单拆组，不延长上限。
-- DATA-RUNTIME-01 已推送 `bc77ffec18`：collector 采用实际执行流 schema，严格 batch 校验保留；typed AND/OR 使用已有 eager UDF；非物理 public ID 在原行流内记录匹配，只有完整来源实际 EOF 才确认 missing，提前停止保留 unresolved，非整数 ID 不伪造精确缺失结论。两个 fixture 和 Node 合同修正同批保存。两种配置的 native check 已通过；Data 原生名单1526项（1525 active、1 ignored）；15项 focused 实跑14通过、1失败，原11失败对应用例均通过，资源回收和source identity完整。
-- DATA-CORRELATION-01：新增多等值关联 MAX 回归实际失败，eager AND 把原生等值键藏入 UDF，导致 decorrelation 拒绝。已推送 `8819608054`：只让两端均为列/outer列且已证明原生精确比较安全的等值 AND 树保持原生可见；其他 AND/OR 继续 eager。新增等式内 CAST 错误不可被短路隐藏的回归。两配置 native check 已通过，Data重新枚举1527项（1526 active、1 ignored）；165项 Engine组正在执行，结果未定。
-- CLI-SOCKET-01：`bc77ffec18` 的 CLI supervisor 实跑4项为1通过、3失败，均在正常receipt等待中遭遇Windows10035；测试2.71秒结束，不是组超时。root101后MSVC辅助进程仍驻留，outer runner强制回收后资源完整，此额外forced事实保留。本批按Winsock accept继承listener属性的合同，将accepted socket在克隆/启动阻塞reader前明确恢复blocking；主监督线程、认证、所有deadline、EOF drain/cancel/backpressure保持。未改测试预期，待固定提交重跑原4项。
-- 完整目标核对发现原124目标遗漏 emmy-adapter、binding-contracts、delivery 共26个离线目标，现已确认9 crate共150个lib/bin/test声明；补充78 stages只是源码清单，未冒充运行。两个 harness=false helper 不计业务测试。Data原未观测active815项已按精确名单拆为14组，每组不超过60项，仍用600秒上限；尚未开始。
-- 下一步完成正在运行的 Engine组，固定 CLI socket 修复并验证原4项，然后按名单完成 Data library 未运行部分，再继续 Data/CLI/Core/Windows/Source/Live与补充三crate correctness。性能、安装试用及游戏验收仍后置且未执行；CAP提交后错误、非yield/排队deadline等覆盖缺口仍须核实，未冒充已验收。
+- 当前任务沿用 `rust-refactor` / [草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)，本机主代理整合并独占 native 队列。GitHub [交接入口](docs/handoff/2026-10-21/HANDOFF.md)及8项内容哈希已核验；实现基线 `cfdefd46`。最近已推送 `f29c8f880a096c4118e8b3a494bc9745952749d4`（tree `1e3cf79415df1ed4b899c79d511b8e6923cc782d`）；本批新增测试尚待固定提交实跑。其他任务的 main 和所有原失败证据保留。
+- 维护已完成：`40c2e66a04` 修复 PowerShell BOM 内存解码；112 manifest/2135引用与配额拒绝原件已封存。仅清理获批 incremental 6,819,246,069字节，受保护文件前后哈希一致，双lease释放。默认20GiB cache/5GiB scratch、默认stack、600秒测试组限、locked/offline/j1、no one-shot均未改变。
+- CORE-FIXTURE-01 已闭合：原853项为839通过/14失败；迁移后的catalog锁序、CAS、recency/durable peak等14项旧夹具已修，`1764e19c8c` 受影响130项逐名全过，产品未改。Agent native parity原2项通过，后续Engine改动后的集成复验待执行。
+- DATA-RUNTIME-01 / DATA-CORRELATION-01 已修并推送 `bc77ffec18` / `8819608054`：使用执行流schema、保留eager布尔错误、公有ID流内缺失证明、保留安全等值关联键；原11失败对应项均实际通过，新增多键MAX和CAST短路回归已通过。`8819608054` 两配置native check通过，Engine165项全部通过。
+- Data原整组600秒超时保持失败事实，资源完整回收；只读核定694通过/11失败/816未观测（含1 ignored）/1无终态，nested child单列。最后无终态用例单独3.05秒通过。原未观测815 active在`f29c8f880a`拆14组全部执行，811通过/4失败；TLS输出造成的一项解析遗漏已用独立reconciliation逐名核定，不重跑或改写原件。
+- DATA-REMOTE-FIXTURE-01：4个剩余失败位于remote cache的durable peak、Core CAP共享catalog序列化，以及target取消后只读打开从未创建的历史DB。四项夹具均已修：按实际durable peak准入、共享catalog锁序、取消后两库不存在且readonly返回record_missing。取消错误身份、未发布pin/CAP、Data私有容量边界保持，产品未改。Data当前原生名单1527项（1526 active、1 ignored），新增两项后须重新枚举。
+- CLI-SOCKET-01 已闭合：原supervisor4项为1通过/3个Windows10035失败；`f29c8f880a` 将accepted socket恢复blocking，两配置native check和原4项真实进程测试全部通过。EOF半关闭、stdout背压、整epoch取消和私有入口拒绝均已实跑；不能冒充CPU负载或排队请求deadline覆盖。
+- CAP-TRANSPORT-01：Data transport新增2项真实Session query/capture及Navigate自动CAP在stdout flush后observer失败的回归，核唯一CAP、原manifest/body和查询handle；待运行。只读追踪发现CLI private worker只打印Display而丢committed details，CLI三文件修复已交回：复用有界stderr诊断，worker独立protocol，超限诊断保留既有typed CAP身份；新增真实BrokenPipe和排队deadline回归，均待执行，receipt协议和无重放合同未改。精确non-yield CPU poll及真实private receipt断线仍未实测。
+- Node合同原399项合计393通过/3失败/3权限skip；三失败为旧Skill差异清单和metadata布局断言，修后对应43项实际全部通过。额外7个TLS import测试和输出混排用例已单独核定。Skill commands/approved-rust静态检查通过；这些不替代产品业务或性能。
+- 剩余correctness目标：Data其余integration、CLI其余target、Core integration、Windows/Source/Live，以及补漏的emmy-adapter/binding-contracts/delivery。共9 crate、150个lib/bin/test声明；binding library合法0-case、两个harness=false helper只作支持，均不记业务通过。Lua5.1可用；需要外部oracle/真实数据或symlink权限的ignored另列，不冒充执行。
+- 下一步固定本批Data夹具和CAP测试，运行两配置全workspace native check、Data6个定向用例、CLI supervisor全6项及CLI diagnostic组，然后继续未执行目标。Release安装试用、配对性能与最终五循环审计均未完成；游戏、合并和发布未获授权。
 
 ## 1. 当前目标和执行顺序
 

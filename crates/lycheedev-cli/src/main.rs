@@ -1569,7 +1569,7 @@ fn main() -> std::process::ExitCode {
     {
         let result = data_agent::worker(&args);
         if let Err(error) = &result {
-            let _ = writeln!(std::io::stderr(), "{error}");
+            data_agent::report_worker_error(error);
         }
         std::process::exit(result.err().map_or(0, |error| error.exit_code));
     }

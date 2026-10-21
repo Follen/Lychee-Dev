@@ -16,7 +16,7 @@ struct Running {
     child: Option<Child>,
     job: Option<JobGuard>,
     input: Option<ChildStdin>,
-    output: BufReader<ChildStdout>,
+    output: Option<BufReader<ChildStdout>>,
 }
 impl Drop for Running {
     fn drop(&mut self) {
@@ -64,7 +64,7 @@ fn start(fx: &Fixture) -> Running {
     .unwrap();
     Running {
         input: child.stdin.take(),
-        output: BufReader::new(child.stdout.take().unwrap()),
+        output: Some(BufReader::new(child.stdout.take().unwrap())),
         child: Some(child),
         job: Some(job),
     }
@@ -77,7 +77,7 @@ fn send(run: &mut Running, value: Value) {
 }
 fn line(run: &mut Running) -> Value {
     let mut text = String::new();
-    run.output.read_line(&mut text).unwrap();
+    run.output.as_mut().unwrap().read_line(&mut text).unwrap();
     serde_json::from_str(&text).unwrap()
 }
 fn query(id: u64) -> Value {
@@ -108,7 +108,9 @@ fn finish(mut run: Running) -> (i32, String, String) {
         thread::sleep(Duration::from_millis(10));
     };
     let mut out = String::new();
-    run.output.read_to_string(&mut out).unwrap();
+    if let Some(mut output) = run.output.take() {
+        output.read_to_string(&mut out).unwrap();
+    }
     let mut err = String::new();
     run.child
         .as_mut()
@@ -192,6 +194,67 @@ fn supervisor_cancel_of_submitted_work_terminates_epoch_without_replay() {
     assert!(err.contains("sessionInvalidated"), "{err}");
     assert!(err.contains("\"replayed\":false"), "{err}");
 }
+
+#[test]
+fn supervisor_enforces_queued_request_deadline_while_prior_output_is_blocked() {
+    let fx = fixture(512, &"x".repeat(4096));
+    let mut run = start(&fx);
+    send(&mut run, query(1));
+    let first = line(&mut run);
+    let handle = first["result"]["result"]["handle"].as_str().unwrap();
+    send(&mut run, json!({"protocol":"lycheedev.data-agent.v1","id":2,"timeout_ms":5000,
+        "task":"page","handle":handle,"offset":0,"limit":512}));
+    send(&mut run, json!({"protocol":"lycheedev.data-agent.v1","id":3,"timeout_ms":100,
+        "task":"page","handle":handle,"offset":0,"limit":1}));
+    // The first page fills stdout. The next serial request must retain its own
+    // ingress deadline while queued, without waiting for page 2's five seconds.
+    let (code, _partial, err) = finish(run);
+    assert_eq!(code, 7, "{err}");
+    let diagnostic: Value = serde_json::from_str(err.trim()).unwrap();
+    assert_eq!(diagnostic["error"]["code"], "command.deadline");
+    assert_eq!(diagnostic["error"]["details"]["requestId"], 3);
+    assert_eq!(diagnostic["error"]["details"]["sessionInvalidated"], true);
+    assert_eq!(diagnostic["error"]["details"]["replayed"], false);
+}
+
+#[test]
+fn supervisor_preserves_committed_capture_on_real_stdout_broken_pipe() {
+    let fx = fixture(2, "exact");
+    let mut run = start(&fx);
+    send(&mut run, query(1));
+    let first = line(&mut run);
+    let handle = first["result"]["result"]["handle"].as_str().unwrap();
+    // Close the actual pipe read end before requesting CAP. Capture work commits
+    // before transport writes its response; no stdout delivery can then succeed.
+    drop(run.output.take());
+    send(&mut run, json!({"protocol":"lycheedev.data-agent.v1","id":2,
+        "task":"capture","handle":handle}));
+    let (code, out, err) = finish(run);
+    assert_eq!(code, 5, "{err}");
+    assert!(out.is_empty());
+    let diagnostics = err.lines().map(|line| serde_json::from_str::<Value>(line).unwrap()).collect::<Vec<_>>();
+    let worker = diagnostics.iter().find(|value| value["protocol"] == "lycheedev.data-agent-worker.v1").unwrap();
+    let details = &worker["error"]["details"];
+    assert_eq!(details["capturePublication"]["state"], "committed");
+    let id = details["capturePublication"]["id"].as_str().unwrap();
+    assert_eq!(details["completedCaptures"], json!([id]));
+    let supervisor = diagnostics.iter().find(|value| value["protocol"] == "lycheedev.data-agent-supervisor.v1").unwrap();
+    assert_eq!(supervisor["error"]["code"], "data.session.worker_exited");
+    assert_eq!(supervisor["error"]["details"]["sessionInvalidated"], true);
+
+    let metadata = lycheedev_core::metadata::Metadata::open(&fx.home, false).unwrap();
+    let captures = metadata.list::<Value>("capture/", 10).unwrap();
+    metadata.close().unwrap();
+    assert_eq!(captures.len(), 1, "failed delivery must not replay CAP work");
+    let capture = lycheedev_core::evidence::read_capture(&fx.home, id).unwrap();
+    assert_eq!(captures[0], capture);
+    let body = lycheedev_core::evidence::read_blob(&fx.home, &capture["blob"], 16 << 20).unwrap();
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["schema"], "lycheedev.data-agent-result.v1");
+    assert_eq!(body["rowCount"], 2);
+    assert_eq!(body["rows"].as_array().unwrap().len(), 2);
+}
+
 #[test]
 fn private_worker_rejects_direct_entry_without_actual_supervisor() {
     let out = Command::new(env!("CARGO_BIN_EXE_lycheedev"))

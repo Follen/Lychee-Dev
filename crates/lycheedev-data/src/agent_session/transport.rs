@@ -358,6 +358,83 @@ fn run(invocation: Invocation, observer: Option<ReceiptObserver>) -> Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capture::committed_tests::fixture::{self, Fixture};
+    use lycheedev_core::{evidence, metadata::Metadata};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn receipt_failure_preserves_committed_capture(home: &std::path::Path, response: Response) {
+        let value = serde_json::to_value(&response).unwrap();
+        let capture = value.get("capture").unwrap_or(&value);
+        let id = capture["id"].as_str().unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        let output = Arc::new(OutputState {
+            writer: Mutex::new(std::io::stdout()),
+            observer: Some(Arc::new(move |event| {
+                assert!(matches!(event, ReceiptEvent::Completed(7)));
+                observed.fetch_add(1, Ordering::SeqCst);
+                Err(fault("test.receipt_finalize", 5, "post-flush receipt finalization failed"))
+            })),
+        });
+        // Run the actual serializer/newline/flush path before its existing
+        // completion observer fails. This is not an injected stdout failure.
+        let primary = send(&output, Some(7), Ok(response)).unwrap_err();
+        assert_eq!(primary.code, "test.receipt_finalize");
+        assert_eq!(primary.details["capturePublication"], json!({"state":"committed","id":id}));
+        assert_eq!(primary.details["completedCaptures"], json!([id]));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        // Sending that committed error can itself fail delivery. Its original
+        // publication identity must survive rather than becoming an IO-only error.
+        let delivered = send(&output, Some(7), Err(primary.clone())).unwrap_err();
+        assert_eq!(delivered.code, primary.code);
+        assert_eq!(delivered.details["capturePublication"], primary.details["capturePublication"]);
+        assert_eq!(delivered.details["completedCaptures"], primary.details["completedCaptures"]);
+        assert_eq!(delivered.details["primary"], primary.details["primary"]);
+        assert_eq!(delivered.details["transportFailure"]["code"], "test.receipt_finalize");
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "one completion per explicit send; no automatic retry");
+
+        let metadata = Metadata::open(home, false).unwrap();
+        let captures = metadata.list::<serde_json::Value>("capture/", 10).unwrap();
+        metadata.close().unwrap();
+        assert_eq!(captures, vec![capture.clone()], "delivery failures must not replay capture work");
+        assert_eq!(evidence::read_capture(home, id).unwrap(), *capture);
+        let body = evidence::read_blob(home, &capture["blob"], 16 << 20).unwrap();
+        assert!(serde_json::from_slice::<serde_json::Value>(&body).is_ok());
+    }
+
+    #[test]
+    fn session_capture_keeps_committed_identity_after_post_flush_receipt_failure() {
+        let fx = Fixture::new(&[fixture::table("Sample", 921,
+            &[("ID", "uint")], &[vec![fixture::Cell::U(1)]])]);
+        let mut session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let query = serde_json::from_value(json!({"kind":"plan","plan":{"op":"scan","table":{"name":"Sample","mode":"static"}}})).unwrap();
+        let result = runtime.block_on(session.execute(Task::Query { query }, OperationControl::default())).unwrap();
+        let value = serde_json::to_value(&result).unwrap();
+        let handle = value["result"]["handle"].as_str().unwrap().to_owned();
+        drop(result);
+        let response = runtime.block_on(session.execute(Task::Capture { handle: handle.clone() }, OperationControl::default())).unwrap();
+        receipt_failure_preserves_committed_capture(&fx.home, response);
+        let page = runtime.block_on(session.execute(Task::Page { handle, offset: 0, limit: 1 }, OperationControl::default())).unwrap();
+        assert_eq!(serde_json::to_value(page).unwrap()["rows"], json!([[1]]));
+        session.close().unwrap();
+    }
+
+    #[test]
+    fn session_domain_capture_keeps_committed_identity_after_post_flush_receipt_failure() {
+        let fx = Fixture::new(&fixture::items());
+        let mut session = Session::new(fx.invocation("data agent serve", &[])).unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let response = runtime.block_on(session.execute(Task::Navigate {
+            request: crate::engine::DomainRequest::ItemGet {
+                item_id: 7, mode: crate::engine::SourceMode::Static, hotfix_captures: vec![],
+            },
+        }, OperationControl::default())).unwrap();
+        receipt_failure_preserves_committed_capture(&fx.home, response);
+        session.close().unwrap();
+    }
+
     #[test]
     fn frame_size_is_bounded_and_eof_never_dispatches_partial_json() {
         let mut input = std::io::Cursor::new(b"{}\n{}");
