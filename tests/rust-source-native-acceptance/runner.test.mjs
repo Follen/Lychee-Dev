@@ -1,7 +1,10 @@
 // These fault fixtures test the checker only, never report product acceptance.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {readFileSync, mkdtempSync, mkdirSync, readdirSync, rmSync} from 'node:fs';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {ownedUserEnvironment} from '../../tools/rust-build.mjs';
 import {assertApiType, assertContextSnippets, assertExecutedContext, assertExecutionAccounting, assertFullNative, assertNestedControllerRetired, extractXmlMaps, mappingDigest, rebuildXmlInventory, semanticOperationDigest, semanticPlanDigest, assertMaterial, assertPrerequisite, assertReuse, fixturePin, groupBudget} from './assertions.mjs';
 import {corpusDigest, sha256} from '../rust-source-full-corpus/assertions.mjs';
 const commit = 'a'.repeat(40), callsite = {source: 'Caller', referenceExpression: 'Helper', caller: {kind: 'named', name: 'Caller', line: 1}, path: 'a.lua', line: 2, kind: 'call', target: 'Helper', site: {file: 'a.lua', start: 20, end: 26}};
@@ -83,6 +86,30 @@ test('wrapper binds source digest and never changes frozen ownership support', (
   assert.match(text, /import \{[^}]*ownedUserEnvironment[^}]*\} from '\.\/rust-build\.mjs'/);
   assert(text.includes('env: ownedUserEnvironment(job.directory), evidence: job.evidence, timeout,'));
   assert(!text.includes('env: {...process.env}'));
+});
+
+test('controller admits the real owner user directories and rejects business or foreign state', t => {
+  const scratch = mkdtempSync(join(tmpdir(), 'source-native-fresh-'));
+  t.after(() => rmSync(scratch, {recursive: true, force: true}));
+  ownedUserEnvironment(scratch);
+  const source = readFileSync(new URL('./run.mjs', import.meta.url), 'utf8');
+  const statement = source.match(/^assert\.[^\n]*'fresh controlled scratch'[^\n]*$/m)?.[0];
+  assert(statement, 'execute the actual controller freshness assertion');
+  const check = new Function('assert', 'readdirSync', 'scratch', statement);
+  check(assert, readdirSync, scratch);
+  for (const entry of ['home', 'foreign']) {
+    mkdirSync(join(scratch, entry));
+    assert.throws(() => check(assert, readdirSync, scratch), /fresh controlled scratch/);
+    rmSync(join(scratch, entry), {recursive: true});
+  }
+});
+
+test('current performance label takes the current workflow commit without claiming a Go measurement', () => {
+  const source = readFileSync(new URL('./run.mjs', import.meta.url), 'utf8');
+  const workflow = JSON.parse(readFileSync(new URL('../rust-skill-usage/workflow-go324.json', import.meta.url)));
+  assert.equal(workflow.goContract, '29bdbdaff5f064ec212ff2064380b1ccac652eda');
+  assert(source.includes('goOracle: workflow.goContract'));
+  assert(source.includes("goDifferential: 'not_run'"));
 });
 
 function apiType() {

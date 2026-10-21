@@ -20,7 +20,7 @@ assert.equal(process.platform, 'win32');
 const root = resolve('.'), binary = resolve(binaryArg), release = resolve(releaseArg), scratch = resolve(scratchArg), out = resolve(evidenceArg), home = join(scratch, 'home');
 const owner = jsonFile(join(out, 'receipt.json'));
 assert.equal(owner.owner, `source-native-${group}`); assert.equal(owner.state, 'active'); assert.equal(resolve(owner.directory), scratch);
-assert.equal(readdirSync(scratch).length, 0, 'fresh controlled scratch');
+assert.deepEqual(readdirSync(scratch).sort(), ['temp', 'user'], 'fresh controlled scratch');
 const oracle = jsonFile(new URL('../rust-source-full-corpus/retail-oracle.json', import.meta.url));
 const runnerRoot = resolve(import.meta.dirname, '../..');
 const workflow = loadCurrentWorkflow(runnerRoot);
@@ -28,7 +28,7 @@ const started = performance.now(), deadline = started + groupBudget(group) - 150
 const report = {schema: 'lycheedev.source-native-acceptance.v1', group, goContract: workflow.goContract, runnerRoot, state: 'running', startedAt: new Date().toISOString(), oracle,
   binarySHA256: sha256(readFileSync(binary)), checks: [], commands: [], resources: [], memoryWindows: [],
   machine: {platform: process.platform, arch: process.arch, release: os.release(), node: process.version, cpu: os.cpus()[0]?.model, cores: os.cpus().length, totalMemory: os.totalmem()},
-  performance: {state: 'not_evaluated', targetRatio: 0.30, sampleKind: 'single correctness execution; independent cold/warm observations only', goOracle: '3766f9cacb52e93a803a626187e2a1d54a445468', goDifferential: 'not_run', cpu: 'not_measured', io: 'not_measured', aggregateRSS: 'not_measured', windowsMemory: 'outer owned Job observation; see owned-report.json; aggregateRSS remains unmeasured', reason: 'No same-machine Go candidate/repeated paired samples. Source sync includes network and local validation; no guessed download subtraction.'},
+  performance: {state: 'not_evaluated', targetRatio: 0.30, sampleKind: 'single correctness execution; independent cold/warm observations only', goOracle: workflow.goContract, goDifferential: 'not_run', cpu: 'not_measured', io: 'not_measured', aggregateRSS: 'not_measured', windowsMemory: 'outer owned Job observation; see owned-report.json; aggregateRSS remains unmeasured', reason: 'No same-machine Go candidate/repeated paired samples. Source sync includes network and local validation; no guessed download subtraction.'},
   boundaries: ['No studied Lua/configuration execution, game or publication', 'Passed selected cases never mean complete semantic resolution or complete Source acceptance', 'Quota/idle/lifetime are separate real small-material IPC groups, never substitutes for this full Retail group']};
 let sequence = 0, outputBytes = 0, fatal = false, pin, corpus, originals, resourcePeer;
 report.resourceAuthentication=[];

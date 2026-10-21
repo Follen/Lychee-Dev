@@ -9,11 +9,11 @@
 - 当前产品为3.5.0 beta配置。按用户最新要求，Skill只描述产品用法，已移除Go对照、迁移验收背景及两个重复开发说明；当前anchor `eb9db30f3423cdeacb13da067b523e12f9c80cf6`、23文件tree `3e0d0d48173ba24b2e51ea3975289fe8216b0a76`。旧25文件身份和全部历史manifest/报告保留，内部Go324差分合同不变；当前安装拒绝旧包冒充新树。Agent是正式Data入口，migration-oracle仅作旧业务对照，Release不启用。七产品、双Forever身份、Mailbox v1、未知输入不重放、精确数字/coverage/CAP合同不变。
 - 用户要求全部隔离测试，不写入现有 `~/.agents`。Skill/npm安装仅在项目隔离目录；测试用户HOME/USERPROFILE/CODEX_HOME、AppData、temp和npm配置/cache均由当前owner持有。编译器及离线依赖缓存保持既有位置，不重新安装工具链。`runCargo`新增显式isolateUser选项，后续native队列启用；已核现有delivery/CLI Skill写入用例均显式临时target，未走真实用户发现。
 - 本机主代理独占 native 队列和此文件，开发与固定提交测试副本分开；其余代理只在分配文件内工作。保留 main 的独立任务改动及 `.worktrees/rust-refactor`。无游戏、合并或发布授权。
-- 单次Cargo构建/测试经官方owned runner，600秒/组、默认stack、locked/offline/j1、no one-shot，默认20GiB构建cache/5GiB scratch。完整paired collector保留各自既定总预算；Data产品容量另为十进制5GB。用户持续授权同一固定副本target/debug/incremental的清理：无编译进程/占用、核对精确清单，仅删可重建incremental，保留其他cache/EXE/PDB/依赖/报告。最近一批7,719文件/1,638,112,789字节已清理；另经用户单独批准，206组reference独占库对象1,444文件/868,869,828字节已清理。两次保留文件及受保护报告前后hash一致，lease释放，上限不变。Live新编译再次触发cache准入拒绝，当前只准备上述已授权incremental的新清单。
+- 单次Cargo构建/测试经官方owned runner，600秒/组、默认stack、locked/offline/j1、no one-shot，默认20GiB构建cache/5GiB scratch。完整paired及native验收collector保留各自既定总预算；Data产品容量另为十进制5GB。用户持续授权同一固定副本target/debug/incremental的清理：无编译进程/占用、核对精确清单，仅删可重建incremental，保留其他cache/EXE/PDB/依赖/报告。本轮三批incremental共2,206,188,607字节已清理；另经用户单独批准，206组reference独占库对象1,444文件/868,869,828字节已清理。保留文件及受保护报告前后hash一致，lease释放，上限不变。当前95组普通测试EXE/PDB清单另待用户授权，尚未执行。
 
 ## 已实现与实际验证
 
-- 当前固定测试副本为 `53220f83659623d2fa4ca5aa34e615a17473d23c`，tree `abd53013d34ca8b1a83e2c720ff87b222153191d`。全部9 crate两配置native check在284a通过；真实用户目录隔离已核。当前第一方Skill、身份及fixture修正已推送532，GitHub同HEAD静态门实际通过；其他native CI为skipped。新树不能继承旧树整套通过结论。
+- 当前固定测试副本为 `4cd40939a49ae2bd39292aaa8256710b741cf5f0`，tree `0881ac19898aa0a1a7a26fb3bdbb7eb998ff1462`；开发分支已推送 `aaa76686fd19d907dec0adc754562ac87f265ee6` 的sealed_memory夹具修正，待缓存清理后切换。全部9 crate两配置native check在284a通过；真实用户目录隔离已核。第一方Skill、身份及fixture修正已推送532，GitHub同HEAD静态门实际通过；其他native CI为skipped。新树不能继承旧树整套通过结论。
 - CORE-FIXTURE-01：853原例839通过/14失败；14个迁移后锁序、CAS、recency/durable peak旧夹具已修，受影响130项在 `1764e19c8c` 逐名全部通过，产品未改。
 - b6cf Core其余6个integration目标65项全部通过，完整native退出和资源回收已核。CLI当前207 active均有实际通过记录：bin184及supervisor6在b6cf通过；另外17个integration跨b6cf/f5dc通过，原5失败在f5dc修复后闭合；3 ignored单列。
 - DATA-RUNTIME-01 / DATA-CORRELATION-01：执行流schema、eager布尔错误、公有ID流内缺失证明、安全等值关联键已修并推送；Engine165项在 `8819608054` 全部通过，新增多键MAX和CAST短路回归已通过。
@@ -47,7 +47,7 @@
 | ACCEPTANCE-ISOLATION-01 | formal Lua/bridge、五个协议prototype及Source fixed oracle入口补齐owner用户环境；Source外层600秒、Cargo no-oneShot。Live工具Node77通过；Source runner/wrapper27通过，历史checker4失败另列 | core_evidence/data_engine已交回，主代理已核15文件；实际专用入口待跑 |
 | SOURCE-HISTORY-01 | historical checker的原ac8 runner/inputs/完整harness统一从contractRoot认证，测试从原Git blobs取冻结输入并验证篡改拒绝。55项Node通过、1 symlink权限skip；原pin/owner/失败/4137行/两差异不变 | data_engine已交回，主代理已核diff；这是历史checker修复，不是fresh Source通过 |
 | PAIRED-ISOLATION-01 | Agent paired的准备Cargo、controller及调用环境使用已有owner目录；Source paired的outer/准备/Git和样本分别使用已有outer/pair目录。业务home、20对、固定输入、测量及限额不变；Agent15与Source41项Node通过 | data_engine/core_evidence已交回，主代理已核九文件；真实paired仍未执行 |
-| SOURCE-OUTER-ISOLATION-01 | full-corpus和native-acceptance两个outer改用现有ownedUserEnvironment，使下游CLI/Git的用户目录和temp归当前owner；业务home、预算、测量逻辑不变。直接Node49项通过 | core_evidence交回，主代理已核4文件；实际Source运行随当前Release执行 |
+| SOURCE-OUTER-ISOLATION-01 | full-corpus和native-acceptance两个outer改用现有ownedUserEnvironment，使下游CLI/Git的用户目录和temp归当前owner；业务home、预算、测量逻辑不变。原直接Node49项通过；后续发现内层空目录断言冲突，已改为只允许owner创建的user/temp并继续拒绝已有业务home/其他内容，当前报告Go标签从workflow读取。新增故障先红后绿，直接runner39项通过 | core_evidence交回，主代理已核；实际Source运行随当前Release执行 |
 | LIVE-MEMORY-FIXTURE-01 | self-process OS模块/堆读取fixture的release改为lycheedev_core::VERSION，与正式Reader保持一致；保留全部RIP、模块哈希、错误layout和secret namespace断言 | 主代理已改、格式检查通过；实际复跑待缓存准入 |
 | COVERAGE-01 | 9 crate共150个lib/bin/test声明；原漏26目标中adapter19和binding2已完成，delivery5目标待执行。binding lib合法0-case、两个harness=false helper不计业务pass；ignored单列 | 主代理 |
 
