@@ -196,13 +196,23 @@ fn controlled_open_returns_same_metadata_and_readonly_remains_readonly() {
     assert_eq!((synchronous, timeout), (2, 0));
     metadata.put("cache/first", &true, None).unwrap();
     metadata.close().unwrap();
+    let before = std::fs::read(f.database()).unwrap();
     let mut read = Metadata::open_controlled(&f.home, false, &OperationControl::default()).unwrap();
     assert!(read.read::<bool>("cache/first").unwrap());
     assert_eq!(
         read.put("cache/second", &true, None).unwrap_err().code,
-        "vault.metadata"
+        "input.invalid"
+    );
+    assert_eq!(read.generation("cache/first").unwrap(), Some(1));
+    assert_eq!(read.generation("cache/second").unwrap(), None);
+    assert_eq!(
+        read.connection
+            .query_row("SELECT total_changes()", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        0
     );
     read.close().unwrap();
+    assert_eq!(std::fs::read(f.database()).unwrap(), before);
     let mut legacy = Metadata::open(&f.home, true).unwrap();
     let timeout: i64 = legacy
         .connection

@@ -280,36 +280,70 @@ fn supplemental_capture_stops_before_blob_after_blob_and_after_manifest() {
     }
 }
 #[test]
-fn supplemental_capture_schema_wait_cancels_without_manifest_and_releases_blob_guard() {
+fn supplemental_capture_metadata_wait_cancels_without_manifest_and_releases_blob_guard() {
     let f = Fixture::new();
     let invocation = alive();
     let bytes = b"{\"lock\":true}";
-    let held = ExclusiveLock::resource(&f.0.join("locks"), "metadata-schema").unwrap();
-    // Supplemental expiry is independent, and begins only once the blob is published.
+    // Schema admission now precedes publication. Block the actual manifest
+    // transaction only after publication, and start the independent budget
+    // once that transaction has encountered real SQLite contention.
+    let mut blocker = None;
+    let busy_before = Cell::new(None);
     let due = Cell::new(None::<Instant>);
-    let error = commit_capture_bounded_with_check(&f.0, input(bytes), &invocation, || {
-        if blob_path(&f.0, &storage::sha256(bytes)).unwrap().exists() {
-            let deadline = due.get().unwrap_or_else(|| {
-                let deadline = Instant::now() + Duration::from_millis(25);
-                due.set(Some(deadline));
-                deadline
-            });
-            if Instant::now() >= deadline {
-                return Err(ToolkitError::new(
-                    "budget.expired",
-                    "independent budget expired",
-                    7,
-                ));
+    let published = Cell::new(0);
+    let manifests = Cell::new(0);
+    let error = commit_internal_observed_with_check(
+        &f.0,
+        input(bytes),
+        Some(&invocation),
+        || {
+            if busy_before
+                .get()
+                .is_some_and(|before| crate::metadata::sql_busy_observations() > before)
+            {
+                let deadline = due.get().unwrap_or_else(|| {
+                    let deadline = Instant::now() + Duration::from_millis(25);
+                    due.set(Some(deadline));
+                    deadline
+                });
+                if Instant::now() >= deadline {
+                    return Err(ToolkitError::new(
+                        "budget.expired",
+                        "independent budget expired",
+                        7,
+                    ));
+                }
             }
-        }
-        Ok(())
-    })
+            Ok(())
+        },
+        |stage| match stage {
+            CapturePublication::BlobPublished => {
+                published.set(published.get() + 1);
+                let connection =
+                    rusqlite::Connection::open(f.0.join("state/toolkit.sqlite")).unwrap();
+                connection.busy_timeout(Duration::ZERO).unwrap();
+                connection.execute_batch("BEGIN IMMEDIATE").unwrap();
+                blocker = Some(connection);
+                busy_before.set(Some(crate::metadata::sql_busy_observations()));
+            }
+            CapturePublication::ManifestPublished => manifests.set(manifests.get() + 1),
+            CapturePublication::BeforeBlob => {}
+        },
+    )
     .unwrap_err();
     assert_eq!(error.code, "budget.expired");
     invocation.check().unwrap();
+    assert_eq!(published.get(), 1);
+    assert_eq!(manifests.get(), 0);
+    assert!(due.get().is_some());
+    let blocker = blocker.unwrap();
+    blocker.execute_batch("ROLLBACK").unwrap();
+    blocker.close().unwrap();
     assert_eq!(f.capture_count(), 0);
-    assert!(blob_path(&f.0, &storage::sha256(bytes)).unwrap().exists());
-    held.close().unwrap();
+    assert_eq!(
+        fs::read(blob_path(&f.0, &storage::sha256(bytes)).unwrap()).unwrap(),
+        bytes
+    );
     f.assert_guard_free(bytes);
 }
 #[test]

@@ -628,7 +628,12 @@ fn scoped_retirement_usage_excludes_staging_but_full_quota_keeps_it() {
     let control = OperationControl::default();
     let resources = f.resources(&control);
     let owner = resources
-        .reserve_derived_cache(AdditionalPeak::default())
+        .reserve_derived_cache(AdditionalPeak {
+            objects: 3,
+            generations: 5,
+            staging: 7,
+            ..Default::default()
+        })
         .unwrap();
     fs::write(owner.paths.objects.join("unknown-object"), b"123").unwrap();
     fs::write(owner.paths.generations.join("unknown-generation"), b"12345").unwrap();

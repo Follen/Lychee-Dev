@@ -310,6 +310,7 @@ fn checked_cleanup_preserves_repeated_close_events_and_consumes_owners_once() {
         "tmp/data-derived-v1/spill",
         "tmp/data-derived-v1/exports",
         "indexes/data-derived-v1/shared-blobs-v1",
+        "indexes/data-derived-v1/recency-v1",
     ]
     .map(|path| home.join(path));
     assert_eq!(
@@ -347,7 +348,7 @@ fn checked_cleanup_preserves_repeated_close_events_and_consumes_owners_once() {
             Err(ToolkitError::new("test.close", "same close event", 5))
         },
     );
-    // One locks parent, four roots (including private metadata), and six children.
+    // One locks parent, four roots (including private metadata), and seven children.
     assert_eq!(directory_calls, expected_directories.len());
     assert_eq!(
         closed_directories,

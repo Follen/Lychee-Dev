@@ -12,26 +12,61 @@ fn home() -> std::path::PathBuf {
     crate::workspace::initialize(&path).unwrap();
     path
 }
+fn seed_historical_capture(home: &std::path::Path) {
+    let metadata = Metadata::open(home, true).unwrap();
+    // Model an existing historical CAP without routing a new reserved-key
+    // mutation after the removal writer has acquired its write lease.
+    metadata
+        .connection
+        .execute(
+            INSERT_DOCUMENT,
+            params!["capture/fixture", b"null".as_slice()],
+        )
+        .unwrap();
+    metadata.close().unwrap();
+}
 #[test]
 fn removal_scan_and_recovery_share_a_real_sqlite_writer_transaction() {
     let home = home();
+    seed_historical_capture(&home);
     let control = OperationControl::default();
-    Metadata::with_historical_write(&home,&control,|writer|writer.with_write_lease(|writer| {
-        writer.commit(&[HistoricalMutation{key:"capture/fixture",expected_generation:0,bytes:b"null"}])?;
-        let other=Connection::open(home.join("state/toolkit.sqlite"))?;other.busy_timeout(Duration::ZERO)?;
-        let mut state=RemovalCommit::NotCommitted;
-        writer.removal_transaction(&mut state,|tx| {
-            let mut rows=0;tx.visit_raw_page("capture/","",|_,_,_|{rows+=1;Ok(())})?;assert_eq!(rows,1);
-            let error=other.execute("INSERT INTO documents VALUES('capture/concurrent',1,'null')",[]).unwrap_err();
-            assert!(matches!(error,rusqlite::Error::SqliteFailure(ref e,_) if e.code==rusqlite::ErrorCode::DatabaseBusy));
-            tx.put_recovery("evidence/remove/fixture",0,b"null")?;
-            tx.delete_manifest("capture/fixture",1)
-        })?;
-        assert_eq!(state,RemovalCommit::Committed);
-        assert_eq!(writer.document("capture/fixture").unwrap_err().code,"vault.record_missing");
-        other.execute("INSERT INTO documents VALUES('capture/concurrent',1,'null')",[])?;
-        other.close().map_err(|(_,e)|ToolkitError::from(e))?;Ok(())
-    })).unwrap();
+    Metadata::with_historical_write(&home, &control, |writer| {
+        writer.with_write_lease(|writer| {
+            let other = Connection::open(home.join("state/toolkit.sqlite"))?;
+            other.busy_timeout(Duration::ZERO)?;
+            let mut state = RemovalCommit::NotCommitted;
+            let mut calls = 0;
+            writer.removal_transaction(&mut state, |tx| {
+                calls += 1;
+                let mut rows = 0;
+                tx.visit_raw_page("capture/", "", |_, _, _| {
+                    rows += 1;
+                    Ok(())
+                })?;
+                assert_eq!(rows, 1);
+                let error = other
+                    .execute("INSERT INTO documents VALUES('capture/concurrent',1,'null')", [])
+                    .unwrap_err();
+                assert!(matches!(error, rusqlite::Error::SqliteFailure(ref e, _) if e.code == rusqlite::ErrorCode::DatabaseBusy));
+                tx.put_recovery("evidence/remove/fixture", 0, b"null")?;
+                tx.delete_manifest("capture/fixture", 1)
+            })?;
+            assert_eq!(calls, 1);
+            assert_eq!(state, RemovalCommit::Committed);
+            assert_eq!(writer.document("capture/fixture").unwrap_err().code, "vault.record_missing");
+            assert_eq!(writer.document("evidence/remove/fixture")?.generation, 1);
+            let deleted: i64 = writer.connection.query_row(
+                "SELECT generation FROM deleted_generations WHERE key='capture/fixture'",
+                [],
+                |row| row.get(0),
+            )?;
+            assert_eq!(deleted, 1);
+            other.execute("INSERT INTO documents VALUES('capture/concurrent',1,'null')", [])?;
+            other.close().map_err(|(_, error)| ToolkitError::from(error))?;
+            Ok(())
+        })
+    })
+    .unwrap();
     std::fs::remove_dir_all(home).unwrap();
 }
 #[test]
@@ -73,14 +108,10 @@ fn cancellation_on_actual_sqlite_busy_does_not_enter_or_replay_removal() {
 #[test]
 fn failed_second_cas_rolls_back_tombstones_and_recovery_without_replaying_callback() {
     let home = home();
+    seed_historical_capture(&home);
     let control = OperationControl::default();
     Metadata::with_historical_write(&home, &control, |writer| {
         writer.with_write_lease(|writer| {
-            writer.commit(&[HistoricalMutation {
-                key: "capture/fixture",
-                expected_generation: 0,
-                bytes: b"null",
-            }])?;
             let mut state = RemovalCommit::NotCommitted;
             let mut calls = 0;
             let error = writer

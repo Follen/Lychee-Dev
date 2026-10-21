@@ -3,9 +3,11 @@
 ## 当前接手与验证恢复（2026-10-21）
 
 - 后续开发与统一验证已由本机主代理接手；沿用 `rust-refactor` / [草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。[GitHub 交接入口](docs/handoff/2026-10-21/HANDOFF.md)来自 `0dfcebd25238239887f4dfb5c209a5bf4c07c392`，9 个文件及清单中的 8 项内容哈希已核验。产品及原测试副本继续固定 `cfdefd46a11ec8dce470d296b424a3eaa1372b8b`；保留其他任务的 main 改动和原测试证据。
-- 当前文件负责人为主代理，范围为交接维护脚本、配套哈希/说明和本交接。MAINT-ENCODING-01 已修：PowerShell 的 JSON 为 UTF-8 BOM、重定向 stderr 为 UTF-16LE BOM；仅在内存解码，保留原始字节、全部身份/大小/哈希检查和清理范围。两次原生失败均发生在创建 blocked 记录与删除之前；修复后实际封存通过。
+- 当前由主代理整合；evidence 与 metadata 两位 worker 已交回各自测试修改，主代理负责 data_disk 与统一 Windows 验证。MAINT-ENCODING-01 已修并推送 `40c2e66a042b11d59fa143915469ee74f1b16010`：仅在内存解码 PowerShell 的 UTF-8/UTF-16LE BOM，保留原始字节、全部身份/大小/哈希检查和清理范围；实际封存与清理已通过。
 - 已验证并封存 112 manifest / 2135 引用及原六份配额拒绝文件；只清理获批的 `target/debug/incremental`，移除 6,819,246,069 字节。2534 项受保护文件和 8663 个其他缓存文件前后哈希一致，最终 receipt 为 `retired`、双 lease 已释放；独立检查无相关进程/lease，缓存为 12,899,139,776 字节，20 GiB 上限未改。原 wrapper exit 1、Cargo 未启动且无实际 owner/receipt 的历史事实保持。
-- 本批产品业务用例实际执行仍为 0；既有两种 check、CI、Data/CLI 名单及 Core all-list 不等于业务通过。下一步在同一固定测试副本新建续跑记录，补 Core ignored-list，再按已列出的目标逐组执行 correctness；不覆盖原拒绝记录、不派发旧队列、不提前运行性能或游戏验收。
+- 原 `cfdefd46` 已实际执行 Agent native parity 2 项全部通过，以及 Core library 853 项（839 通过、14 失败、0 ignored）；两组 source identity、原生退出与资源回收均完整。Core ignored-list 另已完成，仅为名单证据。原失败和配额拒绝记录保留，不重标为当前通过。
+- CORE-FIXTURE-01：14 项失败均定位到迁移后的旧 fixture 假设，包括 catalog-before-blob 锁序、readonly 能力错误、reserved-key CAS、历史行播种、recency/暂存声明遍历与 durable peak。已修改 9 个测试文件，保留实际 SQLite busy/事务回滚、原字节、无 CAP、共享保护和配额拒绝；产品实现未改。rustfmt 语法与 diff 检查通过，Windows 修复后运行尚未执行，不能声明问题已验证关闭。
+- 下一步将本修复批次固定为新 SHA，在原测试副本复用缓存，先执行受影响的 evidence/metadata/data_disk 组，再继续已列出的 Data/CLI/Core integrations/Source/Live correctness。仅创建新的续跑记录，不派发旧队列；性能、安装试用及游戏验收仍后置且未执行。
 
 ## 1. 当前目标和执行顺序
 

@@ -171,7 +171,7 @@ fn same_failure(owner: &DerivedReservation<'_>, code: &str) {
 }
 
 #[test]
-fn full_inventory_reuses_ten_owners_and_second_attribution_walk_with_identical_file_work() {
+fn full_inventory_reuses_managed_owners_and_keeps_identical_file_work() {
     let f = Fixture::new(10000);
     let body = f.publish(b"shared-body");
     let control = OperationControl::default();
@@ -203,18 +203,20 @@ fn full_inventory_reuses_ten_owners_and_second_attribution_walk_with_identical_f
     assert_eq!(reused_events.inventories, 1);
     assert_eq!(fallback_events.file_closes, 9);
     assert_eq!(reused_events.file_closes, fallback_events.file_closes);
-    assert_eq!(fallback_events.opened.len(), 14); // 12 managed traversals + 2 unknown.
+    // Eleven managed directories plus two extra shared-record walks: durable
+    // spool declarations and semantic shared-body attribution.
+    assert_eq!(fallback_events.opened.len(), 15); // 13 managed traversals + 2 unknown.
     assert_eq!(reused_events.opened.len(), 2);
-    assert_eq!(fallback_events.closed.len(), 16);
+    assert_eq!(fallback_events.closed.len(), 17);
     assert_eq!(
         fallback_events.closed.len() - reused_events.closed.len(),
-        12
+        13
     );
     assert!(fallback_events.borrowed.is_empty());
     let mut expected_managed = frequencies(managed.clone());
     *expected_managed
         .get_mut(&owner.paths.shared_blobs())
-        .unwrap() += 1;
+        .unwrap() += 2;
     assert_eq!(
         frequencies(reused_events.borrowed.clone()),
         expected_managed
@@ -268,11 +270,25 @@ fn borrowed_scans_never_close_original_owners_and_finish_consumes_each_once() {
     }
     assert!(monitor.events().opened.is_empty());
     assert!(monitor.events().closed.is_empty());
-    assert_eq!(monitor.events().borrowed.len(), 33);
+    let mut expected_walk = frequencies(paths[1..].iter().cloned());
+    *expected_walk.get_mut(&owner.paths.shared_blobs()).unwrap() += 2;
+    assert_eq!(
+        frequencies(monitor.events().borrowed),
+        expected_walk
+            .iter()
+            .map(|(path, count)| (path.clone(), count * 3))
+            .collect()
+    );
     owner.finish(Ok(())).unwrap();
     let events = monitor.events();
     assert_eq!(events.inventories, 4);
-    assert_eq!(events.borrowed.len(), 44);
+    assert_eq!(
+        frequencies(events.borrowed),
+        expected_walk
+            .into_iter()
+            .map(|(path, count)| (path, count * 4))
+            .collect()
+    );
     assert_eq!(
         events.closed,
         paths[1..]
@@ -656,7 +672,7 @@ fn ordinary_new_body_stream_keeps_two_quota_acquisitions_and_four_full_inventori
     let events = monitor.events();
     assert_eq!(events.quotas, 2);
     assert_eq!(events.inventories, 4);
-    assert_eq!(events.borrowed.len(), 44);
+    assert_eq!(events.borrowed.len(), 52); // 13 managed traversals per inventory.
     assert!(events.opened.is_empty());
     let paths = DataCachePaths::new(&std::path::absolute(&f.0).unwrap());
     assert_eq!(
@@ -665,7 +681,7 @@ fn ordinary_new_body_stream_keeps_two_quota_acquisitions_and_four_full_inventori
             .iter()
             .filter(|path| **path == paths.shared_blobs())
             .count(),
-        8
+        12 // File inventory, durable spool declarations, semantic attribution.
     );
     drop(monitor);
     let control = OperationControl::default();
@@ -697,17 +713,22 @@ fn later_quota_inventory_sees_nested_producer_publication_and_refuses_stale_admi
             self.data.read(out)
         }
     }
-    let f = Fixture::new(100);
+    // Keep the nested publisher admissible with its 128-byte durable shard
+    // declaration: outer spool64 + nested bodies10 + records80 + declaration128.
+    // Once it commits 85 bytes, outer final publication needs 85 + 64 + 128 + 80
+    // = 357 bytes and must fail only when its later inventory sees that commit.
+    const OUTER: &[u8] = &[b'b'; 64];
+    let f = Fixture::new(282);
     let mut producer = Nested {
         home: &f.0,
-        data: Cursor::new(b"body"),
+        data: Cursor::new(OUTER),
         entered: false,
     };
     let monitor = Monitor::new();
     let error = publish_shared_blob_stream_with_check(
         &f.0,
         &mut producer,
-        4,
+        OUTER.len() as u64,
         1000,
         &OperationControl::default(),
         || Ok(()),
@@ -721,7 +742,7 @@ fn later_quota_inventory_sees_nested_producer_publication_and_refuses_stale_admi
     assert_eq!(monitor.events().inventories, 5); // Outer B admission fails; no success finish scan.
     drop(monitor);
     assert!(
-        !evidence::blob_path(&f.0, &storage::sha256(b"body"))
+        !evidence::blob_path(&f.0, &storage::sha256(OUTER))
             .unwrap()
             .exists()
     );

@@ -101,21 +101,27 @@ fn cancellation_after_blob_preserves_original_bytes_without_manifest_or_replay()
     let bytes = b"{\"original\":true}";
     let (c, s) = cancellation();
     let mut published = 0;
+    let mut manifests = 0;
     let error = commit_internal_observed(&f.home(), input(bytes), Some(&c), |stage| {
         if matches!(stage, CapturePublication::BlobPublished) {
             published += 1;
             s.cancel();
         }
+        if matches!(stage, CapturePublication::ManifestPublished) {
+            manifests += 1;
+        }
     })
     .unwrap_err();
     assert_eq!(error.code, "command.cancelled");
     assert_eq!(published, 1);
+    assert_eq!(manifests, 0);
     assert_eq!(
         fs::read(blob_path(&f.home(), &storage::sha256(bytes)).unwrap()).unwrap(),
         bytes
     );
+    // Catalog admission may initialize the schema before the blob; only a
+    // committed capture is publication of its manifest.
     assert_eq!(f.count(), 0);
-    assert!(!f.home().join("state/toolkit.sqlite").exists());
     f.assert_lock_released(bytes);
     assert_eq!(
         commit_capture_bounded(&f.home(), input(bytes), &c)
@@ -124,6 +130,10 @@ fn cancellation_after_blob_preserves_original_bytes_without_manifest_or_replay()
         "command.cancelled"
     );
     assert_eq!(f.count(), 0);
+    assert_eq!(
+        fs::read(blob_path(&f.home(), &storage::sha256(bytes)).unwrap()).unwrap(),
+        bytes
+    );
 }
 #[test]
 fn cancellation_after_manifest_preserves_exact_capture_and_separate_pin_transaction() {

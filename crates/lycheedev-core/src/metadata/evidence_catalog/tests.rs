@@ -302,20 +302,34 @@ fn generic_reserved_key_update_targets_data_store_without_duplicate_history() {
     let capture = f.capture(b"generic mutation", true, &[]);
     let mut historical = Metadata::open(&f.0, true).unwrap();
     let key = format!("capture/{}", id(&capture));
-    historical.put(&key, &capture, None).unwrap();
+    let generation = historical.generation(&key).unwrap();
+    assert_eq!(generation, Some(1));
+    historical.put(&key, &capture, generation).unwrap();
+    assert_eq!(historical.generation(&key).unwrap(), Some(2));
     assert_eq!(
         historical
             .connection
             .query_row(
-                "SELECT count(*) FROM documents WHERE key=?1",
+                "SELECT (SELECT count(*) FROM documents WHERE key=?1), (SELECT count(*) FROM deleted_generations WHERE key=?1)",
                 [&key],
-                |row| row.get::<_, i64>(0)
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
             )
             .unwrap(),
-        0
+        (0, 0)
     );
     assert_eq!(historical.read::<serde_json::Value>(&key).unwrap(), capture);
     historical.close().unwrap();
+    let data = Connection::open(f.0.join("state/data/evidence-v2.sqlite")).unwrap();
+    assert_eq!(
+        data.query_row(
+            "SELECT generation FROM documents WHERE key=?1",
+            [&key],
+            |row| { row.get::<_, i64>(0) }
+        )
+        .unwrap(),
+        2
+    );
+    data.close().unwrap();
 }
 #[test]
 fn purpose_bound_database_rejects_unrelated_documents_without_deleting_them() {

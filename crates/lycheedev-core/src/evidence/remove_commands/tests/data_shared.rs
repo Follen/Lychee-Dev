@@ -191,20 +191,32 @@ fn data_pending_attribution_preserves_body_and_retained_peak_on_capture_remove()
 }
 
 #[test]
-fn absent_data_attribution_preserves_real_deletion_without_creating_ownership_directories() {
+fn absent_data_attribution_preserves_real_deletion_without_creating_ownership_records() {
     for existing_parent in [false, true] {
         let f = Fixture::new();
         let paths = DataCachePaths::new(&f.home);
         if existing_parent {
             fs::create_dir_all(paths.shared_blobs().parent().unwrap()).unwrap();
         }
+        assert!(
+            !workspace::data_disk::protects_evidence_body(
+                &f.home,
+                &storage::sha256(b"body"),
+                4,
+                &OperationControl::default(),
+            )
+            .unwrap()
+        );
+        // The lookup itself remains read-only; later catalog writer admission
+        // prepares managed roots without claiming independent Data ownership.
+        assert!(!paths.shared_blobs().exists());
         let capture = f.capture(b"body", "not-data-owned");
         let path = blob_path(&f.home, capture["blob"]["sha256"].as_str().unwrap()).unwrap();
         let receipt = run(&f.home, id(&capture), &f.inv(id(&capture)).control).unwrap();
         assert_eq!(receipt["blobRemoved"], true);
         assert_eq!(receipt["blobShared"], false);
         assert!(!path.exists());
-        assert!(!paths.shared_blobs().exists());
+        assert!(fs::read_dir(paths.shared_blobs()).unwrap().next().is_none());
         f.cleanup();
     }
 }
@@ -345,7 +357,7 @@ impl FileControl for Native<'_> {
 }
 
 #[test]
-fn active_original_intent_fails_closed_then_closed_intent_protects_without_quota_lock() {
+fn active_original_intent_fails_closed_then_closed_intent_protects_under_catalog_quota() {
     let f = Fixture::new();
     let reference = publish(&f, b"body");
     let capture = f.capture(b"body", "live-intent");
@@ -370,6 +382,7 @@ fn active_original_intent_fails_closed_then_closed_intent_protects_without_quota
         intent.publish_record(&raw, &mut Native(&control)).unwrap(),
         StagedPublication::Published
     );
+    quota.close().unwrap();
     // The live WRITE/DELETE owner and immutable Reader cannot share on Windows.
     // This is an actual native sharing failure, not an injected absent record.
     let error = run(&f.home, id(&capture), &control).unwrap_err();
@@ -380,12 +393,41 @@ fn active_original_intent_fails_closed_then_closed_intent_protects_without_quota
     assert!(read_capture(&f.home, id(&capture)).is_ok());
     assert!(recovery(&f, id(&capture)).is_none());
     assert!(intent.close().is_empty());
-    // Quota remains held: a blob -> quota acquisition here would time out.
+    // The catalog now acquires quota before the blob. Observe its real lock at
+    // that boundary: successful completion must not reacquire it under blob.
+    let entered = std::rc::Rc::new(std::cell::Cell::new(false));
+    let observed = entered.clone();
+    let home = f.home.clone();
+    let expected_key = format!("blob:{}", reference.sha256);
+    BEFORE_BLOB_LEASE.with(|slot| {
+        assert!(slot.borrow().is_none());
+        *slot.borrow_mut() = Some(Box::new(move |key, control| {
+            assert_eq!(key, expected_key);
+            control.check().unwrap();
+            assert_eq!(
+                ExclusiveLock::resource(&home.join("locks"), "data-derived-v1:quota")
+                    .err()
+                    .unwrap()
+                    .code,
+                "workspace.busy"
+            );
+            observed.set(true);
+        }));
+    });
     let receipt = run(&f.home, id(&capture), &control).unwrap();
+    assert!(entered.get());
     assert_shared(&receipt, id(&capture));
     assert_eq!(control.stop_cause().unwrap(), None);
     directory.close().unwrap();
-    quota.close().unwrap();
+    assert_eq!(
+        fs::read(blob_path(&f.home, &reference.sha256).unwrap()).unwrap(),
+        b"body"
+    );
+    assert_eq!(
+        fs::read(record(&f, &reference.sha256, "intent")).unwrap(),
+        raw
+    );
+    assert!(!record(&f, &reference.sha256, "complete").exists());
     assert_eq!(usage(&f).retained_shared_peak_bytes, 8);
     f.cleanup();
 }
