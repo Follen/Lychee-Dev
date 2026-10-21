@@ -1106,3 +1106,33 @@ async fn recovered_static_wide_integer_branch_does_not_coerce_to_dead_float() {
     let expression = json!({"kind":"case","branches":[{"when":lit(json!(true)),"then":lit(json!(u64::MAX))}],"otherwise":lit(json!(1.0))});
     assert_eq!(new_scalar(expression).await.unwrap(), Scalar::UInt(u64::MAX));
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn correlated_scalar_max_preserves_multiple_equality_keys() {
+    let (context, owner) = setup();
+    register(&context, &request("A"), vec![
+        ("key", Arc::new(Int64Array::from(vec![1, 1, 2, 3]))),
+        ("group", Arc::new(Int64Array::from(vec![10, 20, 10, 10]))),
+    ]);
+    register(&context, &request("B"), vec![
+        ("ID", Arc::new(Int64Array::from(vec![7, 9, 8, 5]))),
+        ("key", Arc::new(Int64Array::from(vec![1, 1, 1, 2]))),
+        ("group", Arc::new(Int64Array::from(vec![10, 20, 10, 10]))),
+    ]);
+    let plan = decode(json!({
+        "op":"project", "input":{"op":"scan","table":{"name":"A","mode":"static"}},
+        "columns":[{"name":"value","expression":{"kind":"scalar_query","input":{
+            "op":"aggregate", "groups":[],
+            "metrics":[{"name":"maximum","function":"maximum","expression":{"kind":"column","name":"B.ID"}}],
+            "input":{"op":"filter","input":{"op":"scan","table":{"name":"B","mode":"static"}},
+                "predicate":{"kind":"binary","operator":"and",
+                    "left":{"kind":"binary","operator":"equal",
+                        "left":{"kind":"column","name":"B.key"},"right":{"kind":"outer_column","name":"A.key"}},
+                    "right":{"kind":"binary","operator":"equal",
+                        "left":{"kind":"column","name":"B.group"},"right":{"kind":"outer_column","name":"A.group"}}}}
+        }}}]
+    }));
+    assert_eq!(run(&context, owner, &plan).await, vec![
+        vec![Scalar::Int(8)], vec![Scalar::Int(9)], vec![Scalar::Int(5)], vec![Scalar::Null]
+    ]);
+}

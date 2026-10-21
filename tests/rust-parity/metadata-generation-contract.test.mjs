@@ -70,6 +70,13 @@ function transaction(db, run) {
   try { run(); db.exec('COMMIT'); }
   catch (error) { db.exec('ROLLBACK'); throw error; }
 }
+function methodSource(text, name) {
+  const start = text.search(new RegExp(`\\n    (?:pub(?:\\([^)]*\\))? )?fn ${name}(?:<|\\()`));
+  assert.ok(start >= 0, `missing metadata method ${name}`);
+  const end = text.indexOf('\n    }\n', start);
+  assert.ok(end > start, `missing metadata method end ${name}`);
+  return text.slice(start, end);
+}
 
 test('default writable schema is exactly fixed Go323 and upgrades without resetting rows', () => {
   assert.equal(schema, pinned.schema);
@@ -136,19 +143,39 @@ test('failed DELETE statement rolls back a tombstone overwrite together with doc
 });
 
 test('all default creation sites use the shared generation-history INSERT', () => {
-  const production = rust.slice(0, rust.indexOf('#[cfg(test)]\nmod controlled_tests'));
-  assert.equal((production.match(/transaction\.execute\(\s*INSERT_DOCUMENT,/g) ?? []).length, 4);
-  assert.doesNotMatch(production, /VALUES\(\?1,1,\?2\)/);
   const capture = source('crates/lycheedev-core/src/metadata/capture_write.rs');
-  assert.match(capture, /transaction\.execute\(\s*INSERT_DOCUMENT,/);
-  assert.doesNotMatch(capture, /VALUES\(\?1,1,\?2\)/);
+  const checked = source('crates/lycheedev-core/src/metadata/evidence_catalog/checked_delete.rs');
+  // These are the actual owning transactions. The checked recovery INSERT
+  // moved into the catalog; put_serialized_referencing is a test-only helper.
+  for (const [name, body] of [
+    ['controlled publication', methodSource(rust, 'put_controlled_policy_with_check_dyn')],
+    ['serialized publication', methodSource(rust, 'put_serialized_policy_dyn')],
+    ['capture publication', methodSource(capture, 'put_capture_serialized_observed')],
+    ['checked recovery', checked],
+  ]) {
+    assert.match(body, /TransactionBehavior::Immediate/, name);
+    assert.match(body, /transaction\.execute\(\s*INSERT_DOCUMENT,/, name);
+    assert.doesNotMatch(body, /VALUES\(\?1,1,\?2\)/, name);
+  }
   assert.match(source('crates/lycheedev-core/src/metadata/controlled_open.rs'), /checked_sql_with_check\([^;]+connection\.execute_batch\(DELETED_GENERATIONS_SCHEMA\)/s);
 });
 
 test('default removal sites save generation in their existing write transaction', () => {
-  const production = rust.slice(0, rust.indexOf('#[cfg(test)]\nmod controlled_tests'));
-  assert.equal((production.match(/remember_deleted_generation\(&transaction, key\)/g) ?? []).length, 3);
   const consume = source('crates/lycheedev-core/src/metadata/source_controlled.rs');
+  const checked = source('crates/lycheedev-core/src/metadata/evidence_catalog/checked_delete.rs');
+  assert.match(methodSource(rust, 'consume'), /self\.consume_controlled\(/);
+  assert.match(methodSource(rust, 'delete_checked_record_controlled_with_raw'), /evidence_catalog::checked_delete\(/);
+  for (const [name, body] of [
+    ['ordinary delete', methodSource(rust, 'delete')],
+    ['controlled consume', methodSource(consume, 'consume_controlled_observed')],
+    ['catalog checked delete', checked],
+  ]) {
+    const begin = body.indexOf('TransactionBehavior::Immediate');
+    const remembered = body.indexOf('remember_deleted_generation(&transaction, key)');
+    const deleted = body.indexOf('transaction.execute("DELETE FROM documents');
+    const commit = body.search(/transaction\.(?:commit\(\)|execute_batch\("COMMIT"\))/);
+    assert.ok(begin >= 0 && begin < remembered && remembered < deleted && deleted < commit,
+      `${name}: BEGIN IMMEDIATE -> remember generation -> DELETE -> COMMIT`);
+  }
   assert.match(consume, /checked_sql\(control, control\.deadline\(\), on_busy, \|\| \{\s*remember_deleted_generation\(&transaction, key\)/);
-  assert.ok(consume.indexOf('remember_deleted_generation(&transaction, key)') < consume.indexOf('transaction.execute("DELETE FROM documents'));
 });

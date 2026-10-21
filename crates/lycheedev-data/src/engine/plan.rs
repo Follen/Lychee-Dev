@@ -621,8 +621,10 @@ impl TestCompletedFrame {
         let mut admission = owner.budget.reserve_retained(maximum).map_err(external)?.into_owned(&owner.budget).map_err(external)?;
         subquery::reserve_clone(frame.logical_plan(), &owner)?;
         let keepalive = frame.logical_plan().clone();
-        let schema = Arc::new(frame.schema().as_arrow().clone());
         let mut stream = frame.execute_stream().await?;
+        // Optimization can refine expression nullability. Admit the executing
+        // stream's schema, as production does, before collecting any batches.
+        let schema = stream.schema();
         let mut output = super::output_batches::OutputBatches::new(schema, maximum);
         while let Some(batch) = stream.next().await {
             owner.check()?;
@@ -1033,8 +1035,8 @@ fn expression(value: &Expression, schema: &DFSchema, owner: &Arc<QueryOwner>, bi
                         return Err(external(crate::relational::engine_compat::type_error()));
                     }
                 }
-                Expr::BinaryExpr(datafusion::logical_expr::expr::BinaryExpr::new(Box::new(left), operator_value(*operator), Box::new(right)))
-            } else { numeric::binary(left, operator_value(*operator), right, schema, owner)? }
+            }
+            numeric::binary(left, operator_value(*operator), right, schema, owner)?
         },
         Expression::Not { value } => Expr::Not(Box::new(expression(value, schema, owner, bindings)?)),
         Expression::IsNull { value } => expression(value, schema, owner, bindings)?.is_null(),

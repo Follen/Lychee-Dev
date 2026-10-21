@@ -2,12 +2,15 @@
 
 ## 当前接手与验证恢复（2026-10-21）
 
-- 后续开发与统一验证已由本机主代理接手；沿用 `rust-refactor` / [草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。[GitHub 交接入口](docs/handoff/2026-10-21/HANDOFF.md)来自 `0dfcebd25238239887f4dfb5c209a5bf4c07c392`，9 个文件及清单中的 8 项内容哈希已核验。产品及原测试副本继续固定 `cfdefd46a11ec8dce470d296b424a3eaa1372b8b`；保留其他任务的 main 改动和原测试证据。
-- 当前由主代理整合；evidence 与 metadata 两位 worker 已交回各自测试修改，主代理负责 data_disk 与统一 Windows 验证。MAINT-ENCODING-01 已修并推送 `40c2e66a042b11d59fa143915469ee74f1b16010`：仅在内存解码 PowerShell 的 UTF-8/UTF-16LE BOM，保留原始字节、全部身份/大小/哈希检查和清理范围；实际封存与清理已通过。
+- 后续开发与统一验证已由本机主代理接手；沿用 `rust-refactor` / [草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。[GitHub 交接入口](docs/handoff/2026-10-21/HANDOFF.md)来自 `0dfcebd25238239887f4dfb5c209a5bf4c07c392`，9 个文件及清单中的 8 项内容哈希已核验。产品实现基线为 `cfdefd46a11ec8dce470d296b424a3eaa1372b8b`；当前测试副本固定测试修正提交 `1764e19c8c1d715e519b5eb099ce95218c7d0a1b`（tree `c3f4d13ca3d05351e2cd6b11327c3df4f9ef259b`）。保留其他任务的 main 改动和原测试证据。
+- 当前由主代理整合与统一 Windows 验证；三个 worker 的 Data 修改已交回，metadata worker 正只读核对超时组和 Node 导入名单。MAINT-ENCODING-01 已修并推送 `40c2e66a042b11d59fa143915469ee74f1b16010`：仅在内存解码 PowerShell 的 UTF-8/UTF-16LE BOM，保留原始字节、全部身份/大小/哈希检查和清理范围；实际封存与清理已通过。
 - 已验证并封存 112 manifest / 2135 引用及原六份配额拒绝文件；只清理获批的 `target/debug/incremental`，移除 6,819,246,069 字节。2534 项受保护文件和 8663 个其他缓存文件前后哈希一致，最终 receipt 为 `retired`、双 lease 已释放；独立检查无相关进程/lease，缓存为 12,899,139,776 字节，20 GiB 上限未改。原 wrapper exit 1、Cargo 未启动且无实际 owner/receipt 的历史事实保持。
 - 原 `cfdefd46` 已实际执行 Agent native parity 2 项全部通过，以及 Core library 853 项（839 通过、14 失败、0 ignored）；两组 source identity、原生退出与资源回收均完整。Core ignored-list 另已完成，仅为名单证据。原失败和配额拒绝记录保留，不重标为当前通过。
-- CORE-FIXTURE-01：14 项失败均定位到迁移后的旧 fixture 假设，包括 catalog-before-blob 锁序、readonly 能力错误、reserved-key CAS、历史行播种、recency/暂存声明遍历与 durable peak。已修改 9 个测试文件，保留实际 SQLite busy/事务回滚、原字节、无 CAP、共享保护和配额拒绝；产品实现未改。rustfmt 语法与 diff 检查通过，Windows 修复后运行尚未执行，不能声明问题已验证关闭。
-- 下一步将本修复批次固定为新 SHA，在原测试副本复用缓存，先执行受影响的 evidence/metadata/data_disk 组，再继续已列出的 Data/CLI/Core integrations/Source/Live correctness。仅创建新的续跑记录，不派发旧队列；性能、安装试用及游戏验收仍后置且未执行。
+- CORE-FIXTURE-01：14 项失败均定位到迁移后的旧 fixture 假设，包括 catalog-before-blob 锁序、readonly 能力错误、reserved-key CAS、历史行播种、recency/暂存声明遍历与 durable peak。已推送 9 个测试文件修正，产品实现未改。固定 `1764e19c8c` 实际枚举 130 项受影响测试、0 ignored，并全部通过；14 个原失败对应的用例均实际执行，保留 SQLite busy/事务回滚、原字节、无 CAP、共享保护和配额拒绝验证。默认 stack、600 秒组限、locked/offline/j1 与 owner 回收完整。
+- 当前 Agent client/Data checker/paired consumer 的 24 项 Node 合同测试逐名全过，无 skip；其余 Node 合同实际 375 项为 369 通过、3 失败、3 权限 skip。三失败为旧 Skill 差异清单和 metadata 文件布局断言，本批局部修复并实际验证对应两文件 43 项全部通过。组1额外7项来自显式导入的 TLS adaptation 测试，已补来源，不重跑或改写原结果。Skill commands 与 approved-rust 静态检查通过；这些均不是产品业务或性能通过。
+- DATA-RUNTIME-01：固定 `1764e19c8c` 的 Data library 整组在600秒被受控终止，资源完整回收；初始解析观测692通过、11失败、818未观测、1个嵌套子进程用例重名，完整计数待结合原始输出分层核定。终止时最后一项 `actual_verified_batch_closes_every_constructed_owner_on_later_error_and_delivery_stop` 随后单独3.05秒通过，不能把整组超时归因于它卡死。原600秒失败保留，后续按模块/未执行名单拆组，不延长上限。
+- DATA-RUNTIME-01 本批实现修复：collector 采用实际执行流 schema，严格 batch 校验保留；typed AND/OR 使用已有 eager UDF；非物理 public ID 在原行流内记录匹配，只有完整来源实际 EOF 才确认 missing，提前停止保留 unresolved，非整数 ID 不伪造精确缺失结论。同步修正 decoded alias 外部变化与 generation/CAP quota 两个 fixture，并补生产 Engine 和多等值关联聚合回归。源码已整合核对，修复后 Windows 运行尚未开始；eager AND 对关联聚合优化的影响由实际回归核实。
+- 下一步固定本批提交并执行两种配置的 native check、原11项失败对应回归和新增用例，再拆分尚未完成的 Data library 并继续 Data/CLI/Core integrations/Windows/Source/Live correctness。性能、安装试用及游戏验收仍后置且未执行；CAP提交后错误、非yield/排队deadline等覆盖缺口仍须核实，未冒充已验收。
 
 ## 1. 当前目标和执行顺序
 

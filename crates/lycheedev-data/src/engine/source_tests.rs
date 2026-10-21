@@ -540,7 +540,7 @@ async fn uncached_selected_source_imports_only_existing_requested_rows() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn same_generation_batch_is_reused_for_later_distinct_id_with_source_scope_label() {
+async fn same_generation_distinct_lookup_ids_keep_demand_coverage_and_reuse_exact_native_rows() {
     let rows = (0..4096)
         .map(|i| vec![Cell::U(i * 2 + 1), Cell::I64(7)])
         .collect::<Vec<_>>();
@@ -554,15 +554,29 @@ async fn same_generation_batch_is_reused_for_later_distinct_id_with_source_scope
     let inv = fx.invocation("data sql", &[]);
     let mut engine =
         crate::engine::Engine::new(inv.clone(), crate::engine::EngineLimits::default()).unwrap();
-    for id in [1, 3] {
+    for (index, id) in [1, 3, 3].into_iter().enumerate() {
         let query = serde_json::from_value(json!({"kind":"plan","plan":{"op":"lookup","table":{"name":"Sample","mode":"static"},"ids":[id]}})).unwrap();
         let result = engine.execute(query, inv.control.clone()).await.unwrap();
         assert_eq!(result.row_count(), 1);
-        let preparation = &result.provenance()["sources"][0]["sourceSelection"];
-        assert_eq!(preparation["scope"], "source_preparation_not_current_task");
-        // A fresh second preparation would replace this with [3]. Reusing [1]
-        // proves the already materialized batch and its original owner survive.
-        assert_eq!(preparation["requestedIds"], json!([1]));
+        assert_eq!(serde_json::to_value(result.page(0, 10).unwrap()).unwrap()["rows"], json!([[id, 7]]));
+        let source = &result.provenance()["sources"][0];
+        assert_eq!(source["typedGenerationCache"]["status"], "hit");
+        // Demand decoding retains only visited physical rows. Another ID in
+        // the same IPC batch needs fresh preparation; an exact later request
+        // reuses the resulting native Arrow snapshot with a fresh control.
+        let reused = index == 2;
+        assert_eq!(source["sessionSnapshot"]["reused"], reused);
+        assert_eq!(source["sessionSnapshot"]["sourceReadingScope"], if reused {
+            "authenticated_at_snapshot_construction"
+        } else {
+            "current_request"
+        });
+        assert_eq!(source["typedGenerationCache"]["representationReason"], if reused {
+            "session_native_arrow_reuse"
+        } else {
+            "demand_work_boundary"
+        });
+        assert_eq!(result.provenance()["lookupRequirements"][0]["requestedIds"], json!([id]));
     }
     engine.close().unwrap();
 }
@@ -574,22 +588,29 @@ async fn current_lookup_explanation_does_not_repeat_cached_superset_missing_ids(
     let inv = fx.invocation("data sql", &[]);
     let mut engine =
         crate::engine::Engine::new(inv.clone(), crate::engine::EngineLimits::default()).unwrap();
-    for ids in [vec![1, 99], vec![1]] {
+    for (index, ids) in [vec![1, 99], vec![1], vec![99]].into_iter().enumerate() {
         let query = serde_json::from_value(json!({"kind":"plan","plan":{"op":"lookup","table":{"name":"Sample","mode":"static"},"ids":ids}})).unwrap();
         let result = engine.execute(query, inv.control.clone()).await.unwrap();
         let current = &result.provenance()["lookupRequirements"][0];
         assert_eq!(current["requestedIds"], json!(ids));
         assert_eq!(
             current["missingIds"],
-            if ids.len() == 2 {
+            if ids.contains(&99) {
                 json!([99])
             } else {
                 json!([])
             }
         );
-        let preparation = &result.provenance()["sources"][0]["sourceSelection"];
-        assert_eq!(preparation["scope"], "source_preparation_not_current_task");
-        assert_eq!(preparation["requestedIds"], json!([1, 99]));
+        assert_eq!(current["unresolvedIds"], json!([]));
+        assert_eq!(current["scope"], "current_query_source_requirement");
+        let source = &result.provenance()["sources"][0];
+        assert_eq!(source["sessionSnapshot"]["reused"], index != 0);
+        assert_eq!(source["sessionSnapshot"]["sourceReadingScope"], if index == 0 {
+            "current_request"
+        } else {
+            "authenticated_at_snapshot_construction"
+        });
+        assert_eq!(result.row_count(), usize::from(ids.contains(&1)));
     }
     engine.close().unwrap();
 }
@@ -679,7 +700,7 @@ async fn selected_source_preserves_cancellation_and_checked_generation_close() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn sparse_duplicate_lookup_preserves_membership_and_materializes_distinct_batches_once() {
+async fn sparse_duplicate_lookup_preserves_membership_and_reuses_distinct_demand_rows() {
     let rows = (0..4096)
         .map(|i| vec![Cell::U(i * 2 + 1), Cell::I64(7)])
         .collect::<Vec<_>>();
@@ -693,13 +714,15 @@ async fn sparse_duplicate_lookup_preserves_membership_and_materializes_distinct_
     let inv = fx.invocation("data sql", &[]);
     let mut engine =
         crate::engine::Engine::new(inv.clone(), crate::engine::EngineLimits::default()).unwrap();
-    let query = serde_json::from_value(json!({"kind":"plan","plan":{"op":"lookup","table":{"name":"Sample","mode":"static"},"ids":[4097,1,4097,50_000]}})).unwrap();
+    let query: crate::engine::QueryRequest = serde_json::from_value(json!({"kind":"plan","plan":{"op":"lookup","table":{"name":"Sample","mode":"static"},"ids":[4097,1,4097,50_000]}})).unwrap();
+    let repeated = query.clone();
     let result = engine.execute(query, inv.control.clone()).await.unwrap();
     assert_eq!(result.row_count(), 2);
-    assert_eq!(
-        result.provenance()["sources"][0]["sourceSelection"]["materializationDecodedBatches"],
-        2
-    );
+    let mut rows = serde_json::to_value(result.page(0, 10).unwrap()).unwrap()["rows"].as_array().unwrap().clone();
+    rows.sort_by_key(|row| row[0].as_u64().unwrap());
+    assert_eq!(rows, vec![json!([1, 7]), json!([4097, 7])]);
+    assert_eq!(result.provenance()["sources"][0]["typedGenerationCache"]["representationReason"], "demand_work_boundary");
+    assert_eq!(result.provenance()["sources"][0]["sessionSnapshot"]["reused"], false);
     assert_eq!(
         result.provenance()["lookupRequirements"][0]["requestedIds"],
         json!([1, 4097, 50_000])
@@ -708,6 +731,14 @@ async fn sparse_duplicate_lookup_preserves_membership_and_materializes_distinct_
         result.provenance()["lookupRequirements"][0]["missingIds"],
         json!([50_000])
     );
+    drop(result);
+    let result = engine.execute(repeated, inv.control.clone()).await.unwrap();
+    assert_eq!(result.row_count(), 2);
+    let source = &result.provenance()["sources"][0];
+    assert_eq!(source["sessionSnapshot"]["reused"], true);
+    assert_eq!(source["sessionSnapshot"]["coverage"], "resolved_physical_id_set");
+    assert_eq!(source["typedGenerationCache"]["representationSelection"], "authenticated_arrow_session_snapshot");
+    assert_eq!(result.provenance()["lookupRequirements"][0]["missingIds"], json!([50_000]));
     drop(result);
     engine.close().unwrap();
 }
@@ -743,10 +774,10 @@ async fn physical_tombstone_never_proves_absence_of_nonidentity_public_id() {
     let result = engine.execute(query, inv.control.clone()).await.unwrap();
     assert_eq!(result.row_count(), 1);
     assert!(!result.complete());
-    assert_eq!(
-        result.provenance()["sources"][0]["sourceSelection"]["kind"],
-        "full_source"
-    );
+    assert_eq!(result.provenance()["sources"][0]["typedGenerationCache"]["representationSelection"], "authenticated_wdc_demand_stream");
+    let report = &result.provenance()["lookupRequirements"][0];
+    assert_eq!(report["classification"], "exact_visible_integer_id");
+    assert_eq!(report["identityDomain"], "public_id_not_physical_locator");
     assert_eq!(
         result.provenance()["lookupRequirements"][0]["missingIds"],
         json!([])
@@ -755,6 +786,41 @@ async fn physical_tombstone_never_proves_absence_of_nonidentity_public_id() {
         result.provenance()["lookupRequirements"][0]["unresolvedIds"],
         json!([2])
     );
+    drop(result);
+    engine.close().unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn nonidentity_integer_lookup_uses_visited_public_values_for_missing_ids() {
+    let mut spec = fixture::table(
+        "Sample",
+        921,
+        &[("RecordID", "uint"), ("ID", "uint")],
+        &[vec![Cell::U(1), Cell::U(42)], vec![Cell::U(2), Cell::U(43)]],
+    );
+    spec.dbd = spec.dbd
+        .replace("RecordID<u32>", "$id$RecordID<u32>")
+        .replace("$id$ID<u32>", "ID<u32>");
+    let fx = Fixture::new(&[spec]);
+    let inv = fx.invocation("data agent serve", &[]);
+    let mut engine = crate::engine::Engine::new(inv.clone(), crate::engine::EngineLimits::default()).unwrap();
+    let query = serde_json::from_value(json!({"kind":"plan","plan":{"op":"lookup","table":{"name":"Sample","mode":"static"},"ids":[1,42,99]}})).unwrap();
+    let result = engine.execute(query, inv.control.clone()).await.unwrap();
+    assert_eq!(result.row_count(), 1);
+    assert_eq!(serde_json::to_value(result.page(0, 10).unwrap()).unwrap()["rows"], json!([[1, 42]]));
+    let report = &result.provenance()["lookupRequirements"][0];
+    assert_eq!(report["classification"], "exact_visible_integer_id");
+    assert_eq!(report["identityDomain"], "public_id_not_physical_locator");
+    assert_eq!(report["requestedIds"], json!([1, 42, 99]));
+    assert_eq!(report["missingIds"], json!([1, 99]));
+    assert_eq!(report["unresolvedIds"], json!([]));
+    drop(result);
+    let limited = serde_json::from_value(json!({"kind":"plan","plan":{"op":"limit","offset":0,"count":0,"input":{"op":"lookup","table":{"name":"Sample","mode":"static"},"ids":[42,99]}}})).unwrap();
+    let result = engine.execute(limited, inv.control.clone()).await.unwrap();
+    assert_eq!(result.row_count(), 0);
+    let report = &result.provenance()["lookupRequirements"][0];
+    assert_eq!(report["missingIds"], json!([]));
+    assert_eq!(report["unresolvedIds"], json!([42, 99]));
     drop(result);
     engine.close().unwrap();
 }
@@ -790,10 +856,11 @@ async fn nonidentity_float_id_lookup_keeps_plan_execution_without_fabricated_mis
     let result = engine.execute(full, inv.control.clone()).await.unwrap();
     assert_eq!(result.row_count(), 1);
     assert_eq!(
-        result.provenance()["sources"][0]["sourceSelection"]["selectionAppliedByPlan"],
-        true,
-        "the later full scan reuses the actual full materialization prepared for lookup"
+        result.provenance()["sources"][0]["sessionSnapshot"]["reused"],
+        false,
+        "a public-ID filter did not publish whole physical source coverage"
     );
+    assert_eq!(result.provenance()["sources"][0]["sessionSnapshot"]["sourceReadingScope"], "current_request");
     drop(result);
     engine.close().unwrap();
 }

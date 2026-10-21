@@ -210,35 +210,61 @@ fn sql_generation_absent_does_not_create_a_generation_and_uses_original_rows() {
     );
 }
 #[test]
-fn sql_generation_missing_body_under_reduced_quota_is_explicit_zero_write_wdc_fallback() {
-    let fx = sample();
-    let prepared = prepare(&fx, "Sample");
-    let body = object(&fx, &prepared);
-    fs::remove_file(&body).unwrap();
-    let paths = DataCachePaths::new(&fx.home);
-    let manifest = paths.generations.join(format!(
-        "{}.json",
-        prepared.data["generation"].as_str().unwrap()
-    ));
-    let before = fs::read(&manifest).unwrap();
-    fs::write(fx.home.join("config.json"),br#"{"schema":"lycheedev.config.v1","cache":{"maxBytes":21474836480},"dataCache":{"maxBytes":1}}"#).unwrap();
-    let _observe = Observe::new();
-    let out = crate::migration_oracle::dispatch(&fx.invocation(
-        "data sql",
-        &[("--sql", "SELECT Value FROM Sample WHERE ID=1")],
-    ))
-    .unwrap();
-    assert_eq!(out.data["result"]["rows"], json!([[42]]));
-    let cache = &out.data["sources"][0]["typedGenerationCache"];
-    assert_eq!(cache["status"], "unavailable");
-    assert_eq!(cache["reused"], false);
-    assert_eq!(cache["reason"], "materialized_body_missing");
-    assert_eq!(cache["publicationThisCommand"], false);
-    assert!(!body.exists());
-    assert_eq!(fs::read(&manifest).unwrap(), before);
-    assert_eq!(fs::read_dir(paths.staging).unwrap().count(), 0);
-    assert_eq!(counts(), (0, 0, 1));
-    verify_capture(&fx, &out);
+fn sql_generation_missing_body_fallback_does_not_repair_and_capture_obeys_quota() {
+    // Each independent home keeps its own quota for the entire query. Source
+    // fallback needs no generation repair; the public SQL result still needs CAP.
+    for max_bytes in [1, lycheedev_core::workspace::DEFAULT_DATA_CACHE_MAX_BYTES] {
+        let fx = sample();
+        let prepared = prepare(&fx, "Sample");
+        let body = object(&fx, &prepared);
+        fs::remove_file(&body).unwrap();
+        let paths = DataCachePaths::new(&fx.home);
+        let manifest = paths.generations.join(format!(
+            "{}.json",
+            prepared.data["generation"].as_str().unwrap()
+        ));
+        let before = fs::read(&manifest).unwrap();
+        let captures_before = captures(&fx);
+        fs::write(
+            fx.home.join("config.json"),
+            serde_json::to_vec(&json!({
+                "schema":"lycheedev.config.v1",
+                "cache":{"maxBytes":21474836480u64},
+                "dataCache":{"maxBytes":max_bytes}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let _observe = Observe::new();
+        let result = crate::migration_oracle::dispatch(&fx.invocation(
+            "data sql",
+            &[("--sql", "SELECT Value FROM Sample WHERE ID=1")],
+        ));
+        if max_bytes == 1 {
+            let error = result.unwrap_err();
+            assert_eq!(error.code, "vault.data_cache_budget_exceeded");
+            assert_eq!(error.details["schema"], "lycheedev.data-shared-blob-owner-error.v1");
+            assert!(error.details["blob"]["bytes"].as_u64().unwrap() > 0);
+            assert_eq!(
+                error.details["cause"]["details"]["reservation"]["configuredMaxBytes"],
+                1
+            );
+            assert_eq!(captures(&fx), captures_before);
+        } else {
+            let out = result.unwrap();
+            assert_eq!(out.data["result"]["rows"], json!([[42]]));
+            let cache = &out.data["sources"][0]["typedGenerationCache"];
+            assert_eq!(cache["status"], "unavailable");
+            assert_eq!(cache["reused"], false);
+            assert_eq!(cache["reason"], "materialized_body_missing");
+            assert_eq!(cache["publicationThisCommand"], false);
+            verify_capture(&fx, &out);
+        }
+        assert!(!body.exists());
+        assert_eq!(fs::read(&manifest).unwrap(), before);
+        assert_eq!(fs::read_dir(paths.staging).unwrap().count(), 0);
+        assert_eq!(counts(), (0, 0, 1));
+    }
 }
 #[test]
 fn sql_generation_corrupt_body_is_hard_error_without_wdc_fallback_or_capture() {

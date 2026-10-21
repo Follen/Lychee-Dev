@@ -133,6 +133,7 @@ fn reject_at_eof(failure: Fault) {
     )
     .unwrap();
     let eof_seen = std::cell::Cell::new(false);
+    let revalidation_seen = std::cell::Cell::new(false);
     let mut checked = CheckedEof {
         reader: SourceEof {
             reader: &mut reader,
@@ -176,16 +177,24 @@ fn reject_at_eof(failure: Fault) {
                         || budget.check(),
                     )?
                     .generation;
-                    DataCacheMetadata::put_controlled_with_check(
-                        &f.0,
-                        alias,
-                        &changed,
-                        Some(generation),
-                        &control,
-                        || budget.check(),
-                    )?;
+                    // Inject an external alias change. A normal metadata writer
+                    // correctly rejects the missing managed body during quota
+                    // inventory, before this EOF identity guard can observe it.
+                    let connection =
+                        rusqlite::Connection::open(f.0.join("state/data/cache-v1.sqlite"))?;
+                    assert_eq!(
+                        connection.execute(
+                            "UPDATE documents SET generation=generation+1,value=?2 WHERE key=?1 AND generation=?3",
+                            rusqlite::params![alias, serde_json::to_vec(&changed)?, generation],
+                        )?,
+                        1
+                    );
+                    connection
+                        .close()
+                        .map_err(|(_, error)| ToolkitError::from(error))?;
                 }
             }
+            revalidation_seen.set(true);
             validate_rebuild(&f.0, alias, &record, &keys, &reference, &store)
         },
     };
@@ -211,7 +220,13 @@ fn reject_at_eof(failure: Fault) {
         Fault::Cancel => assert_eq!(error.exit_code, 7),
         Fault::Budget => assert_eq!(error.code, "records.query_resource_budget"),
         Fault::SourceClose => assert_eq!(error.code, "storage.close_failed"),
-        _ => assert_eq!(error.code, "vault.blob_integrity", "{failure:?}: {error:?}"),
+        _ => {
+            assert!(
+                revalidation_seen.get(),
+                "{failure:?}: alias guard was reached"
+            );
+            assert_eq!(error.code, "vault.blob_integrity", "{failure:?}: {error:?}");
+        }
     }
     assert_eq!(error.details["publication"]["state"], "not_published");
     assert!(!body.exists());

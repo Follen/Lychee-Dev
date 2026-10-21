@@ -61,3 +61,48 @@ async fn nonanalyzing_explain_resources_observe_post_source_release_ledger(){
     assert_eq!(result.provenance()["resources"]["requestSafetyLedger"],current);
     assert_eq!(result.provenance()["resources"]["sessionRetainedBytes"].as_u64(),Some(engine.memory.budget.snapshot().unwrap().retained_bytes));
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn execute_admits_optimized_output_schema_without_rounding_wide_values() {
+    let (_fx, mut engine) = setup();
+    let request: QueryRequest = serde_json::from_value(serde_json::json!({
+        "kind":"plan",
+        "plan":{"op":"project","input":{"op":"scan","table":{"name":"Sample","mode":"static"}},
+            "columns":[{"name":"exact","expression":{"kind":"null_if",
+                "left":{"kind":"literal","value":9_007_199_254_740_993u64},
+                "right":{"kind":"literal","value":9_007_199_254_740_992.0}}}]}
+    })).unwrap();
+    let result = engine.execute(request, OperationControl::default()).await.unwrap();
+    assert_eq!(result.row_count(), 3);
+    result.visit_batches(&OperationControl::default(), |schema, batches| {
+        assert_eq!(schema.field(0).name(), "exact");
+        assert_eq!(schema.field(0).data_type(), &arrow_schema::DataType::Int64);
+        for batch in batches {
+            assert_eq!(&batch.schema(), schema);
+        }
+        Ok(())
+    }).unwrap();
+    let page = serde_json::to_value(result.page(0, 10).unwrap()).unwrap();
+    assert_eq!(page["columns"], serde_json::json!(["exact"]));
+    assert_eq!(page["rows"], serde_json::json!([
+        [9_007_199_254_740_993u64], [9_007_199_254_740_993u64], [9_007_199_254_740_993u64]
+    ]));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn execute_eager_boolean_preserves_right_type_errors() {
+    let (_fx, mut engine) = setup();
+    for (operator, left) in [("and", false), ("or", true)] {
+        let request: QueryRequest = serde_json::from_value(serde_json::json!({
+            "kind":"plan",
+            "plan":{"op":"project","input":{"op":"scan","table":{"name":"Sample","mode":"static"}},
+                "columns":[{"name":"value","expression":{"kind":"binary","operator":operator,
+                    "left":{"kind":"literal","value":left},
+                    "right":{"kind":"binary","operator":"equal",
+                        "left":{"kind":"literal","value":"1"},
+                        "right":{"kind":"literal","value":1}}}}]}
+        })).unwrap();
+        let error = engine.execute(request, OperationControl::default()).await.err().unwrap();
+        assert_eq!(error.code, "relational.type_mismatch");
+    }
+}

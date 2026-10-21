@@ -11,7 +11,7 @@ use datafusion::{
         context::{SQLOptions, SessionContext},
         session_state::SessionStateBuilder,
     },
-    logical_expr::{Expr, LogicalPlan},
+    logical_expr::{Expr, ExprSchemable, LogicalPlan},
     physical_plan::{
         ExecutionPlan,
         aggregates::{AggregateExec, AggregateMode},
@@ -437,7 +437,7 @@ async fn exact_state_merges_across_two_real_input_partitions() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn nested_and_constant_folded_arithmetic_keep_exact_type_and_schema() {
+async fn nested_and_constant_arithmetic_keep_exact_type_and_schema() {
     let (context, _owner) = configured();
     register(
         &context,
@@ -455,16 +455,28 @@ async fn nested_and_constant_folded_arithmetic_keep_exact_type_and_schema() {
     let Expr::Alias(folded) = &projection.expr[1] else {
         panic!("expected the public folded alias")
     };
-    assert!(matches!(
-        folded.expr.as_ref(),
-        Expr::Literal(ScalarValue::Decimal128(Some(1), 20, 0), _)
-    ));
+    // Exact arithmetic is request-metered and Volatile: DF must preserve its
+    // exact type, but is not required to evaluate constants during planning.
+    assert_eq!(
+        folded.expr.get_type(projection.input.schema()).unwrap(),
+        DataType::Decimal128(20, 0)
+    );
     let plan = query.create_physical_plan().await.unwrap();
     for (field, name) in plan.schema().fields().iter().zip(["nested", "folded"]) {
         assert_eq!(field.name(), name);
         assert_eq!(field.data_type(), &DataType::Decimal128(20, 0));
     }
+    let schema = plan.schema();
     let batches = collect(plan, context.task_ctx()).await.unwrap();
+    for batch in &batches {
+        assert_eq!(batch.schema(), schema);
+        for column in batch.columns() {
+            assert_eq!(
+                ScalarValue::try_from_array(column, 0).unwrap(),
+                ScalarValue::Decimal128(Some(1), 20, 0)
+            );
+        }
+    }
     assert_eq!(
         scalar_rows(&batches),
         vec![vec![Scalar::Int(1), Scalar::Int(1)]]

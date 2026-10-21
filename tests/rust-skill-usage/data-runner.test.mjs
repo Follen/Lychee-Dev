@@ -320,8 +320,12 @@ test('simplified 6187 Skill keeps its original full bytes and archived report id
 
 test('current Skill identity is a fixed Git source, not learned from candidate bytes', () => {
   const current = loadDataSkillContract();
+  assert.equal(current.sourceCommit, '75cd762e31df0dfd614c8687f9fd3fdb26b6a7f7');
+  assert.equal(current.tree, 'c1768f92d55b454cafb202eb6c2835af1ecc2811');
   const changed = current.files.filter((row, i) => row.gitBlob !== simplifiedSkill.files[i].gitBlob).map(row => row.path);
-  assert.deepEqual(changed, ['SKILL.md', 'references/commands.md', 'references/data-investigation.md']);
+  assert.deepEqual(changed, ['SKILL.md', 'references/commands.md', 'references/data-hotfix.md',
+    'references/data-investigation.md', 'references/data-query-recipes.md',
+    'references/data-recovery.md', 'references/data-tables.md']);
   assert.equal(execFileSync('git', ['--no-replace-objects', 'rev-parse', `${current.sourceCommit}:skills/lycheedev`], {cwd:root, encoding:'utf8'}).trim(), current.tree);
   for (const row of current.files) {
     const bytes = execFileSync('git', ['--no-replace-objects', 'cat-file', 'blob', `${current.sourceCommit}:skills/lycheedev/${row.path}`], {cwd:root, maxBuffer:1<<20});

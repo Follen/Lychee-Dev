@@ -249,7 +249,11 @@ impl Engine {
             owner.retain(crate::capture::json_size(snapshot.provenance(),&lifetime.budget)?.checked_mul(8).and_then(|n|n.checked_add(8192)).ok_or_else(bound)?).map_err(error)?;
             source_provenance.push(snapshot.current_provenance(!new,&lifetime.budget)?);
             let selected=if snapshot.public_equals_physical(){requirement.ids.as_deref()}else{None};
-            let provider=Arc::new(PullTableProvider::new(snapshot.demand(lifetime.budget.clone())?,owner.clone(),selected,None,None,whole||selected.is_some()).map_err(error)?);
+            let mut provider=PullTableProvider::new(snapshot.demand(lifetime.budget.clone())?,owner.clone(),selected,None,None,whole||selected.is_some()).map_err(error)?;
+            if let Some(ids)=requirement.ids.as_deref() && !snapshot.public_equals_physical(){
+                provider=provider.track_public_lookup(ids).map_err(error)?;
+            }
+            let provider=Arc::new(provider);
             context.register_table(datafusion::common::TableReference::bare(alias),provider.clone()).map_err(error)?;
             if let Some(ids)=requirement.ids.as_deref(){
                 owner.retain(8192usize.checked_add(ids.len().checked_mul(256).ok_or_else(bound)?).ok_or_else(bound)?).map_err(error)?;
@@ -288,10 +292,12 @@ impl Engine {
         for source in &source_provenance {metadata_bytes=metadata_bytes.checked_add(crate::capture::json_size(source,&lifetime.budget)?.checked_mul(8).ok_or_else(bound)?).ok_or_else(bound)?;}
         metadata_bytes=metadata_bytes.checked_add(crate::capture::json_size(&(&request_value,&lookup_reports),&lifetime.budget)?.checked_mul(16).ok_or_else(bound)?).ok_or_else(bound)?;
         if metadata_bytes>self.limits.result_bytes{return Err(bound());}
-        let columns=frame.schema().fields().iter().map(|f|f.name().clone()).collect::<Vec<_>>();
-        let schema=Arc::new(frame.schema().as_arrow().clone());
         let root_start=std::time::Instant::now();let root_work=lifetime.budget.snapshot()?.decode_work;
         let mut stream=frame.execute_stream().await.map_err(error)?;
+        // Optimizer-refined nullability belongs to the executing stream. Keep
+        // result metadata and strict output admission on that same schema.
+        let schema=stream.schema();
+        let columns=schema.fields().iter().map(|f|f.name().clone()).collect::<Vec<_>>();
         let mut collector=OutputBatches::new(schema.clone(),self.limits.result_bytes-metadata_bytes);
         while let Some(next)=stream.next().await {control.check()?;owner.check().map_err(error)?;collector.push(next.map_err(error)?,&lifetime.budget)?;}
         let (batches,body_bytes,rows)=collector.finish(&lifetime.budget)?;
@@ -301,7 +307,29 @@ impl Engine {
         drop(stream);drop(held);
         // Promote only full authenticated physical-ID coverage; filtered output
         // is never mistaken for source coverage. No reader is published.
+        let mut reports=lookup_reports.iter_mut();
         for ((snapshot,provider),source_use) in sources.iter().zip(&providers).zip(&source_uses){
+            if let SourceUse::PublicIds(_)=source_use {
+                let report=reports.next().ok_or_else(bound)?;
+                if !snapshot.public_equals_physical(){
+                    // Only the rows consumed by this plan establish public-ID
+                    // matches. A physical tombstone never proves public absence;
+                    // an unexhausted or incomplete source leaves it unresolved.
+                    report["identityDomain"]=serde_json::json!("public_id_not_physical_locator");
+                    match provider.public_lookup_absence(snapshot.complete()).map_err(error)? {
+                        Some((missing,unresolved))=>{
+                            report["classification"]=serde_json::json!("exact_visible_integer_id");
+                            report["missingIds"]=serde_json::json!(missing);
+                            report["unresolvedIds"]=serde_json::json!(unresolved);
+                        }
+                        None=>{
+                            report["classification"]=serde_json::json!(if snapshot.schema().index_of("ID").is_ok(){"unavailable_non_integer_id"}else{"unavailable_missing_id_column"});
+                            report["missingIds"]=serde_json::Value::Null;
+                            report["unresolvedIds"]=serde_json::Value::Null;
+                        }
+                    }
+                }
+            }
             let observed=provider.take_observed().map_err(error)?;
             if snapshot.reusable(){self.install_source(snapshot.clone(),lifetimes[sources.iter().position(|s|Arc::ptr_eq(s,snapshot)).ok_or_else(bound)?+1].clone())?;}
             else if !nonanalyzing && provider.collection_complete() && let Some(cached)=snapshot.promote(observed,source_use,&lifetime.budget)?{self.install_source(cached,lifetime.clone())?;}
