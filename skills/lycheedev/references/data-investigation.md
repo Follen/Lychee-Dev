@@ -13,16 +13,16 @@ caller-owned `data agent serve` process and use its typed tasks. Catalog, fields
 semantics, query and the twelve navigate kinds are the formal Data entry path.
 Business names require discovery in the actual localized field and disambiguation
 by class/rank/relationships, not the first match. Inspect [tables](data-tables.md)
-and [recipes](data-query-recipes.md). Older SQL/DB2/navigation CLI entry points are
-migration-oracle tests only, not a production fallback.
+and [recipes](data-query-recipes.md). Use `data agent schema` to discover the
+available task inputs and results.
 
 Request IDs increase strictly. Cancellation of outstanding work or a deadline
 terminates the isolated worker and invalidates every session handle, including
 earlier results. Never automatically replay uncertain work. Close or EOF drains
 submitted requests before release. Incomplete frames are not results. Abnormal
 exit invalidates the session even if stderr backpressure prevents the best-effort
-diagnostic. Non-Windows serve is explicitly unsupported when equivalent external
-memory protection is unavailable; schema/help remain pure metadata.
+diagnostic. Data agent sessions require Windows amd64; schema and help are
+available without starting a session.
 
 Ordinary command JSONL has its own end frame and successful exit. Agent JSONL
 requires a complete matching-ID response and has no ordinary begin/end wrapper.

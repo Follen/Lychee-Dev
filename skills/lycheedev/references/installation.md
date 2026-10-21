@@ -40,8 +40,8 @@ matching-version diagnosis. Inert older managed files can migrate via receipts;
 that does not make old wire/identity journals compatible with a new driver.
 Never rewrite their schema or clear their claims to permit installation.
 
-Rust ships pinned Emmy direct-analysis workers; no global LuaLS installation is
-required. Managed addon file checking is lightweight and needs no Git/language
+Lychee Dev includes its Source analysis tools; no separate language-server
+installation is required. Managed addon file checking needs no Git/language
 server on the target machine. Do not import legacy task/queue/binding/SavedVariables
 state into a new run. Installed files, slot inventory and loaded readiness remain
 separate evidence.

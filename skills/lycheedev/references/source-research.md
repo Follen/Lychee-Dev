@@ -1,7 +1,10 @@
 # Source research
 
 Use pinned definitions, Lua/XML/TOC and relationships to answer the question.
-The CLI owns Git preparation, mapping and Emmy worker/session lifetime.
+The CLI owns Git preparation, source mapping and analysis worker/session lifetime.
+Structural mapping, Lua 5.1 compilation and semantic analysis provide different
+evidence. Preserve the returned source/environment identities, locations,
+captures and coverage. Never execute studied Lua or repository configuration.
 
 ## Route source evidence
 
@@ -55,7 +58,7 @@ One-shot analysis is the default. Opt into session reuse only for repeated
 semantic cache misses on the same source/environment. Static queries and result
 cache hits do not require a broker. Inspect or close sessions through the CLI;
 do not kill another owner or override leases. Reuse cannot strengthen coverage,
-move cursors between scopes or renew deadlines. See [candidate boundaries](source-candidate.md).
+move cursors between scopes or renew deadlines.
 
 For preparation failures, follow [bounded recovery](source-preparation.md#recover-without-changing-the-revision).
 Static evidence does not prove the client loaded it or behaved that way. If live

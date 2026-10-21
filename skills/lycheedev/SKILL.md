@@ -8,11 +8,6 @@ description: Investigate World of Warcraft (WoW/魔兽世界) addon source/APIs,
 Answer the WoW technical question with the smallest sufficient evidence. The CLI
 owns preparation, verification, transport and recovery; do not build a second path.
 
-This Rust migration candidate reuses the Go 3.2.4 workflow contract at
-`29bdbdaff5f064ec212ff2064380b1ccac652eda`. It is not yet a complete accepted
-release. Read [candidate boundaries](references/source-candidate.md) for engine
-and acceptance limits. Command availability does not establish correctness.
-
 ## Discover, then investigate
 
 Use the selected `lycheedev` on PATH or `node <skill-directory>/scripts/lycheedev.mjs`.

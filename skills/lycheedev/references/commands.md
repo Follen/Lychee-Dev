@@ -7,20 +7,19 @@ at 32; totalChildren and truncated disclose omissions. `describe` retains the
 full installed catalog. Recheck after a binary change; a copied catalog is not
 installed capability evidence.
 
-The command contract drives clap parsing, help and input schemas. Responses are
-structured, noninteractive and uncolored; no separate human-terminal mode or
-locale guessing is needed. Help/search/schema must not open a worker, cache,
-workspace or game or fetch network data. JSON results use stdout; diagnostics
-use stderr. A successful discovery call proves advertised metadata, not that a
-business operation has executed.
+Responses are structured, noninteractive and uncolored. Help, search and schema
+read command metadata without opening a worker, cache, workspace or game, or
+fetching network data. JSON results use stdout; diagnostics use stderr.
+A successful discovery call identifies available commands; use the operation's
+result to establish what it actually completed.
 
 For Data, `data agent schema` gives the authoritative versioned task contract.
 `schema data agent serve` includes it and exact CLI inputs. Open a single bounded
 `data agent serve` process, send typed tasks and keep owned handles for paging.
-The old SQL/DB2/navigation command family is not a production fallback. Missing
-commands, fields or supported combinations are explicit capability gaps, not
-permission to invent flags or infer equivalence from a different task.
+Use the tasks declared by that schema for catalog, fields, semantics, queries
+and navigation. Report missing commands, fields or supported combinations as
+capability gaps; retain the selected version and the original task's scope.
 
 Read each result's captures, completeness and coverage, not just its exit status.
 Agent matching-ID JSONL differs from ordinary command begin/end JSONL. See
-[data investigation](data-investigation.md) and [candidate boundaries](source-candidate.md).
+[data investigation](data-investigation.md) for session and coverage rules.
