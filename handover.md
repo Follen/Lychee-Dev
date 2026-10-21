@@ -13,7 +13,7 @@
 
 ## 已实现与实际验证
 
-- 当前开发提交与固定测试副本为 `fb6629fcbba5510e26d4c5224c4171be879ca4fc`，tree `3e93cba5ebe3a0036b21fceafb3dbb8e6901a9e1`，sourceDigest `31081f15def01eef0140b0836c366a2327d8ee7b342580bb790b07b2c3a6433e`；已推送同一PR。全部9 crate两配置native check在284a通过；真实用户目录隔离已核。第一方Skill、身份及fixture修正已推送532，GitHub同HEAD静态门实际通过；其他native CI为skipped。新树不能继承旧树整套通过结论。
+- 本批开发以已推送的 `95583805bbed6668b6cc2d53d62123939f074cab` 为基线，固定副本在该提交完成Data负零边界及当前安装整表验证；Source输出目录调整和CASC打开错误上下文正在接续验证。全部9 crate两配置native check在284a通过；真实用户目录隔离已核。第一方Skill、身份及fixture修正已推送532，GitHub同HEAD静态门实际通过；其他native CI为skipped。新树不能继承旧树整套通过结论。
 - CORE-FIXTURE-01：853原例839通过/14失败；14个迁移后锁序、CAS、recency/durable peak旧夹具已修，受影响130项在 `1764e19c8c` 逐名全部通过，产品未改。
 - b6cf Core其余6个integration目标65项全部通过，完整native退出和资源回收已核。CLI当前207 active均有实际通过记录：bin184及supervisor6在b6cf通过；另外17个integration跨b6cf/f5dc通过，原5失败在f5dc修复后闭合；3 ignored单列。
 - DATA-RUNTIME-01 / DATA-CORRELATION-01：执行流schema、eager布尔错误、公有ID流内缺失证明、安全等值关联键已修并推送；Engine165项在 `8819608054` 全部通过，新增多键MAX和CAST短路回归已通过。
@@ -49,7 +49,9 @@
 | PAIRED-ISOLATION-01 | Agent paired的准备Cargo、controller及调用环境使用已有owner目录；Source paired的outer/准备/Git和样本分别使用已有outer/pair目录。业务home、20对、固定输入、测量及限额不变；Agent15与Source41项Node通过 | data_engine/core_evidence已交回，主代理已核九文件；真实paired仍未执行 |
 | SOURCE-OUTER-ISOLATION-01 | full-corpus和native-acceptance两个outer改用现有ownedUserEnvironment，使下游CLI/Git的用户目录和temp归当前owner；业务home、预算、测量逻辑不变。原直接Node49项通过；后续发现内层空目录断言冲突，已改为只允许owner创建的user/temp并继续拒绝已有业务home/其他内容，当前报告Go标签从workflow读取。新增故障先红后绿，直接runner39项通过 | core_evidence交回，主代理已核；实际Source运行随当前Release执行 |
 | LIVE-MEMORY-FIXTURE-01 | self-process OS模块/堆读取fixture的release改为lycheedev_core::VERSION，与正式Reader保持一致；保留全部RIP、模块哈希、错误layout和secret namespace断言 | 208实际一例通过，owner15859f19资源回收已核 |
-| DATA-CURRENT-BUILD-01 | 四项真实安装测试已改为每轮读取当前安装身份，再固定本轮Go324独立预期；保留完整Encoding/Root/DBD、SQL/asset/CAP和DB2 stream覆盖。当前12.1.5.70448的Go324准备实际完成30次调用，完整Map1187行，全部资源回收；生成器三项Node通过。694实际installed已通过完整原始DB2字节与ID对比，随后JSON整数/浮点表示比较失败；全部1187行离线核定仅3341处1/1.0等写法差异，精确数值和结构无差异。共享比较已改用既有精确十进制规则，保留大整数及负零，新增边界回归；历史合成样本不变 | fb6629实际边界回归揭示serde Value读取整数-0时丢符号；已在fixture RawValue读取入口保留负零，不改生产parser或原输入字节。主代理已核，修正后的边界回归与四项真实case待本批提交后实跑 |
+| DATA-CURRENT-BUILD-01 | 四项真实安装测试已改为每轮读取当前安装身份，再固定本轮Go324独立预期；保留完整Encoding/Root/DBD、SQL/asset/CAP和DB2 stream覆盖。当前12.1.5.70448的Go324准备实际完成30次调用，完整Map1187行，全部资源回收；生成器三项Node通过。精确十进制比较和RawValue读取已保留大整数及负零，955边界回归和installed整项实际通过，含完整原始DB2、全部ID与1187行；两项原数字比较失败保持原记录 | SQL/asset及DB2各自新home运行均在准备CASC阶段报OS32；一次phase诊断确认尚未读取Encoding或发布body，三个失败均已回收。主代理正补具体打开路径定位，stream待该问题修复后执行 |
+| DATA-CASC-SHARING-01 | 真实SQL/DB2早期external.io已稳定复现；源码核实QuerySource使用严格目录及文件共享，低层installed测试使用标准File::open。既有冲突句柄的持有者未知，不归因游戏或其他程序；错误消息新增本地CASC打开路径，保留原code/exit和共享规则 | 主代理；仅复跑原失败SQL定位，然后按实际文件对象修复 |
+| SOURCE-OUTPUT-01 | 四项真实LuaLS/Source测试增加owner输出目录入口，默认路径兼容；不覆盖已有历史session-report。四文件格式及diff检查通过，实际32项准备helper已完成但未执行 | runner_recovery已交回；主代理已核，等待匹配Release |
 | DELIVERY-INTERRUPTION-01 | 208整组被外层中断，缺最终receipt和完整输出，不计通过。用户已重启；既有恢复工具实际归档原ordinary lease并经inspect确认当前lease缺席，原owner15027501、scratch及日志不变，原历史reap未知。694已在同一target按完整名册补跑九组159例全部通过，各组原始native退出、输出、owner回收和lease释放已核；fb6629四个integration30 active全部通过，唯一ignored symlink例显式失败为OS1314环境权限；不重复已过组 | 主代理已核；library结果delivery-57e684d7、integration结果delivery-094da663；symlink原owner44119f8a保留 |
 | RUNNER-RECOVERY-01 | 普通运行中断已支持同开机恢复：命名Job、原子启动记录、精确wrapper身份、终止并等待Job清空后归档原lease。旧wrapper实际硬中断回归失败；新实现的Job销毁/外部句柄保持两条恢复路径、同通道真实Cargo续跑、活wrapper/外部lease拒绝及已恢复后新lease保留均实际通过。原日志和owner不改、不制造原成功receipt。正常owned runner38项跨本批全部通过。PS5模块加载故障已用.NET哈希修正并先红后绿，原恢复套件其余17项通过 | 两worker交回，主代理已整合及Windows实跑；仅启动身份尚未发布的更早中断不在本批恢复范围，不默认要求重启 |
 | LIVE-HOST-PARITY-01 | 两个原deferred host例已核无需游戏：Lua MemoryProtocol Encode到Rust解码，及30个有限浮点值经Lua writer、Driver、journal恢复的逐位比较。复用现有formal peer和生命周期已实现两例，controller要求11例和11份独立peer生命周期；完整原始bytes、30个Float64bits、恢复/noReplay/disconnect/单次执行均保留。直接Node28项通过，Rust格式检查通过；真实Lua/native尚未执行 | recovery_regression五文件已交回，主代理已核；冻结Go324输入不改 |
@@ -57,7 +59,7 @@
 
 ## 下一步
 
-1. 保存负零读取和两项host测试修正，切换固定副本，使用已完成的当前客户端Go324输入执行边界回归及四项Data真实安装测试。同开机中断恢复已实际验证，后续中断使用tools/rust-owned-recovery.mjs。旧owner15027501归档及fence在fixed `.tmp/rust-disk/recovery/15027501-9183-4cc4-bee4-5ea32919ab45/531c457d-dbf6-4c22-b9b5-8c72409132a6/`，原证据保持。
+1. 定位并修复当前SQL/DB2的CASC共享冲突，继续SQL/asset、DB2、stream三项；负零边界及installed整项已通过不重复。同开机中断恢复已实际验证，后续中断使用tools/rust-owned-recovery.mjs。旧owner15027501归档及fence在fixed `.tmp/rust-disk/recovery/15027501-9183-4cc4-bee4-5ea32919ab45/531c457d-dbf6-4c22-b9b5-8c72409132a6/`，原证据保持。
 2. 继续Live五个专用protocol及Go324 formal Lua。sealed_memory、Delivery159及integration30已通过不重复。694的runner变化使旧Lua构建报告的support身份过时，须用已有本地官方源码重新生成解释器报告；220例Lua及11例桥接待匹配Release。所有无新影响的已通过组不重复。
 3. 完成Source、Live和补漏26目标；Source十个native_oracle目标仅通过专用参考生成器，五个protocol目标用各自wrapper。为其余refs和formal bridge准备当前生产Release及Lua admission，再补这些依赖Release的实际用例。真实数据/权限ignored单列。自有窗口/子进程测试不等于真实游戏测试。
 4. 实际npm安装匹配23文件第一方Skill，执行no-home发现、installed Source及Agent Data。三项exporter/importer显式准备，不在测量内隐式构建；旧SQL私有metadata fixture不能拿来测新Agent。

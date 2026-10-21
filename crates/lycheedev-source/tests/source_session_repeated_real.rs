@@ -23,8 +23,11 @@ fn actual_two_full_workspace_batches_under_aggregate_commit_limit() {
     .source
     .unwrap();
     let zip = PathBuf::from(std::env::var_os("LYCHEEDEV_LUALS_ZIP").expect("exact ZIP"));
-    let staging =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.tmp/rust-source-repeat-session-real");
+    let staging = std::env::var_os("LYCHEEDEV_SOURCE_TEST_OUTPUT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.tmp/rust-source-repeat-session-real")
+        });
     fs::create_dir_all(&staging).unwrap();
     let runtime_root = staging.join(format!("runtime-{}", std::process::id()));
     let runtime = Runtime::unpack_pinned(&zip, &runtime_root).unwrap();

@@ -20,8 +20,11 @@ fn actual_complete_source_workspace_navigation_holds_and_releases_selected_lease
     .source
     .unwrap();
     let zip = PathBuf::from(std::env::var_os("LYCHEEDEV_LUALS_ZIP").expect("exact ZIP"));
-    let staging =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.tmp/rust-source-whole-session-real");
+    let staging = std::env::var_os("LYCHEEDEV_SOURCE_TEST_OUTPUT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.tmp/rust-source-whole-session-real")
+        });
     fs::create_dir_all(&staging).unwrap();
     let runtime_root = staging.join(format!("runtime-{}", std::process::id()));
     let runtime = Runtime::unpack_pinned(&zip, &runtime_root).unwrap();

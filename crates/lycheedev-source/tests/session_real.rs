@@ -13,7 +13,11 @@ use std::{
 #[ignore = "requires exact pinned LuaLS ZIP; real retained worker and retirement proof"]
 fn actual_retained_worker_reuses_pid_and_retires_on_cancel_or_new_input() {
     let zip = PathBuf::from(std::env::var_os("LYCHEEDEV_LUALS_ZIP").expect("exact ZIP"));
-    let staging = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.tmp/rust-source-session-real");
+    let staging = std::env::var_os("LYCHEEDEV_SOURCE_TEST_OUTPUT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.tmp/rust-source-session-real")
+        });
     fs::create_dir_all(&staging).unwrap();
     let runtime_root = staging.join(format!("runtime-{}", std::process::id()));
     let runtime = Runtime::unpack_pinned(&zip, &runtime_root).unwrap();

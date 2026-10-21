@@ -54,7 +54,16 @@ impl<'a> QuerySource<'a> {
             budget: Some(budget),
         };
         scope.check()?;
-        let directory = storage::Directory::open_controlled(&root.join("Data/data"), &mut scope)?;
+        let data = root.join("Data/data");
+        let directory =
+            storage::Directory::open_controlled(&data, &mut scope).map_err(|mut error| {
+                error.message = format!(
+                    "Open local CASC directory '{}': {}",
+                    data.display(),
+                    error.message
+                );
+                error
+            })?;
         let result = (|| {
             let selected = select_indices_with_check(root, limits, None, || scope.check())?;
             directory.verify_controlled(&mut scope)?;
@@ -94,6 +103,14 @@ impl<'a> QuerySource<'a> {
         let mut scope = self.scope;
         self.directory
             .open_file_controlled(OsStr::new(name), &mut scope)
+            .map_err(|mut error| {
+                error.message = format!(
+                    "Open local CASC file '{}': {}",
+                    self.directory.path().join(name).display(),
+                    error.message
+                );
+                error
+            })
     }
     pub(super) fn check_consumer(&self, budget: &Budget, control: &OperationControl) -> Result<()> {
         self.scope.check()?;
@@ -173,9 +190,7 @@ impl<'a> QuerySource<'a> {
     }
     fn read_index(&self, bucket: u8, name: &str) -> Result<(Cached, Observed)> {
         let mut scope = self.scope;
-        let mut file = self
-            .directory
-            .open_file_controlled(OsStr::new(name), &mut scope)?;
+        let mut file = self.open_file(name)?;
         let result = (|| {
             scope.check()?;
             let meta = file.metadata()?;
@@ -252,9 +267,7 @@ impl<'a> QuerySource<'a> {
         let mut buffer = [0; 65536];
         for (name, observed) in &cache.observed {
             let mut scope = self.scope;
-            let mut file = self
-                .directory
-                .open_file_controlled(OsStr::new(name), &mut scope)?;
+            let mut file = self.open_file(name)?;
             let result = (|| {
                 let mut digest = Sha256::new();
                 let mut size = 0usize;

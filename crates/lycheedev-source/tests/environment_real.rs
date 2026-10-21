@@ -29,8 +29,12 @@ fn fixed_blizzard_catalog_real_luals_semantics() {
             .iter()
             .any(|r| r.name == "UnitHealth" && r.namespace.is_empty() && !r.returns.is_empty())
     );
-    let staging =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.tmp/rust-source-environment-real");
+    let staging = std::env::var_os("LYCHEEDEV_SOURCE_TEST_OUTPUT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../.tmp/rust-source-environment-real")
+        });
     fs::create_dir_all(&staging).unwrap();
     let input_docs: BTreeMap<_, _> = docs
         .iter()
@@ -54,7 +58,7 @@ fn fixed_blizzard_catalog_real_luals_semantics() {
     let runtime = Runtime::unpack_pinned(&zip, &runtime_path).unwrap();
     let good = BTreeMap::from([(
         "Good.lua".into(),
-            b"local health = UnitHealth(\"player\", true)\nreturn health\n".to_vec(),
+        b"local health = UnitHealth(\"player\", true)\nreturn health\n".to_vec(),
     )]);
     let good = runtime
         .check_with_control(&staging, &good, env.definitions.as_bytes(), &control)
@@ -62,7 +66,7 @@ fn fixed_blizzard_catalog_real_luals_semantics() {
     assert_eq!(good["passed"], true, "{good}");
     let bad = BTreeMap::from([(
         "Bad.lua".into(),
-            b"local health = UnitHealth(\"player\", {})\nreturn health\n".to_vec(),
+        b"local health = UnitHealth(\"player\", {})\nreturn health\n".to_vec(),
     )]);
     let bad = runtime
         .check_with_control(&staging, &bad, env.definitions.as_bytes(), &control)
