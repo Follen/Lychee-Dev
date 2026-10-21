@@ -4,7 +4,7 @@
 
 ## 待办
 
-- [ ] FB-COMBAT-01实机复验：聊天框战斗按键、战斗中切换焦点及停用后的脱战恢复。代码已修复，受保护API的离线复现先失败、修复后通过；build/vet、Lua5.1必需完整Go套件及93项Node测试通过。本轮尚未部署或运行真实客户端，不计为实机通过。
+- [ ] FB-COMBAT-01实机复验：聊天框战斗按键、战斗中切换焦点及停用后的脱战恢复。代码已修复，受保护API的离线复现先失败、修复后通过；build/vet、Lua5.1必需完整Go套件、93项Node测试及发布CI通过。3.2.4实现提交`29bdbdaff5`已推送main并发布到latest，本机CLI、Skill和7个客户端addon全部更新完成，Codex未重启，详见[当前交付](handover.md#当前交付324-发行)。本轮尚未运行真实客户端，不计为实机通过。
 
 - [x] SpellName查询修复：紧凑索引、SQL数值IN优化及Windows动态内存预算均已实现并验证。上限按可用内存和工作区并发容量确定，保留/元数据/临时缓冲按需扩容。原35-ID SQL返回35/35，8组克隆名一致；spell info实际元数据预算从128 MiB经3次扩容到320 MiB，本地单条和JSONL通过。完整Lua必需Go套件和93项Node测试通过；缺密钥仍标partial。已随3.2.3提交`3766f9c`推送main并发布至latest，本机CLI、Skill及7个客户端addon受管更新完成；已安装正式CLI复验35-ID SQL和spell info通过，详见[当前交付](handover.md#当前交付323-发行)。
 

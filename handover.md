@@ -2,18 +2,21 @@
 
 ## 当前交付：3.2.4 发行
 
-- 用户明确授权提交到main、版号加一、发布npm并更新本机插件。本次为3.2.4，沿用latest；当前main与origin/main一致，复用现有工作区直接提交，不另建分支或PR。
-- 主代理负责发行及本机受管更新。范围为FB-COMBAT-01修复、回归和3.2.4版本同步；尚未提交、推送、发布或安装。
-- 版本同步后的build/vet、版本/Skill/发行输入检查及93项Node工具/启动器测试已通过；Lua5.1必需完整Go套件通过（2947项pass事件、42项既有可选skip、0fail，32个测试包通过，包并发2、测试并发4、包时限20分钟）。发布走固定tag流水线，成功后核验registry并执行受管update；游戏实机验收不由文件更新替代。
-- 更新预检发现Retail安装仍有LycheeGroup项目的旧连接 `CON-fb153033bbcb72b47b486e45187e4395` 占用。只读status确认末次业务complete、报告verified、cleanup=released/complete，且对应进程已不存在。用户明确允许关闭后，已在原项目正常disconnect成功（closed=true、bound=false），保留报告及恢复记录。重跑update预检通过，确认1份Skill和7个客户端addon均为受管3.2.3目标，无冲突。
+- 用户明确授权提交到main、版号加一、发布npm并更新本机插件。本次为3.2.4，沿用latest；实现提交`29bdbdaff5`已直接推送main，`v3.2.4`固定同一提交，不另建分支或PR。
+- 主代理负责发行及本机受管更新。范围为FB-COMBAT-01修复、回归和3.2.4版本同步；[main CI](https://github.com/Follen/Lychee-Dev/actions/runs/39533085883)及[正式发布流水线](https://github.com/Follen/Lychee-Dev/actions/runs/39533113368)全部成功，含源码重建、真实LuaLS/Source、隔离安装、OIDC发布与registry重新安装验收。
+- 版本同步后的build/vet、版本/Skill/发行输入检查及93项Node工具/启动器测试已通过；Lua5.1必需完整Go套件通过（2947项pass事件、42项既有可选skip、0fail，32个测试包通过，包并发2、测试并发4、包时限20分钟）。游戏实机验收不由文件更新替代。
+- 用户明确允许关闭LycheeGroup项目已完成业务的旧连接 `CON-fb153033bbcb72b47b486e45187e4395`；已在原项目正常disconnect成功（closed=true、bound=false，报告verified、cleanup=released/complete），报告和恢复记录保留，安装占用已解除。
+- npm独立回读确认`latest=3.2.4`、`next=3.1.2`，integrity及provenance元数据存在，不声称完成provenance密码学验证。[GitHub Release](https://github.com/Follen/Lychee-Dev/releases/tag/v3.2.4)六项产物齐全。
+- 本机CLI、1份Skill和7个客户端addon均已为3.2.4，最终受管update返回`complete=true`且全部`current`，PATH实际运行提交`29bdbdaff5`、workspaceDirty=false。Skill目录移动曾被拒绝，当前Codex进程持有其references目录句柄；按用户“把Skill弄到位、不重启Codex”的明确要求，核对23个Skill文件与正式3.2.4完全一致后，仅在原目录同步正式安装记录，再由CLI完成整套验收及原更新事务收尾。没有重启Codex或运行游戏；addon需后续reload，Skill供新Agent上下文使用。
+- 本次发行、安装和清理全部完成；已移除本轮`.tmp/release-3.2.4`、诊断工具、一次性脚本及完成后的Skill事务备份，原npm更新事务已正常结束。没有未完成的本轮安装；其他项目的报告、恢复记录及worktree保留。
 
 ## 当前修复：FB-COMBAT-01 聊天框键盘传播
 
-- 用户在原因调查后要求修复 `ChatFrame1EditBox:SetPropagateKeyboardInput()` 的保护调用错误。沿用 `main`（基线 `bae2c587d6`），主代理负责 `FocusBindings.lua`、`InputState.lua`、对应回归和文档；没有新PR或子代理文件分工，未提交或发布。
+- 用户在原因调查后要求修复 `ChatFrame1EditBox:SetPropagateKeyboardInput()` 的保护调用错误。沿用 `main`（基线 `bae2c587d6`），主代理负责 `FocusBindings.lua`、`InputState.lua`、对应回归和文档；没有新PR或子代理文件分工，已随3.2.4提交推送，发行状态见上方。
 - 已确认 `addon/Bridge/FocusBindings.lua:40` 在战斗判断前调用该API；原聊天回调也在这次调用之后。持续战斗足以到达此错误路径，无需假设进战竞态。Retail 12.1.5固定源码 `18c6d677b605b312f3d813d498404631fb941977` 的API声明标记 `HasRestrictions=true`，但不公开C层的具体限制；原报错未附战斗状态，不能确认5次实际发生时机。
 - 已实现：按键回调在传播设置前检查战斗，原处理函数始终保留，并在其返回后复核状态；战斗中不接管新焦点、Ready为false。停用立即撤销INPUT/采样/焦点监听；若旧编辑框尚未恢复，仅用既有框架的脱战事件完成恢复后注销，不新增frame或轮询。
 - 验证已完成：受保护API模拟先失败于原第40行，修复后通过；覆盖持续战斗按键、焦点切换、原回调改变状态、停用后的脱战恢复、清理前重启及无接管编辑框时的零清理事件。`go build ./...`、`go vet ./...`、Lua5.1必需的addon/协议整包通过，diff空白检查通过。3.2.4完整发行检查已通过，结果见上方。
-- 本次源码修复及离线验证已完成；未修改受管安装或运行游戏。后续部署后需复验聊天框战斗按键及停用恢复，实机待办保留在 `todo.md`，不能由离线结果倒填。
+- 本次修复已随3.2.4发布并安装到本机7个客户端；尚未运行游戏复验聊天框战斗按键及停用恢复，实机待办保留在 `todo.md`，不能由离线结果倒填。
 
 ## 当前交付：3.2.3 发行
 
