@@ -13,7 +13,7 @@
 
 ## 已实现与实际验证
 
-- 当前固定测试副本为 `20824613bbd95b5bae6a043719da03cef13d62d4`，tree `8e9821617fa83c111642d0b5c1ec552339d35c4d`，sourceDigest `9567a017eb339b0d3a260ca054d1587d7cf3da0119aaad91c07db6d033ffdebe`。全部9 crate两配置native check在284a通过；真实用户目录隔离已核。第一方Skill、身份及fixture修正已推送532，GitHub同HEAD静态门实际通过；其他native CI为skipped。新树不能继承旧树整套通过结论。
+- 当前开发提交与固定测试副本为 `69497fcce792189c8d37fcc16e6c3402ba2d097c`，tree `132583ebff498bfe67c6b3ee3173bf95132524ff`，sourceDigest `cfb16313cd6482bddb5be8fe8e9dc768cdc81e3732ae3dec7c60f6d8df1675ba`；已推送同一PR。全部9 crate两配置native check在284a通过；真实用户目录隔离已核。第一方Skill、身份及fixture修正已推送532，GitHub同HEAD静态门实际通过；其他native CI为skipped。新树不能继承旧树整套通过结论。
 - CORE-FIXTURE-01：853原例839通过/14失败；14个迁移后锁序、CAS、recency/durable peak旧夹具已修，受影响130项在 `1764e19c8c` 逐名全部通过，产品未改。
 - b6cf Core其余6个integration目标65项全部通过，完整native退出和资源回收已核。CLI当前207 active均有实际通过记录：bin184及supervisor6在b6cf通过；另外17个integration跨b6cf/f5dc通过，原5失败在f5dc修复后闭合；3 ignored单列。
 - DATA-RUNTIME-01 / DATA-CORRELATION-01：执行流schema、eager布尔错误、公有ID流内缺失证明、安全等值关联键已修并推送；Engine165项在 `8819608054` 全部通过，新增多键MAX和CAST短路回归已通过。
@@ -49,14 +49,14 @@
 | PAIRED-ISOLATION-01 | Agent paired的准备Cargo、controller及调用环境使用已有owner目录；Source paired的outer/准备/Git和样本分别使用已有outer/pair目录。业务home、20对、固定输入、测量及限额不变；Agent15与Source41项Node通过 | data_engine/core_evidence已交回，主代理已核九文件；真实paired仍未执行 |
 | SOURCE-OUTER-ISOLATION-01 | full-corpus和native-acceptance两个outer改用现有ownedUserEnvironment，使下游CLI/Git的用户目录和temp归当前owner；业务home、预算、测量逻辑不变。原直接Node49项通过；后续发现内层空目录断言冲突，已改为只允许owner创建的user/temp并继续拒绝已有业务home/其他内容，当前报告Go标签从workflow读取。新增故障先红后绿，直接runner39项通过 | core_evidence交回，主代理已核；实际Source运行随当前Release执行 |
 | LIVE-MEMORY-FIXTURE-01 | self-process OS模块/堆读取fixture的release改为lycheedev_core::VERSION，与正式Reader保持一致；保留全部RIP、模块哈希、错误layout和secret namespace断言 | 208实际一例通过，owner15859f19资源回收已核 |
-| DATA-CURRENT-BUILD-01 | 四项真实安装测试已改为每轮读取当前安装身份，再固定本轮Go324独立预期；保留完整Encoding/Root/DBD、SQL/asset/CAP和DB2 stream覆盖。当前12.1.5.70448的Go324准备实际完成30次调用，完整Map1187行，全部资源回收；生成器三项Node通过。历史合成样本不变 | 主代理已核三个Rust测试、共享helper及生成器；Rust四项尚未执行 |
-| DELIVERY-INTERRUPTION-01 | 208整组被外层中断，缺最终receipt和完整输出，不计通过。用户已重启；既有恢复工具实际归档原ordinary lease并经inspect确认当前lease缺席，原owner15027501、scratch及日志不变，原历史reap未知。159例分组已准备 | 主代理独占native；后续使用同一target补跑 |
+| DATA-CURRENT-BUILD-01 | 四项真实安装测试已改为每轮读取当前安装身份，再固定本轮Go324独立预期；保留完整Encoding/Root/DBD、SQL/asset/CAP和DB2 stream覆盖。当前12.1.5.70448的Go324准备实际完成30次调用，完整Map1187行，全部资源回收；生成器三项Node通过。694实际installed已通过完整原始DB2字节与ID对比，随后JSON整数/浮点表示比较失败；全部1187行离线核定仅3341处1/1.0等写法差异，精确数值和结构无差异。共享比较已改用既有精确十进制规则，保留大整数及负零，新增边界回归；历史合成样本不变 | 主代理已核修正；rustfmt和diff检查通过，边界回归与四项真实case待本批提交后实跑 |
+| DELIVERY-INTERRUPTION-01 | 208整组被外层中断，缺最终receipt和完整输出，不计通过。用户已重启；既有恢复工具实际归档原ordinary lease并经inspect确认当前lease缺席，原owner15027501、scratch及日志不变，原历史reap未知。694正在同一target按完整名册补跑九组159例，四个integration随后执行 | 主代理独占native；本轮结果在fixed .tmp/pr14-product-acceptance/results/delivery-57e684d7-f9f5-4a3f-8b79-155998dd98ac，进行中不计通过 |
 | RUNNER-RECOVERY-01 | 普通运行中断已支持同开机恢复：命名Job、原子启动记录、精确wrapper身份、终止并等待Job清空后归档原lease。旧wrapper实际硬中断回归失败；新实现的Job销毁/外部句柄保持两条恢复路径、同通道真实Cargo续跑、活wrapper/外部lease拒绝及已恢复后新lease保留均实际通过。原日志和owner不改、不制造原成功receipt。正常owned runner38项跨本批全部通过。PS5模块加载故障已用.NET哈希修正并先红后绿，原恢复套件其余17项通过 | 两worker交回，主代理已整合及Windows实跑；仅启动身份尚未发布的更早中断不在本批恢复范围，不默认要求重启 |
 | COVERAGE-01 | 9 crate共150个lib/bin/test声明；原漏26目标中adapter19和binding2已完成，delivery5目标待执行。binding lib合法0-case、两个harness=false helper不计业务pass；ignored单列 | 主代理 |
 
 ## 下一步
 
-1. 保存本批并切换固定副本，使用已完成的当前客户端Go324输入执行四项Data真实安装测试。同开机中断恢复已实际验证，后续中断使用tools/rust-owned-recovery.mjs。旧owner15027501归档及fence在fixed `.tmp/rust-disk/recovery/15027501-9183-4cc4-bee4-5ea32919ab45/531c457d-dbf6-4c22-b9b5-8c72409132a6/`，原证据保持。
+1. 等待当前Delivery九组完成，保存精确数字比较修正并切换固定副本，使用已完成的当前客户端Go324输入执行边界回归及四项Data真实安装测试。同开机中断恢复已实际验证，后续中断使用tools/rust-owned-recovery.mjs。旧owner15027501归档及fence在fixed `.tmp/rust-disk/recovery/15027501-9183-4cc4-bee4-5ea32919ab45/531c457d-dbf6-4c22-b9b5-8c72409132a6/`，原证据保持。
 2. 分组补跑Delivery159及四个integration，继续Live五个专用protocol及Go324 formal Lua。sealed_memory已通过不重复。当前Go324正式Lua5.1解释器已用固定官方源码隔离构建并通过自身探测，220例Lua/九例桥仍待匹配Release。所有无新影响的已通过组不重复。
 3. 完成Source、Live和补漏26目标；Source十个native_oracle目标仅通过专用参考生成器，五个protocol目标用各自wrapper。为其余refs和formal bridge准备当前生产Release及Lua admission，再补这些依赖Release的实际用例。真实数据/权限ignored单列。自有窗口/子进程测试不等于真实游戏测试。
 4. 实际npm安装匹配23文件第一方Skill，执行no-home发现、installed Source及Agent Data。三项exporter/importer显式准备，不在测量内隐式构建；旧SQL私有metadata fixture不能拿来测新Agent。

@@ -85,7 +85,11 @@ fn real_typed_stream_complete_filtered_projected_error_and_cancel() {
             } else {
                 (*expected_row).clone()
             };
-            assert_eq!(record["record"]["row"], expected_row, "{name} row {index}");
+            fixture.assert_json_equal(
+                &record["record"]["row"],
+                &expected_row,
+                &format!("{name} row index {index}, ID {}", expected_row["ID"]),
+            );
         }
         for cap in &outcome.provenance {
             let doc = evidence::read_capture(&home, cap["id"].as_str().unwrap()).unwrap();

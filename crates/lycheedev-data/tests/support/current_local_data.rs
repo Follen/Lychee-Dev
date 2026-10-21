@@ -14,6 +14,47 @@ use std::{
     path::{Path, PathBuf},
 };
 
+// Same exact digits/exponent rule as numeric_json in compound/cte/aggregate
+// parity. Numeric notation may differ; sign (including -0), integers and all
+// nonzero decimal digits remain exact. Never compare through f64 or an epsilon.
+fn numeric_key(number: &serde_json::Number) -> (bool, String, i32) {
+    let text = number.to_string();
+    let (mantissa, exponent) = text
+        .split_once(['e', 'E'])
+        .map_or((text.as_str(), 0i32), |(m, e)| (m, e.parse().unwrap()));
+    let negative = mantissa.starts_with('-');
+    let mantissa = mantissa.trim_start_matches('-');
+    let fraction = mantissa.split_once('.').map_or(0, |(_, f)| f.len()) as i32;
+    let mut digits = mantissa
+        .replace('.', "")
+        .trim_start_matches('0')
+        .to_string();
+    let mut power = exponent - fraction;
+    while digits.ends_with('0') {
+        digits.pop();
+        power += 1;
+    }
+    if digits.is_empty() {
+        digits = "0".into();
+        power = 0;
+    }
+    (negative, digits, power)
+}
+pub fn json_equal(actual: &Value, expected: &Value) -> bool {
+    match (actual, expected) {
+        (Value::Number(a), Value::Number(b)) => numeric_key(a) == numeric_key(b),
+        (Value::Array(a), Value::Array(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| json_equal(a, b))
+        }
+        (Value::Object(a), Value::Object(b)) => {
+            a.len() == b.len()
+                && a.iter()
+                    .all(|(key, a)| b.get(key).is_some_and(|b| json_equal(a, b)))
+        }
+        _ => actual == expected,
+    }
+}
+
 pub struct Fixture {
     pub document: Value,
     pub pin: DataPin,
@@ -187,11 +228,18 @@ impl Fixture {
             "{name} completeness"
         );
         for field in fields {
-            assert_eq!(
-                actual.data[*field], expected["result"][*field],
-                "{name}.{field}"
+            self.assert_json_equal(
+                &actual.data[*field],
+                &expected["result"][*field],
+                &format!("{name}.{field}"),
             );
         }
+    }
+    pub fn assert_json_equal(&self, actual: &Value, expected: &Value, context: &str) {
+        assert!(
+            json_equal(actual, expected),
+            "{context}: JSON values differ"
+        );
     }
     pub fn locale_mask(&self) -> u32 {
         match self.pin.language.as_str() {

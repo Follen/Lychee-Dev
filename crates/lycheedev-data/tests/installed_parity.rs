@@ -19,6 +19,37 @@ fn parser_budget(limits: Cost) -> Budget {
     Budget::new(limits, Instant::now() + Duration::from_secs(30), None)
 }
 #[test]
+fn current_data_json_numeric_equivalence_preserves_exact_boundaries() {
+    let parse = |text: &str| serde_json::from_str(text).unwrap();
+    for (a, b) in [
+        ("0", "0.0"),
+        ("1", "1.0"),
+        ("2e0", "2.0"),
+        ("-0", "-0.0"),
+        ("[1,{\"x\":2.0}]", "[1.0,{\"x\":2e0}]"),
+    ] {
+        assert!(
+            current_local_data::json_equal(&parse(a), &parse(b)),
+            "{a} = {b}"
+        );
+    }
+    for (a, b) in [
+        ("9007199254740992", "9007199254740993"),
+        ("18446744073709551614", "18446744073709551615"),
+        ("-9223372036854775808", "-9223372036854775807"),
+        ("0", "-0"),
+        ("0.0", "-0.0"),
+        ("0.1", "0.10000000000000001"),
+        ("1571.57", "1571.5699462890625"),
+        ("-230.989", "-230.98899841308594"),
+    ] {
+        assert!(
+            !current_local_data::json_equal(&parse(a), &parse(b)),
+            "{a} != {b}"
+        );
+    }
+}
+#[test]
 fn parser_admits_token_storage_before_copying_and_releases_borrowed_scratch() {
     let raw = format!("dense = {}\n", "x ".repeat(4096)).into_bytes();
     let key = md5(&raw);
@@ -518,10 +549,15 @@ fn real_local_authenticated_encoding_root() {
         serde_json::to_value(&all_ids).unwrap(),
         expected_rows["ids"]
     );
-    assert_eq!(
-        serde_json::to_value(&all_rows).unwrap(),
-        expected_rows["rows"]
-    );
+    let expected_records = expected_rows["rows"].as_array().unwrap();
+    assert_eq!(all_rows.len(), expected_records.len(), "Map row count");
+    for (index, (actual, expected)) in all_rows.iter().zip(expected_records).enumerate() {
+        fixture.assert_json_equal(
+            &serde_json::to_value(actual).unwrap(),
+            expected,
+            &format!("Map row index {index}, ID {}", expected["ID"]),
+        );
+    }
     assert_eq!(
         all_rows.len() as u64,
         fixture.json(&fixture.document["map"]["schema"])["result"]["rowCount"]
@@ -552,9 +588,10 @@ fn real_local_authenticated_encoding_root() {
             public["columns"], expected["result"]["result"]["columns"],
             "{sql} columns"
         );
-        assert_eq!(
-            public["rows"], expected["result"]["result"]["rows"],
-            "{sql} rows"
+        fixture.assert_json_equal(
+            &public["rows"],
+            &expected["result"]["result"]["rows"],
+            &format!("{sql} rows"),
         );
         assert_eq!(
             result.complete,
