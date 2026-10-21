@@ -1,7 +1,7 @@
 //! Fixture transport: unchanged Lua computes every receipt and business result.
 //! Only readiness/monotonic time and host-input failure injection are simulated.
 #![forbid(unsafe_code)]
-use super::formal_lua_fixture::{self as fixture, BROKEN_CODE, CODE, Inputs};
+use super::formal_lua_fixture::{self as fixture, BROKEN_CODE, CODE, Inputs, NUMERIC_CODE};
 use lycheedev_core::{control::OperationControl, storage};
 use lycheedev_live::{
     go_mailbox_v1::{
@@ -58,14 +58,28 @@ impl OwnedPeer {
     ) -> Result<Self, String> {
         inputs.verify();
         let mut command = Command::new(&inputs.lua);
+        if fault == "memory" {
+            // Original Go memory parity script, with only authenticated paths
+            // substituted. Keep the same owned pipes/Job/quit lifetime as the
+            // slot peer so this case has its own independent retirement proof.
+            let addon = serde_json::to_string(&fixture::lua_path(&inputs.fixture.join("addon"))?)
+                .map_err(|e| e.to_string())?;
+            let output =
+                serde_json::to_string(&fixture::lua_path(directory)?).map_err(|e| e.to_string())?;
+            command.arg("-e").arg(format!(
+                r#"local ns={{}};assert(loadfile({addon}.."/Bridge/CaptureWriter.lua"))("Lychee Dev",ns);assert(loadfile({addon}.."/Bridge/MemoryProtocol.lua"))("Lychee Dev",ns);local file=assert(io.open({output}.."/memory-record.bin","wb"));file:write(assert(ns.MemoryProtocol.Encode(string.rep("1",32),string.rep("2",32),string.rep("3",32),3,3,17,"hello")));file:close();io.stdout:setvbuf("no");print("ready");assert(io.read("*l")=="quit")"#
+            ));
+        } else {
+            command
+                .arg(fixture::lua_path(
+                    &inputs.fixture.join("tests/protocol/slot_server.lua"),
+                )?)
+                .arg(fixture::lua_path(&inputs.fixture.join("addon"))?)
+                .arg(fixture::lua_path(directory)?)
+                .arg(if fault == "reload_bind" { "2" } else { "1" })
+                .arg(fault);
+        }
         command
-            .arg(fixture::lua_path(
-                &inputs.fixture.join("tests/protocol/slot_server.lua"),
-            )?)
-            .arg(fixture::lua_path(&inputs.fixture.join("addon"))?)
-            .arg(fixture::lua_path(directory)?)
-            .arg(if fault == "reload_bind" { "2" } else { "1" })
-            .arg(fault)
             .current_dir(inputs.fixture.join("tests/protocol"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -571,7 +585,7 @@ impl Backend for Peer {
     ) -> ChannelResult<()> {
         check_control(control)?;
         if envelope.action == "prepare"
-            && !matches!(envelope.code.as_bytes(), bytes if bytes == CODE.as_bytes() || bytes == BROKEN_CODE.as_bytes())
+            && !matches!(envelope.code.as_bytes(), bytes if bytes == CODE.as_bytes() || bytes == BROKEN_CODE.as_bytes() || bytes == NUMERIC_CODE.as_bytes())
             && !self.performance_bytes.is_some_and(|bytes| {
                 envelope.code.as_bytes() == fixture::performance_code(bytes).as_bytes()
             })

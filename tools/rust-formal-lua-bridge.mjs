@@ -25,7 +25,9 @@ export function bridgePaths(argv = [], repository = root) {
   return {runtimePath, candidatePath, artifactDirectory, artifactPath: join(artifactDirectory, 'artifact.json')};
 }
 const args = Object.freeze(['test', '--locked', '--offline', '-p', 'lycheedev-live', '--test', 'formal_lua_bridge', '--no-run', '--message-format=json-render-diagnostics', '-j', '1']);
-const cases = Object.freeze(['normal', 'after_bind', 'after_prepare', 'after_commit', 'after_confirm', 'after_release', 'reload_bind', 'compile_error', 'cleanup_error'].map(value => `formal_lua_recovery_${value}`));
+const cases = Object.freeze([...['normal', 'after_bind', 'after_prepare', 'after_commit', 'after_confirm', 'after_release', 'reload_bind', 'compile_error', 'cleanup_error'].map(value => `formal_lua_recovery_${value}`),
+  'formal_lua_memory_record_parity', 'formal_lua_numeric_report_preserves_finite_numbers']);
+const peerCases = Object.freeze(['normal', 'bind', 'prepare', 'commit', 'confirm', 'release', 'reload_bind', 'compile_error', 'cleanup_error', 'memory', 'numeric']);
 export const SUPPORT = Object.freeze(['tools/rust-formal-lua-bridge.mjs', 'tools/rust-formal-lua.mjs', 'tools/rust-build.mjs', 'tools/rust-cargo.mjs', 'tools/rust-disk.mjs', 'tools/rust-owned-process.mjs', 'tools/rust-owned-process.ps1', ...ORACLE_SUPPORT]);
 const supportIdentity = () => Object.fromEntries(SUPPORT.map(path => [path, hash(regular(join(root, path)))]));
 const save = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2) + '\n', {flag: 'wx'});
@@ -53,8 +55,40 @@ export function verifyTestOutput(stdout) {
   const rows = [...text.matchAll(/^test (.+) \.\.\. ok$/gm)].map(match => match[1]).sort();
   assert.deepEqual(rows, [...cases].sort(), 'formal-bridge.expected_cases');
   assert.equal([...text.matchAll(/^test result: /gm)].length, 1, 'formal-bridge.completion_cardinality');
-  assert.match(text, /^test result: ok\. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in /m);
-  return {passed: 9, failed: 0, ignored: 0, filtered: 0, cases: rows};
+  assert.match(text, /^test result: ok\. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in /m);
+  return {passed: 11, failed: 0, ignored: 0, filtered: 0, cases: rows};
+}
+export function verifyPeerLifetimes(rows) {
+  assert.deepEqual(rows.map(row => row.case).sort(), [...peerCases].sort(), 'formal-bridge.peer_case_set');
+  for (const proof of rows) {
+    assert.equal(proof.schema, 'lycheedev.formal-lua-peer-lifetime.v1');
+    assert.equal(proof.rootReaped, true); assert.equal(proof.rootExit, 0);
+    assert.equal(proof.jobEmpty, true); assert.equal(proof.workersJoined, true);
+    assert.equal(proof.forced, false); assert.deepEqual(proof.errors, []);
+  }
+  return rows;
+}
+export function verifyHostParity(rows, inputs) {
+  assert.deepEqual(rows.map(row => row.case).sort(), ['memory', 'numeric'], 'formal-bridge.host_case_set');
+  return rows.map(({case: name, evidence, evidenceSHA256, proof}) => {
+    const goTest = name === 'memory' ? 'TestMemoryRecordLuaParity' : 'TestSlotDriverLuaReportPreservesFiniteNumbers';
+    const source = `tests/protocol/${name === 'memory' ? 'memory_record' : 'numeric_report'}_test.go`;
+    const fixture = inputs.fixtures.find(row => row.path === source); assert(fixture);
+    assert.equal(proof.schema, 'lycheedev.formal-lua-host-parity.v1'); assert.equal(proof.passed, true);
+    assert.equal(proof.goTest, goTest); assert.equal(proof.sourceSHA256, fixture.sha256);
+    if (name === 'memory') {
+      assert.equal(proof.payload, 'hello'); assert.equal(proof.sequence, 17);
+      assert.equal(proof.nonce, '1'.repeat(32)); assert.equal(proof.runtime, '2'.repeat(32)); assert.equal(proof.ticket, '3'.repeat(32));
+      assert.equal(proof.kind, 3); assert.equal(proof.state, 3); assert.match(proof.recordSHA256, /^[a-f0-9]{64}$/);
+    } else {
+      assert.equal(proof.valueCount, 30); assert.equal(proof.float64Bits.length, 30);
+      assert(proof.float64Bits.every(value => /^[a-f0-9]{16}$/.test(value)));
+      assert.deepEqual(proof.float64Bits.slice(0, 2), ['0000000000000000', '8000000000000000']);
+      for (const key of ['recoveredBytesEqual', 'completedRetryInputCountUnchanged', 'resourcesReleased', 'disconnected']) assert.equal(proof[key], true);
+      assert.equal(proof.executions, 1); assert.match(proof.reportSHA256, /^[a-f0-9]{64}$/);
+    }
+    return {goTest, state: 'passed', testCase: name === 'memory' ? cases[9] : cases[10], source, sourceSHA256: fixture.sha256, evidence, evidenceSHA256, proof};
+  });
 }
 function buildTest(support, inputs, candidate, {artifactDirectory, artifactPath}) {
   assert(!existsSync(artifactDirectory), 'formal-bridge.artifact_directory_exists');
@@ -153,21 +187,22 @@ export function main(argv = []) {
     checkIdentity();
     assert(processPassed(result), `formal-bridge.process_failed:${result.error?.message ?? result.status}`);
     const counts = verifyTestOutput(result.stdout);
-    const lifetimes = readdirSync(caseRoot).sort().map(name => {
+    const lifetimes = verifyPeerLifetimes(readdirSync(caseRoot).sort().map(name => {
       const proof = JSON.parse(regular(join(caseRoot, name, 'peer-lifetime.json')));
-      assert.equal(proof.schema, 'lycheedev.formal-lua-peer-lifetime.v1');
-      assert.equal(proof.rootReaped, true); assert.equal(proof.rootExit, 0);
-      assert.equal(proof.jobEmpty, true); assert.equal(proof.workersJoined, true);
-      assert.equal(proof.forced, false); assert.deepEqual(proof.errors, []);
       return {case: name, ...proof};
-    });
-    assert.deepEqual(lifetimes.map(row => row.case).sort(), ['normal', 'bind', 'prepare', 'commit', 'confirm', 'release', 'reload_bind', 'compile_error', 'cleanup_error'].sort());
+    }));
+    const hostIntegrations = verifyHostParity(['memory', 'numeric'].map(name => {
+      const evidence = join(caseRoot, name, 'host-parity.json'), bytes = regular(evidence);
+      return {case: name, evidence, evidenceSHA256: hash(bytes), proof: JSON.parse(bytes)};
+    }), inputs);
     save(join(job.evidence, 'report.json'), {schema: 'lycheedev.formal-lua-bridge-recovery.v1', state: 'passed',
       oracle: ORACLE, manifestSHA256: MANIFEST_SHA256, releaseFieldsSHA256: RELEASE_FIELDS_SHA256,
       previousOracle: inputs.previousOracle, increment: inputs.increment, goTest: 'TestSlotDriverLuaRecoveryWithoutBusinessReplay', counts, lifetimes,
+      hostIntegrations, coveredHostTests: ['TestSlotDriverLuaRecoveryWithoutBusinessReplay', ...hostIntegrations.map(row => row.goTest)],
+      remainingHostIntegrationGaps: [],
       testBinarySHA256: test.binarySHA256, testIdentity, candidateArtifactSHA256: candidate.artifactSHA256,
       interpreterReportSHA256: runtime.reportSHA256, handlesReaped,
-      scope: 'Real formal Rust Driver, codec, DurableChannelJournal and authenticated fixed Go 3.2.4 Lua. Readiness/clock/input transport are explicit fixtures. No real client or the two other deferred bridge tests. Inner handles use existing standard-library/JobGuard Drop; no independently checked inner-handle-close claim.'});
+      scope: 'Real formal Rust Driver, codec, DurableChannelJournal and authenticated fixed Go 3.2.4 Lua: nine recovery cases, exact memory record encoding/decoding and thirty finite Float64bits with durable recovery and no replay. Readiness/clock/input transport are explicit fixtures. No real client. Inner handles use existing standard-library/JobGuard Drop; no independently checked inner-handle-close claim.'});
     succeeded = true;
   } catch (error) {
     failure = error;

@@ -20,12 +20,23 @@ fn parser_budget(limits: Cost) -> Budget {
 }
 #[test]
 fn current_data_json_numeric_equivalence_preserves_exact_boundaries() {
-    let parse = |text: &str| serde_json::from_str(text).unwrap();
+    let parse = |text: &str| current_local_data::parse_json(text.as_bytes());
+    // The fixture reader must preserve the lexical sign before comparison.
+    let negative_zero = serde_json::Value::Number(serde_json::Number::from_f64(-0.0).unwrap());
+    assert!(current_local_data::json_equal(&parse("-0"), &negative_zero));
+    assert!(!current_local_data::json_equal(&parse("0"), &negative_zero));
+    let nested = parse(r#"{"-0":[-0,"-0"]}"#);
+    assert!(current_local_data::json_equal(
+        &nested["-0"][0],
+        &negative_zero
+    ));
+    assert_eq!(nested["-0"][1], serde_json::json!("-0"));
     for (a, b) in [
         ("0", "0.0"),
         ("1", "1.0"),
         ("2e0", "2.0"),
         ("-0", "-0.0"),
+        ("[-0,{\"-0\":\"-0\"}]", "[-0.0,{\"-0\":\"-0\"}]"),
         ("[1,{\"x\":2.0}]", "[1.0,{\"x\":2e0}]"),
     ] {
         assert!(

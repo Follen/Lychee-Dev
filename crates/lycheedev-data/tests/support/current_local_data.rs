@@ -55,6 +55,35 @@ pub fn json_equal(actual: &Value, expected: &Value) -> bool {
     }
 }
 
+// serde_json's arbitrary_precision parser still parses the integer token -0 as
+// i64(0). Keep that sign at this oracle-reading boundary, before it reaches Value.
+// RawValue borrows the authenticated original tokens; other numbers retain the
+// ordinary arbitrary-precision path, without an intermediate f64 conversion.
+pub fn parse_json(bytes: &[u8]) -> Value {
+    fn value(raw: &serde_json::value::RawValue) -> Value {
+        let text = raw.get();
+        match text.as_bytes()[0] {
+            b'[' => {
+                let items: Vec<&serde_json::value::RawValue> = serde_json::from_str(text).unwrap();
+                Value::Array(items.into_iter().map(value).collect())
+            }
+            b'{' => {
+                let items: BTreeMap<String, &serde_json::value::RawValue> =
+                    serde_json::from_str(text).unwrap();
+                Value::Object(
+                    items
+                        .into_iter()
+                        .map(|(key, raw)| (key, value(raw)))
+                        .collect(),
+                )
+            }
+            _ if text == "-0" => Value::Number(serde_json::Number::from_f64(-0.0).unwrap()),
+            _ => serde_json::from_str(text).unwrap(),
+        }
+    }
+    value(serde_json::from_slice(bytes).unwrap())
+}
+
 pub struct Fixture {
     pub document: Value,
     pub pin: DataPin,
@@ -67,7 +96,7 @@ impl Fixture {
             std::env::var("LYCHEEDEV_RUST_CURRENT_DATA_FIXTURE")
                 .expect("run the current installed-data Go oracle producer first"),
         );
-        let document: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let document = parse_json(&std::fs::read(&path).unwrap());
         assert_eq!(document["schema"], "lycheedev.local-data-go-oracle.v1");
         assert_eq!(
             document["oracleCommit"],
@@ -106,7 +135,7 @@ impl Fixture {
         raw
     }
     pub fn json(&self, descriptor: &Value) -> Value {
-        serde_json::from_slice(&self.bytes(descriptor)).unwrap()
+        parse_json(&self.bytes(descriptor))
     }
     pub fn oracle(&self, name: &str) -> Value {
         self.json(&self.document["expected"][name])

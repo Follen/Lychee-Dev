@@ -27,6 +27,18 @@ const MANIFEST: &[u8] =
     include_bytes!("../../../../tests/rust-parity/formal-lua-3.2.4/manifest.json");
 pub const CODE: &str = "return { message = \"荔枝\\n\\000123\", quoted = [=[x\\y]=] }";
 pub const BROKEN_CODE: &str = "return { broken =";
+// Exact finite-number set from Go324 TestSlotDriverLuaReportPreservesFiniteNumbers.
+// This is the only extra business source admitted by the host parity fixtures.
+pub const NUMERIC_CODE: &str = concat!(
+    "return {0,-1 / math.huge,",
+    "0.1,-0.1,0.5,-0.5,1,-1,1.2345678901234567,-1.2345678901234567,",
+    "100000000000000.125,-100000000000000.125,",
+    "9007199254740991,-9007199254740991,9007199254740992,-9007199254740992,",
+    "9007199254740994,-9007199254740994,",
+    "0.9999999999999999,-0.9999999999999999,1.0000000000000002,-1.0000000000000002,",
+    "1e-200,-1e-200,2.2250738585072014e-308,-2.2250738585072014e-308,",
+    "5e-324,-5e-324,1.7976931348623157e+308,-1.7976931348623157e+308}"
+);
 
 // A closed test-only input set, never arbitrary caller-supplied Lua. These
 // fixtures execute in the authenticated offline Lua peer, never in a client.
@@ -301,6 +313,8 @@ impl Inputs {
                 | "reload_bind"
                 | "compile_error"
                 | "cleanup_error"
+                | "memory"
+                | "numeric"
         ));
         let root = self.cases.join(name);
         fs::create_dir(&root).expect("exclusive case directory, no stale fixture reuse");

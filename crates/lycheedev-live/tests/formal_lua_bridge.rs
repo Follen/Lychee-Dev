@@ -1,22 +1,27 @@
 //! Fixed Go 3.2.4 TestSlotDriverLuaRecoveryWithoutBusinessReplay, with the real
 //! Rust formal Driver/codec/durable journal and unchanged authenticated Lua.
 //! Physical input, selected HWND, monotonic samples and wall clock are fixtures.
-//! This does not replace real-client or the two remaining host bridge tests.
+//! Also covers the fixed memory-record and finite-number host parity tests.
+//! These owned Lua peers do not replace real-client validation.
 #![forbid(unsafe_code)]
 #[path = "support/formal_lua_fixture.rs"]
 mod formal_lua_fixture;
 #[path = "support/formal_lua_peer.rs"]
 mod formal_lua_peer;
 
-use formal_lua_fixture::{BROKEN_CODE, CODE, Case, FixtureClock, Inputs, Tokens, read};
+use formal_lua_fixture::{
+    BROKEN_CODE, CODE, Case, FixtureClock, Inputs, NUMERIC_CODE, Tokens, read,
+};
 use formal_lua_peer::{Peer, PeerOwner};
 use lycheedev_core::control::OperationControl;
 use lycheedev_live::go_mailbox_v1::{
+    Kind, decode_record,
     driver::Driver,
     durable_journal::DurableChannelJournal,
     observations::ChannelError,
     state::{CleanupMethod, Operation, OperationPolicy, OperationStage, State},
 };
+use serde::Deserialize;
 use std::{
     collections::BTreeSet,
     panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
@@ -73,6 +78,136 @@ fn durable_result(case: &Case, operation: &Operation) -> Operation {
     assert_eq!(saved.report_checksum, operation.report_checksum);
     assert_eq!(saved.stage, OperationStage::ResultVerified);
     saved
+}
+fn memory_parity(case: &Case) {
+    let bytes = read(&case.records.join("memory-record.bin"), 4096);
+    let record = decode_record(&bytes).expect("decode actual Lua MemoryProtocol.Encode bytes");
+    assert_eq!(record.payload, b"hello");
+    assert_eq!(record.header.sequence, 17);
+    assert_eq!(record.header.nonce, [0x11; 16]);
+    assert_eq!(record.header.runtime, [0x22; 16]);
+    assert_eq!(record.header.ticket, [0x33; 16]);
+    assert_eq!(record.header.kind, Kind::Body);
+    assert_eq!(record.header.state, 3);
+    std::fs::write(
+        case.root.join("host-parity.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema":"lycheedev.formal-lua-host-parity.v1", "passed":true,
+            "goTest":"TestMemoryRecordLuaParity",
+            "sourceSHA256":"4185e7271a3ef775487ed094d7c7c3d7187cfa1b69e102a84f897f1a2a3c66d2",
+            "recordSHA256":lycheedev_core::storage::sha256(&bytes),
+            "payload":"hello", "sequence":17, "nonce":"1".repeat(32),
+            "runtime":"2".repeat(32), "ticket":"3".repeat(32), "kind":3, "state":3
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+}
+
+fn numeric_bits(bytes: &[u8]) -> Vec<u64> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Report {
+        ok: bool,
+        resources_released: bool,
+        result: Vec<Box<serde_json::value::RawValue>>,
+    }
+    let report: Report = serde_json::from_slice(bytes).expect("real Lua numeric report JSON");
+    assert!(report.ok && report.resources_released);
+    let mut expected = vec![0.0, -0.0];
+    for value in [
+        0.1,
+        0.5,
+        1.0,
+        1.2345678901234567,
+        100000000000000.125,
+        9007199254740991.0,
+        9007199254740992.0,
+        9007199254740994.0,
+        f64::from_bits(1.0_f64.to_bits() - 1),
+        f64::from_bits(1.0_f64.to_bits() + 1),
+        1e-200,
+        f64::MIN_POSITIVE,
+        f64::from_bits(1),
+        f64::MAX,
+    ] {
+        expected.push(value);
+        expected.push(-value);
+    }
+    assert_eq!(report.result.len(), 30);
+    assert_eq!(expected.len(), 30);
+    // Preserve each JSON number token and use the standard correctly-rounded
+    // Float64 parser, matching Go encoding/json's ParseFloat. serde_json's
+    // optional fast f64 path is not the product under test here.
+    let bits: Vec<_> = report
+        .result
+        .iter()
+        .map(|number| {
+            number
+                .get()
+                .parse::<f64>()
+                .expect("finite JSON number")
+                .to_bits()
+        })
+        .collect();
+    let expected: Vec<_> = expected.iter().map(|number| number.to_bits()).collect();
+    assert_eq!(
+        bits, expected,
+        "all thirty Float64bits, including signed zero and subnormals"
+    );
+    bits
+}
+
+fn numeric_parity(slot: &mut Option<TestDriver>, case: &Case, control: &OperationControl) {
+    let d = slot.as_mut().unwrap();
+    d.connect(control).unwrap();
+    d.prepare_request(
+        control,
+        "numeric-roundtrip",
+        NUMERIC_CODE,
+        10,
+        OperationPolicy::Observation,
+    )
+    .unwrap();
+    d.run(control).unwrap();
+    let op = d.state.operation.as_ref().unwrap();
+    assert_eq!(op.stage, OperationStage::Complete);
+    assert_eq!(op.cleanup_method, CleanupMethod::Released);
+    let original = op.result_bytes.0.clone();
+    let bits = numeric_bits(&original);
+    durable_result(case, op);
+    assert_eq!(d.backend.release_checks, 1);
+    let sends = d.backend.sends.clone();
+    assert_eq!(
+        sends
+            .iter()
+            .map(|row| row.action.as_str())
+            .collect::<Vec<_>>(),
+        ["bind", "prepare", "commit", "confirm", "release"]
+    );
+    restart(slot, case, control);
+    let d = slot.as_mut().unwrap();
+    let recovered = &d.state.operation.as_ref().unwrap().result_bytes.0;
+    assert_eq!(recovered, &original, "recovered report bytes changed");
+    assert_eq!(numeric_bits(recovered), bits);
+    d.run(control).unwrap();
+    assert_eq!(d.backend.sends, sends, "completed report retry sent input");
+    assert_eq!(d.state.operation.as_ref().unwrap().result_bytes.0, original);
+    d.disconnect(control).unwrap();
+    assert!(!d.state.bound);
+    assert!(d.state.transaction.is_none());
+    assert_eq!(d.backend.sends.len(), sends.len() + 1);
+    assert_eq!(d.backend.sends.last().unwrap().action, "unbind");
+    assert_eq!(read(&case.records.join("executions.txt"), 16), b"1");
+    std::fs::write(case.root.join("host-parity.json"), serde_json::to_vec_pretty(&serde_json::json!({
+        "schema":"lycheedev.formal-lua-host-parity.v1", "passed":true,
+        "goTest":"TestSlotDriverLuaReportPreservesFiniteNumbers",
+        "sourceSHA256":"f688d2d295cf7037bfe1bbfa06c27b123751f4f09d7ca65944c5ca9873b5574b",
+        "valueCount":bits.len(), "float64Bits":bits.iter().map(|bits| format!("{bits:016x}")).collect::<Vec<_>>(),
+        "reportSHA256":lycheedev_core::storage::sha256(&original),
+        "recoveredBytesEqual":true, "completedRetryInputCountUnchanged":true,
+        "resourcesReleased":true, "disconnected":true, "executions":1
+    })).unwrap()).unwrap();
 }
 fn exercise(slot: &mut Option<TestDriver>, case: &Case, fault: &str, control: &OperationControl) {
     let connected = slot.as_mut().unwrap().connect(control);
@@ -263,7 +398,11 @@ fn run_case(fault: &str) {
         );
         owner = Some(peer.owner());
         driver = Some(Driver::from_state(state, peer, journal, FixtureClock, Tokens(16)).unwrap());
-        exercise(&mut driver, &case, fault, &control);
+        match fault {
+            "memory" => memory_parity(&case),
+            "numeric" => numeric_parity(&mut driver, &case, &control),
+            _ => exercise(&mut driver, &case, fault, &control),
+        }
     }));
     let cleanup = match owner.as_mut() {
         Some(owner) => owner.close(outcome.is_ok()),
@@ -309,3 +448,8 @@ case!(formal_lua_recovery_after_release, "release");
 case!(formal_lua_recovery_reload_bind, "reload_bind");
 case!(formal_lua_recovery_compile_error, "compile_error");
 case!(formal_lua_recovery_cleanup_error, "cleanup_error");
+case!(formal_lua_memory_record_parity, "memory");
+case!(
+    formal_lua_numeric_report_preserves_finite_numbers,
+    "numeric"
+);

@@ -5,7 +5,7 @@ import {resolve, join} from 'node:path';
 import {readFileSync, mkdtempSync, mkdirSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {fileURLToPath} from 'node:url';
-import {SUPPORT, bridgePaths, selectTestExecutable, verifyTestOutput} from './rust-formal-lua-bridge.mjs';
+import {SUPPORT, bridgePaths, selectTestExecutable, verifyTestOutput, verifyPeerLifetimes, verifyHostParity} from './rust-formal-lua-bridge.mjs';
 import {BASE, ORACLE, MANIFEST_SHA256, RELEASE_FIELDS_SHA256, SUPPORT as ORACLE_SUPPORT, authenticate, hash} from '../tests/rust-parity/formal-lua-3.2.4/assertions.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const target = resolve('target');
@@ -13,8 +13,9 @@ const artifact = {reason:'compiler-artifact', target:{name:'formal_lua_bridge',k
   profile:{test:true}, executable:join(target,'debug/deps/formal_lua_bridge-a1b2c3.exe')};
 const complete = {reason:'build-finished',success:true};
 const jsonl = rows => rows.map(row=>JSON.stringify(row)).join('\n')+'\n';
-const cases = ['normal','after_bind','after_prepare','after_commit','after_confirm','after_release','reload_bind','compile_error','cleanup_error'].map(name=>`formal_lua_recovery_${name}`);
-const output = (names=cases, summary='9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;') => Buffer.from(
+const cases = [...['normal','after_bind','after_prepare','after_commit','after_confirm','after_release','reload_bind','compile_error','cleanup_error'].map(name=>`formal_lua_recovery_${name}`),
+  'formal_lua_memory_record_parity','formal_lua_numeric_report_preserves_finite_numbers'];
+const output = (names=cases, summary='11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;') => Buffer.from(
   `running ${names.length} tests\n${names.map(name=>`test ${name} ... ok`).join('\n')}\n\ntest result: ok. ${summary} finished in 0.20s\n`);
 
 test('formal and prototype entries retain owned user environments and existing bounded execution recipes',()=>{
@@ -55,18 +56,19 @@ for(const [name, rows] of [
   ['wrong exe basename',[{...artifact,executable:join(target,'debug/deps/native_e2e-a1.exe')},complete]],
 ]) test(`rejects ${name}`,()=>assert.throws(()=>selectTestExecutable(jsonl(rows),target)));
 test('requires structured Cargo JSON',()=>assert.throws(()=>selectTestExecutable('not JSON\n',target)));
-test('accepts all nine exact zero-skip case results',()=>{
-  assert.equal(verifyTestOutput(output()).passed,9);
-  assert.equal(verifyTestOutput(Buffer.from(output().toString().replaceAll('\n','\r\n'))).passed,9);
+test('accepts all eleven exact zero-skip case results',()=>{
+  assert.equal(verifyTestOutput(output()).passed,11);
+  assert.equal(verifyTestOutput(Buffer.from(output().toString().replaceAll('\n','\r\n'))).passed,11);
 });
 for(const [name, bytes] of [
   ['zero tests',output([], '0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;')],
   ['missing case',output(cases.slice(1))], ['duplicate case',output([...cases.slice(1),cases[1]])],
   ['foreign test',output([...cases.slice(1),'native_e2e'])],
-  ['ignored',output(cases,'9 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out;')],
-  ['filtered',output(cases,'9 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out;')],
-  ['failure',output(cases,'9 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out;')],
-  ['double summary',Buffer.concat([output(),Buffer.from('test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0s\n')])],
+  ['old nine-case result',output(cases.slice(0,9),'9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;')],
+  ['ignored',output(cases,'11 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out;')],
+  ['filtered',output(cases,'11 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out;')],
+  ['failure',output(cases,'11 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out;')],
+  ['double summary',Buffer.concat([output(),Buffer.from('test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0s\n')])],
 ]) test(`rejects ${name} result`,()=>assert.throws(()=>verifyTestOutput(bytes)));
 
 test('Node admission and Rust bridge authenticate the same current 113-file manifest and exact release fields',()=>{
@@ -90,10 +92,41 @@ test('Node admission and Rust bridge authenticate the same current 113-file mani
   assert.match(controller,/fixture: \{root: fixture, oracle: ORACLE, manifestSHA256: MANIFEST_SHA256, releaseFieldsSHA256: RELEASE_FIELDS_SHA256\}/);
   assert.match(controller,/materialize\(root, fixture, inputs\)/);
 });
-test('all nine actual Rust bridge test definitions retain the checked scenario set',()=>{
+test('all eleven actual Rust bridge test definitions retain the checked scenario set',()=>{
   const source=readFileSync(join(root,'crates/lycheedev-live/tests/formal_lua_bridge.rs'),'utf8');
-  const names=[...source.matchAll(/^case!\((formal_lua_recovery_\w+),/gm)].map(match=>match[1]);
+  const names=[...source.matchAll(/^case!\(\s*(formal_lua_\w+),/gm)].map(match=>match[1]);
   assert.deepEqual(names.sort(),[...cases].sort());
+});
+
+const peerCases=['normal','bind','prepare','commit','confirm','release','reload_bind','compile_error','cleanup_error','memory','numeric'];
+const lifetimes=()=>peerCases.map(name=>({case:name,schema:'lycheedev.formal-lua-peer-lifetime.v1',rootReaped:true,rootExit:0,jobEmpty:true,workersJoined:true,forced:false,errors:[]}));
+test('requires an independent complete peer lifetime for each of the eleven cases',()=>{
+  assert.equal(verifyPeerLifetimes(lifetimes()).length,11);
+  for(const name of ['memory','numeric']){
+    assert.throws(()=>verifyPeerLifetimes(lifetimes().filter(row=>row.case!==name)));
+    for(const change of [{rootReaped:false},{rootExit:1},{jobEmpty:false},{workersJoined:false},{forced:true},{errors:['close failed']}]){
+      assert.throws(()=>verifyPeerLifetimes(lifetimes().map(row=>row.case===name?{...row,...change}:row)));
+    }
+  }
+  assert.throws(()=>verifyPeerLifetimes([...lifetimes(),lifetimes()[0]]));
+});
+
+function hostProofs(){
+  const hash='a'.repeat(64);
+  return [
+    {case:'memory',evidence:'memory/host-parity.json',evidenceSHA256:hash,proof:{schema:'lycheedev.formal-lua-host-parity.v1',passed:true,goTest:'TestMemoryRecordLuaParity',sourceSHA256:'4185e7271a3ef775487ed094d7c7c3d7187cfa1b69e102a84f897f1a2a3c66d2',recordSHA256:hash,payload:'hello',sequence:17,nonce:'1'.repeat(32),runtime:'2'.repeat(32),ticket:'3'.repeat(32),kind:3,state:3}},
+    {case:'numeric',evidence:'numeric/host-parity.json',evidenceSHA256:hash,proof:{schema:'lycheedev.formal-lua-host-parity.v1',passed:true,goTest:'TestSlotDriverLuaReportPreservesFiniteNumbers',sourceSHA256:'f688d2d295cf7037bfe1bbfa06c27b123751f4f09d7ca65944c5ca9873b5574b',valueCount:30,float64Bits:['0000000000000000','8000000000000000',...Array(28).fill('3ff0000000000000')],reportSHA256:hash,recoveredBytesEqual:true,completedRetryInputCountUnchanged:true,resourcesReleased:true,disconnected:true,executions:1}},
+  ];
+}
+test('host coverage records require both current Go fixtures and complete business evidence',()=>{
+  const inputs=authenticate(root),verified=verifyHostParity(hostProofs(),inputs);
+  assert.deepEqual(verified.map(row=>row.testCase),cases.slice(9));
+  assert(verified.every(row=>row.state==='passed'&&row.evidenceSHA256));
+  assert.throws(()=>verifyHostParity(hostProofs().slice(0,1),inputs));
+  for(const [name,changes]of [
+    ['memory',[{sourceSHA256:'0'.repeat(64)},{passed:false},{payload:'other'},{nonce:'0'.repeat(32)},{sequence:18}]],
+    ['numeric',[{valueCount:29},{float64Bits:Array(30).fill('0000000000000000')},{recoveredBytesEqual:false},{completedRetryInputCountUnchanged:false},{resourcesReleased:false},{disconnected:false},{executions:2}]],
+  ])for(const change of changes)assert.throws(()=>verifyHostParity(hostProofs().map(row=>row.case===name?{...row,proof:{...row.proof,...change}}:row),inputs));
 });
 
 
