@@ -50,7 +50,7 @@ if($preparedBytes.Length -gt 4194304 -or (Hash-Bytes $preparedBytes) -cne $Prepa
 $prepared=[Text.Encoding]::UTF8.GetString($preparedBytes)|ConvertFrom-Json
 if($prepared.schema -cne 'lycheedev.channel-recovery-prepare.v1' -or $prepared.fenceId -cne $FenceId -or $prepared.snapshot.ownerId -cne $OwnerId -or $prepared.snapshot.channel -cne 'ordinary' -or $prepared.oldOwnerHistoricalState -cne 'unknown' -or $prepared.oldOwnerReaped -ne $false){throw 'recovery.preparation_target'}
 Assert-Same $prepared.root $Root
-if((Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $prepared.toolHashes.powershell -or (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'rust-channel-recovery.mjs') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $prepared.toolHashes.javascript){throw 'recovery.tool_changed_since_prepare'}
+if((Hash-Bytes ([IO.File]::ReadAllBytes($PSCommandPath))) -cne $prepared.toolHashes.powershell -or (Hash-Bytes ([IO.File]::ReadAllBytes([IO.Path]::Combine($PSScriptRoot,'rust-channel-recovery.mjs')))) -cne $prepared.toolHashes.javascript){throw 'recovery.tool_changed_since_prepare'}
 $before=Read-Boot;Assert-NewBoot $prepared.boot $before
 $rows=@($prepared.snapshot.files)
 if($rows.Count -ne 3 -or $rows[0].path -cne '.tmp/rust-disk/channels/ordinary.lease' -or $rows[1].path -cne ".tmp/rust-disk/evidence/$OwnerId/receipt.json" -or $rows[2].path -cnotmatch "^\.tmp/rust-disk/evidence/$OwnerId/process-[0-9a-f-]{36}\.request\.json$"){throw 'recovery.snapshot_paths'}

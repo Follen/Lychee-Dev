@@ -1,5 +1,20 @@
 # Interrupted Windows ordinary-channel recovery
 
+For current runs, recover the recorded named Job without restarting Windows:
+
+```powershell
+node tools/rust-owned-recovery.mjs <repository> <interrupted-owner-UUID>
+```
+
+The recovery checks the recorded wrapper identity, reaps its named Job if it
+still exists, and archives only that owner's channel lease. It preserves the
+interrupted owner and logs; recovery does not turn an incomplete test into a
+pass. Run the original command again through the normal owned runner using the
+same target. A still-running wrapper must finish or be stopped before recovery.
+
+The procedure below is retained for historical runs made before named Job
+recovery existed. It is not the normal response to a test interruption.
+
 This narrow tool fences a pre-restart lease so the existing ordinary channel and
 existing `target` can be used again. It never claims the old command succeeded or
 that its original handles were observed reaped. The old owner receipt, scratch,

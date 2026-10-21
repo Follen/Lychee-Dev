@@ -26,7 +26,7 @@ function result(job,wrapper){
   const handlesReaped=wrapper.status===0&&proof?.rootReaped===true&&proof.treeReaped===true&&proof.handlesClosed===true&&proof.toolIdentityLocksClosed===true&&proof.outputReadersComplete===true&&proof.activeProcesses===0;
   const error=wrapper.error||(!handlesReaped?new Error('owned.tree_reap_unverified'):proof.error||(proof.forced&&!proof.knownAuxiliaryCleanup)?new Error(proof.error||'owned.forced_tree_termination'):undefined);
   const diagnostic=`${path}.wrapper.json`;writeFileSync(diagnostic,JSON.stringify({status:wrapper.status,signal:wrapper.signal,error:wrapper.error?.message,stdout:wrapper.stdout?.toString(),stderr:wrapper.stderr?.toString()},null,2)+'\n');
-  return {status:handlesReaped?proof.exitCode:null,signal:wrapper.signal,error,handlesReaped,proof,stdout:read(spec.stdout),stderr:read(spec.stderr),logs:[path,diagnostic,...[spec.identity,spec.rootIdentity,spec.stdout,spec.stderr,spec.receipt].filter(existsSync)]};
+  return {status:handlesReaped?proof.exitCode:null,signal:wrapper.signal,error,handlesReaped,proof,stdout:read(spec.stdout),stderr:read(spec.stderr),logs:[path,diagnostic,...[spec.identity,path.replace(/\.request\.json$/,'.job.json'),spec.rootIdentity,spec.stdout,spec.stderr,spec.receipt].filter(existsSync)]};
 }
 export function ownedSpawnSync(command,args,options){
   const job=request(command,args,options);

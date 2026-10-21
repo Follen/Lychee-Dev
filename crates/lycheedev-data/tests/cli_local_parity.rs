@@ -1,14 +1,9 @@
+#[path = "support/current_local_data.rs"]
+mod current_local_data;
 #[path = "support/data_cache.rs"]
 mod data_cache;
-use lycheedev_core::{
-    Invocation, evidence,
-    selection::{self, SelectionSpec},
-    storage, workspace,
-};
-use lycheedev_data::{
-    definitions::{self, Manifest},
-    installed,
-};
+use lycheedev_core::{Invocation, evidence, storage, workspace};
+use lycheedev_data::definitions::{self, Manifest};
 use serde_json::json;
 use std::{collections::BTreeMap, path::PathBuf};
 #[test]
@@ -178,54 +173,15 @@ fn offline_definition_bytes_are_rehashed_and_not_replaced() {
 #[test]
 #[ignore = "explicit read-only actual client input and task-owned proof workspace required"]
 fn real_pinned_public_sql_and_asset_dispatch() {
-    let home =
-        PathBuf::from(std::env::var("LYCHEEDEV_RUST_DATA_CLI_HOME").expect("isolated proof home"));
-    let client =
-        PathBuf::from(std::env::var("LYCHEEDEV_RUST_DATA_CLIENT").expect("explicit client"));
-    let build = std::env::var("LYCHEEDEV_RUST_DATA_BUILD").expect("exact build");
-    let definitions_dir = PathBuf::from(
-        std::env::var("LYCHEEDEV_RUST_DATA_DEFINITIONS").expect("fixed definition inputs"),
+    let fixture = current_local_data::Fixture::load();
+    let home = PathBuf::from(
+        std::env::var("LYCHEEDEV_RUST_DATA_CLI_HOME").expect("fresh isolated proof home"),
     );
-    workspace::initialize(&home).unwrap();
-    let commit = "83057bdc0cbe13062850ebf8ad530031e128a1cd";
-    let resolved = installed::resolve_target(&installed::LocalTargetRequest {
-        installation: client.clone(),
-        product: Some("retail".into()),
-        full_build: Some(build),
-        region: "cn".into(),
-        language: "zhCN".into(),
-        definition_commit: commit.into(),
-    })
-    .unwrap();
-    assert_eq!(resolved.data.product, "retail");
-    assert_eq!(resolved.metadata.installed.product, "wow");
-    let pin = selection::pin_selection(
-        &home,
-        SelectionSpec {
-            data: Some(resolved.data),
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    let metadata = data_cache::Cache::new(&home);
-    for (path, file) in [
-        ("manifest.json", "manifest.json"),
-        ("definitions/Map.dbd", "Map.dbd"),
-    ] {
-        let raw = std::fs::read(definitions_dir.join(file)).unwrap();
-        let url = format!("https://raw.githubusercontent.com/wowdev/WoWDBDefs/{commit}/{path}");
-        let blob = evidence::publish_blob(&home, &raw, 4 << 20).unwrap();
-        metadata
-            .put(
-                &format!("definition/{}", storage::sha256(url.as_bytes())),
-                &json!({"url":url,"blob":blob}),
-                None,
-            )
-            .unwrap();
-    }
-    drop(metadata);
+    let pin = fixture.initialize(&home);
+    let client = &fixture.installation;
+    let record_id = fixture.record_id();
     let flags = BTreeMap::from([
-        ("--snapshot".into(), pin.id.clone()),
+        ("--snapshot".into(), pin.clone()),
         (
             "--installation".into(),
             client.to_string_lossy().into_owned(),
@@ -235,7 +191,7 @@ fn real_pinned_public_sql_and_asset_dispatch() {
             "--sql".into(),
             "SELECT ID, Directory, MapName_lang FROM Map WHERE ID=:id".into(),
         ),
-        ("--param".into(), "id=0".into()),
+        ("--param".into(), format!("id={record_id}")),
     ]);
     let inv = Invocation {
         command: "data sql".into(),
@@ -246,21 +202,24 @@ fn real_pinned_public_sql_and_asset_dispatch() {
         cwd: home.clone(),
     };
     let sql = lycheedev_data::migration_oracle::dispatch(&inv).unwrap();
-    assert_eq!(
-        sql.data["result"]["rows"][0],
-        json!([0, "Azeroth", "东部王国"])
-    );
+    fixture.assert_outcome("sql", &sql, &["result"]);
     assert!(sql.complete);
     let mut asset_inv = inv.clone();
     asset_inv.command = "asset inspect".into();
     asset_inv.flags.remove("--sql");
     asset_inv.flags.remove("--param");
-    asset_inv.flags.insert("--file-id".into(), "1349477".into());
+    asset_inv.flags.insert(
+        "--file-id".into(),
+        fixture.table_identity().db2_file_data_id.to_string(),
+    );
     let asset = lycheedev_data::migration_oracle::dispatch(&asset_inv).unwrap();
+    let raw = fixture.bytes(&fixture.document["map"]["raw"]);
+    assert_eq!(asset.data["content"]["sha256"], storage::sha256(&raw));
     assert_eq!(
         asset.data["content"]["sha256"],
-        "f4914e00483fec93f634cff52682518eefaf1921226f6e679929551a49a49a40"
+        fixture.oracle("asset")["result"]["content"]["sha256"]
     );
+    assert_eq!(asset.data["content"]["bytes"], raw.len());
     assert_eq!(asset.data["contentVerified"], true);
     for capture in sql.provenance.iter().chain(asset.provenance.iter()) {
         let archived = evidence::read_capture(&home, capture["id"].as_str().unwrap()).unwrap();
@@ -275,54 +234,18 @@ fn real_pinned_public_sql_and_asset_dispatch() {
 }
 
 #[test]
-#[ignore = "fixed real local CASC/DBD inputs and isolated DB2 proof home required"]
+#[ignore = "current Go-authenticated CASC/DBD fixture and fresh DB2 proof home required"]
 fn real_db2_record_page_schema_search_foreign_key_profiles() {
-    let home =
-        PathBuf::from(std::env::var("LYCHEEDEV_RUST_DATA_CLI_HOME").expect("isolated proof home"));
-    let client =
-        PathBuf::from(std::env::var("LYCHEEDEV_RUST_DATA_CLIENT").expect("explicit client"));
-    let build = std::env::var("LYCHEEDEV_RUST_DATA_BUILD").expect("exact build");
-    let definitions_dir =
-        PathBuf::from(std::env::var("LYCHEEDEV_RUST_DATA_DEFINITIONS").expect("fixed definitions"));
-    workspace::initialize(&home).unwrap();
-    let commit = "83057bdc0cbe13062850ebf8ad530031e128a1cd";
-    let resolved = installed::resolve_target(&installed::LocalTargetRequest {
-        installation: client.clone(),
-        product: Some("retail".into()),
-        full_build: Some(build),
-        region: "cn".into(),
-        language: "zhCN".into(),
-        definition_commit: commit.into(),
-    })
-    .unwrap();
-    let pin = selection::pin_selection(
-        &home,
-        SelectionSpec {
-            data: Some(resolved.data),
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    let metadata = data_cache::Cache::new(&home);
-    for (path, file) in [
-        ("manifest.json", "manifest.json"),
-        ("definitions/Map.dbd", "Map.dbd"),
-    ] {
-        let raw = std::fs::read(definitions_dir.join(file)).unwrap();
-        let url = format!("https://raw.githubusercontent.com/wowdev/WoWDBDefs/{commit}/{path}");
-        let blob = evidence::publish_blob(&home, &raw, 4 << 20).unwrap();
-        metadata
-            .put(
-                &format!("definition/{}", storage::sha256(url.as_bytes())),
-                &json!({"url":url,"blob":blob}),
-                None,
-            )
-            .unwrap();
-    }
-    drop(metadata);
+    let fixture = current_local_data::Fixture::load();
+    let home = PathBuf::from(
+        std::env::var("LYCHEEDEV_RUST_DATA_CLI_HOME").expect("fresh isolated proof home"),
+    );
+    let pin = fixture.initialize(&home);
+    let client = &fixture.installation;
+    let record_id = fixture.record_id();
     let run = |command: &str, extra: &[(&str, &str)]| {
         let mut flags = BTreeMap::from([
-            ("--snapshot".into(), pin.id.clone()),
+            ("--snapshot".into(), pin.clone()),
             (
                 "--installation".into(),
                 client.to_string_lossy().into_owned(),
@@ -345,13 +268,12 @@ fn real_db2_record_page_schema_search_foreign_key_profiles() {
             control: Default::default(),
         })
     };
-    let record = run("data db2", &[("--table", "Map"), ("--id", "0")]).unwrap();
-    assert_eq!(record.data["row"]["Directory"], "Azeroth");
-    assert_eq!(record.data["row"]["ID"], 0);
+    let record = run("data db2", &[("--table", "Map"), ("--id", &record_id)]).unwrap();
+    fixture.assert_outcome("record", &record, &["recordID", "row"]);
     assert!(record.complete);
     let page = run("data db2", &[("--table", "Map"), ("--limit", "3")]).unwrap();
     assert_eq!(page.data["page"]["rows"].as_array().unwrap().len(), 3);
-    assert_eq!(page.data["page"]["ids"][0], 0);
+    fixture.assert_outcome("page", &page, &["page", "truncated"]);
     assert_eq!(page.data["page"]["more"], true);
     assert!(!page.complete);
     assert_eq!(page.warnings.len(), 1);
@@ -361,17 +283,33 @@ fn real_db2_record_page_schema_search_foreign_key_profiles() {
         &[("--table", "Map"), ("--limit", "3"), ("--after-id", &next)],
     )
     .unwrap();
+    fixture.assert_outcome("following", &following, &["page", "truncated"]);
     assert!(following.data["page"]["ids"][0].as_u64().unwrap() > next.parse::<u64>().unwrap());
     let terminal = run(
         "data db2",
         &[("--table", "Map"), ("--after-id", "4294967295")],
     )
     .unwrap();
+    fixture.assert_outcome("terminal", &terminal, &["page", "truncated"]);
     assert_eq!(terminal.data["page"]["ids"], json!([]));
     assert!(!terminal.complete);
     assert_eq!(terminal.data["page"]["more"], false);
     let schema = run("data db2 schema", &[]).unwrap();
-    assert_eq!(schema.data["rowCount"], 1184);
+    fixture.assert_outcome(
+        "schema",
+        &schema,
+        &[
+            "rowCount",
+            "fields",
+            "keys",
+            "relationshipFields",
+            "arrayFields",
+        ],
+    );
+    assert_eq!(
+        schema.data["rowCount"],
+        fixture.document["map"]["rows"]["count"]
+    );
     assert!(
         schema.data["fields"]
             .as_array()
@@ -383,33 +321,54 @@ fn real_db2_record_page_schema_search_foreign_key_profiles() {
         "data db2 search",
         &[
             ("--field", "Directory"),
-            ("--query", "AZEROTH"),
+            (
+                "--query",
+                fixture.document["probes"]["searchQuery"].as_str().unwrap(),
+            ),
             ("--limit", "1"),
         ],
     )
     .unwrap();
-    assert_eq!(search.data["rows"][0]["ID"], 0);
+    fixture.assert_outcome("search", &search, &["rows", "count", "truncated"]);
     let truncated = run(
         "data db2 search",
-        &[("--field", "Directory"), ("--query", "a"), ("--limit", "2")],
+        &[
+            ("--field", "Directory"),
+            (
+                "--query",
+                fixture.document["probes"]["truncatedSearchQuery"]
+                    .as_str()
+                    .unwrap(),
+            ),
+            ("--limit", "2"),
+        ],
     )
     .unwrap();
+    fixture.assert_outcome(
+        "truncatedSearch",
+        &truncated,
+        &["rows", "count", "truncated"],
+    );
     assert_eq!(truncated.data["count"], 2);
     assert_eq!(truncated.data["truncated"], true);
     assert!(!truncated.complete);
     let foreign = run(
         "data db2 foreign-key",
-        &[("--field", "ID"), ("--value", "0"), ("--limit", "1")],
+        &[("--field", "ID"), ("--value", &record_id), ("--limit", "1")],
     )
     .unwrap();
+    fixture.assert_outcome("foreignKey", &foreign, &["rows", "count", "truncated"]);
     assert_eq!(foreign.data["rows"][0], record.data["row"]);
     assert!(foreign.complete);
-    assert!(
-        run(
-            "data db2 foreign-key",
-            &[("--field", "Directory"), ("--value", "0"), ("--limit", "1")]
-        )
-        .is_err()
+    let invalid = run(
+        "data db2 foreign-key",
+        &[("--field", "Directory"), ("--value", "0"), ("--limit", "1")],
+    )
+    .unwrap_err();
+    assert_eq!(invalid.exit_code, 2);
+    assert_eq!(
+        invalid.code,
+        fixture.oracle("invalidForeignKey")["error"]["code"]
     );
     for out in [
         &record, &page, &following, &terminal, &schema, &search, &truncated, &foreign,

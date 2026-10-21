@@ -41,13 +41,17 @@ try{
 }finally{if($wrapperDigest){$wrapperDigest.Dispose()};$wrapperFile.Dispose()}
 # Startup identity is evidence, never a substitute for the terminal reap receipt.
 $wrapperProcess=[Diagnostics.Process]::GetCurrentProcess()
+$jobName='Local\LycheeDev.Owned.'+$runId
+$jobIdentity=$expectedStem+'.job.json'
 Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class ToolkitBootCounter{[DllImport("kernel32.dll",SetLastError=true)]public static extern bool QueryUnbiasedInterruptTime(out ulong time);}'
 [UInt64]$bootCounter=0
 if(-not [ToolkitBootCounter]::QueryUnbiasedInterruptTime([ref]$bootCounter)){throw 'owned.boot_counter'}
-$identity=@{schema='lycheedev.owned-start.v1';runId=$requestData.runId;identitySource=$identitySource;requestPath=$requestPath;bootClock='QueryUnbiasedInterruptTime';coordinatorPid=$requestData.coordinatorPid;wrapperPid=$PID;wrapperCreationFileTime=$wrapperProcess.StartTime.ToUniversalTime().ToFileTimeUtc().ToString([Globalization.CultureInfo]::InvariantCulture);bootUptime100ns=$bootCounter.ToString([Globalization.CultureInfo]::InvariantCulture);requestSHA256=$requestSHA256;wrapperObservedSHA256=$wrapperObservedSHA256;rootIdentity=[string]$requestData.rootIdentity;state='wrapper-started';rootAssignment='PROC_THREAD_ATTRIBUTE_JOB_LIST';historicalReapProof=$false}
+$identity=@{schema='lycheedev.owned-start.v1';runId=$requestData.runId;identitySource=$identitySource;requestPath=$requestPath;bootClock='QueryUnbiasedInterruptTime';coordinatorPid=$requestData.coordinatorPid;wrapperPid=$PID;wrapperSessionId=$wrapperProcess.SessionId;wrapperCreationFileTime=$wrapperProcess.StartTime.ToUniversalTime().ToFileTimeUtc().ToString([Globalization.CultureInfo]::InvariantCulture);bootUptime100ns=$bootCounter.ToString([Globalization.CultureInfo]::InvariantCulture);requestSHA256=$requestSHA256;wrapperObservedSHA256=$wrapperObservedSHA256;rootIdentity=[string]$requestData.rootIdentity;jobName=$jobName;jobIdentity=$jobIdentity;state='wrapper-started';rootAssignment='PROC_THREAD_ATTRIBUTE_JOB_LIST';historicalReapProof=$false}
 $identityBytes=[Text.Encoding]::UTF8.GetBytes(($identity|ConvertTo-Json -Depth 4))
-$identityFile=New-Object IO.FileStream ([string]$requestData.identity),([IO.FileMode]::CreateNew),([IO.FileAccess]::Write),([IO.FileShare]::Read),4096,([IO.FileOptions]::WriteThrough)
+$identityTemporary=[string]$requestData.identity+'.writing'
+$identityFile=New-Object IO.FileStream $identityTemporary,([IO.FileMode]::CreateNew),([IO.FileAccess]::Write),([IO.FileShare]::Read),4096,([IO.FileOptions]::WriteThrough)
 try{$identityFile.Write($identityBytes,0,$identityBytes.Length);$identityFile.Flush($true)}finally{$identityFile.Dispose()}
+[IO.File]::Move($identityTemporary,[string]$requestData.identity)
 $wrapperProcess.Dispose()
 $binary=(Get-Command -Name $requestData.command -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $helperAdmission=@{state='disabled';reason='ordinary_process';helpers=@()}
@@ -246,11 +250,16 @@ public static class ToolkitOwnedProcess {
   }finally{foreach(IntPtr handle in held)if(!CloseHandle(handle))throw Error("owned.close_auxiliary_handle");}
  }
  static string Quote(string argument){if(argument.Length>0&&argument.IndexOfAny(new char[]{' ','\t','\n','\v','"'})<0)return argument;var text=new StringBuilder("\"");int slashes=0;foreach(char c in argument){if(c=='\\'){slashes++;continue;}if(c=='"'){text.Append('\\',slashes*2+1);text.Append(c);}else{text.Append('\\',slashes);text.Append(c);}slashes=0;}text.Append('\\',slashes*2);text.Append('"');return text.ToString();}
- public static Result Run(string binary,string[] args,string cwd,string stdout,string stderr,int timeoutMs,int orphanMs,string[] reviewedAuxiliary,string memoryPrefix,string memoryMarker,string rootIdentity,string runId,bool startupDiagnostics){
+ static void Persist(string path,string json){string temporary=path+".writing";using(var file=new FileStream(temporary,FileMode.CreateNew,FileAccess.Write,FileShare.Read,4096,FileOptions.WriteThrough)){byte[] bytes=new UTF8Encoding(false).GetBytes(json);file.Write(bytes,0,bytes.Length);file.Flush(true);}File.Move(temporary,path);}
+ public static Result Run(string binary,string[] args,string cwd,string stdout,string stderr,int timeoutMs,int orphanMs,string[] reviewedAuxiliary,string memoryPrefix,string memoryMarker,string rootIdentity,string runId,bool startupDiagnostics,string jobName,string jobIdentity,string requestSHA256,int wrapperPid,string wrapperCreated){
   var result=new Result();IntPtr job=IntPtr.Zero,port=IntPtr.Zero,output=IntPtr.Zero,error=IntPtr.Zero,outputRead=IntPtr.Zero,errorRead=IntPtr.Zero,input=IntPtr.Zero,attributes=IntPtr.Zero,handles=IntPtr.Zero,jobHandles=IntPtr.Zero;PI process=new PI();bool assigned=false,attributeReady=false;var clock=Stopwatch.StartNew();long orphanDeadline=Int64.MaxValue;Task rootWatcher=null,stdoutReader=null,stderrReader=null;long outputBytes=0;string readerError=null;ToolkitMemory.Observer memory=null;
   try{
-   job=CreateJobObjectW(IntPtr.Zero,null);if(job==IntPtr.Zero)throw Error("owned.create_job");
+   job=CreateJobObjectW(IntPtr.Zero,jobName);int createError=Marshal.GetLastWin32Error();if(job==IntPtr.Zero)throw new Win32Exception(createError,"owned.create_job");
+   if(createError==183){if(!CloseHandle(job))throw Error("owned.close_existing_job");job=IntPtr.Zero;throw new Exception("owned.job_name_already_exists");}
    var limits=new LIMITS();limits.basic.flags=0x2000;Set(job,9,limits);
+   // Publish only after creating our own Job and setting non-breakaway kill-on-close.
+   string binding="\"runId\":\""+runId+"\",\"jobName\":\""+jobName.Replace("\\","\\\\")+"\",\"requestSHA256\":\""+requestSHA256+"\",\"wrapperPid\":"+wrapperPid.ToString(System.Globalization.CultureInfo.InvariantCulture)+",\"wrapperCreationFileTime\":\""+wrapperCreated+"\"";
+   Persist(jobIdentity,"{\"schema\":\"lycheedev.owned-job.v1\","+binding+",\"createdNew\":true,\"limitFlags\":8192,\"jobHandleInherited\":false}");
    port=CreateIoCompletionPort(new IntPtr(-1),IntPtr.Zero,IntPtr.Zero,1);if(port==IntPtr.Zero)throw Error("owned.create_port");Set(job,7,new PORT{key=job,port=port});
    var security=new SA{size=Marshal.SizeOf(typeof(SA)),inherit=1};
    if(!CreatePipe(out outputRead,out output,ref security,65536)||!CreatePipe(out errorRead,out error,ref security,65536))throw Error("owned.output_pipes");
@@ -272,9 +281,9 @@ public static class ToolkitOwnedProcess {
    result.pid=process.pid;FT created,exited,kernel,user;if(!GetProcessTimes(process.process,out created,out exited,out kernel,out user))throw Error("owned.process_identity");result.creationFileTime=((long)created.high<<32)|created.low;
    bool member;if(!IsProcessInJob(process.process,job,out member)||!member)throw Error("owned.atomic_job_membership");
    // Persist the exact native root before allowing it to execute any user code.
-   string rootJson="{\"schema\":\"lycheedev.owned-root.v1\",\"runId\":\""+runId+"\",\"pid\":"+process.pid.ToString(System.Globalization.CultureInfo.InvariantCulture)+",\"creationFileTime\":\""+result.creationFileTime.ToString(System.Globalization.CultureInfo.InvariantCulture)+"\",\"jobAssignedAtCreation\":true,\"state\":\"suspended\",\"historicalReapProof\":false}";
+   string rootJson="{\"schema\":\"lycheedev.owned-root.v1\","+binding+",\"pid\":"+process.pid.ToString(System.Globalization.CultureInfo.InvariantCulture)+",\"creationFileTime\":\""+result.creationFileTime.ToString(System.Globalization.CultureInfo.InvariantCulture)+"\",\"jobAssignedAtCreation\":true,\"rootAssignment\":\"PROC_THREAD_ATTRIBUTE_JOB_LIST\",\"state\":\"suspended\",\"historicalReapProof\":false}";
    if(startupDiagnostics)result.rootPersistBeginTicks=Stopwatch.GetTimestamp();
-   using(var file=new FileStream(rootIdentity,FileMode.CreateNew,FileAccess.Write,FileShare.Read,4096,FileOptions.WriteThrough)){byte[] bytes=new UTF8Encoding(false).GetBytes(rootJson);file.Write(bytes,0,bytes.Length);file.Flush(true);}
+   Persist(rootIdentity,rootJson);
    if(startupDiagnostics)result.rootPersistEndTicks=Stopwatch.GetTimestamp();
    Action<IntPtr,string> pump=(handle,path)=>{try{using(var stream=new FileStream(new SafeFileHandle(handle,false),FileAccess.Read,65536,false))using(var file=new FileStream(path,FileMode.CreateNew,FileAccess.Write,FileShare.Read)){var buffer=new byte[65536];int count;while((count=stream.Read(buffer,0,buffer.Length))>0){if(Interlocked.Add(ref outputBytes,count)>16*1024*1024){result.outputLimit=true;TerminateJobObject(job,8);break;}file.Write(buffer,0,count);}}}catch(Exception failure){Interlocked.CompareExchange(ref readerError,failure.ToString(),null);TerminateJobObject(job,8);}};
    stdoutReader=Task.Run(()=>pump(outputRead,stdout));stderrReader=Task.Run(()=>pump(errorRead,stderr));
@@ -465,7 +474,7 @@ namespace ToolkitMemory {
 }
 
 '@
-try{$result=[ToolkitOwnedProcess]::Run($binary,[string[]]$requestData.args,[string]$requestData.cwd,[string]$requestData.stdout,[string]$requestData.stderr,[int]$requestData.timeoutMs,[int]$requestData.orphanMs,[string[]]$admittedHelperPaths,[string]$requestData.memoryPrefix,[string]$requestData.memoryMarker,[string]$requestData.rootIdentity,[string]$requestData.runId,($requestData.startupDiagnostics -eq $true))}finally{foreach($file in $heldToolFiles){$file.Dispose()}}
+try{$result=[ToolkitOwnedProcess]::Run($binary,[string[]]$requestData.args,[string]$requestData.cwd,[string]$requestData.stdout,[string]$requestData.stderr,[int]$requestData.timeoutMs,[int]$requestData.orphanMs,[string[]]$admittedHelperPaths,[string]$requestData.memoryPrefix,[string]$requestData.memoryMarker,[string]$requestData.rootIdentity,[string]$requestData.runId,($requestData.startupDiagnostics -eq $true),$jobName,$jobIdentity,$requestSHA256,[int]$identity.wrapperPid,[string]$identity.wrapperCreationFileTime)}finally{foreach($file in $heldToolFiles){$file.Dispose()}}
 # FILETIME exceeds the JSON/JavaScript exact integer range. Preserve the native
 # Int64 comparisons above, and emit decimal strings at every evidence boundary.
 function Convert-ObservedProcesses($rows) {

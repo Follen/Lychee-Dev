@@ -118,7 +118,7 @@ test('atomic startup retains the handle list and persists exact root before Resu
   assert.match(source, /new IntPtr\(0x20002\)/);
   assert.match(source, /new IntPtr\(0x2000D\)/);
   assert.ok(source.indexOf('owned.atomic_job_attribute') < source.indexOf('if(!CreateProcessW'));
-  assert.ok(source.indexOf('using(var file=new FileStream(rootIdentity') < source.indexOf('if(ResumeThread'));
+  assert.ok(source.indexOf('Persist(rootIdentity,rootJson)') < source.indexOf('if(ResumeThread'));
   assert.doesNotMatch(source, /AssignProcessToJobObject/);
   assert.match(source, /file\.Flush\(true\)/);
   assert.match(source, /assigned=true; \/\/ A successful JOB_LIST/);

@@ -1,3 +1,5 @@
+#[path = "support/current_local_data.rs"]
+mod current_local_data;
 use blte::ByteSource;
 use lycheedev_data::{
     blte, casc, installed,
@@ -416,19 +418,18 @@ fn target_preserves_observed_cn_slot_and_rejects_cross_slot_borrowing() {
 #[test]
 #[ignore = "requires explicitly named read-only actual client and report directory"]
 fn real_local_authenticated_encoding_root() {
-    let installation = std::env::var("LYCHEEDEV_RUST_DATA_CLIENT").expect("explicit client path");
-    let build = std::env::var("LYCHEEDEV_RUST_DATA_BUILD").expect("exact build");
+    let fixture = current_local_data::Fixture::load();
+    let installation = fixture.installation.clone();
+    let build = &fixture.pin.full_build;
     let output = std::env::var("LYCHEEDEV_RUST_DATA_REPORT").expect("task-owned report path");
-    let ids = std::env::var("LYCHEEDEV_RUST_DATA_IDS")
-        .unwrap_or_default()
-        .split(',')
-        .filter(|s| !s.is_empty())
-        .map(|s| s.parse::<u32>().unwrap())
-        .collect::<Vec<_>>();
+    let table_identity = fixture.table_identity();
+    let ids = vec![table_identity.db2_file_data_id];
     let start = Instant::now();
     let mut stages = BTreeMap::new();
-    let (root, product) = installed::installation_root(Path::new(&installation)).unwrap();
-    let metadata = installed::resolve_local(&root, &product, &build).unwrap();
+    let resolved = fixture.resolve();
+    let root = resolved.common_root;
+    let product = resolved.metadata.installed.product.clone();
+    let metadata = resolved.metadata;
     stages.insert("identity", start.elapsed().as_micros());
     let limits = casc::Limits::default();
     let keys = BTreeMap::new();
@@ -459,111 +460,117 @@ fn real_local_authenticated_encoding_root() {
     let (object, root_content) =
         installed::read_content(&root, &index, &root_record, limits, &keys, None).unwrap();
     stages.insert("rootDecoded", start.elapsed().as_micros());
-    let entries = if ids.is_empty() {
-        vec![]
-    } else {
-        metadata_format::lookup_root(
-            &root_content,
-            &ids,
-            RootLimits {
-                operation: limits,
-                ..Default::default()
-            },
-            None,
-        )
-        .unwrap()
-    };
+    let entries = metadata_format::lookup_root(
+        &root_content,
+        &ids,
+        RootLimits {
+            operation: limits,
+            ..Default::default()
+        },
+        None,
+    )
+    .unwrap();
     stages.insert("rootLookup", start.elapsed().as_micros());
-    let definition_dir = std::env::var("LYCHEEDEV_RUST_DATA_DEFINITIONS").ok();
-    let mut tables = vec![];
-    if let Some(directory) = definition_dir {
-        let directory = Path::new(&directory);
-        let identity: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(directory.join("input-identity.json")).unwrap())
-                .unwrap();
-        let manifest = std::fs::read(directory.join("manifest.json")).unwrap();
-        assert_eq!(
-            lycheedev_core::storage::sha256(&manifest),
-            identity["manifest"]["sha256"]
-        );
-        let table_identity = &identity["identity"];
-        let id = table_identity["db2FileDataID"].as_u64().unwrap() as u32;
-        let name = table_identity["tableName"].as_str().unwrap();
-        let dbd = std::fs::read(directory.join(format!("{name}.dbd"))).unwrap();
-        assert_eq!(
-            lycheedev_core::storage::sha256(&dbd),
-            identity["definition"]["sha256"]
-        );
-        let matches = entries
-            .iter()
-            .filter(|entry| {
-                entry.file_data_id == id
-                    && entry.locale_mask & 0x40 != 0
-                    && entry.content_flags & 0x80 == 0
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            matches.len(),
-            1,
-            "explicit zhCN standard identity must be unambiguous"
-        );
-        let file_record = index.find(&matches[0].content_key, limits, None).unwrap();
-        let (file_object, file) =
-            installed::read_content(&root, &index, &file_record, limits, &keys, None).unwrap();
-        stages.insert("tableDecoded", start.elapsed().as_micros());
-        let layout = lycheedev_data::table::inspect(&file.bytes, Default::default()).unwrap();
-        assert_eq!(
-            format!("{:08X}", layout.table_hash),
-            table_identity["tableHash"]
-        );
-        let definition = lycheedev_data::schema::Document::parse(&dbd)
+    // Full Map and its exact DBD are mandatory: Root authentication alone is
+    // not the installed table/SQL acceptance path.
+    let name = &table_identity.name;
+    let dbd = fixture.bytes(&fixture.document["definitions"]["map"]);
+    let matches = entries
+        .iter()
+        .filter(|entry| {
+            entry.file_data_id == table_identity.db2_file_data_id
+                && entry.locale_mask & fixture.locale_mask() != 0
+                && entry.content_flags & 0x80 == 0
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        matches.len(),
+        1,
+        "selected locale standard identity must be unambiguous"
+    );
+    let file_record = index.find(&matches[0].content_key, limits, None).unwrap();
+    let (file_object, file) =
+        installed::read_content(&root, &index, &file_record, limits, &keys, None).unwrap();
+    assert_eq!(
+        file.bytes,
+        fixture.bytes(&fixture.document["map"]["raw"]),
+        "independent Go whole-CKey decoded Map"
+    );
+    stages.insert("tableDecoded", start.elapsed().as_micros());
+    let layout = lycheedev_data::table::inspect(&file.bytes, Default::default()).unwrap();
+    assert_eq!(layout.table_hash, table_identity.hash);
+    let definition = lycheedev_data::schema::Document::parse(&dbd)
+        .unwrap()
+        .select(build, &format!("{:08X}", layout.layout_hash))
+        .unwrap();
+    let view = lycheedev_data::table::open(&file.bytes, &definition, Default::default()).unwrap();
+    stages.insert("tableBound", start.elapsed().as_micros());
+    let expected_rows = fixture.rows();
+    let row = view
+        .row(fixture.record_id().parse().unwrap(), 1 << 20)
+        .unwrap();
+    let all_ids = view.ids().collect::<Vec<_>>();
+    let all_rows = all_ids
+        .iter()
+        .map(|id| view.row(*id, 1 << 20).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        serde_json::to_value(&all_ids).unwrap(),
+        expected_rows["ids"]
+    );
+    assert_eq!(
+        serde_json::to_value(&all_rows).unwrap(),
+        expected_rows["rows"]
+    );
+    assert_eq!(
+        all_rows.len() as u64,
+        fixture.json(&fixture.document["map"]["schema"])["result"]["rowCount"]
+            .as_u64()
             .unwrap()
-            .select(&build, &format!("{:08X}", layout.layout_hash))
-            .unwrap();
-        let view =
-            lycheedev_data::table::open(&file.bytes, &definition, Default::default()).unwrap();
-        stages.insert("tableBound", start.elapsed().as_micros());
-        let row = view.row(0, 1 << 20).unwrap();
-        let all_rows = view
-            .ids()
-            .map(|id| view.row(id, 1 << 20).unwrap())
-            .collect::<Vec<_>>();
-        let source =
-            lycheedev_data::relational::Source::from_wdc(&view, Default::default(), None).unwrap();
-        let sql = format!("SELECT ID, Directory, MapName_lang FROM {name} WHERE ID=0");
-        let sql_result = lycheedev_data::relational::Program::compile(&sql)
+    );
+    let provider =
+        lycheedev_data::relational::Source::from_wdc(&view, Default::default(), None).unwrap();
+    let providers = BTreeMap::from([(name.to_owned(), provider)]);
+    let mut queries = vec![];
+    let oracle_queries = fixture.document["expected"]["installedSqlQueries"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        oracle_queries.len(),
+        7,
+        "six syntax scenarios and the selected actual record query"
+    );
+    for query in oracle_queries {
+        let sql = query["sql"].as_str().unwrap();
+        let expected = fixture.json(&query["response"]);
+        let result = lycheedev_data::relational::Program::compile(sql)
             .unwrap()
-            .execute(
-                &BTreeMap::from([(name.into(), source)]),
-                &BTreeMap::new(),
-                Default::default(),
-                None,
-            )
+            .execute(&providers, &BTreeMap::new(), Default::default(), None)
             .unwrap();
-        let mut queries = vec![];
-        let provider =
-            lycheedev_data::relational::Source::from_wdc(&view, Default::default(), None).unwrap();
-        let providers = BTreeMap::from([(name.to_owned(), provider)]);
-        for sql in [
-            "SELECT ID FROM Map WHERE ID>=0 ORDER BY ID",
-            "SELECT ID, Directory FROM Map WHERE ID BETWEEN 0 AND 20 ORDER BY ID DESC LIMIT 5 OFFSET 1",
-            "SELECT ID, \"Flags[0]\" FROM Map WHERE ID=0",
-            "SELECT ID+1 AS NextID FROM Map WHERE ID IN (0,1,2) ORDER BY NextID DESC",
-            "SELECT DISTINCT InstanceType FROM Map ORDER BY InstanceType",
-            "SELECT ID, MapName_lang FROM Map WHERE ID=0 AND LENGTH(MapName_lang)>0",
-        ] {
-            let result = lycheedev_data::relational::Program::compile(sql)
-                .unwrap()
-                .execute(&providers, &BTreeMap::new(), Default::default(), None)
-                .unwrap();
-            queries.push(serde_json::json!({"sql":sql,"columns":result.columns,"rows":result.rows,"complete":result.complete}));
-        }
-        let decoded = directory.join(format!("{name}.decoded.db2"));
-        std::fs::write(&decoded, &file.bytes).unwrap();
-        tables.push(serde_json::json!({"identity":identity,"selectedRoot":matches[0],"encoding":file_record,"archive":{"index":file_object.index,"span":file_object.span},"decoded":{"bytes":file.bytes.len(),"sha256":lycheedev_core::storage::sha256(&file.bytes),"path":decoded,"wholeCKey":true},"layout":layout,"coverage":view.coverage(),"row":row,"allRows":all_rows,"queries":queries,"sql":sql,"sqlResult":sql_result}));
+        let public = serde_json::to_value(&result).unwrap();
+        assert_eq!(
+            public["columns"], expected["result"]["result"]["columns"],
+            "{sql} columns"
+        );
+        assert_eq!(
+            public["rows"], expected["result"]["result"]["rows"],
+            "{sql} rows"
+        );
+        assert_eq!(
+            result.complete,
+            expected["result"]["complete"].as_bool().unwrap(),
+            "{sql} completeness"
+        );
+        queries.push(serde_json::json!({"sql":sql,"columns":result.columns,"rows":result.rows,"complete":result.complete}));
     }
+    let decoded = Path::new(&output).parent().unwrap().join("Map.decoded.db2");
+    std::fs::create_dir_all(decoded.parent().unwrap()).unwrap();
+    std::fs::write(&decoded, &file.bytes).unwrap();
+    let tables = vec![
+        serde_json::json!({"identity":table_identity,"selectedRoot":matches[0],"encoding":file_record,"archive":{"index":file_object.index,"span":file_object.span},"decoded":{"bytes":file.bytes.len(),"sha256":lycheedev_core::storage::sha256(&file.bytes),"path":decoded,"wholeCKey":true},"layout":layout,"coverage":view.coverage(),"row":row,"allRows":all_rows,"queries":queries}),
+    ];
     stages.insert("queriesFinished", start.elapsed().as_micros());
-    let again = installed::resolve_local(&root, &product, &build).unwrap();
+    let again = installed::resolve_local(&root, &product, build).unwrap();
     assert_eq!(metadata.catalog_sha256, again.catalog_sha256);
     assert_eq!(metadata.build_document.sha256, again.build_document.sha256);
     assert_eq!(metadata.cdn_document.sha256, again.cdn_document.sha256);

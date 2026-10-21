@@ -22,6 +22,29 @@ test('semantically equal but byte-different original evidence rejects',t=>{const
 test('false reap, wrong owner, different channel and changed commands reject',t=>{const {snapshot}=fixture(t);for(const [index,update]of [[0,x=>x.channel='symbols'],[0,x=>x.pid=18],[0,x=>x.token='bad'],[1,x=>x.id=runId],[1,x=>x.owner='foreign'],[1,x=>x.handlesReaped=true],[1,x=>x.state='succeeded'],[2,x=>x.args=['test']]])assert.throws(()=>validateSnapshot(change(snapshot,index,update)));});
 test('snapshot hash, encoding and path drift reject',t=>{const {snapshot}=fixture(t);for(const mutate of [x=>x.files[0].sha256='f'.repeat(64),x=>x.files[1].base64+='=',x=>x.files[2].path='../foreign',x=>x.absentNativeReceipt='../foreign']){const value=structuredClone(snapshot);mutate(value);assert.throws(()=>validateSnapshot(value));}});
 test('an actual receipt appearing blocks recovery and preserves the lease',t=>{const {root,snapshot}=fixture(t);writeFileSync(join(root,snapshot.absentNativeReceipt),'{}');assert.throws(()=>capture(root,ownerId),/native_receipt_exists/);assert.equal(readFileSync(join(root,snapshot.files[0].path)).toString('base64'),snapshot.files[0].base64);});
+
+test('Windows recovery tool identity works without PowerShell module autoload',{skip:process.platform!=='win32'},t=>{
+  const directory=mkdtempSync(join(tmpdir(),'recovery-tool-hash-'));t.after(()=>rmSync(directory,{recursive:true,force:true}));
+  const psPath=fileURLToPath(new URL('./rust-channel-recovery.ps1',import.meta.url));
+  const jsPath=fileURLToPath(new URL('./rust-channel-recovery.mjs',import.meta.url));
+  const source=readFileSync(psPath,'utf8');
+  const hashFunction=source.split(/\r?\n/).find(line=>line.startsWith('function Hash-Bytes('));
+  const identityCheck=source.split(/\r?\n/).find(line=>line.includes("throw 'recovery.tool_changed_since_prepare'"));
+  assert(hashFunction&&identityCheck);
+  const literal=value=>"'"+value.replaceAll("'","''")+"'";
+  const script=join(directory,'verify.ps1');
+  writeFileSync(script,`$ErrorActionPreference='Stop'
+$PSModuleAutoLoadingPreference='None'
+$PSCommandPath=${literal(psPath)}
+$PSScriptRoot=${literal(fileURLToPath(new URL('.',import.meta.url)))}
+${hashFunction}
+$prepared=@{toolHashes=@{powershell='${sha256(readFileSync(psPath))}';javascript='${sha256(readFileSync(jsPath))}'}}
+${identityCheck}
+[Console]::Out.Write('verified')
+`);
+  const run=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',script],{encoding:'utf8',windowsHide:true,shell:false,timeout:30000,maxBuffer:1<<20});
+  assert.equal(run.error,undefined);assert.equal(run.status,0,run.stderr);assert.equal(run.stdout,'verified');
+});
 test('ambiguous requests reject without choosing a recent one',t=>{const {root,snapshot}=fixture(t);writeFileSync(join(root,'.tmp/rust-disk/evidence',ownerId,`process-${token}.request.json`),'{}');assert.throws(()=>capture(root,ownerId),/exactly_one_request_required/);assert.equal(readFileSync(join(root,snapshot.files[0].path)).toString('base64'),snapshot.files[0].base64);});
 test('no broad kill, deletion, reboot, alternate target or event-log dependency in recovery',()=>{const js=readFileSync(new URL('./rust-channel-recovery.mjs',import.meta.url),'utf8'),ps=readFileSync(new URL('./rust-channel-recovery.ps1',import.meta.url),'utf8');assert.doesNotMatch(js,/rmSync|unlinkSync|renameSync|execSync/);assert.doesNotMatch(ps,/Remove-Item|Move-Item|Restart-Computer|Stop-Process|TerminateProcess|TerminateJobObject/);assert.match(ps,/SetFileInformationByHandle\(handle,3,data/);assert.match(ps,/Write-NewFlushed \$fencePath[\s\S]*\$held\[0\]\.RenameNoReplace\(\$archive\)/);assert.match(ps,/oldOwnerReaped=\$false/);assert.doesNotMatch(ps,/EventLog|Get-WinEvent|LastBootUpTime/);});
 

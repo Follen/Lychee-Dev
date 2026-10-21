@@ -297,7 +297,7 @@ test('startup diagnostics timestamp durable ownership and keep CPU outside the o
   const order = [
     'result.commandStartTicks=Stopwatch.GetTimestamp();', 'if(!CreateProcessW(binary,command',
     'if(startupDiagnostics)result.createReturnTicks=', 'if(startupDiagnostics)result.rootPersistBeginTicks=',
-    'using(var file=new FileStream(rootIdentity,FileMode.CreateNew', 'file.Flush(true);}',
+    'Persist(rootIdentity,rootJson);',
     'if(startupDiagnostics)result.rootPersistEndTicks=', 'memory=new ToolkitMemory.Observer(',
     'if(startupDiagnostics)result.observerSetupEndTicks=', 'if(startupDiagnostics)result.resumeBeforeTicks=',
     'if(ResumeThread(process.thread)', 'if(startupDiagnostics)result.resumeAfterTicks=',
