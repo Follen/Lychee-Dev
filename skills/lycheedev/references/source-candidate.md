@@ -1,7 +1,7 @@
 # Rust candidate boundaries
 
-This candidate follows the fixed Go 3.2.3 Skill at
-`3766f9cacb52e93a803a626187e2a1d54a445468` and complete Lycheedev mailbox
+This candidate follows the fixed Go 3.2.4 Skill at
+`29bdbdaff5f064ec212ff2064380b1ccac652eda` and complete Lycheedev mailbox
 protocol v1 contract. Use the ordinary [Skill entry](../SKILL.md); this page adds
 migration boundaries, not a reduced product contract.
 

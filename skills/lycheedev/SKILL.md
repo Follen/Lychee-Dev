@@ -8,8 +8,8 @@ description: Investigate World of Warcraft (WoW/魔兽世界) addon source/APIs,
 Answer the WoW technical question with the smallest sufficient evidence. The CLI
 owns preparation, verification, transport and recovery; do not build a second path.
 
-This Rust migration candidate reuses the Go 3.2.3 workflow contract at
-`3766f9cacb52e93a803a626187e2a1d54a445468`. It is not yet a complete accepted
+This Rust migration candidate reuses the Go 3.2.4 workflow contract at
+`29bdbdaff5f064ec212ff2064380b1ccac652eda`. It is not yet a complete accepted
 release. Read [candidate boundaries](references/source-candidate.md) for engine
 and acceptance limits. Command availability does not establish correctness.
 

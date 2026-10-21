@@ -5,11 +5,11 @@
 ## 目标、来源与执行边界
 
 - 沿用 `rust-refactor` / [草稿 PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。已接受 [GitHub 交接](docs/handoff/2026-10-21/HANDOFF.md)和[统一验证队列](docs/handoff/2026-10-21/VALIDATION-QUEUE.md)，交接实现基线 `cfdefd46a11ec8dce470d296b424a3eaa1372b8b`；原交接包的 NOT_RUN 是冻结时事实，后续结果以本页为准。
-- 顺序：Source/Data 业务质量不低于 `f811fc7f75fc206158cecb01dd0eb5d39e88b35f` → 完整实现和 correctness → 同任务 Rust 可控耗时 ≤ 固定 Go 的30% → 最终五循环。Go参考固定 v3.2.3 peeled `3766f9cacb52e93a803a626187e2a1d54a445468`；不跟随其他分支版本变化。
-- 当前产品为3.5.0 beta配置。真实 Skill anchor `75cd762e31df0dfd614c8687f9fd3fdb26b6a7f7`、25文件 tree `c1768f92d55b454cafb202eb6c2835af1ecc2811`。Agent是正式Data入口，migration-oracle仅作旧业务对照，Release不启用。七产品、双Forever身份、Mailbox v1、未知输入不重放、精确数字/coverage/CAP合同不变。
+- 顺序：Source/Data 业务质量不低于 `f811fc7f75fc206158cecb01dd0eb5d39e88b35f` → 完整实现和 correctness → 同任务 Rust 可控耗时 ≤ 固定 Go 的30% → 最终五循环。用户在2026-10-21指定后续基线为 Go v3.2.4 peeled `29bdbdaff5f064ec212ff2064380b1ccac652eda`，并明确保留Rust优化；[增量范围](docs/toolkit/rust-go-3.2.4-increment.md)主要为插件战斗态修复。旧3.2.3报告保留原身份。
+- 当前产品为3.5.0 beta配置。旧真实 Skill anchor `75cd762e31df0dfd614c8687f9fd3fdb26b6a7f7`、25文件 tree `c1768f92d55b454cafb202eb6c2835af1ecc2811`保留；三个当前入口的Go324声明已改，新Skill锚将在提交后单独登记，不能拿旧树验新包。Agent是正式Data入口，migration-oracle仅作旧业务对照，Release不启用。七产品、双Forever身份、Mailbox v1、未知输入不重放、精确数字/coverage/CAP合同不变。
 - 用户要求全部隔离测试，不写入现有 `~/.agents`。Skill/npm安装仅在项目隔离目录；测试用户HOME/USERPROFILE/CODEX_HOME、AppData、temp和npm配置/cache均由当前owner持有。编译器及离线依赖缓存保持既有位置，不重新安装工具链。`runCargo`新增显式isolateUser选项，后续native队列启用；已核现有delivery/CLI Skill写入用例均显式临时target，未走真实用户发现。
 - 本机主代理独占 native 队列和此文件，开发与固定提交测试副本分开；其余代理只在分配文件内工作。保留 main 的独立任务改动及 `.worktrees/rust-refactor`。无游戏、合并或发布授权。
-- 全部 Rust 调用经官方 owned runner，600秒/组、默认stack、locked/offline/j1、no one-shot，默认20GiB构建cache/5GiB scratch。Data产品容量另为十进制5GB。第一次获批incremental清理6,819,246,069字节；284a又触发cache准入后，用户明确批准当前6,170,267,583字节/11,690文件的同目录清理，已完成。两次均保留其他cache/EXE/PDB/证据并释放双lease；第二次9,090个保留cache文件前后hash一致，cache降至13,516,320,356字节，旧拒绝报告保留。
+- 全部 Rust 调用经官方 owned runner，600秒/组、默认stack、locked/offline/j1、no one-shot，默认20GiB构建cache/5GiB scratch。Data产品容量另为十进制5GB。用户已授权本任务后续同一固定副本target/debug/incremental的自动清理：无编译进程/占用、逐项核对清单，只删可重建incremental，保留其他cache/EXE/PDB/依赖/报告且上限不变。最近一批2,433,793,455字节/6,397文件已清理，10,287个保留cache文件及受保护报告前后hash一致，双lease已释放；当前cache16,918,930,915字节。两次先前获批清理及所有拒绝报告保留原记录。
 
 ## 已实现与实际验证
 
@@ -22,14 +22,17 @@
 - CLI-SOCKET-01：accepted socket恢复blocking后，原4项Windows真实supervisor测试全部通过。EOF半关闭、stdout背压、整epoch取消、私有入口拒绝已实跑。
 - CAP-TRANSPORT-01：Data实际Session query/capture和Navigate自动CAP在stdout flush后observer失败的2项新回归通过，核唯一CAP、原body/manifest和query handle；全部Agent Session消费者22项及12条Navigate业务路径同组通过。b6cf CLI bin184项、supervisor6项全部通过，含真实BrokenPipe保留committed CAP、父进程终态统一失效标记及排队deadline。精确non-yield CPU poll及真实private receipt断线仍无实测。
 - Data integration当前284 active均有实际通过记录：e0原275通过/9失败；b6cf通过DB2六项及hotfix一项，f5dc通过content全13项及Agent native parity2项。selected缺失body重建在正式Agent和migration-oracle两条路径均修复并实跑；坏body仍明确拒绝，alias/CAP/归属不变。Data全部ignored合计25，不计业务pass。
-- Windows library188 active跨f5dc/284a均有通过记录；唯一主文件pin失败修后，284a destination八项及Core四个实际调用回归全部通过。11个integration目标中10个非空目标52项全部通过，另一个harness=false helper无业务case。library2个及integration2个ignored单列。
-- Source library749 active在284a按完整名单分组全部通过，7 ignored单列。integration继续执行；diff_prune六项原2通过/4失败，四例均在fixture Git worktree add因隔离TEMP长路径失败，未进入prune断言。已为单次fixture Git add启用core.longpaths，保留实际长路径、全部断言及隔离；原生复跑待做。
+- Windows library188 active跨f5dc/284a均有通过记录；唯一主文件pin失败修后，284a destination八项及Core四个实际调用回归全部通过。两项suspended-child ignored在284a用本次编译helper显式通过，真实正常/取消/准备失败证明及全部进程、reader、句柄回收已核。11个integration目标中10个非空目标52项全部通过，另一个harness=false helper无业务case；integration2个ignored由其parent调用，单列不重复计数。
+- Source完整38目标新库存为836 active、45 ignored、1 helper。library749 active在284a按完整名单分组全部通过，7 ignored单列。integration的47 active已通过，diff_prune四例在fixture Git worktree add因隔离TEMP长路径失败，未进入prune断言；36项oracle留专用入口。已为单次fixture Git add启用core.longpaths并推送d3e30db270，保留实际长路径、全部断言及隔离；原生复跑待做。
+- Source两项native quota ignored已实际通过并回收子进程；临时汇总器误把Windows OsString当string导致外层报告失败，独立只读派生报告已核原结果且未改原报告。观察到接近预算的分配拒绝，不据此声称瞬时硬上限或唯一拒绝原因。外部Lua工具九例六过三败：goto旧断言误用公有Go扫描器，测试已改到native Lua5.1结构；两个refs用例需迁至真实Release CLI，仍待实跑。原有passed六例不重复。
 - Node原399项393通过/3失败/3权限skip；旧Skill差异清单和metadata布局3失败修后对应43项全部通过。后继Source exporter/corpus工具5套84通过/1权限skip；本批真实Skill入口及用户环境隔离的4套Node68项全部通过。重叠套件不累加为独立覆盖，mock/静态检查不代替Windows业务。
 
 ## 当前修正与负责人
 
 | ID | 状态与边界 | 负责人 / 下一步 |
 | --- | --- | --- |
+| GO324-BASELINE-01 | 新固定Go324；仅移入addon两文件及新combat夹具，保留Rust优化/3.5.0版本。新formal324 oracle与工具、118个不同Node用例已通过；实际Lua/bridge未跑。CLI静态对照、paired包身份与Go准备环境隔离正在更新，历史身份不重标 | core_evidence负责formal和现行legacy-addon清单；core_metadata负责CLI/static；data_engine负责paired/Go准备；主代理负责当前docs/Skill新锚 |
+| SOURCE-EXTERNAL-FIXTURE-01 | 真实luac九例中goto结构断言已修；refs两个测试改用Release CLI并保留未执行caller负对照，原130次完整查询/答案身份/CAP要求不降低 | core_evidence交回goto；core_metadata负责refs，主代理待Release实际复跑 |
 | CLI-TERMINAL-01 / CLI-FIXTURE-01 | b6cf bin184及supervisor6全通过，原19个bin旧合同/种子问题及BrokenPipe终态已闭合 | 主代理已实跑 |
 | DATA-INTEGRATION-01 / DATA-HOTFIX-FIXTURE-01 | 原9失败均已修复并实跑通过，整个284 active跨版本均有通过记录 | 主代理已实跑；旧报告不改写 |
 | DATA-LOCAL-ORDER-01 | local_query及正式Agent sql_reader延后一次配置provenance发布；f5dc受影响196 library、content13及Agent parity2全通过，含真实Session缺体恢复/等长坏体拒绝 | 已保存、推送、验证 |
@@ -46,10 +49,10 @@
 
 ## 下一步
 
-1. paired工具隔离已在e99e4e4938a43af87a67491015bea4e8503dbeac保存、推送。固定副本284a的Source队列在source_session_repeated_real ignored-list前因cache准入停止：cache19,352,724,370字节加2GiB预留超过20GiB，Cargo未启动。新一批incremental清单2,433,793,455字节/6,397文件已准备，等待用户选择本批或后续同范围清理授权；未删除。
-2. 保存fixture长路径修正后复跑diff_prune六例；284a两配置check、Windows pin八项及Core四项均已通过，无新影响的CLI/Data/Core/Source库已通过组不重复运行。
-3. 完成Source、Live和补漏26目标；Source十个native_oracle目标仅通过专用参考生成器，Live formal bridge需当前Release+Lua admission，五个protocol目标用各自wrapper，Windows两个suspended-child ignored需封存自有helper后执行。真实数据/权限ignored单列。自有窗口/子进程测试不等于真实游戏测试。
-4. correctness和资源回收通过后构建生产Release，实际npm安装匹配25文件Skill，执行no-home发现、installed Source及Agent Data。三项exporter/importer显式准备，不在测量内隐式构建；旧SQL私有metadata fixture不能拿来测新Agent。
+1. 合并本地Go324增量、当前身份与fixture修正并保存到同一分支。固定副本仍284a，正在补Emmy adapter；其后binding-contracts。Windows suspended和Source quota各两例已实际通过；六项外部Lua工具已通过，三项失败按上表修复。
+2. 当前native队列结束后切换已保存修正，复跑diff_prune六例及受影响goto；完成Go324 formal Lua和Live/Delivery。284a两配置check、Windows pin八项及Core四项均已通过，无新影响的CLI/Data/Core/Source库已通过组不重复运行。
+3. 完成Source、Live和补漏26目标；Source十个native_oracle目标仅通过专用参考生成器，五个protocol目标用各自wrapper。为其余refs和formal bridge准备当前生产Release及Lua admission，再补这些依赖Release的实际用例。真实数据/权限ignored单列。自有窗口/子进程测试不等于真实游戏测试。
+4. 实际npm安装匹配25文件Skill，执行no-home发现、installed Source及Agent Data。三项exporter/importer显式准备，不在测量内隐式构建；旧SQL私有metadata fixture不能拿来测新Agent。
 5. 再执行现有owned paired协议：完整任务、20对、不扣helper成本，CSV仅correctness；历史单pair、诊断profile和旧产物均不是当前性能验收。当前无≤0.30或全产品矩阵通过结论。
 6. 最后五循环依序为架构/业务/Skill、覆盖有效性与冗余、死代码、联合全仓、Rust原生度。需要真实配合的项目始终留在最后，不从历史计划推导操作授权。
 
