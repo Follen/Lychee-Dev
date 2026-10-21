@@ -7,4 +7,5 @@ type Relationship = addoncheck.Relationship
 type LoadReference = addoncheck.LoadReference
 type HeaderValue = addoncheck.HeaderValue
 type SyntaxNote = addoncheck.SyntaxNote
+type EncodingWarning = addoncheck.EncodingWarning
 type DocumentFacts = addoncheck.DocumentFacts

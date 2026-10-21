@@ -253,6 +253,9 @@ func (w *closureWalk) load(name, from string, line, depth int, kind string, mani
 	for _, note := range facts.Diagnostics {
 		w.issue("error", "syntax", name, note.Line, "", note.Message)
 	}
+	for _, warning := range facts.Warnings {
+		w.issue("warning", "source_encoding", name, warning.Line, "", warning.Message)
+	}
 	for _, load := range facts.Loads {
 		w.references++
 		if w.references > 20000 {

@@ -1,8 +1,10 @@
 # 待办与验证范围
 
-基线：3.2.4；更新日期：2026-10-21。发行版本源为 3.2.4，授权渠道为 `latest`。
+基线：3.2.5；更新日期：2026-10-21。发行版本源为 3.2.5，沿用渠道 `latest`。
 
 ## 待办
+
+- [x] SOURCE-FOREVER-ENCODING：非UTF-8编码信息已独立为告警，不降低分析完整性、AST数量或addon加载有效性；query/inspect共用显示规则，原字节与哈希保留。Forever 1.60.1.70450原PIN及提交`172a387e`的8组查询、异常正文查询和第400行inspect均成功；4481文档/4481 AST、0跳过、0语法诊断、1告警，coverage.complete=true，真实结果截断仍保留。build/vet、Lua5.1必需完整Go套件和93项Node测试通过；纳入3.2.5，发行状态见[当前交付](handover.md#当前交付325-发行)，实现证据见[当前修复](handover.md#当前修复source-forever-encoding)。
 
 - [ ] FB-COMBAT-01实机复验：聊天框战斗按键、战斗中切换焦点及停用后的脱战恢复。代码已修复，受保护API的离线复现先失败、修复后通过；build/vet、Lua5.1必需完整Go套件、93项Node测试及发布CI通过。3.2.4实现提交`29bdbdaff5`已推送main并发布到latest，本机CLI、Skill和7个客户端addon全部更新完成，Codex未重启，详见[当前交付](handover.md#当前交付324-发行)。本轮尚未运行真实客户端，不计为实机通过。
 

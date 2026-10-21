@@ -89,7 +89,8 @@ func (c *snapshotCache) numberedLines(ctx context.Context, name string, start, e
 }
 
 // Render only the selected line while retaining the historical CRLF and terminal
-// CR normalization shared by Search, Inspect and Context.
+// CR normalization shared by Search, Inspect and Context. Invalid UTF-8 is shown
+// as U+FFFD; the encoding warning locates it and the document/hash stay unchanged.
 func numberedDocumentLine(data []byte, starts []uint32, line int) string {
 	first, last := int(starts[line-1]), len(data)
 	if line < len(starts) {
@@ -98,5 +99,9 @@ func numberedDocumentLine(data []byte, starts []uint32, line int) string {
 			last--
 		}
 	}
-	return fmt.Sprintf("%d: %s", line, strings.TrimSuffix(string(data[first:last]), "\r"))
+	return fmt.Sprintf("%d: %s", line, strings.TrimSuffix(displaySourceText(data[first:last]), "\r"))
+}
+
+func displaySourceText(data []byte) string {
+	return strings.ToValidUTF8(string(data), "\ufffd")
 }

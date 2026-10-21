@@ -1,6 +1,6 @@
 # Lychee Dev Toolkit 设计
 
-本文描述 3.2.4 开发基线的当前实现。发行版本以 [release/version.json](release/version.json) 为准；验证范围见 [todo.md](todo.md)。
+本文描述 3.2.5 开发基线的当前实现。发行版本以 [release/version.json](release/version.json) 为准；验证范围见 [todo.md](todo.md)。
 
 ## 组成与职责
 
@@ -49,6 +49,8 @@ Retail 12.1.5.70391 对应 `live` 固定提交 `18c6d677b605b312f3d813d498404631
 `source sync` 固定仓库与提交，index 生成结构事实；query、refs、context、flow 和 diff 在固定快照上运行。第三方 addon 的 API 环境同样固定，避免读取时隐式换成另一个客户端。
 
 精确查询按 exact、prefix、索引文本、正文的顺序查找。已命中时停止向低层扫描；声明索引按需生成，请求内复用查找表、Git 文档与 API 环境。
+
+文档按原始字节解析并保留哈希。非UTF-8字节作为独立告警记录所在文件、行号与零起始字节偏移；编码告警不减少分析完整性或AST文件数，也不使addon加载检查失败。query和inspect共用U+FFFD显示规则，归档仍保留原字节，不把非UTF-8归档标成UTF-8。实际语法错误和跳过的超限文件仍影响coverage；文档超限单独报告实际字节数及上限。索引与文件facts使用v3缓存格式，旧缓存不复用，固定PIN及parserRevision不变。
 
 `source batch` 接收至多 64 KiB 的文件，包含 1–32 项 query、refs 或 context。整批共享 90 秒期限和请求级 LuaLS worker，保留输入顺序；每项各自返回 coverage、complete、truncated 和 cursor。部分条目失败不能被当作整批成功。显式 `session-reuse` 才复用跨请求 worker。
 

@@ -32,12 +32,21 @@ type SyntaxNote struct {
 	Message string `json:"message"`
 	Line    int    `json:"line"`
 }
+
+// EncodingWarning describes text display without implying a syntax failure.
+type EncodingWarning struct {
+	Message    string `json:"message"`
+	Line       int    `json:"line"`
+	ByteOffset int    `json:"byteOffset"` // Zero-based offset in the original bytes.
+}
+
 type DocumentFacts struct {
-	Declarations  []Declaration   `json:"declarations"`
-	Relationships []Relationship  `json:"relationships"`
-	Loads         []LoadReference `json:"loads"`
-	Headers       []HeaderValue   `json:"headers"`
-	Diagnostics   []SyntaxNote    `json:"diagnostics"`
+	Declarations  []Declaration     `json:"declarations"`
+	Relationships []Relationship    `json:"relationships"`
+	Loads         []LoadReference   `json:"loads"`
+	Headers       []HeaderValue     `json:"headers"`
+	Diagnostics   []SyntaxNote      `json:"diagnostics"`
+	Warnings      []EncodingWarning `json:"warnings,omitempty"`
 }
 
 func emptyFacts() DocumentFacts {

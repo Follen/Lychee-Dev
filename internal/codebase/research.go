@@ -58,8 +58,12 @@ func InspectSource(ctx context.Context, root, snapshot string, query SpanQuery) 
 	if err != nil {
 		return result, err
 	}
+	mediaType := "text/plain; charset=utf-8"
+	if len(result.Excerpt.Warnings) > 0 {
+		mediaType = "text/plain"
+	}
 	result.Capture, err = vault.WriteMetadata(ctx, root, func(s *vault.Store, m *vault.Metadata) (evidence.CaptureRef, error) {
-		return evidence.OpenArchive(s, m).CommitCapture(ctx, evidence.CaptureDraft{Reader: bytes.NewReader(original), MaxBytes: maxSourceBytes, MediaType: "text/plain; charset=utf-8", Complete: true, Provenance: evidence.Provenance{Kind: "source", Locator: pin.Repository + ":" + query.Path, Snapshot: snapshot, SourceCommit: pin.ExactCommit}})
+		return evidence.OpenArchive(s, m).CommitCapture(ctx, evidence.CaptureDraft{Reader: bytes.NewReader(original), MaxBytes: maxSourceBytes, MediaType: mediaType, Complete: true, Provenance: evidence.Provenance{Kind: "source", Locator: pin.Repository + ":" + query.Path, Snapshot: snapshot, SourceCommit: pin.ExactCommit}})
 	})
 	return result, err
 }

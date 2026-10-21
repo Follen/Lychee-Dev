@@ -1,5 +1,22 @@
 更新日期：2026-10-21，Asia/Shanghai。历史审计见[审计报告](docs/Clean-repo-2026-10-14.md)；本文件只记录当前交接。
 
+## 当前交付：3.2.5 发行
+
+- 用户要求推送GitHub并生成新Release；本次为3.2.5，沿用main及latest渠道，按正式标签触发流水线完成npm和GitHub发布。沿用此前发布后直接更新本机的要求；无新分支、worktree或PR。
+- 主代理负责Source编码修复、版本同步、发布验收及本机受管更新。实现已完成，同一Forever PIN的8组query和异常行inspect通过，详见下方；版本源和渠道清单已同步为3.2.5。提交前build/vet、版本/Skill/发行输入检查、93项Node测试全部通过；Lua5.1必需完整Go套件通过（2962项pass事件、42项既有可选skip、0fail，32个测试包通过；包并发2、测试并发4、包时限20分钟）。
+- 发布使用`.github/workflows/toolkit-release.yml`，目标为本次干净提交及对应`v3.2.5`标签；下一步推送并跟进正式流程。本机update预检已确认1份Skill及7个客户端addon为受管3.2.4，无占用冲突；发布后通过受管update同步，不操作游戏。
+- 用户要求用脚本清理上一轮临时目录，但同一删除目标此前已被自动审批拒绝，未以另一执行方式绕过；11个临时文件保留。该阻力不影响Git推送或发行，原PIN、镜像、captures和其他项目保留。
+
+## 当前修复：SOURCE-FOREVER-ENCODING
+
+- 用户报告3.2.4的source query在Forever 1.60.1.70450固定提交`172a387e3ab85b26e6640d3058d5ec1e6ccd4c63`失败。沿用main，基线`c9bd90ea2b`；主代理负责Source分析/索引、回归和必要文档；explore_source_encoding完成下游编码边界的只读探索，没有产品文件写入。
+- 已通过PATH正式CLI复现原命令和`codebase.analysis_encoding_or_budget`；原PIN身份已核对。初始`source list --snapshot`显示ready=false、snapshotFiles=0。固定树4481份文档中仅`Interface/AddOns/Blizzard_NewPlayerExperience/Camelot/Blizzard_TutorialData.lua`第400行注释含非法UTF-8字节0x92（偏移12719，文件18128字节），没有超过32MiB的文档；全局UTF-8拒绝导致整个索引中止，未进入LuaLS。
+- 已按用户补充要求将编码告警与语法诊断分离：告警不降低coverage、AST文件数或addon加载有效性；query和inspect共用U+FFFD显示，原始归档与哈希保留，非UTF-8归档不声称UTF-8编码。真实语法错误和跳过的超限文件仍影响完整性，单文件超限单独报告路径/实际字节数/上限。索引与文件facts使用v3缓存格式自动重建，固定提交、PIN和parserRevision不变。
+- 回归先复现错误分类、inspect拒绝和加载失败，再确认修复。build/vet及Lua5.1必需环境下addoncheck、codebase/...、command整包通过；覆盖告警位置、query/inspect显示及原字节归档、AST统计、同提交diff、非法token和超限。提交前完整检查和发行状态以上方3.2.5交付为准。
+- 开发CLI在原PIN `PIN-4156b40776bf2bb2caa2c8517ea26b93b61a1c211241607c30db82297cf727f9` 完成precise/exploratory×api/lua×issecretvalue/SecretReturns八组查询，以及异常正文query和397–403行inspect；全部ok=true、exit0。4481文档/4481 AST、0跳过、0诊断、1编码告警，coverage.complete=true；limit/关系预览的真实截断仍保留。异常行显示一致，query/inspect SHA-256相同；inspect保留18128原字节。原命令capture为`CAP-60d8d999097090f67de1a26f01d03cdcc093c2637fac9b9ef432a381a2813015`，inspect为`CAP-c360177a7682bb2bb4e68e07f6895ce6cc5fb901bcf2ba935dd34ab805d7d547`。
+- 实现与验证完成，纳入3.2.5；提交、发布与本机安装状态以上方交付为准。原PIN、镜像和查询captures保留，没有游戏操作；除下述临时文件清理外，无未完成的本轮实现项。
+- 清理受阻：工具自动策略拒绝删除`.tmp/source-forever-encoding`，缩小为明确列出的11个文件、非递归删除仍返回`blocked by policy`，未执行删除。临时开发CLI、字节检查脚本及9份查询输出暂留该忽略目录；可复用回归已放入internal测试。后续仅需清除此目录，不触碰原PIN、镜像、captures或其他项目。
+
 ## 当前交付：3.2.4 发行
 
 - 用户明确授权提交到main、版号加一、发布npm并更新本机插件。本次为3.2.4，沿用latest；实现提交`29bdbdaff5`已直接推送main，`v3.2.4`固定同一提交，不另建分支或PR。

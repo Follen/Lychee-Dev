@@ -14,13 +14,13 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
 
-const indexSchema = "lycheedev.source-map.v2"
+const indexSchema = "lycheedev.source-map.v3"
+const factSchema = "lycheedev.source-file-facts.v3"
 
 type IndexSummary struct {
 	Schema           string           `json:"schema"`
@@ -37,6 +37,8 @@ type IndexSummary struct {
 	Diagnostics      int              `json:"diagnostics"`
 	Complete         bool             `json:"complete"`
 	DiagnosticSample []FileDiagnostic `json:"diagnosticSample,omitempty"`
+	Warnings         int              `json:"warnings,omitempty"`
+	WarningSample    []FileWarning    `json:"warningSample,omitempty"`
 }
 
 type SourceCoverage struct {
@@ -44,17 +46,24 @@ type SourceCoverage struct {
 	SkippedDocuments  int              `json:"skippedDocuments"`
 	Diagnostics       int              `json:"diagnostics"`
 	DiagnosticSample  []FileDiagnostic `json:"diagnosticSample,omitempty"`
+	Warnings          int              `json:"warnings,omitempty"`
+	WarningSample     []FileWarning    `json:"warningSample,omitempty"`
 	Complete          bool             `json:"complete"`
 }
 
 func (s IndexSummary) Coverage() SourceCoverage {
-	return SourceCoverage{AnalyzedDocuments: s.Documents, SkippedDocuments: s.SkippedDocuments, Diagnostics: s.Diagnostics, DiagnosticSample: s.DiagnosticSample, Complete: s.Complete}
+	return SourceCoverage{AnalyzedDocuments: s.Documents, SkippedDocuments: s.SkippedDocuments, Diagnostics: s.Diagnostics, DiagnosticSample: s.DiagnosticSample, Warnings: s.Warnings, WarningSample: s.WarningSample, Complete: s.Complete}
 }
 
 type FileDiagnostic struct {
 	Path    string `json:"path"`
 	Line    int    `json:"line"`
 	Message string `json:"message"`
+}
+
+type FileWarning struct {
+	Path string `json:"path"`
+	EncodingWarning
 }
 
 type sourceRecord struct {
@@ -340,10 +349,16 @@ func (b *Browser) buildIndex(ctx context.Context, pin selection.SourcePin, files
 				summary.DiagnosticSample = append(summary.DiagnosticSample, d)
 			}
 		}
+		for _, warning := range facts.Warnings {
+			if len(summary.WarningSample) < 20 {
+				summary.WarningSample = append(summary.WarningSample, FileWarning{Path: file.path, EncodingWarning: warning})
+			}
+		}
 		summary.Documents++
 		summary.Declarations += len(facts.Declarations)
 		summary.Relationships += len(facts.Relationships)
 		summary.Diagnostics += len(facts.Diagnostics)
+		summary.Warnings += len(facts.Warnings)
 		return nil
 	}
 	if err := enumerate(visit); err != nil {
@@ -435,7 +450,7 @@ func (b *Browser) fileFacts(ctx context.Context, name string, data []byte, diges
 	if mode == ".lua" && strings.Contains(name, "/Blizzard_APIDocumentationGenerated/") {
 		mode += ":generated-api"
 	}
-	key := sha256.Sum256([]byte(ParserRevision + "\x00" + mode + "\x00" + digest))
+	key := sha256.Sum256([]byte(factSchema + "\x00" + ParserRevision + "\x00" + mode + "\x00" + digest))
 	file := filepath.Join(b.store.Root(), "source", "v1", "facts", "files", ParserRevision, hex.EncodeToString(key[:])+".json")
 	lease, err := vault.AcquireLease(ctx, filepath.Join(b.store.Root(), "locks"), "source:v1:fact:"+hex.EncodeToString(key[:]))
 	if err != nil {
@@ -447,7 +462,7 @@ func (b *Browser) fileFacts(ctx context.Context, name string, data []byte, diges
 		closeErr := f.Close()
 		if readErr == nil && closeErr == nil && len(raw) <= maxFactCacheBytes {
 			var envelope factEnvelope
-			if json.Unmarshal(raw, &envelope) == nil && envelope.Schema == "lycheedev.source-file-facts.v2" && envelope.Parser == ParserRevision && envelope.Mode == mode && envelope.InputSHA256 == digest {
+			if json.Unmarshal(raw, &envelope) == nil && envelope.Schema == factSchema && envelope.Parser == ParserRevision && envelope.Mode == mode && envelope.InputSHA256 == digest {
 				payload, _ := json.Marshal(envelope.Facts)
 				sum := sha256.Sum256(payload)
 				if envelope.FactsSHA256 == hex.EncodeToString(sum[:]) {
@@ -465,7 +480,7 @@ func (b *Browser) fileFacts(ctx context.Context, name string, data []byte, diges
 		return facts, err
 	}
 	sum := sha256.Sum256(payload)
-	raw, err := json.Marshal(factEnvelope{Schema: "lycheedev.source-file-facts.v2", Parser: ParserRevision, Mode: mode, InputSHA256: digest, FactsSHA256: hex.EncodeToString(sum[:]), Facts: facts})
+	raw, err := json.Marshal(factEnvelope{Schema: factSchema, Parser: ParserRevision, Mode: mode, InputSHA256: digest, FactsSHA256: hex.EncodeToString(sum[:]), Facts: facts})
 	if err != nil {
 		return facts, err
 	}
@@ -703,7 +718,7 @@ func (c *snapshotCache) document(ctx context.Context, name string) ([]byte, stri
 	}
 	sum := sha256.Sum256(data)
 	digest := hex.EncodeToString(sum[:])
-	if int64(len(data)) != found.Bytes || digest != found.SHA256 || !utf8.Valid(data) {
+	if int64(len(data)) != found.Bytes || digest != found.SHA256 {
 		return nil, "", errors.New("codebase.source_content_mismatch")
 	}
 	if len(data) <= 64<<20 {

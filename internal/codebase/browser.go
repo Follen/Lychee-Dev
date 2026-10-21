@@ -16,6 +16,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/follenfang/lycheedev/internal/addoncheck"
 	"github.com/follenfang/lycheedev/internal/selection"
 	"github.com/follenfang/lycheedev/internal/vault"
 )
@@ -42,11 +43,13 @@ type SourceExcerpt struct {
 	TotalLines int           `json:"totalLines"`
 	Text       string        `json:"text"`
 	Blob       vault.BlobRef `json:"blob"`
+	Warnings   []FileWarning `json:"warnings,omitempty"`
 }
 
 // ReadSpan reads exactly the pinned commit. It never fetches, resolves a moving
 // branch, follows a symlink, or runs textconv/filter drivers. The original full
-// file is stored once; excerpts retain original CRLF and final-newline bytes.
+// file is stored once; display excerpts retain CRLF and final newlines, with
+// invalid UTF-8 displayed as U+FFFD and reported separately as a warning.
 func (b *Browser) ReadSpan(ctx context.Context, pin selection.SourcePin, query SpanQuery) (SourceExcerpt, error) {
 	var result SourceExcerpt
 	repo, err := LookupRepository(pin.Repository)
@@ -91,7 +94,7 @@ func (b *Browser) ReadSpan(ctx context.Context, pin selection.SourcePin, query S
 	if err != nil {
 		return result, err
 	}
-	if int64(len(data)) != size || !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
+	if int64(len(data)) != size || bytes.IndexByte(data, 0) >= 0 {
 		return result, errors.New("codebase.source_encoding_or_size")
 	}
 	// Git's object identity is SHA-1 for these repositories. Check its framed
@@ -123,7 +126,11 @@ func (b *Browser) ReadSpan(ctx context.Context, pin selection.SourcePin, query S
 	if err != nil {
 		return result, err
 	}
-	return SourceExcerpt{Repository: repo.Key, Commit: pin.ExactCommit, Path: query.Path, FirstLine: query.FirstLine, LastLine: last, TotalLines: len(starts), Text: string(data[starts[query.FirstLine-1]:end]), Blob: blob}, nil
+	result = SourceExcerpt{Repository: repo.Key, Commit: pin.ExactCommit, Path: query.Path, FirstLine: query.FirstLine, LastLine: last, TotalLines: len(starts), Text: displaySourceText(data[starts[query.FirstLine-1]:end]), Blob: blob}
+	for _, warning := range addoncheck.EncodingWarnings(data) {
+		result.Warnings = append(result.Warnings, FileWarning{Path: query.Path, EncodingWarning: warning})
+	}
+	return result, nil
 }
 
 func (b *Browser) mirror(key string) string {
