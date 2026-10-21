@@ -1,6 +1,6 @@
 # Lychee Dev Toolkit 设计
 
-本文描述 3.2.3 开发基线的当前实现。发行版本以 [release/version.json](release/version.json) 为准；验证范围见 [todo.md](todo.md)。
+本文描述 3.2.4 开发基线的当前实现。发行版本以 [release/version.json](release/version.json) 为准；验证范围见 [todo.md](todo.md)。
 
 ## 组成与职责
 
@@ -93,6 +93,8 @@ Forever 扫描主模块 `.text` 的可读区间，保留短读前缀，对剩余
 未启用的业务功能不创建 frame、事件、hook、timer 或 OnUpdate。最小启动核拥有正式绑定和独立启动诊断，注册完成后不保留空闲采样；bridge 启用后才运行 INPUT 采样与编辑框透传。
 
 INPUT 采样框架独立于 UIParent，使挂机展示隐藏主 UI 时仍可更新状态。登录、加载、战斗以及 protected、forbidden、密码、secure text、secret 值边界仍须检查。
+
+编辑框透传在修改键盘传播设置前检查战斗状态，战斗中保留原按键处理且不接管新焦点。战斗中停用立即撤销 INPUT 和采样；若旧编辑框尚未恢复，仅保留既有框架的脱战清理事件及原处理函数委托，恢复后全部撤销，不另建轮询。
 
 共享样式位于 `addon/UI/Theme.lua`，字体使用客户端字体；工作台不改写 Blizzard 对象来实现自身样式。中英文 locale 同步维护。
 

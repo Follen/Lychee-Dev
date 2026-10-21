@@ -13,10 +13,14 @@ local function focus()
 end
 local function detach()
     if attached and attached:GetScript("OnKeyDown") == wrapper then
+        -- Keep ownership until restoration is legal; INPUT handles the
+        -- combat-end cleanup if the bridge is stopped in the meantime.
+        if InCombatLockdown() then return false end
         attached:SetScript("OnKeyDown", original)
         attached:SetPropagateKeyboardInput(propagation)
     end
     attached, original, wrapper, propagation = nil, nil, nil, nil
+    return true
 end
 local function eligible(editBox)
     if not editBox or editBox:IsForbidden() then return false end
@@ -28,7 +32,7 @@ local function eligible(editBox)
     return true
 end
 local function refresh()
-    if not enabled then return false end
+    if not enabled or InCombatLockdown() then return false end
     local editBox = focus()
     if editBox == attached and attached and attached:GetScript("OnKeyDown") == wrapper then return true end
     detach()
@@ -37,8 +41,12 @@ local function refresh()
     local propagate = editBox:GetPropagateKeyboardInput()
     if restricted(prior) or restricted(propagate) then return false end
     local function onKeyDown(self, key, ...)
-        self:SetPropagateKeyboardInput(propagate)
+        if enabled and not InCombatLockdown() then
+            self:SetPropagateKeyboardInput(propagate)
+        end
         if prior then prior(self, key, ...) end
+        -- The original handler may change state, so check again before
+        -- forwarding our shortcut.
         if not enabled or InCombatLockdown() or restricted(key) then return end
         local chord = ns.Compat.ReceiverChord(key)
         if not chord then return end
@@ -53,7 +61,7 @@ local function refresh()
 end
 ns.FocusBindings = {
     Refresh = refresh,
-    Ready = function() return enabled and attached ~= nil and focus() == attached and attached:GetScript("OnKeyDown") == wrapper end,
+    Ready = function() return enabled and not InCombatLockdown() and attached ~= nil and focus() == attached and attached:GetScript("OnKeyDown") == wrapper end,
     Start = function()
         if enabled then return end
         enabled = true
@@ -64,8 +72,10 @@ ns.FocusBindings = {
         refresh()
     end,
     Stop = function()
-        enabled = false
-        ns.Compat.StopObservingChatFocus(callbackOwner)
-        detach()
+        if enabled then
+            enabled = false
+            ns.Compat.StopObservingChatFocus(callbackOwner)
+        end
+        return detach()
     end,
 }

@@ -49,7 +49,11 @@ CLI 不硬编码发送默认值。缺少任一有效键时返回 `input_binding_
 普通 EditBox 可能先截获全局快捷键。bridge 启用时，FocusBindings 保留当前编辑框
 原 OnKeyDown，并仅对两个实际绑定的组合键设置 `SetPropagateKeyboardInput(true)`。
 其他键保持原处理和传播行为；不读取、改写或发送文字，不移动光标，不清除焦点。
-切换焦点、停用 bridge 时恢复原处理函数和传播设置。
+切换焦点、停用 bridge 时恢复原处理函数和传播设置。战斗中不调用传播设置 API，
+不接管新编辑框，旧回调只调用原按键处理函数，INPUT 不授权透传。
+若战斗中停用时仍有接管的编辑框，立即撤销 INPUT、采样和焦点监听；仅用既有
+INPUT 框架保留 `PLAYER_REGEN_ENABLED` 清理事件，并保留旧回调以委托原处理函数。
+脱战后恢复原处理函数及传播设置，随即移除清理事件；不新增 frame、timer 或轮询。
 
 聊天框通过暴雪的焦点事件即时接通，其他编辑框复用已有 INPUT 采样；不新增轮询器。
 密码、secure text、protected、forbidden 或无法安全观察的编辑框不接管。
