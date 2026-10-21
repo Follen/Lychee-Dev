@@ -27,7 +27,7 @@ try {
   // Keeping the Job across invocations also permits later session-reuse checks.
   handlesReaped = false;
   const run = ownedSpawnSync(process.execPath, [runner, artifact.sourceBinary, join(job.directory, 'home'), job.evidence], {
-    cwd: root, env: {...process.env}, evidence: job.evidence, timeout: 900000, memoryObservation: true,
+    cwd: root, env: {...process.env}, evidence: job.evidence, timeout: 600000, memoryObservation: true,
   });
   handlesReaped = run.handlesReaped === true; logs.push(...run.logs);
   const observationPath = join(job.evidence, 'report.json');

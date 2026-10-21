@@ -9,7 +9,7 @@ import {sha256, defaults, beginScratch} from '../../tools/rust-disk.mjs';
 import {splitIndexEvidence} from '../../tools/rust-source-pack-evidence.mjs';
 import {hashFile, sourceDigest, runCargo} from '../../tools/rust-build.mjs';
 import {CASES, BASE_COMMIT, FRESH_ALLOWANCE, assertDiskPolicy, captureComparedGo, candidateIdentity, runController, verifyObservedReport} from './source-pack-scenarios.mjs';
-import {POSTCARD_LAYOUT, POSTCARD_INDEX_LAYOUT, LIMITS, EXPORT_BUILD_ARGS, TOOLCHAIN_OWNER, postcardEnvironmentSHA, postcardCompilerEnvironment} from './read-fact-delta-postcard.mjs';
+import {POSTCARD_LAYOUT, POSTCARD_INDEX_LAYOUT, POSTCARD_PREPARATION_POLICY, LIMITS, EXPORT_BUILD_ARGS, TOOLCHAIN_OWNER, postcardEnvironmentSHA, postcardCompilerEnvironment} from './read-fact-delta-postcard.mjs';
 import {fixture as binaryFixture, put, putJSON, compilerPolicy, compilerText} from './read-fact-delta-postcard.fixtures.mjs';
 import {FRESH_OWNER_RECEIPT_BYTES, readFreshPostcardReceipt, freshPostcardReceiptSHA256, parsePostcardFreshArguments, validateFreshPostcardOwner, validatePostcardFreshRequest, prepareFreshPostcardExporter, postcardComparisonFootprint, comparePostcardScenario, verifyFreshPostcardFacts, verifyFreshPostcardReport, runPostcardFreshController, freshPostcardIdentity, FRESH_POSTCARD_FILES} from './source-pack-scenarios-postcard-fresh.mjs';
 
@@ -93,19 +93,20 @@ function compilerBuildBoundary(t, fault = {}) {
       return {status: 0, handlesReaped: true, proof: {...proof(10), runId: `${i ? 'bbbbbbbb' : 'aaaaaaaa'}-bbbb-4ccc-8ddd-eeeeeeeeeeee`, binary, ...(fault.unreapedAt === i ? {treeReaped: false} : {}), ...(fault.flagsAt === i ? fault.flags : {})}, stdout: Buffer.from(stdout), stderr: Buffer.alloc(0)};
     },
     build(root, args, options) {
-      builds++; events.push('cargo'); assert.equal(root, directory); assert.deepEqual(args, EXPORT_BUILD_ARGS); assert.equal(options.owner, 'source-postcard-exporter-build'); assert.equal(options.oneShot, true); assert.deepEqual(options.environment, environment);
+      builds++; events.push('cargo'); assert.equal(root, directory); assert.deepEqual(args, EXPORT_BUILD_ARGS); assert.equal(options.owner, 'source-postcard-exporter-build'); assert.equal(options.oneShot, false); assert.deepEqual(options.environment, environment);
       if (fault.buildThrows) throw new Error('unknown build retirement');
       assert.deepEqual(options.limits, assertDiskPolicy(directory, {}, services.allowance));
       putJSON(join(directory, 'build-receipt.json'), {admission: {limits: fault.buildLimits ? defaults : options.limits}});
-      const target = join(directory, 'target'), effective = {...environment, CARGO_TARGET_DIR: target, CARGO_INCREMENTAL: '0'};
+      const target = join(directory, 'target'), effective = {...environment, CARGO_TARGET_DIR: target};
       return options.onSuccess({target, inputHashes: {sourceTree: request.candidate.sourceTreeSHA256}, environmentSHA256: fault.environment ? '0'.repeat(64) : postcardEnvironmentSHA(effective), buildEvidence: join(directory, 'build-receipt.json')});
     },
-    seal(root, sourceRoot, directory, invocation, toolchain) {
+    seal(root, sourceRoot, directory, invocation, toolchain, options) {
+      assert.deepEqual(options, {preparationPolicy: POSTCARD_PREPARATION_POLICY});
       artifacts++; events.push('artifact'); assert.equal(owners[0].name, TOOLCHAIN_OWNER); assert(owners[0].cleaned); assert.equal(hashFile(toolchain.record), toolchain.recordSHA256); assert.equal(hashFile(toolchain.receipt), toolchain.receiptSHA256);
       const record = JSON.parse(fs.readFileSync(toolchain.record)); assert.equal(record.state, 'verified'); assert.equal(record.observations.length, 2);
-      const artifact = {binarySHA256: 'e'.repeat(64), inputHashes: invocation.inputHashes, toolchain}; fs.mkdirSync(directory); putJSON(join(directory, 'artifact.json'), artifact); return artifact;
+      const artifact = {binarySHA256: 'e'.repeat(64), inputHashes: invocation.inputHashes, toolchain, preparationPolicy: options.preparationPolicy}; fs.mkdirSync(directory); putJSON(join(directory, 'artifact.json'), artifact); return artifact;
     },
-    verify(_root, identity, candidate) { verifies++; assert.equal(identity.sourceTreeSHA256, candidate.sourceTreeSHA256); return {artifactSHA256: identity.artifactSHA256}; },
+    verify(_root, identity, candidate, options) { verifies++; assert.equal(identity.sourceTreeSHA256, candidate.sourceTreeSHA256); assert.deepEqual(options, {requireCurrentPolicy: true, limits: assertDiskPolicy(directory, {}, services.allowance)}); return {artifactSHA256: identity.artifactSHA256}; },
   };
   return {request, services, owners, events, run: () => prepareFreshPostcardExporter(request, services), counts: () => ({builds, observations, verifies, artifacts})};
 }
@@ -114,6 +115,13 @@ test('same-source exporter observes the fixed compiler before and after its one 
   assert(f.events.indexOf('compiler:0') < f.events.indexOf('cargo')); assert(f.events.indexOf('cargo') < f.events.indexOf('compiler:1')); assert(f.events.indexOf('compiler:1') < f.events.indexOf('artifact'));
   assert.equal(prepared.request.exporter.mode, 'existing'); assert.equal(prepared.preparation.built, true);
   prepareFreshPostcardExporter(prepared.request, {build() { assert.fail('existing artifact must not compile'); }, execute() { assert.fail('existing artifact uses sealed observations'); }, verify() { return {}; }});
+});
+
+test('default exporter preparation keeps inherited incremental setting and the default disk policy', t => {
+  const f = compilerBuildBoundary(t); f.services.environment.CARGO_INCREMENTAL = '1';
+  const prepared = f.run();
+  assert.equal(prepared.preparation.built, true);
+  assert.deepEqual(f.owners[0].options.limits, defaults);
 });
 test('compiler version, identity, environment, spawn and retirement failures cannot seal an exporter or clean failed owners', t => {
   for (const fault of [{releaseAt: 0}, {changedAt: 1}, {changedBinaryAt: 1}, {unreapedAt: 0}, {unreapedAt: 1}, {throwAt: 0}, {environment: true}, {buildThrows: true}, {flagsAt: 1, flags: {deadlineHit: true}}, {flagsAt: 1, flags: {cancelled: true}}, {flagsAt: 1, flags: {outputLimit: true}}]) {

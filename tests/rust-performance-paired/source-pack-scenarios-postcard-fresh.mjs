@@ -15,6 +15,7 @@ import {openGoCustody} from './source-pack-custody.mjs';
 import {CASES, FRESH_ALLOWANCE, candidateIdentity, captureComparedGo, indexEvidence, evidenceFiles, assertDiskPolicy, validateRequest, verifyCandidateRecord, runController, verifyObservedReport} from './source-pack-scenarios.mjs';
 import {comparePostcardFacts, POSTCARD_RUNNER_FILES} from './source-pack-scenarios-postcard.mjs';
 import {POSTCARD_OWNER_RECEIPT_BYTES, POSTCARD_LAYOUT, POSTCARD_INDEX_LAYOUT, verifyPostcardIndexCustody, assertPostcardOutputBudget, INDEX_EXPORT_ARGS, EXPORT_ARGS, LIMITS, EXPORT_BUILD_ARGS, TOOLCHAIN_OWNER, postcardCompilerEnvironment, postcardEnvironmentSHA, postcardToolchainPolicy, postcardCompilerObservation, readPostcardBytes, sealPostcardExporter, verifyPostcardExporter, verifyPostcardCustody} from './read-fact-delta-postcard.mjs';
+import {POSTCARD_PREPARATION_POLICY} from './read-fact-delta-postcard.mjs';
 
 const exact = (v, keys, label = 'exact fresh v13 fields required') => assert.deepEqual(Object.keys(v ?? {}).sort(), [...keys].sort(), label);
 const json = (file, maximum = 16 << 20) => JSON.parse(readPostcardBytes(file, maximum));
@@ -58,7 +59,7 @@ export function validatePostcardFreshRequest(value) {
 // existing same-source artifact. Only runCargo owns compilation and targets.
 export function prepareFreshPostcardExporter(request, overrides = {}) {
   const {verify = verifyPostcardExporter, allowance, environment = process.env} = overrides;
-  freshPostcardDiskPolicy(request.ownerRoot, environment, allowance);
+  const limits = freshPostcardDiskPolicy(request.ownerRoot, environment, allowance);
   const started = performance.now(); let identity, built = false;
   if (request.exporter.mode === 'build') {
     const directory = request.exporter.artifactDirectory;
@@ -66,7 +67,7 @@ export function prepareFreshPostcardExporter(request, overrides = {}) {
     const path = join(directory, 'artifact.json');
     identity = {artifact: path, artifactSHA256: hashFile(path, 65536), binarySHA256: artifact.binarySHA256, sourceTreeSHA256: artifact.inputHashes.sourceTree}; built = true;
   } else identity = expectedExporter(request.exporter);
-  const verified = verify(request.ownerRoot, identity, request.candidate);
+  const verified = verify(request.ownerRoot, identity, request.candidate, {requireCurrentPolicy: true, limits});
   return {request: {...request, exporter: {mode: 'existing', ...identity}}, preparation: {built, wrapperWallMillis: performance.now() - started,
     scope: 'Exporter build/authentication before product measurement; separate from every index elapsed', identity: verified}};
 }
@@ -91,14 +92,14 @@ export function buildPostcardExporter(request, {build = runCargo, execute = owne
   try {
     const before = observe('before-build');
     handlesReaped = false; // Unknown Cargo throws must not imply tree retirement.
-    return build(root, [...EXPORT_BUILD_ARGS], {sourceRoot: candidate.sourceRoot, owner: 'source-postcard-exporter-build', oneShot: true, environment: {...env}, limits,
+    return build(root, [...EXPORT_BUILD_ARGS], {sourceRoot: candidate.sourceRoot, owner: 'source-postcard-exporter-build', oneShot: false, environment: {...env}, limits,
       onSuccess(invocation) {
         handlesReaped = true; // runCargo calls this only after its owned process completes.
         assert.deepEqual(readFreshPostcardReceipt(root, invocation.buildEvidence).admission.limits, limits, 'exporter Cargo admission differs');
         assert.deepEqual(readFreshPostcardReceipt(root, job.receipt).admission.limits, limits, 'exporter compiler admission differs');
         // These are runCargo's existing additions, not compiler-selection
         // overrides. Bind its effective environment to this same snapshot.
-        const cargoEnv = {...env, CARGO_TARGET_DIR: invocation.target, CARGO_INCREMENTAL: '0'};
+        const cargoEnv = {...env, CARGO_TARGET_DIR: invocation.target};
         if (invocation.inputHashes.emmyPatch) cargoEnv.LYCHEEDEV_EMMY_CONTEXT_PATCH_SHA256 = invocation.inputHashes.emmyPatch;
         assert.equal(postcardEnvironmentSHA(cargoEnv), invocation.environmentSHA256, 'exporter build environment differs from compiler observations');
         assert.equal(invocation.inputHashes.sourceTree, candidate.sourceTreeSHA256);
@@ -108,7 +109,7 @@ export function buildPostcardExporter(request, {build = runCargo, execute = owne
         record.state = 'verified'; record.handlesReaped = true; save(path, record);
         job.seal({state: 'succeeded', handlesReaped: true, logs: evidenceFiles(job.evidence)}); job.cleanup(); terminal = true;
         const toolchain = {record: path, recordSHA256: hashFile(path, 65536), receipt: job.receipt, receiptSHA256: freshPostcardReceiptSHA256(root, job.receipt)};
-        return seal(root, candidate.sourceRoot, request.exporter.artifactDirectory, invocation, toolchain);
+        return seal(root, candidate.sourceRoot, request.exporter.artifactDirectory, invocation, toolchain, {preparationPolicy: POSTCARD_PREPARATION_POLICY});
       }});
   } catch (error) {
     if (error.buildEvidence) { try { if (readFreshPostcardReceipt(root, error.buildEvidence).handlesReaped !== true) handlesReaped = false; } catch { handlesReaped = false; } }
@@ -251,7 +252,7 @@ export async function runPostcardFreshController(config, overrides = {}) {
   assert([POSTCARD_LAYOUT, POSTCARD_INDEX_LAYOUT].includes(config.layout)); assert.equal(config.layout, config.request.layout); assert.equal(config.request.exporter.mode, 'existing');
   const exporter = expectedExporter(config.request.exporter);
   const services = {runnerIdentity: freshPostcardIdentity,
-    verifyAdditionalIdentity: request => verifyPostcardExporter(request.ownerRoot, exporter, request.candidate),
+    verifyAdditionalIdentity: request => verifyPostcardExporter(request.ownerRoot, exporter, request.candidate, {requireCurrentPolicy: true, limits: freshPostcardDiskPolicy(request.ownerRoot, process.env, config.allowance)}),
     compareFacts: (...args) => comparePostcardScenario(...args, exporter),
     verifyAdditionalEvidence: report => verifyFreshPostcardReport(report, config.request, config.allowance), ...overrides};
   return runController(config, services);
@@ -300,7 +301,7 @@ export async function runPostcardFreshOwned(configuration, conditionsPath, {scra
     validateFreshPostcardOwner(config);
     const configPath = join(job.evidence, 'fresh-configuration.json'); save(configPath, config);
     handlesReaped = false;
-    const run = ownedSpawnSync(process.execPath, [join(runnerRoot, 'tests/rust-performance-paired/source-pack-scenarios-postcard-fresh.mjs'), '--inner', configPath], {cwd: root, env: environment, evidence: job.evidence, timeout: 3600000});
+    const run = ownedSpawnSync(process.execPath, [join(runnerRoot, 'tests/rust-performance-paired/source-pack-scenarios-postcard-fresh.mjs'), '--inner', configPath], {cwd: root, env: environment, evidence: job.evidence, timeout: 600000});
     handlesReaped = processReaped(run) === true; report.process = {exit: run.status, error: run.error?.message ?? null, handlesReaped, proof: run.proof};
     const observedPath = join(job.evidence, 'report.json'), observed = fs.existsSync(observedPath) ? json(observedPath) : null;
     report.observation = observedPath; report.measuredIndexInvocations = observed?.invocationAttempts?.length ?? 0;
@@ -310,7 +311,7 @@ export async function runPostcardFreshOwned(configuration, conditionsPath, {scra
     }
     assert(processPassed(run), 'fresh Postcard controller incomplete');
     verifyObservedReport(run, observed, request, inputs, undefined, undefined, undefined, {layout: request.layout});
-    verifyFreshPostcardReport(observed, request, allowance); verifyCandidateRecord(request.candidate); verifyPostcardExporter(root, expectedExporter(request.exporter), request.candidate);
+    verifyFreshPostcardReport(observed, request, allowance); verifyCandidateRecord(request.candidate); verifyPostcardExporter(root, expectedExporter(request.exporter), request.candidate, {requireCurrentPolicy: true, limits});
     assert.deepEqual(freshPostcardIdentity(runnerRoot), inputs); assert.deepEqual(observed.diskPolicy, limits);
     state = 'succeeded'; report.state = 'source_postcard_fresh_scenarios_observed';
   } catch (error) {

@@ -17,16 +17,18 @@ Rust guide. See `skill-identity.mjs` and `baselines/` for explicit identity lane
   `npmSmoke: passed` and `installedRoot` from the authenticated candidate
   report produced by `tools/rust-package-smoke.mjs`. It verifies the existing
   installation equals the candidate package, EXE and independently fixed
-  25-file Skill, then runs the same three full-Retail Source tasks directly
-  through `installedRoot/bin/lycheedev.mjs`. It does not copy, install, download
-  or build a package. The Source workflows retain their existing fixed-source
+  25-file Skill. New package smoke runs install into an isolated npm global
+  prefix and execute the actual Skill launcher using npm's generated prefix
+  marker; the user's global prefix is unchanged. This mode runs the same
+  three full-Retail Source tasks through that installed Skill. It does not
+  copy, install, download or build a package. The workflows retain fixed-source
   sync and all original window, native-callsite and semantic assertions.
   Reports identify the installation path, candidate-report digest and
-  `entryKind: installed-npm-package-launcher`; the Skill prefix discovery path
-  is explicitly `not_run` in this mode. Its static Skill identity check and the
-  separate staged discovery result do not become one complete Skill launch
-  acceptance. Both modes retain the six no-home discovery checks. Old reports
-  remain historical and are not relabeled as installed runs.
+  `entryKind: installed-skill-launcher`. Historical local npm installation
+  reports remain usable through the package launcher, labeled
+  `installed-npm-package-launcher` and `skillPrefixDiscovery: not_run`; they
+  cannot claim the new Skill discovery path. Both modes retain the six
+  no-home discovery checks. Old reports are never relabeled.
 - `tools/rust-skill-usage.mjs --data ...` is the actual supervised typed Agent
   Data workflow. See [the current Data protocol](data-README.md) for its explicit
   three-target fixture preparation, production importer, exact values/CAP and

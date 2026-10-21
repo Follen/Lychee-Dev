@@ -60,9 +60,9 @@ try {
     assert.equal(observation.executionMode, installed ? 'installed' : 'staged');
     if (installed) {
       assert.deepEqual(observation.installation, installation);
-      assert.equal(observation.launch?.entryKind, 'installed-npm-package-launcher');
-      assert.equal(observation.launch?.packageLauncher, installation.launcher);
-      assert.equal(observation.launch?.skillPrefixDiscovery, 'not_run');
+      assert.equal(observation.launch?.entryKind, installation.entryKind);
+      assert.equal(observation.launch?.packageLauncher, installation.packageLauncher);
+      assert.equal(observation.launch?.skillPrefixDiscovery, installation.skillPrefixDiscovery);
       assert.equal(observation.installedPackageStable, true);
     }
     assertDiscoveryNoHome(observation.discovery,['version','describe','help','query-help','query-schema','query-search'],[join(job.directory,'研究 home'),join(job.directory,'user','.lycheedev')]);
@@ -71,7 +71,7 @@ try {
   save('owned-report.json', {schema: 'lycheedev.skill-usage-owned.v1', passed, goContract: workflow.goContract, goVersion: workflow.goVersion, completeSkillAcceptance: false, pendingTasks: pendingIncrementTasks(workflow), observationContractError, binarySHA256: artifact.binarySHA256, artifactRecordSHA256: artifactSHA256,
     candidateReportSHA256: candidate.reportSHA256, packageSHA256: candidate.packageSHA256, executionMode: installed ? 'installed' : 'staged', installation, inputsStable: stable, testInputs,
     process: {exit: run.status, error: run.error?.message, handlesReaped, proof: run.proof}, observation: observationPath,
-    scope: `Reviewed candidate packaged Skill bytes, separate fixed Go323 historical fixtures and independent real CLI use for the three unchanged full-Retail Source tasks. Four cumulative Data/Live tasks remain not_run with fixture/authorization requirements; static Skill checks are not their runtime acceptance. ${installed ? 'Real npm installed package launcher; the authenticated 25-file Skill prefix discovery path is not exercised by this mode.' : 'Synthetic prefix layout is not npm install acceptance.'} Full source authenticity/corpus, lifecycle, full Go differential, performance and game acceptance remain separate.`});
+    scope: `Reviewed candidate packaged Skill bytes, separate fixed Go323 historical fixtures and independent real CLI use for the three unchanged full-Retail Source tasks. Four cumulative Data/Live tasks remain not_run with fixture/authorization requirements; static Skill checks are not their runtime acceptance. ${!installed ? 'Synthetic prefix layout is not npm install acceptance.' : installation.skillPrefixDiscovery === 'executed' ? 'Real npm global-prefix installation and fixed Skill discovery launch path.' : 'Historical local npm installation uses the package launcher; Skill prefix discovery is not exercised.'} Full source authenticity/corpus, lifecycle, full Go differential, performance and game acceptance remain separate.`});
   console.log(JSON.stringify({passed, goContract: workflow.goContract, completeSkillAcceptance: false, pendingTasks: pendingIncrementTasks(workflow), observationContractError,
     report: join(job.evidence, 'owned-report.json'), checks: observation?.checks?.map(({caseId, state, reason}) => ({caseId, state, reason}))}, null, 2));
   state = passed ? 'succeeded' : 'failed';

@@ -1,8 +1,9 @@
 // Isolated, unpublished candidate assembly and optional npm smoke. No publishing.
 import {mkdirSync, readdirSync, readFileSync, writeFileSync, copyFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
-import {join, resolve, dirname} from 'node:path';
+import {join, resolve, dirname, delimiter} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {homedir} from 'node:os';
 import {stageLuac} from './luac.mjs';
 import {stageLuaLS} from './luals.mjs';
 import {buildRust, verifyArtifact, sourceDigest} from './rust-build.mjs';
@@ -46,17 +47,31 @@ export function assertSourceSyntaxValidation(response, compilerSHA256) {
   if (!response.ok || !response.result?.staticValid || !response.result.syntaxCompilation?.passed || response.result.syntaxCompilation.compilerSHA256 !== compilerSHA256) throw new Error('candidate.source_syntax_validation_failed');
 }
 
+export function packageSmokeEnvironment(scratch, parent = process.env) {
+  const env = Object.fromEntries(Object.entries(parent).filter(([name]) => !/^(LYCHEEDEV_|NPM_CONFIG_)/i.test(name)
+    && !['HOME', 'USERPROFILE', 'CODEX_HOME', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP'].includes(name.toUpperCase())));
+  const user = join(scratch, 'user');
+  // Compiler dependencies stay in their existing offline toolchain caches;
+  // user/product/npm state belongs exclusively to this scratch owner.
+  return {...env, CARGO_HOME: parent.CARGO_HOME ?? join(homedir(), '.cargo'), RUSTUP_HOME: parent.RUSTUP_HOME ?? join(homedir(), '.rustup'),
+    HOME: user, USERPROFILE: user, CODEX_HOME: join(user, '.codex'),
+    APPDATA: join(user, 'AppData/Roaming'), LOCALAPPDATA: join(user, 'AppData/Local'),
+    TEMP: join(scratch, 'temp'), TMP: join(scratch, 'temp'), LYCHEEDEV_HOME: join(scratch, 'home'),
+    npm_config_cache: join(scratch, 'npm-cache'), npm_config_userconfig: join(user, '.npmrc'), npm_config_globalconfig: join(scratch, 'npm-globalrc')};
+}
+
 export async function packageSmoke(argv, root = process.cwd()) {
   const {outArg, luacArg, homeArg, pinArg, lualsArg, artifactPath, profile, assemblyOnly} = parsePackageOptions(argv);
   if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('candidate.windows_amd64_required');
   root = resolve(root);
   const out = contained(root, resolve(outArg)), luacRoot = resolve(luacArg);
   const job = beginScratch(root, 'rust-package-smoke', {command: [process.execPath, fileURLToPath(import.meta.url), ...argv]}), logs = [];
+  const isolatedEnvironment = packageSmokeEnvironment(job.directory);
   let state = 'failed', handlesReaped = true, commandSequence = 0;
-  function run(command, args, cwd = root) {
+  function run(command, args, cwd = root, environment = {}) {
     const index = commandSequence++, metadata = join(job.evidence, `command-${index}.json`), stdout = join(job.evidence, `stdout-${index}.bin`), stderr = join(job.evidence, `stderr-${index}.bin`);
     handlesReaped = false;
-    const result = ownedSpawnSync(command, args, {cwd, env: {...process.env, npm_config_cache: join(job.directory, 'npm-cache')}, evidence: job.evidence, timeout: 300000});
+    const result = ownedSpawnSync(command, args, {cwd, env: {...isolatedEnvironment, ...environment}, evidence: job.evidence, timeout: 300000});
     handlesReaped = result.handlesReaped === true; logs.push(...result.logs);
     writeJson(metadata, {command, args, cwd, exit: result.status, signal: result.signal, error: result.error?.message, handlesReaped});
     writeFileSync(stdout, result.stdout ?? Buffer.alloc(0)); writeFileSync(stderr, result.stderr ?? Buffer.alloc(0)); logs.push(metadata, stdout, stderr);
@@ -65,6 +80,8 @@ export async function packageSmoke(argv, root = process.cwd()) {
   }
   const npm = (args, cwd) => run(process.execPath, [process.env.npm_execpath || join(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js'), ...args], cwd);
   try {
+    for (const key of ['HOME', 'TEMP', 'APPDATA', 'LOCALAPPDATA']) mkdirSync(isolatedEnvironment[key], {recursive: true});
+    writeFileSync(isolatedEnvironment.npm_config_userconfig, ''); writeFileSync(isolatedEnvironment.npm_config_globalconfig, '');
     mkdirSync(out); const pkgRoot = join(out, 'package'); mkdirSync(pkgRoot);
     // Explicit sealed artifacts are reusable only against their exact current
     // build inputs. Never relabel a historical EXE with today's tree/luac pin.
@@ -123,9 +140,12 @@ export async function packageSmoke(argv, root = process.cwd()) {
     if (!assemblyOnly) {
       const packed = JSON.parse(npm(['pack', '--ignore-scripts', '--json', '--pack-destination', out], pkgRoot))[0];
       const installation = join(out, 'installed'); mkdirSync(installation);
-      npm(['install', '--prefix', installation, '--ignore-scripts', '--no-audit', '--no-fund', '--offline', join(out, packed.filename)], out);
+      // This isolated prefix has npm's real Windows global layout and shims;
+      // it never changes the user's configured global prefix.
+      npm(['install', '--global', '--prefix', installation, '--ignore-scripts', '--no-audit', '--no-fund', '--offline', join(out, packed.filename)], out);
       const installed = join(installation, 'node_modules/lycheedev');
-      const version = JSON.parse(run(process.execPath, [join(installed, 'bin/lycheedev.mjs'), 'version', '--format', 'json'], out));
+      const version = JSON.parse(run(process.execPath, [join(installed, 'payload/skill/scripts/lycheedev.mjs'), 'version', '--format', 'json'], out,
+        {PATH: `${installation}${delimiter}${process.env.PATH ?? process.env.Path ?? ''}`, LYCHEEDEV_BIN: ''}));
       assertInstalledNativeVersion(version, pkg.version);
       const payload = join(installed, 'payload/tool/luac'); run(join(payload, 'luac.exe'), ['-v'], out);
       writeFileSync(join(out, 'valid.lua'), 'local value = 1\nreturn value\n'); run(join(payload, 'luac.exe'), ['-p', join(out, 'valid.lua')], out);
@@ -137,7 +157,9 @@ export async function packageSmoke(argv, root = process.cwd()) {
         assertSourceSyntaxValidation(response, report.compilerSHA256);
         report.validation = {state: 'passed', compilerSHA256: response.result.syntaxCompilation.compilerSHA256, checkedLua: response.result.syntaxCompilation.checkedLua, captures: response.captures.map(c => c.id)};
       }
-      Object.assign(report, {state: 'partial_passed', npmSmoke: 'passed', ignoreScripts: true, offlineInstall: true, installedRoot: installed, runtimeDependencies: pkg.dependencies || {}, platform: version.result.platform, tgz: join(out, packed.filename), tgzSHA256: hash(readFileSync(join(out, packed.filename))), version});
+      Object.assign(report, {state: 'partial_passed', npmSmoke: 'passed', ignoreScripts: true, offlineInstall: true,
+        installationKind: 'isolated-global-prefix', installedPrefix: installation, installedRoot: installed, skillLauncherSmoke: 'passed',
+        runtimeDependencies: pkg.dependencies || {}, platform: version.result.platform, tgz: join(out, packed.filename), tgzSHA256: hash(readFileSync(join(out, packed.filename))), version});
     }
     // Staging and optional smoke must not change any compiled input or sealed EXE.
     assertArtifactSource(verifyArtifact(root, recordPath), sourceDigest(root), profile);

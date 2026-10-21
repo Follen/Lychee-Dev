@@ -15,6 +15,7 @@ import {splitIndexEvidence, verifyParts, INDEX_BYTES} from '../../tools/rust-sou
 
 export const POSTCARD_LAYOUT = 'v13-postcard';
 export const POSTCARD_INDEX_LAYOUT = 'v13-postcard-index18';
+export const POSTCARD_PREPARATION_POLICY = 'owned-600s-no-one-shot.v1';
 export const INDEX_EXPORT_TEST = 'index::persistence_wire::export_tests::export_binary_index_manifest';
 export const INDEX_EXPORT_ARGS = Object.freeze(['--exact', INDEX_EXPORT_TEST, '--ignored', '--nocapture']);
 export const POSTCARD_KEY = 'facts-layout-v13-postcard-1.1.3';
@@ -118,7 +119,8 @@ export function selectPostcardExecutable(stdout, target, sourceRoot) {
   return {row, executable};
 }
 // Use as runCargo's onSuccess callback; this function does not invoke Cargo.
-export function sealPostcardExporter(root, sourceRoot, directory, invocation, toolchain) {
+export function sealPostcardExporter(root, sourceRoot, directory, invocation, toolchain, {preparationPolicy} = {}) {
+  if (preparationPolicy !== undefined) assert.equal(preparationPolicy, POSTCARD_PREPARATION_POLICY);
   root = resolve(root); sourceRoot = resolve(sourceRoot); directory = contained(root, resolve(directory));
   assert.equal(sourceDigest(sourceRoot), invocation.inputHashes.sourceTree, 'exporter source changed');
   const {row, executable} = selectPostcardExecutable(invocation.stdout, invocation.target, sourceRoot);
@@ -126,14 +128,16 @@ export function sealPostcardExporter(root, sourceRoot, directory, invocation, to
   fs.mkdirSync(directory); const sourceBinary = join(directory, 'source-facts-exporter.exe'); fs.copyFileSync(executable, sourceBinary);
   assert.equal(hashFile(sourceBinary, 128 << 20), binarySHA256); assert.equal(hashFile(executable, 128 << 20), binarySHA256);
   const artifact = {schema: 'lycheedev.rust-build-artifact.v1', profile: 'source-lib-test', sourceRoot, sourceBinary, bytes, binarySHA256, sameInvocation: true,
-    command: ['cargo', ...EXPORT_BUILD_ARGS], inputHashes: invocation.inputHashes, environmentSHA256: invocation.environmentSHA256, channel: invocation.target, buildEvidence: invocation.buildEvidence, cargoArtifact: row, toolchain};
+    command: ['cargo', ...EXPORT_BUILD_ARGS], inputHashes: invocation.inputHashes, environmentSHA256: invocation.environmentSHA256, channel: invocation.target, buildEvidence: invocation.buildEvidence, cargoArtifact: row, toolchain,
+    ...(preparationPolicy === undefined ? {} : {preparationPolicy})};
   verifyPostcardToolchain(root, artifact);
   save(join(directory, 'artifact.json'), artifact); return artifact;
 }
-export function verifyPostcardExporter(root, expected, candidate) {
+export function verifyPostcardExporter(root, expected, candidate, {requireCurrentPolicy = false, limits} = {}) {
   exact(expected, ['artifact', 'artifactSHA256', 'binarySHA256', 'sourceTreeSHA256']); for (const key of ['artifactSHA256', 'binarySHA256', 'sourceTreeSHA256']) digest(expected[key]);
   assert.equal(hashFile(contained(root, expected.artifact), 65536), expected.artifactSHA256, 'exporter artifact SHA changed');
   const artifact = verifyArtifact(root, expected.artifact); assert.equal(artifact.profile, 'source-lib-test'); assert.equal(artifact.sameInvocation, true);
+  if (requireCurrentPolicy || artifact.preparationPolicy !== undefined) assert.equal(artifact.preparationPolicy, POSTCARD_PREPARATION_POLICY, 'current exporter preparation policy required; historical receipt is read-only evidence');
   verifyPostcardToolchain(root, artifact);
   assert.equal(artifact.binarySHA256, expected.binarySHA256, 'exporter binary SHA differs'); assert.equal(regular(artifact.sourceBinary, 128 << 20).size, artifact.bytes);
   assert.equal(artifact.sourceRoot, candidate.sourceRoot, 'exporter source root differs');
@@ -143,10 +147,21 @@ export function verifyPostcardExporter(root, expected, candidate) {
   assert.deepEqual(artifact.command, ['cargo', ...EXPORT_BUILD_ARGS]);
   const evidence = verifyOwnerEvidence(root, artifact.buildEvidence, 'source-postcard-exporter-build', {receiptMaximumBytes: POSTCARD_OWNER_RECEIPT_BYTES}), command = evidence.json('command.json');
   assert.deepEqual(evidence.receipt.command, artifact.command); assert.equal(command.command, 'cargo'); assert.deepEqual(command.args, EXPORT_BUILD_ARGS);
-  assert.equal(command.cwd, candidate.sourceRoot); assert.equal(command.exit, 0); assert(!command.error && !command.signal); assert.equal(command.oneShot, true);
+  assert.equal(command.cwd, candidate.sourceRoot); assert.equal(command.exit, 0); assert(!command.error && !command.signal);
+  // Unmarked artifacts retain their original historical receipt contract.
+  // Current fresh entry points require the new identity above, so reading old
+  // evidence cannot silently qualify it as a current preparation.
+  assert.equal(command.oneShot, artifact.preparationPolicy === undefined);
+  if (artifact.preparationPolicy !== undefined) assert.equal(command.timeoutMs, 600000, 'current exporter Cargo deadline');
+  if (limits !== undefined) {
+    assert.deepEqual(evidence.receipt.admission?.limits, limits, 'exporter Cargo admission differs');
+    const compilerReceipt = json(readPostcardBytes(artifact.toolchain.receipt, POSTCARD_OWNER_RECEIPT_BYTES));
+    assert.deepEqual(compilerReceipt.admission?.limits, limits, 'exporter compiler admission differs');
+  }
   assert.deepEqual(command.inputHashes, artifact.inputHashes); assert.deepEqual(evidence.receipt.inputHashes, artifact.inputHashes); assert.equal(command.environmentSHA256, artifact.environmentSHA256);
   assert.equal(evidence.processes.length, 1); const {request} = evidence.processes[0];
   assert.equal(request.command, 'cargo'); assert.deepEqual(request.args, EXPORT_BUILD_ARGS); assert.equal(request.cwd, candidate.sourceRoot); assert.equal(request.cargoBuild, true);
+  if (artifact.preparationPolicy !== undefined) assert.equal(request.timeoutMs, 600000, 'current exporter owned deadline');
   const selected = selectPostcardExecutable(evidence.logs.get(join(dirname(artifact.buildEvidence), 'stdout.bin')).toString('utf8'), artifact.channel, candidate.sourceRoot);
   assert.deepEqual(selected.row, artifact.cargoArtifact, 'exporter Cargo artifact differs');
   return {artifact, artifactSHA256: expected.artifactSHA256, buildReceiptSHA256: evidence.receiptSHA256};

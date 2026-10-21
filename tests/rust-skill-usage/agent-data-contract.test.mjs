@@ -41,8 +41,9 @@ test('fixed WDC3 layout oracle binds every metadata region and wide partition ID
 });
 test('wrapper-only PowerShell variables do not alter actual child environment identity',async()=>{
  const {agentEnvironment,environmentHash}=await import('./agent-environment.mjs');
- const config={prefix:'prefix',scratch:'scratch'},base={PATH:'tools',SystemRoot:'Windows',KEEP:'value'};
+ const config={prefix:'prefix',scratch:'scratch'},base={PATH:'tools',SystemRoot:'Windows',KEEP:'value',HOME:'real-user',USERPROFILE:'real-user',CODEX_HOME:'real-agent',APPDATA:'real-apps',LOCALAPPDATA:'real-local'};
  const parent=agentEnvironment(config,base),child=agentEnvironment(config,{...base,PSModulePath:'wrapper modules',PSExecutionPolicyPreference:'Bypass'});
  assert.deepEqual(child,parent);assert.equal(environmentHash(child),environmentHash(parent));
+ for(const key of ['HOME','USERPROFILE','CODEX_HOME','APPDATA','LOCALAPPDATA','TEMP','TMP'])assert(parent[key].startsWith(config.scratch));
  assert.notEqual(environmentHash(agentEnvironment(config,{...base,SystemRoot:'different'})),environmentHash(parent));
 });

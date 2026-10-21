@@ -32,11 +32,19 @@ export function installedSourcePackage(root, candidate) {
   assert.deepEqual(inventory(installedRoot), candidate.files, 'npm installation equals authenticated candidate package');
   const skill = join(installedRoot, 'payload/skill');
   const contract = assertDataSkillDirectory(skill), skillIdentity = dataSkillIdentity(contract);
+  const prefix = dirname(dirname(installedRoot)), packageLauncher = join(installedRoot, 'bin/lycheedev.mjs');
+  const throughSkill = candidate.report.installationKind === 'isolated-global-prefix';
+  if (throughSkill) {
+    assert.equal(candidate.report.installedPrefix, prefix, 'same actual npm prefix');
+    assert.equal(candidate.report.skillLauncherSmoke, 'passed', 'installed Skill smoke passed');
+    assert(existsSync(join(prefix, 'lycheedev.cmd')), 'npm-generated prefix launcher exists');
+  }
   return {mode: 'installed', installedRoot, packageRoot: candidate.packageRoot,
     candidateReportSHA256: candidate.reportSHA256, packageSHA256: candidate.packageSHA256,
     binarySHA256: candidate.report.binarySHA256, skillIdentity, skillFiles: contract.files.length, npmSmoke: 'passed',
-    launcher: join(installedRoot, 'bin/lycheedev.mjs'), skill: join(skill, 'scripts/lycheedev.mjs'),
-    entryKind: 'installed-npm-package-launcher', skillPrefixDiscovery: 'not_run'};
+    prefix, packageLauncher, launcher: throughSkill ? join(skill, 'scripts/lycheedev.mjs') : packageLauncher,
+    skill: join(skill, 'scripts/lycheedev.mjs'), entryKind: throughSkill ? 'installed-skill-launcher' : 'installed-npm-package-launcher',
+    skillPrefixDiscovery: throughSkill ? 'executed' : 'not_run'};
 }
 
 export function runSourceUsage(argv = process.argv.slice(2), {spawn = spawnSync} = {}) {
@@ -74,16 +82,20 @@ const save = () => writeFileSync(join(out, 'report.json'), JSON.stringify(report
 report.executionMode = installed ? 'installed' : 'staged';
 if (installed) {
   report.installation = installedPackage;
-  report.boundaries[0] = 'real npm installation from authenticated passed npm-smoke report; package launcher entry; 25-file Skill authenticated, Skill prefix discovery not run in this mode';
+  report.boundaries[0] = installedPackage.skillPrefixDiscovery === 'executed'
+    ? 'real isolated npm global-prefix installation; fixed 25-file Skill launcher discovers the npm-installed package through its generated prefix marker'
+    : 'historical local npm installation; package launcher entry; 25-file Skill authenticated, Skill prefix discovery not run in this mode';
 }
 save();
 let fatalProcessFailure = false, sequence = 0, outputBytes = 0, stagedReady = false, directory, pin, api, action;
 const started = performance.now(), deadline = started + 570000;
-const prefix = installed ? dirname(dirname(installedPackage.installedRoot)) : join(scratch, '空间 prefix');
+const prefix = installedPackage?.prefix ?? join(scratch, '空间 prefix');
 const staged = installedPackage?.installedRoot ?? join(prefix, 'node_modules', 'lycheedev'), home = join(scratch, '研究 home');
 const launcher = installedPackage?.launcher ?? join(staged, 'payload', 'skill', 'scripts', 'lycheedev.mjs');
-const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !['PATH', 'LYCHEEDEV_BIN', 'LYCHEEDEV_HOME', 'HOME', 'USERPROFILE', 'TEMP', 'TMP'].includes(name.toUpperCase())));
-Object.assign(env, {PATH: `${prefix}${delimiter}${process.env.PATH ?? process.env.Path ?? ''}`, LYCHEEDEV_HOME: home, HOME: join(scratch, 'user'), USERPROFILE: join(scratch, 'user'), TEMP: join(scratch, 'temp'), TMP: join(scratch, 'temp')});
+const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !['PATH', 'LYCHEEDEV_BIN', 'LYCHEEDEV_HOME', 'HOME', 'USERPROFILE', 'CODEX_HOME', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP'].includes(name.toUpperCase())));
+Object.assign(env, {PATH: `${prefix}${delimiter}${process.env.PATH ?? process.env.Path ?? ''}`, LYCHEEDEV_HOME: home,
+  HOME: join(scratch, 'user'), USERPROFILE: join(scratch, 'user'), CODEX_HOME: join(scratch, 'user/.codex'),
+  APPDATA: join(scratch, 'user/AppData/Roaming'), LOCALAPPDATA: join(scratch, 'user/AppData/Local'), TEMP: join(scratch, 'temp'), TMP: join(scratch, 'temp')});
 for (const path of [env.HOME, env.TEMP]) mkdirSync(path, {recursive: true});
 
 function invoke(caseId, args, {expectedExit = 0, timeout = 210000, phase = 'local-fixed-source'} = {}) {
@@ -150,7 +162,7 @@ try {
     assert.equal(inventoryHash(inventory(staged)), packageSHA256, installed ? 'exact installed package bytes' : 'exact staged package bytes');
     for (const name of workflow.requiredSkillFiles) assert(existsSync(join(staged, 'payload', 'skill', name)), `complete fixed Skill resource ${name}`);
     assertDataSkillDirectory(join(staged, 'payload', 'skill'));
-    report.launch = installed ? {...installedPackage, packageLauncher: launcher, explicitNativeOverride: false}
+    report.launch = installed ? {...installedPackage, explicitNativeOverride: false}
       : {skill: launcher, packageLauncher: join(staged, 'bin', 'lycheedev.mjs'), prefix, explicitNativeOverride: false, mode: 'Skill npm-prefix discovery to packaged verified native handoff', entryKind: 'staged-skill-launcher', skillPrefixDiscovery: 'executed'};
     stagedReady = true;
     return {files: files.length, requiredSkillFiles: workflow.requiredSkillFiles.length};

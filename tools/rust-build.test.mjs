@@ -1,6 +1,6 @@
 import fs from 'node:fs';import {syncBuiltinESMExports} from 'node:module';
 import test from 'node:test';import assert from 'node:assert/strict';
-import {existsSync,statSync,mkdirSync,mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';
+import {existsSync,statSync,mkdirSync,mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';import {tmpdir} from 'node:os';import {join,dirname} from 'node:path';
 import {defaults} from './rust-disk.mjs';
 import {buildRust,hashFile,runCargo,verifyArtifact} from './rust-build.mjs';
 test('sealed artifact reuse verifies exact binary and same-invocation PDB without starting compiler',()=>{const root=mkdtempSync(join(tmpdir(),'lycheedev-artifact-'));try{const sourceBinary=join(root,'lycheedev.exe'),pdb=join(root,'lycheedev.pdb'),manifest=join(root,'artifact.json');writeFileSync(sourceBinary,'frozen bytes');writeFileSync(pdb,'matching symbols');const record={schema:'lycheedev.rust-build-artifact.v1',profile:'symbols',sourceBinary,binarySHA256:hashFile(sourceBinary),pdb,pdbSHA256:hashFile(pdb),sameInvocation:true};writeFileSync(manifest,JSON.stringify(record));assert.deepEqual(verifyArtifact(root,manifest),record);writeFileSync(pdb,'changed symbols');assert.throws(()=>verifyArtifact(root,manifest),/symbol_integrity/);writeFileSync(pdb,'matching symbols');writeFileSync(sourceBinary,'changed bytes');assert.throws(()=>verifyArtifact(root,manifest),/artifact_integrity/);assert.throws(()=>hashFile(sourceBinary,1),/file_budget/);assert.equal(readFileSync(sourceBinary,'utf8'),'changed bytes');}finally{rmSync(root,{recursive:true,force:true});}});
@@ -23,6 +23,25 @@ test('Cargo runner seals exact output bytes and refuses another owner during exe
     const receipt=JSON.parse(readFileSync(result.buildEvidence));assert.equal(receipt.state,'retired');assert.equal(receipt.handlesReaped,true);
     const stdout=receipt.sealedLogs.find(log=>log.path.endsWith('stdout.bin'));assert.deepEqual(readFileSync(stdout.path),output);
     assert.equal(existsSync(join(root,'.tmp/rust-disk/channels/ordinary.lease')),false);
+  }finally{rmSync(root,{recursive:true,force:true});}
+});
+
+test('isolated native tests keep user and Agent writes in the owned scratch and retain offline compiler caches',()=>{
+  const root=sourceFixture();
+  try{
+    const result=runCargo(root,['test','--locked','--offline'],{isolateUser:true,
+      environment:{HOME:'foreign-home',USERPROFILE:'foreign-user',CODEX_HOME:'foreign-agent',LYCHEEDEV_BIN:'foreign-cli',CARGO_HOME:'compiler-cache',RUSTUP_HOME:'compiler-tools'},
+      execute(command,args,options){
+        const owner=JSON.parse(readFileSync(join(options.evidence,'receipt.json')));
+        for(const key of ['HOME','USERPROFILE','CODEX_HOME','APPDATA','LOCALAPPDATA','TEMP','TMP','LYCHEEDEV_HOME'])assert(options.env[key].startsWith(owner.directory));
+        assert.equal(options.env.CARGO_HOME,'compiler-cache');assert.equal(options.env.RUSTUP_HOME,'compiler-tools');assert.equal(options.env.LYCHEEDEV_BIN,undefined);
+        assert(existsSync(options.env.HOME));assert(existsSync(options.env.TEMP));
+        writeFileSync(join(options.env.HOME,'test-user-state'),'owned');
+        return{status:0,handlesReaped:true,stdout:Buffer.alloc(0),stderr:Buffer.alloc(0)};
+      }});
+    const receipt=JSON.parse(readFileSync(result.buildEvidence));
+    const command=JSON.parse(readFileSync(receipt.sealedLogs.find(row=>row.path.endsWith('command.json')).path));
+    assert.equal(command.isolatedUserRoot,join(receipt.directory,'user'));assert.equal(receipt.state,'retired');assert.equal(existsSync(receipt.directory),false);
   }finally{rmSync(root,{recursive:true,force:true});}
 });
 test('owned fetch records the resolved lockfile without treating source edits as compilation',()=>{
@@ -144,14 +163,16 @@ test('scoped Source exporter Cargo admission keeps 5 GiB default and accepts exa
     mkdirSync(join(root, '.tmp/rust-scratch/protected'), {recursive: true}); writeFileSync(protectedPath, 'x');
     let calls = 0; const execute = (_command, _args, options) => { calls++; assert(!Object.keys(options.env).some(key => /^LYCHEEDEV_DISK_/i.test(key))); return {status: 0, handlesReaped: true, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0)}; };
     const args = ['test', '--locked', '--offline', '-j', '1', '-p', 'lycheedev-source', '--lib', '--no-run', '--message-format=json-render-diagnostics'];
-    const options = {owner: 'source-postcard-exporter-build', oneShot: true, execute};
+    const options = {owner: 'source-postcard-exporter-build', oneShot: false, execute};
     assert.throws(() => runCargo(root, args, options), /disk.scratch_quota/); assert.equal(calls, 0);
     const limits = {...defaults, scratchBytes: 6 * 1024 ** 3}, result = runCargo(root, args, {...options, limits});
     const receipt = JSON.parse(readFileSync(result.buildEvidence)); assert.equal(receipt.state, 'retired'); assert.deepEqual(receipt.admission.limits, limits); assert.equal(receipt.admission.scratchBytes, defaults.scratchBytes + 1);
+    const command = JSON.parse(readFileSync(join(dirname(result.buildEvidence), 'command.json'))); assert.equal(command.oneShot, false); assert.equal(command.timeoutMs, 600000);
     assert.equal(receipt.admission.cacheReserveBytes, 2 * 1024 ** 3); assert.equal(receipt.admission.requiredBytes, 2 * 1024 ** 3); assert.equal(statSync(protectedPath).size, 1); assert.equal(calls, 1);
     logicalBytes = 6 * 1024 ** 3 + 1; assert.throws(() => runCargo(root, args, {...options, limits}), /disk.scratch_quota/); assert.equal(calls, 1);
     for (const change of [{limits: {...limits, scratchBytes: 7 * 1024 ** 3}}, {limits: {...limits, freeReserveBytes: 0}}, {limits: {...limits, cacheBytes: 30 * 1024 ** 3}}, {limits: {...limits, maxEntries: 1e6}}, {limits: {...limits, unknown: 1}}, {owner: 'ordinary-build'}, {environment: {LYCHEEDEV_DISK_SCRATCH_GIB: '6'}}, {environment: {lycheedev_disk_unknown: '6'}}]) assert.throws(() => runCargo(root, args, {...options, limits, ...change}), /scoped_/);
     for (const altered of [['test'], ['build', ...args.slice(1)], [...args, '--release']]) assert.throws(() => runCargo(root, altered, {...options, limits}), /scoped_cargo_args/);
+    assert.throws(() => runCargo(root, args, {...options, limits, oneShot: true}));
     assert.equal(calls, 1); assert.equal(statSync(protectedPath).size, 1);
   } finally { statMock.mock.restore(); syncBuiltinESMExports(); rmSync(root, {recursive: true, force: true}); }
 });

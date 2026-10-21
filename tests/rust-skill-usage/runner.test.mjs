@@ -206,15 +206,22 @@ test('installed Source binds passed npm provenance, full package, native bytes a
   write(join(f.installedRoot, 'unmanifested'), 'extra'); assert.throws(f.installed, /authenticated candidate package/);
 });
 
-test('mocked Source controller runs the installed package directly and preserves staged Skill discovery separately', t => {
+test('mocked Source controller distinguishes actual npm prefix, historical local install and staged Skill discovery', t => {
   t.mock.method(console, 'log', () => {});
   const f = installedFixture(t);
   for (const path of currentWorkflowInputs(workflow)) write(join(f.root, path), readFileSync(join(repository, path)));
   const previousCwd = process.cwd(), previousExit = process.exitCode, platform = Object.getOwnPropertyDescriptor(process, 'platform');
   try {
     process.chdir(f.root); Object.defineProperty(process, 'platform', {...platform, value: 'win32'});
-    for (const installed of [true, false]) {
-      const scratch = join(f.root, installed ? 'installed-work' : 'staged-work'), out = join(f.root, installed ? 'installed-evidence' : 'staged-evidence');
+    for (const mode of ['local', 'global', 'staged']) {
+      const installed = mode !== 'staged';
+      if (mode === 'global') {
+        Object.assign(f.report, {installationKind: 'isolated-global-prefix', installedPrefix: dirname(dirname(f.installedRoot)), skillLauncherSmoke: 'passed'});
+        f.rewrite();
+        assert.throws(f.installed, /npm-generated prefix launcher exists/);
+        write(join(f.report.installedPrefix, 'lycheedev.cmd'), 'mock npm marker; not executed');
+      }
+      const scratch = join(f.root, `${mode}-work`), out = join(f.root, `${mode}-evidence`);
       mkdirSync(scratch); json(join(out, 'receipt.json'), {owner: 'skill-real-usage', state: 'active', directory: scratch});
       const candidate = f.verify();
       json(join(out, 'candidate-identity.json'), {artifact: f.artifact, candidateReportSHA256: candidate.reportSHA256, installation: f.installed()});
@@ -239,13 +246,20 @@ test('mocked Source controller runs the installed package directly and preserves
       assert.deepEqual(report.discovery.map(row => row.id), ['version', 'describe', 'help', 'query-help', 'query-schema', 'query-search']);
       assert(report.discovery.every(row => row.before.every(value => !value) && row.after.every(value => !value)));
       assert(commands.every(command => !command.options.env.LYCHEEDEV_BIN));
+      for (const key of ['HOME', 'USERPROFILE', 'CODEX_HOME', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP']) {
+        assert(commands.every(command => command.options.env[key].startsWith(scratch)), `isolated ${key}`);
+      }
       if (installed) {
-        assert(commands.every(command => command.args[0] === join(f.installedRoot, 'bin/lycheedev.mjs')));
-        assert.equal(report.launch.entryKind, 'installed-npm-package-launcher');
+        const throughSkill = mode === 'global';
+        assert(commands.every(command => command.args[0] === join(f.installedRoot, throughSkill ? 'payload/skill/scripts/lycheedev.mjs' : 'bin/lycheedev.mjs')));
+        assert.equal(report.launch.entryKind, throughSkill ? 'installed-skill-launcher' : 'installed-npm-package-launcher');
+        assert.equal(report.launch.skillPrefixDiscovery, throughSkill ? 'executed' : 'not_run');
+        assert.equal(report.launch.packageLauncher, join(f.installedRoot, 'bin/lycheedev.mjs'));
+        assert(commands.every(command => command.options.env.PATH.startsWith(dirname(dirname(f.installedRoot)))));
         assert.equal(report.installation.candidateReportSHA256, candidate.reportSHA256);
         assert.equal(report.installedPackageStable, true); assert.equal(report.stagedPackageStable, undefined);
         assert.equal(existsSync(join(scratch, '空间 prefix')), false);
-        assert.equal(existsSync(join(f.root, 'real npm prefix/lycheedev.cmd')), false);
+        assert.equal(existsSync(join(f.root, 'real npm prefix/lycheedev.cmd')), throughSkill);
       } else {
         assert(commands.every(command => command.args[0] === join(scratch, '空间 prefix/node_modules/lycheedev/payload/skill/scripts/lycheedev.mjs')));
         assert.equal(report.launch.entryKind, 'staged-skill-launcher');

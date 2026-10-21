@@ -5,11 +5,14 @@ import os from 'node:os';
 import {join, dirname, relative} from 'node:path';
 import {sha256, readFactDelta, readRustFact} from './read-fact-delta.mjs';
 import {sourceDigest, hashFile} from '../../tools/rust-build.mjs';
+import {defaults} from '../../tools/rust-disk.mjs';
 import {splitIndexEvidence, PART_BYTES} from '../../tools/rust-source-pack-evidence.mjs';
 import {captureGoCustody, openGoCustody} from './source-pack-custody.mjs';
 import {comparePostcardFacts, validatePostcardRequest} from './source-pack-scenarios-postcard.mjs';
 import {verifyOwnerEvidence} from '../rust-parity/formal-lua-3.2.3/assertions.mjs';
 import {POSTCARD_OWNER_RECEIPT_BYTES, POSTCARD_LAYOUT, EXPORT_TEST, EXPORT_ARGS, EXPORT_BUILD_ARGS, LIMITS, postcardFactKey, postcardFactPath, postcardIndexIdentity, verifyPostcardFrame, verifyPostcardExporter, preparePostcardExport, verifyPreparedPostcard, runPostcardExport, capturePostcardExport, verifyPostcardCustody, postcardExportSummary} from './read-fact-delta-postcard.mjs';
+import {POSTCARD_PREPARATION_POLICY} from './read-fact-delta-postcard.mjs';
+import {prepareFreshPostcardExporter} from './source-pack-scenarios-postcard-fresh.mjs';
 
 import {fixture, proof, put, putJSON, emptyFrame} from './read-fact-delta-postcard.fixtures.mjs';
 
@@ -86,6 +89,41 @@ test('explicit configuration and historical reader defaults cannot select v13 ac
   await assert.rejects(readFactDelta(f.goHome, f.home, f.records), /ENOENT/);
   await assert.rejects(readFactDelta(f.goHome, f.home, f.records, 'v11-pack2', f.index.path, f.index.sha256, undefined, {postcardExport: {}}), /Historical Facts layout/);
   assert.equal(LIMITS.total, 128 << 20); assert.equal(LIMITS.manifest, 8 << 20); assert.equal(PART_BYTES, 8 << 20);
+}));
+
+test('current preparation requires new bounded identity while historical one-shot receipts remain readable', t => fixture(t, f => {
+  const {build} = f, read = path => JSON.parse(fs.readFileSync(path));
+  verifyPostcardExporter(f.root, build.expected, build.candidate);
+  const request = {ownerRoot: f.root, candidate: build.candidate, exporter: {mode: 'existing', ...build.expected}};
+  assert.throws(() => prepareFreshPostcardExporter(request), /current exporter preparation policy required/);
+  build.artifact.preparationPolicy = POSTCARD_PREPARATION_POLICY;
+  const saveArtifact = () => {
+    build.artifact.toolchain.receiptSHA256 = hashFile(build.artifact.toolchain.receipt);
+    putJSON(build.expected.artifact, build.artifact); build.expected.artifactSHA256 = hashFile(build.expected.artifact);
+    request.exporter = {mode: 'existing', ...build.expected};
+  };
+  saveArtifact();
+  assert.throws(() => verifyPostcardExporter(f.root, build.expected, build.candidate), 'a marker cannot relabel one-shot history');
+  const commandPath = join(build.evidence, 'command.json'), command = read(commandPath);
+  const nativePath = fs.readdirSync(build.evidence).find(name => name.endsWith('.request.json'));
+  const nativeFile = join(build.evidence, nativePath), native = read(nativeFile);
+  Object.assign(command, {oneShot: false, timeoutMs: 600000}); native.timeoutMs = 600000;
+  putJSON(commandPath, command); putJSON(nativeFile, native); build.seal();
+  const cargoReceipt = read(build.artifact.buildEvidence); cargoReceipt.admission = {limits: defaults}; putJSON(build.artifact.buildEvidence, cargoReceipt);
+  const compilerReceipt = read(build.artifact.toolchain.receipt); compilerReceipt.admission = {limits: defaults}; putJSON(build.artifact.toolchain.receipt, compilerReceipt); saveArtifact();
+  const prepared = prepareFreshPostcardExporter(request);
+  assert.equal(prepared.preparation.built, false);
+  assert.equal(prepared.preparation.identity.artifact.preparationPolicy, POSTCARD_PREPARATION_POLICY);
+  native.timeoutMs = 900000; putJSON(nativeFile, native);
+  const resealCargo = () => {
+    cargoReceipt.sealedLogs = cargoReceipt.sealedLogs.map(row => ({...row, sha256: hashFile(row.path)}));
+    cargoReceipt.logHashes = Object.fromEntries(cargoReceipt.sealedLogs.map(row => [relative(f.root, row.path), row.sha256]));
+    putJSON(build.artifact.buildEvidence, cargoReceipt);
+  };
+  resealCargo(); assert.throws(() => prepareFreshPostcardExporter(request), /current exporter owned deadline/);
+  native.timeoutMs = 600000; putJSON(nativeFile, native); resealCargo();
+  cargoReceipt.admission.limits = {...defaults, scratchBytes: 6 * 1024 ** 3}; putJSON(build.artifact.buildEvidence, cargoReceipt);
+  assert.throws(() => prepareFreshPostcardExporter(request), /Cargo admission differs/, 'explicit 6 GiB exporter cannot be reused by default 5 GiB preparation');
 }));
 
 

@@ -3,6 +3,7 @@ import {spawnSync} from 'node:child_process';
 import {closeSync,copyFileSync,existsSync,lstatSync,mkdirSync,openSync,readFileSync,readSync,readdirSync,writeFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {dirname,join,resolve} from 'node:path';
+import {homedir} from 'node:os';
 import {acquireChannel,admission,beginFreshCache,beginScratch,contained,sha256,defaults,policy} from './rust-disk.mjs';
 import {ownedSpawnSync} from './rust-owned-process.mjs';
 import {emmyRecipeFiles,emmyRecipePath,emmySupportFiles,inspectEmmy,verifyEmmyWiring} from './rust-emmy-identity.mjs';
@@ -32,7 +33,7 @@ export function verifyArtifact(root,path){
 export function runCargo(root,args,options={}){
   return runCargoWithDeadline(root,args,options,600000);
 }
-function runCargoWithDeadline(root,args,{sourceRoot=root,owner='rust-cargo',channelKind='ordinary',oneShot=false,environment={},freshOffline=false,execute=ownedSpawnSync,onSuccess,limits}={},timeoutMs){
+function runCargoWithDeadline(root,args,{sourceRoot=root,owner='rust-cargo',channelKind='ordinary',oneShot=false,environment={},isolateUser=false,freshOffline=false,execute=ownedSpawnSync,onSuccess,limits}={},timeoutMs){
   root=resolve(root);sourceRoot=resolve(sourceRoot);
   if(sourceRoot!==root)contained(root,sourceRoot);
   if(!['build','test','check','clippy','fetch','metadata'].includes(args[0]))throw new Error('build.unsupported_cargo_command');
@@ -45,7 +46,7 @@ function runCargoWithDeadline(root,args,{sourceRoot=root,owner='rust-cargo',chan
   if(limits!==undefined){
     assert.equal(owner,'source-postcard-exporter-build','build.scoped_limits_owner');
     assert.deepEqual(args,['test','--locked','--offline','-j','1','-p','lycheedev-source','--lib','--no-run','--message-format=json-render-diagnostics'],'build.scoped_cargo_args');
-    assert.equal(channelKind,'ordinary');assert.equal(oneShot,true);assert.equal(freshOffline,false);
+    assert.equal(channelKind,'ordinary');assert.equal(oneShot,false);assert.equal(freshOffline,false);
     assert(!Object.keys({...process.env,...environment}).some(key=>/^LYCHEEDEV_DISK_/i.test(key)),'build.scoped_disk_override');
     assert.deepEqual(policy(root,{}),{...defaults},'build.scoped_default_policy');
     assert.deepEqual(limits,{...defaults,scratchBytes:limits?.scratchBytes},'build.scoped_limits');
@@ -81,13 +82,19 @@ function runCargoWithDeadline(root,args,{sourceRoot=root,owner='rust-cargo',chan
     if(freshOffline)fresh=beginFreshCache(root,channel,job);
     const target=fresh?fresh.directory:channel.target;
     const env={...process.env,...environment,CARGO_TARGET_DIR:target};
+    if(isolateUser){
+      const cargoHome=env.CARGO_HOME??join(homedir(),'.cargo'),rustupHome=env.RUSTUP_HOME??join(homedir(),'.rustup'),user=join(job.directory,'user'),temp=join(job.directory,'temp');
+      for(const name of Object.keys(env))if(/^(HOME|USERPROFILE|CODEX_HOME|APPDATA|LOCALAPPDATA|TEMP|TMP)$/i.test(name)||/^LYCHEEDEV_(?:HOME|BIN)$/i.test(name))delete env[name];
+      Object.assign(env,{CARGO_HOME:cargoHome,RUSTUP_HOME:rustupHome,HOME:user,USERPROFILE:user,CODEX_HOME:join(user,'.codex'),APPDATA:join(user,'AppData/Roaming'),LOCALAPPDATA:join(user,'AppData/Local'),TEMP:temp,TMP:temp,LYCHEEDEV_HOME:join(job.directory,'home')});
+      for(const key of ['HOME','TEMP','APPDATA','LOCALAPPDATA'])mkdirSync(env[key],{recursive:true});
+    }
     if(fresh){env.CARGO_HOME=join(job.directory,'cargo-home');mkdirSync(env.CARGO_HOME);env.CARGO_NET_OFFLINE='true';}
     if(oneShot||fresh)env.CARGO_INCREMENTAL='0';
     const environmentSHA256=sha256(Buffer.from(JSON.stringify(Object.entries(env).sort(([a],[b])=>a.localeCompare(b)))));
     terminal={state:'interrupted',handlesReaped:false,logs:[]};
     const result=execute('cargo',args,{cwd:sourceRoot,env,evidence:job.evidence,cargoBuild:true,windowsHide:true,shell:false,timeout:timeoutMs,maxBuffer:8<<20});
     writeFileSync(stdout,result.stdout||Buffer.alloc(0));writeFileSync(stderr,result.stderr||Buffer.alloc(0));
-    writeFileSync(metadata,JSON.stringify({command:'cargo',args,timeoutMs,cwd:sourceRoot,channel:channel.target,target,cargoHome:fresh?env.CARGO_HOME:undefined,freshCacheReceipt:fresh?.receipt,oneShot,environmentSHA256,exit:result.status,signal:result.signal,error:result.error?.message,inputHashes:inputs},null,2)+'\n');
+    writeFileSync(metadata,JSON.stringify({command:'cargo',args,timeoutMs,cwd:sourceRoot,channel:channel.target,target,cargoHome:fresh?env.CARGO_HOME:undefined,freshCacheReceipt:fresh?.receipt,oneShot,...(isolateUser?{isolatedUserRoot:env.HOME}:{}),environmentSHA256,exit:result.status,signal:result.signal,error:result.error?.message,inputHashes:inputs},null,2)+'\n');
     terminal={state:result.handlesReaped===true?(result.status===0&&!result.error?'succeeded':'failed'):'interrupted',handlesReaped:result.handlesReaped===true,logs:[metadata,stdout,stderr,...(result.logs||[])]};
     if(result.error||result.status!==0||!terminal.handlesReaped)throw Object.assign(new Error(`build.cargo_failed:${result.error?.message||(!terminal.handlesReaped?'tree_reap_unverified':result.status)}`),{buildEvidence:job.receipt});
     if(!compiling){

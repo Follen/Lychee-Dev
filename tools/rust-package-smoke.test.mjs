@@ -3,8 +3,20 @@ import assert from 'node:assert/strict';
 import {mkdtempSync, mkdirSync, writeFileSync, rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {parsePackageOptions, assertArtifactSource, assertSourceSyntaxValidation, assertInstalledNativeVersion} from './rust-package-smoke.mjs';
+import {parsePackageOptions, assertArtifactSource, assertSourceSyntaxValidation, assertInstalledNativeVersion, packageSmokeEnvironment} from './rust-package-smoke.mjs';
 import {sourceDigest} from './rust-build.mjs';
+
+test('npm smoke isolates user, Agent and npm state without inherited toolkit overrides', () => {
+  const scratch = join(tmpdir(), 'isolated-npm-smoke'), inherited = '/real-user-state';
+  const env = packageSmokeEnvironment(scratch, {HOME: inherited, UserProfile: inherited, CODEX_HOME: inherited,
+    APPDATA: inherited, LOCALAPPDATA: inherited, TEMP: inherited, TMP: inherited,
+    LYCHEEDEV_BIN: inherited, LYCHEEDEV_HOME: inherited, npm_config_prefix: inherited,
+    NPM_CONFIG_USERCONFIG: inherited, PATH: 'tools', SystemRoot: 'system'});
+  for (const key of ['HOME', 'USERPROFILE', 'CODEX_HOME', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'LYCHEEDEV_HOME', 'npm_config_cache', 'npm_config_userconfig', 'npm_config_globalconfig']) assert(env[key].startsWith(scratch));
+  assert(!Object.values(env).includes(inherited));
+  assert.equal(env.LYCHEEDEV_BIN, undefined); assert.equal(env.npm_config_prefix, undefined);
+  assert.equal(env.PATH, 'tools'); assert.equal(env.SystemRoot, 'system');
+});
 
 test('artifact and assembly-only flags are never mistaken for home, pin, or LuaLS input', () => {
   const parsed = parsePackageOptions(['candidate', 'luac', '--artifact', 'sealed/artifact.json', '--assembly-only']);
