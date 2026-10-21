@@ -17,7 +17,7 @@ const before=snapshot();
 writeFileSync(join(evidence,'compile-inputs-before.json'),JSON.stringify({schema:'lycheedev.protocol-prototype.compile-inputs.v1',createdAt:new Date().toISOString(),inputs:before},null,2)+'\n',{flag:'wx'});
 try{
   const result=runCargo(root,['test','-p','lycheedev-live','--test','native_v1_prototype','--locked','--offline','-j','1','--','--nocapture'],{
-    owner:'native-v1-p0-sealed',onSuccess(invocation){
+    owner:'native-v1-p0-sealed',oneShot:false,isolateUser:true,onSuccess(invocation){
       const after=snapshot();assert.deepEqual(after,before,'additional source changed during compilation/execution');
       const lines=invocation.stdout.split(/\r?\n/).filter(line=>line.startsWith('P0_EVIDENCE='));assert.equal(lines.length,1);
       const testEvidence=contained(root,resolve(lines[0].slice('P0_EVIDENCE='.length)));

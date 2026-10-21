@@ -11,6 +11,17 @@ import {emmyRecipeFiles,emmyRecipePath,emmySupportFiles,inspectEmmy,verifyEmmyWi
 export function hashFile(path,max=512<<20){const file=lstatSync(path);if(!file.isFile()||file.isSymbolicLink()||file.size>max)throw new Error('build.file_budget');const fd=openSync(path,'r'),hash=createHash('sha256'),chunk=Buffer.alloc(65536);let bytes=0;try{for(;;){const read=readSync(fd,chunk,0,chunk.length,null);if(!read)break;bytes+=read;if(bytes>max)throw new Error('build.file_budget');hash.update(chunk.subarray(0,read));}if(bytes!==file.size)throw new Error('build.file_changed');return hash.digest('hex');}finally{closeSync(fd);}}
 export function sourceDigest(root){const hash=createHash('sha256');let entries=0;function visit(path,name){if(++entries>100000)throw new Error('build.source_budget');const info=lstatSync(path);if(info.isSymbolicLink())throw new Error('build.source_reparse');if(info.isDirectory()){for(const child of readdirSync(path).sort())visit(join(path,child),`${name}/${child}`);}else if(info.isFile()){hash.update(JSON.stringify([name,info.size,hashFile(path,64<<20)]));}else throw new Error('build.source_non_regular');}for(const name of ['Cargo.toml','Cargo.lock','crates','release','.cargo'])visit(join(root,name),name);for(const name of ['vendor','LICENSE','THIRD_PARTY_NOTICES.md','tests/rust-source-data/generate-unicode-simple.mjs'])if(existsSync(join(root,name)))visit(join(root,name),name);if(existsSync(join(root,emmyRecipePath))){for(const name of emmyRecipeFiles)visit(join(root,emmyRecipePath,name),`${emmyRecipePath}/${name}`);if(existsSync(join(root,emmyRecipePath,'patches')))visit(join(root,emmyRecipePath,'patches'),`${emmyRecipePath}/patches`);for(const name of emmySupportFiles.filter(path=>path.startsWith('tools/')))visit(join(root,name),name);}return hash.digest('hex');}
 
+// Existing Cargo isolation template, also used by owned acceptance controllers.
+// Preserve the installed offline compiler caches before replacing user paths.
+export function ownedUserEnvironment(directory,parent=process.env){
+  const env={...parent},cargoHome=env.CARGO_HOME??join(homedir(),'.cargo'),rustupHome=env.RUSTUP_HOME??join(homedir(),'.rustup');
+  const user=join(directory,'user'),temp=join(directory,'temp');
+  for(const name of Object.keys(env))if(/^(HOME|USERPROFILE|CODEX_HOME|APPDATA|LOCALAPPDATA|TEMP|TMP)$/i.test(name)||/^LYCHEEDEV_(?:HOME|BIN)$/i.test(name))delete env[name];
+  Object.assign(env,{CARGO_HOME:cargoHome,RUSTUP_HOME:rustupHome,HOME:user,USERPROFILE:user,CODEX_HOME:join(user,'.codex'),APPDATA:join(user,'AppData/Roaming'),LOCALAPPDATA:join(user,'AppData/Local'),TEMP:temp,TMP:temp,LYCHEEDEV_HOME:join(directory,'home')});
+  for(const key of ['HOME','TEMP','APPDATA','LOCALAPPDATA'])mkdirSync(env[key],{recursive:true});
+  return env;
+}
+
 // Fetch resolves the lockfile without compiling product code. Bind manifests
 // and Cargo configuration; source workers can continue editing Rust meanwhile.
 function manifestDigest(root){
@@ -81,13 +92,8 @@ function runCargoWithDeadline(root,args,{sourceRoot=root,owner='rust-cargo',chan
   try{
     if(freshOffline)fresh=beginFreshCache(root,channel,job);
     const target=fresh?fresh.directory:channel.target;
-    const env={...process.env,...environment,CARGO_TARGET_DIR:target};
-    if(isolateUser){
-      const cargoHome=env.CARGO_HOME??join(homedir(),'.cargo'),rustupHome=env.RUSTUP_HOME??join(homedir(),'.rustup'),user=join(job.directory,'user'),temp=join(job.directory,'temp');
-      for(const name of Object.keys(env))if(/^(HOME|USERPROFILE|CODEX_HOME|APPDATA|LOCALAPPDATA|TEMP|TMP)$/i.test(name)||/^LYCHEEDEV_(?:HOME|BIN)$/i.test(name))delete env[name];
-      Object.assign(env,{CARGO_HOME:cargoHome,RUSTUP_HOME:rustupHome,HOME:user,USERPROFILE:user,CODEX_HOME:join(user,'.codex'),APPDATA:join(user,'AppData/Roaming'),LOCALAPPDATA:join(user,'AppData/Local'),TEMP:temp,TMP:temp,LYCHEEDEV_HOME:join(job.directory,'home')});
-      for(const key of ['HOME','TEMP','APPDATA','LOCALAPPDATA'])mkdirSync(env[key],{recursive:true});
-    }
+    const inherited={...process.env,...environment,CARGO_TARGET_DIR:target};
+    const env=isolateUser?ownedUserEnvironment(job.directory,inherited):inherited;
     if(fresh){env.CARGO_HOME=join(job.directory,'cargo-home');mkdirSync(env.CARGO_HOME);env.CARGO_NET_OFFLINE='true';}
     if(oneShot||fresh)env.CARGO_INCREMENTAL='0';
     const environmentSHA256=sha256(Buffer.from(JSON.stringify(Object.entries(env).sort(([a],[b])=>a.localeCompare(b)))));

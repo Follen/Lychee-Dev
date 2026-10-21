@@ -3,11 +3,12 @@
 import {writeFileSync} from 'node:fs';
 import {join,resolve} from 'node:path';
 import {beginScratch} from '../../../tools/rust-disk.mjs';
+import {ownedUserEnvironment} from '../../../tools/rust-build.mjs';
 import {ownedSpawnSync} from '../../../tools/rust-owned-process.mjs';
 
-// Materialization (5m), two existing Cargo budgets (10m each), their bounded
-// wrapper drains, and orchestration. Never grant this budget to product calls.
-export const ORACLE_TIMEOUT_MS=30*60*1000;
+// The complete group and its descendants share the queue's 600-second owner.
+// Nested command budgets do not extend this deadline.
+export const ORACLE_TIMEOUT_MS=600000;
 
 export function runControlledOracle(root=process.cwd(),execute=ownedSpawnSync){
   root=resolve(root);
@@ -19,7 +20,7 @@ export function runControlledOracle(root=process.cwd(),execute=ownedSpawnSync){
     timeoutMs:ORACLE_TIMEOUT_MS,handlesReaped:false,exitCode:null};
   let logs=[];
   try{
-    const result=execute(process.execPath,[script],{cwd:root,env:process.env,
+    const result=execute(process.execPath,[script],{cwd:root,env:ownedUserEnvironment(job.directory),
       evidence:job.evidence,timeout:ORACLE_TIMEOUT_MS,orphanMs:30000});
     logs=result.logs||[];
     report.handlesReaped=result.handlesReaped===true;

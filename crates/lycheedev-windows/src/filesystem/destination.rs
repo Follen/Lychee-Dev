@@ -17,9 +17,9 @@ use windows::{
         Storage::FileSystem::{
             CreateFileW, DELETE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
             FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-            FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_RENAME_INFO, FILE_RENAME_INFO_0,
-            FILE_SHARE_READ, FILE_SHARE_WRITE, FileDispositionInfo, OPEN_EXISTING,
-            SetFileInformationByHandle,
+            FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_RENAME_INFO,
+            FILE_RENAME_INFO_0, FILE_SHARE_READ, FILE_SHARE_WRITE, FileDispositionInfo,
+            OPEN_EXISTING, SetFileInformationByHandle,
         },
     },
     core::PCWSTR,
@@ -208,10 +208,11 @@ fn relative_file_optional_owner<C: FileControl>(
             2,
             0x00200000 | 0x20 | 0x40, // CREATE, REPARSE | SYNCHRONOUS | NON_DIRECTORY
         ),
-        // Attribute-only SQLite main-file identity: allow live writes, deny
-        // rename/delete replacement, and inspect rather than follow reparse.
+        // SQLite main-file identity: data-read access participates in native
+        // sharing checks, so denying share-delete pins rename/delete while
+        // allowing live writes. Inspect rather than follow a reparse leaf.
         RelativeOpen::InspectPinned { create } => (
-            FILE_READ_ATTRIBUTES.0 | 0x100000,
+            FILE_READ_DATA.0 | FILE_READ_ATTRIBUTES.0 | 0x100000,
             1 | 2,
             if create { 3 } else { 1 }, // OPEN_IF or OPEN
             0x00200000 | 0x20,
@@ -1179,22 +1180,37 @@ mod tests {
             crate::random::token().unwrap()
         ));
         fs::create_dir(&root).unwrap();
-        let path = root.join("main.sqlite");
-        fs::write(&path, b"old").unwrap();
         let directory = Directory::open_shared(&root).unwrap();
-        let pin = directory
-            .open_optional_pinned_inspection_file_controlled(
-                "main.sqlite".as_ref(),
-                &mut Uncontrolled,
-            )
-            .unwrap()
-            .unwrap();
-        fs::write(&path, b"new").unwrap();
-        assert!(fs::rename(&path, root.join("replaced")).is_err());
-        assert!(fs::remove_file(&path).is_err());
-        assert_eq!(pin.metadata().unwrap().len(), 3);
-        super::super::close_file(pin).unwrap();
-        fs::remove_file(&path).unwrap();
+        for (name, existing) in [("existing.sqlite", true), ("created.sqlite", false)] {
+            let path = root.join(name);
+            let pin = if existing {
+                fs::write(&path, b"original").unwrap();
+                directory
+                    .open_optional_pinned_inspection_file_controlled(
+                        name.as_ref(),
+                        &mut Uncontrolled,
+                    )
+                    .unwrap()
+                    .unwrap()
+            } else {
+                directory
+                    .open_or_create_pinned_inspection_file_controlled(
+                        name.as_ref(),
+                        &mut Uncontrolled,
+                    )
+                    .unwrap()
+            };
+            assert_eq!(pin.metadata().unwrap().len(), if existing { 8 } else { 0 });
+            fs::write(&path, b"new").unwrap();
+            assert_eq!(fs::read(&path).unwrap(), b"new");
+            let replaced = root.join("replaced");
+            assert!(fs::rename(&path, &replaced).is_err());
+            assert!(fs::remove_file(&path).is_err());
+            assert_eq!(pin.metadata().unwrap().len(), 3);
+            super::super::close_file(pin).unwrap();
+            fs::rename(&path, &replaced).unwrap();
+            fs::remove_file(&replaced).unwrap();
+        }
         directory.close().unwrap();
         fs::remove_dir(root).unwrap();
     }

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {copyFileSync,existsSync,lstatSync,mkdirSync,readFileSync,readdirSync,writeFileSync} from 'node:fs';
 import {basename,dirname,join,resolve} from 'node:path';
-import {hashFile,sourceDigest} from '../../tools/rust-build.mjs';
+import {hashFile,ownedUserEnvironment,sourceDigest} from '../../tools/rust-build.mjs';
 import {contained} from '../../tools/rust-disk.mjs';
 import {ownedSpawnSync} from '../../tools/rust-owned-process.mjs';
 
@@ -35,7 +35,7 @@ for(const input of before){
 const args=['tools/rust-cargo.mjs','--owner','native-p3-revision','--','test','--locked','--offline','-j1','-p','lycheedev-live',
   '--test','native_revised_lifecycle','--','--nocapture'];
 json('command.json',{command:process.execPath,args,timeoutMs:300000,owner:'native-p3-revision',sourceTree:sourceTreeBefore,wordBackend:nativeBit?'native_bit':'arithmetic',wordInputs});
-const run=ownedSpawnSync(process.execPath,args,{cwd:root,evidence,env:{...process.env,LYCHEEDEV_LIFECYCLE_REVISION_ROOT:root,LUA_INIT:nativeBit?'@'+join(protocol,'native-bit-init.lua'):''},timeout:300000,cargoBuild:true});
+const run=ownedSpawnSync(process.execPath,args,{cwd:root,evidence,env:{...ownedUserEnvironment(evidence),LYCHEEDEV_LIFECYCLE_REVISION_ROOT:root,LUA_INIT:nativeBit?'@'+join(protocol,'native-bit-init.lua'):''},timeout:300000,cargoBuild:true});
 json('process.json',{status:run.status,error:run.error?.message,handlesReaped:run.handlesReaped,proof:run.proof,logs:run.logs});
 const stdout=run.stdout.toString(),stderr=run.stderr.toString();
 writeFileSync(contained(evidence,join(evidence,'stdout.txt')),stdout,{flag:'wx'});

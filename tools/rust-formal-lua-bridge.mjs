@@ -5,7 +5,7 @@ import {copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, writeFileSy
 import {basename, dirname, isAbsolute, join, relative, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {beginScratch, contained} from './rust-disk.mjs';
-import {runCargo, sourceDigest, verifyArtifact} from './rust-build.mjs';
+import {ownedUserEnvironment, runCargo, sourceDigest, verifyArtifact} from './rust-build.mjs';
 import {ownedSpawnSync} from './rust-owned-process.mjs';
 import {verifyCandidateArtifact, verifyInterpreter} from './rust-formal-lua.mjs';
 import {BASE, ORACLE, MANIFEST_SHA256, RELEASE_FIELDS_SHA256, SUPPORT as ORACLE_SUPPORT, authenticate, cleanLuaEnvironment, hash, materialize,
@@ -58,7 +58,7 @@ export function verifyTestOutput(stdout) {
 }
 function buildTest(support, inputs, candidate, {artifactDirectory, artifactPath}) {
   assert(!existsSync(artifactDirectory), 'formal-bridge.artifact_directory_exists');
-  return runCargo(root, [...args], {owner: 'formal-lua-bridge-build', oneShot: true,
+  return runCargo(root, [...args], {owner: 'formal-lua-bridge-build', oneShot: false, isolateUser: true,
     onSuccess(invocation) {
       assert.deepEqual(supportIdentity(), support, 'formal-bridge.build_support_changed');
       assert.deepEqual(authenticate(root), inputs, 'formal-bridge.build_fixture_changed');
@@ -147,7 +147,7 @@ export function main(argv = []) {
     };
     checkIdentity(); handlesReaped = false;
     const result = ownedSpawnSync(test.sourceBinary, ['--test-threads=1', '--nocapture'], {cwd: root,
-      env: cleanLuaEnvironment({...process.env, LYCHEEDEV_FORMAL_LUA_BRIDGE_ADMISSION: admissionPath}),
+      env: cleanLuaEnvironment({...ownedUserEnvironment(job.directory), LYCHEEDEV_FORMAL_LUA_BRIDGE_ADMISSION: admissionPath}),
       evidence: job.evidence, timeout: 255000, cargoBuild: false, msvcCompile: false});
     handlesReaped = processReaped(result) === true;
     checkIdentity();

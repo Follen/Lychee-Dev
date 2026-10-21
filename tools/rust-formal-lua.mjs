@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { beginScratch, contained } from './rust-disk.mjs';
 import { ownedSpawnSync } from './rust-owned-process.mjs';
 import { fixedToolchain, luaSource, selectCompiler, verifySystemImports } from './luac.mjs';
-import { sourceDigest, verifyArtifact } from './rust-build.mjs';
+import { ownedUserEnvironment, sourceDigest, verifyArtifact } from './rust-build.mjs';
 import { BRIDGE_GAPS, LIMITS, MANIFEST_SHA256, ORACLE, SUPPORT as ORACLE_SUPPORT, authenticate, cases, cleanLuaEnvironment, hash, materialize, processReaped, regular, runCases, verifyMaterial, verifyOwnerEvidence, verifyUnifiedTOC } from '../tests/rust-parity/formal-lua-3.2.3/assertions.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -48,7 +48,7 @@ export async function buildInterpreter(output, sourceArchive) {
     const remaining = deadline - Date.now() - LIMITS.cleanupMs;
     assert(remaining > 1000, 'formal-lua.build_deadline');
     handlesReaped = false;
-    const result = ownedSpawnSync(command, args, { cwd, env: cleanLuaEnvironment(env), evidence: job.evidence, timeout: Math.min(120000, remaining), cargoBuild: false, msvcCompile });
+    const result = ownedSpawnSync(command, args, { cwd, env: cleanLuaEnvironment(ownedUserEnvironment(job.directory, env)), evidence: job.evidence, timeout: Math.min(120000, remaining), cargoBuild: false, msvcCompile });
     handlesReaped = processReaped(result) === true;
     save(join(job.evidence, `command-${sequence++}.json`), { command, args, cwd, msvcCompile, exit: result.status, error: result.error?.message, handlesReaped, proof: result.proof });
     assert(handlesReaped && !result.error && result.status === 0, `formal-lua.build_command_failed: ${result.error?.message ?? result.status}`);
@@ -175,7 +175,7 @@ export function runAcceptance(interpreterPath, artifactPath) {
     const observations = runCases(cases(inputs), { deadline, checkIdentity, evidenceBytes: () => evidenceBytes(job),
       execute(row, timeout) {
         handlesReaped = false;
-        const result = ownedSpawnSync(runtime.report.executable, row.args, { cwd: join(target, row.cwd), env: cleanLuaEnvironment(process.env), evidence: job.evidence, timeout, cargoBuild: false, msvcCompile: false });
+        const result = ownedSpawnSync(runtime.report.executable, row.args, { cwd: join(target, row.cwd), env: cleanLuaEnvironment(ownedUserEnvironment(job.directory)), evidence: job.evidence, timeout, cargoBuild: false, msvcCompile: false });
         handlesReaped = processReaped(result) === true;
         return result;
       }, onResult(row) { save(join(job.evidence, `case-${String(sequence++).padStart(3, '0')}.json`), row); },

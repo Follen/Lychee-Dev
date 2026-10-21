@@ -18,6 +18,31 @@ const name='actual_unary_tuple_logical_declaration_and_observed_return_transport
 const file=`${target}--${name}.jsonl`;
 const sha=data=>createHash('sha256').update(data).digest('hex');
 const clone=value=>structuredClone(value);
+const HARNESS='tests/rust-source-engine/fixed-emmy-oracle';
+const frozenBlobs=new Map();
+function frozenBlob(path){
+  if(!frozenBlobs.has(path)){
+    const result=spawnSync('git',['show',`${pins.measuredCommit}:${path}`],
+      {cwd:ROOT,maxBuffer:16<<20,windowsHide:true});
+    assert.equal(result.status,0,result.error?.message||result.stderr?.toString());
+    frozenBlobs.set(path,result.stdout);
+  }
+  return frozenBlobs.get(path);
+}
+function frozenContractRoot(t){
+  const root=mkdtempSync(join(tmpdir(),'emmy-frozen-contract-test-'));
+  t.after(()=>rmSync(root,{recursive:true,force:true}));
+  const put=(path,bytes,digest)=>{
+    const data=frozenBlob(path);
+    assert.equal(data.length,bytes,path);assert.equal(sha(data),digest,path);
+    const destination=join(root,path);mkdirSync(dirname(destination),{recursive:true});writeFileSync(destination,data);
+  };
+  for(const file of pins.sourceFiles)put(file.path,file.bytes,file.sha256);
+  const inputs=JSON.parse(readFileSync(join(root,HARNESS,'inputs.json')));
+  for(const file of inputs.files)put(`${HARNESS}/${file.path}`,file.bytes,file.sha256);
+  assert.deepEqual(inputs.targets,targets);
+  return root;
+}
 
 // Deliberately synthetic parser/contract fixtures. They are NEVER sealed as, or
 // passed to the executable as, the ac8 runtime evidence.
@@ -219,6 +244,7 @@ test('CLI has no accept-update ignore-coverage or source-identity override',()=>
 // added; the real executable rejects these different owner/receipt identities.
 function completeSyntheticFixture(t){
   const root=mkdtempSync(join(tmpdir(),'emmy-synthetic-custody-test-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+  const contractRoot=frozenContractRoot(t),inputsPath=join(contractRoot,HARNESS,'inputs.json');
   const checker=join(root,'checker');cpSync(HERE,checker,{recursive:true});
   const evidence=join(root,'.tmp/rust-disk/evidence');mkdirSync(evidence,{recursive:true});
   const fake={...clone(pins),measuredCommit:'SYNTHETIC-UNIT-TEST-NOT-RUNTIME',measuredSourceTree:'a'.repeat(64),
@@ -251,8 +277,8 @@ function completeSyntheticFixture(t){
     fake[index?'candidateCargoReceiptSHA256':'referenceCargoReceiptSHA256']=seal(id,['cargo',...args],childInputs[index],[path]);
   }
   const traceMetadata=role=>traces[role].map(({rows,...trace})=>({...trace,rows:rows.length}));
-  const raw={schema:'lycheedev.emmy-fixed-run.v1',state:'failed',referenceCommit:JSON.parse(readFileSync(join(HERE,'inputs.json'))).referenceCommit,
-    fixedInputsSHA256:sha(readFileSync(join(HERE,'inputs.json'))),sourceTree:fake.measuredSourceTree,tests:36,cargoInvoked:true,
+  const raw={schema:'lycheedev.emmy-fixed-run.v1',state:'failed',referenceCommit:JSON.parse(readFileSync(inputsPath)).referenceCommit,
+    fixedInputsSHA256:sha(readFileSync(inputsPath)),sourceTree:fake.measuredSourceTree,tests:36,cargoInvoked:true,
     production:{identity:'public-upstream-unmodified-v1',treeSHA256:fake.cleanTree,files:848,bytes:8382174,cargoSucceeded:false,
       traces:traceMetadata('candidate'),totalRows:4137},
     reference:{treeSHA256:fake.historicalTree,sourceTree:fake.historicalSourceTree,sourceIdentity:'fixed-source-plus-compile-compatibility',
@@ -270,10 +296,10 @@ function completeSyntheticFixture(t){
   save();let serial=0;
   const run=()=>{
     const output=join(root,`result-${serial++}`);
-    const child=spawnSync(process.execPath,[join(checker,'current-contract.mjs'),'--evidence-root',evidence,'--output',output,'--contract-root',ROOT],{encoding:'utf8'});
+    const child=spawnSync(process.execPath,[join(checker,'current-contract.mjs'),'--evidence-root',evidence,'--output',output,'--contract-root',contractRoot],{encoding:'utf8'});
     return {child,report:JSON.parse(readFileSync(join(output,'current-contract-report.json')))};
   };
-  return {root,evidence,main,fake,raw,traces,save,run};
+  return {root,contractRoot,evidence,main,fake,raw,traces,save,run};
 }
 
 test('complete synthetic three-owner executable preserves raw false and exit101 beside the narrow pass',t=>{
@@ -283,6 +309,15 @@ test('complete synthetic three-owner executable preserves raw false and exit101 
   assert.equal(report.historicalRaw.state,'failed');assert.equal(report.historicalRaw.allTraceFieldsMatch,false);
   assert.deepEqual(report.historicalRaw.invocations.map(row=>row.exit),[0,101]);
   assert.equal(report.historicalRaw.invocations[1].error,'owned.forced_tree_termination');
+  assert.deepEqual(readFileSync(join(f.main,'fixed-oracle-report.json')),before);
+  for(const name of ['run.mjs','inputs.json']){
+    const path=join(f.contractRoot,HARNESS,name),original=readFileSync(path);
+    writeFileSync(path,Buffer.concat([original,Buffer.from('\n')]));
+    const changed=f.run();assert.equal(changed.child.status,1);
+    assert.match(changed.report.currentContract.error,/contract_source_changed:tests\/rust-source-engine\/fixed-emmy-oracle\//);
+    assert.equal(changed.report.historicalRaw.state,'not_verified');
+    writeFileSync(path,original);
+  }
   assert.deepEqual(readFileSync(join(f.main,'fixed-oracle-report.json')),before);
 });
 
@@ -303,13 +338,14 @@ test('authenticated full report rejects trace metadata drift and extra physical 
   assert.equal(actual.report.historicalRaw.state,'failed');
 });
 
-test('reviewed current contract source and unchanged historical runner remain exact ac8 bytes',()=>{
+test('reviewed current contract source and unchanged historical runner remain exact ac8 bytes',t=>{
   assert.equal(pins.measuredCommit,'ac8bfbe656e81501e64ec572fc2c5c2be909a758');
   assert.equal(pins.measuredSourceTree,'73ebb0f797b20187dd8c135812e3d64c26a94410e39b3a4828014f31adf7b5b4');
   for(const key of ['receiptSHA256','reportSHA256','referenceCargoReceiptSHA256','candidateCargoReceiptSHA256'])
     assert.match(pins[key],/^[a-f0-9]{64}$/,key);
+  const contractRoot=frozenContractRoot(t);
   for(const file of pins.sourceFiles){
-    const bytes=readFileSync(join(ROOT,file.path));assert.equal(bytes.length,file.bytes,file.path);assert.equal(sha(bytes),file.sha256,file.path);
+    const bytes=readFileSync(join(contractRoot,file.path));assert.equal(bytes.length,file.bytes,file.path);assert.equal(sha(bytes),file.sha256,file.path);
   }
   const entry=readFileSync(join(HERE,'current-contract.mjs'),'utf8');
   assert(!/runCargo\(|ownedSpawnSync\(|beginScratch\(|sourceDigest\(|inspectEmmy\(/.test(entry));

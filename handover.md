@@ -13,15 +13,16 @@
 
 ## 已实现与实际验证
 
-- 固定测试副本及已推送分支为 `b6cf60d731bfd97a7b11276da82323209729a3ee`，tree `0c5350739715b5aaabe753e30fa4dd27f08d06ae`。该版本全部9 crate默认及migration-oracle两套native check通过，真实用户目录隔离已在owner记录核验。
+- 最近完整保存并推送的实现及固定测试副本为 `f5dc57268d2e8388d002f63a0e9c3d26cd6041c0`，tree `a6ffd26b900066712ecf46460240bade6579eb40`。该版本全部9 crate默认及migration-oracle两套native check通过，真实用户目录隔离已在owner记录核验。下表另列尚待保存/实跑的修正。
 - CORE-FIXTURE-01：853原例839通过/14失败；14个迁移后锁序、CAS、recency/durable peak旧夹具已修，受影响130项在 `1764e19c8c` 逐名全部通过，产品未改。
-- b6cf Core其余6个integration目标65项全部通过，完整native退出和资源回收已核；CLI其余integration合计18通过/5失败/3 ignored，5失败的实际原因及当前修复见下表。
+- b6cf Core其余6个integration目标65项全部通过，完整native退出和资源回收已核。CLI当前207 active均有实际通过记录：bin184及supervisor6在b6cf通过；另外17个integration跨b6cf/f5dc通过，原5失败在f5dc修复后闭合；3 ignored单列。
 - DATA-RUNTIME-01 / DATA-CORRELATION-01：执行流schema、eager布尔错误、公有ID流内缺失证明、安全等值关联键已修并推送；Engine165项在 `8819608054` 全部通过，新增多键MAX和CAST短路回归已通过。
-- Data library当前1529项，1528 active、1 ignored。逐名对账1528 active均有真实pass，缺名0、仅fail未pass为0；最后通过来源分别为1764的524项、bc77的2项、8819的165项、f29c的811项、e0c6的26项。这是跨版本覆盖，不是e0整套单次通过。原整组600秒timeout及所有旧失败保留；nested child排除，输出混排的解析遗漏只作独立只读核定，不重跑或改原结果。
+- Data library当前1530项，1529 active、1 ignored。先前1528 active逐名对账均有真实pass，来源为1764/bc77/8819/f29c/e0c6；f5dc新增真实Session恢复回归通过，并重验受影响196项（Agent Session23、engine result4、engine source24、local_query145）全部通过。这是跨版本覆盖，不是当前整套单次通过。原600秒timeout及所有旧失败保留，nested child和输出混排只作独立核定。
 - DATA-REMOTE-FIXTURE-01：最后4个remote夹具已修并实跑通过；准确使用durable peak、共享catalog序列化，取消后两库不存在且readonly返回record_missing。取消身份、未发布pin/CAP和私有容量边界保留。
 - CLI-SOCKET-01：accepted socket恢复blocking后，原4项Windows真实supervisor测试全部通过。EOF半关闭、stdout背压、整epoch取消、私有入口拒绝已实跑。
 - CAP-TRANSPORT-01：Data实际Session query/capture和Navigate自动CAP在stdout flush后observer失败的2项新回归通过，核唯一CAP、原body/manifest和query handle；全部Agent Session消费者22项及12条Navigate业务路径同组通过。b6cf CLI bin184项、supervisor6项全部通过，含真实BrokenPipe保留committed CAP、父进程终态统一失效标记及排队deadline。精确non-yield CPU poll及真实private receipt断线仍无实测。
-- Data integration原e0已执行43目标中的40个非空目标：275通过/9失败/21 ignored；其余3个目标仅含ignored，不计业务pass。b6cf针对9失败复验，DB2六项、hotfix一项及content Root修复一项通过；selected修复例暴露真实DATA-LOCAL-ORDER-01，尚待修复后复验。Agent native parity2项已在e0通过。b6cf CLI/Core队列现已结束并完整回收；失败组保留原报告。
+- Data integration当前284 active均有实际通过记录：e0原275通过/9失败；b6cf通过DB2六项及hotfix一项，f5dc通过content全13项及Agent native parity2项。selected缺失body重建在正式Agent和migration-oracle两条路径均修复并实跑；坏body仍明确拒绝，alias/CAP/归属不变。Data全部ignored合计25，不计业务pass。
+- f5dc Windows library188 active实际187通过/1失败；11个integration目标中10个非空目标52项全部通过，另一个harness=false helper无业务case。library2个及integration2个ignored单列。唯一失败为主文件pin未阻止rename，已定位并修正，待native；Windows其余结果和资源回收完整。
 - Node原399项393通过/3失败/3权限skip；旧Skill差异清单和metadata布局3失败修后对应43项全部通过。后继Source exporter/corpus工具5套84通过/1权限skip；本批真实Skill入口及用户环境隔离的4套Node68项全部通过。重叠套件不累加为独立覆盖，mock/静态检查不代替Windows业务。
 
 ## 当前修正与负责人
@@ -29,19 +30,22 @@
 | ID | 状态与边界 | 负责人 / 下一步 |
 | --- | --- | --- |
 | CLI-TERMINAL-01 / CLI-FIXTURE-01 | b6cf bin184及supervisor6全通过，原19个bin旧合同/种子问题及BrokenPipe终态已闭合 | 主代理已实跑 |
-| DATA-INTEGRATION-01 / DATA-HOTFIX-FIXTURE-01 | DB2六项、Root重建和hotfix共享归属八项实际复验通过；selected重建另归下面真实问题 | 主代理已实跑；旧报告不改写 |
-| DATA-LOCAL-ORDER-01 | selected缺失body仍有合法alias/CAP/keep时，提前发布配置provenance触发严格库存检查，阻断精确修复。local_query.rs及正式Agent使用的sql_reader.rs均已延后一次配置发布，保留原关闭和严格拒绝边界；新增真实Session缺体恢复/坏体拒绝回归 | data_engine已交回；主代理已核diff，待native；local_query方案经core_metadata限定只读复核 |
-| CLI-PUBLIC-FIXTURE-01 | b6cf实际四失败分别为prune旧85计数、normal exit旧help/解析器文案两例、source inspect空值旧文案。3个integration文件已更新当前71目录、分组help与clap结构；原退出码、无home副作用、输出完整性及prune行为不变 | core_evidence/主代理已修改，待native |
-| DATA-NUMERIC-01 | b6cf numeric page实际records.result_type；Arrow NullArray的is_null恒false，结果scalar match遗漏Null。已补ScalarValue::Null及原scalar边界回归，整数/负零/其他类型拒绝不变 | data_engine已交回，主代理已核，待public page/JSON/CSV/CAP实跑 |
+| DATA-INTEGRATION-01 / DATA-HOTFIX-FIXTURE-01 | 原9失败均已修复并实跑通过，整个284 active跨版本均有通过记录 | 主代理已实跑；旧报告不改写 |
+| DATA-LOCAL-ORDER-01 | local_query及正式Agent sql_reader延后一次配置provenance发布；f5dc受影响196 library、content13及Agent parity2全通过，含真实Session缺体恢复/等长坏体拒绝 | 已保存、推送、验证 |
+| CLI-PUBLIC-FIXTURE-01 | prune当前71目录、normal exit分组help/clap结构、source inspect空值文案夹具已更新；对应10项在f5dc全通过，原退出码/无home副作用/完整输出保留 | 已保存、推送、验证 |
+| DATA-NUMERIC-01 | Arrow NullArray结果补ScalarValue::Null，原scalar边界及CLI numeric3在f5dc通过，涵盖public page/JSON/CSV/CAP；精确整数和负零保留 | 已保存、推送、验证 |
+| WINDOWS-PIN-01 | InspectPinned只有属性权限，Windows不据此阻止DELETE打开。单文件destination.rs增加FILE_READ_DATA并保留共享读写；原测试覆盖已有/创建、写入、持有期间拒绝rename/delete和关闭后允许 | core_evidence已交回，主代理已核diff；待固定提交后原例及Core四个主库pin调用回归 |
 | BUILD-RUNNER-01 | Release、Source full-corpus/fresh场景统一600秒，fresh exporter默认no-oneShot和原20/5GiB；isolateUser令用户目录归owner scratch，本批补齐buildRust透传、Release CLI及三exporter准备显式启用。原prepare身份规则保留；19项对应Node/mock通过。实际Release/exporter未跑 | core_metadata/core_evidence已交回，主代理已核 |
 | SOURCE-INSTALLED-01 | npm smoke在隔离prefix执行真实global布局安装；--installed运行固定25文件Skill launcher，使用npm生成的prefix入口。旧local安装报告仍直接进包并标not_run，staged模式保留；未造shim/改Skill。Node及隔离回归通过，实际npm/Source业务未跑 | 主代理整合完成 |
+| ACCEPTANCE-ISOLATION-01 | formal Lua/bridge、五个协议prototype及Source fixed oracle入口补齐owner用户环境；Source外层600秒、Cargo no-oneShot。Live工具Node77通过；Source runner/wrapper27通过，历史checker4失败另列 | core_evidence/data_engine已交回，主代理已核15文件；实际专用入口待跑 |
+| SOURCE-HISTORY-01 | historical checker的原ac8 runner/inputs/完整harness统一从contractRoot认证，测试从原Git blobs取冻结输入并验证篡改拒绝。55项Node通过、1 symlink权限skip；原pin/owner/失败/4137行/两差异不变 | data_engine已交回，主代理已核diff；这是历史checker修复，不是fresh Source通过 |
 | COVERAGE-01 | 9 crate共150个lib/bin/test声明；补漏emmy-adapter/binding-contracts/delivery共26目标待执行。binding lib合法0-case、两个harness=false helper不计业务pass；ignored单列 | 主代理；core_metadata已交回Data逐名汇总 |
 
 ## 下一步
 
-1. 保存本批Data产品和CLI夹具修复，保持唯一native队列，不在运行中切换副本或并发Cargo。
-2. 集中保存本批修正并固定新提交，执行两配置check及实际受影响用例；已通过且无新影响的CLI184/supervisor6和Data组不重复运行。
-3. 完成尚未执行的Data/CLI/Core integration、Windows、Source、Live和补漏26目标。Lua5.1可用；外部oracle/真实数据、symlink权限等ignored不算通过。自有隐藏窗口/子进程的离线Windows测试不等于真实游戏测试。
+1. 保存本批Windows pin、工具隔离和历史checker修正，保持唯一native队列，不在运行中切换副本或并发Cargo。
+2. 固定新提交，执行两配置check及Windows pin/Core四个相关调用回归；无新影响的CLI/Data已通过组不重复运行。
+3. 完成Source、Live和补漏26目标；Source十个native_oracle目标仅通过专用参考生成器，Live formal bridge需当前Release+Lua admission，五个protocol目标用各自wrapper，Windows两个suspended-child ignored需封存自有helper后执行。真实数据/权限ignored单列。自有窗口/子进程测试不等于真实游戏测试。
 4. correctness和资源回收通过后构建生产Release，实际npm安装匹配25文件Skill，执行no-home发现、installed Source及Agent Data。三项exporter/importer显式准备，不在测量内隐式构建；旧SQL私有metadata fixture不能拿来测新Agent。
 5. 再执行现有owned paired协议：完整任务、20对、不扣helper成本，CSV仅correctness；历史单pair、诊断profile和旧产物均不是当前性能验收。当前无≤0.30或全产品矩阵通过结论。
 6. 最后五循环依序为架构/业务/Skill、覆盖有效性与冗余、死代码、联合全仓、Rust原生度。需要真实配合的项目始终留在最后，不从历史计划推导操作授权。

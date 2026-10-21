@@ -332,6 +332,11 @@ test('Cargo runs every original target after a failure and keeps libtest serial'
   assert.deepEqual(args.slice(separator),['--','--test-threads=1']);
   assert.deepEqual(args.flatMap((value,index)=>value==='--test'?[args[index+1]]:[]),inputs.targets.map(t=>t.target));
 });
+test('both Cargo sides and the owned materializer isolate user state without one-shot builds',()=>{
+  const source=readFileSync(new URL('./run.mjs',import.meta.url),'utf8');
+  assert(/runCargo\(root,args,\{sourceRoot,owner:OWNER,oneShot:false,isolateUser:true,environment\}\)/.test(source));
+  assert(/ownedSpawnSync\('python',[\s\S]*?\{cwd:root,env:ownedUserEnvironment\(job\.directory\),evidence:job\.evidence,timeout:300000,maxBuffer:8<<20\}\)/.test(source));
+});
 test('difference report retains exact independent values and all differing ordinals',()=>{
   const rows=Array.from({length:40},(_,ordinal)=>({...row,ordinal}));
   const reference=[{file:'same.jsonl',rows}],actual=structuredClone(reference);

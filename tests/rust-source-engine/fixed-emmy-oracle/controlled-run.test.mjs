@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {existsSync,mkdtempSync,readFileSync,rmSync} from 'node:fs';
-import {tmpdir} from 'node:os';
+import {homedir,tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {ORACLE_TIMEOUT_MS,runControlledOracle} from './controlled-run.mjs';
 
@@ -12,13 +12,19 @@ function fixture(t){
 }
 test('whole oracle has one bounded owner without changing nested product budgets',t=>{
   const root=fixture(t);
+  assert.equal(ORACLE_TIMEOUT_MS,600000);
   const result=runControlledOracle(root,(command,args,options)=>{
     assert.equal(command,process.execPath);
     assert.deepEqual(args,[join(root,'tests/rust-source-engine/fixed-emmy-oracle/run.mjs')]);
     assert.equal(options.timeout,ORACLE_TIMEOUT_MS);
     assert.equal(options.orphanMs,30000);
     assert.equal(options.cwd,root);
-    assert.equal(options.env,process.env);
+    assert.notEqual(options.env,process.env);
+    for(const key of ['HOME','USERPROFILE','CODEX_HOME','APPDATA','LOCALAPPDATA','TEMP','TMP','LYCHEEDEV_HOME'])
+      assert(options.env[key].startsWith(root),key);
+    assert.equal(options.env.CARGO_HOME,process.env.CARGO_HOME??join(homedir(),'.cargo'));
+    assert.equal(options.env.RUSTUP_HOME,process.env.RUSTUP_HOME??join(homedir(),'.rustup'));
+    assert.equal(options.env.LYCHEEDEV_BIN,undefined);
     return {status:0,handlesReaped:true,logs:[]};
   });
   assert.equal(result.state,'passed');

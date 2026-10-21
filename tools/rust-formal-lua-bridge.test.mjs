@@ -17,6 +17,29 @@ const cases = ['normal','after_bind','after_prepare','after_commit','after_confi
 const output = (names=cases, summary='9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out;') => Buffer.from(
   `running ${names.length} tests\n${names.map(name=>`test ${name} ... ok`).join('\n')}\n\ntest result: ok. ${summary} finished in 0.20s\n`);
 
+test('formal and prototype entries retain owned user environments and existing bounded execution recipes',()=>{
+  const formal=readFileSync(join(root,'tools/rust-formal-lua.mjs'),'utf8');
+  assert.match(formal,/cleanLuaEnvironment\(ownedUserEnvironment\(job.directory, env\)\)/);
+  assert.match(formal,/cleanLuaEnvironment\(ownedUserEnvironment\(job.directory\)\)/);
+  const bridge=readFileSync(join(root,'tools/rust-formal-lua-bridge.mjs'),'utf8');
+  assert.match(bridge,/oneShot: false, isolateUser: true/);
+  assert.match(bridge,/\.\.\.ownedUserEnvironment\(job.directory\), LYCHEEDEV_FORMAL_LUA_BRIDGE_ADMISSION: admissionPath/);
+  assert.match(bridge,/timeout: 255000/);
+  for(const path of ['protocol/native-v1-prototype/run-rust.mjs','protocol/native-exact-commit-prototype/run-rust.mjs']){
+    const source=readFileSync(join(root,path),'utf8');
+    assert.match(source,/oneShot:false,isolateUser:true/);
+    assert.match(source,/--locked/);assert.match(source,/--offline/);
+  }
+  for(const [path,key] of [['protocol/native-lifecycle-prototype/run-rust.mjs','LYCHEEDEV_LIFECYCLE_PROTOTYPE_ROOT'],
+    ['protocol/native-lifecycle-prototype/run-negative-original.mjs','LYCHEEDEV_LIFECYCLE_NEGATIVE_ROOT'],
+    ['protocol/native-lifecycle-revision/run-rust.mjs','LYCHEEDEV_LIFECYCLE_REVISION_ROOT']]){
+    const source=readFileSync(join(root,path),'utf8');
+    assert.match(source,new RegExp(`\\.\\.\\.ownedUserEnvironment\\(evidence\\),${key}:root`));
+    assert.match(source,/timeout:300000/);assert(!source.includes('--one-shot'));
+    assert.match(source,/sourceTreeBefore=sourceDigest\(root\)/);assert.match(source,/actual-input-snapshot/);
+  }
+});
+
 test('selects exactly the current named integration artifact',()=>{
   const selected=selectTestExecutable(jsonl([{reason:'compiler-artifact',target:{name:'dependency'}},artifact,complete]),target);
   assert.equal(selected.executable,artifact.executable); assert.deepEqual(selected.row,artifact);

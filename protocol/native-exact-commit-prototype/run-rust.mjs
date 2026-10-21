@@ -18,7 +18,7 @@ const sources=join(evidence,'source-snapshot');mkdirSync(sources);
 for(const input of before){const path=join(root,input.path),target=join(sources,basename(input.path));assert(!existsSync(target));copyFileSync(path,target);assert.equal(hashFile(target),input.sha256);}
 try{
   const result=runCargo(root,['test','-p','lycheedev-live','--test','native_exact_commit_prototype','--locked','--offline','-j','1','--','--nocapture'],{
-    owner:'native-exact-commit-sealed',environment:{LYCHEEDEV_EXACT_PROTOTYPE_ROOT:root},onSuccess(invocation){
+    owner:'native-exact-commit-sealed',oneShot:false,isolateUser:true,environment:{LYCHEEDEV_EXACT_PROTOTYPE_ROOT:root},onSuccess(invocation){
       const after=snapshot();assert.deepEqual(after,before,'protocol input changed during compile/run');
       const lines=invocation.stdout.split(/\r?\n/).filter(line=>line.startsWith('EXACT_COMMIT_EVIDENCE='));assert.equal(lines.length,1);
       const testEvidence=contained(root,resolve(lines[0].slice('EXACT_COMMIT_EVIDENCE='.length)));

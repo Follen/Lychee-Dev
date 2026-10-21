@@ -148,17 +148,18 @@ export function inspectCurrentContract(evidenceRoot,contractRoot=ROOT){
     const path=join(contractRoot,file.path),data=readBounded(path);
     fail(data.length===file.bytes&&sha256(data)===file.sha256,`contract_source_changed:${file.path}`);
   }
-  // --contract-root may point at the preserved ac8 tree. Authenticate the
-  // original runner beside THIS checker as well as the reviewed source root.
+  // The runner, manifest and every harness input belong to the same preserved
+  // measured tree, independently of the current read-only checker location.
+  const harnessRoot=join(contractRoot,'tests/rust-source-engine/fixed-emmy-oracle');
   const runnerPin=pin.sourceFiles.find(file=>file.path==='tests/rust-source-engine/fixed-emmy-oracle/run.mjs');
-  fail(runnerPin&&hashFile(join(HERE,'run.mjs'))===runnerPin.sha256,'checker_runner_changed');
-  const inputs=readJSON(join(HERE,'inputs.json'));
-  const inputsSHA256=hashFile(join(HERE,'inputs.json'));
+  fail(runnerPin&&hashFile(join(harnessRoot,'run.mjs'))===runnerPin.sha256,'checker_runner_changed');
+  const inputs=readJSON(join(harnessRoot,'inputs.json'));
+  const inputsSHA256=hashFile(join(harnessRoot,'inputs.json'));
   // Authenticate the untouched 32-file historical harness as well as its manifest.
   fail(inputs.files.length===32,'harness_inventory');
   for(const file of inputs.files){
-    const path=resolve(HERE,file.path);
-    fail(inside(HERE,path),'harness_path');
+    const path=resolve(harnessRoot,file.path);
+    fail(inside(harnessRoot,path),'harness_path');
     const data=readBounded(path);
     fail(data.length===file.bytes&&sha256(data)===file.sha256,'harness_hash');
   }
@@ -223,7 +224,7 @@ export function inspectCurrentContract(evidenceRoot,contractRoot=ROOT){
       for(const [name,digest] of owner.seals)fail(hashFile(join(owner.root,name))===digest,'sealed_file_changed');
     }
     fail(hashFile(join(main.root,'fixed-oracle-report.json'))===pin.reportSHA256,'report_changed');
-    fail(hashFile(join(HERE,'run.mjs'))===runnerPin.sha256,'checker_runner_changed');
+    fail(hashFile(join(harnessRoot,'run.mjs'))===runnerPin.sha256,'checker_runner_changed');
     for(const file of pin.sourceFiles)fail(hashFile(join(contractRoot,file.path))===file.sha256,'contract_source_changed');
     return {schema:'lycheedev.emmy-current-contract-report.v1',state:'current-contract-passed-historical-raw-failed',
       contract:pin.identity,measuredCommit:pin.measuredCommit,measuredSourceTree:raw.sourceTree,

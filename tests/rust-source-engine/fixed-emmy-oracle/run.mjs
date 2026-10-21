@@ -6,7 +6,7 @@ import {createHash} from 'node:crypto';
 import {existsSync,lstatSync,mkdirSync,readFileSync,readdirSync,writeFileSync} from 'node:fs';
 import {dirname,join,relative,resolve} from 'node:path';
 import {beginScratch,contained,sha256} from '../../../tools/rust-disk.mjs';
-import {hashFile,runCargo,sourceDigest} from '../../../tools/rust-build.mjs';
+import {hashFile,ownedUserEnvironment,runCargo,sourceDigest} from '../../../tools/rust-build.mjs';
 import {inspectEmmy} from '../../../tools/rust-emmy-identity.mjs';
 import {ownedSpawnSync} from '../../../tools/rust-owned-process.mjs';
 
@@ -189,7 +189,7 @@ export function run(root=process.cwd()){
   try{
     handlesReaped=false;
     const prepared=ownedSpawnSync('python',['-I','-B','-S',join(HERE,'materialize.py'),'--root',root,'--stage',stage,'--receipt',job.receipt],
-      {cwd:root,env:process.env,evidence:job.evidence,timeout:300000,maxBuffer:8<<20});
+      {cwd:root,env:ownedUserEnvironment(job.directory),evidence:job.evidence,timeout:300000,maxBuffer:8<<20});
     logs.push(...(prepared.logs||[]));handlesReaped=prepared.handlesReaped===true;
     assert(handlesReaped&&!prepared.error&&prepared.status===0,'oracle.reference_materialize_failed');
     const historical=inspectEmmy(stage);
@@ -202,7 +202,7 @@ export function run(root=process.cwd()){
     const invoke=(sourceRoot,environment,role)=>{
       handlesReaped=false;
       try{
-        const result=runCargo(root,args,{sourceRoot,owner:OWNER,oneShot:true,environment});
+        const result=runCargo(root,args,{sourceRoot,owner:OWNER,oneShot:false,isolateUser:true,environment});
         handlesReaped=childReaped(root,result.buildEvidence);
         assert(handlesReaped,'oracle.cargo_reap_unverified');
         report.invocations.push({role,state:'succeeded',buildEvidence:result.buildEvidence,inputHashes:result.inputHashes});

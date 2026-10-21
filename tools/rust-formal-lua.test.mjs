@@ -2,12 +2,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BASE, PREVIOUS_BASE, CHANGED_FIXTURES, CHANGED_ADDON, BRIDGE_GAPS, LIMITS, MANIFEST_SHA256, ORACLE, PROFILES, RELEASE_FIELDS_SHA256, SUPPORT as ORACLE_SUPPORT, authenticate, cases, cleanLuaEnvironment, evaluate, gitBlob, hash, fixturePath, manifest, materialize, processPassed, runCases, verifyMaterial, verifyOwnerEvidence, verifyUnifiedTOC } from '../tests/rust-parity/formal-lua-3.2.3/assertions.mjs';
-import { sourceDigest } from './rust-build.mjs';
+import { ownedUserEnvironment, sourceDigest } from './rust-build.mjs';
 import { SUPPORT as RUNNER_SUPPORT, verifyCandidateArtifact } from './rust-formal-lua.mjs';
 import * as historical from '../tests/rust-parity/formal-lua-3.2.2/assertions.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -16,6 +16,20 @@ const proof = () => ({ rootReaped: true, treeReaped: true, handlesClosed: true, 
 const result = row => ({ status: 0, handlesReaped: true, proof: proof(), stdout: Buffer.from(row.completion), stderr: Buffer.alloc(0), logs: ['owned-process.receipt.json'] });
 function scratch(fn) { const dir = mkdtempSync(join(tmpdir(), 'lycheedev-formal-lua-checker-')); try { return fn(dir); } finally { rmSync(dir, { recursive: true, force: true }); } }
 function copied(fn) { return scratch(dir => { cpSync(join(root, BASE), join(dir, BASE), { recursive: true }); cpSync(join(root, PREVIOUS_BASE), join(dir, PREVIOUS_BASE), { recursive: true }); cpSync(join(root, 'addon'), join(dir, 'addon'), { recursive: true }); return fn(dir); }); }
+
+test('owned Lua environment reuses Cargo isolation while keeping explicit fixture inputs and offline compiler caches', () => scratch(directory => {
+  const parent = {PATH: 'system', HOME: 'foreign-home', userprofile: 'foreign-user', CODEX_HOME: 'foreign-agent',
+    APPDATA: 'foreign-apps', LOCALAPPDATA: 'foreign-local', TEMP: 'foreign-temp', TMP: 'foreign-tmp',
+    CARGO_HOME: 'offline-cargo', RUSTUP_HOME: 'offline-rustup', LYCHEEDEV_BIN: 'foreign-cli', LYCHEEDEV_HOME: 'foreign-workspace',
+    LYCHEEDEV_LUA51: 'fixed-lua', LYCHEEDEV_FORMAL_LUA_BRIDGE_ADMISSION: 'owned-admission', LUA_INIT: 'foreign()', LUA_PATH: 'foreign/?.lua'};
+  const before = structuredClone(parent), env = cleanLuaEnvironment(ownedUserEnvironment(directory, parent));
+  assert.deepEqual(parent, before);
+  for (const key of ['HOME','USERPROFILE','CODEX_HOME','APPDATA','LOCALAPPDATA','TEMP','TMP','LYCHEEDEV_HOME']) assert(env[key].startsWith(directory));
+  for (const key of ['HOME','TEMP','APPDATA','LOCALAPPDATA']) assert(existsSync(env[key]));
+  assert.equal(env.userprofile, undefined); assert.equal(env.LYCHEEDEV_BIN, undefined); assert.equal(env.LUA_INIT, undefined);
+  for (const key of ['PATH','CARGO_HOME','RUSTUP_HOME','LYCHEEDEV_LUA51','LYCHEEDEV_FORMAL_LUA_BRIDGE_ADMISSION']) assert.equal(env[key], parent[key]);
+  assert.equal(env.LUA_PATH, ''); assert.equal(env.LUA_CPATH, '');
+}));
 
 test('manifest and all 113 source records match immutable Git objects byte for byte', () => {
   const m = manifest(root); assert.equal(hash(readFileSync(join(root, BASE, 'manifest.json'))), MANIFEST_SHA256);
