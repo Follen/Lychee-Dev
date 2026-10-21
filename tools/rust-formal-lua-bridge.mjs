@@ -9,7 +9,7 @@ import {ownedUserEnvironment, runCargo, sourceDigest, verifyArtifact} from './ru
 import {ownedSpawnSync} from './rust-owned-process.mjs';
 import {verifyCandidateArtifact, verifyInterpreter} from './rust-formal-lua.mjs';
 import {BASE, ORACLE, MANIFEST_SHA256, RELEASE_FIELDS_SHA256, SUPPORT as ORACLE_SUPPORT, authenticate, cleanLuaEnvironment, hash, materialize,
-  processPassed, processReaped, regular, verifyMaterial, verifyOwnerEvidence} from '../tests/rust-parity/formal-lua-3.2.3/assertions.mjs';
+  processPassed, processReaped, regular, verifyMaterial, verifyOwnerEvidence} from '../tests/rust-parity/formal-lua-3.2.4/assertions.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // Optional paths select sealed records and a fresh output directory, never a
@@ -167,7 +167,7 @@ export function main(argv = []) {
       previousOracle: inputs.previousOracle, increment: inputs.increment, goTest: 'TestSlotDriverLuaRecoveryWithoutBusinessReplay', counts, lifetimes,
       testBinarySHA256: test.binarySHA256, testIdentity, candidateArtifactSHA256: candidate.artifactSHA256,
       interpreterReportSHA256: runtime.reportSHA256, handlesReaped,
-      scope: 'Real formal Rust Driver, codec, DurableChannelJournal and authenticated fixed Go 3.2.3 Lua. Readiness/clock/input transport are explicit fixtures. No real client or the two other deferred bridge tests. Inner handles use existing standard-library/JobGuard Drop; no independently checked inner-handle-close claim.'});
+      scope: 'Real formal Rust Driver, codec, DurableChannelJournal and authenticated fixed Go 3.2.4 Lua. Readiness/clock/input transport are explicit fixtures. No real client or the two other deferred bridge tests. Inner handles use existing standard-library/JobGuard Drop; no independently checked inner-handle-close claim.'});
     succeeded = true;
   } catch (error) {
     failure = error;

@@ -7,7 +7,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { loadCliContractOracle } from '../tests/rust-parity/cli-contract-oracle-3.2.3.mjs';
+import { loadCliContractOracle } from '../tests/rust-parity/cli-contract-oracle-3.2.4.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -49,8 +49,7 @@ for (const command of describe()) {
 }
 // Recognize documented commands from the immutable target as well as the
 // candidate. A missing entire group must not make its references disappear.
-const target = JSON.parse(readFileSync(join(repository, 'tests/rust-parity/go-3.2.2.manifest.json'), 'utf8'));
-if (target.oracle?.commit !== '0bec60e4406f5d5dc155ee25cef44f9a710e37e8') throw new Error('unexpected target oracle');
+const target = loadCliContractOracle(readFileSync(join(repository, 'tests/rust-parity/go-3.2.0.manifest.json')));
 const knownPaths = new Set([...target.commands.map(command => command.path), ...contracts.keys()]);
 const oneTokenPaths = new Set([...knownPaths].filter(path => !path.includes(' ')));
 

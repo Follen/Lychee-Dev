@@ -6,16 +6,17 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symli
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BASE, PREVIOUS_BASE, CHANGED_FIXTURES, CHANGED_ADDON, BRIDGE_GAPS, LIMITS, MANIFEST_SHA256, ORACLE, PROFILES, RELEASE_FIELDS_SHA256, SUPPORT as ORACLE_SUPPORT, authenticate, cases, cleanLuaEnvironment, evaluate, gitBlob, hash, fixturePath, manifest, materialize, processPassed, runCases, verifyMaterial, verifyOwnerEvidence, verifyUnifiedTOC } from '../tests/rust-parity/formal-lua-3.2.3/assertions.mjs';
+import { BASE, PREVIOUS_BASE, HISTORICAL_BASE, CHANGED_FIXTURES, CHANGED_ADDON, BRIDGE_GAPS, LIMITS, MANIFEST_SHA256, ORACLE, PROFILES, RELEASE_FIELDS_SHA256, SUPPORT as ORACLE_SUPPORT, authenticate, cases, cleanLuaEnvironment, evaluate, gitBlob, hash, fixturePath, manifest, materialize, processPassed, runCases, verifyMaterial, verifyOwnerEvidence, verifyUnifiedTOC } from '../tests/rust-parity/formal-lua-3.2.4/assertions.mjs';
 import { ownedUserEnvironment, sourceDigest } from './rust-build.mjs';
 import { SUPPORT as RUNNER_SUPPORT, verifyCandidateArtifact } from './rust-formal-lua.mjs';
-import * as historical from '../tests/rust-parity/formal-lua-3.2.2/assertions.mjs';
+import * as historical from '../tests/rust-parity/formal-lua-3.2.3/assertions.mjs';
+import * as original from '../tests/rust-parity/formal-lua-3.2.2/assertions.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const fixed = authenticate(root), plan = cases(fixed);
 const proof = () => ({ rootReaped: true, treeReaped: true, handlesClosed: true, toolIdentityLocksClosed: true, outputReadersComplete: true, activeProcesses: 0, forced: false, outputLimit: false });
 const result = row => ({ status: 0, handlesReaped: true, proof: proof(), stdout: Buffer.from(row.completion), stderr: Buffer.alloc(0), logs: ['owned-process.receipt.json'] });
 function scratch(fn) { const dir = mkdtempSync(join(tmpdir(), 'lycheedev-formal-lua-checker-')); try { return fn(dir); } finally { rmSync(dir, { recursive: true, force: true }); } }
-function copied(fn) { return scratch(dir => { cpSync(join(root, BASE), join(dir, BASE), { recursive: true }); cpSync(join(root, PREVIOUS_BASE), join(dir, PREVIOUS_BASE), { recursive: true }); cpSync(join(root, 'addon'), join(dir, 'addon'), { recursive: true }); return fn(dir); }); }
+function copied(fn) { return scratch(dir => { for (const base of [BASE, PREVIOUS_BASE, HISTORICAL_BASE]) cpSync(join(root, base), join(dir, base), { recursive: true }); cpSync(join(root, 'addon'), join(dir, 'addon'), { recursive: true }); return fn(dir); }); }
 
 test('owned Lua environment reuses Cargo isolation while keeping explicit fixture inputs and offline compiler caches', () => scratch(directory => {
   const parent = {PATH: 'system', HOME: 'foreign-home', userprofile: 'foreign-user', CODEX_HOME: 'foreign-agent',
@@ -263,13 +264,13 @@ test('artifact command uses the actual producer cargo prefix exactly once', () =
 });
 
 // Current release authentication never weakens source-byte custody.
-test('3.2.3 has two exact 3.5.0 release allowances without relabeling historical manifests', () => {
+test('3.2.4 has two exact 3.5.0 release allowances without relabeling historical manifests', () => {
   const m = manifest(root);
-  assert.equal(m.oracle.commit, '3766f9cacb52e93a803a626187e2a1d54a445468');
+  assert.equal(m.oracle.commit, '29bdbdaff5f064ec212ff2064380b1ccac652eda');
   assert.equal(m.previousOracle.commit, historical.ORACLE);
   assert.equal(hash(readFileSync(join(root, PREVIOUS_BASE, 'manifest.json'))), historical.MANIFEST_SHA256);
   assert.deepEqual(m.retainedReleaseFields.map(row => row.path), ['addon/Core/Runtime.lua', 'addon/Lychee Dev.toc']);
-  assert.equal(hash(readFileSync(join(root, 'tests/rust-parity/formal-lua/manifest.json'))), historical.manifest(root).historicalOracle.manifestSHA256);
+  assert.equal(hash(readFileSync(join(root, 'tests/rust-parity/formal-lua/manifest.json'))), original.manifest(root).historicalOracle.manifestSHA256);
   assert.deepEqual(fixed.retainedReleaseFields, m.retainedReleaseFields);
 });
 test('retained release allowance rejects every additional source edit', () => copied(dir => {
@@ -291,7 +292,7 @@ test('current static TOC requires both Retail interfaces and original client gat
   assert(readFileSync(fixturePath(root, 'tests/addon/env.lua'), 'utf8').includes('120105'));
 }));
 
-test('the entire 3.2.3 increment is exactly four one-line version changes', () => {
+test('the 3.2.4 increment contains only the exact combat change and four version literals', () => {
   const current = manifest(root), previous = historical.manifest(root);
   for (const key of ['fixtures', 'candidateAddon']) {
     const changed = [];
@@ -301,32 +302,39 @@ test('the entire 3.2.3 increment is exactly four one-line version changes', () =
       changed.push(row.path);
       const bytes = execFileSync('git', ['cat-file', 'blob', `${ORACLE}:${row.path}`], { cwd: root, timeout: 10000, maxBuffer: LIMITS.file });
       const text = bytes.toString('utf8');
-      assert.equal(text.split('3.2.3').length, 2, row.path);
-      const restored = Buffer.from(text.replace('3.2.3', '3.2.2'));
-      assert.equal(restored.length, old.bytes); assert.equal(hash(restored), old.sha256); assert.equal(gitBlob(restored), old.gitBlob);
+      if (['tests/addon/env.lua', 'tests/addon/t_about.lua', 'addon/Core/Runtime.lua', 'addon/Lychee Dev.toc'].includes(row.path)) {
+        assert.equal(text.split('3.2.4').length, 2, row.path);
+        const restored = Buffer.from(text.replace('3.2.4', '3.2.3'));
+        assert.equal(restored.length, old.bytes); assert.equal(hash(restored), old.sha256); assert.equal(gitBlob(restored), old.gitBlob);
+      } else {
+        assert(['tests/addon/t_focus_bindings.lua', 'addon/Bridge/FocusBindings.lua', 'addon/Bridge/InputState.lua'].includes(row.path));
+        assert.deepEqual(bytes, readFileSync(join(root, row.path)), row.path);
+      }
     }
     assert.deepEqual(changed, key === 'fixtures' ? CHANGED_FIXTURES : CHANGED_ADDON);
   }
   assert.equal(current.increment.authenticatedGitObjects, 113);
-  assert.equal(current.increment.reusedFixtures, 56); assert.equal(current.increment.unchangedAddon, 53);
+  assert.equal(current.increment.reusedFixtures, 55); assert.equal(current.increment.unchangedAddon, 51);
 });
-test('current materialization stages original 3.2.3 fixtures and preserves historical 3.2.2 bytes', () => scratch(dir => {
+test('current materialization stages original 3.2.4 fixtures and preserves historical 3.2.3 bytes', () => scratch(dir => {
   const target = join(dir, 'stage'); materialize(root, target, fixed);
   for (const row of fixed.fixtures) {
     const staged = readFileSync(join(target, row.path));
     assert.equal(hash(staged), row.sha256); assert.equal(gitBlob(staged), row.gitBlob);
     assert.deepEqual(staged, readFileSync(fixturePath(root, row.path)));
     if (CHANGED_FIXTURES.includes(row.path)) {
-      const previous = readFileSync(join(root, PREVIOUS_BASE, 'oracle', row.path));
-      assert(previous.includes('3.2.2')); assert(staged.includes('3.2.3'));
+      const previous = readFileSync(historical.fixturePath(root, row.path));
+      if (row.path !== 'tests/addon/t_focus_bindings.lua') {
+        assert(previous.includes('3.2.3')); assert(staged.includes('3.2.4'));
+      }
       assert.notDeepEqual(previous, staged);
     }
   }
   for (const field of fixed.retainedReleaseFields) {
     assert(readFileSync(join(target, field.path)).includes(field.retainedText));
-    assert(field.expectedText.includes('3.2.3')); assert(field.retainedText.includes('3.5.0'));
+    assert(field.expectedText.includes('3.2.4')); assert(field.retainedText.includes('3.5.0'));
   }
-  assert.deepEqual(cases(fixed), historical.cases(historical.authenticate(root)));
+  assert.deepEqual(cases(fixed), historical.cases({fixtures: historical.manifest(root).fixtures}));
   assert.equal(runCases, historical.runCases); assert.equal(verifyMaterial, historical.verifyMaterial);
 }));
 test('new and reused fixture custody rejects rollback, tampering, omission, additions and rewritten overlays', () => {
@@ -342,7 +350,8 @@ test('new and reused fixture custody rejects rollback, tampering, omission, addi
   ]) copied(dir => { mutate(dir); assert.throws(() => authenticate(dir)); });
 });
 test('materialization refuses a caller-supplied stale or forged identity before creating the target', () => scratch(dir => {
-  assert.throws(() => materialize(root, join(dir, 'old'), historical.authenticate(root)), /materialize_input_identity/);
+  const stale = {...fixed, oracle: historical.ORACLE, manifestSHA256: historical.MANIFEST_SHA256, fixtures: historical.manifest(root).fixtures};
+  assert.throws(() => materialize(root, join(dir, 'old'), stale), /materialize_input_identity/);
   assert.throws(() => materialize(root, join(dir, 'forged'), { ...fixed, oracle: historical.ORACLE }), /materialize_input_identity/);
   const target = join(dir, 'current'); materialize(root, target, fixed);
   writeFileSync(join(target, 'unexpected.lua'), 'assert(true)');
@@ -354,7 +363,7 @@ test('current test map binds all original Go functions and only current not-run 
   for (const entry of map.tests) {
     const source = fixed.fixtures.find(row => row.path === entry.goSource);
     assert.equal(entry.sourceSHA256, source.sha256); assert.equal(entry.sourceGitBlob, source.gitBlob);
-    assert.equal(entry.executionEvidence, 'NOT_RUN for Go 3.2.3 until actual current-oracle execution is sealed');
+    assert.equal(entry.executionEvidence, 'NOT_RUN for Go 3.2.4 until actual current-oracle execution is sealed');
   }
 });
 test('interpreter support binds both identity generations and the new exact release overlay', () => {
@@ -365,5 +374,5 @@ test('interpreter support binds both identity generations and the new exact rele
   const source = readFileSync(join(root, 'tools/rust-formal-lua.mjs'), 'utf8');
   assert.match(source, /report\.oracle, ORACLE/); assert.match(source, /report\.manifestSHA256, MANIFEST_SHA256/);
   assert.match(source, /receipt\.inputHashes\.oracle, ORACLE/);
-  assert.match(source, /scope: '216 fixed Go 3\.2\.3 addon Lua suite\/profile executions plus four/);
+  assert.match(source, /scope: '216 fixed Go 3\.2\.4 addon Lua suite\/profile executions plus four/);
 });

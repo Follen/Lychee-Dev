@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {RESULT_STRING_BYTES, HISTORY_EVENTS, REPEATS, SCOPES, APPEND_PHASES, verifyPerformanceReport} from './live-contract.mjs';
-import {ORACLE} from '../rust-parity/formal-lua-3.2.3/assertions.mjs';
+import {ORACLE} from '../rust-parity/formal-lua-3.2.4/assertions.mjs';
 import {TEST, SUPPORT, performancePaths, selectTestExecutable, verifyTestOutput} from '../../tools/rust-live-offline-performance.mjs';
 const root=fileURLToPath(new URL('../..',import.meta.url));
 const clone=value=>structuredClone(value);

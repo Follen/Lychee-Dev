@@ -110,7 +110,7 @@ function makeReport(t, originalRoot = 'C:\\project', selectedIdentity) {
   const skill = loadDataSkillContract(selectedIdentity), archived = selectedIdentity ? historicalSkillBytes(skill) : null;
   const config = {root: originalRoot, runnerRoot: 'C:\\runner-only', skillIdentity: dataSkillIdentity(skill), scratch, evidence: 'C:\\project\\evidence\\owner', platform: 'win32', arch: 'x64', node: 'C:\\node24\\node.exe', prefix: win32.join(scratch, 'npm-prefix'), sourcePackage: 'C:\\project\\candidate\\package', version: '3.5.0-rust-test', npm: {path: 'C:\\node24\\node_modules\\npm\\bin\\npm-cli.js'}, exporters: {executables: [{path: 'C:\\project\\target\\debug\\deps\\catalog.exe'}, {path: 'C:\\project\\target\\debug\\deps\\partial.exe'}]}, packageFiles: [{path: 'package.json', bytes: 2, sha256: digest('{}')}, ...skill.files.map(row => ({path: 'payload/skill/' + row.path, bytes: row.bytes, sha256: row.sha256}))]};
   config.launcher = win32.join(config.prefix, 'node_modules/lycheedev/payload/skill/scripts/lycheedev.mjs'); config.tgz = win32.join(scratch, `lycheedev-${config.version}.tgz`); config.packageSHA256 = inventoryHash(config.packageFiles);
-  const report = {schema: 'lycheedev.skill-data-usage.v2', state: 'passed_selected_data_workflow', goContract: workflow.goContract, skillTree: 'b9e162ace7abe7ea4a2feecef822283767eb1210', completeSkillAcceptance: false, config, checks: CHECKS.map(caseId => ({caseId, state: 'passed'})), pendingTasks: pendingDataTasks(workflow), fixtures: {}, seeded: {}, workspaces: {}, queries: {}, keys: {}, proofs: {}, commands: [], completedTasks: [{taskId: 'g323-data-query', runtimeVerified: true, basis: 'actual_owned_npm_installed_skill_and_independent_full_capture_replay', captures: 16}]};
+  const report = {schema: 'lycheedev.skill-data-usage.v2', state: 'passed_selected_data_workflow', goContract: skill.goContract, skillTree: 'b9e162ace7abe7ea4a2feecef822283767eb1210', completeSkillAcceptance: false, config, checks: CHECKS.map(caseId => ({caseId, state: 'passed'})), pendingTasks: pendingDataTasks(workflow), fixtures: {}, seeded: {}, workspaces: {}, queries: {}, keys: {}, proofs: {}, commands: [], completedTasks: [{taskId: 'g323-data-query', runtimeVerified: true, basis: 'actual_owned_npm_installed_skill_and_independent_full_capture_replay', captures: 16}]};
   report.skillProof = {...dataSkillIdentity(skill), files: skill.files.map((row, index) => ({path: row.path,
     archive: archiveBytes(evidence, `installed-skill-${index}.bin`, archived ? archived.get(row.path) : readFileSync(join(root, 'skills/lycheedev', row.path)))}))};
   const fixtures = {}, envelopes = {}; let serial = 0;
@@ -162,13 +162,13 @@ function makeReport(t, originalRoot = 'C:\\project', selectedIdentity) {
 }
 
 test('Data fixed IN rows, unordered order and CSV bytes remain exact', () => { assert.equal(CSV.length, 76); assert.equal(digest(CSV), CSV_SHA256); assert.equal(CASES.length, 11); assert.equal(CHECKS.length, 26); assert.deepEqual(requestFor(CASES[1]).parameters, PARAMETERS); });
-test('candidate authenticates all25 source files separately from unchanged Go323 oracle', () => {
+test('candidate authenticates all25 source files separately from unchanged Go324 oracle', () => {
   const contract = assertDataSkillDirectory(join(root, 'skills/lycheedev'));
   assert.equal(contract.files.length, 25); assert.equal(skillTreeIdentity(contract.files), dataSkillIdentity().candidateTree);
-  const original = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines/go3.2.3-skill.json')));
+  const original = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines/go3.2.4-skill.json')));
   assert.equal(original.files.length, 23); assert.equal(skillTreeIdentity(original.files), 'b9e162ace7abe7ea4a2feecef822283767eb1210');
   assert.equal(original.files.find(row => row.path === 'SKILL.md').sha256, 'cbde6b4bb2b598137cfe55c0556765b28890b036e406c1877700a05a33fb6957');
-  assert.equal(contract.files.find(row => row.path === 'SKILL.md').sha256, 'c15a601c0cc7c69a94bb57c03554cb448677a7540706f73bbe65f3fe9a267188');
+  assert.equal(contract.files.find(row => row.path === 'SKILL.md').sha256, 'ec1f36a3b69e59b2247ef4513716fdd9fd49fccca73fb0fb9519715a73400b1c');
   for (const row of original.files.filter(row => ['scripts/lycheedev.mjs', 'agents/openai.yaml'].includes(row.path))) assert.deepEqual(contract.files.find(current => current.path === row.path), row);
 });
 test('candidate rejects same-length tampering even with a forged matching SHA256', () => {
@@ -295,8 +295,10 @@ test('historical archived Data report still replays all checks against its origi
   const f = makeReport(t, 'C:\\project', dataSkillIdentity(historicalSkill));
   assert.equal(f.verify(), true); assert.equal(f.report.commands.length, 42); assert.equal(f.report.checks.length, 26);
   assert.notEqual(f.report.config.skillIdentity.candidateTree, dataSkillIdentity().candidateTree);
+  assert.equal(f.report.goContract, historicalSkill.goContract);
+  const originalGo = f.report.goContract; f.report.goContract = dataSkillIdentity().goContract; assert.throws(f.verify, /authenticated Skill baseline/); f.report.goContract = originalGo;
   f.report.config.skillIdentity = dataSkillIdentity();
-  assert.throws(f.verify, /independently fixed candidate/);
+  assert.throws(f.verify, /authenticated Skill baseline/);
 });
 test('unknown missing null and mixed candidate identities cannot silently select a newer baseline', t => {
   for (const identity of [null, {}, {...dataSkillIdentity(), candidateSourceCommit: 'f'.repeat(40)},
@@ -304,7 +306,7 @@ test('unknown missing null and mixed candidate identities cannot silently select
   for (const identity of [undefined, null, {}, {...dataSkillIdentity(), candidateTree: historicalSkill.tree}]) {
     const f = makeReport(t); f.report.config.skillIdentity = identity; assert.throws(f.verify);
   }
-  const f = makeReport(t); f.report.config.skillIdentity = dataSkillIdentity(historicalSkill); assert.throws(f.verify, /independently fixed candidate/);
+  const f = makeReport(t); f.report.config.skillIdentity = dataSkillIdentity(historicalSkill); assert.throws(f.verify, /authenticated Skill baseline/);
 });
 
 test('simplified 6187 Skill keeps its original full bytes and archived report identity', t => {
@@ -320,12 +322,13 @@ test('simplified 6187 Skill keeps its original full bytes and archived report id
 
 test('current Skill identity is a fixed Git source, not learned from candidate bytes', () => {
   const current = loadDataSkillContract();
-  assert.equal(current.sourceCommit, '75cd762e31df0dfd614c8687f9fd3fdb26b6a7f7');
-  assert.equal(current.tree, 'c1768f92d55b454cafb202eb6c2835af1ecc2811');
-  const changed = current.files.filter((row, i) => row.gitBlob !== simplifiedSkill.files[i].gitBlob).map(row => row.path);
-  assert.deepEqual(changed, ['SKILL.md', 'references/commands.md', 'references/data-hotfix.md',
-    'references/data-investigation.md', 'references/data-query-recipes.md',
-    'references/data-recovery.md', 'references/data-tables.md']);
+  assert.equal(current.sourceCommit, 'bd8196aa68ba1570652bb9540a01bbcdb4628638');
+  assert.equal(current.tree, '4eace74fd90ebc4cc12b4628bb58c6f74262ccb5');
+  const cutover = JSON.parse(readFileSync(join(root, 'tests/rust-skill-usage/baselines/rust-agent-cutover-recovered-skill.json')));
+  assert.equal(loadDataSkillContract(dataSkillIdentity(cutover)).tree, 'c1768f92d55b454cafb202eb6c2835af1ecc2811');
+  assert.throws(() => assertDataSkillInventory(cutover.files.map(({path, bytes, sha256}) => ({path: 'payload/skill/' + path, bytes, sha256}))), /independently fixed candidate/);
+  const changed = current.files.filter((row, i) => row.gitBlob !== cutover.files[i].gitBlob).map(row => row.path);
+  assert.deepEqual(changed, ['SKILL.md', 'references/rust-candidate-entry.md', 'references/source-candidate.md']);
   assert.equal(execFileSync('git', ['--no-replace-objects', 'rev-parse', `${current.sourceCommit}:skills/lycheedev`], {cwd:root, encoding:'utf8'}).trim(), current.tree);
   for (const row of current.files) {
     const bytes = execFileSync('git', ['--no-replace-objects', 'cat-file', 'blob', `${current.sourceCommit}:skills/lycheedev/${row.path}`], {cwd:root, maxBuffer:1<<20});

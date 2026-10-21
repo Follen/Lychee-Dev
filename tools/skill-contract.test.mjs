@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { stageSkill } from './rust-skill.mjs';
-import { loadCliContractOracle } from '../tests/rust-parity/cli-contract-oracle-3.2.3.mjs';
+import { loadCliContractOracle } from '../tests/rust-parity/cli-contract-oracle-3.2.4.mjs';
 
 const contractFile = resolve('tests/rust-parity/go-3.2.0.manifest.json');
 const oracle = JSON.parse(readFileSync(contractFile, 'utf8'));

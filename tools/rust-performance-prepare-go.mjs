@@ -6,8 +6,8 @@ import {dirname, join, resolve} from 'node:path';
 import {performance} from 'node:perf_hooks';
 import {beginScratch, contained} from './rust-disk.mjs';
 import {ownedSpawnSync} from './rust-owned-process.mjs';
-import {hashFile} from './rust-build.mjs';
-import {GO_COMMIT} from '../tests/rust-performance-paired/contract.mjs';
+import {hashFile, ownedUserEnvironment} from './rust-build.mjs';
+import {GO_COMMIT, GO_VERSION} from '../tests/rust-performance-paired/contract.mjs';
 import {inventory, verifyGoMetadata, verifyGoPackage} from '../tests/rust-performance-paired/inputs.mjs';
 
 const [sourceArg, archiveArg, npmArg, outputArg, ...extra] = process.argv.slice(2);
@@ -17,7 +17,7 @@ const root = resolve('.'), source = resolve(sourceArg), archive = resolve(archiv
 assert(!existsSync(output), 'new artifact directory required');
 const job = beginScratch(root, 'paired-fixed-go-prepare', {command: process.argv, inputs: {commit: GO_COMMIT, archiveSHA256: hashFile(archive), npmCliSHA256: hashFile(npm)}, admissionOptions: {requiredBytes: 1 << 30, scratchReserveBytes: 1 << 30}});
 let state = 'failed', handlesReaped = true; const calls = [], start = performance.now();
-const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith('GIT_') && key.toUpperCase() !== 'GCM_INTERACTIVE' && !/^(GOCACHE|GOMODCACHE|GOTMPDIR|GOENV|GOTOOLCHAIN)$/i.test(key)));
+const env = ownedUserEnvironment(job.directory, Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith('GIT_') && key.toUpperCase() !== 'GCM_INTERACTIVE' && !/^(GOCACHE|GOMODCACHE|GOTMPDIR|GOENV|GOTOOLCHAIN)$/i.test(key))));
 Object.assign(env, {GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: 'NUL', GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_NO_REPLACE_OBJECTS: '1', GOTOOLCHAIN: 'local', GOENV: 'off', GOCACHE: join(job.directory, 'go-cache'), GOMODCACHE: join(job.directory, 'go-mod-cache'), GOTMPDIR: join(job.directory, 'go-tmp')});
 function run(command, args, timeout = 60000) {
   handlesReaped = false; const begin = performance.now();
@@ -44,8 +44,8 @@ try {
   for (const row of inventory(packageRoot).rows) {
     const target = join(output, 'dev-npm-stage', row.path); mkdirSync(dirname(target), {recursive: true}); copyFileSync(join(packageRoot, row.path), target);
   }
-  const tarball = join(prepared, 'lycheedev-local-3.2.3.tgz'); copyFileSync(tarball, join(output, 'lycheedev-local-3.2.3.tgz'));
-  assert.equal(hashFile(join(output, 'lycheedev-local-3.2.3.tgz')), hashFile(tarball));
+  const tarballName = `lycheedev-local-${GO_VERSION}.tgz`, tarball = join(prepared, tarballName); copyFileSync(tarball, join(output, tarballName));
+  assert.equal(hashFile(join(output, tarballName)), hashFile(tarball));
   const preserved = verifyGoPackage(join(output, 'dev-npm-stage'), archive); assert.equal(preserved.packageSHA256, verified.packageSHA256);
   const record = {schema: 'lycheedev.fixed-go-performance-artifact.v1', commit: GO_COMMIT, privateDevelopmentPackage: true, publishEligible: false, package: preserved, build, source, sourceCleanBeforeAndAfter: true, toolchain: 'go1.27.1', preparationWallMillis: performance.now() - start, calls, receipt: job.receipt, tarballSHA256: hashFile(tarball)};
   writeFileSync(join(output, 'artifact.json'), JSON.stringify(record, null, 2) + '\n');

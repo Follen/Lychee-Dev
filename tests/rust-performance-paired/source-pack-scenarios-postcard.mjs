@@ -7,10 +7,9 @@ import {fileURLToPath} from 'node:url';
 import {beginScratch, sha256} from '../../tools/rust-disk.mjs';
 import {hashFile} from '../../tools/rust-build.mjs';
 import {splitIndexEvidence, INDEX_BYTES} from '../../tools/rust-source-pack-evidence.mjs';
-import {GO_COMMIT} from './contract.mjs';
 import {verifyGoPackage} from './inputs.mjs';
 import {openGoCustody} from './source-pack-custody.mjs';
-import {candidateIdentity, verifyCandidateRecord, indexEvidence, evidenceFiles, assertDiskPolicy, RUNNER_FILES} from './source-pack-scenarios.mjs';
+import {HISTORICAL_GO_BASELINE, candidateIdentity, verifyCandidateRecord, indexEvidence, evidenceFiles, assertDiskPolicy, RUNNER_FILES} from './source-pack-scenarios.mjs';
 import {readFactDelta, comparedRustIndex} from './read-fact-delta.mjs';
 import {POSTCARD_LAYOUT, POSTCARD_INDEX_LAYOUT, preparePostcardIndexExport, runPostcardIndexExport, comparePostcardIndex, capturePostcardIndexExport, assertPostcardOutputBudget, LIMITS, preparePostcardExport, runPostcardExport, capturePostcardExport, verifyPostcardCustody, verifyPostcardExporter, readPostcardBytes} from './read-fact-delta-postcard.mjs';
 
@@ -35,9 +34,9 @@ export function authenticatePostcardGo(input) {
   assert.equal(observation.request?.go?.packageSHA256, input.packageSHA256, 'Go observation producer differs');
   const matching = observation.scenarios?.filter(row => row.facts?.goCustody && JSON.stringify(row.facts.goCustody) === JSON.stringify(input.reference));
   assert(matching?.length >= 1, 'Go custody must be retained by the authenticated independent Go observation');
-  const producer = verifyGoPackage(input.packageRoot, input.luaLSArchive); assert.equal(producer.packageSHA256, input.packageSHA256);
+  const producer = verifyGoPackage(input.packageRoot, input.luaLSArchive, HISTORICAL_GO_BASELINE); assert.equal(producer.packageSHA256, input.packageSHA256);
   const custody = openGoCustody(input.reference); custody.verify(); custody.reference = input.reference;
-  return {custody, provenance: {commit: GO_COMMIT, observation: input.observation, observationSHA256: input.observationSHA256, producer, reference: input.reference}};
+  return {custody, provenance: {commit: HISTORICAL_GO_BASELINE.commit, observation: input.observation, observationSHA256: input.observationSHA256, producer, reference: input.reference}};
 }
 
 // This is a complete five-array comparison port, not a new codec or production

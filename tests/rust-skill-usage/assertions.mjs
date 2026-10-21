@@ -5,13 +5,14 @@ import {isAbsolute, join, relative, resolve, sep} from 'node:path';
 import {createHash} from 'node:crypto';
 import {performance} from 'node:perf_hooks';
 import {hashFile} from '../../tools/rust-build.mjs';
-import {CURRENT_SKILL_MANIFEST, AGENT_NATIVE_SKILL_MANIFEST, SIMPLIFIED_SKILL_MANIFEST, HISTORICAL_SKILL_MANIFEST, loadReviewedSkillContract, reviewedSkillIdentity, skillTreeIdentity} from './skill-identity.mjs';
+import {CURRENT_SKILL_MANIFEST, AGENT_CUTOVER_SKILL_MANIFEST, AGENT_NATIVE_SKILL_MANIFEST, SIMPLIFIED_SKILL_MANIFEST, HISTORICAL_SKILL_MANIFEST, loadReviewedSkillContract, reviewedSkillIdentity, skillTreeIdentity} from './skill-identity.mjs';
 export {skillTreeIdentity} from './skill-identity.mjs';
 
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 export const POST_SEMANTIC_REQUIREMENTS = Object.freeze(['ordinary-native-callers', 'ordinary-native-context', 'final-same-pin-api-query']);
-export const CURRENT_WORKFLOW = 'tests/rust-skill-usage/workflow-go323.json';
-export const CURRENT_GO_CONTRACT = '3766f9cacb52e93a803a626187e2a1d54a445468';
+export const CURRENT_WORKFLOW = 'tests/rust-skill-usage/workflow-go324.json';
+export const CURRENT_GO_CONTRACT = '29bdbdaff5f064ec212ff2064380b1ccac652eda';
+const GO323_CONTRACT = '3766f9cacb52e93a803a626187e2a1d54a445468';
 const HISTORICAL_GO_CONTRACT = '3057a9666ab078270b63c7f06de748069b0d1f4b';
 const INCREMENT_FILES = Object.freeze({
   'g321-keyboard-recovery': 'references/live-recovery.md',
@@ -25,7 +26,7 @@ export function loadCurrentWorkflow(root) {
   const base = within(root, 'tests/rust-skill-usage');
   const workflow = jsonFile(within(root, CURRENT_WORKFLOW));
   assert.equal(workflow.schema, 'lycheedev.skill-usage-workflow.v2');
-  assert.equal(workflow.goContract, CURRENT_GO_CONTRACT); assert.equal(workflow.goVersion, '3.2.3');
+  assert.equal(workflow.goContract, CURRENT_GO_CONTRACT); assert.equal(workflow.goVersion, '3.2.4');
   assert.equal(workflow.historical?.workflow, 'workflow.json');
   assert.equal(workflow.historical.goContract, HISTORICAL_GO_CONTRACT);
   assert.equal(workflow.historical.sha256, 'ebf400880b52b7929e5614281b1ce90f77e5764bea09a8d9671daedeef6a2d9b');
@@ -35,23 +36,23 @@ export function loadCurrentWorkflow(root) {
   assert.equal(original.goContract, HISTORICAL_GO_CONTRACT);
   for (const name of ['requiredSkillFiles', 'prompts', 'apiOriginalWindow', 'nativeCallsite']) assert.deepEqual(workflow[name], original[name], `original Source workflow retained: ${name}`);
   assert.equal(workflow.historical.manifest, 'baselines/go3.2.0-skill.json');
-  assert.equal(workflow.baselineManifest, 'baselines/go3.2.3-skill.json');
+  assert.equal(workflow.baselineManifest, 'baselines/go3.2.4-skill.json');
   const historical = jsonFile(within(base, workflow.historical.manifest)), current = jsonFile(within(base, workflow.baselineManifest));
   assert.equal(historical.tree, '7145d71201e7b1b63a3fbcd880ec78d6a1589e26');
   assert.equal(current.tree, 'b9e162ace7abe7ea4a2feecef822283767eb1210');
-  for (const [manifest, commit, version] of [[historical, HISTORICAL_GO_CONTRACT, '3.2.0'], [current, CURRENT_GO_CONTRACT, '3.2.3']]) {
+  for (const [manifest, commit, version] of [[historical, HISTORICAL_GO_CONTRACT, '3.2.0'], [current, CURRENT_GO_CONTRACT, '3.2.4']]) {
     assert.equal(manifest.schema, 'lycheedev.fixed-go-skill.v1'); assert.equal(manifest.commit, commit); assert.equal(manifest.version, version);
     assert.deepEqual(manifest.files.map(row => row.path), workflow.requiredSkillFiles, 'full original 23-file Git inventory');
     assert.equal(skillTreeIdentity(manifest.files), manifest.tree, 'full fixed Go Skill tree identity');
   }
   const changed = current.files.filter((row, index) => row.gitBlob !== historical.files[index].gitBlob).map(row => row.path).sort();
-  assert.deepEqual(changed, Object.values(INCREMENT_FILES).sort(), 'exact cumulative 320 to 323 Skill delta');
+  assert.deepEqual(changed, Object.values(INCREMENT_FILES).sort(), 'exact cumulative 320 to 324 Skill delta');
   assert.deepEqual(workflow.increments?.map(row => row.id), Object.keys(INCREMENT_FILES), 'all four cumulative tasks retained');
   for (const increment of workflow.increments) {
     assert.equal(increment.file, INCREMENT_FILES[increment.id]);
     assert.equal(increment.fixture, `baselines/go3.2.3/${increment.file}`);
     const [since, sourceCommit] = increment.id.startsWith('g321-') ? ['3.2.1', '10b561db5706702cd42e047eaeed4ccb5e825351']
-      : increment.id.startsWith('g322-') ? ['3.2.2', '0bec60e4406f5d5dc155ee25cef44f9a710e37e8'] : ['3.2.3', CURRENT_GO_CONTRACT];
+      : increment.id.startsWith('g322-') ? ['3.2.2', '0bec60e4406f5d5dc155ee25cef44f9a710e37e8'] : ['3.2.3', GO323_CONTRACT];
     assert.equal(increment.since, since); assert.equal(increment.sourceCommit, sourceCommit);
     assert(typeof increment.prompt === 'string' && increment.prompt.length > 30);
     assert(Array.isArray(increment.requires) && increment.requires.length >= 2 && increment.requires.every(value => typeof value === 'string' && value.length > 10));
@@ -65,7 +66,7 @@ export function loadCurrentWorkflow(root) {
 }
 
 export function currentWorkflowInputs(workflow) {
-  return [CURRENT_WORKFLOW, CURRENT_SKILL_MANIFEST, AGENT_NATIVE_SKILL_MANIFEST, SIMPLIFIED_SKILL_MANIFEST, HISTORICAL_SKILL_MANIFEST, 'tests/rust-skill-usage/skill-identity.mjs', 'tests/rust-skill-usage/workflow.json', workflow.historical.manifest, workflow.baselineManifest, ...workflow.increments.map(row => row.fixture)]
+  return [CURRENT_WORKFLOW, CURRENT_SKILL_MANIFEST, AGENT_CUTOVER_SKILL_MANIFEST, AGENT_NATIVE_SKILL_MANIFEST, SIMPLIFIED_SKILL_MANIFEST, HISTORICAL_SKILL_MANIFEST, 'tests/rust-skill-usage/baselines/go3.2.3-skill.json', 'tests/rust-skill-usage/skill-identity.mjs', 'tests/rust-skill-usage/workflow.json', workflow.historical.manifest, workflow.baselineManifest, ...workflow.increments.map(row => row.fixture)]
     .map(path => path.startsWith('tests/') ? path : `tests/rust-skill-usage/${path}`);
 }
 
@@ -93,8 +94,11 @@ export function assertCurrentSelectedReport(report, workflow, expectedIdentity) 
     assert.equal(report?.schema, 'lycheedev.skill-real-usage.v2', 'current owned Source run cannot reuse historical report');
     assert.deepEqual(report.skillIdentity, expectedIdentity, 'same selected Source Skill identity');
   }
-  assert.equal(report?.goContract, CURRENT_GO_CONTRACT, 'owned result must identify the actual current workflow');
-  assert.equal(report.goVersion, '3.2.3'); assert.equal(report.state, 'passed_selected_skill_workflows');
+  const reviewed = report?.skillIdentity === undefined ? null : loadReviewedSkillContract(report.skillIdentity);
+  const goContract = reviewed?.goContract ?? GO323_CONTRACT;
+  if (expectedIdentity !== undefined) assert.equal(goContract, CURRENT_GO_CONTRACT, 'owned result must identify the actual current workflow');
+  assert.equal(report?.goContract, goContract, 'report retains its authenticated Skill baseline');
+  assert.equal(report.goVersion, goContract === CURRENT_GO_CONTRACT ? '3.2.4' : '3.2.3'); assert.equal(report.state, 'passed_selected_skill_workflows');
   assert.equal(report.completeSkillAcceptance, false, 'selected Source checks cannot complete all Skill acceptance');
   assert.deepEqual(report.prompts, workflow.prompts);
   assert.deepEqual(report.pendingTasks, pendingIncrementTasks(workflow), 'unexecuted increment tasks retain their explicit gaps');
@@ -103,7 +107,6 @@ export function assertCurrentSelectedReport(report, workflow, expectedIdentity) 
   assert(['lycheedev.skill-real-usage.v1', 'lycheedev.skill-real-usage.v2'].includes(report.schema), 'known Source report schema');
   if (report.schema === 'lycheedev.skill-real-usage.v2') assert(report.skillIdentity, 'current Source report requires reviewed Skill identity');
   else assert.equal(report.skillIdentity, undefined, 'historical Source schema cannot relabel candidate bytes');
-  const reviewed = report.skillIdentity === undefined ? null : loadReviewedSkillContract(report.skillIdentity);
   const manifest = reviewed ?? jsonFile(new URL('./baselines/go3.2.3-skill.json', import.meta.url));
   for (const increment of workflow.increments) {
     const rows = report.checks.filter(row => row.caseId === `fixed-skill-contract-${increment.id}`);

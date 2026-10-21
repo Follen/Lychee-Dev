@@ -34,11 +34,11 @@ jobs:
         with:
           go-version: '1.27.1'
           cache: false
-      - name: Checkout the exact independent Go 3.2.3 source
+      - name: Checkout the exact independent Go 3.2.4 source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: '3766f9cacb52e93a803a626187e2a1d54a445468'
-          path: '.tmp/paired-go-source'
+          ref: '29bdbdaff5f064ec212ff2064380b1ccac652eda'
+          path: '.tmp/paired-go-3.2.4-source'
           fetch-depth: 1
           persist-credentials: false
       - name: Check Node assertions and real native timing/ownership
@@ -59,7 +59,7 @@ jobs:
         run: |
           Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
           Remove-Item Env:CARGO_ENCODED_RUSTFLAGS -ErrorAction SilentlyContinue
-          node tools/rust-build.mjs .tmp/paired-rust-artifact release --one-shot
+          node tools/rust-build.mjs .tmp/paired-rust-artifact release
           exit $LASTEXITCODE
       - name: Download and authenticate fixed LuaLS input separately
         run: |
@@ -76,14 +76,14 @@ jobs:
         run: |
           $npm = Join-Path (Split-Path (Get-Command node).Source) 'node_modules/npm/bin/npm-cli.js'
           if (!(Test-Path -LiteralPath $npm)) { throw 'official installed npm CLI unavailable' }
-          node tools/rust-performance-prepare-go.mjs .tmp/paired-go-source .tmp/paired-bootstrap/luals-3.19.1.zip $npm .tmp/paired-go-artifact
+          node tools/rust-performance-prepare-go.mjs .tmp/paired-go-3.2.4-source .tmp/paired-bootstrap/luals-3.19.1.zip $npm .tmp/paired-go-3.2.4-artifact
           exit $LASTEXITCODE
       - name: Record hosted-machine limitations without a manual gate
         run: |
           @{machine="GitHub hosted windows-2025 VM; runner=$env:RUNNER_NAME; run=$env:GITHUB_RUN_ID";powerAndThermal='Power scheme captured by powercfg before and after; host thermal/turbo state unknown';competingLoad='Job is sequential; colocated host load unknown and not asserted controlled';disk='Same runner workspace volume for both engines; physical backing/storage contention unknown';operator='Explicit rust-performance marker or workflow_dispatch'} | ConvertTo-Json | Set-Content -Encoding utf8 .tmp/paired-bootstrap/machine-conditions.json
       - name: Run 20 independent cold plus warm pairs per selected path
         run: |
-          node tools/rust-performance-paired.mjs .tmp/paired-rust-artifact/artifact.json .tmp/paired-go-source .tmp/paired-go-artifact/dev-npm-stage .tmp/paired-bootstrap/luals-3.19.1.zip .tmp/paired-bootstrap/machine-conditions.json
+          node tools/rust-performance-paired.mjs .tmp/paired-rust-artifact/artifact.json .tmp/paired-go-3.2.4-source .tmp/paired-go-3.2.4-artifact/dev-npm-stage .tmp/paired-bootstrap/luals-3.19.1.zip .tmp/paired-bootstrap/machine-conditions.json
           exit $LASTEXITCODE
       - name: Preserve every sealed report and failed owned fixture
         if: always()
@@ -95,7 +95,7 @@ jobs:
             .tmp/rust-scratch/
             .tmp/paired-bootstrap/
             .tmp/paired-rust-artifact/
-            .tmp/paired-go-artifact/
+            .tmp/paired-go-3.2.4-artifact/
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14

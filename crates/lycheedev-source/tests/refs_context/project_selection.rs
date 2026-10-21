@@ -344,6 +344,9 @@ fn project_research_does_not_relax_static_or_provider_constraints() {
 }
 
 fn cli(executable: &Path, release: &Path, inv: &Invocation) -> Value {
+    cli_envelope(executable, release, inv)["result"].clone()
+}
+pub(super) fn cli_envelope(executable: &Path, release: &Path, inv: &Invocation) -> Value {
     let mut command = Command::new(executable);
     command
         .current_dir(&inv.cwd)
@@ -368,7 +371,8 @@ fn cli(executable: &Path, release: &Path, inv: &Invocation) -> Value {
     );
     let envelope: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(envelope["schema"], "lycheedev.result.v1");
-    envelope["result"].clone()
+    assert_eq!(envelope["ok"], true);
+    envelope
 }
 
 #[test]

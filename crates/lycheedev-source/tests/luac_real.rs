@@ -1,4 +1,7 @@
-use lycheedev_source::luac::{Manifest, Runtime};
+use lycheedev_source::{
+    lua_tree::SyntaxDocument,
+    luac::{Manifest, Runtime},
+};
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
@@ -26,9 +29,11 @@ fn actual_51_goto_identifier_structure() {
         .join("../../.tmp/rust-source-luac-real/goto-identifiers");
     let compiled = compiler.check(&staging, &cases).unwrap();
     assert_eq!(compiled["passed"], true);
+    // Native Lua 5.1 permits goto identifiers. facts::lua is the separate fixed
+    // Go scanner contract, where goto remains a keyword rather than a name.
     let facts: BTreeMap<_, _> = cases
         .iter()
-        .map(|(name, raw)| (name.clone(), lycheedev_source::facts::lua(raw, false)))
+        .map(|(name, raw)| (name.clone(), SyntaxDocument::new(raw).unwrap().facts(false)))
         .collect();
     let invalid = compiler
         .check(
@@ -40,13 +45,22 @@ fn actual_51_goto_identifier_structure() {
         )
         .unwrap();
     assert_eq!(invalid["passed"], false);
-    assert_eq!(invalid["diagnostics"].as_array().unwrap().len(), 2);
+    let mut invalid_files: Vec<_> = invalid["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|diagnostic| diagnostic["file"].as_str().unwrap())
+        .collect();
+    invalid_files.sort_unstable();
+    assert_eq!(invalid_files, ["GotoStatement.lua", "Label.lua"]);
     assert!(
-        !lycheedev_source::facts::lua(b"goto done\n", false)
+        !SyntaxDocument::new(b"goto done\n")
+            .unwrap()
+            .facts(false)
             .diagnostics
             .is_empty()
     );
-    let report = serde_json::json!({"compiler":compiled,"facts":facts,"invalidStatements":invalid,"scope":"Lua5.1 goto identifier false-positive fix; goto jumps and labels remain rejected"});
+    let report = serde_json::json!({"compiler":compiled,"facts":facts,"factsConsumer":"native-lua51-structure","invalidStatements":invalid,"scope":"Lua5.1 goto identifiers retain native structural facts; bundled luac rejects goto jumps and labels; fixed Go scanner contract remains separate"});
     let first = staging.parent().unwrap().join("goto-first-report.json");
     if !first.exists() {
         fs::write(first, serde_json::to_vec_pretty(&report).unwrap()).unwrap();

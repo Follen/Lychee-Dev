@@ -1,0 +1,152 @@
+{
+  "schema": "lycheedev.skill-usage-workflow.v2",
+  "goContract": "29bdbdaff5f064ec212ff2064380b1ccac652eda",
+  "requiredSkillFiles": [
+    "SKILL.md",
+    "agents/openai.yaml",
+    "references/addon-validation.md",
+    "references/asset-export.md",
+    "references/commands.md",
+    "references/data-hotfix.md",
+    "references/data-investigation.md",
+    "references/data-query-recipes.md",
+    "references/data-recovery.md",
+    "references/data-tables.md",
+    "references/data-targets.md",
+    "references/error-diagnosis.md",
+    "references/installation.md",
+    "references/live-investigation.md",
+    "references/live-probes.md",
+    "references/live-recovery.md",
+    "references/live-startup.md",
+    "references/runtime-investigations.md",
+    "references/source-preparation.md",
+    "references/source-relations.md",
+    "references/source-research.md",
+    "references/source-value-flow.md",
+    "scripts/lycheedev.mjs"
+  ],
+  "prompts": [
+    {
+      "id": "timer-api",
+      "text": "请查固定 Retail 源码里的 C_Timer.After 参数与 secret 参数约束，给出准确原始位置并说明静态证据的范围。不要在游戏里执行。"
+    },
+    {
+      "id": "action-callers",
+      "text": "继续查看同一固定版本 GetActionButtonForID 的实现及调用者，保留 symbolId、原始位置与未解析边界。"
+    },
+    {
+      "id": "empty-large-recovery",
+      "text": "同一固定源码中搜索“冷却”；不足时按 Skill 检查主题和搜索词，以 Cooldown 做有界检索并继续一页。遇到错误时保留原 pin，恢复后继续。"
+    }
+  ],
+  "apiOriginalWindow": {
+    "repository": "wow-ui-source",
+    "commit": "31c7f7b9cc79e56c986b365c06a6afbcf3c9177b",
+    "archiveSHA256": "d4d6e468636d6205d94b912fd96ac469b66ae606e6422d7e3849afbff7a376df",
+    "path": "Interface/AddOns/Blizzard_APIDocumentationGenerated/UITimerDocumentation.lua",
+    "firstLine": 10,
+    "lastLine": 21,
+    "count": 12,
+    "totalLines": 81,
+    "fullFileSHA256": "72b5d79e91b3d8185cff68e5a6cd91498cb3aecd8ea6809a84e4d0edc805bc4c",
+    "textSHA256": "e20df7e8a9e30988ebc68f92cd2715db42915d4beecb1faf371cc7a669e3ca12",
+    "text": "\t\t{\n\t\t\tName = \"After\",\n\t\t\tType = \"Function\",\n\t\t\tSecretArguments = \"AllowedWhenUntainted\",\n\n\t\t\tArguments =\n\t\t\t{\n\t\t\t\t{ Name = \"seconds\", Type = \"number\", Nilable = false },\n\t\t\t\t{ Name = \"callback\", Type = \"TimerCallback\", Nilable = false },\n\t\t\t},\n\t\t},\n\t\t{\n",
+    "declarationLines": [
+      10,
+      20
+    ],
+    "argumentLines": [
+      17,
+      18
+    ],
+    "secretArgumentsLine": 13
+  },
+  "nativeCallsite": {
+    "path": "Interface/AddOns/Blizzard_ActionBar/Shared/ActionButton.lua",
+    "line": 141,
+    "kind": "call",
+    "target": "GetActionButtonForID",
+    "sourceText": "\tlocal button = GetActionButtonForID(id);",
+    "fullFileSHA256": "54fb5625a5e8aa343cbbc0be805b23e2b3b329011e792448e6b732a4bebd8cba",
+    "site": {
+      "file": "Interface/AddOns/Blizzard_ActionBar/Shared/ActionButton.lua",
+      "start": 3940,
+      "end": 3960
+    },
+    "siteText": "GetActionButtonForID",
+    "scope": "Native call source is the nearest syntax-authenticated callable; referenceExpression keeps the original callee token. Caller identity does not strengthen selected-value observations or completeness.",
+    "source": "ActionButtonDown",
+    "referenceExpression": "GetActionButtonForID",
+    "caller": {
+      "kind": "named",
+      "name": "ActionButtonDown",
+      "line": 136
+    }
+  },
+  "goVersion": "3.2.4",
+  "historical": {
+    "workflow": "workflow.json",
+    "sha256": "ebf400880b52b7929e5614281b1ce90f77e5764bea09a8d9671daedeef6a2d9b",
+    "goContract": "3057a9666ab078270b63c7f06de748069b0d1f4b",
+    "manifest": "baselines/go3.2.0-skill.json"
+  },
+  "baselineManifest": "baselines/go3.2.4-skill.json",
+  "sourceTaskScope": "The three original full-Retail Source tasks are unchanged; their results are selected Source use, not Data or Live acceptance.",
+  "increments": [
+    {
+      "id": "g321-keyboard-recovery",
+      "since": "3.2.1",
+      "sourceCommit": "10b561db5706702cd42e047eaeed4ccb5e825351",
+      "file": "references/live-recovery.md",
+      "prompt": "原CON遇到键盘活动或已提交/未知输入时，按固定Skill保留原请求与deadline；等待所有键释放及500ms静默并复核新鲜INPUT，不能重放或强制松开用户按键。",
+      "requires": [
+        "authorized selected game process and actor",
+        "original CON/request/deadline and real keyboard/INPUT observations"
+      ],
+      "reason": "Live execution is outside this source-only controller; no game or keyboard input is authorized.",
+      "fixture": "baselines/go3.2.3/references/live-recovery.md"
+    },
+    {
+      "id": "g322-slot-startup",
+      "since": "3.2.2",
+      "sourceCommit": "0bec60e4406f5d5dc155ee25cef44f9a710e37e8",
+      "file": "references/live-startup.md",
+      "prompt": "当前角色受管槽启用后出现slotReloadRequired；先用只读doctor解释live.slot_activation，在原CON与期限内恢复，保留待定业务证据且不重放未知输入。",
+      "requires": [
+        "authorized selected game process and character",
+        "managed-slot enable state, real doctor/INPUT and same-CON reload evidence"
+      ],
+      "reason": "Live execution is outside this source-only controller; static Skill bytes cannot establish slot activation or reload behavior.",
+      "fixture": "baselines/go3.2.3/references/live-startup.md"
+    },
+    {
+      "id": "g323-data-query",
+      "since": "3.2.3",
+      "sourceCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "file": "references/data-tables.md",
+      "prompt": "对固定DataPin和来源运行参数化单表ID IN查询，保留有序完整结果、来源、partial与capture，核memoryBudget；再导出CSV并verify捕获。不得把逻辑预算当RSS，也不以缩小返回量代替共享准备。",
+      "requires": [
+        "exact DataPin/build/locale/definition commit",
+        "authenticated CASC or CDN/DBD fixture and required keys in this owned isolated home",
+        "expected ordered rows, partial coverage and captured CSV evidence"
+      ],
+      "reason": "This selected Source runner has no authenticated DataPin/CASC-or-CDN/DBD/key fixture; real Data query, memoryBudget, partial/export and capture recovery are not run.",
+      "fixture": "baselines/go3.2.3/references/data-tables.md"
+    },
+    {
+      "id": "g323-data-pressure-recovery",
+      "since": "3.2.3",
+      "sourceCommit": "3766f9cacb52e93a803a626187e2a1d54a445468",
+      "file": "references/data-recovery.md",
+      "prompt": "遇到records.query_resource_budget时核维度、used/requested/limit和memoryBudget；仅压力消退后作有界同pin重试，否则按请求缩小准备范围。不杀其他任务、不盲增timeout或max-bytes、不在压力未变时重试。",
+      "requires": [
+        "same authenticated Data fixture and pin as the original request",
+        "actual resource-pressure failure and effective-limit evidence",
+        "verified pressure release before one bounded same-pin retry"
+      ],
+      "reason": "No controlled real memory-pressure Data fixture is supplied; a synthetic error or a static text check is not recovery evidence.",
+      "fixture": "baselines/go3.2.3/references/data-recovery.md"
+    }
+  ]
+}

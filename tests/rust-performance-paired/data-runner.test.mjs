@@ -175,8 +175,8 @@ test('known successful fixture paths require executed business scopes; early fai
 function pairs(entry = contentCase, count = 20) { return Array.from({length: count}, (_, iteration) => ['cold', 'warm'].map(cacheMode => ({caseId: entry.id, iteration, cacheMode, resultEquivalent: true, pairTerminal: {state: 'verified'}, order: orderFor(iteration),
   ...Object.fromEntries(['go', 'rust'].map(engine => [engine, {valid: true, home: `${iteration}/${engine}`, binary: engine, snapshot: 'PIN-input', reuse: {verified: true}, controllableMillis: engine === 'go' ? 100 : 30}]))}))).flat(); }
 
-test('fixed Go323, 17MiB/3-chunk family, five full-size storage modes and no SQL performance claim', () => {
-  assert.equal(GO_COMMIT, '3766f9cacb52e93a803a626187e2a1d54a445468'); assert.equal(REPETITIONS, 20); assert.equal(CONTENT_BYTES, 17825792);
+test('fixed Go324, 17MiB/3-chunk family, five full-size storage modes and no SQL performance claim', () => {
+  assert.equal(GO_COMMIT, '29bdbdaff5f064ec212ff2064380b1ccac652eda'); assert.equal(REPETITIONS, 20); assert.equal(CONTENT_BYTES, 17825792);
   const cases = dataCases(images()); assert.equal(cases.length, 12); assert.equal(cases[0].performance, false); assert(cases.slice(1).every(row => row.performance));
   assert.equal(new Set(cases.map(row => row.id)).size, 12); assert.equal(cases.filter(row => row.encoding === 'webp').length, 5);
 });
@@ -258,9 +258,9 @@ test('final pair integrity is required independently of equivalent product rows,
   legacy[0].pairTerminal = {state: 'failed_final_integrity'};
   assert(summarizeData([sqlCase], legacy, false, {allowLegacyTerminal: true}).every(group => group.state === 'failed_final_integrity'));
 });
-test('real controller preserves product results and raw timings across final-integrity, startup and Data phase failures', t => {
+test('historical controller preserves product results and raw timings across final-integrity, startup and Data phase failures', t => {
   const directory = mkdtempSync(join(tmpdir(), 'paired-data-terminal-')); t.after(() => rmSync(directory, {recursive: true, force: true}));
-  const controller = readFileSync(new URL('./data-run.mjs', import.meta.url));
+  const controller = readFileSync(new URL('./historical-data-run.mjs', import.meta.url));
   const real = file => JSON.stringify(new URL(file, import.meta.url).href);
   for (const [name, entry, failAt, expectedOwners, diagnostics = false, missingDiagnostics = false, profileCase = 'none'] of [
     ['sql-only', sqlCase, 2, 1], ['last-performance', contentCase, 42, 21], ['middle-performance', contentCase, 22, 11], ['complete-performance', contentCase, 0, 21],
@@ -469,8 +469,8 @@ test('buffer decoder destroys its pipeline after success and failure, preserving
   await assert.rejects(decodeDataImage(() => decoder, bytes), error => error instanceof AggregateError && error.cause === first && error.errors[1] === second);
   await assert.rejects(decodeDataImage(() => { throw Error('should not run'); }, 'scratch.webp'), /Buffer required/);
 });
-test('runner preserves original owned clock and stops failed paths before warm/replacement', () => {
-  const source = readFileSync(new URL('./data-run.mjs', import.meta.url), 'utf8');
+test('historical runner preserves original owned clock and stops failed paths before warm/replacement', () => {
+  const source = readFileSync(new URL('./historical-data-run.mjs', import.meta.url), 'utf8');
   assert(source.includes('elapsed(run.proof)')); assert(source.includes('memoryObservation: measured')); assert(source.includes('if (!row.resultEquivalent) break'));
   assert(source.includes('if (!verified || !config.acceptance || !entry.performance) continue')); assert(source.includes('if (!fatal && valid) {'));
   assert(source.includes("state: 'failed_retained'")); assert(source.includes('job.cleanup();')); assert(!source.includes('maxRetries'));

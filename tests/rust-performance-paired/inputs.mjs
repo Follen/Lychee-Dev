@@ -6,7 +6,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {hashFile} from '../../tools/rust-build.mjs';
 import {readZip} from '../../tools/zip.mjs';
 import {assertCorpus, sha256} from '../rust-source-full-corpus/assertions.mjs';
-import {GO_COMMIT} from './contract.mjs';
+import {GO_COMMIT, GO_VERSION} from './contract.mjs';
 
 export const LUALS = Object.freeze({name: 'lua-language-server', version: '3.19.1', platform: 'windows-amd64', url: 'https://github.com/LuaLS/lua-language-server/releases/download/3.19.1/lua-language-server-3.19.1-win32-x64.zip', bytes: 4453980, sha256: 'fdb9a59108cf62517813c97fa5549b0e16d1ef0688306bac728b08434db7e4cd'});
 export function safeRelative(path) {
@@ -89,18 +89,18 @@ export function proveWarmReuse(engine, before, after, envelope) {
   }
   return {verified: true, basis: 'fixed Go openIndex path and unchanged nonempty snapshot records/manifest hashes, file IDs and timestamps before/after warm command; no public hit counter is invented', before: compact(before), after: compact(after)};
 }
-export function verifyGoMetadata(text) {
+export function verifyGoMetadata(text, {commit = GO_COMMIT} = {}) {
   assert.match(text, /:\s+go1\.27\.1\r?\n/, 'fixed Go toolchain');
-  for (const [key, value] of [['vcs.revision', GO_COMMIT], ['vcs.modified', 'false'], ['CGO_ENABLED', '0'], ['GOOS', 'windows'], ['GOARCH', 'amd64'], ['-trimpath', 'true']]) {
+  for (const [key, value] of [['vcs.revision', commit], ['vcs.modified', 'false'], ['CGO_ENABLED', '0'], ['GOOS', 'windows'], ['GOARCH', 'amd64'], ['-trimpath', 'true']]) {
     assert(text.split(/\r?\n/).some(line => line.trim() === `build\t${key}=${value}`), `missing Go build identity ${key}=${value}`);
   }
   assert(!/^\s*build\t-gcflags=/m.test(text), 'nonstandard Go optimization flags');
-  return {commit: GO_COMMIT, modified: false, toolchain: 'go1.27.1', cgo: 0, optimized: true, metadataSHA256: sha256(Buffer.from(text))};
+  return {commit, modified: false, toolchain: 'go1.27.1', cgo: 0, optimized: true, metadataSHA256: sha256(Buffer.from(text))};
 }
-export function verifyGoPackage(packageRoot, archivePath) {
+export function verifyGoPackage(packageRoot, archivePath, {commit = GO_COMMIT, version = GO_VERSION} = {}) {
   packageRoot = resolve(packageRoot);
   const manifest = JSON.parse(readFileSync(join(packageRoot, 'release.json')));
-  assert.equal(manifest.schema, 'lycheedev.release.v1'); assert.equal(manifest.version, '3.2.3'); assert.equal(manifest.commit, GO_COMMIT);
+  assert.equal(manifest.schema, 'lycheedev.release.v1'); assert.equal(manifest.version, version); assert.equal(manifest.commit, commit);
   const binary = manifest.binaries?.['windows-amd64']; assert.equal(binary?.path, 'native/windows-amd64/lycheedev.exe');
   const all = inventory(packageRoot), byName = new Map(all.rows.map(row => [row.path, row]));
   const check = (row, prefix = '') => { const actual = byName.get(prefix + safeRelative(row.path)); assert(actual && actual.bytes === row.bytes && actual.sha256 === row.sha256, `package integrity ${prefix}${row.path}`); };

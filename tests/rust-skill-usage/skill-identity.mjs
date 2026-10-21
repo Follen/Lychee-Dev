@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import {lstatSync, readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 const gitObject = (kind, bytes) => createHash('sha1').update(`${kind} ${bytes.length}\0`).update(bytes).digest('hex');
-export const CURRENT_SKILL_MANIFEST = 'tests/rust-skill-usage/baselines/rust-agent-cutover-recovered-skill.json';
+export const CURRENT_SKILL_MANIFEST = 'tests/rust-skill-usage/baselines/rust-go324-skill.json';
+export const AGENT_CUTOVER_SKILL_MANIFEST = 'tests/rust-skill-usage/baselines/rust-agent-cutover-recovered-skill.json';
 export const AGENT_NATIVE_SKILL_MANIFEST = 'tests/rust-skill-usage/baselines/rust-agent-native-skill.json';
 export const SIMPLIFIED_SKILL_MANIFEST = 'tests/rust-skill-usage/baselines/rust-simplified-skill.json';
 export const HISTORICAL_SKILL_MANIFEST = 'tests/rust-skill-usage/baselines/rust-candidate-skill.json';
@@ -22,7 +23,8 @@ const CURRENT_ADAPTED = ['SKILL.md', 'references/addon-validation.md', 'referenc
   'references/source-relations.md', 'references/source-research.md', 'references/source-value-flow.md'];
 const ADDED = ['references/rust-candidate-entry.md', 'references/source-candidate.md'];
 const IDENTITIES = [
-  {file: CURRENT_SKILL_MANIFEST, commit: '75cd762e31df0dfd614c8687f9fd3fdb26b6a7f7', tree: 'c1768f92d55b454cafb202eb6c2835af1ecc2811', adapted: CURRENT_ADAPTED},
+  {file: CURRENT_SKILL_MANIFEST, commit: 'bd8196aa68ba1570652bb9540a01bbcdb4628638', tree: '4eace74fd90ebc4cc12b4628bb58c6f74262ccb5', adapted: CURRENT_ADAPTED, goCommit: '29bdbdaff5f064ec212ff2064380b1ccac652eda', goManifest: 'go3.2.4-skill.json'},
+  {file: AGENT_CUTOVER_SKILL_MANIFEST, commit: '75cd762e31df0dfd614c8687f9fd3fdb26b6a7f7', tree: 'c1768f92d55b454cafb202eb6c2835af1ecc2811', adapted: CURRENT_ADAPTED},
   {file: AGENT_NATIVE_SKILL_MANIFEST, commit: '3ae03c6bd7f13260629e2f92218f8d9e262b1ebb', tree: 'e1c9f992da62a048d24c62843636230783ff6928', adapted: CURRENT_ADAPTED},
   {file: SIMPLIFIED_SKILL_MANIFEST, commit: '6187ec6581ac9dc9301a26d79fa62a520214fe6d', tree: '231818eb48f81cf927542bb19d9a8964dfbe4baf', adapted: CURRENT_ADAPTED},
   {file: HISTORICAL_SKILL_MANIFEST, commit: '0002ce02bec5fb7c9c31ae40fd96eadf0da17dc6', tree: '5edd025cae923fb2235086f250862696db7a2483', adapted: HISTORICAL_ADAPTED},
@@ -40,10 +42,11 @@ export function loadReviewedSkillContract(identity) {
   const selected = identity === undefined ? IDENTITIES[0] : IDENTITIES.find(row =>
     identity && identity.candidateSourceCommit === row.commit && identity.candidateTree === row.tree);
   assert(selected, 'unknown reviewed Skill identity');
-  const candidate = readManifest(selected.file), go = readManifest('go3.2.3-skill.json');
+  const candidate = readManifest(selected.file), go = readManifest(selected.goManifest ?? 'go3.2.3-skill.json');
+  const goCommit = selected.goCommit ?? GO_COMMIT;
   assert.equal(candidate.schema, 'lycheedev.reviewed-rust-skill.v1');
   assert.equal(candidate.sourceCommit, selected.commit); assert.equal(candidate.sourcePath, 'skills/lycheedev');
-  assert.equal(candidate.goContract, GO_COMMIT); assert.equal(go.commit, GO_COMMIT);
+  assert.equal(candidate.goContract, goCommit); assert.equal(go.commit, goCommit);
   assert.equal(candidate.goTree, GO_TREE); assert.equal(go.tree, GO_TREE); assert.equal(skillTreeIdentity(go.files), GO_TREE);
   assert.equal(candidate.tree, selected.tree); assert.equal(skillTreeIdentity(candidate.files), selected.tree);
   assert.deepEqual(candidate.files.map(row => row.path), [...go.files.map(row => row.path), ...ADDED].sort());

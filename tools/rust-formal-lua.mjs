@@ -8,7 +8,7 @@ import { beginScratch, contained } from './rust-disk.mjs';
 import { ownedSpawnSync } from './rust-owned-process.mjs';
 import { fixedToolchain, luaSource, selectCompiler, verifySystemImports } from './luac.mjs';
 import { ownedUserEnvironment, sourceDigest, verifyArtifact } from './rust-build.mjs';
-import { BRIDGE_GAPS, LIMITS, MANIFEST_SHA256, ORACLE, SUPPORT as ORACLE_SUPPORT, authenticate, cases, cleanLuaEnvironment, hash, materialize, processReaped, regular, runCases, verifyMaterial, verifyOwnerEvidence, verifyUnifiedTOC } from '../tests/rust-parity/formal-lua-3.2.3/assertions.mjs';
+import { BRIDGE_GAPS, LIMITS, MANIFEST_SHA256, ORACLE, SUPPORT as ORACLE_SUPPORT, authenticate, cases, cleanLuaEnvironment, hash, materialize, processReaped, regular, runCases, verifyMaterial, verifyOwnerEvidence, verifyUnifiedTOC } from '../tests/rust-parity/formal-lua-3.2.4/assertions.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BUILD_ARGUMENTS = Object.freeze(['/nologo', '/Bv', '/O2', '/MT', '/Brepro', '/TC']);
@@ -188,7 +188,7 @@ export function runAcceptance(interpreterPath, artifactPath) {
       interpreterSHA256: runtime.report.executableSHA256, interpreterReportSHA256: runtime.reportSHA256, artifactSHA256, binarySHA256: artifact.binarySHA256,
       inputsStable: !identityError, identityError, handlesReaped, elapsedMs, totalDeadlineExceeded, limits: LIMITS, profiles: [...new Set(observations.filter(row => row.kind === 'addon').map(row => row.profile))],
       observations, staticTOC: { source: 'TestUnifiedTOCContract', state: 'passed_static' }, deferredHostTests: BRIDGE_GAPS, historicalAddonExtras: inputs.historicalAddonExtras, retainedReleaseFields: inputs.retainedReleaseFields,
-      scope: '216 fixed Go 3.2.3 addon Lua suite/profile executions plus four standalone protocol Lua suites. Real Lua assertions, WoW API mocks. No Go host tests, Rust bridge integration, real client, seven-product or historical-consumer cleanup claim; the sealed Rust artifact is identity-bound but is not exercised by these Lua suites.' };
+      scope: '216 fixed Go 3.2.4 addon Lua suite/profile executions plus four standalone protocol Lua suites. Real Lua assertions, WoW API mocks. No Go host tests, Rust bridge integration, real client, seven-product or historical-consumer cleanup claim; the sealed Rust artifact is identity-bound but is not exercised by these Lua suites.' };
     save(join(job.evidence, 'report.json'), report);
     state = passed ? 'succeeded' : 'failed';
     return { passed, report: join(job.evidence, 'report.json'), receipt: job.receipt, counts: Object.fromEntries(['passed', 'failed', 'not_run'].map(value => [value, observations.filter(row => row.state === value).length])), deferredHostTests: BRIDGE_GAPS };

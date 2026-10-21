@@ -11,7 +11,7 @@
 
 当前批：ea7原生585通过/1原ignored，完整七调用通过但性能未达标。四文件共享数字Indexed内层已独审及隔离差分验证；新Windows产品质量/收益待测。
 
-以 [handover](handover.md) 为当前事实、[DESIGN](DESIGN.md#authorized-architecture-implementation-plan--2026-10-19) 为完整计划。质量基线f811；性能参考固定Go323。先业务质量/完整实现，再≤30%耗时门禁，之后正式五项循环。历史已完成项与原失败留在[308efa旧清单](https://github.com/Follen/Lychee-Dev/blob/308efa2766d00273b13c9c7e24a0b956bb60e9e9/todo.md)，不滚动复制到当前待办。
+以 [handover](handover.md) 为当前事实、[DESIGN](DESIGN.md#authorized-architecture-implementation-plan--2026-10-19) 为完整计划。质量基线f811；用户指定后续性能参考固定Go324，并保留现有Rust优化。先业务质量/完整实现，再≤30%耗时门禁，之后正式五项循环。历史已完成项与原失败留在[308efa旧清单](https://github.com/Follen/Lychee-Dev/blob/308efa2766d00273b13c9c7e24a0b956bb60e9e9/todo.md)，不滚动复制到当前待办。
 
 ## 立即闭合固定基线
 - [x] ea7原生585通过/0失败/1原ignored、完整七调用正确性通过；hit Rust301.2569/Go112.4970ms，跨单轮下降非因果证明且未达标。

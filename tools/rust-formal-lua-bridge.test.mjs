@@ -6,7 +6,7 @@ import {readFileSync, mkdtempSync, mkdirSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {SUPPORT, bridgePaths, selectTestExecutable, verifyTestOutput} from './rust-formal-lua-bridge.mjs';
-import {BASE, ORACLE, MANIFEST_SHA256, RELEASE_FIELDS_SHA256, SUPPORT as ORACLE_SUPPORT, authenticate, hash} from '../tests/rust-parity/formal-lua-3.2.3/assertions.mjs';
+import {BASE, ORACLE, MANIFEST_SHA256, RELEASE_FIELDS_SHA256, SUPPORT as ORACLE_SUPPORT, authenticate, hash} from '../tests/rust-parity/formal-lua-3.2.4/assertions.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const target = resolve('target');
 const artifact = {reason:'compiler-artifact', target:{name:'formal_lua_bridge',kind:['test']},

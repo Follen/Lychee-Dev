@@ -10,7 +10,7 @@ import {elapsed, semantic} from './contract.mjs';
 import {verifyGoPackage} from './inputs.mjs';
 import {validateConditions} from './source-candidates.mjs';
 import {verifyPackProfile} from './source-pack-resume.mjs';
-import {CASES, FRESH_ALLOWANCE, assertDiskPolicy, candidateIdentity, evidenceFiles, verifyCandidateRecord, authenticateRecordedCall, verifyScenarioObservations} from './source-pack-scenarios.mjs';
+import {HISTORICAL_GO_BASELINE, CASES, FRESH_ALLOWANCE, assertDiskPolicy, candidateIdentity, evidenceFiles, verifyCandidateRecord, authenticateRecordedCall, verifyScenarioObservations} from './source-pack-scenarios.mjs';
 import {POSTCARD_LAYOUT, POSTCARD_INDEX_LAYOUT, readPostcardBytes, verifyPostcardExporter} from './read-fact-delta-postcard.mjs';
 import {FRESH_OWNER_RECEIPT_BYTES, FRESH_POSTCARD_FILES, freshPostcardIdentity, validatePostcardFreshRequest, verifyFreshPostcardReport} from './source-pack-scenarios-postcard-fresh.mjs';
 
@@ -129,7 +129,7 @@ export function reverifySealedPostcardFailure(value, overrides = {}) {
   assert(oversizedRetired >= 0, 'original final receipt-budget failure must be reproducible on an already-retired owner');
   const oversized = oversizedRetired + 1;
   const candidate = svc.verifyCandidateRecord(request.candidate), {mode, ...exporter} = request.exporter;
-  svc.verifyPostcardExporter(root, exporter, request.candidate); const go = svc.verifyGoPackage(request.go.packageRoot, request.go.luaLSArchive); assert.equal(go.packageSHA256, request.go.packageSHA256);
+  svc.verifyPostcardExporter(root, exporter, request.candidate); const go = svc.verifyGoPackage(request.go.packageRoot, request.go.luaLSArchive, HISTORICAL_GO_BASELINE); assert.equal(go.packageSHA256, request.go.packageSHA256);
   const summaries = [];
   for (const [i, row] of report.scenarios.entries()) {
     const entry = CASES[i], outputs = {};
@@ -152,7 +152,7 @@ export function reverifySealedPostcardFailure(value, overrides = {}) {
   }
   svc.verifyFreshPostcardReport(report, request, config.allowance);
   svc.verifyCandidateRecord(request.candidate); svc.verifyPostcardExporter(root, exporter, request.candidate);
-  assert.deepEqual(svc.verifyGoPackage(request.go.packageRoot, request.go.luaLSArchive), go);
+  assert.deepEqual(svc.verifyGoPackage(request.go.packageRoot, request.go.luaLSArchive, HISTORICAL_GO_BASELINE), go);
   assert.deepEqual(freshPostcardIdentity(config.runnerRoot), config.inputs); assert.deepEqual(postcardReverifyIdentity(runnerRoot), verifierInputs);
   for (const row of snapshots.values()) readPostcardBytes(row.path, row.bytes, row);
   return {schema: 'lycheedev.source-postcard-reverification.v1', state: 'sealed_complete_scenarios_reverified', reference,

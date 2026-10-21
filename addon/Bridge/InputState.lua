@@ -92,10 +92,20 @@ ns.InputState={
     -- Transaction completion refreshes facts without moving the periodic tick.
     Refresh=refresh,
     Stop=function()
-        if ns.FocusBindings then ns.FocusBindings.Stop() end
+        local focusRestored=not ns.FocusBindings or ns.FocusBindings.Stop()
         if frame then
             frame:SetScript("OnUpdate",nil);frame:SetScript("OnEvent",nil)
             frame:SetScript("OnShow",nil);frame:SetScript("OnHide",nil);frame:UnregisterAllEvents()
+            if not focusRestored then
+                -- No INPUT or polling survives Stop. Only the owned EditBox
+                -- restoration waits for combat to end, on this existing frame.
+                frame:RegisterEvent("PLAYER_REGEN_ENABLED")
+                frame:SetScript("OnEvent",function(self)
+                    if ns.FocusBindings.Stop() then
+                        self:UnregisterAllEvents();self:SetScript("OnEvent",nil)
+                    end
+                end)
+            end
         end
         provider,record,lastTick=nil,nil,nil
         hide()

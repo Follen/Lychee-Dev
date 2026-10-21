@@ -1,22 +1,38 @@
 // Static contract checks, not a claim of Rust compilation or game behavior.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {addonInventory} from './oracle.mjs';
 import {CURRENT_GO_COMMIT} from './oracle-3.2.2.mjs';
 import {CANDIDATE_RELEASE_FIELDS as RETAINED_RELEASE_FIELDS} from './rust-3.5.0-release-fields.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const oracle = JSON.parse(readFileSync(join(root, 'tests/rust-parity/go-3.2.2.manifest.json'), 'utf8'));
-const read = path => readFileSync(join(root, path), 'utf8');
+const frozenAddon = new Map();
+function addonBytes(path) {
+  if (!frozenAddon.has(path)) {
+    const original = execFileSync('git', ['--no-pager', '--no-optional-locks', '-c', 'core.fsmonitor=false', 'cat-file', 'blob', `${CURRENT_GO_COMMIT}:${path}`], {cwd: root, timeout: 10000, maxBuffer: 2 << 20});
+    const allowed = RETAINED_RELEASE_FIELDS.find(row => row.path === path);
+    frozenAddon.set(path, allowed ? Buffer.from(original.toString('utf8').replace(allowed.expectedText, allowed.retainedText)) : original);
+  }
+  return frozenAddon.get(path);
+}
+// Historical addon assertions consume their original Git bytes plus the same
+// approved release overlay. Current Rust delivery code is still checked below.
+const read = path => path.startsWith('addon/') ? addonBytes(path).toString('utf8') : readFileSync(join(root, path), 'utf8');
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 
-test('all 55 formal addon resources match current Go business bytes with explicit retained release fields', () => {
+test('all 55 formal addon resources match frozen Go322 business bytes with explicit retained release fields', () => {
   assert.equal(oracle.oracle.commit, CURRENT_GO_COMMIT);
   assert.equal(oracle.addon.length, 55);
-  const current = new Map(addonInventory(root).map(row => [row.path, row]));
+  const paths = execFileSync('git', ['--no-pager', '--no-optional-locks', '-c', 'core.fsmonitor=false', 'ls-tree', '-r', '--name-only', CURRENT_GO_COMMIT, '--', 'addon/'], {cwd: root, timeout: 10000, maxBuffer: 65536}).toString('utf8').trim().split('\n');
+  assert.deepEqual(paths, oracle.addon.map(row => row.path));
+  const current = new Map(paths.map(path => {
+    const bytes = addonBytes(path);
+    return [path, {path, bytes: bytes.length, sha256: digest(bytes)}];
+  }));
   for (const expected of oracle.addon) {
     const allowed = RETAINED_RELEASE_FIELDS.find(row => row.path === expected.path);
     if (allowed) {

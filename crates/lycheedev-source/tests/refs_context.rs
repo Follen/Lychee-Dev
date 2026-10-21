@@ -3,7 +3,7 @@ use lycheedev_core::{
     selection::{self, SelectionSpec, SourcePin},
     workspace,
 };
-use lycheedev_source::{SourceTools, context, git, luals, refs};
+use lycheedev_source::{SourceTools, context, git, refs};
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
@@ -16,6 +16,7 @@ struct Fixture {
     home: PathBuf,
     pin: String,
 }
+const RESEARCH_A: &str = "function Caller()\n  Target()\n  Target()\nend\nfunction Target() end\n-- Target() fake comment\nlocal label='Target() fake string'\n";
 impl Drop for Fixture {
     fn drop(&mut self) {
         if std::env::var_os("LYCHEEDEV_RESEARCH_KEEP_FIXTURE").is_some() {
@@ -78,10 +79,7 @@ fn fixture_with(extra: &[(&str, &str)]) -> Fixture {
         String::from_utf8(result.stdout).unwrap().trim().to_owned()
     };
     let files = [
-        (
-            "a.lua",
-            "function Caller()\n  Target()\n  Target()\nend\nfunction Target() end\n-- Target() fake comment\nlocal label='Target() fake string'\n",
-        ),
+        ("a.lua", RESEARCH_A),
         ("Main.toc", "## Interface: 120100\na.lua\n"),
         ("b.lua", "function Neighbor()\n  Caller()\nend\n"),
         (
@@ -90,7 +88,13 @@ fn fixture_with(extra: &[(&str, &str)]) -> Fixture {
         ),
     ];
     let mut tree = String::new();
-    for (path, text) in files.into_iter().chain(extra.iter().copied()) {
+    // Explicit per-test originals may replace a default document. The Git pin
+    // authenticates the final originals, including the selected TOC load order.
+    let files = files
+        .into_iter()
+        .chain(extra.iter().copied())
+        .collect::<BTreeMap<_, _>>();
+    for (path, text) in files {
         let blob = run(text, &["hash-object", "-w", "--stdin"]);
         tree.push_str(&format!("100644 blob {blob}\t{path}\n"));
     }
@@ -112,77 +116,258 @@ fn fixture_with(extra: &[(&str, &str)]) -> Fixture {
     .unwrap();
     Fixture { home, pin: pin.id }
 }
+fn native_fixture(extra: &[(&str, &str)], execute_caller: bool) -> Fixture {
+    let source = format!(
+        "{RESEARCH_A}{}",
+        if execute_caller { "Caller()\n" } else { "" }
+    );
+    let mut manifest = String::from("## Interface: 120100\na.lua\nb.lua\nunicode.lua\n");
+    for (path, _) in extra {
+        if path.ends_with(".lua") {
+            manifest.push_str(&format!("{path}\n"));
+        }
+    }
+    let mut originals = extra.to_vec();
+    originals.extend([("a.lua", source.as_str()), ("Main.toc", manifest.as_str())]);
+    fixture_with(&originals)
+}
+struct NativeCli {
+    executable: PathBuf,
+    release: PathBuf,
+}
+impl NativeCli {
+    fn supplied() -> Self {
+        Self {
+            executable: std::env::var_os("LYCHEEDEV_PROJECT_SELECTION_EXE")
+                .expect("sealed current CLI")
+                .into(),
+            release: std::env::var_os("LYCHEEDEV_PROJECT_SELECTION_RELEASE")
+                .expect("matching current release")
+                .into(),
+        }
+    }
+    fn refs(&self, f: &Fixture, flags: &[(&str, &str)]) -> Value {
+        let inv = invoke(f, "source refs", flags);
+        let envelope = project_selection::cli_envelope(&self.executable, &self.release, &inv);
+        assert_eq!(envelope["result"]["snapshot"], f.pin);
+        assert_eq!(envelope["context"]["snapshot"], f.pin);
+        let captures = envelope["captures"].as_array().unwrap();
+        assert_eq!(captures.len(), 1);
+        for capture in captures {
+            assert_eq!(
+                evidence::read_capture(&f.home, capture["id"].as_str().unwrap()).unwrap(),
+                *capture
+            );
+            let bytes = evidence::read_blob(&f.home, &capture["blob"], 16 << 20).unwrap();
+            assert_eq!(
+                serde_json::from_slice::<Value>(&bytes).unwrap(),
+                envelope["result"]
+            );
+            assert_eq!(capture["complete"], envelope["result"]["complete"]);
+        }
+        envelope["result"].clone()
+    }
+}
+fn assert_native_reading(data: &Value) {
+    let native = &data["nativeResearch"];
+    assert_eq!(data["semanticRuntime"]["engine"], "native-common-source");
+    assert_eq!(native["schema"], "lycheedev.source-native-research.v1");
+    assert_eq!(native["lifecycle"]["retired"], true);
+    assert_eq!(native["entryEvidence"]["sourceExecution"], false);
+    assert_eq!(
+        native["semanticPlan"]["plan"]["source_identity"],
+        native["inputIdentity"]
+    );
+    assert_eq!(native["inputIdentity"].as_str().unwrap().len(), 64);
+    assert_eq!(data["coverage"]["environment"], "missing-client-pin");
+    assert_eq!(data["complete"], false);
+}
+fn assert_executed_operations(data: &Value, count: usize, batches: &[usize]) {
+    assert_native_reading(data);
+    let native = &data["nativeResearch"];
+    let plan = &native["semanticPlan"]["plan"];
+    let operations = plan["operations"].as_array().unwrap();
+    assert_eq!(operations.len(), count);
+    assert_eq!(plan["batch_sizes"], serde_json::json!(batches));
+    assert_eq!(native["semanticPlan"]["state"], "executed");
+    let execution = &native["semanticExecution"];
+    assert_eq!(
+        execution["schema"],
+        "lycheedev.native-semantic-execution.v1"
+    );
+    let receipt = &execution["receipt"];
+    assert_eq!(receipt["planned_batches"], batches.len());
+    assert_eq!(receipt["completed_batches"], batches.len());
+    assert_eq!(receipt["unavailable_scopes"], 0);
+    assert_eq!(receipt["unexecuted_operations"], 0);
+    assert_eq!(receipt["plan_identity"].as_str().unwrap().len(), 64);
+    let scopes = execution["answers"].as_array().unwrap();
+    assert!(!scopes.is_empty());
+    assert_eq!(receipt["scopes"], scopes.len());
+    for scope in scopes {
+        let answers = scope["operations"].as_array().unwrap();
+        assert_eq!(answers.len(), count);
+        for (index, (answer, operation)) in answers.iter().zip(operations).enumerate() {
+            assert_eq!(answer["executed"], true);
+            assert_eq!(answer["operation"], index);
+            assert_eq!(answer["batch"], index / 128);
+            assert_eq!(answer["kind"], operation["kind"]);
+            assert_eq!(answer["operationIdentity"].as_str().unwrap().len(), 64);
+        }
+    }
+}
 #[test]
-#[ignore = "requires exact pinned LuaLS ZIP; 130 real semantic queries across two batches"]
+#[ignore = "requires sealed current CLI and matching Release; 130 executed Native operations across two completed batches"]
 fn actual_incoming_hover_plus_128_outgoing_calls_share_one_initialized_workspace() {
-    let zip = PathBuf::from(std::env::var_os("LYCHEEDEV_LUALS_ZIP").expect("fixed ZIP"));
+    let cli = NativeCli::supplied();
     let body = format!("function Bulk()\n{}end\n", "  Target()\n".repeat(128));
-    let f = fixture_with(&[("bulk.lua", &body)]);
-    let runtime_root = f.home.join("fixture-runtime");
-    let runtime = luals::Runtime::unpack_pinned(&zip, &runtime_root).unwrap();
-    let reading = refs::dispatch_with_tools(
-        &invoke(
-            &f,
-            "source refs",
-            &[
-                ("--symbol", "Bulk"),
-                ("--direction", "both"),
-                ("--limit", "200"),
-            ],
-        ),
-        SourceTools {
-            luac: None,
-            luals: Some(&runtime),
-        },
-    )
-    .unwrap();
+    let f = native_fixture(&[("bulk.lua", &body)], false);
+    let flags = [
+        ("--symbol", "Bulk"),
+        ("--direction", "both"),
+        ("--limit", "200"),
+    ];
+    let reading = cli.refs(&f, &flags);
+    assert_executed_operations(&reading, 130, &[128, 2]);
+    // Both/outgoing research explicitly enters the selected declaration after
+    // loading its TOC. This is authenticated hypothetical input, not a source
+    // Bulk() call or evidence that an unselected Caller ever ran.
+    let native = &reading["nativeResearch"];
     assert_eq!(
-        reading.data["semanticAnalysis"]["queryCount"], 130,
-        "{}",
-        reading.data
+        native["entryEvidence"]["kind"],
+        "hypothetical_selected_declaration_entry"
     );
-    assert_eq!(reading.data["semanticAnalysis"]["queryBatches"], 2);
-    assert_eq!(reading.data["coverage"]["semantic"], "complete");
-    let mut resolved = reading.data["relations"]
+    assert_eq!(native["entryResolution"]["state"], "unique");
+    assert_eq!(
+        native["entryResolution"]["candidate"]["closure"]["file"],
+        "bulk.lua"
+    );
+    let entries = native["entryEvidence"]["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entries[0]["request"]["candidate"],
+        native["entryResolution"]["candidate"]["id"]
+    );
+    assert!(entries[0]["frame"].is_number());
+    assert_eq!(entries[0]["effects_complete"], true);
+    assert_eq!(reading["coverage"]["semantic"], "complete", "{reading}");
+    assert_eq!(
+        reading["nativeResearch"]["semanticExecution"]["receipt"]["uncertain_answers"],
+        0
+    );
+    let operations = reading["nativeResearch"]["semanticPlan"]["plan"]["operations"]
+        .as_array()
+        .unwrap();
+    assert_eq!(operations[0]["kind"], "references");
+    assert_eq!(operations[1]["kind"], "type");
+    for (index, operation) in operations[2..].iter().enumerate() {
+        assert_eq!(operation["kind"], "definition");
+        assert_eq!(
+            operation["target"]["file_sha256"],
+            lycheedev_core::storage::sha256(body.as_bytes())
+        );
+        assert_eq!(operation["target"]["site"]["file"], "bulk.lua");
+        assert_eq!(
+            operation["target"]["position"]["coveringRange"]["start"]["line"],
+            index + 1
+        );
+        let site = &operation["target"]["site"];
+        assert_eq!(
+            &body[site["start"].as_u64().unwrap() as usize..site["end"].as_u64().unwrap() as usize],
+            "Target"
+        );
+    }
+    // Count actual definition answers, not merely planned work. Both batches
+    // are completed within each authenticated prepared Native source scope.
+    for scope in reading["nativeResearch"]["semanticExecution"]["answers"]
+        .as_array()
+        .unwrap()
+    {
+        for answer in &scope["operations"].as_array().unwrap()[2..] {
+            assert_eq!(answer["state"], "known");
+            assert_target_definition(&answer["result"]["selected"]);
+        }
+    }
+    let cursor = reading["nextCursor"]
+        .as_str()
+        .expect("128 candidates and 128 bindings require continuation");
+    let next = cli.refs(
+        &f,
+        &[
+            ("--symbol", "Bulk"),
+            ("--direction", "both"),
+            ("--limit", "200"),
+            ("--cursor", cursor),
+        ],
+    );
+    assert_executed_operations(&next, 130, &[128, 2]);
+    assert_eq!(
+        next["nativeResearch"]["inputIdentity"],
+        reading["nativeResearch"]["inputIdentity"]
+    );
+    assert_eq!(
+        next["nativeResearch"]["semanticPlan"]["plan"],
+        reading["nativeResearch"]["semanticPlan"]["plan"]
+    );
+    let rows = reading["relations"]
         .as_array()
         .unwrap()
         .iter()
-        .filter(|row| row["kind"] == "call" && row["state"] == "resolved")
-        .count();
-    // The public 200-row page also contains structural candidates; continuation
-    // must contain the remainder without reducing the admitted semantic budget.
-    let cursor = reading.data["nextCursor"].as_str().unwrap();
-    let next = refs::dispatch_with_tools(
-        &invoke(
-            &f,
-            "source refs",
-            &[
-                ("--symbol", "Bulk"),
-                ("--direction", "both"),
-                ("--limit", "200"),
-                ("--cursor", cursor),
-            ],
-        ),
-        SourceTools {
-            luac: None,
-            luals: Some(&runtime),
-        },
-    )
-    .unwrap();
-    resolved += next.data["relations"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|row| row["kind"] == "call" && row["state"] == "resolved")
-        .count();
+        .chain(next["relations"].as_array().unwrap());
+    let mut sites = std::collections::BTreeSet::new();
+    let mut candidates = 0;
+    for row in rows.filter(|row| row["kind"] == "call" && row["source"] == "Bulk") {
+        if native_relation(row) {
+            assert_eq!(row["state"], "resolved");
+            assert_eq!(row["target"], "Target");
+            assert_eq!(row["path"], "bulk.lua");
+            assert!(sites.insert(row["line"].as_u64().unwrap()));
+            assert_observed_target(row);
+        } else {
+            assert_eq!(row["state"], "static_candidate");
+            candidates += 1;
+        }
+    }
     assert_eq!(
-        resolved, 128,
-        "all outgoing bindings must be returned across legal pages"
+        sites,
+        (2..=129).collect::<std::collections::BTreeSet<u64>>()
     );
-    assert!(
-        !reading.complete,
-        "no selected client environment must stay partial"
+    assert_eq!(candidates, 128);
+    assert!(next["nextCursor"].is_null());
+}
+fn native_relation(row: &Value) -> bool {
+    row["basis"].as_array().is_some_and(|basis| {
+        basis
+            .iter()
+            .any(|value| value == "native_common_source_facts")
+    })
+}
+fn assert_target_definition(selected: &Value) {
+    assert_eq!(selected["state"], "known");
+    let value = &selected["value"];
+    assert!(value["value_id"].is_string() && value["proof"].is_string());
+    let declaration = &value["function_declaration"];
+    assert_eq!(declaration["file"], "a.lua");
+    let start = declaration["start"].as_u64().unwrap() as usize;
+    let end = declaration["end"].as_u64().unwrap() as usize;
+    assert!(RESEARCH_A.get(start..end).unwrap().contains("Target"));
+    assert_eq!(
+        RESEARCH_A[..start]
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count()
+            + 1,
+        5
     );
+}
+fn assert_observed_target(row: &Value) {
+    assert!(row["proof"].is_string());
+    let observations = row["observations"].as_array().unwrap();
+    assert!(!observations.is_empty());
+    for observation in observations {
+        assert!(observation["proof"].is_string());
+        assert_target_definition(&observation["selected"]);
+    }
 }
 fn invoke(f: &Fixture, command: &str, flags: &[(&str, &str)]) -> Invocation {
     let mut options: BTreeMap<_, _> = flags
@@ -419,101 +604,111 @@ fn unicode_context_continuation_never_splits_codepoints_or_restarts_a_consumed_b
 }
 
 #[test]
-#[ignore = "requires exact pinned LuaLS ZIP; real full-source research regression"]
+#[ignore = "requires sealed current CLI and matching Release; complete Native relation, source identity and candidate boundaries"]
 fn actual_full_source_semantic_relations_preserve_candidates_and_client_gaps() {
-    let zip = PathBuf::from(std::env::var_os("LYCHEEDEV_LUALS_ZIP").expect("set fixed LuaLS ZIP"));
-    let f = fixture();
-    let stage = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../.tmp/rust-source-research-semantic-real")
-        .join(format!("run-{}", std::process::id()));
-    fs::create_dir_all(&stage).unwrap();
-    let runtime_root = stage.join("runtime");
-    let runtime = luals::Runtime::unpack_pinned(&zip, &runtime_root).unwrap();
-    let tools = || SourceTools {
-        luac: None,
-        luals: Some(&runtime),
-    };
-    let incoming = refs::dispatch_with_tools(
-        &invoke(
-            &f,
-            "source refs",
-            &[
-                ("--symbol", "Target"),
-                ("--direction", "incoming"),
-                ("--release", "verified-by-caller"),
-            ],
-        ),
-        tools(),
-    )
-    .unwrap();
-    assert_eq!(incoming.data["semanticRuntime"], runtime.identity());
-    assert_eq!(
-        incoming.data["coverage"]["semantic"], "complete",
-        "{}",
-        incoming.data
+    let cli = NativeCli::supplied();
+    // Loading function declarations does not prove that Caller selected Target.
+    // Preserve this boundary independently from the explicitly invoked fixture.
+    let uncalled = native_fixture(&[], false);
+    let unknown = cli.refs(
+        &uncalled,
+        &[("--symbol", "Target"), ("--direction", "incoming")],
     );
+    assert_executed_operations(&unknown, 2, &[2]);
     assert_eq!(
-        incoming.data["coverage"]["environment"],
-        "missing-client-pin"
+        unknown["nativeResearch"]["entryResolution"]["state"],
+        "absent"
     );
-    assert!(!incoming.complete);
-    let references = incoming.data["relations"]
+    assert!(
+        unknown["nativeResearch"]["entryEvidence"]["entries"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(unknown["coverage"]["semantic"], "partial");
+    let unknown_calls = unknown["relations"]
         .as_array()
         .unwrap()
         .iter()
-        .filter(|row| row["kind"] == "reference" && row["state"] == "resolved")
+        .filter(|row| native_relation(row) && row["kind"] == "call")
         .collect::<Vec<_>>();
-    assert_eq!(references.len(), 2, "{}", incoming.data);
-    assert!(references.iter().all(|row| row["state"] == "resolved"
-        && row["targetId"].is_string()
-        && [2, 3].contains(&row["line"].as_u64().unwrap())));
-    let outgoing = refs::dispatch_with_tools(
-        &invoke(
-            &f,
-            "source refs",
-            &[("--symbol", "Caller"), ("--direction", "outgoing")],
-        ),
-        tools(),
-    )
-    .unwrap();
-    let definitions = outgoing.data["relations"]
+    assert_eq!(unknown_calls.len(), 2);
+    for row in unknown_calls {
+        assert_eq!(row["source"], "Caller");
+        assert_eq!(row["target"], "Target");
+        assert_eq!(row["state"], "static_candidate");
+        assert!(row["observations"].as_array().unwrap().is_empty());
+        assert_eq!(row["caller"]["kind"], "named");
+        assert_eq!(row["caller"]["position"]["path"], "a.lua");
+        assert!([2, 3].contains(&row["line"].as_u64().unwrap()));
+    }
+    let f = native_fixture(&[], true);
+    let incoming = cli.refs(&f, &[("--symbol", "Target"), ("--direction", "incoming")]);
+    assert_executed_operations(&incoming, 2, &[2]);
+    assert_eq!(incoming["coverage"]["semantic"], "complete", "{incoming}");
+    let references = incoming["relations"]
         .as_array()
         .unwrap()
         .iter()
-        .filter(|row| row["kind"] == "call" && row["state"] == "resolved")
+        .filter(|row| native_relation(row) && row["kind"] == "call")
         .collect::<Vec<_>>();
-    assert_eq!(definitions.len(), 2, "{}", outgoing.data);
-    assert!(definitions.iter().all(|row| row["targetPath"] == "a.lua"
-        && row["targetLine"] == 5
-        && row["targetId"].is_string()));
-    let static_reading = refs::dispatch_with_tools(
-        &invoke(
-            &f,
-            "source refs",
-            &[("--symbol", "Target"), ("--static-only", "true")],
-        ),
-        tools(),
-    )
-    .unwrap();
-    assert!(static_reading.data.get("semanticAnalysis").is_none());
-    assert_eq!(static_reading.data["coverage"]["semantic"], "unavailable");
-    let captured = evidence::read_blob(&f.home, &incoming.provenance[0]["blob"], 1 << 20).unwrap();
+    assert_eq!(references.len(), 2);
+    for row in references {
+        assert_eq!(row["state"], "resolved");
+        assert_eq!(row["source"], "Caller");
+        assert_eq!(row["target"], "Target");
+        assert_eq!(row["referenceExpression"], "Target");
+        assert_eq!(row["caller"]["kind"], "named");
+        assert_eq!(row["caller"]["name"], "Caller");
+        assert_eq!(row["caller"]["position"]["path"], "a.lua");
+        assert_eq!(row["path"], "a.lua");
+        assert!([2, 3].contains(&row["line"].as_u64().unwrap()));
+        assert_observed_target(row);
+    }
     assert_eq!(
-        serde_json::from_slice::<Value>(&captured).unwrap(),
-        incoming.data
+        incoming["relations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| !native_relation(row)
+                && row["kind"] == "call"
+                && row["state"] == "static_candidate")
+            .count(),
+        2
     );
-    fs::write(
-        stage.join("report.json"),
-        serde_json::to_vec_pretty(&serde_json::json!({
-        "state":"passed", "home":f.home,"pin":f.pin, "scope":"full fixed fixture source, one-shot semantic relations",
-            "incoming":incoming.data,"outgoing":outgoing.data,"static":static_reading.data,
-            "wholeSourceAcceptance":"not_run","broker":"not_run","flow":"not_run"
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-    drop(runtime);
-    fs::remove_dir_all(&runtime_root).unwrap();
+    let outgoing = cli.refs(&f, &[("--symbol", "Caller"), ("--direction", "outgoing")]);
+    assert_executed_operations(&outgoing, 2, &[2]);
+    let definitions = outgoing["relations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| native_relation(row) && row["kind"] == "call")
+        .collect::<Vec<_>>();
+    assert_eq!(definitions.len(), 2);
+    for row in definitions {
+        assert_eq!(row["state"], "resolved");
+        assert_eq!(row["source"], "Caller");
+        assert_eq!(row["target"], "Target");
+        assert_eq!(row["path"], "a.lua");
+        assert!([2, 3].contains(&row["line"].as_u64().unwrap()));
+        assert_observed_target(row);
+    }
+    assert_eq!(
+        outgoing["nativeResearch"]["inputIdentity"],
+        incoming["nativeResearch"]["inputIdentity"]
+    );
+    assert_eq!(outgoing["commit"], incoming["commit"]);
+    let static_reading = cli.refs(&f, &[("--symbol", "Target"), ("--static-only", "true")]);
+    assert!(static_reading.get("semanticAnalysis").is_none());
+    assert_eq!(static_reading["coverage"]["semantic"], "unavailable");
+    assert!(
+        static_reading["relations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["kind"] == "call")
+            .all(|row| row["state"] == "static_candidate")
+    );
 }
 
 #[test]

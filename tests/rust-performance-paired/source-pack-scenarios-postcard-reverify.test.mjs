@@ -8,14 +8,18 @@ import {join, dirname, relative, resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 import {beginScratch, sha256, defaults} from '../../tools/rust-disk.mjs';
 import {hashFile} from '../../tools/rust-build.mjs';
-import {elapsed, semantic} from './contract.mjs';
+import {GO_COMMIT, elapsed, semantic} from './contract.mjs';
 import {PHASE_NAMES, PHASE_TIMING, LOCK_TIMING} from './source-candidates.mjs';
 import {verifyPackProfile} from './source-pack-resume.mjs';
-import {CASES, candidateIdentity, evidenceFiles} from './source-pack-scenarios.mjs';
+import {HISTORICAL_GO_BASELINE, CASES, candidateIdentity, evidenceFiles} from './source-pack-scenarios.mjs';
 import {POSTCARD_LAYOUT} from './read-fact-delta-postcard.mjs';
 import {freshPostcardIdentity, FRESH_OWNER_RECEIPT_BYTES} from './source-pack-scenarios-postcard-fresh.mjs';
 import {reverifySealedPostcardFailure, validatePostcardReverifyRequest} from './source-pack-scenarios-postcard-reverify.mjs';
 const runnerRoot = resolve(import.meta.dirname, '../..');
+test('historical source-pack producer remains Go323 after the current baseline advances',()=>{
+  assert.deepEqual(HISTORICAL_GO_BASELINE,{commit:'3766f9cacb52e93a803a626187e2a1d54a445468',version:'3.2.3'});
+  assert.equal(GO_COMMIT,'29bdbdaff5f064ec212ff2064380b1ccac652eda');assert.notEqual(HISTORICAL_GO_BASELINE.commit,GO_COMMIT);
+});
 const put = (path, value) => { fs.mkdirSync(dirname(path), {recursive: true}); fs.writeFileSync(path, typeof value === 'string' ? value : JSON.stringify(value)); };
 const load = path => JSON.parse(fs.readFileSync(path));
 const nativeProof = (runId, binary, status = 0) => ({schema: 'lycheedev.owned-process.v1', runId, binary, pid: 1234, creationFileTime: '123456789', exitCode: status,
@@ -97,7 +101,7 @@ function fixture(t) {
   // no fixture claims these synthetic executables or Facts are genuine products.
   const services = {verifyCandidateRecord(input) { assert.deepEqual(input, request.candidate); calls.candidate++; return {sourceBinary: binaries.rust}; },
     verifyPostcardExporter(_root, input) { assert.equal(input.artifactSHA256, request.exporter.artifactSHA256); calls.exporter++; },
-    verifyGoPackage() { calls.go++; return {binary: binaries.go, packageSHA256: request.go.packageSHA256}; },
+    verifyGoPackage(_root, _archive, baseline) { assert.deepEqual(baseline,HISTORICAL_GO_BASELINE); calls.go++; return {binary: binaries.go, packageSHA256: request.go.packageSHA256}; },
     verifyFreshPostcardReport(input, selected) { assert.deepEqual(input, report); assert.deepEqual(selected, request); calls.facts++; }};
   function reseal(receiptPath) {
     const receipt = load(receiptPath); receipt.sealedLogs = evidenceFiles(dirname(receiptPath)).map(path => ({path, original: path, sha256: hashFile(path)}));

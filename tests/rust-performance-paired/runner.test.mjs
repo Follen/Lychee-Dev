@@ -6,8 +6,8 @@ import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:
 import {tmpdir} from 'node:os';
 import {dirname, join} from 'node:path';
 import {runInNewContext} from 'node:vm';
-import {CASES, GO_COMMIT, REPETITIONS, compareSamples, elapsed, orderFor, semantic, startupBreakdown, statistics, summarize} from './contract.mjs';
-import {LUALS, assertSeedCold, cloneSeed, derivedIdentity, inventory, proveWarmReuse, safeRelative, verifyGoMetadata, verifySeedMetadata} from './inputs.mjs';
+import {CASES, GO_COMMIT, GO_VERSION, REPETITIONS, compareSamples, elapsed, orderFor, semantic, startupBreakdown, statistics, summarize} from './contract.mjs';
+import {LUALS, assertSeedCold, cloneSeed, derivedIdentity, inventory, proveWarmReuse, safeRelative, verifyGoMetadata, verifyGoPackage, verifySeedMetadata} from './inputs.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {APPROVED_ENGINE_SUMMARIES} from '../rust-parity/describe-contract.mjs';
 import {ownedUserEnvironment} from '../../tools/rust-build.mjs';
@@ -23,7 +23,7 @@ function index() { return envelope({repository: oracle.repository, product: orac
 function proof() { return {schema: 'lycheedev.owned-process.v1', rootReaped: true, treeReaped: true, handlesClosed: true, toolIdentityLocksClosed: true, outputReadersComplete: true, activeProcesses: 0, forced: false, timing: {schema: 'lycheedev.owned-timing.v1', frequency: 10000000, startTicks: '9007199254740993000', rootExitTicks: '9007199254741993000', treeReapedTicks: '9007199254742993000'}}; }
 function pairs() { return CASES.flatMap(({id}) => Array.from({length: REPETITIONS}, (_, iteration) => ['cold', 'warm'].map(cacheMode => ({caseId: id, iteration, cacheMode, order: orderFor(iteration), resultEquivalent: true, ...Object.fromEntries(['go', 'rust'].map(engine => [engine, {valid: true, home: `${id}/${iteration}/${engine}`, binary: engine, snapshot: pin, warmReuse: {verified: true}, controllableMillis: engine === 'go' ? 100 : 30}]))}))).flat()); }
 test('fixed oracle, workload, exact pair count and 30% target cannot drift to historical five/50%', () => {
-  assert.equal(GO_COMMIT, '3766f9cacb52e93a803a626187e2a1d54a445468'); assert.equal(REPETITIONS, 20);
+  assert.equal(GO_COMMIT, '29bdbdaff5f064ec212ff2064380b1ccac652eda'); assert.equal(GO_VERSION, '3.2.4'); assert.equal(REPETITIONS, 20);
   assert.equal(CASES.length, 3); assert.equal(oracle.documents, 4036); assert.equal(oracle.documentBytes, 32269051);
   assert.deepEqual(orderFor(0), ['go', 'rust']); assert.deepEqual(orderFor(1), ['rust', 'go']);
   assert(summarize(pairs()).every(row => row.state === 'passed_selected_path' && row.targetRatio === .30));
@@ -94,20 +94,38 @@ test('Go metadata requires exact clean fixed build and optimized target identity
   for (const [from, to] of [[GO_COMMIT, '0'.repeat(40)], ['modified=false', 'modified=true'], ['go1.27.1', 'go1.27.0'], ['CGO_ENABLED=0', 'CGO_ENABLED=1'], ['GOOS=windows', 'GOOS=linux'], ['-trimpath=true', '-trimpath=false']]) assert.throws(() => verifyGoMetadata(goMetadata().replace(from, to)));
   assert.throws(() => verifyGoMetadata(goMetadata() + '\tbuild\t-gcflags=all=-N -l\n'));
 });
-test('Go preparer owns caches and temp, ignores user Go config, and preserves dependency networking', () => {
+test('Go preparer owns caches and user paths, ignores user Go config, and preserves dependency networking', t => {
   const preparer = readFileSync(new URL('../../tools/rust-performance-prepare-go.mjs', import.meta.url), 'utf8');
   const setup = preparer.slice(preparer.indexOf('const env ='), preparer.indexOf('function run('));
+  const parent = mkdtempSync(join(tmpdir(), 'owned-go-prepare-')); t.after(() => rmSync(parent, {recursive: true, force: true}));
   for (const proxy of [undefined, 'https://proxy.golang.org,direct']) {
-    const inherited = {Path: 'installed-tools', gocache: 'unowned-cache', GoModCache: 'unowned-modules', gotmpdir: 'unowned-temp', GoEnv: 'user-config', GoToolchain: 'auto', ...(proxy ? {GOPROXY: proxy} : {})};
-    const directory = join(tmpdir(), 'owned-go-prepare');
-    const actual = runInNewContext(setup + '\nenv;', {process: {env: inherited}, job: {directory}, join});
+    const inherited = {Path: 'installed-tools', HOME: 'real-user', userprofile: 'real-user', CODEX_HOME: 'real-agent', APPDATA: 'real-apps', LOCALAPPDATA: 'real-local', TEMP: 'real-temp', TMP: 'real-temp', LYCHEEDEV_BIN: 'real-tool', gocache: 'unowned-cache', GoModCache: 'unowned-modules', gotmpdir: 'unowned-temp', GoEnv: 'user-config', GoToolchain: 'auto', ...(proxy ? {GOPROXY: proxy} : {})};
+    const before = {...inherited}, directory = join(parent, proxy ? 'proxy' : 'default');
+    const actual = runInNewContext(setup + '\nenv;', {process: {env: inherited}, job: {directory}, join, ownedUserEnvironment});
     for (const [key, name] of Object.entries({GOCACHE: 'go-cache', GOMODCACHE: 'go-mod-cache', GOTMPDIR: 'go-tmp'})) assert.equal(actual[key], join(directory, name));
     assert.equal(actual.GOENV, 'off'); assert.equal(actual.GOTOOLCHAIN, 'local'); assert.equal(actual.Path, inherited.Path);
     assert.equal(actual.GOPROXY, proxy); assert.equal(Object.hasOwn(actual, 'GOPROXY'), proxy !== undefined);
+    for (const key of ['HOME', 'USERPROFILE', 'CODEX_HOME', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'LYCHEEDEV_HOME']) assert(actual[key].startsWith(directory), key);
+    assert.equal(actual.LYCHEEDEV_BIN, undefined); assert.equal(actual.userprofile, undefined); assert.deepEqual(inherited, before);
     for (const key of ['gocache', 'GoModCache', 'gotmpdir', 'GoEnv', 'GoToolchain']) assert.equal(Object.hasOwn(actual, key), false);
   }
   assert(preparer.includes('for (const directory of [env.GOCACHE, env.GOMODCACHE, env.GOTMPDIR]) mkdirSync(directory);'));
   assert(preparer.includes('ownedSpawnSync(command, args, {cwd: source, env, evidence: job.evidence, timeout})'));
+});
+test('current Go package rejects both old version and relabelled old commit before runtime use', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'paired-go-version-')); t.after(() => rmSync(directory, {recursive: true, force: true}));
+  for (const [version, commit, actual, expected] of [
+    ['3.2.3', GO_COMMIT, '3.2.3', GO_VERSION],
+    [GO_VERSION, '3766f9cacb52e93a803a626187e2a1d54a445468', '3766f9cacb52e93a803a626187e2a1d54a445468', GO_COMMIT],
+  ]) {
+    writeFileSync(join(directory, 'release.json'), JSON.stringify({schema: 'lycheedev.release.v1', version, commit}));
+    assert.throws(() => verifyGoPackage(directory, 'unused.zip'), error => error.code === 'ERR_ASSERTION' && error.actual === actual && error.expected === expected);
+  }
+  const workflow = readFileSync(new URL('../../.github/workflows/rust-performance.yml', import.meta.url), 'utf8');
+  assert(workflow.includes(`ref: '${GO_COMMIT}'`)); assert(workflow.includes('.tmp/paired-go-3.2.4-artifact/dev-npm-stage'));
+  assert(!workflow.includes('--one-shot'));
+  const preparer = readFileSync(new URL('../../tools/rust-performance-prepare-go.mjs', import.meta.url), 'utf8');
+  assert(preparer.includes('`lycheedev-local-${GO_VERSION}.tgz`')); assert(!preparer.includes('lycheedev-local-3.2.3.tgz'));
 });
 test('Source paired outer controller, preparation and Git inherit only their existing owner user paths', t => {
   const directory = mkdtempSync(join(tmpdir(), 'paired-user-owner-')); t.after(() => rmSync(directory, {recursive: true, force: true}));
@@ -221,7 +239,7 @@ test('warm proof keeps actual derived file identity and requires Rust public hit
   writeFileSync(join(home, 'cache/objects/index'), 'replaced'); assert.throws(() => proveWarmReuse('rust', rust, derivedIdentity(home, 'rust'), hit), /identity changed/);
 });
 
-test('package/runtime validation matches actual immutable Go 3.2.3 source', () => {
+test('package/runtime validation matches actual immutable Go 3.2.4 source', () => {
   const read = path => execFileSync('git', ['--no-replace-objects', 'show', `${GO_COMMIT}:${path}`], {encoding: 'utf8', maxBuffer: 2 << 20});
   const runtime = read('release/tools/luals.json'); assert.deepEqual(JSON.parse(runtime), LUALS);
   const release = read('tools/release.mjs'), lua = read('tools/luals.mjs'), open = read('internal/luals/runtime.go');

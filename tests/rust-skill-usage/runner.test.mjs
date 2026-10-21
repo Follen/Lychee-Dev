@@ -43,8 +43,12 @@ function fixture(t) {
   return {root, packageRoot, reportPath, artifact, manifest, report, verify: () => verifyCandidate(root, reportPath, artifact, workflow), rewrite: () => json(reportPath, report)};
 }
 
-test('current workflow binds Go323 and retains the exact Go320 Source fixtures and prompts', () => {
+test('current workflow binds Go324 and retains the exact Go320 Source fixtures and prompts', () => {
   assert.equal(workflow.goContract, CURRENT_GO_CONTRACT);
+  const previous = jsonFile(new URL('./workflow-go323.json', import.meta.url));
+  assert.deepEqual(workflow, {...previous, goContract: CURRENT_GO_CONTRACT, goVersion: '3.2.4', baselineManifest: 'baselines/go3.2.4-skill.json'});
+  const go = jsonFile(new URL('./baselines/go3.2.4-skill.json', import.meta.url));
+  assert.deepEqual(go.files, jsonFile(new URL('./baselines/go3.2.3-skill.json', import.meta.url)).files);
   assert.equal(historicalWorkflow.goContract, '3057a9666ab078270b63c7f06de748069b0d1f4b');
   for (const field of ['requiredSkillFiles', 'prompts', 'apiOriginalWindow', 'nativeCallsite']) assert.deepEqual(workflow[field], historicalWorkflow[field]);
   assert.equal(workflow.requiredSkillFiles.length, 23);
@@ -58,8 +62,8 @@ function workflowFixture(t) {
   for (const path of currentWorkflowInputs(workflow)) write(join(root, path), readFileSync(join(repository, path)));
   return {root, read: path => jsonFile(join(root, 'tests/rust-skill-usage', path)), write: (path, value) => json(join(root, 'tests/rust-skill-usage', path), value), verify: () => loadCurrentWorkflow(root)};
 }
-test('both complete fixed Skill manifests reconstruct their exact immutable Git trees', () => {
-  for (const [file, expected] of [['go3.2.0-skill.json', '7145d71201e7b1b63a3fbcd880ec78d6a1589e26'], ['go3.2.3-skill.json', 'b9e162ace7abe7ea4a2feecef822283767eb1210']]) {
+test('all complete fixed Skill manifests reconstruct their exact immutable Git trees', () => {
+  for (const [file, expected] of [['go3.2.0-skill.json', '7145d71201e7b1b63a3fbcd880ec78d6a1589e26'], ['go3.2.3-skill.json', 'b9e162ace7abe7ea4a2feecef822283767eb1210'], ['go3.2.4-skill.json', 'b9e162ace7abe7ea4a2feecef822283767eb1210']]) {
     const manifest = jsonFile(new URL(`baselines/${file}`, import.meta.url));
     assert.equal(manifest.files.length, 23); assert.equal(skillTreeIdentity(manifest.files), expected);
     assert.notEqual(skillTreeIdentity(manifest.files.slice(1)), expected);
@@ -72,16 +76,16 @@ test('normal outer and owned controller entries both load current authenticated 
     assert.match(source, /const workflow = loadCurrentWorkflow\(root\)/);
     assert.doesNotMatch(source, /const workflow = jsonFile\(/);
   }
-  assert.equal(CURRENT_WORKFLOW, 'tests/rust-skill-usage/workflow-go323.json');
+  assert.equal(CURRENT_WORKFLOW, 'tests/rust-skill-usage/workflow-go324.json');
   const inputs = currentWorkflowInputs(workflow);
-  assert.equal(inputs.length, 13);
-  assert.equal(new Set(inputs).size, 13);
+  assert.equal(inputs.length, 15);
+  assert.equal(new Set(inputs).size, 15);
   assert.deepEqual([...inputs].sort(), [
-    'workflow-go323.json', 'workflow.json', 'skill-identity.mjs',
-    'baselines/rust-agent-cutover-recovered-skill.json',
+    'workflow-go324.json', 'workflow.json', 'skill-identity.mjs',
+    'baselines/rust-go324-skill.json', 'baselines/rust-agent-cutover-recovered-skill.json',
     'baselines/rust-agent-native-skill.json',
     'baselines/rust-simplified-skill.json', 'baselines/rust-candidate-skill.json',
-    'baselines/go3.2.0-skill.json', 'baselines/go3.2.3-skill.json',
+    'baselines/go3.2.0-skill.json', 'baselines/go3.2.3-skill.json', 'baselines/go3.2.4-skill.json',
     'baselines/go3.2.3/references/live-recovery.md',
     'baselines/go3.2.3/references/live-startup.md',
     'baselines/go3.2.3/references/data-tables.md',
@@ -89,7 +93,7 @@ test('normal outer and owned controller entries both load current authenticated 
   ].map(path => `tests/rust-skill-usage/${path}`).sort());
 });
 test('current workflow rejects historical relabeling, missing increments and weakened Source tasks', t => {
-  const f = workflowFixture(t), original = f.read('workflow-go323.json');
+  const f = workflowFixture(t), original = f.read('workflow-go324.json');
   assert.equal(f.verify().goContract, CURRENT_GO_CONTRACT);
   for (const mutate of [
     row => { row.goContract = historicalWorkflow.goContract; },
@@ -98,14 +102,14 @@ test('current workflow rejects historical relabeling, missing increments and wea
     row => { row.nativeCallsite.site.start++; }, row => { row.requiredSkillFiles.pop(); },
     row => { row.increments[0].sourceCommit = CURRENT_GO_CONTRACT; },
     row => { row.increments[2].fixture = '../other.md'; }, row => { row.increments[2].requires = []; },
-  ]) { const changed = structuredClone(original); mutate(changed); f.write('workflow-go323.json', changed); assert.throws(f.verify); }
+  ]) { const changed = structuredClone(original); mutate(changed); f.write('workflow-go324.json', changed); assert.throws(f.verify); }
 });
 test('historical workflow cannot be edited and rehashed as a new baseline', t => {
   const f = workflowFixture(t), historical = f.read('workflow.json');
   historical.goContract = CURRENT_GO_CONTRACT; f.write('workflow.json', historical);
   assert.throws(f.verify, /historical workflow bytes/);
-  const current = f.read('workflow-go323.json'); current.historical.sha256 = sha256(readFileSync(join(f.root, 'tests/rust-skill-usage/workflow.json')));
-  f.write('workflow-go323.json', current); assert.throws(f.verify);
+  const current = f.read('workflow-go324.json'); current.historical.sha256 = sha256(readFileSync(join(f.root, 'tests/rust-skill-usage/workflow.json')));
+  f.write('workflow-go324.json', current); assert.throws(f.verify);
 });
 test('fixed manifest and increment snapshots reject changed blobs, omitted files and text regressions', t => {
   const f = workflowFixture(t), manifest = f.read(workflow.baselineManifest);
@@ -126,8 +130,8 @@ test('all four historical Go increment fixtures remain byte-exact, never runtime
   assert(pending.find(row => row.taskId === 'g323-data-query').reason.includes('DataPin/CASC-or-CDN/DBD/key'));
   assert(pending.find(row => row.taskId === 'g321-keyboard-recovery').reason.includes('no game'));
 });
-test('owned success cannot relabel Go320, omit current checks or turn static increments into runtime passes', () => {
-  const report = {schema: 'lycheedev.skill-real-usage.v1', goContract: CURRENT_GO_CONTRACT, goVersion: '3.2.3', state: 'passed_selected_skill_workflows', completeSkillAcceptance: false,
+test('historical Go323 Source report retains its baseline and rejects changed checks or runtime claims', () => {
+  const report = {schema: 'lycheedev.skill-real-usage.v1', goContract: '3766f9cacb52e93a803a626187e2a1d54a445468', goVersion: '3.2.3', state: 'passed_selected_skill_workflows', completeSkillAcceptance: false,
     prompts: workflow.prompts, pendingTasks: pendingIncrementTasks(workflow), checks: [
       ...POST_SEMANTIC_REQUIREMENTS.map(caseId => ({caseId, state: 'passed'})),
       ...workflow.increments.map(increment => ({...assertPackagedIncrement(join(repository, 'tests/rust-skill-usage/baselines/go3.2.3'), workflow, increment), caseId: `fixed-skill-contract-${increment.id}`, state: 'passed'})),
@@ -588,7 +592,7 @@ test('fatal transport state prohibits all check callbacks and observed business 
 test('reviewed Source report binds current full Skill identity without relabeling historical checks', () => {
   const identity = reviewedSkillIdentity(loadReviewedSkillContract());
   const report = {schema: 'lycheedev.skill-real-usage.v2', skillIdentity: identity,
-    goContract: CURRENT_GO_CONTRACT, goVersion: '3.2.3', state: 'passed_selected_skill_workflows', completeSkillAcceptance: false,
+    goContract: CURRENT_GO_CONTRACT, goVersion: '3.2.4', state: 'passed_selected_skill_workflows', completeSkillAcceptance: false,
     prompts: workflow.prompts, pendingTasks: pendingIncrementTasks(workflow), checks: [
       ...POST_SEMANTIC_REQUIREMENTS.map(caseId => ({caseId, state: 'passed'})),
       ...workflow.increments.map(increment => ({...assertPackagedIncrement(join(repository, 'skills/lycheedev'), workflow, increment, identity), caseId: `fixed-skill-contract-${increment.id}`, state: 'passed'})),
@@ -605,4 +609,21 @@ test('reviewed Source report binds current full Skill identity without relabelin
   ]) { const changed = structuredClone(report); mutate(changed); assert.throws(() => assertCurrentSelectedReport(changed, workflow, identity)); }
   const historical = { ...report, schema: 'lycheedev.skill-real-usage.v1' }; delete historical.skillIdentity;
   assert.throws(() => assertCurrentSelectedReport(historical, workflow, identity), /cannot reuse historical report/);
+});
+
+test('old reviewed Source reports retain Go323 identity and cannot count as the current owned run', () => {
+  const old = jsonFile(new URL('./baselines/rust-agent-cutover-recovered-skill.json', import.meta.url));
+  const identity = reviewedSkillIdentity(loadReviewedSkillContract(reviewedSkillIdentity(old)));
+  const report = {schema: 'lycheedev.skill-real-usage.v2', skillIdentity: identity,
+    goContract: old.goContract, goVersion: '3.2.3', state: 'passed_selected_skill_workflows', completeSkillAcceptance: false,
+    prompts: workflow.prompts, pendingTasks: pendingIncrementTasks(workflow), checks: [
+      ...POST_SEMANTIC_REQUIREMENTS.map(caseId => ({caseId, state: 'passed'})),
+      ...workflow.increments.map(increment => { const row = old.files.find(row => row.path === increment.file); return {
+        caseId: 'fixed-skill-contract-' + increment.id, state: 'passed', taskId: increment.id, file: increment.file,
+        gitBlob: row.gitBlob, sha256: row.sha256, basis: 'exact_reviewed_candidate_skill_bytes_only', skillIdentity: identity, runtimeVerified: false}; }),
+    ]};
+  assertCurrentSelectedReport(report, workflow);
+  assert.throws(() => assertCurrentSelectedReport(report, workflow, reviewedSkillIdentity(loadReviewedSkillContract())), /same selected Source Skill identity/);
+  const relabeled = structuredClone(report); relabeled.goContract = CURRENT_GO_CONTRACT; relabeled.goVersion = '3.2.4';
+  assert.throws(() => assertCurrentSelectedReport(relabeled, workflow), /authenticated Skill baseline/);
 });

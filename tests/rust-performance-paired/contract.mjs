@@ -4,7 +4,8 @@ import {isDeepStrictEqual} from 'node:util';
 import {APPROVED_ENGINE_SUMMARIES} from '../rust-parity/describe-contract.mjs';
 import {assertAnchor, assertEnvelope} from '../rust-source-full-corpus/assertions.mjs';
 
-export const GO_COMMIT = '3766f9cacb52e93a803a626187e2a1d54a445468';
+export const GO_COMMIT = '29bdbdaff5f064ec212ff2064380b1ccac652eda';
+export const GO_VERSION = '3.2.4';
 export const REPETITIONS = 20;
 export const TARGET_RATIO = 0.30;
 export const CASES = Object.freeze([
@@ -85,7 +86,7 @@ export function semantic(caseId, envelope, engine, oracle, pin) {
   assert.equal(caseId, 'B02-retail-query');
   assertAnchor(result, oracle.anchors[0], oracle, pin);
   assert.equal(result.complete, true); assert.equal(result.truncated, false); assert.equal(result.coverage.complete, true);
-  // Project the fixed Go 3.2.3 public result, never Rust's Emmy-only provenance,
+  // Project the fixed Go 3.2.4 public result, never Rust's Emmy-only provenance,
   // checker counters or matchCoverage. Keep all rows, ordering, scores, IDs,
   // excerpts, original-byte hashes, diagnostics, cursors and completeness.
   const value = fields(result, ['sourceId', 'product', 'requestedRef', 'matchedTag', 'resolvedCommit', 'snapshotId', 'complete', 'truncated'], ['requestedRef']);

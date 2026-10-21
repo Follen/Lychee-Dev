@@ -5,9 +5,11 @@ import {lstatSync, readFileSync, readdirSync} from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import test from 'node:test';
+import {ORACLE as CURRENT_GO_ORACLE} from '../tests/rust-parity/formal-lua-3.2.4/assertions.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const archive = 'tests/history/native-v4-6699bbff';
+const RETIREMENT_GO_ORACLE = '3766f9cacb52e93a803a626187e2a1d54a445468';
 const originals = [
   'addon/Bridge/FaultRunner.lua',
   'addon/Bridge/NativeAdapter.lua',
@@ -50,7 +52,8 @@ function manifest() {
   const value = JSON.parse(bytes);
   assert.equal(value.schema, 'lycheedev.legacy-native-v4-source.v1');
   assert.equal(value.sourceCommit, '6699bbff2d04075e25fafd587cb0de1618561f01');
-  assert.equal(value.currentGoOracle, '3766f9cacb52e93a803a626187e2a1d54a445468');
+  // The frozen archive records the Go baseline when these sources retired.
+  assert.equal(value.currentGoOracle, RETIREMENT_GO_ORACLE);
   assert.equal(value.state, 'historical_source_only');
   assert.equal(value.executableEntry, null);
   assert.deepEqual(value.files.map(row => row.originalPath), originals);
@@ -92,6 +95,11 @@ test('historical source is exactly the frozen set, with no runnable package or s
 });
 
 test('current discovery keeps the formal Driver and excludes only the historical native roots', () => {
+  const currentBytes = read('tests/history/legacy-ui-00fd643/current-oracle-inputs-3.2.4.json');
+  assert.equal(digest(currentBytes), 'd6e6f3ee9128388237e5a9462e4a9976a8282af6f434eb49f91961559089c5d8');
+  const current = JSON.parse(currentBytes);
+  assert.equal(current.oracleCommit, CURRENT_GO_ORACLE);
+  assert.equal(current.previousOracle.commit, RETIREMENT_GO_ORACLE);
   const addonTests = read('tests/addon/addon_test.go').toString();
   assert(addonTests.includes('filepath.Glob("t_*.lua")'));
   const catalog = read('tests/baseline/catalog.mjs').toString();

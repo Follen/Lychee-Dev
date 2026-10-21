@@ -12,7 +12,7 @@ import {runCargo, sourceDigest, verifyArtifact} from './rust-build.mjs';
 import {ownedSpawnSync} from './rust-owned-process.mjs';
 import {verifyInterpreter} from './rust-formal-lua.mjs';
 import {BASE, ORACLE, MANIFEST_SHA256, RELEASE_FIELDS_SHA256, SUPPORT as ORACLE_SUPPORT, authenticate, cleanLuaEnvironment, hash, materialize,
-  processPassed, processReaped, regular, verifyMaterial, verifyOwnerEvidence} from '../tests/rust-parity/formal-lua-3.2.3/assertions.mjs';
+  processPassed, processReaped, regular, verifyMaterial, verifyOwnerEvidence} from '../tests/rust-parity/formal-lua-3.2.4/assertions.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // Optional paths select sealed records and a fresh output directory, never a

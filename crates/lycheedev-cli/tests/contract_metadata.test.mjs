@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { loadCliContractOracle, verifyGo323CommandInheritance } from '../../../tests/rust-parity/cli-contract-oracle-3.2.3.mjs';
+import { loadCliContractOracle, verifyGo324CommandInheritance } from '../../../tests/rust-parity/cli-contract-oracle-3.2.4.mjs';
 
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
 const historicalBytes = read('../../../tests/rust-parity/go-3.2.0.manifest.json');
@@ -34,9 +34,9 @@ function assertMetadata(actual) {
   assert.deepEqual(actual, fixture.expected);
 }
 
-test('shared definitions equal fixed Go 3.2.3 plus exact approved differences and ordering', () => {
-  assert.equal(fixture.oracle.commit, '3766f9cacb52e93a803a626187e2a1d54a445468');
-  assert.equal(fixture.oracle.release, 'Go v3.2.3');
+test('shared definitions equal fixed Go 3.2.4 plus exact approved differences and ordering', () => {
+  assert.equal(fixture.oracle.commit, '29bdbdaff5f064ec212ff2064380b1ccac652eda');
+  assert.equal(fixture.oracle.release, 'Go v3.2.4');
   assert.equal(fixture.commands.length, 84);
   assert.equal(fixture.expected.length, 71);
   assertMetadata(inventory);
@@ -135,7 +135,7 @@ test('oracle preserves historical bytes and rejects corrupt or relabeled fixture
     bytes => bytes.replace('"value": true', '"value": false'),
     bytes => bytes.replace('"mutates": true', '"mutates": false'),
   ]) assert.throws(() => loadCliContractOracle(corrupt(historicalBytes)), /historical CLI fixture identity/);
-  assert.throws(() => verifyGo323CommandInheritance({commands: 'not fixed Go source', products: '', historicalProducts: ''}, historicalBytes), /Go 3.2.3 commands source identity/);
+  assert.throws(() => verifyGo324CommandInheritance({commands: 'not fixed Go source', products: '', historicalProducts: ''}, historicalBytes), /Go 3.2.4 commands source identity/);
 });
 
 test('every command rejects missing duplicate and corrupted metadata, including the approved addition', () => {

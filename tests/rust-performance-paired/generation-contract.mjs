@@ -1,7 +1,7 @@
 // Production static-SQL generation evidence. No timing subtraction or narrowed rows.
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-export const GO_COMMIT = '3766f9cacb52e93a803a626187e2a1d54a445468';
+export const GO_COMMIT = '29bdbdaff5f064ec212ff2064380b1ccac652eda';
 export const REPETITIONS = 20;
 export const TARGET_RATIO = 0.30;
 export const PHASES = Object.freeze(['fresh-wdc', 'prepare', 'first-after-prepare', 'subsequent-hit']);

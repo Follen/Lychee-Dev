@@ -1,7 +1,7 @@
 // Strict bounded evidence contract. No process launch, clocks, or fabricated
 // timings: accepts only complete samples and reports diagnostic distributions.
 import assert from 'node:assert/strict';
-import {ORACLE} from '../rust-parity/formal-lua-3.2.3/assertions.mjs';
+import {ORACLE} from '../rust-parity/formal-lua-3.2.4/assertions.mjs';
 export const RESULT_STRING_BYTES = Object.freeze([256, 16384, 131072]);
 export const HISTORY_EVENTS = Object.freeze([1, 255, 256]);
 export const REPEATS = 3;

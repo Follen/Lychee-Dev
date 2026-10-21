@@ -16,15 +16,15 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-pub const ORACLE: &str = "3766f9cacb52e93a803a626187e2a1d54a445468";
+pub const ORACLE: &str = "29bdbdaff5f064ec212ff2064380b1ccac652eda";
 pub const MANIFEST_SHA256: &str =
-    "c976957ff8e2dd05b12179ccb240a41c0836f6fc877314b7107fedbfd9357cd7";
+    "fb48cb3d55f22b553881bece10be49d451418cdc137814ec05e2964aae93baf6";
 pub const RELEASE_FIELDS_SHA256: &str =
-    "d3d071167c4a031aecebf50508ee0d27bce5bdb2ec8307c4c1b36b827f160396";
+    "c459550c8f467a1978303aa401d6f3aba5f5ed5f43e77111802d7e78bc3060e4";
 const RELEASE_FIELDS: &[u8] =
-    include_bytes!("../../../../tests/rust-parity/formal-lua-3.2.3/release-fields.json");
+    include_bytes!("../../../../tests/rust-parity/formal-lua-3.2.4/release-fields.json");
 const MANIFEST: &[u8] =
-    include_bytes!("../../../../tests/rust-parity/formal-lua-3.2.3/manifest.json");
+    include_bytes!("../../../../tests/rust-parity/formal-lua-3.2.4/manifest.json");
 pub const CODE: &str = "return { message = \"荔枝\\n\\000123\", quoted = [=[x\\y]=] }";
 pub const BROKEN_CODE: &str = "return { broken =";
 

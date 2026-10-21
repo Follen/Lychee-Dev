@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {join} from 'node:path';
 import {writeFileSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
-import {CURRENT_GO_CONTRACT, commandFlags, inventoryHash, pendingIncrementTasks, within} from './assertions.mjs';
+import {commandFlags, inventoryHash, pendingIncrementTasks, within} from './assertions.mjs';
 import {bounded, digest, goJSON, parse, pathStyle, ordinaryPath, npmOfflineFlags, loadArchivedFixture, MISSING_KEYS, RESTORED_KEYS, SAMPLE_KEY_ID} from './data-inputs.mjs';
 import {assertDataSkillBytes, assertDataSkillInventory, dataSkillIdentity, loadDataSkillContract} from './data-skill-contract.mjs';
 
@@ -228,7 +228,8 @@ export function expectedDataCommands(config, fixtures, envelopes) {
 }
 export function assertDataReport(report, workflow, {evidenceDirectory = report?.config?.evidence} = {}) {
   assert.equal(report.schema, 'lycheedev.skill-data-usage.v2'); assert.equal(report.state, 'passed_selected_data_workflow');
-  assert.equal(report.goContract, CURRENT_GO_CONTRACT); assert.equal(report.skillTree, 'b9e162ace7abe7ea4a2feecef822283767eb1210');
+  assert.equal(report.goContract, loadDataSkillContract(report.config?.skillIdentity).goContract, 'report retains its authenticated Skill baseline');
+  assert.equal(report.skillTree, 'b9e162ace7abe7ea4a2feecef822283767eb1210');
   assert.equal(report.completeSkillAcceptance, false); assert.deepEqual(report.pendingTasks, pendingDataTasks(workflow));
   assert.deepEqual(report.checks.map(row => row.caseId), CHECKS); assert(report.checks.every(row => row.state === 'passed'));
   const config = report.config, p = pathStyle(config.scratch);

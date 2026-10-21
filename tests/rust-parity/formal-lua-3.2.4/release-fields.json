@@ -1,0 +1,28 @@
+[
+  {
+    "path": "addon/Core/Runtime.lua",
+    "expected": {
+      "bytes": 2615,
+      "sha256": "41abb954717ddfa43ceb1b9de318d877614e60439e79b524432415e5d12cbd9b"
+    },
+    "retained": {
+      "bytes": 2615,
+      "sha256": "e43dd852d0447774215da803391bf7a130c384d2265b4cb402e1baa8bcebc0bd"
+    },
+    "expectedText": "ns.Release = \"3.2.4\"",
+    "retainedText": "ns.Release = \"3.5.0\""
+  },
+  {
+    "path": "addon/Lychee Dev.toc",
+    "expected": {
+      "bytes": 2005,
+      "sha256": "76d83edeb0bd52719bd41e316a5f1c9ca285e5c67f4e51531ddf41fe6344b175"
+    },
+    "retained": {
+      "bytes": 2005,
+      "sha256": "7d2594d5676dbe8e10c7a644873cd2e00b8cb26f4a539eb19ebbc81a1595d09c"
+    },
+    "expectedText": "## Version: 3.2.4",
+    "retainedText": "## Version: 3.5.0"
+  }
+]

@@ -17,13 +17,16 @@ import {inspectEmmy} from '../../tools/rust-emmy-identity.mjs';
 import {splitIndexEvidence, verifyParts, PART_BYTES, INDEX_BYTES} from '../../tools/rust-source-pack-evidence.mjs';
 import {assertEnvelope, assertCorpus, corpusDigest} from '../rust-source-full-corpus/assertions.mjs';
 import {fixturePin} from '../rust-source-native-acceptance/assertions.mjs';
-import {GO_COMMIT, elapsed, semantic} from './contract.mjs';
+import {elapsed, semantic} from './contract.mjs';
 import {assertSeedCold, auditCorpus, cloneSeed, inventory, derivedIdentity, proveWarmReuse, verifyGoMetadata, verifyGoPackage, verifySeedMetadata} from './inputs.mjs';
 import {RUNNER_FILES as HISTORICAL_RUNNER_FILES, sourcePhaseEnvironment, validateConditions} from './source-candidates.mjs';
 import {verifyPackProfile} from './source-pack-resume.mjs';
 import {readFactDelta, readRustFact, rustFactPath, comparedRustIndex} from './read-fact-delta.mjs';
 import {captureGoCustody, openGoCustody, goFactRelative} from './source-pack-custody.mjs';
 
+// These fixed candidate observations retain their original Go producer identity.
+export const HISTORICAL_GO_BASELINE = Object.freeze({commit: '3766f9cacb52e93a803a626187e2a1d54a445468', version: '3.2.3'});
+const GO_COMMIT = HISTORICAL_GO_BASELINE.commit;
 export const CANDIDATE_COMMIT = '00d215a937513609e482c1ef65f3b43f0288beee';
 export const CANDIDATE_IDENTITY = Object.freeze({artifactSHA256: '02ebe1eb57d552d1c8ebf6c86697fdbc77d6eba4ee847edd33c4d7d19b6253ad', binarySHA256: '3169c2187b966b40ed3622fe14cfb81527e8dd3a52a6d99a888e8ab482c1b1fb', sourceTreeSHA256: '06a5a0e39c46c786d946b8c429c90c0eb4e9e1291028375e329fc9457776b4e3'});
 export const BASE_COMMIT = '31c7f7b9cc79e56c986b365c06a6afbcf3c9177b';
@@ -714,7 +717,7 @@ export async function runController(config, overrides = {}) {
     if (!overrides.verifyCandidateRecord) {
       for (const [root, commit] of [[request.candidate.sourceRoot, request.candidate.commit], [request.go.sourceRoot, GO_COMMIT]]) verifyCleanCheckout(root, commit, (args, cwd) => git(args, undefined, {}, cwd));
     }
-    const go = svc.verifyGoPackage(request.go.packageRoot, request.go.luaLSArchive); assert.equal(go.packageSHA256, request.go.packageSHA256);
+    const go = svc.verifyGoPackage(request.go.packageRoot, request.go.luaLSArchive, HISTORICAL_GO_BASELINE); assert.equal(go.packageSHA256, request.go.packageSHA256);
     return {rust: {binary: candidate.sourceBinary, cwd: request.candidate.sourceRoot}, go: {binary: go.binary, cwd: request.go.sourceRoot}};
   }
   function prepareSeeds(homes, binaries, evidence) {
@@ -770,7 +773,7 @@ export async function runController(config, overrides = {}) {
   save();
   try {
     const binaries = identities();
-    if (!overrides.prepareSeeds) report.goMetadata = verifyGoMetadata(prepare('go', ['version', '-m', binaries.go.binary], 'Go323 binary metadata').toString());
+    if (!overrides.prepareSeeds) report.goMetadata = verifyGoMetadata(prepare('go', ['version', '-m', binaries.go.binary], 'Go323 binary metadata').toString(), HISTORICAL_GO_BASELINE);
     report.machine.powerBefore = prepare('powercfg.exe', ['/getactivescheme'], 'power-before').toString();
     let homes, prepared, cold, coldEvidence;
     if (config.resumeRemaining || config.resumeGo) {
