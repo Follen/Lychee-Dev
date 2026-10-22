@@ -165,7 +165,7 @@ addon 沿用当前实现，以下测试保留。输入来自 [env.lua](tests/add
 | 位置 | 用途与处置 |
 | --- | --- |
 | [tests/fixtures/](tests/fixtures/) | 固定 DB2/DBD、源码、Hotfix、协议和其他字节输入；当前消费者：data 的 db2/hotfix-wago 输入、source 的 source-native 输入、live 的 live-journal。provenance 保留 db2 AGPL 归属。输入文件不是测试通过。 |
-| [tests/protocol/](tests/protocol/) | Lua 协议 peer/fixture（writer、receiver_bindings 等），当前 Mailbox/formal bridge 消费者使用；不再保留旧协议分支。 |
+| [tests/protocol/](tests/protocol/) | 当前 Mailbox/formal bridge 的Lua协议peer/fixture，包括slot_server与receiver_bindings；正式bridge直接加载addon的CaptureWriter，无消费者的旧EncodeSignal测试已删除。 |
 | [tools/rust-formal-lua.mjs](tools/rust-formal-lua.mjs) | 当前解释器准备工具；统一构建阶段执行，addon与Rust桥接复用同一canonical报告及随产物携带的原始构建回执，不每组重建。 |
 | 各 crate 的 `tests/support/`、`#[ignore]` fixture/export/import helper | 共享断言、种子和原生 peer；与父业务用例一起检查引用。辅助准备成功不单独计业务通过。 |
 | [third_party/emmy/](third_party/emmy/) | 固定原版 Emmy 上游 recipe/identity；生成源码在 `.tmp/emmy-reconstruction-v1/upstream`（848 文件，custody 校验）。这是当前 Source 语义引擎输入，不是旧实现。 |

@@ -43,11 +43,21 @@ function run(f) {
 
 function proof(f) { return JSON.parse(readFileSync(f.request.receipt)); }
 
-function startupHashBlock() {
-  const start = source.indexOf('$wrapperFile=[IO.File]::Open(');
-  const end = source.indexOf('\n# Startup identity is evidence,', start);
+function startupHashBlock(input = source) {
+  const start = input.indexOf('$wrapperFile=[IO.File]::Open(');
+  const end = input.indexOf('\n# Startup identity is evidence,', start);
   assert(start >= 0 && end > start, 'extract the actual production wrapper hash block');
-  return source.slice(start, end);
+  return input.slice(start, end);
+}
+
+function assertStartupHashBeforeIdentity(input) {
+  const block = startupHashBlock(input);
+  const identity = input.indexOf('$wrapperIdentity=@{');
+  assert(identity >= 0, 'find the actual startup wrapper identity declaration');
+  assert(input.indexOf(block) + block.length <= identity, 'complete the wrapper hash before constructing startup identity');
+  const serialization = input.indexOf('\n$identityBytes=', identity);
+  assert(serialization > identity, 'find startup identity serialization after its declaration');
+  assert.match(input.slice(identity, serialization), /wrapperObservedSHA256=\$wrapperObservedSHA256;/);
 }
 
 test('startup wrapper identity uses the existing .NET stream hash without Security module autoload', () => {
@@ -56,9 +66,22 @@ test('startup wrapper identity uses the existing .NET stream hash without Securi
   assert.match(block, /\[Security\.Cryptography\.SHA256\]::Create\(\)/);
   assert.match(block, /ComputeHash\(\$wrapperFile\)/);
   assert.match(block, /finally\{if\(\$wrapperDigest\)\{\$wrapperDigest\.Dispose\(\)\};\$wrapperFile\.Dispose\(\)\}/);
-  assert.match(source, /wrapperObservedSHA256=\$wrapperObservedSHA256;/);
-  assert.ok(source.indexOf(block) < source.indexOf('$identity=@{'));
+  assertStartupHashBeforeIdentity(source);
   assert.doesNotMatch(block, /PSModulePath|PSModuleAutoLoadingPreference|Import-Module|SetEnvironmentVariable/);
+});
+
+test('startup hash ordering is checkout-line-ending independent and rejects missing identity or late hashing', () => {
+  const lf = source.replaceAll('\r\n', '\n');
+  for (const input of [lf, lf.replaceAll('\n', '\r\n')]) {
+    assertStartupHashBeforeIdentity(input);
+    assert.throws(() => assertStartupHashBeforeIdentity(input.replace('$wrapperIdentity=@{', '$otherIdentity=@{')),
+      /find the actual startup wrapper identity declaration/);
+    const block = startupHashBlock(input);
+    const lateHash = input.replace(block, '') + '\n' + block + '\n# Startup identity is evidence,';
+    assert.throws(() => assertStartupHashBeforeIdentity(lateHash), /complete the wrapper hash before constructing startup identity/);
+    assert.throws(() => assertStartupHashBeforeIdentity(input.replace('wrapperObservedSHA256=$wrapperObservedSHA256;', 'wrapperObservedSHA256="uncomputed";')),
+      /wrapperObservedSHA256/);
+  }
 });
 
 test('Windows hashes the actual startup block in an empty runspace with no Get-FileHash or module autoload', windows, t => {

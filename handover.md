@@ -7,6 +7,8 @@
 - 工作区：`.worktrees/pr14-local-dev`；分支：`rust-refactor`；既有 [draft PR #14](https://github.com/Follen/Lychee-Dev/pull/14)。本批本地验证基线为`aa468aeca1c4ebfbeca06e801a4cb1f9494cfce7`加任务改动；当前提交以分支为准。版本以 `release/version.json` 为准，当前3.5.0。
 - 用户目标：完成设计文档全部设计；当前性能已接受，先回归全部业务，再循环审计。最新要求是先统一梳理Source调用语义，集中修改、集中验证，再恢复完整业务回归。停止性能优化和补跑，保留已有测量事实。
 - 用户已授权提交并推送本任务到现有分支、更新draft PR #14及运行真实CI；实机仅授权当前Retail，包括必要的受管升级、正式输入、重载及清理。其他客户端、全局Skill安装、合并、发布及渠道变更未获授权。
+- 本批已提交并推送`2d35c957460b5c2085947610dc31cb5adac9e26f`，PR说明已更新并保持draft。[真实CI首轮](https://github.com/Follen/Lychee-Dev/actions/runs/39829055962)在static的Node测试失败（211通过、1失败），尚未进入构建。已核实是测试仍查找改名前的`$identity`；runner_recovery修正当前`$wrapperIdentity`顺序检查，6项纯Node通过后停写，生产脚本未改。协调者继续CI整合、共享文档及当前Retail。
+- 主分支核对确认当前addon已包含main代码，只有3.5.0版本号不同；保留Rust替换结果，接入main历史以解决PR冲突。另修正本地发布清单`preserveLatest`为registry实际的3.2.5（只读`npm view`确认），不改beta目标或远程标签；删除无消费者且仍调用已退役EncodeSignal的`tests/protocol/writer.lua`，当前正式bridge的四项输入与精确数值覆盖不变。
 - 两轮审计修改及本批安装包的受影响验证全部通过。当前源码`3ff2a83c4a0e5f03f5d70883a564423bad53bdbbce70ab7d39f7618053f936be`的`audit-2` all-targets构建通过（93+1，receipt `de1e643f-a86d-41ec-828b-dea633a36178`）；adapter全部19个测试程序、Source完整库712项（5项ignored）、真实checker families及nominal通过。CLI库211项及两实际CLI程序各3项、Data transport101项、CI工具回归和18项workflow结构检查通过。新Release、隔离npm安装、包内receiver/发现信息及Retail/Forever均通过。三名代理均已停写，原生队列空闲；剩余Actions、symlink权限和实机协作见下文。
 - 原生构建/测试共用既有owner队列，单Cargo job、默认栈、50 GiB build cache、5 GiB scratch、2 GiB空闲预留，隔离用户目录。用户已要求为大型编译留足时间：Cargo编译批次默认改为60分钟，测试执行保持各自业务期限。工具维护只处理阻断实际验证的问题。
 
@@ -84,13 +86,15 @@ Forever缺失key ID为`0da4670db36fb2a9`、`d2c028cb7ac14d0b`、`da0e7785727a0a6
 
 1. 本地完整业务回归与两轮审计已完成，修复已在本批安装包验证。后续只因新改动、实际失败或明确未解决的问题补验。
 2. 按已有授权提交、推送本任务并检查真实Actions及跨job路径。两项symlink测试需要创建文件符号链接的权限；当前令牌没有该权限，系统未读取到开发者模式启用标记，环境设置未变更。
-3. 用已验证的候选包推进当前Retail受管升级与实机回归；首次激活需要手动reload时保留原项目/CON等待用户动作。其余客户端保留未验证状态。
+3. 当前Retail已完成受管升级，原连接在等待用户手动reload；收到完成回复后只恢复下文的原项目/CON。其余客户端保留未验证状态。
 
 ## 最后执行：需要真实客户端或用户配合的验证
 
 `D:/Game/World of Warcraft`的七产品安装、executable与共享CASC文件已确认存在；Retail为12.1.5.70448，两Forever Beta为1.60.1.70450。用户仅授权当前Retail；下列跨客户端项目仍保留具体缺口。
 
 当前Retail只读doctor报告`.tmp/rust-disk/evidence/ca9928b7-aec8-4845-8210-a9a1a047437d/readiness.json`：PID `12032`，进程创建FILETIME `134371419009029958`，HWND `242684304`，build `12.1.5.70448`。磁盘为干净受管3.2.5（commit `c3450d9a32d6ea1334f0209897cc02ab06502ba6`）；500槽、0待处理预留、无owner。新CLI报告`mailbox_release_mismatch`，需受管升级后手动reload。此次没有创建CON或发送输入；诊断未证明游戏业务通过。报告中另有临时脚本误调用顶层`instances`的参数错误，正式命令为`live instances`；已知目标不再重复发现。
+
+授权后用本批已安装候选包执行`live doctor --fix`，受管交付成功后进入`activation_waiting_manual_reload`，退出6。原项目为`.tmp/business-regression/live-retail-audit/project`；CON为`CON-772d4ff02d794e1da489f49fea92651e`；请求为`retail-audit-activation-20261023`；PID/创建时间/HWND未变。报告`.tmp/business-regression/live-retail-audit/activate.json`及receipt `9c578590-60cd-4c17-8435-048d33477882`保留。已请求用户在该Retail窗口手动`/reload`一次；未收到完成回复前不重复fix或新建连接。doctor响应中的deployment是修复前的3.2.5诊断，不能当作修复后的磁盘状态；等待激活也不等于实机业务通过。
 
 | ID | 验证目标 | 需要的实际结果 |
 | --- | --- | --- |
