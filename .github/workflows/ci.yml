@@ -67,6 +67,20 @@ jobs:
       - name: Classify the change set (documentation-only skips native stages)
         id: changes
         run: node tools/ci-changes.mjs --github-output $env:GITHUB_OUTPUT
+      - name: Install pinned Rust toolchain for Node identity tests (release/tools/rust.json)
+        if: steps.changes.outputs.native == 'true'
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw 'rustup toolchain install failed' }
+          rustup override set 1.99.0
+          if ($LASTEXITCODE -ne 0) { throw 'rustup override set failed' }
+          $version = rustc -Vv
+          if ($LASTEXITCODE -ne 0 -or $version -cnotcontains 'release: 1.99.0') { throw "rustc drift: $version" }
+          rustup -V
+          if ($LASTEXITCODE -ne 0) { throw 'rustup version probe failed' }
+          $cargo = (Get-Command cargo -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+          $cargoVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($cargo)
+          [pscustomobject]@{ path = $cargo; sha256 = (Get-FileHash -LiteralPath $cargo -Algorithm SHA256).Hash.ToLowerInvariant(); fileVersion = $cargoVersion.FileVersion; productVersion = $cargoVersion.ProductVersion } | ConvertTo-Json -Compress
       - name: Documentation links and paths
         run: node tools/ci-docs.mjs check
       - name: Version source consistency

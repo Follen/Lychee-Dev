@@ -105,6 +105,16 @@ test('Node and Rust toolchains are pinned consistently', () => {
     assert.match(text, /rustup toolchain install 1\.99\.0 --profile minimal/, `${name} must install the pinned Rust toolchain`);
   }
   assert.match(ci, /if \(\$LASTEXITCODE -ne 0 -or \$version -cnotcontains 'release: 1\.99\.0'\)/);
+  const staticJob = jobBodies(ci).get('static');
+  const install = staticJob.indexOf('rustup toolchain install 1.99.0 --profile minimal');
+  const select = staticJob.indexOf('rustup override set 1.99.0');
+  const tests = staticJob.indexOf('node --test');
+  assert(install >= 0 && select > install && tests > select,
+    'static identity tests must install and select the pinned toolchain before running');
+  assert.match(staticJob, /rustup -V/);
+  assert.match(staticJob, /Get-Command cargo -CommandType Application/);
+  assert.match(staticJob, /Get-FileHash -LiteralPath \$cargo -Algorithm SHA256/);
+  assert.match(staticJob, /fileVersion = \$cargoVersion\.FileVersion; productVersion = \$cargoVersion\.ProductVersion/);
 });
 
 test('actual PowerShell toolchain checks accept multiline pinned output and reject drift or command failure', {skip: process.platform !== 'win32'}, () => {
@@ -129,7 +139,7 @@ test('actual PowerShell toolchain checks accept multiline pinned output and reje
       expected.push(`${job}:${fixture.name}:${fixture.rejected ? 'True' : 'False'}`);
     }
   }
-  assert.equal(expected.length, 14, 'exercise both build jobs with all positive and negative outputs');
+  assert.equal(expected.length, 21, 'exercise static and both build jobs with all positive and negative outputs');
   const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand',
     Buffer.from(commands.join('\n'), 'utf16le').toString('base64')], {
     encoding: 'utf8', windowsHide: true, shell: false, timeout: 10000, maxBuffer: 1 << 20,
