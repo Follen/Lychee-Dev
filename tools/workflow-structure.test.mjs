@@ -204,7 +204,7 @@ test('validate jobs download this run artifacts and verify the sealed manifests'
   assert.match(packageJob, /--require cli-release,luac,skill,npm-package/);
   assert.match(packageJob, /skill-contract\.mjs --skill-root \.tmp\/ci\/build-release\/skill\/staged --bin \.tmp\/ci\/build-release\/cli\/lycheedev\.exe/);
   assert.match(packageJob, /rust-package-smoke\.mjs \.tmp\/ci\/validate-package\/npm \.tmp\/ci\/build-release\/luac --artifact \.tmp\/ci\/build-release\/cli\/artifact\.json --profile release --dependency-closure \.tmp\/ci\/build-release\/npm-package\/license-closure/);
-  assert.match(packageJob, /release\.mjs audit-tgz --tgz \$report\.tgz --version \$report\.version --commit \$report\.commit --development-only/);
+  assert.match(packageJob, /release\.mjs audit-tgz --tgz \$report\.tgz --version \$report\.version\.result\.version --commit \$report\.commit --development-only/);
 });
 
 test('downstream jobs never compile, rebuild luac or repack the native binary', () => {

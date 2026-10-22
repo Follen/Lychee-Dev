@@ -6,6 +6,17 @@ import {createHash} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {parsePackageOptions, prepareDependencyClosure, assertArtifactSource, assertSourceSyntaxValidation, assertInstalledNativeVersion, packageSmokeEnvironment} from './rust-package-smoke.mjs';
 import {sourceDigest} from './rust-build.mjs';
+import {assertNpmSmokeVersion} from './ci-release.mjs';
+
+test('release candidate consumes the v1 npm report CLI version envelope without accepting a flat version', () => {
+  const report = {schema: 'lycheedev.rust-npm-smoke.v1', version: {
+    schema: 'lycheedev.result.v1', ok: true, result: {version: '3.5.0'},
+  }};
+  assertNpmSmokeVersion(report, '3.5.0');
+  assert.throws(() => assertNpmSmokeVersion(report, '3.5.1'), /ci-release.npm_version_mismatch/);
+  assert.throws(() => assertNpmSmokeVersion({...report, version: '3.5.0'}, '3.5.0'), /ci-release.npm_version_mismatch/);
+  assert.throws(() => assertNpmSmokeVersion({...report, version: undefined}, '3.5.0'), /ci-release.npm_version_mismatch/);
+});
 
 test('npm smoke isolates user, Agent and npm state without inherited toolkit overrides', () => {
   const scratch = join(tmpdir(), 'isolated-npm-smoke'), inherited = '/real-user-state';

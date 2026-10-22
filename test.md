@@ -113,7 +113,7 @@
 | --- | --- |
 | [version.test.mjs](tools/version.test.mjs)、[addon-package.test.mjs](tools/addon-package.test.mjs)、[tar.test.mjs](tools/tar.test.mjs) | 版本源同步、addon TOC/资源打包与归档字节/CJK 路径；addon 打包已去掉旧 Go 用例。 |
 | [skill-contract.test.mjs](tools/skill-contract.test.mjs)、[skill-launcher.test.mjs](tools/skill-launcher.test.mjs)、[rust-package-smoke.test.mjs](tools/rust-package-smoke.test.mjs) | Skill 合同/链接、Windows npm 启动、隔离安装 smoke 编排；需补极简使用面与 N09 真实安装。 |
-| [workflow-structure.test.mjs](tools/workflow-structure.test.mjs) | 新 CI 四阶段、artifact 消费、无隐式重建、release 复用同一验证内容；所有 action 固定提交，包含带名称步骤的 uses；三个validate失败后仍上传报告且保持job失败。本地静态结构断言不代替Actions运行。 |
+| [workflow-structure.test.mjs](tools/workflow-structure.test.mjs) | 新 CI 四阶段、artifact 消费、无隐式重建、release 复用同一验证内容；所有 action 固定提交，包含带名称步骤的 uses；三个validate失败后仍上传报告且保持job失败。实际PowerShell正反例核对rustc多行版本输出；npm审计消费v1报告内的CLI版本。本地检查不代替Actions运行。 |
 | [ci-test-programs.test.mjs](tools/ci-test-programs.test.mjs) | 预编译程序与support复用；普通程序或Lua bridge未回收时保留原失败报告并停止后续启动，已回收的业务失败仍允许后续测试。 |
 | [rust-build.test.mjs](tools/rust-build.test.mjs)、[rust-disk.test.mjs](tools/rust-disk.test.mjs) | owned 构建、60分钟编译期限与独立的依赖查询期限、产物/工具链、build cache/scratch 额度（50 GiB/5 GiB）；运行时锁文件不误报源码变化，实际源码编辑仍拒绝；不是产品 Data 容量验证。 |
 | [rust-owned-process.test.mjs](tools/rust-owned-process.test.mjs)、[rust-owned-process-atomic-job.test.mjs](tools/rust-owned-process-atomic-job.test.mjs)、[rust-local-owned-process.test.mjs](tools/rust-local-owned-process.test.mjs)、[rust-owned-recovery.test.mjs](tools/rust-owned-recovery.test.mjs)、[rust-owned-memory.test.mjs](tools/rust-owned-memory.test.mjs) | Job/进程创建、启动记录、I/O、取消、资源回收与测量。 |

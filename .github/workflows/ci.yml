@@ -367,7 +367,7 @@ jobs:
         # tools/release.mjs only audits bytes here; it never builds or re-packs.
         run: |
           $report = Get-Content .tmp/ci/validate-package/npm/report.json | ConvertFrom-Json
-          node tools/release.mjs audit-tgz --tgz $report.tgz --version $report.version --commit $report.commit --development-only --out .tmp/ci/validate-package/package-audit.json
+          node tools/release.mjs audit-tgz --tgz $report.tgz --version $report.version.result.version --commit $report.commit --development-only --out .tmp/ci/validate-package/package-audit.json
           if ($LASTEXITCODE -ne 0) { throw 'npm tarball audit failed' }
       - name: Preserve the npm smoke report and tarball
         if: always()

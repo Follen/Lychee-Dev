@@ -100,6 +100,10 @@ function reportEntries(options) {
   });
 }
 
+export function assertNpmSmokeVersion(report, expectedVersion) {
+  if (report.version?.result?.version !== expectedVersion) throw new Error('ci-release.npm_version_mismatch');
+}
+
 export function releaseCandidate(options = {}) {
   if (!options.identity) throw new Error('ci-release.identity_required');
   if (!options.buildManifest) throw new Error('ci-release.build_manifest_required');
@@ -119,7 +123,7 @@ export function releaseCandidate(options = {}) {
   if (npm.assemblyOnly !== false || npm.npmSmoke !== 'passed') throw new Error('ci-release.npm_smoke_not_run');
   if (!['partial_passed', 'passed'].includes(npm.state)) throw new Error(`ci-release.npm_state: ${npm.state}`);
   if (npm.profile !== 'release') throw new Error(`ci-release.npm_profile: ${npm.profile}`);
-  if (npm.version !== identity.version) throw new Error('ci-release.npm_version_mismatch');
+  assertNpmSmokeVersion(npm, identity.version);
   if (npm.commit !== identity.commit) throw new Error('ci-release.npm_commit_mismatch');
   if (npm.sourceTreeSHA256 !== buildManifest.sourceTree) throw new Error('ci-release.npm_source_mismatch');
   if (npm.binarySHA256 !== buildManifest.components['cli-release'].binarySHA256) throw new Error('ci-release.npm_binary_mismatch');
